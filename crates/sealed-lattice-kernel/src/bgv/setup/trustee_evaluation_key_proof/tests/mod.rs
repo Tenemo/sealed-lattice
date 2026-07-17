@@ -18,6 +18,7 @@ use crate::bgv::setup::commitment::{
     setup_commitment_full_value, setup_commitment_root,
 };
 use crate::bgv::setup::setup_proof::ProofByteSource;
+use crate::foundation::PROTOTYPE_PARTICIPANT_COUNT;
 
 use super::relation::{LimbColumnLayout, QUOTIENT_COLUMN_SUMCHECK_RESIDUAL};
 use super::{
@@ -218,7 +219,7 @@ fn private_vss_setup_context_vector() -> serde_json::Value {
         "manifestHash": repeated_hash("10"),
         "rosterHash": repeated_hash("20"),
         "setupParametersHash": setup_parameters["setupParametersHash"],
-        "participantCount": 10,
+        "participantCount": u64::from(PROTOTYPE_PARTICIPANT_COUNT),
         "setupEpoch": "statement-vector-epoch",
     })
 }

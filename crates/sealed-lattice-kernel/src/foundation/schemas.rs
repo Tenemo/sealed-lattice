@@ -26,6 +26,56 @@ const FOUNDATION_SCHEMA_VERSION: u16 = 1;
 pub const ML_DSA_65_SIGNATURE_BYTE_LENGTH: usize = 3_309;
 const OBJECT_SIGNATURE_CONTEXT: &[u8] = b"sealed-lattice/object-signature/v1";
 
+/// Roster sizes for which the protocol formulas are defined. Only the
+/// ten-participant prototype profile is selected and evidence-gated today.
+pub const MINIMUM_CONFIGURABLE_PARTICIPANT_COUNT: u16 = 3;
+pub const MAXIMUM_CONFIGURABLE_PARTICIPANT_COUNT: u16 = 20;
+pub(crate) const PROTOTYPE_PARTICIPANT_COUNT: u16 = 10;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FoundationRosterParameters {
+    pub participant_count: u16,
+    pub active_fault_bound: u16,
+    pub reconstruction_threshold: u16,
+    pub finality_quorum: u16,
+    pub state_witness_quorum: u16,
+}
+
+/// Derives the roster-dependent protocol parameters without selecting or
+/// certifying that roster size. The passive reconstruction bound deliberately
+/// remains independent of the strict asynchronous active-fault bound when
+/// `n` is divisible by three.
+pub const fn derive_foundation_roster_parameters(
+    participant_count: u16,
+) -> Option<FoundationRosterParameters> {
+    if participant_count < MINIMUM_CONFIGURABLE_PARTICIPANT_COUNT
+        || participant_count > MAXIMUM_CONFIGURABLE_PARTICIPANT_COUNT
+    {
+        return None;
+    }
+
+    let active_fault_bound = (participant_count - 1) / 3;
+    let reconstruction_threshold = participant_count / 3 + 1;
+    // Finality needs two signer quorums to intersect in more than f members.
+    // State witnessing has an n-1 universe but also permits one independently
+    // unsafe witness, which yields the same lower bound.
+    let quorum = (participant_count + active_fault_bound) / 2 + 1;
+
+    Some(FoundationRosterParameters {
+        participant_count,
+        active_fault_bound,
+        reconstruction_threshold,
+        finality_quorum: quorum,
+        state_witness_quorum: quorum,
+    })
+}
+
+const PROTOTYPE_ROSTER_PARAMETERS: FoundationRosterParameters =
+    match derive_foundation_roster_parameters(PROTOTYPE_PARTICIPANT_COUNT) {
+        Some(parameters) => parameters,
+        None => panic!("the prototype participant count must be configurable"),
+    };
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FoundationProfile {
     pub protocol_name: &'static str,
@@ -46,11 +96,11 @@ pub struct FoundationProfile {
 pub const FOUNDATION_PROFILE: FoundationProfile = FoundationProfile {
     protocol_name: "sealed-lattice",
     protocol_version: 1,
-    participant_count: 10,
-    active_fault_bound: 3,
-    reconstruction_threshold: 4,
-    finality_quorum: 7,
-    state_witness_quorum: 7,
+    participant_count: PROTOTYPE_ROSTER_PARAMETERS.participant_count,
+    active_fault_bound: PROTOTYPE_ROSTER_PARAMETERS.active_fault_bound,
+    reconstruction_threshold: PROTOTYPE_ROSTER_PARAMETERS.reconstruction_threshold,
+    finality_quorum: PROTOTYPE_ROSTER_PARAMETERS.finality_quorum,
+    state_witness_quorum: PROTOTYPE_ROSTER_PARAMETERS.state_witness_quorum,
     option_count: 20,
     minimum_score: 1,
     maximum_score: 10,
@@ -186,10 +236,10 @@ impl RosterEntry {
     }
 
     fn validate(&self) -> SchemaResult<()> {
-        if self.roster_position >= FOUNDATION_PROFILE.participant_count {
+        if self.roster_position >= MAXIMUM_CONFIGURABLE_PARTICIPANT_COUNT {
             return Err(FoundationSchemaError::new(
                 RefusalReason::OutsideSupportedProfile,
-                "roster position is outside the supported profile",
+                "roster position is outside the configurable range",
             ));
         }
         validate_ml_kem_768_encapsulation_key(&self.mailbox_encapsulation_key)
@@ -239,10 +289,14 @@ pub struct Roster {
 
 impl Roster {
     pub fn new(entries: Vec<RosterEntry>) -> SchemaResult<Self> {
-        if entries.len() != usize::from(FOUNDATION_PROFILE.participant_count) {
+        let participant_count = u16::try_from(entries.len()).ok();
+        if participant_count
+            .and_then(derive_foundation_roster_parameters)
+            .is_none()
+        {
             return Err(FoundationSchemaError::new(
                 RefusalReason::OutsideSupportedProfile,
-                "roster size does not match the supported profile",
+                "roster size is outside the configurable range",
             ));
         }
         let mut signing_keys = BTreeSet::new();
@@ -269,6 +323,16 @@ impl Roster {
             }
         }
         Ok(Self { entries })
+    }
+
+    pub(crate) fn require_selected_profile_size(&self) -> SchemaResult<()> {
+        if self.entries.len() != usize::from(FOUNDATION_PROFILE.participant_count) {
+            return Err(FoundationSchemaError::new(
+                RefusalReason::OutsideSupportedProfile,
+                "roster size does not match the selected prototype profile",
+            ));
+        }
+        Ok(())
     }
 
     pub fn encode(&self) -> SchemaResult<Vec<u8>> {
@@ -760,10 +824,14 @@ fn preflight_roster_entry_count(bytes: &[u8], limits: &CanonicalDecodeLimits) ->
     else {
         return Ok(());
     };
-    if declared_entry_count != u32::from(FOUNDATION_PROFILE.participant_count) {
+    if u16::try_from(declared_entry_count)
+        .ok()
+        .and_then(derive_foundation_roster_parameters)
+        .is_none()
+    {
         return Err(FoundationSchemaError::new(
             RefusalReason::OutsideSupportedProfile,
-            "roster size does not match the supported profile",
+            "roster size is outside the configurable range",
         ));
     }
     Ok(())
@@ -1134,6 +1202,53 @@ mod tests {
 
     use super::*;
 
+    #[test]
+    fn configurable_roster_formulas_preserve_their_intersection_bounds() {
+        assert_eq!(derive_foundation_roster_parameters(2), None);
+        assert_eq!(derive_foundation_roster_parameters(21), None);
+
+        for participant_count in
+            MINIMUM_CONFIGURABLE_PARTICIPANT_COUNT..=MAXIMUM_CONFIGURABLE_PARTICIPANT_COUNT
+        {
+            let parameters = derive_foundation_roster_parameters(participant_count)
+                .expect("the documented roster range derives parameters");
+            let n = i32::from(parameters.participant_count);
+            let f = i32::from(parameters.active_fault_bound);
+            let finality_quorum = i32::from(parameters.finality_quorum);
+            let state_witness_quorum = i32::from(parameters.state_witness_quorum);
+
+            assert_eq!(parameters.active_fault_bound, (participant_count - 1) / 3);
+            assert!(n > 3 * f, "the active-fault bound must satisfy n > 3f");
+            assert_eq!(
+                parameters.reconstruction_threshold,
+                participant_count / 3 + 1
+            );
+            let expected_quorum = (participant_count + parameters.active_fault_bound) / 2 + 1;
+            assert_eq!(parameters.finality_quorum, expected_quorum);
+            assert_eq!(parameters.state_witness_quorum, expected_quorum);
+            assert!(
+                2 * finality_quorum - n > f,
+                "two finality quorums must share an honest signer"
+            );
+            assert!(
+                2 * state_witness_quorum - (n - 1) > f + 1,
+                "two state quorums must share a stable honest witness"
+            );
+            assert!(state_witness_quorum <= n - 1);
+        }
+
+        assert_eq!(
+            derive_foundation_roster_parameters(PROTOTYPE_PARTICIPANT_COUNT),
+            Some(FoundationRosterParameters {
+                participant_count: 10,
+                active_fault_bound: 3,
+                reconstruction_threshold: 4,
+                finality_quorum: 7,
+                state_witness_quorum: 7,
+            })
+        );
+    }
+
     fn roster_entries() -> Vec<RosterEntry> {
         (0..FOUNDATION_PROFILE.participant_count)
             .map(|roster_position| {
@@ -1193,6 +1308,25 @@ mod tests {
     }
 
     #[test]
+    fn roster_schema_accepts_a_configurable_nonselected_size() {
+        let entries = roster_entries().into_iter().take(3).collect();
+        let roster = Roster::new(entries).expect("three-participant roster is structural");
+        assert_eq!(
+            roster
+                .require_selected_profile_size()
+                .expect_err("a structural roster is not selected-profile authority")
+                .refusal_reason,
+            RefusalReason::OutsideSupportedProfile
+        );
+        let encoded = roster.encode().expect("structural roster encodes");
+        assert_eq!(
+            Roster::decode(&encoded, &CanonicalDecodeLimits::default())
+                .expect("structural roster decodes"),
+            roster
+        );
+    }
+
+    #[test]
     fn roster_requires_explicit_consecutive_positions_in_canonical_order() {
         let mut duplicate_position = roster_entries();
         duplicate_position[4].roster_position = 3;
@@ -1212,13 +1346,13 @@ mod tests {
             RefusalReason::WrongTypeOrLength
         );
 
-        let mut outside_profile = roster_entries()[0].clone();
-        outside_profile.roster_position = FOUNDATION_PROFILE.participant_count;
+        let mut outside_range = roster_entries()[0].clone();
+        outside_range.roster_position = MAXIMUM_CONFIGURABLE_PARTICIPANT_COUNT;
         assert_eq!(
             RosterEntry::new(
-                outside_profile.roster_position,
-                outside_profile.signing_verification_key,
-                outside_profile.mailbox_encapsulation_key,
+                outside_range.roster_position,
+                outside_range.signing_verification_key,
+                outside_range.mailbox_encapsulation_key,
             )
             .expect_err("out-of-range roster position must refuse")
             .refusal_reason,

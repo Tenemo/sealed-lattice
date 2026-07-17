@@ -1,5 +1,7 @@
 import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 
+import { requireFoundationRosterParameters } from '../common-fields.js';
+
 import {
     type PublicKeyShareContributionInput,
     type PublicKeyShareMaterialSetInput,
@@ -136,6 +138,10 @@ export const publicKeyShareRecordsByRosterPosition = (
         | 'publicKeyShares'
     >,
 ): ReadonlyMap<number, PublicKeyShareRecord> => {
+    requireFoundationRosterParameters(
+        input.setupContext.participantCount,
+        'setupContext.participantCount',
+    );
     const shareRecords = input.publicKeyShares.shareRecords;
     if (shareRecords.length !== input.setupContext.participantCount) {
         throw new Error(

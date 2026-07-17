@@ -159,12 +159,16 @@ pub use proof_application::{
     ProofObjectHeader,
 };
 pub use refusal::{RefusalReason, VerificationResult};
+#[cfg(test)]
+pub(crate) use schemas::PROTOTYPE_PARTICIPANT_COUNT;
 pub use schemas::{
-    FOUNDATION_PROFILE, FoundationObjectType, FoundationProfile, FoundationSchemaError,
-    ML_DSA_65_SIGNATURE_BYTE_LENGTH, ML_KEM_768_ENCAPSULATION_KEY_BYTE_LENGTH,
-    OBJECT_ENVELOPE_SCHEMA_IDENTIFIER, ObjectEnvelope, ROSTER_ENTRY_SCHEMA_IDENTIFIER,
-    ROSTER_SCHEMA_IDENTIFIER, Roster, RosterEntry, SIGNED_CARRIER_SCHEMA_IDENTIFIER,
-    STREAM_DESCRIPTOR_SCHEMA_IDENTIFIER, SignedCarrier, StreamDescriptor, signature_message,
+    FOUNDATION_PROFILE, FoundationObjectType, FoundationProfile, FoundationRosterParameters,
+    FoundationSchemaError, MAXIMUM_CONFIGURABLE_PARTICIPANT_COUNT,
+    MINIMUM_CONFIGURABLE_PARTICIPANT_COUNT, ML_DSA_65_SIGNATURE_BYTE_LENGTH,
+    ML_KEM_768_ENCAPSULATION_KEY_BYTE_LENGTH, OBJECT_ENVELOPE_SCHEMA_IDENTIFIER, ObjectEnvelope,
+    ROSTER_ENTRY_SCHEMA_IDENTIFIER, ROSTER_SCHEMA_IDENTIFIER, Roster, RosterEntry,
+    SIGNED_CARRIER_SCHEMA_IDENTIFIER, STREAM_DESCRIPTOR_SCHEMA_IDENTIFIER, SignedCarrier,
+    StreamDescriptor, derive_foundation_roster_parameters, signature_message,
 };
 pub(crate) use selected_suite::{SelectedSuiteCapability, select_suite_record};
 pub(crate) use state::PreparedStateReservationIntent;

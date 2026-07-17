@@ -326,13 +326,17 @@ pub(crate) fn selected_evaluator_resource_accounting()
 pub(crate) fn require_selected_suite_record(record: &SuiteRecord) -> SchemaResult<()> {
     let expected_count_limits = selected_count_limits()?;
     let expected_byte_limits = selected_byte_limits()?;
-    if record.count_limits() != expected_count_limits
+    if record.roster_size() != FOUNDATION_PROFILE.participant_count
+        || record.byzantine_bound() != FOUNDATION_PROFILE.active_fault_bound
+        || record.reconstruction_threshold() != FOUNDATION_PROFILE.reconstruction_threshold
+        || record.finality_quorum() != FOUNDATION_PROFILE.finality_quorum
+        || record.count_limits() != expected_count_limits
         || record.byte_limits() != expected_byte_limits
         || record.artifacts() != selected_artifact_references()?.as_slice()
         || record.suite_id()? != SELECTED_CANDIDATE_SUITE_IDENTIFIER
     {
         return Err(invalid_selected_suite(
-            "suite record is not the exact selected count, byte, and artifact profile",
+            "suite record is not the exact selected roster, count, byte, and artifact profile",
         ));
     }
 
@@ -631,6 +635,50 @@ mod tests {
         assert!(
             SELECTED_EXACT_FAMILY_PROOF_BYTES_PER_ACTION
                 > candidate.byte_limits().maximum_proof_bytes_per_action()
+        );
+    }
+
+    #[test]
+    fn nonselected_roster_candidate_cannot_cross_the_authority_boundary() {
+        let mut tuple = CanonicalTuple::decode(
+            &selected_candidate_suite_record()
+                .encode()
+                .expect("selected candidate encodes"),
+            &CanonicalDecodeLimits::default(),
+        )
+        .expect("selected candidate tuple decodes");
+        let roster_parameters = crate::foundation::derive_foundation_roster_parameters(3)
+            .expect("three participants are configurable");
+        tuple.items[1] = CanonicalItem::unsigned16(roster_parameters.participant_count);
+        tuple.items[2] = CanonicalItem::unsigned16(roster_parameters.active_fault_bound);
+        tuple.items[3] = CanonicalItem::unsigned16(roster_parameters.reconstruction_threshold);
+        tuple.items[4] = CanonicalItem::unsigned16(roster_parameters.finality_quorum);
+        tuple.items[15] = CanonicalItem::unsigned16(roster_parameters.participant_count);
+        tuple.items[18] = CanonicalItem::unsigned32(6);
+        let ballot_package_byte_ceiling = selected_byte_limits()
+            .expect("selected byte limits derive")
+            .maximum_candidate_bytes_per_participant()
+            / u64::from(SELECTED_MAXIMUM_BALLOT_ATTEMPTS_PER_PARTICIPANT);
+        tuple.items[21] = CanonicalItem::unsigned64(6 * ballot_package_byte_ceiling);
+        let candidate = SuiteRecord::decode(
+            &tuple.encode().expect("candidate suite encodes"),
+            &CanonicalDecodeLimits::default(),
+        )
+        .expect("nonselected candidate remains structural");
+
+        assert_eq!(
+            require_selected_suite_record(&candidate)
+                .expect_err("nonselected roster cannot mint selected-suite authority")
+                .refusal_reason,
+            RefusalReason::UnsupportedVersionOrSuite
+        );
+        let selection_error = match select_suite_record(&candidate) {
+            Ok(_) => panic!("nonselected roster cannot be selected"),
+            Err(error) => error,
+        };
+        assert_eq!(
+            selection_error.refusal_reason,
+            RefusalReason::UnsupportedVersionOrSuite
         );
     }
 

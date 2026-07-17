@@ -1,5 +1,6 @@
 import {
     BrowserActionStorageCustodyError,
+    deriveFoundationRosterParameters,
     foundationProfile,
     type BrowserActionStorageRootBinding,
     type BrowserFoundationInitializationPreparationInput,
@@ -103,9 +104,25 @@ export const copyBrowserFoundationInitializationPreparationInput = (
     if (
         typeof input !== 'object' ||
         input === null ||
-        !Array.isArray(input.orderedWitnessBindings) ||
-        input.orderedWitnessBindings.length !==
-            foundationProfile.participantCount - 1 ||
+        !Array.isArray(input.orderedWitnessBindings)
+    ) {
+        throw new BrowserActionStorageCustodyError(
+            'InvalidInput',
+            'Fresh foundation initialization requires ordered witness bindings.',
+        );
+    }
+    try {
+        deriveFoundationRosterParameters(
+            input.orderedWitnessBindings.length + 1,
+        );
+    } catch (error) {
+        throw new BrowserActionStorageCustodyError(
+            'InvalidInput',
+            'Fresh foundation initialization witness bindings are outside the configurable participant-count range.',
+            error,
+        );
+    }
+    if (
         typeof input.actionRandomnessRecordContext !== 'object' ||
         input.actionRandomnessRecordContext === null ||
         input.actionRandomnessRecordContext.recordVersion !== 0n ||
@@ -113,7 +130,7 @@ export const copyBrowserFoundationInitializationPreparationInput = (
     ) {
         throw new BrowserActionStorageCustodyError(
             'InvalidInput',
-            `Fresh foundation initialization requires action-randomness version zero and exactly ${String(foundationProfile.participantCount - 1)} witness bindings.`,
+            'Fresh foundation initialization requires action-randomness version zero without a predecessor.',
         );
     }
     return Object.freeze({
@@ -149,6 +166,7 @@ export const copyWorkerBrowserFoundationInitializationPreparationInput = (
 
 const copyWorkerPreparation = (
     value: WorkerPreparedBrowserFoundationInitialization,
+    expectedWitnessRecordCount: number,
 ): WorkerPreparedBrowserFoundationInitialization => {
     if (
         typeof value !== 'object' ||
@@ -161,8 +179,7 @@ const copyWorkerPreparation = (
             value.actionRandomness.actionRandomnessSessionIdentifier,
         ) ||
         !Array.isArray(value.witnessStateRecords) ||
-        value.witnessStateRecords.length !==
-            foundationProfile.participantCount - 1
+        value.witnessStateRecords.length !== expectedWitnessRecordCount
     ) {
         throw new BrowserActionStorageCustodyError(
             'OwnedWorkerFailure',
@@ -308,7 +325,10 @@ export const createPreparedBrowserFoundationInitialization = (input: {
             );
         }
     }
-    const workerPreparation = copyWorkerPreparation(input.workerPreparation);
+    const workerPreparation = copyWorkerPreparation(
+        input.workerPreparation,
+        preparationInput.orderedWitnessBindings.length,
+    );
     const prepared = Object.freeze(
         {},
     ) as PreparedBrowserFoundationInitialization;

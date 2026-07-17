@@ -1,4 +1,7 @@
-import type { BrowserActionStorageRootBinding } from '@sealed-lattice/types';
+import {
+    foundationProfile,
+    type BrowserActionStorageRootBinding,
+} from '@sealed-lattice/types';
 
 import { persistCommonProofApplicationAuthorization } from '#packages/protocol/src/runtime/durable-state-witness-service';
 import { openWebLockOwnedBrowserActionStorageCustody } from '#packages/protocol/src/runtime/web-lock-owned-untrusted-storage-transaction-store';
@@ -66,7 +69,7 @@ const runBoundaryTest = async (databaseName: string): Promise<void> => {
             await ownedStorage.commitFreshFoundationInitialization({
                 actionRandomnessRecordContext: { recordVersion: 0n },
                 orderedWitnessBindings: Array.from(
-                    { length: 9 },
+                    { length: foundationProfile.participantCount - 1 },
                     (_unused, witnessIndex) => ({
                         subjectParticipantIdentity: createTestBytes(
                             64,
@@ -127,37 +130,36 @@ const runBoundaryTest = async (databaseName: string): Promise<void> => {
         try {
             const authorizationFrame = createTestBytes(746, 131);
             const proofApplicationSlotHash = createTestBytes(64, 149);
-            let abandonedAttemptFailed = false;
+            let malformedAttemptFailed = false;
             try {
                 await persistCommonProofApplicationAuthorization(service, {
                     authorizationFrame,
-                    onCommitAttempt: () => {
-                        throw new Error(
-                            'Injected abandonment after sealing and before commit.',
-                        );
-                    },
-                    proofApplicationSlotHash,
+                    onPublicationDisposition: () => undefined,
+                    proofApplicationSlotHash:
+                        proofApplicationSlotHash.subarray(1),
                 });
             } catch {
-                abandonedAttemptFailed = true;
+                malformedAttemptFailed = true;
             }
-            if (!abandonedAttemptFailed) {
+            if (!malformedAttemptFailed) {
                 throw new Error(
-                    'The injected pre-commit abandonment did not fail.',
+                    'The malformed pre-publication application did not fail.',
                 );
             }
 
-            let retryCommitAttemptCount = 0;
+            const retryPublicationDispositions: string[] = [];
             const authenticatedFrame =
                 await persistCommonProofApplicationAuthorization(service, {
                     authorizationFrame,
-                    onCommitAttempt: () => {
-                        retryCommitAttemptCount += 1;
+                    onPublicationDisposition: (disposition) => {
+                        retryPublicationDispositions.push(disposition);
                     },
                     proofApplicationSlotHash,
                 });
             if (
-                retryCommitAttemptCount !== 1 ||
+                retryPublicationDispositions.length !== 1 ||
+                retryPublicationDispositions[0] !==
+                    'published-or-indeterminate' ||
                 authenticatedFrame.byteLength !==
                     authorizationFrame.byteLength ||
                 authenticatedFrame.some(

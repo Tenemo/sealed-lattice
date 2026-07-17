@@ -1,3 +1,5 @@
+import { requireFoundationRosterParameters } from '../common-fields.js';
+
 import {
     type VssCoefficientOpeningInput,
     type VssSourceTrusteeCoefficientOpeningState,
@@ -112,9 +114,17 @@ export const createVssSourceTrusteeCoefficientOpeningState = (
         input.sourceTrusteeRosterPosition,
         'sourceTrusteeRosterPosition',
     );
-    assertPositiveSafeInteger(input.participantCount, 'participantCount');
+    const rosterParameters = requireFoundationRosterParameters(
+        input.participantCount,
+        'participantCount',
+    );
     assertPositiveSafeInteger(input.ringDegree, 'ringDegree');
     assertPositiveSafeInteger(input.thresholdDegree, 'thresholdDegree');
+    if (input.thresholdDegree !== rosterParameters.reconstructionThreshold) {
+        throw new RangeError(
+            `thresholdDegree must equal ${String(rosterParameters.reconstructionThreshold)} for participantCount.`,
+        );
+    }
     assertProtocolHash(
         input.sourceSetupIntentObjectHash,
         'sourceSetupIntentObjectHash',

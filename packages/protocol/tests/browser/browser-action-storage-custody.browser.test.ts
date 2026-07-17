@@ -1,3 +1,4 @@
+import { foundationProfile } from '@sealed-lattice/types';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import type {
@@ -29,6 +30,7 @@ import {
     unsigned64Item,
     variableBytesItem,
 } from '#packages/wasm/tests/canonical-tuple-test-helpers';
+import { createStateVerifierTestVector } from '#packages/wasm/tests/state-verifier-test-vectors';
 
 const transactionLimits = {
     maximumActiveTransactionCount: 2,
@@ -279,7 +281,7 @@ afterEach(async () => {
 });
 
 describe('Browser action-storage custody worker channel', () => {
-    it('enforces the root-backed witness payload budget and retries after a sealed record is abandoned', async () => {
+    it('enforces the root-backed witness payload budget and retries after a malformed prepublication application', async () => {
         await expect(
             runFoundationWitnessStorageBoundaryWorker(createDatabaseName()),
         ).resolves.toBeUndefined();
@@ -288,8 +290,10 @@ describe('Browser action-storage custody worker channel', () => {
     it('opens the composed operation owner from fresh and exact recovered storage after interruption', async () => {
         const databaseName = createDatabaseName();
         databaseNames.add(databaseName);
+        const canonicalRosterBytes =
+            createStateVerifierTestVector().canonicalRosterBytes;
         const orderedWitnessBindings = Array.from(
-            { length: 9 },
+            { length: foundationProfile.participantCount - 1 },
             (_unused, witnessIndex) => ({
                 subjectParticipantIdentity: createTestBytes(
                     64,
@@ -301,7 +305,7 @@ describe('Browser action-storage custody worker channel', () => {
         const initializationInput: BrowserFoundationInitializationInput =
             Object.freeze({
                 actionRandomnessRecordContext: { recordVersion: 0n },
-                canonicalRosterBytes: createTestBytes(640, 11),
+                canonicalRosterBytes,
                 orderedWitnessBindings,
                 runtimeBuildManifestHash,
             });
@@ -334,7 +338,9 @@ describe('Browser action-storage custody worker channel', () => {
             await freshOpening.operationOwner.activateFreshFoundationInitialization(
                 committed.committedBatch,
             );
-        expect(freshActivated.orderedWitnessRoleHandles).toHaveLength(9);
+        expect(freshActivated.orderedWitnessRoleHandles).toHaveLength(
+            foundationProfile.participantCount - 1,
+        );
         const firstFreshRole = freshActivated.orderedWitnessRoleHandles[0];
         if (firstFreshRole === undefined) {
             throw new Error('The fresh operation owner returned no role.');
@@ -556,7 +562,7 @@ describe('Browser action-storage custody worker channel', () => {
         const committed = await custody.commitFreshFoundationInitialization({
             actionRandomnessRecordContext: { recordVersion: 0n },
             orderedWitnessBindings: Array.from(
-                { length: 9 },
+                { length: foundationProfile.participantCount - 1 },
                 (_unused, witnessIndex) => ({
                     subjectParticipantIdentity: createTestBytes(
                         64,

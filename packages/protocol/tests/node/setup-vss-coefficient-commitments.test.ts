@@ -31,7 +31,7 @@ const qSharePrimes = [
     140_700_980_543_489, 140_546_359_361_537, 140_507_704_066_049,
 ] as const;
 const ringDegree = 8;
-const participantCount = 2;
+const participantCount = 3;
 const thresholdDegree = 2;
 
 const fixtureHash = makeSetupFixtureHash('setup-vss-coefficient-commitments');
@@ -414,8 +414,8 @@ const invalidOpeningStateGenerationCases = [
         expectedMessage: /inside the accepted participant count/u,
         input: () =>
             openingStateGenerationInput({
-                sourceTrusteeIdentity: 'trustee-2',
-                sourceTrusteeRosterPosition: 2,
+                sourceTrusteeIdentity: sourceTrusteeIdentity(participantCount),
+                sourceTrusteeRosterPosition: participantCount,
             }),
     },
     {

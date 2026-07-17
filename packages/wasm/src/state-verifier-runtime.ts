@@ -3,7 +3,11 @@ import type {
     StateCapabilityKind,
     VerificationResult,
 } from '@sealed-lattice/types';
-import { foundationProfile, stateCapabilityKinds } from '@sealed-lattice/types';
+import {
+    configurableParticipantCountRange,
+    foundationProfile,
+    stateCapabilityKinds,
+} from '@sealed-lattice/types';
 
 import { byteArraysEqual } from './byte-array.js';
 import {
@@ -704,7 +708,7 @@ const requireCopiedBytes = (
 const frameUntrustedStateWitnessVoteCarriers = (
     untrustedVoteCarriers: readonly UntrustedStateWitnessVoteCarrier[],
 ): Uint8Array => {
-    const maximumCarrierCount = foundationProfile.participantCount * 2;
+    const maximumCarrierCount = configurableParticipantCountRange.maximum * 2;
     if (
         !Array.isArray(untrustedVoteCarriers) ||
         untrustedVoteCarriers.length === 0 ||

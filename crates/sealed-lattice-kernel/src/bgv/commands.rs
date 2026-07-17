@@ -18,8 +18,14 @@ pub(crate) fn describe_bgv_rns_parameters() -> CanonicalResult<Value> {
 pub(crate) fn describe_collective_bgv_setup_parameters_from_request(
     request: &Value,
 ) -> CanonicalResult<Value> {
-    match request.get("participantCount").and_then(Value::as_u64) {
-        Some(participant_count) => {
+    match request.get("participantCount") {
+        Some(value) => {
+            let participant_count = value.as_u64().ok_or_else(|| {
+                crate::encoding::CanonicalError::new(
+                    crate::encoding::CanonicalErrorCode::InvalidProtocolObject,
+                    "participantCount must be an unsigned integer",
+                )
+            })?;
             crate::bgv::setup::describe_collective_bgv_setup_parameters_for_participant_count(
                 participant_count,
             )

@@ -426,11 +426,6 @@ pub(crate) fn selected_evaluator_program_set() -> CanonicalResult<EvaluatorProgr
     let score_domain_max = score_span
         .checked_mul(u64::from(FOUNDATION_PROFILE.participant_count))
         .ok_or_else(|| program_error("selected comparison domain overflowed u64"))?;
-    if score_domain_max != 90 {
-        return Err(program_error(
-            "selected comparison domain does not match the frozen evaluator schedule",
-        ));
-    }
 
     let mut constants = ConstantCatalog::default();
     let mut streams = Vec::with_capacity(SELECTED_OPTION_COUNT);
@@ -479,9 +474,14 @@ fn evaluate_packed_ranks(
     score_domain_max: u64,
 ) -> CanonicalResult<Register> {
     let (_, greater_or_equal_polynomial) = comparison_polynomials(score_domain_max)?;
-    if greater_or_equal_polynomial.len() != 181 {
+    let comparison_point_count = score_domain_max
+        .checked_mul(2)
+        .and_then(|maximum| maximum.checked_add(1))
+        .and_then(|point_count| usize::try_from(point_count).ok())
+        .ok_or_else(|| program_error("selected comparison domain does not fit usize"))?;
+    if greater_or_equal_polynomial.len() != comparison_point_count {
         return Err(program_error(
-            "selected comparison interpolation did not produce degree at most 180",
+            "selected comparison interpolation has the wrong roster-derived degree",
         ));
     }
     let mut comparison_input_sum = None;
@@ -512,11 +512,6 @@ fn evaluate_packed_ranks(
     let comparison_inputs =
         builder.modulus_switch_to(comparison_inputs, comparison_input_target_level)?;
     let baby_step_count = direct_comparison_baby_step_count(score_domain_max)?;
-    if baby_step_count != 14 {
-        return Err(program_error(
-            "selected comparison baby-step count does not match the frozen schedule",
-        ));
-    }
     let comparison_outputs = evaluate_polynomial(
         builder,
         comparison_inputs,

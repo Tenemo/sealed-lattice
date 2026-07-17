@@ -6,6 +6,7 @@ import {
     assertPositiveSafeInteger,
     assertProtocolHash,
     assertSetupContextHashMatches,
+    requireFoundationRosterParameters,
 } from '../common-fields.js';
 
 import {
@@ -64,7 +65,7 @@ const sortedTrusteeReferences = (
 const validateCommonInput = (
     input: EvaluationKeyProofCommonInput,
 ): EvaluationKeyTrusteeReference[] => {
-    assertPositiveSafeInteger(
+    requireFoundationRosterParameters(
         input.setupContext.participantCount,
         'setupContext.participantCount',
     );

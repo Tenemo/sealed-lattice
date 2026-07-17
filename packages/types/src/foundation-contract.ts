@@ -107,15 +107,60 @@ export const parseParticipantIdentity = (
     return value;
 };
 
-/** Fixed public parameters of the first supported foundation profile. */
+/** Roster sizes for which protocol parameters can be derived. */
+export const configurableParticipantCountRange = Object.freeze({
+    minimum: 3,
+    maximum: 20,
+} as const);
+
+export type FoundationRosterParameters = Readonly<{
+    participantCount: number;
+    activeFaultBound: number;
+    reconstructionThreshold: number;
+    finalityQuorum: number;
+    stateWitnessQuorum: number;
+}>;
+
+/**
+ * Derives roster-dependent protocol parameters without claiming support or
+ * evidence for that roster size.
+ */
+export const deriveFoundationRosterParameters = (
+    participantCount: number,
+): FoundationRosterParameters => {
+    if (
+        !Number.isSafeInteger(participantCount) ||
+        participantCount < configurableParticipantCountRange.minimum ||
+        participantCount > configurableParticipantCountRange.maximum
+    ) {
+        throw new RangeError(
+            'participant count must be an integer from 3 through 20.',
+        );
+    }
+
+    const activeFaultBound = Math.floor((participantCount - 1) / 3);
+    const quorum = Math.floor((participantCount + activeFaultBound) / 2) + 1;
+    return Object.freeze({
+        participantCount,
+        activeFaultBound,
+        reconstructionThreshold: Math.floor(participantCount / 3) + 1,
+        finalityQuorum: quorum,
+        stateWitnessQuorum: quorum,
+    });
+};
+
+/** The sole selected and evidence-gated prototype roster size. */
+const prototypeParticipantCount = 10;
+
+const prototypeRosterParameters = deriveFoundationRosterParameters(
+    prototypeParticipantCount,
+);
+
+/** Fixed public parameters of the selected ten-participant prototype profile. */
 export const foundationProfile = Object.freeze({
     protocolName: 'sealed-lattice',
     protocolVersion: 1,
-    participantCount: 10,
-    activeFaultBound: 3,
-    reconstructionThreshold: 4,
-    finalityQuorum: 7,
-    stateWitnessQuorum: 7,
+    ...prototypeRosterParameters,
     optionCount: 20,
     minimumScore: 1,
     maximumScore: 10,

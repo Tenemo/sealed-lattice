@@ -1,7 +1,7 @@
 import { shake256 } from '@noble/hashes/sha3.js';
 import {
     BrowserActionStorageCustodyError,
-    foundationProfile,
+    deriveFoundationRosterParameters,
     isProtocolHash,
     stateCapabilityKinds,
     type BrowserActionProofAttemptBinding,
@@ -622,13 +622,22 @@ const copyBrowserFoundationInitializationInput = (
     if (
         typeof input !== 'object' ||
         input === null ||
-        !Array.isArray(untrustedOrderedWitnessBindings) ||
-        untrustedOrderedWitnessBindings.length !==
-            foundationProfile.participantCount - 1
+        !Array.isArray(untrustedOrderedWitnessBindings)
     ) {
         throw new BrowserActionStorageCustodyError(
             'InvalidInput',
-            `Browser foundation initialization requires exactly ${String(foundationProfile.participantCount - 1)} ordered witness bindings.`,
+            'Browser foundation initialization requires ordered witness bindings.',
+        );
+    }
+    try {
+        deriveFoundationRosterParameters(
+            untrustedOrderedWitnessBindings.length + 1,
+        );
+    } catch (error) {
+        throw new BrowserActionStorageCustodyError(
+            'InvalidInput',
+            'Browser foundation initialization witness bindings are outside the configurable participant-count range.',
+            error,
         );
     }
     if (

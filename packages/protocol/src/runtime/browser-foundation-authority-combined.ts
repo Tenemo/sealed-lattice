@@ -541,8 +541,6 @@ const copyAndValidateComponentBinding = (
                 ),
             );
         if (
-            orderedRosterParticipantIdentities.length !==
-                foundationProfile.participantCount ||
             orderedRosterParticipantIdentities.filter((identity) =>
                 bytesEqual(identity, subjectParticipantIdentity),
             ).length !== 1
@@ -624,7 +622,6 @@ const requireExactWitnessSubjects = async (input: {
     if (
         !handlesAreArray ||
         input.handles.length !== input.expectedSubjects.length ||
-        input.handles.length !== foundationProfile.participantCount - 1 ||
         new Set(input.handles).size !== input.handles.length
     ) {
         throw new BrowserFoundationAuthorityError(

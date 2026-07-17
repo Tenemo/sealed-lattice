@@ -2,7 +2,11 @@ import { shake256 } from '@noble/hashes/sha3.js';
 import { bytesToHex, hexToBytes } from '@noble/hashes/utils.js';
 import { ml_dsa65 } from '@noble/post-quantum/ml-dsa.js';
 import { ml_kem768 } from '@noble/post-quantum/ml-kem.js';
-import { foundationProfile, type ProtocolHash } from '@sealed-lattice/types';
+import {
+    configurableParticipantCountRange,
+    deriveFoundationRosterParameters,
+    type ProtocolHash,
+} from '@sealed-lattice/types';
 
 const canonicalTupleVersion = 1;
 const canonicalBytesItemType = 0x01;
@@ -27,11 +31,19 @@ const canonicalRosterEntryByteLength =
     mlDsa65VerificationKeyByteLength +
     canonicalItemHeaderByteLength +
     mlKem768EncapsulationKeyByteLength;
-const canonicalRosterByteLength =
+const canonicalRosterFixedByteLength =
     canonicalTupleHeaderByteLength +
     canonicalItemHeaderByteLength +
-    canonicalListHeaderByteLength +
-    foundationProfile.participantCount * canonicalRosterEntryByteLength;
+    canonicalListHeaderByteLength;
+const canonicalRosterByteLength = (participantCount: number): number =>
+    canonicalRosterFixedByteLength +
+    participantCount * canonicalRosterEntryByteLength;
+const minimumCanonicalRosterByteLength = canonicalRosterByteLength(
+    configurableParticipantCountRange.minimum,
+);
+const maximumCanonicalRosterByteLength = canonicalRosterByteLength(
+    configurableParticipantCountRange.maximum,
+);
 const textEncoder = new TextEncoder();
 
 declare const authenticatedMailboxFrozenRosterBrand: unique symbol;
@@ -274,16 +286,28 @@ const parseCanonicalRoster = (
             canonicalNestedTupleItemType,
             'canonicalRosterBytes.entries.elementItemType',
         );
-        requireValue(
-            listReader.readUnsigned32('canonicalRosterBytes.entries.count'),
-            foundationProfile.participantCount,
+        const participantCount = listReader.readUnsigned32(
             'canonicalRosterBytes.entries.count',
+        );
+        if (
+            participantCount < configurableParticipantCountRange.minimum ||
+            participantCount > configurableParticipantCountRange.maximum
+        ) {
+            throw new TypeError(
+                'canonicalRosterBytes.entries.count is outside the configurable participant-count range.',
+            );
+        }
+        deriveFoundationRosterParameters(participantCount);
+        requireValue(
+            canonicalRosterBytes.byteLength,
+            canonicalRosterByteLength(participantCount),
+            'canonicalRosterBytes.byteLength',
         );
 
         const entries: ParsedRosterEntry[] = [];
         for (
             let rosterPosition = 0;
-            rosterPosition < foundationProfile.participantCount;
+            rosterPosition < participantCount;
             rosterPosition += 1
         ) {
             const entryName = `canonicalRosterBytes.entries[${rosterPosition}]`;
@@ -394,10 +418,11 @@ export const openAuthenticatedMailboxFrozenRoster = (
 ): AuthenticatedMailboxFrozenRoster => {
     if (
         !(canonicalRosterBytes instanceof Uint8Array) ||
-        canonicalRosterBytes.byteLength !== canonicalRosterByteLength
+        canonicalRosterBytes.byteLength < minimumCanonicalRosterByteLength ||
+        canonicalRosterBytes.byteLength > maximumCanonicalRosterByteLength
     ) {
         throw new TypeError(
-            `canonicalRosterBytes must contain exactly ${canonicalRosterByteLength} bytes for the supported foundation profile.`,
+            `canonicalRosterBytes must encode between ${String(configurableParticipantCountRange.minimum)} and ${String(configurableParticipantCountRange.maximum)} participants.`,
         );
     }
 

@@ -114,13 +114,13 @@ pub(super) fn verify_context(
             Vec::new(),
         )));
     };
-    if !participant_count_is_supported(participant_count) {
+    if !participant_count_is_configurable(participant_count) {
         return Ok(Some(setup_refusals(
             Vec::new(),
             vec![Refusal::new(
                 crate::foundation::RefusalReason::OutsideSupportedProfile,
-                "participantCountOutsideSupportedRange",
-                "setupContext.participantCount must be a supported roster size in 3..=20",
+                "participantCountOutsideConfigurableRange",
+                "setupContext.participantCount must be an integer from 3 through 20",
                 "setupPackage.setupContext.participantCount".to_string(),
             )],
         )));

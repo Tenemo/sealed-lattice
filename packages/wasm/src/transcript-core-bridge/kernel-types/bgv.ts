@@ -19,6 +19,7 @@ export type BgvRnsParametersDescription = {
 export type BgvCollectiveSetupParametersDescription = {
     readonly setupParametersHash: ProtocolHash;
     readonly participantCount: number;
+    readonly reconstructionThreshold: number;
     readonly qShare: {
         readonly primes: readonly number[];
     };

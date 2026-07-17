@@ -1,6 +1,8 @@
 import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
+import { requireFoundationRosterParameters } from '../common-fields.js';
+
 import {
     type SetupCommitmentValue,
     type VssCoefficientOpeningMaterial,
@@ -24,11 +26,16 @@ const validateCommitmentCommonInput = (
 ): void => {
     assertProtocolHash(input.publicMatrixSeedHash, 'publicMatrixSeedHash');
     assertPositiveSafeInteger(input.ringDegree, 'ringDegree');
-    assertPositiveSafeInteger(
+    const rosterParameters = requireFoundationRosterParameters(
         input.setupContext.participantCount,
         'setupContext.participantCount',
     );
     assertPositiveSafeInteger(input.thresholdDegree, 'thresholdDegree');
+    if (input.thresholdDegree !== rosterParameters.reconstructionThreshold) {
+        throw new RangeError(
+            `thresholdDegree must equal ${String(rosterParameters.reconstructionThreshold)} for setupContext.participantCount.`,
+        );
+    }
     input.qSharePrimes.forEach((qSharePrime, rnsLimbIndex) => {
         assertPositiveSafeInteger(
             qSharePrime,

@@ -21,7 +21,7 @@ struct VssProofMaterialSetFixture {
 }
 
 pub(super) fn vss_fixture_threshold_degree(package: &serde_json::Value) -> u64 {
-    participant_count_from_package(package) / 3 + 1
+    decryption_threshold_for_participant_count(participant_count_from_package(package))
 }
 
 // The canonical committed-material commitment-context hash for a role and
@@ -241,6 +241,8 @@ mod finalized_package;
 mod same_secret_bridge;
 mod share_linkage;
 mod transport;
+
+pub(in super::super) use commitment_sets::vss_public_coefficient_commitment_record;
 
 // Builds only the two aggregate coordinates needed by the direct-verifier
 // mutation test. Its proof references are deliberately invalid common-proof

@@ -13,9 +13,11 @@ const protocolVersion = 1;
 const maximumRuntimeBuildManifestByteLength = 65_536;
 const maximumCopiedExecutableAssetByteLength = 1_572_864;
 const maximumFoundationVariableValueByteLength = 8 * 1024 * 1024 - 4;
+const maximumEvaluatorProgramSetArtifactByteLength = 20_270_968;
 const maximumCanonicalListCount = 4_096;
 const hashByteLength = 64;
 const requiredSuiteArtifactCount = 6;
+const evaluatorProgramSetArtifactKind = 5;
 const textDecoder = new TextDecoder('utf-8', { fatal: true });
 const textEncoder = new TextEncoder();
 
@@ -90,6 +92,21 @@ type CanonicalTupleView = Readonly<{
 
 const fail = (message: string): never => {
     throw new RuntimeBuildCanonicalError(message);
+};
+
+export const maximumSuiteArtifactByteLengthForKind = (
+    artifactKind: number,
+): number => {
+    if (
+        !Number.isSafeInteger(artifactKind) ||
+        artifactKind < 1 ||
+        artifactKind > requiredSuiteArtifactCount
+    ) {
+        return fail('A suite artifact kind is outside its accepted profile.');
+    }
+    return artifactKind === evaluatorProgramSetArtifactKind
+        ? maximumEvaluatorProgramSetArtifactByteLength
+        : maximumFoundationVariableValueByteLength;
 };
 
 const unsigned16 = (bytes: Uint8Array, offset: number): number =>
@@ -729,7 +746,8 @@ export const decodeSuiteArtifactReferences = (
             artifactKind < 1 ||
             artifactKind > requiredSuiteArtifactCount ||
             byteLength === 0n ||
-            byteLength > BigInt(maximumFoundationVariableValueByteLength)
+            byteLength >
+                BigInt(maximumSuiteArtifactByteLengthForKind(artifactKind))
         ) {
             return fail(
                 'A suite artifact reference is outside its accepted profile.',
@@ -791,10 +809,11 @@ const createFoundationVariableBytesHash = (
         value: Uint8Array;
     }>[],
     variableByteLength: bigint,
+    maximumVariableByteLength = maximumFoundationVariableValueByteLength,
 ): RuntimeBuildHashAccumulator => {
     if (
         variableByteLength < 0n ||
-        variableByteLength > BigInt(maximumFoundationVariableValueByteLength)
+        variableByteLength > BigInt(maximumVariableByteLength)
     ) {
         return fail(
             'A foundation hash input exceeds its canonical byte ceiling.',
@@ -920,11 +939,13 @@ export const createSuiteArtifactHashAccumulator = (
             },
         ],
         byteLength,
+        maximumSuiteArtifactByteLengthForKind(artifactKind),
     );
 
 export const runtimeBuildCanonicalLimits = Object.freeze({
     hashByteLength,
     maximumCopiedExecutableAssetByteLength,
+    maximumEvaluatorProgramSetArtifactByteLength,
     maximumFoundationVariableValueByteLength,
     maximumRuntimeBuildManifestByteLength,
 });

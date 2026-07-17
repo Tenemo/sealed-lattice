@@ -8,7 +8,8 @@ use super::schemas::{
 };
 use super::{
     CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple, FOUNDATION_PROFILE,
-    FoundationSchemaError, Hash512, RefusalReason, hash_foundation_tuple_512,
+    FoundationRosterParameters, FoundationSchemaError, Hash512, RefusalReason,
+    derive_foundation_roster_parameters, hash_foundation_tuple_512,
 };
 use crate::bgv::{
     evaluator::top_k::CANONICAL_TARGET_CIPHERTEXT_LEVEL,
@@ -377,6 +378,26 @@ impl SuiteCountLimits {
         maximum_candidate_packages_per_action: u32,
         maximum_proof_objects_per_action: u32,
     ) -> SchemaResult<Self> {
+        Self::new_for_roster(
+            maximum_ballot_attempts_per_participant,
+            maximum_target_share_submissions,
+            maximum_private_sampler_candidate_draws_per_output,
+            maximum_public_sampler_candidate_draws_per_output,
+            maximum_candidate_packages_per_action,
+            maximum_proof_objects_per_action,
+            FOUNDATION_PROFILE.participant_count,
+        )
+    }
+
+    fn new_for_roster(
+        maximum_ballot_attempts_per_participant: u16,
+        maximum_target_share_submissions: u16,
+        maximum_private_sampler_candidate_draws_per_output: u32,
+        maximum_public_sampler_candidate_draws_per_output: u32,
+        maximum_candidate_packages_per_action: u32,
+        maximum_proof_objects_per_action: u32,
+        participant_count: u16,
+    ) -> SchemaResult<Self> {
         let limits = Self {
             maximum_ballot_attempts_per_participant,
             maximum_target_share_submissions,
@@ -385,11 +406,11 @@ impl SuiteCountLimits {
             maximum_candidate_packages_per_action,
             maximum_proof_objects_per_action,
         };
-        limits.validate()?;
+        limits.validate_for_roster(participant_count)?;
         Ok(limits)
     }
 
-    fn validate(self) -> SchemaResult<()> {
+    fn validate_for_roster(self, participant_count: u16) -> SchemaResult<()> {
         if self.maximum_ballot_attempts_per_participant == 0
             || self.maximum_target_share_submissions == 0
             || self.maximum_private_sampler_candidate_draws_per_output == 0
@@ -402,17 +423,16 @@ impl SuiteCountLimits {
                 "suite count maxima must be positive",
             ));
         }
-        if self.maximum_target_share_submissions != FOUNDATION_PROFILE.participant_count {
+        if self.maximum_target_share_submissions != participant_count {
             return Err(FoundationSchemaError::new(
                 RefusalReason::OutsideSupportedProfile,
                 "target-share submission maximum must equal the roster size",
             ));
         }
-        let maximum_candidate_packages = u32::from(FOUNDATION_PROFILE.participant_count)
+        let maximum_candidate_packages = u32::from(participant_count)
             .checked_mul(u32::from(self.maximum_ballot_attempts_per_participant))
             .ok_or_else(cap_overflow)?;
-        if self.maximum_candidate_packages_per_action
-            < u32::from(FOUNDATION_PROFILE.participant_count)
+        if self.maximum_candidate_packages_per_action < u32::from(participant_count)
             || self.maximum_candidate_packages_per_action > maximum_candidate_packages
         {
             return Err(FoundationSchemaError::new(
@@ -530,18 +550,33 @@ impl SuiteByteLimits {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SuiteRecord {
+    roster_parameters: FoundationRosterParameters,
     count_limits: SuiteCountLimits,
     byte_limits: SuiteByteLimits,
     artifacts: Vec<ArtifactReference>,
 }
 
 impl SuiteRecord {
+    #[cfg(test)]
     pub(crate) fn new(
         count_limits: SuiteCountLimits,
         byte_limits: SuiteByteLimits,
         artifacts: Vec<ArtifactReference>,
     ) -> SchemaResult<Self> {
+        let roster_parameters =
+            derive_foundation_roster_parameters(FOUNDATION_PROFILE.participant_count)
+                .ok_or_else(unsupported_roster_size)?;
+        Self::new_for_roster(roster_parameters, count_limits, byte_limits, artifacts)
+    }
+
+    fn new_for_roster(
+        roster_parameters: FoundationRosterParameters,
+        count_limits: SuiteCountLimits,
+        byte_limits: SuiteByteLimits,
+        artifacts: Vec<ArtifactReference>,
+    ) -> SchemaResult<Self> {
         let record = Self {
+            roster_parameters,
             count_limits,
             byte_limits,
             artifacts,
@@ -556,19 +591,19 @@ impl SuiteRecord {
     }
 
     pub const fn roster_size(&self) -> u16 {
-        FOUNDATION_PROFILE.participant_count
+        self.roster_parameters.participant_count
     }
 
     pub const fn byzantine_bound(&self) -> u16 {
-        FOUNDATION_PROFILE.active_fault_bound
+        self.roster_parameters.active_fault_bound
     }
 
     pub const fn reconstruction_threshold(&self) -> u16 {
-        FOUNDATION_PROFILE.reconstruction_threshold
+        self.roster_parameters.reconstruction_threshold
     }
 
     pub const fn finality_quorum(&self) -> u16 {
-        FOUNDATION_PROFILE.finality_quorum
+        self.roster_parameters.finality_quorum
     }
 
     pub const fn polynomial_degree(&self) -> u32 {
@@ -635,15 +670,16 @@ impl SuiteRecord {
         let mut budget = CanonicalDecodeBudget::new(limits);
         let tuple = CanonicalTuple::decode_with_budget(bytes, limits, &mut budget)?;
         require_header(&tuple, SUITE_RECORD_SCHEMA_IDENTIFIER, 29)?;
-        validate_fixed_suite_items(&tuple)?;
+        let roster_parameters = validate_suite_items(&tuple)?;
 
-        let count_limits = SuiteCountLimits::new(
+        let count_limits = SuiteCountLimits::new_for_roster(
             read_u16(&tuple.items[14])?,
             read_u16(&tuple.items[15])?,
             read_u32(&tuple.items[16])?,
             read_u32(&tuple.items[17])?,
             read_u32(&tuple.items[18])?,
             read_u32(&tuple.items[19])?,
+            roster_parameters.participant_count,
         )?;
         let byte_limits = SuiteByteLimits::new(
             read_u64(&tuple.items[20])?,
@@ -669,7 +705,7 @@ impl SuiteRecord {
             .iter()
             .map(ArtifactReference::from_tuple)
             .collect::<SchemaResult<Vec<_>>>()?;
-        Self::new(count_limits, byte_limits, artifacts)
+        Self::new_for_roster(roster_parameters, count_limits, byte_limits, artifacts)
     }
 
     pub fn suite_id(&self) -> SchemaResult<Hash512> {
@@ -680,7 +716,14 @@ impl SuiteRecord {
     }
 
     fn validate(&self) -> SchemaResult<()> {
-        self.count_limits.validate()?;
+        let derived_roster_parameters =
+            derive_foundation_roster_parameters(self.roster_parameters.participant_count)
+                .ok_or_else(unsupported_roster_size)?;
+        if derived_roster_parameters != self.roster_parameters {
+            return Err(invalid_roster_parameters());
+        }
+        self.count_limits
+            .validate_for_roster(self.roster_parameters.participant_count)?;
         self.byte_limits.validate_positive()?;
         validate_fixed_algebra()?;
         validate_artifacts(&self.artifacts)?;
@@ -710,10 +753,10 @@ impl SuiteRecord {
             FOUNDATION_SCHEMA_VERSION,
             vec![
                 CanonicalItem::unsigned16(SUITE_RECORD_VERSION),
-                CanonicalItem::unsigned16(FOUNDATION_PROFILE.participant_count),
-                CanonicalItem::unsigned16(FOUNDATION_PROFILE.active_fault_bound),
-                CanonicalItem::unsigned16(FOUNDATION_PROFILE.reconstruction_threshold),
-                CanonicalItem::unsigned16(FOUNDATION_PROFILE.finality_quorum),
+                CanonicalItem::unsigned16(self.roster_parameters.participant_count),
+                CanonicalItem::unsigned16(self.roster_parameters.active_fault_bound),
+                CanonicalItem::unsigned16(self.roster_parameters.reconstruction_threshold),
+                CanonicalItem::unsigned16(self.roster_parameters.finality_quorum),
                 CanonicalItem::unsigned32(fixed_polynomial_degree()?),
                 CanonicalItem::unsigned64(PLAINTEXT_MODULUS),
                 unsigned64_list(&DATA_PRIMES)?,
@@ -754,12 +797,18 @@ impl SuiteRecord {
     }
 }
 
-fn validate_fixed_suite_items(tuple: &CanonicalTuple) -> SchemaResult<()> {
+fn validate_suite_items(tuple: &CanonicalTuple) -> SchemaResult<FoundationRosterParameters> {
+    let participant_count = read_u16(&tuple.items[1])?;
+    let roster_parameters = derive_foundation_roster_parameters(participant_count)
+        .ok_or_else(unsupported_roster_size)?;
+    if read_u16(&tuple.items[2])? != roster_parameters.active_fault_bound
+        || read_u16(&tuple.items[3])? != roster_parameters.reconstruction_threshold
+        || read_u16(&tuple.items[4])? != roster_parameters.finality_quorum
+    {
+        return Err(invalid_roster_parameters());
+    }
+
     let fixed_fields_match = read_u16(&tuple.items[0])? == SUITE_RECORD_VERSION
-        && read_u16(&tuple.items[1])? == FOUNDATION_PROFILE.participant_count
-        && read_u16(&tuple.items[2])? == FOUNDATION_PROFILE.active_fault_bound
-        && read_u16(&tuple.items[3])? == FOUNDATION_PROFILE.reconstruction_threshold
-        && read_u16(&tuple.items[4])? == FOUNDATION_PROFILE.finality_quorum
         && read_u32(&tuple.items[5])? == fixed_polynomial_degree()?
         && read_u64(&tuple.items[6])? == PLAINTEXT_MODULUS
         && read_unsigned64_list(&tuple.items[7])? == DATA_PRIMES
@@ -772,10 +821,10 @@ fn validate_fixed_suite_items(tuple: &CanonicalTuple) -> SchemaResult<()> {
     if !fixed_fields_match {
         return Err(FoundationSchemaError::new(
             RefusalReason::UnsupportedVersionOrSuite,
-            "suite record does not match the supported fixed profile",
+            "suite record does not match the supported fixed algebra",
         ));
     }
-    Ok(())
+    Ok(roster_parameters)
 }
 
 fn validate_fixed_algebra() -> SchemaResult<()> {
@@ -990,6 +1039,20 @@ fn invalid_fixed_algebra() -> FoundationSchemaError {
     )
 }
 
+fn invalid_roster_parameters() -> FoundationSchemaError {
+    FoundationSchemaError::new(
+        RefusalReason::InvalidArithmeticRelation,
+        "suite roster parameters do not match the configurable formulas",
+    )
+}
+
+fn unsupported_roster_size() -> FoundationSchemaError {
+    FoundationSchemaError::new(
+        RefusalReason::OutsideSupportedProfile,
+        "suite roster size is outside the configurable range",
+    )
+}
+
 fn cap_overflow() -> FoundationSchemaError {
     FoundationSchemaError::new(
         RefusalReason::OutsideSupportedProfile,
@@ -1077,6 +1140,65 @@ mod tests {
         assert_eq!(suite.ordered_target_data_prime_indexes(), &[0, 1]);
         assert_eq!(suite.ordered_sharing_data_prime_indexes().len(), 17);
         assert_eq!(suite.distributions(), FIXED_DISTRIBUTIONS);
+    }
+
+    #[test]
+    fn suite_schema_derives_a_configurable_nonselected_roster() {
+        let roster_parameters =
+            derive_foundation_roster_parameters(3).expect("three participants are configurable");
+        let mut tuple = sample_suite()
+            .canonical_tuple()
+            .expect("selected suite tuple derives");
+        tuple.items[1] = CanonicalItem::unsigned16(roster_parameters.participant_count);
+        tuple.items[2] = CanonicalItem::unsigned16(roster_parameters.active_fault_bound);
+        tuple.items[3] = CanonicalItem::unsigned16(roster_parameters.reconstruction_threshold);
+        tuple.items[4] = CanonicalItem::unsigned16(roster_parameters.finality_quorum);
+        tuple.items[15] = CanonicalItem::unsigned16(roster_parameters.participant_count);
+        tuple.items[18] = CanonicalItem::unsigned32(6);
+        tuple.items[21] = CanonicalItem::unsigned64(6_000);
+
+        let encoded = tuple.encode().expect("candidate suite encodes");
+        let decoded = SuiteRecord::decode(&encoded, &CanonicalDecodeLimits::default())
+            .expect("candidate suite is structural");
+        assert_eq!(decoded.roster_size(), 3);
+        assert_eq!(decoded.byzantine_bound(), 0);
+        assert_eq!(decoded.reconstruction_threshold(), 2);
+        assert_eq!(decoded.finality_quorum(), 2);
+        assert_eq!(
+            decoded.encode().expect("candidate suite re-encodes"),
+            encoded
+        );
+    }
+
+    #[test]
+    fn suite_schema_refuses_roster_parameters_that_do_not_match_the_formulas() {
+        let mut tuple = sample_suite()
+            .canonical_tuple()
+            .expect("selected suite tuple derives");
+        tuple.items[3] = CanonicalItem::unsigned16(FOUNDATION_PROFILE.reconstruction_threshold + 1);
+        assert_eq!(
+            SuiteRecord::decode(
+                &tuple.encode().expect("mutated suite encodes"),
+                &CanonicalDecodeLimits::default(),
+            )
+            .expect_err("self-attested roster thresholds must refuse")
+            .refusal_reason,
+            RefusalReason::InvalidArithmeticRelation
+        );
+
+        let mut outside_range = sample_suite()
+            .canonical_tuple()
+            .expect("selected suite tuple derives");
+        outside_range.items[1] = CanonicalItem::unsigned16(2);
+        assert_eq!(
+            SuiteRecord::decode(
+                &outside_range.encode().expect("mutated suite encodes"),
+                &CanonicalDecodeLimits::default(),
+            )
+            .expect_err("out-of-range roster size must refuse")
+            .refusal_reason,
+            RefusalReason::OutsideSupportedProfile
+        );
     }
 
     #[test]

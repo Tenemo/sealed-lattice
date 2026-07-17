@@ -490,6 +490,7 @@ impl FinalityVerifier {
         canonical_decode_limits: CanonicalDecodeLimits,
     ) -> SchemaResult<Self> {
         let canonical_roster = Roster::new(roster.entries.clone())?;
+        canonical_roster.require_selected_profile_size()?;
         let roster_hash = canonical_roster.roster_hash()?;
         let state_verifier = StateVerifier::new(
             suite_identifier,

@@ -888,12 +888,16 @@ impl StateVerifier {
         roster: &Roster,
         canonical_decode_limits: CanonicalDecodeLimits,
     ) -> StateResult<Self> {
-        Roster::new(roster.entries.clone()).map_err(StateError::from_schema)?;
+        let canonical_roster =
+            Roster::new(roster.entries.clone()).map_err(StateError::from_schema)?;
+        canonical_roster
+            .require_selected_profile_size()
+            .map_err(StateError::from_schema)?;
         Ok(Self {
             suite_id,
             ceremony_context_hash,
             action_context_hash,
-            roster: roster.clone(),
+            roster: canonical_roster,
             canonical_decode_limits,
         })
     }

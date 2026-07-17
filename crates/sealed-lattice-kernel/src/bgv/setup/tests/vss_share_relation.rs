@@ -1,5 +1,6 @@
 use super::*;
 use crate::bgv::setup::commitment::SETUP_COMMITMENT_MODULUS_LIMB_INDICES;
+use crate::foundation::FOUNDATION_PROFILE;
 
 #[test]
 fn carry_aware_vss_share_relation_accepts_no_wrap_and_wrap_cases_for_every_q_share_prime() {
@@ -43,7 +44,7 @@ fn carry_aware_vss_share_relation_accepts_no_wrap_and_wrap_cases_for_every_q_sha
 fn carry_aware_vss_share_relation_matches_reduced_shamir_evaluation() {
     for modulus in DATA_PRIMES {
         let coefficients = [modulus - 17, 12_345 % modulus, modulus / 3, modulus / 5];
-        for recipient_roster_position in 0..10 {
+        for recipient_roster_position in 0..usize::from(FOUNDATION_PROFILE.participant_count) {
             let trustee_point =
                 canonical_trustee_point(recipient_roster_position, modulus).expect("trustee point");
             let share_value = evaluate_shamir_polynomial(&coefficients, trustee_point, modulus)

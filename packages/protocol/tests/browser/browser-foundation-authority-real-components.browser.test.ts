@@ -46,7 +46,7 @@ const transactionLimits = {
     maximumTransactionLifetimeMilliseconds: 10_000,
 } as const;
 const storageNamespace = 'browser-foundation-authority-real-components';
-const fixedWitnessVoteCount = 7;
+const requiredWitnessVoteCount = foundationProfile.stateWitnessQuorum;
 const indexedDbObjectStoreName = 'records';
 const deviceWrappingRecordKind = 'sealed-lattice-device-wrapping-state';
 const runtimeStorePrefix = `sealed-lattice-runtime-store/${storageNamespace}/`;
@@ -966,7 +966,7 @@ describe('Browser foundation authority real-component composition', () => {
 
         const freshParticipants = await Promise.all(
             Array.from(
-                { length: fixedWitnessVoteCount + 1 },
+                { length: requiredWitnessVoteCount + 1 },
                 async (_unused, rosterPosition) =>
                     openParticipantAuthority({
                         canonicalBoardContext,
@@ -1013,7 +1013,9 @@ describe('Browser foundation authority real-component composition', () => {
             ),
             'Canonical-board object listing',
         );
-        expect(canonicalBoardObjects).toHaveLength(fixedWitnessVoteCount + 1);
+        expect(canonicalBoardObjects).toHaveLength(
+            requiredWitnessVoteCount + 1,
+        );
         expect(
             canonicalBoardObjects.every(
                 (verifiedObject) =>
@@ -1051,14 +1053,14 @@ describe('Browser foundation authority real-component composition', () => {
                 });
             }),
         );
-        expect(witnessVotes).toHaveLength(fixedWitnessVoteCount);
+        expect(witnessVotes).toHaveLength(requiredWitnessVoteCount);
         expect(
             new Set(
                 witnessVotes.map(({ canonicalVoteCarrier }) =>
                     bytesToHex(canonicalVoteCarrier),
                 ),
             ).size,
-        ).toBe(fixedWitnessVoteCount);
+        ).toBe(requiredWitnessVoteCount);
 
         const certifiedReservation = requireValid(
             await subject.authority.certifyActionRandomnessReservation(

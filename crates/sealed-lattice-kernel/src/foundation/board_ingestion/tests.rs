@@ -312,6 +312,30 @@ fn carrier_object_hash(carrier_bytes: &[u8]) -> Hash512 {
 }
 
 #[test]
+fn board_authority_rejects_a_nonselected_structural_roster() {
+    let fixture = BoardFixture::new();
+    let roster = Roster::new(fixture.roster.entries.iter().take(3).cloned().collect())
+        .expect("three-participant roster is structural");
+    let error = match CanonicalBoardVerifier::new(
+        fixture.suite_id,
+        fixture.ceremony_context_hash,
+        fixture.action_context_hash,
+        &roster,
+        CanonicalBoardLimits {
+            maximum_ballot_attempts_per_participant: 4,
+            maximum_retained_canonical_carrier_byte_length: 8 * 1024 * 1024,
+            maximum_unordered_carriers_per_batch: 128,
+            maximum_retained_transcript_objects: 512,
+        },
+        CanonicalDecodeLimits::default(),
+    ) {
+        Ok(_) => panic!("nonselected roster cannot open board authority"),
+        Err(error) => error,
+    };
+    assert_eq!(error.refusal_reason, RefusalReason::OutsideSupportedProfile);
+}
+
+#[test]
 fn unordered_dependencies_and_semantic_replay_mint_one_cached_capability() {
     let fixture = BoardFixture::new();
     let mut verifier = fixture.verifier();
@@ -518,7 +542,11 @@ fn public_randomness_reveal_is_bound_to_its_authenticated_source_commitment() {
 fn deterministic_unsigned_objects_resolve_typed_dependencies() {
     let fixture = BoardFixture::new();
     let verified_setup_source_hash = Hash512::from_bytes([0x51; Hash512::BYTE_LENGTH]);
-    let selected_roster_positions = [0_usize, 3, 9];
+    let selected_roster_positions = [
+        0_usize,
+        3,
+        usize::from(FOUNDATION_PROFILE.participant_count - 1),
+    ];
     let ballots = selected_roster_positions
         .iter()
         .map(|roster_position| fixture.ballot_package(*roster_position, verified_setup_source_hash))

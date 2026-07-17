@@ -215,7 +215,7 @@ describe('createGaloisKeyShareBatches', () => {
                 ...batches,
                 {
                     ...batches[0],
-                    trusteeRosterPosition: 9,
+                    trusteeRosterPosition: participantCount,
                 },
             ]),
         ).toThrow('one batch per participant');

@@ -1,8 +1,8 @@
 # Protocol package
 
-This package contains deterministic protocol-development helpers for transcript rules, canonical selection, poll validation, structural threshold-count calculation, roster and manifest checks, setup artifact construction, and browser-local durable-state coordination.
+This package contains deterministic protocol-development helpers for transcript rules, canonical selection, poll validation, structural threshold-count calculation, roster and manifest checks, setup artifact construction, and browser-local durable-state coordination. Roster-count helpers derive the documented formulas for `3 <= n <= 20`; this structural range does not make a non-ten roster supported.
 
-These helpers validate their documented inputs and recompute local bindings, but they do not establish a complete ceremony or certify parameter security, supported-phone runtime behavior, or participant acceptance. The participant-facing verification components that exist cross the Rust/WASM kernel and the public SDK boundaries described in the root documentation.
+These helpers validate their documented inputs and recompute local bindings, but they do not establish a complete ceremony or certify parameter security, supported-phone runtime behavior, or participant acceptance. The exact `n = 10` suite and build is the sole prototype completion and evidence target; other roster sizes need no generated artifacts or evidence and remain officially unsupported. The participant-facing verification components that exist cross the Rust/WASM kernel and the public SDK boundaries described in the root documentation.
 
 Browser-local storage authentication and atomicity support honest-client integrity and recovery from interrupted writes. They are not quorum authority, rollback-resistant recency, or target-release authorization. Shared state, finality, and release decisions must be derived from accepted protocol objects and the applicable fixed-roster quorum.
 

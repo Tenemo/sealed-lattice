@@ -119,7 +119,7 @@ pub(super) fn decode_verified_canonical_public_key_share_material(
     participant_count: u64,
     ring_degree: usize,
 ) -> CanonicalResult<DecodedCanonicalPublicKeyShareMaterial> {
-    if !super::super::participant_count_is_supported(participant_count) {
+    if !super::super::participant_count_is_configurable(participant_count) {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
             "public-key share material participant count is outside the accepted setup profile",
@@ -258,12 +258,15 @@ fn public_key_share_material_byte_length(
 }
 
 fn minimum_public_key_share_material_byte_length() -> CanonicalResult<u64> {
-    public_key_share_material_byte_length(super::super::MINIMUM_SUPPORTED_PARTICIPANT_COUNT, 1)
+    public_key_share_material_byte_length(
+        u64::from(crate::foundation::MINIMUM_CONFIGURABLE_PARTICIPANT_COUNT),
+        1,
+    )
 }
 
 fn maximum_public_key_share_material_byte_length() -> CanonicalResult<u64> {
     public_key_share_material_byte_length(
-        super::super::MAXIMUM_SUPPORTED_PARTICIPANT_COUNT,
+        u64::from(crate::foundation::MAXIMUM_CONFIGURABLE_PARTICIPANT_COUNT),
         POLYNOMIAL_DEGREE,
     )
 }

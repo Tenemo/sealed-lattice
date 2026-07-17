@@ -329,6 +329,12 @@ impl CeremonyContext {
         ceremony_identifier: String,
     ) -> SchemaResult<Self> {
         validate_external_identifier(&ceremony_identifier)?;
+        if roster.entries.len() != usize::from(suite.roster_size()) {
+            return Err(FoundationSchemaError::new(
+                RefusalReason::WrongContext,
+                "ceremony roster size does not match the suite record",
+            ));
+        }
         let suite_id = suite.suite_id()?;
         let manifest_hash = manifest.manifest_hash()?;
         let roster_hash = roster.roster_hash()?;
@@ -750,6 +756,24 @@ mod tests {
             error.refusal_reason,
             RefusalReason::UnsupportedVersionOrSuite | RefusalReason::OutsideSupportedProfile
         ));
+    }
+
+    #[test]
+    fn ceremony_context_requires_the_suite_and_roster_sizes_to_match() {
+        let suite = sample_suite();
+        let short_roster = Roster::new(sample_roster().entries.into_iter().take(3).collect())
+            .expect("three-participant roster is structural");
+        assert_eq!(
+            CeremonyContext::new(
+                &suite,
+                &sample_manifest(),
+                &short_roster,
+                "ceremony-2026".to_owned(),
+            )
+            .expect_err("a selected-profile suite cannot bind a different roster size")
+            .refusal_reason,
+            RefusalReason::WrongContext
+        );
     }
 
     #[test]

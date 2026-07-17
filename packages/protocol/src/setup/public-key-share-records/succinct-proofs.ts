@@ -1,3 +1,5 @@
+import { requireFoundationRosterParameters } from '../common-fields.js';
+
 import {
     type PublicKeyShareSuccinctProofSet,
     type PublicKeyShareSuccinctProofSetInput,
@@ -7,6 +9,10 @@ import { assertProtocolHash } from './encoding.js';
 export const createPublicKeyShareSuccinctProofSet = (
     input: PublicKeyShareSuccinctProofSetInput,
 ): PublicKeyShareSuccinctProofSet => {
+    requireFoundationRosterParameters(
+        input.setupContext.participantCount,
+        'setupContext.participantCount',
+    );
     if (input.proofMaterials.length !== input.setupContext.participantCount) {
         throw new Error(
             'public-key share proof materials must contain one proof per participant in roster order.',

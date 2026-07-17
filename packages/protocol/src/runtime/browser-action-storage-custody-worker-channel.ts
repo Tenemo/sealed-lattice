@@ -1,5 +1,11 @@
 import {
+    copyAuthenticatedMailboxFrozenRosterParticipantIdentities,
+    openAuthenticatedMailboxFrozenRoster,
+} from '@sealed-lattice/crypto';
+import {
     browserActionStorageCustodyErrorCodes,
+    configurableParticipantCountRange,
+    deriveFoundationRosterParameters,
     foundationProfile,
     refusalReasonCodes,
 } from '@sealed-lattice/types';
@@ -110,6 +116,7 @@ import type {
     CommonProofCheckpointResumeDescriptor,
 } from './common-proof-browser-custody.js';
 import type {
+    CommonProofApplicationPublicationDisposition,
     DurableStateWitnessServiceLimits,
     DurableStateWitnessService,
     TransferableDurableStateWitnessService,
@@ -250,6 +257,22 @@ type InstalledCommonProofCapabilityTransfer = Readonly<{
     capability: VerifiedCommonProofCapability;
     restore(): void;
 }>;
+
+type PendingInstalledCommonProofApplication = Readonly<{
+    durableBindingIdentifier: string;
+    handoff: CommonProofApplicationHandoff;
+    witnessRoleIdentifier: string;
+}>;
+
+class DefinitelyUnpublishedCommonProofApplicationError extends Error {
+    public readonly failureCause: unknown;
+
+    public constructor(failureCause: unknown) {
+        super('The common-proof application was definitely not published.');
+        this.name = 'DefinitelyUnpublishedCommonProofApplicationError';
+        this.failureCause = failureCause;
+    }
+}
 
 type InstalledCommonProofApplicationInput = Readonly<{
     durableBindingIdentifier: string;
@@ -452,6 +475,7 @@ type InstalledCommonProofExecutionEnvironmentRecord = {
     generationCompleted: boolean;
     installedHost: InstalledCustodyWorkerHost;
     operationActive: boolean;
+    pendingApplication: PendingInstalledCommonProofApplication | undefined;
     generationFamilyAdapter:
         | ClosedWorkerCommonProofGenerationFamilyAdapter
         | undefined;
@@ -594,6 +618,29 @@ export const closeCommonProofExecutionEnvironmentInInstalledCustodyWorker =
                 'The common-proof execution environment is unavailable.',
             );
         }
+        if (record.pendingApplication !== undefined) {
+            const pendingApplicationClosureFailure =
+                new BrowserActionStorageCustodyError(
+                    'OwnedWorkerFailure',
+                    'Closing a pending common-proof application permanently retires its browser-owned foundation authority.',
+                );
+            record.failAfterApplicationHandoff(
+                pendingApplicationClosureFailure,
+            );
+            try {
+                await retireInstalledCommonProofExecutionEnvironment(
+                    environment,
+                    record,
+                );
+            } catch (retirementError) {
+                throw new BrowserActionStorageCustodyError(
+                    'OwnedWorkerFailure',
+                    'The pending common-proof application retired its host but verifier-authority cleanup also failed.',
+                    [pendingApplicationClosureFailure, retirementError],
+                );
+            }
+            throw pendingApplicationClosureFailure;
+        }
         await retireInstalledCommonProofExecutionEnvironment(
             environment,
             record,
@@ -605,11 +652,19 @@ type InstalledCommonProofGenerationOptions = Pick<
     'signal' | 'yieldControl'
 >;
 
+const destroyPendingInstalledCommonProofApplication = (
+    record: InstalledCommonProofExecutionEnvironmentRecord,
+): void => {
+    record.pendingApplication?.handoff.canonicalMarkerRecordBytes.fill(0);
+    record.pendingApplication = undefined;
+};
+
 const beginInstalledCommonProofTerminalCleanup = (
     record: InstalledCommonProofExecutionEnvironmentRecord,
 ): unknown[] => {
     record.terminalCleanupStarted = true;
     record.closed = true;
+    destroyPendingInstalledCommonProofApplication(record);
     const failures: unknown[] = [];
     if (record.generationFamilyAdapter !== undefined) {
         try {
@@ -869,6 +924,160 @@ type VerifyAndApplyInstalledCommonProofInput = Readonly<{
     yieldControl?: CommonProofVerificationWorkerOptions['yieldControl'];
 }>;
 
+type RetryPendingInstalledCommonProofApplicationInput = Readonly<{
+    durableBindingIdentifier: string;
+    witnessRoleIdentifier: string;
+}>;
+
+const runInstalledCommonProofApplication = async (
+    environment: InstalledCommonProofExecutionEnvironment,
+    record: InstalledCommonProofExecutionEnvironmentRecord,
+    input: RetryPendingInstalledCommonProofApplicationInput,
+    verifyCommonProof?: () => Promise<VerifiedCommonProofCapability>,
+): Promise<void> => {
+    record.operationActive = true;
+    let applicationHandoffBoundaryStarted =
+        record.pendingApplication !== undefined;
+    try {
+        if (record.pendingApplication === undefined) {
+            if (verifyCommonProof === undefined) {
+                throw new BrowserActionStorageCustodyError(
+                    'InvalidState',
+                    'The common-proof environment has no pending application to retry.',
+                );
+            }
+            record.verifiedCapability = await verifyCommonProof();
+            await record.assertDurableBindingCurrent(input);
+            applicationHandoffBoundaryStarted = true;
+            const handoff = await record.custody.armApplicationHandoff();
+            record.pendingApplication = Object.freeze({
+                durableBindingIdentifier: input.durableBindingIdentifier,
+                handoff,
+                witnessRoleIdentifier: input.witnessRoleIdentifier,
+            });
+            await completeInstalledCommonProofCustody(record);
+            await record.refreshDurableBindingAfterControlledCleanup(input);
+        } else if (verifyCommonProof !== undefined) {
+            throw new BrowserActionStorageCustodyError(
+                'InvalidState',
+                'The common-proof environment must retry its retained application without another verifier.',
+            );
+        }
+
+        const pendingApplication = record.pendingApplication;
+        if (pendingApplication === undefined) {
+            throw new BrowserActionStorageCustodyError(
+                'OwnedWorkerFailure',
+                'The common-proof application handoff was lost before durable application.',
+            );
+        }
+        const result = await record.applyVerifiedCommonProof({
+            durableBindingIdentifier:
+                pendingApplication.durableBindingIdentifier,
+            handoff: pendingApplication.handoff,
+            transferVerifiedCapability: () => {
+                if (
+                    installedCommonProofExecutionEnvironmentRecords.get(
+                        environment,
+                    ) !== record ||
+                    record.closed ||
+                    record.verifiedCapability === undefined
+                ) {
+                    throw new BrowserActionStorageCustodyError(
+                        'InvalidState',
+                        'The installed common-proof environment no longer owns verifier authority for application.',
+                    );
+                }
+                const capability = record.verifiedCapability;
+                record.verifiedCapability = undefined;
+                let restorationAvailable = true;
+                return Object.freeze({
+                    capability,
+                    restore: () => {
+                        if (!restorationAvailable) {
+                            throw new BrowserActionStorageCustodyError(
+                                'InvalidState',
+                                'The common-proof verifier authority transfer cannot be restored twice.',
+                            );
+                        }
+                        if (
+                            installedCommonProofExecutionEnvironmentRecords.get(
+                                environment,
+                            ) !== record ||
+                            record.closed ||
+                            record.verifiedCapability !== undefined
+                        ) {
+                            throw new BrowserActionStorageCustodyError(
+                                'InvalidState',
+                                'The common-proof verifier authority cannot return to its execution environment.',
+                            );
+                        }
+                        record.verifiedCapability = capability;
+                        restorationAvailable = false;
+                    },
+                });
+            },
+            witnessRoleIdentifier: pendingApplication.witnessRoleIdentifier,
+        });
+        destroyPendingInstalledCommonProofApplication(record);
+        finalizeInstalledCommonProofExecutionEnvironment(environment, record);
+        return result;
+    } catch (error) {
+        if (
+            error instanceof DefinitelyUnpublishedCommonProofApplicationError &&
+            record.pendingApplication !== undefined &&
+            record.verifiedCapability !== undefined &&
+            !record.closed
+        ) {
+            throw error.failureCause;
+        }
+
+        let capabilityReleaseFailure: unknown;
+        if (record.verifiedCapability !== undefined) {
+            try {
+                record.verifiedCapability.release();
+                record.verifiedCapability = undefined;
+            } catch (releaseError) {
+                capabilityReleaseFailure = releaseError;
+            }
+        }
+        if (applicationHandoffBoundaryStarted) {
+            destroyPendingInstalledCommonProofApplication(record);
+            record.failAfterApplicationHandoff(error);
+            if (capabilityReleaseFailure !== undefined) {
+                throw new BrowserActionStorageCustodyError(
+                    'OwnedWorkerFailure',
+                    'Common-proof application failed after handoff with verifier authority retained for terminal cleanup retry.',
+                    [error, capabilityReleaseFailure],
+                );
+            }
+        } else if (capabilityReleaseFailure !== undefined) {
+            try {
+                await retireInstalledCommonProofExecutionEnvironment(
+                    environment,
+                    record,
+                );
+            } catch (retirementError) {
+                throw new BrowserActionStorageCustodyError(
+                    'OwnedWorkerFailure',
+                    'Common-proof verification failed with verifier authority pending and durable retirement also failed.',
+                    [error, capabilityReleaseFailure, retirementError],
+                );
+            }
+            throw new BrowserActionStorageCustodyError(
+                'OwnedWorkerFailure',
+                'Common-proof verification failed and its verifier authority required terminal retirement.',
+                [error, capabilityReleaseFailure],
+            );
+        }
+        throw error;
+    } finally {
+        if (!record.closed) {
+            record.operationActive = false;
+        }
+    }
+};
+
 /**
  * Authenticates the committed generated stream, completes the Rust verifier,
  * and applies only its opaque capability to one durable foundation successor.
@@ -902,6 +1111,12 @@ export const verifyAndApplyCommonProofInInstalledCustodyWorker = async (
                 'The common-proof execution environment has no sealed generated proof ready for verification.',
             );
         }
+        if (record.pendingApplication !== undefined) {
+            throw new BrowserActionStorageCustodyError(
+                'InvalidState',
+                'The common-proof execution environment already owns a pending application retry.',
+            );
+        }
         const verificationDescription =
             describeClosedWorkerCommonProofVerificationFamilyAdapter(
                 input.verificationFamilyAdapter,
@@ -932,13 +1147,15 @@ export const verifyAndApplyCommonProofInInstalledCustodyWorker = async (
         } finally {
             verificationDescription.commonProofVerificationBindingHash.fill(0);
         }
-
-        record.operationActive = true;
-        let applicationHandoff: CommonProofApplicationHandoff | undefined;
-        let applicationHandoffBoundaryStarted = false;
-        try {
-            record.verifiedCapability =
-                await runClosedWorkerCommonProofVerificationFamilyAdapter(
+        return runInstalledCommonProofApplication(
+            environment,
+            record,
+            {
+                durableBindingIdentifier: input.durableBindingIdentifier,
+                witnessRoleIdentifier: input.witnessRoleIdentifier,
+            },
+            () =>
+                runClosedWorkerCommonProofVerificationFamilyAdapter(
                     input.verificationFamilyAdapter,
                     record.custody.authenticatedOutput(),
                     {
@@ -949,117 +1166,67 @@ export const verifyAndApplyCommonProofInInstalledCustodyWorker = async (
                             ? {}
                             : { yieldControl: input.yieldControl }),
                     },
-                );
-            await record.assertDurableBindingCurrent({
-                durableBindingIdentifier: input.durableBindingIdentifier,
-                witnessRoleIdentifier: input.witnessRoleIdentifier,
-            });
-            applicationHandoffBoundaryStarted = true;
-            applicationHandoff = await record.custody.armApplicationHandoff();
-            await completeInstalledCommonProofCustody(record);
-            await record.refreshDurableBindingAfterControlledCleanup({
-                durableBindingIdentifier: input.durableBindingIdentifier,
-                witnessRoleIdentifier: input.witnessRoleIdentifier,
-            });
-            const result = await record.applyVerifiedCommonProof({
-                durableBindingIdentifier: input.durableBindingIdentifier,
-                handoff: applicationHandoff,
-                transferVerifiedCapability: () => {
-                    if (
-                        installedCommonProofExecutionEnvironmentRecords.get(
-                            environment,
-                        ) !== record ||
-                        record.closed ||
-                        record.verifiedCapability === undefined
-                    ) {
-                        throw new BrowserActionStorageCustodyError(
-                            'InvalidState',
-                            'The installed common-proof environment no longer owns verifier authority for application.',
-                        );
-                    }
-                    const capability = record.verifiedCapability;
-                    record.verifiedCapability = undefined;
-                    let restorationAvailable = true;
-                    return Object.freeze({
-                        capability,
-                        restore: () => {
-                            if (!restorationAvailable) {
-                                throw new BrowserActionStorageCustodyError(
-                                    'InvalidState',
-                                    'The common-proof verifier authority transfer cannot be restored twice.',
-                                );
-                            }
-                            if (
-                                installedCommonProofExecutionEnvironmentRecords.get(
-                                    environment,
-                                ) !== record ||
-                                record.closed ||
-                                record.verifiedCapability !== undefined
-                            ) {
-                                throw new BrowserActionStorageCustodyError(
-                                    'InvalidState',
-                                    'The common-proof verifier authority cannot return to its execution environment.',
-                                );
-                            }
-                            record.verifiedCapability = capability;
-                            restorationAvailable = false;
-                        },
-                    });
-                },
-                witnessRoleIdentifier: input.witnessRoleIdentifier,
-            });
-            finalizeInstalledCommonProofExecutionEnvironment(
-                environment,
-                record,
-            );
-            return result;
-        } catch (error) {
-            let capabilityReleaseFailure: unknown;
-            if (record.verifiedCapability !== undefined) {
-                try {
-                    record.verifiedCapability.release();
-                    record.verifiedCapability = undefined;
-                } catch (releaseError) {
-                    capabilityReleaseFailure = releaseError;
-                }
-            }
-            if (applicationHandoffBoundaryStarted) {
-                record.failAfterApplicationHandoff(error);
-                if (capabilityReleaseFailure !== undefined) {
-                    throw new BrowserActionStorageCustodyError(
-                        'OwnedWorkerFailure',
-                        'Common-proof application failed after handoff with verifier authority retained for terminal cleanup retry.',
-                        [error, capabilityReleaseFailure],
-                    );
-                }
-            } else if (capabilityReleaseFailure !== undefined) {
-                try {
-                    await retireInstalledCommonProofExecutionEnvironment(
-                        environment,
-                        record,
-                    );
-                } catch (retirementError) {
-                    throw new BrowserActionStorageCustodyError(
-                        'OwnedWorkerFailure',
-                        'Common-proof verification failed with verifier authority pending and durable retirement also failed.',
-                        [error, capabilityReleaseFailure, retirementError],
-                    );
-                }
-                throw new BrowserActionStorageCustodyError(
-                    'OwnedWorkerFailure',
-                    'Common-proof verification failed and its verifier authority required terminal retirement.',
-                    [error, capabilityReleaseFailure],
-                );
-            }
-            throw error;
-        } finally {
-            applicationHandoff?.canonicalMarkerRecordBytes.fill(0);
-            if (!record.closed) {
-                record.operationActive = false;
-            }
-        }
+                ),
+        );
     });
 };
+
+/** Retries one definitely unpublished application without rerunning proof verification. */
+export const retryPendingCommonProofApplicationInInstalledCustodyWorker =
+    async (
+        environment: InstalledCommonProofExecutionEnvironment,
+        input: RetryPendingInstalledCommonProofApplicationInput,
+    ): Promise<void> => {
+        const record =
+            installedCommonProofExecutionEnvironmentRecords.get(environment);
+        if (record === undefined || record.closed) {
+            throw new BrowserActionStorageCustodyError(
+                'InvalidInput',
+                'The common-proof execution environment is unavailable.',
+            );
+        }
+        return record.runInHostQueue(async () => {
+            if (
+                record.closed ||
+                installedCommonProofExecutionEnvironmentRecords.get(
+                    environment,
+                ) !== record
+            ) {
+                throw new BrowserActionStorageCustodyError(
+                    'InvalidInput',
+                    'The common-proof execution environment became unavailable before application retry.',
+                );
+            }
+            const pendingApplication = record.pendingApplication;
+            if (
+                record.operationActive ||
+                pendingApplication === undefined ||
+                record.verifiedCapability === undefined ||
+                !record.terminalCustodySettled
+            ) {
+                throw new BrowserActionStorageCustodyError(
+                    'InvalidState',
+                    'The common-proof execution environment has no definitely unpublished application to retry.',
+                );
+            }
+            if (
+                input.durableBindingIdentifier !==
+                    pendingApplication.durableBindingIdentifier ||
+                input.witnessRoleIdentifier !==
+                    pendingApplication.witnessRoleIdentifier
+            ) {
+                throw new BrowserActionStorageCustodyError(
+                    'InvalidInput',
+                    'The common-proof application retry must preserve its exact durable binding and witness role.',
+                );
+            }
+            return runInstalledCommonProofApplication(
+                environment,
+                record,
+                input,
+            );
+        });
+    };
 
 type CustodyWorkerScope = Readonly<{
     addEventListener(
@@ -1486,16 +1653,32 @@ const copyWorkerActivatedFoundationInitializationResult = (
         !isPlainRecord(value) ||
         typeof value.actionRandomnessHandleIdentifier !== 'string' ||
         !/^[0-9a-f]{64}$/u.test(value.actionRandomnessHandleIdentifier) ||
-        !Array.isArray(value.orderedWitnessRoleHandleIdentifiers) ||
-        value.orderedWitnessRoleHandleIdentifiers.length !==
-            foundationProfile.participantCount - 1 ||
+        !Array.isArray(value.orderedWitnessRoleHandleIdentifiers)
+    ) {
+        throw new BrowserActionStorageCustodyError(
+            'OwnedWorkerFailure',
+            'The owned worker returned malformed activated foundation authority.',
+        );
+    }
+    try {
+        deriveFoundationRosterParameters(
+            value.orderedWitnessRoleHandleIdentifiers.length + 1,
+        );
+    } catch (error) {
+        throw new BrowserActionStorageCustodyError(
+            'OwnedWorkerFailure',
+            'The owned worker returned foundation authority outside the configurable participant-count range.',
+            error,
+        );
+    }
+    if (
         value.orderedWitnessRoleHandleIdentifiers.some(
             (identifier) =>
                 typeof identifier !== 'string' ||
                 !/^[0-9a-f]{64}$/u.test(identifier),
         ) ||
         new Set(value.orderedWitnessRoleHandleIdentifiers).size !==
-            foundationProfile.participantCount - 1
+            value.orderedWitnessRoleHandleIdentifiers.length
     ) {
         throw new BrowserActionStorageCustodyError(
             'OwnedWorkerFailure',
@@ -1805,13 +1988,35 @@ const copyFoundationOperationInitializationInput = (
     const preparation = copyBrowserFoundationInitializationPreparationInput(
         value as BrowserFoundationInitializationPreparationInput,
     );
+    const canonicalRosterBytes = copyBoundedBytes(
+        value.canonicalRosterBytes,
+        foundationProfile.maximumCopiedBufferByteLength,
+        'Canonical roster bytes',
+    );
+    let participantCount: number;
+    try {
+        participantCount =
+            copyAuthenticatedMailboxFrozenRosterParticipantIdentities(
+                openAuthenticatedMailboxFrozenRoster(canonicalRosterBytes),
+            ).length;
+    } catch (error) {
+        canonicalRosterBytes.fill(0);
+        throw new BrowserActionStorageCustodyError(
+            'InvalidInput',
+            'Browser foundation initialization requires a canonical roster within the configurable participant-count range.',
+            error,
+        );
+    }
+    if (preparation.orderedWitnessBindings.length !== participantCount - 1) {
+        canonicalRosterBytes.fill(0);
+        throw new BrowserActionStorageCustodyError(
+            'InvalidInput',
+            'Browser foundation initialization witness bindings do not match the canonical roster participant count.',
+        );
+    }
     return Object.freeze({
         ...preparation,
-        canonicalRosterBytes: copyBoundedBytes(
-            value.canonicalRosterBytes,
-            foundationProfile.maximumCopiedBufferByteLength,
-            'Canonical roster bytes',
-        ),
+        canonicalRosterBytes,
     });
 };
 
@@ -2889,7 +3094,7 @@ class BrowserActionStorageCustodyWorkerClient implements BrowserFoundationStorag
                     !Array.isArray(untrustedVoteCarriers) ||
                     untrustedVoteCarriers.length === 0 ||
                     untrustedVoteCarriers.length >
-                        foundationProfile.participantCount * 2
+                        configurableParticipantCountRange.maximum * 2
                 ) {
                     throw new BrowserActionStorageCustodyError(
                         'InvalidInput',
@@ -4143,7 +4348,7 @@ const copyHostCommandInput = (
                 !Array.isArray(input.untrustedVoteCarriers) ||
                 input.untrustedVoteCarriers.length === 0 ||
                 input.untrustedVoteCarriers.length >
-                    foundationProfile.participantCount * 2
+                    configurableParticipantCountRange.maximum * 2
             ) {
                 throw new BrowserActionStorageCustodyError(
                     'InvalidInput',
@@ -5587,7 +5792,9 @@ export const installBrowserActionStorageCustodyWorkerHost = (
     const runVerifiedCommonProofApplication = async (
         operationInput: InstalledCommonProofApplicationInput,
     ): Promise<void> => {
-        let commitAttempted = false;
+        let publicationDisposition:
+            | CommonProofApplicationPublicationDisposition
+            | undefined;
         let abortFailed = false;
         try {
             return await runFoundationWitnessMutation({
@@ -5636,25 +5843,13 @@ export const installBrowserActionStorageCustodyWorkerHost = (
                                     authorizationFrame:
                                         prepared.authorizationFrame,
                                     handoff: operationInput.handoff,
-                                    onCommitAttempt: () => {
-                                        if (commitAttempted) {
-                                            throw new BrowserActionStorageCustodyError(
-                                                'InvalidState',
-                                                'The common-proof application attempted more than one durable commit.',
-                                            );
-                                        }
-                                        commitAttempted = true;
+                                    onPublicationDisposition: (disposition) => {
+                                        publicationDisposition = disposition;
                                     },
                                     proofApplicationSlotHash:
                                         prepared.proofApplicationSlotHash,
                                 },
                             );
-                        if (!commitAttempted) {
-                            throw new BrowserActionStorageCustodyError(
-                                'OwnedWorkerFailure',
-                                'Common-proof persistence returned without an authenticated commit attempt.',
-                            );
-                        }
                         successor = copyFoundationFreshnessCoordinate(
                             await requireOwnedCustody().authenticateFoundationHead(),
                         );
@@ -5675,7 +5870,10 @@ export const installBrowserActionStorageCustodyWorkerHost = (
                         });
                         return undefined;
                     } catch (error) {
-                        if (!commitAttempted) {
+                        if (
+                            publicationDisposition !==
+                            'published-or-indeterminate'
+                        ) {
                             try {
                                 await prepared.abort();
                                 capabilityTransfer?.restore();
@@ -5685,6 +5883,24 @@ export const installBrowserActionStorageCustodyWorkerHost = (
                                     'OwnedWorkerFailure',
                                     'The common-proof application failed before commit and its verifier capability could not be restored.',
                                     [error, abortError],
+                                );
+                            }
+                            const prepublicationErrorCode =
+                                error instanceof Error && 'code' in error
+                                    ? String((error as { code?: unknown }).code)
+                                    : undefined;
+                            if (
+                                publicationDisposition ===
+                                    'definitely-not-published' ||
+                                (prepublicationErrorCode !==
+                                    'AuthenticationFailed' &&
+                                    prepublicationErrorCode !==
+                                        'CleanupFailed' &&
+                                    prepublicationErrorCode !== 'Conflict' &&
+                                    prepublicationErrorCode !== 'MissingRecord')
+                            ) {
+                                throw new DefinitelyUnpublishedCommonProofApplicationError(
+                                    error,
                                 );
                             }
                         }
@@ -5699,28 +5915,38 @@ export const installBrowserActionStorageCustodyWorkerHost = (
                 witnessRoleIdentifier: operationInput.witnessRoleIdentifier,
             });
         } catch (error) {
+            const applicationFailure =
+                error instanceof
+                DefinitelyUnpublishedCommonProofApplicationError
+                    ? error.failureCause
+                    : error;
             const errorCode =
-                error instanceof Error && 'code' in error
-                    ? String((error as { code?: unknown }).code)
+                applicationFailure instanceof Error &&
+                'code' in applicationFailure
+                    ? String((applicationFailure as { code?: unknown }).code)
                     : undefined;
+            const definitelyNotPublished =
+                error instanceof
+                DefinitelyUnpublishedCommonProofApplicationError;
             const permanentStateFailure =
                 abortFailed ||
-                commitAttempted ||
+                publicationDisposition === 'published-or-indeterminate' ||
                 errorCode === 'AuthenticationFailed' ||
                 errorCode === 'CleanupFailed' ||
-                errorCode === 'Conflict' ||
-                errorCode === 'MissingRecord';
+                errorCode === 'MissingRecord' ||
+                (errorCode === 'Conflict' && !definitelyNotPublished);
             if (!permanentStateFailure) {
                 throw error;
             }
             const terminalError =
-                error instanceof BrowserActionStorageCustodyError &&
-                error.code === 'OwnedWorkerFailure'
-                    ? error
+                applicationFailure instanceof
+                    BrowserActionStorageCustodyError &&
+                applicationFailure.code === 'OwnedWorkerFailure'
+                    ? applicationFailure
                     : new BrowserActionStorageCustodyError(
                           'OwnedWorkerFailure',
                           'The common-proof application could not establish one exact authenticated durable successor.',
-                          error,
+                          applicationFailure,
                       );
             failHost(terminalError);
             throw terminalError;
@@ -6559,7 +6785,7 @@ export const installBrowserActionStorageCustodyWorkerHost = (
                 try {
                     if (
                         committed.orderedWitnessRecords.length !==
-                        foundationProfile.participantCount - 1
+                        initializationInput.orderedWitnessBindings.length
                     ) {
                         throw new BrowserActionStorageCustodyError(
                             'OwnedWorkerFailure',
@@ -6613,7 +6839,7 @@ export const installBrowserActionStorageCustodyWorkerHost = (
                 try {
                     if (
                         recovered.orderedWitnessRecords.length !==
-                        foundationProfile.participantCount - 1
+                        initializationInput.orderedWitnessBindings.length
                     ) {
                         throw new BrowserActionStorageCustodyError(
                             'OwnedWorkerFailure',
@@ -7454,6 +7680,7 @@ export const installBrowserActionStorageCustodyWorkerHost = (
                             generationCompleted: false,
                             installedHost: uninstall,
                             operationActive: false,
+                            pendingApplication: undefined,
                             generationFamilyAdapter:
                                 copiedInput.generationFamilyAdapter,
                             proofAttemptLineageIdentifier:

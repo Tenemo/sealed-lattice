@@ -600,7 +600,17 @@ describe('untrusted storage transaction store', () => {
             postCommitTransaction.commit(),
             'AuthenticationFailed',
         );
-        await postCommitTransaction.closeAfterFailure();
+        const postCommitPublicationDispositions: string[] = [];
+        await postCommitTransaction.closeAfterFailure((disposition) => {
+            postCommitPublicationDispositions.push(disposition);
+        });
+        await postCommitTransaction.closeAfterFailure((disposition) => {
+            postCommitPublicationDispositions.push(disposition);
+        });
+        expect(postCommitPublicationDispositions).toEqual([
+            'published-or-indeterminate',
+            'published-or-indeterminate',
+        ]);
         await expectStorageError(
             postCommitTransaction.commit(),
             'InvalidState',

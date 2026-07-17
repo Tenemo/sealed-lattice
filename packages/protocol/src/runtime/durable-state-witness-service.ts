@@ -34,6 +34,7 @@ import {
     type ExclusiveResourceOwnerToken,
 } from './exclusive-resource-lifecycle.js';
 import type {
+    UntrustedStoragePublicationDisposition,
     UntrustedStorageTransaction,
     UntrustedStorageTransactionStore,
 } from './untrusted-storage-transaction-store.js';
@@ -127,10 +128,15 @@ export type TransferableDurableStateWitnessService =
             claimExclusiveOwner(): DurableStateWitnessService;
         }>;
 
+export type CommonProofApplicationPublicationDisposition =
+    UntrustedStoragePublicationDisposition;
+
 type PersistCommonProofApplicationInput = Readonly<{
     authorizationFrame: Uint8Array;
     handoff?: CommonProofApplicationHandoff;
-    onCommitAttempt(): void;
+    onPublicationDisposition(
+        disposition: CommonProofApplicationPublicationDisposition,
+    ): void;
     proofApplicationSlotHash: Uint8Array;
 }>;
 
@@ -173,10 +179,13 @@ const requireSafePositiveInteger = (value: number, label: string): void => {
 const closeTransactionAfterFailure = async (
     transaction: UntrustedStorageTransaction,
     operationFailure: unknown,
+    recordPublicationDisposition?: (
+        disposition: UntrustedStoragePublicationDisposition,
+    ) => void,
 ): Promise<AuthenticatedRuntimeRecordError> => {
     const mappedOperationFailure = mapStorageError(operationFailure);
     try {
-        await transaction.closeAfterFailure();
+        await transaction.closeAfterFailure(recordPublicationDisposition);
     } catch (closeFailure) {
         throw new AuthenticatedRuntimeRecordError(
             'CleanupFailed',
@@ -1264,15 +1273,29 @@ export const openDurableStateWitnessServiceWithProtection = (input: {
         async ({
             authorizationFrame,
             handoff,
-            onCommitAttempt,
+            onPublicationDisposition,
             proofApplicationSlotHash,
         }) => {
-            if (typeof onCommitAttempt !== 'function') {
+            if (typeof onPublicationDisposition !== 'function') {
                 throw new AuthenticatedRuntimeRecordError(
                     'InvalidInput',
-                    'Common-proof persistence requires a commit-attempt boundary callback.',
+                    'Common-proof persistence requires a publication-disposition callback.',
                 );
             }
+            const mapPretransactionReadFailure = (
+                error: unknown,
+            ): AuthenticatedRuntimeRecordError => {
+                const mappedFailure = mapStorageError(error);
+                if (
+                    mappedFailure.code !== 'AuthenticationFailed' &&
+                    mappedFailure.code !== 'CleanupFailed' &&
+                    mappedFailure.code !== 'Conflict' &&
+                    mappedFailure.code !== 'MissingRecord'
+                ) {
+                    onPublicationDisposition('definitely-not-published');
+                }
+                return mappedFailure;
+            };
             const copiedAuthorizationFrame = copyExactBytes(
                 authorizationFrame,
                 commonProofAuthorizationFrameByteLength,
@@ -1318,23 +1341,28 @@ export const openDurableStateWitnessServiceWithProtection = (input: {
                     handoffLogicalRecordKey !== undefined &&
                     copiedHandoffMarkerRecordBytes !== undefined
                 ) {
-                    const committedHandoffMarker =
-                        await input.store.readAuthenticated({
-                            authenticate: ({ bytes }) => {
-                                if (
-                                    !bytesEqual(
-                                        bytes,
-                                        copiedHandoffMarkerRecordBytes,
-                                    )
-                                ) {
-                                    throw new AuthenticatedRuntimeRecordError(
-                                        'AuthenticationFailed',
-                                        'The common-proof application handoff marker differs from its worker-owned bytes.',
-                                    );
-                                }
-                            },
-                            logicalRecordKey: handoffLogicalRecordKey,
-                        });
+                    let committedHandoffMarker: Uint8Array | undefined;
+                    try {
+                        committedHandoffMarker =
+                            await input.store.readAuthenticated({
+                                authenticate: ({ bytes }) => {
+                                    if (
+                                        !bytesEqual(
+                                            bytes,
+                                            copiedHandoffMarkerRecordBytes,
+                                        )
+                                    ) {
+                                        throw new AuthenticatedRuntimeRecordError(
+                                            'AuthenticationFailed',
+                                            'The common-proof application handoff marker differs from its worker-owned bytes.',
+                                        );
+                                    }
+                                },
+                                logicalRecordKey: handoffLogicalRecordKey,
+                            });
+                    } catch (error) {
+                        throw mapPretransactionReadFailure(error);
+                    }
                     try {
                         if (
                             committedHandoffMarker === undefined ||
@@ -1352,13 +1380,18 @@ export const openDurableStateWitnessServiceWithProtection = (input: {
                         committedHandoffMarker?.fill(0);
                     }
                 }
-                const existing = await readRuntimeRecord({
-                    logicalRecordKey,
-                    operationDomain:
-                        commonProofApplicationRecordOperationDomain,
-                    protection,
-                    store: input.store,
-                });
+                let existing: Awaited<ReturnType<typeof readRuntimeRecord>>;
+                try {
+                    existing = await readRuntimeRecord({
+                        logicalRecordKey,
+                        operationDomain:
+                            commonProofApplicationRecordOperationDomain,
+                        protection,
+                        store: input.store,
+                    });
+                } catch (error) {
+                    throw mapPretransactionReadFailure(error);
+                }
                 if (existing !== undefined) {
                     existing.plaintext.fill(0);
                     existing.sealedBytes.fill(0);
@@ -1368,11 +1401,16 @@ export const openDurableStateWitnessServiceWithProtection = (input: {
                     );
                 }
 
-                transaction = await beginDurableStateTransaction({
-                    lifetimeMilliseconds:
-                        limits.transactionLifetimeMilliseconds,
-                    store: input.store,
-                });
+                try {
+                    transaction = await beginDurableStateTransaction({
+                        lifetimeMilliseconds:
+                            limits.transactionLifetimeMilliseconds,
+                        store: input.store,
+                    });
+                } catch (error) {
+                    onPublicationDisposition('definitely-not-published');
+                    throw mapStorageError(error);
+                }
                 try {
                     stagedSealedBytes = await stageRuntimeRecordWrite({
                         expectedCurrentSealedBytes: null,
@@ -1396,25 +1434,20 @@ export const openDurableStateWitnessServiceWithProtection = (input: {
                     throw await closeTransactionAfterFailure(
                         transaction,
                         error,
+                        onPublicationDisposition,
                     );
                 }
 
-                try {
-                    onCommitAttempt();
-                } catch (error) {
-                    throw await closeTransactionAfterFailure(
-                        transaction,
-                        error,
-                    );
-                }
                 try {
                     await transaction.commit();
                 } catch (error) {
                     throw await closeTransactionAfterFailure(
                         transaction,
                         error,
+                        onPublicationDisposition,
                     );
                 }
+                onPublicationDisposition('published-or-indeterminate');
 
                 const committed = await readRuntimeRecord({
                     logicalRecordKey,

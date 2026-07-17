@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn ten_participant_factor_clears_every_authorized_subset_denominator() {
-    let participant_count = 10_u64;
+    let participant_count = u64::from(crate::foundation::PROTOTYPE_PARTICIPANT_COUNT);
     let minimum_shares_for_interpolation =
         decryption_threshold_for_participant_count(participant_count);
     let denominator_clearing_factor =

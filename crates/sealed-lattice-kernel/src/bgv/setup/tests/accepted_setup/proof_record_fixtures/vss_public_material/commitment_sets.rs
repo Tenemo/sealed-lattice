@@ -60,7 +60,7 @@ pub(super) fn vss_public_source_coefficient_record(
     })
 }
 
-pub(super) fn vss_public_coefficient_commitment_record(
+pub(in super::super::super) fn vss_public_coefficient_commitment_record(
     setup_context: &serde_json::Value,
     ring_degree: usize,
     source_trustee_identity: &str,

@@ -8,8 +8,8 @@ use crate::bgv::evaluator::engine::{ciphertext_add, ciphertext_object_root};
 use crate::hashing::hash512_hex;
 
 #[test]
-#[ignore = "long-running foundation-profile evidence; run via the focused full-profile-evidence runner"]
-fn foundation_profile_replay_target_release_matches_plaintext_oracle() {
+#[ignore = "long-running prototype-profile evidence; run via the focused full-profile-evidence runner"]
+fn prototype_profile_replay_target_release_matches_plaintext_oracle() {
     let started = std::time::Instant::now();
     let phase = |message: &str| {
         eprintln!(
@@ -18,16 +18,21 @@ fn foundation_profile_replay_target_release_matches_plaintext_oracle() {
         );
     };
 
-    let setup_package = accepted_setup_package();
+    let setup_fixture = prototype_accepted_setup_fixture();
+    let setup_package = setup_fixture.setup_package.clone();
     let evaluator_key = target_decryption_evaluator_key();
-    let ballot_count = 10_usize;
+    let ballot_count = usize::from(PROTOTYPE_PARTICIPANT_COUNT);
     let option_count = MAXIMUM_OPTION_COUNT;
     let top_count = MAXIMUM_OPTION_COUNT;
 
     let ballots: Vec<Vec<u64>> = (0..ballot_count)
         .map(|ballot_index| {
             (0..option_count)
-                .map(|option_index| 1 + ((option_index + ballot_index) % 10) as u64)
+                .map(|option_index| {
+                    1 + ((option_index + ballot_index)
+                        % usize::from(FOUNDATION_PROFILE.maximum_score))
+                        as u64
+                })
                 .collect()
         })
         .collect();
@@ -38,7 +43,7 @@ fn foundation_profile_replay_target_release_matches_plaintext_oracle() {
         direct_ballot_plaintext_target_slots(&aggregate_scores, top_count)
             .expect("plaintext target oracle");
 
-    phase("encrypting ten genuine ballots and summing the aggregate");
+    phase("encrypting the prototype-profile ballots and summing the aggregate");
     let mut aggregate_ciphertext = evaluator_key
         .encrypt_slots(&ballots[0], "replay-release-ballot-0")
         .expect("ballot ciphertext");
@@ -116,9 +121,19 @@ fn foundation_profile_replay_target_release_matches_plaintext_oracle() {
                 .expect("target order hex"),
     });
     let setup_binding = read_setup_binding(&setup_package).expect("setup binding");
+    assert_eq!(
+        setup_binding.participants.len(),
+        usize::from(PROTOTYPE_PARTICIPANT_COUNT),
+        "prototype-profile evidence must use all ten trustees"
+    );
     let required_share_count =
         decryption_threshold_for_roster_length(setup_binding.participants.len())
             .expect("target decryption share threshold");
+    assert_eq!(
+        required_share_count,
+        usize::from(FOUNDATION_PROFILE.reconstruction_threshold),
+        "prototype-profile evidence must require four target-decryption shares"
+    );
     phase("generating the proof-backed share quorum with real succinct proofs");
     let mut target_share_proofs = Vec::with_capacity(required_share_count);
     let selected_participants = setup_binding
@@ -130,15 +145,18 @@ fn foundation_profile_replay_target_release_matches_plaintext_oracle() {
     assert_eq!(selected_participants.len(), required_share_count);
     for participant in selected_participants {
         let trustee_identity = participant.trustee_identity.as_str();
-        let local_target_share_witness_value = local_target_share_witness(
+        let local_target_share_witness_value = local_target_share_witness_for_fixture(
+            setup_fixture,
             &setup_package,
             &accepted,
             &target_ciphertext_binding,
             &target_ciphertexts,
             trustee_identity,
         );
-        let target_share_proof =
-            with_staged_aggregate_opening_material(&local_target_share_witness_value, || {
+        let target_share_proof = with_staged_aggregate_opening_material_for_fixture(
+            setup_fixture,
+            &local_target_share_witness_value,
+            || {
                 generate_bgv_target_decryption_share_proof_request_for_test(&json!({
                     "setupPackage": setup_package,
                     "localTargetShareWitness": local_target_share_witness_value,
@@ -151,14 +169,15 @@ fn foundation_profile_replay_target_release_matches_plaintext_oracle() {
                         &[trustee_identity.as_bytes()],
                     ),
                 }))
-            })
-            .expect("target share proof");
+            },
+        )
+        .expect("target share proof");
         target_share_proofs.push(target_share_proof);
         phase(&format!("proved share for {trustee_identity}"));
     }
 
     phase("releasing the genuine target through the staged session");
-    let release_verification_id = "replay-release-foundation-profile";
+    let release_verification_id = "replay-release-prototype-profile";
     let release_result = staged_target_result_release(
         &setup_package,
         &accepted,

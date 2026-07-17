@@ -32,9 +32,19 @@ impl CommittedMaterialRelationPlanInput {
     }
 
     pub(super) fn point_stride(&self) -> Result<u64, RelationPlanError> {
-        self.ring_degree
-            .checked_div(8)
-            .filter(|stride| *stride > 0 && self.ring_degree == stride * 8)
+        let padded_participant_count = u64::from(self.participant_count).next_power_of_two();
+        let twice_ring_degree = self
+            .ring_degree
+            .checked_mul(2)
+            .ok_or(RelationPlanError::InvalidDomain)?;
+        twice_ring_degree
+            .checked_div(padded_participant_count)
+            .filter(|stride| {
+                *stride > 0
+                    && stride
+                        .checked_mul(padded_participant_count)
+                        .is_some_and(|product| product == twice_ring_degree)
+            })
             .ok_or(RelationPlanError::InvalidDomain)
     }
 
@@ -49,9 +59,11 @@ impl CommittedMaterialRelationPlanInput {
         context: &RelationPlanCheckContext,
     ) -> Result<Vec<(SuiteModulusReference, u64)>, RelationPlanError> {
         let trace_domain_size = self.trace_domain_size()?;
+        let roster_parameters =
+            crate::foundation::derive_foundation_roster_parameters(self.participant_count)
+                .ok_or(RelationPlanError::InvalidDomain)?;
         if !self.ring_degree.is_power_of_two()
-            || !(3..=20).contains(&self.participant_count)
-            || !(2..=self.participant_count).contains(&self.threshold)
+            || self.threshold != roster_parameters.reconstruction_threshold
             || self.sharing_data_modulus_indices.is_empty()
             || !strictly_sorted_unique(&self.sharing_data_modulus_indices)
             || self.trace_mask_degree_bound_exclusive == 0
@@ -1253,7 +1265,15 @@ fn add_constant_to_expression(
 
 #[cfg(test)]
 mod tests {
-    use super::{MonomialActionBranch, monomial_action_branches};
+    use std::collections::BTreeSet;
+
+    use super::{
+        CommittedMaterialRelationPlanInput, MonomialActionBranch, monomial_action_branches,
+    };
+    use crate::foundation::{
+        MAXIMUM_CONFIGURABLE_PARTICIPANT_COUNT, MINIMUM_CONFIGURABLE_PARTICIPANT_COUNT,
+        derive_foundation_roster_parameters,
+    };
 
     fn branch_is_active(
         branch: MonomialActionBranch,
@@ -1266,6 +1286,41 @@ mod tests {
                 let upper_rows_begin = trace_domain_size - branch.rotation_magnitude;
                 (row_ordinal >= upper_rows_begin) == use_upper_rows
             }
+        }
+    }
+
+    #[test]
+    fn committed_material_points_cover_every_configurable_roster_without_collisions() {
+        const RING_DEGREE: u64 = 32_768;
+        for participant_count in
+            MINIMUM_CONFIGURABLE_PARTICIPANT_COUNT..=MAXIMUM_CONFIGURABLE_PARTICIPANT_COUNT
+        {
+            let roster_parameters = derive_foundation_roster_parameters(participant_count)
+                .expect("configurable roster parameters derive");
+            let input = CommittedMaterialRelationPlanInput {
+                ring_degree: RING_DEGREE,
+                evaluation_domain_size: RING_DEGREE,
+                opening_degree_bound_exclusive: RING_DEGREE,
+                material_column_degree_bound_exclusive: RING_DEGREE / 2,
+                participant_count,
+                threshold: roster_parameters.reconstruction_threshold,
+                sharing_data_modulus_indices: vec![0],
+                trace_mask_degree_bound_exclusive: 1,
+                first_mask_purpose: 1,
+            };
+            let point_stride = input.point_stride().expect("point stride derives");
+            let padded_participant_count = u64::from(participant_count).next_power_of_two();
+            assert_eq!(point_stride * padded_participant_count, 2 * RING_DEGREE);
+
+            let exponents = (0..u64::from(participant_count))
+                .map(|participant_ordinal| participant_ordinal * point_stride)
+                .collect::<BTreeSet<_>>();
+            assert_eq!(exponents.len(), usize::from(participant_count));
+            assert!(
+                exponents
+                    .last()
+                    .is_some_and(|last_exponent| *last_exponent < 2 * RING_DEGREE)
+            );
         }
     }
 

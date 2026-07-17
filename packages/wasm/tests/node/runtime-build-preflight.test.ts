@@ -22,8 +22,10 @@ import {
     createSuiteArtifactHashAccumulator,
     createSuiteIdentifierAccumulator,
     decodeRuntimeBuildManifest,
+    decodeSuiteArtifactReferences,
     proofRandomnessPurposeRanges,
     runtimeBuildBytesToHex,
+    runtimeBuildCanonicalLimits,
     type RuntimeAssetRole,
 } from '#packages/wasm/src/runtime-build-canonical';
 import {
@@ -180,6 +182,7 @@ const suiteArtifactReferenceTuple = (
 
 type FixtureOverrides = Readonly<{
     artifactReferenceByteLength?: number;
+    artifactReferenceKind?: number;
     duplicateArtifactPath?: boolean;
     executableReferenceByteLength?: number;
     operationProfiles?: readonly Uint8Array[];
@@ -239,7 +242,8 @@ const createFixture = (overrides: FixtureOverrides = {}) => {
         suiteArtifactReferenceTuple(
             index + 1,
             bytes,
-            index === 0 && overrides.artifactReferenceByteLength !== undefined
+            index + 1 === (overrides.artifactReferenceKind ?? 1) &&
+                overrides.artifactReferenceByteLength !== undefined
                 ? overrides.artifactReferenceByteLength
                 : bytes.byteLength,
         ),
@@ -679,6 +683,12 @@ describe('runtime build preflight', () => {
     );
 
     it('checks small-record, executable, and artifact ceilings before allocation', async () => {
+        expect(runtimeBuildCanonicalLimits).toMatchObject({
+            maximumCopiedExecutableAssetByteLength: 1_572_864,
+            maximumEvaluatorProgramSetArtifactByteLength: 20_270_968,
+            maximumFoundationVariableValueByteLength: 8 * 1024 * 1024 - 4,
+            maximumRuntimeBuildManifestByteLength: 65_536,
+        });
         const ordinaryFixture = createFixture();
         const oversizedManifestFetcher = createFetcher(
             ordinaryFixture.routes,
@@ -706,5 +716,90 @@ describe('runtime build preflight', () => {
             runFixture({ fixture: oversizedArtifactFixture, workerHarness }),
         ).rejects.toThrow('outside its accepted profile');
         expect(workerHarness.observations.terminated).toBe(1);
+    });
+
+    it('admits the selected evaluator artifact length and rejects the next byte', () => {
+        const selectedEvaluatorProgramSetByteLength =
+            runtimeBuildCanonicalLimits.maximumEvaluatorProgramSetArtifactByteLength;
+        expect(() =>
+            createSuiteArtifactHashAccumulator(
+                5,
+                BigInt(selectedEvaluatorProgramSetByteLength),
+            ),
+        ).not.toThrow();
+        expect(() =>
+            createSuiteArtifactHashAccumulator(
+                5,
+                BigInt(selectedEvaluatorProgramSetByteLength + 1),
+            ),
+        ).toThrow('canonical byte ceiling');
+        const selectedEvaluatorFixture = createFixture({
+            artifactReferenceByteLength: selectedEvaluatorProgramSetByteLength,
+            artifactReferenceKind: 5,
+        });
+
+        const references = decodeSuiteArtifactReferences(
+            selectedEvaluatorFixture.routes.get(suiteRecordPath) ??
+                new Uint8Array(0),
+        );
+        expect(references[4]).toMatchObject({
+            artifactKind: 5,
+            byteLength: BigInt(selectedEvaluatorProgramSetByteLength),
+        });
+
+        const oversizedEvaluatorFixture = createFixture({
+            artifactReferenceByteLength:
+                selectedEvaluatorProgramSetByteLength + 1,
+            artifactReferenceKind: 5,
+        });
+        expect(() =>
+            decodeSuiteArtifactReferences(
+                oversizedEvaluatorFixture.routes.get(suiteRecordPath) ??
+                    new Uint8Array(0),
+            ),
+        ).toThrow('outside its accepted profile');
+    });
+
+    it('uses the evaluator artifact bound for streamed response admission', async () => {
+        const selectedEvaluatorProgramSetByteLength =
+            runtimeBuildCanonicalLimits.maximumEvaluatorProgramSetArtifactByteLength;
+        const evaluatorArtifactPath = artifactPaths[4];
+        if (evaluatorArtifactPath === undefined) {
+            throw new Error('The evaluator artifact test path is unavailable.');
+        }
+        const fixture = createFixture();
+        const acceptedBoundaryFetcher = createFetcher(
+            fixture.routes,
+            new Map([
+                [
+                    evaluatorArtifactPath,
+                    {
+                        contentLength: String(
+                            selectedEvaluatorProgramSetByteLength,
+                        ),
+                    },
+                ],
+            ]),
+        );
+        await expect(
+            runFixture({ fetcher: acceptedBoundaryFetcher, fixture }),
+        ).rejects.toThrow('wrong declared length');
+
+        const rejectedBoundaryFetcher = createFetcher(
+            fixture.routes,
+            new Map([
+                [
+                    evaluatorArtifactPath,
+                    {
+                        contentLength: String(
+                            selectedEvaluatorProgramSetByteLength + 1,
+                        ),
+                    },
+                ],
+            ]),
+        );
+        await expect(
+            runFixture({ fetcher: rejectedBoundaryFetcher, fixture }),
+        ).rejects.toThrow('outside its accepted bound');
     });
 });

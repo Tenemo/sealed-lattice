@@ -659,6 +659,9 @@ fn setup_action_randomness_authorization(input: &[u8]) -> RuntimeResult<Vec<u8>>
     }
     let roster = Roster::decode(canonical_roster_bytes, &CanonicalDecodeLimits::default())
         .map_err(schema_status)?;
+    roster
+        .require_selected_profile_size()
+        .map_err(schema_status)?;
     let roster_hash = roster.roster_hash().map_err(schema_status)?;
     ACTION_RANDOMNESS_REGISTRY.with(|registry| {
         let registry = registry.borrow();
@@ -693,6 +696,9 @@ fn validate_setup_mailbox_source_keys(input: &[u8]) -> RuntimeResult<Vec<u8>> {
         return Err(malformed_status());
     }
     let roster = Roster::decode(canonical_roster_bytes, &CanonicalDecodeLimits::default())
+        .map_err(schema_status)?;
+    roster
+        .require_selected_profile_size()
         .map_err(schema_status)?;
     let roster_hash = roster.roster_hash().map_err(schema_status)?;
 

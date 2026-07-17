@@ -163,9 +163,9 @@ pub(in crate::bgv::setup) const CLAIM_MASK_DIGIT_COUNT: usize = 58;
 pub(in crate::bgv) fn target_decryption_interpolation_denominator_clearing_factor(
     participant_count: u64,
 ) -> CanonicalResult<u64> {
-    if !super::accepted_setup::participant_count_is_supported(participant_count) {
+    if !super::accepted_setup::participant_count_is_configurable(participant_count) {
         return Err(invalid_succinct_setup_proof(
-            "target-decryption participant count is outside the supported roster range",
+            "target-decryption participant count is outside the configurable roster range",
         ));
     }
 

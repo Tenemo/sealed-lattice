@@ -1,5 +1,11 @@
 import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
-import { isProtocolHash, type ProtocolHash } from '@sealed-lattice/types';
+import {
+    configurableParticipantCountRange,
+    deriveFoundationRosterParameters,
+    isProtocolHash,
+    type FoundationRosterParameters,
+    type ProtocolHash,
+} from '@sealed-lattice/types';
 
 import type { CollectiveBgvSetupContext } from './vss-share-verification-records.js';
 
@@ -42,6 +48,22 @@ export const assertPositiveSafeInteger = (
     return value;
 };
 
+export const requireFoundationRosterParameters = (
+    value: unknown,
+    fieldName: string,
+): FoundationRosterParameters => {
+    if (typeof value !== 'number' || !Number.isSafeInteger(value)) {
+        throw new TypeError(`${fieldName} must be an integer.`);
+    }
+    try {
+        return deriveFoundationRosterParameters(value);
+    } catch {
+        throw new RangeError(
+            `${fieldName} must be from ${String(configurableParticipantCountRange.minimum)} through ${String(configurableParticipantCountRange.maximum)}.`,
+        );
+    }
+};
+
 export const assertNonNegativeSafeInteger = (
     value: unknown,
     fieldName: string,
@@ -82,8 +104,12 @@ export const bytesFromHex = (hex: string, fieldName: string): Uint8Array => {
 
 export const deriveCollectiveBgvSetupContextHash = (
     setupContext: CollectiveBgvSetupContext,
-): ProtocolHash =>
-    deriveCanonicalObjectHash({
+): ProtocolHash => {
+    requireFoundationRosterParameters(
+        setupContext.participantCount,
+        'setupContext.participantCount',
+    );
+    return deriveCanonicalObjectHash({
         objectType: 'CollectiveBgvSetupContext',
         ceremonyId: setupContext.ceremonyId,
         manifestHash: setupContext.manifestHash,
@@ -92,6 +118,7 @@ export const deriveCollectiveBgvSetupContextHash = (
         setupEpoch: setupContext.setupEpoch,
         participantCount: setupContext.participantCount,
     });
+};
 
 export const assertSetupContextHashMatches = (
     setupContext: CollectiveBgvSetupContext,

@@ -105,6 +105,10 @@ export type UntrustedStorageTransactionLimits = Readonly<{
     maximumTransactionLifetimeMilliseconds: number;
 }>;
 
+export type UntrustedStoragePublicationDisposition =
+    | 'definitely-not-published'
+    | 'published-or-indeterminate';
+
 export type UntrustedStorageAuthenticationInput = Readonly<{
     bytes: Uint8Array;
     logicalRecordKey: string;
@@ -141,7 +145,11 @@ export type UntrustedStorageTransaction = Readonly<{
     ): Promise<void>;
     commit(): Promise<void>;
     abort(): Promise<void>;
-    closeAfterFailure(): Promise<void>;
+    closeAfterFailure(
+        recordPublicationDisposition?: (
+            disposition: UntrustedStoragePublicationDisposition,
+        ) => void,
+    ): Promise<void>;
 }>;
 
 export type UntrustedStorageRepairReport = Readonly<{
@@ -273,6 +281,9 @@ type TransactionRecord = {
     capacityReservationIdentifier: symbol | undefined;
     changes: Map<string, TransactionChange>;
     expiresAtMilliseconds: number;
+    failurePublicationDisposition:
+        | UntrustedStoragePublicationDisposition
+        | undefined;
     identifier: string;
     pendingCleanupObjectKeys: Set<string>;
     state: TransactionState;
@@ -1384,6 +1395,7 @@ export class UntrustedStorageTransactionStore {
                     this.#exclusiveCapacityReservation?.identifier,
                 changes: new Map(),
                 expiresAtMilliseconds,
+                failurePublicationDisposition: undefined,
                 identifier,
                 pendingCleanupObjectKeys: new Set(),
                 state: 'active',
@@ -1730,9 +1742,12 @@ export class UntrustedStorageTransactionStore {
                 this.#runExclusive(() => this.#commitTransaction(transaction)),
             abort: () =>
                 this.#runExclusive(() => this.#abortTransaction(transaction)),
-            closeAfterFailure: () =>
+            closeAfterFailure: (recordPublicationDisposition) =>
                 this.#runExclusive(() =>
-                    this.#closeTransactionAfterFailure(transaction),
+                    this.#closeTransactionAfterFailure(
+                        transaction,
+                        recordPublicationDisposition,
+                    ),
                 ),
         });
     }
@@ -2295,6 +2310,7 @@ export class UntrustedStorageTransactionStore {
                 'storage index changed before transaction commit.',
             );
         }
+        transaction.state = 'committed-unverified';
         if (authenticatedRepairPublication !== undefined) {
             const repair = this.#authenticatedRepair;
             if (repair === undefined) {
@@ -2307,7 +2323,6 @@ export class UntrustedStorageTransactionStore {
             repair.currentSealedHeadBytes =
                 authenticatedRepairPublication.sealedHeadBytes.slice();
         }
-        transaction.state = 'committed-unverified';
         await this.#verifyCommittedPublication(transaction);
         transaction.state = 'committed';
         await this.#finishCommittedCleanup(transaction);
@@ -2474,28 +2489,73 @@ export class UntrustedStorageTransactionStore {
 
     async #closeTransactionAfterFailure(
         transaction: TransactionRecord,
+        recordPublicationDisposition?: (
+            disposition: UntrustedStoragePublicationDisposition,
+        ) => void,
     ): Promise<void> {
-        if (
-            transaction.state === 'active' ||
-            transaction.state === 'aborting'
-        ) {
-            try {
+        const publicationDisposition =
+            transaction.failurePublicationDisposition ??
+            (transaction.state === 'committed' ||
+            transaction.state === 'committed-unverified'
+                ? 'published-or-indeterminate'
+                : 'definitely-not-published');
+        transaction.failurePublicationDisposition = publicationDisposition;
+        let dispositionReportingFailure: unknown;
+        try {
+            recordPublicationDisposition?.(publicationDisposition);
+        } catch (error) {
+            dispositionReportingFailure = error;
+        }
+        let transactionClosureFailure: unknown;
+        try {
+            if (
+                transaction.state === 'active' ||
+                transaction.state === 'aborting'
+            ) {
                 await this.#abortTransaction(transaction);
-            } catch (error) {
+            } else if (
+                transaction.state === 'committed-unverified' ||
+                transaction.state === 'committed'
+            ) {
                 transaction.state = 'closed-after-failure';
                 this.#clearTransactionRetainedBytes(transaction);
                 this.#transactions.delete(transaction.identifier);
-                throw error;
             }
-            return;
-        }
-        if (
-            transaction.state === 'committed-unverified' ||
-            transaction.state === 'committed'
-        ) {
+        } catch (error) {
             transaction.state = 'closed-after-failure';
             this.#clearTransactionRetainedBytes(transaction);
             this.#transactions.delete(transaction.identifier);
+            transactionClosureFailure = error;
+        }
+        if (
+            dispositionReportingFailure !== undefined &&
+            transactionClosureFailure !== undefined
+        ) {
+            throw new UntrustedStorageTransactionError(
+                'CleanupFailed',
+                'transaction failure closure and publication disposition reporting both failed.',
+                [dispositionReportingFailure, transactionClosureFailure],
+            );
+        }
+        if (transactionClosureFailure !== undefined) {
+            if (transactionClosureFailure instanceof Error) {
+                throw transactionClosureFailure;
+            }
+            throw new UntrustedStorageTransactionError(
+                'CleanupFailed',
+                'transaction failure closure failed.',
+                transactionClosureFailure,
+            );
+        }
+        if (dispositionReportingFailure !== undefined) {
+            if (dispositionReportingFailure instanceof Error) {
+                throw dispositionReportingFailure;
+            }
+            throw new UntrustedStorageTransactionError(
+                'CleanupFailed',
+                'transaction publication disposition reporting failed.',
+                dispositionReportingFailure,
+            );
         }
     }
 

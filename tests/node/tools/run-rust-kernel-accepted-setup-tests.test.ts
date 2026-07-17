@@ -58,7 +58,7 @@ describe('Rust accepted setup runner', () => {
         ).toBeUndefined();
     });
 
-    it('keeps maximum-roster evidence out of the routine accepted-setup lane', () => {
+    it('keeps ten-participant prototype evidence out of the routine accepted-setup lane', () => {
         const routineArguments = cargoTestArgumentsForAcceptedSetupTests();
         expect(routineArguments).toContain('--include-ignored');
         expect(routineArguments).toContain('--skip');

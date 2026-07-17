@@ -2075,15 +2075,18 @@ export const openWebLockOwnedBrowserActionStorageCustody = async (
                                 }),
                         ),
                     ];
+                    const expectedRecordCount =
+                        preparedMaterial.preparationInput.orderedWitnessBindings
+                            .length + 1;
                     if (
-                        records.length !== 10 ||
+                        records.length !== expectedRecordCount ||
                         new Set(
                             records.map((record) => record.logicalRecordKey),
-                        ).size !== 10
+                        ).size !== expectedRecordCount
                     ) {
                         throw new WebLockOwnedStorageError(
                             'OpenFailed',
-                            'Foundation initialization did not produce ten distinct worker-derived record identifiers.',
+                            'Foundation initialization did not produce one distinct worker-derived record identifier per roster participant.',
                         );
                     }
                     const authenticateExactRecord = async (input: {
@@ -2331,7 +2334,7 @@ export const openWebLockOwnedBrowserActionStorageCustody = async (
                     if (currentSnapshot.namespaceSequence < 1n) {
                         throw new WebLockOwnedStorageError(
                             'OpenFailed',
-                            'Recovered foundation initialization requires a retained authenticated ten-record batch.',
+                            'Recovered foundation initialization requires a retained authenticated participant-record batch.',
                         );
                     }
                     derivedRecords =
@@ -2346,13 +2349,15 @@ export const openWebLockOwnedBrowserActionStorageCustody = async (
                             bytesToHex(record.localRecordIdentifier),
                         ),
                     ];
+                    const expectedRecordCount =
+                        preparationInput.orderedWitnessBindings.length + 1;
                     if (
-                        allRecordKeys.length !== 10 ||
-                        new Set(allRecordKeys).size !== 10
+                        allRecordKeys.length !== expectedRecordCount ||
+                        new Set(allRecordKeys).size !== expectedRecordCount
                     ) {
                         throw new WebLockOwnedStorageError(
                             'OpenFailed',
-                            'Recovered foundation initialization did not derive ten distinct record identifiers.',
+                            'Recovered foundation initialization did not derive one distinct record identifier per roster participant.',
                         );
                     }
                     const actionRandomnessLogicalRecordKey = allRecordKeys[0];

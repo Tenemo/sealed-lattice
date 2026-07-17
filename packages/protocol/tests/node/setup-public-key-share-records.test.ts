@@ -21,7 +21,7 @@ const qSharePrimes = [
     140_700_980_543_489, 140_546_359_361_537, 140_507_704_066_049,
 ] as const;
 const ringDegree = 8;
-const participantCount = 2;
+const participantCount = 3;
 
 const fixtureHash = makeSetupFixtureHash('setup-public-key-share-records');
 
@@ -127,7 +127,11 @@ const createShareSet = (): PublicKeyShareSet =>
         setupContext,
         qSharePrimes,
         publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
-        shareContributions: [shareContribution(1), shareContribution(0)],
+        shareContributions: Array.from(
+            { length: participantCount },
+            (_unused, reverseRosterPosition) =>
+                shareContribution(participantCount - reverseRosterPosition - 1),
+        ),
     });
 
 const createSuccinctProofFixture = (): PublicKeyShareSuccinctProofSetInput => {
@@ -173,17 +177,22 @@ describe('public-key share builders', () => {
                                 0,
                             ).shareCoefficientVectorHashesByLimb.slice(1),
                     },
-                    shareContribution(1),
+                    ...Array.from(
+                        { length: participantCount - 1 },
+                        (_unused, trusteeOffset) =>
+                            shareContribution(trusteeOffset + 1),
+                    ),
                 ],
             }),
         ).toThrow(/one entry for every Q_share limb/u);
     });
 
     it('rejects material that does not match the accepted public-key share hashes', async () => {
-        const materialContributions = [
-            shareMaterialContribution(0),
-            shareMaterialContribution(1),
-        ] as const;
+        const materialContributions = Array.from(
+            { length: participantCount },
+            (_unused, trusteeRosterPosition) =>
+                shareMaterialContribution(trusteeRosterPosition),
+        );
         const publicKeyShares = createPublicKeyShareSet({
             setupContext,
             qSharePrimes,
@@ -230,10 +239,13 @@ describe('public-key share builders', () => {
     });
 
     it('builds repeatable canonical public-key share material sources', async () => {
-        const materialContributions = [
-            shareMaterialContribution(1),
-            shareMaterialContribution(0),
-        ] as const;
+        const materialContributions = Array.from(
+            { length: participantCount },
+            (_unused, reverseRosterPosition) =>
+                shareMaterialContribution(
+                    participantCount - reverseRosterPosition - 1,
+                ),
+        );
         const publicKeyShares = createPublicKeyShareSet({
             setupContext,
             qSharePrimes,

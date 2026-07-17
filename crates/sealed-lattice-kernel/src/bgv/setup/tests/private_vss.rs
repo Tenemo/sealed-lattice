@@ -470,7 +470,9 @@ fn private_vss_share_envelope_request(ring_degree: usize) -> serde_json::Value {
     .expect("roster hash");
     let setup_parameters_hash =
         crate::bgv::setup::accepted_setup::setup_parameters_hash_for_roster(
-            &crate::bgv::setup::accepted_setup::roster_parameters_from_participant_count(10),
+            &crate::bgv::setup::accepted_setup::roster_parameters_from_participant_count(
+                u64::from(crate::foundation::PROTOTYPE_PARTICIPANT_COUNT),
+            ),
         )
         .expect("roster-derived setup parameters hash");
     let setup_parameters_hash = setup_parameters_hash.as_str();
@@ -481,7 +483,7 @@ fn private_vss_share_envelope_request(ring_degree: usize) -> serde_json::Value {
         "rosterHash": roster_hash,
         "setupParametersHash": setup_parameters_hash,
         "setupEpoch": setup_epoch,
-        "participantCount": 10,
+        "participantCount": u64::from(crate::foundation::PROTOTYPE_PARTICIPANT_COUNT),
     });
     let setup_context_hash = crate::bgv::setup::accepted_setup::setup_context_hash(&setup_context)
         .expect("setup context hash");

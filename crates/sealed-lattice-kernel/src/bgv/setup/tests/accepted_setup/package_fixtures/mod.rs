@@ -165,12 +165,14 @@ fn collective_setup_roster_hash_fixture(participant_count: u64) -> String {
 }
 
 /// The ten-participant parameter profile used by the lightweight setup-intent fixture.
-const PARAMETER_PROFILE_PARTICIPANT_COUNT: u64 = 10;
+const PARAMETER_PROFILE_PARTICIPANT_COUNT: u64 =
+    crate::foundation::PROTOTYPE_PARTICIPANT_COUNT as u64;
 
-/// The minimum roster accepted by the setup verifier. Proof-bearing rejection
+/// The minimum configurable roster. Proof-bearing rejection
 /// tests use this roster because their purpose is to exercise bindings and
 /// refusal behavior, not to benchmark proof material growth with roster size.
-const MINIMUM_SUPPORTED_PARTICIPANT_COUNT: u64 = 3;
+const MINIMUM_CONFIGURABLE_PARTICIPANT_COUNT: u64 =
+    crate::foundation::MINIMUM_CONFIGURABLE_PARTICIPANT_COUNT as u64;
 
 pub(super) fn minimal_collective_setup_package_fixture() -> FinalizedCollectiveSetupPackageFixture {
     cached_minimal_collective_setup_package_fixture().clone()
@@ -181,7 +183,7 @@ fn cached_minimal_collective_setup_package_fixture()
     MINIMAL_COLLECTIVE_SETUP_PACKAGE_CACHE.get_or_init(|| {
         super::proof_record_fixtures::finalize_collective_setup_package(
             minimal_collective_setup_package_for_participant_count(
-                MINIMUM_SUPPORTED_PARTICIPANT_COUNT,
+                MINIMUM_CONFIGURABLE_PARTICIPANT_COUNT,
             ),
         )
     })
@@ -201,7 +203,7 @@ pub(super) fn collective_setup_intent_package() -> serde_json::Value {
 }
 
 /// Reduced development-ring (128) collective setup package for an arbitrary
-/// supported roster size, built through the non-streamed VSS path. Drives the
+/// configurable roster size, built through the non-streamed VSS path. Drives the
 /// same per-trustee material and roster-derived bindings as the ten-participant
 /// setup-intent package path. The finalized fixture adds proof-bearing setup material
 /// on top of this package.
@@ -328,11 +330,7 @@ fn build_collective_setup_package_fixture_parts(
         .as_str()
         .expect("public matrix seed hash");
     let vss_components = vss_coefficient_commitment_components(
-        ceremony_id,
-        &manifest_hash,
-        &roster_hash,
-        setup_parameters_hash,
-        setup_epoch,
+        &setup_context,
         public_matrix_seed_hash,
         vss_material_ring_degree,
         participant_count,
@@ -438,7 +436,7 @@ fn build_descriptor_backed_vss_collective_setup_fixture_from_package(
 
 /// The explicit ten-participant proof-bearing fixture used only by its
 /// dedicated guarded evidence lane. Routine accepted-setup tests retain the
-/// minimum supported roster because their rejection assertions do not gain
+/// minimum configurable roster because their rejection assertions do not gain
 /// coverage by regenerating the same proof relations for a larger roster.
 pub(super) fn ten_participant_descriptor_backed_vss_collective_setup_fixture()
 -> CollectiveSetupVerificationFixture {
@@ -475,14 +473,16 @@ fn build_collective_public_key_bearing_collective_setup_package()
 
 #[test]
 fn pre_finalized_setup_fixture_builds_every_vss_share_acceptance() {
-    let package =
-        minimal_collective_setup_package_for_participant_count(MINIMUM_SUPPORTED_PARTICIPANT_COUNT);
+    let package = minimal_collective_setup_package_for_participant_count(
+        MINIMUM_CONFIGURABLE_PARTICIPANT_COUNT,
+    );
     let acceptance_records = package["vssShareAcceptances"]["acceptanceRecords"]
         .as_array()
         .expect("VSS share acceptance records");
-    let expected_acceptance_count =
-        usize::try_from(MINIMUM_SUPPORTED_PARTICIPANT_COUNT * MINIMUM_SUPPORTED_PARTICIPANT_COUNT)
-            .expect("minimum fixture acceptance count fits usize");
+    let expected_acceptance_count = usize::try_from(
+        MINIMUM_CONFIGURABLE_PARTICIPANT_COUNT * MINIMUM_CONFIGURABLE_PARTICIPANT_COUNT,
+    )
+    .expect("minimum fixture acceptance count fits usize");
 
     assert_eq!(acceptance_records.len(), expected_acceptance_count);
 }

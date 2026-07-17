@@ -45,7 +45,7 @@ pub(in super::super) fn source_constant_commitments_from_fixture_package(
 /// Roster size declared by the package the proof fixtures bind. The proof
 /// records, proof sets, and per-trustee enumeration all follow the package's
 /// own participantCount so the fixtures build the right number of proofs for
-/// any supported roster size.
+/// any configurable roster size.
 pub(super) fn participant_count_from_package(package: &serde_json::Value) -> u64 {
     package["setupContext"]["participantCount"]
         .as_u64()
@@ -82,5 +82,5 @@ pub(super) use trustee_evaluation_key_proofs::*;
 pub(super) use vss_public_material::{
     CompactAggregateThresholdProofFixture, FinalizedCollectiveSetupPackageFixture,
     compact_aggregate_threshold_proof_fixture, descriptor_backed_vss_proof_material_fixture,
-    finalize_collective_setup_package,
+    finalize_collective_setup_package, vss_public_coefficient_commitment_record,
 };

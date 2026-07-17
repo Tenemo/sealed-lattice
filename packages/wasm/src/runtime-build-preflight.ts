@@ -5,6 +5,7 @@ import {
     createSuiteIdentifierAccumulator,
     decodeRuntimeBuildManifest,
     decodeSuiteArtifactReferences,
+    maximumSuiteArtifactByteLengthForKind,
     requireCanonicalRuntimePath,
     runtimeBuildBytesEqual,
     runtimeBuildBytesToHex,
@@ -305,6 +306,7 @@ const fetchIntoCache = async (input: {
     expectedByteLength: number;
     expectedHash: Uint8Array;
     fetch: RuntimeBuildFetcher;
+    maximumByteLength: number;
     namespace: string;
     origin: string;
 }): Promise<void> => {
@@ -313,7 +315,7 @@ const fetchIntoCache = async (input: {
     requireExactResponse(response, expectedUrl);
     const declaredByteLength = parseContentLength(
         response.contentLength,
-        runtimeBuildCanonicalLimits.maximumFoundationVariableValueByteLength,
+        input.maximumByteLength,
     );
     if (declaredByteLength !== input.expectedByteLength) {
         return fail(
@@ -582,6 +584,8 @@ export const compileRuntimeBuildBootstrap = (
                     expectedByteLength: Number(asset.byteLength),
                     expectedHash: asset.assetHash,
                     fetch: environment.fetch,
+                    maximumByteLength:
+                        runtimeBuildCanonicalLimits.maximumFoundationVariableValueByteLength,
                     namespace,
                     origin,
                 });
@@ -669,6 +673,9 @@ export const compileRuntimeBuildBootstrap = (
                     expectedByteLength: Number(artifactReference.byteLength),
                     expectedHash: artifactReference.artifactHash,
                     fetch: environment.fetch,
+                    maximumByteLength: maximumSuiteArtifactByteLengthForKind(
+                        artifactReference.artifactKind,
+                    ),
                     namespace,
                     origin,
                 });

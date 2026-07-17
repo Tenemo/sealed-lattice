@@ -191,7 +191,7 @@ pub(crate) fn collective_bgv_setup_context_hashes_from_package(
     })
 }
 
-// Roster-derived setupParametersHash for a supported participant count, matching
+// Roster-derived setupParametersHash for a configurable participant count, matching
 // what collective_bgv_setup_context_hashes_from_package recomputes from an
 // accepted package's setupContext.participantCount. Target-decryption test
 // fixtures use it to bind an accepted SetupPackage whose setupContext agrees with

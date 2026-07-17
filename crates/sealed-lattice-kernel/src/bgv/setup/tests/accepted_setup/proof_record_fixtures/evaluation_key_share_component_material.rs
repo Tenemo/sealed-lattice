@@ -277,10 +277,11 @@ pub(in super::super) fn evaluation_key_error_coefficients_for_fixture(
 ) -> Vec<i64> {
     // The fixture secret and base error alias with periods three and five, so
     // their combined material repeats every fifteen roster positions. Using a
-    // different position multiplier from position ten onward separates those
-    // aliases across the supported range while keeping errors in {-2..2}.
-    const FOUNDATION_ROSTER_SIZE: u64 = 10;
-    let position_multiplier = if trustee_roster_position < FOUNDATION_ROSTER_SIZE {
+    // different position multiplier outside the selected prototype roster
+    // separates those aliases across the configurable range while keeping
+    // errors in {-2..2}.
+    const PROTOTYPE_ROSTER_SIZE: u64 = crate::foundation::PROTOTYPE_PARTICIPANT_COUNT as u64;
+    let position_multiplier = if trustee_roster_position < PROTOTYPE_ROSTER_SIZE {
         5
     } else {
         1

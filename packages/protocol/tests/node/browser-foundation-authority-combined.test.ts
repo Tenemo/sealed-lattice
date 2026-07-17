@@ -2,9 +2,10 @@ import {
     copyAuthenticatedMailboxFrozenRosterParticipantIdentities,
     openAuthenticatedMailboxFrozenRoster,
 } from '@sealed-lattice/crypto';
-import type {
-    BrowserActionProofAttemptBinding,
-    BrowserActionStorageRootBinding,
+import {
+    foundationProfile,
+    type BrowserActionProofAttemptBinding,
+    type BrowserActionStorageRootBinding,
 } from '@sealed-lattice/types';
 import { beforeAll, describe, expect, it } from 'vitest';
 
@@ -501,7 +502,9 @@ describe('combined browser foundation authority', () => {
         });
 
         const witnessRoles = await harness.authority.witnessRoles();
-        expect(witnessRoles).toHaveLength(9);
+        expect(witnessRoles).toHaveLength(
+            foundationProfile.participantCount - 1,
+        );
         await expect(
             Promise.all(
                 witnessRoles.map((role) =>

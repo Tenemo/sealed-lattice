@@ -31,18 +31,36 @@ const bytesEqual = (
 export class InMemoryRuntimeStorageAdapter implements UntrustedStorageAdapter {
     readonly #failedAtomicMutationNumbers = new Set<number>();
     #values = new Map<string, Uint8Array>();
+    public afterAtomicMutation:
+        | ((mutation: UntrustedStorageAtomicMutation) => void)
+        | undefined;
     public afterNextAtomicMutation:
         | ((mutation: UntrustedStorageAtomicMutation) => void)
         | undefined;
     public atomicMutationCount = 0;
+    public classifyAtomicMutationFailure:
+        | ((
+              mutation: UntrustedStorageAtomicMutation,
+          ) => 'conflict' | 'reject' | undefined)
+        | undefined;
     public failNextDeleteCount = 0;
+    public failNextReadCount = 0;
+    public failNextWriteCount = 0;
     public forceNextAtomicConflict = false;
 
     public read(key: string): Promise<Uint8Array | undefined> {
+        if (this.failNextReadCount > 0) {
+            this.failNextReadCount -= 1;
+            return Promise.reject(new Error('injected read failure'));
+        }
         return Promise.resolve(this.#values.get(key)?.slice());
     }
 
     public write(key: string, value: Uint8Array): Promise<void> {
+        if (this.failNextWriteCount > 0) {
+            this.failNextWriteCount -= 1;
+            return Promise.reject(new Error('injected write failure'));
+        }
         this.#values.set(key, value.slice());
         return Promise.resolve();
     }
@@ -98,6 +116,16 @@ export class InMemoryRuntimeStorageAdapter implements UntrustedStorageAdapter {
                 new Error('injected atomic mutation failure'),
             );
         }
+        const classifiedFailure =
+            this.classifyAtomicMutationFailure?.(mutation);
+        if (classifiedFailure === 'reject') {
+            return Promise.reject(
+                new Error('injected matching atomic mutation failure'),
+            );
+        }
+        if (classifiedFailure === 'conflict') {
+            return Promise.resolve(false);
+        }
         if (this.forceNextAtomicConflict) {
             this.forceNextAtomicConflict = false;
             return Promise.resolve(false);
@@ -127,6 +155,7 @@ export class InMemoryRuntimeStorageAdapter implements UntrustedStorageAdapter {
         const afterMutation = this.afterNextAtomicMutation;
         this.afterNextAtomicMutation = undefined;
         afterMutation?.(mutation);
+        this.afterAtomicMutation?.(mutation);
         return Promise.resolve(true);
     }
 

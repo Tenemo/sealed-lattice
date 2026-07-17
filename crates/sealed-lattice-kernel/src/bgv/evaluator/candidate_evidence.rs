@@ -748,10 +748,10 @@ mod tests {
         assert!(certificate.failures.iter().any(|failure| matches!(
             failure,
             EvaluatorCandidateFailure::NonpositiveDecryptionMargin {
-                ballot_count: 10,
+                ballot_count,
                 top_count: 19,
                 ..
-            }
+            } if *ballot_count == usize::from(FOUNDATION_PROFILE.participant_count)
         )));
         assert!(!certificate.failures.iter().any(|failure| matches!(
             failure,
@@ -768,10 +768,13 @@ mod tests {
     }
 
     #[test]
-    fn maximum_roster_evidence_retains_all_twenty_target_bounds() {
+    fn selected_profile_evidence_retains_all_twenty_target_bounds() {
         let (_, output) = implemented_evidence();
-        let EvaluatorBallotCountEvidence::Outputs { targets, .. } = &output.ballot_counts[9] else {
-            panic!("maximum-roster recurrence must produce target evidence");
+        let selected_profile_index = usize::from(FOUNDATION_PROFILE.participant_count - 1);
+        let EvaluatorBallotCountEvidence::Outputs { targets, .. } =
+            &output.ballot_counts[selected_profile_index]
+        else {
+            panic!("selected-profile recurrence must produce target evidence");
         };
         assert_eq!(targets.len(), 20);
         let expected_error_bound_bit_lengths = vec![
@@ -795,7 +798,7 @@ mod tests {
         );
         let (all_options_target, bounded_targets) = targets
             .split_last()
-            .expect("the maximum-roster evidence retains every target");
+            .expect("the selected-profile evidence retains every target");
         assert_eq!(all_options_target.top_count, 20);
         assert!(
             all_options_target

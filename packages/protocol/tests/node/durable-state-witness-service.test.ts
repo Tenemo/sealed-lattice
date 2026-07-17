@@ -412,32 +412,32 @@ describe('durable state witness service', () => {
         );
         const proofApplicationSlotHash = new Uint8Array(64).fill(0x6d);
         const initialMutationCount = adapter.atomicMutationCount;
-        let commitAttemptCount = 0;
+        const publicationDispositions: string[] = [];
 
         const authenticatedFrame =
             await persistCommonProofApplicationAuthorization(service, {
                 authorizationFrame,
-                onCommitAttempt: () => {
-                    commitAttemptCount += 1;
+                onPublicationDisposition: (disposition) => {
+                    publicationDispositions.push(disposition);
                 },
                 proofApplicationSlotHash,
             });
 
         expect([...authenticatedFrame]).toEqual([...authorizationFrame]);
-        expect(commitAttemptCount).toBe(1);
+        expect(publicationDispositions).toEqual(['published-or-indeterminate']);
         expect(adapter.atomicMutationCount).toBe(initialMutationCount + 1);
 
-        let duplicateCommitAttemptCount = 0;
+        const duplicatePublicationDispositions: string[] = [];
         await expect(
             persistCommonProofApplicationAuthorization(service, {
                 authorizationFrame,
-                onCommitAttempt: () => {
-                    duplicateCommitAttemptCount += 1;
+                onPublicationDisposition: (disposition) => {
+                    duplicatePublicationDispositions.push(disposition);
                 },
                 proofApplicationSlotHash,
             }),
         ).rejects.toMatchObject({ code: 'Conflict' });
-        expect(duplicateCommitAttemptCount).toBe(0);
+        expect(duplicatePublicationDispositions).toEqual([]);
         expect(adapter.atomicMutationCount).toBe(initialMutationCount + 1);
     });
 
@@ -476,7 +476,7 @@ describe('durable state witness service', () => {
                     logicalRecordKey:
                         commonProofApplicationHandoffLogicalRecordKey,
                 },
-                onCommitAttempt: () => undefined,
+                onPublicationDisposition: () => undefined,
                 proofApplicationSlotHash,
             }),
         ).resolves.toEqual(authorizationFrame);
@@ -501,7 +501,7 @@ describe('durable state witness service', () => {
         await expect(
             persistCommonProofApplicationAuthorization(reopenedService, {
                 authorizationFrame,
-                onCommitAttempt: () => undefined,
+                onPublicationDisposition: () => undefined,
                 proofApplicationSlotHash,
             }),
         ).rejects.toMatchObject({ code: 'Conflict' });
@@ -512,52 +512,150 @@ describe('durable state witness service', () => {
         for (const authorizationFrameByteLength of [0, 1, 745, 747, 65_536]) {
             const { adapter, service } = await openService();
             const initialMutationCount = adapter.atomicMutationCount;
-            let commitAttemptCount = 0;
+            const publicationDispositions: string[] = [];
 
             await expect(
                 persistCommonProofApplicationAuthorization(service, {
                     authorizationFrame: new Uint8Array(
                         authorizationFrameByteLength,
                     ),
-                    onCommitAttempt: () => {
-                        commitAttemptCount += 1;
+                    onPublicationDisposition: (disposition) => {
+                        publicationDispositions.push(disposition);
                     },
                     proofApplicationSlotHash: new Uint8Array(64).fill(0x35),
                 }),
             ).rejects.toMatchObject({ code: 'InvalidInput' });
-            expect(commitAttemptCount).toBe(0);
+            expect(publicationDispositions).toEqual([]);
             expect(adapter.atomicMutationCount).toBe(initialMutationCount);
         }
     });
 
-    it('reports the commit boundary before any committed publication or readback failure', async () => {
+    it('reports a published-or-indeterminate disposition before committed readback failure', async () => {
         const { adapter, service } = await openService();
         const authorizationFrame = new Uint8Array(746).fill(0x8e);
         const proofApplicationSlotHash = new Uint8Array(64).fill(0x4c);
-        let commitAttemptCount = 0;
-        adapter.afterNextAtomicMutation = (mutation) => {
+        const publicationDispositions: string[] = [];
+        adapter.afterAtomicMutation = (mutation) => {
             const committedIndex = mutation.writes.find((write) =>
-                write.key.includes('/index/'),
+                write.key.includes('/indices/'),
             );
             if (committedIndex === undefined) {
-                throw new Error(
-                    'The authenticated transaction did not publish an index.',
-                );
+                return;
             }
             adapter.rawDelete(committedIndex.key);
+            adapter.afterAtomicMutation = undefined;
         };
 
         await expect(
             persistCommonProofApplicationAuthorization(service, {
                 authorizationFrame,
-                onCommitAttempt: () => {
-                    commitAttemptCount += 1;
+                onPublicationDisposition: (disposition) => {
+                    publicationDispositions.push(disposition);
                 },
                 proofApplicationSlotHash,
             }),
         ).rejects.toMatchObject({ code: 'StorageFailure' });
-        expect(commitAttemptCount).toBe(1);
+        expect(publicationDispositions).toEqual(['published-or-indeterminate']);
         expect(adapter.atomicMutationCount).toBeGreaterThan(0);
+    });
+
+    it('reports definite nonpublication after adapter rejection and permits an exact retry', async () => {
+        const { adapter, service } = await openService();
+        const authorizationFrame = new Uint8Array(746).fill(0x72);
+        const proofApplicationSlotHash = new Uint8Array(64).fill(0x39);
+        const firstPublicationDispositions: string[] = [];
+        adapter.failAtomicMutationAfter(1);
+
+        await expect(
+            persistCommonProofApplicationAuthorization(service, {
+                authorizationFrame,
+                onPublicationDisposition: (disposition) => {
+                    firstPublicationDispositions.push(disposition);
+                },
+                proofApplicationSlotHash,
+            }),
+        ).rejects.toMatchObject({ code: 'StorageFailure' });
+        expect(firstPublicationDispositions).toEqual([
+            'definitely-not-published',
+        ]);
+
+        const retryPublicationDispositions: string[] = [];
+        await expect(
+            persistCommonProofApplicationAuthorization(service, {
+                authorizationFrame,
+                onPublicationDisposition: (disposition) => {
+                    retryPublicationDispositions.push(disposition);
+                },
+                proofApplicationSlotHash,
+            }),
+        ).resolves.toEqual(authorizationFrame);
+        expect(retryPublicationDispositions).toEqual([
+            'published-or-indeterminate',
+        ]);
+    });
+
+    it('reports definite nonpublication after staging failure and permits an exact retry', async () => {
+        const { adapter, service } = await openService();
+        const authorizationFrame = new Uint8Array(746).fill(0x91);
+        const proofApplicationSlotHash = new Uint8Array(64).fill(0x58);
+        const firstPublicationDispositions: string[] = [];
+        adapter.failNextWriteCount = 1;
+
+        await expect(
+            persistCommonProofApplicationAuthorization(service, {
+                authorizationFrame,
+                onPublicationDisposition: (disposition) => {
+                    firstPublicationDispositions.push(disposition);
+                },
+                proofApplicationSlotHash,
+            }),
+        ).rejects.toMatchObject({ code: 'StorageFailure' });
+        expect(firstPublicationDispositions).toEqual([
+            'definitely-not-published',
+        ]);
+
+        const retryPublicationDispositions: string[] = [];
+        await expect(
+            persistCommonProofApplicationAuthorization(service, {
+                authorizationFrame,
+                onPublicationDisposition: (disposition) => {
+                    retryPublicationDispositions.push(disposition);
+                },
+                proofApplicationSlotHash,
+            }),
+        ).resolves.toEqual(authorizationFrame);
+        expect(retryPublicationDispositions).toEqual([
+            'published-or-indeterminate',
+        ]);
+    });
+
+    it('reports definite nonpublication after transient pretransaction read failure', async () => {
+        const { adapter, service } = await openService();
+        const authorizationFrame = new Uint8Array(746).fill(0xa4);
+        const proofApplicationSlotHash = new Uint8Array(64).fill(0x27);
+        const firstPublicationDispositions: string[] = [];
+        adapter.failNextReadCount = 1;
+
+        await expect(
+            persistCommonProofApplicationAuthorization(service, {
+                authorizationFrame,
+                onPublicationDisposition: (disposition) => {
+                    firstPublicationDispositions.push(disposition);
+                },
+                proofApplicationSlotHash,
+            }),
+        ).rejects.toMatchObject({ code: 'StorageFailure' });
+        expect(firstPublicationDispositions).toEqual([
+            'definitely-not-published',
+        ]);
+
+        await expect(
+            persistCommonProofApplicationAuthorization(service, {
+                authorizationFrame,
+                onPublicationDisposition: () => undefined,
+                proofApplicationSlotHash,
+            }),
+        ).resolves.toEqual(authorizationFrame);
     });
 
     it('transfers exclusive ownership and blocks every operation after close', async () => {

@@ -1,26 +1,13 @@
 use super::*;
 use crate::bgv::setup::commitment::SETUP_COMMITMENT_MODULUS_LIMB_INDICES;
 
-#[allow(clippy::too_many_arguments)]
 pub(super) fn vss_coefficient_commitment_components(
-    ceremony_id: &str,
-    manifest_hash: &str,
-    roster_hash: &str,
-    setup_parameters_hash: &str,
-    setup_epoch: &str,
+    setup_context: &serde_json::Value,
     public_matrix_seed_hash: &str,
     ring_degree: usize,
     participant_count: u64,
 ) -> VssMaterialPackageComponents {
-    let setup_context_hash =
-        crate::bgv::setup::accepted_setup::setup_context_hash(&serde_json::json!({
-            "ceremonyId": ceremony_id,
-            "manifestHash": manifest_hash,
-            "rosterHash": roster_hash,
-            "setupParametersHash": setup_parameters_hash,
-            "setupEpoch": setup_epoch,
-            "participantCount": participant_count,
-        }))
+    let setup_context_hash = crate::bgv::setup::accepted_setup::setup_context_hash(setup_context)
         .expect("setup context hash");
     let decryption_threshold = decryption_threshold_for_participant_count(participant_count);
     let mut source_trustee_records = Vec::new();
@@ -61,9 +48,19 @@ pub(super) fn vss_coefficient_commitment_components(
                 .expect("setup commitment");
                 let commitment_root = setup_commitment_root(&commitment).expect("commitment root");
                 let full_commitment = setup_commitment_full_value(&commitment);
+                let public_commitment =
+                    super::super::proof_record_fixtures::vss_public_coefficient_commitment_record(
+                        setup_context,
+                        ring_degree,
+                        &source_trustee_identity,
+                        source_trustee_roster_position,
+                        rns_limb_index,
+                        rns_prime,
+                        shamir_coefficient_index,
+                    );
                 coefficient_commitment_roots.push(commitment_root);
-                coefficient_commitment_material.push(full_commitment.clone());
-                public_coefficient_commitments.push(full_commitment);
+                coefficient_commitment_material.push(full_commitment);
+                public_coefficient_commitments.push(public_commitment);
             }
         }
 
@@ -105,6 +102,114 @@ pub(super) fn vss_coefficient_commitment_components(
         vss_coefficient_commitment_material: material_set,
         vss_public_coefficient_commitments: public_commitment_set,
     }
+}
+
+#[test]
+fn pre_finalized_coefficient_commitments_pass_full_context_bound_verification() {
+    let participant_count = MINIMUM_CONFIGURABLE_PARTICIPANT_COUNT;
+    let manifest_hash = derive_canonical_object_hash(&serde_json::json!({
+        "objectType": "VssCoefficientCommitmentFixtureManifest",
+    }))
+    .expect("fixture manifest hash");
+    let roster_hash = derive_canonical_object_hash(&serde_json::json!({
+        "objectType": "VssCoefficientCommitmentFixtureRoster",
+        "participantCount": participant_count,
+    }))
+    .expect("fixture roster hash");
+    let setup_parameters_hash = derive_canonical_object_hash(&serde_json::json!({
+        "objectType": "VssCoefficientCommitmentFixtureParameters",
+        "participantCount": participant_count,
+    }))
+    .expect("fixture setup parameters hash");
+    let setup_context = collective_setup_context_fixture(
+        "coefficient-commitment-fixture",
+        &manifest_hash,
+        &roster_hash,
+        &setup_parameters_hash,
+        "setup-epoch-1",
+        participant_count,
+    );
+    let setup_context_hash = crate::bgv::setup::accepted_setup::setup_context_hash(&setup_context)
+        .expect("setup context hash");
+    let public_matrix_seed_hash = derive_canonical_object_hash(&serde_json::json!({
+        "objectType": "VssCoefficientCommitmentFixturePublicMatrixSeed",
+    }))
+    .expect("fixture public matrix seed hash");
+    let components = vss_coefficient_commitment_components(
+        &setup_context,
+        &public_matrix_seed_hash,
+        DEVELOPMENT_RING_DEGREE,
+        participant_count,
+    );
+    let trustee_identities = (0..participant_count)
+        .map(|roster_position| format!("trustee-{roster_position}"))
+        .collect::<Vec<_>>();
+    let coefficient_set = &components.vss_public_coefficient_commitments;
+    let threshold_degree = decryption_threshold_for_participant_count(participant_count);
+    let participant_count =
+        usize::try_from(participant_count).expect("fixture participant count fits usize");
+    let threshold_degree =
+        usize::try_from(threshold_degree).expect("fixture threshold degree fits usize");
+    let verification_context =
+        crate::bgv::setup::vss_commitment::VssPublicCoefficientCommitmentSetContext {
+            setup_context_hash: &setup_context_hash,
+            public_matrix_seed_hash: &public_matrix_seed_hash,
+            participant_count,
+            trustee_identities: &trustee_identities,
+            rns_limb_count: DATA_PRIMES.len(),
+            threshold_degree,
+        };
+
+    let verified_root =
+        crate::bgv::setup::vss_commitment::verify_vss_public_coefficient_commitment_set(
+            coefficient_set,
+            &verification_context,
+        )
+        .expect("pre-finalized coefficient commitments must pass full verification");
+    let canonical_root =
+        crate::bgv::setup::vss_commitment::vss_public_coefficient_commitment_set_root(
+            coefficient_set,
+            &trustee_identities,
+        )
+        .expect("pre-finalized coefficient commitment set root");
+    assert_eq!(verified_root, canonical_root);
+
+    let mut wrong_last_coordinate_set = coefficient_set.clone();
+    let last_source_commitments = wrong_last_coordinate_set["sourceTrusteeRecords"]
+        .as_array_mut()
+        .and_then(|source_records| source_records.last_mut())
+        .and_then(|source_record| source_record["coefficientCommitments"].as_array_mut())
+        .expect("last source trustee coefficient commitments");
+    let first_commitment = last_source_commitments
+        .first()
+        .expect("first coefficient commitment")
+        .clone();
+    *last_source_commitments
+        .last_mut()
+        .expect("last coefficient commitment") = first_commitment;
+    let coordinate_error =
+        crate::bgv::setup::vss_commitment::verify_vss_public_coefficient_commitment_set(
+            &wrong_last_coordinate_set,
+            &verification_context,
+        )
+        .expect_err("the final coefficient must bind its exact coordinate");
+    assert_eq!(coordinate_error.code, CanonicalErrorCode::ComponentMismatch);
+    assert!(coordinate_error.message.contains("commitmentContextHash"));
+
+    let different_setup_context_hash = "0".repeat(128);
+    assert_ne!(different_setup_context_hash, setup_context_hash);
+    let different_context =
+        crate::bgv::setup::vss_commitment::VssPublicCoefficientCommitmentSetContext {
+            setup_context_hash: &different_setup_context_hash,
+            ..verification_context
+        };
+    let error = crate::bgv::setup::vss_commitment::verify_vss_public_coefficient_commitment_set(
+        coefficient_set,
+        &different_context,
+    )
+    .expect_err("coefficient commitments must reject a different setup context");
+    assert_eq!(error.code, CanonicalErrorCode::ComponentMismatch);
+    assert!(error.message.contains("commitmentContextHash"));
 }
 
 pub(in super::super) fn accepted_vss_coefficient_message_fixture(

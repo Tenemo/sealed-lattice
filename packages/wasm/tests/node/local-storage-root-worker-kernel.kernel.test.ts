@@ -88,14 +88,16 @@ describe('Local storage-root real-WASM worker kernel', () => {
                 runtimeBuildManifestHash: createBytes(64, 71),
             });
 
-        expect(prepared.witnessStateRecords).toHaveLength(9);
+        expect(prepared.witnessStateRecords).toHaveLength(
+            foundationProfile.participantCount - 1,
+        );
         expect(
             new Set(
                 prepared.witnessStateRecords.map((record) =>
                     Buffer.from(record.localRecordIdentifier).toString('hex'),
                 ),
             ).size,
-        ).toBe(9);
+        ).toBe(foundationProfile.participantCount - 1);
         await workerKernel.closeActionRandomness(
             prepared.actionRandomness.actionRandomnessSessionIdentifier,
         );

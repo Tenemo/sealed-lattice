@@ -28,7 +28,10 @@ fn collective_setup_parameters_expose_operative_foundation_parameters() {
     );
     let setup_parameters = describe_collective_bgv_setup_parameters().expect("setup parameters");
 
-    assert_eq!(setup_parameters["participantCount"], 10);
+    assert_eq!(
+        setup_parameters["participantCount"],
+        u64::from(crate::foundation::PROTOTYPE_PARTICIPANT_COUNT)
+    );
     assert_eq!(
         setup_parameters["qShare"]["primes"]
             .as_array()
