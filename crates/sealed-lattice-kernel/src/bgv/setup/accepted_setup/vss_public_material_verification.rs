@@ -34,7 +34,6 @@ pub(super) fn verify_vss_public_material(
     if !missing_fields.is_empty() {
         return Ok(VssPublicMaterialVerification::Refused(single_refusal(
             crate::foundation::RefusalReason::MissingPrerequisite,
-            "vssPublicMaterialIncomplete",
             format!(
                 "VSS public material is required; missing {}",
                 missing_fields.join(", ")
@@ -50,7 +49,6 @@ pub(super) fn verify_vss_public_material(
         Ok(ring_degree) => Ok(VssPublicMaterialVerification::Verified { ring_degree }),
         Err(error) => Ok(VssPublicMaterialVerification::Refused(single_refusal(
             crate::foundation::RefusalReason::MalformedEncoding,
-            "vssPublicMaterialMalformed",
             format!("VSS public material is malformed: {}", error.message),
         ))),
     }
@@ -157,8 +155,8 @@ mod tests {
         };
 
         assert_eq!(
-            response.first().map(|refusal| refusal.reason_code),
-            Some("vssPublicMaterialMalformed")
+            response.first().map(|refusal| refusal.refusal_reason),
+            Some(crate::foundation::RefusalReason::MalformedEncoding)
         );
         Ok(())
     }

@@ -1,5 +1,6 @@
 #[cfg(test)]
 use super::super::evaluation_domain::EvaluationDomainPlan;
+#[cfg(test)]
 use super::super::relation::LimbColumnLayout;
 #[cfg(test)]
 use super::super::relation::TrusteeEvaluationKeyWitness;

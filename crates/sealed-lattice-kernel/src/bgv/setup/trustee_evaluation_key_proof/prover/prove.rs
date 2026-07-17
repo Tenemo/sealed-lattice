@@ -99,8 +99,7 @@ fn prove_limb(
     // integer claims (clear integer sum plus the shared smudging mask), so
     // every limb publishes the same integer reduced into its field.
     let mut masked_claims = Vec::with_capacity(layout.claim_count());
-    for local_claim in 0..layout.claim_count() {
-        let claim_integer = &global_claim_integers[local_claim];
+    for claim_integer in &global_claim_integers[..layout.claim_count()] {
         masked_claims.push(bigint_residue(claim_integer, modulus)?);
     }
 

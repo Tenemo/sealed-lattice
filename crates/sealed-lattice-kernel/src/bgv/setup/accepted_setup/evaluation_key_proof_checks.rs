@@ -52,7 +52,6 @@ pub(super) fn verify_trustee_evaluation_key_proofs(
             }
             Some(_) => Ok(Some(single_refusal(
                 crate::foundation::RefusalReason::MissingPrerequisite,
-                "trusteeEvaluationKeyProofsWithoutShareRecords",
                 "trusteeEvaluationKeyProofs requires the relinearization rounds and Galois batches it proves",
             ))),
         };
@@ -66,7 +65,6 @@ pub(super) fn verify_trustee_evaluation_key_proofs(
     if !proof_set.is_object() {
         return Ok(Some(single_refusal(
             crate::foundation::RefusalReason::MalformedEncoding,
-            "trusteeEvaluationKeyProofsNotObject",
             "trusteeEvaluationKeyProofs must be a root-bound object",
         )));
     }
@@ -78,7 +76,6 @@ pub(super) fn verify_trustee_evaluation_key_proofs(
     ) {
         return Ok(Some(single_refusal(
             crate::foundation::RefusalReason::InvalidProof,
-            "trusteeEvaluationKeyProofVerificationFailed",
             error.message,
         )));
     }

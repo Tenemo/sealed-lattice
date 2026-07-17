@@ -13,14 +13,12 @@ pub(in super::super) fn verify_vss_share_acceptances(
     if !acceptance_set.is_object() {
         return Ok(Some(single_refusal(
             crate::foundation::RefusalReason::MalformedEncoding,
-            "vssShareAcceptancesNotObject",
             "vssShareAcceptances must be an object, not an array or scalar",
         )));
     }
     if acceptance_set.get("objectType").and_then(Value::as_str) != Some("VssShareAcceptanceSet") {
         return Ok(Some(single_refusal(
             crate::foundation::RefusalReason::WrongTypeOrLength,
-            "vssShareAcceptanceSetTypeMismatch",
             "vssShareAcceptances.objectType must be VssShareAcceptanceSet",
         )));
     }
@@ -41,7 +39,6 @@ pub(in super::super) fn verify_vss_share_acceptances(
     if acceptance_records.len() != expected_acceptance_count {
         return Ok(Some(single_refusal(
             crate::foundation::RefusalReason::WrongTypeOrLength,
-            "vssShareAcceptanceCountMismatch",
             "vssShareAcceptances.acceptanceRecords must contain one record for every source-trustee-recipient trustee pair",
         )));
     }

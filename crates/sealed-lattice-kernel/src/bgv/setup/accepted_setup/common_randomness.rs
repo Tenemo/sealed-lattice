@@ -15,7 +15,6 @@ pub(super) fn verify_common_randomness(
     if !common_randomness.is_object() {
         return Ok(Some(single_refusal(
             crate::foundation::RefusalReason::MalformedEncoding,
-            "commonRandomnessNotObject",
             "commonRandomness must be a JSON object",
         )));
     }
@@ -23,7 +22,6 @@ pub(super) fn verify_common_randomness(
     {
         return Ok(Some(single_refusal(
             crate::foundation::RefusalReason::WrongTypeOrLength,
-            "commonRandomnessObjectTypeMismatch",
             "commonRandomness.objectType must be SetupCommonRandomness",
         )));
     }
@@ -57,14 +55,12 @@ pub(super) fn verify_common_randomness(
     if commit_records.len() != roster.participant_count as usize {
         return Ok(Some(single_refusal(
             crate::foundation::RefusalReason::WrongTypeOrLength,
-            "commonRandomnessCommitCountMismatch",
             "commonRandomness.commitRecords must contain one commit per participant",
         )));
     }
     if reveal_records.len() != roster.participant_count as usize {
         return Ok(Some(single_refusal(
             crate::foundation::RefusalReason::WrongTypeOrLength,
-            "commonRandomnessRevealCountMismatch",
             "commonRandomness.revealRecords must contain one reveal per participant",
         )));
     }
@@ -82,7 +78,6 @@ pub(super) fn verify_common_randomness(
         {
             return Ok(Some(single_refusal(
                 crate::foundation::RefusalReason::Equivocation,
-                "commonRandomnessCommitDuplicate",
                 "commonRandomness.commitRecords contains duplicate roster positions",
             )));
         }
@@ -99,14 +94,12 @@ pub(super) fn verify_common_randomness(
         else {
             return Ok(Some(single_refusal(
                 crate::foundation::RefusalReason::MissingPrerequisite,
-                "commonRandomnessRevealWithoutCommit",
                 "commonRandomness.revealRecords contains a reveal without a matching commit",
             )));
         };
         if committed_reveal_hash != &reveal_hash {
             return Ok(Some(single_refusal(
                 crate::foundation::RefusalReason::WrongHashOrRoot,
-                "commonRandomnessRevealHashMismatch",
                 "common-randomness reveal hash does not match the participant commit",
             )));
         }
@@ -116,7 +109,6 @@ pub(super) fn verify_common_randomness(
         {
             return Ok(Some(single_refusal(
                 crate::foundation::RefusalReason::Equivocation,
-                "commonRandomnessRevealDuplicate",
                 "commonRandomness.revealRecords contains duplicate roster positions",
             )));
         }
@@ -124,7 +116,6 @@ pub(super) fn verify_common_randomness(
     if ordered_reveal_hashes.len() != roster.participant_count as usize {
         return Ok(Some(single_refusal(
             crate::foundation::RefusalReason::WrongHashOrRoot,
-            "commonRandomnessRevealCoverageMismatch",
             "commonRandomness.revealRecords must cover the full foundation roster",
         )));
     }
@@ -148,7 +139,6 @@ pub(super) fn verify_common_randomness(
     {
         return Ok(Some(single_refusal(
             crate::foundation::RefusalReason::WrongHashOrRoot,
-            "commonRandomnessPublicMatrixSeedMismatch",
             "commonRandomness.publicMatrixSeedHash does not match the ordered reveal set",
         )));
     }

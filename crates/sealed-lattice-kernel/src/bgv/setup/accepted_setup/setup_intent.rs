@@ -31,14 +31,12 @@ pub(super) fn verify_setup_intent(
     if !setup_intent.is_object() {
         return Ok(SetupIntentVerification::Refused(single_refusal(
             crate::foundation::RefusalReason::MalformedEncoding,
-            "setupIntentNotObject",
             "setupIntent must be an object",
         )));
     }
     if setup_intent.get("objectType").and_then(Value::as_str) != Some(SETUP_INTENT_OBJECT_TYPE) {
         return Ok(SetupIntentVerification::Refused(single_refusal(
             crate::foundation::RefusalReason::WrongTypeOrLength,
-            "setupIntentTypeMismatch",
             format!("setupIntent.objectType must be {SETUP_INTENT_OBJECT_TYPE}"),
         )));
     }
@@ -49,7 +47,6 @@ pub(super) fn verify_setup_intent(
     else {
         return Ok(SetupIntentVerification::Refused(single_refusal(
             crate::foundation::RefusalReason::MalformedEncoding,
-            "setupIntentTrusteeRegistrationsMalformed",
             "setupIntent.trusteeRegistrations must be an array",
         )));
     };
@@ -63,7 +60,6 @@ pub(super) fn verify_setup_intent(
     if registration_values.len() != roster.participant_count as usize {
         return Ok(SetupIntentVerification::Refused(single_refusal(
             crate::foundation::RefusalReason::WrongTypeOrLength,
-            "setupIntentTrusteeRegistrationCountMismatch",
             "setupIntent.trusteeRegistrations must contain one signed registration per participant",
         )));
     }
@@ -90,14 +86,12 @@ pub(super) fn verify_setup_intent(
         if !trustee_identities.insert(registration.trustee_identity.clone()) {
             return Ok(SetupIntentVerification::Refused(single_refusal(
                 crate::foundation::RefusalReason::Equivocation,
-                "setupIntentTrusteeIdentityDuplicate",
                 "setupIntent.trusteeRegistrations must bind distinct trustee identities",
             )));
         }
         if !signing_public_key_hashes.insert(registration.signing_public_key_hash.clone()) {
             return Ok(SetupIntentVerification::Refused(single_refusal(
                 crate::foundation::RefusalReason::Equivocation,
-                "setupIntentSigningKeyDuplicate",
                 "setupIntent.trusteeRegistrations must bind distinct signing keys",
             )));
         }
@@ -106,7 +100,6 @@ pub(super) fn verify_setup_intent(
         {
             return Ok(SetupIntentVerification::Refused(single_refusal(
                 crate::foundation::RefusalReason::Equivocation,
-                "setupIntentMailboxKeyDuplicate",
                 "setupIntent.trusteeRegistrations must bind distinct private VSS mailbox keys",
             )));
         }
@@ -124,7 +117,6 @@ fn verify_setup_intent_registration(
     if !registration_value.is_object() {
         return Ok(Err(single_refusal(
             crate::foundation::RefusalReason::MalformedEncoding,
-            "setupIntentTrusteeRegistrationNotObject",
             "setup-intent trustee registrations must be objects",
         )));
     }
@@ -133,7 +125,6 @@ fn verify_setup_intent_registration(
     {
         return Ok(Err(single_refusal(
             crate::foundation::RefusalReason::WrongTypeOrLength,
-            "setupIntentTrusteeRegistrationTypeMismatch",
             format!(
                 "setup-intent trustee registrations must use {SETUP_INTENT_REGISTRATION_OBJECT_TYPE}"
             ),
@@ -142,7 +133,6 @@ fn verify_setup_intent_registration(
     let Some(signature_envelope) = registration_value.get("signatureEnvelope") else {
         return Ok(Err(single_refusal(
             crate::foundation::RefusalReason::MissingPrerequisite,
-            "setupIntentSignatureEnvelopeMissing",
             "setup-intent trustee registration must include an ML-DSA signature envelope",
         )));
     };
@@ -152,7 +142,6 @@ fn verify_setup_intent_registration(
     else {
         return Ok(Err(single_refusal(
             crate::foundation::RefusalReason::MissingPrerequisite,
-            "setupIntentTrusteeIdentityMissing",
             "setup-intent trustee registration must bind trusteeIdentity",
         )));
     };
@@ -160,7 +149,6 @@ fn verify_setup_intent_registration(
     {
         return Ok(Err(single_refusal(
             crate::foundation::RefusalReason::MalformedEncoding,
-            "setupIntentTrusteeIdentityMalformed",
             "setup-intent trustee identity must be non-empty NFC text",
         )));
     }
@@ -170,7 +158,6 @@ fn verify_setup_intent_registration(
     else {
         return Ok(Err(single_refusal(
             crate::foundation::RefusalReason::MissingPrerequisite,
-            "setupIntentSigningKeyHashMissing",
             "setup-intent signature envelope must bind publicKeyHash",
         )));
     };
@@ -184,7 +171,6 @@ fn verify_setup_intent_registration(
     else {
         return Ok(Err(single_refusal(
             crate::foundation::RefusalReason::MissingPrerequisite,
-            "setupIntentMailboxKeyHashMissing",
             "setup-intent trustee registration must bind privateVssMailboxPublicKeyHash",
         )));
     };
@@ -213,7 +199,6 @@ fn verify_setup_intent_registration(
     if let Err(failure) = verification {
         return Ok(Err(single_refusal(
             protocol_signature_refusal_reason(failure.reason_code),
-            failure.reason_code,
             failure.message,
         )));
     }
@@ -312,7 +297,6 @@ pub(super) fn verify_setup_intent_roster_hash(
             Vec::new(),
             vec![Refusal::new(
                 crate::foundation::RefusalReason::WrongHashOrRoot,
-                "setupRosterHashMismatch",
                 "setupContext.rosterHash must match the setup-intent trustee identity and signing-key registrations",
             )],
         )));

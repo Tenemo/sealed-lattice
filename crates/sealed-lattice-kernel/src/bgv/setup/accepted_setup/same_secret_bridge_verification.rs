@@ -63,7 +63,6 @@ pub(super) fn verify_same_secret_bridge_statement_set(
     if !missing_fields.is_empty() {
         return Ok(SameSecretBridgeVerification::Refused(single_refusal(
             crate::foundation::RefusalReason::MissingPrerequisite,
-            "sameSecretBridgeEvidenceIncomplete",
             format!(
                 "same-secret bridge material is required; missing {}",
                 missing_fields.join(", ")
@@ -75,7 +74,6 @@ pub(super) fn verify_same_secret_bridge_statement_set(
         Ok(verified_material) => Ok(SameSecretBridgeVerification::Verified(verified_material)),
         Err(error) => Ok(SameSecretBridgeVerification::Refused(single_refusal(
             crate::foundation::RefusalReason::MalformedEncoding,
-            "sameSecretBridgeMalformed",
             format!(
                 "same-secret bridge material is malformed: {}",
                 error.message
@@ -288,8 +286,8 @@ mod tests {
         .refusal_for_test("complete bridge evidence must refuse");
 
         assert_eq!(
-            response.first().map(|refusal| refusal.reason_code),
-            Some("sameSecretBridgeMalformed")
+            response.first().map(|refusal| refusal.refusal_reason),
+            Some(crate::foundation::RefusalReason::MalformedEncoding)
         );
         Ok(())
     }

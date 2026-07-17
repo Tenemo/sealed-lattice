@@ -7,14 +7,12 @@ fn validate_setup_context_token(field_name: &str, value: &str) -> Option<Refusal
     if value.is_empty() {
         return Some(Refusal::new(
             crate::foundation::RefusalReason::MissingPrerequisite,
-            "setupContextTokenMissing",
             format!("setupContext.{field_name} must be a non-empty setup context token"),
         ));
     }
     if value.len() > MAX_SETUP_CONTEXT_TOKEN_BYTES {
         return Some(Refusal::new(
             crate::foundation::RefusalReason::MalformedEncoding,
-            "setupContextTokenMalformed",
             format!(
                 "setupContext.{field_name} must be at most {MAX_SETUP_CONTEXT_TOKEN_BYTES} bytes"
             ),
@@ -26,7 +24,6 @@ fn validate_setup_context_token(field_name: &str, value: &str) -> Option<Refusal
     }) {
         return Some(Refusal::new(
             crate::foundation::RefusalReason::MalformedEncoding,
-            "setupContextTokenMalformed",
             format!(
                 "setupContext.{field_name} contains a character outside the setup context token alphabet"
             ),
@@ -51,7 +48,6 @@ pub(super) fn verify_context(
             Vec::new(),
             vec![Refusal::new(
                 crate::foundation::RefusalReason::MalformedEncoding,
-                "setupContextNotObject",
                 "setupContext must be a JSON object",
             )],
         )));
@@ -76,7 +72,6 @@ pub(super) fn verify_context(
                 Vec::new(),
                 vec![Refusal::new(
                     crate::foundation::RefusalReason::MalformedEncoding,
-                    "setupContextHashMalformed",
                     format!("setupContext.{field_name} must be a protocol hash"),
                 )],
             )));
@@ -89,7 +84,6 @@ pub(super) fn verify_context(
                 Vec::new(),
                 vec![Refusal::new(
                     crate::foundation::RefusalReason::MalformedEncoding,
-                    "setupContextTokenMalformed",
                     format!("setupContext.{field_name} must be a setup context token"),
                 )],
             )));
@@ -113,7 +107,6 @@ pub(super) fn verify_context(
             Vec::new(),
             vec![Refusal::new(
                 crate::foundation::RefusalReason::OutsideSupportedProfile,
-                "participantCountOutsideConfigurableRange",
                 "setupContext.participantCount must be an integer from 3 through 20",
             )],
         )));
@@ -133,7 +126,6 @@ pub(super) fn verify_context(
             Vec::new(),
             vec![Refusal::new(
                 crate::foundation::RefusalReason::WrongHashOrRoot,
-                "setupParametersHashMismatch",
                 "setupContext.setupParametersHash does not match the roster-derived collective BGV setup parameters",
             )],
         )));

@@ -14,7 +14,6 @@ pub(in super::super) fn verify_public_key_shares(
     if !share_set.is_object() {
         return Ok(Some(single_refusal(
             crate::foundation::RefusalReason::MalformedEncoding,
-            "publicKeySharesNotObject",
             "publicKeyShares must be a root-bound object, not an array or scalar",
         )));
     }
@@ -22,7 +21,6 @@ pub(in super::super) fn verify_public_key_shares(
     {
         return Ok(Some(single_refusal(
             crate::foundation::RefusalReason::WrongTypeOrLength,
-            "publicKeyShareSetTypeMismatch",
             "publicKeyShares.objectType must be PublicKeyShareSet",
         )));
     }
@@ -38,7 +36,6 @@ pub(in super::super) fn verify_public_key_shares(
     if share_records.len() != roster.participant_count as usize {
         return Ok(Some(single_refusal(
             crate::foundation::RefusalReason::WrongTypeOrLength,
-            "publicKeyShareCountMismatch",
             "publicKeyShares.shareRecords must contain one share per trustee",
         )));
     }
@@ -63,7 +60,6 @@ fn verify_public_key_share_record(
     if !share_record.is_object() {
         return Ok(Some(single_refusal(
             crate::foundation::RefusalReason::MalformedEncoding,
-            "publicKeyShareNotObject",
             "public-key share records must be objects",
         )));
     }
@@ -71,14 +67,12 @@ fn verify_public_key_share_record(
     {
         return Ok(Some(single_refusal(
             crate::foundation::RefusalReason::WrongTypeOrLength,
-            "publicKeyShareTypeMismatch",
             "public-key share objectType must be PublicKeyShare",
         )));
     }
     if !expected_trustees.contains_key(&expected_roster_position) {
         return Ok(Some(single_refusal(
             crate::foundation::RefusalReason::WrongContext,
-            "publicKeyShareTrusteeMismatch",
             "public-key share position must identify an accepted setup trustee",
         )));
     }
@@ -167,7 +161,6 @@ fn verify_public_key_share_limb_hashes(
     if limb_hashes.len() != DATA_PRIMES.len() {
         return Ok(Some(single_refusal(
             crate::foundation::RefusalReason::WrongTypeOrLength,
-            "publicKeyShareCoefficientLimbCountMismatch",
             "public-key share must bind one coefficient hash for every Q_share limb",
         )));
     }
@@ -219,13 +212,12 @@ mod tests {
             .collect()
     }
 
-    fn refusal_reason(refusals: Option<Refusals>) -> String {
+    fn refusal_reason(refusals: Option<Refusals>) -> crate::foundation::RefusalReason {
         refusals
             .expect("malformed limb hashes must be refused")
             .first()
-            .map(|refusal| refusal.reason_code)
+            .map(|refusal| refusal.refusal_reason)
             .expect("typed refusal reason")
-            .to_string()
     }
 
     #[test]
@@ -241,7 +233,7 @@ mod tests {
             refusal_reason(
                 verify_public_key_share_limb_hashes(None).expect("missing limb hashes response")
             ),
-            "setupObjectMissing"
+            crate::foundation::RefusalReason::MissingPrerequisite
         );
 
         let mut missing_last_limb = valid_hashes.clone();
@@ -251,7 +243,7 @@ mod tests {
                 verify_public_key_share_limb_hashes(Some(&missing_last_limb))
                     .expect("limb count response")
             ),
-            "publicKeyShareCoefficientLimbCountMismatch"
+            crate::foundation::RefusalReason::WrongTypeOrLength
         );
     }
 

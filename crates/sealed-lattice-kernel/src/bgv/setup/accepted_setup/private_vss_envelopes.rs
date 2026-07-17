@@ -25,7 +25,6 @@ pub(super) fn verify_private_vss_envelope_commitments(
     if !commitment_set.is_object() {
         return Ok(Some(single_refusal(
             crate::foundation::RefusalReason::MalformedEncoding,
-            "privateVssEnvelopeCommitmentsNotObject",
             "privateVssEnvelopeCommitments must be a root-bound object, not an array or scalar",
         )));
     }
@@ -34,7 +33,6 @@ pub(super) fn verify_private_vss_envelope_commitments(
     {
         return Ok(Some(single_refusal(
             crate::foundation::RefusalReason::WrongTypeOrLength,
-            "privateVssEnvelopeCommitmentSetTypeMismatch",
             "privateVssEnvelopeCommitments.objectType must be PrivateVssEnvelopeCommitmentSet",
         )));
     }
@@ -60,7 +58,6 @@ pub(super) fn verify_private_vss_envelope_commitments(
             if bindings.len() != expected_envelope_count as usize {
                 return Ok(Some(single_refusal(
                     crate::foundation::RefusalReason::WrongTypeOrLength,
-                    "privateVssEnvelopeCountMismatch",
                     "privateVssEnvelopeCommitments.envelopeReferences must cover every source-trustee-recipient trustee pair",
                 )));
             }
@@ -175,7 +172,6 @@ fn private_vss_envelope_bindings_from_set(
     else {
         return Ok(Err(Refusal::new(
             crate::foundation::RefusalReason::MissingPrerequisite,
-            "privateVssEnvelopeReferencesMissing",
             "privateVssEnvelopeCommitments.envelopeReferences must contain every source-trustee-recipient envelope commitment",
         )));
     };
@@ -184,7 +180,6 @@ fn private_vss_envelope_bindings_from_set(
     if envelope_references.len() != expected_envelope_count {
         return Ok(Err(Refusal::new(
             crate::foundation::RefusalReason::WrongTypeOrLength,
-            "privateVssEnvelopeReferenceCountMismatch",
             "privateVssEnvelopeCommitments.envelopeReferences must contain one record for every source-trustee-recipient trustee pair",
         )));
     }
@@ -211,7 +206,6 @@ fn private_vss_envelope_bindings_from_set(
         {
             return Ok(Err(Refusal::new(
                 crate::foundation::RefusalReason::Equivocation,
-                "privateVssEnvelopeReferenceDuplicate",
                 "privateVssEnvelopeCommitments.envelopeReferences must have distinct source-trustee-recipient trustee pairs",
             )));
         }
@@ -230,7 +224,6 @@ fn private_vss_envelope_binding_from_reference(
     {
         return Ok(Err(Refusal::new(
             crate::foundation::RefusalReason::WrongTypeOrLength,
-            "privateVssEnvelopeReferenceTypeMismatch",
             "private VSS envelope commitment objectType must be PrivateVssEnvelopeCommitment",
         )));
     }
@@ -242,7 +235,6 @@ fn private_vss_envelope_binding_from_reference(
         None => {
             return Ok(Err(Refusal::new(
                 crate::foundation::RefusalReason::MissingPrerequisite,
-                "privateVssEnvelopeSourceTrusteePositionMissing",
                 "private VSS envelope commitment must bind sourceTrusteeRosterPosition",
             )));
         }
@@ -251,7 +243,6 @@ fn private_vss_envelope_binding_from_reference(
     else {
         return Ok(Err(Refusal::new(
             crate::foundation::RefusalReason::WrongContext,
-            "privateVssEnvelopeSourceTrusteeMismatch",
             "private VSS envelope commitment source roster position must identify a setup-intent trustee",
         )));
     };
@@ -263,7 +254,6 @@ fn private_vss_envelope_binding_from_reference(
         None => {
             return Ok(Err(Refusal::new(
                 crate::foundation::RefusalReason::MissingPrerequisite,
-                "privateVssEnvelopeRecipientPositionMissing",
                 "private VSS envelope commitment must bind recipientRosterPosition",
             )));
         }
@@ -271,7 +261,6 @@ fn private_vss_envelope_binding_from_reference(
     let Some(recipient_identity) = expected_trustees.get(&recipient_roster_position) else {
         return Ok(Err(Refusal::new(
             crate::foundation::RefusalReason::WrongContext,
-            "privateVssEnvelopeRecipientMismatch",
             "private VSS envelope commitment recipient roster position must identify a setup-intent trustee",
         )));
     };
@@ -291,7 +280,6 @@ fn private_vss_envelope_binding_from_reference(
         let Some(hash) = envelope_reference.get(field_name).and_then(Value::as_str) else {
             return Ok(Err(Refusal::new(
                 crate::foundation::RefusalReason::MissingPrerequisite,
-                "privateVssEnvelopeHashMissing",
                 format!("private VSS envelope commitment must bind {field_name}"),
             )));
         };
@@ -325,7 +313,6 @@ fn verify_encrypted_private_vss_envelope(
     if !encrypted_envelope.is_object() {
         return Ok(Err(Refusal::new(
             crate::foundation::RefusalReason::MalformedEncoding,
-            "privateVssEncryptedEnvelopeNotObject",
             "encryptedEnvelope must be a root-bound object",
         )));
     }
@@ -334,7 +321,6 @@ fn verify_encrypted_private_vss_envelope(
     {
         return Ok(Err(Refusal::new(
             crate::foundation::RefusalReason::WrongTypeOrLength,
-            "privateVssEncryptedEnvelopeTypeMismatch",
             "encryptedEnvelope.objectType must be EncryptedPrivateVssShareEnvelope",
         )));
     }
@@ -344,7 +330,6 @@ fn verify_encrypted_private_vss_envelope(
     else {
         return Ok(Err(Refusal::new(
             crate::foundation::RefusalReason::MissingPrerequisite,
-            "privateVssEncryptedEnvelopeCiphertextMissing",
             "encryptedEnvelope.kemCiphertextBytesHex must be present",
         )));
     };
@@ -359,7 +344,6 @@ fn verify_encrypted_private_vss_envelope(
     else {
         return Ok(Err(Refusal::new(
             crate::foundation::RefusalReason::MissingPrerequisite,
-            "privateVssEncryptedEnvelopeNonceMissing",
             "encryptedEnvelope.aeadNonceHex must be present",
         )));
     };
@@ -370,7 +354,6 @@ fn verify_encrypted_private_vss_envelope(
     else {
         return Ok(Err(Refusal::new(
             crate::foundation::RefusalReason::MissingPrerequisite,
-            "privateVssEncryptedEnvelopeCiphertextMissing",
             "encryptedEnvelope.ciphertextBytesHex must be present",
         )));
     };
@@ -385,7 +368,6 @@ fn verify_encrypted_private_vss_envelope(
     if encrypted_envelope_hash != expected_encrypted_envelope_hash {
         return Ok(Err(Refusal::new(
             crate::foundation::RefusalReason::WrongHashOrRoot,
-            "privateVssEncryptedEnvelopeHashMismatch",
             "encryptedEnvelopeHash does not match the canonical encrypted private VSS envelope object",
         )));
     }

@@ -23,7 +23,6 @@ pub(super) fn verify_relinearization_key_share_rounds(
     if !rounds.is_object() {
         return Ok(Some(single_refusal(
             crate::foundation::RefusalReason::MalformedEncoding,
-            "relinearizationKeyShareRoundsNotObject",
             "relinearizationKeyShareRounds must be an object",
         )));
     }
@@ -38,7 +37,6 @@ pub(super) fn verify_relinearization_key_share_rounds(
     {
         return Ok(Some(single_refusal(
             crate::foundation::RefusalReason::WrongTypeOrLength,
-            "relinearizationKeyShareRoundsTypeMismatch",
             "relinearizationKeyShareRounds.objectType must be RelinearizationKeyShareRounds",
         )));
     }
@@ -53,7 +51,6 @@ pub(super) fn verify_relinearization_key_share_rounds(
     {
         return Ok(Some(single_refusal(
             crate::foundation::RefusalReason::WrongTypeOrLength,
-            "relinearizationKeyShareRoundCountMismatch",
             "relinearization round-one and round-two records must contain one record per trustee and scheduled level",
         )));
     }
@@ -62,7 +59,6 @@ pub(super) fn verify_relinearization_key_share_rounds(
         if let Err(error) = verify_evaluation_key_component_material_root(root) {
             return Ok(Some(single_refusal(
                 crate::foundation::RefusalReason::MalformedEncoding,
-                "evaluationKeyMaterialVerificationFailed",
                 error.message,
             )));
         }
@@ -72,7 +68,6 @@ pub(super) fn verify_relinearization_key_share_rounds(
         if let Err(error) = verify_evaluation_key_component_material_root(root) {
             return Ok(Some(single_refusal(
                 crate::foundation::RefusalReason::MalformedEncoding,
-                "evaluationKeyMaterialVerificationFailed",
                 error.message,
             )));
         }
@@ -97,7 +92,6 @@ pub(super) fn verify_galois_key_share_batches(
     let Some(batches) = batches.as_array() else {
         return Ok(Some(single_refusal(
             crate::foundation::RefusalReason::MalformedEncoding,
-            "galoisKeyShareBatchesNotArray",
             "galoisKeyShareBatches must be an array of trustee batches",
         )));
     };
@@ -110,7 +104,6 @@ pub(super) fn verify_galois_key_share_batches(
     if batches.len() != roster.participant_count as usize {
         return Ok(Some(single_refusal(
             crate::foundation::RefusalReason::WrongTypeOrLength,
-            "galoisKeyShareBatchCountMismatch",
             "galoisKeyShareBatches must contain one batch per trustee",
         )));
     }
@@ -129,7 +122,6 @@ pub(super) fn verify_galois_key_share_batches(
         if let Err(error) = verify_galois_key_share_batch(batch, &expected_schedule) {
             return Ok(Some(single_refusal(
                 crate::foundation::RefusalReason::MalformedEncoding,
-                "evaluationKeyMaterialVerificationFailed",
                 error.message,
             )));
         }

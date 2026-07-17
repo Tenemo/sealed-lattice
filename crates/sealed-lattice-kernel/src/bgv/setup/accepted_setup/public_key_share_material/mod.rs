@@ -35,7 +35,6 @@ pub(super) fn verify_collective_public_key_material(
     if !aggregate_object.is_object() {
         return Ok(Some(single_refusal(
             crate::foundation::RefusalReason::MalformedEncoding,
-            "collectivePublicKeyNotObject",
             "collectivePublicKey must be an object",
         )));
     }
@@ -44,7 +43,6 @@ pub(super) fn verify_collective_public_key_material(
     {
         return Ok(Some(single_refusal(
             crate::foundation::RefusalReason::WrongTypeOrLength,
-            "collectivePublicKeyTypeMismatch",
             "collectivePublicKey.objectType must be CollectivePublicKey",
         )));
     }
@@ -57,7 +55,6 @@ pub(super) fn verify_collective_public_key_material(
     ) {
         return Ok(Some(single_refusal(
             crate::foundation::RefusalReason::MalformedEncoding,
-            "collectivePublicKeyVerificationFailed",
             error.message,
         )));
     }

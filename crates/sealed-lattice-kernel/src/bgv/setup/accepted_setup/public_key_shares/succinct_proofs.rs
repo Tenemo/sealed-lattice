@@ -35,7 +35,6 @@ pub(in super::super) fn verify_public_key_share_succinct_proofs(
         return Ok(PublicKeyShareSuccinctProofVerification::Refused(
             single_refusal(
                 crate::foundation::RefusalReason::MissingPrerequisite,
-                "publicKeyShareSuccinctProofsMissing",
                 "publicKeyShareSuccinctProofs must accompany accepted public-key share material",
             ),
         ));
@@ -73,7 +72,6 @@ pub(in super::super) fn verify_public_key_share_succinct_proofs(
             return Ok(PublicKeyShareSuccinctProofVerification::Refused(
                 single_refusal(
                     crate::foundation::RefusalReason::MalformedEncoding,
-                    "publicKeyShareMaterialVerificationFailed",
                     error.message,
                 ),
             ));
@@ -83,7 +81,6 @@ pub(in super::super) fn verify_public_key_share_succinct_proofs(
         return Ok(PublicKeyShareSuccinctProofVerification::Refused(
             single_refusal(
                 crate::foundation::RefusalReason::MalformedEncoding,
-                "publicKeyShareSuccinctProofSetNotObject",
                 "publicKeyShareSuccinctProofs must be a root-bound object",
             ),
         ));
@@ -94,7 +91,6 @@ pub(in super::super) fn verify_public_key_share_succinct_proofs(
         return Ok(PublicKeyShareSuccinctProofVerification::Refused(
             single_refusal(
                 crate::foundation::RefusalReason::WrongTypeOrLength,
-                "publicKeyShareSuccinctProofSetTypeMismatch",
                 "publicKeyShareSuccinctProofs.objectType must be PublicKeyShareSuccinctProofSet",
             ),
         ));
@@ -105,7 +101,6 @@ pub(in super::super) fn verify_public_key_share_succinct_proofs(
         return Ok(PublicKeyShareSuccinctProofVerification::Refused(
             single_refusal(
                 crate::foundation::RefusalReason::MissingPrerequisite,
-                "publicKeyShareSuccinctProofHashesMissing",
                 "publicKeyShareSuccinctProofs.proofBytesHashes must be present on the accepted proof set",
             ),
         ));
@@ -114,7 +109,6 @@ pub(in super::super) fn verify_public_key_share_succinct_proofs(
         return Ok(PublicKeyShareSuccinctProofVerification::Refused(
             single_refusal(
                 crate::foundation::RefusalReason::WrongTypeOrLength,
-                "publicKeyShareSuccinctProofCountMismatch",
                 "publicKeyShareSuccinctProofs.proofBytesHashes must contain one proof per trustee",
             ),
         ));
@@ -146,7 +140,6 @@ pub(in super::super) fn verify_public_key_share_succinct_proofs(
                 return Ok(PublicKeyShareSuccinctProofVerification::Refused(
                     single_refusal(
                         crate::foundation::RefusalReason::InvalidProof,
-                        "publicKeyShareSuccinctProofVerificationFailed",
                         error.message,
                     ),
                 ));

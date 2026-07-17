@@ -18,7 +18,7 @@ pub(in super::super) fn vss_aggregate_threshold_proof_bytes_hashes(
         recipient_coordinates.len(),
         "aggregate recipient records and canonical coordinates",
     );
-    let proof_bytes_hashes = recipient_records
+    recipient_records
         .iter()
         .zip(recipient_coordinates.iter().copied())
         .map(
@@ -32,8 +32,7 @@ pub(in super::super) fn vss_aggregate_threshold_proof_bytes_hashes(
                 )
             },
         )
-        .collect::<Vec<_>>();
-    proof_bytes_hashes
+        .collect::<Vec<_>>()
 }
 
 fn vss_aggregate_threshold_proof_bytes_hash(

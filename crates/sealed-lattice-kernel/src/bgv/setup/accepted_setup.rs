@@ -212,19 +212,16 @@ pub(super) fn accepted_roster_from_package(
 #[derive(Debug, Clone)]
 pub(super) struct Refusal {
     refusal_reason: crate::foundation::RefusalReason,
-    reason_code: &'static str,
     message: String,
 }
 
 impl Refusal {
     pub(super) fn new(
         refusal_reason: crate::foundation::RefusalReason,
-        reason_code: &'static str,
         message: impl Into<String>,
     ) -> Self {
         Self {
             refusal_reason,
-            reason_code,
             message: message.into(),
         }
     }
@@ -244,13 +241,9 @@ pub(super) type Refusals = Vec<Refusal>;
 
 pub(super) fn single_refusal(
     refusal_reason: crate::foundation::RefusalReason,
-    reason_code: &'static str,
     message: impl Into<String>,
 ) -> Refusals {
-    setup_refusals(
-        Vec::new(),
-        vec![Refusal::new(refusal_reason, reason_code, message)],
-    )
+    setup_refusals(Vec::new(), vec![Refusal::new(refusal_reason, message)])
 }
 
 enum SetupPackageVerification {
@@ -398,7 +391,6 @@ fn verify_collective_bgv_setup_package_in_owned_session(
             Vec::new(),
             vec![Refusal::new(
                 crate::foundation::RefusalReason::MalformedEncoding,
-                "setupPackageNotObject",
                 "setupPackage must be a JSON object",
             )],
         );
@@ -553,7 +545,6 @@ fn verify_declared_vss_ring_degree(
             Vec::new(),
             vec![Refusal::new(
                 crate::foundation::RefusalReason::MalformedEncoding,
-                "vssShareLinkageStatementNotObject",
                 "vssShareLinkageStatement must be an object",
             )],
         ));
@@ -563,7 +554,6 @@ fn verify_declared_vss_ring_degree(
             Vec::new(),
             vec![Refusal::new(
                 crate::foundation::RefusalReason::MissingPrerequisite,
-                "vssShareLinkageRingDegreeMissing",
                 "vssShareLinkageStatement.ringDegree is required",
             )],
         ));
@@ -576,7 +566,6 @@ fn verify_declared_vss_ring_degree(
             Vec::new(),
             vec![Refusal::new(
                 crate::foundation::RefusalReason::WrongTypeOrLength,
-                "vssShareLinkageRingDegreeTypeMismatch",
                 "vssShareLinkageStatement.ringDegree must be an unsigned integer that fits usize",
             )],
         ));
@@ -586,7 +575,6 @@ fn verify_declared_vss_ring_degree(
             Vec::new(),
             vec![Refusal::new(
                 crate::foundation::RefusalReason::OutsideSupportedProfile,
-                "outsideCollectiveBgvSetupParameters",
                 "the declared setup ring degree is outside the selected verification profile",
             )],
         ));
@@ -615,7 +603,6 @@ fn verify_expected_setup_package_hash(
             Vec::new(),
             vec![Refusal::new(
                 crate::foundation::RefusalReason::WrongHashOrRoot,
-                "expectedSetupPackageHashMismatch",
                 "setup package hash does not match expectedSetupPackageHash",
             )],
         )));
@@ -647,7 +634,6 @@ fn outside_accepted_parameters(message: impl Into<String>) -> SetupPackageVerifi
         Vec::new(),
         vec![Refusal::new(
             crate::foundation::RefusalReason::OutsideSupportedProfile,
-            "outsideCollectiveBgvSetupParameters",
             message,
         )],
     ))
@@ -660,7 +646,6 @@ pub(super) fn setup_refusals(
     refused_objects.extend(missing_objects.into_iter().map(|_| {
         Refusal::new(
             crate::foundation::RefusalReason::MissingPrerequisite,
-            "setupObjectMissing",
             "A required setup object is missing.",
         )
     }));
