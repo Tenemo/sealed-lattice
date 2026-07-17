@@ -5,6 +5,7 @@ import { ml_dsa65 } from '@noble/post-quantum/ml-dsa.js';
 import { ml_kem768 } from '@noble/post-quantum/ml-kem.js';
 import {
     foundationProfile,
+    refusalReasonCodes,
     type MailboxAssociatedData,
     type MailboxCiphertextDescriptor,
     type MailboxKeyScheduleInput,
@@ -50,22 +51,6 @@ const mlKem768CiphertextByteLength = ml_kem768.lengths.cipherText!;
 const mlDsa65VerificationKeyByteLength = ml_dsa65.lengths.publicKey!;
 const mlDsa65SignatureByteLength = ml_dsa65.lengths.signature!;
 const canonicalUnsignedDecimalPattern = /^(?:0|[1-9][0-9]*)$/u;
-const refusalReasons = new Set<RefusalReason>([
-    'malformedEncoding',
-    'unsupportedVersionOrSuite',
-    'outsideSupportedProfile',
-    'wrongContext',
-    'wrongTypeOrLength',
-    'wrongHashOrRoot',
-    'invalidSignature',
-    'duplicateIdentity',
-    'equivocation',
-    'missingPrerequisite',
-    'invalidProof',
-    'invalidArithmeticRelation',
-    'consumedState',
-]);
-
 export type AuthenticatedMailboxKernel = Readonly<{
     encodeMailboxKeyScheduleInput(input: {
         readonly kemCiphertextHex: string;
@@ -294,7 +279,7 @@ export type AuthenticatedMailboxStagingBoundary = Readonly<{
     }): Promise<AuthenticatedMailboxStagingLease>;
 }>;
 
-type AuthenticatedMailboxSealCommonInput = Readonly<{
+export type AuthenticatedMailboxSealInput = Readonly<{
     readonly abortSignal?: AbortSignal;
     readonly associatedData: SetupMailboxSlot;
     readonly emitCiphertextChunk: MailboxChunkSink;
@@ -308,8 +293,6 @@ type AuthenticatedMailboxSealCommonInput = Readonly<{
     readonly sourceVerificationKey: Uint8Array;
     readonly streamBoundary: AuthenticatedMailboxStreamBoundary;
 }>;
-
-export type AuthenticatedMailboxSealInput = AuthenticatedMailboxSealCommonInput;
 
 export type AuthenticatedMailboxOpenInput = Readonly<{
     readonly abortSignal?: AbortSignal;
@@ -521,7 +504,7 @@ const canonicalAssociatedDataMatches = (
 
 const producerSlot = (
     associatedData:
-        | AuthenticatedMailboxSealCommonInput['associatedData']
+        | AuthenticatedMailboxSealInput['associatedData']
         | MailboxAssociatedData,
 ): AuthenticatedMailboxProducerSlot => ({
     suiteId: associatedData.suiteId,
@@ -727,7 +710,7 @@ const refusalReasonFromBoundaryError = (
     const refusalReason = error.refusalReason;
 
     return typeof refusalReason === 'string' &&
-        refusalReasons.has(refusalReason as RefusalReason)
+        Object.prototype.hasOwnProperty.call(refusalReasonCodes, refusalReason)
         ? (refusalReason as RefusalReason)
         : undefined;
 };
@@ -770,7 +753,7 @@ const cancelSynchronousLease = (
 };
 
 const emitCachedCiphertext = async (
-    input: AuthenticatedMailboxSealCommonInput,
+    input: AuthenticatedMailboxSealInput,
     lease: AuthenticatedMailboxOutboundCacheLease,
     plaintextByteLength: number,
 ): Promise<void> => {
@@ -807,8 +790,8 @@ const emitCachedCiphertext = async (
     );
 };
 
-const sealMailbox = async (
-    input: AuthenticatedMailboxSealCommonInput,
+export const sealAuthenticatedMailbox = async (
+    input: AuthenticatedMailboxSealInput,
 ): Promise<AuthenticatedMailboxCarrier> => {
     const plaintextByteLength = parseMailboxByteLength(
         String(input.plaintextByteLength),
@@ -1059,10 +1042,6 @@ const sealMailbox = async (
 
     return result;
 };
-
-export const sealAuthenticatedMailbox = async (
-    input: AuthenticatedMailboxSealInput,
-): Promise<AuthenticatedMailboxCarrier> => sealMailbox(input);
 
 export const openAuthenticatedMailbox = async (
     input: AuthenticatedMailboxOpenInput,

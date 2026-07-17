@@ -256,12 +256,6 @@ pub(crate) fn describe_collective_bgv_setup_parameters() -> CanonicalResult<Valu
     describe_collective_bgv_setup_parameters_for_roster(&foundation_roster_parameters())
 }
 
-fn q_share_description_value() -> Value {
-    json!({
-        "primes": DATA_PRIMES,
-    })
-}
-
 pub(crate) fn describe_collective_bgv_setup_parameters_for_roster(
     roster: &AcceptedRosterParameters,
 ) -> CanonicalResult<Value> {
@@ -269,7 +263,9 @@ pub(crate) fn describe_collective_bgv_setup_parameters_for_roster(
         "setupParametersHash": setup_parameters_hash_for_roster(roster)?,
         "participantCount": roster.participant_count,
         "reconstructionThreshold": roster.decryption_threshold,
-        "qShare": q_share_description_value(),
+        "qShare": {
+            "primes": DATA_PRIMES,
+        },
         "evaluatorKeySchedule": evaluator_key_schedule_value()?,
         "boundedDomainEvaluator": bounded_domain_evaluator_value_for_roster(roster)?,
     }))

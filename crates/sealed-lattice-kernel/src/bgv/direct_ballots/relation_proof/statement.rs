@@ -8,7 +8,7 @@ pub(super) fn direct_ballot_relation_statement_hash(
     let public_key_hash = direct_ballot_public_key_hash(evaluator_key)?;
     let statement_json = canonical_json(&json!({
         "objectType": "DirectEncryptedBallotValidityRelationStatement",
-        "setupPackageHash": setup_package_hash(setup_package)?,
+        "setupPackageHash": crate::bgv::setup::derive_collective_setup_package_hash(setup_package)?,
         "publicKeyHash": to_hex(&public_key_hash),
         "ciphertextRoot": ballot.ciphertext_root.as_str(),
         "voterIdentity": ballot.input.voter_identity.as_str(),

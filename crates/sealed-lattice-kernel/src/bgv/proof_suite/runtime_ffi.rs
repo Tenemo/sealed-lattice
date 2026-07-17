@@ -2,9 +2,10 @@
 //!
 //! A schema-valid suite record is data, not authority. This boundary mints a
 //! process-local handle only after the canonical record passes the complete
-//! selected-suite derivation. The current selected suite remains fail-closed,
-//! so a successful proof operation cannot be opened until that blocker is
-//! resolved; there is no alternate fixture suite or raw-plan export.
+//! selected-suite derivation. Exact-family operations remain fail-closed until
+//! an accepted board object derives the verifier statement and the family owns
+//! its private-witness or verified-input capability. There is no alternate
+//! fixture suite or raw-plan export.
 
 use core::slice;
 use std::cell::RefCell;

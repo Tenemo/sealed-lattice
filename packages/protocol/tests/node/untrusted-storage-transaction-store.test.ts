@@ -1255,7 +1255,6 @@ describe('untrusted storage transaction store', () => {
 
         const afterCrash = await openTestStore({ adapter });
         expect(afterCrash.repairReport).toMatchObject({
-            removedCorruptIndexCount: 0,
             removedUnreferencedObjectCount: 1,
             retainedObjectCount: 0,
         });

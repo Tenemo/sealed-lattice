@@ -1,4 +1,3 @@
-import { foundationProfile } from '@sealed-lattice/types';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import {
@@ -25,6 +24,7 @@ import {
     createStateVerifierTestVector,
     type StateVerifierTestVector,
 } from '#packages/wasm/tests/state-verifier-test-vectors';
+import { canonicalStreamChunkBuffers as chunkBuffers } from '#tests/support/canonical-stream-chunk-buffers';
 
 const maximumRetainedVerifiedStateObjectCount = 512;
 
@@ -49,23 +49,6 @@ const openSession = (
         throw new Error(opened.refusalReason);
     }
     return opened.value;
-};
-
-const chunkBuffers = (bytes: Uint8Array): readonly ArrayBuffer[] => {
-    const chunks: ArrayBuffer[] = [];
-    for (
-        let offset = 0;
-        offset < bytes.byteLength;
-        offset += foundationProfile.streamChunkByteLength
-    ) {
-        chunks.push(
-            bytes.slice(
-                offset,
-                offset + foundationProfile.streamChunkByteLength,
-            ).buffer,
-        );
-    }
-    return chunks;
 };
 
 const descriptorFor = (

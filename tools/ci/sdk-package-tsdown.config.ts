@@ -2,13 +2,14 @@ import { fileURLToPath } from 'node:url';
 
 import { defineConfig } from 'tsdown';
 
-const kernelHashEnvironmentVariable =
-    'SEALED_LATTICE_KERNEL_NORMALIZED_SHA256_HEX';
-const declarationEntryEnvironmentVariable =
+const sdkDeclarationEntryEnvironmentVariable =
     'SEALED_LATTICE_SDK_DECLARATION_ENTRY_PATH';
+const sdkKernelHashEnvironmentVariable =
+    'SEALED_LATTICE_KERNEL_NORMALIZED_SHA256_HEX';
 const sha256HexPattern = /^[a-f0-9]{64}$/u;
-const kernelHash = process.env[kernelHashEnvironmentVariable];
-const declarationEntryPath = process.env[declarationEntryEnvironmentVariable];
+const kernelHash = process.env[sdkKernelHashEnvironmentVariable];
+const declarationEntryPath =
+    process.env[sdkDeclarationEntryEnvironmentVariable];
 const sdkPackageDirectoryPath = fileURLToPath(
     new URL('../../packages/sdk/', import.meta.url),
 );
@@ -18,12 +19,12 @@ const sdkTsconfigPath = fileURLToPath(
 
 if (kernelHash === undefined || !sha256HexPattern.test(kernelHash)) {
     throw new Error(
-        `${kernelHashEnvironmentVariable} must contain the normalized SHA-256 hash of the packaged WASM kernel. Run the SDK package build through its package script.`,
+        `${sdkKernelHashEnvironmentVariable} must contain the normalized SHA-256 hash of the packaged WASM kernel. Run the SDK package build through its package script.`,
     );
 }
 if (declarationEntryPath === undefined) {
     throw new Error(
-        `${declarationEntryEnvironmentVariable} must identify the declaration entry emitted by TypeScript. Run the SDK package build through its package script.`,
+        `${sdkDeclarationEntryEnvironmentVariable} must identify the declaration entry emitted by TypeScript. Run the SDK package build through its package script.`,
     );
 }
 

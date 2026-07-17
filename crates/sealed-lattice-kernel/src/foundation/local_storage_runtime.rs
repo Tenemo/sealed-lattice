@@ -5,7 +5,7 @@ use subtle::ConstantTimeEq;
 use zeroize::Zeroizing;
 
 use super::local_encrypted_storage::LocalRecordSealWithIdentifierInput;
-use super::runtime_input::RuntimeInputReader as InputReader;
+use super::runtime_input::{RuntimeInputReader as InputReader, refusal_status};
 use super::{
     ACTION_RANDOMNESS_ROOT_BYTE_LENGTH, ActionStorageRoot, CanonicalDecodeLimits,
     CommonProofExternalMemoryRecordKind, DeviceWrappedStorageRoot, Hash512,
@@ -1045,7 +1045,7 @@ fn read_record_request<'input>(
     let record_type = read_record_type(reader)?;
     let identifier_context_byte_length =
         usize::try_from(reader.read_u32()?).map_err(|_| malformed_status())?;
-    let identifier_context = reader.read_slice(identifier_context_byte_length)?;
+    let identifier_context = reader.read_bytes(identifier_context_byte_length)?;
     let record_version = reader.read_u64()?;
     let predecessor_record_hash = match reader.read_u8()? {
         0 => None,
@@ -1106,7 +1106,7 @@ fn derive_record_identifier_from_context(
             if statement_byte_length == 0 {
                 return Err(refusal_status(RefusalReason::WrongTypeOrLength));
             }
-            let canonical_ballot_statement_bytes = reader.read_slice(statement_byte_length)?;
+            let canonical_ballot_statement_bytes = reader.read_bytes(statement_byte_length)?;
             let ballot_encryption_attempt_identifier = reader.read_array()?;
             reader.finish()?;
             return derive_local_record_identifier(
@@ -1279,10 +1279,6 @@ const fn malformed_status() -> u32 {
 
 const fn outside_supported_profile_status() -> u32 {
     refusal_status(RefusalReason::OutsideSupportedProfile)
-}
-
-const fn refusal_status(refusal_reason: RefusalReason) -> u32 {
-    refusal_reason.canonical_code() as u32
 }
 
 fn schema_status(error: super::FoundationSchemaError) -> u32 {

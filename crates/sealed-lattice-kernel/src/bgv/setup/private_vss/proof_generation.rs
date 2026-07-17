@@ -52,7 +52,6 @@ pub(crate) fn generate_private_vss_share_proof_from_request(
     let public_matrix_seed_hash = hash_string_field(
         request,
         "publicMatrixSeedHash",
-        "publicMatrixSeedHash",
         PrivateVssRefusalCode::missing("publicMatrixSeedHashMissing"),
         "publicMatrixSeedHash must be provided for private VSS proof generation",
     )
@@ -60,7 +59,6 @@ pub(crate) fn generate_private_vss_share_proof_from_request(
     validate_hash_string(public_matrix_seed_hash, "publicMatrixSeedHash")?;
     let private_envelope_aad_hash = hash_string_field(
         request,
-        "privateEnvelopeAadHash",
         "privateEnvelopeAadHash",
         PrivateVssRefusalCode::missing("privateEnvelopeAadHashMissing"),
         "privateEnvelopeAadHash must be provided for private VSS proof generation",
@@ -79,7 +77,6 @@ pub(crate) fn generate_private_vss_share_proof_from_request(
     let source_trustee_roster_position = u64_field(
         request,
         "sourceTrusteeRosterPosition",
-        "sourceTrusteeRosterPosition",
         PrivateVssRefusalCode::missing("sourceTrusteeRosterPositionMissing"),
         "sourceTrusteeRosterPosition must be provided for private VSS proof generation",
     )
@@ -92,7 +89,6 @@ pub(crate) fn generate_private_vss_share_proof_from_request(
     .map_err(private_vss_refusal_to_error)?;
     let material_records = array_field(
         request,
-        "sourceTrusteeCoefficientCommitmentMaterialRecords",
         "sourceTrusteeCoefficientCommitmentMaterialRecords",
         PrivateVssRefusalCode::missing("sourceTrusteeCommitmentMaterialMissing"),
         "sourceTrusteeCoefficientCommitmentMaterialRecords must be provided for private VSS proof generation",
@@ -107,7 +103,6 @@ pub(crate) fn generate_private_vss_share_proof_from_request(
 
     let recipient_roster_position = u64_field(
         request,
-        "recipientRosterPosition",
         "recipientRosterPosition",
         PrivateVssRefusalCode::missing("recipientRosterPositionMissing"),
         "recipientRosterPosition must be provided for private VSS proof generation",
@@ -208,7 +203,6 @@ pub(crate) fn generate_private_vss_share_proof_from_request(
     )?;
     let proof_randomness_seed_hex = string_field(
         request,
-        "proofRandomnessSeedHex",
         "proofRandomnessSeedHex",
         PrivateVssRefusalCode::missing("proofRandomnessSeedMissing"),
         "proofRandomnessSeedHex must be provided for private VSS proof generation",
@@ -316,8 +310,8 @@ fn u64_matrix_field(
     code: PrivateVssRefusalCode,
     message: impl Into<String>,
 ) -> CanonicalResult<Vec<Vec<u64>>> {
-    let rows = array_field(value, field_name, object_path, code, message)
-        .map_err(private_vss_refusal_to_error)?;
+    let rows =
+        array_field(value, field_name, code, message).map_err(private_vss_refusal_to_error)?;
     rows.iter()
         .enumerate()
         .map(|(row_index, row)| {
@@ -352,8 +346,8 @@ fn i128_matrix4_field(
     code: PrivateVssRefusalCode,
     message: impl Into<String>,
 ) -> CanonicalResult<Vec<Vec<Vec<Vec<i128>>>>> {
-    let outer_rows = array_field(value, field_name, object_path, code, message)
-        .map_err(private_vss_refusal_to_error)?;
+    let outer_rows =
+        array_field(value, field_name, code, message).map_err(private_vss_refusal_to_error)?;
     outer_rows
         .iter()
         .enumerate()

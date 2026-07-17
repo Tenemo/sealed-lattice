@@ -87,8 +87,9 @@ fn linkage_statement(
     })
 }
 
-// The key-bearing statement checks shared by prove and verify: at least one
-// key and every kind diagonal (public-key shares stay on their own family).
+// The key-bearing statement checks shared by prove and verify. Public-key
+// shares have their own statement family, so every descriptor here is a
+// diagonal-source evaluation key.
 fn validate_key_bearing_statement(
     statement: &TrusteeEvaluationKeyStatement,
 ) -> CanonicalResult<()> {
@@ -97,25 +98,13 @@ fn validate_key_bearing_statement(
             "a key-bearing trustee evaluation-key statement lists at least one key",
         ));
     }
-    if statement
-        .keys()
-        .iter()
-        .any(|key| !key.kind.has_diagonal_source())
-    {
-        return Err(invalid_schedule(
-            "public-key share descriptors do not belong to the key-bearing schedule",
-        ));
-    }
     Ok(())
 }
 
-// Whether a statement routes to the atom schedule backend (any diagonal-source
-// key) rather than the shared succinct engine.
+// Whether a statement routes to the atom schedule backend rather than the
+// shared succinct engine.
 pub(crate) fn statement_is_key_bearing(statement: &TrusteeEvaluationKeyStatement) -> bool {
-    statement
-        .keys()
-        .iter()
-        .any(|key| key.kind.has_diagonal_source())
+    !statement.keys().is_empty()
 }
 
 // Each scheduled proof gets a distinct private mask/salt stream. The caller's

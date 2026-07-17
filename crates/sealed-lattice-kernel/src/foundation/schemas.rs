@@ -289,39 +289,7 @@ pub struct Roster {
 
 impl Roster {
     pub fn new(entries: Vec<RosterEntry>) -> SchemaResult<Self> {
-        let participant_count = u16::try_from(entries.len()).ok();
-        if participant_count
-            .and_then(derive_foundation_roster_parameters)
-            .is_none()
-        {
-            return Err(FoundationSchemaError::new(
-                RefusalReason::OutsideSupportedProfile,
-                "roster size is outside the configurable range",
-            ));
-        }
-        let mut signing_keys = BTreeSet::new();
-        let mut mailbox_keys = BTreeSet::new();
-        let mut participant_identities = BTreeSet::new();
-        for (entry_index, entry) in entries.iter().enumerate() {
-            entry.validate()?;
-            if usize::from(entry.roster_position) != entry_index {
-                return Err(FoundationSchemaError::new(
-                    RefusalReason::WrongTypeOrLength,
-                    "roster positions must be consecutive and canonically ordered",
-                ));
-            }
-            let participant_identity =
-                derive_participant_identity(&entry.signing_verification_key)?;
-            if !signing_keys.insert(entry.signing_verification_key.as_slice())
-                || !mailbox_keys.insert(entry.mailbox_encapsulation_key.as_slice())
-                || !participant_identities.insert(participant_identity)
-            {
-                return Err(FoundationSchemaError::new(
-                    RefusalReason::DuplicateIdentity,
-                    "roster contains a duplicate identity, signing key, or mailbox key",
-                ));
-            }
-        }
+        validate_roster_entries(&entries)?;
         Ok(Self { entries })
     }
 
@@ -336,7 +304,7 @@ impl Roster {
     }
 
     pub fn encode(&self) -> SchemaResult<Vec<u8>> {
-        Self::new(self.entries.clone())?;
+        validate_roster_entries(&self.entries)?;
         let entries = self
             .entries
             .iter()
@@ -383,6 +351,42 @@ impl Roster {
             &[CanonicalItem::variable_bytes(self.encode()?)?],
         )?)
     }
+}
+
+fn validate_roster_entries(entries: &[RosterEntry]) -> SchemaResult<()> {
+    let participant_count = u16::try_from(entries.len()).ok();
+    if participant_count
+        .and_then(derive_foundation_roster_parameters)
+        .is_none()
+    {
+        return Err(FoundationSchemaError::new(
+            RefusalReason::OutsideSupportedProfile,
+            "roster size is outside the configurable range",
+        ));
+    }
+    let mut signing_keys = BTreeSet::new();
+    let mut mailbox_keys = BTreeSet::new();
+    let mut participant_identities = BTreeSet::new();
+    for (entry_index, entry) in entries.iter().enumerate() {
+        entry.validate()?;
+        if usize::from(entry.roster_position) != entry_index {
+            return Err(FoundationSchemaError::new(
+                RefusalReason::WrongTypeOrLength,
+                "roster positions must be consecutive and canonically ordered",
+            ));
+        }
+        let participant_identity = derive_participant_identity(&entry.signing_verification_key)?;
+        if !signing_keys.insert(entry.signing_verification_key.as_slice())
+            || !mailbox_keys.insert(entry.mailbox_encapsulation_key.as_slice())
+            || !participant_identities.insert(participant_identity)
+        {
+            return Err(FoundationSchemaError::new(
+                RefusalReason::DuplicateIdentity,
+                "roster contains a duplicate identity, signing key, or mailbox key",
+            ));
+        }
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

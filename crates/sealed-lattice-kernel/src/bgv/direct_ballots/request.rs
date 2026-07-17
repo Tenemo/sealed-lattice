@@ -20,7 +20,3 @@ pub(super) fn direct_ballot_slots(scores: &[u64]) -> Vec<u64> {
     slots[..OPTION_COUNT].copy_from_slice(scores);
     slots
 }
-
-pub(super) fn setup_package_hash(setup_package: &Value) -> CanonicalResult<String> {
-    crate::bgv::setup::derive_collective_setup_package_hash(setup_package)
-}

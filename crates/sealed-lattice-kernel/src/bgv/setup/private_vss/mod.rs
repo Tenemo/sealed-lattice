@@ -65,7 +65,6 @@ pub(crate) fn derive_private_vss_share_statement_hash_from_request(
     let public_matrix_seed_hash = hash_string_field(
         request,
         "publicMatrixSeedHash",
-        "publicMatrixSeedHash",
         PrivateVssRefusalCode::missing("publicMatrixSeedHashMissing"),
         "publicMatrixSeedHash must be provided for private VSS statement derivation",
     )
@@ -73,7 +72,6 @@ pub(crate) fn derive_private_vss_share_statement_hash_from_request(
     validate_hash_string(public_matrix_seed_hash, "publicMatrixSeedHash")?;
     let private_envelope_aad_hash = hash_string_field(
         request,
-        "privateEnvelopeAadHash",
         "privateEnvelopeAadHash",
         PrivateVssRefusalCode::missing("privateEnvelopeAadHashMissing"),
         "privateEnvelopeAadHash must be provided for private VSS statement derivation",
@@ -83,7 +81,6 @@ pub(crate) fn derive_private_vss_share_statement_hash_from_request(
     let source_trustee_identity = string_field(
         request,
         "sourceTrusteeIdentity",
-        "sourceTrusteeIdentity",
         PrivateVssRefusalCode::missing("sourceTrusteeIdentityMissing"),
         "sourceTrusteeIdentity must be provided for private VSS statement derivation",
     )
@@ -91,14 +88,12 @@ pub(crate) fn derive_private_vss_share_statement_hash_from_request(
     let source_trustee_roster_position = u64_field(
         request,
         "sourceTrusteeRosterPosition",
-        "sourceTrusteeRosterPosition",
         PrivateVssRefusalCode::missing("sourceTrusteeRosterPositionMissing"),
         "sourceTrusteeRosterPosition must be provided for private VSS statement derivation",
     )
     .map_err(private_vss_refusal_to_error)?;
     let recipient_roster_position = u64_field(
         request,
-        "recipientRosterPosition",
         "recipientRosterPosition",
         PrivateVssRefusalCode::missing("recipientRosterPositionMissing"),
         "recipientRosterPosition must be provided for private VSS statement derivation",
@@ -143,7 +138,6 @@ pub(crate) fn derive_private_vss_share_statement_hash_from_request(
     }
     let material_records = array_field(
         request,
-        "sourceTrusteeCoefficientCommitmentMaterialRecords",
         "sourceTrusteeCoefficientCommitmentMaterialRecords",
         PrivateVssRefusalCode::missing("sourceTrusteeCommitmentMaterialMissing"),
         "sourceTrusteeCoefficientCommitmentMaterialRecords must be provided for private VSS statement derivation",
@@ -231,7 +225,6 @@ fn verify_private_vss_share_envelope_inner(
     let public_matrix_seed_hash = match hash_string_field(
         request,
         "publicMatrixSeedHash",
-        "publicMatrixSeedHash",
         PrivateVssRefusalCode::missing("publicMatrixSeedHashMissing"),
         "publicMatrixSeedHash must be provided for private VSS verification",
     ) {
@@ -261,7 +254,6 @@ fn verify_private_vss_share_envelope_inner(
     let source_trustee_roster_position = match u64_field(
         private_envelope,
         "sourceTrusteeRosterPosition",
-        "privateEnvelope.sourceTrusteeRosterPosition",
         PrivateVssRefusalCode::missing("sourceTrusteeRosterPositionMissing"),
         "privateEnvelope.sourceTrusteeRosterPosition is required",
     ) {
@@ -279,7 +271,6 @@ fn verify_private_vss_share_envelope_inner(
     };
     let material_records = match array_field(
         request,
-        "sourceTrusteeCoefficientCommitmentMaterialRecords",
         "sourceTrusteeCoefficientCommitmentMaterialRecords",
         PrivateVssRefusalCode::missing("sourceTrusteeCommitmentMaterialMissing"),
         "sourceTrusteeCoefficientCommitmentMaterialRecords must provide full public commitment material for private VSS verification",
@@ -328,7 +319,6 @@ fn verify_private_vss_share_envelope_inner(
             return Ok(Err(PrivateVssRefusal::new(
                 PrivateVssRefusalCode::wrong_hash("expectedPrivateEnvelopeHashMismatch"),
                 "computed private envelope hash does not match expectedPrivateEnvelopeHash",
-                "expectedPrivateEnvelopeHash",
             )));
         }
     }

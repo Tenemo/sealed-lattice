@@ -116,7 +116,6 @@ export const resolveProcessMemoryLimitGigabytes = (input: {
 export const createProcessMemoryGuard = (input: {
     readonly insufficientFreeMemoryRunDescription: string;
     readonly memoryLimitEnvironmentVariable?: string;
-    readonly virtualAddressSpaceAllowanceBytes?: number;
 }): ProcessMemoryGuard => {
     const automaticMemoryLimitGigabytes = deriveProcessMemoryLimitGigabytes({
         freeMemoryGigabytes: os.freemem() / bytesPerGigabyte,
@@ -129,16 +128,6 @@ export const createProcessMemoryGuard = (input: {
         memoryLimitEnvironmentVariable: input.memoryLimitEnvironmentVariable,
     });
     const memoryLimitBytes = memoryLimitGigabytes * bytesPerGigabyte;
-    const virtualAddressSpaceAllowanceBytes =
-        input.virtualAddressSpaceAllowanceBytes ?? 0;
-    if (
-        !Number.isSafeInteger(virtualAddressSpaceAllowanceBytes) ||
-        virtualAddressSpaceAllowanceBytes < 0
-    ) {
-        throw new Error(
-            'Virtual address-space allowance must be a non-negative safe integer.',
-        );
-    }
     const processMemoryGuardTargetDirectory = path.resolve(
         process.cwd(),
         'target',
@@ -169,12 +158,6 @@ export const createProcessMemoryGuard = (input: {
                 args: [
                     '--memory-limit-bytes',
                     String(options.memoryLimitBytes ?? memoryLimitBytes),
-                    ...(virtualAddressSpaceAllowanceBytes === 0
-                        ? []
-                        : [
-                              '--virtual-address-space-allowance-bytes',
-                              String(virtualAddressSpaceAllowanceBytes),
-                          ]),
                     ...(options.diagnosticsPath === undefined
                         ? []
                         : ['--diagnostics-path', options.diagnosticsPath]),

@@ -10,7 +10,7 @@ use super::board_ingestion::{
     CanonicalBoardLimits, CanonicalBoardVerifier, MAXIMUM_CANONICAL_BOARD_BATCH_CARRIER_COUNT,
     VerifiedTranscriptObject,
 };
-use super::runtime_input::RuntimeInputReader as InputReader;
+use super::runtime_input::{RuntimeInputReader as InputReader, refusal_status};
 use super::{
     ActionContext, ActionDefinition, BoardPolicy, CanonicalDecodeLimits, CeremonyContext,
     FOUNDATION_PROFILE, FoundationObjectType, Hash512, Manifest, ParticipantIdentity,
@@ -632,8 +632,4 @@ fn with_runtime_registry<Value>(
         }
     };
     operation(&mut registry)
-}
-
-const fn refusal_status(refusal_reason: RefusalReason) -> u32 {
-    refusal_reason.canonical_code() as u32
 }

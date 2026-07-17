@@ -17,7 +17,6 @@ pub(super) fn verify_private_envelope_header(
         return Ok(Err(PrivateVssRefusal::new(
             PrivateVssRefusalCode::wrong_type("privateEnvelopeTypeMismatch"),
             "privateEnvelope.objectType must be PrivateVssShareEnvelope",
-            "privateEnvelope.objectType",
         )));
     }
     if let Err(refusal) = compare_context_fields(private_envelope, setup_context, "privateEnvelope")
@@ -32,14 +31,12 @@ pub(super) fn verify_private_envelope_header(
         return Ok(Err(PrivateVssRefusal::new(
             PrivateVssRefusalCode::wrong_hash("privateEnvelopePublicMatrixSeedMismatch"),
             "privateEnvelope.publicMatrixSeedHash must match publicMatrixSeedHash",
-            "privateEnvelope.publicMatrixSeedHash",
         )));
     }
 
     let source_trustee_identity = match string_field(
         private_envelope,
         "sourceTrusteeIdentity",
-        "privateEnvelope.sourceTrusteeIdentity",
         PrivateVssRefusalCode::missing("privateEnvelopeSourceTrusteeMissing"),
         "privateEnvelope.sourceTrusteeIdentity is required",
     ) {
@@ -49,7 +46,6 @@ pub(super) fn verify_private_envelope_header(
     let source_trustee_roster_position = match u64_field(
         private_envelope,
         "sourceTrusteeRosterPosition",
-        "privateEnvelope.sourceTrusteeRosterPosition",
         PrivateVssRefusalCode::missing("privateEnvelopeSourceTrusteePositionMissing"),
         "privateEnvelope.sourceTrusteeRosterPosition is required",
     ) {
@@ -62,7 +58,6 @@ pub(super) fn verify_private_envelope_header(
         return Ok(Err(PrivateVssRefusal::new(
             PrivateVssRefusalCode::wrong_context("privateEnvelopeSourceTrusteeMismatch"),
             "privateEnvelope source trustee binding must match sourceTrusteeCoefficientCommitmentRecord",
-            "privateEnvelope.sourceTrusteeIdentity",
         )));
     }
     if private_envelope
@@ -77,14 +72,12 @@ pub(super) fn verify_private_envelope_header(
         return Ok(Err(PrivateVssRefusal::new(
             PrivateVssRefusalCode::wrong_hash("privateEnvelopeSourceTrusteeCommitmentRootMismatch"),
             "privateEnvelope.sourceTrusteeCommitmentRoot must match the accepted source trustee commitment root",
-            "privateEnvelope.sourceTrusteeCommitmentRoot",
         )));
     }
 
     if let Err(refusal) = string_field(
         private_envelope,
         "recipientIdentity",
-        "privateEnvelope.recipientIdentity",
         PrivateVssRefusalCode::missing("privateEnvelopeRecipientMissing"),
         "privateEnvelope.recipientIdentity is required",
     ) {
@@ -93,7 +86,6 @@ pub(super) fn verify_private_envelope_header(
     let recipient_roster_position = match u64_field(
         private_envelope,
         "recipientRosterPosition",
-        "privateEnvelope.recipientRosterPosition",
         PrivateVssRefusalCode::missing("privateEnvelopeRecipientPositionMissing"),
         "privateEnvelope.recipientRosterPosition is required",
     ) {
@@ -105,13 +97,11 @@ pub(super) fn verify_private_envelope_header(
         return Ok(Err(PrivateVssRefusal::new(
             PrivateVssRefusalCode::wrong_type("privateEnvelopeRecipientPositionInvalid"),
             "privateEnvelope.recipientRosterPosition is outside the setup roster",
-            "privateEnvelope.recipientRosterPosition",
         )));
     }
     let private_envelope_aad_hash = match hash_string_field(
         private_envelope,
         "privateEnvelopeAadHash",
-        "privateEnvelope.privateEnvelopeAadHash",
         PrivateVssRefusalCode::missing("privateEnvelopeAadHashMissing"),
         "privateEnvelope.privateEnvelopeAadHash is required",
     ) {
@@ -142,7 +132,6 @@ pub(super) fn verify_private_envelope_limbs(
     let rns_share_openings = match array_field(
         private_envelope,
         "rnsShareOpenings",
-        "privateEnvelope.rnsShareOpenings",
         PrivateVssRefusalCode::missing("privateEnvelopeOpeningsMissing"),
         "privateEnvelope.rnsShareOpenings is required",
     ) {
@@ -153,7 +142,6 @@ pub(super) fn verify_private_envelope_limbs(
         return Ok(Err(PrivateVssRefusal::new(
             PrivateVssRefusalCode::wrong_type("privateEnvelopeRnsOpeningCountMismatch"),
             "privateEnvelope.rnsShareOpenings must contain one opening for every accepted Q_share limb",
-            "privateEnvelope.rnsShareOpenings",
         )));
     }
 
@@ -175,7 +163,6 @@ pub(super) fn verify_private_envelope_limbs(
             return Ok(Err(PrivateVssRefusal::new(
                 PrivateVssRefusalCode::equivocation("privateEnvelopeRnsOpeningDuplicate"),
                 "privateEnvelope.rnsShareOpenings must have distinct rnsLimbIndex values",
-                "privateEnvelope.rnsShareOpenings",
             )));
         }
         match ring_degree {
@@ -183,7 +170,6 @@ pub(super) fn verify_private_envelope_limbs(
                 return Ok(Err(PrivateVssRefusal::new(
                     PrivateVssRefusalCode::wrong_type("privateEnvelopeRingDegreeMismatch"),
                     "all private VSS limb openings must use the same ring degree",
-                    "privateEnvelope.rnsShareOpenings",
                 )));
             }
             Some(_) => {}
@@ -213,7 +199,6 @@ fn verify_private_envelope_limb(
         return Ok(Err(PrivateVssRefusal::new(
             PrivateVssRefusalCode::wrong_type("privateVssLimbOpeningTypeMismatch"),
             "private VSS limb opening objectType must be PrivateVssShareLimbOpening",
-            "privateEnvelope.rnsShareOpenings.objectType",
         )));
     }
     let rns_limb_index = match usize_field(
@@ -230,7 +215,6 @@ fn verify_private_envelope_limb(
         return Ok(Err(PrivateVssRefusal::new(
             PrivateVssRefusalCode::wrong_type("privateVssRnsLimbIndexInvalid"),
             "private VSS limb opening rnsLimbIndex must select Q_share",
-            "privateEnvelope.rnsShareOpenings.rnsLimbIndex",
         )));
     }
 
@@ -249,7 +233,6 @@ fn verify_private_envelope_limb(
         return Ok(Err(PrivateVssRefusal::new(
             PrivateVssRefusalCode::wrong_type("privateVssShareValuesEmpty"),
             "private VSS share vector must be non-empty",
-            "privateEnvelope.rnsShareOpenings.shareValues",
         )));
     }
 
@@ -266,7 +249,6 @@ fn verify_private_envelope_limb(
             return Ok(Err(PrivateVssRefusal::new(
                 PrivateVssRefusalCode::missing("privateVssCoefficientCommitmentRootMissing"),
                 "source trustee commitment record must include every coefficient root for the private VSS limb",
-                "sourceTrusteeCoefficientCommitmentRecord.coefficientCommitmentRoots",
             )));
         };
         let Some(material_binding) =
@@ -275,7 +257,6 @@ fn verify_private_envelope_limb(
             return Ok(Err(PrivateVssRefusal::new(
                 PrivateVssRefusalCode::missing("privateVssCoefficientCommitmentMaterialMissing"),
                 "private VSS limb references coefficient commitment material that was not provided",
-                "sourceTrusteeCoefficientCommitmentMaterialRecords",
             )));
         };
         if material_binding.commitment_root != commitment_root {
@@ -284,7 +265,6 @@ fn verify_private_envelope_limb(
                     "privateVssCoefficientCommitmentMaterialRootMismatch",
                 ),
                 "coefficient commitment material root must match the source trustee commitment record",
-                "sourceTrusteeCoefficientCommitmentMaterialRecords",
             )));
         }
         coefficient_commitment_roots.push(commitment_root);
@@ -294,7 +274,6 @@ fn verify_private_envelope_limb(
     let private_vss_share_proof_bytes_hash = match hash_string_field(
         limb_opening,
         "privateVssShareProofBytesHash",
-        "privateEnvelope.rnsShareOpenings.privateVssShareProofBytesHash",
         PrivateVssRefusalCode::missing("privateVssShareProofBytesHashMissing"),
         "private VSS limb opening must include its recipient-local proof bytes hash",
     ) {
@@ -320,7 +299,6 @@ fn verify_private_envelope_limb(
         return Ok(Err(PrivateVssRefusal::new(
             PrivateVssRefusalCode::invalid_proof("privateVssShareProofVerificationFailed"),
             error.message,
-            "privateEnvelope.rnsShareOpenings.privateVssShareProofBytesHash",
         )));
     }
 

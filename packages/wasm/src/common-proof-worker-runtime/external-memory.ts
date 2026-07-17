@@ -1,5 +1,7 @@
 import { shake256 } from '@noble/hashes/sha3.js';
 
+import { byteArraysEqual } from '../byte-array.js';
+
 const hashByteLength = 64;
 export const maximumWorkerOperationCount = 4_096;
 export const maximumWorkerPayloadByteLength = 1_048_576n;
@@ -170,20 +172,6 @@ const unsigned64Bytes = (value: bigint): Uint8Array<ArrayBuffer> => {
     const bytes = new Uint8Array(8);
     new DataView(bytes.buffer).setBigUint64(0, value, true);
     return bytes;
-};
-
-export const byteArraysEqual = (
-    left: Uint8Array,
-    right: Uint8Array,
-): boolean => {
-    if (left.byteLength !== right.byteLength) {
-        return false;
-    }
-    let difference = 0;
-    for (let byteIndex = 0; byteIndex < left.byteLength; byteIndex += 1) {
-        difference |= left[byteIndex] ^ right[byteIndex];
-    }
-    return difference === 0;
 };
 
 class BoundedMessageReader {

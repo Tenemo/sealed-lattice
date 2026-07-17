@@ -117,7 +117,6 @@ export type CanonicalStreamRuntimeCounterSnapshot = Readonly<{
     failedSessionCount: number;
     javascriptToWasmPayloadCopyCount: number;
     maximumObservedCopiedPayloadByteLength: number;
-    maximumObservedResidentPayloadChunkCount: number;
     maximumObservedWasmMemoryByteLength: number;
     startedSessionCount: number;
     wasmToJavascriptPayloadCopyCount: number;
@@ -389,7 +388,6 @@ class CanonicalStreamWorkerRuntimeImplementation implements CanonicalStreamWorke
             failedSessionCount: 0,
             javascriptToWasmPayloadCopyCount: 0,
             maximumObservedCopiedPayloadByteLength: 0,
-            maximumObservedResidentPayloadChunkCount: 0,
             maximumObservedWasmMemoryByteLength:
                 context.memory.buffer.byteLength,
             startedSessionCount: 0,
@@ -1008,10 +1006,6 @@ class CanonicalStreamWorkerRuntimeImplementation implements CanonicalStreamWorke
         this.#counters.maximumObservedCopiedPayloadByteLength = Math.max(
             this.#counters.maximumObservedCopiedPayloadByteLength,
             bytes.byteLength,
-        );
-        this.#counters.maximumObservedResidentPayloadChunkCount = Math.max(
-            this.#counters.maximumObservedResidentPayloadChunkCount,
-            2,
         );
         return pointer;
     }

@@ -66,7 +66,7 @@ pub(crate) fn evaluate_rank_lookup(
         ));
     }
     let polynomial = interpolate_coefficients(values)?;
-    evaluate_polynomial_with_fixed_baby_step_count_and_deferred_terminal_switch(
+    evaluate_polynomial_with_fixed_baby_step_count(
         context,
         normalized_rank,
         &polynomial,

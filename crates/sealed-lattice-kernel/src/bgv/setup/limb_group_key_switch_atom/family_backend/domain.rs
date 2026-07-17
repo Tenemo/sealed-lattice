@@ -210,20 +210,6 @@ impl<'a, const LIMB_COUNT: usize> CyclicDomain<'a, LIMB_COUNT> {
     }
 }
 
-// Evaluate one coefficient vector (low to high) at an arbitrary field point by
-// Horner's rule. Used for out-of-domain (DEEP) evaluations.
-pub(super) fn evaluate_polynomial_at<const LIMB_COUNT: usize>(
-    parameters: &ProofFieldParameters<LIMB_COUNT>,
-    coefficients: &[[u64; LIMB_COUNT]],
-    point: &[u64; LIMB_COUNT],
-) -> [u64; LIMB_COUNT] {
-    let mut accumulator = parameters.zero();
-    for coefficient in coefficients.iter().rev() {
-        accumulator = parameters.add(&parameters.multiply(&accumulator, point), coefficient);
-    }
-    accumulator
-}
-
 // The `blowup`-times low-degree extension of a trace polynomial (given by its
 // `trace_size` values on the trace subgroup) evaluated on the coset `offset *
 // K`, `K` the subgroup of order `trace_size * blowup`. Returns the coset
@@ -400,6 +386,7 @@ mod tests {
         eight_limb_group_field_parameters, sixteen_limb_group_field_parameters,
     };
     use super::*;
+    use crate::bgv::setup::limb_group_key_switch_atom::family_backend::polynomial::evaluate;
 
     fn deterministic_values<const LIMB_COUNT: usize>(
         parameters: &ProofFieldParameters<LIMB_COUNT>,
@@ -508,7 +495,7 @@ mod tests {
         let values = domain.evaluate(&coefficients);
         for index in [0_usize, 1, 7, 31, 63] {
             let point = domain.point(index);
-            let expected = evaluate_polynomial_at(&parameters, &coefficients, &point);
+            let expected = evaluate(&parameters, &coefficients, &point);
             assert_eq!(values[index], expected, "point {index}");
         }
     }
@@ -554,7 +541,7 @@ mod tests {
         // Each coset value must equal the polynomial evaluated at offset * K^i.
         for index in [0_usize, 1, 5, 63, 127] {
             let point = parameters.multiply(&offset, &coset_domain.point(index));
-            let expected = evaluate_polynomial_at(&parameters, &coefficients, &point);
+            let expected = evaluate(&parameters, &coefficients, &point);
             assert_eq!(coset_values[index], expected, "coset point {index}");
         }
     }

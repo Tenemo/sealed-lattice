@@ -20,8 +20,7 @@ use crate::bgv::{
     evaluator::{
         circuit::{
             EvaluatorContext, broadcast_constant_coefficients,
-            evaluate_polynomial_with_fixed_baby_step_count_and_deferred_terminal_switch,
-            modulus_switch_to, normalize_scaling,
+            evaluate_polynomial_with_fixed_baby_step_count, modulus_switch_to, normalize_scaling,
         },
         engine::{
             Ciphertext, add_plaintext_coefficients, ciphertext_add, ciphertext_negate,

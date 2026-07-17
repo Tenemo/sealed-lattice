@@ -289,7 +289,7 @@ export const determineNpmPublication = async (input: {
         packageVersion: input.releaseVersion,
         registryLookup,
     });
-    return publicationDisposition.action;
+    return publicationDisposition;
 };
 
 export const determineGitHubRelease = async (input: {
@@ -310,7 +310,7 @@ export const determineGitHubRelease = async (input: {
             workingDirectoryPath: repositoryRoot,
         }),
         tag: input.tag,
-    }).action;
+    });
 };
 
 export const verifyCheckedOutReleaseTag = async (input: {

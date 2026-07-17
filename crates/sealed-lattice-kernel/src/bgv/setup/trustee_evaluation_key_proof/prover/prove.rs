@@ -19,7 +19,7 @@ use super::super::relation::{
 use super::super::{
     COMMITMENT_BOUND_FACTOR, DEEP_EVALUATION_POINT_COUNT, LOW_DEGREE_QUERY_COUNT,
     MAIN_LOW_DEGREE_TRANSCRIPT_PURPOSE, MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT,
-    SUMCHECK_RESIDUAL_LOW_DEGREE_TRANSCRIPT_PURPOSE, invalid_succinct_setup_proof,
+    SUMCHECK_RESIDUAL_LOW_DEGREE_TRANSCRIPT_PURPOSE, bigint_residue, invalid_succinct_setup_proof,
 };
 use super::challenges::{build_limb_public_vectors, draw_limb_challenges};
 use super::claim_masking::{global_claim_id, global_claim_integers};
@@ -37,7 +37,6 @@ use crate::bgv::modular_arithmetic::{inverse_mod, mul_mod_fast, sub_mod_fast};
 use crate::bgv::parameters::DATA_PRIMES;
 use crate::encoding::CanonicalResult;
 use num_bigint::BigInt;
-use num_traits::ToPrimitive;
 
 #[cfg(not(target_arch = "wasm32"))]
 use rayon::prelude::*;
@@ -572,14 +571,6 @@ fn extension_codeword_degree(
     }
 
     Ok(highest_nonzero_coefficient)
-}
-
-fn bigint_residue(value: &BigInt, modulus: u64) -> CanonicalResult<u64> {
-    let modulus_integer = BigInt::from(modulus);
-    let residue = ((value % &modulus_integer) + &modulus_integer) % &modulus_integer;
-    residue
-        .to_u64()
-        .ok_or_else(|| invalid_succinct_setup_proof("masked consistency residue does not fit u64"))
 }
 
 pub(crate) fn prove_evaluation_key_share(

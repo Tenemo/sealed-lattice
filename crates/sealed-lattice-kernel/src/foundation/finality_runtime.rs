@@ -6,7 +6,7 @@ use std::{
 use subtle::ConstantTimeEq;
 use zeroize::Zeroizing;
 
-use super::runtime_input::RuntimeInputReader as InputReader;
+use super::runtime_input::{RuntimeInputReader as InputReader, refusal_status};
 use super::{
     CanonicalDecodeLimits, FOUNDATION_PROFILE, FinalityCertificate, FinalityStatement,
     FinalityVerificationInput, FinalityVerifier, Hash512, RefusalReason, Roster,
@@ -416,8 +416,4 @@ fn with_evaluator_replay_registry<Value>(
         }
     };
     operation(&mut registry)
-}
-
-const fn refusal_status(refusal_reason: RefusalReason) -> u32 {
-    refusal_reason.canonical_code() as u32
 }

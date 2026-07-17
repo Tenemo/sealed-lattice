@@ -36,7 +36,6 @@ pub(super) fn verify_setup_context(
             return Ok(Err(PrivateVssRefusal::new(
                 PrivateVssRefusalCode::missing("setupContextFieldMissing"),
                 format!("setupContext.{field_name} is required"),
-                format!("setupContext.{field_name}"),
             )));
         }
     }
@@ -44,7 +43,6 @@ pub(super) fn verify_setup_context(
         let hash = match hash_string_field(
             setup_context,
             field_name,
-            &format!("setupContext.{field_name}"),
             PrivateVssRefusalCode::malformed("setupContextHashMalformed"),
             format!("setupContext.{field_name} must be a protocol hash"),
         ) {
@@ -56,7 +54,6 @@ pub(super) fn verify_setup_context(
     if string_field(
         setup_context,
         "ceremonyId",
-        "setupContext.ceremonyId",
         PrivateVssRefusalCode::missing("setupContextCeremonyMissing"),
         "setupContext.ceremonyId must be a non-empty string",
     )
@@ -65,13 +62,11 @@ pub(super) fn verify_setup_context(
         return Ok(Err(PrivateVssRefusal::new(
             PrivateVssRefusalCode::missing("setupContextCeremonyMissing"),
             "setupContext.ceremonyId must be a non-empty string",
-            "setupContext.ceremonyId",
         )));
     }
     if string_field(
         setup_context,
         "setupEpoch",
-        "setupContext.setupEpoch",
         PrivateVssRefusalCode::missing("setupContextEpochMissing"),
         "setupContext.setupEpoch must be a non-empty string",
     )
@@ -80,7 +75,6 @@ pub(super) fn verify_setup_context(
         return Ok(Err(PrivateVssRefusal::new(
             PrivateVssRefusalCode::missing("setupContextEpochMissing"),
             "setupContext.setupEpoch must be a non-empty string",
-            "setupContext.setupEpoch",
         )));
     }
 
@@ -100,7 +94,6 @@ pub(super) fn verify_setup_context(
         return Ok(Err(PrivateVssRefusal::new(
             PrivateVssRefusalCode::wrong_hash("setupParametersHashMismatch"),
             "setupContext.setupParametersHash does not match the roster-derived collective BGV setup parameters",
-            "setupContext.setupParametersHash",
         )));
     }
 
@@ -120,13 +113,11 @@ pub(super) fn verify_source_trustee_commitment_record(
         return Ok(Err(PrivateVssRefusal::new(
             PrivateVssRefusalCode::wrong_type("sourceTrusteeCommitmentRecordTypeMismatch"),
             "sourceTrusteeCoefficientCommitmentRecord.objectType must be VssSourceTrusteeCoefficientCommitments",
-            "sourceTrusteeCoefficientCommitmentRecord.objectType",
         )));
     }
     let source_trustee_identity = match string_field(
         source_trustee_record,
         "sourceTrusteeIdentity",
-        "sourceTrusteeCoefficientCommitmentRecord.sourceTrusteeIdentity",
         PrivateVssRefusalCode::missing("sourceTrusteeIdentityMissing"),
         "sourceTrusteeCoefficientCommitmentRecord.sourceTrusteeIdentity is required",
     ) {
@@ -136,7 +127,6 @@ pub(super) fn verify_source_trustee_commitment_record(
     let coefficient_commitment_root_values = match array_field(
         source_trustee_record,
         "coefficientCommitmentRoots",
-        "sourceTrusteeCoefficientCommitmentRecord.coefficientCommitmentRoots",
         PrivateVssRefusalCode::missing("sourceTrusteeCoefficientCommitmentsMissing"),
         "sourceTrusteeCoefficientCommitmentRecord.coefficientCommitmentRoots is required",
     ) {
@@ -149,7 +139,6 @@ pub(super) fn verify_source_trustee_commitment_record(
         return Ok(Err(PrivateVssRefusal::new(
             PrivateVssRefusalCode::wrong_type("sourceTrusteeCoefficientCommitmentCountMismatch"),
             "sourceTrusteeCoefficientCommitmentRecord.coefficientCommitmentRoots must contain every Q_share limb and Shamir coefficient",
-            "sourceTrusteeCoefficientCommitmentRecord.coefficientCommitmentRoots",
         )));
     }
 
@@ -168,7 +157,6 @@ pub(super) fn verify_source_trustee_commitment_record(
                     "sourceTrusteeCoefficientCommitmentRootMalformed",
                 ),
                 "source trustee coefficient commitment roots must be protocol hashes",
-                "sourceTrusteeCoefficientCommitmentRecord.coefficientCommitmentRoots",
             )));
         };
         validate_hash_string(
@@ -208,7 +196,6 @@ pub(super) fn verify_coefficient_commitment_material_records(
         return Ok(Err(PrivateVssRefusal::new(
             PrivateVssRefusalCode::wrong_type("sourceTrusteeCommitmentMaterialCountMismatch"),
             "sourceTrusteeCoefficientCommitmentMaterialRecords must contain full public commitment material for every Q_share limb and Shamir coefficient",
-            "sourceTrusteeCoefficientCommitmentMaterialRecords",
         )));
     }
 
@@ -244,7 +231,6 @@ fn verify_coefficient_commitment_material_record(
             return Ok(Err(PrivateVssRefusal::new(
                 PrivateVssRefusalCode::wrong_type("sourceTrusteeCommitmentMaterialInvalid"),
                 error.message,
-                "sourceTrusteeCoefficientCommitmentMaterialRecords",
             )));
         }
     };
@@ -254,7 +240,6 @@ fn verify_coefficient_commitment_material_record(
         return Ok(Err(PrivateVssRefusal::new(
             PrivateVssRefusalCode::wrong_type("sourceTrusteeCommitmentMaterialDomainMismatch"),
             "full setup commitment domain must match its canonical material position",
-            "sourceTrusteeCoefficientCommitmentMaterialRecords",
         )));
     }
     let commitment_root = setup_commitment_root(&commitment)?;
@@ -267,7 +252,6 @@ fn verify_coefficient_commitment_material_record(
         return Ok(Err(PrivateVssRefusal::new(
             PrivateVssRefusalCode::wrong_hash("sourceTrusteeCommitmentMaterialRootMismatch"),
             "full setup commitment material must match the source trustee coefficient commitment record",
-            "sourceTrusteeCoefficientCommitmentMaterialRecords",
         )));
     }
 

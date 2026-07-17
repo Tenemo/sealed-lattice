@@ -20,8 +20,6 @@ use command::run_transcript_core_command_inner;
 #[serde(rename_all = "PascalCase")]
 pub enum CanonicalErrorCode {
     DuplicateField,
-    FixtureMismatch,
-    InvalidChunkSize,
     InvalidEnum,
     InvalidProtocolObject,
     InvalidHex,
@@ -32,7 +30,6 @@ pub enum CanonicalErrorCode {
     NonCanonicalVarUint,
     ComponentMismatch,
     TrailingBytes,
-    UnsupportedObjectType,
     UnsupportedObjectVersion,
 }
 
@@ -40,8 +37,6 @@ impl CanonicalErrorCode {
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::DuplicateField => "DuplicateField",
-            Self::FixtureMismatch => "FixtureMismatch",
-            Self::InvalidChunkSize => "InvalidChunkSize",
             Self::InvalidEnum => "InvalidEnum",
             Self::InvalidProtocolObject => "InvalidProtocolObject",
             Self::InvalidHex => "InvalidHex",
@@ -52,7 +47,6 @@ impl CanonicalErrorCode {
             Self::NonCanonicalVarUint => "NonCanonicalVarUint",
             Self::ComponentMismatch => "ComponentMismatch",
             Self::TrailingBytes => "TrailingBytes",
-            Self::UnsupportedObjectType => "UnsupportedObjectType",
             Self::UnsupportedObjectVersion => "UnsupportedObjectVersion",
         }
     }

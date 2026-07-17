@@ -61,8 +61,8 @@ pub use authenticated_mailbox::{
     MAILBOX_GCM_TAG_BYTE_LENGTH, MAILBOX_HKDF_EXTRACT_SALT_BYTE_LENGTH,
     MAILBOX_KEM_CIPHERTEXT_BYTE_LENGTH, MAILBOX_KEY_SCHEDULE_INPUT_SCHEMA_IDENTIFIER,
     MAILBOX_SOURCE_SIGNATURE_BYTE_LENGTH, MailboxAssociatedData, MailboxKeyScheduleInput,
-    MailboxPayloadType, SIGNED_MAILBOX_ENVELOPE_SCHEMA_IDENTIFIER, SignedMailboxEnvelope,
-    derive_setup_mailbox_slot_hash,
+    RECIPIENT_PRIVATE_VSS_SHARE_MAILBOX_PAYLOAD_TYPE, SIGNED_MAILBOX_ENVELOPE_SCHEMA_IDENTIFIER,
+    SignedMailboxEnvelope, derive_setup_mailbox_slot_hash,
 };
 pub use board_ingestion::{
     CanonicalBoardError, CanonicalBoardLimits, CanonicalBoardVerifier, VerifiedTranscriptBatch,

@@ -267,7 +267,6 @@ export class UntrustedStorageTransactionStore {
             }
 
             return {
-                removedCorruptIndexCount: 0,
                 removedUnreferencedObjectCount:
                     authenticatedCleanupCount +
                     (authenticatedHeadIsPresent

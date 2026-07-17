@@ -62,10 +62,6 @@ pub(super) fn sample_public_setup_residues(
         )
         .and_then(|value| value.checked_mul(candidate_byte_length))
         .ok_or_else(public_sampler_size_error)?;
-    maximum_stream_byte_length
-        .checked_mul(8)
-        .ok_or_else(public_sampler_size_error)?;
-
     let mut hasher = CShake256::from_core(CShake256Core::new(canonical_customization_bytes));
     hasher.update(&public_setup_seed);
     let mut reader = hasher.finalize_xof();

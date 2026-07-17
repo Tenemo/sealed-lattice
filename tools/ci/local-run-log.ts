@@ -69,7 +69,6 @@ type LocalRunLogMetadata = {
     };
     readonly lanes: readonly string[];
     readonly nodeVersion: string;
-    readonly objectVersion: 'sealed-lattice-local-run-log-metadata-v2';
     readonly operatingSystem: {
         readonly platform: NodeJS.Platform;
         readonly release: string;
@@ -92,7 +91,6 @@ type LocalRunLogSummary = {
     readonly exitCode: number;
     readonly failedCommandId?: string;
     readonly finishedAtIso: string;
-    readonly objectVersion: 'sealed-lattice-local-run-log-summary-v2';
     readonly lastCommandId?: string;
     readonly processStatus: ReturnType<typeof normalizeProcessStatus>;
     readonly resourceExtrema: {
@@ -118,7 +116,6 @@ type ResourceSample = {
         readonly totalBytes: number;
     };
     readonly millisecondsSinceLastOutput: number;
-    readonly objectVersion: 'sealed-lattice-local-run-resource-sample-v1';
     readonly occurredAtIso: string;
     readonly processMemory: {
         readonly arrayBuffersBytes: number;
@@ -415,7 +412,6 @@ class LocalRunLog implements ActiveLocalRunLog {
             ...(this.#lastCommandId === undefined
                 ? {}
                 : { lastCommandId: this.#lastCommandId }),
-            objectVersion: 'sealed-lattice-local-run-log-summary-v2',
             processStatus,
             resourceExtrema: {
                 minimumHostFreeMemoryBytes: this.#minimumHostFreeMemoryBytes,
@@ -554,7 +550,6 @@ class LocalRunLog implements ActiveLocalRunLog {
                 performance.now() - this.#startedAtMilliseconds,
             ),
             eventType: event.eventType,
-            objectVersion: 'sealed-lattice-local-run-event-v1',
             occurredAtIso: new Date().toISOString(),
             sequenceNumber: ++this.#eventSequenceNumber,
         };
@@ -786,7 +781,6 @@ class LocalRunLog implements ActiveLocalRunLog {
             millisecondsSinceLastOutput: Math.round(
                 nowMilliseconds - this.#lastOutputAtMilliseconds,
             ),
-            objectVersion: 'sealed-lattice-local-run-resource-sample-v1',
             occurredAtIso: new Date().toISOString(),
             processMemory: {
                 arrayBuffersBytes: processMemory.arrayBuffers,
@@ -867,7 +861,6 @@ export const createLocalRunLog = async (
         },
         lanes: input.lanes,
         nodeVersion: process.version,
-        objectVersion: 'sealed-lattice-local-run-log-metadata-v2',
         operatingSystem: {
             platform: os.platform(),
             release: os.release(),

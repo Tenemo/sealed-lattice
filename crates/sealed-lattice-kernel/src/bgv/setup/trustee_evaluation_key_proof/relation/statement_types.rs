@@ -27,10 +27,6 @@ impl EvaluationKeyShareKind {
         }
         bytes
     }
-
-    pub(crate) fn has_diagonal_source(self) -> bool {
-        true
-    }
 }
 
 pub(crate) struct EvaluationKeyShareDescriptor {

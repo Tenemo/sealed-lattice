@@ -100,7 +100,6 @@ pub(crate) struct SetupCommitmentValue {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct SetupCommitmentOpeningVerification {
     pub(super) commitment_root: String,
-    pub(super) randomness_infinity_bound: i128,
     pub(super) message_coefficient_bound: u128,
 }
 

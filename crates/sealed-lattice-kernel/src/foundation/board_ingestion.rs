@@ -649,13 +649,12 @@ impl CanonicalBoardVerifier {
 
         match &parsed.payload {
             TypedPayload::SetupIntent => {
-                let producer = self.require_initial_signed_envelope(envelope, 0)?;
+                let producer = self.require_signed_envelope(envelope, 0)?;
                 require_sequence(envelope, 0)?;
                 Ok(participant_slot(producer))
             }
             TypedPayload::PublicRandomnessCommitment => {
-                let producer =
-                    self.require_initial_signed_envelope(envelope, self.roster.entries.len())?;
+                let producer = self.require_signed_envelope(envelope, self.roster.entries.len())?;
                 require_sequence(envelope, 0)?;
                 for (roster_position, prerequisite_hash) in
                     envelope.ordered_prerequisite_hashes.iter().enumerate()
@@ -669,7 +668,7 @@ impl CanonicalBoardVerifier {
             TypedPayload::PublicRandomnessReveal {
                 contribution_commitment_object_hash,
             } => {
-                let producer = self.require_initial_signed_envelope(envelope, 0)?;
+                let producer = self.require_signed_envelope(envelope, 0)?;
                 require_sequence(envelope, 0)?;
                 let commitment =
                     require_available(available, *contribution_commitment_object_hash)?;
@@ -678,14 +677,14 @@ impl CanonicalBoardVerifier {
                 Ok(participant_slot(producer))
             }
             TypedPayload::PrivateShareAcceptance => {
-                let producer = self.require_initial_signed_envelope(envelope, 0)?;
+                let producer = self.require_signed_envelope(envelope, 0)?;
                 require_sequence(envelope, 0)?;
                 Ok(participant_slot(producer))
             }
             TypedPayload::Complaint {
                 accused_participant_id,
             } => {
-                let producer = self.require_initial_signed_envelope(envelope, 0)?;
+                let producer = self.require_signed_envelope(envelope, 0)?;
                 require_sequence(envelope, 0)?;
                 self.roster_position(*accused_participant_id)?;
                 Ok(participant_slot(producer))
@@ -693,7 +692,7 @@ impl CanonicalBoardVerifier {
             TypedPayload::DealerPublicRecord {
                 dealer_roster_position,
             } => {
-                let producer = self.require_initial_signed_envelope(envelope, 1)?;
+                let producer = self.require_signed_envelope(envelope, 1)?;
                 require_sequence(envelope, 0)?;
                 let producer_position = self.roster_position(producer)?;
                 if producer_position != *dealer_roster_position {
@@ -706,7 +705,7 @@ impl CanonicalBoardVerifier {
                 Ok(participant_slot(producer))
             }
             TypedPayload::BallotPackage => {
-                let producer = self.require_initial_signed_envelope(envelope, 1)?;
+                let producer = self.require_signed_envelope(envelope, 1)?;
                 if envelope.producer_sequence >= self.limits.maximum_ballot_attempts_per_participant
                 {
                     return Err(CanonicalBoardError::new(
@@ -718,7 +717,7 @@ impl CanonicalBoardVerifier {
                 Ok(participant_slot(producer))
             }
             TypedPayload::BallotCandidateList { entries } => {
-                let producer = self.require_initial_signed_envelope(envelope, 0)?;
+                let producer = self.require_signed_envelope(envelope, 0)?;
                 require_sequence(envelope, 0)?;
                 for entry in entries {
                     let ballot = require_available(available, entry.ballot_package_object_hash)?;
@@ -776,7 +775,7 @@ impl CanonicalBoardVerifier {
                 })
             }
             TypedPayload::Finality => {
-                let producer = self.require_stateful_subject_envelope(envelope, 1)?;
+                let producer = self.require_signed_envelope(envelope, 1)?;
                 require_sequence(envelope, 0)?;
                 let replay = require_available(available, envelope.ordered_prerequisite_hashes[0])?;
                 require_object_type(replay, FoundationObjectType::EvaluatorReplay)?;
@@ -787,7 +786,7 @@ impl CanonicalBoardVerifier {
                 )
             }
             TypedPayload::StateReservation { capability_kind } => {
-                let subject = self.require_stateful_subject_envelope(envelope, 0)?;
+                let subject = self.require_signed_envelope(envelope, 0)?;
                 require_sequence(envelope, 0)?;
                 let state_key = derive_state_key(
                     self.suite_id,
@@ -813,7 +812,7 @@ impl CanonicalBoardVerifier {
             TypedPayload::StateOutputIntent {
                 reservation_intent_object_hash,
             } => {
-                let subject = self.require_stateful_subject_envelope(envelope, 0)?;
+                let subject = self.require_signed_envelope(envelope, 0)?;
                 require_sequence(envelope, 0)?;
                 let reservation = require_available(available, *reservation_intent_object_hash)?;
                 require_object_type(reservation, FoundationObjectType::StateReservation)?;
@@ -864,7 +863,7 @@ impl CanonicalBoardVerifier {
                 })
             }
             TypedPayload::StateWitnessVote { intent_object_hash } => {
-                let witness = self.require_initial_signed_envelope(envelope, 0)?;
+                let witness = self.require_signed_envelope(envelope, 0)?;
                 let intent = require_available(available, *intent_object_hash)?;
                 let intent_coordinate = intent.state_intent.ok_or_else(|| {
                     ResolveError::Refused(CanonicalBoardError::new(
@@ -895,7 +894,7 @@ impl CanonicalBoardVerifier {
             TypedPayload::TargetDecryptionShare {
                 reservation_intent_object_hash,
             } => {
-                let subject = self.require_stateful_subject_envelope(envelope, 0)?;
+                let subject = self.require_signed_envelope(envelope, 0)?;
                 require_sequence(envelope, 0)?;
                 let reservation = require_available(available, *reservation_intent_object_hash)?;
                 let coordinate = reservation.state_intent.ok_or_else(|| {
@@ -922,7 +921,7 @@ impl CanonicalBoardVerifier {
                 )
             }
             TypedPayload::StorageRootCommitment => {
-                let producer = self.require_initial_signed_envelope(envelope, 0)?;
+                let producer = self.require_signed_envelope(envelope, 0)?;
                 require_sequence(envelope, 0)?;
                 Ok(participant_slot(producer))
             }
@@ -950,22 +949,6 @@ impl CanonicalBoardVerifier {
             }),
             state_intent: None,
         })
-    }
-
-    fn require_initial_signed_envelope(
-        &self,
-        envelope: &ObjectEnvelope,
-        prerequisite_count: usize,
-    ) -> BoardResult<ParticipantIdentity> {
-        self.require_signed_envelope(envelope, prerequisite_count)
-    }
-
-    fn require_stateful_subject_envelope(
-        &self,
-        envelope: &ObjectEnvelope,
-        prerequisite_count: usize,
-    ) -> BoardResult<ParticipantIdentity> {
-        self.require_signed_envelope(envelope, prerequisite_count)
     }
 
     fn require_signed_envelope(

@@ -1,6 +1,6 @@
 //! Dense univariate polynomial helpers over an atom proof field, for the
-//! composition layer (sumcheck decomposition, vanishing quotients, DEEP
-//! quotients). Coefficients are low-to-high; the field is the multi-limb
+//! composition layer (sumcheck decomposition and vanishing quotients).
+//! Coefficients are low-to-high; the field is the multi-limb
 //! Montgomery field of `proof_field`.
 
 use super::super::proof_field::ProofFieldParameters;
@@ -147,33 +147,6 @@ pub(super) fn multiply<const LIMB_COUNT: usize>(
     result
 }
 
-// Divide by `X - point`, returning the quotient. Requires that `point` is a
-// root (the remainder is discarded); callers use this only when the numerator
-// vanishes at `point`.
-#[cfg(test)]
-pub(super) fn divide_by_linear<const LIMB_COUNT: usize>(
-    parameters: &ProofFieldParameters<LIMB_COUNT>,
-    coefficients: &[[u64; LIMB_COUNT]],
-    point: &[u64; LIMB_COUNT],
-) -> Vec<[u64; LIMB_COUNT]> {
-    // Synthetic division by (X - point): quotient q_{i} = c_{i+1} + point*q_{i+1}.
-    if coefficients.len() <= 1 {
-        return vec![parameters.zero()];
-    }
-    let mut quotient = vec![parameters.zero(); coefficients.len() - 1];
-    let mut carry = parameters.zero();
-    for index in (0..coefficients.len()).rev() {
-        if index == 0 {
-            // The final carry is the remainder; discarded (assumed zero).
-            break;
-        }
-        let value = parameters.add(&coefficients[index], &carry);
-        quotient[index - 1] = value;
-        carry = parameters.multiply(&value, point);
-    }
-    quotient
-}
-
 // Divide by `Z_H(X) = X^m - 1`, returning the quotient. The subgroup vanishing
 // polynomial of a size-`m` multiplicative subgroup. Requires the numerator to
 // be divisible (the caller guarantees it vanishes on H); any remainder is
@@ -267,22 +240,6 @@ mod tests {
             &evaluate(&parameters, &b, &point),
         );
         assert_eq!(evaluate(&parameters, &product, &point), expected);
-    }
-
-    #[test]
-    fn divide_by_linear_inverts_multiplication() {
-        let parameters = sixteen_limb_group_field_parameters();
-        let quotient = values(&parameters, &[3, -1, 2, 5]);
-        let root = parameters.unsigned_word_to_element(9);
-        let linear = values(&parameters, &[0, 1]); // X
-        let linear = subtract(&parameters, &linear, &vec![root, parameters.zero()]); // X - root
-        let product = multiply(&parameters, &quotient, &linear);
-        let recovered = divide_by_linear(&parameters, &product, &root);
-        let mut recovered = recovered;
-        trim(&mut recovered);
-        let mut expected = quotient.clone();
-        trim(&mut expected);
-        assert_eq!(recovered, expected);
     }
 
     #[test]

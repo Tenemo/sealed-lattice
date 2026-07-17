@@ -4,7 +4,6 @@ const canonicalHashByteLength = 64;
 export const canonicalStreamDescriptorFixture = (
     totalByteLength: number,
     chunkHashByte = 0x41,
-    fullObjectDigestByte = 0x42,
 ): Uint8Array => {
     if (!Number.isSafeInteger(totalByteLength) || totalByteLength <= 0) {
         throw new TypeError('totalByteLength must be a positive safe integer.');
@@ -45,7 +44,7 @@ export const canonicalStreamDescriptorFixture = (
     view.setUint16(byteOffset, 0x06, true);
     view.setUint32(byteOffset + 2, canonicalHashByteLength, true);
     descriptorBytes.fill(
-        fullObjectDigestByte,
+        0x42,
         byteOffset + 6,
         byteOffset + 6 + canonicalHashByteLength,
     );

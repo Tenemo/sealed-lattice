@@ -9,8 +9,8 @@ use crate::foundation::{
     CanonicalDecodeLimits, Hash512, MAILBOX_ENVELOPE_ATTEMPT_IDENTIFIER_BYTE_LENGTH,
     MAILBOX_GCM_TAG_BYTE_LENGTH, MAILBOX_KEM_CIPHERTEXT_BYTE_LENGTH,
     MAILBOX_SOURCE_SIGNATURE_BYTE_LENGTH, MailboxAssociatedData, MailboxKeyScheduleInput,
-    MailboxPayloadType, ParticipantIdentity, SignedMailboxEnvelope, StreamDescriptor,
-    derive_setup_mailbox_slot_hash,
+    ParticipantIdentity, RECIPIENT_PRIVATE_VSS_SHARE_MAILBOX_PAYLOAD_TYPE, SignedMailboxEnvelope,
+    StreamDescriptor, derive_setup_mailbox_slot_hash,
 };
 use crate::transcript_core::encode_hex;
 
@@ -108,9 +108,11 @@ pub(super) fn derive_mailbox_envelope_hash_command(request: &Value) -> Canonical
 pub(super) fn derive_setup_mailbox_slot_hash_command(request: &Value) -> CanonicalResult<Value> {
     let request = required_object(request, "command request")?;
     let object = required_object(required_value(request, "value")?, "setup mailbox slot")?;
-    let payload_type =
-        MailboxPayloadType::from_canonical_code(required_u16(object, "payloadType")?)
-            .ok_or_else(|| invalid_value("payloadType must be an assigned mailbox payload type"))?;
+    if required_u16(object, "payloadType")? != RECIPIENT_PRIVATE_VSS_SHARE_MAILBOX_PAYLOAD_TYPE {
+        return Err(invalid_value(
+            "payloadType must be an assigned mailbox payload type",
+        ));
+    }
     let ordered_material_roots = required_array(object, "orderedMaterialRoots")?
         .iter()
         .enumerate()
@@ -125,7 +127,6 @@ pub(super) fn derive_setup_mailbox_slot_hash_command(request: &Value) -> Canonic
             required_participant_identity(object, "sourceParticipantId")?,
             required_participant_identity(object, "recipientParticipantId")?,
             required_canonical_u64_decimal(object, "producerSequence")?,
-            payload_type,
             required_hash(object, "statementHash")?,
             &ordered_material_roots,
         )
@@ -136,11 +137,11 @@ pub(super) fn derive_setup_mailbox_slot_hash_command(request: &Value) -> Canonic
 
 fn mailbox_key_schedule_input_from_json(value: &Value) -> CanonicalResult<MailboxKeyScheduleInput> {
     let object = required_object(value, "mailbox key-schedule input")?;
-    let payload_type_code = required_u16(object, "payloadType")?;
-    let payload_type =
-        MailboxPayloadType::from_canonical_code(payload_type_code).ok_or_else(|| {
-            invalid_value("payloadType must be one of the assigned mailbox payload types")
-        })?;
+    if required_u16(object, "payloadType")? != RECIPIENT_PRIVATE_VSS_SHARE_MAILBOX_PAYLOAD_TYPE {
+        return Err(invalid_value(
+            "payloadType must be one of the assigned mailbox payload types",
+        ));
+    }
     let material_roots = required_array(object, "orderedMaterialRoots")?
         .iter()
         .enumerate()
@@ -157,7 +158,6 @@ fn mailbox_key_schedule_input_from_json(value: &Value) -> CanonicalResult<Mailbo
         envelope_attempt_identifier: required_exact_lowercase_hex::<
             MAILBOX_ENVELOPE_ATTEMPT_IDENTIFIER_BYTE_LENGTH,
         >(object, "envelopeAttemptIdentifierHex")?,
-        payload_type,
         statement_hash: required_hash(object, "statementHash")?,
         ordered_material_roots: material_roots,
     }
@@ -175,7 +175,7 @@ fn mailbox_key_schedule_input_to_json(input: &MailboxKeyScheduleInput) -> Value 
         "recipientParticipantId": input.recipient_participant_id.to_lowercase_hex(),
         "producerSequence": input.producer_sequence.to_string(),
         "envelopeAttemptIdentifierHex": encode_hex(&input.envelope_attempt_identifier),
-        "payloadType": input.payload_type.canonical_code(),
+        "payloadType": RECIPIENT_PRIVATE_VSS_SHARE_MAILBOX_PAYLOAD_TYPE,
         "statementHash": input.statement_hash.to_lowercase_hex(),
         "orderedMaterialRoots": input
             .ordered_material_roots

@@ -88,7 +88,7 @@ pub(crate) fn evaluate_packed_rank_evaluation_from_packed_scores_with_batched_pa
     )?;
     drop(comparison_inputs);
     let comparison_baby_step_count = direct_comparison_baby_step_count(score_domain_max)?;
-    let comparison_outputs = evaluate_direct_comparison_polynomial_with_baby_step_count(
+    let comparison_outputs = evaluate_polynomial_with_fixed_baby_step_count(
         context,
         &refreshed_comparison_inputs,
         &greater_or_equal_polynomial,

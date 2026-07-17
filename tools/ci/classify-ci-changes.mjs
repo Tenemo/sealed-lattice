@@ -78,6 +78,18 @@ export const isToolingOnlyCiPath = (changedPath) => {
 
 /**
  * @param {readonly string[]} changedPaths
+ * @param {boolean} versionOnlyReleaseChange
+ */
+const isSingleVersionOnlyReleaseManifestChange = (
+    changedPaths,
+    versionOnlyReleaseChange,
+) =>
+    versionOnlyReleaseChange &&
+    changedPaths.length === 1 &&
+    normalizeChangedPath(changedPaths[0]) === publicPackageManifestPath;
+
+/**
+ * @param {readonly string[]} changedPaths
  * @param {boolean} [versionOnlyReleaseChange]
  */
 export const shouldRunRoutineCiLanes = (
@@ -86,9 +98,10 @@ export const shouldRunRoutineCiLanes = (
 ) => {
     if (changedPaths.length === 0) return true;
     if (
-        versionOnlyReleaseChange &&
-        changedPaths.length === 1 &&
-        normalizeChangedPath(changedPaths[0]) === publicPackageManifestPath
+        isSingleVersionOnlyReleaseManifestChange(
+            changedPaths,
+            versionOnlyReleaseChange,
+        )
     ) {
         return false;
     }
@@ -109,9 +122,10 @@ export const shouldRunHeavyCiLanes = (
     }
 
     if (
-        versionOnlyReleaseChange &&
-        changedPaths.length === 1 &&
-        normalizeChangedPath(changedPaths[0]) === publicPackageManifestPath
+        isSingleVersionOnlyReleaseManifestChange(
+            changedPaths,
+            versionOnlyReleaseChange,
+        )
     ) {
         return false;
     }

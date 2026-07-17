@@ -83,33 +83,6 @@ export type SignedMailboxEnvelope = Readonly<
     }
 >;
 
-declare const participantIdentityBrand: unique symbol;
-
-/** A lowercase canonical participant identity derived from a roster ML-DSA-65 verification key. */
-export type ParticipantIdentity = ProtocolHash & {
-    readonly [participantIdentityBrand]: 'ParticipantIdentity';
-};
-
-const participantIdentityPattern = /^[0-9a-f]{128}$/u;
-
-export const isParticipantIdentity = (
-    value: unknown,
-): value is ParticipantIdentity =>
-    typeof value === 'string' && participantIdentityPattern.test(value);
-
-/** Parses the sole canonical string representation of a participant identity. */
-export const parseParticipantIdentity = (
-    value: unknown,
-): ParticipantIdentity => {
-    if (!isParticipantIdentity(value)) {
-        throw new TypeError(
-            'participant identity must contain exactly 128 lowercase hexadecimal characters.',
-        );
-    }
-
-    return value;
-};
-
 /** Roster sizes for which protocol parameters can be derived. */
 export const configurableParticipantCountRange = Object.freeze({
     minimum: 3,
@@ -185,11 +158,3 @@ export const stateCapabilityKinds = Object.freeze({
 
 export type StateCapabilityKind =
     (typeof stateCapabilityKinds)[keyof typeof stateCapabilityKinds];
-
-export const stateIntentKinds = Object.freeze({
-    output: 'output',
-    reservation: 'reservation',
-} as const);
-
-export type StateIntentKind =
-    (typeof stateIntentKinds)[keyof typeof stateIntentKinds];

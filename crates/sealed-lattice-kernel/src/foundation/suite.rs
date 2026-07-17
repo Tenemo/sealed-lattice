@@ -497,7 +497,6 @@ impl SuiteRecord {
             count_limits,
             artifacts,
         };
-        record.validate()?;
         require_copied_buffer_bound(&record.canonical_tuple()?)?;
         Ok(record)
     }

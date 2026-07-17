@@ -17,6 +17,7 @@ import {
     loadFreshTranscriptCoreKernel,
     type TranscriptCoreKernel,
 } from '#packages/wasm/src/index';
+import { canonicalStreamChunkBuffers as chunkBuffers } from '#tests/support/canonical-stream-chunk-buffers';
 
 const createBytes = (
     byteLength: number,
@@ -27,23 +28,6 @@ const createBytes = (
         bytes[byteIndex] = (seed + byteIndex * 131) & 0xff;
     }
     return bytes;
-};
-
-const chunkBuffers = (bytes: Uint8Array): readonly ArrayBuffer[] => {
-    const chunks: ArrayBuffer[] = [];
-    for (
-        let offset = 0;
-        offset < bytes.byteLength;
-        offset += foundationProfile.streamChunkByteLength
-    ) {
-        chunks.push(
-            bytes.slice(
-                offset,
-                offset + foundationProfile.streamChunkByteLength,
-            ).buffer,
-        );
-    }
-    return chunks;
 };
 
 const writeDescriptor = (
@@ -128,7 +112,6 @@ describe('Canonical stream real-WASM runtime', () => {
         expect(counters.maximumObservedCopiedPayloadByteLength).toBe(
             foundationProfile.streamChunkByteLength,
         );
-        expect(counters.maximumObservedResidentPayloadChunkCount).toBe(2);
         expect(counters.javascriptToWasmPayloadCopyCount).toBe(
             counters.absorbedPayloadChunkCount,
         );

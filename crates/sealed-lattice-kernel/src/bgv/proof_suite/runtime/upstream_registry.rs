@@ -168,11 +168,11 @@ impl CommonProofUpstreamInputRegistry {
         {
             return Err(CommonProofRuntimeError::WrongVerificationBinding);
         }
-        // The fixed candidate's exact-family plans currently exceed the hard
-        // per-proof and per-action browser limits. Structural suite binding is
-        // therefore not promoted into an exact-family application capability.
-        // The generic runtime remains available to separately installed,
-        // checked relation-plan capabilities in tests and later integration.
+        // Structural suite and board binding alone do not establish that an
+        // exact family derived this statement from the accepted board object.
+        // Keep production verification closed until a family-owned adapter
+        // supplies that derivation. The generic runtime remains available to
+        // separately installed checked capabilities in tests.
         Err(CommonProofRuntimeError::InvalidPlanCapability)
     }
 

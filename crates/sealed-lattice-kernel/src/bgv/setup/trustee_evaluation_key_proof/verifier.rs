@@ -1,3 +1,4 @@
+use super::bigint_residue;
 use super::evaluation_domain::EvaluationDomainPlan;
 use super::extension_field::{
     CHALLENGE_EXTENSION_DEGREE, ChallengeExtensionElement, ChallengeExtensionTower,
@@ -33,7 +34,6 @@ use crate::bgv::modular_arithmetic::{inverse_mod, mul_mod_fast};
 use crate::bgv::parameters::DATA_PRIMES;
 use crate::encoding::CanonicalResult;
 use num_bigint::BigInt;
-use num_traits::ToPrimitive;
 
 #[cfg(not(target_arch = "wasm32"))]
 use rayon::prelude::*;
@@ -559,14 +559,6 @@ fn centered_crt_lift(residues: &[(u64, u64)]) -> CanonicalResult<BigInt> {
     }
 
     Ok(value)
-}
-
-fn bigint_residue(value: &BigInt, modulus: u64) -> CanonicalResult<u64> {
-    let modulus_integer = BigInt::from(modulus);
-    let residue = ((value % &modulus_integer) + &modulus_integer) % &modulus_integer;
-    residue
-        .to_u64()
-        .ok_or_else(|| invalid_succinct_setup_proof("masked consistency residue does not fit u64"))
 }
 
 pub(crate) fn verify_evaluation_key_share(

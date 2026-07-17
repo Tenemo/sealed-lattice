@@ -66,11 +66,7 @@ impl PrivateVssRefusalCode {
 }
 
 impl PrivateVssRefusal {
-    pub(super) fn new(
-        code: PrivateVssRefusalCode,
-        message: impl Into<String>,
-        _object_path: impl Into<String>,
-    ) -> Self {
+    pub(super) fn new(code: PrivateVssRefusalCode, message: impl Into<String>) -> Self {
         Self {
             refusal_reason: code.refusal_reason,
             reason_code: code.reason_code,

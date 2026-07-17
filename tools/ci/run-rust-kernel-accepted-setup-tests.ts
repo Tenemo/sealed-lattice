@@ -122,9 +122,10 @@ export const cargoTestArgumentsForAcceptedSetupTests =
 const acceptedSetupRunName = 'Rust accepted setup';
 const acceptedSetupScriptName = 'test:rust:kernel:accepted-setup';
 
-// Keep every nested scheduling layer serial until its peak memory has been
-// measured inside the hard ceiling. Environment overrides cannot weaken this
-// containment policy.
+// Keep every nested scheduling layer serial. Higher Rayon concurrency has no
+// measured wall-time benefit for the current evaluator evidence, while serial
+// execution prevents nested oversubscription. Environment overrides cannot
+// weaken this containment policy.
 export const buildAcceptedSetupEnvironment = (input: {
     readonly baseEnvironment?: NodeJS.ProcessEnv;
     readonly cargoIncremental: '0' | '1';

@@ -168,7 +168,7 @@ impl ProofApplicationSlot {
         }
     }
 
-    fn canonical_tuple(self) -> SchemaResult<CanonicalTuple> {
+    pub(crate) fn canonical_tuple(self) -> SchemaResult<CanonicalTuple> {
         self.validate()?;
         let roster_position = self.roster_position.map(CanonicalItem::unsigned16);
         let schedule_position = self.schedule_position.map(CanonicalItem::unsigned32);
@@ -198,7 +198,7 @@ impl ProofApplicationSlot {
         Self::decode_tuple(&tuple)
     }
 
-    fn decode_tuple(tuple: &CanonicalTuple) -> SchemaResult<Self> {
+    pub(crate) fn decode_tuple(tuple: &CanonicalTuple) -> SchemaResult<Self> {
         require_header(tuple, PROOF_APPLICATION_SLOT_SCHEMA_IDENTIFIER, 8)?;
         require_protocol_version(read_u16(&tuple.items[0])?)?;
         Self::new(

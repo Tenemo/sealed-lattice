@@ -19,13 +19,6 @@ import {
     type RelinearizationKeyShareRoundsInput,
 } from './constants-and-types.js';
 
-const assertShareMaterialRoot = (
-    keySwitchComponentMaterialRoot: ProtocolHash,
-    fieldName: string,
-): void => {
-    assertProtocolHash(keySwitchComponentMaterialRoot, fieldName);
-};
-
 const contributionKey = (
     level: number,
     trusteeRosterPosition: number,
@@ -158,7 +151,7 @@ export const createRelinearizationKeyShareRounds = (
                     'roundOneContributions is missing a scheduled trustee and level.',
                 );
             }
-            assertShareMaterialRoot(
+            assertProtocolHash(
                 contribution.keySwitchComponentMaterialRoot,
                 'roundOneContributions.keySwitchComponentMaterialRoot',
             );
@@ -181,7 +174,7 @@ export const createRelinearizationKeyShareRounds = (
                     'roundTwoContributions is missing a scheduled trustee and level.',
                 );
             }
-            assertShareMaterialRoot(
+            assertProtocolHash(
                 contribution.keySwitchComponentMaterialRoot,
                 'roundTwoContributions.keySwitchComponentMaterialRoot',
             );
@@ -270,7 +263,7 @@ export const createGaloisKeyShareBatches = (
                         'galoisKeyShares must follow the frozen Galois key schedule.',
                     );
                 }
-                assertShareMaterialRoot(
+                assertProtocolHash(
                     shareContribution.keySwitchComponentMaterialRoot,
                     'galoisKeyShares.keySwitchComponentMaterialRoot',
                 );

@@ -54,7 +54,6 @@ pub(in super::super) fn setup_commitment_matrix_polynomial(
         commitment_modulus_index,
         matrix_row_index,
         randomness_column_index,
-        0,
     )?;
     if modulus != DATA_PRIMES[commitment_modulus_index] {
         return Err(invalid_commitment_input(

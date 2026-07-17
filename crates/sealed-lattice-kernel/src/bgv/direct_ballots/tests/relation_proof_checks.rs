@@ -35,7 +35,9 @@ fn direct_ballot_shared_rns_relation_proof_rejects_last_limb_ciphertext_mutation
 
     assert_eq!(error.code, CanonicalErrorCode::InvalidProtocolObject);
     assert!(
-        error.message.contains("not bound to this statement")
+        error
+            .message
+            .contains("challenge does not match its commitment")
             || error.message.contains("limb 16 c0 response")
     );
 }
@@ -152,7 +154,11 @@ fn direct_ballot_shared_rns_relation_proof_rejects_wrong_public_key() {
     .expect_err("wrong public key must reject");
 
     assert_eq!(error.code, CanonicalErrorCode::InvalidProtocolObject);
-    assert!(error.message.contains("not bound to this statement"));
+    assert!(
+        error
+            .message
+            .contains("challenge does not match its commitment")
+    );
 }
 
 #[test]

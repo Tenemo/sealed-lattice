@@ -12,10 +12,6 @@ fn usize_to_u64(value: usize, name: &str) -> CanonicalResult<u64> {
     })
 }
 
-fn setup_package_hash(setup_package: &Value) -> CanonicalResult<String> {
-    crate::bgv::setup::derive_collective_setup_package_hash(setup_package)
-}
-
 pub(crate) struct DirectBallotPackedBatchedPairEvaluatorInput<'a> {
     pub(crate) setup_package: &'a Value,
     pub(crate) evaluator_key: &'a DevelopmentBgvKey,
@@ -181,7 +177,7 @@ pub(super) fn direct_ballot_evaluator_replay_record_hash(
 ) -> CanonicalResult<String> {
     derive_canonical_object_hash(&json!({
         "objectType": "EvaluatorReplayRecord",
-        "setupPackageHash": setup_package_hash(input.setup_package)?,
+        "setupPackageHash": crate::bgv::setup::derive_collective_setup_package_hash(input.setup_package)?,
         "ballotCount": input.ballot_count,
         "targetCiphertextHash": input.target_ciphertext_hash,
     }))

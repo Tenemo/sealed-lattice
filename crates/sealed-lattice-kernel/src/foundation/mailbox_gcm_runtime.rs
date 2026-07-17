@@ -1,5 +1,6 @@
 use std::sync::{Mutex, OnceLock};
 
+use super::runtime_input::refusal_status;
 use super::{
     MAILBOX_GCM_TAG_BYTE_LENGTH, RefusalReason,
     mailbox_gcm::{
@@ -289,10 +290,6 @@ fn require_associated_data_length(associated_data: &[u8]) -> Result<(), u32> {
         }));
     }
     Ok(())
-}
-
-fn refusal_status(refusal_reason: RefusalReason) -> u32 {
-    u32::from(refusal_reason.canonical_code())
 }
 
 #[cfg(test)]

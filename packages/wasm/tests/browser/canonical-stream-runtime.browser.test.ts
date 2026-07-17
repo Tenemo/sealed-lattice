@@ -181,7 +181,6 @@ describe('Canonical stream runtime in a browser worker', () => {
             javascriptToWasmPayloadCopyCount: 4,
             maximumObservedCopiedPayloadByteLength:
                 foundationProfile.streamChunkByteLength,
-            maximumObservedResidentPayloadChunkCount: 2,
             wasmToJavascriptPayloadCopyCount: 0,
         });
         expect(

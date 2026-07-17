@@ -215,9 +215,6 @@ impl TrusteeEvaluationKeyStatement {
         } else {
             preimage.push(0);
         }
-        // Preserve the retained-family statement hash framing that preceded
-        // removal of the target-decryption variant.
-        preimage.push(0);
         hash512(STATEMENT_HASH_DOMAIN, &[&preimage])
     }
 

@@ -8,6 +8,7 @@ import {
 } from '../../../src/common-proof-worker-runtime.js';
 
 import {
+    createCommonProofGenerationCursorFixtureBytes,
     createExpectedWorkerCheckpointBoundary,
     createInstalledCommonProofGenerationFixture,
     createWorkerCheckpointBoundary,
@@ -17,7 +18,6 @@ import {
 } from './custody-fixtures.js';
 import {
     applicationHandoffIndexKeySuffix,
-    bytesFromHex,
     consumesCommonProofApplicationHandoff,
 } from './wire-fixtures.js';
 
@@ -31,6 +31,12 @@ import {
     suspendCommonProofExecutionEnvironmentForAuthenticatedResumeInInstalledCustodyWorker,
     verifyAndApplyCommonProofInInstalledCustodyWorker,
 } from '#packages/protocol/src/runtime/browser-action-storage-custody-worker-channel';
+
+type InstalledCustodyCommonProofExecutionEnvironment = Awaited<
+    ReturnType<
+        typeof openCommonProofExecutionEnvironmentInInstalledCustodyWorker
+    >
+>;
 
 describe('common-proof custody lifecycle', () => {
     it('runs cancellation, authenticated resume, output verification, and durable application through installed custody', async () => {
@@ -60,21 +66,11 @@ describe('common-proof custody lifecycle', () => {
             proofBytes: generatedProofBytes,
         });
         let environment:
-            | Awaited<
-                  ReturnType<
-                      typeof openCommonProofExecutionEnvironmentInInstalledCustodyWorker
-                  >
-              >
+            | InstalledCustodyCommonProofExecutionEnvironment
             | undefined;
         try {
-            const cursorBytes = bytesFromHex(
-                host.kernel.encodePrivateRandomCursor({
-                    derivationContextHash: 'ab'.repeat(64),
-                    family: 0x0200,
-                    nextCounter: '37',
-                    purpose: 2,
-                    streamAttemptIdentifierHex: 'cd'.repeat(32),
-                }).canonicalBytesHex,
+            const cursorBytes = createCommonProofGenerationCursorFixtureBytes(
+                host.kernel,
             );
             const generationFixture =
                 createInstalledCommonProofGenerationFixture(cursorBytes);
@@ -512,14 +508,8 @@ describe('common-proof custody lifecycle', () => {
     it('retains a prepared generation adapter until fail-once disposal succeeds', async () => {
         const host = await openSameRealmCommonProofApplicationHost();
         try {
-            const cursorBytes = bytesFromHex(
-                host.kernel.encodePrivateRandomCursor({
-                    derivationContextHash: 'ab'.repeat(64),
-                    family: 0x0200,
-                    nextCounter: '37',
-                    purpose: 2,
-                    streamAttemptIdentifierHex: 'cd'.repeat(32),
-                }).canonicalBytesHex,
+            const cursorBytes = createCommonProofGenerationCursorFixtureBytes(
+                host.kernel,
             );
             const generationFixture =
                 createInstalledCommonProofGenerationFixture(cursorBytes, {
@@ -580,21 +570,11 @@ describe('common-proof custody lifecycle', () => {
     it('caps one prepared-or-executing proof chain without consuming rejected source adapters', async () => {
         const host = await openSameRealmCommonProofApplicationHost();
         let environment:
-            | Awaited<
-                  ReturnType<
-                      typeof openCommonProofExecutionEnvironmentInInstalledCustodyWorker
-                  >
-              >
+            | InstalledCustodyCommonProofExecutionEnvironment
             | undefined;
         try {
-            const cursorBytes = bytesFromHex(
-                host.kernel.encodePrivateRandomCursor({
-                    derivationContextHash: 'ab'.repeat(64),
-                    family: 0x0200,
-                    nextCounter: '37',
-                    purpose: 2,
-                    streamAttemptIdentifierHex: 'cd'.repeat(32),
-                }).canonicalBytesHex,
+            const cursorBytes = createCommonProofGenerationCursorFixtureBytes(
+                host.kernel,
             );
             const retainedFixture =
                 createInstalledCommonProofGenerationFixture(cursorBytes);
@@ -1139,21 +1119,11 @@ describe('common-proof custody lifecycle', () => {
     it('retains an authenticated resume descriptor until fail-once adapter disposal succeeds', async () => {
         const host = await openSameRealmCommonProofApplicationHost();
         let environment:
-            | Awaited<
-                  ReturnType<
-                      typeof openCommonProofExecutionEnvironmentInInstalledCustodyWorker
-                  >
-              >
+            | InstalledCustodyCommonProofExecutionEnvironment
             | undefined;
         try {
-            const cursorBytes = bytesFromHex(
-                host.kernel.encodePrivateRandomCursor({
-                    derivationContextHash: 'ab'.repeat(64),
-                    family: 0x0200,
-                    nextCounter: '37',
-                    purpose: 2,
-                    streamAttemptIdentifierHex: 'cd'.repeat(32),
-                }).canonicalBytesHex,
+            const cursorBytes = createCommonProofGenerationCursorFixtureBytes(
+                host.kernel,
             );
             const generationFixture =
                 createInstalledCommonProofGenerationFixture(cursorBytes, {
@@ -1299,21 +1269,11 @@ describe('common-proof custody lifecycle', () => {
             proofBytes: generatedProofBytes,
         });
         let environment:
-            | Awaited<
-                  ReturnType<
-                      typeof openCommonProofExecutionEnvironmentInInstalledCustodyWorker
-                  >
-              >
+            | InstalledCustodyCommonProofExecutionEnvironment
             | undefined;
         try {
-            const cursorBytes = bytesFromHex(
-                host.kernel.encodePrivateRandomCursor({
-                    derivationContextHash: 'ab'.repeat(64),
-                    family: 0x0200,
-                    nextCounter: '37',
-                    purpose: 2,
-                    streamAttemptIdentifierHex: 'cd'.repeat(32),
-                }).canonicalBytesHex,
+            const cursorBytes = createCommonProofGenerationCursorFixtureBytes(
+                host.kernel,
             );
             const generationFixture =
                 createInstalledCommonProofGenerationFixture(cursorBytes);
@@ -1435,21 +1395,11 @@ describe('common-proof custody lifecycle', () => {
                 }),
         });
         let environment:
-            | Awaited<
-                  ReturnType<
-                      typeof openCommonProofExecutionEnvironmentInInstalledCustodyWorker
-                  >
-              >
+            | InstalledCustodyCommonProofExecutionEnvironment
             | undefined;
         try {
-            const cursorBytes = bytesFromHex(
-                host.kernel.encodePrivateRandomCursor({
-                    derivationContextHash: 'ab'.repeat(64),
-                    family: 0x0200,
-                    nextCounter: '37',
-                    purpose: 2,
-                    streamAttemptIdentifierHex: 'cd'.repeat(32),
-                }).canonicalBytesHex,
+            const cursorBytes = createCommonProofGenerationCursorFixtureBytes(
+                host.kernel,
             );
             const generationFixture =
                 createInstalledCommonProofGenerationFixture(cursorBytes);
@@ -1505,21 +1455,11 @@ describe('common-proof custody lifecycle', () => {
     it('permanently retires an installed resumed environment when checkpoint restoration is unusable', async () => {
         const host = await openSameRealmCommonProofApplicationHost();
         let environment:
-            | Awaited<
-                  ReturnType<
-                      typeof openCommonProofExecutionEnvironmentInInstalledCustodyWorker
-                  >
-              >
+            | InstalledCustodyCommonProofExecutionEnvironment
             | undefined;
         try {
-            const cursorBytes = bytesFromHex(
-                host.kernel.encodePrivateRandomCursor({
-                    derivationContextHash: 'ab'.repeat(64),
-                    family: 0x0200,
-                    nextCounter: '37',
-                    purpose: 2,
-                    streamAttemptIdentifierHex: 'cd'.repeat(32),
-                }).canonicalBytesHex,
+            const cursorBytes = createCommonProofGenerationCursorFixtureBytes(
+                host.kernel,
             );
             const generationFixture =
                 createInstalledCommonProofGenerationFixture(cursorBytes, {

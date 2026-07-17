@@ -243,7 +243,7 @@ pub(crate) fn broadcast_constant_coefficients(value: u64) -> Vec<u64> {
 // computed with a balanced multiplication tree so the multiplicative depth is
 // logarithmic in the degree; the terms are then brought to a common level and
 // scaling before the linear combination.
-pub(crate) fn evaluate_polynomial_with_fixed_baby_step_count_and_deferred_terminal_switch(
+pub(crate) fn evaluate_polynomial_with_fixed_baby_step_count(
     context: &EvaluatorContext,
     input: &Ciphertext,
     coefficients: &[u64],
@@ -254,7 +254,6 @@ pub(crate) fn evaluate_polynomial_with_fixed_baby_step_count_and_deferred_termin
         input,
         coefficients,
         baby_step_count,
-        true,
     )
 }
 
@@ -322,7 +321,6 @@ fn evaluate_polynomial_paterson_stockmeyer_with_baby_step_count(
     input: &Ciphertext,
     coefficients: &[u64],
     baby_step_count: usize,
-    defer_terminal_modulus_switch: bool,
 ) -> CanonicalResult<Ciphertext> {
     if coefficients.is_empty() {
         return Err(CanonicalError::new(
@@ -381,12 +379,11 @@ fn evaluate_polynomial_paterson_stockmeyer_with_baby_step_count(
                 i64::try_from(block_coefficients[0]).expect("coefficient fits i64"),
             )?);
         } else {
-            let product = if defer_terminal_modulus_switch {
-                multiply_without_immediate_modulus_switch(context, &block_value, giant_power)?
-            } else {
-                multiply(context, &block_value, giant_power)?
-            };
-            terms.push(product);
+            terms.push(multiply_without_immediate_modulus_switch(
+                context,
+                &block_value,
+                giant_power,
+            )?);
         }
     }
 

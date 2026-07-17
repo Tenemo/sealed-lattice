@@ -7,10 +7,7 @@ use super::board_ingestion_runtime::{
     copy_cached_board_carrier, describe_verified_transcript_object,
     release_verified_transcript_object, verify_unordered_board_carriers,
 };
-
-const fn refusal_status(refusal_reason: RefusalReason) -> u32 {
-    refusal_reason.canonical_code() as u32
-}
+use super::runtime_input::refusal_status;
 
 unsafe fn input_bytes<'input>(pointer: *const u8, byte_length: usize) -> &'input [u8] {
     if byte_length == 0 || pointer.is_null() {

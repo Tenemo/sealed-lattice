@@ -15,7 +15,7 @@
 use super::super::proof_field::ProofFieldParameters;
 #[cfg(test)]
 use super::domain::CyclicDomain;
-use super::domain::{CyclicDomainGeometry, evaluate_polynomial_at};
+use super::domain::CyclicDomainGeometry;
 use super::merkle::{
     BatchedMerkleOpening, MerkleDigest, consistent_sorted_leaves, leaf_hash, verify_merkle_batch,
 };
@@ -398,7 +398,7 @@ impl<const LIMB_COUNT: usize> FriVerification<'_, LIMB_COUNT> {
         }
         let final_point = self.final_domain.point(position);
         let expected_final =
-            evaluate_polynomial_at(parameters, &proof.final_coefficients, &final_point);
+            super::polynomial::evaluate(parameters, &proof.final_coefficients, &final_point);
         match chained {
             Some(chained) => chained == expected_final,
             None => false,

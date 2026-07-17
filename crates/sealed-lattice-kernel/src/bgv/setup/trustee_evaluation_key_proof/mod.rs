@@ -54,6 +54,16 @@ use crate::{
     bgv::setup::setup_proof::{CanonicalProofMaterialBytes, SetupProofFamily},
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
 };
+use num_bigint::BigInt;
+use num_traits::ToPrimitive;
+
+fn bigint_residue(value: &BigInt, modulus: u64) -> CanonicalResult<u64> {
+    let modulus_integer = BigInt::from(modulus);
+    let residue = ((value % &modulus_integer) + &modulus_integer) % &modulus_integer;
+    residue
+        .to_u64()
+        .ok_or_else(|| invalid_succinct_setup_proof("masked consistency residue does not fit u64"))
+}
 
 pub(in crate::bgv::setup) fn trustee_evaluation_key_proof_material_bytes_hash(
     proof_bytes: &CanonicalProofMaterialBytes,

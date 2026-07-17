@@ -58,6 +58,7 @@ import {
     createStateVerifierTestVector,
     type StateVerifierTestVector,
 } from '#packages/wasm/tests/state-verifier-test-vectors';
+import { canonicalStreamChunkBuffers as chunkBuffers } from '#tests/support/canonical-stream-chunk-buffers';
 
 const serviceLimits = {
     maximumExactOutputByteLength:
@@ -86,23 +87,6 @@ const requireValid = <Value>(result: {
         throw new Error(result.refusalReason ?? 'verification failed');
     }
     return result.value as Value;
-};
-
-const chunkBuffers = (bytes: Uint8Array): readonly ArrayBuffer[] => {
-    const chunks: ArrayBuffer[] = [];
-    for (
-        let offset = 0;
-        offset < bytes.byteLength;
-        offset += foundationProfile.streamChunkByteLength
-    ) {
-        chunks.push(
-            bytes.slice(
-                offset,
-                offset + foundationProfile.streamChunkByteLength,
-            ).buffer,
-        );
-    }
-    return chunks;
 };
 
 const descriptorFor = (

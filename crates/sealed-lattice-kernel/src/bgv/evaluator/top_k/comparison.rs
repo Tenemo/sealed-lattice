@@ -29,20 +29,6 @@ pub(crate) fn comparison_polynomials(
     ))
 }
 
-pub(crate) fn evaluate_direct_comparison_polynomial_with_baby_step_count(
-    context: &EvaluatorContext,
-    comparison_input: &Ciphertext,
-    polynomial: &[u64],
-    baby_step_count: usize,
-) -> CanonicalResult<Ciphertext> {
-    evaluate_polynomial_with_fixed_baby_step_count_and_deferred_terminal_switch(
-        context,
-        comparison_input,
-        polynomial,
-        baby_step_count,
-    )
-}
-
 pub(crate) fn direct_comparison_baby_step_count(score_domain_max: u64) -> CanonicalResult<usize> {
     let point_count = usize::try_from(
         score_domain_max

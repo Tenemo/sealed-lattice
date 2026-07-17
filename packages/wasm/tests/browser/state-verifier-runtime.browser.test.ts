@@ -1,4 +1,3 @@
-import { foundationProfile } from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -12,23 +11,7 @@ import {
     stateCapabilityKinds,
 } from '#packages/wasm/src/state-verifier-runtime';
 import { createStateVerifierTestVector } from '#packages/wasm/tests/state-verifier-test-vectors';
-
-const chunkBuffers = (bytes: Uint8Array): readonly ArrayBuffer[] => {
-    const chunks: ArrayBuffer[] = [];
-    for (
-        let offset = 0;
-        offset < bytes.byteLength;
-        offset += foundationProfile.streamChunkByteLength
-    ) {
-        chunks.push(
-            bytes.slice(
-                offset,
-                offset + foundationProfile.streamChunkByteLength,
-            ).buffer,
-        );
-    }
-    return chunks;
-};
+import { canonicalStreamChunkBuffers as chunkBuffers } from '#tests/support/canonical-stream-chunk-buffers';
 
 describe('State verifier real-WASM runtime in browsers', () => {
     it('verifies streamed exact output with opaque handles', async () => {

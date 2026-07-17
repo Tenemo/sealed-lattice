@@ -1,5 +1,6 @@
 use std::sync::{Mutex, OnceLock};
 
+use super::runtime_input::refusal_status;
 use super::{
     CanonicalDecodeLimits, CanonicalStreamDomain, CanonicalStreamVerifier, CanonicalStreamWriter,
     FOUNDATION_PROFILE, MAXIMUM_CANONICAL_STREAM_BYTE_LENGTH, RefusalReason, StreamDescriptor,
@@ -265,10 +266,6 @@ fn descriptor_decode_limits() -> CanonicalDecodeLimits {
             * 2,
         ..CanonicalDecodeLimits::default()
     }
-}
-
-fn refusal_status(refusal_reason: RefusalReason) -> u32 {
-    u32::from(refusal_reason.canonical_code())
 }
 
 #[cfg(test)]

@@ -49,10 +49,6 @@ impl<'input> RuntimeInputReader<'input> {
         Ok(bytes)
     }
 
-    pub(super) fn read_slice(&mut self, byte_length: usize) -> RuntimeResult<&'input [u8]> {
-        self.read_bytes(byte_length)
-    }
-
     pub(super) fn read_length_prefixed_bytes(&mut self) -> RuntimeResult<&'input [u8]> {
         let byte_length = usize::try_from(self.read_u32()?)
             .map_err(|_| refusal_status(RefusalReason::OutsideSupportedProfile))?;
@@ -81,6 +77,6 @@ const fn malformed_status() -> u32 {
     refusal_status(RefusalReason::MalformedEncoding)
 }
 
-const fn refusal_status(refusal_reason: RefusalReason) -> u32 {
+pub(super) const fn refusal_status(refusal_reason: RefusalReason) -> u32 {
     refusal_reason.canonical_code() as u32
 }

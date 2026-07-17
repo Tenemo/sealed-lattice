@@ -15,6 +15,10 @@ import { runPackageManagerAndCaptureOutput } from './run-command.js';
 
 import { normalizeTranscriptCoreKernelBytesForHash } from '#packages/wasm/src/transcript-core-bridge.js';
 
+const sdkDeclarationEntryEnvironmentVariable =
+    'SEALED_LATTICE_SDK_DECLARATION_ENTRY_PATH';
+const sdkKernelHashEnvironmentVariable =
+    'SEALED_LATTICE_KERNEL_NORMALIZED_SHA256_HEX';
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const wasmKernelSourcePath = path.resolve(
     repoRoot,
@@ -40,11 +44,6 @@ const tsdownConfigPath = path.resolve(
     'ci',
     'sdk-package-tsdown.config.ts',
 );
-const kernelHashEnvironmentVariable =
-    'SEALED_LATTICE_KERNEL_NORMALIZED_SHA256_HEX';
-const declarationEntryEnvironmentVariable =
-    'SEALED_LATTICE_SDK_DECLARATION_ENTRY_PATH';
-
 export const hashNormalizedWasmKernel = (bytes: Uint8Array): string =>
     createHash('sha256')
         .update(normalizeTranscriptCoreKernelBytesForHash(bytes))
@@ -103,8 +102,8 @@ const bundleSdkOutput = (
 ): void => {
     const environment = {
         ...process.env,
-        [declarationEntryEnvironmentVariable]: declarationEntryPath,
-        [kernelHashEnvironmentVariable]: kernelHash,
+        [sdkDeclarationEntryEnvironmentVariable]: declarationEntryPath,
+        [sdkKernelHashEnvironmentVariable]: kernelHash,
     };
 
     for (const configurationName of ['sdk-javascript', 'sdk-declarations']) {

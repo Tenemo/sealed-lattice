@@ -153,7 +153,6 @@ export type UntrustedStorageTransaction = Readonly<{
 }>;
 
 export type UntrustedStorageRepairReport = Readonly<{
-    removedCorruptIndexCount: number;
     removedUnreferencedObjectCount: number;
     retainedObjectCount: number;
     storedValueByteLength: number;

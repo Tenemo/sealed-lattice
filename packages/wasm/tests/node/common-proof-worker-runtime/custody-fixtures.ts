@@ -89,6 +89,25 @@ import {
 } from '#packages/wasm/tests/canonical-tuple-test-helpers';
 import { createStateVerifierTestVector } from '#packages/wasm/tests/state-verifier-test-vectors';
 
+type InstalledCustodyCommonProofExecutionEnvironment = Awaited<
+    ReturnType<
+        typeof openCommonProofExecutionEnvironmentInInstalledCustodyWorker
+    >
+>;
+
+export const createCommonProofGenerationCursorFixtureBytes = (
+    kernel: TranscriptCoreKernel,
+): Uint8Array<ArrayBuffer> =>
+    bytesFromHex(
+        kernel.encodePrivateRandomCursor({
+            derivationContextHash: 'ab'.repeat(64),
+            family: 0x0200,
+            nextCounter: '37',
+            purpose: 2,
+            streamAttemptIdentifierHex: 'cd'.repeat(32),
+        }).canonicalBytesHex,
+    );
+
 const foundationWitnessServiceLimits: DurableStateWitnessServiceLimits =
     Object.freeze({
         maximumExactOutputByteLength: 65_536,
@@ -1652,11 +1671,7 @@ export const createInstalledCommonProofGenerationFixture = (
 export const openReadyCommonProofApplication = async (): Promise<
     Readonly<{
         durableBindingIdentifier: string;
-        environment: Awaited<
-            ReturnType<
-                typeof openCommonProofExecutionEnvironmentInInstalledCustodyWorker
-            >
-        >;
+        environment: InstalledCustodyCommonProofExecutionEnvironment;
         generationFixture: ReturnType<
             typeof createInstalledCommonProofGenerationFixture
         >;
@@ -1668,14 +1683,8 @@ export const openReadyCommonProofApplication = async (): Promise<
     const proofBytes = Uint8Array.from([8, 6, 7, 5, 3, 0, 9]);
     const host = await openSameRealmCommonProofApplicationHost({ proofBytes });
     try {
-        const cursorBytes = bytesFromHex(
-            host.kernel.encodePrivateRandomCursor({
-                derivationContextHash: 'ab'.repeat(64),
-                family: 0x0200,
-                nextCounter: '37',
-                purpose: 2,
-                streamAttemptIdentifierHex: 'cd'.repeat(32),
-            }).canonicalBytesHex,
+        const cursorBytes = createCommonProofGenerationCursorFixtureBytes(
+            host.kernel,
         );
         const generationFixture =
             createInstalledCommonProofGenerationFixture(cursorBytes);
@@ -1694,11 +1703,7 @@ export const openReadyCommonProofApplication = async (): Promise<
                 },
             );
         let environment:
-            | Awaited<
-                  ReturnType<
-                      typeof openCommonProofExecutionEnvironmentInInstalledCustodyWorker
-                  >
-              >
+            | InstalledCustodyCommonProofExecutionEnvironment
             | undefined =
             await openCommonProofExecutionEnvironmentInInstalledCustodyWorker(
                 host.installedHost,

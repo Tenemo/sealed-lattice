@@ -191,11 +191,6 @@ pub(crate) use runtime::{
 #[cfg(test)]
 pub(crate) use runtime::{ResidentCommonProofByteSource, ResidentCommonProofInputChunk};
 pub(crate) use runtime_ffi::consume_verified_common_proof_with_family_terminal;
-#[cfg(test)]
-pub(crate) use selected_accounting::{
-    SelectedProofAccountingError, SelectedProofByteAccounting, SelectedProofVariantByteCeiling,
-    selected_proof_byte_accounting,
-};
 pub(crate) use selected_profile::selected_relation_plan_check_context;
 #[cfg(test)]
 pub(crate) use selected_profile::{

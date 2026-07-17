@@ -85,10 +85,8 @@ impl ProofApplicationBinding {
         proof_header_hash: Hash512,
         proof_stream_descriptor: StreamDescriptor,
     ) -> SchemaResult<Self> {
-        // Exercise both nested values' canonical validation before retaining
-        // the binding. The stored tuple never trusts a caller-side projection.
-        let _ = application_slot.encode()?;
-        let _ = proof_stream_descriptor.encode()?;
+        let _ = application_slot.canonical_tuple()?;
+        let _ = proof_stream_descriptor.canonical_tuple()?;
         Ok(Self {
             application_slot,
             proof_header_hash,
@@ -116,8 +114,7 @@ impl ProofApplicationBinding {
         let tuple = CanonicalTuple::decode(bytes, limits)?;
         require_header(&tuple, PROOF_APPLICATION_BINDING_SCHEMA_IDENTIFIER, 3)?;
         let application_slot_tuple = read_nested_tuple(&tuple.items[0], limits)?;
-        let application_slot =
-            ProofApplicationSlot::decode(&application_slot_tuple.encode()?, limits)?;
+        let application_slot = ProofApplicationSlot::decode_tuple(&application_slot_tuple)?;
         let proof_header_hash = read_hash(&tuple.items[1])?;
         let stream_descriptor_tuple = read_nested_tuple(&tuple.items[2], limits)?;
         let proof_stream_descriptor = StreamDescriptor::from_tuple(&stream_descriptor_tuple)?;
@@ -125,10 +122,7 @@ impl ProofApplicationBinding {
     }
 
     fn canonical_tuple(&self) -> SchemaResult<CanonicalTuple> {
-        let application_slot_tuple = CanonicalTuple::decode(
-            &self.application_slot.encode()?,
-            &CanonicalDecodeLimits::default(),
-        )?;
+        let application_slot_tuple = self.application_slot.canonical_tuple()?;
         Ok(CanonicalTuple::new(
             PROOF_APPLICATION_BINDING_SCHEMA_IDENTIFIER,
             FOUNDATION_SCHEMA_VERSION,

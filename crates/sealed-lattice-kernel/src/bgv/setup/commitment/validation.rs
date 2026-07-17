@@ -238,7 +238,6 @@ pub(super) fn validate_matrix_coordinate(
     commitment_modulus_index: usize,
     matrix_row_index: usize,
     randomness_column_index: usize,
-    ring_coefficient_position: usize,
 ) -> CanonicalResult<()> {
     if !SETUP_COMMITMENT_MODULUS_LIMB_INDICES.contains(&commitment_modulus_index) {
         return Err(invalid_commitment_input(
@@ -255,11 +254,5 @@ pub(super) fn validate_matrix_coordinate(
             "commitment matrix column is outside the selected BDLOP shape",
         ));
     }
-    if ring_coefficient_position >= POLYNOMIAL_DEGREE {
-        return Err(invalid_commitment_input(
-            "commitment matrix ring coefficient is outside the selected ring degree",
-        ));
-    }
-
     Ok(())
 }

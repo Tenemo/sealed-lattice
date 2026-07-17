@@ -1,3 +1,4 @@
+import { byteArraysEqual } from '../byte-array.js';
 import {
     resolveNumberExport,
     type TranscriptCoreKernelCommandRuntime,
@@ -10,7 +11,6 @@ import type {
 } from './contracts.js';
 import {
     CommonProofWorkerRuntimeError,
-    byteArraysEqual,
     decodeCommonProofExternalMemoryRequest,
     encodeCommonProofExternalMemoryResponse,
     maximumWorkerOperationCount,

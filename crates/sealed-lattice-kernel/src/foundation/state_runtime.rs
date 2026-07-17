@@ -6,7 +6,7 @@ use std::{
 use subtle::ConstantTimeEq;
 use zeroize::Zeroizing;
 
-use super::runtime_input::RuntimeInputReader as InputReader;
+use super::runtime_input::{RuntimeInputReader as InputReader, refusal_status};
 use super::{
     CanonicalDecodeLimits, FOUNDATION_PROFILE, Hash512, ML_DSA_65_SIGNATURE_BYTE_LENGTH,
     ParticipantIdentity, PreparedStateReservationIntent, RefusalReason, Roster,
@@ -1130,10 +1130,6 @@ fn take_nonrepeating_handle(next_handle: &mut u32) -> RuntimeResult<u32> {
     let handle = *next_handle;
     *next_handle = next_handle.checked_add(1).unwrap_or(0);
     Ok(handle)
-}
-
-const fn refusal_status(refusal_reason: RefusalReason) -> u32 {
-    refusal_reason.canonical_code() as u32
 }
 
 #[cfg(test)]

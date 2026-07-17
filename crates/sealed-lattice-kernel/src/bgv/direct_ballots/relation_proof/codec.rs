@@ -5,7 +5,6 @@ pub(super) fn parse_direct_ballot_relation_proof(
     expected_statement_hash: &[u8; 64],
 ) -> CanonicalResult<ParsedDirectBallotRelationProof> {
     let expected_size = RELATION_PROOF_MAGIC.len()
-        + expected_statement_hash.len()
         + RELATION_PROOF_CHALLENGE_BYTES
         + direct_ballot_relation_commitment_bytes()
         + direct_ballot_relation_response_bytes();
@@ -21,12 +20,6 @@ pub(super) fn parse_direct_ballot_relation_proof(
         ));
     }
     cursor += RELATION_PROOF_MAGIC.len();
-    let statement_hash = read_hash(proof_bytes, &mut cursor)?;
-    if &statement_hash != expected_statement_hash {
-        return Err(invalid_direct_ballot_relation_proof(
-            "direct ballot relation proof is not bound to this statement",
-        ));
-    }
     let challenge = read_challenge(proof_bytes, &mut cursor)?;
     if challenge.is_zero() {
         return Err(invalid_direct_ballot_relation_proof(
@@ -66,20 +59,17 @@ pub(super) fn parse_direct_ballot_relation_proof(
 }
 
 pub(super) fn encode_direct_ballot_relation_proof(
-    statement_hash: &[u8; 64],
     challenge: &BigInt,
     encoded_commitments: &[u8],
     response_vector: &DirectBallotWitnessVector,
 ) -> CanonicalResult<Vec<u8>> {
     let mut proof_bytes = Vec::with_capacity(
         RELATION_PROOF_MAGIC.len()
-            + statement_hash.len()
             + RELATION_PROOF_CHALLENGE_BYTES
             + encoded_commitments.len()
             + direct_ballot_relation_response_bytes(),
     );
     proof_bytes.extend_from_slice(RELATION_PROOF_MAGIC);
-    proof_bytes.extend_from_slice(statement_hash);
     append_challenge(&mut proof_bytes, challenge)?;
     proof_bytes.extend_from_slice(encoded_commitments);
     encode_direct_ballot_relation_response(&mut proof_bytes, response_vector)?;
@@ -544,19 +534,6 @@ pub(super) fn read_challenge(input: &[u8], cursor: &mut usize) -> CanonicalResul
 
 pub(super) fn append_u64(output: &mut Vec<u8>, value: u64) {
     output.extend_from_slice(&value.to_le_bytes());
-}
-
-pub(super) fn read_hash(input: &[u8], cursor: &mut usize) -> CanonicalResult<[u8; 64]> {
-    let end = cursor.checked_add(64).ok_or_else(|| {
-        invalid_direct_ballot_relation_proof("direct ballot relation proof cursor overflowed")
-    })?;
-    let bytes = input.get(*cursor..end).ok_or_else(|| {
-        invalid_direct_ballot_relation_proof("direct ballot relation proof ended early")
-    })?;
-    let mut hash = [0_u8; 64];
-    hash.copy_from_slice(bytes);
-    *cursor = end;
-    Ok(hash)
 }
 
 pub(super) fn read_u64(input: &[u8], cursor: &mut usize) -> CanonicalResult<u64> {

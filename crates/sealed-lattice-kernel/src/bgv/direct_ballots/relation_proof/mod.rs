@@ -24,7 +24,7 @@ use num_bigint::{BigInt, Sign};
 use num_traits::Zero;
 use serde_json::{Value, json};
 
-use super::{DirectEncryptedBallot, OPTION_COUNT, SCORE_BUCKET_COUNT, setup_package_hash};
+use super::{DirectEncryptedBallot, OPTION_COUNT, SCORE_BUCKET_COUNT};
 use crate::{
     bgv::{
         evaluator::engine::{DevelopmentBgvKey, encode_slots_to_coefficients, negacyclic_mul},
@@ -35,7 +35,7 @@ use crate::{
     hashing::{canonical_json, hash_framed_parts_512 as hash512, to_hex},
 };
 
-const RELATION_PROOF_MAGIC: &[u8; 8] = b"SLDBP001";
+const RELATION_PROOF_MAGIC: &[u8; 8] = b"SLDBP002";
 const RELATION_WITNESS_POLYNOMIALS: usize = 4;
 const ONE_HOT_SUPPORT_EXPANSION_COEFFICIENTS: usize = 2;
 const RANDOMIZER_SUPPORT_EXPANSION_COEFFICIENTS: usize = 3;

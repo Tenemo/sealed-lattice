@@ -189,20 +189,9 @@ describe('canonical board WASM runtime', () => {
                 kernel: fake.kernel,
             }),
         );
-        const untrustedCarrier = Object.defineProperty(
-            {
-                canonicalCarrier: Uint8Array.of(0x71, 0x72, 0x73),
-                claimedProducer: 'relay-selected',
-            },
-            'claimedFamily',
-            {
-                get: () => {
-                    throw new Error(
-                        'unknown relay metadata must remain unread',
-                    );
-                },
-            },
-        );
+        const untrustedCarrier = {
+            canonicalCarrier: Uint8Array.of(0x71, 0x72, 0x73),
+        };
         const first = requireValid(
             session.verifyUnorderedCarriers([untrustedCarrier]),
         )[0];

@@ -99,7 +99,6 @@ pub(super) fn verify_setup_signed_lifted_commitment_opening(
 
     Ok(SetupCommitmentOpeningVerification {
         commitment_root: setup_commitment_root(&computed_commitment)?,
-        randomness_infinity_bound,
         message_coefficient_bound,
     })
 }
@@ -146,7 +145,6 @@ fn verify_setup_commitment_opening_with_message_bound(
 
     Ok(SetupCommitmentOpeningVerification {
         commitment_root: setup_commitment_root(&computed_commitment)?,
-        randomness_infinity_bound,
         message_coefficient_bound,
     })
 }
