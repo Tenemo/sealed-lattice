@@ -14,11 +14,6 @@ mod prover;
 mod relation;
 mod verifier;
 
-#[cfg(test)]
-pub(in crate::bgv::setup) use commands::{
-    prove_trustee_evaluation_key_proof_bytes, verify_trustee_evaluation_key_proof_bytes,
-};
-
 pub(in crate::bgv::setup) use commands::{
     VssPublicCommandCommitmentExpectation, vss_share_linkage_commitment_from_value,
 };
@@ -39,6 +34,8 @@ pub(in crate::bgv::setup) use proof_codec::encode_trustee_evaluation_key_proof;
 pub(in crate::bgv::setup) use prover::prove_evaluation_key_share;
 #[cfg(test)]
 pub(in crate::bgv::setup) use relation::TrusteeEvaluationKeyWitness;
+#[cfg(test)]
+pub(in crate::bgv::setup) use relation::generate_development_trustee_instance;
 pub(in crate::bgv::setup) use relation::public_key_switch_sample;
 pub(in crate::bgv::setup) use relation::{
     EvaluationKeyShareDescriptor, EvaluationKeyShareKind, PrivateVssShareStatement,
@@ -46,10 +43,6 @@ pub(in crate::bgv::setup) use relation::{
     SameSecretLinkageAtomFieldForms, SameSecretLinkageStatement, SetupProofStatement,
     SuccinctSetupProofContext, TrusteeEvaluationKeyStatement,
     build_same_secret_linkage_atom_field_forms,
-};
-#[cfg(test)]
-pub(in crate::bgv::setup) use relation::{
-    KeyBearingWitness, SameSecretLinkageWitness, generate_development_trustee_instance,
 };
 pub(in crate::bgv::setup) use verifier::verify_evaluation_key_share;
 
@@ -61,21 +54,6 @@ use crate::{
     bgv::setup::setup_proof::{CanonicalProofMaterialBytes, SetupProofFamily},
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
 };
-
-#[cfg(test)]
-use crate::hashing::hash512_hex;
-
-// Canonical hash of authenticated trustee evaluation-key proof bytes, bound into
-// the package proof records and the chunked proof stream reference.
-#[cfg(test)]
-pub(in crate::bgv::setup) fn trustee_evaluation_key_proof_bytes_hash(proof_bytes: &[u8]) -> String {
-    hash512_hex(
-        SetupProofFamily::TrusteeEvaluationKey
-            .proof_bytes_hash_domain()
-            .expect("trustee evaluation-key proofs have a byte-hash domain"),
-        &[proof_bytes],
-    )
-}
 
 pub(in crate::bgv::setup) fn trustee_evaluation_key_proof_material_bytes_hash(
     proof_bytes: &CanonicalProofMaterialBytes,
@@ -98,18 +76,6 @@ pub(crate) const TARGET_DECRYPTION_SHARE_PROOF_FAMILY: &str =
     SetupProofFamily::TargetDecryptionShare.wire_label();
 #[cfg(test)]
 pub(crate) const TARGET_DECRYPTION_FLOODING_NOISE_COEFFICIENT_BOUND: i64 = 16;
-#[cfg(test)]
-pub(in crate::bgv::setup) fn public_key_share_succinct_proof_bytes_hash(
-    proof_bytes: &[u8],
-) -> String {
-    hash512_hex(
-        SetupProofFamily::PublicKeyShare
-            .proof_bytes_hash_domain()
-            .expect("public-key share proofs have a byte-hash domain"),
-        &[proof_bytes],
-    )
-}
-
 pub(in crate::bgv::setup) fn private_vss_share_succinct_proof_material_bytes_hash(
     proof_bytes: &CanonicalProofMaterialBytes,
 ) -> CanonicalResult<String> {

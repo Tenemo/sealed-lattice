@@ -15,8 +15,6 @@ pub(super) struct LocalTargetDecryptionShareWitness {
 pub(super) struct AggregateOpeningCredentialBinding {
     pub(super) aggregate_commitment_root: String,
     pub(super) aggregate_opening_root: String,
-    pub(super) aggregate_commitment_message_values: Vec<u64>,
-    pub(super) aggregate_material_seed_hex: String,
 }
 
 pub(super) struct TargetDecryptionFloodingNoiseOpening {
@@ -27,11 +25,6 @@ struct TargetDecryptionSmudgingCommitmentOpening {
     message_coefficients: Vec<u64>,
     material_seed_hex: String,
     commitment_context: Value,
-}
-
-pub(super) struct TargetDecryptionFloodingNoiseProofOpening {
-    pub(super) message_coefficients: Vec<u64>,
-    pub(super) material_seed_hex: String,
 }
 
 pub(super) fn generate_target_decryption_share_from_secret_share(

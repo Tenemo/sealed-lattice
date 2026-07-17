@@ -177,8 +177,14 @@ fn collective_setup_verifier_refuses_malformed_setup_context_tokens_first() {
 
         let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
             .expect("verification response");
-        assert_eq!(result["isValid"], false, "unexpected result: {result}");
-        assert_eq!(result["refusalReason"], "wrongContext");
+        assert_eq!(
+            result["isValid"], false,
+            "unexpected result for setupContext.{field_name}={malformed_value:?}: {result}"
+        );
+        assert_eq!(
+            result["refusalReason"], "malformedEncoding",
+            "unexpected refusal for setupContext.{field_name}={malformed_value:?}: {result}"
+        );
     }
 }
 

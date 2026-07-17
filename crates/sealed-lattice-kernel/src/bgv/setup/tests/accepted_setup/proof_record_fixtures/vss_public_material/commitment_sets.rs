@@ -229,7 +229,6 @@ pub(in super::super::super) fn vss_public_aggregate_threshold_commitment_set_obj
 
     VssProofMaterialSetFixture {
         value: aggregate_set,
-        proof_binding_leases: aggregate_threshold_proofs.proof_binding_leases,
     }
 }
 

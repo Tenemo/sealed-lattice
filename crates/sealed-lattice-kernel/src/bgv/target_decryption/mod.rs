@@ -36,7 +36,6 @@ pub(crate) use command::{
     derive_bgv_target_decryption_share_proof_statement_from_request,
     finish_bgv_target_decryption_result_release_for_test,
     generate_bgv_target_decryption_share_from_local_share_request,
-    generate_bgv_target_decryption_share_proof_request_for_test,
     verify_bgv_target_decryption_share_proof_statement_binding_from_request,
 };
 #[cfg(test)]

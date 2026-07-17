@@ -104,12 +104,12 @@ impl EvaluatorContext {
             // working-level schedule in constrained WASM memory. The stable
             // context seed makes that prefix identical to the native cached
             // working-level key under CRT truncation.
-            return Ok(Arc::new(generate_galois_key(
+            Ok(Arc::new(generate_galois_key(
                 &self.key,
                 galois_element,
                 requested_level,
                 &self.galois_key_seed_hex,
-            )?));
+            )?))
         }
 
         #[cfg(not(target_arch = "wasm32"))]

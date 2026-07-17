@@ -426,6 +426,19 @@ pub(in super::super) fn automorphism_i128_for_evaluation_key_fixture(
     output
 }
 
+fn signed_i64_residue_for_fixture(value: i64, modulus: u64) -> u64 {
+    if value >= 0 {
+        u64::try_from(value).expect("non-negative value") % modulus
+    } else {
+        let magnitude = value.unsigned_abs() % modulus;
+        if magnitude == 0 {
+            0
+        } else {
+            modulus - magnitude
+        }
+    }
+}
+
 // Signed i128 coefficient reduced into the canonical non-negative residue mod
 // the given modulus.
 fn signed_i128_residue_for_fixture(value: i128, modulus: u64) -> u64 {

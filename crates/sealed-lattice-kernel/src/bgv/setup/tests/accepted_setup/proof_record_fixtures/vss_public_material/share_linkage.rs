@@ -41,7 +41,6 @@ pub(in super::super::super) fn vss_share_linkage_proof_material_set_object(
                 .map(|fixture| fixture.record.clone())
                 .collect::<Vec<_>>(),
         }),
-        proof_binding_leases: Vec::new(),
     }
 }
 

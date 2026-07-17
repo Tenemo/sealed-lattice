@@ -6,8 +6,6 @@ use super::*;
 #[derive(Clone)]
 pub(in super::super::super) struct FinalizedCollectiveSetupPackageFixture {
     pub(in super::super::super) package: serde_json::Value,
-    pub(in super::super::super) proof_binding_leases:
-        Vec<crate::bgv::setup::CanonicalSetupProofBindingLease>,
 }
 
 pub(in super::super::super) fn finalize_collective_setup_package(
@@ -70,36 +68,24 @@ pub(in super::super::super) fn finalize_collective_setup_package(
         .expect("collective setup package")
         .remove("vssCoefficientCommitmentMaterial");
 
-    let mut proof_binding_leases = aggregate_threshold_commitment_set.proof_binding_leases;
-    proof_binding_leases.extend(share_linkage_proof_material_set.proof_binding_leases);
-    proof_binding_leases.extend(same_secret_bridge_proof_material_set.proof_binding_leases);
-    FinalizedCollectiveSetupPackageFixture {
-        package,
-        proof_binding_leases,
-    }
+    FinalizedCollectiveSetupPackageFixture { package }
 }
 
-// The reference finalized fixture carries the descriptor-backed package and
-// the matching authenticated-material request. The cached fixture getter
-// rehydrates proof material before each verification because the verifier
-// consumes it at the end of the call.
+// The reference finalized fixture carries the canonical public VSS structure
+// with deliberately invalid common-proof references and no verifier-approved
+// proof bindings. It exercises structural reconstruction up to the proof
+// authority boundary, which must remain fail-closed.
 fn minimal_finalized_collective_setup_fixture() -> CollectiveSetupVerificationFixture {
-    descriptor_backed_vss_collective_setup_fixture()
+    structural_vss_collective_setup_fixture()
 }
 
-// The finalized setup package flows through the accepted-setup verification
-// path: the canonical BDLOP commitment roots and bridge-carried constant bodies remain
-// alongside the committed-material sets, while the prover-only full opening
-// material is omitted. Every downstream verifier
-// (private VSS envelopes, share acceptances, public key shares and proofs,
-// evaluator schedule and final objects) binds the relevant
-// roots.
-// Like the full-VSS minimal package this reduced-ring package is pre-terminal (no
-// collective public key runtime material), so it is not fully valid; the check is
-// that it passes every object requirement, leaving only the terminal
-// runtime objects missing.
+// Finalization retains the canonical BDLOP roots and bridge-carried commitment
+// bodies while omitting prover-only opening material. This is structural
+// evidence only: until the common-proof verifier grants authority for the
+// referenced bytes, accepted setup must refuse before downstream runtime
+// objects can matter.
 #[test]
-fn minimal_finalized_collective_setup_package_passes_accepted_setup() {
+fn finalized_structural_material_reaches_but_cannot_bypass_common_proof_authority() {
     let fixture = minimal_finalized_collective_setup_fixture();
     let package = &fixture.package;
     assert_eq!(
@@ -110,9 +96,18 @@ fn minimal_finalized_collective_setup_package_passes_accepted_setup() {
     let result = fixture
         .verify()
         .expect("finalized collective setup package verification result");
-    // The embedded commitment sets satisfy the coefficient-commitment requirement;
-    // only the terminal runtime objects a pre-terminal setup package lacks may
-    // remain.
-    assert_eq!(result["isValid"], false, "unexpected result: {result}");
-    assert_eq!(result["refusalReason"], "missingPrerequisite");
+    let result_diagnostics =
+        || serde_json::to_string_pretty(&result).expect("finalized setup verification result JSON");
+    assert_eq!(
+        result["isValid"],
+        false,
+        "structural proof references must not grant acceptance: {}",
+        result_diagnostics(),
+    );
+    assert_eq!(
+        result["refusalReason"],
+        "malformedEncoding",
+        "the missing common-proof authority must refuse at the proof boundary: {}",
+        result_diagnostics(),
+    );
 }

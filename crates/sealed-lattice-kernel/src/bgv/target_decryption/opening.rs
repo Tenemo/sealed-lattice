@@ -36,8 +36,6 @@ pub(super) struct VerifiedAggregateOpeningCredential {
     pub(super) commitment_root: String,
     pub(super) opening_root: String,
     pub(super) aggregate_share_values: Vec<u64>,
-    pub(super) aggregate_commitment_message_values: Vec<u64>,
-    pub(super) aggregate_material_seed_hex: String,
 }
 
 pub(super) fn verify_aggregate_opening_credential(
@@ -68,8 +66,6 @@ pub(super) fn verify_aggregate_opening_credential(
         commitment_root: computation.commitment_root,
         opening_root: computation.opening_root,
         aggregate_share_values,
-        aggregate_commitment_message_values,
-        aggregate_material_seed_hex,
     })
 }
 

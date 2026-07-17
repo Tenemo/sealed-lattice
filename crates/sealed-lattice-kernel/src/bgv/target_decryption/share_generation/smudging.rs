@@ -181,29 +181,6 @@ pub(in super::super) fn target_decryption_smudging_commitment_set_from_flooding_
     }))
 }
 
-pub(in super::super) fn target_decryption_flooding_noise_proof_opening_for_slice(
-    target_accepted: &TargetAcceptedBinding,
-    participant: &ParticipantBinding,
-    private_flooding_seed_hex: &str,
-    flooding_noise_openings: &[TargetDecryptionFloodingNoiseOpening],
-    role: &str,
-    rns_limb_index: usize,
-) -> CanonicalResult<TargetDecryptionFloodingNoiseProofOpening> {
-    let opening = target_decryption_flooding_noise_for_role(flooding_noise_openings, role)?;
-    let commitment_opening = target_decryption_flooding_noise_commitment_opening(
-        target_accepted,
-        participant,
-        private_flooding_seed_hex,
-        opening,
-        role,
-        rns_limb_index,
-    )?;
-    Ok(TargetDecryptionFloodingNoiseProofOpening {
-        message_coefficients: commitment_opening.message_coefficients,
-        material_seed_hex: commitment_opening.material_seed_hex,
-    })
-}
-
 fn target_decryption_flooding_noise_commitment_opening(
     target_accepted: &TargetAcceptedBinding,
     participant: &ParticipantBinding,

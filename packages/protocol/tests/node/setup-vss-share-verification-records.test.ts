@@ -21,7 +21,7 @@ import {
 const fixtureHash = makeSetupFixtureHash(
     'setup-vss-share-verification-records',
 );
-const setupContext = makeSetupContext(fixtureHash, 2);
+const setupContext = makeSetupContext(fixtureHash, 3);
 const privateVssEnvelopeCommitmentRoot = fixtureHash('private-envelope-set');
 
 const envelopeReference = (
@@ -74,7 +74,7 @@ type VerificationRecord =
 
 const setupIntent = (): AcceptanceRecordInput['setupIntent'] => ({
     objectType: 'CollectiveBgvSetupIntent',
-    trusteeRegistrations: [0, 1].map((rosterPosition) => ({
+    trusteeRegistrations: [0, 1, 2].map((rosterPosition) => ({
         objectType: 'CollectiveBgvSetupIntentTrusteeRegistration' as const,
         trusteeIdentity: `trustee-${String(rosterPosition)}`,
         privateVssMailboxPublicKeyHash: fixtureHash(
@@ -101,7 +101,7 @@ const vssPublicCoefficientCommitmentSet =
     (): AcceptanceRecordInput['vssPublicCoefficientCommitmentSet'] => ({
         objectType: 'VssPublicCoefficientCommitmentSet',
         publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
-        sourceTrusteeRecords: [0, 1].map(() => ({
+        sourceTrusteeRecords: [0, 1, 2].map(() => ({
             objectType: 'VssPublicSourceCoefficientCommitments' as const,
             coefficientCommitments: [],
         })),

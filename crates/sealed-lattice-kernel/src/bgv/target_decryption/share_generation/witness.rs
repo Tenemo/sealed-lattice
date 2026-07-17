@@ -89,9 +89,6 @@ pub(in super::super) fn read_local_target_decryption_share_witness(
         active_credential_bindings.push(AggregateOpeningCredentialBinding {
             aggregate_commitment_root: verified_credential.commitment_root,
             aggregate_opening_root: verified_credential.opening_root,
-            aggregate_commitment_message_values: verified_credential
-                .aggregate_commitment_message_values,
-            aggregate_material_seed_hex: verified_credential.aggregate_material_seed_hex,
         });
     }
 

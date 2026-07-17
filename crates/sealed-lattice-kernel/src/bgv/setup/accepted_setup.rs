@@ -13,19 +13,8 @@ mod vss_complaints_and_acceptances;
 mod vss_public_material_verification;
 
 use self::common_randomness::verify_common_randomness;
-use self::same_secret_bridge_verification::{
-    SameSecretBridgeVerification, verify_same_secret_bridge_statement_set,
-};
-// Re-exported for terminal proof fixtures, which build public-key-share and
-// trustee evaluation-key statements against the verified same-secret bridge
-// material that the accepted-setup verifier reconstructs.
 use self::evaluation_key_material_transport::evaluation_key_material_refusal;
 use self::evaluation_key_proof_checks::verify_trustee_evaluation_key_proofs;
-#[cfg(test)]
-pub(in crate::bgv::setup) use self::evaluation_key_proof_checks::{
-    TrusteeEvaluationKeyStatementInputs, trustee_evaluation_key_proof_verification_binding_hash,
-    trustee_evaluation_key_statement_from_package,
-};
 pub(in crate::bgv::setup) use self::evaluation_key_share_rounds::{
     evaluation_key_proof_common_binding, expected_galois_key_switch_seed,
     expected_relinearization_key_switch_seed, scheduled_relinearization_levels,
@@ -40,8 +29,6 @@ use self::private_vss_envelopes::{
     PrivateVssEnvelopeBindingMap, private_vss_envelope_bindings_from_package,
     private_vss_envelope_commitment_root, verify_private_vss_envelope_commitments,
 };
-#[cfg(test)]
-pub(in crate::bgv::setup) use self::public_key_share_material::public_key_share_coefficient_vector_hash;
 pub(in crate::bgv::setup) use self::public_key_share_material::{
     CanonicalPublicKeyShareMaterialStream, VerifiedCanonicalPublicKeyShareMaterialHandle,
     VerifiedCanonicalPublicKeyShareMaterialStoreEntry,
@@ -54,8 +41,6 @@ use self::public_key_share_material::{
     PublicKeyShareMaterialBinding, verify_collective_public_key_material,
     verify_public_key_share_material_set,
 };
-#[cfg(test)]
-pub(in crate::bgv::setup) use self::public_key_shares::public_key_share_succinct_proof_verification_binding_hash;
 use self::public_key_shares::{
     PublicKeyCommonBinding, PublicKeyShareSuccinctProofVerification, public_key_refusal,
     verify_public_key_share_succinct_proofs, verify_public_key_shares,
@@ -63,8 +48,9 @@ use self::public_key_shares::{
 pub(in crate::bgv::setup) use self::public_key_shares::{
     derive_public_key_share_root, derive_public_key_share_set_root,
 };
-#[cfg(test)]
-pub(in crate::bgv::setup) use self::same_secret_bridge_verification::verified_same_secret_bridge_material_from_package;
+use self::same_secret_bridge_verification::{
+    SameSecretBridgeVerification, verify_same_secret_bridge_statement_set,
+};
 use self::setup_context::verify_context;
 #[cfg(test)]
 pub(crate) use self::setup_intent::accepted_setup_participant_roster_from_package;

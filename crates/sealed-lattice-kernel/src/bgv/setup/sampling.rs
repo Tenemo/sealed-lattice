@@ -7,9 +7,6 @@ use sha3::{
 
 use crate::transcript_core::decode_hex;
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
-use rayon::prelude::*;
-
 // These JSON setup paths do not receive suite-provided sampling limits, so a
 // fixed cap keeps deterministic rejection work finite.
 pub(super) const MAXIMUM_DETERMINISTIC_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT: u32 = 64;
@@ -147,40 +144,6 @@ pub(super) fn first_accepted_candidate_from_block(
         Err(candidate_draw_limit_exhausted_error())
     } else {
         Ok(None)
-    }
-}
-
-#[cfg(test)]
-pub(super) fn dense_public_residues(
-    seed_hash: &str,
-    label: &str,
-    modulus: u64,
-) -> CanonicalResult<Vec<u64>> {
-    dense_public_residues_with_degree(seed_hash, label, modulus, POLYNOMIAL_DEGREE)
-}
-
-// Same per-position framing as `dense_public_residues` over an explicit
-// degree, so reduced development rings derive a prefix of the full-ring
-// residues instead of a differently framed vector.
-#[cfg(test)]
-pub(super) fn dense_public_residues_with_degree(
-    seed_hash: &str,
-    label: &str,
-    modulus: u64,
-    ring_degree: usize,
-) -> CanonicalResult<Vec<u64>> {
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        (0..ring_degree)
-            .into_par_iter()
-            .map(|position| sample_residue(seed_hash, label, position, modulus))
-            .collect()
-    }
-    #[cfg(target_arch = "wasm32")]
-    {
-        (0..ring_degree)
-            .map(|position| sample_residue(seed_hash, label, position, modulus))
-            .collect()
     }
 }
 

@@ -910,4 +910,4 @@ fn target_setup_binding_uses_the_accepted_package_hash_boundary() {
 
 mod behavior_proof;
 mod behavior_witness;
-mod replay_release;
+mod evaluator_replay;

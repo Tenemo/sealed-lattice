@@ -75,7 +75,6 @@ pub(in super::super::super) fn same_secret_bridge_proof_material_set_object(
                 .map(|reference| reference.proof_bytes_hash.clone())
                 .collect::<Vec<_>>(),
         }),
-        proof_binding_leases: Vec::new(),
     }
 }
 

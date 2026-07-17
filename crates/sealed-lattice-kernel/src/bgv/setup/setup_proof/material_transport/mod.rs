@@ -180,7 +180,4 @@ pub(in crate::bgv::setup) fn take_authenticated_setup_proof_material_bytes(
 mod verification;
 
 #[cfg(test)]
-pub(crate) use verification::{
-    authenticate_setup_proof_material_stream_for_test,
-    authenticate_setup_proof_material_stream_in_session_for_test,
-};
+pub(crate) use verification::authenticate_setup_proof_material_stream_for_test;

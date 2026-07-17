@@ -1,27 +1,5 @@
 use super::*;
 
-// Until the common-proof family adapters exist, the finalized structural
-// fixture intentionally owns no verifier-approved VSS proof bindings. Keeping
-// this fixture object lets broader accepted-setup tests open an isolated
-// binding session without manufacturing acceptance for deleted proof engines.
-#[derive(Clone)]
-pub(in super::super::super) struct DescriptorBackedVssProofMaterialFixture;
-
-impl DescriptorBackedVssProofMaterialFixture {
-    pub(in super::super::super) fn proof_binding_leases(
-        &self,
-    ) -> Vec<crate::bgv::setup::CanonicalSetupProofBindingLease> {
-        Vec::new()
-    }
-}
-
-pub(in super::super::super) fn descriptor_backed_vss_proof_material_fixture(
-    _package: &mut serde_json::Value,
-    _proof_binding_leases: &[crate::bgv::setup::CanonicalSetupProofBindingLease],
-) -> DescriptorBackedVssProofMaterialFixture {
-    DescriptorBackedVssProofMaterialFixture
-}
-
 #[test]
 fn structural_vss_bindings_do_not_bypass_the_common_proof_gate() {
     let finalized_fixture = structural_vss_public_material_fixture();

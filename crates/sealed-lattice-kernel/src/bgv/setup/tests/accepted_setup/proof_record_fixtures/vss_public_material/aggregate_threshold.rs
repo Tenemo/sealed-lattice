@@ -42,7 +42,6 @@ pub(in super::super) fn vss_aggregate_threshold_proofs(
             .iter()
             .map(|reference| reference.proof_bytes_hash.clone())
             .collect(),
-        proof_binding_leases: Vec::new(),
     }
 }
 

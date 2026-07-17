@@ -2,16 +2,6 @@ use super::*;
 
 const TARGET_DECRYPTION_SHARE_PROOF_MATERIAL_OBJECT_TYPE: &str =
     "BgvTargetDecryptionShareProofMaterial";
-pub(super) struct VerifiedLocalTargetDecryptionShareProofMaterialGenerationInput<'a> {
-    pub(super) setup_binding: &'a SetupBinding,
-    pub(super) target_accepted: &'a TargetAcceptedBinding,
-    pub(super) target_ciphertexts: &'a TargetCiphertextPair,
-    pub(super) participant: &'a ParticipantBinding,
-    pub(super) local_target_share_witness: &'a LocalTargetDecryptionShareWitness,
-    pub(super) target_decryption_share: &'a Value,
-    pub(super) proof_statement: &'a Value,
-    pub(super) proof_randomness_seed_hex: &'a str,
-}
 
 pub(super) struct TargetDecryptionShareProofMaterialVerificationInput<'a> {
     pub(super) setup_binding: &'a SetupBinding,
@@ -48,34 +38,6 @@ pub(super) fn take_target_decryption_share_proof_material_for_active_attempt(
     })?;
 
     Ok(TargetDecryptionShareProofMaterialAttempt { proof_bytes })
-}
-
-pub(super) fn generate_target_decryption_share_proof_material_from_verified_local_witness(
-    input: VerifiedLocalTargetDecryptionShareProofMaterialGenerationInput<'_>,
-) -> CanonicalResult<Value> {
-    let proof_slice_request =
-        target_decryption_share_all_active_limbs_proof_request_from_verified_local_witness(
-            VerifiedLocalTargetDecryptionShareAllActiveLimbsProofRequestInput {
-                setup_binding: input.setup_binding,
-                target_accepted: input.target_accepted,
-                target_ciphertexts: input.target_ciphertexts,
-                participant: input.participant,
-                local_target_share_witness: input.local_target_share_witness,
-                target_decryption_share: input.target_decryption_share,
-                proof_statement: input.proof_statement,
-                proof_randomness_seed_hex: input.proof_randomness_seed_hex,
-            },
-        )?;
-    generate_and_retain_target_decryption_share_proof_material(&proof_slice_request)
-}
-
-fn generate_and_retain_target_decryption_share_proof_material(
-    _proof_slice_request: &Value,
-) -> CanonicalResult<Value> {
-    Err(CanonicalError::new(
-        CanonicalErrorCode::InvalidProtocolObject,
-        "target-decryption share generation requires schema 0x1621 to be proved by the common proof suite",
-    ))
 }
 
 pub(super) fn verify_target_decryption_share_proof_material(

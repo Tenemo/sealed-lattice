@@ -11,34 +11,6 @@ pub(crate) fn authenticate_setup_proof_material_stream_for_test(
     proof_bytes_hash: &str,
     proof_bytes: &[u8],
 ) -> CanonicalResult<()> {
-    authenticate_setup_proof_material_stream_for_test_inner(
-        proof_family,
-        proof_bytes_hash,
-        proof_bytes,
-        None,
-    )
-}
-
-pub(crate) fn authenticate_setup_proof_material_stream_in_session_for_test(
-    proof_family: &str,
-    proof_bytes_hash: &str,
-    proof_bytes: &[u8],
-    accepted_setup_session: crate::bgv::setup::AcceptedSetupProofBindingSession,
-) -> CanonicalResult<()> {
-    authenticate_setup_proof_material_stream_for_test_inner(
-        proof_family,
-        proof_bytes_hash,
-        proof_bytes,
-        Some(accepted_setup_session),
-    )
-}
-
-fn authenticate_setup_proof_material_stream_for_test_inner(
-    proof_family: &str,
-    proof_bytes_hash: &str,
-    proof_bytes: &[u8],
-    accepted_setup_session: Option<crate::bgv::setup::AcceptedSetupProofBindingSession>,
-) -> CanonicalResult<()> {
     let proof_family = setup_proof_stream_family(proof_family)?;
     let family_code = proof_family.stream_code();
     let stream_domain = proof_family.stream_domain();
@@ -57,19 +29,11 @@ fn authenticate_setup_proof_material_stream_for_test_inner(
         )
     })?;
     let material_root_bytes = crate::transcript_core::decode_hex(proof_bytes_hash)?;
-    let stream = match accepted_setup_session {
-        Some(accepted_setup_session) => crate::bgv::setup::begin_accepted_setup_canonical_stream(
-            family_code,
-            &material_root_bytes,
-            &descriptor_bytes,
-            accepted_setup_session,
-        ),
-        None => crate::bgv::setup::begin_bgv_canonical_stream(
-            family_code,
-            &material_root_bytes,
-            &descriptor_bytes,
-        ),
-    }
+    let stream = crate::bgv::setup::begin_bgv_canonical_stream(
+        family_code,
+        &material_root_bytes,
+        &descriptor_bytes,
+    )
     .map_err(|status| {
         CanonicalError::new(
             CanonicalErrorCode::InvalidProtocolObject,

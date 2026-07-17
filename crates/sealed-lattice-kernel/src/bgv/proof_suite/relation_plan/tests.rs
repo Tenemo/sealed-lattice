@@ -1,3 +1,4 @@
+use super::integer_lift::integer_lift_full_ring_product_constraint_programs;
 use super::interpreter::signed_rotation_exponent;
 use super::*;
 
@@ -781,7 +782,13 @@ fn aggregate_plan_checker_rejects_duplicate_or_randomized_half_residuals() {
 #[test]
 fn generated_plan_checker_rejects_rotated_factor_and_opening_catalog_tampering() {
     let context = committed_material_check_context();
-    let input = committed_material_input();
+    let mut input = committed_material_input();
+    // The three-participant fixture's point stride equals the half-ring trace
+    // size, so its degree-one monomial actions are unrotated half swaps. A
+    // valid five-participant roster has a smaller stride and exercises the
+    // nonzero trace-rotation binding this test tampers with.
+    input.participant_count = 5;
+    input.threshold = 2;
     let mut vss_plan = compile_vss_share_linkage_relation_plan(&input, &context)
         .expect("exact VSS share-linkage relation plan");
     let variant = &mut vss_plan.plan.variants[0];

@@ -101,7 +101,7 @@ export type GuardedRustKernelCommand = {
 const serializedThreadCount = '1';
 
 export const tenParticipantAcceptedSetupEvidenceTest =
-    'bgv::setup::tests::accepted_setup::vss_material::ten_participant_vss_proof_bearing_collective_setup_package_passes_preterminal_accepted_setup';
+    'bgv::setup::tests::accepted_setup::vss_material::ten_participant_vss_structural_collective_setup_package_refuses_without_common_proof_authority';
 
 export const cargoTestArgumentsForAcceptedSetupTests =
     (): readonly string[] => [

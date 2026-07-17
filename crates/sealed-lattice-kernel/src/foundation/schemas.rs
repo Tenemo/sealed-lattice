@@ -1234,7 +1234,7 @@ mod tests {
                 2 * state_witness_quorum - (n - 1) > f + 1,
                 "two state quorums must share a stable honest witness"
             );
-            assert!(state_witness_quorum <= n - 1);
+            assert!(state_witness_quorum < n);
         }
 
         assert_eq!(

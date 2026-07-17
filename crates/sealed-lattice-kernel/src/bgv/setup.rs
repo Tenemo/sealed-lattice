@@ -113,35 +113,6 @@ pub(crate) fn verify_collective_bgv_setup_package_with_session_from_request(
     verify_collective_bgv_setup_package_in_session_from_request(request, session)
 }
 
-#[cfg(test)]
-pub(crate) use vss_commitment::{
-    VssAggregateThresholdProofContext, verify_vss_public_aggregate_threshold_proofs,
-};
-#[cfg(test)]
-pub(crate) use vss_commitment::{
-    VssCommittedMaterialCommitmentInput, VssPublicAggregateThresholdCommitmentSetContext,
-    compute_vss_committed_material_commitment,
-    validate_standalone_vss_committed_material_commitment,
-    verify_vss_public_aggregate_threshold_commitment_set,
-};
-#[cfg(test)]
-pub(in crate::bgv::setup) const TEST_CHECKPOINT_ROOT_ENVIRONMENT_VARIABLE: &str =
-    "SEALED_LATTICE_TEST_CHECKPOINT_ROOT";
-
-#[cfg(test)]
-pub(in crate::bgv::setup) fn accepted_setup_test_checkpoint_root_directory() -> std::path::PathBuf {
-    std::env::var_os(TEST_CHECKPOINT_ROOT_ENVIRONMENT_VARIABLE)
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| std::path::PathBuf::from("temp").join("test-checkpoints"))
-}
-
-#[cfg(test)]
-pub(in crate::bgv::setup) fn accepted_setup_final_package_material_store_checkpoint_directory()
--> std::path::PathBuf {
-    accepted_setup_test_checkpoint_root_directory()
-        .join("accepted-setup-final-package-material-store")
-}
-
 use crate::{
     bgv::{
         evaluator::records::MAXIMUM_OPTION_COUNT,
@@ -154,6 +125,13 @@ use crate::{
     },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
     hashing::derive_canonical_object_hash,
+};
+#[cfg(test)]
+pub(crate) use vss_commitment::{
+    VssCommittedMaterialCommitmentInput, VssPublicAggregateThresholdCommitmentSetContext,
+    compute_vss_committed_material_commitment,
+    validate_standalone_vss_committed_material_commitment,
+    verify_vss_public_aggregate_threshold_commitment_set,
 };
 
 #[cfg(test)]

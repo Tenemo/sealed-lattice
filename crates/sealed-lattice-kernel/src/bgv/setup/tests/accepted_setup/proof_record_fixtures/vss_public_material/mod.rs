@@ -12,12 +12,10 @@ struct VssProofRecordFixture {
 
 struct VssProofRecordSetFixture {
     proof_bytes_hashes: Vec<String>,
-    proof_binding_leases: Vec<crate::bgv::setup::CanonicalSetupProofBindingLease>,
 }
 
 struct VssProofMaterialSetFixture {
     value: serde_json::Value,
-    proof_binding_leases: Vec<crate::bgv::setup::CanonicalSetupProofBindingLease>,
 }
 
 pub(super) fn vss_fixture_threshold_degree(package: &serde_json::Value) -> u64 {
@@ -244,44 +242,6 @@ mod transport;
 
 pub(in super::super) use commitment_sets::vss_public_coefficient_commitment_record;
 
-// Builds only the two aggregate coordinates needed by the direct-verifier
-// mutation test. Its proof references are deliberately invalid common-proof
-// fixtures; unrelated accepted-setup proof families are not generated.
-pub(in super::super) struct CompactAggregateThresholdProofFixture {
-    pub(in super::super) package: serde_json::Value,
-    pub(in super::super) proof_binding_leases:
-        Vec<crate::bgv::setup::CanonicalSetupProofBindingLease>,
-}
-
-pub(in super::super) fn compact_aggregate_threshold_proof_fixture()
--> CompactAggregateThresholdProofFixture {
-    let mut package = minimal_collective_setup_package_for_participant_count(3);
-    let ring_degree = vss_commitment_ring_degree_from_fixture_package(&package);
-    package["vssPublicCoefficientCommitmentSet"] =
-        commitment_sets::vss_public_coefficient_commitment_set_object(&package, ring_degree);
-    package["vssPublicRecipientShareCommitmentSet"] =
-        commitment_sets::vss_public_recipient_share_commitment_set_object(&package);
-    let mut aggregate_threshold_commitment_set =
-        commitment_sets::vss_public_aggregate_threshold_commitment_set_without_proofs_for_coordinates(
-            &package,
-            &[(0, 0), (0, 1)],
-        );
-    let aggregate_threshold_proofs = aggregate_threshold::vss_aggregate_threshold_proofs(
-        &package,
-        &aggregate_threshold_commitment_set,
-        &[(0, 0), (0, 1)],
-    );
-    aggregate_threshold_commitment_set["aggregateThresholdProofBytesHashes"] =
-        serde_json::json!(aggregate_threshold_proofs.proof_bytes_hashes);
-    package["vssPublicAggregateThresholdCommitmentSet"] = aggregate_threshold_commitment_set;
-
-    CompactAggregateThresholdProofFixture {
-        package,
-        proof_binding_leases: aggregate_threshold_proofs.proof_binding_leases,
-    }
-}
-
 pub(in super::super) use finalized_package::{
     FinalizedCollectiveSetupPackageFixture, finalize_collective_setup_package,
 };
-pub(in super::super) use transport::descriptor_backed_vss_proof_material_fixture;
