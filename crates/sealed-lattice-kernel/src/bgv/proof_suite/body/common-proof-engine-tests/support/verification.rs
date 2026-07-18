@@ -104,6 +104,9 @@ fn owned_verification_worker_authenticates_external_readback_before_minting_auth
     runtime_registry
         .finish_verification_input(operation_handle)
         .expect("complete canonical ingress mints readback authority");
+    let mut expected_logical_range_count = 0_u64;
+    let mut expected_supplied_chunk_count = 0_u64;
+    let mut expected_supplied_chunk_byte_length = 0_u64;
     loop {
         match runtime_registry
             .poll_owned_verification(operation_handle)
@@ -113,18 +116,83 @@ fn owned_verification_worker_authenticates_external_readback_before_minting_auth
                 first_chunk_index,
                 second_chunk_index,
             } => {
+                expected_logical_range_count += 1;
+                let accounting_before_repeat = runtime_registry
+                    .verification_readback_accounting(operation_handle)
+                    .expect("the live worker exposes unbound readback diagnostics");
+                assert_eq!(
+                    accounting_before_repeat.logical_required_range_count(),
+                    expected_logical_range_count,
+                );
+                assert!(accounting_before_repeat.logical_required_byte_length() > 0);
+                assert_eq!(
+                    runtime_registry
+                        .poll_owned_verification(operation_handle)
+                        .expect("polling an unsupplied range is stable"),
+                    CommonProofVerificationWorkerPoll::NeedsReadback {
+                        first_chunk_index,
+                        second_chunk_index,
+                    },
+                );
+                assert_eq!(
+                    runtime_registry
+                        .verification_readback_accounting(operation_handle)
+                        .expect("a repeated poll preserves the diagnostic"),
+                    accounting_before_repeat,
+                );
+                assert!(matches!(
+                    runtime_registry.supply_verification_readback_chunk(
+                        operation_handle,
+                        chunks.len() + 1,
+                        chunks[0],
+                    ),
+                    Err(CommonProofVerificationWorkerError::Runtime(
+                        CommonProofRuntimeError::WrongVerificationBinding
+                    ))
+                ));
+                assert_eq!(
+                    runtime_registry
+                        .verification_readback_accounting(operation_handle)
+                        .expect("a rejected chunk does not count as supplied traffic"),
+                    accounting_before_repeat,
+                );
                 for chunk_index in [Some(first_chunk_index), second_chunk_index]
                     .into_iter()
                     .flatten()
                 {
+                    let chunk = chunks[chunk_index as usize];
                     runtime_registry
                         .supply_verification_readback_chunk(
                             operation_handle,
                             chunk_index as usize,
-                            chunks[chunk_index as usize],
+                            chunk,
                         )
                         .expect("descriptor-authenticated readback accepts the exact chunk");
+                    expected_supplied_chunk_count += 1;
+                    expected_supplied_chunk_byte_length += chunk.len() as u64;
+                    if chunk_index == first_chunk_index {
+                        runtime_registry
+                            .supply_verification_readback_chunk(
+                                operation_handle,
+                                chunk_index as usize,
+                                chunk,
+                            )
+                            .expect("an identical repeated chunk remains accepted traffic");
+                        expected_supplied_chunk_count += 1;
+                        expected_supplied_chunk_byte_length += chunk.len() as u64;
+                    }
                 }
+                let accounting_after_supply = runtime_registry
+                    .verification_readback_accounting(operation_handle)
+                    .expect("the live worker retains cumulative readback diagnostics");
+                assert_eq!(
+                    accounting_after_supply.supplied_full_chunk_count(),
+                    expected_supplied_chunk_count,
+                );
+                assert_eq!(
+                    accounting_after_supply.supplied_full_chunk_byte_length(),
+                    expected_supplied_chunk_byte_length,
+                );
             }
             CommonProofVerificationWorkerPoll::PrefixAccepted
             | CommonProofVerificationWorkerPoll::QueryHeaderAccepted

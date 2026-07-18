@@ -1,8 +1,7 @@
 //! Committed-material VSS commitment records.
 //!
-//! The public commitment for a VSS message (a Shamir coefficient, a recipient
-//! share, an aggregate threshold share, or a target-decryption smudging
-//! coefficient) is one common-proof-field root over the message's canonical
+//! The public commitment for a VSS message (a sharing coefficient, a recipient
+//! share, or an aggregate threshold share) is one common-proof-field root over the message's canonical
 //! four-column layout. Every consuming proof opens that byte-identical tree on
 //! the profile-bound Goldilocks evaluation domain.
 
@@ -43,18 +42,8 @@ pub(crate) fn compute_vss_committed_material_commitment(
             "messageCoefficients must be non-empty",
         ));
     }
-    let message_coefficient_bound = if input.commitment_role == "target-decryption-flooding-noise" {
-        u64::try_from(
-            super::super::trustee_evaluation_key_proof::TARGET_DECRYPTION_FLOODING_NOISE_COEFFICIENT_BOUND
-                * 2
-                + 1,
-        )
-        .map_err(|_| invalid_vss_public_input("flooding-noise coefficient bound is invalid"))?
-    } else {
-        rns_prime
-    };
     for (coefficient_index, coefficient) in input.message_coefficients.iter().enumerate() {
-        if *coefficient >= message_coefficient_bound {
+        if *coefficient >= rns_prime {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::InvalidProtocolObject,
                 format!(
@@ -377,29 +366,6 @@ mod tests {
         assert!(
             commitment_computation("coefficient", &context, tiny_message, &seed).is_err(),
             "a ring degree below the selected profile minimum must be rejected"
-        );
-
-        let mut flooding_noise_message = vec![32; TEST_RING_DEGREE];
-        assert!(
-            commitment_computation(
-                "target-decryption-flooding-noise",
-                &context,
-                &flooding_noise_message,
-                &seed,
-            )
-            .is_ok(),
-            "the largest canonical encoded flooding-noise coefficient must be accepted"
-        );
-        flooding_noise_message[0] = 33;
-        assert!(
-            commitment_computation(
-                "target-decryption-flooding-noise",
-                &context,
-                &flooding_noise_message,
-                &seed,
-            )
-            .is_err(),
-            "the fixed flooding-noise range must be enforced by the kernel"
         );
     }
 }

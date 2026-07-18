@@ -35,8 +35,8 @@ use super::{
     decode_proof_query_section_header_at, decode_proof_query_tree_at,
     decode_selected_application_statement, evaluate_normalized_opening_claim_pair,
     proof_body_prefix_byte_length, proof_query_tree_byte_length,
-    selected_evaluator_aggregate_entry_roots, selected_evaluator_entry_positions,
-    selected_relation_plan_check_context,
+    selected_evaluator_aggregate_entry_roots, selected_evaluator_aggregate_entry_roots_in_order,
+    selected_evaluator_entry_positions, selected_relation_plan_check_context,
 };
 
 const PROOF_HEADER_HASH_DOMAIN: &str = "sealed-lattice/proof/header/v1";
@@ -121,8 +121,8 @@ pub(crate) use verification_state::{
     CommonProofVerificationStateMachine, PollableCommonProofVerificationInput,
 };
 pub(crate) use verified_values::{
-    VerifiedCommonProof, VerifiedEvaluatorAggregateEntry, VerifiedEvaluatorAuxiliaryRoot,
-    VerifiedEvaluatorKeyStore, VerifiedStatementOwnedTree,
+    VerifiedCommonProof, VerifiedEvaluatorAuxiliaryRoot, VerifiedEvaluatorKeyStore,
+    VerifiedEvaluatorRuntimeRoot, VerifiedStatementOwnedTree, VerifiedStreamedProofTreeTerminal,
 };
 
 use core_verification::{

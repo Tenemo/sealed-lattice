@@ -190,7 +190,7 @@ pub(super) fn vanishing_at<const LIMB_COUNT: usize>(
 
 #[cfg(test)]
 mod tests {
-    use super::super::super::proof_field::sixteen_limb_group_field_parameters;
+    use super::super::super::proof_field::selected_key_switch_proof_field_parameters;
     use super::super::domain::CyclicDomain;
     use super::*;
 
@@ -205,7 +205,7 @@ mod tests {
 
     #[test]
     fn multiply_via_ntt_agrees_with_schoolbook() {
-        let parameters = sixteen_limb_group_field_parameters();
+        let parameters = selected_key_switch_proof_field_parameters();
         let mut state = 0x9e37_u64;
         let mut random = |count: usize| -> Vec<[u64; 13]> {
             (0..count)
@@ -230,7 +230,7 @@ mod tests {
 
     #[test]
     fn multiply_and_evaluate_agree() {
-        let parameters = sixteen_limb_group_field_parameters();
+        let parameters = selected_key_switch_proof_field_parameters();
         let a = values(&parameters, &[1, 2, 3]);
         let b = values(&parameters, &[4, 5]);
         let product = multiply(&parameters, &a, &b);
@@ -244,7 +244,7 @@ mod tests {
 
     #[test]
     fn divide_by_vanishing_inverts_multiplication() {
-        let parameters = sixteen_limb_group_field_parameters();
+        let parameters = selected_key_switch_proof_field_parameters();
         let subgroup_size = 8;
         let quotient = values(&parameters, &[1, 2, 3, 4, 5]);
         // Z_H = X^8 - 1.
@@ -262,7 +262,7 @@ mod tests {
 
     #[test]
     fn vanishing_at_is_zero_on_the_subgroup() {
-        let parameters = sixteen_limb_group_field_parameters();
+        let parameters = selected_key_switch_proof_field_parameters();
         let subgroup_size = 16;
         let domain = CyclicDomain::new(&parameters, subgroup_size).expect("domain");
         for index in [0_usize, 1, 5, 15] {

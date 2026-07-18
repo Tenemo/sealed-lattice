@@ -10,7 +10,7 @@ use super::*;
 struct EncodedTreeOpening {
     root: [u8; 64],
     opened_leaf_bytes: Vec<Vec<u8>>,
-    frontier: Vec<ParsedAuthenticationNode>,
+    frontier: Vec<[u8; AUTHENTICATION_DIGEST_BYTE_LENGTH]>,
 }
 
 fn catalog_input(
@@ -132,8 +132,10 @@ fn common_leaf(entry: &ProofTreeCatalogEntry, leaf_index: u64) -> ProofOraclePha
             })
             .collect::<Vec<_>>()
     };
-    let salt = (context.leaf_visibility() == ProofLeafVisibility::SecretBearing)
-        .then_some([entry.tree_catalog_index() as u8 + leaf_index as u8 + 1; 48]);
+    let salt = (context.leaf_visibility() == ProofLeafVisibility::SecretBearing).then_some(
+        [entry.tree_catalog_index() as u8 + leaf_index as u8 + 1;
+            COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH],
+    );
     ProofOraclePhasePairLeaf::new(context, leaf_index, salt, values(0), values(43))
         .expect("test common leaf is valid")
 }
@@ -152,11 +154,7 @@ fn common_tree_opening(entry: &ProofTreeCatalogEntry) -> EncodedTreeOpening {
     let frontier = if leaf_count == 1 {
         Vec::new()
     } else {
-        vec![ParsedAuthenticationNode {
-            level: 0,
-            node_index: 1,
-            node_digest: leaves[1].digest().expect("sibling leaf hashes"),
-        }]
+        vec![leaves[1].digest().expect("sibling leaf hashes")]
     };
     EncodedTreeOpening {
         root: tree.root(),
@@ -231,11 +229,7 @@ fn statement_tree_opening(
     EncodedTreeOpening {
         root,
         opened_leaf_bytes: vec![leaf_bytes[0].clone()],
-        frontier: vec![ParsedAuthenticationNode {
-            level: 0,
-            node_index: 1,
-            node_digest: leaf_digests[1],
-        }],
+        frontier: vec![leaf_digests[1]],
     }
 }
 
@@ -270,28 +264,21 @@ fn canonical_opening_record(tree_catalog_index: u16, opened_leaf_bytes: &[Vec<u8
     .expect("opening record encodes")
 }
 
-fn canonical_frontier(tree_catalog_index: u16, frontier: &[ParsedAuthenticationNode]) -> Vec<u8> {
+fn canonical_frontier(
+    tree_catalog_index: u16,
+    frontier: &[[u8; AUTHENTICATION_DIGEST_BYTE_LENGTH]],
+) -> Vec<u8> {
     let nodes = frontier
         .iter()
-        .map(|node| {
-            CanonicalItem::nested_tuple(&CanonicalTuple::new(
-                PROOF_AUTHENTICATION_NODE_SCHEMA_IDENTIFIER,
-                SCHEMA_VERSION,
-                vec![
-                    CanonicalItem::unsigned32(node.level),
-                    CanonicalItem::unsigned64(node.node_index),
-                    CanonicalItem::hash512(node.node_digest),
-                ],
-            ))
-            .expect("authentication node encodes")
-        })
+        .copied()
+        .map(CanonicalItem::hash512)
         .collect::<Vec<_>>();
     CanonicalTuple::new(
         PROOF_AUTHENTICATION_FRONTIER_SCHEMA_IDENTIFIER,
         SCHEMA_VERSION,
         vec![
             CanonicalItem::unsigned16(tree_catalog_index),
-            CanonicalItem::homogeneous_list(CanonicalItemType::NestedTuple, &nodes)
+            CanonicalItem::homogeneous_list(CanonicalItemType::Hash512, &nodes)
                 .expect("frontier list encodes"),
         ],
     )
@@ -661,6 +648,34 @@ fn canonical_proof_ceiling_matches_each_tree_maximum_across_folded_query_orbits(
             + ceiling.body_prefix_byte_length()
             + ceiling.query_section_byte_length()
     );
+    let components = ceiling.component_byte_lengths();
+    assert_eq!(
+        components.proof_byte_length(),
+        Some(ceiling.proof_byte_length())
+    );
+    assert_eq!(
+        components.canonical_framing(),
+        canonical_header_byte_length
+            + 4
+            + 12
+            + ceiling
+                .query_trees()
+                .iter()
+                .map(ProofQueryTreeByteLengthCeiling::canonical_framing_byte_length)
+                .sum::<usize>()
+    );
+    assert!(components.relation_commitments_and_openings() > 0);
+    assert!(components.quotient_commitments_and_openings() > 0);
+    assert!(components.transcript_opening_claims() > 0);
+    assert!(components.fri() > 0);
+    for tree in ceiling.query_trees() {
+        assert_eq!(
+            tree.opened_leaf_payload_byte_length()
+                + tree.authentication_frontier_digest_byte_length()
+                + tree.canonical_framing_byte_length(),
+            tree.byte_length()
+        );
+    }
 
     let mut exact_tree_maxima = vec![0_usize; layout.catalog.entries.len()];
     for first_query in 0..6_u64 {
@@ -886,6 +901,110 @@ fn statement_owned_material_and_setup_trees_use_their_exact_leaf_and_node_equati
 }
 
 #[test]
+fn oracle_equation_namespace_identity_rejects_repeated_statement_tree_constructions() {
+    let schedule = transcript_schedule(
+        CommonProofPrivacyMode::SecretBearing,
+        Vec::new(),
+        Vec::new(),
+        1,
+        1,
+        1,
+        1,
+        2,
+    );
+    let repeated_context_hash = [0x6b; 64];
+    let repeated_catalog = build_complete_proof_tree_catalog(
+        catalog_input(
+            4,
+            vec![
+                RelationProofTreeInput::BoundPublic(
+                    StatementOwnedProofTreeInput::CommittedMaterial {
+                        material_context_hash: repeated_context_hash,
+                        expected_root: [0x31; 64],
+                    },
+                ),
+                RelationProofTreeInput::BoundPublic(
+                    StatementOwnedProofTreeInput::CommittedMaterial {
+                        material_context_hash: repeated_context_hash,
+                        expected_root: [0x32; 64],
+                    },
+                ),
+            ],
+        ),
+        &schedule,
+    )
+    .expect("a repeated construction remains a structurally valid catalog");
+    assert!(
+        !repeated_catalog
+            .has_pairwise_distinct_oracle_equation_namespaces()
+            .expect("namespace identity derives")
+    );
+
+    let distinct_catalog = build_complete_proof_tree_catalog(
+        catalog_input(
+            4,
+            vec![
+                RelationProofTreeInput::BoundPublic(
+                    StatementOwnedProofTreeInput::CommittedMaterial {
+                        material_context_hash: repeated_context_hash,
+                        expected_root: [0x31; 64],
+                    },
+                ),
+                RelationProofTreeInput::BoundPublic(
+                    StatementOwnedProofTreeInput::CommittedMaterial {
+                        material_context_hash: [0x6c; 64],
+                        expected_root: [0x32; 64],
+                    },
+                ),
+            ],
+        ),
+        &schedule,
+    )
+    .expect("the distinct construction catalog derives");
+    assert!(
+        distinct_catalog
+            .has_pairwise_distinct_oracle_equation_namespaces()
+            .expect("namespace identity derives")
+    );
+}
+
+#[test]
+fn statement_owned_frontier_accepts_equal_digests_at_distinct_derived_coordinates() {
+    let material_context_hash = [0x63; 64];
+    let construction = ProofTreeConstruction::CommittedMaterial {
+        material_context_hash,
+    };
+    let opened_leaf_digest = [0x41; 64];
+    let repeated_frontier_digest = [0x5a; 64];
+    let first_parent = statement_owned_node_digest(
+        &construction,
+        1,
+        0,
+        opened_leaf_digest,
+        repeated_frontier_digest,
+    )
+    .expect("first statement-owned parent hashes");
+    let expected_root =
+        statement_owned_node_digest(&construction, 2, 0, first_parent, repeated_frontier_digest)
+            .expect("statement-owned root hashes");
+    let entry = ProofTreeCatalogEntry {
+        tree_catalog_index: 0,
+        source: ProofTreeCatalogSource::RelationBoundPublic,
+        construction,
+        bound_root: Some(expected_root),
+    };
+
+    authenticate_opening(
+        &entry,
+        &[(0, opened_leaf_digest)],
+        &[repeated_frontier_digest; 2],
+        expected_root,
+        4,
+    )
+    .expect("equal digest values have distinct verifier-derived coordinates");
+}
+
+#[test]
 fn layout_deduplicates_fri_collisions_without_changing_global_catalog_indexes() {
     let schedule = transcript_schedule(
         CommonProofPrivacyMode::PublicOnly,
@@ -1052,6 +1171,37 @@ fn decoder_rejects_wrong_roots_indices_lengths_noncanonical_fields_and_trailing_
     wrong_leaf_length[inner_leaf_length_offset] ^= 1;
     assert_eq!(
         decode_complete_body(&wrong_leaf_length, &layout),
+        Err(ProofBodyError::InvalidItemLength)
+    );
+
+    let frontier_header = [0x08, 0x01, 0x01, 0x00, 0x02, 0x00, 0x00, 0x00];
+    let frontier_offset = canonical_bytes
+        .windows(frontier_header.len())
+        .position(|window| window == frontier_header)
+        .expect("frontier header occurs");
+    let mut wrong_frontier_element_type = canonical_bytes.clone();
+    wrong_frontier_element_type[frontier_offset + 22..frontier_offset + 24].copy_from_slice(
+        &CanonicalItemType::NestedTuple
+            .canonical_code()
+            .to_le_bytes(),
+    );
+    assert_eq!(
+        decode_complete_body(&wrong_frontier_element_type, &layout),
+        Err(ProofBodyError::InvalidItemType)
+    );
+
+    let mut wrong_frontier_count = canonical_bytes.clone();
+    wrong_frontier_count[frontier_offset + 24..frontier_offset + 28]
+        .copy_from_slice(&2_u32.to_le_bytes());
+    assert_eq!(
+        decode_complete_body(&wrong_frontier_count, &layout),
+        Err(ProofBodyError::InvalidListCount)
+    );
+
+    let mut wrong_frontier_length = canonical_bytes.clone();
+    wrong_frontier_length[frontier_offset + 18] ^= 1;
+    assert_eq!(
+        decode_complete_body(&wrong_frontier_length, &layout),
         Err(ProofBodyError::InvalidItemLength)
     );
 

@@ -1,5 +1,48 @@
 use super::*;
 
+#[derive(Clone, Copy)]
+struct AutomorphismDestination {
+    coefficient_index: usize,
+    negate: bool,
+}
+
+fn automorphism_permutation(
+    galois_element: usize,
+) -> CanonicalResult<Vec<AutomorphismDestination>> {
+    let automorphism_modulus = POLYNOMIAL_DEGREE.checked_mul(2).ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidProtocolObject,
+            "selected-ring automorphism modulus overflowed",
+        )
+    })?;
+    if galois_element <= 1
+        || galois_element >= automorphism_modulus
+        || galois_element.is_multiple_of(2)
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidProtocolObject,
+            "Galois element is not an odd selected-ring automorphism",
+        ));
+    }
+    (0..POLYNOMIAL_DEGREE)
+        .map(|source_coefficient_index| {
+            let mapped_exponent = source_coefficient_index
+                .checked_mul(galois_element)
+                .ok_or_else(|| {
+                    CanonicalError::new(
+                        CanonicalErrorCode::InvalidProtocolObject,
+                        "selected-ring automorphism index overflowed",
+                    )
+                })?
+                % automorphism_modulus;
+            Ok(AutomorphismDestination {
+                coefficient_index: mapped_exponent % POLYNOMIAL_DEGREE,
+                negate: mapped_exponent >= POLYNOMIAL_DEGREE,
+            })
+        })
+        .collect()
+}
+
 // Apply the Galois automorphism X -> X^galois_element to a residue vector. The
 // exponent reduces modulo 2N; the upper half wraps with a sign flip because
 // X^N = -1 in the ring.
@@ -8,36 +51,60 @@ pub(super) fn automorphism_residues(
     galois_element: usize,
     modulus: u64,
 ) -> CanonicalResult<Vec<u64>> {
-    let two_n = 2 * POLYNOMIAL_DEGREE;
+    let permutation = automorphism_permutation(galois_element)?;
+    automorphism_residues_with_permutation(input, &permutation, modulus)
+}
+
+fn automorphism_residues_with_permutation(
+    input: &[u64],
+    permutation: &[AutomorphismDestination],
+    modulus: u64,
+) -> CanonicalResult<Vec<u64>> {
+    if input.len() != POLYNOMIAL_DEGREE
+        || permutation.len() != POLYNOMIAL_DEGREE
+        || input.iter().any(|value| *value >= modulus)
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidProtocolObject,
+            "automorphism input is not a canonical selected-ring residue vector",
+        ));
+    }
     let mut output = vec![0_u64; POLYNOMIAL_DEGREE];
-    for (coefficient_index, value) in input.iter().enumerate() {
-        // X -> X^k sends coefficient i to i*k mod 2N; the subtraction on the
-        // upper half is the negacyclic X^N = -1 sign fold.
-        let exponent = (coefficient_index * galois_element) % two_n;
-        if exponent < POLYNOMIAL_DEGREE {
-            output[exponent] = add_mod(output[exponent], *value, modulus)?;
+    for (value, destination) in input.iter().copied().zip(permutation.iter().copied()) {
+        output[destination.coefficient_index] = if destination.negate && value != 0 {
+            modulus - value
         } else {
-            output[exponent - POLYNOMIAL_DEGREE] =
-                sub_mod(output[exponent - POLYNOMIAL_DEGREE], *value, modulus)?;
-        }
+            value
+        };
     }
 
     Ok(output)
 }
 
-fn automorphism_signed(input: &[i64], galois_element: usize) -> Vec<i64> {
-    let two_n = 2 * POLYNOMIAL_DEGREE;
+#[cfg(test)]
+fn automorphism_signed(input: &[i64], galois_element: usize) -> CanonicalResult<Vec<i64>> {
+    let permutation = automorphism_permutation(galois_element)?;
+    if input.len() != POLYNOMIAL_DEGREE {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "automorphism input has the wrong selected-ring degree",
+        ));
+    }
     let mut output = vec![0_i64; POLYNOMIAL_DEGREE];
-    for (coefficient_index, value) in input.iter().enumerate() {
-        let exponent = (coefficient_index * galois_element) % two_n;
-        if exponent < POLYNOMIAL_DEGREE {
-            output[exponent] += value;
+    for (value, destination) in input.iter().copied().zip(permutation) {
+        output[destination.coefficient_index] = if destination.negate {
+            value.checked_neg().ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::InvalidProtocolObject,
+                    "automorphism coefficient negation overflowed",
+                )
+            })?
         } else {
-            output[exponent - POLYNOMIAL_DEGREE] -= value;
-        }
+            value
+        };
     }
 
-    output
+    Ok(output)
 }
 
 fn apply_automorphism(
@@ -45,6 +112,7 @@ fn apply_automorphism(
     galois_element: usize,
 ) -> CanonicalResult<Ciphertext> {
     let primes = ciphertext.primes();
+    let permutation = automorphism_permutation(galois_element)?;
     let components = ciphertext
         .components
         .iter()
@@ -53,7 +121,7 @@ fn apply_automorphism(
                 .iter()
                 .enumerate()
                 .map(|(limb_index, limb)| {
-                    automorphism_residues(limb, galois_element, primes[limb_index])
+                    automorphism_residues_with_permutation(limb, &permutation, primes[limb_index])
                 })
                 .collect::<CanonicalResult<Vec<_>>>()
         })
@@ -66,6 +134,7 @@ fn apply_automorphism(
     })
 }
 
+#[cfg(test)]
 pub(crate) fn generate_galois_key(
     key: &DevelopmentBgvKey,
     galois_element: usize,
@@ -73,7 +142,7 @@ pub(crate) fn generate_galois_key(
     seed_hex: &str,
 ) -> CanonicalResult<KeySwitchKey> {
     // The rotation source is the automorphism applied to the secret.
-    let rotated_secret = automorphism_signed(key.secret(), galois_element);
+    let rotated_secret = automorphism_signed(key.secret(), galois_element)?;
     let rotated_secret_limbs = DATA_PRIMES[..=level]
         .iter()
         .map(|modulus| {
@@ -99,7 +168,7 @@ pub(crate) fn rotate(
             "rotation requires a two-component ciphertext",
         ));
     }
-    if galois_key.level < ciphertext.level {
+    if galois_key.level() < ciphertext.level {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidProtocolObject,
             "rotation key level is below the ciphertext level",

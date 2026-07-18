@@ -1,4 +1,24 @@
 import {
+    beginAcceptedSetupEvaluatorSourceCatalog,
+    beginAcceptedSetupVerification,
+} from './accepted-setup-assembly-runtime.js';
+import {
+    verifyAcceptedSetupPublicKeyShareInClosedWorker,
+    verifyAcceptedSetupSameSecretInClosedWorker,
+} from './accepted-setup-proof-verification-runtime.js';
+import {
+    resolveAggregateThresholdShareAuthenticatedRecipientConsumer,
+    type AggregateThresholdShareAuthenticatedRecipientConsumer,
+    type AggregateThresholdShareRecipientAuthority,
+    type AggregateThresholdShareRecipientAuthorityInput,
+    type ClosedWorkerAggregateThresholdShareRecipientAuthorityInput,
+} from './aggregate-threshold-share-authenticated-recipient.js';
+import { openVerifiedBallotAggregationInClosedWorker } from './ballot-aggregation-runtime.js';
+import {
+    generateBallotValidityInClosedWorker,
+    verifyBallotValidityInClosedWorker,
+} from './ballot-validity-runtime.js';
+import {
     bgvCanonicalStreamFamilies,
     openBgvCanonicalStreamRuntime,
 } from './bgv-canonical-stream-runtime.js';
@@ -7,6 +27,7 @@ import {
     openCanonicalBoardVerifierSession,
 } from './canonical-board-runtime.js';
 import {
+    CommonProofWorkerRuntimeError,
     describeClosedWorkerCommonProofGenerationFamilyAdapter,
     describeClosedWorkerCommonProofVerificationFamilyAdapter,
     releaseClosedWorkerCommonProofGenerationFamilyAdapter,
@@ -14,14 +35,18 @@ import {
     runClosedWorkerCommonProofGenerationFamilyAdapter,
     runClosedWorkerCommonProofVerificationFamilyAdapter,
 } from './common-proof-worker-runtime.js';
-import { openFinalityVerifierSession } from './finality-verifier-runtime.js';
+import { prepareEvaluatorReplayInClosedWorker } from './evaluator-replay-runtime.js';
+import {
+    openFinalityVerifierSession,
+    releaseVerifiedEvaluatorReplay,
+} from './finality-verifier-runtime.js';
 import { openFoundationCeremonyRuntime } from './foundation-ceremony-runtime.js';
 import {
     certifyClosedWorkerActionRandomnessReservation,
     createWasmBrowserActionStorageWorkerKernel,
+    openClosedWorkerAggregateThresholdShareRecipientAuthority,
     openClosedWorkerCommonProofScratchStorage,
     openClosedWorkerSetupMailboxRandomness,
-    openClosedWorkerStructuredCommitmentOpenings,
     prepareClosedWorkerVerifiedCommonProofApplication,
     openClosedWorkerVerifiedStateDurableBinding,
     produceClosedWorkerActionRandomnessReservationIntent,
@@ -30,8 +55,6 @@ import {
     type ClosedWorkerPreparedCommonProofApplication,
     type ClosedWorkerCommonProofScratchRecordIdentifierInput,
     type ClosedWorkerCommonProofScratchStorage,
-    type ClosedWorkerStructuredCommitmentOpeningCapability,
-    type ClosedWorkerStructuredCommitmentOpeningOperations,
     type ClosedWorkerSetupMailboxRandomnessOperations,
 } from './local-storage-root-worker-kernel.js';
 import { openMailboxGcmRuntime } from './mailbox-gcm-runtime.js';
@@ -46,6 +69,11 @@ import {
     type TranscriptCoreKernelLoaderOptions,
     type TranscriptCoreKernel,
 } from './transcript-core-bridge.js';
+import { generateVssShareLinkageInClosedWorker } from './vss-share-linkage-generation-runtime.js';
+import {
+    verifyVssShareLinkageInClosedWorker,
+    type VerifiedVssShareLinkageTerminal,
+} from './vss-share-linkage-verification-runtime.js';
 
 const transcriptCoreKernelUrl = new URL(
     '../dist/sealed-lattice-kernel.wasm',
@@ -53,8 +81,11 @@ const transcriptCoreKernelUrl = new URL(
 );
 
 export {
+    beginAcceptedSetupEvaluatorSourceCatalog,
+    beginAcceptedSetupVerification,
     bgvCanonicalStreamFamilies,
     certifyClosedWorkerActionRandomnessReservation,
+    CommonProofWorkerRuntimeError,
     createWasmBrowserActionStorageWorkerKernel,
     createTranscriptCoreKernelLoader,
     describeClosedWorkerCommonProofGenerationFamilyAdapter,
@@ -62,23 +93,54 @@ export {
     releaseClosedWorkerCommonProofGenerationFamilyAdapter,
     releaseClosedWorkerCommonProofVerificationFamilyAdapter,
     foundationObjectTypes,
+    generateBallotValidityInClosedWorker,
+    generateVssShareLinkageInClosedWorker,
     openBgvCanonicalStreamRuntime,
     openCanonicalBoardVerifierSession,
+    openClosedWorkerAggregateThresholdShareRecipientAuthority,
     openClosedWorkerSetupMailboxRandomness,
     openClosedWorkerCommonProofScratchStorage,
-    openClosedWorkerStructuredCommitmentOpenings,
+    openVerifiedBallotAggregationInClosedWorker,
     prepareClosedWorkerVerifiedCommonProofApplication,
+    prepareEvaluatorReplayInClosedWorker,
     openClosedWorkerVerifiedStateDurableBinding,
     produceClosedWorkerActionRandomnessReservationIntent,
     produceClosedWorkerActionRandomnessReservationWitnessVote,
     runClosedWorkerCommonProofGenerationFamilyAdapter,
     runClosedWorkerCommonProofVerificationFamilyAdapter,
+    releaseVerifiedEvaluatorReplay,
     verifyClosedWorkerActionRandomnessReservationIntentForWitness,
     openFinalityVerifierSession,
     openFoundationCeremonyRuntime,
     openMailboxGcmRuntime,
+    resolveAggregateThresholdShareAuthenticatedRecipientConsumer,
     TranscriptCoreKernelCommandError,
+    verifyAcceptedSetupPublicKeyShareInClosedWorker,
+    verifyAcceptedSetupSameSecretInClosedWorker,
+    verifyBallotValidityInClosedWorker,
+    verifyVssShareLinkageInClosedWorker,
 };
+export type {
+    AcceptedSetupEvaluatorSourceCatalogSession,
+    AcceptedSetupVerificationSession,
+} from './accepted-setup-assembly-runtime.js';
+export type { AcceptedSetupProofVerificationInput } from './accepted-setup-proof-verification-runtime.js';
+export type { VerifiedAcceptedSetupAuthority } from './accepted-setup-verification-runtime.js';
+export type {
+    VerifiedBallotAggregationSession,
+    VerifiedEvaluatorAggregateAuthority,
+} from './ballot-aggregation-runtime.js';
+export type {
+    BallotValidityGenerationMode,
+    GeneratedBallotValidityTransport,
+    VerifiedBallotOutput,
+} from './ballot-validity-runtime.js';
+export type {
+    EvaluatorKeyStoreRangeReadObservation,
+    EvaluatorKeyStoreRangeSource,
+    EvaluatorReplayWorkerOptions,
+    PreparedEvaluatorReplay,
+} from './evaluator-replay-runtime.js';
 export type {
     CanonicalFoundationActionDefinition,
     CanonicalFoundationBoardPolicy,
@@ -88,19 +150,26 @@ export type {
 } from './foundation-ceremony-runtime.js';
 export type {
     AcceptedSetupSession,
+    AggregateThresholdShareAuthenticatedRecipientConsumer,
+    AggregateThresholdShareRecipientAuthority,
+    AggregateThresholdShareRecipientAuthorityInput,
     ClosedWorkerSetupMailboxRandomnessOperations,
     ClosedWorkerCommonProofScratchRecordIdentifierInput,
     ClosedWorkerCommonProofScratchStorage,
+    ClosedWorkerAggregateThresholdShareRecipientAuthorityInput,
     ClosedWorkerPreparedCommonProofApplication,
-    ClosedWorkerStructuredCommitmentOpeningCapability,
-    ClosedWorkerStructuredCommitmentOpeningOperations,
     TranscriptCoreKernel,
     DecodedPrivateRandomCursor,
     EncodedPrivateRandomCursor,
     PrivateRandomCursor,
     SetupMailboxSlot,
     TranscriptCoreKernelLoaderOptions,
+    VerifiedVssShareLinkageTerminal,
 };
+export type {
+    VerifiedVssShareLinkageBoardCatalog,
+    VssShareLinkageGenerationMode,
+} from './vss-share-linkage-generation-runtime.js';
 export type {
     BgvCanonicalStreamFamily,
     BgvCanonicalStreamRuntime,
@@ -128,6 +197,7 @@ export {
     openCanonicalStreamWorkerRuntime,
 } from './canonical-stream-runtime.js';
 export type {
+    AuthenticatedMailboxPlaintextCapability,
     MailboxGcmEncryptorLease,
     MailboxGcmLeaseState,
     MailboxGcmRuntime,

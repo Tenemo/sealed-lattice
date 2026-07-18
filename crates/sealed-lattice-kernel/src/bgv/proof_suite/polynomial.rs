@@ -136,6 +136,25 @@ impl ProofEvaluationDomain {
         Ok(evaluations)
     }
 
+    /// Converts one owned base-field coefficient buffer into evaluations in
+    /// place. The buffer is extended to the domain size before the transform,
+    /// so streaming family adapters never retain a second whole-domain copy.
+    pub(crate) fn evaluate_base_polynomial_in_place(
+        self,
+        coefficients: &mut Vec<ProofBaseFieldElement>,
+    ) -> Result<(), ProofPolynomialError> {
+        if coefficients.len() > self.size {
+            return Err(ProofPolynomialError::DegreeBoundExceeded);
+        }
+        coefficients.resize(self.size, ProofBaseFieldElement::ZERO);
+        let mut offset_power = ProofBaseFieldElement::ONE;
+        for coefficient in coefficients.iter_mut() {
+            *coefficient = coefficient.multiply(offset_power);
+            offset_power = offset_power.multiply(self.coset_offset);
+        }
+        radix_two_base_transform(coefficients, self.generator, false)
+    }
+
     pub(crate) fn interpolate_base_polynomial(
         self,
         evaluations: &[ProofBaseFieldElement],
@@ -153,6 +172,28 @@ impl ProofEvaluationDomain {
         }
         trim_trailing_base_zeroes(&mut coefficients);
         Ok(coefficients)
+    }
+
+    /// Converts one owned base-field evaluation buffer into coefficients in
+    /// place. This is the generation path for replayed relation columns, where
+    /// retaining a second trace-sized allocation would defeat streaming
+    /// custody.
+    pub(crate) fn interpolate_base_polynomial_in_place(
+        self,
+        evaluations: &mut Vec<ProofBaseFieldElement>,
+    ) -> Result<(), ProofPolynomialError> {
+        if evaluations.len() != self.size {
+            return Err(ProofPolynomialError::InputLengthMismatch);
+        }
+        radix_two_base_transform(evaluations, self.generator, true)?;
+        let offset_inverse = self.coset_offset.inverse()?;
+        let mut offset_inverse_power = ProofBaseFieldElement::ONE;
+        for coefficient in evaluations.iter_mut() {
+            *coefficient = coefficient.multiply(offset_inverse_power);
+            offset_inverse_power = offset_inverse_power.multiply(offset_inverse);
+        }
+        trim_trailing_base_zeroes(evaluations);
+        Ok(())
     }
 
     pub(crate) fn evaluate_extension_polynomial(
@@ -515,12 +556,22 @@ mod tests {
             let base_evaluations = domain
                 .evaluate_base_polynomial(&base_coefficients)
                 .expect("base evaluation");
+            let mut in_place_base_coefficients = base_coefficients.clone();
+            domain
+                .evaluate_base_polynomial_in_place(&mut in_place_base_coefficients)
+                .expect("in-place base evaluation");
+            assert_eq!(in_place_base_coefficients, base_evaluations);
             assert_eq!(
                 domain
                     .interpolate_base_polynomial(&base_evaluations)
                     .expect("base interpolation"),
                 base_coefficients,
             );
+            let mut in_place_base_evaluations = base_evaluations;
+            domain
+                .interpolate_base_polynomial_in_place(&mut in_place_base_evaluations)
+                .expect("in-place base interpolation");
+            assert_eq!(in_place_base_evaluations, base_coefficients);
 
             let extension_coefficients = (0..size / 2 + 1)
                 .map(|index| {

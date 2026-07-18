@@ -24,7 +24,6 @@ import type {
 } from '../untrusted-storage-transaction-store.js';
 
 const checkpointManifestSchemaIdentifier = 0x1805;
-const checkpointRandomCursorSchemaIdentifier = 0x1804;
 const streamDescriptorSchemaIdentifier = 0x1800;
 const hashByteLength = 64;
 export const identifierByteLength = 32;
@@ -46,33 +45,6 @@ export const checkpointOperationIdentityBrand = Symbol(
 );
 const storedCheckpointManifestHeaderByteLength = 2 + identifierByteLength + 4;
 
-export type CheckpointRandomCursor = Readonly<{
-    derivationContextHash: Uint8Array;
-    family: number;
-    nextCounter: bigint;
-    nextUnreadBitOffsetInBufferedBlock?: number;
-    purpose: number;
-    streamAttemptIdentifier: Uint8Array;
-}>;
-
-type KernelPrivateRandomCursor = Readonly<{
-    derivationContextHash: string;
-    family: number;
-    nextCounter: string;
-    nextUnreadBitOffsetInBufferedBlock?: number;
-    purpose: number;
-    streamAttemptIdentifierHex: string;
-}>;
-
-export type CheckpointRandomCursorKernel = Readonly<{
-    decodePrivateRandomCursor(input: {
-        canonicalBytesHex: string;
-    }): Readonly<{ value: KernelPrivateRandomCursor }>;
-    encodePrivateRandomCursor(
-        value: KernelPrivateRandomCursor,
-    ): Readonly<{ canonicalBytesHex: string }>;
-}>;
-
 export type CheckpointBoundaryPolicy = Readonly<{
     validatePublication(input: {
         boundary: CheckpointBoundary;
@@ -88,13 +60,14 @@ export type CheckpointBoundaryPolicy = Readonly<{
 export type CheckpointOperationIdentity = Readonly<{
     readonly [checkpointOperationIdentityBrand]: true;
     checkpointLineageIdentifier: Uint8Array;
-    streamAttemptIdentifiers: readonly Uint8Array[];
+    privateRandomnessStreamAttemptIdentifier?: Uint8Array;
 }>;
 
 export type CheckpointBoundary = Readonly<{
     operationKind: number;
-    orderedRandomCursors: readonly CheckpointRandomCursor[];
     orderedSourceDigests: readonly Uint8Array[];
+    privateRandomCursorManifestBytes: Uint8Array;
+    privateRandomnessStreamAttemptIdentifier?: Uint8Array;
     safeBoundaryOrdinal: number;
     stateStreamDescriptorBytes: Uint8Array;
     stateStreamDomain: string;
@@ -109,10 +82,9 @@ export type AuthenticatedCheckpointStoreLimits = Readonly<{
     maximumActiveOperationIdentityCount: number;
     maximumCheckpointStateByteLength: number;
     maximumManifestByteLength: number;
-    maximumRandomCursorCount: number;
+    maximumRandomCursorManifestByteLength: number;
     maximumRecordSealingCount: number;
     maximumSourceDigestCount: number;
-    maximumStreamAttemptCount: number;
     transactionLifetimeMilliseconds: number;
 }>;
 
@@ -133,7 +105,7 @@ export type AuthenticatedCheckpointStore = Readonly<{
     copyAuthorityContext(): RuntimeStorageAuthorityContext;
     copyStorageInstanceIdentity(): Uint8Array;
     beginOperation(
-        streamAttemptIdentifiers: readonly Uint8Array[],
+        privateRandomnessStreamAttemptIdentifier?: Uint8Array,
     ): Promise<CheckpointOperationIdentity>;
     evict(checkpointLineageIdentifier: Uint8Array): Promise<void>;
     publish(input: {
@@ -186,9 +158,9 @@ export type CheckpointOperationIdentityRecord = {
     lastPublishedBoundary?: CheckpointBoundary;
     operationKind?: number;
     orderedSourceDigestHex?: readonly string[];
+    privateRandomnessStreamAttemptIdentifier?: Uint8Array;
     pendingPublicationIdentifierKey?: string;
     stateStreamDomain?: string;
-    streamAttemptIdentifiers: readonly Uint8Array[];
 };
 
 type CanonicalItem = Readonly<{
@@ -299,72 +271,6 @@ const homogeneousListCanonicalItem = (
     ]),
 });
 
-const validateRandomCursor = (
-    cursor: CheckpointRandomCursor,
-): CheckpointRandomCursor => {
-    if (
-        !Number.isInteger(cursor.family) ||
-        cursor.family < 0 ||
-        cursor.family > 0xffff ||
-        !Number.isInteger(cursor.purpose) ||
-        cursor.purpose < 0 ||
-        cursor.purpose > 0xffff ||
-        cursor.nextCounter < 0n ||
-        cursor.nextCounter > 0xffff_ffff_ffff_ffffn ||
-        (cursor.nextUnreadBitOffsetInBufferedBlock !== undefined &&
-            (!Number.isInteger(cursor.nextUnreadBitOffsetInBufferedBlock) ||
-                cursor.nextUnreadBitOffsetInBufferedBlock < 0 ||
-                cursor.nextUnreadBitOffsetInBufferedBlock > 511 ||
-                cursor.nextCounter === 0n))
-    ) {
-        throw new AuthenticatedRuntimeRecordError(
-            'InvalidInput',
-            'Checkpoint random cursor is outside its canonical range.',
-        );
-    }
-    return Object.freeze({
-        derivationContextHash: copyExactBytes(
-            cursor.derivationContextHash,
-            hashByteLength,
-            'derivationContextHash',
-        ),
-        family: cursor.family,
-        nextCounter: cursor.nextCounter,
-        ...(cursor.nextUnreadBitOffsetInBufferedBlock === undefined
-            ? {}
-            : {
-                  nextUnreadBitOffsetInBufferedBlock:
-                      cursor.nextUnreadBitOffsetInBufferedBlock,
-              }),
-        purpose: cursor.purpose,
-        streamAttemptIdentifier: copyExactBytes(
-            cursor.streamAttemptIdentifier,
-            identifierByteLength,
-            'streamAttemptIdentifier',
-        ),
-    });
-};
-
-const compareBytes = (left: Uint8Array, right: Uint8Array): number => {
-    const sharedByteLength = Math.min(left.byteLength, right.byteLength);
-    for (let byteIndex = 0; byteIndex < sharedByteLength; byteIndex += 1) {
-        const difference = left[byteIndex] - right[byteIndex];
-        if (difference !== 0) {
-            return difference;
-        }
-    }
-    return left.byteLength - right.byteLength;
-};
-
-const compareRandomCursors = (
-    left: CheckpointRandomCursor,
-    right: CheckpointRandomCursor,
-): number =>
-    left.family - right.family ||
-    left.purpose - right.purpose ||
-    compareBytes(left.derivationContextHash, right.derivationContextHash) ||
-    compareBytes(left.streamAttemptIdentifier, right.streamAttemptIdentifier);
-
 export function copyAndValidateBoundary(
     boundary: CheckpointBoundary,
     limits: AuthenticatedCheckpointStoreLimits,
@@ -395,8 +301,9 @@ export function copyAndValidateBoundary(
         boundary.safeBoundaryOrdinal > 0xffff_ffff ||
         boundary.orderedSourceDigests.length >
             limits.maximumSourceDigestCount ||
-        boundary.orderedRandomCursors.length >
-            limits.maximumRandomCursorCount ||
+        !(boundary.privateRandomCursorManifestBytes instanceof Uint8Array) ||
+        boundary.privateRandomCursorManifestBytes.byteLength >
+            limits.maximumRandomCursorManifestByteLength ||
         stateStreamDomainBytes.byteLength === 0 ||
         stateStreamDomainBytes.byteLength >
             maximumStateStreamDomainByteLength ||
@@ -417,29 +324,26 @@ export function copyAndValidateBoundary(
                 `orderedSourceDigests[${digestIndex}]`,
             ),
     );
-    const orderedRandomCursors =
-        boundary.orderedRandomCursors.map(validateRandomCursor);
-    for (
-        let cursorIndex = 1;
-        cursorIndex < orderedRandomCursors.length;
-        cursorIndex += 1
-    ) {
-        if (
-            compareRandomCursors(
-                orderedRandomCursors[cursorIndex - 1],
-                orderedRandomCursors[cursorIndex],
-            ) >= 0
-        ) {
-            throw new AuthenticatedRuntimeRecordError(
-                'InvalidInput',
-                'Checkpoint random cursors must be strictly ordered without duplicates.',
-            );
-        }
-    }
+    const privateRandomCursorManifestBytes = copyBoundedBytes(
+        boundary.privateRandomCursorManifestBytes,
+        limits.maximumRandomCursorManifestByteLength,
+        'privateRandomCursorManifestBytes',
+    );
+    const privateRandomnessStreamAttemptIdentifier =
+        boundary.privateRandomnessStreamAttemptIdentifier === undefined
+            ? undefined
+            : copyExactBytes(
+                  boundary.privateRandomnessStreamAttemptIdentifier,
+                  identifierByteLength,
+                  'privateRandomnessStreamAttemptIdentifier',
+              );
     return Object.freeze({
         operationKind: boundary.operationKind,
-        orderedRandomCursors,
         orderedSourceDigests,
+        privateRandomCursorManifestBytes,
+        ...(privateRandomnessStreamAttemptIdentifier === undefined
+            ? {}
+            : { privateRandomnessStreamAttemptIdentifier }),
         safeBoundaryOrdinal: boundary.safeBoundaryOrdinal,
         ...('stateStreamDescriptorBytes' in boundary
             ? {
@@ -454,47 +358,12 @@ export function copyAndValidateBoundary(
     });
 }
 
-const requireCursorTuple = (bytes: Uint8Array): Uint8Array => {
-    if (
-        bytes.byteLength < 8 ||
-        new DataView(
-            bytes.buffer,
-            bytes.byteOffset,
-            bytes.byteLength,
-        ).getUint16(0, true) !== checkpointRandomCursorSchemaIdentifier ||
-        new DataView(
-            bytes.buffer,
-            bytes.byteOffset,
-            bytes.byteLength,
-        ).getUint16(2, true) !== canonicalTupleVersion
-    ) {
-        throw new AuthenticatedRuntimeRecordError(
-            'AuthenticationFailed',
-            'The checkpoint cursor codec returned the wrong canonical schema.',
-        );
-    }
-    return bytes.slice();
-};
-
 export const encodeCheckpointManifest = (input: {
     authorityContext: RuntimeStorageAuthorityContext;
     boundary: CheckpointBoundary | ExpectedCheckpointBoundary;
     checkpointLineageIdentifier: Uint8Array;
-    cursorKernel: CheckpointRandomCursorKernel;
     stateStreamDescriptorBytes: Uint8Array;
 }): Uint8Array => {
-    const encodedCursors: Uint8Array[] = [];
-    for (const cursor of input.boundary.orderedRandomCursors) {
-        encodedCursors.push(
-            requireCursorTuple(
-                copyBoundedBytes(
-                    encodeCheckpointRandomCursor(input.cursorKernel, cursor),
-                    1_024,
-                    'canonical random cursor',
-                ),
-            ),
-        );
-    }
     return encodeCanonicalTuple(checkpointManifestSchemaIdentifier, [
         fixedCanonicalItem(
             canonicalItemTypes.hash512,
@@ -532,9 +401,14 @@ export const encodeCheckpointManifest = (input: {
             canonicalItemTypes.hash512,
             input.boundary.orderedSourceDigests,
         ),
-        homogeneousListCanonicalItem(
-            canonicalItemTypes.nestedTuple,
-            encodedCursors,
+        fixedCanonicalItem(
+            canonicalItemTypes.rawBytes,
+            input.boundary.privateRandomCursorManifestBytes,
+        ),
+        fixedCanonicalItem(
+            canonicalItemTypes.rawBytes,
+            input.boundary.privateRandomnessStreamAttemptIdentifier ??
+                new Uint8Array(0),
         ),
         fixedCanonicalItem(
             canonicalItemTypes.nestedTuple,
@@ -559,7 +433,8 @@ const parseCheckpointManifestReferences = (
         canonicalItemTypes.unsigned16,
         canonicalItemTypes.unsigned32,
         canonicalItemTypes.homogeneousList,
-        canonicalItemTypes.homogeneousList,
+        canonicalItemTypes.rawBytes,
+        canonicalItemTypes.rawBytes,
         canonicalItemTypes.nestedTuple,
     ] as const;
     const fixedItemByteLengths = [
@@ -641,7 +516,7 @@ const parseCheckpointManifestReferences = (
         );
         if (itemIndex === 5) {
             checkpointLineageIdentifier = itemBytes;
-        } else if (itemIndex === 10) {
+        } else if (itemIndex === 11) {
             if (itemBytes.byteLength === 0) {
                 throw new AuthenticatedRuntimeRecordError(
                     'AuthenticationFailed',
@@ -1065,69 +940,6 @@ const decodeExactHex = (
     return bytes;
 };
 
-const cursorMatchesKernelValue = (
-    cursor: CheckpointRandomCursor,
-    value: KernelPrivateRandomCursor,
-): boolean =>
-    value.family === cursor.family &&
-    value.purpose === cursor.purpose &&
-    value.derivationContextHash === bytesToHex(cursor.derivationContextHash) &&
-    value.streamAttemptIdentifierHex ===
-        bytesToHex(cursor.streamAttemptIdentifier) &&
-    value.nextCounter === cursor.nextCounter.toString() &&
-    value.nextUnreadBitOffsetInBufferedBlock ===
-        cursor.nextUnreadBitOffsetInBufferedBlock;
-
-const encodeCheckpointRandomCursor = (
-    kernel: CheckpointRandomCursorKernel,
-    untrustedCursor: CheckpointRandomCursor,
-): Uint8Array => {
-    const cursor = validateRandomCursor(untrustedCursor);
-    try {
-        const encoded = kernel.encodePrivateRandomCursor({
-            derivationContextHash: bytesToHex(cursor.derivationContextHash),
-            family: cursor.family,
-            nextCounter: cursor.nextCounter.toString(),
-            ...(cursor.nextUnreadBitOffsetInBufferedBlock === undefined
-                ? {}
-                : {
-                      nextUnreadBitOffsetInBufferedBlock:
-                          cursor.nextUnreadBitOffsetInBufferedBlock,
-                  }),
-            purpose: cursor.purpose,
-            streamAttemptIdentifierHex: bytesToHex(
-                cursor.streamAttemptIdentifier,
-            ),
-        });
-        const canonicalBytes = decodeCanonicalHex(
-            encoded.canonicalBytesHex,
-            1_024,
-            'canonical random cursor',
-        );
-        requireCursorTuple(canonicalBytes);
-        const decoded = kernel.decodePrivateRandomCursor({
-            canonicalBytesHex: bytesToHex(canonicalBytes),
-        });
-        if (!cursorMatchesKernelValue(cursor, decoded.value)) {
-            canonicalBytes.fill(0);
-            throw new AuthenticatedRuntimeRecordError(
-                'AuthenticationFailed',
-                'The kernel random-cursor codec did not round-trip the exact checkpoint cursor.',
-            );
-        }
-        return canonicalBytes;
-    } catch (error) {
-        if (error instanceof AuthenticatedRuntimeRecordError) {
-            throw error;
-        }
-        throw new AuthenticatedRuntimeRecordError(
-            'AuthenticationFailed',
-            'The kernel random-cursor codec refused the checkpoint cursor.',
-            error,
-        );
-    }
-};
-
 const decodeRecordKeys = (
     value: unknown,
     expectedPrefix: string,
@@ -1446,10 +1258,12 @@ export const validateAuthenticatedCheckpointStoreLimits = (
             'maximumCheckpointStateByteLength',
         ],
         [limits.maximumManifestByteLength, 'maximumManifestByteLength'],
-        [limits.maximumRandomCursorCount, 'maximumRandomCursorCount'],
+        [
+            limits.maximumRandomCursorManifestByteLength,
+            'maximumRandomCursorManifestByteLength',
+        ],
         [limits.maximumRecordSealingCount, 'maximumRecordSealingCount'],
         [limits.maximumSourceDigestCount, 'maximumSourceDigestCount'],
-        [limits.maximumStreamAttemptCount, 'maximumStreamAttemptCount'],
         [
             limits.transactionLifetimeMilliseconds,
             'transactionLifetimeMilliseconds',

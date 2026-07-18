@@ -96,7 +96,9 @@ impl CommonProofStorageTransactionRuntime {
         matches!(self.pass, CommonProofStorageTransactionPass::Replaying(_))
     }
 
-    pub(crate) fn encode_pending_worker_request(&self) -> Result<Vec<u8>, CommonProofRuntimeError> {
+    pub(crate) fn encode_pending_worker_request(
+        &self,
+    ) -> Result<Zeroizing<Vec<u8>>, CommonProofRuntimeError> {
         self.pending_request()
             .ok_or(CommonProofRuntimeError::TransactionResponseMissing)?
             .encode_worker_request()
@@ -117,7 +119,7 @@ impl CommonProofStorageTransactionRuntime {
 
     pub(crate) fn supply_read_results(
         &mut self,
-        read_results: Vec<Vec<u8>>,
+        read_results: Vec<Zeroizing<Vec<u8>>>,
     ) -> Result<(), CommonProofRuntimeError> {
         let previous = core::mem::replace(
             &mut self.pass,

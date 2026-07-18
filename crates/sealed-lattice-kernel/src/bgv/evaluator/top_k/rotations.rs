@@ -107,20 +107,89 @@ fn modular_power(mut base: usize, mut exponent: usize, modulus: usize) -> usize 
     result
 }
 
-// Decompose each rotation into power-of-two generator steps (and one
-// conjugation X -> X^-1 when needed) so the scheduled rotation-key set is
-// O(log N) keys instead of one per rotation.
+const SIGNED_GENERATOR_LARGE_STEP: usize = 17;
+
+// Decompose a logical rotation into the shortest canonical signed path over
+// generator exponents one and seventeen. The two signs produce exactly four
+// suite keys while still covering the complete selected evaluator schedule.
 pub(crate) fn generator_power_basis_for_exponent(exponent: usize) -> CanonicalResult<Vec<usize>> {
-    let mut basis = Vec::new();
-    let mut remaining = exponent % GENERATOR_SUBGROUP_ORDER;
-    let mut bit = 0_usize;
-    while remaining > 0 {
-        if remaining & 1 == 1 {
-            basis.push(galois_power(1_usize << bit)?);
+    let subgroup_order = i64::try_from(GENERATOR_SUBGROUP_ORDER).map_err(|_| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidProtocolObject,
+            "logical generator subgroup order does not fit the signed path search",
+        )
+    })?;
+    let reduced_exponent = i64::try_from(exponent % GENERATOR_SUBGROUP_ORDER).map_err(|_| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidProtocolObject,
+            "logical generator exponent does not fit the signed path search",
+        )
+    })?;
+    let large_step = i64::try_from(SIGNED_GENERATOR_LARGE_STEP)
+        .expect("selected signed generator step fits i64");
+    let mut selected: Option<(i64, i64, i64)> = None;
+    for wrapped_exponent in [
+        reduced_exponent - subgroup_order,
+        reduced_exponent,
+        reduced_exponent + subgroup_order,
+    ] {
+        let approximate_large_step_count = wrapped_exponent.div_euclid(large_step);
+        for large_step_count in
+            approximate_large_step_count.saturating_sub(1)..=approximate_large_step_count + 1
+        {
+            let unit_step_count = wrapped_exponent - large_step_count * large_step;
+            let hop_count = unit_step_count.abs() + large_step_count.abs();
+            let candidate = (hop_count, unit_step_count, large_step_count);
+            if selected.is_none_or(|current| {
+                (
+                    candidate.0,
+                    candidate.1.abs(),
+                    candidate.2.abs(),
+                    candidate.1,
+                    candidate.2,
+                ) < (
+                    current.0,
+                    current.1.abs(),
+                    current.2.abs(),
+                    current.1,
+                    current.2,
+                )
+            }) {
+                selected = Some(candidate);
+            }
         }
-        remaining >>= 1;
-        bit += 1;
     }
+
+    let (_, unit_step_count, large_step_count) = selected.ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidProtocolObject,
+            "logical generator signed path search produced no candidate",
+        )
+    })?;
+    let positive_unit = galois_power(1)?;
+    let negative_unit = inverse_galois_element(positive_unit)?;
+    let positive_large = galois_power(SIGNED_GENERATOR_LARGE_STEP)?;
+    let negative_large = inverse_galois_element(positive_large)?;
+    let mut basis = Vec::with_capacity(
+        usize::try_from(unit_step_count.abs() + large_step_count.abs())
+            .expect("selected signed path length fits usize"),
+    );
+    basis.extend(std::iter::repeat_n(
+        if large_step_count < 0 {
+            negative_large
+        } else {
+            positive_large
+        },
+        usize::try_from(large_step_count.abs()).expect("large-step count fits usize"),
+    ));
+    basis.extend(std::iter::repeat_n(
+        if unit_step_count < 0 {
+            negative_unit
+        } else {
+            positive_unit
+        },
+        usize::try_from(unit_step_count.abs()).expect("unit-step count fits usize"),
+    ));
 
     Ok(basis)
 }
@@ -134,27 +203,14 @@ pub(crate) fn generator_inverse_power_basis_for_exponent(
         .collect()
 }
 
-pub(crate) fn packed_rank_shift_basis_exponents(
-    option_count: usize,
-) -> CanonicalResult<Vec<usize>> {
+fn largest_packed_rank_shift(option_count: usize) -> CanonicalResult<usize> {
     if option_count < 2 || option_count * 2 > POLYNOMIAL_DEGREE {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidProtocolObject,
             "packed rank compact rotation basis requires 2 <= option count and a valid slot window",
         ));
     }
-    // The batched-pair evaluation rotates by score shifts (below the option
-    // count) and by pair-window offsets (below the unordered pair count), so
-    // the power-of-two basis must cover the largest window offset.
-    let largest_shift = option_count * (option_count - 1) / 2 - 1;
-    let mut exponents = Vec::new();
-    let mut bit = 0_usize;
-    while (1_usize << bit) <= largest_shift {
-        exponents.push(1_usize << bit);
-        bit += 1;
-    }
-
-    Ok(exponents)
+    Ok(option_count * (option_count - 1) / 2 - 1)
 }
 
 pub(crate) fn direct_score_packing_basis_galois_elements(
@@ -178,60 +234,27 @@ pub(crate) fn direct_score_packing_basis_galois_elements(
 pub(crate) fn packed_rank_forward_basis_galois_elements(
     option_count: usize,
 ) -> CanonicalResult<Vec<usize>> {
-    packed_rank_shift_basis_exponents(option_count)?
-        .into_iter()
-        .map(galois_power)
-        .collect()
+    let largest_shift = largest_packed_rank_shift(option_count)?;
+    let mut basis = BTreeSet::new();
+    for exponent in 1..=largest_shift {
+        basis.extend(generator_power_basis_for_exponent(exponent)?);
+    }
+    Ok(basis.into_iter().collect())
 }
 
 pub(crate) fn packed_rank_return_basis_galois_elements(
     option_count: usize,
 ) -> CanonicalResult<Vec<usize>> {
-    packed_rank_shift_basis_exponents(option_count)?
-        .into_iter()
-        .map(|exponent| inverse_galois_element(galois_power(exponent)?))
-        .collect()
+    let largest_shift = largest_packed_rank_shift(option_count)?;
+    let mut basis = BTreeSet::new();
+    for exponent in 1..=largest_shift {
+        basis.extend(generator_inverse_power_basis_for_exponent(exponent)?);
+    }
+    Ok(basis.into_iter().collect())
 }
 
-pub(crate) fn rotate_with_compact_positive_generator_basis(
-    context: &EvaluatorContext,
-    ciphertext: &Ciphertext,
-    galois_element: usize,
-) -> CanonicalResult<Ciphertext> {
-    if galois_element == 1 {
-        return Ok(ciphertext.clone());
-    }
-    let ring_order = 2 * POLYNOMIAL_DEGREE;
-    let (requires_conjugation, exponent) = generator_exponent_or_conjugated(galois_element)?;
-    let mut rotated = ciphertext.clone();
-    if requires_conjugation {
-        rotated = context.rotate_ciphertext(&rotated, ring_order - 1)?;
-    }
-    for basis_rotation in generator_power_basis_for_exponent(exponent)? {
-        rotated = context.rotate_ciphertext(&rotated, basis_rotation)?;
-    }
-
-    Ok(rotated)
-}
-
-pub(crate) fn rotate_with_compact_inverse_generator_basis(
-    context: &EvaluatorContext,
-    ciphertext: &Ciphertext,
-    shift: usize,
-) -> CanonicalResult<Ciphertext> {
-    let mut rotated = ciphertext.clone();
-    for basis_rotation in generator_inverse_power_basis_for_exponent(shift)? {
-        rotated = context.rotate_ciphertext(&rotated, basis_rotation)?;
-    }
-
-    Ok(rotated)
-}
-
-// The frozen rotation key schedule: score-packing and packed-rank-forward
-// rotations at the selected evaluator working level (the replay mod-switches
-// the aggregate there before packing), and packed-rank-return rotations at
-// the comparison output level. Lower-level consumers use the same keys
-// through truncation.
+// The frozen four-key signed rotation schedule sits at the evaluator working
+// level. Lower-level consumers use the same keys through truncation.
 pub(crate) fn selected_evaluator_rotation_key_schedule(
     option_count: usize,
 ) -> CanonicalResult<Vec<(usize, usize)>> {

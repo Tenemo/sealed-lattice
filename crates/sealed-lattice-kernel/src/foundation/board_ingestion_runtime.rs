@@ -7,14 +7,19 @@ use subtle::ConstantTimeEq;
 use zeroize::Zeroizing;
 
 use super::board_ingestion::{
-    CanonicalBoardLimits, CanonicalBoardVerifier, MAXIMUM_CANONICAL_BOARD_BATCH_CARRIER_COUNT,
+    BALLOT_PACKAGE_PAYLOAD_SCHEMA_IDENTIFIER, CanonicalBoardLimits, CanonicalBoardVerifier,
+    DEALER_PUBLIC_RECORD_PAYLOAD_SCHEMA_IDENTIFIER, FOUNDATION_SCHEMA_VERSION,
+    MAXIMUM_CANONICAL_BOARD_BATCH_CARRIER_COUNT,
+    PRIVATE_SHARE_ACCEPTANCE_PAYLOAD_SCHEMA_IDENTIFIER,
+    PUBLIC_RANDOMNESS_COMMITMENT_PAYLOAD_SCHEMA_IDENTIFIER,
+    PUBLIC_RANDOMNESS_REVEAL_PAYLOAD_SCHEMA_IDENTIFIER, SETUP_INTENT_PAYLOAD_SCHEMA_IDENTIFIER,
     VerifiedTranscriptObject,
 };
 use super::runtime_input::{RuntimeInputReader as InputReader, refusal_status};
 use super::{
     ActionContext, ActionDefinition, BoardPolicy, CanonicalDecodeLimits, CeremonyContext,
     FOUNDATION_PROFILE, FoundationObjectType, Hash512, Manifest, ParticipantIdentity,
-    RefusalReason, Roster, SuiteRecord,
+    RefusalReason, Roster, SignedCarrier, StreamDescriptor, SuiteRecord,
 };
 
 pub(crate) const BOARD_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH: usize = 32;
@@ -43,15 +48,139 @@ pub(crate) struct BoardVerifierCanonicalContextInput<'input> {
 pub(crate) struct VerifiedBoardApplicationSource {
     verified_object: VerifiedTranscriptObject,
     suite_identifier: Hash512,
+    manifest_hash: Hash512,
     ceremony_context_hash: Hash512,
     action_context_hash: Hash512,
     roster_hash: Hash512,
     producer_roster_position: Option<u16>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct VerifiedSetupIntentApplicationPayload {
+    action_randomness_commitment: Hash512,
+}
+
+impl VerifiedSetupIntentApplicationPayload {
+    pub(crate) const fn action_randomness_commitment(self) -> Hash512 {
+        self.action_randomness_commitment
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct VerifiedPublicRandomnessCommitmentApplicationPayload {
+    contribution_commitment: Hash512,
+    ordered_setup_intent_object_hashes: Box<[Hash512]>,
+}
+
+impl VerifiedPublicRandomnessCommitmentApplicationPayload {
+    pub(crate) const fn contribution_commitment(&self) -> Hash512 {
+        self.contribution_commitment
+    }
+
+    pub(crate) fn ordered_setup_intent_object_hashes(&self) -> &[Hash512] {
+        &self.ordered_setup_intent_object_hashes
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct VerifiedPublicRandomnessRevealApplicationPayload {
+    contribution_commitment_object_hash: Hash512,
+    contribution_and_salt: [u8; Hash512::BYTE_LENGTH],
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct VerifiedBallotPackageApplicationPayload {
+    ciphertext_descriptor: StreamDescriptor,
+    proof_descriptor: StreamDescriptor,
+}
+
+/// Exact authenticated fields from one dealer's canonical `0x2100` payload.
+/// The sole public-setup-seed prerequisite remains attached to this value so a
+/// proof-family terminal never needs a detached prerequisite hash.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct VerifiedDealerPublicRecordApplicationPayload {
+    dealer_roster_position: u16,
+    coefficient_material_roots: Box<[Hash512]>,
+    recipient_share_material_roots: Box<[Hash512]>,
+    ordered_recipient_envelope_hashes: Box<[Hash512]>,
+    share_linkage_proof: StreamDescriptor,
+    public_setup_seed_prerequisite: Hash512,
+}
+
+impl VerifiedDealerPublicRecordApplicationPayload {
+    pub(crate) const fn dealer_roster_position(&self) -> u16 {
+        self.dealer_roster_position
+    }
+
+    pub(crate) fn coefficient_material_roots(&self) -> &[Hash512] {
+        &self.coefficient_material_roots
+    }
+
+    pub(crate) fn recipient_share_material_roots(&self) -> &[Hash512] {
+        &self.recipient_share_material_roots
+    }
+
+    pub(crate) fn ordered_recipient_envelope_hashes(&self) -> &[Hash512] {
+        &self.ordered_recipient_envelope_hashes
+    }
+
+    pub(crate) const fn share_linkage_proof(&self) -> &StreamDescriptor {
+        &self.share_linkage_proof
+    }
+
+    pub(crate) const fn public_setup_seed_prerequisite(&self) -> Hash512 {
+        self.public_setup_seed_prerequisite
+    }
+}
+
+/// Exact authenticated fields from one recipient's canonical `0x1203`
+/// acceptance. Its empty prerequisite list is rechecked while decoding so the
+/// typed value is the sole public catalog of the aggregate relation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct VerifiedPrivateShareAcceptanceApplicationPayload {
+    recipient_input_root: Hash512,
+    aggregate_threshold_share_material_roots: Box<[Hash512]>,
+    aggregate_threshold_share_proof: StreamDescriptor,
+}
+
+impl VerifiedPrivateShareAcceptanceApplicationPayload {
+    pub(crate) const fn recipient_input_root(&self) -> Hash512 {
+        self.recipient_input_root
+    }
+
+    pub(crate) fn aggregate_threshold_share_material_roots(&self) -> &[Hash512] {
+        &self.aggregate_threshold_share_material_roots
+    }
+
+    pub(crate) const fn aggregate_threshold_share_proof(&self) -> &StreamDescriptor {
+        &self.aggregate_threshold_share_proof
+    }
+}
+
+impl VerifiedBallotPackageApplicationPayload {
+    pub(crate) const fn ciphertext_descriptor(&self) -> &StreamDescriptor {
+        &self.ciphertext_descriptor
+    }
+
+    pub(crate) const fn proof_descriptor(&self) -> &StreamDescriptor {
+        &self.proof_descriptor
+    }
+}
+
+impl VerifiedPublicRandomnessRevealApplicationPayload {
+    pub(crate) const fn contribution_commitment_object_hash(self) -> Hash512 {
+        self.contribution_commitment_object_hash
+    }
+
+    pub(crate) const fn contribution_and_salt(self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.contribution_and_salt
+    }
+}
+
 impl VerifiedBoardApplicationSource {
-    fn from_verifier(
+    pub(crate) fn from_verifier(
         verifier: &CanonicalBoardVerifier,
+        manifest_hash: Hash512,
         verified_object: VerifiedTranscriptObject,
     ) -> Self {
         let producer_roster_position = verified_object
@@ -60,6 +189,7 @@ impl VerifiedBoardApplicationSource {
         Self {
             verified_object,
             suite_identifier: verifier.suite_id(),
+            manifest_hash,
             ceremony_context_hash: verifier.ceremony_context_hash(),
             action_context_hash: verifier.action_context_hash(),
             roster_hash: verifier.roster_hash(),
@@ -69,6 +199,10 @@ impl VerifiedBoardApplicationSource {
 
     pub(crate) const fn suite_identifier(&self) -> Hash512 {
         self.suite_identifier
+    }
+
+    pub(crate) const fn manifest_hash(&self) -> Hash512 {
+        self.manifest_hash
     }
 
     pub(crate) const fn ceremony_context_hash(&self) -> Hash512 {
@@ -106,11 +240,245 @@ impl VerifiedBoardApplicationSource {
     pub(crate) fn canonical_carrier_bytes(&self) -> &[u8] {
         self.verified_object.canonical_carrier_bytes()
     }
+
+    /// Decodes the already authenticated setup-intent payload while retaining
+    /// the board verifier as the only source of application authority.
+    pub(crate) fn setup_intent_payload(
+        &self,
+    ) -> Result<VerifiedSetupIntentApplicationPayload, RefusalReason> {
+        let carrier = self.decode_exact_signed_carrier(FoundationObjectType::SetupIntent)?;
+        let tuple = decode_exact_payload_tuple(&carrier.envelope.payload_bytes)?;
+        require_payload_shape(&tuple, SETUP_INTENT_PAYLOAD_SCHEMA_IDENTIFIER, 1)?;
+        Ok(VerifiedSetupIntentApplicationPayload {
+            action_randomness_commitment: read_payload_hash(&tuple.items[0])?,
+        })
+    }
+
+    /// Decodes the authenticated commitment and its exact roster-ordered
+    /// setup-intent prerequisites. The prerequisite bytes never become an
+    /// independent capability.
+    pub(crate) fn public_randomness_commitment_payload(
+        &self,
+    ) -> Result<VerifiedPublicRandomnessCommitmentApplicationPayload, RefusalReason> {
+        let carrier =
+            self.decode_exact_signed_carrier(FoundationObjectType::PublicRandomnessCommitment)?;
+        let tuple = decode_exact_payload_tuple(&carrier.envelope.payload_bytes)?;
+        require_payload_shape(
+            &tuple,
+            PUBLIC_RANDOMNESS_COMMITMENT_PAYLOAD_SCHEMA_IDENTIFIER,
+            1,
+        )?;
+        Ok(VerifiedPublicRandomnessCommitmentApplicationPayload {
+            contribution_commitment: read_payload_hash(&tuple.items[0])?,
+            ordered_setup_intent_object_hashes: carrier
+                .envelope
+                .ordered_prerequisite_hashes
+                .into_boxed_slice(),
+        })
+    }
+
+    /// Decodes the authenticated reveal into the exact commitment reference
+    /// and fixed contribution-and-salt bytes consumed by setup verification.
+    pub(crate) fn public_randomness_reveal_payload(
+        &self,
+    ) -> Result<VerifiedPublicRandomnessRevealApplicationPayload, RefusalReason> {
+        let carrier =
+            self.decode_exact_signed_carrier(FoundationObjectType::PublicRandomnessReveal)?;
+        let tuple = decode_exact_payload_tuple(&carrier.envelope.payload_bytes)?;
+        require_payload_shape(
+            &tuple,
+            PUBLIC_RANDOMNESS_REVEAL_PAYLOAD_SCHEMA_IDENTIFIER,
+            2,
+        )?;
+        Ok(VerifiedPublicRandomnessRevealApplicationPayload {
+            contribution_commitment_object_hash: read_payload_hash(&tuple.items[0])?,
+            contribution_and_salt: read_fixed_payload_bytes(&tuple.items[1])?,
+        })
+    }
+
+    /// Decodes a board-verified dealer record without promoting copied payload
+    /// fields into independent authority. Exact suite-owned root counts are
+    /// enforced when the payload is joined to canonical `0x2110` statement
+    /// roots by the VSS terminal.
+    pub(crate) fn dealer_public_record_payload(
+        &self,
+    ) -> Result<VerifiedDealerPublicRecordApplicationPayload, RefusalReason> {
+        let carrier = self.decode_exact_signed_carrier(FoundationObjectType::PublicSetupRecord)?;
+        let tuple = decode_exact_payload_tuple(&carrier.envelope.payload_bytes)?;
+        require_payload_shape(&tuple, DEALER_PUBLIC_RECORD_PAYLOAD_SCHEMA_IDENTIFIER, 5)?;
+        let [public_setup_seed_prerequisite] =
+            <[Hash512; 1]>::try_from(carrier.envelope.ordered_prerequisite_hashes)
+                .map_err(|_| RefusalReason::WrongTypeOrLength)?;
+        Ok(VerifiedDealerPublicRecordApplicationPayload {
+            dealer_roster_position: read_payload_unsigned16(&tuple.items[0])?,
+            coefficient_material_roots: read_payload_hash_list(&tuple.items[1])?.into_boxed_slice(),
+            recipient_share_material_roots: read_payload_hash_list(&tuple.items[2])?
+                .into_boxed_slice(),
+            ordered_recipient_envelope_hashes: read_payload_hash_list(&tuple.items[3])?
+                .into_boxed_slice(),
+            share_linkage_proof: read_payload_stream_descriptor(&tuple.items[4])?,
+            public_setup_seed_prerequisite,
+        })
+    }
+
+    /// Decodes a board-verified private-share acceptance. The canonical
+    /// acceptance has no prerequisites; the aggregate terminal later joins
+    /// these exact roots and descriptor to canonical `0x2111` proof authority.
+    pub(crate) fn private_share_acceptance_payload(
+        &self,
+    ) -> Result<VerifiedPrivateShareAcceptanceApplicationPayload, RefusalReason> {
+        let carrier =
+            self.decode_exact_signed_carrier(FoundationObjectType::PrivateShareAcceptance)?;
+        if !carrier.envelope.ordered_prerequisite_hashes.is_empty() {
+            return Err(RefusalReason::WrongTypeOrLength);
+        }
+        let tuple = decode_exact_payload_tuple(&carrier.envelope.payload_bytes)?;
+        require_payload_shape(
+            &tuple,
+            PRIVATE_SHARE_ACCEPTANCE_PAYLOAD_SCHEMA_IDENTIFIER,
+            3,
+        )?;
+        Ok(VerifiedPrivateShareAcceptanceApplicationPayload {
+            recipient_input_root: read_payload_hash(&tuple.items[0])?,
+            aggregate_threshold_share_material_roots: read_payload_hash_list(&tuple.items[1])?
+                .into_boxed_slice(),
+            aggregate_threshold_share_proof: read_payload_stream_descriptor(&tuple.items[2])?,
+        })
+    }
+
+    /// Decodes the two exact stream descriptors from an authenticated ballot
+    /// package. Their positions fix the ciphertext and ballot-validity proof
+    /// domains; detached descriptors cannot construct this payload.
+    pub(crate) fn ballot_package_payload(
+        &self,
+    ) -> Result<VerifiedBallotPackageApplicationPayload, RefusalReason> {
+        let carrier = self.decode_exact_signed_carrier(FoundationObjectType::BallotPackage)?;
+        let tuple = decode_exact_payload_tuple(&carrier.envelope.payload_bytes)?;
+        require_payload_shape(&tuple, BALLOT_PACKAGE_PAYLOAD_SCHEMA_IDENTIFIER, 2)?;
+        Ok(VerifiedBallotPackageApplicationPayload {
+            ciphertext_descriptor: read_payload_stream_descriptor(&tuple.items[0])?,
+            proof_descriptor: read_payload_stream_descriptor(&tuple.items[1])?,
+        })
+    }
+
+    fn decode_exact_signed_carrier(
+        &self,
+        expected_object_type: FoundationObjectType,
+    ) -> Result<SignedCarrier, RefusalReason> {
+        let carrier = SignedCarrier::decode(
+            self.verified_object.canonical_carrier_bytes(),
+            &CanonicalDecodeLimits::default(),
+        )
+        .map_err(|error| error.refusal_reason)?;
+        let exact_reencoding = carrier.encode().map_err(|error| error.refusal_reason)?;
+        if exact_reencoding != self.verified_object.canonical_carrier_bytes() {
+            return Err(RefusalReason::MalformedEncoding);
+        }
+        let envelope = &carrier.envelope;
+        if envelope.object_type != expected_object_type
+            || self.verified_object.object_type() != expected_object_type
+            || envelope.suite_id != self.suite_identifier
+            || envelope.ceremony_context_hash != self.ceremony_context_hash
+            || envelope.action_context_hash != self.action_context_hash
+            || envelope.producer_participant_id != self.verified_object.producer_participant_id()
+            || envelope.producer_sequence != self.verified_object.producer_sequence()
+            || envelope
+                .object_hash()
+                .map_err(|error| error.refusal_reason)?
+                != self.verified_object.object_hash()
+        {
+            return Err(RefusalReason::WrongContext);
+        }
+        Ok(carrier)
+    }
+}
+
+fn decode_exact_payload_tuple(bytes: &[u8]) -> Result<super::CanonicalTuple, RefusalReason> {
+    let tuple = super::CanonicalTuple::decode(bytes, &CanonicalDecodeLimits::default()).map_err(
+        |error| {
+            if error.kind == super::CanonicalCodecErrorKind::LimitExceeded {
+                RefusalReason::OutsideSupportedProfile
+            } else {
+                RefusalReason::MalformedEncoding
+            }
+        },
+    )?;
+    if tuple.encode().map_err(|error| {
+        if error.kind == super::CanonicalCodecErrorKind::LimitExceeded {
+            RefusalReason::OutsideSupportedProfile
+        } else {
+            RefusalReason::MalformedEncoding
+        }
+    })? != bytes
+    {
+        return Err(RefusalReason::MalformedEncoding);
+    }
+    Ok(tuple)
+}
+
+fn require_payload_shape(
+    tuple: &super::CanonicalTuple,
+    expected_schema_identifier: u16,
+    expected_item_count: usize,
+) -> Result<(), RefusalReason> {
+    if tuple.schema_version != FOUNDATION_SCHEMA_VERSION {
+        return Err(RefusalReason::UnsupportedVersionOrSuite);
+    }
+    if tuple.schema_identifier != expected_schema_identifier
+        || tuple.items.len() != expected_item_count
+    {
+        return Err(RefusalReason::WrongTypeOrLength);
+    }
+    Ok(())
+}
+
+fn read_payload_hash(item: &super::CanonicalItem) -> Result<Hash512, RefusalReason> {
+    if item.item_type() != super::CanonicalItemType::Hash512 {
+        return Err(RefusalReason::WrongTypeOrLength);
+    }
+    let bytes = <[u8; Hash512::BYTE_LENGTH]>::try_from(item.canonical_bytes())
+        .map_err(|_| RefusalReason::WrongTypeOrLength)?;
+    Ok(Hash512::from_bytes(bytes))
+}
+
+fn read_payload_unsigned16(item: &super::CanonicalItem) -> Result<u16, RefusalReason> {
+    if item.item_type() != super::CanonicalItemType::Unsigned16 {
+        return Err(RefusalReason::WrongTypeOrLength);
+    }
+    let bytes = <[u8; 2]>::try_from(item.canonical_bytes())
+        .map_err(|_| RefusalReason::WrongTypeOrLength)?;
+    Ok(u16::from_le_bytes(bytes))
+}
+
+fn read_payload_hash_list(item: &super::CanonicalItem) -> Result<Vec<Hash512>, RefusalReason> {
+    super::schemas::read_hash_list(item).map_err(|error| error.refusal_reason)
+}
+
+fn read_fixed_payload_bytes(
+    item: &super::CanonicalItem,
+) -> Result<[u8; Hash512::BYTE_LENGTH], RefusalReason> {
+    if item.item_type() != super::CanonicalItemType::RawBytes {
+        return Err(RefusalReason::WrongTypeOrLength);
+    }
+    <[u8; Hash512::BYTE_LENGTH]>::try_from(item.canonical_bytes())
+        .map_err(|_| RefusalReason::WrongTypeOrLength)
+}
+
+fn read_payload_stream_descriptor(
+    item: &super::CanonicalItem,
+) -> Result<StreamDescriptor, RefusalReason> {
+    if item.item_type() != super::CanonicalItemType::NestedTuple {
+        return Err(RefusalReason::WrongTypeOrLength);
+    }
+    StreamDescriptor::decode(item.canonical_bytes(), &CanonicalDecodeLimits::default())
+        .map_err(|error| error.refusal_reason)
 }
 
 struct BoardVerifierRuntimeSession {
     capability: Zeroizing<[u8; BOARD_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH]>,
     handle: u32,
+    action_top_count: u16,
+    manifest_hash: Hash512,
     verifier: CanonicalBoardVerifier,
     verified_objects: HashMap<u32, VerifiedTranscriptObject>,
     object_handles_by_hash: HashMap<Hash512, u32>,
@@ -159,6 +527,8 @@ impl BoardVerifierRuntimeRegistry {
         self.active_session = Some(BoardVerifierRuntimeSession {
             capability,
             handle,
+            action_top_count: configuration.action_top_count,
+            manifest_hash: configuration.manifest_hash,
             verifier,
             verified_objects: HashMap::new(),
             object_handles_by_hash: HashMap::new(),
@@ -267,8 +637,10 @@ impl BoardVerifierRuntimeRegistry {
 
 struct BoardVerifierRuntimeConfiguration {
     suite_id: Hash512,
+    manifest_hash: Hash512,
     ceremony_context_hash: Hash512,
     action_context_hash: Hash512,
+    action_top_count: u16,
     limits: CanonicalBoardLimits,
     roster: Roster,
 }
@@ -361,6 +733,19 @@ pub(crate) fn resolve_verified_transcript_objects(
     })
 }
 
+/// Resolves the top count from the exact canonical action definition accepted
+/// when the board session opened. The process-local session capability is the
+/// authority; a detached integer cannot enter evaluator selection.
+pub(crate) fn resolve_verified_action_top_count(
+    session_handle: u32,
+    capability: &[u8],
+) -> RuntimeResult<u16> {
+    with_runtime_registry(|registry| {
+        require_active_session(&registry.active_session, session_handle, capability)
+            .map(|session| session.action_top_count)
+    })
+}
+
 /// Resolves verifier-owned application sources for a consumer in this WASM
 /// instance. Descriptions and copied carrier bytes cannot enter this path.
 pub(crate) fn resolve_verified_board_application_sources(
@@ -380,6 +765,7 @@ pub(crate) fn resolve_verified_board_application_sources(
                     .ok_or_else(|| refusal_status(RefusalReason::ConsumedState))?;
                 Ok(VerifiedBoardApplicationSource::from_verifier(
                     &session.verifier,
+                    session.manifest_hash,
                     verified_object,
                 ))
             })
@@ -474,8 +860,10 @@ fn derive_configuration(
     };
     Ok(BoardVerifierRuntimeConfiguration {
         suite_id: action_context.suite_id(),
+        manifest_hash: ceremony_context.manifest_hash(),
         ceremony_context_hash: action_context.ceremony_context_hash(),
         action_context_hash: action_context.context_hash(),
+        action_top_count: action_definition.top_count(),
         limits,
         roster,
     })

@@ -15,8 +15,6 @@ import type {
 
 import type {
     AuthenticatedCheckpointStore,
-    CheckpointRandomCursor,
-    CheckpointRandomCursorKernel,
 } from '../authenticated-checkpoint-store.js';
 import type {
     UntrustedStorageExclusiveCapacityReservation,
@@ -31,8 +29,7 @@ export const maximumDeletionBatchRecordCount = 64;
 export const canonicalCommonProofOutputChunkByteLength = 1_048_576;
 export const maximumCommonProofOutputChunkCount = 256;
 export const maximumCommonProofOutputByteLength = 268_435_456;
-const maximumCheckpointCursorCount = 4_096;
-const maximumCheckpointCursorAggregateByteLength = 1_048_576;
+export const maximumCheckpointCursorManifestByteLength = 1_048_576;
 const maximumUnsigned32 = 0xffff_ffff;
 const publicRecordMagic = Uint8Array.of(0x53, 0x4c, 0x43, 0x50);
 const publicRecordVersion = 1;
@@ -125,7 +122,6 @@ export type CommonProofBrowserCustodyInput = Readonly<{
     commonProofRuntimeBindingHash: Uint8Array;
     limits: CommonProofBrowserCustodyLimits;
     checkpoint?: Readonly<{
-        cursorKernel: CheckpointRandomCursorKernel;
         resumeDescriptor?: CommonProofCheckpointResumeDescriptor;
         store: AuthenticatedCheckpointStore;
     }>;
@@ -137,7 +133,8 @@ export type CommonProofBrowserCustodyInput = Readonly<{
 export type CommonProofCheckpointResumeDescriptor = Readonly<{
     checkpointLineageIdentifier: Uint8Array;
     commonProofEnvironmentIdentifier: Uint8Array;
-    orderedPrivateRandomCursorBytes: readonly Uint8Array[];
+    privateRandomCursorManifestBytes: Uint8Array;
+    privateRandomnessStreamAttemptIdentifier?: Uint8Array;
     safeBoundaryOrdinal: number;
     stableAttemptBindingHash: Uint8Array;
 }>;
@@ -182,14 +179,6 @@ export type CommonProofBrowserCustody = Readonly<{
 
 export const isSafeUnsigned32 = (value: number): boolean =>
     Number.isSafeInteger(value) && value >= 0 && value <= maximumUnsigned32;
-
-export const isNonEmptyByteArrayList = (
-    value: unknown,
-): value is readonly Uint8Array<ArrayBuffer>[] =>
-    Array.isArray(value) &&
-    value.every(
-        (entry: unknown) => entry instanceof Uint8Array && entry.byteLength > 0,
-    );
 
 export const copyExactBytes = (
     value: Uint8Array,
@@ -306,7 +295,9 @@ export const copyCheckpointResumeDescriptor = (
     if (
         typeof value !== 'object' ||
         value === null ||
-        !isNonEmptyByteArrayList(value.orderedPrivateRandomCursorBytes) ||
+        !(value.privateRandomCursorManifestBytes instanceof Uint8Array) ||
+        value.privateRandomCursorManifestBytes.byteLength >
+            maximumCheckpointCursorManifestByteLength ||
         !isSafeUnsigned32(value.safeBoundaryOrdinal)
     ) {
         throw new BrowserActionStorageCustodyError(
@@ -314,32 +305,12 @@ export const copyCheckpointResumeDescriptor = (
             'The common-proof checkpoint resume descriptor is malformed.',
         );
     }
-    if (
-        value.orderedPrivateRandomCursorBytes.length >
-        maximumCheckpointCursorCount
-    ) {
-        throw new BrowserActionStorageCustodyError(
-            'InvalidInput',
-            `The common-proof checkpoint resume descriptor exceeds the ${String(maximumCheckpointCursorCount)}-cursor limit.`,
-        );
-    }
-    let cursorAggregateByteLength = 0;
-    for (const cursorBytes of value.orderedPrivateRandomCursorBytes) {
-        if (
-            cursorBytes.byteLength >
-            maximumCheckpointCursorAggregateByteLength -
-                cursorAggregateByteLength
-        ) {
-            throw new BrowserActionStorageCustodyError(
-                'InvalidInput',
-                `The common-proof checkpoint resume descriptor exceeds the ${String(maximumCheckpointCursorAggregateByteLength)}-byte cursor budget.`,
-            );
-        }
-        cursorAggregateByteLength += cursorBytes.byteLength;
-    }
     let checkpointLineageIdentifier = new Uint8Array(0);
     let commonProofEnvironmentIdentifier = new Uint8Array(0);
-    const orderedPrivateRandomCursorBytes: Uint8Array<ArrayBuffer>[] = [];
+    let privateRandomCursorManifestBytes = new Uint8Array(0);
+    let privateRandomnessStreamAttemptIdentifier:
+        | Uint8Array<ArrayBuffer>
+        | undefined;
     let stableAttemptBindingHash = new Uint8Array(0);
     try {
         checkpointLineageIdentifier = copyExactBytes(
@@ -352,9 +323,17 @@ export const copyCheckpointResumeDescriptor = (
             identifierByteLength,
             'Checkpoint common-proof environment identifier',
         );
-        for (const cursorBytes of value.orderedPrivateRandomCursorBytes) {
-            orderedPrivateRandomCursorBytes.push(Uint8Array.from(cursorBytes));
-        }
+        privateRandomCursorManifestBytes = Uint8Array.from(
+            value.privateRandomCursorManifestBytes,
+        );
+        privateRandomnessStreamAttemptIdentifier =
+            value.privateRandomnessStreamAttemptIdentifier === undefined
+                ? undefined
+                : copyExactBytes(
+                      value.privateRandomnessStreamAttemptIdentifier,
+                      identifierByteLength,
+                      'Private-randomness stream-attempt identifier',
+                  );
         stableAttemptBindingHash = copyExactBytes(
             value.stableAttemptBindingHash,
             foundationHashByteLength,
@@ -363,18 +342,18 @@ export const copyCheckpointResumeDescriptor = (
         return Object.freeze({
             checkpointLineageIdentifier,
             commonProofEnvironmentIdentifier,
-            orderedPrivateRandomCursorBytes: Object.freeze(
-                orderedPrivateRandomCursorBytes,
-            ),
+            privateRandomCursorManifestBytes,
+            ...(privateRandomnessStreamAttemptIdentifier === undefined
+                ? {}
+                : { privateRandomnessStreamAttemptIdentifier }),
             safeBoundaryOrdinal: value.safeBoundaryOrdinal,
             stableAttemptBindingHash,
         });
     } catch (error) {
         checkpointLineageIdentifier.fill(0);
         commonProofEnvironmentIdentifier.fill(0);
-        for (const cursorBytes of orderedPrivateRandomCursorBytes) {
-            cursorBytes.fill(0);
-        }
+        privateRandomCursorManifestBytes.fill(0);
+        privateRandomnessStreamAttemptIdentifier?.fill(0);
         stableAttemptBindingHash.fill(0);
         throw error;
     }
@@ -386,9 +365,8 @@ export const destroyCheckpointResumeDescriptor = (
     descriptor.checkpointLineageIdentifier.fill(0);
     descriptor.commonProofEnvironmentIdentifier.fill(0);
     descriptor.stableAttemptBindingHash.fill(0);
-    for (const cursorBytes of descriptor.orderedPrivateRandomCursorBytes) {
-        cursorBytes.fill(0);
-    }
+    descriptor.privateRandomCursorManifestBytes.fill(0);
+    descriptor.privateRandomnessStreamAttemptIdentifier?.fill(0);
 };
 
 export const destroyIdentifierInput = (
@@ -413,46 +391,6 @@ export const destroyExternalMemoryObjectInMemory = (
     for (const descriptor of allObjectDescriptors(object)) {
         destroyIdentifierInput(descriptor.identifierInput);
     }
-};
-
-export const decodeCheckpointCursor = (
-    cursorKernel: CheckpointRandomCursorKernel,
-    canonicalBytes: Uint8Array,
-): CheckpointRandomCursor => {
-    const decoded = cursorKernel.decodePrivateRandomCursor({
-        canonicalBytesHex: bytesToHex(canonicalBytes),
-    }).value;
-    let nextCounter: bigint;
-    try {
-        nextCounter = BigInt(decoded.nextCounter);
-    } catch (error) {
-        throw new BrowserActionStorageCustodyError(
-            'RecordAuthenticationFailed',
-            'A common-proof checkpoint cursor has a malformed counter.',
-            error,
-        );
-    }
-    return Object.freeze({
-        derivationContextHash: hexToExactBytes(
-            decoded.derivationContextHash,
-            foundationHashByteLength,
-            'Checkpoint cursor derivation-context hash',
-        ),
-        family: decoded.family,
-        nextCounter,
-        ...(decoded.nextUnreadBitOffsetInBufferedBlock === undefined
-            ? {}
-            : {
-                  nextUnreadBitOffsetInBufferedBlock:
-                      decoded.nextUnreadBitOffsetInBufferedBlock,
-              }),
-        purpose: decoded.purpose,
-        streamAttemptIdentifier: hexToExactBytes(
-            decoded.streamAttemptIdentifierHex,
-            identifierByteLength,
-            'Checkpoint cursor stream-attempt identifier',
-        ),
-    });
 };
 
 export const checkpointEnvironmentBindingHash = (input: {

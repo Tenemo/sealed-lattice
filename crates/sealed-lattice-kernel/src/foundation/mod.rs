@@ -68,13 +68,19 @@ pub use board_ingestion::{
     CanonicalBoardError, CanonicalBoardLimits, CanonicalBoardVerifier, VerifiedTranscriptBatch,
     VerifiedTranscriptObject,
 };
-pub(crate) use board_ingestion_runtime::VerifiedBoardApplicationSource;
+pub(crate) use board_ingestion_runtime::{
+    BOARD_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH, VerifiedBallotPackageApplicationPayload,
+    VerifiedBoardApplicationSource, VerifiedDealerPublicRecordApplicationPayload,
+    VerifiedPrivateShareAcceptanceApplicationPayload, resolve_verified_action_top_count,
+    resolve_verified_board_application_sources, resolve_verified_transcript_objects,
+};
 pub use canonical_stream::{
     CanonicalStreamDomain, CanonicalStreamVerifier, CanonicalStreamWriter,
     MAXIMUM_CANONICAL_STREAM_BYTE_LENGTH, derive_canonical_stream_descriptor,
 };
 pub(crate) use canonical_stream::{
     CanonicalStreamReadbackVerifier, VerifiedCanonicalStreamSummary,
+    VerifiedTargetReleaseOutputBundle,
 };
 pub(crate) use canonical_stream_runtime::{
     CANONICAL_STREAM_RUNTIME_INTERNAL_FAILURE, CANONICAL_STREAM_RUNTIME_INVALID_SESSION,
@@ -98,10 +104,14 @@ pub use finality::{
     FinalityCertificate, FinalitySignaturePayload, FinalitySignerInput, FinalityStatement,
     FinalityVerificationInput, FinalityVerifier, VerifiedEvaluatorReplay, VerifiedFinality,
 };
+pub(crate) use finality::{
+    VerifiedFinalityCarrierByteLengths, VerifiedFinalitySignerCarrierByteLengths,
+};
 pub(crate) use finality_runtime::{
     FINALITY_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH, VERIFIED_FINALITY_DESCRIPTION_BYTE_LENGTH,
     begin_finality_verifier_session, cancel_finality_verifier_session, describe_verified_finality,
-    release_verified_finality, verify_finality,
+    release_verified_evaluator_replay, release_verified_finality, retain_verified_evaluator_replay,
+    verify_finality,
 };
 pub use hash::{Hash512, hash_foundation_tuple_512};
 pub(crate) use hash::{
@@ -130,12 +140,14 @@ pub(crate) use local_storage_runtime::{
 pub(crate) use mailbox_gcm::{MAILBOX_GCM_KEY_BYTE_LENGTH, MAILBOX_GCM_NONCE_BYTE_LENGTH};
 pub(crate) use mailbox_gcm_runtime::{
     authenticate_mailbox_gcm_chunk, begin_mailbox_gcm_encryptor, begin_mailbox_gcm_verifier,
-    cancel_mailbox_gcm, decrypt_mailbox_gcm_chunk, encrypt_mailbox_gcm_chunk,
-    finish_mailbox_gcm_authentication, finish_mailbox_gcm_decryptor, finish_mailbox_gcm_encryptor,
+    cancel_mailbox_gcm, consume_authenticated_mailbox_plaintext_capability,
+    decrypt_mailbox_gcm_chunk, encrypt_mailbox_gcm_chunk, finish_mailbox_gcm_authentication,
+    finish_mailbox_gcm_decryptor, finish_mailbox_gcm_encryptor,
 };
 pub use participant_identity::{
     ML_DSA_65_VERIFICATION_KEY_BYTE_LENGTH, ParticipantIdentity, derive_participant_identity,
 };
+pub(crate) use private_randomness::PersistentProofWitnessCoinBinding;
 pub use private_randomness::{
     ACTION_RANDOMNESS_DERIVATION_INPUT_SCHEMA_IDENTIFIER, ACTION_RANDOMNESS_ROOT_BYTE_LENGTH,
     ActionPrivateRandomness, ActionRandomnessDerivationInput, ActionRandomnessRoot,
@@ -149,9 +161,26 @@ pub use private_randomness::{
     SETUP_STRUCTURED_COMMITMENT_OPENING_CONTEXT_SCHEMA_IDENTIFIER,
     SetupStructuredCommitmentOpeningContext,
 };
+pub(crate) use private_randomness::{
+    PrivateRandomnessKmacInputClassAccounting,
+    private_randomness_stream_block_count_for_bit_length,
+    private_randomness_stream_block_count_for_byte_length,
+    private_randomness_stream_block_count_for_modulo_outputs,
+    private_randomness_stream_block_count_for_rejection_sampling,
+    proof_attempt_identifier_derivation_count,
+    selected_action_root_private_randomness_kmac_input_accounting,
+};
 pub(crate) use private_randomness_runtime::{
+    ACTION_RANDOMNESS_RUNTIME_RESOURCE_LIMIT, ACTION_RANDOMNESS_RUNTIME_STALE_HANDLE,
     AuthenticatedCheckpointContinuationSource, PreparedActionProofAttemptSource,
-    resolve_setup_action_randomness_reservation_source, run_action_randomness_command,
+    WitnessBoundPreparedActionProofAttemptSource,
+    bind_prepared_action_proof_attempt_to_canonical_witness,
+    resolve_prepared_action_proof_attempt_source,
+    resolve_prepared_collective_action_proof_attempt_source,
+    resolve_prepared_ordinary_proof_attempt_source,
+    resolve_setup_action_randomness_reservation_source,
+    retain_action_private_randomness_for_exact_family, run_action_randomness_command,
+    selected_setup_transport_private_randomness_kmac_input_accounting,
 };
 pub use proof_application::{
     PROOF_APPLICATION_BINDING_SCHEMA_IDENTIFIER, PROOF_OBJECT_HEADER_SCHEMA_IDENTIFIER,
@@ -161,6 +190,7 @@ pub use proof_application::{
 pub use refusal::{RefusalReason, VerificationResult};
 #[cfg(test)]
 pub(crate) use schemas::PROTOTYPE_PARTICIPANT_COUNT;
+pub(crate) use schemas::{AggregatePayload, encode_evaluator_replay_carrier};
 pub use schemas::{
     FOUNDATION_PROFILE, FoundationObjectType, FoundationProfile, FoundationRosterParameters,
     FoundationSchemaError, MAXIMUM_CONFIGURABLE_PARTICIPANT_COUNT,
@@ -170,8 +200,20 @@ pub use schemas::{
     SIGNED_CARRIER_SCHEMA_IDENTIFIER, STREAM_DESCRIPTOR_SCHEMA_IDENTIFIER, SignedCarrier,
     StreamDescriptor, derive_foundation_roster_parameters, signature_message,
 };
+#[cfg(test)]
+pub(crate) use selected_suite::selected_suite_capability_for_tests;
+pub(crate) use selected_suite::{
+    SELECTED_MAXIMUM_BALLOT_ATTEMPTS_PER_PARTICIPANT,
+    SELECTED_MAXIMUM_CANDIDATE_PACKAGES_PER_ACTION,
+    SELECTED_MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT,
+    SelectedEvaluatorResourceAccounting, selected_evaluator_resource_accounting,
+    selected_maximum_proof_objects_per_action,
+};
 pub(crate) use selected_suite::{SelectedSuiteCapability, select_suite_record};
-pub(crate) use state::PreparedStateReservationIntent;
+pub(crate) use state::{
+    PreparedStateReservationIntent, VerifiedStateOutputCarrierByteLengths,
+    VerifiedStateReservationCarrierByteLengths, VerifiedStateWitnessCarrierByteLength,
+};
 pub use state::{
     STATE_CERTIFICATE_SCHEMA_IDENTIFIER, STATE_OUTPUT_INTENT_SCHEMA_IDENTIFIER,
     STATE_RESERVATION_INTENT_SCHEMA_IDENTIFIER, STATE_WITNESS_VOTE_SCHEMA_IDENTIFIER,
@@ -184,12 +226,15 @@ pub use state::{
 };
 pub(crate) use state_runtime::{
     STATE_DURABLE_BINDING_BYTE_LENGTH, STATE_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH,
-    begin_state_verifier_session, cancel_state_verifier_session, certify_verified_state_intent,
-    certify_verified_state_intent_from_unordered_vote_carriers, describe_verified_state_object,
+    VerifiedStateReservationRuntimeBinding, begin_state_verifier_session,
+    cancel_state_verifier_session, certify_verified_state_intent,
+    certify_verified_state_intent_from_unordered_vote_carriers,
+    commit_accepted_setup_state_reservations, describe_verified_state_object,
     finish_state_output_intent_verification, finish_state_output_verification,
-    release_verified_state_object, run_state_producer_command, verify_state_reservation,
-    verify_state_reservation_intent,
+    release_verified_state_object, run_state_producer_command, verified_state_reservation_binding,
+    verify_state_reservation, verify_state_reservation_intent,
 };
+pub(crate) use suite::selected_target_data_prime_coordinates;
 pub use suite::{
     ARTIFACT_REFERENCE_SCHEMA_IDENTIFIER, ArtifactKind, ArtifactReference,
     DISTRIBUTION_RECORD_SCHEMA_IDENTIFIER, DistributionKind, DistributionPurpose,

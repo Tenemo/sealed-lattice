@@ -1,3 +1,8 @@
+use super::super::{
+    CommonProofAuthenticatedSourceReadRequest, VerifiedEvaluatorAuxiliaryRoot,
+    VerifiedEvaluatorKeyStore, VerifiedEvaluatorKeyStoreMaterial,
+    VerifiedStreamedProofTreeTerminal, VerifiedTargetReleaseProof,
+};
 #[cfg(test)]
 use super::ProofExternalMemoryTransactionRequest;
 use super::{
@@ -5,7 +10,8 @@ use super::{
     BrowserWorkerAuthenticatedStorageTransitionSource, CanonicalStreamDomain,
     CommonProofGenerationWorker, CommonProofGenerationWorkerError, CommonProofGenerationWorkerPoll,
     CommonProofRelationPlanCapability, CommonProofRuntimeCancellation, CommonProofRuntimeError,
-    CommonProofRuntimeLimits, CommonProofVerificationWorker, CommonProofVerificationWorkerError,
+    CommonProofRuntimeLimits, CommonProofVerificationReadbackAccounting,
+    CommonProofVerificationWorker, CommonProofVerificationWorkerError,
     CommonProofVerificationWorkerPoll, DURABLE_AUTHORIZATION_FRAME_BYTE_LENGTH,
     DURABLE_AUTHORIZATION_FRAME_MAGIC, DURABLE_AUTHORIZATION_FRAME_VERSION,
     DURABLE_AUTHORIZATION_RECORD_HASH_DOMAIN, GeneratedCommonProof, HASH_BYTE_LENGTH, Hash512,
@@ -13,9 +19,15 @@ use super::{
     PendingCommonProofGenerationCheckpoint, PreparedCommonProofGeneration,
     PreparedCommonProofVerification, ProofApplicationSlotCeilings,
     VERIFICATION_BINDING_HASH_DOMAIN, VerifiedCanonicalStreamSummary, VerifiedCommonProof,
-    common_proof_registry_entry_count, hash_framed_parts_512,
+    Zeroizing, common_proof_registry_entry_count, hash_framed_parts_512,
     require_common_proof_registry_entry_capacity,
 };
+use crate::bgv::setup::VerifiedAcceptedSetupEvaluatorSourceCatalog;
+use crate::bgv::target_decryption::kllps_release::{
+    KllpsShareVerificationSources, VerifiedKllpsPairedShare,
+    verify_kllps_paired_share_from_common_proof,
+};
+use crate::foundation::{StreamDescriptor, VerifiedBoardApplicationSource};
 
 /// Exact durable application reservation consumed by one proof attempt.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -242,7 +254,18 @@ pub(crate) struct ConsumedVerifiedCommonProofCapability {
     entry: VerifiedCommonProofCapabilityEntry,
 }
 
-impl ConsumedVerifiedCommonProofCapability {
+/// Callback-scoped view of one still-retained verifier capability. Exact
+/// family adapters use this view to complete every fallible terminal and
+/// destination check before the registry permanently retires the handle.
+pub(crate) struct BorrowedVerifiedCommonProofCapability<'capability> {
+    entry: &'capability VerifiedCommonProofCapabilityEntry,
+}
+
+impl BorrowedVerifiedCommonProofCapability<'_> {
+    pub(crate) const fn verified_proof(&self) -> &VerifiedCommonProof {
+        &self.entry.proof
+    }
+
     pub(crate) const fn protocol_version(&self) -> u16 {
         self.entry.proof.protocol_version()
     }
@@ -297,6 +320,10 @@ impl ConsumedVerifiedCommonProofCapability {
         self.entry.verified_stream.stream_domain()
     }
 
+    pub(crate) const fn proof_stream_descriptor(&self) -> &StreamDescriptor {
+        self.entry.verified_stream.stream_descriptor()
+    }
+
     pub(crate) const fn proof_stream_full_object_digest(&self) -> [u8; HASH_BYTE_LENGTH] {
         self.entry.verified_stream.full_object_digest().into_bytes()
     }
@@ -323,6 +350,149 @@ impl ConsumedVerifiedCommonProofCapability {
 
     pub(crate) const fn top_count(&self) -> Option<u16> {
         self.entry.proof.top_count()
+    }
+}
+
+impl ConsumedVerifiedCommonProofCapability {
+    pub(crate) const fn borrowed(&self) -> BorrowedVerifiedCommonProofCapability<'_> {
+        BorrowedVerifiedCommonProofCapability { entry: &self.entry }
+    }
+
+    pub(crate) const fn protocol_version(&self) -> u16 {
+        self.entry.proof.protocol_version()
+    }
+
+    pub(crate) const fn suite_identifier(&self) -> [u8; HASH_BYTE_LENGTH] {
+        self.entry.proof.suite_identifier()
+    }
+
+    pub(crate) const fn ceremony_context_hash(&self) -> [u8; HASH_BYTE_LENGTH] {
+        self.entry.binding.ceremony_context_hash
+    }
+
+    pub(crate) const fn action_context_hash(&self) -> [u8; HASH_BYTE_LENGTH] {
+        self.entry.binding.action_context_hash
+    }
+
+    pub(crate) const fn board_object_hash(&self) -> [u8; HASH_BYTE_LENGTH] {
+        self.entry.binding.board_object_hash
+    }
+
+    pub(crate) fn verification_binding_hash(&self) -> [u8; HASH_BYTE_LENGTH] {
+        self.entry.binding.binding_hash()
+    }
+
+    pub(crate) const fn proof_application_slot_hash(&self) -> [u8; HASH_BYTE_LENGTH] {
+        self.entry
+            .binding
+            .proof_application
+            .proof_application_slot_hash
+    }
+
+    pub(crate) const fn canonical_proof_application_binding_hash(&self) -> [u8; HASH_BYTE_LENGTH] {
+        self.entry
+            .binding
+            .proof_application
+            .canonical_proof_application_binding_hash
+    }
+
+    pub(crate) const fn application_statement_schema_identifier(&self) -> u16 {
+        self.entry.proof.application_statement_schema_identifier()
+    }
+
+    pub(crate) const fn application_statement_hash(&self) -> [u8; HASH_BYTE_LENGTH] {
+        self.entry.proof.application_statement_hash()
+    }
+
+    pub(crate) const fn proof_header_hash(&self) -> [u8; HASH_BYTE_LENGTH] {
+        self.entry.proof.proof_header_hash()
+    }
+
+    pub(crate) const fn proof_stream_domain(&self) -> CanonicalStreamDomain {
+        self.entry.verified_stream.stream_domain()
+    }
+
+    pub(crate) const fn proof_stream_descriptor(&self) -> &StreamDescriptor {
+        self.entry.verified_stream.stream_descriptor()
+    }
+
+    pub(crate) const fn proof_stream_full_object_digest(&self) -> [u8; HASH_BYTE_LENGTH] {
+        self.entry.verified_stream.full_object_digest().into_bytes()
+    }
+
+    pub(crate) const fn proof_byte_length(&self) -> u64 {
+        self.entry.proof.proof_byte_length()
+    }
+
+    pub(crate) const fn verified_query_count(&self) -> u32 {
+        self.entry.proof.verified_query_count()
+    }
+
+    pub(crate) const fn relation_plan_hash(&self) -> [u8; HASH_BYTE_LENGTH] {
+        self.entry.binding.relation_plan_hash
+    }
+
+    pub(crate) const fn relation_plan_variant_hash(&self) -> [u8; HASH_BYTE_LENGTH] {
+        self.entry.proof.relation_plan_variant_hash()
+    }
+
+    pub(crate) const fn schedule_position(&self) -> Option<u32> {
+        self.entry.proof.schedule_position()
+    }
+
+    pub(crate) const fn top_count(&self) -> Option<u16> {
+        self.entry.proof.top_count()
+    }
+
+    /// Consumes the generic verifier authority into the sole selected
+    /// evaluator-store terminal. The exact family supplies its retained
+    /// canonical statement, authenticated evaluator-store stream, retained
+    /// output-tree terminals, and verifier-created auxiliary-root capabilities;
+    /// hashes copied through the worker boundary cannot call this constructor
+    /// or recreate `self`.
+    pub(crate) fn into_verified_evaluator_key_store(
+        self,
+        canonical_application_statement_bytes: &[u8],
+        verified_evaluator_source_catalog: &VerifiedAcceptedSetupEvaluatorSourceCatalog,
+        verified_evaluator_key_store_material: VerifiedEvaluatorKeyStoreMaterial,
+        ordered_runtime_component_trees: Vec<VerifiedStreamedProofTreeTerminal>,
+        ordered_verified_auxiliary_roots: &[VerifiedEvaluatorAuxiliaryRoot],
+    ) -> Result<VerifiedEvaluatorKeyStore, CommonProofRuntimeError> {
+        if self.proof_stream_domain() != CanonicalStreamDomain::EvaluatorKeyAggregateProof {
+            return Err(CommonProofRuntimeError::WrongVerificationBinding);
+        }
+        let proof_stream_descriptor = self.proof_stream_descriptor().clone();
+        VerifiedEvaluatorKeyStore::from_verified_common_proof_and_material(
+            &self.entry.proof,
+            canonical_application_statement_bytes,
+            self.entry.binding.relation_plan_hash,
+            self.entry.binding.ceremony_context_hash,
+            self.entry.binding.action_context_hash,
+            verified_evaluator_source_catalog,
+            proof_stream_descriptor,
+            verified_evaluator_key_store_material,
+            ordered_runtime_component_trees,
+            ordered_verified_auxiliary_roots,
+        )
+        .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)
+    }
+
+    /// Consumes the generic verifier authority into the sole target-share
+    /// terminal. All statement fields and stream bindings are reconstructed
+    /// from accepted setup, finality, and reset-safe state capabilities.
+    pub(crate) fn into_verified_kllps_paired_share(
+        self,
+        sources: KllpsShareVerificationSources<'_>,
+    ) -> Result<VerifiedKllpsPairedShare, CommonProofRuntimeError> {
+        let verified_target_release_proof =
+            VerifiedTargetReleaseProof::from_common_proof(self.entry.proof)
+                .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?;
+        verify_kllps_paired_share_from_common_proof(
+            verified_target_release_proof,
+            self.entry.verified_stream,
+            sources,
+        )
+        .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)
     }
 }
 
@@ -605,6 +775,18 @@ impl CommonProofRuntimeRegistry {
             .ok_or(CommonProofRuntimeError::TransactionResponseMissing)
     }
 
+    pub(crate) fn generation_authenticated_source_read_request(
+        &self,
+        handle: CommonProofGenerationOperationHandle,
+    ) -> Result<CommonProofAuthenticatedSourceReadRequest, CommonProofRuntimeError> {
+        self.generation_operations
+            .get(&handle)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?
+            .worker
+            .pending_authenticated_source_read()
+            .ok_or(CommonProofRuntimeError::WrongOperationPhase)
+    }
+
     pub(crate) fn generation_checkpoint_state(
         &self,
         handle: CommonProofGenerationOperationHandle,
@@ -631,31 +813,16 @@ impl CommonProofRuntimeRegistry {
             .ok_or(CommonProofRuntimeError::WrongOperationPhase)
     }
 
-    pub(crate) fn generation_checkpoint_cursor_count(
+    pub(crate) fn generation_checkpoint_cursor_manifest(
         &self,
         handle: CommonProofGenerationOperationHandle,
-    ) -> Result<usize, CommonProofRuntimeError> {
-        self.generation_operations
-            .get(&handle)
-            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?
-            .worker
-            .pending_checkpoint()
-            .map(|checkpoint| checkpoint.ordered_cursor_bytes().len())
-            .ok_or(CommonProofRuntimeError::WrongOperationPhase)
-    }
-
-    pub(crate) fn generation_checkpoint_cursor(
-        &self,
-        handle: CommonProofGenerationOperationHandle,
-        cursor_index: usize,
     ) -> Result<&[u8], CommonProofRuntimeError> {
         self.generation_operations
             .get(&handle)
             .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?
             .worker
             .pending_checkpoint()
-            .and_then(|checkpoint| checkpoint.ordered_cursor_bytes().get(cursor_index))
-            .map(Vec::as_slice)
+            .map(PendingCommonProofGenerationCheckpoint::cursor_manifest_bytes)
             .ok_or(CommonProofRuntimeError::WrongOperationPhase)
     }
 
@@ -713,6 +880,24 @@ impl CommonProofRuntimeRegistry {
             .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?
             .worker
             .supply_storage_response(encoded_response)
+    }
+
+    pub(crate) fn supply_generation_authenticated_source_range(
+        &mut self,
+        handle: CommonProofGenerationOperationHandle,
+        authenticated_bytes: Zeroizing<Box<[u8]>>,
+    ) -> Result<(), CommonProofGenerationWorkerError> {
+        let operation = self
+            .generation_operations
+            .get_mut(&handle)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?;
+        let request = operation
+            .worker
+            .pending_authenticated_source_read()
+            .ok_or(CommonProofRuntimeError::WrongOperationPhase)?;
+        operation
+            .worker
+            .supply_authenticated_source_range(request, authenticated_bytes)
     }
 
     pub(crate) fn generation_output_chunk(
@@ -823,6 +1008,51 @@ impl CommonProofRuntimeRegistry {
             .remove(&handle)
             .map(|_| ())
             .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)
+    }
+
+    /// Consumes a completed local prover only after a positively verified
+    /// board object carries the exact generated proof descriptor and all
+    /// canonical application coordinates match the generation authority.
+    pub(crate) fn bind_generated_proof_to_verified_board_source(
+        &mut self,
+        handle: GeneratedCommonProofCapabilityHandle,
+        board_source: &VerifiedBoardApplicationSource,
+        board_proof_descriptor: &StreamDescriptor,
+        canonical_application_statement_bytes: &[u8],
+    ) -> Result<CommonProofVerificationBinding, CommonProofRuntimeError> {
+        let binding = self
+            .generated_capabilities
+            .get(&handle)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?
+            .proof
+            .bind_verified_board_source(
+                board_source,
+                board_proof_descriptor,
+                canonical_application_statement_bytes,
+            )?;
+        self.generated_capabilities
+            .remove(&handle)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?;
+        Ok(binding)
+    }
+
+    /// Consumes a completed collective setup prover only after an exact
+    /// accepted-package statement source carries the generated descriptor.
+    pub(crate) fn bind_generated_proof_to_verified_statement_source(
+        &mut self,
+        handle: GeneratedCommonProofCapabilityHandle,
+        statement_source: &super::VerifiedCommonProofStatementSource,
+    ) -> Result<CommonProofVerificationBinding, CommonProofRuntimeError> {
+        let binding = self
+            .generated_capabilities
+            .get(&handle)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?
+            .proof
+            .bind_verified_statement_source(statement_source)?;
+        self.generated_capabilities
+            .remove(&handle)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?;
+        Ok(binding)
     }
 
     pub(crate) fn begin_owned_verification(
@@ -943,6 +1173,19 @@ impl CommonProofRuntimeRegistry {
             .as_mut()
             .ok_or(CommonProofRuntimeError::WrongOperationPhase)?
             .poll()
+    }
+
+    pub(crate) fn verification_readback_accounting(
+        &self,
+        handle: CommonProofVerificationOperationHandle,
+    ) -> Result<CommonProofVerificationReadbackAccounting, CommonProofRuntimeError> {
+        self.operations
+            .get(&handle)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?
+            .worker
+            .as_ref()
+            .ok_or(CommonProofRuntimeError::WrongOperationPhase)
+            .map(CommonProofVerificationWorker::readback_accounting)
     }
 
     pub(crate) fn supply_verification_readback_chunk(
@@ -1135,6 +1378,17 @@ impl CommonProofRuntimeRegistry {
         self.authenticated_ledger_heads
             .retain(|_, head| head.terminal_capability_handle != handle.0);
         Ok(ConsumedVerifiedCommonProofCapability { entry })
+    }
+
+    pub(crate) fn with_verified_proof_for_protocol<Output>(
+        &self,
+        handle: &VerifiedCommonProofCapabilityHandle,
+        inspect: impl FnOnce(BorrowedVerifiedCommonProofCapability<'_>) -> Output,
+    ) -> Result<Output, CommonProofRuntimeError> {
+        self.verified_capabilities
+            .get(handle)
+            .map(|entry| inspect(BorrowedVerifiedCommonProofCapability { entry }))
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)
     }
 
     /// Retains one authenticated browser-worker ledger head for the exact

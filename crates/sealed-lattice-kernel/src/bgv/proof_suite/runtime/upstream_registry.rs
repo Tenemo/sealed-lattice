@@ -1,6 +1,5 @@
 use super::{
-    BTreeMap, BTreeSet, CANONICAL_PROOF_APPLICATION_BINDING_HASH_DOMAIN,
-    CommonProofApplicationBinding, CommonProofApplicationInputCapabilityHandle,
+    BTreeMap, BTreeSet, CommonProofApplicationInputCapabilityHandle,
     CommonProofApplicationInputEntry, CommonProofEvaluatorAuxiliaryRootCapabilityHandle,
     CommonProofEvaluatorAuxiliaryRootEntry, CommonProofPreverificationApplicationSourceEntry,
     CommonProofPreverificationApplicationSourceHandle, CommonProofRuntimeError,
@@ -11,9 +10,8 @@ use super::{
     ConsumedCommonProofVerificationInputs, FOUNDATION_PROFILE, MAXIMUM_COMMON_PROOF_BYTE_LENGTH,
     MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH, MAXIMUM_RESIDENT_COMMON_PROOF_INPUT_CHUNKS,
     PollableCommonProofVerificationInput, RefusingVerifiedColumnEvaluator, RelationColumnOrigin,
-    SelectedSuiteCapability, VerifiedBoardApplicationSource, VerifiedCommonProofStatementSource,
-    VerifiedEvaluatorAuxiliaryRoot, VerifiedRelationColumnEvaluator, VerifiedStatementOwnedTree,
-    common_proof_registry_entry_count, common_proof_stream_domain, hash_framed_parts_512,
+    SelectedSuiteCapability, VerifiedCommonProofStatementSource, VerifiedEvaluatorAuxiliaryRoot,
+    VerifiedRelationColumnEvaluator, VerifiedStatementOwnedTree, common_proof_registry_entry_count,
     require_common_proof_registry_entry_capacity, take_nonrepeating_handle,
     verified_application_statement_hash,
 };
@@ -115,6 +113,16 @@ impl CommonProofUpstreamInputRegistry {
         Ok(CommonProofSelectedSuiteCapabilityHandle(handle))
     }
 
+    pub(crate) fn selected_suite(
+        &self,
+        handle: &CommonProofSelectedSuiteCapabilityHandle,
+    ) -> Result<&SelectedSuiteCapability, CommonProofRuntimeError> {
+        self.suites
+            .get(&handle.0)
+            .map(|entry| &entry.capability)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)
+    }
+
     pub(crate) fn release_suite(&mut self, handle: u32) -> Result<(), CommonProofRuntimeError> {
         self.suites
             .remove(&handle)
@@ -125,8 +133,7 @@ impl CommonProofUpstreamInputRegistry {
     pub(crate) fn install_preverification_application_source(
         &mut self,
         suite_handle: &CommonProofSelectedSuiteCapabilityHandle,
-        board_source: &VerifiedBoardApplicationSource,
-        statement_source: &VerifiedCommonProofStatementSource,
+        statement_source: VerifiedCommonProofStatementSource,
     ) -> Result<CommonProofPreverificationApplicationSourceHandle, CommonProofRuntimeError> {
         let suite = self
             .suites
@@ -147,11 +154,13 @@ impl CommonProofUpstreamInputRegistry {
         let proof_stream_descriptor = proof_application_binding.proof_stream_descriptor();
         let proof_byte_length = usize::try_from(proof_stream_descriptor.total_byte_length)
             .map_err(|_| CommonProofRuntimeError::InvalidLimits)?;
-        let producer_coordinates_match = application_slot.roster_position()
-            == board_source.producer_roster_position()
-            && application_slot
-                .producer_sequence()
-                .is_none_or(|sequence| sequence == board_source.producer_sequence());
+        let application_source_authority = statement_source.application_source_authority();
+        let producer_and_schedule_coordinates_match = application_slot.roster_position()
+            == application_source_authority.producer_roster_position()
+            && application_slot.schedule_position()
+                == application_source_authority.schedule_position()
+            && application_slot.producer_sequence()
+                == application_source_authority.producer_sequence();
         if canonical_application_statement_bytes.is_empty()
             || canonical_application_statement_bytes.len()
                 > FOUNDATION_PROFILE.maximum_copied_buffer_byte_length
@@ -159,24 +168,37 @@ impl CommonProofUpstreamInputRegistry {
             || proof_byte_length > MAXIMUM_COMMON_PROOF_BYTE_LENGTH
             || application_slot.suite_identifier().into_bytes()
                 != suite.capability.suite_identifier()
-            || board_source.suite_identifier().into_bytes() != suite.capability.suite_identifier()
-            || application_slot.ceremony_context_hash() != board_source.ceremony_context_hash()
-            || application_slot.action_context_hash() != board_source.action_context_hash()
-            || !producer_coordinates_match
-            || board_source.object_hash() != statement_source.board_object_hash()
+            || statement_source.protocol_version != suite.capability.protocol_version()
+            || application_source_authority.suite_identifier().into_bytes()
+                != suite.capability.suite_identifier()
+            || application_slot.ceremony_context_hash()
+                != application_source_authority.ceremony_context_hash()
+            || application_slot.action_context_hash()
+                != application_source_authority.action_context_hash()
+            || application_slot.application_statement_schema_identifier()
+                != application_source_authority.application_statement_schema_identifier()
+            || !producer_and_schedule_coordinates_match
+            || proof_stream_descriptor != application_source_authority.proof_stream_descriptor()
+            || statement_source.verification_binding.board_object_hash
+                != application_source_authority
+                    .application_source_object_hash()
+                    .into_bytes()
             || expected_statement_hash != statement_source.application_statement_hash().into_bytes()
         {
             return Err(CommonProofRuntimeError::WrongVerificationBinding);
         }
-        // Structural suite and board binding alone do not establish that an
-        // exact family derived this statement from the accepted board object.
-        // Keep production verification closed until a family-owned adapter
-        // supplies that derivation. The generic runtime remains available to
-        // separately installed checked capabilities in tests.
-        Err(CommonProofRuntimeError::InvalidPlanCapability)
+        let handle =
+            take_nonrepeating_handle(&mut self.next_preverification_application_source_handle)?;
+        self.preverification_application_sources.insert(
+            handle,
+            CommonProofPreverificationApplicationSourceEntry {
+                source: statement_source,
+            },
+        );
+        Ok(CommonProofPreverificationApplicationSourceHandle(handle))
     }
 
-    /// Consumes one board-bound source and promotes it into the sole
+    /// Consumes one verifier-owned source and promotes it into the sole
     /// application capability that exact-family tree/root adapters may use.
     /// No caller-provided binding, plan, descriptor, or digest enters this
     /// transition.
@@ -193,70 +215,44 @@ impl CommonProofUpstreamInputRegistry {
             .preverification_application_sources
             .get(&application_source_handle.0)
             .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?;
-        let proof_application_binding = &source.proof_application_binding;
-        let application_slot = proof_application_binding.application_slot();
-        if source.board_source.suite_identifier().into_bytes()
+        let application_slot = source.source.proof_application_binding.application_slot();
+        let application_source_authority = source.source.application_source_authority();
+        if application_source_authority.suite_identifier().into_bytes()
             != suite.capability.suite_identifier()
             || application_slot.suite_identifier().into_bytes()
                 != suite.capability.suite_identifier()
+            || application_slot.ceremony_context_hash()
+                != application_source_authority.ceremony_context_hash()
+            || application_slot.action_context_hash()
+                != application_source_authority.action_context_hash()
+            || application_slot.application_statement_schema_identifier()
+                != application_source_authority.application_statement_schema_identifier()
+            || application_slot.roster_position()
+                != application_source_authority.producer_roster_position()
+            || application_slot.schedule_position()
+                != application_source_authority.schedule_position()
+            || application_slot.producer_sequence()
+                != application_source_authority.producer_sequence()
+            || source
+                .source
+                .proof_application_binding
+                .proof_stream_descriptor()
+                != application_source_authority.proof_stream_descriptor()
+            || source.source.protocol_version != suite.capability.protocol_version()
         {
             return Err(CommonProofRuntimeError::WrongVerificationBinding);
         }
-        let canonical_binding_bytes = proof_application_binding
-            .encode()
-            .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?;
-        let canonical_binding_hash = hash_framed_parts_512(
-            CANONICAL_PROOF_APPLICATION_BINDING_HASH_DOMAIN,
-            &[&canonical_binding_bytes],
-        );
-        let statement_schema_identifier =
-            application_slot.application_statement_schema_identifier();
-        let proof_stream_domain = common_proof_stream_domain(statement_schema_identifier)
-            .ok_or(CommonProofRuntimeError::WrongVerificationBinding)?;
-        let selected_variant = source
-            .relation_plan
-            .relation_plan
-            .select_variant(
-                source.relation_plan.schedule_position,
-                source.relation_plan.top_count,
-            )
-            .map_err(|_| CommonProofRuntimeError::InvalidPlanCapability)?;
-        let proof_query_count = selected_variant
-            .common_proof_transcript_schedule(&source.relation_plan.relation_context)
-            .map_err(|_| CommonProofRuntimeError::InvalidPlanCapability)?
-            .unique_query_count();
-        let proof_stream_descriptor = proof_application_binding.proof_stream_descriptor();
-        let application_binding = CommonProofApplicationBinding::new(
-            application_slot
-                .hash()
-                .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?
-                .into_bytes(),
-            canonical_binding_hash,
-            statement_schema_identifier,
-            proof_application_binding.proof_header_hash().into_bytes(),
-            proof_stream_domain,
-            proof_stream_descriptor.full_object_digest.into_bytes(),
-            proof_stream_descriptor.total_byte_length,
-            proof_query_count,
-        )?;
-        let verification_binding = CommonProofVerificationBinding::new(
-            suite.capability.suite_identifier(),
-            source.board_source.ceremony_context_hash().into_bytes(),
-            source.board_source.action_context_hash().into_bytes(),
-            source.board_source.object_hash().into_bytes(),
-            application_binding,
-            source.relation_plan.relation_plan_hash(),
-        );
 
         let handle = take_nonrepeating_handle(&mut self.next_application_handle)?;
         let source = self
             .preverification_application_sources
             .remove(&application_source_handle.0)
-            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?;
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?
+            .source;
         self.applications.insert(
             handle,
             CommonProofApplicationInputEntry {
-                verification_binding,
+                verification_binding: source.verification_binding,
                 relation_plan: source.relation_plan,
                 protocol_version: source.protocol_version,
                 canonical_application_statement_bytes: source.canonical_application_statement_bytes,
@@ -278,6 +274,181 @@ impl CommonProofUpstreamInputRegistry {
             .remove(&application_source_handle.0)
             .map(|_| ())
             .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)
+    }
+
+    /// Atomically consumes one exact-family source into a verifier that
+    /// needs no statement-owned trees or auxiliary roots. The checked plan
+    /// still decides whether a verifier-sequence evaluator is required; a
+    /// failed transition removes every partially retained application input.
+    pub(crate) fn prepare_proof_created_tree_family_verification(
+        &mut self,
+        suite_handle: &CommonProofSelectedSuiteCapabilityHandle,
+        statement_source: VerifiedCommonProofStatementSource,
+        verified_column_evaluator: Box<dyn VerifiedRelationColumnEvaluator>,
+    ) -> Result<super::PreparedCommonProofVerification, CommonProofRuntimeError> {
+        let preverification_handle =
+            self.install_preverification_application_source(suite_handle, statement_source)?;
+        let application_handle = match self
+            .promote_preverification_application_source(suite_handle, &preverification_handle)
+        {
+            Ok(handle) => handle,
+            Err(error) => {
+                self.release_preverification_application_source(&preverification_handle)?;
+                return Err(error);
+            }
+        };
+        let evaluator_handle = match self
+            .mint_verified_column_evaluator(&application_handle, verified_column_evaluator)
+        {
+            Ok(handle) => handle,
+            Err(error) => {
+                self.cancel_application(&application_handle)?;
+                return Err(error);
+            }
+        };
+        match self.consume_verification_inputs(
+            &application_handle,
+            &[],
+            &[],
+            Some(&evaluator_handle),
+        ) {
+            Ok(inputs) => inputs.prepare(),
+            Err(error) => {
+                self.cancel_application(&application_handle)?;
+                Err(error)
+            }
+        }
+    }
+
+    /// Atomically consumes one exact-family source into a verifier whose
+    /// checked relation has no verifier-sequence columns. Statement-bound and
+    /// proof-created tree roots remain owned by the relation plan and proof;
+    /// no caller-supplied evaluator can enter this transition.
+    pub(crate) fn prepare_proof_created_tree_family_verification_without_evaluator(
+        &mut self,
+        suite_handle: &CommonProofSelectedSuiteCapabilityHandle,
+        statement_source: VerifiedCommonProofStatementSource,
+    ) -> Result<super::PreparedCommonProofVerification, CommonProofRuntimeError> {
+        let preverification_handle =
+            self.install_preverification_application_source(suite_handle, statement_source)?;
+        let application_handle = match self
+            .promote_preverification_application_source(suite_handle, &preverification_handle)
+        {
+            Ok(handle) => handle,
+            Err(error) => {
+                self.release_preverification_application_source(&preverification_handle)?;
+                return Err(error);
+            }
+        };
+        match self.consume_verification_inputs(&application_handle, &[], &[], None) {
+            Ok(inputs) => inputs.prepare(),
+            Err(error) => {
+                self.cancel_application(&application_handle)?;
+                Err(error)
+            }
+        }
+    }
+
+    /// Atomically prepares an exact-family verifier from verifier-recomputed
+    /// statement trees and no verifier-sequence columns. The caller retains
+    /// the full recomputed trees; these compact inputs carry only their bound
+    /// roots, roles, and relation ordinals into the common verifier.
+    pub(crate) fn prepare_statement_tree_family_verification_without_evaluator(
+        &mut self,
+        suite_handle: &CommonProofSelectedSuiteCapabilityHandle,
+        statement_source: VerifiedCommonProofStatementSource,
+        statement_trees: Vec<VerifiedStatementOwnedTree>,
+    ) -> Result<super::PreparedCommonProofVerification, CommonProofRuntimeError> {
+        let preverification_handle =
+            self.install_preverification_application_source(suite_handle, statement_source)?;
+        let application_handle = match self
+            .promote_preverification_application_source(suite_handle, &preverification_handle)
+        {
+            Ok(handle) => handle,
+            Err(error) => {
+                self.release_preverification_application_source(&preverification_handle)?;
+                return Err(error);
+            }
+        };
+        let mut statement_tree_handles = Vec::new();
+        for tree in statement_trees {
+            match self.mint_statement_tree(&application_handle, tree) {
+                Ok(handle) => statement_tree_handles.push(handle),
+                Err(error) => {
+                    self.cancel_application(&application_handle)?;
+                    return Err(error);
+                }
+            }
+        }
+        let borrowed_statement_tree_handles = statement_tree_handles.iter().collect::<Vec<_>>();
+        match self.consume_verification_inputs(
+            &application_handle,
+            &borrowed_statement_tree_handles,
+            &[],
+            None,
+        ) {
+            Ok(inputs) => inputs.prepare(),
+            Err(error) => {
+                self.cancel_application(&application_handle)?;
+                Err(error)
+            }
+        }
+    }
+
+    /// Atomically prepares an exact-family verifier from verifier-recomputed
+    /// statement trees and its verifier-sequence column evaluator. The trees
+    /// and evaluator are verifier-minted authorities; no caller-provided root,
+    /// column value, or alternate representation enters this transition.
+    pub(crate) fn prepare_statement_tree_family_verification(
+        &mut self,
+        suite_handle: &CommonProofSelectedSuiteCapabilityHandle,
+        statement_source: VerifiedCommonProofStatementSource,
+        statement_trees: Vec<VerifiedStatementOwnedTree>,
+        verified_column_evaluator: Box<dyn VerifiedRelationColumnEvaluator>,
+    ) -> Result<super::PreparedCommonProofVerification, CommonProofRuntimeError> {
+        let preverification_handle =
+            self.install_preverification_application_source(suite_handle, statement_source)?;
+        let application_handle = match self
+            .promote_preverification_application_source(suite_handle, &preverification_handle)
+        {
+            Ok(handle) => handle,
+            Err(error) => {
+                self.release_preverification_application_source(&preverification_handle)?;
+                return Err(error);
+            }
+        };
+        let mut statement_tree_handles = Vec::new();
+        for tree in statement_trees {
+            match self.mint_statement_tree(&application_handle, tree) {
+                Ok(handle) => statement_tree_handles.push(handle),
+                Err(error) => {
+                    self.cancel_application(&application_handle)?;
+                    return Err(error);
+                }
+            }
+        }
+        let evaluator_handle = match self
+            .mint_verified_column_evaluator(&application_handle, verified_column_evaluator)
+        {
+            Ok(handle) => handle,
+            Err(error) => {
+                self.cancel_application(&application_handle)?;
+                return Err(error);
+            }
+        };
+        let borrowed_statement_tree_handles = statement_tree_handles.iter().collect::<Vec<_>>();
+        match self.consume_verification_inputs(
+            &application_handle,
+            &borrowed_statement_tree_handles,
+            &[],
+            Some(&evaluator_handle),
+        ) {
+            Ok(inputs) => inputs.prepare(),
+            Err(error) => {
+                self.cancel_application(&application_handle)?;
+                Err(error)
+            }
+        }
     }
 
     pub(crate) fn mint_statement_tree(
@@ -430,7 +601,7 @@ impl CommonProofUpstreamInputRegistry {
             .map(|handle| {
                 self.evaluator_roots
                     .get(&handle.0)
-                    .map(|entry| entry.root)
+                    .map(|entry| entry.root.clone())
                     .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)
             })
             .collect::<Result<Vec<_>, _>>()?;

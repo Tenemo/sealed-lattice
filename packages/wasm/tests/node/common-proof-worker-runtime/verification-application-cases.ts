@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
     abortVerifiedCommonProofApplication,
+    applyClosedWorkerVerifiedCommonProofCapability,
     confirmVerifiedCommonProofApplication,
     openClosedWorkerCommonProofVerificationFamilyAdapter,
     prepareVerifiedCommonProofApplication,
@@ -637,6 +638,58 @@ describe('common-proof verification and application runtime', () => {
             }),
         ).rejects.toMatchObject({ code: 'KernelFailure' });
         expect(cancellationCount).toBe(1);
+    });
+
+    it('retains generic verifier authority until the exact Rust handoff reports consumption', async () => {
+        const refusedFixture = await createVerifiedApplicationFixture();
+        expect(
+            applyClosedWorkerVerifiedCommonProofCapability(
+                refusedFixture.capability,
+                refusedFixture.runtime,
+                (capabilityHandle) => {
+                    expect(capabilityHandle).toBe(82);
+                    return Object.freeze({
+                        consumed: false,
+                        result: 'refused',
+                    });
+                },
+            ),
+        ).toBe('refused');
+        refusedFixture.capability.release();
+        expect(refusedFixture.observations.releasedCapabilityCount).toBe(1);
+
+        const consumedFixture = await createVerifiedApplicationFixture();
+        expect(
+            applyClosedWorkerVerifiedCommonProofCapability(
+                consumedFixture.capability,
+                consumedFixture.runtime,
+                (capabilityHandle) => {
+                    expect(capabilityHandle).toBe(82);
+                    return Object.freeze({
+                        consumed: true,
+                        result: 'accepted',
+                    });
+                },
+            ),
+        ).toBe('accepted');
+        expect(() => consumedFixture.capability.release()).toThrowError(
+            expect.objectContaining({ code: 'KernelFailure' }),
+        );
+        expect(consumedFixture.observations.releasedCapabilityCount).toBe(0);
+
+        const failedFixture = await createVerifiedApplicationFixture();
+        const finishFailure = new Error('exact family preflight failed');
+        expect(() =>
+            applyClosedWorkerVerifiedCommonProofCapability(
+                failedFixture.capability,
+                failedFixture.runtime,
+                () => {
+                    throw finishFailure;
+                },
+            ),
+        ).toThrow(finishFailure);
+        failedFixture.capability.release();
+        expect(failedFixture.observations.releasedCapabilityCount).toBe(1);
     });
 
     it('applies only a genuinely completed verifier capability to one exact authenticated successor', async () => {

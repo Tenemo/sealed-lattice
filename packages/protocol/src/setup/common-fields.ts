@@ -1,4 +1,3 @@
-import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 import {
     configurableParticipantCountRange,
     deriveFoundationRosterParameters,
@@ -6,8 +5,6 @@ import {
     type FoundationRosterParameters,
     type ProtocolHash,
 } from '@sealed-lattice/types';
-
-import type { CollectiveBgvSetupContext } from './vss-share-verification-records.js';
 
 export type JsonRecord = Record<string, unknown>;
 
@@ -100,37 +97,4 @@ export const bytesFromHex = (hex: string, fieldName: string): Uint8Array => {
     }
 
     return bytes;
-};
-
-export const deriveCollectiveBgvSetupContextHash = (
-    setupContext: CollectiveBgvSetupContext,
-): ProtocolHash => {
-    requireFoundationRosterParameters(
-        setupContext.participantCount,
-        'setupContext.participantCount',
-    );
-    return deriveCanonicalObjectHash({
-        objectType: 'CollectiveBgvSetupContext',
-        ceremonyId: setupContext.ceremonyId,
-        manifestHash: setupContext.manifestHash,
-        rosterHash: setupContext.rosterHash,
-        setupParametersHash: setupContext.setupParametersHash,
-        setupEpoch: setupContext.setupEpoch,
-        participantCount: setupContext.participantCount,
-    });
-};
-
-export const assertSetupContextHashMatches = (
-    setupContext: CollectiveBgvSetupContext,
-    value: Readonly<Record<string, unknown>>,
-    objectPath: string,
-): void => {
-    if (
-        value.setupContextHash !==
-        deriveCollectiveBgvSetupContextHash(setupContext)
-    ) {
-        throw new Error(
-            `${objectPath}.setupContextHash must match the authoritative setup context.`,
-        );
-    }
 };

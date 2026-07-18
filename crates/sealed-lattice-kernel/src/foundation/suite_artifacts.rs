@@ -15,6 +15,7 @@ use super::{
 };
 use crate::bgv::{
     evaluator::program::selected_evaluator_program_set_bytes,
+    evaluator::top_k::CANONICAL_TARGET_CIPHERTEXT_LEVEL,
     parameters::{
         DATA_PRIMES, LOGICAL_SLOT_GENERATOR, PLAINTEXT_MODULUS, root_parameters_for_modulus,
         validate_supported_algebraic_parameters,
@@ -25,6 +26,7 @@ use crate::bgv::{
     },
     setup::{SETUP_COMMITMENT_MODULE_RANK, SETUP_COMMITMENT_MODULUS_LIMB_INDICES},
 };
+use num_bigint::BigUint;
 
 pub(crate) const ENCODER_AND_BALLOT_LAYOUT_SCHEMA_IDENTIFIER: u16 = 0x1300;
 pub(crate) const VERIFIABLE_SECRET_SHARING_PROFILE_SCHEMA_IDENTIFIER: u16 = 0x2120;
@@ -316,16 +318,15 @@ pub(crate) struct TargetDecryptionProfile {
 impl TargetDecryptionProfile {
     pub(crate) fn selected() -> SchemaResult<Self> {
         let flooding_bound =
-            u128::from(selected_target_decryption_flooding_bound().map_err(proof_profile_error)?);
+            selected_target_decryption_flooding_bound().map_err(proof_profile_error)?;
         let target_modulus = selected_target_modulus()?;
-        let word_count =
-            usize::try_from((u128::BITS - target_modulus.leading_zeros()).div_ceil(u64::BITS))
-                .map_err(|_| invalid_selected_artifact())?;
-        let mut words = vec![0_u64; word_count];
-        words[0] = flooding_bound as u64;
-        if word_count > 1 {
-            words[1] = (flooding_bound >> u64::BITS) as u64;
+        let word_count = usize::try_from(target_modulus.bits().div_ceil(u64::from(u64::BITS)))
+            .map_err(|_| invalid_selected_artifact())?;
+        let mut words = flooding_bound.to_u64_digits();
+        if words.len() > word_count {
+            return Err(invalid_selected_artifact());
         }
+        words.resize(word_count, 0);
         let profile = Self {
             flooding_coefficient_bound_words_little_endian: words,
         };
@@ -365,19 +366,18 @@ impl TargetDecryptionProfile {
 
     fn selected_unchecked() -> SchemaResult<Self> {
         let flooding_bound =
-            u128::from(selected_target_decryption_flooding_bound().map_err(proof_profile_error)?);
+            selected_target_decryption_flooding_bound().map_err(proof_profile_error)?;
         let target_modulus = selected_target_modulus()?;
-        if flooding_bound == 0 || flooding_bound >= target_modulus {
+        if flooding_bound == BigUint::from(0_u8) || flooding_bound >= target_modulus {
             return Err(invalid_selected_artifact());
         }
-        let word_count =
-            usize::try_from((u128::BITS - target_modulus.leading_zeros()).div_ceil(u64::BITS))
-                .map_err(|_| invalid_selected_artifact())?;
-        let mut words = vec![0_u64; word_count];
-        words[0] = flooding_bound as u64;
-        if word_count > 1 {
-            words[1] = (flooding_bound >> u64::BITS) as u64;
+        let word_count = usize::try_from(target_modulus.bits().div_ceil(u64::from(u64::BITS)))
+            .map_err(|_| invalid_selected_artifact())?;
+        let mut words = flooding_bound.to_u64_digits();
+        if words.len() > word_count {
+            return Err(invalid_selected_artifact());
         }
+        words.resize(word_count, 0);
         Ok(Self {
             flooding_coefficient_bound_words_little_endian: words,
         })
@@ -412,13 +412,11 @@ pub(crate) fn selected_target_decryption_profile_artifact_bytes() -> SchemaResul
     TargetDecryptionProfile::selected()?.encode()
 }
 
-fn selected_target_modulus() -> SchemaResult<u128> {
-    DATA_PRIMES[..2]
+fn selected_target_modulus() -> SchemaResult<BigUint> {
+    Ok(DATA_PRIMES[..=CANONICAL_TARGET_CIPHERTEXT_LEVEL]
         .iter()
-        .try_fold(1_u128, |product, modulus| {
-            product.checked_mul(u128::from(*modulus))
-        })
-        .ok_or_else(invalid_selected_artifact)
+        .map(|modulus| BigUint::from(*modulus))
+        .product())
 }
 
 #[cfg(test)]
@@ -575,6 +573,6 @@ mod tests {
         assert_eq!(profile.evaluation_coset_offset, 7);
         assert_eq!(profile.masking_polynomial_maximum_degree, 2_047);
         assert_eq!(profile.committed_polynomial_degree_bound_exclusive, 262_144);
-        assert_eq!(crate::bgv::parameters::POLYNOMIAL_DEGREE, 32_768);
+        assert_eq!(crate::bgv::parameters::POLYNOMIAL_DEGREE, 65_536);
     }
 }

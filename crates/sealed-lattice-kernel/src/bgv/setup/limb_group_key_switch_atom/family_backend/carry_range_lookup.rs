@@ -216,7 +216,7 @@ pub(super) fn column_sum<const LIMB_COUNT: usize>(
 
 #[cfg(test)]
 mod tests {
-    use super::super::super::proof_field::sixteen_limb_group_field_parameters;
+    use super::super::super::proof_field::selected_key_switch_proof_field_parameters;
     use super::*;
 
     // A deterministic pseudo-random challenge, standing in for the transcript
@@ -256,7 +256,7 @@ mod tests {
 
     #[test]
     fn honest_in_range_carries_balance() {
-        let parameters = sixteen_limb_group_field_parameters();
+        let parameters = selected_key_switch_proof_field_parameters();
         for ring_degree in [64_usize, 128, 256] {
             // Carries spanning the whole legal band `[-(N+1), N+1]`, including
             // both extremes (shifted 0 and 2N+2) and the values whose shifts
@@ -296,7 +296,7 @@ mod tests {
         // A shifted value of 2N+3 is one past the table's largest entry. Its
         // pole 1/(mu - (2N+3)) has no matching table term, so the balance fails
         // at the sampled challenges.
-        let parameters = sixteen_limb_group_field_parameters();
+        let parameters = selected_key_switch_proof_field_parameters();
         let ring_degree = 64;
         let out_of_range = max_shifted_value(ring_degree) + 1;
         let shifted = vec![0_usize, 5, ring_degree, 2 * ring_degree, out_of_range];
@@ -319,7 +319,7 @@ mod tests {
         // Because the public table value at every padding row is in range (not
         // the out-of-range value), the balance still fails. Directly tests the
         // padding-collision defense.
-        let parameters = sixteen_limb_group_field_parameters();
+        let parameters = selected_key_switch_proof_field_parameters();
         let ring_degree = 64;
         // Table 2 spans domain rows for values [2N, 3N); real entries are the
         // first three (2N, 2N+1, 2N+2); row 3.. are padding. Pick an
@@ -365,7 +365,7 @@ mod tests {
         // The right set of values but a corrupted multiplicity (one value
         // over-counted) must fail: the balance pins each value's multiplicity
         // exactly.
-        let parameters = sixteen_limb_group_field_parameters();
+        let parameters = selected_key_switch_proof_field_parameters();
         let ring_degree = 64;
         let shifted = vec![3_usize, 3, ring_degree + 1, 2 * ring_degree + 2];
         let challenge = sample_challenge(&parameters, 31_337);
@@ -397,7 +397,7 @@ mod tests {
     #[test]
     fn multiplicities_account_for_every_carry() {
         // Every in-range carry is counted exactly once across the chunks.
-        let parameters = sixteen_limb_group_field_parameters();
+        let parameters = selected_key_switch_proof_field_parameters();
         let ring_degree = 128;
         let shifted: Vec<usize> = (0..=max_shifted_value(ring_degree)).collect();
         let multiplicity_columns = multiplicities(&parameters, &shifted, ring_degree);
@@ -416,7 +416,7 @@ mod tests {
     fn batch_reciprocals_match_per_element_inversion() {
         // Montgomery's trick must agree with the direct per-element inverse on
         // every element, including repeated values.
-        let parameters = sixteen_limb_group_field_parameters();
+        let parameters = selected_key_switch_proof_field_parameters();
         let challenge = sample_challenge(&parameters, 777);
         let values: Vec<[u64; 13]> = [0_u64, 5, 5, 130, 129, 1, 42]
             .iter()
@@ -439,7 +439,7 @@ mod tests {
     fn fraction_pin_holds_for_table_and_lookup() {
         // The fraction-pin relation each support constraint enforces:
         // (mu - value) * fraction - multiplicity == 0.
-        let parameters = sixteen_limb_group_field_parameters();
+        let parameters = selected_key_switch_proof_field_parameters();
         let challenge = sample_challenge(&parameters, 90_210);
         // Lookup pin: multiplicity is the implicit 1.
         let value = parameters.unsigned_word_to_element(42);

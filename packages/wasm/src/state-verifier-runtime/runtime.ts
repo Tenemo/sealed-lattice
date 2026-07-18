@@ -102,6 +102,14 @@ type VerifiedStateReservationKernelAuthorization = Readonly<{
     sessionHandle: number;
 }>;
 
+export type PreparedVerifiedStateReservationKernelTransaction = Readonly<{
+    capabilityMemory: WebAssembly.Memory;
+    capabilityPointer: number;
+    reservationHandles: readonly number[];
+    sessionHandle: number;
+    commitAfterKernelSuccess(): void;
+}>;
+
 const verifiedObjectRecords = new WeakMap<object, VerifiedObjectRecord>();
 const durableBindingDescriptions = new WeakMap<
     object,
@@ -187,6 +195,80 @@ export const resolveVerifiedStateReservationKernelAuthorization = (
     }
 
     return record.session.reservationKernelAuthorization(record, kernel);
+};
+
+/**
+ * Preflights one same-session reservation transaction before Rust is allowed
+ * to consume any handle. The returned commit only retires already validated
+ * browser custody after the kernel transaction succeeds.
+ */
+export const prepareVerifiedStateReservationKernelTransaction = (input: {
+    kernel: TranscriptCoreKernel;
+    reservations: readonly VerifiedStateReservation[];
+}): PreparedVerifiedStateReservationKernelTransaction => {
+    const reservationsAreArray =
+        Object.prototype.toString.call(input.reservations) === '[object Array]';
+    if (!reservationsAreArray || input.reservations.length === 0) {
+        throw new TypeError(
+            'A state reservation transaction requires at least one reservation.',
+        );
+    }
+    const records = input.reservations.map((reservation) => {
+        const authorization =
+            resolveVerifiedStateReservationKernelAuthorization(
+                reservation,
+                input.kernel,
+            );
+        const record = verifiedObjectRecords.get(reservation);
+        if (
+            record === undefined ||
+            !record.active ||
+            record.kind !== 'reservation' ||
+            record.activeOutputLeaseCount !== 0
+        ) {
+            throw new TypeError(
+                'The state reservation is unavailable for an atomic kernel transaction.',
+            );
+        }
+        return { authorization, record };
+    });
+    const first = records[0];
+    if (
+        records.some(
+            ({ authorization, record }) =>
+                record.session !== first.record.session ||
+                authorization.capabilityMemory !==
+                    first.authorization.capabilityMemory ||
+                authorization.capabilityPointer !==
+                    first.authorization.capabilityPointer ||
+                authorization.sessionHandle !==
+                    first.authorization.sessionHandle,
+        ) ||
+        new Set(records.map(({ record }) => record.handle)).size !==
+            records.length
+    ) {
+        throw new TypeError(
+            'State reservations for one kernel transaction must be distinct and belong to one active session.',
+        );
+    }
+    let committed = false;
+    return Object.freeze({
+        capabilityMemory: first.authorization.capabilityMemory,
+        capabilityPointer: first.authorization.capabilityPointer,
+        reservationHandles: Object.freeze(
+            records.map(({ authorization }) => authorization.reservationHandle),
+        ),
+        sessionHandle: first.authorization.sessionHandle,
+        commitAfterKernelSuccess: (): void => {
+            if (committed) {
+                return;
+            }
+            committed = true;
+            first.record.session.markReservationsConsumedAfterKernelSuccess(
+                records.map(({ record }) => record),
+            );
+        },
+    });
 };
 
 const refused = <Value>(
@@ -853,6 +935,15 @@ class StateVerifierSessionImplementation implements StateVerifierSession {
             reservationHandle: record.handle,
             sessionHandle: this.#handle,
         });
+    }
+
+    public markReservationsConsumedAfterKernelSuccess(
+        records: readonly VerifiedObjectRecord[],
+    ): void {
+        for (const record of records) {
+            record.active = false;
+            this.#verifiedObjectRecords.delete(record);
+        }
     }
 
     public durableBindingFor(

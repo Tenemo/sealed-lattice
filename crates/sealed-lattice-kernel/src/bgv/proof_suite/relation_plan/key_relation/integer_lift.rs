@@ -1,4 +1,8 @@
+use num_bigint::{BigInt, BigUint};
+use num_traits::{One, Zero};
+
 use super::super::{
+    bounds::SignedIntegerInterval,
     integer_lift::{
         RelationIntegerLiftBatchDescriptor, RelationIntegerLiftCoefficient,
         RelationIntegerLiftComponentDescriptor, RelationIntegerLiftFullRingHalf,
@@ -9,7 +13,8 @@ use super::super::{
     model::{RelationPlanError, SuiteModulusReference},
 };
 use super::{
-    AnchorEquationInputs, KeyRelationPlanBuilder, ProofTreePhase, PublicKeyEquationInputs,
+    AnchorEquationInputs, EXACT_INTEGER_LIFT_RADIX, KeyRelationPlanBuilder,
+    PendingFullRingNegacyclicProduct, ProofTreePhase, PublicKeyEquationInputs,
     ReversibleShiftedSmallVector, ShiftedSmallVector, SplitIntegerVector,
     TrusteeAnchorOpeningWitness, TrusteeRadixThreeQuotientWitness,
     column_builder::{
@@ -18,15 +23,128 @@ use super::{
     },
 };
 
+fn exact_radix_digits(mut value: u128) -> Result<Vec<u64>, RelationPlanError> {
+    let radix = u128::from(EXACT_INTEGER_LIFT_RADIX);
+    let mut digits = Vec::new();
+    while value != 0 {
+        digits.push(
+            u64::try_from(value % radix).map_err(|_| RelationPlanError::IntegerBoundOverflow)?,
+        );
+        value /= radix;
+    }
+    if digits.is_empty() {
+        digits.push(0);
+    }
+    Ok(digits)
+}
+
+fn fixed_exact_radix_digits(
+    mut value: u128,
+    digit_count: usize,
+) -> Result<Vec<u64>, RelationPlanError> {
+    if digit_count == 0 {
+        return Err(RelationPlanError::InvalidConstraint);
+    }
+    let radix = u128::from(EXACT_INTEGER_LIFT_RADIX);
+    let mut digits = Vec::with_capacity(digit_count);
+    for _ in 0..digit_count {
+        digits.push(
+            u64::try_from(value % radix).map_err(|_| RelationPlanError::IntegerBoundOverflow)?,
+        );
+        value /= radix;
+    }
+    if value != 0 {
+        return Err(RelationPlanError::IntegerBoundOverflow);
+    }
+    Ok(digits)
+}
+
+fn split_exact_radix_digits(
+    digits_by_column: &std::collections::BTreeMap<u32, Vec<u32>>,
+    vector: SplitIntegerVector,
+) -> Result<Option<Vec<SplitIntegerVector>>, RelationPlanError> {
+    let low = digits_by_column.get(&vector.halves[0]);
+    let high = digits_by_column.get(&vector.halves[1]);
+    match (low, high) {
+        (None, None) => Ok(None),
+        (Some(low), Some(high)) if low.len() == high.len() && !low.is_empty() => Ok(Some(
+            low.iter()
+                .copied()
+                .zip(high.iter().copied())
+                .map(|(low, high)| SplitIntegerVector {
+                    halves: [low, high],
+                })
+                .collect(),
+        )),
+        _ => Err(RelationPlanError::InvalidConstraint),
+    }
+}
+
+fn ensure_exact_limb(
+    terms: &mut Vec<Vec<RelationIntegerLiftLinearTermDescriptor>>,
+    intervals: &mut Vec<SignedIntegerInterval>,
+    limb: usize,
+) -> Result<(), RelationPlanError> {
+    while terms.len() <= limb {
+        terms.push(Vec::new());
+    }
+    while intervals.len() <= limb {
+        intervals.push(SignedIntegerInterval::new(0, 0));
+    }
+    Ok(())
+}
+
+fn ensure_exact_product_limb(
+    products: &mut Vec<Vec<RelationIntegerLiftFullRingNegacyclicProductDescriptor>>,
+    intervals: &mut Vec<SignedIntegerInterval>,
+    limb: usize,
+) -> Result<(), RelationPlanError> {
+    while products.len() <= limb {
+        products.push(Vec::new());
+    }
+    while intervals.len() <= limb {
+        intervals.push(SignedIntegerInterval::new(0, 0));
+    }
+    Ok(())
+}
+
+fn maximum_absolute_product(
+    left: &SignedIntegerInterval,
+    right: &SignedIntegerInterval,
+) -> Result<BigUint, RelationPlanError> {
+    let product = left.clone().multiply(right.clone())?;
+    Ok(product
+        .minimum
+        .magnitude()
+        .max(product.maximum.magnitude())
+        .clone())
+}
+
+fn interval_maximum_absolute(interval: &SignedIntegerInterval) -> BigUint {
+    interval
+        .minimum
+        .magnitude()
+        .max(interval.maximum.magnitude())
+        .clone()
+}
+
+fn divide_ceil(value: &BigUint, divisor: u64) -> BigUint {
+    if value.is_zero() {
+        return BigUint::zero();
+    }
+    (value + BigUint::from(divisor - 1)) / BigUint::from(divisor)
+}
+
 impl<'context> KeyRelationPlanBuilder<'context> {
     pub(in crate::bgv::proof_suite::relation_plan) fn ensure_reversed_vector_bindings(
         &mut self,
         batch_key: (SuiteModulusReference, u16),
-        vector: &ReversibleShiftedSmallVector,
+        source: SplitIntegerVector,
+        reversed: SplitIntegerVector,
     ) -> Result<(), RelationPlanError> {
         for half_ordinal in 0..2 {
-            let source_column_ordinal = vector.source.coefficients.halves[half_ordinal];
-            let reversed_column_ordinal = vector.reversed.halves[half_ordinal];
+            let source_column_ordinal = source.halves[half_ordinal];
+            let reversed_column_ordinal = reversed.halves[half_ordinal];
             let binding_key = (source_column_ordinal, reversed_column_ordinal);
             let already_present = self
                 .pending_integer_lift_batches
@@ -59,22 +177,38 @@ impl<'context> KeyRelationPlanBuilder<'context> {
 
     pub(in crate::bgv::proof_suite::relation_plan) fn full_ring_product(
         &mut self,
-        batch_key: (SuiteModulusReference, u16),
+        _batch_key: (SuiteModulusReference, u16),
         selected_half: RelationIntegerLiftFullRingHalf,
         negative: bool,
         multiplicand: SplitIntegerVector,
         multiplier: &ReversibleShiftedSmallVector,
-    ) -> Result<RelationIntegerLiftFullRingNegacyclicProductDescriptor, RelationPlanError> {
-        self.ensure_reversed_vector_bindings(batch_key, multiplier)?;
-        Ok(RelationIntegerLiftFullRingNegacyclicProductDescriptor {
+    ) -> Result<PendingFullRingNegacyclicProduct, RelationPlanError> {
+        Ok(PendingFullRingNegacyclicProduct {
             negative,
             selected_half,
+            multiplicand,
+            multiplier: multiplier.clone(),
+        })
+    }
+
+    fn materialize_full_ring_product(
+        &mut self,
+        batch_key: (SuiteModulusReference, u16),
+        pending: &PendingFullRingNegacyclicProduct,
+        multiplicand: SplitIntegerVector,
+        multiplier: &ReversibleShiftedSmallVector,
+    ) -> Result<RelationIntegerLiftFullRingNegacyclicProductDescriptor, RelationPlanError> {
+        let reversed = self.reversed_vector(multiplier.source.coefficients)?;
+        self.ensure_reversed_vector_bindings(batch_key, multiplier.source.coefficients, reversed)?;
+        Ok(RelationIntegerLiftFullRingNegacyclicProductDescriptor {
+            negative: pending.negative,
+            selected_half: pending.selected_half,
             multiplicand_low_column_ordinal: multiplicand.halves[0],
             multiplicand_high_column_ordinal: multiplicand.halves[1],
             multiplier_low_column_ordinal: multiplier.source.coefficients.halves[0],
             multiplier_high_column_ordinal: multiplier.source.coefficients.halves[1],
-            reversed_multiplier_low_column_ordinal: multiplier.reversed.halves[0],
-            reversed_multiplier_high_column_ordinal: multiplier.reversed.halves[1],
+            reversed_multiplier_low_column_ordinal: reversed.halves[0],
+            reversed_multiplier_high_column_ordinal: reversed.halves[1],
             multiplier_low_offset: multiplier.source.offset,
             multiplier_high_offset: multiplier.source.offset,
             multiplicand_low_suffix_evaluation_column_ordinal: self
@@ -88,34 +222,358 @@ impl<'context> KeyRelationPlanBuilder<'context> {
         })
     }
 
+    fn reversed_vector(
+        &mut self,
+        source: SplitIntegerVector,
+    ) -> Result<SplitIntegerVector, RelationPlanError> {
+        if let Some(reversed) = self.reversed_columns_by_source_halves.get(&source.halves) {
+            return Ok(*reversed);
+        }
+        let reversed = SplitIntegerVector {
+            halves: [
+                self.push_prover_column(ProofTreePhase::Base)?,
+                self.push_prover_column(ProofTreePhase::Base)?,
+            ],
+        };
+        self.reversed_columns_by_source_halves
+            .insert(source.halves, reversed);
+        Ok(reversed)
+    }
+
+    fn exact_column_interval(
+        &self,
+        column_ordinal: u32,
+    ) -> Result<SignedIntegerInterval, RelationPlanError> {
+        if let Some((interval, _)) = self.semantic_cells_by_column.get(&column_ordinal) {
+            return Ok(interval.clone());
+        }
+        let column = self
+            .ordered_columns
+            .get(column_ordinal as usize)
+            .ok_or(RelationPlanError::InvalidColumn)?;
+        let modulus_reference = column
+            .canonical_residue_modulus
+            .ok_or(RelationPlanError::InvalidSemanticCell)?;
+        let modulus = self.modulus(modulus_reference)?;
+        SignedIntegerInterval::from_bigints(BigInt::zero(), BigInt::from(modulus - 1))
+    }
+
+    fn exact_coefficient_digits(
+        &self,
+        coefficient: RelationIntegerLiftCoefficient,
+    ) -> Result<Vec<u64>, RelationPlanError> {
+        let value = match coefficient {
+            RelationIntegerLiftCoefficient::Constant(value) => u128::from(value),
+            RelationIntegerLiftCoefficient::Modulus {
+                modulus_reference,
+                multiplier,
+            } => u128::from(self.modulus(modulus_reference)?)
+                .checked_mul(u128::from(multiplier))
+                .ok_or(RelationPlanError::IntegerBoundOverflow)?,
+            RelationIntegerLiftCoefficient::ModulusRadixDigit { .. } => {
+                return Err(RelationPlanError::InvalidConstraint);
+            }
+        };
+        exact_radix_digits(value)
+    }
+
+    fn expand_exact_linear_term(
+        &self,
+        term: &RelationIntegerLiftLinearTermDescriptor,
+        ordered_terms_by_limb: &mut Vec<Vec<RelationIntegerLiftLinearTermDescriptor>>,
+        intervals_by_limb: &mut Vec<SignedIntegerInterval>,
+    ) -> Result<(), RelationPlanError> {
+        let coefficient_digits = self.exact_coefficient_digits(term.coefficient)?;
+        let value_digits = self
+            .exact_radix_digits_by_column
+            .get(&term.column_ordinal)
+            .cloned();
+        let value_is_digitized = value_digits.is_some();
+        if value_digits.is_some() && term.column_offset != 0 {
+            return Err(RelationPlanError::InvalidConstraint);
+        }
+        let source_columns = value_digits.unwrap_or_else(|| vec![term.column_ordinal]);
+        for (value_limb, source_column) in source_columns.into_iter().enumerate() {
+            let source_interval = self.exact_column_interval(source_column)?;
+            for (coefficient_limb, coefficient_digit) in
+                coefficient_digits.iter().copied().enumerate()
+            {
+                if coefficient_digit == 0 {
+                    continue;
+                }
+                let limb = value_limb
+                    .checked_add(coefficient_limb)
+                    .ok_or(RelationPlanError::CountOverflow)?;
+                ensure_exact_limb(ordered_terms_by_limb, intervals_by_limb, limb)?;
+                let expanded_coefficient = match term.coefficient {
+                    RelationIntegerLiftCoefficient::Constant(_) => {
+                        RelationIntegerLiftCoefficient::Constant(coefficient_digit)
+                    }
+                    RelationIntegerLiftCoefficient::Modulus {
+                        modulus_reference,
+                        multiplier,
+                    } => RelationIntegerLiftCoefficient::ModulusRadixDigit {
+                        modulus_reference,
+                        multiplier,
+                        radix: EXACT_INTEGER_LIFT_RADIX,
+                        digit_ordinal: u16::try_from(coefficient_limb)
+                            .map_err(|_| RelationPlanError::CountOverflow)?,
+                    },
+                    RelationIntegerLiftCoefficient::ModulusRadixDigit { .. } => {
+                        return Err(RelationPlanError::InvalidConstraint);
+                    }
+                };
+                let expanded = RelationIntegerLiftLinearTermDescriptor {
+                    negative: term.negative,
+                    column_ordinal: source_column,
+                    column_offset: if value_limb == 0 && !value_is_digitized {
+                        term.column_offset
+                    } else {
+                        0
+                    },
+                    coefficient: expanded_coefficient,
+                };
+                let shifted_interval = SignedIntegerInterval::from_bigints(
+                    source_interval.minimum.clone() - BigInt::from(expanded.column_offset),
+                    source_interval.maximum.clone() - BigInt::from(expanded.column_offset),
+                )?;
+                let coefficient_interval = SignedIntegerInterval::from_bigints(
+                    BigInt::from(coefficient_digit),
+                    BigInt::from(coefficient_digit),
+                )?;
+                let mut contribution = shifted_interval.multiply(coefficient_interval)?;
+                if expanded.negative {
+                    contribution = contribution.negate()?;
+                }
+                intervals_by_limb[limb] = intervals_by_limb[limb].clone().add(contribution)?;
+                ordered_terms_by_limb[limb].push(expanded);
+            }
+        }
+        Ok(())
+    }
+
+    fn expand_exact_full_ring_product(
+        &mut self,
+        batch_key: (SuiteModulusReference, u16),
+        pending: &PendingFullRingNegacyclicProduct,
+        ordered_products_by_limb: &mut Vec<
+            Vec<RelationIntegerLiftFullRingNegacyclicProductDescriptor>,
+        >,
+        intervals_by_limb: &mut Vec<SignedIntegerInterval>,
+    ) -> Result<(), RelationPlanError> {
+        let multiplicand_digits =
+            split_exact_radix_digits(&self.exact_radix_digits_by_column, pending.multiplicand)?;
+        let multiplier_digits = split_exact_radix_digits(
+            &self.exact_radix_digits_by_column,
+            pending.multiplier.source.coefficients,
+        )?;
+        match (multiplicand_digits, multiplier_digits) {
+            (Some(_), Some(_)) => Err(RelationPlanError::NoWrapBoundViolated),
+            (Some(digits), None) => {
+                for (limb, digit) in digits.into_iter().enumerate() {
+                    ensure_exact_product_limb(ordered_products_by_limb, intervals_by_limb, limb)?;
+                    let descriptor = self.materialize_full_ring_product(
+                        batch_key,
+                        pending,
+                        digit,
+                        &pending.multiplier,
+                    )?;
+                    let interval = self.full_ring_product_interval(&descriptor)?;
+                    intervals_by_limb[limb] = intervals_by_limb[limb].clone().add(interval)?;
+                    ordered_products_by_limb[limb].push(descriptor);
+                }
+                Ok(())
+            }
+            (None, Some(digits)) => {
+                let offset_digits = fixed_exact_radix_digits(
+                    u128::from(pending.multiplier.source.offset),
+                    digits.len(),
+                )?;
+                for (limb, digit) in digits.into_iter().enumerate() {
+                    ensure_exact_product_limb(ordered_products_by_limb, intervals_by_limb, limb)?;
+                    let digit_multiplier = ReversibleShiftedSmallVector {
+                        source: ShiftedSmallVector {
+                            coefficients: digit,
+                            offset: offset_digits[limb],
+                        },
+                    };
+                    let descriptor = self.materialize_full_ring_product(
+                        batch_key,
+                        pending,
+                        pending.multiplicand,
+                        &digit_multiplier,
+                    )?;
+                    let interval = self.full_ring_product_interval(&descriptor)?;
+                    intervals_by_limb[limb] = intervals_by_limb[limb].clone().add(interval)?;
+                    ordered_products_by_limb[limb].push(descriptor);
+                }
+                Ok(())
+            }
+            (None, None) => {
+                ensure_exact_product_limb(ordered_products_by_limb, intervals_by_limb, 0)?;
+                let descriptor = self.materialize_full_ring_product(
+                    batch_key,
+                    pending,
+                    pending.multiplicand,
+                    &pending.multiplier,
+                )?;
+                let interval = self.full_ring_product_interval(&descriptor)?;
+                intervals_by_limb[0] = intervals_by_limb[0].clone().add(interval)?;
+                ordered_products_by_limb[0].push(descriptor);
+                Ok(())
+            }
+        }
+    }
+
+    fn full_ring_product_interval(
+        &self,
+        product: &RelationIntegerLiftFullRingNegacyclicProductDescriptor,
+    ) -> Result<SignedIntegerInterval, RelationPlanError> {
+        let multiplicand_low =
+            self.exact_column_interval(product.multiplicand_low_column_ordinal)?;
+        let multiplicand_high =
+            self.exact_column_interval(product.multiplicand_high_column_ordinal)?;
+        let multiplier_low = self.exact_column_interval(product.multiplier_low_column_ordinal)?;
+        let multiplier_high = self.exact_column_interval(product.multiplier_high_column_ordinal)?;
+        let shifted_low = SignedIntegerInterval::from_bigints(
+            multiplier_low.minimum - BigInt::from(product.multiplier_low_offset),
+            multiplier_low.maximum - BigInt::from(product.multiplier_low_offset),
+        )?;
+        let shifted_high = SignedIntegerInterval::from_bigints(
+            multiplier_high.minimum - BigInt::from(product.multiplier_high_offset),
+            multiplier_high.maximum - BigInt::from(product.multiplier_high_offset),
+        )?;
+        let low_low = maximum_absolute_product(&multiplicand_low, &shifted_low)?;
+        let high_low = maximum_absolute_product(&multiplicand_high, &shifted_low)?;
+        let low_high = maximum_absolute_product(&multiplicand_low, &shifted_high)?;
+        let high_high = maximum_absolute_product(&multiplicand_high, &shifted_high)?;
+        let bound = BigInt::from((low_low + high_high).max(high_low + low_high))
+            * BigInt::from(self.geometry.trace_domain_size()?);
+        SignedIntegerInterval::from_bigints(-bound.clone(), bound)
+    }
+
     pub(in crate::bgv::proof_suite::relation_plan) fn add_integer_lift_component(
         &mut self,
         batch_key: (SuiteModulusReference, u16),
         quotient_column_ordinal: u32,
         mut ordered_linear_terms: Vec<RelationIntegerLiftLinearTermDescriptor>,
-        mut ordered_full_ring_negacyclic_products: Vec<
-            RelationIntegerLiftFullRingNegacyclicProductDescriptor,
-        >,
+        ordered_full_ring_negacyclic_products: Vec<PendingFullRingNegacyclicProduct>,
     ) -> Result<(), RelationPlanError> {
-        sort_canonical_items(&mut ordered_linear_terms, |term| term.canonical_bytes())?;
-        sort_canonical_items(&mut ordered_full_ring_negacyclic_products, |product| {
-            product.canonical_bytes()
-        })?;
-        let component = RelationIntegerLiftComponentDescriptor {
-            quotient_is_negative: true,
-            quotient_column_ordinal,
-            ordered_linear_terms,
-            ordered_convolution_products: Vec::new(),
-            ordered_full_ring_negacyclic_products,
-            linear_evaluation_column_ordinal: self.push_prover_column(ProofTreePhase::Auxiliary)?,
-            product_accumulator_column_ordinal: self
-                .push_prover_column(ProofTreePhase::Auxiliary)?,
-        };
+        ordered_linear_terms.push(RelationIntegerLiftLinearTermDescriptor {
+            negative: true,
+            column_ordinal: quotient_column_ordinal,
+            column_offset: 0,
+            coefficient: RelationIntegerLiftCoefficient::Modulus {
+                modulus_reference: batch_key.0,
+                multiplier: 1,
+            },
+        });
+        let exact_carry_component_key = (
+            batch_key.0,
+            ordered_linear_terms.clone(),
+            ordered_full_ring_negacyclic_products.clone(),
+        );
+        let existing_carry_columns = self
+            .exact_carry_columns_by_component
+            .get(&exact_carry_component_key)
+            .cloned();
+        let mut expanded_linear_terms = Vec::new();
+        let mut expanded_products = Vec::new();
+        let mut intervals = Vec::new();
+        for term in &ordered_linear_terms {
+            self.expand_exact_linear_term(term, &mut expanded_linear_terms, &mut intervals)?;
+        }
+        for product in &ordered_full_ring_negacyclic_products {
+            self.expand_exact_full_ring_product(
+                batch_key,
+                product,
+                &mut expanded_products,
+                &mut intervals,
+            )?;
+        }
+        while expanded_linear_terms.len() < intervals.len() {
+            expanded_linear_terms.push(Vec::new());
+        }
+        while expanded_products.len() < intervals.len() {
+            expanded_products.push(Vec::new());
+        }
+        if intervals.is_empty() {
+            return Err(RelationPlanError::InvalidConstraint);
+        }
+        let required_carry_count = intervals.len().saturating_sub(1);
+        if existing_carry_columns
+            .as_ref()
+            .is_some_and(|columns| columns.len() != required_carry_count)
+        {
+            return Err(RelationPlanError::InvalidConstraint);
+        }
+        let mut newly_allocated_carry_columns = Vec::with_capacity(required_carry_count);
+        for limb in 0..intervals.len().saturating_sub(1) {
+            let maximum_absolute = interval_maximum_absolute(&intervals[limb]);
+            let carry_bound = divide_ceil(&maximum_absolute, EXACT_INTEGER_LIFT_RADIX);
+            let carry_column = if let Some(existing_columns) = &existing_carry_columns {
+                existing_columns[limb]
+            } else {
+                let column = self.add_centered_integer_column(&carry_bound)?;
+                newly_allocated_carry_columns.push(column);
+                column
+            };
+            let carry_interval = self.exact_column_interval(carry_column)?;
+            let outgoing = RelationIntegerLiftLinearTermDescriptor {
+                negative: true,
+                column_ordinal: carry_column,
+                column_offset: 0,
+                coefficient: RelationIntegerLiftCoefficient::Constant(EXACT_INTEGER_LIFT_RADIX),
+            };
+            let incoming = RelationIntegerLiftLinearTermDescriptor {
+                negative: false,
+                column_ordinal: carry_column,
+                column_offset: 0,
+                coefficient: RelationIntegerLiftCoefficient::Constant(1),
+            };
+            expanded_linear_terms[limb].push(outgoing);
+            expanded_linear_terms[limb + 1].push(incoming);
+            let scaled_carry =
+                carry_interval
+                    .clone()
+                    .multiply(SignedIntegerInterval::from_bigints(
+                        BigInt::from(EXACT_INTEGER_LIFT_RADIX),
+                        BigInt::from(EXACT_INTEGER_LIFT_RADIX),
+                    )?)?;
+            intervals[limb] = intervals[limb].clone().add(scaled_carry.negate()?)?;
+            intervals[limb + 1] = intervals[limb + 1].clone().add(carry_interval)?;
+        }
+        if existing_carry_columns.is_none()
+            && self
+                .exact_carry_columns_by_component
+                .insert(exact_carry_component_key, newly_allocated_carry_columns)
+                .is_some()
+        {
+            return Err(RelationPlanError::DuplicateItem);
+        }
+        let mut components = Vec::with_capacity(intervals.len());
+        for limb in 0..intervals.len() {
+            sort_canonical_items(&mut expanded_linear_terms[limb], |term| {
+                term.canonical_bytes()
+            })?;
+            sort_canonical_items(&mut expanded_products[limb], |product| {
+                product.canonical_bytes()
+            })?;
+            components.push(RelationIntegerLiftComponentDescriptor {
+                ordered_linear_terms: std::mem::take(&mut expanded_linear_terms[limb]),
+                ordered_convolution_products: Vec::new(),
+                ordered_full_ring_negacyclic_products: std::mem::take(&mut expanded_products[limb]),
+                linear_evaluation_column_ordinal: self
+                    .push_prover_column(ProofTreePhase::Auxiliary)?,
+                product_accumulator_column_ordinal: self
+                    .push_prover_column(ProofTreePhase::Auxiliary)?,
+            });
+        }
         self.pending_integer_lift_batches
             .entry(batch_key)
             .or_default()
             .components
-            .push(component);
+            .extend(components);
         Ok(())
     }
 
@@ -592,12 +1050,8 @@ impl<'context> KeyRelationPlanBuilder<'context> {
             sort_canonical_items(&mut ordered_reversed_column_bindings, |binding| {
                 binding.canonical_bytes()
             })?;
-            let mut ordered_negacyclic_automorphism_permutations =
+            let ordered_negacyclic_automorphism_permutations =
                 pending_batch.negacyclic_automorphism_permutations;
-            sort_canonical_items(
-                &mut ordered_negacyclic_automorphism_permutations,
-                |permutation| permutation.canonical_bytes(),
-            )?;
             let mut ordered_components = pending_batch.components;
             sort_canonical_items(&mut ordered_components, |component| {
                 component.canonical_bytes()

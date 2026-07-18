@@ -5,7 +5,7 @@ use sha3::{
     digest::{ExtendableOutput, Update, XofReader},
 };
 
-use super::canonical_stream::VerifiedCanonicalStreamSummary;
+use super::canonical_stream::{VerifiedCanonicalStreamSummary, VerifiedTargetReleaseOutputBundle};
 use super::{
     ActionRandomnessDerivationInput, CANONICAL_TUPLE_SCHEMA_IDENTIFIER, CANONICAL_TUPLE_VERSION,
     CanonicalCodecError, CanonicalCodecErrorKind, CanonicalDecodeLimits, CanonicalItem,
@@ -677,8 +677,146 @@ impl StateDurableBinding {
     }
 }
 
+#[derive(Clone)]
+struct VerifiedStateIntentCarrierProvenance {
+    object_hash: Hash512,
+    canonical_carrier_byte_length: u64,
+}
+
+#[derive(Clone)]
+struct VerifiedStateWitnessCarrierProvenance {
+    witness_participant_id: ParticipantIdentity,
+    roster_position: u16,
+    object_hash: Hash512,
+    canonical_carrier_byte_length: u64,
+}
+
+#[derive(Clone)]
+struct VerifiedStateCertificateCarrierProvenance {
+    intent_object_hash: Hash512,
+    canonical_certificate_byte_length: u64,
+    ordered_witness_carriers: Vec<VerifiedStateWitnessCarrierProvenance>,
+}
+
+#[derive(Clone)]
+struct VerifiedStateReservationCarrierProvenance {
+    intent: VerifiedStateIntentCarrierProvenance,
+    certificate: VerifiedStateCertificateCarrierProvenance,
+}
+
+#[derive(Clone)]
+struct VerifiedStateOutputIntentCarrierProvenance {
+    reservation: VerifiedStateReservationCarrierProvenance,
+    intent: VerifiedStateIntentCarrierProvenance,
+}
+
+#[derive(Clone)]
+struct VerifiedStateOutputCarrierProvenance {
+    intent: VerifiedStateOutputIntentCarrierProvenance,
+    certificate: VerifiedStateCertificateCarrierProvenance,
+}
+
+/// One authenticated witness carrier retained only as byte-length provenance.
+/// The carrier object hash remains private so this view cannot become an
+/// alternative acceptance surface.
+pub(crate) struct VerifiedStateWitnessCarrierByteLength<'provenance> {
+    provenance: &'provenance VerifiedStateWitnessCarrierProvenance,
+}
+
+impl VerifiedStateWitnessCarrierByteLength<'_> {
+    pub(crate) const fn witness_participant_id(&self) -> ParticipantIdentity {
+        self.provenance.witness_participant_id
+    }
+
+    pub(crate) const fn canonical_carrier_byte_length(&self) -> u64 {
+        self.provenance.canonical_carrier_byte_length
+    }
+
+    pub(crate) const fn roster_position(&self) -> u16 {
+        self.provenance.roster_position
+    }
+}
+
+/// Opaque, nonserialized view of the exact state-reservation carriers consumed
+/// by the verifier. It is available only to derived development accounting.
+pub(crate) struct VerifiedStateReservationCarrierByteLengths<'provenance> {
+    provenance: &'provenance VerifiedStateReservationCarrierProvenance,
+}
+
+impl<'provenance> VerifiedStateReservationCarrierByteLengths<'provenance> {
+    pub(crate) const fn canonical_intent_carrier_byte_length(&self) -> u64 {
+        self.provenance.intent.canonical_carrier_byte_length
+    }
+
+    pub(crate) const fn canonical_certificate_byte_length(&self) -> u64 {
+        self.provenance
+            .certificate
+            .canonical_certificate_byte_length
+    }
+
+    pub(crate) fn witness_carriers(
+        &self,
+    ) -> impl ExactSizeIterator<Item = VerifiedStateWitnessCarrierByteLength<'_>> + '_ {
+        self.provenance
+            .certificate
+            .ordered_witness_carriers
+            .iter()
+            .map(|provenance| VerifiedStateWitnessCarrierByteLength { provenance })
+    }
+}
+
+impl VerifiedStateReservationCarrierProvenance {
+    fn debug_assert_joined(&self) {
+        debug_assert_eq!(self.intent.object_hash, self.certificate.intent_object_hash);
+        for neighboring_carriers in self.certificate.ordered_witness_carriers.windows(2) {
+            debug_assert!(
+                neighboring_carriers[0].roster_position < neighboring_carriers[1].roster_position
+            );
+            debug_assert_ne!(
+                neighboring_carriers[0].object_hash,
+                neighboring_carriers[1].object_hash
+            );
+        }
+    }
+}
+
+/// Opaque, nonserialized view of the exact reservation and output carriers
+/// consumed to create a verified state output.
+pub(crate) struct VerifiedStateOutputCarrierByteLengths<'provenance> {
+    provenance: &'provenance VerifiedStateOutputCarrierProvenance,
+}
+
+impl<'provenance> VerifiedStateOutputCarrierByteLengths<'provenance> {
+    pub(crate) const fn reservation(&self) -> VerifiedStateReservationCarrierByteLengths<'_> {
+        VerifiedStateReservationCarrierByteLengths {
+            provenance: &self.provenance.intent.reservation,
+        }
+    }
+
+    pub(crate) const fn canonical_output_intent_carrier_byte_length(&self) -> u64 {
+        self.provenance.intent.intent.canonical_carrier_byte_length
+    }
+
+    pub(crate) const fn canonical_output_certificate_byte_length(&self) -> u64 {
+        self.provenance
+            .certificate
+            .canonical_certificate_byte_length
+    }
+
+    pub(crate) fn output_witness_carriers(
+        &self,
+    ) -> impl ExactSizeIterator<Item = VerifiedStateWitnessCarrierByteLength<'_>> + '_ {
+        self.provenance
+            .certificate
+            .ordered_witness_carriers
+            .iter()
+            .map(|provenance| VerifiedStateWitnessCarrierByteLength { provenance })
+    }
+}
+
 pub struct VerifiedStateReservationIntent {
     binding: StateReservationBinding,
+    carrier_provenance: VerifiedStateIntentCarrierProvenance,
 }
 
 impl VerifiedStateReservationIntent {
@@ -718,6 +856,7 @@ impl ProducedStateReservation {
 
 pub struct VerifiedStateReservation {
     binding: StateReservationBinding,
+    carrier_provenance: VerifiedStateReservationCarrierProvenance,
 }
 
 impl VerifiedStateReservation {
@@ -756,10 +895,21 @@ impl VerifiedStateReservation {
     pub const fn durable_binding(&self) -> StateDurableBinding {
         durable_reservation_binding(self.binding)
     }
+
+    pub(crate) fn consumed_carrier_byte_lengths(
+        &self,
+    ) -> VerifiedStateReservationCarrierByteLengths<'_> {
+        self.carrier_provenance.debug_assert_joined();
+        VerifiedStateReservationCarrierByteLengths {
+            provenance: &self.carrier_provenance,
+        }
+    }
 }
 
 pub struct VerifiedStateOutputIntent {
     binding: StateOutputBinding,
+    target_release_output_bundle: Option<VerifiedTargetReleaseOutputBundle>,
+    carrier_provenance: VerifiedStateOutputIntentCarrierProvenance,
 }
 
 impl VerifiedStateOutputIntent {
@@ -770,6 +920,8 @@ impl VerifiedStateOutputIntent {
 
 pub struct VerifiedStateOutput {
     binding: StateOutputBinding,
+    target_release_output_bundle: Option<VerifiedTargetReleaseOutputBundle>,
+    carrier_provenance: VerifiedStateOutputCarrierProvenance,
 }
 
 impl VerifiedStateOutput {
@@ -819,6 +971,28 @@ impl VerifiedStateOutput {
 
     pub const fn durable_binding(&self) -> StateDurableBinding {
         durable_output_binding(self.binding)
+    }
+
+    pub(crate) const fn target_release_output_bundle(
+        &self,
+    ) -> Option<&VerifiedTargetReleaseOutputBundle> {
+        self.target_release_output_bundle.as_ref()
+    }
+
+    pub(crate) fn consumed_carrier_byte_lengths(
+        &self,
+    ) -> VerifiedStateOutputCarrierByteLengths<'_> {
+        self.carrier_provenance
+            .intent
+            .reservation
+            .debug_assert_joined();
+        debug_assert_eq!(
+            self.carrier_provenance.intent.intent.object_hash,
+            self.carrier_provenance.certificate.intent_object_hash
+        );
+        VerifiedStateOutputCarrierByteLengths {
+            provenance: &self.carrier_provenance,
+        }
     }
 }
 
@@ -904,6 +1078,10 @@ impl StateVerifier {
 
     pub(crate) fn roster_hash(&self) -> StateResult<Hash512> {
         self.roster.roster_hash().map_err(StateError::from_schema)
+    }
+
+    pub(crate) const fn roster(&self) -> &Roster {
+        &self.roster
     }
 
     pub(crate) fn prepare_setup_action_randomness_reservation_intent(
@@ -1101,10 +1279,17 @@ impl StateVerifier {
                 )?;
                 let canonical_certificate =
                     StateCertificate::new(ordered_vote_carriers)?.encode()?;
-                self.verify_certificate(&canonical_certificate, &expected_intent)?;
+                let certificate_provenance =
+                    self.verify_certificate(&canonical_certificate, &expected_intent)?;
                 Ok(ProducedStateReservation {
                     canonical_certificate,
-                    verified_reservation: VerifiedStateReservation { binding },
+                    verified_reservation: VerifiedStateReservation {
+                        binding,
+                        carrier_provenance: VerifiedStateReservationCarrierProvenance {
+                            intent: verified_intent.carrier_provenance.clone(),
+                            certificate: certificate_provenance,
+                        },
+                    },
                 })
             });
         match result {
@@ -1212,6 +1397,10 @@ impl StateVerifier {
                 state_key,
                 authorization_hash: payload.authorization_hash,
             },
+            carrier_provenance: VerifiedStateIntentCarrierProvenance {
+                object_hash: intent_object_hash,
+                canonical_carrier_byte_length: canonical_reservation_intent_carrier.len() as u64,
+            },
         })
     }
 
@@ -1244,7 +1433,13 @@ impl StateVerifier {
                     },
                 )
             })
-            .map(|()| VerifiedStateReservation { binding });
+            .map(|certificate| VerifiedStateReservation {
+                binding,
+                carrier_provenance: VerifiedStateReservationCarrierProvenance {
+                    intent: verified_intent.carrier_provenance.clone(),
+                    certificate,
+                },
+            });
         match result {
             Ok(value) => VerificationResult::valid(value),
             Err(error) => VerificationResult::refused(error.refusal_reason),
@@ -1258,7 +1453,7 @@ impl StateVerifier {
     ) -> StateResult<VerifiedStateReservation> {
         let binding = verified_intent.binding;
         self.require_reservation_binding_context(binding)?;
-        self.verify_certificate(
+        let certificate = self.verify_certificate(
             canonical_state_certificate,
             &ResolvedStateIntent {
                 intent_object_hash: binding.intent_object_hash,
@@ -1266,7 +1461,13 @@ impl StateVerifier {
                 vote_kind: StateWitnessVoteKind::Reservation,
             },
         )?;
-        Ok(VerifiedStateReservation { binding })
+        Ok(VerifiedStateReservation {
+            binding,
+            carrier_provenance: VerifiedStateReservationCarrierProvenance {
+                intent: verified_intent.carrier_provenance.clone(),
+                certificate,
+            },
+        })
     }
 
     pub(crate) fn verify_output_from_verified_stream(
@@ -1290,11 +1491,19 @@ impl StateVerifier {
         let Some(exact_output_hash) = verified_stream.state_exact_output_hash() else {
             return VerificationResult::refused(RefusalReason::WrongTypeOrLength);
         };
+        let exact_output_byte_length = verified_stream.total_byte_length();
+        let target_release_output_bundle = verified_stream.into_target_release_output_bundle();
+        if (binding.capability_kind == StateCapabilityKind::TargetRelease)
+            != target_release_output_bundle.is_some()
+        {
+            return VerificationResult::refused(RefusalReason::WrongTypeOrLength);
+        }
         let verified_intent = match self.verify_output_intent_binding(
             verified_reservation,
             canonical_output_intent_carrier,
             exact_output_hash,
-            verified_stream.total_byte_length(),
+            exact_output_byte_length,
+            target_release_output_bundle,
         ) {
             Ok(value) => value,
             Err(error) => return VerificationResult::refused(error.refusal_reason),
@@ -1325,11 +1534,19 @@ impl StateVerifier {
         let Some(exact_output_hash) = verified_stream.state_exact_output_hash() else {
             return VerificationResult::refused(RefusalReason::WrongTypeOrLength);
         };
+        let exact_output_byte_length = verified_stream.total_byte_length();
+        let target_release_output_bundle = verified_stream.into_target_release_output_bundle();
+        if (binding.capability_kind == StateCapabilityKind::TargetRelease)
+            != target_release_output_bundle.is_some()
+        {
+            return VerificationResult::refused(RefusalReason::WrongTypeOrLength);
+        }
         match self.verify_output_intent_binding(
             verified_reservation,
             canonical_output_intent_carrier,
             exact_output_hash,
-            verified_stream.total_byte_length(),
+            exact_output_byte_length,
+            target_release_output_bundle,
         ) {
             Ok(value) => VerificationResult::valid(value),
             Err(error) => VerificationResult::refused(error.refusal_reason),
@@ -1342,6 +1559,7 @@ impl StateVerifier {
         canonical_output_intent_carrier: &[u8],
         exact_output_hash: Hash512,
         exact_output_byte_length: u64,
+        target_release_output_bundle: Option<VerifiedTargetReleaseOutputBundle>,
     ) -> StateResult<VerifiedStateOutputIntent> {
         self.require_reservation_context(verified_reservation)?;
         let binding = verified_reservation.binding;
@@ -1361,6 +1579,20 @@ impl StateVerifier {
                 "output intent does not reference its verified reservation",
             ));
         }
+        if let Some(bundle) = target_release_output_bundle.as_ref() {
+            if bundle.reservation_intent_object_hash() != binding.intent_object_hash {
+                return Err(StateError::new(
+                    RefusalReason::WrongContext,
+                    "target-release output does not reference its verified reservation",
+                ));
+            }
+            self.decode_and_verify_subject_carrier(
+                bundle.canonical_signed_carrier(),
+                FoundationObjectType::TargetDecryptionShare,
+                binding.subject_participant_id,
+                0,
+            )?;
+        }
         if payload.exact_output_hash != exact_output_hash {
             return Err(StateError::new(
                 RefusalReason::WrongHashOrRoot,
@@ -1377,6 +1609,14 @@ impl StateVerifier {
                 output_intent_object_hash,
                 exact_output_hash,
                 exact_output_byte_length,
+            },
+            target_release_output_bundle,
+            carrier_provenance: VerifiedStateOutputIntentCarrierProvenance {
+                reservation: verified_reservation.carrier_provenance.clone(),
+                intent: VerifiedStateIntentCarrierProvenance {
+                    object_hash: output_intent_object_hash,
+                    canonical_carrier_byte_length: canonical_output_intent_carrier.len() as u64,
+                },
             },
         })
     }
@@ -1410,7 +1650,14 @@ impl StateVerifier {
                     },
                 )
             })
-            .map(|()| VerifiedStateOutput { binding });
+            .map(|certificate| VerifiedStateOutput {
+                binding,
+                target_release_output_bundle: verified_intent.target_release_output_bundle.clone(),
+                carrier_provenance: VerifiedStateOutputCarrierProvenance {
+                    intent: verified_intent.carrier_provenance.clone(),
+                    certificate,
+                },
+            });
         match result {
             Ok(value) => VerificationResult::valid(value),
             Err(error) => VerificationResult::refused(error.refusal_reason),
@@ -1424,7 +1671,7 @@ impl StateVerifier {
     ) -> StateResult<VerifiedStateOutput> {
         let binding = verified_intent.binding;
         self.require_reservation_binding_context(binding.reservation_binding)?;
-        self.verify_certificate(
+        let certificate = self.verify_certificate(
             canonical_state_certificate,
             &ResolvedStateIntent {
                 intent_object_hash: binding.output_intent_object_hash,
@@ -1432,7 +1679,14 @@ impl StateVerifier {
                 vote_kind: StateWitnessVoteKind::Output,
             },
         )?;
-        Ok(VerifiedStateOutput { binding })
+        Ok(VerifiedStateOutput {
+            binding,
+            target_release_output_bundle: verified_intent.target_release_output_bundle.clone(),
+            carrier_provenance: VerifiedStateOutputCarrierProvenance {
+                intent: verified_intent.carrier_provenance.clone(),
+                certificate,
+            },
+        })
     }
 
     fn require_reservation_context(
@@ -1576,22 +1830,28 @@ impl StateVerifier {
         &self,
         canonical_state_certificate: &[u8],
         expected_intent: &ResolvedStateIntent,
-    ) -> StateResult<()> {
+    ) -> StateResult<VerifiedStateCertificateCarrierProvenance> {
         let certificate =
             StateCertificate::decode(canonical_state_certificate, &self.canonical_decode_limits)?;
-        self.verify_ordered_vote_carriers(
+        let ordered_witness_carriers = self.verify_ordered_vote_carriers(
             certificate.canonical_signed_state_witness_vote_carriers(),
             expected_intent,
-        )
+        )?;
+        Ok(VerifiedStateCertificateCarrierProvenance {
+            intent_object_hash: expected_intent.intent_object_hash,
+            canonical_certificate_byte_length: canonical_state_certificate.len() as u64,
+            ordered_witness_carriers,
+        })
     }
 
     fn verify_ordered_vote_carriers(
         &self,
         canonical_vote_carriers: &[Vec<u8>],
         expected_intent: &ResolvedStateIntent,
-    ) -> StateResult<()> {
+    ) -> StateResult<Vec<VerifiedStateWitnessCarrierProvenance>> {
         let expected_sequence = derive_state_witness_vote_sequence(expected_intent.vote_kind);
         let mut previous_roster_position = None;
+        let mut ordered_witness_carriers = Vec::with_capacity(canonical_vote_carriers.len());
         for canonical_vote_carrier in canonical_vote_carriers {
             let verified_vote = self.verify_vote_carrier(
                 canonical_vote_carrier,
@@ -1620,17 +1880,25 @@ impl StateVerifier {
                 }
             }
             previous_roster_position = Some(roster_position);
+            ordered_witness_carriers.push(VerifiedStateWitnessCarrierProvenance {
+                witness_participant_id: verified_vote.witness_participant_id,
+                roster_position,
+                object_hash: verified_vote.object_hash,
+                canonical_carrier_byte_length: canonical_vote_carrier.len() as u64,
+            });
         }
-        Ok(())
+        Ok(ordered_witness_carriers)
     }
 
     fn verify_unordered_vote_carriers(
         &self,
         canonical_vote_carriers: &[Vec<u8>],
         expected_intent: &ResolvedStateIntent,
-    ) -> StateResult<()> {
-        self.canonicalize_unordered_vote_carriers(canonical_vote_carriers, expected_intent)
-            .map(|_| ())
+    ) -> StateResult<VerifiedStateCertificateCarrierProvenance> {
+        let ordered_vote_carriers =
+            self.canonicalize_unordered_vote_carriers(canonical_vote_carriers, expected_intent)?;
+        let canonical_certificate = StateCertificate::new(ordered_vote_carriers)?.encode()?;
+        self.verify_certificate(&canonical_certificate, expected_intent)
     }
 
     fn canonicalize_unordered_vote_carriers(
@@ -1738,7 +2006,9 @@ impl StateVerifier {
         )?;
         Ok(VerifiedStateWitnessVote {
             intent_object_hash: payload.intent_object_hash,
+            witness_participant_id,
             roster_position,
+            object_hash: envelope.object_hash().map_err(StateError::from_schema)?,
         })
     }
 
@@ -1772,7 +2042,9 @@ struct ResolvedStateIntent {
 #[derive(Clone, Copy)]
 struct VerifiedStateWitnessVote {
     intent_object_hash: Hash512,
+    witness_participant_id: ParticipantIdentity,
     roster_position: u16,
+    object_hash: Hash512,
 }
 
 #[cfg(test)]

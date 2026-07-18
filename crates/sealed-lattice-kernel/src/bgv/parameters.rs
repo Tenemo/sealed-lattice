@@ -6,10 +6,10 @@ use crate::{
 };
 
 // Ring degree N. Powers of two are NTT-friendly; 2N divides each modulus-1.
-pub(crate) const POLYNOMIAL_DEGREE: usize = 32_768;
-// Plaintext modulus t. 65537 is the Fermat prime 2^16+1; t-1 = 2^16 is
-// divisible by 2N, so a length-2N NTT exists for batch (slot) encoding.
-pub(crate) const PLAINTEXT_MODULUS: u64 = 65_537;
+pub(crate) const POLYNOMIAL_DEGREE: usize = 65_536;
+// Plaintext modulus p. The selected prime is one modulo 2N, so the complete
+// scalar slot layout has an exact length-2N transform.
+pub(crate) const PLAINTEXT_MODULUS: u64 = 786_433;
 pub(crate) const LOGICAL_SLOT_GENERATOR: usize = 3;
 pub(crate) const DATA_BASIS_ID: &str = "sealed-lattice-bgv-rns-data-basis";
 #[cfg(test)]
@@ -106,8 +106,8 @@ mod tests {
 
     #[test]
     fn selected_moduli_are_ntt_ready_primes() {
-        assert_eq!(POLYNOMIAL_DEGREE, 32_768);
-        assert_eq!(PLAINTEXT_MODULUS, 65_537);
+        assert_eq!(POLYNOMIAL_DEGREE, 65_536);
+        assert_eq!(PLAINTEXT_MODULUS, 786_433);
         assert!(
             is_prime_for_tests(PLAINTEXT_MODULUS),
             "the selected plaintext modulus must reproduce as prime"

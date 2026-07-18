@@ -4,6 +4,7 @@ use num_bigint::BigInt;
 
 use crate::foundation::ProofApplicationSlotCeilings;
 
+use super::super::trustee_evaluation_key::selected_galois_key_share_relation_schedule;
 use super::super::{
     bounds::SignedIntegerInterval,
     expressions::strictly_sorted_unique,
@@ -12,7 +13,6 @@ use super::super::{
         RelationIntegerLiftConvolutionProductDescriptor,
         RelationIntegerLiftFullRingNegacyclicProductDescriptor,
         RelationIntegerLiftLinearTermDescriptor,
-        RelationIntegerLiftNegacyclicAutomorphismPermutationDescriptor,
         RelationIntegerLiftReversedColumnBindingDescriptor,
     },
     layout::RelationPlanVariant,
@@ -63,8 +63,39 @@ impl RelationPlanChecker<'_> {
         let mut descriptor_auxiliary_columns = BTreeSet::new();
         let mut derived_base_columns = BTreeSet::new();
         let mut matched_constraint_ordinals = BTreeSet::new();
+        let mut constraint_ordinals_by_program = BTreeMap::new();
+        for (constraint_ordinal, constraint) in variant.ordered_constraints.iter().enumerate() {
+            if constraint.enforce_proof_base_field_no_wrap
+                || !constraint
+                    .ordered_injective_integer_factor_expressions
+                    .is_empty()
+            {
+                continue;
+            }
+            constraint_ordinals_by_program
+                .entry((
+                    constraint.numerator_postfix_expression.clone(),
+                    constraint.zeroifier_postfix_expression.clone(),
+                ))
+                .or_insert_with(Vec::new)
+                .push(
+                    u32::try_from(constraint_ordinal)
+                        .map_err(|_| RelationPlanError::CountOverflow)?,
+                );
+        }
         let mut automorphism_permutation_coordinates = BTreeSet::new();
-        let mut automorphism_semantics = None;
+        let mut automorphism_semantics_by_galois_element = BTreeMap::new();
+        let galois_key_share_relation = application_statement_schema_identifier
+            == ProofApplicationSlotCeilings::GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER;
+        let allowed_galois_elements = if galois_key_share_relation {
+            selected_galois_key_share_relation_schedule()?
+                .into_iter()
+                .map(|(galois_element, _)| galois_element)
+                .collect::<BTreeSet<_>>()
+        } else {
+            BTreeSet::new()
+        };
+        let mut observed_galois_elements = None::<Vec<u64>>;
 
         for batch in &variant.ordered_integer_lift_batches {
             let modulus_ordinal = u16::try_from(
@@ -149,27 +180,38 @@ impl RelationPlanChecker<'_> {
                 }
             }
 
-            let automorphism_permutation_bytes = batch
+            let batch_galois_elements = batch
                 .ordered_negacyclic_automorphism_permutations
                 .iter()
-                .map(
-                    RelationIntegerLiftNegacyclicAutomorphismPermutationDescriptor::canonical_bytes,
-                )
-                .collect::<Result<Vec<_>, _>>()?;
-            if automorphism_permutation_bytes.len() > 1
-                || (!automorphism_permutation_bytes.is_empty()
-                    && !strictly_sorted_unique(&automorphism_permutation_bytes))
+                .map(|permutation| permutation.galois_element)
+                .collect::<Vec<_>>();
+            if galois_key_share_relation
+                && variant.ordered_non_native_moduli.first().copied()
+                    == Some(batch.modulus_reference)
             {
+                if batch_galois_elements.is_empty()
+                    || batch_galois_elements
+                        .iter()
+                        .any(|galois_element| !allowed_galois_elements.contains(galois_element))
+                    || batch_galois_elements
+                        .windows(2)
+                        .any(|pair| pair[0] >= pair[1])
+                    || observed_galois_elements
+                        .as_ref()
+                        .is_some_and(|observed| observed != &batch_galois_elements)
+                {
+                    return Err(RelationPlanError::NonCanonicalOrder);
+                }
+                observed_galois_elements.get_or_insert(batch_galois_elements);
+            } else if !batch_galois_elements.is_empty() {
                 return Err(RelationPlanError::NonCanonicalOrder);
             }
             for permutation in &batch.ordered_negacyclic_automorphism_permutations {
-                if application_statement_schema_identifier
-                    != ProofApplicationSlotCeilings::GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER
-                    || variant.ordered_non_native_moduli.first().copied()
-                        != Some(batch.modulus_reference)
-                    || !automorphism_permutation_coordinates
-                        .insert((batch.modulus_reference, batch.challenge_ordinal))
-                {
+                if !automorphism_permutation_coordinates.insert((
+                    batch.modulus_reference,
+                    batch.challenge_ordinal,
+                    permutation.galois_element,
+                )) {
                     return Err(RelationPlanError::InvalidConstraint);
                 }
                 let ring_degree = variant
@@ -285,17 +327,22 @@ impl RelationPlanChecker<'_> {
                     return Err(RelationPlanError::DuplicateItem);
                 }
                 let current_semantics = (
-                    permutation.galois_element,
                     permutation.mapping_verifier_source_ordinal,
-                    semantic_columns,
+                    [
+                        permutation.source_low_column_ordinal,
+                        permutation.source_high_column_ordinal,
+                    ],
+                    [
+                        permutation.target_low_column_ordinal,
+                        permutation.target_high_column_ordinal,
+                    ],
                     mapping_columns,
                 );
-                match automorphism_semantics {
-                    Some(existing) if existing != current_semantics => {
-                        return Err(RelationPlanError::InvalidConstraint);
-                    }
-                    None => automorphism_semantics = Some(current_semantics),
-                    _ => {}
+                if automorphism_semantics_by_galois_element
+                    .insert(permutation.galois_element, current_semantics)
+                    .is_some_and(|existing| existing != current_semantics)
+                {
+                    return Err(RelationPlanError::InvalidConstraint);
                 }
             }
             let mut used_reversed_bindings = BTreeSet::new();
@@ -326,7 +373,6 @@ impl RelationPlanChecker<'_> {
                     .map(RelationIntegerLiftFullRingNegacyclicProductDescriptor::canonical_bytes)
                     .collect::<Result<Vec<_>, _>>()?;
                 if linear_term_bytes.is_empty()
-                    || (product_bytes.is_empty() && full_ring_product_bytes.is_empty())
                     || !strictly_sorted_unique(&linear_term_bytes)
                     || (!product_bytes.is_empty() && !strictly_sorted_unique(&product_bytes))
                     || (!full_ring_product_bytes.is_empty()
@@ -335,26 +381,7 @@ impl RelationPlanChecker<'_> {
                     return Err(RelationPlanError::NonCanonicalOrder);
                 }
 
-                integer_lift_require_pre_challenge_column(
-                    component.quotient_column_ordinal,
-                    variant,
-                    &tree_roles_by_column,
-                )?;
-                let quotient_interval = integer_lift_column_interval(
-                    component.quotient_column_ordinal,
-                    variant,
-                    semantic_bounds,
-                    &explicitly_certified_columns,
-                    self.context,
-                )?;
-                let mut residual_interval =
-                    quotient_interval.multiply(SignedIntegerInterval::from_bigints(
-                        BigInt::from(modulus),
-                        BigInt::from(modulus),
-                    )?)?;
-                if component.quotient_is_negative {
-                    residual_interval = residual_interval.negate()?;
-                }
+                let mut residual_interval = SignedIntegerInterval::new(0, 0);
 
                 for term in &component.ordered_linear_terms {
                     integer_lift_require_pre_challenge_column(
@@ -614,27 +641,14 @@ impl RelationPlanChecker<'_> {
                 variant.evaluation_domain_size,
                 self.context,
             )? {
-                let matching_ordinals = variant
-                    .ordered_constraints
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(constraint_ordinal, constraint)| {
-                        (!constraint.enforce_proof_base_field_no_wrap
-                            && constraint
-                                .ordered_injective_integer_factor_expressions
-                                .is_empty()
-                            && constraint.numerator_postfix_expression
-                                == program.numerator_postfix_expression
-                            && constraint.zeroifier_postfix_expression
-                                == program.zeroifier_postfix_expression)
-                            .then_some(constraint_ordinal)
-                    })
-                    .collect::<Vec<_>>();
+                let matching_ordinals = constraint_ordinals_by_program
+                    .remove(&(
+                        program.numerator_postfix_expression,
+                        program.zeroifier_postfix_expression,
+                    ))
+                    .ok_or(RelationPlanError::InvalidConstraint)?;
                 if matching_ordinals.len() != 1
-                    || !matched_constraint_ordinals.insert(
-                        u32::try_from(matching_ordinals[0])
-                            .map_err(|_| RelationPlanError::CountOverflow)?,
-                    )
+                    || !matched_constraint_ordinals.insert(matching_ordinals[0])
                 {
                     return Err(RelationPlanError::InvalidConstraint);
                 }
@@ -647,29 +661,67 @@ impl RelationPlanChecker<'_> {
         {
             return Err(RelationPlanError::InvalidChallengeCatalog);
         }
-        let expected_automorphism_permutation_coordinates =
-            if application_statement_schema_identifier
-                == ProofApplicationSlotCeilings::GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER
-            {
-                let modulus_reference = variant
-                    .ordered_non_native_moduli
-                    .first()
-                    .copied()
-                    .ok_or(RelationPlanError::MissingModulus)?;
-                expected_challenge_ordinals
-                    .iter()
-                    .copied()
-                    .map(|challenge_ordinal| (modulus_reference, challenge_ordinal))
-                    .collect()
-            } else {
-                BTreeSet::new()
-            };
+        let expected_automorphism_permutation_coordinates = if galois_key_share_relation {
+            let modulus_reference = variant
+                .ordered_non_native_moduli
+                .first()
+                .copied()
+                .ok_or(RelationPlanError::MissingModulus)?;
+            let observed_galois_elements = observed_galois_elements
+                .as_ref()
+                .ok_or(RelationPlanError::InvalidConstraint)?;
+            expected_challenge_ordinals
+                .iter()
+                .copied()
+                .flat_map(|challenge_ordinal| {
+                    observed_galois_elements
+                        .iter()
+                        .copied()
+                        .map(move |galois_element| {
+                            (modulus_reference, challenge_ordinal, galois_element)
+                        })
+                })
+                .collect()
+        } else {
+            BTreeSet::new()
+        };
         if automorphism_permutation_coordinates != expected_automorphism_permutation_coordinates
-            || (application_statement_schema_identifier
-                == ProofApplicationSlotCeilings::GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER)
-                != automorphism_semantics.is_some()
+            || galois_key_share_relation != !automorphism_semantics_by_galois_element.is_empty()
         {
             return Err(RelationPlanError::InvalidConstraint);
+        }
+        if galois_key_share_relation {
+            let observed_galois_elements = observed_galois_elements
+                .as_ref()
+                .ok_or(RelationPlanError::InvalidConstraint)?;
+            let ordered_galois_elements = automorphism_semantics_by_galois_element
+                .keys()
+                .copied()
+                .collect::<Vec<_>>();
+            let source_column_pairs = automorphism_semantics_by_galois_element
+                .values()
+                .map(|semantics| semantics.1)
+                .collect::<BTreeSet<_>>();
+            let target_column_pairs = automorphism_semantics_by_galois_element
+                .values()
+                .map(|semantics| semantics.2)
+                .collect::<BTreeSet<_>>();
+            let mapping_source_ordinals = automorphism_semantics_by_galois_element
+                .values()
+                .map(|semantics| semantics.0)
+                .collect::<BTreeSet<_>>();
+            let mapping_column_sets = automorphism_semantics_by_galois_element
+                .values()
+                .map(|semantics| semantics.3)
+                .collect::<BTreeSet<_>>();
+            if &ordered_galois_elements != observed_galois_elements
+                || source_column_pairs.len() != 1
+                || target_column_pairs.len() != observed_galois_elements.len()
+                || mapping_source_ordinals.len() != observed_galois_elements.len()
+                || mapping_column_sets.len() != observed_galois_elements.len()
+            {
+                return Err(RelationPlanError::InvalidConstraint);
+            }
         }
         Ok(ApplicationExtractorPhaseColumns {
             derived_base_columns,

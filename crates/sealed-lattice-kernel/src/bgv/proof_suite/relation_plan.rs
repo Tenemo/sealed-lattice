@@ -21,6 +21,8 @@ use super::transcript::{
     CommonProofTranscriptSchedule,
 };
 
+mod application_extractor;
+mod application_soundness;
 mod bounds;
 mod compiled_plan;
 mod integer_lift;
@@ -36,6 +38,16 @@ use layout::challenge_descriptor;
 use model::{canonical_encoding_error, validate_negacyclic_automorphism};
 use schema::*;
 
+pub(crate) use application_extractor::{
+    ApplicationExtractionError, ApplicationExtractionInput, ApplicationRootBinding,
+    CheckedApplicationExtractionPlan, ExtractedApplicationWitness,
+    ExtractedLowDegreeApplicationTree, ExtractedSemanticColumn, PackedCommonWitnessClass,
+    PackedCommonWitnessJoin,
+};
+pub(crate) use application_soundness::{
+    RelationApplicationChallengeBadSetCoordinate, RelationApplicationChallengeBadSetGroup,
+    RelationApplicationDeepAllowedSetRootBound, RelationApplicationRoundByRoundTransitionCatalog,
+};
 pub(crate) use bounds::{
     RelationBoundCertificate, RelationConstraintDescriptor, SemanticCellDescriptor,
     SignedIntegerInterval,
@@ -52,10 +64,10 @@ pub(crate) use integer_lift::{
     RelationIntegerLiftFullRingHalf, RelationIntegerLiftFullRingNegacyclicProductDescriptor,
     RelationIntegerLiftLinearTermDescriptor,
     RelationIntegerLiftNegacyclicAutomorphismPermutationDescriptor,
-    RelationIntegerLiftReversedColumnBindingDescriptor,
+    RelationIntegerLiftReversedColumnBindingDescriptor, resolved_modulus_radix_digit,
 };
 pub(crate) use layout::{
-    RelationMaskDescriptor, RelationMaskKind, RelationMaskTargetClass,
+    RelationMaskCoordinate, RelationMaskDescriptor, RelationMaskKind, RelationMaskTargetClass,
     RelationOpeningClaimDescriptor, RelationOpeningPointDescriptor, RelationOpeningSourceClass,
     RelationPlanVariant,
 };
@@ -83,14 +95,17 @@ use checking::{
 use expressions::*;
 
 pub(crate) use expressions::{
-    RelationExpressionInstruction, finite_integer_set_constraint_expressions,
-    ordered_injective_integer_factor_product_expression,
+    RelationConstraintColumnQuery, RelationExpressionInstruction,
+    finite_integer_set_constraint_expressions, ordered_injective_integer_factor_product_expression,
     unsigned_radix_comparator_digit_expression,
 };
 
 mod aggregate_threshold_share;
 mod ballot_validity;
+mod ballot_validity_adapter;
 mod committed_material;
+mod committed_material_adapter;
+mod galois_key_share_adapter;
 mod interpreter;
 mod key_relation;
 mod public_aggregate;
@@ -98,15 +113,50 @@ mod public_key_share;
 mod same_secret_anchor;
 mod target_release;
 mod trustee_evaluation_key;
+#[cfg(test)]
+mod vss_range_candidate_comparison;
 mod vss_share_linkage;
 
 pub(crate) use aggregate_threshold_share::compile_aggregate_threshold_share_relation_plan;
 pub(crate) use ballot_validity::{
-    BallotValidityRelationPlanInput, compile_ballot_validity_relation_plan,
+    BallotValidityColumnTransform, BallotValidityRelationPlanInput,
+    BallotValiditySourceColumnRecipe, BallotValiditySourcePlan, BallotValidityWitnessValueSource,
+    CompiledBallotValidityRelation, compile_ballot_validity_relation,
+    compile_ballot_validity_relation_plan,
 };
-pub(crate) use committed_material::CommittedMaterialRelationPlanInput;
+pub(crate) use ballot_validity_adapter::{
+    BallotValidityAcceptedSetupBinding, BallotValidityAdapterError,
+    BallotValidityAuthenticatedCiphertext, BallotValidityBoundPublicMaterial,
+    BallotValidityCiphertextReadback, BallotValidityCiphertextStreamDecoder,
+    BallotValidityEncryptionAttemptWitness, BallotValidityGeneratedCiphertext,
+    BallotValidityGenerationPreparationError, BallotValidityPreparedProofAttempt,
+    BallotValiditySourcePolynomialAdapter, BallotValidityVerifiedColumnEvaluator,
+    SelectedBallotValidityCarrierBufferAccounting,
+    ballot_encryption_private_randomness_kmac_input_accounting,
+    proof_created_relation_tree_inputs_from_checked_variant,
+    selected_ballot_validity_carrier_buffer_accounting,
+};
+pub(crate) use committed_material::{
+    CommittedMaterialRelationPlanInput, CommittedMaterialRootTraceRows,
+    CommittedMaterialTraceWitnessProvider, CommittedMaterialTraceWitnessStructureMemoryAccounting,
+    aggregate_threshold_share_trace_witness_structure_memory_accounting,
+    derive_aggregate_threshold_share_trace_witness_provider,
+    derive_owned_aggregate_threshold_share_trace_witness_provider,
+    derive_owned_vss_share_linkage_trace_witness_provider,
+    derive_vss_share_linkage_trace_witness_provider,
+    vss_share_linkage_trace_witness_structure_memory_accounting,
+};
+pub(crate) use committed_material_adapter::{
+    CommittedMaterialSourcePolynomialAdapter, CommittedMaterialSourceProviderMemoryAccounting,
+    aggregate_threshold_share_source_provider_memory_accounting,
+    vss_share_linkage_source_provider_memory_accounting,
+};
+pub(crate) use galois_key_share_adapter::{
+    GaloisKeyShareSourcePolynomialAdapter, galois_relation_tree_inputs,
+};
 pub(crate) use interpreter::{
-    RelationApplicationChallengeAssignment, RelationConstraintEvaluation,
+    CheckedRelationApplicationChallenges, RelationApplicationChallengeAssignment,
+    RelationConstraintEvaluation,
 };
 pub(crate) use key_relation::{PublicKeyShareRelationPlanInput, SameSecretRelationPlanInput};
 pub(crate) use public_aggregate::{
@@ -120,17 +170,21 @@ pub(crate) use public_key_share::compile_public_key_share_relation_plan;
 pub(crate) use same_secret_anchor::compile_same_secret_relation_plan;
 pub(crate) use target_release::{
     CompiledTargetReleaseRelation, TargetReleaseCapabilityError, TargetReleaseModulusWitness,
-    TargetReleaseRelationPlanInput, TargetReleaseRoleWitness, TargetReleaseVerifiedColumnEvaluator,
-    TargetReleaseWitness, TargetReleaseWitnessError, VerifiedTargetReleaseModulusInput,
-    VerifiedTargetReleaseProof, compile_target_release_relation,
-    compile_target_release_relation_plan, target_release_radix_semantics_match,
+    TargetReleaseRelationPlanInput, TargetReleaseRoleWitness, TargetReleaseSourcePolynomialAdapter,
+    TargetReleaseVerifiedColumnEvaluator, TargetReleaseWitness, TargetReleaseWitnessError,
+    TargetReleaseWitnessSource, VerifiedTargetReleaseModulusInput, VerifiedTargetReleaseProof,
+    compile_target_release_relation, compile_target_release_relation_plan,
+    target_release_radix_semantics_match,
 };
 pub(crate) use trustee_evaluation_key::{
-    GaloisKeyShareRelationPlanInput, RelinearizationRoundOneRelationPlanInput,
-    RelinearizationRoundTwoRelationPlanInput, TrusteeEvaluationKeyDecompositionBlock,
+    GaloisKeyShareRelationEntryInput, GaloisKeyShareRelationPlanInput,
+    RelinearizationRoundOneRelationPlanInput, RelinearizationRoundTwoRelationPlanInput,
+    TrusteeEvaluationKeyDecompositionBlock, TrusteeEvaluationKeyRelationBasis,
     TrusteeEvaluationKeyRelationGeometry, compile_galois_key_share_relation_plan,
+    compile_galois_key_share_relation_with_source_layout,
     compile_relinearization_round_one_relation_plan,
-    compile_relinearization_round_two_relation_plan,
+    compile_relinearization_round_two_relation_plan, selected_galois_key_share_batch_schedule,
+    trustee_evaluation_key_relation_basis_for_catalog_level,
 };
 pub(crate) use vss_share_linkage::compile_vss_share_linkage_relation_plan;
 #[cfg(test)]

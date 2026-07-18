@@ -311,7 +311,7 @@ pub(super) fn verify_column_opening<const LIMB_COUNT: usize>(
 #[cfg(test)]
 mod tests {
     use super::super::super::proof_field::{
-        ProofFieldParameters, sixteen_limb_group_field_parameters,
+        ProofFieldParameters, selected_key_switch_proof_field_parameters,
     };
     use super::*;
 
@@ -333,7 +333,7 @@ mod tests {
 
     #[test]
     fn column_opening_round_trips_and_rejects_tampering() {
-        let parameters = sixteen_limb_group_field_parameters();
+        let parameters = selected_key_switch_proof_field_parameters();
         let size = 256;
         let columns = vec![
             column(&parameters, size, 1),
@@ -364,7 +364,7 @@ mod tests {
         // produce the same root, the same salts, and openings that verify
         // identically to the in-memory path. This pins the streamed leaf
         // framing to the canonical single-shot `leaf_hash`.
-        let parameters = sixteen_limb_group_field_parameters();
+        let parameters = selected_key_switch_proof_field_parameters();
         let size = 256;
         let columns = vec![
             column(&parameters, size, 11),
@@ -442,7 +442,7 @@ mod tests {
     #[test]
     fn streamed_commitment_rejects_column_miscounts() {
         let size = 64;
-        let parameters = sixteen_limb_group_field_parameters();
+        let parameters = selected_key_switch_proof_field_parameters();
         let columns = [column(&parameters, size, 1), column(&parameters, size, 2)];
         let mut private_randomness = PrivateProofRandomness::for_test(0x77);
         let mut builder =

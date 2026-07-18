@@ -41,7 +41,7 @@ struct SetupCommitmentMatrixNttKey {
     modulus: u64,
 }
 
-pub(in super::super) fn setup_commitment_matrix_polynomial(
+pub(in crate::bgv) fn setup_commitment_matrix_polynomial(
     public_matrix_seed_hash: &str,
     commitment_modulus_index: usize,
     matrix_row_index: usize,

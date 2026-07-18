@@ -175,6 +175,26 @@ impl RelationPlanChecker<'_> {
                 used.insert(*modulus_reference);
             }
         }
+        for batch in &variant.ordered_integer_lift_batches {
+            used.insert(batch.modulus_reference);
+            for component in &batch.ordered_components {
+                for term in &component.ordered_linear_terms {
+                    match term.coefficient {
+                        super::super::integer_lift::RelationIntegerLiftCoefficient::Modulus {
+                            modulus_reference,
+                            ..
+                        }
+                        | super::super::integer_lift::RelationIntegerLiftCoefficient::ModulusRadixDigit {
+                            modulus_reference,
+                            ..
+                        } => {
+                            used.insert(modulus_reference);
+                        }
+                        super::super::integer_lift::RelationIntegerLiftCoefficient::Constant(_) => {}
+                    }
+                }
+            }
+        }
         for constraint in &variant.ordered_constraints {
             for instruction in &constraint.numerator_postfix_expression {
                 match instruction {
@@ -762,8 +782,10 @@ pub(super) fn validate_radix_digit_bounds(
         return Err(RelationPlanError::InvalidBoundCertificate);
     }
 
-    let expected_digit_interval =
-        SignedIntegerInterval::from_bigints(BigInt::zero(), BigInt::from(radix - 1))?;
+    let maximum_per_digit = BigInt::from(radix - 1);
+    let mut radix_power = BigUint::one();
+    let radix = BigUint::from(radix);
+    let mut maximum = BigUint::zero();
     for digit_column_ordinal in ordered_digit_column_ordinals {
         let interval = derive_semantic_cell_interval(
             *digit_column_ordinal,
@@ -774,17 +796,19 @@ pub(super) fn validate_radix_digit_bounds(
             derived_intervals,
             active_columns,
         )?;
-        if interval != expected_digit_interval {
+        if interval.minimum != BigInt::zero()
+            || interval.maximum < BigInt::zero()
+            || interval.maximum > maximum_per_digit
+        {
             return Err(RelationPlanError::InvalidBoundCertificate);
         }
-    }
-
-    let mut radix_power = BigUint::one();
-    let radix = BigUint::from(radix);
-    for _ in ordered_digit_column_ordinals {
+        maximum += interval
+            .maximum
+            .to_biguint()
+            .ok_or(RelationPlanError::InvalidBoundCertificate)?
+            * &radix_power;
         radix_power *= &radix;
     }
-    let maximum = radix_power - BigUint::one();
     if maximum >= BigUint::from(proof_base_field_modulus) {
         return Err(RelationPlanError::NoWrapBoundViolated);
     }

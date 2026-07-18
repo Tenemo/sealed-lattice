@@ -1,0 +1,46 @@
+{
+    "privateProofSaltPurpose": 65534,
+    "maskPurposeClasses": {
+        "trace": 1,
+        "telescoping": 2,
+        "opening": 3
+    },
+    "families": [
+        {
+            "familyName": "sameSecret",
+            "familySchemaIdentifier": 4625
+        },
+        {
+            "familyName": "publicKeyShare",
+            "familySchemaIdentifier": 4626
+        },
+        {
+            "familyName": "relinearizationRoundOne",
+            "familySchemaIdentifier": 4628
+        },
+        {
+            "familyName": "relinearizationRoundTwo",
+            "familySchemaIdentifier": 4630
+        },
+        {
+            "familyName": "galoisKeyShare",
+            "familySchemaIdentifier": 4631
+        },
+        {
+            "familyName": "ballotValidity",
+            "familySchemaIdentifier": 4866
+        },
+        {
+            "familyName": "targetShareProof",
+            "familySchemaIdentifier": 5665
+        },
+        {
+            "familyName": "vssShareLinkage",
+            "familySchemaIdentifier": 8464
+        },
+        {
+            "familyName": "aggregateThresholdShare",
+            "familySchemaIdentifier": 8465
+        }
+    ]
+}

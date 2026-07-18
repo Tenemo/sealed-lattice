@@ -49,14 +49,13 @@ fn every_public_aggregate_family_uses_the_generated_prover_and_capability_verifi
     let evaluator_plan = compile_evaluator_key_aggregate_relation_plan(
         &EvaluatorKeyAggregatePlanInput {
             geometry: public_aggregate_geometry(),
-            ordered_variants: (1..=20)
+            ordered_variants: (1..=FOUNDATION_PROFILE.option_count)
                 .map(|top_count| EvaluatorKeyAggregateVariantInput {
                     top_count,
-                    entry_ordinal: 0,
-                    entry: EvaluatorKeyAggregateEntryPlanInput {
+                    ordered_entries: vec![EvaluatorKeyAggregateEntryPlanInput {
                         schedule_position: 3,
                         ordered_runtime_component_moduli: vec![SuiteModulusReference::data(0)],
-                    },
+                    }],
                 })
                 .collect(),
         },
@@ -68,8 +67,8 @@ fn every_public_aggregate_family_uses_the_generated_prover_and_capability_verifi
         evaluator_plan,
         &[5, 9, 14],
         canonical_evaluator_key_aggregate_statement,
-        Some(0),
-        Some(1),
+        None,
+        Some(FOUNDATION_PROFILE.option_count),
     );
     let evaluator_trees = verified_statement_trees(
         &evaluator_fixture.relation_plan,
@@ -90,8 +89,11 @@ fn every_public_aggregate_family_uses_the_generated_prover_and_capability_verifi
         verified_evaluator.application_statement_schema_identifier(),
         EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER
     );
-    assert_eq!(verified_evaluator.schedule_position(), Some(0));
-    assert_eq!(verified_evaluator.top_count(), Some(1));
+    assert_eq!(verified_evaluator.schedule_position(), None);
+    assert_eq!(
+        verified_evaluator.top_count(),
+        Some(FOUNDATION_PROFILE.option_count)
+    );
     assert_ne!(
         verified_rkg.application_statement_hash(),
         verified_evaluator.application_statement_hash()
@@ -115,6 +117,14 @@ fn compiled_compact_target_relation_is_refused_before_proving() {
         message_digit_columns: &material_digits,
     })
     .expect("the target committed material constructs on the proof domain");
+    let committed_material_source = CommittedMaterialTree::construct(CommittedMaterialTreeInput {
+        profile: material_profile,
+        material_context_hash: [0x51; 64],
+        material_seed: [0x52; 64],
+        message_digit_columns: &material_digits,
+    })
+    .expect("the compact target committed material source constructs")
+    .into_compact_source();
     let compilation = compile_target_release_relation(
         &TargetReleaseRelationPlanInput {
             ring_degree: TARGET_TEST_RING_DEGREE as u64,
@@ -127,8 +137,7 @@ fn compiled_compact_target_relation_is_refused_before_proving() {
             target_modulus_indices: vec![0],
             decryption_scale: 4,
             simulation_scale: 4,
-            flooding_bound: 3,
-            first_mask_purpose: 43,
+            flooding_bound: num_bigint::BigUint::from(3_u8),
         },
         &relation_context,
     )
@@ -150,8 +159,8 @@ fn compiled_compact_target_relation_is_refused_before_proving() {
         .collect::<Vec<_>>();
     let partial_identifier = vec![0_u64; TARGET_TEST_RING_DEGREE];
     let partial_order = vec![0_u64; TARGET_TEST_RING_DEGREE];
-    let flooding_identifier = vec![0_i64; TARGET_TEST_RING_DEGREE];
-    let flooding_order = vec![0_i64; TARGET_TEST_RING_DEGREE];
+    let flooding_identifier = vec![num_bigint::BigInt::from(0_u8); TARGET_TEST_RING_DEGREE];
+    let flooding_order = vec![num_bigint::BigInt::from(0_u8); TARGET_TEST_RING_DEGREE];
     let roles = [
         TargetReleaseRoleWitness {
             converted_a: &converted_identifier,
@@ -163,7 +172,7 @@ fn compiled_compact_target_relation_is_refused_before_proving() {
         },
     ];
     let modulus_witness = TargetReleaseModulusWitness {
-        committed_share: &committed_material,
+        committed_share_source: &committed_material_source,
         threshold_share: &zero_share,
         roles,
     };
@@ -176,14 +185,9 @@ fn compiled_compact_target_relation_is_refused_before_proving() {
     let _verified_column_evaluator = compilation
         .verified_column_evaluator(&[VerifiedTargetReleaseModulusInput { roles }])
         .expect("the verifier independently rebuilds only public target columns");
-    let (relation_trees, _verified_trees, bound_tree_catalog_index) =
+    let (relation_trees, _verified_trees, _bound_tree_catalog_index) =
         target_relation_tree_inputs(&compilation, &committed_material);
     let canonical_statement = canonical_target_release_statement(committed_material.root());
-    let mut bound_openings = CommittedMaterialBoundOpeningProvider::new([(
-        bound_tree_catalog_index,
-        &committed_material,
-    )])
-    .expect("the persistent material tree has one catalog-indexed opening adapter");
     let maximum_proof_byte_length = 64 * 1_024 * 1_024;
     let mut external_memory = BoundedInMemoryExternalMemory::new(512 * 1_024 * 1_024);
     let mut private_coins =
@@ -200,7 +204,9 @@ fn compiled_compact_target_relation_is_refused_before_proving() {
             schedule_position: None,
             top_count: None,
             relation_trees,
-            provided_pre_challenge_columns: provided_columns,
+            source_polynomial_provider: Box::new(ResidentCommonProofSourcePolynomialProvider::new(
+                provided_columns,
+            )),
             maximum_external_memory_chunk_byte_length:
                 MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH,
             maximum_proof_transport_chunk_byte_length: MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH,
@@ -209,7 +215,6 @@ fn compiled_compact_target_relation_is_refused_before_proving() {
         &mut external_memory,
         &mut private_coins,
         &mut sink,
-        &mut bound_openings,
     )
     .expect_err("the compact target relation must not bypass the selected proof profile");
     assert!(matches!(

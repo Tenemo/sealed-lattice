@@ -314,6 +314,8 @@ impl RelationPlanChecker<'_> {
             .collect::<BTreeSet<_>>();
         let mut seen_batch_coordinates = BTreeSet::new();
         let mut matched_constraint_ordinals = BTreeSet::new();
+        let expected_identity_zeroifier =
+            packed_coefficient_local_identity_zeroifier(variant.trace_domain_size)?;
 
         for batch in &variant.ordered_coefficient_local_identity_batches {
             let modulus_ordinal = u16::try_from(
@@ -433,8 +435,7 @@ impl RelationPlanChecker<'_> {
                 || !constraint
                     .ordered_injective_integer_factor_expressions
                     .is_empty()
-                || constraint.zeroifier_postfix_expression
-                    != full_trace_zeroifier_expression(variant.trace_domain_size)
+                || constraint.zeroifier_postfix_expression != expected_identity_zeroifier
                 || constraint.numerator_postfix_expression
                     != batch.numerator_postfix_expression(modulus_ordinal)?
             {
@@ -524,6 +525,8 @@ impl RelationPlanChecker<'_> {
         }
 
         let mut residuals_by_modulus = BTreeMap::<SuiteModulusReference, BTreeSet<Vec<u8>>>::new();
+        let expected_identity_zeroifier =
+            packed_coefficient_local_identity_zeroifier(variant.trace_domain_size)?;
         for (deterministic_ordinal, (_, constraint)) in
             deterministic_constraints.into_iter().enumerate()
         {
@@ -532,8 +535,7 @@ impl RelationPlanChecker<'_> {
                 || !constraint
                     .ordered_injective_integer_factor_expressions
                     .is_empty()
-                || constraint.zeroifier_postfix_expression
-                    != full_trace_zeroifier_expression(variant.trace_domain_size)
+                || constraint.zeroifier_postfix_expression != expected_identity_zeroifier
                 || constraint.numerator_postfix_expression.is_empty()
                 || constraint
                     .numerator_postfix_expression
@@ -645,6 +647,26 @@ impl RelationPlanChecker<'_> {
     }
 }
 
+fn packed_coefficient_local_identity_zeroifier(
+    trace_domain_size: u64,
+) -> Result<Vec<RelationExpressionInstruction>, RelationPlanError> {
+    // The selected committed-material relations pack eight independently
+    // rooted logical rows into one physical trace. Their coefficient-local
+    // identities therefore hold on the exact logical-row subgroup H0, not on
+    // all eight cosets of the packed trace. Recompute that subgroup from the
+    // canonical trace geometry instead of accepting an arbitrary divisor or
+    // trusting a separately declared domain size.
+    const PACKED_ROW_COUNT: u64 = 8;
+    if !trace_domain_size.is_multiple_of(PACKED_ROW_COUNT) {
+        return Err(RelationPlanError::InvalidConstraint);
+    }
+    let identity_domain_size = trace_domain_size / PACKED_ROW_COUNT;
+    if identity_domain_size == 0 || !identity_domain_size.is_power_of_two() {
+        return Err(RelationPlanError::InvalidConstraint);
+    }
+    Ok(full_trace_zeroifier_expression(identity_domain_size))
+}
+
 pub(in crate::bgv::proof_suite::relation_plan) fn zeroifier_roots_are_confined_to_trace_domain(
     expression: &[RelationExpressionInstruction],
     trace_domain_size: u64,
@@ -660,7 +682,11 @@ pub(in crate::bgv::proof_suite::relation_plan) fn zeroifier_roots_are_confined_t
             RelationExpressionInstruction::BaseFieldConstant(1),
             RelationExpressionInstruction::Negation,
             RelationExpressionInstruction::Addition,
-        ] => *exponent == trace_domain_size,
+            // When the exponent divides the trace-domain order, every root of
+            // X^exponent - 1 belongs to the unique trace subgroup. This covers
+            // exact constraints on a plan-fixed subgroup without broadening the
+            // accepted root set beyond the trace domain.
+        ] => *exponent != 0 && trace_domain_size.is_multiple_of(*exponent),
         [
             RelationExpressionInstruction::TraceDomainExceptRoots {
                 trace_domain_size: encoded_trace_domain_size,

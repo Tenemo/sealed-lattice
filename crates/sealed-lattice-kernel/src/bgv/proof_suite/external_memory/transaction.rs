@@ -57,13 +57,13 @@ impl ProofExternalMemoryTransactionRequest {
     /// a delayed or reordered response cannot be supplied to another yield.
     pub(crate) fn encode_worker_request(
         &self,
-    ) -> Result<Vec<u8>, ProofExternalMemoryTransactionAdapterError> {
+    ) -> Result<Zeroizing<Vec<u8>>, ProofExternalMemoryTransactionAdapterError> {
         let operation_bytes = self.encode_operation_bytes()?;
         let request_digest = self.request_digest(&operation_bytes)?;
         let byte_length = EXTERNAL_MEMORY_REQUEST_HEADER_BYTE_LENGTH
             .checked_add(operation_bytes.len())
             .ok_or(ProofExternalMemoryTransactionAdapterError::AllocationLimitExceeded)?;
-        let mut encoded = Vec::new();
+        let mut encoded = Zeroizing::new(Vec::new());
         encoded
             .try_reserve_exact(byte_length)
             .map_err(|_| ProofExternalMemoryTransactionAdapterError::AllocationLimitExceeded)?;
@@ -90,7 +90,7 @@ impl ProofExternalMemoryTransactionRequest {
     pub(crate) fn decode_worker_response(
         &self,
         encoded: &[u8],
-    ) -> Result<Vec<Vec<u8>>, ProofExternalMemoryTransactionAdapterError> {
+    ) -> Result<Vec<Zeroizing<Vec<u8>>>, ProofExternalMemoryTransactionAdapterError> {
         let operation_bytes = self.encode_operation_bytes()?;
         let expected_request_digest = self.request_digest(&operation_bytes)?;
         if encoded.len() < EXTERNAL_MEMORY_RESPONSE_HEADER_BYTE_LENGTH {
@@ -179,7 +179,7 @@ impl ProofExternalMemoryTransactionRequest {
             if supplied_digest != expected_digest {
                 return Err(ProofExternalMemoryTransactionAdapterError::WrongReadDigest);
             }
-            let mut owned_bytes = Vec::new();
+            let mut owned_bytes = Zeroizing::new(Vec::new());
             owned_bytes
                 .try_reserve_exact(bytes.len())
                 .map_err(|_| ProofExternalMemoryTransactionAdapterError::AllocationLimitExceeded)?;
@@ -280,7 +280,7 @@ impl ProofExternalMemoryTransactionRequest {
 
     pub(super) fn encode_operation_bytes(
         &self,
-    ) -> Result<Vec<u8>, ProofExternalMemoryTransactionAdapterError> {
+    ) -> Result<Zeroizing<Vec<u8>>, ProofExternalMemoryTransactionAdapterError> {
         let metadata_byte_length = self
             .operations
             .len()
@@ -298,7 +298,7 @@ impl ProofExternalMemoryTransactionRequest {
         let encoded_byte_length = metadata_byte_length
             .checked_add(append_byte_length)
             .ok_or(ProofExternalMemoryTransactionAdapterError::AllocationLimitExceeded)?;
-        let mut encoded = Vec::new();
+        let mut encoded = Zeroizing::new(Vec::new());
         encoded
             .try_reserve_exact(encoded_byte_length)
             .map_err(|_| ProofExternalMemoryTransactionAdapterError::AllocationLimitExceeded)?;
@@ -710,19 +710,8 @@ pub(crate) struct ProofExternalMemoryTransactionReplay {
 impl ProofExternalMemoryTransactionReplay {
     pub(crate) fn new(
         request: ProofExternalMemoryTransactionRequest,
-        mut read_results: Vec<Vec<u8>>,
+        read_results: Vec<Zeroizing<Vec<u8>>>,
     ) -> Result<Self, ProofExternalMemoryTransactionAdapterError> {
-        let mut protected_read_results = Vec::new();
-        if protected_read_results
-            .try_reserve_exact(read_results.len())
-            .is_err()
-        {
-            for result in &mut read_results {
-                result.fill(0);
-            }
-            return Err(ProofExternalMemoryTransactionAdapterError::AllocationLimitExceeded);
-        }
-        protected_read_results.extend(read_results.into_iter().map(Zeroizing::new));
         if request.maximum_payload_byte_length == 0
             || request.maximum_operation_count == 0
             || request.operations.is_empty()
@@ -756,7 +745,7 @@ impl ProofExternalMemoryTransactionReplay {
         if payload_byte_length > request.maximum_payload_byte_length {
             return Err(ProofExternalMemoryTransactionAdapterError::PayloadByteLengthExceeded);
         }
-        let mut supplied_results = protected_read_results.iter();
+        let mut supplied_results = read_results.iter();
         for operation in &request.operations {
             if let ProofExternalMemoryTransactionOperation::Read { byte_length, .. } = operation {
                 let result = supplied_results
@@ -775,7 +764,7 @@ impl ProofExternalMemoryTransactionReplay {
         }
         Ok(Self {
             request,
-            read_results: protected_read_results,
+            read_results,
             next_operation_index: 0,
             next_read_result_index: 0,
             active: false,

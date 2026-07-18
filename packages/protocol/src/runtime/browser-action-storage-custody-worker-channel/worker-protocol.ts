@@ -1,7 +1,5 @@
 import {
-    describeClosedWorkerCommonProofVerificationFamilyAdapter,
     releaseClosedWorkerCommonProofGenerationFamilyAdapter,
-    releaseClosedWorkerCommonProofVerificationFamilyAdapter,
     runClosedWorkerCommonProofGenerationFamilyAdapter,
     runClosedWorkerCommonProofVerificationFamilyAdapter,
     type ClosedWorkerCommonProofGenerationFamilyAdapter,
@@ -22,10 +20,8 @@ import type {
 } from '../common-proof-browser-custody.js';
 
 import {
-    bytesEqual,
     copyBoundedBytes,
     copyBytes,
-    maximumCheckpointCollectionLength,
     maximumCheckpointDescriptorByteLength,
     mutationIdentifierByteLength,
     storageRootCommitmentByteLength,
@@ -166,7 +162,6 @@ type OpenInstalledCommonProofExecutionEnvironmentInput = Readonly<{
 
 export type ResolvedInstalledCommonProofExecutionEnvironmentInput = Readonly<{
     commonProofRuntimeBindingHash: Uint8Array<ArrayBuffer>;
-    commonProofVerificationBindingHash: Uint8Array<ArrayBuffer>;
     foundationActionRandomnessHandleIdentifier: string;
     generationFamilyAdapter: ClosedWorkerCommonProofGenerationFamilyAdapter;
     proofAttemptLineageIdentifier: Uint8Array<ArrayBuffer>;
@@ -181,9 +176,8 @@ export const destroyCommonProofCheckpointResumeDescriptor = (
     }
     descriptor.checkpointLineageIdentifier.fill(0);
     descriptor.commonProofEnvironmentIdentifier.fill(0);
-    for (const cursorBytes of descriptor.orderedPrivateRandomCursorBytes) {
-        cursorBytes.fill(0);
-    }
+    descriptor.privateRandomCursorManifestBytes.fill(0);
+    descriptor.privateRandomnessStreamAttemptIdentifier?.fill(0);
     descriptor.stableAttemptBindingHash.fill(0);
 };
 
@@ -191,9 +185,11 @@ export const copyCommonProofCheckpointResumeDescriptorForWorker = (
     descriptor: CommonProofCheckpointResumeDescriptor,
 ): CommonProofCheckpointResumeDescriptor => {
     if (
-        !Array.isArray(descriptor.orderedPrivateRandomCursorBytes) ||
-        descriptor.orderedPrivateRandomCursorBytes.length >
-            maximumCheckpointCollectionLength ||
+        !(
+            descriptor.privateRandomCursorManifestBytes instanceof Uint8Array
+        ) ||
+        descriptor.privateRandomCursorManifestBytes.byteLength >
+            maximumCheckpointDescriptorByteLength ||
         !Number.isSafeInteger(descriptor.safeBoundaryOrdinal) ||
         descriptor.safeBoundaryOrdinal < 0 ||
         descriptor.safeBoundaryOrdinal > 0xffff_ffff
@@ -203,25 +199,12 @@ export const copyCommonProofCheckpointResumeDescriptorForWorker = (
             'The common-proof checkpoint resume descriptor is malformed or outside the worker-channel copy bound.',
         );
     }
-    let cursorAggregateByteLength = 0;
-    for (const cursorBytes of descriptor.orderedPrivateRandomCursorBytes) {
-        if (
-            !(cursorBytes instanceof Uint8Array) ||
-            cursorBytes.byteLength === 0 ||
-            cursorBytes.byteLength >
-                maximumCheckpointDescriptorByteLength -
-                    cursorAggregateByteLength
-        ) {
-            throw new BrowserActionStorageCustodyError(
-                'InvalidInput',
-                'The common-proof checkpoint cursors are malformed or exceed the aggregate worker-channel copy bound.',
-            );
-        }
-        cursorAggregateByteLength += cursorBytes.byteLength;
-    }
     let checkpointLineageIdentifier = new Uint8Array(0);
     let commonProofEnvironmentIdentifier = new Uint8Array(0);
-    const orderedPrivateRandomCursorBytes: Uint8Array<ArrayBuffer>[] = [];
+    let privateRandomCursorManifestBytes = new Uint8Array(0);
+    let privateRandomnessStreamAttemptIdentifier:
+        | Uint8Array<ArrayBuffer>
+        | undefined;
     let stableAttemptBindingHash = new Uint8Array(0);
     try {
         checkpointLineageIdentifier = Uint8Array.from(
@@ -238,21 +221,23 @@ export const copyCommonProofCheckpointResumeDescriptorForWorker = (
                 'Checkpoint common-proof environment identifier',
             ),
         );
-        for (
-            let cursorIndex = 0;
-            cursorIndex < descriptor.orderedPrivateRandomCursorBytes.length;
-            cursorIndex += 1
-        ) {
-            orderedPrivateRandomCursorBytes.push(
-                Uint8Array.from(
-                    copyBoundedBytes(
-                        descriptor.orderedPrivateRandomCursorBytes[cursorIndex],
-                        maximumCheckpointDescriptorByteLength,
-                        `Common-proof checkpoint cursor ${String(cursorIndex)}`,
-                    ),
-                ),
-            );
-        }
+        privateRandomCursorManifestBytes = Uint8Array.from(
+            copyBoundedBytes(
+                descriptor.privateRandomCursorManifestBytes,
+                maximumCheckpointDescriptorByteLength,
+                'Common-proof checkpoint cursor manifest',
+            ),
+        );
+        privateRandomnessStreamAttemptIdentifier =
+            descriptor.privateRandomnessStreamAttemptIdentifier === undefined
+                ? undefined
+                : Uint8Array.from(
+                      copyBytes(
+                          descriptor.privateRandomnessStreamAttemptIdentifier,
+                          mutationIdentifierByteLength,
+                          'Common-proof private-randomness stream-attempt identifier',
+                      ),
+                  );
         stableAttemptBindingHash = Uint8Array.from(
             copyBytes(
                 descriptor.stableAttemptBindingHash,
@@ -263,18 +248,18 @@ export const copyCommonProofCheckpointResumeDescriptorForWorker = (
         return Object.freeze({
             checkpointLineageIdentifier,
             commonProofEnvironmentIdentifier,
-            orderedPrivateRandomCursorBytes: Object.freeze(
-                orderedPrivateRandomCursorBytes,
-            ),
+            privateRandomCursorManifestBytes,
+            ...(privateRandomnessStreamAttemptIdentifier === undefined
+                ? {}
+                : { privateRandomnessStreamAttemptIdentifier }),
             safeBoundaryOrdinal: descriptor.safeBoundaryOrdinal,
             stableAttemptBindingHash,
         });
     } catch (error) {
         checkpointLineageIdentifier.fill(0);
         commonProofEnvironmentIdentifier.fill(0);
-        for (const cursorBytes of orderedPrivateRandomCursorBytes) {
-            cursorBytes.fill(0);
-        }
+        privateRandomCursorManifestBytes.fill(0);
+        privateRandomnessStreamAttemptIdentifier?.fill(0);
         stableAttemptBindingHash.fill(0);
         throw error;
     }
@@ -282,7 +267,6 @@ export const copyCommonProofCheckpointResumeDescriptorForWorker = (
 
 export type InstalledCommonProofPreparedOperationRecord = {
     commonProofRuntimeBindingHash: Uint8Array<ArrayBuffer>;
-    commonProofVerificationBindingHash: Uint8Array<ArrayBuffer>;
     consumed: boolean;
     foundationActionRandomnessHandleIdentifier: string;
     generationFamilyAdapter:
@@ -333,7 +317,6 @@ export type InstalledCommonProofExecutionEnvironmentRecord = {
     ): Promise<void>;
     closed: boolean;
     commonProofRuntimeBindingHash: Uint8Array<ArrayBuffer>;
-    commonProofVerificationBindingHash: Uint8Array<ArrayBuffer>;
     custody: CommonProofBrowserCustody;
     foundationActionRandomnessHandleIdentifier: string;
     generationCompleted: boolean;
@@ -567,7 +550,6 @@ const finishInstalledCommonProofTerminalCleanup = (
         );
     }
     record.commonProofRuntimeBindingHash.fill(0);
-    record.commonProofVerificationBindingHash.fill(0);
     record.proofAttemptLineageIdentifier.fill(0);
     destroyCommonProofCheckpointResumeDescriptor(
         record.suspendedResumeDescriptor,
@@ -981,36 +963,6 @@ export const verifyAndApplyCommonProofInInstalledCustodyWorker = async (
                 'InvalidState',
                 'The common-proof execution environment already owns a pending application retry.',
             );
-        }
-        const verificationDescription =
-            describeClosedWorkerCommonProofVerificationFamilyAdapter(
-                input.verificationFamilyAdapter,
-            );
-        try {
-            if (
-                !bytesEqual(
-                    verificationDescription.commonProofVerificationBindingHash,
-                    record.commonProofVerificationBindingHash,
-                )
-            ) {
-                try {
-                    releaseClosedWorkerCommonProofVerificationFamilyAdapter(
-                        input.verificationFamilyAdapter,
-                    );
-                } catch (releaseError) {
-                    throw new BrowserActionStorageCustodyError(
-                        'OwnedWorkerFailure',
-                        'The mismatched common-proof verifier preparation could not be retired.',
-                        releaseError,
-                    );
-                }
-                throw new BrowserActionStorageCustodyError(
-                    'InvalidInput',
-                    'The prepared common-proof verifier belongs to another proof attempt.',
-                );
-            }
-        } finally {
-            verificationDescription.commonProofVerificationBindingHash.fill(0);
         }
         return runInstalledCommonProofApplication(
             environment,

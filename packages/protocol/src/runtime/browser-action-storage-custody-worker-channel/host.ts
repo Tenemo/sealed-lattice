@@ -26,7 +26,6 @@ import type {
     CheckpointBoundary,
     CheckpointBoundaryPolicy,
     CheckpointOperationIdentity,
-    CheckpointRandomCursorKernel,
     ExpectedCheckpointBoundary,
     ResumedCheckpoint,
 } from '../authenticated-checkpoint-store.js';
@@ -97,7 +96,6 @@ import {
     bytesEqual,
     copyBoundedBytes,
     copyBytes,
-    maximumCheckpointCollectionLength,
     maximumCheckpointDescriptorByteLength,
     mutationIdentifierByteLength,
     storageRootCommitmentByteLength,
@@ -191,24 +189,13 @@ const copyHostCommandInput = (
         case 'open-root':
             return copyBoundSnapshotInput(input);
         case 'begin-checkpoint':
-            if (
-                !Array.isArray(input) ||
-                input.length > maximumCheckpointCollectionLength
-            ) {
-                throw new BrowserActionStorageCustodyError(
-                    'InvalidInput',
-                    'Checkpoint stream-attempt identifiers are malformed.',
-                );
-            }
-            return Object.freeze(
-                input.map((identifier, index) =>
-                    copyBytes(
-                        identifier,
-                        32,
-                        `Checkpoint stream-attempt identifier ${String(index)}`,
-                    ),
-                ),
-            );
+            return input === undefined
+                ? undefined
+                : copyBytes(
+                      input,
+                      32,
+                      'Checkpoint private-randomness stream-attempt identifier',
+                  );
         case 'copy-checkpoint-description':
         case 'evict-checkpoint':
         case 'begin-checkpoint-restore':
@@ -907,7 +894,6 @@ type WorkerFoundationDurableStateBinding = {
 export type BrowserActionStorageCustodyWorkerHostConfiguration = Readonly<{
     checkpointStore?: Readonly<{
         boundaryPolicy: CheckpointBoundaryPolicy;
-        cursorKernel: CheckpointRandomCursorKernel;
         limits: AuthenticatedCheckpointStoreLimits;
     }>;
     cryptoProvider?: Crypto;
@@ -1053,7 +1039,6 @@ export const installBrowserActionStorageCustodyWorkerHost = (
                 record.generationFamilyAdapter = undefined;
             }
             record.commonProofRuntimeBindingHash.fill(0);
-            record.commonProofVerificationBindingHash.fill(0);
             record.proofAttemptLineageIdentifier.fill(0);
             installedCommonProofPreparedOperationRecords.delete(
                 preparedOperation,
@@ -1078,7 +1063,6 @@ export const installBrowserActionStorageCustodyWorkerHost = (
             );
         }
         record.commonProofRuntimeBindingHash.fill(0);
-        record.commonProofVerificationBindingHash.fill(0);
         record.proofAttemptLineageIdentifier.fill(0);
         installedCommonProofPreparedOperationRecords.delete(preparedOperation);
         commonProofPreparedOperations.delete(preparedOperation);
@@ -2451,7 +2435,7 @@ export const installBrowserActionStorageCustodyWorkerHost = (
                     issueFoundationInitializationBatchIdentifier();
                 const store = await requireCheckpointStore();
                 const identity = await store.beginOperation(
-                    copiedInput as readonly Uint8Array[],
+                    copiedInput as Uint8Array | undefined,
                 );
                 checkpoints.set(checkpointIdentifier, { identity });
                 return { checkpointIdentifier };
@@ -3397,8 +3381,6 @@ export const installBrowserActionStorageCustodyWorkerHost = (
                     {
                         commonProofRuntimeBindingHash:
                             description.commonProofRuntimeBindingHash,
-                        commonProofVerificationBindingHash:
-                            description.commonProofVerificationBindingHash,
                         consumed: false,
                         foundationActionRandomnessHandleIdentifier,
                         generationFamilyAdapter:
@@ -3409,10 +3391,11 @@ export const installBrowserActionStorageCustodyWorkerHost = (
                     },
                 );
                 commonProofPreparedOperations.add(preparedOperation);
+                description.commonProofGenerationAuthorizationHash.fill(0);
                 return preparedOperation;
             } catch (error) {
                 description.commonProofRuntimeBindingHash.fill(0);
-                description.commonProofVerificationBindingHash.fill(0);
+                description.commonProofGenerationAuthorizationHash.fill(0);
                 description.proofAttemptLineageIdentifier.fill(0);
                 throw error;
             }
@@ -3431,7 +3414,6 @@ export const installBrowserActionStorageCustodyWorkerHost = (
                 );
             }
             let copiedRuntimeBindingHash = new Uint8Array(0);
-            let copiedVerificationBindingHash = new Uint8Array(0);
             let copiedProofAttemptLineageIdentifier = new Uint8Array(0);
             let generationFamilyAdapter:
                 | ClosedWorkerCommonProofGenerationFamilyAdapter
@@ -3467,13 +3449,6 @@ export const installBrowserActionStorageCustodyWorkerHost = (
                         'Common-proof runtime-binding hash',
                     ),
                 );
-                copiedVerificationBindingHash = Uint8Array.from(
-                    copyBytes(
-                        preparedRecord.commonProofVerificationBindingHash,
-                        storageRootCommitmentByteLength,
-                        'Common-proof verification-binding hash',
-                    ),
-                );
                 copiedProofAttemptLineageIdentifier = Uint8Array.from(
                     copyBytes(
                         preparedRecord.proofAttemptLineageIdentifier,
@@ -3492,8 +3467,6 @@ export const installBrowserActionStorageCustodyWorkerHost = (
                 preparedRecord.generationFamilyAdapter = undefined;
                 copiedInput = Object.freeze({
                     commonProofRuntimeBindingHash: copiedRuntimeBindingHash,
-                    commonProofVerificationBindingHash:
-                        copiedVerificationBindingHash,
                     foundationActionRandomnessHandleIdentifier:
                         preparedRecord.foundationActionRandomnessHandleIdentifier,
                     generationFamilyAdapter,
@@ -3505,7 +3478,6 @@ export const installBrowserActionStorageCustodyWorkerHost = (
                 });
             } catch (error) {
                 copiedRuntimeBindingHash.fill(0);
-                copiedVerificationBindingHash.fill(0);
                 copiedProofAttemptLineageIdentifier.fill(0);
                 destroyCommonProofCheckpointResumeDescriptor(
                     copiedResumeDescriptor,
@@ -3608,8 +3580,6 @@ export const installBrowserActionStorageCustodyWorkerHost = (
                                 actionRandomnessCommitment:
                                     actionRandomnessHandle.actionRandomnessCommitment.slice(),
                                 checkpoint: {
-                                    cursorKernel:
-                                        input.checkpointStore.cursorKernel,
                                     ...(copiedInput.resumeDescriptor ===
                                     undefined
                                         ? {}
@@ -3642,8 +3612,6 @@ export const installBrowserActionStorageCustodyWorkerHost = (
                             closed: false,
                             commonProofRuntimeBindingHash:
                                 copiedInput.commonProofRuntimeBindingHash.slice(),
-                            commonProofVerificationBindingHash:
-                                copiedInput.commonProofVerificationBindingHash.slice(),
                             custody: commonProofCustody,
                             foundationActionRandomnessHandleIdentifier:
                                 copiedInput.foundationActionRandomnessHandleIdentifier,
@@ -3749,7 +3717,6 @@ export const installBrowserActionStorageCustodyWorkerHost = (
                 })
                 .finally(() => {
                     copiedInput.commonProofRuntimeBindingHash.fill(0);
-                    copiedInput.commonProofVerificationBindingHash.fill(0);
                     copiedInput.proofAttemptLineageIdentifier.fill(0);
                     destroyCommonProofCheckpointResumeDescriptor(
                         copiedInput.resumeDescriptor,

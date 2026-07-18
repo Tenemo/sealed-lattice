@@ -268,7 +268,6 @@ impl FinalityTestFixture {
             1,
             vec![
                 CanonicalItem::hash512(verified_setup_source_hash.into_bytes()),
-                CanonicalItem::hash512(hash(0x52).into_bytes()),
                 CanonicalItem::homogeneous_list(CanonicalItemType::Hash512, &selected_ballot_items)
                     .expect("selected ballot list"),
                 self.stream_descriptor_item(CanonicalStreamDomain::AggregateCiphertext, 0xc3),
@@ -318,6 +317,8 @@ impl FinalityTestFixture {
             replay_object,
             self.roster_hash,
             4,
+            1,
+            1,
             self.verified_stream(
                 CanonicalStreamDomain::ReplayTargetIdentifierCiphertext,
                 0xc4,
@@ -635,6 +636,73 @@ fn finality_verifier_composes_board_signatures_and_exact_state_outputs() {
         verified_finality.state_outputs().len(),
         usize::from(FOUNDATION_PROFILE.finality_quorum)
     );
+    let finality_carrier_lengths = verified_finality.consumed_carrier_byte_lengths();
+    assert_eq!(
+        finality_carrier_lengths.canonical_certificate_byte_length(),
+        certificate
+            .encode()
+            .expect("verified finality certificate re-encodes")
+            .len() as u64
+    );
+    let retained_signer_carriers = finality_carrier_lengths
+        .ordered_signers()
+        .collect::<Vec<_>>();
+    assert_eq!(retained_signer_carriers.len(), signer_inputs.len());
+    for (subject_roster_position, (retained_signer, signer_input)) in retained_signer_carriers
+        .iter()
+        .zip(signer_inputs.iter())
+        .enumerate()
+    {
+        assert_eq!(
+            retained_signer.signer_participant_id(),
+            fixture.roster.entries[subject_roster_position]
+                .participant_identity()
+                .expect("finality signer identity")
+        );
+        assert_eq!(
+            retained_signer.canonical_finality_carrier_byte_length(),
+            signer_input.canonical_signed_finality_carrier().len() as u64
+        );
+        let state_carriers = retained_signer.state_carriers();
+        assert_eq!(
+            state_carriers
+                .reservation()
+                .canonical_intent_carrier_byte_length(),
+            signer_input
+                .canonical_signed_reservation_intent_carrier()
+                .len() as u64
+        );
+        assert_eq!(
+            state_carriers
+                .reservation()
+                .canonical_certificate_byte_length(),
+            signer_input
+                .reservation_certificate()
+                .encode()
+                .expect("reservation certificate re-encodes")
+                .len() as u64
+        );
+        assert_eq!(
+            state_carriers.canonical_output_intent_carrier_byte_length(),
+            signer_input.canonical_signed_output_intent_carrier().len() as u64
+        );
+        assert_eq!(
+            state_carriers.canonical_output_certificate_byte_length(),
+            signer_input
+                .output_certificate()
+                .encode()
+                .expect("output certificate re-encodes")
+                .len() as u64
+        );
+        assert_eq!(
+            state_carriers.reservation().witness_carriers().len(),
+            usize::from(FOUNDATION_PROFILE.state_witness_quorum)
+        );
+        assert_eq!(
+            state_carriers.output_witness_carriers().len(),
+            usize::from(FOUNDATION_PROFILE.state_witness_quorum)
+        );
+    }
 
     let wrong_replay_statement = FinalityStatement::new(
         fixture.suite_identifier,

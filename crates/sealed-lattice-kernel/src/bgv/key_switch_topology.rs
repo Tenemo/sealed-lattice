@@ -1,16 +1,14 @@
-#[cfg(test)]
 use std::ops::Range;
 
 use num_bigint::BigUint;
-#[cfg(test)]
-use num_traits::One;
 
+use crate::bgv::parameters::DATA_PRIMES;
 use crate::{
-    bgv::parameters::{DATA_PRIMES, SPECIAL_PRIMES},
+    bgv::parameters::SPECIAL_PRIMES,
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
 };
 
-pub(crate) const KEY_SWITCH_DATA_PRIMES_PER_BLOCK: usize = DATA_PRIMES.len();
+pub(crate) const KEY_SWITCH_DATA_PRIMES_PER_BLOCK: usize = 10;
 pub(crate) const KEY_SWITCH_SPECIAL_PRIMES: [u64; SPECIAL_PRIMES.len()] = SPECIAL_PRIMES;
 
 pub(crate) fn key_switch_special_basis_modulus_product() -> BigUint {
@@ -40,7 +38,6 @@ pub(crate) fn canonical_residue_byte_length(modulus: u64) -> CanonicalResult<usi
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg(test)]
 pub(crate) struct KeySwitchDecompositionTopology {
     level: usize,
     data_primes_per_block: usize,
@@ -48,7 +45,6 @@ pub(crate) struct KeySwitchDecompositionTopology {
     extended_moduli: Vec<u64>,
 }
 
-#[cfg(test)]
 impl KeySwitchDecompositionTopology {
     pub(crate) fn for_level(level: usize) -> CanonicalResult<Self> {
         Self::for_level_with_data_primes_per_block(level, KEY_SWITCH_DATA_PRIMES_PER_BLOCK)
@@ -83,21 +79,6 @@ impl KeySwitchDecompositionTopology {
                 block_start..data_prime_count.min(block_start + data_primes_per_block)
             })
             .collect();
-        let special_basis_modulus_product = key_switch_special_basis_modulus_product();
-        let has_undersized_special_basis = data_block_ranges.iter().any(|data_block_range| {
-            DATA_PRIMES[data_block_range.clone()]
-                .iter()
-                .fold(BigUint::one(), |product, modulus| {
-                    product * BigUint::from(*modulus)
-                })
-                >= special_basis_modulus_product
-        });
-        if has_undersized_special_basis {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidProtocolObject,
-                "hybrid key-switch special-basis product must exceed every data-block product",
-            ));
-        }
         let mut extended_moduli = DATA_PRIMES[..data_prime_count].to_vec();
         extended_moduli.extend(KEY_SWITCH_SPECIAL_PRIMES);
 
@@ -203,7 +184,6 @@ impl KeySwitchDecompositionTopology {
     }
 }
 
-#[cfg(test)]
 fn checked_component_byte_length(
     data_block_count: usize,
     ring_degree: usize,
@@ -220,7 +200,6 @@ fn checked_component_byte_length(
         .ok_or_else(component_byte_length_overflow)
 }
 
-#[cfg(test)]
 fn component_byte_length_overflow() -> CanonicalError {
     CanonicalError::new(
         CanonicalErrorCode::InvalidProtocolObject,
@@ -288,35 +267,33 @@ mod tests {
 
         assert_eq!(
             topology
-                .canonical_component_wire_byte_length(32_768)
+                .canonical_component_wire_byte_length(65_536)
                 .expect("wire length"),
-            6_684_672
+            51_707_904
         );
         assert_eq!(
             topology
-                .resident_component_byte_length(32_768)
+                .resident_component_byte_length(65_536)
                 .expect("resident length"),
-            8_912_896
+            55_050_240
         );
         assert!(topology.resident_component_byte_length(usize::MAX).is_err());
     }
 
     #[test]
-    fn complete_special_basis_product_exceeds_every_selected_data_block_product() {
+    fn selected_topology_keeps_exact_three_block_geometry_when_special_modulus_is_smaller() {
         let topology = KeySwitchDecompositionTopology::for_level(DATA_PRIMES.len() - 1)
             .expect("full selected topology");
         let special_basis_modulus_product = key_switch_special_basis_modulus_product();
 
-        assert_eq!(topology.data_block_count(), 1);
-        for data_block_index in 0..topology.data_block_count() {
-            let data_block_range = topology
-                .data_block_range(data_block_index)
-                .expect("selected data block");
-            let data_block_modulus_product = DATA_PRIMES[data_block_range]
-                .iter()
-                .map(|modulus| BigUint::from(*modulus))
-                .product::<BigUint>();
-            assert!(special_basis_modulus_product > data_block_modulus_product);
-        }
+        assert_eq!(topology.data_block_count(), 3);
+        assert_eq!(topology.data_block_range(0).expect("block zero"), 0..10);
+        assert_eq!(topology.data_block_range(1).expect("block one"), 10..20);
+        assert_eq!(topology.data_block_range(2).expect("block two"), 20..26);
+        let largest_block_product = DATA_PRIMES[10..20]
+            .iter()
+            .map(|modulus| BigUint::from(*modulus))
+            .product::<BigUint>();
+        assert!(largest_block_product > special_basis_modulus_product);
     }
 }

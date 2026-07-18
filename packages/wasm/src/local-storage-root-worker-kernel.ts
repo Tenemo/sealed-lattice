@@ -5,6 +5,4 @@ export type {
     ClosedWorkerCommonProofScratchStorage,
     ClosedWorkerPreparedCommonProofApplication,
     ClosedWorkerSetupMailboxRandomnessOperations,
-    ClosedWorkerStructuredCommitmentOpeningCapability,
-    ClosedWorkerStructuredCommitmentOpeningOperations,
 } from './local-storage-root-worker-kernel/authorities.js';

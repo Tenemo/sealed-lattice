@@ -3,10 +3,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use super::super::{PROOF_CHALLENGE_EXTENSION_DEGREE, merkle::ProofLeafVisibility};
 use super::authentication::minimal_frontier_node_count;
 use super::{
-    AUTHENTICATION_NODE_CANONICAL_BYTE_LENGTH, CompleteProofTreeCatalog, ProofBodyError,
-    ProofBodyLayout, ProofTreeCatalogEntry, ProofTreeCatalogSource, ProofTreeConstruction,
-    SECRET_LEAF_SALT_BYTE_LENGTH,
+    AUTHENTICATION_DIGEST_BYTE_LENGTH, CompleteProofTreeCatalog, ProofBodyError, ProofBodyLayout,
+    ProofTreeCatalogEntry, ProofTreeCatalogSource, ProofTreeConstruction,
 };
+use crate::bgv::proof_suite::COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH;
 
 pub(crate) fn proof_query_tree_byte_length(
     layout: &ProofBodyLayout,
@@ -25,8 +25,10 @@ pub(crate) fn proof_query_tree_byte_length(
     let opening_list_byte_length =
         raw_byte_list_byte_length(opened_leaf_indexes.len(), leaf_byte_length)?;
     let frontier_count = minimal_frontier_node_count(&opened_leaf_indexes, leaf_count)?;
-    let frontier_list_byte_length =
-        nested_tuple_list_byte_length(frontier_count, AUTHENTICATION_NODE_CANONICAL_BYTE_LENGTH)?;
+    let frontier_list_byte_length = homogeneous_fixed_width_list_byte_length(
+        frontier_count,
+        AUTHENTICATION_DIGEST_BYTE_LENGTH,
+    )?;
 
     // Each record has an eight-byte tuple header, an eight-byte u16 item,
     // and a six-byte homogeneous-list item header.  The returned list byte
@@ -48,6 +50,9 @@ pub(crate) struct ProofQueryTreeByteLengthCeiling {
     maximum_opened_leaf_count: usize,
     opened_leaf_count_at_ceiling: usize,
     authentication_frontier_node_count_at_ceiling: usize,
+    opened_leaf_payload_byte_length: usize,
+    authentication_frontier_digest_byte_length: usize,
+    canonical_framing_byte_length: usize,
     byte_length: usize,
 }
 
@@ -88,8 +93,62 @@ impl ProofQueryTreeByteLengthCeiling {
         self.authentication_frontier_node_count_at_ceiling
     }
 
+    pub(crate) const fn opened_leaf_payload_byte_length(&self) -> usize {
+        self.opened_leaf_payload_byte_length
+    }
+
+    pub(crate) const fn authentication_frontier_digest_byte_length(&self) -> usize {
+        self.authentication_frontier_digest_byte_length
+    }
+
+    pub(crate) const fn canonical_framing_byte_length(&self) -> usize {
+        self.canonical_framing_byte_length
+    }
+
     pub(crate) const fn byte_length(&self) -> usize {
         self.byte_length
+    }
+}
+
+/// Disjoint serialized components of one canonical proof ceiling. The
+/// categories follow the production transcript order and sum exactly to the
+/// complete proof byte length.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct CommonProofComponentByteLengths {
+    canonical_framing: usize,
+    relation_commitments_and_openings: usize,
+    quotient_commitments_and_openings: usize,
+    transcript_opening_claims: usize,
+    fri: usize,
+}
+
+impl CommonProofComponentByteLengths {
+    pub(crate) const fn canonical_framing(self) -> usize {
+        self.canonical_framing
+    }
+
+    pub(crate) const fn relation_commitments_and_openings(self) -> usize {
+        self.relation_commitments_and_openings
+    }
+
+    pub(crate) const fn quotient_commitments_and_openings(self) -> usize {
+        self.quotient_commitments_and_openings
+    }
+
+    pub(crate) const fn transcript_opening_claims(self) -> usize {
+        self.transcript_opening_claims
+    }
+
+    pub(crate) const fn fri(self) -> usize {
+        self.fri
+    }
+
+    pub(crate) fn proof_byte_length(self) -> Option<usize> {
+        self.canonical_framing
+            .checked_add(self.relation_commitments_and_openings)
+            .and_then(|length| length.checked_add(self.quotient_commitments_and_openings))
+            .and_then(|length| length.checked_add(self.transcript_opening_claims))
+            .and_then(|length| length.checked_add(self.fri))
     }
 }
 
@@ -105,6 +164,7 @@ pub(crate) struct CommonProofByteLengthCeiling {
     body_prefix_byte_length: usize,
     query_section_byte_length: usize,
     proof_byte_length: usize,
+    component_byte_lengths: CommonProofComponentByteLengths,
     query_trees: Vec<ProofQueryTreeByteLengthCeiling>,
 }
 
@@ -123,6 +183,10 @@ impl CommonProofByteLengthCeiling {
 
     pub(crate) const fn proof_byte_length(&self) -> usize {
         self.proof_byte_length
+    }
+
+    pub(crate) const fn component_byte_lengths(&self) -> CommonProofComponentByteLengths {
+        self.component_byte_lengths
     }
 
     pub(crate) fn query_trees(&self) -> &[ProofQueryTreeByteLengthCeiling] {
@@ -158,6 +222,10 @@ pub(crate) fn canonical_common_proof_byte_length_ceiling(
         .try_reserve_exact(layout.catalog.entries.len())
         .map_err(|_| ProofBodyError::AllocationLimitExceeded)?;
     let mut query_section_byte_length = 4_usize;
+    let mut query_framing_byte_length = 0_usize;
+    let mut relation_query_payload_byte_length = 0_usize;
+    let mut quotient_query_payload_byte_length = 0_usize;
+    let mut fri_query_payload_byte_length = 0_usize;
     let mut frontier_node_count_cache = BTreeMap::<(usize, usize), usize>::new();
     for entry in &layout.catalog.entries {
         let leaf_count = entry_leaf_count(entry, layout.catalog.evaluation_domain_size)?;
@@ -202,9 +270,9 @@ pub(crate) fn canonical_common_proof_byte_length_ceiling(
             };
             let opening_list_byte_length =
                 raw_byte_list_byte_length(opened_leaf_count, canonical_leaf_byte_length)?;
-            let frontier_list_byte_length = nested_tuple_list_byte_length(
+            let frontier_list_byte_length = homogeneous_fixed_width_list_byte_length(
                 frontier_node_count,
-                AUTHENTICATION_NODE_CANONICAL_BYTE_LENGTH,
+                AUTHENTICATION_DIGEST_BYTE_LENGTH,
             )?;
             let byte_length = 44_usize
                 .checked_add(opening_list_byte_length)
@@ -219,6 +287,42 @@ pub(crate) fn canonical_common_proof_byte_length_ceiling(
         query_section_byte_length = query_section_byte_length
             .checked_add(byte_length_at_ceiling)
             .ok_or(ProofBodyError::CountOverflow)?;
+        let opened_leaf_payload_byte_length = opened_leaf_count_at_ceiling
+            .checked_mul(canonical_leaf_byte_length)
+            .ok_or(ProofBodyError::CountOverflow)?;
+        let authentication_frontier_digest_byte_length =
+            authentication_frontier_node_count_at_ceiling
+                .checked_mul(AUTHENTICATION_DIGEST_BYTE_LENGTH)
+                .ok_or(ProofBodyError::CountOverflow)?;
+        let canonical_framing_byte_length = byte_length_at_ceiling
+            .checked_sub(opened_leaf_payload_byte_length)
+            .and_then(|length| length.checked_sub(authentication_frontier_digest_byte_length))
+            .ok_or(ProofBodyError::CountOverflow)?;
+        let query_payload_byte_length = opened_leaf_payload_byte_length
+            .checked_add(authentication_frontier_digest_byte_length)
+            .ok_or(ProofBodyError::CountOverflow)?;
+        query_framing_byte_length = query_framing_byte_length
+            .checked_add(canonical_framing_byte_length)
+            .ok_or(ProofBodyError::CountOverflow)?;
+        match entry.source {
+            ProofTreeCatalogSource::RelationProofCreated { .. }
+            | ProofTreeCatalogSource::RelationBoundPublic => {
+                relation_query_payload_byte_length = relation_query_payload_byte_length
+                    .checked_add(query_payload_byte_length)
+                    .ok_or(ProofBodyError::CountOverflow)?;
+            }
+            ProofTreeCatalogSource::QuotientComponent { .. } => {
+                quotient_query_payload_byte_length = quotient_query_payload_byte_length
+                    .checked_add(query_payload_byte_length)
+                    .ok_or(ProofBodyError::CountOverflow)?;
+            }
+            ProofTreeCatalogSource::OpeningBatchMask
+            | ProofTreeCatalogSource::NonterminalFriLayer { .. } => {
+                fri_query_payload_byte_length = fri_query_payload_byte_length
+                    .checked_add(query_payload_byte_length)
+                    .ok_or(ProofBodyError::CountOverflow)?;
+            }
+        }
         query_trees.push(ProofQueryTreeByteLengthCeiling {
             tree_catalog_index: entry.tree_catalog_index,
             source: entry.source,
@@ -229,6 +333,9 @@ pub(crate) fn canonical_common_proof_byte_length_ceiling(
             maximum_opened_leaf_count,
             opened_leaf_count_at_ceiling,
             authentication_frontier_node_count_at_ceiling,
+            opened_leaf_payload_byte_length,
+            authentication_frontier_digest_byte_length,
+            canonical_framing_byte_length,
             byte_length: byte_length_at_ceiling,
         });
     }
@@ -241,16 +348,79 @@ pub(crate) fn canonical_common_proof_byte_length_ceiling(
         .and_then(|length| length.checked_add(query_section_byte_length))
         .filter(|length| *length <= u32::MAX as usize)
         .ok_or(ProofBodyError::CountOverflow)?;
+    let extension_element_byte_length = PROOF_CHALLENGE_EXTENSION_DEGREE
+        .checked_mul(8)
+        .ok_or(ProofBodyError::CountOverflow)?;
+    let transcript_opening_claim_payload_byte_length =
+        usize::try_from(layout.deep_evaluation_count)
+            .map_err(|_| ProofBodyError::CountOverflow)?
+            .checked_mul(extension_element_byte_length)
+            .ok_or(ProofBodyError::CountOverflow)?;
+    let terminal_fri_payload_byte_length = usize::try_from(layout.terminal_coefficient_count)
+        .map_err(|_| ProofBodyError::CountOverflow)?
+        .checked_mul(extension_element_byte_length)
+        .ok_or(ProofBodyError::CountOverflow)?;
+    let mut relation_root_byte_length = 0_usize;
+    let mut quotient_root_byte_length = 0_usize;
+    let mut fri_root_byte_length = 0_usize;
+    for entry in &layout.catalog.entries {
+        if entry.bound_root.is_some() {
+            continue;
+        }
+        match entry.source {
+            ProofTreeCatalogSource::RelationProofCreated { .. } => {
+                relation_root_byte_length = relation_root_byte_length
+                    .checked_add(AUTHENTICATION_DIGEST_BYTE_LENGTH)
+                    .ok_or(ProofBodyError::CountOverflow)?;
+            }
+            ProofTreeCatalogSource::QuotientComponent { .. } => {
+                quotient_root_byte_length = quotient_root_byte_length
+                    .checked_add(AUTHENTICATION_DIGEST_BYTE_LENGTH)
+                    .ok_or(ProofBodyError::CountOverflow)?;
+            }
+            ProofTreeCatalogSource::OpeningBatchMask
+            | ProofTreeCatalogSource::NonterminalFriLayer { .. } => {
+                fri_root_byte_length = fri_root_byte_length
+                    .checked_add(AUTHENTICATION_DIGEST_BYTE_LENGTH)
+                    .ok_or(ProofBodyError::CountOverflow)?;
+            }
+            ProofTreeCatalogSource::RelationBoundPublic => {
+                return Err(ProofBodyError::InvalidCatalog);
+            }
+        }
+    }
+    let component_byte_lengths = CommonProofComponentByteLengths {
+        canonical_framing: canonical_header_byte_length
+            .checked_add(4)
+            .and_then(|length| length.checked_add(query_framing_byte_length))
+            .and_then(|length| length.checked_add(12))
+            .ok_or(ProofBodyError::CountOverflow)?,
+        relation_commitments_and_openings: relation_root_byte_length
+            .checked_add(relation_query_payload_byte_length)
+            .ok_or(ProofBodyError::CountOverflow)?,
+        quotient_commitments_and_openings: quotient_root_byte_length
+            .checked_add(quotient_query_payload_byte_length)
+            .ok_or(ProofBodyError::CountOverflow)?,
+        transcript_opening_claims: transcript_opening_claim_payload_byte_length,
+        fri: fri_root_byte_length
+            .checked_add(fri_query_payload_byte_length)
+            .and_then(|length| length.checked_add(terminal_fri_payload_byte_length))
+            .ok_or(ProofBodyError::CountOverflow)?,
+    };
+    if component_byte_lengths.proof_byte_length() != Some(proof_byte_length) {
+        return Err(ProofBodyError::InvalidCatalog);
+    }
     Ok(CommonProofByteLengthCeiling {
         canonical_header_byte_length,
         body_prefix_byte_length,
         query_section_byte_length,
         proof_byte_length,
+        component_byte_lengths,
         query_trees,
     })
 }
 
-pub(super) fn maximum_minimal_frontier_node_count(
+pub(in crate::bgv::proof_suite) fn maximum_minimal_frontier_node_count(
     leaf_count: usize,
     selected_leaf_count: usize,
 ) -> Result<usize, ProofBodyError> {
@@ -349,7 +519,7 @@ pub(super) fn raw_byte_list_byte_length(
     ensure_u32_length(byte_length)
 }
 
-pub(super) fn nested_tuple_list_byte_length(
+pub(super) fn homogeneous_fixed_width_list_byte_length(
     element_count: usize,
     element_byte_length: usize,
 ) -> Result<usize, ProofBodyError> {
@@ -365,7 +535,7 @@ fn ensure_u32_length(byte_length: usize) -> Result<usize, ProofBodyError> {
     Ok(byte_length)
 }
 
-pub(super) fn entry_leaf_count(
+pub(crate) fn entry_leaf_count(
     entry: &ProofTreeCatalogEntry,
     evaluation_domain_size: u64,
 ) -> Result<usize, ProofBodyError> {
@@ -378,7 +548,7 @@ pub(super) fn entry_leaf_count(
     }
 }
 
-pub(super) fn canonical_leaf_byte_length(
+pub(crate) fn canonical_leaf_byte_length(
     entry: &ProofTreeCatalogEntry,
 ) -> Result<usize, ProofBodyError> {
     match &entry.construction {
@@ -404,7 +574,7 @@ pub(super) fn canonical_leaf_byte_length(
                 .ok_or(ProofBodyError::CountOverflow)?;
             let salt_item_byte_length =
                 if context.leaf_visibility() == ProofLeafVisibility::SecretBearing {
-                    6 + SECRET_LEAF_SALT_BYTE_LENGTH
+                    6 + COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH
                 } else {
                     0
                 };

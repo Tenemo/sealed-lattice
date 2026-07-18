@@ -1,21 +1,27 @@
 //! Exact allowlist checks for the selected fixed suite.
 
+use std::collections::BTreeMap;
+
 use crate::bgv::{
     key_switch_topology::{KEY_SWITCH_DATA_PRIMES_PER_BLOCK, KEY_SWITCH_SPECIAL_PRIMES},
     parameters::{DATA_PRIMES, POLYNOMIAL_DEGREE},
+    proof_suite::{
+        MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH, selected_galois_key_share_batch_schedule,
+    },
 };
 
-#[cfg(test)]
 use crate::bgv::{
-    evaluator::program::selected_evaluator_program_set,
     key_switch_topology::KeySwitchDecompositionTopology,
-    proof_suite::{SelectedEvaluatorEntryKind, selected_evaluator_entry_positions},
+    proof_suite::{
+        SelectedEvaluatorEntryKind, selected_evaluator_galois_entry_positions,
+        selected_evaluator_relinearization_entry_positions,
+    },
 };
 
 use super::schemas::SchemaResult;
 use super::{
     ArtifactKind, ArtifactReference, FOUNDATION_PROFILE, FoundationSchemaError, Hash512,
-    RefusalReason, SuiteCountLimits, SuiteRecord,
+    ProofApplicationSlotCeilings, RefusalReason, SuiteCountLimits, SuiteRecord,
 };
 
 #[cfg(test)]
@@ -30,7 +36,6 @@ pub(crate) const SELECTED_MAXIMUM_BALLOT_ATTEMPTS_PER_PARTICIPANT: u16 = 3;
 pub(crate) const SELECTED_MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT: u32 = 64;
 pub(crate) const SELECTED_MAXIMUM_PUBLIC_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT: u32 = 128;
 pub(crate) const SELECTED_MAXIMUM_CANDIDATE_PACKAGES_PER_ACTION: u32 = 20;
-pub(crate) const SELECTED_MAXIMUM_PROOF_OBJECTS_PER_ACTION: u32 = 269;
 
 const SELECTED_CANDIDATE_SUITE_IDENTIFIER: Hash512 = Hash512::from_bytes([
     0xaf, 0xda, 0x52, 0x0b, 0xe6, 0xd3, 0x0c, 0x78, 0x60, 0x7a, 0xc5, 0x6a, 0x5e, 0xf5, 0x10, 0x15,
@@ -139,6 +144,17 @@ impl SelectedSuiteCapability {
     pub(crate) const fn polynomial_degree(&self) -> u32 {
         POLYNOMIAL_DEGREE as u32
     }
+
+    pub(crate) const fn maximum_private_sampler_candidate_draws_per_output(&self) -> u32 {
+        SELECTED_MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT
+    }
+}
+
+#[cfg(test)]
+pub(crate) const fn selected_suite_capability_for_tests() -> SelectedSuiteCapability {
+    SelectedSuiteCapability {
+        suite_identifier: SELECTED_CANDIDATE_SUITE_IDENTIFIER.into_bytes(),
+    }
 }
 
 pub(crate) fn select_suite_record(record: &SuiteRecord) -> SchemaResult<SelectedSuiteCapability> {
@@ -148,156 +164,432 @@ pub(crate) fn select_suite_record(record: &SuiteRecord) -> SchemaResult<Selected
     })
 }
 
-#[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct SelectedEvaluatorResourceAccounting {
-    component_material_wire_byte_length: u64,
-    component_material_resident_byte_length: u64,
+pub(crate) struct SelectedEvaluatorLevelResourceAccounting {
+    catalog_level: usize,
+    component_wire_byte_length: u64,
+    component_resident_byte_length: u64,
     source_component_count_per_participant: u64,
-    aggregate_component_count: u64,
-    final_evaluator_key_store_wire_byte_length: u64,
-    final_evaluator_key_store_byte_length: u64,
-    setup_upload_lower_bound_per_participant: u64,
-    ceremony_setup_upload_lower_bound: u64,
-    complete_runtime_material_per_participant: u64,
-    complete_runtime_material_for_ceremony: u64,
+    final_component_count: u64,
+    source_wire_byte_length_per_participant: u64,
+    source_resident_byte_length_per_participant: u64,
+    final_wire_byte_length: u64,
+    final_resident_byte_length: u64,
 }
 
-#[cfg(test)]
-impl SelectedEvaluatorResourceAccounting {
-    pub(crate) const fn component_material_wire_byte_length(self) -> u64 {
-        self.component_material_wire_byte_length
+impl SelectedEvaluatorLevelResourceAccounting {
+    pub(crate) const fn catalog_level(self) -> usize {
+        self.catalog_level
     }
 
-    pub(crate) const fn component_material_resident_byte_length(self) -> u64 {
-        self.component_material_resident_byte_length
+    pub(crate) const fn component_wire_byte_length(self) -> u64 {
+        self.component_wire_byte_length
+    }
+
+    pub(crate) const fn component_resident_byte_length(self) -> u64 {
+        self.component_resident_byte_length
     }
 
     pub(crate) const fn source_component_count_per_participant(self) -> u64 {
         self.source_component_count_per_participant
     }
 
-    pub(crate) const fn aggregate_component_count(self) -> u64 {
-        self.aggregate_component_count
+    pub(crate) const fn final_component_count(self) -> u64 {
+        self.final_component_count
     }
 
-    pub(crate) const fn final_evaluator_key_store_wire_byte_length(self) -> u64 {
-        self.final_evaluator_key_store_wire_byte_length
+    pub(crate) const fn source_wire_byte_length_per_participant(self) -> u64 {
+        self.source_wire_byte_length_per_participant
     }
 
-    pub(crate) const fn final_evaluator_key_store_byte_length(self) -> u64 {
-        self.final_evaluator_key_store_byte_length
+    pub(crate) const fn source_resident_byte_length_per_participant(self) -> u64 {
+        self.source_resident_byte_length_per_participant
     }
 
-    pub(crate) const fn setup_upload_lower_bound_per_participant(self) -> u64 {
-        self.setup_upload_lower_bound_per_participant
+    pub(crate) const fn final_wire_byte_length(self) -> u64 {
+        self.final_wire_byte_length
     }
 
-    pub(crate) const fn ceremony_setup_upload_lower_bound(self) -> u64 {
-        self.ceremony_setup_upload_lower_bound
-    }
-
-    pub(crate) const fn complete_runtime_material_per_participant(self) -> u64 {
-        self.complete_runtime_material_per_participant
-    }
-
-    pub(crate) const fn complete_runtime_material_for_ceremony(self) -> u64 {
-        self.complete_runtime_material_for_ceremony
+    pub(crate) const fn final_resident_byte_length(self) -> u64 {
+        self.final_resident_byte_length
     }
 }
 
-#[cfg(test)]
-pub(crate) fn selected_evaluator_resource_accounting()
--> SchemaResult<SelectedEvaluatorResourceAccounting> {
-    let positions = selected_evaluator_entry_positions(FOUNDATION_PROFILE.option_count)
-        .map_err(|_| invalid_selected_suite("selected evaluator key positions are invalid"))?;
-    let decomposition_topology = KeySwitchDecompositionTopology::for_level(
-        DATA_PRIMES
-            .len()
-            .checked_sub(1)
-            .ok_or_else(resource_count_overflow)?,
-    )
-    .map_err(|_| invalid_selected_suite("selected key-switch topology is invalid"))?;
-    let component_material_wire_byte_length = decomposition_topology
-        .canonical_component_wire_byte_length(POLYNOMIAL_DEGREE)
-        .map_err(|_| invalid_selected_suite("selected component wire length is invalid"))?;
-    let component_material_resident_byte_length = decomposition_topology
-        .resident_component_byte_length(POLYNOMIAL_DEGREE)
-        .map_err(|_| invalid_selected_suite("selected component resident length is invalid"))?;
-    let mut source_component_count_per_participant = 0_u64;
-    let mut aggregate_component_count = 0_u64;
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct SelectedEvaluatorResourceAccounting {
+    levels: Vec<SelectedEvaluatorLevelResourceAccounting>,
+    relinearization_position_count: u32,
+    galois_position_count: u32,
+    source_component_count_per_participant: u64,
+    source_public_polynomial_context_hash_count_per_participant: u64,
+    source_public_polynomial_context_hash_resident_byte_length_per_participant: u64,
+    final_component_count: u64,
+    source_wire_byte_length_per_participant: u64,
+    source_resident_byte_length_per_participant: u64,
+    final_evaluator_key_store_wire_byte_length: u64,
+    final_evaluator_key_store_resident_byte_length: u64,
+    ceremony_setup_wire_byte_length: u64,
+    ceremony_source_and_final_resident_volume_byte_length: u64,
+}
 
-    for position in positions {
-        let catalog_level = match position.key_kind() {
-            SelectedEvaluatorEntryKind::Relinearization { catalog_level }
-            | SelectedEvaluatorEntryKind::Galois { catalog_level, .. } => catalog_level,
-        };
-        let decomposition_digit_count = catalog_level
-            .checked_add(1)
-            .ok_or_else(resource_count_overflow)?;
-        if decomposition_digit_count != DATA_PRIMES.len() {
-            return Err(invalid_selected_suite(
-                "selected evaluator entry does not use the complete data-prime basis",
-            ));
-        }
-        match position.key_kind() {
-            SelectedEvaluatorEntryKind::Relinearization { .. } => {
-                // Two round-one source components and one round-two source
-                // component produce the two final relinearization components.
-                source_component_count_per_participant = source_component_count_per_participant
-                    .checked_add(3)
-                    .ok_or_else(resource_count_overflow)?;
-                aggregate_component_count = aggregate_component_count
-                    .checked_add(2)
-                    .ok_or_else(resource_count_overflow)?;
-            }
-            SelectedEvaluatorEntryKind::Galois { .. } => {
-                source_component_count_per_participant = source_component_count_per_participant
-                    .checked_add(1)
-                    .ok_or_else(resource_count_overflow)?;
-                aggregate_component_count = aggregate_component_count
-                    .checked_add(1)
-                    .ok_or_else(resource_count_overflow)?;
-            }
-        }
+impl SelectedEvaluatorResourceAccounting {
+    pub(crate) fn levels(&self) -> &[SelectedEvaluatorLevelResourceAccounting] {
+        &self.levels
     }
 
-    let final_evaluator_key_store_wire_byte_length = component_material_wire_byte_length
-        .checked_mul(aggregate_component_count)
-        .ok_or_else(resource_count_overflow)?;
-    let final_evaluator_key_store_byte_length = component_material_resident_byte_length
-        .checked_mul(aggregate_component_count)
-        .ok_or_else(resource_count_overflow)?;
-    let setup_upload_lower_bound_per_participant = component_material_wire_byte_length
-        .checked_mul(source_component_count_per_participant)
-        .ok_or_else(resource_count_overflow)?;
-    let source_upload_for_ceremony = setup_upload_lower_bound_per_participant
+    pub(crate) const fn source_component_count_per_participant(&self) -> u64 {
+        self.source_component_count_per_participant
+    }
+
+    pub(crate) const fn relinearization_position_count(&self) -> u32 {
+        self.relinearization_position_count
+    }
+
+    pub(crate) const fn galois_position_count(&self) -> u32 {
+        self.galois_position_count
+    }
+
+    pub(crate) const fn source_public_polynomial_context_hash_count_per_participant(&self) -> u64 {
+        self.source_public_polynomial_context_hash_count_per_participant
+    }
+
+    pub(crate) const fn source_public_polynomial_context_hash_resident_byte_length_per_participant(
+        &self,
+    ) -> u64 {
+        self.source_public_polynomial_context_hash_resident_byte_length_per_participant
+    }
+
+    pub(crate) const fn final_component_count(&self) -> u64 {
+        self.final_component_count
+    }
+
+    pub(crate) const fn source_wire_byte_length_per_participant(&self) -> u64 {
+        self.source_wire_byte_length_per_participant
+    }
+
+    pub(crate) const fn source_resident_byte_length_per_participant(&self) -> u64 {
+        self.source_resident_byte_length_per_participant
+    }
+
+    pub(crate) const fn final_evaluator_key_store_wire_byte_length(&self) -> u64 {
+        self.final_evaluator_key_store_wire_byte_length
+    }
+
+    pub(crate) const fn final_evaluator_key_store_resident_byte_length(&self) -> u64 {
+        self.final_evaluator_key_store_resident_byte_length
+    }
+
+    pub(crate) const fn ceremony_setup_wire_byte_length(&self) -> u64 {
+        self.ceremony_setup_wire_byte_length
+    }
+
+    pub(crate) const fn ceremony_source_and_final_resident_volume_byte_length(&self) -> u64 {
+        self.ceremony_source_and_final_resident_volume_byte_length
+    }
+}
+
+pub(crate) fn selected_evaluator_resource_accounting()
+-> SchemaResult<SelectedEvaluatorResourceAccounting> {
+    let relinearization_positions =
+        selected_evaluator_relinearization_entry_positions().map_err(|_| {
+            invalid_selected_suite("selected relinearization key positions are invalid")
+        })?;
+    let galois_positions = selected_evaluator_galois_entry_positions()
+        .map_err(|_| invalid_selected_suite("selected Galois key positions are invalid"))?;
+    if relinearization_positions.is_empty() || galois_positions.is_empty() {
+        return Err(invalid_selected_suite(
+            "selected evaluator key position catalog is empty",
+        ));
+    }
+    let mut component_counts_by_level = BTreeMap::<usize, (u64, u64)>::new();
+    let mut relinearization_position_count = 0_u32;
+    let mut galois_position_count = 0_u32;
+    for position in relinearization_positions {
+        let SelectedEvaluatorEntryKind::Relinearization { catalog_level } = position.key_kind()
+        else {
+            return Err(invalid_selected_suite(
+                "selected relinearization position has the wrong key kind",
+            ));
+        };
+        relinearization_position_count = relinearization_position_count
+            .checked_add(1)
+            .ok_or_else(resource_count_overflow)?;
+        let counts = component_counts_by_level
+            .entry(catalog_level)
+            .or_insert((0, 0));
+        counts.0 = counts
+            .0
+            .checked_add(3)
+            .ok_or_else(resource_count_overflow)?;
+        counts.1 = counts
+            .1
+            .checked_add(2)
+            .ok_or_else(resource_count_overflow)?;
+    }
+    for position in galois_positions {
+        let SelectedEvaluatorEntryKind::Galois { catalog_level, .. } = position.key_kind() else {
+            return Err(invalid_selected_suite(
+                "selected Galois position has the wrong key kind",
+            ));
+        };
+        galois_position_count = galois_position_count
+            .checked_add(1)
+            .ok_or_else(resource_count_overflow)?;
+        let counts = component_counts_by_level
+            .entry(catalog_level)
+            .or_insert((0, 0));
+        counts.0 = counts
+            .0
+            .checked_add(1)
+            .ok_or_else(resource_count_overflow)?;
+        counts.1 = counts
+            .1
+            .checked_add(1)
+            .ok_or_else(resource_count_overflow)?;
+    }
+
+    let mut levels = Vec::new();
+    levels
+        .try_reserve_exact(component_counts_by_level.len())
+        .map_err(|_| resource_count_overflow())?;
+    for (catalog_level, (source_component_count, final_component_count)) in
+        component_counts_by_level
+    {
+        let decomposition_topology = KeySwitchDecompositionTopology::for_level(catalog_level)
+            .map_err(|_| invalid_selected_suite("selected key-switch topology is invalid"))?;
+        let component_wire_byte_length = decomposition_topology
+            .canonical_component_wire_byte_length(POLYNOMIAL_DEGREE)
+            .map_err(|_| invalid_selected_suite("selected component wire length is invalid"))?;
+        let component_resident_byte_length = decomposition_topology
+            .resident_component_byte_length(POLYNOMIAL_DEGREE)
+            .map_err(|_| invalid_selected_suite("selected component resident length is invalid"))?;
+        levels.push(SelectedEvaluatorLevelResourceAccounting {
+            catalog_level,
+            component_wire_byte_length,
+            component_resident_byte_length,
+            source_component_count_per_participant: source_component_count,
+            final_component_count,
+            source_wire_byte_length_per_participant: component_wire_byte_length
+                .checked_mul(source_component_count)
+                .ok_or_else(resource_count_overflow)?,
+            source_resident_byte_length_per_participant: component_resident_byte_length
+                .checked_mul(source_component_count)
+                .ok_or_else(resource_count_overflow)?,
+            final_wire_byte_length: component_wire_byte_length
+                .checked_mul(final_component_count)
+                .ok_or_else(resource_count_overflow)?,
+            final_resident_byte_length: component_resident_byte_length
+                .checked_mul(final_component_count)
+                .ok_or_else(resource_count_overflow)?,
+        });
+    }
+
+    let source_component_count_per_participant =
+        levels.iter().try_fold(0_u64, |total, level| {
+            total
+                .checked_add(level.source_component_count_per_participant())
+                .ok_or_else(resource_count_overflow)
+        })?;
+    let final_component_count = levels.iter().try_fold(0_u64, |total, level| {
+        total
+            .checked_add(level.final_component_count())
+            .ok_or_else(resource_count_overflow)
+    })?;
+    let source_wire_byte_length_per_participant =
+        levels.iter().try_fold(0_u64, |total, level| {
+            total
+                .checked_add(level.source_wire_byte_length_per_participant())
+                .ok_or_else(resource_count_overflow)
+        })?;
+    let source_component_resident_byte_length_per_participant =
+        levels.iter().try_fold(0_u64, |total, level| {
+            total
+                .checked_add(level.source_resident_byte_length_per_participant())
+                .ok_or_else(resource_count_overflow)
+        })?;
+    let source_public_polynomial_context_hash_count_per_participant =
+        u64::from(relinearization_position_count)
+            .checked_add(u64::from(galois_position_count))
+            .ok_or_else(resource_count_overflow)?;
+    let source_public_polynomial_context_hash_resident_byte_length_per_participant =
+        source_public_polynomial_context_hash_count_per_participant
+            .checked_mul(
+                u64::try_from(Hash512::BYTE_LENGTH).map_err(|_| resource_count_overflow())?,
+            )
+            .ok_or_else(resource_count_overflow)?;
+    let source_resident_byte_length_per_participant =
+        source_component_resident_byte_length_per_participant
+            .checked_add(source_public_polynomial_context_hash_resident_byte_length_per_participant)
+            .ok_or_else(resource_count_overflow)?;
+    let final_evaluator_key_store_wire_byte_length =
+        levels.iter().try_fold(0_u64, |total, level| {
+            total
+                .checked_add(level.final_wire_byte_length())
+                .ok_or_else(resource_count_overflow)
+        })?;
+    let final_evaluator_key_store_resident_byte_length =
+        levels.iter().try_fold(0_u64, |total, level| {
+            total
+                .checked_add(level.final_resident_byte_length())
+                .ok_or_else(resource_count_overflow)
+        })?;
+    let source_wire_byte_length_for_ceremony = source_wire_byte_length_per_participant
         .checked_mul(u64::from(FOUNDATION_PROFILE.participant_count))
         .ok_or_else(resource_count_overflow)?;
-    let ceremony_setup_upload_lower_bound = source_upload_for_ceremony
+    let ceremony_setup_wire_byte_length = source_wire_byte_length_for_ceremony
         .checked_add(final_evaluator_key_store_wire_byte_length)
         .ok_or_else(resource_count_overflow)?;
-    let complete_runtime_material_per_participant = component_material_resident_byte_length
-        .checked_mul(source_component_count_per_participant)
-        .ok_or_else(resource_count_overflow)?;
-    let source_runtime_material_for_ceremony = complete_runtime_material_per_participant
+    let ceremony_source_resident_volume_byte_length = source_resident_byte_length_per_participant
         .checked_mul(u64::from(FOUNDATION_PROFILE.participant_count))
         .ok_or_else(resource_count_overflow)?;
-    let complete_runtime_material_for_ceremony = source_runtime_material_for_ceremony
-        .checked_add(final_evaluator_key_store_byte_length)
-        .ok_or_else(resource_count_overflow)?;
-    Ok(SelectedEvaluatorResourceAccounting {
-        component_material_wire_byte_length,
-        component_material_resident_byte_length,
+    let ceremony_source_and_final_resident_volume_byte_length =
+        ceremony_source_resident_volume_byte_length
+            .checked_add(final_evaluator_key_store_resident_byte_length)
+            .ok_or_else(resource_count_overflow)?;
+    let accounting = SelectedEvaluatorResourceAccounting {
+        levels,
+        relinearization_position_count,
+        galois_position_count,
         source_component_count_per_participant,
-        aggregate_component_count,
+        source_public_polynomial_context_hash_count_per_participant,
+        source_public_polynomial_context_hash_resident_byte_length_per_participant,
+        final_component_count,
+        source_wire_byte_length_per_participant,
+        source_resident_byte_length_per_participant,
         final_evaluator_key_store_wire_byte_length,
-        final_evaluator_key_store_byte_length,
-        setup_upload_lower_bound_per_participant,
-        ceremony_setup_upload_lower_bound,
-        complete_runtime_material_per_participant,
-        complete_runtime_material_for_ceremony,
-    })
+        final_evaluator_key_store_resident_byte_length,
+        ceremony_setup_wire_byte_length,
+        ceremony_source_and_final_resident_volume_byte_length,
+    };
+    require_selected_evaluator_resource_accounting(&accounting)?;
+    Ok(accounting)
+}
+
+fn require_selected_evaluator_resource_accounting(
+    accounting: &SelectedEvaluatorResourceAccounting,
+) -> SchemaResult<()> {
+    let mut source_component_count_per_participant = 0_u64;
+    let mut final_component_count = 0_u64;
+    let mut source_wire_byte_length_per_participant = 0_u64;
+    let mut source_component_resident_byte_length_per_participant = 0_u64;
+    let mut final_evaluator_key_store_wire_byte_length = 0_u64;
+    let mut final_evaluator_key_store_resident_byte_length = 0_u64;
+    let mut previous_catalog_level = None;
+    for level in accounting.levels() {
+        if previous_catalog_level
+            .is_some_and(|previous_catalog_level| level.catalog_level() <= previous_catalog_level)
+            || level.component_wire_byte_length() == 0
+            || level.component_resident_byte_length() == 0
+            || level.source_component_count_per_participant() == 0
+            || level.final_component_count() == 0
+            || level.source_wire_byte_length_per_participant()
+                != level
+                    .component_wire_byte_length()
+                    .checked_mul(level.source_component_count_per_participant())
+                    .ok_or_else(resource_count_overflow)?
+            || level.source_resident_byte_length_per_participant()
+                != level
+                    .component_resident_byte_length()
+                    .checked_mul(level.source_component_count_per_participant())
+                    .ok_or_else(resource_count_overflow)?
+            || level.final_wire_byte_length()
+                != level
+                    .component_wire_byte_length()
+                    .checked_mul(level.final_component_count())
+                    .ok_or_else(resource_count_overflow)?
+            || level.final_resident_byte_length()
+                != level
+                    .component_resident_byte_length()
+                    .checked_mul(level.final_component_count())
+                    .ok_or_else(resource_count_overflow)?
+        {
+            return Err(invalid_selected_suite(
+                "selected evaluator level accounting is inconsistent",
+            ));
+        }
+        previous_catalog_level = Some(level.catalog_level());
+        source_component_count_per_participant = source_component_count_per_participant
+            .checked_add(level.source_component_count_per_participant())
+            .ok_or_else(resource_count_overflow)?;
+        final_component_count = final_component_count
+            .checked_add(level.final_component_count())
+            .ok_or_else(resource_count_overflow)?;
+        source_wire_byte_length_per_participant = source_wire_byte_length_per_participant
+            .checked_add(level.source_wire_byte_length_per_participant())
+            .ok_or_else(resource_count_overflow)?;
+        source_component_resident_byte_length_per_participant =
+            source_component_resident_byte_length_per_participant
+                .checked_add(level.source_resident_byte_length_per_participant())
+                .ok_or_else(resource_count_overflow)?;
+        final_evaluator_key_store_wire_byte_length = final_evaluator_key_store_wire_byte_length
+            .checked_add(level.final_wire_byte_length())
+            .ok_or_else(resource_count_overflow)?;
+        final_evaluator_key_store_resident_byte_length =
+            final_evaluator_key_store_resident_byte_length
+                .checked_add(level.final_resident_byte_length())
+                .ok_or_else(resource_count_overflow)?;
+    }
+    let source_public_polynomial_context_hash_count_per_participant =
+        u64::from(accounting.relinearization_position_count())
+            .checked_add(u64::from(accounting.galois_position_count()))
+            .ok_or_else(resource_count_overflow)?;
+    let source_public_polynomial_context_hash_resident_byte_length_per_participant =
+        source_public_polynomial_context_hash_count_per_participant
+            .checked_mul(
+                u64::try_from(Hash512::BYTE_LENGTH).map_err(|_| resource_count_overflow())?,
+            )
+            .ok_or_else(resource_count_overflow)?;
+    let source_resident_byte_length_per_participant =
+        source_component_resident_byte_length_per_participant
+            .checked_add(source_public_polynomial_context_hash_resident_byte_length_per_participant)
+            .ok_or_else(resource_count_overflow)?;
+    let participant_count = u64::from(FOUNDATION_PROFILE.participant_count);
+    let ceremony_setup_wire_byte_length = source_wire_byte_length_per_participant
+        .checked_mul(participant_count)
+        .and_then(|source_byte_length| {
+            source_byte_length.checked_add(final_evaluator_key_store_wire_byte_length)
+        })
+        .ok_or_else(resource_count_overflow)?;
+    let ceremony_source_and_final_resident_volume_byte_length =
+        source_resident_byte_length_per_participant
+            .checked_mul(participant_count)
+            .and_then(|source_byte_length| {
+                source_byte_length.checked_add(final_evaluator_key_store_resident_byte_length)
+            })
+            .ok_or_else(resource_count_overflow)?;
+    if accounting.levels().is_empty()
+        || accounting.relinearization_position_count() == 0
+        || accounting.galois_position_count() == 0
+        || accounting.source_component_count_per_participant()
+            != source_component_count_per_participant
+        || accounting.source_public_polynomial_context_hash_count_per_participant()
+            != source_public_polynomial_context_hash_count_per_participant
+        || accounting.source_public_polynomial_context_hash_resident_byte_length_per_participant()
+            != source_public_polynomial_context_hash_resident_byte_length_per_participant
+        || accounting.final_component_count() != final_component_count
+        || accounting.source_wire_byte_length_per_participant()
+            != source_wire_byte_length_per_participant
+        || accounting.source_resident_byte_length_per_participant()
+            != source_resident_byte_length_per_participant
+        || accounting.final_evaluator_key_store_wire_byte_length()
+            != final_evaluator_key_store_wire_byte_length
+        || accounting.final_evaluator_key_store_resident_byte_length()
+            != final_evaluator_key_store_resident_byte_length
+        || accounting.ceremony_setup_wire_byte_length() != ceremony_setup_wire_byte_length
+        || accounting.ceremony_source_and_final_resident_volume_byte_length()
+            != ceremony_source_and_final_resident_volume_byte_length
+        || accounting.ceremony_setup_wire_byte_length()
+            > crate::foundation::MAXIMUM_CANONICAL_STREAM_BYTE_LENGTH
+        || accounting.source_resident_byte_length_per_participant()
+            > MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH
+        || accounting.final_evaluator_key_store_resident_byte_length()
+            > MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH
+    {
+        return Err(invalid_selected_suite(
+            "selected evaluator resource accounting exceeds an absolute bound or is inconsistent",
+        ));
+    }
+    Ok(())
 }
 
 pub(crate) fn require_selected_suite_record(record: &SuiteRecord) -> SchemaResult<()> {
@@ -337,62 +629,30 @@ fn selected_count_limits() -> SchemaResult<SuiteCountLimits> {
         SELECTED_MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT,
         SELECTED_MAXIMUM_PUBLIC_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT,
         SELECTED_MAXIMUM_CANDIDATE_PACKAGES_PER_ACTION,
-        SELECTED_MAXIMUM_PROOF_OBJECTS_PER_ACTION,
+        selected_maximum_proof_objects_per_action()?,
     )
 }
 
-#[cfg(test)]
-fn selected_maximum_proof_objects_per_action() -> SchemaResult<u32> {
-    let program = selected_evaluator_program_set()
-        .map_err(|_| invalid_selected_suite("selected evaluator program is invalid"))?;
-    let key_positions = program
-        .key_positions()
-        .map_err(|_| invalid_selected_suite("selected evaluator key positions are invalid"))?;
-    let participant_count = u32::from(FOUNDATION_PROFILE.participant_count);
-    key_positions
-        .streams()
-        .iter()
-        .map(|stream| {
-            let relinearization_count =
-                u32::try_from(stream.relinearization_catalog_levels().len())
-                    .map_err(|_| resource_count_overflow())?;
-            let galois_count = u32::try_from(stream.galois_catalog_positions().len())
-                .map_err(|_| resource_count_overflow())?;
-            participant_count
-                .checked_mul(4)
-                .and_then(|count| {
-                    relinearization_count
-                        .checked_add(galois_count)
-                        .and_then(|evaluator_entry_count| evaluator_entry_count.checked_add(1))
-                        .and_then(|aggregate_count| count.checked_add(aggregate_count))
-                })
-                .and_then(|count| {
-                    participant_count
-                        .checked_mul(2)
-                        .and_then(|trustee_count| trustee_count.checked_add(1))
-                        .and_then(|per_position| per_position.checked_mul(relinearization_count))
-                        .and_then(|position_count| count.checked_add(position_count))
-                })
-                .and_then(|count| {
-                    participant_count
-                        .checked_mul(galois_count)
-                        .and_then(|galois_proofs| count.checked_add(galois_proofs))
-                })
-                .and_then(|count| count.checked_add(SELECTED_MAXIMUM_CANDIDATE_PACKAGES_PER_ACTION))
-                .and_then(|count| count.checked_add(participant_count))
-                .ok_or_else(resource_count_overflow)
-        })
-        .collect::<SchemaResult<Vec<_>>>()?
-        .into_iter()
-        .max()
-        .ok_or_else(|| invalid_selected_suite("selected evaluator program has no streams"))
+pub(crate) fn selected_maximum_proof_objects_per_action() -> SchemaResult<u32> {
+    let evaluator_resource_accounting = selected_evaluator_resource_accounting()?;
+    let selected_relinearization_position_count =
+        evaluator_resource_accounting.relinearization_position_count();
+    let selected_galois_batch_count =
+        u32::try_from(selected_galois_key_share_batch_schedule().len())
+            .map_err(|_| resource_count_overflow())?;
+    Ok(ProofApplicationSlotCeilings::derive(
+        FOUNDATION_PROFILE.participant_count,
+        selected_relinearization_position_count,
+        selected_galois_batch_count,
+        SELECTED_MAXIMUM_CANDIDATE_PACKAGES_PER_ACTION,
+    )?
+    .total_application_slot_ceiling())
 }
 
 fn invalid_selected_suite(message: &'static str) -> FoundationSchemaError {
     FoundationSchemaError::new(RefusalReason::UnsupportedVersionOrSuite, message)
 }
 
-#[cfg(test)]
 fn resource_count_overflow() -> FoundationSchemaError {
     FoundationSchemaError::new(
         RefusalReason::OutsideSupportedProfile,
@@ -437,36 +697,112 @@ mod tests {
     #[test]
     fn selected_evaluator_accounting_reports_exact_wire_and_resident_measurements() {
         let accounting = selected_evaluator_resource_accounting().expect("resource accounting");
-        assert_eq!(accounting.component_material_wire_byte_length(), 6_684_672);
+        assert_eq!(accounting.levels().len(), 2);
+        let relinearization_level = accounting
+            .levels()
+            .iter()
+            .find(|level| level.catalog_level() == 23)
+            .expect("the selected level-23 relinearization material is accounted");
+        let galois_level = accounting
+            .levels()
+            .iter()
+            .find(|level| level.catalog_level() == 25)
+            .expect("the selected level-25 Galois material is accounted");
         assert_eq!(
-            accounting.component_material_resident_byte_length(),
-            8_912_896
+            relinearization_level.source_component_count_per_participant(),
+            3
         );
-        assert_eq!(accounting.source_component_count_per_participant(), 19);
-        assert_eq!(accounting.aggregate_component_count(), 18);
+        assert_eq!(relinearization_level.final_component_count(), 2);
+        assert_eq!(galois_level.source_component_count_per_participant(), 4);
+        assert_eq!(galois_level.final_component_count(), 4);
+        assert_eq!(accounting.source_component_count_per_participant(), 7);
+        assert_eq!(accounting.final_component_count(), 6);
+        assert_eq!(
+            accounting.source_public_polynomial_context_hash_count_per_participant(),
+            u64::from(accounting.relinearization_position_count())
+                + u64::from(accounting.galois_position_count())
+        );
+        assert_eq!(
+            accounting.source_public_polynomial_context_hash_resident_byte_length_per_participant(),
+            accounting.source_public_polynomial_context_hash_count_per_participant()
+                * u64::try_from(Hash512::BYTE_LENGTH).expect("hash width fits u64")
+        );
+        assert!(accounting.levels().iter().all(|level| {
+            level.component_wire_byte_length() < level.component_resident_byte_length()
+                && level.source_wire_byte_length_per_participant()
+                    == level.component_wire_byte_length()
+                        * level.source_component_count_per_participant()
+                && level.source_resident_byte_length_per_participant()
+                    == level.component_resident_byte_length()
+                        * level.source_component_count_per_participant()
+                && level.final_wire_byte_length()
+                    == level.component_wire_byte_length() * level.final_component_count()
+                && level.final_resident_byte_length()
+                    == level.component_resident_byte_length() * level.final_component_count()
+        }));
+        assert_eq!(
+            accounting.source_wire_byte_length_per_participant(),
+            accounting
+                .levels()
+                .iter()
+                .map(|level| level.source_wire_byte_length_per_participant())
+                .sum::<u64>()
+        );
+        assert_eq!(
+            accounting.source_resident_byte_length_per_participant(),
+            accounting
+                .levels()
+                .iter()
+                .map(|level| level.source_resident_byte_length_per_participant())
+                .sum::<u64>()
+                + accounting
+                    .source_public_polynomial_context_hash_resident_byte_length_per_participant()
+        );
         assert_eq!(
             accounting.final_evaluator_key_store_wire_byte_length(),
-            120_324_096
+            accounting
+                .levels()
+                .iter()
+                .map(|level| level.final_wire_byte_length())
+                .sum::<u64>()
         );
         assert_eq!(
-            accounting.final_evaluator_key_store_byte_length(),
-            160_432_128
+            accounting.ceremony_setup_wire_byte_length(),
+            accounting.source_wire_byte_length_per_participant()
+                * u64::from(FOUNDATION_PROFILE.participant_count)
+                + accounting.final_evaluator_key_store_wire_byte_length()
         );
         assert_eq!(
-            accounting.setup_upload_lower_bound_per_participant(),
-            127_008_768
+            accounting.ceremony_source_and_final_resident_volume_byte_length(),
+            accounting.source_resident_byte_length_per_participant()
+                * u64::from(FOUNDATION_PROFILE.participant_count)
+                + accounting.final_evaluator_key_store_resident_byte_length()
         );
-        assert_eq!(
-            accounting.ceremony_setup_upload_lower_bound(),
-            1_390_411_776
+        const CEREMONY_CORPUS_PLANNING_TARGET_BYTE_LENGTH: u64 = 2_147_483_648;
+        let planning_target_overage = accounting
+            .ceremony_setup_wire_byte_length()
+            .saturating_sub(CEREMONY_CORPUS_PLANNING_TARGET_BYTE_LENGTH);
+        assert!(
+            accounting.ceremony_setup_wire_byte_length()
+                <= crate::foundation::MAXIMUM_CANONICAL_STREAM_BYTE_LENGTH
         );
-        assert_eq!(
-            accounting.complete_runtime_material_per_participant(),
-            169_345_024
-        );
-        assert_eq!(
-            accounting.complete_runtime_material_for_ceremony(),
-            1_853_882_368
+        eprintln!(
+            "selected_evaluator_resources levels={:?} relinearization_positions={} galois_positions={} source_components_per_participant={} source_public_polynomial_context_hashes_per_participant={} source_public_polynomial_context_hash_resident_bytes_per_participant={} final_components={} source_wire_per_participant={} source_resident_per_participant={} final_wire={} final_resident={} ceremony_wire={} ceremony_source_and_final_resident_volume={} corpus_planning_target={} corpus_planning_overage={}",
+            accounting.levels(),
+            accounting.relinearization_position_count(),
+            accounting.galois_position_count(),
+            accounting.source_component_count_per_participant(),
+            accounting.source_public_polynomial_context_hash_count_per_participant(),
+            accounting.source_public_polynomial_context_hash_resident_byte_length_per_participant(),
+            accounting.final_component_count(),
+            accounting.source_wire_byte_length_per_participant(),
+            accounting.source_resident_byte_length_per_participant(),
+            accounting.final_evaluator_key_store_wire_byte_length(),
+            accounting.final_evaluator_key_store_resident_byte_length(),
+            accounting.ceremony_setup_wire_byte_length(),
+            accounting.ceremony_source_and_final_resident_volume_byte_length(),
+            CEREMONY_CORPUS_PLANNING_TARGET_BYTE_LENGTH,
+            planning_target_overage,
         );
     }
 
@@ -532,11 +868,6 @@ mod tests {
         assert_eq!(
             artifacts,
             selected_artifact_references().expect("fixed artifact references derive")
-        );
-        assert_eq!(
-            selected_maximum_proof_objects_per_action()
-                .expect("selected proof-object count derives"),
-            SELECTED_MAXIMUM_PROOF_OBJECTS_PER_ACTION
         );
         let candidate = SuiteRecord::new(
             selected_count_limits().expect("selected count limits derive"),

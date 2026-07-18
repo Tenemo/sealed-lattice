@@ -430,54 +430,44 @@ const ballotValidityProofFamilySchemaIdentifier = 0x1302;
 const targetShareProofFamilySchemaIdentifier = 0x1621;
 const vssShareLinkageProofFamilySchemaIdentifier = 0x2110;
 const aggregateThresholdShareProofFamilySchemaIdentifier = 0x2111;
-export const proofRandomnessPurposeRanges = Object.freeze([
+export const proofMaskRandomnessPurposeClasses = Object.freeze({
+    trace: 1,
+    telescoping: 2,
+    opening: 3,
+});
+const proofMaskRandomnessPurposeClassSet = new Set<number>(
+    Object.values(proofMaskRandomnessPurposeClasses),
+);
+export const proofRandomnessFamilyAssignments = Object.freeze([
     Object.freeze({
         familySchemaIdentifier: sameSecretProofFamilySchemaIdentifier,
-        firstPurpose: 1,
-        lastPurpose: 2,
     }),
     Object.freeze({
         familySchemaIdentifier: publicKeyShareProofFamilySchemaIdentifier,
-        firstPurpose: 3,
-        lastPurpose: 4,
     }),
     Object.freeze({
         familySchemaIdentifier:
             relinearizationRoundOneProofFamilySchemaIdentifier,
-        firstPurpose: 5,
-        lastPurpose: 6,
     }),
     Object.freeze({
         familySchemaIdentifier:
             relinearizationRoundTwoProofFamilySchemaIdentifier,
-        firstPurpose: 7,
-        lastPurpose: 8,
     }),
     Object.freeze({
         familySchemaIdentifier: galoisKeyShareProofFamilySchemaIdentifier,
-        firstPurpose: 9,
-        lastPurpose: 40,
     }),
     Object.freeze({
         familySchemaIdentifier: ballotValidityProofFamilySchemaIdentifier,
-        firstPurpose: 41,
-        lastPurpose: 42,
     }),
     Object.freeze({
         familySchemaIdentifier: targetShareProofFamilySchemaIdentifier,
-        firstPurpose: 43,
-        lastPurpose: 44,
     }),
     Object.freeze({
         familySchemaIdentifier: vssShareLinkageProofFamilySchemaIdentifier,
-        firstPurpose: 45,
-        lastPurpose: 46,
     }),
     Object.freeze({
         familySchemaIdentifier:
             aggregateThresholdShareProofFamilySchemaIdentifier,
-        firstPurpose: 47,
-        lastPurpose: 48,
     }),
 ]);
 
@@ -500,14 +490,13 @@ const isAssignedRandomUse = (family: number, purpose: number): boolean => {
     if (family === 0x1630) {
         return purpose <= 2;
     }
-    const proofPurposeRange = proofRandomnessPurposeRanges.find(
-        (range) => range.familySchemaIdentifier === family,
+    const proofFamilyAssignment = proofRandomnessFamilyAssignments.find(
+        (assignment) => assignment.familySchemaIdentifier === family,
     );
     return (
-        proofPurposeRange !== undefined &&
+        proofFamilyAssignment !== undefined &&
         (purpose === privateProofSaltPurpose ||
-            (purpose >= proofPurposeRange.firstPurpose &&
-                purpose <= proofPurposeRange.lastPurpose))
+            proofMaskRandomnessPurposeClassSet.has(purpose))
     );
 };
 

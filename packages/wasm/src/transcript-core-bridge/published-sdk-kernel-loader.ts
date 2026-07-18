@@ -117,20 +117,6 @@ export const createPublishedSdkKernelBindings = (
                 expectedCeremonyContextHash: input.expectedCeremonyContextHash,
                 expectedSuiteId: input.expectedSuiteId,
             }),
-        verifyPrivateVssShareEnvelope: (input) =>
-            runtime.executeCommand<
-                ReturnType<PublishedSdkKernel['verifyPrivateVssShareEnvelope']>
-            >({
-                command: 'VerifyPrivateVssShareEnvelope',
-                setupContext: input.setupContext,
-                publicMatrixSeedHash: input.publicMatrixSeedHash,
-                sourceTrusteeCoefficientCommitmentRecord:
-                    input.sourceTrusteeCoefficientCommitmentRecord,
-                sourceTrusteeCoefficientCommitmentMaterialRecords:
-                    input.sourceTrusteeCoefficientCommitmentMaterialRecords,
-                privateEnvelope: input.privateEnvelope,
-                expectedPrivateEnvelopeHash: input.expectedPrivateEnvelopeHash,
-            }),
     };
 };
 

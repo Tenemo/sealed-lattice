@@ -1,41 +1,96 @@
+use super::super::verified_application_statement_hash;
 #[cfg(test)]
 use super::CompletedCommonProofGenerationResult;
 use super::{
     BTreeMap, BoundedCommonProofByteSink, BoundedCommonProofByteSinkError,
-    CHECKPOINT_COMMITTED_STATE_HASH_DOMAIN, CommonProofBoundOpeningProvider, CommonProofByteSink,
-    CommonProofEncodingError, CommonProofGenerationError, CommonProofGenerationInitializationError,
+    CHECKPOINT_COMMITTED_STATE_HASH_DOMAIN, COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH,
+    CommonProofAuthenticatedSourceReadRequest, CommonProofAuxiliaryColumnSynthesisCursor,
+    CommonProofBoundTreeLeafSaltRequest, CommonProofByteSink,
+    CommonProofConstraintStreamQuotientBuilder, CommonProofEncodingError,
+    CommonProofGenerationError, CommonProofGenerationInitializationError,
     CommonProofGenerationInput, CommonProofGenerationPollResult, CommonProofMerkleMaterializer,
     CommonProofMerkleMaterializerProgress, CommonProofMerkleStoragePlan,
-    CommonProofOpeningArtifact, CommonProofOpeningGeometry, CommonProofOpeningPrefetchProgress,
-    CommonProofOpeningPrefetcher, CommonProofPreChallengeRelationColumns, CommonProofPrivacyMode,
+    CommonProofOpeningGeometry, CommonProofOpeningPrefetchProgress, CommonProofOpeningPrefetcher,
+    CommonProofPreChallengeSourceCursor, CommonProofPreChallengeSourcePoll, CommonProofPrivacyMode,
     CommonProofPrivateCoinSource, CommonProofProverError, CommonProofQueryOpeningAbsorber,
-    CommonProofQuotientComponentCursor, CommonProofReplayPolynomialKey,
+    CommonProofQuotientComponentCursor, CommonProofQuotientConstraintTransformKey,
+    CommonProofQuotientEvaluationProgress, CommonProofReplayPolynomialKey,
     CommonProofReplayPolynomialPlan, CommonProofReplayPolynomialReader,
     CommonProofReplayPolynomialRef, CommonProofReplayPolynomialWriter,
-    CommonProofReplayQuotientBuilder, CommonProofResidentMemoryPlan, CommonProofSourcePolynomial,
+    CommonProofResidentMemoryPhase, CommonProofResidentMemoryPlan, CommonProofSourcePolynomial,
+    CommonProofSourcePolynomialProvider, CommonProofSourcePolynomialRequestContext,
     CommonProofTranscript, CommonProofTranscriptSchedule, CommonProofTreeStorageError,
     CompleteProofTreeCatalog, ExternalPolynomialValue, ExternalPolynomialVector,
     ExternalStockhamTransform, ExternalStockhamTransformError, ExternalStockhamTransformPlan,
     ExternalStockhamTransformProgress, GeneratedCommonProofStoragePlanError, HASH_BYTE_LENGTH,
     MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH, MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH,
-    ProofBaseFieldElement, ProofChallengeExtensionElement, ProofEvaluationDomain,
-    ProofExternalMemory, ProofExternalMemoryExecutor, ProofExternalMemoryExecutorError,
-    ProofTreeCatalogEntry, ProofTreeCatalogInput, ProofTreeCatalogSource, ProofTreeRole,
-    ProofTreeValue, RelationApplicationChallengeAssignment, RelationColumnDescriptor,
-    RelationPlanCheckContext, RelationPlanVariant, RelationProofTreeInput, RelationTreeDescriptor,
-    StoredCommonProofMerkleTree, StreamingHash512, ValidatedRelationPlanArtifact,
-    add_replay_polynomial_to_initial_fri, build_complete_proof_tree_catalog,
-    canonical_common_proof_query_section_header, canonical_proof_object_header_bytes,
-    common_proof_query_section_byte_length, common_proof_resident_memory_plan,
-    construct_opening_batch_mask, construct_post_challenge_relation_columns,
-    construct_pre_challenge_relation_columns, encode_common_proof_query_tree_fragment,
+    MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH, ProofBaseFieldElement,
+    ProofChallengeExtensionElement, ProofEvaluationDomain, ProofExternalMemory,
+    ProofExternalMemoryExecutor, ProofExternalMemoryExecutorError, ProofTreeCatalogEntry,
+    ProofTreeCatalogInput, ProofTreeCatalogSource, ProofTreeRole, ProofTreeValue,
+    RelationApplicationChallengeAssignment, RelationPlanCheckContext, RelationPlanVariant,
+    RelationProofTreeInput, RelationTreeDescriptor, StoredCommonProofMerkleTree, StreamingHash512,
+    ValidatedRelationPlanArtifact, Zeroizing, add_replay_polynomial_to_initial_fri,
+    build_complete_proof_tree_catalog, canonical_common_proof_query_section_header,
+    canonical_proof_object_header_bytes, common_proof_query_section_byte_length,
+    common_proof_resident_memory_plan, construct_opening_batch_mask,
+    construct_reversed_relation_column, encode_common_proof_query_tree_fragment, entry_leaf_count,
     evaluate_extension_at, evaluate_replay_polynomial_opening, extension_polynomial_degree,
     fold_extension_evaluations_in_place, generated_common_proof_storage_plan,
     insert_materialized_tree, map_external_polynomial_plan_error,
-    map_private_coin_generation_error, read_external_polynomial_value,
+    map_private_coin_generation_error, proof_created_tree_roles_by_column,
+    read_external_polynomial_extension_values, read_external_polynomial_value,
     replay_polynomial_key_for_claim, statement_owned_tree_root, trim_extension_polynomial,
     unique_catalog_entry, validate_generation_relation_trees, write_common_proof_prefix,
 };
+
+pub(crate) fn common_proof_source_provider_is_live_during_phase(
+    phase: CommonProofResidentMemoryPhase,
+) -> bool {
+    matches!(
+        phase,
+        CommonProofResidentMemoryPhase::LoadingSourcePolynomials
+            | CommonProofResidentMemoryPhase::ConstructingReversedColumns
+            | CommonProofResidentMemoryPhase::TransformingBaseColumns
+            | CommonProofResidentMemoryPhase::MaterializingBaseTrees
+    )
+}
+
+fn enforce_source_provider_resident_memory_bound(
+    resident_memory_plan: &CommonProofResidentMemoryPlan,
+    source_polynomial_provider: &dyn CommonProofSourcePolynomialProvider,
+) -> Result<(), CommonProofProverError> {
+    let loading_persistent_byte_length =
+        source_polynomial_provider.persistent_resident_memory_byte_length()?;
+    let post_finish_persistent_byte_length = source_polynomial_provider
+        .post_source_polynomial_finish_persistent_resident_memory_byte_length()?;
+    let loading_transient_byte_length =
+        source_polynomial_provider.loading_source_polynomials_transient_byte_length()?;
+    for phase in resident_memory_plan
+        .phases()
+        .iter()
+        .filter(|phase| common_proof_source_provider_is_live_during_phase(phase.phase()))
+    {
+        let (provider_persistent_byte_length, provider_transient_byte_length) =
+            if phase.phase() == CommonProofResidentMemoryPhase::LoadingSourcePolynomials {
+                (
+                    loading_persistent_byte_length,
+                    loading_transient_byte_length,
+                )
+            } else {
+                (post_finish_persistent_byte_length, 0)
+            };
+        let combined_byte_length = phase
+            .total_byte_length()
+            .checked_add(provider_persistent_byte_length)
+            .and_then(|length| length.checked_add(provider_transient_byte_length))
+            .ok_or(CommonProofProverError::CountOverflow)?;
+        if combined_byte_length > MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH {
+            return Err(CommonProofProverError::ResidentMemoryLimitExceeded);
+        }
+    }
+    Ok(())
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
@@ -93,24 +148,52 @@ impl CommonProofGenerationCheckpointBoundary {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CommonProofGenerationPhase {
     PreparingInputs,
-    MaterializingBaseTrees { next_tree_index: usize },
+    LoadingPreChallengeSources,
+    DerivingReversedColumns {
+        next_binding_index: usize,
+    },
+    ConstructingReversedColumn {
+        source_column_ordinal: u32,
+        reversed_column_ordinal: u32,
+        next_binding_index: usize,
+    },
+    TransformingBaseColumns {
+        next_column_index: usize,
+    },
+    MaterializingBaseTrees {
+        next_tree_index: usize,
+    },
     DerivingApplicationColumns,
-    PersistingRelationColumns { next_column_index: usize },
-    TransformingRelationColumns { next_column_index: usize },
-    MaterializingAuxiliaryTrees { next_tree_index: usize },
+    DerivingAuxiliaryColumns,
+    TransformingAuxiliaryColumns {
+        next_column_index: usize,
+    },
+    MaterializingAuxiliaryTrees {
+        next_tree_index: usize,
+    },
     ConstructingQuotient,
-    ConstructingQuotientBlocks,
-    MaterializingQuotientTrees { next_component_index: usize },
+    ConstructingQuotientConstraints,
+    MaterializingQuotientTrees {
+        next_component_index: usize,
+    },
     DerivingDeepOpenings,
-    EvaluatingDeepOpenings { next_claim_index: usize },
+    EvaluatingDeepOpenings {
+        next_claim_index: usize,
+    },
     MaterializingOpeningMask,
     PreparingFri,
-    ConstructingInitialFri { next_claim_index: usize },
-    FoldingFri { next_fold_ordinal: u16 },
+    ConstructingInitialFri {
+        next_claim_index: usize,
+    },
+    FoldingFri {
+        next_fold_ordinal: u16,
+    },
     FinishingFri,
     EmittingPrefix,
     EmittingQueryHeader,
-    EmittingQueries { next_catalog_index: usize },
+    EmittingQueries {
+        next_catalog_index: usize,
+    },
     Finalizing,
     Complete,
     Cancelled,
@@ -137,18 +220,31 @@ enum CommonProofTreeContinuation {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CommonProofReplayWriteContinuation {
-    RelationColumn { next_column_index: usize },
+    PreChallengeSource,
+    ReversedColumn { next_binding_index: usize },
+    AuxiliaryColumn,
     QuotientComponent,
     OpeningBatchMask,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CommonProofReplayReadContinuation {
-    QuotientBlockColumn { column_index: usize },
-    DeepOpening { claim_index: usize },
+    ReversedColumnSource {
+        source_column_ordinal: u32,
+        reversed_column_ordinal: u32,
+        next_binding_index: usize,
+    },
+    AuxiliarySynthesisInput {
+        column_ordinal: u32,
+    },
+    DeepOpening {
+        claim_index: usize,
+    },
     OpeningBatchMaskTree,
     OpeningBatchMaskFri,
-    InitialFriClaim { claim_index: usize },
+    InitialFriClaim {
+        claim_index: usize,
+    },
 }
 
 struct ActiveCommonProofReplayPolynomialWriter {
@@ -165,6 +261,20 @@ struct ActiveCommonProofReplayPolynomialReader {
 struct ActiveRelationColumnTransform {
     column_ordinal: u32,
     transform: ExternalStockhamTransform,
+    continuation: CommonProofRelationTransformContinuation,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CommonProofRelationTransformContinuation {
+    Base {
+        next_column_index: usize,
+    },
+    Auxiliary {
+        next_column_index: usize,
+    },
+    Quotient {
+        transform_key: CommonProofQuotientConstraintTransformKey,
+    },
 }
 
 struct ActiveRelationTreeLeafReader {
@@ -172,8 +282,8 @@ struct ActiveRelationTreeLeafReader {
     opposite_index: usize,
     column_ordinals: Vec<u32>,
     next_value_index: usize,
-    first_values: Vec<ProofTreeValue>,
-    opposite_values: Vec<ProofTreeValue>,
+    first_values: Zeroizing<Vec<ProofTreeValue>>,
+    opposite_values: Zeroizing<Vec<ProofTreeValue>>,
 }
 
 impl ActiveRelationTreeLeafReader {
@@ -191,11 +301,11 @@ impl ActiveRelationTreeLeafReader {
             .checked_add(evaluation_domain_size / 2)
             .filter(|index| *index < evaluation_domain_size)
             .ok_or(CommonProofProverError::InvalidTree)?;
-        let mut first_values = Vec::new();
+        let mut first_values = Zeroizing::new(Vec::new());
         first_values
             .try_reserve_exact(column_ordinals.len())
             .map_err(|_| CommonProofProverError::AllocationLimitExceeded)?;
-        let mut opposite_values = Vec::new();
+        let mut opposite_values = Zeroizing::new(Vec::new());
         opposite_values
             .try_reserve_exact(column_ordinals.len())
             .map_err(|_| CommonProofProverError::AllocationLimitExceeded)?;
@@ -217,11 +327,10 @@ struct ActiveCommonProofTreeMaterialization {
 }
 
 enum CommonProofTreeLeafSource {
-    PreChallengeColumns(Vec<u32>),
     RelationColumns(Vec<u32>),
     QuotientComponent,
     OpeningBatchMask,
-    FriEvaluations(Vec<ProofChallengeExtensionElement>),
+    FriEvaluations(Zeroizing<Vec<ProofChallengeExtensionElement>>),
 }
 
 fn evaluate_source_polynomial_tree_value(
@@ -261,14 +370,17 @@ pub(crate) struct CommonProofGenerationStateMachine {
     evaluation_domain: ProofEvaluationDomain,
     catalog: CompleteProofTreeCatalog,
     resident_memory_plan: CommonProofResidentMemoryPlan,
-    relation_trees: Vec<RelationProofTreeInput>,
-    provided_pre_challenge_columns: Option<BTreeMap<u32, CommonProofSourcePolynomial>>,
+    source_polynomial_provider: Option<Box<dyn CommonProofSourcePolynomialProvider>>,
+    source_polynomial_request_context: CommonProofSourcePolynomialRequestContext,
+    source_replay_identity_digest: [u8; HASH_BYTE_LENGTH],
     maximum_prefetched_query_byte_length: u64,
     maximum_output_fragment_byte_length: usize,
     storage_tree_plans: BTreeMap<u16, CommonProofMerkleStoragePlan>,
     replay_polynomial_plans:
         BTreeMap<CommonProofReplayPolynomialKey, CommonProofReplayPolynomialPlan>,
     relation_evaluation_transform_plans: BTreeMap<u32, ExternalStockhamTransformPlan>,
+    quotient_constraint_transform_plans:
+        BTreeMap<CommonProofQuotientConstraintTransformKey, ExternalStockhamTransformPlan>,
     relation_evaluation_vectors: BTreeMap<u32, ExternalPolynomialVector>,
     executor: Option<ProofExternalMemoryExecutor>,
     phase: CommonProofGenerationPhase,
@@ -278,20 +390,22 @@ pub(crate) struct CommonProofGenerationStateMachine {
     active_replay_polynomial_reader: Option<ActiveCommonProofReplayPolynomialReader>,
     active_relation_column_transform: Option<ActiveRelationColumnTransform>,
     active_relation_tree_leaf_reader: Option<ActiveRelationTreeLeafReader>,
-    pre_challenge_columns: Option<CommonProofPreChallengeRelationColumns>,
-    columns: Option<Vec<CommonProofSourcePolynomial>>,
+    pre_challenge_source_cursor: Option<CommonProofPreChallengeSourceCursor>,
+    pending_authenticated_source_read: Option<CommonProofAuthenticatedSourceReadRequest>,
+    auxiliary_column_synthesis_cursor: Option<CommonProofAuxiliaryColumnSynthesisCursor>,
+    current_relation_column: Option<(u32, CommonProofSourcePolynomial)>,
     application_challenges: Vec<RelationApplicationChallengeAssignment>,
-    quotient_builder: Option<CommonProofReplayQuotientBuilder>,
+    quotient_builder: Option<CommonProofConstraintStreamQuotientBuilder>,
     quotient_component_cursor: Option<CommonProofQuotientComponentCursor>,
-    current_quotient_component: Option<Vec<ProofChallengeExtensionElement>>,
+    current_quotient_component: Option<Zeroizing<Vec<ProofChallengeExtensionElement>>>,
     opening_points: Vec<ProofChallengeExtensionElement>,
-    opening_batch_mask: Option<Vec<ProofChallengeExtensionElement>>,
+    opening_batch_mask: Option<Zeroizing<Vec<ProofChallengeExtensionElement>>>,
     deep_evaluations: Vec<ProofChallengeExtensionElement>,
     opening_batch_coefficients: Vec<ProofChallengeExtensionElement>,
-    initial_fri_polynomial: Option<Vec<ProofChallengeExtensionElement>>,
+    initial_fri_polynomial: Option<Zeroizing<Vec<ProofChallengeExtensionElement>>>,
     fri_domain: Option<ProofEvaluationDomain>,
-    fri_evaluations: Option<Vec<ProofChallengeExtensionElement>>,
-    terminal_coefficients: Vec<ProofChallengeExtensionElement>,
+    fri_evaluations: Option<Zeroizing<Vec<ProofChallengeExtensionElement>>>,
+    terminal_coefficients: Zeroizing<Vec<ProofChallengeExtensionElement>>,
     sorted_query_representatives: Vec<u64>,
     opening_geometries: Vec<CommonProofOpeningGeometry>,
     tree_roots: Vec<[u8; HASH_BYTE_LENGTH]>,
@@ -308,7 +422,13 @@ impl CommonProofGenerationStateMachine {
     fn active_tree_leaf_values(
         &self,
         leaf_index: u64,
-    ) -> Result<(Vec<ProofTreeValue>, Vec<ProofTreeValue>), CommonProofProverError> {
+    ) -> Result<
+        (
+            Zeroizing<Vec<ProofTreeValue>>,
+            Zeroizing<Vec<ProofTreeValue>>,
+        ),
+        CommonProofProverError,
+    > {
         let leaf_index =
             usize::try_from(leaf_index).map_err(|_| CommonProofProverError::CountOverflow)?;
         let active = self
@@ -324,16 +444,16 @@ impl CommonProofGenerationStateMachine {
                     .checked_add(evaluations.len() / 2)
                     .ok_or(CommonProofProverError::CountOverflow)?;
                 Ok((
-                    vec![ProofTreeValue::Extension(
+                    Zeroizing::new(vec![ProofTreeValue::Extension(
                         *evaluations
                             .get(leaf_index)
                             .ok_or(CommonProofProverError::InvalidFriLayer)?,
-                    )],
-                    vec![ProofTreeValue::Extension(
+                    )]),
+                    Zeroizing::new(vec![ProofTreeValue::Extension(
                         *evaluations
                             .get(opposite_index)
                             .ok_or(CommonProofProverError::InvalidFriLayer)?,
-                    )],
+                    )]),
                 ))
             }
             leaf_source => {
@@ -342,11 +462,10 @@ impl CommonProofGenerationStateMachine {
                     .ok_or(CommonProofProverError::CountOverflow)?;
                 let first_point = self.evaluation_domain.point(leaf_index)?;
                 let opposite_point = self.evaluation_domain.point(opposite_index)?;
-                let mut first_values = Vec::new();
-                let mut opposite_values = Vec::new();
+                let mut first_values = Zeroizing::new(Vec::new());
+                let mut opposite_values = Zeroizing::new(Vec::new());
                 let row_width = match leaf_source {
-                    CommonProofTreeLeafSource::PreChallengeColumns(column_ordinals)
-                    | CommonProofTreeLeafSource::RelationColumns(column_ordinals) => {
+                    CommonProofTreeLeafSource::RelationColumns(column_ordinals) => {
                         column_ordinals.len()
                     }
                     CommonProofTreeLeafSource::QuotientComponent
@@ -360,25 +479,6 @@ impl CommonProofGenerationStateMachine {
                     .try_reserve_exact(row_width)
                     .map_err(|_| CommonProofProverError::AllocationLimitExceeded)?;
                 match leaf_source {
-                    CommonProofTreeLeafSource::PreChallengeColumns(column_ordinals) => {
-                        let columns = self
-                            .pre_challenge_columns
-                            .as_ref()
-                            .ok_or(CommonProofProverError::InvalidColumn)?;
-                        for column_ordinal in column_ordinals {
-                            let polynomial = columns
-                                .column(*column_ordinal)
-                                .ok_or(CommonProofProverError::InvalidColumn)?;
-                            first_values.push(evaluate_source_polynomial_tree_value(
-                                polynomial,
-                                first_point,
-                            ));
-                            opposite_values.push(evaluate_source_polynomial_tree_value(
-                                polynomial,
-                                opposite_point,
-                            ));
-                        }
-                    }
                     CommonProofTreeLeafSource::RelationColumns(column_ordinals) => {
                         let _ = column_ordinals;
                         return Err(CommonProofProverError::InvalidTree);
@@ -418,13 +518,13 @@ impl CommonProofGenerationStateMachine {
         }
     }
 
-    fn poll_active_tree<Storage, Coins, SinkError, BoundOpeningError>(
+    fn poll_active_tree<Storage, Coins, SinkError>(
         &mut self,
         storage: &mut Storage,
         coins: &mut Coins,
     ) -> Result<
         CommonProofGenerationPoll,
-        CommonProofGenerationError<Storage::Error, Coins::Error, SinkError, BoundOpeningError>,
+        CommonProofGenerationError<Storage::Error, Coins::Error, SinkError>,
     >
     where
         Storage: ProofExternalMemory,
@@ -491,7 +591,7 @@ impl CommonProofGenerationStateMachine {
                 )?;
                 active
                     .materializer
-                    .supply_next_leaf(first_values, opposite_values, coins)
+                    .supply_next_leaf(first_values, opposite_values, None, coins)
                     .map_err(|error| match error {
                         CommonProofTreeStorageError::Prover(error) => {
                             CommonProofGenerationError::Prover(error)
@@ -554,7 +654,7 @@ impl CommonProofGenerationStateMachine {
             schedule_position,
             top_count,
             relation_trees,
-            provided_pre_challenge_columns,
+            source_polynomial_provider,
             maximum_external_memory_chunk_byte_length,
             maximum_proof_transport_chunk_byte_length,
             maximum_prefetched_query_byte_length,
@@ -577,6 +677,27 @@ impl CommonProofGenerationStateMachine {
         let variant = relation_plan
             .select_variant(schedule_position, top_count)
             .map_err(CommonProofGenerationInitializationError::Relation)?;
+        let relation_plan_hash = relation_plan
+            .canonical_hash()
+            .map_err(CommonProofGenerationInitializationError::Relation)?;
+        let relation_plan_variant_hash = variant
+            .canonical_hash()
+            .map_err(CommonProofGenerationInitializationError::Relation)?;
+        let source_polynomial_request_context = CommonProofSourcePolynomialRequestContext::new(
+            protocol_version,
+            suite_identifier,
+            validated_artifact.application_statement_schema_identifier(),
+            verified_application_statement_hash(
+                protocol_version,
+                suite_identifier,
+                validated_artifact.application_statement_schema_identifier(),
+                canonical_application_statement_bytes,
+            ),
+            relation_plan_hash,
+            relation_plan_variant_hash,
+            schedule_position,
+            top_count,
+        );
         validate_generation_relation_trees(variant, &relation_trees)
             .map_err(CommonProofGenerationInitializationError::Prover)?;
         let transcript_schedule = variant
@@ -641,6 +762,11 @@ impl CommonProofGenerationStateMachine {
             })?,
         )
         .map_err(CommonProofGenerationInitializationError::Prover)?;
+        enforce_source_provider_resident_memory_bound(
+            &resident_memory_plan,
+            source_polynomial_provider.as_ref(),
+        )
+        .map_err(CommonProofGenerationInitializationError::Prover)?;
         let executor = ProofExternalMemoryExecutor::new(storage_plan.external_memory_plan);
         let mut tree_roots = vec![[0_u8; HASH_BYTE_LENGTH]; catalog.entries().len()];
         let mut root_present = vec![false; catalog.entries().len()];
@@ -670,13 +796,15 @@ impl CommonProofGenerationStateMachine {
             evaluation_domain,
             catalog,
             resident_memory_plan,
-            relation_trees,
-            provided_pre_challenge_columns: Some(provided_pre_challenge_columns),
+            source_polynomial_provider: Some(source_polynomial_provider),
+            source_polynomial_request_context,
+            source_replay_identity_digest: [0_u8; HASH_BYTE_LENGTH],
             maximum_prefetched_query_byte_length,
             maximum_output_fragment_byte_length: maximum_proof_transport_chunk_byte_length,
             storage_tree_plans: storage_plan.tree_plans,
             replay_polynomial_plans: storage_plan.replay_polynomial_plans,
             relation_evaluation_transform_plans: storage_plan.relation_evaluation_transform_plans,
+            quotient_constraint_transform_plans: storage_plan.quotient_constraint_transform_plans,
             relation_evaluation_vectors: BTreeMap::new(),
             executor: Some(executor),
             phase: CommonProofGenerationPhase::PreparingInputs,
@@ -686,8 +814,10 @@ impl CommonProofGenerationStateMachine {
             active_replay_polynomial_reader: None,
             active_relation_column_transform: None,
             active_relation_tree_leaf_reader: None,
-            pre_challenge_columns: None,
-            columns: None,
+            pre_challenge_source_cursor: None,
+            pending_authenticated_source_read: None,
+            auxiliary_column_synthesis_cursor: None,
+            current_relation_column: None,
             application_challenges: Vec::new(),
             quotient_builder: None,
             quotient_component_cursor: None,
@@ -699,7 +829,7 @@ impl CommonProofGenerationStateMachine {
             initial_fri_polynomial: None,
             fri_domain: None,
             fri_evaluations: None,
-            terminal_coefficients: Vec::new(),
+            terminal_coefficients: Zeroizing::new(Vec::new()),
             sorted_query_representatives: Vec::new(),
             opening_geometries: Vec::new(),
             tree_roots,
@@ -715,7 +845,11 @@ impl CommonProofGenerationStateMachine {
 
     pub(crate) const fn stage(&self) -> CommonProofGenerationStage {
         match self.phase {
-            CommonProofGenerationPhase::PreparingInputs => {
+            CommonProofGenerationPhase::PreparingInputs
+            | CommonProofGenerationPhase::LoadingPreChallengeSources
+            | CommonProofGenerationPhase::DerivingReversedColumns { .. }
+            | CommonProofGenerationPhase::ConstructingReversedColumn { .. }
+            | CommonProofGenerationPhase::TransformingBaseColumns { .. } => {
                 CommonProofGenerationStage::PreparingInputs
             }
             CommonProofGenerationPhase::MaterializingBaseTrees { .. } => {
@@ -724,15 +858,15 @@ impl CommonProofGenerationStateMachine {
             CommonProofGenerationPhase::DerivingApplicationColumns => {
                 CommonProofGenerationStage::DerivingApplicationColumns
             }
-            CommonProofGenerationPhase::PersistingRelationColumns { .. }
-            | CommonProofGenerationPhase::TransformingRelationColumns { .. } => {
+            CommonProofGenerationPhase::DerivingAuxiliaryColumns
+            | CommonProofGenerationPhase::TransformingAuxiliaryColumns { .. } => {
                 CommonProofGenerationStage::DerivingApplicationColumns
             }
             CommonProofGenerationPhase::MaterializingAuxiliaryTrees { .. } => {
                 CommonProofGenerationStage::MaterializingAuxiliaryTrees
             }
             CommonProofGenerationPhase::ConstructingQuotient
-            | CommonProofGenerationPhase::ConstructingQuotientBlocks => {
+            | CommonProofGenerationPhase::ConstructingQuotientConstraints => {
                 CommonProofGenerationStage::ConstructingQuotient
             }
             CommonProofGenerationPhase::MaterializingQuotientTrees { .. } => {
@@ -768,17 +902,46 @@ impl CommonProofGenerationStateMachine {
         &self.resident_memory_plan
     }
 
+    pub(crate) const fn pending_authenticated_source_read(
+        &self,
+    ) -> Option<CommonProofAuthenticatedSourceReadRequest> {
+        self.pending_authenticated_source_read
+    }
+
+    pub(crate) fn supply_authenticated_source_range(
+        &mut self,
+        request: CommonProofAuthenticatedSourceReadRequest,
+        authenticated_bytes: Zeroizing<Box<[u8]>>,
+    ) -> Result<(), CommonProofProverError> {
+        if self.phase != CommonProofGenerationPhase::LoadingPreChallengeSources
+            || self.pending_authenticated_source_read != Some(request)
+            || authenticated_bytes.len()
+                != usize::try_from(request.source_byte_length())
+                    .map_err(|_| CommonProofProverError::CountOverflow)?
+        {
+            return Err(CommonProofProverError::InvalidColumn);
+        }
+        self.source_polynomial_provider
+            .as_deref_mut()
+            .ok_or(CommonProofProverError::InvalidInput)?
+            .supply_authenticated_source_range(request, authenticated_bytes)?;
+        self.pending_authenticated_source_read = None;
+        Ok(())
+    }
+
     #[cfg(test)]
     pub(crate) fn resident_payload_is_empty(&self) -> bool {
-        self.provided_pre_challenge_columns.is_none()
+        self.source_polynomial_provider.is_none()
             && self.active_tree_materialization.is_none()
             && self.pending_tree_continuation.is_none()
             && self.active_replay_polynomial_writer.is_none()
             && self.active_replay_polynomial_reader.is_none()
             && self.active_relation_column_transform.is_none()
             && self.active_relation_tree_leaf_reader.is_none()
-            && self.pre_challenge_columns.is_none()
-            && self.columns.is_none()
+            && self.pre_challenge_source_cursor.is_none()
+            && self.pending_authenticated_source_read.is_none()
+            && self.auxiliary_column_synthesis_cursor.is_none()
+            && self.current_relation_column.is_none()
             && self.application_challenges.is_empty()
             && self.quotient_builder.is_none()
             && self.quotient_component_cursor.is_none()
@@ -796,6 +959,7 @@ impl CommonProofGenerationStateMachine {
             && self.storage_tree_plans.is_empty()
             && self.replay_polynomial_plans.is_empty()
             && self.relation_evaluation_transform_plans.is_empty()
+            && self.quotient_constraint_transform_plans.is_empty()
             && self.relation_evaluation_vectors.is_empty()
             && self.stored_trees.is_empty()
             && self.tree_roots.is_empty()
@@ -805,7 +969,6 @@ impl CommonProofGenerationStateMachine {
             && self.query_section_byte_length.is_none()
             && self.opening_prefetcher.is_none()
             && self.pending_output_fragment.is_none()
-            && self.relation_trees.is_empty()
             && self.canonical_header_bytes.is_empty()
             && self.executor.is_none()
     }
@@ -822,6 +985,7 @@ impl CommonProofGenerationStateMachine {
             || self.active_replay_polynomial_reader.is_some()
             || self.active_relation_column_transform.is_some()
             || self.active_relation_tree_leaf_reader.is_some()
+            || self.pending_authenticated_source_read.is_some()
             || self.opening_prefetcher.is_some()
             || self.pending_output_fragment.is_some()
         {
@@ -851,8 +1015,9 @@ impl CommonProofGenerationStateMachine {
         position[8..12].copy_from_slice(&phase_ordinal.to_le_bytes());
 
         let root_state_byte_length = self.root_present.len().checked_mul(1 + HASH_BYTE_LENGTH)?;
-        let mut hasher = StreamingHash512::new(CHECKPOINT_COMMITTED_STATE_HASH_DOMAIN, 2);
+        let mut hasher = StreamingHash512::new(CHECKPOINT_COMMITTED_STATE_HASH_DOMAIN, 3);
         hasher.absorb_part(&position);
+        hasher.absorb_part(&self.source_replay_identity_digest);
         hasher.begin_part(u64::try_from(root_state_byte_length).ok()?);
         for (present, root) in self.root_present.iter().zip(&self.tree_roots) {
             hasher.absorb_raw(&[u8::from(*present)]);
@@ -871,12 +1036,12 @@ impl CommonProofGenerationStateMachine {
             .ok_or(CommonProofProverError::InvalidInput)
     }
 
-    fn poll_active_relation_column_transform<Storage, CoinError, SinkError, BoundOpeningError>(
+    fn poll_active_relation_column_transform<Storage, CoinError, SinkError>(
         &mut self,
         storage: &mut Storage,
     ) -> Result<
         CommonProofGenerationPoll,
-        CommonProofGenerationError<Storage::Error, CoinError, SinkError, BoundOpeningError>,
+        CommonProofGenerationError<Storage::Error, CoinError, SinkError>,
     >
     where
         Storage: ProofExternalMemory,
@@ -917,35 +1082,61 @@ impl CommonProofGenerationStateMachine {
                 let active = self.active_relation_column_transform.take().ok_or(
                     CommonProofGenerationError::Prover(CommonProofProverError::InvalidColumn),
                 )?;
-                if self
-                    .relation_evaluation_vectors
-                    .insert(active.column_ordinal, vector)
-                    .is_some()
-                {
-                    return Err(CommonProofGenerationError::Prover(
-                        CommonProofProverError::InvalidColumn,
-                    ));
-                }
-                let next_column_index = usize::try_from(active.column_ordinal)
-                    .ok()
-                    .and_then(|index| index.checked_add(1))
-                    .ok_or(CommonProofGenerationError::Prover(
-                        CommonProofProverError::CountOverflow,
-                    ))?;
-                self.phase =
-                    CommonProofGenerationPhase::TransformingRelationColumns { next_column_index };
+                self.phase = match active.continuation {
+                    CommonProofRelationTransformContinuation::Base { next_column_index } => {
+                        if self
+                            .relation_evaluation_vectors
+                            .insert(active.column_ordinal, vector)
+                            .is_some()
+                        {
+                            return Err(CommonProofGenerationError::Prover(
+                                CommonProofProverError::InvalidColumn,
+                            ));
+                        }
+                        CommonProofGenerationPhase::TransformingBaseColumns { next_column_index }
+                    }
+                    CommonProofRelationTransformContinuation::Auxiliary { next_column_index } => {
+                        if self
+                            .relation_evaluation_vectors
+                            .insert(active.column_ordinal, vector)
+                            .is_some()
+                        {
+                            return Err(CommonProofGenerationError::Prover(
+                                CommonProofProverError::InvalidColumn,
+                            ));
+                        }
+                        CommonProofGenerationPhase::TransformingAuxiliaryColumns {
+                            next_column_index,
+                        }
+                    }
+                    CommonProofRelationTransformContinuation::Quotient { transform_key } => {
+                        if active.column_ordinal != transform_key.column_ordinal() {
+                            return Err(CommonProofGenerationError::Prover(
+                                CommonProofProverError::InvalidColumn,
+                            ));
+                        }
+                        self.quotient_builder
+                            .as_mut()
+                            .ok_or(CommonProofGenerationError::Prover(
+                                CommonProofProverError::InvalidQuotient,
+                            ))?
+                            .accept_transformed_column(transform_key, vector)
+                            .map_err(CommonProofGenerationError::Prover)?;
+                        CommonProofGenerationPhase::ConstructingQuotientConstraints
+                    }
+                };
                 Ok(CommonProofGenerationPoll::StorageTransactionCompleted)
             }
         }
     }
 
-    fn poll_active_relation_tree_leaf_reader<Storage, Coins, SinkError, BoundOpeningError>(
+    fn poll_active_relation_tree_leaf_reader<Storage, Coins, SinkError>(
         &mut self,
         storage: &mut Storage,
         coins: &mut Coins,
     ) -> Result<
         CommonProofGenerationPoll,
-        CommonProofGenerationError<Storage::Error, Coins::Error, SinkError, BoundOpeningError>,
+        CommonProofGenerationError<Storage::Error, Coins::Error, SinkError>,
     >
     where
         Storage: ProofExternalMemory,
@@ -964,13 +1155,21 @@ impl CommonProofGenerationStateMachine {
             let reader = self.active_relation_tree_leaf_reader.take().ok_or(
                 CommonProofGenerationError::Prover(CommonProofProverError::InvalidTree),
             )?;
+            let persistent_leaf_salt = self
+                .bound_tree_leaf_salt(reader.leaf_index)
+                .map_err(CommonProofGenerationError::Prover)?;
             self.active_tree_materialization
                 .as_mut()
                 .ok_or(CommonProofGenerationError::Prover(
                     CommonProofProverError::InvalidTree,
                 ))?
                 .materializer
-                .supply_next_leaf(reader.first_values, reader.opposite_values, coins)
+                .supply_next_leaf(
+                    reader.first_values,
+                    reader.opposite_values,
+                    persistent_leaf_salt,
+                    coins,
+                )
                 .map_err(|error| match error {
                     CommonProofTreeStorageError::Prover(error) => {
                         CommonProofGenerationError::Prover(error)
@@ -1058,6 +1257,39 @@ impl CommonProofGenerationStateMachine {
         Ok(CommonProofGenerationPoll::StorageTransactionCompleted)
     }
 
+    fn bound_tree_leaf_salt(
+        &mut self,
+        leaf_index: usize,
+    ) -> Result<Option<[u8; COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH]>, CommonProofProverError>
+    {
+        let tree_catalog_index = self
+            .active_tree_materialization
+            .as_ref()
+            .ok_or(CommonProofProverError::InvalidTree)?
+            .materializer
+            .tree_catalog_index();
+        let entry = self
+            .catalog
+            .entries()
+            .get(usize::from(tree_catalog_index))
+            .ok_or(CommonProofProverError::InvalidTree)?;
+        if !entry.requires_persistent_leaf_salt() {
+            return Ok(None);
+        }
+        let expected_root = entry
+            .bound_root()
+            .ok_or(CommonProofProverError::InvalidTree)?;
+        self.source_polynomial_provider
+            .as_deref_mut()
+            .ok_or(CommonProofProverError::InvalidInput)?
+            .provide_bound_tree_leaf_salt(CommonProofBoundTreeLeafSaltRequest::new(
+                self.source_polynomial_request_context,
+                tree_catalog_index,
+                u64::try_from(leaf_index).map_err(|_| CommonProofProverError::CountOverflow)?,
+                expected_root,
+            ))
+    }
+
     fn prepare_replay_polynomial_writer(
         &mut self,
         key: CommonProofReplayPolynomialKey,
@@ -1078,13 +1310,12 @@ impl CommonProofGenerationStateMachine {
         let polynomial = match key {
             CommonProofReplayPolynomialKey::RelationColumn(column_ordinal) => {
                 CommonProofReplayPolynomialRef::Source(
-                    self.columns
+                    self.current_relation_column
                         .as_ref()
-                        .and_then(|columns| {
-                            usize::try_from(column_ordinal)
-                                .ok()
-                                .and_then(|index| columns.get(index))
+                        .filter(|(current_column_ordinal, _)| {
+                            *current_column_ordinal == column_ordinal
                         })
+                        .map(|(_, polynomial)| polynomial)
                         .ok_or(CommonProofProverError::InvalidColumn)?,
                 )
             }
@@ -1136,12 +1367,12 @@ impl CommonProofGenerationStateMachine {
         Ok(())
     }
 
-    fn poll_active_replay_polynomial_writer<Storage, CoinError, SinkError, BoundOpeningError>(
+    fn poll_active_replay_polynomial_writer<Storage, CoinError, SinkError>(
         &mut self,
         storage: &mut Storage,
     ) -> Result<
         CommonProofGenerationPoll,
-        CommonProofGenerationError<Storage::Error, CoinError, SinkError, BoundOpeningError>,
+        CommonProofGenerationError<Storage::Error, CoinError, SinkError>,
     >
     where
         Storage: ProofExternalMemory,
@@ -1156,13 +1387,12 @@ impl CommonProofGenerationStateMachine {
         let polynomial = match key {
             CommonProofReplayPolynomialKey::RelationColumn(column_ordinal) => {
                 CommonProofReplayPolynomialRef::Source(
-                    self.columns
+                    self.current_relation_column
                         .as_ref()
-                        .and_then(|columns| {
-                            usize::try_from(column_ordinal)
-                                .ok()
-                                .and_then(|index| columns.get(index))
+                        .filter(|(current_column_ordinal, _)| {
+                            *current_column_ordinal == column_ordinal
                         })
+                        .map(|(_, polynomial)| polynomial)
                         .ok_or(CommonProofGenerationError::Prover(
                             CommonProofProverError::InvalidColumn,
                         ))?,
@@ -1207,9 +1437,18 @@ impl CommonProofGenerationStateMachine {
                 ))?
                 .continuation;
             match continuation {
-                CommonProofReplayWriteContinuation::RelationColumn { next_column_index } => {
+                CommonProofReplayWriteContinuation::PreChallengeSource => {
+                    self.current_relation_column = None;
+                    self.phase = CommonProofGenerationPhase::LoadingPreChallengeSources;
+                }
+                CommonProofReplayWriteContinuation::ReversedColumn { next_binding_index } => {
+                    self.current_relation_column = None;
                     self.phase =
-                        CommonProofGenerationPhase::PersistingRelationColumns { next_column_index };
+                        CommonProofGenerationPhase::DerivingReversedColumns { next_binding_index };
+                }
+                CommonProofReplayWriteContinuation::AuxiliaryColumn => {
+                    self.current_relation_column = None;
+                    self.phase = CommonProofGenerationPhase::DerivingAuxiliaryColumns;
                 }
                 CommonProofReplayWriteContinuation::QuotientComponent => {}
                 CommonProofReplayWriteContinuation::OpeningBatchMask => {
@@ -1229,21 +1468,27 @@ impl CommonProofGenerationStateMachine {
         polynomial: CommonProofSourcePolynomial,
     ) -> Result<(), CommonProofProverError> {
         match continuation {
-            CommonProofReplayReadContinuation::QuotientBlockColumn { column_index } => {
-                let expected_value_type = self
-                    .variant
-                    .ordered_columns()
-                    .get(column_index)
-                    .map(RelationColumnDescriptor::value_type)
-                    .ok_or(CommonProofProverError::InvalidColumn)?;
-                if polynomial.value_type() != expected_value_type {
+            CommonProofReplayReadContinuation::ReversedColumnSource {
+                source_column_ordinal,
+                reversed_column_ordinal,
+                next_binding_index,
+            } => {
+                if self.current_relation_column.is_some() {
                     return Err(CommonProofProverError::InvalidColumn);
                 }
-                self.quotient_builder
+                self.current_relation_column = Some((source_column_ordinal, polynomial));
+                self.phase = CommonProofGenerationPhase::ConstructingReversedColumn {
+                    source_column_ordinal,
+                    reversed_column_ordinal,
+                    next_binding_index,
+                };
+            }
+            CommonProofReplayReadContinuation::AuxiliarySynthesisInput { column_ordinal } => {
+                self.auxiliary_column_synthesis_cursor
                     .as_mut()
-                    .ok_or(CommonProofProverError::InvalidQuotient)?
-                    .accept_column(column_index, polynomial)?;
-                self.phase = CommonProofGenerationPhase::ConstructingQuotientBlocks;
+                    .ok_or(CommonProofProverError::InvalidColumn)?
+                    .accept_input_column(column_ordinal, polynomial)?;
+                self.phase = CommonProofGenerationPhase::DerivingAuxiliaryColumns;
             }
             CommonProofReplayReadContinuation::DeepOpening { claim_index } => {
                 let claim = *self
@@ -1289,7 +1534,9 @@ impl CommonProofGenerationStateMachine {
                 if coefficients.len() > initial.len() {
                     return Err(CommonProofProverError::InvalidMask);
                 }
-                for (destination, coefficient) in initial.iter_mut().zip(coefficients) {
+                for (destination, coefficient) in
+                    initial.iter_mut().zip(coefficients.iter().copied())
+                {
                     *destination = destination.add(coefficient);
                 }
                 self.phase = CommonProofGenerationPhase::ConstructingInitialFri {
@@ -1340,12 +1587,12 @@ impl CommonProofGenerationStateMachine {
         Ok(())
     }
 
-    fn poll_active_replay_polynomial_reader<Storage, CoinError, SinkError, BoundOpeningError>(
+    fn poll_active_replay_polynomial_reader<Storage, CoinError, SinkError>(
         &mut self,
         storage: &mut Storage,
     ) -> Result<
         CommonProofGenerationPoll,
-        CommonProofGenerationError<Storage::Error, CoinError, SinkError, BoundOpeningError>,
+        CommonProofGenerationError<Storage::Error, CoinError, SinkError>,
     >
     where
         Storage: ProofExternalMemory,
@@ -1413,7 +1660,11 @@ impl CommonProofGenerationStateMachine {
         if current_step != issued_step {
             return Err(CommonProofProverError::InvalidTree);
         }
-        let materializer = CommonProofMerkleMaterializer::new(entry, tree_plan)?;
+        let materializer = CommonProofMerkleMaterializer::new(
+            entry,
+            self.catalog.evaluation_domain_size(),
+            tree_plan,
+        )?;
         self.active_tree_materialization = Some(ActiveCommonProofTreeMaterialization {
             materializer,
             leaf_source,
@@ -1522,23 +1773,16 @@ impl CommonProofGenerationStateMachine {
         Ok(())
     }
 
-    pub(crate) fn poll<Storage, Coins, Sink, BoundOpenings>(
+    pub(crate) fn poll<Storage, Coins, Sink>(
         &mut self,
         storage: &mut Storage,
         coins: &mut Coins,
         sink: &mut Sink,
-        bound_openings: &mut BoundOpenings,
-    ) -> CommonProofGenerationPollResult<
-        Storage::Error,
-        Coins::Error,
-        Sink::Error,
-        BoundOpenings::Error,
-    >
+    ) -> CommonProofGenerationPollResult<Storage::Error, Coins::Error, Sink::Error>
     where
         Storage: ProofExternalMemory,
         Coins: CommonProofPrivateCoinSource,
         Sink: CommonProofByteSink,
-        BoundOpenings: CommonProofBoundOpeningProvider,
     {
         if self.phase == CommonProofGenerationPhase::Cancelled {
             return Err(CommonProofGenerationError::Prover(
@@ -1591,46 +1835,220 @@ impl CommonProofGenerationStateMachine {
                     if let Some(tree_plan) =
                         self.storage_tree_plans.get(&entry.tree_catalog_index())
                     {
-                        let leaf_count = entry
-                            .common_context()
-                            .ok_or(CommonProofGenerationError::Prover(
-                                CommonProofProverError::InvalidTree,
-                            ))?
-                            .leaf_count()
-                            .map_err(CommonProofProverError::from)
-                            .map_err(CommonProofGenerationError::Prover)?;
+                        let leaf_count =
+                            entry_leaf_count(entry, self.catalog.evaluation_domain_size())
+                                .map_err(|_| {
+                                    CommonProofGenerationError::Prover(
+                                        CommonProofProverError::InvalidTree,
+                                    )
+                                })?;
                         opening_geometries.push(CommonProofOpeningGeometry {
                             tree_catalog_index: entry.tree_catalog_index(),
                             leaf_count,
                             canonical_leaf_byte_length: tree_plan.canonical_leaf_byte_length(),
                         });
-                    } else if entry.source() == ProofTreeCatalogSource::RelationBoundPublic {
-                        opening_geometries.push(
-                            bound_openings
-                                .opening_geometry(entry)
-                                .map_err(CommonProofGenerationError::BoundOpening)?,
-                        );
                     } else {
                         return Err(CommonProofGenerationError::Prover(
                             CommonProofProverError::InvalidTree,
                         ));
                     }
                 }
-                let provided_columns = self.provided_pre_challenge_columns.take().ok_or(
-                    CommonProofGenerationError::Prover(CommonProofProverError::InvalidInput),
-                )?;
-                let pre_challenge_columns = construct_pre_challenge_relation_columns(
+                let source_cursor = CommonProofPreChallengeSourceCursor::new(
                     &self.variant,
-                    provided_columns,
+                    self.source_polynomial_request_context,
+                )
+                .map_err(CommonProofGenerationError::Prover)?;
+                self.opening_geometries = opening_geometries;
+                self.pre_challenge_source_cursor = Some(source_cursor);
+                self.phase = CommonProofGenerationPhase::LoadingPreChallengeSources;
+                Ok(CommonProofGenerationPoll::ArithmeticStepCompleted)
+            }
+            CommonProofGenerationPhase::LoadingPreChallengeSources => {
+                if self.current_relation_column.is_some() {
+                    return Err(CommonProofGenerationError::Prover(
+                        CommonProofProverError::InvalidColumn,
+                    ));
+                }
+                if self.pending_authenticated_source_read.is_some() {
+                    return Ok(CommonProofGenerationPoll::ArithmeticStepCompleted);
+                }
+                let next_source = self
+                    .pre_challenge_source_cursor
+                    .as_mut()
+                    .ok_or(CommonProofGenerationError::Prover(
+                        CommonProofProverError::InvalidInput,
+                    ))?
+                    .next_source(
+                        &self.variant,
+                        self.source_polynomial_request_context,
+                        self.source_polynomial_provider.as_deref_mut().ok_or(
+                            CommonProofGenerationError::Prover(
+                                CommonProofProverError::InvalidInput,
+                            ),
+                        )?,
+                        coins,
+                        self.relation_context
+                            .maximum_fiat_shamir_candidate_draws_per_output,
+                    )
+                    .map_err(map_private_coin_generation_error)?;
+                let (column_ordinal, polynomial) = match next_source {
+                    CommonProofPreChallengeSourcePoll::AuthenticatedSourceReadRequired(request) => {
+                        self.pending_authenticated_source_read = Some(request);
+                        return Ok(CommonProofGenerationPoll::ArithmeticStepCompleted);
+                    }
+                    CommonProofPreChallengeSourcePoll::Ready {
+                        column_ordinal,
+                        polynomial,
+                    } => (column_ordinal, polynomial),
+                    CommonProofPreChallengeSourcePoll::Complete => {
+                        self.source_replay_identity_digest = self
+                            .pre_challenge_source_cursor
+                            .as_mut()
+                            .ok_or(CommonProofGenerationError::Prover(
+                                CommonProofProverError::InvalidInput,
+                            ))?
+                            .finish(self.source_polynomial_provider.as_deref_mut().ok_or(
+                                CommonProofGenerationError::Prover(
+                                    CommonProofProverError::InvalidInput,
+                                ),
+                            )?)
+                            .map_err(CommonProofGenerationError::Prover)?;
+                        self.phase = CommonProofGenerationPhase::DerivingReversedColumns {
+                            next_binding_index: 0,
+                        };
+                        return Ok(CommonProofGenerationPoll::ArithmeticStepCompleted);
+                    }
+                };
+                self.current_relation_column = Some((column_ordinal, polynomial));
+                self.prepare_replay_polynomial_writer(
+                    CommonProofReplayPolynomialKey::RelationColumn(column_ordinal),
+                    CommonProofReplayWriteContinuation::PreChallengeSource,
+                )
+                .map_err(CommonProofGenerationError::Prover)?;
+                Ok(CommonProofGenerationPoll::ArithmeticStepCompleted)
+            }
+            CommonProofGenerationPhase::DerivingReversedColumns { next_binding_index } => {
+                let binding = self
+                    .pre_challenge_source_cursor
+                    .as_ref()
+                    .ok_or(CommonProofGenerationError::Prover(
+                        CommonProofProverError::InvalidInput,
+                    ))?
+                    .reversed_column_bindings()
+                    .get(next_binding_index)
+                    .copied();
+                let Some((source_column_ordinal, reversed_column_ordinal)) = binding else {
+                    self.pre_challenge_source_cursor = None;
+                    self.executor
+                        .as_mut()
+                        .ok_or(CommonProofGenerationError::Prover(
+                            CommonProofProverError::InvalidInput,
+                        ))?
+                        .complete_step(storage)
+                        .map_err(CommonProofGenerationError::Storage)?;
+                    self.phase = CommonProofGenerationPhase::TransformingBaseColumns {
+                        next_column_index: 0,
+                    };
+                    return Ok(CommonProofGenerationPoll::StorageTransactionCompleted);
+                };
+                self.prepare_replay_polynomial_reader(
+                    CommonProofReplayPolynomialKey::RelationColumn(source_column_ordinal),
+                    CommonProofReplayReadContinuation::ReversedColumnSource {
+                        source_column_ordinal,
+                        reversed_column_ordinal,
+                        next_binding_index: next_binding_index.checked_add(1).ok_or(
+                            CommonProofGenerationError::Prover(
+                                CommonProofProverError::CountOverflow,
+                            ),
+                        )?,
+                    },
+                )
+                .map_err(CommonProofGenerationError::Prover)?;
+                Ok(CommonProofGenerationPoll::ArithmeticStepCompleted)
+            }
+            CommonProofGenerationPhase::ConstructingReversedColumn {
+                source_column_ordinal,
+                reversed_column_ordinal,
+                next_binding_index,
+            } => {
+                let (current_column_ordinal, source) = self.current_relation_column.take().ok_or(
+                    CommonProofGenerationError::Prover(CommonProofProverError::InvalidColumn),
+                )?;
+                if current_column_ordinal != source_column_ordinal {
+                    return Err(CommonProofGenerationError::Prover(
+                        CommonProofProverError::InvalidColumn,
+                    ));
+                }
+                let reversed = construct_reversed_relation_column(
+                    &self.variant,
+                    source_column_ordinal,
+                    reversed_column_ordinal,
+                    source,
                     coins,
                     self.relation_context
                         .maximum_fiat_shamir_candidate_draws_per_output,
                 )
                 .map_err(map_private_coin_generation_error)?;
-                self.opening_geometries = opening_geometries;
-                self.pre_challenge_columns = Some(pre_challenge_columns);
-                self.phase =
-                    CommonProofGenerationPhase::MaterializingBaseTrees { next_tree_index: 0 };
+                self.current_relation_column = Some((reversed_column_ordinal, reversed));
+                self.prepare_replay_polynomial_writer(
+                    CommonProofReplayPolynomialKey::RelationColumn(reversed_column_ordinal),
+                    CommonProofReplayWriteContinuation::ReversedColumn { next_binding_index },
+                )
+                .map_err(CommonProofGenerationError::Prover)?;
+                Ok(CommonProofGenerationPoll::ArithmeticStepCompleted)
+            }
+            CommonProofGenerationPhase::TransformingBaseColumns { next_column_index } => {
+                let mut tree_roles = proof_created_tree_roles_by_column(&self.variant)
+                    .map_err(CommonProofGenerationError::Prover)?;
+                add_bound_tree_base_roles(&self.variant, &mut tree_roles)
+                    .map_err(CommonProofGenerationError::Prover)?;
+                let next_column = (next_column_index..self.variant.ordered_columns().len()).find(
+                    |column_index| {
+                        u32::try_from(*column_index)
+                            .ok()
+                            .and_then(|column_ordinal| tree_roles.get(&column_ordinal).copied())
+                            == Some(ProofTreeRole::BaseOracle)
+                    },
+                );
+                let Some(column_index) = next_column else {
+                    if self
+                        .relation_evaluation_transform_plans
+                        .keys()
+                        .any(|column_ordinal| {
+                            tree_roles.get(column_ordinal) == Some(&ProofTreeRole::BaseOracle)
+                        })
+                    {
+                        return Err(CommonProofGenerationError::Prover(
+                            CommonProofProverError::InvalidColumn,
+                        ));
+                    }
+                    self.phase =
+                        CommonProofGenerationPhase::MaterializingBaseTrees { next_tree_index: 0 };
+                    return Ok(CommonProofGenerationPoll::ArithmeticStepCompleted);
+                };
+                let column_ordinal = u32::try_from(column_index).map_err(|_| {
+                    CommonProofGenerationError::Prover(CommonProofProverError::CountOverflow)
+                })?;
+                let plan = self
+                    .relation_evaluation_transform_plans
+                    .remove(&column_ordinal)
+                    .ok_or(CommonProofGenerationError::Prover(
+                        CommonProofProverError::InvalidColumn,
+                    ))?;
+                let transform = ExternalStockhamTransform::new(plan)
+                    .map_err(map_external_polynomial_plan_error)
+                    .map_err(CommonProofGenerationError::StoragePlan)?;
+                self.active_relation_column_transform = Some(ActiveRelationColumnTransform {
+                    column_ordinal,
+                    transform,
+                    continuation: CommonProofRelationTransformContinuation::Base {
+                        next_column_index: column_index.checked_add(1).ok_or(
+                            CommonProofGenerationError::Prover(
+                                CommonProofProverError::CountOverflow,
+                            ),
+                        )?,
+                    },
+                });
                 Ok(CommonProofGenerationPoll::ArithmeticStepCompleted)
             }
             CommonProofGenerationPhase::MaterializingBaseTrees { next_tree_index } => {
@@ -1645,15 +2063,28 @@ impl CommonProofGenerationStateMachine {
                             proof_tree_role: 1,
                             ordered_column_ordinals,
                         } => Some((tree_index, ordered_column_ordinals.clone())),
+                        RelationTreeDescriptor::BoundPublic {
+                            ordered_column_ordinals,
+                            ..
+                        } => Some((tree_index, ordered_column_ordinals.clone())),
                         _ => None,
                     });
                 let Some((tree_index, ordered_column_ordinals)) = next_tree else {
+                    self.source_polynomial_provider
+                        .as_deref_mut()
+                        .ok_or(CommonProofGenerationError::Prover(
+                            CommonProofProverError::InvalidInput,
+                        ))?
+                        .finish_bound_tree_leaf_salts()
+                        .map_err(CommonProofGenerationError::Prover)?;
+                    self.source_polynomial_provider = None;
+                    self.relation_evaluation_vectors.clear();
                     self.phase = CommonProofGenerationPhase::DerivingApplicationColumns;
                     return Ok(CommonProofGenerationPoll::ArithmeticStepCompleted);
                 };
                 self.prepare_tree_materialization(
                     tree_index,
-                    CommonProofTreeLeafSource::PreChallengeColumns(ordered_column_ordinals),
+                    CommonProofTreeLeafSource::RelationColumns(ordered_column_ordinals),
                     CommonProofTreeContinuation::Base {
                         next_tree_index: tree_index.checked_add(1).ok_or(
                             CommonProofGenerationError::Prover(
@@ -1719,39 +2150,93 @@ impl CommonProofGenerationStateMachine {
                         );
                     }
                 }
-                let pre_challenge_columns =
-                    self.pre_challenge_columns
-                        .take()
-                        .ok_or(CommonProofGenerationError::Prover(
-                            CommonProofProverError::InvalidInput,
-                        ))?;
-                let columns = construct_post_challenge_relation_columns(
-                    &self.variant,
-                    &self.relation_context,
-                    pre_challenge_columns,
-                    &application_challenges,
-                    coins,
-                    self.relation_context
-                        .maximum_fiat_shamir_candidate_draws_per_output,
-                )
-                .map_err(map_private_coin_generation_error)?;
+                let auxiliary_column_synthesis_cursor =
+                    CommonProofAuxiliaryColumnSynthesisCursor::new(
+                        &self.variant,
+                        &self.relation_context,
+                        &application_challenges,
+                    )
+                    .map_err(CommonProofGenerationError::Prover)?;
                 self.application_challenges = application_challenges;
-                self.columns = Some(columns);
+                self.auxiliary_column_synthesis_cursor = Some(auxiliary_column_synthesis_cursor);
                 self.transcript = Some(transcript);
-                self.phase = CommonProofGenerationPhase::PersistingRelationColumns {
-                    next_column_index: 0,
-                };
+                self.phase = CommonProofGenerationPhase::DerivingAuxiliaryColumns;
                 Ok(CommonProofGenerationPoll::ArithmeticStepCompleted)
             }
-            CommonProofGenerationPhase::PersistingRelationColumns { next_column_index } => {
-                let column_count = self
-                    .columns
+            CommonProofGenerationPhase::DerivingAuxiliaryColumns => {
+                if self.current_relation_column.is_some() {
+                    return Err(CommonProofGenerationError::Prover(
+                        CommonProofProverError::InvalidColumn,
+                    ));
+                }
+                if self
+                    .auxiliary_column_synthesis_cursor
                     .as_ref()
                     .ok_or(CommonProofGenerationError::Prover(
                         CommonProofProverError::InvalidColumn,
                     ))?
-                    .len();
-                if next_column_index >= column_count {
+                    .has_pending_output()
+                {
+                    let (column_ordinal, polynomial) = self
+                        .auxiliary_column_synthesis_cursor
+                        .as_mut()
+                        .ok_or(CommonProofGenerationError::Prover(
+                            CommonProofProverError::InvalidColumn,
+                        ))?
+                        .take_next_output(
+                            &self.variant,
+                            coins,
+                            self.relation_context
+                                .maximum_fiat_shamir_candidate_draws_per_output,
+                        )
+                        .map_err(map_private_coin_generation_error)?
+                        .ok_or(CommonProofGenerationError::Prover(
+                            CommonProofProverError::InvalidColumn,
+                        ))?;
+                    self.current_relation_column = Some((column_ordinal, polynomial));
+                    self.prepare_replay_polynomial_writer(
+                        CommonProofReplayPolynomialKey::RelationColumn(column_ordinal),
+                        CommonProofReplayWriteContinuation::AuxiliaryColumn,
+                    )
+                    .map_err(CommonProofGenerationError::Prover)?;
+                    return Ok(CommonProofGenerationPoll::ArithmeticStepCompleted);
+                }
+                if let Some(column_ordinal) = self
+                    .auxiliary_column_synthesis_cursor
+                    .as_ref()
+                    .ok_or(CommonProofGenerationError::Prover(
+                        CommonProofProverError::InvalidColumn,
+                    ))?
+                    .next_input_column_ordinal()
+                {
+                    self.prepare_replay_polynomial_reader(
+                        CommonProofReplayPolynomialKey::RelationColumn(column_ordinal),
+                        CommonProofReplayReadContinuation::AuxiliarySynthesisInput {
+                            column_ordinal,
+                        },
+                    )
+                    .map_err(CommonProofGenerationError::Prover)?;
+                    return Ok(CommonProofGenerationPoll::ArithmeticStepCompleted);
+                }
+                if self
+                    .auxiliary_column_synthesis_cursor
+                    .as_mut()
+                    .ok_or(CommonProofGenerationError::Prover(
+                        CommonProofProverError::InvalidColumn,
+                    ))?
+                    .advance_ready_task()
+                    .map_err(CommonProofGenerationError::Prover)?
+                {
+                    return Ok(CommonProofGenerationPoll::ArithmeticStepCompleted);
+                }
+                if self
+                    .auxiliary_column_synthesis_cursor
+                    .as_ref()
+                    .ok_or(CommonProofGenerationError::Prover(
+                        CommonProofProverError::InvalidColumn,
+                    ))?
+                    .is_complete()
+                {
                     self.executor
                         .as_mut()
                         .ok_or(CommonProofGenerationError::Prover(
@@ -1759,34 +2244,29 @@ impl CommonProofGenerationStateMachine {
                         ))?
                         .complete_step(storage)
                         .map_err(CommonProofGenerationError::Storage)?;
-                    self.columns = None;
-                    self.phase = CommonProofGenerationPhase::TransformingRelationColumns {
+                    self.auxiliary_column_synthesis_cursor = None;
+                    self.phase = CommonProofGenerationPhase::TransformingAuxiliaryColumns {
                         next_column_index: 0,
                     };
                     return Ok(CommonProofGenerationPoll::StorageTransactionCompleted);
                 }
-                let column_ordinal = u32::try_from(next_column_index).map_err(|_| {
-                    CommonProofGenerationError::Prover(CommonProofProverError::CountOverflow)
-                })?;
-                self.prepare_replay_polynomial_writer(
-                    CommonProofReplayPolynomialKey::RelationColumn(column_ordinal),
-                    CommonProofReplayWriteContinuation::RelationColumn {
-                        next_column_index: next_column_index.checked_add(1).ok_or(
-                            CommonProofGenerationError::Prover(
-                                CommonProofProverError::CountOverflow,
-                            ),
-                        )?,
-                    },
-                )
-                .map_err(CommonProofGenerationError::Prover)?;
-                Ok(CommonProofGenerationPoll::ArithmeticStepCompleted)
+                Err(CommonProofGenerationError::Prover(
+                    CommonProofProverError::InvalidColumn,
+                ))
             }
-            CommonProofGenerationPhase::TransformingRelationColumns { next_column_index } => {
-                if next_column_index >= self.variant.ordered_columns().len() {
-                    if !self.relation_evaluation_transform_plans.is_empty()
-                        || self.relation_evaluation_vectors.len()
-                            != self.variant.ordered_columns().len()
-                    {
+            CommonProofGenerationPhase::TransformingAuxiliaryColumns { next_column_index } => {
+                let tree_roles = proof_created_tree_roles_by_column(&self.variant)
+                    .map_err(CommonProofGenerationError::Prover)?;
+                let next_column = (next_column_index..self.variant.ordered_columns().len()).find(
+                    |column_index| {
+                        u32::try_from(*column_index)
+                            .ok()
+                            .and_then(|column_ordinal| tree_roles.get(&column_ordinal).copied())
+                            == Some(ProofTreeRole::AuxiliaryOracle)
+                    },
+                );
+                let Some(column_index) = next_column else {
+                    if !self.relation_evaluation_transform_plans.is_empty() {
                         return Err(CommonProofGenerationError::Prover(
                             CommonProofProverError::InvalidColumn,
                         ));
@@ -1795,8 +2275,8 @@ impl CommonProofGenerationStateMachine {
                         next_tree_index: 0,
                     };
                     return Ok(CommonProofGenerationPoll::ArithmeticStepCompleted);
-                }
-                let column_ordinal = u32::try_from(next_column_index).map_err(|_| {
+                };
+                let column_ordinal = u32::try_from(column_index).map_err(|_| {
                     CommonProofGenerationError::Prover(CommonProofProverError::CountOverflow)
                 })?;
                 let plan = self
@@ -1811,6 +2291,13 @@ impl CommonProofGenerationStateMachine {
                 self.active_relation_column_transform = Some(ActiveRelationColumnTransform {
                     column_ordinal,
                     transform,
+                    continuation: CommonProofRelationTransformContinuation::Auxiliary {
+                        next_column_index: column_index.checked_add(1).ok_or(
+                            CommonProofGenerationError::Prover(
+                                CommonProofProverError::CountOverflow,
+                            ),
+                        )?,
+                    },
                 });
                 Ok(CommonProofGenerationPoll::ArithmeticStepCompleted)
             }
@@ -1881,42 +2368,93 @@ impl CommonProofGenerationStateMachine {
                     );
                 }
                 self.quotient_builder = Some(
-                    CommonProofReplayQuotientBuilder::new(
+                    CommonProofConstraintStreamQuotientBuilder::new(
                         &self.variant,
                         &self.relation_context,
                         self.evaluation_domain,
                         core::mem::take(&mut self.application_challenges),
                         composition_challenges,
+                        MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH,
                     )
                     .map_err(CommonProofGenerationError::Prover)?,
                 );
-                self.columns = None;
-                self.phase = CommonProofGenerationPhase::ConstructingQuotientBlocks;
+                self.phase = CommonProofGenerationPhase::ConstructingQuotientConstraints;
                 Ok(CommonProofGenerationPoll::ArithmeticStepCompleted)
             }
-            CommonProofGenerationPhase::ConstructingQuotientBlocks => {
-                if let Some(column_index) = self
+            CommonProofGenerationPhase::ConstructingQuotientConstraints => {
+                if let Some(transform_key) = self
                     .quotient_builder
                     .as_ref()
                     .ok_or(CommonProofGenerationError::Prover(
                         CommonProofProverError::InvalidQuotient,
                     ))?
-                    .next_column_index()
+                    .next_transform_key()
+                    .map_err(CommonProofGenerationError::Prover)?
                 {
-                    self.prepare_replay_polynomial_reader(
-                        CommonProofReplayPolynomialKey::RelationColumn(
-                            u32::try_from(column_index).map_err(|_| {
-                                CommonProofGenerationError::Prover(
-                                    CommonProofProverError::CountOverflow,
-                                )
-                            })?,
-                        ),
-                        CommonProofReplayReadContinuation::QuotientBlockColumn { column_index },
-                    )
-                    .map_err(CommonProofGenerationError::Prover)?;
+                    let plan = self
+                        .quotient_constraint_transform_plans
+                        .remove(&transform_key)
+                        .ok_or(CommonProofGenerationError::Prover(
+                            CommonProofProverError::InvalidColumn,
+                        ))?;
+                    let transform = ExternalStockhamTransform::new(plan)
+                        .map_err(map_external_polynomial_plan_error)
+                        .map_err(CommonProofGenerationError::StoragePlan)?;
+                    self.active_relation_column_transform = Some(ActiveRelationColumnTransform {
+                        column_ordinal: transform_key.column_ordinal(),
+                        transform,
+                        continuation: CommonProofRelationTransformContinuation::Quotient {
+                            transform_key,
+                        },
+                    });
                     return Ok(CommonProofGenerationPoll::ArithmeticStepCompleted);
                 }
-                let completed = self
+
+                let read_request = self
+                    .quotient_builder
+                    .as_ref()
+                    .ok_or(CommonProofGenerationError::Prover(
+                        CommonProofProverError::InvalidQuotient,
+                    ))?
+                    .next_read_request()
+                    .map_err(CommonProofGenerationError::Prover)?;
+                if let Some(read_request) = read_request {
+                    let values = {
+                        let executor =
+                            self.executor
+                                .as_mut()
+                                .ok_or(CommonProofGenerationError::Prover(
+                                    CommonProofProverError::InvalidInput,
+                                ))?;
+                        read_external_polynomial_extension_values(
+                            executor,
+                            storage,
+                            read_request.vector(),
+                            read_request.element_offset(),
+                            read_request.element_count(),
+                        )
+                        .map_err(|error| match error {
+                            ExternalStockhamTransformError::Polynomial(error) => {
+                                CommonProofGenerationError::StoragePlan(
+                                    map_external_polynomial_plan_error(error),
+                                )
+                            }
+                            ExternalStockhamTransformError::Storage(error) => {
+                                CommonProofGenerationError::Storage(error)
+                            }
+                        })?
+                    };
+                    self.quotient_builder
+                        .as_mut()
+                        .ok_or(CommonProofGenerationError::Prover(
+                            CommonProofProverError::InvalidQuotient,
+                        ))?
+                        .accept_read_values(read_request, values)
+                        .map_err(CommonProofGenerationError::Prover)?;
+                    return Ok(CommonProofGenerationPoll::StorageTransactionCompleted);
+                }
+
+                let evaluation_progress = self
                     .quotient_builder
                     .as_mut()
                     .ok_or(CommonProofGenerationError::Prover(
@@ -1924,8 +2462,31 @@ impl CommonProofGenerationStateMachine {
                     ))?
                     .evaluate_ready_block(&self.variant, &self.relation_context)
                     .map_err(CommonProofGenerationError::Prover)?;
-                if !completed {
+                if evaluation_progress == CommonProofQuotientEvaluationProgress::BlockComplete {
                     return Ok(CommonProofGenerationPoll::ArithmeticStepCompleted);
+                }
+                self.executor
+                    .as_mut()
+                    .ok_or(CommonProofGenerationError::Prover(
+                        CommonProofProverError::InvalidInput,
+                    ))?
+                    .complete_step(storage)
+                    .map_err(CommonProofGenerationError::Storage)?;
+                let all_constraints_complete = self
+                    .quotient_builder
+                    .as_mut()
+                    .ok_or(CommonProofGenerationError::Prover(
+                        CommonProofProverError::InvalidQuotient,
+                    ))?
+                    .complete_constraint()
+                    .map_err(CommonProofGenerationError::Prover)?;
+                if !all_constraints_complete {
+                    return Ok(CommonProofGenerationPoll::StorageTransactionCompleted);
+                }
+                if !self.quotient_constraint_transform_plans.is_empty() {
+                    return Err(CommonProofGenerationError::Prover(
+                        CommonProofProverError::InvalidQuotient,
+                    ));
                 }
                 let quotient = self
                     .quotient_builder
@@ -1946,7 +2507,7 @@ impl CommonProofGenerationStateMachine {
                 self.phase = CommonProofGenerationPhase::MaterializingQuotientTrees {
                     next_component_index: 0,
                 };
-                Ok(CommonProofGenerationPoll::ArithmeticStepCompleted)
+                Ok(CommonProofGenerationPoll::StorageTransactionCompleted)
             }
             CommonProofGenerationPhase::MaterializingQuotientTrees {
                 next_component_index,
@@ -1966,7 +2527,6 @@ impl CommonProofGenerationStateMachine {
                         .map_err(map_private_coin_generation_error)?;
                     let Some(component) = component else {
                         self.quotient_component_cursor = None;
-                        self.columns = None;
                         self.application_challenges.clear();
                         self.phase = CommonProofGenerationPhase::DerivingDeepOpenings;
                         return Ok(CommonProofGenerationPoll::ArithmeticStepCompleted);
@@ -2188,10 +2748,10 @@ impl CommonProofGenerationStateMachine {
                         CommonProofProverError::InvalidOpening,
                     ))?;
                 self.opening_batch_coefficients = opening_batch_coefficients;
-                self.initial_fri_polynomial = Some(vec![
+                self.initial_fri_polynomial = Some(Zeroizing::new(vec![
                     ProofChallengeExtensionElement::ZERO;
                     initial_coefficient_count
-                ]);
+                ]));
                 self.phase = CommonProofGenerationPhase::ConstructingInitialFri {
                     next_claim_index: 0,
                 };
@@ -2504,30 +3064,6 @@ impl CommonProofGenerationStateMachine {
                 let geometry = *self.opening_geometries.get(next_catalog_index).ok_or(
                     CommonProofGenerationError::Prover(CommonProofProverError::InvalidTree),
                 )?;
-                if entry.source() == ProofTreeCatalogSource::RelationBoundPublic {
-                    self.pending_output_fragment = Some(
-                        bound_openings
-                            .encode_bound_opening_fragment(
-                                &self.catalog,
-                                next_catalog_index,
-                                geometry,
-                                &self.sorted_query_representatives,
-                                self.maximum_output_fragment_byte_length,
-                            )
-                            .map_err(|error| match error {
-                                CommonProofEncodingError::Prover(error) => {
-                                    CommonProofGenerationError::Prover(error)
-                                }
-                                CommonProofEncodingError::Sink(error) => {
-                                    map_bounded_fragment_error(error)
-                                }
-                                CommonProofEncodingError::Artifact(error) => {
-                                    CommonProofGenerationError::BoundOpening(error)
-                                }
-                            })?,
-                    );
-                    return Ok(CommonProofGenerationPoll::ArithmeticStepCompleted);
-                }
                 if self.opening_prefetcher.is_none() {
                     let tree = self.stored_trees.get(&entry.tree_catalog_index()).ok_or(
                         CommonProofGenerationError::Prover(CommonProofProverError::InvalidTree),
@@ -2564,7 +3100,7 @@ impl CommonProofGenerationStateMachine {
                         Ok(CommonProofGenerationPoll::StorageTransactionCompleted)
                     }
                     CommonProofOpeningPrefetchProgress::Complete => {
-                        let mut artifact = self
+                        let artifact = self
                             .opening_prefetcher
                             .take()
                             .ok_or(CommonProofGenerationError::Prover(
@@ -2578,7 +3114,7 @@ impl CommonProofGenerationStateMachine {
                                 next_catalog_index,
                                 geometry,
                                 &self.sorted_query_representatives,
-                                &mut artifact,
+                                &artifact,
                                 self.maximum_output_fragment_byte_length,
                             )
                             .map_err(|error| match error {
@@ -2640,9 +3176,15 @@ impl CommonProofGenerationStateMachine {
         self.active_replay_polynomial_reader = None;
         self.active_relation_column_transform = None;
         self.active_relation_tree_leaf_reader = None;
-        self.provided_pre_challenge_columns = None;
-        self.pre_challenge_columns = None;
-        self.columns = None;
+        if let Some(source_polynomial_provider) = self.source_polynomial_provider.as_deref_mut() {
+            source_polynomial_provider.cancel_pending_authenticated_source_read();
+        }
+        self.source_polynomial_provider = None;
+        self.source_replay_identity_digest = [0_u8; HASH_BYTE_LENGTH];
+        self.pre_challenge_source_cursor = None;
+        self.pending_authenticated_source_read = None;
+        self.auxiliary_column_synthesis_cursor = None;
+        self.current_relation_column = None;
         self.application_challenges = Vec::new();
         self.quotient_builder = None;
         self.quotient_component_cursor = None;
@@ -2654,12 +3196,13 @@ impl CommonProofGenerationStateMachine {
         self.initial_fri_polynomial = None;
         self.fri_domain = None;
         self.fri_evaluations = None;
-        self.terminal_coefficients = Vec::new();
+        self.terminal_coefficients = Zeroizing::new(Vec::new());
         self.sorted_query_representatives = Vec::new();
         self.opening_geometries = Vec::new();
         self.storage_tree_plans = BTreeMap::new();
         self.replay_polynomial_plans = BTreeMap::new();
         self.relation_evaluation_transform_plans = BTreeMap::new();
+        self.quotient_constraint_transform_plans = BTreeMap::new();
         self.relation_evaluation_vectors = BTreeMap::new();
         self.stored_trees = BTreeMap::new();
         self.tree_roots = Vec::new();
@@ -2669,15 +3212,41 @@ impl CommonProofGenerationStateMachine {
         self.query_section_byte_length = None;
         self.opening_prefetcher = None;
         self.pending_output_fragment = None;
-        self.relation_trees = Vec::new();
         self.canonical_header_bytes = Vec::new();
         Ok(())
     }
 }
 
-fn map_generation_initialization_error<StorageError, CoinError, SinkError, BoundOpeningError>(
+fn add_bound_tree_base_roles(
+    variant: &RelationPlanVariant,
+    roles: &mut BTreeMap<u32, ProofTreeRole>,
+) -> Result<(), CommonProofProverError> {
+    for tree in variant.ordered_trees() {
+        let RelationTreeDescriptor::BoundPublic {
+            ordered_column_ordinals,
+            ..
+        } = tree
+        else {
+            continue;
+        };
+        for column_ordinal in ordered_column_ordinals {
+            match roles.insert(*column_ordinal, ProofTreeRole::BaseOracle) {
+                Some(ProofTreeRole::BaseOracle) | None => {}
+                Some(
+                    ProofTreeRole::AuxiliaryOracle
+                    | ProofTreeRole::QuotientComponent
+                    | ProofTreeRole::OpeningBatchMask
+                    | ProofTreeRole::NonterminalFriLayer,
+                ) => return Err(CommonProofProverError::InvalidTree),
+            }
+        }
+    }
+    Ok(())
+}
+
+fn map_generation_initialization_error<StorageError, CoinError, SinkError>(
     error: CommonProofGenerationInitializationError,
-) -> CommonProofGenerationError<StorageError, CoinError, SinkError, BoundOpeningError> {
+) -> CommonProofGenerationError<StorageError, CoinError, SinkError> {
     match error {
         CommonProofGenerationInitializationError::Prover(error) => {
             CommonProofGenerationError::Prover(error)
@@ -2700,9 +3269,9 @@ fn map_generation_initialization_error<StorageError, CoinError, SinkError, Bound
     }
 }
 
-fn map_bounded_fragment_error<StorageError, CoinError, SinkError, BoundOpeningError>(
+fn map_bounded_fragment_error<StorageError, CoinError, SinkError>(
     error: BoundedCommonProofByteSinkError,
-) -> CommonProofGenerationError<StorageError, CoinError, SinkError, BoundOpeningError> {
+) -> CommonProofGenerationError<StorageError, CoinError, SinkError> {
     match error {
         BoundedCommonProofByteSinkError::ByteLengthExceeded
         | BoundedCommonProofByteSinkError::AllocationLimitExceeded => {
@@ -2710,24 +3279,54 @@ fn map_bounded_fragment_error<StorageError, CoinError, SinkError, BoundOpeningEr
         }
     }
 }
+
 #[cfg(test)]
-pub(crate) fn generate_common_proof<Storage, Coins, Sink, BoundOpenings>(
+mod source_provider_resident_memory_tests {
+    use super::*;
+
+    #[test]
+    fn source_provider_lifetime_covers_exactly_the_four_base_relation_phases() {
+        for phase in [
+            CommonProofResidentMemoryPhase::LoadingSourcePolynomials,
+            CommonProofResidentMemoryPhase::ConstructingReversedColumns,
+            CommonProofResidentMemoryPhase::TransformingBaseColumns,
+            CommonProofResidentMemoryPhase::MaterializingBaseTrees,
+        ] {
+            assert!(common_proof_source_provider_is_live_during_phase(phase));
+        }
+        for phase in [
+            CommonProofResidentMemoryPhase::DerivingAuxiliaryColumns,
+            CommonProofResidentMemoryPhase::TransformingAuxiliaryColumns,
+            CommonProofResidentMemoryPhase::MaterializingAuxiliaryTrees,
+            CommonProofResidentMemoryPhase::ConstructingQuotient,
+            CommonProofResidentMemoryPhase::MaterializingQuotientTrees,
+            CommonProofResidentMemoryPhase::DerivingOpenings,
+            CommonProofResidentMemoryPhase::ConstructingInitialFri,
+            CommonProofResidentMemoryPhase::FoldingFri,
+            CommonProofResidentMemoryPhase::PreparingQueryOutput,
+            CommonProofResidentMemoryPhase::EmittingQueries,
+        ] {
+            assert!(!common_proof_source_provider_is_live_during_phase(phase));
+        }
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn generate_common_proof<Storage, Coins, Sink>(
     input: CommonProofGenerationInput<'_>,
     storage: &mut Storage,
     coins: &mut Coins,
     sink: &mut Sink,
-    bound_openings: &mut BoundOpenings,
-) -> CompletedCommonProofGenerationResult<Storage, Coins, Sink, BoundOpenings>
+) -> CompletedCommonProofGenerationResult<Storage, Coins, Sink>
 where
     Storage: ProofExternalMemory,
     Coins: CommonProofPrivateCoinSource,
     Sink: CommonProofByteSink,
-    BoundOpenings: CommonProofBoundOpeningProvider,
 {
     let mut state_machine = CommonProofGenerationStateMachine::new(input)
         .map_err(map_generation_initialization_error)?;
     let generation_result = loop {
-        match state_machine.poll(storage, coins, sink, bound_openings) {
+        match state_machine.poll(storage, coins, sink) {
             Ok(CommonProofGenerationPoll::Complete) => break Ok(()),
             Ok(
                 CommonProofGenerationPoll::ArithmeticStepCompleted

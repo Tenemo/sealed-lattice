@@ -96,8 +96,17 @@ type MailboxGcmVerifierLease = Readonly<{
     cancel(): void;
     decryptChunk(bytes: ArrayBuffer): void;
     finishAuthentication(tag: Uint8Array): void;
-    finishDecryption(): void;
+    finishDecryption(): AuthenticatedMailboxPlaintextCapability;
     state(): MailboxLeaseState;
+}>;
+
+/**
+ * One-shot worker-local authority over plaintext authenticated and digested by
+ * the mailbox GCM kernel. It exposes only explicit retirement; an exact-family
+ * WASM consumer owns the numeric handle and verifies the bound bytes.
+ */
+export type AuthenticatedMailboxPlaintextCapability = Readonly<{
+    release(): void;
 }>;
 
 export type AuthenticatedMailboxGcmRuntime = Readonly<{
@@ -169,6 +178,8 @@ export type AuthenticatedMailboxPlaintextSinkLease = Readonly<{
      * means every exact plaintext chunk is durably staged but unpublished.
      */
     readonly disposition: 'committed' | 'fresh' | 'prepared';
+    /** Whether this lease needs a fresh full ciphertext authentication pass. */
+    readonly authenticationRequirement: 'authenticate' | 'none';
     /** Removes only an unpublished fresh transaction and its staged bytes. */
     cancel(): Promise<void>;
     /**
@@ -181,8 +192,13 @@ export type AuthenticatedMailboxPlaintextSinkLease = Readonly<{
      * It is a no-op for an already committed delivery.
      */
     release(): Promise<void>;
-    /** Makes every exact staged chunk durable without publishing plaintext. */
-    seal(): Promise<void>;
+    /**
+     * Transfers the one-shot kernel authority after every exact plaintext
+     * chunk is staged. The lease must retire it on cancellation or failure.
+     */
+    seal(
+        authenticatedPlaintextCapability: AuthenticatedMailboxPlaintextCapability,
+    ): Promise<void>;
     stageChunk(input: {
         readonly bytes: ArrayBuffer;
         readonly chunkIndex: number;
@@ -196,6 +212,7 @@ export type AuthenticatedMailboxPlaintextSinkBoundary = Readonly<{
      * state must survive restarts so a retry cannot duplicate or lose delivery.
      */
     reserve(input: {
+        readonly canonicalEnvelopeBytes: Uint8Array;
         readonly envelopeHash: ProtocolHash;
         readonly plaintextByteLength: number;
         readonly producerSlot: AuthenticatedMailboxProducerSlot;
@@ -1046,6 +1063,9 @@ export const sealAuthenticatedMailbox = async (
 export const openAuthenticatedMailbox = async (
     input: AuthenticatedMailboxOpenInput,
 ): Promise<VerificationResult<OpenedAuthenticatedMailbox>> => {
+    let authenticatedPlaintextCapability:
+        | AuthenticatedMailboxPlaintextCapability
+        | undefined;
     let canonicalEnvelopeBytes: Uint8Array | undefined;
     let gcmVerifier: MailboxGcmVerifierLease | undefined;
     let inboundSlotLease: AuthenticatedMailboxInboundSlotLease | undefined;
@@ -1110,12 +1130,22 @@ export const openAuthenticatedMailbox = async (
             inboundSlotLease = slotReservation.value;
             const inboundDisposition = inboundSlotLease.disposition;
             plaintextSinkLease = await input.plaintextSinkBoundary.reserve({
+                canonicalEnvelopeBytes: canonicalEnvelopeBytes.slice(),
                 envelopeHash,
                 plaintextByteLength,
                 producerSlot: producerSlot(envelope.associatedData),
             });
             plaintextSinkCommitted =
-                plaintextSinkLease.disposition === 'committed';
+                plaintextSinkLease.disposition === 'committed' &&
+                plaintextSinkLease.authenticationRequirement === 'none';
+            if (
+                plaintextSinkLease.authenticationRequirement === 'none' &&
+                plaintextSinkLease.disposition !== 'committed'
+            ) {
+                throw new Error(
+                    'A plaintext sink may skip authentication only for a delivery committed by the same live sink authority.',
+                );
+            }
             if (
                 inboundDisposition === 'fresh' &&
                 plaintextSinkLease.disposition === 'committed'
@@ -1124,7 +1154,10 @@ export const openAuthenticatedMailbox = async (
                     'A committed plaintext delivery is missing its authenticated inbound mailbox slot.',
                 );
             }
-            if (plaintextSinkLease.disposition === 'fresh') {
+            if (
+                plaintextSinkLease.authenticationRequirement ===
+                'authenticate'
+            ) {
                 streamVerifier = input.streamBoundary.openVerifier({
                     descriptor: envelope.ciphertextDescriptor,
                 });
@@ -1278,13 +1311,17 @@ export const openAuthenticatedMailbox = async (
                     stagedStreamVerifier.chunkCount,
                 );
                 stagedStreamVerifier.finish();
-                gcmVerifier.finishDecryption();
-                await plaintextSinkLease.seal();
+                authenticatedPlaintextCapability =
+                    gcmVerifier.finishDecryption();
+                await plaintextSinkLease.seal(
+                    authenticatedPlaintextCapability,
+                );
+                authenticatedPlaintextCapability = undefined;
                 retainPlaintextSinkForRetry = true;
                 await stagingLease.dispose();
                 stagingDisposed = true;
             }
-            if (plaintextSinkLease.disposition !== 'committed') {
+            if (!plaintextSinkCommitted) {
                 retainPlaintextSinkForRetry = true;
                 if (inboundDisposition === 'fresh') {
                     await inboundSlotLease.commit();
@@ -1318,6 +1355,13 @@ export const openAuthenticatedMailbox = async (
     cancelSynchronousLease(gcmVerifier, cleanupFailures);
     cancelSynchronousLease(stagedStreamVerifier, cleanupFailures);
     cancelSynchronousLease(streamVerifier, cleanupFailures);
+    if (authenticatedPlaintextCapability !== undefined) {
+        try {
+            authenticatedPlaintextCapability.release();
+        } catch (error) {
+            cleanupFailures.push(error);
+        }
+    }
     if (stagingLease !== undefined && !stagingDisposed) {
         try {
             await stagingLease.dispose();

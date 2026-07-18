@@ -5,6 +5,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import {
     CanonicalStreamInternalError,
     CanonicalStreamRefusalError,
+    CanonicalStreamResourceError,
 } from '#packages/wasm/src/canonical-stream-runtime';
 import {
     loadFreshTranscriptCoreKernel,
@@ -127,9 +128,22 @@ describe('Mailbox AES-GCM real-WASM runtime', () => {
             for (const fragment of decryptedFragments) {
                 verifier.decryptChunk(fragment);
             }
-            verifier.finishDecryption();
+            const authenticatedPlaintextCapability =
+                verifier.finishDecryption();
             expect(concatenate(decryptedFragments)).toEqual(plaintext);
             expect(verifier.state()).toBe('completed');
+            expect(() =>
+                runtime.openEncryptor({
+                    associatedData,
+                    key,
+                    nonce,
+                    totalByteLength: plaintext.byteLength,
+                }),
+            ).toThrow(CanonicalStreamResourceError);
+            authenticatedPlaintextCapability.release();
+            expect(() => authenticatedPlaintextCapability.release()).toThrow(
+                CanonicalStreamInternalError,
+            );
         }
     });
 

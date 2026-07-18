@@ -98,11 +98,11 @@ impl PrivateProofRandomness {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bgv::setup::limb_group_key_switch_atom::proof_field::sixteen_limb_group_field_parameters;
+    use crate::bgv::setup::limb_group_key_switch_atom::proof_field::selected_key_switch_proof_field_parameters;
 
     #[test]
     fn field_masks_use_the_full_proof_field() {
-        let parameters = sixteen_limb_group_field_parameters();
+        let parameters = selected_key_switch_proof_field_parameters();
         let mut private_randomness = PrivateProofRandomness::for_test(7);
         let element = private_randomness.next_field_element(&parameters);
         let raw = parameters.to_raw_value(&element);

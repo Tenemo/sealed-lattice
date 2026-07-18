@@ -15,6 +15,7 @@ use super::field::{
 const TRANSCRIPT_INITIAL_DOMAIN: &str = "sealed-lattice/proof/transcript/v1";
 const TRANSCRIPT_ABSORB_DOMAIN: &str = "sealed-lattice/proof/transcript/absorb/v1";
 const TRANSCRIPT_SQUEEZE_DOMAIN: &str = "sealed-lattice/proof/transcript/squeeze/v1";
+const PRODUCT_RESIDUE_VECTOR_SAMPLER_TYPE: &str = "sealed-lattice/proof/product-residue-vector/v1";
 
 fn transcript_hash(domain: &str, items: Vec<CanonicalItem>) -> Result<[u8; 64], TranscriptError> {
     hash_foundation_tuple_512(domain, &items)
@@ -430,6 +431,63 @@ impl CanonicalProofTranscript {
         Ok(CommonChallengeStream::new(challenge_seed, challenge_tag))
     }
 
+    /// Begins one typed product-space verifier message. The fixed-width chain
+    /// handle and every variable-length rejection candidate bind the sampler
+    /// geometry. Candidate ordinals are separate XOF inputs under that handle.
+    fn begin_common_product_residue_challenge(
+        &mut self,
+        group: CommonProofApplicationChallengeGroup,
+    ) -> Result<(CommonChallengeStream, Vec<u8>), TranscriptError> {
+        self.close_pending_common_challenge()?;
+        if !group.challenge.is_application_challenge() {
+            return Err(TranscriptError::UnexpectedCommonProofChallenge);
+        }
+        let challenge_tag = group
+            .challenge
+            .tag(self.application_statement_schema_identifier);
+        let candidate_byte_length = usize::try_from(group.candidate_byte_length)
+            .map_err(|_| TranscriptError::ChallengeCounterOverflow)?;
+        let chain_handle = transcript_hash(
+            TRANSCRIPT_SQUEEZE_DOMAIN,
+            vec![
+                CanonicalItem::hash512(self.state),
+                CanonicalItem::nonempty_ascii(&challenge_tag)
+                    .map_err(|_| TranscriptError::CanonicalEncoding)?,
+                CanonicalItem::nonempty_ascii(PRODUCT_RESIDUE_VECTOR_SAMPLER_TYPE)
+                    .map_err(|_| TranscriptError::CanonicalEncoding)?,
+                CanonicalItem::unsigned64(group.modulus),
+                CanonicalItem::unsigned16(group.coordinate_count),
+                CanonicalItem::unsigned64(group.candidate_byte_length),
+                CanonicalItem::unsigned64(
+                    u64::try_from(Hash512::BYTE_LENGTH)
+                        .map_err(|_| TranscriptError::ChallengeCounterOverflow)?,
+                ),
+            ],
+        )?;
+        let mut first_candidate = Vec::new();
+        first_candidate
+            .try_reserve_exact(candidate_byte_length)
+            .map_err(|_| TranscriptError::ChallengeCounterOverflow)?;
+        first_candidate.resize(candidate_byte_length, 0);
+        transcript_xof(
+            TRANSCRIPT_SQUEEZE_DOMAIN,
+            product_residue_candidate_xof_input(
+                chain_handle,
+                &challenge_tag,
+                group.modulus,
+                group.coordinate_count,
+                0,
+                candidate_byte_length,
+                candidate_byte_length,
+            )?,
+            &mut first_candidate,
+        )?;
+        Ok((
+            CommonChallengeStream::new(chain_handle, challenge_tag),
+            first_candidate,
+        ))
+    }
+
     /// Begins one logical verifier message backed by one SHAKE256 XOF
     /// evaluation. The first 512 output bits are the chain handle; the rest
     /// are verifier coins consumed locally by the schedule-bounded sampler.
@@ -667,6 +725,7 @@ pub(crate) struct CommonProofApplicationChallengeGroup {
     challenge: CommonProofChallenge,
     modulus: u64,
     coordinate_count: u16,
+    candidate_byte_length: u64,
 }
 
 impl CommonProofApplicationChallengeGroup {
@@ -675,12 +734,16 @@ impl CommonProofApplicationChallengeGroup {
         modulus: u64,
         coordinate_count: u16,
     ) -> Result<Self, TranscriptError> {
+        let candidate_byte_length =
+            product_residue_candidate_byte_length(modulus, coordinate_count).and_then(
+                |length| {
+                    u64::try_from(length).map_err(|_| TranscriptError::ChallengeCounterOverflow)
+                },
+            )?;
         if !challenge.is_application_challenge()
             || modulus <= 1
             || modulus >= PROOF_BASE_FIELD_MODULUS
             || coordinate_count == 0
-            || BigUint::from(modulus).pow(u32::from(coordinate_count))
-                >= (BigUint::one() << 512_usize)
         {
             return Err(TranscriptError::InvalidCommonProofSchedule);
         }
@@ -688,6 +751,7 @@ impl CommonProofApplicationChallengeGroup {
             challenge,
             modulus,
             coordinate_count,
+            candidate_byte_length,
         })
     }
 
@@ -701,6 +765,77 @@ impl CommonProofApplicationChallengeGroup {
 
     pub(crate) fn coordinate_count(self) -> u16 {
         self.coordinate_count
+    }
+
+    pub(crate) const fn candidate_byte_length(self) -> u64 {
+        self.candidate_byte_length
+    }
+}
+
+/// Source-owned accounting for one typed theta or alpha product-vector
+/// sampler. It is ordinary verifier state and is never serialized or accepted
+/// from proof bytes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct CommonProofApplicationChallengeSamplerAccounting {
+    challenge: CommonProofChallenge,
+    modulus: u64,
+    coordinate_count: u16,
+    candidate_byte_length: u64,
+    maximum_candidate_draw_count: u32,
+    accepted_vector_byte_length: u64,
+    chain_handle_xof_query_count: u64,
+    candidate_xof_query_count_ceiling: u64,
+    total_xof_query_count_ceiling: u64,
+}
+
+impl CommonProofApplicationChallengeSamplerAccounting {
+    pub(crate) const fn challenge(self) -> CommonProofChallenge {
+        self.challenge
+    }
+
+    pub(crate) const fn modulus(self) -> u64 {
+        self.modulus
+    }
+
+    pub(crate) const fn coordinate_count(self) -> u16 {
+        self.coordinate_count
+    }
+
+    pub(crate) const fn candidate_byte_length(self) -> u64 {
+        self.candidate_byte_length
+    }
+
+    pub(crate) const fn maximum_candidate_draw_count(self) -> u32 {
+        self.maximum_candidate_draw_count
+    }
+
+    pub(crate) const fn accepted_vector_byte_length(self) -> u64 {
+        self.accepted_vector_byte_length
+    }
+
+    pub(crate) const fn chain_handle_xof_query_count(self) -> u64 {
+        self.chain_handle_xof_query_count
+    }
+
+    pub(crate) const fn candidate_xof_query_count_ceiling(self) -> u64 {
+        self.candidate_xof_query_count_ceiling
+    }
+
+    pub(crate) const fn total_xof_query_count_ceiling(self) -> u64 {
+        self.total_xof_query_count_ceiling
+    }
+
+    /// The sampler reuses one candidate allocation across every bounded draw.
+    pub(crate) const fn reusable_candidate_buffer_byte_length(self) -> u64 {
+        self.candidate_byte_length
+    }
+
+    pub(crate) const fn maximum_xof_output_byte_length(self) -> u64 {
+        if self.candidate_byte_length > Hash512::BYTE_LENGTH as u64 {
+            self.candidate_byte_length
+        } else {
+            Hash512::BYTE_LENGTH as u64
+        }
     }
 }
 
@@ -774,8 +909,7 @@ impl CommonProofTranscriptSchedule {
                         || entry.modulus <= 1
                         || entry.modulus >= PROOF_BASE_FIELD_MODULUS
                         || entry.coordinate_count == 0
-                        || BigUint::from(entry.modulus).pow(u32::from(entry.coordinate_count))
-                            >= (BigUint::one() << 512_usize)
+                        || entry.candidate_byte_length == 0
                 })
             || self.composition_challenge_count == 0
             || self.quotient_component_count == 0
@@ -805,6 +939,36 @@ impl CommonProofTranscriptSchedule {
         &self,
     ) -> &[CommonProofApplicationChallengeGroup] {
         &self.ordered_application_challenge_groups
+    }
+
+    pub(crate) fn ordered_application_challenge_sampler_accounting(
+        &self,
+    ) -> Result<Vec<CommonProofApplicationChallengeSamplerAccounting>, TranscriptError> {
+        self.ordered_application_challenge_groups
+            .iter()
+            .copied()
+            .map(|group| {
+                application_challenge_sampler_accounting(
+                    group,
+                    self.maximum_candidate_draws_per_output,
+                )
+            })
+            .collect()
+    }
+
+    pub(crate) const fn maximum_candidate_draws_per_output(&self) -> u32 {
+        self.maximum_candidate_draws_per_output
+    }
+
+    pub(crate) fn maximum_application_challenge_sampler_scratch_byte_length(
+        &self,
+    ) -> Result<u64, TranscriptError> {
+        Ok(self
+            .ordered_application_challenge_sampler_accounting()?
+            .into_iter()
+            .map(|row| row.reusable_candidate_buffer_byte_length())
+            .max()
+            .unwrap_or(0))
     }
 
     pub(crate) const fn composition_challenge_count(&self) -> u16 {
@@ -846,9 +1010,11 @@ impl CommonProofTranscriptSchedule {
     /// Exact maximum number of typed transcript-hash invocations made while
     /// verifying an accepted proof under this schedule. The bound follows the
     /// same challenge/response state machine as `CommonProofTranscript` and
-    /// includes every rejection-sampling expansion block. It deliberately
-    /// excludes Merkle authentication, whose cost is derived from the checked
-    /// tree catalog and opening geometry.
+    /// includes every extension-field rejection-sampling expansion block and
+    /// every bounded typed product-vector candidate. An application vector
+    /// also consumes one chain-handle query; the complete query vector consumes
+    /// one extended XOF answer. It deliberately excludes Merkle authentication,
+    /// whose cost is derived from the checked tree catalog and opening geometry.
     pub(crate) fn maximum_transcript_hash_query_count(&self) -> Result<u64, TranscriptError> {
         let mut counter = TranscriptHashQueryCounter::new();
 
@@ -856,11 +1022,13 @@ impl CommonProofTranscriptSchedule {
             counter.absorb_response()?;
         }
         for challenge in &self.ordered_application_challenge_groups {
-            counter.begin_challenge(maximum_product_residue_challenge_hash_count(
-                challenge.modulus,
-                challenge.coordinate_count,
-                self.maximum_candidate_draws_per_output,
-            )?)?;
+            counter.begin_challenge(
+                application_challenge_sampler_accounting(
+                    *challenge,
+                    self.maximum_candidate_draws_per_output,
+                )?
+                .total_xof_query_count_ceiling(),
+            )?;
         }
         for _ in &self.ordered_auxiliary_tree_ordinals {
             counter.absorb_response()?;
@@ -901,6 +1069,28 @@ impl CommonProofTranscriptSchedule {
         counter.begin_challenge(1)?;
         counter.absorb_response()?;
         counter.finish()
+    }
+
+    /// Largest finite SHAKE256 answer read by the accepted verifier path.
+    /// This is the concrete `L_max` input to the shared ideal-XOF model, not a
+    /// transport or proof-byte ceiling.
+    pub(crate) fn maximum_transcript_xof_output_byte_length(
+        &self,
+    ) -> Result<usize, TranscriptError> {
+        let mut maximum_output_byte_length = Hash512::BYTE_LENGTH;
+        for sampler in self.ordered_application_challenge_sampler_accounting()? {
+            maximum_output_byte_length = maximum_output_byte_length.max(
+                usize::try_from(sampler.maximum_xof_output_byte_length())
+                    .map_err(|_| TranscriptError::ChallengeCounterOverflow)?,
+            );
+        }
+        maximum_output_byte_length =
+            maximum_output_byte_length.max(query_vector_xof_output_byte_length(
+                self.query_orbit_count,
+                self.unique_query_count,
+                self.maximum_candidate_draws_per_output,
+            )?);
+        Ok(maximum_output_byte_length)
     }
 }
 
@@ -958,19 +1148,124 @@ impl TranscriptHashQueryCounter {
     }
 }
 
-fn maximum_product_residue_challenge_hash_count(
-    modulus: u64,
-    coordinate_count: u16,
+fn application_challenge_sampler_accounting(
+    group: CommonProofApplicationChallengeGroup,
     maximum_candidate_draws: u32,
-) -> Result<u64, TranscriptError> {
-    if modulus <= 1
-        || coordinate_count == 0
-        || BigUint::from(modulus).pow(u32::from(coordinate_count)) >= (BigUint::one() << 512_usize)
-        || maximum_candidate_draws == 0
-    {
+) -> Result<CommonProofApplicationChallengeSamplerAccounting, TranscriptError> {
+    if maximum_candidate_draws == 0 {
         return Err(TranscriptError::InvalidChallengeModulus);
     }
-    maximum_rejection_chain_hash_count(maximum_candidate_draws)
+    let chain_handle_xof_query_count = 1_u64;
+    let candidate_xof_query_count_ceiling = u64::from(maximum_candidate_draws);
+    let total_xof_query_count_ceiling = candidate_xof_query_count_ceiling
+        .checked_add(chain_handle_xof_query_count)
+        .ok_or(TranscriptError::ChallengeCounterOverflow)?;
+    let accepted_vector_byte_length = u64::from(group.coordinate_count)
+        .checked_mul(
+            u64::try_from(std::mem::size_of::<u64>())
+                .map_err(|_| TranscriptError::ChallengeCounterOverflow)?,
+        )
+        .ok_or(TranscriptError::ChallengeCounterOverflow)?;
+    Ok(CommonProofApplicationChallengeSamplerAccounting {
+        challenge: group.challenge,
+        modulus: group.modulus,
+        coordinate_count: group.coordinate_count,
+        candidate_byte_length: group.candidate_byte_length,
+        maximum_candidate_draw_count: maximum_candidate_draws,
+        accepted_vector_byte_length,
+        chain_handle_xof_query_count,
+        candidate_xof_query_count_ceiling,
+        total_xof_query_count_ceiling,
+    })
+}
+
+fn product_residue_candidate_byte_length(
+    modulus: u64,
+    coordinate_count: u16,
+) -> Result<usize, TranscriptError> {
+    if modulus <= 1 || coordinate_count == 0 {
+        return Err(TranscriptError::InvalidChallengeModulus);
+    }
+    let product_cardinality = BigUint::from(modulus).pow(u32::from(coordinate_count));
+    let maximum_candidate = &product_cardinality - BigUint::one();
+    let candidate_bit_length = maximum_candidate.bits().max(1);
+    usize::try_from(
+        candidate_bit_length
+            .checked_add(7)
+            .and_then(|length| length.checked_div(8))
+            .ok_or(TranscriptError::ChallengeCounterOverflow)?,
+    )
+    .map_err(|_| TranscriptError::ChallengeCounterOverflow)
+}
+
+fn product_residue_candidate_xof_input(
+    transcript_chain_handle: [u8; Hash512::BYTE_LENGTH],
+    challenge_tag: &str,
+    modulus: u64,
+    coordinate_count: u16,
+    candidate_ordinal: u64,
+    candidate_byte_length: usize,
+    output_byte_length: usize,
+) -> Result<Vec<CanonicalItem>, TranscriptError> {
+    Ok(vec![
+        CanonicalItem::hash512(transcript_chain_handle),
+        CanonicalItem::nonempty_ascii(challenge_tag)
+            .map_err(|_| TranscriptError::CanonicalEncoding)?,
+        CanonicalItem::nonempty_ascii(PRODUCT_RESIDUE_VECTOR_SAMPLER_TYPE)
+            .map_err(|_| TranscriptError::CanonicalEncoding)?,
+        CanonicalItem::unsigned64(modulus),
+        CanonicalItem::unsigned16(coordinate_count),
+        CanonicalItem::unsigned64(candidate_ordinal),
+        CanonicalItem::unsigned64(
+            u64::try_from(candidate_byte_length)
+                .map_err(|_| TranscriptError::ChallengeCounterOverflow)?,
+        ),
+        CanonicalItem::unsigned64(
+            u64::try_from(output_byte_length)
+                .map_err(|_| TranscriptError::ChallengeCounterOverflow)?,
+        ),
+    ])
+}
+
+fn query_vector_xof_output_byte_length(
+    query_orbit_count: u64,
+    unique_query_count: u32,
+    maximum_candidate_draws_per_output: u32,
+) -> Result<usize, TranscriptError> {
+    if query_orbit_count == 0
+        || !query_orbit_count.is_power_of_two()
+        || unique_query_count == 0
+        || u64::from(unique_query_count) > query_orbit_count
+        || maximum_candidate_draws_per_output == 0
+    {
+        return Err(TranscriptError::InvalidCommonProofSchedule);
+    }
+    let candidate_byte_length = query_vector_candidate_byte_length(query_orbit_count)?;
+    let candidate_count = usize::try_from(unique_query_count)
+        .map_err(|_| TranscriptError::ChallengeCounterOverflow)?
+        .checked_mul(
+            usize::try_from(maximum_candidate_draws_per_output)
+                .map_err(|_| TranscriptError::ChallengeCounterOverflow)?,
+        )
+        .ok_or(TranscriptError::ChallengeCounterOverflow)?;
+    Hash512::BYTE_LENGTH
+        .checked_add(
+            candidate_count
+                .checked_mul(candidate_byte_length)
+                .ok_or(TranscriptError::ChallengeCounterOverflow)?,
+        )
+        .ok_or(TranscriptError::ChallengeCounterOverflow)
+}
+
+fn query_vector_candidate_byte_length(query_orbit_count: u64) -> Result<usize, TranscriptError> {
+    if query_orbit_count == 0 || !query_orbit_count.is_power_of_two() {
+        return Err(TranscriptError::InvalidChallengeModulus);
+    }
+    let candidate_bit_length = 64_u32
+        .checked_sub((query_orbit_count - 1).leading_zeros())
+        .ok_or(TranscriptError::InvalidChallengeModulus)?;
+    usize::try_from(candidate_bit_length.div_ceil(8))
+        .map_err(|_| TranscriptError::ChallengeCounterOverflow)
 }
 
 fn maximum_extension_challenge_hash_count(
@@ -1086,10 +1381,12 @@ impl CommonProofTranscript {
         if expected.challenge != challenge {
             return Err(TranscriptError::UnexpectedCommonProofChallenge);
         }
-        let mut stream = self.transcript.begin_common_challenge(challenge)?;
+        let (stream, first_candidate) = self
+            .transcript
+            .begin_common_product_residue_challenge(expected)?;
         let sampled = stream.sample_residue_vector(
-            expected.modulus,
-            expected.coordinate_count,
+            first_candidate,
+            expected,
             self.schedule.maximum_candidate_draws_per_output,
         )?;
         let mut canonical_output_bytes = Vec::with_capacity(
@@ -1358,21 +1655,15 @@ impl CommonProofTranscript {
         {
             return Err(TranscriptError::UnexpectedCommonProofChallenge);
         }
-        let candidate_bit_length = 64_u32
-            .checked_sub((self.schedule.query_orbit_count - 1).leading_zeros())
-            .ok_or(TranscriptError::InvalidChallengeModulus)?;
-        let candidate_byte_length = usize::try_from(candidate_bit_length.div_ceil(8))
-            .map_err(|_| TranscriptError::ChallengeCounterOverflow)?;
-        let candidate_count = usize::try_from(self.schedule.unique_query_count)
-            .map_err(|_| TranscriptError::ChallengeCounterOverflow)?
-            .checked_mul(
-                usize::try_from(self.schedule.maximum_candidate_draws_per_output)
-                    .map_err(|_| TranscriptError::ChallengeCounterOverflow)?,
-            )
-            .ok_or(TranscriptError::ChallengeCounterOverflow)?;
-        let random_byte_length = candidate_count
-            .checked_mul(candidate_byte_length)
-            .ok_or(TranscriptError::ChallengeCounterOverflow)?;
+        let candidate_byte_length =
+            query_vector_candidate_byte_length(self.schedule.query_orbit_count)?;
+        let random_byte_length = query_vector_xof_output_byte_length(
+            self.schedule.query_orbit_count,
+            self.schedule.unique_query_count,
+            self.schedule.maximum_candidate_draws_per_output,
+        )?
+        .checked_sub(Hash512::BYTE_LENGTH)
+        .ok_or(TranscriptError::ChallengeCounterOverflow)?;
         let (stream, verifier_randomness) = self
             .transcript
             .begin_common_xof_challenge(CommonProofChallenge::QueryVector, random_byte_length)?;
@@ -1575,35 +1866,56 @@ impl CommonChallengeStream {
         }
     }
 
-    /// Samples one uniform vector from `Z_modulus^coordinate_count` with one
-    /// random-oracle draw.  The accepted integer is reduced modulo the full
-    /// product cardinality and only then decoded into base-`modulus` digits;
-    /// the coordinates are not separate Fiat-Shamir verifier messages.
+    /// Samples one uniform vector from `Z_modulus^coordinate_count` as one
+    /// verifier message. Every bounded candidate is a separately typed XOF
+    /// input under the fixed transcript chain handle. Rejection occurs against
+    /// the complete product cardinality before the accepted residue is decoded
+    /// into base-`modulus` coordinates.
     fn sample_residue_vector(
-        &mut self,
-        modulus: u64,
-        coordinate_count: u16,
+        &self,
+        mut candidate_bytes: Vec<u8>,
+        group: CommonProofApplicationChallengeGroup,
         maximum_candidate_draws: u32,
     ) -> Result<Vec<u64>, TranscriptError> {
-        if modulus <= 1 || coordinate_count == 0 || maximum_candidate_draws == 0 {
+        if group.modulus <= 1 || group.coordinate_count == 0 || maximum_candidate_draws == 0 {
             return Err(TranscriptError::InvalidChallengeModulus);
         }
-        let sample_space = BigUint::one() << 512_usize;
-        let modulus_big = BigUint::from(modulus);
-        let product_cardinality = modulus_big.pow(u32::from(coordinate_count));
-        if product_cardinality >= sample_space {
+        let modulus_big = BigUint::from(group.modulus);
+        let product_cardinality = modulus_big.pow(u32::from(group.coordinate_count));
+        let candidate_byte_length = usize::try_from(group.candidate_byte_length)
+            .map_err(|_| TranscriptError::ChallengeCounterOverflow)?;
+        if candidate_bytes.len() != candidate_byte_length {
             return Err(TranscriptError::InvalidChallengeModulus);
         }
+        let candidate_bit_length = candidate_byte_length
+            .checked_mul(8)
+            .ok_or(TranscriptError::ChallengeCounterOverflow)?;
+        let sample_space = BigUint::one() << candidate_bit_length;
         let acceptance_limit = (&sample_space / &product_cardinality) * &product_cardinality;
-        for draw_ordinal in 0..maximum_candidate_draws {
-            let candidate = BigUint::from_bytes_le(&self.current_candidate_seed);
+        for candidate_ordinal in 0..maximum_candidate_draws {
+            if candidate_ordinal != 0 {
+                transcript_xof(
+                    TRANSCRIPT_SQUEEZE_DOMAIN,
+                    product_residue_candidate_xof_input(
+                        self.current_candidate_seed,
+                        &self.challenge_tag,
+                        group.modulus,
+                        group.coordinate_count,
+                        u64::from(candidate_ordinal),
+                        candidate_byte_length,
+                        candidate_byte_length,
+                    )?,
+                    &mut candidate_bytes,
+                )?;
+            }
+            let candidate = BigUint::from_bytes_le(&candidate_bytes);
             if candidate < acceptance_limit {
                 let mut encoded_vector = candidate % &product_cardinality;
                 let mut coordinates = Vec::new();
                 coordinates
-                    .try_reserve_exact(usize::from(coordinate_count))
+                    .try_reserve_exact(usize::from(group.coordinate_count))
                     .map_err(|_| TranscriptError::ChallengeCounterOverflow)?;
-                for _ in 0..coordinate_count {
+                for _ in 0..group.coordinate_count {
                     coordinates.push(
                         u64::try_from(&encoded_vector % &modulus_big)
                             .map_err(|_| TranscriptError::InvalidChallengeModulus)?,
@@ -1614,9 +1926,6 @@ impl CommonChallengeStream {
                     return Err(TranscriptError::InvalidChallengeModulus);
                 }
                 return Ok(coordinates);
-            }
-            if draw_ordinal + 1 < maximum_candidate_draws {
-                self.reject_current_candidate()?;
             }
         }
         Err(TranscriptError::CommonChallengeDrawsExhausted)
@@ -1789,13 +2098,16 @@ pub(super) fn sample_distinct_query_positions_from_values(
 mod common_challenge_chain_tests {
     use num_bigint::BigUint;
 
+    use crate::bgv::parameters::{DATA_PRIMES, PLAINTEXT_MODULUS, SPECIAL_PRIMES};
     use crate::bgv::proof_suite::field::{
         PROOF_BASE_FIELD_MODULUS, PROOF_CHALLENGE_EXTENSION_DEGREE,
     };
 
     use super::{
-        CanonicalProofTranscript, CommonChallengeStream, CommonProofChallenge,
-        CommonProofPrivacyMode, CommonProofRound, CommonProofTranscriptSchedule,
+        CanonicalProofTranscript, CommonChallengeStream, CommonProofApplicationChallengeGroup,
+        CommonProofChallenge, CommonProofPrivacyMode, CommonProofRound,
+        CommonProofTranscriptSchedule, TRANSCRIPT_SQUEEZE_DOMAIN, TranscriptError,
+        product_residue_candidate_byte_length, product_residue_candidate_xof_input, transcript_xof,
     };
 
     fn transcript() -> CanonicalProofTranscript {
@@ -1809,6 +2121,34 @@ mod common_challenge_chain_tests {
 
     fn alpha_challenge() -> CommonProofChallenge {
         CommonProofChallenge::Alpha { modulus_ordinal: 0 }
+    }
+
+    fn typed_product_candidate(
+        chain_handle: [u8; 64],
+        challenge_tag: &str,
+        modulus: u64,
+        coordinate_count: u16,
+        candidate_ordinal: u64,
+        candidate_byte_length: usize,
+        output_byte_length: usize,
+    ) -> Vec<u8> {
+        let mut output = vec![0_u8; output_byte_length];
+        transcript_xof(
+            TRANSCRIPT_SQUEEZE_DOMAIN,
+            product_residue_candidate_xof_input(
+                chain_handle,
+                challenge_tag,
+                modulus,
+                coordinate_count,
+                candidate_ordinal,
+                candidate_byte_length,
+                output_byte_length,
+            )
+            .expect("the typed product candidate input is canonical"),
+            &mut output,
+        )
+        .expect("the typed product candidate derives");
+        output
     }
 
     #[test]
@@ -1995,6 +2335,102 @@ mod common_challenge_chain_tests {
     }
 
     #[test]
+    fn transcript_hash_budget_counts_typed_product_candidates() {
+        let schedule = |maximum_candidate_draws_per_output, includes_product_vector| {
+            CommonProofTranscriptSchedule::new(
+                vec![0],
+                if includes_product_vector {
+                    vec![
+                        CommonProofApplicationChallengeGroup::new(theta_challenge(), 2, 513)
+                            .expect("the above-512-bit product vector is valid"),
+                    ]
+                } else {
+                    Vec::new()
+                },
+                Vec::new(),
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                2,
+                maximum_candidate_draws_per_output,
+                CommonProofPrivacyMode::PublicOnly,
+            )
+            .expect("the product-vector accounting schedule is valid")
+        };
+
+        for maximum_candidate_draws_per_output in [1_u32, 2, 128] {
+            let without_product = schedule(maximum_candidate_draws_per_output, false)
+                .maximum_transcript_hash_query_count()
+                .expect("the baseline hash budget derives");
+            let with_product = schedule(maximum_candidate_draws_per_output, true)
+                .maximum_transcript_hash_query_count()
+                .expect("the product-vector hash budget derives");
+            assert_eq!(
+                with_product - without_product,
+                u64::from(maximum_candidate_draws_per_output) + 2,
+            );
+            assert_eq!(
+                schedule(maximum_candidate_draws_per_output, true)
+                    .maximum_transcript_xof_output_byte_length()
+                    .expect("the exact maximum XOF output length derives"),
+                64 + usize::try_from(maximum_candidate_draws_per_output)
+                    .expect("the draw count fits usize"),
+            );
+        }
+    }
+
+    #[test]
+    fn application_product_sampler_accounting_is_schedule_owned() {
+        let schedule = CommonProofTranscriptSchedule::new(
+            vec![0],
+            vec![
+                CommonProofApplicationChallengeGroup::new(theta_challenge(), 2, 513)
+                    .expect("the above-512-bit product vector is valid"),
+            ],
+            Vec::new(),
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            2,
+            128,
+            CommonProofPrivacyMode::PublicOnly,
+        )
+        .expect("the sampler-accounting schedule is valid");
+        let rows = schedule
+            .ordered_application_challenge_sampler_accounting()
+            .expect("the sampler rows derive");
+
+        assert_eq!(rows.len(), 1);
+        let row = rows[0];
+        assert_eq!(row.challenge(), theta_challenge());
+        assert_eq!(row.modulus(), 2);
+        assert_eq!(row.coordinate_count(), 513);
+        assert_eq!(row.candidate_byte_length(), 65);
+        assert_eq!(row.maximum_candidate_draw_count(), 128);
+        assert_eq!(row.accepted_vector_byte_length(), 513 * 8);
+        assert_eq!(row.chain_handle_xof_query_count(), 1);
+        assert_eq!(row.candidate_xof_query_count_ceiling(), 128);
+        assert_eq!(row.total_xof_query_count_ceiling(), 129);
+        assert_eq!(row.reusable_candidate_buffer_byte_length(), 65);
+        assert_eq!(row.maximum_xof_output_byte_length(), 65);
+        assert_eq!(schedule.maximum_candidate_draws_per_output(), 128);
+        assert_eq!(
+            schedule
+                .maximum_application_challenge_sampler_scratch_byte_length()
+                .expect("the sampler scratch derives"),
+            65,
+        );
+    }
+
+    #[test]
     fn extension_sampler_decodes_one_uniform_full_field_candidate() {
         let modulus = BigUint::from(PROOF_BASE_FIELD_MODULUS);
         let expected_coordinates = [1_u64, 2, 3, 4, 5];
@@ -2022,33 +2458,235 @@ mod common_challenge_chain_tests {
     fn product_residue_sampler_decodes_one_uniform_vector_candidate() {
         let modulus = 65_537_u64;
         let expected_coordinates = [0_u64, 1, 65_536, 17, 9, 42, 7];
+        let group = CommonProofApplicationChallengeGroup::new(theta_challenge(), modulus, 7)
+            .expect("the product-space group derives");
         let mut candidate = BigUint::default();
         let mut place = BigUint::from(1_u8);
         for coordinate in expected_coordinates {
             candidate += &place * BigUint::from(coordinate);
             place *= BigUint::from(modulus);
         }
-        let encoded = candidate.to_bytes_le();
-        let mut block = [0_u8; 64];
-        block[..encoded.len()].copy_from_slice(&encoded);
-        let mut stream = CommonChallengeStream::new(block, "test-product".to_owned());
+        let candidate_byte_length = usize::try_from(group.candidate_byte_length())
+            .expect("the exact candidate width fits usize");
+        let mut encoded = candidate.to_bytes_le();
+        encoded.resize(candidate_byte_length, 0);
+        let chain_handle = [0x47; 64];
+        let stream = CommonChallengeStream::new(chain_handle, "test-product".to_owned());
 
         let sampled = stream
-            .sample_residue_vector(modulus, 7, 1)
+            .sample_residue_vector(encoded, group, 1)
             .expect("the product-space candidate is accepted");
 
         assert_eq!(sampled, expected_coordinates);
-        assert_eq!(stream.current_candidate_seed, block);
+        assert_eq!(sampled.len(), 7);
+        assert!(sampled.iter().all(|coordinate| *coordinate < modulus));
+        assert_eq!(stream.current_candidate_seed, chain_handle);
     }
 
     #[test]
-    fn product_residue_sampler_rejects_an_oversized_product_space() {
-        let mut stream = CommonChallengeStream::new([0_u8; 64], "test-product".to_owned());
+    fn product_residue_sampler_round_trips_an_above_512_bit_vector() {
+        let modulus = DATA_PRIMES[0];
+        let coordinate_count = 9_u16;
+        let expected_coordinates = vec![modulus - 1; usize::from(coordinate_count)];
+        let group =
+            CommonProofApplicationChallengeGroup::new(theta_challenge(), modulus, coordinate_count)
+                .expect("the selected product-space group derives");
+        assert!(group.candidate_byte_length() > 64);
+
+        let product_cardinality = BigUint::from(modulus).pow(u32::from(coordinate_count));
+        let mut encoded = (&product_cardinality - BigUint::from(1_u8)).to_bytes_le();
+        encoded.resize(
+            usize::try_from(group.candidate_byte_length())
+                .expect("the exact candidate width fits usize"),
+            0,
+        );
+        let sampled = CommonChallengeStream::new([0x48; 64], "test-product".to_owned())
+            .sample_residue_vector(encoded, group, 1)
+            .expect("the above-512-bit product-space candidate is accepted");
+
+        assert_eq!(sampled, expected_coordinates);
+        assert!(sampled.iter().all(|coordinate| *coordinate < modulus));
+    }
+
+    #[test]
+    fn product_residue_sampler_crosses_the_old_512_bit_boundary() {
+        assert_eq!(
+            product_residue_candidate_byte_length(2, 511)
+                .expect("the below-boundary product derives"),
+            64,
+        );
+        assert_eq!(
+            product_residue_candidate_byte_length(2, 512)
+                .expect("the exact-boundary product derives"),
+            64,
+        );
+        assert_eq!(
+            product_residue_candidate_byte_length(2, 513)
+                .expect("the above-boundary product derives"),
+            65,
+        );
+        assert!(CommonProofApplicationChallengeGroup::new(theta_challenge(), 2, 513,).is_ok(),);
+    }
+
+    #[test]
+    fn product_residue_sampler_rejects_the_exact_acceptance_boundary() {
+        let modulus = 65_537_u64;
+        let coordinate_count = 7_u16;
+        let group =
+            CommonProofApplicationChallengeGroup::new(theta_challenge(), modulus, coordinate_count)
+                .expect("the product-space group derives");
+        let candidate_byte_length = usize::try_from(group.candidate_byte_length())
+            .expect("the exact candidate width fits usize");
+        let product_cardinality = BigUint::from(modulus).pow(u32::from(coordinate_count));
+        let sample_space = BigUint::from(1_u8) << (8 * candidate_byte_length);
+        let acceptance_limit = (&sample_space / &product_cardinality) * product_cardinality;
+        let mut rejected_candidate = acceptance_limit.to_bytes_le();
+        rejected_candidate.resize(candidate_byte_length, 0);
+        let stream = CommonChallengeStream::new([0x48; 64], "test-product".to_owned());
 
         assert_eq!(
-            stream.sample_residue_vector(2, 512, 1),
-            Err(super::TranscriptError::InvalidChallengeModulus),
+            stream.sample_residue_vector(rejected_candidate, group, 1),
+            Err(TranscriptError::CommonChallengeDrawsExhausted),
         );
+    }
+
+    #[test]
+    fn typed_product_candidates_bind_every_sampler_coordinate() {
+        let chain_handle = [0x49; 64];
+        let challenge_tag = "proof/1211/theta-vector/0000";
+        let modulus = 65_537_u64;
+        let coordinate_count = 7_u16;
+        let candidate_byte_length =
+            product_residue_candidate_byte_length(modulus, coordinate_count)
+                .expect("the exact candidate width derives");
+        let baseline = typed_product_candidate(
+            chain_handle,
+            challenge_tag,
+            modulus,
+            coordinate_count,
+            1,
+            candidate_byte_length,
+            candidate_byte_length,
+        );
+        let changed_inputs = [
+            typed_product_candidate(
+                [0x4a; 64],
+                challenge_tag,
+                modulus,
+                coordinate_count,
+                1,
+                candidate_byte_length,
+                candidate_byte_length,
+            ),
+            typed_product_candidate(
+                chain_handle,
+                "proof/1211/alpha-vector/0000",
+                modulus,
+                coordinate_count,
+                1,
+                candidate_byte_length,
+                candidate_byte_length,
+            ),
+            typed_product_candidate(
+                chain_handle,
+                challenge_tag,
+                modulus + 2,
+                coordinate_count,
+                1,
+                candidate_byte_length,
+                candidate_byte_length,
+            ),
+            typed_product_candidate(
+                chain_handle,
+                challenge_tag,
+                modulus,
+                coordinate_count + 1,
+                1,
+                candidate_byte_length,
+                candidate_byte_length,
+            ),
+            typed_product_candidate(
+                chain_handle,
+                challenge_tag,
+                modulus,
+                coordinate_count,
+                2,
+                candidate_byte_length,
+                candidate_byte_length,
+            ),
+            typed_product_candidate(
+                chain_handle,
+                challenge_tag,
+                modulus,
+                coordinate_count,
+                1,
+                candidate_byte_length,
+                candidate_byte_length + 1,
+            ),
+        ];
+        assert!(
+            changed_inputs
+                .iter()
+                .all(|candidate| candidate != &baseline)
+        );
+    }
+
+    #[test]
+    fn product_residue_sampler_binds_transcript_context() {
+        let mut first = transcript();
+        let mut second =
+            CanonicalProofTranscript::try_new(1, [0x5a; 64], 0x1212, b"changed-header")
+                .expect("the changed transcript header is canonical");
+        let modulus = 65_537_u64;
+        let group = CommonProofApplicationChallengeGroup::new(theta_challenge(), modulus, 7)
+            .expect("the product-space group derives");
+        let (first_stream, first_candidate) = first
+            .begin_common_product_residue_challenge(group)
+            .expect("the first product challenge derives");
+        let (second_stream, second_candidate) = second
+            .begin_common_product_residue_challenge(group)
+            .expect("the changed product challenge derives");
+
+        assert_ne!(
+            first_stream.current_candidate_seed,
+            second_stream.current_candidate_seed,
+        );
+        assert_ne!(first_candidate, second_candidate);
+    }
+
+    #[test]
+    fn selected_moduli_sample_nine_coordinate_product_vectors() {
+        let mut selected_moduli = DATA_PRIMES.to_vec();
+        selected_moduli.extend(SPECIAL_PRIMES);
+        selected_moduli.push(PLAINTEXT_MODULUS);
+        selected_moduli.sort_unstable();
+        selected_moduli.dedup();
+
+        for (modulus_ordinal, modulus) in selected_moduli.into_iter().enumerate() {
+            let mut transcript = CanonicalProofTranscript::try_new(
+                1,
+                [0x5b; 64],
+                0x1211,
+                &u64::try_from(modulus_ordinal)
+                    .expect("the selected modulus ordinal fits u64")
+                    .to_le_bytes(),
+            )
+            .expect("the selected-modulus transcript derives");
+            let challenge = CommonProofChallenge::Theta {
+                modulus_ordinal: u16::try_from(modulus_ordinal)
+                    .expect("the selected modulus ordinal fits u16"),
+            };
+            let group = CommonProofApplicationChallengeGroup::new(challenge, modulus, 9)
+                .expect("the selected product-space group derives");
+            let (stream, first_candidate) = transcript
+                .begin_common_product_residue_challenge(group)
+                .expect("the nine-coordinate product challenge derives");
+            let coordinates = stream
+                .sample_residue_vector(first_candidate, group, 128)
+                .expect("the nine-coordinate product vector samples");
+            assert_eq!(coordinates.len(), 9);
+            assert!(coordinates.iter().all(|coordinate| *coordinate < modulus));
+        }
     }
 
     #[test]

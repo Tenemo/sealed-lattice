@@ -154,13 +154,34 @@ pub(crate) fn parse_lattice_anchor_commitment_canonical_bytes(
     })
 }
 
-fn compute_lattice_anchor_commitment_for_degree(
+pub(crate) fn compute_lattice_anchor_commitment<OpeningPolynomial>(
     public_matrix_seed_hash: &str,
     commitment_data_prime_index: usize,
     secret_contribution_coefficients: &[i8],
-    opening_polynomials: &[Vec<i8>],
+    opening_polynomials: &[OpeningPolynomial],
+) -> CanonicalResult<LatticeAnchorCommitment>
+where
+    OpeningPolynomial: AsRef<[i8]>,
+{
+    compute_lattice_anchor_commitment_for_degree(
+        public_matrix_seed_hash,
+        commitment_data_prime_index,
+        secret_contribution_coefficients,
+        opening_polynomials,
+        POLYNOMIAL_DEGREE,
+    )
+}
+
+fn compute_lattice_anchor_commitment_for_degree<OpeningPolynomial>(
+    public_matrix_seed_hash: &str,
+    commitment_data_prime_index: usize,
+    secret_contribution_coefficients: &[i8],
+    opening_polynomials: &[OpeningPolynomial],
     ring_degree: usize,
-) -> CanonicalResult<LatticeAnchorCommitment> {
+) -> CanonicalResult<LatticeAnchorCommitment>
+where
+    OpeningPolynomial: AsRef<[i8]>,
+{
     validate_hash_string(public_matrix_seed_hash, "publicMatrixSeedHash")?;
     let modulus = selected_commitment_prime(commitment_data_prime_index)?;
     validate_anchor_ring_degree(ring_degree)?;
@@ -176,7 +197,11 @@ fn compute_lattice_anchor_commitment_for_degree(
         ));
     }
     for opening_polynomial in opening_polynomials {
-        validate_centered_ternary_vector(opening_polynomial, ring_degree, "opening polynomial")?;
+        validate_centered_ternary_vector(
+            opening_polynomial.as_ref(),
+            ring_degree,
+            "opening polynomial",
+        )?;
     }
 
     let message_residues = secret_contribution_coefficients
@@ -187,6 +212,7 @@ fn compute_lattice_anchor_commitment_for_degree(
         .iter()
         .map(|polynomial| {
             polynomial
+                .as_ref()
                 .iter()
                 .map(|coefficient| centered_i8_to_residue(*coefficient, modulus))
                 .collect::<Vec<_>>()

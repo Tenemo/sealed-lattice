@@ -98,12 +98,30 @@ export const writeGenerationPoll = (
 };
 
 export const createCheckpointGenerationKernelFixture = (
-    checkpointCursorBytes: readonly Uint8Array[] = [
-        Uint8Array.from([1, 3, 3, 7, 9, 2, 5]),
-    ],
+    checkpointCursorManifestBytes: Uint8Array = Uint8Array.of(
+        0x53,
+        0x4c,
+        0x43,
+        0x50,
+        0x43,
+        0x4d,
+        0x30,
+        0x33,
+        0x03,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+    ),
 ): Readonly<{
     canonicalStateBytes: Uint8Array<ArrayBuffer>;
-    cursorBytes: Uint8Array<ArrayBuffer>;
+    cursorManifestBytes: Uint8Array<ArrayBuffer>;
     observations: {
         acknowledgedCheckpointCount: number;
         discardedCheckpointCount: number;
@@ -113,7 +131,9 @@ export const createCheckpointGenerationKernelFixture = (
     stableAttemptBindingHash: Uint8Array<ArrayBuffer>;
 }> => {
     const canonicalStateBytes = new Uint8Array(37).fill(0x91);
-    const cursorBytes = Uint8Array.from(checkpointCursorBytes[0] ?? []);
+    const cursorManifestBytes = Uint8Array.from(
+        checkpointCursorManifestBytes,
+    );
     const stableAttemptBindingHash = new Uint8Array(hashByteLength).fill(0x62);
     const observations = {
         acknowledgedCheckpointCount: 0,
@@ -154,7 +174,7 @@ export const createCheckpointGenerationKernelFixture = (
             operationHandle,
             safeBoundaryOrdinalPointer,
             stateByteLengthPointer,
-            cursorCountPointer,
+            cursorManifestByteLengthPointer,
         ) => {
             expect(operationHandle).toBe(91);
             expect(phase).toBe('checkpoint');
@@ -166,8 +186,8 @@ export const createCheckpointGenerationKernelFixture = (
             );
             writeUnsigned32(
                 memory,
-                cursorCountPointer,
-                checkpointCursorBytes.length,
+                cursorManifestByteLengthPointer,
+                cursorManifestBytes.byteLength,
             );
             return 0;
         },
@@ -183,33 +203,15 @@ export const createCheckpointGenerationKernelFixture = (
             );
             return 0;
         },
-        sealed_lattice_common_proof_generation_checkpoint_cursor_byte_length: (
+        sealed_lattice_common_proof_generation_copy_checkpoint_cursor_manifest: (
             operationHandle,
-            cursorIndex,
-            statusPointer,
-        ) => {
-            expect(operationHandle).toBe(91);
-            const selectedCursorBytes = checkpointCursorBytes[cursorIndex];
-            if (selectedCursorBytes === undefined) {
-                throw new Error('The checkpoint cursor index is unavailable.');
-            }
-            writeUnsigned32(memory, statusPointer, 0);
-            return selectedCursorBytes.byteLength;
-        },
-        sealed_lattice_common_proof_generation_copy_checkpoint_cursor: (
-            operationHandle,
-            cursorIndex,
             outputPointer,
             outputByteLength,
         ) => {
             expect(operationHandle).toBe(91);
-            const selectedCursorBytes = checkpointCursorBytes[cursorIndex];
-            if (selectedCursorBytes === undefined) {
-                throw new Error('The checkpoint cursor index is unavailable.');
-            }
-            expect(outputByteLength).toBe(selectedCursorBytes.byteLength);
+            expect(outputByteLength).toBe(cursorManifestBytes.byteLength);
             memoryBytes(memory, outputPointer, outputByteLength).set(
-                selectedCursorBytes,
+                cursorManifestBytes,
             );
             return 0;
         },
@@ -269,7 +271,7 @@ export const createCheckpointGenerationKernelFixture = (
     }));
     return {
         canonicalStateBytes,
-        cursorBytes,
+        cursorManifestBytes,
         observations,
         runtime,
         stableAttemptBindingHash,

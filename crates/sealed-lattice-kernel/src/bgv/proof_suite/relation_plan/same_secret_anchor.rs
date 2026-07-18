@@ -242,7 +242,6 @@ pub(super) mod tests {
             sharing_data_modulus_indices: vec![0, 1],
             commitment_data_modulus_indices: vec![0, 1, 2],
             commitment_module_rank: 1,
-            first_mask_purpose: 100,
         }
     }
 
@@ -312,6 +311,49 @@ pub(super) mod tests {
             variant.ordered_trees.len(),
             proof_tree_width(variant, 1),
             proof_tree_width(variant, 2),
+        );
+    }
+
+    #[test]
+    fn application_bad_set_catalog_is_bound_to_the_auxiliary_transition_programs() {
+        let context = check_context(false);
+        let mut plan = compile_same_secret_relation_plan(&same_secret_input(), &context)
+            .expect("same-secret relation plan");
+        let groups = plan.plan.variants[0]
+            .application_non_native_challenge_bad_set_catalog(&context)
+            .expect("production-derived application bad sets");
+        assert!(!groups.is_empty());
+        assert!(groups.iter().all(|group| {
+            group.challenge_role() == RelationChallengeRole::NonNativeTheta
+                && group.ordered_coordinate_bounds().len()
+                    == usize::from(context.non_native_modular_identity_challenge_count)
+        }));
+
+        let changed_transition = plan.plan.variants[0]
+            .ordered_constraints
+            .iter_mut()
+            .find(|constraint| {
+                constraint
+                    .numerator_postfix_expression
+                    .iter()
+                    .any(|instruction| {
+                        matches!(
+                            instruction,
+                            RelationExpressionInstruction::TranscriptChallenge {
+                                challenge_role: RelationChallengeRole::NonNativeTheta,
+                                ..
+                            }
+                        )
+                    })
+            })
+            .expect("same-secret plan has a theta transition");
+        changed_transition.numerator_postfix_expression.extend([
+            RelationExpressionInstruction::BaseFieldConstant(1),
+            RelationExpressionInstruction::Addition,
+        ]);
+        assert_eq!(
+            plan.plan.variants[0].application_non_native_challenge_bad_set_catalog(&context),
+            Err(RelationPlanError::InvalidConstraint),
         );
     }
 
@@ -394,7 +436,6 @@ pub(super) mod tests {
                 assert_auxiliary(binding.reversed_suffix_evaluation_column_ordinal);
             }
             for component in &batch.ordered_components {
-                assert_pre_challenge(component.quotient_column_ordinal);
                 for term in &component.ordered_linear_terms {
                     assert_pre_challenge(term.column_ordinal);
                 }
@@ -427,42 +468,15 @@ pub(super) mod tests {
     pub(in super::super) fn production_context(
         include_plaintext: bool,
     ) -> RelationPlanCheckContext {
-        let evaluation_domain_size = 524_288_u64;
-        let mut resolved_moduli = DATA_PRIMES
-            .iter()
-            .copied()
-            .enumerate()
-            .map(|(index, modulus)| {
-                ResolvedSuiteModulus::new(SuiteModulusReference::data(index as u16), modulus)
-            })
-            .collect::<Vec<_>>();
-        if include_plaintext {
-            resolved_moduli.push(ResolvedSuiteModulus::new(
-                SuiteModulusReference::plaintext(),
-                65_537,
-            ));
-        }
-        RelationPlanCheckContext {
-            base_field_modulus: PROOF_BASE_FIELD_MODULUS,
-            challenge_extension_degree: crate::bgv::proof_suite::PROOF_CHALLENGE_EXTENSION_DEGREE
-                as u16,
-            evaluation_blowup_factor: 8,
-            evaluation_domain_generator: modular_power(
-                PROOF_BASE_FIELD_MAXIMUM_TWO_ADIC_GENERATOR,
-                (1_u64 << 32) / evaluation_domain_size,
-                PROOF_BASE_FIELD_MODULUS,
-            ),
-            evaluation_coset_offset: 7,
-            deep_point_count: 2,
-            quotient_component_count: 8,
-            quotient_component_degree_bound_exclusive: 32_768,
-            fri_fold_count: 8,
-            final_polynomial_degree_bound_exclusive: 256,
-            unique_query_count: 168,
-            non_native_modular_identity_challenge_count: 7,
-            maximum_fiat_shamir_candidate_draws_per_output: 128,
-            resolved_moduli,
-        }
+        let application_statement_schema_identifier = if include_plaintext {
+            crate::foundation::ProofApplicationSlotCeilings::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER
+        } else {
+            crate::foundation::ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER
+        };
+        crate::bgv::proof_suite::selected_profile::selected_relation_plan_check_context(
+            application_statement_schema_identifier,
+        )
+        .expect("selected ordinary-family relation context")
     }
 
     #[test]
@@ -470,15 +484,14 @@ pub(super) mod tests {
         let context = production_context(false);
         let plan = compile_same_secret_relation_plan(
             &SameSecretRelationPlanInput {
-                ring_degree: 32_768,
-                evaluation_domain_size: 524_288,
-                opening_degree_bound_exclusive: 65_536,
-                material_column_degree_bound_exclusive: 16_384,
-                public_polynomial_column_degree_bound_exclusive: 16_384,
-                sharing_data_modulus_indices: (0..17).collect(),
+                ring_degree: crate::bgv::parameters::POLYNOMIAL_DEGREE as u64,
+                evaluation_domain_size: crate::bgv::proof_suite::selected_profile::SELECTED_EVALUATION_DOMAIN_SIZE,
+                opening_degree_bound_exclusive: crate::bgv::proof_suite::selected_profile::SELECTED_OPENING_DEGREE_BOUND_EXCLUSIVE,
+                material_column_degree_bound_exclusive: crate::bgv::parameters::POLYNOMIAL_DEGREE as u64 / 2,
+                public_polynomial_column_degree_bound_exclusive: crate::bgv::proof_suite::selected_profile::SELECTED_PUBLIC_POLYNOMIAL_COLUMN_DEGREE_BOUND_EXCLUSIVE,
+                sharing_data_modulus_indices: (0..DATA_PRIMES.len() as u16).collect(),
                 commitment_data_modulus_indices: vec![0, 1, 2],
                 commitment_module_rank: 1,
-                first_mask_purpose: 100,
             },
             &context,
         )

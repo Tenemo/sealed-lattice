@@ -14,10 +14,16 @@ mod implementation {
     type Handle = *mut c_void;
 
     const JOB_OBJECT_BASIC_ACCOUNTING_INFORMATION_CLASS: i32 = 1;
+    const JOB_OBJECT_BASIC_PROCESS_ID_LIST_CLASS: i32 = 3;
     const JOB_OBJECT_EXTENDED_LIMIT_INFORMATION_CLASS: i32 = 9;
     const JOB_OBJECT_LIMIT_VIOLATION_INFORMATION_2_CLASS: i32 = 34;
     const JOB_OBJECT_LIMIT_JOB_MEMORY: u32 = 0x0000_0200;
     const JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE: u32 = 0x0000_2000;
+    const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x0000_1000;
+    const PROCESS_VM_READ: u32 = 0x0000_0010;
+    const ERROR_INVALID_HANDLE: i32 = 6;
+    const ERROR_INVALID_PARAMETER: i32 = 87;
+    const ERROR_MORE_DATA: i32 = 234;
 
     pub(crate) const CONTAINMENT_BACKEND: &str = "windows-job-object-job-memory";
     pub(crate) const CONTAINMENT_SCOPE: &str = "guard-and-descendant-process-tree";
@@ -108,12 +114,34 @@ mod implementation {
         available_extended_virtual_bytes: u64,
     }
 
+    #[repr(C)]
+    #[derive(Default)]
+    struct ProcessMemoryCounters {
+        structure_length: u32,
+        page_fault_count: u32,
+        peak_working_set_size: usize,
+        working_set_size: usize,
+        quota_peak_paged_pool_usage: usize,
+        quota_paged_pool_usage: usize,
+        quota_peak_non_paged_pool_usage: usize,
+        quota_non_paged_pool_usage: usize,
+        pagefile_usage: usize,
+        peak_pagefile_usage: usize,
+    }
+
     unsafe extern "system" {
         fn AssignProcessToJobObject(job: Handle, process: Handle) -> i32;
         fn CloseHandle(object: Handle) -> i32;
         fn CreateJobObjectW(job_attributes: *const c_void, name: *const u16) -> Handle;
         fn GetCurrentProcess() -> Handle;
         fn GlobalMemoryStatusEx(memory_status: *mut MemoryStatusExtended) -> i32;
+        fn K32GetProcessMemoryInfo(
+            process: Handle,
+            memory_counters: *mut ProcessMemoryCounters,
+            structure_length: u32,
+        ) -> i32;
+        fn OpenProcess(desired_access: u32, inherit_handle: i32, process_identifier: u32)
+        -> Handle;
         fn QueryInformationJobObject(
             job: Handle,
             information_class: i32,
@@ -241,6 +269,13 @@ mod implementation {
                 Err(error) => sample_errors.push(error),
             }
 
+            match query_job_process_tree_resident_memory(self.job_handle.0) {
+                Ok(resident_memory_bytes) => {
+                    snapshot.process_tree_resident_memory_bytes = Some(resident_memory_bytes);
+                }
+                Err(error) => sample_errors.push(error),
+            }
+
             match query_job_information::<JobObjectLimitViolationInformation2>(
                 self.job_handle.0,
                 JOB_OBJECT_LIMIT_VIOLATION_INFORMATION_2_CLASS,
@@ -307,6 +342,186 @@ mod implementation {
             ));
         }
         Ok(information)
+    }
+
+    fn query_job_process_tree_resident_memory(job_handle: Handle) -> Result<u64, String> {
+        let process_identifiers = query_job_process_identifiers(job_handle)?;
+        let mut resident_memory_bytes = 0_u64;
+        let mut process_errors = Vec::new();
+        for process_identifier in process_identifiers {
+            match query_process_resident_memory(process_identifier) {
+                Ok(Some(process_resident_memory_bytes)) => {
+                    resident_memory_bytes = resident_memory_bytes
+                        .checked_add(process_resident_memory_bytes)
+                        .ok_or_else(|| {
+                            "Windows process-tree resident-memory total overflowed u64".to_owned()
+                        })?;
+                }
+                Ok(None) => {}
+                Err(error) => process_errors.push(error),
+            }
+        }
+        if !process_errors.is_empty() {
+            return Err(process_errors.join("; "));
+        }
+        Ok(resident_memory_bytes)
+    }
+
+    fn query_job_process_identifiers(job_handle: Handle) -> Result<Vec<u32>, String> {
+        const PROCESS_LIST_HEADER_BYTE_LENGTH: usize = size_of::<u32>() * 2;
+        let mut process_capacity = 32_usize;
+        loop {
+            let buffer_byte_length = process_capacity
+                .checked_mul(size_of::<usize>())
+                .and_then(|length| length.checked_add(PROCESS_LIST_HEADER_BYTE_LENGTH))
+                .ok_or_else(|| {
+                    "Windows job process-list buffer length overflowed usize".to_owned()
+                })?;
+            let information_length = u32::try_from(buffer_byte_length).map_err(|_| {
+                "Windows job process-list buffer length does not fit u32".to_owned()
+            })?;
+            let mut buffer = vec![0_u8; buffer_byte_length];
+            let mut returned_length = 0_u32;
+            // SAFETY: The byte buffer is writable for the supplied length and
+            // remains alive for the call. The job handle is valid here.
+            let query_succeeded = unsafe {
+                QueryInformationJobObject(
+                    job_handle,
+                    JOB_OBJECT_BASIC_PROCESS_ID_LIST_CLASS,
+                    buffer.as_mut_ptr().cast(),
+                    information_length,
+                    ptr::from_mut(&mut returned_length),
+                )
+            };
+            if query_succeeded == 0 {
+                let error = io::Error::last_os_error();
+                if error.raw_os_error() == Some(ERROR_MORE_DATA) {
+                    process_capacity = process_capacity.checked_mul(2).ok_or_else(|| {
+                        "Windows job process-list capacity overflowed usize".to_owned()
+                    })?;
+                    continue;
+                }
+                return Err(format!(
+                    "QueryInformationJobObject process list failed: {error}"
+                ));
+            }
+            let returned_length = usize::try_from(returned_length).map_err(|_| {
+                "QueryInformationJobObject process-list length does not fit usize".to_owned()
+            })?;
+            if returned_length < PROCESS_LIST_HEADER_BYTE_LENGTH || returned_length > buffer.len() {
+                return Err(
+                    "QueryInformationJobObject returned an invalid process-list length".to_owned(),
+                );
+            }
+            let assigned_process_count =
+                u32::from_ne_bytes(buffer[0..4].try_into().map_err(|_| {
+                    "Windows job process-list assigned count is truncated".to_owned()
+                })?) as usize;
+            let listed_process_count =
+                u32::from_ne_bytes(buffer[4..8].try_into().map_err(|_| {
+                    "Windows job process-list returned count is truncated".to_owned()
+                })?) as usize;
+            if listed_process_count > assigned_process_count
+                || listed_process_count > process_capacity
+            {
+                return Err(
+                    "QueryInformationJobObject returned inconsistent process counts".to_owned(),
+                );
+            }
+            if listed_process_count < assigned_process_count {
+                process_capacity = assigned_process_count.max(process_capacity + 1);
+                continue;
+            }
+
+            let mut process_identifiers = Vec::with_capacity(listed_process_count);
+            for process_index in 0..listed_process_count {
+                let process_identifier_offset = PROCESS_LIST_HEADER_BYTE_LENGTH
+                    .checked_add(process_index.checked_mul(size_of::<usize>()).ok_or_else(
+                        || "Windows job process-list offset overflowed usize".to_owned(),
+                    )?)
+                    .ok_or_else(|| "Windows job process-list offset overflowed usize".to_owned())?;
+                // SAFETY: The returned list count was checked against the
+                // allocated capacity. read_unaligned handles the eight-byte
+                // header on both 32-bit and 64-bit Windows.
+                let process_identifier = unsafe {
+                    ptr::read_unaligned(
+                        buffer
+                            .as_ptr()
+                            .add(process_identifier_offset)
+                            .cast::<usize>(),
+                    )
+                };
+                let process_identifier = u32::try_from(process_identifier)
+                    .map_err(|_| "Windows job process identifier does not fit u32".to_owned())?;
+                if process_identifier != 0 {
+                    process_identifiers.push(process_identifier);
+                }
+            }
+            return Ok(process_identifiers);
+        }
+    }
+
+    fn query_process_resident_memory(process_identifier: u32) -> Result<Option<u64>, String> {
+        // SAFETY: The process identifier came from the live job process list;
+        // the returned handle is checked and closed below.
+        let process_handle = unsafe {
+            OpenProcess(
+                PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ,
+                0,
+                process_identifier,
+            )
+        };
+        if process_handle.is_null() {
+            let error = io::Error::last_os_error();
+            if windows_process_disappeared(&error) {
+                return Ok(None);
+            }
+            return Err(format!(
+                "OpenProcess failed for job process {process_identifier}: {error}"
+            ));
+        }
+
+        let mut memory_counters = ProcessMemoryCounters {
+            structure_length: structure_length::<ProcessMemoryCounters>()?,
+            ..ProcessMemoryCounters::default()
+        };
+        let memory_counters_structure_length = memory_counters.structure_length;
+        // SAFETY: The process handle is valid, and the output pointer addresses
+        // the exact initialized structure length supplied to the function.
+        let query_succeeded = unsafe {
+            K32GetProcessMemoryInfo(
+                process_handle,
+                ptr::from_mut(&mut memory_counters),
+                memory_counters_structure_length,
+            )
+        };
+        let query_error = (query_succeeded == 0).then(io::Error::last_os_error);
+        // SAFETY: OpenProcess returned this owned non-null handle.
+        unsafe {
+            CloseHandle(process_handle);
+        }
+        if let Some(error) = query_error {
+            if windows_process_disappeared(&error) {
+                return Ok(None);
+            }
+            return Err(format!(
+                "K32GetProcessMemoryInfo failed for job process {process_identifier}: {error}"
+            ));
+        }
+        u64::try_from(memory_counters.working_set_size)
+            .map(Some)
+            .map_err(|_| {
+                format!(
+                    "resident-memory length for job process {process_identifier} does not fit u64"
+                )
+            })
+    }
+
+    fn windows_process_disappeared(error: &io::Error) -> bool {
+        matches!(
+            error.raw_os_error(),
+            Some(ERROR_INVALID_HANDLE) | Some(ERROR_INVALID_PARAMETER)
+        )
     }
 
     fn query_host_memory() -> Result<MemoryStatusExtended, String> {

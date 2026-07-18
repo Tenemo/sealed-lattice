@@ -185,6 +185,29 @@ export type CanonicalStreamWorkerRuntime = Readonly<{
 }>;
 
 type CanonicalStreamKernelContext = Readonly<{
+    aggregateThresholdShareBeginRecipientAuthority?: (
+        actionRandomnessHandle: number,
+        localRecipientRosterPosition: number,
+        boardVerifierSessionHandle: number,
+        boardVerifierSessionCapabilityPointer: number,
+        boardVerifierSessionCapabilityByteLength: number,
+        orderedPublicRandomnessHandleBytesPointer: number,
+        orderedPublicRandomnessHandleBytesByteLength: number,
+        orderedDealerTerminalHandleBytesPointer: number,
+        orderedDealerTerminalHandleBytesByteLength: number,
+        statusPointer: number,
+    ) => number;
+    aggregateThresholdShareAbsorbAuthenticatedRecipientPayload?: (
+        recipientAuthorityHandle: number,
+        authenticatedPlaintextCapabilityHandle: number,
+        canonicalSignedEnvelopePointer: number,
+        canonicalSignedEnvelopeLength: number,
+        canonicalPlaintextPointer: number,
+        canonicalPlaintextLength: number,
+    ) => number;
+    aggregateThresholdShareDiscardRecipientAuthority?: (
+        recipientAuthorityHandle: number,
+    ) => number;
     allocate(length: number): number;
     beginVerifier(
         streamDomain: number,
@@ -291,6 +314,48 @@ type CanonicalStreamKernelContext = Readonly<{
         handle: number,
         tagPointer: number,
         tagLength: number,
+    ) => number;
+    setupGenerationAuthorityBegin?: (
+        selectedSuiteHandle: number,
+        boardVerifierSessionHandle: number,
+        boardVerifierSessionCapabilityPointer: number,
+        boardVerifierSessionCapabilityByteLength: number,
+        orderedPublicRandomnessObjectHandlesPointer: number,
+        orderedPublicRandomnessObjectHandlesByteLength: number,
+        actionRandomnessHandle: number,
+        stateVerifierSessionHandle: number,
+        stateVerifierSessionCapabilityPointer: number,
+        stateVerifierSessionCapabilityByteLength: number,
+        verifiedReservationHandle: number,
+        statusPointer: number,
+    ) => number;
+    setupGenerationAuthorityRelease?: (authorityHandle: number) => number;
+    setupGenerationRecipientVssPayloadByteLength?: (
+        authorityHandle: number,
+        recipientRosterPosition: number,
+        statusPointer: number,
+    ) => bigint;
+    setupGenerationRecipientVssPayloadOpen?: (
+        authorityHandle: number,
+        recipientRosterPosition: number,
+        statusPointer: number,
+    ) => number;
+    setupGenerationRecipientVssPayloadSourceByteLength?: (
+        sourceHandle: number,
+        statusPointer: number,
+    ) => bigint;
+    setupGenerationRecipientVssPayloadSourceRecipientRosterPosition?: (
+        sourceHandle: number,
+        statusPointer: number,
+    ) => number;
+    setupGenerationRecipientVssPayloadRead?: (
+        sourceHandle: number,
+        expectedOffset: bigint,
+        outputPointer: number,
+        outputByteLength: number,
+    ) => number;
+    setupGenerationRecipientVssPayloadCancel?: (
+        sourceHandle: number,
     ) => number;
     runExclusive<Result>(
         operationName: string,

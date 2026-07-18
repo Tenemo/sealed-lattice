@@ -7,7 +7,10 @@
 
 use std::sync::OnceLock;
 
+use zeroize::Zeroize;
+
 pub(crate) const PROOF_BASE_FIELD_MODULUS: u64 = 18_446_744_069_414_584_321;
+const GOLDILOCKS_TWO_TO_64_RESIDUE: u64 = (1_u64 << 32) - 1;
 pub(crate) const PROOF_BASE_FIELD_MAXIMUM_TWO_ADIC_GENERATOR: u64 = 1_753_635_133_440_165_772;
 pub(crate) const PROOF_CHALLENGE_EXTENSION_DEGREE: usize = 5;
 pub(crate) const PROOF_CHALLENGE_EXTENSION_POLYNOMIAL_COEFFICIENTS: [u64;
@@ -25,6 +28,12 @@ pub(crate) enum ProofFieldError {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct ProofBaseFieldElement(u64);
 
+impl Zeroize for ProofBaseFieldElement {
+    fn zeroize(&mut self) {
+        self.0.zeroize();
+    }
+}
+
 impl ProofBaseFieldElement {
     pub(crate) const ZERO: Self = Self(0);
     pub(crate) const ONE: Self = Self(1);
@@ -37,7 +46,7 @@ impl ProofBaseFieldElement {
     }
 
     pub(crate) fn from_reduced(value: u128) -> Self {
-        Self((value % u128::from(PROOF_BASE_FIELD_MODULUS)) as u64)
+        Self(reduce_goldilocks_u128(value))
     }
 
     pub(crate) const fn canonical(self) -> u64 {
@@ -45,7 +54,19 @@ impl ProofBaseFieldElement {
     }
 
     pub(crate) fn add(self, other: Self) -> Self {
-        Self::from_reduced(u128::from(self.0) + u128::from(other.0))
+        let (word_sum, carried_two_to_64) = self.0.overflowing_add(other.0);
+        let folded_sum = if carried_two_to_64 {
+            // Canonical operands make this addition non-overflowing: the
+            // largest carried word is 2^64 - 2*(2^32 - 1) - 2.
+            word_sum + GOLDILOCKS_TWO_TO_64_RESIDUE
+        } else {
+            word_sum
+        };
+        Self(
+            folded_sum
+                .checked_sub(PROOF_BASE_FIELD_MODULUS)
+                .unwrap_or(folded_sum),
+        )
     }
 
     pub(crate) fn subtract(self, other: Self) -> Self {
@@ -93,9 +114,33 @@ impl ProofBaseFieldElement {
     }
 }
 
+// For p = 2^64 - 2^32 + 1, every 2^64 factor can be replaced by
+// 2^32 - 1. Four fixed folds reduce the complete u128 input range to one u64
+// representative; one final subtraction makes it canonical. The fixed fold
+// count also avoids a value-dependent reduction loop on witness arithmetic.
+fn reduce_goldilocks_u128(value: u128) -> u64 {
+    let mut folded = value;
+    for _ in 0..4 {
+        let low = folded as u64;
+        let high = (folded >> 64) as u64;
+        folded = u128::from(low) + u128::from(high) * u128::from(GOLDILOCKS_TWO_TO_64_RESIDUE);
+    }
+    debug_assert_eq!(folded >> 64, 0);
+    let candidate = folded as u64;
+    candidate
+        .checked_sub(PROOF_BASE_FIELD_MODULUS)
+        .unwrap_or(candidate)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct ProofChallengeExtensionElement {
     coordinates: [ProofBaseFieldElement; PROOF_CHALLENGE_EXTENSION_DEGREE],
+}
+
+impl Zeroize for ProofChallengeExtensionElement {
+    fn zeroize(&mut self) {
+        self.coordinates.zeroize();
+    }
 }
 
 impl ProofChallengeExtensionElement {
@@ -583,6 +628,82 @@ mod tests {
             ProofBaseFieldElement::from_canonical(PROOF_BASE_FIELD_MODULUS),
             Err(ProofFieldError::NonCanonicalElement),
         );
+    }
+
+    #[test]
+    fn goldilocks_reduction_matches_reference_modulo_across_the_complete_word_boundary() {
+        let modulus_wide = u128::from(PROOF_BASE_FIELD_MODULUS);
+        let boundary_values = [
+            0_u128,
+            1,
+            u128::from(GOLDILOCKS_TWO_TO_64_RESIDUE - 1),
+            u128::from(GOLDILOCKS_TWO_TO_64_RESIDUE),
+            modulus_wide - 1,
+            modulus_wide,
+            modulus_wide + 1,
+            u128::from(u64::MAX),
+            u128::from(u64::MAX) + 1,
+            modulus_wide * modulus_wide - 1,
+            u128::MAX - 1,
+            u128::MAX,
+        ];
+        for value in boundary_values {
+            assert_eq!(
+                reduce_goldilocks_u128(value),
+                (value % modulus_wide) as u64,
+                "boundary reduction for {value}",
+            );
+        }
+
+        let mut deterministic_state = 0x9e37_79b9_7f4a_7c15_u64;
+        for sample_ordinal in 0..20_000_u32 {
+            deterministic_state ^= deterministic_state << 13;
+            deterministic_state ^= deterministic_state >> 7;
+            deterministic_state ^= deterministic_state << 17;
+            let high = deterministic_state;
+            deterministic_state = deterministic_state
+                .wrapping_mul(0xd134_2543_de82_ef95)
+                .wrapping_add(u64::from(sample_ordinal));
+            let low = deterministic_state;
+            let value = (u128::from(high) << 64) | u128::from(low);
+            assert_eq!(
+                reduce_goldilocks_u128(value),
+                (value % modulus_wide) as u64,
+                "deterministic reduction sample {sample_ordinal}",
+            );
+        }
+    }
+
+    #[test]
+    fn optimized_base_operations_match_reference_arithmetic_for_aggressive_operands() {
+        let operands = [
+            0,
+            1,
+            2,
+            GOLDILOCKS_TWO_TO_64_RESIDUE - 1,
+            GOLDILOCKS_TWO_TO_64_RESIDUE,
+            PROOF_BASE_FIELD_MODULUS / 2,
+            PROOF_BASE_FIELD_MODULUS - 3,
+            PROOF_BASE_FIELD_MODULUS - 2,
+            PROOF_BASE_FIELD_MODULUS - 1,
+        ];
+        let modulus_wide = u128::from(PROOF_BASE_FIELD_MODULUS);
+        for left in operands {
+            for right in operands {
+                let left_element = ProofBaseFieldElement::from_canonical(left)
+                    .expect("left boundary operand is canonical");
+                let right_element = ProofBaseFieldElement::from_canonical(right)
+                    .expect("right boundary operand is canonical");
+                assert_eq!(
+                    left_element.add(right_element).canonical(),
+                    ((u128::from(left) + u128::from(right)) % modulus_wide) as u64,
+                );
+                assert_eq!(
+                    left_element.multiply(right_element).canonical(),
+                    ((u128::from(left) * u128::from(right)) % modulus_wide) as u64,
+                );
+            }
+        }
     }
 
     #[test]

@@ -26,6 +26,7 @@ const browserServerBasePort = 41000;
 const nodeHookTimeoutMs = 240_000;
 const nodeTestTimeoutMs = 60_000;
 const nodeKernelTestTimeoutMs = 15 * 60_000;
+const desktopBrowserMeasurementTimeoutMs = 24 * 60 * 60_000;
 
 const protocolNodeTestGlobs = [
     'packages/protocol/tests/node/**/*.test.ts',
@@ -67,6 +68,9 @@ const mobileBrowserTestGlobs = [
     'packages/wasm/tests/browser/canonical-stream-runtime.browser.test.ts',
     'packages/wasm/tests/browser/local-storage-root-worker-kernel.browser.test.ts',
     'packages/wasm/tests/browser/state-verifier-runtime.browser.test.ts',
+] as const;
+const desktopBrowserMeasurementTestGlobs = [
+    'packages/protocol/tests/manual/**/*.browser.measurement.test.ts',
 ] as const;
 
 const testDiagnosticPaths = resolveTestDiagnosticPaths();
@@ -135,6 +139,10 @@ const desktopBrowserInstances: BrowserInstanceOption[] = [
     { browser: 'webkit', name: 'webkit-desktop' },
 ];
 
+const desktopBrowserMeasurementInstances: BrowserInstanceOption[] = [
+    { browser: 'chromium', name: 'chromium-desktop-measurements' },
+];
+
 const mobileBrowserInstances: BrowserInstanceOption[] = [
     {
         browser: 'chromium',
@@ -183,15 +191,19 @@ const makeNodeProject = ({
 });
 
 type BrowserProjectInput = {
+    readonly hookTimeout?: number;
     readonly include: readonly string[];
     readonly instances: BrowserInstanceOption[];
     readonly projectName: string;
+    readonly testTimeout?: number;
 };
 
 const makeBrowserProject = ({
+    hookTimeout,
     include,
     instances,
     projectName,
+    testTimeout,
 }: BrowserProjectInput): UserWorkspaceConfig => ({
     resolve: testResolve,
     test: {
@@ -202,6 +214,7 @@ const makeBrowserProject = ({
         // Firefox WebAssembly compiler and left its test process unable to
         // shut down under otherwise valid multi-browser runs.
         fileParallelism: false,
+        ...(hookTimeout === undefined ? {} : { hookTimeout }),
         ...(nodeDiagnosticReportArguments.length === 0
             ? {}
             : { execArgv: nodeDiagnosticReportArguments }),
@@ -232,6 +245,7 @@ const makeBrowserProject = ({
                       },
                   }),
         },
+        ...(testTimeout === undefined ? {} : { testTimeout }),
     },
 });
 
@@ -275,6 +289,13 @@ export default defineConfig({
                 include: mobileBrowserTestGlobs,
                 instances: mobileBrowserInstances,
                 projectName: 'browser-mobile',
+            }),
+            makeBrowserProject({
+                hookTimeout: desktopBrowserMeasurementTimeoutMs,
+                include: desktopBrowserMeasurementTestGlobs,
+                instances: desktopBrowserMeasurementInstances,
+                projectName: 'browser-desktop-measurements',
+                testTimeout: desktopBrowserMeasurementTimeoutMs,
             }),
         ],
     },

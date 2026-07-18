@@ -5,7 +5,6 @@ import type {
     AuthenticatedCheckpointStore,
     AuthenticatedCheckpointStoreLimits,
     CheckpointBoundaryPolicy,
-    CheckpointRandomCursorKernel,
     TransferableAuthenticatedCheckpointStore,
 } from '../authenticated-checkpoint-store.js';
 import type { RuntimeRecordProtection } from '../authenticated-runtime-record.js';
@@ -339,7 +338,6 @@ export type WebLockOwnedBrowserActionStorageCustody = Readonly<{
     openCommonProofCustody?(input: {
         actionRandomnessCommitment: Uint8Array;
         checkpoint?: Readonly<{
-            cursorKernel: CheckpointRandomCursorKernel;
             resumeDescriptor?: CommonProofCheckpointResumeDescriptor;
             store: AuthenticatedCheckpointStore;
         }>;
@@ -349,7 +347,6 @@ export type WebLockOwnedBrowserActionStorageCustody = Readonly<{
     }): Promise<CommonProofBrowserCustody>;
     openCheckpointStore(input: {
         boundaryPolicy: CheckpointBoundaryPolicy;
-        cursorKernel: CheckpointRandomCursorKernel;
         limits: AuthenticatedCheckpointStoreLimits;
     }): Promise<TransferableAuthenticatedCheckpointStore>;
     openRootAndAuthenticatedStore(input: {

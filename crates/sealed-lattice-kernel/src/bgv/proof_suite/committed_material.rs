@@ -5,41 +5,36 @@
 //! polynomials over the trace subgroup, and committed in the fixed physical
 //! order `[low half 0, low half 1, high half 0, high half 1]`.
 
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    fmt,
-    mem::size_of,
-};
+use std::{fmt, mem::size_of, sync::Arc};
 
 use tiny_keccak::{Hasher, Kmac};
 use zeroize::Zeroizing;
 
 use crate::foundation::{
     CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple,
-    hash_foundation_tuple_512,
+    PrivateRandomnessKmacInputClassAccounting, hash_foundation_tuple_512,
 };
 
 use super::{
-    BoundedCommonProofByteSinkError, CommonProofBoundOpeningProvider, CommonProofEncodingError,
-    CommonProofOpeningArtifact, CommonProofOpeningGeometry, CommonProofProverError,
-    CommonProofSourcePolynomial, CompleteProofTreeCatalog, PROOF_BASE_FIELD_MODULUS,
-    PROOF_EVALUATION_BLOWUP_FACTOR, PROOF_EVALUATION_COSET_OFFSET,
+    COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH, CommonProofProverError, CommonProofSourcePolynomial,
+    PROOF_BASE_FIELD_MODULUS, PROOF_EVALUATION_BLOWUP_FACTOR, PROOF_EVALUATION_COSET_OFFSET,
     PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT, ProofBaseFieldElement,
-    ProofEvaluationDomain, ProofFieldError, ProofPolynomialError, ProofTreeCatalogEntry,
-    ProofTreeCatalogSource, apply_trace_mask, encode_common_proof_query_tree_fragment,
+    ProofEvaluationDomain, ProofFieldError, ProofPolynomialError, apply_trace_mask,
 };
 
+const MATERIAL_CONTEXT_SCHEMA_IDENTIFIER: u16 = 0x2101;
 const MATERIAL_DERIVATION_INPUT_SCHEMA_IDENTIFIER: u16 = 0x2105;
 pub(super) const COMMITTED_MATERIAL_PHASE_PAIR_LEAF_SCHEMA_IDENTIFIER: u16 = 0x2102;
 const SCHEMA_VERSION: u16 = 1;
 const MATERIAL_COLUMN_COUNT: usize = 4;
 const MATERIAL_DIGIT_COLUMN_COUNT: usize = 2;
-const SECRET_LEAF_SALT_BYTE_LENGTH: usize = 48;
+const MATERIAL_DIGIT_RADIX: u64 = 129_140_163;
 const DERIVED_BLOCK_BYTE_LENGTH: usize = 64;
 const MAXIMUM_MASKING_POLYNOMIAL_DEGREE: usize = 2_047;
 
 const PRIVATE_DERIVATION_CUSTOMIZATION: &[u8] =
     b"sealed-lattice/setup/vss-committed-material/private-derivation/v1";
+const MATERIAL_CONTEXT_HASH_DOMAIN: &str = "sealed-lattice/setup/vss-committed-material/context/v1";
 const PHASE_PAIR_LEAF_HASH_DOMAIN: &str =
     "sealed-lattice/setup/vss-committed-material/phase-pair-leaf/v1";
 const MERKLE_NODE_HASH_DOMAIN: &str = "sealed-lattice/setup/vss-committed-material/merkle-node/v1";
@@ -78,6 +73,79 @@ impl From<CommonProofProverError> for CommittedMaterialError {
 
 fn canonical_encoding_error<T>(_: T) -> CommittedMaterialError {
     CommittedMaterialError::CanonicalEncoding
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u16)]
+pub(crate) enum CommittedMaterialRole {
+    Coefficient = 1,
+    RecipientShare = 2,
+    AggregateThresholdShare = 3,
+}
+
+/// Canonical owner and index coordinates for one persistent material tree.
+/// The suite fixes every omitted field and tree dimension, so a caller cannot
+/// supply proof geometry through this context.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct CommittedMaterialContext {
+    suite_identifier: [u8; 64],
+    ceremony_context_hash: [u8; 64],
+    action_context_hash: [u8; 64],
+    owner_participant_identity: [u8; 64],
+    material_role: CommittedMaterialRole,
+    sharing_limb_index: u16,
+    object_index: u16,
+}
+
+impl CommittedMaterialContext {
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) const fn new(
+        suite_identifier: [u8; 64],
+        ceremony_context_hash: [u8; 64],
+        action_context_hash: [u8; 64],
+        owner_participant_identity: [u8; 64],
+        material_role: CommittedMaterialRole,
+        sharing_limb_index: u16,
+        object_index: u16,
+    ) -> Self {
+        Self {
+            suite_identifier,
+            ceremony_context_hash,
+            action_context_hash,
+            owner_participant_identity,
+            material_role,
+            sharing_limb_index,
+            object_index,
+        }
+    }
+
+    pub(crate) fn canonical_bytes(self) -> Result<Vec<u8>, CommittedMaterialError> {
+        CanonicalTuple::new(
+            MATERIAL_CONTEXT_SCHEMA_IDENTIFIER,
+            SCHEMA_VERSION,
+            vec![
+                CanonicalItem::hash512(self.suite_identifier),
+                CanonicalItem::hash512(self.ceremony_context_hash),
+                CanonicalItem::hash512(self.action_context_hash),
+                CanonicalItem::participant_identity(self.owner_participant_identity),
+                CanonicalItem::unsigned16(self.material_role as u16),
+                CanonicalItem::unsigned16(self.sharing_limb_index),
+                CanonicalItem::unsigned16(self.object_index),
+            ],
+        )
+        .encode()
+        .map_err(canonical_encoding_error)
+    }
+
+    pub(crate) fn context_hash(self) -> Result<[u8; 64], CommittedMaterialError> {
+        let canonical_bytes = self.canonical_bytes()?;
+        hash_foundation_tuple_512(
+            MATERIAL_CONTEXT_HASH_DOMAIN,
+            &[CanonicalItem::variable_bytes(canonical_bytes).map_err(canonical_encoding_error)?],
+        )
+        .map(|hash| hash.into_bytes())
+        .map_err(canonical_encoding_error)
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -261,6 +329,73 @@ impl CommittedMaterialProfile {
     }
 }
 
+/// Maximum number of distinct canonical inner-derivation KMAC inputs needed
+/// to construct the supplied action-level population of persistent material
+/// roots. Every mask candidate advances its physical-column counter, while
+/// every leaf salt consumes consecutive 64-byte counter blocks.
+pub(crate) fn maximum_committed_material_inner_derivation_count(
+    profile: CommittedMaterialProfile,
+    physical_root_count: u64,
+    full_salted_leaf_count: u64,
+) -> Result<u64, CommittedMaterialError> {
+    profile.validate()?;
+    let mask_coefficient_count = u64::try_from(
+        profile
+            .masking_polynomial_maximum_degree()
+            .checked_add(1)
+            .ok_or(CommittedMaterialError::CountOverflow)?,
+    )
+    .map_err(|_| CommittedMaterialError::CountOverflow)?;
+    let maximum_mask_candidate_count = physical_root_count
+        .checked_mul(
+            u64::try_from(MATERIAL_COLUMN_COUNT)
+                .map_err(|_| CommittedMaterialError::CountOverflow)?,
+        )
+        .and_then(|count| count.checked_mul(mask_coefficient_count))
+        .and_then(|count| {
+            count.checked_mul(u64::from(
+                PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT,
+            ))
+        })
+        .ok_or(CommittedMaterialError::CountOverflow)?;
+    let leaf_salt_block_count = u64::try_from(COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH)
+        .map_err(|_| CommittedMaterialError::CountOverflow)?
+        .div_ceil(
+            u64::try_from(DERIVED_BLOCK_BYTE_LENGTH)
+                .map_err(|_| CommittedMaterialError::CountOverflow)?,
+        );
+    maximum_mask_candidate_count
+        .checked_add(
+            full_salted_leaf_count
+                .checked_mul(leaf_salt_block_count)
+                .ok_or(CommittedMaterialError::CountOverflow)?,
+        )
+        .ok_or(CommittedMaterialError::CountOverflow)
+}
+
+/// Source-owned private-randomness accounting for a persistent committed
+/// material population. Every physical root has one 64-byte material-seed
+/// stream block, while mask candidates and full-leaf salts use the inner
+/// derivation keyed by that seed.
+pub(crate) fn maximum_committed_material_kmac_input_accounting(
+    profile: CommittedMaterialProfile,
+    physical_root_count: u64,
+    full_salted_leaf_count: u64,
+) -> Result<PrivateRandomnessKmacInputClassAccounting, CommittedMaterialError> {
+    let inner_derivation_count = maximum_committed_material_inner_derivation_count(
+        profile,
+        physical_root_count,
+        full_salted_leaf_count,
+    )?;
+    PrivateRandomnessKmacInputClassAccounting::checked_new(
+        0,
+        0,
+        physical_root_count,
+        inner_derivation_count,
+    )
+    .ok_or(CommittedMaterialError::CountOverflow)
+}
+
 pub(crate) struct CommittedMaterialTreeInput<'input> {
     pub(crate) profile: CommittedMaterialProfile,
     pub(crate) material_context_hash: [u8; 64],
@@ -272,9 +407,297 @@ pub(crate) struct CommittedMaterialTree {
     profile: CommittedMaterialProfile,
     material_context_hash: [u8; 64],
     material_seed: Zeroizing<[u8; 64]>,
-    masked_coefficients_by_physical_column: Vec<Vec<ProofBaseFieldElement>>,
+    masked_coefficients_by_physical_column: Vec<Zeroizing<Vec<ProofBaseFieldElement>>>,
     extension_columns: Vec<Vec<ProofBaseFieldElement>>,
     merkle_levels: Vec<Vec<[u8; 64]>>,
+}
+
+/// Compact regeneration authority retained after a committed-material root is
+/// constructed. The evaluation columns and Merkle layers are deliberately
+/// absent: the common prover rebuilds one source polynomial at a time from
+/// the authenticated trace row and obtains only the leaf salt it is currently
+/// materializing. The seed never crosses the Rust/Wasm boundary.
+pub(crate) struct CompactCommittedMaterialSource {
+    profile: CommittedMaterialProfile,
+    material_context_hash: [u8; 64],
+    material_seed: Zeroizing<[u8; 64]>,
+    root: [u8; 64],
+}
+
+/// One positively authenticated committed-material root and its compact
+/// canonical lattice coefficients. The expensive evaluation columns, Merkle
+/// layers, and digit trace rows are absent. A proof source derives only the
+/// requested physical column from these coefficients and drops that working
+/// set before advancing.
+#[derive(Clone)]
+pub(crate) struct AuthenticatedCompactCommittedMaterialSource {
+    compact_source: Arc<CompactCommittedMaterialSource>,
+    canonical_message: Arc<Zeroizing<Box<[u64]>>>,
+    canonical_modulus: u64,
+}
+
+impl AuthenticatedCompactCommittedMaterialSource {
+    /// Consumes a tree that was recomputed from these exact coefficients. The
+    /// positive opening check keeps the compact source, root, and canonical
+    /// coefficients inseparable after the full tree is released.
+    pub(crate) fn from_recomputed_tree_and_canonical_message(
+        tree: CommittedMaterialTree,
+        canonical_message: Zeroizing<Box<[u64]>>,
+        canonical_modulus: u64,
+    ) -> Result<Self, CommittedMaterialError> {
+        if !tree.authenticates_canonical_message(&canonical_message, canonical_modulus)? {
+            return Err(CommittedMaterialError::InvalidInput);
+        }
+        Ok(Self {
+            compact_source: Arc::new(tree.into_compact_source()),
+            canonical_message: Arc::new(canonical_message),
+            canonical_modulus,
+        })
+    }
+
+    pub(crate) fn compact_source(&self) -> &CompactCommittedMaterialSource {
+        &self.compact_source
+    }
+
+    pub(crate) fn owned_compact_source(&self) -> Arc<CompactCommittedMaterialSource> {
+        Arc::clone(&self.compact_source)
+    }
+
+    pub(crate) fn into_owned_compact_source(self) -> Arc<CompactCommittedMaterialSource> {
+        self.compact_source
+    }
+
+    pub(crate) fn canonical_message(&self) -> &[u64] {
+        &self.canonical_message
+    }
+
+    pub(crate) const fn canonical_modulus(&self) -> u64 {
+        self.canonical_modulus
+    }
+
+    pub(crate) fn authenticates_canonical_message(
+        &self,
+        canonical_message: &[u64],
+        canonical_modulus: u64,
+    ) -> bool {
+        canonical_modulus == self.canonical_modulus && canonical_message == self.canonical_message()
+    }
+
+    pub(crate) fn material_digit(
+        &self,
+        physical_half_ordinal: usize,
+        material_digit_ordinal: usize,
+        row_ordinal: usize,
+    ) -> Result<u64, CommittedMaterialError> {
+        if physical_half_ordinal >= 2 || material_digit_ordinal >= 2 {
+            return Err(CommittedMaterialError::InvalidInput);
+        }
+        let trace_domain_size = self.compact_source.profile.trace_domain_size;
+        let coefficient_ordinal = physical_half_ordinal
+            .checked_mul(trace_domain_size)
+            .and_then(|offset| offset.checked_add(row_ordinal))
+            .ok_or(CommittedMaterialError::CountOverflow)?;
+        let coefficient = *self
+            .canonical_message
+            .get(coefficient_ordinal)
+            .ok_or(CommittedMaterialError::InvalidInput)?;
+        Ok(if material_digit_ordinal == 0 {
+            coefficient % MATERIAL_DIGIT_RADIX
+        } else {
+            coefficient / MATERIAL_DIGIT_RADIX
+        })
+    }
+
+    pub(crate) fn regenerate_masked_coefficients(
+        &self,
+        physical_column_ordinal: usize,
+    ) -> Result<Zeroizing<Vec<ProofBaseFieldElement>>, CommittedMaterialError> {
+        self.compact_source
+            .regenerate_masked_coefficients_from_canonical_message(
+                physical_column_ordinal,
+                self.canonical_message(),
+                self.canonical_modulus,
+            )
+    }
+
+    pub(crate) fn retained_canonical_coefficient_byte_length(&self) -> usize {
+        self.canonical_message
+            .len()
+            .saturating_mul(size_of::<u64>())
+    }
+
+    pub(crate) fn maximum_regeneration_trace_byte_length(&self) -> usize {
+        self.compact_source
+            .profile
+            .trace_domain_size
+            .saturating_mul(size_of::<ProofBaseFieldElement>())
+    }
+}
+
+impl fmt::Debug for AuthenticatedCompactCommittedMaterialSource {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("AuthenticatedCompactCommittedMaterialSource")
+            .field("compact_source", &self.compact_source)
+            .field("canonical_message", &"[REDACTED]")
+            .field("canonical_modulus", &self.canonical_modulus)
+            .finish()
+    }
+}
+
+impl CompactCommittedMaterialSource {
+    pub(crate) const fn profile(&self) -> CommittedMaterialProfile {
+        self.profile
+    }
+
+    pub(crate) const fn material_context_hash(&self) -> [u8; 64] {
+        self.material_context_hash
+    }
+
+    pub(crate) const fn root(&self) -> [u8; 64] {
+        self.root
+    }
+
+    /// Rebuilds exactly one masked physical column from its authenticated
+    /// unmasked trace row. This is the only large scratch allocation retained
+    /// by the caller for source-polynomial delivery.
+    pub(crate) fn regenerate_masked_coefficients(
+        &self,
+        physical_column_ordinal: usize,
+        trace_values: &[u64],
+    ) -> Result<Zeroizing<Vec<ProofBaseFieldElement>>, CommittedMaterialError> {
+        if physical_column_ordinal >= MATERIAL_COLUMN_COUNT
+            || trace_values.len() != self.profile.trace_domain_size
+            || trace_values
+                .iter()
+                .any(|value| *value >= PROOF_BASE_FIELD_MODULUS)
+        {
+            return Err(CommittedMaterialError::InvalidInput);
+        }
+        let trace_domain = ProofEvaluationDomain::new_subgroup(self.profile.trace_domain_size)?;
+        let mut canonical_trace_values = trace_values
+            .iter()
+            .copied()
+            .map(ProofBaseFieldElement::from_canonical)
+            .collect::<Result<Vec<_>, _>>()?;
+        trace_domain.interpolate_base_polynomial_in_place(&mut canonical_trace_values)?;
+        self.apply_mask_to_witness_coefficients(physical_column_ordinal, canonical_trace_values)
+    }
+
+    pub(crate) fn regenerate_masked_coefficients_from_canonical_message(
+        &self,
+        physical_column_ordinal: usize,
+        canonical_message: &[u64],
+        canonical_modulus: u64,
+    ) -> Result<Zeroizing<Vec<ProofBaseFieldElement>>, CommittedMaterialError> {
+        let trace_domain_size = self.profile.trace_domain_size;
+        if physical_column_ordinal >= MATERIAL_COLUMN_COUNT
+            || canonical_modulus <= 1
+            || canonical_message.len() != trace_domain_size.checked_mul(2).unwrap_or(0)
+            || canonical_message
+                .iter()
+                .any(|coefficient| *coefficient >= canonical_modulus)
+            || u128::from(canonical_modulus - 1)
+                >= u128::from(MATERIAL_DIGIT_RADIX) * u128::from(MATERIAL_DIGIT_RADIX)
+        {
+            return Err(CommittedMaterialError::InvalidInput);
+        }
+        let material_digit_ordinal = physical_column_ordinal / 2;
+        let physical_half_ordinal = physical_column_ordinal % 2;
+        let coefficient_start = physical_half_ordinal
+            .checked_mul(trace_domain_size)
+            .ok_or(CommittedMaterialError::CountOverflow)?;
+        let coefficient_end = coefficient_start
+            .checked_add(trace_domain_size)
+            .ok_or(CommittedMaterialError::CountOverflow)?;
+        let mut witness_coefficients = canonical_message[coefficient_start..coefficient_end]
+            .iter()
+            .copied()
+            .map(|coefficient| {
+                let digit = if material_digit_ordinal == 0 {
+                    coefficient % MATERIAL_DIGIT_RADIX
+                } else {
+                    coefficient / MATERIAL_DIGIT_RADIX
+                };
+                ProofBaseFieldElement::from_canonical(digit)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        ProofEvaluationDomain::new_subgroup(trace_domain_size)?
+            .interpolate_base_polynomial_in_place(&mut witness_coefficients)?;
+        self.apply_mask_to_witness_coefficients(physical_column_ordinal, witness_coefficients)
+    }
+
+    fn apply_mask_to_witness_coefficients(
+        &self,
+        physical_column_ordinal: usize,
+        witness_coefficients: Vec<ProofBaseFieldElement>,
+    ) -> Result<Zeroizing<Vec<ProofBaseFieldElement>>, CommittedMaterialError> {
+        let mask_coefficient_count = self
+            .profile
+            .masking_polynomial_maximum_degree
+            .checked_add(1)
+            .ok_or(CommittedMaterialError::CountOverflow)?;
+        let mut derivation = MaterialPrivateDerivation::new(
+            &self.material_seed,
+            self.material_context_hash,
+            COLUMN_MASK_PURPOSE,
+            u64::try_from(physical_column_ordinal)
+                .map_err(|_| CommittedMaterialError::CountOverflow)?,
+        );
+        let mut mask_coefficients = Vec::with_capacity(mask_coefficient_count);
+        for _ in 0..mask_coefficient_count {
+            mask_coefficients.push(ProofBaseFieldElement::from_canonical(
+                derivation.sample_uniform_base_field()?,
+            )?);
+        }
+        let masked_coefficients = match apply_trace_mask(
+            CommonProofSourcePolynomial::from_base_coefficients(witness_coefficients),
+            u64::try_from(self.profile.trace_domain_size)
+                .map_err(|_| CommittedMaterialError::CountOverflow)?,
+            CommonProofSourcePolynomial::from_base_coefficients(mask_coefficients),
+        )? {
+            CommonProofSourcePolynomial::Base(coefficients) => coefficients,
+            CommonProofSourcePolynomial::Extension(_) => {
+                return Err(CommittedMaterialError::InvalidInput);
+            }
+        };
+        if masked_coefficients.len() > self.profile.material_column_degree_bound_exclusive {
+            return Err(CommittedMaterialError::InvalidProfile);
+        }
+        Ok(masked_coefficients)
+    }
+
+    pub(crate) fn persistent_leaf_salt(
+        &self,
+        leaf_index: usize,
+    ) -> Result<[u8; COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH], CommittedMaterialError> {
+        if leaf_index >= self.profile.evaluation_domain_size / 2 {
+            return Err(CommittedMaterialError::InvalidInput);
+        }
+        derive_material_leaf_salt(self.material_context_hash, &self.material_seed, leaf_index)
+    }
+
+    pub(crate) const fn retained_byte_length(&self) -> usize {
+        size_of::<Self>()
+    }
+
+    pub(crate) fn maximum_regenerated_column_byte_length(&self) -> usize {
+        self.profile
+            .material_column_degree_bound_exclusive
+            .saturating_mul(size_of::<ProofBaseFieldElement>())
+    }
+}
+
+impl fmt::Debug for CompactCommittedMaterialSource {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("CompactCommittedMaterialSource")
+            .field("profile", &self.profile)
+            .field("material_context_hash", &self.material_context_hash)
+            .field("material_seed", &"[REDACTED]")
+            .field("root", &self.root)
+            .finish()
+    }
 }
 
 impl fmt::Debug for CommittedMaterialTree {
@@ -295,6 +718,69 @@ impl fmt::Debug for CommittedMaterialTree {
 }
 
 impl CommittedMaterialTree {
+    /// Constructs the persistent tree and its exact physical trace rows from
+    /// one canonical lattice message. Digit decomposition and physical-column
+    /// ordering remain inside Rust so a caller cannot detach rows from the
+    /// message whose root is being retained.
+    pub(crate) fn from_canonical_message(
+        profile: CommittedMaterialProfile,
+        material_context_hash: [u8; 64],
+        material_seed: [u8; 64],
+        canonical_message: &[u64],
+        canonical_modulus: u64,
+    ) -> Result<(Self, [Vec<u64>; MATERIAL_COLUMN_COUNT]), CommittedMaterialError> {
+        let expected_message_length = profile
+            .trace_domain_size
+            .checked_mul(2)
+            .ok_or(CommittedMaterialError::CountOverflow)?;
+        if canonical_modulus <= 1
+            || canonical_message.len() != expected_message_length
+            || canonical_message
+                .iter()
+                .any(|coefficient| *coefficient >= canonical_modulus)
+            || u128::from(canonical_modulus - 1)
+                >= u128::from(MATERIAL_DIGIT_RADIX) * u128::from(MATERIAL_DIGIT_RADIX)
+        {
+            return Err(CommittedMaterialError::InvalidInput);
+        }
+
+        let mut message_digit_columns = vec![
+            canonical_message
+                .iter()
+                .map(|coefficient| coefficient % MATERIAL_DIGIT_RADIX)
+                .collect::<Vec<_>>(),
+            canonical_message
+                .iter()
+                .map(|coefficient| coefficient / MATERIAL_DIGIT_RADIX)
+                .collect::<Vec<_>>(),
+        ];
+        let tree = Self::construct(CommittedMaterialTreeInput {
+            profile,
+            material_context_hash,
+            material_seed,
+            message_digit_columns: &message_digit_columns,
+        })?;
+
+        let mut high_digit_column = message_digit_columns
+            .pop()
+            .ok_or(CommittedMaterialError::InvalidInput)?;
+        let mut low_digit_column = message_digit_columns
+            .pop()
+            .ok_or(CommittedMaterialError::InvalidInput)?;
+        let high_digit_second_half = high_digit_column.split_off(profile.trace_domain_size);
+        let low_digit_second_half = low_digit_column.split_off(profile.trace_domain_size);
+        let trace_rows = [
+            low_digit_column,
+            low_digit_second_half,
+            high_digit_column,
+            high_digit_second_half,
+        ];
+        if !tree.authenticates_canonical_message(canonical_message, canonical_modulus)? {
+            return Err(CommittedMaterialError::InvalidInput);
+        }
+        Ok((tree, trace_rows))
+    }
+
     pub(crate) fn construct(
         input: CommittedMaterialTreeInput<'_>,
     ) -> Result<Self, CommittedMaterialError> {
@@ -349,10 +835,10 @@ impl CommittedMaterialTree {
                     )?);
                 }
                 let masked_coefficients = match apply_trace_mask(
-                    CommonProofSourcePolynomial::Base(witness_coefficients),
+                    CommonProofSourcePolynomial::from_base_coefficients(witness_coefficients),
                     u64::try_from(input.profile.trace_domain_size)
                         .map_err(|_| CommittedMaterialError::CountOverflow)?,
-                    CommonProofSourcePolynomial::Base(mask_coefficients),
+                    CommonProofSourcePolynomial::from_base_coefficients(mask_coefficients),
                 )? {
                     CommonProofSourcePolynomial::Base(coefficients) => coefficients,
                     CommonProofSourcePolynomial::Extension(_) => {
@@ -407,7 +893,9 @@ impl CommittedMaterialTree {
         self.material_context_hash
     }
 
-    pub(crate) fn masked_coefficients_by_physical_column(&self) -> &[Vec<ProofBaseFieldElement>] {
+    pub(crate) fn masked_coefficients_by_physical_column(
+        &self,
+    ) -> &[Zeroizing<Vec<ProofBaseFieldElement>>] {
         &self.masked_coefficients_by_physical_column
     }
 
@@ -435,184 +923,66 @@ impl CommittedMaterialTree {
         )
     }
 
-    pub(crate) fn authentication_frontier(
-        &self,
-        sorted_unique_leaf_indices: &[usize],
-    ) -> Result<Vec<(u32, u64, [u8; 64])>, CommittedMaterialError> {
-        if sorted_unique_leaf_indices.is_empty()
-            || sorted_unique_leaf_indices
-                .windows(2)
-                .any(|pair| pair[0] >= pair[1])
-            || sorted_unique_leaf_indices
-                .last()
-                .is_none_or(|index| *index >= self.merkle_levels[0].len())
-        {
-            return Err(CommittedMaterialError::InvalidInput);
+    /// Releases the full evaluation and Merkle representation after its root
+    /// has been fixed, retaining only the private data required to regenerate
+    /// source columns and persistent leaf salts exactly.
+    pub(crate) fn into_compact_source(self) -> CompactCommittedMaterialSource {
+        let root = self.root();
+        CompactCommittedMaterialSource {
+            profile: self.profile,
+            material_context_hash: self.material_context_hash,
+            material_seed: self.material_seed,
+            root,
         }
-        let mut current = sorted_unique_leaf_indices
+    }
+
+    /// Positively checks that this exact masked tree opens to the supplied
+    /// canonical lattice message on the committed trace subgroup. This is used
+    /// when a browser-owned private share is joined to a separately verified
+    /// public root; a detached share or a tree for another message cannot pass.
+    pub(crate) fn authenticates_canonical_message(
+        &self,
+        canonical_message: &[u64],
+        canonical_modulus: u64,
+    ) -> Result<bool, CommittedMaterialError> {
+        let trace_domain_size = self.profile.trace_domain_size();
+        if canonical_modulus <= 1
+            || canonical_message.len() != trace_domain_size.checked_mul(2).unwrap_or(0)
+            || canonical_message
+                .iter()
+                .any(|coefficient| *coefficient >= canonical_modulus)
+            || self.masked_coefficients_by_physical_column.len() != MATERIAL_COLUMN_COUNT
+            || u128::from(canonical_modulus - 1)
+                >= u128::from(MATERIAL_DIGIT_RADIX) * u128::from(MATERIAL_DIGIT_RADIX)
+        {
+            return Ok(false);
+        }
+        let trace_domain = ProofEvaluationDomain::new_subgroup(trace_domain_size)?;
+        for (physical_column_ordinal, masked_coefficients) in self
+            .masked_coefficients_by_physical_column
             .iter()
-            .copied()
-            .collect::<BTreeSet<_>>();
-        let mut frontier = Vec::new();
-        for (level_ordinal, level) in self
-            .merkle_levels
-            .iter()
-            .take(self.merkle_levels.len() - 1)
             .enumerate()
         {
-            let mut next = BTreeSet::new();
-            for index in current.iter().copied() {
-                let sibling_index = index ^ 1;
-                if !current.contains(&sibling_index) {
-                    frontier.push((
-                        u32::try_from(level_ordinal)
-                            .map_err(|_| CommittedMaterialError::CountOverflow)?,
-                        u64::try_from(sibling_index)
-                            .map_err(|_| CommittedMaterialError::CountOverflow)?,
-                        *level
-                            .get(sibling_index)
-                            .ok_or(CommittedMaterialError::InvalidInput)?,
-                    ));
-                }
-                next.insert(index / 2);
-            }
-            current = next;
-        }
-        frontier.sort_by_key(|(level, index, _)| (*level, *index));
-        Ok(frontier)
-    }
-}
-
-struct CommittedMaterialOpeningArtifact<'tree> {
-    tree_catalog_index: u16,
-    canonical_leaf_byte_length: usize,
-    tree: &'tree CommittedMaterialTree,
-}
-
-impl CommonProofOpeningArtifact for CommittedMaterialOpeningArtifact<'_> {
-    type Error = CommittedMaterialError;
-
-    fn tree_catalog_index(&self) -> u16 {
-        self.tree_catalog_index
-    }
-
-    fn leaf_count(&self) -> usize {
-        self.tree.profile.evaluation_domain_size / 2
-    }
-
-    fn canonical_leaf_byte_length(&self) -> usize {
-        self.canonical_leaf_byte_length
-    }
-
-    fn read_canonical_leaf(
-        &mut self,
-        leaf_index: u64,
-        destination: &mut [u8],
-    ) -> Result<(), Self::Error> {
-        let canonical_bytes = self.tree.canonical_leaf_bytes(
-            usize::try_from(leaf_index).map_err(|_| CommittedMaterialError::CountOverflow)?,
-        )?;
-        if canonical_bytes.len() != self.canonical_leaf_byte_length
-            || destination.len() != self.canonical_leaf_byte_length
-        {
-            return Err(CommittedMaterialError::InvalidInput);
-        }
-        destination.copy_from_slice(&canonical_bytes);
-        Ok(())
-    }
-
-    fn read_digest(&mut self, level: u32, node_index: u64) -> Result<[u8; 64], Self::Error> {
-        self.tree
-            .merkle_levels
-            .get(usize::try_from(level).map_err(|_| CommittedMaterialError::CountOverflow)?)
-            .and_then(|nodes| {
-                usize::try_from(node_index)
-                    .ok()
-                    .and_then(|index| nodes.get(index))
-            })
-            .copied()
-            .ok_or(CommittedMaterialError::InvalidInput)
-    }
-}
-
-/// Catalog-indexed adapter for persistent committed-material roots. It feeds
-/// the same generated prover used by every application family and never
-/// reconstructs a second proof-specific representation of the tree.
-pub(crate) struct CommittedMaterialBoundOpeningProvider<'tree> {
-    artifacts: BTreeMap<u16, CommittedMaterialOpeningArtifact<'tree>>,
-}
-
-impl<'tree> CommittedMaterialBoundOpeningProvider<'tree> {
-    pub(crate) fn new(
-        trees: impl IntoIterator<Item = (u16, &'tree CommittedMaterialTree)>,
-    ) -> Result<Self, CommittedMaterialError> {
-        let mut artifacts = BTreeMap::new();
-        for (tree_catalog_index, tree) in trees {
-            let canonical_leaf_byte_length = tree.canonical_leaf_bytes(0)?.len();
-            let artifact = CommittedMaterialOpeningArtifact {
-                tree_catalog_index,
-                canonical_leaf_byte_length,
-                tree,
-            };
-            if artifacts.insert(tree_catalog_index, artifact).is_some() {
-                return Err(CommittedMaterialError::InvalidInput);
+            let digit_ordinal = physical_column_ordinal / 2;
+            let half_ordinal = physical_column_ordinal % 2;
+            let start = half_ordinal * trace_domain_size;
+            let trace_values = trace_domain.evaluate_base_polynomial(masked_coefficients)?;
+            if trace_values
+                .iter()
+                .zip(&canonical_message[start..start + trace_domain_size])
+                .any(|(actual, message_coefficient)| {
+                    let expected = if digit_ordinal == 0 {
+                        *message_coefficient % MATERIAL_DIGIT_RADIX
+                    } else {
+                        *message_coefficient / MATERIAL_DIGIT_RADIX
+                    };
+                    actual.canonical() != expected
+                })
+            {
+                return Ok(false);
             }
         }
-        if artifacts.is_empty() {
-            return Err(CommittedMaterialError::InvalidInput);
-        }
-        Ok(Self { artifacts })
-    }
-}
-
-impl CommonProofBoundOpeningProvider for CommittedMaterialBoundOpeningProvider<'_> {
-    type Error = CommittedMaterialError;
-
-    fn opening_geometry(
-        &self,
-        catalog_entry: &ProofTreeCatalogEntry,
-    ) -> Result<CommonProofOpeningGeometry, Self::Error> {
-        if catalog_entry.source() != ProofTreeCatalogSource::RelationBoundPublic {
-            return Err(CommittedMaterialError::InvalidInput);
-        }
-        let artifact = self
-            .artifacts
-            .get(&catalog_entry.tree_catalog_index())
-            .ok_or(CommittedMaterialError::InvalidInput)?;
-        Ok(CommonProofOpeningGeometry {
-            tree_catalog_index: artifact.tree_catalog_index(),
-            leaf_count: artifact.leaf_count(),
-            canonical_leaf_byte_length: artifact.canonical_leaf_byte_length(),
-        })
-    }
-
-    fn encode_bound_opening_fragment(
-        &mut self,
-        catalog: &CompleteProofTreeCatalog,
-        catalog_index: usize,
-        geometry: CommonProofOpeningGeometry,
-        sorted_query_representatives: &[u64],
-        maximum_fragment_byte_length: usize,
-    ) -> Result<Vec<u8>, CommonProofEncodingError<BoundedCommonProofByteSinkError, Self::Error>>
-    {
-        let entry =
-            catalog
-                .entries()
-                .get(catalog_index)
-                .ok_or(CommonProofEncodingError::Artifact(
-                    CommittedMaterialError::InvalidInput,
-                ))?;
-        let artifact = self.artifacts.get_mut(&entry.tree_catalog_index()).ok_or(
-            CommonProofEncodingError::Artifact(CommittedMaterialError::InvalidInput),
-        )?;
-        encode_common_proof_query_tree_fragment(
-            catalog,
-            catalog_index,
-            geometry,
-            sorted_query_representatives,
-            artifact,
-            maximum_fragment_byte_length,
-        )
+        Ok(true)
     }
 }
 
@@ -713,13 +1083,7 @@ fn canonical_phase_pair_leaf_bytes(
         .iter()
         .map(|column| canonical_field_item(column[opposite_index]))
         .collect::<Result<Vec<_>, _>>()?;
-    let mut salt_derivation = MaterialPrivateDerivation::new(
-        material_seed,
-        material_context_hash,
-        LEAF_SALT_PURPOSE,
-        u64::try_from(leaf_index).map_err(|_| CommittedMaterialError::CountOverflow)?,
-    );
-    let salt_block = salt_derivation.next_block()?;
+    let leaf_salt = derive_material_leaf_salt(material_context_hash, material_seed, leaf_index)?;
     CanonicalTuple::new(
         COMMITTED_MATERIAL_PHASE_PAIR_LEAF_SCHEMA_IDENTIFIER,
         SCHEMA_VERSION,
@@ -728,8 +1092,7 @@ fn canonical_phase_pair_leaf_bytes(
             CanonicalItem::unsigned64(
                 u64::try_from(leaf_index).map_err(|_| CommittedMaterialError::CountOverflow)?,
             ),
-            CanonicalItem::fixed_bytes(&salt_block[..SECRET_LEAF_SALT_BYTE_LENGTH])
-                .map_err(canonical_encoding_error)?,
+            CanonicalItem::fixed_bytes(leaf_salt).map_err(canonical_encoding_error)?,
             CanonicalItem::homogeneous_list(CanonicalItemType::FieldElement, &first_values)
                 .map_err(canonical_encoding_error)?,
             CanonicalItem::homogeneous_list(CanonicalItemType::FieldElement, &opposite_values)
@@ -738,6 +1101,25 @@ fn canonical_phase_pair_leaf_bytes(
     )
     .encode()
     .map_err(canonical_encoding_error)
+}
+
+fn derive_material_leaf_salt(
+    material_context_hash: [u8; 64],
+    material_seed: &[u8; 64],
+    leaf_index: usize,
+) -> Result<[u8; COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH], CommittedMaterialError> {
+    let mut salt_derivation = MaterialPrivateDerivation::new(
+        material_seed,
+        material_context_hash,
+        LEAF_SALT_PURPOSE,
+        u64::try_from(leaf_index).map_err(|_| CommittedMaterialError::CountOverflow)?,
+    );
+    let mut leaf_salt = [0_u8; COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH];
+    for salt_chunk in leaf_salt.chunks_mut(DERIVED_BLOCK_BYTE_LENGTH) {
+        let salt_block = salt_derivation.next_block()?;
+        salt_chunk.copy_from_slice(&salt_block[..salt_chunk.len()]);
+    }
+    Ok(leaf_salt)
 }
 
 fn canonical_field_item(
@@ -787,4 +1169,246 @@ fn build_merkle_levels(
         levels.push(parents);
     }
     Ok(levels)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn committed_message_fixture() -> (CommittedMaterialTree, Vec<u64>, u64) {
+        let canonical_modulus = 1_000_000_007_u64;
+        let canonical_message = vec![
+            0,
+            1,
+            MATERIAL_DIGIT_RADIX - 1,
+            MATERIAL_DIGIT_RADIX,
+            MATERIAL_DIGIT_RADIX + 19,
+            canonical_modulus - 2,
+            77_777_777,
+            canonical_modulus - 1,
+        ];
+        let profile = CommittedMaterialProfile::selected(canonical_message.len())
+            .expect("small committed-material profile");
+        let (tree, _) = CommittedMaterialTree::from_canonical_message(
+            profile,
+            [0x31; 64],
+            [0x52; 64],
+            &canonical_message,
+            canonical_modulus,
+        )
+        .expect("committed material tree");
+        (tree, canonical_message, canonical_modulus)
+    }
+
+    #[test]
+    fn canonical_message_constructor_derives_the_exact_physical_trace_order() {
+        let canonical_modulus = 1_000_000_007_u64;
+        let canonical_message = [
+            0,
+            MATERIAL_DIGIT_RADIX,
+            MATERIAL_DIGIT_RADIX + 7,
+            canonical_modulus - 1,
+            19,
+            MATERIAL_DIGIT_RADIX * 2 + 23,
+            41,
+            canonical_modulus - 2,
+        ];
+        let profile = CommittedMaterialProfile::selected(canonical_message.len())
+            .expect("small committed-material profile");
+        let (tree, trace_rows) = CommittedMaterialTree::from_canonical_message(
+            profile,
+            [0x17; 64],
+            [0x81; 64],
+            &canonical_message,
+            canonical_modulus,
+        )
+        .expect("canonical message constructs");
+        let trace_size = profile.trace_domain_size();
+        assert_eq!(
+            trace_rows[0],
+            canonical_message[..trace_size]
+                .iter()
+                .map(|coefficient| coefficient % MATERIAL_DIGIT_RADIX)
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            trace_rows[1],
+            canonical_message[trace_size..]
+                .iter()
+                .map(|coefficient| coefficient % MATERIAL_DIGIT_RADIX)
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            trace_rows[2],
+            canonical_message[..trace_size]
+                .iter()
+                .map(|coefficient| coefficient / MATERIAL_DIGIT_RADIX)
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            trace_rows[3],
+            canonical_message[trace_size..]
+                .iter()
+                .map(|coefficient| coefficient / MATERIAL_DIGIT_RADIX)
+                .collect::<Vec<_>>()
+        );
+        assert!(
+            tree.authenticates_canonical_message(&canonical_message, canonical_modulus)
+                .expect("exact opening check")
+        );
+    }
+
+    #[test]
+    fn canonical_message_constructor_rejects_detached_shapes_and_values() {
+        let profile = CommittedMaterialProfile::selected(8).expect("small material profile");
+        let construct = |message: &[u64], modulus: u64| {
+            CommittedMaterialTree::from_canonical_message(
+                profile, [0x21; 64], [0x43; 64], message, modulus,
+            )
+        };
+        assert!(construct(&[0; 7], 257).is_err());
+        assert!(construct(&[0, 1, 2, 3, 4, 5, 6, 257], 257).is_err());
+        assert!(construct(&[0; 8], 1).is_err());
+        assert!(construct(&[0; 8], MATERIAL_DIGIT_RADIX * MATERIAL_DIGIT_RADIX + 1,).is_err());
+    }
+
+    #[test]
+    fn committed_tree_positively_authenticates_the_exact_canonical_message() {
+        let (tree, canonical_message, canonical_modulus) = committed_message_fixture();
+        assert!(
+            tree.authenticates_canonical_message(&canonical_message, canonical_modulus)
+                .expect("exact opening check")
+        );
+
+        let mut changed_low_digit = canonical_message.clone();
+        changed_low_digit[1] += 1;
+        assert!(
+            !tree
+                .authenticates_canonical_message(&changed_low_digit, canonical_modulus)
+                .expect("changed low digit check")
+        );
+
+        let mut changed_high_digit = canonical_message.clone();
+        changed_high_digit[4] += MATERIAL_DIGIT_RADIX;
+        assert!(
+            !tree
+                .authenticates_canonical_message(&changed_high_digit, canonical_modulus)
+                .expect("changed high digit check")
+        );
+    }
+
+    #[test]
+    fn committed_tree_rejects_wrong_length_noncanonical_values_and_oversized_modulus() {
+        let (tree, mut canonical_message, canonical_modulus) = committed_message_fixture();
+        assert!(
+            !tree
+                .authenticates_canonical_message(&canonical_message[..7], canonical_modulus)
+                .expect("short message check")
+        );
+        canonical_message[0] = canonical_modulus;
+        assert!(
+            !tree
+                .authenticates_canonical_message(&canonical_message, canonical_modulus)
+                .expect("noncanonical message check")
+        );
+        assert!(
+            !tree
+                .authenticates_canonical_message(
+                    &[0; 8],
+                    MATERIAL_DIGIT_RADIX * MATERIAL_DIGIT_RADIX + 1,
+                )
+                .expect("oversized modulus check")
+        );
+    }
+
+    #[test]
+    fn compact_source_regenerates_every_masked_column_and_leaf_salt_without_tree_storage() {
+        let (tree, _, _) = committed_message_fixture();
+        let profile = tree.profile();
+        let expected_root = tree.root();
+        let expected_columns = tree.masked_coefficients_by_physical_column().to_vec();
+        let trace_domain =
+            ProofEvaluationDomain::new_subgroup(profile.trace_domain_size()).expect("trace domain");
+        let trace_rows = expected_columns
+            .iter()
+            .map(|coefficients| {
+                trace_domain
+                    .evaluate_base_polynomial(coefficients)
+                    .expect("trace values")
+                    .into_iter()
+                    .map(ProofBaseFieldElement::canonical)
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+
+        let source = tree.into_compact_source();
+        assert_eq!(source.root(), expected_root);
+        assert_eq!(source.profile(), profile);
+        for (physical_column_ordinal, (trace_row, expected_coefficients)) in
+            trace_rows.iter().zip(&expected_columns).enumerate()
+        {
+            assert_eq!(
+                source
+                    .regenerate_masked_coefficients(physical_column_ordinal, trace_row)
+                    .expect("the compact source regenerates the canonical column"),
+                *expected_coefficients
+            );
+        }
+        assert_ne!(
+            source.persistent_leaf_salt(0).expect("first leaf salt"),
+            source.persistent_leaf_salt(1).expect("second leaf salt")
+        );
+        assert!(
+            source
+                .persistent_leaf_salt(profile.evaluation_domain_size() / 2)
+                .is_err()
+        );
+        assert_eq!(source.retained_byte_length(), size_of_val(&source));
+        assert_eq!(
+            source.maximum_regenerated_column_byte_length(),
+            profile.material_column_degree_bound_exclusive() * size_of::<ProofBaseFieldElement>()
+        );
+    }
+
+    #[test]
+    fn persistent_leaf_salt_uses_two_sequential_domain_separated_kmac_blocks() {
+        let material_seed = [0x37_u8; 64];
+        let material_context_hash = [0xa9_u8; 64];
+        let leaf_index = 19_usize;
+        let leaf_salt =
+            derive_material_leaf_salt(material_context_hash, &material_seed, leaf_index)
+                .expect("the persistent leaf salt derives");
+
+        let mut expected_derivation = MaterialPrivateDerivation::new(
+            &material_seed,
+            material_context_hash,
+            LEAF_SALT_PURPOSE,
+            u64::try_from(leaf_index).expect("the fixture leaf index fits u64"),
+        );
+        let first_block = expected_derivation
+            .next_block()
+            .expect("the first salt block derives");
+        let second_block = expected_derivation
+            .next_block()
+            .expect("the second salt block derives");
+        assert_eq!(&leaf_salt[..DERIVED_BLOCK_BYTE_LENGTH], &first_block[..]);
+        assert_eq!(&leaf_salt[DERIVED_BLOCK_BYTE_LENGTH..], &second_block[..]);
+        assert_ne!(first_block[..], second_block[..]);
+
+        let neighboring_leaf_salt =
+            derive_material_leaf_salt(material_context_hash, &material_seed, leaf_index + 1)
+                .expect("the neighboring persistent leaf salt derives");
+        assert_ne!(leaf_salt, neighboring_leaf_salt);
+
+        let mut mask_derivation = MaterialPrivateDerivation::new(
+            &material_seed,
+            material_context_hash,
+            COLUMN_MASK_PURPOSE,
+            u64::try_from(leaf_index).expect("the fixture physical index fits u64"),
+        );
+        let mask_block = mask_derivation
+            .next_block()
+            .expect("the column-mask block derives");
+        assert_ne!(&leaf_salt[..DERIVED_BLOCK_BYTE_LENGTH], &mask_block[..]);
+    }
 }

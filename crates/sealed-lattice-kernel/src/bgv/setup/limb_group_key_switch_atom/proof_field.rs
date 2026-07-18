@@ -1,8 +1,8 @@
 //! Fixed-width Montgomery arithmetic over the digit-atom proof fields.
 //!
 //! Both selected proof primes are generalized Fermat primes p = b^64 + 1
-//! with even b, which makes them simultaneously NTT-friendly (2^16 divides
-//! p - 1, so the full negacyclic domain for ring degree 32768 exists) and
+//! with even b, which makes them simultaneously NTT-friendly (2^17 divides
+//! p - 1, so the full negacyclic domain for ring degree 65536 exists) and
 //! base-b digit-encodable for lattice commitment messages. Elements are
 //! little-endian limb arrays kept in Montgomery form; the word-level
 //! Montgomery constant is -p^{-1} mod 2^64, which is exactly u64::MAX here
@@ -23,15 +23,16 @@ pub(crate) struct ProofFieldParameters<const LIMB_COUNT: usize> {
     montgomery_radix_squared: [u64; LIMB_COUNT],
     negated_modulus_inverse_word: u64,
     pub(crate) primitive_65536th_root: [u64; LIMB_COUNT],
+    pub(crate) primitive_131072nd_root: Option<[u64; LIMB_COUNT]>,
 }
 
-/// The 16-limb-group proof field: p = 4166^64 + 1 (770 bits, 13 limbs).
-/// Large enough for the limb-group integer relation over the full active
-/// level-15 group (16 data primes) at ring degree 32768.
-pub(crate) const SIXTEEN_LIMB_GROUP_FIELD_LIMBS: usize = 13;
+/// The selected key-switch proof field: p = 4166^64 + 1 (770 bits, 13 storage
+/// limbs). It is large enough for a fourteen-data-prime exact relation at ring
+/// degree 65536.
+pub(crate) const SELECTED_KEY_SWITCH_PROOF_FIELD_LIMBS: usize = 13;
 
-pub(crate) fn sixteen_limb_group_field_parameters()
--> ProofFieldParameters<SIXTEEN_LIMB_GROUP_FIELD_LIMBS> {
+pub(crate) fn selected_key_switch_proof_field_parameters()
+-> ProofFieldParameters<SELECTED_KEY_SWITCH_PROOF_FIELD_LIMBS> {
     ProofFieldParameters::from_constants(
         [
             0x0000000000000001,
@@ -78,11 +79,26 @@ pub(crate) fn sixteen_limb_group_field_parameters()
             0x793e56009bdb41af,
             0x0000000000000000,
         ],
+        Some([
+            0xfdd6864d6871e518,
+            0x999d5481ba116637,
+            0x451491b173e05557,
+            0xb5fac925e08651d6,
+            0x759c05c167ac7f69,
+            0x55b8d18efd4ee22f,
+            0xb2335e5071a52aca,
+            0x14a367dd2ec9f669,
+            0xbabcac4a4c2e2ded,
+            0x6f80323c5fee1bd9,
+            0xa80105f8f689c977,
+            0x0c3ea922829b8bbc,
+            0x0000000000000001,
+        ]),
     )
 }
 
-/// The 8-limb-group proof field: p = 102^64 + 1 (428 bits, 7 limbs). Large
-/// enough for an 8-prime limb-group congruence at ring degree 32768.
+/// The reduced test proof field: p = 102^64 + 1 (428 bits, 7 storage limbs).
+/// It is large enough for an eight-data-prime congruence at ring degree 65536.
 #[cfg(test)]
 pub(crate) const EIGHT_LIMB_GROUP_FIELD_LIMBS: usize = 7;
 
@@ -117,6 +133,15 @@ pub(crate) fn eight_limb_group_field_parameters()
             0x1ba4e83925867d3d,
             0x000005c2d0c5f121,
         ],
+        Some([
+            0x0048d2769a7827e1,
+            0x37a8385a73d72f70,
+            0x31008d2ac976d93c,
+            0xfb5568aa6aedd2a1,
+            0x61c977eb6c0c298e,
+            0x7602f1e535cc2826,
+            0x000001c30ae4c43d,
+        ]),
     )
 }
 
@@ -130,7 +155,7 @@ pub(crate) fn single_limb_field_parameters(
     let radix_remainder = ((1_u128 << 64) % u128::from(modulus)) as u64;
     let radix_squared =
         ((u128::from(radix_remainder) * u128::from(radix_remainder)) % u128::from(modulus)) as u64;
-    ProofFieldParameters::from_constants([modulus], [radix_squared], [primitive_65536th_root])
+    ProofFieldParameters::from_constants([modulus], [radix_squared], [primitive_65536th_root], None)
 }
 
 impl<const LIMB_COUNT: usize> ProofFieldParameters<LIMB_COUNT> {
@@ -138,6 +163,7 @@ impl<const LIMB_COUNT: usize> ProofFieldParameters<LIMB_COUNT> {
         modulus: [u64; LIMB_COUNT],
         montgomery_radix_squared: [u64; LIMB_COUNT],
         primitive_65536th_root: [u64; LIMB_COUNT],
+        primitive_131072nd_root: Option<[u64; LIMB_COUNT]>,
     ) -> Self {
         #[cfg(test)]
         let modulus_half_floor = {
@@ -152,6 +178,7 @@ impl<const LIMB_COUNT: usize> ProofFieldParameters<LIMB_COUNT> {
             montgomery_radix_squared,
             negated_modulus_inverse_word: negated_inverse_word(modulus[0]),
             primitive_65536th_root,
+            primitive_131072nd_root,
         }
     }
 
@@ -379,12 +406,12 @@ mod tests {
 
     #[test]
     fn selected_fields_match_their_generalized_fermat_shapes() {
-        let sixteen = sixteen_limb_group_field_parameters();
+        let selected = selected_key_switch_proof_field_parameters();
         assert_eq!(
-            to_biguint(&sixteen.modulus),
+            to_biguint(&selected.modulus),
             BigUint::from(4166_u32).pow(64) + BigUint::from(1_u32)
         );
-        assert_eq!(sixteen.negated_modulus_inverse_word, u64::MAX);
+        assert_eq!(selected.negated_modulus_inverse_word, u64::MAX);
         let eight = eight_limb_group_field_parameters();
         assert_eq!(
             to_biguint(&eight.modulus),
@@ -395,7 +422,7 @@ mod tests {
 
     #[test]
     fn multiplication_matches_known_answer_vectors() {
-        let parameters = sixteen_limb_group_field_parameters();
+        let parameters = selected_key_switch_proof_field_parameters();
         let x = [
             0x951a8aa3f3473c7c,
             0x9b6f52b584ed5d51,
@@ -469,7 +496,7 @@ mod tests {
 
     #[test]
     fn multiplication_matches_bigint_reference() {
-        check_multiplication_against_bigint(&sixteen_limb_group_field_parameters());
+        check_multiplication_against_bigint(&selected_key_switch_proof_field_parameters());
         check_multiplication_against_bigint(&eight_limb_group_field_parameters());
     }
 
@@ -501,7 +528,7 @@ mod tests {
 
     #[test]
     fn public_exponentiation_matches_bigint_across_zero_small_and_cross_limb_exponents() {
-        check_power_against_bigint(&sixteen_limb_group_field_parameters());
+        check_power_against_bigint(&selected_key_switch_proof_field_parameters());
         check_power_against_bigint(&eight_limb_group_field_parameters());
     }
 
@@ -525,23 +552,28 @@ mod tests {
 
     #[test]
     fn field_axioms_hold_for_structured_values() {
-        check_field_axioms(&sixteen_limb_group_field_parameters());
+        check_field_axioms(&selected_key_switch_proof_field_parameters());
         check_field_axioms(&eight_limb_group_field_parameters());
     }
 
     fn check_primitive_root_order<const LIMB_COUNT: usize>(
         parameters: &ProofFieldParameters<LIMB_COUNT>,
     ) {
-        let root = parameters.raw_value_to_element(&parameters.primitive_65536th_root);
+        let root = parameters.raw_value_to_element(
+            parameters
+                .primitive_131072nd_root
+                .as_ref()
+                .expect("selected proof field carries the complete-ring root"),
+        );
         let mut exponent = [0_u64; LIMB_COUNT];
-        exponent[0] = 32_768;
+        exponent[0] = 65_536;
         let half_order = parameters.power(&root, &exponent);
         assert_eq!(half_order, parameters.negate(&parameters.one()));
     }
 
     #[test]
-    fn primitive_root_has_exact_order_65536() {
-        check_primitive_root_order(&sixteen_limb_group_field_parameters());
+    fn selected_primitive_root_has_exact_order_131072() {
+        check_primitive_root_order(&selected_key_switch_proof_field_parameters());
         check_primitive_root_order(&eight_limb_group_field_parameters());
     }
 
@@ -557,7 +589,7 @@ mod tests {
 
     #[test]
     fn centered_lift_round_trips_signed_words() {
-        check_centered_lift(&sixteen_limb_group_field_parameters());
+        check_centered_lift(&selected_key_switch_proof_field_parameters());
         check_centered_lift(&eight_limb_group_field_parameters());
     }
 

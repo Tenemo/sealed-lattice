@@ -8,7 +8,8 @@ use fips204::{
 };
 
 use super::*;
-use crate::foundation::{RosterEntry, signature_message};
+use crate::bgv::parameters::DATA_PRIMES;
+use crate::foundation::{RosterEntry, VerifiedBoardApplicationSource, signature_message};
 
 const OBJECT_SIGNATURE_CONTEXT: &[u8] = b"sealed-lattice/object-signature/v1";
 
@@ -244,6 +245,66 @@ impl BoardFixture {
         )
     }
 
+    fn dealer_public_record(
+        &self,
+        producer_roster_position: usize,
+        public_setup_seed: Hash512,
+    ) -> Vec<u8> {
+        let coefficient_root_count =
+            DATA_PRIMES.len() * usize::from(FOUNDATION_PROFILE.reconstruction_threshold);
+        let recipient_root_count =
+            DATA_PRIMES.len() * usize::from(FOUNDATION_PROFILE.participant_count);
+        let payload = CanonicalTuple::new(
+            DEALER_PUBLIC_RECORD_PAYLOAD_SCHEMA_IDENTIFIER,
+            FOUNDATION_SCHEMA_VERSION,
+            vec![
+                CanonicalItem::unsigned16(u16::try_from(producer_roster_position).unwrap()),
+                test_hash_list_item(coefficient_root_count, 0xd1),
+                test_hash_list_item(recipient_root_count, 0xd2),
+                test_hash_list_item(usize::from(FOUNDATION_PROFILE.participant_count), 0xd3),
+                test_stream_descriptor_item(0xd4),
+            ],
+        )
+        .encode()
+        .expect("dealer public record payload encodes");
+        self.sign_envelope(
+            producer_roster_position,
+            self.envelope(
+                producer_roster_position,
+                FoundationObjectType::PublicSetupRecord,
+                0,
+                vec![public_setup_seed],
+                payload,
+            ),
+            0x71,
+        )
+    }
+
+    fn private_share_acceptance(&self, producer_roster_position: usize) -> Vec<u8> {
+        let payload = CanonicalTuple::new(
+            PRIVATE_SHARE_ACCEPTANCE_PAYLOAD_SCHEMA_IDENTIFIER,
+            FOUNDATION_SCHEMA_VERSION,
+            vec![
+                CanonicalItem::hash512([0xe1; Hash512::BYTE_LENGTH]),
+                test_hash_list_item(DATA_PRIMES.len(), 0xe2),
+                test_stream_descriptor_item(0xe3),
+            ],
+        )
+        .encode()
+        .expect("private-share acceptance payload encodes");
+        self.sign_envelope(
+            producer_roster_position,
+            self.envelope(
+                producer_roster_position,
+                FoundationObjectType::PrivateShareAcceptance,
+                0,
+                Vec::new(),
+                payload,
+            ),
+            0x72,
+        )
+    }
+
     fn aggregate(
         &self,
         verified_setup_source_hash: Hash512,
@@ -258,7 +319,6 @@ impl BoardFixture {
             FOUNDATION_SCHEMA_VERSION,
             vec![
                 CanonicalItem::hash512(verified_setup_source_hash.into_bytes()),
-                CanonicalItem::hash512([0x52; Hash512::BYTE_LENGTH]),
                 CanonicalItem::homogeneous_list(CanonicalItemType::Hash512, &selected_ballots)
                     .expect("selected-ballot hash list encodes"),
                 test_stream_descriptor_item(0xc3),
@@ -289,18 +349,42 @@ impl BoardFixture {
 }
 
 fn test_stream_descriptor_item(digest_byte: u8) -> CanonicalItem {
-    let descriptor = StreamDescriptor::new(
-        1,
-        vec![Hash512::from_bytes([digest_byte; Hash512::BYTE_LENGTH])],
-        Hash512::from_bytes([digest_byte.wrapping_add(1); Hash512::BYTE_LENGTH]),
-    )
-    .expect("test stream descriptor is valid");
+    let descriptor = test_stream_descriptor(digest_byte);
     let tuple = CanonicalTuple::decode(
         &descriptor.encode().expect("test stream descriptor encodes"),
         &CanonicalDecodeLimits::default(),
     )
     .expect("test stream descriptor tuple decodes");
     CanonicalItem::nested_tuple(&tuple).expect("nested stream descriptor encodes")
+}
+
+fn test_stream_descriptor(digest_byte: u8) -> StreamDescriptor {
+    StreamDescriptor::new(
+        1,
+        vec![Hash512::from_bytes([digest_byte; Hash512::BYTE_LENGTH])],
+        Hash512::from_bytes([digest_byte.wrapping_add(1); Hash512::BYTE_LENGTH]),
+    )
+    .expect("test stream descriptor is valid")
+}
+
+fn test_hash_list(count: usize, family: u8) -> Vec<Hash512> {
+    (0..count)
+        .map(|ordinal| {
+            let mut bytes = [family; Hash512::BYTE_LENGTH];
+            bytes[..4].copy_from_slice(&u32::try_from(ordinal).unwrap().to_le_bytes());
+            Hash512::from_bytes(bytes)
+        })
+        .collect()
+}
+
+fn test_hash_list_item(count: usize, family: u8) -> CanonicalItem {
+    let hashes = test_hash_list(count, family);
+    let items = hashes
+        .iter()
+        .map(|hash| CanonicalItem::hash512(hash.into_bytes()))
+        .collect::<Vec<_>>();
+    CanonicalItem::homogeneous_list(CanonicalItemType::Hash512, &items)
+        .expect("test hash list encodes")
 }
 
 fn carrier_object_hash(carrier_bytes: &[u8]) -> Hash512 {
@@ -333,6 +417,97 @@ fn board_authority_rejects_a_nonselected_structural_roster() {
         Err(error) => error,
     };
     assert_eq!(error.refusal_reason, RefusalReason::OutsideSupportedProfile);
+}
+
+#[test]
+fn verified_application_sources_retain_exact_setup_payloads_and_manifest() {
+    let fixture = BoardFixture::new();
+    let manifest_hash = Hash512::from_bytes([0x18; Hash512::BYTE_LENGTH]);
+    let public_setup_seed = Hash512::from_bytes([0xa5; Hash512::BYTE_LENGTH]);
+    let dealer_roster_position = 3;
+    let recipient_roster_position = 6;
+    let carriers = [
+        fixture.dealer_public_record(dealer_roster_position, public_setup_seed),
+        fixture.private_share_acceptance(recipient_roster_position),
+    ];
+    let mut verifier = fixture.verifier();
+    let batch = verifier
+        .verify_unordered_carriers(&carriers)
+        .into_result()
+        .expect("the exact setup carriers verify");
+    let mut sources = batch
+        .objects()
+        .iter()
+        .cloned()
+        .map(|object| {
+            VerifiedBoardApplicationSource::from_verifier(&verifier, manifest_hash, object)
+        })
+        .collect::<Vec<_>>();
+    let acceptance_source_position = sources
+        .iter()
+        .position(|source| source.object_type() == FoundationObjectType::PrivateShareAcceptance)
+        .expect("the acceptance source is retained");
+    let acceptance_source = sources.swap_remove(acceptance_source_position);
+    let dealer_source = sources.pop().expect("the dealer source is retained");
+
+    assert_eq!(dealer_source.manifest_hash(), manifest_hash);
+    assert_eq!(dealer_source.producer_roster_position(), Some(3));
+    let dealer_payload = dealer_source
+        .dealer_public_record_payload()
+        .expect("the exact dealer payload decodes");
+    assert_eq!(dealer_payload.dealer_roster_position(), 3);
+    assert_eq!(
+        dealer_payload.coefficient_material_roots(),
+        test_hash_list(
+            DATA_PRIMES.len() * usize::from(FOUNDATION_PROFILE.reconstruction_threshold),
+            0xd1,
+        )
+    );
+    assert_eq!(
+        dealer_payload.recipient_share_material_roots(),
+        test_hash_list(
+            DATA_PRIMES.len() * usize::from(FOUNDATION_PROFILE.participant_count),
+            0xd2,
+        )
+    );
+    assert_eq!(
+        dealer_payload.ordered_recipient_envelope_hashes(),
+        test_hash_list(usize::from(FOUNDATION_PROFILE.participant_count), 0xd3)
+    );
+    assert_eq!(
+        dealer_payload.share_linkage_proof(),
+        &test_stream_descriptor(0xd4)
+    );
+    assert_eq!(
+        dealer_payload.public_setup_seed_prerequisite(),
+        public_setup_seed
+    );
+    assert_eq!(
+        dealer_source.private_share_acceptance_payload(),
+        Err(RefusalReason::WrongContext)
+    );
+
+    assert_eq!(acceptance_source.manifest_hash(), manifest_hash);
+    assert_eq!(acceptance_source.producer_roster_position(), Some(6));
+    let acceptance_payload = acceptance_source
+        .private_share_acceptance_payload()
+        .expect("the exact acceptance payload decodes");
+    assert_eq!(
+        acceptance_payload.recipient_input_root(),
+        Hash512::from_bytes([0xe1; Hash512::BYTE_LENGTH])
+    );
+    assert_eq!(
+        acceptance_payload.aggregate_threshold_share_material_roots(),
+        test_hash_list(DATA_PRIMES.len(), 0xe2)
+    );
+    assert_eq!(
+        acceptance_payload.aggregate_threshold_share_proof(),
+        &test_stream_descriptor(0xe3)
+    );
+    assert_eq!(
+        acceptance_source.dealer_public_record_payload(),
+        Err(RefusalReason::WrongContext)
+    );
 }
 
 #[test]

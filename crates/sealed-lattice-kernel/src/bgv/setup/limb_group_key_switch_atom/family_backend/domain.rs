@@ -12,7 +12,7 @@
 //! The subgroups exist because every atom proof field is a generalized Fermat
 //! prime `p = b^64 + 1` with even `b`, so `p - 1 = b^64` has `2^64` as a factor
 //! and admits the required power-of-two subgroups. Roots above the stored
-//! order-2^16 root are computed on demand, allowing N = 32768 to run without a
+//! order-2^16 root are computed on demand, allowing N = 65536 to run without a
 //! trace-column split.
 
 use super::super::negacyclic_transform::radix_two_cyclic_transform_in_place;
@@ -383,7 +383,7 @@ fn power_by_domain_index<const LIMB_COUNT: usize>(
 #[cfg(test)]
 mod tests {
     use super::super::super::proof_field::{
-        eight_limb_group_field_parameters, sixteen_limb_group_field_parameters,
+        eight_limb_group_field_parameters, selected_key_switch_proof_field_parameters,
     };
     use super::*;
     use crate::bgv::setup::limb_group_key_switch_atom::family_backend::polynomial::evaluate;
@@ -432,7 +432,7 @@ mod tests {
     #[test]
     fn lightweight_domain_geometry_matches_full_width_field_power() {
         check_lightweight_geometry(&eight_limb_group_field_parameters());
-        check_lightweight_geometry(&sixteen_limb_group_field_parameters());
+        check_lightweight_geometry(&selected_key_switch_proof_field_parameters());
     }
 
     fn check_root_tower_across_precomputed_boundary<const LIMB_COUNT: usize>(
@@ -452,12 +452,12 @@ mod tests {
     #[test]
     fn computed_roots_continue_the_precomputed_fri_root_tower() {
         check_root_tower_across_precomputed_boundary(&eight_limb_group_field_parameters());
-        check_root_tower_across_precomputed_boundary(&sixteen_limb_group_field_parameters());
+        check_root_tower_across_precomputed_boundary(&selected_key_switch_proof_field_parameters());
     }
 
     #[test]
     fn interpolation_inverts_evaluation() {
-        let parameters = sixteen_limb_group_field_parameters();
+        let parameters = selected_key_switch_proof_field_parameters();
         for size in [1_usize, 2, 8, 64, 512] {
             let domain = CyclicDomain::new(&parameters, size).expect("domain");
             let coefficients = deterministic_values(&parameters, size, 7 + size as u64);
@@ -469,7 +469,7 @@ mod tests {
 
     #[test]
     fn direction_specific_domains_match_the_full_transform_domain() {
-        let parameters = sixteen_limb_group_field_parameters();
+        let parameters = selected_key_switch_proof_field_parameters();
         let size = 128;
         let coefficients = deterministic_values(&parameters, size, 0x711d);
         let full_domain = CyclicDomain::new(&parameters, size).expect("full domain");
@@ -502,7 +502,7 @@ mod tests {
 
     #[test]
     fn reusable_coset_buffer_clears_coefficients_from_longer_preceding_columns() {
-        let parameters = sixteen_limb_group_field_parameters();
+        let parameters = selected_key_switch_proof_field_parameters();
         let size = 128;
         let domain = CyclicDomain::new(&parameters, size).expect("domain");
         let offset = coset_offset(&parameters);
@@ -527,7 +527,7 @@ mod tests {
 
     #[test]
     fn coset_low_degree_extension_matches_direct_evaluation() {
-        let parameters = sixteen_limb_group_field_parameters();
+        let parameters = selected_key_switch_proof_field_parameters();
         let trace_size = 32;
         let blowup = 4;
         let trace_domain = CyclicDomain::new(&parameters, trace_size).expect("trace");
@@ -550,7 +550,7 @@ mod tests {
     fn higher_order_domains_beyond_the_precomputed_root_round_trip() {
         // Orders above the precomputed 2^16 root are computed on demand; a
         // correct primitive root makes evaluate/interpolate invert each other.
-        let parameters = sixteen_limb_group_field_parameters();
+        let parameters = selected_key_switch_proof_field_parameters();
         for log2_order in [17_u32, 18, 19] {
             let size = 1usize << log2_order;
             let domain = CyclicDomain::new(&parameters, size).expect("large domain");
@@ -568,7 +568,7 @@ mod tests {
     #[test]
     fn computed_primitive_root_has_the_claimed_order() {
         // z^(2^(k-1)) = -1 (primitive) and z^(2^k) = 1 (order divides 2^k).
-        let parameters = sixteen_limb_group_field_parameters();
+        let parameters = selected_key_switch_proof_field_parameters();
         for log2_order in [17_u32, 18, 20] {
             let root = super::compute_primitive_two_adic_root(&parameters, log2_order);
             let mut full = [0_u64; 13];
@@ -586,7 +586,7 @@ mod tests {
 
     #[test]
     fn coset_offset_is_outside_the_evaluation_subgroup() {
-        let parameters = sixteen_limb_group_field_parameters();
+        let parameters = selected_key_switch_proof_field_parameters();
         // offset^size != 1 for any size below the full two-adic order means the
         // coset is disjoint from K; check at a representative coset order.
         let coset_size = 128;

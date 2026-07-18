@@ -147,7 +147,7 @@ export type BrowserFoundationStorageAuthority = BrowserActionStorageCustody &
     Readonly<{
         authenticateFoundationHead(): Promise<BrowserFoundationFreshnessCoordinate>;
         beginCheckpoint(
-            streamAttemptIdentifiers: readonly Uint8Array[],
+            privateRandomnessStreamAttemptIdentifier?: Uint8Array,
         ): Promise<BrowserFoundationCheckpointHandle>;
         copyCheckpointDescription(
             checkpoint: BrowserFoundationCheckpointHandle,

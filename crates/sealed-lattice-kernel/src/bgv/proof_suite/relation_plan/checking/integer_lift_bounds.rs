@@ -14,7 +14,7 @@ use super::super::{
         ordered_injective_integer_factor_product_expression, radix_recomposition_expression,
         resolved_modulus_multiple, strictly_sorted_unique, trinary_constraint_expression,
     },
-    integer_lift::RelationIntegerLiftCoefficient,
+    integer_lift::{RelationIntegerLiftCoefficient, resolved_modulus_radix_digit},
     layout::RelationPlanVariant,
     model::{
         BoundTreeConstructionKind, RelationColumnOrigin, RelationElementKind,
@@ -235,6 +235,24 @@ pub(super) fn integer_lift_coefficient_value(
             modulus_reference,
             multiplier,
         } => resolved_modulus_multiple(modulus_reference, multiplier, context),
+        RelationIntegerLiftCoefficient::ModulusRadixDigit {
+            modulus_reference,
+            multiplier,
+            radix,
+            digit_ordinal,
+        } => {
+            let value = resolved_modulus_radix_digit(
+                modulus_reference,
+                multiplier,
+                radix,
+                digit_ordinal,
+                context,
+            )?;
+            if value == 0 {
+                return Err(RelationPlanError::NoWrapBoundViolated);
+            }
+            Ok(value)
+        }
     }
 }
 

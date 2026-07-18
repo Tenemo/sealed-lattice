@@ -12,8 +12,9 @@ use super::super::{
     transcript::CommonProofChallenge,
 };
 use super::{
-    RelationChallengeRole, RelationExpressionInstruction, RelationPlanCheckContext,
-    RelationPlanError, RelationPlanVariant, modular_power,
+    RelationChallengeRole, RelationConstraintColumnQuery, RelationExpressionInstruction,
+    RelationPlanCheckContext, RelationPlanError, RelationPlanVariant,
+    RelationRadixFactorDescriptor, modular_power, relation_column_queries,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -62,11 +63,11 @@ pub(crate) struct RelationConstraintEvaluation {
 }
 
 #[derive(Clone, Debug)]
-struct CheckedApplicationChallenges {
+pub(crate) struct CheckedRelationApplicationChallenges {
     values: BTreeMap<(RelationChallengeRole, Vec<u64>), u64>,
 }
 
-impl CheckedApplicationChallenges {
+impl CheckedRelationApplicationChallenges {
     fn new(
         variant: &RelationPlanVariant,
         context: &RelationPlanCheckContext,
@@ -184,6 +185,141 @@ impl CheckedApplicationChallenges {
 }
 
 impl RelationPlanVariant {
+    pub(crate) const fn constraint_count(&self) -> usize {
+        self.ordered_constraints.len()
+    }
+
+    pub(crate) fn checked_application_challenges(
+        &self,
+        context: &RelationPlanCheckContext,
+        assignments: &[RelationApplicationChallengeAssignment],
+    ) -> Result<CheckedRelationApplicationChallenges, RelationPlanError> {
+        CheckedRelationApplicationChallenges::new(self, context, assignments)
+    }
+
+    pub(crate) fn constraint_column_queries(
+        &self,
+        constraint_ordinal: usize,
+    ) -> Result<Vec<RelationConstraintColumnQuery>, RelationPlanError> {
+        let constraint = self
+            .ordered_constraints
+            .get(constraint_ordinal)
+            .ok_or(RelationPlanError::InvalidConstraint)?;
+        let queries = relation_column_queries(
+            &[
+                &constraint.numerator_postfix_expression,
+                &constraint.zeroifier_postfix_expression,
+            ],
+            &self.ordered_radix_convolutions,
+            RelationPlanError::InvalidConstraint,
+        )?;
+        for query in &queries {
+            if usize::try_from(query.column_ordinal)
+                .ok()
+                .filter(|column_index| *column_index < self.ordered_columns.len())
+                .is_none()
+            {
+                return Err(RelationPlanError::InvalidConstraint);
+            }
+        }
+        Ok(queries.into_iter().collect())
+    }
+
+    pub(crate) fn evaluate_constraint_at_point<ColumnValue>(
+        &self,
+        context: &RelationPlanCheckContext,
+        constraint_ordinal: usize,
+        evaluation_point: ProofChallengeExtensionElement,
+        checked_challenges: &CheckedRelationApplicationChallenges,
+        column_value: &mut ColumnValue,
+    ) -> Result<RelationConstraintEvaluation, RelationPlanError>
+    where
+        ColumnValue:
+            FnMut(u32, bool, u64) -> Result<ProofChallengeExtensionElement, RelationPlanError>,
+    {
+        let evaluation = self.evaluate_constraint_programs_at_point(
+            context,
+            constraint_ordinal,
+            evaluation_point,
+            checked_challenges,
+            column_value,
+        )?;
+        if evaluation.zeroifier.is_zero() {
+            return Err(RelationPlanError::ZeroifierVanishesOnEvaluationCoset);
+        }
+        Ok(evaluation)
+    }
+
+    /// Evaluates both checked programs without imposing the DEEP/coset
+    /// non-vanishing condition. Application extraction uses this entry point
+    /// on trace roots, where a constraint is operative precisely when its
+    /// checked zeroifier vanishes.
+    pub(crate) fn evaluate_constraint_programs_at_point<ColumnValue>(
+        &self,
+        context: &RelationPlanCheckContext,
+        constraint_ordinal: usize,
+        evaluation_point: ProofChallengeExtensionElement,
+        checked_challenges: &CheckedRelationApplicationChallenges,
+        column_value: &mut ColumnValue,
+    ) -> Result<RelationConstraintEvaluation, RelationPlanError>
+    where
+        ColumnValue:
+            FnMut(u32, bool, u64) -> Result<ProofChallengeExtensionElement, RelationPlanError>,
+    {
+        let constraint = self
+            .ordered_constraints
+            .get(constraint_ordinal)
+            .ok_or(RelationPlanError::InvalidConstraint)?;
+        let numerator = evaluate_program(
+            self,
+            context,
+            &constraint.numerator_postfix_expression,
+            evaluation_point,
+            checked_challenges,
+            column_value,
+            false,
+        )?;
+        let zeroifier = evaluate_program(
+            self,
+            context,
+            &constraint.zeroifier_postfix_expression,
+            evaluation_point,
+            checked_challenges,
+            column_value,
+            true,
+        )?;
+        Ok(RelationConstraintEvaluation {
+            numerator,
+            zeroifier,
+        })
+    }
+
+    /// Evaluates an expression program using the same opcode interpreter as
+    /// the generated relation constraints. The caller must first obtain the
+    /// checked application challenge catalog for this variant.
+    pub(crate) fn evaluate_expression_program_at_point<ColumnValue>(
+        &self,
+        context: &RelationPlanCheckContext,
+        expression: &[RelationExpressionInstruction],
+        evaluation_point: ProofChallengeExtensionElement,
+        checked_challenges: &CheckedRelationApplicationChallenges,
+        column_value: &mut ColumnValue,
+    ) -> Result<ProofChallengeExtensionElement, RelationPlanError>
+    where
+        ColumnValue:
+            FnMut(u32, bool, u64) -> Result<ProofChallengeExtensionElement, RelationPlanError>,
+    {
+        evaluate_program(
+            self,
+            context,
+            expression,
+            evaluation_point,
+            checked_challenges,
+            column_value,
+            false,
+        )
+    }
+
     pub(crate) fn evaluate_constraints_at_point<ColumnValue>(
         &self,
         context: &RelationPlanCheckContext,
@@ -196,35 +332,18 @@ impl RelationPlanVariant {
             FnMut(u32, bool, u64) -> Result<ProofChallengeExtensionElement, RelationPlanError>,
     {
         let checked_challenges =
-            CheckedApplicationChallenges::new(self, context, application_challenges)?;
+            self.checked_application_challenges(context, application_challenges)?;
         self.ordered_constraints
             .iter()
-            .map(|constraint| {
-                let numerator = evaluate_program(
-                    self,
+            .enumerate()
+            .map(|(constraint_ordinal, _)| {
+                self.evaluate_constraint_at_point(
                     context,
-                    &constraint.numerator_postfix_expression,
+                    constraint_ordinal,
                     evaluation_point,
                     &checked_challenges,
                     &mut column_value,
-                    false,
-                )?;
-                let zeroifier = evaluate_program(
-                    self,
-                    context,
-                    &constraint.zeroifier_postfix_expression,
-                    evaluation_point,
-                    &checked_challenges,
-                    &mut column_value,
-                    true,
-                )?;
-                if zeroifier.is_zero() {
-                    return Err(RelationPlanError::ZeroifierVanishesOnEvaluationCoset);
-                }
-                Ok(RelationConstraintEvaluation {
-                    numerator,
-                    zeroifier,
-                })
+                )
             })
             .collect()
     }
@@ -490,7 +609,7 @@ impl RelationPlanVariant {
         context: &RelationPlanCheckContext,
         evaluation_point: ProofChallengeExtensionElement,
     ) -> Result<bool, RelationPlanError> {
-        let no_challenges = CheckedApplicationChallenges {
+        let no_challenges = CheckedRelationApplicationChallenges {
             values: BTreeMap::new(),
         };
         for constraint in &self.ordered_constraints {
@@ -662,7 +781,7 @@ fn evaluate_program<ColumnValue>(
     context: &RelationPlanCheckContext,
     program: &[RelationExpressionInstruction],
     evaluation_point: ProofChallengeExtensionElement,
-    application_challenges: &CheckedApplicationChallenges,
+    application_challenges: &CheckedRelationApplicationChallenges,
     column_value: &mut ColumnValue,
     zeroifier_program: bool,
 ) -> Result<ProofChallengeExtensionElement, RelationPlanError>
@@ -821,7 +940,7 @@ fn evaluate_radix_convolution_coefficient<ColumnValue>(
     variant: &RelationPlanVariant,
     convolution_ordinal: u32,
     coefficient_ordinal: u32,
-    application_challenges: &CheckedApplicationChallenges,
+    application_challenges: &CheckedRelationApplicationChallenges,
     context: &RelationPlanCheckContext,
     column_value: &mut ColumnValue,
 ) -> Result<ProofChallengeExtensionElement, RelationPlanError>
@@ -977,8 +1096,9 @@ fn convolve_extension_coefficients(
 mod tests {
     use super::*;
     use crate::bgv::proof_suite::relation_plan::{
-        CommittedMaterialRelationPlanInput, RelationPlanCheckContext, ResolvedSuiteModulus,
-        SuiteModulusReference, compile_vss_share_linkage_relation_plan,
+        CommittedMaterialRelationPlanInput, RelationPlanCheckContext,
+        RelationRadixConvolutionDescriptor, RelationRadixProductTermDescriptor,
+        ResolvedSuiteModulus, SuiteModulusReference, compile_vss_share_linkage_relation_plan,
     };
     use crate::bgv::proof_suite::{
         PROOF_BASE_FIELD_MAXIMUM_TWO_ADIC_GENERATOR, PROOF_BASE_FIELD_MODULUS,
@@ -1019,7 +1139,6 @@ mod tests {
             threshold: 2,
             sharing_data_modulus_indices: vec![0],
             trace_mask_degree_bound_exclusive: 14,
-            first_mask_purpose: 100,
         };
         let compiled = compile_vss_share_linkage_relation_plan(&input, &context)
             .expect("exact VSS share-linkage plan");
@@ -1035,8 +1154,9 @@ mod tests {
             96,
         )
         .expect("alpha assignment");
-        let challenges = CheckedApplicationChallenges::new(&variant, &context, &[alpha_assignment])
-            .expect("one alpha sample resolves the complete coefficient group");
+        let challenges =
+            CheckedRelationApplicationChallenges::new(&variant, &context, &[alpha_assignment])
+                .expect("one alpha sample resolves the complete coefficient group");
 
         let weights = (0_u64..3)
             .map(|unit_ordinal| {
@@ -1049,11 +1169,11 @@ mod tests {
         assert_ne!(weights[2], modular_power(96, 2, 97));
 
         assert!(matches!(
-            CheckedApplicationChallenges::new(&variant, &context, &[]),
+            CheckedRelationApplicationChallenges::new(&variant, &context, &[]),
             Err(RelationPlanError::InvalidChallengeCatalog)
         ));
         assert!(matches!(
-            CheckedApplicationChallenges::new(
+            CheckedRelationApplicationChallenges::new(
                 &variant,
                 &context,
                 &[alpha_assignment, alpha_assignment],
@@ -1081,6 +1201,91 @@ mod tests {
             !variant
                 .deep_point_candidate_is_forbidden(&context, 0, full_degree_candidate, &[])
                 .expect("full-degree candidate is decidable")
+        );
+    }
+
+    #[test]
+    fn constraint_queries_include_implicit_radix_columns_with_exact_rotations() {
+        let (mut variant, _) = vss_linkage_interpreter_fixture();
+        assert!(variant.ordered_columns.len() >= 5);
+        variant.ordered_radix_convolutions = vec![RelationRadixConvolutionDescriptor {
+            radix: 4,
+            ordered_terms: vec![RelationRadixProductTermDescriptor {
+                negative: false,
+                ordered_factors: vec![
+                    RelationRadixFactorDescriptor::ColumnDigits {
+                        ordered_column_ordinals: vec![2, 1, 2],
+                        rotation_is_negative: true,
+                        rotation_magnitude: 7,
+                    },
+                    RelationRadixFactorDescriptor::ScalarColumn {
+                        column_ordinal: 0,
+                        complement_binary_value: true,
+                    },
+                    RelationRadixFactorDescriptor::ColumnDigits {
+                        ordered_column_ordinals: vec![3],
+                        rotation_is_negative: false,
+                        rotation_magnitude: 11,
+                    },
+                    RelationRadixFactorDescriptor::ConstantDigits {
+                        ordered_digits: vec![1, 2],
+                    },
+                ],
+            }],
+        }];
+        variant.ordered_constraints[0].numerator_postfix_expression = vec![
+            RelationExpressionInstruction::RadixConvolutionCoefficient {
+                convolution_ordinal: 0,
+                coefficient_ordinal: 1,
+            },
+            RelationExpressionInstruction::ColumnValue {
+                column_ordinal: 1,
+                rotation_is_negative: true,
+                rotation_magnitude: 7,
+            },
+            RelationExpressionInstruction::Addition,
+            RelationExpressionInstruction::ColumnValue {
+                column_ordinal: 4,
+                rotation_is_negative: false,
+                rotation_magnitude: 0,
+            },
+            RelationExpressionInstruction::Addition,
+        ];
+        variant.ordered_constraints[0].zeroifier_postfix_expression =
+            vec![RelationExpressionInstruction::BaseFieldConstant(1)];
+
+        let queries = variant
+            .constraint_column_queries(0)
+            .expect("radix factors resolve to their exact column queries");
+        assert_eq!(
+            queries,
+            vec![
+                RelationConstraintColumnQuery {
+                    column_ordinal: 0,
+                    rotation_is_negative: false,
+                    rotation_magnitude: 0,
+                },
+                RelationConstraintColumnQuery {
+                    column_ordinal: 1,
+                    rotation_is_negative: true,
+                    rotation_magnitude: 7,
+                },
+                RelationConstraintColumnQuery {
+                    column_ordinal: 2,
+                    rotation_is_negative: true,
+                    rotation_magnitude: 7,
+                },
+                RelationConstraintColumnQuery {
+                    column_ordinal: 3,
+                    rotation_is_negative: false,
+                    rotation_magnitude: 11,
+                },
+                RelationConstraintColumnQuery {
+                    column_ordinal: 4,
+                    rotation_is_negative: false,
+                    rotation_magnitude: 0,
+                },
+            ]
         );
     }
 }

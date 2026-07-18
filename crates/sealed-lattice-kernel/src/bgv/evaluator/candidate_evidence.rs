@@ -6,7 +6,10 @@ use crate::{
     foundation::FOUNDATION_PROFILE,
 };
 
-use super::top_k::{SELECTED_EVALUATOR_WORKING_LEVEL, selected_evaluator_rotation_key_schedule};
+use super::top_k::{
+    SELECTED_EVALUATOR_WORKING_LEVEL, SELECTED_RELINEARIZATION_KEY_LEVEL,
+    selected_evaluator_rotation_key_schedule,
+};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct EvaluatorCandidateInput {
@@ -25,7 +28,7 @@ impl EvaluatorCandidateInput {
             special_primes: SPECIAL_PRIMES.to_vec(),
             plaintext_modulus: PLAINTEXT_MODULUS,
             evaluator_working_level: SELECTED_EVALUATOR_WORKING_LEVEL,
-            relinearization_levels: vec![SELECTED_EVALUATOR_WORKING_LEVEL],
+            relinearization_levels: vec![SELECTED_RELINEARIZATION_KEY_LEVEL],
             galois_key_schedule: selected_evaluator_rotation_key_schedule(usize::from(
                 FOUNDATION_PROFILE.option_count,
             ))?,

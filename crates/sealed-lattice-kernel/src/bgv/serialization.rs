@@ -1,9 +1,5 @@
-#[cfg(test)]
-use crate::bgv::parameters::BgvBasisKind;
-#[cfg(test)]
+use crate::bgv::parameters::{BgvBasisKind, POLYNOMIAL_DEGREE};
 use crate::encoding::CanonicalReader;
-#[cfg(test)]
-use crate::transcript_core::encode_hex;
 use crate::{
     bgv::rns::RnsPolynomial,
     encoding::{
@@ -15,7 +11,6 @@ use crate::{
 const CANONICAL_MAGIC: &str = "sealed-lattice-bgv-rns-canonical-object";
 const CANONICAL_OBJECT_VERSION: u64 = 2;
 // Max polynomial components in a BGV object: a degree-2 ciphertext has 3.
-#[cfg(test)]
 const MAXIMUM_COMPONENT_COUNT: usize = 3;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum BgvObjectKind {
@@ -33,9 +28,9 @@ impl BgvObjectKind {
         }
     }
 
-    #[cfg(test)]
     fn from_str(value: &str) -> CanonicalResult<Self> {
         match value {
+            #[cfg(test)]
             "plaintext" => Ok(Self::Plaintext),
             "ciphertext" => Ok(Self::Ciphertext),
             _ => Err(CanonicalError::new(
@@ -46,7 +41,6 @@ impl BgvObjectKind {
     }
 }
 
-#[cfg(test)]
 #[derive(Debug)]
 pub(crate) struct CanonicalBgvObject {
     pub(crate) object_kind: BgvObjectKind,
@@ -75,6 +69,111 @@ pub(crate) fn serialize_bgv_object(
 
 #[cfg(test)]
 pub(crate) fn parse_bgv_object(bytes: &[u8]) -> CanonicalResult<CanonicalBgvObject> {
+    parse_bgv_object_with_expected_data_level(bytes, None)
+}
+
+/// Parses the exact two-component data-basis ciphertext used by a finalized
+/// evaluator target. The basis and level are checked before allocating any
+/// residue limbs, so an untrusted object cannot select a larger suite basis
+/// and make the target decoder allocate it before refusing.
+pub(crate) fn parse_two_component_data_ciphertext_at_level(
+    bytes: &[u8],
+    expected_level: usize,
+) -> CanonicalResult<CanonicalBgvObject> {
+    parse_bgv_object_with_expected_data_level(bytes, Some(expected_level))
+}
+
+/// Exact codec ceiling for the canonical two-component data ciphertext at one
+/// suite level. The calculation lives beside the serializer so accounting
+/// cannot drift from string framing, varuint framing, or selected moduli.
+pub(crate) fn two_component_data_ciphertext_canonical_byte_length_ceiling_at_level(
+    expected_level: usize,
+) -> CanonicalResult<u64> {
+    let data_basis = BgvBasisKind::Data;
+    let moduli = data_basis.moduli_for_level(expected_level).ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidProtocolObject,
+            "BGV ciphertext ceiling level is outside the selected data basis",
+        )
+    })?;
+    let polynomial_degree = u64::try_from(POLYNOMIAL_DEGREE).map_err(|_| {
+        CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "BGV polynomial degree does not fit the canonical length width",
+        )
+    })?;
+    let component_count = 2_u64;
+
+    let object_kind_byte_length = canonical_string_byte_length(BgvObjectKind::Ciphertext.as_str())?;
+    let header_byte_length = canonical_string_byte_length(CANONICAL_MAGIC)?
+        .checked_add(canonical_varuint_byte_length(CANONICAL_OBJECT_VERSION))
+        .and_then(|total| total.checked_add(object_kind_byte_length))
+        .and_then(|total| total.checked_add(canonical_varuint_byte_length(component_count)))
+        .ok_or_else(canonical_ceiling_length_overflow)?;
+    let polynomial_header_byte_length = canonical_string_byte_length(data_basis.basis_id())?
+        .checked_add(canonical_varuint_byte_length(
+            u64::try_from(expected_level).map_err(|_| {
+                CanonicalError::new(
+                    CanonicalErrorCode::MalformedLength,
+                    "BGV ciphertext ceiling level does not fit the canonical width",
+                )
+            })?,
+        ))
+        .ok_or_else(canonical_ceiling_length_overflow)?;
+    let polynomial_residue_byte_length = moduli.iter().try_fold(0_u64, |total, modulus| {
+        total
+            .checked_add(
+                polynomial_degree
+                    .checked_mul(canonical_varuint_byte_length(modulus - 1))
+                    .ok_or_else(canonical_ceiling_length_overflow)?,
+            )
+            .ok_or_else(canonical_ceiling_length_overflow)
+    })?;
+    header_byte_length
+        .checked_add(
+            component_count
+                .checked_mul(
+                    polynomial_header_byte_length
+                        .checked_add(polynomial_residue_byte_length)
+                        .ok_or_else(canonical_ceiling_length_overflow)?,
+                )
+                .ok_or_else(canonical_ceiling_length_overflow)?,
+        )
+        .ok_or_else(canonical_ceiling_length_overflow)
+}
+
+const fn canonical_varuint_byte_length(mut value: u64) -> u64 {
+    let mut byte_length = 1_u64;
+    while value >= 0x80 {
+        value >>= 7;
+        byte_length += 1;
+    }
+    byte_length
+}
+
+fn canonical_string_byte_length(value: &str) -> CanonicalResult<u64> {
+    let value_byte_length = u64::try_from(value.len()).map_err(|_| {
+        CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "BGV canonical string length does not fit the framing width",
+        )
+    })?;
+    canonical_varuint_byte_length(value_byte_length)
+        .checked_add(value_byte_length)
+        .ok_or_else(canonical_ceiling_length_overflow)
+}
+
+fn canonical_ceiling_length_overflow() -> CanonicalError {
+    CanonicalError::new(
+        CanonicalErrorCode::MalformedLength,
+        "BGV canonical ciphertext ceiling length overflows",
+    )
+}
+
+fn parse_bgv_object_with_expected_data_level(
+    bytes: &[u8],
+    expected_data_level: Option<usize>,
+) -> CanonicalResult<CanonicalBgvObject> {
     let mut reader = CanonicalReader::new(bytes);
     let magic = reader.read_string()?;
     if magic != CANONICAL_MAGIC {
@@ -93,9 +192,17 @@ pub(crate) fn parse_bgv_object(bytes: &[u8]) -> CanonicalResult<CanonicalBgvObje
     let object_kind = BgvObjectKind::from_str(&reader.read_string()?)?;
     let component_count = read_bounded_count(&mut reader, MAXIMUM_COMPONENT_COUNT, "component")?;
     validate_component_count(object_kind, component_count)?;
+    if expected_data_level.is_some()
+        && (object_kind != BgvObjectKind::Ciphertext || component_count != 2)
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ComponentMismatch,
+            "finalized BGV target must contain exactly two ciphertext components",
+        ));
+    }
     let mut components = Vec::with_capacity(component_count);
     for _ in 0..component_count {
-        components.push(read_polynomial(&mut reader)?);
+        components.push(read_polynomial(&mut reader, expected_data_level)?);
     }
     if !reader.is_finished() {
         return Err(CanonicalError::new(
@@ -123,11 +230,6 @@ pub(crate) fn parse_bgv_object(bytes: &[u8]) -> CanonicalResult<CanonicalBgvObje
 }
 
 #[cfg(test)]
-pub(crate) fn canonical_bytes_hex(bytes: &[u8]) -> String {
-    encode_hex(bytes)
-}
-
-#[cfg(test)]
 pub(crate) fn plaintext_root(canonical_bytes: &[u8]) -> String {
     namespace_root("sealed-lattice-root/plaintext-root", canonical_bytes)
 }
@@ -146,8 +248,10 @@ fn append_polynomial(output: &mut Vec<u8>, polynomial: &RnsPolynomial) {
     }
 }
 
-#[cfg(test)]
-fn read_polynomial(reader: &mut CanonicalReader<'_>) -> CanonicalResult<RnsPolynomial> {
+fn read_polynomial(
+    reader: &mut CanonicalReader<'_>,
+    expected_data_level: Option<usize>,
+) -> CanonicalResult<RnsPolynomial> {
     let basis_id = reader.read_string()?;
     let basis_kind = BgvBasisKind::from_basis_id(&basis_id).ok_or_else(|| {
         CanonicalError::new(
@@ -161,6 +265,14 @@ fn read_polynomial(reader: &mut CanonicalReader<'_>) -> CanonicalResult<RnsPolyn
             "level does not fit usize",
         )
     })?;
+    if let Some(expected_level) = expected_data_level
+        && (basis_kind != BgvBasisKind::Data || level != expected_level)
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ComponentMismatch,
+            "finalized BGV target uses the wrong basis or level",
+        ));
+    }
     let moduli = basis_kind.moduli_for_level(level).ok_or_else(|| {
         CanonicalError::new(
             CanonicalErrorCode::InvalidProtocolObject,
@@ -183,7 +295,6 @@ fn read_polynomial(reader: &mut CanonicalReader<'_>) -> CanonicalResult<RnsPolyn
     })
 }
 
-#[cfg(test)]
 fn read_bounded_count(
     reader: &mut CanonicalReader<'_>,
     maximum_count: usize,
@@ -229,10 +340,15 @@ fn validate_component_count(
 mod tests {
     use super::{
         BgvObjectKind, CANONICAL_MAGIC, CANONICAL_OBJECT_VERSION, parse_bgv_object,
-        serialize_bgv_object,
+        serialize_bgv_object, two_component_data_ciphertext_canonical_byte_length_ceiling_at_level,
     };
     use crate::{
-        bgv::{encoding::encode_batch_plaintext_slots, parameters::POLYNOMIAL_DEGREE},
+        bgv::{
+            encoding::encode_batch_plaintext_slots,
+            evaluator::top_k::CANONICAL_TARGET_CIPHERTEXT_LEVEL,
+            parameters::{BgvBasisKind, POLYNOMIAL_DEGREE},
+            rns::RnsPolynomial,
+        },
         encoding::{CanonicalErrorCode, append_string, append_varuint},
     };
 
@@ -301,6 +417,37 @@ mod tests {
         assert!(
             error.message.contains("basis identifier"),
             "unexpected error: {error:?}"
+        );
+    }
+
+    #[test]
+    fn target_ciphertext_codec_ceiling_matches_maximal_canonical_residues() {
+        let moduli = BgvBasisKind::Data
+            .moduli_for_level(CANONICAL_TARGET_CIPHERTEXT_LEVEL)
+            .expect("selected target level has data moduli");
+        let maximal_polynomial = RnsPolynomial::coefficient_domain(
+            BgvBasisKind::Data,
+            CANONICAL_TARGET_CIPHERTEXT_LEVEL,
+            moduli
+                .iter()
+                .map(|modulus| vec![modulus - 1; POLYNOMIAL_DEGREE])
+                .collect(),
+        )
+        .expect("maximal target polynomial is canonical");
+        let maximal_bytes = serialize_bgv_object(
+            BgvObjectKind::Ciphertext,
+            &[maximal_polynomial.clone(), maximal_polynomial],
+        )
+        .expect("maximal target ciphertext serializes");
+        let ceiling = two_component_data_ciphertext_canonical_byte_length_ceiling_at_level(
+            CANONICAL_TARGET_CIPHERTEXT_LEVEL,
+        )
+        .expect("selected target codec ceiling derives");
+
+        assert_eq!(maximal_bytes.len() as u64, ceiling);
+        assert!(
+            two_component_data_ciphertext_canonical_byte_length_ceiling_at_level(usize::MAX)
+                .is_err()
         );
     }
 }

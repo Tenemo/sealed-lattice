@@ -31,9 +31,60 @@ const KEY_SWITCH_BASIS_CONVERTER: u16 = 1;
 const SUITE_HASH_DOMAIN: &str = "sealed-lattice/foundation/suite/v1";
 const SUITE_ARTIFACT_HASH_DOMAIN: &str = "sealed-lattice/foundation/suite-artifact/v1";
 const ORDERED_SPECIAL_PRIMES: [u64; SPECIAL_PRIMES.len()] = SPECIAL_PRIMES;
-const ORDERED_TARGET_DATA_PRIME_INDEXES: [u16; 2] = [0, 1];
+const ORDERED_TARGET_DATA_PRIME_INDEXES: [u16; CANONICAL_TARGET_CIPHERTEXT_LEVEL + 1] =
+    ordered_target_data_prime_indexes();
 const ORDERED_SHARING_DATA_PRIME_INDEXES: [u16; DATA_PRIMES.len()] =
-    [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
+    ordered_sharing_data_prime_indexes();
+
+const fn ordered_target_data_prime_indexes() -> [u16; CANONICAL_TARGET_CIPHERTEXT_LEVEL + 1] {
+    let mut indexes = [0_u16; CANONICAL_TARGET_CIPHERTEXT_LEVEL + 1];
+    let mut position = 0;
+    while position < indexes.len() {
+        indexes[position] = position as u16;
+        position += 1;
+    }
+    indexes
+}
+
+const fn ordered_sharing_data_prime_indexes() -> [u16; DATA_PRIMES.len()] {
+    let mut indexes = [0_u16; DATA_PRIMES.len()];
+    let mut position = 0;
+    while position < indexes.len() {
+        indexes[position] = position as u16;
+        position += 1;
+    }
+    indexes
+}
+
+/// Resolves the exact selected target-basis subset in its canonical suite
+/// order. Consumers retain the sharing-basis index beside each modulus so a
+/// target-only capability cannot silently reinterpret its compact ordinal as
+/// a different one of the complete sharing-basis limbs.
+pub(crate) fn selected_target_data_prime_coordinates() -> SchemaResult<Box<[(u16, u64)]>> {
+    target_data_prime_coordinates(&ORDERED_TARGET_DATA_PRIME_INDEXES)
+}
+
+fn target_data_prime_coordinates(
+    ordered_data_prime_indexes: &[u16],
+) -> SchemaResult<Box<[(u16, u64)]>> {
+    if ordered_data_prime_indexes.is_empty() {
+        return Err(invalid_fixed_algebra());
+    }
+    let mut coordinates = Vec::with_capacity(ordered_data_prime_indexes.len());
+    for (target_basis_position, data_prime_index) in
+        ordered_data_prime_indexes.iter().copied().enumerate()
+    {
+        if ordered_data_prime_indexes[..target_basis_position].contains(&data_prime_index) {
+            return Err(invalid_fixed_algebra());
+        }
+        let modulus = DATA_PRIMES
+            .get(usize::from(data_prime_index))
+            .copied()
+            .ok_or_else(invalid_fixed_algebra)?;
+        coordinates.push((data_prime_index, modulus));
+    }
+    Ok(coordinates.into_boxed_slice())
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(u16)]
@@ -960,6 +1011,28 @@ mod tests {
     }
 
     #[test]
+    fn selected_target_coordinates_preserve_order_and_reject_invalid_subsets() {
+        let coordinates =
+            selected_target_data_prime_coordinates().expect("selected target coordinates resolve");
+        assert_eq!(coordinates.len(), ORDERED_TARGET_DATA_PRIME_INDEXES.len());
+        assert!(coordinates.iter().enumerate().all(
+            |(target_basis_position, (data_prime_index, modulus))| {
+                *data_prime_index == ORDERED_TARGET_DATA_PRIME_INDEXES[target_basis_position]
+                    && Some(modulus) == DATA_PRIMES.get(usize::from(*data_prime_index))
+            }
+        ));
+
+        for invalid_indexes in [Vec::new(), vec![0, 0], vec![0, u16::MAX]] {
+            assert_eq!(
+                target_data_prime_coordinates(&invalid_indexes)
+                    .expect_err("invalid target subset is refused")
+                    .refusal_reason,
+                RefusalReason::InvalidArithmeticRelation
+            );
+        }
+    }
+
+    #[test]
     fn suite_round_trip_preserves_the_exact_twenty_two_item_record_and_identifier() {
         let suite = sample_suite();
         let encoded = suite.encode().expect("suite encodes");
@@ -978,8 +1051,14 @@ mod tests {
                 .expect("decoded suite identifier derives"),
             suite.suite_id().expect("suite identifier derives")
         );
-        assert_eq!(suite.ordered_target_data_prime_indexes(), &[0, 1]);
-        assert_eq!(suite.ordered_sharing_data_prime_indexes().len(), 17);
+        assert_eq!(
+            suite.ordered_target_data_prime_indexes(),
+            &(0..=CANONICAL_TARGET_CIPHERTEXT_LEVEL as u16).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            suite.ordered_sharing_data_prime_indexes(),
+            &(0..DATA_PRIMES.len() as u16).collect::<Vec<_>>()
+        );
         assert_eq!(suite.distributions(), FIXED_DISTRIBUTIONS);
     }
 

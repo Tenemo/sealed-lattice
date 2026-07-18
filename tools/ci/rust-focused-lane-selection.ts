@@ -14,8 +14,12 @@ export const fullProfileEvidenceRustTests = [
 ] as const;
 
 export const measurementRustTests = [
+    'bgv::evaluator::noise_recurrence::tests::selected_evaluator_depth_drop_allocation_search_reports_exact_candidates',
+    'bgv::evaluator::noise_recurrence::tests::selected_evaluator_joint_topology_parallel_prefix_reports_guarded_peak',
+    'bgv::evaluator::noise_recurrence::tests::selected_evaluator_joint_topology_search_reports_exact_pareto',
     'bgv::evaluator::top_k::tests::level_budget_probe::production_rank_lookup_level_budget_measurement',
-    'bgv::proof_suite::selected_accounting::tests::selected_exact_family_and_action_proof_accounting_reports_browser_ceiling_mismatch',
+    'bgv::proof_suite::selected_accounting::tests::selected_exact_family_and_action_proof_accounting_reports_measurements',
+    'bgv::proof_suite::relation_plan::vss_range_candidate_comparison::selected_vss_range_candidates_report_exact_compiler_comparison',
     'bgv::setup::limb_group_key_switch_atom::family_backend::bench::round_one_key_prover_cost',
 ] as const;
 

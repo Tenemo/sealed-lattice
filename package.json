@@ -31,6 +31,8 @@
         "test:node": "pnpm run build && pnpm run test:node:built",
         "test:browser:built": "vitest --project chromium-desktop --project firefox-desktop --project webkit-desktop --project pixel-5-chromium --project iphone-12-webkit --run",
         "test:browser": "pnpm run build && pnpm run test:browser:built",
+        "test:browser:measurements": "tsx ./tools/ci/run-desktop-browser-measurements.ts",
+        "test:browser:evaluator-replay-measurements": "tsx ./tools/ci/run-desktop-browser-evaluator-replay-measurements.ts",
         "test": "pnpm run build && pnpm run test:node:built && pnpm run test:browser:built",
         "smoke:pack:npm": "pnpm run build && tsx ./tools/ci/verify-packed-package.ts",
         "prepare": "husky"

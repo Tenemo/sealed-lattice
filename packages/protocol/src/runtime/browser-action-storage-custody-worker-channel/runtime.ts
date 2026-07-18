@@ -250,10 +250,14 @@ export const copyCheckpointBoundary = <
         !Number.isSafeInteger(value.operationKind) ||
         !Number.isSafeInteger(value.safeBoundaryOrdinal) ||
         typeof value.stateStreamDomain !== 'string' ||
-        !Array.isArray(value.orderedRandomCursors) ||
+        !(value.privateRandomCursorManifestBytes instanceof Uint8Array) ||
+        value.privateRandomCursorManifestBytes.byteLength >
+            maximumCheckpointDescriptorByteLength ||
         !Array.isArray(value.orderedSourceDigests) ||
-        value.orderedRandomCursors.length > maximumCheckpointCollectionLength ||
         value.orderedSourceDigests.length > maximumCheckpointCollectionLength ||
+        (value.privateRandomnessStreamAttemptIdentifier !== undefined &&
+            !(value.privateRandomnessStreamAttemptIdentifier instanceof
+                Uint8Array)) ||
         (includeDescriptor &&
             !(stateStreamDescriptorBytes instanceof Uint8Array))
     ) {
@@ -262,49 +266,8 @@ export const copyCheckpointBoundary = <
             'The checkpoint boundary is malformed or outside the worker-channel copy bound.',
         );
     }
-    const orderedRandomCursors = value.orderedRandomCursors.map(
-        (cursor, cursorIndex) => {
-            if (
-                !isPlainRecord(cursor) ||
-                !Number.isSafeInteger(cursor.family) ||
-                !Number.isSafeInteger(cursor.purpose) ||
-                typeof cursor.nextCounter !== 'bigint' ||
-                (cursor.nextUnreadBitOffsetInBufferedBlock !== undefined &&
-                    !Number.isSafeInteger(
-                        cursor.nextUnreadBitOffsetInBufferedBlock,
-                    ))
-            ) {
-                throw new BrowserActionStorageCustodyError(
-                    'InvalidInput',
-                    `Checkpoint random cursor ${String(cursorIndex)} is malformed.`,
-                );
-            }
-            return Object.freeze({
-                derivationContextHash: copyBytes(
-                    cursor.derivationContextHash,
-                    storageRootCommitmentByteLength,
-                    `Checkpoint random cursor ${String(cursorIndex)} derivation-context hash`,
-                ),
-                family: cursor.family,
-                nextCounter: cursor.nextCounter,
-                ...(cursor.nextUnreadBitOffsetInBufferedBlock === undefined
-                    ? {}
-                    : {
-                          nextUnreadBitOffsetInBufferedBlock:
-                              cursor.nextUnreadBitOffsetInBufferedBlock,
-                      }),
-                purpose: cursor.purpose,
-                streamAttemptIdentifier: copyBytes(
-                    cursor.streamAttemptIdentifier,
-                    32,
-                    `Checkpoint random cursor ${String(cursorIndex)} stream-attempt identifier`,
-                ),
-            });
-        },
-    );
     return Object.freeze({
         operationKind: value.operationKind,
-        orderedRandomCursors: Object.freeze(orderedRandomCursors),
         orderedSourceDigests: Object.freeze(
             value.orderedSourceDigests.map((digest, digestIndex) =>
                 copyBytes(
@@ -314,6 +277,20 @@ export const copyCheckpointBoundary = <
                 ),
             ),
         ),
+        privateRandomCursorManifestBytes: copyBoundedBytes(
+            value.privateRandomCursorManifestBytes,
+            maximumCheckpointDescriptorByteLength,
+            'Checkpoint private-randomness cursor manifest',
+        ),
+        ...(value.privateRandomnessStreamAttemptIdentifier === undefined
+            ? {}
+            : {
+                  privateRandomnessStreamAttemptIdentifier: copyBytes(
+                      value.privateRandomnessStreamAttemptIdentifier,
+                      32,
+                      'Checkpoint private-randomness stream-attempt identifier',
+                  ),
+              }),
         safeBoundaryOrdinal: value.safeBoundaryOrdinal,
         ...(includeDescriptor
             ? {
@@ -1295,34 +1272,21 @@ class BrowserActionStorageCustodyWorkerClient implements BrowserFoundationStorag
     }
 
     public beginCheckpoint(
-        streamAttemptIdentifiers: readonly Uint8Array[],
+        privateRandomnessStreamAttemptIdentifier?: Uint8Array,
     ): Promise<BrowserFoundationCheckpointHandle> {
         return this.#queueValidatedOperation(
-            () => {
-                if (
-                    !Array.isArray(streamAttemptIdentifiers) ||
-                    streamAttemptIdentifiers.length >
-                        maximumCheckpointCollectionLength
-                ) {
-                    throw new BrowserActionStorageCustodyError(
-                        'InvalidInput',
-                        'Checkpoint stream-attempt identifiers are outside the worker-channel copy bound.',
-                    );
-                }
-                return Object.freeze(
-                    streamAttemptIdentifiers.map((identifier, index) =>
-                        copyBytes(
-                            identifier,
-                            32,
-                            `Checkpoint stream-attempt identifier ${String(index)}`,
-                        ),
-                    ),
-                );
-            },
-            (copiedIdentifiers) =>
+            () =>
+                privateRandomnessStreamAttemptIdentifier === undefined
+                    ? undefined
+                    : copyBytes(
+                          privateRandomnessStreamAttemptIdentifier,
+                          32,
+                          'Checkpoint private-randomness stream-attempt identifier',
+                      ),
+            (copiedIdentifier) =>
                 this.#sendRequest(
                     'begin-checkpoint',
-                    copiedIdentifiers,
+                    copiedIdentifier,
                     createCheckpointHandle,
                 ),
         );
@@ -2604,9 +2568,11 @@ const makeTransferableCustody = (
                 lifecycle.run(owner, () =>
                     custody.authenticateFoundationHead(),
                 ),
-            beginCheckpoint: (streamAttemptIdentifiers) =>
+            beginCheckpoint: (privateRandomnessStreamAttemptIdentifier) =>
                 lifecycle.run(owner, () =>
-                    custody.beginCheckpoint(streamAttemptIdentifiers),
+                    custody.beginCheckpoint(
+                        privateRandomnessStreamAttemptIdentifier,
+                    ),
                 ),
             close: () => lifecycle.close(owner),
             closeActionRandomness: (identifier) =>
@@ -2735,9 +2701,11 @@ const makeTransferableFoundationOperationOwner = (
                         recoveredBatch,
                     ),
                 ),
-            beginCheckpoint: (streamAttemptIdentifiers) =>
+            beginCheckpoint: (privateRandomnessStreamAttemptIdentifier) =>
                 lifecycle.run(owner, () =>
-                    client.beginCheckpoint(streamAttemptIdentifiers),
+                    client.beginCheckpoint(
+                        privateRandomnessStreamAttemptIdentifier,
+                    ),
                 ),
             cacheWitnessExactOutput: (witnessRole, cacheInput) =>
                 lifecycle.run(owner, () =>
@@ -2908,8 +2876,12 @@ export const openBrowserActionStorageCustodyWorker = async (input: {
             Object.freeze({
                 authenticateFoundationHead: () =>
                     client.authenticateFoundationHead(),
-                beginCheckpoint: (streamAttemptIdentifiers) =>
-                    client.beginCheckpoint(streamAttemptIdentifiers),
+                beginCheckpoint: (
+                    privateRandomnessStreamAttemptIdentifier,
+                ) =>
+                    client.beginCheckpoint(
+                        privateRandomnessStreamAttemptIdentifier,
+                    ),
                 closeActionRandomness: (identifier) =>
                     client.closeActionRandomness(identifier),
                 closeActionStateVerifierSession: (identifier) =>

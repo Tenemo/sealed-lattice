@@ -106,6 +106,69 @@ pub(crate) enum CommonProofVerificationWorkerPoll {
     Complete,
 }
 
+/// Process-local readback traffic observed by one verifier worker. This is a
+/// measurement diagnostic only: it is neither serialized nor bound into a
+/// proof, verification result, or capability.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct CommonProofVerificationReadbackAccounting {
+    logical_required_range_count: u64,
+    logical_required_byte_length: u64,
+    supplied_full_chunk_count: u64,
+    supplied_full_chunk_byte_length: u64,
+}
+
+impl CommonProofVerificationReadbackAccounting {
+    pub(crate) const fn logical_required_range_count(self) -> u64 {
+        self.logical_required_range_count
+    }
+
+    pub(crate) const fn logical_required_byte_length(self) -> u64 {
+        self.logical_required_byte_length
+    }
+
+    pub(crate) const fn supplied_full_chunk_count(self) -> u64 {
+        self.supplied_full_chunk_count
+    }
+
+    pub(crate) const fn supplied_full_chunk_byte_length(self) -> u64 {
+        self.supplied_full_chunk_byte_length
+    }
+
+    fn record_logical_required_range(
+        &mut self,
+        byte_length: usize,
+    ) -> Result<(), CommonProofRuntimeError> {
+        let byte_length = u64::try_from(byte_length)
+            .map_err(|_| CommonProofRuntimeError::AllocationLimitExceeded)?;
+        self.logical_required_range_count = self
+            .logical_required_range_count
+            .checked_add(1)
+            .ok_or(CommonProofRuntimeError::AllocationLimitExceeded)?;
+        self.logical_required_byte_length = self
+            .logical_required_byte_length
+            .checked_add(byte_length)
+            .ok_or(CommonProofRuntimeError::AllocationLimitExceeded)?;
+        Ok(())
+    }
+
+    fn record_supplied_full_chunk(
+        &mut self,
+        byte_length: usize,
+    ) -> Result<(), CommonProofRuntimeError> {
+        let byte_length = u64::try_from(byte_length)
+            .map_err(|_| CommonProofRuntimeError::AllocationLimitExceeded)?;
+        self.supplied_full_chunk_count = self
+            .supplied_full_chunk_count
+            .checked_add(1)
+            .ok_or(CommonProofRuntimeError::AllocationLimitExceeded)?;
+        self.supplied_full_chunk_byte_length = self
+            .supplied_full_chunk_byte_length
+            .checked_add(byte_length)
+            .ok_or(CommonProofRuntimeError::AllocationLimitExceeded)?;
+        Ok(())
+    }
+}
+
 #[derive(Debug)]
 pub(crate) enum CommonProofVerificationWorkerError {
     Runtime(CommonProofRuntimeError),
@@ -144,6 +207,8 @@ pub(super) struct CommonProofVerificationWorker {
     proof_stream_descriptor: StreamDescriptor,
     pub(super) limits: CommonProofRuntimeLimits,
     phase: CommonProofVerificationWorkerPhase,
+    last_accounted_required_range: Option<super::CommonProofRequiredByteRange>,
+    readback_accounting: CommonProofVerificationReadbackAccounting,
 }
 
 impl CommonProofVerificationWorker {
@@ -167,7 +232,26 @@ impl CommonProofVerificationWorker {
                 verifier: Box::new(prepared.verifier),
                 verified_column_evaluator: prepared.verified_column_evaluator,
             },
+            last_accounted_required_range: None,
+            readback_accounting: CommonProofVerificationReadbackAccounting::default(),
         })
+    }
+
+    pub(crate) const fn readback_accounting(&self) -> CommonProofVerificationReadbackAccounting {
+        self.readback_accounting
+    }
+
+    fn account_required_range(
+        &mut self,
+        required_range: super::CommonProofRequiredByteRange,
+    ) -> Result<(), CommonProofRuntimeError> {
+        if self.last_accounted_required_range == Some(required_range) {
+            return Ok(());
+        }
+        self.readback_accounting
+            .record_logical_required_range(required_range.byte_length())?;
+        self.last_accounted_required_range = Some(required_range);
+        Ok(())
     }
 
     pub(super) fn absorb_input_chunk(
@@ -210,7 +294,6 @@ impl CommonProofVerificationWorker {
             self.verification_binding
                 .proof_application
                 .proof_stream_domain,
-            self.proof_stream_descriptor.clone(),
             verified_summary,
         )
         .map_err(CommonProofVerificationWorkerError::Stream)?;
@@ -237,6 +320,13 @@ impl CommonProofVerificationWorker {
         chunk_index: usize,
         chunk_bytes: &[u8],
     ) -> Result<(), CommonProofVerificationWorkerError> {
+        let required_range = match &self.phase {
+            CommonProofVerificationWorkerPhase::Verifying { verifier, .. } => verifier
+                .required_byte_range()
+                .ok_or(CommonProofRuntimeError::WrongOperationPhase)?,
+            _ => return Err(CommonProofRuntimeError::WrongOperationPhase.into()),
+        };
+        self.account_required_range(required_range)?;
         let CommonProofVerificationWorkerPhase::Verifying {
             readback_verifier,
             verifier,
@@ -253,6 +343,8 @@ impl CommonProofVerificationWorker {
         readback_verifier
             .authenticate_chunk(chunk_index, chunk_bytes)
             .map_err(CommonProofVerificationWorkerError::Stream)?;
+        self.readback_accounting
+            .record_supplied_full_chunk(chunk_bytes.len())?;
         if let Some(existing) = resident_chunks.get(&chunk_index) {
             if existing != chunk_bytes {
                 return Err(CommonProofRuntimeError::WrongVerificationBinding.into());
@@ -274,6 +366,16 @@ impl CommonProofVerificationWorker {
     pub(super) fn poll(
         &mut self,
     ) -> Result<CommonProofVerificationWorkerPoll, CommonProofVerificationWorkerError> {
+        let required_range = match &self.phase {
+            CommonProofVerificationWorkerPhase::Verifying { verifier, .. } => {
+                verifier.required_byte_range()
+            }
+            _ => return Err(CommonProofRuntimeError::WrongOperationPhase.into()),
+        };
+        let Some(required_range) = required_range else {
+            return Ok(CommonProofVerificationWorkerPoll::Complete);
+        };
+        self.account_required_range(required_range)?;
         let CommonProofVerificationWorkerPhase::Verifying {
             verifier,
             verified_column_evaluator,
@@ -283,9 +385,6 @@ impl CommonProofVerificationWorker {
         else {
             return Err(CommonProofRuntimeError::WrongOperationPhase.into());
         };
-        if verifier.required_byte_range().is_none() {
-            return Ok(CommonProofVerificationWorkerPoll::Complete);
-        }
         let (first_chunk_index, second_chunk_index) = Self::required_readback_chunks(verifier)?;
         if !resident_chunks.contains_key(&first_chunk_index)
             || second_chunk_index.is_some_and(|index| !resident_chunks.contains_key(&index))
@@ -312,9 +411,12 @@ impl CommonProofVerificationWorker {
             self.limits.proof_byte_length(),
             resident_input_chunks,
         )?;
-        let result = verifier.poll(&source, verified_column_evaluator.as_mut());
+        let result = verifier
+            .poll(&source, verified_column_evaluator.as_mut())
+            .map_err(CommonProofVerificationWorkerError::Verifier)?;
         resident_chunks.clear();
-        match result.map_err(CommonProofVerificationWorkerError::Verifier)? {
+        self.last_accounted_required_range = None;
+        match result {
             CommonProofVerificationPoll::PrefixAccepted => {
                 Ok(CommonProofVerificationWorkerPoll::PrefixAccepted)
             }
@@ -379,5 +481,32 @@ impl CommonProofVerificationWorker {
             CommonProofVerificationWorkerPhase::Cancelled => {}
         }
         self.phase = CommonProofVerificationWorkerPhase::Cancelled;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn readback_accounting_records_exact_logical_and_supplied_bytes() {
+        let mut accounting = CommonProofVerificationReadbackAccounting::default();
+        accounting
+            .record_logical_required_range(17)
+            .expect("the logical range fits the diagnostic counters");
+        accounting
+            .record_logical_required_range(31)
+            .expect("the second logical range fits the diagnostic counters");
+        accounting
+            .record_supplied_full_chunk(64)
+            .expect("the supplied chunk fits the diagnostic counters");
+        accounting
+            .record_supplied_full_chunk(64)
+            .expect("an exact repeated chunk remains observable traffic");
+
+        assert_eq!(accounting.logical_required_range_count(), 2);
+        assert_eq!(accounting.logical_required_byte_length(), 48);
+        assert_eq!(accounting.supplied_full_chunk_count(), 2);
+        assert_eq!(accounting.supplied_full_chunk_byte_length(), 128);
     }
 }

@@ -128,6 +128,7 @@ type VerifiedEvaluatorReplayRecord = {
     active: boolean;
     handle: number;
     kernel: TranscriptCoreKernel;
+    release(handle: number): number;
 };
 
 type VerifiedFinalityRecord = {
@@ -184,6 +185,47 @@ const requireWasm32Handle = (value: unknown, label: string): void => {
     ) {
         throw new TypeError(`The ${label} is invalid.`);
     }
+};
+
+/**
+ * Mints the TypeScript wrapper only from a verifier-owned replay handle
+ * produced in the same WASM worker. This is an internal package seam and is
+ * deliberately not re-exported from the public package entry point.
+ */
+export const createVerifiedEvaluatorReplayKernelAuthority = (input: {
+    handle: number;
+    kernel: TranscriptCoreKernel;
+    release(handle: number): number;
+}): VerifiedEvaluatorReplay => {
+    requireWasm32Handle(input.handle, 'verified evaluator replay handle');
+    if (typeof input.release !== 'function') {
+        throw new TypeError(
+            'The verified evaluator replay release operation is invalid.',
+        );
+    }
+    const capability = Object.freeze(Object.create(null) as object);
+    verifiedEvaluatorReplayRecords.set(capability, {
+        active: true,
+        handle: input.handle,
+        kernel: input.kernel,
+        release: input.release,
+    });
+    return capability as VerifiedEvaluatorReplay;
+};
+
+/** Releases one live replay capability after finality no longer needs it. */
+export const releaseVerifiedEvaluatorReplay = (
+    verifiedEvaluatorReplay: VerifiedEvaluatorReplay,
+): void => {
+    const record = verifiedEvaluatorReplayRecords.get(verifiedEvaluatorReplay);
+    if (record === undefined || !record.active) {
+        throw new FinalityVerifierRefusalError('consumedState');
+    }
+    const refusalReason = decodeStatus(record.release(record.handle));
+    if (refusalReason !== undefined) {
+        throw new FinalityVerifierRefusalError(refusalReason);
+    }
+    record.active = false;
 };
 
 const requireBytes = (

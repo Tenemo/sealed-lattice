@@ -34,6 +34,7 @@ export {
 export type {
     AuthenticatedMailboxCarrier,
     AuthenticatedMailboxGcmRuntime,
+    AuthenticatedMailboxPlaintextCapability,
     AuthenticatedMailboxInboundSlotAuthority,
     AuthenticatedMailboxKernel,
     AuthenticatedMailboxOpenInput,

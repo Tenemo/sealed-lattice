@@ -161,6 +161,8 @@ fn runs_a_small_child_below_the_memory_limit() {
     assert!(diagnostic_text.contains("\"eventType\":\"guard-started\""));
     assert!(diagnostic_text.contains("\"eventType\":\"child-started\""));
     assert!(diagnostic_text.contains("\"eventType\":\"resource-sample\""));
+    assert!(diagnostic_text.contains("\"processTreeResidentMemoryBytes\":"));
+    assert!(!diagnostic_text.contains("\"processTreeResidentMemoryBytes\":null"));
     assert!(diagnostic_text.contains("\"eventType\":\"child-exited\""));
     assert!(diagnostic_text.contains("\"terminationClassification\":\"completed\""));
     assert!(diagnostic_text.contains("\"memoryLimitBytes\":1073741824"));

@@ -18,17 +18,24 @@ use super::{
         INTEGER_LIFT_FULL_RING_NEGACYCLIC_PRODUCT_SCHEMA_IDENTIFIER,
         INTEGER_LIFT_LINEAR_TERM_SCHEMA_IDENTIFIER,
         INTEGER_LIFT_MODULUS_COEFFICIENT_SCHEMA_IDENTIFIER,
+        INTEGER_LIFT_MODULUS_RADIX_DIGIT_COEFFICIENT_SCHEMA_IDENTIFIER,
         INTEGER_LIFT_NEGACYCLIC_AUTOMORPHISM_PERMUTATION_SCHEMA_IDENTIFIER,
         INTEGER_LIFT_REVERSED_COLUMN_BINDING_SCHEMA_IDENTIFIER, SCHEMA_VERSION,
     },
 };
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum RelationIntegerLiftCoefficient {
     Constant(u64),
     Modulus {
         modulus_reference: SuiteModulusReference,
         multiplier: u16,
+    },
+    ModulusRadixDigit {
+        modulus_reference: SuiteModulusReference,
+        multiplier: u16,
+        radix: u64,
+        digit_ordinal: u16,
     },
 }
 
@@ -52,11 +59,47 @@ impl RelationIntegerLiftCoefficient {
                     CanonicalItem::unsigned16(multiplier),
                 ],
             ),
+            Self::ModulusRadixDigit {
+                modulus_reference,
+                multiplier,
+                radix,
+                digit_ordinal,
+            } => CanonicalTuple::new(
+                INTEGER_LIFT_MODULUS_RADIX_DIGIT_COEFFICIENT_SCHEMA_IDENTIFIER,
+                SCHEMA_VERSION,
+                vec![
+                    CanonicalItem::nested_tuple(&modulus_reference.canonical_tuple())
+                        .map_err(canonical_encoding_error)?,
+                    CanonicalItem::unsigned16(multiplier),
+                    CanonicalItem::unsigned64(radix),
+                    CanonicalItem::unsigned16(digit_ordinal),
+                ],
+            ),
         })
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) fn resolved_modulus_radix_digit(
+    modulus_reference: SuiteModulusReference,
+    multiplier: u16,
+    radix: u64,
+    digit_ordinal: u16,
+    context: &RelationPlanCheckContext,
+) -> Result<u64, RelationPlanError> {
+    if multiplier == 0 || !(2..context.base_field_modulus).contains(&radix) {
+        return Err(RelationPlanError::InvalidConstraint);
+    }
+    let mut value = u128::from(context.resolved_modulus(modulus_reference)?)
+        .checked_mul(u128::from(multiplier))
+        .ok_or(RelationPlanError::IntegerBoundOverflow)?;
+    let radix = u128::from(radix);
+    for _ in 0..digit_ordinal {
+        value /= radix;
+    }
+    u64::try_from(value % radix).map_err(|_| RelationPlanError::IntegerBoundOverflow)
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct RelationIntegerLiftLinearTermDescriptor {
     pub(crate) negative: bool,
     pub(crate) column_ordinal: u32,
@@ -105,7 +148,7 @@ pub(crate) struct RelationIntegerLiftConvolutionProductDescriptor {
     pub(crate) reversed_transpose_column_ordinal: u32,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(u16)]
 pub(crate) enum RelationIntegerLiftFullRingHalf {
     Low = 1,
@@ -269,8 +312,6 @@ impl RelationIntegerLiftConvolutionProductDescriptor {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct RelationIntegerLiftComponentDescriptor {
-    pub(crate) quotient_is_negative: bool,
-    pub(crate) quotient_column_ordinal: u32,
     pub(crate) ordered_linear_terms: Vec<RelationIntegerLiftLinearTermDescriptor>,
     pub(crate) ordered_convolution_products: Vec<RelationIntegerLiftConvolutionProductDescriptor>,
     pub(crate) ordered_full_ring_negacyclic_products:
@@ -285,8 +326,6 @@ impl RelationIntegerLiftComponentDescriptor {
             INTEGER_LIFT_COMPONENT_SCHEMA_IDENTIFIER,
             SCHEMA_VERSION,
             vec![
-                CanonicalItem::boolean(self.quotient_is_negative),
-                CanonicalItem::unsigned32(self.quotient_column_ordinal),
                 canonical_nested_list(
                     self.ordered_linear_terms
                         .iter()
@@ -559,8 +598,10 @@ impl RelationIntegerLiftBatchDescriptor {
                 component,
                 self.modulus_reference,
                 &theta_expression,
+                point_zero.clone(),
                 point_last.clone(),
                 except_last.clone(),
+                context,
             )?);
         }
         Ok(programs)
@@ -1057,13 +1098,14 @@ pub(super) fn integer_lift_product_constraint_programs(
 
 pub(super) fn integer_lift_component_constraint_programs(
     component: &RelationIntegerLiftComponentDescriptor,
-    modulus_reference: SuiteModulusReference,
+    _modulus_reference: SuiteModulusReference,
     theta_expression: &[RelationExpressionInstruction],
+    point_zero: Vec<RelationExpressionInstruction>,
     point_last: Vec<RelationExpressionInstruction>,
     except_last: Vec<RelationExpressionInstruction>,
+    context: &RelationPlanCheckContext,
 ) -> Result<Vec<RelationIntegerLiftConstraintProgram>, RelationPlanError> {
-    let coefficient_expression =
-        integer_lift_component_coefficient_expression(component, modulus_reference)?;
+    let coefficient_expression = integer_lift_component_coefficient_expression(component, context)?;
     let linear_evaluation = component.linear_evaluation_column_ordinal;
     let linear_last = subtract_integer_lift_expressions(
         integer_lift_column_expression(linear_evaluation, false, 0),
@@ -1082,6 +1124,7 @@ pub(super) fn integer_lift_component_constraint_programs(
 
     let product_expression = integer_lift_component_product_expression(component)?;
     let accumulator = component.product_accumulator_column_ordinal;
+    let accumulator_initial = integer_lift_column_expression(accumulator, false, 0);
     let accumulator_step = subtract_integer_lift_expressions(
         subtract_integer_lift_expressions(
             integer_lift_column_expression(accumulator, false, 1),
@@ -1104,6 +1147,10 @@ pub(super) fn integer_lift_component_constraint_programs(
             zeroifier_postfix_expression: except_last.clone(),
         },
         RelationIntegerLiftConstraintProgram {
+            numerator_postfix_expression: accumulator_initial,
+            zeroifier_postfix_expression: point_zero,
+        },
+        RelationIntegerLiftConstraintProgram {
             numerator_postfix_expression: accumulator_step,
             zeroifier_postfix_expression: except_last,
         },
@@ -1116,25 +1163,13 @@ pub(super) fn integer_lift_component_constraint_programs(
 
 pub(super) fn integer_lift_component_coefficient_expression(
     component: &RelationIntegerLiftComponentDescriptor,
-    modulus_reference: SuiteModulusReference,
+    context: &RelationPlanCheckContext,
 ) -> Result<Vec<RelationExpressionInstruction>, RelationPlanError> {
-    let mut terms = component
+    let terms = component
         .ordered_linear_terms
         .iter()
-        .map(integer_lift_linear_term_expression)
+        .map(|term| integer_lift_linear_term_expression(term, context))
         .collect::<Result<Vec<_>, _>>()?;
-    let quotient = multiply_integer_lift_expressions(
-        vec![RelationExpressionInstruction::NonNativeModulusConstant {
-            modulus_reference,
-            multiplier: 1,
-        }],
-        integer_lift_column_expression(component.quotient_column_ordinal, false, 0),
-    );
-    terms.push(if component.quotient_is_negative {
-        negate_integer_lift_expression(quotient)
-    } else {
-        quotient
-    });
     sum_integer_lift_expressions(terms)
 }
 
@@ -1216,11 +1251,16 @@ pub(super) fn integer_lift_component_product_expression(
                 }
             }),
     );
-    sum_integer_lift_expressions(terms)
+    if terms.is_empty() {
+        Ok(vec![RelationExpressionInstruction::BaseFieldConstant(0)])
+    } else {
+        sum_integer_lift_expressions(terms)
+    }
 }
 
 pub(super) fn integer_lift_linear_term_expression(
     term: &RelationIntegerLiftLinearTermDescriptor,
+    context: &RelationPlanCheckContext,
 ) -> Result<Vec<RelationExpressionInstruction>, RelationPlanError> {
     let shifted_column = subtract_integer_lift_expressions(
         integer_lift_column_expression(term.column_ordinal, false, 0),
@@ -1239,6 +1279,18 @@ pub(super) fn integer_lift_linear_term_expression(
             modulus_reference,
             multiplier,
         },
+        RelationIntegerLiftCoefficient::ModulusRadixDigit {
+            modulus_reference,
+            multiplier,
+            radix,
+            digit_ordinal,
+        } => RelationExpressionInstruction::BaseFieldConstant(resolved_modulus_radix_digit(
+            modulus_reference,
+            multiplier,
+            radix,
+            digit_ordinal,
+            context,
+        )?),
     };
     let expression = multiply_integer_lift_expressions(vec![coefficient], shifted_column);
     Ok(if term.negative {

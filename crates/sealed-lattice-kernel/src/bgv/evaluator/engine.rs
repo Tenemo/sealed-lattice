@@ -6,12 +6,11 @@ use num_traits::{ToPrimitive, Zero};
 use crate::{
     bgv::{
         encoding::encode_logical_slots_to_plaintext_coefficients,
-        evaluator::prg::DeterministicSampler,
         modular_arithmetic::{add_mod, add_mod_fast, inverse_mod, mul_mod, mul_mod_fast, sub_mod},
         ntt::{forward_negacyclic_ntt_in_place, inverse_negacyclic_ntt_in_place},
         parameters::{BgvBasisKind, DATA_PRIMES, POLYNOMIAL_DEGREE},
         rns::RnsPolynomial,
-        serialization::{BgvObjectKind, ciphertext_root, serialize_bgv_object},
+        serialization::{BgvObjectKind, serialize_bgv_object},
     },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
 };
@@ -19,8 +18,7 @@ use crate::{
 #[cfg(test)]
 use crate::bgv::encoding::decode_plaintext_coefficients_to_logical_slots;
 #[cfg(test)]
-use crate::bgv::serialization::canonical_bytes_hex;
-
+use crate::bgv::evaluator::prg::DeterministicSampler;
 #[cfg(not(target_arch = "wasm32"))]
 use rayon::prelude::*;
 
@@ -29,18 +27,18 @@ mod ciphertext_records;
 mod decryption;
 mod operations;
 
-#[cfg(test)]
-pub(crate) use ciphertext_records::ciphertext_canonical_bytes_hex;
-pub(crate) use ciphertext_records::ciphertext_object_root;
+pub(crate) use ciphertext_records::ciphertext_canonical_bytes;
 #[cfg(test)]
 pub(crate) use decryption::decryption_accumulator_to_coefficients;
 pub(crate) use operations::{
     add_plaintext_coefficients, ciphertext_add, ciphertext_negate, ciphertext_sub,
-    ciphertext_tensor, modulus_switch, plaintext_mul, scalar_mul,
+    ciphertext_tensor, modulus_switch, modulus_switch_to, normalize_scaling, plaintext_mul,
+    scalar_mul,
 };
 
 // Highest modulus-chain level: index of the last data prime, so a fresh
 // ciphertext at this level uses all data primes (q = product of all primes).
+#[cfg(test)]
 pub(crate) const EVALUATOR_FULL_LEVEL: usize = DATA_PRIMES.len() - 1;
 
 // Reduce a signed integer coefficient into the canonical residue range
@@ -88,6 +86,7 @@ pub(crate) struct Ciphertext {
     pub(crate) decrypt_scaling: u64,
 }
 
+#[cfg(test)]
 #[derive(Clone, Debug)]
 pub(crate) struct EncryptionWitness {
     pub(crate) randomizer_coefficients: Vec<i64>,
@@ -177,6 +176,7 @@ impl BgvPublicKey {
 // plaintext lives in the least-significant residue and decryption is exact mod
 // the plaintext modulus. The secret is retained only for development decryption
 // and correctness certificates; it is never exported through the public surface.
+#[cfg(test)]
 #[derive(Clone)]
 pub(crate) struct DevelopmentBgvKey {
     secret: Vec<i64>,
@@ -184,8 +184,8 @@ pub(crate) struct DevelopmentBgvKey {
     public_a: Vec<Vec<u64>>,
 }
 
+#[cfg(test)]
 impl DevelopmentBgvKey {
-    #[cfg(test)]
     pub(crate) fn generate(seed_hex: &str) -> CanonicalResult<Self> {
         let secret = DeterministicSampler::new(
             "sealed-lattice-bgv-evaluator/development-secret",
@@ -256,7 +256,6 @@ impl DevelopmentBgvKey {
     }
 
     // Encrypt plaintext slot values into a fresh full-level ciphertext.
-    #[cfg(test)]
     pub(crate) fn encrypt_slots(
         &self,
         slots: &[u64],
@@ -269,7 +268,6 @@ impl DevelopmentBgvKey {
 
     // Encrypt a plaintext polynomial given as coefficients in [0, plaintext
     // modulus): c0 = b*u + p*e0 + m, c1 = a*u + p*e1, at the full data level.
-    #[cfg(test)]
     pub(crate) fn encrypt_coefficients(
         &self,
         plaintext_coefficients: &[u64],
@@ -293,7 +291,6 @@ impl DevelopmentBgvKey {
         )
     }
 
-    #[cfg(test)]
     pub(crate) fn decrypt_to_coefficients(
         &self,
         ciphertext: &Ciphertext,
@@ -334,7 +331,6 @@ impl DevelopmentBgvKey {
         decryption_accumulator_to_coefficients(ciphertext, &accumulator)
     }
 
-    #[cfg(test)]
     pub(crate) fn decrypt_to_slots(&self, ciphertext: &Ciphertext) -> CanonicalResult<Vec<u64>> {
         let coefficients = self.decrypt_to_coefficients(ciphertext)?;
 
@@ -342,8 +338,10 @@ impl DevelopmentBgvKey {
     }
 }
 
-const PLAINTEXT_MODULUS_I32: i32 = 65_537;
+#[cfg(test)]
+const PLAINTEXT_MODULUS_I32: i32 = crate::bgv::parameters::PLAINTEXT_MODULUS as i32;
 
+#[cfg(test)]
 fn encrypt_coefficients_with_public_key_components(
     public_b: &[Vec<u64>],
     public_a: &[Vec<u64>],
@@ -433,6 +431,7 @@ fn encrypt_coefficients_with_public_key_components(
     ))
 }
 
+#[cfg(test)]
 fn validate_public_key_component_shape(component: &[Vec<u64>], label: &str) -> CanonicalResult<()> {
     if component.len() != DATA_PRIMES.len() {
         return Err(CanonicalError::new(
@@ -470,7 +469,8 @@ pub(crate) fn encode_slots_to_coefficients(slots: &[u64]) -> CanonicalResult<Vec
 mod tests {
     use super::{
         BgvPublicKey, Ciphertext, DevelopmentBgvKey, ciphertext_add, ciphertext_negate,
-        ciphertext_sub, ciphertext_tensor, modulus_switch, plaintext_mul, scalar_mul,
+        ciphertext_sub, ciphertext_tensor, modulus_switch, modulus_switch_to, normalize_scaling,
+        plaintext_mul, scalar_mul,
     };
     use crate::bgv::parameters::PLAINTEXT_MODULUS;
 
@@ -543,7 +543,10 @@ mod tests {
         let left = key.encrypt_slots(&[10, 5], "aa04").expect("encrypt left");
         let right = key.encrypt_slots(&[3, 9], "aa05").expect("encrypt right");
         let difference = ciphertext_sub(&left, &right).expect("sub");
-        assert_eq!(decrypt_prefix(key, &difference, 2), vec![7, 65_537 - 4]);
+        assert_eq!(
+            decrypt_prefix(key, &difference, 2),
+            vec![7, PLAINTEXT_MODULUS - 4]
+        );
     }
 
     #[test]
@@ -605,5 +608,32 @@ mod tests {
         }
         assert_eq!(ciphertext.level, super::EVALUATOR_FULL_LEVEL - 4);
         assert_eq!(decrypt_prefix(key, &ciphertext, 3), vec![42, 9, 100]);
+    }
+
+    #[test]
+    fn exact_level_switch_and_scaling_normalization_preserve_plaintext() {
+        let key = shared_key();
+        let plaintext = vec![0, 1, 17, 32_768, PLAINTEXT_MODULUS - 1];
+        let ciphertext = key
+            .encrypt_slots(&plaintext, "exact-level-and-scaling")
+            .expect("encrypt");
+        let target_level = ciphertext.level - 3;
+
+        let switched = modulus_switch_to(&ciphertext, target_level).expect("switch to exact level");
+        assert_eq!(switched.level, target_level);
+        assert_ne!(switched.decrypt_scaling, 1);
+        assert_eq!(decrypt_prefix(key, &switched, plaintext.len()), plaintext);
+
+        let normalized = normalize_scaling(&switched).expect("normalize scaling");
+        assert_eq!(normalized.level, target_level);
+        assert_eq!(normalized.decrypt_scaling, 1);
+        assert_ne!(normalized.components, switched.components);
+        assert_eq!(decrypt_prefix(key, &normalized, plaintext.len()), plaintext);
+
+        let unchanged = modulus_switch_to(&normalized, target_level + 1)
+            .expect("a ciphertext below the requested level is unchanged");
+        assert_eq!(unchanged.level, normalized.level);
+        assert_eq!(unchanged.decrypt_scaling, normalized.decrypt_scaling);
+        assert_eq!(unchanged.components, normalized.components);
     }
 }

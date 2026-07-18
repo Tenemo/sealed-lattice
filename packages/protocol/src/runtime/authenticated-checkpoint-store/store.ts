@@ -50,7 +50,6 @@ import {
     asAsyncIterable,
     runCheckpointLineageExclusive,
     validateAuthenticatedCheckpointStoreLimits,
-    type CheckpointRandomCursorKernel,
     type CheckpointBoundaryPolicy,
     type CheckpointOperationIdentity,
     type CheckpointBoundary,
@@ -69,8 +68,6 @@ export type {
     CheckpointBoundary,
     CheckpointBoundaryPolicy,
     CheckpointOperationIdentity,
-    CheckpointRandomCursor,
-    CheckpointRandomCursorKernel,
     ExpectedCheckpointBoundary,
     ResumedCheckpoint,
     TransferableAuthenticatedCheckpointStore,
@@ -78,7 +75,6 @@ export type {
 
 export const openAuthenticatedCheckpointStoreWithProtection = (input: {
     boundaryPolicy: CheckpointBoundaryPolicy;
-    cursorKernel: CheckpointRandomCursorKernel;
     limits: AuthenticatedCheckpointStoreLimits;
     protection: RuntimeRecordProtection;
     store: UntrustedStorageTransactionStore;
@@ -176,10 +172,8 @@ export const openAuthenticatedCheckpointStoreWithProtection = (input: {
             sourceDigest.fill(0);
         }
         boundary.stateStreamDescriptorBytes.fill(0);
-        for (const randomCursor of boundary.orderedRandomCursors) {
-            randomCursor.derivationContextHash.fill(0);
-            randomCursor.streamAttemptIdentifier.fill(0);
-        }
+        boundary.privateRandomCursorManifestBytes.fill(0);
+        boundary.privateRandomnessStreamAttemptIdentifier?.fill(0);
     };
 
     const destroyOperationIdentityRecord = (
@@ -241,9 +235,8 @@ export const openAuthenticatedCheckpointStoreWithProtection = (input: {
         identityRecord.operationKind = undefined;
         identityRecord.orderedSourceDigestHex = undefined;
         identityRecord.stateStreamDomain = undefined;
-        for (const attemptIdentifier of identityRecord.streamAttemptIdentifiers) {
-            attemptIdentifier.fill(0);
-        }
+        identityRecord.privateRandomnessStreamAttemptIdentifier?.fill(0);
+        identityRecord.privateRandomnessStreamAttemptIdentifier = undefined;
     };
 
     const synchronizePublicationIdentifier = (
@@ -288,7 +281,7 @@ export const openAuthenticatedCheckpointStoreWithProtection = (input: {
 
     const createOperationIdentity = (
         checkpointLineageIdentifier: Uint8Array,
-        streamAttemptIdentifiers: readonly Uint8Array[],
+        privateRandomnessStreamAttemptIdentifier: Uint8Array | undefined,
         lineageIdentifierAlreadyRetained: boolean,
         resumedPublication?: Readonly<{
             boundary: CheckpointBoundary;
@@ -297,18 +290,17 @@ export const openAuthenticatedCheckpointStoreWithProtection = (input: {
         }>,
     ): CheckpointOperationIdentity => {
         const lineageIdentifier = checkpointLineageIdentifier.slice();
-        const attemptIdentifiers = streamAttemptIdentifiers.map((identifier) =>
-            identifier.slice(),
-        );
+        const attemptIdentifier =
+            privateRandomnessStreamAttemptIdentifier?.slice();
         const identity = Object.freeze({
             [checkpointOperationIdentityBrand]: true as const,
             get checkpointLineageIdentifier(): Uint8Array {
                 return lineageIdentifier.slice();
             },
-            get streamAttemptIdentifiers(): readonly Uint8Array[] {
-                return Object.freeze(
-                    attemptIdentifiers.map((identifier) => identifier.slice()),
-                );
+            get privateRandomnessStreamAttemptIdentifier():
+                | Uint8Array
+                | undefined {
+                return attemptIdentifier?.slice();
             },
         });
         const identityRecord: CheckpointOperationIdentityRecord = {
@@ -332,7 +324,12 @@ export const openAuthenticatedCheckpointStoreWithProtection = (input: {
                       stateStreamDomain:
                           resumedPublication.boundary.stateStreamDomain,
                   }),
-            streamAttemptIdentifiers: Object.freeze(attemptIdentifiers),
+            ...(attemptIdentifier === undefined
+                ? {}
+                : {
+                      privateRandomnessStreamAttemptIdentifier:
+                          attemptIdentifier,
+                  }),
         };
         const lineageIdentifierKey = bytesToHex(lineageIdentifier);
         if (!lineageIdentifierAlreadyRetained) {
@@ -399,9 +396,23 @@ export const openAuthenticatedCheckpointStoreWithProtection = (input: {
             identityRecord.operationKind = boundary.operationKind;
             identityRecord.orderedSourceDigestHex = sourceDigestHex;
             identityRecord.stateStreamDomain = boundary.stateStreamDomain;
+            identityRecord.privateRandomnessStreamAttemptIdentifier =
+                boundary.privateRandomnessStreamAttemptIdentifier?.slice();
         } else if (
             identityRecord.operationKind !== boundary.operationKind ||
             identityRecord.stateStreamDomain !== boundary.stateStreamDomain ||
+            (identityRecord.privateRandomnessStreamAttemptIdentifier ===
+                undefined) !==
+                (boundary.privateRandomnessStreamAttemptIdentifier ===
+                    undefined) ||
+            (identityRecord.privateRandomnessStreamAttemptIdentifier !==
+                undefined &&
+                boundary.privateRandomnessStreamAttemptIdentifier !==
+                    undefined &&
+                !bytesEqual(
+                    identityRecord.privateRandomnessStreamAttemptIdentifier,
+                    boundary.privateRandomnessStreamAttemptIdentifier,
+                )) ||
             identityRecord.orderedSourceDigestHex?.length !==
                 sourceDigestHex.length ||
             identityRecord.orderedSourceDigestHex.some(
@@ -444,49 +455,10 @@ export const openAuthenticatedCheckpointStoreWithProtection = (input: {
             }
             return;
         }
-        const previousCursorsByKey = new Map(
-            previousBoundary.orderedRandomCursors.map((cursor) => [
-                [
-                    cursor.family,
-                    cursor.purpose,
-                    bytesToHex(cursor.derivationContextHash),
-                    bytesToHex(cursor.streamAttemptIdentifier),
-                ].join('/'),
-                cursor,
-            ]),
-        );
-        for (const cursor of boundary.orderedRandomCursors) {
-            const previousCursor = previousCursorsByKey.get(
-                [
-                    cursor.family,
-                    cursor.purpose,
-                    bytesToHex(cursor.derivationContextHash),
-                    bytesToHex(cursor.streamAttemptIdentifier),
-                ].join('/'),
-            );
-            if (previousCursor === undefined) {
-                continue;
-            }
-            const counterRewound =
-                cursor.nextCounter < previousCursor.nextCounter;
-            const positionRewoundAtSameCounter =
-                cursor.nextCounter === previousCursor.nextCounter &&
-                ((previousCursor.nextUnreadBitOffsetInBufferedBlock ===
-                    undefined &&
-                    cursor.nextUnreadBitOffsetInBufferedBlock !== undefined) ||
-                    (previousCursor.nextUnreadBitOffsetInBufferedBlock !==
-                        undefined &&
-                        cursor.nextUnreadBitOffsetInBufferedBlock !==
-                            undefined &&
-                        cursor.nextUnreadBitOffsetInBufferedBlock <
-                            previousCursor.nextUnreadBitOffsetInBufferedBlock));
-            if (counterRewound || positionRewoundAtSameCounter) {
-                throw new AuthenticatedRuntimeRecordError(
-                    'Conflict',
-                    'Checkpoint replacement cannot rewind a private-randomness cursor.',
-                );
-            }
-        }
+        // The canonical private-randomness manifest is opaque to JavaScript.
+        // Rust creates it from the exact coordinate plan and authenticates it
+        // again during deterministic-prefix replay. The store binds its exact
+        // bytes at every boundary and never expands it into an ordinal map.
     };
 
     const readManifest = async (lineageIdentifier: Uint8Array) => {
@@ -591,50 +563,24 @@ export const openAuthenticatedCheckpointStoreWithProtection = (input: {
     };
 
     const beginOperation: AuthenticatedCheckpointStore['beginOperation'] =
-        async (untrustedStreamAttemptIdentifiers) => {
-            if (!Array.isArray(untrustedStreamAttemptIdentifiers)) {
-                throw new AuthenticatedRuntimeRecordError(
-                    'InvalidInput',
-                    'Checkpoint stream-attempt identifiers must be an array.',
-                );
-            }
-            if (
-                untrustedStreamAttemptIdentifiers.length >
-                limits.maximumStreamAttemptCount
-            ) {
-                throw new AuthenticatedRuntimeRecordError(
-                    'ResourceLimit',
-                    'Checkpoint stream-attempt count exceeds the configured profile.',
-                );
-            }
-            const streamAttemptIdentifiers: Uint8Array[] = [];
+        async (untrustedPrivateRandomnessStreamAttemptIdentifier) => {
+            let privateRandomnessStreamAttemptIdentifier:
+                | Uint8Array
+                | undefined;
             let releaseOperationIdentitySlot: (() => void) | undefined;
             let checkpointLineageIdentifier: Uint8Array | undefined;
             let sampledLineageIdentifierKey: string | undefined;
             let sampledLineageIdentifierTransferred = false;
             try {
-                for (
-                    let identifierIndex = 0;
-                    identifierIndex < untrustedStreamAttemptIdentifiers.length;
-                    identifierIndex += 1
-                ) {
-                    streamAttemptIdentifiers.push(
-                        copyExactBytes(
-                            untrustedStreamAttemptIdentifiers[identifierIndex],
-                            identifierByteLength,
-                            `streamAttemptIdentifiers[${String(identifierIndex)}]`,
-                        ),
-                    );
-                }
-                if (
-                    new Set(streamAttemptIdentifiers.map(bytesToHex)).size !==
-                    streamAttemptIdentifiers.length
-                ) {
-                    throw new AuthenticatedRuntimeRecordError(
-                        'InvalidInput',
-                        'Checkpoint stream-attempt identifiers must be distinct.',
-                    );
-                }
+                privateRandomnessStreamAttemptIdentifier =
+                    untrustedPrivateRandomnessStreamAttemptIdentifier ===
+                    undefined
+                        ? undefined
+                        : copyExactBytes(
+                              untrustedPrivateRandomnessStreamAttemptIdentifier,
+                              identifierByteLength,
+                              'privateRandomnessStreamAttemptIdentifier',
+                          );
                 releaseOperationIdentitySlot = reserveOperationIdentitySlot();
                 checkpointLineageIdentifier = sampleRuntimeIdentifier(
                     protection,
@@ -671,16 +617,14 @@ export const openAuthenticatedCheckpointStoreWithProtection = (input: {
                 );
                 const identity = createOperationIdentity(
                     retainedLineageIdentifier,
-                    streamAttemptIdentifiers,
+                    privateRandomnessStreamAttemptIdentifier,
                     true,
                 );
                 sampledLineageIdentifierTransferred = true;
                 return identity;
             } finally {
                 releaseOperationIdentitySlot?.();
-                for (const identifier of streamAttemptIdentifiers) {
-                    identifier.fill(0);
-                }
+                privateRandomnessStreamAttemptIdentifier?.fill(0);
                 checkpointLineageIdentifier?.fill(0);
                 if (
                     sampledLineageIdentifierKey !== undefined &&
@@ -710,56 +654,22 @@ export const openAuthenticatedCheckpointStoreWithProtection = (input: {
         const lineageIdentifier =
             issuedIdentity.checkpointLineageIdentifier.slice();
         if (
-            issuedIdentity.streamAttemptIdentifiers.length >
-            limits.maximumStreamAttemptCount
+            (issuedIdentity.privateRandomnessStreamAttemptIdentifier ===
+                undefined) !==
+                (boundary.privateRandomnessStreamAttemptIdentifier ===
+                    undefined) ||
+            (issuedIdentity.privateRandomnessStreamAttemptIdentifier !==
+                undefined &&
+                boundary.privateRandomnessStreamAttemptIdentifier !==
+                    undefined &&
+                !bytesEqual(
+                    issuedIdentity.privateRandomnessStreamAttemptIdentifier,
+                    boundary.privateRandomnessStreamAttemptIdentifier,
+                ))
         ) {
             throw new AuthenticatedRuntimeRecordError(
                 'InvalidInput',
-                'Checkpoint operation identity has an invalid stream-attempt count.',
-            );
-        }
-        const expectedAttemptIdentifiers =
-            issuedIdentity.streamAttemptIdentifiers.map(
-                (identifier, identifierIndex) =>
-                    copyExactBytes(
-                        identifier,
-                        identifierByteLength,
-                        `streamAttemptIdentifiers[${identifierIndex}]`,
-                    ),
-            );
-        const expectedAttemptIdentifierKeys = new Set(
-            expectedAttemptIdentifiers.map(bytesToHex),
-        );
-        if (
-            expectedAttemptIdentifierKeys.size !==
-            expectedAttemptIdentifiers.length
-        ) {
-            throw new AuthenticatedRuntimeRecordError(
-                'InvalidInput',
-                'Checkpoint operation identity contains a reused stream-attempt identifier.',
-            );
-        }
-        const observedAttemptIdentifiersByKey = new Map<string, Uint8Array>();
-        for (const cursor of boundary.orderedRandomCursors) {
-            observedAttemptIdentifiersByKey.set(
-                bytesToHex(cursor.streamAttemptIdentifier),
-                cursor.streamAttemptIdentifier,
-            );
-        }
-        const observedAttemptIdentifiers = [
-            ...observedAttemptIdentifiersByKey.values(),
-        ];
-        if (
-            observedAttemptIdentifiers.length !==
-                expectedAttemptIdentifiers.length ||
-            observedAttemptIdentifiers.some(
-                (identifier) =>
-                    !expectedAttemptIdentifierKeys.has(bytesToHex(identifier)),
-            )
-        ) {
-            throw new AuthenticatedRuntimeRecordError(
-                'InvalidInput',
-                'Checkpoint cursor attempts were not issued for this operation.',
+                'Checkpoint private-randomness attempt was not issued for this operation.',
             );
         }
         await repairInterruptedPublicationUnlocked(lineageIdentifier);
@@ -796,7 +706,6 @@ export const openAuthenticatedCheckpointStoreWithProtection = (input: {
             authorityContext,
             boundary,
             checkpointLineageIdentifier: lineageIdentifier,
-            cursorKernel: input.cursorKernel,
             stateStreamDescriptorBytes: boundary.stateStreamDescriptorBytes,
         });
         if (
@@ -1059,7 +968,6 @@ export const openAuthenticatedCheckpointStoreWithProtection = (input: {
             authorityContext,
             boundary: expectedBoundary,
             checkpointLineageIdentifier: lineageIdentifier,
-            cursorKernel: input.cursorKernel,
             stateStreamDescriptorBytes: descriptorBytes,
         });
         const storedCanonicalManifest =
@@ -1073,21 +981,11 @@ export const openAuthenticatedCheckpointStoreWithProtection = (input: {
         }
         const manifestSealedBytes = manifest.opened.sealedBytes.slice();
         const chunkRecordKeys = [...manifest.record.chunkRecordKeys];
-        const resumedAttemptIdentifiersByHex = new Map<string, Uint8Array>();
-        for (const cursor of expectedBoundary.orderedRandomCursors) {
-            resumedAttemptIdentifiersByHex.set(
-                bytesToHex(cursor.streamAttemptIdentifier),
-                cursor.streamAttemptIdentifier,
-            );
-        }
-        const resumedAttemptIdentifiers = [
-            ...resumedAttemptIdentifiersByHex.values(),
-        ];
         return Object.freeze({
             canonicalManifestBytes: storedCanonicalManifest.slice(),
             operationIdentity: createOperationIdentity(
                 lineageIdentifier,
-                resumedAttemptIdentifiers,
+                expectedBoundary.privateRandomnessStreamAttemptIdentifier,
                 false,
                 {
                     boundary: {
@@ -1343,9 +1241,9 @@ export const openAuthenticatedCheckpointStoreWithProtection = (input: {
                 identityRecord.checkpointLineageIdentifier.fill(0);
                 identityRecord.lastCanonicalManifestBytes?.fill(0);
                 destroyBoundary(identityRecord.lastPublishedBoundary);
-                for (const attemptIdentifier of identityRecord.streamAttemptIdentifiers) {
-                    attemptIdentifier.fill(0);
-                }
+                identityRecord.privateRandomnessStreamAttemptIdentifier?.fill(
+                    0,
+                );
             }
             issuedOperationIdentityRecords.clear();
             identifierReferenceCounts.clear();
@@ -1365,9 +1263,9 @@ export const openAuthenticatedCheckpointStoreWithProtection = (input: {
         owner: ExclusiveResourceOwnerToken,
     ): AuthenticatedCheckpointStore =>
         Object.freeze({
-            beginOperation: (streamAttemptIdentifiers) =>
+            beginOperation: (privateRandomnessStreamAttemptIdentifier) =>
                 lifecycle.run(owner, () =>
-                    beginOperation(streamAttemptIdentifiers),
+                    beginOperation(privateRandomnessStreamAttemptIdentifier),
                 ),
             close: () => lifecycle.close(owner),
             copyAuthorityContext: () => {
@@ -1402,7 +1300,6 @@ export const openAuthenticatedCheckpointStore = (input: {
     authorityContext: RuntimeStorageAuthorityContext;
     boundaryPolicy: CheckpointBoundaryPolicy;
     cryptoProvider?: Crypto;
-    cursorKernel: CheckpointRandomCursorKernel;
     encryptionKey: CryptoKey;
     limits: AuthenticatedCheckpointStoreLimits;
     store: UntrustedStorageTransactionStore;
@@ -1410,7 +1307,6 @@ export const openAuthenticatedCheckpointStore = (input: {
     const limits = validateAuthenticatedCheckpointStoreLimits(input.limits);
     return openAuthenticatedCheckpointStoreWithProtection({
         boundaryPolicy: input.boundaryPolicy,
-        cursorKernel: input.cursorKernel,
         limits,
         protection: createRuntimeRecordProtection({
             authorityContext: input.authorityContext,

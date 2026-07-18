@@ -382,6 +382,56 @@ pub(crate) fn modulus_switch(ciphertext: &Ciphertext) -> CanonicalResult<Ciphert
     })
 }
 
+// Bring a ciphertext to an exact active data-basis prefix. A ciphertext already
+// at or below the requested level is returned unchanged; the compiled evaluator
+// validates its monotone level schedule before execution.
+pub(crate) fn modulus_switch_to(
+    ciphertext: &Ciphertext,
+    target_level: usize,
+) -> CanonicalResult<Ciphertext> {
+    let mut current = ciphertext.clone();
+    while current.level > target_level {
+        current = modulus_switch(&current)?;
+    }
+
+    Ok(current)
+}
+
+// Rewrite a ciphertext so its tracked plaintext-field scaling is one. BGV
+// modulus switching leaves the raw plaintext multiplied by the inverse of the
+// tracked factor; multiplying every residue by that factor restores the
+// unscaled plaintext and makes same-level ciphertexts additively compatible.
+pub(crate) fn normalize_scaling(ciphertext: &Ciphertext) -> CanonicalResult<Ciphertext> {
+    if ciphertext.decrypt_scaling == 1 {
+        return Ok(ciphertext.clone());
+    }
+    let primes = ciphertext.primes();
+    let factor = ciphertext.decrypt_scaling;
+    let components = ciphertext
+        .components
+        .iter()
+        .map(|component| {
+            component
+                .iter()
+                .enumerate()
+                .map(|(limb_index, limb)| {
+                    let modulus = primes[limb_index];
+                    let factor_in_limb = factor % modulus;
+                    limb.iter()
+                        .map(|value| mul_mod(*value, factor_in_limb, modulus))
+                        .collect::<CanonicalResult<Vec<_>>>()
+                })
+                .collect::<CanonicalResult<Vec<_>>>()
+        })
+        .collect::<CanonicalResult<Vec<_>>>()?;
+
+    Ok(Ciphertext {
+        components,
+        level: ciphertext.level,
+        decrypt_scaling: 1,
+    })
+}
+
 fn signed_residue_i128(value: i128, modulus: u64) -> u64 {
     let modulus_i128 = i128::from(modulus);
     let reduced = ((value % modulus_i128) + modulus_i128) % modulus_i128;

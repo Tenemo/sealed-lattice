@@ -499,6 +499,46 @@ fn state_verifier_binds_reservation_quorum_and_exact_output() {
             .witness_vote_sequence(),
         1
     );
+    let reservation_carrier_lengths = verified_reservation.consumed_carrier_byte_lengths();
+    assert_eq!(
+        reservation_carrier_lengths.canonical_intent_carrier_byte_length(),
+        reservation_carrier.len() as u64
+    );
+    assert_eq!(
+        reservation_carrier_lengths.canonical_certificate_byte_length(),
+        reservation_certificate.len() as u64
+    );
+    let decoded_reservation_certificate =
+        StateCertificate::decode(&reservation_certificate, &CanonicalDecodeLimits::default())
+            .expect("reservation certificate decodes");
+    let retained_reservation_witnesses = reservation_carrier_lengths
+        .witness_carriers()
+        .collect::<Vec<_>>();
+    assert_eq!(
+        retained_reservation_witnesses.len(),
+        decoded_reservation_certificate
+            .canonical_signed_state_witness_vote_carriers()
+            .len()
+    );
+    for (retained_witness, canonical_witness_carrier) in retained_reservation_witnesses
+        .iter()
+        .zip(decoded_reservation_certificate.canonical_signed_state_witness_vote_carriers())
+    {
+        let witness_carrier =
+            SignedCarrier::decode(canonical_witness_carrier, &CanonicalDecodeLimits::default())
+                .expect("reservation witness carrier decodes");
+        assert_eq!(
+            retained_witness.canonical_carrier_byte_length(),
+            canonical_witness_carrier.len() as u64
+        );
+        assert_eq!(
+            retained_witness.witness_participant_id(),
+            witness_carrier
+                .envelope
+                .producer_participant_id
+                .expect("witness carrier names a producer")
+        );
+    }
 
     let exact_output_hash =
         derive_state_exact_output_hash(StateCapabilityKind::FinalitySignature, EXACT_OUTPUT_BYTES)
@@ -537,6 +577,25 @@ fn state_verifier_binds_reservation_quorum_and_exact_output() {
         u64::try_from(EXACT_OUTPUT_BYTES.len()).expect("test length fits u64")
     );
     assert_eq!(verified_output.durable_binding().witness_vote_sequence(), 2);
+    let output_carrier_lengths = verified_output.consumed_carrier_byte_lengths();
+    assert_eq!(
+        output_carrier_lengths
+            .reservation()
+            .canonical_intent_carrier_byte_length(),
+        reservation_carrier.len() as u64
+    );
+    assert_eq!(
+        output_carrier_lengths.canonical_output_intent_carrier_byte_length(),
+        output_carrier.len() as u64
+    );
+    assert_eq!(
+        output_carrier_lengths.canonical_output_certificate_byte_length(),
+        output_certificate.len() as u64
+    );
+    assert_eq!(
+        output_carrier_lengths.output_witness_carriers().len(),
+        usize::from(FOUNDATION_PROFILE.state_witness_quorum)
+    );
 
     expect_refusal(
         verifier.verify_reservation(StateReservationVerificationInput {
@@ -657,10 +716,27 @@ fn unordered_state_votes_authenticate_before_duplicate_and_equivocation_resoluti
         .map(|position| fixture.vote_carrier(position, reservation_hash, sequence))
         .collect::<Vec<_>>();
     unordered_votes.push(unordered_votes[0].clone());
-    verifier
+    let verified_reservation = verifier
         .certify_reservation_intent_from_unordered_vote_carriers(&verified_intent, &unordered_votes)
         .into_result()
         .expect("unordered votes and semantic replay verify");
+    let retained_carriers = verified_reservation.consumed_carrier_byte_lengths();
+    assert_eq!(
+        retained_carriers.witness_carriers().len(),
+        usize::from(FOUNDATION_PROFILE.state_witness_quorum)
+    );
+    let expected_certificate = StateCertificate::new(
+        (1..=7)
+            .map(|position| fixture.vote_carrier(position, reservation_hash, sequence))
+            .collect(),
+    )
+    .expect("selected unordered vote set forms a certificate")
+    .encode()
+    .expect("selected unordered certificate encodes");
+    assert_eq!(
+        retained_carriers.canonical_certificate_byte_length(),
+        expected_certificate.len() as u64
+    );
 
     let mut insufficient_votes = unordered_votes[..6].to_vec();
     insufficient_votes.dedup();

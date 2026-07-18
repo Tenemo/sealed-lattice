@@ -182,12 +182,12 @@ impl ProofApplicationSlotCeilings {
     pub fn derive(
         roster_size: u16,
         selected_relinearization_position_count: u32,
-        selected_galois_position_count: u32,
+        selected_galois_batch_count: u32,
         maximum_candidate_packages_per_action: u32,
     ) -> SchemaResult<Self> {
         if roster_size == 0
             || selected_relinearization_position_count == 0
-            || selected_galois_position_count == 0
+            || selected_galois_batch_count == 0
             || maximum_candidate_packages_per_action == 0
         {
             return Err(schema_error(
@@ -201,10 +201,7 @@ impl ProofApplicationSlotCeilings {
             .checked_mul(selected_relinearization_position_count)
             .ok_or_else(slot_count_overflow)?;
         let galois_trustee_slot_count = roster_size
-            .checked_mul(selected_galois_position_count)
-            .ok_or_else(slot_count_overflow)?;
-        let evaluator_aggregate_slot_count = selected_relinearization_position_count
-            .checked_add(selected_galois_position_count)
+            .checked_mul(selected_galois_batch_count)
             .ok_or_else(slot_count_overflow)?;
         let ordered_family_ceilings = [
             family_ceiling(
@@ -240,10 +237,7 @@ impl ProofApplicationSlotCeilings {
                 Self::GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
                 galois_trustee_slot_count,
             ),
-            family_ceiling(
-                Self::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
-                evaluator_aggregate_slot_count,
-            ),
+            family_ceiling(Self::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER, 1),
             family_ceiling(
                 Self::BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER,
                 maximum_candidate_packages_per_action,
@@ -441,14 +435,14 @@ mod tests {
             (0x1215, 3),
             (0x1216, 15),
             (0x1217, 20),
-            (0x1218, 7),
+            (0x1218, 1),
             (0x1302, 17),
             (0x1621, 5),
         ];
         for (family, ceiling) in expected {
             assert_eq!(ceilings.family_ceiling(family), Some(ceiling));
         }
-        assert_eq!(ceilings.total_application_slot_ceiling(), 103);
+        assert_eq!(ceilings.total_application_slot_ceiling(), 97);
         assert_eq!(ceilings.family_ceiling(0xffff), None);
     }
 

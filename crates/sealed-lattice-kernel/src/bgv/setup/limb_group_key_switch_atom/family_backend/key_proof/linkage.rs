@@ -699,16 +699,16 @@ pub(in super::super) fn absorb_linkage_statement(
 mod tests {
     use super::*;
     use crate::bgv::setup::limb_group_key_switch_atom::proof_field::{
-        SIXTEEN_LIMB_GROUP_FIELD_LIMBS, sixteen_limb_group_field_parameters,
+        SELECTED_KEY_SWITCH_PROOF_FIELD_LIMBS, selected_key_switch_proof_field_parameters,
     };
 
     const TEST_RING_DEGREE: usize = 128;
 
     fn support_constraints(
-        base_values: &[[u64; SIXTEEN_LIMB_GROUP_FIELD_LIMBS]],
-        aux_values: &[[u64; SIXTEEN_LIMB_GROUP_FIELD_LIMBS]],
-    ) -> Vec<[u64; SIXTEEN_LIMB_GROUP_FIELD_LIMBS]> {
-        let parameters = sixteen_limb_group_field_parameters();
+        base_values: &[[u64; SELECTED_KEY_SWITCH_PROOF_FIELD_LIMBS]],
+        aux_values: &[[u64; SELECTED_KEY_SWITCH_PROOF_FIELD_LIMBS]],
+    ) -> Vec<[u64; SELECTED_KEY_SWITCH_PROOF_FIELD_LIMBS]> {
+        let parameters = selected_key_switch_proof_field_parameters();
         let context = linkage_constraint_context(TEST_RING_DEGREE).expect("context");
         let mut constraints = Vec::new();
         push_linkage_support_values(
@@ -726,7 +726,7 @@ mod tests {
 
     #[test]
     fn verifier_support_enforces_each_bdlop_randomness_distribution() {
-        let parameters = sixteen_limb_group_field_parameters();
+        let parameters = selected_key_switch_proof_field_parameters();
         let layout = linkage_layout(TEST_RING_DEGREE).expect("layout");
         let mut base_values = vec![parameters.zero(); linkage_base_column_count(&layout)];
         let aux_values = vec![parameters.zero(); linkage_aux_column_count(&layout)];
@@ -773,7 +773,7 @@ mod tests {
 
     #[test]
     fn verifier_support_proves_the_exact_sixteen_n_quotient_bound() {
-        let parameters = sixteen_limb_group_field_parameters();
+        let parameters = selected_key_switch_proof_field_parameters();
         let layout = linkage_layout(TEST_RING_DEGREE).expect("layout");
         let base_values = vec![parameters.zero(); linkage_base_column_count(&layout)];
         let mut aux_values = vec![parameters.zero(); linkage_aux_column_count(&layout)];

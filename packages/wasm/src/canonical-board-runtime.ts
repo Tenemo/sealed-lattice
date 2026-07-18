@@ -20,7 +20,6 @@ export const foundationObjectTypes = Object.freeze({
     complaint: 0x0012,
     publicSetupRecord: 0x0013,
     ballotPackage: 0x0020,
-    ballotCandidateList: 0x0021,
     aggregate: 0x0030,
     evaluatorReplay: 0x0040,
     finalitySignature: 0x0050,

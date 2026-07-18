@@ -1,10 +1,10 @@
-use super::super::super::proof_field::sixteen_limb_group_field_parameters;
+use super::super::super::proof_field::selected_key_switch_proof_field_parameters;
 use super::super::test_support::build_synthetic_key_fixture;
 use super::*;
 
 #[test]
 fn coefficient_space_combination_matches_codeword_space_reference_including_shifted_g() {
-    let parameters = sixteen_limb_group_field_parameters();
+    let parameters = selected_key_switch_proof_field_parameters();
     for trace_size in [16_usize, 64] {
         let coset_size = FRI_RATE_BLOWUP * 2 * trace_size;
         let coset_domain = CyclicDomain::new(&parameters, coset_size).expect("coset domain");
@@ -87,7 +87,7 @@ fn coefficient_space_combination_matches_codeword_space_reference_including_shif
 // boundary.
 #[test]
 fn g_degree_adjustment_rejects_helper_above_the_sumcheck_bound() {
-    let parameters = sixteen_limb_group_field_parameters();
+    let parameters = selected_key_switch_proof_field_parameters();
     let trace_size = 64;
     // The layout's coset: FRI_RATE_BLOWUP * 2 * trace_size, rate 1/4, so the
     // combined codeword bound is 2 * trace_size.
@@ -155,7 +155,7 @@ fn g_degree_adjustment_rejects_helper_above_the_sumcheck_bound() {
 
 #[test]
 fn honest_multi_digit_key_verifies() {
-    let parameters = sixteen_limb_group_field_parameters();
+    let parameters = selected_key_switch_proof_field_parameters();
     let ring_degree = 64;
     for digit_count in [1_usize, 3, 8] {
         let (secret, digits, public) =
@@ -189,7 +189,7 @@ fn prover_and_verifier_transcript_order_matches() {
         capture_transcript_order_audit, run_length_encode_transcript_order_audit,
     };
 
-    let parameters = sixteen_limb_group_field_parameters();
+    let parameters = selected_key_switch_proof_field_parameters();
     let ring_degree = 64;
     let (secret, digits, public) =
         build_synthetic_key_fixture(ring_degree, 3, &KeySource::RoundOne);
@@ -237,7 +237,7 @@ fn prover_and_verifier_transcript_order_matches() {
 
 #[test]
 fn masked_multi_digit_key_verifies() {
-    let parameters = sixteen_limb_group_field_parameters();
+    let parameters = selected_key_switch_proof_field_parameters();
     let ring_degree = 64;
     let (secret, digits, public) =
         build_synthetic_key_fixture(ring_degree, 4, &KeySource::RoundOne);
@@ -268,7 +268,7 @@ fn one_tampered_digit_error_is_caught_by_the_batch() {
     // eta-2 support). The per-digit batching challenge makes the combined
     // claim miss, and the support constraint fails, so the prover cannot
     // build a valid proof or the verifier rejects.
-    let parameters = sixteen_limb_group_field_parameters();
+    let parameters = selected_key_switch_proof_field_parameters();
     let ring_degree = 64;
     let (secret, mut digits, public) =
         build_synthetic_key_fixture(ring_degree, 5, &KeySource::RoundOne);
@@ -301,7 +301,7 @@ fn one_tampered_digit_error_is_caught_by_the_batch() {
 fn honest_committed_component_material_verifies() {
     // The prover commits the public material through its dedicated material
     // columns and sumcheck forms, both unmasked and masked.
-    let parameters = sixteen_limb_group_field_parameters();
+    let parameters = selected_key_switch_proof_field_parameters();
     let ring_degree = 64;
     let (secret, digits, public) =
         build_synthetic_key_fixture(ring_degree, 4, &KeySource::RoundOne);
@@ -358,7 +358,7 @@ fn tampered_committed_component_material_is_rejected_by_the_relation() {
     // the left side of `B + A(*)s - t e - G source - Q c = 0`. Changing one
     // coefficient therefore breaks the relation even when every other column
     // and transcript-bound input is unchanged.
-    let parameters = sixteen_limb_group_field_parameters();
+    let parameters = selected_key_switch_proof_field_parameters();
     let ring_degree = 64;
     let (secret, digits, public) =
         build_synthetic_key_fixture(ring_degree, 4, &KeySource::RoundOne);
@@ -424,7 +424,7 @@ fn out_of_range_carry_is_rejected() {
     // fails, so the prover or verifier rejects. This guards the carry range
     // against admitting a carry large enough to break the field no-wrap bound.
     use super::super::super::negacyclic_transform::NegacyclicDomain;
-    let parameters = sixteen_limb_group_field_parameters();
+    let parameters = selected_key_switch_proof_field_parameters();
     let ring_degree = 64;
     let domain = NegacyclicDomain::new(&parameters, ring_degree).expect("domain");
     let secret: Vec<i64> = (0..ring_degree).map(|i| ((i * 7) % 3) as i64 - 1).collect();
@@ -433,7 +433,8 @@ fn out_of_range_carry_is_rejected() {
         .map(|v| parameters.signed_word_to_element(*v))
         .collect();
     let group_modulus = parameters.unsigned_word_to_element(1_000_003);
-    let plaintext_modulus = parameters.unsigned_word_to_element(65_537);
+    let plaintext_modulus =
+        parameters.unsigned_word_to_element(crate::bgv::parameters::PLAINTEXT_MODULUS);
     let error: Vec<i64> = (0..ring_degree).map(|i| ((i * 5) % 5) as i64 - 2).collect();
     let mut carry: Vec<i64> = (0..ring_degree).map(|i| (i % 3) as i64 - 1).collect();
     // Well beyond `|c| <= N+1` and the relation's no-wrap bound.
@@ -518,7 +519,7 @@ fn out_of_range_carry_is_rejected() {
 fn wrong_shared_secret_breaks_every_digit() {
     // A secret that is not the one the components were built from: every
     // digit congruence fails, so the batched claim misses.
-    let parameters = sixteen_limb_group_field_parameters();
+    let parameters = selected_key_switch_proof_field_parameters();
     let ring_degree = 64;
     let (secret, digits, public) =
         build_synthetic_key_fixture(ring_degree, 4, &KeySource::RoundOne);
@@ -554,7 +555,7 @@ fn tampered_lookup_terminal_is_rejected() {
     // batched sumcheck and cross-checked against the table terminals. Any
     // change (the verifier also re-absorbs it into the transcript) breaks
     // acceptance.
-    let parameters = sixteen_limb_group_field_parameters();
+    let parameters = selected_key_switch_proof_field_parameters();
     let ring_degree = 64;
     let (secret, digits, public) =
         build_synthetic_key_fixture(ring_degree, 4, &KeySource::RoundOne);
@@ -585,7 +586,7 @@ fn tampered_lookup_terminal_is_rejected() {
 fn tampered_table_terminal_is_rejected() {
     // Tampering one table terminal breaks the lookup/table cross-check and
     // the sumcheck binding.
-    let parameters = sixteen_limb_group_field_parameters();
+    let parameters = selected_key_switch_proof_field_parameters();
     let ring_degree = 64;
     let (secret, digits, public) =
         build_synthetic_key_fixture(ring_degree, 4, &KeySource::RoundOne);
@@ -614,7 +615,7 @@ fn tampered_table_terminal_is_rejected() {
 
 #[test]
 fn honest_galois_key_verifies() {
-    let parameters = sixteen_limb_group_field_parameters();
+    let parameters = selected_key_switch_proof_field_parameters();
     let ring_degree = 64;
     let source = KeySource::Galois { galois_element: 5 };
     let (secret, digits, public) = build_synthetic_key_fixture(ring_degree, 4, &source);
@@ -657,7 +658,7 @@ fn honest_galois_key_verifies() {
 fn galois_proof_bound_to_its_element() {
     // A Galois proof made with element 5 must not verify as element 7: the
     // element is absorbed into the transcript.
-    let parameters = sixteen_limb_group_field_parameters();
+    let parameters = selected_key_switch_proof_field_parameters();
     let ring_degree = 64;
     let source = KeySource::Galois { galois_element: 5 };
     let (secret, digits, public) = build_synthetic_key_fixture(ring_degree, 3, &source);
@@ -700,7 +701,7 @@ fn galois_proof_bound_to_its_element() {
 
 #[test]
 fn honest_round_two_key_verifies() {
-    let parameters = sixteen_limb_group_field_parameters();
+    let parameters = selected_key_switch_proof_field_parameters();
     let ring_degree = 64;
     let digit_count = 4;
     // One public aggregate per digit.

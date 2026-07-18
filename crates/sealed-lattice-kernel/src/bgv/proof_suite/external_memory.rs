@@ -24,9 +24,9 @@ const EXTERNAL_MEMORY_REQUEST_DIGEST_DOMAIN: &str =
     "sealed-lattice/common-proof/external-memory-request/v1";
 const EXTERNAL_MEMORY_READ_DIGEST_DOMAIN: &str =
     "sealed-lattice/common-proof/external-memory-read/v1";
-const EXTERNAL_MEMORY_REQUEST_HEADER_BYTE_LENGTH: usize = 156;
+pub(crate) const EXTERNAL_MEMORY_REQUEST_HEADER_BYTE_LENGTH: usize = 156;
 const EXTERNAL_MEMORY_RESPONSE_HEADER_BYTE_LENGTH: usize = 80;
-const EXTERNAL_MEMORY_OPERATION_HEADER_BYTE_LENGTH: usize = 32;
+pub(crate) const EXTERNAL_MEMORY_OPERATION_HEADER_BYTE_LENGTH: usize = 32;
 const EXTERNAL_MEMORY_READ_RESULT_HEADER_BYTE_LENGTH: usize = 88;
 const HASH_BYTE_LENGTH: usize = 64;
 

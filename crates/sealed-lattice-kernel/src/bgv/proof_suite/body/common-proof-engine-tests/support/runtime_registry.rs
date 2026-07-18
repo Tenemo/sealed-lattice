@@ -426,7 +426,7 @@ fn upstream_input_registry_consumes_only_one_complete_application_owned_capabili
     );
     let proof_stream_descriptor = StreamDescriptor {
         total_byte_length: super::super::super::super::MAXIMUM_COMMON_PROOF_BYTE_LENGTH as u64,
-        ordered_chunk_digests: vec![Hash512::from_bytes([0x45; 64]); 5],
+        ordered_chunk_digests: vec![Hash512::from_bytes([0x45; 64]); 5].into(),
         full_object_digest: Hash512::from_bytes([0x44; 64]),
     };
     let mut registry = CommonProofUpstreamInputRegistry::default();

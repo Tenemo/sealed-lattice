@@ -11,8 +11,5 @@ export const actionRandomnessCommandIdentifiers = Object.freeze({
     setupActionRandomnessAuthorization: 10,
     validateSetupMailboxSourceKeys: 11,
     setupMailboxSignatureHedge: 12,
-    createStructuredCommitmentOpening: 13,
-    releaseStructuredCommitmentOpening: 14,
-    computeStructuredCommitment: 15,
     setupObjectSignatureHedge: 16,
 } as const);

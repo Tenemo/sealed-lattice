@@ -38,6 +38,21 @@ export const registerPrivateKernelContexts = (
     const { wasmExports } = runtime;
     registerCanonicalStreamKernelContext(kernel, {
         ...canonicalStreamContext,
+        aggregateThresholdShareBeginRecipientAuthority:
+            resolveOptionalNumberExport(
+                wasmExports,
+                'sealed_lattice_aggregate_threshold_share_begin_recipient_authority',
+            ),
+        aggregateThresholdShareAbsorbAuthenticatedRecipientPayload:
+            resolveOptionalNumberExport(
+                wasmExports,
+                'sealed_lattice_aggregate_threshold_share_absorb_authenticated_recipient_payload',
+            ),
+        aggregateThresholdShareDiscardRecipientAuthority:
+            resolveOptionalNumberExport(
+                wasmExports,
+                'sealed_lattice_aggregate_threshold_share_discard_recipient_authority',
+            ),
         bgvMaterialReaderBegin: resolveOptionalNumberExport(
             wasmExports,
             'sealed_lattice_bgv_canonical_material_reader_begin',
@@ -90,5 +105,40 @@ export const registerPrivateKernelContexts = (
             wasmExports,
             'sealed_lattice_mailbox_gcm_finish_encryptor',
         ),
+        setupGenerationAuthorityBegin: resolveOptionalNumberExport(
+            wasmExports,
+            'sealed_lattice_setup_generation_authority_begin',
+        ),
+        setupGenerationAuthorityRelease: resolveOptionalNumberExport(
+            wasmExports,
+            'sealed_lattice_setup_generation_authority_release',
+        ),
+        setupGenerationRecipientVssPayloadByteLength:
+            resolveOptionalNumberExport(
+                wasmExports,
+                'sealed_lattice_setup_generation_recipient_vss_payload_byte_length',
+            ),
+        setupGenerationRecipientVssPayloadCancel: resolveOptionalNumberExport(
+            wasmExports,
+            'sealed_lattice_setup_generation_recipient_vss_payload_cancel',
+        ),
+        setupGenerationRecipientVssPayloadOpen: resolveOptionalNumberExport(
+            wasmExports,
+            'sealed_lattice_setup_generation_recipient_vss_payload_open',
+        ),
+        setupGenerationRecipientVssPayloadRead: resolveOptionalNumberExport(
+            wasmExports,
+            'sealed_lattice_setup_generation_recipient_vss_payload_read',
+        ),
+        setupGenerationRecipientVssPayloadSourceByteLength:
+            resolveOptionalNumberExport(
+                wasmExports,
+                'sealed_lattice_setup_generation_recipient_vss_payload_source_byte_length',
+            ),
+        setupGenerationRecipientVssPayloadSourceRecipientRosterPosition:
+            resolveOptionalNumberExport(
+                wasmExports,
+                'sealed_lattice_setup_generation_recipient_vss_payload_source_recipient_roster_position',
+            ),
     });
 };

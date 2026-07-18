@@ -11,7 +11,7 @@ use super::{
     VERIFIED_COMMON_PROOF_STATEMENT_HASH_DOMAIN, VerifiedEvaluatorAuxiliaryRoot,
     VerifiedStatementOwnedTree, decode_selected_application_statement, hash_foundation_tuple_512,
     hash_framed_parts_512, selected_evaluator_aggregate_entry_roots,
-    selected_relation_plan_check_context,
+    selected_evaluator_entry_positions, selected_relation_plan_check_context,
 };
 #[cfg(test)]
 use super::{
@@ -431,7 +431,10 @@ pub(super) fn decode_application_statement(
     {
         return Err(CommonProofVerifierError::InvalidApplicationStatement);
     }
-    if relation_context == &selected_relation_plan_check_context() {
+    if selected_relation_plan_check_context(expected_schema_identifier)
+        .as_ref()
+        .is_some_and(|selected_context| relation_context == selected_context)
+    {
         return decode_selected_application_statement(
             canonical_bytes,
             expected_schema_identifier,
@@ -466,7 +469,10 @@ pub(super) fn validate_evaluator_auxiliary_root_linkage(
     verified_auxiliary_roots: &[VerifiedEvaluatorAuxiliaryRoot],
     relation_context: &RelationPlanCheckContext,
 ) -> Result<(), CommonProofVerifierError> {
-    if relation_context != &selected_relation_plan_check_context() {
+    if !selected_relation_plan_check_context(application_statement_schema_identifier)
+        .as_ref()
+        .is_some_and(|selected_context| relation_context == selected_context)
+    {
         return if verified_auxiliary_roots.is_empty() {
             Ok(())
         } else {
@@ -482,21 +488,36 @@ pub(super) fn validate_evaluator_auxiliary_root_linkage(
             Err(CommonProofVerifierError::InvalidApplicationStatement)
         };
     }
-    let entry_ordinal =
-        schedule_position.ok_or(CommonProofVerifierError::InvalidApplicationStatement)?;
-    let entry = selected_evaluator_aggregate_entry_roots(
-        application_statement,
-        top_count.ok_or(CommonProofVerifierError::InvalidApplicationStatement)?,
-        entry_ordinal,
-    )
-    .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?;
-    if verified_auxiliary_roots.len() != 1
-        || entry.entry_ordinal() != entry_ordinal
-        || entry.position() != verified_auxiliary_roots[0].position()
-        || entry.auxiliary_component_root()
-            != verified_auxiliary_roots[0].auxiliary_component_root()
-    {
+    if schedule_position.is_some() {
         return Err(CommonProofVerifierError::InvalidApplicationStatement);
+    }
+    let top_count = top_count
+        .filter(|top_count| (1..=FOUNDATION_PROFILE.option_count).contains(top_count))
+        .ok_or(CommonProofVerifierError::InvalidApplicationStatement)?;
+    let positions = selected_evaluator_entry_positions(top_count)
+        .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?;
+    if verified_auxiliary_roots.len() != positions.len() {
+        return Err(CommonProofVerifierError::InvalidApplicationStatement);
+    }
+    for (entry_ordinal, (position, verified_auxiliary_root)) in
+        positions.iter().zip(verified_auxiliary_roots).enumerate()
+    {
+        let entry_ordinal = u32::try_from(entry_ordinal)
+            .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?;
+        let entry = selected_evaluator_aggregate_entry_roots(
+            application_statement,
+            top_count,
+            entry_ordinal,
+        )
+        .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?;
+        if entry.entry_ordinal() != entry_ordinal
+            || entry.position() != *position
+            || verified_auxiliary_root.position() != *position
+            || entry.auxiliary_component_root()
+                != verified_auxiliary_root.auxiliary_component_root()
+        {
+            return Err(CommonProofVerifierError::InvalidApplicationStatement);
+        }
     }
     Ok(())
 }

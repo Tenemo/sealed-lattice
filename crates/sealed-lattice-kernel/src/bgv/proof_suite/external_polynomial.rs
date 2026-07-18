@@ -2,13 +2,18 @@
 //!
 //! Each Stockham pass writes one immutable, append-only object. A pass becomes
 //! a checkpoint boundary only after the output is sealed and the executor has
-//! completed the pass step, which transactionally deletes the consumed input.
+//! completed the pass step, which transactionally deletes any input whose
+//! caller-declared last use is that pass.
 //! The implementation retains at most two input scan blocks, one encoded
 //! output block, and one canonical external-memory write record; no resident
 //! field grows with the transform domain.
 
 use zeroize::{Zeroize, Zeroizing};
 
+use super::external_memory::{
+    EXTERNAL_MEMORY_OPERATION_HEADER_BYTE_LENGTH, EXTERNAL_MEMORY_REQUEST_HEADER_BYTE_LENGTH,
+    ProofExternalMemoryTransactionOperation,
+};
 use super::relation_plan::RelationColumnValueType;
 use super::{
     PROOF_CHALLENGE_EXTENSION_DEGREE, ProofBaseFieldElement, ProofChallengeExtensionElement,
@@ -120,7 +125,8 @@ impl ExternalStockhamPassPlan {
 
 /// Planner output for one complete radix-two transform. The source object plan
 /// is owned by the caller because its issuance and earlier uses precede this
-/// transform. Its declared last use must equal `first_executor_step`.
+/// transform. Its declared last use may be this transform's first pass or a
+/// later use by another transform or proof phase.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ExternalStockhamTransformPlan {
     domain: ProofEvaluationDomain,
@@ -134,7 +140,171 @@ pub(crate) struct ExternalStockhamTransformPlan {
     maximum_resident_byte_length: u64,
     total_written_byte_length: u64,
     total_read_byte_length: u64,
-    maximum_transaction_count: u64,
+    transaction_count_excluding_deletions: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ExternalStockhamResidentMemoryRequirement {
+    component_working_set_byte_length: u64,
+    transaction_overlap_peak_byte_length: u64,
+    peak_byte_length: u64,
+}
+
+impl ExternalStockhamResidentMemoryRequirement {
+    pub(crate) const fn component_working_set_byte_length(self) -> u64 {
+        self.component_working_set_byte_length
+    }
+
+    pub(crate) const fn transaction_overlap_peak_byte_length(self) -> u64 {
+        self.transaction_overlap_peak_byte_length
+    }
+
+    pub(crate) const fn peak_byte_length(self) -> u64 {
+        self.peak_byte_length
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ExternalPolynomialExtensionReadResidentMemoryRequirement {
+    component_working_set_byte_length: u64,
+    transaction_overlap_peak_byte_length: u64,
+    peak_byte_length: u64,
+}
+
+impl ExternalPolynomialExtensionReadResidentMemoryRequirement {
+    pub(crate) const fn component_working_set_byte_length(self) -> u64 {
+        self.component_working_set_byte_length
+    }
+
+    pub(crate) const fn transaction_overlap_peak_byte_length(self) -> u64 {
+        self.transaction_overlap_peak_byte_length
+    }
+
+    pub(crate) const fn peak_byte_length(self) -> u64 {
+        self.peak_byte_length
+    }
+}
+
+pub(crate) fn external_polynomial_extension_read_resident_memory_requirement(
+    value_type: RelationColumnValueType,
+    element_count: u64,
+) -> Result<ExternalPolynomialExtensionReadResidentMemoryRequirement, ExternalPolynomialError> {
+    if element_count == 0 {
+        return Err(ExternalPolynomialError::InvalidVector);
+    }
+    let encoded_byte_length = element_count
+        .checked_mul(external_value_byte_length(value_type))
+        .ok_or(ExternalPolynomialError::CountOverflow)?;
+    let typed_value_byte_length = element_count
+        .checked_mul(
+            u64::try_from(match value_type {
+                RelationColumnValueType::BaseField => core::mem::size_of::<ProofBaseFieldElement>(),
+                RelationColumnValueType::ChallengeExtension => {
+                    core::mem::size_of::<ProofChallengeExtensionElement>()
+                }
+            })
+            .map_err(|_| ExternalPolynomialError::CountOverflow)?,
+        )
+        .ok_or(ExternalPolynomialError::CountOverflow)?;
+    let extension_output_byte_length = element_count
+        .checked_mul(
+            u64::try_from(core::mem::size_of::<ProofChallengeExtensionElement>())
+                .map_err(|_| ExternalPolynomialError::CountOverflow)?,
+        )
+        .ok_or(ExternalPolynomialError::CountOverflow)?;
+    let conversion_overlap_byte_length = match value_type {
+        RelationColumnValueType::BaseField => typed_value_byte_length
+            .checked_add(extension_output_byte_length)
+            .ok_or(ExternalPolynomialError::CountOverflow)?,
+        RelationColumnValueType::ChallengeExtension => typed_value_byte_length,
+    };
+    let component_working_set_byte_length = typed_value_byte_length
+        .checked_add(encoded_byte_length)
+        .ok_or(ExternalPolynomialError::CountOverflow)?
+        .max(conversion_overlap_byte_length);
+    let operation_allocation_byte_length =
+        u64::try_from(core::mem::size_of::<ProofExternalMemoryTransactionOperation>())
+            .map_err(|_| ExternalPolynomialError::CountOverflow)?;
+    let read_result_allocation_byte_length =
+        u64::try_from(core::mem::size_of::<Zeroizing<Vec<u8>>>())
+            .map_err(|_| ExternalPolynomialError::CountOverflow)?;
+    let transaction_overlap_peak_byte_length = typed_value_byte_length
+        .checked_add(
+            encoded_byte_length
+                .checked_mul(2)
+                .ok_or(ExternalPolynomialError::CountOverflow)?,
+        )
+        .and_then(|length| length.checked_add(operation_allocation_byte_length))
+        .and_then(|length| length.checked_add(read_result_allocation_byte_length))
+        .ok_or(ExternalPolynomialError::CountOverflow)?;
+    Ok(ExternalPolynomialExtensionReadResidentMemoryRequirement {
+        component_working_set_byte_length,
+        transaction_overlap_peak_byte_length,
+        peak_byte_length: component_working_set_byte_length
+            .max(transaction_overlap_peak_byte_length),
+    })
+}
+
+pub(crate) fn external_stockham_resident_memory_requirement(
+    scan_byte_length: u64,
+    transaction_chunk_byte_length: u64,
+) -> Result<ExternalStockhamResidentMemoryRequirement, ExternalPolynomialError> {
+    if scan_byte_length == 0 || transaction_chunk_byte_length == 0 {
+        return Err(ExternalPolynomialError::InvalidPlan);
+    }
+    // The transform owns two typed scan vectors, one encoded-output vector,
+    // and one output-transaction chunk. A read additionally retains its local
+    // encoded vector while replay owns the response bytes. An append request
+    // retains the recorder's payload copy while operation encoding and final
+    // worker-request encoding coexist. The operation and outer read-result
+    // vector allocations are explicit so the plan does not rely on the
+    // executor reserve to hide payload-sized transaction copies.
+    let persistent_transform_byte_length = scan_byte_length
+        .checked_mul(3)
+        .and_then(|length| length.checked_add(transaction_chunk_byte_length))
+        .ok_or(ExternalPolynomialError::CountOverflow)?;
+    let component_working_set_byte_length = persistent_transform_byte_length
+        .checked_add(scan_byte_length)
+        .ok_or(ExternalPolynomialError::CountOverflow)?;
+    let operation_allocation_byte_length =
+        u64::try_from(core::mem::size_of::<ProofExternalMemoryTransactionOperation>())
+            .map_err(|_| ExternalPolynomialError::CountOverflow)?;
+    let read_result_allocation_byte_length =
+        u64::try_from(core::mem::size_of::<Zeroizing<Vec<u8>>>())
+            .map_err(|_| ExternalPolynomialError::CountOverflow)?;
+    let replay_response_overlap_byte_length = persistent_transform_byte_length
+        .checked_add(
+            scan_byte_length
+                .checked_mul(2)
+                .ok_or(ExternalPolynomialError::CountOverflow)?,
+        )
+        .and_then(|length| length.checked_add(operation_allocation_byte_length))
+        .and_then(|length| length.checked_add(read_result_allocation_byte_length))
+        .ok_or(ExternalPolynomialError::CountOverflow)?;
+    let request_framing_byte_length = u64::try_from(
+        EXTERNAL_MEMORY_OPERATION_HEADER_BYTE_LENGTH
+            .checked_mul(2)
+            .and_then(|length| length.checked_add(EXTERNAL_MEMORY_REQUEST_HEADER_BYTE_LENGTH))
+            .ok_or(ExternalPolynomialError::CountOverflow)?,
+    )
+    .map_err(|_| ExternalPolynomialError::CountOverflow)?;
+    let append_request_overlap_byte_length = persistent_transform_byte_length
+        .checked_add(
+            transaction_chunk_byte_length
+                .checked_mul(3)
+                .ok_or(ExternalPolynomialError::CountOverflow)?,
+        )
+        .and_then(|length| length.checked_add(request_framing_byte_length))
+        .and_then(|length| length.checked_add(operation_allocation_byte_length))
+        .ok_or(ExternalPolynomialError::CountOverflow)?;
+    let transaction_overlap_peak_byte_length =
+        replay_response_overlap_byte_length.max(append_request_overlap_byte_length);
+    Ok(ExternalStockhamResidentMemoryRequirement {
+        component_working_set_byte_length,
+        transaction_overlap_peak_byte_length,
+        peak_byte_length: component_working_set_byte_length
+            .max(transaction_overlap_peak_byte_length),
+    })
 }
 
 impl ExternalStockhamTransformPlan {
@@ -186,7 +356,7 @@ impl ExternalStockhamTransformPlan {
 
         let mut next_object_ordinal = first_object_ordinal;
         let mut input = source;
-        let mut maximum_transaction_count = 0_u64;
+        let mut transaction_count_excluding_deletions = 0_u64;
         let mut total_read_byte_length = 0_u64;
         for stage_ordinal in 0..pass_count {
             let executor_step = first_executor_step
@@ -239,12 +409,14 @@ impl ExternalStockhamTransformPlan {
             .and_then(|count| count.checked_mul(2))
             .ok_or(ExternalPolynomialError::CountOverflow)?;
             // Create, every nonempty input read, every canonical output-record
-            // append, seal, and one executor-step transaction.
-            maximum_transaction_count = maximum_transaction_count
+            // append, and seal. Deletions are planned globally because the
+            // executor batches every object with the same exact last-use step
+            // into one transaction.
+            transaction_count_excluding_deletions = transaction_count_excluding_deletions
                 .checked_add(
                     output_chunk_count
                         .checked_add(read_transaction_count)
-                        .and_then(|count| count.checked_add(3))
+                        .and_then(|count| count.checked_add(2))
                         .ok_or(ExternalPolynomialError::CountOverflow)?,
                 )
                 .ok_or(ExternalPolynomialError::CountOverflow)?;
@@ -267,10 +439,11 @@ impl ExternalStockhamTransformPlan {
             .ok()
             .and_then(|count| count.checked_mul(value_byte_length))
             .ok_or(ExternalPolynomialError::CountOverflow)?;
-        let maximum_resident_byte_length = scan_byte_length
-            .checked_mul(3)
-            .and_then(|byte_length| byte_length.checked_add(u64::from(maximum_chunk_byte_length)))
-            .ok_or(ExternalPolynomialError::CountOverflow)?;
+        let maximum_resident_byte_length = external_stockham_resident_memory_requirement(
+            scan_byte_length,
+            u64::from(maximum_chunk_byte_length),
+        )?
+        .peak_byte_length();
 
         Ok(Self {
             domain,
@@ -284,7 +457,7 @@ impl ExternalStockhamTransformPlan {
             maximum_resident_byte_length,
             total_written_byte_length,
             total_read_byte_length,
-            maximum_transaction_count,
+            transaction_count_excluding_deletions,
         })
     }
 
@@ -324,8 +497,8 @@ impl ExternalStockhamTransformPlan {
         self.total_read_byte_length
     }
 
-    pub(crate) const fn maximum_transaction_count(&self) -> u64 {
-        self.maximum_transaction_count
+    pub(crate) const fn transaction_count_excluding_deletions(&self) -> u64 {
+        self.transaction_count_excluding_deletions
     }
 }
 
@@ -377,8 +550,8 @@ enum ExternalStockhamOutputHalf {
 }
 
 enum ExternalPolynomialValues {
-    Base(Vec<ProofBaseFieldElement>),
-    Extension(Vec<ProofChallengeExtensionElement>),
+    Base(Zeroizing<Vec<ProofBaseFieldElement>>),
+    Extension(Zeroizing<Vec<ProofChallengeExtensionElement>>),
 }
 
 impl ExternalPolynomialValues {
@@ -392,14 +565,14 @@ impl ExternalPolynomialValues {
                 values
                     .try_reserve_exact(capacity)
                     .map_err(|_| ExternalPolynomialError::AllocationLimitExceeded)?;
-                Ok(Self::Base(values))
+                Ok(Self::Base(Zeroizing::new(values)))
             }
             RelationColumnValueType::ChallengeExtension => {
                 let mut values = Vec::new();
                 values
                     .try_reserve_exact(capacity)
                     .map_err(|_| ExternalPolynomialError::AllocationLimitExceeded)?;
-                Ok(Self::Extension(values))
+                Ok(Self::Extension(Zeroizing::new(values)))
             }
         }
     }
@@ -413,8 +586,8 @@ impl ExternalPolynomialValues {
 
     fn clear(&mut self) {
         match self {
-            Self::Base(values) => values.clear(),
-            Self::Extension(values) => values.clear(),
+            Self::Base(values) => values.zeroize(),
+            Self::Extension(values) => values.zeroize(),
         }
     }
 
@@ -480,6 +653,27 @@ impl ExternalPolynomialValues {
             _ => return Err(ExternalPolynomialError::InvalidVector),
         }
         Ok(())
+    }
+
+    fn into_extension_values(
+        self,
+    ) -> Result<Zeroizing<Vec<ProofChallengeExtensionElement>>, ExternalPolynomialError> {
+        match self {
+            Self::Base(values) => {
+                let mut extension_values = Vec::new();
+                extension_values
+                    .try_reserve_exact(values.len())
+                    .map_err(|_| ExternalPolynomialError::AllocationLimitExceeded)?;
+                extension_values.extend(
+                    values
+                        .iter()
+                        .copied()
+                        .map(ProofChallengeExtensionElement::from_base),
+                );
+                Ok(Zeroizing::new(extension_values))
+            }
+            Self::Extension(values) => Ok(values),
+        }
     }
 }
 
@@ -1104,6 +1298,39 @@ pub(crate) fn read_external_polynomial_value<Storage: ProofExternalMemory>(
     }
 }
 
+pub(crate) fn read_external_polynomial_extension_values<Storage: ProofExternalMemory>(
+    executor: &mut ProofExternalMemoryExecutor,
+    storage: &mut Storage,
+    vector: ExternalPolynomialVector,
+    element_offset: usize,
+    element_count: usize,
+) -> Result<
+    Zeroizing<Vec<ProofChallengeExtensionElement>>,
+    ExternalStockhamTransformError<Storage::Error>,
+> {
+    if element_count == 0
+        || element_offset
+            .checked_add(element_count)
+            .filter(|end| *end <= vector.element_count())
+            .is_none()
+    {
+        return Err(ExternalPolynomialError::InvalidVector.into());
+    }
+    let mut values = ExternalPolynomialValues::with_capacity(vector.value_type(), element_count)?;
+    if !read_external_values(
+        executor,
+        storage,
+        vector,
+        element_offset,
+        element_count,
+        &mut values,
+    )? || values.len() != element_count
+    {
+        return Err(ExternalPolynomialError::InvalidVector.into());
+    }
+    values.into_extension_values().map_err(Into::into)
+}
+
 pub(crate) const fn external_value_byte_length(value_type: RelationColumnValueType) -> u64 {
     match value_type {
         RelationColumnValueType::BaseField => BASE_FIELD_ELEMENT_BYTE_LENGTH as u64,
@@ -1166,7 +1393,7 @@ pub(crate) fn map_external_polynomial_plan_error(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
+    use std::collections::{BTreeMap, BTreeSet};
 
     use super::*;
     use crate::bgv::proof_suite::{PROOF_EVALUATION_COSET_OFFSET, ProofExternalMemoryPlan};
@@ -1493,12 +1720,21 @@ mod tests {
         let output_chunk_count = usize::try_from(output_exact_byte_length)
             .expect("the output length fits usize")
             .div_ceil(aligned_chunk_byte_length);
+        let deletion_transaction_count = u64::try_from(
+            object_plans
+                .iter()
+                .map(|object_plan| object_plan.last_use_step())
+                .collect::<BTreeSet<_>>()
+                .len(),
+        )
+        .expect("the deletion transaction count fits u64");
         let maximum_transaction_count = transform_plan
-            .maximum_transaction_count()
+            .transaction_count_excluding_deletions()
             .checked_add(
-                u64::try_from(source_chunk_count + output_chunk_count + 3)
+                u64::try_from(source_chunk_count + output_chunk_count + 2)
                     .expect("the test transaction count fits u64"),
             )
+            .and_then(|count| count.checked_add(deletion_transaction_count))
             .expect("the transaction count does not overflow");
         let source_exact_byte_length = source.exact_byte_length().expect("source length is valid");
         let maximum_stored_byte_length = source_exact_byte_length
@@ -1779,10 +2015,23 @@ mod tests {
         );
         assert_eq!(small_plan.passes().len(), 3);
         assert_eq!(large_plan.passes().len(), 18);
+        let resident_requirement =
+            external_stockham_resident_memory_requirement(1_048_560, 1_048_576)
+                .expect("the aligned Stockham buffers have one resident requirement");
         assert_eq!(
             large_plan.maximum_resident_byte_length(),
-            3 * 1_048_560 + 1_048_576,
-            "three aligned scan buffers and one canonical output-record buffer are live",
+            resident_requirement.peak_byte_length(),
+            "the transform plan includes its full transaction-overlap peak",
+        );
+        assert_eq!(
+            resident_requirement.component_working_set_byte_length(),
+            4 * 1_048_560 + 1_048_576,
+            "a replayable read retains the three transform vectors and one encoded read vector",
+        );
+        assert!(
+            resident_requirement.transaction_overlap_peak_byte_length()
+                > resident_requirement.component_working_set_byte_length(),
+            "request encoding includes the recorder, operation, and final request copies",
         );
     }
 

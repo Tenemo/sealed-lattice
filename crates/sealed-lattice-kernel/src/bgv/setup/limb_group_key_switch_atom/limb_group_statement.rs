@@ -596,7 +596,7 @@ fn word_inverse_mod_prime(value: u64, prime: u64) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::super::proof_field::{
-        eight_limb_group_field_parameters, sixteen_limb_group_field_parameters,
+        eight_limb_group_field_parameters, selected_key_switch_proof_field_parameters,
     };
     use super::*;
     use crate::bgv::evaluator::key_switch::{KEY_SWITCH_ERROR_DOMAIN, KEY_SWITCH_SAMPLE_DOMAIN};
@@ -711,8 +711,8 @@ mod tests {
 
     #[test]
     fn crt_basis_constants_are_gadget_idempotents() {
-        let parameters = sixteen_limb_group_field_parameters();
-        let group = LimbGroupContext::new(&parameters, &DATA_PRIMES[..16]).expect("group builds");
+        let parameters = selected_key_switch_proof_field_parameters();
+        let group = LimbGroupContext::new(&parameters, &DATA_PRIMES[..14]).expect("group builds");
         // Recompute each reduced basis constant exactly as the constructor
         // does (the context only retains the centered idempotents).
         for (constant_index, (cofactor, cofactor_inverse)) in group
@@ -752,17 +752,33 @@ mod tests {
     }
 
     #[test]
-    fn exactness_bound_accepts_the_full_sixteen_limb_group() {
-        let parameters = sixteen_limb_group_field_parameters();
-        let group = LimbGroupContext::new(&parameters, &DATA_PRIMES[..16])
-            .expect("full group modulus fits below the proof field");
+    fn exactness_bound_accepts_the_selected_fourteen_limb_group() {
+        let parameters = selected_key_switch_proof_field_parameters();
+        let group = LimbGroupContext::new(&parameters, &DATA_PRIMES[..14])
+            .expect("selected group modulus fits below the proof field");
 
         validate_limb_group_exactness_bound(
             &parameters,
             &group.group_modulus,
             crate::bgv::parameters::POLYNOMIAL_DEGREE,
         )
-        .expect("active full group fits the proof field exactness bound");
+        .expect("selected fourteen-limb group fits the proof field exactness bound");
+    }
+
+    #[test]
+    fn exactness_bound_rejects_fifteen_selected_limbs() {
+        let parameters = selected_key_switch_proof_field_parameters();
+        let group = LimbGroupContext::new(&parameters, &DATA_PRIMES[..15])
+            .expect("fifteen-limb group modulus itself fits below the proof field");
+
+        let error = validate_limb_group_exactness_bound(
+            &parameters,
+            &group.group_modulus,
+            crate::bgv::parameters::POLYNOMIAL_DEGREE,
+        )
+        .expect_err("the fifteen-limb lifted relation exceeds the proof field");
+
+        assert_eq!(error.code, CanonicalErrorCode::MalformedLength);
     }
 
     #[test]
@@ -823,9 +839,9 @@ mod tests {
 
     #[test]
     fn synthetic_diagonal_atom_verifies_and_reports_a_small_carry() {
-        let parameters = sixteen_limb_group_field_parameters();
+        let parameters = selected_key_switch_proof_field_parameters();
         let ring_degree = 256;
-        let group_primes = &DATA_PRIMES[..16];
+        let group_primes = &DATA_PRIMES[..14];
         let group = LimbGroupContext::new(&parameters, group_primes).expect("group builds");
         let domain = NegacyclicDomain::new(&parameters, ring_degree).expect("domain builds");
         let atom = synthetic_atom(group_primes, ring_degree, Some(5), "diagonal");
@@ -848,7 +864,7 @@ mod tests {
     fn synthetic_off_diagonal_atom_verifies_without_a_source() {
         let parameters = eight_limb_group_field_parameters();
         let ring_degree = 128;
-        let group_primes = &DATA_PRIMES[8..16];
+        let group_primes = &DATA_PRIMES[6..14];
         let group = LimbGroupContext::new(&parameters, group_primes).expect("group builds");
         let domain = NegacyclicDomain::new(&parameters, ring_degree).expect("domain builds");
         let atom = synthetic_atom(group_primes, ring_degree, None, "off-diagonal");
@@ -867,9 +883,9 @@ mod tests {
 
     #[test]
     fn round_two_shaped_public_product_atom_verifies() {
-        let parameters = sixteen_limb_group_field_parameters();
+        let parameters = selected_key_switch_proof_field_parameters();
         let ring_degree = 128;
-        let group_primes = &DATA_PRIMES[..16];
+        let group_primes = &DATA_PRIMES[..14];
         let group = LimbGroupContext::new(&parameters, group_primes).expect("group builds");
         let domain = NegacyclicDomain::new(&parameters, ring_degree).expect("domain builds");
         let diagonal_group_position = 3;
@@ -906,9 +922,9 @@ mod tests {
 
     #[test]
     fn tampered_material_and_wrong_shapes_are_rejected() {
-        let parameters = sixteen_limb_group_field_parameters();
+        let parameters = selected_key_switch_proof_field_parameters();
         let ring_degree = 128;
-        let group_primes = &DATA_PRIMES[..16];
+        let group_primes = &DATA_PRIMES[..14];
         let group = LimbGroupContext::new(&parameters, group_primes).expect("group builds");
         let domain = NegacyclicDomain::new(&parameters, ring_degree).expect("domain builds");
         let atom = synthetic_atom(group_primes, ring_degree, Some(2), "tamper");
@@ -1045,7 +1061,7 @@ mod tests {
         use crate::bgv::evaluator::key_switch::generate_galois_key;
         use crate::bgv::parameters::POLYNOMIAL_DEGREE;
 
-        let parameters = sixteen_limb_group_field_parameters();
+        let parameters = selected_key_switch_proof_field_parameters();
         let level = 1;
         let galois_element = 3;
         let seed_hex = "limb-group-atom-cross-check-seed";
@@ -1075,7 +1091,7 @@ mod tests {
         assert_eq!(
             galois_key.components.len(),
             1,
-            "the selected hybrid topology carries this active data-prime prefix in one block"
+            "a two-limb active prefix occupies one key-switch block"
         );
         for (block_index, component) in galois_key.components.iter().enumerate() {
             let component_b = component

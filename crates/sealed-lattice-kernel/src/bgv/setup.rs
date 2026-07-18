@@ -29,13 +29,52 @@ mod tests;
 pub(crate) use accepted_setup::accepted_setup_participant_roster_from_package;
 #[cfg(test)]
 pub(in crate::bgv) use accepted_setup::decryption_threshold_for_participant_count;
+#[cfg(test)]
+pub(in crate::bgv) use accepted_setup::deterministic_galois_runtime_component_bytes_for_tests;
+#[cfg(test)]
+pub(in crate::bgv) use accepted_setup::retain_evaluator_execution_authority_for_tests;
 pub(in crate::bgv) use accepted_setup::{
-    decryption_threshold_for_roster_length, derive_collective_setup_package_hash,
-};
-pub(crate) use accepted_setup::{
+    BrowserOwnedAggregateThresholdShareLimb, CanonicalAcceptedSetupPackage,
+    SetupGeneratedCommittedMaterial, SetupGeneratedGaloisEntry, SetupGeneratedKeySwitchComponent,
+    SetupGeneratedVssMaterial, SetupGenerationAnchorOpening, SetupGenerationAuthorityHandle,
+    SetupGenerationGaloisApplication, SetupGenerationGaloisBatchSource,
+    SetupGenerationRecipientPayloadSourceHandle, SetupGenerationVssApplication,
+    SetupGenerationVssPreparationSource, SetupGenerationVssSource,
+    SetupVssGenerationPreparationError, VerifiedAcceptedSetupAuthority,
+    VerifiedAcceptedSetupAuthorityHandle, VerifiedAcceptedSetupConsumedObjectByteLengthCatalog,
+    VerifiedAcceptedSetupEvaluatorSourceCatalog, VerifiedAcceptedSetupFinalizationInput,
+    VerifiedAcceptedSetupParticipantReleaseMaterial,
+    VerifiedAcceptedSetupParticipantTargetReleaseLease,
+    VerifiedAcceptedSetupParticipantTargetReleaseLimb,
+    VerifiedAcceptedSetupParticipantTargetReleaseSource, VerifiedAcceptedSetupPublicProofCatalog,
+    VerifiedAcceptedSetupVssQualification, VerifiedCollectivePublicKeyPolynomial,
+    VerifiedCollectivePublicKeyReadback, VerifiedEvaluatorCommonComponentAuthority,
+    VerifiedEvaluatorExecutionAuthority, cancel_setup_generation_recipient_vss_payload,
     describe_collective_bgv_setup_parameters,
     describe_collective_bgv_setup_parameters_for_participant_count,
+    finalize_verified_accepted_setup, lease_verified_participant_target_release_source,
+    open_setup_generation_recipient_vss_payload, populate_browser_owned_setup_generation_authority,
+    read_setup_generation_recipient_vss_payload_chunk, release_setup_generation_authority,
+    release_verified_accepted_setup_authority, resolve_setup_generation_vss_preparation_source,
+    selected_setup_generation_private_randomness_kmac_input_accounting,
+    setup_generation_recipient_vss_payload_byte_length,
+    setup_generation_recipient_vss_payload_source_byte_length,
+    setup_generation_recipient_vss_payload_source_recipient_roster_position,
+    take_verified_evaluator_execution_authority,
     verify_collective_bgv_setup_package_in_session_from_request,
+    with_setup_generation_galois_batch, with_setup_generation_vss_material,
+    with_verified_accepted_setup_authority, with_verified_participant_target_release_source,
+};
+pub(in crate::bgv) use accepted_setup::{
+    GeneratedPrivateVssMailboxCorpusInput, VerifiedAggregateThresholdShareTerminal,
+    VerifiedCollectivePublicKeyTerminal, VerifiedGeneratedPrivateVssMailboxByteLengths,
+    VerifiedGeneratedPrivateVssMailboxCorpusByteLengthCatalog, VerifiedPublicKeyShareTerminal,
+    VerifiedPublicRandomness, VerifiedSameSecretTerminal, VerifiedSetupVerificationContext,
+    VerifiedVssQualificationTerminals, VerifiedVssShareLinkageTerminal,
+    derive_recipient_input_root, verify_public_randomness_board_sources,
+};
+pub(in crate::bgv) use accepted_setup::{
+    decryption_threshold_for_roster_length, derive_collective_setup_package_hash,
 };
 #[cfg(test)]
 pub(crate) use canonical_stream_transport::BGV_CANONICAL_STREAM_FAMILY_TARGET_DECRYPTION_AGGREGATE_OPENING;
@@ -64,8 +103,11 @@ pub(crate) use canonical_stream_transport::{
     cancel_bgv_canonical_stream, finish_bgv_canonical_material_reader, finish_bgv_canonical_stream,
     read_bgv_canonical_material_chunk, take_authenticated_canonical_proof_material_bytes,
 };
-#[cfg(test)]
-pub(crate) use commitment::{LatticeAnchorCommitment, lattice_anchor_commitment_canonical_bytes};
+pub(in crate::bgv) use commitment::setup_commitment_matrix_polynomial;
+pub(crate) use commitment::{
+    LatticeAnchorCommitment, compute_lattice_anchor_commitment,
+    lattice_anchor_commitment_canonical_bytes,
+};
 pub(crate) use commitment::{
     SETUP_COMMITMENT_HIDING_ERROR_WIDTH, SETUP_COMMITMENT_HIDING_SECRET_WIDTH,
     SETUP_COMMITMENT_MODULE_RANK, SETUP_COMMITMENT_MODULUS_LIMB_INDICES,
@@ -93,17 +135,17 @@ pub(crate) use same_secret_bridge::{
     verify_vss_same_secret_bridge_proof_material_set_request,
     verify_vss_same_secret_bridge_statement_set_request,
 };
+pub(in crate::bgv) use sampling::{
+    sample_collective_public_key_common_reference_limb, sample_galois_common_reference_limb,
+    sample_relinearization_common_reference_limb,
+};
 pub(crate) use setup_proof::ProofByteSource;
 #[cfg(test)]
 pub(crate) use setup_proof::{
     BgvProofMaterialBytes, authenticate_setup_proof_material_stream_for_test,
 };
 #[cfg(test)]
-pub(in crate::bgv) use trustee_evaluation_key_proof::TARGET_DECRYPTION_FLOODING_NOISE_COEFFICIENT_BOUND;
-#[cfg(test)]
 pub(crate) use trustee_evaluation_key_proof::TARGET_DECRYPTION_SHARE_PROOF_FAMILY;
-#[cfg(test)]
-pub(in crate::bgv) use trustee_evaluation_key_proof::target_decryption_interpolation_denominator_clearing_factor;
 
 pub(crate) fn verify_collective_bgv_setup_package_with_session_from_request(
     request: &Value,
@@ -136,12 +178,6 @@ pub(crate) use vss_commitment::{
 
 #[cfg(test)]
 use crate::hashing::{hash_framed_parts_512 as hash512, hash512_hex};
-
-#[cfg(test)]
-use crate::bgv::{
-    modular_arithmetic::mul_mod,
-    ntt::{forward_negacyclic_ntt_in_place, inverse_negacyclic_ntt_in_place},
-};
 
 // The context hashes that target-decryption commitment contexts and proof
 // statements bind to. The setup-context hash canonically binds setupContext,

@@ -4,6 +4,13 @@ use crate::{
     transcript_core::{decode_hex, encode_hex},
 };
 
+/// Returns the unique little-endian byte width used for canonical residues of
+/// the supplied modulus. The selected BGV moduli are all greater than one.
+pub(in crate::bgv) fn canonical_modulus_byte_length(modulus: u64) -> usize {
+    usize::try_from((u64::from(64 - (modulus - 1).leading_zeros()) + 7) / 8)
+        .expect("a u64 modulus byte length fits usize")
+}
+
 pub(in crate::bgv) fn coefficient_vector_bytes(coefficients: &[u64]) -> Vec<u8> {
     let mut bytes = Vec::with_capacity(coefficients.len() * 8);
     for coefficient in coefficients {

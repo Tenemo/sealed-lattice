@@ -3,27 +3,37 @@ use num_traits::ToPrimitive;
 
 use crate::{
     bgv::{
-        evaluator::{
-            engine::{Ciphertext, DevelopmentBgvKey, negacyclic_mul, signed_residue},
-            prg::DeterministicSampler,
-        },
-        key_switch_topology::{KEY_SWITCH_DATA_PRIMES_PER_BLOCK, KEY_SWITCH_SPECIAL_PRIMES},
+        evaluator::engine::{Ciphertext, signed_residue},
+        key_switch_topology::{KEY_SWITCH_SPECIAL_PRIMES, KeySwitchDecompositionTopology},
         modular_arithmetic::{add_mod, add_mod_fast, inverse_mod, mul_mod, mul_mod_fast, sub_mod},
-        ntt::{forward_negacyclic_ntt, inverse_negacyclic_ntt},
+        ntt::{forward_negacyclic_ntt_in_place, inverse_negacyclic_ntt_in_place},
         parameters::{DATA_PRIMES, POLYNOMIAL_DEGREE},
     },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
 };
 
+#[cfg(test)]
+use crate::bgv::evaluator::{
+    engine::{DevelopmentBgvKey, negacyclic_mul},
+    prg::DeterministicSampler,
+};
+#[cfg(test)]
+use crate::bgv::key_switch_topology::canonical_residue_byte_length;
+
 mod rotation;
 
+#[cfg(test)]
+use crate::bgv::ntt::inverse_negacyclic_ntt;
 #[cfg(not(target_arch = "wasm32"))]
 use rayon::prelude::*;
 #[cfg(test)]
 use rotation::automorphism_residues;
-pub(crate) use rotation::{generate_galois_key, rotate};
+#[cfg(test)]
+pub(crate) use rotation::generate_galois_key;
+pub(crate) use rotation::rotate;
 
-pub(crate) const PLAINTEXT_MODULUS_I64: i64 = 65_537;
+pub(crate) const PLAINTEXT_MODULUS_I64: i64 = crate::bgv::parameters::PLAINTEXT_MODULUS as i64;
+#[cfg(test)]
 pub(crate) const KEY_SWITCH_ERROR_DOMAIN: &str = "sealed-lattice-bgv-evaluator/key-switch-error";
 pub(crate) const KEY_SWITCH_SAMPLE_DOMAIN: &str = "sealed-lattice-bgv-evaluator/key-switch-sample";
 // A polynomial component held as residue vectors, one per active prime.
@@ -35,9 +45,255 @@ type LimbMatrix = Vec<Vec<u64>>;
 // followed by the plaintext-preserving BGV correction modulus-down.
 #[derive(Clone)]
 pub(crate) struct KeySwitchKey {
-    pub(crate) level: usize,
     pub(crate) components: Vec<KeySwitchComponent>,
-    data_primes_per_block: usize,
+    topology: KeySwitchDecompositionTopology,
+}
+
+impl KeySwitchKey {
+    pub(crate) fn level(&self) -> usize {
+        self.topology.level()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn runtime_component_canonical_bytes(&self) -> CanonicalResult<Vec<u8>> {
+        self.canonical_component_bytes(KeySwitchComponent::component_b_coefficients)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn auxiliary_component_canonical_bytes(&self) -> CanonicalResult<Vec<u8>> {
+        self.canonical_component_bytes(KeySwitchComponent::component_a_coefficients)
+    }
+
+    #[cfg(test)]
+    fn canonical_component_bytes(
+        &self,
+        component_coefficients: fn(&KeySwitchComponent) -> CanonicalResult<Vec<Vec<u64>>>,
+    ) -> CanonicalResult<Vec<u8>> {
+        let expected_byte_length = usize::try_from(
+            self.topology
+                .canonical_component_wire_byte_length(POLYNOMIAL_DEGREE)?,
+        )
+        .map_err(|_| {
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "key-switch component wire length does not fit usize",
+            )
+        })?;
+        let mut canonical_bytes = Vec::with_capacity(expected_byte_length);
+        for component in &self.components {
+            let coefficient_limbs = component_coefficients(component)?;
+            if coefficient_limbs.len() != self.topology.extended_limb_count() {
+                return Err(CanonicalError::new(
+                    CanonicalErrorCode::MalformedLength,
+                    "key-switch component has the wrong extended-limb count",
+                ));
+            }
+            for (coefficient_limb, modulus) in coefficient_limbs
+                .iter()
+                .zip(self.topology.extended_moduli())
+            {
+                if coefficient_limb.len() != POLYNOMIAL_DEGREE
+                    || coefficient_limb
+                        .iter()
+                        .any(|coefficient| *coefficient >= *modulus)
+                {
+                    return Err(CanonicalError::new(
+                        CanonicalErrorCode::InvalidProtocolObject,
+                        "key-switch component contains malformed canonical residues",
+                    ));
+                }
+                let residue_byte_length = canonical_residue_byte_length(*modulus)?;
+                for coefficient in coefficient_limb {
+                    canonical_bytes
+                        .extend_from_slice(&coefficient.to_le_bytes()[..residue_byte_length]);
+                }
+            }
+        }
+        if canonical_bytes.len() != expected_byte_length {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "key-switch component canonical bytes have the wrong length",
+            ));
+        }
+        Ok(canonical_bytes)
+    }
+}
+
+/// One exact limb coordinate in the block-major, extended-limb-major key
+/// material order. Production replay uses this coordinate to derive common
+/// components without allowing transport bytes to select a modulus or block.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct KeySwitchReplayLimbPosition {
+    block_index: usize,
+    extended_limb_index: usize,
+    modulus: u64,
+}
+
+impl KeySwitchReplayLimbPosition {
+    pub(crate) const fn from_topology_coordinate(
+        block_index: usize,
+        extended_limb_index: usize,
+        modulus: u64,
+    ) -> Self {
+        Self {
+            block_index,
+            extended_limb_index,
+            modulus,
+        }
+    }
+
+    pub(crate) const fn block_index(self) -> usize {
+        self.block_index
+    }
+
+    pub(crate) const fn extended_limb_index(self) -> usize {
+        self.extended_limb_index
+    }
+
+    pub(crate) const fn modulus(self) -> u64 {
+        self.modulus
+    }
+}
+
+/// Builds one runtime key from independently authenticated polynomial passes.
+/// Each coefficient limb is transformed and released before the next limb is
+/// decoded, so compact store bytes never coexist with another full decoded
+/// copy. The runtime B pass must finish before the linked or derived A pass.
+pub(crate) struct KeySwitchKeyNttBuilder {
+    topology: KeySwitchDecompositionTopology,
+    components: Vec<KeySwitchComponent>,
+    next_runtime_limb_ordinal: usize,
+    next_auxiliary_limb_ordinal: usize,
+}
+
+impl KeySwitchKeyNttBuilder {
+    pub(crate) fn new(level: usize) -> CanonicalResult<Self> {
+        let topology = KeySwitchDecompositionTopology::for_level(level)?;
+        let components = (0..topology.data_block_count())
+            .map(|_| KeySwitchComponent {
+                component_b_ntt: Vec::with_capacity(topology.extended_limb_count()),
+                component_a_ntt: Vec::with_capacity(topology.extended_limb_count()),
+                moduli: topology.extended_moduli().to_vec(),
+            })
+            .collect();
+        Ok(Self {
+            topology,
+            components,
+            next_runtime_limb_ordinal: 0,
+            next_auxiliary_limb_ordinal: 0,
+        })
+    }
+
+    pub(crate) fn next_runtime_limb(&self) -> Option<KeySwitchReplayLimbPosition> {
+        self.limb_position(self.next_runtime_limb_ordinal)
+    }
+
+    pub(crate) fn next_auxiliary_limb(&self) -> Option<KeySwitchReplayLimbPosition> {
+        (self.next_runtime_limb().is_none())
+            .then(|| self.limb_position(self.next_auxiliary_limb_ordinal))
+            .flatten()
+    }
+
+    pub(crate) fn absorb_runtime_limb(&mut self, coefficients: Vec<u64>) -> CanonicalResult<()> {
+        let position = self.next_runtime_limb().ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidProtocolObject,
+                "runtime key-switch component already contains every expected limb",
+            )
+        })?;
+        let transformed = transform_authenticated_limb(coefficients, position.modulus)?;
+        self.components[position.block_index]
+            .component_b_ntt
+            .push(transformed);
+        self.next_runtime_limb_ordinal = self
+            .next_runtime_limb_ordinal
+            .checked_add(1)
+            .ok_or_else(key_switch_replay_size_error)?;
+        Ok(())
+    }
+
+    pub(crate) fn absorb_auxiliary_limb(&mut self, coefficients: Vec<u64>) -> CanonicalResult<()> {
+        let position = self.next_auxiliary_limb().ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidProtocolObject,
+                "key-switch auxiliary pass is out of order or already complete",
+            )
+        })?;
+        let transformed = transform_authenticated_limb(coefficients, position.modulus)?;
+        self.components[position.block_index]
+            .component_a_ntt
+            .push(transformed);
+        self.next_auxiliary_limb_ordinal = self
+            .next_auxiliary_limb_ordinal
+            .checked_add(1)
+            .ok_or_else(key_switch_replay_size_error)?;
+        Ok(())
+    }
+
+    pub(crate) fn finish(self) -> CanonicalResult<KeySwitchKey> {
+        if self.next_runtime_limb().is_some()
+            || self.next_auxiliary_limb().is_some()
+            || self.components.iter().any(|component| {
+                component.component_b_ntt.len() != self.topology.extended_limb_count()
+                    || component.component_a_ntt.len() != self.topology.extended_limb_count()
+            })
+        {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "replayed key-switch key is missing an authenticated limb",
+            ));
+        }
+        Ok(KeySwitchKey {
+            components: self.components,
+            topology: self.topology,
+        })
+    }
+
+    fn limb_position(&self, flat_ordinal: usize) -> Option<KeySwitchReplayLimbPosition> {
+        let extended_limb_count = self.topology.extended_limb_count();
+        let total_limb_count = self
+            .topology
+            .data_block_count()
+            .checked_mul(extended_limb_count)?;
+        (flat_ordinal < total_limb_count).then(|| {
+            let extended_limb_index = flat_ordinal % extended_limb_count;
+            KeySwitchReplayLimbPosition::from_topology_coordinate(
+                flat_ordinal / extended_limb_count,
+                extended_limb_index,
+                self.topology.extended_moduli()[extended_limb_index],
+            )
+        })
+    }
+}
+
+fn transform_authenticated_limb(
+    mut coefficients: Vec<u64>,
+    modulus: u64,
+) -> CanonicalResult<Vec<u64>> {
+    if coefficients.len() != POLYNOMIAL_DEGREE {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "replayed key-switch limb has the wrong polynomial degree",
+        ));
+    }
+    if coefficients
+        .iter()
+        .any(|coefficient| *coefficient >= modulus)
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidProtocolObject,
+            "replayed key-switch limb contains a non-canonical residue",
+        ));
+    }
+    forward_negacyclic_ntt_in_place(&mut coefficients, modulus)?;
+    Ok(coefficients)
+}
+
+fn key_switch_replay_size_error() -> CanonicalError {
+    CanonicalError::new(
+        CanonicalErrorCode::InvalidProtocolObject,
+        "replayed key-switch limb count overflowed",
+    )
 }
 
 #[derive(Clone)]
@@ -59,15 +315,24 @@ impl KeySwitchComponent {
             .collect()
     }
 
+    #[cfg(test)]
+    pub(crate) fn component_a_coefficients(&self) -> CanonicalResult<Vec<Vec<u64>>> {
+        self.component_a_ntt
+            .iter()
+            .zip(self.moduli.iter())
+            .map(|(component_a_limb_ntt, modulus)| {
+                inverse_negacyclic_ntt(component_a_limb_ntt, *modulus)
+            })
+            .collect()
+    }
+
     fn from_coefficients(
         component_b: Vec<Vec<u64>>,
         component_a: Vec<Vec<u64>>,
         primes: &[u64],
     ) -> CanonicalResult<Self> {
-        let component_b_ntt = ntt_limbs(&component_b, primes)?;
-        let component_a_ntt = ntt_limbs(&component_a, primes)?;
-        drop(component_b);
-        drop(component_a);
+        let component_b_ntt = ntt_limbs(component_b, primes)?;
+        let component_a_ntt = ntt_limbs(component_a, primes)?;
 
         Ok(Self {
             component_b_ntt,
@@ -77,7 +342,7 @@ impl KeySwitchComponent {
     }
 }
 
-fn ntt_limbs(limbs: &[Vec<u64>], primes: &[u64]) -> CanonicalResult<Vec<Vec<u64>>> {
+fn ntt_limbs(mut limbs: Vec<Vec<u64>>, primes: &[u64]) -> CanonicalResult<Vec<Vec<u64>>> {
     if limbs.len() != primes.len() {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
@@ -86,25 +351,20 @@ fn ntt_limbs(limbs: &[Vec<u64>], primes: &[u64]) -> CanonicalResult<Vec<Vec<u64>
     }
 
     evaluator_parallel_iterator!(
-        limbs.par_iter().zip(primes.par_iter()),
-        limbs.iter().zip(primes.iter())
+        limbs.par_iter_mut().zip(primes.par_iter()),
+        limbs.iter_mut().zip(primes.iter())
     )
-    .map(|(limb, modulus)| forward_negacyclic_ntt(limb, *modulus))
-    .collect()
+    .try_for_each(|(limb, modulus)| forward_negacyclic_ntt_in_place(limb, *modulus))?;
+    Ok(limbs)
 }
 
 fn extended_moduli_for_level(level: usize) -> CanonicalResult<Vec<u64>> {
-    if level >= DATA_PRIMES.len() {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidProtocolObject,
-            "hybrid key-switch level is outside the selected data basis",
-        ));
-    }
-    let mut moduli = DATA_PRIMES[..=level].to_vec();
-    moduli.extend(KEY_SWITCH_SPECIAL_PRIMES);
-    Ok(moduli)
+    Ok(KeySwitchDecompositionTopology::for_level(level)?
+        .extended_moduli()
+        .to_vec())
 }
 
+#[cfg(test)]
 fn secret_residues_for_moduli(secret: &[i64], moduli: &[u64]) -> Vec<Vec<u64>> {
     evaluator_parallel_iterator!(moduli.par_iter(), moduli.iter())
         .map(|modulus| {
@@ -119,6 +379,7 @@ fn secret_residues_for_moduli(secret: &[i64], moduli: &[u64]) -> Vec<Vec<u64>> {
 // Generate a key-switching key for a source polynomial whose RNS limbs are
 // `source_limbs` (one residue vector per active prime), under the development
 // secret, at the given modulus level.
+#[cfg(test)]
 fn generate_key_switch_key(
     key: &DevelopmentBgvKey,
     source_limbs: &[Vec<u64>],
@@ -126,47 +387,23 @@ fn generate_key_switch_key(
     domain: &str,
     seed_hex: &str,
 ) -> CanonicalResult<KeySwitchKey> {
-    generate_key_switch_key_with_block_size(
-        key,
-        source_limbs,
-        level,
-        domain,
-        seed_hex,
-        KEY_SWITCH_DATA_PRIMES_PER_BLOCK,
-    )
-}
-
-fn generate_key_switch_key_with_block_size(
-    key: &DevelopmentBgvKey,
-    source_limbs: &[Vec<u64>],
-    level: usize,
-    domain: &str,
-    seed_hex: &str,
-    data_primes_per_block: usize,
-) -> CanonicalResult<KeySwitchKey> {
-    if data_primes_per_block == 0 {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidProtocolObject,
-            "hybrid key-switch block size must be positive",
-        ));
-    }
-    if source_limbs.len() != level + 1 {
+    let topology = KeySwitchDecompositionTopology::for_level(level)?;
+    if source_limbs.len() != topology.data_prime_count() {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
             "hybrid key-switch source has the wrong data-limb count",
         ));
     }
-    let extended_moduli = extended_moduli_for_level(level)?;
+    let extended_moduli = topology.extended_moduli();
     let secret_residues = secret_residues_for_moduli(key.secret(), &extended_moduli);
-    let block_count = (level + 1).div_ceil(data_primes_per_block);
-    let components = (0..block_count)
+    let components = (0..topology.data_block_count())
         .map(|block_index| {
             generate_key_switch_component_for_block(
-                &extended_moduli,
+                extended_moduli,
                 &secret_residues,
                 source_limbs,
                 block_index,
-                data_primes_per_block,
+                topology.data_block_range(block_index)?,
                 domain,
                 seed_hex,
             )
@@ -174,18 +411,18 @@ fn generate_key_switch_key_with_block_size(
         .collect::<CanonicalResult<Vec<_>>>()?;
 
     Ok(KeySwitchKey {
-        level,
         components,
-        data_primes_per_block,
+        topology,
     })
 }
 
+#[cfg(test)]
 fn generate_key_switch_component_for_block(
     extended_moduli: &[u64],
     secret_residues: &[Vec<u64>],
     source_limbs: &[Vec<u64>],
     block_index: usize,
-    data_primes_per_block: usize,
+    block_range: std::ops::Range<usize>,
     domain: &str,
     seed_hex: &str,
 ) -> CanonicalResult<KeySwitchComponent> {
@@ -197,14 +434,11 @@ fn generate_key_switch_component_for_block(
         &[domain.as_bytes(), seed_hex.as_bytes(), &block_bytes],
     )
     .centered_binomial_eta2(POLYNOMIAL_DEGREE);
-    let data_limb_count = source_limbs.len();
-    let block_start = block_index * data_primes_per_block;
-    let block_end = data_limb_count.min(block_start + data_primes_per_block);
     let limbs = evaluator_parallel_iterator!(extended_moduli.par_iter(), extended_moduli.iter())
         .enumerate()
         .map(|(limb_index, modulus)| {
-            let source_limb = (limb_index < data_limb_count
-                && (block_start..block_end).contains(&limb_index))
+            let source_limb = (limb_index < source_limbs.len()
+                && block_range.contains(&limb_index))
             .then(|| source_limbs[limb_index].as_slice());
             generate_key_switch_component_limb_for_block(KeySwitchComponentLimbInput {
                 secret_residue_limb: &secret_residues[limb_index],
@@ -222,6 +456,7 @@ fn generate_key_switch_component_for_block(
     KeySwitchComponent::from_coefficients(component_b, component_a, extended_moduli)
 }
 
+#[cfg(test)]
 struct KeySwitchComponentLimbInput<'a> {
     secret_residue_limb: &'a [u64],
     source_limb: Option<&'a [u64]>,
@@ -232,6 +467,7 @@ struct KeySwitchComponentLimbInput<'a> {
     seed_hex: &'a str,
 }
 
+#[cfg(test)]
 fn generate_key_switch_component_limb_for_block(
     input: KeySwitchComponentLimbInput<'_>,
 ) -> CanonicalResult<(Vec<u64>, Vec<u64>)> {
@@ -271,7 +507,7 @@ fn generate_key_switch_component_limb_for_block(
     Ok((component_b_limb, public_sample))
 }
 
-fn special_basis_modulus_residue(modulus: u64) -> u64 {
+pub(crate) fn special_basis_modulus_residue(modulus: u64) -> u64 {
     KEY_SWITCH_SPECIAL_PRIMES
         .iter()
         .fold(1_u64, |product, special_modulus| {
@@ -279,6 +515,7 @@ fn special_basis_modulus_residue(modulus: u64) -> u64 {
         })
 }
 
+#[cfg(test)]
 fn public_component_a_limb(
     domain: &str,
     seed_hex: &str,
@@ -315,7 +552,7 @@ fn key_switch_component(
             "key-switch term must carry at least one limb",
         )
     })?;
-    if key_switch_key.level < term_level {
+    if key_switch_key.level() < term_level {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidProtocolObject,
             "key-switching key level is below the term level",
@@ -335,7 +572,8 @@ fn key_switch_component(
             ));
         }
     }
-    let active_block_count = (term_level + 1).div_ceil(key_switch_key.data_primes_per_block);
+    let active_topology = KeySwitchDecompositionTopology::for_level(term_level)?;
+    let active_block_count = active_topology.data_block_count();
     if key_switch_key.components.len() < active_block_count {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
@@ -343,7 +581,7 @@ fn key_switch_component(
         ));
     }
     let extended_moduli = extended_moduli_for_level(term_level)?;
-    let stored_special_limb_start = key_switch_key.level + 1;
+    let stored_special_limb_start = key_switch_key.level() + 1;
     let mut extended_zero_ntt = vec![vec![0_u64; POLYNOMIAL_DEGREE]; extended_moduli.len()];
     let mut extended_one_ntt = vec![vec![0_u64; POLYNOMIAL_DEGREE]; extended_moduli.len()];
 
@@ -351,12 +589,9 @@ fn key_switch_component(
         .iter()
         .enumerate()
     {
-        let block_start = block_index * key_switch_key.data_primes_per_block;
-        let block_end = (term_level + 1).min(block_start + key_switch_key.data_primes_per_block);
-        let digit = centered_block_reconstruction(
-            &term[block_start..block_end],
-            &DATA_PRIMES[block_start..block_end],
-        )?;
+        let block_range = active_topology.data_block_range(block_index)?;
+        let digit =
+            centered_block_reconstruction(&term[block_range.clone()], &DATA_PRIMES[block_range])?;
         for (extended_limb_index, modulus) in extended_moduli.iter().copied().enumerate() {
             let stored_limb_index = if extended_limb_index <= term_level {
                 extended_limb_index
@@ -369,7 +604,8 @@ fn key_switch_component(
                     "hybrid key-switch component basis does not match its key level",
                 ));
             }
-            let digit_ntt = forward_negacyclic_ntt(&digit.residues(modulus)?, modulus)?;
+            let mut digit_ntt = digit.residues(modulus)?;
+            forward_negacyclic_ntt_in_place(&mut digit_ntt, modulus)?;
             for (coefficient_index, digit_coefficient) in digit_ntt.iter().copied().enumerate() {
                 extended_zero_ntt[extended_limb_index][coefficient_index] = add_mod_fast(
                     extended_zero_ntt[extended_limb_index][coefficient_index],
@@ -393,21 +629,26 @@ fn key_switch_component(
         }
     }
 
-    let extended_zero = extended_zero_ntt
-        .iter()
-        .zip(extended_moduli.iter())
-        .map(|(limb, modulus)| inverse_negacyclic_ntt(limb, *modulus))
-        .collect::<CanonicalResult<Vec<_>>>()?;
-    let extended_one = extended_one_ntt
-        .iter()
-        .zip(extended_moduli.iter())
-        .map(|(limb, modulus)| inverse_negacyclic_ntt(limb, *modulus))
-        .collect::<CanonicalResult<Vec<_>>>()?;
+    evaluator_parallel_iterator!(
+        extended_zero_ntt
+            .par_iter_mut()
+            .zip(extended_moduli.par_iter()),
+        extended_zero_ntt.iter_mut().zip(extended_moduli.iter())
+    )
+    .try_for_each(|(limb, modulus)| inverse_negacyclic_ntt_in_place(limb, *modulus))?;
+    let component_zero = hybrid_modulus_down(&extended_zero_ntt, term_level)?;
+    drop(extended_zero_ntt);
 
-    Ok((
-        hybrid_modulus_down(&extended_zero, term_level)?,
-        hybrid_modulus_down(&extended_one, term_level)?,
-    ))
+    evaluator_parallel_iterator!(
+        extended_one_ntt
+            .par_iter_mut()
+            .zip(extended_moduli.par_iter()),
+        extended_one_ntt.iter_mut().zip(extended_moduli.iter())
+    )
+    .try_for_each(|(limb, modulus)| inverse_negacyclic_ntt_in_place(limb, *modulus))?;
+    let component_one = hybrid_modulus_down(&extended_one_ntt, term_level)?;
+
+    Ok((component_zero, component_one))
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -423,10 +664,13 @@ impl CenteredBlockCoefficients {
                 .iter()
                 .map(|coefficient| signed_residue(*coefficient, modulus))
                 .collect()),
-            Self::Wide(coefficients) => coefficients
-                .iter()
-                .map(|coefficient| bigint_residue(coefficient, modulus))
-                .collect(),
+            Self::Wide(coefficients) => {
+                let modulus_bigint = BigInt::from(modulus);
+                coefficients
+                    .iter()
+                    .map(|coefficient| bigint_residue_with_modulus(coefficient, &modulus_bigint))
+                    .collect()
+            }
         }
     }
 }
@@ -477,6 +721,7 @@ fn centered_block_reconstruction(
         .map(|modulus| BigUint::from(*modulus))
         .product::<BigUint>();
     let half_block_modulus = &block_modulus >> 1_usize;
+    let block_modulus_bigint = BigInt::from_biguint(Sign::Plus, block_modulus.clone());
     let crt_basis = moduli
         .iter()
         .map(|modulus| {
@@ -497,8 +742,7 @@ fn centered_block_reconstruction(
             .sum::<BigUint>()
             % &block_modulus;
         let centered = if residue > half_block_modulus {
-            BigInt::from_biguint(Sign::Plus, residue)
-                - BigInt::from_biguint(Sign::Plus, block_modulus.clone())
+            BigInt::from_biguint(Sign::Plus, residue) - &block_modulus_bigint
         } else {
             BigInt::from_biguint(Sign::Plus, residue)
         };
@@ -510,9 +754,13 @@ fn centered_block_reconstruction(
 
 fn bigint_residue(value: &BigInt, modulus: u64) -> CanonicalResult<u64> {
     let modulus_bigint = BigInt::from(modulus);
-    let mut residue = value % &modulus_bigint;
+    bigint_residue_with_modulus(value, &modulus_bigint)
+}
+
+fn bigint_residue_with_modulus(value: &BigInt, modulus: &BigInt) -> CanonicalResult<u64> {
+    let mut residue = value % modulus;
     if residue.sign() == Sign::Minus {
-        residue += &modulus_bigint;
+        residue += modulus;
     }
     residue.to_u64().ok_or_else(|| {
         CanonicalError::new(
@@ -603,6 +851,7 @@ fn add_component_in_place(target: &mut [Vec<u64>], addend: &[Vec<u64>], level: u
     }
 }
 
+#[cfg(test)]
 pub(crate) fn generate_relinearization_key(
     key: &DevelopmentBgvKey,
     level: usize,
@@ -628,7 +877,7 @@ pub(crate) fn relinearize(
             "relinearization requires a three-component ciphertext",
         ));
     }
-    if relinearization_key.level < ciphertext.level {
+    if relinearization_key.level() < ciphertext.level {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidProtocolObject,
             "relinearization key level is below the ciphertext level",

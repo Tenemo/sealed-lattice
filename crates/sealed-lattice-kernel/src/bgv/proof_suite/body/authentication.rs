@@ -1,28 +1,28 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::bgv::proof_suite::COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH;
 use crate::foundation::{CanonicalItem, CanonicalItemType, hash_foundation_tuple_512};
 
 use super::super::{
     PROOF_CHALLENGE_EXTENSION_DEGREE,
     decoder::{BoundedProofDecoder, ProofByteSource},
     merkle::{
-        ProofAuthenticationNode, ProofLeafVisibility, ProofMerkleError, ProofMerkleTreeContext,
-        ProofOraclePhasePairLeaf, ProofTreeRole, ProofTreeValue, verify_authentication_frontier,
+        ProofLeafVisibility, ProofMerkleError, ProofMerkleTreeContext, ProofOraclePhasePairLeaf,
+        ProofTreeRole, ProofTreeValue, minimal_frontier_coordinates,
+        verify_authentication_frontier,
     },
 };
 use super::decoding::{
     DecodedProofPhasePairLeaf, read_hash_item, read_item_header, read_list_header,
-    read_tuple_header, read_u16_item, read_u32_item, read_u64_item,
+    read_tuple_header, read_u16_item, read_u64_item,
 };
-use super::sizing::nested_tuple_list_byte_length;
 use super::{
-    AUTHENTICATION_NODE_CANONICAL_BYTE_LENGTH, COMMITTED_MATERIAL_LEAF_HASH_DOMAIN,
+    AUTHENTICATION_DIGEST_BYTE_LENGTH, COMMITTED_MATERIAL_LEAF_HASH_DOMAIN,
     COMMITTED_MATERIAL_NODE_HASH_DOMAIN, COMMITTED_MATERIAL_PHASE_PAIR_LEAF_SCHEMA_IDENTIFIER,
     COMMITTED_MATERIAL_ROW_WIDTH, PROOF_AUTHENTICATION_FRONTIER_SCHEMA_IDENTIFIER,
-    PROOF_AUTHENTICATION_NODE_SCHEMA_IDENTIFIER, PROOF_ORACLE_PHASE_PAIR_LEAF_SCHEMA_IDENTIFIER,
-    ProofBodyError, ProofTreeCatalogEntry, ProofTreeCatalogSource, ProofTreeConstruction,
-    SCHEMA_VERSION, SECRET_LEAF_SALT_BYTE_LENGTH, SETUP_PUBLIC_POLYNOMIAL_LEAF_HASH_DOMAIN,
-    SETUP_PUBLIC_POLYNOMIAL_NODE_HASH_DOMAIN,
+    PROOF_ORACLE_PHASE_PAIR_LEAF_SCHEMA_IDENTIFIER, ProofBodyError, ProofTreeCatalogEntry,
+    ProofTreeCatalogSource, ProofTreeConstruction, SCHEMA_VERSION,
+    SETUP_PUBLIC_POLYNOMIAL_LEAF_HASH_DOMAIN, SETUP_PUBLIC_POLYNOMIAL_NODE_HASH_DOMAIN,
     SETUP_PUBLIC_POLYNOMIAL_PHASE_PAIR_LEAF_SCHEMA_IDENTIFIER,
 };
 
@@ -104,9 +104,9 @@ fn decode_common_phase_pair_leaf(
         read_item_header(
             &mut decoder,
             CanonicalItemType::RawBytes,
-            SECRET_LEAF_SALT_BYTE_LENGTH,
+            COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH,
         )?;
-        Some(decoder.read_array::<SECRET_LEAF_SALT_BYTE_LENGTH>()?)
+        Some(decoder.read_array::<COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH>()?)
     } else {
         None
     };
@@ -176,9 +176,9 @@ fn decode_statement_owned_phase_pair_leaf(
         read_item_header(
             &mut decoder,
             CanonicalItemType::RawBytes,
-            SECRET_LEAF_SALT_BYTE_LENGTH,
+            COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH,
         )?;
-        let _ = decoder.read_array::<SECRET_LEAF_SALT_BYTE_LENGTH>()?;
+        let _ = decoder.read_array::<COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH>()?;
     }
     let row_width = usize::try_from(layout.row_width).map_err(|_| ProofBodyError::CountOverflow)?;
     let first_point_values =
@@ -262,118 +262,64 @@ pub(super) fn hash_canonical_leaf(
     .into_bytes())
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub(super) struct ParsedAuthenticationNode {
-    pub(super) level: u32,
-    pub(super) node_index: u64,
-    pub(super) node_digest: [u8; 64],
-}
-
 pub(super) fn read_authentication_frontier<Source: ProofByteSource + ?Sized>(
     decoder: &mut BoundedProofDecoder<'_, Source>,
     expected_tree_catalog_index: u16,
     expected_node_count: usize,
-) -> Result<Vec<ParsedAuthenticationNode>, ProofBodyError> {
+) -> Result<Vec<[u8; AUTHENTICATION_DIGEST_BYTE_LENGTH]>, ProofBodyError> {
     read_tuple_header(decoder, PROOF_AUTHENTICATION_FRONTIER_SCHEMA_IDENTIFIER, 2)?;
     read_u16_item(
         decoder,
         expected_tree_catalog_index,
         ProofBodyError::InvalidTreeCatalogIndex,
     )?;
-    let list_byte_length = nested_tuple_list_byte_length(
-        expected_node_count,
-        AUTHENTICATION_NODE_CANONICAL_BYTE_LENGTH,
-    )?;
+    let list_byte_length = expected_node_count
+        .checked_mul(AUTHENTICATION_DIGEST_BYTE_LENGTH)
+        .and_then(|length| length.checked_add(6))
+        .filter(|length| u32::try_from(*length).is_ok())
+        .ok_or(ProofBodyError::CountOverflow)?;
     read_item_header(
         decoder,
         CanonicalItemType::HomogeneousList,
         list_byte_length,
     )?;
-    read_list_header(decoder, CanonicalItemType::NestedTuple, expected_node_count)?;
-    let mut nodes = Vec::new();
-    nodes
+    read_list_header(decoder, CanonicalItemType::Hash512, expected_node_count)?;
+    let mut digests = Vec::new();
+    digests
         .try_reserve_exact(expected_node_count)
         .map_err(|_| ProofBodyError::AllocationLimitExceeded)?;
     for _ in 0..expected_node_count {
-        read_tuple_header(decoder, PROOF_AUTHENTICATION_NODE_SCHEMA_IDENTIFIER, 3)?;
-        let node = ParsedAuthenticationNode {
-            level: read_u32_item(decoder)?,
-            node_index: read_u64_item(decoder)?,
-            node_digest: read_hash_item(decoder)?,
-        };
-        if nodes.last().is_some_and(|previous| previous >= &node) {
-            return Err(ProofMerkleError::NonCanonicalOrder.into());
-        }
-        nodes.push(node);
+        digests.push(decoder.read_hash512()?);
     }
-    Ok(nodes)
+    Ok(digests)
 }
 
 pub(in crate::bgv::proof_suite) fn minimal_frontier_node_count(
     sorted_unique_leaf_indexes: &[u64],
     leaf_count: usize,
 ) -> Result<usize, ProofBodyError> {
-    if sorted_unique_leaf_indexes.is_empty()
-        || leaf_count == 0
-        || !leaf_count.is_power_of_two()
-        || !sorted_unique_leaf_indexes
-            .windows(2)
-            .all(|pair| pair[0] < pair[1])
-        || sorted_unique_leaf_indexes
-            .last()
-            .is_some_and(|index| usize::try_from(*index).map_or(true, |index| index >= leaf_count))
-    {
-        return Err(ProofBodyError::InvalidQueryRepresentatives);
-    }
-    let mut required = sorted_unique_leaf_indexes
-        .iter()
-        .copied()
-        .collect::<BTreeSet<_>>();
-    let mut frontier_count = 0_usize;
-    for _ in 0..leaf_count.trailing_zeros() {
-        let mut next = BTreeSet::new();
-        let mut processed = BTreeSet::new();
-        for index in required.iter().copied() {
-            if !processed.insert(index) {
-                continue;
-            }
-            let sibling = index ^ 1;
-            if required.contains(&sibling) {
-                processed.insert(sibling);
-            } else {
-                frontier_count = frontier_count
-                    .checked_add(1)
-                    .ok_or(ProofBodyError::CountOverflow)?;
-            }
-            next.insert(index / 2);
-        }
-        required = next;
-    }
-    Ok(frontier_count)
+    minimal_frontier_coordinates(sorted_unique_leaf_indexes, leaf_count)
+        .map(|coordinates| coordinates.len())
+        .map_err(|error| match error {
+            ProofMerkleError::CountOverflow => ProofBodyError::CountOverflow,
+            _ => ProofBodyError::InvalidQueryRepresentatives,
+        })
 }
 
 pub(super) fn authenticate_opening(
     entry: &ProofTreeCatalogEntry,
     sorted_unique_opened_leaves: &[(u64, [u8; 64])],
-    frontier: &[ParsedAuthenticationNode],
+    frontier: &[[u8; AUTHENTICATION_DIGEST_BYTE_LENGTH]],
     expected_root: [u8; 64],
     leaf_count: usize,
 ) -> Result<(), ProofBodyError> {
     match &entry.construction {
-        ProofTreeConstruction::Common(context) => {
-            let common_frontier = frontier
-                .iter()
-                .map(|node| {
-                    ProofAuthenticationNode::new(node.level, node.node_index, node.node_digest)
-                })
-                .collect::<Vec<_>>();
-            Ok(verify_authentication_frontier(
-                context,
-                sorted_unique_opened_leaves,
-                &common_frontier,
-                expected_root,
-            )?)
-        }
+        ProofTreeConstruction::Common(context) => Ok(verify_authentication_frontier(
+            context,
+            sorted_unique_opened_leaves,
+            frontier,
+            expected_root,
+        )?),
         ProofTreeConstruction::CommittedMaterial { .. }
         | ProofTreeConstruction::SetupPolynomial { .. } => verify_statement_owned_frontier(
             &entry.construction,
@@ -388,14 +334,13 @@ pub(super) fn authenticate_opening(
 fn verify_statement_owned_frontier(
     construction: &ProofTreeConstruction,
     sorted_unique_opened_leaves: &[(u64, [u8; 64])],
-    frontier: &[ParsedAuthenticationNode],
+    frontier: &[[u8; AUTHENTICATION_DIGEST_BYTE_LENGTH]],
     expected_root: [u8; 64],
     leaf_count: usize,
 ) -> Result<(), ProofBodyError> {
     if !sorted_unique_opened_leaves
         .windows(2)
         .all(|pair| pair[0].0 < pair[1].0)
-        || frontier.windows(2).any(|pair| pair[0] >= pair[1])
     {
         return Err(ProofMerkleError::NonCanonicalOrder.into());
     }
@@ -417,14 +362,12 @@ fn verify_statement_owned_frontier(
                 processed.insert(sibling_index);
                 digest
             } else {
-                let supplied = frontier
+                let supplied_digest = frontier
                     .get(frontier_offset)
+                    .copied()
                     .ok_or(ProofMerkleError::InvalidOpening)?;
-                if supplied.level != level || supplied.node_index != sibling_index {
-                    return Err(ProofMerkleError::InvalidOpening.into());
-                }
                 frontier_offset += 1;
-                supplied.node_digest
+                supplied_digest
             };
             let own_digest = *current
                 .get(&index)

@@ -41,7 +41,3 @@ export type BgvCollectiveSetupParametersDescription = {
 };
 
 export type BgvCollectiveSetupVerification = VerificationResult<void>;
-
-export type BgvPrivateVssShareEnvelopeVerification = VerificationResult<{
-    readonly privateEnvelopeHash: ProtocolHash;
-}>;

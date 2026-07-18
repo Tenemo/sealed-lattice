@@ -16,10 +16,10 @@ use super::super::{
 use super::{
     AnchorOpeningWitness, AnchorQuotientWitness, BoundPolynomialRootUse, BoundedUnsignedColumn,
     KeyRelationPlanBuilder, KeyVerifierSourceKey, MATERIAL_DIGIT_RADIX, MATERIAL_DIGIT_TRIT_COUNT,
-    MODULAR_QUOTIENT_BIT_COUNT, ProofTreePhase, ReversibleShiftedSmallVector, ShiftedSmallVector,
-    SplitIntegerVector, TRIT_RADIX, TRUSTEE_QUOTIENT_LOW_TRIT_COUNT, TargetBoundedUnsignedVector,
-    TargetCenteredVector, TargetCommittedMaterialVector, TrusteeAnchorOpeningWitness,
-    TrusteeRadixThreeQuotientWitness,
+    MODULAR_QUOTIENT_BIT_COUNT, ProofTreePhase, RecenteredVerifierVectorWitness,
+    ReversibleShiftedSmallVector, ShiftedSmallVector, SplitIntegerVector, TRIT_RADIX,
+    TRUSTEE_QUOTIENT_LOW_TRIT_COUNT, TargetBoundedUnsignedVector, TargetCenteredVector,
+    TargetCommittedMaterialVector, TrusteeAnchorOpeningWitness, TrusteeRadixThreeQuotientWitness,
     column_builder::{fixed_radix_digits, minimum_unsigned_radix_digit_count},
 };
 
@@ -49,11 +49,15 @@ impl<'context> KeyRelationPlanBuilder<'context> {
                 )?,
             );
         }
-        Ok(SplitIntegerVector {
+        let vector = SplitIntegerVector {
             halves: halves
                 .try_into()
                 .map_err(|_| RelationPlanError::CountOverflow)?,
-        })
+        };
+        for half in vector.halves {
+            self.register_exact_radix_decomposition(half, modulus_reference, None)?;
+        }
+        Ok(vector)
     }
 
     pub(in crate::bgv::proof_suite::relation_plan) fn add_split_verifier_base_vector(
@@ -200,6 +204,9 @@ impl<'context> KeyRelationPlanBuilder<'context> {
                 None,
             )?;
             let halves = [low, high];
+            for half in halves {
+                self.register_exact_radix_decomposition(half, modulus_reference, None)?;
+            }
             tree_columns.extend(halves);
             rows.push(SplitIntegerVector { halves });
         }
@@ -254,6 +261,9 @@ impl<'context> KeyRelationPlanBuilder<'context> {
                 None,
             )?;
             tree_columns.extend([low, high]);
+            for half in [low, high] {
+                self.register_exact_radix_decomposition(half, *modulus_reference, None)?;
+            }
             limbs.push(SplitIntegerVector {
                 halves: [low, high],
             });
@@ -308,6 +318,9 @@ impl<'context> KeyRelationPlanBuilder<'context> {
                 None,
             )?;
             tree_columns.extend([low, high]);
+            for half in [low, high] {
+                self.register_exact_radix_decomposition(half, *modulus_reference, None)?;
+            }
             rows.push(SplitIntegerVector {
                 halves: [low, high],
             });
@@ -452,12 +465,6 @@ impl<'context> KeyRelationPlanBuilder<'context> {
                         coefficients,
                         offset: 0,
                     },
-                    reversed: SplitIntegerVector {
-                        halves: [
-                            self.push_prover_column(ProofTreePhase::Base)?,
-                            self.push_prover_column(ProofTreePhase::Base)?,
-                        ],
-                    },
                 })
             })
             .collect()
@@ -516,29 +523,46 @@ impl<'context> KeyRelationPlanBuilder<'context> {
 
     pub(in crate::bgv::proof_suite::relation_plan) fn add_bounded_unsigned_vector_trits(
         &mut self,
-        maximum: u64,
+        maximum: &BigUint,
     ) -> Result<TargetBoundedUnsignedVector, RelationPlanError> {
-        let maximum_digits = fixed_radix_digits(maximum, 2, MATERIAL_DIGIT_RADIX)?;
+        if maximum.is_zero() {
+            return Err(RelationPlanError::InvalidConstraint);
+        }
+        let material_digit_radix = BigUint::from(MATERIAL_DIGIT_RADIX);
+        let mut remaining = maximum.clone();
+        let mut maximum_digits = Vec::new();
+        while !remaining.is_zero() {
+            maximum_digits.push(
+                u64::try_from(&remaining % &material_digit_radix)
+                    .map_err(|_| RelationPlanError::IntegerBoundOverflow)?,
+            );
+            remaining /= &material_digit_radix;
+        }
         let mut halves = Vec::with_capacity(2);
         let mut digit_columns_by_half = Vec::with_capacity(2);
         let mut upper_bound_comparators = Vec::with_capacity(2);
         for _ in 0..2 {
-            let low_digit = self.push_prover_column(ProofTreePhase::Base)?;
-            let high_digit = self.push_prover_column(ProofTreePhase::Base)?;
-            let low_trits =
-                self.add_trit_columns(MATERIAL_DIGIT_TRIT_COUNT, ProofTreePhase::Base)?;
-            let high_trit_count =
-                minimum_unsigned_radix_digit_count(maximum_digits[1], TRIT_RADIX)?;
-            let high_trits = self.add_trit_columns(high_trit_count, ProofTreePhase::Base)?;
-            self.certify_unsigned_recomposition(low_digit, TRIT_RADIX, &low_trits)?;
-            self.certify_unsigned_recomposition(high_digit, TRIT_RADIX, &high_trits)?;
+            let mut digit_columns = Vec::with_capacity(maximum_digits.len());
+            let mut all_trits = Vec::new();
+            for (digit_ordinal, maximum_digit) in maximum_digits.iter().copied().enumerate() {
+                let digit_column = self.push_prover_column(ProofTreePhase::Base)?;
+                let trit_count = if digit_ordinal + 1 == maximum_digits.len() {
+                    minimum_unsigned_radix_digit_count(maximum_digit, TRIT_RADIX)?
+                } else {
+                    MATERIAL_DIGIT_TRIT_COUNT
+                };
+                let trits = self.add_trit_columns(trit_count, ProofTreePhase::Base)?;
+                self.certify_unsigned_recomposition(digit_column, TRIT_RADIX, &trits)?;
+                digit_columns.push(digit_column);
+                all_trits.extend(trits);
+            }
             upper_bound_comparators.push(self.add_upper_bound_comparator(
-                &[low_digit, high_digit],
+                &digit_columns,
                 &maximum_digits,
                 ProofTreePhase::Base,
             )?);
-            digit_columns_by_half.push([low_digit, high_digit]);
-            halves.push(low_trits.into_iter().chain(high_trits).collect::<Vec<_>>());
+            digit_columns_by_half.push(digit_columns);
+            halves.push(all_trits);
         }
         Ok(TargetBoundedUnsignedVector {
             digit_columns_by_half: digit_columns_by_half
@@ -643,15 +667,7 @@ impl<'context> KeyRelationPlanBuilder<'context> {
         &mut self,
     ) -> Result<ReversibleShiftedSmallVector, RelationPlanError> {
         let source = self.add_shifted_ternary_vector()?;
-        Ok(ReversibleShiftedSmallVector {
-            source,
-            reversed: SplitIntegerVector {
-                halves: [
-                    self.push_prover_column(ProofTreePhase::Base)?,
-                    self.push_prover_column(ProofTreePhase::Base)?,
-                ],
-            },
-        })
+        Ok(ReversibleShiftedSmallVector { source })
     }
 
     pub(in crate::bgv::proof_suite::relation_plan) fn add_signed_ternary_vector(
@@ -676,15 +692,7 @@ impl<'context> KeyRelationPlanBuilder<'context> {
         &mut self,
     ) -> Result<ReversibleShiftedSmallVector, RelationPlanError> {
         let source = self.add_signed_ternary_vector()?;
-        Ok(ReversibleShiftedSmallVector {
-            source,
-            reversed: SplitIntegerVector {
-                halves: [
-                    self.push_prover_column(ProofTreePhase::Base)?,
-                    self.push_prover_column(ProofTreePhase::Base)?,
-                ],
-            },
-        })
+        Ok(ReversibleShiftedSmallVector { source })
     }
 
     pub(in crate::bgv::proof_suite::relation_plan) fn add_binary_vector(
@@ -741,7 +749,6 @@ impl<'context> KeyRelationPlanBuilder<'context> {
             .ok_or(RelationPlanError::InvalidModulus)?
             / 2;
         let mut shifted_centered_halves = Vec::with_capacity(2);
-        let mut reversed_halves = Vec::with_capacity(2);
         for canonical_half in canonical_vector.halves {
             let shifted_centered =
                 self.add_canonical_modulus_column(modulus_reference, ProofTreePhase::Base)?;
@@ -764,7 +771,6 @@ impl<'context> KeyRelationPlanBuilder<'context> {
             ];
             self.add_full_trace_constraint(expression, true)?;
             shifted_centered_halves.push(shifted_centered);
-            reversed_halves.push(self.push_prover_column(ProofTreePhase::Base)?);
         }
         Ok(ReversibleShiftedSmallVector {
             source: ShiftedSmallVector {
@@ -775,11 +781,6 @@ impl<'context> KeyRelationPlanBuilder<'context> {
                 },
                 offset: centered_offset,
             },
-            reversed: SplitIntegerVector {
-                halves: reversed_halves
-                    .try_into()
-                    .map_err(|_| RelationPlanError::CountOverflow)?,
-            },
         })
     }
 
@@ -788,8 +789,63 @@ impl<'context> KeyRelationPlanBuilder<'context> {
         source_key: &KeyVerifierSourceKey,
         modulus_reference: SuiteModulusReference,
     ) -> Result<ReversibleShiftedSmallVector, RelationPlanError> {
+        self.add_recentered_split_verifier_vector_with_witness(source_key, modulus_reference)
+            .map(|witness| witness.centered)
+    }
+
+    pub(in crate::bgv::proof_suite::relation_plan) fn add_recentered_split_verifier_vector_with_witness(
+        &mut self,
+        source_key: &KeyVerifierSourceKey,
+        modulus_reference: SuiteModulusReference,
+    ) -> Result<RecenteredVerifierVectorWitness, RelationPlanError> {
         let canonical_vector = self.add_split_verifier_vector(source_key, modulus_reference)?;
-        self.add_recentered_vector(canonical_vector, modulus_reference)
+        let modulus = self.modulus(modulus_reference)?;
+        let centered_offset = modulus
+            .checked_sub(1)
+            .ok_or(RelationPlanError::InvalidModulus)?
+            / 2;
+        let mut shifted_centered_halves = Vec::with_capacity(2);
+        let mut carry_columns = Vec::with_capacity(2);
+        for canonical_half in canonical_vector.halves {
+            let shifted_centered =
+                self.add_canonical_modulus_column(modulus_reference, ProofTreePhase::Base)?;
+            let recentering_carry = self.add_binary_column(ProofTreePhase::Base)?;
+            let expression = vec![
+                unrotated_column_expression(shifted_centered),
+                unrotated_column_expression(canonical_half),
+                RelationExpressionInstruction::Negation,
+                RelationExpressionInstruction::Addition,
+                RelationExpressionInstruction::BaseFieldConstant(centered_offset),
+                RelationExpressionInstruction::Negation,
+                RelationExpressionInstruction::Addition,
+                unrotated_column_expression(recentering_carry),
+                RelationExpressionInstruction::NonNativeModulusConstant {
+                    modulus_reference,
+                    multiplier: 1,
+                },
+                RelationExpressionInstruction::Multiplication,
+                RelationExpressionInstruction::Addition,
+            ];
+            self.add_full_trace_constraint(expression, true)?;
+            shifted_centered_halves.push(shifted_centered);
+            carry_columns.push(recentering_carry);
+        }
+        Ok(RecenteredVerifierVectorWitness {
+            canonical: canonical_vector,
+            centered: ReversibleShiftedSmallVector {
+                source: ShiftedSmallVector {
+                    coefficients: SplitIntegerVector {
+                        halves: shifted_centered_halves
+                            .try_into()
+                            .map_err(|_| RelationPlanError::CountOverflow)?,
+                    },
+                    offset: centered_offset,
+                },
+            },
+            carry_columns: carry_columns
+                .try_into()
+                .map_err(|_| RelationPlanError::CountOverflow)?,
+        })
     }
 
     pub(in crate::bgv::proof_suite::relation_plan) fn add_anchor_opening_witness(

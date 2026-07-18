@@ -298,7 +298,7 @@ fn layout(ring_degree: usize) -> CanonicalResult<Layout> {
     }
     // Committed degree bound `2m` covers the masked columns and the quadratic
     // support and fraction constraints. The coset is `FRI_RATE_BLOWUP` times
-    // that bound, giving FRI rate 1/4; N = 32768 therefore runs unsplit below
+    // that bound, giving FRI rate 1/4; N = 65536 therefore runs unsplit below
     // the 2^20 domain ceiling.
     let coset_size = FRI_RATE_BLOWUP * 2 * ring_degree;
     if coset_size > super::domain::MAX_TWO_ADIC_ORDER {

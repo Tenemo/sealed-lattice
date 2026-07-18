@@ -55,12 +55,11 @@ pub(super) fn evaluator_key_schedule_value() -> CanonicalResult<Value> {
     }))
 }
 
-// One relinearization key per round at the selected evaluator working level:
-// lower levels reuse the same key through CRT-idempotent truncation, so the
-// schedule carries no per-level entries.
+// One relinearization key per round at the highest multiplication level;
+// lower levels reuse it through CRT-idempotent truncation.
 pub(super) fn expected_relinearization_level_schedule() -> Value {
     Value::Array(vec![json!({
-        "level": SELECTED_EVALUATOR_WORKING_LEVEL,
+        "level": crate::bgv::evaluator::top_k::SELECTED_RELINEARIZATION_KEY_LEVEL,
     })])
 }
 

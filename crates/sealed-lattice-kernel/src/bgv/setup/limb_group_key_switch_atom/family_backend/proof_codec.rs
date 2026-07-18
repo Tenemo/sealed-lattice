@@ -326,7 +326,7 @@ pub(super) fn decode_key_proof<const LIMB_COUNT: usize>(
 
 #[cfg(test)]
 mod tests {
-    use super::super::super::proof_field::sixteen_limb_group_field_parameters;
+    use super::super::super::proof_field::selected_key_switch_proof_field_parameters;
     use super::super::key_proof::{
         KeyFriProofParameters, KeySource, key_fri_proof_decoding_shape, prove_round_one_key_fri,
         verify_round_one_key_fri,
@@ -341,7 +341,7 @@ mod tests {
         KeyFriProofParameters,
         KeyFriProof<13>,
     ) {
-        let parameters = sixteen_limb_group_field_parameters();
+        let parameters = selected_key_switch_proof_field_parameters();
         let ring_degree = 64;
         let digit_count = 3;
         let (secret, digits, public) =
@@ -366,7 +366,7 @@ mod tests {
 
     #[test]
     fn encode_decode_round_trips_and_the_decoded_proof_verifies() {
-        let parameters = sixteen_limb_group_field_parameters();
+        let parameters = selected_key_switch_proof_field_parameters();
         let (public, ring_degree, proof_parameters, proof) = sample_proof();
         let bytes = encode_key_proof(&proof).expect("encode");
         let decoding_shape = key_fri_proof_decoding_shape(
@@ -395,7 +395,7 @@ mod tests {
 
     #[test]
     fn malformed_proof_encodings_are_rejected() {
-        let parameters = sixteen_limb_group_field_parameters();
+        let parameters = selected_key_switch_proof_field_parameters();
         let (public, ring_degree, proof_parameters, proof) = sample_proof();
         let bytes = encode_key_proof(&proof).expect("encode");
         let decoding_shape = key_fri_proof_decoding_shape(

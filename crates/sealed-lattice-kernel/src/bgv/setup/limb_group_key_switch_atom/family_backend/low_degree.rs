@@ -484,7 +484,7 @@ pub(super) fn verify_low_degree<const LIMB_COUNT: usize>(
 mod tests {
     use super::super::super::proof_field::{
         ProofFieldParameters, eight_limb_group_field_parameters,
-        sixteen_limb_group_field_parameters,
+        selected_key_switch_proof_field_parameters,
     };
     use super::super::domain::{CyclicDomain, coset_offset};
     use super::*;
@@ -566,12 +566,12 @@ mod tests {
     #[test]
     fn geometric_inverse_folding_matches_direct_point_inversion() {
         check_geometric_inverse_folding(&eight_limb_group_field_parameters());
-        check_geometric_inverse_folding(&sixteen_limb_group_field_parameters());
+        check_geometric_inverse_folding(&selected_key_switch_proof_field_parameters());
     }
 
     #[test]
     fn honest_low_degree_codeword_verifies() {
-        let parameters = sixteen_limb_group_field_parameters();
+        let parameters = selected_key_switch_proof_field_parameters();
         let blowup = 4;
         let trace_size = 64;
         let coset_size = trace_size * blowup;
@@ -610,7 +610,7 @@ mod tests {
 
     #[test]
     fn high_degree_codeword_is_rejected() {
-        let parameters = sixteen_limb_group_field_parameters();
+        let parameters = selected_key_switch_proof_field_parameters();
         let blowup = 4;
         let trace_size = 64;
         let coset_size = trace_size * blowup;
@@ -690,7 +690,7 @@ mod tests {
 
     #[test]
     fn wrong_domain_size_is_rejected() {
-        let parameters = sixteen_limb_group_field_parameters();
+        let parameters = selected_key_switch_proof_field_parameters();
         let blowup = 4;
         let trace_size = 64;
         let coset_size = trace_size * blowup;

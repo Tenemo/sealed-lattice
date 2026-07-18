@@ -1,12 +1,11 @@
 use super::{
-    BTreeMap, BoundTreeConstructionKind, BoundedCommonProofByteSinkError,
-    COMMON_PROOF_RELATION_EVALUATION_BLOCK_LENGTH, CommonProofEncodingError,
-    CommonProofGenerationPoll, CommonProofMerkleStoragePlan, CommonProofOpeningArtifact,
-    CommonProofOpeningGeometry, CommonProofPrivacyMode, CommonProofPrivateCoinError,
-    CommonProofProverError, CommonProofSourcePolynomial, CommonProofTranscriptSchedule,
-    CompiledRelationPlan, CompleteProofTreeCatalog, ExternalPolynomialVector,
-    ExternalStockhamTransformDirection, ExternalStockhamTransformPlan, HASH_BYTE_LENGTH,
-    PROOF_CHALLENGE_EXTENSION_DEGREE, ProofBaseFieldElement, ProofBodyError,
+    BTreeMap, BTreeSet, BoundTreeConstructionKind, COMMON_PROOF_RELATION_EVALUATION_BLOCK_LENGTH,
+    CommonProofGenerationPoll, CommonProofMerkleStoragePlan, CommonProofPrivacyMode,
+    CommonProofPrivateCoinError, CommonProofProverError, CommonProofQuotientConstraintTransformKey,
+    CommonProofSourcePolynomial, CommonProofSourcePolynomialProvider,
+    CommonProofTranscriptSchedule, CompiledRelationPlan, CompleteProofTreeCatalog,
+    ExternalPolynomialVector, ExternalStockhamTransformDirection, ExternalStockhamTransformPlan,
+    HASH_BYTE_LENGTH, PROOF_CHALLENGE_EXTENSION_DEGREE, ProofBaseFieldElement, ProofBodyError,
     ProofChallengeExtensionElement, ProofEvaluationDomain, ProofExternalMemory,
     ProofExternalMemoryError, ProofExternalMemoryExecutor, ProofExternalMemoryExecutorError,
     ProofExternalMemoryObject, ProofExternalMemoryObjectPlan, ProofExternalMemoryPlan,
@@ -15,35 +14,17 @@ use super::{
     RelationColumnValueType, RelationMaskKind, RelationMaskTargetClass, RelationPlanCheckContext,
     RelationPlanError, RelationPlanVariant, RelationProofTreeInput, RelationTreeDescriptor,
     StatementOwnedProofTreeInput, StoredCommonProofMerkleTree, TranscriptError, Zeroize, Zeroizing,
-    canonical_common_proof_leaf_byte_length, common_proof_merkle_storage_plan,
-    common_proof_tree_value_type, map_external_polynomial_plan_error,
-    required_relation_rotations_by_column, trim_extension_polynomial,
+    canonical_common_proof_leaf_byte_length, canonical_leaf_byte_length,
+    common_proof_merkle_storage_plan, common_proof_tree_value_type, entry_leaf_count,
+    external_polynomial_extension_read_resident_memory_requirement,
+    external_stockham_resident_memory_requirement, external_value_byte_length,
+    map_external_polynomial_plan_error, maximum_minimal_frontier_node_count,
+    proof_created_tree_roles_by_column, relation_column_replay_requirements,
+    replay_polynomial_key_for_claim, rotated_relation_evaluation_position,
+    trim_extension_polynomial,
 };
 #[cfg(test)]
 use super::{CommonProofByteSink, CommonProofPrivateCoinSource};
-
-/// Family-owned access to the statement trees already authenticated while
-/// constructing the application statement.  The common prover owns every
-/// proof-created tree; this boundary exists only because committed-material
-/// and setup-polynomial trees retain their canonical bytes in their owning
-/// family stores.
-pub(crate) trait CommonProofBoundOpeningProvider {
-    type Error;
-
-    fn opening_geometry(
-        &self,
-        catalog_entry: &ProofTreeCatalogEntry,
-    ) -> Result<CommonProofOpeningGeometry, Self::Error>;
-
-    fn encode_bound_opening_fragment(
-        &mut self,
-        catalog: &CompleteProofTreeCatalog,
-        catalog_index: usize,
-        geometry: CommonProofOpeningGeometry,
-        sorted_query_representatives: &[u64],
-        maximum_fragment_byte_length: usize,
-    ) -> Result<Vec<u8>, CommonProofEncodingError<BoundedCommonProofByteSinkError, Self::Error>>;
-}
 
 /// Complete application-owned inputs for one production common-proof
 /// attempt.  Only genuine pre-challenge source columns are accepted:
@@ -58,14 +39,14 @@ pub(crate) struct CommonProofGenerationInput<'input> {
     pub(crate) schedule_position: Option<u32>,
     pub(crate) top_count: Option<u16>,
     pub(crate) relation_trees: Vec<RelationProofTreeInput>,
-    pub(crate) provided_pre_challenge_columns: BTreeMap<u32, CommonProofSourcePolynomial>,
+    pub(crate) source_polynomial_provider: Box<dyn CommonProofSourcePolynomialProvider>,
     pub(crate) maximum_external_memory_chunk_byte_length: u32,
     pub(crate) maximum_proof_transport_chunk_byte_length: usize,
     pub(crate) maximum_prefetched_query_byte_length: u64,
 }
 
 #[derive(Debug)]
-pub(crate) enum CommonProofGenerationError<StorageError, CoinError, SinkError, BoundOpeningError> {
+pub(crate) enum CommonProofGenerationError<StorageError, CoinError, SinkError> {
     Prover(CommonProofProverError),
     Profile(ProofProfileError),
     Relation(RelationPlanError),
@@ -75,32 +56,24 @@ pub(crate) enum CommonProofGenerationError<StorageError, CoinError, SinkError, B
     Storage(ProofExternalMemoryExecutorError<StorageError>),
     CoinSource(CoinError),
     Sink(SinkError),
-    BoundOpening(BoundOpeningError),
     Cleanup {
-        original:
-            Box<CommonProofGenerationError<StorageError, CoinError, SinkError, BoundOpeningError>>,
+        original: Box<CommonProofGenerationError<StorageError, CoinError, SinkError>>,
         cleanup: ProofExternalMemoryExecutorError<StorageError>,
     },
 }
 
-pub(super) type CommonProofGenerationPollResult<
-    StorageError,
-    CoinError,
-    SinkError,
-    BoundOpeningError,
-> = Result<
+pub(super) type CommonProofGenerationPollResult<StorageError, CoinError, SinkError> = Result<
     CommonProofGenerationPoll,
-    CommonProofGenerationError<StorageError, CoinError, SinkError, BoundOpeningError>,
+    CommonProofGenerationError<StorageError, CoinError, SinkError>,
 >;
 
 #[cfg(test)]
-pub(super) type CompletedCommonProofGenerationResult<Storage, Coins, Sink, BoundOpenings> = Result<
+pub(super) type CompletedCommonProofGenerationResult<Storage, Coins, Sink> = Result<
     (),
     CommonProofGenerationError<
         <Storage as ProofExternalMemory>::Error,
         <Coins as CommonProofPrivateCoinSource>::Error,
         <Sink as CommonProofByteSink>::Error,
-        <BoundOpenings as CommonProofBoundOpeningProvider>::Error,
     >,
 >;
 
@@ -110,6 +83,73 @@ pub(super) struct GeneratedCommonProofStoragePlan {
     pub(super) replay_polynomial_plans:
         BTreeMap<CommonProofReplayPolynomialKey, CommonProofReplayPolynomialPlan>,
     pub(super) relation_evaluation_transform_plans: BTreeMap<u32, ExternalStockhamTransformPlan>,
+    pub(super) quotient_constraint_transform_plans:
+        BTreeMap<CommonProofQuotientConstraintTransformKey, ExternalStockhamTransformPlan>,
+}
+
+struct GeneratedCommonProofStorageGeometry {
+    step_count: u32,
+    maximum_chunk_byte_length: u32,
+    maximum_transaction_payload_byte_length: u64,
+    maximum_transaction_operation_count: u32,
+    object_count: u32,
+    maximum_stored_byte_length: u64,
+    maximum_total_written_byte_length: u64,
+    maximum_total_read_byte_length: u64,
+    maximum_transaction_count: u64,
+    object_plans: Vec<ProofExternalMemoryObjectPlan>,
+    tree_plans: BTreeMap<u16, CommonProofMerkleStoragePlan>,
+    replay_polynomial_plans:
+        BTreeMap<CommonProofReplayPolynomialKey, CommonProofReplayPolynomialPlan>,
+    relation_evaluation_transform_plans: BTreeMap<u32, ExternalStockhamTransformPlan>,
+    quotient_constraint_transform_plans:
+        BTreeMap<CommonProofQuotientConstraintTransformKey, ExternalStockhamTransformPlan>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct CommonProofExternalMemoryRequirement {
+    step_count: u32,
+    maximum_chunk_byte_length: u32,
+    maximum_transaction_payload_byte_length: u64,
+    object_count: u32,
+    peak_stored_byte_length: u64,
+    total_written_byte_length: u64,
+    total_read_byte_length: u64,
+    transaction_count: u64,
+}
+
+impl CommonProofExternalMemoryRequirement {
+    pub(crate) const fn step_count(self) -> u32 {
+        self.step_count
+    }
+
+    pub(crate) const fn maximum_chunk_byte_length(self) -> u32 {
+        self.maximum_chunk_byte_length
+    }
+
+    pub(crate) const fn maximum_transaction_payload_byte_length(self) -> u64 {
+        self.maximum_transaction_payload_byte_length
+    }
+
+    pub(crate) const fn object_count(self) -> u32 {
+        self.object_count
+    }
+
+    pub(crate) const fn peak_stored_byte_length(self) -> u64 {
+        self.peak_stored_byte_length
+    }
+
+    pub(crate) const fn total_written_byte_length(self) -> u64 {
+        self.total_written_byte_length
+    }
+
+    pub(crate) const fn total_read_byte_length(self) -> u64 {
+        self.total_read_byte_length
+    }
+
+    pub(crate) const fn transaction_count(self) -> u64 {
+        self.transaction_count
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -117,6 +157,67 @@ pub(super) enum CommonProofReplayPolynomialKey {
     RelationColumn(u32),
     QuotientComponent(u16),
     OpeningBatchMask,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct CommonProofReplayReadRequirement {
+    read_count: u64,
+    last_use_step: Option<u32>,
+}
+
+impl CommonProofReplayReadRequirement {
+    fn include_reads(
+        &mut self,
+        read_count: u64,
+        executor_step: u32,
+    ) -> Result<(), CommonProofProverError> {
+        self.read_count = self
+            .read_count
+            .checked_add(read_count)
+            .ok_or(CommonProofProverError::CountOverflow)?;
+        self.include_use(executor_step);
+        Ok(())
+    }
+
+    fn include_use(&mut self, executor_step: u32) {
+        self.last_use_step = Some(self.last_use_step.map_or(executor_step, |last_use_step| {
+            last_use_step.max(executor_step)
+        }));
+    }
+}
+
+struct PendingCommonProofReplayObjectPlan {
+    key: CommonProofReplayPolynomialKey,
+    object: ProofExternalMemoryObject,
+    protection: ProofExternalMemoryProtection,
+    exact_byte_length: u64,
+    issued_step: u32,
+}
+
+fn include_common_proof_replay_reads(
+    requirements: &mut BTreeMap<CommonProofReplayPolynomialKey, CommonProofReplayReadRequirement>,
+    key: CommonProofReplayPolynomialKey,
+    read_count: u64,
+    executor_step: u32,
+) -> Result<(), CommonProofProverError> {
+    if read_count == 0 {
+        return Ok(());
+    }
+    requirements
+        .entry(key)
+        .or_default()
+        .include_reads(read_count, executor_step)
+}
+
+fn include_common_proof_replay_use(
+    requirements: &mut BTreeMap<CommonProofReplayPolynomialKey, CommonProofReplayReadRequirement>,
+    key: CommonProofReplayPolynomialKey,
+    executor_step: u32,
+) {
+    requirements
+        .entry(key)
+        .or_default()
+        .include_use(executor_step);
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -356,8 +457,8 @@ impl CommonProofReplayPolynomialWriter {
 }
 
 enum CommonProofReplayPolynomialCoefficients {
-    Base(Vec<ProofBaseFieldElement>),
-    Extension(Vec<ProofChallengeExtensionElement>),
+    Base(Zeroizing<Vec<ProofBaseFieldElement>>),
+    Extension(Zeroizing<Vec<ProofChallengeExtensionElement>>),
 }
 
 pub(super) struct CommonProofReplayPolynomialReader {
@@ -379,10 +480,10 @@ impl CommonProofReplayPolynomialReader {
         }
         let coefficients = match plan.value_type {
             RelationColumnValueType::BaseField => {
-                CommonProofReplayPolynomialCoefficients::Base(Vec::new())
+                CommonProofReplayPolynomialCoefficients::Base(Zeroizing::new(Vec::new()))
             }
             RelationColumnValueType::ChallengeExtension => {
-                CommonProofReplayPolynomialCoefficients::Extension(Vec::new())
+                CommonProofReplayPolynomialCoefficients::Extension(Zeroizing::new(Vec::new()))
             }
         };
         Ok(Self {
@@ -483,7 +584,7 @@ impl CommonProofReplayPolynomialReader {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum GeneratedCommonProofStoragePlanError {
+pub(crate) enum GeneratedCommonProofStoragePlanError {
     Prover(CommonProofProverError),
     Storage(ProofExternalMemoryError),
 }
@@ -517,6 +618,204 @@ fn ceiling_division_u64(
     Ok(numerator.checked_add(denominator - 1).ok_or(
         GeneratedCommonProofStoragePlanError::Prover(CommonProofProverError::CountOverflow),
     )? / denominator)
+}
+
+struct CommonProofQuotientStreamRequirement {
+    constraint_columns: Vec<Vec<u32>>,
+    transform_count: u64,
+    total_read_byte_length: u64,
+    read_transaction_count: u64,
+    maximum_rotation_block_byte_length: u64,
+    maximum_read_working_set_byte_length: u64,
+    maximum_read_transaction_overlap_peak_byte_length: u64,
+    maximum_read_subphase_transient_byte_length: u64,
+}
+
+fn common_proof_quotient_stream_requirement(
+    variant: &RelationPlanVariant,
+    maximum_chunk_byte_length: u64,
+) -> Result<CommonProofQuotientStreamRequirement, CommonProofProverError> {
+    if maximum_chunk_byte_length == 0
+        || variant.trace_domain_size() == 0
+        || !variant
+            .evaluation_domain_size()
+            .is_multiple_of(variant.trace_domain_size())
+    {
+        return Err(CommonProofProverError::InvalidInput);
+    }
+    let evaluation_domain_size = usize::try_from(variant.evaluation_domain_size())
+        .map_err(|_| CommonProofProverError::CountOverflow)?;
+    let trace_domain_size = usize::try_from(variant.trace_domain_size())
+        .map_err(|_| CommonProofProverError::CountOverflow)?;
+    let trace_rotation_stride =
+        usize::try_from(variant.evaluation_domain_size() / variant.trace_domain_size())
+            .map_err(|_| CommonProofProverError::CountOverflow)?;
+    let mut constraint_columns = Vec::new();
+    constraint_columns
+        .try_reserve_exact(variant.constraint_count())
+        .map_err(|_| CommonProofProverError::AllocationLimitExceeded)?;
+    let mut transform_count = 0_u64;
+    let mut total_read_byte_length = 0_u64;
+    let mut read_transaction_count = 0_u64;
+    let mut maximum_rotation_block_byte_length = 0_u64;
+    let mut maximum_read_working_set_byte_length = 0_u64;
+    let mut maximum_read_transaction_overlap_peak_byte_length = 0_u64;
+    let mut maximum_read_subphase_transient_byte_length = 0_u64;
+    let extension_value_byte_length =
+        u64::try_from(core::mem::size_of::<ProofChallengeExtensionElement>())
+            .map_err(|_| CommonProofProverError::CountOverflow)?;
+
+    for constraint_ordinal in 0..variant.constraint_count() {
+        let queries = variant.constraint_column_queries(constraint_ordinal)?;
+        let mut columns = Vec::new();
+        columns
+            .try_reserve_exact(queries.len())
+            .map_err(|_| CommonProofProverError::AllocationLimitExceeded)?;
+        for query in &queries {
+            if columns.last().copied() != Some(query.column_ordinal()) {
+                columns.push(query.column_ordinal());
+            }
+        }
+        let mut block_start = 0_usize;
+        while block_start < evaluation_domain_size {
+            let block_end = block_start
+                .checked_add(COMMON_PROOF_RELATION_EVALUATION_BLOCK_LENGTH)
+                .ok_or(CommonProofProverError::CountOverflow)?
+                .min(evaluation_domain_size);
+            let block_element_count = block_end - block_start;
+            let query_block_capacity_byte_length = u64::try_from(block_element_count)
+                .map_err(|_| CommonProofProverError::CountOverflow)?
+                .checked_mul(extension_value_byte_length)
+                .ok_or(CommonProofProverError::CountOverflow)?;
+            let mut completed_query_block_byte_length = 0_u64;
+            for query in &queries {
+                let column = variant
+                    .ordered_columns()
+                    .get(
+                        usize::try_from(query.column_ordinal())
+                            .map_err(|_| CommonProofProverError::CountOverflow)?,
+                    )
+                    .ok_or(CommonProofProverError::InvalidColumn)?;
+                let encoded_value_byte_length = external_value_byte_length(column.value_type());
+                let maximum_chunk_element_count = maximum_chunk_byte_length
+                    .checked_div(encoded_value_byte_length)
+                    .filter(|count| *count != 0)
+                    .ok_or(CommonProofProverError::InvalidInput)?;
+                let rotated_block_start = rotated_relation_evaluation_position(
+                    block_start,
+                    evaluation_domain_size,
+                    trace_domain_size,
+                    trace_rotation_stride,
+                    query.rotation_is_negative(),
+                    query.rotation_magnitude(),
+                )?;
+                let mut logical_value_offset = 0_usize;
+                while logical_value_offset < block_element_count {
+                    let element_offset = rotated_block_start
+                        .checked_add(logical_value_offset)
+                        .ok_or(CommonProofProverError::CountOverflow)?
+                        % evaluation_domain_size;
+                    let element_count = (block_element_count - logical_value_offset)
+                        .min(evaluation_domain_size - element_offset)
+                        .min(
+                            usize::try_from(maximum_chunk_element_count)
+                                .map_err(|_| CommonProofProverError::CountOverflow)?,
+                        );
+                    if element_count == 0 {
+                        return Err(CommonProofProverError::InvalidQuotient);
+                    }
+                    let encoded_read_byte_length = u64::try_from(element_count)
+                        .map_err(|_| CommonProofProverError::CountOverflow)?
+                        .checked_mul(encoded_value_byte_length)
+                        .ok_or(CommonProofProverError::CountOverflow)?;
+                    total_read_byte_length = total_read_byte_length
+                        .checked_add(encoded_read_byte_length)
+                        .ok_or(CommonProofProverError::CountOverflow)?;
+                    let read_resident_requirement =
+                        external_polynomial_extension_read_resident_memory_requirement(
+                            column.value_type(),
+                            u64::try_from(element_count)
+                                .map_err(|_| CommonProofProverError::CountOverflow)?,
+                        )
+                        .map_err(|error| match error {
+                            super::ExternalPolynomialError::CountOverflow => {
+                                CommonProofProverError::CountOverflow
+                            }
+                            super::ExternalPolynomialError::AllocationLimitExceeded => {
+                                CommonProofProverError::AllocationLimitExceeded
+                            }
+                            _ => CommonProofProverError::InvalidInput,
+                        })?;
+                    maximum_read_working_set_byte_length = maximum_read_working_set_byte_length
+                        .max(read_resident_requirement.component_working_set_byte_length());
+                    maximum_read_transaction_overlap_peak_byte_length =
+                        maximum_read_transaction_overlap_peak_byte_length
+                            .max(read_resident_requirement.transaction_overlap_peak_byte_length());
+                    let builder_byte_length_during_read = completed_query_block_byte_length
+                        .checked_add(if logical_value_offset == 0 {
+                            0
+                        } else {
+                            query_block_capacity_byte_length
+                        })
+                        .ok_or(CommonProofProverError::CountOverflow)?;
+                    let read_transaction_peak_byte_length = builder_byte_length_during_read
+                        .checked_add(read_resident_requirement.peak_byte_length())
+                        .ok_or(CommonProofProverError::CountOverflow)?;
+                    let accepted_values_byte_length = u64::try_from(element_count)
+                        .map_err(|_| CommonProofProverError::CountOverflow)?
+                        .checked_mul(extension_value_byte_length)
+                        .ok_or(CommonProofProverError::CountOverflow)?;
+                    let acceptance_peak_byte_length = completed_query_block_byte_length
+                        .checked_add(query_block_capacity_byte_length)
+                        .and_then(|length| length.checked_add(accepted_values_byte_length))
+                        .ok_or(CommonProofProverError::CountOverflow)?;
+                    maximum_read_subphase_transient_byte_length =
+                        maximum_read_subphase_transient_byte_length
+                            .max(read_transaction_peak_byte_length)
+                            .max(acceptance_peak_byte_length);
+                    read_transaction_count = read_transaction_count
+                        .checked_add(1)
+                        .ok_or(CommonProofProverError::CountOverflow)?;
+                    logical_value_offset = logical_value_offset
+                        .checked_add(element_count)
+                        .ok_or(CommonProofProverError::CountOverflow)?;
+                }
+                completed_query_block_byte_length = completed_query_block_byte_length
+                    .checked_add(query_block_capacity_byte_length)
+                    .ok_or(CommonProofProverError::CountOverflow)?;
+            }
+            maximum_rotation_block_byte_length =
+                maximum_rotation_block_byte_length.max(completed_query_block_byte_length);
+            maximum_read_subphase_transient_byte_length =
+                maximum_read_subphase_transient_byte_length.max(completed_query_block_byte_length);
+            block_start = block_end;
+        }
+        transform_count = transform_count
+            .checked_add(
+                u64::try_from(columns.len()).map_err(|_| CommonProofProverError::CountOverflow)?,
+            )
+            .ok_or(CommonProofProverError::CountOverflow)?;
+        constraint_columns.push(columns);
+    }
+    if constraint_columns.is_empty()
+        || transform_count == 0
+        || maximum_rotation_block_byte_length == 0
+        || maximum_read_working_set_byte_length == 0
+        || maximum_read_transaction_overlap_peak_byte_length == 0
+        || maximum_read_subphase_transient_byte_length == 0
+    {
+        return Err(CommonProofProverError::InvalidQuotient);
+    }
+    Ok(CommonProofQuotientStreamRequirement {
+        constraint_columns,
+        transform_count,
+        total_read_byte_length,
+        read_transaction_count,
+        maximum_rotation_block_byte_length,
+        maximum_read_working_set_byte_length,
+        maximum_read_transaction_overlap_peak_byte_length,
+        maximum_read_subphase_transient_byte_length,
+    })
 }
 
 fn exact_peak_stored_byte_length(
@@ -612,22 +911,22 @@ fn common_tree_materialization_phase(source: ProofTreeCatalogSource) -> Option<u
         ProofTreeCatalogSource::QuotientComponent { .. } => Some(2),
         ProofTreeCatalogSource::OpeningBatchMask => Some(3),
         ProofTreeCatalogSource::NonterminalFriLayer { .. } => Some(4),
-        ProofTreeCatalogSource::RelationProofCreated { .. }
-        | ProofTreeCatalogSource::RelationBoundPublic => None,
+        ProofTreeCatalogSource::RelationBoundPublic => Some(0),
+        ProofTreeCatalogSource::RelationProofCreated { .. } => None,
     }
 }
 
 /// Generates the exact object liveness graph for every common tree.  Read and
 /// transaction ceilings include worst-case query collisions and frontiers;
 /// they are operational limits, never proof fields.
-pub(super) fn generated_common_proof_storage_plan(
+fn derive_generated_common_proof_storage_geometry(
     variant: &RelationPlanVariant,
     relation_context: &RelationPlanCheckContext,
     catalog: &CompleteProofTreeCatalog,
     transcript_schedule: &CommonProofTranscriptSchedule,
     maximum_chunk_byte_length: u32,
     include_replay_polynomials: bool,
-) -> Result<GeneratedCommonProofStoragePlan, GeneratedCommonProofStoragePlanError> {
+) -> Result<GeneratedCommonProofStorageGeometry, GeneratedCommonProofStoragePlanError> {
     if maximum_chunk_byte_length == 0 {
         return Err(GeneratedCommonProofStoragePlanError::Prover(
             CommonProofProverError::InvalidInput,
@@ -652,44 +951,164 @@ pub(super) fn generated_common_proof_storage_plan(
         .iter()
         .take_while(|(phase, _, _)| *phase == 0)
         .count();
-    let relation_replay_step = u32::try_from(base_tree_count).map_err(|_| {
+    let auxiliary_tree_count = common_entries
+        .iter()
+        .filter(|(phase, _, _)| *phase == 1)
+        .count();
+    let mut tree_roles_by_column = proof_created_tree_roles_by_column(variant)
+        .map_err(GeneratedCommonProofStoragePlanError::Prover)?;
+    for tree in variant.ordered_trees() {
+        let RelationTreeDescriptor::BoundPublic {
+            ordered_column_ordinals,
+            ..
+        } = tree
+        else {
+            continue;
+        };
+        for column_ordinal in ordered_column_ordinals {
+            match tree_roles_by_column.insert(*column_ordinal, ProofTreeRole::BaseOracle) {
+                Some(ProofTreeRole::AuxiliaryOracle) => {
+                    return Err(GeneratedCommonProofStoragePlanError::Prover(
+                        CommonProofProverError::InvalidTree,
+                    ));
+                }
+                Some(ProofTreeRole::BaseOracle) | None => {}
+                Some(
+                    ProofTreeRole::QuotientComponent
+                    | ProofTreeRole::OpeningBatchMask
+                    | ProofTreeRole::NonterminalFriLayer,
+                ) => {
+                    return Err(GeneratedCommonProofStoragePlanError::Prover(
+                        CommonProofProverError::InvalidTree,
+                    ));
+                }
+            }
+        }
+    }
+    let base_tree_column_count = tree_roles_by_column
+        .values()
+        .filter(|role| **role == ProofTreeRole::BaseOracle)
+        .count();
+    let auxiliary_tree_column_count = tree_roles_by_column
+        .values()
+        .filter(|role| **role == ProofTreeRole::AuxiliaryOracle)
+        .count();
+    let transform_pass_count_per_column = variant.evaluation_domain_size().trailing_zeros();
+    let quotient_stream_requirement =
+        common_proof_quotient_stream_requirement(variant, u64::from(maximum_chunk_byte_length))
+            .map_err(GeneratedCommonProofStoragePlanError::Prover)?;
+    let base_transform_pass_count = u32::try_from(base_tree_column_count)
+        .ok()
+        .and_then(|column_count| column_count.checked_mul(transform_pass_count_per_column))
+        .ok_or(GeneratedCommonProofStoragePlanError::Prover(
+            CommonProofProverError::CountOverflow,
+        ))?;
+    let auxiliary_transform_pass_count = u32::try_from(auxiliary_tree_column_count)
+        .ok()
+        .and_then(|column_count| column_count.checked_mul(transform_pass_count_per_column))
+        .ok_or(GeneratedCommonProofStoragePlanError::Prover(
+            CommonProofProverError::CountOverflow,
+        ))?;
+    let first_base_transform_step = u32::from(include_replay_polynomials);
+    let first_base_tree_step = first_base_transform_step
+        .checked_add(if include_replay_polynomials {
+            base_transform_pass_count
+        } else {
+            0
+        })
+        .ok_or(GeneratedCommonProofStoragePlanError::Prover(
+            CommonProofProverError::CountOverflow,
+        ))?;
+    let auxiliary_replay_step = first_base_tree_step
+        .checked_add(u32::try_from(base_tree_count).map_err(|_| {
+            GeneratedCommonProofStoragePlanError::Prover(CommonProofProverError::CountOverflow)
+        })?)
+        .ok_or(GeneratedCommonProofStoragePlanError::Prover(
+            CommonProofProverError::CountOverflow,
+        ))?;
+    let first_auxiliary_transform_step = auxiliary_replay_step
+        .checked_add(u32::from(include_replay_polynomials))
+        .ok_or(GeneratedCommonProofStoragePlanError::Prover(
+            CommonProofProverError::CountOverflow,
+        ))?;
+    let first_auxiliary_tree_step = first_auxiliary_transform_step
+        .checked_add(if include_replay_polynomials {
+            auxiliary_transform_pass_count
+        } else {
+            0
+        })
+        .ok_or(GeneratedCommonProofStoragePlanError::Prover(
+            CommonProofProverError::CountOverflow,
+        ))?;
+    let first_quotient_transform_step = first_auxiliary_tree_step
+        .checked_add(u32::try_from(auxiliary_tree_count).map_err(|_| {
+            GeneratedCommonProofStoragePlanError::Prover(CommonProofProverError::CountOverflow)
+        })?)
+        .ok_or(GeneratedCommonProofStoragePlanError::Prover(
+            CommonProofProverError::CountOverflow,
+        ))?;
+    let quotient_transform_pass_count = u32::try_from(
+        quotient_stream_requirement
+            .transform_count
+            .checked_mul(u64::from(transform_pass_count_per_column))
+            .ok_or(GeneratedCommonProofStoragePlanError::Prover(
+                CommonProofProverError::CountOverflow,
+            ))?,
+    )
+    .map_err(|_| {
         GeneratedCommonProofStoragePlanError::Prover(CommonProofProverError::CountOverflow)
     })?;
-    let transform_pass_count = if include_replay_polynomials {
-        u32::try_from(variant.ordered_columns().len())
-            .ok()
-            .and_then(|column_count| {
-                column_count.checked_mul(variant.evaluation_domain_size().trailing_zeros())
-            })
+    let quotient_constraint_evaluation_step_count =
+        u32::try_from(quotient_stream_requirement.constraint_columns.len()).map_err(|_| {
+            GeneratedCommonProofStoragePlanError::Prover(CommonProofProverError::CountOverflow)
+        })?;
+    let quotient_work_step_count = if include_replay_polynomials {
+        quotient_transform_pass_count
+            .checked_add(quotient_constraint_evaluation_step_count)
             .ok_or(GeneratedCommonProofStoragePlanError::Prover(
                 CommonProofProverError::CountOverflow,
             ))?
     } else {
         0
     };
-    let first_relation_transform_step = relation_replay_step
-        .checked_add(if include_replay_polynomials { 1 } else { 0 })
-        .ok_or(GeneratedCommonProofStoragePlanError::Prover(
-            CommonProofProverError::CountOverflow,
-        ))?;
-    let first_post_challenge_tree_step = first_relation_transform_step
-        .checked_add(transform_pass_count)
+    let first_post_auxiliary_tree_step = first_quotient_transform_step
+        .checked_add(quotient_work_step_count)
         .ok_or(GeneratedCommonProofStoragePlanError::Prover(
             CommonProofProverError::CountOverflow,
         ))?;
     let mut materialization_steps = BTreeMap::new();
-    let mut next_post_challenge_tree_step = first_post_challenge_tree_step;
-    for (materialization_index, (phase, catalog_index, _)) in common_entries.iter().enumerate() {
-        let materialization_step = if *phase == 0 {
-            u32::try_from(materialization_index).map_err(|_| {
-                GeneratedCommonProofStoragePlanError::Prover(CommonProofProverError::CountOverflow)
-            })?
-        } else {
-            let step = next_post_challenge_tree_step;
-            next_post_challenge_tree_step = next_post_challenge_tree_step.checked_add(1).ok_or(
-                GeneratedCommonProofStoragePlanError::Prover(CommonProofProverError::CountOverflow),
-            )?;
-            step
+    let mut next_base_tree_step = first_base_tree_step;
+    let mut next_auxiliary_tree_step = first_auxiliary_tree_step;
+    let mut next_post_auxiliary_tree_step = first_post_auxiliary_tree_step;
+    for (phase, catalog_index, _) in &common_entries {
+        let materialization_step = match *phase {
+            0 => {
+                let step = next_base_tree_step;
+                next_base_tree_step = next_base_tree_step.checked_add(1).ok_or(
+                    GeneratedCommonProofStoragePlanError::Prover(
+                        CommonProofProverError::CountOverflow,
+                    ),
+                )?;
+                step
+            }
+            1 => {
+                let step = next_auxiliary_tree_step;
+                next_auxiliary_tree_step = next_auxiliary_tree_step.checked_add(1).ok_or(
+                    GeneratedCommonProofStoragePlanError::Prover(
+                        CommonProofProverError::CountOverflow,
+                    ),
+                )?;
+                step
+            }
+            _ => {
+                let step = next_post_auxiliary_tree_step;
+                next_post_auxiliary_tree_step = next_post_auxiliary_tree_step
+                    .checked_add(1)
+                    .ok_or(GeneratedCommonProofStoragePlanError::Prover(
+                        CommonProofProverError::CountOverflow,
+                    ))?;
+                step
+            }
         };
         if materialization_steps
             .insert(*catalog_index, materialization_step)
@@ -702,12 +1121,16 @@ pub(super) fn generated_common_proof_storage_plan(
     }
     let mut last_relation_evaluation_use_steps = BTreeMap::new();
     for (tree_index, descriptor) in variant.ordered_trees().iter().enumerate() {
-        let RelationTreeDescriptor::ProofCreated {
-            proof_tree_role: 2,
-            ordered_column_ordinals,
-        } = descriptor
-        else {
-            continue;
+        let ordered_column_ordinals = match descriptor {
+            RelationTreeDescriptor::ProofCreated {
+                proof_tree_role,
+                ordered_column_ordinals,
+            } if matches!(*proof_tree_role, 1 | 2) => ordered_column_ordinals,
+            RelationTreeDescriptor::BoundPublic {
+                ordered_column_ordinals,
+                ..
+            } => ordered_column_ordinals,
+            RelationTreeDescriptor::ProofCreated { .. } => continue,
         };
         let tree_catalog_index = u16::try_from(tree_index).map_err(|_| {
             GeneratedCommonProofStoragePlanError::Prover(CommonProofProverError::CountOverflow)
@@ -724,7 +1147,40 @@ pub(super) fn generated_common_proof_storage_plan(
                 .or_insert(materialization_step);
         }
     }
-    let query_step = next_post_challenge_tree_step;
+    let query_step = next_post_auxiliary_tree_step;
+    let quotient_component_tree_count = u32::try_from(
+        common_entries
+            .iter()
+            .filter(|(phase, _, _)| *phase == 2)
+            .count(),
+    )
+    .map_err(|_| {
+        GeneratedCommonProofStoragePlanError::Prover(CommonProofProverError::CountOverflow)
+    })?;
+    let opening_mask_tree_count = u32::try_from(
+        common_entries
+            .iter()
+            .filter(|(phase, _, _)| *phase == 3)
+            .count(),
+    )
+    .map_err(|_| {
+        GeneratedCommonProofStoragePlanError::Prover(CommonProofProverError::CountOverflow)
+    })?;
+    let deep_opening_step = first_post_auxiliary_tree_step
+        .checked_add(quotient_component_tree_count)
+        .ok_or(GeneratedCommonProofStoragePlanError::Prover(
+            CommonProofProverError::CountOverflow,
+        ))?;
+    let initial_fri_step = deep_opening_step
+        .checked_add(opening_mask_tree_count)
+        .ok_or(GeneratedCommonProofStoragePlanError::Prover(
+            CommonProofProverError::CountOverflow,
+        ))?;
+    if initial_fri_step > query_step {
+        return Err(GeneratedCommonProofStoragePlanError::Prover(
+            CommonProofProverError::InvalidTree,
+        ));
+    }
     let step_count =
         query_step
             .checked_add(1)
@@ -741,6 +1197,7 @@ pub(super) fn generated_common_proof_storage_plan(
     let mut tree_plans = BTreeMap::new();
     let mut replay_polynomial_plans = BTreeMap::new();
     let mut relation_evaluation_transform_plans = BTreeMap::new();
+    let mut quotient_constraint_transform_plans = BTreeMap::new();
     let mut maximum_total_written_byte_length = 0_u64;
     let mut maximum_total_read_byte_length = 0_u64;
     let mut maximum_transaction_count = 0_u64;
@@ -751,23 +1208,29 @@ pub(super) fn generated_common_proof_storage_plan(
         )?;
         let tree_plan = common_proof_merkle_storage_plan(
             entry,
+            variant.evaluation_domain_size(),
             next_object_ordinal,
             materialization_step,
             query_step,
         )
         .map_err(GeneratedCommonProofStoragePlanError::Prover)?;
         next_object_ordinal = tree_plan.next_object_ordinal();
-        let context =
-            entry
-                .common_context()
-                .ok_or(GeneratedCommonProofStoragePlanError::Prover(
-                    CommonProofProverError::InvalidTree,
-                ))?;
         let leaf_count = u64::try_from(
-            context
-                .leaf_count()
-                .map_err(CommonProofProverError::from)
-                .map_err(GeneratedCommonProofStoragePlanError::Prover)?,
+            entry_leaf_count(entry, variant.evaluation_domain_size()).map_err(
+                |error| match error {
+                    ProofBodyError::CountOverflow => GeneratedCommonProofStoragePlanError::Prover(
+                        CommonProofProverError::CountOverflow,
+                    ),
+                    ProofBodyError::AllocationLimitExceeded => {
+                        GeneratedCommonProofStoragePlanError::Prover(
+                            CommonProofProverError::AllocationLimitExceeded,
+                        )
+                    }
+                    _ => GeneratedCommonProofStoragePlanError::Prover(
+                        CommonProofProverError::InvalidTree,
+                    ),
+                },
+            )?,
         )
         .map_err(|_| {
             GeneratedCommonProofStoragePlanError::Prover(CommonProofProverError::CountOverflow)
@@ -801,7 +1264,7 @@ pub(super) fn generated_common_proof_storage_plan(
         if matches!(
             entry.source(),
             ProofTreeCatalogSource::RelationProofCreated {
-                tree_role: ProofTreeRole::AuxiliaryOracle,
+                tree_role: ProofTreeRole::BaseOracle | ProofTreeRole::AuxiliaryOracle,
                 ..
             }
         ) {
@@ -812,7 +1275,7 @@ pub(super) fn generated_common_proof_storage_plan(
                     CommonProofProverError::InvalidTree,
                 ))?;
             let RelationTreeDescriptor::ProofCreated {
-                proof_tree_role: 2,
+                proof_tree_role,
                 ordered_column_ordinals,
             } = descriptor
             else {
@@ -820,6 +1283,24 @@ pub(super) fn generated_common_proof_storage_plan(
                     CommonProofProverError::InvalidTree,
                 ));
             };
+            let expected_tree_role = match *proof_tree_role {
+                1 => ProofTreeRole::BaseOracle,
+                2 => ProofTreeRole::AuxiliaryOracle,
+                _ => {
+                    return Err(GeneratedCommonProofStoragePlanError::Prover(
+                        CommonProofProverError::InvalidTree,
+                    ));
+                }
+            };
+            if !matches!(
+                entry.source(),
+                ProofTreeCatalogSource::RelationProofCreated { tree_role, .. }
+                    if tree_role == expected_tree_role
+            ) {
+                return Err(GeneratedCommonProofStoragePlanError::Prover(
+                    CommonProofProverError::InvalidTree,
+                ));
+            }
             let mut row_byte_length = 0_u64;
             for column_ordinal in ordered_column_ordinals {
                 let column = variant
@@ -918,7 +1399,7 @@ pub(super) fn generated_common_proof_storage_plan(
         }
     }
     if include_replay_polynomials {
-        if relation_replay_step >= query_step {
+        if auxiliary_replay_step >= query_step {
             return Err(GeneratedCommonProofStoragePlanError::Prover(
                 CommonProofProverError::InvalidTree,
             ));
@@ -957,21 +1438,25 @@ pub(super) fn generated_common_proof_storage_plan(
                 )
             })?;
         for (column_index, column) in variant.ordered_columns().iter().enumerate() {
+            let column_ordinal = u32::try_from(column_index).map_err(|_| {
+                GeneratedCommonProofStoragePlanError::Prover(CommonProofProverError::CountOverflow)
+            })?;
+            let issued_step = if tree_roles_by_column.get(&column_ordinal)
+                == Some(&ProofTreeRole::AuxiliaryOracle)
+            {
+                auxiliary_replay_step
+            } else {
+                0
+            };
             replay_specifications.push((
-                CommonProofReplayPolynomialKey::RelationColumn(
-                    u32::try_from(column_index).map_err(|_| {
-                        GeneratedCommonProofStoragePlanError::Prover(
-                            CommonProofProverError::CountOverflow,
-                        )
-                    })?,
-                ),
+                CommonProofReplayPolynomialKey::RelationColumn(column_ordinal),
                 column.value_type(),
                 usize::try_from(column.source_degree_bound_exclusive()).map_err(|_| {
                     GeneratedCommonProofStoragePlanError::Prover(
                         CommonProofProverError::CountOverflow,
                     )
                 })?,
-                relation_replay_step,
+                issued_step,
             ));
         }
         for (_, catalog_index, entry) in &common_entries {
@@ -1032,18 +1517,71 @@ pub(super) fn generated_common_proof_storage_plan(
                 | ProofTreeCatalogSource::RelationBoundPublic => {}
             }
         }
-        let maximum_replay_count = u64::from(transcript_schedule.opening_claim_count())
-            .checked_mul(2)
-            .and_then(|count| {
-                u64::try_from(catalog.entries().len())
-                    .ok()
-                    .and_then(|catalog_entry_count| count.checked_add(catalog_entry_count))
-            })
-            .and_then(|count| count.checked_add(u64::from(transcript_schedule.fri_fold_count())))
-            .and_then(|count| count.checked_add(4))
-            .ok_or(GeneratedCommonProofStoragePlanError::Prover(
-                CommonProofProverError::CountOverflow,
-            ))?;
+        let mut replay_read_requirements = BTreeMap::new();
+        for (column_ordinal, requirement) in relation_column_replay_requirements(variant)
+            .map_err(GeneratedCommonProofStoragePlanError::Prover)?
+        {
+            let key = CommonProofReplayPolynomialKey::RelationColumn(column_ordinal);
+            include_common_proof_replay_reads(
+                &mut replay_read_requirements,
+                key,
+                requirement.pre_challenge_read_count,
+                0,
+            )
+            .map_err(GeneratedCommonProofStoragePlanError::Prover)?;
+            include_common_proof_replay_reads(
+                &mut replay_read_requirements,
+                key,
+                requirement.auxiliary_synthesis_read_count,
+                auxiliary_replay_step,
+            )
+            .map_err(GeneratedCommonProofStoragePlanError::Prover)?;
+        }
+        for claim in variant.ordered_opening_claims() {
+            let key = replay_polynomial_key_for_claim(claim)
+                .map_err(GeneratedCommonProofStoragePlanError::Prover)?;
+            include_common_proof_replay_reads(
+                &mut replay_read_requirements,
+                key,
+                1,
+                deep_opening_step,
+            )
+            .map_err(GeneratedCommonProofStoragePlanError::Prover)?;
+            include_common_proof_replay_reads(
+                &mut replay_read_requirements,
+                key,
+                1,
+                initial_fri_step,
+            )
+            .map_err(GeneratedCommonProofStoragePlanError::Prover)?;
+        }
+        if transcript_schedule.privacy_mode() == CommonProofPrivacyMode::SecretBearing {
+            // Besides its ordinary DEEP and initial-FRI opening-claim reads,
+            // the secret opening-batch mask is replayed once to materialize
+            // its tree and once to seed the initial FRI polynomial.
+            include_common_proof_replay_reads(
+                &mut replay_read_requirements,
+                CommonProofReplayPolynomialKey::OpeningBatchMask,
+                1,
+                deep_opening_step,
+            )
+            .map_err(GeneratedCommonProofStoragePlanError::Prover)?;
+            include_common_proof_replay_reads(
+                &mut replay_read_requirements,
+                CommonProofReplayPolynomialKey::OpeningBatchMask,
+                1,
+                initial_fri_step,
+            )
+            .map_err(GeneratedCommonProofStoragePlanError::Prover)?;
+        }
+        let mut pending_replay_object_plans = Vec::new();
+        pending_replay_object_plans
+            .try_reserve_exact(replay_specifications.len())
+            .map_err(|_| {
+                GeneratedCommonProofStoragePlanError::Prover(
+                    CommonProofProverError::AllocationLimitExceeded,
+                )
+            })?;
         for (key, value_type, coefficient_count, issued_step) in replay_specifications {
             if coefficient_count == 0 || issued_step >= query_step {
                 return Err(GeneratedCommonProofStoragePlanError::Prover(
@@ -1058,23 +1596,25 @@ pub(super) fn generated_common_proof_storage_plan(
                 })?,
                 resident_value_byte_length(value_type),
             )?;
+            let replay_count = replay_read_requirements
+                .get(&key)
+                .map_or(0, |requirement| requirement.read_count);
             let object = ProofExternalMemoryObject::new(next_object_ordinal);
             next_object_ordinal = next_object_ordinal.checked_add(1).ok_or(
                 GeneratedCommonProofStoragePlanError::Prover(CommonProofProverError::CountOverflow),
             )?;
-            object_plans.push(ProofExternalMemoryObjectPlan::new(
+            pending_replay_object_plans.push(PendingCommonProofReplayObjectPlan {
+                key,
                 object,
-                replay_protection,
+                protection: replay_protection,
                 exact_byte_length,
                 issued_step,
-                issued_step,
-                query_step,
-            ));
+            });
             maximum_total_written_byte_length =
                 checked_add_u64(maximum_total_written_byte_length, exact_byte_length)?;
             maximum_total_read_byte_length = checked_add_u64(
                 maximum_total_read_byte_length,
-                checked_multiply_u64(exact_byte_length, maximum_replay_count)?,
+                checked_multiply_u64(exact_byte_length, replay_count)?,
             )?;
             let object_chunk_count = ceiling_division_u64(exact_byte_length, chunk_byte_length)?;
             maximum_transaction_count = checked_add_u64(
@@ -1083,7 +1623,7 @@ pub(super) fn generated_common_proof_storage_plan(
                     2,
                     checked_add_u64(
                         object_chunk_count,
-                        checked_multiply_u64(object_chunk_count, maximum_replay_count)?,
+                        checked_multiply_u64(object_chunk_count, replay_count)?,
                     )?,
                 )?,
             )?;
@@ -1104,6 +1644,14 @@ pub(super) fn generated_common_proof_storage_plan(
                 ));
             }
         }
+        if replay_read_requirements
+            .keys()
+            .any(|key| !replay_polynomial_plans.contains_key(key))
+        {
+            return Err(GeneratedCommonProofStoragePlanError::Prover(
+                CommonProofProverError::InvalidInput,
+            ));
+        }
 
         let evaluation_domain = ProofEvaluationDomain::new(
             usize::try_from(variant.evaluation_domain_size()).map_err(|_| {
@@ -1113,10 +1661,9 @@ pub(super) fn generated_common_proof_storage_plan(
         )
         .map_err(CommonProofProverError::from)
         .map_err(GeneratedCommonProofStoragePlanError::Prover)?;
-        for (column_index, _) in variant.ordered_columns().iter().enumerate() {
-            let column_ordinal = u32::try_from(column_index).map_err(|_| {
-                GeneratedCommonProofStoragePlanError::Prover(CommonProofProverError::CountOverflow)
-            })?;
+        let mut next_base_transform_index = 0_u32;
+        let mut next_auxiliary_transform_index = 0_u32;
+        for (&column_ordinal, &tree_role) in &tree_roles_by_column {
             let source_plan = replay_polynomial_plans
                 .get(&CommonProofReplayPolynomialKey::RelationColumn(
                     column_ordinal,
@@ -1132,9 +1679,34 @@ pub(super) fn generated_common_proof_storage_plan(
             )
             .map_err(map_external_polynomial_plan_error)
             .map_err(GeneratedCommonProofStoragePlanError::Storage)?;
-            let first_executor_step = first_relation_transform_step
+            let (first_transform_step, transform_index) = match tree_role {
+                ProofTreeRole::BaseOracle => {
+                    let transform_index = next_base_transform_index;
+                    next_base_transform_index = next_base_transform_index.checked_add(1).ok_or(
+                        GeneratedCommonProofStoragePlanError::Prover(
+                            CommonProofProverError::CountOverflow,
+                        ),
+                    )?;
+                    (first_base_transform_step, transform_index)
+                }
+                ProofTreeRole::AuxiliaryOracle => {
+                    let transform_index = next_auxiliary_transform_index;
+                    next_auxiliary_transform_index = next_auxiliary_transform_index
+                        .checked_add(1)
+                        .ok_or(GeneratedCommonProofStoragePlanError::Prover(
+                            CommonProofProverError::CountOverflow,
+                        ))?;
+                    (first_auxiliary_transform_step, transform_index)
+                }
+                _ => {
+                    return Err(GeneratedCommonProofStoragePlanError::Prover(
+                        CommonProofProverError::InvalidTree,
+                    ));
+                }
+            };
+            let first_executor_step = first_transform_step
                 .checked_add(
-                    column_ordinal
+                    transform_index
                         .checked_mul(evaluation_domain.size().trailing_zeros())
                         .ok_or(GeneratedCommonProofStoragePlanError::Prover(
                             CommonProofProverError::CountOverflow,
@@ -1143,6 +1715,11 @@ pub(super) fn generated_common_proof_storage_plan(
                 .ok_or(GeneratedCommonProofStoragePlanError::Prover(
                     CommonProofProverError::CountOverflow,
                 ))?;
+            include_common_proof_replay_use(
+                &mut replay_read_requirements,
+                CommonProofReplayPolynomialKey::RelationColumn(column_ordinal),
+                first_executor_step,
+            );
             let transform_plan = ExternalStockhamTransformPlan::new(
                 evaluation_domain,
                 ExternalStockhamTransformDirection::Forward,
@@ -1152,7 +1729,9 @@ pub(super) fn generated_common_proof_storage_plan(
                 last_relation_evaluation_use_steps
                     .get(&column_ordinal)
                     .copied()
-                    .unwrap_or(first_post_challenge_tree_step),
+                    .ok_or(GeneratedCommonProofStoragePlanError::Prover(
+                        CommonProofProverError::InvalidTree,
+                    ))?,
                 maximum_chunk_byte_length,
                 replay_protection,
             )
@@ -1180,7 +1759,7 @@ pub(super) fn generated_common_proof_storage_plan(
             )?;
             maximum_transaction_count = checked_add_u64(
                 maximum_transaction_count,
-                transform_plan.maximum_transaction_count(),
+                transform_plan.transaction_count_excluding_deletions(),
             )?;
             object_plans.extend_from_slice(transform_plan.object_plans());
             if relation_evaluation_transform_plans
@@ -1192,28 +1771,245 @@ pub(super) fn generated_common_proof_storage_plan(
                 ));
             }
         }
-    }
-    // One deletion transaction for each materialized root and one final
-    // transaction for all query-live leaf/frontier objects.
-    maximum_transaction_count = checked_add_u64(
-        maximum_transaction_count,
-        u64::try_from(common_entries.len())
-            .map_err(|_| {
+        if next_base_transform_index
+            != u32::try_from(base_tree_column_count).map_err(|_| {
                 GeneratedCommonProofStoragePlanError::Prover(CommonProofProverError::CountOverflow)
             })?
-            .checked_add(1 + u64::from(include_replay_polynomials))
-            .ok_or(GeneratedCommonProofStoragePlanError::Prover(
-                CommonProofProverError::CountOverflow,
-            ))?,
-    )?;
-    let maximum_transaction_operation_count = u32::try_from(object_plans.len()).map_err(|_| {
+            || next_auxiliary_transform_index
+                != u32::try_from(auxiliary_tree_column_count).map_err(|_| {
+                    GeneratedCommonProofStoragePlanError::Prover(
+                        CommonProofProverError::CountOverflow,
+                    )
+                })?
+        {
+            return Err(GeneratedCommonProofStoragePlanError::Prover(
+                CommonProofProverError::InvalidColumn,
+            ));
+        }
+
+        let mut next_quotient_step = first_quotient_transform_step;
+        for (constraint_index, columns) in quotient_stream_requirement
+            .constraint_columns
+            .iter()
+            .enumerate()
+        {
+            let constraint_ordinal = u32::try_from(constraint_index).map_err(|_| {
+                GeneratedCommonProofStoragePlanError::Prover(CommonProofProverError::CountOverflow)
+            })?;
+            let constraint_transform_pass_count = u32::try_from(columns.len())
+                .ok()
+                .and_then(|column_count| column_count.checked_mul(transform_pass_count_per_column))
+                .ok_or(GeneratedCommonProofStoragePlanError::Prover(
+                    CommonProofProverError::CountOverflow,
+                ))?;
+            let constraint_evaluation_step = next_quotient_step
+                .checked_add(constraint_transform_pass_count)
+                .ok_or(GeneratedCommonProofStoragePlanError::Prover(
+                    CommonProofProverError::CountOverflow,
+                ))?;
+            for (constraint_column_index, column_ordinal) in columns.iter().copied().enumerate() {
+                let source_plan = replay_polynomial_plans
+                    .get(&CommonProofReplayPolynomialKey::RelationColumn(
+                        column_ordinal,
+                    ))
+                    .copied()
+                    .ok_or(GeneratedCommonProofStoragePlanError::Prover(
+                        CommonProofProverError::InvalidColumn,
+                    ))?;
+                let source = ExternalPolynomialVector::new(
+                    source_plan.object,
+                    source_plan.value_type,
+                    source_plan.coefficient_count,
+                )
+                .map_err(map_external_polynomial_plan_error)
+                .map_err(GeneratedCommonProofStoragePlanError::Storage)?;
+                let first_executor_step = next_quotient_step
+                    .checked_add(
+                        u32::try_from(constraint_column_index)
+                            .map_err(|_| {
+                                GeneratedCommonProofStoragePlanError::Prover(
+                                    CommonProofProverError::CountOverflow,
+                                )
+                            })?
+                            .checked_mul(transform_pass_count_per_column)
+                            .ok_or(GeneratedCommonProofStoragePlanError::Prover(
+                                CommonProofProverError::CountOverflow,
+                            ))?,
+                    )
+                    .ok_or(GeneratedCommonProofStoragePlanError::Prover(
+                        CommonProofProverError::CountOverflow,
+                    ))?;
+                include_common_proof_replay_use(
+                    &mut replay_read_requirements,
+                    CommonProofReplayPolynomialKey::RelationColumn(column_ordinal),
+                    first_executor_step,
+                );
+                let transform_plan = ExternalStockhamTransformPlan::new(
+                    evaluation_domain,
+                    ExternalStockhamTransformDirection::Forward,
+                    source,
+                    next_object_ordinal,
+                    first_executor_step,
+                    constraint_evaluation_step,
+                    maximum_chunk_byte_length,
+                    replay_protection,
+                )
+                .map_err(map_external_polynomial_plan_error)
+                .map_err(GeneratedCommonProofStoragePlanError::Storage)?;
+                if transform_plan.next_executor_step()
+                    != first_executor_step
+                        .checked_add(transform_pass_count_per_column)
+                        .ok_or(GeneratedCommonProofStoragePlanError::Prover(
+                            CommonProofProverError::CountOverflow,
+                        ))?
+                {
+                    return Err(GeneratedCommonProofStoragePlanError::Prover(
+                        CommonProofProverError::InvalidColumn,
+                    ));
+                }
+                next_object_ordinal = transform_plan.next_object_ordinal();
+                maximum_total_written_byte_length = checked_add_u64(
+                    maximum_total_written_byte_length,
+                    transform_plan.total_written_byte_length(),
+                )?;
+                maximum_total_read_byte_length = checked_add_u64(
+                    maximum_total_read_byte_length,
+                    transform_plan.total_read_byte_length(),
+                )?;
+                maximum_transaction_count = checked_add_u64(
+                    maximum_transaction_count,
+                    transform_plan.transaction_count_excluding_deletions(),
+                )?;
+                object_plans.extend_from_slice(transform_plan.object_plans());
+                let transform_key = CommonProofQuotientConstraintTransformKey::new(
+                    constraint_ordinal,
+                    column_ordinal,
+                );
+                if quotient_constraint_transform_plans
+                    .insert(transform_key, transform_plan)
+                    .is_some()
+                {
+                    return Err(GeneratedCommonProofStoragePlanError::Prover(
+                        CommonProofProverError::InvalidColumn,
+                    ));
+                }
+            }
+            next_quotient_step = constraint_evaluation_step.checked_add(1).ok_or(
+                GeneratedCommonProofStoragePlanError::Prover(CommonProofProverError::CountOverflow),
+            )?;
+        }
+        if next_quotient_step != first_post_auxiliary_tree_step
+            || quotient_constraint_transform_plans.len()
+                != usize::try_from(quotient_stream_requirement.transform_count).map_err(|_| {
+                    GeneratedCommonProofStoragePlanError::Prover(
+                        CommonProofProverError::CountOverflow,
+                    )
+                })?
+        {
+            return Err(GeneratedCommonProofStoragePlanError::Prover(
+                CommonProofProverError::InvalidQuotient,
+            ));
+        }
+        maximum_total_read_byte_length = checked_add_u64(
+            maximum_total_read_byte_length,
+            quotient_stream_requirement.total_read_byte_length,
+        )?;
+        maximum_transaction_count = checked_add_u64(
+            maximum_transaction_count,
+            quotient_stream_requirement.read_transaction_count,
+        )?;
+        for pending in pending_replay_object_plans {
+            let last_use_step = replay_read_requirements
+                .get(&pending.key)
+                .and_then(|requirement| requirement.last_use_step)
+                .filter(|last_use_step| *last_use_step >= pending.issued_step)
+                .ok_or(GeneratedCommonProofStoragePlanError::Prover(
+                    CommonProofProverError::InvalidInput,
+                ))?;
+            object_plans.push(ProofExternalMemoryObjectPlan::new(
+                pending.object,
+                pending.protection,
+                pending.exact_byte_length,
+                pending.issued_step,
+                pending.issued_step,
+                last_use_step,
+            ));
+        }
+    }
+    // The executor deletes every object with the same exact last-use step in
+    // one transaction, including objects owned by different transforms or
+    // trees. Count those batches once after every source use is known.
+    let deletion_transaction_count = u64::try_from(
+        object_plans
+            .iter()
+            .map(|object_plan| object_plan.last_use_step())
+            .collect::<BTreeSet<_>>()
+            .len(),
+    )
+    .map_err(|_| {
         GeneratedCommonProofStoragePlanError::Prover(CommonProofProverError::CountOverflow)
     })?;
+    maximum_transaction_count =
+        checked_add_u64(maximum_transaction_count, deletion_transaction_count)?;
+    let object_count = u32::try_from(object_plans.len()).map_err(|_| {
+        GeneratedCommonProofStoragePlanError::Prover(CommonProofProverError::CountOverflow)
+    })?;
+    let maximum_transaction_operation_count = object_count;
     let maximum_stored_byte_length = exact_peak_stored_byte_length(&object_plans)?;
+    Ok(GeneratedCommonProofStorageGeometry {
+        step_count,
+        maximum_chunk_byte_length,
+        maximum_transaction_payload_byte_length: chunk_byte_length,
+        maximum_transaction_operation_count,
+        object_count,
+        maximum_stored_byte_length,
+        maximum_total_written_byte_length,
+        maximum_total_read_byte_length,
+        maximum_transaction_count,
+        object_plans,
+        tree_plans,
+        replay_polynomial_plans,
+        relation_evaluation_transform_plans,
+        quotient_constraint_transform_plans,
+    })
+}
+
+pub(super) fn generated_common_proof_storage_plan(
+    variant: &RelationPlanVariant,
+    relation_context: &RelationPlanCheckContext,
+    catalog: &CompleteProofTreeCatalog,
+    transcript_schedule: &CommonProofTranscriptSchedule,
+    maximum_chunk_byte_length: u32,
+    include_replay_polynomials: bool,
+) -> Result<GeneratedCommonProofStoragePlan, GeneratedCommonProofStoragePlanError> {
+    let geometry = derive_generated_common_proof_storage_geometry(
+        variant,
+        relation_context,
+        catalog,
+        transcript_schedule,
+        maximum_chunk_byte_length,
+        include_replay_polynomials,
+    )?;
+    let GeneratedCommonProofStorageGeometry {
+        step_count,
+        maximum_chunk_byte_length,
+        maximum_transaction_payload_byte_length,
+        maximum_transaction_operation_count,
+        object_count: _,
+        maximum_stored_byte_length,
+        maximum_total_written_byte_length,
+        maximum_total_read_byte_length,
+        maximum_transaction_count,
+        object_plans,
+        tree_plans,
+        replay_polynomial_plans,
+        relation_evaluation_transform_plans,
+        quotient_constraint_transform_plans,
+    } = geometry;
     let external_memory_plan = ProofExternalMemoryPlan::new(
         step_count,
         maximum_chunk_byte_length,
-        chunk_byte_length,
+        maximum_transaction_payload_byte_length,
         maximum_transaction_operation_count,
         maximum_stored_byte_length,
         maximum_total_written_byte_length,
@@ -1227,6 +2023,37 @@ pub(super) fn generated_common_proof_storage_plan(
         tree_plans,
         replay_polynomial_plans,
         relation_evaluation_transform_plans,
+        quotient_constraint_transform_plans,
+    })
+}
+
+/// Derives exact browser scratch liveness and traffic before applying the
+/// absolute storage ceiling. The production generation path constructs its
+/// enforced plan from the same geometry.
+pub(crate) fn common_proof_external_memory_requirement(
+    variant: &RelationPlanVariant,
+    relation_context: &RelationPlanCheckContext,
+    catalog: &CompleteProofTreeCatalog,
+    transcript_schedule: &CommonProofTranscriptSchedule,
+    maximum_chunk_byte_length: u32,
+) -> Result<CommonProofExternalMemoryRequirement, GeneratedCommonProofStoragePlanError> {
+    let geometry = derive_generated_common_proof_storage_geometry(
+        variant,
+        relation_context,
+        catalog,
+        transcript_schedule,
+        maximum_chunk_byte_length,
+        true,
+    )?;
+    Ok(CommonProofExternalMemoryRequirement {
+        step_count: geometry.step_count,
+        maximum_chunk_byte_length: geometry.maximum_chunk_byte_length,
+        maximum_transaction_payload_byte_length: geometry.maximum_transaction_payload_byte_length,
+        object_count: geometry.object_count,
+        peak_stored_byte_length: geometry.maximum_stored_byte_length,
+        total_written_byte_length: geometry.maximum_total_written_byte_length,
+        total_read_byte_length: geometry.maximum_total_read_byte_length,
+        transaction_count: geometry.maximum_transaction_count,
     })
 }
 
@@ -1373,14 +2200,9 @@ pub(super) fn unique_catalog_entry(
     Ok(entry)
 }
 
-pub(super) fn map_private_coin_generation_error<
-    StorageError,
-    CoinError,
-    SinkError,
-    BoundOpeningError,
->(
+pub(super) fn map_private_coin_generation_error<StorageError, CoinError, SinkError>(
     error: CommonProofPrivateCoinError<CoinError>,
-) -> CommonProofGenerationError<StorageError, CoinError, SinkError, BoundOpeningError> {
+) -> CommonProofGenerationError<StorageError, CoinError, SinkError> {
     match error {
         CommonProofPrivateCoinError::Prover(error) => CommonProofGenerationError::Prover(error),
         CommonProofPrivateCoinError::CoinSource(error) => {
@@ -1404,11 +2226,13 @@ pub(super) fn insert_materialized_tree(
     let presence = root_present
         .get_mut(tree_index)
         .ok_or(CommonProofProverError::InvalidTree)?;
-    if *presence || stored_trees.insert(catalog_index, tree).is_some() {
+    if (*presence && *destination != root) || stored_trees.insert(catalog_index, tree).is_some() {
         return Err(CommonProofProverError::InvalidTree);
     }
-    *destination = root;
-    *presence = true;
+    if !*presence {
+        *destination = root;
+        *presence = true;
+    }
     Ok(())
 }
 
@@ -1429,32 +2253,38 @@ const COMMON_PROOF_EXECUTOR_RESIDENT_RESERVE_BYTE_LENGTH: u64 = 33_554_432;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
 pub(crate) enum CommonProofResidentMemoryPhase {
-    PreparingInputs = 1,
-    MaterializingRelationTree = 2,
-    DerivingApplicationColumns = 3,
-    PersistingRelationColumns = 4,
-    ConstructingQuotient = 5,
-    MaterializingQuotientTree = 6,
-    DerivingOpenings = 7,
-    ConstructingInitialFri = 8,
-    FoldingFri = 9,
-    EmittingQueries = 10,
+    LoadingSourcePolynomials = 1,
+    ConstructingReversedColumns = 2,
+    TransformingBaseColumns = 3,
+    MaterializingBaseTrees = 4,
+    DerivingAuxiliaryColumns = 5,
+    TransformingAuxiliaryColumns = 6,
+    MaterializingAuxiliaryTrees = 7,
+    ConstructingQuotient = 8,
+    MaterializingQuotientTrees = 9,
+    DerivingOpenings = 10,
+    ConstructingInitialFri = 11,
+    FoldingFri = 12,
+    PreparingQueryOutput = 13,
+    EmittingQueries = 14,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct CommonProofResidentMemoryPhasePlan {
     phase: CommonProofResidentMemoryPhase,
     executor_reserve_byte_length: u64,
-    relation_column_catalog_byte_length: u64,
-    trace_row_cache_byte_length: u64,
-    trace_synthesis_scratch_byte_length: u64,
-    replay_source_byte_length: u64,
+    relation_polynomial_working_set_byte_length: u64,
+    auxiliary_trace_workspace_byte_length: u64,
+    replay_polynomial_byte_length: u64,
     primary_vector_byte_length: u64,
     secondary_vector_byte_length: u64,
     claim_and_query_metadata_byte_length: u64,
     relation_rotation_block_byte_length: u64,
     external_working_set_byte_length: u64,
+    external_transaction_overlap_peak_byte_length: u64,
+    subphase_transient_peak_byte_length: u64,
     query_prefetch_byte_length: u64,
+    output_fragment_byte_length: u64,
     stream_window_byte_length: u64,
     total_byte_length: u64,
 }
@@ -1468,20 +2298,16 @@ impl CommonProofResidentMemoryPhasePlan {
         self.executor_reserve_byte_length
     }
 
-    pub(crate) const fn relation_column_catalog_byte_length(&self) -> u64 {
-        self.relation_column_catalog_byte_length
+    pub(crate) const fn relation_polynomial_working_set_byte_length(&self) -> u64 {
+        self.relation_polynomial_working_set_byte_length
     }
 
-    pub(crate) const fn trace_row_cache_byte_length(&self) -> u64 {
-        self.trace_row_cache_byte_length
+    pub(crate) const fn auxiliary_trace_workspace_byte_length(&self) -> u64 {
+        self.auxiliary_trace_workspace_byte_length
     }
 
-    pub(crate) const fn trace_synthesis_scratch_byte_length(&self) -> u64 {
-        self.trace_synthesis_scratch_byte_length
-    }
-
-    pub(crate) const fn replay_source_byte_length(&self) -> u64 {
-        self.replay_source_byte_length
+    pub(crate) const fn replay_polynomial_byte_length(&self) -> u64 {
+        self.replay_polynomial_byte_length
     }
 
     pub(crate) const fn primary_vector_byte_length(&self) -> u64 {
@@ -1504,8 +2330,20 @@ impl CommonProofResidentMemoryPhasePlan {
         self.external_working_set_byte_length
     }
 
+    pub(crate) const fn external_transaction_overlap_peak_byte_length(&self) -> u64 {
+        self.external_transaction_overlap_peak_byte_length
+    }
+
+    pub(crate) const fn subphase_transient_peak_byte_length(&self) -> u64 {
+        self.subphase_transient_peak_byte_length
+    }
+
     pub(crate) const fn query_prefetch_byte_length(&self) -> u64 {
         self.query_prefetch_byte_length
+    }
+
+    pub(crate) const fn output_fragment_byte_length(&self) -> u64 {
+        self.output_fragment_byte_length
     }
 
     pub(crate) const fn stream_window_byte_length(&self) -> u64 {
@@ -1552,53 +2390,185 @@ fn resident_value_byte_length(value_type: RelationColumnValueType) -> u64 {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn resident_phase_plan(
-    phase: CommonProofResidentMemoryPhase,
-    relation_column_catalog_byte_length: u64,
-    trace_row_cache_byte_length: u64,
-    trace_synthesis_scratch_byte_length: u64,
-    replay_source_byte_length: u64,
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct CommonProofQueryPrefetchRequirement {
+    maximum_payload_byte_length: u64,
+    maximum_allocation_byte_length: u64,
+}
+
+fn common_proof_query_prefetch_requirement(
+    catalog: &CompleteProofTreeCatalog,
+    unique_query_count: u32,
+) -> Result<CommonProofQueryPrefetchRequirement, CommonProofProverError> {
+    let unique_query_count =
+        usize::try_from(unique_query_count).map_err(|_| CommonProofProverError::CountOverflow)?;
+    if unique_query_count == 0 {
+        return Err(CommonProofProverError::InvalidOpening);
+    }
+    let evaluation_domain_size = usize::try_from(catalog.evaluation_domain_size())
+        .map_err(|_| CommonProofProverError::CountOverflow)?;
+    let mut maximum_payload_byte_length = 0_u64;
+    let mut maximum_allocation_byte_length = 0_u64;
+    for entry in catalog.entries() {
+        let leaf_count = entry_leaf_count(entry, catalog.evaluation_domain_size())
+            .map_err(|_| CommonProofProverError::InvalidTree)?;
+        let canonical_leaf_byte_length =
+            canonical_leaf_byte_length(entry).map_err(|_| CommonProofProverError::InvalidTree)?;
+        let query_representatives_per_leaf = match entry.source() {
+            ProofTreeCatalogSource::NonterminalFriLayer { .. } => evaluation_domain_size
+                .checked_div(2)
+                .and_then(|query_orbit_count| query_orbit_count.checked_div(leaf_count))
+                .filter(|multiplicity| *multiplicity != 0)
+                .ok_or(CommonProofProverError::InvalidTree)?,
+            _ => 1,
+        };
+        let minimum_opened_leaf_count = unique_query_count
+            .checked_add(query_representatives_per_leaf - 1)
+            .and_then(|count| count.checked_div(query_representatives_per_leaf))
+            .ok_or(CommonProofProverError::CountOverflow)?;
+        let maximum_opened_leaf_count = unique_query_count.min(leaf_count);
+        if minimum_opened_leaf_count == 0 || minimum_opened_leaf_count > maximum_opened_leaf_count {
+            return Err(CommonProofProverError::InvalidOpening);
+        }
+        let digest_level_count = usize::try_from(leaf_count.trailing_zeros())
+            .map_err(|_| CommonProofProverError::CountOverflow)?
+            .checked_add(1)
+            .ok_or(CommonProofProverError::CountOverflow)?;
+        for opened_leaf_count in minimum_opened_leaf_count..=maximum_opened_leaf_count {
+            let frontier_node_count =
+                maximum_minimal_frontier_node_count(leaf_count, opened_leaf_count).map_err(
+                    |error| match error {
+                        ProofBodyError::CountOverflow => CommonProofProverError::CountOverflow,
+                        ProofBodyError::AllocationLimitExceeded => {
+                            CommonProofProverError::AllocationLimitExceeded
+                        }
+                        _ => CommonProofProverError::InvalidTree,
+                    },
+                )?;
+            let opened_leaf_payload_byte_length = opened_leaf_count
+                .checked_mul(canonical_leaf_byte_length)
+                .ok_or(CommonProofProverError::CountOverflow)?;
+            let frontier_digest_byte_length = frontier_node_count
+                .checked_mul(HASH_BYTE_LENGTH)
+                .ok_or(CommonProofProverError::CountOverflow)?;
+            let payload_byte_length = opened_leaf_payload_byte_length
+                .checked_add(frontier_digest_byte_length)
+                .ok_or(CommonProofProverError::CountOverflow)?;
+            let allocation_byte_length = payload_byte_length
+                .checked_add(
+                    opened_leaf_count
+                        .checked_mul(core::mem::size_of::<u64>())
+                        .ok_or(CommonProofProverError::CountOverflow)?,
+                )
+                .and_then(|length| {
+                    length.checked_add(
+                        frontier_node_count.checked_mul(core::mem::size_of::<(u32, u64)>())?,
+                    )
+                })
+                .and_then(|length| {
+                    length.checked_add(
+                        digest_level_count
+                            .checked_mul(core::mem::size_of::<ProofExternalMemoryObject>())?,
+                    )
+                })
+                .ok_or(CommonProofProverError::CountOverflow)?;
+            maximum_payload_byte_length = maximum_payload_byte_length.max(
+                u64::try_from(payload_byte_length)
+                    .map_err(|_| CommonProofProverError::CountOverflow)?,
+            );
+            maximum_allocation_byte_length = maximum_allocation_byte_length.max(
+                u64::try_from(allocation_byte_length)
+                    .map_err(|_| CommonProofProverError::CountOverflow)?,
+            );
+        }
+    }
+    if maximum_payload_byte_length == 0 || maximum_allocation_byte_length == 0 {
+        return Err(CommonProofProverError::InvalidOpening);
+    }
+    Ok(CommonProofQueryPrefetchRequirement {
+        maximum_payload_byte_length,
+        maximum_allocation_byte_length,
+    })
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct CommonProofResidentMemoryPhaseInput {
+    relation_polynomial_working_set_byte_length: u64,
+    auxiliary_trace_workspace_byte_length: u64,
+    replay_polynomial_byte_length: u64,
     primary_vector_byte_length: u64,
     secondary_vector_byte_length: u64,
     claim_and_query_metadata_byte_length: u64,
     relation_rotation_block_byte_length: u64,
     external_working_set_byte_length: u64,
+    external_transaction_overlap_peak_byte_length: u64,
+    exact_subphase_transient_peak_byte_length: Option<u64>,
     query_prefetch_byte_length: u64,
+    output_fragment_byte_length: u64,
     stream_window_byte_length: u64,
+}
+
+fn resident_phase_plan(
+    phase: CommonProofResidentMemoryPhase,
+    input: CommonProofResidentMemoryPhaseInput,
 ) -> Result<CommonProofResidentMemoryPhasePlan, CommonProofProverError> {
-    let total_byte_length = [
-        COMMON_PROOF_EXECUTOR_RESIDENT_RESERVE_BYTE_LENGTH,
-        relation_column_catalog_byte_length,
-        trace_row_cache_byte_length,
-        trace_synthesis_scratch_byte_length,
-        replay_source_byte_length,
+    let CommonProofResidentMemoryPhaseInput {
+        relation_polynomial_working_set_byte_length,
+        auxiliary_trace_workspace_byte_length,
+        replay_polynomial_byte_length,
         primary_vector_byte_length,
         secondary_vector_byte_length,
         claim_and_query_metadata_byte_length,
         relation_rotation_block_byte_length,
         external_working_set_byte_length,
+        external_transaction_overlap_peak_byte_length,
+        exact_subphase_transient_peak_byte_length,
         query_prefetch_byte_length,
+        output_fragment_byte_length,
+        stream_window_byte_length,
+    } = input;
+    let external_peak_byte_length =
+        external_working_set_byte_length.max(external_transaction_overlap_peak_byte_length);
+    let additive_subphase_transient_peak_byte_length = relation_rotation_block_byte_length
+        .checked_add(external_peak_byte_length)
+        .ok_or(CommonProofProverError::CountOverflow)?;
+    let subphase_transient_peak_byte_length = exact_subphase_transient_peak_byte_length
+        .unwrap_or(additive_subphase_transient_peak_byte_length);
+    if subphase_transient_peak_byte_length < relation_rotation_block_byte_length
+        || subphase_transient_peak_byte_length < external_peak_byte_length
+    {
+        return Err(CommonProofProverError::InvalidInput);
+    }
+    let total_byte_length = [
+        COMMON_PROOF_EXECUTOR_RESIDENT_RESERVE_BYTE_LENGTH,
+        relation_polynomial_working_set_byte_length,
+        auxiliary_trace_workspace_byte_length,
+        replay_polynomial_byte_length,
+        primary_vector_byte_length,
+        secondary_vector_byte_length,
+        claim_and_query_metadata_byte_length,
+        subphase_transient_peak_byte_length,
+        query_prefetch_byte_length,
+        output_fragment_byte_length,
         stream_window_byte_length,
     ]
     .into_iter()
     .try_fold(0_u64, checked_resident_add)?;
-    if total_byte_length > MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH {
-        return Err(CommonProofProverError::ResidentMemoryLimitExceeded);
-    }
     Ok(CommonProofResidentMemoryPhasePlan {
         phase,
         executor_reserve_byte_length: COMMON_PROOF_EXECUTOR_RESIDENT_RESERVE_BYTE_LENGTH,
-        relation_column_catalog_byte_length,
-        trace_row_cache_byte_length,
-        trace_synthesis_scratch_byte_length,
-        replay_source_byte_length,
+        relation_polynomial_working_set_byte_length,
+        auxiliary_trace_workspace_byte_length,
+        replay_polynomial_byte_length,
         primary_vector_byte_length,
         secondary_vector_byte_length,
         claim_and_query_metadata_byte_length,
         relation_rotation_block_byte_length,
         external_working_set_byte_length,
+        external_transaction_overlap_peak_byte_length,
+        subphase_transient_peak_byte_length,
         query_prefetch_byte_length,
+        output_fragment_byte_length,
         stream_window_byte_length,
         total_byte_length,
     })
@@ -1606,12 +2576,14 @@ fn resident_phase_plan(
 
 /// Derives the hard resident live-set for the implemented external-memory
 /// schedule. Every potentially domain-sized state-machine field is assigned to
-/// a phase: the complete relation-column catalog and integer-lift row cache,
-/// one replay source, quotient and FRI vectors, DEEP/opening metadata, terminal
-/// and query vectors, the bounded external materialization, transform, and
-/// write working sets, query prefetch, and the acknowledged stream window.
-/// Complete Merkle levels and polynomial vectors are external.
-pub(crate) fn common_proof_resident_memory_plan(
+/// a phase: one current relation polynomial, one replay polynomial,
+/// descriptor-local auxiliary trace rows, quotient and FRI vectors,
+/// DEEP/opening metadata, terminal and query vectors, bounded external
+/// materialization/transform/write working sets, query prefetch, output
+/// staging, and the acknowledged stream window. Complete Merkle levels and
+/// persisted polynomial vectors are external; no pre- or post-challenge
+/// relation-column catalog is resident.
+fn derive_common_proof_resident_memory_plan(
     variant: &RelationPlanVariant,
     relation_context: &RelationPlanCheckContext,
     transcript_schedule: &CommonProofTranscriptSchedule,
@@ -1629,77 +2601,115 @@ pub(crate) fn common_proof_resident_memory_plan(
     }
     let evaluation_domain_size = variant.evaluation_domain_size();
     let trace_domain_size = variant.trace_domain_size();
+    let quotient_stream_requirement =
+        common_proof_quotient_stream_requirement(variant, external_memory_write_chunk_byte_length)?;
+    let query_prefetch_requirement =
+        common_proof_query_prefetch_requirement(catalog, transcript_schedule.unique_query_count())?;
+    if query_prefetch_requirement.maximum_payload_byte_length > maximum_prefetched_query_byte_length
+    {
+        return Err(CommonProofProverError::AllocationLimitExceeded);
+    }
     let extension_value_byte_length =
         resident_value_byte_length(RelationColumnValueType::ChallengeExtension);
     let base_value_byte_length = resident_value_byte_length(RelationColumnValueType::BaseField);
-    let mut relation_column_catalog_byte_length = 0_u64;
-    let mut base_column_count = 0_u64;
+    let trace_vector_byte_length =
+        checked_resident_multiply(trace_domain_size, base_value_byte_length)?;
+    let mut maximum_relation_polynomial_byte_length = 0_u64;
     let mut maximum_replay_source_byte_length = 0_u64;
-    let mut maximum_scalar_lde_byte_length = 0_u64;
-    let mut maximum_relation_persistence_external_working_set_byte_length = 0_u64;
+    let mut maximum_replay_writer_working_set_byte_length = 0_u64;
+    let mut maximum_stockham_working_set_byte_length = 0_u64;
+    let mut maximum_stockham_transaction_overlap_peak_byte_length = 0_u64;
     for column in variant.ordered_columns() {
         let value_byte_length = resident_value_byte_length(column.value_type());
         let source_byte_length =
             checked_resident_multiply(column.source_degree_bound_exclusive(), value_byte_length)?;
-        relation_column_catalog_byte_length =
-            checked_resident_add(relation_column_catalog_byte_length, source_byte_length)?;
+        maximum_relation_polynomial_byte_length =
+            maximum_relation_polynomial_byte_length.max(source_byte_length);
         maximum_replay_source_byte_length =
             maximum_replay_source_byte_length.max(source_byte_length);
-        maximum_scalar_lde_byte_length = maximum_scalar_lde_byte_length.max(
-            checked_resident_multiply(evaluation_domain_size, value_byte_length)?,
-        );
         let maximum_scan_element_count = external_memory_write_chunk_byte_length
             .checked_div(value_byte_length)
             .filter(|count| *count != 0)
             .ok_or(CommonProofProverError::InvalidInput)?;
         let stockham_scan_byte_length =
             checked_resident_multiply(maximum_scan_element_count, value_byte_length)?;
-        let stockham_working_set_byte_length = checked_resident_add(
-            checked_resident_multiply(stockham_scan_byte_length, 3)?,
+        let stockham_requirement = external_stockham_resident_memory_requirement(
+            stockham_scan_byte_length,
             external_memory_write_chunk_byte_length,
-        )?;
+        )
+        .map_err(|error| match error {
+            super::ExternalPolynomialError::CountOverflow => CommonProofProverError::CountOverflow,
+            super::ExternalPolynomialError::AllocationLimitExceeded => {
+                CommonProofProverError::AllocationLimitExceeded
+            }
+            _ => CommonProofProverError::InvalidInput,
+        })?;
         let replay_writer_working_set_byte_length =
             checked_resident_add(external_memory_write_chunk_byte_length, value_byte_length)?;
-        maximum_relation_persistence_external_working_set_byte_length =
-            maximum_relation_persistence_external_working_set_byte_length
-                .max(stockham_working_set_byte_length)
+        maximum_replay_writer_working_set_byte_length =
+            maximum_replay_writer_working_set_byte_length
                 .max(replay_writer_working_set_byte_length);
-        if column.value_type() == RelationColumnValueType::BaseField {
-            base_column_count = checked_resident_add(base_column_count, 1)?;
-        }
+        maximum_stockham_working_set_byte_length = maximum_stockham_working_set_byte_length
+            .max(stockham_requirement.component_working_set_byte_length());
+        maximum_stockham_transaction_overlap_peak_byte_length =
+            maximum_stockham_transaction_overlap_peak_byte_length
+                .max(stockham_requirement.transaction_overlap_peak_byte_length());
     }
-    if maximum_replay_source_byte_length == 0 || maximum_scalar_lde_byte_length == 0 {
+    if maximum_relation_polynomial_byte_length == 0 || maximum_replay_source_byte_length == 0 {
         return Err(CommonProofProverError::InvalidColumn);
     }
 
-    let trace_row_cache_byte_length = checked_resident_multiply(
-        checked_resident_multiply(base_column_count, trace_domain_size)?,
-        base_value_byte_length,
+    let auxiliary_trace_workspace_byte_length = checked_resident_multiply(
+        trace_vector_byte_length,
+        super::maximum_auxiliary_synthesis_trace_vector_count(variant)?,
     )?;
-    // The largest integer-lift helper simultaneously owns the product
-    // accumulator, two suffix vectors, two transpose vectors, one contribution
-    // vector, and the reduced/evaluated scratch pair used while populating the
-    // cache. These eight trace vectors are dropped before transcript progress.
-    let trace_synthesis_scratch_byte_length = checked_resident_multiply(
-        checked_resident_multiply(trace_domain_size, base_value_byte_length)?,
-        8,
+    let mut maximum_trace_mask_polynomial_byte_length = 0_u64;
+    for mask in variant.ordered_masks().iter().copied().filter(|mask| {
+        mask.mask_kind() == RelationMaskKind::Trace
+            && mask.target_class() == RelationMaskTargetClass::Column
+    }) {
+        let column = variant
+            .ordered_columns()
+            .get(
+                usize::try_from(mask.target_ordinal())
+                    .map_err(|_| CommonProofProverError::CountOverflow)?,
+            )
+            .ok_or(CommonProofProverError::InvalidMask)?;
+        maximum_trace_mask_polynomial_byte_length =
+            maximum_trace_mask_polynomial_byte_length.max(checked_resident_multiply(
+                mask.mask_degree_bound_exclusive(),
+                resident_value_byte_length(column.value_type()),
+            )?);
+    }
+    let source_polynomial_construction_working_set_byte_length = checked_resident_add(
+        maximum_relation_polynomial_byte_length,
+        maximum_trace_mask_polynomial_byte_length,
     )?;
+    let reversed_polynomial_construction_working_set_byte_length = checked_resident_add(
+        maximum_replay_source_byte_length,
+        checked_resident_multiply(trace_vector_byte_length, 2)?,
+    )?
+    .max(source_polynomial_construction_working_set_byte_length);
+    let auxiliary_output_growth_byte_length =
+        maximum_relation_polynomial_byte_length.saturating_sub(trace_vector_byte_length);
 
     let mut maximum_relation_merkle_working_set_byte_length = 0_u64;
     let mut maximum_extension_merkle_working_set_byte_length = 0_u64;
     for entry in catalog.entries() {
-        let Some(context) = entry.common_context() else {
+        if common_tree_materialization_phase(entry.source()).is_none() {
             continue;
-        };
-        let leaf_count = u64::try_from(context.leaf_count()?)
-            .map_err(|_| CommonProofProverError::CountOverflow)?;
+        }
+        let leaf_count = u64::try_from(
+            entry_leaf_count(entry, catalog.evaluation_domain_size())
+                .map_err(|_| CommonProofProverError::InvalidTree)?,
+        )
+        .map_err(|_| CommonProofProverError::CountOverflow)?;
         if leaf_count == 0 || !leaf_count.is_power_of_two() {
             return Err(CommonProofProverError::InvalidTree);
         }
-        let canonical_leaf_byte_length = u64::try_from(canonical_common_proof_leaf_byte_length(
-            context,
-            common_proof_tree_value_type(entry)?,
-        )?)
+        let canonical_leaf_byte_length = u64::try_from(
+            canonical_leaf_byte_length(entry).map_err(|_| CommonProofProverError::InvalidTree)?,
+        )
         .map_err(|_| CommonProofProverError::CountOverflow)?;
         // The materializer owns one canonical leaf, both typed phase values,
         // the two child plus one parent digests, and two external-memory write
@@ -1713,7 +2723,8 @@ pub(crate) fn common_proof_resident_memory_plan(
             checked_resident_multiply(external_memory_write_chunk_byte_length, 2)?,
         )?;
         match entry.source() {
-            ProofTreeCatalogSource::RelationProofCreated { .. } => {
+            ProofTreeCatalogSource::RelationProofCreated { .. }
+            | ProofTreeCatalogSource::RelationBoundPublic => {
                 maximum_relation_merkle_working_set_byte_length =
                     maximum_relation_merkle_working_set_byte_length.max(working_set_byte_length);
             }
@@ -1723,39 +2734,45 @@ pub(crate) fn common_proof_resident_memory_plan(
                 maximum_extension_merkle_working_set_byte_length =
                     maximum_extension_merkle_working_set_byte_length.max(working_set_byte_length);
             }
-            ProofTreeCatalogSource::RelationBoundPublic => {}
         }
     }
-    // Relation-column persistence serially writes replay polynomials, runs one
-    // Stockham transform, or materializes one relation tree. The state machine
-    // never owns these working sets concurrently, so the phase owns their
-    // maximum rather than their sum.
-    maximum_relation_persistence_external_working_set_byte_length =
-        maximum_relation_persistence_external_working_set_byte_length
-            .max(maximum_relation_merkle_working_set_byte_length);
-
     let evaluation_extension_vector_byte_length =
         checked_resident_multiply(evaluation_domain_size, extension_value_byte_length)?;
-    let relation_rotation_count = required_relation_rotations_by_column(variant)?
-        .into_iter()
-        .try_fold(0_u64, |count, rotations| {
-            checked_resident_add(
-                count,
-                u64::try_from(rotations.len())
-                    .map_err(|_| CommonProofProverError::CountOverflow)?,
-            )
-        })?;
-    let relation_rotation_block_byte_length = checked_resident_multiply(
-        checked_resident_multiply(
-            evaluation_domain_size.min(COMMON_PROOF_RELATION_EVALUATION_BLOCK_LENGTH as u64),
-            relation_rotation_count,
-        )?,
-        extension_value_byte_length,
-    )?;
+    let relation_rotation_block_byte_length =
+        quotient_stream_requirement.maximum_rotation_block_byte_length;
+    let quotient_external_working_set_byte_length = maximum_stockham_working_set_byte_length
+        .max(quotient_stream_requirement.maximum_read_working_set_byte_length);
+    let quotient_external_transaction_overlap_peak_byte_length =
+        maximum_stockham_transaction_overlap_peak_byte_length
+            .max(quotient_stream_requirement.maximum_read_transaction_overlap_peak_byte_length);
+    let quotient_stockham_transient_peak_byte_length = maximum_stockham_working_set_byte_length
+        .max(maximum_stockham_transaction_overlap_peak_byte_length);
+    let quotient_subphase_transient_peak_byte_length = quotient_stockham_transient_peak_byte_length
+        .max(quotient_stream_requirement.maximum_read_subphase_transient_byte_length);
     let quotient_component_byte_length = checked_resident_multiply(
         relation_context.quotient_component_degree_bound_exclusive,
         extension_value_byte_length,
     )?;
+    let opening_batch_mask_byte_length = {
+        let mut matching_masks = variant.ordered_masks().iter().copied().filter(|mask| {
+            mask.mask_kind() == RelationMaskKind::OpeningBatch
+                && mask.target_class() == RelationMaskTargetClass::Batch
+                && mask.target_ordinal() == 0
+        });
+        let mask = matching_masks.next();
+        if matching_masks.next().is_some()
+            || (transcript_schedule.privacy_mode() == CommonProofPrivacyMode::SecretBearing)
+                != mask.is_some()
+        {
+            return Err(CommonProofProverError::InvalidMask);
+        }
+        mask.map_or(Ok(0), |descriptor| {
+            checked_resident_multiply(
+                descriptor.mask_degree_bound_exclusive(),
+                extension_value_byte_length,
+            )
+        })?
+    };
     let opening_accumulator_byte_length = checked_resident_multiply(
         variant
             .opening_degree_bound_exclusive()
@@ -1763,10 +2780,19 @@ pub(crate) fn common_proof_resident_memory_plan(
             .ok_or(CommonProofProverError::InvalidOpening)?,
         extension_value_byte_length,
     )?;
-    let quotient_cursor_byte_length = checked_resident_add(
-        evaluation_extension_vector_byte_length,
+    // While creating a middle quotient component, the cursor owns the current
+    // component and both neighboring telescoping randomizers. While
+    // materializing it, the current component and previous randomizer instead
+    // overlap one bounded Merkle working set.
+    let quotient_component_creation_working_set_byte_length =
+        checked_resident_multiply(quotient_component_byte_length, 3)?;
+    let quotient_component_materialization_working_set_byte_length = checked_resident_add(
         checked_resident_multiply(quotient_component_byte_length, 2)?,
+        maximum_extension_merkle_working_set_byte_length,
     )?;
+    let quotient_component_phase_working_set_byte_length =
+        quotient_component_creation_working_set_byte_length
+            .max(quotient_component_materialization_working_set_byte_length);
     let opening_claim_count = u64::try_from(variant.ordered_opening_claims().len())
         .map_err(|_| CommonProofProverError::CountOverflow)?;
     let opening_point_count = variant
@@ -1782,6 +2808,8 @@ pub(crate) fn common_proof_resident_memory_plan(
         )?,
         extension_value_byte_length,
     )?;
+    let deep_evaluation_byte_length =
+        checked_resident_multiply(opening_claim_count, extension_value_byte_length)?;
     let terminal_coefficient_byte_length = checked_resident_multiply(
         u64::from(relation_context.final_polynomial_degree_bound_exclusive),
         extension_value_byte_length,
@@ -1792,150 +2820,161 @@ pub(crate) fn common_proof_resident_memory_plan(
             .map_err(|_| CommonProofProverError::CountOverflow)?,
     )?;
     let query_metadata_byte_length = checked_resident_add(
-        terminal_coefficient_byte_length,
+        checked_resident_add(
+            terminal_coefficient_byte_length,
+            checked_resident_multiply(opening_claim_count, extension_value_byte_length)?,
+        )?,
         query_representative_byte_length,
     )?;
+    let emitted_query_metadata_byte_length = checked_resident_add(
+        terminal_coefficient_byte_length,
+        checked_resident_multiply(
+            u64::from(transcript_schedule.unique_query_count()),
+            u64::try_from(core::mem::size_of::<u64>())
+                .map_err(|_| CommonProofProverError::CountOverflow)?,
+        )?,
+    )?;
+    let auxiliary_relation_polynomial_working_set_byte_length = maximum_replay_source_byte_length
+        .max(checked_resident_add(
+            auxiliary_output_growth_byte_length,
+            maximum_trace_mask_polynomial_byte_length,
+        )?);
+    let maximum_opening_replay_polynomial_byte_length = maximum_replay_source_byte_length
+        .max(quotient_component_byte_length)
+        .max(opening_batch_mask_byte_length);
+    let opening_phase_vector_working_set_byte_length =
+        maximum_opening_replay_polynomial_byte_length.max(checked_resident_add(
+            opening_batch_mask_byte_length,
+            maximum_extension_merkle_working_set_byte_length,
+        )?);
 
     let phases = vec![
         resident_phase_plan(
-            CommonProofResidentMemoryPhase::PreparingInputs,
-            relation_column_catalog_byte_length,
-            trace_row_cache_byte_length,
-            trace_synthesis_scratch_byte_length,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            maximum_stream_window_byte_length,
+            CommonProofResidentMemoryPhase::LoadingSourcePolynomials,
+            CommonProofResidentMemoryPhaseInput {
+                relation_polynomial_working_set_byte_length:
+                    source_polynomial_construction_working_set_byte_length,
+                external_working_set_byte_length: maximum_replay_writer_working_set_byte_length,
+                ..CommonProofResidentMemoryPhaseInput::default()
+            },
         )?,
         resident_phase_plan(
-            CommonProofResidentMemoryPhase::MaterializingRelationTree,
-            relation_column_catalog_byte_length,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            maximum_relation_merkle_working_set_byte_length,
-            0,
-            maximum_stream_window_byte_length,
+            CommonProofResidentMemoryPhase::ConstructingReversedColumns,
+            CommonProofResidentMemoryPhaseInput {
+                relation_polynomial_working_set_byte_length:
+                    reversed_polynomial_construction_working_set_byte_length,
+                external_working_set_byte_length: maximum_replay_writer_working_set_byte_length,
+                ..CommonProofResidentMemoryPhaseInput::default()
+            },
         )?,
         resident_phase_plan(
-            CommonProofResidentMemoryPhase::DerivingApplicationColumns,
-            relation_column_catalog_byte_length,
-            trace_row_cache_byte_length,
-            trace_synthesis_scratch_byte_length,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            maximum_stream_window_byte_length,
+            CommonProofResidentMemoryPhase::TransformingBaseColumns,
+            CommonProofResidentMemoryPhaseInput {
+                external_working_set_byte_length: maximum_stockham_working_set_byte_length,
+                external_transaction_overlap_peak_byte_length:
+                    maximum_stockham_transaction_overlap_peak_byte_length,
+                ..CommonProofResidentMemoryPhaseInput::default()
+            },
         )?,
         resident_phase_plan(
-            CommonProofResidentMemoryPhase::PersistingRelationColumns,
-            relation_column_catalog_byte_length,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            maximum_relation_persistence_external_working_set_byte_length,
-            0,
-            maximum_stream_window_byte_length,
+            CommonProofResidentMemoryPhase::MaterializingBaseTrees,
+            CommonProofResidentMemoryPhaseInput {
+                external_working_set_byte_length: maximum_relation_merkle_working_set_byte_length,
+                ..CommonProofResidentMemoryPhaseInput::default()
+            },
+        )?,
+        resident_phase_plan(
+            CommonProofResidentMemoryPhase::DerivingAuxiliaryColumns,
+            CommonProofResidentMemoryPhaseInput {
+                relation_polynomial_working_set_byte_length:
+                    auxiliary_relation_polynomial_working_set_byte_length,
+                auxiliary_trace_workspace_byte_length,
+                external_working_set_byte_length: maximum_replay_writer_working_set_byte_length,
+                ..CommonProofResidentMemoryPhaseInput::default()
+            },
+        )?,
+        resident_phase_plan(
+            CommonProofResidentMemoryPhase::TransformingAuxiliaryColumns,
+            CommonProofResidentMemoryPhaseInput {
+                external_working_set_byte_length: maximum_stockham_working_set_byte_length,
+                external_transaction_overlap_peak_byte_length:
+                    maximum_stockham_transaction_overlap_peak_byte_length,
+                ..CommonProofResidentMemoryPhaseInput::default()
+            },
+        )?,
+        resident_phase_plan(
+            CommonProofResidentMemoryPhase::MaterializingAuxiliaryTrees,
+            CommonProofResidentMemoryPhaseInput {
+                external_working_set_byte_length: maximum_relation_merkle_working_set_byte_length,
+                ..CommonProofResidentMemoryPhaseInput::default()
+            },
         )?,
         resident_phase_plan(
             CommonProofResidentMemoryPhase::ConstructingQuotient,
-            0,
-            0,
-            0,
-            maximum_replay_source_byte_length,
-            evaluation_extension_vector_byte_length,
-            maximum_scalar_lde_byte_length,
-            0,
-            relation_rotation_block_byte_length,
-            0,
-            0,
-            maximum_stream_window_byte_length,
+            CommonProofResidentMemoryPhaseInput {
+                primary_vector_byte_length: evaluation_extension_vector_byte_length,
+                relation_rotation_block_byte_length,
+                external_working_set_byte_length: quotient_external_working_set_byte_length,
+                external_transaction_overlap_peak_byte_length:
+                    quotient_external_transaction_overlap_peak_byte_length,
+                exact_subphase_transient_peak_byte_length: Some(
+                    quotient_subphase_transient_peak_byte_length,
+                ),
+                ..CommonProofResidentMemoryPhaseInput::default()
+            },
         )?,
         resident_phase_plan(
-            CommonProofResidentMemoryPhase::MaterializingQuotientTree,
-            0,
-            0,
-            0,
-            0,
-            quotient_cursor_byte_length,
-            0,
-            0,
-            0,
-            maximum_extension_merkle_working_set_byte_length,
-            0,
-            maximum_stream_window_byte_length,
+            CommonProofResidentMemoryPhase::MaterializingQuotientTrees,
+            CommonProofResidentMemoryPhaseInput {
+                primary_vector_byte_length: evaluation_extension_vector_byte_length,
+                secondary_vector_byte_length: quotient_component_phase_working_set_byte_length,
+                ..CommonProofResidentMemoryPhaseInput::default()
+            },
         )?,
         resident_phase_plan(
             CommonProofResidentMemoryPhase::DerivingOpenings,
-            0,
-            0,
-            0,
-            maximum_replay_source_byte_length.max(quotient_component_byte_length),
-            quotient_component_byte_length,
-            0,
-            opening_metadata_byte_length,
-            0,
-            maximum_extension_merkle_working_set_byte_length,
-            0,
-            maximum_stream_window_byte_length,
+            CommonProofResidentMemoryPhaseInput {
+                primary_vector_byte_length: opening_phase_vector_working_set_byte_length,
+                claim_and_query_metadata_byte_length: opening_metadata_byte_length,
+                ..CommonProofResidentMemoryPhaseInput::default()
+            },
         )?,
         resident_phase_plan(
             CommonProofResidentMemoryPhase::ConstructingInitialFri,
-            0,
-            0,
-            0,
-            maximum_replay_source_byte_length.max(quotient_component_byte_length),
-            opening_accumulator_byte_length,
-            0,
-            opening_metadata_byte_length,
-            0,
-            0,
-            0,
-            maximum_stream_window_byte_length,
+            CommonProofResidentMemoryPhaseInput {
+                replay_polynomial_byte_length: maximum_opening_replay_polynomial_byte_length,
+                primary_vector_byte_length: opening_accumulator_byte_length,
+                claim_and_query_metadata_byte_length: opening_metadata_byte_length,
+                ..CommonProofResidentMemoryPhaseInput::default()
+            },
         )?,
         resident_phase_plan(
             CommonProofResidentMemoryPhase::FoldingFri,
-            0,
-            0,
-            0,
-            0,
-            evaluation_extension_vector_byte_length,
-            0,
-            opening_metadata_byte_length,
-            0,
-            maximum_extension_merkle_working_set_byte_length,
-            0,
-            maximum_stream_window_byte_length,
+            CommonProofResidentMemoryPhaseInput {
+                primary_vector_byte_length: evaluation_extension_vector_byte_length,
+                claim_and_query_metadata_byte_length: deep_evaluation_byte_length,
+                external_working_set_byte_length: maximum_extension_merkle_working_set_byte_length,
+                ..CommonProofResidentMemoryPhaseInput::default()
+            },
+        )?,
+        resident_phase_plan(
+            CommonProofResidentMemoryPhase::PreparingQueryOutput,
+            CommonProofResidentMemoryPhaseInput {
+                claim_and_query_metadata_byte_length: query_metadata_byte_length,
+                output_fragment_byte_length: maximum_stream_window_byte_length,
+                ..CommonProofResidentMemoryPhaseInput::default()
+            },
         )?,
         resident_phase_plan(
             CommonProofResidentMemoryPhase::EmittingQueries,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            query_metadata_byte_length,
-            0,
-            0,
-            maximum_prefetched_query_byte_length,
-            maximum_stream_window_byte_length,
+            CommonProofResidentMemoryPhaseInput {
+                claim_and_query_metadata_byte_length: emitted_query_metadata_byte_length,
+                query_prefetch_byte_length: query_prefetch_requirement
+                    .maximum_allocation_byte_length,
+                output_fragment_byte_length: maximum_stream_window_byte_length,
+                stream_window_byte_length: maximum_stream_window_byte_length,
+                ..CommonProofResidentMemoryPhaseInput::default()
+            },
         )?,
     ];
     let peak_byte_length = phases
@@ -1947,4 +2986,51 @@ pub(crate) fn common_proof_resident_memory_plan(
         phases,
         peak_byte_length,
     })
+}
+
+/// Derives the exact selected liveness requirement before applying the
+/// absolute WebAssembly safety bound. Development accounting uses this to
+/// report a concrete overage instead of replacing it with an opaque failure.
+pub(crate) fn common_proof_resident_memory_requirement(
+    variant: &RelationPlanVariant,
+    relation_context: &RelationPlanCheckContext,
+    transcript_schedule: &CommonProofTranscriptSchedule,
+    catalog: &CompleteProofTreeCatalog,
+    maximum_prefetched_query_byte_length: u64,
+    external_memory_write_chunk_byte_length: u64,
+    maximum_stream_window_byte_length: u64,
+) -> Result<CommonProofResidentMemoryPlan, CommonProofProverError> {
+    derive_common_proof_resident_memory_plan(
+        variant,
+        relation_context,
+        transcript_schedule,
+        catalog,
+        maximum_prefetched_query_byte_length,
+        external_memory_write_chunk_byte_length,
+        maximum_stream_window_byte_length,
+    )
+}
+
+pub(crate) fn common_proof_resident_memory_plan(
+    variant: &RelationPlanVariant,
+    relation_context: &RelationPlanCheckContext,
+    transcript_schedule: &CommonProofTranscriptSchedule,
+    catalog: &CompleteProofTreeCatalog,
+    maximum_prefetched_query_byte_length: u64,
+    external_memory_write_chunk_byte_length: u64,
+    maximum_stream_window_byte_length: u64,
+) -> Result<CommonProofResidentMemoryPlan, CommonProofProverError> {
+    let plan = derive_common_proof_resident_memory_plan(
+        variant,
+        relation_context,
+        transcript_schedule,
+        catalog,
+        maximum_prefetched_query_byte_length,
+        external_memory_write_chunk_byte_length,
+        maximum_stream_window_byte_length,
+    )?;
+    if plan.peak_byte_length() > MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH {
+        return Err(CommonProofProverError::ResidentMemoryLimitExceeded);
+    }
+    Ok(plan)
 }

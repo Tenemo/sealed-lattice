@@ -1,3 +1,5 @@
+#[cfg(test)]
+use super::committed_material::CommittedMaterialRangeCandidate;
 use super::committed_material::{
     CommittedMaterialPlanBuilder, CommittedMaterialRelationPlanInput, IntegerTerm, MaterialRootUse,
     root_path,
@@ -12,6 +14,28 @@ const RECIPIENT_SHARE_MATERIAL_ROOTS_FIELD_ORDINAL: u64 = 9;
 pub(crate) fn compile_vss_share_linkage_relation_plan(
     input: &CommittedMaterialRelationPlanInput,
     check_context: &RelationPlanCheckContext,
+) -> Result<CompiledRelationPlan, RelationPlanError> {
+    compile_vss_share_linkage_relation_plan_inner(
+        input,
+        check_context,
+        #[cfg(test)]
+        None,
+    )
+}
+
+#[cfg(test)]
+pub(crate) fn compile_vss_share_linkage_range_candidate(
+    input: &CommittedMaterialRelationPlanInput,
+    check_context: &RelationPlanCheckContext,
+    range_candidate: CommittedMaterialRangeCandidate,
+) -> Result<CompiledRelationPlan, RelationPlanError> {
+    compile_vss_share_linkage_relation_plan_inner(input, check_context, Some(range_candidate))
+}
+
+fn compile_vss_share_linkage_relation_plan_inner(
+    input: &CommittedMaterialRelationPlanInput,
+    check_context: &RelationPlanCheckContext,
+    #[cfg(test)] range_candidate: Option<CommittedMaterialRangeCandidate>,
 ) -> Result<CompiledRelationPlan, RelationPlanError> {
     let sharing_limb_count = input.sharing_data_modulus_indices.len();
     let threshold = usize::from(input.threshold);
@@ -54,37 +78,41 @@ pub(crate) fn compile_vss_share_linkage_relation_plan(
         check_context,
         root_paths,
     )?;
+    #[cfg(test)]
+    if let Some(range_candidate) = range_candidate {
+        builder.use_range_candidate(range_candidate);
+    }
     let mut coefficient_messages = Vec::with_capacity(sharing_limb_count);
     let mut recipient_messages = Vec::with_capacity(sharing_limb_count);
     let mut logical_root_ordinal = 0_usize;
     for sharing_limb_ordinal in 0..sharing_limb_count {
-        let mut limb_coefficients = Vec::with_capacity(threshold);
-        for _ in 0..threshold {
-            limb_coefficients.push(builder.add_material_message(
-                logical_root_ordinal,
-                sharing_limb_ordinal,
-                MaterialRootUse::Output,
-            )?);
-            logical_root_ordinal = logical_root_ordinal
-                .checked_add(1)
-                .ok_or(RelationPlanError::CountOverflow)?;
-        }
-        coefficient_messages.push(limb_coefficients);
-
-        let mut limb_recipients = Vec::with_capacity(participant_count);
-        for _ in 0..participant_count {
-            limb_recipients.push(builder.add_material_message(
-                logical_root_ordinal,
-                sharing_limb_ordinal,
-                MaterialRootUse::Output,
-            )?);
-            logical_root_ordinal = logical_root_ordinal
-                .checked_add(1)
-                .ok_or(RelationPlanError::CountOverflow)?;
-        }
-        recipient_messages.push(limb_recipients);
+        let roots_per_limb = threshold
+            .checked_add(participant_count)
+            .ok_or(RelationPlanError::CountOverflow)?;
+        let roots = (0..roots_per_limb)
+            .map(|root_offset| {
+                logical_root_ordinal
+                    .checked_add(root_offset)
+                    .map(|root_ordinal| (root_ordinal, MaterialRootUse::Output))
+                    .ok_or(RelationPlanError::CountOverflow)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let messages = builder.add_material_messages(&roots, sharing_limb_ordinal)?;
+        let (limb_coefficients, limb_recipients) = messages.split_at(threshold);
+        coefficient_messages.push(limb_coefficients.to_vec());
+        recipient_messages.push(limb_recipients.to_vec());
+        logical_root_ordinal = logical_root_ordinal
+            .checked_add(roots_per_limb)
+            .ok_or(RelationPlanError::CountOverflow)?;
     }
 
+    let quotient_count = sharing_limb_count
+        .checked_mul(2)
+        .and_then(|count| count.checked_mul(participant_count))
+        .ok_or(RelationPlanError::CountOverflow)?;
+    let mut quotient_columns = builder
+        .add_packed_signed_quotient_columns(quotient_count, u64::from(input.threshold))?
+        .into_iter();
     let point_stride = input.point_stride()?;
     for sharing_limb_ordinal in 0..sharing_limb_count {
         let mut residuals_by_half = [Vec::new(), Vec::new()];
@@ -116,8 +144,9 @@ pub(crate) fn compile_vss_share_linkage_relation_plan(
                     physical_half_ordinal,
                     true,
                 )?;
-                let quotient_column =
-                    builder.add_signed_quotient_column(u64::from(input.threshold))?;
+                let quotient_column = quotient_columns
+                    .next()
+                    .ok_or(RelationPlanError::InvalidColumn)?;
                 builder.append_modulus_quotient_integer_term(
                     &mut terms,
                     sharing_limb_ordinal,
@@ -137,6 +166,9 @@ pub(crate) fn compile_vss_share_linkage_relation_plan(
                 )?;
             }
         }
+    }
+    if quotient_columns.next().is_some() {
+        return Err(RelationPlanError::InvalidColumn);
     }
     builder.finish()
 }

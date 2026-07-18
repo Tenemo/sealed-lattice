@@ -12,12 +12,16 @@ use crate::foundation::{
     ActionPrivateRandomness, CanonicalDecodeLimits, CanonicalItem, CanonicalItemType,
     CanonicalTuple, FoundationSchemaError, Hash512, PRIVATE_PROOF_SALT_PURPOSE,
     PrivateRandomCursor, PrivateRandomnessAttemptIdentifier, PrivateRandomnessDomain,
-    PrivateRandomnessStream, ProofObjectHeader, hash_foundation_tuple_512,
+    PrivateRandomnessKmacInputClassAccounting, PrivateRandomnessStream, ProofObjectHeader,
+    hash_foundation_tuple_512, private_randomness_stream_block_count_for_byte_length,
+    private_randomness_stream_block_count_for_modulo_outputs,
+    proof_attempt_identifier_derivation_count,
 };
 use crate::hashing::StreamingHash512;
 
 use super::body::{
     PROOF_AUTHENTICATION_FRONTIER_SCHEMA_IDENTIFIER, PROOF_QUERY_OPENING_RECORD_SCHEMA_IDENTIFIER,
+    canonical_leaf_byte_length, entry_leaf_count, maximum_minimal_frontier_node_count,
 };
 use super::external_memory;
 use super::external_memory::{
@@ -26,30 +30,33 @@ use super::external_memory::{
     ProofExternalMemoryPlan, ProofExternalMemoryProtection,
 };
 use super::external_polynomial::{
-    ExternalPolynomialValue, ExternalPolynomialVector, ExternalStockhamTransform,
-    ExternalStockhamTransformDirection, ExternalStockhamTransformError,
+    ExternalPolynomialError, ExternalPolynomialValue, ExternalPolynomialVector,
+    ExternalStockhamTransform, ExternalStockhamTransformDirection, ExternalStockhamTransformError,
     ExternalStockhamTransformPlan, ExternalStockhamTransformProgress,
-    map_external_polynomial_plan_error, read_external_polynomial_value,
+    external_polynomial_extension_read_resident_memory_requirement,
+    external_stockham_resident_memory_requirement, external_value_byte_length,
+    map_external_polynomial_plan_error, read_external_polynomial_extension_values,
+    read_external_polynomial_value,
 };
-use super::merkle::{
-    PROOF_AUTHENTICATION_NODE_SCHEMA_IDENTIFIER, PROOF_MERKLE_NODE_SCHEMA_IDENTIFIER,
-};
+use super::merkle::{PROOF_MERKLE_NODE_SCHEMA_IDENTIFIER, minimal_frontier_coordinates};
 use super::relation_plan::{
-    BoundTreeConstructionKind, ProofPrivacyMode, RelationColumnDescriptor, RelationColumnOrigin,
-    RelationColumnValueType, RelationIntegerLiftCoefficient,
+    BoundTreeConstructionKind, CheckedRelationApplicationChallenges, ProofPrivacyMode,
+    RelationColumnDescriptor, RelationColumnOrigin, RelationColumnValueType,
+    RelationConstraintColumnQuery, RelationIntegerLiftCoefficient,
     RelationIntegerLiftComponentDescriptor, RelationIntegerLiftConvolutionKind,
     RelationIntegerLiftConvolutionProductDescriptor, RelationIntegerLiftFullRingHalf,
     RelationIntegerLiftFullRingNegacyclicProductDescriptor,
     RelationIntegerLiftLinearTermDescriptor,
-    RelationIntegerLiftNegacyclicAutomorphismPermutationDescriptor, RelationMaskDescriptor,
-    RelationMaskKind, RelationMaskTargetClass, RelationOpeningClaimDescriptor,
-    RelationOpeningSourceClass, RelationTreeDescriptor,
+    RelationIntegerLiftNegacyclicAutomorphismPermutationDescriptor, RelationMaskCoordinate,
+    RelationMaskDescriptor, RelationMaskKind, RelationMaskTargetClass,
+    RelationOpeningClaimDescriptor, RelationOpeningSourceClass, RelationTreeDescriptor,
 };
 use super::{
-    CommonProofChallenge, CommonProofPrivacyMode, CommonProofQueryOpeningAbsorber,
-    CommonProofTranscript, CommonProofTranscriptSchedule, CompiledRelationPlan,
-    CompleteProofTreeCatalog, MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH,
-    MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH, PROOF_CHALLENGE_EXTENSION_DEGREE,
+    COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH, CommonProofChallenge, CommonProofPrivacyMode,
+    CommonProofQueryOpeningAbsorber, CommonProofTranscript, CommonProofTranscriptSchedule,
+    CompiledRelationPlan, CompleteProofTreeCatalog, MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH,
+    MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH, PROOF_BASE_FIELD_MODULUS,
+    PROOF_CHALLENGE_EXTENSION_DEGREE, PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT,
     ProofBaseFieldElement, ProofBodyError, ProofChallengeExtensionElement, ProofEvaluationDomain,
     ProofFieldError, ProofLeafVisibility, ProofMerkleError, ProofMerkleTreeContext,
     ProofOraclePhasePairLeaf, ProofPolynomialError, ProofProfileError, ProofTreeCatalogEntry,
@@ -63,10 +70,9 @@ use super::{
 };
 
 const SCHEMA_VERSION: u16 = 1;
-const PROOF_SECRET_LEAF_SALT_BYTE_LENGTH: usize = 48;
 const PROOF_MERKLE_NODE_HASH_DOMAIN: &str = "sealed-lattice/proof/merkle/node/v1";
 const HASH_BYTE_LENGTH: usize = 64;
-const AUTHENTICATION_NODE_CANONICAL_BYTE_LENGTH: usize = 102;
+const AUTHENTICATION_DIGEST_BYTE_LENGTH: usize = 64;
 const CHECKPOINT_COMMITTED_STATE_HASH_DOMAIN: &str =
     "sealed-lattice/common-proof/checkpoint-committed-state/v1";
 
@@ -137,40 +143,61 @@ pub(crate) use fri::{
 pub(crate) use generation_state::generate_common_proof;
 pub(crate) use generation_state::{
     CommonProofGenerationCheckpointBoundary, CommonProofGenerationPoll, CommonProofGenerationStage,
-    CommonProofGenerationStateMachine,
+    CommonProofGenerationStateMachine, common_proof_source_provider_is_live_during_phase,
 };
 pub(crate) use generation_storage::{
-    CommonProofBoundOpeningProvider, CommonProofGenerationError,
+    CommonProofExternalMemoryRequirement, CommonProofGenerationError,
     CommonProofGenerationInitializationError, CommonProofGenerationInput,
     CommonProofResidentMemoryPhase, CommonProofResidentMemoryPhasePlan,
-    CommonProofResidentMemoryPlan, MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH,
-    common_proof_resident_memory_plan,
+    CommonProofResidentMemoryPlan, GeneratedCommonProofStoragePlanError,
+    MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH, common_proof_external_memory_requirement,
+    common_proof_resident_memory_plan, common_proof_resident_memory_requirement,
 };
 pub(crate) use merkle_storage::{
     CommonProofMerkleMaterializer, CommonProofMerkleMaterializerProgress,
-    CommonProofMerkleStoragePlan, CommonProofOpeningArtifact, CommonProofOpeningPrefetchProgress,
-    CommonProofOpeningPrefetcher, CommonProofTreeStorageError,
-    PrefetchedCommonProofOpeningArtifact, StoredCommonProofMerkleTree,
-    StoredCommonProofOpeningArtifact, common_proof_merkle_storage_plan,
+    CommonProofMerkleStoragePlan, CommonProofOpeningPrefetchProgress, CommonProofOpeningPrefetcher,
+    CommonProofTreeStorageError, PrefetchedCommonProofOpeningArtifact, StoredCommonProofMerkleTree,
+    common_proof_merkle_storage_plan,
 };
 pub(crate) use private_coins::{
-    CheckpointableCommonProofPrivateCoinSource, CommonProofPrivateCoinSource,
+    CheckpointableCommonProofPrivateCoinSource, CommonProofCheckpointCursorManifestError,
+    CommonProofCheckpointCursorManifestRequirement, CommonProofPrivateCoinCoordinate,
+    CommonProofPrivateCoinCoordinateCapacity, CommonProofPrivateCoinSource,
+    CommonProofPrivateRandomnessAccountingError,
+    MAXIMUM_COMMON_PROOF_CHECKPOINT_CURSOR_MANIFEST_BYTE_LENGTH,
+    MAXIMUM_COMMON_PROOF_CHECKPOINT_CURSOR_MANIFEST_RUN_COUNT,
     PrivateRandomnessCommonProofCoinError, PrivateRandomnessCommonProofCoinSource,
+    common_proof_checkpoint_cursor_manifest_requirement,
+    common_proof_checkpoint_cursor_manifest_requirement_for_variant,
+    common_proof_private_coin_coordinate_derivation_context_hash,
+    common_proof_private_randomness_kmac_input_accounting,
+    encode_common_proof_checkpoint_cursor_manifest,
 };
 #[cfg(test)]
 pub(crate) use quotient::{
-    construct_composed_quotient_polynomial, construct_quotient_components,
+    construct_composed_quotient_polynomial,
+    construct_constraint_stream_composed_quotient_polynomial, construct_quotient_components,
     decompose_composed_quotient,
 };
+#[cfg(test)]
+pub(crate) use relation_columns::ResidentCommonProofSourcePolynomialProvider;
 pub(crate) use relation_columns::{
-    CommonProofColumnEvaluations, CommonProofPreChallengeRelationColumns,
-    CommonProofPrivateCoinError, CommonProofSourcePolynomial, apply_trace_mask,
-    construct_post_challenge_relation_columns, construct_pre_challenge_relation_columns,
+    CommonProofAuthenticatedSourceReadRequest, CommonProofAuxiliaryColumnSynthesisCursor,
+    CommonProofBoundTreeLeafSaltRequest, CommonProofColumnEvaluations,
+    CommonProofPreChallengeRelationColumns, CommonProofPreChallengeSourceCursor,
+    CommonProofPreChallengeSourcePoll, CommonProofPrivateCoinError, CommonProofSourcePolynomial,
+    CommonProofSourcePolynomialProvider, CommonProofSourcePolynomialProviderPoll,
+    CommonProofSourcePolynomialReplayIdentity, CommonProofSourcePolynomialRequest,
+    CommonProofSourcePolynomialRequestContext, ProvidedCommonProofSourcePolynomial,
+    apply_trace_mask, base_trace_rows, construct_post_challenge_relation_columns,
+    construct_pre_challenge_relation_columns, construct_reversed_relation_column,
     evaluate_common_proof_tree_columns, evaluate_pre_challenge_common_proof_tree_columns,
+    integer_lift_derived_columns, maximum_auxiliary_synthesis_trace_vector_count,
+    proof_created_tree_roles_by_column, relation_column_replay_requirements,
     sample_private_base_polynomial, sample_private_extension_polynomial,
 };
 
-use encoding::{minimal_frontier_coordinates, opened_leaf_indexes};
+use encoding::opened_leaf_indexes;
 use fri::{
     add_replay_polynomial_to_initial_fri, add_shifted_extension_polynomial,
     evaluate_replay_polynomial_opening, replay_polynomial_key_for_claim,
@@ -184,15 +211,15 @@ use generation_storage::{
     CommonProofGenerationPollResult, CommonProofReplayPolynomialKey,
     CommonProofReplayPolynomialPlan, CommonProofReplayPolynomialReader,
     CommonProofReplayPolynomialRef, CommonProofReplayPolynomialWriter,
-    GeneratedCommonProofStoragePlan, GeneratedCommonProofStoragePlanError,
-    generated_common_proof_storage_plan, insert_materialized_tree,
+    GeneratedCommonProofStoragePlan, generated_common_proof_storage_plan, insert_materialized_tree,
     map_private_coin_generation_error, statement_owned_tree_root, unique_catalog_entry,
     validate_generation_relation_trees,
 };
 use merkle_storage::{canonical_common_proof_leaf_byte_length, common_proof_tree_value_type};
 use quotient::{
-    COMMON_PROOF_RELATION_EVALUATION_BLOCK_LENGTH, CommonProofQuotientComponentCursor,
-    CommonProofReplayQuotientBuilder, required_relation_rotations_by_column,
+    COMMON_PROOF_RELATION_EVALUATION_BLOCK_LENGTH, CommonProofConstraintStreamQuotientBuilder,
+    CommonProofQuotientComponentCursor, CommonProofQuotientConstraintTransformKey,
+    CommonProofQuotientEvaluationProgress, rotated_relation_evaluation_position,
     validate_column_polynomials,
 };
 #[cfg(test)]

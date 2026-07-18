@@ -11,6 +11,7 @@ import type {
 } from './contracts.js';
 import {
     CommonProofWorkerRuntimeError,
+    clearCommonProofExternalMemoryRequest,
     decodeCommonProofExternalMemoryRequest,
     encodeCommonProofExternalMemoryResponse,
     maximumWorkerOperationCount,
@@ -36,12 +37,13 @@ import {
     yieldBrowserWorkerTurn,
     type ClosedWorkerCommonProofGenerationFamilyAdapterDescription,
     type ClosedWorkerCommonProofVerificationFamilyAdapterDescription,
+    type CommonProofAuthenticatedSourceRangeRequest,
 } from './kernel-boundaries.js';
 
 /**
  * Executes one storage transaction. Ownership of every returned read buffer
- * transfers to this runtime; the runtime snapshots and clears those buffers
- * before continuing.
+ * transfers to this runtime; the runtime validates and clears those buffers
+ * after encoding the exact Rust response.
  */
 export type CommonProofExternalMemoryTransactionExecutor = Readonly<{
     executeTransaction(
@@ -91,10 +93,18 @@ export type CommonProofCanonicalOutputStore = Readonly<{
 }>;
 
 export type CommonProofGenerationWorkerOptions = Readonly<{
+    authenticatedSourceRangeReader?: CommonProofAuthenticatedSourceRangeReader;
     checkpointCustody?: CommonProofGenerationCheckpointCustody;
     resume?: CommonProofGenerationResume;
     signal?: AbortSignal;
     yieldControl?: () => Promise<void>;
+}>;
+
+/** Browser custody transports only the exact range selected by Rust. */
+export type CommonProofAuthenticatedSourceRangeReader = Readonly<{
+    readExactRange(
+        request: CommonProofAuthenticatedSourceRangeRequest,
+    ): Promise<Uint8Array<ArrayBuffer>>;
 }>;
 
 /**
@@ -116,12 +126,8 @@ export type CommonProofVerificationWorkerOptions = Readonly<{
     yieldControl?: () => Promise<void>;
 }>;
 
-/**
- * Opaque generated-proof authority retained in the WASM worker. It exposes no
- * numeric handle and can only be released until a downstream Rust capability
- * consumer is connected.
- */
-type GeneratedCommonProofCapability = Readonly<{
+/** Opaque generated-proof authority retained in the same WASM worker. */
+export type ClosedWorkerGeneratedCommonProofCapability = Readonly<{
     release(): void;
 }>;
 
@@ -151,8 +157,8 @@ export type ClosedWorkerCommonProofVerificationFamilyAdapter = Readonly<{
 
 type ClosedWorkerCommonProofGenerationFamilyAdapterRecord = {
     adapterHandle: number;
+    commonProofGenerationAuthorizationHash: Uint8Array<ArrayBuffer>;
     commonProofRuntimeBindingHash: Uint8Array<ArrayBuffer>;
-    commonProofVerificationBindingHash: Uint8Array<ArrayBuffer>;
     consumed: boolean;
     context: TranscriptCoreKernelCommandRuntime;
     proofAttemptLineageIdentifier: Uint8Array<ArrayBuffer>;
@@ -233,7 +239,7 @@ class CommonProofStorageRequestSequence {
     }
 }
 
-const snapshotReadResults = (
+const validateTransferredReadResults = (
     request: CommonProofExternalMemoryRequest,
     readResults: readonly CommonProofExternalMemoryReadResult[],
 ): readonly CommonProofExternalMemoryReadResult[] => {
@@ -261,13 +267,20 @@ const snapshotReadResults = (
         }
         return untrustedReadResults.map((result: unknown, readIndex) => {
             const expectedOperation = readOperations[readIndex];
+            const transferredBytes =
+                typeof result === 'object' &&
+                result !== null &&
+                'bytes' in result
+                    ? result.bytes
+                    : undefined;
             if (
                 expectedOperation === undefined ||
                 typeof result !== 'object' ||
                 result === null ||
                 !('bytes' in result) ||
-                !(result.bytes instanceof Uint8Array) ||
-                result.bytes.byteLength !== expectedOperation.byteLength ||
+                !(transferredBytes instanceof Uint8Array) ||
+                !(transferredBytes.buffer instanceof ArrayBuffer) ||
+                transferredBytes.byteLength !== expectedOperation.byteLength ||
                 !('objectOrdinal' in result) ||
                 typeof result.objectOrdinal !== 'number' ||
                 !Number.isSafeInteger(result.objectOrdinal) ||
@@ -292,13 +305,17 @@ const snapshotReadResults = (
                 );
             }
             return Object.freeze({
-                bytes: result.bytes.slice(),
+                bytes: new Uint8Array(
+                    transferredBytes.buffer,
+                    transferredBytes.byteOffset,
+                    transferredBytes.byteLength,
+                ),
                 objectOrdinal: result.objectOrdinal,
                 offset: result.offset,
                 operationIndex: result.operationIndex,
             });
         });
-    } finally {
+    } catch (error) {
         const cleanupResultCount = Math.min(
             untrustedReadResults.length,
             maximumWorkerOperationCount,
@@ -319,29 +336,58 @@ const snapshotReadResults = (
                 result.bytes.fill(0);
             }
         }
+        throw error;
     }
 };
 
 const createGeneratedCapability = (
+    context: TranscriptCoreKernelCommandRuntime,
     kernel: CommonProofGenerationKernelBoundary,
     capabilityHandle: number,
-): GeneratedCommonProofCapability => {
-    let live = true;
-    return Object.freeze({
-        release: (): void => {
-            if (!live) {
-                throw kernelFailure(
-                    'The generated common-proof capability was already released.',
-                );
-            }
-            kernel.releaseGenerated(capabilityHandle);
-            live = false;
-        },
+): ClosedWorkerGeneratedCommonProofCapability => {
+    const capability: ClosedWorkerGeneratedCommonProofCapability =
+        Object.freeze({
+            release: (): void => {
+                const record =
+                    generatedCommonProofCapabilityRecords.get(capability);
+                if (record === undefined) {
+                    throw kernelFailure(
+                        'The generated common-proof capability was already released.',
+                    );
+                }
+                generatedCommonProofCapabilityRecords.delete(capability);
+                try {
+                    record.kernel.releaseGenerated(record.capabilityHandle);
+                } catch (releaseFailure) {
+                    throw permanentRetirementFailure(
+                        releaseFailure,
+                        'The generated common-proof capability could not be released and its proof attempt was permanently retired.',
+                    );
+                }
+            },
+        });
+    generatedCommonProofCapabilityRecords.set(capability, {
+        capabilityHandle,
+        context,
+        kernel,
     });
+    return capability;
 };
+
+type GeneratedCommonProofCapabilityRecord = Readonly<{
+    capabilityHandle: number;
+    context: TranscriptCoreKernelCommandRuntime;
+    kernel: CommonProofGenerationKernelBoundary;
+}>;
+
+const generatedCommonProofCapabilityRecords = new WeakMap<
+    ClosedWorkerGeneratedCommonProofCapability,
+    GeneratedCommonProofCapabilityRecord
+>();
 
 type VerifiedCommonProofCapabilityRecord = {
     readonly capabilityHandle: number;
+    readonly context: TranscriptCoreKernelCommandRuntime;
     readonly kernel: CommonProofVerificationKernelBoundary;
 };
 
@@ -351,6 +397,7 @@ const verifiedCommonProofCapabilityRecords = new WeakMap<
 >();
 
 const createVerifiedCapability = (
+    context: TranscriptCoreKernelCommandRuntime,
     kernel: CommonProofVerificationKernelBoundary,
     capabilityHandle: number,
 ): VerifiedCommonProofCapability => {
@@ -368,13 +415,73 @@ const createVerifiedCapability = (
     });
     verifiedCommonProofCapabilityRecords.set(capability, {
         capabilityHandle,
+        context,
         kernel,
     });
     return capability;
 };
 
+/**
+ * Internal same-worker handoff for a protocol family that binds a generated
+ * proof to positive Rust-owned authority. Numeric handles never cross the
+ * worker boundary. The family reports whether Rust actually consumed the
+ * capability so a refused board binding remains releasable.
+ */
+export const applyClosedWorkerGeneratedCommonProofCapability = <Result>(
+    capability: ClosedWorkerGeneratedCommonProofCapability,
+    expectedContext: TranscriptCoreKernelCommandRuntime,
+    apply: (
+        capabilityHandle: number,
+    ) => Readonly<{ readonly consumed: boolean; readonly result: Result }>,
+): Result => {
+    const record =
+        typeof capability === 'object' && capability !== null
+            ? generatedCommonProofCapabilityRecords.get(capability)
+            : undefined;
+    if (record === undefined || record.context !== expectedContext) {
+        throw kernelFailure(
+            'The generated common-proof capability is unavailable or belongs to another WASM worker.',
+        );
+    }
+    const outcome = apply(record.capabilityHandle);
+    if (outcome.consumed) {
+        generatedCommonProofCapabilityRecords.delete(capability);
+    }
+    return outcome.result;
+};
+
+/**
+ * Internal same-worker handoff from the generic verifier to an exact Rust
+ * terminal. The family reports whether its borrowed preflight reached the
+ * infallible Rust consume/commit point, so a refused handoff remains available
+ * for an exact retry or explicit release.
+ */
+export const applyClosedWorkerVerifiedCommonProofCapability = <Result>(
+    capability: VerifiedCommonProofCapability,
+    expectedContext: TranscriptCoreKernelCommandRuntime,
+    apply: (
+        capabilityHandle: number,
+    ) => Readonly<{ readonly consumed: boolean; readonly result: Result }>,
+): Result => {
+    const record =
+        typeof capability === 'object' && capability !== null
+            ? verifiedCommonProofCapabilityRecords.get(capability)
+            : undefined;
+    if (record === undefined || record.context !== expectedContext) {
+        throw kernelFailure(
+            'The verified common-proof capability is unavailable or belongs to another WASM worker.',
+        );
+    }
+    const outcome = apply(record.capabilityHandle);
+    if (outcome.consumed) {
+        verifiedCommonProofCapabilityRecords.delete(capability);
+    }
+    return outcome.result;
+};
+
 type PreparedCommonProofApplicationRecord = Readonly<{
     capability: VerifiedCommonProofCapability;
+    context: TranscriptCoreKernelCommandRuntime;
     kernel: CommonProofVerificationKernelBoundary;
     pendingHandle: number;
     predecessor: CommonProofApplicationFreshnessCoordinate;
@@ -468,6 +575,7 @@ export const prepareVerifiedCommonProofApplication = (
     ) as PreparedCommonProofApplicationAuthority;
     preparedCommonProofApplicationRecords.set(authority, {
         capability,
+        context: capabilityRecord.context,
         kernel: capabilityRecord.kernel,
         pendingHandle: prepared.pendingHandle,
         predecessor: copiedPredecessor,
@@ -501,6 +609,7 @@ export const abortVerifiedCommonProofApplication = (
     destroyApplicationFreshnessCoordinate(record.predecessor);
     verifiedCommonProofCapabilityRecords.set(record.capability, {
         capabilityHandle: restoredCapabilityHandle,
+        context: record.context,
         kernel: record.kernel,
     });
 };
@@ -546,9 +655,7 @@ const clearGenerationCheckpoint = (
 ): void => {
     checkpoint.canonicalStateBytes.fill(0);
     checkpoint.stableAttemptBindingHash.fill(0);
-    for (const cursorBytes of checkpoint.orderedPrivateRandomCursorBytes) {
-        cursorBytes.fill(0);
-    }
+    checkpoint.privateRandomCursorManifestBytes.fill(0);
 };
 
 const permanentRetirementFailure = (
@@ -676,10 +783,10 @@ export const openClosedWorkerCommonProofGenerationFamilyAdapter = (
             familyAdapter,
             {
                 adapterHandle,
+                commonProofGenerationAuthorizationHash:
+                    description.commonProofGenerationAuthorizationHash,
                 commonProofRuntimeBindingHash:
                     description.commonProofRuntimeBindingHash,
-                commonProofVerificationBindingHash:
-                    description.commonProofVerificationBindingHash,
                 consumed: false,
                 context,
                 proofAttemptLineageIdentifier:
@@ -689,7 +796,7 @@ export const openClosedWorkerCommonProofGenerationFamilyAdapter = (
         return familyAdapter;
     } catch (error) {
         description?.commonProofRuntimeBindingHash.fill(0);
-        description?.commonProofVerificationBindingHash.fill(0);
+        description?.commonProofGenerationAuthorizationHash.fill(0);
         description?.proofAttemptLineageIdentifier.fill(0);
         const discardError = tryDiscardTransferredCommonProofHandle(
             context,
@@ -764,10 +871,10 @@ export const describeClosedWorkerCommonProofGenerationFamilyAdapter = (
         familyAdapter,
     );
     return Object.freeze({
+        commonProofGenerationAuthorizationHash:
+            record.commonProofGenerationAuthorizationHash.slice(),
         commonProofRuntimeBindingHash:
             record.commonProofRuntimeBindingHash.slice(),
-        commonProofVerificationBindingHash:
-            record.commonProofVerificationBindingHash.slice(),
         proofAttemptLineageIdentifier:
             record.proofAttemptLineageIdentifier.slice(),
     });
@@ -790,7 +897,7 @@ const destroyClosedWorkerCommonProofGenerationFamilyAdapterRecord = (
     record: ClosedWorkerCommonProofGenerationFamilyAdapterRecord,
 ): void => {
     record.commonProofRuntimeBindingHash.fill(0);
-    record.commonProofVerificationBindingHash.fill(0);
+    record.commonProofGenerationAuthorizationHash.fill(0);
     record.proofAttemptLineageIdentifier.fill(0);
 };
 
@@ -871,127 +978,157 @@ const restoreAuthenticatedGenerationCheckpointState = async (
     }
 };
 
+export const runClosedWorkerCommonProofGenerationFamilyAdapterRetainingGeneratedCapability =
+    async (
+        familyAdapter: ClosedWorkerCommonProofGenerationFamilyAdapter,
+        externalMemory: CommonProofExternalMemoryTransactionExecutor,
+        outputStore: CommonProofCanonicalOutputStore,
+        options: CommonProofGenerationWorkerOptions = {},
+    ): Promise<ClosedWorkerGeneratedCommonProofCapability> => {
+        const record = consumeClosedWorkerCommonProofFamilyAdapterRecord(
+            closedWorkerCommonProofGenerationFamilyAdapterRecords,
+            familyAdapter,
+        );
+        let kernel: CommonProofFamilyAdapterKernelBoundary | undefined;
+        let authenticatedCheckpointState: Uint8Array<ArrayBuffer> | undefined;
+        let checkpointRestorationCompleted = false;
+        let optionSnapshotCompleted = false;
+        let resumedContinuationExpected = false;
+        let generatedCapability:
+            | ClosedWorkerGeneratedCommonProofCapability
+            | undefined;
+        let preparedGenerationHandle: number | undefined;
+        try {
+            const resume = options.resume;
+            resumedContinuationExpected = resume !== undefined;
+            const authenticatedSourceRangeReader =
+                options.authenticatedSourceRangeReader;
+            const checkpointCustody = options.checkpointCustody;
+            const signal = options.signal;
+            const yieldControl = options.yieldControl;
+            const resumeCheckpointCustody = resume?.checkpointCustody;
+            const prefixReplayExternalMemory =
+                resume?.prefixReplayExternalMemory;
+            const ownedOptions: CommonProofGenerationWorkerOptions =
+                Object.freeze({
+                    ...(authenticatedSourceRangeReader === undefined
+                        ? {}
+                        : { authenticatedSourceRangeReader }),
+                    ...(checkpointCustody === undefined
+                        ? {}
+                        : { checkpointCustody }),
+                    ...(resume === undefined
+                        ? {}
+                        : {
+                              resume: Object.freeze({
+                                  checkpointCustody: resumeCheckpointCustody!,
+                                  prefixReplayExternalMemory:
+                                      prefixReplayExternalMemory!,
+                              }),
+                          }),
+                    ...(signal === undefined ? {} : { signal }),
+                    ...(yieldControl === undefined ? {} : { yieldControl }),
+                });
+            optionSnapshotCompleted = true;
+            checkpointRestorationCompleted = resume === undefined;
+            kernel = new CommonProofFamilyAdapterKernelBoundary(record.context);
+            if (resume !== undefined) {
+                authenticatedCheckpointState =
+                    await restoreAuthenticatedGenerationCheckpointState(
+                        kernel,
+                        resumeCheckpointCustody!,
+                    );
+                checkpointRestorationCompleted = true;
+            }
+            preparedGenerationHandle = kernel.prepareGeneration(
+                record.adapterHandle,
+                authenticatedCheckpointState,
+            );
+            generatedCapability =
+                await runPreparedCommonProofGenerationWorkerWithAuthenticatedState(
+                    record.context,
+                    preparedGenerationHandle,
+                    externalMemory,
+                    outputStore,
+                    ownedOptions,
+                    authenticatedCheckpointState,
+                );
+            return generatedCapability;
+        } catch (error) {
+            if (generatedCapability !== undefined) {
+                throw permanentRetirementFailure(
+                    error,
+                    'The generated common-proof capability could not be released and its proof attempt was permanently retired.',
+                );
+            }
+            if (preparedGenerationHandle === undefined) {
+                // The preparation FFI consumes the adapter before returning a
+                // refusal, so a stale-handle discard is an expected no-op.
+                const discardError = tryDiscardTransferredCommonProofHandle(
+                    record.context,
+                    record.adapterHandle,
+                    'sealed_lattice_common_proof_discard_generation_family_adapter',
+                    'generation family-adapter failed-preparation discard',
+                );
+                if (!optionSnapshotCompleted) {
+                    throw permanentRetirementFailure(
+                        {
+                            adapterDiscardError: discardError,
+                            optionError: error,
+                        },
+                        'The common-proof generation adapter could not adopt its worker options and was permanently retired.',
+                    );
+                }
+                if (
+                    resumedContinuationExpected &&
+                    !checkpointRestorationCompleted
+                ) {
+                    if (discardError !== undefined) {
+                        throw permanentRetirementFailure(
+                            { discardError, restorationError: error },
+                            'Authenticated common-proof continuation was unavailable and its deferred family authority could not be retired.',
+                        );
+                    }
+                    throw permanentRetirementFailure(
+                        error,
+                        'Authenticated common-proof continuation was unavailable, so the deferred family authority was permanently retired.',
+                    );
+                }
+                if (discardError !== undefined) {
+                    throw permanentRetirementFailure(
+                        {
+                            adapterDiscardError: discardError,
+                            operationError: error,
+                        },
+                        'Common-proof generation preparation failed and its deferred family authority could not be retired.',
+                    );
+                }
+                throw permanentRetirementFailure(
+                    error,
+                    'Common-proof generation preparation consumed its exact deferred family authority and permanently retired the attempt.',
+                );
+            }
+            throw error;
+        } finally {
+            authenticatedCheckpointState?.fill(0);
+            destroyClosedWorkerCommonProofGenerationFamilyAdapterRecord(record);
+        }
+    };
+
 export const runClosedWorkerCommonProofGenerationFamilyAdapter = async (
     familyAdapter: ClosedWorkerCommonProofGenerationFamilyAdapter,
     externalMemory: CommonProofExternalMemoryTransactionExecutor,
     outputStore: CommonProofCanonicalOutputStore,
     options: CommonProofGenerationWorkerOptions = {},
 ): Promise<void> => {
-    const record = consumeClosedWorkerCommonProofFamilyAdapterRecord(
-        closedWorkerCommonProofGenerationFamilyAdapterRecords,
-        familyAdapter,
-    );
-    let kernel: CommonProofFamilyAdapterKernelBoundary | undefined;
-    let authenticatedCheckpointState: Uint8Array<ArrayBuffer> | undefined;
-    let checkpointRestorationCompleted = false;
-    let optionSnapshotCompleted = false;
-    let resumedContinuationExpected = false;
-    let generatedCapability: GeneratedCommonProofCapability | undefined;
-    let preparedGenerationHandle: number | undefined;
-    try {
-        const resume = options.resume;
-        resumedContinuationExpected = resume !== undefined;
-        const checkpointCustody = options.checkpointCustody;
-        const signal = options.signal;
-        const yieldControl = options.yieldControl;
-        const resumeCheckpointCustody = resume?.checkpointCustody;
-        const prefixReplayExternalMemory = resume?.prefixReplayExternalMemory;
-        const ownedOptions: CommonProofGenerationWorkerOptions = Object.freeze({
-            ...(checkpointCustody === undefined ? {} : { checkpointCustody }),
-            ...(resume === undefined
-                ? {}
-                : {
-                      resume: Object.freeze({
-                          checkpointCustody: resumeCheckpointCustody!,
-                          prefixReplayExternalMemory:
-                              prefixReplayExternalMemory!,
-                      }),
-                  }),
-            ...(signal === undefined ? {} : { signal }),
-            ...(yieldControl === undefined ? {} : { yieldControl }),
-        });
-        optionSnapshotCompleted = true;
-        checkpointRestorationCompleted = resume === undefined;
-        kernel = new CommonProofFamilyAdapterKernelBoundary(record.context);
-        if (resume !== undefined) {
-            authenticatedCheckpointState =
-                await restoreAuthenticatedGenerationCheckpointState(
-                    kernel,
-                    resumeCheckpointCustody!,
-                );
-            checkpointRestorationCompleted = true;
-        }
-        preparedGenerationHandle = kernel.prepareGeneration(
-            record.adapterHandle,
-            authenticatedCheckpointState,
+    const generatedCapability =
+        await runClosedWorkerCommonProofGenerationFamilyAdapterRetainingGeneratedCapability(
+            familyAdapter,
+            externalMemory,
+            outputStore,
+            options,
         );
-        generatedCapability =
-            await runPreparedCommonProofGenerationWorkerWithAuthenticatedState(
-                record.context,
-                preparedGenerationHandle,
-                externalMemory,
-                outputStore,
-                ownedOptions,
-                authenticatedCheckpointState,
-            );
-        generatedCapability.release();
-        generatedCapability = undefined;
-    } catch (error) {
-        if (generatedCapability !== undefined) {
-            throw permanentRetirementFailure(
-                error,
-                'The generated common-proof capability could not be released and its proof attempt was permanently retired.',
-            );
-        }
-        if (preparedGenerationHandle === undefined) {
-            // The preparation FFI consumes the adapter before returning a
-            // refusal, so a stale-handle discard is an expected no-op.
-            const discardError = tryDiscardTransferredCommonProofHandle(
-                record.context,
-                record.adapterHandle,
-                'sealed_lattice_common_proof_discard_generation_family_adapter',
-                'generation family-adapter failed-preparation discard',
-            );
-            if (!optionSnapshotCompleted) {
-                throw permanentRetirementFailure(
-                    { adapterDiscardError: discardError, optionError: error },
-                    'The common-proof generation adapter could not adopt its worker options and was permanently retired.',
-                );
-            }
-            if (
-                resumedContinuationExpected &&
-                !checkpointRestorationCompleted
-            ) {
-                if (discardError !== undefined) {
-                    throw permanentRetirementFailure(
-                        { discardError, restorationError: error },
-                        'Authenticated common-proof continuation was unavailable and its deferred family authority could not be retired.',
-                    );
-                }
-                throw permanentRetirementFailure(
-                    error,
-                    'Authenticated common-proof continuation was unavailable, so the deferred family authority was permanently retired.',
-                );
-            }
-            if (discardError !== undefined) {
-                throw permanentRetirementFailure(
-                    {
-                        adapterDiscardError: discardError,
-                        operationError: error,
-                    },
-                    'Common-proof generation preparation failed and its deferred family authority could not be retired.',
-                );
-            }
-            throw permanentRetirementFailure(
-                error,
-                'Common-proof generation preparation consumed its exact deferred family authority and permanently retired the attempt.',
-            );
-        }
-        throw error;
-    } finally {
-        authenticatedCheckpointState?.fill(0);
-        destroyClosedWorkerCommonProofGenerationFamilyAdapterRecord(record);
-    }
+    generatedCapability.release();
 };
 
 export const runClosedWorkerCommonProofVerificationFamilyAdapter = async (
@@ -1063,7 +1200,7 @@ export const runPreparedCommonProofGenerationWorker = async (
     externalMemory: CommonProofExternalMemoryTransactionExecutor,
     outputStore: CommonProofCanonicalOutputStore,
     options: CommonProofGenerationWorkerOptions = {},
-): Promise<GeneratedCommonProofCapability> =>
+): Promise<ClosedWorkerGeneratedCommonProofCapability> =>
     runPreparedCommonProofGenerationWorkerWithAuthenticatedState(
         context,
         preparedGenerationHandle,
@@ -1080,7 +1217,7 @@ const runPreparedCommonProofGenerationWorkerWithAuthenticatedState = async (
     outputStore: CommonProofCanonicalOutputStore,
     options: CommonProofGenerationWorkerOptions,
     previouslyAuthenticatedCheckpointState: Uint8Array<ArrayBuffer> | undefined,
-): Promise<GeneratedCommonProofCapability> => {
+): Promise<ClosedWorkerGeneratedCommonProofCapability> => {
     let kernel: CommonProofGenerationKernelBoundary | undefined;
     let operationHandle: number | undefined;
     let operationTerminal = false;
@@ -1091,6 +1228,8 @@ const runPreparedCommonProofGenerationWorkerWithAuthenticatedState = async (
         const yieldControl = options.yieldControl ?? yieldBrowserWorkerTurn;
         const checkpointCustody =
             options.checkpointCustody ?? resume?.checkpointCustody;
+        const authenticatedSourceRangeReader =
+            options.authenticatedSourceRangeReader;
         const requestSequence = new CommonProofStorageRequestSequence();
         const committedOutputChunkByteLengths = new Map<number, number>();
         let committedOutputByteLength = 0;
@@ -1176,8 +1315,9 @@ const runPreparedCommonProofGenerationWorkerWithAuthenticatedState = async (
                         poll.encodedRequestByteLength,
                     );
                     let encodedResponse: Uint8Array<ArrayBuffer> | undefined;
+                    let request: CommonProofExternalMemoryRequest | undefined;
                     try {
-                        const request =
+                        request =
                             decodeCommonProofExternalMemoryRequest(
                                 encodedRequest,
                             );
@@ -1201,7 +1341,7 @@ const runPreparedCommonProofGenerationWorkerWithAuthenticatedState = async (
                                         request,
                                     );
                             }
-                            readResults = snapshotReadResults(
+                            readResults = validateTransferredReadResults(
                                 request,
                                 untrustedReadResults,
                             );
@@ -1224,8 +1364,62 @@ const runPreparedCommonProofGenerationWorkerWithAuthenticatedState = async (
                         );
                         requestSequence.commit();
                     } finally {
-                        encodedRequest.fill(0);
+                        if (request !== undefined) {
+                            clearCommonProofExternalMemoryRequest(request);
+                        }
+                        if (encodedRequest.byteLength !== 0) {
+                            encodedRequest.fill(0);
+                        }
                         encodedResponse?.fill(0);
+                    }
+                    break;
+                }
+                case 'authenticated-source-read-ready': {
+                    if (authenticatedSourceRangeReader === undefined) {
+                        throw kernelFailure(
+                            'The common-proof kernel requested authenticated source bytes without a family-owned source reader.',
+                        );
+                    }
+                    const request = kernel.copyAuthenticatedSourceRequest(
+                        liveOperationHandle,
+                        poll.sourceByteLength,
+                        poll.authenticationChunkIndex,
+                    );
+                    let sourceBytes: Uint8Array<ArrayBuffer> | undefined;
+                    try {
+                        try {
+                            sourceBytes =
+                                await authenticatedSourceRangeReader.readExactRange(
+                                    request,
+                                );
+                        } catch (error) {
+                            throw storageFailure(
+                                'The browser store could not read the exact authenticated common-proof source range.',
+                                error,
+                            );
+                        }
+                        if (
+                            !(sourceBytes instanceof Uint8Array) ||
+                            !(sourceBytes.buffer instanceof ArrayBuffer) ||
+                            sourceBytes.byteOffset !== 0 ||
+                            sourceBytes.byteLength !==
+                                request.exactByteLength ||
+                            sourceBytes.buffer.byteLength !==
+                                request.exactByteLength
+                        ) {
+                            throw storageFailure(
+                                'The browser store did not return a fresh owned authenticated common-proof source range.',
+                                undefined,
+                            );
+                        }
+                        kernel.supplyAuthenticatedSourceRange(
+                            liveOperationHandle,
+                            sourceBytes,
+                        );
+                    } finally {
+                        sourceBytes?.fill(0);
+                        request.sourceMaterialRoot.fill(0);
+                        request.sourceStreamDigest.fill(0);
                     }
                     break;
                 }
@@ -1321,10 +1515,16 @@ const runPreparedCommonProofGenerationWorkerWithAuthenticatedState = async (
                             error,
                         );
                     }
-                    if (!(storedChunk instanceof Uint8Array)) {
+                    if (
+                        !(storedChunk instanceof Uint8Array) ||
+                        !(storedChunk.buffer instanceof ArrayBuffer)
+                    ) {
+                        if (storedChunk instanceof Uint8Array) {
+                            storedChunk.fill(0);
+                        }
                         throw new CommonProofWorkerRuntimeError(
                             'WrongStorageResult',
-                            'The browser store returned a common-proof output chunk with the wrong length.',
+                            'The browser store did not return a fresh owned common-proof output chunk.',
                         );
                     }
                     if (storedChunk.byteLength !== exactByteLength) {
@@ -1334,16 +1534,19 @@ const runPreparedCommonProofGenerationWorkerWithAuthenticatedState = async (
                             'The browser store returned a common-proof output chunk with the wrong length.',
                         );
                     }
-                    const ownedReadback = storedChunk.slice();
+                    const transferredReadback = new Uint8Array(
+                        storedChunk.buffer,
+                        storedChunk.byteOffset,
+                        storedChunk.byteLength,
+                    );
                     try {
                         kernel.confirmOutputReadback(
                             liveOperationHandle,
                             poll.chunkIndex,
-                            ownedReadback,
+                            transferredReadback,
                         );
                     } finally {
-                        ownedReadback.fill(0);
-                        storedChunk.fill(0);
+                        transferredReadback.fill(0);
                     }
                     break;
                 }
@@ -1360,7 +1563,11 @@ const runPreparedCommonProofGenerationWorkerWithAuthenticatedState = async (
                     }
                     const capabilityHandle = kernel.finish(liveOperationHandle);
                     operationTerminal = true;
-                    return createGeneratedCapability(kernel, capabilityHandle);
+                    return createGeneratedCapability(
+                        context,
+                        kernel,
+                        capabilityHandle,
+                    );
                 }
                 case 'cancelled':
                     kernel.releaseCancelled(liveOperationHandle);
@@ -1620,7 +1827,11 @@ export const runPreparedCommonProofVerificationWorker = async (
                     throwIfVerificationCancelled(signal);
                     const capabilityHandle = kernel.finish(liveOperationHandle);
                     operationTerminal = true;
-                    return createVerifiedCapability(kernel, capabilityHandle);
+                    return createVerifiedCapability(
+                        context,
+                        kernel,
+                        capabilityHandle,
+                    );
                 }
             }
         }

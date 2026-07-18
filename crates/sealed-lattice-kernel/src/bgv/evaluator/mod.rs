@@ -6,10 +6,9 @@
 //! target ciphertext and replay binding; it does not accept the target, prove
 //! the evaluation, or decrypt the result.
 //!
-//! The development key set drives prototype key synthesis and encryption.
-//! Secret-key decryption helpers compile only in tests, where they check the
-//! evaluator against a plaintext top-k oracle. None of these helpers is
-//! exported through the public package surface.
+//! Development key synthesis, encryption, and secret-key decryption compile
+//! only in tests, where they check production evaluator primitives. None of
+//! these helpers is exported through the public package surface.
 
 #[cfg(not(target_arch = "wasm32"))]
 macro_rules! evaluator_parallel_iterator {
@@ -27,11 +26,13 @@ macro_rules! evaluator_parallel_iterator {
 
 pub(crate) mod prg;
 
+pub(crate) mod ballot_aggregation;
+pub(crate) mod ballot_aggregation_runtime;
 pub(crate) mod candidate_evidence;
-pub(crate) mod circuit;
 pub(crate) mod engine;
 pub(crate) mod key_switch;
 pub(crate) mod noise_recurrence;
 pub(crate) mod program;
 pub(crate) mod records;
+pub(crate) mod replay;
 pub(crate) mod top_k;

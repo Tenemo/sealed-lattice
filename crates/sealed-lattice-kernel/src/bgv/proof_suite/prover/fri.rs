@@ -1,9 +1,9 @@
 use super::{
-    CommonProofPrivateCoinError, CommonProofPrivateCoinSource, CommonProofProverError,
-    CommonProofReplayPolynomialKey, CommonProofSourcePolynomial, ProofBaseFieldElement,
-    ProofChallengeExtensionElement, ProofEvaluationDomain, ProofPrivacyMode,
+    CommonProofPrivateCoinCoordinate, CommonProofPrivateCoinError, CommonProofPrivateCoinSource,
+    CommonProofProverError, CommonProofReplayPolynomialKey, CommonProofSourcePolynomial,
+    ProofBaseFieldElement, ProofChallengeExtensionElement, ProofEvaluationDomain, ProofPrivacyMode,
     RelationColumnValueType, RelationMaskKind, RelationMaskTargetClass,
-    RelationOpeningClaimDescriptor, RelationOpeningSourceClass, RelationPlanVariant,
+    RelationOpeningClaimDescriptor, RelationOpeningSourceClass, RelationPlanVariant, Zeroizing,
     divide_extension_polynomial_by_linear_in_place, evaluate_extension_at,
     extension_polynomial_degree, fold_extension_evaluations, sample_private_extension_polynomial,
     validate_column_polynomials,
@@ -14,7 +14,10 @@ pub(crate) fn construct_opening_batch_mask<Coins>(
     variant: &RelationPlanVariant,
     coins: &mut Coins,
     maximum_candidate_draws_per_output: u32,
-) -> Result<Option<Vec<ProofChallengeExtensionElement>>, CommonProofPrivateCoinError<Coins::Error>>
+) -> Result<
+    Option<Zeroizing<Vec<ProofChallengeExtensionElement>>>,
+    CommonProofPrivateCoinError<Coins::Error>,
+>
 where
     Coins: CommonProofPrivateCoinSource,
 {
@@ -36,7 +39,7 @@ where
     }
     Ok(Some(sample_private_extension_polynomial(
         coins,
-        descriptor.mask_purpose(),
+        CommonProofPrivateCoinCoordinate::from_mask(descriptor.mask_coordinate()),
         descriptor.mask_degree_bound_exclusive(),
         maximum_candidate_draws_per_output,
     )?))
@@ -50,9 +53,9 @@ pub(crate) fn evaluate_ordered_deep_openings(
     quotient_components: &[Vec<ProofChallengeExtensionElement>],
     opening_batch_mask: Option<&[ProofChallengeExtensionElement]>,
     opening_points: &[ProofChallengeExtensionElement],
-) -> Result<Vec<ProofChallengeExtensionElement>, CommonProofProverError> {
+) -> Result<Zeroizing<Vec<ProofChallengeExtensionElement>>, CommonProofProverError> {
     validate_column_polynomials(variant, columns)?;
-    let mut evaluations = Vec::new();
+    let mut evaluations = Zeroizing::new(Vec::new());
     evaluations
         .try_reserve_exact(variant.ordered_opening_claims().len())
         .map_err(|_| CommonProofProverError::AllocationLimitExceeded)?;
@@ -115,7 +118,7 @@ pub(crate) fn construct_initial_fri_polynomial(
     opening_points: &[ProofChallengeExtensionElement],
     deep_evaluations: &[ProofChallengeExtensionElement],
     batching_coefficients: &[ProofChallengeExtensionElement],
-) -> Result<Vec<ProofChallengeExtensionElement>, CommonProofProverError> {
+) -> Result<Zeroizing<Vec<ProofChallengeExtensionElement>>, CommonProofProverError> {
     if deep_evaluations.len() != variant.ordered_opening_claims().len()
         || batching_coefficients.len() != deep_evaluations.len()
     {
@@ -126,7 +129,10 @@ pub(crate) fn construct_initial_fri_polynomial(
     if opening_bound <= 1 {
         return Err(CommonProofProverError::InvalidOpening);
     }
-    let mut initial = vec![ProofChallengeExtensionElement::ZERO; opening_bound - 1];
+    let mut initial = Zeroizing::new(vec![
+        ProofChallengeExtensionElement::ZERO;
+        opening_bound - 1
+    ]);
     if let Some(mask) = opening_batch_mask {
         if mask.len() > initial.len() {
             return Err(CommonProofProverError::InvalidMask);
@@ -139,7 +145,7 @@ pub(crate) fn construct_initial_fri_polynomial(
     }
 
     for (claim_ordinal, claim) in variant.ordered_opening_claims().iter().enumerate() {
-        let mut numerator = Vec::new();
+        let mut numerator = Zeroizing::new(Vec::new());
         match claim.source_class() {
             RelationOpeningSourceClass::TreeColumn => {
                 let column = columns
@@ -210,7 +216,7 @@ pub(crate) fn construct_initial_fri_polynomial(
             .checked_sub(source_bound)
             .ok_or(CommonProofProverError::InvalidOpening)?;
         let batching_coefficient = batching_coefficients[claim_ordinal];
-        for (coefficient_ordinal, coefficient) in numerator.into_iter().enumerate() {
+        for (coefficient_ordinal, coefficient) in numerator.iter().copied().enumerate() {
             let destination_ordinal = shift
                 .checked_add(coefficient_ordinal)
                 .ok_or(CommonProofProverError::CountOverflow)?;
@@ -275,16 +281,17 @@ pub(super) fn evaluate_replay_polynomial_opening(
 
 fn into_extension_polynomial(
     polynomial: CommonProofSourcePolynomial,
-) -> Result<Vec<ProofChallengeExtensionElement>, CommonProofProverError> {
+) -> Result<Zeroizing<Vec<ProofChallengeExtensionElement>>, CommonProofProverError> {
     match polynomial {
         CommonProofSourcePolynomial::Base(coefficients) => {
-            let mut extension_coefficients = Vec::new();
+            let mut extension_coefficients = Zeroizing::new(Vec::new());
             extension_coefficients
                 .try_reserve_exact(coefficients.len())
                 .map_err(|_| CommonProofProverError::AllocationLimitExceeded)?;
             extension_coefficients.extend(
                 coefficients
-                    .into_iter()
+                    .iter()
+                    .copied()
                     .map(ProofChallengeExtensionElement::from_base),
             );
             Ok(extension_coefficients)
@@ -320,7 +327,7 @@ pub(super) fn add_replay_polynomial_to_initial_fri(
     let shift = opening_degree_bound_exclusive
         .checked_sub(source_degree_bound_exclusive)
         .ok_or(CommonProofProverError::InvalidOpening)?;
-    for (coefficient_ordinal, coefficient) in numerator.into_iter().enumerate() {
+    for (coefficient_ordinal, coefficient) in numerator.iter().copied().enumerate() {
         let destination_ordinal = shift
             .checked_add(coefficient_ordinal)
             .ok_or(CommonProofProverError::CountOverflow)?;

@@ -24,14 +24,14 @@ use crate::{
 use crate::foundation::{ArtifactKind, ArtifactReference};
 
 use super::relation_plan::{
-    BoundTreeConstructionKind, BoundTreeRootUse, RelationColumnValueType,
-    RelationOpeningSourceClass, RelationTreeDescriptor,
+    BoundTreeConstructionKind, BoundTreeRootUse, RelationColumnValueType, RelationTreeDescriptor,
 };
 
 use super::{
     CompiledRelationPlan, PROOF_BASE_FIELD_MAXIMUM_TWO_ADIC_GENERATOR, PROOF_BASE_FIELD_MODULUS,
     PROOF_CHALLENGE_EXTENSION_DEGREE, PROOF_CHALLENGE_EXTENSION_POLYNOMIAL_COEFFICIENTS,
     RelationPlanCheckContext, RelationPlanError, validate_proof_field_profile,
+    zero_knowledge::{TraceMaskObservationCoordinateCatalog, TraceMaskSurjectivityCertificate},
 };
 
 const PROOF_PROFILE_SET_SCHEMA_IDENTIFIER: u16 = 0x2200;
@@ -69,7 +69,9 @@ pub(crate) const PROOF_EVALUATION_COSET_OFFSET: u64 = 7;
 pub(crate) const PROOF_DEEP_POINT_COUNT: u16 = 1;
 pub(crate) const PROOF_FINAL_POLYNOMIAL_DEGREE_BOUND_EXCLUSIVE: u32 = 256;
 pub(crate) const PROOF_UNIQUE_QUERY_COUNT: u32 = 168;
-pub(crate) const PROOF_NON_NATIVE_IDENTITY_CHALLENGE_COUNT: u16 = 7;
+pub(crate) const COMMITTED_MATERIAL_PROOF_EVALUATION_BLOWUP_FACTOR: u32 = 4;
+pub(crate) const COMMITTED_MATERIAL_PROOF_UNIQUE_QUERY_COUNT: u32 = 192;
+pub(crate) const PROOF_NON_NATIVE_IDENTITY_CHALLENGE_COUNT: u16 = 9;
 pub(crate) const PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT: u32 = 128;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -156,22 +158,39 @@ pub(crate) struct ProofFieldSchedule {
 }
 
 impl ProofFieldSchedule {
-    fn selected() -> Self {
+    fn selected(application_statement_schema_identifier: u16) -> Self {
+        let uses_committed_material_schedule = matches!(
+            application_statement_schema_identifier,
+            ProofFamilies::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER
+                | ProofFamilies::AGGREGATE_THRESHOLD_SHARE_STATEMENT_SCHEMA_IDENTIFIER
+        );
         Self {
             proof_field_index: 0,
-            evaluation_blowup_factor: PROOF_EVALUATION_BLOWUP_FACTOR,
+            evaluation_blowup_factor: if uses_committed_material_schedule {
+                COMMITTED_MATERIAL_PROOF_EVALUATION_BLOWUP_FACTOR
+            } else {
+                PROOF_EVALUATION_BLOWUP_FACTOR
+            },
             evaluation_coset_offset: PROOF_EVALUATION_COSET_OFFSET,
             deep_point_count: PROOF_DEEP_POINT_COUNT,
             final_polynomial_degree_bound_exclusive: PROOF_FINAL_POLYNOMIAL_DEGREE_BOUND_EXCLUSIVE,
-            unique_query_count: PROOF_UNIQUE_QUERY_COUNT,
+            unique_query_count: if uses_committed_material_schedule {
+                COMMITTED_MATERIAL_PROOF_UNIQUE_QUERY_COUNT
+            } else {
+                PROOF_UNIQUE_QUERY_COUNT
+            },
             non_native_modular_identity_challenge_count: PROOF_NON_NATIVE_IDENTITY_CHALLENGE_COUNT,
             maximum_fiat_shamir_candidate_draws_per_output:
                 PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT,
         }
     }
 
-    fn validate(&self, proof_field_count: usize) -> Result<(), ProofProfileError> {
-        if *self != Self::selected()
+    fn validate(
+        &self,
+        application_statement_schema_identifier: u16,
+        proof_field_count: usize,
+    ) -> Result<(), ProofProfileError> {
+        if *self != Self::selected(application_statement_schema_identifier)
             || usize::from(self.proof_field_index) >= proof_field_count
             || self.evaluation_blowup_factor == 0
             || !self.evaluation_blowup_factor.is_power_of_two()
@@ -238,7 +257,7 @@ impl ProofFamilyProfile {
         }
         Ok(Self {
             application_statement_schema_identifier,
-            field_schedule: ProofFieldSchedule::selected(),
+            field_schedule: ProofFieldSchedule::selected(application_statement_schema_identifier),
         })
     }
 
@@ -248,7 +267,10 @@ impl ProofFamilyProfile {
         {
             return Err(ProofProfileError::UnsupportedFamily);
         }
-        self.field_schedule.validate(proof_field_count)
+        self.field_schedule.validate(
+            self.application_statement_schema_identifier,
+            proof_field_count,
+        )
     }
 
     fn canonical_tuple(&self) -> Result<CanonicalTuple, ProofProfileError> {
@@ -355,7 +377,22 @@ impl EvaluatorKeyShareSourceKind {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct EvaluatorKeyAggregateEntryTopology {
     source_kind: EvaluatorKeyShareSourceKind,
-    schedule_position: u32,
+    producer_schedule_position: u32,
+    producer_output_ordinal: u32,
+}
+
+impl EvaluatorKeyAggregateEntryTopology {
+    pub(crate) const fn source_kind(self) -> EvaluatorKeyShareSourceKind {
+        self.source_kind
+    }
+
+    pub(crate) const fn producer_schedule_position(self) -> u32 {
+        self.producer_schedule_position
+    }
+
+    pub(crate) const fn producer_output_ordinal(self) -> u32 {
+        self.producer_output_ordinal
+    }
 }
 
 /// Instance topology needed to expand relation-plan variants into concrete
@@ -386,6 +423,24 @@ impl FirstProfileRootTopology {
         };
         topology.validate()?;
         Ok(topology)
+    }
+
+    pub(crate) const fn roster_size(&self) -> u16 {
+        self.roster_size
+    }
+
+    pub(crate) fn evaluator_key_entries(
+        &self,
+        top_count: u16,
+    ) -> Result<&[EvaluatorKeyAggregateEntryTopology], ProofProfileError> {
+        self.ordered_evaluator_key_entries_by_top_count
+            .get(usize::from(
+                top_count
+                    .checked_sub(1)
+                    .ok_or(ProofProfileError::InvalidRootTopology)?,
+            ))
+            .map(Vec::as_slice)
+            .ok_or(ProofProfileError::InvalidRootTopology)
     }
 
     fn validate(&self) -> Result<(), ProofProfileError> {
@@ -451,8 +506,9 @@ impl FirstProfileRootTopology {
                             .map_err(|_| ProofProfileError::InvalidRootTopology)?;
                         Ok(EvaluatorKeyAggregateEntryTopology {
                             source_kind: EvaluatorKeyShareSourceKind::Relinearization,
-                            schedule_position: u32::try_from(schedule_position)
+                            producer_schedule_position: u32::try_from(schedule_position)
                                 .map_err(|_| ProofProfileError::CountOverflow)?,
+                            producer_output_ordinal: 0,
                         })
                     })
                     .collect::<Result<Vec<_>, ProofProfileError>>()?;
@@ -467,7 +523,8 @@ impl FirstProfileRootTopology {
                                 .map_err(|_| ProofProfileError::InvalidRootTopology)?;
                             Ok(EvaluatorKeyAggregateEntryTopology {
                                 source_kind: EvaluatorKeyShareSourceKind::Galois,
-                                schedule_position: u32::try_from(schedule_position)
+                                producer_schedule_position: 0,
+                                producer_output_ordinal: u32::try_from(schedule_position)
                                     .map_err(|_| ProofProfileError::CountOverflow)?,
                             })
                         })
@@ -510,6 +567,30 @@ impl RelationRootEndpoint {
         Ok(endpoint)
     }
 
+    pub(crate) const fn application_statement_schema_identifier(self) -> u16 {
+        self.application_statement_schema_identifier
+    }
+
+    pub(crate) const fn roster_position(self) -> Option<u16> {
+        self.roster_position
+    }
+
+    pub(crate) const fn schedule_position(self) -> Option<u32> {
+        self.schedule_position
+    }
+
+    pub(crate) const fn top_count(self) -> Option<u16> {
+        self.top_count
+    }
+
+    pub(crate) const fn producer_sequence(self) -> Option<u64> {
+        self.producer_sequence
+    }
+
+    pub(crate) const fn verifier_source_ordinal(self) -> u32 {
+        self.verifier_source_ordinal
+    }
+
     fn validate_presence_pattern(&self) -> Result<(), ProofProfileError> {
         let family = self.application_statement_schema_identifier;
         if !FIRST_PROFILE_APPLICATION_FAMILIES.contains(&family) {
@@ -531,7 +612,9 @@ impl RelationRootEndpoint {
         let schedule_expected = matches!(
             family,
             ProofFamilies::RELINEARIZATION_ROUND_ONE_STATEMENT_SCHEMA_IDENTIFIER
-                ..=ProofFamilies::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER
+                | ProofFamilies::RKG_ROUND_ONE_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER
+                | ProofFamilies::RELINEARIZATION_ROUND_TWO_STATEMENT_SCHEMA_IDENTIFIER
+                | ProofFamilies::GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER
         );
         let top_count_expected =
             family == ProofFamilies::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER;
@@ -598,6 +681,18 @@ impl RelationRootCompatibilityEdge {
             consumer_endpoint,
             construction_kind,
         })
+    }
+
+    pub(crate) const fn producer_endpoint(self) -> RelationRootEndpoint {
+        self.producer_endpoint
+    }
+
+    pub(crate) const fn consumer_endpoint(self) -> RelationRootEndpoint {
+        self.consumer_endpoint
+    }
+
+    pub(crate) const fn construction_kind(self) -> RelationRootConstructionKind {
+        self.construction_kind
     }
 
     fn canonical_tuple(self) -> Result<CanonicalTuple, ProofProfileError> {
@@ -1318,7 +1413,7 @@ fn derive_root_compatibility_edges(
             (
                 ProofFamilies::GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
                 0,
-                1,
+                0,
             ),
         ] {
             let trustee_plan = relation_plan_artifact(relation_plans, trustee_family)?;
@@ -1487,11 +1582,11 @@ fn derive_root_compatibility_edges(
     Ok(encoded_edges.into_iter().map(|(_, edge)| edge).collect())
 }
 
-fn committed_material_root_view_coordinate_count(
+fn committed_material_root_view_catalogs(
     relation_plans: &[ValidatedRelationPlanArtifact],
     endpoint: RelationRootEndpoint,
     root_use: BoundTreeRootUse,
-) -> Result<u64, ProofProfileError> {
+) -> Result<Vec<TraceMaskObservationCoordinateCatalog>, ProofProfileError> {
     let root = bound_root_slot_for_endpoint(
         relation_plans,
         endpoint,
@@ -1504,74 +1599,61 @@ fn committed_material_root_view_coordinate_count(
     )?
     .compiled_plan()
     .select_variant(endpoint.schedule_position, endpoint.top_count)?;
-    let extension_degree = u64::try_from(PROOF_CHALLENGE_EXTENSION_DEGREE)
+    let challenge_extension_degree = u16::try_from(PROOF_CHALLENGE_EXTENSION_DEGREE)
         .map_err(|_| ProofProfileError::CountOverflow)?;
-    let phase_pair_query_coordinate_count = u64::from(PROOF_UNIQUE_QUERY_COUNT)
-        .checked_mul(2)
-        .ok_or(ProofProfileError::CountOverflow)?;
-    let mut maximum_coordinate_count = 0_u64;
-    for column_ordinal in root.ordered_column_ordinals {
-        let mut deep_opening_count = 0_u64;
-        let mut required_rotations = BTreeSet::from([(false, 0_u64)]);
-        for claim in variant.ordered_opening_claims().iter().filter(|claim| {
-            claim.source_class() == RelationOpeningSourceClass::TreeColumn
-                && claim.column_ordinal() == Some(column_ordinal)
-        }) {
-            deep_opening_count = deep_opening_count
-                .checked_add(1)
-                .ok_or(ProofProfileError::CountOverflow)?;
-            let opening_point = variant
-                .ordered_opening_points()
-                .get(
-                    usize::try_from(claim.opening_point_ordinal())
-                        .map_err(|_| ProofProfileError::CountOverflow)?,
-                )
-                .ok_or(ProofProfileError::IncompatibleRoot)?;
-            required_rotations.insert(opening_point.trace_rotation());
-        }
-        if deep_opening_count == 0 {
-            return Err(ProofProfileError::InsufficientRootMaskImage);
-        }
-        let query_rotation_count = u64::try_from(required_rotations.len())
-            .map_err(|_| ProofProfileError::CountOverflow)?;
-        let coordinate_count = deep_opening_count
-            .checked_mul(extension_degree)
-            .and_then(|count| {
-                phase_pair_query_coordinate_count
-                    .checked_mul(query_rotation_count)
-                    .and_then(|query_count| count.checked_add(query_count))
-            })
-            .ok_or(ProofProfileError::CountOverflow)?;
-        maximum_coordinate_count = maximum_coordinate_count.max(coordinate_count);
-    }
-    if maximum_coordinate_count == 0 {
+    let unique_query_count =
+        selected_unique_query_count(endpoint.application_statement_schema_identifier)?;
+    let catalogs = root
+        .ordered_column_ordinals
+        .into_iter()
+        .map(|column_ordinal| {
+            TraceMaskObservationCoordinateCatalog::derive(
+                variant,
+                column_ordinal,
+                challenge_extension_degree,
+                unique_query_count,
+            )
+            .map_err(ProofProfileError::from)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    if catalogs.is_empty() {
         return Err(ProofProfileError::InsufficientRootMaskImage);
     }
-    Ok(maximum_coordinate_count)
+    Ok(catalogs)
 }
 
-fn committed_material_mask_coefficient_count(
+fn selected_unique_query_count(
+    application_statement_schema_identifier: u16,
+) -> Result<u32, ProofProfileError> {
+    Ok(
+        ProofFamilyProfile::selected(application_statement_schema_identifier)?
+            .field_schedule
+            .unique_query_count,
+    )
+}
+
+fn committed_material_mask_coefficient_counts(
     root: &BoundRootSlot,
-) -> Result<u64, ProofProfileError> {
+) -> Result<Vec<u64>, ProofProfileError> {
     if root.construction_kind != RelationRootConstructionKind::CommittedMaterial {
         return Err(ProofProfileError::IncompatibleRoot);
     }
-    let mut counts = root.shape.ordered_columns.iter().map(|column| {
-        column
-            .source_degree_bound_exclusive
-            .checked_sub(root.shape.trace_domain_size)
-            .filter(|count| *count > 0 && *count <= root.shape.trace_domain_size)
-            .ok_or(ProofProfileError::InsufficientRootMaskImage)
-    });
-    let coefficient_count = counts
-        .next()
-        .ok_or(ProofProfileError::InsufficientRootMaskImage)??;
-    for count in counts {
-        if count? != coefficient_count {
-            return Err(ProofProfileError::InsufficientRootMaskImage);
-        }
+    let counts = root
+        .shape
+        .ordered_columns
+        .iter()
+        .map(|column| {
+            column
+                .source_degree_bound_exclusive
+                .checked_sub(root.shape.trace_domain_size)
+                .filter(|count| *count > 0 && *count <= root.shape.trace_domain_size)
+                .ok_or(ProofProfileError::InsufficientRootMaskImage)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    if counts.is_empty() {
+        return Err(ProofProfileError::InsufficientRootMaskImage);
     }
-    Ok(coefficient_count)
+    Ok(counts)
 }
 
 fn validate_persistent_committed_material_mask_images(
@@ -1583,25 +1665,47 @@ fn validate_persistent_committed_material_mask_images(
         .into_iter()
         .filter(|root| root.construction_kind == RelationRootConstructionKind::CommittedMaterial)
     {
-        let mut required_coefficient_count = committed_material_root_view_coordinate_count(
+        let producer_catalogs = committed_material_root_view_catalogs(
             relation_plans,
             producer.endpoint,
             BoundTreeRootUse::Output,
         )?;
+        let mut joint_catalogs_by_physical_column = producer_catalogs
+            .into_iter()
+            .map(|catalog| vec![catalog])
+            .collect::<Vec<_>>();
         for edge in edges.iter().filter(|edge| {
             edge.construction_kind == RelationRootConstructionKind::CommittedMaterial
                 && edge.producer_endpoint == producer.endpoint
         }) {
-            required_coefficient_count = required_coefficient_count
-                .checked_add(committed_material_root_view_coordinate_count(
-                    relation_plans,
-                    edge.consumer_endpoint,
-                    BoundTreeRootUse::Input,
-                )?)
-                .ok_or(ProofProfileError::CountOverflow)?;
+            let consumer_catalogs = committed_material_root_view_catalogs(
+                relation_plans,
+                edge.consumer_endpoint,
+                BoundTreeRootUse::Input,
+            )?;
+            if consumer_catalogs.len() != joint_catalogs_by_physical_column.len() {
+                return Err(ProofProfileError::IncompatibleRoot);
+            }
+            for (joint_catalogs, consumer_catalog) in joint_catalogs_by_physical_column
+                .iter_mut()
+                .zip(consumer_catalogs)
+            {
+                joint_catalogs.push(consumer_catalog);
+            }
         }
-        if committed_material_mask_coefficient_count(&producer)? < required_coefficient_count {
-            return Err(ProofProfileError::InsufficientRootMaskImage);
+        let mask_coefficient_counts = committed_material_mask_coefficient_counts(&producer)?;
+        if mask_coefficient_counts.len() != joint_catalogs_by_physical_column.len() {
+            return Err(ProofProfileError::IncompatibleRoot);
+        }
+        for (mask_coefficient_count, joint_catalogs) in mask_coefficient_counts
+            .into_iter()
+            .zip(&joint_catalogs_by_physical_column)
+        {
+            TraceMaskSurjectivityCertificate::derive(mask_coefficient_count, joint_catalogs)
+                .map_err(|error| match error {
+                    RelationPlanError::CountOverflow => ProofProfileError::CountOverflow,
+                    _ => ProofProfileError::InsufficientRootMaskImage,
+                })?;
         }
     }
     Ok(())
@@ -1720,40 +1824,46 @@ fn derive_evaluator_aggregate_edges(
     assigned_consumers: &mut BTreeSet<RelationRootEndpoint>,
 ) -> Result<(), ProofProfileError> {
     let roster_size = usize::from(topology.roster_size);
+    let galois_batch_output_count = EvaluatorCandidateInput::implemented()
+        .map_err(|_| ProofProfileError::InvalidRootTopology)?
+        .galois_key_schedule
+        .len();
     for top_count in 1..=20_u16 {
         let selected_entries = topology
             .ordered_evaluator_key_entries_by_top_count
             .get(usize::from(top_count - 1))
             .ok_or(ProofProfileError::InvalidRootTopology)?;
+        let evaluator_inputs = ordered_bound_root_slots(
+            relation_plans,
+            RelationRootApplicationCoordinates::new(
+                ProofFamilies::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+                None,
+                None,
+                Some(top_count),
+                None,
+            ),
+            RelationRootConstructionKind::SetupPolynomial,
+            BoundTreeRootUse::Input,
+        )?;
+        let evaluator_outputs = ordered_bound_root_slots(
+            relation_plans,
+            RelationRootApplicationCoordinates::new(
+                ProofFamilies::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+                None,
+                None,
+                Some(top_count),
+                None,
+            ),
+            RelationRootConstructionKind::SetupPolynomial,
+            BoundTreeRootUse::Output,
+        )?;
+        require_root_count(
+            &evaluator_inputs,
+            checked_product(selected_entries.len(), roster_size)?,
+        )?;
+        require_root_count(&evaluator_outputs, selected_entries.len())?;
         for (entry_ordinal, entry) in selected_entries.iter().enumerate() {
-            let entry_ordinal =
-                u32::try_from(entry_ordinal).map_err(|_| ProofProfileError::CountOverflow)?;
-            let evaluator_inputs = ordered_bound_root_slots(
-                relation_plans,
-                RelationRootApplicationCoordinates::new(
-                    ProofFamilies::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
-                    None,
-                    Some(entry_ordinal),
-                    Some(top_count),
-                    None,
-                ),
-                RelationRootConstructionKind::SetupPolynomial,
-                BoundTreeRootUse::Input,
-            )?;
-            let evaluator_outputs = ordered_bound_root_slots(
-                relation_plans,
-                RelationRootApplicationCoordinates::new(
-                    ProofFamilies::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
-                    None,
-                    Some(entry_ordinal),
-                    Some(top_count),
-                    None,
-                ),
-                RelationRootConstructionKind::SetupPolynomial,
-                BoundTreeRootUse::Output,
-            )?;
-            require_root_count(&evaluator_inputs, roster_size)?;
-            require_root_count(&evaluator_outputs, 1)?;
+            let evaluator_input_offset = checked_product(entry_ordinal, roster_size)?;
             let producer_family = entry.source_kind.application_statement_schema_identifier();
             for roster_position in 0..topology.roster_size {
                 let trustee_outputs = ordered_bound_root_slots(
@@ -1761,19 +1871,35 @@ fn derive_evaluator_aggregate_edges(
                     RelationRootApplicationCoordinates::new(
                         producer_family,
                         Some(roster_position),
-                        Some(entry.schedule_position),
+                        Some(entry.producer_schedule_position),
                         None,
                         None,
                     ),
                     RelationRootConstructionKind::SetupPolynomial,
                     BoundTreeRootUse::Output,
                 )?;
-                require_root_count(&trustee_outputs, 1)?;
+                require_root_count(
+                    &trustee_outputs,
+                    match entry.source_kind {
+                        EvaluatorKeyShareSourceKind::Relinearization => 1,
+                        EvaluatorKeyShareSourceKind::Galois => galois_batch_output_count,
+                    },
+                )?;
+                let producer_output_index = usize::try_from(entry.producer_output_ordinal)
+                    .map_err(|_| ProofProfileError::CountOverflow)?;
+                let producer_output = trustee_outputs
+                    .get(producer_output_index)
+                    .ok_or(ProofProfileError::InvalidRootTopology)?;
+                let evaluator_input_index = evaluator_input_offset
+                    .checked_add(usize::from(roster_position))
+                    .ok_or(ProofProfileError::CountOverflow)?;
                 append_root_edge(
                     edges,
                     assigned_consumers,
-                    &trustee_outputs[0],
-                    &evaluator_inputs[usize::from(roster_position)],
+                    producer_output,
+                    evaluator_inputs
+                        .get(evaluator_input_index)
+                        .ok_or(ProofProfileError::InvalidRootTopology)?,
                     RelationRootConstructionKind::SetupPolynomial,
                 )?;
             }
@@ -2072,16 +2198,35 @@ mod tests {
     fn selected_field_and_schedule_are_canonical_and_nonnegotiable() {
         let field = ProofFieldProfile::selected().expect("selected field is valid");
         assert_eq!(field.validate(), Ok(()));
-        assert_eq!(ProofFieldSchedule::selected().validate(1), Ok(()));
+        let ordinary_family = ProofFamilies::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER;
+        let committed_material_family =
+            ProofFamilies::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER;
+        assert_eq!(
+            ProofFieldSchedule::selected(ordinary_family).validate(ordinary_family, 1),
+            Ok(())
+        );
+        assert_eq!(
+            ProofFieldSchedule::selected(committed_material_family)
+                .validate(committed_material_family, 1),
+            Ok(())
+        );
+        assert_ne!(
+            ProofFieldSchedule::selected(ordinary_family),
+            ProofFieldSchedule::selected(committed_material_family)
+        );
 
         let mut wrong_field = field.clone();
         wrong_field.maximum_two_adic_subgroup_generator = 1;
         assert_eq!(wrong_field.validate(), Err(ProofProfileError::InvalidField));
 
-        let mut wrong_schedule = ProofFieldSchedule::selected();
+        let mut wrong_schedule = ProofFieldSchedule::selected(ordinary_family);
         wrong_schedule.unique_query_count -= 1;
         assert_eq!(
-            wrong_schedule.validate(1),
+            wrong_schedule.validate(ordinary_family, 1),
+            Err(ProofProfileError::InvalidSchedule),
+        );
+        assert_eq!(
+            ProofFieldSchedule::selected(ordinary_family).validate(committed_material_family, 1),
             Err(ProofProfileError::InvalidSchedule),
         );
     }
@@ -2114,7 +2259,7 @@ mod tests {
             RelationRootEndpoint::new(
                 ProofFamilies::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
                 None,
-                Some(0),
+                None,
                 Some(20),
                 None,
                 0,
@@ -2125,7 +2270,7 @@ mod tests {
             RelationRootEndpoint::new(
                 ProofFamilies::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
                 None,
-                Some(0),
+                None,
                 Some(21),
                 None,
                 0,
@@ -2136,7 +2281,7 @@ mod tests {
             RelationRootEndpoint::new(
                 ProofFamilies::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
                 None,
-                None,
+                Some(0),
                 Some(20),
                 None,
                 0,
@@ -2238,6 +2383,29 @@ mod tests {
         }
         assert_eq!(
             ProofFamilyProfile::selected(0x9999),
+            Err(ProofProfileError::UnsupportedFamily),
+        );
+    }
+
+    #[test]
+    fn persistent_root_views_use_each_family_selected_query_schedule() {
+        for family in FIRST_PROFILE_APPLICATION_FAMILIES {
+            let expected_unique_query_count = if matches!(
+                family,
+                ProofFamilies::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER
+                    | ProofFamilies::AGGREGATE_THRESHOLD_SHARE_STATEMENT_SCHEMA_IDENTIFIER
+            ) {
+                192
+            } else {
+                168
+            };
+            assert_eq!(
+                selected_unique_query_count(family),
+                Ok(expected_unique_query_count),
+            );
+        }
+        assert_eq!(
+            selected_unique_query_count(0x9999),
             Err(ProofProfileError::UnsupportedFamily),
         );
     }

@@ -1,17 +1,60 @@
+mod authority;
+mod canonical_package;
 mod common_randomness;
+mod consumed_object_byte_lengths;
 mod evaluation_key_proof_checks;
 mod evaluation_key_share_rounds;
 mod evaluator_key_schedule;
+mod evaluator_source;
+mod finalization;
+mod generated_mailbox_byte_lengths;
+mod generation_authority;
+mod generation_population;
+mod prepackage_evaluator_source_catalog;
 mod private_vss_envelopes;
 mod public_key_share_material;
 mod public_key_shares;
 mod same_secret_bridge_verification;
 mod setup_context;
 mod setup_intent;
+mod verification_assembly;
+mod verification_population;
+mod verified_public_proof_catalog;
+mod verified_public_randomness;
+mod verified_terminals;
 mod vss_complaints_and_acceptances;
 mod vss_public_material_verification;
+mod vss_qualification;
 
+pub(in crate::bgv) use self::verified_public_proof_catalog::VerifiedAcceptedSetupPublicProofCatalog;
+pub(in crate::bgv) use self::verified_public_randomness::{
+    VerifiedPublicRandomness, VerifiedSetupVerificationContext,
+    verify_public_randomness_board_sources,
+};
+pub(in crate::bgv) use self::verified_terminals::{
+    VerifiedAggregateThresholdShareTerminal, VerifiedCollectivePublicKeyTerminal,
+    VerifiedPublicKeyShareTerminal, VerifiedSameSecretTerminal, VerifiedVssQualificationTerminals,
+    VerifiedVssShareLinkageTerminal, derive_recipient_input_root,
+};
+
+#[cfg(test)]
+pub(in crate::bgv) use self::authority::retain_evaluator_execution_authority_for_tests;
+pub(in crate::bgv) use self::authority::{
+    BrowserOwnedAggregateThresholdShareLimb, VerifiedAcceptedSetupAuthority,
+    VerifiedAcceptedSetupAuthorityHandle, VerifiedAcceptedSetupParticipantReleaseMaterial,
+    VerifiedAcceptedSetupParticipantTargetReleaseLease,
+    VerifiedAcceptedSetupParticipantTargetReleaseLimb,
+    VerifiedAcceptedSetupParticipantTargetReleaseSource, VerifiedCollectivePublicKeyPolynomial,
+    VerifiedCollectivePublicKeyReadback, VerifiedEvaluatorCommonComponentAuthority,
+    VerifiedEvaluatorExecutionAuthority, lease_verified_participant_target_release_source,
+    release_verified_accepted_setup_authority, take_verified_evaluator_execution_authority,
+    with_verified_accepted_setup_authority, with_verified_participant_target_release_source,
+};
+pub(in crate::bgv) use self::canonical_package::{
+    AcceptedSetupPackageError, CanonicalAcceptedSetupPackage, VerifiedSetupTerminalReservationSet,
+};
 use self::common_randomness::verify_common_randomness;
+pub(in crate::bgv) use self::consumed_object_byte_lengths::VerifiedAcceptedSetupConsumedObjectByteLengthCatalog;
 use self::evaluation_key_proof_checks::verify_trustee_evaluation_key_proofs;
 pub(in crate::bgv::setup) use self::evaluation_key_share_rounds::{
     evaluation_key_proof_common_binding, expected_galois_key_switch_seed,
@@ -23,6 +66,42 @@ use self::evaluation_key_share_rounds::{
     verify_relinearization_key_switch_sample_binding,
 };
 use self::evaluator_key_schedule::verify_pending_evaluation_key_material_boundary;
+pub(in crate::bgv) use self::evaluator_source::VerifiedAcceptedSetupEvaluatorSourceCatalog;
+pub(in crate::bgv) use self::finalization::{
+    VerifiedAcceptedSetupFinalizationInput, finalize_verified_accepted_setup,
+};
+pub(in crate::bgv) use self::generated_mailbox_byte_lengths::{
+    GeneratedPrivateVssMailboxCorpusInput, VerifiedGeneratedPrivateVssMailboxByteLengths,
+    VerifiedGeneratedPrivateVssMailboxCorpusByteLengthCatalog,
+};
+pub(in crate::bgv) use self::generation_authority::{
+    SetupGeneratedCommittedMaterial, SetupGeneratedGaloisEntry, SetupGeneratedKeySwitchComponent,
+    SetupGeneratedVssMaterial, SetupGenerationAnchorOpening, SetupGenerationAuthorityHandle,
+    SetupGenerationGaloisApplication, SetupGenerationGaloisBatchSource,
+    SetupGenerationRecipientPayloadSourceHandle, SetupGenerationVssApplication,
+    SetupGenerationVssPreparationSource, SetupGenerationVssSource,
+    SetupVssGenerationPreparationError, cancel_setup_generation_recipient_vss_payload,
+    open_setup_generation_recipient_vss_payload, read_setup_generation_recipient_vss_payload_chunk,
+    release_setup_generation_authority, resolve_setup_generation_vss_preparation_source,
+    setup_generation_recipient_vss_payload_byte_length,
+    setup_generation_recipient_vss_payload_source_byte_length,
+    setup_generation_recipient_vss_payload_source_recipient_roster_position,
+    with_setup_generation_galois_batch, with_setup_generation_vss_material,
+};
+#[cfg(test)]
+pub(in crate::bgv) use self::generation_population::deterministic_galois_runtime_component_bytes_for_tests;
+pub(in crate::bgv) use self::generation_population::populate_browser_owned_setup_generation_authority;
+pub(in crate::bgv) use self::generation_population::selected_setup_generation_private_randomness_kmac_input_accounting;
+pub(crate) use self::prepackage_evaluator_source_catalog::{
+    PreparedPrepackageGaloisSourceSlot, PreparedPrepackageRelinearizationAggregateSlot,
+    PreparedPrepackageRelinearizationSourceSlot, begin_prepackage_evaluator_source_catalog,
+    cancel_prepackage_evaluator_source_catalog, commit_prepackage_galois_source,
+    commit_prepackage_relinearization_aggregate, commit_prepackage_relinearization_source,
+    complete_prepackage_evaluator_source_catalog, preflight_prepackage_galois_source_slot,
+    preflight_prepackage_relinearization_aggregate_slot,
+    preflight_prepackage_relinearization_source_slot,
+    with_completed_prepackage_evaluator_source_catalog, with_prepackage_relinearization_aggregate,
+};
 use self::private_vss_envelopes::{
     PrivateVssEnvelopeBindingMap, private_vss_envelope_bindings_from_package,
     private_vss_envelope_commitment_root, verify_private_vss_envelope_commitments,
@@ -56,6 +135,32 @@ use self::setup_intent::{
     SetupIntentVerification, expected_trustees_from_setup_intent, verify_setup_intent,
     verify_setup_intent_roster_hash,
 };
+pub(crate) use self::verification_assembly::{
+    PreparedVerifiedCollectivePublicKeyTerminalSlot, PreparedVerifiedEvaluatorKeyStoreSlot,
+    PreparedVerifiedGaloisSourceSlot, PreparedVerifiedPublicKeyShareTerminalSlot,
+    PreparedVerifiedRelinearizationAggregateSlot, PreparedVerifiedRelinearizationSourceSlot,
+    PreparedVerifiedSameSecretTerminalSlot, begin_accepted_setup_verification_assembly,
+    cancel_accepted_setup_verification_assembly,
+    commit_preflighted_verified_collective_public_key_terminal,
+    commit_preflighted_verified_evaluator_key_store, commit_preflighted_verified_galois_source,
+    commit_preflighted_verified_public_key_share_terminal,
+    commit_preflighted_verified_relinearization_aggregate,
+    commit_preflighted_verified_relinearization_source,
+    commit_preflighted_verified_same_secret_terminal,
+    complete_accepted_setup_evaluator_source_catalog, complete_accepted_setup_public_proof_catalog,
+    finalize_completed_accepted_setup_verification_assembly,
+    preflight_verified_collective_public_key_terminal_slot,
+    preflight_verified_evaluator_key_store_slot, preflight_verified_galois_source_slot,
+    preflight_verified_public_key_share_terminal_slot,
+    preflight_verified_relinearization_aggregate_slot,
+    preflight_verified_relinearization_source_slot, preflight_verified_same_secret_terminal_slot,
+    retain_verified_collective_public_key_terminal, retain_verified_evaluator_key_store,
+    retain_verified_galois_source, retain_verified_public_key_share_terminal,
+    retain_verified_relinearization_aggregate, retain_verified_relinearization_source,
+    retain_verified_same_secret_terminal, transfer_completed_prepackage_evaluator_source_catalog,
+    with_accepted_setup_verification_package, with_accepted_setup_verification_sources,
+    with_verified_accepted_setup_evaluator_construction_sources,
+};
 use self::vss_complaints_and_acceptances::{
     source_trustee_commitment_roots_from_vss_commitments, verify_vss_complaints,
     verify_vss_share_acceptances,
@@ -63,6 +168,7 @@ use self::vss_complaints_and_acceptances::{
 use self::vss_public_material_verification::{
     VssPublicMaterialVerification, verify_vss_public_material,
 };
+pub(in crate::bgv) use self::vss_qualification::VerifiedAcceptedSetupVssQualification;
 
 use crate::bgv::setup_helpers::{compare_required_string, compare_required_u64};
 

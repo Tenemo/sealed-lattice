@@ -580,7 +580,7 @@ describe('Browser action-storage custody worker channel', () => {
             foundationHeadBeforeCheckpoint,
         );
 
-        const checkpoint = await custody.beginCheckpoint([]);
+        const checkpoint = await custody.beginCheckpoint();
         await expect(
             custody.copyCheckpointDescription(
                 Object.freeze({}) as BrowserFoundationCheckpointHandle,
@@ -588,7 +588,7 @@ describe('Browser action-storage custody worker channel', () => {
         ).rejects.toMatchObject({ code: 'InvalidInput' });
         const boundary = {
             operationKind: 1,
-            orderedRandomCursors: [],
+            privateRandomCursorManifestBytes: new Uint8Array(),
             orderedSourceDigests: [],
             safeBoundaryOrdinal: 0,
             stateStreamDescriptorBytes: checkpointStateDescriptor(
@@ -611,7 +611,8 @@ describe('Browser action-storage custody worker channel', () => {
                 description.checkpointLineageIdentifier,
             expectedBoundary: {
                 operationKind: boundary.operationKind,
-                orderedRandomCursors: boundary.orderedRandomCursors,
+                privateRandomCursorManifestBytes:
+                    boundary.privateRandomCursorManifestBytes,
                 orderedSourceDigests: boundary.orderedSourceDigests,
                 safeBoundaryOrdinal: boundary.safeBoundaryOrdinal,
                 stateStreamDomain: boundary.stateStreamDomain,

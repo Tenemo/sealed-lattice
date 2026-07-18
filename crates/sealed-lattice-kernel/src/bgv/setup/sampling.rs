@@ -5,7 +5,25 @@ use sha3::{
     digest::{ExtendableOutput, Update, XofReader},
 };
 
+use crate::bgv::{
+    modular_arithmetic::mul_mod,
+    ntt::{forward_negacyclic_ntt_in_place, inverse_negacyclic_ntt_in_place},
+    parameters::SPECIAL_PRIMES,
+};
+use crate::foundation::{CanonicalItem, CanonicalTuple};
 use crate::transcript_core::decode_hex;
+
+const PUBLIC_SETUP_SAMPLER_CUSTOMIZATION_SCHEMA_IDENTIFIER: u16 = 0x1208;
+const COLLECTIVE_PUBLIC_KEY_COMMON_REFERENCE_COORDINATE_SCHEMA_IDENTIFIER: u16 = 0x1209;
+const RELINEARIZATION_COMMON_REFERENCE_COORDINATE_SCHEMA_IDENTIFIER: u16 = 0x120a;
+const GALOIS_COMMON_REFERENCE_COORDINATE_SCHEMA_IDENTIFIER: u16 = 0x120b;
+const FOUNDATION_SCHEMA_VERSION: u16 = 1;
+const COLLECTIVE_PUBLIC_KEY_COMMON_REFERENCE_DOMAIN: &str = "sealed-lattice/setup/public-key-a/v1";
+const RELINEARIZATION_COMMON_REFERENCE_DOMAIN: &str =
+    "sealed-lattice/setup/relinearization-common-a/v1";
+const GALOIS_COMMON_REFERENCE_DOMAIN: &str = "sealed-lattice/setup/galois-common-a/v1";
+const DATA_MODULUS_CATALOG_IDENTIFIER: u16 = 1;
+const SPECIAL_MODULUS_CATALOG_IDENTIFIER: u16 = 2;
 
 // These JSON setup paths do not receive suite-provided sampling limits, so a
 // fixed cap keeps deterministic rejection work finite.
@@ -18,6 +36,27 @@ pub(super) const MAXIMUM_DETERMINISTIC_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT: u32 =
 /// relation-specific coordinate grammar.
 pub(super) fn sample_public_setup_residues(
     public_setup_seed_hex: &str,
+    canonical_customization_bytes: &[u8],
+    modulus: u64,
+    output_count: usize,
+) -> CanonicalResult<Vec<u64>> {
+    let public_setup_seed = decode_hex(public_setup_seed_hex)?;
+    let public_setup_seed: [u8; 64] = public_setup_seed.try_into().map_err(|_| {
+        CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "public setup seed must contain exactly 64 bytes",
+        )
+    })?;
+    sample_public_setup_residues_from_seed(
+        &public_setup_seed,
+        canonical_customization_bytes,
+        modulus,
+        output_count,
+    )
+}
+
+fn sample_public_setup_residues_from_seed(
+    public_setup_seed: &[u8; 64],
     canonical_customization_bytes: &[u8],
     modulus: u64,
     output_count: usize,
@@ -41,14 +80,6 @@ pub(super) fn sample_public_setup_residues(
         ));
     }
 
-    let public_setup_seed = decode_hex(public_setup_seed_hex)?;
-    if public_setup_seed.len() != 64 {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "public setup seed must contain exactly 64 bytes",
-        ));
-    }
-
     // The profile deliberately uses bitLength(m), rather than bitLength(m-1).
     // For example modulus 256 therefore consumes two bytes, matching the
     // canonical private sampler rule and its exact zero-rejection case.
@@ -63,7 +94,7 @@ pub(super) fn sample_public_setup_residues(
         .and_then(|value| value.checked_mul(candidate_byte_length))
         .ok_or_else(public_sampler_size_error)?;
     let mut hasher = CShake256::from_core(CShake256Core::new(canonical_customization_bytes));
-    hasher.update(&public_setup_seed);
+    hasher.update(public_setup_seed);
     let mut reader = hasher.finalize_xof();
 
     let candidate_space_size = 1_u128
@@ -101,6 +132,194 @@ pub(super) fn sample_public_setup_residues(
     }
 
     Ok(residues)
+}
+
+/// Derives one complete common-`a` limb for the collective public key from the
+/// verifier-owned setup seed. The coordinate tuple and cSHAKE customization
+/// are fixed here so proof verification and downstream key readback cannot
+/// select different sampler grammars for the same protocol source.
+pub(in crate::bgv) fn sample_collective_public_key_common_reference_limb(
+    public_setup_seed: &[u8; 64],
+    data_prime_index: u16,
+    ring_degree: usize,
+) -> CanonicalResult<Vec<u64>> {
+    let data_prime_ordinal = usize::from(data_prime_index);
+    let modulus = DATA_PRIMES.get(data_prime_ordinal).copied().ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidProtocolObject,
+            "collective public-key common-reference data-prime index is outside the selected basis",
+        )
+    })?;
+    if ring_degree != POLYNOMIAL_DEGREE {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "collective public-key common-reference ring degree does not match the selected suite",
+        ));
+    }
+    let coordinate_bytes = CanonicalTuple::new(
+        COLLECTIVE_PUBLIC_KEY_COMMON_REFERENCE_COORDINATE_SCHEMA_IDENTIFIER,
+        FOUNDATION_SCHEMA_VERSION,
+        vec![CanonicalItem::unsigned16(data_prime_index)],
+    )
+    .encode()
+    .map_err(|error| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidProtocolObject,
+            format!("collective public-key common-reference coordinate encoding failed: {error}"),
+        )
+    })?;
+    let customization_bytes = CanonicalTuple::new(
+        PUBLIC_SETUP_SAMPLER_CUSTOMIZATION_SCHEMA_IDENTIFIER,
+        FOUNDATION_SCHEMA_VERSION,
+        vec![
+            CanonicalItem::nonempty_ascii(COLLECTIVE_PUBLIC_KEY_COMMON_REFERENCE_DOMAIN).map_err(
+                |error| {
+                    CanonicalError::new(
+                        CanonicalErrorCode::InvalidProtocolObject,
+                        format!("collective public-key common-reference domain encoding failed: {error}"),
+                    )
+                },
+            )?,
+            CanonicalItem::variable_bytes(coordinate_bytes).map_err(|error| {
+                CanonicalError::new(
+                    CanonicalErrorCode::InvalidProtocolObject,
+                    format!("collective public-key common-reference customization encoding failed: {error}"),
+                )
+            })?,
+        ],
+    )
+    .encode()
+    .map_err(|error| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidProtocolObject,
+            format!("collective public-key common-reference customization encoding failed: {error}"),
+        )
+    })?;
+    sample_public_setup_residues_from_seed(
+        public_setup_seed,
+        &customization_bytes,
+        modulus,
+        ring_degree,
+    )
+}
+
+pub(in crate::bgv) fn sample_relinearization_common_reference_limb(
+    public_setup_seed: &[u8; 64],
+    schedule_position: u32,
+    decomposition_block_index: u16,
+    modulus_catalog_identifier: u16,
+    modulus_index: u16,
+    ring_degree: usize,
+) -> CanonicalResult<Vec<u64>> {
+    sample_key_switch_common_reference_limb(
+        public_setup_seed,
+        RELINEARIZATION_COMMON_REFERENCE_COORDINATE_SCHEMA_IDENTIFIER,
+        RELINEARIZATION_COMMON_REFERENCE_DOMAIN,
+        schedule_position,
+        decomposition_block_index,
+        modulus_catalog_identifier,
+        modulus_index,
+        ring_degree,
+    )
+}
+
+pub(in crate::bgv) fn sample_galois_common_reference_limb(
+    public_setup_seed: &[u8; 64],
+    schedule_position: u32,
+    decomposition_block_index: u16,
+    modulus_catalog_identifier: u16,
+    modulus_index: u16,
+    ring_degree: usize,
+) -> CanonicalResult<Vec<u64>> {
+    sample_key_switch_common_reference_limb(
+        public_setup_seed,
+        GALOIS_COMMON_REFERENCE_COORDINATE_SCHEMA_IDENTIFIER,
+        GALOIS_COMMON_REFERENCE_DOMAIN,
+        schedule_position,
+        decomposition_block_index,
+        modulus_catalog_identifier,
+        modulus_index,
+        ring_degree,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn sample_key_switch_common_reference_limb(
+    public_setup_seed: &[u8; 64],
+    coordinate_schema_identifier: u16,
+    domain: &str,
+    schedule_position: u32,
+    decomposition_block_index: u16,
+    modulus_catalog_identifier: u16,
+    modulus_index: u16,
+    ring_degree: usize,
+) -> CanonicalResult<Vec<u64>> {
+    if ring_degree != POLYNOMIAL_DEGREE {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "key-switch common-reference ring degree does not match the selected suite",
+        ));
+    }
+    let modulus = match modulus_catalog_identifier {
+        DATA_MODULUS_CATALOG_IDENTIFIER => DATA_PRIMES.get(usize::from(modulus_index)),
+        SPECIAL_MODULUS_CATALOG_IDENTIFIER => SPECIAL_PRIMES.get(usize::from(modulus_index)),
+        _ => None,
+    }
+    .copied()
+    .ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidProtocolObject,
+            "key-switch common-reference modulus coordinate is outside the selected basis",
+        )
+    })?;
+    let coordinate_bytes = CanonicalTuple::new(
+        coordinate_schema_identifier,
+        FOUNDATION_SCHEMA_VERSION,
+        vec![
+            CanonicalItem::unsigned32(schedule_position),
+            CanonicalItem::unsigned16(decomposition_block_index),
+            CanonicalItem::unsigned16(modulus_catalog_identifier),
+            CanonicalItem::unsigned16(modulus_index),
+        ],
+    )
+    .encode()
+    .map_err(|error| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidProtocolObject,
+            format!("key-switch common-reference coordinate encoding failed: {error}"),
+        )
+    })?;
+    let customization_bytes = CanonicalTuple::new(
+        PUBLIC_SETUP_SAMPLER_CUSTOMIZATION_SCHEMA_IDENTIFIER,
+        FOUNDATION_SCHEMA_VERSION,
+        vec![
+            CanonicalItem::nonempty_ascii(domain).map_err(|error| {
+                CanonicalError::new(
+                    CanonicalErrorCode::InvalidProtocolObject,
+                    format!("key-switch common-reference domain encoding failed: {error}"),
+                )
+            })?,
+            CanonicalItem::variable_bytes(coordinate_bytes).map_err(|error| {
+                CanonicalError::new(
+                    CanonicalErrorCode::InvalidProtocolObject,
+                    format!("key-switch common-reference customization encoding failed: {error}"),
+                )
+            })?,
+        ],
+    )
+    .encode()
+    .map_err(|error| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidProtocolObject,
+            format!("key-switch common-reference customization encoding failed: {error}"),
+        )
+    })?;
+    sample_public_setup_residues_from_seed(
+        public_setup_seed,
+        &customization_bytes,
+        modulus,
+        ring_degree,
+    )
 }
 
 fn public_sampler_size_error() -> CanonicalError {
@@ -145,7 +364,6 @@ pub(super) fn first_accepted_candidate_from_block(
 
 // Polynomial multiplication in Z_q[X]/(X^N + 1): forward NTT both operands,
 // multiply pointwise, then inverse NTT.
-#[cfg(test)]
 pub(super) fn negacyclic_product_mod(
     left: &[u64],
     right: &[u64],

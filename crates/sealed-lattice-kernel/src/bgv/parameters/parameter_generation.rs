@@ -1,25 +1,18 @@
 use core::fmt;
 use std::sync::OnceLock;
 
+use super::root_parameters::MULTIPLICATIVE_GROUP_PRIME_FACTORS;
 use super::{
     DATA_PRIMES, LOGICAL_SLOT_GENERATOR, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE, ROOT_PARAMETERS,
     RootParameters, SPECIAL_PRIMES,
 };
 
-#[cfg(test)]
-const DATA_PRIME_BIT_LENGTH: u32 = 47;
-const DATA_PRIME_COUNT: usize = 17;
+const DATA_PRIME_COUNT: usize = DATA_PRIMES.len();
 const SPECIAL_PRIME_COUNT: usize = SPECIAL_PRIMES.len();
 const TWICE_POLYNOMIAL_DEGREE: u64 = 2 * POLYNOMIAL_DEGREE as u64;
-#[cfg(test)]
-const COMPATIBILITY_CONGRUENCE_MODULUS: u64 = PLAINTEXT_MODULUS * TWICE_POLYNOMIAL_DEGREE;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ParameterGenerationError {
-    #[cfg(test)]
-    ArithmeticOverflow,
-    #[cfg(test)]
-    CandidateSearchExhausted,
     #[cfg(test)]
     PrimitiveGeneratorNotFound,
     InvalidCertificate,
@@ -28,10 +21,6 @@ pub(crate) enum ParameterGenerationError {
 impl fmt::Display for ParameterGenerationError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self {
-            #[cfg(test)]
-            Self::ArithmeticOverflow => "parameter generation arithmetic overflowed",
-            #[cfg(test)]
-            Self::CandidateSearchExhausted => "compatible data-prime search was exhausted",
             #[cfg(test)]
             Self::PrimitiveGeneratorNotFound => {
                 "a full-order multiplicative generator was not found"
@@ -48,32 +37,12 @@ impl std::error::Error for ParameterGenerationError {}
 #[cfg(test)]
 pub(crate) fn regenerate_supported_data_root_parameters()
 -> Result<[RootParameters; DATA_PRIME_COUNT], ParameterGenerationError> {
-    let maximum_candidate = (1_u64 << DATA_PRIME_BIT_LENGTH) - 1;
-    let mut multiplier = maximum_candidate
-        .checked_sub(1)
-        .ok_or(ParameterGenerationError::ArithmeticOverflow)?
-        / COMPATIBILITY_CONGRUENCE_MODULUS;
-    let mut generated = Vec::with_capacity(DATA_PRIME_COUNT);
-
-    while generated.len() < DATA_PRIME_COUNT {
-        let candidate_modulus = multiplier
-            .checked_mul(COMPATIBILITY_CONGRUENCE_MODULUS)
-            .and_then(|value| value.checked_add(1))
-            .ok_or(ParameterGenerationError::ArithmeticOverflow)?;
-        if is_prime(candidate_modulus) {
-            generated.push(derive_root_parameters(
-                candidate_modulus,
-                verify_data_root_parameters,
-            )?);
-        }
-        multiplier = multiplier
-            .checked_sub(1)
-            .ok_or(ParameterGenerationError::CandidateSearchExhausted)?;
-    }
-
-    generated
+    DATA_PRIMES
+        .into_iter()
+        .map(|modulus| derive_root_parameters(modulus, verify_data_root_parameters))
+        .collect::<Result<Vec<_>, _>>()?
         .try_into()
-        .map_err(|_| ParameterGenerationError::CandidateSearchExhausted)
+        .map_err(|_| ParameterGenerationError::InvalidCertificate)
 }
 
 /// Deterministically regenerates the complete special basis used by hybrid
@@ -83,51 +52,60 @@ pub(crate) fn regenerate_supported_data_root_parameters()
 #[cfg(test)]
 pub(crate) fn regenerate_supported_special_root_parameters()
 -> Result<[RootParameters; SPECIAL_PRIME_COUNT], ParameterGenerationError> {
-    let maximum_candidate = (1_u64 << DATA_PRIME_BIT_LENGTH) - 1;
-    let mut multiplier = maximum_candidate
-        .checked_sub(1)
-        .ok_or(ParameterGenerationError::ArithmeticOverflow)?
-        / TWICE_POLYNOMIAL_DEGREE;
-    let mut generated = Vec::with_capacity(SPECIAL_PRIME_COUNT);
-
-    while generated.len() < SPECIAL_PRIME_COUNT {
-        let candidate_modulus = multiplier
-            .checked_mul(TWICE_POLYNOMIAL_DEGREE)
-            .and_then(|value| value.checked_add(1))
-            .ok_or(ParameterGenerationError::ArithmeticOverflow)?;
-        if is_prime(candidate_modulus) {
-            generated.push(derive_root_parameters(
-                candidate_modulus,
-                verify_ntt_root_parameters,
-            )?);
-        }
-        multiplier = multiplier
-            .checked_sub(1)
-            .ok_or(ParameterGenerationError::CandidateSearchExhausted)?;
-    }
-
-    generated
+    SPECIAL_PRIMES
+        .into_iter()
+        .map(|modulus| derive_root_parameters(modulus, verify_ntt_root_parameters))
+        .collect::<Result<Vec<_>, _>>()?
         .try_into()
-        .map_err(|_| ParameterGenerationError::CandidateSearchExhausted)
+        .map_err(|_| ParameterGenerationError::InvalidCertificate)
 }
 
 pub(crate) fn verify_ntt_root_parameters(parameters: RootParameters) -> bool {
+    let Some(parameter_index) = ROOT_PARAMETERS
+        .iter()
+        .position(|supported| supported.modulus == parameters.modulus)
+    else {
+        return false;
+    };
+    verify_ntt_root_parameters_with_factors(
+        parameters,
+        MULTIPLICATIVE_GROUP_PRIME_FACTORS[parameter_index],
+    )
+}
+
+fn verify_ntt_root_parameters_with_factors(
+    parameters: RootParameters,
+    multiplicative_group_prime_factors: &[u64],
+) -> bool {
     if !is_prime(parameters.modulus)
         || parameters.modulus % TWICE_POLYNOMIAL_DEGREE != 1
         || parameters.primitive_generator <= 1
         || parameters.primitive_generator >= parameters.modulus
+        || [
+            parameters.negacyclic_root,
+            parameters.cyclic_root,
+            parameters.inverse_negacyclic_root,
+            parameters.inverse_cyclic_root,
+            parameters.inverse_polynomial_degree,
+        ]
+        .into_iter()
+        .any(|component| component == 0 || component >= parameters.modulus)
     {
         return false;
     }
 
     let multiplicative_group_order = parameters.modulus - 1;
-    if modular_power(
+    if !verify_complete_prime_factor_certificate(
+        multiplicative_group_order,
+        multiplicative_group_prime_factors,
+    ) || modular_power(
         parameters.primitive_generator,
         multiplicative_group_order,
         parameters.modulus,
     ) != 1
-        || distinct_prime_factors(multiplicative_group_order)
-            .into_iter()
+        || multiplicative_group_prime_factors
+            .iter()
+            .copied()
             .any(|prime_factor| {
                 modular_power(
                     parameters.primitive_generator,
@@ -180,6 +158,26 @@ pub(crate) fn verify_ntt_root_parameters(parameters: RootParameters) -> bool {
             parameters.inverse_polynomial_degree,
             parameters.modulus,
         ) == 1
+}
+
+fn verify_complete_prime_factor_certificate(
+    multiplicative_group_order: u64,
+    prime_factors: &[u64],
+) -> bool {
+    if prime_factors.is_empty() || prime_factors.windows(2).any(|pair| pair[0] >= pair[1]) {
+        return false;
+    }
+
+    let mut remaining_group_order = multiplicative_group_order;
+    for prime_factor in prime_factors {
+        if !is_prime(*prime_factor) || !remaining_group_order.is_multiple_of(*prime_factor) {
+            return false;
+        }
+        while remaining_group_order.is_multiple_of(*prime_factor) {
+            remaining_group_order /= *prime_factor;
+        }
+    }
+    remaining_group_order == 1
 }
 
 pub(crate) fn verify_data_root_parameters(parameters: RootParameters) -> bool {
@@ -355,22 +353,89 @@ fn is_prime(candidate: u64) -> bool {
     true
 }
 
+#[cfg(test)]
 fn distinct_prime_factors(mut value: u64) -> Vec<u64> {
-    let mut factors = Vec::new();
-    let mut candidate_factor = 2_u64;
-    while candidate_factor <= value / candidate_factor {
-        if value.is_multiple_of(candidate_factor) {
-            factors.push(candidate_factor);
-            while value.is_multiple_of(candidate_factor) {
-                value /= candidate_factor;
+    let mut prime_factors = Vec::new();
+    for small_prime in [2_u64, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37] {
+        if value.is_multiple_of(small_prime) {
+            prime_factors.push(small_prime);
+            while value.is_multiple_of(small_prime) {
+                value /= small_prime;
             }
         }
-        candidate_factor += if candidate_factor == 2 { 1 } else { 2 };
     }
-    if value > 1 {
-        factors.push(value);
+
+    collect_prime_factors(value, &mut prime_factors);
+    prime_factors.sort_unstable();
+    prime_factors.dedup();
+    prime_factors
+}
+
+#[cfg(test)]
+fn collect_prime_factors(value: u64, prime_factors: &mut Vec<u64>) {
+    if value == 1 {
+        return;
     }
-    factors
+    if is_prime(value) {
+        prime_factors.push(value);
+        return;
+    }
+
+    let factor = deterministic_nontrivial_factor(value);
+    collect_prime_factors(factor, prime_factors);
+    collect_prime_factors(value / factor, prime_factors);
+}
+
+#[cfg(test)]
+fn deterministic_nontrivial_factor(composite: u64) -> u64 {
+    debug_assert!(composite > 1 && !is_prime(composite));
+    for small_prime in [2_u64, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37] {
+        if composite.is_multiple_of(small_prime) {
+            return small_prime;
+        }
+    }
+
+    let mut polynomial_constant = 1_u64;
+    loop {
+        let mut slow_sequence_value = 2_u64;
+        let mut fast_sequence_value = 2_u64;
+        for _ in 0..1_000_000 {
+            slow_sequence_value =
+                pollard_rho_step(slow_sequence_value, polynomial_constant, composite);
+            fast_sequence_value = pollard_rho_step(
+                pollard_rho_step(fast_sequence_value, polynomial_constant, composite),
+                polynomial_constant,
+                composite,
+            );
+            let sequence_difference = slow_sequence_value.abs_diff(fast_sequence_value);
+            let divisor = greatest_common_divisor(sequence_difference, composite);
+            if divisor > 1 && divisor < composite {
+                return divisor;
+            }
+            if divisor == composite {
+                break;
+            }
+        }
+        polynomial_constant = polynomial_constant
+            .checked_add(1)
+            .expect("a u64 composite must yield a nontrivial factor");
+    }
+}
+
+#[cfg(test)]
+fn pollard_rho_step(value: u64, polynomial_constant: u64, modulus: u64) -> u64 {
+    ((u128::from(multiply_modular(value, value, modulus)) + u128::from(polynomial_constant))
+        % u128::from(modulus)) as u64
+}
+
+#[cfg(test)]
+fn greatest_common_divisor(mut left: u64, mut right: u64) -> u64 {
+    while right != 0 {
+        let remainder = left % right;
+        left = right;
+        right = remainder;
+    }
+    left
 }
 
 fn modular_power(base: u64, mut exponent: u64, modulus: u64) -> u64 {
@@ -477,6 +542,34 @@ mod tests {
     fn complete_algebraic_certificate_reproduces() {
         validate_supported_algebraic_parameters()
             .expect("the fixed algebraic parameter certificate must reproduce");
+    }
+
+    #[test]
+    fn every_multiplicative_group_factor_certificate_is_prime_and_complete() {
+        for (parameters, prime_factors) in ROOT_PARAMETERS
+            .iter()
+            .zip(MULTIPLICATIVE_GROUP_PRIME_FACTORS)
+        {
+            assert!(verify_complete_prime_factor_certificate(
+                parameters.modulus - 1,
+                prime_factors,
+            ));
+        }
+
+        let group_order = ROOT_PARAMETERS[1].modulus - 1;
+        let complete_factors = MULTIPLICATIVE_GROUP_PRIME_FACTORS[1];
+        assert!(!verify_complete_prime_factor_certificate(
+            group_order,
+            &complete_factors[..complete_factors.len() - 1],
+        ));
+        assert!(!verify_complete_prime_factor_certificate(
+            group_order,
+            &[2, 2, 3, 786_433],
+        ));
+        assert!(!verify_complete_prime_factor_certificate(
+            group_order,
+            &[2, 3, 786_433, 1_572_866],
+        ));
     }
 
     #[test]

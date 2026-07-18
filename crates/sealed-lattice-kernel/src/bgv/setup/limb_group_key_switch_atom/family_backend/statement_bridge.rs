@@ -342,7 +342,7 @@ pub(super) fn bridge_key_public<const LIMB_COUNT: usize>(
 
 #[cfg(test)]
 mod tests {
-    use super::super::super::proof_field::sixteen_limb_group_field_parameters;
+    use super::super::super::proof_field::selected_key_switch_proof_field_parameters;
     use super::super::key_proof::{
         KeyFriProofParameters, ZERO_STATEMENT_BINDING, prove_key_fri, verify_key_fri,
     };
@@ -498,7 +498,7 @@ mod tests {
         material: &SyntheticLimbMaterial,
         kind: BridgedKeyKind<'_>,
     ) {
-        let parameters = sixteen_limb_group_field_parameters();
+        let parameters = selected_key_switch_proof_field_parameters();
         let ring_degree = material.secret.len();
         let group_primes = &DATA_PRIMES[..material.component_b_by_digit.len()];
         let group = LimbGroupContext::new(&parameters, group_primes).expect("group builds");
@@ -601,7 +601,7 @@ mod tests {
         // both group proofs, the diagonal source only in its owning group.
         let kind = BridgedKeyKind::RelinearizationRoundOne;
         let material = synthetic_limb_material(64, &DATA_PRIMES[..3], &kind);
-        let parameters = sixteen_limb_group_field_parameters();
+        let parameters = selected_key_switch_proof_field_parameters();
         let ring_degree = material.secret.len();
         for (group_start_limb, group_limb_count) in [(0_usize, 2_usize), (2, 1)] {
             let group_primes = &DATA_PRIMES[group_start_limb..group_start_limb + group_limb_count];
@@ -678,7 +678,7 @@ mod tests {
         let kind = BridgedKeyKind::RelinearizationRoundOne;
         let mut material = synthetic_limb_material(64, &DATA_PRIMES[..2], &kind);
         material.component_b_by_digit[1][0][7] ^= 1;
-        let parameters = sixteen_limb_group_field_parameters();
+        let parameters = selected_key_switch_proof_field_parameters();
         let group_primes = &DATA_PRIMES[..2];
         let group = LimbGroupContext::new(&parameters, group_primes).expect("group builds");
         let domain = NegacyclicDomain::new(&parameters, 64).expect("domain builds");
@@ -708,7 +708,7 @@ mod tests {
         let material = synthetic_limb_material(64, &DATA_PRIMES[..2], &kind);
         let mut wrong_secret = material.secret.clone();
         wrong_secret[3] = if wrong_secret[3] == 1 { -1 } else { 1 };
-        let parameters = sixteen_limb_group_field_parameters();
+        let parameters = selected_key_switch_proof_field_parameters();
         let group = LimbGroupContext::new(&parameters, &DATA_PRIMES[..2]).expect("group builds");
         let domain = NegacyclicDomain::new(&parameters, 64).expect("domain builds");
         let result = bridge_key_material(

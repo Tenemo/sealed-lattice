@@ -43,10 +43,9 @@ const checkpointLimits = {
     maximumActiveOperationIdentityCount: 64,
     maximumCheckpointStateByteLength: 1_048_576,
     maximumManifestByteLength: 16_384,
-    maximumRandomCursorCount: 8,
+    maximumRandomCursorManifestByteLength: 4_096,
     maximumRecordSealingCount: 256,
     maximumSourceDigestCount: 8,
-    maximumStreamAttemptCount: 4,
     transactionLifetimeMilliseconds: 5_000,
 } as const;
 const boundaryPolicy: CheckpointBoundaryPolicy = {
@@ -62,6 +61,29 @@ const binding = Object.freeze({
 const actionRandomnessCommitment = new Uint8Array(64).fill(0x55);
 const runtimeBindingHash = new Uint8Array(64).fill(0x66);
 const proofAttemptLineageIdentifier = new Uint8Array(32).fill(0x77);
+
+const emptyPrivateRandomCursorManifest = (): Uint8Array<ArrayBuffer> =>
+    Uint8Array.of(
+        0x53,
+        0x4c,
+        0x43,
+        0x50,
+        0x43,
+        0x4d,
+        0x30,
+        0x33,
+        0x03,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+    );
 
 const bytesFromHex = (encoded: string): Uint8Array<ArrayBuffer> => {
     const bytes = new Uint8Array(encoded.length / 2);
@@ -317,7 +339,6 @@ describe('Common-proof browser custody', () => {
                     ? {}
                     : {
                           checkpoint: {
-                              cursorKernel: transcriptCoreKernel,
                               ...(input.resumeDescriptor === undefined
                                   ? {}
                                   : {
@@ -347,7 +368,7 @@ describe('Common-proof browser custody', () => {
         return { adapter, custody, store, workerKernel };
     };
 
-    it('rejects hostile checkpoint cursor counts and aggregate bytes before custody opens', async () => {
+    it('rejects hostile checkpoint manifest and attempt-identifier lengths before custody opens', async () => {
         const checkpointStorage = await openRuntimeTestStore({
             namespace: 'common-proof-hostile-checkpoint-descriptor-test',
         });
@@ -355,7 +376,6 @@ describe('Common-proof browser custody', () => {
             authorityContext: runtimeAuthorityContext(),
             boundaryPolicy,
             cryptoProvider,
-            cursorKernel: transcriptCoreKernel,
             encryptionKey: await generateRuntimeStorageEncryptionKey(),
             limits: checkpointLimits,
             store: checkpointStorage.store,
@@ -378,32 +398,28 @@ describe('Common-proof browser custody', () => {
                 checkpointStore,
                 resumeDescriptor: {
                     ...descriptorBase,
-                    orderedPrivateRandomCursorBytes: Array.from(
-                        { length: 4_097 },
-                        () => Uint8Array.of(1),
+                    privateRandomCursorManifestBytes: new Uint8Array(
+                        1_048_577,
                     ),
                 },
                 workerKernel,
             }),
         ).rejects.toMatchObject({ code: 'InvalidInput' });
 
-        const firstOversizedCursor = new Uint8Array(524_289).fill(0x56);
-        const secondOversizedCursor = new Uint8Array(524_288).fill(0x78);
+        const malformedAttemptIdentifier = new Uint8Array(31).fill(0x56);
         await expect(
             openFixture({
                 checkpointStore,
                 resumeDescriptor: {
                     ...descriptorBase,
-                    orderedPrivateRandomCursorBytes: [
-                        firstOversizedCursor,
-                        secondOversizedCursor,
-                    ],
+                    privateRandomCursorManifestBytes: new Uint8Array(),
+                    privateRandomnessStreamAttemptIdentifier:
+                        malformedAttemptIdentifier,
                 },
                 workerKernel,
             }),
         ).rejects.toMatchObject({ code: 'InvalidInput' });
-        expect(firstOversizedCursor[0]).toBe(0x56);
-        expect(secondOversizedCursor[0]).toBe(0x78);
+        expect(malformedAttemptIdentifier[0]).toBe(0x56);
     });
 
     it('persists encrypted and public objects through create, append, seal, ordered read, and delete', async () => {
@@ -702,7 +718,6 @@ describe('Common-proof browser custody', () => {
             authorityContext: runtimeAuthorityContext(),
             boundaryPolicy,
             cryptoProvider,
-            cursorKernel: transcriptCoreKernel,
             encryptionKey,
             limits: checkpointLimits,
             store: checkpointStorage.store,
@@ -746,7 +761,7 @@ describe('Common-proof browser custody', () => {
         );
         await first.custody.checkpointCustody?.publishAuthenticatedCheckpoint({
             canonicalStateBytes: checkpointState,
-            orderedPrivateRandomCursorBytes: [cursorBytes],
+            privateRandomCursorManifestBytes: cursorBytes,
             safeBoundaryOrdinal: 6,
             stableAttemptBindingHash: new Uint8Array(64).fill(0x31),
         });
@@ -857,7 +872,6 @@ describe('Common-proof browser custody', () => {
             authorityContext: runtimeAuthorityContext(),
             boundaryPolicy,
             cryptoProvider,
-            cursorKernel: transcriptCoreKernel,
             encryptionKey: await generateRuntimeStorageEncryptionKey(),
             limits: checkpointLimits,
             store: checkpointStorage.store,
@@ -870,7 +884,8 @@ describe('Common-proof browser custody', () => {
         });
         await first.custody.checkpointCustody?.publishAuthenticatedCheckpoint({
             canonicalStateBytes: new Uint8Array(64).fill(0x17),
-            orderedPrivateRandomCursorBytes: [],
+            privateRandomCursorManifestBytes:
+                emptyPrivateRandomCursorManifest(),
             safeBoundaryOrdinal: 2,
             stableAttemptBindingHash: new Uint8Array(64).fill(0x29),
         });
@@ -935,7 +950,6 @@ describe('Common-proof browser custody', () => {
             authorityContext: runtimeAuthorityContext(),
             boundaryPolicy,
             cryptoProvider,
-            cursorKernel: transcriptCoreKernel,
             encryptionKey: await generateRuntimeStorageEncryptionKey(),
             limits: checkpointLimits,
             store: checkpointStorage.store,
@@ -948,7 +962,8 @@ describe('Common-proof browser custody', () => {
         });
         await first.custody.checkpointCustody?.publishAuthenticatedCheckpoint({
             canonicalStateBytes: new Uint8Array(128).fill(0x41),
-            orderedPrivateRandomCursorBytes: [],
+            privateRandomCursorManifestBytes:
+                emptyPrivateRandomCursorManifest(),
             safeBoundaryOrdinal: 3,
             stableAttemptBindingHash: new Uint8Array(64).fill(0x52),
         });
@@ -1122,7 +1137,6 @@ describe('Common-proof browser custody', () => {
             authorityContext: runtimeAuthorityContext(),
             boundaryPolicy,
             cryptoProvider,
-            cursorKernel: transcriptCoreKernel,
             encryptionKey: await generateRuntimeStorageEncryptionKey(),
             limits: checkpointLimits,
             store: checkpointStorage.store,
@@ -1174,7 +1188,8 @@ describe('Common-proof browser custody', () => {
         });
         await custody.checkpointCustody?.publishAuthenticatedCheckpoint({
             canonicalStateBytes: new Uint8Array(97).fill(0x61),
-            orderedPrivateRandomCursorBytes: [],
+            privateRandomCursorManifestBytes:
+                emptyPrivateRandomCursorManifest(),
             safeBoundaryOrdinal: 4,
             stableAttemptBindingHash: new Uint8Array(64).fill(0x72),
         });

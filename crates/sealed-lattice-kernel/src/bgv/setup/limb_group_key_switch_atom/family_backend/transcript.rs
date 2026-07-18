@@ -190,12 +190,12 @@ impl Transcript {
 
 #[cfg(test)]
 mod tests {
-    use super::super::super::proof_field::sixteen_limb_group_field_parameters;
+    use super::super::super::proof_field::selected_key_switch_proof_field_parameters;
     use super::*;
 
     #[test]
     fn absorbing_different_bytes_diverges_challenges() {
-        let parameters = sixteen_limb_group_field_parameters();
+        let parameters = selected_key_switch_proof_field_parameters();
         let mut left = Transcript::new("atom");
         let mut right = Transcript::new("atom");
         left.absorb("x", &[1, 2, 3]);
@@ -211,7 +211,7 @@ mod tests {
 
     #[test]
     fn same_absorptions_reproduce_challenges() {
-        let parameters = sixteen_limb_group_field_parameters();
+        let parameters = selected_key_switch_proof_field_parameters();
         let mut left = Transcript::new("atom");
         let mut right = Transcript::new("atom");
         for transcript in [&mut left, &mut right] {
@@ -236,7 +236,7 @@ mod tests {
 
     #[test]
     fn challenge_field_element_is_reduced_and_varied() {
-        let parameters = sixteen_limb_group_field_parameters();
+        let parameters = selected_key_switch_proof_field_parameters();
         let mut transcript = Transcript::new("atom");
         transcript.absorb("seed", b"reduce-check");
         let mut seen = std::collections::HashSet::new();
@@ -258,7 +258,7 @@ mod tests {
 
     #[test]
     fn squeeze_counter_resets_on_absorb() {
-        let parameters = sixteen_limb_group_field_parameters();
+        let parameters = selected_key_switch_proof_field_parameters();
         let mut transcript = Transcript::new("atom");
         transcript.absorb("a", b"1");
         let first = transcript

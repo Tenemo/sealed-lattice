@@ -84,8 +84,6 @@ pub(crate) const PRIVATE_VSS_SHARE_PROOF_FAMILY: &str =
 #[cfg(test)]
 pub(crate) const TARGET_DECRYPTION_SHARE_PROOF_FAMILY: &str =
     SetupProofFamily::TargetDecryptionShare.wire_label();
-#[cfg(test)]
-pub(crate) const TARGET_DECRYPTION_FLOODING_NOISE_COEFFICIENT_BOUND: i64 = 16;
 pub(in crate::bgv::setup) fn private_vss_share_succinct_proof_material_bytes_hash(
     proof_bytes: &CanonicalProofMaterialBytes,
 ) -> CanonicalResult<String> {
@@ -132,27 +130,6 @@ pub(in crate::bgv::setup) const CONSISTENCY_COEFFICIENT_BITS: u32 = 8;
 // inside the two-field CRT lift window, leaving another field for consistency.
 pub(in crate::bgv::setup) const CLAIM_MASK_RADIX: u64 = 3;
 pub(in crate::bgv::setup) const CLAIM_MASK_DIGIT_COUNT: usize = 58;
-// Integer-point asynchronous interpolation has subset-dependent rational
-// weights. Multiplying every private noise polynomial by n! clears all of their
-// denominators before the RNS limbs are recombined.
-#[cfg(test)]
-pub(in crate::bgv) fn target_decryption_interpolation_denominator_clearing_factor(
-    participant_count: u64,
-) -> CanonicalResult<u64> {
-    if !super::accepted_setup::participant_count_is_configurable(participant_count) {
-        return Err(invalid_succinct_setup_proof(
-            "target-decryption participant count is outside the configurable roster range",
-        ));
-    }
-
-    (2..=participant_count).try_fold(1_u64, |product, factor| {
-        product.checked_mul(factor).ok_or_else(|| {
-            invalid_succinct_setup_proof(
-                "target-decryption interpolation denominator-clearing factor overflowed",
-            )
-        })
-    })
-}
 // Fixed shared-engine FRI query count at rate one half. Positions are sampled
 // independently with replacement; repeated positions remain distinct query
 // ordinals while their Merkle openings may be deduplicated for transport.

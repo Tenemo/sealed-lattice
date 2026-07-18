@@ -5,9 +5,10 @@ use sha3::{
 
 use super::state::StateExactOutputHasher;
 use super::{
-    CANONICAL_TUPLE_SCHEMA_IDENTIFIER, CANONICAL_TUPLE_VERSION, CanonicalItemType,
-    FOUNDATION_PROFILE, Hash512, RefusalReason, StateCapabilityKind, StreamDescriptor,
-    VerificationResult,
+    CANONICAL_TUPLE_SCHEMA_IDENTIFIER, CANONICAL_TUPLE_VERSION, CanonicalDecodeLimits,
+    CanonicalItemType, CanonicalTuple, FOUNDATION_PROFILE, FoundationObjectType, Hash512,
+    ML_DSA_65_SIGNATURE_BYTE_LENGTH, RefusalReason, SIGNED_CARRIER_SCHEMA_IDENTIFIER,
+    SignedCarrier, StateCapabilityKind, StreamDescriptor, VerificationResult,
 };
 
 #[cfg(test)]
@@ -189,9 +190,9 @@ impl CanonicalStreamDomain {
 #[derive(Debug, Clone)]
 pub(crate) struct VerifiedCanonicalStreamSummary {
     stream_domain: CanonicalStreamDomain,
-    total_byte_length: u64,
-    full_object_digest: Hash512,
+    stream_descriptor: StreamDescriptor,
     state_exact_output_hash: Option<Hash512>,
+    target_release_output_bundle: Option<Box<VerifiedTargetReleaseOutputBundle>>,
 }
 
 impl VerifiedCanonicalStreamSummary {
@@ -199,16 +200,160 @@ impl VerifiedCanonicalStreamSummary {
         self.stream_domain
     }
 
+    pub(crate) const fn stream_descriptor(&self) -> &StreamDescriptor {
+        &self.stream_descriptor
+    }
+
     pub(crate) const fn total_byte_length(&self) -> u64 {
-        self.total_byte_length
+        self.stream_descriptor.total_byte_length
     }
 
     pub(crate) const fn full_object_digest(&self) -> Hash512 {
-        self.full_object_digest
+        self.stream_descriptor.full_object_digest
     }
 
     pub(crate) const fn state_exact_output_hash(&self) -> Option<Hash512> {
         self.state_exact_output_hash
+    }
+
+    pub(crate) fn into_target_release_output_bundle(
+        self,
+    ) -> Option<VerifiedTargetReleaseOutputBundle> {
+        self.target_release_output_bundle.map(|bundle| *bundle)
+    }
+}
+
+/// Verifier-owned decomposition of one exact target-release output. The large
+/// proof body is never retained here; only the bounded signed carrier and the
+/// three terminal child-stream authorities survive verification.
+#[derive(Debug, Clone)]
+pub(crate) struct VerifiedTargetReleaseOutputBundle {
+    canonical_signed_carrier: Vec<u8>,
+    finality_hash: Hash512,
+    reservation_intent_object_hash: Hash512,
+    target_identifier_stream: VerifiedCanonicalStreamSummary,
+    target_order_stream: VerifiedCanonicalStreamSummary,
+    malicious_share_proof_stream: VerifiedCanonicalStreamSummary,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct TargetReleaseOutputBundleByteLengths {
+    header: u64,
+    signed_carrier: u64,
+    target_identifier: u64,
+    target_order: u64,
+    malicious_share_proof: u64,
+    total: u64,
+}
+
+impl TargetReleaseOutputBundleByteLengths {
+    pub(crate) const fn header(self) -> u64 {
+        self.header
+    }
+
+    pub(crate) const fn signed_carrier(self) -> u64 {
+        self.signed_carrier
+    }
+
+    pub(crate) const fn target_identifier(self) -> u64 {
+        self.target_identifier
+    }
+
+    pub(crate) const fn target_order(self) -> u64 {
+        self.target_order
+    }
+
+    pub(crate) const fn malicious_share_proof(self) -> u64 {
+        self.malicious_share_proof
+    }
+
+    pub(crate) const fn total(self) -> u64 {
+        self.total
+    }
+}
+
+impl VerifiedTargetReleaseOutputBundle {
+    pub(crate) fn canonical_signed_carrier(&self) -> &[u8] {
+        &self.canonical_signed_carrier
+    }
+
+    pub(crate) const fn finality_hash(&self) -> Hash512 {
+        self.finality_hash
+    }
+
+    pub(crate) const fn reservation_intent_object_hash(&self) -> Hash512 {
+        self.reservation_intent_object_hash
+    }
+
+    pub(crate) const fn target_identifier_descriptor(&self) -> &StreamDescriptor {
+        self.target_identifier_stream.stream_descriptor()
+    }
+
+    pub(crate) const fn target_order_descriptor(&self) -> &StreamDescriptor {
+        self.target_order_stream.stream_descriptor()
+    }
+
+    pub(crate) const fn malicious_share_proof_descriptor(&self) -> &StreamDescriptor {
+        self.malicious_share_proof_stream.stream_descriptor()
+    }
+
+    pub(crate) fn byte_lengths(
+        &self,
+    ) -> Result<TargetReleaseOutputBundleByteLengths, RefusalReason> {
+        let header = u64::try_from(TARGET_RELEASE_OUTPUT_BUNDLE_HEADER_BYTE_LENGTH)
+            .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
+        let signed_carrier = u64::try_from(self.canonical_signed_carrier.len())
+            .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
+        let target_identifier = self.target_identifier_stream.total_byte_length();
+        let target_order = self.target_order_stream.total_byte_length();
+        let malicious_share_proof = self.malicious_share_proof_stream.total_byte_length();
+        let total = [
+            signed_carrier,
+            target_identifier,
+            target_order,
+            malicious_share_proof,
+        ]
+        .into_iter()
+        .try_fold(header, |total, byte_length| {
+            total
+                .checked_add(byte_length)
+                .ok_or(RefusalReason::OutsideSupportedProfile)
+        })?;
+        Ok(TargetReleaseOutputBundleByteLengths {
+            header,
+            signed_carrier,
+            target_identifier,
+            target_order,
+            malicious_share_proof,
+            total,
+        })
+    }
+
+    pub(crate) fn open_target_identifier_readback(
+        &self,
+    ) -> Result<CanonicalStreamReadbackVerifier, RefusalReason> {
+        CanonicalStreamReadbackVerifier::new(
+            CanonicalStreamDomain::TargetIdentifierPartialDecryption,
+            self.target_identifier_stream.clone(),
+        )
+    }
+
+    pub(crate) fn open_target_order_readback(
+        &self,
+    ) -> Result<CanonicalStreamReadbackVerifier, RefusalReason> {
+        CanonicalStreamReadbackVerifier::new(
+            CanonicalStreamDomain::TargetOrderPartialDecryption,
+            self.target_order_stream.clone(),
+        )
+    }
+
+    pub(crate) fn open_malicious_share_proof_readback(
+        &self,
+    ) -> Result<CanonicalStreamReadbackVerifier, RefusalReason> {
+        CanonicalStreamReadbackVerifier::new(
+            CanonicalStreamDomain::MaliciousTargetShareProof,
+            self.malicious_share_proof_stream.clone(),
+        )
     }
 }
 
@@ -219,9 +364,8 @@ impl VerifiedCanonicalStreamSummary {
 /// mint stream authority by themselves.
 pub(crate) struct CanonicalStreamReadbackVerifier {
     stream_domain: CanonicalStreamDomain,
-    descriptor: StreamDescriptor,
     verified_summary: VerifiedCanonicalStreamSummary,
-    authenticated_chunks: Vec<bool>,
+    authenticated_chunks: Box<[bool]>,
     authenticated_chunk_count: usize,
     refusal_reason: Option<RefusalReason>,
 }
@@ -229,22 +373,20 @@ pub(crate) struct CanonicalStreamReadbackVerifier {
 impl CanonicalStreamReadbackVerifier {
     pub(crate) fn new(
         stream_domain: CanonicalStreamDomain,
-        descriptor: StreamDescriptor,
         verified_summary: VerifiedCanonicalStreamSummary,
     ) -> Result<Self, RefusalReason> {
-        validate_descriptor(&descriptor)?;
-        if verified_summary.stream_domain() != stream_domain
-            || verified_summary.total_byte_length() != descriptor.total_byte_length
-            || verified_summary.full_object_digest() != descriptor.full_object_digest
-        {
+        validate_descriptor(verified_summary.stream_descriptor())?;
+        if verified_summary.stream_domain() != stream_domain {
             return Err(RefusalReason::WrongHashOrRoot);
         }
-        let chunk_count = descriptor.ordered_chunk_digests.len();
+        let chunk_count = verified_summary
+            .stream_descriptor()
+            .ordered_chunk_digests
+            .len();
         Ok(Self {
             stream_domain,
-            descriptor,
             verified_summary,
-            authenticated_chunks: vec![false; chunk_count],
+            authenticated_chunks: vec![false; chunk_count].into_boxed_slice(),
             authenticated_chunk_count: 0,
             refusal_reason: None,
         })
@@ -252,12 +394,15 @@ impl CanonicalStreamReadbackVerifier {
 
     #[cfg(test)]
     pub(crate) const fn total_byte_length(&self) -> u64 {
-        self.descriptor.total_byte_length
+        self.verified_summary.total_byte_length()
     }
 
     #[cfg(test)]
-    pub(crate) const fn chunk_count(&self) -> usize {
-        self.descriptor.ordered_chunk_digests.len()
+    pub(crate) fn chunk_count(&self) -> usize {
+        self.verified_summary
+            .stream_descriptor()
+            .ordered_chunk_digests
+            .len()
     }
 
     pub(crate) fn authenticate_chunk(
@@ -291,13 +436,17 @@ impl CanonicalStreamReadbackVerifier {
         chunk_bytes: &[u8],
     ) -> Result<(), RefusalReason> {
         let expected_digest = self
-            .descriptor
+            .verified_summary
+            .stream_descriptor()
             .ordered_chunk_digests
             .get(chunk_index)
             .ok_or(RefusalReason::WrongTypeOrLength)?;
         let expected_byte_length = expected_chunk_byte_length(
-            self.descriptor.total_byte_length,
-            self.descriptor.ordered_chunk_digests.len(),
+            self.verified_summary.total_byte_length(),
+            self.verified_summary
+                .stream_descriptor()
+                .ordered_chunk_digests
+                .len(),
             chunk_index,
         )?;
         if chunk_bytes.len() != expected_byte_length
@@ -331,6 +480,7 @@ pub struct CanonicalStreamVerifier {
     observed_byte_length: u64,
     full_object_hasher: Shake256,
     state_exact_output_hasher: Option<StateExactOutputHasher>,
+    target_release_output_verifier: Option<Box<TargetReleaseOutputBundleVerifier>>,
     refusal_reason: Option<RefusalReason>,
 }
 
@@ -401,6 +551,30 @@ impl CanonicalStreamWriter {
         .map_err(|error| error.refusal_reason)
     }
 
+    /// Mints verifier-owned authority for generator-produced replay
+    /// ciphertexts from the same digest state that constructs their canonical
+    /// descriptor. Domains whose validity requires parsing or state semantics
+    /// must still pass through `CanonicalStreamVerifier`.
+    pub(crate) fn finish_generated_summary(
+        self,
+    ) -> Result<VerifiedCanonicalStreamSummary, RefusalReason> {
+        let stream_domain = self.stream_domain;
+        if !matches!(
+            stream_domain,
+            CanonicalStreamDomain::ReplayTargetIdentifierCiphertext
+                | CanonicalStreamDomain::ReplayTargetOrderCiphertext
+        ) {
+            return Err(RefusalReason::WrongContext);
+        }
+        let stream_descriptor = self.finish()?;
+        Ok(VerifiedCanonicalStreamSummary {
+            stream_domain,
+            stream_descriptor,
+            state_exact_output_hash: None,
+            target_release_output_bundle: None,
+        })
+    }
+
     fn absorb_chunk_inner(
         &mut self,
         chunk_index: usize,
@@ -450,6 +624,12 @@ impl CanonicalStreamVerifier {
                     .map_err(|error| error.refusal_reason)
             })
             .transpose()?;
+        let target_release_output_verifier = (stream_domain
+            == CanonicalStreamDomain::StateTargetReleaseExactOutput)
+            .then(|| {
+                TargetReleaseOutputBundleVerifier::new(descriptor.total_byte_length).map(Box::new)
+            })
+            .transpose()?;
         Ok(Self {
             stream_domain,
             descriptor,
@@ -457,8 +637,13 @@ impl CanonicalStreamVerifier {
             observed_byte_length: 0,
             full_object_hasher,
             state_exact_output_hasher,
+            target_release_output_verifier,
             refusal_reason: None,
         })
+    }
+
+    pub(crate) const fn stream_descriptor(&self) -> &StreamDescriptor {
+        &self.descriptor
     }
 
     pub fn absorb_chunk(
@@ -510,11 +695,18 @@ impl CanonicalStreamVerifier {
             },
             None => None,
         };
+        let target_release_output_bundle = match self.target_release_output_verifier {
+            Some(verifier) => match verifier.finish() {
+                Ok(bundle) => Some(Box::new(bundle)),
+                Err(refusal_reason) => return VerificationResult::refused(refusal_reason),
+            },
+            None => None,
+        };
         VerificationResult::valid(VerifiedCanonicalStreamSummary {
             stream_domain: self.stream_domain,
-            total_byte_length: self.descriptor.total_byte_length,
-            full_object_digest,
+            stream_descriptor: self.descriptor,
             state_exact_output_hash,
+            target_release_output_bundle,
         })
     }
 
@@ -549,6 +741,9 @@ impl CanonicalStreamVerifier {
                 .absorb(chunk_bytes)
                 .map_err(|error| error.refusal_reason)?;
         }
+        if let Some(verifier) = self.target_release_output_verifier.as_mut() {
+            verifier.absorb(chunk_bytes)?;
+        }
         self.observed_byte_length = self
             .observed_byte_length
             .checked_add(
@@ -559,6 +754,477 @@ impl CanonicalStreamVerifier {
         self.next_chunk_index += 1;
         Ok(())
     }
+}
+
+const TARGET_RELEASE_OUTPUT_BUNDLE_SCHEMA_IDENTIFIER: u16 = 0x1622;
+const TARGET_DECRYPTION_SHARE_PAYLOAD_SCHEMA_IDENTIFIER: u16 = 0x1620;
+const TARGET_RELEASE_OUTPUT_BUNDLE_VERSION: u16 = 1;
+const TARGET_RELEASE_OUTPUT_BUNDLE_HEADER_BYTE_LENGTH: usize = 4;
+const CANONICAL_TUPLE_HEADER_BYTE_LENGTH: usize = 8;
+const CANONICAL_ITEM_HEADER_BYTE_LENGTH: usize = 6;
+
+struct TargetReleaseCarrierPayload {
+    finality_hash: Hash512,
+    reservation_intent_object_hash: Hash512,
+    target_identifier_descriptor: Option<StreamDescriptor>,
+    target_order_descriptor: Option<StreamDescriptor>,
+    malicious_share_proof_descriptor: Option<StreamDescriptor>,
+}
+
+/// Verifies the self-delimiting target-release bundle while the outer exact
+/// output is streamed. It buffers only the bounded signed carrier and one
+/// canonical child chunk; proof-sized bytes are never assembled in memory.
+struct TargetReleaseOutputBundleVerifier {
+    expected_total_byte_length: u64,
+    observed_total_byte_length: u64,
+    header_bytes: Vec<u8>,
+    canonical_signed_carrier: Vec<u8>,
+    carrier_payload: Option<TargetReleaseCarrierPayload>,
+    child_stream_position: usize,
+    active_child_stream: Option<EmbeddedCanonicalStreamVerifier>,
+    target_identifier_stream: Option<VerifiedCanonicalStreamSummary>,
+    target_order_stream: Option<VerifiedCanonicalStreamSummary>,
+    malicious_share_proof_stream: Option<VerifiedCanonicalStreamSummary>,
+}
+
+impl TargetReleaseOutputBundleVerifier {
+    fn new(expected_total_byte_length: u64) -> Result<Self, RefusalReason> {
+        if expected_total_byte_length
+            <= u64::try_from(TARGET_RELEASE_OUTPUT_BUNDLE_HEADER_BYTE_LENGTH)
+                .map_err(|_| RefusalReason::OutsideSupportedProfile)?
+        {
+            return Err(RefusalReason::WrongTypeOrLength);
+        }
+        Ok(Self {
+            expected_total_byte_length,
+            observed_total_byte_length: 0,
+            header_bytes: Vec::with_capacity(TARGET_RELEASE_OUTPUT_BUNDLE_HEADER_BYTE_LENGTH),
+            canonical_signed_carrier: Vec::new(),
+            carrier_payload: None,
+            child_stream_position: 0,
+            active_child_stream: None,
+            target_identifier_stream: None,
+            target_order_stream: None,
+            malicious_share_proof_stream: None,
+        })
+    }
+
+    fn absorb(&mut self, bytes: &[u8]) -> Result<(), RefusalReason> {
+        let incoming_byte_length =
+            u64::try_from(bytes.len()).map_err(|_| RefusalReason::OutsideSupportedProfile)?;
+        let next_observed_byte_length = self
+            .observed_total_byte_length
+            .checked_add(incoming_byte_length)
+            .ok_or(RefusalReason::OutsideSupportedProfile)?;
+        if next_observed_byte_length > self.expected_total_byte_length {
+            return Err(RefusalReason::WrongTypeOrLength);
+        }
+
+        let mut byte_offset = 0;
+        while byte_offset < bytes.len() {
+            if self.header_bytes.len() < TARGET_RELEASE_OUTPUT_BUNDLE_HEADER_BYTE_LENGTH {
+                let needed = TARGET_RELEASE_OUTPUT_BUNDLE_HEADER_BYTE_LENGTH
+                    .checked_sub(self.header_bytes.len())
+                    .ok_or(RefusalReason::OutsideSupportedProfile)?;
+                let consumed = needed.min(bytes.len() - byte_offset);
+                self.header_bytes
+                    .extend_from_slice(&bytes[byte_offset..byte_offset + consumed]);
+                byte_offset += consumed;
+                if self.header_bytes.len() == TARGET_RELEASE_OUTPUT_BUNDLE_HEADER_BYTE_LENGTH {
+                    self.validate_header()?;
+                }
+                continue;
+            }
+
+            if self.carrier_payload.is_none() {
+                let boundary = next_signed_carrier_boundary(&self.canonical_signed_carrier)?;
+                let needed = boundary
+                    .checked_sub(self.canonical_signed_carrier.len())
+                    .ok_or(RefusalReason::MalformedEncoding)?;
+                let consumed = needed.min(bytes.len() - byte_offset);
+                self.canonical_signed_carrier
+                    .extend_from_slice(&bytes[byte_offset..byte_offset + consumed]);
+                byte_offset += consumed;
+                if self.canonical_signed_carrier.len() == boundary
+                    && signed_carrier_total_byte_length(&self.canonical_signed_carrier)?
+                        == Some(boundary)
+                {
+                    self.initialize_child_streams()?;
+                }
+                continue;
+            }
+
+            let active_stream = self
+                .active_child_stream
+                .as_mut()
+                .ok_or(RefusalReason::WrongTypeOrLength)?;
+            let consumed = active_stream.absorb(&bytes[byte_offset..])?;
+            if consumed == 0 {
+                return Err(RefusalReason::WrongTypeOrLength);
+            }
+            byte_offset += consumed;
+            if active_stream.is_complete() {
+                self.finish_active_child_stream()?;
+            }
+        }
+
+        self.observed_total_byte_length = next_observed_byte_length;
+        Ok(())
+    }
+
+    fn finish(self) -> Result<VerifiedTargetReleaseOutputBundle, RefusalReason> {
+        if self.observed_total_byte_length != self.expected_total_byte_length
+            || self.child_stream_position != 3
+            || self.active_child_stream.is_some()
+        {
+            return Err(RefusalReason::WrongTypeOrLength);
+        }
+        let payload = self
+            .carrier_payload
+            .ok_or(RefusalReason::WrongTypeOrLength)?;
+        Ok(VerifiedTargetReleaseOutputBundle {
+            canonical_signed_carrier: self.canonical_signed_carrier,
+            finality_hash: payload.finality_hash,
+            reservation_intent_object_hash: payload.reservation_intent_object_hash,
+            target_identifier_stream: self
+                .target_identifier_stream
+                .ok_or(RefusalReason::WrongTypeOrLength)?,
+            target_order_stream: self
+                .target_order_stream
+                .ok_or(RefusalReason::WrongTypeOrLength)?,
+            malicious_share_proof_stream: self
+                .malicious_share_proof_stream
+                .ok_or(RefusalReason::WrongTypeOrLength)?,
+        })
+    }
+
+    fn validate_header(&self) -> Result<(), RefusalReason> {
+        let schema_identifier = u16::from_le_bytes(
+            self.header_bytes[..2]
+                .try_into()
+                .map_err(|_| RefusalReason::MalformedEncoding)?,
+        );
+        let schema_version = u16::from_le_bytes(
+            self.header_bytes[2..]
+                .try_into()
+                .map_err(|_| RefusalReason::MalformedEncoding)?,
+        );
+        if schema_identifier != TARGET_RELEASE_OUTPUT_BUNDLE_SCHEMA_IDENTIFIER {
+            return Err(RefusalReason::WrongTypeOrLength);
+        }
+        if schema_version != TARGET_RELEASE_OUTPUT_BUNDLE_VERSION {
+            return Err(RefusalReason::UnsupportedVersionOrSuite);
+        }
+        Ok(())
+    }
+
+    fn initialize_child_streams(&mut self) -> Result<(), RefusalReason> {
+        let mut payload = decode_target_release_carrier_payload(&self.canonical_signed_carrier)?;
+        let expected_bundle_byte_length = [
+            payload
+                .target_identifier_descriptor
+                .as_ref()
+                .ok_or(RefusalReason::WrongTypeOrLength)?
+                .total_byte_length,
+            payload
+                .target_order_descriptor
+                .as_ref()
+                .ok_or(RefusalReason::WrongTypeOrLength)?
+                .total_byte_length,
+            payload
+                .malicious_share_proof_descriptor
+                .as_ref()
+                .ok_or(RefusalReason::WrongTypeOrLength)?
+                .total_byte_length,
+        ]
+        .into_iter()
+        .try_fold(
+            u64::try_from(TARGET_RELEASE_OUTPUT_BUNDLE_HEADER_BYTE_LENGTH)
+                .map_err(|_| RefusalReason::OutsideSupportedProfile)?
+                .checked_add(
+                    u64::try_from(self.canonical_signed_carrier.len())
+                        .map_err(|_| RefusalReason::OutsideSupportedProfile)?,
+                )
+                .ok_or(RefusalReason::OutsideSupportedProfile)?,
+            |total, child_length| {
+                total
+                    .checked_add(child_length)
+                    .ok_or(RefusalReason::OutsideSupportedProfile)
+            },
+        )?;
+        if expected_bundle_byte_length != self.expected_total_byte_length {
+            return Err(RefusalReason::WrongTypeOrLength);
+        }
+        self.active_child_stream = Some(EmbeddedCanonicalStreamVerifier::new(
+            CanonicalStreamDomain::TargetIdentifierPartialDecryption,
+            payload
+                .target_identifier_descriptor
+                .take()
+                .ok_or(RefusalReason::WrongTypeOrLength)?,
+        )?);
+        self.carrier_payload = Some(payload);
+        Ok(())
+    }
+
+    fn finish_active_child_stream(&mut self) -> Result<(), RefusalReason> {
+        let active_stream = self
+            .active_child_stream
+            .take()
+            .ok_or(RefusalReason::WrongTypeOrLength)?;
+        let summary = active_stream.finish()?;
+        let payload = self
+            .carrier_payload
+            .as_mut()
+            .ok_or(RefusalReason::WrongTypeOrLength)?;
+        match self.child_stream_position {
+            0 => {
+                self.target_identifier_stream = Some(summary);
+                self.active_child_stream = Some(EmbeddedCanonicalStreamVerifier::new(
+                    CanonicalStreamDomain::TargetOrderPartialDecryption,
+                    payload
+                        .target_order_descriptor
+                        .take()
+                        .ok_or(RefusalReason::WrongTypeOrLength)?,
+                )?);
+            }
+            1 => {
+                self.target_order_stream = Some(summary);
+                self.active_child_stream = Some(EmbeddedCanonicalStreamVerifier::new(
+                    CanonicalStreamDomain::MaliciousTargetShareProof,
+                    payload
+                        .malicious_share_proof_descriptor
+                        .take()
+                        .ok_or(RefusalReason::WrongTypeOrLength)?,
+                )?);
+            }
+            2 => {
+                self.malicious_share_proof_stream = Some(summary);
+            }
+            _ => return Err(RefusalReason::WrongTypeOrLength),
+        }
+        self.child_stream_position += 1;
+        Ok(())
+    }
+}
+
+struct EmbeddedCanonicalStreamVerifier {
+    verifier: CanonicalStreamVerifier,
+    total_byte_length: u64,
+    expected_chunk_count: usize,
+    next_chunk_index: usize,
+    observed_byte_length: u64,
+    pending_chunk: Vec<u8>,
+}
+
+impl EmbeddedCanonicalStreamVerifier {
+    fn new(
+        stream_domain: CanonicalStreamDomain,
+        descriptor: StreamDescriptor,
+    ) -> Result<Self, RefusalReason> {
+        let total_byte_length = descriptor.total_byte_length;
+        let expected_chunk_count = descriptor.ordered_chunk_digests.len();
+        let verifier = CanonicalStreamVerifier::new(stream_domain, descriptor)?;
+        Ok(Self {
+            verifier,
+            total_byte_length,
+            expected_chunk_count,
+            next_chunk_index: 0,
+            observed_byte_length: 0,
+            pending_chunk: Vec::new(),
+        })
+    }
+
+    fn absorb(&mut self, bytes: &[u8]) -> Result<usize, RefusalReason> {
+        let remaining_byte_length = self
+            .total_byte_length
+            .checked_sub(self.observed_byte_length)
+            .ok_or(RefusalReason::WrongTypeOrLength)?;
+        let consumed =
+            usize::try_from(remaining_byte_length.min(
+                u64::try_from(bytes.len()).map_err(|_| RefusalReason::OutsideSupportedProfile)?,
+            ))
+            .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
+        let mut byte_offset = 0;
+        while byte_offset < consumed {
+            let expected_chunk_length = expected_chunk_byte_length(
+                self.total_byte_length,
+                self.expected_chunk_count,
+                self.next_chunk_index,
+            )?;
+            let needed = expected_chunk_length
+                .checked_sub(self.pending_chunk.len())
+                .ok_or(RefusalReason::WrongTypeOrLength)?;
+            let copied = needed.min(consumed - byte_offset);
+            self.pending_chunk
+                .extend_from_slice(&bytes[byte_offset..byte_offset + copied]);
+            byte_offset += copied;
+            self.observed_byte_length = self
+                .observed_byte_length
+                .checked_add(
+                    u64::try_from(copied).map_err(|_| RefusalReason::OutsideSupportedProfile)?,
+                )
+                .ok_or(RefusalReason::OutsideSupportedProfile)?;
+            if self.pending_chunk.len() == expected_chunk_length {
+                self.verifier
+                    .absorb_chunk(self.next_chunk_index, &self.pending_chunk)
+                    .into_result()?;
+                self.pending_chunk.clear();
+                self.next_chunk_index += 1;
+            }
+        }
+        Ok(consumed)
+    }
+
+    const fn is_complete(&self) -> bool {
+        self.observed_byte_length == self.total_byte_length
+    }
+
+    fn finish(self) -> Result<VerifiedCanonicalStreamSummary, RefusalReason> {
+        if !self.pending_chunk.is_empty()
+            || self.next_chunk_index != self.expected_chunk_count
+            || self.observed_byte_length != self.total_byte_length
+        {
+            return Err(RefusalReason::WrongTypeOrLength);
+        }
+        self.verifier.finish_with_summary().into_result()
+    }
+}
+
+fn next_signed_carrier_boundary(carrier_bytes: &[u8]) -> Result<usize, RefusalReason> {
+    if carrier_bytes.len() < CANONICAL_TUPLE_HEADER_BYTE_LENGTH + CANONICAL_ITEM_HEADER_BYTE_LENGTH
+    {
+        return Ok(CANONICAL_TUPLE_HEADER_BYTE_LENGTH + CANONICAL_ITEM_HEADER_BYTE_LENGTH);
+    }
+    validate_signed_carrier_tuple_header(carrier_bytes)?;
+    let first_item_byte_length = read_u32_at(carrier_bytes, 10)? as usize;
+    let second_item_header_end = CANONICAL_TUPLE_HEADER_BYTE_LENGTH
+        .checked_add(CANONICAL_ITEM_HEADER_BYTE_LENGTH)
+        .and_then(|length| length.checked_add(first_item_byte_length))
+        .and_then(|length| length.checked_add(CANONICAL_ITEM_HEADER_BYTE_LENGTH))
+        .ok_or(RefusalReason::OutsideSupportedProfile)?;
+    if second_item_header_end > FOUNDATION_PROFILE.maximum_copied_buffer_byte_length {
+        return Err(RefusalReason::OutsideSupportedProfile);
+    }
+    if carrier_bytes.len() < second_item_header_end {
+        return Ok(second_item_header_end);
+    }
+    if read_u16_at(
+        carrier_bytes,
+        second_item_header_end - CANONICAL_ITEM_HEADER_BYTE_LENGTH,
+    )? != CanonicalItemType::RawBytes.canonical_code()
+        || read_u32_at(carrier_bytes, second_item_header_end - 4)? as usize
+            != ML_DSA_65_SIGNATURE_BYTE_LENGTH
+    {
+        return Err(RefusalReason::MalformedEncoding);
+    }
+    let total_byte_length = second_item_header_end
+        .checked_add(ML_DSA_65_SIGNATURE_BYTE_LENGTH)
+        .ok_or(RefusalReason::OutsideSupportedProfile)?;
+    if total_byte_length > FOUNDATION_PROFILE.maximum_copied_buffer_byte_length {
+        return Err(RefusalReason::OutsideSupportedProfile);
+    }
+    Ok(total_byte_length)
+}
+
+fn signed_carrier_total_byte_length(carrier_bytes: &[u8]) -> Result<Option<usize>, RefusalReason> {
+    let boundary = next_signed_carrier_boundary(carrier_bytes)?;
+    Ok((carrier_bytes.len() == boundary).then_some(boundary))
+}
+
+fn validate_signed_carrier_tuple_header(carrier_bytes: &[u8]) -> Result<(), RefusalReason> {
+    if read_u16_at(carrier_bytes, 0)? != SIGNED_CARRIER_SCHEMA_IDENTIFIER {
+        return Err(RefusalReason::WrongTypeOrLength);
+    }
+    if read_u16_at(carrier_bytes, 2)? != CANONICAL_TUPLE_VERSION {
+        return Err(RefusalReason::UnsupportedVersionOrSuite);
+    }
+    if read_u32_at(carrier_bytes, 4)? != 2
+        || read_u16_at(carrier_bytes, 8)? != CanonicalItemType::RawBytes.canonical_code()
+    {
+        return Err(RefusalReason::MalformedEncoding);
+    }
+    Ok(())
+}
+
+fn decode_target_release_carrier_payload(
+    canonical_signed_carrier: &[u8],
+) -> Result<TargetReleaseCarrierPayload, RefusalReason> {
+    let limits = CanonicalDecodeLimits::default();
+    let carrier = SignedCarrier::decode(canonical_signed_carrier, &limits)
+        .map_err(|error| error.refusal_reason)?;
+    if carrier.envelope.object_type != FoundationObjectType::TargetDecryptionShare {
+        return Err(RefusalReason::WrongTypeOrLength);
+    }
+    let payload = CanonicalTuple::decode(&carrier.envelope.payload_bytes, &limits)
+        .map_err(|_| RefusalReason::MalformedEncoding)?;
+    if payload.schema_identifier != TARGET_DECRYPTION_SHARE_PAYLOAD_SCHEMA_IDENTIFIER
+        || payload.schema_version != TARGET_RELEASE_OUTPUT_BUNDLE_VERSION
+        || payload.items.len() != 5
+    {
+        return Err(RefusalReason::WrongTypeOrLength);
+    }
+    Ok(TargetReleaseCarrierPayload {
+        finality_hash: read_hash_item(&payload.items[0])?,
+        reservation_intent_object_hash: read_hash_item(&payload.items[1])?,
+        target_identifier_descriptor: Some(read_stream_descriptor_item(
+            &payload.items[2],
+            &limits,
+        )?),
+        target_order_descriptor: Some(read_stream_descriptor_item(&payload.items[3], &limits)?),
+        malicious_share_proof_descriptor: Some(read_stream_descriptor_item(
+            &payload.items[4],
+            &limits,
+        )?),
+    })
+}
+
+fn read_hash_item(item: &super::CanonicalItem) -> Result<Hash512, RefusalReason> {
+    if item.item_type() != CanonicalItemType::Hash512
+        || item.canonical_bytes().len() != Hash512::BYTE_LENGTH
+    {
+        return Err(RefusalReason::MalformedEncoding);
+    }
+    Ok(Hash512::from_bytes(
+        item.canonical_bytes()
+            .try_into()
+            .map_err(|_| RefusalReason::MalformedEncoding)?,
+    ))
+}
+
+fn read_stream_descriptor_item(
+    item: &super::CanonicalItem,
+    limits: &CanonicalDecodeLimits,
+) -> Result<StreamDescriptor, RefusalReason> {
+    if item.item_type() != CanonicalItemType::NestedTuple {
+        return Err(RefusalReason::MalformedEncoding);
+    }
+    StreamDescriptor::decode(item.canonical_bytes(), limits).map_err(|error| error.refusal_reason)
+}
+
+fn read_u16_at(bytes: &[u8], byte_offset: usize) -> Result<u16, RefusalReason> {
+    let byte_end = byte_offset
+        .checked_add(2)
+        .ok_or(RefusalReason::OutsideSupportedProfile)?;
+    Ok(u16::from_le_bytes(
+        bytes
+            .get(byte_offset..byte_end)
+            .ok_or(RefusalReason::MalformedEncoding)?
+            .try_into()
+            .map_err(|_| RefusalReason::MalformedEncoding)?,
+    ))
+}
+
+fn read_u32_at(bytes: &[u8], byte_offset: usize) -> Result<u32, RefusalReason> {
+    let byte_end = byte_offset
+        .checked_add(4)
+        .ok_or(RefusalReason::OutsideSupportedProfile)?;
+    Ok(u32::from_le_bytes(
+        bytes
+            .get(byte_offset..byte_end)
+            .ok_or(RefusalReason::MalformedEncoding)?
+            .try_into()
+            .map_err(|_| RefusalReason::MalformedEncoding)?,
+    ))
 }
 
 /// Derives the canonical descriptor for an in-memory stream body.
@@ -742,9 +1408,214 @@ mod tests {
     use std::collections::BTreeSet;
 
     use super::*;
+    use crate::foundation::{ObjectEnvelope, ParticipantIdentity};
 
     fn descriptor_for(stream_domain: CanonicalStreamDomain, bytes: &[u8]) -> StreamDescriptor {
         derive_canonical_stream_descriptor(stream_domain, bytes).expect("test descriptor is valid")
+    }
+
+    fn target_release_bundle(
+        target_identifier_bytes: &[u8],
+        target_order_bytes: &[u8],
+        proof_bytes: &[u8],
+    ) -> Vec<u8> {
+        let target_identifier_descriptor = descriptor_for(
+            CanonicalStreamDomain::TargetIdentifierPartialDecryption,
+            target_identifier_bytes,
+        );
+        let target_order_descriptor = descriptor_for(
+            CanonicalStreamDomain::TargetOrderPartialDecryption,
+            target_order_bytes,
+        );
+        let proof_descriptor = descriptor_for(
+            CanonicalStreamDomain::MaliciousTargetShareProof,
+            proof_bytes,
+        );
+        let descriptor_item = |descriptor: &StreamDescriptor| {
+            CanonicalItem::nested_tuple(
+                &CanonicalTuple::decode(
+                    &descriptor.encode().expect("descriptor encodes"),
+                    &CanonicalDecodeLimits::default(),
+                )
+                .expect("descriptor tuple decodes"),
+            )
+            .expect("nested descriptor")
+        };
+        let payload = CanonicalTuple::new(
+            TARGET_DECRYPTION_SHARE_PAYLOAD_SCHEMA_IDENTIFIER,
+            TARGET_RELEASE_OUTPUT_BUNDLE_VERSION,
+            vec![
+                CanonicalItem::hash512([0x31; Hash512::BYTE_LENGTH]),
+                CanonicalItem::hash512([0x32; Hash512::BYTE_LENGTH]),
+                descriptor_item(&target_identifier_descriptor),
+                descriptor_item(&target_order_descriptor),
+                descriptor_item(&proof_descriptor),
+            ],
+        )
+        .encode()
+        .expect("target payload");
+        let carrier = SignedCarrier {
+            envelope: ObjectEnvelope {
+                suite_id: Hash512::from_bytes([0x11; Hash512::BYTE_LENGTH]),
+                object_type: FoundationObjectType::TargetDecryptionShare,
+                ceremony_context_hash: Hash512::from_bytes([0x12; Hash512::BYTE_LENGTH]),
+                action_context_hash: Hash512::from_bytes([0x13; Hash512::BYTE_LENGTH]),
+                producer_participant_id: Some(ParticipantIdentity::from_bytes(
+                    [0x14; ParticipantIdentity::BYTE_LENGTH],
+                )),
+                producer_sequence: 0,
+                ordered_prerequisite_hashes: Vec::new(),
+                payload_bytes: payload,
+            },
+            signature: [0x15; ML_DSA_65_SIGNATURE_BYTE_LENGTH],
+        }
+        .encode()
+        .expect("target carrier");
+        let mut bundle = Vec::new();
+        bundle.extend_from_slice(&TARGET_RELEASE_OUTPUT_BUNDLE_SCHEMA_IDENTIFIER.to_le_bytes());
+        bundle.extend_from_slice(&TARGET_RELEASE_OUTPUT_BUNDLE_VERSION.to_le_bytes());
+        bundle.extend_from_slice(&carrier);
+        bundle.extend_from_slice(target_identifier_bytes);
+        bundle.extend_from_slice(target_order_bytes);
+        bundle.extend_from_slice(proof_bytes);
+        bundle
+    }
+
+    fn verify_stream_with_summary(
+        stream_domain: CanonicalStreamDomain,
+        bytes: &[u8],
+    ) -> VerifiedCanonicalStreamSummary {
+        let descriptor = descriptor_for(stream_domain, bytes);
+        let mut verifier =
+            CanonicalStreamVerifier::new(stream_domain, descriptor).expect("stream begins");
+        for (chunk_index, chunk) in bytes
+            .chunks(FOUNDATION_PROFILE.stream_chunk_byte_length)
+            .enumerate()
+        {
+            verifier
+                .absorb_chunk(chunk_index, chunk)
+                .into_result()
+                .expect("chunk verifies");
+        }
+        verifier
+            .finish_with_summary()
+            .into_result()
+            .expect("stream finishes")
+    }
+
+    #[test]
+    fn target_release_exact_output_authenticates_misaligned_nested_streams_incrementally() {
+        let target_identifier_bytes = vec![0x41; 37];
+        let target_order_bytes = vec![0x42; 53];
+        let proof_bytes = vec![0x43; FOUNDATION_PROFILE.stream_chunk_byte_length + 29];
+        let bundle_bytes =
+            target_release_bundle(&target_identifier_bytes, &target_order_bytes, &proof_bytes);
+
+        let summary = verify_stream_with_summary(
+            CanonicalStreamDomain::StateTargetReleaseExactOutput,
+            &bundle_bytes,
+        );
+        let bundle = summary
+            .into_target_release_output_bundle()
+            .expect("typed target bundle");
+        assert_eq!(bundle.finality_hash(), Hash512::from_bytes([0x31; 64]));
+        assert_eq!(
+            bundle.reservation_intent_object_hash(),
+            Hash512::from_bytes([0x32; 64])
+        );
+        let byte_lengths = bundle.byte_lengths().expect("bundle byte lengths derive");
+        assert_eq!(
+            byte_lengths.header(),
+            u64::try_from(TARGET_RELEASE_OUTPUT_BUNDLE_HEADER_BYTE_LENGTH)
+                .expect("test header byte length fits u64")
+        );
+        assert_eq!(
+            byte_lengths.signed_carrier(),
+            u64::try_from(bundle.canonical_signed_carrier().len())
+                .expect("test carrier byte length fits u64")
+        );
+        assert_eq!(
+            byte_lengths.target_identifier(),
+            u64::try_from(target_identifier_bytes.len())
+                .expect("test target-identifier byte length fits u64")
+        );
+        assert_eq!(
+            byte_lengths.target_order(),
+            u64::try_from(target_order_bytes.len())
+                .expect("test target-order byte length fits u64")
+        );
+        assert_eq!(
+            byte_lengths.malicious_share_proof(),
+            u64::try_from(proof_bytes.len()).expect("test proof byte length fits u64")
+        );
+        assert_eq!(
+            byte_lengths.total(),
+            u64::try_from(bundle_bytes.len()).expect("test bundle byte length fits u64")
+        );
+
+        let mut proof_readback = bundle
+            .open_malicious_share_proof_readback()
+            .expect("proof readback begins");
+        for (chunk_index, chunk) in proof_bytes
+            .chunks(FOUNDATION_PROFILE.stream_chunk_byte_length)
+            .enumerate()
+        {
+            proof_readback
+                .authenticate_chunk(chunk_index, chunk)
+                .expect("proof readback chunk");
+        }
+        proof_readback
+            .finish()
+            .into_result()
+            .expect("proof readback finishes");
+    }
+
+    #[test]
+    fn target_release_exact_output_rejects_extension_and_nested_stream_substitution() {
+        let target_identifier_bytes = vec![0x51; 17];
+        let target_order_bytes = vec![0x52; 19];
+        let proof_bytes = vec![0x53; 23];
+        let bundle_bytes =
+            target_release_bundle(&target_identifier_bytes, &target_order_bytes, &proof_bytes);
+        let mut extended = bundle_bytes.clone();
+        extended.push(0);
+        let extended_descriptor = descriptor_for(
+            CanonicalStreamDomain::StateTargetReleaseExactOutput,
+            &extended,
+        );
+        let mut extended_verifier = CanonicalStreamVerifier::new(
+            CanonicalStreamDomain::StateTargetReleaseExactOutput,
+            extended_descriptor,
+        )
+        .expect("extended stream begins");
+        assert!(
+            extended_verifier
+                .absorb_chunk(0, &extended)
+                .into_result()
+                .is_err()
+        );
+
+        let mut substituted = bundle_bytes;
+        let target_byte_offset = substituted.len()
+            - target_identifier_bytes.len()
+            - target_order_bytes.len()
+            - proof_bytes.len();
+        substituted[target_byte_offset] ^= 1;
+        let substituted_descriptor = descriptor_for(
+            CanonicalStreamDomain::StateTargetReleaseExactOutput,
+            &substituted,
+        );
+        let mut substituted_verifier = CanonicalStreamVerifier::new(
+            CanonicalStreamDomain::StateTargetReleaseExactOutput,
+            substituted_descriptor,
+        )
+        .expect("substituted stream begins");
+        assert!(
+            substituted_verifier
+                .absorb_chunk(0, &substituted)
+                .into_result()
+                .is_err()
+        );
     }
 
     #[test]
@@ -965,9 +1836,8 @@ mod tests {
             .into_result()
             .expect("the sequential stream verifies");
 
-        let mut readback =
-            CanonicalStreamReadbackVerifier::new(stream_domain, descriptor, verified_summary)
-                .expect("the verified descriptor begins authenticated readback");
+        let mut readback = CanonicalStreamReadbackVerifier::new(stream_domain, verified_summary)
+            .expect("the verified descriptor begins authenticated readback");
         assert_eq!(readback.chunk_count(), 2);
         assert_eq!(readback.total_byte_length(), bytes.len() as u64);
         assert_eq!(readback.authenticate_chunk(1, chunks[1]), Ok(()));
@@ -982,7 +1852,7 @@ mod tests {
     }
 
     #[test]
-    fn authenticated_readback_refuses_missing_substituted_and_mismatched_streams() {
+    fn authenticated_readback_refuses_missing_substituted_and_wrong_domain_streams() {
         let stream_domain = CanonicalStreamDomain::PublicKeyShareProof;
         let bytes = vec![0x4d; FOUNDATION_PROFILE.stream_chunk_byte_length + 11];
         let descriptor = descriptor_for(stream_domain, &bytes);
@@ -1004,12 +1874,9 @@ mod tests {
                 .expect("the sequential stream verifies")
         };
 
-        let mut missing = CanonicalStreamReadbackVerifier::new(
-            stream_domain,
-            descriptor.clone(),
-            verified_summary.clone(),
-        )
-        .expect("verified descriptor begins readback");
+        let mut missing =
+            CanonicalStreamReadbackVerifier::new(stream_domain, verified_summary.clone())
+                .expect("verified descriptor begins readback");
         assert_eq!(missing.authenticate_chunk(0, chunks[0]), Ok(()));
         assert!(matches!(
             missing.finish().into_result(),
@@ -1018,12 +1885,9 @@ mod tests {
 
         let mut substituted_chunk = chunks[0].to_vec();
         substituted_chunk[17] ^= 1;
-        let mut substituted = CanonicalStreamReadbackVerifier::new(
-            stream_domain,
-            descriptor.clone(),
-            verified_summary.clone(),
-        )
-        .expect("verified descriptor begins readback");
+        let mut substituted =
+            CanonicalStreamReadbackVerifier::new(stream_domain, verified_summary.clone())
+                .expect("verified descriptor begins readback");
         assert_eq!(
             substituted.authenticate_chunk(0, &substituted_chunk),
             Err(RefusalReason::WrongHashOrRoot)
@@ -1037,20 +1901,9 @@ mod tests {
             Err(RefusalReason::WrongHashOrRoot)
         ));
 
-        let other_bytes = vec![0x93; bytes.len()];
-        let other_descriptor = descriptor_for(stream_domain, &other_bytes);
-        assert!(matches!(
-            CanonicalStreamReadbackVerifier::new(
-                stream_domain,
-                other_descriptor,
-                verified_summary.clone(),
-            ),
-            Err(RefusalReason::WrongHashOrRoot)
-        ));
         assert!(matches!(
             CanonicalStreamReadbackVerifier::new(
                 CanonicalStreamDomain::PublicKeyShareMaterial,
-                descriptor,
                 verified_summary,
             ),
             Err(RefusalReason::WrongHashOrRoot)
@@ -1244,17 +2097,17 @@ mod tests {
         for descriptor in [
             StreamDescriptor {
                 total_byte_length: 0,
-                ordered_chunk_digests: Vec::new(),
+                ordered_chunk_digests: std::sync::Arc::from([]),
                 full_object_digest: Hash512::from_bytes([0; 64]),
             },
             StreamDescriptor {
                 total_byte_length: 1,
-                ordered_chunk_digests: Vec::new(),
+                ordered_chunk_digests: std::sync::Arc::from([]),
                 full_object_digest: Hash512::from_bytes([0; 64]),
             },
             StreamDescriptor {
                 total_byte_length: u64::from(u32::MAX),
-                ordered_chunk_digests: vec![Hash512::from_bytes([0; 64]); 4096],
+                ordered_chunk_digests: vec![Hash512::from_bytes([0; 64]); 4096].into(),
                 full_object_digest: Hash512::from_bytes([0; 64]),
             },
         ] {

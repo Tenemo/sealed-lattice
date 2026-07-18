@@ -649,8 +649,9 @@ fn browser_transaction_yield_and_exact_replay_change_state_only_after_replay() {
     let request = recorder
         .take_yielded_request()
         .expect("read transaction yielded");
-    let mut replay = ProofExternalMemoryTransactionReplay::new(request, vec![vec![1, 2, 3, 4]])
-        .expect("read response has the exact requested length");
+    let mut replay =
+        ProofExternalMemoryTransactionReplay::new(request, vec![Zeroizing::new(vec![1, 2, 3, 4])])
+            .expect("read response has the exact requested length");
     executor
         .read_object_bytes(&mut replay, first, 0, &mut destination)
         .expect("successful IndexedDB read replays");
@@ -742,11 +743,15 @@ fn worker_response_decoder_binds_sequence_operation_object_range_and_digest() {
         (3, second_read_object, 11, &[5, 6, 7][..]),
     ];
     let valid_response = encode_worker_test_response(&request, &ordered_results);
+    let decoded_results = request
+        .decode_worker_response(&valid_response)
+        .expect("exact worker response decodes");
     assert_eq!(
-        request
-            .decode_worker_response(&valid_response)
-            .expect("exact worker response decodes"),
-        vec![vec![1, 2, 3, 4], vec![5, 6, 7]],
+        decoded_results
+            .iter()
+            .map(|bytes| bytes.as_slice())
+            .collect::<Vec<_>>(),
+        vec![&[1, 2, 3, 4][..], &[5, 6, 7][..]],
     );
 
     let mut wrong_sequence = valid_response.clone();

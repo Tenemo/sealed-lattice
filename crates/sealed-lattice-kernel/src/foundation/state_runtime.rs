@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     sync::{Mutex, OnceLock},
 };
 
@@ -70,6 +70,14 @@ impl StateVerifierRuntimeSession {
     fn reservation(&self, handle: u32) -> RuntimeResult<&VerifiedStateReservation> {
         match self.verified_objects.get(&handle) {
             Some(RuntimeVerifiedStateObject::Reservation(reservation)) => Ok(reservation),
+            Some(_) => Err(refusal_status(RefusalReason::WrongTypeOrLength)),
+            None => Err(refusal_status(RefusalReason::ConsumedState)),
+        }
+    }
+
+    fn output(&self, handle: u32) -> RuntimeResult<&VerifiedStateOutput> {
+        match self.verified_objects.get(&handle) {
+            Some(RuntimeVerifiedStateObject::Output(output)) => Ok(output),
             Some(_) => Err(refusal_status(RefusalReason::WrongTypeOrLength)),
             None => Err(refusal_status(RefusalReason::ConsumedState)),
         }
@@ -599,6 +607,112 @@ impl StateVerifierRuntimeRegistry {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
+    fn commit_accepted_setup_reservations<PreparedCommit, Output>(
+        &mut self,
+        session_handle: u32,
+        capability: &[u8],
+        ordered_commitment_reservation_handles: &[u32],
+        terminal_package_reservation_handles: &[u32],
+        expected_terminal_package_authorization_hash: Hash512,
+        preflight: impl FnOnce(
+            &StateVerifier,
+            &[&VerifiedStateReservation],
+            &[&VerifiedStateReservation],
+        ) -> RuntimeResult<PreparedCommit>,
+        commit: impl FnOnce(PreparedCommit) -> Output,
+    ) -> RuntimeResult<Output> {
+        let participant_count = usize::from(FOUNDATION_PROFILE.participant_count);
+        if ordered_commitment_reservation_handles.len() != participant_count
+            || terminal_package_reservation_handles.len()
+                < usize::from(FOUNDATION_PROFILE.finality_quorum)
+            || terminal_package_reservation_handles.len() > participant_count
+        {
+            return Err(refusal_status(RefusalReason::WrongTypeOrLength));
+        }
+
+        let prepared_commit = {
+            let session = self.require_active_session(session_handle, capability)?;
+            let total_handle_count = ordered_commitment_reservation_handles
+                .len()
+                .checked_add(terminal_package_reservation_handles.len())
+                .ok_or_else(|| refusal_status(RefusalReason::OutsideSupportedProfile))?;
+            let mut distinct_handles = HashSet::with_capacity(total_handle_count);
+            let mut ordered_commitment_reservations =
+                Vec::with_capacity(ordered_commitment_reservation_handles.len());
+            for (roster_position, handle) in ordered_commitment_reservation_handles
+                .iter()
+                .copied()
+                .enumerate()
+            {
+                if handle == 0 || !distinct_handles.insert(handle) {
+                    return Err(refusal_status(RefusalReason::WrongTypeOrLength));
+                }
+                let reservation = session.reservation(handle)?;
+                if reservation.capability_kind() != StateCapabilityKind::SetupActionRandomnessRoot {
+                    return Err(refusal_status(RefusalReason::WrongTypeOrLength));
+                }
+                let expected_participant_identity = session
+                    .verifier
+                    .roster()
+                    .entries
+                    .get(roster_position)
+                    .ok_or_else(|| refusal_status(RefusalReason::WrongTypeOrLength))?
+                    .participant_identity()
+                    .map_err(|error| refusal_status(error.refusal_reason))?;
+                if reservation.subject_participant_id() != expected_participant_identity {
+                    return Err(refusal_status(RefusalReason::WrongContext));
+                }
+                ordered_commitment_reservations.push(reservation);
+            }
+
+            let mut terminal_participant_identities =
+                HashSet::with_capacity(terminal_package_reservation_handles.len());
+            let mut terminal_package_reservations =
+                Vec::with_capacity(terminal_package_reservation_handles.len());
+            for handle in terminal_package_reservation_handles.iter().copied() {
+                if handle == 0 || !distinct_handles.insert(handle) {
+                    return Err(refusal_status(RefusalReason::WrongTypeOrLength));
+                }
+                let reservation = session.reservation(handle)?;
+                if reservation.capability_kind() != StateCapabilityKind::SetupTerminalPackage {
+                    return Err(refusal_status(RefusalReason::WrongTypeOrLength));
+                }
+                if reservation.authorization_hash() != expected_terminal_package_authorization_hash
+                {
+                    return Err(refusal_status(RefusalReason::WrongHashOrRoot));
+                }
+                if !terminal_participant_identities.insert(reservation.subject_participant_id()) {
+                    return Err(refusal_status(RefusalReason::DuplicateIdentity));
+                }
+                terminal_package_reservations.push(reservation);
+            }
+
+            preflight(
+                &session.verifier,
+                &ordered_commitment_reservations,
+                &terminal_package_reservations,
+            )?
+        };
+
+        // The caller's preflight must reserve the destination handle and make
+        // this insertion infallible. Only a completed insertion authorizes
+        // destructive removal from the state collector.
+        let output = commit(prepared_commit);
+        let session = self.require_active_session_mut(session_handle, capability)?;
+        for handle in ordered_commitment_reservation_handles
+            .iter()
+            .chain(terminal_package_reservation_handles)
+        {
+            let Some(RuntimeVerifiedStateObject::Reservation(_)) =
+                session.verified_objects.remove(handle)
+            else {
+                unreachable!("the preflight borrow established every committed reservation")
+            };
+        }
+        Ok(output)
+    }
+
     fn release_verified_object(
         &mut self,
         session_handle: u32,
@@ -961,6 +1075,68 @@ pub(crate) fn verified_state_reservation_binding(
     })
 }
 
+/// Commits one accepted setup against its complete state authority atomically.
+///
+/// The first handle set must contain exactly the fixed ten kind-four
+/// commitments in roster order. The second must contain seven through ten
+/// distinct kind-eight reservations authorized by the exact package hash. The
+/// fallible preflight borrows every genuine source without consuming it and
+/// must reserve an authority destination. The following callback is infallible
+/// by type; reservations are removed only after that callback has inserted the
+/// authority. Any validation or preflight error leaves the collector intact.
+/// Both callbacks run while the state collector is exclusively held and must
+/// not re-enter the state runtime.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn commit_accepted_setup_state_reservations<PreparedCommit, Output>(
+    session_handle: u32,
+    capability: &[u8],
+    ordered_commitment_reservation_handles: &[u32],
+    terminal_package_reservation_handles: &[u32],
+    expected_terminal_package_authorization_hash: Hash512,
+    preflight: impl FnOnce(
+        &StateVerifier,
+        &[&VerifiedStateReservation],
+        &[&VerifiedStateReservation],
+    ) -> RuntimeResult<PreparedCommit>,
+    commit: impl FnOnce(PreparedCommit) -> Output,
+) -> RuntimeResult<Output> {
+    with_runtime_registry(|registry| {
+        registry.commit_accepted_setup_reservations(
+            session_handle,
+            capability,
+            ordered_commitment_reservation_handles,
+            terminal_package_reservation_handles,
+            expected_terminal_package_authorization_hash,
+            preflight,
+            commit,
+        )
+    })
+}
+
+/// Borrows the genuine reservation, its exact certified output, and the
+/// anchored state-verifier roster for one family terminal. Neither transport
+/// hashes nor durable descriptions can recreate these process-local sources.
+pub(crate) fn with_verified_state_reservation_and_output<Value>(
+    session_handle: u32,
+    capability: &[u8],
+    verified_reservation_handle: u32,
+    verified_output_handle: u32,
+    operation: impl FnOnce(
+        &StateVerifier,
+        &VerifiedStateReservation,
+        &VerifiedStateOutput,
+    ) -> RuntimeResult<Value>,
+) -> RuntimeResult<Value> {
+    with_runtime_registry(|registry| {
+        let session = registry.require_active_session(session_handle, capability)?;
+        operation(
+            &session.verifier,
+            session.reservation(verified_reservation_handle)?,
+            session.output(verified_output_handle)?,
+        )
+    })
+}
+
 pub(crate) fn release_verified_state_object(
     session_handle: u32,
     capability: &[u8],
@@ -1134,6 +1310,8 @@ fn take_nonrepeating_handle(next_handle: &mut u32) -> RuntimeResult<u32> {
 
 #[cfg(test)]
 mod tests {
+    use std::{cell::Cell, collections::BTreeMap};
+
     use fips203::{
         ml_kem_768,
         traits::{KeyGen as KemKeyGen, SerDes as KemSerDes},
@@ -1145,7 +1323,10 @@ mod tests {
 
     use super::*;
     use crate::foundation::{
-        FOUNDATION_PROFILE, RosterEntry, StateCertificate, run_action_randomness_command,
+        FOUNDATION_PROFILE, FoundationObjectType, ObjectEnvelope, RosterEntry, SignedCarrier,
+        StateCertificate, StateReservationIntentPayload, StateWitnessVoteKind,
+        StateWitnessVotePayload, derive_state_witness_vote_sequence, run_action_randomness_command,
+        signature_message,
     };
 
     const OBJECT_SIGNATURE_CONTEXT: &[u8] = b"sealed-lattice/object-signature/v1";
@@ -1154,6 +1335,7 @@ mod tests {
         capability: [u8; STATE_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH],
         configuration: Vec<u8>,
         participant_identities: Vec<ParticipantIdentity>,
+        roster_hash: Hash512,
         signing_keys: Vec<ml_dsa_65::PrivateKey>,
     }
 
@@ -1198,6 +1380,7 @@ mod tests {
                         .expect("participant identity derives")
                 })
                 .collect();
+            let roster_hash = roster.roster_hash().expect("test roster hash derives");
             let roster_bytes = roster.encode().expect("test roster encodes");
             let mut configuration = Vec::new();
             configuration.extend_from_slice(&STATE_VERIFIER_CONFIGURATION_VERSION.to_le_bytes());
@@ -1214,6 +1397,7 @@ mod tests {
                 capability: [0xa5; STATE_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH],
                 configuration,
                 participant_identities,
+                roster_hash,
                 signing_keys,
             }
         }
@@ -1232,6 +1416,106 @@ mod tests {
             input.extend_from_slice(&[0x33; Hash512::BYTE_LENGTH]);
             input.extend_from_slice(self.participant_identities[0].as_bytes());
             input
+        }
+
+        fn sign_envelope(
+            &self,
+            producer_roster_position: usize,
+            envelope: ObjectEnvelope,
+            signature_seed_byte: u8,
+        ) -> Vec<u8> {
+            let message = signature_message(&envelope, self.roster_hash)
+                .expect("test signature message derives");
+            let signature = self.signing_keys[producer_roster_position]
+                .try_sign_with_seed(
+                    &[signature_seed_byte; 32],
+                    message.as_bytes(),
+                    OBJECT_SIGNATURE_CONTEXT,
+                )
+                .expect("test signature generates");
+            SignedCarrier {
+                envelope,
+                signature,
+            }
+            .encode()
+            .expect("test signed carrier encodes")
+        }
+
+        fn reservation_material(
+            &self,
+            subject_roster_position: usize,
+            capability_kind: StateCapabilityKind,
+            authorization_hash: Hash512,
+        ) -> (Vec<u8>, Vec<u8>) {
+            let intent_envelope = ObjectEnvelope {
+                suite_id: Hash512::from_bytes([0x11; Hash512::BYTE_LENGTH]),
+                object_type: FoundationObjectType::StateReservation,
+                ceremony_context_hash: Hash512::from_bytes([0x22; Hash512::BYTE_LENGTH]),
+                action_context_hash: Hash512::from_bytes([0x33; Hash512::BYTE_LENGTH]),
+                producer_participant_id: Some(self.participant_identities[subject_roster_position]),
+                producer_sequence: 0,
+                ordered_prerequisite_hashes: Vec::new(),
+                payload_bytes: StateReservationIntentPayload {
+                    capability_kind,
+                    authorization_hash,
+                }
+                .encode()
+                .expect("test reservation payload encodes"),
+            };
+            let intent_object_hash = intent_envelope
+                .object_hash()
+                .expect("test reservation object hash derives");
+            let subject_roster_byte =
+                u8::try_from(subject_roster_position).expect("test roster position fits u8");
+            let capability_kind_byte = u8::try_from(capability_kind.canonical_code())
+                .expect("test capability-kind code fits u8");
+            let canonical_intent_carrier = self.sign_envelope(
+                subject_roster_position,
+                intent_envelope,
+                0x40_u8
+                    .wrapping_add(subject_roster_byte)
+                    .wrapping_add(capability_kind_byte),
+            );
+            let vote_sequence =
+                derive_state_witness_vote_sequence(StateWitnessVoteKind::Reservation);
+            let participant_count = usize::from(FOUNDATION_PROFILE.participant_count);
+            let canonical_vote_carriers =
+                (1..=usize::from(FOUNDATION_PROFILE.state_witness_quorum))
+                    .map(|witness_offset| {
+                        let witness_roster_position =
+                            (subject_roster_position + witness_offset) % participant_count;
+                        let witness_roster_byte = u8::try_from(witness_roster_position)
+                            .expect("test witness roster position fits u8");
+                        let vote_envelope = ObjectEnvelope {
+                            suite_id: Hash512::from_bytes([0x11; Hash512::BYTE_LENGTH]),
+                            object_type: FoundationObjectType::StateWitnessVote,
+                            ceremony_context_hash: Hash512::from_bytes(
+                                [0x22; Hash512::BYTE_LENGTH],
+                            ),
+                            action_context_hash: Hash512::from_bytes([0x33; Hash512::BYTE_LENGTH]),
+                            producer_participant_id: Some(
+                                self.participant_identities[witness_roster_position],
+                            ),
+                            producer_sequence: vote_sequence,
+                            ordered_prerequisite_hashes: Vec::new(),
+                            payload_bytes: StateWitnessVotePayload { intent_object_hash }
+                                .encode()
+                                .expect("test witness-vote payload encodes"),
+                        };
+                        self.sign_envelope(
+                            witness_roster_position,
+                            vote_envelope,
+                            0x80_u8
+                                .wrapping_add(subject_roster_byte)
+                                .wrapping_add(witness_roster_byte),
+                        )
+                    })
+                    .collect();
+            let canonical_certificate = StateCertificate::new(canonical_vote_carriers)
+                .expect("test state certificate has a distinct quorum")
+                .encode()
+                .expect("test state certificate encodes");
+            (canonical_intent_carrier, canonical_certificate)
         }
     }
 
@@ -1255,6 +1539,32 @@ mod tests {
             framed.extend_from_slice(carrier);
         }
         framed
+    }
+
+    fn retain_test_reservation(
+        registry: &mut StateVerifierRuntimeRegistry,
+        fixture: &StateProducerRuntimeFixture,
+        session_handle: u32,
+        subject_roster_position: usize,
+        capability_kind: StateCapabilityKind,
+        authorization_hash: Hash512,
+    ) -> u32 {
+        let (canonical_intent_carrier, canonical_certificate) = fixture.reservation_material(
+            subject_roster_position,
+            capability_kind,
+            authorization_hash,
+        );
+        registry
+            .verify_reservation(
+                session_handle,
+                &fixture.capability,
+                fixture.participant_identities[subject_roster_position],
+                capability_kind,
+                authorization_hash,
+                &canonical_intent_carrier,
+                &canonical_certificate,
+            )
+            .expect("test reservation positively verifies")
     }
 
     struct StateProducerRuntimeCleanup {
@@ -1487,6 +1797,225 @@ mod tests {
         run_action_randomness_command(2, &action_randomness_handle.to_le_bytes())
             .expect("action randomness closes");
         cleanup.action_randomness_handle = None;
+    }
+
+    #[test]
+    fn accepted_setup_commit_preserves_every_reservation_until_infallible_insertion() {
+        let fixture = StateProducerRuntimeFixture::new();
+        let mut registry = StateVerifierRuntimeRegistry::default();
+        let session_handle = registry
+            .begin(&fixture.configuration, fixture.capability)
+            .expect("state session begins");
+        let ordered_commitment_handles = (0..usize::from(FOUNDATION_PROFILE.participant_count))
+            .map(|roster_position| {
+                retain_test_reservation(
+                    &mut registry,
+                    &fixture,
+                    session_handle,
+                    roster_position,
+                    StateCapabilityKind::SetupActionRandomnessRoot,
+                    Hash512::from_bytes(
+                        [0x40_u8.wrapping_add(
+                            u8::try_from(roster_position).expect("test roster position fits u8"),
+                        ); Hash512::BYTE_LENGTH],
+                    ),
+                )
+            })
+            .collect::<Vec<_>>();
+        let terminal_package_authorization_hash = Hash512::from_bytes([0xd1; Hash512::BYTE_LENGTH]);
+        let terminal_package_handles = (0..usize::from(FOUNDATION_PROFILE.finality_quorum))
+            .map(|roster_position| {
+                retain_test_reservation(
+                    &mut registry,
+                    &fixture,
+                    session_handle,
+                    roster_position,
+                    StateCapabilityKind::SetupTerminalPackage,
+                    terminal_package_authorization_hash,
+                )
+            })
+            .collect::<Vec<_>>();
+        let retained_object_count = registry
+            .active_session
+            .as_ref()
+            .expect("state session remains active")
+            .verified_objects
+            .len();
+        assert_eq!(
+            retained_object_count,
+            ordered_commitment_handles.len() + terminal_package_handles.len()
+        );
+
+        let preflight_called = Cell::new(false);
+        assert_eq!(
+            registry.commit_accepted_setup_reservations(
+                session_handle,
+                &fixture.capability,
+                &ordered_commitment_handles,
+                &terminal_package_handles,
+                Hash512::from_bytes([0xd2; Hash512::BYTE_LENGTH]),
+                |_, _, _| {
+                    preflight_called.set(true);
+                    Ok(())
+                },
+                |()| (),
+            ),
+            Err(refusal_status(RefusalReason::WrongHashOrRoot))
+        );
+        assert!(!preflight_called.get());
+        assert_eq!(
+            registry
+                .active_session
+                .as_ref()
+                .expect("state session remains active")
+                .verified_objects
+                .len(),
+            retained_object_count
+        );
+
+        let mut wrong_commitment_order = ordered_commitment_handles.clone();
+        wrong_commitment_order.swap(0, 1);
+        assert_eq!(
+            registry.commit_accepted_setup_reservations(
+                session_handle,
+                &fixture.capability,
+                &wrong_commitment_order,
+                &terminal_package_handles,
+                terminal_package_authorization_hash,
+                |_, _, _| Ok(()),
+                |()| (),
+            ),
+            Err(refusal_status(RefusalReason::WrongContext))
+        );
+        assert_eq!(
+            registry
+                .active_session
+                .as_ref()
+                .expect("state session remains active")
+                .verified_objects
+                .len(),
+            retained_object_count
+        );
+
+        let mut duplicate_terminal_handle = terminal_package_handles.clone();
+        duplicate_terminal_handle[1] = duplicate_terminal_handle[0];
+        assert_eq!(
+            registry.commit_accepted_setup_reservations(
+                session_handle,
+                &fixture.capability,
+                &ordered_commitment_handles,
+                &duplicate_terminal_handle,
+                terminal_package_authorization_hash,
+                |_, _, _| Ok(()),
+                |()| (),
+            ),
+            Err(refusal_status(RefusalReason::WrongTypeOrLength))
+        );
+        assert_eq!(
+            registry
+                .active_session
+                .as_ref()
+                .expect("state session remains active")
+                .verified_objects
+                .len(),
+            retained_object_count
+        );
+
+        let preflight_refusal = refusal_status(RefusalReason::OutsideSupportedProfile);
+        assert_eq!(
+            registry.commit_accepted_setup_reservations(
+                session_handle,
+                &fixture.capability,
+                &ordered_commitment_handles,
+                &terminal_package_handles,
+                terminal_package_authorization_hash,
+                |_, _, _| Err(preflight_refusal),
+                |()| (),
+            ),
+            Err(preflight_refusal)
+        );
+        assert_eq!(
+            registry
+                .active_session
+                .as_ref()
+                .expect("state session remains active")
+                .verified_objects
+                .len(),
+            retained_object_count
+        );
+
+        let mut authority_collector = BTreeMap::new();
+        let authority_handle = registry
+            .commit_accepted_setup_reservations(
+                session_handle,
+                &fixture.capability,
+                &ordered_commitment_handles,
+                &terminal_package_handles,
+                terminal_package_authorization_hash,
+                |state_verifier, ordered_commitments, terminal_reservations| {
+                    assert_eq!(
+                        state_verifier
+                            .roster_hash()
+                            .expect("state verifier roster hash derives"),
+                        fixture.roster_hash
+                    );
+                    assert_eq!(
+                        ordered_commitments.len(),
+                        usize::from(FOUNDATION_PROFILE.participant_count)
+                    );
+                    assert_eq!(
+                        terminal_reservations.len(),
+                        usize::from(FOUNDATION_PROFILE.finality_quorum)
+                    );
+                    assert!(ordered_commitments.iter().enumerate().all(
+                        |(roster_position, reservation)| {
+                            reservation.capability_kind()
+                                == StateCapabilityKind::SetupActionRandomnessRoot
+                                && reservation.subject_participant_id()
+                                    == fixture.participant_identities[roster_position]
+                        }
+                    ));
+                    assert!(terminal_reservations.iter().all(|reservation| {
+                        reservation.capability_kind() == StateCapabilityKind::SetupTerminalPackage
+                            && reservation.authorization_hash()
+                                == terminal_package_authorization_hash
+                    }));
+                    Ok((fixture.roster_hash, terminal_package_authorization_hash))
+                },
+                |prepared_authority| {
+                    let authority_handle = 1_u32;
+                    assert!(
+                        authority_collector
+                            .insert(authority_handle, prepared_authority)
+                            .is_none()
+                    );
+                    authority_handle
+                },
+            )
+            .expect("preflighted authority insertion commits");
+        assert_eq!(authority_handle, 1);
+        assert_eq!(authority_collector.len(), 1);
+        assert!(
+            registry
+                .active_session
+                .as_ref()
+                .expect("state session remains active")
+                .verified_objects
+                .is_empty()
+        );
+        for consumed_handle in ordered_commitment_handles
+            .iter()
+            .chain(&terminal_package_handles)
+        {
+            assert!(matches!(
+                registry.reservation_binding(
+                    session_handle,
+                    &fixture.capability,
+                    *consumed_handle,
+                ),
+                Err(status) if status == refusal_status(RefusalReason::ConsumedState)
+            ));
+        }
     }
 
     #[test]

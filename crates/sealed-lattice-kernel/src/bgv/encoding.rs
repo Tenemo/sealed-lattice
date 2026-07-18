@@ -55,7 +55,7 @@ pub(super) fn encode_logical_slots_to_plaintext_coefficients(
     if supplied_slots.iter().any(|slot| *slot >= PLAINTEXT_MODULUS) {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidProtocolObject,
-            "BGV batch encoder slot value is outside GF(65537)",
+            "BGV batch encoder slot value is outside the selected plaintext field",
         ));
     }
     let mut padded_slots = vec![0_u64; POLYNOMIAL_DEGREE];
@@ -66,13 +66,6 @@ pub(super) fn encode_logical_slots_to_plaintext_coefficients(
     Ok(coefficients_mod_plaintext)
 }
 
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the browser-compiled evaluator decode path is not yet reached by a transcript-core command"
-    )
-)]
 pub(super) fn decode_plaintext_coefficients_to_logical_slots(
     coefficients_mod_plaintext: &[u64],
 ) -> CanonicalResult<Vec<u64>> {
@@ -191,11 +184,11 @@ mod tests {
     #[test]
     fn batch_encoder_round_trips_boundary_slots() {
         let mut slots = vec![0_u64; POLYNOMIAL_DEGREE];
-        slots[0] = 65_536;
+        slots[0] = PLAINTEXT_MODULUS - 1;
         slots[1] = 1;
         slots[2] = 2;
         slots[17] = 32_768;
-        slots[POLYNOMIAL_DEGREE / 2 - 1] = 65_535;
+        slots[POLYNOMIAL_DEGREE / 2 - 1] = PLAINTEXT_MODULUS - 2;
         slots[POLYNOMIAL_DEGREE / 2] = 31_337;
         slots[POLYNOMIAL_DEGREE - 1] = 99;
         let encoded = encode_batch_plaintext_slots(&slots, 0).expect("encode");
@@ -316,7 +309,7 @@ mod tests {
     fn batch_encoder_round_trips_all_zero_and_all_max_slots() {
         for slots in [
             vec![0_u64; POLYNOMIAL_DEGREE],
-            vec![65_536_u64; POLYNOMIAL_DEGREE],
+            vec![PLAINTEXT_MODULUS - 1; POLYNOMIAL_DEGREE],
         ] {
             let encoded = encode_batch_plaintext_slots(&slots, 1).expect("encode");
             let decoded = decode_batch_plaintext_polynomial(&encoded.polynomial).expect("decode");
@@ -328,7 +321,7 @@ mod tests {
 
     #[test]
     fn batch_encoder_rejects_bad_slot_values_and_levels() {
-        assert!(encode_batch_plaintext_slots(&[65_537], 0).is_err());
+        assert!(encode_batch_plaintext_slots(&[PLAINTEXT_MODULUS], 0).is_err());
         assert!(encode_batch_plaintext_slots(&vec![0_u64; POLYNOMIAL_DEGREE + 1], 0).is_err());
         assert!(encode_batch_plaintext_slots(&[0], DATA_PRIMES.len()).is_err());
 

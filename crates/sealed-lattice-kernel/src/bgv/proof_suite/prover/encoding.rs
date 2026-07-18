@@ -1,12 +1,12 @@
 use super::{
-    AUTHENTICATION_NODE_CANONICAL_BYTE_LENGTH, BTreeSet, CanonicalDecodeLimits, CanonicalItemType,
-    CommonProofOpeningArtifact, CommonProofProverError, CommonProofQueryOpeningAbsorber,
-    CommonProofTranscriptSchedule, CompleteProofTreeCatalog, HASH_BYTE_LENGTH,
-    PROOF_AUTHENTICATION_FRONTIER_SCHEMA_IDENTIFIER, PROOF_AUTHENTICATION_NODE_SCHEMA_IDENTIFIER,
-    PROOF_QUERY_OPENING_RECORD_SCHEMA_IDENTIFIER, ProofChallengeExtensionElement,
-    ProofObjectHeader, ProofTreeCatalogEntry, ProofTreeCatalogSource, ProofTreeRole,
-    SCHEMA_VERSION, TranscriptError, Zeroizing, canonical_common_proof_leaf_byte_length,
-    common_proof_tree_value_type,
+    AUTHENTICATION_DIGEST_BYTE_LENGTH, BTreeSet, CanonicalDecodeLimits, CanonicalItemType,
+    CommonProofProverError, CommonProofQueryOpeningAbsorber, CommonProofTranscriptSchedule,
+    CompleteProofTreeCatalog, HASH_BYTE_LENGTH, PROOF_AUTHENTICATION_FRONTIER_SCHEMA_IDENTIFIER,
+    PROOF_QUERY_OPENING_RECORD_SCHEMA_IDENTIFIER, PrefetchedCommonProofOpeningArtifact,
+    ProofChallengeExtensionElement, ProofObjectHeader, ProofTreeCatalogEntry,
+    ProofTreeCatalogSource, ProofTreeRole, SCHEMA_VERSION, TranscriptError,
+    canonical_common_proof_leaf_byte_length, common_proof_tree_value_type,
+    minimal_frontier_coordinates,
 };
 
 /// Streaming destination for the canonical header and proof body.  Production
@@ -80,17 +80,17 @@ pub(crate) fn canonical_common_proof_query_section_header(
 /// Encodes one catalog entry's opening/frontier pair as an independently
 /// bounded fragment.  Concatenating the query-count header and these fragments
 /// in catalog order is exactly the body grammar consumed by `body.rs`.
-pub(crate) fn encode_common_proof_query_tree_fragment<Artifact>(
+pub(crate) fn encode_common_proof_query_tree_fragment(
     catalog: &CompleteProofTreeCatalog,
     catalog_index: usize,
     geometry: CommonProofOpeningGeometry,
     sorted_query_representatives: &[u64],
-    artifact: &mut Artifact,
+    artifact: &PrefetchedCommonProofOpeningArtifact,
     maximum_fragment_byte_length: usize,
-) -> Result<Vec<u8>, CommonProofEncodingError<BoundedCommonProofByteSinkError, Artifact::Error>>
-where
-    Artifact: CommonProofOpeningArtifact,
-{
+) -> Result<
+    Vec<u8>,
+    CommonProofEncodingError<BoundedCommonProofByteSinkError, CommonProofProverError>,
+> {
     let entry = catalog
         .entries()
         .get(catalog_index)
@@ -123,28 +123,25 @@ where
             CommonProofProverError::InvalidTree,
         ));
     }
-    let opened_indexes = opened_leaf_indexes(
+    if !artifact_matches_query_representatives(
         entry.source(),
         catalog.evaluation_domain_size(),
         sorted_query_representatives,
-    )
-    .map_err(CommonProofEncodingError::Prover)?;
+        artifact.opened_leaf_indexes(),
+    )? {
+        return Err(CommonProofEncodingError::Prover(
+            CommonProofProverError::InvalidOpening,
+        ));
+    }
     let mut sink = BoundedCommonProofByteSink::new(maximum_fragment_byte_length)
         .map_err(CommonProofEncodingError::Sink)?;
     write_opening_record(
         &mut sink,
         entry.tree_catalog_index(),
         geometry.canonical_leaf_byte_length,
-        &opened_indexes,
         artifact,
     )?;
-    write_authentication_frontier(
-        &mut sink,
-        entry.tree_catalog_index(),
-        geometry.leaf_count,
-        &opened_indexes,
-        artifact,
-    )?;
+    write_authentication_frontier(&mut sink, entry.tree_catalog_index(), artifact)?;
     Ok(sink.finish())
 }
 
@@ -349,9 +346,7 @@ pub(crate) fn common_proof_query_section_byte_length(
             .checked_add(56)
             .and_then(|length| length.checked_add(leaf_payload))
             .and_then(|length| {
-                length.checked_add(
-                    frontier_count.checked_mul(AUTHENTICATION_NODE_CANONICAL_BYTE_LENGTH)?,
-                )
+                length.checked_add(frontier_count.checked_mul(AUTHENTICATION_DIGEST_BYTE_LENGTH)?)
             })
             .ok_or(CommonProofProverError::CountOverflow)?;
     }
@@ -410,17 +405,16 @@ fn validate_common_proof_opening_geometry(
     Ok(())
 }
 
-fn write_opening_record<Sink, Artifact>(
+fn write_opening_record<Sink>(
     sink: &mut Sink,
     tree_catalog_index: u16,
     canonical_leaf_byte_length: usize,
-    opened_indexes: &[u64],
-    artifact: &mut Artifact,
-) -> Result<(), CommonProofEncodingError<Sink::Error, Artifact::Error>>
+    artifact: &PrefetchedCommonProofOpeningArtifact,
+) -> Result<(), CommonProofEncodingError<Sink::Error, CommonProofProverError>>
 where
     Sink: CommonProofByteSink,
-    Artifact: CommonProofOpeningArtifact,
 {
+    let opened_indexes = artifact.opened_leaf_indexes();
     write_tuple_header(sink, PROOF_QUERY_OPENING_RECORD_SCHEMA_IDENTIFIER, 2)?;
     write_u16_item(sink, tree_catalog_index)?;
     let list_payload_length = opened_indexes
@@ -443,40 +437,36 @@ where
         u32::try_from(opened_indexes.len())
             .map_err(|_| CommonProofEncodingError::Prover(CommonProofProverError::CountOverflow))?,
     )?;
-    let mut leaf_bytes = Zeroizing::new(vec![0_u8; canonical_leaf_byte_length]);
-    for leaf_index in opened_indexes {
+    for position in 0..opened_indexes.len() {
         write_u32(
             sink,
             u32::try_from(canonical_leaf_byte_length).map_err(|_| {
                 CommonProofEncodingError::Prover(CommonProofProverError::CountOverflow)
             })?,
         )?;
-        artifact
-            .read_canonical_leaf(*leaf_index, &mut leaf_bytes)
+        let leaf_bytes = artifact
+            .canonical_leaf_bytes_by_position(position)
             .map_err(CommonProofEncodingError::Artifact)?;
-        sink.write_bytes(&leaf_bytes)
+        sink.write_bytes(leaf_bytes)
             .map_err(CommonProofEncodingError::Sink)?;
     }
     Ok(())
 }
 
-fn write_authentication_frontier<Sink, Artifact>(
+fn write_authentication_frontier<Sink>(
     sink: &mut Sink,
     tree_catalog_index: u16,
-    leaf_count: usize,
-    opened_indexes: &[u64],
-    artifact: &mut Artifact,
-) -> Result<(), CommonProofEncodingError<Sink::Error, Artifact::Error>>
+    artifact: &PrefetchedCommonProofOpeningArtifact,
+) -> Result<(), CommonProofEncodingError<Sink::Error, CommonProofProverError>>
 where
     Sink: CommonProofByteSink,
-    Artifact: CommonProofOpeningArtifact,
 {
-    let frontier_count = minimal_frontier_node_count(opened_indexes, leaf_count)
-        .map_err(CommonProofEncodingError::Prover)?;
+    let frontier_coordinates = artifact.frontier_coordinates();
+    let frontier_count = frontier_coordinates.len();
     write_tuple_header(sink, PROOF_AUTHENTICATION_FRONTIER_SCHEMA_IDENTIFIER, 2)?;
     write_u16_item(sink, tree_catalog_index)?;
     let list_payload_length = frontier_count
-        .checked_mul(AUTHENTICATION_NODE_CANONICAL_BYTE_LENGTH)
+        .checked_mul(AUTHENTICATION_DIGEST_BYTE_LENGTH)
         .and_then(|length| length.checked_add(6))
         .ok_or(CommonProofEncodingError::Prover(
             CommonProofProverError::CountOverflow,
@@ -486,45 +476,63 @@ where
         CanonicalItemType::HomogeneousList,
         list_payload_length,
     )?;
-    write_u16(sink, CanonicalItemType::NestedTuple.canonical_code())?;
+    write_u16(sink, CanonicalItemType::Hash512.canonical_code())?;
     write_u32(
         sink,
         u32::try_from(frontier_count)
             .map_err(|_| CommonProofEncodingError::Prover(CommonProofProverError::CountOverflow))?,
     )?;
-
-    let mut required = opened_indexes.iter().copied().collect::<BTreeSet<_>>();
-    let mut emitted = 0_usize;
-    for level in 0..leaf_count.trailing_zeros() {
-        let mut next = BTreeSet::new();
-        let mut processed = BTreeSet::new();
-        for index in required.iter().copied() {
-            if !processed.insert(index) {
-                continue;
-            }
-            let sibling = index ^ 1;
-            if required.contains(&sibling) {
-                processed.insert(sibling);
-            } else {
-                let digest = artifact
-                    .read_digest(level, sibling)
-                    .map_err(CommonProofEncodingError::Artifact)?;
-                write_tuple_header(sink, PROOF_AUTHENTICATION_NODE_SCHEMA_IDENTIFIER, 3)?;
-                write_u32_item(sink, level)?;
-                write_u64_item(sink, sibling)?;
-                write_hash_item(sink, digest)?;
-                emitted += 1;
-            }
-            next.insert(index / 2);
-        }
-        required = next;
-    }
-    if emitted != frontier_count {
-        return Err(CommonProofEncodingError::Prover(
-            CommonProofProverError::InvalidOpening,
-        ));
+    for position in 0..frontier_coordinates.len() {
+        let digest = artifact
+            .frontier_digest_by_position(position)
+            .map_err(CommonProofEncodingError::Artifact)?;
+        sink.write_bytes(&digest)
+            .map_err(CommonProofEncodingError::Sink)?;
     }
     Ok(())
+}
+
+fn artifact_matches_query_representatives(
+    source: ProofTreeCatalogSource,
+    evaluation_domain_size: u64,
+    sorted_query_representatives: &[u64],
+    opened_leaf_indexes: &[u64],
+) -> Result<bool, CommonProofEncodingError<BoundedCommonProofByteSinkError, CommonProofProverError>>
+{
+    if !opened_leaf_indexes.windows(2).all(|pair| pair[0] < pair[1]) {
+        return Ok(false);
+    }
+    let ProofTreeCatalogSource::NonterminalFriLayer { fold_ordinal } = source else {
+        return Ok(opened_leaf_indexes == sorted_query_representatives);
+    };
+    let shift = u32::from(fold_ordinal)
+        .checked_add(2)
+        .ok_or(CommonProofEncodingError::Prover(
+            CommonProofProverError::CountOverflow,
+        ))?;
+    let leaf_count = evaluation_domain_size
+        .checked_shr(shift)
+        .filter(|count| *count != 0)
+        .ok_or(CommonProofEncodingError::Prover(
+            CommonProofProverError::InvalidTree,
+        ))?;
+    if opened_leaf_indexes
+        .last()
+        .is_some_and(|leaf_index| *leaf_index >= leaf_count)
+    {
+        return Ok(false);
+    }
+    let every_query_is_opened = sorted_query_representatives.iter().all(|representative| {
+        opened_leaf_indexes
+            .binary_search(&(representative % leaf_count))
+            .is_ok()
+    });
+    let every_opened_leaf_is_queried = opened_leaf_indexes.iter().all(|leaf_index| {
+        sorted_query_representatives
+            .iter()
+            .any(|representative| representative % leaf_count == *leaf_index)
+    });
+    Ok(every_query_is_opened && every_opened_leaf_is_queried)
 }
 
 pub(super) fn opened_leaf_indexes(
@@ -556,50 +564,6 @@ fn minimal_frontier_node_count(
     leaf_count: usize,
 ) -> Result<usize, CommonProofProverError> {
     Ok(minimal_frontier_coordinates(sorted_unique_leaf_indexes, leaf_count)?.len())
-}
-
-pub(super) fn minimal_frontier_coordinates(
-    sorted_unique_leaf_indexes: &[u64],
-    leaf_count: usize,
-) -> Result<Vec<(u32, u64)>, CommonProofProverError> {
-    if sorted_unique_leaf_indexes.is_empty()
-        || leaf_count == 0
-        || !leaf_count.is_power_of_two()
-        || !sorted_unique_leaf_indexes
-            .windows(2)
-            .all(|pair| pair[0] < pair[1])
-        || sorted_unique_leaf_indexes
-            .last()
-            .is_some_and(|index| usize::try_from(*index).map_or(true, |index| index >= leaf_count))
-    {
-        return Err(CommonProofProverError::InvalidOpening);
-    }
-    let mut required = sorted_unique_leaf_indexes
-        .iter()
-        .copied()
-        .collect::<BTreeSet<_>>();
-    let mut coordinates = Vec::new();
-    for level in 0..leaf_count.trailing_zeros() {
-        let mut next = BTreeSet::new();
-        let mut processed = BTreeSet::new();
-        for index in required.iter().copied() {
-            if !processed.insert(index) {
-                continue;
-            }
-            let sibling = index ^ 1;
-            if required.contains(&sibling) {
-                processed.insert(sibling);
-            } else {
-                coordinates
-                    .try_reserve(1)
-                    .map_err(|_| CommonProofProverError::AllocationLimitExceeded)?;
-                coordinates.push((level, sibling));
-            }
-            next.insert(index / 2);
-        }
-        required = next;
-    }
-    Ok(coordinates)
 }
 
 fn write_tuple_header<Sink, ArtifactError>(
@@ -643,41 +607,6 @@ where
 {
     write_item_header(sink, CanonicalItemType::Unsigned16, 2)?;
     write_u16(sink, value)
-}
-
-fn write_u32_item<Sink, ArtifactError>(
-    sink: &mut Sink,
-    value: u32,
-) -> Result<(), CommonProofEncodingError<Sink::Error, ArtifactError>>
-where
-    Sink: CommonProofByteSink,
-{
-    write_item_header(sink, CanonicalItemType::Unsigned32, 4)?;
-    write_u32(sink, value)
-}
-
-fn write_u64_item<Sink, ArtifactError>(
-    sink: &mut Sink,
-    value: u64,
-) -> Result<(), CommonProofEncodingError<Sink::Error, ArtifactError>>
-where
-    Sink: CommonProofByteSink,
-{
-    write_item_header(sink, CanonicalItemType::Unsigned64, 8)?;
-    sink.write_bytes(&value.to_le_bytes())
-        .map_err(CommonProofEncodingError::Sink)
-}
-
-fn write_hash_item<Sink, ArtifactError>(
-    sink: &mut Sink,
-    value: [u8; HASH_BYTE_LENGTH],
-) -> Result<(), CommonProofEncodingError<Sink::Error, ArtifactError>>
-where
-    Sink: CommonProofByteSink,
-{
-    write_item_header(sink, CanonicalItemType::Hash512, HASH_BYTE_LENGTH)?;
-    sink.write_bytes(&value)
-        .map_err(CommonProofEncodingError::Sink)
 }
 
 fn write_u16<Sink, ArtifactError>(

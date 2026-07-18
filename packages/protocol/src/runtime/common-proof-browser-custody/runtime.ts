@@ -28,9 +28,9 @@ import {
     canonicalOutputKeyDomain,
     checkpointStateStreamDomain,
     commonProofGenerationCheckpointOperationKind,
+    maximumCheckpointCursorManifestByteLength,
     textEncoder,
     isSafeUnsigned32,
-    isNonEmptyByteArrayList,
     copyExactBytes,
     bytesEqual,
     bytesToHex,
@@ -43,7 +43,6 @@ import {
     destroyIdentifierInput,
     allObjectDescriptors,
     destroyExternalMemoryObjectInMemory,
-    decodeCheckpointCursor,
     checkpointEnvironmentBindingHash,
     encodePublicRecord,
     decodePublicRecord,
@@ -233,7 +232,8 @@ export const openCommonProofBrowserCustody = (
     const checkpointBoundary = (inputValue: {
         canonicalStateBytes?: Uint8Array;
         commonProofEnvironmentIdentifier: Uint8Array;
-        orderedPrivateRandomCursorBytes: readonly Uint8Array[];
+        privateRandomCursorManifestBytes: Uint8Array;
+        privateRandomnessStreamAttemptIdentifier?: Uint8Array;
         safeBoundaryOrdinal: number;
         stableAttemptBindingHash: Uint8Array;
     }): CheckpointBoundary | ExpectedCheckpointBoundary => {
@@ -243,13 +243,6 @@ export const openCommonProofBrowserCustody = (
                 'Common-proof checkpoint custody is not configured.',
             );
         }
-        const orderedRandomCursors =
-            inputValue.orderedPrivateRandomCursorBytes.map((cursorBytes) =>
-                decodeCheckpointCursor(
-                    input.checkpoint!.cursorKernel,
-                    cursorBytes,
-                ),
-            );
         const environmentBindingHash = checkpointEnvironmentBindingHash({
             commonProofEnvironmentIdentifier:
                 inputValue.commonProofEnvironmentIdentifier,
@@ -258,12 +251,20 @@ export const openCommonProofBrowserCustody = (
         });
         return Object.freeze({
             operationKind: commonProofGenerationCheckpointOperationKind,
-            orderedRandomCursors: Object.freeze(orderedRandomCursors),
             orderedSourceDigests: Object.freeze([
                 commonProofRuntimeBindingHash.slice(),
                 inputValue.stableAttemptBindingHash.slice(),
                 environmentBindingHash,
             ]),
+            privateRandomCursorManifestBytes:
+                inputValue.privateRandomCursorManifestBytes.slice(),
+            ...(inputValue.privateRandomnessStreamAttemptIdentifier ===
+            undefined
+                ? {}
+                : {
+                      privateRandomnessStreamAttemptIdentifier:
+                          inputValue.privateRandomnessStreamAttemptIdentifier.slice(),
+                  }),
             safeBoundaryOrdinal: inputValue.safeBoundaryOrdinal,
             ...(inputValue.canonicalStateBytes === undefined
                 ? {}
@@ -300,9 +301,19 @@ export const openCommonProofBrowserCustody = (
                           ) ||
                           checkpoint.stableAttemptBindingHash.byteLength !==
                               foundationHashByteLength ||
-                          !isNonEmptyByteArrayList(
-                              checkpoint.orderedPrivateRandomCursorBytes,
+                          !(
+                              checkpoint.privateRandomCursorManifestBytes instanceof
+                              Uint8Array
                           ) ||
+                          checkpoint.privateRandomCursorManifestBytes
+                              .byteLength >
+                              maximumCheckpointCursorManifestByteLength ||
+                          (checkpoint.privateRandomnessStreamAttemptIdentifier !==
+                              undefined &&
+                              (!(checkpoint.privateRandomnessStreamAttemptIdentifier instanceof
+                                  Uint8Array) ||
+                                  checkpoint.privateRandomnessStreamAttemptIdentifier
+                                      .byteLength !== identifierByteLength)) ||
                           !isSafeUnsigned32(checkpoint.safeBoundaryOrdinal)
                       ) {
                           throw new BrowserActionStorageCustodyError(
@@ -322,41 +333,32 @@ export const openCommonProofBrowserCustody = (
                               'A common-proof checkpoint changed its stable attempt binding.',
                           );
                       }
-                      const canonicalCursorBytes =
-                          checkpoint.orderedPrivateRandomCursorBytes.map(
-                              (cursorBytes) => Uint8Array.from(cursorBytes),
-                          );
+                      const privateRandomCursorManifestBytes = Uint8Array.from(
+                          checkpoint.privateRandomCursorManifestBytes,
+                      );
+                      const privateRandomnessStreamAttemptIdentifier =
+                          checkpoint.privateRandomnessStreamAttemptIdentifier?.slice();
                       try {
                           const boundary = checkpointBoundary({
                               canonicalStateBytes:
                                   checkpoint.canonicalStateBytes,
                               commonProofEnvironmentIdentifier,
-                              orderedPrivateRandomCursorBytes:
-                                  canonicalCursorBytes,
+                              privateRandomCursorManifestBytes,
+                              ...(privateRandomnessStreamAttemptIdentifier ===
+                              undefined
+                                  ? {}
+                                  : {
+                                        privateRandomnessStreamAttemptIdentifier,
+                                    }),
                               safeBoundaryOrdinal:
                                   checkpoint.safeBoundaryOrdinal,
                               stableAttemptBindingHash:
                                   checkpoint.stableAttemptBindingHash,
                           }) as CheckpointBoundary;
                           if (checkpointOperationIdentity === undefined) {
-                              const cursorStreamIdentifiers =
-                                  boundary.orderedRandomCursors.map(
-                                      (cursor) =>
-                                          cursor.streamAttemptIdentifier,
-                                  );
-                              const distinctStreamIdentifiers = [
-                                  ...new Map(
-                                      cursorStreamIdentifiers.map(
-                                          (identifier) => [
-                                              bytesToHex(identifier),
-                                              identifier,
-                                          ],
-                                      ),
-                                  ).values(),
-                              ];
                               checkpointOperationIdentity =
                                   await input.checkpoint!.store.beginOperation(
-                                      distinctStreamIdentifiers,
+                                      privateRandomnessStreamAttemptIdentifier,
                                   );
                           }
                           await input.checkpoint!.store.publish({
@@ -371,8 +373,13 @@ export const openCommonProofBrowserCustody = (
                                   checkpointLineageIdentifier:
                                       checkpointOperationIdentity.checkpointLineageIdentifier,
                                   commonProofEnvironmentIdentifier,
-                                  orderedPrivateRandomCursorBytes:
-                                      canonicalCursorBytes,
+                                  privateRandomCursorManifestBytes,
+                                  ...(privateRandomnessStreamAttemptIdentifier ===
+                                  undefined
+                                      ? {}
+                                      : {
+                                            privateRandomnessStreamAttemptIdentifier,
+                                        }),
                                   safeBoundaryOrdinal:
                                       checkpoint.safeBoundaryOrdinal,
                                   stableAttemptBindingHash:
@@ -386,9 +393,8 @@ export const openCommonProofBrowserCustody = (
                           latestCheckpointResumeDescriptor =
                               nextResumeDescriptor;
                       } finally {
-                          for (const cursorBytes of canonicalCursorBytes) {
-                              cursorBytes.fill(0);
-                          }
+                          privateRandomCursorManifestBytes.fill(0);
+                          privateRandomnessStreamAttemptIdentifier?.fill(0);
                       }
                   },
                   restoreAuthenticatedCheckpointState:
@@ -410,8 +416,15 @@ export const openCommonProofBrowserCustody = (
                               const expectedBoundary = checkpointBoundary({
                                   commonProofEnvironmentIdentifier:
                                       resumeDescriptor.commonProofEnvironmentIdentifier,
-                                  orderedPrivateRandomCursorBytes:
-                                      resumeDescriptor.orderedPrivateRandomCursorBytes,
+                                  privateRandomCursorManifestBytes:
+                                      resumeDescriptor.privateRandomCursorManifestBytes,
+                                  ...(resumeDescriptor.privateRandomnessStreamAttemptIdentifier ===
+                                  undefined
+                                      ? {}
+                                      : {
+                                            privateRandomnessStreamAttemptIdentifier:
+                                                resumeDescriptor.privateRandomnessStreamAttemptIdentifier,
+                                        }),
                                   safeBoundaryOrdinal:
                                       resumeDescriptor.safeBoundaryOrdinal,
                                   stableAttemptBindingHash:

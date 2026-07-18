@@ -4,8 +4,6 @@
 //! coefficients are evaluated by this module, so an object hash or a claimed
 //! root can never stand in for the tree opened by the common proof verifier.
 
-use std::collections::BTreeMap;
-
 use crate::{
     bgv::setup::{
         SETUP_COMMITMENT_MODULUS_LIMB_INDICES, parse_lattice_anchor_commitment_canonical_bytes,
@@ -17,11 +15,8 @@ use crate::{
 };
 
 use super::{
-    BoundedCommonProofByteSinkError, CommonProofBoundOpeningProvider, CommonProofEncodingError,
-    CommonProofOpeningArtifact, CommonProofOpeningGeometry, CompleteProofTreeCatalog,
     PROOF_EVALUATION_COSET_OFFSET, ProofBaseFieldElement, ProofEvaluationDomain, ProofFieldError,
-    ProofPolynomialError, ProofTreeCatalogEntry, ProofTreeCatalogSource,
-    encode_common_proof_query_tree_fragment,
+    ProofPolynomialError,
 };
 
 const SETUP_PUBLIC_POLYNOMIAL_CONTEXT_SCHEMA_IDENTIFIER: u16 = 0x121b;
@@ -172,6 +167,19 @@ impl SetupPublicPolynomialContext {
         )
     }
 
+    pub(crate) fn collective_public_key(
+        setup_proof_context_hash: [u8; 64],
+    ) -> Result<Self, SetupPublicPolynomialError> {
+        Self::new(
+            setup_proof_context_hash,
+            SetupPublicPolynomialRootRole::CollectivePublicKey,
+            None,
+            None,
+            None,
+            None,
+        )
+    }
+
     pub(crate) fn galois_common(
         setup_proof_context_hash: [u8; 64],
         schedule_position: u32,
@@ -207,6 +215,18 @@ impl SetupPublicPolynomialContext {
 
     pub(crate) const fn root_role(&self) -> SetupPublicPolynomialRootRole {
         self.root_role
+    }
+
+    pub(crate) const fn setup_proof_context_hash(&self) -> [u8; 64] {
+        self.setup_proof_context_hash
+    }
+
+    pub(crate) const fn owner_participant_identity(&self) -> Option<[u8; 64]> {
+        self.owner_participant_identity
+    }
+
+    pub(crate) const fn owner_roster_position(&self) -> Option<u16> {
+        self.owner_roster_position
     }
 
     pub(crate) const fn schedule_position(&self) -> Option<u32> {
@@ -281,9 +301,10 @@ pub(crate) struct SetupPublicPolynomialTree {
 
 impl SetupPublicPolynomialTree {
     /// Decodes the sole canonical lattice-anchor representation and derives
-    /// the role-one tree from its complete ordered rows. The selected prime is
-    /// checked against the typed context; neither an object hash nor a claimed
-    /// Merkle root is accepted.
+    /// the role-one tree from the low and high coefficient halves of each
+    /// logical row, in row-major order. The selected prime is checked against
+    /// the typed context; neither an object hash nor a claimed Merkle root is
+    /// accepted.
     pub(crate) fn from_lattice_anchor_canonical_bytes(
         context: &SetupPublicPolynomialContext,
         evaluation_domain_size: usize,
@@ -299,15 +320,33 @@ impl SetupPublicPolynomialTree {
         {
             return Err(SetupPublicPolynomialError::InvalidLatticeAnchor);
         }
-        let ordered_coefficient_columns = commitment
+        let physical_column_coefficient_count = commitment.ring_degree / 2;
+        if physical_column_coefficient_count == 0
+            || physical_column_coefficient_count.checked_mul(2) != Some(commitment.ring_degree)
+        {
+            return Err(SetupPublicPolynomialError::InvalidLatticeAnchor);
+        }
+        let physical_column_count = commitment
             .rows
-            .iter()
-            .map(|row| {
-                row.iter()
-                    .map(|coefficient| ProofBaseFieldElement::from_canonical(*coefficient))
-                    .collect::<Result<Vec<_>, _>>()
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+            .len()
+            .checked_mul(2)
+            .ok_or(SetupPublicPolynomialError::CountOverflow)?;
+        let mut ordered_coefficient_columns = Vec::with_capacity(physical_column_count);
+        for logical_row in &commitment.rows {
+            if logical_row.len() != commitment.ring_degree {
+                return Err(SetupPublicPolynomialError::InvalidLatticeAnchor);
+            }
+            let (low_coefficients, high_coefficients) =
+                logical_row.split_at(physical_column_coefficient_count);
+            for physical_column in [low_coefficients, high_coefficients] {
+                ordered_coefficient_columns.push(
+                    physical_column
+                        .iter()
+                        .map(|coefficient| ProofBaseFieldElement::from_canonical(*coefficient))
+                        .collect::<Result<Vec<_>, _>>()?,
+                );
+            }
+        }
         Self::construct_from_canonical_coefficients(SetupPublicPolynomialTreeInput {
             context,
             evaluation_domain_size,
@@ -394,6 +433,13 @@ impl SetupPublicPolynomialTree {
         &self.ordered_coefficient_columns
     }
 
+    /// Consumes a verifier-built tree and releases its large evaluation and
+    /// Merkle layers while preserving the exact coefficient columns whose
+    /// committed root was opened by the common proof verifier.
+    pub(crate) fn into_ordered_coefficient_columns(self) -> Vec<Vec<ProofBaseFieldElement>> {
+        self.ordered_coefficient_columns
+    }
+
     pub(crate) fn extension_columns(&self) -> &[Vec<ProofBaseFieldElement>] {
         &self.extension_columns
     }
@@ -423,176 +469,6 @@ impl SetupPublicPolynomialTree {
             self.public_polynomial_context_hash,
             &self.extension_columns,
             leaf_index,
-        )
-    }
-}
-
-enum SetupPublicPolynomialTreeSource<'tree> {
-    Borrowed(&'tree SetupPublicPolynomialTree),
-    Owned(Box<SetupPublicPolynomialTree>),
-}
-
-impl SetupPublicPolynomialTreeSource<'_> {
-    fn tree(&self) -> &SetupPublicPolynomialTree {
-        match self {
-            Self::Borrowed(tree) => tree,
-            Self::Owned(tree) => tree.as_ref(),
-        }
-    }
-}
-
-struct SetupPublicPolynomialOpeningArtifact<'tree> {
-    tree_catalog_index: u16,
-    canonical_leaf_byte_length: usize,
-    tree: SetupPublicPolynomialTreeSource<'tree>,
-}
-
-impl CommonProofOpeningArtifact for SetupPublicPolynomialOpeningArtifact<'_> {
-    type Error = SetupPublicPolynomialError;
-
-    fn tree_catalog_index(&self) -> u16 {
-        self.tree_catalog_index
-    }
-
-    fn leaf_count(&self) -> usize {
-        self.tree.tree().leaf_count()
-    }
-
-    fn canonical_leaf_byte_length(&self) -> usize {
-        self.canonical_leaf_byte_length
-    }
-
-    fn read_canonical_leaf(
-        &mut self,
-        leaf_index: u64,
-        destination: &mut [u8],
-    ) -> Result<(), Self::Error> {
-        let canonical_bytes = self.tree.tree().canonical_leaf_bytes(
-            usize::try_from(leaf_index).map_err(|_| SetupPublicPolynomialError::CountOverflow)?,
-        )?;
-        if canonical_bytes.len() != self.canonical_leaf_byte_length
-            || destination.len() != self.canonical_leaf_byte_length
-        {
-            return Err(SetupPublicPolynomialError::InvalidInput);
-        }
-        destination.copy_from_slice(&canonical_bytes);
-        Ok(())
-    }
-
-    fn read_digest(&mut self, level: u32, node_index: u64) -> Result<[u8; 64], Self::Error> {
-        self.tree
-            .tree()
-            .merkle_levels
-            .get(usize::try_from(level).map_err(|_| SetupPublicPolynomialError::CountOverflow)?)
-            .and_then(|nodes| {
-                usize::try_from(node_index)
-                    .ok()
-                    .and_then(|index| nodes.get(index))
-            })
-            .copied()
-            .ok_or(SetupPublicPolynomialError::InvalidInput)
-    }
-}
-
-/// Catalog-indexed adapter over trees recomputed from canonical public
-/// polynomial coefficients. It never accepts a separately claimed root.
-pub(crate) struct SetupPublicPolynomialBoundOpeningProvider<'tree> {
-    artifacts: BTreeMap<u16, SetupPublicPolynomialOpeningArtifact<'tree>>,
-}
-
-impl<'tree> SetupPublicPolynomialBoundOpeningProvider<'tree> {
-    pub(crate) fn new(
-        trees: impl IntoIterator<Item = (u16, &'tree SetupPublicPolynomialTree)>,
-    ) -> Result<Self, SetupPublicPolynomialError> {
-        let mut artifacts = BTreeMap::new();
-        for (tree_catalog_index, tree) in trees {
-            let canonical_leaf_byte_length = tree.canonical_leaf_bytes(0)?.len();
-            let artifact = SetupPublicPolynomialOpeningArtifact {
-                tree_catalog_index,
-                canonical_leaf_byte_length,
-                tree: SetupPublicPolynomialTreeSource::Borrowed(tree),
-            };
-            if artifacts.insert(tree_catalog_index, artifact).is_some() {
-                return Err(SetupPublicPolynomialError::InvalidInput);
-            }
-        }
-        if artifacts.is_empty() {
-            return Err(SetupPublicPolynomialError::InvalidInput);
-        }
-        Ok(Self { artifacts })
-    }
-}
-
-impl SetupPublicPolynomialBoundOpeningProvider<'static> {
-    pub(crate) fn from_owned(
-        trees: impl IntoIterator<Item = (u16, SetupPublicPolynomialTree)>,
-    ) -> Result<Self, SetupPublicPolynomialError> {
-        let mut artifacts = BTreeMap::new();
-        for (tree_catalog_index, tree) in trees {
-            let canonical_leaf_byte_length = tree.canonical_leaf_bytes(0)?.len();
-            let artifact = SetupPublicPolynomialOpeningArtifact {
-                tree_catalog_index,
-                canonical_leaf_byte_length,
-                tree: SetupPublicPolynomialTreeSource::Owned(Box::new(tree)),
-            };
-            if artifacts.insert(tree_catalog_index, artifact).is_some() {
-                return Err(SetupPublicPolynomialError::InvalidInput);
-            }
-        }
-        if artifacts.is_empty() {
-            return Err(SetupPublicPolynomialError::InvalidInput);
-        }
-        Ok(Self { artifacts })
-    }
-}
-
-impl CommonProofBoundOpeningProvider for SetupPublicPolynomialBoundOpeningProvider<'_> {
-    type Error = SetupPublicPolynomialError;
-
-    fn opening_geometry(
-        &self,
-        catalog_entry: &ProofTreeCatalogEntry,
-    ) -> Result<CommonProofOpeningGeometry, Self::Error> {
-        if catalog_entry.source() != ProofTreeCatalogSource::RelationBoundPublic {
-            return Err(SetupPublicPolynomialError::InvalidInput);
-        }
-        let artifact = self
-            .artifacts
-            .get(&catalog_entry.tree_catalog_index())
-            .ok_or(SetupPublicPolynomialError::InvalidInput)?;
-        Ok(CommonProofOpeningGeometry {
-            tree_catalog_index: artifact.tree_catalog_index(),
-            leaf_count: artifact.leaf_count(),
-            canonical_leaf_byte_length: artifact.canonical_leaf_byte_length(),
-        })
-    }
-
-    fn encode_bound_opening_fragment(
-        &mut self,
-        catalog: &CompleteProofTreeCatalog,
-        catalog_index: usize,
-        geometry: CommonProofOpeningGeometry,
-        sorted_query_representatives: &[u64],
-        maximum_fragment_byte_length: usize,
-    ) -> Result<Vec<u8>, CommonProofEncodingError<BoundedCommonProofByteSinkError, Self::Error>>
-    {
-        let entry =
-            catalog
-                .entries()
-                .get(catalog_index)
-                .ok_or(CommonProofEncodingError::Artifact(
-                    SetupPublicPolynomialError::InvalidInput,
-                ))?;
-        let artifact = self.artifacts.get_mut(&entry.tree_catalog_index()).ok_or(
-            CommonProofEncodingError::Artifact(SetupPublicPolynomialError::InvalidInput),
-        )?;
-        encode_common_proof_query_tree_fragment(
-            catalog,
-            catalog_index,
-            geometry,
-            sorted_query_representatives,
-            artifact,
-            maximum_fragment_byte_length,
         )
     }
 }
@@ -779,8 +655,9 @@ mod tests {
     }
 
     #[test]
-    fn canonical_lattice_anchor_bytes_are_the_only_role_one_tree_source() {
+    fn canonical_lattice_anchor_provider_uses_relation_column_order_and_rejects_detached_columns() {
         let context = lattice_anchor_context();
+        let physical_column_coefficient_count = POLYNOMIAL_DEGREE / 2;
         let mut commitment = LatticeAnchorCommitment {
             commitment_data_prime_index: 1,
             ring_degree: POLYNOMIAL_DEGREE,
@@ -791,6 +668,14 @@ mod tests {
                     .expect("the anchor row count fits usize")
             ],
         };
+        commitment.rows[0][0] = 3;
+        commitment.rows[0][physical_column_coefficient_count - 1] = 5;
+        commitment.rows[0][physical_column_coefficient_count] = 7;
+        commitment.rows[0][POLYNOMIAL_DEGREE - 1] = 11;
+        commitment.rows[1][0] = 13;
+        commitment.rows[1][physical_column_coefficient_count - 1] = 17;
+        commitment.rows[1][physical_column_coefficient_count] = 19;
+        commitment.rows[1][POLYNOMIAL_DEGREE - 1] = 23;
         let canonical_bytes = lattice_anchor_commitment_canonical_bytes(&commitment)
             .expect("the anchor bytes are canonical");
         let original = SetupPublicPolynomialTree::from_lattice_anchor_canonical_bytes(
@@ -800,12 +685,55 @@ mod tests {
         )
         .expect("the canonical anchor builds its role-one tree");
         let original_root = original.root();
-        assert_eq!(original.row_width(), 2);
+        assert_eq!(original.row_width(), 4);
         assert_eq!(
             original.source_polynomial_degree_bound_exclusive(),
             POLYNOMIAL_DEGREE,
         );
+        let expected_physical_columns = [
+            &commitment.rows[0][..physical_column_coefficient_count],
+            &commitment.rows[0][physical_column_coefficient_count..],
+            &commitment.rows[1][..physical_column_coefficient_count],
+            &commitment.rows[1][physical_column_coefficient_count..],
+        ];
+        for (physical_column, expected_coefficients) in original
+            .ordered_coefficient_columns()
+            .iter()
+            .zip(expected_physical_columns)
+        {
+            assert_eq!(
+                physical_column
+                    .iter()
+                    .map(|coefficient| coefficient.canonical())
+                    .collect::<Vec<_>>(),
+                expected_coefficients,
+            );
+        }
+
+        let mut wrong_order_columns = original.ordered_coefficient_columns().to_vec();
+        wrong_order_columns.swap(1, 2);
         drop(original);
+        assert_eq!(
+            SetupPublicPolynomialTree::construct(SetupPublicPolynomialTreeInput {
+                context: &context,
+                evaluation_domain_size: 2 * POLYNOMIAL_DEGREE,
+                source_polynomial_degree_bound_exclusive: POLYNOMIAL_DEGREE,
+                ordered_coefficient_columns: &wrong_order_columns,
+            })
+            .map(|tree| tree.root()),
+            Err(SetupPublicPolynomialError::InvalidLatticeAnchor),
+        );
+        let wrong_order_tree = SetupPublicPolynomialTree::construct_from_canonical_coefficients(
+            SetupPublicPolynomialTreeInput {
+                context: &context,
+                evaluation_domain_size: 2 * POLYNOMIAL_DEGREE,
+                source_polynomial_degree_bound_exclusive: POLYNOMIAL_DEGREE,
+                ordered_coefficient_columns: &wrong_order_columns,
+            },
+        )
+        .expect("the detached columns remain individually well formed");
+        assert_ne!(original_root, wrong_order_tree.root());
+        drop(wrong_order_tree);
 
         commitment.rows[1][3] = 1;
         let changed_bytes = lattice_anchor_commitment_canonical_bytes(&commitment)

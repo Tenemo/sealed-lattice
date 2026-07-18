@@ -47,8 +47,6 @@ const expectedPublicRuntimeExportNames = [
     'verifyCanonicalCeremonyContext',
     'verifyCanonicalManifest',
     'verifyCanonicalSuiteRecord',
-    'verifyPrivateVssShare',
-    'verifySetupPackage',
 ] as const;
 
 describe('election foundation public package API in Node', () => {
@@ -123,9 +121,6 @@ describe('election foundation public package API in Node', () => {
             'utf8',
         );
 
-        expect(declarations).toContain(
-            'type SetupPackageVerification = VerificationResult<void>;',
-        );
         expect(declarations).not.toContain('derivePollSpecHash');
         expect(declarations).toContain(
             'declare const createCanonicalManifest:',

@@ -135,6 +135,26 @@ pub(crate) enum RelationMaskKind {
     OpeningBatch = 3,
 }
 
+/// The private-randomness stream class is derived from the mask grammar. The
+/// family remains in the foundation randomness domain, while the compiler-
+/// assigned ordinal distinguishes every mask in one class without imposing a
+/// `u16` ceiling on the relation width.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct RelationMaskCoordinate {
+    purpose_class: u16,
+    mask_ordinal: u32,
+}
+
+impl RelationMaskCoordinate {
+    pub(crate) const fn purpose_class(self) -> u16 {
+        self.purpose_class
+    }
+
+    pub(crate) const fn mask_ordinal(self) -> u32 {
+        self.mask_ordinal
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u16)]
 pub(crate) enum RelationMaskTargetClass {
@@ -145,7 +165,7 @@ pub(crate) enum RelationMaskTargetClass {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct RelationMaskDescriptor {
-    pub(super) mask_purpose: u16,
+    pub(super) mask_ordinal: u32,
     pub(super) mask_kind: RelationMaskKind,
     pub(super) target_class: RelationMaskTargetClass,
     pub(super) target_ordinal: u32,
@@ -153,8 +173,15 @@ pub(crate) struct RelationMaskDescriptor {
 }
 
 impl RelationMaskDescriptor {
-    pub(crate) const fn mask_purpose(self) -> u16 {
-        self.mask_purpose
+    pub(crate) const fn mask_coordinate(self) -> RelationMaskCoordinate {
+        RelationMaskCoordinate {
+            purpose_class: self.mask_kind as u16,
+            mask_ordinal: self.mask_ordinal,
+        }
+    }
+
+    pub(crate) const fn mask_ordinal(self) -> u32 {
+        self.mask_ordinal
     }
 
     pub(crate) const fn mask_kind(self) -> RelationMaskKind {
@@ -178,7 +205,7 @@ impl RelationMaskDescriptor {
             RELATION_MASK_SCHEMA_IDENTIFIER,
             SCHEMA_VERSION,
             vec![
-                CanonicalItem::unsigned16(self.mask_purpose),
+                CanonicalItem::unsigned32(self.mask_ordinal),
                 CanonicalItem::unsigned16(self.mask_kind as u16),
                 CanonicalItem::unsigned16(self.target_class as u16),
                 CanonicalItem::unsigned32(self.target_ordinal),
@@ -363,7 +390,8 @@ impl RelationPlanVariant {
     /// Conservative cardinality of the values rejected while sampling the
     /// last DEEP center. Rotations and Frobenius maps are bijections, so a
     /// union bound over their inverse images covers trace roots, the evaluation
-    /// coset, every checked zeroifier root, and collisions with earlier centers.
+    /// coset, every checked zeroifier root, direct equality with an earlier
+    /// center, and translated-orbit collisions with earlier centers.
     pub(crate) fn application_deep_forbidden_candidate_count_bound(
         &self,
         context: &RelationPlanCheckContext,
@@ -439,6 +467,7 @@ impl RelationPlanVariant {
         Ok(BigUint::one()
             + &opening_point_count * BigUint::from(excluded_per_translated_point)
             + &opening_point_count * non_full_degree_element_bound
+            + BigUint::from(prior_center_count)
             + prior_orbit_collision_bound
             + current_orbit_collision_bound)
     }

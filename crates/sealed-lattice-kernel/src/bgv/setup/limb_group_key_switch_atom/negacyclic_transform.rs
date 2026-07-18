@@ -106,22 +106,40 @@ pub(crate) struct NegacyclicDomain<'a, const LIMB_COUNT: usize> {
 }
 
 impl<'a, const LIMB_COUNT: usize> NegacyclicDomain<'a, LIMB_COUNT> {
-    /// Builds the domain for a power-of-two size up to 32768. The field's
-    /// primitive 65536th root is stepped down to a primitive 2*size-th root,
-    /// which exists because 2 * size divides 65536.
+    /// Builds a power-of-two domain supported by the field's stored exact-order
+    /// root. The selected field carries a primitive 131072nd root for N=65536;
+    /// smaller test fields retain their 65536th-root ceiling.
     pub(crate) fn new(
         parameters: &'a ProofFieldParameters<LIMB_COUNT>,
         size: usize,
     ) -> CanonicalResult<Self> {
-        if !size.is_power_of_two() || !(2..=32_768).contains(&size) {
+        let maximum_size = if parameters.primitive_131072nd_root.is_some() {
+            65_536
+        } else {
+            32_768
+        };
+        if !size.is_power_of_two() || !(2..=maximum_size).contains(&size) {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::MalformedLength,
-                "negacyclic domain size must be a power of two between 2 and 32768",
+                "negacyclic domain size exceeds the proof field's exact-order root",
             ));
         }
-        let root = parameters.raw_value_to_element(&parameters.primitive_65536th_root);
+        let (root_raw, root_order) = if size > 32_768 {
+            (
+                parameters.primitive_131072nd_root.as_ref().ok_or_else(|| {
+                    CanonicalError::new(
+                        CanonicalErrorCode::MalformedLength,
+                        "negacyclic domain requires an unavailable primitive 131072nd root",
+                    )
+                })?,
+                131_072,
+            )
+        } else {
+            (&parameters.primitive_65536th_root, 65_536)
+        };
+        let root = parameters.raw_value_to_element(root_raw);
         let mut step_exponent = [0_u64; LIMB_COUNT];
-        step_exponent[0] = (65_536 / (2 * size)) as u64;
+        step_exponent[0] = (root_order / (2 * size)) as u64;
         let psi = parameters.power(&root, &step_exponent);
         let omega = parameters.multiply(&psi, &psi);
         // These are roots of known public orders, so x^(order - 1) is their
@@ -217,8 +235,8 @@ impl<'a, const LIMB_COUNT: usize> NegacyclicDomain<'a, LIMB_COUNT> {
 #[cfg(test)]
 mod tests {
     use super::super::proof_field::{
-        eight_limb_group_field_parameters, single_limb_field_parameters,
-        sixteen_limb_group_field_parameters,
+        eight_limb_group_field_parameters, selected_key_switch_proof_field_parameters,
+        single_limb_field_parameters,
     };
     use super::*;
 
@@ -253,15 +271,20 @@ mod tests {
 
     #[test]
     fn transform_round_trips_across_sizes_and_fields() {
-        let sixteen = sixteen_limb_group_field_parameters();
+        let selected = selected_key_switch_proof_field_parameters();
         let eight = eight_limb_group_field_parameters();
         let single =
             single_limb_field_parameters(2_305_843_009_214_414_849, 1_324_459_744_473_789_483);
         for size in [8, 64, 2048] {
-            check_round_trip(&sixteen, size);
+            check_round_trip(&selected, size);
             check_round_trip(&eight, size);
             check_round_trip(&single, size);
         }
+    }
+
+    #[test]
+    fn selected_field_round_trips_the_complete_ring_domain() {
+        check_round_trip(&selected_key_switch_proof_field_parameters(), 65_536);
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -317,7 +340,7 @@ mod tests {
 
     #[test]
     fn ntt_product_matches_schoolbook_negacyclic_product() {
-        let parameters = sixteen_limb_group_field_parameters();
+        let parameters = selected_key_switch_proof_field_parameters();
         let domain = NegacyclicDomain::new(&parameters, 64).expect("domain builds");
         let left = deterministic_values(&parameters, 64, 41);
         let right = deterministic_values(&parameters, 64, 43);

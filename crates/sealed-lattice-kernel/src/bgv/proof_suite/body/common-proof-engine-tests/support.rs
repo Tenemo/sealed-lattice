@@ -13,8 +13,8 @@ use crate::foundation::{
     BrowserWorkerAuthenticatedStorageHeadSource, BrowserWorkerAuthenticatedStorageTransitionSource,
     CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalStreamDomain,
     CanonicalStreamVerifier, CanonicalTuple, FOUNDATION_PROFILE, Hash512, LocalStorageBinding,
-    ParticipantIdentity, PrivateRandomCursor, ProofApplicationSlotCeilings, ProofObjectHeader,
-    RefusalReason, StreamDescriptor, VerifiedCanonicalStreamSummary,
+    ParticipantIdentity, PrivateRandomCursor, ProofApplicationSlot, ProofApplicationSlotCeilings,
+    ProofObjectHeader, RefusalReason, StreamDescriptor, VerifiedCanonicalStreamSummary,
     derive_canonical_stream_descriptor,
 };
 
@@ -23,46 +23,50 @@ use super::super::super::relation_plan::{
 };
 use super::super::super::{
     BoundedCommonProofByteSink, CheckpointableCommonProofPrivateCoinSource,
-    CollectivePublicKeyAggregatePlanInput, CommittedMaterialBoundOpeningProvider,
-    CommittedMaterialProfile, CommittedMaterialTree, CommittedMaterialTreeInput,
-    CommonProofApplicationBinding, CommonProofGenerationError,
-    CommonProofGenerationInitializationError, CommonProofGenerationInput,
-    CommonProofGenerationOperationHandle, CommonProofGenerationSources,
+    CollectivePublicKeyAggregatePlanInput, CommittedMaterialProfile, CommittedMaterialTree,
+    CommittedMaterialTreeInput, CommonProofApplicationBinding,
+    CommonProofCheckpointCursorManifestError, CommonProofGenerationAuthorization,
+    CommonProofGenerationError, CommonProofGenerationInitializationError,
+    CommonProofGenerationInput, CommonProofGenerationOperationHandle, CommonProofGenerationSources,
     CommonProofGenerationStateMachine, CommonProofGenerationWorkerError,
-    CommonProofGenerationWorkerPoll, CommonProofPrivateCoinSource, CommonProofProverError,
-    CommonProofRelationPlanCapability, CommonProofResidentMemoryPhase, CommonProofRuntimeError,
-    CommonProofRuntimeLimits, CommonProofRuntimeRegistry, CommonProofSourcePolynomial,
-    CommonProofUpstreamInputRegistry, CommonProofVerificationBinding, CommonProofVerificationInput,
-    CommonProofVerificationPoll, CommonProofVerificationStateMachine,
-    CommonProofVerificationWorkerError, CommonProofVerificationWorkerPoll,
-    CommonProofVerifierError, CompiledRelationPlan, CompiledTargetReleaseRelation,
-    EvaluatorKeyAggregateEntryPlanInput, EvaluatorKeyAggregatePlanInput,
-    EvaluatorKeyAggregateVariantInput, MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH,
-    MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH,
+    CommonProofGenerationWorkerPoll, CommonProofPrivateCoinCoordinate,
+    CommonProofPrivateCoinSource, CommonProofProverError, CommonProofRelationPlanCapability,
+    CommonProofResidentMemoryPhase, CommonProofRuntimeError, CommonProofRuntimeLimits,
+    CommonProofRuntimeRegistry, CommonProofSourcePolynomial, CommonProofUpstreamInputRegistry,
+    CommonProofVerificationBinding, CommonProofVerificationInput, CommonProofVerificationPoll,
+    CommonProofVerificationStateMachine, CommonProofVerificationWorkerError,
+    CommonProofVerificationWorkerPoll, CommonProofVerifierError, CompiledRelationPlan,
+    CompiledTargetReleaseRelation, EvaluatorKeyAggregateEntryPlanInput,
+    EvaluatorKeyAggregatePlanInput, EvaluatorKeyAggregateVariantInput,
+    MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH, MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH,
     MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH, PROOF_BASE_FIELD_MODULUS,
     PROOF_CHALLENGE_EXTENSION_DEGREE, PROOF_DEEP_POINT_COUNT, PROOF_EVALUATION_BLOWUP_FACTOR,
     PROOF_EVALUATION_COSET_OFFSET, PROOF_FINAL_POLYNOMIAL_DEGREE_BOUND_EXCLUSIVE,
     PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT,
     PROOF_NON_NATIVE_IDENTITY_CHALLENGE_COUNT, PROOF_UNIQUE_QUERY_COUNT,
     PollableCommonProofVerificationInput, PreparedCommonProofGeneration,
-    PreparedCommonProofVerification, ProofBaseFieldElement, ProofBodyError, ProofDecodeError,
-    ProofEvaluationDomain, ProofExternalMemory, ProofExternalMemoryObject,
-    ProofExternalMemoryProtection, ProofExternalMemoryTransactionOperation,
-    ProofExternalMemoryTransactionRequest, ProofLeafVisibility, ProofProfileError, ProofTreeRole,
-    PublicAggregateRelationGeometry, RelationPlanCheckContext, RelationProofTreeInput,
-    ResidentCommonProofByteSource, ResidentCommonProofInputChunk, ResolvedSuiteModulus,
-    RkgRoundOneAggregatePlanInput, RkgRoundOneAggregateVariantInput, SameSecretRelationPlanInput,
-    SetupPublicPolynomialBoundOpeningProvider, SetupPublicPolynomialContext,
-    SetupPublicPolynomialTree, SetupPublicPolynomialTreeInput, StatementOwnedProofTreeInput,
-    SuiteModulusReference, TargetReleaseModulusWitness, TargetReleaseRelationPlanInput,
-    TargetReleaseRoleWitness, TargetReleaseWitness, VerifiedCommonProof,
-    VerifiedCommonProofCapabilityHandle, VerifiedRelationColumnEvaluator,
-    VerifiedStatementOwnedTree, VerifiedTargetReleaseModulusInput,
-    canonical_proof_object_header_bytes, compile_collective_public_key_aggregate_relation_plan,
+    PreparedCommonProofVerification, ProofBaseFieldElement, ProofBodyError,
+    ProofChallengeExtensionElement, ProofDecodeError, ProofEvaluationDomain, ProofExternalMemory,
+    ProofExternalMemoryObject, ProofExternalMemoryProtection,
+    ProofExternalMemoryTransactionOperation, ProofExternalMemoryTransactionRequest,
+    ProofLeafVisibility, ProofProfileError, ProofTreeRole, PublicAggregateRelationGeometry,
+    RelationPlanCheckContext, RelationProofTreeInput, ResidentCommonProofByteSource,
+    ResidentCommonProofInputChunk, ResidentCommonProofSourcePolynomialProvider,
+    ResolvedSuiteModulus, RkgRoundOneAggregatePlanInput, RkgRoundOneAggregateVariantInput,
+    SameSecretRelationPlanInput, SetupPublicPolynomialContext, SetupPublicPolynomialTree,
+    SetupPublicPolynomialTreeInput, StatementOwnedProofTreeInput, SuiteModulusReference,
+    TargetReleaseModulusWitness, TargetReleaseRelationPlanInput, TargetReleaseRoleWitness,
+    TargetReleaseWitness, VerifiedCommonProof, VerifiedCommonProofCapabilityHandle,
+    VerifiedRelationColumnEvaluator, VerifiedStatementOwnedTree, VerifiedTargetReleaseModulusInput,
+    canonical_proof_object_header_bytes,
+    common_proof_private_coin_coordinate_derivation_context_hash,
+    compile_collective_public_key_aggregate_relation_plan,
     compile_evaluator_key_aggregate_relation_plan, compile_rkg_round_one_aggregate_relation_plan,
     compile_same_secret_relation_plan, compile_target_release_relation,
-    durable_authorization_frame_digest, generate_common_proof, verified_application_statement_hash,
-    verify_common_proof,
+    construct_composed_quotient_polynomial,
+    construct_constraint_stream_composed_quotient_polynomial, durable_authorization_frame_digest,
+    encode_common_proof_checkpoint_cursor_manifest, generate_common_proof,
+    verified_application_statement_hash, verify_common_proof,
 };
 use super::super::SCHEMA_VERSION;
 
@@ -397,7 +401,7 @@ struct BoundedDeterministicTestPrivateCoins {
     next_value: u64,
     remaining_call_count: u32,
     remaining_byte_count: usize,
-    calls_by_purpose: BTreeMap<u16, u64>,
+    calls_by_coordinate: BTreeMap<CommonProofPrivateCoinCoordinate, u64>,
     checkpoint_cursor_family_schema_identifier: u16,
 }
 
@@ -407,7 +411,7 @@ impl BoundedDeterministicTestPrivateCoins {
             next_value: 1,
             remaining_call_count: maximum_call_count,
             remaining_byte_count: maximum_byte_count,
-            calls_by_purpose: BTreeMap::new(),
+            calls_by_coordinate: BTreeMap::new(),
             checkpoint_cursor_family_schema_identifier: APPLICATION_STATEMENT_SCHEMA_IDENTIFIER,
         }
     }
@@ -416,17 +420,24 @@ impl BoundedDeterministicTestPrivateCoins {
         if counter_delta != 0 {
             self.checkpoint_cursor_family_schema_identifier =
                 ProofApplicationSlotCeilings::BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER;
-            self.calls_by_purpose.insert(41, counter_delta);
+            self.calls_by_coordinate.insert(
+                CommonProofPrivateCoinCoordinate::mask(1, 0)
+                    .expect("trace private-coin class is assigned"),
+                counter_delta,
+            );
         }
         self
     }
 
-    fn consume_call(&mut self, purpose: u16) -> Result<(), TestPrivateCoinError> {
+    fn consume_call(
+        &mut self,
+        coordinate: CommonProofPrivateCoinCoordinate,
+    ) -> Result<(), TestPrivateCoinError> {
         self.remaining_call_count = self
             .remaining_call_count
             .checked_sub(1)
             .ok_or(TestPrivateCoinError::CallLimitExceeded)?;
-        let call_count = self.calls_by_purpose.entry(purpose).or_default();
+        let call_count = self.calls_by_coordinate.entry(coordinate).or_default();
         *call_count = call_count
             .checked_add(1)
             .ok_or(TestPrivateCoinError::CallLimitExceeded)?;
@@ -439,11 +450,11 @@ impl CommonProofPrivateCoinSource for BoundedDeterministicTestPrivateCoins {
 
     fn sample_modulo(
         &mut self,
-        purpose: u16,
+        coordinate: CommonProofPrivateCoinCoordinate,
         modulus: u64,
         maximum_candidate_draws_per_output: u32,
     ) -> Result<u64, Self::Error> {
-        self.consume_call(purpose)?;
+        self.consume_call(coordinate)?;
         if modulus < 2 || maximum_candidate_draws_per_output == 0 {
             return Err(TestPrivateCoinError::InvalidModulus);
         }
@@ -452,8 +463,12 @@ impl CommonProofPrivateCoinSource for BoundedDeterministicTestPrivateCoins {
         Ok(value)
     }
 
-    fn fill_raw_bytes(&mut self, purpose: u16, destination: &mut [u8]) -> Result<(), Self::Error> {
-        self.consume_call(purpose)?;
+    fn fill_raw_bytes(
+        &mut self,
+        coordinate: CommonProofPrivateCoinCoordinate,
+        destination: &mut [u8],
+    ) -> Result<(), Self::Error> {
+        self.consume_call(coordinate)?;
         self.remaining_byte_count = self
             .remaining_byte_count
             .checked_sub(destination.len())
@@ -469,21 +484,36 @@ impl CommonProofPrivateCoinSource for BoundedDeterministicTestPrivateCoins {
 }
 
 impl CheckpointableCommonProofPrivateCoinSource for BoundedDeterministicTestPrivateCoins {
-    fn checkpoint_cursors(&self) -> Vec<PrivateRandomCursor> {
-        self.calls_by_purpose
+    fn checkpoint_cursor_manifest(
+        &self,
+    ) -> Result<Vec<u8>, CommonProofCheckpointCursorManifestError> {
+        let derivation_binding_hash = Hash512::from_bytes([0x51; 64]);
+        let stream_attempt_identifier = [0x52; 32];
+        let ordered_cursors = self
+            .calls_by_coordinate
             .iter()
-            .map(|(purpose, call_count)| {
+            .map(|(coordinate, call_count)| {
                 PrivateRandomCursor::new(
                     self.checkpoint_cursor_family_schema_identifier,
-                    *purpose,
-                    Hash512::from_bytes([0x51; 64]),
-                    [0x52; 32],
+                    coordinate.purpose_class(),
+                    common_proof_private_coin_coordinate_derivation_context_hash(
+                        derivation_binding_hash,
+                        *coordinate,
+                    ),
+                    stream_attempt_identifier,
                     *call_count,
                     None,
                 )
-                .expect("the common-proof test purpose is assigned")
+                .map(|cursor| (*coordinate, cursor))
+                .expect("the common-proof test coordinate is assigned")
             })
-            .collect()
+            .collect::<Vec<_>>();
+        encode_common_proof_checkpoint_cursor_manifest(
+            self.checkpoint_cursor_family_schema_identifier,
+            derivation_binding_hash,
+            stream_attempt_identifier,
+            ordered_cursors.iter().copied(),
+        )
     }
 }
 
@@ -906,7 +936,7 @@ fn public_aggregate_common_proof_fixture(
         .map(|(column_index, value)| {
             (
                 u32::try_from(column_index).expect("the toy column index fits u32"),
-                CommonProofSourcePolynomial::Base(vec![
+                CommonProofSourcePolynomial::from_base_coefficients(vec![
                     ProofBaseFieldElement::from_canonical(value)
                         .expect("the toy source coefficient is canonical"),
                 ]),
@@ -1091,19 +1121,6 @@ fn generate_fixture_proof(fixture: &mut CommonProofEngineFixture) -> Vec<u8> {
     let mut private_coins = BoundedDeterministicTestPrivateCoins::new(1_024, 1_024 * 1_024);
     let mut sink = BoundedCommonProofByteSink::new(MAXIMUM_PROOF_BYTE_LENGTH)
         .expect("the bounded proof sink initializes");
-    let mut bound_openings = SetupPublicPolynomialBoundOpeningProvider::new(
-        fixture
-            .setup_polynomial_trees
-            .iter()
-            .enumerate()
-            .map(|(tree_index, tree)| {
-                (
-                    u16::try_from(tree_index).expect("the toy tree index fits u16"),
-                    tree,
-                )
-            }),
-    )
-    .expect("the public-polynomial trees have one opening adapter");
     generate_common_proof(
         CommonProofGenerationInput {
             protocol_version: 1,
@@ -1114,7 +1131,9 @@ fn generate_fixture_proof(fixture: &mut CommonProofEngineFixture) -> Vec<u8> {
             schedule_position: fixture.schedule_position,
             top_count: fixture.top_count,
             relation_trees: fixture.relation_trees.clone(),
-            provided_pre_challenge_columns: fixture.provided_columns.clone(),
+            source_polynomial_provider: Box::new(ResidentCommonProofSourcePolynomialProvider::new(
+                fixture.provided_columns.clone(),
+            )),
             maximum_external_memory_chunk_byte_length:
                 MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH,
             maximum_proof_transport_chunk_byte_length: MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH,
@@ -1123,7 +1142,6 @@ fn generate_fixture_proof(fixture: &mut CommonProofEngineFixture) -> Vec<u8> {
         &mut external_memory,
         &mut private_coins,
         &mut sink,
-        &mut bound_openings,
     )
     .expect("the checked public aggregate relation produces one complete canonical proof");
     sink.finish()
@@ -1166,7 +1184,7 @@ fn prepared_verification_worker_fixture() -> PreparedCommonProofVerification {
     let stream_domain = CanonicalStreamDomain::CollectivePublicKeyAggregateProof;
     let proof_stream_descriptor = StreamDescriptor {
         total_byte_length: super::super::super::MAXIMUM_COMMON_PROOF_BYTE_LENGTH as u64,
-        ordered_chunk_digests: vec![Hash512::from_bytes([0x45; 64]); 5],
+        ordered_chunk_digests: vec![Hash512::from_bytes([0x45; 64]); 5].into(),
         full_object_digest: Hash512::from_bytes([0x44; 64]),
     };
     let proof_application = CommonProofApplicationBinding::new(

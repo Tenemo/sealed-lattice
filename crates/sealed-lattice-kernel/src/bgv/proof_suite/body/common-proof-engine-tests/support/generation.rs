@@ -6,10 +6,6 @@ pub(super) fn prepared_generation_worker_fixture_for_checkpoint(
 ) -> Result<(PreparedCommonProofGeneration, Vec<u8>), CommonProofRuntimeError> {
     let mut fixture = common_proof_engine_fixture();
     let expected_proof_bytes = generate_fixture_proof(&mut fixture);
-    let stream_domain = CanonicalStreamDomain::CollectivePublicKeyAggregateProof;
-    let stream_descriptor =
-        derive_canonical_stream_descriptor(stream_domain, &expected_proof_bytes)
-            .expect("the genuine generated proof has one canonical descriptor");
     let proof_header_hash = ProofObjectHeader::from_canonical_application_statement(
         fixture.canonical_application_statement_bytes.clone(),
         &CanonicalDecodeLimits::default(),
@@ -23,25 +19,30 @@ pub(super) fn prepared_generation_worker_fixture_for_checkpoint(
         fixture.top_count,
     )
     .expect("the genuine fixture relation plan is checked");
-    let proof_application = CommonProofApplicationBinding::new(
-        [0x81; 64],
-        [0x82; 64],
+    let application_slot = ProofApplicationSlot::new(
+        Hash512::from_bytes([0x11; 64]),
+        Hash512::from_bytes([0x83; 64]),
+        Hash512::from_bytes([0x84; 64]),
         APPLICATION_STATEMENT_SCHEMA_IDENTIFIER,
-        proof_header_hash.into_bytes(),
-        stream_domain,
-        stream_descriptor.full_object_digest.into_bytes(),
-        stream_descriptor.total_byte_length,
-        fixture.relation_context.unique_query_count,
+        None,
+        None,
+        None,
     )
-    .expect("the genuine proof application has bounded coordinates");
-    let verification_binding = CommonProofVerificationBinding::new(
-        [0x11; 64],
-        [0x83; 64],
-        [0x84; 64],
-        [0x85; 64],
-        proof_application,
-        relation_plan.relation_plan_hash(),
-    );
+    .expect("the aggregate proof application has one exact slot");
+    let generation_authorization =
+        CommonProofGenerationAuthorization::from_genuine_test_application(
+            1,
+            application_slot,
+            verified_application_statement_hash(
+                1,
+                [0x11; 64],
+                APPLICATION_STATEMENT_SCHEMA_IDENTIFIER,
+                &fixture.canonical_application_statement_bytes,
+            ),
+            proof_header_hash.into_bytes(),
+            relation_plan.relation_plan_hash(),
+        )
+        .expect("the genuine generation fixture has one pre-output authorization");
     let limits = CommonProofRuntimeLimits::new(
         expected_proof_bytes.len(),
         MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH,
@@ -62,35 +63,24 @@ pub(super) fn prepared_generation_worker_fixture_for_checkpoint(
         schedule_position: fixture.schedule_position,
         top_count: fixture.top_count,
         relation_trees: fixture.relation_trees,
-        provided_pre_challenge_columns: fixture.provided_columns,
+        source_polynomial_provider: Box::new(ResidentCommonProofSourcePolynomialProvider::new(
+            fixture.provided_columns,
+        )),
         maximum_external_memory_chunk_byte_length:
             MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH,
         maximum_proof_transport_chunk_byte_length: MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH,
         maximum_prefetched_query_byte_length: limits.prefetched_query_byte_length(),
     })
     .expect("the genuine generation state owns the checked relation inputs");
-    let bound_openings = SetupPublicPolynomialBoundOpeningProvider::from_owned(
-        fixture
-            .setup_polynomial_trees
-            .into_iter()
-            .enumerate()
-            .map(|(tree_index, tree)| {
-                (
-                    u16::try_from(tree_index).expect("the fixture tree index fits u16"),
-                    tree,
-                )
-            }),
-    )
-    .expect("the worker owns the genuine public-polynomial opening trees");
     let sources = CommonProofGenerationSources::new(
         BoundedDeterministicTestPrivateCoins::new(1_024, 1_024 * 1_024)
             .with_checkpoint_cursor_counter_delta(checkpoint_cursor_counter_delta),
-        bound_openings,
+        ResidentCommonProofSourcePolynomialProvider::new(BTreeMap::new()),
     );
     let prepared = match authenticated_checkpoint_state {
         Some(checkpoint_state_bytes) => {
             PreparedCommonProofGeneration::from_genuine_test_sources_for_authenticated_checkpoint(
-                verification_binding,
+                generation_authorization,
                 relation_plan,
                 state,
                 sources,
@@ -99,7 +89,7 @@ pub(super) fn prepared_generation_worker_fixture_for_checkpoint(
             )?
         }
         None => PreparedCommonProofGeneration::from_genuine_test_sources(
-            verification_binding,
+            generation_authorization,
             relation_plan,
             state,
             sources,
@@ -202,6 +192,9 @@ fn drive_generation_worker_to_complete(
                     .supply_generation_storage_response(operation, &response)
                     .expect("the exact storage response replays the Rust transaction");
             }
+            CommonProofGenerationWorkerPoll::AuthenticatedSourceReadReady { .. } => {
+                panic!("the resident generation fixture cannot request an authenticated source")
+            }
             CommonProofGenerationWorkerPoll::OutputChunkReady {
                 chunk_index,
                 chunk_byte_length,
@@ -245,7 +238,7 @@ fn drive_generation_worker_to_complete(
     )
 }
 
-pub(super) fn capture_first_generation_checkpoint() -> (Vec<u8>, Vec<Vec<u8>>, [u8; 64], Vec<u8>) {
+pub(super) fn capture_first_generation_checkpoint() -> (Vec<u8>, Vec<u8>, [u8; 64], Vec<u8>) {
     let (prepared, expected_proof_bytes) = prepared_generation_worker_fixture();
     let mut registry = CommonProofRuntimeRegistry::default();
     let operation = registry
@@ -266,17 +259,10 @@ pub(super) fn capture_first_generation_checkpoint() -> (Vec<u8>, Vec<Vec<u8>>, [
                     .generation_checkpoint_state(operation)
                     .expect("the pending checkpoint owns fixed canonical state")
                     .to_vec();
-                let cursor_count = registry
-                    .generation_checkpoint_cursor_count(operation)
-                    .expect("the checkpoint describes its ordered cursor count");
-                let ordered_cursor_bytes = (0..cursor_count)
-                    .map(|cursor_index| {
-                        registry
-                            .generation_checkpoint_cursor(operation, cursor_index)
-                            .expect("every ordered checkpoint cursor is available")
-                            .to_vec()
-                    })
-                    .collect::<Vec<_>>();
+                let cursor_manifest_bytes = registry
+                    .generation_checkpoint_cursor_manifest(operation)
+                    .expect("the checkpoint exposes one compact cursor manifest")
+                    .to_vec();
                 let stable_attempt_binding_hash = registry
                     .generation_checkpoint_stable_attempt_binding_hash(operation)
                     .expect("the checkpoint exposes its stable attempt binding");
@@ -291,7 +277,7 @@ pub(super) fn capture_first_generation_checkpoint() -> (Vec<u8>, Vec<Vec<u8>>, [
                     .expect("a lost checkpoint response permanently retires the old operation");
                 return (
                     checkpoint_state,
-                    ordered_cursor_bytes,
+                    cursor_manifest_bytes,
                     stable_attempt_binding_hash,
                     expected_proof_bytes,
                 );
@@ -354,6 +340,9 @@ fn owned_generation_worker_replays_storage_and_authenticates_every_output_chunk(
                     .supply_generation_storage_response(operation, &response)
                     .expect("the exact response changes recording into replay");
             }
+            CommonProofGenerationWorkerPoll::AuthenticatedSourceReadReady { .. } => {
+                panic!("the resident generation fixture cannot request an authenticated source")
+            }
             CommonProofGenerationWorkerPoll::OutputChunkReady {
                 chunk_index,
                 chunk_byte_length,
@@ -403,7 +392,7 @@ fn owned_generation_worker_replays_storage_and_authenticates_every_output_chunk(
 fn owned_generation_worker_replays_from_zero_and_produces_byte_identical_output() {
     let (
         authenticated_checkpoint_state,
-        _ordered_cursor_bytes,
+        _cursor_manifest_bytes,
         stable_attempt_binding_hash,
         expected_proof_bytes,
     ) = capture_first_generation_checkpoint();
@@ -633,6 +622,78 @@ fn failed_owned_generation_retirement_is_linear() {
 }
 
 #[test]
+fn constraint_stream_quotient_is_byte_identical_to_the_whole_matrix_oracle() {
+    let fixture = common_proof_engine_fixture();
+    let variant = fixture
+        .relation_plan
+        .select_variant(fixture.schedule_position, fixture.top_count)
+        .expect("the aggregate fixture variant exists");
+    let mut columns = (0..variant.ordered_columns().len())
+        .map(|column_index| {
+            fixture
+                .provided_columns
+                .get(&u32::try_from(column_index).expect("the column ordinal fits u32"))
+                .cloned()
+                .expect("the aggregate fixture provides every source column")
+        })
+        .collect::<Vec<_>>();
+    columns[2] = CommonProofSourcePolynomial::from_base_coefficients(vec![
+        ProofBaseFieldElement::from_canonical(19).expect("the mutated value is canonical"),
+    ]);
+    let evaluation_domain = ProofEvaluationDomain::new(
+        usize::try_from(variant.evaluation_domain_size())
+            .expect("the fixture evaluation domain fits usize"),
+        fixture.relation_context.evaluation_coset_offset,
+    )
+    .expect("the fixture evaluation domain is valid");
+    let composition_challenges = (0..variant.constraint_count())
+        .map(|constraint_ordinal| {
+            ProofChallengeExtensionElement::from_base(
+                ProofBaseFieldElement::from_canonical(
+                    u64::try_from(constraint_ordinal).expect("the constraint ordinal fits u64") + 2,
+                )
+                .expect("the composition challenge is canonical"),
+            )
+        })
+        .collect::<Vec<_>>();
+    let whole_matrix = construct_composed_quotient_polynomial(
+        variant,
+        &fixture.relation_context,
+        evaluation_domain,
+        &columns,
+        &[],
+        &composition_challenges,
+    )
+    .expect("the whole-matrix quotient oracle accepts the mutated witness");
+    let constraint_stream = construct_constraint_stream_composed_quotient_polynomial(
+        variant,
+        &fixture.relation_context,
+        evaluation_domain,
+        &columns,
+        &[],
+        &composition_challenges,
+    )
+    .expect("the constraint-stream quotient oracle accepts the mutated witness");
+    assert!(
+        whole_matrix
+            .iter()
+            .any(|coefficient| *coefficient != ProofChallengeExtensionElement::ZERO),
+        "the deliberately inconsistent aggregate exercises a nonzero quotient",
+    );
+    let canonical_bytes = |polynomial: &[ProofChallengeExtensionElement]| {
+        polynomial
+            .iter()
+            .flat_map(|coefficient| coefficient.canonical_coordinates())
+            .flat_map(u64::to_le_bytes)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        canonical_bytes(&constraint_stream),
+        canonical_bytes(&whole_matrix)
+    );
+}
+
+#[test]
 fn generation_state_enforces_reports_and_releases_its_complete_resident_live_set() {
     let fixture = common_proof_engine_fixture();
     let mut state = CommonProofGenerationStateMachine::new(CommonProofGenerationInput {
@@ -644,7 +705,9 @@ fn generation_state_enforces_reports_and_releases_its_complete_resident_live_set
         schedule_position: fixture.schedule_position,
         top_count: fixture.top_count,
         relation_trees: fixture.relation_trees.clone(),
-        provided_pre_challenge_columns: fixture.provided_columns.clone(),
+        source_polynomial_provider: Box::new(ResidentCommonProofSourcePolynomialProvider::new(
+            fixture.provided_columns.clone(),
+        )),
         maximum_external_memory_chunk_byte_length:
             MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH,
         maximum_proof_transport_chunk_byte_length: MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH,
@@ -652,7 +715,7 @@ fn generation_state_enforces_reports_and_releases_its_complete_resident_live_set
     })
     .expect("the compact fixture fits the resident-memory safety bound");
     let resident_memory_plan = state.resident_memory_plan();
-    assert_eq!(resident_memory_plan.phases().len(), 10);
+    assert_eq!(resident_memory_plan.phases().len(), 14);
     assert_eq!(
         resident_memory_plan.peak_byte_length(),
         resident_memory_plan
@@ -666,30 +729,48 @@ fn generation_state_enforces_reports_and_releases_its_complete_resident_live_set
         resident_memory_plan.peak_byte_length() <= MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH
     );
 
-    let preparing_inputs = resident_memory_plan
+    let loading_source_polynomials = resident_memory_plan
         .phases()
         .iter()
-        .find(|phase| phase.phase() == CommonProofResidentMemoryPhase::PreparingInputs)
-        .expect("the source-column and integer-lift phase is explicit");
-    assert!(preparing_inputs.relation_column_catalog_byte_length() > 0);
-    assert!(preparing_inputs.trace_row_cache_byte_length() > 0);
-    assert!(preparing_inputs.trace_synthesis_scratch_byte_length() > 0);
+        .find(|phase| phase.phase() == CommonProofResidentMemoryPhase::LoadingSourcePolynomials)
+        .expect("the source-polynomial construction phase is explicit");
+    assert!(loading_source_polynomials.relation_polynomial_working_set_byte_length() > 0);
+
+    let deriving_auxiliary_columns = resident_memory_plan
+        .phases()
+        .iter()
+        .find(|phase| phase.phase() == CommonProofResidentMemoryPhase::DerivingAuxiliaryColumns)
+        .expect("the descriptor-local auxiliary-column phase is explicit");
+    assert!(deriving_auxiliary_columns.relation_polynomial_working_set_byte_length() > 0);
+    assert!(deriving_auxiliary_columns.auxiliary_trace_workspace_byte_length() > 0);
 
     let constructing_quotient = resident_memory_plan
         .phases()
         .iter()
         .find(|phase| phase.phase() == CommonProofResidentMemoryPhase::ConstructingQuotient)
-        .expect("the quotient replay phase is explicit");
-    assert!(constructing_quotient.replay_source_byte_length() > 0);
+        .expect("the quotient constraint-stream phase is explicit");
+    assert_eq!(constructing_quotient.replay_polynomial_byte_length(), 0);
     assert!(constructing_quotient.primary_vector_byte_length() > 0);
-    assert!(constructing_quotient.secondary_vector_byte_length() > 0);
+    assert_eq!(constructing_quotient.secondary_vector_byte_length(), 0);
     assert!(constructing_quotient.relation_rotation_block_byte_length() > 0);
+    assert!(constructing_quotient.external_working_set_byte_length() > 0);
+    assert!(constructing_quotient.external_transaction_overlap_peak_byte_length() > 0);
+    assert!(
+        constructing_quotient.subphase_transient_peak_byte_length()
+            >= constructing_quotient.relation_rotation_block_byte_length()
+    );
+    assert!(
+        constructing_quotient.subphase_transient_peak_byte_length()
+            >= constructing_quotient
+                .external_working_set_byte_length()
+                .max(constructing_quotient.external_transaction_overlap_peak_byte_length())
+    );
 
-    let persisting_relation_columns = resident_memory_plan
+    let transforming_auxiliary_columns = resident_memory_plan
         .phases()
         .iter()
-        .find(|phase| phase.phase() == CommonProofResidentMemoryPhase::PersistingRelationColumns)
-        .expect("the external relation-column persistence phase is explicit");
+        .find(|phase| phase.phase() == CommonProofResidentMemoryPhase::TransformingAuxiliaryColumns)
+        .expect("the auxiliary-column transform phase is explicit");
     let external_memory_chunk_byte_length =
         u64::from(MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH);
     let extension_value_byte_length = u64::try_from(PROOF_CHALLENGE_EXTENSION_DEGREE)
@@ -704,16 +785,26 @@ fn generation_state_enforces_reports_and_releases_its_complete_resident_live_set
         .checked_mul(extension_value_byte_length)
         .expect("the aligned scan byte length fits u64");
     let stockham_working_set_byte_length = aligned_extension_scan_byte_length
-        .checked_mul(3)
+        .checked_mul(4)
         .and_then(|byte_length| byte_length.checked_add(external_memory_chunk_byte_length))
         .expect("the Stockham working set byte length fits u64");
     let replay_writer_working_set_byte_length = external_memory_chunk_byte_length
         .checked_add(extension_value_byte_length)
         .expect("the replay writer working set byte length fits u64");
     assert!(
-        persisting_relation_columns.external_working_set_byte_length()
-            >= stockham_working_set_byte_length.max(replay_writer_working_set_byte_length),
-        "the relation persistence live set includes its transform and replay-writer buffers",
+        transforming_auxiliary_columns.external_working_set_byte_length()
+            >= stockham_working_set_byte_length,
+        "the auxiliary transform live set includes its Stockham buffers",
+    );
+    assert!(
+        transforming_auxiliary_columns.external_transaction_overlap_peak_byte_length()
+            > transforming_auxiliary_columns.external_working_set_byte_length(),
+        "the auxiliary transform live set includes request encoding and replay copies",
+    );
+    assert!(
+        loading_source_polynomials.external_working_set_byte_length()
+            >= replay_writer_working_set_byte_length,
+        "the source-polynomial live set includes its replay-writer buffers",
     );
 
     let maximum_external_working_set_byte_length = resident_memory_plan
@@ -733,9 +824,10 @@ fn generation_state_enforces_reports_and_releases_its_complete_resident_live_set
         .iter()
         .find(|phase| phase.phase() == CommonProofResidentMemoryPhase::EmittingQueries)
         .expect("the query extraction phase is explicit");
-    assert_eq!(
-        emitting_queries.query_prefetch_byte_length(),
-        MAXIMUM_PROOF_BYTE_LENGTH as u64
+    assert!(emitting_queries.query_prefetch_byte_length() > 0);
+    assert!(
+        emitting_queries.query_prefetch_byte_length() < MAXIMUM_PROOF_BYTE_LENGTH as u64,
+        "the resident plan charges retained query allocations, not the caller's upper cap",
     );
     assert_eq!(
         emitting_queries.stream_window_byte_length(),
@@ -752,7 +844,7 @@ fn generation_state_enforces_reports_and_releases_its_complete_resident_live_set
 }
 
 #[test]
-fn generation_state_rejects_an_unattainable_resident_live_set_before_proving() {
+fn generation_state_rejects_an_unattainable_stream_window_before_proving() {
     let fixture = common_proof_engine_fixture();
     let result = CommonProofGenerationStateMachine::new(CommonProofGenerationInput {
         protocol_version: 1,
@@ -763,11 +855,13 @@ fn generation_state_rejects_an_unattainable_resident_live_set_before_proving() {
         schedule_position: fixture.schedule_position,
         top_count: fixture.top_count,
         relation_trees: fixture.relation_trees,
-        provided_pre_challenge_columns: fixture.provided_columns,
+        source_polynomial_provider: Box::new(ResidentCommonProofSourcePolynomialProvider::new(
+            fixture.provided_columns,
+        )),
         maximum_external_memory_chunk_byte_length:
             MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH,
-        maximum_proof_transport_chunk_byte_length: MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH,
-        maximum_prefetched_query_byte_length: MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH,
+        maximum_proof_transport_chunk_byte_length: usize::MAX,
+        maximum_prefetched_query_byte_length: MAXIMUM_PROOF_BYTE_LENGTH as u64,
     });
     assert!(matches!(
         result,

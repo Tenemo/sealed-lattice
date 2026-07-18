@@ -1,4 +1,6 @@
-use super::integer_lift::integer_lift_full_ring_product_constraint_programs;
+use super::integer_lift::{
+    integer_lift_component_constraint_programs, integer_lift_full_ring_product_constraint_programs,
+};
 use super::interpreter::signed_rotation_exponent;
 use super::*;
 
@@ -29,7 +31,7 @@ fn check_context() -> RelationPlanCheckContext {
 }
 
 fn committed_material_check_context() -> RelationPlanCheckContext {
-    let evaluation_domain_size = 256_u64;
+    let evaluation_domain_size = 1_024_u64;
     let maximum_two_adic_order = 1_u64 << 32;
     RelationPlanCheckContext {
         base_field_modulus: crate::bgv::proof_suite::PROOF_BASE_FIELD_MODULUS,
@@ -43,9 +45,9 @@ fn committed_material_check_context() -> RelationPlanCheckContext {
         ),
         evaluation_coset_offset: 7,
         deep_point_count: 1,
-        quotient_component_count: 4,
+        quotient_component_count: 16,
         quotient_component_degree_bound_exclusive: 64,
-        fri_fold_count: 4,
+        fri_fold_count: 6,
         final_polynomial_degree_bound_exclusive: 8,
         unique_query_count: 1,
         non_native_modular_identity_challenge_count: 1,
@@ -57,17 +59,26 @@ fn committed_material_check_context() -> RelationPlanCheckContext {
     }
 }
 
+fn trace_zeroifier_check_context() -> RelationPlanCheckContext {
+    let mut context = committed_material_check_context();
+    context.evaluation_domain_generator = modular_power(
+        crate::bgv::proof_suite::PROOF_BASE_FIELD_MAXIMUM_TWO_ADIC_GENERATOR,
+        (1_u64 << 32) / 256,
+        crate::bgv::proof_suite::PROOF_BASE_FIELD_MODULUS,
+    );
+    context
+}
+
 fn committed_material_input() -> CommittedMaterialRelationPlanInput {
     CommittedMaterialRelationPlanInput {
         ring_degree: 32,
-        evaluation_domain_size: 256,
-        opening_degree_bound_exclusive: 128,
+        evaluation_domain_size: 1_024,
+        opening_degree_bound_exclusive: 512,
         material_column_degree_bound_exclusive: 10,
         participant_count: 3,
         threshold: 2,
         sharing_data_modulus_indices: vec![0],
         trace_mask_degree_bound_exclusive: 14,
-        first_mask_purpose: 100,
     }
 }
 
@@ -191,8 +202,8 @@ fn suffix_evaluations(values: &[BigInt], theta: &BigInt) -> Vec<BigInt> {
 }
 
 #[test]
-fn trace_subgroup_zeroifier_grammar_is_recognized_exactly() {
-    let context = committed_material_check_context();
+fn trace_subgroup_zeroifier_grammar_accepts_exact_subgroups_and_rejects_other_roots() {
+    let context = trace_zeroifier_check_context();
     let trace_domain_size = 16;
     let evaluation_domain_size = 256;
     let trace_generator = modular_power(
@@ -228,8 +239,23 @@ fn trace_subgroup_zeroifier_grammar_is_recognized_exactly() {
         context.base_field_modulus,
     ));
 
-    assert!(!zeroifier_roots_are_confined_to_trace_domain(
+    assert!(zeroifier_roots_are_confined_to_trace_domain(
         &full_trace_zeroifier_expression(trace_domain_size / 2),
+        trace_domain_size,
+        context.base_field_modulus,
+    ));
+    assert!(zeroifier_roots_are_confined_to_trace_domain(
+        &full_trace_zeroifier_expression(trace_domain_size / 4),
+        trace_domain_size,
+        context.base_field_modulus,
+    ));
+    assert!(!zeroifier_roots_are_confined_to_trace_domain(
+        &full_trace_zeroifier_expression(3),
+        trace_domain_size,
+        context.base_field_modulus,
+    ));
+    assert!(!zeroifier_roots_are_confined_to_trace_domain(
+        &full_trace_zeroifier_expression(0),
         trace_domain_size,
         context.base_field_modulus,
     ));
@@ -252,18 +278,44 @@ fn trace_subgroup_zeroifier_grammar_is_recognized_exactly() {
 
 #[test]
 fn trace_zeroifier_fast_path_refuses_a_colliding_coset() {
-    let mut context = committed_material_check_context();
+    let mut context = trace_zeroifier_check_context();
     context.evaluation_coset_offset = 1;
     let checker = RelationPlanChecker::new(&context);
     assert_eq!(
         checker.check_zeroifier_on_coset(&full_trace_zeroifier_expression(16), 16, 256),
         Err(RelationPlanError::ZeroifierVanishesOnEvaluationCoset),
     );
+    assert_eq!(
+        checker.check_zeroifier_on_coset(&full_trace_zeroifier_expression(8), 16, 256),
+        Err(RelationPlanError::ZeroifierVanishesOnEvaluationCoset),
+    );
+}
+
+#[test]
+fn trace_subgroup_zeroifier_uses_the_exact_large_coset_fast_path() {
+    let mut context = trace_zeroifier_check_context();
+    let trace_domain_size = 1_u64 << 17;
+    let subgroup_size = trace_domain_size / 8;
+    let evaluation_domain_size = 1_u64 << 19;
+    context.evaluation_domain_generator = modular_power(
+        crate::bgv::proof_suite::PROOF_BASE_FIELD_MAXIMUM_TWO_ADIC_GENERATOR,
+        (1_u64 << 32) / evaluation_domain_size,
+        context.base_field_modulus,
+    );
+
+    assert_eq!(
+        RelationPlanChecker::new(&context).check_zeroifier_on_coset(
+            &full_trace_zeroifier_expression(subgroup_size),
+            trace_domain_size,
+            evaluation_domain_size,
+        ),
+        Ok(()),
+    );
 }
 
 #[test]
 fn oversized_arbitrary_zeroifier_fails_closed() {
-    let mut context = committed_material_check_context();
+    let mut context = trace_zeroifier_check_context();
     let evaluation_domain_size = MAXIMUM_EXHAUSTIVE_ZEROIFIER_COSET_CHECK_DOMAIN_SIZE * 2;
     context.evaluation_domain_generator = modular_power(
         crate::bgv::proof_suite::PROOF_BASE_FIELD_MAXIMUM_TWO_ADIC_GENERATOR,
@@ -456,6 +508,89 @@ fn full_ring_high_half_low_multiplier_transpose_is_exact_for_dense_small_rings()
 }
 
 #[test]
+fn integer_lift_product_accumulator_rejects_a_uniform_additive_shift() {
+    const TRACE_DOMAIN_SIZE: usize = 4;
+    const SOURCE_COLUMN: u32 = 0;
+    const LINEAR_EVALUATION_COLUMN: u32 = 1;
+    const PRODUCT_ACCUMULATOR_COLUMN: u32 = 2;
+
+    let component = RelationIntegerLiftComponentDescriptor {
+        ordered_linear_terms: vec![RelationIntegerLiftLinearTermDescriptor {
+            negative: false,
+            column_ordinal: SOURCE_COLUMN,
+            column_offset: 0,
+            coefficient: RelationIntegerLiftCoefficient::Constant(1),
+        }],
+        ordered_convolution_products: Vec::new(),
+        ordered_full_ring_negacyclic_products: Vec::new(),
+        linear_evaluation_column_ordinal: LINEAR_EVALUATION_COLUMN,
+        product_accumulator_column_ordinal: PRODUCT_ACCUMULATOR_COLUMN,
+    };
+    let theta_expression = vec![RelationExpressionInstruction::TranscriptChallenge {
+        challenge_role: RelationChallengeRole::NonNativeTheta,
+        role_coordinates: vec![0, 0],
+    }];
+    let point_zero = vec![RelationExpressionInstruction::BaseFieldConstant(101)];
+    let programs = integer_lift_component_constraint_programs(
+        &component,
+        SuiteModulusReference::data(0),
+        &theta_expression,
+        point_zero.clone(),
+        vec![RelationExpressionInstruction::BaseFieldConstant(103)],
+        vec![RelationExpressionInstruction::BaseFieldConstant(107)],
+        &check_context(),
+    )
+    .expect("integer-lift component constraint programs");
+    assert_eq!(programs.len(), 5);
+    assert_eq!(programs[2].zeroifier_postfix_expression, point_zero);
+
+    let theta = BigInt::from(11_u8);
+    let base_columns = BTreeMap::from([
+        (SOURCE_COLUMN, vec![BigInt::zero(); TRACE_DOMAIN_SIZE]),
+        (
+            LINEAR_EVALUATION_COLUMN,
+            vec![BigInt::zero(); TRACE_DOMAIN_SIZE],
+        ),
+    ]);
+    let evaluate = |program_ordinal: usize, row_ordinal: usize, accumulator_rows: Vec<BigInt>| {
+        let mut columns = base_columns.clone();
+        columns.insert(PRODUCT_ACCUMULATOR_COLUMN, accumulator_rows);
+        evaluate_integer_lift_test_expression(
+            &programs[program_ordinal].numerator_postfix_expression,
+            row_ordinal,
+            TRACE_DOMAIN_SIZE,
+            &theta,
+            &columns,
+        )
+    };
+
+    let unshifted = vec![BigInt::zero(); TRACE_DOMAIN_SIZE];
+    assert_eq!(
+        evaluate(0, TRACE_DOMAIN_SIZE - 1, unshifted.clone()),
+        BigInt::zero()
+    );
+    for row_ordinal in 0..TRACE_DOMAIN_SIZE - 1 {
+        assert_eq!(evaluate(1, row_ordinal, unshifted.clone()), BigInt::zero());
+        assert_eq!(evaluate(3, row_ordinal, unshifted.clone()), BigInt::zero());
+    }
+    assert_eq!(evaluate(2, 0, unshifted.clone()), BigInt::zero());
+    assert_eq!(
+        evaluate(4, TRACE_DOMAIN_SIZE - 1, unshifted),
+        BigInt::zero()
+    );
+
+    let shifted = vec![BigInt::from(7_u8); TRACE_DOMAIN_SIZE];
+    for row_ordinal in 0..TRACE_DOMAIN_SIZE - 1 {
+        assert_eq!(evaluate(3, row_ordinal, shifted.clone()), BigInt::zero());
+    }
+    assert_eq!(
+        evaluate(4, TRACE_DOMAIN_SIZE - 1, shifted.clone()),
+        BigInt::zero()
+    );
+    assert_eq!(evaluate(2, 0, shifted), BigInt::from(7_u8));
+}
+
+#[test]
 fn signed_magnitudes_are_unique_for_arbitrary_width_bounds() {
     let zero_tuple =
         canonical_signed_integer_tuple(&BigInt::zero()).expect("canonical zero signed magnitude");
@@ -549,6 +684,111 @@ fn bound_checker_derives_trinary_and_recomposition_intervals() {
     assert_eq!(
         derive_test_interval(2, &semantic_cells, &constraints),
         Ok(SignedIntegerInterval::new(0, 8))
+    );
+}
+
+#[test]
+fn bound_checker_derives_mixed_top_digit_recomposition_interval() {
+    let ordered_nonary_values = (0..9).map(BigInt::from).collect::<Vec<_>>();
+    let (nonary_expression, ordered_nonary_factor_expressions) =
+        finite_integer_set_constraint_expressions(0, &ordered_nonary_values, TEST_BASE_FIELD)
+            .expect("nonary constraint expression");
+    let constraints = vec![
+        RelationConstraintDescriptor {
+            constraint_role: 1,
+            role_coordinates: Vec::new(),
+            numerator_postfix_expression: nonary_expression,
+            zeroifier_postfix_expression: full_trace_zeroifier_expression(16),
+            enforce_proof_base_field_no_wrap: false,
+            ordered_injective_integer_factor_expressions: ordered_nonary_factor_expressions,
+        },
+        bound_constraint(2, trinary_constraint_expression(1)),
+        bound_constraint(
+            3,
+            radix_recomposition_expression(2, 9, None, &[0, 1], TEST_BASE_FIELD)
+                .expect("mixed-radix recomposition expression"),
+        ),
+    ];
+    let semantic_cells = vec![
+        SemanticCellDescriptor {
+            semantic_cell_ordinal: 0,
+            column_ordinal: 0,
+            claimed_interval: SignedIntegerInterval::new(0, 8),
+            bound_certificate: RelationBoundCertificate::FiniteIntegerSet {
+                constraint_ordinal: 0,
+                ordered_values: ordered_nonary_values,
+            },
+        },
+        SemanticCellDescriptor {
+            semantic_cell_ordinal: 1,
+            column_ordinal: 1,
+            claimed_interval: SignedIntegerInterval::new(0, 2),
+            bound_certificate: RelationBoundCertificate::Trinary {
+                constraint_ordinal: 1,
+            },
+        },
+        SemanticCellDescriptor {
+            semantic_cell_ordinal: 2,
+            column_ordinal: 2,
+            claimed_interval: SignedIntegerInterval::new(0, 26),
+            bound_certificate: RelationBoundCertificate::UnsignedRadixRecomposition {
+                constraint_ordinal: 2,
+                radix: 9,
+                ordered_digit_column_ordinals: vec![0, 1],
+            },
+        },
+    ];
+    assert_eq!(
+        derive_test_interval(2, &semantic_cells, &constraints),
+        Ok(SignedIntegerInterval::new(0, 26))
+    );
+}
+
+#[test]
+fn bound_checker_rejects_a_mixed_digit_outside_the_recomposition_radix() {
+    let ordered_values = (0..=9).map(BigInt::from).collect::<Vec<_>>();
+    let (finite_set_expression, ordered_factor_expressions) =
+        finite_integer_set_constraint_expressions(0, &ordered_values, TEST_BASE_FIELD)
+            .expect("finite-set constraint expression");
+    let constraints = vec![
+        RelationConstraintDescriptor {
+            constraint_role: 1,
+            role_coordinates: Vec::new(),
+            numerator_postfix_expression: finite_set_expression,
+            zeroifier_postfix_expression: full_trace_zeroifier_expression(16),
+            enforce_proof_base_field_no_wrap: false,
+            ordered_injective_integer_factor_expressions: ordered_factor_expressions,
+        },
+        bound_constraint(
+            2,
+            radix_recomposition_expression(1, 9, None, &[0], TEST_BASE_FIELD)
+                .expect("recomposition expression"),
+        ),
+    ];
+    let semantic_cells = vec![
+        SemanticCellDescriptor {
+            semantic_cell_ordinal: 0,
+            column_ordinal: 0,
+            claimed_interval: SignedIntegerInterval::new(0, 9),
+            bound_certificate: RelationBoundCertificate::FiniteIntegerSet {
+                constraint_ordinal: 0,
+                ordered_values,
+            },
+        },
+        SemanticCellDescriptor {
+            semantic_cell_ordinal: 1,
+            column_ordinal: 1,
+            claimed_interval: SignedIntegerInterval::new(0, 9),
+            bound_certificate: RelationBoundCertificate::UnsignedRadixRecomposition {
+                constraint_ordinal: 1,
+                radix: 9,
+                ordered_digit_column_ordinals: vec![0],
+            },
+        },
+    ];
+    assert_eq!(
+        derive_test_interval(1, &semantic_cells, &constraints),
+        Err(RelationPlanError::InvalidBoundCertificate)
     );
 }
 
@@ -804,7 +1044,9 @@ fn generated_plan_checker_rejects_rotated_factor_and_opening_catalog_tampering()
             _ => None,
         })
         .expect("the exact VSS plan contains a rotated monomial-action column");
-    *rotated_column = input.trace_domain_size().expect("trace domain size");
+    *rotated_column = input
+        .relation_trace_domain_size()
+        .expect("relation trace domain size");
     assert!(
         vss_plan.check(&context).is_err(),
         "a full-trace rotation cannot remain a checked coefficient-local residual",

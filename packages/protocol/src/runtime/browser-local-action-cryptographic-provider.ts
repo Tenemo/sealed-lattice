@@ -13,15 +13,12 @@ import type {
 } from '@sealed-lattice/types';
 import {
     openClosedWorkerSetupMailboxRandomness,
-    openClosedWorkerStructuredCommitmentOpenings,
     type ClosedWorkerSetupMailboxRandomnessOperations,
-    type ClosedWorkerStructuredCommitmentOpeningOperations,
 } from '@sealed-lattice/wasm';
 
 export type BrowserLocalActionCryptographicProvider = Readonly<{
     readonly actionRandomnessSessionIdentifier: string;
     readonly externalKeyProvider: BrowserLocalExternalKeyProvider;
-    readonly structuredCommitmentOpenings: ClosedWorkerStructuredCommitmentOpeningOperations;
     sealSetupMailbox(
         input: Omit<
             AuthenticatedMailboxSealInput,
@@ -108,7 +105,6 @@ export const openBrowserLocalActionCryptographicProvider = async (
         }
     };
     let resetSafeSetupMailboxRandomness: ClosedWorkerSetupMailboxRandomnessOperations;
-    let structuredCommitmentOpenings: ClosedWorkerStructuredCommitmentOpeningOperations;
     let sourceMailboxEncapsulationKey = new Uint8Array(0);
     let sourceSigningVerificationKey = new Uint8Array(0);
     let rosterBoundSourceSigningVerificationKey = new Uint8Array(0);
@@ -123,17 +119,6 @@ export const openBrowserLocalActionCryptographicProvider = async (
                 sourceMailboxEncapsulationKey,
                 stateReservationIdentifier: input.stateReservationIdentifier,
             });
-        structuredCommitmentOpenings =
-            await openClosedWorkerStructuredCommitmentOpenings(
-                input.workerKernel,
-                {
-                    actionRandomnessSessionIdentifier:
-                        input.actionRandomnessSessionIdentifier,
-                    rosterHash: resetSafeSetupMailboxRandomness.rosterHash,
-                    stateReservationIdentifier:
-                        input.stateReservationIdentifier,
-                },
-            );
     } catch (error) {
         sourceMailboxEncapsulationKey.fill(0);
         sourceSigningVerificationKey.fill(0);
@@ -173,11 +158,6 @@ export const openBrowserLocalActionCryptographicProvider = async (
         rosterBoundSourceSigningVerificationKey.fill(0);
         const cleanupFailures: unknown[] = [];
         try {
-            structuredCommitmentOpenings.revoke();
-        } catch (cleanupFailure) {
-            cleanupFailures.push(cleanupFailure);
-        }
-        try {
             await closeOwnedWorkerState();
         } catch (cleanupFailure) {
             cleanupFailures.push(cleanupFailure);
@@ -206,38 +186,22 @@ export const openBrowserLocalActionCryptographicProvider = async (
         } catch (error) {
             providerFailure = error;
         }
-        let structuredOpeningFailure: unknown;
-        try {
-            structuredCommitmentOpenings.revoke();
-        } catch (error) {
-            structuredOpeningFailure = error;
-        }
         let workerFailure: unknown;
         try {
             await closeOwnedWorkerState();
         } catch (error) {
             workerFailure = error;
         }
-        if (
-            providerFailure !== undefined &&
-            (structuredOpeningFailure !== undefined ||
-                workerFailure !== undefined)
-        ) {
+        if (providerFailure !== undefined && workerFailure !== undefined) {
             throw new BrowserLocalActionCryptographicProviderCleanupError(
                 providerFailure,
-                structuredOpeningFailure ?? workerFailure,
+                workerFailure,
             );
         }
         if (providerFailure !== undefined) {
             throw errorFromUnknownFailure(
                 providerFailure,
                 'Closing the browser-local external key provider failed.',
-            );
-        }
-        if (structuredOpeningFailure !== undefined) {
-            throw errorFromUnknownFailure(
-                structuredOpeningFailure,
-                'Closing structured-commitment opening custody failed.',
             );
         }
         if (workerFailure !== undefined) {
@@ -284,7 +248,6 @@ export const openBrowserLocalActionCryptographicProvider = async (
                 signingCapability: externalKeyProvider.signingCapability,
             });
         },
-        structuredCommitmentOpenings,
         close: () => (closePromise ??= close()),
     });
 };

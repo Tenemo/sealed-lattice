@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use super::*;
 use crate::foundation::{
     ACTION_RANDOMNESS_ROOT_BYTE_LENGTH, ActionRandomnessDerivationInput, ActionRandomnessRoot,
@@ -70,8 +72,10 @@ fn theta_fingerprint(
 
 #[test]
 fn trace_mask_changes_coefficients_but_preserves_every_trace_domain_value() {
-    let witness = CommonProofSourcePolynomial::Base(vec![base(7), base(11), base(13)]);
-    let mask = CommonProofSourcePolynomial::Base(vec![base(17), base(19), base(23)]);
+    let witness =
+        CommonProofSourcePolynomial::from_base_coefficients(vec![base(7), base(11), base(13)]);
+    let mask =
+        CommonProofSourcePolynomial::from_base_coefficients(vec![base(17), base(19), base(23)]);
     let masked = apply_trace_mask(witness.clone(), 8, mask).expect("valid trace mask is applied");
     assert_ne!(masked, witness);
 
@@ -90,9 +94,9 @@ fn trace_mask_changes_coefficients_but_preserves_every_trace_domain_value() {
 #[test]
 fn trace_mask_rejects_cross_field_application() {
     let result = apply_trace_mask(
-        CommonProofSourcePolynomial::Base(vec![base(1)]),
+        CommonProofSourcePolynomial::from_base_coefficients(vec![base(1)]),
         4,
-        CommonProofSourcePolynomial::Extension(vec![extension(2)]),
+        CommonProofSourcePolynomial::from_extension_coefficients(vec![extension(2)]),
     );
     assert_eq!(result, Err(CommonProofProverError::InvalidMask));
 }
@@ -305,14 +309,57 @@ fn quotient_decomposition_is_constant_first_and_exactly_reconstructible() {
     let components = decompose_composed_quotient(&quotient, 3, 4)
         .expect("quotient fits the declared decomposition");
     assert_eq!(
-        components.iter().map(Vec::len).collect::<Vec<_>>(),
+        components
+            .iter()
+            .map(|component| component.len())
+            .collect::<Vec<_>>(),
         vec![4, 4, 3]
     );
-    assert_eq!(components.concat(), quotient);
+    let reconstructed_quotient = Zeroizing::new(
+        components
+            .iter()
+            .flat_map(|component| component.iter().copied())
+            .collect::<Vec<_>>(),
+    );
+    assert_eq!(reconstructed_quotient.as_slice(), quotient.as_slice());
     assert_eq!(
         decompose_composed_quotient(&[extension(1); 9], 2, 4),
         Err(CommonProofProverError::InvalidQuotient)
     );
+}
+
+#[test]
+fn quotient_rotation_positions_cover_both_directions_wraparound_and_reduction() {
+    let rotate = |position, is_negative, magnitude| {
+        rotated_relation_evaluation_position(position, 32, 8, 4, is_negative, magnitude)
+            .expect("the exact trace/evaluation geometry is valid")
+    };
+    assert_eq!(rotate(17, false, 0), 17);
+    assert_eq!(rotate(17, true, 0), 17);
+    assert_eq!(rotate(29, false, 1), 1);
+    assert_eq!(rotate(2, true, 1), 30);
+    assert_eq!(rotate(29, false, 9), 1);
+    assert_eq!(rotate(2, true, u64::MAX), 6);
+
+    for (evaluation_size, trace_domain_size, trace_rotation_stride, position) in [
+        (0, 8, 4, 0),
+        (32, 0, 4, 0),
+        (32, 8, 0, 0),
+        (32, 8, 2, 0),
+        (32, 8, 4, 32),
+    ] {
+        assert_eq!(
+            rotated_relation_evaluation_position(
+                position,
+                evaluation_size,
+                trace_domain_size,
+                trace_rotation_stride,
+                false,
+                1,
+            ),
+            Err(CommonProofProverError::InvalidOpening),
+        );
+    }
 }
 
 #[test]
@@ -363,16 +410,18 @@ fn private_randomness_coin_source_resumes_exactly_and_keeps_purposes_independent
     let action_context_hash = Hash512::from_bytes([0x33; 64]);
     let participant_identity =
         ParticipantIdentity::from_bytes([0x44; ParticipantIdentity::BYTE_LENGTH]);
-    let action_private_randomness = ActionRandomnessRoot::from_injected_bytes(Zeroizing::new(
-        [0x55; ACTION_RANDOMNESS_ROOT_BYTE_LENGTH],
-    ))
-    .derive(ActionRandomnessDerivationInput::new(
-        suite_identifier,
-        ceremony_context_hash,
-        action_context_hash,
-        participant_identity,
-    ))
-    .expect("action private randomness derives");
+    let action_private_randomness = Rc::new(
+        ActionRandomnessRoot::from_injected_bytes(Zeroizing::new(
+            [0x55; ACTION_RANDOMNESS_ROOT_BYTE_LENGTH],
+        ))
+        .derive(ActionRandomnessDerivationInput::new(
+            suite_identifier,
+            ceremony_context_hash,
+            action_context_hash,
+            participant_identity,
+        ))
+        .expect("action private randomness derives"),
+    );
     let application_slot = ProofApplicationSlot::new(
         suite_identifier,
         ceremony_context_hash,
@@ -386,46 +435,69 @@ fn private_randomness_coin_source_resumes_exactly_and_keeps_purposes_independent
     let attempt_input =
         PersistentProofCoinInput::new(application_slot, Hash512::from_bytes([0x66; 64]))
             .expect("persistent proof attempt input is valid");
-    let attempt_identifier = action_private_randomness
-        .persistent_proof_attempt_identifier(&attempt_input)
+    let mut witness_binding = action_private_randomness
+        .begin_persistent_proof_witness_coin_binding(&attempt_input)
+        .expect("persistent proof witness binding starts");
+    witness_binding
+        .absorb_canonical_bytes(b"sealed-lattice/test/common-proof-coin-witness/v1")
+        .expect("test witness domain is absorbed");
+    witness_binding
+        .absorb_canonical_u64_values(&[3, 5, 8, 13, 21])
+        .expect("test witness is absorbed");
+    let attempt_identifier = witness_binding
+        .finish()
         .expect("persistent proof attempt derives");
     let derivation_context_hash = Hash512::from_bytes([0x77; 64]);
+    let first_coordinate =
+        CommonProofPrivateCoinCoordinate::mask(1, 0).expect("trace private-coin class is assigned");
+    let second_coordinate =
+        CommonProofPrivateCoinCoordinate::mask(1, 1).expect("trace private-coin class is assigned");
 
     let mut uninterrupted = PrivateRandomnessCommonProofCoinSource::new(
-        &action_private_randomness,
+        Rc::clone(&action_private_randomness),
         0x1211,
         derivation_context_hash,
         attempt_identifier,
+        CommonProofPrivateCoinCoordinateCapacity::for_test(2, 0, 0, true),
     )
     .expect("coin source starts");
     let _first = uninterrupted
-        .sample_modulo(1, super::super::PROOF_BASE_FIELD_MODULUS, 64)
+        .sample_modulo(first_coordinate, super::super::PROOF_BASE_FIELD_MODULUS, 64)
         .expect("first purpose-one sample succeeds");
     let authenticated_cursors = uninterrupted.cursors().collect::<Vec<_>>();
     let expected_next = uninterrupted
-        .sample_modulo(1, super::super::PROOF_BASE_FIELD_MODULUS, 64)
+        .sample_modulo(first_coordinate, super::super::PROOF_BASE_FIELD_MODULUS, 64)
         .expect("uninterrupted suffix sample succeeds");
     let expected_purpose_two = uninterrupted
-        .sample_modulo(2, super::super::PROOF_BASE_FIELD_MODULUS, 64)
+        .sample_modulo(
+            second_coordinate,
+            super::super::PROOF_BASE_FIELD_MODULUS,
+            64,
+        )
         .expect("independent purpose-two sample succeeds");
 
     let mut resumed = PrivateRandomnessCommonProofCoinSource::resume(
-        &action_private_randomness,
+        Rc::clone(&action_private_randomness),
         0x1211,
         derivation_context_hash,
         attempt_identifier,
+        CommonProofPrivateCoinCoordinateCapacity::for_test(2, 0, 0, true),
         authenticated_cursors,
     )
     .expect("authenticated cursor resumes");
     assert_eq!(
         resumed
-            .sample_modulo(1, super::super::PROOF_BASE_FIELD_MODULUS, 64)
+            .sample_modulo(first_coordinate, super::super::PROOF_BASE_FIELD_MODULUS, 64)
             .expect("resumed suffix sample succeeds"),
         expected_next,
     );
     assert_eq!(
         resumed
-            .sample_modulo(2, super::super::PROOF_BASE_FIELD_MODULUS, 64)
+            .sample_modulo(
+                second_coordinate,
+                super::super::PROOF_BASE_FIELD_MODULUS,
+                64
+            )
             .expect("resumed independent purpose starts at counter zero"),
         expected_purpose_two,
     );
@@ -435,12 +507,13 @@ fn private_randomness_coin_source_resumes_exactly_and_keeps_purposes_independent
         .expect("at least one cursor was retained");
     assert!(matches!(
         PrivateRandomnessCommonProofCoinSource::resume(
-            &action_private_randomness,
+            Rc::clone(&action_private_randomness),
             0x1211,
             derivation_context_hash,
             attempt_identifier,
+            CommonProofPrivateCoinCoordinateCapacity::for_test(2, 0, 0, true),
             [duplicate_cursor, duplicate_cursor],
         ),
-        Err(PrivateRandomnessCommonProofCoinError::DuplicateCursorPurpose),
+        Err(PrivateRandomnessCommonProofCoinError::DuplicateCursorCoordinate),
     ));
 }

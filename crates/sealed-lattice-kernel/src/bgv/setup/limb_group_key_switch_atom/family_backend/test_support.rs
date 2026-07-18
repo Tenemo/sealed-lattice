@@ -1,5 +1,5 @@
 use super::super::{
-    negacyclic_transform::NegacyclicDomain, proof_field::sixteen_limb_group_field_parameters,
+    negacyclic_transform::NegacyclicDomain, proof_field::selected_key_switch_proof_field_parameters,
 };
 use super::key_proof::{DigitPublic, DigitWitness, KeyPublic, KeySource};
 
@@ -8,7 +8,7 @@ pub(super) fn build_synthetic_key_fixture(
     digit_count: usize,
     key_source: &KeySource<13>,
 ) -> (Vec<i64>, Vec<DigitWitness>, KeyPublic<13>) {
-    let proof_field_parameters = sixteen_limb_group_field_parameters();
+    let proof_field_parameters = selected_key_switch_proof_field_parameters();
     let negacyclic_domain =
         NegacyclicDomain::new(&proof_field_parameters, ring_degree).expect("synthetic key domain");
     let secret_coefficients: Vec<i64> = (0..ring_degree)
@@ -19,7 +19,8 @@ pub(super) fn build_synthetic_key_fixture(
         .map(|coefficient| proof_field_parameters.signed_word_to_element(*coefficient))
         .collect();
     let group_modulus = proof_field_parameters.unsigned_word_to_element(1_000_003);
-    let plaintext_modulus = proof_field_parameters.unsigned_word_to_element(65_537);
+    let plaintext_modulus =
+        proof_field_parameters.unsigned_word_to_element(crate::bgv::parameters::PLAINTEXT_MODULUS);
     let mut digit_witnesses = Vec::with_capacity(digit_count);
     let mut public_digit_records = Vec::with_capacity(digit_count);
 

@@ -20,7 +20,10 @@ const MAXIMUM_EVALUATOR_PROGRAM_BYTE_LENGTH: usize = 64 * 1024 * 1024;
 const MAXIMUM_EVALUATOR_PROGRAM_ITEM_BYTE_LENGTH: usize = 48 * 1024 * 1024;
 const MAXIMUM_EVALUATOR_PROGRAM_CUMULATIVE_WORK_BYTE_LENGTH: usize = 128 * 1024 * 1024;
 const MAXIMUM_EVALUATOR_PROGRAM_CUMULATIVE_ALLOCATION_BYTE_LENGTH: usize = 96 * 1024 * 1024;
-const MAXIMUM_EVALUATOR_CANONICAL_LIST_COUNT: usize = 32_768;
+// A selected slot-vector constant contains one canonical plaintext residue
+// for every ring slot. Keep the decoder bound exact to that largest list;
+// instruction and catalog lists retain their narrower checks at their owners.
+const MAXIMUM_EVALUATOR_CANONICAL_LIST_COUNT: usize = crate::bgv::parameters::POLYNOMIAL_DEGREE;
 
 pub(super) fn encode_program_set(program_set: &EvaluatorProgramSet) -> CanonicalResult<Vec<u8>> {
     program_set.validate()?;

@@ -28,8 +28,47 @@ import {
     runtimeBinding,
 } from './wire-fixtures.js';
 
+const authenticatedSourceRequestByteLength = 160;
+
+const encodeAuthenticatedSourceReadRequest = (input: {
+    authenticationChunkIndex: number;
+    exactByteLength: number;
+    sourceMaterialRootByte: number;
+    sourceStreamByteOffset: bigint;
+    sourceStreamDigestByte: number;
+    sourceStreamTotalByteLength: bigint;
+    storageByteOffset: bigint;
+}): Uint8Array<ArrayBuffer> => {
+    const encodedRequest = new Uint8Array(authenticatedSourceRequestByteLength);
+    encodedRequest.fill(input.sourceMaterialRootByte, 0, hashByteLength);
+    encodedRequest.fill(
+        input.sourceStreamDigestByte,
+        hashByteLength,
+        2 * hashByteLength,
+    );
+    const view = new DataView(encodedRequest.buffer);
+    view.setBigUint64(128, input.sourceStreamTotalByteLength, true);
+    view.setBigUint64(136, input.sourceStreamByteOffset, true);
+    view.setBigUint64(144, input.storageByteOffset, true);
+    view.setUint32(152, input.exactByteLength, true);
+    view.setUint32(156, input.authenticationChunkIndex, true);
+    return encodedRequest;
+};
+
 describe('common-proof generation runtime', () => {
     it('drives storage, commit, exact readback, and opaque generation authority in order', async () => {
+        class SliceObservingBytes extends Uint8Array {
+            public sliceCount = 0;
+
+            public override slice(
+                start?: number,
+                end?: number,
+            ): Uint8Array<ArrayBuffer> {
+                this.sliceCount += 1;
+                return super.slice(start, end);
+            }
+        }
+
         const binding = runtimeBinding(0x41);
         const request = fourByteReadRequest(binding, 1n);
         const outputBytes = Uint8Array.from([7, 3, 9, 1, 4]);
@@ -197,10 +236,13 @@ describe('common-proof generation runtime', () => {
                 return 0;
             },
         }));
-        const storageReadBytes = Uint8Array.from([5, 8, 13, 21]);
-        const transferredReadResult = readResult(0, 7, 3n, [
-            ...storageReadBytes,
-        ]);
+        const transferredReadBytes = new SliceObservingBytes([5, 8, 13, 21]);
+        const transferredReadResult = {
+            bytes: transferredReadBytes,
+            objectOrdinal: 7,
+            offset: 3n,
+            operationIndex: 0,
+        };
         const externalMemory: CommonProofExternalMemoryTransactionExecutor = {
             executeTransaction: (decodedRequest) => {
                 expect(decodedRequest.requestSequence).toBe(1n);
@@ -209,6 +251,7 @@ describe('common-proof generation runtime', () => {
         };
         let committedArgument: Uint8Array<ArrayBuffer> | undefined;
         let committedOutput: Uint8Array<ArrayBuffer> | undefined;
+        let transferredOutputReadback: SliceObservingBytes | undefined;
         const outputStore: CommonProofCanonicalOutputStore = {
             commitChunk: (chunkIndex, chunkBytes) => {
                 expect(chunkIndex).toBe(0);
@@ -219,9 +262,10 @@ describe('common-proof generation runtime', () => {
             readChunk: (chunkIndex, exactByteLength) => {
                 expect(chunkIndex).toBe(0);
                 expect(exactByteLength).toBe(outputBytes.byteLength);
-                return Promise.resolve(
-                    committedOutput?.slice() ?? new Uint8Array(),
+                transferredOutputReadback = new SliceObservingBytes(
+                    committedOutput ?? new Uint8Array(),
                 );
+                return Promise.resolve(transferredOutputReadback);
             },
         };
         let yieldCount = 0;
@@ -244,13 +288,347 @@ describe('common-proof generation runtime', () => {
         expect([...(committedArgument ?? [])]).toEqual(
             Array(outputBytes.byteLength).fill(0),
         );
-        expect([...storageReadBytes]).toEqual([5, 8, 13, 21]);
+        expect(transferredReadBytes.sliceCount).toBe(0);
         expect([...transferredReadResult.bytes]).toEqual([0, 0, 0, 0]);
+        expect(transferredOutputReadback?.sliceCount).toBe(0);
+        expect([...(transferredOutputReadback ?? [])]).toEqual(
+            Array(outputBytes.byteLength).fill(0),
+        );
         capability.release();
         expect(releasedCapabilityCount).toBe(1);
         expect(() => capability.release()).toThrowError(
             expect.objectContaining({ code: 'KernelFailure' }),
         );
+    });
+
+    it('services one exact Rust-authenticated source range and clears every transferred view', async () => {
+        const exactSourceBytes = Uint8Array.from([2, 3, 5, 7, 11]);
+        const encodedSourceRequest = encodeAuthenticatedSourceReadRequest({
+            authenticationChunkIndex: 3,
+            exactByteLength: exactSourceBytes.byteLength,
+            sourceMaterialRootByte: 0x31,
+            sourceStreamByteOffset: 1024n,
+            sourceStreamDigestByte: 0x42,
+            sourceStreamTotalByteLength: 4096n,
+            storageByteOffset: 8192n,
+        });
+        let phase = 0;
+        let releasedCapabilityCount = 0;
+        const runtime = createMockKernelRuntime((memory) => ({
+            sealed_lattice_common_proof_begin_generation: (
+                preparedGenerationHandle,
+                statusPointer,
+            ) => {
+                expect(preparedGenerationHandle).toBe(42);
+                writeUnsigned32(memory, statusPointer, 0);
+                return 52;
+            },
+            sealed_lattice_common_proof_generation_authenticated_source_request_byte_length:
+                () => authenticatedSourceRequestByteLength,
+            sealed_lattice_common_proof_generation_copy_authenticated_source_request:
+                (operationHandle, outputPointer, outputByteLength) => {
+                    expect(operationHandle).toBe(52);
+                    expect(outputByteLength).toBe(
+                        authenticatedSourceRequestByteLength,
+                    );
+                    memoryBytes(memory, outputPointer, outputByteLength).set(
+                        encodedSourceRequest,
+                    );
+                    return 0;
+                },
+            sealed_lattice_common_proof_generation_poll: (
+                operationHandle,
+                pollKindPointer,
+                primaryValuePointer,
+                secondaryValuePointer,
+            ) => {
+                expect(operationHandle).toBe(52);
+                return phase === 0
+                    ? writeGenerationPoll(
+                          memory,
+                          pollKindPointer,
+                          primaryValuePointer,
+                          secondaryValuePointer,
+                          8,
+                          exactSourceBytes.byteLength,
+                          3,
+                      )
+                    : writeGenerationPoll(
+                          memory,
+                          pollKindPointer,
+                          primaryValuePointer,
+                          secondaryValuePointer,
+                          5,
+                          0,
+                          noSecondPollValue,
+                      );
+            },
+            sealed_lattice_common_proof_generation_supply_authenticated_source_range:
+                (operationHandle, sourcePointer, sourceByteLength) => {
+                    expect(operationHandle).toBe(52);
+                    expect(phase).toBe(0);
+                    expect([
+                        ...memoryBytes(memory, sourcePointer, sourceByteLength),
+                    ]).toEqual([...exactSourceBytes]);
+                    phase = 1;
+                    return 0;
+                },
+            sealed_lattice_common_proof_generation_finish: (
+                operationHandle,
+                statusPointer,
+            ) => {
+                expect(operationHandle).toBe(52);
+                expect(phase).toBe(1);
+                writeUnsigned32(memory, statusPointer, 0);
+                return 62;
+            },
+            sealed_lattice_common_proof_release_generated_proof: (
+                capabilityHandle,
+            ) => {
+                expect(capabilityHandle).toBe(62);
+                releasedCapabilityCount += 1;
+                return 0;
+            },
+        }));
+        let transferredSourceBytes: Uint8Array<ArrayBuffer> | undefined;
+        let retainedSourceMaterialRoot: Uint8Array<ArrayBuffer> | undefined;
+        let retainedSourceStreamDigest: Uint8Array<ArrayBuffer> | undefined;
+
+        const capability = await runPreparedCommonProofGenerationWorker(
+            runtime,
+            42,
+            {
+                executeTransaction: () =>
+                    Promise.reject(
+                        new Error(
+                            'Authenticated-source generation must not use external scratch in this fixture.',
+                        ),
+                    ),
+            },
+            {
+                commitChunk: () =>
+                    Promise.reject(
+                        new Error(
+                            'Authenticated-source generation emitted an unexpected proof chunk.',
+                        ),
+                    ),
+                readChunk: () =>
+                    Promise.reject(
+                        new Error(
+                            'Authenticated-source generation requested unexpected proof readback.',
+                        ),
+                    ),
+            },
+            {
+                authenticatedSourceRangeReader: Object.freeze({
+                    readExactRange: (request) => {
+                        expect(request).toMatchObject({
+                            authenticationChunkIndex: 3,
+                            exactByteLength: exactSourceBytes.byteLength,
+                            sourceStreamByteOffset: 1024n,
+                            sourceStreamTotalByteLength: 4096n,
+                            storageByteOffset: 8192n,
+                        });
+                        expect([...request.sourceMaterialRoot]).toEqual(
+                            Array(hashByteLength).fill(0x31),
+                        );
+                        expect([...request.sourceStreamDigest]).toEqual(
+                            Array(hashByteLength).fill(0x42),
+                        );
+                        retainedSourceMaterialRoot = request.sourceMaterialRoot;
+                        retainedSourceStreamDigest = request.sourceStreamDigest;
+                        transferredSourceBytes = exactSourceBytes.slice();
+                        return Promise.resolve(transferredSourceBytes);
+                    },
+                }),
+            },
+        );
+
+        expect([...(transferredSourceBytes ?? [])]).toEqual(
+            Array(exactSourceBytes.byteLength).fill(0),
+        );
+        expect([...(retainedSourceMaterialRoot ?? [])]).toEqual(
+            Array(hashByteLength).fill(0),
+        );
+        expect([...(retainedSourceStreamDigest ?? [])]).toEqual(
+            Array(hashByteLength).fill(0),
+        );
+        capability.release();
+        expect(releasedCapabilityCount).toBe(1);
+    });
+
+    it('retires generation before reading an inconsistent authenticated-source request', async () => {
+        const encodedSourceRequest = encodeAuthenticatedSourceReadRequest({
+            authenticationChunkIndex: 4,
+            exactByteLength: 4,
+            sourceMaterialRootByte: 0x51,
+            sourceStreamByteOffset: 256n,
+            sourceStreamDigestByte: 0x62,
+            sourceStreamTotalByteLength: 1024n,
+            storageByteOffset: 2048n,
+        });
+        let readAttemptCount = 0;
+        let retirementCount = 0;
+        const runtime = createMockKernelRuntime((memory) => ({
+            sealed_lattice_common_proof_begin_generation: (
+                preparedGenerationHandle,
+                statusPointer,
+            ) => {
+                expect(preparedGenerationHandle).toBe(43);
+                writeUnsigned32(memory, statusPointer, 0);
+                return 53;
+            },
+            sealed_lattice_common_proof_generation_authenticated_source_request_byte_length:
+                () => authenticatedSourceRequestByteLength,
+            sealed_lattice_common_proof_generation_copy_authenticated_source_request:
+                (operationHandle, outputPointer, outputByteLength) => {
+                    expect(operationHandle).toBe(53);
+                    memoryBytes(memory, outputPointer, outputByteLength).set(
+                        encodedSourceRequest,
+                    );
+                    return 0;
+                },
+            sealed_lattice_common_proof_generation_poll: (
+                operationHandle,
+                pollKindPointer,
+                primaryValuePointer,
+                secondaryValuePointer,
+            ) => {
+                expect(operationHandle).toBe(53);
+                return writeGenerationPoll(
+                    memory,
+                    pollKindPointer,
+                    primaryValuePointer,
+                    secondaryValuePointer,
+                    8,
+                    5,
+                    4,
+                );
+            },
+            sealed_lattice_common_proof_generation_retire_failed: (
+                operationHandle,
+            ) => {
+                expect(operationHandle).toBe(53);
+                retirementCount += 1;
+                return 0;
+            },
+        }));
+
+        await expect(
+            runPreparedCommonProofGenerationWorker(
+                runtime,
+                43,
+                { executeTransaction: () => Promise.resolve([]) },
+                {
+                    commitChunk: () => Promise.resolve(),
+                    readChunk: () => Promise.resolve(new Uint8Array()),
+                },
+                {
+                    authenticatedSourceRangeReader: Object.freeze({
+                        readExactRange: () => {
+                            readAttemptCount += 1;
+                            return Promise.resolve(new Uint8Array(5));
+                        },
+                    }),
+                },
+            ),
+        ).rejects.toMatchObject({
+            code: 'KernelFailure',
+            permanentRetirementRequired: true,
+        });
+        expect(readAttemptCount).toBe(0);
+        expect(retirementCount).toBe(1);
+    });
+
+    it('clears and rejects a non-owned authenticated-source range before Rust ingestion', async () => {
+        const exactByteLength = 5;
+        const encodedSourceRequest = encodeAuthenticatedSourceReadRequest({
+            authenticationChunkIndex: 5,
+            exactByteLength,
+            sourceMaterialRootByte: 0x71,
+            sourceStreamByteOffset: 64n,
+            sourceStreamDigestByte: 0x72,
+            sourceStreamTotalByteLength: 512n,
+            storageByteOffset: 1024n,
+        });
+        const backingBytes = new Uint8Array(exactByteLength + 2).fill(0x83);
+        const nonOwnedSourceRange = backingBytes.subarray(
+            1,
+            1 + exactByteLength,
+        );
+        let ingestionCount = 0;
+        let retirementCount = 0;
+        const runtime = createMockKernelRuntime((memory) => ({
+            sealed_lattice_common_proof_begin_generation: (
+                preparedGenerationHandle,
+                statusPointer,
+            ) => {
+                expect(preparedGenerationHandle).toBe(44);
+                writeUnsigned32(memory, statusPointer, 0);
+                return 54;
+            },
+            sealed_lattice_common_proof_generation_authenticated_source_request_byte_length:
+                () => authenticatedSourceRequestByteLength,
+            sealed_lattice_common_proof_generation_copy_authenticated_source_request:
+                (_operationHandle, outputPointer, outputByteLength) => {
+                    memoryBytes(memory, outputPointer, outputByteLength).set(
+                        encodedSourceRequest,
+                    );
+                    return 0;
+                },
+            sealed_lattice_common_proof_generation_poll: (
+                _operationHandle,
+                pollKindPointer,
+                primaryValuePointer,
+                secondaryValuePointer,
+            ) =>
+                writeGenerationPoll(
+                    memory,
+                    pollKindPointer,
+                    primaryValuePointer,
+                    secondaryValuePointer,
+                    8,
+                    exactByteLength,
+                    5,
+                ),
+            sealed_lattice_common_proof_generation_supply_authenticated_source_range:
+                () => {
+                    ingestionCount += 1;
+                    return 0;
+                },
+            sealed_lattice_common_proof_generation_retire_failed: () => {
+                retirementCount += 1;
+                return 0;
+            },
+        }));
+
+        await expect(
+            runPreparedCommonProofGenerationWorker(
+                runtime,
+                44,
+                { executeTransaction: () => Promise.resolve([]) },
+                {
+                    commitChunk: () => Promise.resolve(),
+                    readChunk: () => Promise.resolve(new Uint8Array()),
+                },
+                {
+                    authenticatedSourceRangeReader: Object.freeze({
+                        readExactRange: () =>
+                            Promise.resolve(nonOwnedSourceRange),
+                    }),
+                },
+            ),
+        ).rejects.toMatchObject({
+            code: 'StorageFailure',
+            permanentRetirementRequired: true,
+        });
+        expect([...nonOwnedSourceRange]).toEqual(
+            Array(exactByteLength).fill(0),
+        );
+        expect(backingBytes[0]).toBe(0x83);
+        expect(backingBytes[backingBytes.byteLength - 1]).toBe(0x83);
+        expect(ingestionCount).toBe(0);
+        expect(retirementCount).toBe(1);
     });
 
     it('rejects a hostile read length before copying and clears the transferred buffer', async () => {
@@ -530,7 +908,7 @@ describe('common-proof generation runtime', () => {
                         committedStateBytes =
                             checkpoint.canonicalStateBytes.slice();
                         committedCursorBytes =
-                            checkpoint.orderedPrivateRandomCursorBytes[0]?.slice();
+                            checkpoint.privateRandomCursorManifestBytes.slice();
                         committedStableAttemptBindingHash =
                             checkpoint.stableAttemptBindingHash.slice();
                         return Promise.resolve();
@@ -553,7 +931,7 @@ describe('common-proof generation runtime', () => {
             ...fixture.canonicalStateBytes,
         ]);
         expect([...(committedCursorBytes ?? [])]).toEqual([
-            ...fixture.cursorBytes,
+            ...fixture.cursorManifestBytes,
         ]);
         expect([...(committedStableAttemptBindingHash ?? [])]).toEqual([
             ...fixture.stableAttemptBindingHash,
@@ -566,8 +944,8 @@ describe('common-proof generation runtime', () => {
             Array(fixture.canonicalStateBytes.byteLength).fill(0),
         );
         expect([
-            ...publishedCheckpoint.orderedPrivateRandomCursorBytes[0],
-        ]).toEqual(Array(fixture.cursorBytes.byteLength).fill(0));
+            ...publishedCheckpoint.privateRandomCursorManifestBytes,
+        ]).toEqual(Array(fixture.cursorManifestBytes.byteLength).fill(0));
         expect([...publishedCheckpoint.stableAttemptBindingHash]).toEqual(
             Array(hashByteLength).fill(0),
         );
@@ -648,11 +1026,9 @@ describe('common-proof generation runtime', () => {
     });
 
     it('retires a checkpoint whose cursor corpus exceeds the aggregate worker bound', async () => {
-        const fixture = createCheckpointGenerationKernelFixture([
-            new Uint8Array(524_288).fill(0x31),
-            new Uint8Array(524_288).fill(0x32),
-            Uint8Array.of(0x33),
-        ]);
+        const fixture = createCheckpointGenerationKernelFixture(
+            new Uint8Array(1_048_577).fill(0x31),
+        );
         let publicationAttempted = false;
 
         await expect(
@@ -928,8 +1304,9 @@ describe('common-proof generation runtime', () => {
                 return 0;
             },
         }));
-        const committedReplayRequest =
-            decodeCommonProofExternalMemoryRequest(replayRequest);
+        const committedReplayRequest = decodeCommonProofExternalMemoryRequest(
+            replayRequest.slice(),
+        );
         const underlyingWriteCount = 1;
         let prefixReplayCount = 0;
         let liveTransactionCount = 0;

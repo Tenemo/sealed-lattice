@@ -30,28 +30,6 @@ pub(crate) fn direct_score_packing_galois_elements(
     Ok(vec![galois_element_moving_slot_to_target(0, option_count)?])
 }
 
-pub(crate) fn pack_direct_score_slots(
-    context: &EvaluatorContext,
-    direct_scores: &Ciphertext,
-    option_count: usize,
-) -> CanonicalResult<Ciphertext> {
-    if option_count < 2 || option_count * 2 > POLYNOMIAL_DEGREE {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidProtocolObject,
-            "direct score-slot packing requires at least two options and a valid packed window",
-        ));
-    }
-    let option_indices = (0..option_count).collect::<Vec<_>>();
-    let selected_scores = plaintext_mul(
-        &normalize_scaling(direct_scores)?,
-        &packed_score_slot_selector(&option_indices)?,
-    )?;
-    let duplicated_scores =
-        rotate_with_compact_inverse_generator_basis(context, &selected_scores, option_count)?;
-
-    sum_aligned_ciphertexts(&[selected_scores, duplicated_scores])
-}
-
 pub(crate) fn packed_score_slot_selector(logical_indices: &[usize]) -> CanonicalResult<Vec<u64>> {
     let weights = logical_indices
         .iter()

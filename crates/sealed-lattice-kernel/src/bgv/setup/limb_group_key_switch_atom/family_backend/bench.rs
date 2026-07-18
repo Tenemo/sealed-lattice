@@ -17,7 +17,7 @@
 
 use super::key_proof::{begin_key_prover_phase_timing, finish_key_prover_phase_timing};
 use super::schedule::{
-    SCHEDULE_QUERY_COUNT, prove_key_bearing_trustee_evaluation_keys,
+    LIMB_GROUP_CAPACITY, SCHEDULE_QUERY_COUNT, prove_key_bearing_trustee_evaluation_keys,
     verify_key_bearing_trustee_evaluation_keys,
 };
 use crate::bgv::evaluator::top_k::SELECTED_EVALUATOR_WORKING_LEVEL;
@@ -97,16 +97,11 @@ fn process_lifetime_high_water_memory_bytes() -> Option<u64> {
 fn round_one_key_prover_cost() {
     use std::time::Instant;
 
-    // Level 15 is one 16-limb scheduled atom with 16 digit columns. It remains
-    // the closest stable comparison with historical per-atom measurements, but
-    // is explicitly a proxy: the shipped level-16 key has 17 digit columns and
-    // splits into a 16-limb atom plus a one-limb atom.
+    // One capacity-sized atom is the stable per-atom comparison. The complete
+    // working-level key has 26 digit columns and splits into 14- and 12-limb
+    // atoms.
     let benchmark_cases = [
-        (
-            "largest-group atom proxy",
-            SELECTED_EVALUATOR_WORKING_LEVEL - 1,
-            1_usize,
-        ),
+        ("largest-group atom proxy", LIMB_GROUP_CAPACITY - 1, 1_usize),
         (
             "complete shipped round-one key schedule",
             SELECTED_EVALUATOR_WORKING_LEVEL,

@@ -19,8 +19,8 @@ use super::authentication::{
     read_authentication_frontier,
 };
 use super::sizing::{
-    canonical_leaf_byte_length, entry_leaf_count, nested_tuple_list_byte_length,
-    proof_body_prefix_byte_length, raw_byte_list_byte_length,
+    canonical_leaf_byte_length, entry_leaf_count, proof_body_prefix_byte_length,
+    raw_byte_list_byte_length,
 };
 use super::{
     CompleteProofTreeCatalog, PROOF_QUERY_OPENING_RECORD_SCHEMA_IDENTIFIER, ProofBodyError,

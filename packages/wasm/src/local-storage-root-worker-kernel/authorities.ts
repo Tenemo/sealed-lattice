@@ -16,6 +16,10 @@ import {
 } from '@sealed-lattice/types';
 
 import type {
+    AggregateThresholdShareRecipientAuthority,
+    ClosedWorkerAggregateThresholdShareRecipientAuthorityInput,
+} from '../aggregate-threshold-share-authenticated-recipient.js';
+import type {
     CommonProofApplicationFreshnessCoordinate,
     VerifiedCommonProofCapability,
 } from '../common-proof-worker-runtime.js';
@@ -25,7 +29,6 @@ import type {
     VerifiedStateReservation,
     VerifiedStateReservationIntent,
 } from '../state-verifier-runtime.js';
-import type { BgvSetupCommitmentOpeningComputation } from '../structured-commitment-worker-response.js';
 import type { SetupMailboxSlot } from '../transcript-core-bridge/kernel-types.js';
 export type RootLease = {
     binding: BrowserActionStorageRootBinding;
@@ -111,32 +114,6 @@ export type ClosedWorkerSetupMailboxRandomnessOperations = Readonly<{
     revoke(): void;
 }>;
 
-export const structuredCommitmentOpeningCapabilityBrand: unique symbol = Symbol(
-    'sealed-lattice/structured-commitment-opening-capability',
-);
-
-export type ClosedWorkerStructuredCommitmentOpeningCapability = Readonly<{
-    readonly [structuredCommitmentOpeningCapabilityBrand]: true;
-}>;
-
-export type ClosedWorkerStructuredCommitmentOpeningOperations = Readonly<{
-    create(input: {
-        readonly sourceSetupIntentObjectHash: ProtocolHash;
-        readonly sourceRosterPosition: number;
-        readonly sourceRnsLimbIndex: number;
-        readonly shamirCoefficientIndex: number;
-    }): ClosedWorkerStructuredCommitmentOpeningCapability;
-    computeCommitment(input: {
-        readonly capability: ClosedWorkerStructuredCommitmentOpeningCapability;
-        readonly messageCoefficients: readonly number[];
-        readonly publicMatrixSeedHash: ProtocolHash;
-    }): BgvSetupCommitmentOpeningComputation;
-    release(
-        capability: ClosedWorkerStructuredCommitmentOpeningCapability,
-    ): void;
-    revoke(): void;
-}>;
-
 export type ClosedWorkerPreparedCommonProofApplication = Readonly<{
     authorizationFrame: Uint8Array<ArrayBuffer>;
     proofApplicationSlotHash: Uint8Array<ArrayBuffer>;
@@ -163,12 +140,6 @@ export type WorkerSetupMailboxRandomnessInput = Readonly<{
     readonly stateReservationIdentifier: string;
 }>;
 
-export type WorkerStructuredCommitmentOpeningInput = Readonly<{
-    readonly actionRandomnessSessionIdentifier: string;
-    readonly rosterHash: ProtocolHash;
-    readonly stateReservationIdentifier: string;
-}>;
-
 export type WorkerActionRandomnessKernelRunner = Readonly<{
     close(sessionIdentifier: string): Promise<void>;
     createAndSeal(
@@ -184,9 +155,9 @@ export type WorkerActionRandomnessKernelRunner = Readonly<{
     openSetupMailboxRandomness(
         input: WorkerSetupMailboxRandomnessInput,
     ): Promise<ClosedWorkerSetupMailboxRandomnessOperations>;
-    openStructuredCommitmentOpenings(
-        input: WorkerStructuredCommitmentOpeningInput,
-    ): Promise<ClosedWorkerStructuredCommitmentOpeningOperations>;
+    openAggregateThresholdShareRecipientAuthority(
+        input: ClosedWorkerAggregateThresholdShareRecipientAuthorityInput,
+    ): Promise<AggregateThresholdShareRecipientAuthority>;
     durableBindingForStateObject(
         stateObjectIdentifier: string,
     ): Promise<VerificationResult<VerifiedStateDurableBinding>>;

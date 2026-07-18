@@ -521,6 +521,33 @@ pub(super) fn kmac256<const OUTPUT_BYTE_LENGTH: usize>(
     *kmac256_zeroizing(key, message, customization)
 }
 
+/// Incremental, length-delimited KMAC input used when a canonical private
+/// witness is too large to assemble as one resident byte vector.
+pub(super) struct Kmac256FramedInput {
+    kmac: Kmac,
+}
+
+impl Kmac256FramedInput {
+    pub(super) fn new(key: &[u8], customization: &[u8]) -> Self {
+        Self {
+            kmac: Kmac::v256(key, customization),
+        }
+    }
+
+    pub(super) fn absorb_part(&mut self, bytes: &[u8]) -> Option<()> {
+        let byte_length = u64::try_from(bytes.len()).ok()?;
+        self.kmac.update(&byte_length.to_le_bytes());
+        self.kmac.update(bytes);
+        Some(())
+    }
+
+    pub(super) fn finish<const OUTPUT_BYTE_LENGTH: usize>(self) -> [u8; OUTPUT_BYTE_LENGTH] {
+        let mut output = [0_u8; OUTPUT_BYTE_LENGTH];
+        self.kmac.finalize(&mut output);
+        output
+    }
+}
+
 pub(super) fn kmac256_zeroizing<const OUTPUT_BYTE_LENGTH: usize>(
     key: &[u8],
     message: &[u8],

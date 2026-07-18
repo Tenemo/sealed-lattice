@@ -31,6 +31,11 @@ import {
 
 import { actionRandomnessCommandOutputByteLimit } from '../action-randomness-command-byte-limits.js';
 import { actionRandomnessCommandIdentifiers } from '../action-randomness-command-identifiers.js';
+import {
+    beginAggregateThresholdShareRecipientAuthorityFromRetainedActionRandomness,
+    type AggregateThresholdShareRecipientAuthority,
+    type ClosedWorkerAggregateThresholdShareRecipientAuthorityInput,
+} from '../aggregate-threshold-share-authenticated-recipient.js';
 import { byteArraysEqual } from '../byte-array.js';
 import {
     abortVerifiedCommonProofApplication,
@@ -48,7 +53,6 @@ import {
     type VerifiedStateDurableBinding,
     type VerifiedStateReservation,
 } from '../state-verifier-runtime.js';
-import { decodeStructuredCommitmentWorkerResponse } from '../structured-commitment-worker-response.js';
 import { type ActionRandomnessKernelContext } from '../transcript-core-bridge/action-randomness-kernel-context.js';
 import { resolveCommonProofKernelContext } from '../transcript-core-bridge/common-proof-kernel-context.js';
 import type {
@@ -64,8 +68,6 @@ import {
     ClosedWorkerCommonProofScratchRecordSealInput,
     ClosedWorkerPreparedCommonProofApplication,
     ClosedWorkerSetupMailboxRandomnessOperations,
-    ClosedWorkerStructuredCommitmentOpeningCapability,
-    ClosedWorkerStructuredCommitmentOpeningOperations,
     RootLease,
     WorkerActionRandomnessRecordContext,
     WorkerActionRandomnessSessionRecord,
@@ -74,9 +76,7 @@ import {
     WorkerSetupMailboxRandomnessInput,
     WorkerStateObject,
     WorkerStateVerifierSession,
-    WorkerStructuredCommitmentOpeningInput,
     closedWorkerCommonProofScratchStorage,
-    structuredCommitmentOpeningCapabilityBrand,
 } from './authorities.js';
 import {
     actionRandomnessRootByteLength,
@@ -102,7 +102,6 @@ import {
     encodeFoundationWitnessRole,
     encodeLocalRecordExpectedContext,
     encodeLocalRecordIdentifierInput,
-    encodeStructuredCommitmentMessage,
     encodeUnsigned32,
     foundationHashByteLength,
     foundationWitnessStateKeyDomain,
@@ -498,10 +497,21 @@ export class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorag
         return this.#openClosedSetupMailboxRandomness(input);
     }
 
-    public openClosedStructuredCommitmentOpenings(
-        input: WorkerStructuredCommitmentOpeningInput,
-    ): ClosedWorkerStructuredCommitmentOpeningOperations {
-        return this.#openClosedStructuredCommitmentOpenings(input);
+    public openClosedAggregateThresholdShareRecipientAuthority(
+        input: ClosedWorkerAggregateThresholdShareRecipientAuthorityInput,
+    ): Promise<AggregateThresholdShareRecipientAuthority> {
+        return this.#enqueue(() =>
+            beginAggregateThresholdShareRecipientAuthorityFromRetainedActionRandomness(
+                {
+                    ...input,
+                    actionRandomnessHandle:
+                        this.#requireActionRandomnessSession(
+                            input.actionRandomnessSessionIdentifier,
+                        ),
+                    kernel: this.#kernel,
+                },
+            ),
+        );
     }
 
     public prepareClosedCommonProofApplication(
@@ -1650,353 +1660,6 @@ export class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorag
                 }
                 revoked = true;
                 rosterHashBytes.fill(0);
-            },
-        });
-    }
-
-    #openClosedStructuredCommitmentOpenings(
-        input: WorkerStructuredCommitmentOpeningInput,
-    ): ClosedWorkerStructuredCommitmentOpeningOperations {
-        if (typeof input !== 'object' || input === null) {
-            throw new BrowserActionStorageCustodyError(
-                'InvalidInput',
-                'The structured-commitment opening input must be an object.',
-            );
-        }
-        const actionRandomnessSessionIdentifier = requireOpaqueWorkerIdentifier(
-            input.actionRandomnessSessionIdentifier,
-            'Action-randomness session identifier',
-        );
-        const stateReservationIdentifier = requireOpaqueWorkerIdentifier(
-            input.stateReservationIdentifier,
-            'State-reservation identifier',
-        );
-        const rosterHashBytes = protocolHashBytes(
-            input.rosterHash,
-            'Structured-commitment roster hash',
-        );
-        const initialBinding = this.#requireActiveLease().binding;
-        this.#requireActionRandomnessSession(actionRandomnessSessionIdentifier);
-        this.#requireStateReservation(
-            stateReservationIdentifier,
-            stateCapabilityKinds.setupActionRandomnessRoot,
-            initialBinding,
-        );
-        const structuredCommitmentParameters =
-            this.#kernel.describeBgvRnsParameters().parameters;
-
-        type RetainedOpeningRecord = {
-            readonly capability: ClosedWorkerStructuredCommitmentOpeningCapability;
-            readonly shamirCoefficientIndex: number;
-            readonly slotKey: string;
-            readonly sourceRnsLimbIndex: number;
-            handles: number[];
-            state: 'active' | 'releasing' | 'released';
-        };
-        const recordsByCapability = new WeakMap<
-            ClosedWorkerStructuredCommitmentOpeningCapability,
-            RetainedOpeningRecord
-        >();
-        const recordsBySlot = new Map<string, RetainedOpeningRecord>();
-        let revoked = false;
-
-        const requireScope = (): Readonly<{
-            reservation: Extract<
-                WorkerStateObject,
-                Readonly<{ kind: 'reservation' }>
-            >;
-            sessionHandle: number;
-        }> => {
-            if (revoked) {
-                throw new BrowserActionStorageCustodyError(
-                    'InvalidState',
-                    'The structured-commitment opening operations were revoked.',
-                );
-            }
-            const binding = this.#requireActiveLease().binding;
-            const sessionHandle = this.#requireActionRandomnessSession(
-                actionRandomnessSessionIdentifier,
-            );
-            const reservation = this.#requireStateReservation(
-                stateReservationIdentifier,
-                stateCapabilityKinds.setupActionRandomnessRoot,
-                binding,
-            );
-            return Object.freeze({ reservation, sessionHandle });
-        };
-
-        const requireActiveRecord = (
-            capability: ClosedWorkerStructuredCommitmentOpeningCapability,
-        ): RetainedOpeningRecord => {
-            if (
-                typeof capability !== 'object' ||
-                capability === null ||
-                capability[structuredCommitmentOpeningCapabilityBrand] !== true
-            ) {
-                throw new BrowserActionStorageCustodyError(
-                    'InvalidInput',
-                    'The structured-commitment opening capability is invalid.',
-                );
-            }
-            const record = recordsByCapability.get(capability);
-            if (record === undefined) {
-                throw new BrowserActionStorageCustodyError(
-                    'InvalidInput',
-                    'The structured-commitment opening capability belongs to another operation scope.',
-                );
-            }
-            if (record.state !== 'active') {
-                throw new BrowserActionStorageCustodyError(
-                    'InvalidState',
-                    'The structured-commitment opening capability is no longer active.',
-                );
-            }
-            return record;
-        };
-
-        const releaseRecord = (record: RetainedOpeningRecord): void => {
-            if (record.state === 'released') {
-                return;
-            }
-            record.state = 'releasing';
-            while (record.handles.length > 0) {
-                const sessionHandle = this.#requireActionRandomnessSession(
-                    actionRandomnessSessionIdentifier,
-                );
-                const openingHandle = record.handles[0];
-                if (openingHandle === undefined) {
-                    throw new BrowserActionStorageCustodyError(
-                        'InvalidState',
-                        'The retained structured-commitment handle set is inconsistent.',
-                    );
-                }
-                const output = this.#runActionRandomnessCommand(
-                    actionRandomnessCommandIdentifiers.releaseStructuredCommitmentOpening,
-                    concatenateBytes(
-                        encodeUnsigned32(sessionHandle),
-                        encodeUnsigned32(openingHandle),
-                    ),
-                    'release a structured-commitment opening',
-                    'runtime',
-                );
-                try {
-                    if (output.byteLength !== 0) {
-                        throw new BrowserActionStorageCustodyError(
-                            'OwnedWorkerFailure',
-                            'The WASM action-randomness kernel returned unexpected structured-opening release output.',
-                        );
-                    }
-                    record.handles.shift();
-                } finally {
-                    output.fill(0);
-                }
-            }
-            record.state = 'released';
-            recordsBySlot.delete(record.slotKey);
-        };
-
-        return Object.freeze({
-            create: (openingInput) => {
-                if (typeof openingInput !== 'object' || openingInput === null) {
-                    throw new BrowserActionStorageCustodyError(
-                        'InvalidInput',
-                        'The structured-commitment opening request must be an object.',
-                    );
-                }
-                const {
-                    sourceSetupIntentObjectHash,
-                    sourceRosterPosition,
-                    sourceRnsLimbIndex,
-                    shamirCoefficientIndex,
-                } = openingInput;
-                const sourceSetupIntentObjectHashBytes = protocolHashBytes(
-                    sourceSetupIntentObjectHash,
-                    'Source setup-intent object hash',
-                );
-                const sourceRosterPositionBytes = encodeCanonicalUnsigned16(
-                    sourceRosterPosition,
-                    'Source roster position',
-                );
-                const sourceRnsLimbIndexBytes = encodeCanonicalUnsigned16(
-                    sourceRnsLimbIndex,
-                    'Source RNS-limb index',
-                );
-                const shamirCoefficientIndexBytes = encodeCanonicalUnsigned16(
-                    shamirCoefficientIndex,
-                    'Shamir coefficient index',
-                );
-                const slotKey = `${sourceSetupIntentObjectHash}:${String(sourceRnsLimbIndex)}:${String(shamirCoefficientIndex)}`;
-                const existing = recordsBySlot.get(slotKey);
-                if (existing !== undefined) {
-                    sourceSetupIntentObjectHashBytes.fill(0);
-                    sourceRosterPositionBytes.fill(0);
-                    sourceRnsLimbIndexBytes.fill(0);
-                    shamirCoefficientIndexBytes.fill(0);
-                    if (existing.state !== 'active') {
-                        throw new BrowserActionStorageCustodyError(
-                            'InvalidState',
-                            'The structured-commitment opening slot is being released.',
-                        );
-                    }
-                    return existing.capability;
-                }
-                const { reservation, sessionHandle } = requireScope();
-                const reservationAuthorization =
-                    this.#reservationAuthorizationBytes(reservation.value);
-                let output: Uint8Array<ArrayBuffer> | undefined;
-                try {
-                    output = this.#runActionRandomnessCommand(
-                        actionRandomnessCommandIdentifiers.createStructuredCommitmentOpening,
-                        concatenateBytes(
-                            encodeUnsigned32(sessionHandle),
-                            reservationAuthorization,
-                            rosterHashBytes,
-                            sourceRosterPositionBytes,
-                            sourceSetupIntentObjectHashBytes,
-                            sourceRnsLimbIndexBytes,
-                            shamirCoefficientIndexBytes,
-                        ),
-                        'create and retain a structured-commitment opening',
-                        'runtime',
-                    );
-                    if (
-                        output.byteLength === 0 ||
-                        output.byteLength % handleByteLength !== 0
-                    ) {
-                        throw new BrowserActionStorageCustodyError(
-                            'OwnedWorkerFailure',
-                            'The WASM action-randomness kernel returned malformed structured-opening handles.',
-                        );
-                    }
-                    const handles = Array.from(
-                        { length: output.byteLength / handleByteLength },
-                        (_unused, handleIndex) =>
-                            decodeUnsigned32(
-                                output as Uint8Array<ArrayBuffer>,
-                                handleIndex * handleByteLength,
-                            ),
-                    );
-                    if (
-                        handles.some((handle) => handle === 0) ||
-                        new Set(handles).size !== handles.length
-                    ) {
-                        throw new BrowserActionStorageCustodyError(
-                            'OwnedWorkerFailure',
-                            'The WASM action-randomness kernel returned invalid structured-opening handles.',
-                        );
-                    }
-                    const capability = Object.freeze({
-                        [structuredCommitmentOpeningCapabilityBrand]: true,
-                    }) as ClosedWorkerStructuredCommitmentOpeningCapability;
-                    const record: RetainedOpeningRecord = {
-                        capability,
-                        handles,
-                        shamirCoefficientIndex,
-                        slotKey,
-                        sourceRnsLimbIndex,
-                        state: 'active',
-                    };
-                    recordsByCapability.set(capability, record);
-                    recordsBySlot.set(slotKey, record);
-                    return capability;
-                } finally {
-                    output?.fill(0);
-                    reservationAuthorization.fill(0);
-                    sourceSetupIntentObjectHashBytes.fill(0);
-                    sourceRosterPositionBytes.fill(0);
-                    sourceRnsLimbIndexBytes.fill(0);
-                    shamirCoefficientIndexBytes.fill(0);
-                }
-            },
-            computeCommitment: (commitmentInput) => {
-                if (
-                    typeof commitmentInput !== 'object' ||
-                    commitmentInput === null
-                ) {
-                    throw new BrowserActionStorageCustodyError(
-                        'InvalidInput',
-                        'The structured-commitment computation request must be an object.',
-                    );
-                }
-                const {
-                    capability,
-                    messageCoefficients,
-                    publicMatrixSeedHash,
-                } = commitmentInput;
-                const record = requireActiveRecord(capability);
-                const { sessionHandle } = requireScope();
-                const publicMatrixSeedHashBytes = protocolHashBytes(
-                    publicMatrixSeedHash,
-                    'Public matrix-seed hash',
-                );
-                const encodedMessageCoefficients =
-                    encodeStructuredCommitmentMessage(messageCoefficients);
-                const encodedHandles = record.handles.map(encodeUnsigned32);
-                let output: Uint8Array<ArrayBuffer> | undefined;
-                try {
-                    output = this.#runActionRandomnessCommand(
-                        actionRandomnessCommandIdentifiers.computeStructuredCommitment,
-                        concatenateBytes(
-                            encodeUnsigned32(sessionHandle),
-                            publicMatrixSeedHashBytes,
-                            ...encodedHandles,
-                            encodedMessageCoefficients,
-                        ),
-                        'compute a commitment from retained structured-opening material',
-                        'runtime',
-                    );
-                    return decodeStructuredCommitmentWorkerResponse({
-                        bytes: output,
-                        dataPrimes: structuredCommitmentParameters.dataPrimes,
-                        expectedRingDegree:
-                            structuredCommitmentParameters.polynomialDegree,
-                        expectedShamirCoefficientIndex:
-                            record.shamirCoefficientIndex,
-                        expectedSourceRnsLimbIndex: record.sourceRnsLimbIndex,
-                    });
-                } finally {
-                    output?.fill(0);
-                    publicMatrixSeedHashBytes.fill(0);
-                    encodedMessageCoefficients.fill(0);
-                    encodedHandles.forEach((encodedHandle) =>
-                        encodedHandle.fill(0),
-                    );
-                }
-            },
-            release: (capability) => {
-                const record = recordsByCapability.get(capability);
-                if (record === undefined) {
-                    throw new BrowserActionStorageCustodyError(
-                        'InvalidInput',
-                        'The structured-commitment opening capability belongs to another operation scope.',
-                    );
-                }
-                releaseRecord(record);
-            },
-            revoke: () => {
-                if (revoked) {
-                    return;
-                }
-                revoked = true;
-                let firstFailure: Error | undefined;
-                for (const record of [...recordsBySlot.values()]) {
-                    try {
-                        releaseRecord(record);
-                    } catch (error) {
-                        firstFailure ??=
-                            error instanceof Error
-                                ? error
-                                : new BrowserActionStorageCustodyError(
-                                      'OwnedWorkerFailure',
-                                      'Releasing retained structured-commitment material failed.',
-                                      error,
-                                  );
-                    }
-                }
-                rosterHashBytes.fill(0);
-                if (firstFailure !== undefined) {
-                    throw firstFailure;
-                }
             },
         });
     }

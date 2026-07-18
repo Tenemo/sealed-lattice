@@ -41,8 +41,17 @@ export type MailboxGcmVerifierLease = Readonly<{
     cancel(): void;
     decryptChunk(bytes: ArrayBuffer): void;
     finishAuthentication(tag: Uint8Array): void;
-    finishDecryption(): void;
+    finishDecryption(): AuthenticatedMailboxPlaintextCapability;
     state(): MailboxGcmLeaseState;
+}>;
+
+/**
+ * One-shot same-worker authority over the plaintext bytes Rust authenticated
+ * and digested while completing mailbox decryption. The numeric kernel handle
+ * never leaves this module.
+ */
+export type AuthenticatedMailboxPlaintextCapability = Readonly<{
+    release(): void;
 }>;
 
 export type MailboxGcmRuntime = Readonly<{
@@ -82,6 +91,18 @@ type ActiveMailboxGcmLease = {
     state: MailboxGcmLeaseState;
     totalByteLength: number;
 };
+
+type AuthenticatedMailboxPlaintextCapabilityRecord = {
+    consumed: boolean;
+    context: RequiredMailboxGcmKernelContext;
+    handle: number;
+    retireRuntimeLease(): void;
+};
+
+const authenticatedMailboxPlaintextCapabilityRecords = new WeakMap<
+    AuthenticatedMailboxPlaintextCapability,
+    AuthenticatedMailboxPlaintextCapabilityRecord
+>();
 
 const requireExactBytes = (
     value: Uint8Array,
@@ -147,6 +168,9 @@ class MailboxGcmRuntimeImplementation implements MailboxGcmRuntime {
     readonly #memoryBoundary: WasmMemoryBoundary;
     readonly #statusBoundary: WasmStatusBoundary;
     #activeLease: ActiveMailboxGcmLease | undefined;
+    #authenticatedPlaintextCapability:
+        | AuthenticatedMailboxPlaintextCapability
+        | undefined;
 
     public constructor(context: RequiredMailboxGcmKernelContext) {
         this.#context = context;
@@ -204,7 +228,8 @@ class MailboxGcmRuntimeImplementation implements MailboxGcmRuntime {
                 this.#transformChunk(lease, bytes, 'decrypt'),
             finishAuthentication: (tag: Uint8Array): void =>
                 this.#finishAuthentication(lease, tag),
-            finishDecryption: (): void => this.#finishDecryption(lease),
+            finishDecryption: (): AuthenticatedMailboxPlaintextCapability =>
+                this.#finishDecryption(lease),
             state: (): MailboxGcmLeaseState => lease.state,
             totalByteLength: lease.totalByteLength,
         });
@@ -219,7 +244,10 @@ class MailboxGcmRuntimeImplementation implements MailboxGcmRuntime {
             readonly totalByteLength: number;
         },
     ): ActiveMailboxGcmLease {
-        if (this.#activeLease !== undefined) {
+        if (
+            this.#activeLease !== undefined ||
+            this.#authenticatedPlaintextCapability !== undefined
+        ) {
             throw new CanonicalStreamResourceError(
                 'Only one mailbox GCM operation may be active in a WASM instance.',
             );
@@ -405,7 +433,9 @@ class MailboxGcmRuntimeImplementation implements MailboxGcmRuntime {
         }
     }
 
-    #finishDecryption(lease: ActiveMailboxGcmLease): void {
+    #finishDecryption(
+        lease: ActiveMailboxGcmLease,
+    ): AuthenticatedMailboxPlaintextCapability {
         this.#requireState(lease, 'verifier', 'decrypting');
         try {
             const status = this.#context.runExclusive(
@@ -413,7 +443,30 @@ class MailboxGcmRuntimeImplementation implements MailboxGcmRuntime {
                 () => this.#context.mailboxGcmFinishDecryptor(lease.handle),
             );
             this.#statusBoundary.throwIfError(status);
+            const capability: AuthenticatedMailboxPlaintextCapability =
+                Object.freeze({
+                    release: (): void =>
+                        releaseAuthenticatedMailboxPlaintextCapability(
+                            capability,
+                        ),
+                });
+            const record: AuthenticatedMailboxPlaintextCapabilityRecord = {
+                consumed: false,
+                context: this.#context,
+                handle: lease.handle,
+                retireRuntimeLease: (): void => {
+                    if (this.#authenticatedPlaintextCapability === capability) {
+                        this.#authenticatedPlaintextCapability = undefined;
+                    }
+                },
+            };
+            this.#authenticatedPlaintextCapability = capability;
+            authenticatedMailboxPlaintextCapabilityRecords.set(
+                capability,
+                record,
+            );
             this.#completeLease(lease);
+            return capability;
         } catch (error) {
             return this.#failLease(lease, error);
         }
@@ -536,6 +589,116 @@ class MailboxGcmRuntimeImplementation implements MailboxGcmRuntime {
         this.#memoryBoundary.zeroAndDeallocate(pointer, byteLength);
     }
 }
+
+const requireAuthenticatedMailboxPlaintextCapabilityRecord = (
+    capability: AuthenticatedMailboxPlaintextCapability,
+): AuthenticatedMailboxPlaintextCapabilityRecord => {
+    const record = authenticatedMailboxPlaintextCapabilityRecords.get(capability);
+    if (record === undefined || record.consumed) {
+        throw new CanonicalStreamInternalError(
+            'The authenticated mailbox plaintext capability is unknown or already consumed.',
+        );
+    }
+    return record;
+};
+
+const retireAuthenticatedMailboxPlaintextCapabilityRecord = (
+    capability: AuthenticatedMailboxPlaintextCapability,
+    record: AuthenticatedMailboxPlaintextCapabilityRecord,
+): void => {
+    record.consumed = true;
+    authenticatedMailboxPlaintextCapabilityRecords.delete(capability);
+    record.retireRuntimeLease();
+};
+
+export const releaseAuthenticatedMailboxPlaintextCapability = (
+    capability: AuthenticatedMailboxPlaintextCapability,
+): void => {
+    const record = requireAuthenticatedMailboxPlaintextCapabilityRecord(capability);
+    try {
+        const status = record.context.runExclusive(
+            'authenticated mailbox plaintext capability release',
+            () => record.context.mailboxGcmCancel(record.handle),
+        );
+        if (status !== 0) {
+            throw new CanonicalStreamInternalError(
+                'The authenticated mailbox plaintext capability could not be released.',
+            );
+        }
+    } finally {
+        retireAuthenticatedMailboxPlaintextCapabilityRecord(capability, record);
+    }
+};
+
+/**
+ * Same-worker bridge for an exact protocol-family consumer. The callback is
+ * the only place the numeric handle is visible, and any callback failure
+ * terminally cancels a capability that the Rust consumer did not take.
+ */
+export const consumeAuthenticatedMailboxPlaintextCapability = <ResultValue>(
+    input: Readonly<{
+        capability: AuthenticatedMailboxPlaintextCapability;
+        consume(capabilityHandle: number): ResultValue;
+        context: CanonicalStreamKernelContext;
+    }>,
+): ResultValue => {
+    const record = requireAuthenticatedMailboxPlaintextCapabilityRecord(
+        input.capability,
+    );
+    if (record.context !== input.context) {
+        const operationFailure = new CanonicalStreamInternalError(
+            'The authenticated mailbox plaintext capability belongs to another WASM instance.',
+        );
+        try {
+            releaseAuthenticatedMailboxPlaintextCapability(input.capability);
+        } catch (cleanupFailure) {
+            throw new CanonicalStreamCleanupError(
+                operationFailure,
+                cleanupFailure,
+            );
+        }
+        throw operationFailure;
+    }
+    let operationCompleted = false;
+    let operationFailure: unknown;
+    try {
+        const result = input.consume(record.handle);
+        operationCompleted = true;
+        return result;
+    } catch (error) {
+        operationFailure = error;
+        throw error;
+    } finally {
+        if (!operationCompleted) {
+            try {
+                const status = record.context.runExclusive(
+                    'authenticated mailbox plaintext capability failure cleanup',
+                    () => record.context.mailboxGcmCancel(record.handle),
+                );
+                if (status !== 0) {
+                    throw new CanonicalStreamInternalError(
+                        'The failed authenticated mailbox plaintext capability could not be retired.',
+                    );
+                }
+            } catch (cleanupFailure) {
+                throw new CanonicalStreamCleanupError(
+                    operationFailure,
+                    cleanupFailure,
+                );
+            } finally {
+                retireAuthenticatedMailboxPlaintextCapabilityRecord(
+                    input.capability,
+                    record,
+                );
+            }
+        } else {
+            retireAuthenticatedMailboxPlaintextCapabilityRecord(
+                input.capability,
+                record,
+            );
+        }
+    }
+};
 
 export const openMailboxGcmRuntime = (input: {
     readonly kernel: TranscriptCoreKernelContextOwner;

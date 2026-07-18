@@ -9,7 +9,7 @@ use crate::{
 };
 use std::sync::OnceLock;
 
-static FULL_DEGREE_NTT_PLANS: OnceLock<Vec<NttPlan>> = OnceLock::new();
+static FULL_DEGREE_NTT_PLAN_CACHE: OnceLock<FullDegreeNttPlanCache> = OnceLock::new();
 
 pub(crate) fn forward_negacyclic_ntt(
     coefficients: &[u64],
@@ -59,9 +59,9 @@ fn transform_negacyclic_in_place(
     validate_transform_length(values.len())?;
     validate_residues(values, modulus)?;
     if values.len() == POLYNOMIAL_DEGREE {
-        let plan = full_degree_ntt_plan(modulus)?;
+        let (plan, bit_reverse_swaps) = full_degree_ntt_plan(modulus)?;
 
-        transform_with_plan_in_place(values, plan, direction);
+        transform_with_plan_in_place(values, plan, bit_reverse_swaps, direction);
         return Ok(());
     }
 
@@ -72,19 +72,25 @@ fn transform_negacyclic_in_place(
         )
     })?;
     let plan = build_ntt_plan(root_parameters, values.len())?;
+    let bit_reverse_swaps = build_bit_reverse_swaps(values.len());
 
-    transform_with_plan_in_place(values, &plan, direction);
+    transform_with_plan_in_place(values, &plan, &bit_reverse_swaps, direction);
 
     Ok(())
 }
 
-fn transform_with_plan_in_place(values: &mut [u64], plan: &NttPlan, direction: TransformDirection) {
+fn transform_with_plan_in_place(
+    values: &mut [u64],
+    plan: &NttPlan,
+    bit_reverse_swaps: &[(usize, usize)],
+    direction: TransformDirection,
+) {
     match direction {
         TransformDirection::Forward => {
             multiply_by_cached_powers(values, &plan.forward_negacyclic_powers, plan.modulus);
             cyclic_ntt_with_twiddles(
                 values,
-                &plan.bit_reverse_swaps,
+                bit_reverse_swaps,
                 &plan.forward_stage_twiddles,
                 plan.modulus,
                 None,
@@ -93,7 +99,7 @@ fn transform_with_plan_in_place(values: &mut [u64], plan: &NttPlan, direction: T
         TransformDirection::Inverse => {
             cyclic_ntt_with_twiddles(
                 values,
-                &plan.bit_reverse_swaps,
+                bit_reverse_swaps,
                 &plan.inverse_stage_twiddles,
                 plan.modulus,
                 Some(plan.inverse_length),
@@ -103,37 +109,66 @@ fn transform_with_plan_in_place(values: &mut [u64], plan: &NttPlan, direction: T
     }
 }
 
-fn full_degree_ntt_plans() -> &'static [NttPlan] {
-    FULL_DEGREE_NTT_PLANS
-        .get_or_init(|| {
-            ROOT_PARAMETERS
-                .iter()
-                .map(|parameters| {
-                    build_ntt_plan(*parameters, POLYNOMIAL_DEGREE)
-                        .expect("selected root parameters build a full-degree NTT plan")
-                })
-                .collect()
-        })
-        .as_slice()
+struct FullDegreeNttPlanCache {
+    plans: Vec<OnceLock<NttPlan>>,
+    bit_reverse_swaps: OnceLock<Vec<(usize, usize)>>,
+    transform_length: usize,
 }
 
-fn full_degree_ntt_plan(modulus: u64) -> CanonicalResult<&'static NttPlan> {
-    full_degree_ntt_plans()
+impl FullDegreeNttPlanCache {
+    fn new(transform_length: usize) -> Self {
+        Self {
+            plans: (0..ROOT_PARAMETERS.len())
+                .map(|_| OnceLock::new())
+                .collect(),
+            bit_reverse_swaps: OnceLock::new(),
+            transform_length,
+        }
+    }
+
+    fn plan(&self, root_parameter_index: usize) -> &NttPlan {
+        self.plans[root_parameter_index].get_or_init(|| {
+            build_ntt_plan(ROOT_PARAMETERS[root_parameter_index], self.transform_length)
+                .expect("selected root parameters build an NTT plan for the cached length")
+        })
+    }
+
+    fn bit_reverse_swaps(&self) -> &[(usize, usize)] {
+        self.bit_reverse_swaps
+            .get_or_init(|| build_bit_reverse_swaps(self.transform_length))
+            .as_slice()
+    }
+
+    #[cfg(test)]
+    fn initialized_plan_count(&self) -> usize {
+        self.plans
+            .iter()
+            .filter(|plan| plan.get().is_some())
+            .count()
+    }
+}
+
+fn full_degree_ntt_plan(
+    modulus: u64,
+) -> CanonicalResult<(&'static NttPlan, &'static [(usize, usize)])> {
+    let root_parameter_index = ROOT_PARAMETERS
         .iter()
-        .find(|plan| plan.modulus == modulus)
+        .position(|parameters| parameters.modulus == modulus)
         .ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::InvalidProtocolObject,
                 "modulus is not part of the selected BGV-RNS parameters",
             )
-        })
+        })?;
+    let cache =
+        FULL_DEGREE_NTT_PLAN_CACHE.get_or_init(|| FullDegreeNttPlanCache::new(POLYNOMIAL_DEGREE));
+    Ok((cache.plan(root_parameter_index), cache.bit_reverse_swaps()))
 }
 
 struct NttPlan {
     modulus: u64,
     forward_negacyclic_powers: Vec<u64>,
     inverse_negacyclic_powers: Vec<u64>,
-    bit_reverse_swaps: Vec<(usize, usize)>,
     forward_stage_twiddles: Vec<Vec<u64>>,
     inverse_stage_twiddles: Vec<Vec<u64>>,
     inverse_length: u64,
@@ -155,7 +190,6 @@ fn build_ntt_plan(root_parameters: RootParameters, length: usize) -> CanonicalRe
         modulus,
         forward_negacyclic_powers: build_powers(negacyclic_root, length, modulus),
         inverse_negacyclic_powers: build_powers(inverse_negacyclic_root, length, modulus),
-        bit_reverse_swaps: build_bit_reverse_swaps(length),
         forward_stage_twiddles: build_stage_twiddles(cyclic_root, length, modulus)?,
         inverse_stage_twiddles: build_stage_twiddles(inverse_cyclic_root, length, modulus)?,
         inverse_length: inverse_mod(length as u64, modulus)?,
@@ -320,13 +354,13 @@ pub(crate) fn negacyclic_convolution_for_tests(
 #[cfg(test)]
 mod tests {
     use super::{
-        forward_negacyclic_ntt, forward_negacyclic_ntt_in_place, inverse_negacyclic_ntt,
-        inverse_negacyclic_ntt_in_place, negacyclic_convolution_for_tests,
+        FullDegreeNttPlanCache, forward_negacyclic_ntt, forward_negacyclic_ntt_in_place,
+        inverse_negacyclic_ntt, inverse_negacyclic_ntt_in_place, negacyclic_convolution_for_tests,
     };
     use crate::{
         bgv::{
             modular_arithmetic::sub_mod,
-            parameters::{DATA_PRIMES, POLYNOMIAL_DEGREE, SPECIAL_PRIMES},
+            parameters::{DATA_PRIMES, POLYNOMIAL_DEGREE, ROOT_PARAMETERS, SPECIAL_PRIMES},
         },
         encoding::CanonicalResult,
     };
@@ -403,6 +437,34 @@ mod tests {
             assert!(forward_negacyclic_ntt(&[modulus, 0], modulus).is_err());
         }
         assert!(forward_negacyclic_ntt(&[1, 2], 97).is_err());
+    }
+
+    #[test]
+    fn full_degree_cache_builds_only_requested_modulus_plans_and_shares_one_permutation() {
+        let cache = FullDegreeNttPlanCache::new(8);
+        assert_eq!(cache.initialized_plan_count(), 0);
+
+        let first_plan = cache.plan(0);
+        assert_eq!(first_plan.modulus, ROOT_PARAMETERS[0].modulus);
+        assert_eq!(cache.initialized_plan_count(), 1);
+        assert!(std::ptr::eq(first_plan, cache.plan(0)));
+        assert_eq!(cache.initialized_plan_count(), 1);
+
+        let first_permutation = cache.bit_reverse_swaps();
+        let repeated_permutation = cache.bit_reverse_swaps();
+        assert!(std::ptr::eq(
+            first_permutation.as_ptr(),
+            repeated_permutation.as_ptr(),
+        ));
+        assert_eq!(first_permutation, &[(1, 4), (3, 6)]);
+
+        let last_parameter_index = ROOT_PARAMETERS.len() - 1;
+        let last_plan = cache.plan(last_parameter_index);
+        assert_eq!(
+            last_plan.modulus,
+            ROOT_PARAMETERS[last_parameter_index].modulus,
+        );
+        assert_eq!(cache.initialized_plan_count(), 2);
     }
 
     fn selected_ntt_moduli() -> Vec<u64> {

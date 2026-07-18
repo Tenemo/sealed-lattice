@@ -11,15 +11,26 @@ use crate::{
 
 use super::top_k::{
     CANONICAL_TARGET_CIPHERTEXT_LEVEL, SELECTED_EVALUATOR_WORKING_LEVEL,
-    selected_evaluator_rotation_key_schedule,
+    SELECTED_RELINEARIZATION_KEY_LEVEL, selected_evaluator_rotation_key_schedule,
 };
 
 mod codec;
 mod compiler;
+mod executor;
+mod runtime;
 
 pub(crate) use compiler::selected_evaluator_program_set;
 #[cfg(test)]
-pub(crate) use compiler::selected_evaluator_program_set_bytes;
+pub(crate) use compiler::{
+    CandidateCompiledEvaluatorMeasurement, compile_candidate_evaluator_program_measurement,
+    compiled_prepared_power_instruction_count, compiled_prepared_power_level_trace,
+    selected_evaluator_program_set_bytes,
+};
+pub(crate) use executor::{
+    PreparedSelectedEvaluatorReplay, SelectedEvaluatorExecutionProgress,
+    SelectedEvaluatorProgramExecution, VerifiedEvaluatorAggregate,
+    VerifiedSelectedEvaluatorExecution,
+};
 
 pub(crate) const EVALUATOR_PROGRAM_SET_SCHEMA_IDENTIFIER: u16 = 0x1500;
 pub(crate) const EVALUATOR_INSTRUCTION_SCHEMA_IDENTIFIER: u16 = 0x1501;
@@ -255,6 +266,26 @@ impl EvaluatorInstruction {
         }
         Ok(())
     }
+
+    pub(super) const fn opcode(&self) -> EvaluatorOpcode {
+        self.opcode
+    }
+
+    pub(super) const fn output_register(&self) -> Option<u32> {
+        self.output_register
+    }
+
+    pub(super) fn input_registers(&self) -> &[u32] {
+        &self.input_registers
+    }
+
+    pub(super) const fn immediate0(&self) -> u64 {
+        self.immediate0
+    }
+
+    pub(super) const fn constant_hash(&self) -> Option<Hash512> {
+        self.constant_hash
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -355,6 +386,10 @@ impl EvaluatorInstructionStream {
 
     pub(crate) const fn top_count(&self) -> u16 {
         self.top_count
+    }
+
+    pub(super) fn instructions(&self) -> &[EvaluatorInstruction] {
+        &self.instructions
     }
 }
 
@@ -588,7 +623,7 @@ fn validate_instruction_stream(
         match instruction.opcode {
             EvaluatorOpcode::CiphertextMultiplyRelinearizeAndDrop
             | EvaluatorOpcode::CiphertextMultiplyAndRelinearize => {
-                relinearization_catalog_levels.insert(SELECTED_EVALUATOR_WORKING_LEVEL);
+                relinearization_catalog_levels.insert(SELECTED_RELINEARIZATION_KEY_LEVEL);
             }
             EvaluatorOpcode::GaloisRotate => {
                 galois_catalog_positions.insert(EvaluatorGaloisKeyPosition {
@@ -758,7 +793,7 @@ fn evaluate_instruction_transition(
             require_matching_levels(inputs)?;
             let left = inputs[0];
             let right = inputs[1];
-            if left.level > SELECTED_EVALUATOR_WORKING_LEVEL {
+            if left.level > SELECTED_RELINEARIZATION_KEY_LEVEL {
                 return Err(program_error(
                     "evaluator multiplication requires an unavailable relinearization-key level",
                 ));

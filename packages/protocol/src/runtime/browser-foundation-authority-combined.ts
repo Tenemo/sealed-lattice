@@ -161,7 +161,7 @@ export type BrowserFoundationAuthority = Readonly<{
     activeCapability(): BrowserFoundationActiveCapability;
     beginCheckpoint(
         capability: BrowserFoundationActiveCapability,
-        proofAttempts: readonly BrowserFoundationProofAttempt[],
+        proofAttempt?: BrowserFoundationProofAttempt,
     ): Promise<BrowserFoundationCheckpoint>;
     cacheWitnessExactOutput(
         capability: BrowserFoundationActiveCapability,
@@ -1209,21 +1209,14 @@ class BrowserFoundationAuthorityImplementation implements BrowserFoundationAutho
 
     public beginCheckpoint(
         capability: BrowserFoundationActiveCapability,
-        proofAttempts: readonly BrowserFoundationProofAttempt[],
+        proofAttempt?: BrowserFoundationProofAttempt,
     ): Promise<BrowserFoundationCheckpoint> {
         return this.#ownerOperation(capability, async () => {
-            if (!Array.isArray(proofAttempts)) {
-                throw new BrowserFoundationAuthorityError(
-                    'InvalidInput',
-                    'proofAttempts must be an array of retained capabilities.',
-                );
-            }
             const handle = await this.#operationOwner.beginCheckpoint(
-                proofAttempts.map(
-                    (proofAttempt) =>
-                        this.#requireProofAttempt(proofAttempt)
-                            .attemptIdentifier,
-                ),
+                proofAttempt === undefined
+                    ? undefined
+                    : this.#requireProofAttempt(proofAttempt)
+                          .attemptIdentifier,
             );
             return this.#registerCheckpoint(handle);
         });

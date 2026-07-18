@@ -1,5 +1,3 @@
-use std::collections::BTreeMap;
-
 use zeroize::Zeroizing;
 
 use super::plan::{
@@ -73,7 +71,7 @@ impl<StorageError> From<ProofExternalMemoryError>
 pub(crate) struct ProofExternalMemoryExecutor {
     plan: ProofExternalMemoryPlan,
     current_step: u32,
-    states: BTreeMap<ProofExternalMemoryObject, ProofExternalMemoryObjectState>,
+    states: Box<[(ProofExternalMemoryObject, ProofExternalMemoryObjectState)]>,
     current_stored_byte_length: u64,
     usage: ProofExternalMemoryUsage,
     terminal: bool,
@@ -81,15 +79,16 @@ pub(crate) struct ProofExternalMemoryExecutor {
 
 impl ProofExternalMemoryExecutor {
     pub(crate) fn new(plan: ProofExternalMemoryPlan) -> Self {
-        let states = plan
+        let mut states = plan
             .objects
             .iter()
             .map(|object| (object.object, ProofExternalMemoryObjectState::Issued))
-            .collect();
+            .collect::<Vec<_>>();
+        states.sort_unstable_by_key(|(object, _)| *object);
         Self {
             plan,
             current_step: 0,
-            states,
+            states: states.into_boxed_slice(),
             current_stored_byte_length: 0,
             usage: ProofExternalMemoryUsage::default(),
             terminal: false,
@@ -135,12 +134,12 @@ impl ProofExternalMemoryExecutor {
                 object_plan.exact_byte_length,
             )
         })?;
-        self.states.insert(
+        self.set_state(
             object,
             ProofExternalMemoryObjectState::Writing {
                 written_byte_length: 0,
             },
-        );
+        )?;
         self.current_stored_byte_length = next_stored_byte_length;
         self.usage.peak_stored_byte_length = self
             .usage
@@ -202,12 +201,12 @@ impl ProofExternalMemoryExecutor {
         self.run_mutating_transaction(storage, chunk_byte_length, |storage| {
             storage.append_object_bytes(object, written_byte_length, bytes)
         })?;
-        self.states.insert(
+        self.set_state(
             object,
             ProofExternalMemoryObjectState::Writing {
                 written_byte_length: next_object_byte_length,
             },
-        );
+        )?;
         self.usage.total_written_byte_length = next_total_written;
         Ok(())
     }
@@ -228,8 +227,7 @@ impl ProofExternalMemoryExecutor {
             return Err(ProofExternalMemoryError::Incomplete.into());
         }
         self.run_mutating_transaction(storage, 0, |storage| storage.seal_object(object))?;
-        self.states
-            .insert(object, ProofExternalMemoryObjectState::Sealed);
+        self.set_state(object, ProofExternalMemoryObjectState::Sealed)?;
         Ok(())
     }
 
@@ -282,8 +280,7 @@ impl ProofExternalMemoryExecutor {
             return Err(ProofExternalMemoryExecutorError::StorageCommit(error));
         }
         self.record_transaction()?;
-        self.states
-            .insert(object, ProofExternalMemoryObjectState::Claimed);
+        self.set_state(object, ProofExternalMemoryObjectState::Claimed)?;
         self.usage.total_read_byte_length = next_total_read;
         Ok(())
     }
@@ -336,8 +333,7 @@ impl ProofExternalMemoryExecutor {
             }
             self.record_transaction()?;
             for object in &due_for_deletion {
-                self.states
-                    .insert(object.object, ProofExternalMemoryObjectState::Consumed);
+                self.set_state(object.object, ProofExternalMemoryObjectState::Consumed)?;
                 self.current_stored_byte_length = self
                     .current_stored_byte_length
                     .checked_sub(object.exact_byte_length)
@@ -358,8 +354,8 @@ impl ProofExternalMemoryExecutor {
             if self.current_stored_byte_length != 0
                 || self
                     .states
-                    .values()
-                    .any(|state| *state != ProofExternalMemoryObjectState::Consumed)
+                    .iter()
+                    .any(|(_, state)| *state != ProofExternalMemoryObjectState::Consumed)
             {
                 return Err(ProofExternalMemoryError::Incomplete.into());
             }
@@ -418,7 +414,7 @@ impl ProofExternalMemoryExecutor {
             }
             self.record_transaction()?;
         }
-        for state in self.states.values_mut() {
+        for (_, state) in self.states.iter_mut() {
             if *state != ProofExternalMemoryObjectState::Consumed {
                 *state = ProofExternalMemoryObjectState::Cancelled;
             }
@@ -455,9 +451,24 @@ impl ProofExternalMemoryExecutor {
         object: ProofExternalMemoryObject,
     ) -> Result<ProofExternalMemoryObjectState, ProofExternalMemoryError> {
         self.states
-            .get(&object)
-            .copied()
+            .binary_search_by_key(&object, |(catalog_object, _)| *catalog_object)
+            .ok()
+            .and_then(|index| self.states.get(index))
+            .map(|(_, state)| *state)
             .ok_or(ProofExternalMemoryError::UnknownObject)
+    }
+
+    fn set_state(
+        &mut self,
+        object: ProofExternalMemoryObject,
+        state: ProofExternalMemoryObjectState,
+    ) -> Result<(), ProofExternalMemoryError> {
+        let index = self
+            .states
+            .binary_search_by_key(&object, |(catalog_object, _)| *catalog_object)
+            .map_err(|_| ProofExternalMemoryError::UnknownObject)?;
+        self.states[index].1 = state;
+        Ok(())
     }
 
     fn require_active(&self) -> Result<(), ProofExternalMemoryError> {

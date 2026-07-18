@@ -1,11 +1,13 @@
 use super::{
-    BTreeSet, CommonProofColumnEvaluations, CommonProofPrivateCoinError,
-    CommonProofPrivateCoinSource, CommonProofProverError, CommonProofSourcePolynomial,
+    BTreeMap, BTreeSet, CheckedRelationApplicationChallenges, CommonProofColumnEvaluations,
+    CommonProofPrivateCoinCoordinate, CommonProofPrivateCoinError, CommonProofPrivateCoinSource,
+    CommonProofProverError, CommonProofSourcePolynomial, ExternalPolynomialVector,
     ProofChallengeExtensionElement, ProofEvaluationDomain, ProofPrivacyMode,
-    RelationApplicationChallengeAssignment, RelationMaskDescriptor, RelationMaskKind,
-    RelationMaskTargetClass, RelationOpeningSourceClass, RelationPlanCheckContext,
-    RelationPlanError, RelationPlanVariant, add_shifted_extension_polynomial,
-    sample_private_extension_polynomial, subtract_extension_polynomial, trim_extension_polynomial,
+    RelationApplicationChallengeAssignment, RelationColumnValueType, RelationConstraintColumnQuery,
+    RelationMaskDescriptor, RelationMaskKind, RelationMaskTargetClass, RelationPlanCheckContext,
+    RelationPlanError, RelationPlanVariant, Zeroizing, add_shifted_extension_polynomial,
+    external_value_byte_length, sample_private_extension_polynomial, subtract_extension_polynomial,
+    trim_extension_polynomial,
 };
 
 pub(super) fn validate_column_polynomials(
@@ -38,7 +40,7 @@ pub(crate) fn construct_composed_quotient_polynomial(
     columns: &[CommonProofSourcePolynomial],
     application_challenges: &[RelationApplicationChallengeAssignment],
     composition_challenges: &[ProofChallengeExtensionElement],
-) -> Result<Vec<ProofChallengeExtensionElement>, CommonProofProverError> {
+) -> Result<Zeroizing<Vec<ProofChallengeExtensionElement>>, CommonProofProverError> {
     validate_column_polynomials(variant, columns)?;
     if evaluation_domain.size()
         != usize::try_from(variant.evaluation_domain_size())
@@ -57,10 +59,10 @@ pub(crate) fn construct_composed_quotient_polynomial(
         .map(|column| match column {
             CommonProofSourcePolynomial::Base(coefficients) => evaluation_domain
                 .evaluate_base_polynomial(coefficients)
-                .map(CommonProofColumnEvaluations::Base),
+                .map(|values| CommonProofColumnEvaluations::Base(Zeroizing::new(values))),
             CommonProofSourcePolynomial::Extension(coefficients) => evaluation_domain
                 .evaluate_extension_polynomial(coefficients)
-                .map(CommonProofColumnEvaluations::Extension),
+                .map(|values| CommonProofColumnEvaluations::Extension(Zeroizing::new(values))),
         })
         .collect::<Result<Vec<_>, _>>()?;
     let evaluation_size = evaluation_domain.size();
@@ -70,7 +72,7 @@ pub(crate) fn construct_composed_quotient_polynomial(
     let trace_domain_size = usize::try_from(variant.trace_domain_size())
         .map_err(|_| CommonProofProverError::CountOverflow)?;
 
-    let mut quotient_evaluations = Vec::new();
+    let mut quotient_evaluations = Zeroizing::new(Vec::new());
     quotient_evaluations
         .try_reserve_exact(evaluation_size)
         .map_err(|_| CommonProofProverError::AllocationLimitExceeded)?;
@@ -115,52 +117,129 @@ pub(crate) fn construct_composed_quotient_polynomial(
             },
         )?);
     }
-    let mut quotient = evaluation_domain.interpolate_extension_polynomial(&quotient_evaluations)?;
+    let mut quotient =
+        Zeroizing::new(evaluation_domain.interpolate_extension_polynomial(&quotient_evaluations)?);
     trim_extension_polynomial(&mut quotient);
     Ok(quotient)
 }
 
-pub(super) const COMMON_PROOF_RELATION_EVALUATION_BLOCK_LENGTH: usize = 4_096;
-
-pub(super) fn required_relation_rotations_by_column(
+/// Test oracle for the production constraint-at-a-time schedule. Each
+/// constraint materializes only its own unique relation columns, while the
+/// older oracle above retains the complete relation-column matrix.
+#[cfg(test)]
+pub(crate) fn construct_constraint_stream_composed_quotient_polynomial(
     variant: &RelationPlanVariant,
-) -> Result<Vec<Vec<(bool, u64)>>, CommonProofProverError> {
-    let mut rotations_by_column = vec![BTreeSet::new(); variant.ordered_columns().len()];
-    for claim in variant.ordered_opening_claims() {
-        if claim.source_class() != RelationOpeningSourceClass::TreeColumn {
-            continue;
-        }
-        let column_index = usize::try_from(
-            claim
-                .column_ordinal()
-                .ok_or(CommonProofProverError::InvalidOpening)?,
-        )
-        .map_err(|_| CommonProofProverError::CountOverflow)?;
-        let opening_point = variant
-            .ordered_opening_points()
-            .get(
-                usize::try_from(claim.opening_point_ordinal())
-                    .map_err(|_| CommonProofProverError::CountOverflow)?,
-            )
-            .ok_or(CommonProofProverError::InvalidOpening)?;
-        rotations_by_column
-            .get_mut(column_index)
-            .ok_or(CommonProofProverError::InvalidColumn)?
-            .insert(opening_point.trace_rotation());
+    context: &RelationPlanCheckContext,
+    evaluation_domain: ProofEvaluationDomain,
+    columns: &[CommonProofSourcePolynomial],
+    application_challenges: &[RelationApplicationChallengeAssignment],
+    composition_challenges: &[ProofChallengeExtensionElement],
+) -> Result<Zeroizing<Vec<ProofChallengeExtensionElement>>, CommonProofProverError> {
+    validate_column_polynomials(variant, columns)?;
+    if evaluation_domain.size()
+        != usize::try_from(variant.evaluation_domain_size())
+            .map_err(|_| CommonProofProverError::CountOverflow)?
+        || evaluation_domain.generator().canonical() != context.evaluation_domain_generator
+        || evaluation_domain.coset_offset().canonical() != context.evaluation_coset_offset
+        || !variant
+            .evaluation_domain_size()
+            .is_multiple_of(variant.trace_domain_size())
+        || composition_challenges.len() != variant.constraint_count()
+    {
+        return Err(CommonProofProverError::InvalidQuotient);
     }
-    rotations_by_column
-        .into_iter()
-        .map(|rotations| {
-            if rotations.is_empty() {
-                Err(CommonProofProverError::InvalidColumn)
-            } else {
-                Ok(rotations.into_iter().collect())
+    let checked_application_challenges =
+        variant.checked_application_challenges(context, application_challenges)?;
+    let trace_domain_size = usize::try_from(variant.trace_domain_size())
+        .map_err(|_| CommonProofProverError::CountOverflow)?;
+    let trace_rotation_stride =
+        usize::try_from(variant.evaluation_domain_size() / variant.trace_domain_size())
+            .map_err(|_| CommonProofProverError::CountOverflow)?;
+    let mut quotient_evaluations = Zeroizing::new(vec![
+        ProofChallengeExtensionElement::ZERO;
+        evaluation_domain.size()
+    ]);
+
+    for constraint_ordinal in 0..variant.constraint_count() {
+        let queries = variant.constraint_column_queries(constraint_ordinal)?;
+        let mut constraint_column_evaluations = BTreeMap::new();
+        for column_ordinal in queries
+            .iter()
+            .map(|query| query.column_ordinal())
+            .collect::<BTreeSet<_>>()
+        {
+            let column = columns
+                .get(
+                    usize::try_from(column_ordinal)
+                        .map_err(|_| CommonProofProverError::CountOverflow)?,
+                )
+                .ok_or(CommonProofProverError::InvalidColumn)?;
+            let evaluations = match column {
+                CommonProofSourcePolynomial::Base(coefficients) => evaluation_domain
+                    .evaluate_base_polynomial(coefficients)
+                    .map(|values| CommonProofColumnEvaluations::Base(Zeroizing::new(values)))?,
+                CommonProofSourcePolynomial::Extension(coefficients) => evaluation_domain
+                    .evaluate_extension_polynomial(coefficients)
+                    .map(|values| {
+                        CommonProofColumnEvaluations::Extension(Zeroizing::new(values))
+                    })?,
+            };
+            if constraint_column_evaluations
+                .insert(column_ordinal, evaluations)
+                .is_some()
+            {
+                return Err(CommonProofProverError::InvalidColumn);
             }
-        })
-        .collect()
+        }
+        let composition_challenge = composition_challenges
+            .get(constraint_ordinal)
+            .copied()
+            .ok_or(CommonProofProverError::InvalidQuotient)?;
+        for evaluation_position in 0..evaluation_domain.size() {
+            let evaluation_point = ProofChallengeExtensionElement::from_base(
+                evaluation_domain.point(evaluation_position)?,
+            );
+            let evaluation = variant.evaluate_constraint_at_point(
+                context,
+                constraint_ordinal,
+                evaluation_point,
+                &checked_application_challenges,
+                &mut |column_ordinal, rotation_is_negative, rotation_magnitude| {
+                    let rotated_position = rotated_relation_evaluation_position(
+                        evaluation_position,
+                        evaluation_domain.size(),
+                        trace_domain_size,
+                        trace_rotation_stride,
+                        rotation_is_negative,
+                        rotation_magnitude,
+                    )
+                    .map_err(|error| match error {
+                        CommonProofProverError::CountOverflow => RelationPlanError::CountOverflow,
+                        _ => RelationPlanError::InvalidOpening,
+                    })?;
+                    constraint_column_evaluations
+                        .get(&column_ordinal)
+                        .ok_or(RelationPlanError::InvalidConstraint)?
+                        .extension_value(rotated_position)
+                        .map_err(|_| RelationPlanError::InvalidConstraint)
+                },
+            )?;
+            let normalized = evaluation
+                .numerator
+                .divide(evaluation.zeroifier)
+                .map_err(|_| RelationPlanError::InvalidZeroifier)?;
+            quotient_evaluations[evaluation_position] = quotient_evaluations[evaluation_position]
+                .add(normalized.multiply(composition_challenge));
+        }
+    }
+    evaluation_domain.interpolate_extension_polynomial_in_place(&mut quotient_evaluations)?;
+    trim_extension_polynomial(&mut quotient_evaluations);
+    Ok(quotient_evaluations)
 }
 
-fn rotated_relation_evaluation_position(
+pub(super) const COMMON_PROOF_RELATION_EVALUATION_BLOCK_LENGTH: usize = 4_096;
+
+pub(super) fn rotated_relation_evaluation_position(
     evaluation_position: usize,
     evaluation_size: usize,
     trace_domain_size: usize,
@@ -168,6 +247,14 @@ fn rotated_relation_evaluation_position(
     rotation_is_negative: bool,
     rotation_magnitude: u64,
 ) -> Result<usize, CommonProofProverError> {
+    if evaluation_size == 0
+        || trace_domain_size == 0
+        || trace_rotation_stride == 0
+        || evaluation_position >= evaluation_size
+        || trace_domain_size.checked_mul(trace_rotation_stride) != Some(evaluation_size)
+    {
+        return Err(CommonProofProverError::InvalidOpening);
+    }
     let reduced_rotation = usize::try_from(
         rotation_magnitude
             % u64::try_from(trace_domain_size)
@@ -194,26 +281,87 @@ fn rotated_relation_evaluation_position(
     }
 }
 
-pub(super) struct CommonProofReplayQuotientBuilder {
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(super) struct CommonProofQuotientConstraintTransformKey {
+    constraint_ordinal: u32,
+    column_ordinal: u32,
+}
+
+impl CommonProofQuotientConstraintTransformKey {
+    pub(super) const fn new(constraint_ordinal: u32, column_ordinal: u32) -> Self {
+        Self {
+            constraint_ordinal,
+            column_ordinal,
+        }
+    }
+
+    pub(super) const fn constraint_ordinal(self) -> u32 {
+        self.constraint_ordinal
+    }
+
+    pub(super) const fn column_ordinal(self) -> u32 {
+        self.column_ordinal
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct CommonProofQuotientEvaluationReadRequest {
+    transform_key: CommonProofQuotientConstraintTransformKey,
+    query_ordinal: usize,
+    logical_value_offset: usize,
+    vector: ExternalPolynomialVector,
+    element_offset: usize,
+    element_count: usize,
+}
+
+impl CommonProofQuotientEvaluationReadRequest {
+    pub(super) const fn vector(self) -> ExternalPolynomialVector {
+        self.vector
+    }
+
+    pub(super) const fn element_offset(self) -> usize {
+        self.element_offset
+    }
+
+    pub(super) const fn element_count(self) -> usize {
+        self.element_count
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum CommonProofQuotientEvaluationProgress {
+    BlockComplete,
+    ConstraintComplete,
+}
+
+pub(super) struct CommonProofConstraintStreamQuotientBuilder {
     evaluation_domain: ProofEvaluationDomain,
     trace_domain_size: usize,
     trace_rotation_stride: usize,
-    rotations_by_column: Vec<Vec<(bool, u64)>>,
-    block_values_by_column: Vec<Vec<Vec<ProofChallengeExtensionElement>>>,
+    column_value_types: Vec<RelationColumnValueType>,
+    constraint_queries: Vec<Vec<RelationConstraintColumnQuery>>,
+    constraint_columns: Vec<Vec<u32>>,
+    current_constraint_ordinal: usize,
+    next_transform_column_index: usize,
+    transformed_columns: BTreeMap<u32, ExternalPolynomialVector>,
     block_start: usize,
-    next_column_index: usize,
-    quotient_evaluations: Vec<ProofChallengeExtensionElement>,
-    application_challenges: Vec<RelationApplicationChallengeAssignment>,
+    next_query_ordinal: usize,
+    next_query_logical_value_offset: usize,
+    block_values_by_query: Vec<Zeroizing<Vec<ProofChallengeExtensionElement>>>,
+    maximum_external_read_chunk_byte_length: usize,
+    quotient_evaluations: Zeroizing<Vec<ProofChallengeExtensionElement>>,
+    checked_application_challenges: CheckedRelationApplicationChallenges,
     composition_challenges: Vec<ProofChallengeExtensionElement>,
 }
 
-impl CommonProofReplayQuotientBuilder {
+impl CommonProofConstraintStreamQuotientBuilder {
     pub(super) fn new(
         variant: &RelationPlanVariant,
         context: &RelationPlanCheckContext,
         evaluation_domain: ProofEvaluationDomain,
         application_challenges: Vec<RelationApplicationChallengeAssignment>,
         composition_challenges: Vec<ProofChallengeExtensionElement>,
+        maximum_external_read_chunk_byte_length: u32,
     ) -> Result<Self, CommonProofProverError> {
         if evaluation_domain.size()
             != usize::try_from(variant.evaluation_domain_size())
@@ -226,91 +374,257 @@ impl CommonProofReplayQuotientBuilder {
         {
             return Err(CommonProofProverError::InvalidQuotient);
         }
+        if composition_challenges.len() != variant.constraint_count()
+            || maximum_external_read_chunk_byte_length == 0
+        {
+            return Err(CommonProofProverError::InvalidQuotient);
+        }
         let trace_domain_size = usize::try_from(variant.trace_domain_size())
             .map_err(|_| CommonProofProverError::CountOverflow)?;
         let trace_rotation_stride =
             usize::try_from(variant.evaluation_domain_size() / variant.trace_domain_size())
                 .map_err(|_| CommonProofProverError::CountOverflow)?;
-        let rotations_by_column = required_relation_rotations_by_column(variant)?;
-        let mut quotient_evaluations = Vec::new();
+        let column_value_types = variant
+            .ordered_columns()
+            .iter()
+            .map(|column| column.value_type())
+            .collect::<Vec<_>>();
+        let mut constraint_queries = Vec::new();
+        let mut constraint_columns = Vec::new();
+        constraint_queries
+            .try_reserve_exact(variant.constraint_count())
+            .map_err(|_| CommonProofProverError::AllocationLimitExceeded)?;
+        constraint_columns
+            .try_reserve_exact(variant.constraint_count())
+            .map_err(|_| CommonProofProverError::AllocationLimitExceeded)?;
+        for constraint_ordinal in 0..variant.constraint_count() {
+            let queries = variant.constraint_column_queries(constraint_ordinal)?;
+            let columns = queries
+                .iter()
+                .map(|query| query.column_ordinal())
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .collect::<Vec<_>>();
+            for column_ordinal in &columns {
+                let value_type = column_value_types
+                    .get(
+                        usize::try_from(*column_ordinal)
+                            .map_err(|_| CommonProofProverError::CountOverflow)?,
+                    )
+                    .copied()
+                    .ok_or(CommonProofProverError::InvalidColumn)?;
+                let value_byte_length = usize::try_from(external_value_byte_length(value_type))
+                    .map_err(|_| CommonProofProverError::CountOverflow)?;
+                if usize::try_from(maximum_external_read_chunk_byte_length)
+                    .map_err(|_| CommonProofProverError::CountOverflow)?
+                    < value_byte_length
+                {
+                    return Err(CommonProofProverError::InvalidInput);
+                }
+            }
+            constraint_queries.push(queries);
+            constraint_columns.push(columns);
+        }
+        let checked_application_challenges =
+            variant.checked_application_challenges(context, &application_challenges)?;
+        let mut quotient_evaluations = Zeroizing::new(Vec::new());
         quotient_evaluations
             .try_reserve_exact(evaluation_domain.size())
             .map_err(|_| CommonProofProverError::AllocationLimitExceeded)?;
+        quotient_evaluations.resize(
+            evaluation_domain.size(),
+            ProofChallengeExtensionElement::ZERO,
+        );
         Ok(Self {
             evaluation_domain,
             trace_domain_size,
             trace_rotation_stride,
-            rotations_by_column,
-            block_values_by_column: Vec::new(),
+            column_value_types,
+            constraint_queries,
+            constraint_columns,
+            current_constraint_ordinal: 0,
+            next_transform_column_index: 0,
+            transformed_columns: BTreeMap::new(),
             block_start: 0,
-            next_column_index: 0,
+            next_query_ordinal: 0,
+            next_query_logical_value_offset: 0,
+            block_values_by_query: Vec::new(),
+            maximum_external_read_chunk_byte_length: usize::try_from(
+                maximum_external_read_chunk_byte_length,
+            )
+            .map_err(|_| CommonProofProverError::CountOverflow)?,
             quotient_evaluations,
-            application_challenges,
+            checked_application_challenges,
             composition_challenges,
         })
     }
 
-    pub(super) fn next_column_index(&self) -> Option<usize> {
-        (self.block_start < self.evaluation_domain.size()
-            && self.next_column_index < self.rotations_by_column.len())
-        .then_some(self.next_column_index)
+    pub(super) fn next_transform_key(
+        &self,
+    ) -> Result<Option<CommonProofQuotientConstraintTransformKey>, CommonProofProverError> {
+        if self.current_constraint_ordinal >= self.constraint_columns.len() {
+            return Ok(None);
+        }
+        let Some(column_ordinal) = self
+            .constraint_columns
+            .get(self.current_constraint_ordinal)
+            .and_then(|columns| columns.get(self.next_transform_column_index))
+            .copied()
+        else {
+            return Ok(None);
+        };
+        Ok(Some(CommonProofQuotientConstraintTransformKey::new(
+            u32::try_from(self.current_constraint_ordinal)
+                .map_err(|_| CommonProofProverError::CountOverflow)?,
+            column_ordinal,
+        )))
     }
 
-    pub(super) fn accept_column(
+    pub(super) fn accept_transformed_column(
         &mut self,
-        column_index: usize,
-        polynomial: CommonProofSourcePolynomial,
+        transform_key: CommonProofQuotientConstraintTransformKey,
+        vector: ExternalPolynomialVector,
     ) -> Result<(), CommonProofProverError> {
-        if self.next_column_index() != Some(column_index) {
+        if self.next_transform_key()? != Some(transform_key)
+            || vector.element_count() != self.evaluation_domain.size()
+            || self
+                .column_value_types
+                .get(
+                    usize::try_from(transform_key.column_ordinal())
+                        .map_err(|_| CommonProofProverError::CountOverflow)?,
+                )
+                .copied()
+                != Some(vector.value_type())
+            || self
+                .transformed_columns
+                .contains_key(&transform_key.column_ordinal())
+        {
             return Err(CommonProofProverError::InvalidColumn);
         }
-        let evaluations = match polynomial {
-            CommonProofSourcePolynomial::Base(coefficients) => CommonProofColumnEvaluations::Base(
-                self.evaluation_domain
-                    .evaluate_base_polynomial(&coefficients)?,
-            ),
-            CommonProofSourcePolynomial::Extension(mut coefficients) => {
-                self.evaluation_domain
-                    .evaluate_extension_polynomial_in_place(&mut coefficients)?;
-                CommonProofColumnEvaluations::Extension(coefficients)
-            }
-        };
+        let previous = self
+            .transformed_columns
+            .insert(transform_key.column_ordinal(), vector);
+        debug_assert!(previous.is_none());
+        self.next_transform_column_index = self
+            .next_transform_column_index
+            .checked_add(1)
+            .ok_or(CommonProofProverError::CountOverflow)?;
+        Ok(())
+    }
+
+    fn current_block_end(&self) -> Result<usize, CommonProofProverError> {
         let block_end = self
             .block_start
             .checked_add(COMMON_PROOF_RELATION_EVALUATION_BLOCK_LENGTH)
             .ok_or(CommonProofProverError::CountOverflow)?
             .min(self.evaluation_domain.size());
-        let rotations = self
-            .rotations_by_column
-            .get(column_index)
-            .ok_or(CommonProofProverError::InvalidColumn)?;
-        let mut values_by_rotation = Vec::new();
-        values_by_rotation
-            .try_reserve_exact(rotations.len())
-            .map_err(|_| CommonProofProverError::AllocationLimitExceeded)?;
-        for (rotation_is_negative, rotation_magnitude) in rotations.iter().copied() {
-            let mut values = Vec::new();
-            values
-                .try_reserve_exact(block_end - self.block_start)
-                .map_err(|_| CommonProofProverError::AllocationLimitExceeded)?;
-            for evaluation_position in self.block_start..block_end {
-                let rotated_position = rotated_relation_evaluation_position(
-                    evaluation_position,
-                    self.evaluation_domain.size(),
-                    self.trace_domain_size,
-                    self.trace_rotation_stride,
-                    rotation_is_negative,
-                    rotation_magnitude,
-                )?;
-                values.push(evaluations.extension_value(rotated_position)?);
-            }
-            values_by_rotation.push(values);
+        if block_end <= self.block_start {
+            return Err(CommonProofProverError::InvalidQuotient);
         }
-        self.block_values_by_column.push(values_by_rotation);
-        self.next_column_index = self
-            .next_column_index
-            .checked_add(1)
+        Ok(block_end)
+    }
+
+    pub(super) fn next_read_request(
+        &self,
+    ) -> Result<Option<CommonProofQuotientEvaluationReadRequest>, CommonProofProverError> {
+        if self.current_constraint_ordinal >= self.constraint_queries.len()
+            || self.next_transform_key()?.is_some()
+        {
+            return Ok(None);
+        }
+        let queries = self
+            .constraint_queries
+            .get(self.current_constraint_ordinal)
+            .ok_or(CommonProofProverError::InvalidQuotient)?;
+        let Some(query) = queries.get(self.next_query_ordinal).copied() else {
+            return Ok(None);
+        };
+        let vector = self
+            .transformed_columns
+            .get(&query.column_ordinal())
+            .copied()
+            .ok_or(CommonProofProverError::InvalidColumn)?;
+        let block_end = self.current_block_end()?;
+        let block_element_count = block_end - self.block_start;
+        if self.next_query_logical_value_offset >= block_element_count {
+            return Err(CommonProofProverError::InvalidQuotient);
+        }
+        let rotated_block_start = rotated_relation_evaluation_position(
+            self.block_start,
+            self.evaluation_domain.size(),
+            self.trace_domain_size,
+            self.trace_rotation_stride,
+            query.rotation_is_negative(),
+            query.rotation_magnitude(),
+        )?;
+        let element_offset = rotated_block_start
+            .checked_add(self.next_query_logical_value_offset)
+            .ok_or(CommonProofProverError::CountOverflow)?
+            % self.evaluation_domain.size();
+        let maximum_chunk_element_count = self
+            .maximum_external_read_chunk_byte_length
+            .checked_div(
+                usize::try_from(external_value_byte_length(vector.value_type()))
+                    .map_err(|_| CommonProofProverError::CountOverflow)?,
+            )
+            .filter(|count| *count != 0)
+            .ok_or(CommonProofProverError::InvalidInput)?;
+        let element_count = (block_element_count - self.next_query_logical_value_offset)
+            .min(self.evaluation_domain.size() - element_offset)
+            .min(maximum_chunk_element_count);
+        if element_count == 0 {
+            return Err(CommonProofProverError::InvalidQuotient);
+        }
+        Ok(Some(CommonProofQuotientEvaluationReadRequest {
+            transform_key: CommonProofQuotientConstraintTransformKey::new(
+                u32::try_from(self.current_constraint_ordinal)
+                    .map_err(|_| CommonProofProverError::CountOverflow)?,
+                query.column_ordinal(),
+            ),
+            query_ordinal: self.next_query_ordinal,
+            logical_value_offset: self.next_query_logical_value_offset,
+            vector,
+            element_offset,
+            element_count,
+        }))
+    }
+
+    pub(super) fn accept_read_values(
+        &mut self,
+        request: CommonProofQuotientEvaluationReadRequest,
+        values: Zeroizing<Vec<ProofChallengeExtensionElement>>,
+    ) -> Result<(), CommonProofProverError> {
+        if self.next_read_request()? != Some(request) || values.len() != request.element_count {
+            return Err(CommonProofProverError::InvalidQuotient);
+        }
+        let block_element_count = self.current_block_end()? - self.block_start;
+        if self.block_values_by_query.len() == request.query_ordinal {
+            let mut query_values = Vec::new();
+            query_values
+                .try_reserve_exact(block_element_count)
+                .map_err(|_| CommonProofProverError::AllocationLimitExceeded)?;
+            self.block_values_by_query
+                .push(Zeroizing::new(query_values));
+        }
+        let query_values = self
+            .block_values_by_query
+            .get_mut(request.query_ordinal)
+            .ok_or(CommonProofProverError::InvalidQuotient)?;
+        if query_values.len() != request.logical_value_offset {
+            return Err(CommonProofProverError::InvalidQuotient);
+        }
+        query_values.extend(values.iter().copied());
+        self.next_query_logical_value_offset = self
+            .next_query_logical_value_offset
+            .checked_add(values.len())
             .ok_or(CommonProofProverError::CountOverflow)?;
+        if self.next_query_logical_value_offset == block_element_count {
+            self.next_query_ordinal = self
+                .next_query_ordinal
+                .checked_add(1)
+                .ok_or(CommonProofProverError::CountOverflow)?;
+            self.next_query_logical_value_offset = 0;
+        }
         Ok(())
     }
 
@@ -318,65 +632,112 @@ impl CommonProofReplayQuotientBuilder {
         &mut self,
         variant: &RelationPlanVariant,
         context: &RelationPlanCheckContext,
-    ) -> Result<bool, CommonProofProverError> {
+    ) -> Result<CommonProofQuotientEvaluationProgress, CommonProofProverError> {
+        let queries = self
+            .constraint_queries
+            .get(self.current_constraint_ordinal)
+            .ok_or(CommonProofProverError::InvalidQuotient)?;
+        let columns = self
+            .constraint_columns
+            .get(self.current_constraint_ordinal)
+            .ok_or(CommonProofProverError::InvalidQuotient)?;
         if self.block_start >= self.evaluation_domain.size()
-            || self.next_column_index != self.rotations_by_column.len()
-            || self.block_values_by_column.len() != self.rotations_by_column.len()
+            || self.next_transform_column_index != columns.len()
+            || self.transformed_columns.len() != columns.len()
+            || self.next_query_ordinal != queries.len()
+            || self.next_query_logical_value_offset != 0
+            || self.block_values_by_query.len() != queries.len()
         {
             return Err(CommonProofProverError::InvalidQuotient);
         }
-        let block_end = self
-            .block_start
-            .checked_add(COMMON_PROOF_RELATION_EVALUATION_BLOCK_LENGTH)
-            .ok_or(CommonProofProverError::CountOverflow)?
-            .min(self.evaluation_domain.size());
+        let block_end = self.current_block_end()?;
+        let composition_challenge = self
+            .composition_challenges
+            .get(self.current_constraint_ordinal)
+            .copied()
+            .ok_or(CommonProofProverError::InvalidQuotient)?;
         for evaluation_position in self.block_start..block_end {
             let block_position = evaluation_position - self.block_start;
             let evaluation_point = ProofChallengeExtensionElement::from_base(
                 self.evaluation_domain.point(evaluation_position)?,
             );
-            self.quotient_evaluations.push(
-                variant
-                    .evaluate_composed_quotient_at_point(
-                        context,
-                        evaluation_point,
-                        &self.application_challenges,
-                        &self.composition_challenges,
-                        |column_ordinal, rotation_is_negative, rotation_magnitude| {
-                            let column_index = usize::try_from(column_ordinal)
-                                .map_err(|_| RelationPlanError::CountOverflow)?;
-                            let rotations = self
-                                .rotations_by_column
-                                .get(column_index)
-                                .ok_or(RelationPlanError::InvalidConstraint)?;
-                            let rotation_index = rotations
-                                .binary_search(&(rotation_is_negative, rotation_magnitude))
-                                .map_err(|_| RelationPlanError::InvalidOpening)?;
-                            self.block_values_by_column
-                                .get(column_index)
-                                .and_then(|values_by_rotation| {
-                                    values_by_rotation.get(rotation_index)
-                                })
-                                .and_then(|values| values.get(block_position))
-                                .copied()
-                                .ok_or(RelationPlanError::InvalidConstraint)
+            let mut column_value = |column_ordinal, rotation_is_negative, rotation_magnitude| {
+                let query_index = queries
+                    .binary_search_by_key(
+                        &(column_ordinal, rotation_is_negative, rotation_magnitude),
+                        |query| {
+                            (
+                                query.column_ordinal(),
+                                query.rotation_is_negative(),
+                                query.rotation_magnitude(),
+                            )
                         },
                     )
-                    .map_err(CommonProofProverError::from)?,
-            );
+                    .map_err(|_| RelationPlanError::InvalidOpening)?;
+                self.block_values_by_query
+                    .get(query_index)
+                    .and_then(|values| values.get(block_position))
+                    .copied()
+                    .ok_or(RelationPlanError::InvalidConstraint)
+            };
+            let evaluation = variant
+                .evaluate_constraint_at_point(
+                    context,
+                    self.current_constraint_ordinal,
+                    evaluation_point,
+                    &self.checked_application_challenges,
+                    &mut column_value,
+                )
+                .map_err(CommonProofProverError::from)?;
+            let normalized = evaluation
+                .numerator
+                .divide(evaluation.zeroifier)
+                .map_err(|_| CommonProofProverError::from(RelationPlanError::InvalidZeroifier))?;
+            let quotient_evaluation = self
+                .quotient_evaluations
+                .get_mut(evaluation_position)
+                .ok_or(CommonProofProverError::InvalidQuotient)?;
+            *quotient_evaluation =
+                quotient_evaluation.add(normalized.multiply(composition_challenge));
         }
-        self.block_values_by_column.clear();
-        self.next_column_index = 0;
+        self.block_values_by_query.clear();
+        self.next_query_ordinal = 0;
+        self.next_query_logical_value_offset = 0;
         self.block_start = block_end;
-        Ok(self.block_start == self.evaluation_domain.size())
+        Ok(if self.block_start == self.evaluation_domain.size() {
+            CommonProofQuotientEvaluationProgress::ConstraintComplete
+        } else {
+            CommonProofQuotientEvaluationProgress::BlockComplete
+        })
+    }
+
+    pub(super) fn complete_constraint(&mut self) -> Result<bool, CommonProofProverError> {
+        if self.current_constraint_ordinal >= self.constraint_queries.len()
+            || self.block_start != self.evaluation_domain.size()
+            || !self.block_values_by_query.is_empty()
+        {
+            return Err(CommonProofProverError::InvalidQuotient);
+        }
+        self.transformed_columns.clear();
+        self.current_constraint_ordinal = self
+            .current_constraint_ordinal
+            .checked_add(1)
+            .ok_or(CommonProofProverError::CountOverflow)?;
+        self.next_transform_column_index = 0;
+        self.block_start = 0;
+        self.next_query_ordinal = 0;
+        self.next_query_logical_value_offset = 0;
+        Ok(self.current_constraint_ordinal == self.constraint_queries.len())
     }
 
     pub(super) fn finish(
         mut self,
-    ) -> Result<Vec<ProofChallengeExtensionElement>, CommonProofProverError> {
-        if self.block_start != self.evaluation_domain.size()
+    ) -> Result<Zeroizing<Vec<ProofChallengeExtensionElement>>, CommonProofProverError> {
+        if self.current_constraint_ordinal != self.constraint_queries.len()
+            || self.block_start != 0
             || self.quotient_evaluations.len() != self.evaluation_domain.size()
-            || !self.block_values_by_column.is_empty()
+            || !self.block_values_by_query.is_empty()
+            || !self.transformed_columns.is_empty()
         {
             return Err(CommonProofProverError::InvalidQuotient);
         }
@@ -393,7 +754,7 @@ pub(crate) fn decompose_composed_quotient(
     quotient: &[ProofChallengeExtensionElement],
     component_count: u32,
     component_stride: u64,
-) -> Result<Vec<Vec<ProofChallengeExtensionElement>>, CommonProofProverError> {
+) -> Result<Vec<Zeroizing<Vec<ProofChallengeExtensionElement>>>, CommonProofProverError> {
     let component_count =
         usize::try_from(component_count).map_err(|_| CommonProofProverError::CountOverflow)?;
     let component_stride =
@@ -419,11 +780,11 @@ pub(crate) fn decompose_composed_quotient(
             .checked_add(component_stride)
             .ok_or(CommonProofProverError::CountOverflow)?
             .min(quotient.len());
-        let mut component = if start < quotient.len() {
+        let mut component = Zeroizing::new(if start < quotient.len() {
             quotient[start..end].to_vec()
         } else {
             vec![ProofChallengeExtensionElement::ZERO]
-        };
+        });
         trim_extension_polynomial(&mut component);
         components.push(component);
     }
@@ -439,12 +800,19 @@ pub(crate) fn construct_quotient_components<Coins>(
     quotient: &[ProofChallengeExtensionElement],
     coins: &mut Coins,
     maximum_candidate_draws_per_output: u32,
-) -> Result<Vec<Vec<ProofChallengeExtensionElement>>, CommonProofPrivateCoinError<Coins::Error>>
+) -> Result<
+    Vec<Zeroizing<Vec<ProofChallengeExtensionElement>>>,
+    CommonProofPrivateCoinError<Coins::Error>,
+>
 where
     Coins: CommonProofPrivateCoinSource,
 {
-    let mut cursor = CommonProofQuotientComponentCursor::new(variant, context, quotient.to_vec())
-        .map_err(CommonProofPrivateCoinError::Prover)?;
+    let mut cursor = CommonProofQuotientComponentCursor::new(
+        variant,
+        context,
+        Zeroizing::new(quotient.to_vec()),
+    )
+    .map_err(CommonProofPrivateCoinError::Prover)?;
     let component_count = cursor.component_count();
     let mut components = Vec::new();
     components.try_reserve_exact(component_count).map_err(|_| {
@@ -457,12 +825,12 @@ where
 }
 
 pub(super) struct CommonProofQuotientComponentCursor {
-    quotient: Vec<ProofChallengeExtensionElement>,
+    quotient: Zeroizing<Vec<ProofChallengeExtensionElement>>,
     stride: usize,
     component_count: usize,
     component_degree_bound_exclusive: usize,
     telescoping_descriptors: Vec<RelationMaskDescriptor>,
-    previous_randomizer: Option<Vec<ProofChallengeExtensionElement>>,
+    previous_randomizer: Option<Zeroizing<Vec<ProofChallengeExtensionElement>>>,
     next_component_index: usize,
 }
 
@@ -470,7 +838,7 @@ impl CommonProofQuotientComponentCursor {
     pub(super) fn new(
         variant: &RelationPlanVariant,
         context: &RelationPlanCheckContext,
-        quotient: Vec<ProofChallengeExtensionElement>,
+        quotient: Zeroizing<Vec<ProofChallengeExtensionElement>>,
     ) -> Result<Self, CommonProofProverError> {
         let stride = usize::try_from(variant.quotient_decomposition_stride(context)?)
             .map_err(|_| CommonProofProverError::CountOverflow)?;
@@ -539,7 +907,7 @@ impl CommonProofQuotientComponentCursor {
         coins: &mut Coins,
         maximum_candidate_draws_per_output: u32,
     ) -> Result<
-        Option<Vec<ProofChallengeExtensionElement>>,
+        Option<Zeroizing<Vec<ProofChallengeExtensionElement>>>,
         CommonProofPrivateCoinError<Coins::Error>,
     > {
         if self.next_component_index >= self.component_count {
@@ -551,15 +919,16 @@ impl CommonProofQuotientComponentCursor {
             return Ok(None);
         }
         let component_index = self.next_component_index;
-        let mut component = self
-            .quotient
-            .iter()
-            .skip(component_index.checked_mul(self.stride).ok_or_else(|| {
-                CommonProofPrivateCoinError::Prover(CommonProofProverError::CountOverflow)
-            })?)
-            .take(self.stride)
-            .copied()
-            .collect::<Vec<_>>();
+        let mut component = Zeroizing::new(
+            self.quotient
+                .iter()
+                .skip(component_index.checked_mul(self.stride).ok_or_else(|| {
+                    CommonProofPrivateCoinError::Prover(CommonProofProverError::CountOverflow)
+                })?)
+                .take(self.stride)
+                .copied()
+                .collect::<Vec<_>>(),
+        );
         if component.is_empty() {
             component.push(ProofChallengeExtensionElement::ZERO);
         }
@@ -567,7 +936,7 @@ impl CommonProofQuotientComponentCursor {
             if let Some(descriptor) = self.telescoping_descriptors.get(component_index).copied() {
                 let randomizer = sample_private_extension_polynomial(
                     coins,
-                    descriptor.mask_purpose(),
+                    CommonProofPrivateCoinCoordinate::from_mask(descriptor.mask_coordinate()),
                     descriptor.mask_degree_bound_exclusive(),
                     maximum_candidate_draws_per_output,
                 )?;

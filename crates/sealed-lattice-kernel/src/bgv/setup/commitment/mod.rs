@@ -53,7 +53,7 @@ use commitment_parameters::{
     setup_big_signed_coefficient_fits_centered_commitment_modulus_product,
     setup_signed_coefficient_fits_centered_commitment_modulus_product,
 };
-pub(super) use matrix::*;
+pub(in crate::bgv) use matrix::*;
 #[cfg(test)]
 pub(super) use opening::*;
 pub(super) use serialization::*;
@@ -66,10 +66,9 @@ pub(super) use computation::{
     compute_setup_big_signed_lifted_commitment, compute_setup_commitment_for_degree,
     compute_setup_commitment_from_typed_opening_for_degree,
 };
-pub(crate) use lattice_anchor::parse_lattice_anchor_commitment_canonical_bytes;
-#[cfg(test)]
 pub(crate) use lattice_anchor::{
-    LatticeAnchorCommitment, lattice_anchor_commitment_canonical_bytes,
+    LatticeAnchorCommitment, compute_lattice_anchor_commitment,
+    lattice_anchor_commitment_canonical_bytes, parse_lattice_anchor_commitment_canonical_bytes,
 };
 pub(crate) use worker_response::setup_commitment_worker_response_bytes;
 

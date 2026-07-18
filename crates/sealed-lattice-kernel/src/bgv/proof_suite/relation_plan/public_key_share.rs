@@ -145,7 +145,6 @@ mod tests {
             commitment_data_modulus_indices: vec![0, 1, 2],
             commitment_module_rank: 1,
             plaintext_modulus: 257,
-            first_mask_purpose: 100,
         }
     }
 
@@ -215,15 +214,14 @@ mod tests {
         let context = production_context(true);
         let plan = compile_public_key_share_relation_plan(
             &PublicKeyShareRelationPlanInput {
-                ring_degree: 32_768,
-                evaluation_domain_size: 524_288,
-                opening_degree_bound_exclusive: 65_536,
-                public_polynomial_column_degree_bound_exclusive: 16_384,
-                data_modulus_indices: (0..17).collect(),
+                ring_degree: crate::bgv::parameters::POLYNOMIAL_DEGREE as u64,
+                evaluation_domain_size: crate::bgv::proof_suite::selected_profile::SELECTED_EVALUATION_DOMAIN_SIZE,
+                opening_degree_bound_exclusive: crate::bgv::proof_suite::selected_profile::SELECTED_OPENING_DEGREE_BOUND_EXCLUSIVE,
+                public_polynomial_column_degree_bound_exclusive: crate::bgv::proof_suite::selected_profile::SELECTED_PUBLIC_POLYNOMIAL_COLUMN_DEGREE_BOUND_EXCLUSIVE,
+                data_modulus_indices: (0..crate::bgv::parameters::DATA_PRIMES.len() as u16).collect(),
                 commitment_data_modulus_indices: vec![0, 1, 2],
                 commitment_module_rank: 1,
-                plaintext_modulus: 65_537,
-                first_mask_purpose: 100,
+                plaintext_modulus: crate::bgv::parameters::PLAINTEXT_MODULUS,
             },
             &context,
         )

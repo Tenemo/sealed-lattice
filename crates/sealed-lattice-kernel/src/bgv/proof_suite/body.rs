@@ -3,17 +3,21 @@ use std::{
     collections::{BTreeMap, BTreeSet},
 };
 
-use crate::foundation::{CanonicalItem, CanonicalItemType, hash_foundation_tuple_512};
+use zeroize::Zeroizing;
+
+use crate::foundation::{
+    CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple,
+    hash_foundation_tuple_512,
+};
 
 use super::{
+    COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH,
     committed_material::COMMITTED_MATERIAL_PHASE_PAIR_LEAF_SCHEMA_IDENTIFIER,
     decoder::{BoundedProofDecoder, ProofByteSource, ProofDecodeError},
     field::ProofChallengeExtensionElement,
     merkle::{
-        PROOF_AUTHENTICATION_NODE_SCHEMA_IDENTIFIER,
-        PROOF_ORACLE_PHASE_PAIR_LEAF_SCHEMA_IDENTIFIER, ProofAuthenticationNode,
-        ProofLeafVisibility, ProofMerkleError, ProofMerkleTreeContext, ProofOraclePhasePairLeaf,
-        ProofTreeRole, ProofTreeValue, verify_authentication_frontier,
+        PROOF_ORACLE_PHASE_PAIR_LEAF_SCHEMA_IDENTIFIER, ProofLeafVisibility, ProofMerkleError,
+        ProofMerkleTreeContext, ProofOraclePhasePairLeaf, ProofTreeRole, ProofTreeValue,
     },
     setup_public_polynomial::SETUP_PUBLIC_POLYNOMIAL_PHASE_PAIR_LEAF_SCHEMA_IDENTIFIER,
     transcript::{
@@ -25,9 +29,8 @@ use super::{
 pub(super) const PROOF_QUERY_OPENING_RECORD_SCHEMA_IDENTIFIER: u16 = 0x0107;
 pub(super) const PROOF_AUTHENTICATION_FRONTIER_SCHEMA_IDENTIFIER: u16 = 0x0108;
 const SCHEMA_VERSION: u16 = 1;
-const SECRET_LEAF_SALT_BYTE_LENGTH: usize = 48;
 const COMMITTED_MATERIAL_ROW_WIDTH: u32 = 4;
-const AUTHENTICATION_NODE_CANONICAL_BYTE_LENGTH: usize = 102;
+const AUTHENTICATION_DIGEST_BYTE_LENGTH: usize = 64;
 const MAXIMUM_TREE_CATALOG_ENTRY_COUNT: usize = u16::MAX as usize + 1;
 
 const COMMITTED_MATERIAL_LEAF_HASH_DOMAIN: &str =
@@ -139,6 +142,24 @@ enum ProofTreeConstruction {
     },
 }
 
+/// Unbound identifier for the random-oracle input namespace used by one proof
+/// tree. The verifier ledger uses this only to establish that its per-tree
+/// equation sum does not silently count the same tree construction twice.
+/// Distinct namespaces imply distinct leaf inputs, and, in the collision-free
+/// database game, distinct child digests propagate that distinction through
+/// every position-bound parent equation.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum ProofTreeOracleEquationNamespace {
+    Common(Vec<u8>),
+    CommittedMaterial {
+        material_context_hash: [u8; 64],
+    },
+    SetupPolynomial {
+        public_polynomial_context_hash: [u8; 64],
+        row_width: u32,
+    },
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ProofTreeCatalogEntry {
     tree_catalog_index: u16,
@@ -164,6 +185,160 @@ impl ProofTreeCatalogEntry {
         }
     }
 
+    pub(crate) fn uses_common_merkle_context(&self) -> bool {
+        matches!(&self.construction, ProofTreeConstruction::Common(_))
+    }
+
+    fn oracle_equation_namespace(
+        &self,
+    ) -> Result<ProofTreeOracleEquationNamespace, ProofBodyError> {
+        match &self.construction {
+            ProofTreeConstruction::Common(context) => Ok(ProofTreeOracleEquationNamespace::Common(
+                context.canonical_bytes()?,
+            )),
+            ProofTreeConstruction::CommittedMaterial {
+                material_context_hash,
+            } => Ok(ProofTreeOracleEquationNamespace::CommittedMaterial {
+                material_context_hash: *material_context_hash,
+            }),
+            ProofTreeConstruction::SetupPolynomial {
+                public_polynomial_context_hash,
+                row_width,
+            } => Ok(ProofTreeOracleEquationNamespace::SetupPolynomial {
+                public_polynomial_context_hash: *public_polynomial_context_hash,
+                row_width: *row_width,
+            }),
+        }
+    }
+
+    pub(crate) const fn bound_root(&self) -> Option<[u8; 64]> {
+        self.bound_root
+    }
+
+    pub(crate) fn materialized_row_width(&self) -> Result<usize, ProofBodyError> {
+        let row_width = match &self.construction {
+            ProofTreeConstruction::Common(context) => context.row_width(),
+            ProofTreeConstruction::CommittedMaterial { .. } => COMMITTED_MATERIAL_ROW_WIDTH,
+            ProofTreeConstruction::SetupPolynomial { row_width, .. } => *row_width,
+        };
+        usize::try_from(row_width).map_err(|_| ProofBodyError::CountOverflow)
+    }
+
+    pub(crate) const fn materialized_leaf_visibility(&self) -> ProofLeafVisibility {
+        match &self.construction {
+            ProofTreeConstruction::Common(context) => context.leaf_visibility(),
+            ProofTreeConstruction::CommittedMaterial { .. } => ProofLeafVisibility::SecretBearing,
+            ProofTreeConstruction::SetupPolynomial { .. } => ProofLeafVisibility::Public,
+        }
+    }
+
+    pub(crate) const fn requires_persistent_leaf_salt(&self) -> bool {
+        matches!(
+            self.construction,
+            ProofTreeConstruction::CommittedMaterial { .. }
+        )
+    }
+
+    pub(crate) fn encode_materialized_leaf(
+        &self,
+        leaf_index: u64,
+        salt: Option<[u8; COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH]>,
+        first_point_values: Zeroizing<Vec<ProofTreeValue>>,
+        opposite_point_values: Zeroizing<Vec<ProofTreeValue>>,
+    ) -> Result<(Vec<u8>, [u8; 64]), ProofBodyError> {
+        let expected_row_width = self.materialized_row_width()?;
+        if first_point_values.len() != expected_row_width
+            || opposite_point_values.len() != expected_row_width
+        {
+            return Err(ProofBodyError::InvalidLeaf);
+        }
+        match &self.construction {
+            ProofTreeConstruction::Common(context) => {
+                let expected_salt = context.leaf_visibility() == ProofLeafVisibility::SecretBearing;
+                if salt.is_some() != expected_salt {
+                    return Err(ProofBodyError::InvalidLeaf);
+                }
+                let leaf = ProofOraclePhasePairLeaf::new_protected(
+                    context,
+                    leaf_index,
+                    salt,
+                    first_point_values,
+                    opposite_point_values,
+                )?;
+                Ok((leaf.canonical_bytes()?, leaf.digest()?))
+            }
+            ProofTreeConstruction::CommittedMaterial {
+                material_context_hash,
+            } => {
+                let salt = salt.ok_or(ProofBodyError::InvalidLeaf)?;
+                let canonical_bytes = canonical_statement_owned_leaf_bytes(
+                    COMMITTED_MATERIAL_PHASE_PAIR_LEAF_SCHEMA_IDENTIFIER,
+                    *material_context_hash,
+                    leaf_index,
+                    Some(salt),
+                    first_point_values.as_slice(),
+                    opposite_point_values.as_slice(),
+                )?;
+                let digest = authentication::hash_canonical_leaf(
+                    COMMITTED_MATERIAL_LEAF_HASH_DOMAIN,
+                    &canonical_bytes,
+                )?;
+                Ok((canonical_bytes, digest))
+            }
+            ProofTreeConstruction::SetupPolynomial {
+                public_polynomial_context_hash,
+                ..
+            } => {
+                if salt.is_some() {
+                    return Err(ProofBodyError::InvalidLeaf);
+                }
+                let canonical_bytes = canonical_statement_owned_leaf_bytes(
+                    SETUP_PUBLIC_POLYNOMIAL_PHASE_PAIR_LEAF_SCHEMA_IDENTIFIER,
+                    *public_polynomial_context_hash,
+                    leaf_index,
+                    None,
+                    first_point_values.as_slice(),
+                    opposite_point_values.as_slice(),
+                )?;
+                let digest = authentication::hash_canonical_leaf(
+                    SETUP_PUBLIC_POLYNOMIAL_LEAF_HASH_DOMAIN,
+                    &canonical_bytes,
+                )?;
+                Ok((canonical_bytes, digest))
+            }
+        }
+    }
+
+    pub(crate) fn materialized_parent_digest(
+        &self,
+        level: u32,
+        parent_index: u64,
+        left_child_digest: [u8; 64],
+        right_child_digest: [u8; 64],
+    ) -> Result<[u8; 64], ProofBodyError> {
+        match &self.construction {
+            ProofTreeConstruction::Common(context) => {
+                Ok(crate::bgv::proof_suite::merkle::proof_merkle_node_digest(
+                    context.context_hash()?,
+                    level,
+                    parent_index,
+                    left_child_digest,
+                    right_child_digest,
+                )?)
+            }
+            ProofTreeConstruction::CommittedMaterial { .. }
+            | ProofTreeConstruction::SetupPolynomial { .. } => {
+                authentication::statement_owned_node_digest(
+                    &self.construction,
+                    level,
+                    parent_index,
+                    left_child_digest,
+                    right_child_digest,
+                )
+            }
+        }
+    }
+
     fn leaf_count(&self) -> Result<usize, ProofBodyError> {
         match &self.construction {
             ProofTreeConstruction::Common(context) => Ok(context.leaf_count()?),
@@ -171,6 +346,56 @@ impl ProofTreeCatalogEntry {
             | ProofTreeConstruction::SetupPolynomial { .. } => Err(ProofBodyError::InvalidCatalog),
         }
     }
+}
+
+fn canonical_statement_owned_leaf_bytes(
+    schema_identifier: u16,
+    context_hash: [u8; 64],
+    leaf_index: u64,
+    salt: Option<[u8; COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH]>,
+    first_point_values: &[ProofTreeValue],
+    opposite_point_values: &[ProofTreeValue],
+) -> Result<Vec<u8>, ProofBodyError> {
+    let first_values = canonical_base_field_list(first_point_values)?;
+    let opposite_values = canonical_base_field_list(opposite_point_values)?;
+    let mut items = Vec::with_capacity(if salt.is_some() { 5 } else { 4 });
+    items.push(CanonicalItem::hash512(context_hash));
+    items.push(CanonicalItem::unsigned64(leaf_index));
+    if let Some(salt) = salt {
+        items.push(
+            CanonicalItem::fixed_bytes(&salt).map_err(|_| ProofBodyError::CanonicalEncoding)?,
+        );
+    }
+    items.push(first_values);
+    items.push(opposite_values);
+    CanonicalTuple::new(schema_identifier, SCHEMA_VERSION, items)
+        .encode()
+        .map_err(|_| ProofBodyError::CanonicalEncoding)
+}
+
+fn canonical_base_field_list(values: &[ProofTreeValue]) -> Result<CanonicalItem, ProofBodyError> {
+    if values.is_empty() {
+        return Err(ProofBodyError::InvalidLeaf);
+    }
+    let mut items = Vec::new();
+    items
+        .try_reserve_exact(values.len())
+        .map_err(|_| ProofBodyError::AllocationLimitExceeded)?;
+    for value in values {
+        let ProofTreeValue::Base(value) = value else {
+            return Err(ProofBodyError::InvalidLeaf);
+        };
+        items.push(
+            CanonicalItem::from_canonical_bytes(
+                CanonicalItemType::FieldElement,
+                value.canonical().to_le_bytes().to_vec(),
+                &CanonicalDecodeLimits::default(),
+            )
+            .map_err(|_| ProofBodyError::CanonicalEncoding)?,
+        );
+    }
+    CanonicalItem::homogeneous_list(CanonicalItemType::FieldElement, &items)
+        .map_err(|_| ProofBodyError::CanonicalEncoding)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -186,6 +411,20 @@ impl CompleteProofTreeCatalog {
 
     pub(crate) const fn evaluation_domain_size(&self) -> u64 {
         self.evaluation_domain_size
+    }
+
+    /// Checks the source-authoritative namespace identity used by leaf and
+    /// parent hashing before an exact across-tree equation sum is formed.
+    pub(crate) fn has_pairwise_distinct_oracle_equation_namespaces(
+        &self,
+    ) -> Result<bool, ProofBodyError> {
+        let mut namespaces = BTreeSet::new();
+        for entry in &self.entries {
+            if !namespaces.insert(entry.oracle_equation_namespace()?) {
+                return Ok(false);
+            }
+        }
+        Ok(true)
     }
 }
 
@@ -548,7 +787,7 @@ mod sizing;
 pub(super) use authentication::minimal_frontier_node_count;
 #[cfg(test)]
 use authentication::{
-    ParsedAuthenticationNode, TreeValueKind, hash_canonical_leaf, statement_owned_node_digest,
+    TreeValueKind, authenticate_opening, hash_canonical_leaf, statement_owned_node_digest,
 };
 pub(crate) use decoding::{
     DecodedProofBody, DecodedProofBodyPrefix, DecodedProofPhasePairLeaf, DecodedProofTreeOpening,
@@ -556,12 +795,11 @@ pub(crate) use decoding::{
     decode_proof_body_prefix_owned, decode_proof_query_section_header_at,
     decode_proof_query_tree_at,
 };
-#[cfg(test)]
-use sizing::maximum_minimal_frontier_node_count;
+pub(super) use sizing::maximum_minimal_frontier_node_count;
 pub(crate) use sizing::{
-    CommonProofByteLengthCeiling, ProofQueryTreeByteLengthCeiling,
-    canonical_common_proof_byte_length_ceiling, proof_body_prefix_byte_length,
-    proof_query_tree_byte_length,
+    CommonProofByteLengthCeiling, CommonProofComponentByteLengths, ProofQueryTreeByteLengthCeiling,
+    canonical_common_proof_byte_length_ceiling, canonical_leaf_byte_length, entry_leaf_count,
+    proof_body_prefix_byte_length, proof_query_tree_byte_length,
 };
 
 #[cfg(test)]

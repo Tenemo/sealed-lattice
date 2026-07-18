@@ -23,7 +23,8 @@ import {
     createSuiteIdentifierAccumulator,
     decodeRuntimeBuildManifest,
     decodeSuiteArtifactReferences,
-    proofRandomnessPurposeRanges,
+    proofMaskRandomnessPurposeClasses,
+    proofRandomnessFamilyAssignments,
     runtimeBuildBytesToHex,
     runtimeBuildCanonicalLimits,
     type RuntimeAssetRole,
@@ -48,29 +49,32 @@ const artifactPaths = Object.freeze(
 );
 const textEncoder = new TextEncoder();
 
-type PrivateRandomnessPurposeRangeVector = Readonly<{
+type PrivateRandomnessFamilyAssignmentVector = Readonly<{
     familyName: string;
     familySchemaIdentifier: number;
-    firstPurpose: number;
-    lastPurpose: number;
 }>;
 
-type PrivateRandomnessPurposeRangesVector = Readonly<{
+type PrivateRandomnessProofCoordinatesVector = Readonly<{
     privateProofSaltPurpose: number;
-    ranges: readonly PrivateRandomnessPurposeRangeVector[];
+    maskPurposeClasses: Readonly<{
+        trace: number;
+        telescoping: number;
+        opening: number;
+    }>;
+    families: readonly PrivateRandomnessFamilyAssignmentVector[];
 }>;
 
-const readPrivateRandomnessPurposeRangesVector =
-    async (): Promise<PrivateRandomnessPurposeRangesVector> =>
+const readPrivateRandomnessProofCoordinatesVector =
+    async (): Promise<PrivateRandomnessProofCoordinatesVector> =>
         JSON.parse(
             await readFile(
                 path.resolve(
                     'test-vectors',
-                    'private-randomness-purpose-ranges.json',
+                    'private-randomness-proof-coordinates.json',
                 ),
                 'utf8',
             ),
-        ) as PrivateRandomnessPurposeRangesVector;
+        ) as PrivateRandomnessProofCoordinatesVector;
 
 const byteSource = (
     bytes: Uint8Array,
@@ -493,9 +497,9 @@ const runFixture = async (input: {
 };
 
 describe('runtime build preflight', () => {
-    it('matches the shared proof-family randomness purpose ranges', async () => {
-        const vector = await readPrivateRandomnessPurposeRangesVector();
-        expect(vector.ranges.map((range) => range.familyName)).toEqual([
+    it('matches the shared proof-family randomness coordinates', async () => {
+        const vector = await readPrivateRandomnessProofCoordinatesVector();
+        expect(vector.families.map((family) => family.familyName)).toEqual([
             'sameSecret',
             'publicKeyShare',
             'relinearizationRoundOne',
@@ -506,26 +510,26 @@ describe('runtime build preflight', () => {
             'vssShareLinkage',
             'aggregateThresholdShare',
         ]);
-        expect(proofRandomnessPurposeRanges).toEqual(
-            vector.ranges.map(
-                ({ familySchemaIdentifier, firstPurpose, lastPurpose }) => ({
-                    familySchemaIdentifier,
-                    firstPurpose,
-                    lastPurpose,
-                }),
-            ),
+        expect(proofRandomnessFamilyAssignments).toEqual(
+            vector.families.map(({ familySchemaIdentifier }) => ({
+                familySchemaIdentifier,
+            })),
+        );
+        expect(proofMaskRandomnessPurposeClasses).toEqual(
+            vector.maskPurposeClasses,
         );
 
-        for (const range of vector.ranges) {
+        for (const family of vector.families) {
             for (const purpose of [
-                range.firstPurpose,
-                range.lastPurpose,
+                vector.maskPurposeClasses.trace,
+                vector.maskPurposeClasses.telescoping,
+                vector.maskPurposeClasses.opening,
                 vector.privateProofSaltPurpose,
             ]) {
                 const fixture = createFixture({
                     operationProfiles: [
                         operationProfileForRandomUse(
-                            range.familySchemaIdentifier,
+                            family.familySchemaIdentifier,
                             purpose,
                         ),
                     ],
@@ -535,14 +539,11 @@ describe('runtime build preflight', () => {
                 ).not.toThrow();
             }
 
-            for (const purpose of [
-                range.firstPurpose - 1,
-                range.lastPurpose + 1,
-            ]) {
+            for (const purpose of [0, 4]) {
                 const fixture = createFixture({
                     operationProfiles: [
                         operationProfileForRandomUse(
-                            range.familySchemaIdentifier,
+                            family.familySchemaIdentifier,
                             purpose,
                         ),
                     ],

@@ -18,7 +18,7 @@ use super::super::limb_group_statement::LimbGroupContext;
 use super::super::negacyclic_transform::NegacyclicDomain;
 #[cfg(test)]
 use super::super::proof_field::ProofFieldParameters;
-use super::super::proof_field::sixteen_limb_group_field_parameters;
+use super::super::proof_field::selected_key_switch_proof_field_parameters;
 use super::key_proof::{
     KeyFriProofParameters, LinkageStatement, key_fri_proof_decoding_shape,
     verify_key_fri_with_negacyclic_domain,
@@ -51,10 +51,10 @@ pub(crate) const SCHEDULE_QUERY_COUNT: usize = 80;
 // Keys prove independently; bounding the concurrent set keeps the peak
 // working set at a few streamed provers rather than the whole schedule.
 const PARALLEL_KEY_GROUP: usize = 4;
-// The proof field hosts at most sixteen data primes per limb group (the
-// sixteen-limb group field modulus bounds the group product); wider keys
-// split into consecutive groups with one atom proof per group.
-const LIMB_GROUP_CAPACITY: usize = 16;
+// At ring degree 65536 the exact lifted relation fits fourteen selected data
+// primes below the proof-field modulus. Wider keys split into consecutive
+// groups with one atom proof per group.
+pub(super) const LIMB_GROUP_CAPACITY: usize = 14;
 
 fn invalid_schedule(message: &str) -> CanonicalError {
     CanonicalError::new(CanonicalErrorCode::InvalidProtocolObject, message)
@@ -241,7 +241,7 @@ pub(crate) fn prove_key_bearing_trustee_evaluation_keys(
         negative_indicator: witness.negative_indicator_coefficients(),
         randomness_by_commitment_limb: linkage_randomness,
     };
-    let parameters = sixteen_limb_group_field_parameters();
+    let parameters = selected_key_switch_proof_field_parameters();
     let statement_hash = statement.statement_hash();
     let ring_degree = statement.ring_degree;
     // These immutable tables depend only on the field and ring degree. Share
@@ -403,7 +403,7 @@ pub(crate) fn verify_key_bearing_trustee_evaluation_keys(
     proof_bytes: &(impl ProofByteSource + ?Sized),
 ) -> CanonicalResult<()> {
     let linkage_statement = linkage_statement(statement)?;
-    let parameters = sixteen_limb_group_field_parameters();
+    let parameters = selected_key_switch_proof_field_parameters();
     let statement_hash = statement.statement_hash();
     let ring_degree = statement.ring_degree;
     // Public bridging and proof verification use the same immutable domain.

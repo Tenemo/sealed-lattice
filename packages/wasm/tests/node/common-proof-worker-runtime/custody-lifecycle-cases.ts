@@ -117,9 +117,10 @@ describe('common-proof custody lifecycle', () => {
             if (copiedResumeDescriptor !== undefined) {
                 copiedResumeDescriptor.checkpointLineageIdentifier.fill(0);
                 copiedResumeDescriptor.commonProofEnvironmentIdentifier.fill(0);
-                for (const copiedCursorBytes of copiedResumeDescriptor.orderedPrivateRandomCursorBytes) {
-                    copiedCursorBytes.fill(0);
-                }
+                copiedResumeDescriptor.privateRandomCursorManifestBytes.fill(0);
+                copiedResumeDescriptor.privateRandomnessStreamAttemptIdentifier?.fill(
+                    0,
+                );
                 copiedResumeDescriptor.stableAttemptBindingHash.fill(0);
             }
             const resumeDescriptor =
@@ -151,9 +152,8 @@ describe('common-proof custody lifecycle', () => {
                 );
             resumeDescriptor.checkpointLineageIdentifier.fill(0);
             resumeDescriptor.commonProofEnvironmentIdentifier.fill(0);
-            for (const resumeCursorBytes of resumeDescriptor.orderedPrivateRandomCursorBytes) {
-                resumeCursorBytes.fill(0);
-            }
+            resumeDescriptor.privateRandomCursorManifestBytes.fill(0);
+            resumeDescriptor.privateRandomnessStreamAttemptIdentifier?.fill(0);
             resumeDescriptor.stableAttemptBindingHash.fill(0);
             await runCommonProofGenerationInInstalledCustodyWorker(
                 environment,
@@ -682,7 +682,7 @@ describe('common-proof custody lifecycle', () => {
                 );
                 const opened = (await host.workerScope.send(
                     'begin-checkpoint',
-                    [streamAttemptIdentifier],
+                    streamAttemptIdentifier,
                 )) as Readonly<{ checkpointIdentifier: string }>;
                 checkpointIdentifiers.push(opened.checkpointIdentifier);
             }
@@ -693,9 +693,10 @@ describe('common-proof custody lifecycle', () => {
             const retainedRefusedSource =
                 refusedStreamAttemptIdentifier.slice();
             await expect(
-                host.workerScope.send('begin-checkpoint', [
+                host.workerScope.send(
+                    'begin-checkpoint',
                     refusedStreamAttemptIdentifier,
-                ]),
+                ),
             ).rejects.toMatchObject({ code: 'InvalidState' });
             expect(refusedStreamAttemptIdentifier).toEqual(
                 retainedRefusedSource,
@@ -711,9 +712,10 @@ describe('common-proof custody lifecycle', () => {
                 'evict-checkpoint',
                 releasedCheckpointIdentifier,
             );
-            const retried = (await host.workerScope.send('begin-checkpoint', [
+            const retried = (await host.workerScope.send(
+                'begin-checkpoint',
                 refusedStreamAttemptIdentifier,
-            ])) as Readonly<{ checkpointIdentifier: string }>;
+            )) as Readonly<{ checkpointIdentifier: string }>;
             checkpointIdentifiers.push(retried.checkpointIdentifier);
 
             for (const checkpointIdentifier of checkpointIdentifiers) {
@@ -735,7 +737,7 @@ describe('common-proof custody lifecycle', () => {
         try {
             const persisted = (await host.workerScope.send(
                 'begin-checkpoint',
-                [],
+                undefined,
             )) as Readonly<{ checkpointIdentifier: string }>;
             checkpointIdentifiers.push(persisted.checkpointIdentifier);
             const description = (await host.workerScope.send(
@@ -766,7 +768,7 @@ describe('common-proof custody lifecycle', () => {
             ) {
                 const opened = (await host.workerScope.send(
                     'begin-checkpoint',
-                    [new Uint8Array(32).fill(checkpointIndex + 0x40)],
+                    new Uint8Array(32).fill(checkpointIndex + 0x40),
                 )) as Readonly<{ checkpointIdentifier: string }>;
                 unrelatedCheckpointIdentifiers.push(
                     opened.checkpointIdentifier,
@@ -828,7 +830,7 @@ describe('common-proof custody lifecycle', () => {
         try {
             const opened = (await host.workerScope.send(
                 'begin-checkpoint',
-                [],
+                undefined,
             )) as Readonly<{ checkpointIdentifier: string }>;
             checkpointIdentifiers.push(opened.checkpointIdentifier);
             const description = (await host.workerScope.send(
@@ -1168,10 +1170,10 @@ describe('common-proof custody lifecycle', () => {
                 initialResumeDescriptor.checkpointLineageIdentifier.slice();
             const expectedEnvironmentIdentifier =
                 initialResumeDescriptor.commonProofEnvironmentIdentifier.slice();
-            const expectedCursors =
-                initialResumeDescriptor.orderedPrivateRandomCursorBytes.map(
-                    (cursor) => cursor.slice(),
-                );
+            const expectedCursorManifest =
+                initialResumeDescriptor.privateRandomCursorManifestBytes.slice();
+            const expectedPrivateRandomnessStreamAttemptIdentifier =
+                initialResumeDescriptor.privateRandomnessStreamAttemptIdentifier?.slice();
             const expectedStableAttemptBindingHash =
                 initialResumeDescriptor.stableAttemptBindingHash.slice();
             const resumedPreparedOperation =
@@ -1197,9 +1199,10 @@ describe('common-proof custody lifecycle', () => {
                 );
             initialResumeDescriptor.checkpointLineageIdentifier.fill(0);
             initialResumeDescriptor.commonProofEnvironmentIdentifier.fill(0);
-            for (const resumeCursorBytes of initialResumeDescriptor.orderedPrivateRandomCursorBytes) {
-                resumeCursorBytes.fill(0);
-            }
+            initialResumeDescriptor.privateRandomCursorManifestBytes.fill(0);
+            initialResumeDescriptor.privateRandomnessStreamAttemptIdentifier?.fill(
+                0,
+            );
             initialResumeDescriptor.stableAttemptBindingHash.fill(0);
 
             await expect(
@@ -1232,25 +1235,26 @@ describe('common-proof custody lifecycle', () => {
             expect([
                 ...retriedResumeDescriptor.commonProofEnvironmentIdentifier,
             ]).toEqual([...expectedEnvironmentIdentifier]);
+            expect([
+                ...retriedResumeDescriptor.privateRandomCursorManifestBytes,
+            ]).toEqual([...expectedCursorManifest]);
             expect(
-                retriedResumeDescriptor.orderedPrivateRandomCursorBytes.map(
-                    (cursor) => [...cursor],
-                ),
-            ).toEqual(expectedCursors.map((cursor) => [...cursor]));
+                retriedResumeDescriptor.privateRandomnessStreamAttemptIdentifier,
+            ).toEqual(expectedPrivateRandomnessStreamAttemptIdentifier);
             expect([
                 ...retriedResumeDescriptor.stableAttemptBindingHash,
             ]).toEqual([...expectedStableAttemptBindingHash]);
             retriedResumeDescriptor.checkpointLineageIdentifier.fill(0);
             retriedResumeDescriptor.commonProofEnvironmentIdentifier.fill(0);
-            for (const cursor of retriedResumeDescriptor.orderedPrivateRandomCursorBytes) {
-                cursor.fill(0);
-            }
+            retriedResumeDescriptor.privateRandomCursorManifestBytes.fill(0);
+            retriedResumeDescriptor.privateRandomnessStreamAttemptIdentifier?.fill(
+                0,
+            );
             retriedResumeDescriptor.stableAttemptBindingHash.fill(0);
             expectedCheckpointLineageIdentifier.fill(0);
             expectedEnvironmentIdentifier.fill(0);
-            for (const cursor of expectedCursors) {
-                cursor.fill(0);
-            }
+            expectedCursorManifest.fill(0);
+            expectedPrivateRandomnessStreamAttemptIdentifier?.fill(0);
             expectedStableAttemptBindingHash.fill(0);
         } finally {
             if (environment !== undefined) {
@@ -1335,9 +1339,8 @@ describe('common-proof custody lifecycle', () => {
                 );
             resumeDescriptor.checkpointLineageIdentifier.fill(0);
             resumeDescriptor.commonProofEnvironmentIdentifier.fill(0);
-            for (const cursor of resumeDescriptor.orderedPrivateRandomCursorBytes) {
-                cursor.fill(0);
-            }
+            resumeDescriptor.privateRandomCursorManifestBytes.fill(0);
+            resumeDescriptor.privateRandomnessStreamAttemptIdentifier?.fill(0);
             resumeDescriptor.stableAttemptBindingHash.fill(0);
             await runCommonProofGenerationInInstalledCustodyWorker(
                 environment,
@@ -1523,9 +1526,8 @@ describe('common-proof custody lifecycle', () => {
                 );
             resumeDescriptor.checkpointLineageIdentifier.fill(0);
             resumeDescriptor.commonProofEnvironmentIdentifier.fill(0);
-            for (const resumeCursorBytes of resumeDescriptor.orderedPrivateRandomCursorBytes) {
-                resumeCursorBytes.fill(0);
-            }
+            resumeDescriptor.privateRandomCursorManifestBytes.fill(0);
+            resumeDescriptor.privateRandomnessStreamAttemptIdentifier?.fill(0);
             resumeDescriptor.stableAttemptBindingHash.fill(0);
 
             const retiredEnvironment = environment;

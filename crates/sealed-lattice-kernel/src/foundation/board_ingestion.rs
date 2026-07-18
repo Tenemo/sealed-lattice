@@ -4,7 +4,9 @@ use std::{
     sync::Arc,
 };
 
-use super::schemas::EvaluatorReplayPayload;
+#[cfg(test)]
+use super::schemas::AGGREGATE_PAYLOAD_SCHEMA_IDENTIFIER;
+use super::schemas::{AggregatePayload, EvaluatorReplayPayload};
 use super::{
     CanonicalCodecError, CanonicalCodecErrorKind, CanonicalDecodeLimits, CanonicalItem,
     CanonicalItemType, CanonicalTuple, FINALITY_SIGNATURE_PAYLOAD_SCHEMA_IDENTIFIER,
@@ -15,17 +17,14 @@ use super::{
     derive_state_key, derive_state_witness_vote_sequence,
 };
 
-const FOUNDATION_SCHEMA_VERSION: u16 = 1;
-const SETUP_INTENT_PAYLOAD_SCHEMA_IDENTIFIER: u16 = 0x1200;
-const PUBLIC_RANDOMNESS_COMMITMENT_PAYLOAD_SCHEMA_IDENTIFIER: u16 = 0x1201;
-const PUBLIC_RANDOMNESS_REVEAL_PAYLOAD_SCHEMA_IDENTIFIER: u16 = 0x1202;
-const PRIVATE_SHARE_ACCEPTANCE_PAYLOAD_SCHEMA_IDENTIFIER: u16 = 0x1203;
+pub(crate) const FOUNDATION_SCHEMA_VERSION: u16 = 1;
+pub(crate) const SETUP_INTENT_PAYLOAD_SCHEMA_IDENTIFIER: u16 = 0x1200;
+pub(crate) const PUBLIC_RANDOMNESS_COMMITMENT_PAYLOAD_SCHEMA_IDENTIFIER: u16 = 0x1201;
+pub(crate) const PUBLIC_RANDOMNESS_REVEAL_PAYLOAD_SCHEMA_IDENTIFIER: u16 = 0x1202;
+pub(crate) const PRIVATE_SHARE_ACCEPTANCE_PAYLOAD_SCHEMA_IDENTIFIER: u16 = 0x1203;
 const COMPLAINT_PAYLOAD_SCHEMA_IDENTIFIER: u16 = 0x1204;
-const DEALER_PUBLIC_RECORD_PAYLOAD_SCHEMA_IDENTIFIER: u16 = 0x2100;
-const BALLOT_PACKAGE_PAYLOAD_SCHEMA_IDENTIFIER: u16 = 0x1301;
-const BALLOT_CANDIDATE_LIST_PAYLOAD_SCHEMA_IDENTIFIER: u16 = 0x1400;
-const BALLOT_CANDIDATE_ENTRY_SCHEMA_IDENTIFIER: u16 = 0x1401;
-const AGGREGATE_PAYLOAD_SCHEMA_IDENTIFIER: u16 = 0x1404;
+pub(crate) const DEALER_PUBLIC_RECORD_PAYLOAD_SCHEMA_IDENTIFIER: u16 = 0x2100;
+pub(super) const BALLOT_PACKAGE_PAYLOAD_SCHEMA_IDENTIFIER: u16 = 0x1301;
 const TARGET_DECRYPTION_SHARE_PAYLOAD_SCHEMA_IDENTIFIER: u16 = 0x1620;
 pub(crate) const MAXIMUM_CANONICAL_BOARD_BATCH_CARRIER_COUNT: u32 = 4_096;
 
@@ -159,6 +158,10 @@ impl VerifiedTranscriptObject {
     pub fn canonical_carrier_bytes(&self) -> &[u8] {
         &self.inner.canonical_carrier_bytes
     }
+
+    pub(crate) fn envelope(&self) -> &ObjectEnvelope {
+        &self.inner.envelope
+    }
 }
 
 impl fmt::Debug for VerifiedTranscriptObject {
@@ -213,12 +216,6 @@ enum ProducerSlot {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct CandidateEntryCoordinate {
-    producer_sequence: u64,
-    ballot_package_object_hash: Hash512,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct StateIntentCoordinate {
     capability_kind: StateCapabilityKind,
     state_key: Hash512,
@@ -246,9 +243,6 @@ enum TypedPayload {
         dealer_roster_position: u16,
     },
     BallotPackage,
-    BallotCandidateList {
-        entries: Vec<CandidateEntryCoordinate>,
-    },
     Aggregate {
         selected_ballot_object_hashes: Vec<Hash512>,
     },
@@ -591,7 +585,6 @@ impl CanonicalBoardVerifier {
             envelope.object_type,
             &envelope.payload_bytes,
             &self.canonical_decode_limits,
-            self.limits.maximum_ballot_attempts_per_participant,
         )?;
         if let DecodedBoardCarrier::Signed(carrier) = &decoded {
             carrier
@@ -714,23 +707,6 @@ impl CanonicalBoardVerifier {
                         "ballot producer sequence exceeds the suite candidate bound",
                     )
                     .into());
-                }
-                Ok(participant_slot(producer))
-            }
-            TypedPayload::BallotCandidateList { entries } => {
-                let producer = self.require_signed_envelope(envelope, 0)?;
-                require_sequence(envelope, 0)?;
-                for entry in entries {
-                    let ballot = require_available(available, entry.ballot_package_object_hash)?;
-                    require_object_type(ballot, FoundationObjectType::BallotPackage)?;
-                    require_producer(ballot, producer)?;
-                    if ballot.envelope.producer_sequence != entry.producer_sequence {
-                        return Err(CanonicalBoardError::new(
-                            RefusalReason::WrongContext,
-                            "candidate entry does not match its ballot producer slot",
-                        )
-                        .into());
-                    }
                 }
                 Ok(participant_slot(producer))
             }
@@ -1116,7 +1092,6 @@ fn decode_typed_payload(
     object_type: FoundationObjectType,
     payload_bytes: &[u8],
     limits: &CanonicalDecodeLimits,
-    maximum_ballot_attempts_per_participant: u64,
 ) -> BoardResult<TypedPayload> {
     let tuple = CanonicalTuple::decode(payload_bytes, limits)?;
     if tuple.schema_version != FOUNDATION_SCHEMA_VERSION {
@@ -1219,54 +1194,12 @@ fn decode_typed_payload(
             read_stream_descriptor(&tuple.items[1], limits)?;
             Ok(TypedPayload::BallotPackage)
         }
-        FoundationObjectType::BallotCandidateList => {
-            require_payload_header(&tuple, BALLOT_CANDIDATE_LIST_PAYLOAD_SCHEMA_IDENTIFIER, 2)?;
-            read_hash(&tuple.items[0])?;
-            let maximum_entry_count = usize::try_from(maximum_ballot_attempts_per_participant)
-                .map_err(|_| {
-                    CanonicalBoardError::new(
-                        RefusalReason::OutsideSupportedProfile,
-                        "candidate-list entry bound does not fit this runtime",
-                    )
-                })?;
-            let entry_tuples =
-                read_nested_tuple_list(&tuple.items[1], limits, maximum_entry_count)?;
-            let mut entries = Vec::with_capacity(entry_tuples.len());
-            for (entry_index, entry) in entry_tuples.iter().enumerate() {
-                require_payload_header(entry, BALLOT_CANDIDATE_ENTRY_SCHEMA_IDENTIFIER, 2)?;
-                let producer_sequence = read_u64(&entry.items[0])?;
-                if producer_sequence
-                    != u64::try_from(entry_index).map_err(|_| {
-                        CanonicalBoardError::new(
-                            RefusalReason::OutsideSupportedProfile,
-                            "candidate-list entry index does not fit u64",
-                        )
-                    })?
-                {
-                    return Err(CanonicalBoardError::new(
-                        RefusalReason::WrongTypeOrLength,
-                        "candidate-list entries are not in contiguous producer-sequence order",
-                    ));
-                }
-                entries.push(CandidateEntryCoordinate {
-                    producer_sequence,
-                    ballot_package_object_hash: read_hash(&entry.items[1])?,
-                });
-            }
-            Ok(TypedPayload::BallotCandidateList { entries })
-        }
         FoundationObjectType::Aggregate => {
-            require_payload_header(&tuple, AGGREGATE_PAYLOAD_SCHEMA_IDENTIFIER, 4)?;
-            read_hash(&tuple.items[0])?;
-            read_hash(&tuple.items[1])?;
-            let selected_ballot_object_hashes = read_nonempty_hash_list_with_maximum_count(
-                &tuple.items[2],
-                usize::from(FOUNDATION_PROFILE.participant_count),
-                "aggregate selected-ballot count is outside the frozen-roster bound",
-            )?;
-            read_stream_descriptor(&tuple.items[3], limits)?;
+            let aggregate_payload = AggregatePayload::from_tuple(&tuple, limits)?;
             Ok(TypedPayload::Aggregate {
-                selected_ballot_object_hashes,
+                selected_ballot_object_hashes: aggregate_payload
+                    .selected_ballot_object_hashes()
+                    .to_vec(),
             })
         }
         FoundationObjectType::EvaluatorReplay => {
@@ -1351,13 +1284,6 @@ fn read_u16(item: &CanonicalItem) -> BoardResult<u16> {
     let mut bytes = [0_u8; 2];
     bytes.copy_from_slice(item.canonical_bytes());
     Ok(u16::from_le_bytes(bytes))
-}
-
-fn read_u64(item: &CanonicalItem) -> BoardResult<u64> {
-    require_item(item, CanonicalItemType::Unsigned64, 8)?;
-    let mut bytes = [0_u8; 8];
-    bytes.copy_from_slice(item.canonical_bytes());
-    Ok(u64::from_le_bytes(bytes))
 }
 
 fn read_hash(item: &CanonicalItem) -> BoardResult<Hash512> {
@@ -1468,142 +1394,6 @@ fn require_nonempty_hash_list(
         ));
     }
     Ok(())
-}
-
-fn read_nonempty_hash_list_with_maximum_count(
-    item: &CanonicalItem,
-    maximum_count: usize,
-    mismatch_message: &'static str,
-) -> BoardResult<Vec<Hash512>> {
-    let (bytes, count) = hash_list_layout(item)?;
-    if count == 0 || count > maximum_count {
-        return Err(CanonicalBoardError::new(
-            RefusalReason::WrongTypeOrLength,
-            mismatch_message,
-        ));
-    }
-    let mut hashes = Vec::with_capacity(count);
-    for chunk in bytes[6..].chunks_exact(Hash512::BYTE_LENGTH) {
-        let mut hash_bytes = [0_u8; Hash512::BYTE_LENGTH];
-        hash_bytes.copy_from_slice(chunk);
-        hashes.push(Hash512::from_bytes(hash_bytes));
-    }
-    Ok(hashes)
-}
-
-fn read_nested_tuple_list(
-    item: &CanonicalItem,
-    limits: &CanonicalDecodeLimits,
-    maximum_count: usize,
-) -> BoardResult<Vec<CanonicalTuple>> {
-    if item.item_type() != CanonicalItemType::HomogeneousList {
-        return Err(CanonicalBoardError::new(
-            RefusalReason::WrongTypeOrLength,
-            "transcript payload item is not a homogeneous list",
-        ));
-    }
-    let bytes = item.canonical_bytes();
-    if bytes.len() < 6
-        || u16::from_le_bytes([bytes[0], bytes[1]])
-            != CanonicalItemType::NestedTuple.canonical_code()
-    {
-        return Err(CanonicalBoardError::new(
-            RefusalReason::WrongTypeOrLength,
-            "transcript list has the wrong nested element type",
-        ));
-    }
-    let count = usize::try_from(u32::from_le_bytes([bytes[2], bytes[3], bytes[4], bytes[5]]))
-        .map_err(|_| {
-            CanonicalBoardError::new(
-                RefusalReason::OutsideSupportedProfile,
-                "nested transcript-list count does not fit this runtime",
-            )
-        })?;
-    if count == 0 || count > maximum_count {
-        return Err(CanonicalBoardError::new(
-            RefusalReason::OutsideSupportedProfile,
-            "candidate-list entry count is outside the suite bound",
-        ));
-    }
-    let mut offset = 6_usize;
-    let mut tuples = Vec::with_capacity(count);
-    for _ in 0..count {
-        let tuple_length = canonical_tuple_byte_length(&bytes[offset..])?;
-        let end = offset.checked_add(tuple_length).ok_or_else(|| {
-            CanonicalBoardError::new(
-                RefusalReason::OutsideSupportedProfile,
-                "nested transcript-list offset overflows",
-            )
-        })?;
-        let tuple_bytes = bytes.get(offset..end).ok_or_else(|| {
-            CanonicalBoardError::new(
-                RefusalReason::MalformedEncoding,
-                "nested transcript-list element is truncated",
-            )
-        })?;
-        tuples.push(CanonicalTuple::decode(tuple_bytes, limits)?);
-        offset = end;
-    }
-    if offset != bytes.len() {
-        return Err(CanonicalBoardError::new(
-            RefusalReason::MalformedEncoding,
-            "nested transcript-list has trailing bytes",
-        ));
-    }
-    Ok(tuples)
-}
-
-fn canonical_tuple_byte_length(bytes: &[u8]) -> BoardResult<usize> {
-    if bytes.len() < 8 {
-        return Err(CanonicalBoardError::new(
-            RefusalReason::MalformedEncoding,
-            "nested canonical tuple is truncated",
-        ));
-    }
-    let item_count = usize::try_from(u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]))
-        .map_err(|_| {
-            CanonicalBoardError::new(
-                RefusalReason::OutsideSupportedProfile,
-                "nested canonical tuple item count does not fit this runtime",
-            )
-        })?;
-    let mut offset = 8_usize;
-    for _ in 0..item_count {
-        let item_header = bytes.get(offset..offset.saturating_add(6)).ok_or_else(|| {
-            CanonicalBoardError::new(
-                RefusalReason::MalformedEncoding,
-                "nested canonical tuple item header is truncated",
-            )
-        })?;
-        let item_byte_length = usize::try_from(u32::from_le_bytes([
-            item_header[2],
-            item_header[3],
-            item_header[4],
-            item_header[5],
-        ]))
-        .map_err(|_| {
-            CanonicalBoardError::new(
-                RefusalReason::OutsideSupportedProfile,
-                "nested canonical tuple item length does not fit this runtime",
-            )
-        })?;
-        offset = offset
-            .checked_add(6)
-            .and_then(|value| value.checked_add(item_byte_length))
-            .ok_or_else(|| {
-                CanonicalBoardError::new(
-                    RefusalReason::OutsideSupportedProfile,
-                    "nested canonical tuple length overflows",
-                )
-            })?;
-        if offset > bytes.len() {
-            return Err(CanonicalBoardError::new(
-                RefusalReason::MalformedEncoding,
-                "nested canonical tuple item is truncated",
-            ));
-        }
-    }
-    Ok(offset)
 }
 
 fn read_stream_descriptor(

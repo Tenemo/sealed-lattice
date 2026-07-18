@@ -1,6 +1,6 @@
 use core::fmt;
 
-use zeroize::Zeroizing;
+use zeroize::{Zeroize, Zeroizing};
 
 use super::super::schemas::{SchemaResult, read_hash, read_u16, require_header};
 use super::super::{
@@ -13,7 +13,8 @@ use super::proof_coins::{
     ProofApplicationSlot,
 };
 use super::stream::{
-    PrivateRandomCursor, PrivateRandomnessStream, kmac256, kmac256_zeroizing, require_attempt_class,
+    Kmac256FramedInput, PrivateRandomCursor, PrivateRandomnessStream, kmac256, kmac256_zeroizing,
+    require_attempt_class,
 };
 use super::validation::{read_participant_identity, require_protocol_version};
 use super::{
@@ -21,7 +22,8 @@ use super::{
     ACTION_RANDOMNESS_DERIVATION_INPUT_SCHEMA_IDENTIFIER,
     ACTION_RANDOMNESS_KEY_HIERARCHY_CUSTOMIZATION, ACTION_RANDOMNESS_KEY_MATERIAL_BYTE_LENGTH,
     ACTION_RANDOMNESS_ROOT_BYTE_LENGTH, FOUNDATION_SCHEMA_VERSION,
-    ORDINARY_PROOF_ATTEMPT_CUSTOMIZATION, PERSISTENT_PROOF_ATTEMPT_CUSTOMIZATION,
+    ORDINARY_PROOF_ATTEMPT_CUSTOMIZATION, PERSISTENT_PROOF_PREPARATION_CUSTOMIZATION,
+    PERSISTENT_PROOF_WITNESS_ATTEMPT_CUSTOMIZATION,
     PRIVATE_RANDOMNESS_ATTEMPT_IDENTIFIER_BYTE_LENGTH, PRIVATE_RANDOMNESS_BLOCK_BYTE_LENGTH,
     PRIVATE_RANDOMNESS_STREAM_KEY_BYTE_LENGTH, PROOF_COIN_KEY_BYTE_LENGTH,
     SETUP_ACTION_RANDOMNESS_AUTHORIZATION_DOMAIN, SETUP_ATTEMPT_CUSTOMIZATION,
@@ -30,6 +32,113 @@ use super::{
     SETUP_STRUCTURED_COMMITMENT_OPENING_CONTEXT_SCHEMA_VERSION,
     TARGET_DECRYPTION_SHARE_PROOF_FAMILY, TARGET_RELEASE_ATTEMPT_CUSTOMIZATION, schema_error,
 };
+
+/// In-process keyed binding for the canonical semantic witness of one
+/// reset-safe proof attempt. Witness bytes are absorbed directly into KMAC;
+/// no unkeyed witness digest is created, returned, stored, or published. The
+/// preparation identifier proves that this binding uses the same action key as
+/// the independently prepared reservation before generation is authorized.
+pub(crate) struct PersistentProofWitnessCoinBinding {
+    input: PersistentProofCoinInput,
+    preparation_identifier: PrivateRandomnessAttemptIdentifier,
+    framed_input: Kmac256FramedInput,
+    canonical_witness_part_count: u64,
+}
+
+impl PersistentProofWitnessCoinBinding {
+    pub(crate) fn absorb_canonical_bytes(&mut self, bytes: &[u8]) -> SchemaResult<()> {
+        self.canonical_witness_part_count = self
+            .canonical_witness_part_count
+            .checked_add(1)
+            .ok_or_else(|| {
+                schema_error(
+                    RefusalReason::OutsideSupportedProfile,
+                    "canonical proof witness has too many framed parts",
+                )
+            })?;
+        self.framed_input.absorb_part(bytes).ok_or_else(|| {
+            schema_error(
+                RefusalReason::OutsideSupportedProfile,
+                "canonical proof witness part is too large",
+            )
+        })
+    }
+
+    pub(crate) fn absorb_canonical_i8_values(&mut self, values: &[i8]) -> SchemaResult<()> {
+        const BUFFER_BYTE_LENGTH: usize = 4_096;
+        let mut buffer = Zeroizing::new([0_u8; BUFFER_BYTE_LENGTH]);
+        self.absorb_canonical_bytes(
+            &u64::try_from(values.len())
+                .map_err(|_| {
+                    schema_error(
+                        RefusalReason::OutsideSupportedProfile,
+                        "canonical signed coefficient count does not fit",
+                    )
+                })?
+                .to_le_bytes(),
+        )?;
+        for chunk in values.chunks(BUFFER_BYTE_LENGTH) {
+            for (destination, value) in buffer.iter_mut().zip(chunk) {
+                *destination = value.to_le_bytes()[0];
+            }
+            self.absorb_canonical_bytes(&buffer[..chunk.len()])?;
+            buffer[..chunk.len()].zeroize();
+        }
+        Ok(())
+    }
+
+    pub(crate) fn absorb_canonical_u64_values(&mut self, values: &[u64]) -> SchemaResult<()> {
+        const VALUES_PER_BUFFER: usize = 512;
+        let mut buffer = Zeroizing::new([0_u8; VALUES_PER_BUFFER * 8]);
+        self.absorb_canonical_bytes(
+            &u64::try_from(values.len())
+                .map_err(|_| {
+                    schema_error(
+                        RefusalReason::OutsideSupportedProfile,
+                        "canonical field-value count does not fit",
+                    )
+                })?
+                .to_le_bytes(),
+        )?;
+        for chunk in values.chunks(VALUES_PER_BUFFER) {
+            for (destination, value) in buffer.chunks_exact_mut(8).zip(chunk) {
+                destination.copy_from_slice(&value.to_le_bytes());
+            }
+            let byte_length = chunk.len().checked_mul(8).ok_or_else(|| {
+                schema_error(
+                    RefusalReason::OutsideSupportedProfile,
+                    "canonical field-value byte length does not fit",
+                )
+            })?;
+            self.absorb_canonical_bytes(&buffer[..byte_length])?;
+            buffer[..byte_length].zeroize();
+        }
+        Ok(())
+    }
+
+    pub(crate) const fn input(&self) -> PersistentProofCoinInput {
+        self.input
+    }
+
+    pub(crate) const fn preparation_identifier(&self) -> PrivateRandomnessAttemptIdentifier {
+        self.preparation_identifier
+    }
+
+    pub(crate) fn finish(self) -> SchemaResult<PrivateRandomnessAttemptIdentifier> {
+        if self.canonical_witness_part_count == 0 {
+            return Err(schema_error(
+                RefusalReason::WrongTypeOrLength,
+                "persistent proof coins require a canonical semantic witness",
+            ));
+        }
+        Ok(PrivateRandomnessAttemptIdentifier {
+            bytes: self
+                .framed_input
+                .finish::<PRIVATE_RANDOMNESS_ATTEMPT_IDENTIFIER_BYTE_LENGTH>(),
+            attempt_class: AttemptClass::ResetSafeProof,
+        })
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ActionRandomnessDerivationInput {
@@ -113,8 +222,6 @@ impl ActionRandomnessDerivationInput {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SetupStructuredCommitmentOpeningContext {
     source_setup_intent_object_hash: Hash512,
-    source_rns_limb_index: u16,
-    shamir_coefficient_index: u16,
     commitment_data_prime_index: u16,
     distribution_purpose: u16,
     component_ordinal: u16,
@@ -123,8 +230,6 @@ pub struct SetupStructuredCommitmentOpeningContext {
 impl SetupStructuredCommitmentOpeningContext {
     pub fn new(
         source_setup_intent_object_hash: Hash512,
-        source_rns_limb_index: u16,
-        shamir_coefficient_index: u16,
         commitment_data_prime_index: u16,
         distribution_purpose: u16,
         component_ordinal: u16,
@@ -142,8 +247,6 @@ impl SetupStructuredCommitmentOpeningContext {
         }
         Ok(Self {
             source_setup_intent_object_hash,
-            source_rns_limb_index,
-            shamir_coefficient_index,
             commitment_data_prime_index,
             distribution_purpose,
             component_ordinal,
@@ -152,14 +255,6 @@ impl SetupStructuredCommitmentOpeningContext {
 
     pub const fn source_setup_intent_object_hash(self) -> Hash512 {
         self.source_setup_intent_object_hash
-    }
-
-    pub const fn source_rns_limb_index(self) -> u16 {
-        self.source_rns_limb_index
-    }
-
-    pub const fn shamir_coefficient_index(self) -> u16 {
-        self.shamir_coefficient_index
     }
 
     pub const fn commitment_data_prime_index(self) -> u16 {
@@ -180,8 +275,6 @@ impl SetupStructuredCommitmentOpeningContext {
             SETUP_STRUCTURED_COMMITMENT_OPENING_CONTEXT_SCHEMA_VERSION,
             vec![
                 CanonicalItem::hash512(self.source_setup_intent_object_hash.into_bytes()),
-                CanonicalItem::unsigned16(self.source_rns_limb_index),
-                CanonicalItem::unsigned16(self.shamir_coefficient_index),
                 CanonicalItem::unsigned16(self.commitment_data_prime_index),
                 CanonicalItem::unsigned16(self.distribution_purpose),
                 CanonicalItem::unsigned16(self.component_ordinal),
@@ -196,7 +289,7 @@ impl SetupStructuredCommitmentOpeningContext {
     pub fn decode(bytes: &[u8], limits: &CanonicalDecodeLimits) -> SchemaResult<Self> {
         let tuple = CanonicalTuple::decode(bytes, limits)?;
         if tuple.schema_identifier != SETUP_STRUCTURED_COMMITMENT_OPENING_CONTEXT_SCHEMA_IDENTIFIER
-            || tuple.items.len() != 6
+            || tuple.items.len() != 4
         {
             return Err(schema_error(
                 RefusalReason::WrongTypeOrLength,
@@ -214,8 +307,6 @@ impl SetupStructuredCommitmentOpeningContext {
             read_u16(&tuple.items[1])?,
             read_u16(&tuple.items[2])?,
             read_u16(&tuple.items[3])?,
-            read_u16(&tuple.items[4])?,
-            read_u16(&tuple.items[5])?,
         )
     }
 
@@ -357,7 +448,7 @@ impl ActionPrivateRandomness {
         }
     }
 
-    pub fn persistent_proof_attempt_identifier(
+    pub(crate) fn persistent_proof_preparation_identifier(
         &self,
         input: &PersistentProofCoinInput,
     ) -> SchemaResult<PrivateRandomnessAttemptIdentifier> {
@@ -372,9 +463,38 @@ impl ActionPrivateRandomness {
             bytes: kmac256::<PRIVATE_RANDOMNESS_ATTEMPT_IDENTIFIER_BYTE_LENGTH>(
                 self.proof_coin_key.as_ref(),
                 &input.encode()?,
-                PERSISTENT_PROOF_ATTEMPT_CUSTOMIZATION,
+                PERSISTENT_PROOF_PREPARATION_CUSTOMIZATION,
             ),
             attempt_class: AttemptClass::ResetSafeProof,
+        })
+    }
+
+    pub(crate) fn begin_persistent_proof_witness_coin_binding(
+        &self,
+        input: &PersistentProofCoinInput,
+    ) -> SchemaResult<PersistentProofWitnessCoinBinding> {
+        self.require_matching_slot(input.application_slot)?;
+        if input.application_slot.attempt_class()? != AttemptClass::ResetSafeProof {
+            return Err(schema_error(
+                RefusalReason::WrongTypeOrLength,
+                "persistent proof coins require a reset-safe private proof family",
+            ));
+        }
+        let mut framed_input = Kmac256FramedInput::new(
+            self.proof_coin_key.as_ref(),
+            PERSISTENT_PROOF_WITNESS_ATTEMPT_CUSTOMIZATION,
+        );
+        framed_input.absorb_part(&input.encode()?).ok_or_else(|| {
+            schema_error(
+                RefusalReason::OutsideSupportedProfile,
+                "persistent proof coin input is too large",
+            )
+        })?;
+        Ok(PersistentProofWitnessCoinBinding {
+            input: *input,
+            preparation_identifier: self.persistent_proof_preparation_identifier(input)?,
+            framed_input,
+            canonical_witness_part_count: 0,
         })
     }
 

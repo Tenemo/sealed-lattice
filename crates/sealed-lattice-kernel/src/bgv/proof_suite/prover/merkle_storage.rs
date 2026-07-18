@@ -1,13 +1,13 @@
 use super::{
-    CanonicalItem, CanonicalTuple, CommonProofPrivateCoinSource, CommonProofProverError,
-    HASH_BYTE_LENGTH, PRIVATE_PROOF_SALT_PURPOSE, PROOF_MERKLE_NODE_HASH_DOMAIN,
-    PROOF_MERKLE_NODE_SCHEMA_IDENTIFIER, PROOF_SECRET_LEAF_SALT_BYTE_LENGTH, ProofBaseFieldElement,
-    ProofChallengeExtensionElement, ProofExternalMemory, ProofExternalMemoryExecutor,
-    ProofExternalMemoryExecutorError, ProofExternalMemoryObject, ProofExternalMemoryObjectPlan,
-    ProofExternalMemoryProtection, ProofLeafVisibility, ProofMerkleTreeContext,
-    ProofOraclePhasePairLeaf, ProofTreeCatalogEntry, ProofTreeCatalogSource, ProofTreeRole,
-    ProofTreeValue, RelationColumnValueType, SCHEMA_VERSION, Zeroize, Zeroizing,
-    hash_foundation_tuple_512, minimal_frontier_coordinates, opened_leaf_indexes,
+    COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH, CommonProofPrivateCoinCoordinate,
+    CommonProofPrivateCoinSource, CommonProofProverError, HASH_BYTE_LENGTH, ProofBaseFieldElement,
+    ProofBodyError, ProofChallengeExtensionElement, ProofExternalMemory,
+    ProofExternalMemoryExecutor, ProofExternalMemoryExecutorError, ProofExternalMemoryObject,
+    ProofExternalMemoryObjectPlan, ProofExternalMemoryProtection, ProofLeafVisibility,
+    ProofMerkleTreeContext, ProofOraclePhasePairLeaf, ProofTreeCatalogEntry,
+    ProofTreeCatalogSource, ProofTreeRole, ProofTreeValue, RelationColumnValueType, Zeroize,
+    Zeroizing, canonical_leaf_byte_length, entry_leaf_count, minimal_frontier_coordinates,
+    opened_leaf_indexes,
 };
 
 #[derive(Debug, PartialEq, Eq)]
@@ -23,7 +23,7 @@ pub(crate) enum CommonProofTreeStorageError<StorageError, CoinError> {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct StoredCommonProofMerkleTree {
     tree_catalog_index: u16,
-    context: ProofMerkleTreeContext,
+    catalog_entry: ProofTreeCatalogEntry,
     leaf_count: usize,
     canonical_leaf_byte_length: usize,
     leaf_bytes_object: ProofExternalMemoryObject,
@@ -83,6 +83,7 @@ impl CommonProofMerkleStoragePlan {
 /// FRI trees contain extension-field rows.
 pub(crate) fn common_proof_merkle_storage_plan(
     catalog_entry: &ProofTreeCatalogEntry,
+    evaluation_domain_size: u64,
     first_object_ordinal: u32,
     materialization_step: u32,
     query_step: u32,
@@ -90,22 +91,20 @@ pub(crate) fn common_proof_merkle_storage_plan(
     if query_step < materialization_step {
         return Err(CommonProofProverError::InvalidTree);
     }
-    let context = catalog_entry
-        .common_context()
-        .ok_or(CommonProofProverError::InvalidTree)?;
-    let value_type = common_proof_tree_value_type(catalog_entry)?;
-    let leaf_count = context.leaf_count()?;
+    let leaf_count = entry_leaf_count(catalog_entry, evaluation_domain_size)
+        .map_err(map_proof_body_tree_error)?;
     if leaf_count == 0 || !leaf_count.is_power_of_two() {
         return Err(CommonProofProverError::InvalidTree);
     }
-    let canonical_leaf_byte_length = canonical_common_proof_leaf_byte_length(context, value_type)?;
+    let canonical_leaf_byte_length =
+        canonical_leaf_byte_length(catalog_entry).map_err(map_proof_body_tree_error)?;
     let stored_leaf_byte_length = u64::try_from(canonical_leaf_byte_length)
         .map_err(|_| CommonProofProverError::CountOverflow)?
         .checked_mul(u64::try_from(leaf_count).map_err(|_| CommonProofProverError::CountOverflow)?)
         .ok_or(CommonProofProverError::CountOverflow)?;
 
     let leaf_bytes_object = ProofExternalMemoryObject::new(first_object_ordinal);
-    let leaf_protection = match context.leaf_visibility() {
+    let leaf_protection = match catalog_entry.materialized_leaf_visibility() {
         ProofLeafVisibility::Public => ProofExternalMemoryProtection::PublicIntegrity,
         ProofLeafVisibility::SecretBearing => {
             ProofExternalMemoryProtection::SecretAuthenticatedEncryption
@@ -184,8 +183,10 @@ pub(super) fn common_proof_tree_value_type(
         | ProofTreeCatalogSource::NonterminalFriLayer { .. } => {
             Ok(RelationColumnValueType::ChallengeExtension)
         }
-        ProofTreeCatalogSource::RelationProofCreated { .. }
-        | ProofTreeCatalogSource::RelationBoundPublic => Err(CommonProofProverError::InvalidTree),
+        ProofTreeCatalogSource::RelationBoundPublic => Ok(RelationColumnValueType::BaseField),
+        ProofTreeCatalogSource::RelationProofCreated { .. } => {
+            Err(CommonProofProverError::InvalidTree)
+        }
     }
 }
 
@@ -203,7 +204,7 @@ pub(super) fn canonical_common_proof_leaf_byte_length(
     };
     let row = vec![empty_value; row_width];
     let secret_salt = (context.leaf_visibility() == ProofLeafVisibility::SecretBearing)
-        .then_some([0_u8; PROOF_SECRET_LEAF_SALT_BYTE_LENGTH]);
+        .then_some([0_u8; COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH]);
     Ok(
         ProofOraclePhasePairLeaf::new(context, 0, secret_salt, row.clone(), row)?
             .canonical_bytes()?
@@ -226,7 +227,7 @@ fn common_proof_tree_value_has_type(
 }
 
 fn common_proof_merkle_storage_plan_matches(
-    context: &ProofMerkleTreeContext,
+    catalog_entry: &ProofTreeCatalogEntry,
     leaf_count: usize,
     canonical_leaf_byte_length: usize,
     storage_plan: &CommonProofMerkleStoragePlan,
@@ -244,7 +245,7 @@ fn common_proof_merkle_storage_plan_matches(
         .first()
         .copied()
         .ok_or(CommonProofProverError::InvalidTree)?;
-    let expected_leaf_protection = match context.leaf_visibility() {
+    let expected_leaf_protection = match catalog_entry.materialized_leaf_visibility() {
         ProofLeafVisibility::Public => ProofExternalMemoryProtection::PublicIntegrity,
         ProofLeafVisibility::SecretBearing => {
             ProofExternalMemoryProtection::SecretAuthenticatedEncryption
@@ -349,9 +350,8 @@ pub(crate) enum CommonProofMerkleMaterializerProgress {
 /// memory across all of its bounded append transactions.
 pub(crate) struct CommonProofMerkleMaterializer {
     tree_catalog_index: u16,
-    context: ProofMerkleTreeContext,
+    catalog_entry: ProofTreeCatalogEntry,
     value_type: RelationColumnValueType,
-    context_hash: [u8; HASH_BYTE_LENGTH],
     leaf_count: usize,
     canonical_leaf_byte_length: usize,
     leaf_bytes_object: ProofExternalMemoryObject,
@@ -371,19 +371,20 @@ pub(crate) struct CommonProofMerkleMaterializer {
 }
 
 impl CommonProofMerkleMaterializer {
+    pub(crate) const fn tree_catalog_index(&self) -> u16 {
+        self.tree_catalog_index
+    }
+
     pub(crate) fn new(
         catalog_entry: &ProofTreeCatalogEntry,
+        evaluation_domain_size: u64,
         storage_plan: CommonProofMerkleStoragePlan,
     ) -> Result<Self, CommonProofProverError> {
-        let context = catalog_entry
-            .common_context()
-            .cloned()
-            .ok_or(CommonProofProverError::InvalidTree)?;
-        let context_hash = context.context_hash()?;
-        let leaf_count = context.leaf_count()?;
+        let leaf_count = entry_leaf_count(catalog_entry, evaluation_domain_size)
+            .map_err(map_proof_body_tree_error)?;
         let value_type = common_proof_tree_value_type(catalog_entry)?;
         let expected_leaf_byte_length =
-            canonical_common_proof_leaf_byte_length(&context, value_type)?;
+            canonical_leaf_byte_length(catalog_entry).map_err(map_proof_body_tree_error)?;
         let expected_level_count = usize::try_from(leaf_count.trailing_zeros())
             .map_err(|_| CommonProofProverError::CountOverflow)?
             .checked_add(1)
@@ -393,7 +394,7 @@ impl CommonProofMerkleMaterializer {
             || storage_plan.digest_level_objects.len() != expected_level_count
             || storage_plan.canonical_leaf_byte_length != expected_leaf_byte_length
             || !common_proof_merkle_storage_plan_matches(
-                &context,
+                catalog_entry,
                 leaf_count,
                 expected_leaf_byte_length,
                 &storage_plan,
@@ -403,9 +404,8 @@ impl CommonProofMerkleMaterializer {
         }
         Ok(Self {
             tree_catalog_index: catalog_entry.tree_catalog_index(),
-            context,
+            catalog_entry: catalog_entry.clone(),
             value_type,
-            context_hash,
             leaf_count,
             canonical_leaf_byte_length: storage_plan.canonical_leaf_byte_length,
             leaf_bytes_object: storage_plan.leaf_bytes_object,
@@ -499,62 +499,71 @@ impl CommonProofMerkleMaterializer {
 
     pub(crate) fn supply_next_leaf<Coins>(
         &mut self,
-        first_point_values: Vec<ProofTreeValue>,
-        opposite_point_values: Vec<ProofTreeValue>,
+        first_point_values: Zeroizing<Vec<ProofTreeValue>>,
+        opposite_point_values: Zeroizing<Vec<ProofTreeValue>>,
+        persistent_leaf_salt: Option<[u8; COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH]>,
         coins: &mut Coins,
     ) -> Result<(), CommonProofTreeStorageError<core::convert::Infallible, Coins::Error>>
     where
         Coins: CommonProofPrivateCoinSource,
     {
-        let expected_row_width = usize::try_from(self.context.row_width()).map_err(|_| {
-            CommonProofTreeStorageError::Prover(CommonProofProverError::CountOverflow)
-        })?;
+        let expected_row_width = self
+            .catalog_entry
+            .materialized_row_width()
+            .map_err(map_proof_body_tree_error)
+            .map_err(CommonProofTreeStorageError::Prover)?;
         if self.phase != CommonProofMerkleMaterializerPhase::NeedLeafValues
             || self.next_leaf_index >= self.leaf_count
             || first_point_values.len() != expected_row_width
             || opposite_point_values.len() != expected_row_width
             || first_point_values
                 .iter()
-                .chain(&opposite_point_values)
+                .chain(opposite_point_values.iter())
                 .any(|value| !common_proof_tree_value_has_type(value, self.value_type))
         {
             return Err(CommonProofTreeStorageError::Prover(
                 CommonProofProverError::InvalidTree,
             ));
         }
-        let secret_salt = if self.context.leaf_visibility() == ProofLeafVisibility::SecretBearing {
-            let mut salt = [0_u8; PROOF_SECRET_LEAF_SALT_BYTE_LENGTH];
+        let secret_salt = if self.catalog_entry.requires_persistent_leaf_salt() {
+            Some(
+                persistent_leaf_salt.ok_or(CommonProofTreeStorageError::Prover(
+                    CommonProofProverError::InvalidTree,
+                ))?,
+            )
+        } else if persistent_leaf_salt.is_some() {
+            return Err(CommonProofTreeStorageError::Prover(
+                CommonProofProverError::InvalidTree,
+            ));
+        } else if self.catalog_entry.materialized_leaf_visibility()
+            == ProofLeafVisibility::SecretBearing
+        {
+            let mut salt = [0_u8; COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH];
             coins
-                .fill_raw_bytes(PRIVATE_PROOF_SALT_PURPOSE, &mut salt)
+                .fill_raw_bytes(CommonProofPrivateCoinCoordinate::proof_salt(), &mut salt)
                 .map_err(CommonProofTreeStorageError::CoinSource)?;
             Some(salt)
         } else {
             None
         };
-        let leaf = ProofOraclePhasePairLeaf::new(
-            &self.context,
-            u64::try_from(self.next_leaf_index).map_err(|_| {
-                CommonProofTreeStorageError::Prover(CommonProofProverError::CountOverflow)
-            })?,
-            secret_salt,
-            first_point_values,
-            opposite_point_values,
-        )
-        .map_err(CommonProofProverError::from)
-        .map_err(CommonProofTreeStorageError::Prover)?;
-        let canonical_bytes = leaf
-            .canonical_bytes()
-            .map_err(CommonProofProverError::from)
+        let (canonical_bytes, leaf_digest) = self
+            .catalog_entry
+            .encode_materialized_leaf(
+                u64::try_from(self.next_leaf_index).map_err(|_| {
+                    CommonProofTreeStorageError::Prover(CommonProofProverError::CountOverflow)
+                })?,
+                secret_salt,
+                first_point_values,
+                opposite_point_values,
+            )
+            .map_err(map_proof_body_tree_error)
             .map_err(CommonProofTreeStorageError::Prover)?;
         if canonical_bytes.len() != self.canonical_leaf_byte_length {
             return Err(CommonProofTreeStorageError::Prover(
                 CommonProofProverError::InvalidTree,
             ));
         }
-        self.current_leaf_digest = leaf
-            .digest()
-            .map_err(CommonProofProverError::from)
-            .map_err(CommonProofTreeStorageError::Prover)?;
+        self.current_leaf_digest = leaf_digest;
         self.current_leaf_bytes = Zeroizing::new(canonical_bytes);
         self.current_byte_offset = 0;
         self.phase = CommonProofMerkleMaterializerPhase::WriteLeafBytes;
@@ -801,22 +810,24 @@ impl CommonProofMerkleMaterializer {
                         .map_err(CommonProofTreeStorageError::Storage)?;
                     self.current_byte_offset = end;
                     if end == HASH_BYTE_LENGTH {
-                        self.current_leaf_digest = common_proof_merkle_node_digest(
-                            self.context_hash,
-                            u32::try_from(self.current_level_ordinal).map_err(|_| {
-                                CommonProofTreeStorageError::Prover(
-                                    CommonProofProverError::CountOverflow,
-                                )
-                            })?,
-                            u64::try_from(self.current_parent_index).map_err(|_| {
-                                CommonProofTreeStorageError::Prover(
-                                    CommonProofProverError::CountOverflow,
-                                )
-                            })?,
-                            self.left_child_digest,
-                            self.right_child_digest,
-                        )
-                        .map_err(CommonProofTreeStorageError::Prover)?;
+                        self.current_leaf_digest = self
+                            .catalog_entry
+                            .materialized_parent_digest(
+                                u32::try_from(self.current_level_ordinal).map_err(|_| {
+                                    CommonProofTreeStorageError::Prover(
+                                        CommonProofProverError::CountOverflow,
+                                    )
+                                })?,
+                                u64::try_from(self.current_parent_index).map_err(|_| {
+                                    CommonProofTreeStorageError::Prover(
+                                        CommonProofProverError::CountOverflow,
+                                    )
+                                })?,
+                                self.left_child_digest,
+                                self.right_child_digest,
+                            )
+                            .map_err(map_proof_body_tree_error)
+                            .map_err(CommonProofTreeStorageError::Prover)?;
                         self.left_child_digest = [0; HASH_BYTE_LENGTH];
                         self.right_child_digest = [0; HASH_BYTE_LENGTH];
                         self.current_byte_offset = 0;
@@ -936,7 +947,7 @@ impl CommonProofMerkleMaterializer {
         }
         Ok(StoredCommonProofMerkleTree {
             tree_catalog_index: self.tree_catalog_index,
-            context: self.context,
+            catalog_entry: self.catalog_entry,
             leaf_count: self.leaf_count,
             canonical_leaf_byte_length: self.canonical_leaf_byte_length,
             leaf_bytes_object: self.leaf_bytes_object,
@@ -997,207 +1008,25 @@ fn append_bounded<Storage: ProofExternalMemory>(
     Ok(())
 }
 
-fn read_exact_bounded<Storage: ProofExternalMemory>(
-    executor: &mut ProofExternalMemoryExecutor,
-    storage: &mut Storage,
-    object: ProofExternalMemoryObject,
-    offset: u64,
-    destination: &mut [u8],
-) -> Result<(), ProofExternalMemoryExecutorError<Storage::Error>> {
-    let maximum_chunk = usize::try_from(executor.maximum_chunk_byte_length()).map_err(|_| {
-        ProofExternalMemoryExecutorError::Execution(
-            super::external_memory::ProofExternalMemoryError::ResourceLimitExceeded,
-        )
-    })?;
-    if maximum_chunk == 0 {
-        return Err(ProofExternalMemoryExecutorError::Execution(
-            super::external_memory::ProofExternalMemoryError::ResourceLimitExceeded,
-        ));
-    }
-    let mut relative_offset = 0_usize;
-    for chunk in destination.chunks_mut(maximum_chunk) {
-        let absolute_offset = offset
-            .checked_add(u64::try_from(relative_offset).map_err(|_| {
-                ProofExternalMemoryExecutorError::Execution(
-                    super::external_memory::ProofExternalMemoryError::ResourceLimitExceeded,
-                )
-            })?)
-            .ok_or(ProofExternalMemoryExecutorError::Execution(
-                super::external_memory::ProofExternalMemoryError::ResourceLimitExceeded,
-            ))?;
-        executor.read_object_bytes(storage, object, absolute_offset, chunk)?;
-        relative_offset += chunk.len();
-    }
-    Ok(())
-}
-
-fn read_stored_hash<Storage: ProofExternalMemory>(
-    executor: &mut ProofExternalMemoryExecutor,
-    storage: &mut Storage,
-    object: ProofExternalMemoryObject,
-    hash_index: usize,
-) -> Result<[u8; HASH_BYTE_LENGTH], ProofExternalMemoryExecutorError<Storage::Error>> {
-    let offset = hash_index
-        .checked_mul(HASH_BYTE_LENGTH)
-        .and_then(|offset| u64::try_from(offset).ok())
-        .ok_or(ProofExternalMemoryExecutorError::Execution(
-            super::external_memory::ProofExternalMemoryError::ResourceLimitExceeded,
-        ))?;
-    let mut digest = [0_u8; HASH_BYTE_LENGTH];
-    read_exact_bounded(executor, storage, object, offset, &mut digest)?;
-    Ok(digest)
-}
-
-fn common_proof_merkle_node_digest(
-    context_hash: [u8; HASH_BYTE_LENGTH],
-    level: u32,
-    node_index: u64,
-    left_child_digest: [u8; HASH_BYTE_LENGTH],
-    right_child_digest: [u8; HASH_BYTE_LENGTH],
-) -> Result<[u8; HASH_BYTE_LENGTH], CommonProofProverError> {
-    if level == 0 {
-        return Err(CommonProofProverError::InvalidTree);
-    }
-    let canonical_bytes = CanonicalTuple::new(
-        PROOF_MERKLE_NODE_SCHEMA_IDENTIFIER,
-        SCHEMA_VERSION,
-        vec![
-            CanonicalItem::hash512(context_hash),
-            CanonicalItem::unsigned32(level),
-            CanonicalItem::unsigned64(node_index),
-            CanonicalItem::hash512(left_child_digest),
-            CanonicalItem::hash512(right_child_digest),
-        ],
-    )
-    .encode()
-    .map_err(|_| CommonProofProverError::CanonicalEncoding)?;
-    Ok(hash_foundation_tuple_512(
-        PROOF_MERKLE_NODE_HASH_DOMAIN,
-        &[CanonicalItem::variable_bytes(canonical_bytes)
-            .map_err(|_| CommonProofProverError::CanonicalEncoding)?],
-    )
-    .map_err(|_| CommonProofProverError::CanonicalEncoding)?
-    .into_bytes())
-}
-
-/// Random-access source needed to encode one catalog-ordered opening.  Bound
-/// statement trees implement the same interface from their existing canonical
-/// leaf and Merkle stores; common trees use the adapter below.
-pub(crate) trait CommonProofOpeningArtifact {
-    type Error;
-
-    fn tree_catalog_index(&self) -> u16;
-    fn leaf_count(&self) -> usize;
-    fn canonical_leaf_byte_length(&self) -> usize;
-    fn read_canonical_leaf(
-        &mut self,
-        leaf_index: u64,
-        destination: &mut [u8],
-    ) -> Result<(), Self::Error>;
-    fn read_digest(
-        &mut self,
-        level: u32,
-        node_index: u64,
-    ) -> Result<[u8; HASH_BYTE_LENGTH], Self::Error>;
-}
-
-pub(crate) struct StoredCommonProofOpeningArtifact<'storage, Storage> {
-    tree: &'storage StoredCommonProofMerkleTree,
-    executor: &'storage mut ProofExternalMemoryExecutor,
-    storage: &'storage mut Storage,
-}
-
-impl<'storage, Storage> StoredCommonProofOpeningArtifact<'storage, Storage> {
-    pub(crate) fn new(
-        tree: &'storage StoredCommonProofMerkleTree,
-        executor: &'storage mut ProofExternalMemoryExecutor,
-        storage: &'storage mut Storage,
-    ) -> Self {
-        Self {
-            tree,
-            executor,
-            storage,
-        }
-    }
-}
-
-impl<Storage: ProofExternalMemory> CommonProofOpeningArtifact
-    for StoredCommonProofOpeningArtifact<'_, Storage>
-{
-    type Error = ProofExternalMemoryExecutorError<Storage::Error>;
-
-    fn tree_catalog_index(&self) -> u16 {
-        self.tree.tree_catalog_index
-    }
-
-    fn leaf_count(&self) -> usize {
-        self.tree.leaf_count
-    }
-
-    fn canonical_leaf_byte_length(&self) -> usize {
-        self.tree.canonical_leaf_byte_length
-    }
-
-    fn read_canonical_leaf(
-        &mut self,
-        leaf_index: u64,
-        destination: &mut [u8],
-    ) -> Result<(), Self::Error> {
-        if destination.len() != self.tree.canonical_leaf_byte_length
-            || leaf_index
-                >= u64::try_from(self.tree.leaf_count).map_err(|_| {
-                    ProofExternalMemoryExecutorError::Execution(
-                        super::external_memory::ProofExternalMemoryError::ResourceLimitExceeded,
-                    )
-                })?
-        {
-            return Err(ProofExternalMemoryExecutorError::Execution(
-                super::external_memory::ProofExternalMemoryError::WrongOffsetOrLength,
-            ));
-        }
-        let offset = usize::try_from(leaf_index)
-            .ok()
-            .and_then(|index| index.checked_mul(self.tree.canonical_leaf_byte_length))
-            .and_then(|offset| u64::try_from(offset).ok())
-            .ok_or(ProofExternalMemoryExecutorError::Execution(
-                super::external_memory::ProofExternalMemoryError::ResourceLimitExceeded,
-            ))?;
-        read_exact_bounded(
-            self.executor,
-            self.storage,
-            self.tree.leaf_bytes_object,
-            offset,
-            destination,
-        )
-    }
-
-    fn read_digest(
-        &mut self,
-        level: u32,
-        node_index: u64,
-    ) -> Result<[u8; HASH_BYTE_LENGTH], Self::Error> {
-        let object = self
-            .tree
-            .digest_level_objects
-            .get(usize::try_from(level).map_err(|_| {
-                ProofExternalMemoryExecutorError::Execution(
-                    super::external_memory::ProofExternalMemoryError::ResourceLimitExceeded,
-                )
-            })?)
-            .copied()
-            .ok_or(ProofExternalMemoryExecutorError::Execution(
-                super::external_memory::ProofExternalMemoryError::WrongOffsetOrLength,
-            ))?;
-        read_stored_hash(
-            self.executor,
-            self.storage,
-            object,
-            usize::try_from(node_index).map_err(|_| {
-                ProofExternalMemoryExecutorError::Execution(
-                    super::external_memory::ProofExternalMemoryError::ResourceLimitExceeded,
-                )
-            })?,
-        )
+fn map_proof_body_tree_error(error: ProofBodyError) -> CommonProofProverError {
+    match error {
+        ProofBodyError::CanonicalEncoding => CommonProofProverError::CanonicalEncoding,
+        ProofBodyError::CountOverflow => CommonProofProverError::CountOverflow,
+        ProofBodyError::AllocationLimitExceeded => CommonProofProverError::AllocationLimitExceeded,
+        ProofBodyError::Merkle(error) => CommonProofProverError::Merkle(error),
+        ProofBodyError::Decode(_)
+        | ProofBodyError::Transcript(_)
+        | ProofBodyError::InvalidCatalog
+        | ProofBodyError::CatalogTooLarge
+        | ProofBodyError::InvalidQueryRepresentatives
+        | ProofBodyError::InvalidSchema
+        | ProofBodyError::InvalidSchemaVersion
+        | ProofBodyError::InvalidItemCount
+        | ProofBodyError::InvalidItemType
+        | ProofBodyError::InvalidItemLength
+        | ProofBodyError::InvalidListCount
+        | ProofBodyError::InvalidTreeCatalogIndex
+        | ProofBodyError::InvalidLeaf => CommonProofProverError::InvalidTree,
     }
 }
 
@@ -1241,20 +1070,16 @@ impl CommonProofOpeningPrefetcher {
         sorted_query_representatives: &[u64],
         maximum_prefetched_byte_length: u64,
     ) -> Result<Self, CommonProofProverError> {
-        let expected_context = catalog_entry
-            .common_context()
-            .ok_or(CommonProofProverError::InvalidTree)?;
-        let expected_leaf_count = expected_context.leaf_count()?;
-        let expected_leaf_byte_length = canonical_common_proof_leaf_byte_length(
-            expected_context,
-            common_proof_tree_value_type(catalog_entry)?,
-        )?;
+        let expected_leaf_count = entry_leaf_count(catalog_entry, evaluation_domain_size)
+            .map_err(map_proof_body_tree_error)?;
+        let expected_leaf_byte_length =
+            canonical_leaf_byte_length(catalog_entry).map_err(map_proof_body_tree_error)?;
         let expected_digest_level_count = usize::try_from(expected_leaf_count.trailing_zeros())
             .map_err(|_| CommonProofProverError::CountOverflow)?
             .checked_add(1)
             .ok_or(CommonProofProverError::CountOverflow)?;
         if tree.tree_catalog_index != catalog_entry.tree_catalog_index()
-            || &tree.context != expected_context
+            || &tree.catalog_entry != catalog_entry
             || tree.leaf_count != expected_leaf_count
             || tree.canonical_leaf_byte_length != expected_leaf_byte_length
             || tree.digest_level_objects.len() != expected_digest_level_count
@@ -1455,56 +1280,46 @@ pub(crate) struct PrefetchedCommonProofOpeningArtifact {
     frontier_digests: Vec<[u8; HASH_BYTE_LENGTH]>,
 }
 
-impl CommonProofOpeningArtifact for PrefetchedCommonProofOpeningArtifact {
-    type Error = CommonProofProverError;
-
-    fn tree_catalog_index(&self) -> u16 {
+impl PrefetchedCommonProofOpeningArtifact {
+    pub(crate) const fn tree_catalog_index(&self) -> u16 {
         self.tree_catalog_index
     }
 
-    fn leaf_count(&self) -> usize {
+    pub(crate) const fn leaf_count(&self) -> usize {
         self.leaf_count
     }
 
-    fn canonical_leaf_byte_length(&self) -> usize {
+    pub(crate) const fn canonical_leaf_byte_length(&self) -> usize {
         self.canonical_leaf_byte_length
     }
 
-    fn read_canonical_leaf(
-        &mut self,
-        leaf_index: u64,
-        destination: &mut [u8],
-    ) -> Result<(), Self::Error> {
-        if destination.len() != self.canonical_leaf_byte_length {
-            return Err(CommonProofProverError::InvalidOpening);
-        }
-        let position = self
-            .opened_leaf_indexes
-            .binary_search(&leaf_index)
-            .map_err(|_| CommonProofProverError::InvalidOpening)?;
+    pub(crate) fn opened_leaf_indexes(&self) -> &[u64] {
+        &self.opened_leaf_indexes
+    }
+
+    pub(crate) fn canonical_leaf_bytes_by_position(
+        &self,
+        position: usize,
+    ) -> Result<&[u8], CommonProofProverError> {
         let start = position
             .checked_mul(self.canonical_leaf_byte_length)
             .ok_or(CommonProofProverError::CountOverflow)?;
         let end = start
             .checked_add(self.canonical_leaf_byte_length)
             .ok_or(CommonProofProverError::CountOverflow)?;
-        destination.copy_from_slice(
-            self.opened_leaf_bytes
-                .get(start..end)
-                .ok_or(CommonProofProverError::InvalidOpening)?,
-        );
-        Ok(())
+        self.opened_leaf_bytes
+            .get(start..end)
+            .ok_or(CommonProofProverError::InvalidOpening)
     }
 
-    fn read_digest(
-        &mut self,
-        level: u32,
-        node_index: u64,
-    ) -> Result<[u8; HASH_BYTE_LENGTH], Self::Error> {
-        let position = self
-            .frontier_coordinates
-            .binary_search(&(level, node_index))
-            .map_err(|_| CommonProofProverError::InvalidOpening)?;
+    pub(crate) fn frontier_coordinates(&self) -> &[(u32, u64)] {
+        &self.frontier_coordinates
+    }
+
+    pub(crate) fn frontier_digest_by_position(
+        &self,
+        position: usize,
+    ) -> Result<[u8; HASH_BYTE_LENGTH], CommonProofProverError> {
         self.frontier_digests
             .get(position)
             .copied()
