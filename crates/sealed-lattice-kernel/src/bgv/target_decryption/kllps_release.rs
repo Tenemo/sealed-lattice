@@ -22,14 +22,17 @@ use crate::{
         ntt::{forward_negacyclic_ntt, inverse_negacyclic_ntt_in_place},
         parameters::{DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE},
         proof_suite::{
-            CommonProofGenerationAuthorization, CommonProofGenerationPreparationError,
-            CommonProofGenerationSources, CommonProofProverError, CommonProofRuntimeError,
-            CommonProofRuntimeLimits, PreparedCommonProofGeneration,
+            BorrowedVerifiedCommonProofCapability, CommonProofGenerationAuthorization,
+            CommonProofGenerationPreparationError, CommonProofGenerationSources,
+            CommonProofProverError, CommonProofRuntimeError, CommonProofRuntimeLimits,
+            ConsumedVerifiedCommonProofCapability, PreparedCommonProofGeneration,
             PrivateRandomnessCommonProofCoinError, PrivateRandomnessCommonProofCoinSource,
             TargetReleaseModulusWitness, TargetReleaseRoleWitness,
-            TargetReleaseSourcePolynomialAdapter, TargetReleaseWitnessError,
-            TargetReleaseWitnessSource, VerifiedTargetReleaseProof,
-            canonical_selected_target_share_statement, verified_application_statement_hash,
+            TargetReleaseSourcePolynomialAdapter, TargetReleaseVerifiedColumnEvaluator,
+            TargetReleaseWitnessError, TargetReleaseWitnessSource,
+            VerifiedTargetReleaseModulusInput, VerifiedTargetReleaseProof,
+            canonical_selected_target_share_statement, selected_target_release_relation,
+            verified_application_statement_hash,
         },
         setup::{
             VerifiedAcceptedSetupAuthority, VerifiedAcceptedSetupAuthorityHandle,
@@ -106,6 +109,40 @@ pub(crate) struct KllpsTargetPair {
     participant_binding: KllpsParticipantReleaseBinding,
     target_identifier: Ciphertext,
     target_order: Ciphertext,
+}
+
+/// Finalized cross-participant target authority used only after individual
+/// paired shares have already passed their participant state and board gates.
+/// It deliberately carries no participant reservation binding.
+#[derive(Debug)]
+pub(crate) struct KllpsReconstructionTargetPair {
+    binding: KllpsReleaseBinding,
+    target_identifier: Ciphertext,
+    target_order: Ciphertext,
+}
+
+impl KllpsReconstructionTargetPair {
+    fn from_verified_finality(
+        binding: KllpsReleaseBinding,
+        target_identifier: Ciphertext,
+        target_order: Ciphertext,
+    ) -> CanonicalResult<Self> {
+        validate_target_ciphertext(&target_identifier)?;
+        validate_target_ciphertext(&target_order)?;
+        if target_identifier.level != target_order.level
+            || target_identifier.decrypt_scaling != target_order.decrypt_scaling
+        {
+            return Err(invalid_release(
+                CanonicalErrorCode::ComponentMismatch,
+                "paired KLLPS reconstruction targets must use the same target basis and decryption scaling",
+            ));
+        }
+        Ok(Self {
+            binding,
+            target_identifier,
+            target_order,
+        })
+    }
 }
 
 impl KllpsTargetPair {
@@ -192,19 +229,6 @@ fn verify_finalized_kllps_target_pair_inner(
     {
         return Err(RefusalReason::WrongContext);
     }
-    if statement
-        .finality_hash()
-        .map_err(|error| error.refusal_reason)?
-        != verified_finality.finality_hash()
-    {
-        return Err(RefusalReason::WrongHashOrRoot);
-    }
-    let expected_authorization_hash = verified_finality
-        .target_release_authorization_hash()
-        .map_err(|error| error.refusal_reason)?;
-    if verified_reservation.authorization_hash() != expected_authorization_hash {
-        return Err(RefusalReason::WrongHashOrRoot);
-    }
     let subject_participant_id = verified_reservation.subject_participant_id();
     let subject_is_in_roster = state_verifier.roster().entries.iter().any(|entry| {
         entry
@@ -215,6 +239,71 @@ fn verify_finalized_kllps_target_pair_inner(
         return Err(RefusalReason::WrongContext);
     }
 
+    let (binding, target_identifier, target_order) = authenticate_finalized_kllps_target_sources(
+        verified_finality,
+        target_identifier_bytes,
+        target_order_bytes,
+    )?;
+    if verified_reservation.authorization_hash().into_bytes() != binding.authorization_hash {
+        return Err(RefusalReason::WrongHashOrRoot);
+    }
+    let participant_binding = KllpsParticipantReleaseBinding {
+        reservation_intent_object_hash: verified_reservation.intent_object_hash().into_bytes(),
+        subject_participant_id: subject_participant_id.into_bytes(),
+        state_key: verified_reservation.state_key().into_bytes(),
+    };
+    KllpsTargetPair::from_verified_finality(
+        binding,
+        participant_binding,
+        target_identifier,
+        target_order,
+    )
+    .map_err(|error| canonical_target_refusal(&error))
+}
+
+/// Re-authenticates the exact finalized target for threshold reconstruction.
+/// Participant state/output and board bindings are already embodied by each
+/// `VerifiedKllpsPairedShare`; this source contributes only the shared finality
+/// ciphertexts and cross-participant release binding.
+pub(crate) fn verify_finalized_kllps_reconstruction_target_pair(
+    verified_finality: &VerifiedFinality,
+    target_identifier_bytes: &[u8],
+    target_order_bytes: &[u8],
+) -> VerificationResult<KllpsReconstructionTargetPair> {
+    match authenticate_finalized_kllps_target_sources(
+        verified_finality,
+        target_identifier_bytes,
+        target_order_bytes,
+    )
+    .and_then(|(binding, target_identifier, target_order)| {
+        KllpsReconstructionTargetPair::from_verified_finality(
+            binding,
+            target_identifier,
+            target_order,
+        )
+        .map_err(|error| canonical_target_refusal(&error))
+    }) {
+        Ok(target_pair) => VerificationResult::valid(target_pair),
+        Err(refusal_reason) => VerificationResult::refused(refusal_reason),
+    }
+}
+
+fn authenticate_finalized_kllps_target_sources(
+    verified_finality: &VerifiedFinality,
+    target_identifier_bytes: &[u8],
+    target_order_bytes: &[u8],
+) -> Result<(KllpsReleaseBinding, Ciphertext, Ciphertext), RefusalReason> {
+    let statement = verified_finality.statement();
+    if statement
+        .finality_hash()
+        .map_err(|error| error.refusal_reason)?
+        != verified_finality.finality_hash()
+    {
+        return Err(RefusalReason::WrongHashOrRoot);
+    }
+    let authorization_hash = verified_finality
+        .target_release_authorization_hash()
+        .map_err(|error| error.refusal_reason)?;
     authenticate_exact_stream(
         verified_finality.open_target_identifier_readback()?,
         target_identifier_bytes,
@@ -239,7 +328,7 @@ fn verify_finalized_kllps_target_pair_inner(
         roster_hash: statement.roster_hash().into_bytes(),
         verified_setup_source_hash: verified_finality.verified_setup_source_hash().into_bytes(),
         finality_hash: verified_finality.finality_hash().into_bytes(),
-        authorization_hash: expected_authorization_hash.into_bytes(),
+        authorization_hash: authorization_hash.into_bytes(),
         target_identifier_full_digest: verified_finality
             .target_identifier_full_object_digest()
             .into_bytes(),
@@ -247,18 +336,7 @@ fn verify_finalized_kllps_target_pair_inner(
             .target_order_full_object_digest()
             .into_bytes(),
     };
-    let participant_binding = KllpsParticipantReleaseBinding {
-        reservation_intent_object_hash: verified_reservation.intent_object_hash().into_bytes(),
-        subject_participant_id: subject_participant_id.into_bytes(),
-        state_key: verified_reservation.state_key().into_bytes(),
-    };
-    KllpsTargetPair::from_verified_finality(
-        binding,
-        participant_binding,
-        target_identifier,
-        target_order,
-    )
-    .map_err(|error| canonical_target_refusal(&error))
+    Ok((binding, target_identifier, target_order))
 }
 
 fn authenticate_exact_stream(
@@ -1177,6 +1255,22 @@ pub(crate) struct VerifiedKllpsPairedShare {
     partial_decryption: KllpsPairedPartialDecryption,
 }
 
+/// Fully checked target-share terminal held while the generic common-proof
+/// capability remains live. Completion is infallible and consumes that exact
+/// capability, so a failed family or destination preflight is retryable.
+pub(crate) struct VerifiedKllpsPairedSharePreflight {
+    verified_share: VerifiedKllpsPairedShare,
+}
+
+impl VerifiedKllpsPairedSharePreflight {
+    pub(crate) fn complete(
+        self,
+        _verified_common_proof: ConsumedVerifiedCommonProofCapability,
+    ) -> VerifiedKllpsPairedShare {
+        self.verified_share
+    }
+}
+
 pub(crate) struct KllpsShareVerificationSources<'input> {
     pub(crate) accepted_setup_authority: &'input VerifiedAcceptedSetupAuthority,
     pub(crate) verified_finality: &'input VerifiedFinality,
@@ -1187,9 +1281,136 @@ pub(crate) struct KllpsShareVerificationSources<'input> {
     pub(crate) target_order_partial_bytes: &'input [u8],
 }
 
+/// Reconstructs the sole verifier-sequence view for schema `0x1621` from the
+/// finalized target and the two canonical partial-decryption streams. The
+/// selected relation supplies every modulus, scale, column, and bound; the
+/// caller cannot provide an alternate arithmetic profile.
+pub(crate) fn verified_target_release_column_evaluator(
+    target_pair: &KllpsTargetPair,
+    roster_position: usize,
+    target_identifier_partial_bytes: &[u8],
+    target_order_partial_bytes: &[u8],
+) -> CanonicalResult<TargetReleaseVerifiedColumnEvaluator> {
+    let partial_decryption = KllpsPairedPartialDecryptionStreams::decode_partial(
+        target_pair.binding.clone(),
+        roster_position,
+        target_identifier_partial_bytes,
+        target_order_partial_bytes,
+    )?;
+    let selected_target_coordinates = selected_target_data_prime_coordinates().map_err(|_| {
+        invalid_release(
+            CanonicalErrorCode::ComponentMismatch,
+            "selected target basis does not resolve for target-share verification",
+        )
+    })?;
+    if selected_target_coordinates.len() != target_pair.level() + 1
+        || partial_decryption.target_identifier_by_limb.len() != selected_target_coordinates.len()
+        || partial_decryption.target_order_by_limb.len() != selected_target_coordinates.len()
+    {
+        return Err(invalid_release(
+            CanonicalErrorCode::MalformedLength,
+            "target-share streams do not cover the complete selected target basis",
+        ));
+    }
+
+    let converted_target_identifier_by_limb = selected_target_coordinates
+        .iter()
+        .map(|(data_modulus_index, modulus)| {
+            target_pair.target_identifier.components[1]
+                .get(usize::from(*data_modulus_index))
+                .ok_or_else(|| {
+                    invalid_release(
+                        CanonicalErrorCode::MalformedLength,
+                        "target identifier does not cover the selected target basis",
+                    )
+                })
+                .and_then(|component| converted_target_component(component, *modulus))
+        })
+        .collect::<CanonicalResult<Vec<_>>>()?;
+    let converted_target_order_by_limb = selected_target_coordinates
+        .iter()
+        .map(|(data_modulus_index, modulus)| {
+            target_pair.target_order.components[1]
+                .get(usize::from(*data_modulus_index))
+                .ok_or_else(|| {
+                    invalid_release(
+                        CanonicalErrorCode::MalformedLength,
+                        "target order does not cover the selected target basis",
+                    )
+                })
+                .and_then(|component| converted_target_component(component, *modulus))
+        })
+        .collect::<CanonicalResult<Vec<_>>>()?;
+    let public_moduli = (0..selected_target_coordinates.len())
+        .map(|modulus_ordinal| VerifiedTargetReleaseModulusInput {
+            roles: [
+                TargetReleaseRoleWitness {
+                    converted_a: &converted_target_identifier_by_limb[modulus_ordinal],
+                    partial_decryption: &partial_decryption.target_identifier_by_limb
+                        [modulus_ordinal],
+                },
+                TargetReleaseRoleWitness {
+                    converted_a: &converted_target_order_by_limb[modulus_ordinal],
+                    partial_decryption: &partial_decryption.target_order_by_limb[modulus_ordinal],
+                },
+            ],
+        })
+        .collect::<Vec<_>>();
+    selected_target_release_relation()
+        .map_err(|_| {
+            invalid_release(
+                CanonicalErrorCode::ComponentMismatch,
+                "selected target-release relation is unavailable",
+            )
+        })?
+        .verified_column_evaluator(&public_moduli)
+        .map_err(|_| {
+            invalid_release(
+                CanonicalErrorCode::ComponentMismatch,
+                "canonical target-share streams do not satisfy the selected verifier layout",
+            )
+        })
+}
+
 pub(crate) fn verify_kllps_paired_share_from_common_proof(
     verified_target_release_proof: VerifiedTargetReleaseProof,
     verified_proof_stream: VerifiedCanonicalStreamSummary,
+    sources: KllpsShareVerificationSources<'_>,
+) -> CanonicalResult<VerifiedKllpsPairedShare> {
+    preflight_kllps_paired_share_binding(
+        &verified_target_release_proof,
+        verified_proof_stream.stream_domain(),
+        verified_proof_stream.stream_descriptor(),
+        sources,
+    )
+}
+
+pub(crate) fn preflight_kllps_paired_share_from_borrowed_common_proof(
+    verified_common_proof: BorrowedVerifiedCommonProofCapability<'_>,
+    sources: KllpsShareVerificationSources<'_>,
+) -> CanonicalResult<VerifiedKllpsPairedSharePreflight> {
+    let verified_target_release_proof = VerifiedTargetReleaseProof::from_borrowed_common_proof(
+        verified_common_proof.verified_proof(),
+    )
+    .map_err(|_| {
+        invalid_release(
+            CanonicalErrorCode::ComponentMismatch,
+            "common proof does not name the target-share application",
+        )
+    })?;
+    let verified_share = preflight_kllps_paired_share_binding(
+        &verified_target_release_proof,
+        verified_common_proof.proof_stream_domain(),
+        verified_common_proof.proof_stream_descriptor(),
+        sources,
+    )?;
+    Ok(VerifiedKllpsPairedSharePreflight { verified_share })
+}
+
+fn preflight_kllps_paired_share_binding(
+    verified_target_release_proof: &VerifiedTargetReleaseProof,
+    verified_proof_stream_domain: CanonicalStreamDomain,
+    verified_proof_stream_descriptor: &StreamDescriptor,
     sources: KllpsShareVerificationSources<'_>,
 ) -> CanonicalResult<VerifiedKllpsPairedShare> {
     verified_target_release_proof
@@ -1307,15 +1528,8 @@ pub(crate) fn verify_kllps_paired_share_from_common_proof(
         sources.target_order_partial_bytes,
     )
     .map_err(|reason| release_readback_error(reason, "target order partial"))?;
-    if verified_proof_stream.stream_domain() != CanonicalStreamDomain::MaliciousTargetShareProof
-        || verified_proof_stream.total_byte_length()
-            != output_bundle
-                .malicious_share_proof_descriptor()
-                .total_byte_length
-        || verified_proof_stream.full_object_digest()
-            != output_bundle
-                .malicious_share_proof_descriptor()
-                .full_object_digest
+    if verified_proof_stream_domain != CanonicalStreamDomain::MaliciousTargetShareProof
+        || verified_proof_stream_descriptor != output_bundle.malicious_share_proof_descriptor()
     {
         return Err(invalid_release(
             CanonicalErrorCode::ComponentMismatch,
@@ -1853,13 +2067,47 @@ pub(crate) fn reconstruct_factor_four_target_pair(
     target_pair: &KllpsTargetPair,
     verified_shares: &[&VerifiedKllpsPairedShare],
 ) -> CanonicalResult<ReconstructedKllpsTargetPair> {
-    let selected_shares = select_lowest_roster_positions(target_pair, verified_shares)?;
+    reconstruct_factor_four_target_pair_from_sources(
+        target_pair.binding(),
+        &target_pair.target_identifier,
+        &target_pair.target_order,
+        verified_shares,
+    )
+}
+
+pub(crate) fn reconstruct_factor_four_finalized_target_pair(
+    target_pair: &KllpsReconstructionTargetPair,
+    verified_shares: &[&VerifiedKllpsPairedShare],
+) -> CanonicalResult<ReconstructedKllpsTargetPair> {
+    reconstruct_factor_four_target_pair_from_sources(
+        &target_pair.binding,
+        &target_pair.target_identifier,
+        &target_pair.target_order,
+        verified_shares,
+    )
+}
+
+fn reconstruct_factor_four_target_pair_from_sources(
+    release_binding: &KllpsReleaseBinding,
+    target_identifier: &Ciphertext,
+    target_order: &Ciphertext,
+    verified_shares: &[&VerifiedKllpsPairedShare],
+) -> CanonicalResult<ReconstructedKllpsTargetPair> {
+    if target_identifier.level != target_order.level
+        || target_identifier.decrypt_scaling != target_order.decrypt_scaling
+    {
+        return Err(invalid_release(
+            CanonicalErrorCode::ComponentMismatch,
+            "paired KLLPS reconstruction targets do not share one basis and scaling",
+        ));
+    }
+    let selected_shares = select_lowest_roster_positions(release_binding, verified_shares)?;
     let selected_positions = selected_shares
         .iter()
         .map(|share| share.roster_position())
         .collect::<Vec<_>>();
     validate_selected_positions(&selected_positions)?;
-    let active_primes = &DATA_PRIMES[..=target_pair.level()];
+    let active_primes = &DATA_PRIMES[..=target_identifier.level];
     let lagrange_coefficients_by_limb = active_primes
         .iter()
         .copied()
@@ -1881,7 +2129,7 @@ pub(crate) fn reconstruct_factor_four_target_pair(
         PLAINTEXT_MODULUS,
     )?;
     let target_identifier_coefficients = reconstruct_role(
-        &target_pair.target_identifier,
+        target_identifier,
         &selected_shares,
         active_primes,
         &lagrange_coefficients_by_limb,
@@ -1890,7 +2138,7 @@ pub(crate) fn reconstruct_factor_four_target_pair(
         |share| &share.partial_decryption.target_identifier_by_limb,
     )?;
     let target_order_coefficients = reconstruct_role(
-        &target_pair.target_order,
+        target_order,
         &selected_shares,
         active_primes,
         &lagrange_coefficients_by_limb,
@@ -1906,14 +2154,14 @@ pub(crate) fn reconstruct_factor_four_target_pair(
 }
 
 fn select_lowest_roster_positions<'a>(
-    target_pair: &KllpsTargetPair,
+    release_binding: &KllpsReleaseBinding,
     verified_shares: &'a [&'a VerifiedKllpsPairedShare],
 ) -> CanonicalResult<Vec<&'a VerifiedKllpsPairedShare>> {
     let mut by_roster_position = BTreeMap::new();
     for &share in verified_shares {
         let roster_position = share.roster_position();
         validate_roster_position(roster_position)?;
-        if share.partial_decryption.binding != target_pair.binding {
+        if share.partial_decryption.binding != *release_binding {
             return Err(invalid_release(
                 CanonicalErrorCode::ComponentMismatch,
                 "KLLPS reconstruction received shares from different release contexts",

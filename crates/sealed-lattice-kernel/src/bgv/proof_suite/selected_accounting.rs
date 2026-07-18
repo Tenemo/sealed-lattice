@@ -2411,8 +2411,7 @@ pub(crate) struct SelectedCompleteActionByteAccounting {
     maximum_source_derived_boundary_copied_buffer_byte_length: u64,
     evaluator_source_resident_byte_length_per_participant: u64,
     final_evaluator_key_store_resident_byte_length: u64,
-    ceremony_private_randomness_kmac_input_accounting:
-        PrivateRandomnessKmacInputClassAccounting,
+    ceremony_private_randomness_kmac_input_accounting: PrivateRandomnessKmacInputClassAccounting,
     proof_privacy_private_randomness_kmac_input_accounting:
         PrivateRandomnessKmacInputClassAccounting,
 }
@@ -2514,15 +2513,11 @@ impl SelectedCompleteActionByteAccounting {
         self.modeled_proof_generation_resident_peak_byte_length
     }
 
-    pub(crate) const fn modeled_proof_generation_external_scratch_peak_byte_length(
-        &self,
-    ) -> u64 {
+    pub(crate) const fn modeled_proof_generation_external_scratch_peak_byte_length(&self) -> u64 {
         self.modeled_proof_generation_external_scratch_peak_byte_length
     }
 
-    pub(crate) const fn maximum_source_derived_boundary_copied_buffer_byte_length(
-        &self,
-    ) -> u64 {
+    pub(crate) const fn maximum_source_derived_boundary_copied_buffer_byte_length(&self) -> u64 {
         self.maximum_source_derived_boundary_copied_buffer_byte_length
     }
 
@@ -2589,13 +2584,12 @@ pub(crate) fn selected_complete_action_byte_accounting_diagnostic_json(
                 "numerator": bound.numerator().to_string(),
             })
         };
-    let exact_probability_json =
-        |bound: &super::qrom_soundness::SelectedExactProbabilityBound| {
-            serde_json::json!({
-                "denominator": bound.denominator().to_string(),
-                "numerator": bound.numerator().to_string(),
-            })
-        };
+    let exact_probability_json = |bound: &super::qrom_soundness::SelectedExactProbabilityBound| {
+        serde_json::json!({
+            "denominator": bound.denominator().to_string(),
+            "numerator": bound.numerator().to_string(),
+        })
+    };
     let round_by_round_probability_json =
         |bound: &super::selected_profile::SelectedRoundByRoundProbabilityBound| {
             serde_json::json!({
@@ -2957,11 +2951,13 @@ pub(crate) fn selected_complete_action_byte_accounting(
         output.suite_identifier() != finality_statement.suite_identifier().into_bytes()
             || output.ceremony_context_hash()
                 != finality_statement.ceremony_context_hash().into_bytes()
-            || output.action_context_hash()
-                != finality_statement.action_context_hash().into_bytes()
+            || output.action_context_hash() != finality_statement.action_context_hash().into_bytes()
             || output.roster_hash() != finality_statement.roster_hash().into_bytes()
             || output.verified_setup_source_hash()
-                != input.accepted_setup_package.setup_package_hash().into_bytes()
+                != input
+                    .accepted_setup_package
+                    .setup_package_hash()
+                    .into_bytes()
     }) || input.verified_target_release_outputs.iter().any(|output| {
         output.suite_id() != finality_statement.suite_identifier()
             || output.ceremony_context_hash() != finality_statement.ceremony_context_hash()
@@ -3171,13 +3167,14 @@ fn selected_complete_action_corpus_totals(
     let mut rows_by_owner = BTreeMap::new();
     for row in rows {
         if row.canonical_wire_byte_length() == 0
-            || row.codec_and_proof_ceiling_wire_byte_length()
-                < row.canonical_wire_byte_length()
+            || row.codec_and_proof_ceiling_wire_byte_length() < row.canonical_wire_byte_length()
             || row.producer_upload_byte_length() != row.canonical_wire_byte_length()
-            || row.complete_verifier_download_byte_length()
+            || row
+                .complete_verifier_download_byte_length()
                 .checked_add(row.private_mailbox_storage_byte_length())
                 != Some(row.canonical_wire_byte_length())
-            || row.public_storage_byte_length()
+            || row
+                .public_storage_byte_length()
                 .checked_add(row.private_mailbox_storage_byte_length())
                 != Some(row.canonical_wire_byte_length())
         {
@@ -6225,11 +6222,7 @@ mod tests {
                     private_mailbox_storage_byte_length: byte_length,
                 }
             }
-            _ => selected_public_complete_action_owner_row(
-                owner,
-                byte_length,
-                byte_length + 1,
-            ),
+            _ => selected_public_complete_action_owner_row(owner, byte_length, byte_length + 1),
         }
     }
 

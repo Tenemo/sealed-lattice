@@ -150,9 +150,9 @@ pub(crate) use generation_storage::{
     CommonProofGenerationInitializationError, CommonProofGenerationInput,
     CommonProofResidentInfrastructurePayloadAccounting, CommonProofResidentMemoryPhase,
     CommonProofResidentMemoryPhasePlan, CommonProofResidentMemoryPlan,
-    GeneratedCommonProofStoragePlanError,
-    MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH, common_proof_external_memory_requirement,
-    common_proof_resident_memory_plan, common_proof_resident_memory_requirement,
+    GeneratedCommonProofStoragePlanError, MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH,
+    common_proof_external_memory_requirement, common_proof_resident_memory_plan,
+    common_proof_resident_memory_requirement,
 };
 pub(crate) use merkle_storage::{
     CommonProofMerkleMaterializer, CommonProofMerkleMaterializerProgress,

@@ -1,3 +1,4 @@
+use super::super::RelationTreeDescriptor;
 use super::{
     BTreeMap, BTreeSet, CommonProofApplicationInputCapabilityHandle,
     CommonProofApplicationInputEntry, CommonProofEvaluatorAuxiliaryRootCapabilityHandle,
@@ -5,14 +6,15 @@ use super::{
     CommonProofPreverificationApplicationSourceHandle, CommonProofRuntimeError,
     CommonProofSelectedSuiteCapabilityHandle, CommonProofSelectedSuiteEntry,
     CommonProofVerificationBinding, CommonProofVerificationStateMachine,
-    CommonProofVerifiedColumnEvaluatorCapabilityHandle, CommonProofVerifiedColumnEvaluatorEntry,
-    ConsumedCommonProofVerificationInputs, FOUNDATION_PROFILE, MAXIMUM_COMMON_PROOF_BYTE_LENGTH,
-    MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH, MAXIMUM_RESIDENT_COMMON_PROOF_INPUT_CHUNKS,
-    PollableCommonProofVerificationInput, RefusingVerifiedColumnEvaluator, RelationColumnOrigin,
-    RelationTreeDescriptor, SelectedSuiteCapability, VerifiedCommonProofStatementSource,
-    VerifiedEvaluatorAuxiliaryRoot, VerifiedRelationColumnEvaluator, VerifiedStatementOwnedTree,
-    common_proof_registry_entry_count, require_common_proof_registry_entry_capacity,
-    take_nonrepeating_handle, verified_application_statement_hash,
+    CommonProofVerificationStatementSource, CommonProofVerifiedColumnEvaluatorCapabilityHandle,
+    CommonProofVerifiedColumnEvaluatorEntry, ConsumedCommonProofVerificationInputs,
+    FOUNDATION_PROFILE, MAXIMUM_COMMON_PROOF_BYTE_LENGTH, MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH,
+    MAXIMUM_RESIDENT_COMMON_PROOF_INPUT_CHUNKS, PollableCommonProofVerificationInput,
+    RefusingVerifiedColumnEvaluator, RelationColumnOrigin, SelectedSuiteCapability,
+    VerifiedCommonProofStatementSource, VerifiedEvaluatorAuxiliaryRoot,
+    VerifiedRelationColumnEvaluator, VerifiedStatementOwnedTree, common_proof_registry_entry_count,
+    require_common_proof_registry_entry_capacity, take_nonrepeating_handle,
+    verified_application_statement_hash,
 };
 #[cfg(test)]
 use super::{CommonProofRelationPlanCapability, CommonProofRuntimeLimits, StreamDescriptor};
@@ -100,11 +102,23 @@ impl CommonProofUpstreamInputRegistry {
     pub(crate) fn install_suite(
         &mut self,
         capability: SelectedSuiteCapability,
+        canonical_suite_record_bytes: Vec<u8>,
     ) -> Result<CommonProofSelectedSuiteCapabilityHandle, CommonProofRuntimeError> {
+        if canonical_suite_record_bytes.is_empty()
+            || canonical_suite_record_bytes.len()
+                > FOUNDATION_PROFILE.maximum_copied_buffer_byte_length
+        {
+            return Err(CommonProofRuntimeError::InvalidLimits);
+        }
         self.require_entry_capacity()?;
         let handle = take_nonrepeating_handle(&mut self.next_suite_handle)?;
-        self.suites
-            .insert(handle, CommonProofSelectedSuiteEntry { capability });
+        self.suites.insert(
+            handle,
+            CommonProofSelectedSuiteEntry {
+                capability,
+                canonical_suite_record_bytes,
+            },
+        );
         Ok(CommonProofSelectedSuiteCapabilityHandle(handle))
     }
 
@@ -122,6 +136,16 @@ impl CommonProofUpstreamInputRegistry {
         self.suites
             .remove(&handle)
             .map(|_| ())
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)
+    }
+
+    pub(crate) fn canonical_suite_record_bytes(
+        &self,
+        handle: u32,
+    ) -> Result<&[u8], CommonProofRuntimeError> {
+        self.suites
+            .get(&handle)
+            .map(|entry| entry.canonical_suite_record_bytes.as_slice())
             .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)
     }
 
@@ -256,16 +280,8 @@ impl CommonProofUpstreamInputRegistry {
         self.applications.insert(
             handle,
             CommonProofApplicationInputEntry {
-                verification_binding: source.verification_binding,
-                relation_plan: source.relation_plan,
-                protocol_version: source.protocol_version,
-                canonical_application_statement_bytes: source.canonical_application_statement_bytes,
-                proof_stream_descriptor: source
-                    .proof_application_binding
-                    .proof_stream_descriptor()
-                    .clone(),
+                statement_source: CommonProofVerificationStatementSource::from_exact(source),
                 statement_owned_tree_batch: None,
-                limits: source.limits,
             },
         );
         Ok(CommonProofApplicationInputCapabilityHandle(handle))
@@ -311,12 +327,8 @@ impl CommonProofUpstreamInputRegistry {
                 return Err(error);
             }
         };
-        match self.consume_verification_inputs(
-            &application_handle,
-            &[],
-            Some(&evaluator_handle),
-        ) {
-            Ok(inputs) => inputs.prepare(),
+        match self.consume_verification_inputs(&application_handle, &[], Some(&evaluator_handle)) {
+            Ok(inputs) => Ok(inputs.prepare()),
             Err(error) => {
                 self.cancel_application(&application_handle)?;
                 Err(error)
@@ -345,7 +357,7 @@ impl CommonProofUpstreamInputRegistry {
             }
         };
         match self.consume_verification_inputs(&application_handle, &[], None) {
-            Ok(inputs) => inputs.prepare(),
+            Ok(inputs) => Ok(inputs.prepare()),
             Err(error) => {
                 self.cancel_application(&application_handle)?;
                 Err(error)
@@ -380,12 +392,8 @@ impl CommonProofUpstreamInputRegistry {
             self.cancel_application(&application_handle)?;
             return Err(error);
         }
-        match self.consume_verification_inputs(
-            &application_handle,
-            &[],
-            None,
-        ) {
-            Ok(inputs) => inputs.prepare(),
+        match self.consume_verification_inputs(&application_handle, &[], None) {
+            Ok(inputs) => Ok(inputs.prepare()),
             Err(error) => {
                 self.cancel_application(&application_handle)?;
                 Err(error)
@@ -463,24 +471,13 @@ impl CommonProofUpstreamInputRegistry {
             &auxiliary_roots,
         )
         .expect("preflighted common-proof verifier inputs remain valid during commit");
-        let proof_stream_descriptor = statement_source
-            .proof_application_binding
-            .proof_stream_descriptor()
-            .clone();
         ConsumedCommonProofVerificationInputs {
-            verification_binding: statement_source.verification_binding,
-            relation_plan: statement_source.relation_plan,
-            protocol_version: statement_source.protocol_version,
-            canonical_application_statement_bytes: statement_source
-                .canonical_application_statement_bytes,
-            proof_stream_descriptor,
+            statement_source: CommonProofVerificationStatementSource::from_exact(statement_source),
             statement_owned_trees: statement_trees,
             evaluator_auxiliary_roots: auxiliary_roots,
             verified_column_evaluator: Box::new(RefusingVerifiedColumnEvaluator),
-            limits: statement_source.limits,
         }
         .prepare()
-        .expect("preflighted common-proof verifier construction remains valid during commit")
     }
 
     /// Atomically prepares an exact-family verifier from verifier-recomputed
@@ -535,7 +532,7 @@ impl CommonProofUpstreamInputRegistry {
             &auxiliary_root_handle_references,
             None,
         ) {
-            Ok(inputs) => inputs.prepare(),
+            Ok(inputs) => Ok(inputs.prepare()),
             Err(error) => {
                 self.cancel_application(&application_handle)?;
                 Err(error)
@@ -580,12 +577,8 @@ impl CommonProofUpstreamInputRegistry {
                 return Err(error);
             }
         };
-        match self.consume_verification_inputs(
-            &application_handle,
-            &[],
-            Some(&evaluator_handle),
-        ) {
-            Ok(inputs) => inputs.prepare(),
+        match self.consume_verification_inputs(&application_handle, &[], Some(&evaluator_handle)) {
+            Ok(inputs) => Ok(inputs.prepare()),
             Err(error) => {
                 self.cancel_application(&application_handle)?;
                 Err(error)
@@ -601,13 +594,10 @@ impl CommonProofUpstreamInputRegistry {
             .applications
             .get(&application_handle.0)
             .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?;
-        let selected_variant = application
+        let relation_plan = application.statement_source.relation_plan();
+        let selected_variant = relation_plan
             .relation_plan
-            .relation_plan
-            .select_variant(
-                application.relation_plan.schedule_position,
-                application.relation_plan.top_count,
-            )
+            .select_variant(relation_plan.schedule_position, relation_plan.top_count)
             .map_err(|_| CommonProofRuntimeError::InvalidPlanCapability)?;
         Ok(selected_variant
             .ordered_trees()
@@ -714,13 +704,10 @@ impl CommonProofUpstreamInputRegistry {
                 return Err(CommonProofRuntimeError::WrongVerificationBinding);
             }
         }
-        let selected_variant = application
+        let relation_plan = application.statement_source.relation_plan();
+        let selected_variant = relation_plan
             .relation_plan
-            .relation_plan
-            .select_variant(
-                application.relation_plan.schedule_position,
-                application.relation_plan.top_count,
-            )
+            .select_variant(relation_plan.schedule_position, relation_plan.top_count)
             .map_err(|_| CommonProofRuntimeError::InvalidPlanCapability)?;
         let requires_verified_column_evaluator =
             selected_variant.ordered_columns().iter().any(|column| {
@@ -755,19 +742,25 @@ impl CommonProofUpstreamInputRegistry {
                     .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)
             })
             .collect::<Result<Vec<_>, _>>()?;
+        let relation_plan = application.statement_source.relation_plan();
+        let verification_binding = application.statement_source.verification_binding();
         let validation_state =
             CommonProofVerificationStateMachine::new(PollableCommonProofVerificationInput {
-                protocol_version: application.protocol_version,
-                suite_identifier: application.verification_binding.suite_identifier,
-                canonical_application_statement_bytes: &application
-                    .canonical_application_statement_bytes,
-                relation_plan: &application.relation_plan.relation_plan,
-                relation_context: &application.relation_plan.relation_context,
-                schedule_position: application.relation_plan.schedule_position,
-                top_count: application.relation_plan.top_count,
+                protocol_version: application.statement_source.protocol_version(),
+                suite_identifier: verification_binding.suite_identifier,
+                canonical_application_statement_bytes: application
+                    .statement_source
+                    .canonical_application_statement_bytes(),
+                relation_plan: &relation_plan.relation_plan,
+                relation_context: &relation_plan.relation_context,
+                schedule_position: relation_plan.schedule_position,
+                top_count: relation_plan.top_count,
                 statement_owned_trees,
                 evaluator_auxiliary_roots: &evaluator_auxiliary_roots,
-                declared_proof_byte_length: application.limits.proof_byte_length(),
+                declared_proof_byte_length: application
+                    .statement_source
+                    .limits()
+                    .proof_byte_length(),
                 proof_byte_ceiling: MAXIMUM_COMMON_PROOF_BYTE_LENGTH,
                 maximum_resident_window_byte_length: MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH
                     .checked_mul(MAXIMUM_RESIDENT_COMMON_PROOF_INPUT_CHUNKS)
@@ -795,16 +788,10 @@ impl CommonProofUpstreamInputRegistry {
             .remove(&application_handle.0)
             .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?;
         Ok(ConsumedCommonProofVerificationInputs {
-            verification_binding: application.verification_binding,
-            relation_plan: application.relation_plan,
-            protocol_version: application.protocol_version,
-            canonical_application_statement_bytes: application
-                .canonical_application_statement_bytes,
-            proof_stream_descriptor: application.proof_stream_descriptor,
+            statement_source: application.statement_source,
             statement_owned_trees: application.statement_owned_tree_batch.unwrap_or_default(),
             evaluator_auxiliary_roots,
             verified_column_evaluator,
-            limits: application.limits,
         })
     }
 
@@ -855,13 +842,15 @@ impl CommonProofUpstreamInputRegistry {
         self.applications.insert(
             handle,
             CommonProofApplicationInputEntry {
-                verification_binding,
-                relation_plan,
-                protocol_version,
-                canonical_application_statement_bytes: statement_bytes,
-                proof_stream_descriptor,
+                statement_source: CommonProofVerificationStatementSource::from_test_fixture(
+                    verification_binding,
+                    relation_plan,
+                    protocol_version,
+                    statement_bytes,
+                    proof_stream_descriptor,
+                    limits,
+                ),
                 statement_owned_tree_batch: None,
-                limits,
             },
         );
         Ok(CommonProofApplicationInputCapabilityHandle(handle))

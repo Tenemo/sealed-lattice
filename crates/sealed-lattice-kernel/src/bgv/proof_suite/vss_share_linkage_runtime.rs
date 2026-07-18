@@ -1589,23 +1589,21 @@ mod tests {
         let dealer_identity = verified_public_randomness.ordered_participant_identities()
             [usize::from(dealer_roster_position)]
         .into_bytes();
-        let canonical_application_statement_bytes =
-            canonical_selected_vss_share_linkage_statement(
-                FOUNDATION_PROFILE.protocol_version,
-                suite_identifier.into_bytes(),
-                ceremony_context_hash.into_bytes(),
-                action_context_hash.into_bytes(),
-                roster_hash.into_bytes(),
-                public_setup_seed.into_bytes(),
-                dealer_identity,
-                dealer_roster_position,
-                &ordered_coefficient_roots,
-                &ordered_recipient_roots,
-            )
-            .expect("selected VSS statement is canonical");
-        let runtime_plan =
-            selected_vss_proof_runtime_plan(&canonical_application_statement_bytes)
-                .expect("selected VSS runtime plan");
+        let canonical_application_statement_bytes = canonical_selected_vss_share_linkage_statement(
+            FOUNDATION_PROFILE.protocol_version,
+            suite_identifier.into_bytes(),
+            ceremony_context_hash.into_bytes(),
+            action_context_hash.into_bytes(),
+            roster_hash.into_bytes(),
+            public_setup_seed.into_bytes(),
+            dealer_identity,
+            dealer_roster_position,
+            &ordered_coefficient_roots,
+            &ordered_recipient_roots,
+        )
+        .expect("selected VSS statement is canonical");
+        let runtime_plan = selected_vss_proof_runtime_plan(&canonical_application_statement_bytes)
+            .expect("selected VSS runtime plan");
         let proof_byte_length = runtime_plan.limits.proof_byte_length();
         let statement_source =
             VerifiedCommonProofStatementSource::from_test_verified_vss_statement_source(
@@ -1719,9 +1717,7 @@ mod tests {
             VerifiedCommonProofStatementSource::from_test_verified_vss_statement_source(
                 &verified_public_randomness,
                 wrong_context_statement_bytes,
-                test_proof_stream_descriptor(
-                    wrong_context_runtime_plan.limits.proof_byte_length(),
-                ),
+                test_proof_stream_descriptor(wrong_context_runtime_plan.limits.proof_byte_length(),),
                 wrong_context_runtime_plan.relation_plan,
                 wrong_context_runtime_plan.limits,
             ),
@@ -1835,5 +1831,4 @@ mod tests {
         assert_eq!(decoded_reordered[0], handles[1]);
         assert_eq!(decoded_reordered[1], handles[0]);
     }
-
 }

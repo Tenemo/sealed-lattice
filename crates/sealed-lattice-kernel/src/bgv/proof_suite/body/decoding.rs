@@ -35,6 +35,19 @@ pub(crate) struct DecodedProofPhasePairLeaf {
 }
 
 impl DecodedProofPhasePairLeaf {
+    #[cfg(test)]
+    pub(crate) fn from_test_values(
+        leaf_index: u64,
+        first_point_values: Vec<ProofTreeValue>,
+        opposite_point_values: Vec<ProofTreeValue>,
+    ) -> Self {
+        Self {
+            leaf_index,
+            first_point_values,
+            opposite_point_values,
+        }
+    }
+
     pub(crate) const fn leaf_index(&self) -> u64 {
         self.leaf_index
     }

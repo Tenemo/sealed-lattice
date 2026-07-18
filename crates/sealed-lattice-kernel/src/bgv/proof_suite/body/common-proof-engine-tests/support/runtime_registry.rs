@@ -442,11 +442,10 @@ fn upstream_input_registry_consumes_only_one_complete_application_owned_capabili
         .expect("the positively constructed fixture application is retained");
     let incomplete_statement_tree_batch = verified_trees[..2].to_vec();
     assert_eq!(
-        registry
-            .attach_statement_owned_tree_batch(
-                &application_handle,
-                incomplete_statement_tree_batch,
-            ),
+        registry.attach_statement_owned_tree_batch(
+            &application_handle,
+            incomplete_statement_tree_batch,
+        ),
         Err(CommonProofRuntimeError::WrongVerificationBinding),
         "an incomplete tree batch fails without mutating the application",
     );
@@ -540,9 +539,7 @@ fn application_owned_statement_tree_batch_does_not_spend_one_registry_entry_per_
     let relation_plan_artifact = selected_relation_plans()
         .expect("selected relation plans")
         .into_iter()
-        .find(|artifact| {
-            artifact.application_statement_schema_identifier() == schema_identifier
-        })
+        .find(|artifact| artifact.application_statement_schema_identifier() == schema_identifier)
         .expect("selected VSS relation plan");
     let relation_context = selected_relation_plan_check_context(schema_identifier)
         .expect("selected VSS relation context");

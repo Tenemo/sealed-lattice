@@ -21,6 +21,12 @@ export type {
     BrowserLocalMailboxCapability,
     BrowserLocalSigningCapability,
 } from './browser-local-key-provider.js';
+export { openBrowserWorkerOwnedKeyOwner } from './browser-worker-key-owner.js';
+export type {
+    BrowserWorkerOwnedKeyOperationLease,
+    BrowserWorkerOwnedKeyOwner,
+    BrowserWorkerOwnedKeyPublicMaterial,
+} from './browser-worker-key-owner.js';
 export {
     copyAuthenticatedMailboxFrozenRosterParticipantIdentities,
     openAuthenticatedMailboxFrozenRoster,

@@ -28,6 +28,14 @@ mod compiled_plan;
 mod integer_lift;
 mod layout;
 mod model;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the round-by-round security experiment is exercised only by its module tests"
+    )
+)]
+mod round_by_round_extractor;
 mod schema;
 
 #[cfg(test)]
@@ -84,7 +92,6 @@ pub(crate) use model::{
     apply_negacyclic_automorphism, negacyclic_automorphism_mapping_values,
     negacyclic_automorphism_semantics_match, radix_decompose_scaled_residues,
 };
-
 mod checking;
 mod expressions;
 
@@ -110,7 +117,10 @@ mod interpreter;
 mod key_relation;
 mod public_aggregate;
 mod public_key_share;
+mod relinearization_round_one_adapter;
+mod relinearization_round_one_aggregate_adapter;
 mod same_secret_anchor;
+mod setup_key_relation_adapter;
 mod target_release;
 mod trustee_evaluation_key;
 mod verified_key_relation_column_evaluator;
@@ -122,7 +132,8 @@ pub(crate) use aggregate_threshold_share::compile_aggregate_threshold_share_rela
 pub(crate) use ballot_validity::{
     BallotValidityColumnTransform, BallotValidityRelationPlanInput,
     BallotValiditySourceColumnRecipe, BallotValiditySourcePlan, BallotValidityWitnessValueSource,
-    CompiledBallotValidityRelation, compile_ballot_validity_relation,
+    BallotValidityVerifierColumnSource, CompiledBallotValidityRelation,
+    compile_ballot_validity_relation,
     compile_ballot_validity_relation_plan,
 };
 pub(crate) use ballot_validity_adapter::{
@@ -171,9 +182,17 @@ pub(crate) use public_key_share::{
     PublicKeyShareSourceLayout, compile_public_key_share_relation_plan,
     compile_public_key_share_relation_with_source_layout,
 };
+pub(crate) use relinearization_round_one_adapter::{
+    RelinearizationRoundOneSourcePolynomialAdapter, relinearization_round_one_relation_tree_inputs,
+};
+pub(crate) use relinearization_round_one_aggregate_adapter::prepare_relinearization_round_one_aggregate_source;
 pub(crate) use same_secret_anchor::{
     SameSecretSourceLayout, compile_same_secret_relation_plan,
     compile_same_secret_relation_with_source_layout,
+};
+pub(crate) use setup_key_relation_adapter::{
+    SetupKeyRelationSourcePolynomialAdapter, public_key_share_relation_tree_inputs,
+    same_secret_relation_tree_inputs,
 };
 pub(crate) use target_release::{
     CompiledTargetReleaseRelation, TargetReleaseCapabilityError, TargetReleaseModulusWitness,
@@ -184,13 +203,18 @@ pub(crate) use target_release::{
     target_release_radix_semantics_match,
 };
 pub(crate) use trustee_evaluation_key::{
+    CompiledRelinearizationRoundOneRelation, CompiledRelinearizationRoundTwoRelation,
     GaloisKeyShareRelationEntryInput, GaloisKeyShareRelationPlanInput,
-    RelinearizationRoundOneRelationPlanInput, RelinearizationRoundTwoRelationPlanInput,
+    RelinearizationRoundOneRelationPlanInput, RelinearizationRoundOneSourceLayout,
+    RelinearizationRoundTwoRelationPlanInput, RelinearizationRoundTwoSourceLayout,
     TrusteeEvaluationKeyDecompositionBlock, TrusteeEvaluationKeyRelationBasis,
     TrusteeEvaluationKeyRelationGeometry, compile_galois_key_share_relation_plan,
     compile_galois_key_share_relation_with_source_layout,
     compile_relinearization_round_one_relation_plan,
-    compile_relinearization_round_two_relation_plan, selected_galois_key_share_batch_schedule,
+    compile_relinearization_round_one_relation_with_source_layout,
+    compile_relinearization_round_two_relation_plan,
+    compile_relinearization_round_two_relation_with_source_layout,
+    selected_galois_key_share_batch_schedule,
     trustee_evaluation_key_relation_basis_for_catalog_level,
 };
 pub(crate) use verified_key_relation_column_evaluator::VerifiedKeyRelationColumnEvaluator;

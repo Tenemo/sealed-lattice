@@ -11,16 +11,17 @@ use super::{
     CommonProofGenerationWorker, CommonProofGenerationWorkerError, CommonProofGenerationWorkerPoll,
     CommonProofRelationPlanCapability, CommonProofRuntimeCancellation, CommonProofRuntimeError,
     CommonProofRuntimeLimits, CommonProofVerificationReadbackAccounting,
-    CommonProofVerificationWorker, CommonProofVerificationWorkerError,
-    CommonProofVerificationWorkerPoll, DURABLE_AUTHORIZATION_FRAME_BYTE_LENGTH,
-    DURABLE_AUTHORIZATION_FRAME_MAGIC, DURABLE_AUTHORIZATION_FRAME_VERSION,
-    DURABLE_AUTHORIZATION_RECORD_HASH_DOMAIN, GeneratedCommonProof, HASH_BYTE_LENGTH, Hash512,
-    LocalStorageBinding, MAXIMUM_COMMON_PROOF_BYTE_LENGTH, PROOF_APPLICATION_BINDING_HASH_DOMAIN,
+    CommonProofVerificationStatementSource, CommonProofVerificationWorker,
+    CommonProofVerificationWorkerError, CommonProofVerificationWorkerPoll,
+    DURABLE_AUTHORIZATION_FRAME_BYTE_LENGTH, DURABLE_AUTHORIZATION_FRAME_MAGIC,
+    DURABLE_AUTHORIZATION_FRAME_VERSION, DURABLE_AUTHORIZATION_RECORD_HASH_DOMAIN,
+    GeneratedCommonProof, HASH_BYTE_LENGTH, Hash512, LocalStorageBinding,
+    MAXIMUM_COMMON_PROOF_BYTE_LENGTH, PROOF_APPLICATION_BINDING_HASH_DOMAIN,
     PendingCommonProofGenerationCheckpoint, PreparedCommonProofGeneration,
     PreparedCommonProofVerification, ProofApplicationSlotCeilings,
     VERIFICATION_BINDING_HASH_DOMAIN, VerifiedCanonicalStreamSummary, VerifiedCommonProof,
-    Zeroizing, common_proof_registry_entry_count, hash_framed_parts_512,
-    require_common_proof_registry_entry_capacity,
+    VerifiedCommonProofStatementSource, Zeroizing, common_proof_registry_entry_count,
+    hash_framed_parts_512, require_common_proof_registry_entry_capacity,
 };
 use crate::bgv::setup::VerifiedAcceptedSetupEvaluatorSourceCatalog;
 use crate::bgv::target_decryption::kllps_release::{
@@ -225,8 +226,28 @@ impl CommonProofAuthenticatedLedgerTransitionCapabilityHandle {
 struct CommonProofOperationEntry {
     binding: CommonProofVerificationBinding,
     limits: CommonProofRuntimeLimits,
+    statement_source: Option<CommonProofVerificationStatementSource>,
     cancellation_requested: bool,
     worker: Option<CommonProofVerificationWorker>,
+}
+
+#[derive(Clone, Copy)]
+struct CommonProofRelationPlanTerminalBinding {
+    relation_plan_hash: [u8; HASH_BYTE_LENGTH],
+    relation_plan_variant_hash: [u8; HASH_BYTE_LENGTH],
+    schedule_position: Option<u32>,
+    top_count: Option<u16>,
+}
+
+impl CommonProofRelationPlanTerminalBinding {
+    const fn from_relation_plan(relation_plan: &CommonProofRelationPlanCapability) -> Self {
+        Self {
+            relation_plan_hash: relation_plan.relation_plan_hash(),
+            relation_plan_variant_hash: relation_plan.relation_plan_variant_hash(),
+            schedule_position: relation_plan.schedule_position,
+            top_count: relation_plan.top_count,
+        }
+    }
 }
 
 struct CommonProofGenerationOperationEntry {
@@ -239,6 +260,7 @@ struct GeneratedCommonProofCapabilityEntry {
 
 struct VerifiedCommonProofCapabilityEntry {
     binding: CommonProofVerificationBinding,
+    statement_source: Option<CommonProofVerificationStatementSource>,
     proof: VerifiedCommonProof,
     verified_stream: VerifiedCanonicalStreamSummary,
 }
@@ -262,6 +284,19 @@ pub(crate) struct BorrowedVerifiedCommonProofCapability<'capability> {
 }
 
 impl BorrowedVerifiedCommonProofCapability<'_> {
+    /// Borrows the exact family-minted statement source that remained linear
+    /// throughout positive verification. A terminal can join against this
+    /// authority before the generic capability is consumed.
+    pub(crate) fn statement_source(
+        &self,
+    ) -> Result<&VerifiedCommonProofStatementSource, CommonProofRuntimeError> {
+        self.entry
+            .statement_source
+            .as_ref()
+            .ok_or(CommonProofRuntimeError::WrongOperationPhase)?
+            .exact_source()
+    }
+
     pub(crate) const fn verified_proof(&self) -> &VerifiedCommonProof {
         &self.entry.proof
     }
@@ -351,41 +386,24 @@ impl BorrowedVerifiedCommonProofCapability<'_> {
     pub(crate) const fn top_count(&self) -> Option<u16> {
         self.entry.proof.top_count()
     }
-
-    /// Preflights the exact evaluator-store terminal while the generic proof
-    /// capability remains retained. The returned authority stays inside the
-    /// family terminal transition and is committed only after the proof
-    /// handle is consumed by the same operation.
-    pub(crate) fn preflight_verified_evaluator_key_store(
-        &self,
-        canonical_application_statement_bytes: &[u8],
-        verified_evaluator_source_catalog: &VerifiedAcceptedSetupEvaluatorSourceCatalog,
-        verified_evaluator_key_store_material: VerifiedEvaluatorKeyStoreMaterial,
-        ordered_runtime_component_trees: Vec<VerifiedStreamedProofTreeTerminal>,
-        ordered_verified_auxiliary_roots: &[VerifiedEvaluatorAuxiliaryRoot],
-    ) -> Result<VerifiedEvaluatorKeyStore, CommonProofRuntimeError> {
-        if self.proof_stream_domain() != CanonicalStreamDomain::EvaluatorKeyAggregateProof {
-            return Err(CommonProofRuntimeError::WrongVerificationBinding);
-        }
-        VerifiedEvaluatorKeyStore::from_verified_common_proof_and_material(
-            &self.entry.proof,
-            canonical_application_statement_bytes,
-            self.entry.binding.relation_plan_hash,
-            self.entry.binding.ceremony_context_hash,
-            self.entry.binding.action_context_hash,
-            verified_evaluator_source_catalog,
-            self.proof_stream_descriptor().clone(),
-            verified_evaluator_key_store_material,
-            ordered_runtime_component_trees,
-            ordered_verified_auxiliary_roots,
-        )
-        .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)
-    }
 }
 
 impl ConsumedVerifiedCommonProofCapability {
     pub(crate) const fn borrowed(&self) -> BorrowedVerifiedCommonProofCapability<'_> {
         BorrowedVerifiedCommonProofCapability { entry: &self.entry }
+    }
+
+    /// Borrows the exact source while this one-shot verified capability owns
+    /// it. Consuming the capability into its family terminal also consumes the
+    /// source; no binding copy can recreate it.
+    pub(crate) fn statement_source(
+        &self,
+    ) -> Result<&VerifiedCommonProofStatementSource, CommonProofRuntimeError> {
+        self.entry
+            .statement_source
+            .as_ref()
+            .ok_or(CommonProofRuntimeError::WrongOperationPhase)?
+            .exact_source()
     }
 
     pub(crate) const fn protocol_version(&self) -> u16 {
@@ -710,6 +728,7 @@ impl CommonProofRuntimeRegistry {
             CommonProofOperationEntry {
                 binding,
                 limits,
+                statement_source: None,
                 cancellation_requested: false,
                 worker: None,
             },
@@ -1148,8 +1167,7 @@ impl CommonProofRuntimeRegistry {
         if bindings.is_empty() {
             return Err(CommonProofRuntimeError::WrongVerificationBinding);
         }
-        for (binding_ordinal, (handle_identifier, statement_source)) in
-            bindings.iter().enumerate()
+        for (binding_ordinal, (handle_identifier, statement_source)) in bindings.iter().enumerate()
         {
             if *handle_identifier == 0
                 || bindings[..binding_ordinal]
@@ -1158,8 +1176,7 @@ impl CommonProofRuntimeRegistry {
             {
                 return Err(CommonProofRuntimeError::WrongVerificationBinding);
             }
-            let handle =
-                GeneratedCommonProofCapabilityHandle::from_identifier(*handle_identifier);
+            let handle = GeneratedCommonProofCapabilityHandle::from_identifier(*handle_identifier);
             self.generated_capabilities
                 .get(&handle)
                 .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?
@@ -1170,7 +1187,10 @@ impl CommonProofRuntimeRegistry {
             let removed = self.generated_capabilities.remove(
                 &GeneratedCommonProofCapabilityHandle::from_identifier(*handle_identifier),
             );
-            assert!(removed.is_some(), "joint binding preflight retained every generated proof");
+            assert!(
+                removed.is_some(),
+                "joint binding preflight retained every generated proof"
+            );
         }
         Ok(())
     }
@@ -1197,12 +1217,13 @@ impl CommonProofRuntimeRegistry {
         prepared: PreparedCommonProofVerification,
         handle: CommonProofVerificationOperationHandle,
     ) -> Result<CommonProofVerificationOperationHandle, CommonProofVerificationWorkerError> {
-        let worker = CommonProofVerificationWorker::new(prepared)?;
+        let (statement_source, worker) = CommonProofVerificationWorker::new(prepared);
         self.operations.insert(
             handle,
             CommonProofOperationEntry {
                 binding: worker.verification_binding,
                 limits: worker.limits,
+                statement_source: Some(statement_source),
                 cancellation_requested: false,
                 worker: Some(worker),
             },
@@ -1229,6 +1250,7 @@ impl CommonProofRuntimeRegistry {
             CommonProofOperationEntry {
                 binding,
                 limits,
+                statement_source: None,
                 cancellation_requested: false,
                 worker: None,
             },
@@ -1350,26 +1372,27 @@ impl CommonProofRuntimeRegistry {
                 .take()
                 .ok_or(CommonProofRuntimeError::WrongOperationPhase)?
         };
-        let (_binding, relation_plan, proof, verified_stream) = match worker.finish() {
-            Ok(terminal) => terminal,
-            Err(error) => {
-                self.operations.remove(&handle);
-                return Err(error);
-            }
+        let relation_plan_binding = {
+            let operation = self
+                .operations
+                .get(&handle)
+                .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?;
+            let relation_plan = operation
+                .statement_source
+                .as_ref()
+                .ok_or(CommonProofRuntimeError::WrongOperationPhase)?
+                .relation_plan();
+            CommonProofRelationPlanTerminalBinding::from_relation_plan(relation_plan)
         };
-        match self.register_verified_proof_with_identifier(
+        let (proof, verified_stream) = worker.finish()?;
+        self.register_verified_proof_with_identifier(
             handle,
-            &relation_plan,
+            relation_plan_binding,
             proof,
             verified_stream,
             capability_identifier,
-        ) {
-            Ok(capability_handle) => Ok(capability_handle),
-            Err(error) => {
-                self.operations.remove(&handle);
-                Err(CommonProofVerificationWorkerError::Runtime(error))
-            }
-        }
+        )
+        .map_err(CommonProofVerificationWorkerError::Runtime)
     }
 
     pub(crate) fn request_cancellation(
@@ -1414,6 +1437,53 @@ impl CommonProofRuntimeRegistry {
         Ok(())
     }
 
+    /// Borrows the exact statement source retained by an active, cancelled,
+    /// or failed verifier operation. Families use this only to reserve and
+    /// validate the original source destination before ownership moves.
+    pub(crate) fn with_verification_statement_source<Output>(
+        &self,
+        handle: CommonProofVerificationOperationHandle,
+        inspect: impl FnOnce(&VerifiedCommonProofStatementSource) -> Output,
+    ) -> Result<Output, CommonProofRuntimeError> {
+        let source = self
+            .operations
+            .get(&handle)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?
+            .statement_source
+            .as_ref()
+            .ok_or(CommonProofRuntimeError::WrongOperationPhase)?
+            .exact_source()?;
+        Ok(inspect(source))
+    }
+
+    /// Cancels a verifier operation and returns its original family-minted
+    /// source by move. The caller must first reserve a destination through the
+    /// borrowed preflight above so this transition has no fallible commit.
+    pub(crate) fn cancel_operation_and_take_statement_source(
+        &mut self,
+        handle: CommonProofVerificationOperationHandle,
+    ) -> Result<VerifiedCommonProofStatementSource, CommonProofRuntimeError> {
+        self.operations
+            .get(&handle)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?
+            .statement_source
+            .as_ref()
+            .ok_or(CommonProofRuntimeError::WrongOperationPhase)?
+            .exact_source()?;
+        let mut operation = self
+            .operations
+            .remove(&handle)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?;
+        if let Some(worker) = operation.worker.as_mut() {
+            worker.cancel();
+        }
+        operation
+            .statement_source
+            .take()
+            .ok_or(CommonProofRuntimeError::WrongOperationPhase)?
+            .into_exact_source()
+    }
+
     /// Converts the verifier's terminal, non-constructible token into a
     /// process-local capability. Decoded bytes, hashes, and caller-supplied
     /// verdicts cannot enter this registry.
@@ -1431,7 +1501,7 @@ impl CommonProofRuntimeRegistry {
         )?;
         self.register_verified_proof_with_identifier(
             handle,
-            relation_plan,
+            CommonProofRelationPlanTerminalBinding::from_relation_plan(relation_plan),
             proof,
             verified_stream,
             capability_identifier,
@@ -1441,7 +1511,7 @@ impl CommonProofRuntimeRegistry {
     fn register_verified_proof_with_identifier(
         &mut self,
         handle: CommonProofVerificationOperationHandle,
-        relation_plan: &CommonProofRelationPlanCapability,
+        relation_plan: CommonProofRelationPlanTerminalBinding,
         proof: VerifiedCommonProof,
         verified_stream: VerifiedCanonicalStreamSummary,
         capability_identifier: u32,
@@ -1451,7 +1521,7 @@ impl CommonProofRuntimeRegistry {
         if operation.cancellation_requested {
             return Err(CommonProofRuntimeError::CancellationRequested);
         }
-        if operation.binding.relation_plan_hash != relation_plan.relation_plan_hash()
+        if operation.binding.relation_plan_hash != relation_plan.relation_plan_hash
             || operation.binding.suite_identifier != proof.suite_identifier()
             || proof_application.application_statement_schema_identifier
                 != proof.application_statement_schema_identifier()
@@ -1464,18 +1534,30 @@ impl CommonProofRuntimeRegistry {
             || usize::try_from(proof_application.proof_byte_length).ok()
                 != Some(operation.limits.proof_byte_length())
             || proof_application.proof_query_count != proof.verified_query_count()
-            || proof.relation_plan_variant_hash() != relation_plan.relation_plan_variant_hash()
+            || proof.relation_plan_variant_hash() != relation_plan.relation_plan_variant_hash
             || proof.schedule_position() != relation_plan.schedule_position
             || proof.top_count() != relation_plan.top_count
+            || operation.statement_source.as_ref().is_some_and(|source| {
+                source.verification_binding() != operation.binding
+                    || source.relation_plan().relation_plan_hash()
+                        != relation_plan.relation_plan_hash
+                    || source.relation_plan().relation_plan_variant_hash()
+                        != relation_plan.relation_plan_variant_hash
+                    || source.relation_plan().schedule_position != relation_plan.schedule_position
+                    || source.relation_plan().top_count != relation_plan.top_count
+            })
         {
             return Err(CommonProofRuntimeError::WrongVerificationBinding);
         }
-        let binding = operation.binding;
-        self.operations.remove(&handle);
+        let operation = self
+            .operations
+            .remove(&handle)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?;
         self.verified_capabilities.insert(
             VerifiedCommonProofCapabilityHandle(capability_identifier),
             VerifiedCommonProofCapabilityEntry {
-                binding,
+                binding: operation.binding,
+                statement_source: operation.statement_source,
                 proof,
                 verified_stream,
             },

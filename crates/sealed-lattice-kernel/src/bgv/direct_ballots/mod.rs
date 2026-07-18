@@ -2,19 +2,17 @@
 mod aggregation;
 #[cfg(test)]
 mod encryption;
-#[cfg(test)]
 mod request;
 #[cfg(test)]
 use aggregation::*;
 #[cfg(test)]
 use encryption::*;
-#[cfg(test)]
-use request::*;
+pub(crate) use request::direct_ballot_slots;
 
 #[cfg(test)]
 use crate::bgv::{
     evaluator::engine::{ciphertext_add, encode_slots_to_coefficients},
-    parameters::POLYNOMIAL_DEGREE,
+    parameters::{PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE},
 };
 
 #[cfg(test)]
@@ -24,8 +22,9 @@ use crate::{
     hashing::hash512_hex,
 };
 
-#[cfg(test)]
 const OPTION_COUNT: usize = 20;
+#[cfg(test)]
+const PAIR_COUNT: usize = OPTION_COUNT * (OPTION_COUNT - 1) / 2;
 // pub(crate): the setup-parameter identity binds the bounded-domain evaluator
 // profile (score span times roster size) from these score-domain constants.
 pub(crate) const MINIMUM_SCORE: u64 = 1;

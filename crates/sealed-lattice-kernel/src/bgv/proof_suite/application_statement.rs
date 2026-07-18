@@ -547,6 +547,15 @@ fn selected_galois_key_share_schedule_positions()
         .collect()
 }
 
+fn selected_relinearization_statement_schedule_position()
+-> Result<u32, SelectedApplicationStatementError> {
+    let selected_positions = selected_evaluator_relinearization_entry_positions()?;
+    let [selected_position] = selected_positions.as_slice() else {
+        return Err(SelectedApplicationStatementError::InvalidProfile);
+    };
+    Ok(selected_position.schedule_position())
+}
+
 impl<'input> SelectedEvaluatorAggregateEntryInput<'input> {
     pub(crate) const fn new(
         source_component_roots: &'input [[u8; Hash512::BYTE_LENGTH]],
@@ -1209,8 +1218,13 @@ pub(crate) fn canonical_selected_relinearization_round_one_statement(
     round_one_left_root: [u8; Hash512::BYTE_LENGTH],
     round_one_right_root: [u8; Hash512::BYTE_LENGTH],
 ) -> Result<Vec<u8>, SelectedApplicationStatementError> {
-    if roster_position >= FOUNDATION_PROFILE.participant_count || anchor_commitment_roots.len() != 3
-    {
+    if schedule_position != selected_relinearization_statement_schedule_position()? {
+        return Err(SelectedApplicationStatementError::InvalidProfile);
+    }
+    if roster_position >= FOUNDATION_PROFILE.participant_count {
+        return Err(SelectedApplicationStatementError::WrongValue);
+    }
+    if anchor_commitment_roots.len() != 3 {
         return Err(SelectedApplicationStatementError::WrongTypeOrLength);
     }
     let canonical_bytes = CanonicalTuple::new(
@@ -1229,6 +1243,58 @@ pub(crate) fn canonical_selected_relinearization_round_one_statement(
     .encode()
     .map_err(|_| SelectedApplicationStatementError::CanonicalEncoding)?;
     decode_selected_relinearization_round_one_statement(
+        &canonical_bytes,
+        SelectedApplicationStatementContext::new(
+            FOUNDATION_PROFILE.protocol_version,
+            [0; Hash512::BYTE_LENGTH],
+            Some(schedule_position),
+            None,
+        ),
+    )?;
+    Ok(canonical_bytes)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn canonical_selected_relinearization_round_two_statement(
+    setup_proof_context_hash: [u8; Hash512::BYTE_LENGTH],
+    participant_identity: [u8; Hash512::BYTE_LENGTH],
+    roster_position: u16,
+    schedule_position: u32,
+    anchor_commitment_roots: &[[u8; Hash512::BYTE_LENGTH]],
+    round_one_left_root: [u8; Hash512::BYTE_LENGTH],
+    round_one_right_root: [u8; Hash512::BYTE_LENGTH],
+    aggregate_round_one_left_root: [u8; Hash512::BYTE_LENGTH],
+    aggregate_round_one_right_root: [u8; Hash512::BYTE_LENGTH],
+    contribution_root: [u8; Hash512::BYTE_LENGTH],
+) -> Result<Vec<u8>, SelectedApplicationStatementError> {
+    if schedule_position != selected_relinearization_statement_schedule_position()? {
+        return Err(SelectedApplicationStatementError::InvalidProfile);
+    }
+    if roster_position >= FOUNDATION_PROFILE.participant_count {
+        return Err(SelectedApplicationStatementError::WrongValue);
+    }
+    if anchor_commitment_roots.len() != 3 {
+        return Err(SelectedApplicationStatementError::WrongTypeOrLength);
+    }
+    let canonical_bytes = CanonicalTuple::new(
+        ProofApplicationSlotCeilings::RELINEARIZATION_ROUND_TWO_STATEMENT_SCHEMA_IDENTIFIER,
+        APPLICATION_STATEMENT_SCHEMA_VERSION,
+        vec![
+            CanonicalItem::hash512(setup_proof_context_hash),
+            CanonicalItem::participant_identity(participant_identity),
+            CanonicalItem::unsigned16(roster_position),
+            CanonicalItem::unsigned32(schedule_position),
+            canonical_hash_list_values(anchor_commitment_roots)?,
+            CanonicalItem::hash512(round_one_left_root),
+            CanonicalItem::hash512(round_one_right_root),
+            CanonicalItem::hash512(aggregate_round_one_left_root),
+            CanonicalItem::hash512(aggregate_round_one_right_root),
+            CanonicalItem::hash512(contribution_root),
+        ],
+    )
+    .encode()
+    .map_err(|_| SelectedApplicationStatementError::CanonicalEncoding)?;
+    decode_selected_relinearization_round_two_statement(
         &canonical_bytes,
         SelectedApplicationStatementContext::new(
             FOUNDATION_PROFILE.protocol_version,
@@ -2644,41 +2710,33 @@ mod tests {
     }
 
     #[test]
-    fn relinearization_round_two_decoder_retains_each_cross_round_binding() {
-        let schedule_position = selected_evaluator_entry_positions(FOUNDATION_PROFILE.option_count)
-            .expect("selected evaluator positions")
-            .into_iter()
-            .find_map(|position| {
-                matches!(
-                    position.key_kind(),
-                    SelectedEvaluatorEntryKind::Relinearization { .. }
-                )
-                .then_some(position.schedule_position())
-            })
+    fn relinearization_round_two_constructor_retains_each_cross_round_binding() {
+        let schedule_position = selected_relinearization_statement_schedule_position()
             .expect("selected relinearization position");
-        let anchor_commitment_roots = [[0x15; 64], [0x16; 64], [0x17; 64]];
-        let canonical_bytes = CanonicalTuple::new(
-            ProofApplicationSlotCeilings::RELINEARIZATION_ROUND_TWO_STATEMENT_SCHEMA_IDENTIFIER,
-            APPLICATION_STATEMENT_SCHEMA_VERSION,
-            vec![
-                CanonicalItem::hash512([0x11; 64]),
-                CanonicalItem::participant_identity([0x12; 64]),
-                CanonicalItem::unsigned16(FOUNDATION_PROFILE.participant_count - 1),
-                CanonicalItem::unsigned32(schedule_position),
-                canonical_hash_list_values(&anchor_commitment_roots)
-                    .expect("anchor commitment roots"),
-                CanonicalItem::hash512([0x21; 64]),
-                CanonicalItem::hash512([0x22; 64]),
-                CanonicalItem::hash512([0x23; 64]),
-                CanonicalItem::hash512([0x24; 64]),
-                CanonicalItem::hash512([0x25; 64]),
-            ],
+        let wrong_schedule_position = schedule_position
+            .checked_add(1)
+            .expect("selected schedule position has a successor");
+        let anchor_commitment_roots = [
+            [0x15; Hash512::BYTE_LENGTH],
+            [0x16; Hash512::BYTE_LENGTH],
+            [0x17; Hash512::BYTE_LENGTH],
+        ];
+        let canonical_bytes = canonical_selected_relinearization_round_two_statement(
+            [0x11; Hash512::BYTE_LENGTH],
+            [0x12; Hash512::BYTE_LENGTH],
+            FOUNDATION_PROFILE.participant_count - 1,
+            schedule_position,
+            &anchor_commitment_roots,
+            [0x21; Hash512::BYTE_LENGTH],
+            [0x22; Hash512::BYTE_LENGTH],
+            [0x23; Hash512::BYTE_LENGTH],
+            [0x24; Hash512::BYTE_LENGTH],
+            [0x25; Hash512::BYTE_LENGTH],
         )
-        .encode()
         .expect("canonical round-two statement");
         let context = SelectedApplicationStatementContext::new(
             FOUNDATION_PROFILE.protocol_version,
-            [0x31; 64],
+            [0x31; Hash512::BYTE_LENGTH],
             Some(schedule_position),
             None,
         );
@@ -2686,24 +2744,33 @@ mod tests {
         let decoded =
             decode_selected_relinearization_round_two_statement(&canonical_bytes, context)
                 .expect("selected round-two statement");
-        assert_eq!(decoded.setup_proof_context_hash(), [0x11; 64]);
-        assert_eq!(decoded.participant_identity(), [0x12; 64]);
+        assert_eq!(
+            decoded.setup_proof_context_hash(),
+            [0x11; Hash512::BYTE_LENGTH]
+        );
+        assert_eq!(decoded.participant_identity(), [0x12; Hash512::BYTE_LENGTH]);
         assert_eq!(
             decoded.roster_position(),
             FOUNDATION_PROFILE.participant_count - 1
         );
         assert_eq!(decoded.schedule_position(), schedule_position);
         assert_eq!(decoded.anchor_commitment_roots(), anchor_commitment_roots);
-        assert_eq!(decoded.round_one_left_root(), [0x21; 64]);
-        assert_eq!(decoded.round_one_right_root(), [0x22; 64]);
-        assert_eq!(decoded.aggregate_round_one_left_root(), [0x23; 64]);
-        assert_eq!(decoded.aggregate_round_one_right_root(), [0x24; 64]);
-        assert_eq!(decoded.contribution_root(), [0x25; 64]);
+        assert_eq!(decoded.round_one_left_root(), [0x21; Hash512::BYTE_LENGTH]);
+        assert_eq!(decoded.round_one_right_root(), [0x22; Hash512::BYTE_LENGTH]);
+        assert_eq!(
+            decoded.aggregate_round_one_left_root(),
+            [0x23; Hash512::BYTE_LENGTH]
+        );
+        assert_eq!(
+            decoded.aggregate_round_one_right_root(),
+            [0x24; Hash512::BYTE_LENGTH]
+        );
+        assert_eq!(decoded.contribution_root(), [0x25; Hash512::BYTE_LENGTH]);
 
         let wrong_schedule_context = SelectedApplicationStatementContext::new(
             FOUNDATION_PROFILE.protocol_version,
-            [0x31; 64],
-            Some(schedule_position.checked_add(1).expect("schedule position")),
+            [0x31; Hash512::BYTE_LENGTH],
+            Some(wrong_schedule_position),
             None,
         );
         assert_eq!(
@@ -2712,6 +2779,49 @@ mod tests {
                 wrong_schedule_context,
             ),
             Err(SelectedApplicationStatementError::WrongValue)
+        );
+
+        assert_eq!(
+            canonical_selected_relinearization_round_two_statement(
+                [0x11; Hash512::BYTE_LENGTH],
+                [0x12; Hash512::BYTE_LENGTH],
+                FOUNDATION_PROFILE.participant_count - 1,
+                wrong_schedule_position,
+                &anchor_commitment_roots,
+                [0x21; Hash512::BYTE_LENGTH],
+                [0x22; Hash512::BYTE_LENGTH],
+                [0x23; Hash512::BYTE_LENGTH],
+                [0x24; Hash512::BYTE_LENGTH],
+                [0x25; Hash512::BYTE_LENGTH],
+            ),
+            Err(SelectedApplicationStatementError::InvalidProfile)
+        );
+        assert_eq!(
+            canonical_selected_relinearization_round_two_statement(
+                [0x11; Hash512::BYTE_LENGTH],
+                [0x12; Hash512::BYTE_LENGTH],
+                FOUNDATION_PROFILE.participant_count - 1,
+                schedule_position,
+                &anchor_commitment_roots[..2],
+                [0x21; Hash512::BYTE_LENGTH],
+                [0x22; Hash512::BYTE_LENGTH],
+                [0x23; Hash512::BYTE_LENGTH],
+                [0x24; Hash512::BYTE_LENGTH],
+                [0x25; Hash512::BYTE_LENGTH],
+            ),
+            Err(SelectedApplicationStatementError::WrongTypeOrLength)
+        );
+
+        let mut reordered_statement =
+            CanonicalTuple::decode(&canonical_bytes, &CanonicalDecodeLimits::default())
+                .expect("canonical round-two statement decodes as a tuple");
+        reordered_statement.items.swap(1, 2);
+        let reordered_bytes = reordered_statement
+            .encode()
+            .expect("reordered round-two tuple remains canonically encodable");
+        assert_eq!(
+            decode_selected_relinearization_round_two_statement(&reordered_bytes, context),
+            Err(SelectedApplicationStatementError::WrongTypeOrLength)
         );
     }
 
@@ -3374,7 +3484,11 @@ mod tests {
     #[test]
     fn typed_relinearization_round_one_statements_preserve_exact_source_order() {
         let setup_proof_context_hash = [0x19; Hash512::BYTE_LENGTH];
-        let schedule_position = 0;
+        let schedule_position = selected_relinearization_statement_schedule_position()
+            .expect("selected relinearization position");
+        let wrong_schedule_position = schedule_position
+            .checked_add(1)
+            .expect("selected schedule position has a successor");
         let source_root_pairs = (0..FOUNDATION_PROFILE.participant_count)
             .map(|roster_position| {
                 let root_byte = u8::try_from(roster_position)
@@ -3412,12 +3526,17 @@ mod tests {
         assert_eq!(aggregate.aggregate_left_root(), [0x81; 64]);
         assert_eq!(aggregate.aggregate_right_root(), [0x82; 64]);
 
+        let anchor_commitment_roots = [
+            [0x31; Hash512::BYTE_LENGTH],
+            [0x32; Hash512::BYTE_LENGTH],
+            [0x33; Hash512::BYTE_LENGTH],
+        ];
         let participant_bytes = canonical_selected_relinearization_round_one_statement(
             setup_proof_context_hash,
             [0x23; Hash512::BYTE_LENGTH],
             3,
             schedule_position,
-            &[[0x31; 64], [0x32; 64], [0x33; 64]],
+            &anchor_commitment_roots,
             source_root_pairs[3][0],
             source_root_pairs[3][1],
         )
@@ -3440,6 +3559,30 @@ mod tests {
         );
         assert_eq!(participant.round_one_left_root(), source_root_pairs[3][0]);
         assert_eq!(participant.round_one_right_root(), source_root_pairs[3][1]);
+        assert_eq!(
+            canonical_selected_relinearization_round_one_statement(
+                setup_proof_context_hash,
+                [0x23; Hash512::BYTE_LENGTH],
+                3,
+                wrong_schedule_position,
+                &anchor_commitment_roots,
+                source_root_pairs[3][0],
+                source_root_pairs[3][1],
+            ),
+            Err(SelectedApplicationStatementError::InvalidProfile)
+        );
+        assert_eq!(
+            canonical_selected_relinearization_round_one_statement(
+                setup_proof_context_hash,
+                [0x23; Hash512::BYTE_LENGTH],
+                3,
+                schedule_position,
+                &anchor_commitment_roots[..2],
+                source_root_pairs[3][0],
+                source_root_pairs[3][1],
+            ),
+            Err(SelectedApplicationStatementError::WrongTypeOrLength)
+        );
 
         let mut reordered_pairs = source_root_pairs.clone();
         reordered_pairs.swap(2, 7);

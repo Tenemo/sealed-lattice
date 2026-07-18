@@ -12,12 +12,14 @@ import {
     CanonicalStreamResourceError,
 } from './canonical-stream-runtime.js';
 import {
+    applyClosedWorkerGeneratedCommonProofCapability,
     applyClosedWorkerVerifiedCommonProofCapability,
     openClosedWorkerCommonProofVerificationFamilyAdapter,
     releaseClosedWorkerCommonProofVerificationFamilyAdapter,
     runClosedWorkerCommonProofVerificationFamilyAdapter,
     type AuthenticatedCommonProofInputStore,
     type ClosedWorkerCommonProofVerificationFamilyAdapter,
+    type ClosedWorkerGeneratedCommonProofCapability,
     type CommonProofVerificationWorkerOptions,
 } from './common-proof-worker-runtime/runtime.js';
 import { resolveCommonProofKernelContext } from './transcript-core-bridge/common-proof-kernel-context.js';
@@ -33,6 +35,11 @@ type AcceptedSetupProofFamily = 'publicKeyShare' | 'sameSecret';
 
 type AcceptedSetupProofVerificationKernel = Readonly<{
     discardTerminalSource(terminalSourceHandle: number): number;
+    finishGeneratedVerification(
+        verifiedCommonProofHandle: number,
+        terminalSourceHandle: number,
+        generatedCommonProofHandle: number,
+    ): number;
     finishVerification(
         verifiedCommonProofHandle: number,
         terminalSourceHandle: number,
@@ -113,6 +120,12 @@ const requireVerificationKernel = (
                   .sealed_lattice_accepted_setup_same_secret_finish_verification
             : context.wasmExports
                   .sealed_lattice_accepted_setup_public_key_share_finish_verification;
+    const finishGeneratedVerification =
+        family === 'sameSecret'
+            ? context.wasmExports
+                  .sealed_lattice_accepted_setup_same_secret_finish_generated_verification
+            : context.wasmExports
+                  .sealed_lattice_accepted_setup_public_key_share_finish_generated_verification;
     const discardTerminalSource =
         family === 'sameSecret'
             ? context.wasmExports
@@ -124,6 +137,7 @@ const requireVerificationKernel = (
         typeof selectSuite !== 'function' ||
         typeof prepareVerification !== 'function' ||
         typeof finishVerification !== 'function' ||
+        typeof finishGeneratedVerification !== 'function' ||
         typeof discardTerminalSource !== 'function'
     ) {
         throw new CanonicalStreamInternalError(
@@ -132,6 +146,7 @@ const requireVerificationKernel = (
     }
     return Object.freeze({
         discardTerminalSource,
+        finishGeneratedVerification,
         finishVerification,
         prepareVerification,
         releaseSelectedSuite,
@@ -218,6 +233,7 @@ const discardTerminalSource = (input: {
 const verifyAcceptedSetupProofInClosedWorker = async (
     family: AcceptedSetupProofFamily,
     input: AcceptedSetupProofVerificationInput,
+    generatedCommonProofCapability?: ClosedWorkerGeneratedCommonProofCapability,
 ): Promise<void> => {
     if (typeof globalThis.document !== 'undefined') {
         throw new CanonicalStreamInternalError(
@@ -332,14 +348,37 @@ const verifyAcceptedSetupProofInClosedWorker = async (
                     verifiedCommonProof,
                     context,
                     (verifiedCommonProofHandle) => {
-                        const status = context.runExclusive(
-                            `accepted-setup ${family} verification finish`,
-                            () =>
-                                kernel.finishVerification(
-                                    verifiedCommonProofHandle,
-                                    terminalSourceHandle,
-                                ),
-                        );
+                        const status =
+                            generatedCommonProofCapability === undefined
+                                ? context.runExclusive(
+                                      `accepted-setup ${family} verification finish`,
+                                      () =>
+                                          kernel.finishVerification(
+                                              verifiedCommonProofHandle,
+                                              terminalSourceHandle,
+                                          ),
+                                  )
+                                : applyClosedWorkerGeneratedCommonProofCapability(
+                                      generatedCommonProofCapability,
+                                      context,
+                                      (generatedCommonProofHandle) => {
+                                          const generatedFinishStatus =
+                                              context.runExclusive(
+                                                  `accepted-setup ${family} generated-proof verification finish`,
+                                                  () =>
+                                                      kernel.finishGeneratedVerification(
+                                                          verifiedCommonProofHandle,
+                                                          terminalSourceHandle,
+                                                          generatedCommonProofHandle,
+                                                      ),
+                                              );
+                                          return Object.freeze({
+                                              consumed:
+                                                  generatedFinishStatus === 0,
+                                              result: generatedFinishStatus,
+                                          });
+                                      },
+                                  );
                         return Object.freeze({
                             consumed: status === 0,
                             result: status,
@@ -429,3 +468,31 @@ export const verifyAcceptedSetupPublicKeyShareInClosedWorker = (
     input: AcceptedSetupProofVerificationInput,
 ): Promise<void> =>
     verifyAcceptedSetupProofInClosedWorker('publicKeyShare', input);
+
+/**
+ * Internal same-worker handoff that requires a locally generated same-secret
+ * proof to match the positive accepted-package verifier terminal exactly.
+ */
+export const verifyGeneratedAcceptedSetupSameSecretCapabilityInClosedWorker = (
+    input: AcceptedSetupProofVerificationInput,
+    generatedCommonProofCapability: ClosedWorkerGeneratedCommonProofCapability,
+): Promise<void> =>
+    verifyAcceptedSetupProofInClosedWorker(
+        'sameSecret',
+        input,
+        generatedCommonProofCapability,
+    );
+
+/**
+ * Internal same-worker handoff that requires a locally generated public-key-
+ * share proof to match the positive accepted-package verifier terminal exactly.
+ */
+export const verifyGeneratedAcceptedSetupPublicKeyShareCapabilityInClosedWorker = (
+    input: AcceptedSetupProofVerificationInput,
+    generatedCommonProofCapability: ClosedWorkerGeneratedCommonProofCapability,
+): Promise<void> =>
+    verifyAcceptedSetupProofInClosedWorker(
+        'publicKeyShare',
+        input,
+        generatedCommonProofCapability,
+    );

@@ -34,7 +34,7 @@ use super::{
     selected_evaluator_entry_positions,
     selected_profile::{
         SELECTED_EVALUATION_DOMAIN_SIZE, SELECTED_OPENING_DEGREE_BOUND_EXCLUSIVE,
-        SELECTED_PUBLIC_POLYNOMIAL_COLUMN_DEGREE_BOUND_EXCLUSIVE,
+        SELECTED_PUBLIC_AGGREGATE_QUARTER_DEGREE_BOUND_EXCLUSIVE,
         selected_relation_plan_check_context,
     },
 };
@@ -68,8 +68,8 @@ pub(crate) fn selected_evaluator_aggregate_relation_plan()
         || DATA_PRIMES.is_empty()
         || SPECIAL_PRIMES.is_empty()
         || POLYNOMIAL_DEGREE < 2
-        || POLYNOMIAL_DEGREE / 2
-            != usize::try_from(SELECTED_PUBLIC_POLYNOMIAL_COLUMN_DEGREE_BOUND_EXCLUSIVE)
+        || POLYNOMIAL_DEGREE / 4
+            != usize::try_from(SELECTED_PUBLIC_AGGREGATE_QUARTER_DEGREE_BOUND_EXCLUSIVE)
                 .map_err(|_| SelectedEvaluatorAggregatePlanError::CountOverflow)?
     {
         return Err(SelectedEvaluatorAggregatePlanError::WrongSelectedSuite);
@@ -107,7 +107,7 @@ pub(crate) fn selected_evaluator_aggregate_relation_plan()
                 evaluation_domain_size: SELECTED_EVALUATION_DOMAIN_SIZE,
                 opening_degree_bound_exclusive: SELECTED_OPENING_DEGREE_BOUND_EXCLUSIVE,
                 public_polynomial_column_degree_bound_exclusive:
-                    SELECTED_PUBLIC_POLYNOMIAL_COLUMN_DEGREE_BOUND_EXCLUSIVE,
+                    SELECTED_PUBLIC_AGGREGATE_QUARTER_DEGREE_BOUND_EXCLUSIVE,
                 participant_count: FOUNDATION_PROFILE.participant_count,
             },
             ordered_variants,
@@ -152,7 +152,7 @@ fn ordered_runtime_component_moduli(
             extended_moduli
                 .iter()
                 .copied()
-                .flat_map(|modulus_reference| [modulus_reference, modulus_reference])
+                .flat_map(|modulus_reference| [modulus_reference; 4])
         })
         .collect())
 }
@@ -573,10 +573,7 @@ impl SelectedEvaluatorStoreConstruction {
                 .first()
                 .map(|source| source.topology.clone())
                 .ok_or(RefusalReason::MissingPrerequisite)?;
-            if sources
-                .iter()
-                .any(|source| source.topology != topology)
-            {
+            if sources.iter().any(|source| source.topology != topology) {
                 return Err(RefusalReason::WrongTypeOrLength);
             }
             physical_components.push(SelectedEvaluatorPhysicalComponentConstruction {

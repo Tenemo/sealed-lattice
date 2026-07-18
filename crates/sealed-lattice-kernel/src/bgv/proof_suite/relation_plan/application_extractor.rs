@@ -280,6 +280,18 @@ impl CheckedApplicationExtractionPlan {
         &self.semantic_role_one_columns
     }
 
+    pub(super) const fn application_statement_schema_identifier(&self) -> u16 {
+        self.application_statement_schema_identifier
+    }
+
+    pub(super) const fn variant(&self) -> &RelationPlanVariant {
+        &self.variant
+    }
+
+    pub(super) const fn context(&self) -> &RelationPlanCheckContext {
+        &self.context
+    }
+
     pub(crate) fn derived_role_one_columns_by_source(&self) -> &BTreeMap<u32, u32> {
         &self.derived_role_one_columns_by_source
     }

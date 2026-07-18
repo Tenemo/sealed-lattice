@@ -4,10 +4,11 @@ use sha3::{
     Shake256,
     digest::{ExtendableOutput, Update, XofReader},
 };
+use zeroize::Zeroizing;
 
 use super::{
-    CANONICAL_TUPLE_SCHEMA_IDENTIFIER, CANONICAL_TUPLE_VERSION, CanonicalCodecError, CanonicalItem,
-    CanonicalItemType, CanonicalTuple,
+    CANONICAL_TUPLE_SCHEMA_IDENTIFIER, CANONICAL_TUPLE_VERSION, CanonicalCodecError,
+    CanonicalCodecErrorKind, CanonicalItem, CanonicalItemType, CanonicalTuple,
 };
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
@@ -85,19 +86,84 @@ fn foundation_tuple_hasher(
     domain: &str,
     items: &[CanonicalItem],
 ) -> Result<Shake256, CanonicalCodecError> {
-    let mut framed_items = Vec::with_capacity(items.len().saturating_add(1));
-    framed_items.push(CanonicalItem::nonempty_ascii(domain)?);
-    framed_items.extend_from_slice(items);
-    let framed_bytes = CanonicalTuple::new(
-        CANONICAL_TUPLE_SCHEMA_IDENTIFIER,
-        CANONICAL_TUPLE_VERSION,
-        framed_items,
-    )
-    .encode()?;
+    let framed_bytes = canonical_foundation_tuple_hash_preimage(domain, items)?;
 
     let mut hasher = Shake256::default();
     hasher.update(&framed_bytes);
     Ok(hasher)
+}
+
+/// Returns the exact canonical byte string absorbed by the foundation
+/// SHAKE256 invocation. Security experiments use this to match an observed
+/// oracle-query preimage without re-evaluating the fixed oracle.
+pub(crate) fn canonical_foundation_tuple_hash_preimage(
+    domain: &str,
+    items: &[CanonicalItem],
+) -> Result<Zeroizing<Vec<u8>>, CanonicalCodecError> {
+    let mut framed_items = Vec::with_capacity(items.len().saturating_add(1));
+    framed_items.push(CanonicalItem::nonempty_ascii(domain)?);
+    framed_items.extend_from_slice(items);
+    Ok(Zeroizing::new(
+        CanonicalTuple::new(
+            CANONICAL_TUPLE_SCHEMA_IDENTIFIER,
+            CANONICAL_TUPLE_VERSION,
+            framed_items,
+        )
+        .encode()?,
+    ))
+}
+
+/// Protected exact preimage for the common `H(domain, bytes(payload))` case.
+/// This avoids placing a secret-bearing payload in an ordinary `CanonicalItem`
+/// allocation while an experiment matches a recorded oracle query.
+pub(crate) fn canonical_foundation_variable_bytes_hash_preimage(
+    domain: &str,
+    payload: &[u8],
+) -> Result<Zeroizing<Vec<u8>>, CanonicalCodecError> {
+    let domain_item = CanonicalItem::nonempty_ascii(domain)?;
+    let payload_byte_length = u32::try_from(payload.len()).map_err(|_| CanonicalCodecError {
+        kind: CanonicalCodecErrorKind::LengthOverflow,
+        byte_offset: 0,
+        message: "foundation hash payload length exceeds u32",
+    })?;
+    let encoded_payload_byte_length =
+        payload_byte_length
+            .checked_add(4)
+            .ok_or(CanonicalCodecError {
+                kind: CanonicalCodecErrorKind::LengthOverflow,
+                byte_offset: 0,
+                message: "foundation hash payload framing length exceeds u32",
+            })?;
+    let capacity = 8_usize
+        .checked_add(6)
+        .and_then(|length| length.checked_add(domain_item.canonical_bytes().len()))
+        .and_then(|length| length.checked_add(6))
+        .and_then(|length| length.checked_add(usize::try_from(encoded_payload_byte_length).ok()?))
+        .ok_or(CanonicalCodecError {
+            kind: CanonicalCodecErrorKind::LengthOverflow,
+            byte_offset: 0,
+            message: "foundation hash preimage length exceeds usize",
+        })?;
+    let mut preimage = Zeroizing::new(Vec::with_capacity(capacity));
+    preimage.extend_from_slice(&CANONICAL_TUPLE_SCHEMA_IDENTIFIER.to_le_bytes());
+    preimage.extend_from_slice(&CANONICAL_TUPLE_VERSION.to_le_bytes());
+    preimage.extend_from_slice(&2_u32.to_le_bytes());
+    preimage.extend_from_slice(&domain_item.item_type().canonical_code().to_le_bytes());
+    preimage.extend_from_slice(
+        &u32::try_from(domain_item.canonical_bytes().len())
+            .map_err(|_| CanonicalCodecError {
+                kind: CanonicalCodecErrorKind::LengthOverflow,
+                byte_offset: 0,
+                message: "foundation hash domain framing length exceeds u32",
+            })?
+            .to_le_bytes(),
+    );
+    preimage.extend_from_slice(domain_item.canonical_bytes());
+    preimage.extend_from_slice(&CanonicalItemType::RawBytes.canonical_code().to_le_bytes());
+    preimage.extend_from_slice(&encoded_payload_byte_length.to_le_bytes());
+    preimage.extend_from_slice(&payload_byte_length.to_le_bytes());
+    preimage.extend_from_slice(payload);
+    Ok(preimage)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

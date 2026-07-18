@@ -137,11 +137,40 @@ type VerifiedFinalityRecord = {
     session: FinalityVerifierSessionImplementation;
 };
 
+export type VerifiedFinalityKernelAuthorization = Readonly<{
+    capabilityMemory: WebAssembly.Memory;
+    capabilityPointer: number;
+    finalityHandle: number;
+    sessionHandle: number;
+}>;
+
 const verifiedEvaluatorReplayRecords = new WeakMap<
     object,
     VerifiedEvaluatorReplayRecord
 >();
 const verifiedFinalityRecords = new WeakMap<object, VerifiedFinalityRecord>();
+
+export const resolveVerifiedFinalityKernelAuthorization = (
+    verifiedFinality: VerifiedFinality,
+    kernel: TranscriptCoreKernel,
+): VerifiedFinalityKernelAuthorization => {
+    if (
+        (typeof verifiedFinality !== 'object' &&
+            typeof verifiedFinality !== 'function') ||
+        verifiedFinality === null
+    ) {
+        throw new TypeError(
+            'The verified finality was not issued by the WASM finality verifier.',
+        );
+    }
+    const record = verifiedFinalityRecords.get(verifiedFinality);
+    if (record === undefined || !record.active) {
+        throw new TypeError(
+            'The verified finality is unavailable or was not issued by the WASM finality verifier.',
+        );
+    }
+    return record.session.kernelAuthorization(record, kernel);
+};
 
 class FinalityVerifierInternalError extends Error {
     public readonly failureCause: unknown;
@@ -398,6 +427,30 @@ class FinalityVerifierSessionImplementation implements FinalityVerifierSession {
 
     public state(): 'active' | 'cancelled' {
         return this.#state;
+    }
+
+    public kernelAuthorization(
+        record: VerifiedFinalityRecord,
+        kernel: TranscriptCoreKernel,
+    ): VerifiedFinalityKernelAuthorization {
+        if (
+            this.#state !== 'active' ||
+            !record.active ||
+            record.session !== this
+        ) {
+            throw new TypeError('The verified finality is unavailable.');
+        }
+        if (kernel !== this.#kernel) {
+            throw new TypeError(
+                'The verified finality belongs to another WASM kernel.',
+            );
+        }
+        return Object.freeze({
+            capabilityMemory: this.#context.memory,
+            capabilityPointer: this.#capabilityPointer,
+            finalityHandle: record.handle,
+            sessionHandle: this.#handle,
+        });
     }
 
     public verify(

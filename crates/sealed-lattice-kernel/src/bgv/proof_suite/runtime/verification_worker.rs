@@ -1,13 +1,13 @@
 use super::{
-    BTreeMap, CanonicalStreamReadbackVerifier, CanonicalStreamVerifier,
-    CommonProofRelationPlanCapability, CommonProofRuntimeError, CommonProofRuntimeLimits,
-    CommonProofVerificationBinding, CommonProofVerificationPoll,
-    CommonProofVerificationStateMachine, CommonProofVerifierError, HASH_BYTE_LENGTH,
-    MAXIMUM_COMMON_PROOF_BYTE_LENGTH, MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH,
-    MAXIMUM_RESIDENT_COMMON_PROOF_INPUT_CHUNKS, PollableCommonProofVerificationInput,
-    RefusalReason, ResidentCommonProofByteSource, ResidentCommonProofInputChunk, StreamDescriptor,
-    VerifiedCanonicalStreamSummary, VerifiedCommonProof, VerifiedEvaluatorAuxiliaryRoot,
-    VerifiedRelationColumnEvaluator, VerifiedStatementOwnedTree, required_chunk_indices,
+    BTreeMap, CanonicalStreamReadbackVerifier, CanonicalStreamVerifier, CommonProofRuntimeError,
+    CommonProofRuntimeLimits, CommonProofVerificationBinding, CommonProofVerificationPoll,
+    CommonProofVerificationStateMachine, CommonProofVerificationStatementSource,
+    CommonProofVerifierError, HASH_BYTE_LENGTH, MAXIMUM_COMMON_PROOF_BYTE_LENGTH,
+    MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH, MAXIMUM_RESIDENT_COMMON_PROOF_INPUT_CHUNKS,
+    PollableCommonProofVerificationInput, RefusalReason, ResidentCommonProofByteSource,
+    ResidentCommonProofInputChunk, StreamDescriptor, VerifiedCanonicalStreamSummary,
+    VerifiedCommonProof, VerifiedEvaluatorAuxiliaryRoot, VerifiedRelationColumnEvaluator,
+    VerifiedStatementOwnedTree, required_chunk_indices,
 };
 
 /// One consumed set of positively verified inputs. This value is process local
@@ -15,42 +15,43 @@ use super::{
 /// no constructor from statement roots, relation-plan bytes, or decoded proof
 /// binding bytes.
 pub(crate) struct ConsumedCommonProofVerificationInputs {
-    pub(super) verification_binding: CommonProofVerificationBinding,
-    pub(super) relation_plan: CommonProofRelationPlanCapability,
-    pub(super) protocol_version: u16,
-    pub(super) canonical_application_statement_bytes: Vec<u8>,
-    pub(super) proof_stream_descriptor: StreamDescriptor,
+    pub(super) statement_source: CommonProofVerificationStatementSource,
     pub(super) statement_owned_trees: Vec<VerifiedStatementOwnedTree>,
     pub(super) evaluator_auxiliary_roots: Vec<VerifiedEvaluatorAuxiliaryRoot>,
     pub(super) verified_column_evaluator: Box<dyn VerifiedRelationColumnEvaluator>,
-    pub(super) limits: CommonProofRuntimeLimits,
 }
 
 impl ConsumedCommonProofVerificationInputs {
     pub(crate) const fn verification_binding(&self) -> CommonProofVerificationBinding {
-        self.verification_binding
+        self.statement_source.verification_binding()
     }
 
-    pub(crate) const fn relation_plan(&self) -> &CommonProofRelationPlanCapability {
-        &self.relation_plan
+    pub(crate) const fn relation_plan(&self) -> &super::CommonProofRelationPlanCapability {
+        self.statement_source.relation_plan()
     }
 
     pub(crate) const fn proof_stream_descriptor(&self) -> &StreamDescriptor {
-        &self.proof_stream_descriptor
+        self.statement_source.proof_stream_descriptor()
     }
 
     pub(crate) fn pollable_verification_input(&self) -> PollableCommonProofVerificationInput<'_> {
+        let relation_plan = self.statement_source.relation_plan();
         PollableCommonProofVerificationInput {
-            protocol_version: self.protocol_version,
-            suite_identifier: self.verification_binding.suite_identifier,
-            canonical_application_statement_bytes: &self.canonical_application_statement_bytes,
-            relation_plan: &self.relation_plan.relation_plan,
-            relation_context: &self.relation_plan.relation_context,
-            schedule_position: self.relation_plan.schedule_position,
-            top_count: self.relation_plan.top_count,
+            protocol_version: self.statement_source.protocol_version(),
+            suite_identifier: self
+                .statement_source
+                .verification_binding()
+                .suite_identifier,
+            canonical_application_statement_bytes: self
+                .statement_source
+                .canonical_application_statement_bytes(),
+            relation_plan: &relation_plan.relation_plan,
+            relation_context: &relation_plan.relation_context,
+            schedule_position: relation_plan.schedule_position,
+            top_count: relation_plan.top_count,
             statement_owned_trees: &self.statement_owned_trees,
             evaluator_auxiliary_roots: &self.evaluator_auxiliary_roots,
-            declared_proof_byte_length: self.limits.proof_byte_length(),
+            declared_proof_byte_length: self.statement_source.limits().proof_byte_length(),
             proof_byte_ceiling: MAXIMUM_COMMON_PROOF_BYTE_LENGTH,
             maximum_resident_window_byte_length: MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH
                 .checked_mul(MAXIMUM_RESIDENT_COMMON_PROOF_INPUT_CHUNKS)
@@ -58,19 +59,21 @@ impl ConsumedCommonProofVerificationInputs {
         }
     }
 
-    pub(crate) fn prepare(
-        self,
-    ) -> Result<PreparedCommonProofVerification, CommonProofRuntimeError> {
+    pub(crate) fn prepare(self) -> PreparedCommonProofVerification {
         let verifier = CommonProofVerificationStateMachine::new(self.pollable_verification_input())
-            .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?;
-        Ok(PreparedCommonProofVerification {
-            verification_binding: self.verification_binding,
-            relation_plan: self.relation_plan,
-            proof_stream_descriptor: self.proof_stream_descriptor,
+            .expect("consumed common-proof verifier inputs passed complete validation");
+        let verification_binding = self.statement_source.verification_binding();
+        let canonical_stream_verifier = CanonicalStreamVerifier::new(
+            verification_binding.proof_application.proof_stream_domain,
+            self.statement_source.proof_stream_descriptor().clone(),
+        )
+        .expect("the verified statement source retains one canonical proof descriptor");
+        PreparedCommonProofVerification {
+            statement_source: self.statement_source,
+            canonical_stream_verifier: Box::new(canonical_stream_verifier),
             verifier,
             verified_column_evaluator: self.verified_column_evaluator,
-            limits: self.limits,
-        })
+        }
     }
 }
 
@@ -78,17 +81,27 @@ impl ConsumedCommonProofVerificationInputs {
 /// generated-WASM boundary can retain this value behind an opaque handle, but
 /// cannot construct one from proof bytes, roots, or a relation-plan record.
 pub(crate) struct PreparedCommonProofVerification {
-    verification_binding: CommonProofVerificationBinding,
-    relation_plan: CommonProofRelationPlanCapability,
-    proof_stream_descriptor: StreamDescriptor,
+    statement_source: CommonProofVerificationStatementSource,
+    canonical_stream_verifier: Box<CanonicalStreamVerifier>,
     verifier: CommonProofVerificationStateMachine,
     verified_column_evaluator: Box<dyn VerifiedRelationColumnEvaluator>,
-    limits: CommonProofRuntimeLimits,
 }
 
 impl PreparedCommonProofVerification {
     pub(crate) fn verification_binding_hash(&self) -> [u8; HASH_BYTE_LENGTH] {
-        self.verification_binding.binding_hash()
+        self.statement_source.verification_binding().binding_hash()
+    }
+
+    pub(crate) fn statement_source(
+        &self,
+    ) -> Result<&super::VerifiedCommonProofStatementSource, CommonProofRuntimeError> {
+        self.statement_source.exact_source()
+    }
+
+    pub(crate) fn into_statement_source(
+        self,
+    ) -> Result<super::VerifiedCommonProofStatementSource, CommonProofRuntimeError> {
+        self.statement_source.into_exact_source()
     }
 }
 
@@ -203,8 +216,6 @@ enum CommonProofVerificationWorkerPhase {
 /// sees at most two resident chunks and never receives a caller verdict.
 pub(super) struct CommonProofVerificationWorker {
     pub(super) verification_binding: CommonProofVerificationBinding,
-    relation_plan: CommonProofRelationPlanCapability,
-    proof_stream_descriptor: StreamDescriptor,
     pub(super) limits: CommonProofRuntimeLimits,
     phase: CommonProofVerificationWorkerPhase,
     last_accounted_required_range: Option<super::CommonProofRequiredByteRange>,
@@ -214,27 +225,24 @@ pub(super) struct CommonProofVerificationWorker {
 impl CommonProofVerificationWorker {
     pub(super) fn new(
         prepared: PreparedCommonProofVerification,
-    ) -> Result<Self, CommonProofVerificationWorkerError> {
-        let stream_domain = prepared
-            .verification_binding
-            .proof_application
-            .proof_stream_domain;
-        let canonical_stream_verifier =
-            CanonicalStreamVerifier::new(stream_domain, prepared.proof_stream_descriptor.clone())
-                .map_err(CommonProofVerificationWorkerError::Stream)?;
-        Ok(Self {
-            verification_binding: prepared.verification_binding,
-            relation_plan: prepared.relation_plan,
-            proof_stream_descriptor: prepared.proof_stream_descriptor,
-            limits: prepared.limits,
-            phase: CommonProofVerificationWorkerPhase::Ingesting {
-                canonical_stream_verifier: Box::new(canonical_stream_verifier),
-                verifier: Box::new(prepared.verifier),
-                verified_column_evaluator: prepared.verified_column_evaluator,
+    ) -> (CommonProofVerificationStatementSource, Self) {
+        let verification_binding = prepared.statement_source.verification_binding();
+        let limits = prepared.statement_source.limits();
+        let statement_source = prepared.statement_source;
+        (
+            statement_source,
+            Self {
+                verification_binding,
+                limits,
+                phase: CommonProofVerificationWorkerPhase::Ingesting {
+                    canonical_stream_verifier: prepared.canonical_stream_verifier,
+                    verifier: Box::new(prepared.verifier),
+                    verified_column_evaluator: prepared.verified_column_evaluator,
+                },
+                last_accounted_required_range: None,
+                readback_accounting: CommonProofVerificationReadbackAccounting::default(),
             },
-            last_accounted_required_range: None,
-            readback_accounting: CommonProofVerificationReadbackAccounting::default(),
-        })
+        )
     }
 
     pub(crate) const fn readback_accounting(&self) -> CommonProofVerificationReadbackAccounting {
@@ -435,12 +443,7 @@ impl CommonProofVerificationWorker {
     pub(super) fn finish(
         mut self,
     ) -> Result<
-        (
-            CommonProofVerificationBinding,
-            CommonProofRelationPlanCapability,
-            VerifiedCommonProof,
-            VerifiedCanonicalStreamSummary,
-        ),
+        (VerifiedCommonProof, VerifiedCanonicalStreamSummary),
         CommonProofVerificationWorkerError,
     > {
         let phase = core::mem::replace(
@@ -466,12 +469,7 @@ impl CommonProofVerificationWorker {
             .finish()
             .into_result()
             .map_err(CommonProofVerificationWorkerError::Stream)?;
-        Ok((
-            self.verification_binding,
-            self.relation_plan,
-            proof,
-            verified_stream,
-        ))
+        Ok((proof, verified_stream))
     }
 
     pub(super) fn cancel(&mut self) {

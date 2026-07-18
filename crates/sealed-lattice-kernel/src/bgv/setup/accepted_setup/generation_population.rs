@@ -14,7 +14,7 @@ use crate::{
             SelectedEvaluatorEntryKind, apply_negacyclic_automorphism,
             canonical_recipient_private_vss_payload,
             maximum_committed_material_kmac_input_accounting, selected_committed_material_profile,
-            selected_committed_material_relation_plan_input,
+            selected_committed_material_relation_plan_input, selected_evaluator_entry_positions,
             selected_evaluator_galois_entry_positions, selected_galois_key_share_batch_schedule,
         },
         setup::{
@@ -44,9 +44,10 @@ use super::{
         SetupGeneratedCommittedMaterial, SetupGeneratedGaloisEntry,
         SetupGeneratedKeySwitchComponent, SetupGeneratedPublicKeyShare,
         SetupGeneratedRecipientPrivateVssPayload, SetupGeneratedVssMaterial,
-        SetupGenerationAnchorOpening, SetupGenerationAuthorityHandle, SetupGenerationAuthorityInput,
-        retain_browser_owned_setup_generation_authority,
+        SetupGenerationAnchorOpening, SetupGenerationAuthorityHandle,
+        SetupGenerationAuthorityInput, retain_browser_owned_setup_generation_authority,
     },
+    generation_relinearization::construct_relinearization_material,
 };
 use crate::bgv::setup::sampling::negacyclic_product_mod;
 
@@ -108,7 +109,7 @@ pub(in crate::bgv) fn selected_setup_generation_private_randomness_kmac_input_ac
     let mut private_stream_block_count = centered_ternary_stream_block_count
         .checked_mul(
             anchor_randomness_polynomial_count
-                .checked_add(1)
+                .checked_add(2)
                 .ok_or(RefusalReason::OutsideSupportedProfile)?,
         )
         .ok_or(RefusalReason::OutsideSupportedProfile)?;
@@ -152,6 +153,34 @@ pub(in crate::bgv) fn selected_setup_generation_private_randomness_kmac_input_ac
         .ok_or(RefusalReason::OutsideSupportedProfile)?;
     private_stream_block_count = private_stream_block_count
         .checked_add(centered_binomial_stream_block_count)
+        .ok_or(RefusalReason::OutsideSupportedProfile)?;
+    let selected_relinearization_catalog_levels =
+        selected_evaluator_entry_positions(FOUNDATION_PROFILE.option_count)
+            .map_err(|_| RefusalReason::UnsupportedVersionOrSuite)?
+            .into_iter()
+            .filter_map(|position| match position.key_kind() {
+                SelectedEvaluatorEntryKind::Relinearization { catalog_level } => {
+                    Some(catalog_level)
+                }
+                SelectedEvaluatorEntryKind::Galois { .. } => None,
+            })
+            .collect::<Vec<_>>();
+    let [relinearization_catalog_level] = selected_relinearization_catalog_levels.as_slice() else {
+        return Err(RefusalReason::UnsupportedVersionOrSuite);
+    };
+    let relinearization_data_block_count = relinearization_catalog_level
+        .checked_add(1)
+        .ok_or(RefusalReason::OutsideSupportedProfile)?
+        .div_ceil(KEY_SWITCH_DATA_PRIMES_PER_BLOCK);
+    private_stream_block_count = private_stream_block_count
+        .checked_add(
+            centered_binomial_stream_block_count
+                .checked_mul(3)
+                .and_then(|count| {
+                    count.checked_mul(u64::try_from(relinearization_data_block_count).ok()?)
+                })
+                .ok_or(RefusalReason::OutsideSupportedProfile)?,
+        )
         .ok_or(RefusalReason::OutsideSupportedProfile)?;
     for evaluator_position in selected_evaluator_galois_entry_positions()
         .map_err(|_| RefusalReason::UnsupportedVersionOrSuite)?
@@ -283,6 +312,14 @@ pub(in crate::bgv) fn populate_browser_owned_setup_generation_authority(
         usize::try_from(relation_input.evaluation_domain_size)
             .map_err(|_| RefusalReason::OutsideSupportedProfile)?,
     )?;
+    let relinearization_material = construct_relinearization_material(
+        selected_suite,
+        &action_private_randomness,
+        bindings.source_setup_intent_object_hash,
+        bindings.setup_attempt_identifier,
+        bindings.public_setup_seed,
+        &common_secret_coefficients,
+    )?;
     let ordered_galois_entries = construct_galois_entries(
         selected_suite,
         &action_private_randomness,
@@ -311,6 +348,7 @@ pub(in crate::bgv) fn populate_browser_owned_setup_generation_authority(
         common_secret_coefficients,
         public_key_share,
         vss_material,
+        relinearization_material,
         galois_batch_schedule_position,
         ordered_galois_entries,
     })
@@ -330,15 +368,12 @@ fn construct_public_key_share(
     if common_secret_coefficients.len() != ring_degree {
         return Err(RefusalReason::WrongTypeOrLength);
     }
-    let error_context_hash = public_key_error_context_hash(
-        bindings.source_setup_intent_object_hash,
-    )?;
+    let error_context_hash =
+        public_key_error_context_hash(bindings.source_setup_intent_object_hash)?;
     let centered_error_coefficients = sample_centered_binomial_polynomial(
         action_private_randomness,
-        PrivateRandomnessDomain::setup_suite_distribution(
-            PUBLIC_KEY_ERROR_DISTRIBUTION_PURPOSE,
-        )
-        .map_err(|error| error.refusal_reason)?,
+        PrivateRandomnessDomain::setup_suite_distribution(PUBLIC_KEY_ERROR_DISTRIBUTION_PURPOSE)
+            .map_err(|error| error.refusal_reason)?,
         error_context_hash,
         bindings.setup_attempt_identifier,
         PUBLIC_KEY_ERROR_CENTERED_BINOMIAL_PARAMETER,
@@ -1084,7 +1119,7 @@ fn construct_galois_component_bytes(
     Ok(canonical_bytes)
 }
 
-fn sample_centered_ternary_polynomial(
+pub(super) fn sample_centered_ternary_polynomial(
     selected_suite: &SelectedSuiteCapability,
     action_private_randomness: &ActionPrivateRandomness,
     domain: PrivateRandomnessDomain,
@@ -1108,7 +1143,7 @@ fn sample_centered_ternary_polynomial(
     Ok(coefficients)
 }
 
-fn sample_centered_binomial_polynomial(
+pub(super) fn sample_centered_binomial_polynomial(
     action_private_randomness: &ActionPrivateRandomness,
     domain: PrivateRandomnessDomain,
     context_hash: Hash512,
@@ -1311,7 +1346,7 @@ fn canonical_context_hash(
     .map_err(|_| RefusalReason::MalformedEncoding)
 }
 
-fn centered_i8_residue(coefficient: i8, modulus: u64) -> u64 {
+pub(super) fn centered_i8_residue(coefficient: i8, modulus: u64) -> u64 {
     centered_i64_residue(i64::from(coefficient), modulus)
 }
 

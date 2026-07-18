@@ -9,24 +9,25 @@ use std::cell::RefCell;
 
 use crate::{
     bgv::setup::{
-        SetupGeneratedGaloisSourceAuthority, SetupGenerationAuthorityHandle,
-        SetupGenerationGaloisApplication, SetupGenerationGaloisPreparationSource,
-        SetupGaloisGenerationPreparationError, commit_prepackage_galois_source,
+        SetupGaloisGenerationPreparationError, SetupGeneratedGaloisSourceAuthority,
+        SetupGenerationAuthorityHandle, SetupGenerationGaloisApplication,
+        SetupGenerationGaloisPreparationSource, commit_prepackage_galois_source,
         commit_prepackage_generated_galois_source, preflight_prepackage_galois_source_slot,
         preflight_prepackage_generated_galois_source_slot,
-        restore_prepackage_galois_statement_source,
-        resolve_setup_generation_galois_preparation_source, with_setup_generation_galois_batch,
-        take_prepackage_galois_statement_source, with_prepackage_generated_galois_source,
-        with_prepackage_relinearization_source,
+        resolve_setup_generation_galois_preparation_source,
+        restore_prepackage_galois_statement_source, take_prepackage_galois_statement_source,
+        with_prepackage_generated_galois_source, with_prepackage_relinearization_source,
+        with_setup_generation_galois_batch, with_setup_generation_galois_public_component_chunk,
     },
     foundation::{
-        BOARD_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH, CanonicalDecodeLimits, FOUNDATION_PROFILE,
-        FoundationObjectType, FoundationSchemaError, Hash512, ParticipantIdentity,
-        PreparedActionProofAttemptSource,
-        ProofApplicationSlot, ProofApplicationSlotCeilings, RefusalReason, StreamDescriptor,
-        STATE_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH, VerifiedBoardApplicationSource,
-        VerifiedStateReservationRuntimeBinding, resolve_prepared_action_proof_attempt_source,
-        resolve_verified_board_application_sources, verified_state_reservation_binding,
+        BOARD_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH, CanonicalDecodeLimits,
+        CanonicalStreamReadbackVerifier, FOUNDATION_PROFILE, FoundationObjectType,
+        FoundationSchemaError, Hash512, ParticipantIdentity, PreparedActionProofAttemptSource,
+        ProofApplicationSlot, ProofApplicationSlotCeilings, RefusalReason,
+        STATE_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH, StreamDescriptor,
+        VerifiedBoardApplicationSource, VerifiedStateReservationRuntimeBinding,
+        resolve_prepared_action_proof_attempt_source, resolve_verified_board_application_sources,
+        verified_state_reservation_binding,
     },
 };
 
@@ -35,30 +36,28 @@ use super::runtime_ffi::{
     cancel_common_proof_verification_family_adapter_reservation,
     commit_reserved_common_proof_verification_family_adapter_from_upstream,
     preflight_reserved_common_proof_verification_family_adapter_from_upstream,
-    retain_common_proof_generation_family_adapter,
     reserve_common_proof_verification_family_adapter,
-    with_common_proof_selected_suite,
+    retain_common_proof_generation_family_adapter, with_common_proof_selected_suite,
 };
 use super::{
-    ComponentMaterialOwnershipBinding, KeySwitchComponentMaterialTopology,
-    KeySwitchComponentPublicPolynomialStream,
     CommonProofGenerationPreparationError, CommonProofRelationPlanCapability,
     CommonProofRelationPlanCapabilityError, CommonProofRuntimeError, CommonProofRuntimeLimits,
-    CommonProofSelectedSuiteCapabilityHandle, PreparedCommonProofGeneration, ProofProfileError,
-    RelationPlanError, RecomputedKeySwitchComponentTree,
-    SelectedApplicationStatementContext, SelectedEvaluatorEntryKind, SelectedProofAccountingError,
-    SetupPublicPolynomialContext, SetupPublicPolynomialRootRole, SetupPublicPolynomialTree,
-    VerifiedCommonProofCapabilityHandle, VerifiedCommonProofStatementSource,
-    VerifiedEvaluatorAuxiliaryRoot, VerifiedGaloisSourceMaterialBatchPreflight,
-    VerifiedKeySwitchComponentMaterial, VerifiedStatementOwnedTree,
-    compile_galois_key_share_relation_with_source_layout,
-    decode_selected_galois_key_share_statement, selected_galois_key_share_relation_plan_input,
-    selected_evaluator_galois_entry_positions, selected_proof_runtime_limits,
-    selected_relation_plan_check_context,
-    verified_application_statement_hash,
+    CommonProofSelectedSuiteCapabilityHandle, ComponentMaterialOwnershipBinding,
+    KeySwitchComponentMaterialTopology, KeySwitchComponentPublicPolynomialStream,
+    PreparedCommonProofGeneration, ProofProfileError, RecomputedKeySwitchComponentTree,
+    RelationPlanError, SelectedApplicationStatementContext, SelectedEvaluatorEntryKind,
+    SelectedProofAccountingError, SetupPublicPolynomialContext, SetupPublicPolynomialRootRole,
+    SetupPublicPolynomialTree, VerifiedCommonProofCapabilityHandle,
+    VerifiedCommonProofStatementSource, VerifiedEvaluatorAuxiliaryRoot,
+    VerifiedGaloisSourceMaterialBatchPreflight, VerifiedKeySwitchComponentMaterial,
+    VerifiedStatementOwnedTree, compile_galois_key_share_relation_with_source_layout,
+    decode_selected_galois_key_share_statement, selected_evaluator_galois_entry_positions,
+    selected_galois_key_share_relation_plan_input, selected_proof_runtime_limits,
+    selected_relation_plan_check_context, verified_application_statement_hash,
 };
 
 const ATTEMPT_IDENTIFIER_BYTE_LENGTH: usize = 32;
+const SELECTED_GALOIS_KEY_SHARE_BATCH_SCHEDULE_POSITION: u32 = 0;
 
 fn component_runtime_error(
     error: super::ComponentPublicPolynomialRuntimeError,
@@ -175,9 +174,23 @@ impl SingleActiveGaloisGenerationSourceRegistry {
         Ok(handle)
     }
 
-    fn source(&self, handle: u32) -> Result<&PendingGeneratedGaloisSource, CommonProofRuntimeError> {
+    fn source(
+        &self,
+        handle: u32,
+    ) -> Result<&PendingGeneratedGaloisSource, CommonProofRuntimeError> {
         self.active
             .as_ref()
+            .filter(|(active_handle, _)| *active_handle == handle)
+            .map(|(_, source)| source)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)
+    }
+
+    fn source_mut(
+        &mut self,
+        handle: u32,
+    ) -> Result<&mut PendingGeneratedGaloisSource, CommonProofRuntimeError> {
+        self.active
+            .as_mut()
             .filter(|(active_handle, _)| *active_handle == handle)
             .map(|(_, source)| source)
             .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)
@@ -208,8 +221,10 @@ impl SingleActiveGaloisGenerationSourceRegistry {
 }
 
 pub(crate) struct PendingGeneratedGaloisSource {
+    setup_generation_authority_identifier: u32,
     preparation_source: SetupGenerationGaloisPreparationSource,
     generated_source_authority: SetupGeneratedGaloisSourceAuthority,
+    component_readback_lifecycle: GaloisComponentReadbackLifecycle,
 }
 
 impl PendingGeneratedGaloisSource {
@@ -221,8 +236,282 @@ impl PendingGeneratedGaloisSource {
         &self.generated_source_authority
     }
 
+    const fn setup_generation_authority_handle(&self) -> SetupGenerationAuthorityHandle {
+        SetupGenerationAuthorityHandle::from_identifier(self.setup_generation_authority_identifier)
+    }
+
+    fn require_completed_component_readback(&self) -> Result<(), CommonProofRuntimeError> {
+        if self.component_readback_lifecycle == GaloisComponentReadbackLifecycle::Completed {
+            Ok(())
+        } else {
+            Err(CommonProofRuntimeError::WrongOperationPhase)
+        }
+    }
+
     pub(crate) fn into_generated_source_authority(self) -> SetupGeneratedGaloisSourceAuthority {
         self.generated_source_authority
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum GaloisComponentReadbackLifecycle {
+    Available,
+    Active(u32),
+    Completed,
+    Cancelled,
+}
+
+struct GaloisGeneratedComponentReadbackBinding {
+    material_root: [u8; Hash512::BYTE_LENGTH],
+    stream_descriptor: StreamDescriptor,
+    encoded_stream_descriptor: Box<[u8]>,
+    authenticated_readback: Option<CanonicalStreamReadbackVerifier>,
+}
+
+struct GaloisGeneratedComponentReadback {
+    owner_generation_source_handle: u32,
+    setup_generation_authority_handle: SetupGenerationAuthorityHandle,
+    ordered_components: Box<[GaloisGeneratedComponentReadbackBinding]>,
+    next_component_ordinal: usize,
+    next_chunk_index: usize,
+}
+
+impl GaloisGeneratedComponentReadback {
+    fn from_pending_source(
+        owner_generation_source_handle: u32,
+        pending_source: &PendingGeneratedGaloisSource,
+    ) -> Result<Self, GaloisKeyShareRuntimeError> {
+        let selected_positions = selected_evaluator_galois_entry_positions().map_err(|_| {
+            GaloisKeyShareRuntimeError::Runtime(CommonProofRuntimeError::WrongVerificationBinding)
+        })?;
+        let generated_components = pending_source
+            .generated_source_authority()
+            .ordered_components();
+        if generated_components.len() != selected_positions.len() {
+            return Err(GaloisKeyShareRuntimeError::Runtime(
+                CommonProofRuntimeError::WrongVerificationBinding,
+            ));
+        }
+        let mut ordered_components = Vec::with_capacity(generated_components.len());
+        for (generated_component, expected_position) in
+            generated_components.iter().zip(selected_positions)
+        {
+            if generated_component.evaluator_position() != expected_position {
+                return Err(GaloisKeyShareRuntimeError::Runtime(
+                    CommonProofRuntimeError::WrongVerificationBinding,
+                ));
+            }
+            let stream_descriptor = generated_component.stream_descriptor().clone();
+            let encoded_stream_descriptor = stream_descriptor.encode()?.into_boxed_slice();
+            let authenticated_readback = generated_component.begin_authenticated_readback()?;
+            ordered_components.push(GaloisGeneratedComponentReadbackBinding {
+                material_root: generated_component.material_root().into_bytes(),
+                stream_descriptor,
+                encoded_stream_descriptor,
+                authenticated_readback: Some(authenticated_readback),
+            });
+        }
+        Ok(Self {
+            owner_generation_source_handle,
+            setup_generation_authority_handle: pending_source.setup_generation_authority_handle(),
+            ordered_components: ordered_components.into_boxed_slice(),
+            next_component_ordinal: 0,
+            next_chunk_index: 0,
+        })
+    }
+
+    const fn owner_generation_source_handle(&self) -> u32 {
+        self.owner_generation_source_handle
+    }
+
+    fn component_count(&self) -> usize {
+        self.ordered_components.len()
+    }
+
+    fn current_component(
+        &self,
+        component_ordinal: usize,
+    ) -> Result<&GaloisGeneratedComponentReadbackBinding, CommonProofRuntimeError> {
+        if component_ordinal != self.next_component_ordinal {
+            return Err(CommonProofRuntimeError::WrongOperationPhase);
+        }
+        self.ordered_components
+            .get(component_ordinal)
+            .ok_or(CommonProofRuntimeError::WrongOperationPhase)
+    }
+
+    fn current_component_mut(
+        &mut self,
+        component_ordinal: usize,
+    ) -> Result<&mut GaloisGeneratedComponentReadbackBinding, CommonProofRuntimeError> {
+        if component_ordinal != self.next_component_ordinal {
+            return Err(CommonProofRuntimeError::WrongOperationPhase);
+        }
+        self.ordered_components
+            .get_mut(component_ordinal)
+            .ok_or(CommonProofRuntimeError::WrongOperationPhase)
+    }
+
+    fn expected_chunk_byte_length(
+        &self,
+        component_ordinal: usize,
+        chunk_index: usize,
+    ) -> Result<usize, GaloisKeyShareRuntimeError> {
+        if chunk_index != self.next_chunk_index {
+            return Err(GaloisKeyShareRuntimeError::Runtime(
+                CommonProofRuntimeError::WrongOperationPhase,
+            ));
+        }
+        let component = self.current_component(component_ordinal)?;
+        if chunk_index >= component.stream_descriptor.ordered_chunk_digests.len() {
+            return Err(GaloisKeyShareRuntimeError::Runtime(
+                CommonProofRuntimeError::WrongOperationPhase,
+            ));
+        }
+        let chunk_byte_length = FOUNDATION_PROFILE.stream_chunk_byte_length;
+        let byte_start = chunk_index
+            .checked_mul(chunk_byte_length)
+            .ok_or(GaloisKeyShareRuntimeError::InvalidInput)?;
+        let total_byte_length = usize::try_from(component.stream_descriptor.total_byte_length)
+            .map_err(|_| GaloisKeyShareRuntimeError::InvalidInput)?;
+        Ok(total_byte_length
+            .checked_sub(byte_start)
+            .ok_or(GaloisKeyShareRuntimeError::InvalidInput)?
+            .min(chunk_byte_length))
+    }
+
+    fn authenticate_and_copy_chunk(
+        &mut self,
+        component_ordinal: usize,
+        chunk_index: usize,
+        source_chunk: &[u8],
+        output: &mut [u8],
+    ) -> Result<(), GaloisKeyShareRuntimeError> {
+        let expected_byte_length =
+            self.expected_chunk_byte_length(component_ordinal, chunk_index)?;
+        if source_chunk.len() != expected_byte_length || output.len() != expected_byte_length {
+            return Err(GaloisKeyShareRuntimeError::InvalidInput);
+        }
+        let is_final_component_chunk = {
+            let component = self.current_component_mut(component_ordinal)?;
+            let readback = component.authenticated_readback.as_mut().ok_or(
+                GaloisKeyShareRuntimeError::Runtime(CommonProofRuntimeError::WrongOperationPhase),
+            )?;
+            readback.authenticate_chunk(chunk_index, source_chunk)?;
+            output.copy_from_slice(source_chunk);
+            chunk_index + 1 == component.stream_descriptor.ordered_chunk_digests.len()
+        };
+        self.next_chunk_index = self
+            .next_chunk_index
+            .checked_add(1)
+            .ok_or(GaloisKeyShareRuntimeError::InvalidInput)?;
+        if is_final_component_chunk {
+            let completed_readback = self
+                .current_component_mut(component_ordinal)?
+                .authenticated_readback
+                .take()
+                .ok_or(GaloisKeyShareRuntimeError::Runtime(
+                    CommonProofRuntimeError::WrongOperationPhase,
+                ))?;
+            completed_readback.finish().into_result()?;
+            self.next_component_ordinal = self
+                .next_component_ordinal
+                .checked_add(1)
+                .ok_or(GaloisKeyShareRuntimeError::InvalidInput)?;
+            self.next_chunk_index = 0;
+        }
+        Ok(())
+    }
+
+    fn is_complete(&self) -> bool {
+        self.next_component_ordinal == self.ordered_components.len()
+            && self.next_chunk_index == 0
+            && self
+                .ordered_components
+                .iter()
+                .all(|component| component.authenticated_readback.is_none())
+    }
+}
+
+struct SingleActiveGaloisComponentReadbackRegistry {
+    active: Option<(u32, GaloisGeneratedComponentReadback)>,
+    next_handle: u32,
+}
+
+impl Default for SingleActiveGaloisComponentReadbackRegistry {
+    fn default() -> Self {
+        Self {
+            active: None,
+            next_handle: 1,
+        }
+    }
+}
+
+impl SingleActiveGaloisComponentReadbackRegistry {
+    fn retain(
+        &mut self,
+        readback: GaloisGeneratedComponentReadback,
+    ) -> Result<u32, CommonProofRuntimeError> {
+        if self.active.is_some() || self.next_handle == 0 {
+            return Err(CommonProofRuntimeError::AllocationLimitExceeded);
+        }
+        let handle = self.next_handle;
+        self.next_handle = handle
+            .checked_add(1)
+            .filter(|next| *next != 0)
+            .ok_or(CommonProofRuntimeError::AllocationLimitExceeded)?;
+        self.active = Some((handle, readback));
+        Ok(handle)
+    }
+
+    fn entry(
+        &self,
+        handle: u32,
+    ) -> Result<&GaloisGeneratedComponentReadback, CommonProofRuntimeError> {
+        self.active
+            .as_ref()
+            .filter(|(active_handle, _)| *active_handle == handle)
+            .map(|(_, readback)| readback)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)
+    }
+
+    fn entry_mut(
+        &mut self,
+        handle: u32,
+    ) -> Result<&mut GaloisGeneratedComponentReadback, CommonProofRuntimeError> {
+        self.active
+            .as_mut()
+            .filter(|(active_handle, _)| *active_handle == handle)
+            .map(|(_, readback)| readback)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)
+    }
+
+    fn finish(
+        &mut self,
+        handle: u32,
+        owner_generation_source_handle: u32,
+    ) -> Result<(), CommonProofRuntimeError> {
+        let entry = self.entry(handle)?;
+        if entry.owner_generation_source_handle() != owner_generation_source_handle
+            || !entry.is_complete()
+        {
+            return Err(CommonProofRuntimeError::WrongOperationPhase);
+        }
+        self.active = None;
+        Ok(())
+    }
+
+    fn cancel(
+        &mut self,
+        handle: u32,
+        owner_generation_source_handle: u32,
+    ) -> Result<(), CommonProofRuntimeError> {
+        let entry = self.entry(handle)?;
+        if entry.owner_generation_source_handle() != owner_generation_source_handle {
+            return Err(CommonProofRuntimeError::WrongVerificationBinding);
+        }
+        self.active = None;
+        Ok(())
     }
 }
 
@@ -230,6 +519,9 @@ thread_local! {
     static GALOIS_GENERATION_SOURCE_REGISTRY:
         RefCell<SingleActiveGaloisGenerationSourceRegistry> =
         RefCell::new(SingleActiveGaloisGenerationSourceRegistry::default());
+    static GALOIS_COMPONENT_READBACK_REGISTRY:
+        RefCell<SingleActiveGaloisComponentReadbackRegistry> =
+        RefCell::new(SingleActiveGaloisComponentReadbackRegistry::default());
 }
 
 struct GaloisVerificationComponentIngress {
@@ -262,9 +554,7 @@ impl GaloisVerificationIngress {
         stream_descriptor: StreamDescriptor,
         ownership_binding: ComponentMaterialOwnershipBinding,
     ) -> Result<(), CommonProofRuntimeError> {
-        if self.active_ingress.is_some()
-            || component_ordinal != self.next_component_ordinal
-        {
+        if self.active_ingress.is_some() || component_ordinal != self.next_component_ordinal {
             return Err(CommonProofRuntimeError::WrongOperationPhase);
         }
         let component = self
@@ -398,10 +688,7 @@ impl<Source> SingleActiveGaloisVerificationRegistry<Source> {
             return Err((error, source));
         }
         let handle = self.next_handle;
-        let Some(next_handle) = handle
-            .checked_add(1)
-            .filter(|next| *next != 0)
-        else {
+        let Some(next_handle) = handle.checked_add(1).filter(|next| *next != 0) else {
             return Err((CommonProofRuntimeError::AllocationLimitExceeded, source));
         };
         self.next_handle = next_handle;
@@ -502,8 +789,7 @@ pub(crate) fn restore_pending_generated_galois_source(
     handle: u32,
     source: PendingGeneratedGaloisSource,
 ) -> Result<(), CommonProofRuntimeError> {
-    GALOIS_GENERATION_SOURCE_REGISTRY
-        .with(|registry| registry.borrow_mut().restore(handle, source))
+    GALOIS_GENERATION_SOURCE_REGISTRY.with(|registry| registry.borrow_mut().restore(handle, source))
 }
 
 struct SelectedGaloisProofRuntimePlan {
@@ -766,8 +1052,7 @@ fn prepare_galois_generation(
     }
     let authority_handle =
         SetupGenerationAuthorityHandle::from_identifier(setup_generation_authority_handle);
-    let preparation_source =
-        resolve_setup_generation_galois_preparation_source(&authority_handle)?;
+    let preparation_source = resolve_setup_generation_galois_preparation_source(&authority_handle)?;
     require_selected_suite_matches_generation_source(selected_suite_handle, &preparation_source)?;
     let board_source = resolve_single_setup_intent_source(
         board_verifier_session_handle,
@@ -817,14 +1102,13 @@ fn prepare_galois_generation(
             )
         }
         GaloisGenerationMode::Resume => {
-            let (fresh_preparation, generated_source_authority) =
-                prepare_galois_common_generation(
-                    setup_generation_authority_handle,
-                    &preparation_source,
-                    fresh_prepared_attempt,
-                    runtime_plan.relation_plan,
-                    runtime_plan.limits,
-                )?;
+            let (fresh_preparation, generated_source_authority) = prepare_galois_common_generation(
+                setup_generation_authority_handle,
+                &preparation_source,
+                fresh_prepared_attempt,
+                runtime_plan.relation_plan,
+                runtime_plan.limits,
+            )?;
             let description = CommonProofGenerationFamilyAdapterDescription::new(
                 fresh_preparation.runtime_binding_hash(),
                 fresh_preparation.generation_authorization_hash(),
@@ -867,8 +1151,10 @@ fn prepare_galois_generation(
     };
     let generation_source_handle = GALOIS_GENERATION_SOURCE_REGISTRY.with(|registry| {
         registry.borrow_mut().retain(PendingGeneratedGaloisSource {
+            setup_generation_authority_identifier: setup_generation_authority_handle,
             preparation_source,
             generated_source_authority,
+            component_readback_lifecycle: GaloisComponentReadbackLifecycle::Available,
         })
     })?;
     match retain_common_proof_generation_family_adapter(generation_family_adapter) {
@@ -927,9 +1213,8 @@ fn begin_galois_verification_ingress(
         {
             return Err(CommonProofRuntimeError::WrongVerificationBinding);
         }
-        let ordered_topologies = with_common_proof_selected_suite(
-            selected_suite_handle,
-            |selected_suite| {
+        let ordered_topologies =
+            with_common_proof_selected_suite(selected_suite_handle, |selected_suite| {
                 if selected_suite.protocol_version() != FOUNDATION_PROFILE.protocol_version
                     || selected_suite.suite_identifier()
                         != proof_application_slot.suite_identifier().into_bytes()
@@ -951,47 +1236,43 @@ fn begin_galois_verification_ingress(
                         }
                     })
                     .collect::<Result<Vec<_>, _>>()
+            })??;
+        let (roster_hash, ordered_auxiliary_roots) = with_prepackage_generated_galois_source(
+            prepackage_catalog_handle,
+            roster_position,
+            |generated_source| {
+                if generated_source.protocol_version() != FOUNDATION_PROFILE.protocol_version
+                    || generated_source.suite_identifier()
+                        != proof_application_slot.suite_identifier().into_bytes()
+                    || generated_source.ceremony_context_hash()
+                        != proof_application_slot.ceremony_context_hash().into_bytes()
+                    || generated_source.action_context_hash()
+                        != proof_application_slot.action_context_hash().into_bytes()
+                    || generated_source.setup_proof_context_hash()
+                        != statement.setup_proof_context_hash()
+                    || generated_source.participant_identity() != statement.participant_identity()
+                    || generated_source.roster_position() != roster_position
+                    || generated_source.batch_schedule_position()
+                        != statement.batch_schedule_position()
+                    || generated_source.anchor_commitment_roots()
+                        != statement.anchor_commitment_roots()
+                    || generated_source.canonical_application_statement_bytes()
+                        != canonical_application_statement_bytes
+                    || generated_source.ordered_auxiliary_roots().len() != selected_positions.len()
+                    || generated_source
+                        .ordered_auxiliary_roots()
+                        .iter()
+                        .zip(&selected_positions)
+                        .any(|(root, position)| root.position() != *position)
+                {
+                    return Err(CommonProofRuntimeError::WrongVerificationBinding);
+                }
+                Ok((
+                    generated_source.roster_hash(),
+                    generated_source.ordered_auxiliary_roots().to_vec(),
+                ))
             },
-        )??;
-        let (roster_hash, ordered_auxiliary_roots) =
-            with_prepackage_generated_galois_source(
-                prepackage_catalog_handle,
-                roster_position,
-                |generated_source| {
-                    if generated_source.protocol_version() != FOUNDATION_PROFILE.protocol_version
-                        || generated_source.suite_identifier()
-                            != proof_application_slot.suite_identifier().into_bytes()
-                        || generated_source.ceremony_context_hash()
-                            != proof_application_slot.ceremony_context_hash().into_bytes()
-                        || generated_source.action_context_hash()
-                            != proof_application_slot.action_context_hash().into_bytes()
-                        || generated_source.setup_proof_context_hash()
-                            != statement.setup_proof_context_hash()
-                        || generated_source.participant_identity()
-                            != statement.participant_identity()
-                        || generated_source.roster_position() != roster_position
-                        || generated_source.batch_schedule_position()
-                            != statement.batch_schedule_position()
-                        || generated_source.anchor_commitment_roots()
-                            != statement.anchor_commitment_roots()
-                        || generated_source.canonical_application_statement_bytes()
-                            != canonical_application_statement_bytes
-                        || generated_source.ordered_auxiliary_roots().len()
-                            != selected_positions.len()
-                        || generated_source
-                            .ordered_auxiliary_roots()
-                            .iter()
-                            .zip(&selected_positions)
-                            .any(|(root, position)| root.position() != *position)
-                    {
-                        return Err(CommonProofRuntimeError::WrongVerificationBinding);
-                    }
-                    Ok((
-                        generated_source.roster_hash(),
-                        generated_source.ordered_auxiliary_roots().to_vec(),
-                    ))
-                },
-            )?;
+        )?;
         let mut ordered_components = Vec::new();
         ordered_components
             .try_reserve_exact(selected_positions.len())
@@ -1043,9 +1324,9 @@ fn begin_galois_verification_ingress(
             return Err(error);
         }
     };
-    match GALOIS_VERIFICATION_INGRESS_REGISTRY.with(|registry| {
-        registry.borrow_mut().retain_recovering(session)
-    }) {
+    match GALOIS_VERIFICATION_INGRESS_REGISTRY
+        .with(|registry| registry.borrow_mut().retain_recovering(session))
+    {
         Ok(handle) => Ok(handle),
         Err((error, mut session)) => {
             let statement_source = session
@@ -1062,9 +1343,7 @@ fn begin_galois_verification_ingress(
     }
 }
 
-fn discard_galois_verification_ingress(
-    ingress_handle: u32,
-) -> Result<(), CommonProofRuntimeError> {
+fn discard_galois_verification_ingress(ingress_handle: u32) -> Result<(), CommonProofRuntimeError> {
     let mut ingress = GALOIS_VERIFICATION_INGRESS_REGISTRY
         .with(|registry| registry.borrow_mut().take(ingress_handle))?;
     if let Some(statement_source) = ingress.statement_source.take() {
@@ -1106,19 +1385,16 @@ fn prepare_galois_verification_adapter(
     ingress_handle: u32,
 ) -> Result<(u32, u32), CommonProofRuntimeError> {
     let adapter_reservation_handle = reserve_common_proof_verification_family_adapter()?;
-    let terminal_source_reservation_handle =
-        match GALOIS_VERIFICATION_TERMINAL_SOURCE_REGISTRY
-            .with(|registry| registry.borrow_mut().reserve())
-        {
-            Ok(handle) => handle,
-            Err(error) => {
-                cancel_common_proof_verification_family_adapter_reservation(
-                    adapter_reservation_handle,
-                )
+    let terminal_source_reservation_handle = match GALOIS_VERIFICATION_TERMINAL_SOURCE_REGISTRY
+        .with(|registry| registry.borrow_mut().reserve())
+    {
+        Ok(handle) => handle,
+        Err(error) => {
+            cancel_common_proof_verification_family_adapter_reservation(adapter_reservation_handle)
                 .expect("uncommitted common-proof adapter reservation remains live");
-                return Err(error);
-            }
-        };
+            return Err(error);
+        }
+    };
 
     let borrowed_preflight = GALOIS_VERIFICATION_INGRESS_REGISTRY.with(|registry| {
         registry.borrow_mut().with_mut(ingress_handle, |ingress| {
@@ -1176,16 +1452,15 @@ fn prepare_galois_verification_adapter(
     let statement_trees = match borrowed_preflight {
         Ok(statement_trees) => statement_trees,
         Err(error) => {
-            cancel_common_proof_verification_family_adapter_reservation(
-                adapter_reservation_handle,
-            )
-            .expect("failed Galois preflight retains its common-proof reservation");
-            GALOIS_VERIFICATION_TERMINAL_SOURCE_REGISTRY.with(|registry| {
-                registry
-                    .borrow_mut()
-                    .cancel_reservation(terminal_source_reservation_handle)
-            })
-            .expect("failed Galois preflight retains its terminal reservation");
+            cancel_common_proof_verification_family_adapter_reservation(adapter_reservation_handle)
+                .expect("failed Galois preflight retains its common-proof reservation");
+            GALOIS_VERIFICATION_TERMINAL_SOURCE_REGISTRY
+                .with(|registry| {
+                    registry
+                        .borrow_mut()
+                        .cancel_reservation(terminal_source_reservation_handle)
+                })
+                .expect("failed Galois preflight retains its terminal reservation");
             return Err(error);
         }
     };
@@ -1224,28 +1499,24 @@ fn prepare_galois_verification_adapter(
         ordered_contribution_trees,
         ordered_materials,
     };
-    let adapter_handle =
-        commit_reserved_common_proof_verification_family_adapter_from_upstream(
-            adapter_reservation_handle,
-            move |upstream_inputs| {
-                let selected_suite_handle =
-                    CommonProofSelectedSuiteCapabilityHandle::from_identifier(
-                        selected_suite_handle,
-                    );
-                upstream_inputs
+    let adapter_handle = commit_reserved_common_proof_verification_family_adapter_from_upstream(
+        adapter_reservation_handle,
+        move |upstream_inputs| {
+            let selected_suite_handle =
+                CommonProofSelectedSuiteCapabilityHandle::from_identifier(selected_suite_handle);
+            upstream_inputs
                     .prepare_preflighted_statement_tree_and_auxiliary_root_family_verification_without_evaluator(
                         &selected_suite_handle,
                         statement_source,
                         statement_trees,
                         adapter_auxiliary_roots,
                     )
-            },
-        );
+        },
+    );
     GALOIS_VERIFICATION_TERMINAL_SOURCE_REGISTRY.with(|registry| {
-        registry.borrow_mut().commit_reserved(
-            terminal_source_reservation_handle,
-            terminal_source,
-        )
+        registry
+            .borrow_mut()
+            .commit_reserved(terminal_source_reservation_handle, terminal_source)
     });
     Ok((adapter_handle, terminal_source_reservation_handle))
 }
@@ -1314,6 +1585,10 @@ fn commit_generated_galois_source(
     generation_source_handle: u32,
 ) -> Result<(), CommonProofRuntimeError> {
     let pending_source = take_pending_generated_galois_source(generation_source_handle)?;
+    if let Err(error) = pending_source.require_completed_component_readback() {
+        restore_pending_generated_galois_source(generation_source_handle, pending_source)?;
+        return Err(error);
+    }
     let preflight = match preflight_prepackage_generated_galois_source_slot(
         prepackage_catalog_handle,
         generated_common_proof_handle,
@@ -1330,6 +1605,132 @@ fn commit_generated_galois_source(
         pending_source.into_generated_source_authority(),
     );
     Ok(())
+}
+
+fn open_generated_galois_component_readback(
+    generation_source_handle: u32,
+) -> Result<u32, GaloisKeyShareRuntimeError> {
+    GALOIS_GENERATION_SOURCE_REGISTRY.with(|source_registry| {
+        let mut source_registry = source_registry.borrow_mut();
+        let pending_source = source_registry.source_mut(generation_source_handle)?;
+        if pending_source.component_readback_lifecycle
+            != GaloisComponentReadbackLifecycle::Available
+        {
+            return Err(GaloisKeyShareRuntimeError::Runtime(
+                CommonProofRuntimeError::WrongOperationPhase,
+            ));
+        }
+        let readback = GaloisGeneratedComponentReadback::from_pending_source(
+            generation_source_handle,
+            pending_source,
+        )?;
+        let readback_handle = GALOIS_COMPONENT_READBACK_REGISTRY
+            .with(|readback_registry| readback_registry.borrow_mut().retain(readback))?;
+        pending_source.component_readback_lifecycle =
+            GaloisComponentReadbackLifecycle::Active(readback_handle);
+        Ok(readback_handle)
+    })
+}
+
+fn finish_generated_galois_component_readback(
+    generation_source_handle: u32,
+    readback_handle: u32,
+) -> Result<(), CommonProofRuntimeError> {
+    GALOIS_GENERATION_SOURCE_REGISTRY.with(|source_registry| {
+        let mut source_registry = source_registry.borrow_mut();
+        let pending_source = source_registry.source_mut(generation_source_handle)?;
+        if pending_source.component_readback_lifecycle
+            != GaloisComponentReadbackLifecycle::Active(readback_handle)
+        {
+            return Err(CommonProofRuntimeError::WrongOperationPhase);
+        }
+        GALOIS_COMPONENT_READBACK_REGISTRY.with(|readback_registry| {
+            readback_registry
+                .borrow_mut()
+                .finish(readback_handle, generation_source_handle)
+        })?;
+        pending_source.component_readback_lifecycle = GaloisComponentReadbackLifecycle::Completed;
+        Ok(())
+    })
+}
+
+fn cancel_generated_galois_component_readback(
+    generation_source_handle: u32,
+    readback_handle: u32,
+) -> Result<(), CommonProofRuntimeError> {
+    GALOIS_GENERATION_SOURCE_REGISTRY.with(|source_registry| {
+        let mut source_registry = source_registry.borrow_mut();
+        let pending_source = source_registry.source_mut(generation_source_handle)?;
+        if pending_source.component_readback_lifecycle
+            != GaloisComponentReadbackLifecycle::Active(readback_handle)
+        {
+            return Err(CommonProofRuntimeError::WrongOperationPhase);
+        }
+        GALOIS_COMPONENT_READBACK_REGISTRY.with(|readback_registry| {
+            readback_registry
+                .borrow_mut()
+                .cancel(readback_handle, generation_source_handle)
+        })?;
+        pending_source.component_readback_lifecycle = GaloisComponentReadbackLifecycle::Cancelled;
+        Ok(())
+    })
+}
+
+fn discard_generated_galois_source(
+    generation_source_handle: u32,
+) -> Result<(), CommonProofRuntimeError> {
+    let pending_source = take_pending_generated_galois_source(generation_source_handle)?;
+    if let GaloisComponentReadbackLifecycle::Active(readback_handle) =
+        pending_source.component_readback_lifecycle
+        && let Err(error) = GALOIS_COMPONENT_READBACK_REGISTRY.with(|readback_registry| {
+            readback_registry
+                .borrow_mut()
+                .cancel(readback_handle, generation_source_handle)
+        })
+    {
+        restore_pending_generated_galois_source(generation_source_handle, pending_source)?;
+        return Err(error);
+    }
+    Ok(())
+}
+
+fn read_generated_galois_component_chunk(
+    readback_handle: u32,
+    component_ordinal: usize,
+    chunk_index: usize,
+    output: &mut [u8],
+) -> Result<(), GaloisKeyShareRuntimeError> {
+    GALOIS_COMPONENT_READBACK_REGISTRY.with(|registry| {
+        let mut registry = registry.borrow_mut();
+        let readback = registry.entry_mut(readback_handle)?;
+        let expected_byte_length =
+            readback.expected_chunk_byte_length(component_ordinal, chunk_index)?;
+        if output.len() != expected_byte_length {
+            return Err(GaloisKeyShareRuntimeError::InvalidInput);
+        }
+        let setup_generation_authority_handle = SetupGenerationAuthorityHandle::from_identifier(
+            readback.setup_generation_authority_handle.identifier(),
+        );
+        let stream_descriptor = readback
+            .current_component(component_ordinal)?
+            .stream_descriptor
+            .clone();
+        with_setup_generation_galois_public_component_chunk(
+            &setup_generation_authority_handle,
+            component_ordinal,
+            &stream_descriptor,
+            chunk_index,
+            |source_chunk| {
+                readback.authenticate_and_copy_chunk(
+                    component_ordinal,
+                    chunk_index,
+                    source_chunk,
+                    output,
+                )
+            },
+        )??;
+        Ok(())
+    })
 }
 
 const fn refusal_status(refusal_reason: RefusalReason) -> u32 {
@@ -1584,6 +1985,278 @@ pub unsafe extern "C" fn sealed_lattice_galois_key_share_prepare_resumed_generat
     }
 }
 
+/// Opens the one-pass public-component readback owned by one pending Galois
+/// generation source. The returned handle cannot be reopened after completion
+/// or cancellation.
+///
+/// # Safety
+///
+/// A non-null status pointer must name one writable `u32`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_galois_key_share_component_readback_open(
+    generation_source_handle: u32,
+    status_pointer: *mut u32,
+) -> u32 {
+    match open_generated_galois_component_readback(generation_source_handle) {
+        Ok(readback_handle) => {
+            unsafe { write_status(status_pointer, 0) };
+            readback_handle
+        }
+        Err(error) => {
+            unsafe { write_status(status_pointer, runtime_error_status(error)) };
+            0
+        }
+    }
+}
+
+/// Returns the exact suite-fixed ordered component count.
+///
+/// # Safety
+///
+/// A non-null status pointer must name one writable `u32`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_galois_key_share_component_readback_component_count(
+    readback_handle: u32,
+    status_pointer: *mut u32,
+) -> u32 {
+    let result = GALOIS_COMPONENT_READBACK_REGISTRY.with(|registry| {
+        u32::try_from(registry.borrow().entry(readback_handle)?.component_count())
+            .map_err(|_| GaloisKeyShareRuntimeError::InvalidInput)
+    });
+    match result {
+        Ok(component_count) => {
+            unsafe { write_status(status_pointer, 0) };
+            component_count
+        }
+        Err(error) => {
+            unsafe { write_status(status_pointer, runtime_error_status(error)) };
+            0
+        }
+    }
+}
+
+/// Returns the canonical descriptor encoding length for the current ordered
+/// component.
+///
+/// # Safety
+///
+/// A non-null status pointer must name one writable `u32`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_galois_key_share_component_readback_descriptor_byte_length(
+    readback_handle: u32,
+    component_ordinal: u32,
+    status_pointer: *mut u32,
+) -> u32 {
+    let result = (|| -> Result<u32, GaloisKeyShareRuntimeError> {
+        let component_ordinal = usize::try_from(component_ordinal)
+            .map_err(|_| GaloisKeyShareRuntimeError::InvalidInput)?;
+        GALOIS_COMPONENT_READBACK_REGISTRY.with(|registry| {
+            let registry = registry.borrow();
+            let byte_length = registry
+                .entry(readback_handle)?
+                .current_component(component_ordinal)?
+                .encoded_stream_descriptor
+                .len();
+            u32::try_from(byte_length).map_err(|_| GaloisKeyShareRuntimeError::InvalidInput)
+        })
+    })();
+    match result {
+        Ok(byte_length) => {
+            unsafe { write_status(status_pointer, 0) };
+            byte_length
+        }
+        Err(error) => {
+            unsafe { write_status(status_pointer, runtime_error_status(error)) };
+            0
+        }
+    }
+}
+
+/// Copies the Rust-minted canonical descriptor for the current ordered
+/// component.
+///
+/// # Safety
+///
+/// The output pointer must name its declared writable range. A non-null status
+/// pointer must name one writable `u32`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_galois_key_share_component_readback_copy_descriptor(
+    readback_handle: u32,
+    component_ordinal: u32,
+    output_pointer: *mut u8,
+    output_byte_length: usize,
+    status_pointer: *mut u32,
+) -> u32 {
+    let result = (|| -> Result<(), GaloisKeyShareRuntimeError> {
+        if output_pointer.is_null() {
+            return Err(GaloisKeyShareRuntimeError::InvalidInput);
+        }
+        let component_ordinal = usize::try_from(component_ordinal)
+            .map_err(|_| GaloisKeyShareRuntimeError::InvalidInput)?;
+        GALOIS_COMPONENT_READBACK_REGISTRY.with(|registry| {
+            let registry = registry.borrow();
+            let descriptor = &registry
+                .entry(readback_handle)?
+                .current_component(component_ordinal)?
+                .encoded_stream_descriptor;
+            if output_byte_length != descriptor.len() {
+                return Err(GaloisKeyShareRuntimeError::InvalidInput);
+            }
+            let output = unsafe { slice::from_raw_parts_mut(output_pointer, output_byte_length) };
+            output.copy_from_slice(descriptor);
+            Ok(())
+        })
+    })();
+    match result {
+        Ok(()) => {
+            unsafe { write_status(status_pointer, 0) };
+            0
+        }
+        Err(error) => {
+            let status = runtime_error_status(error);
+            unsafe { write_status(status_pointer, status) };
+            status
+        }
+    }
+}
+
+/// Copies the Rust-minted material root for the current ordered component.
+/// This root binds the authenticated stream to the exact generated
+/// application and is never supplied by JavaScript.
+///
+/// # Safety
+///
+/// The output pointer must name exactly its declared writable range.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_galois_key_share_component_readback_copy_material_root(
+    readback_handle: u32,
+    component_ordinal: u32,
+    output_pointer: *mut u8,
+    output_byte_length: usize,
+) -> u32 {
+    let result = (|| -> Result<(), GaloisKeyShareRuntimeError> {
+        if output_pointer.is_null() || output_byte_length != Hash512::BYTE_LENGTH {
+            return Err(GaloisKeyShareRuntimeError::InvalidInput);
+        }
+        let component_ordinal = usize::try_from(component_ordinal)
+            .map_err(|_| GaloisKeyShareRuntimeError::InvalidInput)?;
+        GALOIS_COMPONENT_READBACK_REGISTRY.with(|registry| {
+            let registry = registry.borrow();
+            let material_root = registry
+                .entry(readback_handle)?
+                .current_component(component_ordinal)?
+                .material_root;
+            let output = unsafe { slice::from_raw_parts_mut(output_pointer, output_byte_length) };
+            output.copy_from_slice(&material_root);
+            Ok(())
+        })
+    })();
+    result.map_or_else(runtime_error_status, |()| 0)
+}
+
+/// Returns the exact authenticated stream length for the current ordered
+/// component.
+///
+/// # Safety
+///
+/// A non-null status pointer must name one writable `u32`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_galois_key_share_component_readback_total_byte_length(
+    readback_handle: u32,
+    component_ordinal: u32,
+    status_pointer: *mut u32,
+) -> u64 {
+    let result = (|| -> Result<u64, GaloisKeyShareRuntimeError> {
+        let component_ordinal = usize::try_from(component_ordinal)
+            .map_err(|_| GaloisKeyShareRuntimeError::InvalidInput)?;
+        GALOIS_COMPONENT_READBACK_REGISTRY.with(|registry| {
+            Ok(registry
+                .borrow()
+                .entry(readback_handle)?
+                .current_component(component_ordinal)?
+                .stream_descriptor
+                .total_byte_length)
+        })
+    })();
+    match result {
+        Ok(total_byte_length) => {
+            unsafe { write_status(status_pointer, 0) };
+            total_byte_length
+        }
+        Err(error) => {
+            unsafe { write_status(status_pointer, runtime_error_status(error)) };
+            0
+        }
+    }
+}
+
+/// Authenticates and copies one exact sequential component chunk. Failed
+/// order or range checks do not advance the readback cursor.
+///
+/// # Safety
+///
+/// The output pointer must name its declared writable range. A non-null status
+/// pointer must name one writable `u32`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_galois_key_share_component_readback_read_chunk(
+    readback_handle: u32,
+    component_ordinal: u32,
+    chunk_index: u32,
+    output_pointer: *mut u8,
+    output_byte_length: usize,
+    status_pointer: *mut u32,
+) -> u32 {
+    let result = (|| -> Result<(), GaloisKeyShareRuntimeError> {
+        if output_pointer.is_null() || output_byte_length == 0 {
+            return Err(GaloisKeyShareRuntimeError::InvalidInput);
+        }
+        let component_ordinal = usize::try_from(component_ordinal)
+            .map_err(|_| GaloisKeyShareRuntimeError::InvalidInput)?;
+        let chunk_index =
+            usize::try_from(chunk_index).map_err(|_| GaloisKeyShareRuntimeError::InvalidInput)?;
+        let output = unsafe { slice::from_raw_parts_mut(output_pointer, output_byte_length) };
+        read_generated_galois_component_chunk(
+            readback_handle,
+            component_ordinal,
+            chunk_index,
+            output,
+        )
+    })();
+    match result {
+        Ok(()) => {
+            unsafe { write_status(status_pointer, 0) };
+            0
+        }
+        Err(error) => {
+            let status = runtime_error_status(error);
+            unsafe { write_status(status_pointer, status) };
+            status
+        }
+    }
+}
+
+/// Completes and releases a fully read component stream while leaving its
+/// owning generation source live for package commit.
+#[unsafe(no_mangle)]
+pub extern "C" fn sealed_lattice_galois_key_share_component_readback_finish(
+    generation_source_handle: u32,
+    readback_handle: u32,
+) -> u32 {
+    finish_generated_galois_component_readback(generation_source_handle, readback_handle)
+        .map_or_else(super::runtime_ffi::runtime_error_status, |()| 0)
+}
+
+/// Cancels and releases an incomplete component stream. Cancellation is
+/// permanent for the owning generation source.
+#[unsafe(no_mangle)]
+pub extern "C" fn sealed_lattice_galois_key_share_component_readback_cancel(
+    generation_source_handle: u32,
+    readback_handle: u32,
+) -> u32 {
+    cancel_generated_galois_component_readback(generation_source_handle, readback_handle)
+        .map_or_else(super::runtime_ffi::runtime_error_status, |()| 0)
+}
+
 /// Atomically transfers one completed generated proof and its exact
 /// generation-only source into the prepackage catalog. The generic generated
 /// proof remains there pending joint package binding and cannot be reused by
@@ -1607,12 +2280,8 @@ pub extern "C" fn sealed_lattice_galois_key_share_commit_generated_source(
 pub extern "C" fn sealed_lattice_galois_key_share_discard_generation_source(
     generation_source_handle: u32,
 ) -> u32 {
-    GALOIS_GENERATION_SOURCE_REGISTRY.with(|registry| {
-        registry
-            .borrow_mut()
-            .take(generation_source_handle)
-            .map_or_else(super::runtime_ffi::runtime_error_status, |_| 0)
-    })
+    discard_generated_galois_source(generation_source_handle)
+        .map_or_else(super::runtime_ffi::runtime_error_status, |()| 0)
 }
 
 /// Begins package-bound positive `0x1217` verification for one exact roster
@@ -1638,7 +2307,12 @@ pub unsafe extern "C" fn sealed_lattice_galois_key_share_verification_ingress_be
             handle
         }
         Err(error) => {
-            unsafe { write_status(status_pointer, super::runtime_ffi::runtime_error_status(error)) };
+            unsafe {
+                write_status(
+                    status_pointer,
+                    super::runtime_ffi::runtime_error_status(error),
+                )
+            };
             0
         }
     }
@@ -1659,31 +2333,21 @@ pub unsafe extern "C" fn sealed_lattice_galois_key_share_component_begin(
     stream_descriptor_byte_length: usize,
 ) -> u32 {
     let result = (|| {
-        let descriptor_bytes = unsafe {
-            variable_input(
-                stream_descriptor_pointer,
-                stream_descriptor_byte_length,
-            )
-        }
-        .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?;
-        let stream_descriptor = StreamDescriptor::decode(
-            descriptor_bytes,
-            &CanonicalDecodeLimits::default(),
-        )
-        .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?;
+        let descriptor_bytes =
+            unsafe { variable_input(stream_descriptor_pointer, stream_descriptor_byte_length) }
+                .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?;
+        let stream_descriptor =
+            StreamDescriptor::decode(descriptor_bytes, &CanonicalDecodeLimits::default())
+                .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?;
         let component_ordinal = usize::try_from(component_ordinal)
             .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?;
-        begin_galois_component_ingress(
-            ingress_handle,
-            component_ordinal,
-            stream_descriptor,
-        )
+        begin_galois_component_ingress(ingress_handle, component_ordinal, stream_descriptor)
     })();
     result.map_or_else(super::runtime_ffi::runtime_error_status, |()| 0)
 }
 
-/// Absorbs one exact canonical component chunk into the active descriptor or
-/// application-owned material pass.
+/// Absorbs one exact canonical component chunk into the active one-pass
+/// application-owned stream.
 ///
 /// # Safety
 ///
@@ -1704,11 +2368,9 @@ pub unsafe extern "C" fn sealed_lattice_galois_key_share_component_absorb_chunk(
         let chunk_index = usize::try_from(chunk_index)
             .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?;
         GALOIS_VERIFICATION_INGRESS_REGISTRY.with(|registry| {
-            registry
-                .borrow_mut()
-                .with_mut(ingress_handle, |ingress| {
-                    ingress.absorb_active_chunk(component_ordinal, chunk_index, chunk_bytes)
-                })
+            registry.borrow_mut().with_mut(ingress_handle, |ingress| {
+                ingress.absorb_active_chunk(component_ordinal, chunk_index, chunk_bytes)
+            })
         })
     })();
     result.map_or_else(super::runtime_ffi::runtime_error_status, |()| 0)
@@ -1723,17 +2385,15 @@ pub extern "C" fn sealed_lattice_galois_key_share_component_finish(
         .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)
         .and_then(|component_ordinal| {
             GALOIS_VERIFICATION_INGRESS_REGISTRY.with(|registry| {
-                registry
-                    .borrow_mut()
-                    .with_mut(ingress_handle, |ingress| {
-                        ingress.finish_component(component_ordinal)
-                    })
+                registry.borrow_mut().with_mut(ingress_handle, |ingress| {
+                    ingress.finish_component(component_ordinal)
+                })
             })
         })
         .map_or_else(super::runtime_ffi::runtime_error_status, |()| 0)
 }
 
-/// Consumes a complete two-pass component ingress into the generic verifier
+/// Consumes a complete one-pass component ingress into the generic verifier
 /// adapter and returns the one-shot family terminal source beside it.
 ///
 /// # Safety
@@ -1767,7 +2427,12 @@ pub unsafe extern "C" fn sealed_lattice_galois_key_share_prepare_verification(
             adapter_handle
         }
         Err(error) => {
-            unsafe { write_status(status_pointer, super::runtime_ffi::runtime_error_status(error)) };
+            unsafe {
+                write_status(
+                    status_pointer,
+                    super::runtime_ffi::runtime_error_status(error),
+                )
+            };
             0
         }
     }
@@ -1782,7 +2447,7 @@ pub extern "C" fn sealed_lattice_galois_key_share_finish_verification(
         .map_or_else(super::runtime_ffi::runtime_error_status, |()| 0)
 }
 
-/// Cancels an incomplete two-pass ingress and restores its exact package-
+/// Cancels an incomplete one-pass ingress and restores its exact package-
 /// backed statement source for a fresh attempt.
 #[unsafe(no_mangle)]
 pub extern "C" fn sealed_lattice_galois_key_share_discard_verification_ingress(
@@ -1804,4 +2469,198 @@ pub extern "C" fn sealed_lattice_galois_key_share_discard_verification_terminal_
             .take(terminal_source_handle)
             .map_or_else(super::runtime_ffi::runtime_error_status, |_| 0)
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::foundation::{
+        CanonicalStreamDomain, CanonicalStreamVerifier, derive_canonical_stream_descriptor,
+    };
+
+    fn readback_binding(
+        canonical_bytes: &[u8],
+        material_root_byte: u8,
+    ) -> GaloisGeneratedComponentReadbackBinding {
+        let stream_descriptor = derive_canonical_stream_descriptor(
+            CanonicalStreamDomain::EvaluatorKeyStore,
+            canonical_bytes,
+        )
+        .expect("test descriptor derives from canonical bytes");
+        let mut verifier = CanonicalStreamVerifier::new(
+            CanonicalStreamDomain::EvaluatorKeyStore,
+            stream_descriptor.clone(),
+        )
+        .expect("test component verification begins");
+        for (chunk_index, chunk) in canonical_bytes
+            .chunks(FOUNDATION_PROFILE.stream_chunk_byte_length)
+            .enumerate()
+        {
+            assert!(verifier.absorb_chunk(chunk_index, chunk).is_valid());
+        }
+        let summary = verifier
+            .finish_with_summary()
+            .into_result()
+            .expect("test component summary is verifier minted");
+        let authenticated_readback =
+            CanonicalStreamReadbackVerifier::new(CanonicalStreamDomain::EvaluatorKeyStore, summary)
+                .expect("test authenticated readback begins");
+        GaloisGeneratedComponentReadbackBinding {
+            material_root: [material_root_byte; Hash512::BYTE_LENGTH],
+            encoded_stream_descriptor: stream_descriptor
+                .encode()
+                .expect("test descriptor encodes")
+                .into_boxed_slice(),
+            stream_descriptor,
+            authenticated_readback: Some(authenticated_readback),
+        }
+    }
+
+    fn readback_source(
+        owner_generation_source_handle: u32,
+        components: &[(&[u8], u8)],
+    ) -> GaloisGeneratedComponentReadback {
+        GaloisGeneratedComponentReadback {
+            owner_generation_source_handle,
+            setup_generation_authority_handle: SetupGenerationAuthorityHandle::from_identifier(91),
+            ordered_components: components
+                .iter()
+                .map(|(canonical_bytes, material_root_byte)| {
+                    readback_binding(canonical_bytes, *material_root_byte)
+                })
+                .collect::<Vec<_>>()
+                .into_boxed_slice(),
+            next_component_ordinal: 0,
+            next_chunk_index: 0,
+        }
+    }
+
+    #[test]
+    fn generated_component_readback_requires_exact_component_chunk_and_output_order() {
+        let first_component = vec![11_u8; 31];
+        let second_component = vec![22_u8; 47];
+        let mut source = readback_source(
+            7,
+            &[
+                (first_component.as_slice(), 31),
+                (second_component.as_slice(), 47),
+            ],
+        );
+
+        assert!(matches!(
+            source.current_component(1),
+            Err(CommonProofRuntimeError::WrongOperationPhase)
+        ));
+        assert!(matches!(
+            source.expected_chunk_byte_length(0, 1),
+            Err(GaloisKeyShareRuntimeError::Runtime(
+                CommonProofRuntimeError::WrongOperationPhase
+            ))
+        ));
+        let mut short_output = vec![0_u8; first_component.len() - 1];
+        assert!(matches!(
+            source.authenticate_and_copy_chunk(0, 0, &first_component, &mut short_output),
+            Err(GaloisKeyShareRuntimeError::InvalidInput)
+        ));
+        assert_eq!(source.next_component_ordinal, 0);
+        assert_eq!(source.next_chunk_index, 0);
+
+        let mut first_output = vec![0_u8; first_component.len()];
+        source
+            .authenticate_and_copy_chunk(0, 0, &first_component, &mut first_output)
+            .expect("the exact first component is released");
+        assert_eq!(first_output, first_component);
+        assert_eq!(source.next_component_ordinal, 1);
+        assert_eq!(source.next_chunk_index, 0);
+
+        assert!(matches!(
+            source.current_component(0),
+            Err(CommonProofRuntimeError::WrongOperationPhase)
+        ));
+        let mut second_output = vec![0_u8; second_component.len()];
+        source
+            .authenticate_and_copy_chunk(1, 0, &second_component, &mut second_output)
+            .expect("the exact second component is released");
+        assert_eq!(second_output, second_component);
+        assert!(source.is_complete());
+    }
+
+    #[test]
+    fn generated_component_readback_authenticates_before_copying() {
+        let canonical_component = vec![73_u8; 29];
+        let substituted_component = vec![74_u8; canonical_component.len()];
+        let mut source = readback_source(13, &[(canonical_component.as_slice(), 73)]);
+        let mut output = vec![99_u8; canonical_component.len()];
+
+        assert!(matches!(
+            source.authenticate_and_copy_chunk(0, 0, &substituted_component, &mut output,),
+            Err(GaloisKeyShareRuntimeError::Refusal(
+                RefusalReason::WrongHashOrRoot
+            ))
+        ));
+        assert_eq!(output, vec![99_u8; canonical_component.len()]);
+        assert_eq!(source.next_component_ordinal, 0);
+        assert_eq!(source.next_chunk_index, 0);
+    }
+
+    #[test]
+    fn generated_component_readback_registry_releases_and_never_reuses_handles() {
+        let canonical_component = vec![8_u8; 17];
+        let mut registry = SingleActiveGaloisComponentReadbackRegistry::default();
+        let first_handle = registry
+            .retain(readback_source(41, &[(canonical_component.as_slice(), 8)]))
+            .expect("first readback retains");
+        assert_eq!(first_handle, 1);
+        assert!(matches!(
+            registry.finish(first_handle, 41),
+            Err(CommonProofRuntimeError::WrongOperationPhase)
+        ));
+        assert!(matches!(
+            registry.cancel(first_handle, 42),
+            Err(CommonProofRuntimeError::WrongVerificationBinding)
+        ));
+        registry
+            .cancel(first_handle, 41)
+            .expect("the owning source cancels its readback");
+        assert!(matches!(
+            registry.entry(first_handle),
+            Err(CommonProofRuntimeError::UnknownOrStaleHandle)
+        ));
+
+        let second_handle = registry
+            .retain(readback_source(42, &[(canonical_component.as_slice(), 9)]))
+            .expect("a fresh readback retains after release");
+        assert_eq!(second_handle, 2);
+        assert!(matches!(
+            registry.entry(first_handle),
+            Err(CommonProofRuntimeError::UnknownOrStaleHandle)
+        ));
+        assert_eq!(registry.entry(second_handle).unwrap().next_chunk_index, 0);
+    }
+
+    #[test]
+    fn generated_component_readback_registry_finishes_only_the_complete_owner() {
+        let canonical_component = vec![19_u8; 23];
+        let mut registry = SingleActiveGaloisComponentReadbackRegistry::default();
+        let handle = registry
+            .retain(readback_source(57, &[(canonical_component.as_slice(), 19)]))
+            .expect("readback retains");
+        let mut output = vec![0_u8; canonical_component.len()];
+        registry
+            .entry_mut(handle)
+            .unwrap()
+            .authenticate_and_copy_chunk(0, 0, &canonical_component, &mut output)
+            .expect("component readback completes");
+        assert!(matches!(
+            registry.finish(handle, 58),
+            Err(CommonProofRuntimeError::WrongOperationPhase)
+        ));
+        registry
+            .finish(handle, 57)
+            .expect("complete owning readback releases");
+        assert!(matches!(
+            registry.entry(handle),
+            Err(CommonProofRuntimeError::UnknownOrStaleHandle)
+        ));
+    }
 }

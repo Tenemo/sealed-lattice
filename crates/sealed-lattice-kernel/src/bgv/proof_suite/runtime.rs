@@ -569,8 +569,7 @@ impl VerifiedCommonProofStatementSource {
         let roster_position = statement.roster_position();
         if statement.protocol_version() != context.protocol_version()
             || statement.suite_identifier() != context.suite_identifier().into_bytes()
-            || statement.ceremony_context_hash()
-                != context.ceremony_context_hash().into_bytes()
+            || statement.ceremony_context_hash() != context.ceremony_context_hash().into_bytes()
             || statement.action_context_hash() != context.action_context_hash().into_bytes()
             || statement.roster_hash() != context.roster_hash().into_bytes()
             || statement.public_setup_seed()
@@ -826,16 +825,132 @@ pub(crate) struct CommonProofVerifiedColumnEvaluatorCapabilityHandle(u32);
 
 struct CommonProofSelectedSuiteEntry {
     capability: SelectedSuiteCapability,
+    canonical_suite_record_bytes: Vec<u8>,
+}
+
+/// Linear owner of the statement inputs used by one common-proof verifier.
+/// Production paths retain the exact family-minted source instead of
+/// decomposing it into values from which source authority cannot be restored.
+pub(super) enum CommonProofVerificationStatementSource {
+    Exact(VerifiedCommonProofStatementSource),
+    #[cfg(test)]
+    TestFixture {
+        verification_binding: CommonProofVerificationBinding,
+        relation_plan: CommonProofRelationPlanCapability,
+        protocol_version: u16,
+        canonical_application_statement_bytes: Vec<u8>,
+        proof_stream_descriptor: StreamDescriptor,
+        limits: CommonProofRuntimeLimits,
+    },
+}
+
+impl CommonProofVerificationStatementSource {
+    pub(super) const fn from_exact(source: VerifiedCommonProofStatementSource) -> Self {
+        Self::Exact(source)
+    }
+
+    #[cfg(test)]
+    pub(super) const fn from_test_fixture(
+        verification_binding: CommonProofVerificationBinding,
+        relation_plan: CommonProofRelationPlanCapability,
+        protocol_version: u16,
+        canonical_application_statement_bytes: Vec<u8>,
+        proof_stream_descriptor: StreamDescriptor,
+        limits: CommonProofRuntimeLimits,
+    ) -> Self {
+        Self::TestFixture {
+            verification_binding,
+            relation_plan,
+            protocol_version,
+            canonical_application_statement_bytes,
+            proof_stream_descriptor,
+            limits,
+        }
+    }
+
+    pub(super) const fn verification_binding(&self) -> CommonProofVerificationBinding {
+        match self {
+            Self::Exact(source) => source.verification_binding,
+            #[cfg(test)]
+            Self::TestFixture {
+                verification_binding,
+                ..
+            } => *verification_binding,
+        }
+    }
+
+    pub(super) const fn relation_plan(&self) -> &CommonProofRelationPlanCapability {
+        match self {
+            Self::Exact(source) => &source.relation_plan,
+            #[cfg(test)]
+            Self::TestFixture { relation_plan, .. } => relation_plan,
+        }
+    }
+
+    pub(super) const fn protocol_version(&self) -> u16 {
+        match self {
+            Self::Exact(source) => source.protocol_version,
+            #[cfg(test)]
+            Self::TestFixture {
+                protocol_version, ..
+            } => *protocol_version,
+        }
+    }
+
+    pub(super) fn canonical_application_statement_bytes(&self) -> &[u8] {
+        match self {
+            Self::Exact(source) => &source.canonical_application_statement_bytes,
+            #[cfg(test)]
+            Self::TestFixture {
+                canonical_application_statement_bytes,
+                ..
+            } => canonical_application_statement_bytes,
+        }
+    }
+
+    pub(super) const fn proof_stream_descriptor(&self) -> &StreamDescriptor {
+        match self {
+            Self::Exact(source) => source.proof_application_binding.proof_stream_descriptor(),
+            #[cfg(test)]
+            Self::TestFixture {
+                proof_stream_descriptor,
+                ..
+            } => proof_stream_descriptor,
+        }
+    }
+
+    pub(super) const fn limits(&self) -> CommonProofRuntimeLimits {
+        match self {
+            Self::Exact(source) => source.limits,
+            #[cfg(test)]
+            Self::TestFixture { limits, .. } => *limits,
+        }
+    }
+
+    pub(super) fn exact_source(
+        &self,
+    ) -> Result<&VerifiedCommonProofStatementSource, CommonProofRuntimeError> {
+        match self {
+            Self::Exact(source) => Ok(source),
+            #[cfg(test)]
+            Self::TestFixture { .. } => Err(CommonProofRuntimeError::WrongOperationPhase),
+        }
+    }
+
+    pub(super) fn into_exact_source(
+        self,
+    ) -> Result<VerifiedCommonProofStatementSource, CommonProofRuntimeError> {
+        match self {
+            Self::Exact(source) => Ok(source),
+            #[cfg(test)]
+            Self::TestFixture { .. } => Err(CommonProofRuntimeError::WrongOperationPhase),
+        }
+    }
 }
 
 struct CommonProofApplicationInputEntry {
-    verification_binding: CommonProofVerificationBinding,
-    relation_plan: CommonProofRelationPlanCapability,
-    protocol_version: u16,
-    canonical_application_statement_bytes: Vec<u8>,
-    proof_stream_descriptor: StreamDescriptor,
+    statement_source: CommonProofVerificationStatementSource,
     statement_owned_tree_batch: Option<Vec<VerifiedStatementOwnedTree>>,
-    limits: CommonProofRuntimeLimits,
 }
 
 struct CommonProofPreverificationApplicationSourceEntry {

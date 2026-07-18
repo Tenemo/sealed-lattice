@@ -92,10 +92,13 @@ impl ProofExternalMemoryExecutor {
         let object_state_catalog_byte_length = u64::try_from(plan.objects.len())
             .ok()
             .and_then(|length| {
-                length.checked_mul(u64::try_from(std::mem::size_of::<(
-                    ProofExternalMemoryObject,
-                    ProofExternalMemoryObjectState,
-                )>()).ok()?)
+                length.checked_mul(
+                    u64::try_from(std::mem::size_of::<(
+                        ProofExternalMemoryObject,
+                        ProofExternalMemoryObjectState,
+                    )>())
+                    .ok()?,
+                )
             })
             .ok_or(ProofExternalMemoryError::ResourceLimitExceeded)?;
         object_plan_catalog_byte_length

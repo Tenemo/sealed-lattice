@@ -1225,7 +1225,6 @@ fn prepared_verification_worker_fixture() -> PreparedCommonProofVerification {
         .consume_verification_inputs(&application_handle, &[], None)
         .expect("the exact verifier capability set is consumed")
         .prepare()
-        .expect("the owned verifier initializes")
 }
 
 #[path = "support/adapters.rs"]

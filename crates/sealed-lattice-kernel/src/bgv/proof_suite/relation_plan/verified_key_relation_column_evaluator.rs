@@ -4,8 +4,7 @@ use crate::{
         setup::{
             SETUP_COMMITMENT_MODULE_RANK, VerifiedPublicRandomness,
             sample_collective_public_key_common_reference_limb,
-            sample_galois_common_reference_limb,
-            sample_relinearization_common_reference_limb,
+            sample_galois_common_reference_limb, sample_relinearization_common_reference_limb,
             setup_commitment_matrix_polynomial,
         },
     },
@@ -147,7 +146,12 @@ impl VerifiedKeyRelationColumnEvaluator {
     }
 
     fn ensure_cached_column(&mut self, column_ordinal: u32) -> Result<(), RefusalReason> {
-        if self.cached_column.as_ref().map(|cached| cached.column_ordinal) == Some(column_ordinal) {
+        if self
+            .cached_column
+            .as_ref()
+            .map(|cached| cached.column_ordinal)
+            == Some(column_ordinal)
+        {
             return Ok(());
         }
 
@@ -248,8 +252,7 @@ impl VerifiedKeyRelationColumnEvaluator {
                 .map_err(|_| RefusalReason::InvalidArithmeticRelation)
             }
             RelationVerifierSource::Protocol {
-                protocol_source_kind:
-                    COLLECTIVE_PUBLIC_KEY_COMMON_REFERENCE_PROTOCOL_SOURCE_KIND,
+                protocol_source_kind: COLLECTIVE_PUBLIC_KEY_COMMON_REFERENCE_PROTOCOL_SOURCE_KIND,
                 source_coordinates,
                 ..
             } => {
@@ -408,8 +411,7 @@ fn validate_verifier_source(
                         .map_err(|_| RefusalReason::WrongTypeOrLength)?
                     {
                         1 => {
-                            usize::try_from(*row)
-                                .map_err(|_| RefusalReason::WrongTypeOrLength)?;
+                            usize::try_from(*row).map_err(|_| RefusalReason::WrongTypeOrLength)?;
                         }
                         2 if *row == 0 => {}
                         _ => return Err(RefusalReason::WrongTypeOrLength),
@@ -512,14 +514,8 @@ fn protocol_source_kind_is_supported_by_family(
     }
 }
 
-type KeySwitchCommonReferenceSampler = fn(
-    &[u8; 64],
-    u32,
-    u16,
-    u16,
-    u16,
-    usize,
-) -> crate::encoding::CanonicalResult<Vec<u64>>;
+type KeySwitchCommonReferenceSampler =
+    fn(&[u8; 64], u32, u16, u16, u16, usize) -> crate::encoding::CanonicalResult<Vec<u64>>;
 
 fn sample_key_switch_common_reference(
     public_setup_seed: &[u8; 64],
@@ -527,7 +523,12 @@ fn sample_key_switch_common_reference(
     ring_degree: usize,
     sampler: KeySwitchCommonReferenceSampler,
 ) -> Result<Vec<u64>, RefusalReason> {
-    let [schedule_position, block_ordinal, modulus_catalog, modulus_index] = source_coordinates
+    let [
+        schedule_position,
+        block_ordinal,
+        modulus_catalog,
+        modulus_index,
+    ] = source_coordinates
     else {
         return Err(RefusalReason::WrongTypeOrLength);
     };

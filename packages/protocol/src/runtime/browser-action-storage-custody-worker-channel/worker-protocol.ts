@@ -18,6 +18,7 @@ import type {
     CommonProofBrowserCustody,
     CommonProofCheckpointResumeDescriptor,
 } from '../common-proof-browser-custody.js';
+import type { CheckpointOperationIdentity } from '../authenticated-checkpoint-store.js';
 
 import {
     copyBoundedBytes,
@@ -143,6 +144,9 @@ export type InstalledCommonProofApplicationInput = Readonly<{
 export const installedCommonProofExecutionEnvironmentBrand = Symbol(
     'installed-common-proof-execution-environment',
 );
+export const installedCommonProofCheckpointLineageReservationBrand = Symbol(
+    'installed-common-proof-checkpoint-lineage-reservation',
+);
 export const installedCommonProofPreparedOperationBrand = Symbol(
     'installed-common-proof-prepared-operation',
 );
@@ -151,13 +155,16 @@ export type InstalledCommonProofExecutionEnvironment = Readonly<{
     readonly [installedCommonProofExecutionEnvironmentBrand]: true;
 }>;
 
+export type InstalledCommonProofCheckpointLineageReservation = Readonly<{
+    readonly [installedCommonProofCheckpointLineageReservationBrand]: true;
+}>;
+
 export type InstalledCommonProofPreparedOperation = Readonly<{
     readonly [installedCommonProofPreparedOperationBrand]: true;
 }>;
 
 type OpenInstalledCommonProofExecutionEnvironmentInput = Readonly<{
     preparedOperation: InstalledCommonProofPreparedOperation;
-    resumeDescriptor?: CommonProofCheckpointResumeDescriptor;
 }>;
 
 export type ResolvedInstalledCommonProofExecutionEnvironmentInput = Readonly<{
@@ -165,6 +172,7 @@ export type ResolvedInstalledCommonProofExecutionEnvironmentInput = Readonly<{
     foundationActionRandomnessHandleIdentifier: string;
     generationFamilyAdapter: ClosedWorkerCommonProofGenerationFamilyAdapter;
     proofAttemptLineageIdentifier: Uint8Array<ArrayBuffer>;
+    checkpointOperationIdentity?: CheckpointOperationIdentity;
     resumeDescriptor?: CommonProofCheckpointResumeDescriptor;
 }>;
 
@@ -266,6 +274,7 @@ export const copyCommonProofCheckpointResumeDescriptorForWorker = (
 };
 
 export type InstalledCommonProofPreparedOperationRecord = {
+    checkpointOperationIdentity?: CheckpointOperationIdentity;
     commonProofRuntimeBindingHash: Uint8Array<ArrayBuffer>;
     consumed: boolean;
     foundationActionRandomnessHandleIdentifier: string;
@@ -274,6 +283,7 @@ export type InstalledCommonProofPreparedOperationRecord = {
         | undefined;
     installedHost: InstalledCustodyWorkerHost;
     proofAttemptLineageIdentifier: Uint8Array<ArrayBuffer>;
+    resumeDescriptor?: CommonProofCheckpointResumeDescriptor;
 };
 
 export const installedCommonProofPreparedOperationRecords = new WeakMap<
@@ -281,23 +291,116 @@ export const installedCommonProofPreparedOperationRecords = new WeakMap<
     InstalledCommonProofPreparedOperationRecord
 >();
 
+export type InstalledCommonProofCheckpointLineageReservationRecord = {
+    checkpointLineageIdentifier: Uint8Array<ArrayBuffer>;
+    installedHost: InstalledCustodyWorkerHost;
+    state: 'available' | 'consumed';
+};
+
+export const installedCommonProofCheckpointLineageReservationRecords =
+    new WeakMap<
+        InstalledCommonProofCheckpointLineageReservation,
+        InstalledCommonProofCheckpointLineageReservationRecord
+    >();
+
+export const installedCustodyWorkerHostCommonProofCheckpointLineageReservers =
+    new WeakMap<
+        InstalledCustodyWorkerHost,
+        () => Promise<InstalledCommonProofCheckpointLineageReservation>
+    >();
+
+export const installedCustodyWorkerHostCommonProofCheckpointLineageReleasers =
+    new WeakMap<
+        InstalledCustodyWorkerHost,
+        (
+            reservation: InstalledCommonProofCheckpointLineageReservation,
+        ) => Promise<void>
+    >();
+
+export const reserveCommonProofCheckpointLineageInInstalledCustodyWorker = (
+    installedHost: InstalledCustodyWorkerHost,
+): Promise<InstalledCommonProofCheckpointLineageReservation> => {
+    const reserveLineage =
+        installedCustodyWorkerHostCommonProofCheckpointLineageReservers.get(
+            installedHost,
+        );
+    if (reserveLineage === undefined) {
+        throw new BrowserActionStorageCustodyError(
+            'InvalidInput',
+            'The installed custody worker host cannot reserve common-proof checkpoint lineage.',
+        );
+    }
+    return reserveLineage();
+};
+
+export const copyReservedCommonProofCheckpointLineageIdentifier = (
+    reservation: InstalledCommonProofCheckpointLineageReservation,
+): Uint8Array<ArrayBuffer> => {
+    const record =
+        installedCommonProofCheckpointLineageReservationRecords.get(
+            reservation,
+        );
+    if (record === undefined || record.state !== 'available') {
+        throw new BrowserActionStorageCustodyError(
+            'InvalidInput',
+            'The common-proof checkpoint-lineage reservation is unavailable.',
+        );
+    }
+    return record.checkpointLineageIdentifier.slice();
+};
+
+export const releaseReservedCommonProofCheckpointLineageInInstalledCustodyWorker = (
+    installedHost: InstalledCustodyWorkerHost,
+    reservation: InstalledCommonProofCheckpointLineageReservation,
+): Promise<void> => {
+    const releaseLineage =
+        installedCustodyWorkerHostCommonProofCheckpointLineageReleasers.get(
+            installedHost,
+        );
+    if (releaseLineage === undefined) {
+        throw new BrowserActionStorageCustodyError(
+            'InvalidInput',
+            'The installed custody worker host cannot release common-proof checkpoint lineage.',
+        );
+    }
+    return releaseLineage(reservation);
+};
+
 export const installedCustodyWorkerHostCommonProofGenerationPreparers =
     new WeakMap<
         InstalledCustodyWorkerHost,
         (input: {
+            checkpoint:
+                | Readonly<{
+                      generationMode: 'fresh';
+                      reservation: InstalledCommonProofCheckpointLineageReservation;
+                  }>
+                | Readonly<{
+                      generationMode: 'resumed';
+                      resumeDescriptor: CommonProofCheckpointResumeDescriptor;
+                  }>;
             foundationActionRandomnessHandleIdentifier: string;
             generationFamilyAdapter: ClosedWorkerCommonProofGenerationFamilyAdapter;
-        }) => InstalledCommonProofPreparedOperation
+        }) => Promise<InstalledCommonProofPreparedOperation>
     >();
 
 /** Internal exact-family adapter entry; intentionally absent from the protocol root. */
 export const prepareCommonProofGenerationInInstalledCustodyWorker = (
     installedHost: InstalledCustodyWorkerHost,
     input: {
+        checkpoint:
+            | Readonly<{
+                  generationMode: 'fresh';
+                  reservation: InstalledCommonProofCheckpointLineageReservation;
+              }>
+            | Readonly<{
+                  generationMode: 'resumed';
+                  resumeDescriptor: CommonProofCheckpointResumeDescriptor;
+              }>;
         foundationActionRandomnessHandleIdentifier: string;
         generationFamilyAdapter: ClosedWorkerCommonProofGenerationFamilyAdapter;
     },
-): InstalledCommonProofPreparedOperation => {
+): Promise<InstalledCommonProofPreparedOperation> => {
     const prepareOperation =
         installedCustodyWorkerHostCommonProofGenerationPreparers.get(
             installedHost,

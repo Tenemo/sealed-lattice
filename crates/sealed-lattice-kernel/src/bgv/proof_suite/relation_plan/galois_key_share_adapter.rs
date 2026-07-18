@@ -225,7 +225,9 @@ impl GaloisKeyShareSourcePolynomialAdapter {
                     .map_err(|_| CommonProofProverError::CountOverflow)?,
             )
             .ok_or(CommonProofProverError::InvalidColumn)?;
-        if !matches!(descriptor.origin(), RelationColumnOrigin::BoundTree { .. }) {
+        if !matches!(descriptor.origin(), RelationColumnOrigin::BoundTree { .. })
+            && !is_public_polynomial_half_projection(&self.source_layout, column_ordinal)
+        {
             ProofEvaluationDomain::new_subgroup(
                 usize::try_from(self.relation_plan_variant.trace_domain_size())
                     .map_err(|_| CommonProofProverError::CountOverflow)?,
@@ -286,7 +288,7 @@ impl CommonProofSourcePolynomialProvider for GaloisKeyShareSourcePolynomialAdapt
     }
 }
 
-fn requested_source_column_ordinals(
+pub(super) fn requested_source_column_ordinals(
     relation_plan_variant: &RelationPlanVariant,
 ) -> Result<Vec<u32>, CommonProofProverError> {
     let proof_tree_roles = proof_created_tree_roles_by_column(relation_plan_variant)?;
@@ -363,10 +365,10 @@ pub(crate) fn galois_relation_tree_inputs(
             } => {
                 let row_width = u32::try_from(ordered_column_ordinals.len())
                     .map_err(|_| CommonProofProverError::CountOverflow)?;
-                if let Some(entry_ordinal) = source_layout
-                    .ordered_entries
-                    .iter()
-                    .position(|entry| split_rows_match(&entry.bound_rows, ordered_column_ordinals))
+                if let Some(entry_ordinal) =
+                    source_layout.ordered_entries.iter().position(|entry| {
+                        quarter_rows_match(&entry.bound_rows, ordered_column_ordinals)
+                    })
                 {
                     let root = ordered_contribution_roots
                         .get(entry_ordinal)
@@ -420,10 +422,34 @@ pub(crate) fn galois_relation_tree_inputs(
     Ok(relation_trees)
 }
 
-fn split_rows_match(rows: &[SplitIntegerVector], ordered_column_ordinals: &[u32]) -> bool {
+pub(super) fn quarter_rows_match(
+    rows: &[super::key_relation::QuarterBackedSplitIntegerVector],
+    ordered_column_ordinals: &[u32],
+) -> bool {
+    rows.iter()
+        .flat_map(|row| row.quarters)
+        .eq(ordered_column_ordinals.iter().copied())
+}
+
+pub(super) fn split_rows_match(
+    rows: &[SplitIntegerVector],
+    ordered_column_ordinals: &[u32],
+) -> bool {
     rows.iter()
         .flat_map(|row| row.halves)
         .eq(ordered_column_ordinals.iter().copied())
+}
+
+fn is_public_polynomial_half_projection(
+    source_layout: &GaloisKeyShareSourceLayout,
+    column_ordinal: u32,
+) -> bool {
+    source_layout.ordered_entries.iter().any(|entry| {
+        entry
+            .bound_rows
+            .iter()
+            .any(|row| row.half_projections.halves.contains(&column_ordinal))
+    })
 }
 
 struct GaloisColumnDerivation<'source, 'authority, 'statement, 'plan> {
@@ -517,11 +543,15 @@ impl GaloisColumnDerivation<'_, '_, '_, '_> {
                 return split_signed_i64_polynomial(&automorphed, half_ordinal).map(Some);
             }
             for (row_ordinal, row) in layout.bound_rows.iter().copied().enumerate() {
-                if let Some(half_ordinal) = half_position(row, column_ordinal) {
+                if let Some(quarter_ordinal) = row
+                    .quarters
+                    .iter()
+                    .position(|candidate| *candidate == column_ordinal)
+                {
                     let trace_column = entry.component().topology().trace_column(
                         row_ordinal
-                            .checked_mul(2)
-                            .and_then(|value| value.checked_add(half_ordinal))
+                            .checked_mul(4)
+                            .and_then(|value| value.checked_add(quarter_ordinal))
                             .ok_or(RefusalReason::OutsideSupportedProfile)?,
                     )?;
                     let byte_start = usize::try_from(trace_column.byte_offset())
@@ -546,6 +576,13 @@ impl GaloisColumnDerivation<'_, '_, '_, '_> {
                             .map(|value| i128::from(value.canonical()))
                             .collect(),
                     )));
+                }
+                if let Some(half_ordinal) = half_position(row.half_projections, column_ordinal) {
+                    return decode_component_full_row(entry, row_ordinal)
+                        .and_then(|coefficients| {
+                            split_signed_polynomial(&coefficients, half_ordinal)
+                        })
+                        .map(Some);
                 }
             }
             for (block_ordinal, error_layout) in layout.errors_by_block.iter().enumerate() {
@@ -1307,14 +1344,14 @@ impl GaloisColumnDerivation<'_, '_, '_, '_> {
     }
 }
 
-fn half_position(vector: SplitIntegerVector, column_ordinal: u32) -> Option<usize> {
+pub(super) fn half_position(vector: SplitIntegerVector, column_ordinal: u32) -> Option<usize> {
     vector
         .halves
         .iter()
         .position(|candidate| *candidate == column_ordinal)
 }
 
-fn split_signed_i8_polynomial(
+pub(super) fn split_signed_i8_polynomial(
     coefficients: &[i8],
     half_ordinal: usize,
 ) -> Result<Zeroizing<Vec<i128>>, RefusalReason> {
@@ -1342,7 +1379,7 @@ fn split_signed_i64_polynomial(
     )
 }
 
-fn split_signed_polynomial(
+pub(super) fn split_signed_polynomial(
     coefficients: &[i128],
     half_ordinal: usize,
 ) -> Result<Zeroizing<Vec<i128>>, RefusalReason> {
@@ -1358,7 +1395,7 @@ fn split_signed_polynomial(
     ))
 }
 
-fn split_balanced_quotient(
+pub(super) fn split_balanced_quotient(
     quotient: &[i128],
     half_ordinal: usize,
     select_high: bool,
@@ -1387,11 +1424,11 @@ fn decode_component_full_row(
 ) -> Result<Vec<i128>, RefusalReason> {
     let topology = entry.component().topology();
     let mut coefficients = Vec::with_capacity(topology.polynomial_degree());
-    for half_ordinal in 0..2 {
+    for quarter_ordinal in 0..4 {
         let trace_column = topology.trace_column(
             row_ordinal
-                .checked_mul(2)
-                .and_then(|value| value.checked_add(half_ordinal))
+                .checked_mul(4)
+                .and_then(|value| value.checked_add(quarter_ordinal))
                 .ok_or(RefusalReason::OutsideSupportedProfile)?,
         )?;
         let byte_start = usize::try_from(trace_column.byte_offset())
@@ -1419,7 +1456,7 @@ fn decode_component_full_row(
     Ok(coefficients)
 }
 
-fn anchor_full_row(
+pub(super) fn anchor_full_row(
     anchor: &crate::bgv::setup::SetupGenerationAnchorOpening,
     row_ordinal: usize,
 ) -> Result<Vec<i128>, RefusalReason> {
@@ -1442,7 +1479,7 @@ fn anchor_full_row(
     Ok(coefficients)
 }
 
-fn exact_modular_quotient<Coordinate>(
+pub(super) fn exact_modular_quotient<Coordinate>(
     coordinates: impl IntoIterator<Item = Coordinate>,
     modulus: u64,
     mut numerator: impl FnMut(Coordinate) -> Option<i128>,
@@ -1462,7 +1499,7 @@ fn exact_modular_quotient<Coordinate>(
     Ok(Zeroizing::new(quotient))
 }
 
-fn centered_residue(value: u64, modulus: u64) -> i128 {
+pub(super) fn centered_residue(value: u64, modulus: u64) -> i128 {
     if value <= (modulus - 1) / 2 {
         i128::from(value)
     } else {
@@ -1470,7 +1507,7 @@ fn centered_residue(value: u64, modulus: u64) -> i128 {
     }
 }
 
-fn exact_negacyclic_product_radix(
+pub(super) fn exact_negacyclic_product_radix(
     left: &[i128],
     right: &[i128],
 ) -> Result<Zeroizing<Vec<i128>>, RefusalReason> {
@@ -1531,7 +1568,7 @@ fn exact_negacyclic_product_radix(
     Ok(result)
 }
 
-fn exact_negacyclic_product_small(
+pub(super) fn exact_negacyclic_product_small(
     left: &[i128],
     right: &[i128],
 ) -> Result<Zeroizing<Vec<i128>>, RefusalReason> {
@@ -1597,7 +1634,9 @@ fn exact_negacyclic_product_small(
     Ok(Zeroizing::new(result))
 }
 
-fn signed_integer_to_base_field(value: i128) -> Result<ProofBaseFieldElement, RefusalReason> {
+pub(super) fn signed_integer_to_base_field(
+    value: i128,
+) -> Result<ProofBaseFieldElement, RefusalReason> {
     if value >= 0 {
         ProofBaseFieldElement::from_canonical(
             u64::try_from(value).map_err(|_| RefusalReason::InvalidArithmeticRelation)?,
@@ -1623,7 +1662,7 @@ fn centered_base_field_value(value: ProofBaseFieldElement) -> Result<i128, Refus
     }
 }
 
-fn resolve_integer_lift_coefficient(
+pub(super) fn resolve_integer_lift_coefficient(
     coefficient: RelationIntegerLiftCoefficient,
     context: &RelationPlanCheckContext,
 ) -> Result<u64, RefusalReason> {
@@ -1654,7 +1693,7 @@ fn resolve_integer_lift_coefficient(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn canonical_comparator_column_rows(
+pub(super) fn canonical_comparator_column_rows(
     target: &[i128],
     modulus: u64,
     radix: u64,
@@ -1708,7 +1747,7 @@ fn canonical_comparator_column_rows(
     Ok(requested_rows)
 }
 
-fn fixed_radix_digits(
+pub(super) fn fixed_radix_digits(
     mut value: i128,
     digit_count: usize,
     radix: u64,

@@ -1,11 +1,18 @@
 import {
     beginAcceptedSetupEvaluatorSourceCatalog,
     beginAcceptedSetupVerification,
+    bindAcceptedSetupEvaluatorGeneratedProofsToPackage,
 } from './accepted-setup-assembly-runtime.js';
 import {
     verifyAcceptedSetupPublicKeyShareInClosedWorker,
     verifyAcceptedSetupSameSecretInClosedWorker,
 } from './accepted-setup-proof-verification-runtime.js';
+import {
+    generateAcceptedSetupPublicKeyShareInClosedWorker,
+    generateAcceptedSetupSameSecretInClosedWorker,
+    verifyGeneratedAcceptedSetupPublicKeyShareInClosedWorker,
+    verifyGeneratedAcceptedSetupSameSecretInClosedWorker,
+} from './accepted-setup-key-relation-generation-runtime.js';
 import {
     resolveAggregateThresholdShareAuthenticatedRecipientConsumer,
     type AggregateThresholdShareAuthenticatedRecipientConsumer,
@@ -36,11 +43,18 @@ import {
     runClosedWorkerCommonProofVerificationFamilyAdapter,
 } from './common-proof-worker-runtime.js';
 import { prepareEvaluatorReplayInClosedWorker } from './evaluator-replay-runtime.js';
+import { constructEvaluatorAggregateInClosedWorker } from './evaluator-aggregate-runtime.js';
 import {
     openFinalityVerifierSession,
     releaseVerifiedEvaluatorReplay,
 } from './finality-verifier-runtime.js';
+import {
+    FoundationBootstrapInternalError,
+    FoundationBootstrapRefusalError,
+    FoundationBootstrapResourceError,
+} from './foundation-bootstrap-errors.js';
 import { openFoundationCeremonyRuntime } from './foundation-ceremony-runtime.js';
+import { encodeCanonicalFoundationRoster } from './foundation-roster-runtime.js';
 import {
     certifyClosedWorkerActionRandomnessReservation,
     createWasmBrowserActionStorageWorkerKernel,
@@ -58,6 +72,16 @@ import {
     type ClosedWorkerSetupMailboxRandomnessOperations,
 } from './local-storage-root-worker-kernel.js';
 import { openMailboxGcmRuntime } from './mailbox-gcm-runtime.js';
+import {
+    activateSelectedSuiteRecordSource,
+    copySelectedSuiteRecordSourceBytes,
+    releaseSelectedSuiteRecordSource,
+} from './selected-suite-record-source.js';
+import {
+    generateTargetReleaseInClosedWorker,
+    reconstructTargetReleaseInClosedWorker,
+    verifyTargetReleaseInClosedWorker,
+} from './target-release-runtime.js';
 import {
     createTranscriptCoreKernelLoader,
     TranscriptCoreKernelCommandError,
@@ -83,17 +107,26 @@ const transcriptCoreKernelUrl = new URL(
 export {
     beginAcceptedSetupEvaluatorSourceCatalog,
     beginAcceptedSetupVerification,
+    bindAcceptedSetupEvaluatorGeneratedProofsToPackage,
     bgvCanonicalStreamFamilies,
     certifyClosedWorkerActionRandomnessReservation,
     CommonProofWorkerRuntimeError,
     createWasmBrowserActionStorageWorkerKernel,
     createTranscriptCoreKernelLoader,
+    constructEvaluatorAggregateInClosedWorker,
     describeClosedWorkerCommonProofGenerationFamilyAdapter,
     describeClosedWorkerCommonProofVerificationFamilyAdapter,
     releaseClosedWorkerCommonProofGenerationFamilyAdapter,
     releaseClosedWorkerCommonProofVerificationFamilyAdapter,
+    encodeCanonicalFoundationRoster,
+    FoundationBootstrapInternalError,
+    FoundationBootstrapRefusalError,
+    FoundationBootstrapResourceError,
     foundationObjectTypes,
+    generateAcceptedSetupPublicKeyShareInClosedWorker,
+    generateAcceptedSetupSameSecretInClosedWorker,
     generateBallotValidityInClosedWorker,
+    generateTargetReleaseInClosedWorker,
     generateVssShareLinkageInClosedWorker,
     openBgvCanonicalStreamRuntime,
     openCanonicalBoardVerifierSession,
@@ -109,15 +142,22 @@ export {
     runClosedWorkerCommonProofGenerationFamilyAdapter,
     runClosedWorkerCommonProofVerificationFamilyAdapter,
     releaseVerifiedEvaluatorReplay,
+    reconstructTargetReleaseInClosedWorker,
     verifyClosedWorkerActionRandomnessReservationIntentForWitness,
     openFinalityVerifierSession,
     openFoundationCeremonyRuntime,
     openMailboxGcmRuntime,
     resolveAggregateThresholdShareAuthenticatedRecipientConsumer,
+    activateSelectedSuiteRecordSource,
+    copySelectedSuiteRecordSourceBytes,
+    releaseSelectedSuiteRecordSource,
     TranscriptCoreKernelCommandError,
     verifyAcceptedSetupPublicKeyShareInClosedWorker,
     verifyAcceptedSetupSameSecretInClosedWorker,
+    verifyGeneratedAcceptedSetupPublicKeyShareInClosedWorker,
+    verifyGeneratedAcceptedSetupSameSecretInClosedWorker,
     verifyBallotValidityInClosedWorker,
+    verifyTargetReleaseInClosedWorker,
     verifyVssShareLinkageInClosedWorker,
 };
 export type {
@@ -125,6 +165,12 @@ export type {
     AcceptedSetupVerificationSession,
 } from './accepted-setup-assembly-runtime.js';
 export type { AcceptedSetupProofVerificationInput } from './accepted-setup-proof-verification-runtime.js';
+export type {
+    AcceptedSetupKeyRelationGenerationInput,
+    AcceptedSetupKeyRelationGenerationMode,
+    GeneratedAcceptedSetupKeyRelationProof,
+    GeneratedAcceptedSetupKeyRelationProofVerificationInput,
+} from './accepted-setup-key-relation-generation-runtime.js';
 export type { VerifiedAcceptedSetupAuthority } from './accepted-setup-verification-runtime.js';
 export type {
     VerifiedBallotAggregationSession,
@@ -142,12 +188,28 @@ export type {
     PreparedEvaluatorReplay,
 } from './evaluator-replay-runtime.js';
 export type {
+    EvaluatorAggregateConstructionOptions,
+    EvaluatorAggregateGenerationMode,
+    EvaluatorAggregateSession,
+    EvaluatorKeyStoreDescription,
+} from './evaluator-aggregate-runtime.js';
+export type {
     CanonicalFoundationActionDefinition,
     CanonicalFoundationBoardPolicy,
     CanonicalFoundationManifest,
     FoundationCeremonyRuntime,
     FoundationManifestInput,
 } from './foundation-ceremony-runtime.js';
+export type { FoundationRosterEntryInput } from './foundation-roster-runtime.js';
+export type { SelectedSuiteRecordSource } from './selected-suite-record-source.js';
+export type {
+    GeneratedTargetReleaseTransport,
+    ReconstructedTargetRelease,
+    TargetReleaseGenerationMode,
+    TargetReleasePartialOutputStoreResolver,
+    TargetReleasePartialRole,
+    VerifiedTargetReleaseShare,
+} from './target-release-runtime.js';
 export type {
     AcceptedSetupSession,
     AggregateThresholdShareAuthenticatedRecipientConsumer,

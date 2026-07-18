@@ -93,14 +93,11 @@ impl CommonProofSamplerExhaustionProbabilityBound {
         let common_exponent = self
             .denominator_power_of_two_exponent
             .max(right.denominator_power_of_two_exponent);
-        let left_shift = usize::try_from(
-            common_exponent - self.denominator_power_of_two_exponent,
-        )
-        .map_err(|_| CommonProofSamplerAvailabilityAccountingError::CountOverflow)?;
-        let right_shift = usize::try_from(
-            common_exponent - right.denominator_power_of_two_exponent,
-        )
-        .map_err(|_| CommonProofSamplerAvailabilityAccountingError::CountOverflow)?;
+        let left_shift = usize::try_from(common_exponent - self.denominator_power_of_two_exponent)
+            .map_err(|_| CommonProofSamplerAvailabilityAccountingError::CountOverflow)?;
+        let right_shift =
+            usize::try_from(common_exponent - right.denominator_power_of_two_exponent)
+                .map_err(|_| CommonProofSamplerAvailabilityAccountingError::CountOverflow)?;
         let mut numerator = (&self.numerator << left_shift) + (&right.numerator << right_shift);
         let denominator = power_of_two(common_exponent)?;
         if numerator > denominator {
@@ -320,8 +317,7 @@ pub(crate) struct CommonProofSamplerAvailabilityAccounting {
     deep_sampler: CommonProofDeepSamplerAvailabilityAccounting,
     deep_point_draw_count: u16,
     query_vector_sampler: CommonProofQueryVectorSamplerAvailabilityAccounting,
-    combined_exhaustion_probability_upper_bound:
-        CommonProofSamplerExhaustionProbabilityBound,
+    combined_exhaustion_probability_upper_bound: CommonProofSamplerExhaustionProbabilityBound,
 }
 
 impl CommonProofSamplerAvailabilityAccounting {
@@ -426,9 +422,10 @@ impl SelectedActionSamplerAvailabilityAccounting {
     }
 }
 
-pub(crate) fn selected_complete_action_sampler_availability_accounting()
--> Result<SelectedActionSamplerAvailabilityAccounting, CommonProofSamplerAvailabilityAccountingError>
-{
+pub(crate) fn selected_complete_action_sampler_availability_accounting() -> Result<
+    SelectedActionSamplerAvailabilityAccounting,
+    CommonProofSamplerAvailabilityAccountingError,
+> {
     let top_count = FOUNDATION_PROFILE.option_count;
     let application_slot_ceilings = selected_proof_application_slot_ceilings()
         .map_err(|_| CommonProofSamplerAvailabilityAccountingError::SelectedProfile)?;
@@ -452,20 +449,22 @@ pub(crate) fn selected_complete_action_sampler_availability_accounting()
         if variants.is_empty() {
             return Err(CommonProofSamplerAvailabilityAccountingError::InvalidSchedule);
         }
-        let relation_context = selected_relation_plan_check_context(
-            application_statement_schema_identifier,
-        )
-        .ok_or(CommonProofSamplerAvailabilityAccountingError::SelectedProfile)?;
+        let relation_context =
+            selected_relation_plan_check_context(application_statement_schema_identifier)
+                .ok_or(CommonProofSamplerAvailabilityAccountingError::SelectedProfile)?;
         let has_top_count_selector = variants.iter().any(|variant| variant.top_count().is_some());
         if has_top_count_selector {
             if variants.len() != usize::from(FOUNDATION_PROFILE.option_count)
-                || variants.iter().enumerate().any(|(variant_ordinal, variant)| {
-                    variant.schedule_position().is_some()
-                        || u16::try_from(variant_ordinal)
-                            .ok()
-                            .and_then(|ordinal| ordinal.checked_add(1))
-                            != variant.top_count()
-                })
+                || variants
+                    .iter()
+                    .enumerate()
+                    .any(|(variant_ordinal, variant)| {
+                        variant.schedule_position().is_some()
+                            || u16::try_from(variant_ordinal)
+                                .ok()
+                                .and_then(|ordinal| ordinal.checked_add(1))
+                                != variant.top_count()
+                    })
             {
                 return Err(CommonProofSamplerAvailabilityAccountingError::InvalidSchedule);
             }
@@ -478,10 +477,8 @@ pub(crate) fn selected_complete_action_sampler_availability_accounting()
             if selected_variants.next().is_some() {
                 return Err(CommonProofSamplerAvailabilityAccountingError::InvalidSchedule);
             }
-            let selected_per_proof = sampler_availability_for_variant(
-                selected_variant,
-                &relation_context,
-            )?;
+            let selected_per_proof =
+                sampler_availability_for_variant(selected_variant, &relation_context)?;
             for variant in variants {
                 if sampler_availability_for_variant(variant, &relation_context)?
                     != selected_per_proof
@@ -590,8 +587,7 @@ fn common_proof_sampler_availability_accounting(
 ) -> Result<CommonProofSamplerAvailabilityAccounting, CommonProofSamplerAvailabilityAccountingError>
 {
     let maximum_candidate_draw_count = transition_catalog.maximum_candidate_draws_per_output();
-    if maximum_candidate_draw_count == 0
-        || transition_catalog.query_vector_transition_count() != 1
+    if maximum_candidate_draw_count == 0 || transition_catalog.query_vector_transition_count() != 1
     {
         return Err(CommonProofSamplerAvailabilityAccountingError::InvalidSchedule);
     }
@@ -618,18 +614,15 @@ fn common_proof_sampler_availability_accounting(
         COMMON_PROOF_EXTENSION_CANDIDATE_BIT_LENGTH,
         maximum_candidate_draw_count,
     )?;
-    let generic_extension_draw_count = u64::from(
-        transition_catalog.composition_coefficient_count(),
-    )
-    .checked_add(u64::from(
-        transition_catalog.opening_batch_mca_transition_count(),
-    ))
-    .and_then(|count| {
-        count.checked_add(u64::from(
-            transition_catalog.fri_fold_transition_count(),
-        ))
-    })
-    .ok_or(CommonProofSamplerAvailabilityAccountingError::CountOverflow)?;
+    let generic_extension_draw_count =
+        u64::from(transition_catalog.composition_coefficient_count())
+            .checked_add(u64::from(
+                transition_catalog.opening_batch_mca_transition_count(),
+            ))
+            .and_then(|count| {
+                count.checked_add(u64::from(transition_catalog.fri_fold_transition_count()))
+            })
+            .ok_or(CommonProofSamplerAvailabilityAccountingError::CountOverflow)?;
     let deep_point_draw_count = transition_catalog.deep_point_transition_count();
     let query_orbit_count = evaluation_domain_size
         .checked_div(2)
@@ -648,21 +641,20 @@ fn common_proof_sampler_availability_accounting(
             combined_exhaustion_probability_upper_bound
                 .checked_union(product_sampler.exhaustion_probability())?;
     }
-    combined_exhaustion_probability_upper_bound =
-        combined_exhaustion_probability_upper_bound.checked_union(
+    combined_exhaustion_probability_upper_bound = combined_exhaustion_probability_upper_bound
+        .checked_union(
             &generic_extension_sampler
                 .exhaustion_probability()
                 .checked_multiply_union(generic_extension_draw_count)?,
         )?;
-    combined_exhaustion_probability_upper_bound =
-        combined_exhaustion_probability_upper_bound.checked_union(
+    combined_exhaustion_probability_upper_bound = combined_exhaustion_probability_upper_bound
+        .checked_union(
             &deep_sampler
                 .exhaustion_probability_upper_bound()
                 .checked_multiply_union(u64::from(deep_point_draw_count))?,
         )?;
-    combined_exhaustion_probability_upper_bound =
-        combined_exhaustion_probability_upper_bound
-            .checked_union(query_vector_sampler.exact_exhaustion_probability())?;
+    combined_exhaustion_probability_upper_bound = combined_exhaustion_probability_upper_bound
+        .checked_union(query_vector_sampler.exact_exhaustion_probability())?;
 
     Ok(CommonProofSamplerAvailabilityAccounting {
         ordered_product_samplers,
@@ -681,8 +673,10 @@ fn product_sampler_availability_accounting(
     coordinate_modulus: u64,
     coordinate_count: u16,
     maximum_candidate_draw_count: u32,
-) -> Result<CommonProofProductSamplerAvailabilityAccounting, CommonProofSamplerAvailabilityAccountingError>
-{
+) -> Result<
+    CommonProofProductSamplerAvailabilityAccounting,
+    CommonProofSamplerAvailabilityAccountingError,
+> {
     if coordinate_modulus <= 1 || coordinate_count == 0 || maximum_candidate_draw_count == 0 {
         return Err(CommonProofSamplerAvailabilityAccountingError::InvalidSchedule);
     }
@@ -759,11 +753,10 @@ fn extension_sampler_availability_accounting(
     if rejected_raw_candidate_count_upper_bound > raw_candidate_space {
         return Err(CommonProofSamplerAvailabilityAccountingError::InvalidSchedule);
     }
-    let exhaustion_probability_upper_bound =
-        CommonProofSamplerExhaustionProbabilityBound::new(
-            rejected_raw_candidate_count_upper_bound.pow(maximum_candidate_draw_count),
-            exhaustion_denominator_exponent,
-        )?;
+    let exhaustion_probability_upper_bound = CommonProofSamplerExhaustionProbabilityBound::new(
+        rejected_raw_candidate_count_upper_bound.pow(maximum_candidate_draw_count),
+        exhaustion_denominator_exponent,
+    )?;
 
     Ok((
         CommonProofExtensionSamplerAvailabilityAccounting {
@@ -792,8 +785,10 @@ fn query_vector_sampler_availability_accounting(
     query_orbit_count: u64,
     unique_query_count: u32,
     maximum_candidate_draw_count_per_output: u32,
-) -> Result<CommonProofQueryVectorSamplerAvailabilityAccounting, CommonProofSamplerAvailabilityAccountingError>
-{
+) -> Result<
+    CommonProofQueryVectorSamplerAvailabilityAccounting,
+    CommonProofSamplerAvailabilityAccountingError,
+> {
     if !query_orbit_count.is_power_of_two()
         || unique_query_count == 0
         || u64::from(unique_query_count) > query_orbit_count
@@ -813,8 +808,8 @@ fn query_vector_sampler_availability_accounting(
     let mut exact_success_numerator = BigUint::one();
     let mut per_output_union_numerator = BigUint::zero();
     for prior_accepted_count in 0..unique_query_count {
-        let duplicate_draw_sequence_count = BigUint::from(prior_accepted_count)
-            .pow(maximum_candidate_draw_count_per_output);
+        let duplicate_draw_sequence_count =
+            BigUint::from(prior_accepted_count).pow(maximum_candidate_draw_count_per_output);
         exact_success_numerator *= &per_output_denominator - &duplicate_draw_sequence_count;
         per_output_union_numerator += duplicate_draw_sequence_count;
     }
@@ -840,9 +835,7 @@ fn query_vector_sampler_availability_accounting(
     })
 }
 
-fn power_of_two(
-    exponent: u32,
-) -> Result<BigUint, CommonProofSamplerAvailabilityAccountingError> {
+fn power_of_two(exponent: u32) -> Result<BigUint, CommonProofSamplerAvailabilityAccountingError> {
     Ok(BigUint::one()
         << usize::try_from(exponent)
             .map_err(|_| CommonProofSamplerAvailabilityAccountingError::CountOverflow)?)
@@ -865,8 +858,14 @@ mod tests {
 
         assert_eq!(accounting.product_space_cardinality(), &BigUint::from(9_u8));
         assert_eq!(accounting.candidate_byte_length(), 1);
-        assert_eq!(accounting.rejected_raw_candidate_count(), &BigUint::from(4_u8));
-        assert_eq!(accounting.exhaustion_probability().numerator(), &BigUint::from(16_u8));
+        assert_eq!(
+            accounting.rejected_raw_candidate_count(),
+            &BigUint::from(4_u8)
+        );
+        assert_eq!(
+            accounting.exhaustion_probability().numerator(),
+            &BigUint::from(16_u8)
+        );
         assert_eq!(
             accounting
                 .exhaustion_probability()
@@ -887,7 +886,10 @@ mod tests {
 
         assert_eq!(generic.uniform_preimage_count(), &BigUint::from(85_u8));
         assert_eq!(generic.noncanonical_raw_candidate_count(), &BigUint::one());
-        assert_eq!(generic.exhaustion_probability().numerator(), &BigUint::one());
+        assert_eq!(
+            generic.exhaustion_probability().numerator(),
+            &BigUint::one()
+        );
         assert_eq!(
             deep.rejected_raw_candidate_count_upper_bound(),
             &BigUint::from(86_u8),
@@ -980,11 +982,12 @@ mod tests {
         let two_center_bound = variant
             .application_deep_forbidden_candidate_count_bound(&two_center_context)
             .expect("two-center DEEP bound");
-        let prior_translated_orbit_collision_increment = BigUint::from(
-            opening_point_count
-                .checked_mul(opening_point_count)
-                .expect("opening-point square fits"),
-        ) * BigUint::from(one_center_context.challenge_extension_degree);
+        let prior_translated_orbit_collision_increment =
+            BigUint::from(
+                opening_point_count
+                    .checked_mul(opening_point_count)
+                    .expect("opening-point square fits"),
+            ) * BigUint::from(one_center_context.challenge_extension_degree);
 
         assert_eq!(
             two_center_bound - one_center_bound,
@@ -1008,7 +1011,10 @@ mod tests {
             .count();
 
         assert_eq!(accounting.top_count(), FOUNDATION_PROFILE.option_count);
-        assert_eq!(observed_physical_proof_count, accounting.physical_proof_object_count());
+        assert_eq!(
+            observed_physical_proof_count,
+            accounting.physical_proof_object_count()
+        );
         assert!(product_sampler_count > 0);
         assert!(accounting.ordered_variant_accounting().iter().all(|row| {
             row.per_proof()

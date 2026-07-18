@@ -5,7 +5,7 @@ pub(super) fn encrypt_direct_ballot(
     ballot: DirectBallotInput,
 ) -> CanonicalResult<DirectEncryptedBallot> {
     validate_direct_ballot_input(&ballot)?;
-    let slots = direct_ballot_slots(&ballot.scores);
+    let slots = direct_ballot_slots(&ballot.scores, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE)?;
     let plaintext_coefficients = encode_slots_to_coefficients(&slots)?;
     let (ciphertext, _) = evaluator_key
         .encrypt_coefficients_with_witness(&plaintext_coefficients, &ballot.encryption_seed_hex)?;

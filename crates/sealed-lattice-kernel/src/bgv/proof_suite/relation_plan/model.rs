@@ -7,13 +7,14 @@ use super::{
     compiled_plan::RelationPlanCheckContext,
     expressions::{
         canonical_nested_list, canonical_u32_list, canonical_u64_list,
-        checked_resident_payload_add, encode_generated_tuple,
-        resident_string_payload_byte_length, resident_vec_storage_byte_length,
+        checked_resident_payload_add, encode_generated_tuple, resident_string_payload_byte_length,
+        resident_vec_storage_byte_length,
     },
     layout::RelationPlanVariant,
     schema::{
         APPLICATION_SLOT_SOURCE_SCHEMA_IDENTIFIER, APPLICATION_STATEMENT_SOURCE_SCHEMA_IDENTIFIER,
         BOUND_PUBLIC_TREE_SCHEMA_IDENTIFIER, BOUND_TREE_COLUMN_ORIGIN_SCHEMA_IDENTIFIER,
+        DIRECT_BALLOT_PAIR_DIFFERENCE_ENCODER_WEIGHTS_SOURCE_SCHEMA_IDENTIFIER,
         NEGACYCLIC_AUTOMORPHISM_MAPPING_SOURCE_SCHEMA_IDENTIFIER,
         PROOF_CREATED_TREE_SCHEMA_IDENTIFIER, PROTOCOL_SOURCE_SCHEMA_IDENTIFIER,
         PROVER_COLUMN_ORIGIN_SCHEMA_IDENTIFIER, PUBLIC_ONLY_FAMILIES,
@@ -349,6 +350,15 @@ pub(crate) enum RelationVerifierSource {
         ring_degree: u64,
         galois_element: u64,
     },
+    /// The verifier-derived coefficient weights for one score in the direct
+    /// ballot's canonical packed pair-difference slot layout.
+    DirectBallotPairDifferenceEncoderWeights {
+        ring_degree: u64,
+        primitive_two_n_root: u64,
+        slot_generator: u16,
+        option_count: u16,
+        option_ordinal: u16,
+    },
     /// A plan-owned, deterministic view of a canonical residue source.  It
     /// emits one fixed radix digit of `scale * residue` for every source
     /// element.  The wrapped source remains the sole protocol-facing source;
@@ -398,7 +408,9 @@ impl RelationVerifierSource {
                     .map_err(|_| RelationPlanError::CountOverflow)?,
                 source.resident_owned_payload_byte_length()?,
             ),
-            Self::SamplerOutput { .. } | Self::NegacyclicAutomorphismMapping { .. } => Ok(0),
+            Self::SamplerOutput { .. }
+            | Self::NegacyclicAutomorphismMapping { .. }
+            | Self::DirectBallotPairDifferenceEncoderWeights { .. } => Ok(0),
         }
     }
 
@@ -462,6 +474,12 @@ impl RelationVerifierSource {
                 ],
                 embedding_kind: RelationEmbeddingKind::Identity,
             }),
+            Self::DirectBallotPairDifferenceEncoderWeights { ring_degree, .. } => {
+                Ok(RelationValueLayout::residue_vector(
+                    SuiteModulusReference::plaintext(),
+                    *ring_degree,
+                ))
+            }
             Self::RadixDecomposition { source, .. } => {
                 let source_layout = source.value_layout(samplers, sources)?;
                 Ok(RelationValueLayout {
@@ -542,6 +560,22 @@ impl RelationVerifierSource {
                 vec![
                     CanonicalItem::unsigned64(*ring_degree),
                     CanonicalItem::unsigned64(*galois_element),
+                ],
+            ),
+            Self::DirectBallotPairDifferenceEncoderWeights {
+                ring_degree,
+                primitive_two_n_root,
+                slot_generator,
+                option_count,
+                option_ordinal,
+            } => (
+                DIRECT_BALLOT_PAIR_DIFFERENCE_ENCODER_WEIGHTS_SOURCE_SCHEMA_IDENTIFIER,
+                vec![
+                    CanonicalItem::unsigned64(*ring_degree),
+                    CanonicalItem::unsigned64(*primitive_two_n_root),
+                    CanonicalItem::unsigned16(*slot_generator),
+                    CanonicalItem::unsigned16(*option_count),
+                    CanonicalItem::unsigned16(*option_ordinal),
                 ],
             ),
             Self::RadixDecomposition {
@@ -637,6 +671,30 @@ impl RelationVerifierSource {
                 ring_degree,
                 galois_element,
             } => validate_negacyclic_automorphism(*ring_degree, *galois_element),
+            Self::DirectBallotPairDifferenceEncoderWeights {
+                ring_degree,
+                primitive_two_n_root,
+                slot_generator,
+                option_count,
+                option_ordinal,
+            } => {
+                let option_count = u64::from(*option_count);
+                let pair_count = option_count
+                    .checked_mul(option_count.saturating_sub(1))
+                    .ok_or(RelationPlanError::CountOverflow)?
+                    / 2;
+                if *ring_degree < 2
+                    || !ring_degree.is_power_of_two()
+                    || option_count < 2
+                    || pair_count > *ring_degree
+                    || u64::from(*option_ordinal) >= option_count
+                    || *primitive_two_n_root == 0
+                    || *slot_generator < 2
+                {
+                    return Err(RelationPlanError::InvalidSource);
+                }
+                Ok(())
+            }
             Self::RadixDecomposition {
                 source,
                 modulus_reference,
@@ -993,7 +1051,16 @@ pub(crate) enum RelationTreeDescriptor {
 
 impl RelationTreeDescriptor {
     pub(super) fn resident_owned_payload_byte_length(&self) -> Result<u64, RelationPlanError> {
-        resident_vec_storage_byte_length(self.ordered_column_ordinals())
+        match self {
+            Self::ProofCreated {
+                ordered_column_ordinals,
+                ..
+            }
+            | Self::BoundPublic {
+                ordered_column_ordinals,
+                ..
+            } => resident_vec_storage_byte_length(ordered_column_ordinals),
+        }
     }
 
     pub(crate) fn ordered_column_ordinals(&self) -> &[u32] {
@@ -1584,10 +1651,7 @@ impl RelationRadixProductTermDescriptor {
         self.ordered_factors.iter().try_fold(
             resident_vec_storage_byte_length(&self.ordered_factors)?,
             |total, factor| {
-                checked_resident_payload_add(
-                    total,
-                    factor.resident_owned_payload_byte_length()?,
-                )
+                checked_resident_payload_add(total, factor.resident_owned_payload_byte_length()?)
             },
         )
     }
@@ -1626,10 +1690,7 @@ impl RelationRadixConvolutionDescriptor {
         self.ordered_terms.iter().try_fold(
             resident_vec_storage_byte_length(&self.ordered_terms)?,
             |total, term| {
-                checked_resident_payload_add(
-                    total,
-                    term.resident_owned_payload_byte_length()?,
-                )
+                checked_resident_payload_add(total, term.resident_owned_payload_byte_length()?)
             },
         )
     }

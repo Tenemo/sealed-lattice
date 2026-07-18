@@ -156,6 +156,13 @@ impl CommonProofGenerationFamilyAdapter {
         }
     }
 
+    fn checkpoint_lineage_identifier(&self) -> [u8; 32] {
+        match self {
+            Self::Fresh { prepared } => prepared.checkpoint_lineage_identifier(),
+            Self::Resume(adapter) => adapter.checkpoint_lineage_identifier,
+        }
+    }
+
     fn prepare(
         self,
         authenticated_checkpoint: Option<AuthenticatedCommonProofGenerationCheckpoint>,
@@ -205,6 +212,18 @@ impl CommonProofVerificationFamilyAdapter {
 
     fn verification_binding_hash(&self) -> [u8; 64] {
         self.prepared.verification_binding_hash()
+    }
+
+    fn statement_source(
+        &self,
+    ) -> Result<&super::VerifiedCommonProofStatementSource, CommonProofRuntimeError> {
+        self.prepared.statement_source()
+    }
+
+    fn into_statement_source(
+        self,
+    ) -> Result<super::VerifiedCommonProofStatementSource, CommonProofRuntimeError> {
+        self.prepared.into_statement_source()
     }
 }
 
@@ -351,9 +370,7 @@ impl CommonProofWasmRuntimeRegistry {
         Ok(handle)
     }
 
-    fn issue_verification_family_adapter_handle(
-        &mut self,
-    ) -> Result<u32, CommonProofRuntimeError> {
+    fn issue_verification_family_adapter_handle(&mut self) -> Result<u32, CommonProofRuntimeError> {
         let handle = self.next_verification_family_adapter_handle;
         if handle == 0 {
             return Err(CommonProofRuntimeError::AllocationLimitExceeded);
@@ -432,8 +449,8 @@ pub(crate) fn retain_common_proof_verification_family_adapter_from_upstream(
 
 /// Reserves the sole common-runtime destination needed by an exact-family
 /// verifier before that family consumes its unique package-owned source.
-pub(crate) fn reserve_common_proof_verification_family_adapter(
-) -> Result<u32, CommonProofRuntimeError> {
+pub(crate) fn reserve_common_proof_verification_family_adapter()
+-> Result<u32, CommonProofRuntimeError> {
     COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
         let mut registry = registry.borrow_mut();
         registry.require_new_entry_capacity(true)?;
@@ -452,9 +469,7 @@ pub(crate) fn reserve_common_proof_verification_family_adapter(
 /// destination remains live. The callback cannot consume package authority.
 pub(crate) fn preflight_reserved_common_proof_verification_family_adapter_from_upstream<Output>(
     reservation_handle: u32,
-    preflight: impl FnOnce(
-        &CommonProofUpstreamInputRegistry,
-    ) -> Result<Output, CommonProofRuntimeError>,
+    preflight: impl FnOnce(&CommonProofUpstreamInputRegistry) -> Result<Output, CommonProofRuntimeError>,
 ) -> Result<Output, CommonProofRuntimeError> {
     COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
         let registry = registry.borrow();
@@ -512,6 +527,103 @@ pub(crate) fn cancel_common_proof_verification_family_adapter_reservation(
             Err(CommonProofRuntimeError::UnknownOrStaleHandle)
         }
     })
+}
+
+/// Restores the exact family-minted statement source from an adapter that did
+/// not enter the generic worker. The fallible destination preflight runs while
+/// the adapter remains retained; only the infallible callback receives source
+/// ownership, so a rejected destination leaves the same adapter retryable.
+pub(crate) fn preflight_and_restore_common_proof_verification_family_adapter_statement_source<
+    Preflight,
+    Output,
+>(
+    adapter_handle: u32,
+    preflight: impl FnOnce(
+        &super::VerifiedCommonProofStatementSource,
+    ) -> Result<Preflight, CommonProofRuntimeError>,
+    restore: impl FnOnce(super::VerifiedCommonProofStatementSource, Preflight) -> Output,
+) -> Result<Output, CommonProofRuntimeError> {
+    let preflight = COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        let registry = registry.borrow();
+        let source = registry
+            .verification_family_adapters
+            .get(&adapter_handle)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?
+            .statement_source()?;
+        preflight(source)
+    })?;
+    let source = COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        registry
+            .borrow_mut()
+            .verification_family_adapters
+            .remove(&adapter_handle)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?
+            .into_statement_source()
+    })?;
+    Ok(restore(source, preflight))
+}
+
+/// Restores the exact family-minted statement source from a prepared verifier
+/// that never entered the browser worker. The prepared handle stays live when
+/// destination preflight refuses the transition.
+pub(crate) fn preflight_and_restore_prepared_common_proof_verification_statement_source<
+    Preflight,
+    Output,
+>(
+    prepared_handle: u32,
+    preflight: impl FnOnce(
+        &super::VerifiedCommonProofStatementSource,
+    ) -> Result<Preflight, CommonProofRuntimeError>,
+    restore: impl FnOnce(super::VerifiedCommonProofStatementSource, Preflight) -> Output,
+) -> Result<Output, CommonProofRuntimeError> {
+    let preflight = COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        let registry = registry.borrow();
+        let source = registry
+            .prepared_verifications
+            .get(&prepared_handle)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?
+            .statement_source()?;
+        preflight(source)
+    })?;
+    let source = COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        registry
+            .borrow_mut()
+            .prepared_verifications
+            .remove(&prepared_handle)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?
+            .into_statement_source()
+    })?;
+    Ok(restore(source, preflight))
+}
+
+/// Cancels an active, cancelled, or failed verifier operation and restores its
+/// original family-minted statement source. A verifier refusal may consume its
+/// decoder state, but it never consumes this independent linear authority.
+pub(crate) fn preflight_and_restore_common_proof_verification_operation_statement_source<
+    Preflight,
+    Output,
+>(
+    operation_handle: u32,
+    preflight: impl FnOnce(
+        &super::VerifiedCommonProofStatementSource,
+    ) -> Result<Preflight, CommonProofRuntimeError>,
+    restore: impl FnOnce(super::VerifiedCommonProofStatementSource, Preflight) -> Output,
+) -> Result<Output, CommonProofRuntimeError> {
+    let operation_handle =
+        CommonProofVerificationOperationHandle::from_identifier(operation_handle);
+    let preflight = COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        registry
+            .borrow()
+            .runtime
+            .with_verification_statement_source(operation_handle, preflight)
+    })??;
+    let source = COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        registry
+            .borrow_mut()
+            .runtime
+            .cancel_operation_and_take_statement_source(operation_handle)
+    })?;
+    Ok(restore(source, preflight))
 }
 
 /// Transfers one genuinely completed verifier capability into an exact-family
@@ -671,16 +783,18 @@ pub unsafe extern "C" fn sealed_lattice_common_proof_describe_generation_family_
     runtime_binding_hash_output_pointer: *mut u8,
     generation_authorization_hash_output_pointer: *mut u8,
     proof_attempt_lineage_identifier_output_pointer: *mut u8,
+    checkpoint_lineage_identifier_output_pointer: *mut u8,
     status_pointer: *mut u32,
 ) -> u32 {
     let result = COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
         let registry = registry.borrow();
-        let description = registry
+        let adapter = registry
             .generation_family_adapters
             .get(&adapter_handle)
             .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)
-            .map_err(runtime_error_status)?
-            .description();
+            .map_err(runtime_error_status)?;
+        let description = adapter.description();
+        let checkpoint_lineage_identifier = adapter.checkpoint_lineage_identifier();
         unsafe {
             copy_exact_output_bytes(
                 runtime_binding_hash_output_pointer,
@@ -696,6 +810,11 @@ pub unsafe extern "C" fn sealed_lattice_common_proof_describe_generation_family_
                 proof_attempt_lineage_identifier_output_pointer,
                 description.proof_attempt_lineage_identifier.len(),
                 &description.proof_attempt_lineage_identifier,
+            )?;
+            copy_exact_output_bytes(
+                checkpoint_lineage_identifier_output_pointer,
+                checkpoint_lineage_identifier.len(),
+                &checkpoint_lineage_identifier,
             )?;
         }
         Ok::<(), u32>(())
@@ -1019,7 +1138,7 @@ fn select_canonical_suite_record(canonical_suite_record_bytes: &[u8]) -> Result<
             .map_err(runtime_error_status)?;
         registry
             .upstream_inputs
-            .install_suite(selected_suite)
+            .install_suite(selected_suite, reencoded_suite_record)
             .map(|handle| handle.get())
             .map_err(runtime_error_status)
     })
@@ -1126,6 +1245,70 @@ pub extern "C" fn sealed_lattice_common_proof_release_suite(handle: u32) -> u32 
             .upstream_inputs
             .release_suite(handle)
             .map_or_else(runtime_error_status, |()| 0)
+    })
+}
+
+/// Returns the exact positively selected canonical suite-record length.
+///
+/// # Safety
+///
+/// A non-null status pointer must name one writable `u32` in WASM memory.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_common_proof_selected_suite_record_byte_length(
+    handle: u32,
+    status_pointer: *mut u32,
+) -> usize {
+    let result = COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        registry
+            .borrow()
+            .upstream_inputs
+            .canonical_suite_record_bytes(handle)
+            .map(<[u8]>::len)
+    });
+    match result {
+        Ok(byte_length) => {
+            unsafe {
+                write_status(status_pointer, 0);
+            }
+            byte_length
+        }
+        Err(error) => {
+            unsafe {
+                write_status(status_pointer, runtime_error_status(error));
+            }
+            0
+        }
+    }
+}
+
+/// Copies the exact canonical bytes retained by positive suite selection.
+///
+/// # Safety
+///
+/// The output pointer must name its declared writable range in WASM memory.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_common_proof_copy_selected_suite_record(
+    handle: u32,
+    output_pointer: *mut u8,
+    output_byte_length: usize,
+) -> u32 {
+    COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        let registry = registry.borrow();
+        let canonical_suite_record_bytes = match registry
+            .upstream_inputs
+            .canonical_suite_record_bytes(handle)
+        {
+            Ok(bytes) => bytes,
+            Err(error) => return runtime_error_status(error),
+        };
+        unsafe {
+            copy_exact_output_bytes(
+                output_pointer,
+                output_byte_length,
+                canonical_suite_record_bytes,
+            )
+        }
+        .map_or_else(core::convert::identity, |()| 0)
     })
 }
 
@@ -2154,6 +2337,23 @@ pub extern "C" fn sealed_lattice_common_proof_verification_cancel(operation_hand
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{
+        bgv::{
+            proof_suite::{
+                CommonProofRelationPlanCapability, VerifiedCommonProofStatementSource,
+                VerifiedStatementOwnedTree, canonical_selected_vss_share_linkage_statement,
+                compile_vss_share_linkage_relation_plan,
+                selected_committed_material_relation_plan_input, selected_proof_runtime_limits,
+                selected_relation_plan_check_context,
+            },
+            setup::VerifiedPublicRandomness,
+        },
+        foundation::{
+            ParticipantIdentity, ProofApplicationSlotCeilings, selected_suite_capability_for_tests,
+        },
+    };
+    use core::mem::size_of;
+    use std::cell::RefCell;
 
     struct IsolatedCommonProofWasmRuntimeRegistry;
 
@@ -2183,6 +2383,218 @@ mod tests {
             Hash512::from_bytes([0x55; 64]),
             Box::new(|_| Err(CommonProofRuntimeError::WrongVerificationBinding.into())),
         )
+    }
+
+    fn test_root(domain: u8, ordinal: usize) -> [u8; Hash512::BYTE_LENGTH] {
+        let mut root = [domain; Hash512::BYTE_LENGTH];
+        root[..size_of::<u64>()].copy_from_slice(
+            &u64::try_from(ordinal)
+                .expect("selected catalog ordinal fits u64")
+                .to_le_bytes(),
+        );
+        root[Hash512::BYTE_LENGTH - 1] = domain;
+        root
+    }
+
+    fn test_proof_stream_descriptor(proof_byte_length: usize) -> StreamDescriptor {
+        let chunk_byte_length = FOUNDATION_PROFILE.stream_chunk_byte_length;
+        let chunk_count = proof_byte_length
+            .checked_add(chunk_byte_length - 1)
+            .expect("selected proof byte length fits usize")
+            / chunk_byte_length;
+        StreamDescriptor {
+            total_byte_length: u64::try_from(proof_byte_length)
+                .expect("selected proof byte length fits u64"),
+            ordered_chunk_digests: vec![Hash512::from_bytes([0xd1; 64]); chunk_count].into(),
+            full_object_digest: Hash512::from_bytes([0xd2; 64]),
+        }
+    }
+
+    fn exact_vss_prepared_verification_fixture() -> (PreparedCommonProofVerification, usize) {
+        let selected_suite = selected_suite_capability_for_tests();
+        let suite_identifier = Hash512::from_bytes(selected_suite.suite_identifier());
+        let manifest_hash = Hash512::from_bytes([0x18; 64]);
+        let ceremony_context_hash = Hash512::from_bytes([0x22; 64]);
+        let action_context_hash = Hash512::from_bytes([0x33; 64]);
+        let roster_hash = Hash512::from_bytes([0x44; 64]);
+        let public_setup_seed = Hash512::from_bytes([0x55; 64]);
+        let ordered_participant_identities = (0..FOUNDATION_PROFILE.participant_count)
+            .map(|roster_position| {
+                ParticipantIdentity::from_bytes(test_root(0x70, usize::from(roster_position)))
+            })
+            .collect::<Vec<_>>();
+        let verified_public_randomness = VerifiedPublicRandomness::from_test_values(
+            suite_identifier,
+            manifest_hash,
+            ceremony_context_hash,
+            action_context_hash,
+            roster_hash,
+            ordered_participant_identities,
+            public_setup_seed,
+        );
+        let relation_input = selected_committed_material_relation_plan_input()
+            .expect("selected committed-material relation input");
+        let sharing_limb_count = relation_input.sharing_data_modulus_indices.len();
+        let reconstruction_threshold = usize::from(relation_input.threshold);
+        let participant_count = usize::from(relation_input.participant_count);
+        let coefficient_root_count = sharing_limb_count
+            .checked_mul(reconstruction_threshold)
+            .expect("selected coefficient root count fits usize");
+        let recipient_root_count = sharing_limb_count
+            .checked_mul(participant_count)
+            .expect("selected recipient root count fits usize");
+        let ordered_coefficient_roots = (0..coefficient_root_count)
+            .map(|root_ordinal| test_root(0xa1, root_ordinal))
+            .collect::<Vec<_>>();
+        let ordered_recipient_roots = (0..recipient_root_count)
+            .map(|root_ordinal| test_root(0xb2, root_ordinal))
+            .collect::<Vec<_>>();
+        let dealer_roster_position = 3_u16;
+        let dealer_identity = verified_public_randomness.ordered_participant_identities()
+            [usize::from(dealer_roster_position)]
+        .into_bytes();
+        let canonical_application_statement_bytes = canonical_selected_vss_share_linkage_statement(
+            FOUNDATION_PROFILE.protocol_version,
+            suite_identifier.into_bytes(),
+            ceremony_context_hash.into_bytes(),
+            action_context_hash.into_bytes(),
+            roster_hash.into_bytes(),
+            public_setup_seed.into_bytes(),
+            dealer_identity,
+            dealer_roster_position,
+            &ordered_coefficient_roots,
+            &ordered_recipient_roots,
+        )
+        .expect("selected VSS statement is canonical");
+        let statement_schema_identifier =
+            ProofApplicationSlotCeilings::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER;
+        let relation_context = selected_relation_plan_check_context(statement_schema_identifier)
+            .expect("selected VSS relation context");
+        let compiled_relation_plan =
+            compile_vss_share_linkage_relation_plan(&relation_input, &relation_context)
+                .expect("selected VSS relation plan");
+        let selected_variant = compiled_relation_plan
+            .select_variant(None, None)
+            .expect("selected VSS relation variant");
+        let limits = selected_proof_runtime_limits(
+            statement_schema_identifier,
+            &canonical_application_statement_bytes,
+            selected_variant,
+        )
+        .expect("selected VSS proof limits");
+        let relation_plan = CommonProofRelationPlanCapability::from_compiled_plan(
+            &compiled_relation_plan,
+            &relation_context,
+            None,
+            None,
+        )
+        .expect("selected VSS relation capability");
+        let statement_source =
+            VerifiedCommonProofStatementSource::from_test_verified_vss_statement_source(
+                &verified_public_randomness,
+                canonical_application_statement_bytes,
+                test_proof_stream_descriptor(limits.proof_byte_length()),
+                relation_plan,
+                limits,
+            )
+            .expect("exact selected VSS statement source");
+        let statement_byte_allocation = statement_source
+            .canonical_application_statement_bytes()
+            .as_ptr() as usize;
+        let statement_trees =
+            VerifiedStatementOwnedTree::from_verified_committed_material_statement_source(
+                &statement_source,
+                &verified_public_randomness,
+            )
+            .expect("selected VSS statement tree catalog");
+        let prepared = COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+            let mut registry = registry.borrow_mut();
+            let suite_handle = registry
+                .upstream_inputs
+                .install_suite(selected_suite, vec![0x51])
+                .expect("selected suite authority is retained");
+            registry
+                .upstream_inputs
+                .prepare_statement_tree_family_verification_without_evaluator(
+                    &suite_handle,
+                    statement_source,
+                    statement_trees,
+                )
+                .expect("exact VSS verifier is prepared")
+        });
+        (prepared, statement_byte_allocation)
+    }
+
+    #[test]
+    fn selected_suite_bytes_have_exact_copy_bounds_and_end_with_the_handle_lifecycle() {
+        let _isolated_registry = IsolatedCommonProofWasmRuntimeRegistry::new();
+        let exact_suite_bytes = vec![0x31, 0x42, 0x53, 0x64, 0x75];
+        let selected_suite_handle = COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+            registry
+                .borrow_mut()
+                .upstream_inputs
+                .install_suite(
+                    selected_suite_capability_for_tests(),
+                    exact_suite_bytes.clone(),
+                )
+                .expect("selected suite and its exact bytes are retained")
+                .get()
+        });
+
+        let mut status = u32::MAX;
+        let byte_length = unsafe {
+            sealed_lattice_common_proof_selected_suite_record_byte_length(
+                selected_suite_handle,
+                &mut status,
+            )
+        };
+        assert_eq!(status, 0);
+        assert_eq!(byte_length, exact_suite_bytes.len());
+
+        let mut short_output = vec![0_u8; byte_length - 1];
+        assert_eq!(
+            unsafe {
+                sealed_lattice_common_proof_copy_selected_suite_record(
+                    selected_suite_handle,
+                    short_output.as_mut_ptr(),
+                    short_output.len(),
+                )
+            },
+            refusal_status(RefusalReason::WrongTypeOrLength)
+        );
+
+        let mut copied_suite_bytes = vec![0_u8; byte_length];
+        assert_eq!(
+            unsafe {
+                sealed_lattice_common_proof_copy_selected_suite_record(
+                    selected_suite_handle,
+                    copied_suite_bytes.as_mut_ptr(),
+                    copied_suite_bytes.len(),
+                )
+            },
+            0
+        );
+        assert_eq!(copied_suite_bytes, exact_suite_bytes);
+
+        assert_eq!(
+            sealed_lattice_common_proof_release_suite(selected_suite_handle),
+            0
+        );
+        status = u32::MAX;
+        assert_eq!(
+            unsafe {
+                sealed_lattice_common_proof_selected_suite_record_byte_length(
+                    selected_suite_handle,
+                    &mut status,
+                )
+            },
+            0
+        );
+        assert_eq!(status, refusal_status(RefusalReason::ConsumedState));
+        assert_eq!(
+            sealed_lattice_common_proof_release_suite(selected_suite_handle),
+            refusal_status(RefusalReason::ConsumedState)
+        );
     }
 
     #[test]
@@ -2263,6 +2675,187 @@ mod tests {
         assert_eq!(
             sealed_lattice_common_proof_discard_generation_family_adapter(adapter_handle),
             0,
+        );
+    }
+
+    #[test]
+    fn verifier_adapter_and_prepared_discard_restore_the_exact_statement_source() {
+        let _isolated_registry = IsolatedCommonProofWasmRuntimeRegistry::new();
+        let (prepared, statement_byte_allocation) = exact_vss_prepared_verification_fixture();
+        let adapter_handle = retain_common_proof_verification_family_adapter(
+            CommonProofVerificationFamilyAdapter::new(prepared),
+        )
+        .expect("the exact verifier adapter is retained");
+
+        let rejected_restore: Result<(), CommonProofRuntimeError> =
+            preflight_and_restore_common_proof_verification_family_adapter_statement_source(
+                adapter_handle,
+                |_| Err(CommonProofRuntimeError::WrongVerificationBinding),
+                |_, ()| (),
+            );
+        assert_eq!(
+            rejected_restore,
+            Err(CommonProofRuntimeError::WrongVerificationBinding),
+            "a rejected destination cannot consume the adapter source",
+        );
+        let restored_adapter_source = RefCell::new(None);
+        preflight_and_restore_common_proof_verification_family_adapter_statement_source(
+            adapter_handle,
+            |source| {
+                assert_eq!(
+                    source.canonical_application_statement_bytes().as_ptr() as usize,
+                    statement_byte_allocation,
+                    "adapter preflight borrows the original statement allocation",
+                );
+                Ok(())
+            },
+            |source, ()| {
+                *restored_adapter_source.borrow_mut() = Some(source);
+            },
+        )
+        .expect("adapter discard restores its exact statement source");
+        let source = restored_adapter_source
+            .into_inner()
+            .expect("adapter restoration returns one source");
+        assert_eq!(
+            source.canonical_application_statement_bytes().as_ptr() as usize,
+            statement_byte_allocation,
+            "adapter restoration moves rather than reconstructs the source",
+        );
+
+        let (prepared, prepared_statement_byte_allocation) =
+            exact_vss_prepared_verification_fixture();
+        let adapter_handle = retain_common_proof_verification_family_adapter(
+            CommonProofVerificationFamilyAdapter::new(prepared),
+        )
+        .expect("the second exact verifier adapter is retained");
+        let mut status = u32::MAX;
+        let prepared_handle = unsafe {
+            sealed_lattice_common_proof_prepare_verification_family_adapter(
+                adapter_handle,
+                &mut status,
+            )
+        };
+        assert_ne!(prepared_handle, 0);
+        assert_eq!(status, 0);
+        let restored_prepared_source = RefCell::new(None);
+        preflight_and_restore_prepared_common_proof_verification_statement_source(
+            prepared_handle,
+            |source| {
+                assert_eq!(
+                    source.canonical_application_statement_bytes().as_ptr() as usize,
+                    prepared_statement_byte_allocation,
+                );
+                Ok(())
+            },
+            |source, ()| {
+                *restored_prepared_source.borrow_mut() = Some(source);
+            },
+        )
+        .expect("prepared-verifier discard restores its exact statement source");
+        assert_eq!(
+            restored_prepared_source
+                .into_inner()
+                .expect("prepared restoration returns one source")
+                .canonical_application_statement_bytes()
+                .as_ptr() as usize,
+            prepared_statement_byte_allocation,
+            "prepared restoration moves rather than reconstructs the source",
+        );
+    }
+
+    #[test]
+    fn verifier_cancellation_and_failure_restore_the_exact_statement_source() {
+        let _isolated_registry = IsolatedCommonProofWasmRuntimeRegistry::new();
+        let begin_operation = |prepared: PreparedCommonProofVerification| {
+            let adapter_handle = retain_common_proof_verification_family_adapter(
+                CommonProofVerificationFamilyAdapter::new(prepared),
+            )
+            .expect("the exact verifier adapter is retained");
+            let mut status = u32::MAX;
+            let prepared_handle = unsafe {
+                sealed_lattice_common_proof_prepare_verification_family_adapter(
+                    adapter_handle,
+                    &mut status,
+                )
+            };
+            assert_ne!(prepared_handle, 0);
+            assert_eq!(status, 0);
+            let operation_handle = unsafe {
+                sealed_lattice_common_proof_begin_verification(prepared_handle, &mut status)
+            };
+            assert_ne!(operation_handle, 0);
+            assert_eq!(status, 0);
+            operation_handle
+        };
+
+        let (prepared, cancellation_statement_byte_allocation) =
+            exact_vss_prepared_verification_fixture();
+        let operation_handle = begin_operation(prepared);
+        let restored_cancelled_source = RefCell::new(None);
+        preflight_and_restore_common_proof_verification_operation_statement_source(
+            operation_handle,
+            |source| {
+                assert_eq!(
+                    source.canonical_application_statement_bytes().as_ptr() as usize,
+                    cancellation_statement_byte_allocation,
+                );
+                Ok(())
+            },
+            |source, ()| {
+                *restored_cancelled_source.borrow_mut() = Some(source);
+            },
+        )
+        .expect("worker cancellation restores its exact statement source");
+        assert_eq!(
+            restored_cancelled_source
+                .into_inner()
+                .expect("cancelled operation returns one source")
+                .canonical_application_statement_bytes()
+                .as_ptr() as usize,
+            cancellation_statement_byte_allocation,
+        );
+
+        let (prepared, failed_statement_byte_allocation) =
+            exact_vss_prepared_verification_fixture();
+        let failed_operation_handle = begin_operation(prepared);
+        let mut finish_status = u32::MAX;
+        assert_eq!(
+            unsafe {
+                sealed_lattice_common_proof_verification_finish(
+                    failed_operation_handle,
+                    &mut finish_status,
+                )
+            },
+            0,
+        );
+        assert_eq!(
+            finish_status,
+            refusal_status(RefusalReason::ConsumedState),
+            "finishing before canonical input completion is a verifier-phase refusal",
+        );
+        let restored_failed_source = RefCell::new(None);
+        preflight_and_restore_common_proof_verification_operation_statement_source(
+            failed_operation_handle,
+            |source| {
+                assert_eq!(
+                    source.canonical_application_statement_bytes().as_ptr() as usize,
+                    failed_statement_byte_allocation,
+                );
+                Ok(())
+            },
+            |source, ()| {
+                *restored_failed_source.borrow_mut() = Some(source);
+            },
+        )
+        .expect("verifier failure retains and restores its exact statement source");
+        assert_eq!(
+            restored_failed_source
+                .into_inner()
+                .expect("failed operation returns one source")
+                .canonical_application_statement_bytes()
+                .as_ptr() as usize,
+            failed_statement_byte_allocation,
         );
     }
 }

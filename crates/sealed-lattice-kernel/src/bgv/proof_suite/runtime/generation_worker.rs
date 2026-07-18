@@ -220,9 +220,18 @@ impl CommonProofGenerationAuthorization {
     ) -> Result<Self, CommonProofRuntimeError> {
         if attempt_source.application_statement_schema_identifier()
             != ProofApplicationSlotCeilings::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER
-            || attempt_source.application_slot().roster_position().is_some()
-            || attempt_source.application_slot().schedule_position().is_some()
-            || attempt_source.application_slot().producer_sequence().is_some()
+            || attempt_source
+                .application_slot()
+                .roster_position()
+                .is_some()
+            || attempt_source
+                .application_slot()
+                .schedule_position()
+                .is_some()
+            || attempt_source
+                .application_slot()
+                .producer_sequence()
+                .is_some()
         {
             return Err(CommonProofRuntimeError::WrongVerificationBinding);
         }
@@ -486,12 +495,12 @@ impl CommonProofPostOutputApplicationBinding {
                 .ceremony_context_hash()
                 .into_bytes()
                 != self.authorization.ceremony_context_hash
-            || application_source_authority.action_context_hash().into_bytes()
+            || application_source_authority
+                .action_context_hash()
+                .into_bytes()
                 != self.authorization.action_context_hash
             || application_source_authority.application_statement_schema_identifier()
-                != self
-                    .authorization
-                    .application_statement_schema_identifier
+                != self.authorization.application_statement_schema_identifier
             || application_source_authority.producer_roster_position()
                 != application_slot.roster_position()
             || application_source_authority.schedule_position()

@@ -1,11 +1,15 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fmt,
+};
 
 use zeroize::{Zeroize, Zeroizing};
 
 use crate::{
     foundation::{
         CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple,
-        StreamingFoundationTupleHash512, hash_foundation_tuple_512,
+        StreamingFoundationTupleHash512, canonical_foundation_tuple_hash_preimage,
+        canonical_foundation_variable_bytes_hash_preimage, hash_foundation_tuple_512,
     },
     hashing::hash_framed_parts_512 as hash512,
 };
@@ -462,7 +466,7 @@ impl ProofOraclePhasePairLeafDigestBuilder {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub(crate) struct ProofOraclePhasePairLeaf {
     proof_tree_context_hash: [u8; 64],
     leaf_index: u64,
@@ -470,6 +474,24 @@ pub(crate) struct ProofOraclePhasePairLeaf {
     secret_salt: Option<[u8; COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH]>,
     first_point_values: Zeroizing<Vec<ProofTreeValue>>,
     opposite_point_values: Zeroizing<Vec<ProofTreeValue>>,
+}
+
+impl fmt::Debug for ProofOraclePhasePairLeaf {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ProofOraclePhasePairLeaf")
+            .field("leaf_index", &self.leaf_index)
+            .field("leaf_visibility", &self.leaf_visibility)
+            .field("has_secret_salt", &self.secret_salt.is_some())
+            .field("row_width", &self.first_point_values.len())
+            .finish_non_exhaustive()
+    }
+}
+
+impl Drop for ProofOraclePhasePairLeaf {
+    fn drop(&mut self) {
+        self.secret_salt.zeroize();
+    }
 }
 
 impl ProofOraclePhasePairLeaf {
@@ -561,6 +583,15 @@ impl ProofOraclePhasePairLeaf {
         self.canonical_tuple()?
             .encode()
             .map_err(canonical_encoding_error)
+    }
+
+    pub(crate) fn hash_preimage(&self) -> Result<Zeroizing<Vec<u8>>, ProofMerkleError> {
+        let canonical_bytes = Zeroizing::new(self.canonical_bytes()?);
+        canonical_foundation_variable_bytes_hash_preimage(
+            PROOF_PHASE_PAIR_LEAF_HASH_DOMAIN,
+            canonical_bytes.as_slice(),
+        )
+        .map_err(canonical_encoding_error)
     }
 
     fn canonical_leaf_byte_length(
@@ -801,6 +832,43 @@ pub(in crate::bgv::proof_suite) fn proof_merkle_node_digest(
     left_child_digest: [u8; 64],
     right_child_digest: [u8; 64],
 ) -> Result<[u8; 64], ProofMerkleError> {
+    let items = proof_merkle_node_hash_items(
+        context_hash,
+        level,
+        node_index,
+        left_child_digest,
+        right_child_digest,
+    )?;
+    Ok(hash_foundation_tuple_512(MERKLE_NODE_DOMAIN, &items)
+        .map_err(canonical_encoding_error)?
+        .into_bytes())
+}
+
+pub(in crate::bgv::proof_suite) fn proof_merkle_node_hash_preimage(
+    context_hash: [u8; 64],
+    level: u32,
+    node_index: u64,
+    left_child_digest: [u8; 64],
+    right_child_digest: [u8; 64],
+) -> Result<Zeroizing<Vec<u8>>, ProofMerkleError> {
+    let items = proof_merkle_node_hash_items(
+        context_hash,
+        level,
+        node_index,
+        left_child_digest,
+        right_child_digest,
+    )?;
+    canonical_foundation_tuple_hash_preimage(MERKLE_NODE_DOMAIN, &items)
+        .map_err(canonical_encoding_error)
+}
+
+fn proof_merkle_node_hash_items(
+    context_hash: [u8; 64],
+    level: u32,
+    node_index: u64,
+    left_child_digest: [u8; 64],
+    right_child_digest: [u8; 64],
+) -> Result<[CanonicalItem; 1], ProofMerkleError> {
     if level == 0 {
         return Err(ProofMerkleError::InvalidNode);
     }
@@ -817,12 +885,7 @@ pub(in crate::bgv::proof_suite) fn proof_merkle_node_digest(
     )
     .encode()
     .map_err(canonical_encoding_error)?;
-    Ok(hash_foundation_tuple_512(
-        MERKLE_NODE_DOMAIN,
-        &[CanonicalItem::variable_bytes(canonical_bytes).map_err(canonical_encoding_error)?],
-    )
-    .map_err(canonical_encoding_error)?
-    .into_bytes())
+    Ok([CanonicalItem::variable_bytes(canonical_bytes).map_err(canonical_encoding_error)?])
 }
 
 pub(in crate::bgv::proof_suite) fn minimal_frontier_coordinates(

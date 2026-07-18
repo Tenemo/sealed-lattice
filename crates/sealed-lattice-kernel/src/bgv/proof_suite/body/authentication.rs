@@ -1,7 +1,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::bgv::proof_suite::COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH;
-use crate::foundation::{CanonicalItem, CanonicalItemType, hash_foundation_tuple_512};
+use crate::foundation::{
+    CanonicalItem, CanonicalItemType, canonical_foundation_tuple_hash_preimage,
+    hash_foundation_tuple_512,
+};
+use zeroize::Zeroizing;
 
 use super::super::{
     PROOF_CHALLENGE_EXTENSION_DEGREE,
@@ -407,6 +411,43 @@ pub(super) fn statement_owned_node_digest(
     left_child_digest: [u8; 64],
     right_child_digest: [u8; 64],
 ) -> Result<[u8; 64], ProofBodyError> {
+    let (domain, items) = statement_owned_node_hash_input(
+        construction,
+        level,
+        parent_index,
+        left_child_digest,
+        right_child_digest,
+    )?;
+    Ok(hash_foundation_tuple_512(domain, &items)
+        .map_err(|_| ProofBodyError::CanonicalEncoding)?
+        .into_bytes())
+}
+
+pub(super) fn statement_owned_node_hash_preimage(
+    construction: &ProofTreeConstruction,
+    level: u32,
+    parent_index: u64,
+    left_child_digest: [u8; 64],
+    right_child_digest: [u8; 64],
+) -> Result<Zeroizing<Vec<u8>>, ProofBodyError> {
+    let (domain, items) = statement_owned_node_hash_input(
+        construction,
+        level,
+        parent_index,
+        left_child_digest,
+        right_child_digest,
+    )?;
+    canonical_foundation_tuple_hash_preimage(domain, &items)
+        .map_err(|_| ProofBodyError::CanonicalEncoding)
+}
+
+fn statement_owned_node_hash_input(
+    construction: &ProofTreeConstruction,
+    level: u32,
+    parent_index: u64,
+    left_child_digest: [u8; 64],
+    right_child_digest: [u8; 64],
+) -> Result<(&'static str, Vec<CanonicalItem>), ProofBodyError> {
     let left_child_index = parent_index
         .checked_mul(2)
         .ok_or(ProofBodyError::CountOverflow)?;
@@ -435,7 +476,5 @@ pub(super) fn statement_owned_node_digest(
         ),
         ProofTreeConstruction::Common(_) => return Err(ProofBodyError::InvalidCatalog),
     };
-    Ok(hash_foundation_tuple_512(domain, &items)
-        .map_err(|_| ProofBodyError::CanonicalEncoding)?
-        .into_bytes())
+    Ok((domain, items))
 }

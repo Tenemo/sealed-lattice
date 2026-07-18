@@ -1092,6 +1092,7 @@ describe('common-proof generation runtime', () => {
                 runtimeBindingHashOutputPointer,
                 verificationBindingHashOutputPointer,
                 proofAttemptLineageIdentifierOutputPointer,
+                checkpointLineageIdentifierOutputPointer,
                 statusPointer,
             ) => {
                 expect(adapterHandle).toBe(72);
@@ -1110,6 +1111,11 @@ describe('common-proof generation runtime', () => {
                     proofAttemptLineageIdentifierOutputPointer,
                     32,
                 ).fill(0x59);
+                memoryBytes(
+                    memory,
+                    checkpointLineageIdentifierOutputPointer,
+                    32,
+                ).fill(0x5a);
                 writeUnsigned32(memory, statusPointer, 0);
                 return 0;
             },
@@ -1390,6 +1396,7 @@ describe('common-proof generation runtime', () => {
                 runtimeBindingHashOutputPointer,
                 verificationBindingHashOutputPointer,
                 proofAttemptLineageIdentifierOutputPointer,
+                checkpointLineageIdentifierOutputPointer,
                 statusPointer,
             ) => {
                 expect(adapterHandle).toBe(73);
@@ -1408,6 +1415,11 @@ describe('common-proof generation runtime', () => {
                     proofAttemptLineageIdentifierOutputPointer,
                     32,
                 ).fill(0x33);
+                memoryBytes(
+                    memory,
+                    checkpointLineageIdentifierOutputPointer,
+                    32,
+                ).fill(0x34);
                 writeUnsigned32(memory, statusPointer, 0);
                 return 0;
             },
@@ -1479,6 +1491,7 @@ describe('common-proof generation runtime', () => {
                 runtimeBindingHashOutputPointer,
                 verificationBindingHashOutputPointer,
                 proofAttemptLineageIdentifierOutputPointer,
+                checkpointLineageIdentifierOutputPointer,
                 statusPointer,
             ) => {
                 expect(adapterHandle).toBe(74);
@@ -1497,6 +1510,11 @@ describe('common-proof generation runtime', () => {
                     proofAttemptLineageIdentifierOutputPointer,
                     32,
                 ).fill(0x33);
+                memoryBytes(
+                    memory,
+                    checkpointLineageIdentifierOutputPointer,
+                    32,
+                ).fill(0x34);
                 writeUnsigned32(memory, statusPointer, 0);
                 return 0;
             },
@@ -1539,6 +1557,7 @@ describe('common-proof generation runtime', () => {
                 runtimeBindingHashOutputPointer,
                 verificationBindingHashOutputPointer,
                 proofAttemptLineageIdentifierOutputPointer,
+                checkpointLineageIdentifierOutputPointer,
                 statusPointer,
             ) => {
                 expect(adapterHandle).toBe(77);
@@ -1557,6 +1576,11 @@ describe('common-proof generation runtime', () => {
                     proofAttemptLineageIdentifierOutputPointer,
                     32,
                 ).fill(0x33);
+                memoryBytes(
+                    memory,
+                    checkpointLineageIdentifierOutputPointer,
+                    32,
+                ).fill(0x34);
                 writeUnsigned32(memory, statusPointer, 0);
                 return 0;
             },
@@ -1613,6 +1637,7 @@ describe('common-proof generation runtime', () => {
                 _runtimeBindingHashOutputPointer,
                 _verificationBindingHashOutputPointer,
                 _proofAttemptLineageIdentifierOutputPointer,
+                _checkpointLineageIdentifierOutputPointer,
                 _statusPointer,
             ) => {
                 adapterDescriptionCount += 1;
@@ -1651,6 +1676,7 @@ describe('common-proof generation runtime', () => {
                 runtimeBindingHashOutputPointer,
                 verificationBindingHashOutputPointer,
                 proofAttemptLineageIdentifierOutputPointer,
+                checkpointLineageIdentifierOutputPointer,
                 statusPointer,
             ) => {
                 expect(adapterHandle).toBe(76);
@@ -1669,6 +1695,11 @@ describe('common-proof generation runtime', () => {
                     proofAttemptLineageIdentifierOutputPointer,
                     32,
                 ).fill(0x33);
+                memoryBytes(
+                    memory,
+                    checkpointLineageIdentifierOutputPointer,
+                    32,
+                ).fill(0x34);
                 writeUnsigned32(memory, statusPointer, 0);
                 return 0;
             },

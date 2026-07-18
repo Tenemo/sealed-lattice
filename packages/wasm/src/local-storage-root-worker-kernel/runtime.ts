@@ -53,7 +53,10 @@ import {
     type VerifiedStateDurableBinding,
     type VerifiedStateReservation,
 } from '../state-verifier-runtime.js';
-import { type ActionRandomnessKernelContext } from '../transcript-core-bridge/action-randomness-kernel-context.js';
+import {
+    resolveActionRandomnessKernelContext,
+    type ActionRandomnessKernelContext,
+} from '../transcript-core-bridge/action-randomness-kernel-context.js';
 import { resolveCommonProofKernelContext } from '../transcript-core-bridge/common-proof-kernel-context.js';
 import type {
     SetupMailboxSlot,
@@ -63,6 +66,8 @@ import { bytesToHex } from '../transcript-core-bridge/kernel-wasm-hash.js';
 import { type LocalStorageRootKernelContext } from '../transcript-core-bridge/local-storage-root-kernel-context.js';
 
 import {
+    type ClosedWorkerProductionOperationAuthority,
+    type ClosedWorkerProductionOperationIdentifiers,
     ClosedWorkerCommonProofScratchRecordIdentifierInput,
     ClosedWorkerCommonProofScratchRecordOpenInput,
     ClosedWorkerCommonProofScratchRecordSealInput,
@@ -77,6 +82,7 @@ import {
     WorkerStateObject,
     WorkerStateVerifierSession,
     closedWorkerCommonProofScratchStorage,
+    createClosedWorkerProductionOperationAuthority,
 } from './authorities.js';
 import {
     actionRandomnessRootByteLength,
@@ -514,6 +520,20 @@ export class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorag
         );
     }
 
+    public withClosedWorkerProductionOperationAuthority(
+        identifiers: ClosedWorkerProductionOperationIdentifiers,
+        operation: (
+            authority: ClosedWorkerProductionOperationAuthority,
+        ) => Promise<void> | void,
+    ): Promise<void> {
+        return this.#enqueue(() =>
+            this.#withClosedWorkerProductionOperationAuthority(
+                identifiers,
+                operation,
+            ),
+        );
+    }
+
     public prepareClosedCommonProofApplication(
         capability: VerifiedCommonProofCapability,
         predecessor: CommonProofApplicationFreshnessCoordinate,
@@ -527,6 +547,249 @@ export class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorag
         input: BrowserTargetReleaseAttemptInput,
     ): Promise<BrowserActionProofAttemptBinding> {
         return this.#enqueue(() => this.#deriveTargetReleaseAttempt(input));
+    }
+
+    async #withClosedWorkerProductionOperationAuthority(
+        identifiers: ClosedWorkerProductionOperationIdentifiers,
+        operation: (
+            authority: ClosedWorkerProductionOperationAuthority,
+        ) => Promise<void> | void,
+    ): Promise<void> {
+        if (typeof identifiers !== 'object' || identifiers === null) {
+            throw new BrowserActionStorageCustodyError(
+                'InvalidInput',
+                'Production-operation identifiers must be an object.',
+            );
+        }
+        if (typeof operation !== 'function') {
+            throw new BrowserActionStorageCustodyError(
+                'InvalidInput',
+                'The closed worker production operation must be a function.',
+            );
+        }
+
+        const actionRandomnessSessionIdentifier =
+            requireOpaqueWorkerIdentifier(
+                identifiers.actionRandomnessSessionIdentifier,
+                'Action-randomness session identifier',
+            );
+        const stateReservationIdentifier = requireOpaqueWorkerIdentifier(
+            identifiers.stateReservationIdentifier,
+            'State-reservation identifier',
+        );
+        const stateVerifierSessionIdentifier = requireOpaqueWorkerIdentifier(
+            identifiers.stateVerifierSessionIdentifier,
+            'State-verifier session identifier',
+        );
+        const activeBinding = this.#requireActiveLease().binding;
+        const actionRandomnessSessionRecord =
+            this.#actionRandomnessSessions.get(
+                actionRandomnessSessionIdentifier,
+            );
+        const stateVerifierSessionRecord = this.#stateVerifierSessions.get(
+            stateVerifierSessionIdentifier,
+        );
+        const stateReservationRecord = this.#stateObjects.get(
+            stateReservationIdentifier,
+        );
+        if (
+            actionRandomnessSessionRecord === undefined ||
+            stateVerifierSessionRecord === undefined ||
+            stateVerifierSessionRecord.session.state() !== 'active' ||
+            stateReservationRecord === undefined ||
+            stateReservationRecord.kind !== 'reservation' ||
+            stateReservationRecord.sessionIdentifier !==
+                stateVerifierSessionIdentifier ||
+            !byteArraysEqual(
+                stateReservationRecord.subjectParticipantIdentity,
+                activeBinding.participantId,
+            )
+        ) {
+            throw new BrowserActionStorageCustodyError(
+                'InvalidState',
+                'The required action randomness, state session, and reservation are not active in the same worker operation.',
+            );
+        }
+
+        const actionRandomnessContext =
+            resolveActionRandomnessKernelContext(this.#kernel);
+        if (actionRandomnessContext !== this.#actionRandomnessContext) {
+            throw new BrowserActionStorageCustodyError(
+                'OwnedWorkerFailure',
+                'The worker-owned action randomness does not belong to the exact loaded WASM kernel.',
+            );
+        }
+
+        let stateReservationAuthorization;
+        try {
+            stateReservationAuthorization =
+                resolveVerifiedStateReservationKernelAuthorization(
+                    stateReservationRecord.value,
+                    this.#kernel,
+                );
+        } catch (error) {
+            throw new BrowserActionStorageCustodyError(
+                'InvalidState',
+                'The worker-owned state reservation is no longer active in the exact loaded WASM kernel.',
+                error,
+            );
+        }
+        if (
+            stateReservationAuthorization.capabilityMemory !==
+                actionRandomnessContext.memory ||
+            actionRandomnessSessionRecord.actionRandomnessCommitment
+                .byteLength !== foundationHashByteLength ||
+            !Number.isSafeInteger(actionRandomnessSessionRecord.handle) ||
+            actionRandomnessSessionRecord.handle <= 0 ||
+            actionRandomnessSessionRecord.handle > 0xffff_ffff ||
+            !Number.isSafeInteger(
+                stateReservationAuthorization.capabilityPointer,
+            ) ||
+            stateReservationAuthorization.capabilityPointer <= 0 ||
+            stateReservationAuthorization.capabilityPointer >
+                stateReservationAuthorization.capabilityMemory.buffer
+                    .byteLength -
+                    capabilityByteLength ||
+            !Number.isSafeInteger(
+                stateReservationAuthorization.reservationHandle,
+            ) ||
+            stateReservationAuthorization.reservationHandle <= 0 ||
+            stateReservationAuthorization.reservationHandle > 0xffff_ffff ||
+            !Number.isSafeInteger(
+                stateReservationAuthorization.sessionHandle,
+            ) ||
+            stateReservationAuthorization.sessionHandle <= 0 ||
+            stateReservationAuthorization.sessionHandle > 0xffff_ffff
+        ) {
+            throw new BrowserActionStorageCustodyError(
+                'OwnedWorkerFailure',
+                'The exact WASM kernel returned malformed production-operation authority.',
+            );
+        }
+
+        const confirmActionRandomnessLifecycle = (): void => {
+            const actionRandomnessLifecycleInput = concatenateBytes(
+                encodeUnsigned32(actionRandomnessSessionRecord.handle),
+                stateVerifierSessionRecord.canonicalRosterBytes,
+            );
+            let actionRandomnessLifecycleOutput:
+                | Uint8Array<ArrayBuffer>
+                | undefined;
+            try {
+                actionRandomnessLifecycleOutput =
+                    this.#runActionRandomnessCommand(
+                        actionRandomnessCommandIdentifiers.setupActionRandomnessAuthorization,
+                        actionRandomnessLifecycleInput,
+                        'confirm the borrowed action-randomness lifecycle',
+                        'runtime',
+                    );
+                if (
+                    actionRandomnessLifecycleOutput.byteLength !==
+                    foundationHashByteLength
+                ) {
+                    throw new BrowserActionStorageCustodyError(
+                        'OwnedWorkerFailure',
+                        'The WASM action-randomness kernel returned malformed lifecycle confirmation.',
+                    );
+                }
+            } finally {
+                actionRandomnessLifecycleInput.fill(0);
+                actionRandomnessLifecycleOutput?.fill(0);
+            }
+        };
+        confirmActionRandomnessLifecycle();
+
+        const authorityLease = createClosedWorkerProductionOperationAuthority({
+            authorization: Object.freeze({
+                actionRandomnessContext,
+                actionRandomnessHandle: actionRandomnessSessionRecord.handle,
+                kernel: this.#kernel,
+                stateReservationCapabilityMemory:
+                    stateReservationAuthorization.capabilityMemory,
+                stateReservationCapabilityPointer:
+                    stateReservationAuthorization.capabilityPointer,
+                stateReservationHandle:
+                    stateReservationAuthorization.reservationHandle,
+                stateVerifierSessionHandle:
+                    stateReservationAuthorization.sessionHandle,
+            }),
+        });
+        let operationFailed = false;
+        let operationFailure: unknown;
+        try {
+            const operationOutput = await operation(authorityLease.authority);
+            if (operationOutput !== undefined) {
+                throw new BrowserActionStorageCustodyError(
+                    'InvalidInput',
+                    'A closed worker production-operation callback must not return authority material.',
+                );
+            }
+        } catch (error) {
+            operationFailed = true;
+            operationFailure = error;
+        }
+
+        let lifecycleCheckFailed = false;
+        let lifecycleCheckFailure: unknown;
+        try {
+            confirmActionRandomnessLifecycle();
+            let retainedStateReservationAuthorization;
+            try {
+                retainedStateReservationAuthorization =
+                    resolveVerifiedStateReservationKernelAuthorization(
+                        stateReservationRecord.value,
+                        this.#kernel,
+                    );
+            } catch (error) {
+                throw new BrowserActionStorageCustodyError(
+                    'OwnedWorkerFailure',
+                    'The production operation invalidated its borrowed state reservation.',
+                    error,
+                );
+            }
+            if (
+                this.#actionRandomnessSessions.get(
+                    actionRandomnessSessionIdentifier,
+                ) !== actionRandomnessSessionRecord ||
+                this.#stateVerifierSessions.get(
+                    stateVerifierSessionIdentifier,
+                ) !== stateVerifierSessionRecord ||
+                stateVerifierSessionRecord.session.state() !== 'active' ||
+                this.#stateObjects.get(stateReservationIdentifier) !==
+                    stateReservationRecord ||
+                retainedStateReservationAuthorization.capabilityMemory !==
+                    stateReservationAuthorization.capabilityMemory ||
+                retainedStateReservationAuthorization.capabilityPointer !==
+                    stateReservationAuthorization.capabilityPointer ||
+                retainedStateReservationAuthorization.reservationHandle !==
+                    stateReservationAuthorization.reservationHandle ||
+                retainedStateReservationAuthorization.sessionHandle !==
+                    stateReservationAuthorization.sessionHandle
+            ) {
+                throw new BrowserActionStorageCustodyError(
+                    'OwnedWorkerFailure',
+                    'The production operation invalidated a borrowed worker authority before callback completion.',
+                );
+            }
+        } catch (error) {
+            lifecycleCheckFailed = true;
+            lifecycleCheckFailure = error;
+        } finally {
+            authorityLease.revoke();
+        }
+        if (lifecycleCheckFailed) {
+            if (operationFailed) {
+                throw new BrowserActionStorageCustodyError(
+                    'OwnedWorkerFailure',
+                    'The production operation failed and also invalidated a borrowed worker authority.',
+                    [operationFailure, lifecycleCheckFailure],
+                );
+            }
+            throw lifecycleCheckFailure;
+        }
+        if (operationFailed) {
+            throw operationFailure;
+        }
     }
 
     #prepareClosedCommonProofApplication(

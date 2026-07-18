@@ -4,10 +4,13 @@ use crate::{
     bgv::{
         parameters::{DATA_PRIMES, POLYNOMIAL_DEGREE},
         proof_suite::{
-            BorrowedVerifiedCommonProofCapability, CommonProofVerifierError,
-            ConsumedVerifiedCommonProofCapability, SelectedApplicationStatementContext,
-            SetupPublicPolynomialContext, SetupPublicPolynomialRootRole, SuiteModulusReference,
-            VerifiedStreamedProofTreeTerminal, decode_selected_aggregate_threshold_share_statement,
+            BorrowedVerifiedCommonProofCapability, BoundTreeConstructionKind, BoundTreeRootUse,
+            CommonProofVerifierError, ConsumedVerifiedCommonProofCapability,
+            RelationTreeDescriptor, SelectedApplicationStatementContext,
+            SetupPublicPolynomialContext, SetupPublicPolynomialRootRole, SetupPublicPolynomialTree,
+            SuiteModulusReference, VerifiedStatementOwnedTree, VerifiedStreamedProofTreeTerminal,
+            VerifiedStreamedProofTreeTerminalPreflight,
+            decode_selected_aggregate_threshold_share_statement,
             decode_selected_collective_public_key_aggregate_statement,
             decode_selected_public_key_share_statement, decode_selected_same_secret_statement,
             decode_selected_vss_share_linkage_statement, selected_relation_plans,
@@ -30,8 +33,8 @@ const COLLECTIVE_PUBLIC_KEY_AGGREGATE_TREE_ORDINAL: u32 =
     FOUNDATION_PROFILE.participant_count as u32;
 const COLLECTIVE_PUBLIC_KEY_AGGREGATE_ROOT_SOURCE_ORDINAL: u32 =
     FOUNDATION_PROFILE.participant_count as u32;
-const COLLECTIVE_PUBLIC_KEY_SPLIT_COLUMN_COUNT: usize = DATA_PRIMES.len() * 2;
-const COLLECTIVE_PUBLIC_KEY_HALF_DEGREE: usize = POLYNOMIAL_DEGREE / 2;
+const COLLECTIVE_PUBLIC_KEY_QUARTER_COLUMN_COUNT: usize = DATA_PRIMES.len() * 4;
+const COLLECTIVE_PUBLIC_KEY_QUARTER_DEGREE: usize = POLYNOMIAL_DEGREE / 4;
 const RECIPIENT_INPUT_ROOT_DOMAIN: &str = "sealed-lattice/setup/recipient-input/v1";
 
 /// Compact terminal for one participant's complete selected same-secret proof.
@@ -412,42 +415,62 @@ pub(in crate::bgv) struct VerifiedCollectivePublicKeyTerminal {
 
 pub(in crate::bgv) struct VerifiedCollectivePublicKeyTerminalPreflight {
     terminal: VerifiedCollectivePublicKeyTerminal,
+    tree_preflight: VerifiedStreamedProofTreeTerminalPreflight,
 }
 
 impl VerifiedCollectivePublicKeyTerminalPreflight {
+    pub(in crate::bgv) const fn protocol_version(&self) -> u16 {
+        self.terminal.protocol_version()
+    }
+
+    pub(in crate::bgv) const fn suite_identifier(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.terminal.suite_identifier()
+    }
+
+    pub(in crate::bgv) const fn ceremony_context_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.terminal.ceremony_context_hash()
+    }
+
+    pub(in crate::bgv) const fn action_context_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.terminal.action_context_hash()
+    }
+
+    pub(in crate::bgv) const fn roster_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.terminal.roster_hash()
+    }
+
+    pub(in crate::bgv) const fn setup_proof_context_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.terminal.setup_proof_context_hash()
+    }
+
+    pub(in crate::bgv) fn ordered_public_key_share_roots(&self) -> &[[u8; Hash512::BYTE_LENGTH]] {
+        self.terminal.ordered_public_key_share_roots()
+    }
+
     pub(in crate::bgv) fn complete(
         self,
         _verified_proof: ConsumedVerifiedCommonProofCapability,
-        _collective_public_key_tree: VerifiedStreamedProofTreeTerminal,
+        collective_public_key_tree: SetupPublicPolynomialTree,
     ) -> VerifiedCollectivePublicKeyTerminal {
+        let _collective_public_key_tree = self.tree_preflight.complete(collective_public_key_tree);
         self.terminal
     }
 }
 
 impl VerifiedCollectivePublicKeyTerminal {
-    pub(in crate::bgv) fn from_consumed_common_proof_and_tree(
-        verified_proof: ConsumedVerifiedCommonProofCapability,
-        collective_public_key_tree: VerifiedStreamedProofTreeTerminal,
-    ) -> Result<Self, CommonProofVerifierError> {
-        let preflight = Self::preflight_from_borrowed_common_proof_and_tree(
-            verified_proof.borrowed(),
-            &collective_public_key_tree,
-        )?;
-        Ok(preflight.complete(verified_proof, collective_public_key_tree))
-    }
-
     pub(in crate::bgv) fn preflight_from_borrowed_common_proof_and_tree(
         verified_proof: BorrowedVerifiedCommonProofCapability<'_>,
-        collective_public_key_tree: &VerifiedStreamedProofTreeTerminal,
+        canonical_application_statement_bytes: &[u8],
+        roster_hash: [u8; Hash512::BYTE_LENGTH],
+        statement_trees: &[VerifiedStatementOwnedTree],
+        collective_public_key_tree: &SetupPublicPolynomialTree,
     ) -> Result<VerifiedCollectivePublicKeyTerminalPreflight, CommonProofVerifierError> {
         let protocol_version = verified_proof.protocol_version();
         let suite_identifier = verified_proof.suite_identifier();
         let board_object_hash = verified_proof.board_object_hash();
         let proof_stream_descriptor = verified_proof.proof_stream_descriptor().clone();
-        let canonical_statement_bytes =
-            collective_public_key_tree.canonical_application_statement_bytes();
         let statement = decode_selected_collective_public_key_aggregate_statement(
-            canonical_statement_bytes,
+            canonical_application_statement_bytes,
             SelectedApplicationStatementContext::new(
                 protocol_version,
                 suite_identifier,
@@ -460,7 +483,7 @@ impl VerifiedCollectivePublicKeyTerminal {
             protocol_version,
             suite_identifier,
             ProofApplicationSlotCeilings::COLLECTIVE_PUBLIC_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
-            canonical_statement_bytes,
+            canonical_application_statement_bytes,
         );
         let expected_application_slot_hash = ProofApplicationSlot::new(
             Hash512::from_bytes(suite_identifier),
@@ -473,13 +496,55 @@ impl VerifiedCollectivePublicKeyTerminal {
         )
         .and_then(ProofApplicationSlot::hash)
         .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?;
-        let expected_public_polynomial_context_hash =
-            SetupPublicPolynomialContext::collective_public_key(
-                statement.setup_proof_context_hash(),
-            )
-            .and_then(|context| context.context_hash())
-            .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?;
+        let public_polynomial_context = SetupPublicPolynomialContext::collective_public_key(
+            statement.setup_proof_context_hash(),
+        )
+        .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?;
         let expected_column_moduli = expected_collective_public_key_column_moduli()?;
+        let selected_plan_artifact = selected_relation_plans()
+            .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?
+            .into_iter()
+            .find(|artifact| {
+                artifact.application_statement_schema_identifier()
+                    == ProofApplicationSlotCeilings::COLLECTIVE_PUBLIC_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER
+            })
+            .ok_or(CommonProofVerifierError::InvalidApplicationStatement)?;
+        let selected_plan = selected_plan_artifact.compiled_plan();
+        let selected_variant = selected_plan
+            .select_variant(None, None)
+            .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?;
+        let expected_tree = selected_variant
+            .ordered_trees()
+            .get(
+                usize::try_from(COLLECTIVE_PUBLIC_KEY_AGGREGATE_TREE_ORDINAL)
+                    .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?,
+            )
+            .ok_or(CommonProofVerifierError::InvalidApplicationStatement)?;
+        let expected_relation_column_count = match expected_tree {
+            RelationTreeDescriptor::BoundPublic {
+                construction_kind: BoundTreeConstructionKind::SetupPolynomial,
+                expected_root_source_ordinal,
+                root_use: BoundTreeRootUse::Output,
+                ordered_column_ordinals,
+            } if *expected_root_source_ordinal
+                == COLLECTIVE_PUBLIC_KEY_AGGREGATE_ROOT_SOURCE_ORDINAL =>
+            {
+                ordered_column_ordinals.len()
+            }
+            _ => return Err(CommonProofVerifierError::InvalidApplicationStatement),
+        };
+        let mut matching_statement_trees = statement_trees.iter().filter(|tree| {
+            tree.ordered_tree_ordinal() == COLLECTIVE_PUBLIC_KEY_AGGREGATE_TREE_ORDINAL
+                && tree.expected_root_source_ordinal()
+                    == COLLECTIVE_PUBLIC_KEY_AGGREGATE_ROOT_SOURCE_ORDINAL
+                && tree.expected_root() == statement.collective_public_key_root()
+        });
+        let statement_tree = matching_statement_trees
+            .next()
+            .ok_or(CommonProofVerifierError::InvalidBoundTree)?;
+        if matching_statement_trees.next().is_some() {
+            return Err(CommonProofVerifierError::InvalidBoundTree);
+        }
 
         if protocol_version != FOUNDATION_PROFILE.protocol_version
             || verified_proof.application_statement_schema_identifier()
@@ -492,49 +557,43 @@ impl VerifiedCollectivePublicKeyTerminal {
                 != expected_application_slot_hash.into_bytes()
             || verified_proof.schedule_position().is_some()
             || verified_proof.top_count().is_some()
-            || collective_public_key_tree.protocol_version() != protocol_version
-            || collective_public_key_tree.suite_identifier() != suite_identifier
-            || collective_public_key_tree.ceremony_context_hash()
-                != verified_proof.ceremony_context_hash()
-            || collective_public_key_tree.action_context_hash()
-                != verified_proof.action_context_hash()
-            || collective_public_key_tree.application_statement_schema_identifier()
-                != ProofApplicationSlotCeilings::COLLECTIVE_PUBLIC_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER
-            || collective_public_key_tree.application_statement_hash()
-                != expected_application_statement_hash
-            || collective_public_key_tree.relation_plan_variant_hash()
+            || selected_plan
+                .canonical_hash()
+                .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?
+                != verified_proof.relation_plan_hash()
+            || selected_variant
+                .canonical_hash()
+                .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?
                 != verified_proof.relation_plan_variant_hash()
-            || collective_public_key_tree.ordered_tree_ordinal()
-                != COLLECTIVE_PUBLIC_KEY_AGGREGATE_TREE_ORDINAL
-            || collective_public_key_tree.expected_root_source_ordinal()
-                != COLLECTIVE_PUBLIC_KEY_AGGREGATE_ROOT_SOURCE_ORDINAL
-            || collective_public_key_tree.setup_proof_context_hash()
-                != statement.setup_proof_context_hash()
-            || collective_public_key_tree.root_role()
-                != SetupPublicPolynomialRootRole::CollectivePublicKey
-            || collective_public_key_tree.owner_participant_identity().is_some()
-            || collective_public_key_tree.owner_roster_position().is_some()
-            || collective_public_key_tree.schedule_position().is_some()
-            || collective_public_key_tree.public_polynomial_context_hash()
-                != expected_public_polynomial_context_hash
             || collective_public_key_tree.root() != statement.collective_public_key_root()
             || collective_public_key_tree.source_polynomial_degree_bound_exclusive()
-                != COLLECTIVE_PUBLIC_KEY_HALF_DEGREE
+                != COLLECTIVE_PUBLIC_KEY_QUARTER_DEGREE
             || usize::try_from(collective_public_key_tree.row_width()).ok()
-                != Some(COLLECTIVE_PUBLIC_KEY_SPLIT_COLUMN_COUNT)
-            || collective_public_key_tree.ordered_canonical_residue_moduli()
+                != Some(COLLECTIVE_PUBLIC_KEY_QUARTER_COLUMN_COUNT)
+            || expected_relation_column_count != COLLECTIVE_PUBLIC_KEY_QUARTER_COLUMN_COUNT
+            || statement_tree.ordered_canonical_residue_moduli()
                 != expected_column_moduli.as_slice()
-            || collective_public_key_tree.source_stream_domain().is_some()
-            || collective_public_key_tree.source_material_root().is_some()
-            || collective_public_key_tree.source_stream_descriptor().is_some()
         {
             return Err(CommonProofVerifierError::InvalidApplicationStatement);
         }
 
-        let roster_hash = collective_public_key_tree.roster_hash();
         let collective_public_key_b_polynomials = compact_collective_public_key_b_polynomials(
             collective_public_key_tree.ordered_coefficient_columns(),
         )?;
+        let tree_preflight =
+            VerifiedStreamedProofTreeTerminal::preflight_from_recomputed_public_polynomial_tree(
+                verified_proof.verified_proof(),
+                canonical_application_statement_bytes,
+                verified_proof.ceremony_context_hash(),
+                verified_proof.action_context_hash(),
+                roster_hash,
+                COLLECTIVE_PUBLIC_KEY_AGGREGATE_TREE_ORDINAL,
+                COLLECTIVE_PUBLIC_KEY_AGGREGATE_ROOT_SOURCE_ORDINAL,
+                statement.collective_public_key_root(),
+                public_polynomial_context,
+                expected_column_moduli,
+                collective_public_key_tree,
+            )?;
         Ok(VerifiedCollectivePublicKeyTerminalPreflight {
             terminal: Self {
                 protocol_version,
@@ -551,6 +610,7 @@ impl VerifiedCollectivePublicKeyTerminal {
                     .collective_public_key_full_object_digest(),
                 collective_public_key_b_polynomials,
             },
+            tree_preflight,
         })
     }
 
@@ -1431,14 +1491,13 @@ fn require_selected_unscheduled_relation_plan(
 
 fn expected_collective_public_key_column_moduli()
 -> Result<Vec<Option<SuiteModulusReference>>, CommonProofVerifierError> {
-    let mut ordered_moduli = Vec::with_capacity(COLLECTIVE_PUBLIC_KEY_SPLIT_COLUMN_COUNT);
+    let mut ordered_moduli = Vec::with_capacity(COLLECTIVE_PUBLIC_KEY_QUARTER_COLUMN_COUNT);
     for data_modulus_index in 0..DATA_PRIMES.len() {
         let reference = SuiteModulusReference::data(
             u16::try_from(data_modulus_index)
                 .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?,
         );
-        ordered_moduli.push(Some(reference));
-        ordered_moduli.push(Some(reference));
+        ordered_moduli.extend([Some(reference); 4]);
     }
     Ok(ordered_moduli)
 }
@@ -1446,21 +1505,22 @@ fn expected_collective_public_key_column_moduli()
 fn compact_collective_public_key_b_polynomials(
     columns: &[Vec<crate::bgv::proof_suite::ProofBaseFieldElement>],
 ) -> Result<Box<[Arc<[u64]>]>, CommonProofVerifierError> {
-    if columns.len() != COLLECTIVE_PUBLIC_KEY_SPLIT_COLUMN_COUNT {
+    if columns.len() != COLLECTIVE_PUBLIC_KEY_QUARTER_COLUMN_COUNT {
         return Err(CommonProofVerifierError::InvalidBoundTree);
     }
     columns
-        .chunks_exact(2)
+        .chunks_exact(4)
         .zip(DATA_PRIMES)
         .map(|(split_columns, modulus)| {
-            if split_columns[0].len() != COLLECTIVE_PUBLIC_KEY_HALF_DEGREE
-                || split_columns[1].len() != COLLECTIVE_PUBLIC_KEY_HALF_DEGREE
+            if split_columns
+                .iter()
+                .any(|quarter| quarter.len() != COLLECTIVE_PUBLIC_KEY_QUARTER_DEGREE)
             {
                 return Err(CommonProofVerifierError::InvalidBoundTree);
             }
-            let coefficients = split_columns[0]
+            let coefficients = split_columns
                 .iter()
-                .chain(&split_columns[1])
+                .flat_map(|quarter| quarter.iter())
                 .map(|coefficient| coefficient.canonical())
                 .collect::<Vec<_>>();
             if coefficients.len() != POLYNOMIAL_DEGREE
@@ -1855,17 +1915,17 @@ mod tests {
         }
     }
 
-    fn split_columns_with_distinct_halves() -> Vec<Vec<ProofBaseFieldElement>> {
+    fn quarter_columns_with_distinct_values() -> Vec<Vec<ProofBaseFieldElement>> {
         DATA_PRIMES
             .iter()
             .copied()
             .enumerate()
             .flat_map(|(modulus_ordinal, modulus)| {
-                (0..2).map(move |half_ordinal| {
-                    (0..COLLECTIVE_PUBLIC_KEY_HALF_DEGREE)
+                (0..4).map(move |quarter_ordinal| {
+                    (0..COLLECTIVE_PUBLIC_KEY_QUARTER_DEGREE)
                         .map(|coefficient_ordinal| {
                             let value = (u64::try_from(modulus_ordinal).unwrap() * 101
-                                + u64::try_from(half_ordinal).unwrap() * 17
+                                + u64::try_from(quarter_ordinal).unwrap() * 17
                                 + u64::try_from(coefficient_ordinal).unwrap())
                                 % modulus;
                             ProofBaseFieldElement::from_canonical(value).unwrap()
@@ -1877,10 +1937,11 @@ mod tests {
     }
 
     #[test]
-    fn collective_key_terminal_compacts_adjacent_split_columns_in_ring_order() {
-        let columns = split_columns_with_distinct_halves();
-        let expected_first_low = columns[0][COLLECTIVE_PUBLIC_KEY_HALF_DEGREE - 1].canonical();
-        let expected_first_high = columns[1][0].canonical();
+    fn collective_key_terminal_compacts_adjacent_quarters_in_ring_order() {
+        let columns = quarter_columns_with_distinct_values();
+        let expected_first_quarter_end =
+            columns[0][COLLECTIVE_PUBLIC_KEY_QUARTER_DEGREE - 1].canonical();
+        let expected_second_quarter_start = columns[1][0].canonical();
         let polynomials = compact_collective_public_key_b_polynomials(&columns)
             .expect("the exact selected split layout compacts");
         assert_eq!(polynomials.len(), DATA_PRIMES.len());
@@ -1890,12 +1951,12 @@ mod tests {
                 .all(|polynomial| polynomial.len() == POLYNOMIAL_DEGREE)
         );
         assert_eq!(
-            polynomials[0][COLLECTIVE_PUBLIC_KEY_HALF_DEGREE - 1],
-            expected_first_low
+            polynomials[0][COLLECTIVE_PUBLIC_KEY_QUARTER_DEGREE - 1],
+            expected_first_quarter_end
         );
         assert_eq!(
-            polynomials[0][COLLECTIVE_PUBLIC_KEY_HALF_DEGREE],
-            expected_first_high
+            polynomials[0][COLLECTIVE_PUBLIC_KEY_QUARTER_DEGREE],
+            expected_second_quarter_start
         );
         assert!(
             polynomials
@@ -1909,15 +1970,15 @@ mod tests {
 
     #[test]
     fn collective_key_terminal_rejects_missing_short_and_noncanonical_columns() {
-        let mut missing = split_columns_with_distinct_halves();
+        let mut missing = quarter_columns_with_distinct_values();
         missing.pop();
         assert!(compact_collective_public_key_b_polynomials(&missing).is_err());
 
-        let mut short = split_columns_with_distinct_halves();
+        let mut short = quarter_columns_with_distinct_values();
         short[4].pop();
         assert!(compact_collective_public_key_b_polynomials(&short).is_err());
 
-        let mut noncanonical = split_columns_with_distinct_halves();
+        let mut noncanonical = quarter_columns_with_distinct_values();
         noncanonical[2][19] = ProofBaseFieldElement::from_canonical(DATA_PRIMES[1]).unwrap();
         assert!(compact_collective_public_key_b_polynomials(&noncanonical).is_err());
     }

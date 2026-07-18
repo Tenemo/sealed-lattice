@@ -1,20 +1,19 @@
 use super::{
     BTreeMap, BTreeSet, BoundTreeConstructionKind, COMMON_PROOF_RELATION_EVALUATION_BLOCK_LENGTH,
     CommonProofGenerationPoll, CommonProofGenerationStateMachine, CommonProofMerkleStoragePlan,
-    CommonProofOpeningGeometry, CommonProofPrivacyMode,
-    CommonProofPrivateCoinError, CommonProofProverError, CommonProofQuotientConstraintTransformKey,
-    CommonProofSourcePolynomial, CommonProofSourcePolynomialProvider,
-    CommonProofTranscriptSchedule, CompiledRelationPlan, CompleteProofTreeCatalog,
-    ExternalPolynomialVector, ExternalStockhamTransformDirection, ExternalStockhamTransformPlan,
-    HASH_BYTE_LENGTH, PROOF_CHALLENGE_EXTENSION_DEGREE, ProofBaseFieldElement, ProofBodyError,
-    ProofChallengeExtensionElement, ProofEvaluationDomain, ProofExternalMemory,
-    ProofExternalMemoryError, ProofExternalMemoryExecutor, ProofExternalMemoryExecutorError,
-    ProofExternalMemoryObject, ProofExternalMemoryObjectPlan, ProofExternalMemoryPlan,
-    ProofExternalMemoryProtection, ProofLeafVisibility, ProofPrivacyMode, ProofProfileError,
-    ProofTreeCatalogEntry, ProofTreeCatalogSource, ProofTreeRole, RelationColumnOrigin,
-    RelationApplicationChallengeAssignment, RelationColumnValueType, RelationMaskKind,
-    RelationMaskTargetClass, RelationPlanCheckContext, RelationPlanError, RelationPlanVariant,
-    RelationProofTreeInput, RelationTreeDescriptor,
+    CommonProofOpeningGeometry, CommonProofPrivacyMode, CommonProofPrivateCoinError,
+    CommonProofProverError, CommonProofQuotientConstraintTransformKey, CommonProofSourcePolynomial,
+    CommonProofSourcePolynomialProvider, CommonProofTranscriptSchedule, CompiledRelationPlan,
+    CompleteProofTreeCatalog, ExternalPolynomialVector, ExternalStockhamTransformDirection,
+    ExternalStockhamTransformPlan, HASH_BYTE_LENGTH, PROOF_CHALLENGE_EXTENSION_DEGREE,
+    ProofBaseFieldElement, ProofBodyError, ProofChallengeExtensionElement, ProofEvaluationDomain,
+    ProofExternalMemory, ProofExternalMemoryError, ProofExternalMemoryExecutor,
+    ProofExternalMemoryExecutorError, ProofExternalMemoryObject, ProofExternalMemoryObjectPlan,
+    ProofExternalMemoryPlan, ProofExternalMemoryProtection, ProofLeafVisibility, ProofPrivacyMode,
+    ProofProfileError, ProofTreeCatalogEntry, ProofTreeCatalogSource, ProofTreeRole,
+    RelationApplicationChallengeAssignment, RelationColumnOrigin, RelationColumnValueType,
+    RelationMaskKind, RelationMaskTargetClass, RelationPlanCheckContext, RelationPlanError,
+    RelationPlanVariant, RelationProofTreeInput, RelationTreeDescriptor,
     StatementOwnedProofTreeInput, StoredCommonProofMerkleTree, TranscriptError, Zeroize, Zeroizing,
     canonical_common_proof_leaf_byte_length, canonical_leaf_byte_length,
     common_proof_merkle_storage_plan, common_proof_tree_value_type, entry_leaf_count,
@@ -95,7 +94,9 @@ struct GeneratedCommonProofStorageResidentPayload {
     executor_catalog_byte_length: u64,
 }
 
-fn map_entry_payload_byte_length<Key, Value>(entry_count: usize) -> Result<u64, CommonProofProverError> {
+fn map_entry_payload_byte_length<Key, Value>(
+    entry_count: usize,
+) -> Result<u64, CommonProofProverError> {
     u64::try_from(entry_count)
         .ok()
         .and_then(|count| {
@@ -112,9 +113,7 @@ impl GeneratedCommonProofStoragePlan {
             map_entry_payload_byte_length::<u16, CommonProofMerkleStoragePlan>(
                 self.tree_plans.len(),
             )?,
-            |total, plan| {
-                checked_resident_add(total, plan.resident_owned_payload_byte_length()?)
-            },
+            |total, plan| checked_resident_add(total, plan.resident_owned_payload_byte_length()?),
         )?;
         let completed_tree_catalog_byte_length = self.tree_plans.values().try_fold(
             map_entry_payload_byte_length::<u16, StoredCommonProofMerkleTree>(
@@ -131,10 +130,8 @@ impl GeneratedCommonProofStoragePlan {
             CommonProofReplayPolynomialKey,
             CommonProofReplayPolynomialPlan,
         >(self.replay_polynomial_plans.len())?;
-        let relation_transform_catalog_byte_length = self
-            .relation_evaluation_transform_plans
-            .values()
-            .try_fold(
+        let relation_transform_catalog_byte_length =
+            self.relation_evaluation_transform_plans.values().try_fold(
                 map_entry_payload_byte_length::<u32, ExternalStockhamTransformPlan>(
                     self.relation_evaluation_transform_plans.len(),
                 )?,
@@ -152,10 +149,8 @@ impl GeneratedCommonProofStoragePlan {
                     )
                 },
             )?;
-        let quotient_transform_catalog_byte_length = self
-            .quotient_constraint_transform_plans
-            .values()
-            .try_fold(
+        let quotient_transform_catalog_byte_length =
+            self.quotient_constraint_transform_plans.values().try_fold(
                 map_entry_payload_byte_length::<
                     CommonProofQuotientConstraintTransformKey,
                     ExternalStockhamTransformPlan,
@@ -2791,10 +2786,10 @@ fn resident_infrastructure_payload_accounting(
             TranscriptError::ChallengeCounterOverflow => CommonProofProverError::CountOverflow,
             _ => CommonProofProverError::InvalidInput,
         })?;
-    let relation_evaluation_vector_catalog_byte_length = map_entry_payload_byte_length::<
-        u32,
-        ExternalPolynomialVector,
-    >(storage_plan.relation_evaluation_transform_plans.len())?;
+    let relation_evaluation_vector_catalog_byte_length =
+        map_entry_payload_byte_length::<u32, ExternalPolynomialVector>(
+            storage_plan.relation_evaluation_transform_plans.len(),
+        )?;
     let opening_geometry_catalog_byte_length = checked_resident_multiply(
         u64::try_from(storage_plan.tree_plans.len())
             .map_err(|_| CommonProofProverError::CountOverflow)?,
@@ -2842,7 +2837,8 @@ fn resident_infrastructure_payload_accounting(
             .map_err(|_| CommonProofProverError::CountOverflow)?;
     let transcript_persistent_payload_byte_length =
         transcript_payload.persistent_transcript_byte_length();
-    let transcript_transient_payload_byte_length = transcript_payload.maximum_transient_byte_length();
+    let transcript_transient_payload_byte_length =
+        transcript_payload.maximum_transient_byte_length();
     let total_byte_length = [
         state_machine_inline_byte_length,
         canonical_header_payload_byte_length,
@@ -3161,11 +3157,7 @@ fn derive_common_proof_resident_memory_plan(
         )?);
 
     let resident_phase_plan = |phase, input| {
-        resident_phase_plan_with_infrastructure(
-            phase,
-            infrastructure_payload_accounting,
-            input,
-        )
+        resident_phase_plan_with_infrastructure(phase, infrastructure_payload_accounting, input)
     };
     let phases = vec![
         resident_phase_plan(

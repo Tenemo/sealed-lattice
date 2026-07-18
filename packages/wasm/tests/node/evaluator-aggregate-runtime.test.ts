@@ -1,0 +1,861 @@
+import { refusalReasonCodes } from '@sealed-lattice/types';
+import { describe, expect, it, vi } from 'vitest';
+
+import type {
+    AcceptedSetupEvaluatorSourceCatalogSession,
+    AcceptedSetupVerificationSession,
+} from '#packages/wasm/src/accepted-setup-assembly-runtime';
+import type { ActionRandomnessSession } from '#packages/wasm/src/action-randomness-runtime';
+import {
+    CanonicalStreamInternalError,
+    CanonicalStreamRefusalError,
+} from '#packages/wasm/src/canonical-stream-runtime';
+import type {
+    AuthenticatedCommonProofInputStore,
+    CommonProofCanonicalOutputStore,
+    CommonProofExternalMemoryTransactionExecutor,
+} from '#packages/wasm/src/common-proof-worker-runtime';
+import {
+    constructEvaluatorAggregateInClosedWorker,
+    type EvaluatorAggregateSession,
+} from '#packages/wasm/src/evaluator-aggregate-runtime';
+import {
+    activateSelectedSuiteRecordSource,
+    releaseSelectedSuiteRecordSource,
+} from '#packages/wasm/src/selected-suite-record-source';
+import type { VerifiedStateReservation } from '#packages/wasm/src/state-verifier-runtime';
+import { registerCommonProofKernelContext } from '#packages/wasm/src/transcript-core-bridge/common-proof-kernel-context';
+import type { TranscriptCoreKernelCommandRuntime } from '#packages/wasm/src/transcript-core-bridge/kernel-runtime';
+import type { TranscriptCoreKernel } from '#packages/wasm/src/transcript-core-bridge/kernel-types';
+
+type FakeRuntimeState = {
+    readonly acceptedSetupVerification: AcceptedSetupVerificationSession;
+    readonly actionRandomnessSession: ActionRandomnessSession;
+    readonly allocations: Map<number, number>;
+    readonly canonicalSuiteRecordBytes: Uint8Array<ArrayBuffer>;
+    catalogPhase: 'collecting' | 'complete';
+    commitGeneratedProofCalls: number[];
+    commitVerifiedStoreCalls: number[];
+    commitVerifiedStoreStatuses: number[];
+    readonly evaluatorSourceCatalog: AcceptedSetupEvaluatorSourceCatalogSession;
+    finishVerificationCalls: number[];
+    freshGenerationPreparationCount: number;
+    readonly kernel: TranscriptCoreKernel;
+    readonly materialChunks: Uint8Array<ArrayBuffer>[];
+    readonly outputChunks: Map<number, Uint8Array<ArrayBuffer>>;
+    packageStatementTakeCount: number;
+    packageStatementTakeStatuses: number[];
+    readonly readSourceOrdinals: number[];
+    resumedGenerationPreparationCount: number;
+    readonly runtimeTreeChunks: Uint8Array<ArrayBuffer>[];
+    readonly sessionDiscardHandles: number[];
+    sourceRequestOrdinal: number;
+    sourceRangeSuppliedCount: number;
+    storeConstructionPollStatus: number;
+    storeOutputAcknowledged: boolean;
+    wrongSourceLength: boolean;
+    readonly verifiedReservation: VerifiedStateReservation;
+};
+
+const fakeStates = vi.hoisted(
+    () => new WeakMap<object, FakeRuntimeState>(),
+);
+const generatedCapabilityRelease = vi.hoisted(() => vi.fn());
+const verifiedCapabilityRelease = vi.hoisted(() => vi.fn());
+
+vi.mock('#packages/wasm/src/accepted-setup-assembly-runtime', () => ({
+    readAcceptedSetupPrepackageEvaluatorComponentExactRange: async (input: {
+        exactByteLength: number;
+        kernel: TranscriptCoreKernel;
+        materialRoot: Uint8Array;
+    }): Promise<Uint8Array<ArrayBuffer>> => {
+        const state = fakeStates.get(input.kernel);
+        if (state === undefined) {
+            throw new Error('Unknown fake evaluator kernel.');
+        }
+        const sourceOrdinal = input.materialRoot[0] ?? 0;
+        state.readSourceOrdinals.push(sourceOrdinal);
+        const byteLength = state.wrongSourceLength
+            ? input.exactByteLength - 1
+            : input.exactByteLength;
+        return new Uint8Array(byteLength).fill(sourceOrdinal + 1);
+    },
+    requireAcceptedSetupEvaluatorSourceCatalogKernelOwner: (
+        catalog: AcceptedSetupEvaluatorSourceCatalogSession,
+        kernel: TranscriptCoreKernel,
+        expectedPhase: 'collecting' | 'complete' = 'collecting',
+    ) => {
+        const state = fakeStates.get(kernel);
+        if (
+            state?.evaluatorSourceCatalog !== catalog ||
+            state.catalogPhase !== expectedPhase
+        ) {
+            throw new CanonicalStreamRefusalError('wrongContext');
+        }
+        return Object.freeze({ handle: 21, kernel });
+    },
+    requireAcceptedSetupVerificationAssemblyKernelOwner: (
+        acceptedSetupVerification: AcceptedSetupVerificationSession,
+        kernel: TranscriptCoreKernel,
+    ) => {
+        const state = fakeStates.get(kernel);
+        if (
+            state?.acceptedSetupVerification !== acceptedSetupVerification
+        ) {
+            throw new CanonicalStreamRefusalError('wrongContext');
+        }
+        return Object.freeze({ handle: 31, kernel });
+    },
+}));
+
+vi.mock('#packages/wasm/src/action-randomness-runtime', () => ({
+    resolveActionRandomnessKernelAuthorization: (
+        session: ActionRandomnessSession,
+        kernel: TranscriptCoreKernel,
+    ) => {
+        const state = fakeStates.get(kernel);
+        if (state?.actionRandomnessSession !== session) {
+            throw new CanonicalStreamRefusalError('wrongContext');
+        }
+        const context = resolveFakeContext(kernel);
+        return Object.freeze({ context, handle: 41 });
+    },
+}));
+
+vi.mock('#packages/wasm/src/state-verifier-runtime', () => ({
+    resolveVerifiedStateReservationKernelAuthorization: (
+        reservation: VerifiedStateReservation,
+        kernel: TranscriptCoreKernel,
+    ) => {
+        const state = fakeStates.get(kernel);
+        if (state?.verifiedReservation !== reservation) {
+            throw new CanonicalStreamRefusalError('wrongContext');
+        }
+        const context = resolveFakeContext(kernel);
+        return Object.freeze({
+            capabilityMemory: context.memory,
+            capabilityPointer: 64,
+            reservationHandle: 43,
+            sessionHandle: 42,
+        });
+    },
+}));
+
+vi.mock('#packages/wasm/src/common-proof-worker-runtime/runtime', () => ({
+    applyClosedWorkerGeneratedCommonProofCapability: (
+        _capability: object,
+        _context: TranscriptCoreKernelCommandRuntime,
+        apply: (handle: number) => Readonly<{
+            consumed: boolean;
+            result: number;
+        }>,
+    ) => apply(91).result,
+    applyClosedWorkerVerifiedCommonProofCapability: (
+        _capability: object,
+        _context: TranscriptCoreKernelCommandRuntime,
+        apply: (handle: number) => Readonly<{
+            consumed: boolean;
+            result: number;
+        }>,
+    ) => apply(92).result,
+    openClosedWorkerCommonProofGenerationFamilyAdapter: () =>
+        Object.freeze({}),
+    openClosedWorkerCommonProofVerificationFamilyAdapter: () =>
+        Object.freeze({}),
+    releaseClosedWorkerCommonProofGenerationFamilyAdapter: vi.fn(),
+    releaseClosedWorkerCommonProofVerificationFamilyAdapter: vi.fn(),
+    runClosedWorkerCommonProofGenerationFamilyAdapterRetainingGeneratedCapability:
+        async (
+            _adapter: object,
+            _externalMemory: CommonProofExternalMemoryTransactionExecutor,
+            outputStore: CommonProofCanonicalOutputStore,
+        ) => {
+            await outputStore.commitChunk(
+                0,
+                Uint8Array.of(0x51, 0x52),
+            );
+            return Object.freeze({ release: generatedCapabilityRelease });
+        },
+    runClosedWorkerCommonProofVerificationFamilyAdapter: async () =>
+        Object.freeze({ release: verifiedCapabilityRelease }),
+}));
+
+vi.mock('#packages/wasm/src/generated-common-proof-output-runtime', () => ({
+    deriveGeneratedCommonProofDescriptor: async () =>
+        Uint8Array.of(0xd1, 0xd2),
+    trackCanonicalCommonProofOutputChunks: (
+        outputStore: CommonProofCanonicalOutputStore,
+    ) => {
+        const outputChunkByteLengths: number[] = [];
+        return Object.freeze({
+            outputChunkByteLengths,
+            outputStore: Object.freeze({
+                commitChunk: async (
+                    chunkIndex: number,
+                    chunkBytes: Uint8Array<ArrayBuffer>,
+                ): Promise<void> => {
+                    await outputStore.commitChunk(chunkIndex, chunkBytes);
+                    outputChunkByteLengths.push(chunkBytes.byteLength);
+                },
+                readChunk: (chunkIndex: number, exactByteLength: number) =>
+                    outputStore.readChunk(chunkIndex, exactByteLength),
+            }),
+        });
+    },
+}));
+
+const contextRecords = new WeakMap<
+    TranscriptCoreKernel,
+    TranscriptCoreKernelCommandRuntime
+>();
+
+const resolveFakeContext = (
+    kernel: TranscriptCoreKernel,
+): TranscriptCoreKernelCommandRuntime => {
+    const context = contextRecords.get(kernel);
+    if (context === undefined) {
+        throw new Error('The fake evaluator context is unavailable.');
+    }
+    return context;
+};
+
+const writeStatus = (
+    memory: WebAssembly.Memory,
+    pointer: number,
+    status: number,
+): void => {
+    new DataView(memory.buffer).setUint32(pointer, status, true);
+};
+
+const writeStoreSourceRequest = (
+    memory: WebAssembly.Memory,
+    pointer: number,
+    sourceOrdinal: number,
+): void => {
+    const bytes = new Uint8Array(memory.buffer, pointer, 160);
+    bytes.fill(0);
+    const view = new DataView(memory.buffer, pointer, 160);
+    view.setUint32(0, 0, true);
+    view.setUint32(4, sourceOrdinal, true);
+    bytes[8] = sourceOrdinal;
+    bytes.fill(0x40 + sourceOrdinal, 72, 136);
+    view.setBigUint64(136, 4n, true);
+    view.setBigUint64(144, 0n, true);
+    view.setUint32(152, 0, true);
+    view.setUint32(156, 4, true);
+};
+
+const createFakeRuntime = (): FakeRuntimeState => {
+    const memory = new WebAssembly.Memory({ initial: 2 });
+    const allocations = new Map<number, number>();
+    const selectedSuiteRecords = new Map<
+        number,
+        Uint8Array<ArrayBuffer>
+    >();
+    let nextPointer = 1024;
+    let nextSelectedSuiteHandle = 51;
+    const allocate = (byteLength: number): number => {
+        const pointer = Math.ceil(nextPointer / 8) * 8;
+        nextPointer = pointer + byteLength;
+        allocations.set(pointer, byteLength);
+        return pointer;
+    };
+    const deallocate = (pointer: number, byteLength: number): void => {
+        if (allocations.get(pointer) !== byteLength) {
+            throw new Error(
+                'The fake evaluator allocation was released with the wrong byte length.',
+            );
+        }
+        allocations.delete(pointer);
+    };
+    const kernel = Object.freeze(Object.create(null)) as TranscriptCoreKernel;
+    const state: FakeRuntimeState = {
+        acceptedSetupVerification:
+            Object.freeze({}) as AcceptedSetupVerificationSession,
+        actionRandomnessSession: Object.freeze({}) as ActionRandomnessSession,
+        allocations,
+        canonicalSuiteRecordBytes: Uint8Array.of(0xa1),
+        catalogPhase: 'collecting',
+        commitGeneratedProofCalls: [],
+        commitVerifiedStoreCalls: [],
+        commitVerifiedStoreStatuses: [],
+        evaluatorSourceCatalog:
+            Object.freeze({}) as AcceptedSetupEvaluatorSourceCatalogSession,
+        finishVerificationCalls: [],
+        freshGenerationPreparationCount: 0,
+        kernel,
+        materialChunks: [],
+        outputChunks: new Map(),
+        packageStatementTakeCount: 0,
+        packageStatementTakeStatuses: [],
+        readSourceOrdinals: [],
+        resumedGenerationPreparationCount: 0,
+        runtimeTreeChunks: [],
+        sessionDiscardHandles: [],
+        sourceRangeSuppliedCount: 0,
+        sourceRequestOrdinal: 0,
+        storeConstructionPollStatus: 0,
+        storeOutputAcknowledged: false,
+        verifiedReservation: Object.freeze({}) as VerifiedStateReservation,
+        wrongSourceLength: false,
+    };
+    const context = {
+        allocate,
+        deallocate,
+        executeCommand: () => {
+            throw new Error('The test does not use the JSON command boundary.');
+        },
+        memory,
+        runExclusive: <Result>(
+            _operationName: string,
+            operation: () => Result,
+        ): Result => operation(),
+        wasmExports: {
+            sealed_lattice_common_proof_copy_selected_suite_record: (
+                selectedSuiteHandle: number,
+                outputPointer: number,
+                outputByteLength: number,
+            ) => {
+                const suiteRecord = selectedSuiteRecords.get(
+                    selectedSuiteHandle,
+                );
+                if (suiteRecord === undefined) {
+                    return refusalReasonCodes.consumedState;
+                }
+                if (suiteRecord.byteLength !== outputByteLength) {
+                    return refusalReasonCodes.wrongTypeOrLength;
+                }
+                new Uint8Array(
+                    memory.buffer,
+                    outputPointer,
+                    outputByteLength,
+                ).set(suiteRecord);
+                return 0;
+            },
+            sealed_lattice_common_proof_release_suite: (
+                selectedSuiteHandle: number,
+            ) =>
+                selectedSuiteRecords.delete(selectedSuiteHandle)
+                    ? 0
+                    : refusalReasonCodes.consumedState,
+            sealed_lattice_common_proof_select_suite: (
+                suitePointer: number,
+                suiteByteLength: number,
+                statusPointer: number,
+            ) => {
+                writeStatus(memory, statusPointer, 0);
+                const selectedSuiteHandle = nextSelectedSuiteHandle;
+                nextSelectedSuiteHandle += 1;
+                selectedSuiteRecords.set(
+                    selectedSuiteHandle,
+                    Uint8Array.from(
+                        new Uint8Array(
+                            memory.buffer,
+                            suitePointer,
+                            suiteByteLength,
+                        ),
+                    ),
+                );
+                return selectedSuiteHandle;
+            },
+            sealed_lattice_common_proof_selected_suite_record_byte_length: (
+                selectedSuiteHandle: number,
+                statusPointer: number,
+            ) => {
+                const suiteRecord = selectedSuiteRecords.get(
+                    selectedSuiteHandle,
+                );
+                writeStatus(
+                    memory,
+                    statusPointer,
+                    suiteRecord === undefined
+                        ? refusalReasonCodes.consumedState
+                        : 0,
+                );
+                return suiteRecord?.byteLength ?? 0;
+            },
+            sealed_lattice_evaluator_aggregate_absorb_runtime_component_chunk:
+                (
+                    _sessionHandle: number,
+                    _logicalComponentOrdinal: number,
+                    _chunkIndex: number,
+                    chunkPointer: number,
+                    chunkByteLength: number,
+                ) => {
+                    state.runtimeTreeChunks.push(
+                        Uint8Array.from(
+                            new Uint8Array(
+                                memory.buffer,
+                                chunkPointer,
+                                chunkByteLength,
+                            ),
+                        ),
+                    );
+                    return 0;
+                },
+            sealed_lattice_evaluator_aggregate_absorb_store_material_chunk: (
+                _sessionHandle: number,
+                _chunkIndex: number,
+                chunkPointer: number,
+                chunkByteLength: number,
+            ) => {
+                state.materialChunks.push(
+                    Uint8Array.from(
+                        new Uint8Array(
+                            memory.buffer,
+                            chunkPointer,
+                            chunkByteLength,
+                        ),
+                    ),
+                );
+                return 0;
+            },
+            sealed_lattice_evaluator_aggregate_acknowledge_store_output_chunk:
+                () => {
+                    state.storeOutputAcknowledged = true;
+                    return 0;
+                },
+            sealed_lattice_evaluator_aggregate_application_statement_byte_length:
+                (_sessionHandle: number, statusPointer: number) => {
+                    writeStatus(memory, statusPointer, 0);
+                    return 3n;
+                },
+            sealed_lattice_evaluator_aggregate_begin_runtime_component_tree:
+                () => 0,
+            sealed_lattice_evaluator_aggregate_begin_store_construction: (
+                _catalogHandle: number,
+                statusPointer: number,
+            ) => {
+                writeStatus(memory, statusPointer, 0);
+                return 7;
+            },
+            sealed_lattice_evaluator_aggregate_commit_generated_proof: (
+                _sessionHandle: number,
+                generatedCommonProofHandle: number,
+            ) => {
+                state.commitGeneratedProofCalls.push(
+                    generatedCommonProofHandle,
+                );
+                return 0;
+            },
+            sealed_lattice_evaluator_aggregate_commit_verified_store: (
+                _sessionHandle: number,
+                acceptedSetupAssemblyHandle: number,
+            ) => {
+                state.commitVerifiedStoreCalls.push(
+                    acceptedSetupAssemblyHandle,
+                );
+                return state.commitVerifiedStoreStatuses.shift() ?? 0;
+            },
+            sealed_lattice_evaluator_aggregate_copy_application_statement: (
+                _sessionHandle: number,
+                outputPointer: number,
+                outputByteLength: number,
+            ) => {
+                new Uint8Array(
+                    memory.buffer,
+                    outputPointer,
+                    outputByteLength,
+                ).set([0xb1, 0xb2, 0xb3]);
+                return 0;
+            },
+            sealed_lattice_evaluator_aggregate_copy_store_output_chunk: (
+                _sessionHandle: number,
+                _chunkIndex: number,
+                outputPointer: number,
+                outputByteLength: number,
+            ) => {
+                new Uint8Array(
+                    memory.buffer,
+                    outputPointer,
+                    outputByteLength,
+                ).set([9, 8, 7, 6]);
+                return 0;
+            },
+            sealed_lattice_evaluator_aggregate_copy_store_source_request: (
+                _sessionHandle: number,
+                outputPointer: number,
+            ) => {
+                writeStoreSourceRequest(
+                    memory,
+                    outputPointer,
+                    state.sourceRequestOrdinal,
+                );
+                return 0;
+            },
+            sealed_lattice_evaluator_aggregate_describe_store: (
+                _sessionHandle: number,
+                outputPointer: number,
+            ) => {
+                const bytes = new Uint8Array(
+                    memory.buffer,
+                    outputPointer,
+                    72,
+                );
+                new DataView(memory.buffer, outputPointer, 72).setBigUint64(
+                    0,
+                    4n,
+                    true,
+                );
+                bytes.fill(0xaa, 8);
+                return 0;
+            },
+            sealed_lattice_evaluator_aggregate_discard_session: (
+                sessionHandle: number,
+            ) => {
+                state.sessionDiscardHandles.push(sessionHandle);
+                return 0;
+            },
+            sealed_lattice_evaluator_aggregate_finalize_statement: () => 0,
+            sealed_lattice_evaluator_aggregate_finish_runtime_component_tree:
+                () => 0,
+            sealed_lattice_evaluator_aggregate_finish_store_construction: () =>
+                0,
+            sealed_lattice_evaluator_aggregate_finish_store_material: () => 0,
+            sealed_lattice_evaluator_aggregate_finish_verification: (
+                _sessionHandle: number,
+                verifiedCommonProofHandle: number,
+            ) => {
+                state.finishVerificationCalls.push(
+                    verifiedCommonProofHandle,
+                );
+                return 0;
+            },
+            sealed_lattice_evaluator_aggregate_prepare_generation: (
+                _sessionHandle: number,
+                _randomnessHandle: number,
+                _stateSessionHandle: number,
+                _capabilityPointer: number,
+                _capabilityByteLength: number,
+                _reservationHandle: number,
+                _checkpointPointer: number,
+                _checkpointByteLength: number,
+                statusPointer: number,
+            ) => {
+                state.freshGenerationPreparationCount += 1;
+                writeStatus(memory, statusPointer, 0);
+                return 61;
+            },
+            sealed_lattice_evaluator_aggregate_prepare_resumed_generation: (
+                _sessionHandle: number,
+                _randomnessHandle: number,
+                _stateSessionHandle: number,
+                _capabilityPointer: number,
+                _capabilityByteLength: number,
+                _reservationHandle: number,
+                _checkpointPointer: number,
+                _checkpointByteLength: number,
+                statusPointer: number,
+            ) => {
+                state.resumedGenerationPreparationCount += 1;
+                writeStatus(memory, statusPointer, 0);
+                return 61;
+            },
+            sealed_lattice_evaluator_aggregate_prepare_verification: (
+                _suiteHandle: number,
+                _sessionHandle: number,
+                statusPointer: number,
+            ) => {
+                writeStatus(memory, statusPointer, 0);
+                return 62;
+            },
+            sealed_lattice_evaluator_aggregate_store_construction_poll: (
+                _sessionHandle: number,
+                firstValuePointer: number,
+                secondValuePointer: number,
+                statusPointer: number,
+            ) => {
+                writeStatus(
+                    memory,
+                    statusPointer,
+                    state.storeConstructionPollStatus,
+                );
+                if (state.storeConstructionPollStatus !== 0) {
+                    return 0;
+                }
+                if (state.sourceRequestOrdinal < 10) {
+                    return 1;
+                }
+                if (!state.storeOutputAcknowledged) {
+                    new DataView(memory.buffer).setUint32(
+                        firstValuePointer,
+                        0,
+                        true,
+                    );
+                    new DataView(memory.buffer).setUint32(
+                        secondValuePointer,
+                        4,
+                        true,
+                    );
+                    return 2;
+                }
+                return 3;
+            },
+            sealed_lattice_evaluator_aggregate_store_source_request_byte_length:
+                () => 160,
+            sealed_lattice_evaluator_aggregate_supply_store_source_range: (
+                _sessionHandle: number,
+                _requestPointer: number,
+                _requestByteLength: number,
+                sourcePointer: number,
+                sourceByteLength: number,
+            ) => {
+                expect(
+                    Array.from(
+                        new Uint8Array(
+                            memory.buffer,
+                            sourcePointer,
+                            sourceByteLength,
+                        ),
+                    ),
+                ).toEqual(
+                    new Array(4).fill(state.sourceRequestOrdinal + 1),
+                );
+                state.sourceRangeSuppliedCount += 1;
+                state.sourceRequestOrdinal += 1;
+                return 0;
+            },
+            sealed_lattice_evaluator_aggregate_take_package_statement_source:
+                () => {
+                    state.packageStatementTakeCount += 1;
+                    return state.packageStatementTakeStatuses.shift() ?? 0;
+                },
+        },
+    } as unknown as TranscriptCoreKernelCommandRuntime;
+    contextRecords.set(kernel, context);
+    fakeStates.set(kernel, state);
+    registerCommonProofKernelContext(kernel, context);
+    return state;
+};
+
+const createStore = (
+    chunks: Map<number, Uint8Array<ArrayBuffer>>,
+): CommonProofCanonicalOutputStore =>
+    Object.freeze({
+        commitChunk: async (
+            chunkIndex: number,
+            chunkBytes: Uint8Array<ArrayBuffer>,
+        ): Promise<void> => {
+            chunks.set(chunkIndex, Uint8Array.from(chunkBytes));
+        },
+        readChunk: async (
+            chunkIndex: number,
+            exactByteLength: number,
+        ): Promise<Uint8Array<ArrayBuffer>> => {
+            const chunk = chunks.get(chunkIndex);
+            if (chunk?.byteLength !== exactByteLength) {
+                throw new Error('The fake store has no exact chunk.');
+            }
+            return Uint8Array.from(chunk);
+        },
+    });
+
+const constructSession = async (
+    state: FakeRuntimeState,
+): Promise<EvaluatorAggregateSession> => {
+    const selectedSuiteRecordSource = activateSelectedSuiteRecordSource({
+        canonicalSuiteRecordBytes: state.canonicalSuiteRecordBytes,
+        kernel: state.kernel,
+    });
+    try {
+        return await constructEvaluatorAggregateInClosedWorker({
+            evaluatorSourceCatalog: state.evaluatorSourceCatalog,
+            kernel: state.kernel,
+            options: { yieldControl: async () => undefined },
+            selectedSuiteRecordSource,
+            store: createStore(state.outputChunks),
+        });
+    } finally {
+        releaseSelectedSuiteRecordSource({
+            kernel: state.kernel,
+            source: selectedSuiteRecordSource,
+        });
+    }
+};
+
+const emptyExternalMemory = Object.freeze(
+    async () => Object.freeze({ readResults: [] }),
+) as unknown as CommonProofExternalMemoryTransactionExecutor;
+
+const unusedProofInputStore: AuthenticatedCommonProofInputStore =
+    Object.freeze({
+        declaredByteLength: 2,
+        readCommittedChunk: async () => Uint8Array.of(0x51, 0x52),
+    });
+
+const unusedResumeOptions = Object.freeze({
+    resume: Object.freeze({
+        checkpointCustody: Object.freeze({
+            publishAuthenticatedCheckpoint: async () => undefined,
+            restoreAuthenticatedCheckpointState: async () =>
+                new Uint8Array(),
+        }),
+        prefixReplayExternalMemory: Object.freeze({
+            executeDeterministicPrefixReplayTransaction: async () => [],
+        }),
+    }),
+});
+
+describe('Evaluator aggregate Rust/WASM lifecycle', () => {
+    it('streams the production-derived store and completes positive generation, verification, and store commit', async () => {
+        const state = createFakeRuntime();
+        const session = await constructSession(state);
+
+        expect(state.readSourceOrdinals).toEqual([
+            0, 1, 2, 3, 4, 5, 6, 7, 8, 9,
+        ]);
+        expect(state.sourceRangeSuppliedCount).toBe(10);
+        expect(state.runtimeTreeChunks).toEqual([Uint8Array.of(9, 8, 7, 6)]);
+        expect(state.materialChunks).toEqual([Uint8Array.of(9, 8, 7, 6)]);
+        expect(session.copyCanonicalApplicationStatement()).toEqual(
+            Uint8Array.of(0xb1, 0xb2, 0xb3),
+        );
+        expect(session.describeStore()).toEqual({
+            fullObjectDigest: new Uint8Array(64).fill(0xaa),
+            totalByteLength: 4n,
+        });
+
+        const proofOutputChunks = new Map<
+            number,
+            Uint8Array<ArrayBuffer>
+        >();
+        const descriptor = await session.generate({
+            actionRandomnessSession: state.actionRandomnessSession,
+            checkpointLineageIdentifier: new Uint8Array(32).fill(0x31),
+            externalMemory: emptyExternalMemory,
+            generationMode: 'fresh',
+            options: { yieldControl: async () => undefined },
+            proofOutputStore: createStore(proofOutputChunks),
+            verifiedReservation: state.verifiedReservation,
+        });
+        expect(descriptor).toEqual(Uint8Array.of(0xd1, 0xd2));
+        expect(state.freshGenerationPreparationCount).toBe(1);
+        expect(state.commitGeneratedProofCalls).toEqual([91]);
+
+        session.takePackageStatement();
+        await expect(
+            session.verify({ proofInputStore: unusedProofInputStore }),
+        ).rejects.toThrow(CanonicalStreamRefusalError);
+        state.catalogPhase = 'complete';
+        await session.verify({ proofInputStore: unusedProofInputStore });
+        session.commitVerifiedStore(state.acceptedSetupVerification);
+
+        expect(state.packageStatementTakeCount).toBe(1);
+        expect(state.finishVerificationCalls).toEqual([92]);
+        expect(state.commitVerifiedStoreCalls).toEqual([31]);
+        expect(state.sessionDiscardHandles).toEqual([7]);
+        expect(state.allocations.size).toBe(0);
+        expect(() => session.cancel()).toThrow(TypeError);
+    });
+
+    it('uses only the resumed preparation hook and enforces lifecycle order', async () => {
+        const state = createFakeRuntime();
+        const session = await constructSession(state);
+
+        expect(() => session.takePackageStatement()).toThrow(
+            CanonicalStreamRefusalError,
+        );
+        await expect(
+            session.generate({
+                actionRandomnessSession: state.actionRandomnessSession,
+                checkpointLineageIdentifier: new Uint8Array(32),
+                externalMemory: emptyExternalMemory,
+                generationMode: 'fresh',
+                options: unusedResumeOptions,
+                proofOutputStore: createStore(new Map()),
+                verifiedReservation: state.verifiedReservation,
+            }),
+        ).rejects.toThrow(CanonicalStreamRefusalError);
+        await session.generate({
+            actionRandomnessSession: state.actionRandomnessSession,
+            checkpointLineageIdentifier: new Uint8Array(32).fill(0x32),
+            externalMemory: emptyExternalMemory,
+            generationMode: 'resumed',
+            options: unusedResumeOptions,
+            proofOutputStore: createStore(new Map()),
+            verifiedReservation: state.verifiedReservation,
+        });
+        expect(state.freshGenerationPreparationCount).toBe(0);
+        expect(state.resumedGenerationPreparationCount).toBe(1);
+        await expect(
+            session.generate({
+                actionRandomnessSession: state.actionRandomnessSession,
+                checkpointLineageIdentifier: new Uint8Array(32),
+                externalMemory: emptyExternalMemory,
+                generationMode: 'fresh',
+                proofOutputStore: createStore(new Map()),
+                verifiedReservation: state.verifiedReservation,
+            }),
+        ).rejects.toThrow(CanonicalStreamRefusalError);
+
+        session.cancel();
+        expect(state.sessionDiscardHandles).toEqual([7]);
+        expect(state.allocations.size).toBe(0);
+    });
+
+    it('keeps package handoff and verified-store commit retryable after refusal', async () => {
+        const state = createFakeRuntime();
+        const session = await constructSession(state);
+        await session.generate({
+            actionRandomnessSession: state.actionRandomnessSession,
+            checkpointLineageIdentifier: new Uint8Array(32).fill(0x33),
+            externalMemory: emptyExternalMemory,
+            generationMode: 'fresh',
+            proofOutputStore: createStore(new Map()),
+            verifiedReservation: state.verifiedReservation,
+        });
+
+        state.packageStatementTakeStatuses.push(
+            refusalReasonCodes.missingPrerequisite,
+            0,
+        );
+        expect(() => session.takePackageStatement()).toThrow(
+            CanonicalStreamRefusalError,
+        );
+        expect(() => session.takePackageStatement()).not.toThrow();
+        state.catalogPhase = 'complete';
+        await session.verify({ proofInputStore: unusedProofInputStore });
+
+        state.commitVerifiedStoreStatuses.push(
+            refusalReasonCodes.missingPrerequisite,
+            0,
+        );
+        expect(() =>
+            session.commitVerifiedStore(state.acceptedSetupVerification),
+        ).toThrow(CanonicalStreamRefusalError);
+        expect(state.sessionDiscardHandles).toEqual([]);
+        expect(() =>
+            session.commitVerifiedStore(state.acceptedSetupVerification),
+        ).not.toThrow();
+
+        expect(state.packageStatementTakeCount).toBe(2);
+        expect(state.commitVerifiedStoreCalls).toEqual([31, 31]);
+        expect(state.sessionDiscardHandles).toEqual([7]);
+        expect(state.allocations.size).toBe(0);
+    });
+
+    it('separates construction refusal status from poll state', async () => {
+        const state = createFakeRuntime();
+        state.storeConstructionPollStatus =
+            refusalReasonCodes.malformedEncoding;
+
+        await expect(constructSession(state)).rejects.toThrow(
+            CanonicalStreamRefusalError,
+        );
+        expect(state.readSourceOrdinals).toEqual([]);
+        expect(state.sessionDiscardHandles).toEqual([7]);
+        expect(state.allocations.size).toBe(0);
+    });
+
+    it('discards the Rust session when authenticated source custody returns a truncated range', async () => {
+        const state = createFakeRuntime();
+        state.wrongSourceLength = true;
+
+        await expect(constructSession(state)).rejects.toThrow(
+            CanonicalStreamInternalError,
+        );
+        expect(state.sourceRangeSuppliedCount).toBe(0);
+        expect(state.sessionDiscardHandles).toEqual([7]);
+        expect(state.allocations.size).toBe(0);
+    });
+});

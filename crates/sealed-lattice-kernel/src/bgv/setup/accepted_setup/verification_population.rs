@@ -15,8 +15,10 @@ use crate::{
             CommonProofSelectedSuiteCapabilityHandle, SelectedApplicationStatementContext,
             VerifiedCommonProofCapabilityHandle, VerifiedCommonProofStatementSource,
             VerifiedKeyRelationColumnEvaluator, VerifiedStatementOwnedTree,
+            bind_generated_common_proof_to_verified_statement_source,
             decode_selected_public_key_share_statement, decode_selected_same_secret_statement,
             preflight_and_consume_verified_common_proof_with_family_terminal,
+            preflight_generated_common_proof_pending_statement,
             retain_common_proof_verification_family_adapter_from_upstream, runtime_error_status,
             selected_proof_runtime_limits, selected_relation_plan_check_context,
             selected_relation_plans,
@@ -144,112 +146,113 @@ fn prepare_verification(
     let canonical_application_statement_bytes = canonical_application_statement_bytes.to_vec();
     let (statement_source, statement_trees, verified_column_evaluator, terminal_source) =
         with_accepted_setup_verification_sources(
-        assembly_handle,
-        |package, verified_public_randomness| {
-            let context = verified_public_randomness.context();
-            let statement_context = SelectedApplicationStatementContext::new(
-                context.protocol_version(),
-                context.suite_identifier().into_bytes(),
-                None,
-                None,
-            );
-            let roster_position = match family {
-                AcceptedSetupProofFamily::SameSecret => decode_selected_same_secret_statement(
-                    &canonical_application_statement_bytes,
-                    statement_context,
-                )
-                .map(|statement| statement.roster_position()),
-                AcceptedSetupProofFamily::PublicKeyShare => {
-                    decode_selected_public_key_share_statement(
+            assembly_handle,
+            |package, verified_public_randomness| {
+                let context = verified_public_randomness.context();
+                let statement_context = SelectedApplicationStatementContext::new(
+                    context.protocol_version(),
+                    context.suite_identifier().into_bytes(),
+                    None,
+                    None,
+                );
+                let roster_position = match family {
+                    AcceptedSetupProofFamily::SameSecret => decode_selected_same_secret_statement(
                         &canonical_application_statement_bytes,
                         statement_context,
                     )
-                    .map(|statement| statement.roster_position())
+                    .map(|statement| statement.roster_position()),
+                    AcceptedSetupProofFamily::PublicKeyShare => {
+                        decode_selected_public_key_share_statement(
+                            &canonical_application_statement_bytes,
+                            statement_context,
+                        )
+                        .map(|statement| statement.roster_position())
+                    }
                 }
-            }
-            .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?;
-            let selected_slots = package
-                .selected_public_proof_slots()
                 .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?;
-            let mut matching_descriptor_indices = selected_slots
-                .iter()
-                .enumerate()
-                .filter(|(_, slot)| {
-                    slot.application_statement_schema_identifier() == schema_identifier
-                        && slot.roster_position() == Some(roster_position)
-                        && slot.schedule_position().is_none()
-                })
-                .map(|(descriptor_index, _)| descriptor_index);
-            let proof_descriptor_index = matching_descriptor_indices
-                .next()
-                .ok_or(CommonProofRuntimeError::WrongVerificationBinding)?;
-            if matching_descriptor_indices.next().is_some() {
-                return Err(CommonProofRuntimeError::WrongVerificationBinding);
-            }
-            let proof_stream_descriptor = package
-                .ordered_proof_descriptors()
-                .get(proof_descriptor_index)
-                .cloned()
-                .ok_or(CommonProofRuntimeError::WrongVerificationBinding)?;
-            let application_slot = ProofApplicationSlot::new(
-                context.suite_identifier(),
-                context.ceremony_context_hash(),
-                context.action_context_hash(),
-                schema_identifier,
-                Some(roster_position),
-                None,
-                None,
-            )
-            .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?;
-            let proof_header = ProofObjectHeader::from_canonical_application_statement(
-                canonical_application_statement_bytes.clone(),
-                &CanonicalDecodeLimits::default(),
-            )
-            .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?;
-            let proof_header_hash = proof_header
-                .proof_header_hash()
-                .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?;
-            let proof_application_binding = ProofApplicationBinding::new(
-                application_slot,
-                proof_header_hash,
-                proof_stream_descriptor,
-            )
-            .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?;
-            let relation_plan_artifact = selected_relation_plans()
-                .map_err(|_| CommonProofRuntimeError::InvalidPlanCapability)?
-                .into_iter()
-                .find(|artifact| {
-                    artifact.application_statement_schema_identifier() == schema_identifier
-                })
-                .ok_or(CommonProofRuntimeError::InvalidPlanCapability)?;
-            let relation_plan = relation_plan_artifact.compiled_plan();
-            let relation_plan_variant = relation_plan
-                .select_variant(None, None)
-                .map_err(|_| CommonProofRuntimeError::InvalidPlanCapability)?;
-            let runtime_limits = selected_proof_runtime_limits(
-                schema_identifier,
-                &canonical_application_statement_bytes,
-                relation_plan_variant,
-            )
-            .map_err(|_| CommonProofRuntimeError::InvalidLimits)?;
-            let relation_context = selected_relation_plan_check_context(schema_identifier)
-                .ok_or(CommonProofRuntimeError::InvalidPlanCapability)?;
-            let verified_column_evaluator =
-                VerifiedKeyRelationColumnEvaluator::from_verified_public_randomness(
-                    verified_public_randomness,
-                    &relation_plan_artifact,
-                    relation_plan_variant,
-                    &relation_context,
+                let selected_slots = package
+                    .selected_public_proof_slots()
+                    .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?;
+                let mut matching_descriptor_indices = selected_slots
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, slot)| {
+                        slot.application_statement_schema_identifier() == schema_identifier
+                            && slot.roster_position() == Some(roster_position)
+                            && slot.schedule_position().is_none()
+                    })
+                    .map(|(descriptor_index, _)| descriptor_index);
+                let proof_descriptor_index = matching_descriptor_indices
+                    .next()
+                    .ok_or(CommonProofRuntimeError::WrongVerificationBinding)?;
+                if matching_descriptor_indices.next().is_some() {
+                    return Err(CommonProofRuntimeError::WrongVerificationBinding);
+                }
+                let proof_stream_descriptor = package
+                    .ordered_proof_descriptors()
+                    .get(proof_descriptor_index)
+                    .cloned()
+                    .ok_or(CommonProofRuntimeError::WrongVerificationBinding)?;
+                let application_slot = ProofApplicationSlot::new(
+                    context.suite_identifier(),
+                    context.ceremony_context_hash(),
+                    context.action_context_hash(),
+                    schema_identifier,
+                    Some(roster_position),
+                    None,
+                    None,
                 )
-                .map_err(|_| CommonProofRuntimeError::InvalidPlanCapability)?;
-            let relation_plan_capability = CommonProofRelationPlanCapability::from_compiled_plan(
-                relation_plan,
-                &relation_context,
-                None,
-                None,
-            )
-            .map_err(|_| CommonProofRuntimeError::InvalidPlanCapability)?;
-            let statement_source =
+                .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?;
+                let proof_header = ProofObjectHeader::from_canonical_application_statement(
+                    canonical_application_statement_bytes.clone(),
+                    &CanonicalDecodeLimits::default(),
+                )
+                .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?;
+                let proof_header_hash = proof_header
+                    .proof_header_hash()
+                    .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?;
+                let proof_application_binding = ProofApplicationBinding::new(
+                    application_slot,
+                    proof_header_hash,
+                    proof_stream_descriptor,
+                )
+                .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?;
+                let relation_plan_artifact = selected_relation_plans()
+                    .map_err(|_| CommonProofRuntimeError::InvalidPlanCapability)?
+                    .into_iter()
+                    .find(|artifact| {
+                        artifact.application_statement_schema_identifier() == schema_identifier
+                    })
+                    .ok_or(CommonProofRuntimeError::InvalidPlanCapability)?;
+                let relation_plan = relation_plan_artifact.compiled_plan();
+                let relation_plan_variant = relation_plan
+                    .select_variant(None, None)
+                    .map_err(|_| CommonProofRuntimeError::InvalidPlanCapability)?;
+                let runtime_limits = selected_proof_runtime_limits(
+                    schema_identifier,
+                    &canonical_application_statement_bytes,
+                    relation_plan_variant,
+                )
+                .map_err(|_| CommonProofRuntimeError::InvalidLimits)?;
+                let relation_context = selected_relation_plan_check_context(schema_identifier)
+                    .ok_or(CommonProofRuntimeError::InvalidPlanCapability)?;
+                let verified_column_evaluator =
+                    VerifiedKeyRelationColumnEvaluator::from_verified_public_randomness(
+                        verified_public_randomness,
+                        &relation_plan_artifact,
+                        relation_plan_variant,
+                        &relation_context,
+                    )
+                    .map_err(|_| CommonProofRuntimeError::InvalidPlanCapability)?;
+                let relation_plan_capability =
+                    CommonProofRelationPlanCapability::from_compiled_plan(
+                        relation_plan,
+                        &relation_context,
+                        None,
+                        None,
+                    )
+                    .map_err(|_| CommonProofRuntimeError::InvalidPlanCapability)?;
+                let statement_source =
                 VerifiedCommonProofStatementSource::from_exact_family_verified_accepted_setup_package(
                     package,
                     verified_public_randomness,
@@ -259,26 +262,27 @@ fn prepare_verification(
                     relation_plan_capability,
                     runtime_limits,
                 )?;
-            let statement_trees =
-                VerifiedStatementOwnedTree::from_verified_accepted_setup_statement_source(
-                    &statement_source,
-                    verified_public_randomness,
-                )
-                .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?;
-            Ok((
-                statement_source,
-                statement_trees,
-                verified_column_evaluator,
-                AcceptedSetupVerificationTerminalSource {
-                    family,
-                    assembly_handle,
-                    canonical_application_statement_bytes: canonical_application_statement_bytes
-                        .clone()
-                        .into_boxed_slice(),
-                },
-            ))
-        },
-    )?;
+                let statement_trees =
+                    VerifiedStatementOwnedTree::from_verified_accepted_setup_statement_source(
+                        &statement_source,
+                        verified_public_randomness,
+                    )
+                    .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?;
+                Ok((
+                    statement_source,
+                    statement_trees,
+                    verified_column_evaluator,
+                    AcceptedSetupVerificationTerminalSource {
+                        family,
+                        assembly_handle,
+                        canonical_application_statement_bytes:
+                            canonical_application_statement_bytes
+                                .clone()
+                                .into_boxed_slice(),
+                    },
+                ))
+            },
+        )?;
     let terminal_source_handle = ACCEPTED_SETUP_VERIFICATION_TERMINAL_SOURCE_REGISTRY
         .with(|registry| registry.borrow_mut().retain(terminal_source))?;
     let selected_suite_handle =
@@ -397,6 +401,245 @@ fn finish_public_key_share_verification(
             Ok((terminal_preflight, prepared_slot))
         },
         |verified_proof, (terminal_preflight, prepared_slot)| {
+            let _source = terminal_source
+                .borrow_mut()
+                .take()
+                .expect("terminal preflight retained the exact source");
+            let terminal = terminal_preflight.complete(verified_proof);
+            commit_preflighted_verified_public_key_share_terminal(prepared_slot, terminal);
+        },
+    );
+    if result.is_err()
+        && let Some(source) = terminal_source.into_inner()
+    {
+        ACCEPTED_SETUP_VERIFICATION_TERMINAL_SOURCE_REGISTRY.with(|registry| {
+            registry
+                .borrow_mut()
+                .restore(terminal_source_handle, source)
+        })?;
+    }
+    result
+}
+
+fn same_secret_terminal_roster_position(
+    source: &AcceptedSetupVerificationTerminalSource,
+) -> Result<u16, CommonProofRuntimeError> {
+    with_accepted_setup_verification_sources(
+        source.assembly_handle,
+        |_, verified_public_randomness| {
+            let context = verified_public_randomness.context();
+            decode_selected_same_secret_statement(
+                &source.canonical_application_statement_bytes,
+                SelectedApplicationStatementContext::new(
+                    context.protocol_version(),
+                    context.suite_identifier().into_bytes(),
+                    None,
+                    None,
+                ),
+            )
+            .map(|statement| statement.roster_position())
+            .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)
+        },
+    )
+}
+
+fn public_key_share_terminal_roster_position(
+    source: &AcceptedSetupVerificationTerminalSource,
+) -> Result<u16, CommonProofRuntimeError> {
+    with_accepted_setup_verification_sources(
+        source.assembly_handle,
+        |_, verified_public_randomness| {
+            let context = verified_public_randomness.context();
+            decode_selected_public_key_share_statement(
+                &source.canonical_application_statement_bytes,
+                SelectedApplicationStatementContext::new(
+                    context.protocol_version(),
+                    context.suite_identifier().into_bytes(),
+                    None,
+                    None,
+                ),
+            )
+            .map(|statement| statement.roster_position())
+            .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)
+        },
+    )
+}
+
+fn finish_generated_same_secret_verification(
+    verified_common_proof_handle: u32,
+    terminal_source_handle: u32,
+    generated_common_proof_handle: u32,
+) -> Result<(), CommonProofRuntimeError> {
+    let terminal_source =
+        ACCEPTED_SETUP_VERIFICATION_TERMINAL_SOURCE_REGISTRY.with(|registry| {
+            registry
+                .borrow_mut()
+                .take(terminal_source_handle, AcceptedSetupProofFamily::SameSecret)
+        })?;
+    let terminal_source = RefCell::new(Some(terminal_source));
+    let generated_proof_descriptor = {
+        let preliminary_result = (|| {
+            let source = terminal_source.borrow();
+            let source = source
+                .as_ref()
+                .ok_or(CommonProofRuntimeError::WrongVerificationBinding)?;
+            let roster_position = same_secret_terminal_roster_position(source)?;
+            preflight_generated_common_proof_pending_statement(
+                generated_common_proof_handle,
+                ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER,
+                Some(roster_position),
+                None,
+                &source.canonical_application_statement_bytes,
+            )
+        })();
+        match preliminary_result {
+            Ok(descriptor) => descriptor,
+            Err(error) => {
+                let source = terminal_source
+                    .into_inner()
+                    .expect("the preliminary preflight retained the terminal source");
+                ACCEPTED_SETUP_VERIFICATION_TERMINAL_SOURCE_REGISTRY.with(|registry| {
+                    registry
+                        .borrow_mut()
+                        .restore(terminal_source_handle, source)
+                })?;
+                return Err(error);
+            }
+        }
+    };
+    let result = preflight_and_consume_verified_common_proof_with_family_terminal(
+        &VerifiedCommonProofCapabilityHandle::from_identifier(verified_common_proof_handle),
+        |verified_proof| {
+            if verified_proof.proof_stream_descriptor() != &generated_proof_descriptor {
+                return Err(CommonProofRuntimeError::WrongVerificationBinding);
+            }
+            let source = terminal_source.borrow();
+            let source = source
+                .as_ref()
+                .ok_or(CommonProofRuntimeError::WrongVerificationBinding)?;
+            let terminal_preflight = with_accepted_setup_verification_sources(
+                source.assembly_handle,
+                |_, verified_public_randomness| {
+                    VerifiedSameSecretTerminal::preflight_from_borrowed_common_proof(
+                        verified_proof,
+                        &source.canonical_application_statement_bytes,
+                        verified_public_randomness,
+                    )
+                    .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)
+                },
+            )?;
+            let prepared_slot = preflight_verified_same_secret_terminal_slot(
+                source.assembly_handle,
+                terminal_preflight.roster_position(),
+            )?;
+            Ok((terminal_preflight, prepared_slot))
+        },
+        |verified_proof, (terminal_preflight, prepared_slot)| {
+            bind_generated_common_proof_to_verified_statement_source(
+                generated_common_proof_handle,
+                verified_proof
+                    .statement_source()
+                    .expect("borrowed preflight retained the exact package statement source"),
+            )
+            .expect("borrowed preflight established the exact generated-proof package binding");
+            let _source = terminal_source
+                .borrow_mut()
+                .take()
+                .expect("terminal preflight retained the exact source");
+            let terminal = terminal_preflight.complete(verified_proof);
+            commit_preflighted_verified_same_secret_terminal(prepared_slot, terminal);
+        },
+    );
+    if result.is_err()
+        && let Some(source) = terminal_source.into_inner()
+    {
+        ACCEPTED_SETUP_VERIFICATION_TERMINAL_SOURCE_REGISTRY.with(|registry| {
+            registry
+                .borrow_mut()
+                .restore(terminal_source_handle, source)
+        })?;
+    }
+    result
+}
+
+fn finish_generated_public_key_share_verification(
+    verified_common_proof_handle: u32,
+    terminal_source_handle: u32,
+    generated_common_proof_handle: u32,
+) -> Result<(), CommonProofRuntimeError> {
+    let terminal_source =
+        ACCEPTED_SETUP_VERIFICATION_TERMINAL_SOURCE_REGISTRY.with(|registry| {
+            registry.borrow_mut().take(
+                terminal_source_handle,
+                AcceptedSetupProofFamily::PublicKeyShare,
+            )
+        })?;
+    let terminal_source = RefCell::new(Some(terminal_source));
+    let generated_proof_descriptor = {
+        let preliminary_result = (|| {
+            let source = terminal_source.borrow();
+            let source = source
+                .as_ref()
+                .ok_or(CommonProofRuntimeError::WrongVerificationBinding)?;
+            let roster_position = public_key_share_terminal_roster_position(source)?;
+            preflight_generated_common_proof_pending_statement(
+                generated_common_proof_handle,
+                ProofApplicationSlotCeilings::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+                Some(roster_position),
+                None,
+                &source.canonical_application_statement_bytes,
+            )
+        })();
+        match preliminary_result {
+            Ok(descriptor) => descriptor,
+            Err(error) => {
+                let source = terminal_source
+                    .into_inner()
+                    .expect("the preliminary preflight retained the terminal source");
+                ACCEPTED_SETUP_VERIFICATION_TERMINAL_SOURCE_REGISTRY.with(|registry| {
+                    registry
+                        .borrow_mut()
+                        .restore(terminal_source_handle, source)
+                })?;
+                return Err(error);
+            }
+        }
+    };
+    let result = preflight_and_consume_verified_common_proof_with_family_terminal(
+        &VerifiedCommonProofCapabilityHandle::from_identifier(verified_common_proof_handle),
+        |verified_proof| {
+            if verified_proof.proof_stream_descriptor() != &generated_proof_descriptor {
+                return Err(CommonProofRuntimeError::WrongVerificationBinding);
+            }
+            let source = terminal_source.borrow();
+            let source = source
+                .as_ref()
+                .ok_or(CommonProofRuntimeError::WrongVerificationBinding)?;
+            let terminal_preflight = with_accepted_setup_verification_sources(
+                source.assembly_handle,
+                |_, verified_public_randomness| {
+                    VerifiedPublicKeyShareTerminal::preflight_from_borrowed_common_proof(
+                        verified_proof,
+                        &source.canonical_application_statement_bytes,
+                        verified_public_randomness,
+                    )
+                    .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)
+                },
+            )?;
+            let prepared_slot = preflight_verified_public_key_share_terminal_slot(
+                source.assembly_handle,
+                terminal_preflight.roster_position(),
+            )?;
+            Ok((terminal_preflight, prepared_slot))
+        },
+        |verified_proof, (terminal_preflight, prepared_slot)| {
+            bind_generated_common_proof_to_verified_statement_source(
+                generated_common_proof_handle,
+                verified_proof
+                    .statement_source()
+                    .expect("borrowed preflight retained the exact package statement source"),
+            )
+            .expect("borrowed preflight established the exact generated-proof package binding");
             let _source = terminal_source
                 .borrow_mut()
                 .take()
@@ -563,6 +806,38 @@ pub extern "C" fn sealed_lattice_accepted_setup_public_key_share_finish_verifica
 ) -> u32 {
     finish_public_key_share_verification(verified_common_proof_handle, terminal_source_handle)
         .map_or_else(runtime_error_status, |()| 0)
+}
+
+/// Atomically binds one locally generated same-secret proof to the exact
+/// positive package source and commits its verified terminal.
+#[unsafe(no_mangle)]
+pub extern "C" fn sealed_lattice_accepted_setup_same_secret_finish_generated_verification(
+    verified_common_proof_handle: u32,
+    terminal_source_handle: u32,
+    generated_common_proof_handle: u32,
+) -> u32 {
+    finish_generated_same_secret_verification(
+        verified_common_proof_handle,
+        terminal_source_handle,
+        generated_common_proof_handle,
+    )
+    .map_or_else(runtime_error_status, |()| 0)
+}
+
+/// Atomically binds one locally generated public-key-share proof to the exact
+/// positive package source and commits its verified terminal.
+#[unsafe(no_mangle)]
+pub extern "C" fn sealed_lattice_accepted_setup_public_key_share_finish_generated_verification(
+    verified_common_proof_handle: u32,
+    terminal_source_handle: u32,
+    generated_common_proof_handle: u32,
+) -> u32 {
+    finish_generated_public_key_share_verification(
+        verified_common_proof_handle,
+        terminal_source_handle,
+        generated_common_proof_handle,
+    )
+    .map_or_else(runtime_error_status, |()| 0)
 }
 
 #[unsafe(no_mangle)]

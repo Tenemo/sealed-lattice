@@ -9,6 +9,7 @@ import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import {
     openAuthenticatedCheckpointStore,
     type CheckpointBoundaryPolicy,
+    type CheckpointOperationIdentity,
     type TransferableAuthenticatedCheckpointStore,
 } from '#packages/protocol/src/runtime/authenticated-checkpoint-store';
 import {
@@ -330,6 +331,29 @@ describe('Common-proof browser custody', () => {
         const ownedCapacityReservation =
             input?.decorateCapacityReservation?.(capacityReservation) ??
             capacityReservation;
+        let freshCheckpointOperationIdentity:
+            | CheckpointOperationIdentity
+            | undefined;
+        if (
+            input?.checkpointStore !== undefined &&
+            input.resumeDescriptor === undefined
+        ) {
+            const checkpointLineageReservation =
+                await input.checkpointStore.reserveCheckpointLineage();
+            try {
+                freshCheckpointOperationIdentity =
+                    await input.checkpointStore.bindCheckpointLineageToProofAttempt(
+                        checkpointLineageReservation,
+                        proofAttemptLineageIdentifier,
+                    );
+            } catch (error) {
+                await input.checkpointStore.releaseCheckpointLineageReservation(
+                    checkpointLineageReservation,
+                );
+                await ownedCapacityReservation.release();
+                throw error;
+            }
+        }
         let custody: CommonProofBrowserCustody;
         try {
             custody = openCommonProofBrowserCustody({
@@ -340,7 +364,10 @@ describe('Common-proof browser custody', () => {
                     : {
                           checkpoint: {
                               ...(input.resumeDescriptor === undefined
-                                  ? {}
+                                  ? {
+                                        operationIdentity:
+                                            freshCheckpointOperationIdentity!,
+                                    }
                                   : {
                                         resumeDescriptor:
                                             input.resumeDescriptor,
@@ -361,6 +388,14 @@ describe('Common-proof browser custody', () => {
                 workerKernel,
             });
         } catch (error) {
+            if (
+                freshCheckpointOperationIdentity !== undefined &&
+                input?.checkpointStore !== undefined
+            ) {
+                await input.checkpointStore.releaseOperationIdentity(
+                    freshCheckpointOperationIdentity,
+                );
+            }
             await ownedCapacityReservation.release();
             throw error;
         }

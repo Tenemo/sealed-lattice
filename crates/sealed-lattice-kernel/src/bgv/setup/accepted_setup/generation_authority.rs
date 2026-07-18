@@ -2,44 +2,55 @@ use std::{cell::RefCell, collections::BTreeMap, rc::Rc, sync::Arc};
 
 use zeroize::{Zeroize, Zeroizing};
 
+use super::generation_relinearization::{
+    SetupGeneratedRelinearizationMaterial, SetupGeneratedRelinearizationRoundOneSourceAuthority,
+    SetupGeneratedRelinearizationRoundTwoGeneration,
+    SetupGeneratedRelinearizationRoundTwoSourceAuthority,
+    SetupGenerationRelinearizationRoundOnePreparationSource,
+};
+
 use crate::{
     bgv::proof_suite::{
         AuthenticatedCompactCommittedMaterialSource, CommittedMaterialContext,
         CommittedMaterialRole, CommittedMaterialSourcePolynomialAdapter, CommittedMaterialTree,
-        ComponentMaterialOwnershipBinding, ComponentPublicPolynomialRuntimeError,
         CommonProofGenerationAuthorization, CommonProofGenerationPreparationError,
         CommonProofGenerationSources, CommonProofPrivateCoinCoordinateCapacity,
         CommonProofProverError, CommonProofRelationPlanCapability, CommonProofRuntimeError,
         CommonProofRuntimeLimits, CompactCommittedMaterialSource,
-        GaloisKeyShareSourcePolynomialAdapter, KeySwitchComponentPublicPolynomialStream,
-        KeySwitchComponentMaterialTopology, PreparedCommonProofGeneration,
+        ComponentMaterialOwnershipBinding, ComponentPublicPolynomialRuntimeError,
+        GaloisKeyShareSourcePolynomialAdapter, KeySwitchComponentMaterialTopology,
+        KeySwitchComponentPublicPolynomialStream, PreparedCommonProofGeneration,
         PrivateRandomnessCommonProofCoinSource, ProofBaseFieldElement, ProofEvaluationDomain,
         RelationPlanVariant, SelectedEvaluatorEntryKind, SelectedEvaluatorEntryPosition,
-        SelectedVssShareLinkageStatement, SetupPublicPolynomialContext, SetupPublicPolynomialTree,
-        SetupPublicPolynomialTreeInput, canonical_selected_galois_key_share_statement,
+        SelectedVssShareLinkageStatement, SetupKeyRelationSourcePolynomialAdapter,
+        SetupPublicPolynomialContext, SetupPublicPolynomialTree, SetupPublicPolynomialTreeInput,
+        VerifiedEvaluatorAuxiliaryRoot, VerifiedKeySwitchComponentMaterial,
+        VerifiedRelinearizationAggregateMaterial, canonical_selected_galois_key_share_statement,
+        canonical_selected_public_key_share_statement, canonical_selected_same_secret_statement,
         canonical_selected_vss_share_linkage_statement,
         compile_galois_key_share_relation_with_source_layout,
-        compile_vss_share_linkage_relation_plan,
-        decode_recipient_private_vss_payload, selected_committed_material_profile,
-        selected_committed_material_relation_plan_input, selected_evaluator_galois_entry_positions,
-        selected_galois_key_share_batch_schedule, selected_galois_key_share_relation_plan_input,
-        selected_relation_plan_check_context, selected_relation_plans,
-        verified_application_statement_hash, galois_relation_tree_inputs,
-        VerifiedEvaluatorAuxiliaryRoot, VerifiedKeySwitchComponentMaterial,
+        compile_public_key_share_relation_with_source_layout,
+        compile_same_secret_relation_with_source_layout, compile_vss_share_linkage_relation_plan,
+        decode_recipient_private_vss_payload, galois_relation_tree_inputs,
+        public_key_share_relation_tree_inputs, same_secret_relation_tree_inputs,
+        selected_committed_material_profile, selected_committed_material_relation_plan_input,
+        selected_evaluator_galois_entry_positions, selected_galois_key_share_batch_schedule,
+        selected_galois_key_share_relation_plan_input,
+        selected_public_key_share_relation_plan_input, selected_relation_plan_check_context,
+        selected_relation_plans, selected_same_secret_relation_plan_input,
+        verified_application_statement_hash,
     },
     bgv::setup::{
         SETUP_COMMITMENT_HIDING_ERROR_WIDTH, SETUP_COMMITMENT_HIDING_SECRET_WIDTH,
         SETUP_COMMITMENT_MODULE_RANK, SETUP_COMMITMENT_MODULUS_LIMB_INDICES,
         sample_galois_common_reference_limb,
-        sampling::{
-            DATA_MODULUS_CATALOG_IDENTIFIER, SPECIAL_MODULUS_CATALOG_IDENTIFIER,
-        },
+        sampling::{DATA_MODULUS_CATALOG_IDENTIFIER, SPECIAL_MODULUS_CATALOG_IDENTIFIER},
     },
     foundation::{
         ActionPrivateRandomness, CanonicalStreamDomain, CanonicalStreamReadbackVerifier,
-        FOUNDATION_PROFILE, Hash512,
-        PersistentProofCoinInput, PreparedActionProofAttemptSource, ProofApplicationSlotCeilings,
-        RefusalReason, StreamDescriptor, WitnessBoundPreparedActionProofAttemptSource,
+        FOUNDATION_PROFILE, Hash512, PersistentProofCoinInput, PersistentProofWitnessCoinBinding,
+        PreparedActionProofAttemptSource, ProofApplicationSlotCeilings, RefusalReason,
+        SelectedSuiteCapability, StreamDescriptor, WitnessBoundPreparedActionProofAttemptSource,
         bind_prepared_action_proof_attempt_to_canonical_witness,
         derive_canonical_stream_descriptor,
     },
@@ -51,6 +62,14 @@ const MAXIMUM_RETAINED_SETUP_GENERATION_RECIPIENT_PAYLOAD_SOURCE_COUNT: usize =
         * FOUNDATION_PROFILE.participant_count as usize;
 const GALOIS_KEY_SHARE_CANONICAL_SEMANTIC_WITNESS_DOMAIN: &[u8] =
     b"sealed-lattice/galois-key-share/canonical-semantic-witness/v1";
+const RELINEARIZATION_ROUND_ONE_CANONICAL_SEMANTIC_WITNESS_DOMAIN: &[u8] =
+    b"sealed-lattice/relinearization-round-one/canonical-semantic-witness/v1";
+const RELINEARIZATION_ROUND_TWO_CANONICAL_SEMANTIC_WITNESS_DOMAIN: &[u8] =
+    b"sealed-lattice/relinearization-round-two/canonical-semantic-witness/v1";
+const SAME_SECRET_CANONICAL_SEMANTIC_WITNESS_DOMAIN: &[u8] =
+    b"sealed-lattice/same-secret/canonical-semantic-witness/v1";
+const PUBLIC_KEY_SHARE_CANONICAL_SEMANTIC_WITNESS_DOMAIN: &[u8] =
+    b"sealed-lattice/public-key-share/canonical-semantic-witness/v1";
 
 const fn generated_galois_stream_refusal(
     error: ComponentPublicPolynomialRuntimeError,
@@ -75,6 +94,25 @@ impl SetupGenerationAuthorityHandle {
 
     pub(crate) const fn identifier(&self) -> u32 {
         self.0
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SetupKeyRelationProofFamily {
+    SameSecret,
+    PublicKeyShare,
+}
+
+impl SetupKeyRelationProofFamily {
+    pub(crate) const fn statement_schema_identifier(self) -> u16 {
+        match self {
+            Self::SameSecret => {
+                ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER
+            }
+            Self::PublicKeyShare => {
+                ProofApplicationSlotCeilings::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER
+            }
+        }
     }
 }
 
@@ -164,7 +202,9 @@ impl SetupGeneratedKeySwitchComponent {
         SetupPublicPolynomialTree::construct(SetupPublicPolynomialTreeInput {
             context,
             evaluation_domain_size,
-            source_polynomial_degree_bound_exclusive: self.topology.polynomial_degree(),
+            source_polynomial_degree_bound_exclusive: self
+                .topology
+                .quarter_polynomial_degree_bound_exclusive()?,
             ordered_coefficient_columns: &ordered_columns,
         })
         .map_err(|_| RefusalReason::WrongHashOrRoot)
@@ -203,9 +243,7 @@ impl SetupGeneratedGaloisSourceComponent {
         self.contribution_root
     }
 
-    pub(crate) const fn public_polynomial_context_hash(
-        &self,
-    ) -> [u8; Hash512::BYTE_LENGTH] {
+    pub(crate) const fn public_polynomial_context_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
         self.public_polynomial_context_hash
     }
 
@@ -315,16 +353,16 @@ impl SetupGeneratedPublicKeyShare {
         participant_identity: [u8; Hash512::BYTE_LENGTH],
         roster_position: u16,
         evaluation_domain_size: usize,
-        source_polynomial_degree_bound_exclusive: usize,
+        ring_degree: usize,
         ordered_data_modulus_indices: Vec<u16>,
         ordered_limb_coefficients: Vec<Zeroizing<Vec<u64>>>,
         centered_error_coefficients: Zeroizing<Vec<i8>>,
     ) -> Result<Self, RefusalReason> {
-        if source_polynomial_degree_bound_exclusive == 0
-            || !source_polynomial_degree_bound_exclusive.is_power_of_two()
+        if ring_degree == 0
+            || !ring_degree.is_power_of_two()
             || ordered_data_modulus_indices.is_empty()
             || ordered_data_modulus_indices.len() != ordered_limb_coefficients.len()
-            || centered_error_coefficients.len() != source_polynomial_degree_bound_exclusive
+            || centered_error_coefficients.len() != ring_degree
             || centered_error_coefficients
                 .iter()
                 .any(|coefficient| !(-2..=2).contains(coefficient))
@@ -337,11 +375,14 @@ impl SetupGeneratedPublicKeyShare {
             roster_position,
         )
         .map_err(|_| RefusalReason::WrongContext)?;
-        let half_degree = source_polynomial_degree_bound_exclusive / 2;
+        let quarter_degree = ring_degree
+            .checked_div(4)
+            .filter(|quarter_degree| *quarter_degree > 0 && *quarter_degree * 4 == ring_degree)
+            .ok_or(RefusalReason::OutsideSupportedProfile)?;
         let mut ordered_coefficient_columns = Vec::with_capacity(
             ordered_limb_coefficients
                 .len()
-                .checked_mul(2)
+                .checked_mul(4)
                 .ok_or(RefusalReason::OutsideSupportedProfile)?,
         );
         for (data_modulus_index, coefficients) in ordered_data_modulus_indices
@@ -352,17 +393,19 @@ impl SetupGeneratedPublicKeyShare {
             let modulus = *crate::bgv::parameters::DATA_PRIMES
                 .get(usize::from(data_modulus_index))
                 .ok_or(RefusalReason::UnsupportedVersionOrSuite)?;
-            if coefficients.len() != source_polynomial_degree_bound_exclusive
-                || coefficients.iter().any(|coefficient| *coefficient >= modulus)
+            if coefficients.len() != ring_degree
+                || coefficients
+                    .iter()
+                    .any(|coefficient| *coefficient >= modulus)
             {
                 return Err(RefusalReason::WrongTypeOrLength);
             }
-            for half_ordinal in 0..2 {
-                let start = half_ordinal
-                    .checked_mul(half_degree)
+            for quarter_ordinal in 0_usize..4_usize {
+                let start = quarter_ordinal
+                    .checked_mul(quarter_degree)
                     .ok_or(RefusalReason::OutsideSupportedProfile)?;
                 ordered_coefficient_columns.push(
-                    coefficients[start..start + half_degree]
+                    coefficients[start..start + quarter_degree]
                         .iter()
                         .copied()
                         .map(ProofBaseFieldElement::from_canonical)
@@ -374,7 +417,7 @@ impl SetupGeneratedPublicKeyShare {
         let tree = SetupPublicPolynomialTree::construct(SetupPublicPolynomialTreeInput {
             context: &context,
             evaluation_domain_size,
-            source_polynomial_degree_bound_exclusive,
+            source_polynomial_degree_bound_exclusive: quarter_degree,
             ordered_coefficient_columns: &ordered_coefficient_columns,
         })
         .map_err(|_| RefusalReason::InvalidArithmeticRelation)?;
@@ -736,6 +779,7 @@ pub(crate) struct SetupGenerationAuthorityInput {
     pub(crate) common_secret_coefficients: Zeroizing<Vec<i8>>,
     pub(crate) public_key_share: SetupGeneratedPublicKeyShare,
     pub(crate) vss_material: SetupGeneratedVssMaterial,
+    pub(crate) relinearization_material: SetupGeneratedRelinearizationMaterial,
     pub(crate) galois_batch_schedule_position: u32,
     pub(crate) ordered_galois_entries: Vec<SetupGeneratedGaloisEntry>,
 }
@@ -744,6 +788,84 @@ struct PinnedProofAttempt {
     attempt_identifier: [u8; 32],
     application_slot_hash: [u8; Hash512::BYTE_LENGTH],
     application_statement_hash: [u8; Hash512::BYTE_LENGTH],
+}
+
+/// Exact verifier-derived aggregate identity retained between round-two
+/// activation and fresh or resumed proof generation. Every field comes from a
+/// positively verified aggregate capability; no transport-facing constructor
+/// accepts any of these bindings separately.
+struct SetupGenerationVerifiedRelinearizationAggregateBinding {
+    protocol_version: u16,
+    suite_identifier: [u8; Hash512::BYTE_LENGTH],
+    ceremony_context_hash: [u8; Hash512::BYTE_LENGTH],
+    action_context_hash: [u8; Hash512::BYTE_LENGTH],
+    roster_hash: [u8; Hash512::BYTE_LENGTH],
+    setup_proof_context_hash: [u8; Hash512::BYTE_LENGTH],
+    schedule_position: u32,
+    evaluator_position: SelectedEvaluatorEntryPosition,
+    ordered_participant_identities: Box<[[u8; Hash512::BYTE_LENGTH]]>,
+    ordered_anchor_commitment_roots: Box<[[[u8; Hash512::BYTE_LENGTH]; 3]]>,
+    ordered_round_one_proof_stream_descriptors: Box<[StreamDescriptor]>,
+    ordered_source_root_pairs: Box<[[[u8; Hash512::BYTE_LENGTH]; 2]]>,
+    proof_stream_descriptor: StreamDescriptor,
+    aggregate_left_material_root: Hash512,
+    aggregate_left_stream_descriptor: StreamDescriptor,
+    aggregate_right_material_root: Hash512,
+    aggregate_right_stream_descriptor: StreamDescriptor,
+}
+
+impl SetupGenerationVerifiedRelinearizationAggregateBinding {
+    fn from_verified(aggregate: &VerifiedRelinearizationAggregateMaterial) -> Self {
+        Self {
+            protocol_version: aggregate.protocol_version(),
+            suite_identifier: aggregate.suite_identifier(),
+            ceremony_context_hash: aggregate.ceremony_context_hash(),
+            action_context_hash: aggregate.action_context_hash(),
+            roster_hash: aggregate.roster_hash(),
+            setup_proof_context_hash: aggregate.setup_proof_context_hash(),
+            schedule_position: aggregate.schedule_position(),
+            evaluator_position: aggregate.evaluator_position(),
+            ordered_participant_identities: aggregate.ordered_participant_identities().into(),
+            ordered_anchor_commitment_roots: aggregate.ordered_anchor_commitment_roots().into(),
+            ordered_round_one_proof_stream_descriptors: aggregate
+                .ordered_round_one_proof_stream_descriptors()
+                .into(),
+            ordered_source_root_pairs: aggregate.ordered_source_root_pairs().into(),
+            proof_stream_descriptor: aggregate.proof_stream_descriptor().clone(),
+            aggregate_left_material_root: aggregate.aggregate_left_material().material_root(),
+            aggregate_left_stream_descriptor: aggregate
+                .aggregate_left_material()
+                .stream_descriptor()
+                .clone(),
+            aggregate_right_material_root: aggregate.material().material_root(),
+            aggregate_right_stream_descriptor: aggregate.material().stream_descriptor().clone(),
+        }
+    }
+
+    fn binds(&self, aggregate: &VerifiedRelinearizationAggregateMaterial) -> bool {
+        self.protocol_version == aggregate.protocol_version()
+            && self.suite_identifier == aggregate.suite_identifier()
+            && self.ceremony_context_hash == aggregate.ceremony_context_hash()
+            && self.action_context_hash == aggregate.action_context_hash()
+            && self.roster_hash == aggregate.roster_hash()
+            && self.setup_proof_context_hash == aggregate.setup_proof_context_hash()
+            && self.schedule_position == aggregate.schedule_position()
+            && self.evaluator_position == aggregate.evaluator_position()
+            && self.ordered_participant_identities.as_ref()
+                == aggregate.ordered_participant_identities()
+            && self.ordered_anchor_commitment_roots.as_ref()
+                == aggregate.ordered_anchor_commitment_roots()
+            && self.ordered_round_one_proof_stream_descriptors.as_ref()
+                == aggregate.ordered_round_one_proof_stream_descriptors()
+            && self.ordered_source_root_pairs.as_ref() == aggregate.ordered_source_root_pairs()
+            && self.proof_stream_descriptor == *aggregate.proof_stream_descriptor()
+            && self.aggregate_left_material_root
+                == aggregate.aggregate_left_material().material_root()
+            && self.aggregate_left_stream_descriptor
+                == *aggregate.aggregate_left_material().stream_descriptor()
+            && self.aggregate_right_material_root == aggregate.material().material_root()
+            && self.aggregate_right_stream_descriptor == *aggregate.material().stream_descriptor()
+    }
 }
 
 struct SetupGenerationAuthority {
@@ -767,10 +889,18 @@ struct SetupGenerationAuthority {
     common_secret_coefficients: Zeroizing<Vec<i8>>,
     public_key_share: SetupGeneratedPublicKeyShare,
     vss_material: SetupGeneratedVssMaterial,
+    relinearization_material: SetupGeneratedRelinearizationMaterial,
+    verified_relinearization_aggregate_binding:
+        Option<SetupGenerationVerifiedRelinearizationAggregateBinding>,
+    generated_relinearization_round_two: Option<SetupGeneratedRelinearizationRoundTwoGeneration>,
     galois_batch_schedule_position: u32,
     ordered_galois_entries: Box<[SetupGeneratedGaloisEntry]>,
     pinned_vss_proof_attempt: Option<PinnedProofAttempt>,
+    pinned_relinearization_round_one_proof_attempt: Option<PinnedProofAttempt>,
+    pinned_relinearization_round_two_proof_attempt: Option<PinnedProofAttempt>,
     pinned_galois_proof_attempt: Option<PinnedProofAttempt>,
+    pinned_same_secret_proof_attempt: Option<PinnedProofAttempt>,
+    pinned_public_key_share_proof_attempt: Option<PinnedProofAttempt>,
 }
 
 impl SetupGenerationAuthority {
@@ -939,12 +1069,72 @@ impl SetupGenerationAuthority {
         let [expected_batch_schedule_position] = selected_galois_key_share_batch_schedule();
         let expected_galois_positions = selected_evaluator_galois_entry_positions()
             .map_err(|_| RefusalReason::UnsupportedVersionOrSuite)?;
+        let expected_relinearization_positions =
+            crate::bgv::proof_suite::selected_evaluator_entry_positions(
+                FOUNDATION_PROFILE.option_count,
+            )
+            .map_err(|_| RefusalReason::UnsupportedVersionOrSuite)?
+            .into_iter()
+            .filter(|position| {
+                matches!(
+                    position.key_kind(),
+                    SelectedEvaluatorEntryKind::Relinearization { .. }
+                )
+            })
+            .collect::<Vec<_>>();
+        let [expected_relinearization_position] = expected_relinearization_positions.as_slice()
+        else {
+            return Err(RefusalReason::UnsupportedVersionOrSuite);
+        };
+        let relinearization_material = &input.relinearization_material;
+        let relinearization_topology = relinearization_material
+            .round_one_left_component()
+            .topology();
         if input.galois_batch_schedule_position != expected_batch_schedule_position
             || input
                 .ordered_galois_entries
                 .iter()
                 .map(|entry| entry.component().evaluator_position())
                 .ne(expected_galois_positions)
+            || relinearization_material.evaluator_position() != *expected_relinearization_position
+            || relinearization_material.schedule_position()
+                != expected_relinearization_position.schedule_position()
+            || relinearization_material
+                .ephemeral_secret_coefficients()
+                .len()
+                != ring_degree
+            || relinearization_material
+                .ephemeral_secret_coefficients()
+                .iter()
+                .any(|coefficient| !(-1..=1).contains(coefficient))
+            || relinearization_material
+                .round_one_left_component()
+                .evaluator_position()
+                != *expected_relinearization_position
+            || relinearization_material
+                .round_one_right_component()
+                .evaluator_position()
+                != *expected_relinearization_position
+            || relinearization_material
+                .round_one_right_component()
+                .topology()
+                != relinearization_topology
+            || relinearization_topology.polynomial_degree() != ring_degree
+            || [
+                relinearization_material.round_one_left_errors_by_block(),
+                relinearization_material.round_one_right_errors_by_block(),
+                relinearization_material.round_two_errors_by_block(),
+            ]
+            .into_iter()
+            .any(|errors_by_block| {
+                errors_by_block.len() != relinearization_topology.data_block_count()
+                    || errors_by_block.iter().any(|error| {
+                        error.len() != ring_degree
+                            || error
+                                .iter()
+                                .any(|coefficient| !(-2..=2).contains(coefficient))
+                    })
+            })
         {
             return Err(RefusalReason::WrongTypeOrLength);
         }
@@ -969,11 +1159,277 @@ impl SetupGenerationAuthority {
             common_secret_coefficients: input.common_secret_coefficients,
             public_key_share: input.public_key_share,
             vss_material: input.vss_material,
+            relinearization_material: input.relinearization_material,
+            verified_relinearization_aggregate_binding: None,
+            generated_relinearization_round_two: None,
             galois_batch_schedule_position: input.galois_batch_schedule_position,
             ordered_galois_entries: input.ordered_galois_entries.into_boxed_slice(),
             pinned_vss_proof_attempt: None,
+            pinned_relinearization_round_one_proof_attempt: None,
+            pinned_relinearization_round_two_proof_attempt: None,
             pinned_galois_proof_attempt: None,
+            pinned_same_secret_proof_attempt: None,
+            pinned_public_key_share_proof_attempt: None,
         })
+    }
+
+    fn degree_zero_material_count(&self) -> Result<usize, RefusalReason> {
+        selected_committed_material_relation_plan_input()
+            .map(|input| input.sharing_data_modulus_indices.len())
+            .map_err(|_| RefusalReason::UnsupportedVersionOrSuite)
+    }
+
+    fn degree_zero_material(
+        &self,
+        degree_zero_material_ordinal: usize,
+    ) -> Result<&SetupGeneratedCommittedMaterial, RefusalReason> {
+        if degree_zero_material_ordinal >= self.degree_zero_material_count()? {
+            return Err(RefusalReason::WrongTypeOrLength);
+        }
+        let reconstruction_threshold = usize::from(FOUNDATION_PROFILE.reconstruction_threshold);
+        let material_ordinal = degree_zero_material_ordinal
+            .checked_mul(reconstruction_threshold)
+            .ok_or(RefusalReason::OutsideSupportedProfile)?;
+        self.vss_material
+            .ordered_coefficient_materials()
+            .get(material_ordinal)
+            .ok_or(RefusalReason::WrongTypeOrLength)
+    }
+
+    fn canonical_key_relation_statement(
+        &self,
+        family: SetupKeyRelationProofFamily,
+    ) -> Result<Vec<u8>, RefusalReason> {
+        match family {
+            SetupKeyRelationProofFamily::SameSecret => {
+                let ordered_degree_zero_commitment_roots = (0..self
+                    .degree_zero_material_count()?)
+                    .map(|material_ordinal| {
+                        self.degree_zero_material(material_ordinal)
+                            .map(|material| material.compact_source().root())
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                canonical_selected_same_secret_statement(
+                    self.setup_proof_context_hash,
+                    self.participant_identity,
+                    self.roster_position,
+                    &ordered_degree_zero_commitment_roots,
+                    &self.anchor_commitment_roots,
+                )
+                .map_err(|_| RefusalReason::OutsideSupportedProfile)
+            }
+            SetupKeyRelationProofFamily::PublicKeyShare => {
+                canonical_selected_public_key_share_statement(
+                    self.setup_proof_context_hash,
+                    self.participant_identity,
+                    self.roster_position,
+                    &self.anchor_commitment_roots,
+                    self.public_key_share.root(),
+                )
+                .map_err(|_| RefusalReason::OutsideSupportedProfile)
+            }
+        }
+    }
+
+    fn key_relation_preparation_source(
+        &self,
+        family: SetupKeyRelationProofFamily,
+    ) -> Result<SetupGenerationKeyRelationPreparationSource, RefusalReason> {
+        Ok(SetupGenerationKeyRelationPreparationSource {
+            family,
+            protocol_version: self.protocol_version,
+            suite_identifier: self.suite_identifier,
+            manifest_hash: self.manifest_hash,
+            ceremony_context_hash: self.ceremony_context_hash,
+            action_context_hash: self.action_context_hash,
+            roster_hash: self.roster_hash,
+            setup_proof_context_hash: self.setup_proof_context_hash,
+            source_setup_intent_object_hash: self.source_setup_intent_object_hash,
+            participant_identity: self.participant_identity,
+            roster_position: self.roster_position,
+            action_randomness_authorization_hash: self.action_randomness_authorization_hash,
+            canonical_application_statement_bytes: self.canonical_key_relation_statement(family)?,
+        })
+    }
+
+    fn generated_relinearization_round_one_source_authority(
+        &self,
+    ) -> Result<SetupGeneratedRelinearizationRoundOneSourceAuthority, RefusalReason> {
+        let statement_schema_identifier =
+            ProofApplicationSlotCeilings::RELINEARIZATION_ROUND_ONE_STATEMENT_SCHEMA_IDENTIFIER;
+        let selected_plan = selected_relation_plans()
+            .map_err(|_| RefusalReason::UnsupportedVersionOrSuite)?
+            .into_iter()
+            .find(|artifact| {
+                artifact.application_statement_schema_identifier() == statement_schema_identifier
+            })
+            .ok_or(RefusalReason::UnsupportedVersionOrSuite)?;
+        let variant = selected_plan
+            .compiled_plan()
+            .select_variant(
+                Some(self.relinearization_material.schedule_position()),
+                None,
+            )
+            .map_err(|_| RefusalReason::UnsupportedVersionOrSuite)?;
+        let evaluation_domain_size = usize::try_from(variant.evaluation_domain_size())
+            .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
+        self.relinearization_material
+            .generated_round_one_source_authority(
+                self.suite_identifier,
+                self.ceremony_context_hash,
+                self.action_context_hash,
+                self.roster_hash,
+                self.setup_proof_context_hash,
+                self.participant_identity,
+                self.roster_position,
+                self.anchor_commitment_roots,
+                evaluation_domain_size,
+            )
+    }
+
+    fn relinearization_round_one_preparation_source(
+        &self,
+    ) -> Result<SetupGenerationRelinearizationRoundOnePreparationSource, RefusalReason> {
+        let generated_source = self.generated_relinearization_round_one_source_authority()?;
+        Ok(
+            SetupGenerationRelinearizationRoundOnePreparationSource::from_generated_source(
+                &generated_source,
+                self.manifest_hash,
+                self.source_setup_intent_object_hash,
+                self.action_randomness_authorization_hash,
+            ),
+        )
+    }
+
+    fn relinearization_round_two_evaluation_domain_size(&self) -> Result<usize, RefusalReason> {
+        let statement_schema_identifier =
+            ProofApplicationSlotCeilings::RELINEARIZATION_ROUND_TWO_STATEMENT_SCHEMA_IDENTIFIER;
+        let selected_plan = selected_relation_plans()
+            .map_err(|_| RefusalReason::UnsupportedVersionOrSuite)?
+            .into_iter()
+            .find(|artifact| {
+                artifact.application_statement_schema_identifier() == statement_schema_identifier
+            })
+            .ok_or(RefusalReason::UnsupportedVersionOrSuite)?;
+        let variant = selected_plan
+            .compiled_plan()
+            .select_variant(
+                Some(self.relinearization_material.schedule_position()),
+                None,
+            )
+            .map_err(|_| RefusalReason::UnsupportedVersionOrSuite)?;
+        usize::try_from(variant.evaluation_domain_size())
+            .map_err(|_| RefusalReason::OutsideSupportedProfile)
+    }
+
+    fn exact_local_round_one_source_in_verified_aggregate(
+        &self,
+        round_one_source: &SetupGeneratedRelinearizationRoundOneSourceAuthority,
+        verified_aggregate: &VerifiedRelinearizationAggregateMaterial,
+    ) -> Result<(), RefusalReason> {
+        let roster_index = usize::from(self.roster_position);
+        let round_one_root_pair = round_one_source.root_pair();
+        if verified_aggregate.ordered_participant_identities().len()
+            != usize::from(FOUNDATION_PROFILE.participant_count)
+            || verified_aggregate.ordered_anchor_commitment_roots().len()
+                != usize::from(FOUNDATION_PROFILE.participant_count)
+            || verified_aggregate.ordered_source_root_pairs().len()
+                != usize::from(FOUNDATION_PROFILE.participant_count)
+            || verified_aggregate
+                .ordered_round_one_proof_stream_descriptors()
+                .len()
+                != usize::from(FOUNDATION_PROFILE.participant_count)
+            || verified_aggregate
+                .ordered_participant_identities()
+                .get(roster_index)
+                != Some(&self.participant_identity)
+            || verified_aggregate
+                .ordered_anchor_commitment_roots()
+                .get(roster_index)
+                != Some(&self.anchor_commitment_roots)
+            || verified_aggregate
+                .ordered_source_root_pairs()
+                .get(roster_index)
+                != Some(&round_one_root_pair)
+        {
+            return Err(RefusalReason::WrongContext);
+        }
+        Ok(())
+    }
+
+    fn activate_relinearization_round_two(
+        &mut self,
+        selected_suite: &SelectedSuiteCapability,
+        verified_aggregate: &VerifiedRelinearizationAggregateMaterial,
+        aggregate_round_one_left_bytes: &[u8],
+        aggregate_round_one_right_bytes: &[u8],
+    ) -> Result<SetupGenerationRelinearizationRoundTwoPreparationSource, RefusalReason> {
+        if self.generated_relinearization_round_two.is_some()
+            || self.verified_relinearization_aggregate_binding.is_some()
+        {
+            return Err(RefusalReason::ConsumedState);
+        }
+        if self
+            .pinned_relinearization_round_one_proof_attempt
+            .is_none()
+        {
+            return Err(RefusalReason::MissingPrerequisite);
+        }
+        let round_one_source = self.generated_relinearization_round_one_source_authority()?;
+        self.exact_local_round_one_source_in_verified_aggregate(
+            &round_one_source,
+            verified_aggregate,
+        )?;
+        let generated_round_two = self.relinearization_material.generated_round_two(
+            selected_suite,
+            &self.common_secret_coefficients,
+            &round_one_source,
+            verified_aggregate,
+            aggregate_round_one_left_bytes,
+            aggregate_round_one_right_bytes,
+            self.relinearization_round_two_evaluation_domain_size()?,
+        )?;
+        let aggregate_binding =
+            SetupGenerationVerifiedRelinearizationAggregateBinding::from_verified(
+                verified_aggregate,
+            );
+        self.verified_relinearization_aggregate_binding = Some(aggregate_binding);
+        self.generated_relinearization_round_two = Some(generated_round_two);
+        self.relinearization_round_two_preparation_source()
+    }
+
+    fn relinearization_round_two_preparation_source(
+        &self,
+    ) -> Result<SetupGenerationRelinearizationRoundTwoPreparationSource, RefusalReason> {
+        let generated = self
+            .generated_relinearization_round_two
+            .as_ref()
+            .ok_or(RefusalReason::MissingPrerequisite)?;
+        if self.verified_relinearization_aggregate_binding.is_none() {
+            return Err(RefusalReason::MissingPrerequisite);
+        }
+        Ok(
+            SetupGenerationRelinearizationRoundTwoPreparationSource::from_generated_source(
+                generated.source_authority(),
+                self.manifest_hash,
+                self.source_setup_intent_object_hash,
+                self.action_randomness_authorization_hash,
+            ),
+        )
+    }
+
+    fn validate_relinearization_round_two_aggregate(
+        &self,
+        verified_aggregate: &VerifiedRelinearizationAggregateMaterial,
+    ) -> Result<(), RefusalReason> {
+        let binding = self
+            .verified_relinearization_aggregate_binding
+            .as_ref()
+            .ok_or(RefusalReason::MissingPrerequisite)?;
+        if !binding.binds(verified_aggregate) {
+            return Err(RefusalReason::WrongContext);
+        }
+        Ok(())
     }
 
     fn galois_preparation_source(
@@ -1082,6 +1538,202 @@ impl SetupGenerationAuthority {
         })
     }
 
+    fn pin_key_relation_application(
+        &mut self,
+        application: &SetupGenerationKeyRelationApplication<'_>,
+    ) -> Result<(), RefusalReason> {
+        let application_slot = application.prepared_attempt.application_slot();
+        let statement_schema_identifier = application.family.statement_schema_identifier();
+        let canonical_application_statement_bytes =
+            self.canonical_key_relation_statement(application.family)?;
+        if application.canonical_application_statement_bytes
+            != canonical_application_statement_bytes
+            || application.setup_proof_context_hash != self.setup_proof_context_hash
+            || application.roster_hash != self.roster_hash
+            || application.participant_identity != self.participant_identity
+            || application.roster_position != self.roster_position
+            || application_slot.suite_identifier().into_bytes() != self.suite_identifier
+            || application_slot.ceremony_context_hash().into_bytes() != self.ceremony_context_hash
+            || application_slot.action_context_hash().into_bytes() != self.action_context_hash
+            || application_slot.application_statement_schema_identifier()
+                != statement_schema_identifier
+            || application_slot.roster_position() != Some(self.roster_position)
+            || application_slot.schedule_position().is_some()
+            || application_slot.producer_sequence().is_some()
+            || application
+                .prepared_attempt
+                .application_statement_hash()
+                .into_bytes()
+                != verified_application_statement_hash(
+                    self.protocol_version,
+                    self.suite_identifier,
+                    statement_schema_identifier,
+                    &canonical_application_statement_bytes,
+                )
+        {
+            return Err(RefusalReason::WrongContext);
+        }
+        let pinned = PinnedProofAttempt {
+            attempt_identifier: application.prepared_attempt.attempt_identifier(),
+            application_slot_hash: application
+                .prepared_attempt
+                .application_slot_hash()
+                .into_bytes(),
+            application_statement_hash: application
+                .prepared_attempt
+                .application_statement_hash()
+                .into_bytes(),
+        };
+        let pinned_attempt = match application.family {
+            SetupKeyRelationProofFamily::SameSecret => &mut self.pinned_same_secret_proof_attempt,
+            SetupKeyRelationProofFamily::PublicKeyShare => {
+                &mut self.pinned_public_key_share_proof_attempt
+            }
+        };
+        if let Some(existing) = pinned_attempt {
+            if existing.attempt_identifier != pinned.attempt_identifier
+                || existing.application_slot_hash != pinned.application_slot_hash
+                || existing.application_statement_hash != pinned.application_statement_hash
+            {
+                return Err(RefusalReason::ConsumedState);
+            }
+        } else {
+            *pinned_attempt = Some(pinned);
+        }
+        Ok(())
+    }
+
+    fn pin_relinearization_round_one_application(
+        &mut self,
+        application: &SetupGenerationRelinearizationRoundOneApplication<'_>,
+    ) -> Result<(), RefusalReason> {
+        let application_slot = application.prepared_attempt.application_slot();
+        if application.setup_proof_context_hash != self.setup_proof_context_hash
+            || application.participant_identity != self.participant_identity
+            || application.roster_position != self.roster_position
+            || application.schedule_position != self.relinearization_material.schedule_position()
+            || application_slot.suite_identifier().into_bytes() != self.suite_identifier
+            || application_slot.ceremony_context_hash().into_bytes() != self.ceremony_context_hash
+            || application_slot.action_context_hash().into_bytes() != self.action_context_hash
+            || application_slot.application_statement_schema_identifier()
+                != ProofApplicationSlotCeilings::RELINEARIZATION_ROUND_ONE_STATEMENT_SCHEMA_IDENTIFIER
+            || application_slot.roster_position() != Some(self.roster_position)
+            || application_slot.schedule_position()
+                != Some(self.relinearization_material.schedule_position())
+            || application_slot.producer_sequence().is_some()
+            || application
+                .prepared_attempt
+                .application_statement_hash()
+                .into_bytes()
+                != verified_application_statement_hash(
+                    self.protocol_version,
+                    self.suite_identifier,
+                    ProofApplicationSlotCeilings::RELINEARIZATION_ROUND_ONE_STATEMENT_SCHEMA_IDENTIFIER,
+                    application.canonical_application_statement_bytes,
+                )
+        {
+            return Err(RefusalReason::WrongContext);
+        }
+        let pinned = PinnedProofAttempt {
+            attempt_identifier: application.prepared_attempt.attempt_identifier(),
+            application_slot_hash: application
+                .prepared_attempt
+                .application_slot_hash()
+                .into_bytes(),
+            application_statement_hash: application
+                .prepared_attempt
+                .application_statement_hash()
+                .into_bytes(),
+        };
+        if let Some(existing) = &self.pinned_relinearization_round_one_proof_attempt {
+            if existing.attempt_identifier != pinned.attempt_identifier
+                || existing.application_slot_hash != pinned.application_slot_hash
+                || existing.application_statement_hash != pinned.application_statement_hash
+            {
+                return Err(RefusalReason::ConsumedState);
+            }
+        } else {
+            self.pinned_relinearization_round_one_proof_attempt = Some(pinned);
+        }
+        Ok(())
+    }
+
+    fn pin_relinearization_round_two_application(
+        &mut self,
+        application: &SetupGenerationRelinearizationRoundTwoApplication<'_>,
+    ) -> Result<(), RefusalReason> {
+        let generated = self
+            .generated_relinearization_round_two
+            .as_ref()
+            .ok_or(RefusalReason::MissingPrerequisite)?;
+        if self.verified_relinearization_aggregate_binding.is_none() {
+            return Err(RefusalReason::MissingPrerequisite);
+        }
+        let source = generated.source_authority();
+        let round_one_attempt = self
+            .pinned_relinearization_round_one_proof_attempt
+            .as_ref()
+            .ok_or(RefusalReason::MissingPrerequisite)?;
+        let application_slot = application.prepared_attempt.application_slot();
+        if application.prepared_attempt.attempt_identifier()
+            == round_one_attempt.attempt_identifier
+            || application.setup_proof_context_hash != source.setup_proof_context_hash()
+            || application.participant_identity != source.participant_identity()
+            || application.roster_position != source.roster_position()
+            || application.schedule_position != source.schedule_position()
+            || application.anchor_commitment_roots != source.anchor_commitment_roots()
+            || application.round_one_root_pair != source.round_one_root_pair()
+            || application.aggregate_round_one_root_pair
+                != source.aggregate_round_one_root_pair()
+            || application.contribution_root != source.component().contribution_root()
+            || application.canonical_application_statement_bytes
+                != source.canonical_application_statement_bytes()
+            || application_slot.suite_identifier().into_bytes() != self.suite_identifier
+            || application_slot.ceremony_context_hash().into_bytes() != self.ceremony_context_hash
+            || application_slot.action_context_hash().into_bytes() != self.action_context_hash
+            || application_slot.application_statement_schema_identifier()
+                != ProofApplicationSlotCeilings::RELINEARIZATION_ROUND_TWO_STATEMENT_SCHEMA_IDENTIFIER
+            || application_slot.roster_position() != Some(self.roster_position)
+            || application_slot.schedule_position()
+                != Some(self.relinearization_material.schedule_position())
+            || application_slot.producer_sequence().is_some()
+            || application
+                .prepared_attempt
+                .application_statement_hash()
+                .into_bytes()
+                != verified_application_statement_hash(
+                    self.protocol_version,
+                    self.suite_identifier,
+                    ProofApplicationSlotCeilings::RELINEARIZATION_ROUND_TWO_STATEMENT_SCHEMA_IDENTIFIER,
+                    application.canonical_application_statement_bytes,
+                )
+        {
+            return Err(RefusalReason::WrongContext);
+        }
+        let pinned = PinnedProofAttempt {
+            attempt_identifier: application.prepared_attempt.attempt_identifier(),
+            application_slot_hash: application
+                .prepared_attempt
+                .application_slot_hash()
+                .into_bytes(),
+            application_statement_hash: application
+                .prepared_attempt
+                .application_statement_hash()
+                .into_bytes(),
+        };
+        if let Some(existing) = &self.pinned_relinearization_round_two_proof_attempt {
+            if existing.attempt_identifier != pinned.attempt_identifier
+                || existing.application_slot_hash != pinned.application_slot_hash
+                || existing.application_statement_hash != pinned.application_statement_hash
+            {
+                return Err(RefusalReason::ConsumedState);
+            }
+        } else {
+            self.pinned_relinearization_round_two_proof_attempt = Some(pinned);
+        }
+        Ok(())
+    }
+
     fn pin_galois_application(
         &mut self,
         application: &SetupGenerationGaloisApplication<'_>,
@@ -1098,8 +1750,7 @@ impl SetupGenerationAuthority {
             || application_slot.application_statement_schema_identifier()
                 != ProofApplicationSlotCeilings::GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER
             || application_slot.roster_position() != Some(self.roster_position)
-            || application_slot.schedule_position()
-                != Some(self.galois_batch_schedule_position)
+            || application_slot.schedule_position() != Some(self.galois_batch_schedule_position)
             || application_slot.producer_sequence().is_some()
             || application
                 .prepared_attempt
@@ -1373,6 +2024,523 @@ impl SetupGenerationVssPreparationSource {
     }
 }
 
+/// Public preparation facts for one exact selected setup key relation. Every
+/// statement root is recomputed from retained browser-owned setup material.
+#[derive(Clone)]
+pub(crate) struct SetupGenerationKeyRelationPreparationSource {
+    family: SetupKeyRelationProofFamily,
+    protocol_version: u16,
+    suite_identifier: [u8; Hash512::BYTE_LENGTH],
+    manifest_hash: [u8; Hash512::BYTE_LENGTH],
+    ceremony_context_hash: [u8; Hash512::BYTE_LENGTH],
+    action_context_hash: [u8; Hash512::BYTE_LENGTH],
+    roster_hash: [u8; Hash512::BYTE_LENGTH],
+    setup_proof_context_hash: [u8; Hash512::BYTE_LENGTH],
+    source_setup_intent_object_hash: [u8; Hash512::BYTE_LENGTH],
+    participant_identity: [u8; Hash512::BYTE_LENGTH],
+    roster_position: u16,
+    action_randomness_authorization_hash: [u8; Hash512::BYTE_LENGTH],
+    canonical_application_statement_bytes: Vec<u8>,
+}
+
+impl SetupGenerationKeyRelationPreparationSource {
+    pub(crate) const fn family(&self) -> SetupKeyRelationProofFamily {
+        self.family
+    }
+
+    pub(crate) const fn protocol_version(&self) -> u16 {
+        self.protocol_version
+    }
+
+    pub(crate) const fn suite_identifier(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.suite_identifier
+    }
+
+    pub(crate) const fn manifest_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.manifest_hash
+    }
+
+    pub(crate) const fn ceremony_context_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.ceremony_context_hash
+    }
+
+    pub(crate) const fn action_context_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.action_context_hash
+    }
+
+    pub(crate) const fn roster_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.roster_hash
+    }
+
+    pub(crate) const fn setup_proof_context_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.setup_proof_context_hash
+    }
+
+    pub(crate) const fn source_setup_intent_object_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.source_setup_intent_object_hash
+    }
+
+    pub(crate) const fn participant_identity(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.participant_identity
+    }
+
+    pub(crate) const fn roster_position(&self) -> u16 {
+        self.roster_position
+    }
+
+    pub(crate) const fn action_randomness_authorization_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.action_randomness_authorization_hash
+    }
+
+    pub(crate) fn canonical_application_statement_bytes(&self) -> &[u8] {
+        &self.canonical_application_statement_bytes
+    }
+}
+
+/// Exact reset-safe attempt binding for one authority-derived setup key
+/// relation. The caller cannot supply a witness or statement root.
+pub(crate) struct SetupGenerationKeyRelationApplication<'statement> {
+    family: SetupKeyRelationProofFamily,
+    prepared_attempt: PreparedActionProofAttemptSource,
+    canonical_application_statement_bytes: &'statement [u8],
+    setup_proof_context_hash: [u8; Hash512::BYTE_LENGTH],
+    roster_hash: [u8; Hash512::BYTE_LENGTH],
+    participant_identity: [u8; Hash512::BYTE_LENGTH],
+    roster_position: u16,
+}
+
+impl<'statement> SetupGenerationKeyRelationApplication<'statement> {
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) const fn from_runtime_binding(
+        family: SetupKeyRelationProofFamily,
+        prepared_attempt: PreparedActionProofAttemptSource,
+        canonical_application_statement_bytes: &'statement [u8],
+        setup_proof_context_hash: [u8; Hash512::BYTE_LENGTH],
+        roster_hash: [u8; Hash512::BYTE_LENGTH],
+        participant_identity: [u8; Hash512::BYTE_LENGTH],
+        roster_position: u16,
+    ) -> Self {
+        Self {
+            family,
+            prepared_attempt,
+            canonical_application_statement_bytes,
+            setup_proof_context_hash,
+            roster_hash,
+            participant_identity,
+            roster_position,
+        }
+    }
+}
+
+/// Borrowed, non-serializable source for the selected same-secret and public-
+/// key-share provers. Secret reads remain inside the authority callback.
+pub(crate) struct SetupGenerationKeyRelationSource<'authority, 'statement> {
+    authority_identifier: u32,
+    authority: &'authority SetupGenerationAuthority,
+    application: &'authority SetupGenerationKeyRelationApplication<'statement>,
+}
+
+impl SetupGenerationKeyRelationSource<'_, '_> {
+    pub(crate) const fn authority_identifier(&self) -> u32 {
+        self.authority_identifier
+    }
+
+    pub(crate) const fn family(&self) -> SetupKeyRelationProofFamily {
+        self.application.family
+    }
+
+    pub(crate) const fn protocol_version(&self) -> u16 {
+        self.authority.protocol_version
+    }
+
+    pub(crate) const fn suite_identifier(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.authority.suite_identifier
+    }
+
+    pub(crate) const fn ceremony_context_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.authority.ceremony_context_hash
+    }
+
+    pub(crate) const fn action_context_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.authority.action_context_hash
+    }
+
+    pub(crate) const fn roster_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.authority.roster_hash
+    }
+
+    pub(crate) const fn setup_proof_context_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.authority.setup_proof_context_hash
+    }
+
+    pub(crate) const fn source_setup_intent_object_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.authority.source_setup_intent_object_hash
+    }
+
+    pub(crate) const fn participant_identity(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.authority.participant_identity
+    }
+
+    pub(crate) const fn roster_position(&self) -> u16 {
+        self.authority.roster_position
+    }
+
+    pub(crate) const fn setup_attempt_identifier(&self) -> [u8; 32] {
+        self.authority.setup_attempt_identifier
+    }
+
+    pub(crate) const fn action_randomness_authorization_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.authority.action_randomness_authorization_hash
+    }
+
+    pub(crate) const fn public_setup_seed(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.authority.public_setup_seed
+    }
+
+    pub(crate) fn ring_degree(&self) -> usize {
+        self.authority.common_secret_coefficients.len()
+    }
+
+    pub(crate) fn common_secret_coefficients(&self) -> &[i8] {
+        self.authority.common_secret_coefficients.as_slice()
+    }
+
+    pub(crate) fn anchor_openings(&self) -> &[SetupGenerationAnchorOpening] {
+        &self.authority.anchor_openings
+    }
+
+    pub(crate) const fn public_key_share(&self) -> &SetupGeneratedPublicKeyShare {
+        &self.authority.public_key_share
+    }
+
+    pub(crate) fn degree_zero_material(
+        &self,
+        degree_zero_material_ordinal: usize,
+    ) -> Result<&SetupGeneratedCommittedMaterial, RefusalReason> {
+        self.authority
+            .degree_zero_material(degree_zero_material_ordinal)
+    }
+
+    pub(crate) const fn prepared_attempt(&self) -> &PreparedActionProofAttemptSource {
+        &self.application.prepared_attempt
+    }
+
+    pub(crate) fn canonical_application_statement_bytes(&self) -> &[u8] {
+        self.application.canonical_application_statement_bytes
+    }
+
+    fn absorb_anchor_opening_witness(
+        &self,
+        binding: &mut PersistentProofWitnessCoinBinding,
+    ) -> Result<(), RefusalReason> {
+        binding
+            .absorb_canonical_bytes(
+                &u64::try_from(self.anchor_openings().len())
+                    .map_err(|_| RefusalReason::OutsideSupportedProfile)?
+                    .to_le_bytes(),
+            )
+            .map_err(|error| error.refusal_reason)?;
+        for (anchor_ordinal, anchor) in self.anchor_openings().iter().enumerate() {
+            binding
+                .absorb_canonical_bytes(
+                    &u64::try_from(anchor_ordinal)
+                        .map_err(|_| RefusalReason::OutsideSupportedProfile)?
+                        .to_le_bytes(),
+                )
+                .map_err(|error| error.refusal_reason)?;
+            binding
+                .absorb_canonical_bytes(&anchor.commitment_data_prime_index().to_le_bytes())
+                .map_err(|error| error.refusal_reason)?;
+            binding
+                .absorb_canonical_bytes(&anchor.public_polynomial_context_hash())
+                .map_err(|error| error.refusal_reason)?;
+            binding
+                .absorb_canonical_bytes(&anchor.root())
+                .map_err(|error| error.refusal_reason)?;
+            binding
+                .absorb_canonical_bytes(anchor.canonical_commitment_bytes())
+                .map_err(|error| error.refusal_reason)?;
+            binding
+                .absorb_canonical_bytes(
+                    &u64::try_from(anchor.hiding_secret_polynomials().len())
+                        .map_err(|_| RefusalReason::OutsideSupportedProfile)?
+                        .to_le_bytes(),
+                )
+                .map_err(|error| error.refusal_reason)?;
+            for (polynomial_ordinal, polynomial) in
+                anchor.hiding_secret_polynomials().iter().enumerate()
+            {
+                binding
+                    .absorb_canonical_bytes(
+                        &u64::try_from(polynomial_ordinal)
+                            .map_err(|_| RefusalReason::OutsideSupportedProfile)?
+                            .to_le_bytes(),
+                    )
+                    .map_err(|error| error.refusal_reason)?;
+                binding
+                    .absorb_canonical_i8_values(polynomial)
+                    .map_err(|error| error.refusal_reason)?;
+            }
+            binding
+                .absorb_canonical_bytes(
+                    &u64::try_from(anchor.hiding_error_polynomials().len())
+                        .map_err(|_| RefusalReason::OutsideSupportedProfile)?
+                        .to_le_bytes(),
+                )
+                .map_err(|error| error.refusal_reason)?;
+            for (polynomial_ordinal, polynomial) in
+                anchor.hiding_error_polynomials().iter().enumerate()
+            {
+                binding
+                    .absorb_canonical_bytes(
+                        &u64::try_from(polynomial_ordinal)
+                            .map_err(|_| RefusalReason::OutsideSupportedProfile)?
+                            .to_le_bytes(),
+                    )
+                    .map_err(|error| error.refusal_reason)?;
+                binding
+                    .absorb_canonical_i8_values(polynomial)
+                    .map_err(|error| error.refusal_reason)?;
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn witness_bound_attempt(
+        &self,
+    ) -> Result<WitnessBoundPreparedActionProofAttemptSource, RefusalReason> {
+        let persistent_proof_coin_input = PersistentProofCoinInput::new(
+            self.prepared_attempt().application_slot(),
+            self.prepared_attempt().application_statement_hash(),
+        )
+        .map_err(|error| error.refusal_reason)?;
+        let mut binding = self
+            .authority
+            .action_private_randomness
+            .begin_persistent_proof_witness_coin_binding(&persistent_proof_coin_input)
+            .map_err(|error| error.refusal_reason)?;
+        let witness_domain = match self.family() {
+            SetupKeyRelationProofFamily::SameSecret => {
+                SAME_SECRET_CANONICAL_SEMANTIC_WITNESS_DOMAIN
+            }
+            SetupKeyRelationProofFamily::PublicKeyShare => {
+                PUBLIC_KEY_SHARE_CANONICAL_SEMANTIC_WITNESS_DOMAIN
+            }
+        };
+        binding
+            .absorb_canonical_bytes(witness_domain)
+            .map_err(|error| error.refusal_reason)?;
+        binding
+            .absorb_canonical_i8_values(self.common_secret_coefficients())
+            .map_err(|error| error.refusal_reason)?;
+        self.absorb_anchor_opening_witness(&mut binding)?;
+        match self.family() {
+            SetupKeyRelationProofFamily::SameSecret => {
+                let material_count = self.authority.degree_zero_material_count()?;
+                binding
+                    .absorb_canonical_bytes(
+                        &u64::try_from(material_count)
+                            .map_err(|_| RefusalReason::OutsideSupportedProfile)?
+                            .to_le_bytes(),
+                    )
+                    .map_err(|error| error.refusal_reason)?;
+                for material_ordinal in 0..material_count {
+                    let material = self.degree_zero_material(material_ordinal)?;
+                    let authenticated_source = material.owned_authenticated_source();
+                    binding
+                        .absorb_canonical_bytes(
+                            &u64::try_from(material_ordinal)
+                                .map_err(|_| RefusalReason::OutsideSupportedProfile)?
+                                .to_le_bytes(),
+                        )
+                        .map_err(|error| error.refusal_reason)?;
+                    binding
+                        .absorb_canonical_bytes(
+                            &authenticated_source
+                                .compact_source()
+                                .material_context_hash(),
+                        )
+                        .map_err(|error| error.refusal_reason)?;
+                    binding
+                        .absorb_canonical_bytes(&authenticated_source.compact_source().root())
+                        .map_err(|error| error.refusal_reason)?;
+                    binding
+                        .absorb_canonical_bytes(
+                            &authenticated_source.canonical_modulus().to_le_bytes(),
+                        )
+                        .map_err(|error| error.refusal_reason)?;
+                    binding
+                        .absorb_canonical_u64_values(authenticated_source.canonical_message())
+                        .map_err(|error| error.refusal_reason)?;
+                }
+            }
+            SetupKeyRelationProofFamily::PublicKeyShare => {
+                let public_key_share = self.public_key_share();
+                binding
+                    .absorb_canonical_bytes(&public_key_share.public_polynomial_context_hash())
+                    .map_err(|error| error.refusal_reason)?;
+                binding
+                    .absorb_canonical_bytes(&public_key_share.root())
+                    .map_err(|error| error.refusal_reason)?;
+                binding
+                    .absorb_canonical_bytes(
+                        &u64::try_from(public_key_share.ordered_limb_coefficients().len())
+                            .map_err(|_| RefusalReason::OutsideSupportedProfile)?
+                            .to_le_bytes(),
+                    )
+                    .map_err(|error| error.refusal_reason)?;
+                for (limb_ordinal, (data_modulus_index, coefficients)) in public_key_share
+                    .ordered_data_modulus_indices()
+                    .iter()
+                    .copied()
+                    .zip(public_key_share.ordered_limb_coefficients())
+                    .enumerate()
+                {
+                    binding
+                        .absorb_canonical_bytes(
+                            &u64::try_from(limb_ordinal)
+                                .map_err(|_| RefusalReason::OutsideSupportedProfile)?
+                                .to_le_bytes(),
+                        )
+                        .map_err(|error| error.refusal_reason)?;
+                    binding
+                        .absorb_canonical_bytes(&data_modulus_index.to_le_bytes())
+                        .map_err(|error| error.refusal_reason)?;
+                    binding
+                        .absorb_canonical_u64_values(coefficients)
+                        .map_err(|error| error.refusal_reason)?;
+                }
+                binding
+                    .absorb_canonical_i8_values(public_key_share.centered_error_coefficients())
+                    .map_err(|error| error.refusal_reason)?;
+            }
+        }
+        bind_prepared_action_proof_attempt_to_canonical_witness(*self.prepared_attempt(), binding)
+            .map_err(|error| error.refusal_reason)
+    }
+
+    fn private_coin_source(
+        &self,
+        pre_output_generation_binding_hash: [u8; Hash512::BYTE_LENGTH],
+        relation_plan_variant: &RelationPlanVariant,
+        witness_bound_attempt: WitnessBoundPreparedActionProofAttemptSource,
+    ) -> Result<PrivateRandomnessCommonProofCoinSource, RefusalReason> {
+        if pre_output_generation_binding_hash == [0_u8; Hash512::BYTE_LENGTH]
+            || witness_bound_attempt.application_slot()
+                != self.application.prepared_attempt.application_slot()
+            || witness_bound_attempt.application_statement_hash()
+                != self
+                    .application
+                    .prepared_attempt
+                    .application_statement_hash()
+        {
+            return Err(RefusalReason::WrongContext);
+        }
+        let coordinate_capacity =
+            CommonProofPrivateCoinCoordinateCapacity::from_relation_plan_variant(
+                relation_plan_variant,
+            )
+            .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
+        PrivateRandomnessCommonProofCoinSource::new(
+            Rc::clone(&self.authority.action_private_randomness),
+            self.family().statement_schema_identifier(),
+            Hash512::from_bytes(pre_output_generation_binding_hash),
+            witness_bound_attempt.private_randomness_attempt_identifier(),
+            coordinate_capacity,
+        )
+        .map_err(|_| RefusalReason::WrongContext)
+    }
+
+    pub(crate) fn prepare_common_generation(
+        &self,
+        relation_plan: CommonProofRelationPlanCapability,
+        limits: CommonProofRuntimeLimits,
+    ) -> Result<PreparedCommonProofGeneration, SetupKeyRelationGenerationPreparationError> {
+        let statement_schema_identifier = self.family().statement_schema_identifier();
+        let relation_context = selected_relation_plan_check_context(statement_schema_identifier)
+            .ok_or(RefusalReason::UnsupportedVersionOrSuite)?;
+        let ring_degree = self.ring_degree();
+        let (relation_plan_variant, relation_trees, source_polynomials) = match self.family() {
+            SetupKeyRelationProofFamily::SameSecret => {
+                let input = selected_same_secret_relation_plan_input()
+                    .map_err(|_| RefusalReason::UnsupportedVersionOrSuite)?;
+                let compiled_relation =
+                    compile_same_secret_relation_with_source_layout(&input, &relation_context)
+                        .map_err(|_| RefusalReason::UnsupportedVersionOrSuite)?;
+                let relation_plan_variant = compiled_relation
+                    .relation_plan
+                    .select_variant(None, None)
+                    .map_err(|_| CommonProofProverError::InvalidColumn)?
+                    .clone();
+                let relation_trees = same_secret_relation_tree_inputs(
+                    self,
+                    &relation_plan_variant,
+                    &compiled_relation.source_layout,
+                )?;
+                let source_polynomials = SetupKeyRelationSourcePolynomialAdapter::new_same_secret(
+                    self,
+                    &relation_plan,
+                    relation_plan_variant.clone(),
+                    relation_context,
+                    ring_degree,
+                    compiled_relation.source_layout,
+                )?;
+                (relation_plan_variant, relation_trees, source_polynomials)
+            }
+            SetupKeyRelationProofFamily::PublicKeyShare => {
+                let input = selected_public_key_share_relation_plan_input()
+                    .map_err(|_| RefusalReason::UnsupportedVersionOrSuite)?;
+                let compiled_relation =
+                    compile_public_key_share_relation_with_source_layout(&input, &relation_context)
+                        .map_err(|_| RefusalReason::UnsupportedVersionOrSuite)?;
+                let relation_plan_variant = compiled_relation
+                    .relation_plan
+                    .select_variant(None, None)
+                    .map_err(|_| CommonProofProverError::InvalidColumn)?
+                    .clone();
+                let relation_trees = public_key_share_relation_tree_inputs(
+                    self,
+                    &relation_plan_variant,
+                    &compiled_relation.source_layout,
+                )?;
+                let source_polynomials =
+                    SetupKeyRelationSourcePolynomialAdapter::new_public_key_share(
+                        self,
+                        &relation_plan,
+                        relation_plan_variant.clone(),
+                        relation_context,
+                        ring_degree,
+                        compiled_relation.source_layout,
+                    )?;
+                (relation_plan_variant, relation_trees, source_polynomials)
+            }
+        };
+        let witness_bound_attempt = self.witness_bound_attempt()?;
+        let authorization =
+            CommonProofGenerationAuthorization::from_witness_bound_authenticated_attempt(
+                witness_bound_attempt,
+                &relation_plan,
+                self.protocol_version(),
+                self.canonical_application_statement_bytes(),
+                limits,
+            )?;
+        let private_coins = self.private_coin_source(
+            authorization.binding_hash(),
+            &relation_plan_variant,
+            witness_bound_attempt,
+        )?;
+        PreparedCommonProofGeneration::from_exact_family_sources(
+            authorization,
+            relation_plan,
+            self.canonical_application_statement_bytes().to_vec(),
+            relation_trees,
+            limits,
+            CommonProofGenerationSources::new(private_coins, source_polynomials),
+        )
+        .map_err(SetupKeyRelationGenerationPreparationError::from)
+    }
+}
+
 /// Exact decoded `0x2110` statement joined to the reset-safe proof attempt.
 /// The root arrays remain borrowed from the canonical decoder and are matched
 /// in order against the recomputed browser-owned committed-material trees.
@@ -1380,6 +2548,38 @@ pub(crate) struct SetupGenerationVssApplication<'statement> {
     prepared_attempt: PreparedActionProofAttemptSource,
     canonical_application_statement_bytes: &'statement [u8],
     statement: &'statement SelectedVssShareLinkageStatement,
+}
+
+#[derive(Debug)]
+pub(crate) enum SetupKeyRelationGenerationPreparationError {
+    Refusal(RefusalReason),
+    Prover(CommonProofProverError),
+    Runtime(CommonProofRuntimeError),
+    Preparation(CommonProofGenerationPreparationError),
+}
+
+impl From<RefusalReason> for SetupKeyRelationGenerationPreparationError {
+    fn from(error: RefusalReason) -> Self {
+        Self::Refusal(error)
+    }
+}
+
+impl From<CommonProofProverError> for SetupKeyRelationGenerationPreparationError {
+    fn from(error: CommonProofProverError) -> Self {
+        Self::Prover(error)
+    }
+}
+
+impl From<CommonProofRuntimeError> for SetupKeyRelationGenerationPreparationError {
+    fn from(error: CommonProofRuntimeError) -> Self {
+        Self::Runtime(error)
+    }
+}
+
+impl From<CommonProofGenerationPreparationError> for SetupKeyRelationGenerationPreparationError {
+    fn from(error: CommonProofGenerationPreparationError) -> Self {
+        Self::Preparation(error)
+    }
 }
 
 #[derive(Debug)]
@@ -1694,6 +2894,649 @@ impl SetupGenerationVssSource<'_, '_> {
             CommonProofGenerationSources::new(private_coins, source_polynomials),
         )
         .map_err(SetupVssGenerationPreparationError::from)
+    }
+}
+
+pub(crate) struct SetupGenerationRelinearizationRoundOneApplication<'statement> {
+    prepared_attempt: PreparedActionProofAttemptSource,
+    canonical_application_statement_bytes: &'statement [u8],
+    setup_proof_context_hash: [u8; Hash512::BYTE_LENGTH],
+    participant_identity: [u8; Hash512::BYTE_LENGTH],
+    roster_position: u16,
+    schedule_position: u32,
+}
+
+impl<'statement> SetupGenerationRelinearizationRoundOneApplication<'statement> {
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) const fn from_decoded_statement(
+        prepared_attempt: PreparedActionProofAttemptSource,
+        canonical_application_statement_bytes: &'statement [u8],
+        setup_proof_context_hash: [u8; Hash512::BYTE_LENGTH],
+        participant_identity: [u8; Hash512::BYTE_LENGTH],
+        roster_position: u16,
+        schedule_position: u32,
+    ) -> Self {
+        Self {
+            prepared_attempt,
+            canonical_application_statement_bytes,
+            setup_proof_context_hash,
+            participant_identity,
+            roster_position,
+            schedule_position,
+        }
+    }
+}
+
+pub(crate) struct SetupGenerationRelinearizationRoundOneSource<'authority, 'statement> {
+    authority_identifier: u32,
+    authority: &'authority SetupGenerationAuthority,
+    application: &'authority SetupGenerationRelinearizationRoundOneApplication<'statement>,
+}
+
+impl SetupGenerationRelinearizationRoundOneSource<'_, '_> {
+    pub(crate) const fn authority_identifier(&self) -> u32 {
+        self.authority_identifier
+    }
+
+    pub(crate) const fn protocol_version(&self) -> u16 {
+        self.authority.protocol_version
+    }
+
+    pub(crate) const fn suite_identifier(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.authority.suite_identifier
+    }
+
+    pub(crate) const fn ceremony_context_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.authority.ceremony_context_hash
+    }
+
+    pub(crate) const fn action_context_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.authority.action_context_hash
+    }
+
+    pub(crate) const fn roster_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.authority.roster_hash
+    }
+
+    pub(crate) const fn setup_proof_context_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.authority.setup_proof_context_hash
+    }
+
+    pub(crate) const fn source_setup_intent_object_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.authority.source_setup_intent_object_hash
+    }
+
+    pub(crate) const fn participant_identity(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.authority.participant_identity
+    }
+
+    pub(crate) const fn roster_position(&self) -> u16 {
+        self.authority.roster_position
+    }
+
+    pub(crate) const fn setup_attempt_identifier(&self) -> [u8; 32] {
+        self.authority.setup_attempt_identifier
+    }
+
+    pub(crate) const fn action_randomness_authorization_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.authority.action_randomness_authorization_hash
+    }
+
+    pub(crate) const fn public_setup_seed(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.authority.public_setup_seed
+    }
+
+    pub(crate) const fn anchor_commitment_roots(&self) -> [[u8; Hash512::BYTE_LENGTH]; 3] {
+        self.authority.anchor_commitment_roots
+    }
+
+    pub(crate) fn anchor_openings(&self) -> &[SetupGenerationAnchorOpening] {
+        &self.authority.anchor_openings
+    }
+
+    pub(crate) fn common_secret_coefficients(&self) -> &[i8] {
+        &self.authority.common_secret_coefficients
+    }
+
+    pub(crate) fn ephemeral_secret_coefficients(&self) -> &[i8] {
+        self.authority
+            .relinearization_material
+            .ephemeral_secret_coefficients()
+    }
+
+    pub(crate) const fn schedule_position(&self) -> u32 {
+        self.authority.relinearization_material.schedule_position()
+    }
+
+    pub(crate) const fn round_one_left_component(&self) -> &SetupGeneratedKeySwitchComponent {
+        self.authority
+            .relinearization_material
+            .round_one_left_component()
+    }
+
+    pub(crate) const fn round_one_right_component(&self) -> &SetupGeneratedKeySwitchComponent {
+        self.authority
+            .relinearization_material
+            .round_one_right_component()
+    }
+
+    pub(crate) fn round_one_left_errors_by_block(&self) -> &[Zeroizing<Vec<i8>>] {
+        self.authority
+            .relinearization_material
+            .round_one_left_errors_by_block()
+    }
+
+    pub(crate) fn round_one_right_errors_by_block(&self) -> &[Zeroizing<Vec<i8>>] {
+        self.authority
+            .relinearization_material
+            .round_one_right_errors_by_block()
+    }
+
+    pub(crate) const fn prepared_attempt(&self) -> &PreparedActionProofAttemptSource {
+        &self.application.prepared_attempt
+    }
+
+    pub(crate) fn canonical_application_statement_bytes(&self) -> &[u8] {
+        self.application.canonical_application_statement_bytes
+    }
+
+    pub(crate) fn generated_source_authority(
+        &self,
+    ) -> Result<SetupGeneratedRelinearizationRoundOneSourceAuthority, RefusalReason> {
+        self.authority
+            .generated_relinearization_round_one_source_authority()
+    }
+
+    pub(crate) fn witness_bound_attempt(
+        &self,
+    ) -> Result<WitnessBoundPreparedActionProofAttemptSource, RefusalReason> {
+        let persistent_proof_coin_input = PersistentProofCoinInput::new(
+            self.prepared_attempt().application_slot(),
+            self.prepared_attempt().application_statement_hash(),
+        )
+        .map_err(|error| error.refusal_reason)?;
+        let mut binding = self
+            .authority
+            .action_private_randomness
+            .begin_persistent_proof_witness_coin_binding(&persistent_proof_coin_input)
+            .map_err(|error| error.refusal_reason)?;
+        binding
+            .absorb_canonical_bytes(RELINEARIZATION_ROUND_ONE_CANONICAL_SEMANTIC_WITNESS_DOMAIN)
+            .map_err(|error| error.refusal_reason)?;
+        binding
+            .absorb_canonical_bytes(&self.schedule_position().to_le_bytes())
+            .map_err(|error| error.refusal_reason)?;
+        binding
+            .absorb_canonical_i8_values(self.common_secret_coefficients())
+            .map_err(|error| error.refusal_reason)?;
+        binding
+            .absorb_canonical_i8_values(self.ephemeral_secret_coefficients())
+            .map_err(|error| error.refusal_reason)?;
+        for anchor in self.anchor_openings() {
+            binding
+                .absorb_canonical_bytes(&anchor.commitment_data_prime_index().to_le_bytes())
+                .map_err(|error| error.refusal_reason)?;
+            for polynomial in anchor.hiding_secret_polynomials() {
+                binding
+                    .absorb_canonical_i8_values(polynomial)
+                    .map_err(|error| error.refusal_reason)?;
+            }
+            for polynomial in anchor.hiding_error_polynomials() {
+                binding
+                    .absorb_canonical_i8_values(polynomial)
+                    .map_err(|error| error.refusal_reason)?;
+            }
+        }
+        for errors_by_block in [
+            self.round_one_left_errors_by_block(),
+            self.round_one_right_errors_by_block(),
+        ] {
+            for polynomial in errors_by_block {
+                binding
+                    .absorb_canonical_i8_values(polynomial)
+                    .map_err(|error| error.refusal_reason)?;
+            }
+        }
+        bind_prepared_action_proof_attempt_to_canonical_witness(*self.prepared_attempt(), binding)
+            .map_err(|error| error.refusal_reason)
+    }
+
+    pub(crate) fn private_coin_source(
+        &self,
+        pre_output_generation_binding_hash: [u8; Hash512::BYTE_LENGTH],
+        relation_plan_variant: &RelationPlanVariant,
+        witness_bound_attempt: WitnessBoundPreparedActionProofAttemptSource,
+    ) -> Result<PrivateRandomnessCommonProofCoinSource, RefusalReason> {
+        if pre_output_generation_binding_hash == [0_u8; Hash512::BYTE_LENGTH]
+            || witness_bound_attempt.application_slot()
+                != self.prepared_attempt().application_slot()
+            || witness_bound_attempt.application_statement_hash()
+                != self.prepared_attempt().application_statement_hash()
+        {
+            return Err(RefusalReason::WrongContext);
+        }
+        let coordinate_capacity =
+            CommonProofPrivateCoinCoordinateCapacity::from_relation_plan_variant(
+                relation_plan_variant,
+            )
+            .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
+        PrivateRandomnessCommonProofCoinSource::new(
+            Rc::clone(&self.authority.action_private_randomness),
+            self.prepared_attempt()
+                .application_statement_schema_identifier(),
+            Hash512::from_bytes(pre_output_generation_binding_hash),
+            witness_bound_attempt.private_randomness_attempt_identifier(),
+            coordinate_capacity,
+        )
+        .map_err(|_| RefusalReason::WrongContext)
+    }
+}
+
+/// Public preparation facts derived from the retained round-two generation.
+/// The generated component and verifier-derived aggregate binding remain in
+/// the setup-generation authority across fresh and resumed proof attempts.
+#[derive(Clone)]
+pub(crate) struct SetupGenerationRelinearizationRoundTwoPreparationSource {
+    protocol_version: u16,
+    suite_identifier: [u8; Hash512::BYTE_LENGTH],
+    manifest_hash: [u8; Hash512::BYTE_LENGTH],
+    ceremony_context_hash: [u8; Hash512::BYTE_LENGTH],
+    action_context_hash: [u8; Hash512::BYTE_LENGTH],
+    roster_hash: [u8; Hash512::BYTE_LENGTH],
+    setup_proof_context_hash: [u8; Hash512::BYTE_LENGTH],
+    source_setup_intent_object_hash: [u8; Hash512::BYTE_LENGTH],
+    participant_identity: [u8; Hash512::BYTE_LENGTH],
+    roster_position: u16,
+    action_randomness_authorization_hash: [u8; Hash512::BYTE_LENGTH],
+    schedule_position: u32,
+    round_one_root_pair: [[u8; Hash512::BYTE_LENGTH]; 2],
+    aggregate_round_one_root_pair: [[u8; Hash512::BYTE_LENGTH]; 2],
+    contribution_root: [u8; Hash512::BYTE_LENGTH],
+    canonical_application_statement_bytes: Box<[u8]>,
+}
+
+impl SetupGenerationRelinearizationRoundTwoPreparationSource {
+    fn from_generated_source(
+        source: &SetupGeneratedRelinearizationRoundTwoSourceAuthority,
+        manifest_hash: [u8; Hash512::BYTE_LENGTH],
+        source_setup_intent_object_hash: [u8; Hash512::BYTE_LENGTH],
+        action_randomness_authorization_hash: [u8; Hash512::BYTE_LENGTH],
+    ) -> Self {
+        Self {
+            protocol_version: source.protocol_version(),
+            suite_identifier: source.suite_identifier(),
+            manifest_hash,
+            ceremony_context_hash: source.ceremony_context_hash(),
+            action_context_hash: source.action_context_hash(),
+            roster_hash: source.roster_hash(),
+            setup_proof_context_hash: source.setup_proof_context_hash(),
+            source_setup_intent_object_hash,
+            participant_identity: source.participant_identity(),
+            roster_position: source.roster_position(),
+            action_randomness_authorization_hash,
+            schedule_position: source.schedule_position(),
+            round_one_root_pair: source.round_one_root_pair(),
+            aggregate_round_one_root_pair: source.aggregate_round_one_root_pair(),
+            contribution_root: source.component().contribution_root(),
+            canonical_application_statement_bytes: source
+                .canonical_application_statement_bytes()
+                .into(),
+        }
+    }
+
+    pub(crate) const fn protocol_version(&self) -> u16 {
+        self.protocol_version
+    }
+
+    pub(crate) const fn suite_identifier(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.suite_identifier
+    }
+
+    pub(crate) const fn manifest_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.manifest_hash
+    }
+
+    pub(crate) const fn ceremony_context_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.ceremony_context_hash
+    }
+
+    pub(crate) const fn action_context_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.action_context_hash
+    }
+
+    pub(crate) const fn roster_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.roster_hash
+    }
+
+    pub(crate) const fn setup_proof_context_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.setup_proof_context_hash
+    }
+
+    pub(crate) const fn source_setup_intent_object_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.source_setup_intent_object_hash
+    }
+
+    pub(crate) const fn participant_identity(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.participant_identity
+    }
+
+    pub(crate) const fn roster_position(&self) -> u16 {
+        self.roster_position
+    }
+
+    pub(crate) const fn action_randomness_authorization_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.action_randomness_authorization_hash
+    }
+
+    pub(crate) const fn schedule_position(&self) -> u32 {
+        self.schedule_position
+    }
+
+    pub(crate) const fn round_one_root_pair(&self) -> [[u8; Hash512::BYTE_LENGTH]; 2] {
+        self.round_one_root_pair
+    }
+
+    pub(crate) const fn aggregate_round_one_root_pair(&self) -> [[u8; Hash512::BYTE_LENGTH]; 2] {
+        self.aggregate_round_one_root_pair
+    }
+
+    pub(crate) const fn contribution_root(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.contribution_root
+    }
+
+    pub(crate) fn canonical_application_statement_bytes(&self) -> &[u8] {
+        &self.canonical_application_statement_bytes
+    }
+}
+
+/// Exact decoded `0x1216` statement facts joined to one reset-safe proof
+/// attempt. Construction remains inside the relation adapter after canonical
+/// statement decoding.
+pub(crate) struct SetupGenerationRelinearizationRoundTwoApplication<'statement> {
+    prepared_attempt: PreparedActionProofAttemptSource,
+    canonical_application_statement_bytes: &'statement [u8],
+    setup_proof_context_hash: [u8; Hash512::BYTE_LENGTH],
+    participant_identity: [u8; Hash512::BYTE_LENGTH],
+    roster_position: u16,
+    schedule_position: u32,
+    anchor_commitment_roots: [[u8; Hash512::BYTE_LENGTH]; 3],
+    round_one_root_pair: [[u8; Hash512::BYTE_LENGTH]; 2],
+    aggregate_round_one_root_pair: [[u8; Hash512::BYTE_LENGTH]; 2],
+    contribution_root: [u8; Hash512::BYTE_LENGTH],
+}
+
+impl<'statement> SetupGenerationRelinearizationRoundTwoApplication<'statement> {
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) const fn from_decoded_statement(
+        prepared_attempt: PreparedActionProofAttemptSource,
+        canonical_application_statement_bytes: &'statement [u8],
+        setup_proof_context_hash: [u8; Hash512::BYTE_LENGTH],
+        participant_identity: [u8; Hash512::BYTE_LENGTH],
+        roster_position: u16,
+        schedule_position: u32,
+        anchor_commitment_roots: [[u8; Hash512::BYTE_LENGTH]; 3],
+        round_one_root_pair: [[u8; Hash512::BYTE_LENGTH]; 2],
+        aggregate_round_one_root_pair: [[u8; Hash512::BYTE_LENGTH]; 2],
+        contribution_root: [u8; Hash512::BYTE_LENGTH],
+    ) -> Self {
+        Self {
+            prepared_attempt,
+            canonical_application_statement_bytes,
+            setup_proof_context_hash,
+            participant_identity,
+            roster_position,
+            schedule_position,
+            anchor_commitment_roots,
+            round_one_root_pair,
+            aggregate_round_one_root_pair,
+            contribution_root,
+        }
+    }
+}
+
+/// Retained browser-worker authority for the exact `0x1216` witness and its
+/// positively verified round-one aggregate. Aggregate material remains a
+/// verifier-minted capability; the caller cannot replace it with detached
+/// roots, descriptors, or statement bytes.
+pub(crate) struct SetupGenerationRelinearizationRoundTwoSource<'authority, 'statement, 'aggregate> {
+    authority_identifier: u32,
+    authority: &'authority SetupGenerationAuthority,
+    application: &'authority SetupGenerationRelinearizationRoundTwoApplication<'statement>,
+    generated_round_two: &'authority SetupGeneratedRelinearizationRoundTwoGeneration,
+    verified_aggregate: &'aggregate VerifiedRelinearizationAggregateMaterial,
+}
+
+impl SetupGenerationRelinearizationRoundTwoSource<'_, '_, '_> {
+    pub(crate) const fn authority_identifier(&self) -> u32 {
+        self.authority_identifier
+    }
+
+    pub(crate) const fn protocol_version(&self) -> u16 {
+        self.authority.protocol_version
+    }
+
+    pub(crate) const fn suite_identifier(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.authority.suite_identifier
+    }
+
+    pub(crate) const fn ceremony_context_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.authority.ceremony_context_hash
+    }
+
+    pub(crate) const fn action_context_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.authority.action_context_hash
+    }
+
+    pub(crate) const fn roster_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.authority.roster_hash
+    }
+
+    pub(crate) const fn setup_proof_context_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.authority.setup_proof_context_hash
+    }
+
+    pub(crate) const fn source_setup_intent_object_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.authority.source_setup_intent_object_hash
+    }
+
+    pub(crate) const fn participant_identity(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.authority.participant_identity
+    }
+
+    pub(crate) const fn roster_position(&self) -> u16 {
+        self.authority.roster_position
+    }
+
+    pub(crate) const fn setup_attempt_identifier(&self) -> [u8; 32] {
+        self.authority.setup_attempt_identifier
+    }
+
+    pub(crate) const fn action_randomness_authorization_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.authority.action_randomness_authorization_hash
+    }
+
+    pub(crate) const fn public_setup_seed(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.authority.public_setup_seed
+    }
+
+    pub(crate) const fn anchor_commitment_roots(&self) -> [[u8; Hash512::BYTE_LENGTH]; 3] {
+        self.authority.anchor_commitment_roots
+    }
+
+    pub(crate) fn anchor_openings(&self) -> &[SetupGenerationAnchorOpening] {
+        &self.authority.anchor_openings
+    }
+
+    pub(crate) fn common_secret_coefficients(&self) -> &[i8] {
+        &self.authority.common_secret_coefficients
+    }
+
+    pub(crate) fn ephemeral_secret_coefficients(&self) -> &[i8] {
+        self.authority
+            .relinearization_material
+            .ephemeral_secret_coefficients()
+    }
+
+    pub(crate) const fn schedule_position(&self) -> u32 {
+        self.authority.relinearization_material.schedule_position()
+    }
+
+    pub(crate) const fn round_one_left_component(&self) -> &SetupGeneratedKeySwitchComponent {
+        self.authority
+            .relinearization_material
+            .round_one_left_component()
+    }
+
+    pub(crate) const fn round_one_right_component(&self) -> &SetupGeneratedKeySwitchComponent {
+        self.authority
+            .relinearization_material
+            .round_one_right_component()
+    }
+
+    pub(crate) fn round_one_left_errors_by_block(&self) -> &[Zeroizing<Vec<i8>>] {
+        self.authority
+            .relinearization_material
+            .round_one_left_errors_by_block()
+    }
+
+    pub(crate) fn round_one_right_errors_by_block(&self) -> &[Zeroizing<Vec<i8>>] {
+        self.authority
+            .relinearization_material
+            .round_one_right_errors_by_block()
+    }
+
+    pub(crate) fn round_two_errors_by_block(&self) -> &[Zeroizing<Vec<i8>>] {
+        self.authority
+            .relinearization_material
+            .round_two_errors_by_block()
+    }
+
+    pub(crate) const fn round_two_component(&self) -> &SetupGeneratedKeySwitchComponent {
+        self.generated_round_two.component()
+    }
+
+    pub(crate) const fn generated_source_authority(
+        &self,
+    ) -> &SetupGeneratedRelinearizationRoundTwoSourceAuthority {
+        self.generated_round_two.source_authority()
+    }
+
+    pub(crate) fn generated_round_one_source_authority(
+        &self,
+    ) -> Result<SetupGeneratedRelinearizationRoundOneSourceAuthority, RefusalReason> {
+        self.authority
+            .generated_relinearization_round_one_source_authority()
+    }
+
+    pub(crate) const fn verified_relinearization_aggregate(
+        &self,
+    ) -> &VerifiedRelinearizationAggregateMaterial {
+        self.verified_aggregate
+    }
+
+    pub(crate) const fn aggregate_round_one_left_material(
+        &self,
+    ) -> &VerifiedKeySwitchComponentMaterial {
+        self.verified_aggregate.aggregate_left_material()
+    }
+
+    pub(crate) const fn aggregate_round_one_right_material(
+        &self,
+    ) -> &VerifiedKeySwitchComponentMaterial {
+        self.verified_aggregate.material()
+    }
+
+    pub(crate) const fn prepared_attempt(&self) -> &PreparedActionProofAttemptSource {
+        &self.application.prepared_attempt
+    }
+
+    pub(crate) fn canonical_application_statement_bytes(&self) -> &[u8] {
+        self.application.canonical_application_statement_bytes
+    }
+
+    pub(crate) fn witness_bound_attempt(
+        &self,
+    ) -> Result<WitnessBoundPreparedActionProofAttemptSource, RefusalReason> {
+        let persistent_proof_coin_input = PersistentProofCoinInput::new(
+            self.prepared_attempt().application_slot(),
+            self.prepared_attempt().application_statement_hash(),
+        )
+        .map_err(|error| error.refusal_reason)?;
+        let mut binding = self
+            .authority
+            .action_private_randomness
+            .begin_persistent_proof_witness_coin_binding(&persistent_proof_coin_input)
+            .map_err(|error| error.refusal_reason)?;
+        binding
+            .absorb_canonical_bytes(RELINEARIZATION_ROUND_TWO_CANONICAL_SEMANTIC_WITNESS_DOMAIN)
+            .map_err(|error| error.refusal_reason)?;
+        binding
+            .absorb_canonical_bytes(&self.schedule_position().to_le_bytes())
+            .map_err(|error| error.refusal_reason)?;
+        binding
+            .absorb_canonical_i8_values(self.common_secret_coefficients())
+            .map_err(|error| error.refusal_reason)?;
+        binding
+            .absorb_canonical_i8_values(self.ephemeral_secret_coefficients())
+            .map_err(|error| error.refusal_reason)?;
+        for anchor in self.anchor_openings() {
+            binding
+                .absorb_canonical_bytes(&anchor.commitment_data_prime_index().to_le_bytes())
+                .map_err(|error| error.refusal_reason)?;
+            for polynomial in anchor.hiding_secret_polynomials() {
+                binding
+                    .absorb_canonical_i8_values(polynomial)
+                    .map_err(|error| error.refusal_reason)?;
+            }
+            for polynomial in anchor.hiding_error_polynomials() {
+                binding
+                    .absorb_canonical_i8_values(polynomial)
+                    .map_err(|error| error.refusal_reason)?;
+            }
+        }
+        for errors_by_block in [
+            self.round_one_left_errors_by_block(),
+            self.round_one_right_errors_by_block(),
+            self.round_two_errors_by_block(),
+        ] {
+            for polynomial in errors_by_block {
+                binding
+                    .absorb_canonical_i8_values(polynomial)
+                    .map_err(|error| error.refusal_reason)?;
+            }
+        }
+        bind_prepared_action_proof_attempt_to_canonical_witness(*self.prepared_attempt(), binding)
+            .map_err(|error| error.refusal_reason)
+    }
+
+    pub(crate) fn private_coin_source(
+        &self,
+        pre_output_generation_binding_hash: [u8; Hash512::BYTE_LENGTH],
+        relation_plan_variant: &RelationPlanVariant,
+        witness_bound_attempt: WitnessBoundPreparedActionProofAttemptSource,
+    ) -> Result<PrivateRandomnessCommonProofCoinSource, RefusalReason> {
+        if pre_output_generation_binding_hash == [0_u8; Hash512::BYTE_LENGTH]
+            || witness_bound_attempt.application_slot()
+                != self.prepared_attempt().application_slot()
+            || witness_bound_attempt.application_statement_hash()
+                != self.prepared_attempt().application_statement_hash()
+        {
+            return Err(RefusalReason::WrongContext);
+        }
+        let coordinate_capacity =
+            CommonProofPrivateCoinCoordinateCapacity::from_relation_plan_variant(
+                relation_plan_variant,
+            )
+            .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
+        PrivateRandomnessCommonProofCoinSource::new(
+            Rc::clone(&self.authority.action_private_randomness),
+            self.prepared_attempt()
+                .application_statement_schema_identifier(),
+            Hash512::from_bytes(pre_output_generation_binding_hash),
+            witness_bound_attempt.private_randomness_attempt_identifier(),
+            coordinate_capacity,
+        )
+        .map_err(|_| RefusalReason::WrongContext)
     }
 }
 
@@ -2046,10 +3889,10 @@ impl SetupGenerationGaloisBatchSource<'_, '_> {
             .ok_or(RefusalReason::OutsideSupportedProfile)?;
         let polynomial_degree = topology.polynomial_degree();
         let extended_limb_count = topology.extended_limb_count();
-        let physical_column_coefficient_count = polynomial_degree / 2;
+        let quarter_polynomial_degree_bound_exclusive = polynomial_degree / 4;
         if active_data_limb_count > extended_limb_count
-            || physical_column_coefficient_count == 0
-            || physical_column_coefficient_count.checked_mul(2) != Some(polynomial_degree)
+            || quarter_polynomial_degree_bound_exclusive == 0
+            || quarter_polynomial_degree_bound_exclusive.checked_mul(4) != Some(polynomial_degree)
         {
             return Err(RefusalReason::WrongTypeOrLength);
         }
@@ -2087,9 +3930,12 @@ impl SetupGenerationGaloisBatchSource<'_, '_> {
                 if common_reference_coefficients.len() != polynomial_degree {
                     return Err(RefusalReason::WrongTypeOrLength);
                 }
-                let (low_coefficients, high_coefficients) = common_reference_coefficients
-                    .split_at(physical_column_coefficient_count);
-                for physical_column in [low_coefficients, high_coefficients] {
+                for quarter_ordinal in 0_usize..4_usize {
+                    let coefficient_start = quarter_ordinal
+                        .checked_mul(quarter_polynomial_degree_bound_exclusive)
+                        .ok_or(RefusalReason::OutsideSupportedProfile)?;
+                    let physical_column = &common_reference_coefficients[coefficient_start
+                        ..coefficient_start + quarter_polynomial_degree_bound_exclusive];
                     ordered_coefficient_columns.push(
                         physical_column
                             .iter()
@@ -2113,7 +3959,7 @@ impl SetupGenerationGaloisBatchSource<'_, '_> {
         let tree = SetupPublicPolynomialTree::construct(SetupPublicPolynomialTreeInput {
             context: &public_polynomial_context,
             evaluation_domain_size,
-            source_polynomial_degree_bound_exclusive: polynomial_degree,
+            source_polynomial_degree_bound_exclusive: quarter_polynomial_degree_bound_exclusive,
             ordered_coefficient_columns: &ordered_coefficient_columns,
         })
         .map_err(|_| RefusalReason::WrongHashOrRoot)?;
@@ -2142,8 +3988,9 @@ impl SetupGenerationGaloisBatchSource<'_, '_> {
             .compiled_plan()
             .select_variant(Some(self.batch_schedule_position()), None)
             .map_err(|_| RefusalReason::UnsupportedVersionOrSuite)?;
-        let evaluation_domain_size = usize::try_from(relation_plan_variant.evaluation_domain_size())
-            .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
+        let evaluation_domain_size =
+            usize::try_from(relation_plan_variant.evaluation_domain_size())
+                .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
         let mut ordered_public_polynomial_contexts =
             Vec::with_capacity(self.ordered_entries().len());
         let mut ordered_contribution_roots = Vec::with_capacity(self.ordered_entries().len());
@@ -2231,9 +4078,7 @@ impl SetupGenerationGaloisBatchSource<'_, '_> {
         let ordered_auxiliary_roots = self
             .ordered_entries()
             .iter()
-            .map(|entry| {
-                self.recompute_galois_common_auxiliary_root(entry, evaluation_domain_size)
-            })
+            .map(|entry| self.recompute_galois_common_auxiliary_root(entry, evaluation_domain_size))
             .collect::<Result<Vec<_>, _>>()?;
         Ok(SetupGeneratedGaloisSourceAuthority {
             protocol_version: self.protocol_version(),
@@ -2430,6 +4275,48 @@ pub(super) fn retain_browser_owned_setup_generation_authority(
     })
 }
 
+pub(crate) fn resolve_setup_generation_key_relation_preparation_source(
+    handle: &SetupGenerationAuthorityHandle,
+    family: SetupKeyRelationProofFamily,
+) -> Result<SetupGenerationKeyRelationPreparationSource, RefusalReason> {
+    SETUP_GENERATION_AUTHORITY_REGISTRY.with(|registry| {
+        registry
+            .try_borrow()
+            .map_err(|_| RefusalReason::ConsumedState)?
+            .authorities
+            .get(&handle.0)
+            .ok_or(RefusalReason::ConsumedState)?
+            .key_relation_preparation_source(family)
+    })
+}
+
+pub(crate) fn with_setup_generation_key_relation<Value, Error>(
+    handle: &SetupGenerationAuthorityHandle,
+    application: &SetupGenerationKeyRelationApplication<'_>,
+    operation: impl FnOnce(SetupGenerationKeyRelationSource<'_, '_>) -> Result<Value, Error>,
+) -> Result<Value, Error>
+where
+    Error: From<RefusalReason>,
+{
+    SETUP_GENERATION_AUTHORITY_REGISTRY.with(|registry| {
+        let mut registry = registry
+            .try_borrow_mut()
+            .map_err(|_| Error::from(RefusalReason::ConsumedState))?;
+        let authority = registry
+            .authorities
+            .get_mut(&handle.0)
+            .ok_or_else(|| Error::from(RefusalReason::ConsumedState))?;
+        authority
+            .pin_key_relation_application(application)
+            .map_err(Error::from)?;
+        operation(SetupGenerationKeyRelationSource {
+            authority_identifier: handle.0,
+            authority,
+            application,
+        })
+    })
+}
+
 pub(crate) fn resolve_setup_generation_vss_preparation_source(
     handle: &SetupGenerationAuthorityHandle,
 ) -> Result<SetupGenerationVssPreparationSource, RefusalReason> {
@@ -2458,6 +4345,131 @@ pub(crate) fn resolve_setup_generation_galois_preparation_source(
     })
 }
 
+pub(crate) fn resolve_setup_generation_relinearization_round_one_preparation_source(
+    handle: &SetupGenerationAuthorityHandle,
+) -> Result<SetupGenerationRelinearizationRoundOnePreparationSource, RefusalReason> {
+    SETUP_GENERATION_AUTHORITY_REGISTRY.with(|registry| {
+        registry
+            .try_borrow()
+            .map_err(|_| RefusalReason::ConsumedState)?
+            .authorities
+            .get(&handle.0)
+            .ok_or(RefusalReason::ConsumedState)?
+            .relinearization_round_one_preparation_source()
+    })
+}
+
+/// Activates the one suite-fixed round-two generation after the exact ordered
+/// round-one aggregate has been positively verified. The aggregate bytes are
+/// authenticated against that verifier capability before the generated
+/// component or preparation source is retained.
+pub(crate) fn activate_setup_generation_relinearization_round_two(
+    handle: &SetupGenerationAuthorityHandle,
+    selected_suite: &SelectedSuiteCapability,
+    verified_aggregate: &VerifiedRelinearizationAggregateMaterial,
+    aggregate_round_one_left_bytes: &[u8],
+    aggregate_round_one_right_bytes: &[u8],
+) -> Result<SetupGenerationRelinearizationRoundTwoPreparationSource, RefusalReason> {
+    SETUP_GENERATION_AUTHORITY_REGISTRY.with(|registry| {
+        let mut registry = registry
+            .try_borrow_mut()
+            .map_err(|_| RefusalReason::ConsumedState)?;
+        registry
+            .authorities
+            .get_mut(&handle.0)
+            .ok_or(RefusalReason::ConsumedState)?
+            .activate_relinearization_round_two(
+                selected_suite,
+                verified_aggregate,
+                aggregate_round_one_left_bytes,
+                aggregate_round_one_right_bytes,
+            )
+    })
+}
+
+/// Reopens the public preparation facts after activation without regenerating
+/// the retained round-two component. This is the reset-safe checkpoint-resume
+/// path; the verifier-derived aggregate binding remains inside the authority.
+pub(crate) fn resolve_setup_generation_relinearization_round_two_preparation_source(
+    handle: &SetupGenerationAuthorityHandle,
+) -> Result<SetupGenerationRelinearizationRoundTwoPreparationSource, RefusalReason> {
+    SETUP_GENERATION_AUTHORITY_REGISTRY.with(|registry| {
+        registry
+            .try_borrow()
+            .map_err(|_| RefusalReason::ConsumedState)?
+            .authorities
+            .get(&handle.0)
+            .ok_or(RefusalReason::ConsumedState)?
+            .relinearization_round_two_preparation_source()
+    })
+}
+
+pub(crate) fn with_setup_generation_relinearization_round_one<Value, Error>(
+    handle: &SetupGenerationAuthorityHandle,
+    application: &SetupGenerationRelinearizationRoundOneApplication<'_>,
+    operation: impl FnOnce(SetupGenerationRelinearizationRoundOneSource<'_, '_>) -> Result<Value, Error>,
+) -> Result<Value, Error>
+where
+    Error: From<RefusalReason>,
+{
+    SETUP_GENERATION_AUTHORITY_REGISTRY.with(|registry| {
+        let mut registry = registry
+            .try_borrow_mut()
+            .map_err(|_| Error::from(RefusalReason::ConsumedState))?;
+        let authority = registry
+            .authorities
+            .get_mut(&handle.0)
+            .ok_or_else(|| Error::from(RefusalReason::ConsumedState))?;
+        authority
+            .pin_relinearization_round_one_application(application)
+            .map_err(Error::from)?;
+        operation(SetupGenerationRelinearizationRoundOneSource {
+            authority_identifier: handle.0,
+            authority,
+            application,
+        })
+    })
+}
+
+pub(crate) fn with_setup_generation_relinearization_round_two<Value, Error>(
+    handle: &SetupGenerationAuthorityHandle,
+    application: &SetupGenerationRelinearizationRoundTwoApplication<'_>,
+    verified_aggregate: &VerifiedRelinearizationAggregateMaterial,
+    operation: impl FnOnce(
+        SetupGenerationRelinearizationRoundTwoSource<'_, '_, '_>,
+    ) -> Result<Value, Error>,
+) -> Result<Value, Error>
+where
+    Error: From<RefusalReason>,
+{
+    SETUP_GENERATION_AUTHORITY_REGISTRY.with(|registry| {
+        let mut registry = registry
+            .try_borrow_mut()
+            .map_err(|_| Error::from(RefusalReason::ConsumedState))?;
+        let authority = registry
+            .authorities
+            .get_mut(&handle.0)
+            .ok_or_else(|| Error::from(RefusalReason::ConsumedState))?;
+        authority
+            .validate_relinearization_round_two_aggregate(verified_aggregate)
+            .map_err(Error::from)?;
+        authority
+            .pin_relinearization_round_two_application(application)
+            .map_err(Error::from)?;
+        let generated_round_two = authority
+            .generated_relinearization_round_two
+            .as_ref()
+            .ok_or_else(|| Error::from(RefusalReason::MissingPrerequisite))?;
+        operation(SetupGenerationRelinearizationRoundTwoSource {
+            authority_identifier: handle.0,
+            authority,
+            application,
+            generated_round_two,
+            verified_aggregate,
+        })
+    })
+}
+
 pub(crate) fn with_setup_generation_galois_batch<Value, Error>(
     handle: &SetupGenerationAuthorityHandle,
     application: &SetupGenerationGaloisApplication<'_>,
@@ -2482,6 +4494,151 @@ where
             authority,
             application,
         })
+    })
+}
+
+/// Borrows one exact public Galois component chunk from the retained setup
+/// generation authority. The expected descriptor is minted by the matching
+/// generated-source authority, so this seam cannot be used to select a
+/// caller-described byte stream or expose any secret witness material.
+pub(crate) fn with_setup_generation_galois_public_component_chunk<Value>(
+    handle: &SetupGenerationAuthorityHandle,
+    component_ordinal: usize,
+    expected_stream_descriptor: &StreamDescriptor,
+    chunk_index: usize,
+    operation: impl FnOnce(&[u8]) -> Value,
+) -> Result<Value, RefusalReason> {
+    SETUP_GENERATION_AUTHORITY_REGISTRY.with(|registry| {
+        let registry = registry
+            .try_borrow()
+            .map_err(|_| RefusalReason::ConsumedState)?;
+        let authority = registry
+            .authorities
+            .get(&handle.0)
+            .ok_or(RefusalReason::ConsumedState)?;
+        let component = authority
+            .ordered_galois_entries
+            .get(component_ordinal)
+            .map(SetupGeneratedGaloisEntry::component)
+            .ok_or(RefusalReason::WrongTypeOrLength)?;
+        if component.stream_descriptor() != expected_stream_descriptor
+            || u64::try_from(component.canonical_bytes().len()).ok()
+                != Some(expected_stream_descriptor.total_byte_length)
+        {
+            return Err(RefusalReason::WrongHashOrRoot);
+        }
+        let chunk_byte_length = FOUNDATION_PROFILE.stream_chunk_byte_length;
+        let byte_start = chunk_index
+            .checked_mul(chunk_byte_length)
+            .ok_or(RefusalReason::OutsideSupportedProfile)?;
+        let byte_end = byte_start
+            .checked_add(chunk_byte_length)
+            .map(|end| end.min(component.canonical_bytes().len()))
+            .ok_or(RefusalReason::OutsideSupportedProfile)?;
+        let chunk = component
+            .canonical_bytes()
+            .get(byte_start..byte_end)
+            .filter(|chunk| {
+                chunk_index < expected_stream_descriptor.ordered_chunk_digests.len()
+                    && !chunk.is_empty()
+            })
+            .ok_or(RefusalReason::WrongTypeOrLength)?;
+        Ok(operation(chunk))
+    })
+}
+
+pub(crate) fn with_setup_generation_relinearization_round_one_component_chunk<Value>(
+    handle: &SetupGenerationAuthorityHandle,
+    component_ordinal: usize,
+    expected_stream_descriptor: &StreamDescriptor,
+    chunk_index: usize,
+    operation: impl FnOnce(&[u8]) -> Value,
+) -> Result<Value, RefusalReason> {
+    SETUP_GENERATION_AUTHORITY_REGISTRY.with(|registry| {
+        let registry = registry
+            .try_borrow()
+            .map_err(|_| RefusalReason::ConsumedState)?;
+        let authority = registry
+            .authorities
+            .get(&handle.0)
+            .ok_or(RefusalReason::ConsumedState)?;
+        let component = match component_ordinal {
+            0 => authority
+                .relinearization_material
+                .round_one_left_component(),
+            1 => authority
+                .relinearization_material
+                .round_one_right_component(),
+            _ => return Err(RefusalReason::WrongTypeOrLength),
+        };
+        if component.stream_descriptor() != expected_stream_descriptor
+            || u64::try_from(component.canonical_bytes().len()).ok()
+                != Some(expected_stream_descriptor.total_byte_length)
+        {
+            return Err(RefusalReason::WrongHashOrRoot);
+        }
+        let chunk_byte_length = FOUNDATION_PROFILE.stream_chunk_byte_length;
+        let byte_start = chunk_index
+            .checked_mul(chunk_byte_length)
+            .ok_or(RefusalReason::OutsideSupportedProfile)?;
+        let byte_end = byte_start
+            .checked_add(chunk_byte_length)
+            .map(|end| end.min(component.canonical_bytes().len()))
+            .ok_or(RefusalReason::OutsideSupportedProfile)?;
+        let chunk = component
+            .canonical_bytes()
+            .get(byte_start..byte_end)
+            .filter(|chunk| {
+                chunk_index < expected_stream_descriptor.ordered_chunk_digests.len()
+                    && !chunk.is_empty()
+            })
+            .ok_or(RefusalReason::WrongTypeOrLength)?;
+        Ok(operation(chunk))
+    })
+}
+
+pub(crate) fn with_setup_generation_relinearization_round_two_component_chunk<Value>(
+    handle: &SetupGenerationAuthorityHandle,
+    expected_stream_descriptor: &StreamDescriptor,
+    chunk_index: usize,
+    operation: impl FnOnce(&[u8]) -> Value,
+) -> Result<Value, RefusalReason> {
+    SETUP_GENERATION_AUTHORITY_REGISTRY.with(|registry| {
+        let registry = registry
+            .try_borrow()
+            .map_err(|_| RefusalReason::ConsumedState)?;
+        let authority = registry
+            .authorities
+            .get(&handle.0)
+            .ok_or(RefusalReason::ConsumedState)?;
+        let component = authority
+            .generated_relinearization_round_two
+            .as_ref()
+            .map(SetupGeneratedRelinearizationRoundTwoGeneration::component)
+            .ok_or(RefusalReason::MissingPrerequisite)?;
+        if component.stream_descriptor() != expected_stream_descriptor
+            || u64::try_from(component.canonical_bytes().len()).ok()
+                != Some(expected_stream_descriptor.total_byte_length)
+        {
+            return Err(RefusalReason::WrongHashOrRoot);
+        }
+        let chunk_byte_length = FOUNDATION_PROFILE.stream_chunk_byte_length;
+        let byte_start = chunk_index
+            .checked_mul(chunk_byte_length)
+            .ok_or(RefusalReason::OutsideSupportedProfile)?;
+        let byte_end = byte_start
+            .checked_add(chunk_byte_length)
+            .map(|end| end.min(component.canonical_bytes().len()))
+            .ok_or(RefusalReason::OutsideSupportedProfile)?;
+        let chunk = component
+            .canonical_bytes()
+            .get(byte_start..byte_end)
+            .filter(|chunk| {
+                chunk_index < expected_stream_descriptor.ordered_chunk_digests.len()
+                    && !chunk.is_empty()
+            })
+            .ok_or(RefusalReason::WrongTypeOrLength)?;
+        Ok(operation(chunk))
     })
 }
 

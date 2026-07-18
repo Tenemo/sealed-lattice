@@ -109,7 +109,10 @@ impl SelectedExactProbabilityBound {
         &self,
         multiplier: impl Into<BigUint>,
     ) -> Result<Self, SelectedApplicationSoundnessAccountingError> {
-        Self::new(&self.numerator * multiplier.into(), self.denominator.clone())
+        Self::new(
+            &self.numerator * multiplier.into(),
+            self.denominator.clone(),
+        )
     }
 }
 
@@ -195,9 +198,7 @@ impl SelectedActionApplicationSoundnessAccounting {
         &self.round_by_round_compiler_input_bound
     }
 
-    pub(crate) const fn ordinary_invalid_acceptance_bound(
-        &self,
-    ) -> &SelectedExactProbabilityBound {
+    pub(crate) const fn ordinary_invalid_acceptance_bound(&self) -> &SelectedExactProbabilityBound {
         &self.ordinary_invalid_acceptance_bound
     }
 
@@ -260,10 +261,8 @@ pub(crate) fn require_selected_application_soundness_bounds(
         if !observed_top_counts.insert(action.top_count()) {
             return Err(SelectedApplicationSoundnessAccountingError::InvalidInventory);
         }
-        let row_sources = selected_action_soundness_row_sources(
-            action,
-            proof_accounting.variant_ceilings(),
-        )?;
+        let row_sources =
+            selected_action_soundness_row_sources(action, proof_accounting.variant_ceilings())?;
         referenced_variant_catalog_indices.extend(
             row_sources
                 .iter()
@@ -298,8 +297,10 @@ pub(crate) fn require_selected_application_soundness_bounds(
 fn selected_action_soundness_row_sources<'a>(
     action: &SelectedActionProofAccounting,
     variants: &'a [SelectedProofVariantByteCeiling],
-) -> Result<Vec<SelectedApplicationSoundnessRowSource<'a>>, SelectedApplicationSoundnessAccountingError>
-{
+) -> Result<
+    Vec<SelectedApplicationSoundnessRowSource<'a>>,
+    SelectedApplicationSoundnessAccountingError,
+> {
     action
         .variant_applications()
         .iter()
@@ -440,14 +441,12 @@ fn require_selected_action_inventory(
     if observed_variant_catalog_indices != expected_variant_catalog_indices
         || physical_proof_object_count != action.physical_proof_object_count()
         || logical_relation_application_count != action.logical_relation_application_count()
-        || physical_proof_object_count
-            != application_slot_ceilings.total_application_slot_ceiling()
+        || physical_proof_object_count != application_slot_ceilings.total_application_slot_ceiling()
     {
         return Err(SelectedApplicationSoundnessAccountingError::InvalidInventory);
     }
     for family in application_slot_ceilings.ordered_family_ceilings() {
-        if observed_family_multiplicities
-            .remove(&family.application_statement_schema_identifier)
+        if observed_family_multiplicities.remove(&family.application_statement_schema_identifier)
             != Some(family.application_slot_ceiling)
         {
             return Err(SelectedApplicationSoundnessAccountingError::InvalidInventory);
@@ -471,8 +470,7 @@ fn selected_action_application_soundness_accounting(
         .map_err(|_| SelectedApplicationSoundnessAccountingError::CountOverflow)?;
     let mut round_by_round_compiler_input_bound = SelectedExactProbabilityBound::zero();
     let mut ordinary_invalid_acceptance_bound = SelectedExactProbabilityBound::zero();
-    let mut quantum_random_oracle_invalid_acceptance_bound =
-        SelectedExactProbabilityBound::zero();
+    let mut quantum_random_oracle_invalid_acceptance_bound = SelectedExactProbabilityBound::zero();
 
     for row_source in row_sources {
         let variant = row_source.variant;
@@ -495,9 +493,7 @@ fn selected_action_application_soundness_accounting(
             transition_catalog.composition_batching_transition_count(),
         ))
         .and_then(|count| {
-            count.checked_add(u64::from(
-                transition_catalog.deep_point_transition_count(),
-            ))
+            count.checked_add(u64::from(transition_catalog.deep_point_transition_count()))
         })
         .and_then(|count| {
             count.checked_add(u64::from(
@@ -575,17 +571,15 @@ fn selected_action_application_soundness_accounting(
         .is_at_most_inverse_power_of_two(SELECTED_ROUND_BY_ROUND_MARGIN_EXPONENT)
     {
         return Err(
-            SelectedApplicationSoundnessAccountingError::RoundByRoundMarginExceeded {
-                top_count,
-            },
+            SelectedApplicationSoundnessAccountingError::RoundByRoundMarginExceeded { top_count },
         );
     }
     if !ordinary_invalid_acceptance_bound
         .is_at_most_inverse_power_of_two(SELECTED_ASSURANCE_EXPONENT)
     {
-        return Err(SelectedApplicationSoundnessAccountingError::OrdinaryBoundExceeded {
-            top_count,
-        });
+        return Err(
+            SelectedApplicationSoundnessAccountingError::OrdinaryBoundExceeded { top_count },
+        );
     }
     if !quantum_random_oracle_invalid_acceptance_bound.is_at_most_fraction(1, 4) {
         return Err(
@@ -652,9 +646,8 @@ mod tests {
     #[test]
     fn selected_nine_coordinate_rows_pass_and_eight_coordinate_ballot_fails_the_margin() {
         let proof_accounting = selected_accounting();
-        let soundness_accounting =
-            require_selected_application_soundness_bounds(&proof_accounting)
-                .expect("selected application soundness bounds hold");
+        let soundness_accounting = require_selected_application_soundness_bounds(&proof_accounting)
+            .expect("selected application soundness bounds hold");
         assert_eq!(
             soundness_accounting.adversary_ideal_xof_query_ceiling(),
             &(power_of_two(SELECTED_ASSURANCE_EXPONENT) - BigUint::one()),
@@ -714,9 +707,7 @@ mod tests {
         let ballot_variant = proof_accounting
             .variant_ceilings()
             .iter()
-            .find(|variant| {
-                variant.application_statement_schema_identifier() == ballot_family
-            })
+            .find(|variant| variant.application_statement_schema_identifier() == ballot_family)
             .expect("selected ballot variant");
         let prior_repetition_count = PROOF_NON_NATIVE_IDENTITY_CHALLENGE_COUNT - 1;
         let prior_ballot_non_native_bound = ballot_variant
@@ -743,9 +734,7 @@ mod tests {
                 .expect("eight-coordinate bad-set fraction derives")
             })
             .reduce(|left, right| {
-                if &left.numerator * &right.denominator
-                    <= &right.numerator * &left.denominator
-                {
+                if &left.numerator * &right.denominator <= &right.numerator * &left.denominator {
                     right
                 } else {
                     left
@@ -758,8 +747,7 @@ mod tests {
             .expect("selected ballot multiplicity");
         let prior_weighted_ballot_lower_bound = prior_ballot_non_native_bound
             .checked_multiply_integer(
-                BigUint::from(CMS19_ROUND_BY_ROUND_ERROR_COEFFICIENT)
-                    * ballot_multiplicity,
+                BigUint::from(CMS19_ROUND_BY_ROUND_ERROR_COEFFICIENT) * ballot_multiplicity,
             )
             .expect("weighted ballot lower bound derives");
         assert!(
@@ -801,9 +789,7 @@ mod tests {
             - BigUint::from(CMS19_DATABASE_TERM_COEFFICIENT) * query_ceiling.pow(3);
         let k_sensitive_error = SelectedExactProbabilityBound::new(
             k_sensitive_error_numerator,
-            &xof_denominator
-                * CMS19_ROUND_BY_ROUND_ERROR_COEFFICIENT
-                * query_ceiling.pow(2),
+            &xof_denominator * CMS19_ROUND_BY_ROUND_ERROR_COEFFICIENT * query_ceiling.pow(2),
         )
         .expect("k-sensitive round-by-round error derives");
         let before_k_change = cms19_quantum_random_oracle_single_event_bound(
@@ -831,13 +817,11 @@ mod tests {
             .actions()
             .first()
             .expect("selected action inventory is non-empty");
-        let application_slot_ceilings = selected_proof_application_slot_ceilings()
-            .expect("selected application slots derive");
-        let complete_rows = selected_action_soundness_row_sources(
-            action,
-            proof_accounting.variant_ceilings(),
-        )
-        .expect("selected action rows derive");
+        let application_slot_ceilings =
+            selected_proof_application_slot_ceilings().expect("selected application slots derive");
+        let complete_rows =
+            selected_action_soundness_row_sources(action, proof_accounting.variant_ceilings())
+                .expect("selected action rows derive");
         require_selected_action_inventory(
             action,
             proof_accounting.variant_ceilings(),

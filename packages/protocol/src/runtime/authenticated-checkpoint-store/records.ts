@@ -43,6 +43,9 @@ const fatalTextDecoder = new TextDecoder('utf-8', { fatal: true });
 export const checkpointOperationIdentityBrand = Symbol(
     'checkpoint-operation-identity',
 );
+export const checkpointLineageReservationBrand = Symbol(
+    'checkpoint-lineage-reservation',
+);
 const storedCheckpointManifestHeaderByteLength = 2 + identifierByteLength + 4;
 
 export type CheckpointBoundaryPolicy = Readonly<{
@@ -61,6 +64,16 @@ export type CheckpointOperationIdentity = Readonly<{
     readonly [checkpointOperationIdentityBrand]: true;
     checkpointLineageIdentifier: Uint8Array;
     privateRandomnessStreamAttemptIdentifier?: Uint8Array;
+}>;
+
+/**
+ * Process-local authority for one freshly sampled checkpoint lineage. It
+ * cannot publish until the authenticated store binds it to the proof attempt
+ * reported by the worker-owned common-proof adapter.
+ */
+export type CheckpointLineageReservation = Readonly<{
+    readonly [checkpointLineageReservationBrand]: true;
+    checkpointLineageIdentifier: Uint8Array;
 }>;
 
 export type CheckpointBoundary = Readonly<{
@@ -101,6 +114,10 @@ export type ResumedCheckpoint = Readonly<{
 }>;
 
 export type AuthenticatedCheckpointStore = Readonly<{
+    bindCheckpointLineageToProofAttempt(
+        reservation: CheckpointLineageReservation,
+        proofAttemptLineageIdentifier: Uint8Array,
+    ): Promise<CheckpointOperationIdentity>;
     close(): Promise<void>;
     copyAuthorityContext(): RuntimeStorageAuthorityContext;
     copyStorageInstanceIdentity(): Uint8Array;
@@ -117,6 +134,10 @@ export type AuthenticatedCheckpointStore = Readonly<{
     releaseOperationIdentity(
         identity: CheckpointOperationIdentity,
     ): Promise<void>;
+    releaseCheckpointLineageReservation(
+        reservation: CheckpointLineageReservation,
+    ): Promise<void>;
+    reserveCheckpointLineage(): Promise<CheckpointLineageReservation>;
     repair(checkpointLineageIdentifier: Uint8Array): Promise<void>;
     resume(input: {
         checkpointLineageIdentifier: Uint8Array;
@@ -161,6 +182,10 @@ export type CheckpointOperationIdentityRecord = {
     privateRandomnessStreamAttemptIdentifier?: Uint8Array;
     pendingPublicationIdentifierKey?: string;
     stateStreamDomain?: string;
+};
+
+export type CheckpointLineageReservationRecord = {
+    checkpointLineageIdentifier: Uint8Array;
 };
 
 type CanonicalItem = Readonly<{

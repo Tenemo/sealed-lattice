@@ -3,24 +3,22 @@ use std::{cell::RefCell, collections::BTreeMap};
 use crate::{
     bgv::proof_suite::{
         AggregateThresholdShareRuntimeError, CommonProofRelationPlanCapability,
-        CommonProofRuntimeError,
-        SelectedEvaluatorEntryPosition, SelectedEvaluatorStoreSource,
-        SelectedEvaluatorStoreSourceCatalog, VerifiedGaloisSourceMaterialBatch,
-        VerifiedCommonProofStatementSource, VerifiedEvaluatorAuxiliaryRoot,
-        VerifiedEvaluatorRuntimeRoot, VerifiedRelinearizationAggregateMaterial,
-        VerifiedRelinearizationSourceMaterial,
-        VerifiedGaloisSourceMaterialBatchPreflight,
+        CommonProofRuntimeError, SelectedEvaluatorEntryPosition, SelectedEvaluatorStoreSource,
+        SelectedEvaluatorStoreSourceCatalog, VerifiedCommonProofStatementSource,
+        VerifiedEvaluatorAuxiliaryRoot, VerifiedEvaluatorRuntimeRoot,
+        VerifiedGaloisSourceMaterialBatch, VerifiedGaloisSourceMaterialBatchPreflight,
+        VerifiedRelinearizationAggregateMaterial,
+        VerifiedRelinearizationAggregateMaterialPreflight,
+        VerifiedRelinearizationRoundOneSourceMaterial,
+        VerifiedRelinearizationRoundOneSourceMaterialPreflight,
+        VerifiedRelinearizationSourceMaterial, VerifiedRelinearizationSourceMaterialPreflight,
         bind_generated_common_proofs_to_verified_statement_sources,
-        decode_selected_application_statement,
-        preflight_generated_common_proof_pending_statement, runtime_error_status,
-        retire_generated_common_proof_capabilities,
-        selected_evaluator_aggregate_entry_roots_in_order,
-        selected_evaluator_entry_positions,
-        selected_evaluator_galois_entry_positions,
-        selected_galois_key_share_batch_schedule,
+        decode_selected_application_statement, preflight_generated_common_proof_pending_statement,
+        retire_generated_common_proof_capabilities, runtime_error_status,
+        selected_evaluator_aggregate_entry_roots_in_order, selected_evaluator_entry_positions,
+        selected_evaluator_galois_entry_positions, selected_galois_key_share_batch_schedule,
         selected_proof_runtime_limits, selected_relation_plan_check_context,
-        selected_relation_plans,
-        verified_application_statement_hash,
+        selected_relation_plans, verified_application_statement_hash,
         with_verified_accepted_setup_vss_public_randomness,
     },
     foundation::{
@@ -31,12 +29,12 @@ use crate::{
 };
 
 use super::{
+    canonical_package::CanonicalAcceptedSetupPackage,
     evaluator_source::{
         VerifiedAcceptedSetupEvaluatorSourceCatalog,
         VerifiedAcceptedSetupParticipantEvaluatorSource,
     },
     generation_authority::SetupGeneratedGaloisSourceAuthority,
-    canonical_package::CanonicalAcceptedSetupPackage,
     verification_assembly::with_accepted_setup_verification_sources,
     verified_public_randomness::VerifiedPublicRandomness,
 };
@@ -55,12 +53,12 @@ struct PrepackageEvaluatorSourceCatalogAssembly {
     expected_manifest_hash: [u8; 64],
     expected_roster_hash: [u8; 64],
     expected_setup_proof_context_hash: [u8; 64],
+    relinearization_round_one_sources: BTreeMap<u16, VerifiedRelinearizationRoundOneSourceMaterial>,
     relinearization_aggregate: Option<VerifiedRelinearizationAggregateMaterial>,
     relinearization_sources: BTreeMap<u16, VerifiedRelinearizationSourceMaterial>,
     generated_galois_sources: BTreeMap<u16, SetupGeneratedGaloisSourceAuthority>,
     pending_galois_proofs: BTreeMap<u16, PendingGeneratedCommonProof>,
-    package_bound_galois_statement_sources:
-        BTreeMap<u16, VerifiedCommonProofStatementSource>,
+    package_bound_galois_statement_sources: BTreeMap<u16, VerifiedCommonProofStatementSource>,
     pending_evaluator_proof: Option<PendingGeneratedEvaluatorCommonProof>,
     package_bound_evaluator_statement_source: Option<VerifiedCommonProofStatementSource>,
     galois_sources: BTreeMap<u16, VerifiedGaloisSourceMaterialBatch>,
@@ -86,6 +84,7 @@ impl PrepackageEvaluatorSourceCatalogAssembly {
             expected_setup_proof_context_hash: verified_public_randomness
                 .setup_proof_context_hash()
                 .into_bytes(),
+            relinearization_round_one_sources: BTreeMap::new(),
             relinearization_aggregate: None,
             relinearization_sources: BTreeMap::new(),
             generated_galois_sources: BTreeMap::new(),
@@ -126,6 +125,7 @@ impl PrepackageEvaluatorSourceCatalogAssembly {
         self.require_collecting()?;
         let participant_count = usize::from(FOUNDATION_PROFILE.participant_count);
         if self.relinearization_aggregate.is_none()
+            || !self.relinearization_round_one_sources.is_empty()
             || self.relinearization_sources.len() != participant_count
             || self.generated_galois_sources.len() != participant_count
             || self.pending_galois_proofs.len() != participant_count
@@ -159,8 +159,7 @@ impl PrepackageEvaluatorSourceCatalogAssembly {
                 || galois.participant_identity() != expected_participant_identity
                 || galois.roster_position() != roster_position
                 || galois.batch_schedule_position() != expected_batch_schedule_position
-                || galois.anchor_commitment_roots()
-                    != relinearization.anchor_commitment_roots()
+                || galois.anchor_commitment_roots() != relinearization.anchor_commitment_roots()
                 || galois.ordered_components().len() != expected_galois_positions.len()
                 || galois.ordered_auxiliary_roots().len() != expected_galois_positions.len()
                 || galois
@@ -224,6 +223,7 @@ impl PrepackageEvaluatorSourceCatalogAssembly {
         self.require_collecting()?;
         let participant_count = usize::from(FOUNDATION_PROFILE.participant_count);
         if self.relinearization_aggregate.is_none()
+            || !self.relinearization_round_one_sources.is_empty()
             || self.relinearization_sources.len() != participant_count
             || self.galois_sources.len() != participant_count
             || self
@@ -362,12 +362,14 @@ impl SelectedEvaluatorStoreSourceCatalog for PrepackageEvaluatorSourceCatalogAss
             && relinearization.evaluator_position() == evaluator_position
         {
             let material = relinearization.material();
-            return Ok(Some(SelectedEvaluatorStoreSource::from_authenticated_authority(
-                material.topology().clone(),
-                material.material_root().into_bytes(),
-                material.stream_descriptor().clone(),
-                material.begin_authenticated_readback()?,
-            )));
+            return Ok(Some(
+                SelectedEvaluatorStoreSource::from_authenticated_authority(
+                    material.topology().clone(),
+                    material.material_root().into_bytes(),
+                    material.stream_descriptor().clone(),
+                    material.begin_authenticated_readback()?,
+                ),
+            ));
         }
         let component = self
             .generated_galois_sources
@@ -381,12 +383,14 @@ impl SelectedEvaluatorStoreSourceCatalog for PrepackageEvaluatorSourceCatalogAss
         let Some(component) = component else {
             return Ok(None);
         };
-        Ok(Some(SelectedEvaluatorStoreSource::from_authenticated_authority(
-            component.topology().clone(),
-            component.material_root().into_bytes(),
-            component.stream_descriptor().clone(),
-            component.begin_authenticated_readback()?,
-        )))
+        Ok(Some(
+            SelectedEvaluatorStoreSource::from_authenticated_authority(
+                component.topology().clone(),
+                component.material_root().into_bytes(),
+                component.stream_descriptor().clone(),
+                component.begin_authenticated_readback()?,
+            ),
+        ))
     }
 
     fn component_root(
@@ -438,8 +442,14 @@ struct PendingGeneratedEvaluatorCommonProof {
 }
 
 #[derive(Clone, Copy)]
+pub(crate) struct PreparedPrepackageRelinearizationRoundOneSourceSlot {
+    assembly_handle: u32,
+    roster_position: u16,
+}
+
 pub(crate) struct PreparedPrepackageRelinearizationAggregateSlot {
     assembly_handle: u32,
+    ordered_source_buffer: Vec<VerifiedRelinearizationRoundOneSourceMaterial>,
 }
 
 #[derive(Clone, Copy)]
@@ -561,17 +571,149 @@ pub(crate) fn begin_prepackage_evaluator_source_catalog(
     .map_err(aggregate_runtime_error)
 }
 
+pub(crate) fn preflight_prepackage_relinearization_round_one_source_slot(
+    assembly_handle: u32,
+    source: &VerifiedRelinearizationRoundOneSourceMaterialPreflight,
+) -> Result<PreparedPrepackageRelinearizationRoundOneSourceSlot, CommonProofRuntimeError> {
+    PREPACKAGE_EVALUATOR_SOURCE_CATALOG_REGISTRY.with(|registry| {
+        let registry = registry.borrow();
+        let assembly = registry.get(assembly_handle)?;
+        assembly.require_collecting()?;
+        let roster_position = source.roster_position();
+        let expected_participant_identity = assembly
+            .expected_ordered_participant_identities
+            .get(usize::from(roster_position))
+            .copied()
+            .ok_or(CommonProofRuntimeError::WrongVerificationBinding)?;
+        if assembly.relinearization_aggregate.is_some()
+            || assembly
+                .relinearization_round_one_sources
+                .contains_key(&roster_position)
+            || source.protocol_version() != assembly.expected_protocol_version
+            || source.suite_identifier() != assembly.expected_suite_identifier
+            || source.ceremony_context_hash() != assembly.expected_ceremony_context_hash
+            || source.action_context_hash() != assembly.expected_action_context_hash
+            || source.roster_hash() != assembly.expected_roster_hash
+            || source.setup_proof_context_hash() != assembly.expected_setup_proof_context_hash
+            || source.participant_identity() != expected_participant_identity
+        {
+            return Err(CommonProofRuntimeError::WrongVerificationBinding);
+        }
+        Ok(PreparedPrepackageRelinearizationRoundOneSourceSlot {
+            assembly_handle,
+            roster_position,
+        })
+    })
+}
+
+pub(crate) fn commit_prepackage_relinearization_round_one_source(
+    prepared_slot: PreparedPrepackageRelinearizationRoundOneSourceSlot,
+    source: VerifiedRelinearizationRoundOneSourceMaterial,
+) {
+    PREPACKAGE_EVALUATOR_SOURCE_CATALOG_REGISTRY.with(|registry| {
+        let mut registry = registry.borrow_mut();
+        let assembly = registry
+            .assemblies
+            .get_mut(&prepared_slot.assembly_handle)
+            .expect("preflight retained the exact prepackage source assembly");
+        assert_eq!(source.roster_position(), prepared_slot.roster_position);
+        assert!(
+            assembly
+                .relinearization_round_one_sources
+                .insert(prepared_slot.roster_position, source)
+                .is_none()
+        );
+    });
+}
+
+pub(crate) fn with_prepackage_relinearization_round_one_sources<Output>(
+    assembly_handle: u32,
+    inspect: impl FnOnce(
+        &[&VerifiedRelinearizationRoundOneSourceMaterial],
+    ) -> Result<Output, CommonProofRuntimeError>,
+) -> Result<Output, CommonProofRuntimeError> {
+    PREPACKAGE_EVALUATOR_SOURCE_CATALOG_REGISTRY.with(|registry| {
+        let registry = registry.borrow();
+        let assembly = registry.get(assembly_handle)?;
+        assembly.require_collecting()?;
+        if assembly.relinearization_aggregate.is_some()
+            || assembly.relinearization_round_one_sources.len()
+                != usize::from(FOUNDATION_PROFILE.participant_count)
+        {
+            return Err(CommonProofRuntimeError::WrongOperationPhase);
+        }
+        let ordered_sources = (0..FOUNDATION_PROFILE.participant_count)
+            .map(|roster_position| {
+                assembly
+                    .relinearization_round_one_sources
+                    .get(&roster_position)
+                    .ok_or(CommonProofRuntimeError::WrongVerificationBinding)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        inspect(&ordered_sources)
+    })
+}
+
 pub(crate) fn preflight_prepackage_relinearization_aggregate_slot(
     assembly_handle: u32,
+    aggregate: &VerifiedRelinearizationAggregateMaterialPreflight,
 ) -> Result<PreparedPrepackageRelinearizationAggregateSlot, CommonProofRuntimeError> {
     PREPACKAGE_EVALUATOR_SOURCE_CATALOG_REGISTRY.with(|registry| {
         let registry = registry.borrow();
         let assembly = registry.get(assembly_handle)?;
         assembly.require_collecting()?;
-        if assembly.relinearization_aggregate.is_some() {
+        if assembly.relinearization_aggregate.is_some()
+            || assembly.relinearization_round_one_sources.len()
+                != usize::from(FOUNDATION_PROFILE.participant_count)
+            || aggregate.protocol_version() != assembly.expected_protocol_version
+            || aggregate.suite_identifier() != assembly.expected_suite_identifier
+            || aggregate.ceremony_context_hash() != assembly.expected_ceremony_context_hash
+            || aggregate.action_context_hash() != assembly.expected_action_context_hash
+            || aggregate.roster_hash() != assembly.expected_roster_hash
+            || aggregate.setup_proof_context_hash() != assembly.expected_setup_proof_context_hash
+            || aggregate.ordered_participant_identities()
+                != assembly.expected_ordered_participant_identities.as_ref()
+        {
             return Err(CommonProofRuntimeError::WrongVerificationBinding);
         }
-        Ok(PreparedPrepackageRelinearizationAggregateSlot { assembly_handle })
+        let mut ordered_source_buffer = Vec::new();
+        ordered_source_buffer
+            .try_reserve_exact(usize::from(FOUNDATION_PROFILE.participant_count))
+            .map_err(|_| CommonProofRuntimeError::AllocationLimitExceeded)?;
+        Ok(PreparedPrepackageRelinearizationAggregateSlot {
+            assembly_handle,
+            ordered_source_buffer,
+        })
+    })
+}
+
+pub(crate) fn consume_prepackage_relinearization_round_one_sources(
+    mut prepared_slot: PreparedPrepackageRelinearizationAggregateSlot,
+) -> (
+    PreparedPrepackageRelinearizationAggregateSlot,
+    Vec<VerifiedRelinearizationRoundOneSourceMaterial>,
+) {
+    PREPACKAGE_EVALUATOR_SOURCE_CATALOG_REGISTRY.with(|registry| {
+        let mut registry = registry.borrow_mut();
+        let assembly = registry
+            .assemblies
+            .get_mut(&prepared_slot.assembly_handle)
+            .expect("preflight retained the exact prepackage source assembly");
+        assert!(assembly.relinearization_aggregate.is_none());
+        assert_eq!(
+            assembly.relinearization_round_one_sources.len(),
+            usize::from(FOUNDATION_PROFILE.participant_count)
+        );
+        for roster_position in 0..FOUNDATION_PROFILE.participant_count {
+            prepared_slot.ordered_source_buffer.push(
+                assembly
+                    .relinearization_round_one_sources
+                    .remove(&roster_position)
+                    .expect("preflight retained every ordered round-one source"),
+            );
+        }
+        let ordered_sources = std::mem::take(&mut prepared_slot.ordered_source_buffer);
+        (prepared_slot, ordered_sources)
     })
 }
 
@@ -585,6 +727,7 @@ pub(crate) fn commit_prepackage_relinearization_aggregate(
             .assemblies
             .get_mut(&prepared_slot.assembly_handle)
             .expect("preflight retained the exact prepackage source assembly");
+        assert!(assembly.relinearization_round_one_sources.is_empty());
         assert!(
             assembly
                 .relinearization_aggregate
@@ -596,16 +739,34 @@ pub(crate) fn commit_prepackage_relinearization_aggregate(
 
 pub(crate) fn preflight_prepackage_relinearization_source_slot(
     assembly_handle: u32,
-    roster_position: u16,
+    source: &VerifiedRelinearizationSourceMaterialPreflight,
 ) -> Result<PreparedPrepackageRelinearizationSourceSlot, CommonProofRuntimeError> {
     PREPACKAGE_EVALUATOR_SOURCE_CATALOG_REGISTRY.with(|registry| {
         let registry = registry.borrow();
         let assembly = registry.get(assembly_handle)?;
         assembly.require_collecting()?;
+        let roster_position = source.roster_position();
+        let aggregate = assembly
+            .relinearization_aggregate
+            .as_ref()
+            .ok_or(CommonProofRuntimeError::WrongOperationPhase)?;
+        let expected_participant_identity = assembly
+            .expected_ordered_participant_identities
+            .get(usize::from(roster_position))
+            .copied()
+            .ok_or(CommonProofRuntimeError::WrongVerificationBinding)?;
         if usize::from(roster_position) >= usize::from(FOUNDATION_PROFILE.participant_count)
             || assembly
                 .relinearization_sources
                 .contains_key(&roster_position)
+            || source.protocol_version() != assembly.expected_protocol_version
+            || source.suite_identifier() != assembly.expected_suite_identifier
+            || source.ceremony_context_hash() != assembly.expected_ceremony_context_hash
+            || source.action_context_hash() != assembly.expected_action_context_hash
+            || source.roster_hash() != assembly.expected_roster_hash
+            || source.setup_proof_context_hash() != assembly.expected_setup_proof_context_hash
+            || source.participant_identity() != expected_participant_identity
+            || !source.binds_verified_round_one_aggregate(aggregate)
         {
             return Err(CommonProofRuntimeError::WrongVerificationBinding);
         }
@@ -616,21 +777,23 @@ pub(crate) fn preflight_prepackage_relinearization_source_slot(
     })
 }
 
-pub(crate) fn with_prepackage_relinearization_aggregate<Output>(
+pub(crate) fn with_prepackage_relinearization_aggregate<Output, Error>(
     assembly_handle: u32,
-    inspect: impl FnOnce(
-        &VerifiedRelinearizationAggregateMaterial,
-    ) -> Result<Output, CommonProofRuntimeError>,
-) -> Result<Output, CommonProofRuntimeError> {
+    inspect: impl FnOnce(&VerifiedRelinearizationAggregateMaterial) -> Result<Output, Error>,
+) -> Result<Output, Error>
+where
+    Error: From<CommonProofRuntimeError>,
+{
     PREPACKAGE_EVALUATOR_SOURCE_CATALOG_REGISTRY.with(|registry| {
         let registry = registry.borrow();
-        let assembly = registry.get(assembly_handle)?;
-        assembly.require_collecting()?;
+        let assembly = registry.get(assembly_handle).map_err(Error::from)?;
+        assembly.require_collecting().map_err(Error::from)?;
         inspect(
             assembly
                 .relinearization_aggregate
                 .as_ref()
-                .ok_or(CommonProofRuntimeError::WrongOperationPhase)?,
+                .ok_or(CommonProofRuntimeError::WrongOperationPhase)
+                .map_err(Error::from)?,
         )
     })
 }
@@ -729,12 +892,10 @@ pub(crate) fn preflight_prepackage_galois_source_slot(
             || source.ceremony_context_hash() != generated_source.ceremony_context_hash()
             || source.action_context_hash() != generated_source.action_context_hash()
             || source.roster_hash() != generated_source.roster_hash()
-            || source.setup_proof_context_hash()
-                != generated_source.setup_proof_context_hash()
+            || source.setup_proof_context_hash() != generated_source.setup_proof_context_hash()
             || source.participant_identity() != generated_source.participant_identity()
             || source.batch_schedule_position() != generated_source.batch_schedule_position()
-            || source.anchor_commitment_roots()
-                != generated_source.anchor_commitment_roots()
+            || source.anchor_commitment_roots() != generated_source.anchor_commitment_roots()
             || source.application_statement_hash() != expected_statement_hash
             || source.proof_stream_descriptor() != &pending_proof.stream_descriptor
             || source.ordered_auxiliary_roots() != generated_source.ordered_auxiliary_roots()
@@ -751,8 +912,7 @@ pub(crate) fn preflight_prepackage_galois_source_slot(
                             != generated_component.public_polynomial_context_hash()
                         || verified_component.contribution_root()
                             != generated_component.contribution_root()
-                        || verified_component.material_root()
-                            != generated_component.material_root()
+                        || verified_component.material_root() != generated_component.material_root()
                         || verified_component.topology() != generated_component.topology()
                         || verified_component.stream_descriptor()
                             != generated_component.stream_descriptor()
@@ -795,7 +955,9 @@ pub(crate) fn preflight_prepackage_generated_galois_source_slot(
         if assembly
             .generated_galois_sources
             .contains_key(&roster_position)
-            || assembly.pending_galois_proofs.contains_key(&roster_position)
+            || assembly
+                .pending_galois_proofs
+                .contains_key(&roster_position)
             || source.protocol_version() != assembly.expected_protocol_version
             || source.suite_identifier() != assembly.expected_suite_identifier
             || source.ceremony_context_hash() != assembly.expected_ceremony_context_hash
@@ -816,8 +978,7 @@ pub(crate) fn preflight_prepackage_generated_galois_source_slot(
                 .relinearization_sources
                 .get(&roster_position)
                 .is_some_and(|relinearization| {
-                    relinearization.anchor_commitment_roots()
-                        != source.anchor_commitment_roots()
+                    relinearization.anchor_commitment_roots() != source.anchor_commitment_roots()
                 })
         {
             return Err(CommonProofRuntimeError::WrongVerificationBinding);
@@ -927,15 +1088,11 @@ pub(crate) fn preflight_prepackage_generated_evaluator_proof_slot(
                 || runtime_root.position() != *position
                 || auxiliary_root.position() != *position
                 || entry.runtime_component_root() != runtime_root.runtime_component_root()
-                || entry.auxiliary_component_root()
-                    != auxiliary_root.auxiliary_component_root()
+                || entry.auxiliary_component_root() != auxiliary_root.auxiliary_component_root()
                 || entry.source_component_roots().len()
                     != usize::from(FOUNDATION_PROFILE.participant_count)
-                || entry
-                    .source_component_roots()
-                    .iter()
-                    .enumerate()
-                    .any(|(roster_ordinal, root)| {
+                || entry.source_component_roots().iter().enumerate().any(
+                    |(roster_ordinal, root)| {
                         u16::try_from(roster_ordinal)
                             .ok()
                             .and_then(|roster_position| {
@@ -943,7 +1100,8 @@ pub(crate) fn preflight_prepackage_generated_evaluator_proof_slot(
                             })
                             .as_ref()
                             != Some(root)
-                    })
+                    },
+                )
             {
                 return Err(CommonProofRuntimeError::WrongVerificationBinding);
             }
@@ -1435,8 +1593,7 @@ pub(crate) fn cancel_prepackage_evaluator_source_catalog(
     {
         generated_proof_handles.push(generated_proof_handle);
     }
-    let retirement_result =
-        retire_generated_common_proof_capabilities(&generated_proof_handles);
+    let retirement_result = retire_generated_common_proof_capabilities(&generated_proof_handles);
     drop(assembly);
     retirement_result
 }

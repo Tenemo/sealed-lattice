@@ -255,9 +255,7 @@ impl RelationPlanVariant {
             resident_vec_storage_byte_length(&self.ordered_semantic_cells)?,
             resident_vec_storage_byte_length(&self.ordered_radix_convolutions)?,
             resident_vec_storage_byte_length(&self.ordered_integer_lift_batches)?,
-            resident_vec_storage_byte_length(
-                &self.ordered_coefficient_local_identity_batches,
-            )?,
+            resident_vec_storage_byte_length(&self.ordered_coefficient_local_identity_batches)?,
             resident_vec_storage_byte_length(&self.ordered_trees)?,
             resident_vec_storage_byte_length(&self.ordered_constraints)?,
             resident_vec_storage_byte_length(&self.ordered_opening_points)?,
@@ -267,22 +265,16 @@ impl RelationPlanVariant {
         .into_iter()
         .try_fold(0_u64, checked_resident_payload_add)?;
         for source in &self.ordered_verifier_sources {
-            total = checked_resident_payload_add(
-                total,
-                source.resident_owned_payload_byte_length()?,
-            )?;
+            total =
+                checked_resident_payload_add(total, source.resident_owned_payload_byte_length()?)?;
         }
         for sampler in &self.ordered_public_samplers {
-            total = checked_resident_payload_add(
-                total,
-                sampler.resident_owned_payload_byte_length()?,
-            )?;
+            total =
+                checked_resident_payload_add(total, sampler.resident_owned_payload_byte_length()?)?;
         }
         for cell in &self.ordered_semantic_cells {
-            total = checked_resident_payload_add(
-                total,
-                cell.resident_owned_payload_byte_length()?,
-            )?;
+            total =
+                checked_resident_payload_add(total, cell.resident_owned_payload_byte_length()?)?;
         }
         for convolution in &self.ordered_radix_convolutions {
             total = checked_resident_payload_add(
@@ -291,22 +283,16 @@ impl RelationPlanVariant {
             )?;
         }
         for batch in &self.ordered_integer_lift_batches {
-            total = checked_resident_payload_add(
-                total,
-                batch.resident_owned_payload_byte_length()?,
-            )?;
+            total =
+                checked_resident_payload_add(total, batch.resident_owned_payload_byte_length()?)?;
         }
         for batch in &self.ordered_coefficient_local_identity_batches {
-            total = checked_resident_payload_add(
-                total,
-                batch.resident_owned_payload_byte_length()?,
-            )?;
+            total =
+                checked_resident_payload_add(total, batch.resident_owned_payload_byte_length()?)?;
         }
         for tree in &self.ordered_trees {
-            total = checked_resident_payload_add(
-                total,
-                tree.resident_owned_payload_byte_length()?,
-            )?;
+            total =
+                checked_resident_payload_add(total, tree.resident_owned_payload_byte_length()?)?;
         }
         for constraint in &self.ordered_constraints {
             total = checked_resident_payload_add(

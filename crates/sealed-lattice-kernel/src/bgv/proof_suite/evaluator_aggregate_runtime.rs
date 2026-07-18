@@ -9,48 +9,50 @@ use std::{cell::RefCell, rc::Rc};
 
 use crate::{
     bgv::setup::{
+        commit_preflighted_verified_evaluator_key_store,
         commit_prepackage_generated_evaluator_proof,
         preflight_prepackage_generated_evaluator_proof_slot,
-        restore_prepackage_evaluator_statement_source,
+        preflight_verified_evaluator_key_store_slot, restore_prepackage_evaluator_statement_source,
         take_prepackage_evaluator_statement_source,
         with_completed_prepackage_evaluator_source_catalog,
         with_prepackage_evaluator_generation_sources,
     },
     foundation::{
-        AuthenticatedCheckpointContinuationSource, Hash512, PreparedActionProofAttemptSource,
-        ProofApplicationSlot, ProofApplicationSlotCeilings, RefusalReason,
-        STATE_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH, StreamDescriptor,
-        VerifiedStateReservationRuntimeBinding, retain_action_private_randomness_for_exact_family,
-        resolve_prepared_collective_action_proof_attempt_source, verified_state_reservation_binding,
-        FOUNDATION_PROFILE,
+        AuthenticatedCheckpointContinuationSource, FOUNDATION_PROFILE, Hash512,
+        PreparedActionProofAttemptSource, ProofApplicationSlot, ProofApplicationSlotCeilings,
+        RefusalReason, STATE_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH, StreamDescriptor,
+        VerifiedStateReservationRuntimeBinding,
+        resolve_prepared_collective_action_proof_attempt_source,
+        retain_action_private_randomness_for_exact_family, verified_state_reservation_binding,
     },
 };
 
 use super::runtime_ffi::{
     CommonProofGenerationFamilyAdapter, CommonProofGenerationFamilyAdapterDescription,
-    retain_common_proof_generation_family_adapter,
-    retain_common_proof_verification_family_adapter_from_upstream,
-    with_common_proof_selected_suite,
+    cancel_common_proof_verification_family_adapter_reservation,
+    commit_reserved_common_proof_verification_family_adapter_from_upstream,
+    preflight_and_consume_verified_common_proof_with_family_terminal,
+    preflight_reserved_common_proof_verification_family_adapter_from_upstream,
+    reserve_common_proof_verification_family_adapter,
+    retain_common_proof_generation_family_adapter, with_common_proof_selected_suite,
 };
 use super::{
     CommonProofGenerationAuthorization, CommonProofGenerationPreparationError,
-    CommonProofGenerationSources, CommonProofPrivateCoinCoordinateCapacity,
-    CommonProofProverError, CommonProofRelationPlanCapability,
-    CommonProofRelationPlanCapabilityError, CommonProofRuntimeError, CommonProofRuntimeLimits,
-    CommonProofSelectedSuiteCapabilityHandle, ComponentMaterialOwnershipBinding,
-    ComponentPublicPolynomialRuntimeError,
-    DescriptorAuthenticatedKeySwitchComponentPublicPolynomialStream,
-    EvaluatorKeyStorePhysicalRole, PreparedCommonProofGeneration,
-    PrivateRandomnessCommonProofCoinSource, ProofProfileError, RelationPlanError,
-    SelectedApplicationStatementContext, SelectedEvaluatorAggregatePlanError,
+    CommonProofGenerationSources, CommonProofPrivateCoinCoordinateCapacity, CommonProofProverError,
+    CommonProofRelationPlanCapability, CommonProofRelationPlanCapabilityError,
+    CommonProofRuntimeError, CommonProofRuntimeLimits, CommonProofSelectedSuiteCapabilityHandle,
+    ComponentMaterialOwnershipBinding, ComponentPublicPolynomialRuntimeError,
+    DescriptorAuthenticatedKeySwitchComponentPublicPolynomialStream, EvaluatorKeyStorePhysicalRole,
+    PreparedCommonProofGeneration, PrivateRandomnessCommonProofCoinSource, ProofProfileError,
+    RelationPlanError, SelectedEvaluatorAggregatePlanError,
     SelectedEvaluatorAggregateSourcePolynomialProvider, SelectedEvaluatorEntryKind,
     SelectedEvaluatorStoreConstruction, SelectedEvaluatorStoreConstructionOutput,
     SelectedEvaluatorStoreOutputChunk, SelectedEvaluatorStoreSourceReadRequest,
     SelectedProofAccountingError, SetupPublicPolynomialContext, SetupPublicPolynomialRootRole,
     SetupPublicPolynomialTree, VerifiedCommonProofCapabilityHandle,
-    VerifiedCommonProofStatementSource, VerifiedEvaluatorAuxiliaryRoot,
+    VerifiedCommonProofStatementSource, VerifiedEvaluatorAuxiliaryRoot, VerifiedEvaluatorKeyStore,
     VerifiedEvaluatorKeyStoreMaterial, VerifiedEvaluatorKeyStoreMaterialStream,
-    VerifiedEvaluatorRuntimeRoot, VerifiedStatementOwnedTree,
+    VerifiedEvaluatorKeyStorePreflight, VerifiedEvaluatorRuntimeRoot, VerifiedStatementOwnedTree,
     selected_evaluator_aggregate_relation_plan, selected_evaluator_entry_positions,
     selected_proof_runtime_limits, selected_relation_plan_check_context,
     verified_application_statement_hash,
@@ -63,14 +65,16 @@ const STORE_POLL_SOURCE_READ_REQUIRED: u32 = 1;
 const STORE_POLL_OUTPUT_CHUNK_READY: u32 = 2;
 const STORE_POLL_CONSTRUCTION_COMPLETE: u32 = 3;
 
-fn component_runtime_error(error: ComponentPublicPolynomialRuntimeError) -> CommonProofRuntimeError {
+fn component_runtime_error(
+    error: ComponentPublicPolynomialRuntimeError,
+) -> CommonProofRuntimeError {
     match error {
         ComponentPublicPolynomialRuntimeError::Refusal(RefusalReason::ConsumedState) => {
             CommonProofRuntimeError::WrongOperationPhase
         }
-        ComponentPublicPolynomialRuntimeError::Refusal(
-            RefusalReason::OutsideSupportedProfile,
-        ) => CommonProofRuntimeError::AllocationLimitExceeded,
+        ComponentPublicPolynomialRuntimeError::Refusal(RefusalReason::OutsideSupportedProfile) => {
+            CommonProofRuntimeError::AllocationLimitExceeded
+        }
         ComponentPublicPolynomialRuntimeError::Refusal(_)
         | ComponentPublicPolynomialRuntimeError::PublicPolynomial(_) => {
             CommonProofRuntimeError::WrongVerificationBinding
@@ -159,6 +163,8 @@ struct EvaluatorAggregateSession {
     store_material_stream: Option<VerifiedEvaluatorKeyStoreMaterialStream>,
     verified_store_material: Option<VerifiedEvaluatorKeyStoreMaterial>,
     package_statement_source: Option<VerifiedCommonProofStatementSource>,
+    statement_trees: Option<Vec<VerifiedStatementOwnedTree>>,
+    verified_evaluator_key_store: Option<VerifiedEvaluatorKeyStore>,
     generated_proof_committed: bool,
 }
 
@@ -188,11 +194,15 @@ impl EvaluatorAggregateSession {
             store_material_stream: None,
             verified_store_material: None,
             package_statement_source: None,
+            statement_trees: None,
+            verified_evaluator_key_store: None,
             generated_proof_committed: false,
         })
     }
 
-    fn require_construction(&self) -> Result<&SelectedEvaluatorStoreConstruction, CommonProofRuntimeError> {
+    fn require_construction(
+        &self,
+    ) -> Result<&SelectedEvaluatorStoreConstruction, CommonProofRuntimeError> {
         self.construction
             .as_ref()
             .ok_or(CommonProofRuntimeError::WrongOperationPhase)
@@ -210,7 +220,11 @@ impl EvaluatorAggregateSession {
         if self.pending_output_chunk.is_some() {
             return Ok(STORE_POLL_OUTPUT_CHUNK_READY);
         }
-        if self.require_construction()?.next_source_read_request().is_some() {
+        if self
+            .require_construction()?
+            .next_source_read_request()
+            .is_some()
+        {
             return Ok(STORE_POLL_SOURCE_READ_REQUIRED);
         }
         if let Some(output_chunk) = self
@@ -221,7 +235,11 @@ impl EvaluatorAggregateSession {
             self.pending_output_chunk = Some(output_chunk);
             return Ok(STORE_POLL_OUTPUT_CHUNK_READY);
         }
-        if self.require_construction()?.next_source_read_request().is_none() {
+        if self
+            .require_construction()?
+            .next_source_read_request()
+            .is_none()
+        {
             return Ok(STORE_POLL_CONSTRUCTION_COMPLETE);
         }
         Err(CommonProofRuntimeError::WrongOperationPhase)
@@ -278,7 +296,10 @@ impl EvaluatorAggregateSession {
             .ok_or(CommonProofRuntimeError::WrongOperationPhase)
     }
 
-    fn acknowledge_output_chunk(&mut self, chunk_index: usize) -> Result<(), CommonProofRuntimeError> {
+    fn acknowledge_output_chunk(
+        &mut self,
+        chunk_index: usize,
+    ) -> Result<(), CommonProofRuntimeError> {
         if self
             .pending_output_chunk
             .as_ref()
@@ -342,20 +363,20 @@ impl EvaluatorAggregateSession {
             .get(physical_component_ordinal)
             .cloned()
             .ok_or(CommonProofRuntimeError::WrongVerificationBinding)?;
-        let topology = with_common_proof_selected_suite(selected_suite_handle, |selected_suite| {
-            let catalog_level = match position.key_kind() {
-                SelectedEvaluatorEntryKind::Relinearization { catalog_level }
-                | SelectedEvaluatorEntryKind::Galois { catalog_level, .. } => catalog_level,
-            };
-            super::KeySwitchComponentMaterialTopology::from_selected_suite_at_level(
-                selected_suite,
-                catalog_level,
-            )
-            .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)
-        })??;
+        let topology =
+            with_common_proof_selected_suite(selected_suite_handle, |selected_suite| {
+                let catalog_level = match position.key_kind() {
+                    SelectedEvaluatorEntryKind::Relinearization { catalog_level }
+                    | SelectedEvaluatorEntryKind::Galois { catalog_level, .. } => catalog_level,
+                };
+                super::KeySwitchComponentMaterialTopology::from_selected_suite_at_level(
+                    selected_suite,
+                    catalog_level,
+                )
+                .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)
+            })??;
         let stream = DescriptorAuthenticatedKeySwitchComponentPublicPolynomialStream::begin(
-            topology,
-            descriptor,
+            topology, descriptor,
         )
         .map_err(component_runtime_error)?;
         self.active_runtime_tree_stream = Some(ActiveRuntimeTreeStream {
@@ -449,21 +470,20 @@ impl EvaluatorAggregateSession {
         {
             return Err(CommonProofRuntimeError::WrongOperationPhase);
         }
-        let (canonical_statement, auxiliary_roots) =
-            with_prepackage_evaluator_generation_sources(
-                self.prepackage_catalog_handle,
-                |source_catalog, _, auxiliary_roots| {
-                    let statement = self
-                        .output()?
-                        .canonical_application_statement(
-                            source_catalog,
-                            &self.ordered_runtime_roots,
-                            auxiliary_roots,
-                        )
-                        .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?;
-                    Ok((statement, auxiliary_roots.to_vec()))
-                },
-            )?;
+        let (canonical_statement, auxiliary_roots) = with_prepackage_evaluator_generation_sources(
+            self.prepackage_catalog_handle,
+            |source_catalog, _, auxiliary_roots| {
+                let statement = self
+                    .output()?
+                    .canonical_application_statement(
+                        source_catalog,
+                        &self.ordered_runtime_roots,
+                        auxiliary_roots,
+                    )
+                    .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?;
+                Ok((statement, auxiliary_roots.to_vec()))
+            },
+        )?;
         let application_statement_hash = verified_application_statement_hash(
             FOUNDATION_PROFILE.protocol_version,
             with_prepackage_evaluator_generation_sources(
@@ -476,21 +496,21 @@ impl EvaluatorAggregateSession {
         let ownership_binding = with_prepackage_evaluator_generation_sources(
             self.prepackage_catalog_handle,
             |source_catalog, _, _| {
-                Ok(ComponentMaterialOwnershipBinding::from_verified_application(
-                    source_catalog.suite_identifier(),
-                    source_catalog.action_context_hash(),
-                    application_statement_hash,
-                ))
+                Ok(
+                    ComponentMaterialOwnershipBinding::from_verified_application(
+                        source_catalog.suite_identifier(),
+                        source_catalog.action_context_hash(),
+                        application_statement_hash,
+                    ),
+                )
             },
         )?;
-        let material_stream = with_common_proof_selected_suite(
-            selected_suite_handle,
-            |selected_suite| {
+        let material_stream =
+            with_common_proof_selected_suite(selected_suite_handle, |selected_suite| {
                 self.output()?
                     .begin_material_verification(selected_suite, ownership_binding)
                     .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)
-            },
-        )??;
+            })??;
         self.ordered_auxiliary_roots = auxiliary_roots;
         self.canonical_application_statement_bytes = Some(canonical_statement);
         self.store_material_stream = Some(material_stream);
@@ -533,7 +553,9 @@ impl EvaluatorAggregateSession {
             .ok_or(CommonProofRuntimeError::WrongOperationPhase)
     }
 
-    fn verified_store_material(&self) -> Result<&VerifiedEvaluatorKeyStoreMaterial, CommonProofRuntimeError> {
+    fn verified_store_material(
+        &self,
+    ) -> Result<&VerifiedEvaluatorKeyStoreMaterial, CommonProofRuntimeError> {
         self.verified_store_material
             .as_ref()
             .ok_or(CommonProofRuntimeError::WrongOperationPhase)
@@ -555,7 +577,10 @@ impl Default for SingleEvaluatorAggregateSessionRegistry {
 }
 
 impl SingleEvaluatorAggregateSessionRegistry {
-    fn retain(&mut self, session: EvaluatorAggregateSession) -> Result<u32, CommonProofRuntimeError> {
+    fn retain(
+        &mut self,
+        session: EvaluatorAggregateSession,
+    ) -> Result<u32, CommonProofRuntimeError> {
         if self.active.is_some() || self.next_handle == 0 {
             return Err(CommonProofRuntimeError::AllocationLimitExceeded);
         }
@@ -628,8 +653,8 @@ fn selected_evaluator_proof_runtime_plan(
         EvaluatorAggregateRuntimeError::Relation(RelationPlanError::InvalidDomain),
     )?;
     let compiled_relation_plan = selected_evaluator_aggregate_relation_plan()?;
-    let variant = compiled_relation_plan
-        .select_variant(None, Some(FOUNDATION_PROFILE.option_count))?;
+    let variant =
+        compiled_relation_plan.select_variant(None, Some(FOUNDATION_PROFILE.option_count))?;
     let limits = selected_proof_runtime_limits(
         schema_identifier,
         canonical_application_statement_bytes,
@@ -742,10 +767,9 @@ fn prepare_evaluator_common_generation(
     let coordinate_capacity =
         CommonProofPrivateCoinCoordinateCapacity::from_relation_plan_variant(variant)
             .map_err(|_| EvaluatorAggregateRuntimeError::InvalidInput)?;
-    let action_private_randomness = retain_action_private_randomness_for_exact_family(
-        action_randomness_handle,
-    )
-    .map_err(EvaluatorAggregateRuntimeError::ActionRandomnessRuntime)?;
+    let action_private_randomness =
+        retain_action_private_randomness_for_exact_family(action_randomness_handle)
+            .map_err(EvaluatorAggregateRuntimeError::ActionRandomnessRuntime)?;
     let private_coins = PrivateRandomnessCommonProofCoinSource::new(
         Rc::clone(&action_private_randomness),
         prepared_attempt.application_statement_schema_identifier(),
@@ -799,8 +823,7 @@ fn prepare_evaluator_generation(
     generation_mode: EvaluatorGenerationMode,
 ) -> Result<u32, EvaluatorAggregateRuntimeError> {
     if checkpoint_lineage_identifier == [0_u8; ATTEMPT_IDENTIFIER_BYTE_LENGTH]
-        || state_verifier_session_capability.len()
-            != STATE_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH
+        || state_verifier_session_capability.len() != STATE_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH
     {
         return Err(EvaluatorAggregateRuntimeError::InvalidInput);
     }
@@ -820,9 +843,9 @@ fn prepare_evaluator_generation(
     )
     .map_err(EvaluatorAggregateRuntimeError::StateRuntime)?;
     let canonical_statement = EVALUATOR_AGGREGATE_SESSION_REGISTRY.with(|registry| {
-        registry
-            .borrow()
-            .with(session_handle, |session| Ok(session.canonical_statement()?.to_vec()))
+        registry.borrow().with(session_handle, |session| {
+            Ok(session.canonical_statement()?.to_vec())
+        })
     })?;
     let runtime_plan = selected_evaluator_proof_runtime_plan(&canonical_statement)?;
     let checkpoint_schedule_digest = runtime_plan
@@ -841,14 +864,14 @@ fn prepare_evaluator_generation(
         fresh_continuation,
     )?;
     let adapter = match generation_mode {
-        EvaluatorGenerationMode::Fresh => CommonProofGenerationFamilyAdapter::fresh(
-            prepare_evaluator_common_generation(
+        EvaluatorGenerationMode::Fresh => {
+            CommonProofGenerationFamilyAdapter::fresh(prepare_evaluator_common_generation(
                 session_handle,
                 action_randomness_handle,
                 fresh_prepared_attempt,
                 runtime_plan,
-            )?,
-        ),
+            )?)
+        }
         EvaluatorGenerationMode::Resume => {
             let fresh_preparation = prepare_evaluator_common_generation(
                 session_handle,
@@ -867,14 +890,13 @@ fn prepare_evaluator_generation(
                 checkpoint_lineage_identifier,
                 checkpoint_schedule_digest,
                 Box::new(move |continuation| {
-                    let canonical_statement = EVALUATOR_AGGREGATE_SESSION_REGISTRY.with(
-                        |registry| {
+                    let canonical_statement = EVALUATOR_AGGREGATE_SESSION_REGISTRY
+                        .with(|registry| {
                             registry.borrow().with(session_handle, |session| {
                                 Ok(session.canonical_statement()?.to_vec())
                             })
-                        },
-                    )
-                    .map_err(CommonProofGenerationPreparationError::Runtime)?;
+                        })
+                        .map_err(CommonProofGenerationPreparationError::Runtime)?;
                     let runtime_plan = selected_evaluator_proof_runtime_plan(&canonical_statement)
                         .map_err(resumed_generation_error)?;
                     let attempt = resolve_collective_prepared_attempt(
@@ -928,9 +950,7 @@ fn commit_generated_evaluator_proof(
     })
 }
 
-fn take_package_statement_source(
-    session_handle: u32,
-) -> Result<(), CommonProofRuntimeError> {
+fn take_package_statement_source(session_handle: u32) -> Result<(), CommonProofRuntimeError> {
     let prepackage_catalog_handle = EVALUATOR_AGGREGATE_SESSION_REGISTRY.with(|registry| {
         registry.borrow().with(session_handle, |session| {
             if !session.generated_proof_committed || session.package_statement_source.is_some() {
@@ -939,25 +959,203 @@ fn take_package_statement_source(
             Ok(session.prepackage_catalog_handle)
         })
     })?;
-    let source = take_prepackage_evaluator_statement_source(prepackage_catalog_handle)?;
+    let mut source = Some(take_prepackage_evaluator_statement_source(
+        prepackage_catalog_handle,
+    )?);
     let retain_result = EVALUATOR_AGGREGATE_SESSION_REGISTRY.with(|registry| {
         registry.borrow_mut().with_mut(session_handle, |session| {
+            let retained_source = source
+                .as_ref()
+                .ok_or(CommonProofRuntimeError::WrongOperationPhase)?;
             if session.package_statement_source.is_some()
-                || source.canonical_application_statement_bytes() != session.canonical_statement()?
+                || retained_source.canonical_application_statement_bytes()
+                    != session.canonical_statement()?
             {
                 return Err(CommonProofRuntimeError::WrongVerificationBinding);
             }
-            session.package_statement_source = Some(source);
+            session.package_statement_source = source.take();
             Ok(())
         })
     });
     if let Err(error) = retain_result {
         restore_prepackage_evaluator_statement_source(
             prepackage_catalog_handle,
-            source,
+            source.expect("failed evaluator statement retention preserves the package source"),
         )?;
         return Err(error);
     }
+    Ok(())
+}
+
+fn prepare_evaluator_verification_adapter(
+    selected_suite_handle: u32,
+    session_handle: u32,
+) -> Result<u32, CommonProofRuntimeError> {
+    let adapter_reservation_handle = reserve_common_proof_verification_family_adapter()?;
+    let borrowed_preflight = EVALUATOR_AGGREGATE_SESSION_REGISTRY.with(|registry| {
+        registry.borrow().with(session_handle, |session| {
+            if !session.generated_proof_committed
+                || session.statement_trees.is_some()
+                || session.verified_evaluator_key_store.is_some()
+            {
+                return Err(CommonProofRuntimeError::WrongOperationPhase);
+            }
+            let statement_source = session
+                .package_statement_source
+                .as_ref()
+                .ok_or(CommonProofRuntimeError::WrongOperationPhase)?;
+            with_completed_prepackage_evaluator_source_catalog(
+                session.prepackage_catalog_handle,
+                |source_catalog, _| {
+                    let statement_trees =
+                        VerifiedStatementOwnedTree::from_verified_evaluator_aggregate_statement_sources(
+                            statement_source,
+                            source_catalog,
+                            &session.ordered_runtime_component_trees,
+                        )
+                        .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?;
+                    preflight_reserved_common_proof_verification_family_adapter_from_upstream(
+                        adapter_reservation_handle,
+                        |upstream_inputs| {
+                            let selected_suite_handle =
+                                CommonProofSelectedSuiteCapabilityHandle::from_identifier(
+                                    selected_suite_handle,
+                                );
+                            upstream_inputs
+                                .preflight_statement_tree_and_auxiliary_root_family_verification_without_evaluator(
+                                    &selected_suite_handle,
+                                    statement_source,
+                                    &statement_trees,
+                                    &session.ordered_auxiliary_roots,
+                                )
+                        },
+                    )?;
+                    Ok(statement_trees)
+                },
+            )
+        })
+    });
+    let statement_trees = match borrowed_preflight {
+        Ok(statement_trees) => statement_trees,
+        Err(error) => {
+            cancel_common_proof_verification_family_adapter_reservation(adapter_reservation_handle)
+                .expect("failed evaluator preflight retains its common-proof reservation");
+            return Err(error);
+        }
+    };
+    let adapter_statement_trees = statement_trees.clone();
+    let (statement_source, auxiliary_roots) = EVALUATOR_AGGREGATE_SESSION_REGISTRY
+        .with(|registry| {
+            registry.borrow_mut().with_mut(session_handle, |session| {
+                let statement_source = session
+                    .package_statement_source
+                    .take()
+                    .expect("preflighted evaluator statement source remains live");
+                session.statement_trees = Some(statement_trees);
+                Ok((statement_source, session.ordered_auxiliary_roots.clone()))
+            })
+        })
+        .expect("preflighted evaluator session remains live during commit");
+    Ok(
+        commit_reserved_common_proof_verification_family_adapter_from_upstream(
+            adapter_reservation_handle,
+            move |upstream_inputs| {
+                let selected_suite_handle =
+                    CommonProofSelectedSuiteCapabilityHandle::from_identifier(
+                        selected_suite_handle,
+                    );
+                upstream_inputs
+                    .prepare_preflighted_statement_tree_and_auxiliary_root_family_verification_without_evaluator(
+                        &selected_suite_handle,
+                        statement_source,
+                        adapter_statement_trees,
+                        auxiliary_roots,
+                    )
+            },
+        ),
+    )
+}
+
+fn finish_evaluator_verification(
+    session_handle: u32,
+    verified_common_proof_handle: u32,
+) -> Result<(), CommonProofRuntimeError> {
+    preflight_and_consume_verified_common_proof_with_family_terminal(
+        &VerifiedCommonProofCapabilityHandle::from_identifier(verified_common_proof_handle),
+        |borrowed_proof| {
+            EVALUATOR_AGGREGATE_SESSION_REGISTRY.with(|registry| {
+                registry.borrow().with(session_handle, |session| {
+                    let statement_trees = session
+                        .statement_trees
+                        .as_deref()
+                        .ok_or(CommonProofRuntimeError::WrongOperationPhase)?;
+                    with_completed_prepackage_evaluator_source_catalog(
+                        session.prepackage_catalog_handle,
+                        |source_catalog, _| {
+                            VerifiedEvaluatorKeyStorePreflight::from_borrowed_common_proof(
+                                borrowed_proof,
+                                session.canonical_statement()?,
+                                source_catalog,
+                                session.verified_store_material()?,
+                                statement_trees,
+                                &session.ordered_runtime_component_trees,
+                                &session.ordered_auxiliary_roots,
+                            )
+                            .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)
+                        },
+                    )
+                })
+            })
+        },
+        |verified_proof, terminal_preflight| {
+            EVALUATOR_AGGREGATE_SESSION_REGISTRY
+                .with(|registry| {
+                    registry.borrow_mut().with_mut(session_handle, |session| {
+                        let canonical_statement = session.canonical_statement()?.to_vec();
+                        let store_material = session
+                            .verified_store_material
+                            .take()
+                            .expect("evaluator terminal preflight retains its store material");
+                        let runtime_component_trees =
+                            core::mem::take(&mut session.ordered_runtime_component_trees);
+                        let auxiliary_roots = core::mem::take(&mut session.ordered_auxiliary_roots);
+                        session.statement_trees = None;
+                        let verified_store = terminal_preflight.complete(
+                            verified_proof,
+                            &canonical_statement,
+                            store_material,
+                            runtime_component_trees,
+                            auxiliary_roots,
+                        );
+                        assert!(
+                            session
+                                .verified_evaluator_key_store
+                                .replace(verified_store)
+                                .is_none(),
+                        );
+                        Ok(())
+                    })
+                })
+                .expect("evaluator terminal commit uses the exact preflighted session");
+        },
+    )
+}
+
+fn commit_verified_evaluator_store(
+    session_handle: u32,
+    accepted_setup_assembly_handle: u32,
+) -> Result<(), CommonProofRuntimeError> {
+    let prepared_slot =
+        preflight_verified_evaluator_key_store_slot(accepted_setup_assembly_handle)?;
+    let store = EVALUATOR_AGGREGATE_SESSION_REGISTRY.with(|registry| {
+        registry.borrow_mut().with_mut(session_handle, |session| {
+            session
+                .verified_evaluator_key_store
+                .take()
+                .ok_or(CommonProofRuntimeError::WrongOperationPhase)
+        })
+    })?;
+    commit_preflighted_verified_evaluator_key_store(prepared_slot, store);
     Ok(())
 }
 
@@ -1001,17 +1199,39 @@ fn refusal_status(reason: RefusalReason) -> u32 {
 
 fn runtime_error_status(error: EvaluatorAggregateRuntimeError) -> u32 {
     match error {
-        EvaluatorAggregateRuntimeError::Runtime(error) => super::runtime_ffi::runtime_error_status(error),
+        EvaluatorAggregateRuntimeError::Runtime(error) => {
+            super::runtime_ffi::runtime_error_status(error)
+        }
         EvaluatorAggregateRuntimeError::Refusal(reason) => refusal_status(reason),
         EvaluatorAggregateRuntimeError::ActionRandomnessRuntime(status)
         | EvaluatorAggregateRuntimeError::StateRuntime(status) => status,
-        EvaluatorAggregateRuntimeError::InvalidInput => refusal_status(RefusalReason::WrongTypeOrLength),
-        EvaluatorAggregateRuntimeError::Accounting(error) => { let _ = error; refusal_status(RefusalReason::OutsideSupportedProfile) }
-        EvaluatorAggregateRuntimeError::Profile(error) => { let _ = error; refusal_status(RefusalReason::OutsideSupportedProfile) }
-        EvaluatorAggregateRuntimeError::Relation(error) => { let _ = error; refusal_status(RefusalReason::OutsideSupportedProfile) }
-        EvaluatorAggregateRuntimeError::AggregatePlan(error) => { let _ = error; refusal_status(RefusalReason::OutsideSupportedProfile) }
-        EvaluatorAggregateRuntimeError::RelationCapability(error) => { let _ = error; refusal_status(RefusalReason::OutsideSupportedProfile) }
-        EvaluatorAggregateRuntimeError::Prover(error) => { let _ = error; refusal_status(RefusalReason::InvalidArithmeticRelation) }
+        EvaluatorAggregateRuntimeError::InvalidInput => {
+            refusal_status(RefusalReason::WrongTypeOrLength)
+        }
+        EvaluatorAggregateRuntimeError::Accounting(error) => {
+            let _ = error;
+            refusal_status(RefusalReason::OutsideSupportedProfile)
+        }
+        EvaluatorAggregateRuntimeError::Profile(error) => {
+            let _ = error;
+            refusal_status(RefusalReason::OutsideSupportedProfile)
+        }
+        EvaluatorAggregateRuntimeError::Relation(error) => {
+            let _ = error;
+            refusal_status(RefusalReason::OutsideSupportedProfile)
+        }
+        EvaluatorAggregateRuntimeError::AggregatePlan(error) => {
+            let _ = error;
+            refusal_status(RefusalReason::OutsideSupportedProfile)
+        }
+        EvaluatorAggregateRuntimeError::RelationCapability(error) => {
+            let _ = error;
+            refusal_status(RefusalReason::OutsideSupportedProfile)
+        }
+        EvaluatorAggregateRuntimeError::Prover(error) => {
+            let _ = error;
+            refusal_status(RefusalReason::InvalidArithmeticRelation)
+        }
     }
 }
 
@@ -1042,37 +1262,48 @@ unsafe fn write_status(pointer: *mut u32, status: u32) {
 }
 
 #[unsafe(no_mangle)]
-pub const extern "C" fn sealed_lattice_evaluator_aggregate_store_source_request_byte_length() -> u32 {
+pub const extern "C" fn sealed_lattice_evaluator_aggregate_store_source_request_byte_length() -> u32
+{
     STORE_SOURCE_READ_REQUEST_BYTE_LENGTH as u32
 }
 
+/// # Safety
+///
+/// A non-null `status_pointer` must point to one writable `u32` in WASM memory.
 #[unsafe(no_mangle)]
-pub extern "C" fn sealed_lattice_evaluator_aggregate_begin_store_construction(
+pub unsafe extern "C" fn sealed_lattice_evaluator_aggregate_begin_store_construction(
     prepackage_catalog_handle: u32,
     status_pointer: *mut u32,
 ) -> u32 {
-    let result = EvaluatorAggregateSession::begin(prepackage_catalog_handle)
-        .and_then(|session| {
-            EVALUATOR_AGGREGATE_SESSION_REGISTRY
-                .with(|registry| registry.borrow_mut().retain(session))
-        });
+    let result = EvaluatorAggregateSession::begin(prepackage_catalog_handle).and_then(|session| {
+        EVALUATOR_AGGREGATE_SESSION_REGISTRY.with(|registry| registry.borrow_mut().retain(session))
+    });
     match result {
         Ok(handle) => {
             unsafe { write_status(status_pointer, 0) };
             handle
         }
         Err(error) => {
-            unsafe { write_status(status_pointer, super::runtime_ffi::runtime_error_status(error)) };
+            unsafe {
+                write_status(
+                    status_pointer,
+                    super::runtime_ffi::runtime_error_status(error),
+                )
+            };
             0
         }
     }
 }
 
+/// # Safety
+///
+/// Every non-null output pointer must point to one writable `u32` in WASM memory.
 #[unsafe(no_mangle)]
-pub extern "C" fn sealed_lattice_evaluator_aggregate_store_construction_poll(
+pub unsafe extern "C" fn sealed_lattice_evaluator_aggregate_store_construction_poll(
     session_handle: u32,
     first_value_pointer: *mut u32,
     second_value_pointer: *mut u32,
+    status_pointer: *mut u32,
 ) -> u32 {
     let result = EVALUATOR_AGGREGATE_SESSION_REGISTRY.with(|registry| {
         registry.borrow_mut().with_mut(session_handle, |session| {
@@ -1080,8 +1311,10 @@ pub extern "C" fn sealed_lattice_evaluator_aggregate_store_construction_poll(
             let (first, second) = if poll == STORE_POLL_OUTPUT_CHUNK_READY {
                 let (chunk_index, byte_length) = session.pending_output_description()?;
                 (
-                    u32::try_from(chunk_index).map_err(|_| CommonProofRuntimeError::AllocationLimitExceeded)?,
-                    u32::try_from(byte_length).map_err(|_| CommonProofRuntimeError::AllocationLimitExceeded)?,
+                    u32::try_from(chunk_index)
+                        .map_err(|_| CommonProofRuntimeError::AllocationLimitExceeded)?,
+                    u32::try_from(byte_length)
+                        .map_err(|_| CommonProofRuntimeError::AllocationLimitExceeded)?,
                 )
             } else {
                 (0, 0)
@@ -1091,14 +1324,30 @@ pub extern "C" fn sealed_lattice_evaluator_aggregate_store_construction_poll(
     });
     match result {
         Ok((poll, first, second)) => {
-            if !first_value_pointer.is_null() { unsafe { first_value_pointer.write(first) }; }
-            if !second_value_pointer.is_null() { unsafe { second_value_pointer.write(second) }; }
+            if !first_value_pointer.is_null() {
+                unsafe { first_value_pointer.write(first) };
+            }
+            if !second_value_pointer.is_null() {
+                unsafe { second_value_pointer.write(second) };
+            }
+            unsafe { write_status(status_pointer, 0) };
             poll
         }
-        Err(error) => super::runtime_ffi::runtime_error_status(error),
+        Err(error) => {
+            unsafe {
+                write_status(
+                    status_pointer,
+                    super::runtime_ffi::runtime_error_status(error),
+                )
+            };
+            0
+        }
     }
 }
 
+/// # Safety
+///
+/// `output_pointer` must point to its declared non-empty writable range.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn sealed_lattice_evaluator_aggregate_copy_store_source_request(
     session_handle: u32,
@@ -1108,13 +1357,18 @@ pub unsafe extern "C" fn sealed_lattice_evaluator_aggregate_copy_store_source_re
     let result: Result<(), EvaluatorAggregateRuntimeError> = (|| {
         let output = unsafe { exact_output(output_pointer, output_byte_length) }?;
         EVALUATOR_AGGREGATE_SESSION_REGISTRY.with(|registry| {
-            registry.borrow().with(session_handle, |session| session.copy_source_request(output))
+            registry.borrow().with(session_handle, |session| {
+                session.copy_source_request(output)
+            })
         })?;
         Ok(())
     })();
     result.map_or_else(runtime_error_status, |()| 0)
 }
 
+/// # Safety
+///
+/// Each input pointer must point to its declared non-empty readable range.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn sealed_lattice_evaluator_aggregate_supply_store_source_range(
     session_handle: u32,
@@ -1136,6 +1390,9 @@ pub unsafe extern "C" fn sealed_lattice_evaluator_aggregate_supply_store_source_
     result.map_or_else(runtime_error_status, |()| 0)
 }
 
+/// # Safety
+///
+/// `output_pointer` must point to its declared non-empty writable range.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn sealed_lattice_evaluator_aggregate_copy_store_output_chunk(
     session_handle: u32,
@@ -1184,11 +1441,17 @@ pub extern "C" fn sealed_lattice_evaluator_aggregate_finish_store_construction(
     EVALUATOR_AGGREGATE_SESSION_REGISTRY.with(|registry| {
         registry
             .borrow_mut()
-            .with_mut(session_handle, EvaluatorAggregateSession::finish_construction)
+            .with_mut(
+                session_handle,
+                EvaluatorAggregateSession::finish_construction,
+            )
             .map_or_else(super::runtime_ffi::runtime_error_status, |()| 0)
     })
 }
 
+/// # Safety
+///
+/// `output_pointer` must point to its declared non-empty writable range.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn sealed_lattice_evaluator_aggregate_describe_store(
     session_handle: u32,
@@ -1233,6 +1496,9 @@ pub extern "C" fn sealed_lattice_evaluator_aggregate_begin_runtime_component_tre
     })
 }
 
+/// # Safety
+///
+/// `chunk_pointer` must point to its declared non-empty readable range.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn sealed_lattice_evaluator_aggregate_absorb_runtime_component_chunk(
     session_handle: u32,
@@ -1292,6 +1558,66 @@ pub extern "C" fn sealed_lattice_evaluator_aggregate_finalize_statement(
     })
 }
 
+/// # Safety
+///
+/// A non-null `status_pointer` must point to one writable `u32` in WASM memory.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_evaluator_aggregate_application_statement_byte_length(
+    session_handle: u32,
+    status_pointer: *mut u32,
+) -> u64 {
+    let result = EVALUATOR_AGGREGATE_SESSION_REGISTRY.with(|registry| {
+        registry.borrow().with(session_handle, |session| {
+            u64::try_from(session.canonical_statement()?.len())
+                .map_err(|_| CommonProofRuntimeError::AllocationLimitExceeded)
+        })
+    });
+    match result {
+        Ok(byte_length) => {
+            unsafe { write_status(status_pointer, 0) };
+            byte_length
+        }
+        Err(error) => {
+            unsafe {
+                write_status(
+                    status_pointer,
+                    super::runtime_ffi::runtime_error_status(error),
+                )
+            };
+            0
+        }
+    }
+}
+
+/// # Safety
+///
+/// `output_pointer` must point to its declared non-empty writable range.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_evaluator_aggregate_copy_application_statement(
+    session_handle: u32,
+    output_pointer: *mut u8,
+    output_byte_length: usize,
+) -> u32 {
+    let result: Result<(), EvaluatorAggregateRuntimeError> = (|| {
+        let output = unsafe { exact_output(output_pointer, output_byte_length) }?;
+        EVALUATOR_AGGREGATE_SESSION_REGISTRY.with(|registry| {
+            registry.borrow().with(session_handle, |session| {
+                let statement = session.canonical_statement()?;
+                if output.len() != statement.len() {
+                    return Err(CommonProofRuntimeError::WrongVerificationBinding);
+                }
+                output.copy_from_slice(statement);
+                Ok(())
+            })
+        })?;
+        Ok(())
+    })();
+    result.map_or_else(runtime_error_status, |()| 0)
+}
+
+/// # Safety
+///
+/// `chunk_pointer` must point to its declared non-empty readable range.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn sealed_lattice_evaluator_aggregate_absorb_store_material_chunk(
     session_handle: u32,
@@ -1322,7 +1648,10 @@ pub extern "C" fn sealed_lattice_evaluator_aggregate_finish_store_material(
     EVALUATOR_AGGREGATE_SESSION_REGISTRY.with(|registry| {
         registry
             .borrow_mut()
-            .with_mut(session_handle, EvaluatorAggregateSession::finish_store_material)
+            .with_mut(
+                session_handle,
+                EvaluatorAggregateSession::finish_store_material,
+            )
             .map_or_else(super::runtime_ffi::runtime_error_status, |()| 0)
     })
 }
@@ -1378,6 +1707,12 @@ unsafe fn prepare_generation_from_ffi(
     }
 }
 
+/// # Safety
+///
+/// The capability and checkpoint pointers must point to their declared
+/// non-empty readable ranges. A non-null `status_pointer` must point to one
+/// writable `u32` in WASM memory.
+#[allow(clippy::too_many_arguments)]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn sealed_lattice_evaluator_aggregate_prepare_generation(
     session_handle: u32,
@@ -1406,6 +1741,12 @@ pub unsafe extern "C" fn sealed_lattice_evaluator_aggregate_prepare_generation(
     }
 }
 
+/// # Safety
+///
+/// The capability and checkpoint pointers must point to their declared
+/// non-empty readable ranges. A non-null `status_pointer` must point to one
+/// writable `u32` in WASM memory.
+#[allow(clippy::too_many_arguments)]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn sealed_lattice_evaluator_aggregate_prepare_resumed_generation(
     session_handle: u32,
@@ -1451,13 +1792,54 @@ pub extern "C" fn sealed_lattice_evaluator_aggregate_take_package_statement_sour
         .map_or_else(super::runtime_ffi::runtime_error_status, |()| 0)
 }
 
+/// # Safety
+///
+/// A non-null `status_pointer` must point to one writable `u32` in WASM memory.
 #[unsafe(no_mangle)]
-pub extern "C" fn sealed_lattice_evaluator_aggregate_discard_session(
+pub unsafe extern "C" fn sealed_lattice_evaluator_aggregate_prepare_verification(
+    selected_suite_handle: u32,
     session_handle: u32,
+    status_pointer: *mut u32,
 ) -> u32 {
-    let result = EVALUATOR_AGGREGATE_SESSION_REGISTRY.with(|registry| {
-        registry.borrow_mut().take(session_handle)
-    });
+    match prepare_evaluator_verification_adapter(selected_suite_handle, session_handle) {
+        Ok(adapter_handle) => {
+            unsafe { write_status(status_pointer, 0) };
+            adapter_handle
+        }
+        Err(error) => {
+            unsafe {
+                write_status(
+                    status_pointer,
+                    super::runtime_ffi::runtime_error_status(error),
+                )
+            };
+            0
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn sealed_lattice_evaluator_aggregate_finish_verification(
+    session_handle: u32,
+    verified_common_proof_handle: u32,
+) -> u32 {
+    finish_evaluator_verification(session_handle, verified_common_proof_handle)
+        .map_or_else(super::runtime_ffi::runtime_error_status, |()| 0)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn sealed_lattice_evaluator_aggregate_commit_verified_store(
+    session_handle: u32,
+    accepted_setup_assembly_handle: u32,
+) -> u32 {
+    commit_verified_evaluator_store(session_handle, accepted_setup_assembly_handle)
+        .map_or_else(super::runtime_ffi::runtime_error_status, |()| 0)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn sealed_lattice_evaluator_aggregate_discard_session(session_handle: u32) -> u32 {
+    let result = EVALUATOR_AGGREGATE_SESSION_REGISTRY
+        .with(|registry| registry.borrow_mut().take(session_handle));
     match result {
         Ok(mut session) => {
             if let Some(statement_source) = session.package_statement_source.take() {

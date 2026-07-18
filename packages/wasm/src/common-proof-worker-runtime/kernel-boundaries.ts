@@ -114,6 +114,7 @@ export const maximumCommonProofOutputChunkCount = Math.ceil(
 
 export type ClosedWorkerCommonProofGenerationFamilyAdapterDescription =
     Readonly<{
+        checkpointLineageIdentifier: Uint8Array<ArrayBuffer>;
         commonProofGenerationAuthorizationHash: Uint8Array<ArrayBuffer>;
         commonProofRuntimeBindingHash: Uint8Array<ArrayBuffer>;
         proofAttemptLineageIdentifier: Uint8Array<ArrayBuffer>;
@@ -279,7 +280,8 @@ export class CommonProofFamilyAdapterKernelBoundary {
         return this.#context.runExclusive(
             'common-proof generation family-adapter description',
             () => {
-                const outputByteLength = hashByteLength + hashByteLength + 32;
+                const outputByteLength =
+                    hashByteLength + hashByteLength + 32 + 32;
                 const outputPointer =
                     this.#memoryBoundary.allocate(outputByteLength);
                 const statusPointer =
@@ -293,6 +295,7 @@ export class CommonProofFamilyAdapterKernelBoundary {
                         outputPointer,
                         outputPointer + hashByteLength,
                         outputPointer + 2 * hashByteLength,
+                        outputPointer + 2 * hashByteLength + 32,
                         statusPointer,
                     );
                     const [status] = this.#memoryBoundary.readWords(
@@ -316,7 +319,13 @@ export class CommonProofFamilyAdapterKernelBoundary {
                             .subarray(hashByteLength, 2 * hashByteLength)
                             .slice(),
                         proofAttemptLineageIdentifier: output
-                            .subarray(2 * hashByteLength)
+                            .subarray(
+                                2 * hashByteLength,
+                                2 * hashByteLength + 32,
+                            )
+                            .slice(),
+                        checkpointLineageIdentifier: output
+                            .subarray(2 * hashByteLength + 32)
                             .slice(),
                     });
                 } finally {

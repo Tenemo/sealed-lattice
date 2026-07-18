@@ -379,6 +379,82 @@ describe('Authenticated checkpoint store', () => {
         await checkpointStore.close();
     });
 
+    it('reserves one opaque lineage before proof-attempt binding and restores capacity on cancellation', async () => {
+        const checkpointStore = openStore({
+            limits: {
+                ...checkpointLimits,
+                maximumActiveOperationIdentityCount: 1,
+            },
+        });
+        const reservation =
+            await checkpointStore.reserveCheckpointLineage();
+        const reservedLineageIdentifier =
+            reservation.checkpointLineageIdentifier;
+        expect(reservedLineageIdentifier).toHaveLength(32);
+        await expect(checkpointStore.beginOperation()).rejects.toMatchObject({
+            code: 'ResourceLimit',
+        });
+
+        const stateBytes = Uint8Array.of(0x21, 0x43, 0x65, 0x87);
+        await expect(
+            checkpointStore.publish({
+                boundary: deterministicBoundaryFor({ stateBytes }),
+                identity:
+                    reservation as unknown as CheckpointOperationIdentity,
+                stateChunks: [stateBytes],
+            }),
+        ).rejects.toMatchObject({ code: 'InvalidInput' });
+        expect(adapter.keys()).toEqual([]);
+
+        await expect(
+            checkpointStore.bindCheckpointLineageToProofAttempt(
+                reservation,
+                new Uint8Array(31),
+            ),
+        ).rejects.toMatchObject({ code: 'InvalidInput' });
+        expect(reservation.checkpointLineageIdentifier).toEqual(
+            reservedLineageIdentifier,
+        );
+
+        const proofAttemptLineageIdentifier = proofAttemptIdentifier(0x42);
+        const identity =
+            await checkpointStore.bindCheckpointLineageToProofAttempt(
+                reservation,
+                proofAttemptLineageIdentifier,
+            );
+        expect(identity.checkpointLineageIdentifier).toEqual(
+            reservedLineageIdentifier,
+        );
+        expect(identity.privateRandomnessStreamAttemptIdentifier).toEqual(
+            proofAttemptLineageIdentifier,
+        );
+        expect(reservation.checkpointLineageIdentifier).toEqual(
+            new Uint8Array(32),
+        );
+        await expect(
+            checkpointStore.bindCheckpointLineageToProofAttempt(
+                reservation,
+                proofAttemptIdentifier(0x43),
+            ),
+        ).rejects.toMatchObject({ code: 'InvalidInput' });
+        await checkpointStore.releaseOperationIdentity(identity);
+
+        const cancelledReservation =
+            await checkpointStore.reserveCheckpointLineage();
+        await checkpointStore.releaseCheckpointLineageReservation(
+            cancelledReservation,
+        );
+        await checkpointStore.releaseCheckpointLineageReservation(
+            cancelledReservation,
+        );
+        expect(cancelledReservation.checkpointLineageIdentifier).toEqual(
+            new Uint8Array(32),
+        );
+        const replacementIdentity = await checkpointStore.beginOperation();
+        await checkpointStore.releaseOperationIdentity(replacementIdentity);
+        await checkpointStore.close();
+    });
+
     it('releases every identity across repeated publish and eviction cycles', async () => {
         const checkpointStore = openStore({
             limits: {

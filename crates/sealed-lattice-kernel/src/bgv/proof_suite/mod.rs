@@ -41,7 +41,9 @@ mod sampler_availability;
 mod selected_accounting;
 mod selected_profile;
 mod setup_generation_runtime;
+mod setup_key_relation_runtime;
 mod setup_public_polynomial;
+mod target_release_runtime;
 mod transcript;
 mod verifier;
 mod vss_share_linkage_runtime;
@@ -77,10 +79,10 @@ pub(crate) use body::{
 pub(crate) use body::{
     CompleteProofTreeCatalog, DecodedProofBodyPrefix, DecodedProofPhasePairLeaf, ProofBodyError,
     ProofBodyLayout, ProofTreeCatalogEntry, ProofTreeCatalogInput, ProofTreeCatalogSource,
-    ProofTreeOpening, RelationProofTreeInput, StatementOwnedProofTreeInput,
-    build_complete_proof_tree_catalog, decode_proof_body_prefix, decode_proof_body_prefix_owned,
-    decode_proof_query_section_header_at, decode_proof_query_tree_at,
-    proof_body_prefix_byte_length, proof_query_tree_byte_length,
+    ProofTreeOpening, ProofTreeOracleEquationNamespace, RelationProofTreeInput,
+    StatementOwnedProofTreeInput, build_complete_proof_tree_catalog, decode_proof_body_prefix,
+    decode_proof_body_prefix_owned, decode_proof_query_section_header_at,
+    decode_proof_query_tree_at, proof_body_prefix_byte_length, proof_query_tree_byte_length,
 };
 pub(crate) use committed_material::CommittedMaterialTree;
 pub(crate) use committed_material::{
@@ -91,13 +93,14 @@ pub(crate) use committed_material::{
 };
 pub(crate) use component_material_stream::{
     ComponentMaterialOwnershipBinding, KeySwitchComponentMaterialTopology,
-    KeySwitchComponentTraceColumn, KeySwitchComponentTraceHalf, VerifiedKeySwitchComponentMaterial,
-    VerifiedKeySwitchComponentMaterialStream,
+    KeySwitchComponentTraceColumn, KeySwitchComponentTraceQuarter,
+    VerifiedKeySwitchComponentMaterial, VerifiedKeySwitchComponentMaterialStream,
 };
 pub(crate) use component_public_polynomial_runtime::{
-    ComponentPublicPolynomialRuntimeError, DescriptorAuthenticatedKeySwitchComponentTree,
+    ComponentPublicPolynomialRuntimeError,
     DescriptorAuthenticatedKeySwitchComponentPublicPolynomialStream,
-    KeySwitchComponentPublicPolynomialStream, RecomputedKeySwitchComponentTree,
+    DescriptorAuthenticatedKeySwitchComponentTree, KeySwitchComponentPublicPolynomialStream,
+    RecomputedKeySwitchComponentTree,
 };
 pub(crate) use decoder::{BoundedProofDecoder, ProofByteSource, ProofDecodeError};
 pub(crate) use domain::{
@@ -137,13 +140,13 @@ pub(crate) use field::{
 pub(crate) use fri::{
     OpenedFriLayerPair, ProofFriError, ProofFriQueryState, ProofFriQueryVerifier,
 };
-pub(crate) use galois_source_material::{
-    GaloisSourceComponentPreflightBinding, VerifiedGaloisSourceComponent,
-    VerifiedGaloisSourceMaterialBatch, VerifiedGaloisSourceMaterialBatchPreflight,
-};
 pub(crate) use galois_key_share_runtime::{
     PendingGeneratedGaloisSource, restore_pending_generated_galois_source,
     take_pending_generated_galois_source,
+};
+pub(crate) use galois_source_material::{
+    GaloisSourceComponentPreflightBinding, VerifiedGaloisSourceComponent,
+    VerifiedGaloisSourceMaterialBatch, VerifiedGaloisSourceMaterialBatchPreflight,
 };
 #[cfg(test)]
 pub(crate) use merkle::{CanonicalProofMerkleTree, verify_authentication_frontier};
@@ -230,9 +233,8 @@ pub(crate) use prover::{
 };
 pub(crate) use qrom_soundness::{
     SelectedActionApplicationSoundnessAccounting, SelectedApplicationSoundnessAccounting,
-    SelectedApplicationSoundnessAccountingError,
-    SelectedApplicationSoundnessVariantAccounting, SelectedExactProbabilityBound,
-    require_selected_application_soundness_bounds,
+    SelectedApplicationSoundnessAccountingError, SelectedApplicationSoundnessVariantAccounting,
+    SelectedExactProbabilityBound, require_selected_application_soundness_bounds,
 };
 pub(crate) use recipient_vss_payload::{
     DecodedRecipientPrivateVssPayload, DecodedRecipientShareLimb, RecipientPrivateVssPayloadError,
@@ -249,12 +251,14 @@ pub(crate) use relation_plan::{
     BallotValidityPreparedProofAttempt, BallotValidityRelationPlanInput,
     BallotValiditySourceColumnRecipe, BallotValiditySourcePlan,
     BallotValiditySourcePolynomialAdapter, BallotValidityVerifiedColumnEvaluator,
-    BallotValidityWitnessValueSource, BoundTreeConstructionKind, CheckedApplicationExtractionPlan,
-    CollectivePublicKeyAggregatePlanInput, CommittedMaterialRelationPlanInput,
-    CommittedMaterialRootTraceRows, CommittedMaterialSourcePolynomialAdapter,
-    CommittedMaterialTraceWitnessProvider, CompiledBallotValidityRelation, CompiledRelationPlan,
-    CompiledTargetReleaseRelation, EvaluatorKeyAggregateEntryPlanInput,
-    EvaluatorKeyAggregatePlanInput, EvaluatorKeyAggregateVariantInput, ExtractedApplicationWitness,
+    BallotValidityWitnessValueSource, BoundTreeConstructionKind, BoundTreeRootUse,
+    CheckedApplicationExtractionPlan, CollectivePublicKeyAggregatePlanInput,
+    CommittedMaterialRelationPlanInput, CommittedMaterialRootTraceRows,
+    CommittedMaterialSourcePolynomialAdapter, CommittedMaterialTraceWitnessProvider,
+    CompiledBallotValidityRelation, CompiledRelationPlan, CompiledRelinearizationRoundOneRelation,
+    CompiledRelinearizationRoundTwoRelation, CompiledTargetReleaseRelation,
+    EvaluatorKeyAggregateEntryPlanInput, EvaluatorKeyAggregatePlanInput,
+    EvaluatorKeyAggregateVariantInput, ExtractedApplicationWitness,
     ExtractedLowDegreeApplicationTree, ExtractedSemanticColumn, GaloisKeyShareRelationEntryInput,
     GaloisKeyShareRelationPlanInput, GaloisKeyShareSourcePolynomialAdapter,
     PackedCommonWitnessClass, PackedCommonWitnessJoin, PublicAggregateRelationGeometry,
@@ -266,16 +270,17 @@ pub(crate) use relation_plan::{
     RelationChallengeRole, RelationChallengeSampling, RelationColumnOrigin,
     RelationConstraintEvaluation, RelationPlanCheckContext, RelationPlanError, RelationPlanVariant,
     RelationTreeDescriptor, RelinearizationRoundOneRelationPlanInput,
-    RelinearizationRoundTwoRelationPlanInput, ResolvedRelationChallengeSampling,
-    ResolvedSuiteModulus, RkgRoundOneAggregatePlanInput, RkgRoundOneAggregateVariantInput,
-    SameSecretRelationPlanInput, SelectedBallotValidityCarrierBufferAccounting,
+    RelinearizationRoundOneSourceLayout, RelinearizationRoundOneSourcePolynomialAdapter,
+    RelinearizationRoundTwoRelationPlanInput, RelinearizationRoundTwoSourceLayout,
+    ResolvedRelationChallengeSampling, ResolvedSuiteModulus, RkgRoundOneAggregatePlanInput,
+    RkgRoundOneAggregateVariantInput, SameSecretRelationPlanInput,
+    SelectedBallotValidityCarrierBufferAccounting, SetupKeyRelationSourcePolynomialAdapter,
     SuiteModulusReference, TargetReleaseCapabilityError, TargetReleaseModulusWitness,
     TargetReleaseRelationPlanInput, TargetReleaseRoleWitness, TargetReleaseSourcePolynomialAdapter,
     TargetReleaseVerifiedColumnEvaluator, TargetReleaseWitness, TargetReleaseWitnessError,
     TargetReleaseWitnessSource, TrusteeEvaluationKeyDecompositionBlock,
-    TrusteeEvaluationKeyRelationGeometry, VerifiedTargetReleaseModulusInput,
-    VerifiedKeyRelationColumnEvaluator, VerifiedTargetReleaseProof,
-    apply_negacyclic_automorphism,
+    TrusteeEvaluationKeyRelationGeometry, VerifiedKeyRelationColumnEvaluator,
+    VerifiedTargetReleaseModulusInput, VerifiedTargetReleaseProof, apply_negacyclic_automorphism,
     ballot_encryption_private_randomness_kmac_input_accounting,
     compile_aggregate_threshold_share_relation_plan, compile_ballot_validity_relation,
     compile_ballot_validity_relation_plan, compile_collective_public_key_aggregate_relation_plan,
@@ -283,20 +288,26 @@ pub(crate) use relation_plan::{
     compile_galois_key_share_relation_with_source_layout, compile_public_key_share_relation_plan,
     compile_public_key_share_relation_with_source_layout,
     compile_relinearization_round_one_relation_plan,
-    compile_relinearization_round_two_relation_plan, compile_rkg_round_one_aggregate_relation_plan,
-    compile_same_secret_relation_plan, compile_same_secret_relation_with_source_layout,
-    compile_target_release_relation,
+    compile_relinearization_round_one_relation_with_source_layout,
+    compile_relinearization_round_two_relation_plan,
+    compile_relinearization_round_two_relation_with_source_layout,
+    compile_rkg_round_one_aggregate_relation_plan, compile_same_secret_relation_plan,
+    compile_same_secret_relation_with_source_layout, compile_target_release_relation,
     compile_target_release_relation_plan, compile_vss_share_linkage_relation_plan,
     derive_aggregate_threshold_share_trace_witness_provider,
     derive_owned_aggregate_threshold_share_trace_witness_provider,
     derive_owned_vss_share_linkage_trace_witness_provider,
     derive_vss_share_linkage_trace_witness_provider, galois_relation_tree_inputs,
     merge_checked_relation_plan_variants, proof_created_relation_tree_inputs_from_checked_variant,
-    selected_ballot_validity_carrier_buffer_accounting, selected_galois_key_share_batch_schedule,
+    public_key_share_relation_tree_inputs, relinearization_round_one_relation_tree_inputs,
+    same_secret_relation_tree_inputs, selected_ballot_validity_carrier_buffer_accounting,
+    selected_galois_key_share_batch_schedule,
 };
 pub(crate) use relinearization_source_material::{
-    VerifiedRelinearizationAggregateMaterial, VerifiedRelinearizationRoundOneSourceMaterial,
-    VerifiedRelinearizationSourceMaterial, selected_relinearization_source_position,
+    VerifiedRelinearizationAggregateMaterial, VerifiedRelinearizationAggregateMaterialPreflight,
+    VerifiedRelinearizationRoundOneSourceMaterial,
+    VerifiedRelinearizationRoundOneSourceMaterialPreflight, VerifiedRelinearizationSourceMaterial,
+    VerifiedRelinearizationSourceMaterialPreflight, selected_relinearization_source_position,
 };
 pub(crate) use runtime::{
     AuthenticatedCommonProofGenerationCheckpoint, BorrowedVerifiedCommonProofCapability,
@@ -313,13 +324,12 @@ pub(crate) use runtime::{
     CommonProofRuntimeCancellation, CommonProofRuntimeError, CommonProofRuntimeLimits,
     CommonProofRuntimeRegistry, CommonProofSelectedSuiteCapabilityHandle,
     CommonProofStorageTransactionRuntime, CommonProofUpstreamInputRegistry,
-    CommonProofVerificationBinding,
-    CommonProofVerificationOperationHandle, CommonProofVerificationWorkerError,
-    CommonProofVerificationWorkerPoll, CommonProofVerifiedColumnEvaluatorCapabilityHandle,
-    ConsumedCommonProofVerificationInputs, ConsumedVerifiedCommonProofCapability,
-    DURABLE_AUTHORIZATION_FRAME_BYTE_LENGTH, GeneratedCommonProofCapabilityHandle,
-    MAXIMUM_COMMON_PROOF_BYTE_LENGTH, MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH,
-    MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH,
+    CommonProofVerificationBinding, CommonProofVerificationOperationHandle,
+    CommonProofVerificationWorkerError, CommonProofVerificationWorkerPoll,
+    CommonProofVerifiedColumnEvaluatorCapabilityHandle, ConsumedCommonProofVerificationInputs,
+    ConsumedVerifiedCommonProofCapability, DURABLE_AUTHORIZATION_FRAME_BYTE_LENGTH,
+    GeneratedCommonProofCapabilityHandle, MAXIMUM_COMMON_PROOF_BYTE_LENGTH,
+    MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH, MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH,
     MAXIMUM_RESIDENT_COMMON_PROOF_INPUT_CHUNKS, PendingCommonProofAuthorizationHandle,
     PollableCommonProofByteSink, PollableCommonProofByteSinkError,
     PreparedCommonProofAuthorization, PreparedCommonProofGeneration,
@@ -330,26 +340,27 @@ pub(crate) use runtime::{
 };
 #[cfg(test)]
 pub(crate) use runtime::{ResidentCommonProofByteSource, ResidentCommonProofInputChunk};
-pub(crate) use runtime_ffi::consume_verified_common_proof_with_family_terminal;
 pub(crate) use runtime_ffi::bind_generated_common_proof_to_verified_statement_source;
 pub(crate) use runtime_ffi::bind_generated_common_proofs_to_verified_statement_sources;
+pub(crate) use runtime_ffi::consume_verified_common_proof_with_family_terminal;
 pub(crate) use runtime_ffi::preflight_and_consume_verified_common_proof_with_family_terminal;
 pub(crate) use runtime_ffi::preflight_generated_common_proof_pending_statement;
 pub(crate) use runtime_ffi::release_generated_common_proof_capability;
-pub(crate) use runtime_ffi::retire_generated_common_proof_capabilities;
 pub(crate) use runtime_ffi::retain_common_proof_verification_family_adapter_from_upstream;
+pub(crate) use runtime_ffi::retire_generated_common_proof_capabilities;
 pub(crate) use runtime_ffi::runtime_error_status;
 pub(crate) use runtime_ffi::with_common_proof_selected_suite;
 pub(crate) use sampler_availability::{
     CommonProofDeepSamplerAvailabilityAccounting,
     CommonProofExtensionSamplerAvailabilityAccounting,
     CommonProofProductSamplerAvailabilityAccounting,
-    CommonProofQueryVectorSamplerAvailabilityAccounting,
-    CommonProofSamplerAvailabilityAccounting, CommonProofSamplerAvailabilityAccountingError,
-    CommonProofSamplerExhaustionProbabilityBound, SelectedActionSamplerAvailabilityAccounting,
-    SelectedProofSamplerAvailabilityVariantAccounting,
+    CommonProofQueryVectorSamplerAvailabilityAccounting, CommonProofSamplerAvailabilityAccounting,
+    CommonProofSamplerAvailabilityAccountingError, CommonProofSamplerExhaustionProbabilityBound,
+    SelectedActionSamplerAvailabilityAccounting, SelectedProofSamplerAvailabilityVariantAccounting,
     selected_complete_action_sampler_availability_accounting,
 };
+#[cfg(test)]
+pub(crate) use selected_accounting::selected_complete_action_byte_accounting_diagnostic_json;
 pub(crate) use selected_accounting::{
     SelectedCompleteActionByteAccounting, SelectedCompleteActionByteAccountingInput,
     SelectedCompleteActionCorpusOwner, SelectedCompleteActionCorpusOwnerByteAccounting,
@@ -357,8 +368,6 @@ pub(crate) use selected_accounting::{
     selected_complete_action_byte_accounting, selected_proof_byte_accounting,
     selected_proof_runtime_limits,
 };
-#[cfg(test)]
-pub(crate) use selected_accounting::selected_complete_action_byte_accounting_diagnostic_json;
 pub(crate) use selected_profile::{
     SelectedRelationApplicationRoundByRoundNumericalBounds,
     SelectedRelationApplicationRoundByRoundTheoremInput, SelectedRoundByRoundProbabilityBound,
@@ -368,8 +377,8 @@ pub(crate) use selected_profile::{
     selected_public_key_share_relation_plan_input,
     selected_relation_application_round_by_round_theorem_inputs,
     selected_relation_plan_check_context, selected_relation_plans,
-    selected_same_secret_relation_plan_input,
-    selected_target_decryption_flooding_bound,
+    selected_same_secret_relation_plan_input, selected_target_decryption_flooding_bound,
+    selected_target_release_relation,
 };
 pub(crate) use setup_generation_runtime::{
     begin_setup_generation_authority, cancel_setup_generation_recipient_payload,
@@ -395,10 +404,9 @@ pub(crate) use verifier::{
     CommonProofRequiredByteRange, CommonProofVerificationInput, CommonProofVerificationPoll,
     CommonProofVerificationStateMachine, CommonProofVerifierError,
     PollableCommonProofVerificationInput, VerifiedCommonProof, VerifiedEvaluatorAuxiliaryRoot,
-    VerifiedEvaluatorKeyStore, VerifiedEvaluatorRuntimeRoot, VerifiedRelationColumnEvaluator,
-    VerifiedStatementOwnedTree, VerifiedStreamedProofTreeTerminal,
-    VerifiedStreamedProofTreeTerminalPreflight,
-    verified_application_statement_hash,
+    VerifiedEvaluatorKeyStore, VerifiedEvaluatorKeyStorePreflight, VerifiedEvaluatorRuntimeRoot,
+    VerifiedRelationColumnEvaluator, VerifiedStatementOwnedTree, VerifiedStreamedProofTreeTerminal,
+    VerifiedStreamedProofTreeTerminalPreflight, verified_application_statement_hash,
 };
 pub(crate) use vss_share_linkage_runtime::{
     consume_ordered_verified_vss_share_linkage_terminals,
@@ -417,11 +425,13 @@ pub(crate) use application_statement::{
     SelectedRelinearizationRoundOneStatement, SelectedSameSecretStatement,
     SelectedVssShareLinkageStatement, canonical_selected_aggregate_threshold_share_statement,
     canonical_selected_application_statement_for_ceiling,
-    canonical_selected_ballot_validity_statement, canonical_selected_evaluator_aggregate_statement,
+    canonical_selected_ballot_validity_statement,
     canonical_selected_collective_public_key_aggregate_statement,
+    canonical_selected_evaluator_aggregate_statement,
     canonical_selected_galois_key_share_statement, canonical_selected_public_key_share_statement,
     canonical_selected_relinearization_round_one_aggregate_statement,
     canonical_selected_relinearization_round_one_statement,
+    canonical_selected_relinearization_round_two_statement,
     canonical_selected_same_secret_statement, canonical_selected_target_share_statement,
     canonical_selected_vss_share_linkage_statement,
     decode_selected_aggregate_threshold_share_statement, decode_selected_application_statement,

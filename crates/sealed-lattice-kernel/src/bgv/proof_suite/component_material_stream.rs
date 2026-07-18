@@ -153,38 +153,43 @@ impl KeySwitchComponentMaterialTopology {
     pub(crate) fn trace_column_count(&self) -> Result<usize, RefusalReason> {
         self.data_block_count
             .checked_mul(self.extended_limb_count())
-            .and_then(|column_count| column_count.checked_mul(2))
+            .and_then(|column_count| column_count.checked_mul(4))
             .ok_or(RefusalReason::OutsideSupportedProfile)
+    }
+
+    pub(crate) fn quarter_polynomial_degree_bound_exclusive(&self) -> Result<usize, RefusalReason> {
+        self.polynomial_degree
+            .checked_div(4)
+            .filter(|quarter_degree| {
+                *quarter_degree > 0 && *quarter_degree * 4 == self.polynomial_degree
+            })
+            .ok_or(RefusalReason::UnsupportedVersionOrSuite)
     }
 
     /// Maps one relation-plan column to its sole contiguous range in the
     /// authenticated headerless component stream. Full-ring residue vectors
-    /// are split into their low and high trace halves in block, limb, half
-    /// order, exactly matching the setup-polynomial relation plans.
+    /// are split into four contiguous coefficient quarters in block, limb,
+    /// quarter order, exactly matching the setup-polynomial relation plans.
     pub(crate) fn trace_column(
         &self,
         column_ordinal: usize,
     ) -> Result<KeySwitchComponentTraceColumn, RefusalReason> {
         let columns_per_block = self
             .extended_limb_count()
-            .checked_mul(2)
+            .checked_mul(4)
             .ok_or(RefusalReason::OutsideSupportedProfile)?;
         if column_ordinal >= self.trace_column_count()? || self.polynomial_degree < 2 {
             return Err(RefusalReason::WrongTypeOrLength);
         }
         let block_index = column_ordinal / columns_per_block;
         let column_within_block = column_ordinal % columns_per_block;
-        let limb_index = column_within_block / 2;
-        let half = if column_within_block % 2 == 0 {
-            KeySwitchComponentTraceHalf::Low
-        } else {
-            KeySwitchComponentTraceHalf::High
-        };
-        let half_degree = self.polynomial_degree / 2;
-        let coefficient_start = match half {
-            KeySwitchComponentTraceHalf::Low => 0,
-            KeySwitchComponentTraceHalf::High => half_degree,
-        };
+        let limb_index = column_within_block / 4;
+        let quarter = KeySwitchComponentTraceQuarter::from_ordinal(column_within_block % 4)?;
+        let quarter_degree = self.quarter_polynomial_degree_bound_exclusive()?;
+        let coefficient_start = quarter
+            .ordinal()
+            .checked_mul(quarter_degree)
+            .ok_or(RefusalReason::OutsideSupportedProfile)?;
         let residue_byte_length = self.residue_byte_length(limb_index)?;
         let bytes_per_block =
             self.residue_byte_lengths
@@ -217,7 +222,7 @@ impl KeySwitchComponentMaterialTopology {
                     .and_then(|half_offset| offset.checked_add(half_offset))
             })
             .ok_or(RefusalReason::OutsideSupportedProfile)?;
-        let byte_length = u64::try_from(half_degree)
+        let byte_length = u64::try_from(quarter_degree)
             .ok()
             .and_then(|degree| degree.checked_mul(u64::try_from(residue_byte_length).ok()?))
             .ok_or(RefusalReason::OutsideSupportedProfile)?;
@@ -226,11 +231,11 @@ impl KeySwitchComponentMaterialTopology {
             column_ordinal,
             block_index,
             limb_index,
-            half,
+            quarter,
             modulus: self.modulus(limb_index)?,
             residue_byte_length,
             coefficient_start,
-            coefficient_count: half_degree,
+            coefficient_count: quarter_degree,
             byte_offset,
             byte_length,
         })
@@ -268,9 +273,32 @@ impl KeySwitchComponentMaterialTopology {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum KeySwitchComponentTraceHalf {
-    Low,
-    High,
+pub(crate) enum KeySwitchComponentTraceQuarter {
+    First,
+    Second,
+    Third,
+    Fourth,
+}
+
+impl KeySwitchComponentTraceQuarter {
+    fn from_ordinal(ordinal: usize) -> Result<Self, RefusalReason> {
+        match ordinal {
+            0 => Ok(Self::First),
+            1 => Ok(Self::Second),
+            2 => Ok(Self::Third),
+            3 => Ok(Self::Fourth),
+            _ => Err(RefusalReason::WrongTypeOrLength),
+        }
+    }
+
+    pub(crate) const fn ordinal(self) -> usize {
+        match self {
+            Self::First => 0,
+            Self::Second => 1,
+            Self::Third => 2,
+            Self::Fourth => 3,
+        }
+    }
 }
 
 /// Exact authenticated-stream coordinates for one setup-polynomial trace
@@ -281,7 +309,7 @@ pub(crate) struct KeySwitchComponentTraceColumn {
     column_ordinal: usize,
     block_index: usize,
     limb_index: usize,
-    half: KeySwitchComponentTraceHalf,
+    quarter: KeySwitchComponentTraceQuarter,
     modulus: u64,
     residue_byte_length: usize,
     coefficient_start: usize,
@@ -303,8 +331,8 @@ impl KeySwitchComponentTraceColumn {
         self.limb_index
     }
 
-    pub(crate) const fn half(self) -> KeySwitchComponentTraceHalf {
-        self.half
+    pub(crate) const fn quarter(self) -> KeySwitchComponentTraceQuarter {
+        self.quarter
     }
 
     pub(crate) const fn modulus(self) -> u64 {
@@ -468,7 +496,7 @@ impl VerifiedKeySwitchComponentMaterial {
     }
 
     /// Re-encodes the exact block, limb, coefficient order authenticated by
-    /// this material terminal from a setup tree's low/high trace columns. A
+    /// this material terminal from a setup tree's quarter trace columns. A
     /// matching descriptor proves that the tree and the later component
     /// readback refer to the same canonical bytes; a detached root or digest
     /// cannot establish this linkage.
@@ -478,11 +506,11 @@ impl VerifiedKeySwitchComponentMaterial {
     ) -> Result<(), RefusalReason> {
         let topology = &self.topology;
         let expected_column_count = topology.trace_column_count()?;
-        let half_degree = topology.polynomial_degree / 2;
+        let quarter_degree = topology.quarter_polynomial_degree_bound_exclusive()?;
         if ordered_trace_columns.len() != expected_column_count
             || ordered_trace_columns
                 .iter()
-                .any(|column| column.len() != half_degree)
+                .any(|column| column.len() != quarter_degree)
         {
             return Err(RefusalReason::WrongTypeOrLength);
         }
@@ -498,14 +526,14 @@ impl VerifiedKeySwitchComponentMaterial {
             for limb_index in 0..topology.extended_limb_count() {
                 let modulus = topology.modulus(limb_index)?;
                 let residue_byte_length = topology.residue_byte_length(limb_index)?;
-                let column_pair_ordinal = block_index
+                let first_quarter_column_ordinal = block_index
                     .checked_mul(topology.extended_limb_count())
                     .and_then(|ordinal| ordinal.checked_add(limb_index))
-                    .and_then(|ordinal| ordinal.checked_mul(2))
+                    .and_then(|ordinal| ordinal.checked_mul(4))
                     .ok_or(RefusalReason::OutsideSupportedProfile)?;
-                for half_ordinal in 0..2_usize {
+                for quarter_ordinal in 0..4_usize {
                     let column = ordered_trace_columns
-                        .get(column_pair_ordinal + half_ordinal)
+                        .get(first_quarter_column_ordinal + quarter_ordinal)
                         .ok_or(RefusalReason::WrongTypeOrLength)?;
                     for coefficient in column {
                         let canonical_coefficient = coefficient.canonical();
@@ -860,24 +888,51 @@ mod tests {
     }
 
     #[test]
-    fn trace_columns_map_exactly_to_low_and_high_authenticated_stream_ranges() {
+    fn trace_columns_map_exactly_to_quarter_authenticated_stream_ranges() {
         let topology = test_topology();
         let bytes = encoded_material(&topology);
 
-        assert_eq!(topology.trace_column_count(), Ok(20));
+        assert_eq!(topology.trace_column_count(), Ok(40));
         let expected_columns = [
-            (0, 0, 0, KeySwitchComponentTraceHalf::Low, 0, 4, 0, 8),
-            (1, 0, 0, KeySwitchComponentTraceHalf::High, 4, 4, 8, 8),
-            (2, 0, 1, KeySwitchComponentTraceHalf::Low, 0, 4, 16, 12),
-            (9, 0, 4, KeySwitchComponentTraceHalf::High, 4, 4, 96, 16),
-            (10, 1, 0, KeySwitchComponentTraceHalf::Low, 0, 4, 112, 8),
-            (19, 1, 4, KeySwitchComponentTraceHalf::High, 4, 4, 208, 16),
+            (0, 0, 0, KeySwitchComponentTraceQuarter::First, 0, 2, 0, 4),
+            (1, 0, 0, KeySwitchComponentTraceQuarter::Second, 2, 2, 4, 4),
+            (2, 0, 0, KeySwitchComponentTraceQuarter::Third, 4, 2, 8, 4),
+            (
+                19,
+                0,
+                4,
+                KeySwitchComponentTraceQuarter::Fourth,
+                6,
+                2,
+                104,
+                8,
+            ),
+            (
+                20,
+                1,
+                0,
+                KeySwitchComponentTraceQuarter::First,
+                0,
+                2,
+                112,
+                4,
+            ),
+            (
+                39,
+                1,
+                4,
+                KeySwitchComponentTraceQuarter::Fourth,
+                6,
+                2,
+                216,
+                8,
+            ),
         ];
         for (
             column_ordinal,
             expected_block,
             expected_limb,
-            expected_half,
+            expected_quarter,
             expected_coefficient_start,
             expected_coefficient_count,
             expected_byte_offset,
@@ -890,7 +945,7 @@ mod tests {
             assert_eq!(column.column_ordinal(), column_ordinal);
             assert_eq!(column.block_index(), expected_block);
             assert_eq!(column.limb_index(), expected_limb);
-            assert_eq!(column.half(), expected_half);
+            assert_eq!(column.quarter(), expected_quarter);
             assert_eq!(column.coefficient_start(), expected_coefficient_start);
             assert_eq!(column.coefficient_count(), expected_coefficient_count);
             assert_eq!(column.byte_offset(), expected_byte_offset);
@@ -920,15 +975,15 @@ mod tests {
         }
 
         assert_eq!(
-            topology.trace_column(20),
+            topology.trace_column(40),
             Err(RefusalReason::WrongTypeOrLength)
         );
         let first_column = topology.trace_column(0).unwrap();
         assert_eq!(
-            first_column.decode_authenticated_bytes(&bytes[..7]),
+            first_column.decode_authenticated_bytes(&bytes[..3]),
             Err(RefusalReason::WrongTypeOrLength)
         );
-        let mut noncanonical = bytes[..8].to_vec();
+        let mut noncanonical = bytes[..4].to_vec();
         noncanonical[..2].copy_from_slice(&TEST_DATA_MODULI[0].to_le_bytes()[..2]);
         assert_eq!(
             first_column.decode_authenticated_bytes(&noncanonical),

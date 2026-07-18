@@ -8,9 +8,9 @@ use crate::bgv::{
 
 use super::key_relation::{
     BoundPolynomialRootUse, KeyRelationGeometry, KeyRelationPlanBuilder, KeyVerifierSourceKey,
-    RecenteredVerifierVectorWitness, ReversibleShiftedSmallVector, ShiftedSmallVector,
-    SplitIntegerVector, TRUSTEE_QUOTIENT_MAXIMUM_ABSOLUTE_VALUE, TrusteeAnchorOpeningWitness,
-    TrusteeKeyRelationGeometryInput, TrusteeRadixThreeQuotientWitness,
+    QuarterBackedSplitIntegerVector, RecenteredVerifierVectorWitness, ReversibleShiftedSmallVector,
+    ShiftedSmallVector, SplitIntegerVector, TRUSTEE_QUOTIENT_MAXIMUM_ABSOLUTE_VALUE,
+    TrusteeAnchorOpeningWitness, TrusteeKeyRelationGeometryInput, TrusteeRadixThreeQuotientWitness,
     galois_common_reference_source, negacyclic_automorphism_mapping_source,
     nested_statement_root_source, relinearization_common_reference_source, statement_root_source,
     trustee_bdlop_matrix_source,
@@ -156,6 +156,60 @@ pub(crate) struct CompiledGaloisKeyShareRelation {
     pub(crate) source_layout: GaloisKeyShareSourceLayout,
 }
 
+pub(crate) struct CompiledRelinearizationRoundOneRelation {
+    pub(crate) relation_plan: CompiledRelationPlan,
+    pub(crate) source_layout: RelinearizationRoundOneSourceLayout,
+}
+
+pub(crate) struct CompiledRelinearizationRoundTwoRelation {
+    pub(crate) relation_plan: CompiledRelationPlan,
+    pub(crate) source_layout: RelinearizationRoundTwoSourceLayout,
+}
+
+pub(crate) struct RelinearizationRoundOneSourceLayout {
+    pub(super) common_secret: ReversibleShiftedSmallVector,
+    pub(super) ephemeral_secret: ReversibleShiftedSmallVector,
+    pub(super) round_one_left_rows: Box<[QuarterBackedSplitIntegerVector]>,
+    pub(super) round_one_right_rows: Box<[QuarterBackedSplitIntegerVector]>,
+    pub(super) errors_by_block: Box<[RelinearizationRoundOneErrorSourceLayout]>,
+    pub(super) quotients_by_row: Box<[RelinearizationRoundOneQuotientSourceLayout]>,
+    pub(super) ordered_anchors: Box<[GaloisKeyShareAnchorSourceLayout]>,
+    pub(super) exact_radix_digits_by_column: BTreeMap<u32, Box<[u32]>>,
+}
+
+pub(crate) struct RelinearizationRoundTwoSourceLayout {
+    pub(super) common_secret: ReversibleShiftedSmallVector,
+    pub(super) ephemeral_secret: ReversibleShiftedSmallVector,
+    pub(super) round_one_left_rows: Box<[QuarterBackedSplitIntegerVector]>,
+    pub(super) round_one_right_rows: Box<[QuarterBackedSplitIntegerVector]>,
+    pub(super) aggregate_round_one_left_rows: Box<[QuarterBackedSplitIntegerVector]>,
+    pub(super) aggregate_round_one_right_rows: Box<[QuarterBackedSplitIntegerVector]>,
+    pub(super) round_two_rows: Box<[QuarterBackedSplitIntegerVector]>,
+    pub(super) round_one_errors_by_block: Box<[RelinearizationRoundOneErrorSourceLayout]>,
+    pub(super) round_one_quotients_by_row: Box<[RelinearizationRoundOneQuotientSourceLayout]>,
+    pub(super) aggregate_rows: Box<[RelinearizationRoundTwoAggregateRowSourceLayout]>,
+    pub(super) round_two_errors_by_block: Box<[ShiftedSmallVector]>,
+    pub(super) round_two_quotients_by_row: Box<[TrusteeRadixThreeQuotientWitness]>,
+    pub(super) ordered_anchors: Box<[GaloisKeyShareAnchorSourceLayout]>,
+    pub(super) exact_radix_digits_by_column: BTreeMap<u32, Box<[u32]>>,
+}
+
+pub(crate) struct RelinearizationRoundOneErrorSourceLayout {
+    pub(super) left: ShiftedSmallVector,
+    pub(super) right: ShiftedSmallVector,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct RelinearizationRoundOneQuotientSourceLayout {
+    pub(super) left: TrusteeRadixThreeQuotientWitness,
+    pub(super) right: TrusteeRadixThreeQuotientWitness,
+}
+
+pub(crate) struct RelinearizationRoundTwoAggregateRowSourceLayout {
+    pub(super) left: RecenteredVerifierVectorWitness,
+    pub(super) right: RecenteredVerifierVectorWitness,
+}
+
 pub(crate) struct GaloisKeyShareSourceLayout {
     pub(super) common_secret: ReversibleShiftedSmallVector,
     pub(super) ordered_entries: Box<[GaloisKeyShareEntrySourceLayout]>,
@@ -168,7 +222,7 @@ pub(crate) struct GaloisKeyShareEntrySourceLayout {
     pub(super) galois_element: u64,
     pub(super) selected_level: usize,
     pub(super) automorphed_secret: ShiftedSmallVector,
-    pub(super) bound_rows: Box<[SplitIntegerVector]>,
+    pub(super) bound_rows: Box<[QuarterBackedSplitIntegerVector]>,
     pub(super) errors_by_block: Box<[ShiftedSmallVector]>,
     pub(super) quotients_by_row: Box<[TrusteeRadixThreeQuotientWitness]>,
 }
@@ -570,12 +624,16 @@ fn add_statement_root_rows(
     geometry: &TrusteeEvaluationKeyRelationGeometry,
     source_key: &KeyVerifierSourceKey,
     root_use: BoundPolynomialRootUse,
-) -> Result<Vec<SplitIntegerVector>, RelationPlanError> {
+) -> Result<Vec<QuarterBackedSplitIntegerVector>, RelationPlanError> {
     builder.add_setup_polynomial_rows_root(
         source_key,
         &geometry.ordered_root_row_modulus_references()?,
         root_use,
     )
+}
+
+fn half_projection_rows(rows: &[QuarterBackedSplitIntegerVector]) -> Vec<SplitIntegerVector> {
+    rows.iter().map(|row| row.half_projections).collect()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -588,7 +646,13 @@ fn add_round_one_relations(
     secret: &ReversibleShiftedSmallVector,
     ephemeral_secret: &ReversibleShiftedSmallVector,
     check_context: &RelationPlanCheckContext,
-) -> Result<(), RelationPlanError> {
+) -> Result<
+    (
+        Box<[RelinearizationRoundOneErrorSourceLayout]>,
+        Box<[RelinearizationRoundOneQuotientSourceLayout]>,
+    ),
+    RelationPlanError,
+> {
     let ordered_modulus_references = geometry.ordered_modulus_references()?;
     let expected_row_count = geometry
         .decomposition_blocks
@@ -601,9 +665,15 @@ fn add_round_one_relations(
         return Err(RelationPlanError::InvalidRoot);
     }
 
+    let mut errors_by_block = Vec::with_capacity(geometry.decomposition_blocks.len());
+    let mut quotients_by_row = Vec::with_capacity(expected_row_count);
     for decomposition_block_index in 0..geometry.decomposition_blocks.len() {
         let round_one_left_error = builder.add_signed_eta_two_vector()?;
         let round_one_right_error = builder.add_signed_eta_two_vector()?;
+        errors_by_block.push(RelinearizationRoundOneErrorSourceLayout {
+            left: round_one_left_error.clone(),
+            right: round_one_right_error.clone(),
+        });
         for (limb_ordinal, modulus_reference) in
             ordered_modulus_references.iter().copied().enumerate()
         {
@@ -621,6 +691,10 @@ fn add_round_one_relations(
                 builder.add_split_verifier_vector(&source_key, modulus_reference)?;
             let left_quotient = builder.add_trustee_radix_three_quotient_witness()?;
             let right_quotient = builder.add_trustee_radix_three_quotient_witness()?;
+            quotients_by_row.push(RelinearizationRoundOneQuotientSourceLayout {
+                left: left_quotient,
+                right: right_quotient,
+            });
             let gadget_coefficient =
                 geometry.gadget_coefficient(decomposition_block_index, modulus_reference)?;
             for challenge_ordinal in 0..check_context.non_native_modular_identity_challenge_count {
@@ -641,7 +715,10 @@ fn add_round_one_relations(
             }
         }
     }
-    Ok(())
+    Ok((
+        errors_by_block.into_boxed_slice(),
+        quotients_by_row.into_boxed_slice(),
+    ))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -654,7 +731,14 @@ fn add_round_two_relations(
     secret: &ReversibleShiftedSmallVector,
     ephemeral_secret: &ReversibleShiftedSmallVector,
     check_context: &RelationPlanCheckContext,
-) -> Result<(), RelationPlanError> {
+) -> Result<
+    (
+        Box<[RelinearizationRoundTwoAggregateRowSourceLayout]>,
+        Box<[ShiftedSmallVector]>,
+        Box<[TrusteeRadixThreeQuotientWitness]>,
+    ),
+    RelationPlanError,
+> {
     let ordered_modulus_references = geometry.ordered_modulus_references()?;
     let expected_row_count = geometry
         .decomposition_blocks
@@ -668,8 +752,12 @@ fn add_round_two_relations(
         return Err(RelationPlanError::InvalidRoot);
     }
 
+    let mut aggregate_rows = Vec::with_capacity(expected_row_count);
+    let mut errors_by_block = Vec::with_capacity(geometry.decomposition_blocks.len());
+    let mut quotients_by_row = Vec::with_capacity(expected_row_count);
     for decomposition_block_index in 0..geometry.decomposition_blocks.len() {
         let round_two_error = builder.add_signed_eta_two_vector()?;
+        errors_by_block.push(round_two_error.clone());
         for (limb_ordinal, modulus_reference) in
             ordered_modulus_references.iter().copied().enumerate()
         {
@@ -686,13 +774,18 @@ fn add_round_two_relations(
                 modulus_reference,
             )?;
             let quotient = builder.add_trustee_radix_three_quotient_witness()?;
+            aggregate_rows.push(RelinearizationRoundTwoAggregateRowSourceLayout {
+                left: aggregate_round_one_left.clone(),
+                right: aggregate_round_one_right.clone(),
+            });
+            quotients_by_row.push(quotient);
             for challenge_ordinal in 0..check_context.non_native_modular_identity_challenge_count {
                 builder.add_relinearization_round_two_equation(
                     modulus_reference,
                     challenge_ordinal,
                     &round_two_rows[row_ordinal],
-                    &aggregate_round_one_left,
-                    &aggregate_round_one_right,
+                    &aggregate_round_one_left.centered,
+                    &aggregate_round_one_right.centered,
                     secret,
                     ephemeral_secret,
                     &round_two_error,
@@ -701,7 +794,11 @@ fn add_round_two_relations(
             }
         }
     }
-    Ok(())
+    Ok((
+        aggregate_rows.into_boxed_slice(),
+        errors_by_block.into_boxed_slice(),
+        quotients_by_row.into_boxed_slice(),
+    ))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -883,6 +980,14 @@ pub(crate) fn compile_relinearization_round_one_relation_plan(
     input: &RelinearizationRoundOneRelationPlanInput,
     check_context: &RelationPlanCheckContext,
 ) -> Result<CompiledRelationPlan, RelationPlanError> {
+    compile_relinearization_round_one_relation_with_source_layout(input, check_context)
+        .map(|compiled| compiled.relation_plan)
+}
+
+pub(crate) fn compile_relinearization_round_one_relation_with_source_layout(
+    input: &RelinearizationRoundOneRelationPlanInput,
+    check_context: &RelationPlanCheckContext,
+) -> Result<CompiledRelinearizationRoundOneRelation, RelationPlanError> {
     input.geometry.validate_common(check_context)?;
     let mut sources = vec![
         statement_root_source(ROUND_ONE_LEFT_ROOT_FIELD_ORDINAL, None),
@@ -900,19 +1005,21 @@ pub(crate) fn compile_relinearization_round_one_relation_plan(
     )?;
     let secret = builder.add_reversible_signed_ternary_vector()?;
     let ephemeral_secret = builder.add_reversible_signed_ternary_vector()?;
-    let round_one_left_rows = add_statement_root_rows(
+    let round_one_left_source_rows = add_statement_root_rows(
         &mut builder,
         &input.geometry,
         &statement_root_key(ROUND_ONE_LEFT_ROOT_FIELD_ORDINAL),
         BoundPolynomialRootUse::Output,
     )?;
-    let round_one_right_rows = add_statement_root_rows(
+    let round_one_right_source_rows = add_statement_root_rows(
         &mut builder,
         &input.geometry,
         &statement_root_key(ROUND_ONE_RIGHT_ROOT_FIELD_ORDINAL),
         BoundPolynomialRootUse::Output,
     )?;
-    add_round_one_relations(
+    let round_one_left_rows = half_projection_rows(&round_one_left_source_rows);
+    let round_one_right_rows = half_projection_rows(&round_one_right_source_rows);
+    let (errors_by_block, quotients_by_row) = add_round_one_relations(
         &mut builder,
         &input.geometry,
         input.schedule_position,
@@ -922,14 +1029,46 @@ pub(crate) fn compile_relinearization_round_one_relation_plan(
         &ephemeral_secret,
         check_context,
     )?;
-    add_anchor_relations(&mut builder, &input.geometry, &secret, check_context)?;
-    builder.finish()
+    let ordered_anchors =
+        add_anchor_relations(&mut builder, &input.geometry, &secret, check_context)?;
+    let exact_radix_digits_by_column = builder
+        .exact_radix_digits_by_column()
+        .iter()
+        .map(|(column_ordinal, digit_column_ordinals)| {
+            (
+                *column_ordinal,
+                digit_column_ordinals.clone().into_boxed_slice(),
+            )
+        })
+        .collect();
+    let relation_plan = builder.finish()?;
+    Ok(CompiledRelinearizationRoundOneRelation {
+        relation_plan,
+        source_layout: RelinearizationRoundOneSourceLayout {
+            common_secret: secret,
+            ephemeral_secret,
+            round_one_left_rows: round_one_left_source_rows.into_boxed_slice(),
+            round_one_right_rows: round_one_right_source_rows.into_boxed_slice(),
+            errors_by_block,
+            quotients_by_row,
+            ordered_anchors: ordered_anchors.into_boxed_slice(),
+            exact_radix_digits_by_column,
+        },
+    })
 }
 
 pub(crate) fn compile_relinearization_round_two_relation_plan(
     input: &RelinearizationRoundTwoRelationPlanInput,
     check_context: &RelationPlanCheckContext,
 ) -> Result<CompiledRelationPlan, RelationPlanError> {
+    compile_relinearization_round_two_relation_with_source_layout(input, check_context)
+        .map(|compiled| compiled.relation_plan)
+}
+
+pub(crate) fn compile_relinearization_round_two_relation_with_source_layout(
+    input: &RelinearizationRoundTwoRelationPlanInput,
+    check_context: &RelationPlanCheckContext,
+) -> Result<CompiledRelinearizationRoundTwoRelation, RelationPlanError> {
     input.geometry.validate_common(check_context)?;
     input.geometry.validate_round_two_quotient_bounds()?;
     let mut sources = vec![
@@ -951,37 +1090,43 @@ pub(crate) fn compile_relinearization_round_two_relation_plan(
     )?;
     let secret = builder.add_reversible_signed_ternary_vector()?;
     let ephemeral_secret = builder.add_reversible_signed_ternary_vector()?;
-    let round_one_left_rows = add_statement_root_rows(
+    let round_one_left_source_rows = add_statement_root_rows(
         &mut builder,
         &input.geometry,
         &statement_root_key(ROUND_ONE_LEFT_ROOT_FIELD_ORDINAL),
         BoundPolynomialRootUse::Input,
     )?;
-    let round_one_right_rows = add_statement_root_rows(
+    let round_one_right_source_rows = add_statement_root_rows(
         &mut builder,
         &input.geometry,
         &statement_root_key(ROUND_ONE_RIGHT_ROOT_FIELD_ORDINAL),
         BoundPolynomialRootUse::Input,
     )?;
-    let aggregate_round_one_left_rows = add_statement_root_rows(
+    let aggregate_round_one_left_source_rows = add_statement_root_rows(
         &mut builder,
         &input.geometry,
         &statement_root_key(AGGREGATE_ROUND_ONE_LEFT_ROOT_FIELD_ORDINAL),
         BoundPolynomialRootUse::Input,
     )?;
-    let aggregate_round_one_right_rows = add_statement_root_rows(
+    let aggregate_round_one_right_source_rows = add_statement_root_rows(
         &mut builder,
         &input.geometry,
         &statement_root_key(AGGREGATE_ROUND_ONE_RIGHT_ROOT_FIELD_ORDINAL),
         BoundPolynomialRootUse::Input,
     )?;
-    let round_two_rows = add_statement_root_rows(
+    let round_two_source_rows = add_statement_root_rows(
         &mut builder,
         &input.geometry,
         &statement_root_key(ROUND_TWO_ROOT_FIELD_ORDINAL),
         BoundPolynomialRootUse::Output,
     )?;
-    add_round_one_relations(
+    let round_one_left_rows = half_projection_rows(&round_one_left_source_rows);
+    let round_one_right_rows = half_projection_rows(&round_one_right_source_rows);
+    let aggregate_round_one_left_rows = half_projection_rows(&aggregate_round_one_left_source_rows);
+    let aggregate_round_one_right_rows =
+        half_projection_rows(&aggregate_round_one_right_source_rows);
+    let round_two_rows = half_projection_rows(&round_two_source_rows);
+    let (round_one_errors_by_block, round_one_quotients_by_row) = add_round_one_relations(
         &mut builder,
         &input.geometry,
         input.schedule_position,
@@ -991,18 +1136,50 @@ pub(crate) fn compile_relinearization_round_two_relation_plan(
         &ephemeral_secret,
         check_context,
     )?;
-    add_round_two_relations(
-        &mut builder,
-        &input.geometry,
-        &round_two_rows,
-        &aggregate_round_one_left_rows,
-        &aggregate_round_one_right_rows,
-        &secret,
-        &ephemeral_secret,
-        check_context,
-    )?;
-    add_anchor_relations(&mut builder, &input.geometry, &secret, check_context)?;
-    builder.finish()
+    let (aggregate_rows, round_two_errors_by_block, round_two_quotients_by_row) =
+        add_round_two_relations(
+            &mut builder,
+            &input.geometry,
+            &round_two_rows,
+            &aggregate_round_one_left_rows,
+            &aggregate_round_one_right_rows,
+            &secret,
+            &ephemeral_secret,
+            check_context,
+        )?;
+    let ordered_anchors =
+        add_anchor_relations(&mut builder, &input.geometry, &secret, check_context)?;
+    let exact_radix_digits_by_column = builder
+        .exact_radix_digits_by_column()
+        .iter()
+        .map(|(column_ordinal, digit_column_ordinals)| {
+            (
+                *column_ordinal,
+                digit_column_ordinals.clone().into_boxed_slice(),
+            )
+        })
+        .collect();
+    let relation_plan = builder.finish()?;
+    Ok(CompiledRelinearizationRoundTwoRelation {
+        relation_plan,
+        source_layout: RelinearizationRoundTwoSourceLayout {
+            common_secret: secret,
+            ephemeral_secret,
+            round_one_left_rows: round_one_left_source_rows.into_boxed_slice(),
+            round_one_right_rows: round_one_right_source_rows.into_boxed_slice(),
+            aggregate_round_one_left_rows: aggregate_round_one_left_source_rows.into_boxed_slice(),
+            aggregate_round_one_right_rows: aggregate_round_one_right_source_rows
+                .into_boxed_slice(),
+            round_two_rows: round_two_source_rows.into_boxed_slice(),
+            round_one_errors_by_block,
+            round_one_quotients_by_row,
+            aggregate_rows,
+            round_two_errors_by_block,
+            round_two_quotients_by_row,
+            ordered_anchors: ordered_anchors.into_boxed_slice(),
+            exact_radix_digits_by_column,
+        },
+    })
 }
 
 pub(crate) fn compile_galois_key_share_relation_plan(
@@ -1115,7 +1292,7 @@ fn compile_galois_key_share_relation_batch(
             &secret,
             &automorphed_secret,
         )?;
-        let galois_key_share_rows = add_statement_root_rows(
+        let galois_key_share_source_rows = add_statement_root_rows(
             &mut builder,
             &input.geometry,
             &nested_statement_root_key(
@@ -1125,6 +1302,7 @@ fn compile_galois_key_share_relation_batch(
             ),
             BoundPolynomialRootUse::Output,
         )?;
+        let galois_key_share_rows = half_projection_rows(&galois_key_share_source_rows);
         let (errors_by_block, quotients_by_row) = add_galois_relations(
             &mut builder,
             &input.geometry,
@@ -1139,7 +1317,7 @@ fn compile_galois_key_share_relation_batch(
             galois_element: entry.galois_element,
             selected_level: entry.selected_level,
             automorphed_secret,
-            bound_rows: galois_key_share_rows.into_boxed_slice(),
+            bound_rows: galois_key_share_source_rows.into_boxed_slice(),
             errors_by_block,
             quotients_by_row,
         });

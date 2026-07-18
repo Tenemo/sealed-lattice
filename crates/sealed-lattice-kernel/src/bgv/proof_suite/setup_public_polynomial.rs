@@ -361,6 +361,13 @@ impl SetupPublicPolynomialTree {
         if input.context.root_role == SetupPublicPolynomialRootRole::LatticeAnchor {
             return Err(SetupPublicPolynomialError::InvalidLatticeAnchor);
         }
+        if input
+            .ordered_coefficient_columns
+            .iter()
+            .any(|column| column.len() != input.source_polynomial_degree_bound_exclusive)
+        {
+            return Err(SetupPublicPolynomialError::InvalidInput);
+        }
         Self::construct_from_canonical_coefficients(input)
     }
 

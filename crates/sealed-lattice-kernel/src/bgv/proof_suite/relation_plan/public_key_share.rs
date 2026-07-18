@@ -3,9 +3,9 @@ use std::collections::BTreeMap;
 use super::key_relation::{
     AnchorEquationInputs, AnchorOpeningWitness, AnchorQuotientWitness, BoundPolynomialRootUse,
     KeyRelationGeometry, KeyRelationPlanBuilder, KeyVerifierSourceKey, PublicKeyEquationInputs,
-    PublicKeyShareRelationPlanInput, QuarterBackedSplitIntegerVector,
-    ReversibleShiftedSmallVector, ShiftedSmallVector, SplitIntegerVector,
-    public_key_common_reference_source, statement_root_source,
+    PublicKeyShareRelationPlanInput, QuarterBackedSplitIntegerVector, ReversibleShiftedSmallVector,
+    ShiftedSmallVector, SplitIntegerVector, public_key_common_reference_source,
+    statement_root_source,
 };
 use super::same_secret_anchor::{add_matrix_columns, append_matrix_sources};
 use super::*;
@@ -130,8 +130,7 @@ pub(crate) fn compile_public_key_share_relation_with_source_layout(
             quotient_columns,
         });
     }
-    let mut anchor_source_layouts =
-        Vec::with_capacity(input.commitment_data_modulus_indices.len());
+    let mut anchor_source_layouts = Vec::with_capacity(input.commitment_data_modulus_indices.len());
     for (root_ordinal, data_modulus_index) in input
         .commitment_data_modulus_indices
         .iter()

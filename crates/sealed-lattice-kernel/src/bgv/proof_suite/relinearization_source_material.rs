@@ -11,8 +11,8 @@ use super::{
     ComponentMaterialOwnershipBinding, ConsumedVerifiedCommonProofCapability,
     RelationTreeDescriptor, SelectedApplicationStatementContext, SelectedEvaluatorEntryKind,
     SelectedEvaluatorEntryPosition, SetupPublicPolynomialContext, SetupPublicPolynomialRootRole,
-    VerifiedKeySwitchComponentMaterial, VerifiedStatementOwnedTree,
-    VerifiedStreamedProofTreeTerminal,
+    SetupPublicPolynomialTree, VerifiedKeySwitchComponentMaterial, VerifiedStatementOwnedTree,
+    VerifiedStreamedProofTreeTerminal, VerifiedStreamedProofTreeTerminalPreflight,
     application_statement::{
         decode_selected_relinearization_round_one_aggregate_statement,
         decode_selected_relinearization_round_one_statement,
@@ -30,6 +30,26 @@ use super::{
 
 const ROUND_TWO_ORDERED_TREE_ORDINAL: u32 = 4;
 const ROUND_TWO_ROOT_SOURCE_ORDINAL: u32 = 4;
+
+fn exact_statement_tree(
+    statement_trees: &[VerifiedStatementOwnedTree],
+    ordered_tree_ordinal: u32,
+    expected_root_source_ordinal: u32,
+    expected_root: [u8; Hash512::BYTE_LENGTH],
+) -> Result<&VerifiedStatementOwnedTree, CommonProofVerifierError> {
+    let mut matching_trees = statement_trees.iter().filter(|tree| {
+        tree.ordered_tree_ordinal() == ordered_tree_ordinal
+            && tree.expected_root_source_ordinal() == expected_root_source_ordinal
+            && tree.expected_root() == expected_root
+    });
+    let statement_tree = matching_trees
+        .next()
+        .ok_or(CommonProofVerifierError::InvalidBoundTree)?;
+    if matching_trees.next().is_some() {
+        return Err(CommonProofVerifierError::InvalidBoundTree);
+    }
+    Ok(statement_tree)
+}
 
 #[derive(Clone, Copy)]
 struct VerifiedRelinearizationProofBinding {
@@ -77,20 +97,62 @@ pub(crate) struct VerifiedRelinearizationRoundOneSourceMaterialPreflight {
     roster_position: u16,
     schedule_position: u32,
     anchor_commitment_roots: [[u8; Hash512::BYTE_LENGTH]; 3],
+    component_tree_preflights: [VerifiedStreamedProofTreeTerminalPreflight; 2],
 }
 
 impl VerifiedRelinearizationRoundOneSourceMaterialPreflight {
+    pub(crate) const fn protocol_version(&self) -> u16 {
+        self.proof_binding.protocol_version
+    }
+
+    pub(crate) const fn suite_identifier(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.proof_binding.suite_identifier
+    }
+
+    pub(crate) const fn ceremony_context_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.proof_binding.ceremony_context_hash
+    }
+
+    pub(crate) const fn action_context_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.proof_binding.action_context_hash
+    }
+
+    pub(crate) const fn roster_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.proof_binding.roster_hash
+    }
+
+    pub(crate) const fn setup_proof_context_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.setup_proof_context_hash
+    }
+
+    pub(crate) const fn participant_identity(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.participant_identity
+    }
+
     pub(crate) const fn roster_position(&self) -> u16 {
         self.roster_position
+    }
+
+    pub(crate) const fn schedule_position(&self) -> u32 {
+        self.schedule_position
+    }
+
+    pub(crate) const fn anchor_commitment_roots(&self) -> [[u8; Hash512::BYTE_LENGTH]; 3] {
+        self.anchor_commitment_roots
     }
 
     pub(crate) fn complete(
         self,
         _verified_proof: ConsumedVerifiedCommonProofCapability,
-        component_trees: [VerifiedStreamedProofTreeTerminal; 2],
+        component_trees: [SetupPublicPolynomialTree; 2],
         component_materials: [VerifiedKeySwitchComponentMaterial; 2],
     ) -> VerifiedRelinearizationRoundOneSourceMaterial {
+        let [left_tree_preflight, right_tree_preflight] = self.component_tree_preflights;
         let [left_tree, right_tree] = component_trees;
+        let [left_tree, right_tree] = [
+            left_tree_preflight.complete(left_tree),
+            right_tree_preflight.complete(right_tree),
+        ];
         let left_tree = left_tree.statement_owned_tree();
         let right_tree = right_tree.statement_owned_tree();
         let [left_material, right_material] = component_materials;
@@ -111,25 +173,12 @@ impl VerifiedRelinearizationRoundOneSourceMaterialPreflight {
 }
 
 impl VerifiedRelinearizationRoundOneSourceMaterial {
-    pub(crate) fn from_consumed_common_proof(
-        verified_proof: ConsumedVerifiedCommonProofCapability,
-        canonical_application_statement_bytes: &[u8],
-        component_trees: [VerifiedStreamedProofTreeTerminal; 2],
-        component_materials: [VerifiedKeySwitchComponentMaterial; 2],
-    ) -> Result<Self, CommonProofVerifierError> {
-        let preflight = Self::preflight_from_borrowed_common_proof(
-            verified_proof.borrowed(),
-            canonical_application_statement_bytes,
-            &component_trees,
-            &component_materials,
-        )?;
-        Ok(preflight.complete(verified_proof, component_trees, component_materials))
-    }
-
     pub(crate) fn preflight_from_borrowed_common_proof(
         verified_proof: BorrowedVerifiedCommonProofCapability<'_>,
         canonical_application_statement_bytes: &[u8],
-        component_trees: &[VerifiedStreamedProofTreeTerminal; 2],
+        roster_hash: [u8; Hash512::BYTE_LENGTH],
+        statement_trees: &[VerifiedStatementOwnedTree],
+        component_trees: &[SetupPublicPolynomialTree; 2],
         component_materials: &[VerifiedKeySwitchComponentMaterial; 2],
     ) -> Result<VerifiedRelinearizationRoundOneSourceMaterialPreflight, CommonProofVerifierError>
     {
@@ -228,6 +277,10 @@ impl VerifiedRelinearizationRoundOneSourceMaterial {
             SetupPublicPolynomialRootRole::RelinearizationRoundOneLeft,
             SetupPublicPolynomialRootRole::RelinearizationRoundOneRight,
         ];
+        let mut component_tree_preflights = Vec::new();
+        component_tree_preflights
+            .try_reserve_exact(component_trees.len())
+            .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?;
         for (component_ordinal, ((tree, material), (expected_root, expected_role))) in
             component_trees
                 .iter()
@@ -250,7 +303,7 @@ impl VerifiedRelinearizationRoundOneSourceMaterial {
                 } => (*expected_root_source_ordinal, ordered_column_ordinals.len()),
                 _ => return Err(CommonProofVerifierError::InvalidApplicationStatement),
             };
-            let expected_public_polynomial_context_hash = SetupPublicPolynomialContext::new(
+            let context = SetupPublicPolynomialContext::new(
                 statement.setup_proof_context_hash(),
                 expected_role,
                 Some(statement.participant_identity()),
@@ -258,38 +311,24 @@ impl VerifiedRelinearizationRoundOneSourceMaterial {
                 Some(schedule_position),
                 None,
             )
-            .and_then(|context| context.context_hash())
             .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?;
             let expected_column_moduli =
                 expected_component_column_moduli(&selected_candidate, material)?;
-            if tree.protocol_version() != verified_proof.protocol_version()
-                || tree.suite_identifier() != verified_proof.suite_identifier()
-                || tree.ceremony_context_hash() != verified_proof.ceremony_context_hash()
-                || tree.action_context_hash() != verified_proof.action_context_hash()
-                || tree.application_statement_schema_identifier()
-                    != ProofApplicationSlotCeilings::RELINEARIZATION_ROUND_ONE_STATEMENT_SCHEMA_IDENTIFIER
-                || tree.application_statement_hash() != verified_proof.application_statement_hash()
-                || tree.relation_plan_variant_hash()
-                    != verified_proof.relation_plan_variant_hash()
-                || tree.canonical_application_statement_bytes()
-                    != canonical_application_statement_bytes
-                || tree.ordered_tree_ordinal() != tree_ordinal
-                || tree.expected_root_source_ordinal() != expected_root_source_ordinal
-                || tree.setup_proof_context_hash() != statement.setup_proof_context_hash()
-                || tree.root_role() != expected_role
-                || tree.owner_participant_identity() != Some(statement.participant_identity())
-                || tree.owner_roster_position() != Some(statement.roster_position())
-                || tree.schedule_position() != Some(schedule_position)
-                || tree.public_polynomial_context_hash()
-                    != expected_public_polynomial_context_hash
-                || tree.root() != expected_root
+            let statement_tree = exact_statement_tree(
+                statement_trees,
+                tree_ordinal,
+                expected_root_source_ordinal,
+                expected_root,
+            )?;
+            if tree.root() != expected_root
                 || tree.source_polynomial_degree_bound_exclusive()
-                    != material.topology().polynomial_degree()
+                    != material
+                        .topology()
+                        .quarter_polynomial_degree_bound_exclusive()
+                        .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?
                 || usize::try_from(tree.row_width()).ok() != Some(expected_column_count)
-                || tree.ordered_canonical_residue_moduli() != expected_column_moduli.as_ref()
-                || tree.source_stream_domain() != Some(CanonicalStreamDomain::EvaluatorKeyStore)
-                || tree.source_material_root() != Some(material.material_root().into_bytes())
-                || tree.source_stream_descriptor() != Some(material.stream_descriptor())
+                || statement_tree.ordered_canonical_residue_moduli()
+                    != expected_column_moduli.as_ref()
                 || !material.binds_ownership(material_ownership)
                 || !material_topology_matches_selected_catalog_level(
                     &selected_candidate,
@@ -299,17 +338,33 @@ impl VerifiedRelinearizationRoundOneSourceMaterial {
             {
                 return Err(CommonProofVerifierError::InvalidApplicationStatement);
             }
+            component_tree_preflights.push(
+                VerifiedStreamedProofTreeTerminal::preflight_from_recomputed_key_switch_component_tree(
+                    verified_proof.verified_proof(),
+                    canonical_application_statement_bytes,
+                    verified_proof.ceremony_context_hash(),
+                    verified_proof.action_context_hash(),
+                    roster_hash,
+                    tree_ordinal,
+                    expected_root_source_ordinal,
+                    expected_root,
+                    context,
+                    expected_column_moduli.into_vec(),
+                    material,
+                    tree,
+                )?,
+            );
         }
-        if component_trees[0].roster_hash() != component_trees[1].roster_hash() {
-            return Err(CommonProofVerifierError::InvalidApplicationStatement);
-        }
+        let component_tree_preflights = component_tree_preflights
+            .try_into()
+            .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?;
 
         let proof_binding = VerifiedRelinearizationProofBinding {
             protocol_version: verified_proof.protocol_version(),
             suite_identifier: verified_proof.suite_identifier(),
             ceremony_context_hash: verified_proof.ceremony_context_hash(),
             action_context_hash: verified_proof.action_context_hash(),
-            roster_hash: component_trees[0].roster_hash(),
+            roster_hash,
             board_object_hash: verified_proof.board_object_hash(),
             verification_binding_hash: verified_proof.verification_binding_hash(),
             proof_application_slot_hash: verified_proof.proof_application_slot_hash(),
@@ -331,6 +386,7 @@ impl VerifiedRelinearizationRoundOneSourceMaterial {
             roster_position: statement.roster_position(),
             schedule_position,
             anchor_commitment_roots: statement.anchor_commitment_roots(),
+            component_tree_preflights,
         })
     }
 
@@ -442,19 +498,84 @@ pub(crate) struct VerifiedRelinearizationSourceMaterialPreflight {
     aggregate_round_one_left_root: [u8; Hash512::BYTE_LENGTH],
     aggregate_round_one_right_root: [u8; Hash512::BYTE_LENGTH],
     contribution_root: [u8; Hash512::BYTE_LENGTH],
+    contribution_tree_preflight: VerifiedStreamedProofTreeTerminalPreflight,
 }
 
 impl VerifiedRelinearizationSourceMaterialPreflight {
+    pub(crate) const fn protocol_version(&self) -> u16 {
+        self.proof_binding.protocol_version
+    }
+
+    pub(crate) const fn suite_identifier(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.proof_binding.suite_identifier
+    }
+
+    pub(crate) const fn ceremony_context_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.proof_binding.ceremony_context_hash
+    }
+
+    pub(crate) const fn action_context_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.proof_binding.action_context_hash
+    }
+
+    pub(crate) const fn roster_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.proof_binding.roster_hash
+    }
+
+    pub(crate) const fn setup_proof_context_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.setup_proof_context_hash
+    }
+
+    pub(crate) const fn participant_identity(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.participant_identity
+    }
+
     pub(crate) const fn roster_position(&self) -> u16 {
         self.roster_position
+    }
+
+    pub(crate) const fn schedule_position(&self) -> u32 {
+        self.schedule_position
+    }
+
+    pub(crate) fn binds_verified_round_one_aggregate(
+        &self,
+        aggregate: &VerifiedRelinearizationAggregateMaterial,
+    ) -> bool {
+        let roster_index = usize::from(self.roster_position);
+        self.protocol_version() == aggregate.protocol_version()
+            && self.suite_identifier() == aggregate.suite_identifier()
+            && self.ceremony_context_hash() == aggregate.ceremony_context_hash()
+            && self.action_context_hash() == aggregate.action_context_hash()
+            && self.roster_hash() == aggregate.roster_hash()
+            && self.setup_proof_context_hash() == aggregate.setup_proof_context_hash()
+            && self.schedule_position() == aggregate.schedule_position()
+            && self.evaluator_position == aggregate.evaluator_position()
+            && aggregate
+                .ordered_participant_identities()
+                .get(roster_index)
+                .is_some_and(|identity| *identity == self.participant_identity)
+            && aggregate
+                .ordered_anchor_commitment_roots()
+                .get(roster_index)
+                .is_some_and(|roots| *roots == self.anchor_commitment_roots)
+            && aggregate
+                .ordered_source_root_pairs()
+                .get(roster_index)
+                .is_some_and(|roots| {
+                    *roots == [self.round_one_left_root, self.round_one_right_root]
+                })
+            && aggregate.aggregate_left_root() == self.aggregate_round_one_left_root
+            && aggregate.aggregate_right_root() == self.aggregate_round_one_right_root
     }
 
     pub(crate) fn complete(
         self,
         _verified_proof: ConsumedVerifiedCommonProofCapability,
-        _contribution_tree: VerifiedStreamedProofTreeTerminal,
+        contribution_tree: SetupPublicPolynomialTree,
         material: VerifiedKeySwitchComponentMaterial,
     ) -> VerifiedRelinearizationSourceMaterial {
+        let _contribution_tree = self.contribution_tree_preflight.complete(contribution_tree);
         VerifiedRelinearizationSourceMaterial {
             proof_binding: self.proof_binding,
             proof_stream_descriptor: self.proof_stream_descriptor,
@@ -476,25 +597,12 @@ impl VerifiedRelinearizationSourceMaterialPreflight {
 }
 
 impl VerifiedRelinearizationSourceMaterial {
-    pub(crate) fn from_consumed_common_proof(
-        verified_proof: ConsumedVerifiedCommonProofCapability,
-        canonical_application_statement_bytes: &[u8],
-        contribution_tree: VerifiedStreamedProofTreeTerminal,
-        material: VerifiedKeySwitchComponentMaterial,
-    ) -> Result<Self, CommonProofVerifierError> {
-        let preflight = Self::preflight_from_borrowed_common_proof(
-            verified_proof.borrowed(),
-            canonical_application_statement_bytes,
-            &contribution_tree,
-            &material,
-        )?;
-        Ok(preflight.complete(verified_proof, contribution_tree, material))
-    }
-
     pub(crate) fn preflight_from_borrowed_common_proof(
         verified_proof: BorrowedVerifiedCommonProofCapability<'_>,
         canonical_application_statement_bytes: &[u8],
-        contribution_tree: &VerifiedStreamedProofTreeTerminal,
+        roster_hash: [u8; Hash512::BYTE_LENGTH],
+        statement_trees: &[VerifiedStatementOwnedTree],
+        contribution_tree: &SetupPublicPolynomialTree,
         material: &VerifiedKeySwitchComponentMaterial,
     ) -> Result<VerifiedRelinearizationSourceMaterialPreflight, CommonProofVerifierError> {
         let proof_binding = VerifiedRelinearizationProofBinding {
@@ -502,7 +610,7 @@ impl VerifiedRelinearizationSourceMaterial {
             suite_identifier: verified_proof.suite_identifier(),
             ceremony_context_hash: verified_proof.ceremony_context_hash(),
             action_context_hash: verified_proof.action_context_hash(),
-            roster_hash: contribution_tree.roster_hash(),
+            roster_hash,
             board_object_hash: verified_proof.board_object_hash(),
             verification_binding_hash: verified_proof.verification_binding_hash(),
             proof_application_slot_hash: verified_proof.proof_application_slot_hash(),
@@ -578,60 +686,73 @@ impl VerifiedRelinearizationSourceMaterial {
             Some(schedule_position),
             None,
         )
-        .and_then(|context| context.context_hash())
         .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?;
+        let selected_plan_artifact = selected_relation_plans()
+            .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?
+            .into_iter()
+            .find(|artifact| {
+                artifact.application_statement_schema_identifier()
+                    == ProofApplicationSlotCeilings::RELINEARIZATION_ROUND_TWO_STATEMENT_SCHEMA_IDENTIFIER
+            })
+            .ok_or(CommonProofVerifierError::InvalidApplicationStatement)?;
+        let selected_plan = selected_plan_artifact.compiled_plan();
+        let selected_variant = selected_plan
+            .select_variant(Some(schedule_position), None)
+            .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?;
+        if selected_plan
+            .canonical_hash()
+            .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?
+            != verified_proof.relation_plan_hash()
+            || selected_variant
+                .canonical_hash()
+                .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?
+                != verified_proof.relation_plan_variant_hash()
+        {
+            return Err(CommonProofVerifierError::InvalidApplicationStatement);
+        }
+        let expected_tree = selected_variant
+            .ordered_trees()
+            .get(
+                usize::try_from(ROUND_TWO_ORDERED_TREE_ORDINAL)
+                    .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?,
+            )
+            .ok_or(CommonProofVerifierError::InvalidApplicationStatement)?;
+        let expected_column_count = match expected_tree {
+            RelationTreeDescriptor::BoundPublic {
+                construction_kind: BoundTreeConstructionKind::SetupPolynomial,
+                expected_root_source_ordinal,
+                root_use: BoundTreeRootUse::Output,
+                ordered_column_ordinals,
+            } if *expected_root_source_ordinal == ROUND_TWO_ROOT_SOURCE_ORDINAL => {
+                ordered_column_ordinals.len()
+            }
+            _ => return Err(CommonProofVerifierError::InvalidApplicationStatement),
+        };
         let selected_candidate = EvaluatorCandidateInput::implemented()
             .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?;
         let expected_column_moduli =
             expected_component_column_moduli(&selected_candidate, material)?;
+        let statement_tree = exact_statement_tree(
+            statement_trees,
+            ROUND_TWO_ORDERED_TREE_ORDINAL,
+            ROUND_TWO_ROOT_SOURCE_ORDINAL,
+            statement.contribution_root(),
+        )?;
         let material_ownership = ComponentMaterialOwnershipBinding::from_verified_application(
             proof_binding.suite_identifier,
             proof_binding.action_context_hash,
             proof_binding.application_statement_hash,
         );
-        if contribution_tree.protocol_version() != proof_binding.protocol_version
-            || contribution_tree.suite_identifier() != proof_binding.suite_identifier
-            || contribution_tree.ceremony_context_hash() != proof_binding.ceremony_context_hash
-            || contribution_tree.action_context_hash() != proof_binding.action_context_hash
-            || contribution_tree.roster_hash() != proof_binding.roster_hash
-            || contribution_tree.application_statement_schema_identifier()
-                != ProofApplicationSlotCeilings::RELINEARIZATION_ROUND_TWO_STATEMENT_SCHEMA_IDENTIFIER
-            || contribution_tree.application_statement_hash()
-                != proof_binding.application_statement_hash
-            || contribution_tree.relation_plan_variant_hash()
-                != proof_binding.relation_plan_variant_hash
-            || contribution_tree.canonical_application_statement_bytes()
-                != canonical_application_statement_bytes
-            || contribution_tree.setup_proof_context_hash()
-                != statement.setup_proof_context_hash()
-            || contribution_tree.owner_participant_identity()
-                != Some(statement.participant_identity())
-            || contribution_tree.owner_roster_position() != Some(statement.roster_position())
-            || contribution_tree.schedule_position() != Some(schedule_position)
-            || contribution_tree.ordered_tree_ordinal() != ROUND_TWO_ORDERED_TREE_ORDINAL
-            || contribution_tree.expected_root_source_ordinal()
-                != ROUND_TWO_ROOT_SOURCE_ORDINAL
-            || contribution_tree.root_role()
-                != SetupPublicPolynomialRootRole::RelinearizationRoundTwo
-            || contribution_tree.public_polynomial_context_hash()
-                != expected_public_polynomial_context
-            || contribution_tree.root() != statement.contribution_root()
+        if contribution_tree.root() != statement.contribution_root()
             || contribution_tree.source_polynomial_degree_bound_exclusive()
-                != material.topology().polynomial_degree()
-            || contribution_tree.ordered_canonical_residue_moduli()
-                != expected_column_moduli.as_ref()
-            || material
-                .topology()
-                .trace_column_count()
-                .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?
-                != contribution_tree.ordered_canonical_residue_moduli().len()
+                != material
+                    .topology()
+                    .quarter_polynomial_degree_bound_exclusive()
+                    .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?
+            || statement_tree.ordered_canonical_residue_moduli() != expected_column_moduli.as_ref()
+            || usize::try_from(contribution_tree.row_width()).ok() != Some(expected_column_count)
             || usize::try_from(contribution_tree.row_width()).ok()
-                != Some(contribution_tree.ordered_canonical_residue_moduli().len())
-            || contribution_tree.source_stream_domain()
-                != Some(CanonicalStreamDomain::EvaluatorKeyStore)
-            || contribution_tree.source_material_root()
-                != Some(material.material_root().into_bytes())
-            || contribution_tree.source_stream_descriptor() != Some(material.stream_descriptor())
+                != Some(expected_column_moduli.len())
             || !material.binds_ownership(material_ownership)
             || !material_topology_matches_selected_catalog_level(
                 &selected_candidate,
@@ -641,6 +762,21 @@ impl VerifiedRelinearizationSourceMaterial {
         {
             return Err(CommonProofVerifierError::InvalidApplicationStatement);
         }
+        let contribution_tree_preflight =
+            VerifiedStreamedProofTreeTerminal::preflight_from_recomputed_key_switch_component_tree(
+                verified_proof.verified_proof(),
+                canonical_application_statement_bytes,
+                proof_binding.ceremony_context_hash,
+                proof_binding.action_context_hash,
+                proof_binding.roster_hash,
+                ROUND_TWO_ORDERED_TREE_ORDINAL,
+                ROUND_TWO_ROOT_SOURCE_ORDINAL,
+                statement.contribution_root(),
+                expected_public_polynomial_context,
+                expected_column_moduli.into_vec(),
+                material,
+                contribution_tree,
+            )?;
 
         Ok(VerifiedRelinearizationSourceMaterialPreflight {
             proof_binding,
@@ -657,6 +793,7 @@ impl VerifiedRelinearizationSourceMaterial {
             aggregate_round_one_left_root: statement.aggregate_round_one_left_root(),
             aggregate_round_one_right_root: statement.aggregate_round_one_right_root(),
             contribution_root: statement.contribution_root(),
+            contribution_tree_preflight,
         })
     }
 
@@ -758,7 +895,7 @@ pub(crate) struct VerifiedRelinearizationAggregateMaterial {
     ordered_anchor_commitment_roots: Box<[[[u8; Hash512::BYTE_LENGTH]; 3]]>,
     ordered_round_one_proof_stream_descriptors: Box<[StreamDescriptor]>,
     ordered_source_root_pairs: Box<[[[u8; Hash512::BYTE_LENGTH]; 2]]>,
-    ordered_round_one_sources: Box<[VerifiedRelinearizationRoundOneSourceMaterial]>,
+    ordered_round_one_sources: Vec<VerifiedRelinearizationRoundOneSourceMaterial>,
     aggregate_left_tree: VerifiedStatementOwnedTree,
     aggregate_left_material: VerifiedKeySwitchComponentMaterial,
     aggregate_right_tree: VerifiedStatementOwnedTree,
@@ -775,18 +912,57 @@ pub(crate) struct VerifiedRelinearizationAggregateMaterialPreflight {
     ordered_anchor_commitment_roots: Box<[[[u8; Hash512::BYTE_LENGTH]; 3]]>,
     ordered_round_one_proof_stream_descriptors: Box<[StreamDescriptor]>,
     ordered_source_root_pairs: Box<[[[u8; Hash512::BYTE_LENGTH]; 2]]>,
+    aggregate_tree_preflights: [VerifiedStreamedProofTreeTerminalPreflight; 2],
 }
 
 impl VerifiedRelinearizationAggregateMaterialPreflight {
+    pub(crate) const fn protocol_version(&self) -> u16 {
+        self.proof_binding.protocol_version
+    }
+
+    pub(crate) const fn suite_identifier(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.proof_binding.suite_identifier
+    }
+
+    pub(crate) const fn ceremony_context_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.proof_binding.ceremony_context_hash
+    }
+
+    pub(crate) const fn action_context_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.proof_binding.action_context_hash
+    }
+
+    pub(crate) const fn roster_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.proof_binding.roster_hash
+    }
+
+    pub(crate) const fn setup_proof_context_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.setup_proof_context_hash
+    }
+
+    pub(crate) const fn schedule_position(&self) -> u32 {
+        self.schedule_position
+    }
+
+    pub(crate) fn ordered_participant_identities(&self) -> &[[u8; Hash512::BYTE_LENGTH]] {
+        &self.ordered_participant_identities
+    }
+
     pub(crate) fn complete(
         self,
         _verified_proof: ConsumedVerifiedCommonProofCapability,
         ordered_sources: Vec<VerifiedRelinearizationRoundOneSourceMaterial>,
-        aggregate_left_tree: VerifiedStreamedProofTreeTerminal,
+        aggregate_left_tree: SetupPublicPolynomialTree,
         aggregate_left_material: VerifiedKeySwitchComponentMaterial,
-        aggregate_right_tree: VerifiedStreamedProofTreeTerminal,
+        aggregate_right_tree: SetupPublicPolynomialTree,
         aggregate_right_material: VerifiedKeySwitchComponentMaterial,
     ) -> VerifiedRelinearizationAggregateMaterial {
+        let [
+            aggregate_left_tree_preflight,
+            aggregate_right_tree_preflight,
+        ] = self.aggregate_tree_preflights;
+        let aggregate_left_tree = aggregate_left_tree_preflight.complete(aggregate_left_tree);
+        let aggregate_right_tree = aggregate_right_tree_preflight.complete(aggregate_right_tree);
         let aggregate_left_tree = aggregate_left_tree.statement_owned_tree();
         let aggregate_right_tree = aggregate_right_tree.statement_owned_tree();
         VerifiedRelinearizationAggregateMaterial {
@@ -800,7 +976,7 @@ impl VerifiedRelinearizationAggregateMaterialPreflight {
             ordered_round_one_proof_stream_descriptors: self
                 .ordered_round_one_proof_stream_descriptors,
             ordered_source_root_pairs: self.ordered_source_root_pairs,
-            ordered_round_one_sources: ordered_sources.into_boxed_slice(),
+            ordered_round_one_sources: ordered_sources,
             aggregate_left_tree,
             aggregate_left_material,
             aggregate_right_tree,
@@ -810,42 +986,16 @@ impl VerifiedRelinearizationAggregateMaterialPreflight {
 }
 
 impl VerifiedRelinearizationAggregateMaterial {
-    pub(crate) fn from_consumed_common_proof(
-        verified_proof: ConsumedVerifiedCommonProofCapability,
-        canonical_application_statement_bytes: &[u8],
-        ordered_sources: Vec<VerifiedRelinearizationRoundOneSourceMaterial>,
-        aggregate_left_tree: VerifiedStreamedProofTreeTerminal,
-        aggregate_left_material: VerifiedKeySwitchComponentMaterial,
-        aggregate_right_tree: VerifiedStreamedProofTreeTerminal,
-        aggregate_right_material: VerifiedKeySwitchComponentMaterial,
-    ) -> Result<Self, CommonProofVerifierError> {
-        let preflight = Self::preflight_from_borrowed_common_proof(
-            verified_proof.borrowed(),
-            canonical_application_statement_bytes,
-            &ordered_sources,
-            &aggregate_left_tree,
-            &aggregate_left_material,
-            &aggregate_right_tree,
-            &aggregate_right_material,
-        )?;
-        Ok(preflight.complete(
-            verified_proof,
-            ordered_sources,
-            aggregate_left_tree,
-            aggregate_left_material,
-            aggregate_right_tree,
-            aggregate_right_material,
-        ))
-    }
-
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn preflight_from_borrowed_common_proof(
         verified_proof: BorrowedVerifiedCommonProofCapability<'_>,
         canonical_application_statement_bytes: &[u8],
-        ordered_sources: &[VerifiedRelinearizationRoundOneSourceMaterial],
-        aggregate_left_tree: &VerifiedStreamedProofTreeTerminal,
+        roster_hash: [u8; Hash512::BYTE_LENGTH],
+        statement_trees: &[VerifiedStatementOwnedTree],
+        ordered_sources: &[&VerifiedRelinearizationRoundOneSourceMaterial],
+        aggregate_left_tree: &SetupPublicPolynomialTree,
         aggregate_left_material: &VerifiedKeySwitchComponentMaterial,
-        aggregate_right_tree: &VerifiedStreamedProofTreeTerminal,
+        aggregate_right_tree: &SetupPublicPolynomialTree,
         aggregate_right_material: &VerifiedKeySwitchComponentMaterial,
     ) -> Result<VerifiedRelinearizationAggregateMaterialPreflight, CommonProofVerifierError> {
         let schedule_position = verified_proof
@@ -906,7 +1056,7 @@ impl VerifiedRelinearizationAggregateMaterial {
                 || source.suite_identifier() != verified_proof.suite_identifier()
                 || source.ceremony_context_hash() != verified_proof.ceremony_context_hash()
                 || source.action_context_hash() != verified_proof.action_context_hash()
-                || source.roster_hash() != aggregate_left_tree.roster_hash()
+                || source.roster_hash() != roster_hash
                 || source.setup_proof_context_hash() != setup_proof_context_hash
                 || source.roster_position() != roster_position
                 || source.schedule_position() != schedule_position
@@ -919,9 +1069,6 @@ impl VerifiedRelinearizationAggregateMaterial {
             ordered_anchor_commitment_roots.push(source.anchor_commitment_roots());
             ordered_round_one_proof_stream_descriptors
                 .push(source.proof_stream_descriptor().clone());
-        }
-        if aggregate_left_tree.roster_hash() != aggregate_right_tree.roster_hash() {
-            return Err(CommonProofVerifierError::InvalidApplicationStatement);
         }
         let reconstructed_application_slot = ProofApplicationSlot::new(
             Hash512::from_bytes(verified_proof.suite_identifier()),
@@ -984,6 +1131,10 @@ impl VerifiedRelinearizationAggregateMaterial {
             verified_proof.action_context_hash(),
             verified_proof.application_statement_hash(),
         );
+        let mut aggregate_tree_preflights = Vec::new();
+        aggregate_tree_preflights
+            .try_reserve_exact(2)
+            .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?;
         for (tree, material, tree_ordinal, expected_root, expected_role) in [
             (
                 aggregate_left_tree,
@@ -1018,7 +1169,7 @@ impl VerifiedRelinearizationAggregateMaterial {
             };
             let expected_column_moduli =
                 expected_component_column_moduli(&selected_candidate, material)?;
-            let expected_public_polynomial_context_hash = SetupPublicPolynomialContext::new(
+            let context = SetupPublicPolynomialContext::new(
                 setup_proof_context_hash,
                 expected_role,
                 None,
@@ -1026,36 +1177,22 @@ impl VerifiedRelinearizationAggregateMaterial {
                 Some(schedule_position),
                 None,
             )
-            .and_then(|context| context.context_hash())
             .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?;
-            if tree.protocol_version() != verified_proof.protocol_version()
-                || tree.suite_identifier() != verified_proof.suite_identifier()
-                || tree.ceremony_context_hash() != verified_proof.ceremony_context_hash()
-                || tree.action_context_hash() != verified_proof.action_context_hash()
-                || tree.application_statement_schema_identifier()
-                    != ProofApplicationSlotCeilings::RKG_ROUND_ONE_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER
-                || tree.application_statement_hash() != verified_proof.application_statement_hash()
-                || tree.relation_plan_variant_hash()
-                    != verified_proof.relation_plan_variant_hash()
-                || tree.canonical_application_statement_bytes()
-                    != canonical_application_statement_bytes
-                || tree.ordered_tree_ordinal() != tree_ordinal
-                || tree.expected_root_source_ordinal() != expected_root_source_ordinal
-                || tree.setup_proof_context_hash() != setup_proof_context_hash
-                || tree.root_role() != expected_role
-                || tree.owner_participant_identity().is_some()
-                || tree.owner_roster_position().is_some()
-                || tree.schedule_position() != Some(schedule_position)
-                || tree.public_polynomial_context_hash()
-                    != expected_public_polynomial_context_hash
-                || tree.root() != expected_root
+            let statement_tree = exact_statement_tree(
+                statement_trees,
+                tree_ordinal,
+                expected_root_source_ordinal,
+                expected_root,
+            )?;
+            if tree.root() != expected_root
                 || tree.source_polynomial_degree_bound_exclusive()
-                    != material.topology().polynomial_degree()
+                    != material
+                        .topology()
+                        .quarter_polynomial_degree_bound_exclusive()
+                        .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?
                 || usize::try_from(tree.row_width()).ok() != Some(expected_column_count)
-                || tree.ordered_canonical_residue_moduli() != expected_column_moduli.as_ref()
-                || tree.source_stream_domain() != Some(CanonicalStreamDomain::EvaluatorKeyStore)
-                || tree.source_material_root() != Some(material.material_root().into_bytes())
-                || tree.source_stream_descriptor() != Some(material.stream_descriptor())
+                || statement_tree.ordered_canonical_residue_moduli()
+                    != expected_column_moduli.as_ref()
                 || !material.binds_ownership(material_ownership)
                 || !material_topology_matches_selected_catalog_level(
                     &selected_candidate,
@@ -1065,7 +1202,26 @@ impl VerifiedRelinearizationAggregateMaterial {
             {
                 return Err(CommonProofVerifierError::InvalidApplicationStatement);
             }
+            aggregate_tree_preflights.push(
+                VerifiedStreamedProofTreeTerminal::preflight_from_recomputed_key_switch_component_tree(
+                    verified_proof.verified_proof(),
+                    canonical_application_statement_bytes,
+                    verified_proof.ceremony_context_hash(),
+                    verified_proof.action_context_hash(),
+                    roster_hash,
+                    tree_ordinal,
+                    expected_root_source_ordinal,
+                    expected_root,
+                    context,
+                    expected_column_moduli.into_vec(),
+                    material,
+                    tree,
+                )?,
+            );
         }
+        let aggregate_tree_preflights = aggregate_tree_preflights
+            .try_into()
+            .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?;
 
         let proof_stream_descriptor = verified_proof.proof_stream_descriptor().clone();
         let proof_binding = VerifiedRelinearizationProofBinding {
@@ -1073,7 +1229,7 @@ impl VerifiedRelinearizationAggregateMaterial {
             suite_identifier: verified_proof.suite_identifier(),
             ceremony_context_hash: verified_proof.ceremony_context_hash(),
             action_context_hash: verified_proof.action_context_hash(),
-            roster_hash: aggregate_right_tree.roster_hash(),
+            roster_hash,
             board_object_hash: verified_proof.board_object_hash(),
             verification_binding_hash: verified_proof.verification_binding_hash(),
             proof_application_slot_hash: verified_proof.proof_application_slot_hash(),
@@ -1098,6 +1254,7 @@ impl VerifiedRelinearizationAggregateMaterial {
             ordered_round_one_proof_stream_descriptors: ordered_round_one_proof_stream_descriptors
                 .into_boxed_slice(),
             ordered_source_root_pairs: statement.ordered_source_root_pairs().into(),
+            aggregate_tree_preflights,
         })
     }
 

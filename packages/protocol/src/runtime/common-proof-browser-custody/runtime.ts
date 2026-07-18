@@ -96,6 +96,9 @@ export const openCommonProofBrowserCustody = (
     let latestCheckpointResumeDescriptor:
         | CommonProofCheckpointResumeDescriptor
         | undefined;
+    let initialCheckpointOperationIdentity:
+        | CheckpointOperationIdentity
+        | undefined;
     try {
         actionRandomnessCommitment = copyExactBytes(
             input.actionRandomnessCommitment,
@@ -127,22 +130,52 @@ export const openCommonProofBrowserCustody = (
         applicationHandoffLogicalRecordKey =
             commonProofApplicationHandoffLogicalRecordKey;
         latestCheckpointResumeDescriptor =
-            input.checkpoint?.resumeDescriptor === undefined
-                ? undefined
-                : copyCheckpointResumeDescriptor(
+            input.checkpoint !== undefined &&
+            'resumeDescriptor' in input.checkpoint
+                ? copyCheckpointResumeDescriptor(
                       input.checkpoint.resumeDescriptor,
-                  );
+                  )
+                : undefined;
+        initialCheckpointOperationIdentity =
+            input.checkpoint !== undefined &&
+            'operationIdentity' in input.checkpoint
+                ? input.checkpoint.operationIdentity
+                : undefined;
         if (
             latestCheckpointResumeDescriptor !== undefined &&
-            !bytesEqual(
+            (!bytesEqual(
                 latestCheckpointResumeDescriptor.commonProofEnvironmentIdentifier,
                 commonProofEnvironmentIdentifier,
-            )
+            ) ||
+                latestCheckpointResumeDescriptor.privateRandomnessStreamAttemptIdentifier ===
+                    undefined ||
+                !bytesEqual(
+                    latestCheckpointResumeDescriptor.privateRandomnessStreamAttemptIdentifier,
+                    proofAttemptLineageIdentifier,
+                ))
         ) {
             throw new BrowserActionStorageCustodyError(
                 'RecordAuthenticationFailed',
-                'The resumed common-proof environment identifier differs from the authenticated checkpoint.',
+                'The resumed common-proof environment or proof-attempt lineage differs from the authenticated checkpoint.',
             );
+        }
+        if (initialCheckpointOperationIdentity !== undefined) {
+            const boundProofAttemptLineageIdentifier =
+                initialCheckpointOperationIdentity.privateRandomnessStreamAttemptIdentifier;
+            if (
+                boundProofAttemptLineageIdentifier === undefined ||
+                !bytesEqual(
+                    boundProofAttemptLineageIdentifier,
+                    proofAttemptLineageIdentifier,
+                )
+            ) {
+                boundProofAttemptLineageIdentifier?.fill(0);
+                throw new BrowserActionStorageCustodyError(
+                    'RecordAuthenticationFailed',
+                    'The reserved checkpoint lineage is not bound to this common-proof attempt.',
+                );
+            }
+            boundProofAttemptLineageIdentifier.fill(0);
         }
     } catch (error) {
         actionRandomnessCommitment?.fill(0);
@@ -174,7 +207,7 @@ export const openCommonProofBrowserCustody = (
     let applicationHandoffArmed = false;
     let state: 'open' | 'releasing-external-memory' | 'retiring' | 'retired' =
         'open';
-    let checkpointOperationIdentity: CheckpointOperationIdentity | undefined;
+    let checkpointOperationIdentity = initialCheckpointOperationIdentity;
     let checkpointRestoreAttempted = false;
     const assertOpen = (): void => {
         if (state !== 'open') {
@@ -356,10 +389,10 @@ export const openCommonProofBrowserCustody = (
                                   checkpoint.stableAttemptBindingHash,
                           }) as CheckpointBoundary;
                           if (checkpointOperationIdentity === undefined) {
-                              checkpointOperationIdentity =
-                                  await input.checkpoint!.store.beginOperation(
-                                      privateRandomnessStreamAttemptIdentifier,
-                                  );
+                              throw new BrowserActionStorageCustodyError(
+                                  'InvalidState',
+                                  'Fresh common-proof checkpoint publication lost its pre-bound lineage identity.',
+                              );
                           }
                           await input.checkpoint!.store.publish({
                               boundary,

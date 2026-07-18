@@ -16,11 +16,11 @@ use super::super::{
 use super::{
     AnchorOpeningWitness, AnchorQuotientWitness, BoundPolynomialRootUse, BoundedUnsignedColumn,
     KeyRelationPlanBuilder, KeyVerifierSourceKey, MATERIAL_DIGIT_RADIX, MATERIAL_DIGIT_TRIT_COUNT,
-    MODULAR_QUOTIENT_BIT_COUNT, ProofTreePhase, RecenteredVerifierVectorWitness,
-    QuarterBackedSplitIntegerVector, ReversibleShiftedSmallVector, ShiftedSmallVector,
-    SplitIntegerVector, TRIT_RADIX,
-    TRUSTEE_QUOTIENT_LOW_TRIT_COUNT, TargetBoundedUnsignedVector, TargetCenteredVector,
-    TargetCommittedMaterialVector, TrusteeAnchorOpeningWitness, TrusteeRadixThreeQuotientWitness,
+    MODULAR_QUOTIENT_BIT_COUNT, ProofTreePhase, QuarterBackedSplitIntegerVector,
+    RecenteredVerifierVectorWitness, ReversibleShiftedSmallVector, ShiftedSmallVector,
+    SplitIntegerVector, TRIT_RADIX, TRUSTEE_QUOTIENT_LOW_TRIT_COUNT, TargetBoundedUnsignedVector,
+    TargetCenteredVector, TargetCommittedMaterialVector, TrusteeAnchorOpeningWitness,
+    TrusteeRadixThreeQuotientWitness,
     column_builder::{fixed_radix_digits, minimum_unsigned_radix_digit_count},
 };
 
@@ -238,7 +238,7 @@ impl<'context> KeyRelationPlanBuilder<'context> {
         let mut tree_columns = Vec::with_capacity(
             ordered_modulus_references
                 .len()
-                .checked_mul(6)
+                .checked_mul(4)
                 .ok_or(RelationPlanError::CountOverflow)?,
         );
         let mut limbs = Vec::with_capacity(ordered_modulus_references.len());
@@ -278,7 +278,7 @@ impl<'context> KeyRelationPlanBuilder<'context> {
         let mut tree_columns = Vec::with_capacity(
             ordered_row_modulus_references
                 .len()
-                .checked_mul(6)
+                .checked_mul(4)
                 .ok_or(RelationPlanError::CountOverflow)?,
         );
         let mut rows = Vec::with_capacity(ordered_row_modulus_references.len());
@@ -312,17 +312,18 @@ impl<'context> KeyRelationPlanBuilder<'context> {
         modulus_reference: SuiteModulusReference,
         tree_columns: &mut Vec<u32>,
     ) -> Result<QuarterBackedSplitIntegerVector, RelationPlanError> {
-        let quarter_degree_bound_exclusive = self
-            .geometry
-            .public_polynomial_column_degree_bound_exclusive;
         let trace_domain_size = self.geometry.trace_domain_size()?;
-        if quarter_degree_bound_exclusive
-            .checked_mul(2)
-            .filter(|degree| *degree == trace_domain_size)
-            .is_none()
-        {
-            return Err(RelationPlanError::InvalidDomain);
-        }
+        let quarter_degree_bound_exclusive = trace_domain_size
+            .checked_div(2)
+            .filter(|quarter_degree| {
+                *quarter_degree > 0
+                    && *quarter_degree * 2 == trace_domain_size
+                    && self
+                        .geometry
+                        .public_polynomial_column_degree_bound_exclusive
+                        == trace_domain_size
+            })
+            .ok_or(RelationPlanError::InvalidDomain)?;
         let mut quarters = Vec::with_capacity(4);
         for _ in 0..4 {
             quarters.push(self.push_column(
@@ -337,12 +338,10 @@ impl<'context> KeyRelationPlanBuilder<'context> {
         let mut half_projections = Vec::with_capacity(2);
         for half_ordinal in 0..2 {
             let half_projection = self.push_column(
-                RelationColumnOrigin::BoundTree {
-                    expected_root_source_ordinal: source_ordinal,
-                },
+                RelationColumnOrigin::Prover,
                 trace_domain_size,
                 Some(modulus_reference),
-                None,
+                Some(ProofTreePhase::Base),
             )?;
             let first_quarter = quarters[half_ordinal * 2];
             let second_quarter = quarters[half_ordinal * 2 + 1];
@@ -353,9 +352,7 @@ impl<'context> KeyRelationPlanBuilder<'context> {
                     RelationExpressionInstruction::Negation,
                     RelationExpressionInstruction::Addition,
                     RelationExpressionInstruction::EvaluationVariable,
-                    RelationExpressionInstruction::NonnegativePower(
-                        quarter_degree_bound_exclusive,
-                    ),
+                    RelationExpressionInstruction::NonnegativePower(quarter_degree_bound_exclusive),
                     unrotated_column_expression(second_quarter),
                     RelationExpressionInstruction::Multiplication,
                     RelationExpressionInstruction::Negation,
@@ -374,7 +371,6 @@ impl<'context> KeyRelationPlanBuilder<'context> {
                 .map_err(|_| RelationPlanError::CountOverflow)?,
         };
         tree_columns.extend(quarters);
-        tree_columns.extend(half_projections.halves);
         Ok(QuarterBackedSplitIntegerVector {
             quarters,
             half_projections,
@@ -786,13 +782,14 @@ impl<'context> KeyRelationPlanBuilder<'context> {
         &mut self,
         canonical_vector: SplitIntegerVector,
         modulus_reference: SuiteModulusReference,
-    ) -> Result<ReversibleShiftedSmallVector, RelationPlanError> {
+    ) -> Result<RecenteredVerifierVectorWitness, RelationPlanError> {
         let modulus = self.modulus(modulus_reference)?;
         let centered_offset = modulus
             .checked_sub(1)
             .ok_or(RelationPlanError::InvalidModulus)?
             / 2;
         let mut shifted_centered_halves = Vec::with_capacity(2);
+        let mut carry_columns = Vec::with_capacity(2);
         for canonical_half in canonical_vector.halves {
             let shifted_centered =
                 self.add_canonical_modulus_column(modulus_reference, ProofTreePhase::Base)?;
@@ -815,16 +812,23 @@ impl<'context> KeyRelationPlanBuilder<'context> {
             ];
             self.add_full_trace_constraint(expression, true)?;
             shifted_centered_halves.push(shifted_centered);
+            carry_columns.push(recentering_carry);
         }
-        Ok(ReversibleShiftedSmallVector {
-            source: ShiftedSmallVector {
-                coefficients: SplitIntegerVector {
-                    halves: shifted_centered_halves
-                        .try_into()
-                        .map_err(|_| RelationPlanError::CountOverflow)?,
+        Ok(RecenteredVerifierVectorWitness {
+            canonical: canonical_vector,
+            centered: ReversibleShiftedSmallVector {
+                source: ShiftedSmallVector {
+                    coefficients: SplitIntegerVector {
+                        halves: shifted_centered_halves
+                            .try_into()
+                            .map_err(|_| RelationPlanError::CountOverflow)?,
+                    },
+                    offset: centered_offset,
                 },
-                offset: centered_offset,
             },
+            carry_columns: carry_columns
+                .try_into()
+                .map_err(|_| RelationPlanError::CountOverflow)?,
         })
     }
 

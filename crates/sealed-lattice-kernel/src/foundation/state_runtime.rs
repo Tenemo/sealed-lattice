@@ -1075,6 +1075,25 @@ pub(crate) fn verified_state_reservation_binding(
     })
 }
 
+/// Borrows one genuine reservation together with the anchored state verifier.
+/// This is the generation-side counterpart of the reservation-and-output
+/// terminal seam below: it exposes no serialized authority and never consumes
+/// the reservation during a retryable proof attempt.
+pub(crate) fn with_verified_state_reservation<Value>(
+    session_handle: u32,
+    capability: &[u8],
+    verified_reservation_handle: u32,
+    operation: impl FnOnce(&StateVerifier, &VerifiedStateReservation) -> RuntimeResult<Value>,
+) -> RuntimeResult<Value> {
+    with_runtime_registry(|registry| {
+        let session = registry.require_active_session(session_handle, capability)?;
+        operation(
+            &session.verifier,
+            session.reservation(verified_reservation_handle)?,
+        )
+    })
+}
+
 /// Commits one accepted setup against its complete state authority atomically.
 ///
 /// The first handle set must contain exactly the fixed ten kind-four

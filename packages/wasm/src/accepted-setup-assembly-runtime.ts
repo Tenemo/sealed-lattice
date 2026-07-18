@@ -58,6 +58,7 @@ type AcceptedSetupEvaluatorSourceCatalogExports = Required<
     Pick<
         TranscriptCoreKernelExports,
         | 'sealed_lattice_accepted_setup_verification_transfer_prepackage_evaluator_sources'
+        | 'sealed_lattice_prepackage_evaluator_generated_proofs_bind_package'
         | 'sealed_lattice_prepackage_evaluator_source_catalog_begin'
         | 'sealed_lattice_prepackage_evaluator_source_catalog_cancel'
         | 'sealed_lattice_prepackage_evaluator_source_catalog_complete'
@@ -122,6 +123,7 @@ type AcceptedSetupEvaluatorComponentBackingRecord = {
         exactByteLength: number,
     ) => Promise<Uint8Array>;
     readonly release: () => void;
+    retained: boolean;
     released: boolean;
 };
 
@@ -300,6 +302,8 @@ const requireEvaluatorSourceCatalogContext = (
             'function' ||
         typeof wasmExports.sealed_lattice_prepackage_evaluator_source_catalog_cancel !==
             'function' ||
+        typeof wasmExports.sealed_lattice_prepackage_evaluator_generated_proofs_bind_package !==
+            'function' ||
         typeof wasmExports.sealed_lattice_accepted_setup_verification_transfer_prepackage_evaluator_sources !==
             'function'
     ) {
@@ -459,6 +463,43 @@ const transferEvaluatorSourceCatalogSession = (
         catalogRecord.evaluatorComponentBackings;
     catalogRecord.evaluatorComponentBackings = new Map();
     evaluatorSourceCatalogSessionRecords.delete(session);
+};
+
+/**
+ * Atomically binds every generated evaluator-source proof to the canonical
+ * package slots held by the exact accepted-setup assembly. A refusal consumes
+ * neither session and remains retryable.
+ */
+export const bindAcceptedSetupEvaluatorGeneratedProofsToPackage = (input: {
+    acceptedSetupVerification: AcceptedSetupVerificationSession;
+    catalog: AcceptedSetupEvaluatorSourceCatalogSession;
+    kernel: TranscriptCoreKernel;
+}): void => {
+    const catalogRecord = requireEvaluatorSourceCatalogSessionRecord(
+        input.catalog,
+    );
+    const assemblyRecord = requireSessionRecord(
+        input.acceptedSetupVerification,
+    );
+    if (
+        catalogRecord.kernel !== input.kernel ||
+        assemblyRecord.kernel !== input.kernel ||
+        catalogRecord.phase !== 'collecting' ||
+        assemblyRecord.phase !== 'collecting' ||
+        catalogRecord.vssRecipientAuthority !==
+            assemblyRecord.vssRecipientAuthority
+    ) {
+        throw new CanonicalStreamRefusalError('wrongContext');
+    }
+    const status = catalogRecord.context.runExclusive(
+        'prepackage generated-proof package binding',
+        () =>
+            catalogRecord.context.wasmExports.sealed_lattice_prepackage_evaluator_generated_proofs_bind_package(
+                assemblyRecord.handle,
+                catalogRecord.handle,
+            ),
+    );
+    createStatusBoundary().throwIfError(status);
 };
 
 const completeEvaluatorSources = (
@@ -917,9 +958,10 @@ export const requireAcceptedSetupEvaluatorSourceCatalogKernelOwner = (
 };
 
 /**
- * Mints an internal backing only after a family adapter has obtained the
- * component identity from its positive Rust terminal. This helper is not part
- * of the package entry point and exposes no component identity on the object.
+ * Mints internal custody from Rust-authenticated component readback. Custody
+ * does not accept the proof; only the later positive family terminal can do
+ * that. This helper is not part of the package entry point and exposes no
+ * component identity on the object.
  */
 export const createAcceptedSetupEvaluatorComponentBacking = (input: {
     authenticatedByteLength: bigint;
@@ -955,6 +997,7 @@ export const createAcceptedSetupEvaluatorComponentBacking = (input: {
         ),
         readExactRange: input.readExactRange,
         release: input.release,
+        retained: false,
         released: false,
     };
     const backing: AcceptedSetupEvaluatorComponentBacking = Object.freeze({
@@ -964,16 +1007,24 @@ export const createAcceptedSetupEvaluatorComponentBacking = (input: {
     return backing;
 };
 
-/** Atomically gives the prepackage catalog custody of verified source bytes. */
-export const retainAcceptedSetupEvaluatorComponentBackings = (input: {
+const prepareAcceptedSetupEvaluatorComponentBackingRetention = (input: {
     backings: readonly AcceptedSetupEvaluatorComponentBacking[];
     catalog: AcceptedSetupEvaluatorSourceCatalogSession;
     kernel: TranscriptCoreKernel;
-}): void => {
+}): Readonly<{
+    catalogRecord: AcceptedSetupEvaluatorSourceCatalogSessionRecord;
+    prepared: readonly Readonly<{
+        backing: AcceptedSetupEvaluatorComponentBacking;
+        materialRootHex: string;
+    }>[];
+}> => {
     const catalogRecord = requireEvaluatorSourceCatalogSessionRecord(
         input.catalog,
     );
-    if (catalogRecord.kernel !== input.kernel || catalogRecord.phase !== 'collecting') {
+    if (
+        catalogRecord.kernel !== input.kernel ||
+        catalogRecord.phase !== 'collecting'
+    ) {
         throw new CanonicalStreamRefusalError('wrongContext');
     }
     if (input.backings.length === 0) {
@@ -985,6 +1036,7 @@ export const retainAcceptedSetupEvaluatorComponentBackings = (input: {
             input.kernel,
         );
         if (
+            record.retained ||
             catalogRecord.evaluatorComponentBackings.has(
                 record.materialRootHex,
             )
@@ -997,11 +1049,65 @@ export const retainAcceptedSetupEvaluatorComponentBackings = (input: {
     if (distinctRoots.size !== prepared.length) {
         throw new CanonicalStreamRefusalError('wrongHashOrRoot');
     }
+    return Object.freeze({
+        catalogRecord,
+        prepared: Object.freeze(prepared),
+    });
+};
+
+/** Rejects component-custody conflicts before consuming Rust proof authority. */
+export const requireAcceptedSetupEvaluatorComponentBackingsRetainable = (
+    input: {
+        backings: readonly AcceptedSetupEvaluatorComponentBacking[];
+        catalog: AcceptedSetupEvaluatorSourceCatalogSession;
+        kernel: TranscriptCoreKernel;
+    },
+): void => {
+    prepareAcceptedSetupEvaluatorComponentBackingRetention(input);
+};
+
+/** Gives the prepackage catalog custody of Rust-minted component carriers. */
+export const retainAcceptedSetupEvaluatorComponentBackings = (input: {
+    backings: readonly AcceptedSetupEvaluatorComponentBacking[];
+    catalog: AcceptedSetupEvaluatorSourceCatalogSession;
+    kernel: TranscriptCoreKernel;
+}): void => {
+    const { catalogRecord, prepared } =
+        prepareAcceptedSetupEvaluatorComponentBackingRetention(input);
     for (const entry of prepared) {
         catalogRecord.evaluatorComponentBackings.set(
             entry.materialRootHex,
             entry.backing,
         );
+        requireEvaluatorComponentBackingRecord(
+            entry.backing,
+            input.kernel,
+        ).retained = true;
+    }
+};
+
+/** Releases component carriers that were never transferred into a catalog. */
+export const releaseUnretainedAcceptedSetupEvaluatorComponentBackings = (
+    backings: readonly AcceptedSetupEvaluatorComponentBacking[],
+    kernel: TranscriptCoreKernel,
+): void => {
+    let firstFailure: unknown;
+    for (const backing of backings) {
+        try {
+            const record = requireEvaluatorComponentBackingRecord(
+                backing,
+                kernel,
+            );
+            if (record.retained) {
+                throw new CanonicalStreamRefusalError('consumedState');
+            }
+            releaseEvaluatorComponentBacking(backing);
+        } catch (error) {
+            firstFailure ??= error;
+        }
+    }
+    if (firstFailure !== undefined) {
+        throw firstFailure;
     }
 };
 
@@ -1046,7 +1152,7 @@ export const readAcceptedSetupPrepackageEvaluatorComponentExactRange = async (in
     const catalogRecord = requireEvaluatorSourceCatalogSessionRecord(
         input.catalog,
     );
-    if (catalogRecord.kernel !== input.kernel || catalogRecord.phase !== 'complete') {
+    if (catalogRecord.kernel !== input.kernel) {
         throw new CanonicalStreamRefusalError('consumedState');
     }
     const backing = resolveEvaluatorComponentBacking({
@@ -1072,7 +1178,10 @@ export const readAcceptedSetupVerificationEvaluatorComponentExactRange = async (
     sourceByteOffset: bigint;
 }): Promise<Uint8Array> => {
     const assemblyRecord = requireSessionRecord(input.acceptedSetupVerification);
-    if (assemblyRecord.kernel !== input.kernel || assemblyRecord.phase !== 'collecting') {
+    if (
+        assemblyRecord.kernel !== input.kernel ||
+        assemblyRecord.phase !== 'collecting'
+    ) {
         throw new CanonicalStreamRefusalError('consumedState');
     }
     const backing = resolveEvaluatorComponentBacking({
@@ -1094,7 +1203,10 @@ export const releaseAcceptedSetupVerificationEvaluatorComponentBackings = (
     kernel: TranscriptCoreKernel,
 ): void => {
     const assemblyRecord = requireSessionRecord(acceptedSetupVerification);
-    if (assemblyRecord.kernel !== kernel || assemblyRecord.phase !== 'collecting') {
+    if (
+        assemblyRecord.kernel !== kernel ||
+        assemblyRecord.phase !== 'collecting'
+    ) {
         throw new CanonicalStreamRefusalError('consumedState');
     }
     releaseEvaluatorComponentBackingMap(

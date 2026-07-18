@@ -27,8 +27,8 @@ use super::{
     verified_public_proof_catalog::VerifiedAcceptedSetupPublicProofCatalog,
     verified_public_randomness::VerifiedPublicRandomness,
     verified_terminals::{
-        VerifiedCollectivePublicKeyTerminal, VerifiedPublicKeyShareTerminal,
-        VerifiedSameSecretTerminal,
+        VerifiedCollectivePublicKeyTerminal, VerifiedCollectivePublicKeyTerminalPreflight,
+        VerifiedPublicKeyShareTerminal, VerifiedSameSecretTerminal,
     },
 };
 
@@ -723,15 +723,59 @@ pub(crate) fn commit_preflighted_verified_public_key_share_terminal(
 
 pub(crate) fn preflight_verified_collective_public_key_terminal_slot(
     assembly_handle: u32,
+    terminal: &VerifiedCollectivePublicKeyTerminalPreflight,
 ) -> Result<PreparedVerifiedCollectivePublicKeyTerminalSlot, CommonProofRuntimeError> {
     ACCEPTED_SETUP_VERIFICATION_ASSEMBLY_REGISTRY.with(|registry| {
         let registry = registry.borrow();
         let assembly = registry.get(assembly_handle)?;
         assembly.require_collecting()?;
-        if assembly.collective_public_key_terminal.is_some() {
+        if assembly.collective_public_key_terminal.is_some()
+            || assembly.public_key_share_terminals.len()
+                != usize::from(FOUNDATION_PROFILE.participant_count)
+            || terminal.protocol_version() != assembly.expected_protocol_version
+            || terminal.suite_identifier() != assembly.expected_suite_identifier
+            || terminal.ceremony_context_hash() != assembly.expected_ceremony_context_hash
+            || terminal.action_context_hash() != assembly.expected_action_context_hash
+            || terminal.roster_hash() != assembly.expected_roster_hash
+            || terminal.setup_proof_context_hash() != assembly.expected_setup_proof_context_hash
+            || terminal.ordered_public_key_share_roots().len()
+                != usize::from(FOUNDATION_PROFILE.participant_count)
+            || terminal
+                .ordered_public_key_share_roots()
+                .iter()
+                .enumerate()
+                .any(|(roster_index, expected_root)| {
+                    u16::try_from(roster_index)
+                        .ok()
+                        .and_then(|roster_position| {
+                            assembly.public_key_share_terminals.get(&roster_position)
+                        })
+                        .is_none_or(|public_key_share| {
+                            public_key_share.public_key_share_root() != *expected_root
+                        })
+                })
+        {
             return Err(CommonProofRuntimeError::WrongVerificationBinding);
         }
         Ok(PreparedVerifiedCollectivePublicKeyTerminalSlot { assembly_handle })
+    })
+}
+
+pub(crate) fn with_verified_same_secret_terminal<Output>(
+    assembly_handle: u32,
+    roster_position: u16,
+    inspect: impl FnOnce(&VerifiedSameSecretTerminal) -> Result<Output, CommonProofRuntimeError>,
+) -> Result<Output, CommonProofRuntimeError> {
+    ACCEPTED_SETUP_VERIFICATION_ASSEMBLY_REGISTRY.with(|registry| {
+        let registry = registry.borrow();
+        let assembly = registry.get(assembly_handle)?;
+        assembly.require_collecting()?;
+        inspect(
+            assembly
+                .same_secret_terminals
+                .get(&roster_position)
+                .ok_or(CommonProofRuntimeError::WrongOperationPhase)?,
+        )
     })
 }
 

@@ -15,6 +15,7 @@ import type {
 
 import type {
     AuthenticatedCheckpointStore,
+    CheckpointOperationIdentity,
 } from '../authenticated-checkpoint-store.js';
 import type {
     UntrustedStorageExclusiveCapacityReservation,
@@ -121,10 +122,15 @@ export type CommonProofBrowserCustodyInput = Readonly<{
     commonProofEnvironmentIdentifier: Uint8Array;
     commonProofRuntimeBindingHash: Uint8Array;
     limits: CommonProofBrowserCustodyLimits;
-    checkpoint?: Readonly<{
-        resumeDescriptor?: CommonProofCheckpointResumeDescriptor;
-        store: AuthenticatedCheckpointStore;
-    }>;
+    checkpoint?:
+        | Readonly<{
+              operationIdentity: CheckpointOperationIdentity;
+              store: AuthenticatedCheckpointStore;
+          }>
+        | Readonly<{
+              resumeDescriptor: CommonProofCheckpointResumeDescriptor;
+              store: AuthenticatedCheckpointStore;
+          }>;
     proofAttemptLineageIdentifier: Uint8Array;
     store: UntrustedStorageTransactionStore;
     workerKernel: BrowserActionStorageWorkerKernel;

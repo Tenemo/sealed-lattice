@@ -69,6 +69,8 @@ pub(super) const SELECTED_EVALUATION_DOMAIN_SIZE: u64 =
     SELECTED_OPENING_DEGREE_BOUND_EXCLUSIVE * PROOF_EVALUATION_BLOWUP_FACTOR as u64;
 pub(super) const SELECTED_PUBLIC_POLYNOMIAL_COLUMN_DEGREE_BOUND_EXCLUSIVE: u64 =
     POLYNOMIAL_DEGREE as u64 / 2;
+pub(super) const SELECTED_PUBLIC_AGGREGATE_QUARTER_DEGREE_BOUND_EXCLUSIVE: u64 =
+    POLYNOMIAL_DEGREE as u64 / 4;
 const SELECTED_QUOTIENT_COMPONENT_COUNT: u32 = 8;
 const SELECTED_QUOTIENT_COMPONENT_DEGREE_BOUND_EXCLUSIVE: u64 = 33_884;
 const SELECTED_COMMITTED_MATERIAL_QUOTIENT_COMPONENT_COUNT: u32 = 3;
@@ -672,7 +674,10 @@ pub(crate) fn selected_target_release_relation()
         ProofApplicationSlotCeilings::TARGET_SHARE_PROOF_STATEMENT_SCHEMA_IDENTIFIER,
     )
     .ok_or(ProofProfileError::InvalidSchedule)?;
-    let commitment_data_modulus_indices = selected_commitment_data_modulus_indices()?;
+    let material_column_degree_bound_exclusive = u64::try_from(
+        selected_committed_material_profile()?.material_column_degree_bound_exclusive(),
+    )
+    .map_err(|_| ProofProfileError::CountOverflow)?;
     compile_target_release_relation(
         &TargetReleaseRelationPlanInput {
             ring_degree: selected_ring_degree(),
@@ -751,10 +756,7 @@ pub(crate) fn selected_relation_plans()
     .ok_or(ProofProfileError::InvalidSchedule)?;
     let evaluator_candidate = EvaluatorCandidateInput::implemented()
         .map_err(|_| ProofProfileError::InvalidRelationPlan)?;
-    let committed_material_profile = selected_committed_material_profile()?;
-    let material_column_degree_bound_exclusive =
-        u64::try_from(committed_material_profile.material_column_degree_bound_exclusive())
-            .map_err(|_| ProofProfileError::CountOverflow)?;
+    let commitment_data_modulus_indices = selected_commitment_data_modulus_indices()?;
     let same_secret = compile_same_secret_relation_plan(
         &selected_same_secret_relation_plan_input()?,
         &ordinary_context,
@@ -770,13 +772,13 @@ pub(crate) fn selected_relation_plans()
         evaluation_domain_size: SELECTED_EVALUATION_DOMAIN_SIZE,
         opening_degree_bound_exclusive: SELECTED_OPENING_DEGREE_BOUND_EXCLUSIVE,
         public_polynomial_column_degree_bound_exclusive:
-            SELECTED_PUBLIC_POLYNOMIAL_COLUMN_DEGREE_BOUND_EXCLUSIVE,
+            SELECTED_PUBLIC_AGGREGATE_QUARTER_DEGREE_BOUND_EXCLUSIVE,
         participant_count: FOUNDATION_PROFILE.participant_count,
     };
     let collective_public_key = compile_collective_public_key_aggregate_relation_plan(
         &CollectivePublicKeyAggregatePlanInput {
             geometry: aggregate_geometry.clone(),
-            ordered_component_moduli: split_polynomial_modulus_references(
+            ordered_component_moduli: quarter_polynomial_modulus_references(
                 &sharing_data_modulus_indices
                     .iter()
                     .copied()
@@ -809,7 +811,7 @@ pub(crate) fn selected_relation_plans()
         },
         &ordinary_context,
     )?;
-    let relinearization_root_component_moduli = split_polynomial_modulus_references(
+    let relinearization_root_component_moduli = quarter_polynomial_modulus_references(
         &ordered_trustee_root_row_modulus_references(&relinearization_geometry)?,
     );
     let rkg_round_one_aggregate = compile_rkg_round_one_aggregate_relation_plan(
@@ -875,7 +877,7 @@ pub(crate) fn selected_relation_plans()
         },
         &ordinary_context,
     )?;
-    let galois_root_component_moduli = split_polynomial_modulus_references(
+    let galois_root_component_moduli = quarter_polynomial_modulus_references(
         &ordered_trustee_root_row_modulus_references(&galois_geometry)?,
     );
 
@@ -1016,6 +1018,42 @@ fn selected_trustee_evaluation_key_geometry(
         commitment_module_rank: u16::try_from(SETUP_COMMITMENT_MODULE_RANK)
             .map_err(|_| ProofProfileError::CountOverflow)?,
     })
+}
+
+pub(crate) fn selected_relinearization_relation_plan_inputs() -> Result<
+    (
+        RelinearizationRoundOneRelationPlanInput,
+        RelinearizationRoundTwoRelationPlanInput,
+    ),
+    ProofProfileError,
+> {
+    let evaluator_candidate = EvaluatorCandidateInput::implemented()
+        .map_err(|_| ProofProfileError::InvalidRelationPlan)?;
+    let (schedule_position, catalog_level) = evaluator_candidate
+        .relinearization_levels
+        .iter()
+        .copied()
+        .enumerate()
+        .next()
+        .filter(|_| evaluator_candidate.relinearization_levels.len() == 1)
+        .ok_or(ProofProfileError::InvalidRelationPlan)?;
+    let schedule_position =
+        u32::try_from(schedule_position).map_err(|_| ProofProfileError::CountOverflow)?;
+    let geometry = selected_trustee_evaluation_key_geometry(
+        &evaluator_candidate,
+        catalog_level,
+        selected_commitment_data_modulus_indices()?,
+    )?;
+    Ok((
+        RelinearizationRoundOneRelationPlanInput {
+            schedule_position,
+            geometry: geometry.clone(),
+        },
+        RelinearizationRoundTwoRelationPlanInput {
+            schedule_position,
+            geometry,
+        },
+    ))
 }
 
 pub(crate) fn selected_galois_key_share_relation_plan_input()
@@ -1159,13 +1197,13 @@ fn ordered_trustee_root_row_modulus_references(
         .collect())
 }
 
-fn split_polynomial_modulus_references(
+fn quarter_polynomial_modulus_references(
     ordered_moduli: &[SuiteModulusReference],
 ) -> Vec<SuiteModulusReference> {
     ordered_moduli
         .iter()
         .copied()
-        .flat_map(|modulus_reference| [modulus_reference, modulus_reference])
+        .flat_map(|modulus_reference| [modulus_reference; 4])
         .collect()
 }
 

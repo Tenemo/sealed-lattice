@@ -1,5 +1,6 @@
 mod authority;
 mod canonical_package;
+mod collective_and_relinearization_verification_population;
 mod common_randomness;
 mod consumed_object_byte_lengths;
 mod evaluation_key_proof_checks;
@@ -10,6 +11,7 @@ mod finalization;
 mod generated_mailbox_byte_lengths;
 mod generation_authority;
 mod generation_population;
+mod generation_relinearization;
 mod prepackage_evaluator_source_catalog;
 mod private_vss_envelopes;
 mod public_key_share_material;
@@ -53,6 +55,12 @@ pub(in crate::bgv) use self::authority::{
 pub(in crate::bgv) use self::canonical_package::{
     AcceptedSetupPackageError, CanonicalAcceptedSetupPackage, VerifiedSetupTerminalReservationSet,
 };
+pub(crate) use self::collective_and_relinearization_verification_population::{
+    retain_collective_public_key_verification_terminal_source,
+    retain_relinearization_round_one_aggregate_verification_terminal_source,
+    retain_relinearization_round_one_verification_terminal_source,
+    retain_relinearization_round_two_verification_terminal_source,
+};
 use self::common_randomness::verify_common_randomness;
 pub(in crate::bgv) use self::consumed_object_byte_lengths::VerifiedAcceptedSetupConsumedObjectByteLengthCatalog;
 use self::evaluation_key_proof_checks::verify_trustee_evaluation_key_proofs;
@@ -75,47 +83,75 @@ pub(in crate::bgv) use self::generated_mailbox_byte_lengths::{
     VerifiedGeneratedPrivateVssMailboxCorpusByteLengthCatalog,
 };
 pub(in crate::bgv) use self::generation_authority::{
-    SetupGeneratedCommittedMaterial, SetupGeneratedGaloisEntry,
-    SetupGeneratedGaloisSourceAuthority, SetupGeneratedGaloisSourceComponent,
-    SetupGeneratedKeySwitchComponent, SetupGeneratedVssMaterial, SetupGenerationAnchorOpening,
-    SetupGenerationAuthorityHandle, SetupGenerationGaloisApplication,
-    SetupGenerationGaloisBatchSource, SetupGenerationGaloisPreparationSource,
-    SetupGenerationRecipientPayloadSourceHandle, SetupGenerationVssApplication,
+    SetupGaloisGenerationPreparationError, SetupGeneratedCommittedMaterial,
+    SetupGeneratedGaloisEntry, SetupGeneratedGaloisSourceAuthority,
+    SetupGeneratedGaloisSourceComponent, SetupGeneratedKeySwitchComponent,
+    SetupGeneratedVssMaterial, SetupGenerationAnchorOpening, SetupGenerationAuthorityHandle,
+    SetupGenerationGaloisApplication, SetupGenerationGaloisBatchSource,
+    SetupGenerationGaloisPreparationSource, SetupGenerationKeyRelationApplication,
+    SetupGenerationKeyRelationPreparationSource, SetupGenerationKeyRelationSource,
+    SetupGenerationRecipientPayloadSourceHandle, SetupGenerationRelinearizationRoundOneApplication,
+    SetupGenerationRelinearizationRoundOneSource,
+    SetupGenerationRelinearizationRoundTwoApplication,
+    SetupGenerationRelinearizationRoundTwoPreparationSource,
+    SetupGenerationRelinearizationRoundTwoSource, SetupGenerationVssApplication,
     SetupGenerationVssPreparationSource, SetupGenerationVssSource,
-    SetupGaloisGenerationPreparationError, SetupVssGenerationPreparationError,
-    cancel_setup_generation_recipient_vss_payload,
-    open_setup_generation_recipient_vss_payload, read_setup_generation_recipient_vss_payload_chunk,
-    release_setup_generation_authority, resolve_setup_generation_galois_preparation_source,
+    SetupKeyRelationGenerationPreparationError, SetupKeyRelationProofFamily,
+    SetupVssGenerationPreparationError, activate_setup_generation_relinearization_round_two,
+    cancel_setup_generation_recipient_vss_payload, open_setup_generation_recipient_vss_payload,
+    read_setup_generation_recipient_vss_payload_chunk, release_setup_generation_authority,
+    resolve_setup_generation_galois_preparation_source,
+    resolve_setup_generation_key_relation_preparation_source,
+    resolve_setup_generation_relinearization_round_one_preparation_source,
+    resolve_setup_generation_relinearization_round_two_preparation_source,
     resolve_setup_generation_vss_preparation_source,
     setup_generation_recipient_vss_payload_byte_length,
     setup_generation_recipient_vss_payload_source_byte_length,
     setup_generation_recipient_vss_payload_source_recipient_roster_position,
-    with_setup_generation_galois_batch, with_setup_generation_vss_material,
+    with_setup_generation_galois_batch, with_setup_generation_galois_public_component_chunk,
+    with_setup_generation_key_relation, with_setup_generation_relinearization_round_one,
+    with_setup_generation_relinearization_round_one_component_chunk,
+    with_setup_generation_relinearization_round_two,
+    with_setup_generation_relinearization_round_two_component_chunk,
+    with_setup_generation_vss_material,
 };
 #[cfg(test)]
 pub(in crate::bgv) use self::generation_population::deterministic_galois_runtime_component_bytes_for_tests;
 pub(in crate::bgv) use self::generation_population::populate_browser_owned_setup_generation_authority;
 pub(in crate::bgv) use self::generation_population::selected_setup_generation_private_randomness_kmac_input_accounting;
+pub(in crate::bgv) use self::generation_relinearization::{
+    SetupGeneratedRelinearizationAggregateGeneration,
+    SetupGeneratedRelinearizationAggregateSourceAuthority,
+    SetupGeneratedRelinearizationComponentSource,
+    SetupGeneratedRelinearizationRoundOneSourceAuthority,
+    SetupGeneratedRelinearizationRoundTwoGeneration,
+    SetupGeneratedRelinearizationRoundTwoSourceAuthority,
+    SetupGenerationRelinearizationRoundOnePreparationSource,
+    construct_generated_relinearization_aggregate,
+};
 pub(crate) use self::prepackage_evaluator_source_catalog::{
     PreparedPrepackageGaloisSourceSlot, PreparedPrepackageGeneratedEvaluatorProofSlot,
-    PreparedPrepackageGeneratedGaloisSourceSlot,
-    PreparedPrepackageRelinearizationAggregateSlot, PreparedPrepackageRelinearizationSourceSlot,
-    begin_prepackage_evaluator_source_catalog, cancel_prepackage_evaluator_source_catalog,
+    PreparedPrepackageGeneratedGaloisSourceSlot, PreparedPrepackageRelinearizationAggregateSlot,
+    PreparedPrepackageRelinearizationRoundOneSourceSlot,
+    PreparedPrepackageRelinearizationSourceSlot, begin_prepackage_evaluator_source_catalog,
     bind_prepackage_generated_proofs_to_accepted_setup_package,
-    commit_prepackage_galois_source, commit_prepackage_generated_evaluator_proof,
-    commit_prepackage_generated_galois_source,
-    commit_prepackage_relinearization_aggregate, commit_prepackage_relinearization_source,
+    cancel_prepackage_evaluator_source_catalog, commit_prepackage_galois_source,
+    commit_prepackage_generated_evaluator_proof, commit_prepackage_generated_galois_source,
+    commit_prepackage_relinearization_aggregate,
+    commit_prepackage_relinearization_round_one_source, commit_prepackage_relinearization_source,
     complete_prepackage_evaluator_source_catalog,
+    consume_prepackage_relinearization_round_one_sources, preflight_prepackage_galois_source_slot,
     preflight_prepackage_generated_evaluator_proof_slot,
-    preflight_prepackage_galois_source_slot,
     preflight_prepackage_generated_galois_source_slot,
     preflight_prepackage_relinearization_aggregate_slot,
+    preflight_prepackage_relinearization_round_one_source_slot,
     preflight_prepackage_relinearization_source_slot,
     restore_prepackage_evaluator_statement_source, restore_prepackage_galois_statement_source,
     take_prepackage_evaluator_statement_source, take_prepackage_galois_statement_source,
     with_completed_prepackage_evaluator_source_catalog,
     with_prepackage_evaluator_generation_sources, with_prepackage_generated_galois_source,
-    with_prepackage_relinearization_aggregate, with_prepackage_relinearization_source,
+    with_prepackage_relinearization_aggregate, with_prepackage_relinearization_round_one_sources,
+    with_prepackage_relinearization_source,
 };
 use self::private_vss_envelopes::{
     PrivateVssEnvelopeBindingMap, private_vss_envelope_bindings_from_package,
@@ -175,6 +211,7 @@ pub(crate) use self::verification_assembly::{
     retain_verified_same_secret_terminal, transfer_completed_prepackage_evaluator_source_catalog,
     with_accepted_setup_verification_package, with_accepted_setup_verification_sources,
     with_verified_accepted_setup_evaluator_construction_sources,
+    with_verified_same_secret_terminal,
 };
 use self::vss_complaints_and_acceptances::{
     source_trustee_commitment_roots_from_vss_commitments, verify_vss_complaints,

@@ -29,7 +29,12 @@ import type {
     VerifiedStateReservation,
     VerifiedStateReservationIntent,
 } from '../state-verifier-runtime.js';
-import type { SetupMailboxSlot } from '../transcript-core-bridge/kernel-types.js';
+import type { ActionRandomnessKernelContext } from '../transcript-core-bridge/action-randomness-kernel-context.js';
+import type {
+    SetupMailboxSlot,
+    TranscriptCoreKernel,
+} from '../transcript-core-bridge/kernel-types.js';
+
 export type RootLease = {
     binding: BrowserActionStorageRootBinding;
     capability: Uint8Array<ArrayBuffer>;
@@ -79,6 +84,155 @@ export type WorkerActionRandomnessSessionRecord = Readonly<{
     actionRandomnessCommitment: Uint8Array<ArrayBuffer>;
     handle: number;
 }>;
+
+export type ClosedWorkerProductionOperationIdentifiers = Readonly<{
+    actionRandomnessSessionIdentifier: string;
+    stateReservationIdentifier: string;
+    stateVerifierSessionIdentifier: string;
+}>;
+
+type ClosedWorkerProductionOperationKernelAuthorization = Readonly<{
+    readonly actionRandomnessContext: ActionRandomnessKernelContext;
+    readonly actionRandomnessHandle: number;
+    readonly kernel: TranscriptCoreKernel;
+    readonly stateReservationCapabilityMemory: WebAssembly.Memory;
+    readonly stateReservationCapabilityPointer: number;
+    readonly stateReservationHandle: number;
+    readonly stateVerifierSessionHandle: number;
+}>;
+
+export type ClosedWorkerProductionOperationAuthority = Readonly<{
+    withExactKernelAuthorization(
+        operation: (
+            authorization: ClosedWorkerProductionOperationKernelAuthorization,
+        ) => Promise<void> | void,
+    ): Promise<void> | void;
+}>;
+
+type ClosedWorkerProductionOperationAuthorityRecord = {
+    authorization:
+        | ClosedWorkerProductionOperationKernelAuthorization
+        | undefined;
+    state: 'active' | 'revoked';
+};
+
+const closedWorkerProductionOperationAuthorityRecords = new WeakMap<
+    ClosedWorkerProductionOperationAuthority,
+    ClosedWorkerProductionOperationAuthorityRecord
+>();
+
+const requireLiveClosedWorkerProductionOperationAuthorityRecord = (
+    authority: ClosedWorkerProductionOperationAuthority,
+): ClosedWorkerProductionOperationKernelAuthorization => {
+    const record =
+        closedWorkerProductionOperationAuthorityRecords.get(authority);
+    if (
+        record === undefined ||
+        record.state !== 'active' ||
+        record.authorization === undefined
+    ) {
+        throw new BrowserActionStorageCustodyError(
+            'InvalidState',
+            'The closed worker production-operation authority is no longer active.',
+        );
+    }
+    return record.authorization;
+};
+
+const defineBorrowedAuthorizationProperty = <
+    PropertyName extends keyof ClosedWorkerProductionOperationKernelAuthorization,
+>(
+    target: object,
+    authority: ClosedWorkerProductionOperationAuthority,
+    propertyName: PropertyName,
+): void => {
+    Object.defineProperty(target, propertyName, {
+        configurable: false,
+        enumerable: false,
+        get: () =>
+            requireLiveClosedWorkerProductionOperationAuthorityRecord(
+                authority,
+            )[propertyName],
+    });
+};
+
+export const createClosedWorkerProductionOperationAuthority = (input: {
+    authorization: ClosedWorkerProductionOperationKernelAuthorization;
+}): Readonly<{
+    authority: ClosedWorkerProductionOperationAuthority;
+    revoke(): void;
+}> => {
+    let authority: ClosedWorkerProductionOperationAuthority;
+    const authorityTarget = Object.create(null) as object;
+    Object.defineProperty(authorityTarget, 'withExactKernelAuthorization', {
+        configurable: false,
+        enumerable: false,
+        value: (
+            operation: (
+                authorization: ClosedWorkerProductionOperationKernelAuthorization,
+            ) => Promise<void> | void,
+        ): Promise<void> | void => {
+            if (typeof operation !== 'function') {
+                throw new BrowserActionStorageCustodyError(
+                    'InvalidInput',
+                    'The exact-kernel production operation must be a function.',
+                );
+            }
+            requireLiveClosedWorkerProductionOperationAuthorityRecord(
+                authority,
+            );
+            const borrowedAuthorizationTarget = Object.create(null) as object;
+            for (const propertyName of [
+                'actionRandomnessContext',
+                'actionRandomnessHandle',
+                'kernel',
+                'stateReservationCapabilityMemory',
+                'stateReservationCapabilityPointer',
+                'stateReservationHandle',
+                'stateVerifierSessionHandle',
+            ] as const) {
+                defineBorrowedAuthorizationProperty(
+                    borrowedAuthorizationTarget,
+                    authority,
+                    propertyName,
+                );
+            }
+            const operationOutput = operation(
+                Object.freeze(
+                    borrowedAuthorizationTarget,
+                ) as ClosedWorkerProductionOperationKernelAuthorization,
+            );
+            if (operationOutput === undefined) {
+                return;
+            }
+            return Promise.resolve(operationOutput).then((resolvedOutput) => {
+                if (resolvedOutput !== undefined) {
+                    throw new BrowserActionStorageCustodyError(
+                        'InvalidInput',
+                        'An exact-kernel production operation must not return authority material.',
+                    );
+                }
+            });
+        },
+        writable: false,
+    });
+    authority = Object.freeze(
+        authorityTarget,
+    ) as ClosedWorkerProductionOperationAuthority;
+    const record: ClosedWorkerProductionOperationAuthorityRecord = {
+        authorization: input.authorization,
+        state: 'active',
+    };
+    closedWorkerProductionOperationAuthorityRecords.set(authority, record);
+
+    return Object.freeze({
+        authority,
+        revoke: (): void => {
+            record.state = 'revoked';
+            record.authorization = undefined;
+        },
+    });
+};
 
 export type WorkerAuthenticatedRepairProtectionRecord = Readonly<{
     namespaceBytes: Uint8Array<ArrayBuffer>;
@@ -221,6 +375,20 @@ type WorkerCommonProofApplicationRunner = Readonly<{
 export const workerCommonProofApplicationRunners = new WeakMap<
     BrowserActionStorageWorkerKernel,
     WorkerCommonProofApplicationRunner
+>();
+
+export type WorkerProductionOperationAuthorityRunner = Readonly<{
+    withAuthority(
+        identifiers: ClosedWorkerProductionOperationIdentifiers,
+        operation: (
+            authority: ClosedWorkerProductionOperationAuthority,
+        ) => Promise<void> | void,
+    ): Promise<void>;
+}>;
+
+export const workerProductionOperationAuthorityRunners = new WeakMap<
+    BrowserActionStorageWorkerKernel,
+    WorkerProductionOperationAuthorityRunner
 >();
 
 export const closedWorkerCommonProofScratchStorage = new WeakMap<

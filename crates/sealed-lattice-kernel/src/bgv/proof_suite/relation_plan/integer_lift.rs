@@ -381,9 +381,7 @@ impl RelationIntegerLiftBatchDescriptor {
     pub(super) fn resident_owned_payload_byte_length(&self) -> Result<u64, RelationPlanError> {
         let mut total = [
             resident_vec_storage_byte_length(&self.ordered_reversed_column_bindings)?,
-            resident_vec_storage_byte_length(
-                &self.ordered_negacyclic_automorphism_permutations,
-            )?,
+            resident_vec_storage_byte_length(&self.ordered_negacyclic_automorphism_permutations)?,
             resident_vec_storage_byte_length(&self.ordered_components)?,
         ]
         .into_iter()
@@ -498,10 +496,7 @@ impl RelationCoefficientLocalIdentityBatchDescriptor {
         self.ordered_residuals.iter().try_fold(
             resident_vec_storage_byte_length(&self.ordered_residuals)?,
             |total, residual| {
-                checked_resident_payload_add(
-                    total,
-                    residual.resident_owned_payload_byte_length()?,
-                )
+                checked_resident_payload_add(total, residual.resident_owned_payload_byte_length()?)
             },
         )
     }

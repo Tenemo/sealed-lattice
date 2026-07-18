@@ -8,6 +8,8 @@ fn wasm_family_adapters_derive_bindings_and_discard_unstarted_preparations_once(
     let expected_generation_authorization_hash =
         prepared_generation.generation_authorization_hash();
     let expected_lineage_identifier = prepared_generation.proof_attempt_lineage_identifier();
+    let expected_checkpoint_lineage_identifier =
+        prepared_generation.checkpoint_lineage_identifier();
     let generation_adapter =
         super::super::runtime_ffi::CommonProofGenerationFamilyAdapter::fresh(prepared_generation);
     let generation_adapter_handle =
@@ -18,6 +20,7 @@ fn wasm_family_adapters_derive_bindings_and_discard_unstarted_preparations_once(
     let mut described_runtime_binding_hash = [0_u8; 64];
     let mut described_generation_authorization_hash = [0_u8; 64];
     let mut described_lineage_identifier = [0_u8; 32];
+    let mut described_checkpoint_lineage_identifier = [0_u8; 32];
     let mut status = u32::MAX;
     assert_eq!(
         unsafe {
@@ -26,6 +29,7 @@ fn wasm_family_adapters_derive_bindings_and_discard_unstarted_preparations_once(
                 described_runtime_binding_hash.as_mut_ptr(),
                 described_generation_authorization_hash.as_mut_ptr(),
                 described_lineage_identifier.as_mut_ptr(),
+                described_checkpoint_lineage_identifier.as_mut_ptr(),
                 &mut status,
             )
         },
@@ -41,6 +45,10 @@ fn wasm_family_adapters_derive_bindings_and_discard_unstarted_preparations_once(
         expected_generation_authorization_hash
     );
     assert_eq!(described_lineage_identifier, expected_lineage_identifier);
+    assert_eq!(
+        described_checkpoint_lineage_identifier,
+        expected_checkpoint_lineage_identifier
+    );
     let generation_handle = unsafe {
         super::super::runtime_ffi::sealed_lattice_common_proof_prepare_generation_family_adapter(
             generation_adapter_handle,

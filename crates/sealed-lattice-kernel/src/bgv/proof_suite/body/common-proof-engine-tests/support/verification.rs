@@ -77,8 +77,7 @@ fn owned_verification_worker_authenticates_external_readback_before_minting_auth
     let prepared = upstream_registry
         .consume_verification_inputs(&application_handle, &[], None)
         .expect("the exact capability set is consumed")
-        .prepare()
-        .expect("the owned verifier initializes");
+        .prepare();
     let mut runtime_registry = CommonProofRuntimeRegistry::default();
     let operation_handle = runtime_registry
         .begin_owned_verification(prepared)

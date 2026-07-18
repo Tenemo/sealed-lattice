@@ -232,12 +232,14 @@ impl RelationBoundCertificate {
             .try_fold(0_u64, checked_resident_payload_add),
             Self::FiniteIntegerSet { ordered_values, .. } => {
                 let value_storage = resident_vec_storage_byte_length(ordered_values)?;
-                ordered_values.iter().try_fold(value_storage, |total, value| {
-                    checked_resident_payload_add(
-                        total,
-                        resident_big_signed_integer_payload_byte_length(value)?,
-                    )
-                })
+                ordered_values
+                    .iter()
+                    .try_fold(value_storage, |total, value| {
+                        checked_resident_payload_add(
+                            total,
+                            resident_big_signed_integer_payload_byte_length(value)?,
+                        )
+                    })
             }
         }
     }
@@ -369,7 +371,8 @@ impl SemanticCellDescriptor {
     pub(super) fn resident_owned_payload_byte_length(&self) -> Result<u64, RelationPlanError> {
         checked_resident_payload_add(
             self.claimed_interval.resident_owned_payload_byte_length()?,
-            self.bound_certificate.resident_owned_payload_byte_length()?,
+            self.bound_certificate
+                .resident_owned_payload_byte_length()?,
         )
     }
 
@@ -419,10 +422,8 @@ impl RelationConstraintDescriptor {
             .iter()
             .chain(&self.zeroifier_postfix_expression)
         {
-            total = checked_resident_payload_add(
-                total,
-                expression_payload_byte_length(expression)?,
-            )?;
+            total =
+                checked_resident_payload_add(total, expression_payload_byte_length(expression)?)?;
         }
         for factor_expression in &self.ordered_injective_integer_factor_expressions {
             total = checked_resident_payload_add(

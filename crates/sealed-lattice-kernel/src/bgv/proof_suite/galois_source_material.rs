@@ -10,15 +10,14 @@ use super::evaluator_source_material::{
     expected_component_column_moduli, material_topology_matches_selected_catalog_level,
 };
 use super::{
-    CommonProofVerifierError, ComponentMaterialOwnershipBinding,
-    BorrowedVerifiedCommonProofCapability, ConsumedVerifiedCommonProofCapability,
-    SelectedApplicationStatementContext,
-    SelectedEvaluatorEntryKind, SelectedEvaluatorEntryPosition, SetupPublicPolynomialContext,
-    SetupPublicPolynomialRootRole, SetupPublicPolynomialTree, VerifiedEvaluatorAuxiliaryRoot,
-    VerifiedKeySwitchComponentMaterial, VerifiedStreamedProofTreeTerminal,
-    VerifiedStreamedProofTreeTerminalPreflight, VerifiedStatementOwnedTree,
-    decode_selected_galois_key_share_statement, selected_evaluator_entry_positions,
-    verified_application_statement_hash,
+    BorrowedVerifiedCommonProofCapability, CommonProofVerifierError,
+    ComponentMaterialOwnershipBinding, ConsumedVerifiedCommonProofCapability,
+    SelectedApplicationStatementContext, SelectedEvaluatorEntryKind,
+    SelectedEvaluatorEntryPosition, SetupPublicPolynomialContext, SetupPublicPolynomialRootRole,
+    SetupPublicPolynomialTree, VerifiedEvaluatorAuxiliaryRoot, VerifiedKeySwitchComponentMaterial,
+    VerifiedStatementOwnedTree, VerifiedStreamedProofTreeTerminal,
+    VerifiedStreamedProofTreeTerminalPreflight, decode_selected_galois_key_share_statement,
+    selected_evaluator_entry_positions, verified_application_statement_hash,
 };
 
 const SELECTED_GALOIS_KEY_SHARE_BATCH_SCHEDULE_POSITION: u32 = 0;
@@ -117,9 +116,7 @@ impl GaloisSourceComponentPreflightBinding {
         self.evaluator_position
     }
 
-    pub(crate) const fn public_polynomial_context_hash(
-        &self,
-    ) -> [u8; Hash512::BYTE_LENGTH] {
+    pub(crate) const fn public_polynomial_context_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
         self.public_polynomial_context_hash
     }
 
@@ -311,7 +308,10 @@ impl VerifiedGaloisSourceMaterialBatchPreflight {
                 || contribution_tree.public_polynomial_context_hash()
                     != public_polynomial_context_hash
                 || contribution_tree.source_polynomial_degree_bound_exclusive()
-                    != material.topology().polynomial_degree()
+                    != material
+                        .topology()
+                        .quarter_polynomial_degree_bound_exclusive()
+                        .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?
                 || !material.binds_ownership(material_ownership)
                 || !material_topology_matches_selected_catalog_level(
                     &selected_candidate,
@@ -334,7 +334,7 @@ impl VerifiedGaloisSourceMaterialBatchPreflight {
                     expected_root_source_ordinal,
                     statement_root,
                     context,
-                    expected_column_moduli,
+                    expected_column_moduli.into_vec(),
                     material,
                     contribution_tree,
                 )?;
@@ -410,9 +410,7 @@ impl VerifiedGaloisSourceMaterialBatchPreflight {
         &self.proof_stream_descriptor
     }
 
-    pub(crate) fn ordered_component_bindings(
-        &self,
-    ) -> &[GaloisSourceComponentPreflightBinding] {
+    pub(crate) fn ordered_component_bindings(&self) -> &[GaloisSourceComponentPreflightBinding] {
         &self.ordered_component_bindings
     }
 
@@ -429,8 +427,14 @@ impl VerifiedGaloisSourceMaterialBatchPreflight {
         ordered_auxiliary_roots: Vec<VerifiedEvaluatorAuxiliaryRoot>,
     ) -> VerifiedGaloisSourceMaterialBatch {
         let borrowed_proof = verified_proof.borrowed();
-        assert_eq!(borrowed_proof.protocol_version(), self.proof_binding.protocol_version);
-        assert_eq!(borrowed_proof.suite_identifier(), self.proof_binding.suite_identifier);
+        assert_eq!(
+            borrowed_proof.protocol_version(),
+            self.proof_binding.protocol_version
+        );
+        assert_eq!(
+            borrowed_proof.suite_identifier(),
+            self.proof_binding.suite_identifier
+        );
         assert_eq!(
             borrowed_proof.ceremony_context_hash(),
             self.proof_binding.ceremony_context_hash
@@ -449,8 +453,7 @@ impl VerifiedGaloisSourceMaterialBatchPreflight {
         );
         assert_eq!(
             borrowed_proof.canonical_proof_application_binding_hash(),
-            self.proof_binding
-                .canonical_proof_application_binding_hash
+            self.proof_binding.canonical_proof_application_binding_hash
         );
         assert_eq!(
             borrowed_proof.application_statement_hash(),
@@ -644,7 +647,10 @@ impl VerifiedGaloisSourceMaterialBatch {
                     != expected_public_polynomial_context
                 || contribution_tree.root() != statement_root
                 || contribution_tree.source_polynomial_degree_bound_exclusive()
-                    != material.topology().polynomial_degree()
+                    != material
+                        .topology()
+                        .quarter_polynomial_degree_bound_exclusive()
+                        .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?
                 || material
                     .topology()
                     .trace_column_count()

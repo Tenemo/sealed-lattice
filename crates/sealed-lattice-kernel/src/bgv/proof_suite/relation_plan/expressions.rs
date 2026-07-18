@@ -32,7 +32,8 @@ pub(super) fn checked_resident_payload_add(
     left: u64,
     right: u64,
 ) -> Result<u64, RelationPlanError> {
-    left.checked_add(right).ok_or(RelationPlanError::CountOverflow)
+    left.checked_add(right)
+        .ok_or(RelationPlanError::CountOverflow)
 }
 
 pub(super) fn resident_vec_storage_byte_length<Value>(

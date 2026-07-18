@@ -780,9 +780,12 @@ fn generation_state_enforces_reports_and_releases_its_complete_resident_live_set
             })
             .expect("the named infrastructure payload sum fits u64"),
     );
-    assert!(resident_memory_plan.phases().iter().all(|phase| {
-        phase.infrastructure_payload_accounting() == infrastructure
-    }));
+    assert!(
+        resident_memory_plan
+            .phases()
+            .iter()
+            .all(|phase| { phase.infrastructure_payload_accounting() == infrastructure })
+    );
     assert!(loading_source_polynomials.relation_polynomial_working_set_byte_length() > 0);
 
     let deriving_auxiliary_columns = resident_memory_plan

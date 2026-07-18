@@ -25,19 +25,20 @@ use super::{
     SelectedApplicationStatementContext, SelectedEvaluatorEntryKind,
     SelectedEvaluatorEntryPosition, SelectedEvaluatorStoreSource,
     SelectedEvaluatorStoreSourceCatalog, SetupPublicPolynomialContext,
-    SetupPublicPolynomialRootRole, StatementOwnedProofTreeInput,
-    VerifiedEvaluatorKeyStoreMaterial, VerifiedEvaluatorRuntimeRoot,
-    VerifiedKeySwitchComponentMaterial, decode_selected_application_statement,
-    selected_evaluator_aggregate_entry_roots_in_order, selected_evaluator_entry_positions,
-    verified_application_statement_hash,
+    SetupPublicPolynomialRootRole, StatementOwnedProofTreeInput, VerifiedEvaluatorKeyStoreMaterial,
+    VerifiedEvaluatorRuntimeRoot, VerifiedKeySwitchComponentMaterial,
+    decode_selected_application_statement, selected_evaluator_aggregate_entry_roots_in_order,
+    selected_evaluator_entry_positions, verified_application_statement_hash,
 };
 
 const EVALUATOR_SOURCE_CATALOG_BINDING_DOMAIN: &str =
     "sealed-lattice/evaluator-aggregate/source-catalog-binding/v1";
 const EVALUATOR_SOURCE_DESCRIPTOR_BINDING_DOMAIN: &str =
     "sealed-lattice/evaluator-aggregate/source-descriptor-binding/v1";
-const EVALUATOR_SOURCE_REPLAY_IDENTITY_DOMAIN: &str =
-    "sealed-lattice/evaluator-aggregate/source-replay-identity/v1";
+const COMPLETE_LIST_SOURCE_REPLAY_IDENTITY_DOMAIN: &str =
+    "sealed-lattice/complete-list-setup-polynomial/source-replay-identity/v1";
+const COMPLETE_LIST_SOURCE_DESCRIPTOR_BINDING_DOMAIN: &str =
+    "sealed-lattice/complete-list-setup-polynomial/source-descriptor-binding/v1";
 const RELINEARIZATION_ENTRY_KIND_BINDING: u16 = 1;
 const GALOIS_ENTRY_KIND_BINDING: u16 = 2;
 const EVALUATOR_RUNTIME_SOURCE_ROLE: u16 = u16::MAX;
@@ -383,6 +384,33 @@ struct CachedEvaluatorAggregateSourceChunk {
     bytes: Zeroizing<Box<[u8]>>,
 }
 
+/// One verifier- or generation-authority-owned source in the exact tree order
+/// of a public complete-list relation. Storage coordinates are assigned by
+/// the Rust runtime that owns the authenticated input corpus; JavaScript never
+/// supplies a detached topology, root, context, or stream descriptor.
+pub(crate) struct CompleteListSetupPolynomialSourceInput {
+    source: SelectedEvaluatorStoreSource,
+    storage_byte_offset: u64,
+    public_polynomial_context_hash: [u8; Hash512::BYTE_LENGTH],
+    expected_root: [u8; Hash512::BYTE_LENGTH],
+}
+
+impl CompleteListSetupPolynomialSourceInput {
+    pub(crate) fn from_authenticated_source(
+        source: SelectedEvaluatorStoreSource,
+        storage_byte_offset: u64,
+        public_polynomial_context_hash: [u8; Hash512::BYTE_LENGTH],
+        expected_root: [u8; Hash512::BYTE_LENGTH],
+    ) -> Self {
+        Self {
+            source,
+            storage_byte_offset,
+            public_polynomial_context_hash,
+            expected_root,
+        }
+    }
+}
+
 /// Closed, plan-addressed provider for one action-selected `0x1218` variant.
 /// The provider traverses the checked tree and column descriptors themselves;
 /// no arithmetic global-column convention or host ordinal map is accepted.
@@ -399,6 +427,142 @@ pub(crate) struct SelectedEvaluatorAggregateSourcePolynomialProvider {
 }
 
 impl SelectedEvaluatorAggregateSourcePolynomialProvider {
+    /// Prepares any checked public complete-list relation whose bound trees
+    /// are exact key-switch setup-polynomial streams. This is the shared
+    /// compact frontier used by the evaluator aggregate and RKG round-one
+    /// aggregate families; it retains only descriptors, readback state, one
+    /// source column, and one authenticated transport chunk.
+    pub(crate) fn prepare_complete_list(
+        relation_plan: &CompiledRelationPlan,
+        relation_plan_variant: RelationPlanVariant,
+        expected_request_context: CommonProofSourcePolynomialRequestContext,
+        source_catalog_binding: [u8; Hash512::BYTE_LENGTH],
+        ordered_source_inputs: Vec<CompleteListSetupPolynomialSourceInput>,
+    ) -> Result<(Vec<RelationProofTreeInput>, Self), CommonProofProverError> {
+        if source_catalog_binding == [0_u8; Hash512::BYTE_LENGTH]
+            || expected_request_context.relation_plan_hash() != relation_plan.canonical_hash()?
+            || expected_request_context.relation_plan_variant_hash()
+                != relation_plan_variant.canonical_hash()?
+            || relation_plan_variant.schedule_position()
+                != expected_request_context.schedule_position()
+            || relation_plan_variant.top_count() != expected_request_context.top_count()
+            || ordered_source_inputs.len() != relation_plan_variant.ordered_trees().len()
+        {
+            return Err(CommonProofProverError::InvalidInput);
+        }
+
+        let mut ordered_sources = Vec::new();
+        ordered_sources
+            .try_reserve_exact(ordered_source_inputs.len())
+            .map_err(|_| CommonProofProverError::CountOverflow)?;
+        let mut relation_trees = Vec::new();
+        relation_trees
+            .try_reserve_exact(ordered_source_inputs.len())
+            .map_err(|_| CommonProofProverError::CountOverflow)?;
+        let mut ordered_source_columns = Vec::new();
+
+        for (source_index, (tree, source_input)) in relation_plan_variant
+            .ordered_trees()
+            .iter()
+            .zip(ordered_source_inputs)
+            .enumerate()
+        {
+            let RelationTreeDescriptor::BoundPublic {
+                construction_kind: BoundTreeConstructionKind::SetupPolynomial,
+                ordered_column_ordinals,
+                ..
+            } = tree
+            else {
+                return Err(CommonProofProverError::InvalidTree);
+            };
+            let (topology, material_root, stream_descriptor, readback) =
+                source_input.source.into_authenticated_parts();
+            if ordered_column_ordinals.len()
+                != topology
+                    .trace_column_count()
+                    .map_err(|_| CommonProofProverError::InvalidColumn)?
+            {
+                return Err(CommonProofProverError::InvalidColumn);
+            }
+            relation_trees.push(setup_polynomial_tree_input(
+                source_input.public_polynomial_context_hash,
+                source_input.expected_root,
+                &topology,
+            )?);
+            let stream_full_object_digest = stream_descriptor.full_object_digest.into_bytes();
+            let source_ordinal =
+                u64::try_from(source_index).map_err(|_| CommonProofProverError::CountOverflow)?;
+            let descriptor_binding = hash_framed_parts_512(
+                COMPLETE_LIST_SOURCE_DESCRIPTOR_BINDING_DOMAIN,
+                &[
+                    &source_catalog_binding,
+                    &source_ordinal.to_le_bytes(),
+                    &source_input.storage_byte_offset.to_le_bytes(),
+                    &source_input.public_polynomial_context_hash,
+                    &source_input.expected_root,
+                    &material_root,
+                    &stream_full_object_digest,
+                    &stream_descriptor.total_byte_length.to_le_bytes(),
+                ],
+            );
+            for (trace_column_index, column_ordinal) in
+                ordered_column_ordinals.iter().copied().enumerate()
+            {
+                let descriptor = relation_plan_variant
+                    .ordered_columns()
+                    .get(
+                        usize::try_from(column_ordinal)
+                            .map_err(|_| CommonProofProverError::CountOverflow)?,
+                    )
+                    .cloned()
+                    .ok_or(CommonProofProverError::InvalidColumn)?;
+                if ordered_source_columns.last().is_some_and(
+                    |prior: &EvaluatorAggregateSourceColumn| prior.column_ordinal >= column_ordinal,
+                ) {
+                    return Err(CommonProofProverError::InvalidColumn);
+                }
+                ordered_source_columns.push(EvaluatorAggregateSourceColumn {
+                    column_ordinal,
+                    source_index,
+                    trace_column: topology
+                        .trace_column(trace_column_index)
+                        .map_err(|_| CommonProofProverError::InvalidColumn)?,
+                    descriptor,
+                });
+            }
+            ordered_sources.push(EvaluatorAggregateAuthenticatedSource {
+                material_root,
+                topology,
+                stream_total_byte_length: stream_descriptor.total_byte_length,
+                stream_full_object_digest,
+                storage_byte_offset: source_input.storage_byte_offset,
+                descriptor_binding,
+                readback: Some(readback),
+            });
+        }
+        if ordered_source_columns.len() != relation_plan_variant.ordered_columns().len() {
+            return Err(CommonProofProverError::InvalidColumn);
+        }
+        let memory_accounting = prepared_evaluator_source_provider_memory_accounting(
+            &ordered_sources,
+            &ordered_source_columns,
+        )?;
+        Ok((
+            relation_trees,
+            Self {
+                expected_request_context,
+                source_catalog_binding,
+                memory_accounting,
+                ordered_sources: ordered_sources.into_boxed_slice(),
+                ordered_source_columns: ordered_source_columns.into_boxed_slice(),
+                next_source_column_position: 0,
+                pending_column: None,
+                cached_chunk: None,
+                finished: false,
+            },
+        ))
+    }
+
     /// Prepares the exact bound-public tree list and its authenticated source
     /// provider from verifier-owned source and store material. The statement
     /// roots, selected plan variant, physical store layout, and every source
@@ -812,7 +976,7 @@ impl SelectedEvaluatorAggregateSourcePolynomialProvider {
             .map_err(|_| CommonProofProverError::InvalidColumn)?;
         let replay_identity = CommonProofSourcePolynomialReplayIdentity::from_authenticated_source(
             hash_framed_parts_512(
-                EVALUATOR_SOURCE_REPLAY_IDENTITY_DOMAIN,
+                COMPLETE_LIST_SOURCE_REPLAY_IDENTITY_DOMAIN,
                 &[
                     &self
                         .expected_request_context
@@ -1020,8 +1184,7 @@ fn prepare_authenticated_catalog_source(
     storage_byte_offset: u64,
     source: SelectedEvaluatorStoreSource,
 ) -> Result<EvaluatorAggregateAuthenticatedSource, CommonProofProverError> {
-    let (topology, material_root, stream_descriptor, readback) =
-        source.into_authenticated_parts();
+    let (topology, material_root, stream_descriptor, readback) = source.into_authenticated_parts();
     prepare_authenticated_source_parts(
         source_catalog_binding,
         position,

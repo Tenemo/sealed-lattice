@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 
 use super::key_relation::{
-    AnchorEquationInputs, AnchorOpeningWitness, AnchorQuotientWitness, BoundedUnsignedColumn,
-    BoundPolynomialRootUse, KeyRelationGeometry, KeyRelationPlanBuilder, KeyVerifierSourceKey,
+    AnchorEquationInputs, AnchorOpeningWitness, AnchorQuotientWitness, BoundPolynomialRootUse,
+    BoundedUnsignedColumn, KeyRelationGeometry, KeyRelationPlanBuilder, KeyVerifierSourceKey,
     SameSecretRelationPlanInput, ShiftedSmallVector, SplitIntegerVector, bdlop_matrix_source,
     statement_root_source,
 };
@@ -108,8 +108,7 @@ pub(crate) fn compile_same_secret_relation_with_source_layout(
             material,
         });
     }
-    let mut anchor_source_layouts =
-        Vec::with_capacity(input.commitment_data_modulus_indices.len());
+    let mut anchor_source_layouts = Vec::with_capacity(input.commitment_data_modulus_indices.len());
     for (root_ordinal, data_modulus_index) in input
         .commitment_data_modulus_indices
         .iter()

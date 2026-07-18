@@ -157,6 +157,7 @@ export type ClosedWorkerCommonProofVerificationFamilyAdapter = Readonly<{
 
 type ClosedWorkerCommonProofGenerationFamilyAdapterRecord = {
     adapterHandle: number;
+    checkpointLineageIdentifier: Uint8Array<ArrayBuffer>;
     commonProofGenerationAuthorizationHash: Uint8Array<ArrayBuffer>;
     commonProofRuntimeBindingHash: Uint8Array<ArrayBuffer>;
     consumed: boolean;
@@ -783,6 +784,8 @@ export const openClosedWorkerCommonProofGenerationFamilyAdapter = (
             familyAdapter,
             {
                 adapterHandle,
+                checkpointLineageIdentifier:
+                    description.checkpointLineageIdentifier,
                 commonProofGenerationAuthorizationHash:
                     description.commonProofGenerationAuthorizationHash,
                 commonProofRuntimeBindingHash:
@@ -798,6 +801,7 @@ export const openClosedWorkerCommonProofGenerationFamilyAdapter = (
         description?.commonProofRuntimeBindingHash.fill(0);
         description?.commonProofGenerationAuthorizationHash.fill(0);
         description?.proofAttemptLineageIdentifier.fill(0);
+        description?.checkpointLineageIdentifier.fill(0);
         const discardError = tryDiscardTransferredCommonProofHandle(
             context,
             adapterHandle,
@@ -871,6 +875,8 @@ export const describeClosedWorkerCommonProofGenerationFamilyAdapter = (
         familyAdapter,
     );
     return Object.freeze({
+        checkpointLineageIdentifier:
+            record.checkpointLineageIdentifier.slice(),
         commonProofGenerationAuthorizationHash:
             record.commonProofGenerationAuthorizationHash.slice(),
         commonProofRuntimeBindingHash:
@@ -896,6 +902,7 @@ export const describeClosedWorkerCommonProofVerificationFamilyAdapter = (
 const destroyClosedWorkerCommonProofGenerationFamilyAdapterRecord = (
     record: ClosedWorkerCommonProofGenerationFamilyAdapterRecord,
 ): void => {
+    record.checkpointLineageIdentifier.fill(0);
     record.commonProofRuntimeBindingHash.fill(0);
     record.commonProofGenerationAuthorizationHash.fill(0);
     record.proofAttemptLineageIdentifier.fill(0);

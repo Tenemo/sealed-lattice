@@ -4,8 +4,14 @@ import { describe, expect, it, vi } from 'vitest';
 import {
     beginAcceptedSetupEvaluatorSourceCatalog,
     beginAcceptedSetupVerification,
+    bindAcceptedSetupEvaluatorGeneratedProofsToPackage,
+    createAcceptedSetupEvaluatorComponentBacking,
+    readAcceptedSetupPrepackageEvaluatorComponentExactRange,
+    releaseUnretainedAcceptedSetupEvaluatorComponentBackings,
+    requireAcceptedSetupEvaluatorComponentBackingsRetainable,
     requireAcceptedSetupEvaluatorSourceCatalogKernelOwner,
     requireAcceptedSetupVerificationAssemblyKernelOwner,
+    retainAcceptedSetupEvaluatorComponentBackings,
 } from '#packages/wasm/src/accepted-setup-assembly-runtime';
 import type { AggregateThresholdShareRecipientAuthority } from '#packages/wasm/src/aggregate-threshold-share-authenticated-recipient';
 import {
@@ -59,6 +65,9 @@ type FakeAcceptedSetupRuntime = Readonly<{
         handle: number,
     ): AggregateThresholdShareRecipientAuthority;
     kernel: TranscriptCoreKernel;
+    packageBindingCalls: Array<
+        Readonly<{ acceptedSetupHandle: number; catalogHandle: number }>
+    >;
     transferCalls: Array<
         Readonly<{ acceptedSetupHandle: number; catalogHandle: number }>
     >;
@@ -70,6 +79,7 @@ const createFakeAcceptedSetupRuntime = (
         catalogCancellationStatuses?: readonly number[];
         catalogCompletionStatuses?: readonly number[];
         catalogHandle?: number;
+        packageBindingStatuses?: readonly number[];
         transferStatuses?: readonly number[];
     }> = {},
 ): FakeAcceptedSetupRuntime => {
@@ -78,6 +88,9 @@ const createFakeAcceptedSetupRuntime = (
     const acceptedSetupCancellationHandles: number[] = [];
     const catalogCancellationHandles: number[] = [];
     const catalogCompletionHandles: number[] = [];
+    const packageBindingCalls: Array<
+        Readonly<{ acceptedSetupHandle: number; catalogHandle: number }>
+    > = [];
     const transferCalls: Array<
         Readonly<{ acceptedSetupHandle: number; catalogHandle: number }>
     > = [];
@@ -88,6 +101,9 @@ const createFakeAcceptedSetupRuntime = (
         ...(options.catalogCompletionStatuses ?? [0]),
     ];
     const transferStatuses = [...(options.transferStatuses ?? [0])];
+    const packageBindingStatuses = [
+        ...(options.packageBindingStatuses ?? [0]),
+    ];
     let nextPointer = 8;
 
     const allocate = (byteLength: number): number => {
@@ -171,6 +187,14 @@ const createFakeAcceptedSetupRuntime = (
                 catalogCompletionHandles.push(catalogHandle);
                 return catalogCompletionStatuses.shift() ?? 0;
             },
+            sealed_lattice_prepackage_evaluator_generated_proofs_bind_package:
+                (acceptedSetupHandle: number, catalogHandle: number) => {
+                    packageBindingCalls.push({
+                        acceptedSetupHandle,
+                        catalogHandle,
+                    });
+                    return packageBindingStatuses.shift() ?? 0;
+                },
         },
     } as unknown as TranscriptCoreKernelCommandRuntime;
     registerCommonProofKernelContext(kernel, context);
@@ -188,6 +212,7 @@ const createFakeAcceptedSetupRuntime = (
             return authority;
         },
         kernel,
+        packageBindingCalls,
         transferCalls,
     });
 };
@@ -203,6 +228,155 @@ const beginAcceptedSetup = (
     });
 
 describe('Accepted-setup evaluator-source catalog runtime', () => {
+    it('keeps exact component bytes under one same-kernel catalog custody', async () => {
+        const runtime = createFakeAcceptedSetupRuntime();
+        const aggregateAuthority = runtime.createAggregateAuthority(8);
+        const catalog = beginAcceptedSetupEvaluatorSourceCatalog({
+            kernel: runtime.kernel,
+            vssRecipientAuthority: aggregateAuthority,
+        });
+        const materialRoot = new Uint8Array(64).fill(0x31);
+        const fullObjectDigest = new Uint8Array(64).fill(0x42);
+        const release = vi.fn();
+        const readExactRange = vi.fn(
+            async (
+                sourceByteOffset: bigint,
+                exactByteLength: number,
+            ): Promise<Uint8Array> => {
+                const bytes = new Uint8Array(exactByteLength);
+                bytes.fill(Number(sourceByteOffset));
+                return bytes;
+            },
+        );
+        const backing = createAcceptedSetupEvaluatorComponentBacking({
+            authenticatedByteLength: 12n,
+            fullObjectDigest,
+            kernel: runtime.kernel,
+            materialRoot,
+            readExactRange,
+            release,
+        });
+
+        const retentionInput = {
+            backings: [backing],
+            catalog,
+            kernel: runtime.kernel,
+        };
+        expect(() =>
+            requireAcceptedSetupEvaluatorComponentBackingsRetainable({
+                ...retentionInput,
+                backings: [backing, backing],
+            }),
+        ).toThrow(CanonicalStreamRefusalError);
+        requireAcceptedSetupEvaluatorComponentBackingsRetainable(
+            retentionInput,
+        );
+        retainAcceptedSetupEvaluatorComponentBackings(retentionInput);
+        const bytes =
+            await readAcceptedSetupPrepackageEvaluatorComponentExactRange({
+                authenticatedByteLength: 12n,
+                catalog,
+                exactByteLength: 5,
+                fullObjectDigest,
+                kernel: runtime.kernel,
+                materialRoot,
+                sourceByteOffset: 3n,
+            });
+
+        expect(Array.from(bytes)).toEqual([3, 3, 3, 3, 3]);
+        expect(readExactRange).toHaveBeenCalledExactlyOnceWith(3n, 5);
+        expect(() =>
+            releaseUnretainedAcceptedSetupEvaluatorComponentBackings(
+                [backing],
+                runtime.kernel,
+            ),
+        ).toThrow(CanonicalStreamRefusalError);
+
+        await expect(
+            readAcceptedSetupPrepackageEvaluatorComponentExactRange({
+                authenticatedByteLength: 12n,
+                catalog,
+                exactByteLength: 5,
+                fullObjectDigest,
+                kernel: runtime.kernel,
+                materialRoot: new Uint8Array(64).fill(0x99),
+                sourceByteOffset: 3n,
+            }),
+        ).rejects.toThrow(CanonicalStreamRefusalError);
+        expect(readExactRange).toHaveBeenCalledTimes(1);
+
+        catalog.cancel();
+        expect(release).toHaveBeenCalledOnce();
+        expect(runtime.allocations.size).toBe(0);
+    });
+
+    it('binds the complete generated proof set to the exact package once', () => {
+        const runtime = createFakeAcceptedSetupRuntime({
+            packageBindingStatuses: [0, refusalReasonCodes.consumedState],
+        });
+        const aggregateAuthority = runtime.createAggregateAuthority(10);
+        const catalog = beginAcceptedSetupEvaluatorSourceCatalog({
+            kernel: runtime.kernel,
+            vssRecipientAuthority: aggregateAuthority,
+        });
+        const acceptedSetup = beginAcceptedSetup(runtime, aggregateAuthority);
+
+        bindAcceptedSetupEvaluatorGeneratedProofsToPackage({
+            acceptedSetupVerification: acceptedSetup,
+            catalog,
+            kernel: runtime.kernel,
+        });
+
+        expect(runtime.packageBindingCalls).toEqual([
+            { acceptedSetupHandle: 31, catalogHandle: 21 },
+        ]);
+        expect(() =>
+            bindAcceptedSetupEvaluatorGeneratedProofsToPackage({
+                acceptedSetupVerification: acceptedSetup,
+                catalog,
+                kernel: runtime.kernel,
+            }),
+        ).toThrow(CanonicalStreamRefusalError);
+
+        catalog.cancel();
+        acceptedSetup.cancel();
+        expect(runtime.allocations.size).toBe(0);
+    });
+
+    it('leaves package binding retryable when Rust refuses before consumption', () => {
+        const runtime = createFakeAcceptedSetupRuntime({
+            packageBindingStatuses: [
+                refusalReasonCodes.missingPrerequisite,
+                0,
+            ],
+        });
+        const aggregateAuthority = runtime.createAggregateAuthority(9);
+        const catalog = beginAcceptedSetupEvaluatorSourceCatalog({
+            kernel: runtime.kernel,
+            vssRecipientAuthority: aggregateAuthority,
+        });
+        const acceptedSetup = beginAcceptedSetup(runtime, aggregateAuthority);
+
+        expect(() =>
+            bindAcceptedSetupEvaluatorGeneratedProofsToPackage({
+                acceptedSetupVerification: acceptedSetup,
+                catalog,
+                kernel: runtime.kernel,
+            }),
+        ).toThrow(CanonicalStreamRefusalError);
+        expect(() =>
+            bindAcceptedSetupEvaluatorGeneratedProofsToPackage({
+                acceptedSetupVerification: acceptedSetup,
+                catalog,
+                kernel: runtime.kernel,
+            }),
+        ).not.toThrow();
+        expect(runtime.packageBindingCalls).toHaveLength(2);
+
+        catalog.cancel();
+        acceptedSetup.cancel();
+    });
+
     it('transfers one complete catalog into the exact live accepted-setup assembly', () => {
         const runtime = createFakeAcceptedSetupRuntime();
         const aggregateAuthority = runtime.createAggregateAuthority(11);

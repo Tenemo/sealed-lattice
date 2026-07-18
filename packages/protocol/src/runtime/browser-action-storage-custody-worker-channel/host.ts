@@ -25,6 +25,7 @@ import type {
     AuthenticatedCheckpointStoreLimits,
     CheckpointBoundary,
     CheckpointBoundaryPolicy,
+    CheckpointLineageReservation,
     CheckpointOperationIdentity,
     ExpectedCheckpointBoundary,
     ResumedCheckpoint,
@@ -131,9 +132,13 @@ import {
     destroyCommonProofCheckpointResumeDescriptor,
     installedCommonProofExecutionEnvironmentBrand,
     installedCommonProofExecutionEnvironmentRecords,
+    installedCommonProofCheckpointLineageReservationBrand,
+    installedCommonProofCheckpointLineageReservationRecords,
     installedCommonProofPreparedOperationBrand,
     installedCommonProofPreparedOperationRecords,
     installedCustodyWorkerHostCommonProofEnvironmentOpeners,
+    installedCustodyWorkerHostCommonProofCheckpointLineageReleasers,
+    installedCustodyWorkerHostCommonProofCheckpointLineageReservers,
     installedCustodyWorkerHostCommonProofGenerationPreparers,
     retireInstalledCommonProofExecutionEnvironment,
     type CustodyWorkerCommand,
@@ -142,6 +147,7 @@ import {
     type InstalledCommonProofCapabilityTransfer,
     type InstalledCommonProofExecutionEnvironment,
     type InstalledCommonProofExecutionEnvironmentRecord,
+    type InstalledCommonProofCheckpointLineageReservation,
     type InstalledCommonProofPreparedOperation,
     type InstalledCommonProofPreparedOperationRecord,
     type ResolvedInstalledCommonProofExecutionEnvironmentInput,
@@ -1023,11 +1029,17 @@ export const installBrowserActionStorageCustodyWorkerHost = (
     };
     const commonProofExecutionEnvironments =
         new Set<InstalledCommonProofExecutionEnvironment>();
+    const commonProofCustodiesPendingCleanup =
+        new Set<CommonProofBrowserCustody>();
+    const commonProofCheckpointLineageReservations = new Map<
+        InstalledCommonProofCheckpointLineageReservation,
+        CheckpointLineageReservation
+    >();
     const commonProofPreparedOperations =
         new Set<InstalledCommonProofPreparedOperation>();
-    const retirePreparedCommonProofOperation = (
+    const retirePreparedCommonProofOperation = async (
         preparedOperation: InstalledCommonProofPreparedOperation,
-    ): void => {
+    ): Promise<void> => {
         const record =
             installedCommonProofPreparedOperationRecords.get(preparedOperation);
         if (record !== undefined) {
@@ -1038,6 +1050,17 @@ export const installBrowserActionStorageCustodyWorkerHost = (
                 );
                 record.generationFamilyAdapter = undefined;
             }
+            if (record.checkpointOperationIdentity !== undefined) {
+                const store = await requireCheckpointStore();
+                await store.releaseOperationIdentity(
+                    record.checkpointOperationIdentity,
+                );
+                record.checkpointOperationIdentity = undefined;
+            }
+            destroyCommonProofCheckpointResumeDescriptor(
+                record.resumeDescriptor,
+            );
+            record.resumeDescriptor = undefined;
             record.commonProofRuntimeBindingHash.fill(0);
             record.proofAttemptLineageIdentifier.fill(0);
             installedCommonProofPreparedOperationRecords.delete(
@@ -1055,7 +1078,9 @@ export const installBrowserActionStorageCustodyWorkerHost = (
                 preparedOperation,
             ) !== record ||
             !record.consumed ||
-            record.generationFamilyAdapter !== undefined
+            record.generationFamilyAdapter !== undefined ||
+            record.checkpointOperationIdentity !== undefined ||
+            record.resumeDescriptor !== undefined
         ) {
             throw new BrowserActionStorageCustodyError(
                 'InvalidState',
@@ -1064,6 +1089,8 @@ export const installBrowserActionStorageCustodyWorkerHost = (
         }
         record.commonProofRuntimeBindingHash.fill(0);
         record.proofAttemptLineageIdentifier.fill(0);
+        destroyCommonProofCheckpointResumeDescriptor(record.resumeDescriptor);
+        record.resumeDescriptor = undefined;
         installedCommonProofPreparedOperationRecords.delete(preparedOperation);
         commonProofPreparedOperations.delete(preparedOperation);
     };
@@ -1262,7 +1289,7 @@ export const installBrowserActionStorageCustodyWorkerHost = (
         const failures: unknown[] = [];
         for (const preparedOperation of commonProofPreparedOperations) {
             try {
-                retirePreparedCommonProofOperation(preparedOperation);
+                await retirePreparedCommonProofOperation(preparedOperation);
             } catch (error) {
                 failures.push(error);
             }
@@ -1395,6 +1422,41 @@ export const installBrowserActionStorageCustodyWorkerHost = (
                 );
             }),
         );
+        const pendingCommonProofCustodyCleanupOutcomes =
+            await Promise.allSettled(
+                [...commonProofCustodiesPendingCleanup].map(
+                    async (commonProofCustody) => {
+                        await commonProofCustody.retire();
+                        commonProofCustodiesPendingCleanup.delete(
+                            commonProofCustody,
+                        );
+                    },
+                ),
+            );
+        const commonProofPreparedOperationCleanupOutcomes =
+            await Promise.allSettled(
+                [...commonProofPreparedOperations].map((preparedOperation) =>
+                    retirePreparedCommonProofOperation(preparedOperation),
+                ),
+            );
+        const commonProofReservationCleanupOutcomes =
+            await Promise.allSettled(
+                [...commonProofCheckpointLineageReservations.keys()].map(
+                    (reservation) => {
+                        const releaseReservation =
+                            installedCustodyWorkerHostCommonProofCheckpointLineageReleasers.get(
+                                uninstall,
+                            );
+                        if (releaseReservation === undefined) {
+                            throw new BrowserActionStorageCustodyError(
+                                'OwnedWorkerFailure',
+                                'Worker-owned common-proof checkpoint reservation lost its release authority.',
+                            );
+                        }
+                        return releaseReservation(reservation);
+                    },
+                ),
+            );
         const operationOutcomes = await Promise.allSettled([
             ...[...checkpointPublications.values()].map(
                 (record) => record.publication,
@@ -1417,8 +1479,39 @@ export const installBrowserActionStorageCustodyWorkerHost = (
                     outcome.status === 'rejected',
             )
             .map((outcome) => outcome.reason as unknown);
-        failures.push(...commonProofCleanupFailures);
-        if (commonProofCleanupFailures.length === 0) {
+        const pendingCommonProofCustodyCleanupFailures =
+            pendingCommonProofCustodyCleanupOutcomes
+                .filter(
+                    (outcome): outcome is PromiseRejectedResult =>
+                        outcome.status === 'rejected',
+                )
+                .map((outcome) => outcome.reason as unknown);
+        const commonProofPreparedOperationCleanupFailures =
+            commonProofPreparedOperationCleanupOutcomes
+                .filter(
+                    (outcome): outcome is PromiseRejectedResult =>
+                        outcome.status === 'rejected',
+                )
+                .map((outcome) => outcome.reason as unknown);
+        const commonProofReservationCleanupFailures =
+            commonProofReservationCleanupOutcomes
+                .filter(
+                    (outcome): outcome is PromiseRejectedResult =>
+                        outcome.status === 'rejected',
+                )
+                .map((outcome) => outcome.reason as unknown);
+        failures.push(
+            ...commonProofCleanupFailures,
+            ...pendingCommonProofCustodyCleanupFailures,
+            ...commonProofPreparedOperationCleanupFailures,
+            ...commonProofReservationCleanupFailures,
+        );
+        if (
+            commonProofCleanupFailures.length === 0 &&
+            pendingCommonProofCustodyCleanupFailures.length === 0 &&
+            commonProofPreparedOperationCleanupFailures.length === 0 &&
+            commonProofReservationCleanupFailures.length === 0
+        ) {
             let store = checkpointStore;
             if (store === undefined && openingCheckpointStore !== undefined) {
                 try {
@@ -3115,7 +3208,7 @@ export const installBrowserActionStorageCustodyWorkerHost = (
                         identifier
                     ) {
                         try {
-                            retirePreparedCommonProofOperation(
+                            await retirePreparedCommonProofOperation(
                                 preparedOperation,
                             );
                         } catch (error) {
@@ -3331,9 +3424,97 @@ export const installBrowserActionStorageCustodyWorkerHost = (
             throw error;
         }
     };
+    installedCustodyWorkerHostCommonProofCheckpointLineageReservers.set(
+        uninstall,
+        async () => {
+            if (uninstalled || terminalFailure !== undefined) {
+                throw (
+                    terminalFailure ??
+                    new BrowserActionStorageCustodyError(
+                        'Closed',
+                        'The custody worker host is no longer available for common-proof checkpoint reservation.',
+                    )
+                );
+            }
+            if (
+                commonProofCheckpointLineageReservations.size +
+                    commonProofPreparedOperations.size +
+                    commonProofExecutionEnvironments.size >=
+                1
+            ) {
+                throw new BrowserActionStorageCustodyError(
+                    'InvalidState',
+                    'The installed worker already owns the maximum one common-proof reservation, preparation, or execution chain.',
+                );
+            }
+            const store = await requireCheckpointStore();
+            const storeReservation =
+                await store.reserveCheckpointLineage();
+            const checkpointLineageIdentifier = Uint8Array.from(
+                storeReservation.checkpointLineageIdentifier,
+            );
+            if (
+                checkpointLineageIdentifier.byteLength !==
+                mutationIdentifierByteLength
+            ) {
+                checkpointLineageIdentifier.fill(0);
+                await store.releaseCheckpointLineageReservation(
+                    storeReservation,
+                );
+                throw new BrowserActionStorageCustodyError(
+                    'OwnedWorkerFailure',
+                    'The authenticated checkpoint store returned a malformed lineage reservation.',
+                );
+            }
+            const reservation = Object.freeze({
+                [installedCommonProofCheckpointLineageReservationBrand]:
+                    true as const,
+            });
+            installedCommonProofCheckpointLineageReservationRecords.set(
+                reservation,
+                {
+                    checkpointLineageIdentifier,
+                    installedHost: uninstall,
+                    state: 'available',
+                },
+            );
+            commonProofCheckpointLineageReservations.set(
+                reservation,
+                storeReservation,
+            );
+            return reservation;
+        },
+    );
+    installedCustodyWorkerHostCommonProofCheckpointLineageReleasers.set(
+        uninstall,
+        async (reservation) => {
+            const record =
+                installedCommonProofCheckpointLineageReservationRecords.get(
+                    reservation,
+                );
+            const storeReservation =
+                commonProofCheckpointLineageReservations.get(reservation);
+            if (
+                record === undefined ||
+                record.installedHost !== uninstall ||
+                record.state !== 'available' ||
+                storeReservation === undefined
+            ) {
+                throw new BrowserActionStorageCustodyError(
+                    'InvalidInput',
+                    'The common-proof checkpoint-lineage reservation is unavailable in this worker.',
+                );
+            }
+            const store = await requireCheckpointStore();
+            await store.releaseCheckpointLineageReservation(storeReservation);
+            record.state = 'consumed';
+            record.checkpointLineageIdentifier.fill(0);
+            commonProofCheckpointLineageReservations.delete(reservation);
+        },
+    );
     installedCustodyWorkerHostCommonProofGenerationPreparers.set(
         uninstall,
-        (preparationInput) => {
+        async (preparationInput) => {
             if (uninstalled || terminalFailure !== undefined) {
                 throw (
                     terminalFailure ??
@@ -3346,7 +3527,9 @@ export const installBrowserActionStorageCustodyWorkerHost = (
             if (
                 commonProofPreparedOperations.size +
                     commonProofExecutionEnvironments.size >=
-                1
+                    1 ||
+                (preparationInput.checkpoint.generationMode === 'resumed' &&
+                    commonProofCheckpointLineageReservations.size !== 0)
             ) {
                 throw new BrowserActionStorageCustodyError(
                     'InvalidState',
@@ -3372,13 +3555,85 @@ export const installBrowserActionStorageCustodyWorkerHost = (
                 describeClosedWorkerCommonProofGenerationFamilyAdapter(
                     preparationInput.generationFamilyAdapter,
                 );
+            let checkpointOperationIdentity:
+                | CheckpointOperationIdentity
+                | undefined;
+            let copiedResumeDescriptor:
+                | CommonProofCheckpointResumeDescriptor
+                | undefined;
             try {
                 const preparedOperation = Object.freeze({
                     [installedCommonProofPreparedOperationBrand]: true as const,
                 });
+                if (
+                    preparationInput.checkpoint.generationMode === 'fresh'
+                ) {
+                    const reservation =
+                        preparationInput.checkpoint.reservation;
+                    const reservationRecord =
+                        installedCommonProofCheckpointLineageReservationRecords.get(
+                            reservation,
+                        );
+                    const storeReservation =
+                        commonProofCheckpointLineageReservations.get(
+                            reservation,
+                        );
+                    if (
+                        reservationRecord === undefined ||
+                        reservationRecord.installedHost !== uninstall ||
+                        reservationRecord.state !== 'available' ||
+                        storeReservation === undefined ||
+                        !bytesEqual(
+                            reservationRecord.checkpointLineageIdentifier,
+                            description.checkpointLineageIdentifier,
+                        )
+                    ) {
+                        throw new BrowserActionStorageCustodyError(
+                            'InvalidInput',
+                            'The fresh common-proof adapter is not bound to the reserved checkpoint lineage.',
+                        );
+                    }
+                    checkpointOperationIdentity =
+                        await (
+                            await requireCheckpointStore()
+                        ).bindCheckpointLineageToProofAttempt(
+                            storeReservation,
+                            description.proofAttemptLineageIdentifier,
+                        );
+                    reservationRecord.state = 'consumed';
+                    reservationRecord.checkpointLineageIdentifier.fill(0);
+                    commonProofCheckpointLineageReservations.delete(
+                        reservation,
+                    );
+                } else {
+                    copiedResumeDescriptor =
+                        copyCommonProofCheckpointResumeDescriptorForWorker(
+                            preparationInput.checkpoint.resumeDescriptor,
+                        );
+                    if (
+                        !bytesEqual(
+                            copiedResumeDescriptor.checkpointLineageIdentifier,
+                            description.checkpointLineageIdentifier,
+                        ) ||
+                        copiedResumeDescriptor.privateRandomnessStreamAttemptIdentifier ===
+                            undefined ||
+                        !bytesEqual(
+                            copiedResumeDescriptor.privateRandomnessStreamAttemptIdentifier,
+                            description.proofAttemptLineageIdentifier,
+                        )
+                    ) {
+                        throw new BrowserActionStorageCustodyError(
+                            'RecordAuthenticationFailed',
+                            'The resumed common-proof adapter differs from the authenticated checkpoint lineage or proof attempt.',
+                        );
+                    }
+                }
                 installedCommonProofPreparedOperationRecords.set(
                     preparedOperation,
                     {
+                        ...(checkpointOperationIdentity === undefined
+                            ? {}
+                            : { checkpointOperationIdentity }),
                         commonProofRuntimeBindingHash:
                             description.commonProofRuntimeBindingHash,
                         consumed: false,
@@ -3388,22 +3643,45 @@ export const installBrowserActionStorageCustodyWorkerHost = (
                         installedHost: uninstall,
                         proofAttemptLineageIdentifier:
                             description.proofAttemptLineageIdentifier,
+                        ...(copiedResumeDescriptor === undefined
+                            ? {}
+                            : { resumeDescriptor: copiedResumeDescriptor }),
                     },
                 );
                 commonProofPreparedOperations.add(preparedOperation);
                 description.commonProofGenerationAuthorizationHash.fill(0);
+                description.checkpointLineageIdentifier.fill(0);
                 return preparedOperation;
             } catch (error) {
                 description.commonProofRuntimeBindingHash.fill(0);
                 description.commonProofGenerationAuthorizationHash.fill(0);
                 description.proofAttemptLineageIdentifier.fill(0);
+                description.checkpointLineageIdentifier.fill(0);
+                destroyCommonProofCheckpointResumeDescriptor(
+                    copiedResumeDescriptor,
+                );
+                if (checkpointOperationIdentity !== undefined) {
+                    try {
+                        await (
+                            await requireCheckpointStore()
+                        ).releaseOperationIdentity(
+                            checkpointOperationIdentity,
+                        );
+                    } catch (cleanupError) {
+                        throw new BrowserActionStorageCustodyError(
+                            'OwnedWorkerFailure',
+                            'Common-proof preparation failed after binding its checkpoint lineage and the unused identity could not be released.',
+                            [error, cleanupError],
+                        );
+                    }
+                }
                 throw error;
             }
         },
     );
     installedCustodyWorkerHostCommonProofEnvironmentOpeners.set(
         uninstall,
-        (environmentInput) => {
+        async (environmentInput) => {
             if (uninstalled || terminalFailure !== undefined) {
                 return Promise.reject(
                     terminalFailure ??
@@ -3420,6 +3698,9 @@ export const installBrowserActionStorageCustodyWorkerHost = (
                 | undefined;
             let copiedResumeDescriptor:
                 | CommonProofCheckpointResumeDescriptor
+                | undefined;
+            let checkpointOperationIdentity:
+                | CheckpointOperationIdentity
                 | undefined;
             let copiedInput: ResolvedInstalledCommonProofExecutionEnvironmentInput;
             const preparedRecord =
@@ -3456,12 +3737,20 @@ export const installBrowserActionStorageCustodyWorkerHost = (
                         'Proof-attempt lineage identifier',
                     ),
                 );
-                copiedResumeDescriptor =
-                    environmentInput.resumeDescriptor === undefined
-                        ? undefined
-                        : copyCommonProofCheckpointResumeDescriptorForWorker(
-                              environmentInput.resumeDescriptor,
-                          );
+                copiedResumeDescriptor = preparedRecord.resumeDescriptor;
+                preparedRecord.resumeDescriptor = undefined;
+                checkpointOperationIdentity =
+                    preparedRecord.checkpointOperationIdentity;
+                preparedRecord.checkpointOperationIdentity = undefined;
+                if (
+                    (copiedResumeDescriptor === undefined) ===
+                    (checkpointOperationIdentity === undefined)
+                ) {
+                    throw new BrowserActionStorageCustodyError(
+                        'InvalidState',
+                        'The common-proof preparation does not own exactly one fresh or resumed checkpoint authority.',
+                    );
+                }
                 generationFamilyAdapter =
                     preparedRecord.generationFamilyAdapter;
                 preparedRecord.generationFamilyAdapter = undefined;
@@ -3472,6 +3761,9 @@ export const installBrowserActionStorageCustodyWorkerHost = (
                     generationFamilyAdapter,
                     proofAttemptLineageIdentifier:
                         copiedProofAttemptLineageIdentifier,
+                    ...(checkpointOperationIdentity === undefined
+                        ? {}
+                        : { checkpointOperationIdentity }),
                     ...(copiedResumeDescriptor === undefined
                         ? {}
                         : { resumeDescriptor: copiedResumeDescriptor }),
@@ -3495,8 +3787,13 @@ export const installBrowserActionStorageCustodyWorkerHost = (
                         preparedRecord.generationFamilyAdapter =
                             generationFamilyAdapter;
                     }
+                    preparedRecord.checkpointOperationIdentity =
+                        checkpointOperationIdentity;
+                    checkpointOperationIdentity = undefined;
+                    preparedRecord.resumeDescriptor = copiedResumeDescriptor;
+                    copiedResumeDescriptor = undefined;
                     try {
-                        retirePreparedCommonProofOperation(
+                        await retirePreparedCommonProofOperation(
                             environmentInput.preparedOperation,
                         );
                     } catch (cleanupError) {
@@ -3531,6 +3828,9 @@ export const installBrowserActionStorageCustodyWorkerHost = (
                 return Promise.reject(inputError);
             }
             let generationFamilyAdapterOwnedByEnvironment = false;
+            let openedCommonProofCustody:
+                | CommonProofBrowserCustody
+                | undefined;
             const result = operationTail.then(
                 async () => {
                     const actionRandomnessHandle =
@@ -3558,7 +3858,6 @@ export const installBrowserActionStorageCustodyWorkerHost = (
                         copiedInput.resumeDescriptor === undefined
                             ? new Uint8Array(mutationIdentifierByteLength)
                             : copiedInput.resumeDescriptor.commonProofEnvironmentIdentifier.slice();
-                    let commonProofCustody: CommonProofBrowserCustody;
                     try {
                         if (copiedInput.resumeDescriptor === undefined) {
                             cryptoProvider.getRandomValues(
@@ -3575,29 +3874,41 @@ export const installBrowserActionStorageCustodyWorkerHost = (
                                 'The installed worker does not provide common-proof checkpoint and execution custody.',
                             );
                         }
-                        commonProofCustody = await owned.openCommonProofCustody(
-                            {
+                        const store = await requireCheckpointStore();
+                        openedCommonProofCustody =
+                            await owned.openCommonProofCustody({
                                 actionRandomnessCommitment:
                                     actionRandomnessHandle.actionRandomnessCommitment.slice(),
-                                checkpoint: {
-                                    ...(copiedInput.resumeDescriptor ===
-                                    undefined
-                                        ? {}
+                                checkpoint:
+                                    copiedInput.resumeDescriptor === undefined
+                                        ? {
+                                              operationIdentity:
+                                                  copiedInput.checkpointOperationIdentity!,
+                                              store,
+                                          }
                                         : {
                                               resumeDescriptor:
                                                   copiedInput.resumeDescriptor,
-                                          }),
-                                    store: await requireCheckpointStore(),
-                                },
+                                              store,
+                                          },
                                 commonProofEnvironmentIdentifier,
                                 commonProofRuntimeBindingHash:
                                     copiedInput.commonProofRuntimeBindingHash,
                                 proofAttemptLineageIdentifier:
                                     copiedInput.proofAttemptLineageIdentifier,
-                            },
+                            });
+                        commonProofCustodiesPendingCleanup.add(
+                            openedCommonProofCustody,
                         );
                     } finally {
                         commonProofEnvironmentIdentifier.fill(0);
+                    }
+                    const commonProofCustody = openedCommonProofCustody;
+                    if (commonProofCustody === undefined) {
+                        throw new BrowserActionStorageCustodyError(
+                            'OwnedWorkerFailure',
+                            'Common-proof execution custody ended without an owned environment.',
+                        );
                     }
                     const environment = Object.freeze({
                         [installedCommonProofExecutionEnvironmentBrand]:
@@ -3660,6 +3971,9 @@ export const installBrowserActionStorageCustodyWorkerHost = (
                         environmentRecord,
                     );
                     commonProofExecutionEnvironments.add(environment);
+                    commonProofCustodiesPendingCleanup.delete(
+                        commonProofCustody,
+                    );
                     generationFamilyAdapterOwnedByEnvironment = true;
                     return environment;
                 },
@@ -3674,9 +3988,21 @@ export const installBrowserActionStorageCustodyWorkerHost = (
                 },
             );
             const resultWithDestroyedInput = result
-                .catch((error: unknown) => {
+                .catch(async (error: unknown) => {
                     if (!generationFamilyAdapterOwnedByEnvironment) {
-                        let cleanupFailure: unknown;
+                        const cleanupFailures: unknown[] = [];
+                        const checkpointAuthorityOwnedByCustody =
+                            openedCommonProofCustody !== undefined;
+                        if (openedCommonProofCustody !== undefined) {
+                            try {
+                                await openedCommonProofCustody.retire();
+                                commonProofCustodiesPendingCleanup.delete(
+                                    openedCommonProofCustody,
+                                );
+                            } catch (cleanupError) {
+                                cleanupFailures.push(cleanupError);
+                            }
+                        }
                         const retainedPreparedRecord =
                             installedCommonProofPreparedOperationRecords.get(
                                 environmentInput.preparedOperation,
@@ -3689,12 +4015,18 @@ export const installBrowserActionStorageCustodyWorkerHost = (
                                 retainedPreparedRecord.generationFamilyAdapter =
                                     copiedInput.generationFamilyAdapter;
                             }
+                            if (!checkpointAuthorityOwnedByCustody) {
+                                retainedPreparedRecord.checkpointOperationIdentity =
+                                    copiedInput.checkpointOperationIdentity;
+                                retainedPreparedRecord.resumeDescriptor =
+                                    copiedInput.resumeDescriptor;
+                            }
                             try {
-                                retirePreparedCommonProofOperation(
+                                await retirePreparedCommonProofOperation(
                                     environmentInput.preparedOperation,
                                 );
                             } catch (cleanupError) {
-                                cleanupFailure = cleanupError;
+                                cleanupFailures.push(cleanupError);
                             }
                         } else {
                             try {
@@ -3702,14 +4034,29 @@ export const installBrowserActionStorageCustodyWorkerHost = (
                                     copiedInput.generationFamilyAdapter,
                                 );
                             } catch (cleanupError) {
-                                cleanupFailure = cleanupError;
+                                cleanupFailures.push(cleanupError);
+                            }
+                            if (
+                                !checkpointAuthorityOwnedByCustody &&
+                                copiedInput.checkpointOperationIdentity !==
+                                    undefined
+                            ) {
+                                try {
+                                    await (
+                                        await requireCheckpointStore()
+                                    ).releaseOperationIdentity(
+                                        copiedInput.checkpointOperationIdentity,
+                                    );
+                                } catch (cleanupError) {
+                                    cleanupFailures.push(cleanupError);
+                                }
                             }
                         }
-                        if (cleanupFailure !== undefined) {
+                        if (cleanupFailures.length !== 0) {
                             throw new BrowserActionStorageCustodyError(
                                 'OwnedWorkerFailure',
-                                'Opening common-proof execution custody failed and its generation authority remains retained for cleanup retry.',
-                                [error, cleanupFailure],
+                                'Opening common-proof execution custody failed and one or more worker-owned authorities remain retained for cleanup retry.',
+                                [error, ...cleanupFailures],
                             );
                         }
                     }

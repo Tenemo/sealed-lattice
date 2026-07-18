@@ -39,6 +39,7 @@ mod private_randomness;
 mod private_randomness_runtime;
 mod proof_application;
 mod refusal;
+mod roster_runtime;
 mod runtime_input;
 #[cfg_attr(
     not(test),
@@ -111,11 +112,13 @@ pub(crate) use finality_runtime::{
     FINALITY_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH, VERIFIED_FINALITY_DESCRIPTION_BYTE_LENGTH,
     begin_finality_verifier_session, cancel_finality_verifier_session, describe_verified_finality,
     release_verified_evaluator_replay, release_verified_finality, retain_verified_evaluator_replay,
-    verify_finality,
+    verify_finality, with_verified_finality,
 };
 pub use hash::{Hash512, hash_foundation_tuple_512};
 pub(crate) use hash::{
-    StreamingFoundationHashError, StreamingFoundationTupleHash512, fill_foundation_tuple_xof,
+    StreamingFoundationHashError, StreamingFoundationTupleHash512,
+    canonical_foundation_tuple_hash_preimage, canonical_foundation_variable_bytes_hash_preimage,
+    fill_foundation_tuple_xof,
 };
 pub use local_encrypted_storage::{
     ACTION_STORAGE_DERIVATION_INPUT_SCHEMA_IDENTIFIER, ACTION_STORAGE_ROOT_BYTE_LENGTH,
@@ -232,7 +235,8 @@ pub(crate) use state_runtime::{
     commit_accepted_setup_state_reservations, describe_verified_state_object,
     finish_state_output_intent_verification, finish_state_output_verification,
     release_verified_state_object, run_state_producer_command, verified_state_reservation_binding,
-    verify_state_reservation, verify_state_reservation_intent,
+    verify_state_reservation, verify_state_reservation_intent, with_verified_state_reservation,
+    with_verified_state_reservation_and_output,
 };
 pub(crate) use suite::selected_target_data_prime_coordinates;
 pub use suite::{

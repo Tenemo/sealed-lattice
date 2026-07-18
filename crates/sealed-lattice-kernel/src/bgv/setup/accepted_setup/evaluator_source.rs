@@ -335,12 +335,14 @@ impl SelectedEvaluatorStoreSourceCatalog for VerifiedAcceptedSetupEvaluatorSourc
             return Ok(None);
         };
         let readback: CanonicalStreamReadbackVerifier = material.begin_authenticated_readback()?;
-        Ok(Some(SelectedEvaluatorStoreSource::from_authenticated_authority(
-            material.topology().clone(),
-            material.material_root().into_bytes(),
-            material.stream_descriptor().clone(),
-            readback,
-        )))
+        Ok(Some(
+            SelectedEvaluatorStoreSource::from_authenticated_authority(
+                material.topology().clone(),
+                material.material_root().into_bytes(),
+                material.stream_descriptor().clone(),
+                readback,
+            ),
+        ))
     }
 
     fn component_root(

@@ -3,6 +3,7 @@ import { foundationProfile } from '@sealed-lattice/types';
 
 import type {
     AuthenticatedCheckpointStore,
+    CheckpointOperationIdentity,
     AuthenticatedCheckpointStoreLimits,
     CheckpointBoundaryPolicy,
     TransferableAuthenticatedCheckpointStore,
@@ -337,10 +338,15 @@ export type WebLockOwnedBrowserActionStorageCustody = Readonly<{
     ): Promise<RuntimeRecordProtection>;
     openCommonProofCustody?(input: {
         actionRandomnessCommitment: Uint8Array;
-        checkpoint?: Readonly<{
-            resumeDescriptor?: CommonProofCheckpointResumeDescriptor;
-            store: AuthenticatedCheckpointStore;
-        }>;
+        checkpoint?:
+            | Readonly<{
+                  operationIdentity: CheckpointOperationIdentity;
+                  store: AuthenticatedCheckpointStore;
+              }>
+            | Readonly<{
+                  resumeDescriptor: CommonProofCheckpointResumeDescriptor;
+                  store: AuthenticatedCheckpointStore;
+              }>;
         commonProofEnvironmentIdentifier: Uint8Array;
         commonProofRuntimeBindingHash: Uint8Array;
         proofAttemptLineageIdentifier: Uint8Array;

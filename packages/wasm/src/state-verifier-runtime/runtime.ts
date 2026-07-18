@@ -102,6 +102,13 @@ type VerifiedStateReservationKernelAuthorization = Readonly<{
     sessionHandle: number;
 }>;
 
+export type VerifiedStateOutputKernelAuthorization = Readonly<{
+    capabilityMemory: WebAssembly.Memory;
+    capabilityPointer: number;
+    outputHandle: number;
+    sessionHandle: number;
+}>;
+
 export type PreparedVerifiedStateReservationKernelTransaction = Readonly<{
     capabilityMemory: WebAssembly.Memory;
     capabilityPointer: number;
@@ -195,6 +202,27 @@ export const resolveVerifiedStateReservationKernelAuthorization = (
     }
 
     return record.session.reservationKernelAuthorization(record, kernel);
+};
+
+export const resolveVerifiedStateOutputKernelAuthorization = (
+    output: VerifiedStateOutput,
+    kernel: TranscriptCoreKernel,
+): VerifiedStateOutputKernelAuthorization => {
+    if (
+        (typeof output !== 'object' && typeof output !== 'function') ||
+        output === null
+    ) {
+        throw new TypeError(
+            'The state output was not issued by the WASM state verifier.',
+        );
+    }
+    const record = verifiedObjectRecords.get(output);
+    if (record === undefined || !record.active || record.kind !== 'output') {
+        throw new TypeError(
+            'The state output is unavailable or was not issued by the WASM state verifier.',
+        );
+    }
+    return record.session.outputKernelAuthorization(record, kernel);
 };
 
 /**
@@ -933,6 +961,31 @@ class StateVerifierSessionImplementation implements StateVerifierSession {
             capabilityMemory: this.#context.memory,
             capabilityPointer: this.#capabilityPointer,
             reservationHandle: record.handle,
+            sessionHandle: this.#handle,
+        });
+    }
+
+    public outputKernelAuthorization(
+        record: VerifiedObjectRecord,
+        kernel: TranscriptCoreKernel,
+    ): VerifiedStateOutputKernelAuthorization {
+        if (
+            this.#state !== 'active' ||
+            !record.active ||
+            record.kind !== 'output' ||
+            record.session !== this
+        ) {
+            throw new TypeError('The verified state output is unavailable.');
+        }
+        if (kernel !== this.#kernel) {
+            throw new TypeError(
+                'The verified state output belongs to another WASM kernel.',
+            );
+        }
+        return Object.freeze({
+            capabilityMemory: this.#context.memory,
+            capabilityPointer: this.#capabilityPointer,
+            outputHandle: record.handle,
             sessionHandle: this.#handle,
         });
     }

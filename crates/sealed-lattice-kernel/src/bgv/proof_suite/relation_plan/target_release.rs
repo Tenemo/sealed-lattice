@@ -52,6 +52,12 @@ impl VerifiedTargetReleaseProof {
     pub(crate) fn from_common_proof(
         common_proof: VerifiedCommonProof,
     ) -> Result<Self, TargetReleaseCapabilityError> {
+        Self::from_borrowed_common_proof(&common_proof)
+    }
+
+    pub(crate) fn from_borrowed_common_proof(
+        common_proof: &VerifiedCommonProof,
+    ) -> Result<Self, TargetReleaseCapabilityError> {
         if common_proof.application_statement_schema_identifier()
             != TARGET_SHARE_PROOF_STATEMENT_SCHEMA_IDENTIFIER
             || common_proof.schedule_position().is_some()

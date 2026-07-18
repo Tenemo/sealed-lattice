@@ -245,41 +245,24 @@ impl QueryVerificationWorkspace {
             .get(catalog_index)
             .ok_or(CommonProofVerifierError::InvalidOpeningClaim)?;
 
-        for (query_index, representative) in query_representatives.iter().copied().enumerate() {
-            let leaf = leaf_for_index(leaves, representative)?;
-            if leaf.first_point_values().len() != columns.len()
-                || leaf.opposite_point_values().len() != columns.len()
-            {
-                return Err(CommonProofVerifierError::InvalidTreeLayout);
-            }
+        verify_relation_tree_columns(
+            leaves,
+            columns,
+            variant,
+            query_representatives,
+            self.evaluation_domain,
+            evaluate_verified_column,
+        )?;
+
+        for (query_index, (leaf, representative)) in leaves
+            .iter()
+            .zip(query_representatives.iter().copied())
+            .enumerate()
+        {
             let evaluation_point = self.evaluation_domain.point(
                 usize::try_from(representative)
                     .map_err(|_| CommonProofVerifierError::InvalidTreeLayout)?,
             )?;
-            for (column_position, column_ordinal) in columns.iter().copied().enumerate() {
-                let column_index = usize::try_from(column_ordinal)
-                    .map_err(|_| CommonProofVerifierError::InvalidTreeLayout)?;
-                let column = variant
-                    .ordered_columns()
-                    .get(column_index)
-                    .ok_or(CommonProofVerifierError::InvalidTreeLayout)?;
-                let pair = opened_pair(leaf, column_position, column.value_type())?;
-                if matches!(
-                    column.origin(),
-                    RelationColumnOrigin::VerifierSequence { .. }
-                ) {
-                    let expected_pair = evaluate_verified_column
-                        .evaluate_at_evaluation_domain_pair(
-                            column_ordinal,
-                            self.evaluation_domain,
-                            representative,
-                        )
-                        .ok_or(CommonProofVerifierError::MissingVerifiedColumnValue)?;
-                    if pair != expected_pair {
-                        return Err(CommonProofVerifierError::VerifiedColumnMismatch);
-                    }
-                }
-            }
             for claim in claims {
                 let column_position = claim
                     .column_position
@@ -421,6 +404,58 @@ impl QueryVerificationWorkspace {
         }
         Ok(())
     }
+}
+
+fn verify_relation_tree_columns<ColumnEvaluator>(
+    leaves: &[super::super::DecodedProofPhasePairLeaf],
+    columns: &[u32],
+    variant: &RelationPlanVariant,
+    query_representatives: &[u64],
+    evaluation_domain: ProofEvaluationDomain,
+    evaluate_verified_column: &mut ColumnEvaluator,
+) -> Result<(), CommonProofVerifierError>
+where
+    ColumnEvaluator: VerifiedRelationColumnEvaluator + ?Sized,
+{
+    if leaves.len() != query_representatives.len() {
+        return Err(CommonProofVerifierError::InvalidTreeLayout);
+    }
+    for (leaf, representative) in leaves.iter().zip(query_representatives) {
+        if leaf.leaf_index() != *representative
+            || leaf.first_point_values().len() != columns.len()
+            || leaf.opposite_point_values().len() != columns.len()
+        {
+            return Err(CommonProofVerifierError::InvalidTreeLayout);
+        }
+    }
+
+    for (column_position, column_ordinal) in columns.iter().copied().enumerate() {
+        let column_index = usize::try_from(column_ordinal)
+            .map_err(|_| CommonProofVerifierError::InvalidTreeLayout)?;
+        let column = variant
+            .ordered_columns()
+            .get(column_index)
+            .ok_or(CommonProofVerifierError::InvalidTreeLayout)?;
+        for (leaf, representative) in leaves.iter().zip(query_representatives.iter().copied()) {
+            let pair = opened_pair(leaf, column_position, column.value_type())?;
+            if matches!(
+                column.origin(),
+                RelationColumnOrigin::VerifierSequence { .. }
+            ) {
+                let expected_pair = evaluate_verified_column
+                    .evaluate_at_evaluation_domain_pair(
+                        column_ordinal,
+                        evaluation_domain,
+                        representative,
+                    )
+                    .ok_or(CommonProofVerifierError::MissingVerifiedColumnValue)?;
+                if pair != expected_pair {
+                    return Err(CommonProofVerifierError::VerifiedColumnMismatch);
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 fn leaf_for_index(
