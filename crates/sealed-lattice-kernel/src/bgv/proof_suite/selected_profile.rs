@@ -672,10 +672,7 @@ pub(crate) fn selected_target_release_relation()
         ProofApplicationSlotCeilings::TARGET_SHARE_PROOF_STATEMENT_SCHEMA_IDENTIFIER,
     )
     .ok_or(ProofProfileError::InvalidSchedule)?;
-    let committed_material_profile = selected_committed_material_profile()?;
-    let material_column_degree_bound_exclusive =
-        u64::try_from(committed_material_profile.material_column_degree_bound_exclusive())
-            .map_err(|_| ProofProfileError::CountOverflow)?;
+    let commitment_data_modulus_indices = selected_commitment_data_modulus_indices()?;
     compile_target_release_relation(
         &TargetReleaseRelationPlanInput {
             ring_degree: selected_ring_degree(),
@@ -758,45 +755,15 @@ pub(crate) fn selected_relation_plans()
     let material_column_degree_bound_exclusive =
         u64::try_from(committed_material_profile.material_column_degree_bound_exclusive())
             .map_err(|_| ProofProfileError::CountOverflow)?;
-    let sharing_data_modulus_indices = selected_data_modulus_indices();
-    let commitment_data_modulus_indices = SETUP_COMMITMENT_MODULUS_LIMB_INDICES
-        .iter()
-        .copied()
-        .map(|modulus_index| {
-            u16::try_from(modulus_index).map_err(|_| ProofProfileError::CountOverflow)
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-
     let same_secret = compile_same_secret_relation_plan(
-        &SameSecretRelationPlanInput {
-            ring_degree: selected_ring_degree(),
-            evaluation_domain_size: SELECTED_EVALUATION_DOMAIN_SIZE,
-            opening_degree_bound_exclusive: SELECTED_OPENING_DEGREE_BOUND_EXCLUSIVE,
-            material_column_degree_bound_exclusive,
-            public_polynomial_column_degree_bound_exclusive:
-                SELECTED_PUBLIC_POLYNOMIAL_COLUMN_DEGREE_BOUND_EXCLUSIVE,
-            sharing_data_modulus_indices: sharing_data_modulus_indices.clone(),
-            commitment_data_modulus_indices: commitment_data_modulus_indices.clone(),
-            commitment_module_rank: u16::try_from(SETUP_COMMITMENT_MODULE_RANK)
-                .map_err(|_| ProofProfileError::CountOverflow)?,
-        },
+        &selected_same_secret_relation_plan_input()?,
         &ordinary_context,
     )?;
     let public_key_share = compile_public_key_share_relation_plan(
-        &PublicKeyShareRelationPlanInput {
-            ring_degree: selected_ring_degree(),
-            evaluation_domain_size: SELECTED_EVALUATION_DOMAIN_SIZE,
-            opening_degree_bound_exclusive: SELECTED_OPENING_DEGREE_BOUND_EXCLUSIVE,
-            public_polynomial_column_degree_bound_exclusive:
-                SELECTED_PUBLIC_POLYNOMIAL_COLUMN_DEGREE_BOUND_EXCLUSIVE,
-            data_modulus_indices: sharing_data_modulus_indices.clone(),
-            commitment_data_modulus_indices: commitment_data_modulus_indices.clone(),
-            commitment_module_rank: u16::try_from(SETUP_COMMITMENT_MODULE_RANK)
-                .map_err(|_| ProofProfileError::CountOverflow)?,
-            plaintext_modulus: PLAINTEXT_MODULUS,
-        },
+        &selected_public_key_share_relation_plan_input()?,
         &ordinary_context,
     )?;
+    let sharing_data_modulus_indices = selected_data_modulus_indices();
 
     let aggregate_geometry = PublicAggregateRelationGeometry {
         ring_degree: selected_ring_degree(),
@@ -976,6 +943,52 @@ pub(crate) fn selected_relation_plans()
             )
             .ok_or(ProofProfileError::InvalidSchedule)?;
             ValidatedRelationPlanArtifact::from_owned_compiled_plan(plan, &context)
+        })
+        .collect()
+}
+
+pub(crate) fn selected_same_secret_relation_plan_input()
+-> Result<SameSecretRelationPlanInput, ProofProfileError> {
+    let material_column_degree_bound_exclusive = u64::try_from(
+        selected_committed_material_profile()?.material_column_degree_bound_exclusive(),
+    )
+    .map_err(|_| ProofProfileError::CountOverflow)?;
+    Ok(SameSecretRelationPlanInput {
+        ring_degree: selected_ring_degree(),
+        evaluation_domain_size: SELECTED_EVALUATION_DOMAIN_SIZE,
+        opening_degree_bound_exclusive: SELECTED_OPENING_DEGREE_BOUND_EXCLUSIVE,
+        material_column_degree_bound_exclusive,
+        public_polynomial_column_degree_bound_exclusive:
+            SELECTED_PUBLIC_POLYNOMIAL_COLUMN_DEGREE_BOUND_EXCLUSIVE,
+        sharing_data_modulus_indices: selected_data_modulus_indices(),
+        commitment_data_modulus_indices: selected_commitment_data_modulus_indices()?,
+        commitment_module_rank: u16::try_from(SETUP_COMMITMENT_MODULE_RANK)
+            .map_err(|_| ProofProfileError::CountOverflow)?,
+    })
+}
+
+pub(crate) fn selected_public_key_share_relation_plan_input()
+-> Result<PublicKeyShareRelationPlanInput, ProofProfileError> {
+    Ok(PublicKeyShareRelationPlanInput {
+        ring_degree: selected_ring_degree(),
+        evaluation_domain_size: SELECTED_EVALUATION_DOMAIN_SIZE,
+        opening_degree_bound_exclusive: SELECTED_OPENING_DEGREE_BOUND_EXCLUSIVE,
+        public_polynomial_column_degree_bound_exclusive:
+            SELECTED_PUBLIC_POLYNOMIAL_COLUMN_DEGREE_BOUND_EXCLUSIVE,
+        data_modulus_indices: selected_data_modulus_indices(),
+        commitment_data_modulus_indices: selected_commitment_data_modulus_indices()?,
+        commitment_module_rank: u16::try_from(SETUP_COMMITMENT_MODULE_RANK)
+            .map_err(|_| ProofProfileError::CountOverflow)?,
+        plaintext_modulus: PLAINTEXT_MODULUS,
+    })
+}
+
+fn selected_commitment_data_modulus_indices() -> Result<Vec<u16>, ProofProfileError> {
+    SETUP_COMMITMENT_MODULUS_LIMB_INDICES
+        .iter()
+        .copied()
+        .map(|modulus_index| {
+            u16::try_from(modulus_index).map_err(|_| ProofProfileError::CountOverflow)
         })
         .collect()
 }

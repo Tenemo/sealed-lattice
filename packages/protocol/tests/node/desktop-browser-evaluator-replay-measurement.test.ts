@@ -4,7 +4,10 @@ import {
     measureProductionDesktopBrowserEvaluatorReplayCase,
     type DesktopBrowserEvaluatorReplayMeasurement,
 } from '#packages/protocol/tests/support/desktop-browser-evaluator-replay-measurement';
-import { requireDesktopBrowserEvaluatorReplayMeasurementCaseIdentifier } from '#packages/protocol/tests/support/desktop-browser-evaluator-replay-measurement-case-identifier';
+import {
+    productionDesktopBrowserEvaluatorReplayMeasurementCaseIdentifier,
+    requireDesktopBrowserEvaluatorReplayMeasurementCaseIdentifier,
+} from '#packages/protocol/tests/support/desktop-browser-evaluator-replay-measurement-case-identifier';
 import { validateDesktopBrowserEvaluatorReplayMeasurement } from '#packages/protocol/tests/support/desktop-browser-evaluator-replay-measurement-worker-protocol';
 
 const validMeasurement = (): DesktopBrowserEvaluatorReplayMeasurement =>
@@ -218,9 +221,9 @@ describe('Desktop-browser evaluator-replay measurement accounting', () => {
     it('requires unambiguous lowercase kebab-case identifiers', () => {
         expect(
             requireDesktopBrowserEvaluatorReplayMeasurementCaseIdentifier(
-                'selected-evaluator-replay',
+                productionDesktopBrowserEvaluatorReplayMeasurementCaseIdentifier,
             ),
-        ).toBe('selected-evaluator-replay');
+        ).toBe('selected-complete-action');
         for (const malformedIdentifier of [
             '',
             'Selected-evaluator-replay',

@@ -1,6 +1,7 @@
 use super::{
     BTreeMap, BTreeSet, BoundTreeConstructionKind, COMMON_PROOF_RELATION_EVALUATION_BLOCK_LENGTH,
-    CommonProofGenerationPoll, CommonProofMerkleStoragePlan, CommonProofPrivacyMode,
+    CommonProofGenerationPoll, CommonProofGenerationStateMachine, CommonProofMerkleStoragePlan,
+    CommonProofOpeningGeometry, CommonProofPrivacyMode,
     CommonProofPrivateCoinError, CommonProofProverError, CommonProofQuotientConstraintTransformKey,
     CommonProofSourcePolynomial, CommonProofSourcePolynomialProvider,
     CommonProofTranscriptSchedule, CompiledRelationPlan, CompleteProofTreeCatalog,
@@ -11,8 +12,9 @@ use super::{
     ProofExternalMemoryObject, ProofExternalMemoryObjectPlan, ProofExternalMemoryPlan,
     ProofExternalMemoryProtection, ProofLeafVisibility, ProofPrivacyMode, ProofProfileError,
     ProofTreeCatalogEntry, ProofTreeCatalogSource, ProofTreeRole, RelationColumnOrigin,
-    RelationColumnValueType, RelationMaskKind, RelationMaskTargetClass, RelationPlanCheckContext,
-    RelationPlanError, RelationPlanVariant, RelationProofTreeInput, RelationTreeDescriptor,
+    RelationApplicationChallengeAssignment, RelationColumnValueType, RelationMaskKind,
+    RelationMaskTargetClass, RelationPlanCheckContext, RelationPlanError, RelationPlanVariant,
+    RelationProofTreeInput, RelationTreeDescriptor,
     StatementOwnedProofTreeInput, StoredCommonProofMerkleTree, TranscriptError, Zeroize, Zeroizing,
     canonical_common_proof_leaf_byte_length, canonical_leaf_byte_length,
     common_proof_merkle_storage_plan, common_proof_tree_value_type, entry_leaf_count,
@@ -77,7 +79,7 @@ pub(super) type CompletedCommonProofGenerationResult<Storage, Coins, Sink> = Res
     >,
 >;
 
-pub(super) struct GeneratedCommonProofStoragePlan {
+pub(crate) struct GeneratedCommonProofStoragePlan {
     pub(super) external_memory_plan: ProofExternalMemoryPlan,
     pub(super) tree_plans: BTreeMap<u16, CommonProofMerkleStoragePlan>,
     pub(super) replay_polynomial_plans:
@@ -85,6 +87,111 @@ pub(super) struct GeneratedCommonProofStoragePlan {
     pub(super) relation_evaluation_transform_plans: BTreeMap<u32, ExternalStockhamTransformPlan>,
     pub(super) quotient_constraint_transform_plans:
         BTreeMap<CommonProofQuotientConstraintTransformKey, ExternalStockhamTransformPlan>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct GeneratedCommonProofStorageResidentPayload {
+    storage_plan_catalog_byte_length: u64,
+    executor_catalog_byte_length: u64,
+}
+
+fn map_entry_payload_byte_length<Key, Value>(entry_count: usize) -> Result<u64, CommonProofProverError> {
+    u64::try_from(entry_count)
+        .ok()
+        .and_then(|count| {
+            count.checked_mul(u64::try_from(std::mem::size_of::<(Key, Value)>()).ok()?)
+        })
+        .ok_or(CommonProofProverError::CountOverflow)
+}
+
+impl GeneratedCommonProofStoragePlan {
+    fn resident_owned_payload(
+        &self,
+    ) -> Result<GeneratedCommonProofStorageResidentPayload, CommonProofProverError> {
+        let initial_tree_plan_catalog_byte_length = self.tree_plans.values().try_fold(
+            map_entry_payload_byte_length::<u16, CommonProofMerkleStoragePlan>(
+                self.tree_plans.len(),
+            )?,
+            |total, plan| {
+                checked_resident_add(total, plan.resident_owned_payload_byte_length()?)
+            },
+        )?;
+        let completed_tree_catalog_byte_length = self.tree_plans.values().try_fold(
+            map_entry_payload_byte_length::<u16, StoredCommonProofMerkleTree>(
+                self.tree_plans.len(),
+            )?,
+            |total, plan| {
+                checked_resident_add(
+                    total,
+                    plan.stored_tree_resident_owned_payload_byte_length()?,
+                )
+            },
+        )?;
+        let replay_plan_catalog_byte_length = map_entry_payload_byte_length::<
+            CommonProofReplayPolynomialKey,
+            CommonProofReplayPolynomialPlan,
+        >(self.replay_polynomial_plans.len())?;
+        let relation_transform_catalog_byte_length = self
+            .relation_evaluation_transform_plans
+            .values()
+            .try_fold(
+                map_entry_payload_byte_length::<u32, ExternalStockhamTransformPlan>(
+                    self.relation_evaluation_transform_plans.len(),
+                )?,
+                |total, plan| {
+                    checked_resident_add(
+                        total,
+                        plan.resident_owned_payload_byte_length().map_err(|error| {
+                            match map_external_polynomial_plan_error(error) {
+                                ProofExternalMemoryError::ResourceLimitExceeded => {
+                                    CommonProofProverError::CountOverflow
+                                }
+                                _ => CommonProofProverError::InvalidInput,
+                            }
+                        })?,
+                    )
+                },
+            )?;
+        let quotient_transform_catalog_byte_length = self
+            .quotient_constraint_transform_plans
+            .values()
+            .try_fold(
+                map_entry_payload_byte_length::<
+                    CommonProofQuotientConstraintTransformKey,
+                    ExternalStockhamTransformPlan,
+                >(self.quotient_constraint_transform_plans.len())?,
+                |total, plan| {
+                    checked_resident_add(
+                        total,
+                        plan.resident_owned_payload_byte_length().map_err(|error| {
+                            match map_external_polynomial_plan_error(error) {
+                                ProofExternalMemoryError::ResourceLimitExceeded => {
+                                    CommonProofProverError::CountOverflow
+                                }
+                                _ => CommonProofProverError::InvalidInput,
+                            }
+                        })?,
+                    )
+                },
+            )?;
+        let storage_plan_catalog_byte_length = [
+            initial_tree_plan_catalog_byte_length.max(completed_tree_catalog_byte_length),
+            replay_plan_catalog_byte_length,
+            relation_transform_catalog_byte_length,
+            quotient_transform_catalog_byte_length,
+        ]
+        .into_iter()
+        .try_fold(0_u64, checked_resident_add)?;
+        let executor_catalog_byte_length =
+            ProofExternalMemoryExecutor::planned_resident_owned_payload_byte_length(
+                &self.external_memory_plan,
+            )
+            .map_err(|_| CommonProofProverError::CountOverflow)?;
+        Ok(GeneratedCommonProofStorageResidentPayload {
+            storage_plan_catalog_byte_length,
+            executor_catalog_byte_length,
+        })
+    }
 }
 
 struct GeneratedCommonProofStorageGeometry {
@@ -2248,7 +2355,77 @@ pub(crate) enum CommonProofGenerationInitializationError {
 
 /// Absolute WASM-memory safety bound, distinct from phone qualification targets.
 pub(crate) const MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH: u64 = 671_088_640;
-const COMMON_PROOF_EXECUTOR_RESIDENT_RESERVE_BYTE_LENGTH: u64 = 33_554_432;
+
+/// Named source-owned payloads that remain outside the phase-local polynomial
+/// and external-transaction working sets. The build accounts the one fixed
+/// WebAssembly stack separately, exactly once. Standard-library allocator
+/// metadata is validated by runtime peak measurements rather than represented
+/// as a protocol-derived byte field.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct CommonProofResidentInfrastructurePayloadAccounting {
+    state_machine_inline_byte_length: u64,
+    canonical_header_payload_byte_length: u64,
+    relation_plan_catalog_payload_byte_length: u64,
+    relation_context_catalog_payload_byte_length: u64,
+    proof_tree_catalog_payload_byte_length: u64,
+    storage_plan_catalog_payload_byte_length: u64,
+    executor_catalog_payload_byte_length: u64,
+    generation_catalog_payload_byte_length: u64,
+    resident_phase_catalog_payload_byte_length: u64,
+    transcript_persistent_payload_byte_length: u64,
+    transcript_transient_payload_byte_length: u64,
+    total_byte_length: u64,
+}
+
+impl CommonProofResidentInfrastructurePayloadAccounting {
+    pub(crate) const fn state_machine_inline_byte_length(self) -> u64 {
+        self.state_machine_inline_byte_length
+    }
+
+    pub(crate) const fn canonical_header_payload_byte_length(self) -> u64 {
+        self.canonical_header_payload_byte_length
+    }
+
+    pub(crate) const fn relation_plan_catalog_payload_byte_length(self) -> u64 {
+        self.relation_plan_catalog_payload_byte_length
+    }
+
+    pub(crate) const fn relation_context_catalog_payload_byte_length(self) -> u64 {
+        self.relation_context_catalog_payload_byte_length
+    }
+
+    pub(crate) const fn proof_tree_catalog_payload_byte_length(self) -> u64 {
+        self.proof_tree_catalog_payload_byte_length
+    }
+
+    pub(crate) const fn storage_plan_catalog_payload_byte_length(self) -> u64 {
+        self.storage_plan_catalog_payload_byte_length
+    }
+
+    pub(crate) const fn executor_catalog_payload_byte_length(self) -> u64 {
+        self.executor_catalog_payload_byte_length
+    }
+
+    pub(crate) const fn generation_catalog_payload_byte_length(self) -> u64 {
+        self.generation_catalog_payload_byte_length
+    }
+
+    pub(crate) const fn resident_phase_catalog_payload_byte_length(self) -> u64 {
+        self.resident_phase_catalog_payload_byte_length
+    }
+
+    pub(crate) const fn transcript_persistent_payload_byte_length(self) -> u64 {
+        self.transcript_persistent_payload_byte_length
+    }
+
+    pub(crate) const fn transcript_transient_payload_byte_length(self) -> u64 {
+        self.transcript_transient_payload_byte_length
+    }
+
+    pub(crate) const fn total_byte_length(self) -> u64 {
+        self.total_byte_length
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
@@ -2272,7 +2449,7 @@ pub(crate) enum CommonProofResidentMemoryPhase {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct CommonProofResidentMemoryPhasePlan {
     phase: CommonProofResidentMemoryPhase,
-    executor_reserve_byte_length: u64,
+    infrastructure_payload_accounting: CommonProofResidentInfrastructurePayloadAccounting,
     relation_polynomial_working_set_byte_length: u64,
     auxiliary_trace_workspace_byte_length: u64,
     replay_polynomial_byte_length: u64,
@@ -2294,8 +2471,10 @@ impl CommonProofResidentMemoryPhasePlan {
         self.phase
     }
 
-    pub(crate) const fn executor_reserve_byte_length(&self) -> u64 {
-        self.executor_reserve_byte_length
+    pub(crate) const fn infrastructure_payload_accounting(
+        &self,
+    ) -> CommonProofResidentInfrastructurePayloadAccounting {
+        self.infrastructure_payload_accounting
     }
 
     pub(crate) const fn relation_polynomial_working_set_byte_length(&self) -> u64 {
@@ -2508,8 +2687,9 @@ struct CommonProofResidentMemoryPhaseInput {
     stream_window_byte_length: u64,
 }
 
-fn resident_phase_plan(
+fn resident_phase_plan_with_infrastructure(
     phase: CommonProofResidentMemoryPhase,
+    infrastructure_payload_accounting: CommonProofResidentInfrastructurePayloadAccounting,
     input: CommonProofResidentMemoryPhaseInput,
 ) -> Result<CommonProofResidentMemoryPhasePlan, CommonProofProverError> {
     let CommonProofResidentMemoryPhaseInput {
@@ -2540,7 +2720,7 @@ fn resident_phase_plan(
         return Err(CommonProofProverError::InvalidInput);
     }
     let total_byte_length = [
-        COMMON_PROOF_EXECUTOR_RESIDENT_RESERVE_BYTE_LENGTH,
+        infrastructure_payload_accounting.total_byte_length(),
         relation_polynomial_working_set_byte_length,
         auxiliary_trace_workspace_byte_length,
         replay_polynomial_byte_length,
@@ -2556,7 +2736,7 @@ fn resident_phase_plan(
     .try_fold(0_u64, checked_resident_add)?;
     Ok(CommonProofResidentMemoryPhasePlan {
         phase,
-        executor_reserve_byte_length: COMMON_PROOF_EXECUTOR_RESIDENT_RESERVE_BYTE_LENGTH,
+        infrastructure_payload_accounting,
         relation_polynomial_working_set_byte_length,
         auxiliary_trace_workspace_byte_length,
         replay_polynomial_byte_length,
@@ -2570,6 +2750,126 @@ fn resident_phase_plan(
         query_prefetch_byte_length,
         output_fragment_byte_length,
         stream_window_byte_length,
+        total_byte_length,
+    })
+}
+
+fn resident_infrastructure_payload_accounting(
+    variant: &RelationPlanVariant,
+    relation_context: &RelationPlanCheckContext,
+    transcript_schedule: &CommonProofTranscriptSchedule,
+    catalog: &CompleteProofTreeCatalog,
+    storage_plan: &GeneratedCommonProofStoragePlan,
+    application_statement_schema_identifier: u16,
+    canonical_header_payload_byte_length: u64,
+) -> Result<CommonProofResidentInfrastructurePayloadAccounting, CommonProofProverError> {
+    if canonical_header_payload_byte_length == 0 {
+        return Err(CommonProofProverError::InvalidInput);
+    }
+    let storage_payload = storage_plan.resident_owned_payload()?;
+    let relation_plan_catalog_payload_byte_length = variant
+        .resident_owned_payload_byte_length()
+        .map_err(|error| match error {
+            RelationPlanError::CountOverflow => CommonProofProverError::CountOverflow,
+            _ => CommonProofProverError::InvalidInput,
+        })?;
+    let relation_context_catalog_payload_byte_length = relation_context
+        .resident_owned_payload_byte_length()
+        .map_err(|error| match error {
+            RelationPlanError::CountOverflow => CommonProofProverError::CountOverflow,
+            _ => CommonProofProverError::InvalidInput,
+        })?;
+    let proof_tree_catalog_payload_byte_length = catalog
+        .resident_owned_payload_byte_length()
+        .map_err(|error| match error {
+            ProofBodyError::CountOverflow => CommonProofProverError::CountOverflow,
+            _ => CommonProofProverError::InvalidTree,
+        })?;
+    let transcript_payload = transcript_schedule
+        .live_payload_memory_accounting(application_statement_schema_identifier)
+        .map_err(|error| match error {
+            TranscriptError::ChallengeCounterOverflow => CommonProofProverError::CountOverflow,
+            _ => CommonProofProverError::InvalidInput,
+        })?;
+    let relation_evaluation_vector_catalog_byte_length = map_entry_payload_byte_length::<
+        u32,
+        ExternalPolynomialVector,
+    >(storage_plan.relation_evaluation_transform_plans.len())?;
+    let opening_geometry_catalog_byte_length = checked_resident_multiply(
+        u64::try_from(storage_plan.tree_plans.len())
+            .map_err(|_| CommonProofProverError::CountOverflow)?,
+        u64::try_from(std::mem::size_of::<CommonProofOpeningGeometry>())
+            .map_err(|_| CommonProofProverError::CountOverflow)?,
+    )?;
+    let tree_root_catalog_byte_length = checked_resident_multiply(
+        u64::try_from(catalog.entries().len())
+            .map_err(|_| CommonProofProverError::CountOverflow)?,
+        HASH_BYTE_LENGTH as u64,
+    )?;
+    let root_presence_catalog_byte_length = checked_resident_multiply(
+        u64::try_from(catalog.entries().len())
+            .map_err(|_| CommonProofProverError::CountOverflow)?,
+        u64::try_from(std::mem::size_of::<bool>())
+            .map_err(|_| CommonProofProverError::CountOverflow)?,
+    )?;
+    let application_challenge_assignment_count = transcript_schedule
+        .ordered_application_challenge_groups()
+        .iter()
+        .try_fold(0_u64, |total, group| {
+            checked_resident_add(total, u64::from(group.coordinate_count()))
+        })?;
+    let application_challenge_assignment_catalog_byte_length = checked_resident_multiply(
+        application_challenge_assignment_count,
+        u64::try_from(std::mem::size_of::<RelationApplicationChallengeAssignment>())
+            .map_err(|_| CommonProofProverError::CountOverflow)?,
+    )?;
+    let generation_catalog_payload_byte_length = [
+        relation_evaluation_vector_catalog_byte_length,
+        opening_geometry_catalog_byte_length,
+        tree_root_catalog_byte_length,
+        root_presence_catalog_byte_length,
+        application_challenge_assignment_catalog_byte_length,
+    ]
+    .into_iter()
+    .try_fold(0_u64, checked_resident_add)?;
+    let resident_phase_catalog_payload_byte_length = checked_resident_multiply(
+        u64::from(CommonProofResidentMemoryPhase::EmittingQueries as u8),
+        u64::try_from(std::mem::size_of::<CommonProofResidentMemoryPhasePlan>())
+            .map_err(|_| CommonProofProverError::CountOverflow)?,
+    )?;
+    let state_machine_inline_byte_length =
+        u64::try_from(std::mem::size_of::<CommonProofGenerationStateMachine>())
+            .map_err(|_| CommonProofProverError::CountOverflow)?;
+    let transcript_persistent_payload_byte_length =
+        transcript_payload.persistent_transcript_byte_length();
+    let transcript_transient_payload_byte_length = transcript_payload.maximum_transient_byte_length();
+    let total_byte_length = [
+        state_machine_inline_byte_length,
+        canonical_header_payload_byte_length,
+        relation_plan_catalog_payload_byte_length,
+        relation_context_catalog_payload_byte_length,
+        proof_tree_catalog_payload_byte_length,
+        storage_payload.storage_plan_catalog_byte_length,
+        storage_payload.executor_catalog_byte_length,
+        generation_catalog_payload_byte_length,
+        resident_phase_catalog_payload_byte_length,
+        transcript_persistent_payload_byte_length,
+        transcript_transient_payload_byte_length,
+    ]
+    .into_iter()
+    .try_fold(0_u64, checked_resident_add)?;
+    Ok(CommonProofResidentInfrastructurePayloadAccounting {
+        state_machine_inline_byte_length,
+        canonical_header_payload_byte_length,
+        relation_plan_catalog_payload_byte_length,
+        relation_context_catalog_payload_byte_length,
+        proof_tree_catalog_payload_byte_length,
+        storage_plan_catalog_payload_byte_length: storage_payload.storage_plan_catalog_byte_length,
+        executor_catalog_payload_byte_length: storage_payload.executor_catalog_byte_length,
+        generation_catalog_payload_byte_length,
+        resident_phase_catalog_payload_byte_length,
+        transcript_persistent_payload_byte_length,
+        transcript_transient_payload_byte_length,
         total_byte_length,
     })
 }
@@ -2588,6 +2888,9 @@ fn derive_common_proof_resident_memory_plan(
     relation_context: &RelationPlanCheckContext,
     transcript_schedule: &CommonProofTranscriptSchedule,
     catalog: &CompleteProofTreeCatalog,
+    storage_plan: &GeneratedCommonProofStoragePlan,
+    application_statement_schema_identifier: u16,
+    canonical_header_payload_byte_length: u64,
     maximum_prefetched_query_byte_length: u64,
     external_memory_write_chunk_byte_length: u64,
     maximum_stream_window_byte_length: u64,
@@ -2601,6 +2904,15 @@ fn derive_common_proof_resident_memory_plan(
     }
     let evaluation_domain_size = variant.evaluation_domain_size();
     let trace_domain_size = variant.trace_domain_size();
+    let infrastructure_payload_accounting = resident_infrastructure_payload_accounting(
+        variant,
+        relation_context,
+        transcript_schedule,
+        catalog,
+        storage_plan,
+        application_statement_schema_identifier,
+        canonical_header_payload_byte_length,
+    )?;
     let quotient_stream_requirement =
         common_proof_quotient_stream_requirement(variant, external_memory_write_chunk_byte_length)?;
     let query_prefetch_requirement =
@@ -2848,6 +3160,13 @@ fn derive_common_proof_resident_memory_plan(
             maximum_extension_merkle_working_set_byte_length,
         )?);
 
+    let resident_phase_plan = |phase, input| {
+        resident_phase_plan_with_infrastructure(
+            phase,
+            infrastructure_payload_accounting,
+            input,
+        )
+    };
     let phases = vec![
         resident_phase_plan(
             CommonProofResidentMemoryPhase::LoadingSourcePolynomials,
@@ -2996,15 +3315,35 @@ pub(crate) fn common_proof_resident_memory_requirement(
     relation_context: &RelationPlanCheckContext,
     transcript_schedule: &CommonProofTranscriptSchedule,
     catalog: &CompleteProofTreeCatalog,
+    application_statement_schema_identifier: u16,
+    canonical_header_payload_byte_length: u64,
     maximum_prefetched_query_byte_length: u64,
     external_memory_write_chunk_byte_length: u64,
     maximum_stream_window_byte_length: u64,
 ) -> Result<CommonProofResidentMemoryPlan, CommonProofProverError> {
+    let external_memory_write_chunk_byte_length_u32 =
+        u32::try_from(external_memory_write_chunk_byte_length)
+            .map_err(|_| CommonProofProverError::CountOverflow)?;
+    let storage_plan = generated_common_proof_storage_plan(
+        variant,
+        relation_context,
+        catalog,
+        transcript_schedule,
+        external_memory_write_chunk_byte_length_u32,
+        true,
+    )
+    .map_err(|error| match error {
+        GeneratedCommonProofStoragePlanError::Prover(error) => error,
+        GeneratedCommonProofStoragePlanError::Storage(_) => CommonProofProverError::InvalidInput,
+    })?;
     derive_common_proof_resident_memory_plan(
         variant,
         relation_context,
         transcript_schedule,
         catalog,
+        &storage_plan,
+        application_statement_schema_identifier,
+        canonical_header_payload_byte_length,
         maximum_prefetched_query_byte_length,
         external_memory_write_chunk_byte_length,
         maximum_stream_window_byte_length,
@@ -3016,6 +3355,9 @@ pub(crate) fn common_proof_resident_memory_plan(
     relation_context: &RelationPlanCheckContext,
     transcript_schedule: &CommonProofTranscriptSchedule,
     catalog: &CompleteProofTreeCatalog,
+    storage_plan: &GeneratedCommonProofStoragePlan,
+    application_statement_schema_identifier: u16,
+    canonical_header_payload_byte_length: u64,
     maximum_prefetched_query_byte_length: u64,
     external_memory_write_chunk_byte_length: u64,
     maximum_stream_window_byte_length: u64,
@@ -3025,6 +3367,9 @@ pub(crate) fn common_proof_resident_memory_plan(
         relation_context,
         transcript_schedule,
         catalog,
+        storage_plan,
+        application_statement_schema_identifier,
+        canonical_header_payload_byte_length,
         maximum_prefetched_query_byte_length,
         external_memory_write_chunk_byte_length,
         maximum_stream_window_byte_length,

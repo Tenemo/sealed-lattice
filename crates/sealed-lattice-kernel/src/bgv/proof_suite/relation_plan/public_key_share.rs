@@ -1,6 +1,10 @@
+use std::collections::BTreeMap;
+
 use super::key_relation::{
-    AnchorEquationInputs, BoundPolynomialRootUse, KeyRelationGeometry, KeyRelationPlanBuilder,
-    KeyVerifierSourceKey, PublicKeyEquationInputs, PublicKeyShareRelationPlanInput,
+    AnchorEquationInputs, AnchorOpeningWitness, AnchorQuotientWitness, BoundPolynomialRootUse,
+    KeyRelationGeometry, KeyRelationPlanBuilder, KeyVerifierSourceKey, PublicKeyEquationInputs,
+    PublicKeyShareRelationPlanInput, QuarterBackedSplitIntegerVector,
+    ReversibleShiftedSmallVector, ShiftedSmallVector, SplitIntegerVector,
     public_key_common_reference_source, statement_root_source,
 };
 use super::same_secret_anchor::{add_matrix_columns, append_matrix_sources};
@@ -11,10 +15,47 @@ const PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER: u16 =
 const ANCHOR_COMMITMENT_ROOTS_FIELD_ORDINAL: u64 = 3;
 const PUBLIC_KEY_SHARE_ROOT_FIELD_ORDINAL: u64 = 4;
 
+pub(crate) struct CompiledPublicKeyShareRelation {
+    pub(crate) relation_plan: CompiledRelationPlan,
+    pub(crate) source_layout: PublicKeyShareSourceLayout,
+}
+
+pub(crate) struct PublicKeyShareSourceLayout {
+    pub(super) common_secret: ReversibleShiftedSmallVector,
+    pub(super) public_key_error: ShiftedSmallVector,
+    pub(super) public_key_share_limbs: Box<[QuarterBackedSplitIntegerVector]>,
+    pub(super) ordered_limbs: Box<[PublicKeyShareLimbSourceLayout]>,
+    pub(super) ordered_anchors: Box<[PublicKeyShareAnchorSourceLayout]>,
+    pub(super) exact_radix_digits_by_column: BTreeMap<u32, Box<[u32]>>,
+}
+
+pub(super) struct PublicKeyShareLimbSourceLayout {
+    pub(super) data_modulus_index: u16,
+    pub(super) common_reference: SplitIntegerVector,
+    pub(super) quotient_columns: [u32; 2],
+}
+
+pub(super) struct PublicKeyShareAnchorSourceLayout {
+    pub(super) data_modulus_index: u16,
+    pub(super) opening: AnchorOpeningWitness,
+    pub(super) commitments: Box<[SplitIntegerVector]>,
+    pub(super) first_matrix: Box<[Box<[SplitIntegerVector]>]>,
+    pub(super) second_matrix: Box<[SplitIntegerVector]>,
+    pub(super) quotients: AnchorQuotientWitness,
+}
+
 pub(crate) fn compile_public_key_share_relation_plan(
     input: &PublicKeyShareRelationPlanInput,
     check_context: &RelationPlanCheckContext,
 ) -> Result<CompiledRelationPlan, RelationPlanError> {
+    compile_public_key_share_relation_with_source_layout(input, check_context)
+        .map(|compiled| compiled.relation_plan)
+}
+
+pub(crate) fn compile_public_key_share_relation_with_source_layout(
+    input: &PublicKeyShareRelationPlanInput,
+    check_context: &RelationPlanCheckContext,
+) -> Result<CompiledPublicKeyShareRelation, RelationPlanError> {
     let rank = usize::from(input.commitment_module_rank);
     let mut sources = vec![statement_root_source(
         PUBLIC_KEY_SHARE_ROOT_FIELD_ORDINAL,
@@ -61,6 +102,7 @@ pub(crate) fn compile_public_key_share_relation_plan(
         &data_modulus_references,
         BoundPolynomialRootUse::Output,
     )?;
+    let mut limb_source_layouts = Vec::with_capacity(input.data_modulus_indices.len());
     for (limb_ordinal, data_modulus_index) in input.data_modulus_indices.iter().copied().enumerate()
     {
         let modulus_reference = SuiteModulusReference::data(data_modulus_index);
@@ -74,7 +116,7 @@ pub(crate) fn compile_public_key_share_relation_plan(
                 modulus_reference,
                 challenge_ordinal,
                 PublicKeyEquationInputs::new(
-                    &public_key_share_limbs[limb_ordinal],
+                    &public_key_share_limbs[limb_ordinal].half_projections,
                     &common_reference,
                     &secret,
                     &public_key_error,
@@ -82,7 +124,14 @@ pub(crate) fn compile_public_key_share_relation_plan(
                 ),
             )?;
         }
+        limb_source_layouts.push(PublicKeyShareLimbSourceLayout {
+            data_modulus_index,
+            common_reference,
+            quotient_columns,
+        });
     }
+    let mut anchor_source_layouts =
+        Vec::with_capacity(input.commitment_data_modulus_indices.len());
     for (root_ordinal, data_modulus_index) in input
         .commitment_data_modulus_indices
         .iter()
@@ -122,8 +171,41 @@ pub(crate) fn compile_public_key_share_relation_plan(
                 ),
             )?;
         }
+        anchor_source_layouts.push(PublicKeyShareAnchorSourceLayout {
+            data_modulus_index,
+            opening,
+            commitments: commitments.into_boxed_slice(),
+            first_matrix: first_matrix
+                .into_iter()
+                .map(Vec::into_boxed_slice)
+                .collect::<Vec<_>>()
+                .into_boxed_slice(),
+            second_matrix: second_matrix.into_boxed_slice(),
+            quotients,
+        });
     }
-    builder.finish()
+    let exact_radix_digits_by_column = builder
+        .exact_radix_digits_by_column()
+        .iter()
+        .map(|(column_ordinal, digit_column_ordinals)| {
+            (
+                *column_ordinal,
+                digit_column_ordinals.clone().into_boxed_slice(),
+            )
+        })
+        .collect();
+    let relation_plan = builder.finish()?;
+    Ok(CompiledPublicKeyShareRelation {
+        relation_plan,
+        source_layout: PublicKeyShareSourceLayout {
+            common_secret: secret,
+            public_key_error,
+            public_key_share_limbs: public_key_share_limbs.into_boxed_slice(),
+            ordered_limbs: limb_source_layouts.into_boxed_slice(),
+            ordered_anchors: anchor_source_layouts.into_boxed_slice(),
+            exact_radix_digits_by_column,
+        },
+    })
 }
 
 #[cfg(test)]

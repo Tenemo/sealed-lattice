@@ -1,5 +1,8 @@
 const caseIdentifierPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
 
+export const productionDesktopBrowserEvaluatorReplayMeasurementCaseIdentifier =
+    'selected-complete-action';
+
 export const requireDesktopBrowserEvaluatorReplayMeasurementCaseIdentifier = (
     value: unknown,
 ): string => {

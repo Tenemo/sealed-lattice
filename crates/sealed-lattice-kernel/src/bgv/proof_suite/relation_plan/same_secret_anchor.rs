@@ -1,6 +1,9 @@
+use std::collections::BTreeMap;
+
 use super::key_relation::{
-    AnchorEquationInputs, BoundPolynomialRootUse, KeyRelationGeometry, KeyRelationPlanBuilder,
-    KeyVerifierSourceKey, SameSecretRelationPlanInput, SplitIntegerVector, bdlop_matrix_source,
+    AnchorEquationInputs, AnchorOpeningWitness, AnchorQuotientWitness, BoundedUnsignedColumn,
+    BoundPolynomialRootUse, KeyRelationGeometry, KeyRelationPlanBuilder, KeyVerifierSourceKey,
+    SameSecretRelationPlanInput, ShiftedSmallVector, SplitIntegerVector, bdlop_matrix_source,
     statement_root_source,
 };
 use super::*;
@@ -10,10 +13,45 @@ const SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER: u16 =
 const DEGREE_ZERO_VSS_MATERIAL_ROOTS_FIELD_ORDINAL: u64 = 3;
 const ANCHOR_COMMITMENT_ROOTS_FIELD_ORDINAL: u64 = 4;
 
+pub(crate) struct CompiledSameSecretRelation {
+    pub(crate) relation_plan: CompiledRelationPlan,
+    pub(crate) source_layout: SameSecretSourceLayout,
+}
+
+pub(crate) struct SameSecretSourceLayout {
+    pub(super) common_secret: ShiftedSmallVector,
+    pub(super) negative_indicator: [u32; 2],
+    pub(super) ordered_materials: Box<[SameSecretMaterialSourceLayout]>,
+    pub(super) ordered_anchors: Box<[SameSecretAnchorSourceLayout]>,
+    pub(super) exact_radix_digits_by_column: BTreeMap<u32, Box<[u32]>>,
+}
+
+pub(super) struct SameSecretMaterialSourceLayout {
+    pub(super) data_modulus_index: u16,
+    pub(super) material: [BoundedUnsignedColumn; 2],
+}
+
+pub(super) struct SameSecretAnchorSourceLayout {
+    pub(super) data_modulus_index: u16,
+    pub(super) opening: AnchorOpeningWitness,
+    pub(super) commitments: Box<[SplitIntegerVector]>,
+    pub(super) first_matrix: Box<[Box<[SplitIntegerVector]>]>,
+    pub(super) second_matrix: Box<[SplitIntegerVector]>,
+    pub(super) quotients: AnchorQuotientWitness,
+}
+
 pub(crate) fn compile_same_secret_relation_plan(
     input: &SameSecretRelationPlanInput,
     check_context: &RelationPlanCheckContext,
 ) -> Result<CompiledRelationPlan, RelationPlanError> {
+    compile_same_secret_relation_with_source_layout(input, check_context)
+        .map(|compiled| compiled.relation_plan)
+}
+
+pub(crate) fn compile_same_secret_relation_with_source_layout(
+    input: &SameSecretRelationPlanInput,
+    check_context: &RelationPlanCheckContext,
+) -> Result<CompiledSameSecretRelation, RelationPlanError> {
     let rank = usize::from(input.commitment_module_rank);
     let mut sources = Vec::new();
     for (root_ordinal, _) in input.sharing_data_modulus_indices.iter().enumerate() {
@@ -43,6 +81,7 @@ pub(crate) fn compile_same_secret_relation_plan(
     )?;
     let secret = builder.add_shifted_ternary_vector()?;
     let negative_indicator = builder.add_binary_vector()?;
+    let mut material_source_layouts = Vec::with_capacity(input.sharing_data_modulus_indices.len());
     for (root_ordinal, data_modulus_index) in input
         .sharing_data_modulus_indices
         .iter()
@@ -64,7 +103,13 @@ pub(crate) fn compile_same_secret_relation_plan(
             &negative_indicator,
             SuiteModulusReference::data(data_modulus_index),
         )?;
+        material_source_layouts.push(SameSecretMaterialSourceLayout {
+            data_modulus_index,
+            material,
+        });
     }
+    let mut anchor_source_layouts =
+        Vec::with_capacity(input.commitment_data_modulus_indices.len());
     for (root_ordinal, data_modulus_index) in input
         .commitment_data_modulus_indices
         .iter()
@@ -105,8 +150,40 @@ pub(crate) fn compile_same_secret_relation_plan(
                 ),
             )?;
         }
+        anchor_source_layouts.push(SameSecretAnchorSourceLayout {
+            data_modulus_index,
+            opening,
+            commitments: commitments.into_boxed_slice(),
+            first_matrix: first_matrix
+                .into_iter()
+                .map(Vec::into_boxed_slice)
+                .collect::<Vec<_>>()
+                .into_boxed_slice(),
+            second_matrix: second_matrix.into_boxed_slice(),
+            quotients,
+        });
     }
-    builder.finish()
+    let exact_radix_digits_by_column = builder
+        .exact_radix_digits_by_column()
+        .iter()
+        .map(|(column_ordinal, digit_column_ordinals)| {
+            (
+                *column_ordinal,
+                digit_column_ordinals.clone().into_boxed_slice(),
+            )
+        })
+        .collect();
+    let relation_plan = builder.finish()?;
+    Ok(CompiledSameSecretRelation {
+        relation_plan,
+        source_layout: SameSecretSourceLayout {
+            common_secret: secret,
+            negative_indicator,
+            ordered_materials: material_source_layouts.into_boxed_slice(),
+            ordered_anchors: anchor_source_layouts.into_boxed_slice(),
+            exact_radix_digits_by_column,
+        },
+    })
 }
 
 pub(super) fn append_matrix_sources(

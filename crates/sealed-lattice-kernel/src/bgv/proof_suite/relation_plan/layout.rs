@@ -14,7 +14,8 @@ use super::{
     compiled_plan::RelationPlanCheckContext,
     expressions::{
         RelationExpressionInstruction, canonical_nested_list, check_expression,
-        encode_generated_tuple, hash_generated_variable_bytes, validate_challenge_catalog,
+        checked_resident_payload_add, encode_generated_tuple, hash_generated_variable_bytes,
+        resident_vec_storage_byte_length, validate_challenge_catalog,
     },
     integer_lift::{
         RelationCoefficientLocalIdentityBatchDescriptor, RelationIntegerLiftBatchDescriptor,
@@ -240,6 +241,82 @@ pub(crate) struct RelationPlanVariant {
 }
 
 impl RelationPlanVariant {
+    /// Exact source-owned resident payload of the selected typed relation
+    /// catalog. Top-level descriptor arrays, recursively owned vectors,
+    /// strings, boxes, and semantic big-integer limbs are counted once. The
+    /// inline `RelationPlanVariant` headers are owned by the generation state
+    /// machine and are deliberately not repeated here.
+    pub(crate) fn resident_owned_payload_byte_length(&self) -> Result<u64, RelationPlanError> {
+        let mut total = [
+            resident_vec_storage_byte_length(&self.ordered_non_native_moduli)?,
+            resident_vec_storage_byte_length(&self.ordered_verifier_sources)?,
+            resident_vec_storage_byte_length(&self.ordered_public_samplers)?,
+            resident_vec_storage_byte_length(&self.ordered_columns)?,
+            resident_vec_storage_byte_length(&self.ordered_semantic_cells)?,
+            resident_vec_storage_byte_length(&self.ordered_radix_convolutions)?,
+            resident_vec_storage_byte_length(&self.ordered_integer_lift_batches)?,
+            resident_vec_storage_byte_length(
+                &self.ordered_coefficient_local_identity_batches,
+            )?,
+            resident_vec_storage_byte_length(&self.ordered_trees)?,
+            resident_vec_storage_byte_length(&self.ordered_constraints)?,
+            resident_vec_storage_byte_length(&self.ordered_opening_points)?,
+            resident_vec_storage_byte_length(&self.ordered_opening_claims)?,
+            resident_vec_storage_byte_length(&self.ordered_masks)?,
+        ]
+        .into_iter()
+        .try_fold(0_u64, checked_resident_payload_add)?;
+        for source in &self.ordered_verifier_sources {
+            total = checked_resident_payload_add(
+                total,
+                source.resident_owned_payload_byte_length()?,
+            )?;
+        }
+        for sampler in &self.ordered_public_samplers {
+            total = checked_resident_payload_add(
+                total,
+                sampler.resident_owned_payload_byte_length()?,
+            )?;
+        }
+        for cell in &self.ordered_semantic_cells {
+            total = checked_resident_payload_add(
+                total,
+                cell.resident_owned_payload_byte_length()?,
+            )?;
+        }
+        for convolution in &self.ordered_radix_convolutions {
+            total = checked_resident_payload_add(
+                total,
+                convolution.resident_owned_payload_byte_length()?,
+            )?;
+        }
+        for batch in &self.ordered_integer_lift_batches {
+            total = checked_resident_payload_add(
+                total,
+                batch.resident_owned_payload_byte_length()?,
+            )?;
+        }
+        for batch in &self.ordered_coefficient_local_identity_batches {
+            total = checked_resident_payload_add(
+                total,
+                batch.resident_owned_payload_byte_length()?,
+            )?;
+        }
+        for tree in &self.ordered_trees {
+            total = checked_resident_payload_add(
+                total,
+                tree.resident_owned_payload_byte_length()?,
+            )?;
+        }
+        for constraint in &self.ordered_constraints {
+            total = checked_resident_payload_add(
+                total,
+                constraint.resident_owned_payload_byte_length()?,
+            )?;
+        }
+        Ok(total)
+    }
+
     pub(crate) fn canonical_bytes(&self) -> Result<Vec<u8>, RelationPlanError> {
         encode_generated_tuple(&self.canonical_tuple()?)
     }

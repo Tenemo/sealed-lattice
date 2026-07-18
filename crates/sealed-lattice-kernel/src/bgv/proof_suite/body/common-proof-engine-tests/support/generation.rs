@@ -734,6 +734,55 @@ fn generation_state_enforces_reports_and_releases_its_complete_resident_live_set
         .iter()
         .find(|phase| phase.phase() == CommonProofResidentMemoryPhase::LoadingSourcePolynomials)
         .expect("the source-polynomial construction phase is explicit");
+    let infrastructure = loading_source_polynomials.infrastructure_payload_accounting();
+    assert!(infrastructure.state_machine_inline_byte_length() > 0);
+    assert!(infrastructure.canonical_header_payload_byte_length() > 0);
+    assert!(infrastructure.relation_plan_catalog_payload_byte_length() > 0);
+    assert!(infrastructure.relation_context_catalog_payload_byte_length() > 0);
+    assert!(infrastructure.proof_tree_catalog_payload_byte_length() > 0);
+    assert!(infrastructure.storage_plan_catalog_payload_byte_length() > 0);
+    assert!(infrastructure.executor_catalog_payload_byte_length() > 0);
+    assert!(infrastructure.generation_catalog_payload_byte_length() > 0);
+    assert!(infrastructure.resident_phase_catalog_payload_byte_length() > 0);
+    assert!(infrastructure.transcript_persistent_payload_byte_length() > 0);
+    assert!(infrastructure.transcript_transient_payload_byte_length() > 0);
+    assert_eq!(
+        infrastructure.total_byte_length(),
+        infrastructure
+            .state_machine_inline_byte_length()
+            .checked_add(infrastructure.canonical_header_payload_byte_length())
+            .and_then(|total| {
+                total.checked_add(infrastructure.relation_plan_catalog_payload_byte_length())
+            })
+            .and_then(|total| {
+                total.checked_add(infrastructure.relation_context_catalog_payload_byte_length())
+            })
+            .and_then(|total| {
+                total.checked_add(infrastructure.proof_tree_catalog_payload_byte_length())
+            })
+            .and_then(|total| {
+                total.checked_add(infrastructure.storage_plan_catalog_payload_byte_length())
+            })
+            .and_then(|total| {
+                total.checked_add(infrastructure.executor_catalog_payload_byte_length())
+            })
+            .and_then(|total| {
+                total.checked_add(infrastructure.generation_catalog_payload_byte_length())
+            })
+            .and_then(|total| {
+                total.checked_add(infrastructure.resident_phase_catalog_payload_byte_length())
+            })
+            .and_then(|total| {
+                total.checked_add(infrastructure.transcript_persistent_payload_byte_length())
+            })
+            .and_then(|total| {
+                total.checked_add(infrastructure.transcript_transient_payload_byte_length())
+            })
+            .expect("the named infrastructure payload sum fits u64"),
+    );
+    assert!(resident_memory_plan.phases().iter().all(|phase| {
+        phase.infrastructure_payload_accounting() == infrastructure
+    }));
     assert!(loading_source_polynomials.relation_polynomial_working_set_byte_length() > 0);
 
     let deriving_auxiliary_columns = resident_memory_plan

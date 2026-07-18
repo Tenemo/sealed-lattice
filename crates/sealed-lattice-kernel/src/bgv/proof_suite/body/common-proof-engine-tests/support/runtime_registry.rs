@@ -440,42 +440,23 @@ fn upstream_input_registry_consumes_only_one_complete_application_owned_capabili
             runtime_limits,
         )
         .expect("the positively constructed fixture application is retained");
-    let statement_tree_handles = verified_trees
-        .iter()
-        .cloned()
-        .map(|tree| {
-            registry
-                .mint_statement_tree(&application_handle, tree)
-                .expect("the verified tree is retained for the exact application")
-        })
-        .collect::<Vec<_>>();
-    let mut duplicate_statement_tree_handles = statement_tree_handles.iter().collect::<Vec<_>>();
-    duplicate_statement_tree_handles[1] = duplicate_statement_tree_handles[0];
+    let incomplete_statement_tree_batch = verified_trees[..2].to_vec();
     assert_eq!(
         registry
-            .consume_verification_inputs(
+            .attach_statement_owned_tree_batch(
                 &application_handle,
-                &duplicate_statement_tree_handles,
-                &[],
-                None,
-            )
-            .err(),
-        Some(CommonProofRuntimeError::WrongVerificationBinding),
-        "a duplicate handle cannot stand in for a missing verified tree",
+                incomplete_statement_tree_batch,
+            ),
+        Err(CommonProofRuntimeError::WrongVerificationBinding),
+        "an incomplete tree batch fails without mutating the application",
     );
-
-    let incomplete_statement_tree_handles = statement_tree_handles[..2].iter().collect::<Vec<_>>();
+    registry
+        .attach_statement_owned_tree_batch(&application_handle, verified_trees.clone())
+        .expect("the exact ordered tree batch attaches once");
     assert_eq!(
-        registry
-            .consume_verification_inputs(
-                &application_handle,
-                &incomplete_statement_tree_handles,
-                &[],
-                None,
-            )
-            .err(),
-        Some(CommonProofRuntimeError::WrongVerificationBinding),
-        "an incomplete tree set fails before consuming any capability",
+        registry.attach_statement_owned_tree_batch(&application_handle, verified_trees.clone()),
+        Err(CommonProofRuntimeError::WrongVerificationBinding),
+        "a second batch cannot replace the application-owned catalog",
     );
 
     let second_relation_plan_capability = CommonProofRelationPlanCapability::from_compiled_plan(
@@ -495,32 +476,25 @@ fn upstream_input_registry_consumes_only_one_complete_application_owned_capabili
             runtime_limits,
         )
         .expect("the independent application is retained");
-    let cross_application_tree_handle = registry
-        .mint_statement_tree(&second_application_handle, verified_trees[0].clone())
-        .expect("the second application's verified tree is retained");
-    let mut cross_application_tree_handles = statement_tree_handles.iter().collect::<Vec<_>>();
-    cross_application_tree_handles[0] = &cross_application_tree_handle;
+    let mut wrong_coordinate_batch = verified_trees.clone();
+    wrong_coordinate_batch[0] =
+        wrong_coordinate_batch[0].with_relation_coordinates(u32::MAX, u32::MAX);
+    registry
+        .attach_statement_owned_tree_batch(&second_application_handle, wrong_coordinate_batch)
+        .expect("the complete batch is retained until its per-tree validation runs");
     assert_eq!(
         registry
-            .consume_verification_inputs(
-                &application_handle,
-                &cross_application_tree_handles,
-                &[],
-                None,
-            )
+            .consume_verification_inputs(&second_application_handle, &[], None)
             .err(),
         Some(CommonProofRuntimeError::WrongVerificationBinding),
-        "a verified tree cannot cross application ownership boundaries",
+        "the complete batch still receives exact per-tree coordinate validation",
     );
+    registry
+        .cancel_application(&second_application_handle)
+        .expect("cancellation atomically drops the rejected application-owned batch");
 
-    let complete_statement_tree_handles = statement_tree_handles.iter().collect::<Vec<_>>();
     let consumed = registry
-        .consume_verification_inputs(
-            &application_handle,
-            &complete_statement_tree_handles,
-            &[],
-            None,
-        )
+        .consume_verification_inputs(&application_handle, &[], None)
         .expect("the exact complete capability set initializes and transfers once");
     assert_eq!(consumed.verification_binding(), binding);
     assert_eq!(
@@ -538,28 +512,117 @@ fn upstream_input_registry_consumes_only_one_complete_application_owned_capabili
     );
     assert_eq!(
         registry
-            .consume_verification_inputs(
-                &application_handle,
-                &complete_statement_tree_handles,
-                &[],
-                None,
-            )
+            .consume_verification_inputs(&application_handle, &[], None)
             .err(),
         Some(CommonProofRuntimeError::UnknownOrStaleHandle),
         "the application handle is permanently stale after transfer",
     );
-    registry
-        .cancel_application(&second_application_handle)
-        .expect("cancellation retires the second application and all attached inputs");
     assert_eq!(
         registry
-            .consume_verification_inputs(
-                &second_application_handle,
-                &[&cross_application_tree_handle],
-                &[],
-                None,
-            )
+            .consume_verification_inputs(&second_application_handle, &[], None)
             .err(),
         Some(CommonProofRuntimeError::UnknownOrStaleHandle),
     );
+}
+
+#[test]
+fn application_owned_statement_tree_batch_does_not_spend_one_registry_entry_per_tree() {
+    let fixture = common_proof_engine_fixture();
+    let fixture_trees = verified_statement_trees(
+        &fixture.relation_plan,
+        &fixture.setup_polynomial_trees,
+        None,
+        fixture.schedule_position,
+        fixture.top_count,
+    );
+    let schema_identifier =
+        ProofApplicationSlotCeilings::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER;
+    let relation_plan_artifact = selected_relation_plans()
+        .expect("selected relation plans")
+        .into_iter()
+        .find(|artifact| {
+            artifact.application_statement_schema_identifier() == schema_identifier
+        })
+        .expect("selected VSS relation plan");
+    let relation_context = selected_relation_plan_check_context(schema_identifier)
+        .expect("selected VSS relation context");
+    let statement_tree_count = relation_plan_artifact
+        .compiled_plan()
+        .select_variant(None, None)
+        .expect("selected VSS relation variant")
+        .ordered_trees()
+        .iter()
+        .filter(|tree| matches!(tree, RelationTreeDescriptor::BoundPublic { .. }))
+        .count();
+    assert!(
+        statement_tree_count > 64,
+        "the regression must cover a catalog larger than the registry ceiling",
+    );
+    let relation_plan_capability = CommonProofRelationPlanCapability::from_compiled_plan(
+        relation_plan_artifact.compiled_plan(),
+        &relation_context,
+        None,
+        None,
+    )
+    .expect("checked selected VSS plan capability");
+    let runtime_limits = CommonProofRuntimeLimits::new(
+        super::super::super::super::MAXIMUM_COMMON_PROOF_BYTE_LENGTH,
+        MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH,
+        super::super::super::super::MAXIMUM_COMMON_PROOF_BYTE_LENGTH as u64,
+    )
+    .expect("fixed worker limits");
+    let proof_stream_digest = [0x64; 64];
+    let proof_application = CommonProofApplicationBinding::new(
+        [0x61; 64],
+        [0x62; 64],
+        schema_identifier,
+        [0x63; 64],
+        CanonicalStreamDomain::DealerVssShareLinkageProof,
+        proof_stream_digest,
+        super::super::super::super::MAXIMUM_COMMON_PROOF_BYTE_LENGTH as u64,
+        relation_plan_capability
+            .proof_query_count()
+            .expect("selected VSS query count"),
+    )
+    .expect("VSS application binding");
+    let verification_binding = CommonProofVerificationBinding::new(
+        [0x11; 64],
+        [0x32; 64],
+        [0x31; 64],
+        [0x33; 64],
+        proof_application,
+        relation_plan_capability.relation_plan_hash(),
+    );
+    let proof_stream_descriptor = StreamDescriptor {
+        total_byte_length: super::super::super::super::MAXIMUM_COMMON_PROOF_BYTE_LENGTH as u64,
+        ordered_chunk_digests: vec![Hash512::from_bytes([0x65; 64]); 5].into(),
+        full_object_digest: Hash512::from_bytes(proof_stream_digest),
+    };
+    let mut registry = CommonProofUpstreamInputRegistry::default();
+    let application_handle = registry
+        .install_test_application_fixture(
+            verification_binding,
+            relation_plan_capability,
+            1,
+            &fixture.canonical_application_statement_bytes,
+            proof_stream_descriptor,
+            runtime_limits,
+        )
+        .expect("VSS application retained");
+    let entry_count_before_batch = registry.entry_count().expect("entry count");
+    registry
+        .attach_statement_owned_tree_batch(
+            &application_handle,
+            vec![fixture_trees[0].clone(); statement_tree_count],
+        )
+        .expect("one application-owned large tree batch");
+    assert_eq!(
+        registry.entry_count().expect("entry count after batch"),
+        entry_count_before_batch,
+        "tree count must not be registry entry count",
+    );
+    registry
+        .cancel_application(&application_handle)
+        .expect("cancellation drops the whole application-owned batch");
+    assert_eq!(registry.entry_count().expect("empty registry"), 0);
 }

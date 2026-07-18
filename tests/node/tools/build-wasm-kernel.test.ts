@@ -2,7 +2,11 @@ import path from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { createDeterministicCargoEnvironment } from '#tools/ci/build-wasm-kernel';
+import {
+    assertDeterministicWasmStackLayout,
+    createDeterministicCargoEnvironment,
+    wasmStackByteLength,
+} from '#tools/ci/build-wasm-kernel';
 
 const encodedRustflagSeparator = '\x1f';
 
@@ -26,6 +30,12 @@ describe('WASM kernel build environment', () => {
             `${cargoHome}=/cargo`,
             '-C',
             expect.stringMatching(/^link-arg=--max-memory=\d+$/u),
+            '-C',
+            'link-arg=-z',
+            '-C',
+            `link-arg=stack-size=${wasmStackByteLength}`,
+            '-C',
+            'link-arg=--stack-first',
         ]);
         expect(environment.CARGO_TARGET_DIR).toBe(targetDirectory);
         expect(environment.CARGO_INCREMENTAL).toBe('0');
@@ -41,5 +51,49 @@ describe('WASM kernel build environment', () => {
         ).toThrow(
             'CARGO_ENCODED_RUSTFLAGS must be unset for the deterministic WASM build.',
         );
+    });
+
+    it('requires one build-owned mutable stack global', () => {
+        const moduleWithStack = Uint8Array.from([
+            0x00,
+            0x61,
+            0x73,
+            0x6d,
+            0x01,
+            0x00,
+            0x00,
+            0x00,
+            0x06,
+            0x13,
+            0x03,
+            0x7f,
+            0x01,
+            0x41,
+            0x80,
+            0x80,
+            0xc0,
+            0x00,
+            0x0b,
+            0x7f,
+            0x00,
+            0x41,
+            0x01,
+            0x0b,
+            0x7f,
+            0x00,
+            0x41,
+            0x02,
+            0x0b,
+        ]);
+
+        expect(() =>
+            assertDeterministicWasmStackLayout(moduleWithStack),
+        ).not.toThrow();
+
+        const moduleWithWrongStack = moduleWithStack.slice();
+        moduleWithWrongStack[15] = 0x81;
+        expect(() =>
+            assertDeterministicWasmStackLayout(moduleWithWrongStack),
+        ).toThrow(`initialized to ${wasmStackByteLength}`);
     });
 });

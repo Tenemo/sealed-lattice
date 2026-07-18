@@ -4,37 +4,35 @@ use super::{
     CommonProofEvaluatorAuxiliaryRootEntry, CommonProofPreverificationApplicationSourceEntry,
     CommonProofPreverificationApplicationSourceHandle, CommonProofRuntimeError,
     CommonProofSelectedSuiteCapabilityHandle, CommonProofSelectedSuiteEntry,
-    CommonProofStatementTreeCapabilityHandle, CommonProofStatementTreeEntry,
     CommonProofVerificationBinding, CommonProofVerificationStateMachine,
     CommonProofVerifiedColumnEvaluatorCapabilityHandle, CommonProofVerifiedColumnEvaluatorEntry,
     ConsumedCommonProofVerificationInputs, FOUNDATION_PROFILE, MAXIMUM_COMMON_PROOF_BYTE_LENGTH,
     MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH, MAXIMUM_RESIDENT_COMMON_PROOF_INPUT_CHUNKS,
     PollableCommonProofVerificationInput, RefusingVerifiedColumnEvaluator, RelationColumnOrigin,
-    SelectedSuiteCapability, VerifiedCommonProofStatementSource, VerifiedEvaluatorAuxiliaryRoot,
-    VerifiedRelationColumnEvaluator, VerifiedStatementOwnedTree, common_proof_registry_entry_count,
-    require_common_proof_registry_entry_capacity, take_nonrepeating_handle,
-    verified_application_statement_hash,
+    RelationTreeDescriptor, SelectedSuiteCapability, VerifiedCommonProofStatementSource,
+    VerifiedEvaluatorAuxiliaryRoot, VerifiedRelationColumnEvaluator, VerifiedStatementOwnedTree,
+    common_proof_registry_entry_count, require_common_proof_registry_entry_capacity,
+    take_nonrepeating_handle, verified_application_statement_hash,
 };
 #[cfg(test)]
 use super::{CommonProofRelationPlanCapability, CommonProofRuntimeLimits, StreamDescriptor};
 
 /// Process-local ownership registry between accepted suite/setup/board inputs
-/// and the common verifier. Upstream owners mint tree and evaluator handles
-/// from their non-constructible verified values. Verification consumes the
-/// exact application and all supplied handles atomically after a complete
-/// coordinate check; a mismatch leaves every capability live for its owner.
+/// and the common verifier. Upstream owners attach one ordered statement-tree
+/// batch to its application and mint evaluator handles from non-constructible
+/// verified values. Verification consumes the exact application, its batch,
+/// and all supplied handles atomically after a complete coordinate check; a
+/// mismatch leaves every capability live for its owner.
 pub(crate) struct CommonProofUpstreamInputRegistry {
     next_suite_handle: u32,
     next_application_handle: u32,
     next_preverification_application_source_handle: u32,
-    next_statement_tree_handle: u32,
     next_evaluator_root_handle: u32,
     next_verified_column_evaluator_handle: u32,
     suites: BTreeMap<u32, CommonProofSelectedSuiteEntry>,
     applications: BTreeMap<u32, CommonProofApplicationInputEntry>,
     preverification_application_sources:
         BTreeMap<u32, CommonProofPreverificationApplicationSourceEntry>,
-    statement_trees: BTreeMap<u32, CommonProofStatementTreeEntry>,
     evaluator_roots: BTreeMap<u32, CommonProofEvaluatorAuxiliaryRootEntry>,
     verified_column_evaluators: BTreeMap<u32, CommonProofVerifiedColumnEvaluatorEntry>,
 }
@@ -45,13 +43,11 @@ impl Default for CommonProofUpstreamInputRegistry {
             next_suite_handle: 1,
             next_application_handle: 1,
             next_preverification_application_source_handle: 1,
-            next_statement_tree_handle: 1,
             next_evaluator_root_handle: 1,
             next_verified_column_evaluator_handle: 1,
             suites: BTreeMap::new(),
             applications: BTreeMap::new(),
             preverification_application_sources: BTreeMap::new(),
-            statement_trees: BTreeMap::new(),
             evaluator_roots: BTreeMap::new(),
             verified_column_evaluators: BTreeMap::new(),
         }
@@ -64,15 +60,15 @@ impl CommonProofUpstreamInputRegistry {
             self.suites.len(),
             self.applications.len(),
             self.preverification_application_sources.len(),
-            self.statement_trees.len(),
             self.evaluator_roots.len(),
             self.verified_column_evaluators.len(),
         ])
     }
 
-    /// Counts proof attempts, not the tree, root, and evaluator handles owned
-    /// by the same application. Those supporting handles are still included in
-    /// `entry_count` and cannot outlive the worker-process ownership ceiling.
+    /// Counts proof attempts, not the application-owned statement-tree batch
+    /// or the root and evaluator handles owned by the same application. The
+    /// separately retained handles are still included in `entry_count` and
+    /// cannot outlive the worker-process ownership ceiling.
     pub(crate) fn heavy_operation_count(&self) -> Result<usize, CommonProofRuntimeError> {
         common_proof_registry_entry_count(&[
             self.applications.len(),
@@ -85,7 +81,6 @@ impl CommonProofUpstreamInputRegistry {
             self.suites.len(),
             self.applications.len(),
             self.preverification_application_sources.len(),
-            self.statement_trees.len(),
             self.evaluator_roots.len(),
             self.verified_column_evaluators.len(),
         ])
@@ -130,11 +125,11 @@ impl CommonProofUpstreamInputRegistry {
             .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)
     }
 
-    pub(crate) fn install_preverification_application_source(
-        &mut self,
+    fn preflight_statement_source_suite_binding(
+        &self,
         suite_handle: &CommonProofSelectedSuiteCapabilityHandle,
-        statement_source: VerifiedCommonProofStatementSource,
-    ) -> Result<CommonProofPreverificationApplicationSourceHandle, CommonProofRuntimeError> {
+        statement_source: &VerifiedCommonProofStatementSource,
+    ) -> Result<(), CommonProofRuntimeError> {
         let suite = self
             .suites
             .get(&suite_handle.0)
@@ -187,6 +182,15 @@ impl CommonProofUpstreamInputRegistry {
         {
             return Err(CommonProofRuntimeError::WrongVerificationBinding);
         }
+        Ok(())
+    }
+
+    pub(crate) fn install_preverification_application_source(
+        &mut self,
+        suite_handle: &CommonProofSelectedSuiteCapabilityHandle,
+        statement_source: VerifiedCommonProofStatementSource,
+    ) -> Result<CommonProofPreverificationApplicationSourceHandle, CommonProofRuntimeError> {
+        self.preflight_statement_source_suite_binding(suite_handle, &statement_source)?;
         let handle =
             take_nonrepeating_handle(&mut self.next_preverification_application_source_handle)?;
         self.preverification_application_sources.insert(
@@ -260,6 +264,7 @@ impl CommonProofUpstreamInputRegistry {
                     .proof_application_binding
                     .proof_stream_descriptor()
                     .clone(),
+                statement_owned_tree_batch: None,
                 limits: source.limits,
             },
         );
@@ -309,7 +314,6 @@ impl CommonProofUpstreamInputRegistry {
         match self.consume_verification_inputs(
             &application_handle,
             &[],
-            &[],
             Some(&evaluator_handle),
         ) {
             Ok(inputs) => inputs.prepare(),
@@ -340,7 +344,7 @@ impl CommonProofUpstreamInputRegistry {
                 return Err(error);
             }
         };
-        match self.consume_verification_inputs(&application_handle, &[], &[], None) {
+        match self.consume_verification_inputs(&application_handle, &[], None) {
             Ok(inputs) => inputs.prepare(),
             Err(error) => {
                 self.cancel_application(&application_handle)?;
@@ -370,21 +374,165 @@ impl CommonProofUpstreamInputRegistry {
                 return Err(error);
             }
         };
-        let mut statement_tree_handles = Vec::new();
-        for tree in statement_trees {
-            match self.mint_statement_tree(&application_handle, tree) {
-                Ok(handle) => statement_tree_handles.push(handle),
+        if let Err(error) =
+            self.attach_statement_owned_tree_batch(&application_handle, statement_trees)
+        {
+            self.cancel_application(&application_handle)?;
+            return Err(error);
+        }
+        match self.consume_verification_inputs(
+            &application_handle,
+            &[],
+            None,
+        ) {
+            Ok(inputs) => inputs.prepare(),
+            Err(error) => {
+                self.cancel_application(&application_handle)?;
+                Err(error)
+            }
+        }
+    }
+
+    /// Validates an exact-family source and its complete verifier-recomputed
+    /// tree/root catalog without consuming the unique source. A family can
+    /// therefore reserve every downstream owner before the source leaves its
+    /// reset-safe package catalog.
+    pub(crate) fn preflight_statement_tree_and_auxiliary_root_family_verification_without_evaluator(
+        &self,
+        suite_handle: &CommonProofSelectedSuiteCapabilityHandle,
+        statement_source: &VerifiedCommonProofStatementSource,
+        statement_trees: &[VerifiedStatementOwnedTree],
+        auxiliary_roots: &[VerifiedEvaluatorAuxiliaryRoot],
+    ) -> Result<(), CommonProofRuntimeError> {
+        self.preflight_statement_source_suite_binding(suite_handle, statement_source)?;
+        let selected_variant = statement_source
+            .relation_plan
+            .relation_plan
+            .select_variant(
+                statement_source.relation_plan.schedule_position,
+                statement_source.relation_plan.top_count,
+            )
+            .map_err(|_| CommonProofRuntimeError::InvalidPlanCapability)?;
+        if selected_variant.ordered_columns().iter().any(|column| {
+            matches!(
+                column.origin(),
+                RelationColumnOrigin::VerifierSequence { .. }
+            )
+        }) {
+            return Err(CommonProofRuntimeError::WrongVerificationBinding);
+        }
+        let maximum_resident_window_byte_length = MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH
+            .checked_mul(MAXIMUM_RESIDENT_COMMON_PROOF_INPUT_CHUNKS)
+            .ok_or(CommonProofRuntimeError::AllocationLimitExceeded)?;
+        let validation_state =
+            CommonProofVerificationStateMachine::new(PollableCommonProofVerificationInput {
+                protocol_version: statement_source.protocol_version,
+                suite_identifier: statement_source.verification_binding.suite_identifier,
+                canonical_application_statement_bytes: statement_source
+                    .canonical_application_statement_bytes(),
+                relation_plan: &statement_source.relation_plan.relation_plan,
+                relation_context: &statement_source.relation_plan.relation_context,
+                schedule_position: statement_source.relation_plan.schedule_position,
+                top_count: statement_source.relation_plan.top_count,
+                statement_owned_trees: statement_trees,
+                evaluator_auxiliary_roots: auxiliary_roots,
+                declared_proof_byte_length: statement_source.limits.proof_byte_length(),
+                proof_byte_ceiling: MAXIMUM_COMMON_PROOF_BYTE_LENGTH,
+                maximum_resident_window_byte_length,
+            })
+            .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?;
+        drop(validation_state);
+        Ok(())
+    }
+
+    /// Consumes the exact source after the borrowed preflight and constructs
+    /// the same prepared verifier without any fallible ownership transition.
+    /// The repeated state-machine construction is deterministic for the
+    /// preflighted inputs; an invariant failure is an implementation defect.
+    pub(crate) fn prepare_preflighted_statement_tree_and_auxiliary_root_family_verification_without_evaluator(
+        &self,
+        suite_handle: &CommonProofSelectedSuiteCapabilityHandle,
+        statement_source: VerifiedCommonProofStatementSource,
+        statement_trees: Vec<VerifiedStatementOwnedTree>,
+        auxiliary_roots: Vec<VerifiedEvaluatorAuxiliaryRoot>,
+    ) -> super::PreparedCommonProofVerification {
+        self.preflight_statement_tree_and_auxiliary_root_family_verification_without_evaluator(
+            suite_handle,
+            &statement_source,
+            &statement_trees,
+            &auxiliary_roots,
+        )
+        .expect("preflighted common-proof verifier inputs remain valid during commit");
+        let proof_stream_descriptor = statement_source
+            .proof_application_binding
+            .proof_stream_descriptor()
+            .clone();
+        ConsumedCommonProofVerificationInputs {
+            verification_binding: statement_source.verification_binding,
+            relation_plan: statement_source.relation_plan,
+            protocol_version: statement_source.protocol_version,
+            canonical_application_statement_bytes: statement_source
+                .canonical_application_statement_bytes,
+            proof_stream_descriptor,
+            statement_owned_trees: statement_trees,
+            evaluator_auxiliary_roots: auxiliary_roots,
+            verified_column_evaluator: Box::new(RefusingVerifiedColumnEvaluator),
+            limits: statement_source.limits,
+        }
+        .prepare()
+        .expect("preflighted common-proof verifier construction remains valid during commit")
+    }
+
+    /// Atomically prepares an exact-family verifier from verifier-recomputed
+    /// statement trees and auxiliary roots, with no verifier-sequence column
+    /// evaluator. The roots are minted inside the same application ownership
+    /// transition and are removed together if any coordinate or plan check
+    /// fails.
+    pub(crate) fn prepare_statement_tree_and_auxiliary_root_family_verification_without_evaluator(
+        &mut self,
+        suite_handle: &CommonProofSelectedSuiteCapabilityHandle,
+        statement_source: VerifiedCommonProofStatementSource,
+        statement_trees: Vec<VerifiedStatementOwnedTree>,
+        auxiliary_roots: Vec<VerifiedEvaluatorAuxiliaryRoot>,
+    ) -> Result<super::PreparedCommonProofVerification, CommonProofRuntimeError> {
+        let preverification_handle =
+            self.install_preverification_application_source(suite_handle, statement_source)?;
+        let application_handle = match self
+            .promote_preverification_application_source(suite_handle, &preverification_handle)
+        {
+            Ok(handle) => handle,
+            Err(error) => {
+                self.release_preverification_application_source(&preverification_handle)?;
+                return Err(error);
+            }
+        };
+        if let Err(error) =
+            self.attach_statement_owned_tree_batch(&application_handle, statement_trees)
+        {
+            self.cancel_application(&application_handle)?;
+            return Err(error);
+        }
+        let mut auxiliary_root_handles = Vec::new();
+        if auxiliary_root_handles
+            .try_reserve_exact(auxiliary_roots.len())
+            .is_err()
+        {
+            self.cancel_application(&application_handle)?;
+            return Err(CommonProofRuntimeError::AllocationLimitExceeded);
+        }
+        for root in auxiliary_roots {
+            match self.mint_evaluator_auxiliary_root(&application_handle, root) {
+                Ok(handle) => auxiliary_root_handles.push(handle),
                 Err(error) => {
                     self.cancel_application(&application_handle)?;
                     return Err(error);
                 }
             }
         }
-        let borrowed_statement_tree_handles = statement_tree_handles.iter().collect::<Vec<_>>();
+        let auxiliary_root_handle_references = auxiliary_root_handles.iter().collect::<Vec<_>>();
         match self.consume_verification_inputs(
             &application_handle,
-            &borrowed_statement_tree_handles,
-            &[],
+            &auxiliary_root_handle_references,
             None,
         ) {
             Ok(inputs) => inputs.prepare(),
@@ -417,15 +565,11 @@ impl CommonProofUpstreamInputRegistry {
                 return Err(error);
             }
         };
-        let mut statement_tree_handles = Vec::new();
-        for tree in statement_trees {
-            match self.mint_statement_tree(&application_handle, tree) {
-                Ok(handle) => statement_tree_handles.push(handle),
-                Err(error) => {
-                    self.cancel_application(&application_handle)?;
-                    return Err(error);
-                }
-            }
+        if let Err(error) =
+            self.attach_statement_owned_tree_batch(&application_handle, statement_trees)
+        {
+            self.cancel_application(&application_handle)?;
+            return Err(error);
         }
         let evaluator_handle = match self
             .mint_verified_column_evaluator(&application_handle, verified_column_evaluator)
@@ -436,10 +580,8 @@ impl CommonProofUpstreamInputRegistry {
                 return Err(error);
             }
         };
-        let borrowed_statement_tree_handles = statement_tree_handles.iter().collect::<Vec<_>>();
         match self.consume_verification_inputs(
             &application_handle,
-            &borrowed_statement_tree_handles,
             &[],
             Some(&evaluator_handle),
         ) {
@@ -451,24 +593,51 @@ impl CommonProofUpstreamInputRegistry {
         }
     }
 
-    pub(crate) fn mint_statement_tree(
-        &mut self,
+    fn expected_statement_tree_count(
+        &self,
         application_handle: &CommonProofApplicationInputCapabilityHandle,
-        tree: VerifiedStatementOwnedTree,
-    ) -> Result<CommonProofStatementTreeCapabilityHandle, CommonProofRuntimeError> {
-        self.applications
+    ) -> Result<usize, CommonProofRuntimeError> {
+        let application = self
+            .applications
             .get(&application_handle.0)
             .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?;
-        self.require_entry_capacity()?;
-        let handle = take_nonrepeating_handle(&mut self.next_statement_tree_handle)?;
-        self.statement_trees.insert(
-            handle,
-            CommonProofStatementTreeEntry {
-                application_handle: application_handle.0,
-                tree,
-            },
-        );
-        Ok(CommonProofStatementTreeCapabilityHandle(handle))
+        let selected_variant = application
+            .relation_plan
+            .relation_plan
+            .select_variant(
+                application.relation_plan.schedule_position,
+                application.relation_plan.top_count,
+            )
+            .map_err(|_| CommonProofRuntimeError::InvalidPlanCapability)?;
+        Ok(selected_variant
+            .ordered_trees()
+            .iter()
+            .filter(|tree| matches!(tree, RelationTreeDescriptor::BoundPublic { .. }))
+            .count())
+    }
+
+    /// Attaches the complete ordered statement-tree catalog to its application
+    /// in one transition. The batch is not a separately addressable registry
+    /// object: it is validated with the application and can only be consumed
+    /// when the complete verifier input is accepted.
+    pub(crate) fn attach_statement_owned_tree_batch(
+        &mut self,
+        application_handle: &CommonProofApplicationInputCapabilityHandle,
+        ordered_trees: Vec<VerifiedStatementOwnedTree>,
+    ) -> Result<(), CommonProofRuntimeError> {
+        let expected_tree_count = self.expected_statement_tree_count(application_handle)?;
+        if expected_tree_count == 0 || ordered_trees.len() != expected_tree_count {
+            return Err(CommonProofRuntimeError::WrongVerificationBinding);
+        }
+        let application = self
+            .applications
+            .get_mut(&application_handle.0)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?;
+        if application.statement_owned_tree_batch.is_some() {
+            return Err(CommonProofRuntimeError::WrongVerificationBinding);
+        }
+        application.statement_owned_tree_batch = Some(ordered_trees);
+        Ok(())
     }
 
     pub(crate) fn mint_evaluator_auxiliary_root(
@@ -523,7 +692,6 @@ impl CommonProofUpstreamInputRegistry {
     pub(crate) fn consume_verification_inputs(
         &mut self,
         application_handle: &CommonProofApplicationInputCapabilityHandle,
-        statement_tree_handles: &[&CommonProofStatementTreeCapabilityHandle],
         evaluator_root_handles: &[&CommonProofEvaluatorAuxiliaryRootCapabilityHandle],
         verified_column_evaluator_handle: Option<
             &CommonProofVerifiedColumnEvaluatorCapabilityHandle,
@@ -533,19 +701,6 @@ impl CommonProofUpstreamInputRegistry {
             .applications
             .get(&application_handle.0)
             .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?;
-        let mut unique_statement_tree_handles = BTreeSet::new();
-        for handle in statement_tree_handles {
-            if !unique_statement_tree_handles.insert(handle.0) {
-                return Err(CommonProofRuntimeError::WrongVerificationBinding);
-            }
-            let entry = self
-                .statement_trees
-                .get(&handle.0)
-                .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?;
-            if entry.application_handle != application_handle.0 {
-                return Err(CommonProofRuntimeError::WrongVerificationBinding);
-            }
-        }
         let mut unique_evaluator_root_handles = BTreeSet::new();
         for handle in evaluator_root_handles {
             if !unique_evaluator_root_handles.insert(handle.0) {
@@ -587,15 +742,10 @@ impl CommonProofUpstreamInputRegistry {
             }
         }
 
-        let statement_owned_trees = statement_tree_handles
-            .iter()
-            .map(|handle| {
-                self.statement_trees
-                    .get(&handle.0)
-                    .map(|entry| entry.tree.clone())
-                    .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+        let statement_owned_trees = application
+            .statement_owned_tree_batch
+            .as_deref()
+            .unwrap_or(&[]);
         let evaluator_auxiliary_roots = evaluator_root_handles
             .iter()
             .map(|handle| {
@@ -615,7 +765,7 @@ impl CommonProofUpstreamInputRegistry {
                 relation_context: &application.relation_plan.relation_context,
                 schedule_position: application.relation_plan.schedule_position,
                 top_count: application.relation_plan.top_count,
-                statement_owned_trees: &statement_owned_trees,
+                statement_owned_trees,
                 evaluator_auxiliary_roots: &evaluator_auxiliary_roots,
                 declared_proof_byte_length: application.limits.proof_byte_length(),
                 proof_byte_ceiling: MAXIMUM_COMMON_PROOF_BYTE_LENGTH,
@@ -626,15 +776,6 @@ impl CommonProofUpstreamInputRegistry {
             .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?;
         drop(validation_state);
 
-        let application = self
-            .applications
-            .remove(&application_handle.0)
-            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?;
-        for handle in statement_tree_handles {
-            self.statement_trees
-                .remove(&handle.0)
-                .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?;
-        }
         for handle in evaluator_root_handles {
             self.evaluator_roots
                 .remove(&handle.0)
@@ -649,6 +790,10 @@ impl CommonProofUpstreamInputRegistry {
             }
             None => Box::new(RefusingVerifiedColumnEvaluator),
         };
+        let application = self
+            .applications
+            .remove(&application_handle.0)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?;
         Ok(ConsumedCommonProofVerificationInputs {
             verification_binding: application.verification_binding,
             relation_plan: application.relation_plan,
@@ -656,7 +801,7 @@ impl CommonProofUpstreamInputRegistry {
             canonical_application_statement_bytes: application
                 .canonical_application_statement_bytes,
             proof_stream_descriptor: application.proof_stream_descriptor,
-            statement_owned_trees,
+            statement_owned_trees: application.statement_owned_tree_batch.unwrap_or_default(),
             evaluator_auxiliary_roots,
             verified_column_evaluator,
             limits: application.limits,
@@ -667,16 +812,16 @@ impl CommonProofUpstreamInputRegistry {
         &mut self,
         application_handle: &CommonProofApplicationInputCapabilityHandle,
     ) -> Result<(), CommonProofRuntimeError> {
-        self.applications
-            .remove(&application_handle.0)
-            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?;
-        self.statement_trees
-            .retain(|_, entry| entry.application_handle != application_handle.0);
+        let application_was_present = self.applications.remove(&application_handle.0).is_some();
         self.evaluator_roots
             .retain(|_, entry| entry.application_handle != application_handle.0);
         self.verified_column_evaluators
             .retain(|_, entry| entry.application_handle != application_handle.0);
-        Ok(())
+        if application_was_present {
+            Ok(())
+        } else {
+            Err(CommonProofRuntimeError::UnknownOrStaleHandle)
+        }
     }
 
     #[cfg(test)]
@@ -715,6 +860,7 @@ impl CommonProofUpstreamInputRegistry {
                 protocol_version,
                 canonical_application_statement_bytes: statement_bytes,
                 proof_stream_descriptor,
+                statement_owned_tree_batch: None,
                 limits,
             },
         );

@@ -391,6 +391,7 @@ const cancelSession = (session: AcceptedSetupVerificationSession): void => {
     );
     statusBoundary.throwIfError(status);
     sessionRecords.delete(session);
+    releaseEvaluatorComponentBackingMap(record.evaluatorComponentBackings);
 };
 
 const cancelEvaluatorSourceCatalogSession = (
@@ -406,6 +407,7 @@ const cancelEvaluatorSourceCatalogSession = (
     );
     createStatusBoundary().throwIfError(status);
     evaluatorSourceCatalogSessionRecords.delete(session);
+    releaseEvaluatorComponentBackingMap(record.evaluatorComponentBackings);
 };
 
 const completeEvaluatorSourceCatalogSession = (
@@ -439,7 +441,8 @@ const transferEvaluatorSourceCatalogSession = (
     if (
         assemblyRecord.kernel !== catalogRecord.kernel ||
         assemblyRecord.vssRecipientAuthority !==
-            catalogRecord.vssRecipientAuthority
+            catalogRecord.vssRecipientAuthority ||
+        assemblyRecord.evaluatorComponentBackings.size !== 0
     ) {
         throw new CanonicalStreamRefusalError('wrongContext');
     }
@@ -452,6 +455,9 @@ const transferEvaluatorSourceCatalogSession = (
             ),
     );
     createStatusBoundary().throwIfError(status);
+    assemblyRecord.evaluatorComponentBackings =
+        catalogRecord.evaluatorComponentBackings;
+    catalogRecord.evaluatorComponentBackings = new Map();
     evaluatorSourceCatalogSessionRecords.delete(session);
 };
 
@@ -760,6 +766,7 @@ export const beginAcceptedSetupEvaluatorSourceCatalog = (input: {
         );
         const session = createEvaluatorSourceCatalogSession({
             context,
+            evaluatorComponentBackings: new Map(),
             handle: catalogHandle,
             kernel: input.kernel,
             phase: 'collecting',
@@ -839,6 +846,7 @@ export const beginAcceptedSetupVerification = (input: {
         );
         const session = createSession({
             context,
+            evaluatorComponentBackings: new Map(),
             handle: assemblyHandle,
             kernel: input.kernel,
             phase: 'collecting',
@@ -894,6 +902,7 @@ export const requireAcceptedSetupVerificationAssemblyKernelOwner = (
 export const requireAcceptedSetupEvaluatorSourceCatalogKernelOwner = (
     session: AcceptedSetupEvaluatorSourceCatalogSession,
     kernel: TranscriptCoreKernel,
+    expectedPhase: 'collecting' | 'complete' = 'collecting',
 ): AcceptedSetupEvaluatorSourceCatalogKernelOwner => {
     const record = requireEvaluatorSourceCatalogSessionRecord(session);
     if (record.kernel !== kernel) {
@@ -901,8 +910,194 @@ export const requireAcceptedSetupEvaluatorSourceCatalogKernelOwner = (
             'The evaluator-source catalog session belongs to another WASM kernel.',
         );
     }
-    if (record.phase !== 'collecting') {
+    if (record.phase !== expectedPhase) {
         throw new CanonicalStreamRefusalError('consumedState');
     }
     return Object.freeze({ handle: record.handle, kernel: record.kernel });
+};
+
+/**
+ * Mints an internal backing only after a family adapter has obtained the
+ * component identity from its positive Rust terminal. This helper is not part
+ * of the package entry point and exposes no component identity on the object.
+ */
+export const createAcceptedSetupEvaluatorComponentBacking = (input: {
+    authenticatedByteLength: bigint;
+    fullObjectDigest: Uint8Array;
+    kernel: TranscriptCoreKernel;
+    materialRoot: Uint8Array;
+    readExactRange(
+        sourceByteOffset: bigint,
+        exactByteLength: number,
+    ): Promise<Uint8Array>;
+    release(): void;
+}): AcceptedSetupEvaluatorComponentBacking => {
+    if (
+        typeof input.authenticatedByteLength !== 'bigint' ||
+        input.authenticatedByteLength <= 0n ||
+        typeof input.readExactRange !== 'function' ||
+        typeof input.release !== 'function'
+    ) {
+        throw new TypeError(
+            'The evaluator component backing has invalid authenticated ownership.',
+        );
+    }
+    const record: AcceptedSetupEvaluatorComponentBackingRecord = {
+        authenticatedByteLength: input.authenticatedByteLength,
+        fullObjectDigestHex: requireFixedHashHex(
+            input.fullObjectDigest,
+            'The evaluator component stream digest',
+        ),
+        kernel: input.kernel,
+        materialRootHex: requireFixedHashHex(
+            input.materialRoot,
+            'The evaluator component material root',
+        ),
+        readExactRange: input.readExactRange,
+        release: input.release,
+        released: false,
+    };
+    const backing: AcceptedSetupEvaluatorComponentBacking = Object.freeze({
+        [acceptedSetupEvaluatorComponentBackingBrand]: true as const,
+    });
+    evaluatorComponentBackingRecords.set(backing, record);
+    return backing;
+};
+
+/** Atomically gives the prepackage catalog custody of verified source bytes. */
+export const retainAcceptedSetupEvaluatorComponentBackings = (input: {
+    backings: readonly AcceptedSetupEvaluatorComponentBacking[];
+    catalog: AcceptedSetupEvaluatorSourceCatalogSession;
+    kernel: TranscriptCoreKernel;
+}): void => {
+    const catalogRecord = requireEvaluatorSourceCatalogSessionRecord(
+        input.catalog,
+    );
+    if (catalogRecord.kernel !== input.kernel || catalogRecord.phase !== 'collecting') {
+        throw new CanonicalStreamRefusalError('wrongContext');
+    }
+    if (input.backings.length === 0) {
+        throw new CanonicalStreamRefusalError('wrongTypeOrLength');
+    }
+    const prepared = input.backings.map((backing) => {
+        const record = requireEvaluatorComponentBackingRecord(
+            backing,
+            input.kernel,
+        );
+        if (
+            catalogRecord.evaluatorComponentBackings.has(
+                record.materialRootHex,
+            )
+        ) {
+            throw new CanonicalStreamRefusalError('wrongHashOrRoot');
+        }
+        return { backing, materialRootHex: record.materialRootHex };
+    });
+    const distinctRoots = new Set(prepared.map((entry) => entry.materialRootHex));
+    if (distinctRoots.size !== prepared.length) {
+        throw new CanonicalStreamRefusalError('wrongHashOrRoot');
+    }
+    for (const entry of prepared) {
+        catalogRecord.evaluatorComponentBackings.set(
+            entry.materialRootHex,
+            entry.backing,
+        );
+    }
+};
+
+const resolveEvaluatorComponentBacking = (input: {
+    authenticatedByteLength: bigint;
+    backings: Map<string, AcceptedSetupEvaluatorComponentBacking>;
+    fullObjectDigest: Uint8Array;
+    kernel: TranscriptCoreKernel;
+    materialRoot: Uint8Array;
+}): AcceptedSetupEvaluatorComponentBackingRecord => {
+    const materialRootHex = requireFixedHashHex(
+        input.materialRoot,
+        'The requested evaluator component material root',
+    );
+    const backing = input.backings.get(materialRootHex);
+    if (backing === undefined) {
+        throw new CanonicalStreamRefusalError('missingPrerequisite');
+    }
+    const record = requireEvaluatorComponentBackingRecord(backing, input.kernel);
+    if (
+        record.authenticatedByteLength !== input.authenticatedByteLength ||
+        record.fullObjectDigestHex !==
+            requireFixedHashHex(
+                input.fullObjectDigest,
+                'The requested evaluator component stream digest',
+            )
+    ) {
+        throw new CanonicalStreamRefusalError('wrongHashOrRoot');
+    }
+    return record;
+};
+
+export const readAcceptedSetupPrepackageEvaluatorComponentExactRange = async (input: {
+    authenticatedByteLength: bigint;
+    catalog: AcceptedSetupEvaluatorSourceCatalogSession;
+    exactByteLength: number;
+    fullObjectDigest: Uint8Array;
+    kernel: TranscriptCoreKernel;
+    materialRoot: Uint8Array;
+    sourceByteOffset: bigint;
+}): Promise<Uint8Array> => {
+    const catalogRecord = requireEvaluatorSourceCatalogSessionRecord(
+        input.catalog,
+    );
+    if (catalogRecord.kernel !== input.kernel || catalogRecord.phase !== 'complete') {
+        throw new CanonicalStreamRefusalError('consumedState');
+    }
+    const backing = resolveEvaluatorComponentBacking({
+        authenticatedByteLength: input.authenticatedByteLength,
+        backings: catalogRecord.evaluatorComponentBackings,
+        fullObjectDigest: input.fullObjectDigest,
+        kernel: input.kernel,
+        materialRoot: input.materialRoot,
+    });
+    return backing.readExactRange(
+        input.sourceByteOffset,
+        input.exactByteLength,
+    );
+};
+
+export const readAcceptedSetupVerificationEvaluatorComponentExactRange = async (input: {
+    acceptedSetupVerification: AcceptedSetupVerificationSession;
+    authenticatedByteLength: bigint;
+    exactByteLength: number;
+    fullObjectDigest: Uint8Array;
+    kernel: TranscriptCoreKernel;
+    materialRoot: Uint8Array;
+    sourceByteOffset: bigint;
+}): Promise<Uint8Array> => {
+    const assemblyRecord = requireSessionRecord(input.acceptedSetupVerification);
+    if (assemblyRecord.kernel !== input.kernel || assemblyRecord.phase !== 'collecting') {
+        throw new CanonicalStreamRefusalError('consumedState');
+    }
+    const backing = resolveEvaluatorComponentBacking({
+        authenticatedByteLength: input.authenticatedByteLength,
+        backings: assemblyRecord.evaluatorComponentBackings,
+        fullObjectDigest: input.fullObjectDigest,
+        kernel: input.kernel,
+        materialRoot: input.materialRoot,
+    });
+    return backing.readExactRange(
+        input.sourceByteOffset,
+        input.exactByteLength,
+    );
+};
+
+/** Releases participant component carriers after the evaluator terminal. */
+export const releaseAcceptedSetupVerificationEvaluatorComponentBackings = (
+    acceptedSetupVerification: AcceptedSetupVerificationSession,
+    kernel: TranscriptCoreKernel,
+): void => {
+    const assemblyRecord = requireSessionRecord(acceptedSetupVerification);
+    if (assemblyRecord.kernel !== kernel || assemblyRecord.phase !== 'collecting') {
+        throw new CanonicalStreamRefusalError('consumedState');
+    }
+    releaseEvaluatorComponentBackingMap(
+        assemblyRecord.evaluatorComponentBackings,
+    );
 };

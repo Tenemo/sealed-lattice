@@ -436,6 +436,16 @@ pub(super) struct BoundedUnsignedColumn {
     ordered_digit_column_ordinals: Vec<u32>,
 }
 
+impl BoundedUnsignedColumn {
+    pub(super) const fn target_column_ordinal(&self) -> u32 {
+        self.target_column_ordinal
+    }
+
+    pub(super) fn ordered_digit_column_ordinals(&self) -> &[u32] {
+        &self.ordered_digit_column_ordinals
+    }
+}
+
 #[derive(Clone, Debug)]
 pub(super) struct BoundedMaterialDigitWitnessLayout {
     pub(super) target_column_ordinal: u32,
@@ -451,6 +461,16 @@ pub(super) struct UpperBoundComparatorWitnessLayout {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) struct SplitIntegerVector {
     pub(super) halves: [u32; 2],
+}
+
+/// Canonical public-polynomial source columns and the two load-bearing half
+/// projections consumed by the existing full-ring integer-lift relations.
+/// The relation compiler always binds each half projection to its two source
+/// quarters; an authenticated root alone is not authority for that link.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(super) struct QuarterBackedSplitIntegerVector {
+    pub(super) quarters: [u32; 4],
+    pub(super) half_projections: SplitIntegerVector,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -470,9 +490,25 @@ pub(super) struct AnchorOpeningWitness {
     hiding_errors: Vec<ShiftedSmallVector>,
 }
 
+impl AnchorOpeningWitness {
+    pub(super) fn hiding_secrets(&self) -> &[ReversibleShiftedSmallVector] {
+        &self.hiding_secrets
+    }
+
+    pub(super) fn hiding_errors(&self) -> &[ShiftedSmallVector] {
+        &self.hiding_errors
+    }
+}
+
 #[derive(Clone, Debug)]
 pub(super) struct AnchorQuotientWitness {
     rows: Vec<[u32; 2]>,
+}
+
+impl AnchorQuotientWitness {
+    pub(super) fn rows(&self) -> &[[u32; 2]] {
+        &self.rows
+    }
 }
 
 pub(super) struct AnchorEquationInputs<'input> {

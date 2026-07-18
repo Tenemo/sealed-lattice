@@ -7,7 +7,6 @@ use crate::{
     bgv::{
         key_switch_topology::{KEY_SWITCH_DATA_PRIMES_PER_BLOCK, canonical_residue_byte_length},
         parameters::{DATA_PRIMES, POLYNOMIAL_DEGREE, SPECIAL_PRIMES},
-        setup::VerifiedAcceptedSetupEvaluatorSourceCatalog,
     },
     foundation::{
         CanonicalStreamDomain, CanonicalStreamReadbackVerifier, CanonicalStreamVerifier,
@@ -221,8 +220,103 @@ pub(crate) struct SelectedEvaluatorStoreSourceReadRequest {
     physical_component_ordinal: usize,
     source_ordinal: usize,
     source_material_root: [u8; Hash512::BYTE_LENGTH],
+    source_stream_digest: [u8; Hash512::BYTE_LENGTH],
+    source_stream_total_byte_length: u64,
+    source_stream_byte_offset: u64,
     chunk_index: usize,
     byte_length: usize,
+}
+
+/// One bounded, authenticated source opened from either a generation-only
+/// Galois authority or the corresponding positively verified catalog. The
+/// construction runtime owns the fresh readback verifier and therefore never
+/// accepts a detached root or descriptor from its worker caller.
+pub(crate) struct SelectedEvaluatorStoreSource {
+    topology: KeySwitchComponentMaterialTopology,
+    material_root: [u8; Hash512::BYTE_LENGTH],
+    descriptor: StreamDescriptor,
+    readback: CanonicalStreamReadbackVerifier,
+}
+
+impl SelectedEvaluatorStoreSource {
+    pub(crate) fn from_authenticated_authority(
+        topology: KeySwitchComponentMaterialTopology,
+        material_root: [u8; Hash512::BYTE_LENGTH],
+        descriptor: StreamDescriptor,
+        readback: CanonicalStreamReadbackVerifier,
+    ) -> Self {
+        Self {
+            topology,
+            material_root,
+            descriptor,
+            readback,
+        }
+    }
+
+    pub(crate) const fn topology(&self) -> &KeySwitchComponentMaterialTopology {
+        &self.topology
+    }
+
+    pub(crate) const fn material_root(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.material_root
+    }
+
+    pub(crate) const fn stream_descriptor(&self) -> &StreamDescriptor {
+        &self.descriptor
+    }
+
+    pub(crate) fn into_authenticated_parts(
+        self,
+    ) -> (
+        KeySwitchComponentMaterialTopology,
+        [u8; Hash512::BYTE_LENGTH],
+        StreamDescriptor,
+        CanonicalStreamReadbackVerifier,
+    ) {
+        (
+            self.topology,
+            self.material_root,
+            self.descriptor,
+            self.readback,
+        )
+    }
+}
+
+/// Exact source interface shared by prepackage generation and final positive
+/// verification. Implementations are non-serializable authorities; host data
+/// cannot implement or cross this crate-private boundary.
+pub(crate) trait SelectedEvaluatorStoreSourceCatalog {
+    fn protocol_version(&self) -> u16;
+
+    fn suite_identifier(&self) -> [u8; Hash512::BYTE_LENGTH];
+
+    fn ceremony_context_hash(&self) -> [u8; Hash512::BYTE_LENGTH];
+
+    fn action_context_hash(&self) -> [u8; Hash512::BYTE_LENGTH];
+
+    fn manifest_hash(&self) -> [u8; Hash512::BYTE_LENGTH];
+
+    fn roster_hash(&self) -> [u8; Hash512::BYTE_LENGTH];
+
+    fn setup_proof_context_hash(&self) -> [u8; Hash512::BYTE_LENGTH];
+
+    fn component_source(
+        &self,
+        roster_position: u16,
+        evaluator_position: SelectedEvaluatorEntryPosition,
+    ) -> Result<Option<SelectedEvaluatorStoreSource>, RefusalReason>;
+
+    fn component_root(
+        &self,
+        roster_position: u16,
+        evaluator_position: SelectedEvaluatorEntryPosition,
+    ) -> Option<[u8; Hash512::BYTE_LENGTH]>;
+
+    fn component_public_polynomial_context_hash(
+        &self,
+        roster_position: u16,
+        evaluator_position: SelectedEvaluatorEntryPosition,
+    ) -> Option<[u8; Hash512::BYTE_LENGTH]>;
 }
 
 impl SelectedEvaluatorStoreSourceReadRequest {
@@ -236,6 +330,18 @@ impl SelectedEvaluatorStoreSourceReadRequest {
 
     pub(crate) const fn source_material_root(&self) -> [u8; Hash512::BYTE_LENGTH] {
         self.source_material_root
+    }
+
+    pub(crate) const fn source_stream_digest(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.source_stream_digest
+    }
+
+    pub(crate) const fn source_stream_total_byte_length(&self) -> u64 {
+        self.source_stream_total_byte_length
+    }
+
+    pub(crate) const fn source_stream_byte_offset(&self) -> u64 {
+        self.source_stream_byte_offset
     }
 
     pub(crate) const fn chunk_index(&self) -> usize {
@@ -297,12 +403,15 @@ impl SelectedEvaluatorStoreConstructionOutput {
     /// catalog, recomputed typed roots, and this generator-owned store digest.
     /// No caller-supplied source-root list or detached store digest enters the
     /// application binding.
-    pub(crate) fn canonical_application_statement(
+    pub(crate) fn canonical_application_statement<SourceCatalog>(
         &self,
-        source_catalog: &VerifiedAcceptedSetupEvaluatorSourceCatalog,
+        source_catalog: &SourceCatalog,
         ordered_runtime_roots: &[VerifiedEvaluatorRuntimeRoot],
         ordered_auxiliary_roots: &[VerifiedEvaluatorAuxiliaryRoot],
-    ) -> Result<Vec<u8>, SelectedApplicationStatementError> {
+    ) -> Result<Vec<u8>, SelectedApplicationStatementError>
+    where
+        SourceCatalog: SelectedEvaluatorStoreSourceCatalog + ?Sized,
+    {
         let logical_positions = selected_evaluator_entry_positions(self.top_count)?;
         let expected_physical_component_count = logical_positions.len()
             + logical_positions
@@ -428,11 +537,14 @@ pub(crate) struct SelectedEvaluatorStoreConstruction {
 }
 
 impl SelectedEvaluatorStoreConstruction {
-    pub(crate) fn begin(
-        source_catalog: &VerifiedAcceptedSetupEvaluatorSourceCatalog,
+    pub(crate) fn begin<SourceCatalog>(
+        source_catalog: &SourceCatalog,
         relinearization_aggregate: &VerifiedRelinearizationAggregateMaterial,
         top_count: u16,
-    ) -> Result<Self, RefusalReason> {
+    ) -> Result<Self, RefusalReason>
+    where
+        SourceCatalog: SelectedEvaluatorStoreSourceCatalog + ?Sized,
+    {
         if source_catalog.protocol_version() != relinearization_aggregate.protocol_version()
             || source_catalog.suite_identifier() != relinearization_aggregate.suite_identifier()
             || source_catalog.ceremony_context_hash()
@@ -449,21 +561,21 @@ impl SelectedEvaluatorStoreConstruction {
             .map_err(|_| RefusalReason::UnsupportedVersionOrSuite)?;
         let mut physical_components = Vec::new();
         for position in ordered_positions {
-            let mut source_materials = Vec::new();
+            let mut sources = Vec::new();
             for roster_position in 0..FOUNDATION_PROFILE.participant_count {
-                source_materials.push(
+                sources.push(
                     source_catalog
-                        .component_material(roster_position, position)
+                        .component_source(roster_position, position)?
                         .ok_or(RefusalReason::MissingPrerequisite)?,
                 );
             }
-            let topology = source_materials
+            let topology = sources
                 .first()
-                .map(|material| material.topology().clone())
+                .map(|source| source.topology.clone())
                 .ok_or(RefusalReason::MissingPrerequisite)?;
-            if source_materials
+            if sources
                 .iter()
-                .any(|material| material.topology() != &topology)
+                .any(|source| source.topology != topology)
             {
                 return Err(RefusalReason::WrongTypeOrLength);
             }
@@ -471,7 +583,7 @@ impl SelectedEvaluatorStoreConstruction {
                 position,
                 role: EvaluatorKeyStorePhysicalRole::Runtime,
                 topology: topology.clone(),
-                sources: selected_evaluator_source_readbacks(&source_materials)?,
+                sources: selected_evaluator_source_readbacks_from_sources(sources),
             });
             if matches!(
                 position.key_kind(),
@@ -570,6 +682,9 @@ impl SelectedEvaluatorStoreConstruction {
             physical_component_ordinal: self.physical_component_ordinal,
             source_ordinal: self.next_source_ordinal,
             source_material_root: source.material_root,
+            source_stream_digest: source.descriptor.full_object_digest.into_bytes(),
+            source_stream_total_byte_length: source.descriptor.total_byte_length,
+            source_stream_byte_offset: local_byte_offset,
             chunk_index: self.source_chunk_index,
             byte_length,
         })
@@ -937,6 +1052,20 @@ impl SelectedEvaluatorStoreConstruction {
             ordered_physical_roles,
         })
     }
+}
+
+fn selected_evaluator_source_readbacks_from_sources(
+    sources: Vec<SelectedEvaluatorStoreSource>,
+) -> Box<[SelectedEvaluatorStoreSourceReadback]> {
+    sources
+        .into_iter()
+        .map(|source| SelectedEvaluatorStoreSourceReadback {
+            material_root: source.material_root,
+            descriptor: source.descriptor,
+            readback: Some(source.readback),
+        })
+        .collect::<Vec<_>>()
+        .into_boxed_slice()
 }
 
 fn selected_evaluator_source_readbacks(

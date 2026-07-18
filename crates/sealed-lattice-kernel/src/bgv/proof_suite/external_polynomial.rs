@@ -143,6 +143,32 @@ pub(crate) struct ExternalStockhamTransformPlan {
     transaction_count_excluding_deletions: u64,
 }
 
+impl ExternalStockhamTransformPlan {
+    pub(crate) fn resident_owned_payload_byte_length(
+        &self,
+    ) -> Result<u64, ExternalPolynomialError> {
+        let pass_catalog_byte_length = u64::try_from(self.passes.capacity())
+            .ok()
+            .and_then(|capacity| {
+                capacity.checked_mul(
+                    u64::try_from(std::mem::size_of::<ExternalStockhamPassPlan>()).ok()?,
+                )
+            })
+            .ok_or(ExternalPolynomialError::CountOverflow)?;
+        let object_plan_catalog_byte_length = u64::try_from(self.object_plans.capacity())
+            .ok()
+            .and_then(|capacity| {
+                capacity.checked_mul(
+                    u64::try_from(std::mem::size_of::<ProofExternalMemoryObjectPlan>()).ok()?,
+                )
+            })
+            .ok_or(ExternalPolynomialError::CountOverflow)?;
+        pass_catalog_byte_length
+            .checked_add(object_plan_catalog_byte_length)
+            .ok_or(ExternalPolynomialError::CountOverflow)
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct ExternalStockhamResidentMemoryRequirement {
     component_working_set_byte_length: u64,

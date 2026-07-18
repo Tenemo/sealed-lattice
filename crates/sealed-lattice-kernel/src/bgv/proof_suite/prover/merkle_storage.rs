@@ -63,6 +63,41 @@ pub(crate) struct CommonProofMerkleStoragePlan {
 }
 
 impl CommonProofMerkleStoragePlan {
+    pub(crate) fn resident_owned_payload_byte_length(&self) -> Result<u64, CommonProofProverError> {
+        let digest_catalog_byte_length = u64::try_from(self.digest_level_objects.capacity())
+            .ok()
+            .and_then(|capacity| {
+                capacity.checked_mul(
+                    u64::try_from(std::mem::size_of::<ProofExternalMemoryObject>()).ok()?,
+                )
+            })
+            .ok_or(CommonProofProverError::CountOverflow)?;
+        let object_plan_catalog_byte_length = u64::try_from(self.object_plans.capacity())
+            .ok()
+            .and_then(|capacity| {
+                capacity.checked_mul(
+                    u64::try_from(std::mem::size_of::<ProofExternalMemoryObjectPlan>()).ok()?,
+                )
+            })
+            .ok_or(CommonProofProverError::CountOverflow)?;
+        digest_catalog_byte_length
+            .checked_add(object_plan_catalog_byte_length)
+            .ok_or(CommonProofProverError::CountOverflow)
+    }
+
+    pub(crate) fn stored_tree_resident_owned_payload_byte_length(
+        &self,
+    ) -> Result<u64, CommonProofProverError> {
+        u64::try_from(self.digest_level_objects.capacity())
+            .ok()
+            .and_then(|capacity| {
+                capacity.checked_mul(
+                    u64::try_from(std::mem::size_of::<ProofExternalMemoryObject>()).ok()?,
+                )
+            })
+            .ok_or(CommonProofProverError::CountOverflow)
+    }
+
     pub(crate) fn object_plans(&self) -> &[ProofExternalMemoryObjectPlan] {
         &self.object_plans
     }

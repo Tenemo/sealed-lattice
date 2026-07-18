@@ -995,6 +995,113 @@ pub(crate) fn canonical_selected_aggregate_threshold_share_statement(
     Ok(canonical_bytes)
 }
 
+pub(crate) fn canonical_selected_same_secret_statement(
+    setup_proof_context_hash: [u8; Hash512::BYTE_LENGTH],
+    participant_identity: [u8; Hash512::BYTE_LENGTH],
+    roster_position: u16,
+    ordered_degree_zero_commitment_roots: &[[u8; Hash512::BYTE_LENGTH]],
+    anchor_commitment_roots: &[[u8; Hash512::BYTE_LENGTH]],
+) -> Result<Vec<u8>, SelectedApplicationStatementError> {
+    if roster_position >= FOUNDATION_PROFILE.participant_count
+        || ordered_degree_zero_commitment_roots.len() != DATA_PRIMES.len()
+        || anchor_commitment_roots.len() != 3
+    {
+        return Err(SelectedApplicationStatementError::WrongTypeOrLength);
+    }
+    let canonical_bytes = CanonicalTuple::new(
+        ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER,
+        APPLICATION_STATEMENT_SCHEMA_VERSION,
+        vec![
+            CanonicalItem::hash512(setup_proof_context_hash),
+            CanonicalItem::participant_identity(participant_identity),
+            CanonicalItem::unsigned16(roster_position),
+            canonical_hash_list_values(ordered_degree_zero_commitment_roots)?,
+            canonical_hash_list_values(anchor_commitment_roots)?,
+        ],
+    )
+    .encode()
+    .map_err(|_| SelectedApplicationStatementError::CanonicalEncoding)?;
+    decode_selected_same_secret_statement(
+        &canonical_bytes,
+        SelectedApplicationStatementContext::new(
+            FOUNDATION_PROFILE.protocol_version,
+            [0; Hash512::BYTE_LENGTH],
+            None,
+            None,
+        ),
+    )?;
+    Ok(canonical_bytes)
+}
+
+pub(crate) fn canonical_selected_public_key_share_statement(
+    setup_proof_context_hash: [u8; Hash512::BYTE_LENGTH],
+    participant_identity: [u8; Hash512::BYTE_LENGTH],
+    roster_position: u16,
+    anchor_commitment_roots: &[[u8; Hash512::BYTE_LENGTH]],
+    public_key_share_root: [u8; Hash512::BYTE_LENGTH],
+) -> Result<Vec<u8>, SelectedApplicationStatementError> {
+    if roster_position >= FOUNDATION_PROFILE.participant_count || anchor_commitment_roots.len() != 3
+    {
+        return Err(SelectedApplicationStatementError::WrongTypeOrLength);
+    }
+    let canonical_bytes = CanonicalTuple::new(
+        ProofApplicationSlotCeilings::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+        APPLICATION_STATEMENT_SCHEMA_VERSION,
+        vec![
+            CanonicalItem::hash512(setup_proof_context_hash),
+            CanonicalItem::participant_identity(participant_identity),
+            CanonicalItem::unsigned16(roster_position),
+            canonical_hash_list_values(anchor_commitment_roots)?,
+            CanonicalItem::hash512(public_key_share_root),
+        ],
+    )
+    .encode()
+    .map_err(|_| SelectedApplicationStatementError::CanonicalEncoding)?;
+    decode_selected_public_key_share_statement(
+        &canonical_bytes,
+        SelectedApplicationStatementContext::new(
+            FOUNDATION_PROFILE.protocol_version,
+            [0; Hash512::BYTE_LENGTH],
+            None,
+            None,
+        ),
+    )?;
+    Ok(canonical_bytes)
+}
+
+pub(crate) fn canonical_selected_collective_public_key_aggregate_statement(
+    setup_proof_context_hash: [u8; Hash512::BYTE_LENGTH],
+    ordered_public_key_share_roots: &[[u8; Hash512::BYTE_LENGTH]],
+    collective_public_key_root: [u8; Hash512::BYTE_LENGTH],
+    collective_public_key_full_object_digest: [u8; Hash512::BYTE_LENGTH],
+) -> Result<Vec<u8>, SelectedApplicationStatementError> {
+    if ordered_public_key_share_roots.len() != usize::from(FOUNDATION_PROFILE.participant_count) {
+        return Err(SelectedApplicationStatementError::WrongTypeOrLength);
+    }
+    let canonical_bytes = CanonicalTuple::new(
+        ProofApplicationSlotCeilings::COLLECTIVE_PUBLIC_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+        APPLICATION_STATEMENT_SCHEMA_VERSION,
+        vec![
+            CanonicalItem::hash512(setup_proof_context_hash),
+            canonical_hash_list_values(ordered_public_key_share_roots)?,
+            CanonicalItem::hash512(collective_public_key_root),
+            CanonicalItem::hash512(collective_public_key_full_object_digest),
+        ],
+    )
+    .encode()
+    .map_err(|_| SelectedApplicationStatementError::CanonicalEncoding)?;
+    decode_selected_collective_public_key_aggregate_statement(
+        &canonical_bytes,
+        SelectedApplicationStatementContext::new(
+            FOUNDATION_PROFILE.protocol_version,
+            [0; Hash512::BYTE_LENGTH],
+            None,
+            None,
+        ),
+    )?;
+    Ok(canonical_bytes)
+}
+
 pub(crate) fn canonical_selected_galois_key_share_statement(
     setup_proof_context_hash: [u8; Hash512::BYTE_LENGTH],
     participant_identity: [u8; Hash512::BYTE_LENGTH],

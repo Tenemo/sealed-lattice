@@ -148,8 +148,9 @@ pub(crate) use generation_state::{
 pub(crate) use generation_storage::{
     CommonProofExternalMemoryRequirement, CommonProofGenerationError,
     CommonProofGenerationInitializationError, CommonProofGenerationInput,
-    CommonProofResidentMemoryPhase, CommonProofResidentMemoryPhasePlan,
-    CommonProofResidentMemoryPlan, GeneratedCommonProofStoragePlanError,
+    CommonProofResidentInfrastructurePayloadAccounting, CommonProofResidentMemoryPhase,
+    CommonProofResidentMemoryPhasePlan, CommonProofResidentMemoryPlan,
+    GeneratedCommonProofStoragePlanError,
     MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH, common_proof_external_memory_requirement,
     common_proof_resident_memory_plan, common_proof_resident_memory_requirement,
 };

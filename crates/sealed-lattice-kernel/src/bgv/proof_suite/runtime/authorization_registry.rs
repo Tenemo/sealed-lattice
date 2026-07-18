@@ -351,6 +351,36 @@ impl BorrowedVerifiedCommonProofCapability<'_> {
     pub(crate) const fn top_count(&self) -> Option<u16> {
         self.entry.proof.top_count()
     }
+
+    /// Preflights the exact evaluator-store terminal while the generic proof
+    /// capability remains retained. The returned authority stays inside the
+    /// family terminal transition and is committed only after the proof
+    /// handle is consumed by the same operation.
+    pub(crate) fn preflight_verified_evaluator_key_store(
+        &self,
+        canonical_application_statement_bytes: &[u8],
+        verified_evaluator_source_catalog: &VerifiedAcceptedSetupEvaluatorSourceCatalog,
+        verified_evaluator_key_store_material: VerifiedEvaluatorKeyStoreMaterial,
+        ordered_runtime_component_trees: Vec<VerifiedStreamedProofTreeTerminal>,
+        ordered_verified_auxiliary_roots: &[VerifiedEvaluatorAuxiliaryRoot],
+    ) -> Result<VerifiedEvaluatorKeyStore, CommonProofRuntimeError> {
+        if self.proof_stream_domain() != CanonicalStreamDomain::EvaluatorKeyAggregateProof {
+            return Err(CommonProofRuntimeError::WrongVerificationBinding);
+        }
+        VerifiedEvaluatorKeyStore::from_verified_common_proof_and_material(
+            &self.entry.proof,
+            canonical_application_statement_bytes,
+            self.entry.binding.relation_plan_hash,
+            self.entry.binding.ceremony_context_hash,
+            self.entry.binding.action_context_hash,
+            verified_evaluator_source_catalog,
+            self.proof_stream_descriptor().clone(),
+            verified_evaluator_key_store_material,
+            ordered_runtime_component_trees,
+            ordered_verified_auxiliary_roots,
+        )
+        .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)
+    }
 }
 
 impl ConsumedVerifiedCommonProofCapability {
@@ -1010,6 +1040,58 @@ impl CommonProofRuntimeRegistry {
             .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)
     }
 
+    /// Retires every still-live member of a family-owned pending set. Missing
+    /// or duplicated identifiers remain a loud binding error, but cannot make
+    /// another retained proof leak when the owning lifecycle is cancelled.
+    pub(crate) fn retire_generated_proofs(
+        &mut self,
+        handle_identifiers: &[u32],
+    ) -> Result<(), CommonProofRuntimeError> {
+        let mut invalid_binding = false;
+        for (handle_ordinal, handle_identifier) in handle_identifiers.iter().enumerate() {
+            if *handle_identifier == 0
+                || handle_identifiers[..handle_ordinal].contains(handle_identifier)
+            {
+                invalid_binding = true;
+                continue;
+            }
+            if self
+                .generated_capabilities
+                .remove(&GeneratedCommonProofCapabilityHandle::from_identifier(
+                    *handle_identifier,
+                ))
+                .is_none()
+            {
+                invalid_binding = true;
+            }
+        }
+        if invalid_binding {
+            Err(CommonProofRuntimeError::WrongVerificationBinding)
+        } else {
+            Ok(())
+        }
+    }
+
+    pub(crate) fn preflight_generated_proof_pending_statement(
+        &self,
+        handle: &GeneratedCommonProofCapabilityHandle,
+        expected_application_statement_schema_identifier: u16,
+        expected_roster_position: Option<u16>,
+        expected_schedule_position: Option<u32>,
+        canonical_application_statement_bytes: &[u8],
+    ) -> Result<StreamDescriptor, CommonProofRuntimeError> {
+        self.generated_capabilities
+            .get(handle)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?
+            .proof
+            .preflight_pending_statement(
+                expected_application_statement_schema_identifier,
+                expected_roster_position,
+                expected_schedule_position,
+                canonical_application_statement_bytes,
+            )
+    }
+
     /// Consumes a completed local prover only after a positively verified
     /// board object carries the exact generated proof descriptor and all
     /// canonical application coordinates match the generation authority.
@@ -1053,6 +1135,44 @@ impl CommonProofRuntimeRegistry {
             .remove(&handle)
             .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?;
         Ok(binding)
+    }
+
+    /// Validates one exact accepted-package binding set before retiring any
+    /// generated proof. This keeps a malformed joint package retryable and
+    /// makes the later retirement loop infallible after every descriptor and
+    /// application coordinate has been checked.
+    pub(crate) fn bind_generated_proofs_to_verified_statement_sources(
+        &mut self,
+        bindings: &[(u32, &super::VerifiedCommonProofStatementSource)],
+    ) -> Result<(), CommonProofRuntimeError> {
+        if bindings.is_empty() {
+            return Err(CommonProofRuntimeError::WrongVerificationBinding);
+        }
+        for (binding_ordinal, (handle_identifier, statement_source)) in
+            bindings.iter().enumerate()
+        {
+            if *handle_identifier == 0
+                || bindings[..binding_ordinal]
+                    .iter()
+                    .any(|(earlier_identifier, _)| earlier_identifier == handle_identifier)
+            {
+                return Err(CommonProofRuntimeError::WrongVerificationBinding);
+            }
+            let handle =
+                GeneratedCommonProofCapabilityHandle::from_identifier(*handle_identifier);
+            self.generated_capabilities
+                .get(&handle)
+                .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?
+                .proof
+                .bind_verified_statement_source(statement_source)?;
+        }
+        for (handle_identifier, _) in bindings {
+            let removed = self.generated_capabilities.remove(
+                &GeneratedCommonProofCapabilityHandle::from_identifier(*handle_identifier),
+            );
+            assert!(removed.is_some(), "joint binding preflight retained every generated proof");
+        }
+        Ok(())
     }
 
     pub(crate) fn begin_owned_verification(

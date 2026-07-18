@@ -374,7 +374,7 @@ pub(crate) struct ComponentMaterialOwnershipBinding {
 }
 
 impl ComponentMaterialOwnershipBinding {
-    pub(crate) const fn from_verified_application(
+    pub(crate) const fn from_generated_application(
         suite_identifier: [u8; Hash512::BYTE_LENGTH],
         action_context_hash: [u8; Hash512::BYTE_LENGTH],
         application_context_hash: [u8; Hash512::BYTE_LENGTH],
@@ -384,6 +384,18 @@ impl ComponentMaterialOwnershipBinding {
             action_context_hash: Hash512::from_bytes(action_context_hash),
             application_context_hash: Hash512::from_bytes(application_context_hash),
         }
+    }
+
+    pub(crate) const fn from_verified_application(
+        suite_identifier: [u8; Hash512::BYTE_LENGTH],
+        action_context_hash: [u8; Hash512::BYTE_LENGTH],
+        application_context_hash: [u8; Hash512::BYTE_LENGTH],
+    ) -> Self {
+        Self::from_generated_application(
+            suite_identifier,
+            action_context_hash,
+            application_context_hash,
+        )
     }
 }
 

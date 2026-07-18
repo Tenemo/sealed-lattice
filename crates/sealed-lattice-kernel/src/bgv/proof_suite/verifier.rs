@@ -123,6 +123,7 @@ pub(crate) use verification_state::{
 pub(crate) use verified_values::{
     VerifiedCommonProof, VerifiedEvaluatorAuxiliaryRoot, VerifiedEvaluatorKeyStore,
     VerifiedEvaluatorRuntimeRoot, VerifiedStatementOwnedTree, VerifiedStreamedProofTreeTerminal,
+    VerifiedStreamedProofTreeTerminalPreflight,
 };
 
 use core_verification::{

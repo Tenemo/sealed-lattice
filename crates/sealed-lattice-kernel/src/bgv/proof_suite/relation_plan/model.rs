@@ -6,7 +6,9 @@ use crate::foundation::{CanonicalItem, CanonicalItemType, CanonicalTuple};
 use super::{
     compiled_plan::RelationPlanCheckContext,
     expressions::{
-        canonical_nested_list, canonical_u32_list, canonical_u64_list, encode_generated_tuple,
+        canonical_nested_list, canonical_u32_list, canonical_u64_list,
+        checked_resident_payload_add, encode_generated_tuple,
+        resident_string_payload_byte_length, resident_vec_storage_byte_length,
     },
     layout::RelationPlanVariant,
     schema::{
@@ -115,6 +117,14 @@ impl SuiteModulusReference {
         }
     }
 
+    pub(crate) const fn catalog_identifier(self) -> u16 {
+        self.catalog as u16
+    }
+
+    pub(crate) const fn modulus_index(self) -> u16 {
+        self.modulus_index
+    }
+
     pub(super) fn canonical_tuple(self) -> CanonicalTuple {
         CanonicalTuple::new(
             SUITE_MODULUS_REFERENCE_SCHEMA_IDENTIFIER,
@@ -173,6 +183,10 @@ pub(crate) struct RelationValueLayout {
 }
 
 impl RelationValueLayout {
+    fn resident_owned_payload_byte_length(&self) -> Result<u64, RelationPlanError> {
+        resident_vec_storage_byte_length(&self.shape)
+    }
+
     pub(super) fn scalar_hash() -> Self {
         Self {
             element_kind: RelationElementKind::Hash512,
@@ -350,6 +364,44 @@ pub(crate) enum RelationVerifierSource {
 }
 
 impl RelationVerifierSource {
+    pub(super) fn resident_owned_payload_byte_length(&self) -> Result<u64, RelationPlanError> {
+        match self {
+            Self::ApplicationStatement {
+                value_path,
+                value_layout,
+            }
+            | Self::Suite {
+                value_path,
+                value_layout,
+            }
+            | Self::ApplicationSlot {
+                value_path,
+                value_layout,
+            } => checked_resident_payload_add(
+                resident_vec_storage_byte_length(value_path)?,
+                value_layout.resident_owned_payload_byte_length()?,
+            ),
+            Self::Protocol {
+                source_coordinates,
+                statement_binding_path,
+                value_layout,
+                ..
+            } => [
+                resident_vec_storage_byte_length(source_coordinates)?,
+                resident_vec_storage_byte_length(statement_binding_path)?,
+                value_layout.resident_owned_payload_byte_length()?,
+            ]
+            .into_iter()
+            .try_fold(0_u64, checked_resident_payload_add),
+            Self::RadixDecomposition { source, .. } => checked_resident_payload_add(
+                u64::try_from(std::mem::size_of::<RelationVerifierSource>())
+                    .map_err(|_| RelationPlanError::CountOverflow)?,
+                source.resident_owned_payload_byte_length()?,
+            ),
+            Self::SamplerOutput { .. } | Self::NegacyclicAutomorphismMapping { .. } => Ok(0),
+        }
+    }
+
     pub(crate) fn application_statement_scalar_hash_path(
         &self,
     ) -> Option<&[RelationSelectorPathStep]> {
@@ -787,6 +839,13 @@ pub(crate) struct RelationPublicSamplerDescriptor {
 }
 
 impl RelationPublicSamplerDescriptor {
+    pub(super) fn resident_owned_payload_byte_length(&self) -> Result<u64, RelationPlanError> {
+        checked_resident_payload_add(
+            resident_string_payload_byte_length(&self.role_domain)?,
+            resident_vec_storage_byte_length(&self.canonical_role_coordinate_bytes)?,
+        )
+    }
+
     pub(super) fn canonical_tuple(&self) -> Result<CanonicalTuple, RelationPlanError> {
         Ok(CanonicalTuple::new(
             RELATION_PUBLIC_SAMPLER_SCHEMA_IDENTIFIER,
@@ -933,6 +992,10 @@ pub(crate) enum RelationTreeDescriptor {
 }
 
 impl RelationTreeDescriptor {
+    pub(super) fn resident_owned_payload_byte_length(&self) -> Result<u64, RelationPlanError> {
+        resident_vec_storage_byte_length(self.ordered_column_ordinals())
+    }
+
     pub(crate) fn ordered_column_ordinals(&self) -> &[u32] {
         match self {
             Self::ProofCreated {
@@ -1426,6 +1489,22 @@ pub(crate) enum RelationRadixFactorDescriptor {
 }
 
 impl RelationRadixFactorDescriptor {
+    fn resident_owned_payload_byte_length(&self) -> Result<u64, RelationPlanError> {
+        match self {
+            Self::ColumnDigits {
+                ordered_column_ordinals,
+                ..
+            } => resident_vec_storage_byte_length(ordered_column_ordinals),
+            Self::ConstantDigits { ordered_digits } => {
+                resident_vec_storage_byte_length(ordered_digits)
+            }
+            Self::TranscriptChallengeDigits {
+                role_coordinates, ..
+            } => resident_vec_storage_byte_length(role_coordinates),
+            Self::NonNativeModulusDigits { .. } | Self::ScalarColumn { .. } => Ok(0),
+        }
+    }
+
     pub(super) fn canonical_tuple(&self) -> Result<CanonicalTuple, RelationPlanError> {
         Ok(match self {
             Self::ColumnDigits {
@@ -1501,6 +1580,18 @@ pub(crate) struct RelationRadixProductTermDescriptor {
 }
 
 impl RelationRadixProductTermDescriptor {
+    fn resident_owned_payload_byte_length(&self) -> Result<u64, RelationPlanError> {
+        self.ordered_factors.iter().try_fold(
+            resident_vec_storage_byte_length(&self.ordered_factors)?,
+            |total, factor| {
+                checked_resident_payload_add(
+                    total,
+                    factor.resident_owned_payload_byte_length()?,
+                )
+            },
+        )
+    }
+
     pub(super) fn canonical_tuple(&self) -> Result<CanonicalTuple, RelationPlanError> {
         Ok(CanonicalTuple::new(
             RADIX_PRODUCT_TERM_SCHEMA_IDENTIFIER,
@@ -1531,6 +1622,18 @@ pub(crate) struct RelationRadixConvolutionDescriptor {
 }
 
 impl RelationRadixConvolutionDescriptor {
+    pub(super) fn resident_owned_payload_byte_length(&self) -> Result<u64, RelationPlanError> {
+        self.ordered_terms.iter().try_fold(
+            resident_vec_storage_byte_length(&self.ordered_terms)?,
+            |total, term| {
+                checked_resident_payload_add(
+                    total,
+                    term.resident_owned_payload_byte_length()?,
+                )
+            },
+        )
+    }
+
     pub(super) fn canonical_tuple(&self) -> Result<CanonicalTuple, RelationPlanError> {
         Ok(CanonicalTuple::new(
             RADIX_CONVOLUTION_SCHEMA_IDENTIFIER,

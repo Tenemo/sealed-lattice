@@ -1,10 +1,11 @@
 use crate::{
     bgv::proof_suite::{
-        SelectedEvaluatorEntryPosition, VerifiedGaloisSourceMaterialBatch,
+        SelectedEvaluatorEntryPosition, SelectedEvaluatorStoreSource,
+        SelectedEvaluatorStoreSourceCatalog, VerifiedGaloisSourceMaterialBatch,
         VerifiedKeySwitchComponentMaterial, VerifiedRelinearizationAggregateMaterial,
         VerifiedRelinearizationSourceMaterial,
     },
-    foundation::{FOUNDATION_PROFILE, Hash512, RefusalReason},
+    foundation::{CanonicalStreamReadbackVerifier, FOUNDATION_PROFILE, Hash512, RefusalReason},
 };
 
 pub(super) struct VerifiedAcceptedSetupParticipantEvaluatorSource {
@@ -293,5 +294,76 @@ impl VerifiedAcceptedSetupEvaluatorSourceCatalog {
         self.ordered_participants
             .first()
             .map(|participant| participant.galois().ordered_auxiliary_roots())
+    }
+}
+
+impl SelectedEvaluatorStoreSourceCatalog for VerifiedAcceptedSetupEvaluatorSourceCatalog {
+    fn protocol_version(&self) -> u16 {
+        self.protocol_version
+    }
+
+    fn suite_identifier(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.suite_identifier
+    }
+
+    fn ceremony_context_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.ceremony_context_hash
+    }
+
+    fn action_context_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.action_context_hash
+    }
+
+    fn manifest_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.manifest_hash
+    }
+
+    fn roster_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.roster_hash
+    }
+
+    fn setup_proof_context_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.setup_proof_context_hash
+    }
+
+    fn component_source(
+        &self,
+        roster_position: u16,
+        evaluator_position: SelectedEvaluatorEntryPosition,
+    ) -> Result<Option<SelectedEvaluatorStoreSource>, RefusalReason> {
+        let Some(material) = self.component_material(roster_position, evaluator_position) else {
+            return Ok(None);
+        };
+        let readback: CanonicalStreamReadbackVerifier = material.begin_authenticated_readback()?;
+        Ok(Some(SelectedEvaluatorStoreSource::from_authenticated_authority(
+            material.topology().clone(),
+            material.material_root().into_bytes(),
+            material.stream_descriptor().clone(),
+            readback,
+        )))
+    }
+
+    fn component_root(
+        &self,
+        roster_position: u16,
+        evaluator_position: SelectedEvaluatorEntryPosition,
+    ) -> Option<[u8; Hash512::BYTE_LENGTH]> {
+        VerifiedAcceptedSetupEvaluatorSourceCatalog::component_root(
+            self,
+            roster_position,
+            evaluator_position,
+        )
+    }
+
+    fn component_public_polynomial_context_hash(
+        &self,
+        roster_position: u16,
+        evaluator_position: SelectedEvaluatorEntryPosition,
+    ) -> Option<[u8; Hash512::BYTE_LENGTH]> {
+        VerifiedAcceptedSetupEvaluatorSourceCatalog::component_public_polynomial_context_hash(
+            self,
+            roster_position,
+            evaluator_position,
+        )
     }
 }

@@ -78,6 +78,31 @@ pub(crate) struct ProofExternalMemoryExecutor {
 }
 
 impl ProofExternalMemoryExecutor {
+    pub(crate) fn planned_resident_owned_payload_byte_length(
+        plan: &ProofExternalMemoryPlan,
+    ) -> Result<u64, ProofExternalMemoryError> {
+        let object_plan_catalog_byte_length = u64::try_from(plan.objects.capacity())
+            .ok()
+            .and_then(|capacity| {
+                capacity.checked_mul(
+                    u64::try_from(std::mem::size_of::<ProofExternalMemoryObjectPlan>()).ok()?,
+                )
+            })
+            .ok_or(ProofExternalMemoryError::ResourceLimitExceeded)?;
+        let object_state_catalog_byte_length = u64::try_from(plan.objects.len())
+            .ok()
+            .and_then(|length| {
+                length.checked_mul(u64::try_from(std::mem::size_of::<(
+                    ProofExternalMemoryObject,
+                    ProofExternalMemoryObjectState,
+                )>()).ok()?)
+            })
+            .ok_or(ProofExternalMemoryError::ResourceLimitExceeded)?;
+        object_plan_catalog_byte_length
+            .checked_add(object_state_catalog_byte_length)
+            .ok_or(ProofExternalMemoryError::ResourceLimitExceeded)
+    }
+
     pub(crate) fn new(plan: ProofExternalMemoryPlan) -> Self {
         let mut states = plan
             .objects

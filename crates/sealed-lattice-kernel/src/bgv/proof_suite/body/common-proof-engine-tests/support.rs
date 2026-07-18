@@ -66,6 +66,7 @@ use super::super::super::{
     construct_composed_quotient_polynomial,
     construct_constraint_stream_composed_quotient_polynomial, durable_authorization_frame_digest,
     encode_common_proof_checkpoint_cursor_manifest, generate_common_proof,
+    selected_relation_plan_check_context, selected_relation_plans,
     verified_application_statement_hash, verify_common_proof,
 };
 use super::super::SCHEMA_VERSION;
@@ -1217,21 +1218,11 @@ fn prepared_verification_worker_fixture() -> PreparedCommonProofVerification {
             runtime_limits,
         )
         .expect("the positively constructed application is retained");
-    let statement_tree_handles = verified_trees
-        .into_iter()
-        .map(|tree| {
-            upstream_registry
-                .mint_statement_tree(&application_handle, tree)
-                .expect("the verified statement tree is retained")
-        })
-        .collect::<Vec<_>>();
     upstream_registry
-        .consume_verification_inputs(
-            &application_handle,
-            &statement_tree_handles.iter().collect::<Vec<_>>(),
-            &[],
-            None,
-        )
+        .attach_statement_owned_tree_batch(&application_handle, verified_trees)
+        .expect("the verified statement-tree batch is retained");
+    upstream_registry
+        .consume_verification_inputs(&application_handle, &[], None)
         .expect("the exact verifier capability set is consumed")
         .prepare()
         .expect("the owned verifier initializes")

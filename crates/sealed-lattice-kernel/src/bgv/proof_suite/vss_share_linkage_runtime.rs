@@ -959,6 +959,12 @@ fn prepare_vss_verification(
             runtime_plan.relation_plan,
             runtime_plan.limits,
         )?;
+    let statement_trees =
+        super::VerifiedStatementOwnedTree::from_verified_committed_material_statement_source(
+            &statement_source,
+            &board_authority.verified_public_randomness,
+        )
+        .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?;
     let terminal_source_handle = VSS_VERIFICATION_TERMINAL_SOURCE_REGISTRY.with(|registry| {
         registry.borrow_mut().retain(VssVerificationTerminalSource {
             canonical_application_statement_bytes: board_authority
@@ -971,9 +977,10 @@ fn prepare_vss_verification(
         CommonProofSelectedSuiteCapabilityHandle::from_identifier(selected_suite_handle);
     let adapter_result =
         retain_common_proof_verification_family_adapter_from_upstream(move |upstream_inputs| {
-            upstream_inputs.prepare_proof_created_tree_family_verification_without_evaluator(
+            upstream_inputs.prepare_statement_tree_family_verification_without_evaluator(
                 &selected_suite_handle,
                 statement_source,
+                statement_trees,
             )
         });
     match adapter_result {
@@ -1505,6 +1512,222 @@ pub extern "C" fn sealed_lattice_vss_share_linkage_discard_verified_terminal(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{
+        bgv::proof_suite::{
+            CommonProofVerificationStateMachine, CommonProofVerifierError,
+            PollableCommonProofVerificationInput, RelationTreeDescriptor,
+            VerifiedCommonProofStatementSource, VerifiedStatementOwnedTree,
+        },
+        foundation::StreamDescriptor,
+    };
+
+    fn test_root(domain: u8, ordinal: usize) -> [u8; Hash512::BYTE_LENGTH] {
+        let mut root = [domain; Hash512::BYTE_LENGTH];
+        root[..size_of::<u64>()].copy_from_slice(
+            &u64::try_from(ordinal)
+                .expect("selected catalog ordinal fits u64")
+                .to_le_bytes(),
+        );
+        root[Hash512::BYTE_LENGTH - 1] = domain;
+        root
+    }
+
+    fn test_proof_stream_descriptor(proof_byte_length: usize) -> StreamDescriptor {
+        let chunk_byte_length = FOUNDATION_PROFILE.stream_chunk_byte_length;
+        let chunk_count = proof_byte_length
+            .checked_add(chunk_byte_length - 1)
+            .expect("selected proof byte length fits usize")
+            / chunk_byte_length;
+        StreamDescriptor {
+            total_byte_length: u64::try_from(proof_byte_length)
+                .expect("selected proof byte length fits u64"),
+            ordered_chunk_digests: vec![Hash512::from_bytes([0xd1; 64]); chunk_count].into(),
+            full_object_digest: Hash512::from_bytes([0xd2; 64]),
+        }
+    }
+
+    #[test]
+    fn selected_vss_statement_tree_catalog_is_complete_and_exactly_bound() {
+        let suite_identifier = Hash512::from_bytes([0x11; 64]);
+        let manifest_hash = Hash512::from_bytes([0x18; 64]);
+        let ceremony_context_hash = Hash512::from_bytes([0x22; 64]);
+        let action_context_hash = Hash512::from_bytes([0x33; 64]);
+        let roster_hash = Hash512::from_bytes([0x44; 64]);
+        let public_setup_seed = Hash512::from_bytes([0x55; 64]);
+        let ordered_participant_identities = (0..FOUNDATION_PROFILE.participant_count)
+            .map(|roster_position| {
+                ParticipantIdentity::from_bytes(test_root(0x70, usize::from(roster_position)))
+            })
+            .collect::<Vec<_>>();
+        let verified_public_randomness = VerifiedPublicRandomness::from_test_values(
+            suite_identifier,
+            manifest_hash,
+            ceremony_context_hash,
+            action_context_hash,
+            roster_hash,
+            ordered_participant_identities,
+            public_setup_seed,
+        );
+        let relation_input = selected_committed_material_relation_plan_input()
+            .expect("selected committed-material relation input");
+        let sharing_limb_count = relation_input.sharing_data_modulus_indices.len();
+        let reconstruction_threshold = usize::from(relation_input.threshold);
+        let participant_count = usize::from(relation_input.participant_count);
+        let coefficient_root_count = sharing_limb_count
+            .checked_mul(reconstruction_threshold)
+            .expect("selected coefficient root count fits usize");
+        let recipient_root_count = sharing_limb_count
+            .checked_mul(participant_count)
+            .expect("selected recipient root count fits usize");
+        let ordered_coefficient_roots = (0..coefficient_root_count)
+            .map(|root_ordinal| test_root(0xa1, root_ordinal))
+            .collect::<Vec<_>>();
+        let ordered_recipient_roots = (0..recipient_root_count)
+            .map(|root_ordinal| test_root(0xb2, root_ordinal))
+            .collect::<Vec<_>>();
+        let dealer_roster_position = 3_u16;
+        let dealer_identity = verified_public_randomness.ordered_participant_identities()
+            [usize::from(dealer_roster_position)]
+        .into_bytes();
+        let canonical_application_statement_bytes =
+            canonical_selected_vss_share_linkage_statement(
+                FOUNDATION_PROFILE.protocol_version,
+                suite_identifier.into_bytes(),
+                ceremony_context_hash.into_bytes(),
+                action_context_hash.into_bytes(),
+                roster_hash.into_bytes(),
+                public_setup_seed.into_bytes(),
+                dealer_identity,
+                dealer_roster_position,
+                &ordered_coefficient_roots,
+                &ordered_recipient_roots,
+            )
+            .expect("selected VSS statement is canonical");
+        let runtime_plan =
+            selected_vss_proof_runtime_plan(&canonical_application_statement_bytes)
+                .expect("selected VSS runtime plan");
+        let proof_byte_length = runtime_plan.limits.proof_byte_length();
+        let statement_source =
+            VerifiedCommonProofStatementSource::from_test_verified_vss_statement_source(
+                &verified_public_randomness,
+                canonical_application_statement_bytes.clone(),
+                test_proof_stream_descriptor(proof_byte_length),
+                runtime_plan.relation_plan,
+                runtime_plan.limits,
+            )
+            .expect("exact selected VSS statement source");
+        let statement_trees =
+            VerifiedStatementOwnedTree::from_verified_committed_material_statement_source(
+                &statement_source,
+                &verified_public_randomness,
+            )
+            .expect("selected VSS statement tree catalog");
+
+        let relation_context = selected_relation_plan_check_context(
+            ProofApplicationSlotCeilings::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER,
+        )
+        .expect("selected VSS relation context");
+        let compiled_relation_plan =
+            compile_vss_share_linkage_relation_plan(&relation_input, &relation_context)
+                .expect("selected VSS relation plan");
+        let selected_variant = compiled_relation_plan
+            .select_variant(None, None)
+            .expect("selected VSS relation variant");
+        let expected_statement_tree_count = selected_variant
+            .ordered_trees()
+            .iter()
+            .filter(|tree| matches!(tree, RelationTreeDescriptor::BoundPublic { .. }))
+            .count();
+        assert_eq!(statement_trees.len(), expected_statement_tree_count);
+
+        let mut expected_roots = Vec::with_capacity(expected_statement_tree_count);
+        for sharing_limb_ordinal in 0..sharing_limb_count {
+            let coefficient_start = sharing_limb_ordinal * reconstruction_threshold;
+            expected_roots.extend_from_slice(
+                &ordered_coefficient_roots
+                    [coefficient_start..coefficient_start + reconstruction_threshold],
+            );
+            let recipient_start = sharing_limb_ordinal * participant_count;
+            expected_roots.extend_from_slice(
+                &ordered_recipient_roots[recipient_start..recipient_start + participant_count],
+            );
+        }
+        assert_eq!(
+            statement_trees
+                .iter()
+                .map(VerifiedStatementOwnedTree::expected_root)
+                .collect::<Vec<_>>(),
+            expected_roots,
+            "the selected tree order remains limb-major with coefficient roots before recipient roots",
+        );
+
+        CommonProofVerificationStateMachine::new(PollableCommonProofVerificationInput {
+            protocol_version: FOUNDATION_PROFILE.protocol_version,
+            suite_identifier: suite_identifier.into_bytes(),
+            canonical_application_statement_bytes: &canonical_application_statement_bytes,
+            relation_plan: &compiled_relation_plan,
+            relation_context: &relation_context,
+            schedule_position: None,
+            top_count: None,
+            statement_owned_trees: &statement_trees,
+            evaluator_auxiliary_roots: &[],
+            declared_proof_byte_length: proof_byte_length,
+            proof_byte_ceiling: proof_byte_length,
+            maximum_resident_window_byte_length: proof_byte_length,
+        })
+        .expect("the exact selected VSS catalog initializes the current verifier");
+
+        let mut wrong_root_trees = statement_trees.clone();
+        wrong_root_trees[0] = wrong_root_trees[0].with_test_expected_root([0xee; 64]);
+        assert_eq!(
+            CommonProofVerificationStateMachine::new(PollableCommonProofVerificationInput {
+                protocol_version: FOUNDATION_PROFILE.protocol_version,
+                suite_identifier: suite_identifier.into_bytes(),
+                canonical_application_statement_bytes: &canonical_application_statement_bytes,
+                relation_plan: &compiled_relation_plan,
+                relation_context: &relation_context,
+                schedule_position: None,
+                top_count: None,
+                statement_owned_trees: &wrong_root_trees,
+                evaluator_auxiliary_roots: &[],
+                declared_proof_byte_length: proof_byte_length,
+                proof_byte_ceiling: proof_byte_length,
+                maximum_resident_window_byte_length: proof_byte_length,
+            })
+            .err(),
+            Some(CommonProofVerifierError::InvalidBoundTree),
+            "a tree root cannot diverge from the canonical statement root",
+        );
+
+        let wrong_context_statement_bytes = canonical_selected_vss_share_linkage_statement(
+            FOUNDATION_PROFILE.protocol_version,
+            suite_identifier.into_bytes(),
+            [0x92; 64],
+            action_context_hash.into_bytes(),
+            roster_hash.into_bytes(),
+            public_setup_seed.into_bytes(),
+            dealer_identity,
+            dealer_roster_position,
+            &ordered_coefficient_roots,
+            &ordered_recipient_roots,
+        )
+        .expect("context-tampered VSS statement is still canonically encoded");
+        let wrong_context_runtime_plan =
+            selected_vss_proof_runtime_plan(&wrong_context_statement_bytes)
+                .expect("selected plan remains independent of the statement context value");
+        assert!(matches!(
+            VerifiedCommonProofStatementSource::from_test_verified_vss_statement_source(
+                &verified_public_randomness,
+                wrong_context_statement_bytes,
+                test_proof_stream_descriptor(
+                    wrong_context_runtime_plan.limits.proof_byte_length(),
+                ),
+                wrong_context_runtime_plan.relation_plan,
+                wrong_context_runtime_plan.limits,
+            ),
+            Err(CommonProofRuntimeError::WrongVerificationBinding),
+        ));
+    }
 
     #[test]
     fn single_active_source_registry_is_one_shot_and_supports_failure_restore() {
@@ -1612,4 +1835,5 @@ mod tests {
         assert_eq!(decoded_reordered[0], handles[1]);
         assert_eq!(decoded_reordered[1], handles[0]);
     }
+
 }

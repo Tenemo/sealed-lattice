@@ -20,7 +20,9 @@ use crate::{
         setup::{
             SETUP_COMMITMENT_HIDING_ERROR_WIDTH, SETUP_COMMITMENT_HIDING_SECRET_WIDTH,
             SETUP_COMMITMENT_MODULUS_LIMB_INDICES, compute_lattice_anchor_commitment,
-            lattice_anchor_commitment_canonical_bytes, sample_galois_common_reference_limb,
+            lattice_anchor_commitment_canonical_bytes,
+            sample_collective_public_key_common_reference_limb,
+            sample_galois_common_reference_limb,
         },
     },
     foundation::{
@@ -40,9 +42,10 @@ use super::{
     VerifiedPublicRandomness,
     generation_authority::{
         SetupGeneratedCommittedMaterial, SetupGeneratedGaloisEntry,
-        SetupGeneratedKeySwitchComponent, SetupGeneratedRecipientPrivateVssPayload,
-        SetupGeneratedVssMaterial, SetupGenerationAnchorOpening, SetupGenerationAuthorityHandle,
-        SetupGenerationAuthorityInput, retain_browser_owned_setup_generation_authority,
+        SetupGeneratedKeySwitchComponent, SetupGeneratedPublicKeyShare,
+        SetupGeneratedRecipientPrivateVssPayload, SetupGeneratedVssMaterial,
+        SetupGenerationAnchorOpening, SetupGenerationAuthorityHandle, SetupGenerationAuthorityInput,
+        retain_browser_owned_setup_generation_authority,
     },
 };
 use crate::bgv::setup::sampling::negacyclic_product_mod;
@@ -50,10 +53,14 @@ use crate::bgv::setup::sampling::negacyclic_product_mod;
 const FOUNDATION_SCHEMA_VERSION: u16 = 1;
 const SETUP_SOURCE_SAMPLER_CONTEXT_SCHEMA_IDENTIFIER: u16 = 0x120c;
 const GALOIS_ERROR_CONTEXT_SCHEMA_IDENTIFIER: u16 = 0x120e;
+const PUBLIC_KEY_ERROR_CONTEXT_SCHEMA_IDENTIFIER: u16 = 0x120f;
 const SETUP_SOURCE_SAMPLER_CONTEXT_HASH_DOMAIN: &str =
     "sealed-lattice/setup/private-sampler-context/v1";
 const GALOIS_ERROR_CONTEXT_HASH_DOMAIN: &str = "sealed-lattice/setup/galois-error-context/v1";
+const PUBLIC_KEY_ERROR_CONTEXT_HASH_DOMAIN: &str =
+    "sealed-lattice/setup/public-key-error-context/v1";
 const SECRET_CONTRIBUTION_DISTRIBUTION_PURPOSE: u16 = 1;
+const PUBLIC_KEY_ERROR_DISTRIBUTION_PURPOSE: u16 = 2;
 const GALOIS_ERROR_DISTRIBUTION_PURPOSE: u16 = 7;
 const ANCHOR_HIDING_SECRET_DISTRIBUTION_PURPOSE: u16 = 11;
 const ANCHOR_HIDING_ERROR_DISTRIBUTION_PURPOSE: u16 = 12;
@@ -63,6 +70,7 @@ const NONCONSTANT_VSS_COEFFICIENT_PURPOSE: u16 = 4;
 const DATA_MODULUS_CATALOG_IDENTIFIER: u16 = 1;
 const SPECIAL_MODULUS_CATALOG_IDENTIFIER: u16 = 2;
 const GALOIS_ERROR_CENTERED_BINOMIAL_PARAMETER: u16 = 2;
+const PUBLIC_KEY_ERROR_CENTERED_BINOMIAL_PARAMETER: u16 = 2;
 const MATERIAL_SEED_BYTE_LENGTH: usize = 64;
 
 /// Source-owned count for the complete selected setup population created by
@@ -141,6 +149,9 @@ pub(in crate::bgv) fn selected_setup_generation_private_randomness_kmac_input_ac
                 ))
                 .ok_or(RefusalReason::OutsideSupportedProfile)?,
         )
+        .ok_or(RefusalReason::OutsideSupportedProfile)?;
+    private_stream_block_count = private_stream_block_count
+        .checked_add(centered_binomial_stream_block_count)
         .ok_or(RefusalReason::OutsideSupportedProfile)?;
     for evaluator_position in selected_evaluator_galois_entry_positions()
         .map_err(|_| RefusalReason::UnsupportedVersionOrSuite)?
@@ -264,6 +275,14 @@ pub(in crate::bgv) fn populate_browser_owned_setup_generation_authority(
         &bindings,
         &common_secret_coefficients,
     )?;
+    let public_key_share = construct_public_key_share(
+        selected_suite,
+        &action_private_randomness,
+        &bindings,
+        &common_secret_coefficients,
+        usize::try_from(relation_input.evaluation_domain_size)
+            .map_err(|_| RefusalReason::OutsideSupportedProfile)?,
+    )?;
     let ordered_galois_entries = construct_galois_entries(
         selected_suite,
         &action_private_randomness,
@@ -290,10 +309,94 @@ pub(in crate::bgv) fn populate_browser_owned_setup_generation_authority(
         anchor_commitment_roots,
         anchor_openings,
         common_secret_coefficients,
+        public_key_share,
         vss_material,
         galois_batch_schedule_position,
         ordered_galois_entries,
     })
+}
+
+fn construct_public_key_share(
+    selected_suite: &SelectedSuiteCapability,
+    action_private_randomness: &ActionPrivateRandomness,
+    bindings: &SetupGenerationBindings,
+    common_secret_coefficients: &[i8],
+    evaluation_domain_size: usize,
+) -> Result<SetupGeneratedPublicKeyShare, RefusalReason> {
+    let relation_input = selected_committed_material_relation_plan_input()
+        .map_err(|_| RefusalReason::UnsupportedVersionOrSuite)?;
+    let ring_degree = usize::try_from(relation_input.ring_degree)
+        .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
+    if common_secret_coefficients.len() != ring_degree {
+        return Err(RefusalReason::WrongTypeOrLength);
+    }
+    let error_context_hash = public_key_error_context_hash(
+        bindings.source_setup_intent_object_hash,
+    )?;
+    let centered_error_coefficients = sample_centered_binomial_polynomial(
+        action_private_randomness,
+        PrivateRandomnessDomain::setup_suite_distribution(
+            PUBLIC_KEY_ERROR_DISTRIBUTION_PURPOSE,
+        )
+        .map_err(|error| error.refusal_reason)?,
+        error_context_hash,
+        bindings.setup_attempt_identifier,
+        PUBLIC_KEY_ERROR_CENTERED_BINOMIAL_PARAMETER,
+        ring_degree,
+    )?;
+    let mut ordered_limb_coefficients =
+        Vec::with_capacity(relation_input.sharing_data_modulus_indices.len());
+    for data_modulus_index in relation_input.sharing_data_modulus_indices.iter().copied() {
+        let modulus = *selected_suite
+            .ordered_data_primes()
+            .get(usize::from(data_modulus_index))
+            .ok_or(RefusalReason::UnsupportedVersionOrSuite)?;
+        let common_reference = sample_collective_public_key_common_reference_limb(
+            &bindings.public_setup_seed,
+            data_modulus_index,
+            ring_degree,
+        )
+        .map_err(|_| RefusalReason::InvalidArithmeticRelation)?;
+        let secret_residues = Zeroizing::new(
+            common_secret_coefficients
+                .iter()
+                .copied()
+                .map(|coefficient| centered_i8_residue(coefficient, modulus))
+                .collect::<Vec<_>>(),
+        );
+        let common_reference_secret_product = Zeroizing::new(
+            negacyclic_product_mod(&common_reference, &secret_residues, modulus)
+                .map_err(|_| RefusalReason::InvalidArithmeticRelation)?,
+        );
+        ordered_limb_coefficients.push(Zeroizing::new(
+            centered_error_coefficients
+                .iter()
+                .copied()
+                .zip(common_reference_secret_product.iter().copied())
+                .map(|(error, product)| {
+                    sub_mod_fast(
+                        mul_mod_fast(
+                            PLAINTEXT_MODULUS % modulus,
+                            centered_i32_residue(i32::from(error), modulus),
+                            modulus,
+                        ),
+                        product,
+                        modulus,
+                    )
+                })
+                .collect::<Vec<_>>(),
+        ));
+    }
+    SetupGeneratedPublicKeyShare::from_browser_owned_witness(
+        bindings.setup_proof_context_hash,
+        bindings.participant_identity,
+        bindings.roster_position,
+        evaluation_domain_size,
+        ring_degree,
+        relation_input.sharing_data_modulus_indices,
+        ordered_limb_coefficients,
+        centered_error_coefficients,
+    )
 }
 
 fn validate_setup_generation_bindings(
@@ -1179,6 +1282,16 @@ fn galois_error_context_hash(
             CanonicalItem::unsigned16(decomposition_block_index),
         ],
         GALOIS_ERROR_CONTEXT_HASH_DOMAIN,
+    )
+}
+
+fn public_key_error_context_hash(
+    source_setup_intent_object_hash: [u8; Hash512::BYTE_LENGTH],
+) -> Result<Hash512, RefusalReason> {
+    canonical_context_hash(
+        PUBLIC_KEY_ERROR_CONTEXT_SCHEMA_IDENTIFIER,
+        vec![CanonicalItem::hash512(source_setup_intent_object_hash)],
+        PUBLIC_KEY_ERROR_CONTEXT_HASH_DOMAIN,
     )
 }
 

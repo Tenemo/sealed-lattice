@@ -405,6 +405,15 @@ pub(crate) struct CompleteProofTreeCatalog {
 }
 
 impl CompleteProofTreeCatalog {
+    pub(crate) fn resident_owned_payload_byte_length(&self) -> Result<u64, ProofBodyError> {
+        u64::try_from(self.entries.capacity())
+            .ok()
+            .and_then(|capacity| {
+                capacity.checked_mul(u64::try_from(std::mem::size_of::<ProofTreeCatalogEntry>()).ok()?)
+            })
+            .ok_or(ProofBodyError::CountOverflow)
+    }
+
     pub(crate) fn entries(&self) -> &[ProofTreeCatalogEntry] {
         &self.entries
     }

@@ -211,6 +211,30 @@ impl CommonProofGenerationAuthorization {
         )
     }
 
+    pub(crate) fn from_collective_authenticated_attempt(
+        attempt_source: PreparedActionProofAttemptSource,
+        relation_plan: &CommonProofRelationPlanCapability,
+        protocol_version: u16,
+        canonical_application_statement_bytes: &[u8],
+        limits: CommonProofRuntimeLimits,
+    ) -> Result<Self, CommonProofRuntimeError> {
+        if attempt_source.application_statement_schema_identifier()
+            != ProofApplicationSlotCeilings::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER
+            || attempt_source.application_slot().roster_position().is_some()
+            || attempt_source.application_slot().schedule_position().is_some()
+            || attempt_source.application_slot().producer_sequence().is_some()
+        {
+            return Err(CommonProofRuntimeError::WrongVerificationBinding);
+        }
+        Self::from_attempt_fields(
+            CommonProofGenerationAttemptFields::from_ordinary(attempt_source),
+            relation_plan,
+            protocol_version,
+            canonical_application_statement_bytes,
+            limits,
+        )
+    }
+
     fn from_attempt_fields(
         attempt_source: CommonProofGenerationAttemptFields,
         relation_plan: &CommonProofRelationPlanCapability,
@@ -1129,6 +1153,44 @@ pub(super) struct GeneratedCommonProof {
 }
 
 impl GeneratedCommonProof {
+    /// Checks the exact family statement and application coordinates retained
+    /// beside a prepackage proof without joining a package source or consuming
+    /// the generated capability. The returned descriptor was derived from the
+    /// authenticated output readback, never from host accounting.
+    pub(super) fn preflight_pending_statement(
+        &self,
+        expected_application_statement_schema_identifier: u16,
+        expected_roster_position: Option<u16>,
+        expected_schedule_position: Option<u32>,
+        canonical_application_statement_bytes: &[u8],
+    ) -> Result<StreamDescriptor, CommonProofRuntimeError> {
+        let authorization = self.binding.authorization;
+        let application_slot = authorization.application_slot;
+        let proof_header_hash = ProofObjectHeader::from_canonical_application_statement(
+            canonical_application_statement_bytes.to_vec(),
+            &CanonicalDecodeLimits::default(),
+        )
+        .and_then(|header| header.proof_header_hash())
+        .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?
+        .into_bytes();
+        if authorization.application_statement_schema_identifier
+            != expected_application_statement_schema_identifier
+            || application_slot.roster_position() != expected_roster_position
+            || application_slot.schedule_position() != expected_schedule_position
+            || application_slot.producer_sequence().is_some()
+            || verified_application_statement_hash(
+                authorization.protocol_version,
+                authorization.suite_identifier,
+                authorization.application_statement_schema_identifier,
+                canonical_application_statement_bytes,
+            ) != authorization.application_statement_hash
+            || proof_header_hash != authorization.proof_header_hash
+        {
+            return Err(CommonProofRuntimeError::WrongVerificationBinding);
+        }
+        Ok(self.stream_descriptor.clone())
+    }
+
     pub(super) fn bind_verified_board_source(
         &self,
         board_source: &VerifiedBoardApplicationSource,

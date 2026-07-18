@@ -519,6 +519,10 @@ impl VerifiedFinality {
         self.verified_evaluator_replay.object_hash()
     }
 
+    pub(crate) const fn verified_evaluator_replay(&self) -> &VerifiedEvaluatorReplay {
+        &self.verified_evaluator_replay
+    }
+
     pub const fn verified_setup_source_hash(&self) -> Hash512 {
         self.verified_evaluator_replay.verified_setup_source_hash()
     }

@@ -223,6 +223,7 @@ struct CommonProofWasmRuntimeRegistry {
     prepared_generations: BTreeMap<u32, PreparedCommonProofGeneration>,
     prepared_verifications: BTreeMap<u32, PreparedCommonProofVerification>,
     generation_preparation_reservations: BTreeSet<u32>,
+    verification_family_adapter_reservations: BTreeSet<u32>,
     runtime: CommonProofRuntimeRegistry,
     upstream_inputs: CommonProofUpstreamInputRegistry,
 }
@@ -239,6 +240,7 @@ impl Default for CommonProofWasmRuntimeRegistry {
             prepared_generations: BTreeMap::new(),
             prepared_verifications: BTreeMap::new(),
             generation_preparation_reservations: BTreeSet::new(),
+            verification_family_adapter_reservations: BTreeSet::new(),
             runtime: CommonProofRuntimeRegistry::default(),
             upstream_inputs: CommonProofUpstreamInputRegistry::default(),
         }
@@ -253,6 +255,7 @@ impl CommonProofWasmRuntimeRegistry {
             self.prepared_generations.len(),
             self.prepared_verifications.len(),
             self.generation_preparation_reservations.len(),
+            self.verification_family_adapter_reservations.len(),
         ])
     }
 
@@ -343,6 +346,14 @@ impl CommonProofWasmRuntimeRegistry {
         adapter: CommonProofVerificationFamilyAdapter,
     ) -> Result<u32, CommonProofRuntimeError> {
         self.require_new_entry_capacity(true)?;
+        let handle = self.issue_verification_family_adapter_handle()?;
+        self.verification_family_adapters.insert(handle, adapter);
+        Ok(handle)
+    }
+
+    fn issue_verification_family_adapter_handle(
+        &mut self,
+    ) -> Result<u32, CommonProofRuntimeError> {
         let handle = self.next_verification_family_adapter_handle;
         if handle == 0 {
             return Err(CommonProofRuntimeError::AllocationLimitExceeded);
@@ -352,7 +363,6 @@ impl CommonProofWasmRuntimeRegistry {
             .checked_add(1)
             .filter(|next| *next != 0)
             .ok_or(CommonProofRuntimeError::AllocationLimitExceeded)?;
-        self.verification_family_adapters.insert(handle, adapter);
         Ok(handle)
     }
 }
@@ -417,6 +427,90 @@ pub(crate) fn retain_common_proof_verification_family_adapter_from_upstream(
         let prepared = prepare(&mut registry.upstream_inputs)?;
         registry
             .retain_verification_family_adapter(CommonProofVerificationFamilyAdapter::new(prepared))
+    })
+}
+
+/// Reserves the sole common-runtime destination needed by an exact-family
+/// verifier before that family consumes its unique package-owned source.
+pub(crate) fn reserve_common_proof_verification_family_adapter(
+) -> Result<u32, CommonProofRuntimeError> {
+    COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        let mut registry = registry.borrow_mut();
+        registry.require_new_entry_capacity(true)?;
+        let handle = registry.issue_verification_family_adapter_handle()?;
+        if !registry
+            .verification_family_adapter_reservations
+            .insert(handle)
+        {
+            return Err(CommonProofRuntimeError::WrongOperationPhase);
+        }
+        Ok(handle)
+    })
+}
+
+/// Runs a borrowed exact-family validation while its reserved common-runtime
+/// destination remains live. The callback cannot consume package authority.
+pub(crate) fn preflight_reserved_common_proof_verification_family_adapter_from_upstream<Output>(
+    reservation_handle: u32,
+    preflight: impl FnOnce(
+        &CommonProofUpstreamInputRegistry,
+    ) -> Result<Output, CommonProofRuntimeError>,
+) -> Result<Output, CommonProofRuntimeError> {
+    COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        let registry = registry.borrow();
+        if !registry
+            .verification_family_adapter_reservations
+            .contains(&reservation_handle)
+        {
+            return Err(CommonProofRuntimeError::UnknownOrStaleHandle);
+        }
+        preflight(&registry.upstream_inputs)
+    })
+}
+
+/// Commits one reserved adapter through an infallible ownership transition.
+/// All source, tree, and auxiliary-root validation must have completed through
+/// the borrowed preflight before this function is called.
+pub(crate) fn commit_reserved_common_proof_verification_family_adapter_from_upstream(
+    reservation_handle: u32,
+    prepare: impl FnOnce(&CommonProofUpstreamInputRegistry) -> PreparedCommonProofVerification,
+) -> u32 {
+    COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        let mut registry = registry.borrow_mut();
+        assert!(
+            registry
+                .verification_family_adapter_reservations
+                .remove(&reservation_handle),
+            "reserved common-proof verifier adapter remains live during commit"
+        );
+        let prepared = prepare(&registry.upstream_inputs);
+        assert!(
+            registry
+                .verification_family_adapters
+                .insert(
+                    reservation_handle,
+                    CommonProofVerificationFamilyAdapter::new(prepared),
+                )
+                .is_none(),
+            "reserved common-proof verifier handle is unique"
+        );
+        reservation_handle
+    })
+}
+
+pub(crate) fn cancel_common_proof_verification_family_adapter_reservation(
+    reservation_handle: u32,
+) -> Result<(), CommonProofRuntimeError> {
+    COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        if registry
+            .borrow_mut()
+            .verification_family_adapter_reservations
+            .remove(&reservation_handle)
+        {
+            Ok(())
+        } else {
+            Err(CommonProofRuntimeError::UnknownOrStaleHandle)
+        }
     })
 }
 
@@ -505,6 +599,63 @@ pub(crate) fn bind_generated_common_proof_to_verified_statement_source(
                 statement_source,
             )
             .map(|_| ())
+    })
+}
+
+/// Retires an exact joint set of generated collective setup proofs only after
+/// every accepted-package statement source has passed borrowed preflight.
+/// No capability is consumed when any member is missing, duplicated, or bound
+/// to a different package slot.
+pub(crate) fn bind_generated_common_proofs_to_verified_statement_sources(
+    bindings: &[(u32, &super::VerifiedCommonProofStatementSource)],
+) -> Result<(), CommonProofRuntimeError> {
+    COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        registry
+            .borrow_mut()
+            .runtime
+            .bind_generated_proofs_to_verified_statement_sources(bindings)
+    })
+}
+
+pub(crate) fn release_generated_common_proof_capability(
+    generated_proof_handle: u32,
+) -> Result<(), CommonProofRuntimeError> {
+    COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        registry.borrow_mut().runtime.release_generated_proof(
+            GeneratedCommonProofCapabilityHandle::from_identifier(generated_proof_handle),
+        )
+    })
+}
+
+pub(crate) fn retire_generated_common_proof_capabilities(
+    generated_proof_handles: &[u32],
+) -> Result<(), CommonProofRuntimeError> {
+    COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        registry
+            .borrow_mut()
+            .runtime
+            .retire_generated_proofs(generated_proof_handles)
+    })
+}
+
+pub(crate) fn preflight_generated_common_proof_pending_statement(
+    generated_proof_handle: u32,
+    expected_application_statement_schema_identifier: u16,
+    expected_roster_position: Option<u16>,
+    expected_schedule_position: Option<u32>,
+    canonical_application_statement_bytes: &[u8],
+) -> Result<StreamDescriptor, CommonProofRuntimeError> {
+    COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        registry
+            .borrow()
+            .runtime
+            .preflight_generated_proof_pending_statement(
+                &GeneratedCommonProofCapabilityHandle::from_identifier(generated_proof_handle),
+                expected_application_statement_schema_identifier,
+                expected_roster_position,
+                expected_schedule_position,
+                canonical_application_statement_bytes,
+            )
     })
 }
 

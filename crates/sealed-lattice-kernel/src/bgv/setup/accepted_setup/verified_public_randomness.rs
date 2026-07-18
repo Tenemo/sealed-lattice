@@ -117,7 +117,7 @@ impl VerifiedPublicRandomness {
     }
 
     #[cfg(test)]
-    pub(super) fn from_test_values(
+    pub(in crate::bgv) fn from_test_values(
         suite_identifier: Hash512,
         manifest_hash: Hash512,
         ceremony_context_hash: Hash512,

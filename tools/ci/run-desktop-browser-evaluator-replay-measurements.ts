@@ -365,6 +365,7 @@ export const runDesktopBrowserEvaluatorReplayMeasurements =
                         details: {
                             ...measurement,
                             measurementPath: processMemoryMeasurementPath,
+                            protocolAcceptanceBound: false,
                         },
                         eventType:
                             'desktop-browser-evaluator-replay-process-memory-measured',

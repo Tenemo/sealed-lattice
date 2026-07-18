@@ -71,21 +71,11 @@ fn owned_verification_worker_authenticates_external_readback_before_minting_auth
             runtime_limits,
         )
         .expect("the exact fixture application is retained");
-    let statement_tree_handles = verified_trees
-        .into_iter()
-        .map(|tree| {
-            upstream_registry
-                .mint_statement_tree(&application_handle, tree)
-                .expect("the verified statement tree is retained")
-        })
-        .collect::<Vec<_>>();
+    upstream_registry
+        .attach_statement_owned_tree_batch(&application_handle, verified_trees)
+        .expect("the verified statement-tree batch is retained");
     let prepared = upstream_registry
-        .consume_verification_inputs(
-            &application_handle,
-            &statement_tree_handles.iter().collect::<Vec<_>>(),
-            &[],
-            None,
-        )
+        .consume_verification_inputs(&application_handle, &[], None)
         .expect("the exact capability set is consumed")
         .prepare()
         .expect("the owned verifier initializes");

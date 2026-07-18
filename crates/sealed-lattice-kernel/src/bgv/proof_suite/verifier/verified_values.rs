@@ -1,24 +1,39 @@
 use super::super::{
-    ComponentMaterialOwnershipBinding, SetupPublicPolynomialContext,
+    CommittedMaterialContext, CommittedMaterialRole, ComponentMaterialOwnershipBinding,
+    SetupPublicPolynomialContext,
     VerifiedEvaluatorKeyStoreMaterial, VerifiedKeySwitchComponentMaterial,
-    VerifiedRelinearizationAggregateMaterial,
+    VerifiedRelinearizationAggregateMaterial, VerifiedRelinearizationSourceMaterial,
     evaluator_source_material::{
         expected_component_column_moduli, material_topology_matches_selected_catalog_level,
     },
-    relation_plan::{BoundTreeConstructionKind, BoundTreeRootUse, RelationTreeDescriptor},
-    selected_evaluator_aggregate_relation_plan,
+    relation_plan::{
+        BoundTreeConstructionKind, BoundTreeRootUse, RelationColumnOrigin,
+        RelationColumnValueType, RelationPlanVariant, RelationTreeDescriptor,
+    },
+    selected_committed_material_relation_plan_input, selected_evaluator_aggregate_relation_plan,
 };
 use super::{
     CanonicalItemType, CommittedMaterialTree, CommonProofVerifierError, FOUNDATION_PROFILE,
     ProofApplicationSlotCeilings, SelectedApplicationStatementContext, SelectedEvaluatorEntryKind,
     SelectedEvaluatorEntryPosition, SetupPublicPolynomialRootRole, SetupPublicPolynomialTree,
-    StatementOwnedProofTreeInput, SuiteModulusReference, decode_selected_application_statement,
+    StatementOwnedProofTreeInput, SuiteModulusReference, VerifiedCommonProofStatementSource,
+    decode_selected_aggregate_threshold_share_statement, decode_selected_application_statement,
+    decode_selected_collective_public_key_aggregate_statement,
+    decode_selected_galois_key_share_statement,
+    decode_selected_public_key_share_statement,
+    decode_selected_relinearization_round_one_aggregate_statement,
+    decode_selected_relinearization_round_one_statement, decode_selected_same_secret_statement,
+    decode_selected_vss_share_linkage_statement,
     selected_evaluator_aggregate_entry_roots_in_order, selected_evaluator_entry_positions,
     verified_application_statement_hash,
 };
 use crate::bgv::evaluator::candidate_evidence::EvaluatorCandidateInput;
 use crate::bgv::proof_suite::ProofBaseFieldElement;
-use crate::bgv::setup::VerifiedAcceptedSetupEvaluatorSourceCatalog;
+use crate::bgv::proof_suite::application_statement::decode_selected_relinearization_round_two_statement;
+use crate::bgv::setup::{
+    SETUP_COMMITMENT_MODULUS_LIMB_INDICES, VerifiedAcceptedSetupEvaluatorSourceCatalog,
+    VerifiedPublicRandomness,
+};
 use crate::foundation::{CanonicalStreamDomain, StreamDescriptor, VerifiedCanonicalStreamSummary};
 
 /// Opaque evidence minted only after the complete generated verifier accepts.
@@ -102,6 +117,20 @@ pub(crate) struct VerifiedStatementOwnedTree {
 }
 
 impl VerifiedStatementOwnedTree {
+    pub(crate) const fn ordered_tree_ordinal(&self) -> u32 {
+        self.ordered_tree_ordinal
+    }
+
+    pub(crate) const fn expected_root_source_ordinal(&self) -> u32 {
+        self.expected_root_source_ordinal
+    }
+
+    pub(crate) fn ordered_canonical_residue_moduli(
+        &self,
+    ) -> &[Option<SuiteModulusReference>] {
+        &self.ordered_canonical_residue_moduli
+    }
+
     pub(crate) fn with_relation_coordinates(
         &self,
         ordered_tree_ordinal: u32,
@@ -118,6 +147,22 @@ impl VerifiedStatementOwnedTree {
             StatementOwnedProofTreeInput::CommittedMaterial { expected_root, .. }
             | StatementOwnedProofTreeInput::SetupPolynomial { expected_root, .. } => *expected_root,
         }
+    }
+
+    #[cfg(test)]
+    pub(in crate::bgv) fn with_test_expected_root(&self, expected_root: [u8; 64]) -> Self {
+        let mut rebound = self.clone();
+        match &mut rebound.tree {
+            StatementOwnedProofTreeInput::CommittedMaterial {
+                expected_root: rebound_root,
+                ..
+            }
+            | StatementOwnedProofTreeInput::SetupPolynomial {
+                expected_root: rebound_root,
+                ..
+            } => *rebound_root = expected_root,
+        }
+        rebound
     }
 
     pub(crate) fn from_committed_material_tree(
@@ -158,6 +203,1436 @@ impl VerifiedStatementOwnedTree {
             ordered_canonical_residue_moduli,
         }
     }
+
+    /// Resolves the complete `0x1217` statement-tree catalog from one exact
+    /// package statement, the positively verified participant RKG source, and
+    /// the four descriptor-authenticated Galois component trees. Anchor roots
+    /// cannot be supplied independently, and every output root is recomputed
+    /// from its component bytes.
+    pub(crate) fn from_verified_galois_key_share_statement_sources(
+        statement_source: &VerifiedCommonProofStatementSource,
+        relinearization_source: &VerifiedRelinearizationSourceMaterial,
+        ordered_component_trees: &[&SetupPublicPolynomialTree],
+    ) -> Result<Vec<Self>, CommonProofVerifierError> {
+        let selected_variant = selected_statement_variant(
+            statement_source,
+            ProofApplicationSlotCeilings::GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+            statement_source
+                .application_source_authority()
+                .schedule_position(),
+        )?;
+        let schedule_position = selected_variant
+            .schedule_position()
+            .ok_or(CommonProofVerifierError::InvalidApplicationStatement)?;
+        let statement = decode_selected_galois_key_share_statement(
+            statement_source.canonical_application_statement_bytes(),
+            SelectedApplicationStatementContext::new(
+                relinearization_source.protocol_version(),
+                relinearization_source.suite_identifier(),
+                Some(schedule_position),
+                None,
+            ),
+        )
+        .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?;
+        let anchor_roots = statement.anchor_commitment_roots();
+        let contribution_roots = statement.ordered_contribution_roots();
+        if relinearization_source.setup_proof_context_hash()
+            != statement.setup_proof_context_hash()
+            || relinearization_source.participant_identity() != statement.participant_identity()
+            || relinearization_source.roster_position() != statement.roster_position()
+            || relinearization_source.anchor_commitment_roots() != anchor_roots
+            || statement.batch_schedule_position() != schedule_position
+            || ordered_component_trees.len() != contribution_roots.len()
+        {
+            return Err(CommonProofVerifierError::InvalidApplicationStatement);
+        }
+
+        let mut consumed_anchor_sources = vec![false; anchor_roots.len()];
+        let mut consumed_component_sources = vec![false; contribution_roots.len()];
+        let mut statement_trees = Vec::new();
+        for descriptor in selected_variant.ordered_trees() {
+            let RelationTreeDescriptor::BoundPublic {
+                construction_kind: BoundTreeConstructionKind::SetupPolynomial,
+                expected_root_source_ordinal,
+                root_use,
+                ..
+            } = descriptor
+            else {
+                continue;
+            };
+            let (expected_root, public_polynomial_context) = match root_use {
+                BoundTreeRootUse::Input => {
+                    let anchor_ordinal = usize::try_from(*expected_root_source_ordinal)
+                        .map_err(|_| CommonProofVerifierError::InvalidBoundTree)?;
+                    let consumed = consumed_anchor_sources
+                        .get_mut(anchor_ordinal)
+                        .ok_or(CommonProofVerifierError::InvalidBoundTree)?;
+                    if *consumed {
+                        return Err(CommonProofVerifierError::InvalidBoundTree);
+                    }
+                    *consumed = true;
+                    (
+                        anchor_roots[anchor_ordinal],
+                        verified_lattice_anchor_context(
+                            statement.setup_proof_context_hash(),
+                            statement.participant_identity(),
+                            statement.roster_position(),
+                            anchor_ordinal,
+                        )?,
+                    )
+                }
+                BoundTreeRootUse::Output => {
+                    let root_source_ordinal = usize::try_from(*expected_root_source_ordinal)
+                        .map_err(|_| CommonProofVerifierError::InvalidBoundTree)?;
+                    let component_ordinal = root_source_ordinal
+                        .checked_sub(anchor_roots.len())
+                        .ok_or(CommonProofVerifierError::InvalidBoundTree)?;
+                    let consumed = consumed_component_sources
+                        .get_mut(component_ordinal)
+                        .ok_or(CommonProofVerifierError::InvalidBoundTree)?;
+                    if *consumed {
+                        return Err(CommonProofVerifierError::InvalidBoundTree);
+                    }
+                    *consumed = true;
+                    let tree = *ordered_component_trees
+                        .get(component_ordinal)
+                        .ok_or(CommonProofVerifierError::InvalidBoundTree)?;
+                    let context = SetupPublicPolynomialContext::new(
+                        statement.setup_proof_context_hash(),
+                        SetupPublicPolynomialRootRole::GaloisKeyShare,
+                        Some(statement.participant_identity()),
+                        Some(statement.roster_position()),
+                        Some(
+                            u32::try_from(component_ordinal)
+                                .map_err(|_| CommonProofVerifierError::InvalidBoundTree)?,
+                        ),
+                        None,
+                    )
+                    .map_err(|_| CommonProofVerifierError::InvalidBoundTree)?;
+                    if tree.root() != contribution_roots[component_ordinal]
+                        || tree.public_polynomial_context_hash()
+                            != context
+                                .context_hash()
+                                .map_err(|_| CommonProofVerifierError::InvalidBoundTree)?
+                    {
+                        return Err(CommonProofVerifierError::InvalidBoundTree);
+                    }
+                    (tree.root(), context)
+                }
+            };
+            statement_trees.push(verified_setup_polynomial_statement_tree(
+                selected_variant,
+                statement_trees.len(),
+                *root_use,
+                expected_root,
+                public_polynomial_context,
+            )?);
+        }
+        if consumed_anchor_sources.iter().any(|consumed| !consumed)
+            || consumed_component_sources.iter().any(|consumed| !consumed)
+        {
+            return Err(CommonProofVerifierError::InvalidBoundTree);
+        }
+        require_complete_bound_tree_catalog(selected_variant, statement_trees)
+    }
+
+    /// Resolves the complete selected `0x1218` statement-tree batch from the
+    /// positive participant-source catalog and the five runtime component
+    /// trees recomputed from the exact evaluator-store bytes. The fifty
+    /// participant roots and context hashes retain their earlier positive
+    /// `0x1216`/`0x1217` authority; no detached root list is accepted here.
+    pub(crate) fn from_verified_evaluator_aggregate_statement_sources(
+        statement_source: &VerifiedCommonProofStatementSource,
+        verified_source_catalog: &VerifiedAcceptedSetupEvaluatorSourceCatalog,
+        ordered_runtime_component_trees: &[SetupPublicPolynomialTree],
+    ) -> Result<Vec<Self>, CommonProofVerifierError> {
+        let selected_variant = statement_source
+            .selected_relation_variant()
+            .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?;
+        let top_count = selected_variant
+            .top_count()
+            .filter(|top_count| *top_count == FOUNDATION_PROFILE.option_count)
+            .ok_or(CommonProofVerifierError::InvalidApplicationStatement)?;
+        let application_source = statement_source.application_source_authority();
+        if application_source.application_statement_schema_identifier()
+            != ProofApplicationSlotCeilings::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER
+            || selected_variant.schedule_position().is_some()
+            || verified_source_catalog.protocol_version() != FOUNDATION_PROFILE.protocol_version
+            || verified_source_catalog.suite_identifier()
+                != application_source.suite_identifier().into_bytes()
+            || verified_source_catalog.ceremony_context_hash()
+                != application_source.ceremony_context_hash().into_bytes()
+            || verified_source_catalog.action_context_hash()
+                != application_source.action_context_hash().into_bytes()
+        {
+            return Err(CommonProofVerifierError::InvalidApplicationStatement);
+        }
+        let statement = decode_selected_application_statement(
+            statement_source.canonical_application_statement_bytes(),
+            ProofApplicationSlotCeilings::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+            SelectedApplicationStatementContext::new(
+                verified_source_catalog.protocol_version(),
+                verified_source_catalog.suite_identifier(),
+                None,
+                Some(top_count),
+            ),
+        )
+        .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?;
+        let statement_entries =
+            selected_evaluator_aggregate_entry_roots_in_order(&statement, top_count)
+                .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?;
+        if statement_entries.len() != ordered_runtime_component_trees.len()
+            || statement_entries.len()
+                != selected_evaluator_entry_positions(top_count)
+                    .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?
+                    .len()
+        {
+            return Err(CommonProofVerifierError::InvalidApplicationStatement);
+        }
+
+        let participant_count = usize::from(FOUNDATION_PROFILE.participant_count);
+        let expected_tree_count = statement_entries
+            .len()
+            .checked_mul(
+                participant_count
+                    .checked_add(1)
+                    .ok_or(CommonProofVerifierError::InvalidBoundTree)?,
+            )
+            .ok_or(CommonProofVerifierError::InvalidBoundTree)?;
+        let mut statement_trees = Vec::new();
+        statement_trees
+            .try_reserve_exact(expected_tree_count)
+            .map_err(|_| CommonProofVerifierError::InvalidBoundTree)?;
+        for (entry_ordinal, (entry, runtime_tree)) in statement_entries
+            .iter()
+            .zip(ordered_runtime_component_trees)
+            .enumerate()
+        {
+            let position = entry.position();
+            if entry.entry_ordinal()
+                != u32::try_from(entry_ordinal)
+                    .map_err(|_| CommonProofVerifierError::InvalidBoundTree)?
+                || entry.source_component_roots().len() != participant_count
+            {
+                return Err(CommonProofVerifierError::InvalidApplicationStatement);
+            }
+            for roster_position in 0..FOUNDATION_PROFILE.participant_count {
+                let source_root = verified_source_catalog
+                    .component_root(roster_position, position)
+                    .filter(|root| {
+                        entry
+                            .source_component_roots()
+                            .get(usize::from(roster_position))
+                            == Some(root)
+                    })
+                    .ok_or(CommonProofVerifierError::InvalidApplicationStatement)?;
+                let context_hash = verified_source_catalog
+                    .component_public_polynomial_context_hash(roster_position, position)
+                    .filter(|hash| *hash != [0_u8; 64])
+                    .ok_or(CommonProofVerifierError::InvalidApplicationStatement)?;
+                statement_trees.push(
+                    verified_setup_polynomial_statement_tree_from_context_hash(
+                        selected_variant,
+                        statement_trees.len(),
+                        BoundTreeRootUse::Input,
+                        source_root,
+                        context_hash,
+                    )?,
+                );
+            }
+
+            let runtime_role = match position.key_kind() {
+                SelectedEvaluatorEntryKind::Relinearization { .. } => {
+                    SetupPublicPolynomialRootRole::RelinearizationRuntime
+                }
+                SelectedEvaluatorEntryKind::Galois { .. } => {
+                    SetupPublicPolynomialRootRole::GaloisRuntime
+                }
+            };
+            let runtime_context = SetupPublicPolynomialContext::new(
+                verified_source_catalog.setup_proof_context_hash(),
+                runtime_role,
+                None,
+                None,
+                Some(position.schedule_position()),
+                None,
+            )
+            .map_err(|_| CommonProofVerifierError::InvalidBoundTree)?;
+            if runtime_tree.root() != entry.runtime_component_root()
+                || runtime_tree.public_polynomial_context_hash()
+                    != runtime_context
+                        .context_hash()
+                        .map_err(|_| CommonProofVerifierError::InvalidBoundTree)?
+            {
+                return Err(CommonProofVerifierError::InvalidBoundTree);
+            }
+            statement_trees.push(verified_setup_polynomial_statement_tree(
+                selected_variant,
+                statement_trees.len(),
+                BoundTreeRootUse::Output,
+                runtime_tree.root(),
+                runtime_context,
+            )?);
+        }
+        require_complete_bound_tree_catalog(selected_variant, statement_trees)
+    }
+
+    /// Resolves every statement-owned tree for the closed accepted-setup
+    /// family set directly from the family-minted statement capability. The
+    /// selected relation supplies all tree coordinates and column moduli;
+    /// verified public randomness supplies the roster and setup context.
+    pub(crate) fn from_verified_accepted_setup_statement_source(
+        statement_source: &VerifiedCommonProofStatementSource,
+        verified_public_randomness: &VerifiedPublicRandomness,
+    ) -> Result<Vec<Self>, CommonProofVerifierError> {
+        let schema_identifier = statement_source
+            .application_source_authority()
+            .application_statement_schema_identifier();
+        match schema_identifier {
+            ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER => {
+                verified_same_secret_statement_trees(
+                    statement_source,
+                    verified_public_randomness,
+                )
+            }
+            ProofApplicationSlotCeilings::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER => {
+                verified_public_key_share_statement_trees(
+                    statement_source,
+                    verified_public_randomness,
+                )
+            }
+            ProofApplicationSlotCeilings::COLLECTIVE_PUBLIC_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER => {
+                verified_collective_public_key_statement_trees(
+                    statement_source,
+                    verified_public_randomness,
+                )
+            }
+            ProofApplicationSlotCeilings::RELINEARIZATION_ROUND_ONE_STATEMENT_SCHEMA_IDENTIFIER => {
+                verified_relinearization_round_one_statement_trees(
+                    statement_source,
+                    verified_public_randomness,
+                )
+            }
+            ProofApplicationSlotCeilings::RKG_ROUND_ONE_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER => {
+                verified_relinearization_round_one_aggregate_statement_trees(
+                    statement_source,
+                    verified_public_randomness,
+                )
+            }
+            ProofApplicationSlotCeilings::RELINEARIZATION_ROUND_TWO_STATEMENT_SCHEMA_IDENTIFIER => {
+                verified_relinearization_round_two_statement_trees(
+                    statement_source,
+                    verified_public_randomness,
+                )
+            }
+            _ => Err(CommonProofVerifierError::InvalidApplicationStatement),
+        }
+    }
+
+    /// Resolves the selected VSS and aggregate-threshold committed-material
+    /// trees from an exact board-backed statement capability. Material
+    /// contexts are recomputed from the verified setup roster; no transported
+    /// root, context hash, relation coordinate, or modulus list is accepted.
+    pub(crate) fn from_verified_committed_material_statement_source(
+        statement_source: &VerifiedCommonProofStatementSource,
+        verified_public_randomness: &VerifiedPublicRandomness,
+    ) -> Result<Vec<Self>, CommonProofVerifierError> {
+        let schema_identifier = statement_source
+            .application_source_authority()
+            .application_statement_schema_identifier();
+        match schema_identifier {
+            ProofApplicationSlotCeilings::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER => {
+                verified_vss_share_linkage_statement_trees(
+                    statement_source,
+                    verified_public_randomness,
+                )
+            }
+            ProofApplicationSlotCeilings::AGGREGATE_THRESHOLD_SHARE_STATEMENT_SCHEMA_IDENTIFIER => {
+                verified_aggregate_threshold_share_statement_trees(
+                    statement_source,
+                    verified_public_randomness,
+                )
+            }
+            _ => Err(CommonProofVerifierError::InvalidApplicationStatement),
+        }
+    }
+}
+
+fn verified_statement_decode_context(
+    statement_source: &VerifiedCommonProofStatementSource,
+    verified_public_randomness: &VerifiedPublicRandomness,
+    expected_schema_identifier: u16,
+) -> Result<SelectedApplicationStatementContext, CommonProofVerifierError> {
+    let verified_setup_context = verified_public_randomness.context();
+    let application_source_authority = statement_source.application_source_authority();
+    let application_slot = statement_source
+        .proof_application_binding()
+        .application_slot();
+    let protocol_version = verified_setup_context.protocol_version();
+    let suite_identifier = verified_setup_context.suite_identifier().into_bytes();
+    let canonical_statement = statement_source.canonical_application_statement_bytes();
+    if protocol_version != FOUNDATION_PROFILE.protocol_version
+        || verified_public_randomness.ordered_participant_identities().len()
+            != usize::from(FOUNDATION_PROFILE.participant_count)
+        || application_source_authority.application_statement_schema_identifier()
+            != expected_schema_identifier
+        || application_source_authority.suite_identifier()
+            != verified_setup_context.suite_identifier()
+        || application_source_authority.ceremony_context_hash()
+            != verified_setup_context.ceremony_context_hash()
+        || application_source_authority.action_context_hash()
+            != verified_setup_context.action_context_hash()
+        || application_slot.suite_identifier() != verified_setup_context.suite_identifier()
+        || application_slot.ceremony_context_hash()
+            != verified_setup_context.ceremony_context_hash()
+        || application_slot.action_context_hash() != verified_setup_context.action_context_hash()
+        || application_slot.application_statement_schema_identifier()
+            != expected_schema_identifier
+        || application_slot.roster_position()
+            != application_source_authority.producer_roster_position()
+        || application_slot.schedule_position()
+            != application_source_authority.schedule_position()
+        || application_slot.producer_sequence()
+            != application_source_authority.producer_sequence()
+        || application_slot.producer_sequence().is_some()
+        || statement_source.application_statement_hash().into_bytes()
+            != verified_application_statement_hash(
+                protocol_version,
+                suite_identifier,
+                expected_schema_identifier,
+                canonical_statement,
+            )
+    {
+        return Err(CommonProofVerifierError::InvalidApplicationStatement);
+    }
+    Ok(SelectedApplicationStatementContext::new(
+        protocol_version,
+        suite_identifier,
+        application_slot.schedule_position(),
+        None,
+    ))
+}
+
+fn require_verified_statement_coordinates(
+    statement_source: &VerifiedCommonProofStatementSource,
+    verified_public_randomness: &VerifiedPublicRandomness,
+    participant: Option<([u8; 64], u16)>,
+    schedule_position: Option<u32>,
+) -> Result<(), CommonProofVerifierError> {
+    let application_source_authority = statement_source.application_source_authority();
+    let expected_roster_position = participant.map(|(_, roster_position)| roster_position);
+    if application_source_authority.producer_roster_position() != expected_roster_position
+        || application_source_authority.schedule_position() != schedule_position
+        || participant.is_some_and(|(participant_identity, roster_position)| {
+            verified_public_randomness
+                .ordered_participant_identities()
+                .get(usize::from(roster_position))
+                .map(|identity| identity.into_bytes())
+                != Some(participant_identity)
+        })
+    {
+        return Err(CommonProofVerifierError::InvalidApplicationStatement);
+    }
+    Ok(())
+}
+
+fn selected_statement_variant<'source>(
+    statement_source: &'source VerifiedCommonProofStatementSource,
+    schema_identifier: u16,
+    schedule_position: Option<u32>,
+) -> Result<&'source RelationPlanVariant, CommonProofVerifierError> {
+    let selected_variant = statement_source
+        .selected_relation_variant()
+        .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?;
+    if statement_source
+        .application_source_authority()
+        .application_statement_schema_identifier()
+        != schema_identifier
+        || selected_variant.schedule_position() != schedule_position
+        || selected_variant.top_count().is_some()
+    {
+        return Err(CommonProofVerifierError::InvalidApplicationStatement);
+    }
+    Ok(selected_variant)
+}
+
+fn verified_bound_tree_layout(
+    selected_variant: &RelationPlanVariant,
+    bound_tree_ordinal: usize,
+    expected_construction_kind: BoundTreeConstructionKind,
+    expected_root_use: BoundTreeRootUse,
+) -> Result<
+    (u32, u32, Vec<Option<SuiteModulusReference>>),
+    CommonProofVerifierError,
+> {
+    let (ordered_tree_ordinal, descriptor) = selected_variant
+        .ordered_trees()
+        .iter()
+        .enumerate()
+        .filter(|(_, descriptor)| matches!(descriptor, RelationTreeDescriptor::BoundPublic { .. }))
+        .nth(bound_tree_ordinal)
+        .ok_or(CommonProofVerifierError::InvalidBoundTree)?;
+    let (expected_root_source_ordinal, ordered_column_ordinals) = match descriptor {
+        RelationTreeDescriptor::BoundPublic {
+            construction_kind,
+            expected_root_source_ordinal,
+            root_use,
+            ordered_column_ordinals,
+        } if *construction_kind == expected_construction_kind
+            && *root_use == expected_root_use =>
+        {
+            (*expected_root_source_ordinal, ordered_column_ordinals)
+        }
+        _ => return Err(CommonProofVerifierError::InvalidBoundTree),
+    };
+    let ordered_canonical_residue_moduli = ordered_column_ordinals
+        .iter()
+        .map(|column_ordinal| {
+            let column = selected_variant
+                .ordered_columns()
+                .get(
+                    usize::try_from(*column_ordinal)
+                        .map_err(|_| CommonProofVerifierError::InvalidBoundTree)?,
+                )
+                .ok_or(CommonProofVerifierError::InvalidBoundTree)?;
+            if column.value_type() != RelationColumnValueType::BaseField
+                || !matches!(
+                    column.origin(),
+                    RelationColumnOrigin::BoundTree {
+                        expected_root_source_ordinal: column_root_source_ordinal,
+                    } if *column_root_source_ordinal == expected_root_source_ordinal
+                )
+            {
+                return Err(CommonProofVerifierError::InvalidBoundTree);
+            }
+            Ok(column.canonical_residue_modulus())
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    if ordered_canonical_residue_moduli.is_empty()
+        || (expected_construction_kind == BoundTreeConstructionKind::CommittedMaterial
+            && ordered_canonical_residue_moduli.iter().any(Option::is_some))
+        || (expected_construction_kind == BoundTreeConstructionKind::SetupPolynomial
+            && ordered_canonical_residue_moduli.iter().any(Option::is_none))
+    {
+        return Err(CommonProofVerifierError::InvalidBoundTree);
+    }
+    Ok((
+        u32::try_from(ordered_tree_ordinal)
+            .map_err(|_| CommonProofVerifierError::InvalidBoundTree)?,
+        expected_root_source_ordinal,
+        ordered_canonical_residue_moduli,
+    ))
+}
+
+fn verified_committed_material_statement_tree(
+    selected_variant: &RelationPlanVariant,
+    ordered_tree_ordinal: usize,
+    expected_root_use: BoundTreeRootUse,
+    expected_root: [u8; 64],
+    material_context: CommittedMaterialContext,
+) -> Result<VerifiedStatementOwnedTree, CommonProofVerifierError> {
+    let (
+        ordered_tree_ordinal,
+        expected_root_source_ordinal,
+        ordered_canonical_residue_moduli,
+    ) =
+        verified_bound_tree_layout(
+            selected_variant,
+            ordered_tree_ordinal,
+            BoundTreeConstructionKind::CommittedMaterial,
+            expected_root_use,
+        )?;
+    Ok(VerifiedStatementOwnedTree {
+        ordered_tree_ordinal,
+        expected_root_source_ordinal,
+        tree: StatementOwnedProofTreeInput::CommittedMaterial {
+            material_context_hash: material_context
+                .context_hash()
+                .map_err(|_| CommonProofVerifierError::InvalidBoundTree)?,
+            expected_root,
+        },
+        ordered_canonical_residue_moduli,
+    })
+}
+
+fn verified_setup_polynomial_statement_tree(
+    selected_variant: &RelationPlanVariant,
+    ordered_tree_ordinal: usize,
+    expected_root_use: BoundTreeRootUse,
+    expected_root: [u8; 64],
+    public_polynomial_context: SetupPublicPolynomialContext,
+) -> Result<VerifiedStatementOwnedTree, CommonProofVerifierError> {
+    let (
+        ordered_tree_ordinal,
+        expected_root_source_ordinal,
+        ordered_canonical_residue_moduli,
+    ) =
+        verified_bound_tree_layout(
+            selected_variant,
+            ordered_tree_ordinal,
+            BoundTreeConstructionKind::SetupPolynomial,
+            expected_root_use,
+        )?;
+    let row_width = u32::try_from(ordered_canonical_residue_moduli.len())
+        .map_err(|_| CommonProofVerifierError::InvalidBoundTree)?;
+    Ok(VerifiedStatementOwnedTree {
+        ordered_tree_ordinal,
+        expected_root_source_ordinal,
+        tree: StatementOwnedProofTreeInput::SetupPolynomial {
+            public_polynomial_context_hash: public_polynomial_context
+                .context_hash()
+                .map_err(|_| CommonProofVerifierError::InvalidBoundTree)?,
+            row_width,
+            expected_root,
+        },
+        ordered_canonical_residue_moduli,
+    })
+}
+
+fn verified_setup_polynomial_statement_tree_from_context_hash(
+    selected_variant: &RelationPlanVariant,
+    ordered_tree_ordinal: usize,
+    expected_root_use: BoundTreeRootUse,
+    expected_root: [u8; 64],
+    public_polynomial_context_hash: [u8; 64],
+) -> Result<VerifiedStatementOwnedTree, CommonProofVerifierError> {
+    let (
+        ordered_tree_ordinal,
+        expected_root_source_ordinal,
+        ordered_canonical_residue_moduli,
+    ) = verified_bound_tree_layout(
+        selected_variant,
+        ordered_tree_ordinal,
+        BoundTreeConstructionKind::SetupPolynomial,
+        expected_root_use,
+    )?;
+    Ok(VerifiedStatementOwnedTree {
+        ordered_tree_ordinal,
+        expected_root_source_ordinal,
+        tree: StatementOwnedProofTreeInput::SetupPolynomial {
+            public_polynomial_context_hash,
+            row_width: u32::try_from(ordered_canonical_residue_moduli.len())
+                .map_err(|_| CommonProofVerifierError::InvalidBoundTree)?,
+            expected_root,
+        },
+        ordered_canonical_residue_moduli,
+    })
+}
+
+fn require_complete_bound_tree_catalog(
+    selected_variant: &RelationPlanVariant,
+    statement_trees: Vec<VerifiedStatementOwnedTree>,
+) -> Result<Vec<VerifiedStatementOwnedTree>, CommonProofVerifierError> {
+    if statement_trees.len() != bound_public_tree_count(selected_variant) {
+        return Err(CommonProofVerifierError::InvalidBoundTree);
+    }
+    Ok(statement_trees)
+}
+
+fn bound_public_tree_count(selected_variant: &RelationPlanVariant) -> usize {
+    selected_variant
+        .ordered_trees()
+        .iter()
+        .filter(|descriptor| matches!(descriptor, RelationTreeDescriptor::BoundPublic { .. }))
+        .count()
+}
+
+fn verified_lattice_anchor_context(
+    setup_proof_context_hash: [u8; 64],
+    participant_identity: [u8; 64],
+    roster_position: u16,
+    anchor_ordinal: usize,
+) -> Result<SetupPublicPolynomialContext, CommonProofVerifierError> {
+    let commitment_data_prime_index = SETUP_COMMITMENT_MODULUS_LIMB_INDICES
+        .get(anchor_ordinal)
+        .copied()
+        .and_then(|index| u16::try_from(index).ok())
+        .ok_or(CommonProofVerifierError::InvalidBoundTree)?;
+    SetupPublicPolynomialContext::lattice_anchor(
+        setup_proof_context_hash,
+        participant_identity,
+        roster_position,
+        commitment_data_prime_index,
+    )
+    .map_err(|_| CommonProofVerifierError::InvalidBoundTree)
+}
+
+fn verified_owned_setup_context(
+    setup_proof_context_hash: [u8; 64],
+    root_role: SetupPublicPolynomialRootRole,
+    participant_identity: [u8; 64],
+    roster_position: u16,
+    schedule_position: Option<u32>,
+) -> Result<SetupPublicPolynomialContext, CommonProofVerifierError> {
+    SetupPublicPolynomialContext::new(
+        setup_proof_context_hash,
+        root_role,
+        Some(participant_identity),
+        Some(roster_position),
+        schedule_position,
+        None,
+    )
+    .map_err(|_| CommonProofVerifierError::InvalidBoundTree)
+}
+
+fn verified_unowned_setup_context(
+    setup_proof_context_hash: [u8; 64],
+    root_role: SetupPublicPolynomialRootRole,
+    schedule_position: Option<u32>,
+) -> Result<SetupPublicPolynomialContext, CommonProofVerifierError> {
+    SetupPublicPolynomialContext::new(
+        setup_proof_context_hash,
+        root_role,
+        None,
+        None,
+        schedule_position,
+        None,
+    )
+    .map_err(|_| CommonProofVerifierError::InvalidBoundTree)
+}
+
+fn verified_same_secret_statement_trees(
+    statement_source: &VerifiedCommonProofStatementSource,
+    verified_public_randomness: &VerifiedPublicRandomness,
+) -> Result<Vec<VerifiedStatementOwnedTree>, CommonProofVerifierError> {
+    let schema_identifier =
+        ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER;
+    let decode_context = verified_statement_decode_context(
+        statement_source,
+        verified_public_randomness,
+        schema_identifier,
+    )?;
+    let statement = decode_selected_same_secret_statement(
+        statement_source.canonical_application_statement_bytes(),
+        decode_context,
+    )
+    .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?;
+    require_verified_statement_coordinates(
+        statement_source,
+        verified_public_randomness,
+        Some((statement.participant_identity(), statement.roster_position())),
+        None,
+    )?;
+    if statement.setup_proof_context_hash()
+        != verified_public_randomness
+            .setup_proof_context_hash()
+            .into_bytes()
+    {
+        return Err(CommonProofVerifierError::InvalidApplicationStatement);
+    }
+    let selected_variant = selected_statement_variant(statement_source, schema_identifier, None)?;
+    let committed_material_input = selected_committed_material_relation_plan_input()
+        .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?;
+    if statement.ordered_degree_zero_commitment_roots().len()
+        != committed_material_input.sharing_data_modulus_indices.len()
+    {
+        return Err(CommonProofVerifierError::InvalidApplicationStatement);
+    }
+    let verified_setup_context = verified_public_randomness.context();
+    let mut statement_trees = Vec::new();
+    statement_trees
+        .try_reserve_exact(bound_public_tree_count(selected_variant))
+        .map_err(|_| CommonProofVerifierError::InvalidBoundTree)?;
+    for (sharing_limb_index, expected_root) in committed_material_input
+        .sharing_data_modulus_indices
+        .iter()
+        .copied()
+        .zip(
+            statement
+                .ordered_degree_zero_commitment_roots()
+                .iter()
+                .copied(),
+        )
+    {
+        statement_trees.push(verified_committed_material_statement_tree(
+            selected_variant,
+            statement_trees.len(),
+            BoundTreeRootUse::Input,
+            expected_root,
+            CommittedMaterialContext::new(
+                verified_setup_context.suite_identifier().into_bytes(),
+                verified_setup_context.ceremony_context_hash().into_bytes(),
+                verified_setup_context.action_context_hash().into_bytes(),
+                statement.participant_identity(),
+                CommittedMaterialRole::Coefficient,
+                sharing_limb_index,
+                0,
+            ),
+        )?);
+    }
+    for (anchor_ordinal, expected_root) in statement
+        .anchor_commitment_roots()
+        .into_iter()
+        .enumerate()
+    {
+        statement_trees.push(verified_setup_polynomial_statement_tree(
+            selected_variant,
+            statement_trees.len(),
+            BoundTreeRootUse::Output,
+            expected_root,
+            verified_lattice_anchor_context(
+                statement.setup_proof_context_hash(),
+                statement.participant_identity(),
+                statement.roster_position(),
+                anchor_ordinal,
+            )?,
+        )?);
+    }
+    require_complete_bound_tree_catalog(selected_variant, statement_trees)
+}
+
+fn verified_public_key_share_statement_trees(
+    statement_source: &VerifiedCommonProofStatementSource,
+    verified_public_randomness: &VerifiedPublicRandomness,
+) -> Result<Vec<VerifiedStatementOwnedTree>, CommonProofVerifierError> {
+    let schema_identifier =
+        ProofApplicationSlotCeilings::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER;
+    let decode_context = verified_statement_decode_context(
+        statement_source,
+        verified_public_randomness,
+        schema_identifier,
+    )?;
+    let statement = decode_selected_public_key_share_statement(
+        statement_source.canonical_application_statement_bytes(),
+        decode_context,
+    )
+    .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?;
+    require_verified_statement_coordinates(
+        statement_source,
+        verified_public_randomness,
+        Some((statement.participant_identity(), statement.roster_position())),
+        None,
+    )?;
+    if statement.setup_proof_context_hash()
+        != verified_public_randomness
+            .setup_proof_context_hash()
+            .into_bytes()
+    {
+        return Err(CommonProofVerifierError::InvalidApplicationStatement);
+    }
+    let selected_variant = selected_statement_variant(statement_source, schema_identifier, None)?;
+    let mut statement_trees = Vec::new();
+    statement_trees.push(verified_setup_polynomial_statement_tree(
+        selected_variant,
+        0,
+        BoundTreeRootUse::Output,
+        statement.public_key_share_root(),
+        SetupPublicPolynomialContext::public_key_share(
+            statement.setup_proof_context_hash(),
+            statement.participant_identity(),
+            statement.roster_position(),
+        )
+        .map_err(|_| CommonProofVerifierError::InvalidBoundTree)?,
+    )?);
+    for (anchor_ordinal, expected_root) in statement
+        .anchor_commitment_roots()
+        .into_iter()
+        .enumerate()
+    {
+        statement_trees.push(verified_setup_polynomial_statement_tree(
+            selected_variant,
+            statement_trees.len(),
+            BoundTreeRootUse::Input,
+            expected_root,
+            verified_lattice_anchor_context(
+                statement.setup_proof_context_hash(),
+                statement.participant_identity(),
+                statement.roster_position(),
+                anchor_ordinal,
+            )?,
+        )?);
+    }
+    require_complete_bound_tree_catalog(selected_variant, statement_trees)
+}
+
+fn verified_collective_public_key_statement_trees(
+    statement_source: &VerifiedCommonProofStatementSource,
+    verified_public_randomness: &VerifiedPublicRandomness,
+) -> Result<Vec<VerifiedStatementOwnedTree>, CommonProofVerifierError> {
+    let schema_identifier = ProofApplicationSlotCeilings::
+        COLLECTIVE_PUBLIC_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER;
+    let decode_context = verified_statement_decode_context(
+        statement_source,
+        verified_public_randomness,
+        schema_identifier,
+    )?;
+    let statement = decode_selected_collective_public_key_aggregate_statement(
+        statement_source.canonical_application_statement_bytes(),
+        decode_context,
+    )
+    .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?;
+    require_verified_statement_coordinates(
+        statement_source,
+        verified_public_randomness,
+        None,
+        None,
+    )?;
+    if statement.setup_proof_context_hash()
+        != verified_public_randomness
+            .setup_proof_context_hash()
+            .into_bytes()
+        || statement.ordered_public_key_share_roots().len()
+            != verified_public_randomness.ordered_participant_identities().len()
+    {
+        return Err(CommonProofVerifierError::InvalidApplicationStatement);
+    }
+    let selected_variant = selected_statement_variant(statement_source, schema_identifier, None)?;
+    let mut statement_trees = Vec::new();
+    for (roster_ordinal, (participant_identity, expected_root)) in verified_public_randomness
+        .ordered_participant_identities()
+        .iter()
+        .zip(statement.ordered_public_key_share_roots())
+        .enumerate()
+    {
+        let roster_position = u16::try_from(roster_ordinal)
+            .map_err(|_| CommonProofVerifierError::InvalidBoundTree)?;
+        statement_trees.push(verified_setup_polynomial_statement_tree(
+            selected_variant,
+            statement_trees.len(),
+            BoundTreeRootUse::Input,
+            *expected_root,
+            SetupPublicPolynomialContext::public_key_share(
+                statement.setup_proof_context_hash(),
+                participant_identity.into_bytes(),
+                roster_position,
+            )
+            .map_err(|_| CommonProofVerifierError::InvalidBoundTree)?,
+        )?);
+    }
+    statement_trees.push(verified_setup_polynomial_statement_tree(
+        selected_variant,
+        statement_trees.len(),
+        BoundTreeRootUse::Output,
+        statement.collective_public_key_root(),
+        SetupPublicPolynomialContext::collective_public_key(
+            statement.setup_proof_context_hash(),
+        )
+        .map_err(|_| CommonProofVerifierError::InvalidBoundTree)?,
+    )?);
+    require_complete_bound_tree_catalog(selected_variant, statement_trees)
+}
+
+fn verified_relinearization_round_one_statement_trees(
+    statement_source: &VerifiedCommonProofStatementSource,
+    verified_public_randomness: &VerifiedPublicRandomness,
+) -> Result<Vec<VerifiedStatementOwnedTree>, CommonProofVerifierError> {
+    let schema_identifier =
+        ProofApplicationSlotCeilings::RELINEARIZATION_ROUND_ONE_STATEMENT_SCHEMA_IDENTIFIER;
+    let decode_context = verified_statement_decode_context(
+        statement_source,
+        verified_public_randomness,
+        schema_identifier,
+    )?;
+    let statement = decode_selected_relinearization_round_one_statement(
+        statement_source.canonical_application_statement_bytes(),
+        decode_context,
+    )
+    .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?;
+    let schedule_position = statement.schedule_position();
+    require_verified_statement_coordinates(
+        statement_source,
+        verified_public_randomness,
+        Some((statement.participant_identity(), statement.roster_position())),
+        Some(schedule_position),
+    )?;
+    if statement.setup_proof_context_hash()
+        != verified_public_randomness
+            .setup_proof_context_hash()
+            .into_bytes()
+    {
+        return Err(CommonProofVerifierError::InvalidApplicationStatement);
+    }
+    let selected_variant = selected_statement_variant(
+        statement_source,
+        schema_identifier,
+        Some(schedule_position),
+    )?;
+    let mut statement_trees = Vec::new();
+    for (root_role, expected_root) in [
+        (
+            SetupPublicPolynomialRootRole::RelinearizationRoundOneLeft,
+            statement.round_one_left_root(),
+        ),
+        (
+            SetupPublicPolynomialRootRole::RelinearizationRoundOneRight,
+            statement.round_one_right_root(),
+        ),
+    ] {
+        statement_trees.push(verified_setup_polynomial_statement_tree(
+            selected_variant,
+            statement_trees.len(),
+            BoundTreeRootUse::Output,
+            expected_root,
+            verified_owned_setup_context(
+                statement.setup_proof_context_hash(),
+                root_role,
+                statement.participant_identity(),
+                statement.roster_position(),
+                Some(schedule_position),
+            )?,
+        )?);
+    }
+    for (anchor_ordinal, expected_root) in statement
+        .anchor_commitment_roots()
+        .into_iter()
+        .enumerate()
+    {
+        statement_trees.push(verified_setup_polynomial_statement_tree(
+            selected_variant,
+            statement_trees.len(),
+            BoundTreeRootUse::Input,
+            expected_root,
+            verified_lattice_anchor_context(
+                statement.setup_proof_context_hash(),
+                statement.participant_identity(),
+                statement.roster_position(),
+                anchor_ordinal,
+            )?,
+        )?);
+    }
+    require_complete_bound_tree_catalog(selected_variant, statement_trees)
+}
+
+fn verified_relinearization_round_one_aggregate_statement_trees(
+    statement_source: &VerifiedCommonProofStatementSource,
+    verified_public_randomness: &VerifiedPublicRandomness,
+) -> Result<Vec<VerifiedStatementOwnedTree>, CommonProofVerifierError> {
+    let schema_identifier = ProofApplicationSlotCeilings::
+        RKG_ROUND_ONE_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER;
+    let decode_context = verified_statement_decode_context(
+        statement_source,
+        verified_public_randomness,
+        schema_identifier,
+    )?;
+    let statement = decode_selected_relinearization_round_one_aggregate_statement(
+        statement_source.canonical_application_statement_bytes(),
+        decode_context,
+    )
+    .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?;
+    let schedule_position = statement.schedule_position();
+    require_verified_statement_coordinates(
+        statement_source,
+        verified_public_randomness,
+        None,
+        Some(schedule_position),
+    )?;
+    if statement.setup_proof_context_hash()
+        != verified_public_randomness
+            .setup_proof_context_hash()
+            .into_bytes()
+        || statement.ordered_source_root_pairs().len()
+            != verified_public_randomness.ordered_participant_identities().len()
+    {
+        return Err(CommonProofVerifierError::InvalidApplicationStatement);
+    }
+    let selected_variant = selected_statement_variant(
+        statement_source,
+        schema_identifier,
+        Some(schedule_position),
+    )?;
+    let mut statement_trees = Vec::new();
+    for (pair_ordinal, aggregate_root_role, aggregate_root) in [
+        (
+            0_usize,
+            SetupPublicPolynomialRootRole::RelinearizationAggregateRoundOneLeft,
+            statement.aggregate_left_root(),
+        ),
+        (
+            1_usize,
+            SetupPublicPolynomialRootRole::RelinearizationAggregateRoundOneRight,
+            statement.aggregate_right_root(),
+        ),
+    ] {
+        let source_root_role = if pair_ordinal == 0 {
+            SetupPublicPolynomialRootRole::RelinearizationRoundOneLeft
+        } else {
+            SetupPublicPolynomialRootRole::RelinearizationRoundOneRight
+        };
+        for (roster_ordinal, (participant_identity, root_pair)) in verified_public_randomness
+            .ordered_participant_identities()
+            .iter()
+            .zip(statement.ordered_source_root_pairs())
+            .enumerate()
+        {
+            let roster_position = u16::try_from(roster_ordinal)
+                .map_err(|_| CommonProofVerifierError::InvalidBoundTree)?;
+            statement_trees.push(verified_setup_polynomial_statement_tree(
+                selected_variant,
+                statement_trees.len(),
+                BoundTreeRootUse::Input,
+                root_pair[pair_ordinal],
+                verified_owned_setup_context(
+                    statement.setup_proof_context_hash(),
+                    source_root_role,
+                    participant_identity.into_bytes(),
+                    roster_position,
+                    Some(schedule_position),
+                )?,
+            )?);
+        }
+        statement_trees.push(verified_setup_polynomial_statement_tree(
+            selected_variant,
+            statement_trees.len(),
+            BoundTreeRootUse::Output,
+            aggregate_root,
+            verified_unowned_setup_context(
+                statement.setup_proof_context_hash(),
+                aggregate_root_role,
+                Some(schedule_position),
+            )?,
+        )?);
+    }
+    require_complete_bound_tree_catalog(selected_variant, statement_trees)
+}
+
+fn verified_relinearization_round_two_statement_trees(
+    statement_source: &VerifiedCommonProofStatementSource,
+    verified_public_randomness: &VerifiedPublicRandomness,
+) -> Result<Vec<VerifiedStatementOwnedTree>, CommonProofVerifierError> {
+    let schema_identifier =
+        ProofApplicationSlotCeilings::RELINEARIZATION_ROUND_TWO_STATEMENT_SCHEMA_IDENTIFIER;
+    let decode_context = verified_statement_decode_context(
+        statement_source,
+        verified_public_randomness,
+        schema_identifier,
+    )?;
+    let statement = decode_selected_relinearization_round_two_statement(
+        statement_source.canonical_application_statement_bytes(),
+        decode_context,
+    )
+    .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?;
+    let schedule_position = statement.schedule_position();
+    require_verified_statement_coordinates(
+        statement_source,
+        verified_public_randomness,
+        Some((statement.participant_identity(), statement.roster_position())),
+        Some(schedule_position),
+    )?;
+    if statement.setup_proof_context_hash()
+        != verified_public_randomness
+            .setup_proof_context_hash()
+            .into_bytes()
+    {
+        return Err(CommonProofVerifierError::InvalidApplicationStatement);
+    }
+    let selected_variant = selected_statement_variant(
+        statement_source,
+        schema_identifier,
+        Some(schedule_position),
+    )?;
+    let mut statement_trees = Vec::new();
+    for (root_role, participant_owned, expected_root) in [
+        (
+            SetupPublicPolynomialRootRole::RelinearizationRoundOneLeft,
+            true,
+            statement.round_one_left_root(),
+        ),
+        (
+            SetupPublicPolynomialRootRole::RelinearizationRoundOneRight,
+            true,
+            statement.round_one_right_root(),
+        ),
+        (
+            SetupPublicPolynomialRootRole::RelinearizationAggregateRoundOneLeft,
+            false,
+            statement.aggregate_round_one_left_root(),
+        ),
+        (
+            SetupPublicPolynomialRootRole::RelinearizationAggregateRoundOneRight,
+            false,
+            statement.aggregate_round_one_right_root(),
+        ),
+    ] {
+        let public_polynomial_context = if participant_owned {
+            verified_owned_setup_context(
+                statement.setup_proof_context_hash(),
+                root_role,
+                statement.participant_identity(),
+                statement.roster_position(),
+                Some(schedule_position),
+            )?
+        } else {
+            verified_unowned_setup_context(
+                statement.setup_proof_context_hash(),
+                root_role,
+                Some(schedule_position),
+            )?
+        };
+        statement_trees.push(verified_setup_polynomial_statement_tree(
+            selected_variant,
+            statement_trees.len(),
+            BoundTreeRootUse::Input,
+            expected_root,
+            public_polynomial_context,
+        )?);
+    }
+    statement_trees.push(verified_setup_polynomial_statement_tree(
+        selected_variant,
+        statement_trees.len(),
+        BoundTreeRootUse::Output,
+        statement.contribution_root(),
+        verified_owned_setup_context(
+            statement.setup_proof_context_hash(),
+            SetupPublicPolynomialRootRole::RelinearizationRoundTwo,
+            statement.participant_identity(),
+            statement.roster_position(),
+            Some(schedule_position),
+        )?,
+    )?);
+    for (anchor_ordinal, expected_root) in statement
+        .anchor_commitment_roots()
+        .into_iter()
+        .enumerate()
+    {
+        statement_trees.push(verified_setup_polynomial_statement_tree(
+            selected_variant,
+            statement_trees.len(),
+            BoundTreeRootUse::Input,
+            expected_root,
+            verified_lattice_anchor_context(
+                statement.setup_proof_context_hash(),
+                statement.participant_identity(),
+                statement.roster_position(),
+                anchor_ordinal,
+            )?,
+        )?);
+    }
+    require_complete_bound_tree_catalog(selected_variant, statement_trees)
+}
+
+fn verified_vss_share_linkage_statement_trees(
+    statement_source: &VerifiedCommonProofStatementSource,
+    verified_public_randomness: &VerifiedPublicRandomness,
+) -> Result<Vec<VerifiedStatementOwnedTree>, CommonProofVerifierError> {
+    let schema_identifier =
+        ProofApplicationSlotCeilings::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER;
+    let decode_context = verified_statement_decode_context(
+        statement_source,
+        verified_public_randomness,
+        schema_identifier,
+    )?;
+    let statement = decode_selected_vss_share_linkage_statement(
+        statement_source.canonical_application_statement_bytes(),
+        decode_context,
+    )
+    .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?;
+    require_verified_statement_coordinates(
+        statement_source,
+        verified_public_randomness,
+        Some((statement.participant_identity(), statement.roster_position())),
+        None,
+    )?;
+    let verified_setup_context = verified_public_randomness.context();
+    if statement.protocol_version() != verified_setup_context.protocol_version()
+        || statement.suite_identifier() != verified_setup_context.suite_identifier().into_bytes()
+        || statement.ceremony_context_hash()
+            != verified_setup_context.ceremony_context_hash().into_bytes()
+        || statement.action_context_hash()
+            != verified_setup_context.action_context_hash().into_bytes()
+        || statement.roster_hash() != verified_setup_context.roster_hash().into_bytes()
+        || statement.public_setup_seed()
+            != verified_public_randomness.public_setup_seed().into_bytes()
+    {
+        return Err(CommonProofVerifierError::InvalidApplicationStatement);
+    }
+    let selected_variant = selected_statement_variant(statement_source, schema_identifier, None)?;
+    let committed_material_input = selected_committed_material_relation_plan_input()
+        .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?;
+    let sharing_limb_count = committed_material_input
+        .sharing_data_modulus_indices
+        .len();
+    let threshold = usize::from(committed_material_input.threshold);
+    let participant_count = usize::from(committed_material_input.participant_count);
+    let expected_coefficient_root_count = sharing_limb_count
+        .checked_mul(threshold)
+        .ok_or(CommonProofVerifierError::InvalidBoundTree)?;
+    let expected_recipient_root_count = sharing_limb_count
+        .checked_mul(participant_count)
+        .ok_or(CommonProofVerifierError::InvalidBoundTree)?;
+    if participant_count != verified_public_randomness.ordered_participant_identities().len()
+        || statement.ordered_coefficient_material_roots().len()
+            != expected_coefficient_root_count
+        || statement.ordered_recipient_share_material_roots().len()
+            != expected_recipient_root_count
+    {
+        return Err(CommonProofVerifierError::InvalidApplicationStatement);
+    }
+    let mut statement_trees = Vec::new();
+    statement_trees
+        .try_reserve_exact(bound_public_tree_count(selected_variant))
+        .map_err(|_| CommonProofVerifierError::InvalidBoundTree)?;
+    for (sharing_limb_ordinal, sharing_limb_index) in committed_material_input
+        .sharing_data_modulus_indices
+        .iter()
+        .copied()
+        .enumerate()
+    {
+        for coefficient_ordinal in 0..threshold {
+            let root_ordinal = sharing_limb_ordinal
+                .checked_mul(threshold)
+                .and_then(|offset| offset.checked_add(coefficient_ordinal))
+                .ok_or(CommonProofVerifierError::InvalidBoundTree)?;
+            let expected_root = *statement
+                .ordered_coefficient_material_roots()
+                .get(root_ordinal)
+                .ok_or(CommonProofVerifierError::InvalidApplicationStatement)?;
+            statement_trees.push(verified_committed_material_statement_tree(
+                selected_variant,
+                statement_trees.len(),
+                BoundTreeRootUse::Output,
+                expected_root,
+                CommittedMaterialContext::new(
+                    verified_setup_context.suite_identifier().into_bytes(),
+                    verified_setup_context.ceremony_context_hash().into_bytes(),
+                    verified_setup_context.action_context_hash().into_bytes(),
+                    statement.participant_identity(),
+                    CommittedMaterialRole::Coefficient,
+                    sharing_limb_index,
+                    u16::try_from(coefficient_ordinal)
+                        .map_err(|_| CommonProofVerifierError::InvalidBoundTree)?,
+                ),
+            )?);
+        }
+        for recipient_ordinal in 0..participant_count {
+            let root_ordinal = sharing_limb_ordinal
+                .checked_mul(participant_count)
+                .and_then(|offset| offset.checked_add(recipient_ordinal))
+                .ok_or(CommonProofVerifierError::InvalidBoundTree)?;
+            let expected_root = *statement
+                .ordered_recipient_share_material_roots()
+                .get(root_ordinal)
+                .ok_or(CommonProofVerifierError::InvalidApplicationStatement)?;
+            statement_trees.push(verified_committed_material_statement_tree(
+                selected_variant,
+                statement_trees.len(),
+                BoundTreeRootUse::Output,
+                expected_root,
+                CommittedMaterialContext::new(
+                    verified_setup_context.suite_identifier().into_bytes(),
+                    verified_setup_context.ceremony_context_hash().into_bytes(),
+                    verified_setup_context.action_context_hash().into_bytes(),
+                    statement.participant_identity(),
+                    CommittedMaterialRole::RecipientShare,
+                    sharing_limb_index,
+                    u16::try_from(recipient_ordinal)
+                        .map_err(|_| CommonProofVerifierError::InvalidBoundTree)?,
+                ),
+            )?);
+        }
+    }
+    require_complete_bound_tree_catalog(selected_variant, statement_trees)
+}
+
+fn verified_aggregate_threshold_share_statement_trees(
+    statement_source: &VerifiedCommonProofStatementSource,
+    verified_public_randomness: &VerifiedPublicRandomness,
+) -> Result<Vec<VerifiedStatementOwnedTree>, CommonProofVerifierError> {
+    let schema_identifier = ProofApplicationSlotCeilings::
+        AGGREGATE_THRESHOLD_SHARE_STATEMENT_SCHEMA_IDENTIFIER;
+    let decode_context = verified_statement_decode_context(
+        statement_source,
+        verified_public_randomness,
+        schema_identifier,
+    )?;
+    let statement = decode_selected_aggregate_threshold_share_statement(
+        statement_source.canonical_application_statement_bytes(),
+        decode_context,
+    )
+    .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?;
+    require_verified_statement_coordinates(
+        statement_source,
+        verified_public_randomness,
+        Some((statement.participant_identity(), statement.roster_position())),
+        None,
+    )?;
+    let verified_setup_context = verified_public_randomness.context();
+    if statement.protocol_version() != verified_setup_context.protocol_version()
+        || statement.suite_identifier() != verified_setup_context.suite_identifier().into_bytes()
+        || statement.ceremony_context_hash()
+            != verified_setup_context.ceremony_context_hash().into_bytes()
+        || statement.action_context_hash()
+            != verified_setup_context.action_context_hash().into_bytes()
+        || statement.roster_hash() != verified_setup_context.roster_hash().into_bytes()
+    {
+        return Err(CommonProofVerifierError::InvalidApplicationStatement);
+    }
+    let selected_variant = selected_statement_variant(statement_source, schema_identifier, None)?;
+    let committed_material_input = selected_committed_material_relation_plan_input()
+        .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?;
+    let sharing_limb_count = committed_material_input
+        .sharing_data_modulus_indices
+        .len();
+    let participant_count = usize::from(committed_material_input.participant_count);
+    let expected_source_root_count = sharing_limb_count
+        .checked_mul(participant_count)
+        .ok_or(CommonProofVerifierError::InvalidBoundTree)?;
+    if participant_count != verified_public_randomness.ordered_participant_identities().len()
+        || statement.ordered_source_share_roots().len() != expected_source_root_count
+        || statement.ordered_aggregate_threshold_roots().len() != sharing_limb_count
+    {
+        return Err(CommonProofVerifierError::InvalidApplicationStatement);
+    }
+    let mut statement_trees = Vec::new();
+    statement_trees
+        .try_reserve_exact(bound_public_tree_count(selected_variant))
+        .map_err(|_| CommonProofVerifierError::InvalidBoundTree)?;
+    for (sharing_limb_ordinal, sharing_limb_index) in committed_material_input
+        .sharing_data_modulus_indices
+        .iter()
+        .copied()
+        .enumerate()
+    {
+        for dealer_ordinal in 0..participant_count {
+            let source_root_ordinal = dealer_ordinal
+                .checked_mul(sharing_limb_count)
+                .and_then(|offset| offset.checked_add(sharing_limb_ordinal))
+                .ok_or(CommonProofVerifierError::InvalidBoundTree)?;
+            let dealer_identity = verified_public_randomness
+                .ordered_participant_identities()
+                .get(dealer_ordinal)
+                .ok_or(CommonProofVerifierError::InvalidApplicationStatement)?
+                .into_bytes();
+            let expected_root = *statement
+                .ordered_source_share_roots()
+                .get(source_root_ordinal)
+                .ok_or(CommonProofVerifierError::InvalidApplicationStatement)?;
+            statement_trees.push(verified_committed_material_statement_tree(
+                selected_variant,
+                statement_trees.len(),
+                BoundTreeRootUse::Input,
+                expected_root,
+                CommittedMaterialContext::new(
+                    verified_setup_context.suite_identifier().into_bytes(),
+                    verified_setup_context.ceremony_context_hash().into_bytes(),
+                    verified_setup_context.action_context_hash().into_bytes(),
+                    dealer_identity,
+                    CommittedMaterialRole::RecipientShare,
+                    sharing_limb_index,
+                    statement.roster_position(),
+                ),
+            )?);
+        }
+        let expected_root = *statement
+            .ordered_aggregate_threshold_roots()
+            .get(sharing_limb_ordinal)
+            .ok_or(CommonProofVerifierError::InvalidApplicationStatement)?;
+        statement_trees.push(verified_committed_material_statement_tree(
+            selected_variant,
+            statement_trees.len(),
+            BoundTreeRootUse::Output,
+            expected_root,
+            CommittedMaterialContext::new(
+                verified_setup_context.suite_identifier().into_bytes(),
+                verified_setup_context.ceremony_context_hash().into_bytes(),
+                verified_setup_context.action_context_hash().into_bytes(),
+                statement.participant_identity(),
+                CommittedMaterialRole::AggregateThresholdShare,
+                sharing_limb_index,
+                statement.roster_position(),
+            ),
+        )?);
+    }
+    require_complete_bound_tree_catalog(selected_variant, statement_trees)
 }
 
 /// Opaque terminal for one public-polynomial tree whose coefficient stream,

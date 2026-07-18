@@ -4,7 +4,8 @@ use super::{
     checking::full_trace_zeroifier_expression,
     compiled_plan::RelationPlanCheckContext,
     expressions::{
-        RelationExpressionInstruction, canonical_nested_list, modular_power, strictly_sorted_unique,
+        RelationExpressionInstruction, canonical_nested_list, checked_resident_payload_add,
+        modular_power, resident_vec_storage_byte_length, strictly_sorted_unique,
     },
     model::{
         RelationChallengeRole, RelationPlanError, SuiteModulusReference, canonical_encoding_error,
@@ -321,6 +322,16 @@ pub(crate) struct RelationIntegerLiftComponentDescriptor {
 }
 
 impl RelationIntegerLiftComponentDescriptor {
+    fn resident_owned_payload_byte_length(&self) -> Result<u64, RelationPlanError> {
+        [
+            resident_vec_storage_byte_length(&self.ordered_linear_terms)?,
+            resident_vec_storage_byte_length(&self.ordered_convolution_products)?,
+            resident_vec_storage_byte_length(&self.ordered_full_ring_negacyclic_products)?,
+        ]
+        .into_iter()
+        .try_fold(0_u64, checked_resident_payload_add)
+    }
+
     pub(super) fn canonical_tuple(&self) -> Result<CanonicalTuple, RelationPlanError> {
         Ok(CanonicalTuple::new(
             INTEGER_LIFT_COMPONENT_SCHEMA_IDENTIFIER,
@@ -367,6 +378,25 @@ pub(crate) struct RelationIntegerLiftBatchDescriptor {
 }
 
 impl RelationIntegerLiftBatchDescriptor {
+    pub(super) fn resident_owned_payload_byte_length(&self) -> Result<u64, RelationPlanError> {
+        let mut total = [
+            resident_vec_storage_byte_length(&self.ordered_reversed_column_bindings)?,
+            resident_vec_storage_byte_length(
+                &self.ordered_negacyclic_automorphism_permutations,
+            )?,
+            resident_vec_storage_byte_length(&self.ordered_components)?,
+        ]
+        .into_iter()
+        .try_fold(0_u64, checked_resident_payload_add)?;
+        for component in &self.ordered_components {
+            total = checked_resident_payload_add(
+                total,
+                component.resident_owned_payload_byte_length()?,
+            )?;
+        }
+        Ok(total)
+    }
+
     pub(crate) const fn modulus_reference(&self) -> SuiteModulusReference {
         self.modulus_reference
     }
@@ -425,6 +455,18 @@ pub(crate) struct RelationCoefficientLocalResidualDescriptor {
 }
 
 impl RelationCoefficientLocalResidualDescriptor {
+    fn resident_owned_payload_byte_length(&self) -> Result<u64, RelationPlanError> {
+        self.residual_postfix_expression.iter().try_fold(
+            resident_vec_storage_byte_length(&self.residual_postfix_expression)?,
+            |total, expression| {
+                checked_resident_payload_add(
+                    total,
+                    expression.resident_owned_payload_byte_length()?,
+                )
+            },
+        )
+    }
+
     pub(super) fn canonical_tuple(&self) -> Result<CanonicalTuple, RelationPlanError> {
         Ok(CanonicalTuple::new(
             COEFFICIENT_LOCAL_RESIDUAL_SCHEMA_IDENTIFIER,
@@ -452,6 +494,18 @@ pub(crate) struct RelationCoefficientLocalIdentityBatchDescriptor {
 }
 
 impl RelationCoefficientLocalIdentityBatchDescriptor {
+    pub(super) fn resident_owned_payload_byte_length(&self) -> Result<u64, RelationPlanError> {
+        self.ordered_residuals.iter().try_fold(
+            resident_vec_storage_byte_length(&self.ordered_residuals)?,
+            |total, residual| {
+                checked_resident_payload_add(
+                    total,
+                    residual.resident_owned_payload_byte_length()?,
+                )
+            },
+        )
+    }
+
     pub(super) fn canonical_tuple(&self) -> Result<CanonicalTuple, RelationPlanError> {
         Ok(CanonicalTuple::new(
             COEFFICIENT_LOCAL_IDENTITY_BATCH_SCHEMA_IDENTIFIER,

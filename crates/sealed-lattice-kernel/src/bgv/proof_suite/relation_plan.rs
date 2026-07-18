@@ -113,6 +113,7 @@ mod public_key_share;
 mod same_secret_anchor;
 mod target_release;
 mod trustee_evaluation_key;
+mod verified_key_relation_column_evaluator;
 #[cfg(test)]
 mod vss_range_candidate_comparison;
 mod vss_share_linkage;
@@ -166,8 +167,14 @@ pub(crate) use public_aggregate::{
     RkgRoundOneAggregateVariantInput, compile_collective_public_key_aggregate_relation_plan,
     compile_evaluator_key_aggregate_relation_plan, compile_rkg_round_one_aggregate_relation_plan,
 };
-pub(crate) use public_key_share::compile_public_key_share_relation_plan;
-pub(crate) use same_secret_anchor::compile_same_secret_relation_plan;
+pub(crate) use public_key_share::{
+    PublicKeyShareSourceLayout, compile_public_key_share_relation_plan,
+    compile_public_key_share_relation_with_source_layout,
+};
+pub(crate) use same_secret_anchor::{
+    SameSecretSourceLayout, compile_same_secret_relation_plan,
+    compile_same_secret_relation_with_source_layout,
+};
 pub(crate) use target_release::{
     CompiledTargetReleaseRelation, TargetReleaseCapabilityError, TargetReleaseModulusWitness,
     TargetReleaseRelationPlanInput, TargetReleaseRoleWitness, TargetReleaseSourcePolynomialAdapter,
@@ -186,6 +193,7 @@ pub(crate) use trustee_evaluation_key::{
     compile_relinearization_round_two_relation_plan, selected_galois_key_share_batch_schedule,
     trustee_evaluation_key_relation_basis_for_catalog_level,
 };
+pub(crate) use verified_key_relation_column_evaluator::VerifiedKeyRelationColumnEvaluator;
 pub(crate) use vss_share_linkage::compile_vss_share_linkage_relation_plan;
 #[cfg(test)]
 mod tests;

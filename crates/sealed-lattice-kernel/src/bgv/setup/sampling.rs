@@ -22,8 +22,8 @@ const COLLECTIVE_PUBLIC_KEY_COMMON_REFERENCE_DOMAIN: &str = "sealed-lattice/setu
 const RELINEARIZATION_COMMON_REFERENCE_DOMAIN: &str =
     "sealed-lattice/setup/relinearization-common-a/v1";
 const GALOIS_COMMON_REFERENCE_DOMAIN: &str = "sealed-lattice/setup/galois-common-a/v1";
-const DATA_MODULUS_CATALOG_IDENTIFIER: u16 = 1;
-const SPECIAL_MODULUS_CATALOG_IDENTIFIER: u16 = 2;
+pub(super) const DATA_MODULUS_CATALOG_IDENTIFIER: u16 = 1;
+pub(super) const SPECIAL_MODULUS_CATALOG_IDENTIFIER: u16 = 2;
 
 // These JSON setup paths do not receive suite-provided sampling limits, so a
 // fixed cap keeps deterministic rejection work finite.

@@ -310,6 +310,9 @@ fn candidate_sizing(
         context,
         &transcript_schedule,
         layout.catalog(),
+        schema_identifier,
+        u64::try_from(proof_header_bytes.len())
+            .map_err(|_| "proof header length does not fit u64".to_owned())?,
         u64::try_from(maximum_prefetched_query_byte_length)
             .map_err(|_| "query prefetch length does not fit u64".to_owned())?,
         u64::from(MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH),

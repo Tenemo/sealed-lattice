@@ -170,6 +170,12 @@ impl PreparedActionProofAttemptSource {
         *self.attempt_identifier.as_bytes()
     }
 
+    pub(crate) const fn private_randomness_attempt_identifier(
+        &self,
+    ) -> PrivateRandomnessAttemptIdentifier {
+        self.attempt_identifier
+    }
+
     pub(crate) const fn application_slot(&self) -> ProofApplicationSlot {
         self.application_slot
     }

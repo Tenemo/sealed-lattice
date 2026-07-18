@@ -14,6 +14,7 @@ use crate::{
             CommonProofRelationPlanCapability, CommonProofRuntimeError,
             CommonProofSelectedSuiteCapabilityHandle, SelectedApplicationStatementContext,
             VerifiedCommonProofCapabilityHandle, VerifiedCommonProofStatementSource,
+            VerifiedKeyRelationColumnEvaluator, VerifiedStatementOwnedTree,
             decode_selected_public_key_share_statement, decode_selected_same_secret_statement,
             preflight_and_consume_verified_common_proof_with_family_terminal,
             retain_common_proof_verification_family_adapter_from_upstream, runtime_error_status,
@@ -141,7 +142,8 @@ fn prepare_verification(
 ) -> Result<(u32, u32), CommonProofRuntimeError> {
     let schema_identifier = family.schema_identifier();
     let canonical_application_statement_bytes = canonical_application_statement_bytes.to_vec();
-    let (statement_source, terminal_source) = with_accepted_setup_verification_sources(
+    let (statement_source, statement_trees, verified_column_evaluator, terminal_source) =
+        with_accepted_setup_verification_sources(
         assembly_handle,
         |package, verified_public_randomness| {
             let context = verified_public_randomness.context();
@@ -232,6 +234,14 @@ fn prepare_verification(
             .map_err(|_| CommonProofRuntimeError::InvalidLimits)?;
             let relation_context = selected_relation_plan_check_context(schema_identifier)
                 .ok_or(CommonProofRuntimeError::InvalidPlanCapability)?;
+            let verified_column_evaluator =
+                VerifiedKeyRelationColumnEvaluator::from_verified_public_randomness(
+                    verified_public_randomness,
+                    &relation_plan_artifact,
+                    relation_plan_variant,
+                    &relation_context,
+                )
+                .map_err(|_| CommonProofRuntimeError::InvalidPlanCapability)?;
             let relation_plan_capability = CommonProofRelationPlanCapability::from_compiled_plan(
                 relation_plan,
                 &relation_context,
@@ -249,8 +259,16 @@ fn prepare_verification(
                     relation_plan_capability,
                     runtime_limits,
                 )?;
+            let statement_trees =
+                VerifiedStatementOwnedTree::from_verified_accepted_setup_statement_source(
+                    &statement_source,
+                    verified_public_randomness,
+                )
+                .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?;
             Ok((
                 statement_source,
+                statement_trees,
+                verified_column_evaluator,
                 AcceptedSetupVerificationTerminalSource {
                     family,
                     assembly_handle,
@@ -266,9 +284,11 @@ fn prepare_verification(
     let selected_suite_handle =
         CommonProofSelectedSuiteCapabilityHandle::from_identifier(selected_suite_handle);
     match retain_common_proof_verification_family_adapter_from_upstream(move |upstream_inputs| {
-        upstream_inputs.prepare_proof_created_tree_family_verification_without_evaluator(
+        upstream_inputs.prepare_statement_tree_family_verification(
             &selected_suite_handle,
             statement_source,
+            statement_trees,
+            Box::new(verified_column_evaluator),
         )
     }) {
         Ok(adapter_handle) => Ok((adapter_handle, terminal_source_handle)),

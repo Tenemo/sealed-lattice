@@ -17,7 +17,8 @@ use super::{
     AnchorOpeningWitness, AnchorQuotientWitness, BoundPolynomialRootUse, BoundedUnsignedColumn,
     KeyRelationPlanBuilder, KeyVerifierSourceKey, MATERIAL_DIGIT_RADIX, MATERIAL_DIGIT_TRIT_COUNT,
     MODULAR_QUOTIENT_BIT_COUNT, ProofTreePhase, RecenteredVerifierVectorWitness,
-    ReversibleShiftedSmallVector, ShiftedSmallVector, SplitIntegerVector, TRIT_RADIX,
+    QuarterBackedSplitIntegerVector, ReversibleShiftedSmallVector, ShiftedSmallVector,
+    SplitIntegerVector, TRIT_RADIX,
     TRUSTEE_QUOTIENT_LOW_TRIT_COUNT, TargetBoundedUnsignedVector, TargetCenteredVector,
     TargetCommittedMaterialVector, TrusteeAnchorOpeningWitness, TrusteeRadixThreeQuotientWitness,
     column_builder::{fixed_radix_digits, minimum_unsigned_radix_digit_count},
@@ -227,7 +228,7 @@ impl<'context> KeyRelationPlanBuilder<'context> {
         source_key: &KeyVerifierSourceKey,
         ordered_modulus_references: &[SuiteModulusReference],
         root_use: BoundPolynomialRootUse,
-    ) -> Result<Vec<SplitIntegerVector>, RelationPlanError> {
+    ) -> Result<Vec<QuarterBackedSplitIntegerVector>, RelationPlanError> {
         if ordered_modulus_references.is_empty()
             || !strictly_sorted_unique(ordered_modulus_references)
         {
@@ -237,36 +238,20 @@ impl<'context> KeyRelationPlanBuilder<'context> {
         let mut tree_columns = Vec::with_capacity(
             ordered_modulus_references
                 .len()
-                .checked_mul(2)
+                .checked_mul(6)
                 .ok_or(RelationPlanError::CountOverflow)?,
         );
         let mut limbs = Vec::with_capacity(ordered_modulus_references.len());
         for modulus_reference in ordered_modulus_references {
-            let low = self.push_column(
-                RelationColumnOrigin::BoundTree {
-                    expected_root_source_ordinal: source_ordinal,
-                },
-                self.geometry
-                    .public_polynomial_column_degree_bound_exclusive,
-                Some(*modulus_reference),
-                None,
+            let vector = self.add_quarter_backed_bound_vector(
+                source_ordinal,
+                *modulus_reference,
+                &mut tree_columns,
             )?;
-            let high = self.push_column(
-                RelationColumnOrigin::BoundTree {
-                    expected_root_source_ordinal: source_ordinal,
-                },
-                self.geometry
-                    .public_polynomial_column_degree_bound_exclusive,
-                Some(*modulus_reference),
-                None,
-            )?;
-            tree_columns.extend([low, high]);
-            for half in [low, high] {
+            for half in vector.half_projections.halves {
                 self.register_exact_radix_decomposition(half, *modulus_reference, None)?;
             }
-            limbs.push(SplitIntegerVector {
-                halves: [low, high],
-            });
+            limbs.push(vector);
         }
         self.bound_trees.push(RelationTreeDescriptor::BoundPublic {
             construction_kind: BoundTreeConstructionKind::SetupPolynomial,
@@ -285,7 +270,7 @@ impl<'context> KeyRelationPlanBuilder<'context> {
         source_key: &KeyVerifierSourceKey,
         ordered_row_modulus_references: &[SuiteModulusReference],
         root_use: BoundPolynomialRootUse,
-    ) -> Result<Vec<SplitIntegerVector>, RelationPlanError> {
+    ) -> Result<Vec<QuarterBackedSplitIntegerVector>, RelationPlanError> {
         if ordered_row_modulus_references.is_empty() {
             return Err(RelationPlanError::InvalidRoot);
         }
@@ -293,37 +278,21 @@ impl<'context> KeyRelationPlanBuilder<'context> {
         let mut tree_columns = Vec::with_capacity(
             ordered_row_modulus_references
                 .len()
-                .checked_mul(2)
+                .checked_mul(6)
                 .ok_or(RelationPlanError::CountOverflow)?,
         );
         let mut rows = Vec::with_capacity(ordered_row_modulus_references.len());
         for modulus_reference in ordered_row_modulus_references {
             self.modulus(*modulus_reference)?;
-            let low = self.push_column(
-                RelationColumnOrigin::BoundTree {
-                    expected_root_source_ordinal: source_ordinal,
-                },
-                self.geometry
-                    .public_polynomial_column_degree_bound_exclusive,
-                Some(*modulus_reference),
-                None,
+            let vector = self.add_quarter_backed_bound_vector(
+                source_ordinal,
+                *modulus_reference,
+                &mut tree_columns,
             )?;
-            let high = self.push_column(
-                RelationColumnOrigin::BoundTree {
-                    expected_root_source_ordinal: source_ordinal,
-                },
-                self.geometry
-                    .public_polynomial_column_degree_bound_exclusive,
-                Some(*modulus_reference),
-                None,
-            )?;
-            tree_columns.extend([low, high]);
-            for half in [low, high] {
+            for half in vector.half_projections.halves {
                 self.register_exact_radix_decomposition(half, *modulus_reference, None)?;
             }
-            rows.push(SplitIntegerVector {
-                halves: [low, high],
-            });
+            rows.push(vector);
         }
         self.bound_trees.push(RelationTreeDescriptor::BoundPublic {
             construction_kind: BoundTreeConstructionKind::SetupPolynomial,
@@ -335,6 +304,81 @@ impl<'context> KeyRelationPlanBuilder<'context> {
             ordered_column_ordinals: tree_columns,
         });
         Ok(rows)
+    }
+
+    fn add_quarter_backed_bound_vector(
+        &mut self,
+        source_ordinal: u32,
+        modulus_reference: SuiteModulusReference,
+        tree_columns: &mut Vec<u32>,
+    ) -> Result<QuarterBackedSplitIntegerVector, RelationPlanError> {
+        let quarter_degree_bound_exclusive = self
+            .geometry
+            .public_polynomial_column_degree_bound_exclusive;
+        let trace_domain_size = self.geometry.trace_domain_size()?;
+        if quarter_degree_bound_exclusive
+            .checked_mul(2)
+            .filter(|degree| *degree == trace_domain_size)
+            .is_none()
+        {
+            return Err(RelationPlanError::InvalidDomain);
+        }
+        let mut quarters = Vec::with_capacity(4);
+        for _ in 0..4 {
+            quarters.push(self.push_column(
+                RelationColumnOrigin::BoundTree {
+                    expected_root_source_ordinal: source_ordinal,
+                },
+                quarter_degree_bound_exclusive,
+                Some(modulus_reference),
+                None,
+            )?);
+        }
+        let mut half_projections = Vec::with_capacity(2);
+        for half_ordinal in 0..2 {
+            let half_projection = self.push_column(
+                RelationColumnOrigin::BoundTree {
+                    expected_root_source_ordinal: source_ordinal,
+                },
+                trace_domain_size,
+                Some(modulus_reference),
+                None,
+            )?;
+            let first_quarter = quarters[half_ordinal * 2];
+            let second_quarter = quarters[half_ordinal * 2 + 1];
+            self.add_full_trace_constraint(
+                vec![
+                    unrotated_column_expression(half_projection),
+                    unrotated_column_expression(first_quarter),
+                    RelationExpressionInstruction::Negation,
+                    RelationExpressionInstruction::Addition,
+                    RelationExpressionInstruction::EvaluationVariable,
+                    RelationExpressionInstruction::NonnegativePower(
+                        quarter_degree_bound_exclusive,
+                    ),
+                    unrotated_column_expression(second_quarter),
+                    RelationExpressionInstruction::Multiplication,
+                    RelationExpressionInstruction::Negation,
+                    RelationExpressionInstruction::Addition,
+                ],
+                false,
+            )?;
+            half_projections.push(half_projection);
+        }
+        let quarters: [u32; 4] = quarters
+            .try_into()
+            .map_err(|_| RelationPlanError::CountOverflow)?;
+        let half_projections = SplitIntegerVector {
+            halves: half_projections
+                .try_into()
+                .map_err(|_| RelationPlanError::CountOverflow)?,
+        };
+        tree_columns.extend(quarters);
+        tree_columns.extend(half_projections.halves);
+        Ok(QuarterBackedSplitIntegerVector {
+            quarters,
+            half_projections,
+        })
     }
 
     pub(in crate::bgv::proof_suite::relation_plan) fn add_committed_material_root(

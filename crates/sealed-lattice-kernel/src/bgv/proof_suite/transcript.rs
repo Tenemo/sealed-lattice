@@ -1,10 +1,12 @@
+#[cfg(test)]
 use std::collections::BTreeSet;
 
 use num_bigint::BigUint;
 use num_traits::One;
 
 use crate::foundation::{
-    CanonicalItem, CanonicalItemType, Hash512, StreamingFoundationHashError,
+    CANONICAL_TUPLE_SCHEMA_IDENTIFIER, CANONICAL_TUPLE_VERSION, CanonicalItem,
+    CanonicalItemType, CanonicalTuple, Hash512, StreamingFoundationHashError,
     StreamingFoundationTupleHash512, fill_foundation_tuple_xof, hash_foundation_tuple_512,
 };
 
@@ -839,6 +841,416 @@ impl CommonProofApplicationChallengeSamplerAccounting {
     }
 }
 
+/// Exact source-owned live payload of one typed foundation-tuple hash or XOF
+/// call. The caller-owned typed input, the domain-framed clone, and the encoded
+/// tuple are simultaneously live while SHAKE absorbs the canonical preimage.
+/// Allocator bookkeeping and allocator-selected excess capacity are runtime
+/// measurements rather than protocol-derived payload.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct CommonProofTypedXofMemoryAccounting {
+    typed_input_item_storage_byte_length: u64,
+    typed_input_payload_byte_length: u64,
+    framed_item_storage_byte_length: u64,
+    framed_payload_byte_length: u64,
+    encoded_tuple_byte_length: u64,
+    total_byte_length: u64,
+}
+
+impl CommonProofTypedXofMemoryAccounting {
+    pub(crate) const fn typed_input_item_storage_byte_length(self) -> u64 {
+        self.typed_input_item_storage_byte_length
+    }
+
+    pub(crate) const fn typed_input_payload_byte_length(self) -> u64 {
+        self.typed_input_payload_byte_length
+    }
+
+    pub(crate) const fn framed_item_storage_byte_length(self) -> u64 {
+        self.framed_item_storage_byte_length
+    }
+
+    pub(crate) const fn framed_payload_byte_length(self) -> u64 {
+        self.framed_payload_byte_length
+    }
+
+    pub(crate) const fn encoded_tuple_byte_length(self) -> u64 {
+        self.encoded_tuple_byte_length
+    }
+
+    pub(crate) const fn total_byte_length(self) -> u64 {
+        self.total_byte_length
+    }
+}
+
+/// Source-owned live-payload accounting for one bounded product-residue vector draw.
+/// The accepted coordinate vector is a distinct owner from the reusable
+/// candidate buffer, and the BigUint term covers the live 32-bit limb payloads
+/// used by the exact product-space rejection and radix decode.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct CommonProofProductSamplerMemoryAccounting {
+    challenge_tag_byte_length: u64,
+    reusable_candidate_buffer_byte_length: u64,
+    accepted_coordinate_vector_byte_length: u64,
+    big_integer_limb_working_set_byte_length: u64,
+    typed_xof_memory_accounting: CommonProofTypedXofMemoryAccounting,
+    xof_draw_peak_byte_length: u64,
+    accepted_decode_peak_byte_length: u64,
+    maximum_peak_byte_length: u64,
+}
+
+impl CommonProofProductSamplerMemoryAccounting {
+    pub(crate) const fn challenge_tag_byte_length(self) -> u64 {
+        self.challenge_tag_byte_length
+    }
+
+    pub(crate) const fn reusable_candidate_buffer_byte_length(self) -> u64 {
+        self.reusable_candidate_buffer_byte_length
+    }
+
+    pub(crate) const fn accepted_coordinate_vector_byte_length(self) -> u64 {
+        self.accepted_coordinate_vector_byte_length
+    }
+
+    pub(crate) const fn big_integer_limb_working_set_byte_length(self) -> u64 {
+        self.big_integer_limb_working_set_byte_length
+    }
+
+    pub(crate) const fn typed_xof_memory_accounting(
+        self,
+    ) -> CommonProofTypedXofMemoryAccounting {
+        self.typed_xof_memory_accounting
+    }
+
+    pub(crate) const fn xof_draw_peak_byte_length(self) -> u64 {
+        self.xof_draw_peak_byte_length
+    }
+
+    pub(crate) const fn accepted_decode_peak_byte_length(self) -> u64 {
+        self.accepted_decode_peak_byte_length
+    }
+
+    pub(crate) const fn maximum_peak_byte_length(self) -> u64 {
+        self.maximum_peak_byte_length
+    }
+}
+
+/// Complete source-derived transcript live-payload owners used by the common
+/// prover's resident-memory plan. This is development accounting only; none of
+/// these values is serialized into a proof or interpreted as a verification
+/// result. Allocator metadata remains an empirical runtime measurement.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct CommonProofTranscriptMemoryAccounting {
+    schedule_catalog_byte_length: u64,
+    accepted_deep_point_catalog_byte_length: u64,
+    accepted_query_catalog_byte_length: u64,
+    pending_challenge_tag_byte_length: u64,
+    pending_challenge_output_byte_length: u64,
+    product_sampler_memory_accounting: CommonProofProductSamplerMemoryAccounting,
+    extension_sampler_big_integer_limb_working_set_byte_length: u64,
+    deep_point_prior_catalog_clone_byte_length: u64,
+    query_xof_output_buffer_byte_length: u64,
+    query_xof_split_tail_byte_length: u64,
+    maximum_transcript_codec_overlap_byte_length: u64,
+    maximum_output_overlap_byte_length: u64,
+    persistent_transcript_byte_length: u64,
+    maximum_transient_byte_length: u64,
+}
+
+impl CommonProofTranscriptMemoryAccounting {
+    pub(crate) const fn schedule_catalog_byte_length(self) -> u64 {
+        self.schedule_catalog_byte_length
+    }
+
+    pub(crate) const fn accepted_deep_point_catalog_byte_length(self) -> u64 {
+        self.accepted_deep_point_catalog_byte_length
+    }
+
+    pub(crate) const fn accepted_query_catalog_byte_length(self) -> u64 {
+        self.accepted_query_catalog_byte_length
+    }
+
+    pub(crate) const fn pending_challenge_tag_byte_length(self) -> u64 {
+        self.pending_challenge_tag_byte_length
+    }
+
+    pub(crate) const fn pending_challenge_output_byte_length(self) -> u64 {
+        self.pending_challenge_output_byte_length
+    }
+
+    pub(crate) const fn product_sampler_memory_accounting(
+        self,
+    ) -> CommonProofProductSamplerMemoryAccounting {
+        self.product_sampler_memory_accounting
+    }
+
+    pub(crate) const fn extension_sampler_big_integer_limb_working_set_byte_length(self) -> u64 {
+        self.extension_sampler_big_integer_limb_working_set_byte_length
+    }
+
+    pub(crate) const fn deep_point_prior_catalog_clone_byte_length(self) -> u64 {
+        self.deep_point_prior_catalog_clone_byte_length
+    }
+
+    pub(crate) const fn query_xof_output_buffer_byte_length(self) -> u64 {
+        self.query_xof_output_buffer_byte_length
+    }
+
+    pub(crate) const fn query_xof_split_tail_byte_length(self) -> u64 {
+        self.query_xof_split_tail_byte_length
+    }
+
+    pub(crate) const fn maximum_transcript_codec_overlap_byte_length(self) -> u64 {
+        self.maximum_transcript_codec_overlap_byte_length
+    }
+
+    pub(crate) const fn maximum_output_overlap_byte_length(self) -> u64 {
+        self.maximum_output_overlap_byte_length
+    }
+
+    pub(crate) const fn persistent_transcript_byte_length(self) -> u64 {
+        self.persistent_transcript_byte_length
+    }
+
+    pub(crate) const fn maximum_transient_byte_length(self) -> u64 {
+        self.maximum_transient_byte_length
+    }
+}
+
+fn checked_memory_add(left: u64, right: u64) -> Result<u64, TranscriptError> {
+    left.checked_add(right)
+        .ok_or(TranscriptError::ChallengeCounterOverflow)
+}
+
+fn checked_memory_multiply(left: u64, right: u64) -> Result<u64, TranscriptError> {
+    left.checked_mul(right)
+        .ok_or(TranscriptError::ChallengeCounterOverflow)
+}
+
+fn usize_memory_byte_length(value: usize) -> Result<u64, TranscriptError> {
+    u64::try_from(value).map_err(|_| TranscriptError::ChallengeCounterOverflow)
+}
+
+fn typed_foundation_tuple_memory_accounting(
+    domain: &str,
+    typed_input_items: Vec<CanonicalItem>,
+) -> Result<CommonProofTypedXofMemoryAccounting, TranscriptError> {
+    let canonical_item_byte_length =
+        usize_memory_byte_length(std::mem::size_of::<CanonicalItem>())?;
+    let typed_input_item_storage_byte_length = checked_memory_multiply(
+        usize_memory_byte_length(typed_input_items.capacity())?,
+        canonical_item_byte_length,
+    )?;
+    let typed_input_payload_byte_length = typed_input_items.iter().try_fold(
+        0_u64,
+        |total, item| {
+            checked_memory_add(
+                total,
+                usize_memory_byte_length(item.canonical_bytes().len())?,
+            )
+        },
+    )?;
+    let mut framed_items = Vec::with_capacity(
+        typed_input_items
+            .len()
+            .checked_add(1)
+            .ok_or(TranscriptError::ChallengeCounterOverflow)?,
+    );
+    framed_items.push(
+        CanonicalItem::nonempty_ascii(domain)
+            .map_err(|_| TranscriptError::CanonicalEncoding)?,
+    );
+    framed_items.extend_from_slice(&typed_input_items);
+    let framed_item_storage_byte_length = checked_memory_multiply(
+        usize_memory_byte_length(framed_items.capacity())?,
+        canonical_item_byte_length,
+    )?;
+    let framed_payload_byte_length = framed_items.iter().try_fold(0_u64, |total, item| {
+        checked_memory_add(
+            total,
+            usize_memory_byte_length(item.canonical_bytes().len())?,
+        )
+    })?;
+    let encoded_tuple_byte_length = usize_memory_byte_length(
+        CanonicalTuple::new(
+            CANONICAL_TUPLE_SCHEMA_IDENTIFIER,
+            CANONICAL_TUPLE_VERSION,
+            framed_items,
+        )
+        .encode()
+        .map_err(|_| TranscriptError::CanonicalEncoding)?
+        .len(),
+    )?;
+    let total_byte_length = [
+        typed_input_item_storage_byte_length,
+        typed_input_payload_byte_length,
+        framed_item_storage_byte_length,
+        framed_payload_byte_length,
+        encoded_tuple_byte_length,
+    ]
+    .into_iter()
+    .try_fold(0_u64, checked_memory_add)?;
+    Ok(CommonProofTypedXofMemoryAccounting {
+        typed_input_item_storage_byte_length,
+        typed_input_payload_byte_length,
+        framed_item_storage_byte_length,
+        framed_payload_byte_length,
+        encoded_tuple_byte_length,
+        total_byte_length,
+    })
+}
+
+fn big_integer_limb_payload_byte_length(value: &BigUint) -> Result<u64, TranscriptError> {
+    checked_memory_multiply(
+        value.bits()
+            .checked_add(31)
+            .ok_or(TranscriptError::ChallengeCounterOverflow)?
+            .div_ceil(32),
+        usize_memory_byte_length(std::mem::size_of::<u32>())?,
+    )
+}
+
+fn product_sampler_memory_accounting(
+    group: CommonProofApplicationChallengeGroup,
+    maximum_candidate_draws: u32,
+    application_statement_schema_identifier: u16,
+) -> Result<CommonProofProductSamplerMemoryAccounting, TranscriptError> {
+    let sampler = application_challenge_sampler_accounting(group, maximum_candidate_draws)?;
+    let candidate_byte_length = usize::try_from(sampler.candidate_byte_length())
+        .map_err(|_| TranscriptError::ChallengeCounterOverflow)?;
+    let challenge_tag = group
+        .challenge
+        .tag(application_statement_schema_identifier);
+    let candidate_xof_memory_accounting = typed_foundation_tuple_memory_accounting(
+        TRANSCRIPT_SQUEEZE_DOMAIN,
+        product_residue_candidate_xof_input(
+            [0_u8; Hash512::BYTE_LENGTH],
+            &challenge_tag,
+            group.modulus,
+            group.coordinate_count,
+            u64::from(maximum_candidate_draws.saturating_sub(1)),
+            candidate_byte_length,
+            candidate_byte_length,
+        )?,
+    )?;
+    let chain_handle_memory_accounting = typed_foundation_tuple_memory_accounting(
+        TRANSCRIPT_SQUEEZE_DOMAIN,
+        vec![
+            CanonicalItem::hash512([0_u8; Hash512::BYTE_LENGTH]),
+            CanonicalItem::nonempty_ascii(&challenge_tag)
+                .map_err(|_| TranscriptError::CanonicalEncoding)?,
+            CanonicalItem::nonempty_ascii(PRODUCT_RESIDUE_VECTOR_SAMPLER_TYPE)
+                .map_err(|_| TranscriptError::CanonicalEncoding)?,
+            CanonicalItem::unsigned64(group.modulus),
+            CanonicalItem::unsigned16(group.coordinate_count),
+            CanonicalItem::unsigned64(sampler.candidate_byte_length()),
+            CanonicalItem::unsigned64(Hash512::BYTE_LENGTH as u64),
+        ],
+    )?;
+    let typed_xof_memory_accounting = if chain_handle_memory_accounting.total_byte_length()
+        > candidate_xof_memory_accounting.total_byte_length()
+    {
+        chain_handle_memory_accounting
+    } else {
+        candidate_xof_memory_accounting
+    };
+
+    let modulus = BigUint::from(group.modulus);
+    let product_cardinality = modulus.pow(u32::from(group.coordinate_count));
+    let sample_space = BigUint::one()
+        << candidate_byte_length
+            .checked_mul(8)
+            .ok_or(TranscriptError::ChallengeCounterOverflow)?;
+    let acceptance_quotient = &sample_space / &product_cardinality;
+    let acceptance_limit = &acceptance_quotient * &product_cardinality;
+    let maximum_candidate = &sample_space - BigUint::one();
+    let maximum_encoded_vector = &maximum_candidate % &product_cardinality;
+    let persistent_big_integer_limb_byte_length = [
+        &modulus,
+        &product_cardinality,
+        &sample_space,
+        &acceptance_limit,
+    ]
+    .into_iter()
+    .try_fold(0_u64, |total, value| {
+        checked_memory_add(total, big_integer_limb_payload_byte_length(value)?)
+    })?;
+    let acceptance_construction_transient_byte_length =
+        big_integer_limb_payload_byte_length(&acceptance_quotient)?;
+    let accepted_decode_transient_byte_length = checked_memory_add(
+        big_integer_limb_payload_byte_length(&maximum_candidate)?,
+        big_integer_limb_payload_byte_length(&maximum_encoded_vector)?,
+    )?;
+    let big_integer_limb_working_set_byte_length = checked_memory_add(
+        persistent_big_integer_limb_byte_length,
+        acceptance_construction_transient_byte_length
+            .max(accepted_decode_transient_byte_length),
+    )?;
+    let reusable_candidate_buffer_byte_length = sampler.reusable_candidate_buffer_byte_length();
+    let accepted_coordinate_vector_byte_length = sampler.accepted_vector_byte_length();
+    let challenge_tag_byte_length = usize_memory_byte_length(challenge_tag.capacity())?;
+    let xof_draw_peak_byte_length = [
+        challenge_tag_byte_length,
+        reusable_candidate_buffer_byte_length,
+        persistent_big_integer_limb_byte_length,
+        typed_xof_memory_accounting.total_byte_length(),
+    ]
+    .into_iter()
+    .try_fold(0_u64, checked_memory_add)?;
+    let accepted_decode_peak_byte_length = [
+        challenge_tag_byte_length,
+        reusable_candidate_buffer_byte_length,
+        persistent_big_integer_limb_byte_length,
+        accepted_decode_transient_byte_length,
+        accepted_coordinate_vector_byte_length,
+    ]
+    .into_iter()
+    .try_fold(0_u64, checked_memory_add)?;
+    Ok(CommonProofProductSamplerMemoryAccounting {
+        challenge_tag_byte_length,
+        reusable_candidate_buffer_byte_length,
+        accepted_coordinate_vector_byte_length,
+        big_integer_limb_working_set_byte_length,
+        typed_xof_memory_accounting,
+        xof_draw_peak_byte_length,
+        accepted_decode_peak_byte_length,
+        maximum_peak_byte_length: xof_draw_peak_byte_length.max(accepted_decode_peak_byte_length),
+    })
+}
+
+fn extension_sampler_big_integer_limb_working_set_byte_length(
+) -> Result<u64, TranscriptError> {
+    let base_field_modulus = BigUint::from(PROOF_BASE_FIELD_MODULUS);
+    let extension_cardinality = base_field_modulus.pow(
+        u32::try_from(PROOF_CHALLENGE_EXTENSION_DEGREE)
+            .map_err(|_| TranscriptError::ChallengeCounterOverflow)?,
+    );
+    let sample_space = BigUint::one() << 512_usize;
+    let acceptance_quotient = &sample_space / &extension_cardinality;
+    let acceptance_limit = &acceptance_quotient * &extension_cardinality;
+    let maximum_candidate = &sample_space - BigUint::one();
+    let maximum_residue = &maximum_candidate % &extension_cardinality;
+    let persistent_byte_length = [
+        &base_field_modulus,
+        &extension_cardinality,
+        &sample_space,
+        &acceptance_limit,
+    ]
+    .into_iter()
+    .try_fold(0_u64, |total, value| {
+        checked_memory_add(total, big_integer_limb_payload_byte_length(value)?)
+    })?;
+    let construction_transient_byte_length =
+        big_integer_limb_payload_byte_length(&acceptance_quotient)?;
+    let accepted_transient_byte_length = checked_memory_add(
+        big_integer_limb_payload_byte_length(&maximum_candidate)?,
+        big_integer_limb_payload_byte_length(&maximum_residue)?,
+    )?;
+    checked_memory_add(
+        persistent_byte_length,
+        construction_transient_byte_length.max(accepted_transient_byte_length),
+    )
+}
+
 /// Exact plan-derived schedule needed to reject omitted, reordered, repeated,
 /// or mode-incompatible common-proof messages before algebraic verification.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -969,6 +1381,326 @@ impl CommonProofTranscriptSchedule {
             .map(|row| row.reusable_candidate_buffer_byte_length())
             .max()
             .unwrap_or(0))
+    }
+
+    /// Derives every dynamically owned transcript payload from the checked
+    /// production schedule and the canonical tuple codec used by the runtime.
+    /// The result is a live-payload ceiling; the one fixed WebAssembly stack is
+    /// accounted by the build evidence rather than repeated here.
+    pub(crate) fn live_payload_memory_accounting(
+        &self,
+        application_statement_schema_identifier: u16,
+    ) -> Result<CommonProofTranscriptMemoryAccounting, TranscriptError> {
+        let schedule_catalog_byte_length = [
+            checked_memory_multiply(
+                usize_memory_byte_length(self.ordered_base_tree_ordinals.capacity())?,
+                usize_memory_byte_length(std::mem::size_of::<u16>())?,
+            )?,
+            checked_memory_multiply(
+                usize_memory_byte_length(
+                    self.ordered_application_challenge_groups.capacity(),
+                )?,
+                usize_memory_byte_length(std::mem::size_of::<
+                    CommonProofApplicationChallengeGroup,
+                >())?,
+            )?,
+            checked_memory_multiply(
+                usize_memory_byte_length(self.ordered_auxiliary_tree_ordinals.capacity())?,
+                usize_memory_byte_length(std::mem::size_of::<u16>())?,
+            )?,
+        ]
+        .into_iter()
+        .try_fold(0_u64, checked_memory_add)?;
+
+        let mut product_sampler_memory_accounting =
+            CommonProofProductSamplerMemoryAccounting::default();
+        let mut maximum_application_output_byte_length = 0_u64;
+        for (group, sampler) in self
+            .ordered_application_challenge_groups
+            .iter()
+            .copied()
+            .zip(self.ordered_application_challenge_sampler_accounting()?)
+        {
+            let memory = product_sampler_memory_accounting(
+                group,
+                self.maximum_candidate_draws_per_output,
+                application_statement_schema_identifier,
+            )?;
+            if memory.maximum_peak_byte_length()
+                > product_sampler_memory_accounting.maximum_peak_byte_length()
+            {
+                product_sampler_memory_accounting = memory;
+            }
+            maximum_application_output_byte_length = maximum_application_output_byte_length
+                .max(sampler.accepted_vector_byte_length());
+        }
+
+        let extension_output_byte_length = checked_memory_multiply(
+            usize_memory_byte_length(PROOF_CHALLENGE_EXTENSION_DEGREE)?,
+            usize_memory_byte_length(std::mem::size_of::<u64>())?,
+        )?;
+        let accepted_deep_point_catalog_byte_length = checked_memory_multiply(
+            u64::from(self.deep_point_count),
+            usize_memory_byte_length(std::mem::size_of::<
+                ProofChallengeExtensionElement,
+            >())?,
+        )?;
+        let accepted_query_catalog_byte_length = checked_memory_multiply(
+            u64::from(self.unique_query_count),
+            usize_memory_byte_length(std::mem::size_of::<u64>())?,
+        )?;
+        let deep_point_prior_catalog_clone_byte_length = checked_memory_multiply(
+            u64::from(self.deep_point_count.saturating_sub(1)),
+            usize_memory_byte_length(std::mem::size_of::<
+                ProofChallengeExtensionElement,
+            >())?,
+        )?;
+
+        let mut challenge_tags = self
+            .ordered_application_challenge_groups
+            .iter()
+            .map(|group| {
+                group
+                    .challenge
+                    .tag(application_statement_schema_identifier)
+            })
+            .collect::<Vec<_>>();
+        challenge_tags.extend([
+            CommonProofChallenge::Composition {
+                constraint_ordinal: self.composition_challenge_count - 1,
+            }
+            .tag(application_statement_schema_identifier),
+            CommonProofChallenge::DeepPoint {
+                point_ordinal: self.deep_point_count - 1,
+            }
+            .tag(application_statement_schema_identifier),
+            CommonProofChallenge::OpeningBatch {
+                claim_ordinal: self.opening_claim_count - 1,
+            }
+            .tag(application_statement_schema_identifier),
+            CommonProofChallenge::FriFold {
+                fold_ordinal: self.fri_fold_count - 1,
+            }
+            .tag(application_statement_schema_identifier),
+            CommonProofChallenge::QueryVector
+                .tag(application_statement_schema_identifier),
+        ]);
+        let pending_challenge_tag_byte_length = challenge_tags
+            .iter()
+            .map(|tag| usize_memory_byte_length(tag.capacity()))
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .max()
+            .unwrap_or(0);
+        let maximum_challenge_tag = challenge_tags
+            .into_iter()
+            .max_by_key(String::capacity)
+            .ok_or(TranscriptError::InvalidCommonProofSchedule)?;
+        let pending_challenge_output_byte_length = maximum_application_output_byte_length
+            .max(extension_output_byte_length)
+            .max(accepted_query_catalog_byte_length);
+
+        let query_xof_output_buffer_byte_length = usize_memory_byte_length(
+            query_vector_xof_output_byte_length(
+                self.query_orbit_count,
+                self.unique_query_count,
+                self.maximum_candidate_draws_per_output,
+            )?,
+        )?;
+        let query_xof_split_tail_byte_length = query_xof_output_buffer_byte_length
+            .checked_sub(Hash512::BYTE_LENGTH as u64)
+            .ok_or(TranscriptError::ChallengeCounterOverflow)?;
+        let query_tag =
+            CommonProofChallenge::QueryVector.tag(application_statement_schema_identifier);
+        let query_xof_codec = typed_foundation_tuple_memory_accounting(
+            TRANSCRIPT_SQUEEZE_DOMAIN,
+            vec![
+                CanonicalItem::hash512([0_u8; Hash512::BYTE_LENGTH]),
+                CanonicalItem::nonempty_ascii(&query_tag)
+                    .map_err(|_| TranscriptError::CanonicalEncoding)?,
+                CanonicalItem::unsigned64(0),
+            ],
+        )?;
+
+        let extension_initial_codec = typed_foundation_tuple_memory_accounting(
+            TRANSCRIPT_SQUEEZE_DOMAIN,
+            vec![
+                CanonicalItem::hash512([0_u8; Hash512::BYTE_LENGTH]),
+                CanonicalItem::nonempty_ascii(&maximum_challenge_tag)
+                    .map_err(|_| TranscriptError::CanonicalEncoding)?,
+                CanonicalItem::unsigned64(0),
+            ],
+        )?;
+        let rejected_tag = format!("{maximum_challenge_tag}/rejected");
+        let extension_rejection_codec = typed_foundation_tuple_memory_accounting(
+            TRANSCRIPT_ABSORB_DOMAIN,
+            vec![
+                CanonicalItem::hash512([0_u8; Hash512::BYTE_LENGTH]),
+                CanonicalItem::nonempty_ascii(&rejected_tag)
+                    .map_err(|_| TranscriptError::CanonicalEncoding)?,
+            ],
+        )?;
+
+        let round_tags = [
+            CommonProofRound::BaseRoot { tree_ordinal: 0 },
+            CommonProofRound::AuxiliaryRoot { tree_ordinal: 0 },
+            CommonProofRound::QuotientRoot {
+                component_ordinal: self.quotient_component_count - 1,
+            },
+            CommonProofRound::DeepValues,
+            CommonProofRound::OpeningBatchMaskRoot,
+            CommonProofRound::FriLayerRoot {
+                fold_ordinal: self.fri_fold_count - 1,
+            },
+            CommonProofRound::FriTerminal,
+            CommonProofRound::QueryOpenings,
+        ]
+        .map(|round| round.tag(application_statement_schema_identifier));
+        let maximum_round_tag = round_tags
+            .into_iter()
+            .max_by_key(String::capacity)
+            .ok_or(TranscriptError::InvalidCommonProofSchedule)?;
+        let response_codec = typed_foundation_tuple_memory_accounting(
+            TRANSCRIPT_ABSORB_DOMAIN,
+            vec![
+                CanonicalItem::hash512([0_u8; Hash512::BYTE_LENGTH]),
+                CanonicalItem::nonempty_ascii(&maximum_round_tag)
+                    .map_err(|_| TranscriptError::CanonicalEncoding)?,
+                CanonicalItem::variable_bytes(vec![
+                    0_u8;
+                    usize::try_from(
+                        pending_challenge_output_byte_length,
+                    )
+                    .map_err(
+                        |_| TranscriptError::ChallengeCounterOverflow,
+                    )?
+                ])
+                .map_err(|_| TranscriptError::CanonicalEncoding)?,
+                CanonicalItem::variable_bytes(vec![0_u8; Hash512::BYTE_LENGTH])
+                    .map_err(|_| TranscriptError::CanonicalEncoding)?,
+            ],
+        )?;
+        let accepted_tag = format!("{maximum_challenge_tag}/accepted");
+        let close_pending_codec = typed_foundation_tuple_memory_accounting(
+            TRANSCRIPT_ABSORB_DOMAIN,
+            vec![
+                CanonicalItem::hash512([0_u8; Hash512::BYTE_LENGTH]),
+                CanonicalItem::nonempty_ascii(&accepted_tag)
+                    .map_err(|_| TranscriptError::CanonicalEncoding)?,
+                CanonicalItem::variable_bytes(vec![
+                    0_u8;
+                    usize::try_from(
+                        pending_challenge_output_byte_length,
+                    )
+                    .map_err(
+                        |_| TranscriptError::ChallengeCounterOverflow,
+                    )?
+                ])
+                .map_err(|_| TranscriptError::CanonicalEncoding)?,
+            ],
+        )?;
+        let maximum_transcript_codec_overlap_byte_length = [
+            product_sampler_memory_accounting
+                .typed_xof_memory_accounting()
+                .total_byte_length(),
+            query_xof_codec.total_byte_length(),
+            extension_initial_codec.total_byte_length(),
+            extension_rejection_codec.total_byte_length(),
+            response_codec.total_byte_length(),
+            close_pending_codec.total_byte_length(),
+        ]
+        .into_iter()
+        .max()
+        .unwrap_or(0);
+
+        let query_tag_byte_length = usize_memory_byte_length(query_tag.capacity())?;
+        let query_xof_draw_overlap_byte_length = [
+            query_tag_byte_length,
+            query_xof_output_buffer_byte_length,
+            query_xof_codec.total_byte_length(),
+        ]
+        .into_iter()
+        .try_fold(0_u64, checked_memory_add)?;
+        let query_xof_split_overlap_byte_length = [
+            query_tag_byte_length,
+            query_xof_output_buffer_byte_length,
+            query_xof_split_tail_byte_length,
+        ]
+        .into_iter()
+        .try_fold(0_u64, checked_memory_add)?;
+        let query_decode_overlap_byte_length = [
+            query_tag_byte_length,
+            query_xof_split_tail_byte_length,
+            accepted_query_catalog_byte_length,
+        ]
+        .into_iter()
+        .try_fold(0_u64, checked_memory_add)?;
+        let query_return_overlap_byte_length = checked_memory_add(
+            query_tag_byte_length,
+            checked_memory_multiply(accepted_query_catalog_byte_length, 3)?,
+        )?;
+        let product_output_overlap_byte_length = checked_memory_add(
+            product_sampler_memory_accounting.challenge_tag_byte_length(),
+            checked_memory_multiply(
+                product_sampler_memory_accounting.accepted_coordinate_vector_byte_length(),
+                2,
+            )?,
+        )?;
+        let maximum_output_overlap_byte_length = [
+            query_xof_draw_overlap_byte_length,
+            query_xof_split_overlap_byte_length,
+            query_decode_overlap_byte_length,
+            query_return_overlap_byte_length,
+            product_output_overlap_byte_length,
+        ]
+        .into_iter()
+        .max()
+        .unwrap_or(0);
+
+        let extension_sampler_big_integer_limb_working_set_byte_length =
+            extension_sampler_big_integer_limb_working_set_byte_length()?;
+        let extension_sampler_transient_byte_length = [
+            pending_challenge_tag_byte_length,
+            deep_point_prior_catalog_clone_byte_length,
+            extension_sampler_big_integer_limb_working_set_byte_length.max(
+                extension_initial_codec
+                    .total_byte_length()
+                    .max(extension_rejection_codec.total_byte_length()),
+            ),
+        ]
+        .into_iter()
+        .try_fold(0_u64, checked_memory_add)?;
+        let persistent_transcript_byte_length = [
+            schedule_catalog_byte_length,
+            accepted_deep_point_catalog_byte_length,
+            accepted_query_catalog_byte_length,
+            pending_challenge_tag_byte_length,
+            pending_challenge_output_byte_length,
+        ]
+        .into_iter()
+        .try_fold(0_u64, checked_memory_add)?;
+        let maximum_transient_byte_length = product_sampler_memory_accounting
+            .maximum_peak_byte_length()
+            .max(extension_sampler_transient_byte_length)
+            .max(maximum_transcript_codec_overlap_byte_length)
+            .max(maximum_output_overlap_byte_length);
+
+        Ok(CommonProofTranscriptMemoryAccounting {
+            schedule_catalog_byte_length,
+            accepted_deep_point_catalog_byte_length,
+            accepted_query_catalog_byte_length,
+            pending_challenge_tag_byte_length,
+            pending_challenge_output_byte_length,
+            product_sampler_memory_accounting,
+            extension_sampler_big_integer_limb_working_set_byte_length,
+            deep_point_prior_catalog_clone_byte_length,
+            query_xof_output_buffer_byte_length,
+            query_xof_split_tail_byte_length,
+            maximum_transcript_codec_overlap_byte_length,
+            maximum_output_overlap_byte_length,
+            persistent_transcript_byte_length,
+            maximum_transient_byte_length,
+        })
     }
 
     pub(crate) const fn composition_challenge_count(&self) -> u16 {
@@ -1329,6 +2061,17 @@ impl CommonProofTranscript {
         canonical_proof_object_header_bytes: &[u8],
         schedule: CommonProofTranscriptSchedule,
     ) -> Result<Self, TranscriptError> {
+        let mut accepted_deep_points = Vec::new();
+        accepted_deep_points
+            .try_reserve_exact(usize::from(schedule.deep_point_count))
+            .map_err(|_| TranscriptError::ChallengeCounterOverflow)?;
+        let mut accepted_query_representatives = Vec::new();
+        accepted_query_representatives
+            .try_reserve_exact(
+                usize::try_from(schedule.unique_query_count)
+                    .map_err(|_| TranscriptError::ChallengeCounterOverflow)?,
+            )
+            .map_err(|_| TranscriptError::ChallengeCounterOverflow)?;
         let mut result = Self {
             transcript: CanonicalProofTranscript::try_new(
                 protocol_version,
@@ -1338,8 +2081,8 @@ impl CommonProofTranscript {
             )?,
             schedule,
             progress: CommonProofProgress::BaseRoots(0),
-            accepted_deep_points: Vec::new(),
-            accepted_query_representatives: Vec::new(),
+            accepted_deep_points,
+            accepted_query_representatives,
         };
         result.skip_empty_prefix_phases();
         Ok(result)
@@ -1667,7 +2410,6 @@ impl CommonProofTranscript {
         let (stream, verifier_randomness) = self
             .transcript
             .begin_common_xof_challenge(CommonProofChallenge::QueryVector, random_byte_length)?;
-        let mut selected = BTreeSet::new();
         let mut randomness_offset = 0_usize;
         for _ in 0..self.schedule.unique_query_count {
             let mut accepted = None;
@@ -1683,7 +2425,7 @@ impl CommonProofTranscript {
                 canonical_candidate[..candidate_byte_length].copy_from_slice(candidate_bytes);
                 let candidate =
                     u64::from_le_bytes(canonical_candidate) % self.schedule.query_orbit_count;
-                if selected.insert(candidate) {
+                if !self.accepted_query_representatives.contains(&candidate) {
                     accepted = Some(candidate);
                     break;
                 }
@@ -2427,6 +3169,36 @@ mod common_challenge_chain_tests {
                 .maximum_application_challenge_sampler_scratch_byte_length()
                 .expect("the sampler scratch derives"),
             65,
+        );
+
+        let memory = schedule
+            .live_payload_memory_accounting(0x1302)
+            .expect("the complete transcript payload ledger derives");
+        let product_memory = memory.product_sampler_memory_accounting();
+        assert_eq!(product_memory.reusable_candidate_buffer_byte_length(), 65);
+        assert_eq!(product_memory.accepted_coordinate_vector_byte_length(), 513 * 8);
+        assert!(product_memory.challenge_tag_byte_length() > 0);
+        assert!(product_memory.big_integer_limb_working_set_byte_length() > 65);
+        assert!(
+            product_memory.maximum_peak_byte_length()
+                >= product_memory.accepted_decode_peak_byte_length()
+        );
+        assert_eq!(
+            memory.accepted_deep_point_catalog_byte_length(),
+            std::mem::size_of::<ProofChallengeExtensionElement>() as u64,
+        );
+        assert_eq!(memory.accepted_query_catalog_byte_length(), 8);
+        assert_eq!(memory.query_xof_output_buffer_byte_length(), 64 + 128);
+        assert_eq!(memory.query_xof_split_tail_byte_length(), 128);
+        assert_eq!(memory.deep_point_prior_catalog_clone_byte_length(), 0);
+        assert!(memory.schedule_catalog_byte_length() > 0);
+        assert!(memory.pending_challenge_tag_byte_length() > 0);
+        assert_eq!(memory.pending_challenge_output_byte_length(), 513 * 8);
+        assert!(memory.maximum_transcript_codec_overlap_byte_length() > 513 * 8);
+        assert!(memory.maximum_output_overlap_byte_length() >= 2 * 513 * 8);
+        assert!(
+            memory.maximum_transient_byte_length()
+                >= product_memory.maximum_peak_byte_length()
         );
     }
 

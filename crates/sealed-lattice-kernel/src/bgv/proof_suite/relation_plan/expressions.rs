@@ -28,6 +28,46 @@ use super::{
     },
 };
 
+pub(super) fn checked_resident_payload_add(
+    left: u64,
+    right: u64,
+) -> Result<u64, RelationPlanError> {
+    left.checked_add(right).ok_or(RelationPlanError::CountOverflow)
+}
+
+pub(super) fn resident_vec_storage_byte_length<Value>(
+    values: &Vec<Value>,
+) -> Result<u64, RelationPlanError> {
+    u64::try_from(values.capacity())
+        .ok()
+        .and_then(|capacity| {
+            capacity.checked_mul(u64::try_from(std::mem::size_of::<Value>()).ok()?)
+        })
+        .ok_or(RelationPlanError::CountOverflow)
+}
+
+pub(super) fn resident_string_payload_byte_length(
+    value: &String,
+) -> Result<u64, RelationPlanError> {
+    u64::try_from(value.capacity()).map_err(|_| RelationPlanError::CountOverflow)
+}
+
+pub(super) fn resident_big_unsigned_integer_payload_byte_length(
+    value: &BigUint,
+) -> Result<u64, RelationPlanError> {
+    value
+        .bits()
+        .checked_add(31)
+        .and_then(|bits| bits.div_ceil(32).checked_mul(4))
+        .ok_or(RelationPlanError::CountOverflow)
+}
+
+pub(super) fn resident_big_signed_integer_payload_byte_length(
+    value: &BigInt,
+) -> Result<u64, RelationPlanError> {
+    resident_big_unsigned_integer_payload_byte_length(value.magnitude())
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum RelationExpressionInstruction {
     BaseFieldConstant(u64),
@@ -82,6 +122,28 @@ impl RelationConstraintColumnQuery {
 }
 
 impl RelationExpressionInstruction {
+    pub(super) fn resident_owned_payload_byte_length(&self) -> Result<u64, RelationPlanError> {
+        match self {
+            Self::TranscriptChallenge {
+                role_coordinates, ..
+            } => resident_vec_storage_byte_length(role_coordinates),
+            Self::TraceDomainExceptRoots {
+                ordered_excluded_roots,
+                ..
+            } => resident_vec_storage_byte_length(ordered_excluded_roots),
+            Self::BaseFieldConstant(_)
+            | Self::NonNativeModulusConstant { .. }
+            | Self::EvaluationVariable
+            | Self::ColumnValue { .. }
+            | Self::Addition
+            | Self::Multiplication
+            | Self::Negation
+            | Self::NonnegativePower(_)
+            | Self::FrobeniusConjugate(_)
+            | Self::RadixConvolutionCoefficient { .. } => Ok(0),
+        }
+    }
+
     pub(super) fn canonical_tuple(&self) -> Result<CanonicalTuple, RelationPlanError> {
         Ok(match self {
             Self::BaseFieldConstant(value) => CanonicalTuple::new(

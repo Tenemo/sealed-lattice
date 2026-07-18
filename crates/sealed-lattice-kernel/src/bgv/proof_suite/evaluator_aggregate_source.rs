@@ -6,7 +6,6 @@ use core::mem::size_of;
 use zeroize::Zeroizing;
 
 use crate::{
-    bgv::setup::VerifiedAcceptedSetupEvaluatorSourceCatalog,
     foundation::{
         CanonicalItemType, CanonicalStreamReadbackVerifier, FOUNDATION_PROFILE, Hash512,
         ProofApplicationSlotCeilings,
@@ -24,8 +23,10 @@ use super::{
     ProofBaseFieldElement, ProvidedCommonProofSourcePolynomial, RelationPlanCheckContext,
     RelationPlanVariant, RelationProofTreeInput, RelationTreeDescriptor,
     SelectedApplicationStatementContext, SelectedEvaluatorEntryKind,
-    SelectedEvaluatorEntryPosition, SetupPublicPolynomialContext, SetupPublicPolynomialRootRole,
-    StatementOwnedProofTreeInput, VerifiedEvaluatorKeyStoreMaterial, VerifiedEvaluatorRuntimeRoot,
+    SelectedEvaluatorEntryPosition, SelectedEvaluatorStoreSource,
+    SelectedEvaluatorStoreSourceCatalog, SetupPublicPolynomialContext,
+    SetupPublicPolynomialRootRole, StatementOwnedProofTreeInput,
+    VerifiedEvaluatorKeyStoreMaterial, VerifiedEvaluatorRuntimeRoot,
     VerifiedKeySwitchComponentMaterial, decode_selected_application_statement,
     selected_evaluator_aggregate_entry_roots_in_order, selected_evaluator_entry_positions,
     verified_application_statement_hash,
@@ -402,13 +403,16 @@ impl SelectedEvaluatorAggregateSourcePolynomialProvider {
     /// provider from verifier-owned source and store material. The statement
     /// roots, selected plan variant, physical store layout, and every source
     /// material capability must agree before any byte request can be emitted.
-    pub(crate) fn prepare(
+    pub(crate) fn prepare<SourceCatalog>(
         relation_plan: &CompiledRelationPlan,
-        source_catalog: &VerifiedAcceptedSetupEvaluatorSourceCatalog,
+        source_catalog: &SourceCatalog,
         store_material: &VerifiedEvaluatorKeyStoreMaterial,
         ordered_runtime_roots: &[VerifiedEvaluatorRuntimeRoot],
         canonical_application_statement_bytes: &[u8],
-    ) -> Result<(Vec<RelationProofTreeInput>, Self), CommonProofProverError> {
+    ) -> Result<(Vec<RelationProofTreeInput>, Self), CommonProofProverError>
+    where
+        SourceCatalog: SelectedEvaluatorStoreSourceCatalog + ?Sized,
+    {
         let top_count = store_material.top_count();
         let positions = selected_evaluator_entry_positions(top_count)
             .map_err(|_| CommonProofProverError::InvalidInput)?;
@@ -487,8 +491,9 @@ impl SelectedEvaluatorAggregateSourcePolynomialProvider {
                 .filter(|entry| entry.position() == position)
                 .ok_or(CommonProofProverError::InvalidInput)?;
             for roster_position in 0..FOUNDATION_PROFILE.participant_count {
-                let material = source_catalog
-                    .component_material(roster_position, position)
+                let source = source_catalog
+                    .component_source(roster_position, position)
+                    .map_err(|_| CommonProofProverError::InvalidInput)?
                     .ok_or(CommonProofProverError::InvalidInput)?;
                 let expected_root = source_catalog
                     .component_root(roster_position, position)
@@ -502,17 +507,18 @@ impl SelectedEvaluatorAggregateSourcePolynomialProvider {
                 let public_polynomial_context_hash = source_catalog
                     .component_public_polynomial_context_hash(roster_position, position)
                     .ok_or(CommonProofProverError::InvalidInput)?;
-                source_descriptions.push(prepare_authenticated_source(
+                let topology = source.topology().clone();
+                source_descriptions.push(prepare_authenticated_catalog_source(
                     source_catalog_binding,
                     position,
                     roster_position,
                     0,
-                    material,
+                    source,
                 )?);
                 relation_trees.push(setup_polynomial_tree_input(
                     public_polynomial_context_hash,
                     expected_root,
-                    material.topology(),
+                    &topology,
                 )?);
             }
 
@@ -993,6 +999,52 @@ fn prepare_authenticated_source(
     storage_byte_offset: u64,
     material: &VerifiedKeySwitchComponentMaterial,
 ) -> Result<EvaluatorAggregateAuthenticatedSource, CommonProofProverError> {
+    prepare_authenticated_source_parts(
+        source_catalog_binding,
+        position,
+        source_role,
+        storage_byte_offset,
+        material.topology().clone(),
+        material.material_root().into_bytes(),
+        material.stream_descriptor().clone(),
+        material
+            .begin_authenticated_readback()
+            .map_err(|_| CommonProofProverError::InvalidInput)?,
+    )
+}
+
+fn prepare_authenticated_catalog_source(
+    source_catalog_binding: [u8; Hash512::BYTE_LENGTH],
+    position: SelectedEvaluatorEntryPosition,
+    source_role: u16,
+    storage_byte_offset: u64,
+    source: SelectedEvaluatorStoreSource,
+) -> Result<EvaluatorAggregateAuthenticatedSource, CommonProofProverError> {
+    let (topology, material_root, stream_descriptor, readback) =
+        source.into_authenticated_parts();
+    prepare_authenticated_source_parts(
+        source_catalog_binding,
+        position,
+        source_role,
+        storage_byte_offset,
+        topology,
+        material_root,
+        stream_descriptor,
+        readback,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn prepare_authenticated_source_parts(
+    source_catalog_binding: [u8; Hash512::BYTE_LENGTH],
+    position: SelectedEvaluatorEntryPosition,
+    source_role: u16,
+    storage_byte_offset: u64,
+    topology: KeySwitchComponentMaterialTopology,
+    material_root: [u8; Hash512::BYTE_LENGTH],
+    stream_descriptor: crate::foundation::StreamDescriptor,
+    readback: CanonicalStreamReadbackVerifier,
+) -> Result<EvaluatorAggregateAuthenticatedSource, CommonProofProverError> {
     let (entry_kind, galois_element, catalog_level) = match position.key_kind() {
         SelectedEvaluatorEntryKind::Relinearization { catalog_level } => {
             (RELINEARIZATION_ENTRY_KIND_BINDING, 0_u64, catalog_level)
@@ -1008,8 +1060,7 @@ fn prepare_authenticated_source(
     };
     let catalog_level =
         u64::try_from(catalog_level).map_err(|_| CommonProofProverError::CountOverflow)?;
-    let material_root = material.material_root().into_bytes();
-    let stream_full_object_digest = material.full_object_digest().into_bytes();
+    let stream_full_object_digest = stream_descriptor.full_object_digest.into_bytes();
     let descriptor_binding = hash_framed_parts_512(
         EVALUATOR_SOURCE_DESCRIPTOR_BINDING_DOMAIN,
         &[
@@ -1022,21 +1073,17 @@ fn prepare_authenticated_source(
             &storage_byte_offset.to_le_bytes(),
             &material_root,
             &stream_full_object_digest,
-            &material.total_byte_length().to_le_bytes(),
+            &stream_descriptor.total_byte_length.to_le_bytes(),
         ],
     );
     Ok(EvaluatorAggregateAuthenticatedSource {
         material_root,
-        topology: material.topology().clone(),
-        stream_total_byte_length: material.total_byte_length(),
+        topology,
+        stream_total_byte_length: stream_descriptor.total_byte_length,
         stream_full_object_digest,
         storage_byte_offset,
         descriptor_binding,
-        readback: Some(
-            material
-                .begin_authenticated_readback()
-                .map_err(|_| CommonProofProverError::InvalidInput)?,
-        ),
+        readback: Some(readback),
     })
 }
 

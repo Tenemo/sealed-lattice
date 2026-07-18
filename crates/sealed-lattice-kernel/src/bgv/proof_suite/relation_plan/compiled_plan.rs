@@ -2,7 +2,10 @@ use crate::foundation::{CanonicalItem, CanonicalItemType, CanonicalTuple};
 
 use super::{
     checking::RelationPlanChecker,
-    expressions::{canonical_nested_list, encode_generated_tuple, hash_generated_variable_bytes},
+    expressions::{
+        canonical_nested_list, encode_generated_tuple, hash_generated_variable_bytes,
+        resident_vec_storage_byte_length,
+    },
     layout::RelationPlanVariant,
     model::{RelationPlanError, SuiteModulusReference, canonical_encoding_error},
     schema::{
@@ -210,6 +213,10 @@ pub(crate) struct RelationPlanCheckContext {
 }
 
 impl RelationPlanCheckContext {
+    pub(crate) fn resident_owned_payload_byte_length(&self) -> Result<u64, RelationPlanError> {
+        resident_vec_storage_byte_length(&self.resolved_moduli)
+    }
+
     pub(crate) fn resolved_modulus(
         &self,
         reference: SuiteModulusReference,

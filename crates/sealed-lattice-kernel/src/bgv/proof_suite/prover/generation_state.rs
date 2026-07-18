@@ -753,6 +753,13 @@ impl CommonProofGenerationStateMachine {
             relation_context,
             &transcript_schedule,
             &catalog,
+            &storage_plan,
+            validated_artifact.application_statement_schema_identifier(),
+            u64::try_from(canonical_header_bytes.len()).map_err(|_| {
+                CommonProofGenerationInitializationError::Prover(
+                    CommonProofProverError::CountOverflow,
+                )
+            })?,
             maximum_prefetched_query_byte_length,
             u64::from(maximum_external_memory_chunk_byte_length),
             u64::try_from(maximum_proof_transport_chunk_byte_length).map_err(|_| {
@@ -784,6 +791,24 @@ impl CommonProofGenerationStateMachine {
                 )? = true;
             }
         }
+        let application_challenge_assignment_count = transcript_schedule
+            .ordered_application_challenge_groups()
+            .iter()
+            .try_fold(0_usize, |total, group| {
+                total
+                    .checked_add(usize::from(group.coordinate_count()))
+                    .ok_or(CommonProofGenerationInitializationError::Prover(
+                        CommonProofProverError::CountOverflow,
+                    ))
+            })?;
+        let mut application_challenges = Vec::new();
+        application_challenges
+            .try_reserve_exact(application_challenge_assignment_count)
+            .map_err(|_| {
+                CommonProofGenerationInitializationError::Prover(
+                    CommonProofProverError::AllocationLimitExceeded,
+                )
+            })?;
         Ok(Self {
             protocol_version,
             suite_identifier,
@@ -818,7 +843,7 @@ impl CommonProofGenerationStateMachine {
             pending_authenticated_source_read: None,
             auxiliary_column_synthesis_cursor: None,
             current_relation_column: None,
-            application_challenges: Vec::new(),
+            application_challenges,
             quotient_builder: None,
             quotient_component_cursor: None,
             current_quotient_component: None,

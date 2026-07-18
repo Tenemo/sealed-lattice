@@ -6,11 +6,12 @@ use crate::{
     bgv::proof_suite::{
         AuthenticatedCompactCommittedMaterialSource, CommittedMaterialContext,
         CommittedMaterialRole, CommittedMaterialSourcePolynomialAdapter, CommittedMaterialTree,
+        ComponentMaterialOwnershipBinding, ComponentPublicPolynomialRuntimeError,
         CommonProofGenerationAuthorization, CommonProofGenerationPreparationError,
         CommonProofGenerationSources, CommonProofPrivateCoinCoordinateCapacity,
         CommonProofProverError, CommonProofRelationPlanCapability, CommonProofRuntimeError,
         CommonProofRuntimeLimits, CompactCommittedMaterialSource,
-        GaloisKeyShareSourcePolynomialAdapter,
+        GaloisKeyShareSourcePolynomialAdapter, KeySwitchComponentPublicPolynomialStream,
         KeySwitchComponentMaterialTopology, PreparedCommonProofGeneration,
         PrivateRandomnessCommonProofCoinSource, ProofBaseFieldElement, ProofEvaluationDomain,
         RelationPlanVariant, SelectedEvaluatorEntryKind, SelectedEvaluatorEntryPosition,
@@ -24,13 +25,19 @@ use crate::{
         selected_galois_key_share_batch_schedule, selected_galois_key_share_relation_plan_input,
         selected_relation_plan_check_context, selected_relation_plans,
         verified_application_statement_hash, galois_relation_tree_inputs,
+        VerifiedEvaluatorAuxiliaryRoot, VerifiedKeySwitchComponentMaterial,
     },
     bgv::setup::{
         SETUP_COMMITMENT_HIDING_ERROR_WIDTH, SETUP_COMMITMENT_HIDING_SECRET_WIDTH,
         SETUP_COMMITMENT_MODULE_RANK, SETUP_COMMITMENT_MODULUS_LIMB_INDICES,
+        sample_galois_common_reference_limb,
+        sampling::{
+            DATA_MODULUS_CATALOG_IDENTIFIER, SPECIAL_MODULUS_CATALOG_IDENTIFIER,
+        },
     },
     foundation::{
-        ActionPrivateRandomness, CanonicalStreamDomain, FOUNDATION_PROFILE, Hash512,
+        ActionPrivateRandomness, CanonicalStreamDomain, CanonicalStreamReadbackVerifier,
+        FOUNDATION_PROFILE, Hash512,
         PersistentProofCoinInput, PreparedActionProofAttemptSource, ProofApplicationSlotCeilings,
         RefusalReason, StreamDescriptor, WitnessBoundPreparedActionProofAttemptSource,
         bind_prepared_action_proof_attempt_to_canonical_witness,
@@ -44,6 +51,17 @@ const MAXIMUM_RETAINED_SETUP_GENERATION_RECIPIENT_PAYLOAD_SOURCE_COUNT: usize =
         * FOUNDATION_PROFILE.participant_count as usize;
 const GALOIS_KEY_SHARE_CANONICAL_SEMANTIC_WITNESS_DOMAIN: &[u8] =
     b"sealed-lattice/galois-key-share/canonical-semantic-witness/v1";
+
+const fn generated_galois_stream_refusal(
+    error: ComponentPublicPolynomialRuntimeError,
+) -> RefusalReason {
+    match error {
+        ComponentPublicPolynomialRuntimeError::Refusal(refusal_reason) => refusal_reason,
+        ComponentPublicPolynomialRuntimeError::PublicPolynomial(_) => {
+            RefusalReason::WrongHashOrRoot
+        }
+    }
+}
 
 /// Opaque browser-owned setup-generation capability. It is deliberately not
 /// cloneable or serializable; JavaScript can retain only the numeric handle
@@ -153,12 +171,241 @@ impl SetupGeneratedKeySwitchComponent {
     }
 }
 
+/// One exact generated Galois B component retained only as input to the
+/// suite-fixed evaluator aggregate prover. This is generation authority, not
+/// verification authority: accepted setup can obtain the corresponding
+/// source only by positively verifying the package-bound `0x1217` proof.
+pub(crate) struct SetupGeneratedGaloisSourceComponent {
+    evaluator_position: SelectedEvaluatorEntryPosition,
+    material: VerifiedKeySwitchComponentMaterial,
+    contribution_root: [u8; Hash512::BYTE_LENGTH],
+    public_polynomial_context_hash: [u8; Hash512::BYTE_LENGTH],
+}
+
+impl SetupGeneratedGaloisSourceComponent {
+    pub(crate) const fn evaluator_position(&self) -> SelectedEvaluatorEntryPosition {
+        self.evaluator_position
+    }
+
+    pub(crate) const fn topology(&self) -> &KeySwitchComponentMaterialTopology {
+        self.material.topology()
+    }
+
+    pub(crate) const fn stream_descriptor(&self) -> &StreamDescriptor {
+        self.material.stream_descriptor()
+    }
+
+    pub(crate) const fn material_root(&self) -> Hash512 {
+        self.material.material_root()
+    }
+
+    pub(crate) const fn contribution_root(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.contribution_root
+    }
+
+    pub(crate) const fn public_polynomial_context_hash(
+        &self,
+    ) -> [u8; Hash512::BYTE_LENGTH] {
+        self.public_polynomial_context_hash
+    }
+
+    pub(crate) fn begin_authenticated_readback(
+        &self,
+    ) -> Result<CanonicalStreamReadbackVerifier, RefusalReason> {
+        self.material.begin_authenticated_readback()
+    }
+}
+
+/// Non-cloneable, generation-only authority for one participant's exact
+/// suite-fixed Galois source batch. It is consumed by `0x1218` proving and is
+/// never admitted to the verified evaluator-source catalog.
+pub(crate) struct SetupGeneratedGaloisSourceAuthority {
+    protocol_version: u16,
+    suite_identifier: [u8; Hash512::BYTE_LENGTH],
+    ceremony_context_hash: [u8; Hash512::BYTE_LENGTH],
+    action_context_hash: [u8; Hash512::BYTE_LENGTH],
+    roster_hash: [u8; Hash512::BYTE_LENGTH],
+    setup_proof_context_hash: [u8; Hash512::BYTE_LENGTH],
+    participant_identity: [u8; Hash512::BYTE_LENGTH],
+    roster_position: u16,
+    batch_schedule_position: u32,
+    anchor_commitment_roots: [[u8; Hash512::BYTE_LENGTH]; 3],
+    canonical_application_statement_bytes: Box<[u8]>,
+    ordered_auxiliary_roots: Box<[VerifiedEvaluatorAuxiliaryRoot]>,
+    ordered_components: Box<[SetupGeneratedGaloisSourceComponent]>,
+}
+
+impl SetupGeneratedGaloisSourceAuthority {
+    pub(crate) const fn protocol_version(&self) -> u16 {
+        self.protocol_version
+    }
+
+    pub(crate) const fn suite_identifier(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.suite_identifier
+    }
+
+    pub(crate) const fn ceremony_context_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.ceremony_context_hash
+    }
+
+    pub(crate) const fn action_context_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.action_context_hash
+    }
+
+    pub(crate) const fn roster_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.roster_hash
+    }
+
+    pub(crate) const fn setup_proof_context_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.setup_proof_context_hash
+    }
+
+    pub(crate) const fn participant_identity(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.participant_identity
+    }
+
+    pub(crate) const fn roster_position(&self) -> u16 {
+        self.roster_position
+    }
+
+    pub(crate) const fn batch_schedule_position(&self) -> u32 {
+        self.batch_schedule_position
+    }
+
+    pub(crate) const fn anchor_commitment_roots(&self) -> [[u8; Hash512::BYTE_LENGTH]; 3] {
+        self.anchor_commitment_roots
+    }
+
+    pub(crate) fn canonical_application_statement_bytes(&self) -> &[u8] {
+        &self.canonical_application_statement_bytes
+    }
+
+    pub(crate) fn ordered_auxiliary_roots(&self) -> &[VerifiedEvaluatorAuxiliaryRoot] {
+        &self.ordered_auxiliary_roots
+    }
+
+    pub(crate) fn ordered_components(&self) -> &[SetupGeneratedGaloisSourceComponent] {
+        &self.ordered_components
+    }
+}
+
 /// One Galois relation witness entry. Error polynomials are retained by data
 /// block because the same centered integer must be represented in every
 /// extended Q/P limb of that block.
 pub(crate) struct SetupGeneratedGaloisEntry {
     component: SetupGeneratedKeySwitchComponent,
     centered_error_polynomials_by_block: Box<[Zeroizing<Vec<i8>>]>,
+}
+
+/// One reset-stable public-key share generated from the authority-owned
+/// common secret and one eta-two error polynomial. The tree root is recomputed
+/// from these exact coefficients; no separately supplied root is retained.
+pub(crate) struct SetupGeneratedPublicKeyShare {
+    public_polynomial_context_hash: [u8; Hash512::BYTE_LENGTH],
+    root: [u8; Hash512::BYTE_LENGTH],
+    ordered_data_modulus_indices: Box<[u16]>,
+    ordered_limb_coefficients: Box<[Zeroizing<Vec<u64>>]>,
+    centered_error_coefficients: Zeroizing<Vec<i8>>,
+}
+
+impl SetupGeneratedPublicKeyShare {
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn from_browser_owned_witness(
+        setup_proof_context_hash: [u8; Hash512::BYTE_LENGTH],
+        participant_identity: [u8; Hash512::BYTE_LENGTH],
+        roster_position: u16,
+        evaluation_domain_size: usize,
+        source_polynomial_degree_bound_exclusive: usize,
+        ordered_data_modulus_indices: Vec<u16>,
+        ordered_limb_coefficients: Vec<Zeroizing<Vec<u64>>>,
+        centered_error_coefficients: Zeroizing<Vec<i8>>,
+    ) -> Result<Self, RefusalReason> {
+        if source_polynomial_degree_bound_exclusive == 0
+            || !source_polynomial_degree_bound_exclusive.is_power_of_two()
+            || ordered_data_modulus_indices.is_empty()
+            || ordered_data_modulus_indices.len() != ordered_limb_coefficients.len()
+            || centered_error_coefficients.len() != source_polynomial_degree_bound_exclusive
+            || centered_error_coefficients
+                .iter()
+                .any(|coefficient| !(-2..=2).contains(coefficient))
+        {
+            return Err(RefusalReason::WrongTypeOrLength);
+        }
+        let context = SetupPublicPolynomialContext::public_key_share(
+            setup_proof_context_hash,
+            participant_identity,
+            roster_position,
+        )
+        .map_err(|_| RefusalReason::WrongContext)?;
+        let half_degree = source_polynomial_degree_bound_exclusive / 2;
+        let mut ordered_coefficient_columns = Vec::with_capacity(
+            ordered_limb_coefficients
+                .len()
+                .checked_mul(2)
+                .ok_or(RefusalReason::OutsideSupportedProfile)?,
+        );
+        for (data_modulus_index, coefficients) in ordered_data_modulus_indices
+            .iter()
+            .copied()
+            .zip(&ordered_limb_coefficients)
+        {
+            let modulus = *crate::bgv::parameters::DATA_PRIMES
+                .get(usize::from(data_modulus_index))
+                .ok_or(RefusalReason::UnsupportedVersionOrSuite)?;
+            if coefficients.len() != source_polynomial_degree_bound_exclusive
+                || coefficients.iter().any(|coefficient| *coefficient >= modulus)
+            {
+                return Err(RefusalReason::WrongTypeOrLength);
+            }
+            for half_ordinal in 0..2 {
+                let start = half_ordinal
+                    .checked_mul(half_degree)
+                    .ok_or(RefusalReason::OutsideSupportedProfile)?;
+                ordered_coefficient_columns.push(
+                    coefficients[start..start + half_degree]
+                        .iter()
+                        .copied()
+                        .map(ProofBaseFieldElement::from_canonical)
+                        .collect::<Result<Vec<_>, _>>()
+                        .map_err(|_| RefusalReason::InvalidArithmeticRelation)?,
+                );
+            }
+        }
+        let tree = SetupPublicPolynomialTree::construct(SetupPublicPolynomialTreeInput {
+            context: &context,
+            evaluation_domain_size,
+            source_polynomial_degree_bound_exclusive,
+            ordered_coefficient_columns: &ordered_coefficient_columns,
+        })
+        .map_err(|_| RefusalReason::InvalidArithmeticRelation)?;
+        Ok(Self {
+            public_polynomial_context_hash: tree.public_polynomial_context_hash(),
+            root: tree.root(),
+            ordered_data_modulus_indices: ordered_data_modulus_indices.into_boxed_slice(),
+            ordered_limb_coefficients: ordered_limb_coefficients.into_boxed_slice(),
+            centered_error_coefficients,
+        })
+    }
+
+    pub(crate) const fn public_polynomial_context_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.public_polynomial_context_hash
+    }
+
+    pub(crate) const fn root(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.root
+    }
+
+    pub(crate) fn ordered_data_modulus_indices(&self) -> &[u16] {
+        &self.ordered_data_modulus_indices
+    }
+
+    pub(crate) fn ordered_limb_coefficients(&self) -> &[Zeroizing<Vec<u64>>] {
+        &self.ordered_limb_coefficients
+    }
+
+    pub(crate) fn centered_error_coefficients(&self) -> &[i8] {
+        &self.centered_error_coefficients
+    }
 }
 
 /// One exact lattice-anchor tree and its browser-owned reset-safe opening.
@@ -487,6 +734,7 @@ pub(crate) struct SetupGenerationAuthorityInput {
     pub(crate) anchor_commitment_roots: [[u8; Hash512::BYTE_LENGTH]; 3],
     pub(crate) anchor_openings: Vec<SetupGenerationAnchorOpening>,
     pub(crate) common_secret_coefficients: Zeroizing<Vec<i8>>,
+    pub(crate) public_key_share: SetupGeneratedPublicKeyShare,
     pub(crate) vss_material: SetupGeneratedVssMaterial,
     pub(crate) galois_batch_schedule_position: u32,
     pub(crate) ordered_galois_entries: Vec<SetupGeneratedGaloisEntry>,
@@ -517,6 +765,7 @@ struct SetupGenerationAuthority {
     anchor_commitment_roots: [[u8; Hash512::BYTE_LENGTH]; 3],
     anchor_openings: Box<[SetupGenerationAnchorOpening]>,
     common_secret_coefficients: Zeroizing<Vec<i8>>,
+    public_key_share: SetupGeneratedPublicKeyShare,
     vss_material: SetupGeneratedVssMaterial,
     galois_batch_schedule_position: u32,
     ordered_galois_entries: Box<[SetupGeneratedGaloisEntry]>,
@@ -543,6 +792,14 @@ impl SetupGenerationAuthority {
             .setup_action_randomness_authorization(Hash512::from_bytes(input.roster_hash))
             .map_err(|_| RefusalReason::WrongContext)?
             .into_bytes();
+        let expected_public_key_share_context_hash =
+            SetupPublicPolynomialContext::public_key_share(
+                input.setup_proof_context_hash,
+                input.participant_identity,
+                input.roster_position,
+            )
+            .and_then(|context| context.context_hash())
+            .map_err(|_| RefusalReason::WrongContext)?;
         if *roster_participant != input.participant_identity
             || input.ordered_roster.len() != usize::from(FOUNDATION_PROFILE.participant_count)
             || action_randomness_derivation_input
@@ -573,6 +830,13 @@ impl SetupGenerationAuthority {
                 .common_secret_coefficients
                 .iter()
                 .any(|coefficient| !(-1..=1).contains(coefficient))
+            || input.public_key_share.ordered_data_modulus_indices()
+                != selected_committed_material_relation_plan_input()
+                    .map_err(|_| RefusalReason::UnsupportedVersionOrSuite)?
+                    .sharing_data_modulus_indices
+            || input.public_key_share.centered_error_coefficients().len() != ring_degree
+            || input.public_key_share.public_polynomial_context_hash()
+                != expected_public_key_share_context_hash
             || input
                 .ordered_galois_entries
                 .iter()
@@ -703,6 +967,7 @@ impl SetupGenerationAuthority {
             anchor_commitment_roots: input.anchor_commitment_roots,
             anchor_openings: input.anchor_openings.into_boxed_slice(),
             common_secret_coefficients: input.common_secret_coefficients,
+            public_key_share: input.public_key_share,
             vss_material: input.vss_material,
             galois_batch_schedule_position: input.galois_batch_schedule_position,
             ordered_galois_entries: input.ordered_galois_entries.into_boxed_slice(),
@@ -833,8 +1098,9 @@ impl SetupGenerationAuthority {
             || application_slot.application_statement_schema_identifier()
                 != ProofApplicationSlotCeilings::GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER
             || application_slot.roster_position() != Some(self.roster_position)
-            || application_slot.producer_sequence()
-                != Some(u64::from(self.galois_batch_schedule_position))
+            || application_slot.schedule_position()
+                != Some(self.galois_batch_schedule_position)
+            || application_slot.producer_sequence().is_some()
             || application
                 .prepared_attempt
                 .application_statement_hash()
@@ -1758,6 +2024,233 @@ impl SetupGenerationGaloisBatchSource<'_, '_> {
             coordinate_capacity,
         )
         .map_err(|_| RefusalReason::WrongContext)
+    }
+
+    fn recompute_galois_common_auxiliary_root(
+        &self,
+        entry: &SetupGeneratedGaloisEntry,
+        evaluation_domain_size: usize,
+    ) -> Result<VerifiedEvaluatorAuxiliaryRoot, RefusalReason> {
+        let component = entry.component();
+        let position = component.evaluator_position();
+        let SelectedEvaluatorEntryKind::Galois {
+            galois_element,
+            catalog_level,
+        } = position.key_kind()
+        else {
+            return Err(RefusalReason::WrongTypeOrLength);
+        };
+        let topology = component.topology();
+        let active_data_limb_count = catalog_level
+            .checked_add(1)
+            .ok_or(RefusalReason::OutsideSupportedProfile)?;
+        let polynomial_degree = topology.polynomial_degree();
+        let extended_limb_count = topology.extended_limb_count();
+        let physical_column_coefficient_count = polynomial_degree / 2;
+        if active_data_limb_count > extended_limb_count
+            || physical_column_coefficient_count == 0
+            || physical_column_coefficient_count.checked_mul(2) != Some(polynomial_degree)
+        {
+            return Err(RefusalReason::WrongTypeOrLength);
+        }
+
+        let expected_column_count = topology.trace_column_count()?;
+        let public_setup_seed = self.public_setup_seed();
+        let mut ordered_coefficient_columns = Vec::with_capacity(expected_column_count);
+        for decomposition_block_index in 0..topology.data_block_count() {
+            let decomposition_block_coordinate = u16::try_from(decomposition_block_index)
+                .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
+            for extended_limb_index in 0..extended_limb_count {
+                let (modulus_catalog_identifier, modulus_index) =
+                    if extended_limb_index < active_data_limb_count {
+                        (
+                            DATA_MODULUS_CATALOG_IDENTIFIER,
+                            u16::try_from(extended_limb_index)
+                                .map_err(|_| RefusalReason::OutsideSupportedProfile)?,
+                        )
+                    } else {
+                        (
+                            SPECIAL_MODULUS_CATALOG_IDENTIFIER,
+                            u16::try_from(extended_limb_index - active_data_limb_count)
+                                .map_err(|_| RefusalReason::OutsideSupportedProfile)?,
+                        )
+                    };
+                let common_reference_coefficients = sample_galois_common_reference_limb(
+                    &public_setup_seed,
+                    position.schedule_position(),
+                    decomposition_block_coordinate,
+                    modulus_catalog_identifier,
+                    modulus_index,
+                    polynomial_degree,
+                )
+                .map_err(|_| RefusalReason::InvalidArithmeticRelation)?;
+                if common_reference_coefficients.len() != polynomial_degree {
+                    return Err(RefusalReason::WrongTypeOrLength);
+                }
+                let (low_coefficients, high_coefficients) = common_reference_coefficients
+                    .split_at(physical_column_coefficient_count);
+                for physical_column in [low_coefficients, high_coefficients] {
+                    ordered_coefficient_columns.push(
+                        physical_column
+                            .iter()
+                            .copied()
+                            .map(ProofBaseFieldElement::from_canonical)
+                            .collect::<Result<Vec<_>, _>>()
+                            .map_err(|_| RefusalReason::InvalidArithmeticRelation)?,
+                    );
+                }
+            }
+        }
+        if ordered_coefficient_columns.len() != expected_column_count {
+            return Err(RefusalReason::WrongTypeOrLength);
+        }
+
+        let public_polynomial_context = SetupPublicPolynomialContext::galois_common(
+            self.setup_proof_context_hash(),
+            position.schedule_position(),
+        )
+        .map_err(|_| RefusalReason::WrongContext)?;
+        let tree = SetupPublicPolynomialTree::construct(SetupPublicPolynomialTreeInput {
+            context: &public_polynomial_context,
+            evaluation_domain_size,
+            source_polynomial_degree_bound_exclusive: polynomial_degree,
+            ordered_coefficient_columns: &ordered_coefficient_columns,
+        })
+        .map_err(|_| RefusalReason::WrongHashOrRoot)?;
+        VerifiedEvaluatorAuxiliaryRoot::from_galois_common_public_polynomial_tree(
+            position.schedule_position(),
+            galois_element,
+            catalog_level,
+            &tree,
+        )
+        .map_err(|_| RefusalReason::WrongContext)
+    }
+
+    pub(crate) fn generated_source_authority(
+        &self,
+    ) -> Result<SetupGeneratedGaloisSourceAuthority, RefusalReason> {
+        let statement_schema_identifier =
+            ProofApplicationSlotCeilings::GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER;
+        let selected_plan = selected_relation_plans()
+            .map_err(|_| RefusalReason::UnsupportedVersionOrSuite)?
+            .into_iter()
+            .find(|artifact| {
+                artifact.application_statement_schema_identifier() == statement_schema_identifier
+            })
+            .ok_or(RefusalReason::UnsupportedVersionOrSuite)?;
+        let relation_plan_variant = selected_plan
+            .compiled_plan()
+            .select_variant(Some(self.batch_schedule_position()), None)
+            .map_err(|_| RefusalReason::UnsupportedVersionOrSuite)?;
+        let evaluation_domain_size = usize::try_from(relation_plan_variant.evaluation_domain_size())
+            .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
+        let mut ordered_public_polynomial_contexts =
+            Vec::with_capacity(self.ordered_entries().len());
+        let mut ordered_contribution_roots = Vec::with_capacity(self.ordered_entries().len());
+        for (component_ordinal, entry) in self.ordered_entries().iter().enumerate() {
+            let logical_schedule_position = u32::try_from(component_ordinal)
+                .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
+            let public_polynomial_context = SetupPublicPolynomialContext::new(
+                self.setup_proof_context_hash(),
+                crate::bgv::proof_suite::SetupPublicPolynomialRootRole::GaloisKeyShare,
+                Some(self.participant_identity()),
+                Some(self.roster_position()),
+                Some(logical_schedule_position),
+                None,
+            )
+            .map_err(|_| RefusalReason::WrongContext)?;
+            let component = entry.component();
+            let tree = component.recompute_public_polynomial_tree(
+                &public_polynomial_context,
+                evaluation_domain_size,
+            )?;
+            let contribution_root = tree.root();
+            ordered_contribution_roots.push(contribution_root);
+            ordered_public_polynomial_contexts.push(public_polynomial_context);
+        }
+        let canonical_application_statement_bytes = canonical_selected_galois_key_share_statement(
+            self.setup_proof_context_hash(),
+            self.participant_identity(),
+            self.roster_position(),
+            self.batch_schedule_position(),
+            &self.authority.anchor_commitment_roots,
+            &ordered_contribution_roots,
+        )
+        .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
+        if canonical_application_statement_bytes != self.canonical_application_statement_bytes() {
+            return Err(RefusalReason::WrongHashOrRoot);
+        }
+        let application_statement_hash = verified_application_statement_hash(
+            self.protocol_version(),
+            self.suite_identifier(),
+            statement_schema_identifier,
+            &canonical_application_statement_bytes,
+        );
+        let material_ownership = ComponentMaterialOwnershipBinding::from_generated_application(
+            self.suite_identifier(),
+            self.action_context_hash(),
+            application_statement_hash,
+        );
+        let mut ordered_components = Vec::with_capacity(self.ordered_entries().len());
+        for ((entry, public_polynomial_context), contribution_root) in self
+            .ordered_entries()
+            .iter()
+            .zip(ordered_public_polynomial_contexts)
+            .zip(ordered_contribution_roots.iter().copied())
+        {
+            let component = entry.component();
+            let mut component_stream = KeySwitchComponentPublicPolynomialStream::begin(
+                component.topology.clone(),
+                material_ownership,
+                component.stream_descriptor.clone(),
+            )
+            .map_err(generated_galois_stream_refusal)?;
+            for (chunk_index, chunk_bytes) in component
+                .canonical_bytes
+                .chunks(FOUNDATION_PROFILE.stream_chunk_byte_length)
+                .enumerate()
+            {
+                component_stream
+                    .absorb_chunk(chunk_index, chunk_bytes)
+                    .map_err(generated_galois_stream_refusal)?;
+            }
+            let recomputed = component_stream
+                .finish(public_polynomial_context)
+                .map_err(generated_galois_stream_refusal)?;
+            let (material, tree) = recomputed.into_parts();
+            if tree.root() != contribution_root {
+                return Err(RefusalReason::WrongHashOrRoot);
+            }
+            ordered_components.push(SetupGeneratedGaloisSourceComponent {
+                evaluator_position: component.evaluator_position,
+                material,
+                contribution_root,
+                public_polynomial_context_hash: tree.public_polynomial_context_hash(),
+            });
+        }
+        let ordered_auxiliary_roots = self
+            .ordered_entries()
+            .iter()
+            .map(|entry| {
+                self.recompute_galois_common_auxiliary_root(entry, evaluation_domain_size)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(SetupGeneratedGaloisSourceAuthority {
+            protocol_version: self.protocol_version(),
+            suite_identifier: self.suite_identifier(),
+            ceremony_context_hash: self.ceremony_context_hash(),
+            action_context_hash: self.action_context_hash(),
+            roster_hash: self.roster_hash(),
+            setup_proof_context_hash: self.setup_proof_context_hash(),
+            participant_identity: self.participant_identity(),
+            roster_position: self.roster_position(),
+            batch_schedule_position: self.batch_schedule_position(),
+            anchor_commitment_roots: self.authority.anchor_commitment_roots,
+            canonical_application_statement_bytes: canonical_application_statement_bytes
+                .into_boxed_slice(),
+            ordered_auxiliary_roots: ordered_auxiliary_roots.into_boxed_slice(),
+            ordered_components: ordered_components.into_boxed_slice(),
+        })
     }
 
     pub(crate) fn prepare_common_generation(
