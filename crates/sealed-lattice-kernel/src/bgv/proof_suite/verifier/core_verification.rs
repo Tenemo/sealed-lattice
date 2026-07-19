@@ -1,13 +1,13 @@
 use super::{
     BoundTreeConstructionKind, CanonicalDecodeLimits, CanonicalItem, CanonicalItemType,
     CanonicalTuple, CommonProofTranscript, CommonProofVerifierError, CompleteProofTreeCatalog,
-    FOUNDATION_PROFILE, OpenedFriLayerPair, PROOF_HEADER_HASH_DOMAIN,
-    PROOF_OBJECT_HEADER_SCHEMA_VERSION, ProofApplicationSlotCeilings,
-    ProofChallengeExtensionElement, ProofEvaluationDomain, ProofLeafVisibility,
-    ProofTreeCatalogSource, ProofTreeRole, RelationColumnOrigin, RelationColumnValueType,
-    RelationOpeningSourceClass, RelationPlanCheckContext, RelationPlanVariant,
-    RelationProofTreeInput, RelationSelectorPathStep, RelationTreeDescriptor,
-    SelectedApplicationStatementContext, SelectorPathStepKind, StatementOwnedProofTreeInput,
+    FOUNDATION_PROFILE, PROOF_HEADER_HASH_DOMAIN, PROOF_OBJECT_HEADER_SCHEMA_VERSION,
+    ProofApplicationSlotCeilings, ProofChallengeExtensionElement, ProofEvaluationDomain,
+    ProofLeafVisibility, ProofTreeCatalogSource, ProofTreeRole,
+    RelationApplicationChallengeAssignment, RelationColumnOrigin, RelationColumnValueType,
+    RelationPlanCheckContext, RelationPlanVariant, RelationProofTreeInput,
+    RelationSelectorPathStep, RelationTreeDescriptor, SelectedApplicationStatementContext,
+    SelectorPathStepKind, StatementOwnedProofTreeInput,
     VERIFIED_COMMON_PROOF_STATEMENT_HASH_DOMAIN, VerifiedEvaluatorAuxiliaryRoot,
     VerifiedStatementOwnedTree, decode_selected_application_statement, hash_foundation_tuple_512,
     hash_framed_parts_512, selected_evaluator_aggregate_entry_roots,
@@ -17,15 +17,14 @@ use super::{
 use super::{
     CommonProofPrivacyMode, CommonProofVerificationInput, PROOF_OBJECT_HEADER_SCHEMA_IDENTIFIER,
     ProofBodyError, ProofBodyLayout, ProofByteSource, ProofFriQueryVerifier, ProofTreeCatalogInput,
-    QueryVerificationWorkspace, RelationApplicationChallengeAssignment, SELECTED_PROOF_FIELD_INDEX,
-    ValidatedRelationPlanArtifact, VerifiedCommonProof, build_complete_proof_tree_catalog,
-    build_runtime_claim_groups, decode_proof_body_prefix, verify_and_slice_proof_header,
+    QueryVerificationWorkspace, SELECTED_PROOF_FIELD_INDEX, ValidatedRelationPlanArtifact,
+    VerifiedCommonProof, build_complete_proof_tree_catalog, build_runtime_claim_groups,
+    decode_proof_body_prefix, verify_and_slice_proof_header,
 };
 
 /// Resolves plan-addressed verifier-sequence columns from verified statement,
 /// suite, slot, sampler, or protocol sources. Proof bytes never supply these
-/// values. Implementations retaining a verifier column over the evaluation
-/// domain should override the pair method to avoid per-query interpolation.
+/// values.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct VerifiedRelationColumnEvaluatorMemoryAccounting {
     fixed_and_input_resident_byte_length: u64,
@@ -79,26 +78,6 @@ pub(crate) trait VerifiedRelationColumnEvaluator {
         column_ordinal: u32,
         point: ProofChallengeExtensionElement,
     ) -> Option<ProofChallengeExtensionElement>;
-
-    fn evaluate_at_evaluation_domain_pair(
-        &mut self,
-        column_ordinal: u32,
-        evaluation_domain: ProofEvaluationDomain,
-        query_representative: u64,
-    ) -> Option<OpenedFriLayerPair> {
-        let evaluation_point = evaluation_domain
-            .point(usize::try_from(query_representative).ok()?)
-            .ok()?;
-        let first = self.evaluate_at_extension_point(
-            column_ordinal,
-            ProofChallengeExtensionElement::from_base(evaluation_point),
-        )?;
-        let opposite = self.evaluate_at_extension_point(
-            column_ordinal,
-            ProofChallengeExtensionElement::from_base(evaluation_point.negate()),
-        )?;
-        Some(OpenedFriLayerPair::new(first, opposite))
-    }
 }
 
 /// Verifies one complete common proof. Returning `None` from a verified-column
@@ -298,18 +277,15 @@ where
         deep_points.push(sampled?);
     }
     let opening_points = variant.derive_opening_points(input.relation_context, &deep_points)?;
-    verify_statement_derived_deep_values(
+    verify_deep_composition_with_verified_sequences(
         variant,
-        &opening_points,
-        pending.deep_evaluations(),
-        evaluate_verified_column,
-    )?;
-    variant.verify_deep_composition(
         input.relation_context,
         &application_challenges,
         &composition_challenges,
         &deep_points,
+        &opening_points,
         pending.deep_evaluations(),
+        evaluate_verified_column,
     )?;
     transcript.absorb_deep_evaluations(pending.deep_evaluations())?;
 
@@ -392,7 +368,6 @@ where
                 variant,
                 layout.catalog(),
                 &sorted_query_representatives,
-                evaluate_verified_column,
             ) {
                 query_verification_error = Some(error);
                 return Err(ProofBodyError::InvalidLeaf);
@@ -884,7 +859,10 @@ fn validate_tree_columns(
             (RelationColumnOrigin::BoundTree { .. }, _) | (_, Some(_)) => {
                 return Err(CommonProofVerifierError::InvalidTreeLayout);
             }
-            (_, None) => {}
+            (RelationColumnOrigin::VerifierSequence { .. }, None) => {
+                return Err(CommonProofVerifierError::InvalidTreeLayout);
+            }
+            (RelationColumnOrigin::Prover, None) => {}
         }
     }
     Ok(())
@@ -941,8 +919,12 @@ pub(super) fn catalog_root(
     Ok(root)
 }
 
-pub(super) fn verify_statement_derived_deep_values<ColumnEvaluator>(
+pub(super) fn verify_deep_composition_with_verified_sequences<ColumnEvaluator>(
     variant: &RelationPlanVariant,
+    relation_context: &RelationPlanCheckContext,
+    application_challenges: &[RelationApplicationChallengeAssignment],
+    composition_challenges: &[ProofChallengeExtensionElement],
+    deep_points: &[ProofChallengeExtensionElement],
     opening_points: &[ProofChallengeExtensionElement],
     deep_evaluations: &[ProofChallengeExtensionElement],
     evaluate_verified_column: &mut ColumnEvaluator,
@@ -953,37 +935,24 @@ where
     if deep_evaluations.len() != variant.ordered_opening_claims().len() {
         return Err(CommonProofVerifierError::InvalidOpeningClaim);
     }
-    for (claim_ordinal, claim) in variant.ordered_opening_claims().iter().copied().enumerate() {
-        if claim.source_class() != RelationOpeningSourceClass::TreeColumn {
-            continue;
-        }
-        let column_ordinal = claim
-            .column_ordinal()
-            .ok_or(CommonProofVerifierError::InvalidOpeningClaim)?;
-        let column_index = usize::try_from(column_ordinal)
-            .map_err(|_| CommonProofVerifierError::InvalidOpeningClaim)?;
-        let column = variant
-            .ordered_columns()
-            .get(column_index)
-            .ok_or(CommonProofVerifierError::InvalidOpeningClaim)?;
-        if !matches!(
-            column.origin(),
-            RelationColumnOrigin::VerifierSequence { .. }
-        ) {
-            continue;
-        }
-        let opening_point_index = usize::try_from(claim.opening_point_ordinal())
-            .map_err(|_| CommonProofVerifierError::InvalidOpeningClaim)?;
-        let point = opening_points
-            .get(opening_point_index)
-            .copied()
-            .ok_or(CommonProofVerifierError::InvalidOpeningClaim)?;
-        let expected = evaluate_verified_column
-            .evaluate_at_extension_point(column_ordinal, point)
-            .ok_or(CommonProofVerifierError::MissingVerifiedColumnValue)?;
-        if deep_evaluations[claim_ordinal] != expected {
-            return Err(CommonProofVerifierError::VerifiedColumnMismatch);
-        }
+    let mut missing_verified_column_value = false;
+    let result = variant.verify_deep_composition(
+        relation_context,
+        application_challenges,
+        composition_challenges,
+        deep_points,
+        opening_points,
+        deep_evaluations,
+        |column_ordinal, point| {
+            let value = evaluate_verified_column.evaluate_at_extension_point(column_ordinal, point);
+            if value.is_none() {
+                missing_verified_column_value = true;
+            }
+            value
+        },
+    );
+    if missing_verified_column_value {
+        return Err(CommonProofVerifierError::MissingVerifiedColumnValue);
     }
-    Ok(())
+    result.map_err(CommonProofVerifierError::from)
 }

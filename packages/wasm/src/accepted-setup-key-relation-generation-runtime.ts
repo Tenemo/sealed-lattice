@@ -1,4 +1,7 @@
-import { refusalReasonCodes } from '@sealed-lattice/types';
+import {
+    refusalReasonCodes,
+    type BrowserActionStorageWorkerKernel,
+} from '@sealed-lattice/types';
 
 import {
     requireAcceptedSetupPackageBuilderKernelOwner,
@@ -9,10 +12,6 @@ import {
     verifyGeneratedAcceptedSetupSameSecretCapabilityInClosedWorker,
     type AcceptedSetupProofVerificationInput,
 } from './accepted-setup-proof-verification-runtime.js';
-import {
-    resolveActionRandomnessKernelAuthorization,
-    type ActionRandomnessSession,
-} from './action-randomness-runtime.js';
 import { isUint8Array } from './byte-array.js';
 import type { VerifiedTranscriptObject } from './canonical-board-runtime.js';
 import {
@@ -26,25 +25,18 @@ import {
     applyClosedWorkerGeneratedCommonProofCapability,
     openClosedWorkerCommonProofGenerationFamilyAdapter,
     releaseClosedWorkerCommonProofGenerationFamilyAdapter,
-    runClosedWorkerCommonProofGenerationFamilyAdapterRetainingGeneratedCapability,
-    type CommonProofCanonicalOutputStore,
-    type CommonProofExternalMemoryTransactionExecutor,
-    type CommonProofGenerationWorkerOptions,
+    runClosedWorkerCommonProofGenerationFamilyAdapterWithExecutionOpener,
+    type CommonProofGenerationExecutionOpener,
     type ClosedWorkerCommonProofGenerationFamilyAdapter,
     type ClosedWorkerGeneratedCommonProofCapability,
 } from './common-proof-worker-runtime/runtime.js';
-import {
-    deriveGeneratedCommonProofDescriptor,
-    trackCanonicalCommonProofOutputChunks,
-} from './generated-common-proof-output-runtime.js';
+import { deriveGeneratedCommonProofDescriptor } from './generated-common-proof-output-runtime.js';
+import type { ClosedWorkerProductionOperationIdentifiers } from './local-storage-root-worker-kernel/authorities.js';
+import { withClosedWorkerProductionOperationAuthority } from './local-storage-root-worker-kernel/worker-kernel.js';
 import {
     resolveSetupGenerationAuthorityKernelAuthorization,
     type BrowserOwnedSetupGenerationAuthority,
 } from './setup-generation-recipient-payload.js';
-import {
-    resolveVerifiedStateReservationKernelAuthorization,
-    type VerifiedStateReservation,
-} from './state-verifier-runtime.js';
 import { resolveCommonProofKernelContext } from './transcript-core-bridge/common-proof-kernel-context.js';
 import type { TranscriptCoreKernelCommandRuntime } from './transcript-core-bridge/kernel-runtime.js';
 import type {
@@ -90,17 +82,15 @@ const generatedProofRecords = new WeakMap<
 >();
 
 export type AcceptedSetupKeyRelationGenerationInput = Readonly<{
-    actionRandomnessSession: ActionRandomnessSession;
     canonicalSuiteRecordBytes: Uint8Array;
     checkpointLineageIdentifier: Uint8Array;
-    externalMemory: CommonProofExternalMemoryTransactionExecutor;
     generationMode: AcceptedSetupKeyRelationGenerationMode;
-    generationOptions?: CommonProofGenerationWorkerOptions;
     kernel: TranscriptCoreKernel;
-    outputStore: CommonProofCanonicalOutputStore;
+    openProofGenerationExecution: CommonProofGenerationExecutionOpener;
+    productionOperationIdentifiers: ClosedWorkerProductionOperationIdentifiers;
     setupGenerationAuthority: BrowserOwnedSetupGenerationAuthority;
     setupIntentObject: VerifiedTranscriptObject;
-    verifiedReservation: VerifiedStateReservation;
+    workerKernel: BrowserActionStorageWorkerKernel;
 }>;
 
 export type GeneratedAcceptedSetupKeyRelationProofVerificationInput = Omit<
@@ -406,8 +396,7 @@ const generateAcceptedSetupKeyRelationInClosedWorker = async (
     if (
         (input.generationMode !== 'fresh' &&
             input.generationMode !== 'resumed') ||
-        (input.generationMode === 'resumed') !==
-            (input.generationOptions?.resume !== undefined)
+        typeof input.openProofGenerationExecution !== 'function'
     ) {
         throw new CanonicalStreamRefusalError('wrongContext');
     }
@@ -431,20 +420,10 @@ const generateAcceptedSetupKeyRelationInClosedWorker = async (
         input.checkpointLineageIdentifier,
         checkpointLineageIdentifierByteLength,
     );
-    const actionRandomnessAuthorization =
-        resolveActionRandomnessKernelAuthorization(
-            input.actionRandomnessSession,
-            input.kernel,
-        );
     const setupGenerationAuthorization =
         resolveSetupGenerationAuthorityKernelAuthorization(
             input.setupGenerationAuthority,
             context,
-        );
-    const stateAuthorization =
-        resolveVerifiedStateReservationKernelAuthorization(
-            input.verifiedReservation,
-            input.kernel,
         );
     const setupIntentAuthorization =
         resolveOrderedVerifiedBoardObjectAuthorization({
@@ -454,11 +433,6 @@ const generateAcceptedSetupKeyRelationInClosedWorker = async (
             objects: [input.setupIntentObject],
         });
     if (
-        actionRandomnessAuthorization.context.memory !== context.memory ||
-        stateAuthorization.capabilityMemory !== context.memory ||
-        stateAuthorization.capabilityPointer <= 0 ||
-        stateAuthorization.capabilityPointer + verifierCapabilityByteLength >
-            context.memory.buffer.byteLength ||
         setupIntentAuthorization.handleBytes.byteLength !== wasm32WordByteLength
     ) {
         throw new CanonicalStreamInternalError(
@@ -486,66 +460,105 @@ const generateAcceptedSetupKeyRelationInClosedWorker = async (
             memoryBoundary,
             statusBoundary,
         });
-        const prepared = context.runExclusive(
-            `accepted-setup ${family} generation preparation`,
-            () => {
-                const checkpointPointer = memoryBoundary.copy(
-                    checkpointLineageIdentifier,
-                );
-                const metadataPointer = memoryBoundary.allocateZeroedWords(2);
-                try {
-                    const prepare =
-                        input.generationMode === 'fresh'
-                            ? kernel.prepareGeneration
-                            : kernel.prepareResumedGeneration;
-                    const adapterHandle = prepare(
-                        selectedSuiteHandle,
-                        setupGenerationAuthorization.handle,
-                        actionRandomnessAuthorization.handle,
-                        stateAuthorization.sessionHandle,
-                        stateAuthorization.capabilityPointer,
-                        verifierCapabilityByteLength,
-                        stateAuthorization.reservationHandle,
-                        setupIntentAuthorization.sessionHandle,
-                        setupIntentAuthorization.capabilityPointer,
-                        verifierCapabilityByteLength,
-                        new DataView(
-                            setupIntentAuthorization.handleBytes.buffer,
-                            setupIntentAuthorization.handleBytes.byteOffset,
-                            setupIntentAuthorization.handleBytes.byteLength,
-                        ).getUint32(0, true),
-                        checkpointPointer,
-                        checkpointLineageIdentifier.byteLength,
-                        metadataPointer,
-                        metadataPointer + wasm32WordByteLength,
-                    );
-                    const [sourceHandle, status] = memoryBoundary.readWords(
-                        metadataPointer,
-                        2,
-                    );
-                    statusBoundary.throwIfError(status);
-                    return Object.freeze({
-                        adapterHandle: requireLiveHandle(
-                            adapterHandle,
-                            `The accepted-setup ${family} generation family-adapter handle`,
-                        ),
-                        statementSourceHandle: requireLiveHandle(
-                            sourceHandle,
-                            `The accepted-setup ${family} statement-source handle`,
-                        ),
-                    });
-                } finally {
-                    memoryBoundary.zeroAndDeallocate(
-                        metadataPointer,
-                        wasm32WordByteLength * 2,
-                    );
-                    memoryBoundary.zeroAndDeallocate(
-                        checkpointPointer,
-                        checkpointLineageIdentifier.byteLength,
-                    );
-                }
-            },
+        let prepared:
+            | Readonly<{
+                  adapterHandle: number;
+                  statementSourceHandle: number;
+              }>
+            | undefined;
+        await withClosedWorkerProductionOperationAuthority(
+            input.workerKernel,
+            input.productionOperationIdentifiers,
+            (productionOperationAuthority) =>
+                productionOperationAuthority.withExactKernelAuthorization(
+                    (authorization) => {
+                        if (
+                            authorization.kernel !== input.kernel ||
+                            authorization.actionRandomnessContext.memory !==
+                                context.memory ||
+                            authorization.stateReservationCapabilityMemory !==
+                                context.memory ||
+                            authorization.stateReservationCapabilityPointer <=
+                                0 ||
+                            authorization.stateReservationCapabilityPointer +
+                                    verifierCapabilityByteLength >
+                                context.memory.buffer.byteLength
+                        ) {
+                            throw new CanonicalStreamInternalError(
+                                'The accepted-setup key-relation generation authorities do not belong to one WASM worker.',
+                            );
+                        }
+                        prepared = context.runExclusive(
+                            `accepted-setup ${family} generation preparation`,
+                            () => {
+                                const checkpointPointer = memoryBoundary.copy(
+                                    checkpointLineageIdentifier,
+                                );
+                                const metadataPointer =
+                                    memoryBoundary.allocateZeroedWords(2);
+                                try {
+                                    const prepare =
+                                        input.generationMode === 'fresh'
+                                            ? kernel.prepareGeneration
+                                            : kernel.prepareResumedGeneration;
+                                    const adapterHandle = prepare(
+                                        selectedSuiteHandle,
+                                        setupGenerationAuthorization.handle,
+                                        authorization.actionRandomnessHandle,
+                                        authorization.stateVerifierSessionHandle,
+                                        authorization.stateReservationCapabilityPointer,
+                                        verifierCapabilityByteLength,
+                                        authorization.stateReservationHandle,
+                                        setupIntentAuthorization.sessionHandle,
+                                        setupIntentAuthorization.capabilityPointer,
+                                        verifierCapabilityByteLength,
+                                        new DataView(
+                                            setupIntentAuthorization.handleBytes.buffer,
+                                            setupIntentAuthorization.handleBytes.byteOffset,
+                                            setupIntentAuthorization.handleBytes.byteLength,
+                                        ).getUint32(0, true),
+                                        checkpointPointer,
+                                        checkpointLineageIdentifier.byteLength,
+                                        metadataPointer,
+                                        metadataPointer + wasm32WordByteLength,
+                                    );
+                                    const [sourceHandle, status] =
+                                        memoryBoundary.readWords(
+                                            metadataPointer,
+                                            2,
+                                        );
+                                    statusBoundary.throwIfError(status);
+                                    return Object.freeze({
+                                        adapterHandle: requireLiveHandle(
+                                            adapterHandle,
+                                            `The accepted-setup ${family} generation family-adapter handle`,
+                                        ),
+                                        statementSourceHandle:
+                                            requireLiveHandle(
+                                                sourceHandle,
+                                                `The accepted-setup ${family} statement-source handle`,
+                                            ),
+                                    });
+                                } finally {
+                                    memoryBoundary.zeroAndDeallocate(
+                                        metadataPointer,
+                                        wasm32WordByteLength * 2,
+                                    );
+                                    memoryBoundary.zeroAndDeallocate(
+                                        checkpointPointer,
+                                        checkpointLineageIdentifier.byteLength,
+                                    );
+                                }
+                            },
+                        );
+                    },
+                ),
         );
+        if (prepared === undefined) {
+            throw new CanonicalStreamInternalError(
+                'The production operation completed without a key-relation adapter.',
+            );
+        }
         statementSourceHandle = prepared.statementSourceHandle;
         familyAdapter = openClosedWorkerCommonProofGenerationFamilyAdapter(
             context,
@@ -562,20 +575,16 @@ const generateAcceptedSetupKeyRelationInClosedWorker = async (
 
         const adapterForRun = familyAdapter;
         familyAdapter = undefined;
-        const trackedOutput = trackCanonicalCommonProofOutputChunks(
-            input.outputStore,
-        );
-        generatedCapability =
-            await runClosedWorkerCommonProofGenerationFamilyAdapterRetainingGeneratedCapability(
+        const execution =
+            await runClosedWorkerCommonProofGenerationFamilyAdapterWithExecutionOpener(
                 adapterForRun,
-                input.externalMemory,
-                trackedOutput.outputStore,
-                input.generationOptions,
+                input.openProofGenerationExecution,
             );
+        generatedCapability = execution.generatedCapability;
         proofDescriptorBytes = await deriveGeneratedCommonProofDescriptor({
             kernel: input.kernel,
-            outputChunkByteLengths: trackedOutput.outputChunkByteLengths,
-            outputStore: input.outputStore,
+            outputChunkByteLengths: execution.outputChunkByteLengths,
+            outputStore: execution.outputStore,
             proofFamilyLabel:
                 family === 'sameSecret' ? 'same-secret' : 'public-key-share',
             streamDomain:

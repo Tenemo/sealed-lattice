@@ -12,10 +12,24 @@ use super::super::{
     transcript::CommonProofChallenge,
 };
 use super::{
-    RelationChallengeRole, RelationConstraintColumnQuery, RelationExpressionInstruction,
-    RelationPlanCheckContext, RelationPlanError, RelationPlanVariant,
-    RelationRadixFactorDescriptor, modular_power, relation_column_queries,
+    RelationChallengeRole, RelationColumnOrigin, RelationConstraintColumnQuery,
+    RelationExpressionInstruction, RelationPlanCheckContext, RelationPlanError,
+    RelationPlanVariant, RelationRadixFactorDescriptor, modular_power, relation_column_queries,
+    visit_relation_column_queries,
 };
+
+#[derive(Clone, Copy)]
+struct ResolvedVerifierSequenceOpening {
+    column_ordinal: u32,
+    opening_point_ordinal: u32,
+    value: ProofChallengeExtensionElement,
+}
+
+impl ResolvedVerifierSequenceOpening {
+    const fn key(self) -> (u32, u32) {
+        (self.column_ordinal, self.opening_point_ordinal)
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct RelationApplicationChallengeAssignment {
@@ -387,20 +401,50 @@ impl RelationPlanVariant {
     /// Verifies the DEEP values against both the complete relation expression
     /// and the canonical quotient-component decomposition.  The ordered DEEP
     /// value list is indexed only by the checked opening-claim catalog.
-    pub(crate) fn verify_deep_composition(
+    pub(crate) fn verify_deep_composition<VerifierSequenceValue>(
         &self,
         context: &RelationPlanCheckContext,
         application_challenges: &[RelationApplicationChallengeAssignment],
         composition_challenges: &[ProofChallengeExtensionElement],
         deep_points: &[ProofChallengeExtensionElement],
+        opening_points: &[ProofChallengeExtensionElement],
         ordered_deep_evaluations: &[ProofChallengeExtensionElement],
-    ) -> Result<(), RelationPlanError> {
+        mut verifier_sequence_value: VerifierSequenceValue,
+    ) -> Result<(), RelationPlanError>
+    where
+        VerifierSequenceValue:
+            FnMut(u32, ProofChallengeExtensionElement) -> Option<ProofChallengeExtensionElement>,
+    {
         if deep_points.len() != usize::from(context.deep_point_count)
+            || opening_points.len() != self.ordered_opening_points.len()
             || ordered_deep_evaluations.len() != self.ordered_opening_claims.len()
         {
             return Err(RelationPlanError::InvalidOpening);
         }
         let quotient_decomposition_stride = self.quotient_decomposition_stride(context)?;
+        let verifier_sequence_opening_keys = self.verifier_sequence_opening_keys(context)?;
+        let mut resolved_verifier_sequence_openings = Vec::new();
+        resolved_verifier_sequence_openings
+            .try_reserve_exact(verifier_sequence_opening_keys.len())
+            .map_err(|_| RelationPlanError::CountOverflow)?;
+        for (column_ordinal, opening_point_ordinal) in verifier_sequence_opening_keys {
+            resolved_verifier_sequence_openings.push(ResolvedVerifierSequenceOpening {
+                column_ordinal,
+                opening_point_ordinal,
+                value: ProofChallengeExtensionElement::ZERO,
+            });
+        }
+        for opening in &mut resolved_verifier_sequence_openings {
+            let point = opening_points
+                .get(
+                    usize::try_from(opening.opening_point_ordinal)
+                        .map_err(|_| RelationPlanError::CountOverflow)?,
+                )
+                .copied()
+                .ok_or(RelationPlanError::InvalidOpening)?;
+            opening.value = verifier_sequence_value(opening.column_ordinal, point)
+                .ok_or(RelationPlanError::InvalidOpening)?;
+        }
 
         for (deep_point_ordinal, deep_point) in deep_points.iter().copied().enumerate() {
             let deep_point_ordinal =
@@ -417,11 +461,33 @@ impl RelationPlanVariant {
                         rotation_magnitude,
                         0,
                     )?;
-                    self.tree_column_opened_value(
-                        column_ordinal,
-                        opening_point_ordinal,
-                        ordered_deep_evaluations,
-                    )
+                    let column = self
+                        .ordered_columns
+                        .get(
+                            usize::try_from(column_ordinal)
+                                .map_err(|_| RelationPlanError::CountOverflow)?,
+                        )
+                        .ok_or(RelationPlanError::InvalidColumn)?;
+                    if matches!(column.origin, RelationColumnOrigin::VerifierSequence { .. }) {
+                        resolved_verifier_sequence_openings
+                            .binary_search_by_key(
+                                &(column_ordinal, opening_point_ordinal),
+                                |opening| opening.key(),
+                            )
+                            .ok()
+                            .and_then(|opening_index| {
+                                resolved_verifier_sequence_openings
+                                    .get(opening_index)
+                                    .map(|opening| opening.value)
+                            })
+                            .ok_or(RelationPlanError::InvalidOpening)
+                    } else {
+                        self.tree_column_opened_value(
+                            column_ordinal,
+                            opening_point_ordinal,
+                            ordered_deep_evaluations,
+                        )
+                    }
                 },
             )?;
 
@@ -445,6 +511,83 @@ impl RelationPlanVariant {
             if reconstructed_quotient != composed_quotient {
                 return Err(RelationPlanError::InvalidConstraint);
             }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn verifier_sequence_deep_resolution_payload_byte_length(
+        &self,
+        context: &RelationPlanCheckContext,
+    ) -> Result<u64, RelationPlanError> {
+        let opening_count = u64::try_from(self.verifier_sequence_opening_keys(context)?.len())
+            .map_err(|_| RelationPlanError::CountOverflow)?;
+        opening_count
+            .checked_mul(
+                u64::try_from(core::mem::size_of::<ResolvedVerifierSequenceOpening>())
+                    .map_err(|_| RelationPlanError::CountOverflow)?,
+            )
+            .ok_or(RelationPlanError::CountOverflow)
+    }
+
+    fn verifier_sequence_opening_keys(
+        &self,
+        context: &RelationPlanCheckContext,
+    ) -> Result<BTreeSet<(u32, u32)>, RelationPlanError> {
+        let mut opening_keys = BTreeSet::new();
+        self.visit_verifier_sequence_query_occurrences(
+            context,
+            |column_ordinal, opening_point_ordinal| {
+                opening_keys.insert((column_ordinal, opening_point_ordinal));
+                Ok(())
+            },
+        )?;
+        Ok(opening_keys)
+    }
+
+    fn visit_verifier_sequence_query_occurrences<Visit>(
+        &self,
+        context: &RelationPlanCheckContext,
+        mut visit: Visit,
+    ) -> Result<(), RelationPlanError>
+    where
+        Visit: FnMut(u32, u32) -> Result<(), RelationPlanError>,
+    {
+        if context.deep_point_count == 0 {
+            return Err(RelationPlanError::InvalidOpening);
+        }
+        for constraint in &self.ordered_constraints {
+            visit_relation_column_queries(
+                &[
+                    &constraint.numerator_postfix_expression,
+                    &constraint.zeroifier_postfix_expression,
+                ],
+                &self.ordered_radix_convolutions,
+                RelationPlanError::InvalidConstraint,
+                |query| {
+                    let column = self
+                        .ordered_columns
+                        .get(
+                            usize::try_from(query.column_ordinal)
+                                .map_err(|_| RelationPlanError::CountOverflow)?,
+                        )
+                        .ok_or(RelationPlanError::InvalidColumn)?;
+                    if !matches!(column.origin, RelationColumnOrigin::VerifierSequence { .. }) {
+                        return Ok(());
+                    }
+                    for deep_point_ordinal in 0..context.deep_point_count {
+                        visit(
+                            query.column_ordinal,
+                            self.opening_point_ordinal_for_rotation(
+                                deep_point_ordinal,
+                                query.rotation_is_negative,
+                                query.rotation_magnitude,
+                                0,
+                            )?,
+                        )?;
+                    }
+                    Ok(())
+                },
+            )?;
         }
         Ok(())
     }
@@ -822,6 +965,22 @@ where
                 *rotation_is_negative,
                 *rotation_magnitude,
             )?),
+            RelationExpressionInstruction::ConstantColumnVerifierSequenceProductSum {
+                ordered_terms,
+                ..
+            } if !zeroifier_program => {
+                let mut sum = ProofChallengeExtensionElement::ZERO;
+                for term in ordered_terms {
+                    let constant = column_value(term.constant_column_ordinal, false, 0)?;
+                    let verifier_sequence = column_value(
+                        term.verifier_sequence_column_ordinal,
+                        term.verifier_sequence_rotation_is_negative,
+                        term.verifier_sequence_rotation_magnitude,
+                    )?;
+                    sum = sum.add(constant.multiply(verifier_sequence));
+                }
+                stack.push(sum);
+            }
             RelationExpressionInstruction::TranscriptChallenge {
                 challenge_role,
                 role_coordinates,
@@ -1096,9 +1255,10 @@ fn convolve_extension_coefficients(
 mod tests {
     use super::*;
     use crate::bgv::proof_suite::relation_plan::{
-        CommittedMaterialRelationPlanInput, RelationPlanCheckContext,
+        CommittedMaterialRelationPlanInput, RelationOpeningSourceClass, RelationPlanCheckContext,
         RelationRadixConvolutionDescriptor, RelationRadixProductTermDescriptor,
-        ResolvedSuiteModulus, SuiteModulusReference, compile_vss_share_linkage_relation_plan,
+        RelationTreeDescriptor, ResolvedSuiteModulus, SuiteModulusReference,
+        compile_vss_share_linkage_relation_plan,
     };
     use crate::bgv::proof_suite::{
         PROOF_BASE_FIELD_MAXIMUM_TWO_ADIC_GENERATOR, PROOF_BASE_FIELD_MODULUS,
@@ -1287,5 +1447,178 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn deep_composition_resolves_virtual_verifier_sequences_without_opening_claims() {
+        let (mut variant, context) = vss_linkage_interpreter_fixture();
+        let verifier_column_ordinal = (0..variant.constraint_count())
+            .flat_map(|constraint_ordinal| {
+                variant
+                    .constraint_column_queries(constraint_ordinal)
+                    .expect("fixture constraint queries resolve")
+            })
+            .find_map(|query| {
+                let is_materialized_prover_column = variant.ordered_trees.iter().any(|tree| {
+                    tree.ordered_column_ordinals()
+                        .contains(&query.column_ordinal)
+                }) && variant
+                    .ordered_columns
+                    .get(query.column_ordinal as usize)
+                    .is_some_and(|column| matches!(column.origin, RelationColumnOrigin::Prover));
+                (query.rotation_magnitude != 0 && is_materialized_prover_column)
+                    .then_some(query.column_ordinal)
+            })
+            .expect("the fixture has a rotated prover-owned relation column");
+        variant.ordered_columns[verifier_column_ordinal as usize].origin =
+            RelationColumnOrigin::VerifierSequence {
+                verifier_source_ordinal: 0,
+                first_logical_element_index: 0,
+                logical_element_stride: 1,
+            };
+        for tree in &mut variant.ordered_trees {
+            match tree {
+                RelationTreeDescriptor::ProofCreated {
+                    ordered_column_ordinals,
+                    ..
+                }
+                | RelationTreeDescriptor::BoundPublic {
+                    ordered_column_ordinals,
+                    ..
+                } => ordered_column_ordinals
+                    .retain(|column_ordinal| *column_ordinal != verifier_column_ordinal),
+            }
+        }
+        variant
+            .ordered_opening_claims
+            .retain(|claim| claim.column_ordinal() != Some(verifier_column_ordinal));
+        assert!(variant.ordered_trees.iter().all(|tree| {
+            !tree
+                .ordered_column_ordinals()
+                .contains(&verifier_column_ordinal)
+        }));
+        assert!(variant.ordered_opening_claims.iter().all(|claim| {
+            claim.source_class() != RelationOpeningSourceClass::TreeColumn
+                || claim.column_ordinal() != Some(verifier_column_ordinal)
+        }));
+
+        let application_challenges = [RelationApplicationChallengeAssignment::new(
+            CommonProofChallenge::Alpha { modulus_ordinal: 0 },
+            0,
+            96,
+        )
+        .expect("alpha assignment")];
+        let composition_challenges =
+            vec![ProofChallengeExtensionElement::ONE; variant.constraint_count()];
+        let deep_point =
+            ProofChallengeExtensionElement::from_canonical_coordinates([0, 1, 0, 0, 0])
+                .expect("canonical full-degree point");
+        let deep_points = [deep_point];
+        let opening_points = variant
+            .derive_opening_points(&context, &deep_points)
+            .expect("canonical opening points");
+        let verifier_constant = ProofChallengeExtensionElement::from_base(
+            ProofBaseFieldElement::from_canonical(23).expect("canonical verifier value"),
+        );
+        let verifier_value_at_point =
+            |point: ProofChallengeExtensionElement| point.multiply(point).add(verifier_constant);
+        let composed_quotient = variant
+            .evaluate_composed_quotient_at_point(
+                &context,
+                deep_point,
+                &application_challenges,
+                &composition_challenges,
+                |column_ordinal, rotation_is_negative, rotation_magnitude| {
+                    Ok(if column_ordinal == verifier_column_ordinal {
+                        let opening_point_ordinal = variant.opening_point_ordinal_for_rotation(
+                            0,
+                            rotation_is_negative,
+                            rotation_magnitude,
+                            0,
+                        )?;
+                        verifier_value_at_point(
+                            opening_points[usize::try_from(opening_point_ordinal)
+                                .map_err(|_| RelationPlanError::CountOverflow)?],
+                        )
+                    } else {
+                        ProofChallengeExtensionElement::ZERO
+                    })
+                },
+            )
+            .expect("the fixture quotient evaluates");
+        let deep_evaluations = variant
+            .ordered_opening_claims
+            .iter()
+            .map(|claim| {
+                if claim.source_class() == RelationOpeningSourceClass::Quotient
+                    && claim.source_ordinal() == 0
+                {
+                    composed_quotient
+                } else {
+                    ProofChallengeExtensionElement::ZERO
+                }
+            })
+            .collect::<Vec<_>>();
+        let mut resolved_points = Vec::new();
+        variant
+            .verify_deep_composition(
+                &context,
+                &application_challenges,
+                &composition_challenges,
+                &deep_points,
+                &opening_points,
+                &deep_evaluations,
+                |column_ordinal, point| {
+                    resolved_points.push((column_ordinal, point));
+                    (column_ordinal == verifier_column_ordinal)
+                        .then_some(verifier_value_at_point(point))
+                },
+            )
+            .expect("virtual verifier values complete the checked relation");
+        assert!(!resolved_points.is_empty());
+        assert!(resolved_points.iter().all(|(column_ordinal, point)| {
+            *column_ordinal == verifier_column_ordinal && opening_points.contains(point)
+        }));
+        assert_eq!(
+            resolved_points.len(),
+            resolved_points
+                .iter()
+                .map(|(column_ordinal, point)| { (*column_ordinal, point.canonical_coordinates()) })
+                .collect::<BTreeSet<_>>()
+                .len(),
+            "each fixed column and rotated point is recomputed exactly once"
+        );
+        assert!(
+            resolved_points
+                .iter()
+                .any(|(_, point)| *point != deep_point),
+            "a rotated query must resolve at its canonical rotated DEEP point"
+        );
+        assert!(matches!(
+            variant.verify_deep_composition(
+                &context,
+                &application_challenges,
+                &composition_challenges,
+                &deep_points,
+                &opening_points,
+                &deep_evaluations,
+                |column_ordinal, point| (column_ordinal == verifier_column_ordinal).then_some(
+                    verifier_value_at_point(point).add(ProofChallengeExtensionElement::ONE),
+                ),
+            ),
+            Err(RelationPlanError::InvalidConstraint)
+        ));
+        assert!(matches!(
+            variant.verify_deep_composition(
+                &context,
+                &application_challenges,
+                &composition_challenges,
+                &deep_points,
+                &opening_points,
+                &deep_evaluations,
+                |_, _| None,
+            ),
+            Err(RelationPlanError::InvalidOpening)
+        ));
     }
 }

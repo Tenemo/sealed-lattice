@@ -476,7 +476,7 @@ impl VerifiedStatementOwnedTree {
     /// family set directly from the family-minted statement capability. The
     /// selected relation supplies all tree coordinates and column moduli;
     /// verified public randomness supplies the roster and setup context.
-    pub(crate) fn from_verified_accepted_setup_statement_source(
+    pub(in crate::bgv) fn from_verified_accepted_setup_statement_source(
         statement_source: &VerifiedCommonProofStatementSource,
         verified_public_randomness: &VerifiedPublicRandomness,
     ) -> Result<Vec<Self>, CommonProofVerifierError> {
@@ -528,7 +528,7 @@ impl VerifiedStatementOwnedTree {
     /// trees from an exact board-backed statement capability. Material
     /// contexts are recomputed from the verified setup roster; no transported
     /// root, context hash, relation coordinate, or modulus list is accepted.
-    pub(crate) fn from_verified_committed_material_statement_source(
+    pub(in crate::bgv) fn from_verified_committed_material_statement_source(
         statement_source: &VerifiedCommonProofStatementSource,
         verified_public_randomness: &VerifiedPublicRandomness,
     ) -> Result<Vec<Self>, CommonProofVerifierError> {

@@ -12,8 +12,11 @@ use zeroize::{Zeroize, Zeroizing};
 use crate::{
     bgv::{
         coefficient_codec::canonical_modulus_byte_length,
-        direct_ballots::direct_ballot_slots,
-        encoding::encode_logical_slots_to_plaintext_coefficients,
+        direct_ballots::{
+            PAIR_CHARACTER_CIPHERTEXT_COUNT, PAIR_CHARACTER_LANE_COUNT, PAIR_CHARACTER_LANE_DEGREE,
+            PairCharacterEncoderProfileTerm, pair_character_encoder_profile_terms,
+            pair_character_plaintexts,
+        },
         evaluator::engine::{negacyclic_mul, signed_residue},
         modular_arithmetic::add_mod,
         setup::{VerifiedAcceptedSetupAuthorityHandle, with_verified_accepted_setup_authority},
@@ -41,7 +44,7 @@ use crate::bgv::proof_suite::{
     CommonProofSourcePolynomial, CommonProofSourcePolynomialProvider,
     CommonProofSourcePolynomialProviderPoll, CommonProofSourcePolynomialReplayIdentity,
     CommonProofSourcePolynomialRequest, CommonProofSourceProviderMemoryAccounting,
-    CommonProofVerifierError, OpenedFriLayerPair, PROOF_BASE_FIELD_MODULUS,
+    CommonProofVerifierError, PROOF_BASE_FIELD_MODULUS, PROOF_CHALLENGE_EXTENSION_DEGREE,
     PreparedCommonProofGeneration, PrivateRandomnessCommonProofCoinError,
     PrivateRandomnessCommonProofCoinSource, ProofBaseFieldElement, ProofChallengeExtensionElement,
     ProofEvaluationDomain, ProofFieldError, ProofLeafVisibility, ProofPolynomialError,
@@ -55,6 +58,7 @@ use crate::bgv::proof_suite::{
 const OPTION_COUNT: usize = FOUNDATION_PROFILE.option_count as usize;
 const MINIMUM_SCORE: u64 = FOUNDATION_PROFILE.minimum_score as u64;
 const MAXIMUM_SCORE: u64 = FOUNDATION_PROFILE.maximum_score as u64;
+const PAIR_CHARACTER_PROFILE_LAGRANGE_WEIGHT_COUNT: usize = PAIR_CHARACTER_LANE_COUNT;
 const RADIX: i128 = 3;
 const VERIFIED_SETUP_SOURCE_HASH_FIELD_ORDINAL: u64 = 7;
 const BALLOT_CIPHERTEXT_DIGEST_FIELD_ORDINAL: u64 = 8;
@@ -65,9 +69,9 @@ const BALLOT_SOURCE_POLYNOMIAL_REPLAY_DOMAIN: &str =
 const BALLOT_ENCRYPTION_COIN_CONTEXT_SCHEMA_IDENTIFIER: u16 = 0x1303;
 const BALLOT_ENCRYPTION_COIN_CONTEXT_HASH_DOMAIN: &str =
     "sealed-lattice/ballot/encryption-coin-context/v1";
-const BALLOT_EPHEMERAL_SECRET_RANDOMNESS_PURPOSE: u16 = 8;
-const BALLOT_ERROR_ZERO_RANDOMNESS_PURPOSE: u16 = 9;
-const BALLOT_ERROR_ONE_RANDOMNESS_PURPOSE: u16 = 10;
+const BALLOT_EPHEMERAL_SECRET_RANDOMNESS_PURPOSE: [u16; PAIR_CHARACTER_CIPHERTEXT_COUNT] = [8, 11];
+const BALLOT_ERROR_ZERO_RANDOMNESS_PURPOSE: [u16; PAIR_CHARACTER_CIPHERTEXT_COUNT] = [9, 12];
+const BALLOT_ERROR_ONE_RANDOMNESS_PURPOSE: [u16; PAIR_CHARACTER_CIPHERTEXT_COUNT] = [10, 13];
 
 /// Source-owned count for one ballot encryption attempt. The centered
 /// ternary randomizer uses rejection sampling, while each eta-two centered
@@ -87,7 +91,8 @@ pub(crate) fn ballot_encryption_private_randomness_kmac_input_accounting(
         0,
         0,
         randomizer_stream_block_count
-            .checked_add(centered_binomial_stream_block_count.checked_mul(2)?)?,
+            .checked_add(centered_binomial_stream_block_count.checked_mul(2)?)?
+            .checked_mul(u64::try_from(PAIR_CHARACTER_CIPHERTEXT_COUNT).ok()?)?,
         0,
     )
 }
@@ -232,7 +237,7 @@ fn ballot_validity_carrier_buffer_accounting(
                 .ok_or(BallotValidityAdapterError::IntegerOverflow)
             })?;
     let canonical_ciphertext_byte_length = ring_degree
-        .checked_mul(2)
+        .checked_mul(4)
         .and_then(|count| count.checked_mul(canonical_coefficient_width_sum))
         .and_then(|bytes| bytes.checked_add(4))
         .ok_or(BallotValidityAdapterError::IntegerOverflow)?;
@@ -275,7 +280,7 @@ fn ballot_validity_carrier_buffer_accounting(
             })
             .ok_or(BallotValidityAdapterError::IntegerOverflow)?;
     let ciphertext_readback_polynomial_catalog_byte_length = limb_count
-        .checked_mul(2)
+        .checked_mul(4)
         .and_then(|count| {
             u64::try_from(size_of::<(u16, u16, u64, Arc<[u64]>)>())
                 .ok()
@@ -283,25 +288,30 @@ fn ballot_validity_carrier_buffer_accounting(
         })
         .ok_or(BallotValidityAdapterError::IntegerOverflow)?;
     let decoded_ciphertext_residue_byte_length = ring_degree
-        .checked_mul(2)
+        .checked_mul(4)
         .and_then(|count| count.checked_mul(limb_count))
         .and_then(|count| count.checked_mul(8))
         .ok_or(BallotValidityAdapterError::IntegerOverflow)?;
-    let provider_bound_public_residue_byte_length = decoded_ciphertext_residue_byte_length
-        .checked_mul(2)
+    let provider_bound_public_residue_byte_length = ring_degree
+        .checked_mul(6)
+        .and_then(|count| count.checked_mul(limb_count))
+        .and_then(|count| count.checked_mul(8))
         .ok_or(BallotValidityAdapterError::IntegerOverflow)?;
     let provider_witness_coefficient_byte_length = ring_degree
-        .checked_mul(4)
+        .checked_mul(12)
         .and_then(|count| count.checked_mul(8))
         .ok_or(BallotValidityAdapterError::IntegerOverflow)?;
     let provider_precomputed_transform_byte_length = ring_degree
-        .checked_mul(2)
+        .checked_mul(4)
         .and_then(|count| count.checked_mul(8))
         .ok_or(BallotValidityAdapterError::IntegerOverflow)?;
     let provider_value_cache_byte_length = ring_degree
         .checked_mul(16)
         .ok_or(BallotValidityAdapterError::IntegerOverflow)?;
-    let provider_transient_scratch_byte_length = provider_precomputed_transform_byte_length;
+    let provider_transient_scratch_byte_length = ring_degree
+        .checked_mul(4)
+        .and_then(|count| count.checked_mul(8))
+        .ok_or(BallotValidityAdapterError::IntegerOverflow)?;
     let provider_buffer_live_set_peak_byte_length = provider_bound_public_residue_byte_length
         .checked_add(provider_witness_coefficient_byte_length)
         .and_then(|bytes| bytes.checked_add(provider_precomputed_transform_byte_length))
@@ -332,11 +342,13 @@ fn ballot_validity_carrier_buffer_accounting(
     )
     .map_err(|_| BallotValidityAdapterError::IntegerOverflow)?;
     let public_polynomial_count = limb_count
-        .checked_mul(4)
+        .checked_mul(6)
         .ok_or(BallotValidityAdapterError::IntegerOverflow)?;
     let public_material_catalog_and_arc_header_byte_length =
         checked_slice_byte_length::<[BoundResiduePolynomial; 2]>(source_plan.data_moduli().len())?
-            .checked_mul(2)
+            .checked_add(checked_slice_byte_length::<[BoundResiduePolynomial; 4]>(
+                source_plan.data_moduli().len(),
+            )?)
             .and_then(|length| {
                 u64::try_from(size_of::<usize>() * 2)
                     .ok()
@@ -561,12 +573,18 @@ pub(crate) struct BallotValidityAcceptedSetupBinding {
 /// by the ballot encryption operation and is retained across a resumed proof;
 /// it prevents a restarted provider from being rebound to a different secret
 /// witness that happens to have the same public ciphertext.
-struct BallotValidityEncryptionAttemptSecret {
-    scores: Zeroizing<[u64; OPTION_COUNT]>,
-    plaintext_coefficients: Zeroizing<Vec<u64>>,
+struct BallotValidityCiphertextEncryptionSecret {
+    auxiliary_left_coefficients: Zeroizing<Vec<u64>>,
+    auxiliary_right_coefficients: Zeroizing<Vec<u64>>,
+    message_coefficients: Zeroizing<Vec<u64>>,
     randomizer_coefficients: Zeroizing<Vec<i64>>,
     error_zero_coefficients: Zeroizing<Vec<i64>>,
     error_one_coefficients: Zeroizing<Vec<i64>>,
+}
+
+struct BallotValidityEncryptionAttemptSecret {
+    scores: Zeroizing<[u64; OPTION_COUNT]>,
+    ciphertexts: [BallotValidityCiphertextEncryptionSecret; PAIR_CHARACTER_CIPHERTEXT_COUNT],
     encryption_attempt_identifier: Zeroizing<[u8; 32]>,
 }
 
@@ -584,7 +602,7 @@ impl BallotValidityEncryptionAttemptWitness {
         verified_setup_source_hash: [u8; 64],
         scores: &[u64],
         injected_encryption_attempt_identifier: Zeroizing<[u8; 32]>,
-    ) -> Result<(Self, [PrivateRandomCursor; 3]), BallotValidityAdapterError> {
+    ) -> Result<(Self, [PrivateRandomCursor; 6]), BallotValidityAdapterError> {
         let derivation_input = action_private_randomness.derivation_input();
         let source_ring_degree = u32::try_from(source_plan.ring_degree())
             .map_err(|_| BallotValidityAdapterError::IntegerOverflow)?;
@@ -628,104 +646,148 @@ impl BallotValidityEncryptionAttemptWitness {
             .map_err(|_| BallotValidityAdapterError::IntegerOverflow)?;
         let maximum_candidate_draws =
             selected_suite.maximum_private_sampler_candidate_draws_per_output();
-        let mut randomizer_stream = action_private_randomness.begin_stream(
-            PrivateRandomnessDomain::ballot_encryption_distribution(
-                BALLOT_EPHEMERAL_SECRET_RANDOMNESS_PURPOSE,
-            )?,
-            coin_context_hash,
-            attempt_identifier,
-        )?;
-        let mut error_zero_stream = action_private_randomness.begin_stream(
-            PrivateRandomnessDomain::ballot_encryption_distribution(
-                BALLOT_ERROR_ZERO_RANDOMNESS_PURPOSE,
-            )?,
-            coin_context_hash,
-            attempt_identifier,
-        )?;
-        let mut error_one_stream = action_private_randomness.begin_stream(
-            PrivateRandomnessDomain::ballot_encryption_distribution(
-                BALLOT_ERROR_ONE_RANDOMNESS_PURPOSE,
-            )?,
-            coin_context_hash,
-            attempt_identifier,
-        )?;
-        let mut randomizer_coefficients = Zeroizing::new(Vec::with_capacity(ring_degree));
-        let mut error_zero_coefficients = Zeroizing::new(Vec::with_capacity(ring_degree));
-        let mut error_one_coefficients = Zeroizing::new(Vec::with_capacity(ring_degree));
-        for _ in 0..ring_degree {
-            randomizer_coefficients.push(i64::from(
-                randomizer_stream.sample_centered_ternary(maximum_candidate_draws)?,
-            ));
-            error_zero_coefficients.push(i64::from(error_zero_stream.sample_centered_binomial(2)?));
-            error_one_coefficients.push(i64::from(error_one_stream.sample_centered_binomial(2)?));
-        }
-        let cursors = [
-            randomizer_stream.cursor(),
-            error_zero_stream.cursor(),
-            error_one_stream.cursor(),
-        ];
         let scores: Zeroizing<[u64; OPTION_COUNT]> = Zeroizing::new(
             <[u64; OPTION_COUNT]>::try_from(scores)
                 .map_err(|_| BallotValidityAdapterError::InvalidWitness)?,
         );
-        let pair_difference_slots = Zeroizing::new(direct_ballot_slots(
-            &scores[..],
-            source_plan.plaintext_modulus(),
-            ring_degree,
-        )?);
-        let plaintext_coefficients = Zeroizing::new(
-            encode_logical_slots_to_plaintext_coefficients(&pair_difference_slots)?,
-        );
-        let witness = Self::from_zeroizing_encryption_attempt(
-            source_plan,
-            scores,
-            plaintext_coefficients,
-            randomizer_coefficients,
-            error_zero_coefficients,
-            error_one_coefficients,
-            Zeroizing::new(*attempt_identifier.as_bytes()),
-        )?;
-        Ok((witness, cursors))
+        let pair_character_plaintexts =
+            pair_character_plaintexts(&scores[..], source_plan.plaintext_modulus(), ring_degree)?;
+        let mut ciphertext_secrets = Vec::with_capacity(PAIR_CHARACTER_CIPHERTEXT_COUNT);
+        let mut cursors = Vec::with_capacity(PAIR_CHARACTER_CIPHERTEXT_COUNT * 3);
+        for ciphertext_ordinal in 0..PAIR_CHARACTER_CIPHERTEXT_COUNT {
+            let mut randomizer_stream = action_private_randomness.begin_stream(
+                PrivateRandomnessDomain::ballot_encryption_distribution(
+                    BALLOT_EPHEMERAL_SECRET_RANDOMNESS_PURPOSE[ciphertext_ordinal],
+                )?,
+                coin_context_hash,
+                attempt_identifier,
+            )?;
+            let mut error_zero_stream = action_private_randomness.begin_stream(
+                PrivateRandomnessDomain::ballot_encryption_distribution(
+                    BALLOT_ERROR_ZERO_RANDOMNESS_PURPOSE[ciphertext_ordinal],
+                )?,
+                coin_context_hash,
+                attempt_identifier,
+            )?;
+            let mut error_one_stream = action_private_randomness.begin_stream(
+                PrivateRandomnessDomain::ballot_encryption_distribution(
+                    BALLOT_ERROR_ONE_RANDOMNESS_PURPOSE[ciphertext_ordinal],
+                )?,
+                coin_context_hash,
+                attempt_identifier,
+            )?;
+            let mut randomizer_coefficients = Zeroizing::new(Vec::with_capacity(ring_degree));
+            let mut error_zero_coefficients = Zeroizing::new(Vec::with_capacity(ring_degree));
+            let mut error_one_coefficients = Zeroizing::new(Vec::with_capacity(ring_degree));
+            for _ in 0..ring_degree {
+                randomizer_coefficients.push(i64::from(
+                    randomizer_stream.sample_centered_ternary(maximum_candidate_draws)?,
+                ));
+                error_zero_coefficients
+                    .push(i64::from(error_zero_stream.sample_centered_binomial(2)?));
+                error_one_coefficients
+                    .push(i64::from(error_one_stream.sample_centered_binomial(2)?));
+            }
+            cursors.extend([
+                randomizer_stream.cursor(),
+                error_zero_stream.cursor(),
+                error_one_stream.cursor(),
+            ]);
+            let plaintext = &pair_character_plaintexts[ciphertext_ordinal];
+            ciphertext_secrets.push(BallotValidityCiphertextEncryptionSecret {
+                auxiliary_left_coefficients: Zeroizing::new(
+                    plaintext.auxiliary_left_coefficients().to_vec(),
+                ),
+                auxiliary_right_coefficients: Zeroizing::new(
+                    plaintext.auxiliary_right_coefficients().to_vec(),
+                ),
+                message_coefficients: Zeroizing::new(plaintext.message_coefficients().to_vec()),
+                randomizer_coefficients,
+                error_zero_coefficients,
+                error_one_coefficients,
+            });
+        }
+        let ciphertexts = ciphertext_secrets
+            .try_into()
+            .map_err(|_| BallotValidityAdapterError::InvalidWitness)?;
+        let cursors = cursors
+            .try_into()
+            .map_err(|_| BallotValidityAdapterError::IntegerOverflow)?;
+        Ok((
+            Self::from_zeroizing_encryption_attempt(
+                source_plan,
+                scores,
+                ciphertexts,
+                Zeroizing::new(*attempt_identifier.as_bytes()),
+            )?,
+            cursors,
+        ))
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[cfg(test)]
     fn from_encryption_attempt(
         source_plan: &BallotValiditySourcePlan,
         scores: &[u64],
-        plaintext_coefficients: Vec<u64>,
-        randomizer_coefficients: Vec<i64>,
-        error_zero_coefficients: Vec<i64>,
-        error_one_coefficients: Vec<i64>,
+        randomizer_coefficients: [Vec<i64>; PAIR_CHARACTER_CIPHERTEXT_COUNT],
+        error_zero_coefficients: [Vec<i64>; PAIR_CHARACTER_CIPHERTEXT_COUNT],
+        error_one_coefficients: [Vec<i64>; PAIR_CHARACTER_CIPHERTEXT_COUNT],
         encryption_attempt_identifier: [u8; 32],
     ) -> Result<Self, BallotValidityAdapterError> {
-        let plaintext_coefficients = Zeroizing::new(plaintext_coefficients);
-        let randomizer_coefficients = Zeroizing::new(randomizer_coefficients);
-        let error_zero_coefficients = Zeroizing::new(error_zero_coefficients);
-        let error_one_coefficients = Zeroizing::new(error_one_coefficients);
         let encryption_attempt_identifier = Zeroizing::new(encryption_attempt_identifier);
         let scores: Zeroizing<[u64; OPTION_COUNT]> = Zeroizing::new(
             <[u64; OPTION_COUNT]>::try_from(scores)
                 .map_err(|_| BallotValidityAdapterError::InvalidWitness)?,
         );
+        let ring_degree = usize::try_from(source_plan.ring_degree())
+            .map_err(|_| BallotValidityAdapterError::IntegerOverflow)?;
+        let plaintexts =
+            pair_character_plaintexts(&scores[..], source_plan.plaintext_modulus(), ring_degree)?;
+        let mut randomizers = randomizer_coefficients.into_iter();
+        let mut errors_zero = error_zero_coefficients.into_iter();
+        let mut errors_one = error_one_coefficients.into_iter();
+        let ciphertexts = plaintexts
+            .iter()
+            .map(|plaintext| {
+                Ok(BallotValidityCiphertextEncryptionSecret {
+                    auxiliary_left_coefficients: Zeroizing::new(
+                        plaintext.auxiliary_left_coefficients().to_vec(),
+                    ),
+                    auxiliary_right_coefficients: Zeroizing::new(
+                        plaintext.auxiliary_right_coefficients().to_vec(),
+                    ),
+                    message_coefficients: Zeroizing::new(plaintext.message_coefficients().to_vec()),
+                    randomizer_coefficients: Zeroizing::new(
+                        randomizers
+                            .next()
+                            .ok_or(BallotValidityAdapterError::InvalidWitness)?,
+                    ),
+                    error_zero_coefficients: Zeroizing::new(
+                        errors_zero
+                            .next()
+                            .ok_or(BallotValidityAdapterError::InvalidWitness)?,
+                    ),
+                    error_one_coefficients: Zeroizing::new(
+                        errors_one
+                            .next()
+                            .ok_or(BallotValidityAdapterError::InvalidWitness)?,
+                    ),
+                })
+            })
+            .collect::<Result<Vec<_>, BallotValidityAdapterError>>()?
+            .try_into()
+            .map_err(|_| BallotValidityAdapterError::InvalidWitness)?;
         Self::from_zeroizing_encryption_attempt(
             source_plan,
             scores,
-            plaintext_coefficients,
-            randomizer_coefficients,
-            error_zero_coefficients,
-            error_one_coefficients,
+            ciphertexts,
             encryption_attempt_identifier,
         )
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn from_zeroizing_encryption_attempt(
         source_plan: &BallotValiditySourcePlan,
         scores: Zeroizing<[u64; OPTION_COUNT]>,
-        plaintext_coefficients: Zeroizing<Vec<u64>>,
-        randomizer_coefficients: Zeroizing<Vec<i64>>,
-        error_zero_coefficients: Zeroizing<Vec<i64>>,
-        error_one_coefficients: Zeroizing<Vec<i64>>,
+        ciphertexts: [BallotValidityCiphertextEncryptionSecret; PAIR_CHARACTER_CIPHERTEXT_COUNT],
         encryption_attempt_identifier: Zeroizing<[u8; 32]>,
     ) -> Result<Self, BallotValidityAdapterError> {
         let ring_degree = usize::try_from(source_plan.ring_degree())
@@ -733,37 +795,47 @@ impl BallotValidityEncryptionAttemptWitness {
         if scores
             .iter()
             .any(|score| !(MINIMUM_SCORE..=MAXIMUM_SCORE).contains(score))
-            || plaintext_coefficients.len() != ring_degree
-            || randomizer_coefficients.len() != ring_degree
-            || error_zero_coefficients.len() != ring_degree
-            || error_one_coefficients.len() != ring_degree
-            || randomizer_coefficients
-                .iter()
-                .any(|coefficient| !(-1..=1).contains(coefficient))
-            || error_zero_coefficients
-                .iter()
-                .chain(error_one_coefficients.iter())
-                .any(|coefficient| !(-2..=2).contains(coefficient))
+            || ciphertexts.iter().any(|ciphertext| {
+                ciphertext.auxiliary_left_coefficients.len() != ring_degree
+                    || ciphertext.auxiliary_right_coefficients.len() != ring_degree
+                    || ciphertext.message_coefficients.len() != ring_degree
+                    || ciphertext.randomizer_coefficients.len() != ring_degree
+                    || ciphertext.error_zero_coefficients.len() != ring_degree
+                    || ciphertext.error_one_coefficients.len() != ring_degree
+                    || ciphertext
+                        .randomizer_coefficients
+                        .iter()
+                        .any(|coefficient| !(-1..=1).contains(coefficient))
+                    || ciphertext
+                        .error_zero_coefficients
+                        .iter()
+                        .chain(ciphertext.error_one_coefficients.iter())
+                        .any(|coefficient| !(-2..=2).contains(coefficient))
+            })
         {
             return Err(BallotValidityAdapterError::InvalidWitness);
         }
 
-        let expected_plaintext_coefficients = Zeroizing::new(
-            source_plan
-                .plaintext_coefficients_for_scores(&scores[..])
-                .ok_or(BallotValidityAdapterError::InvalidWitness)?,
-        );
-        if plaintext_coefficients.as_slice() != expected_plaintext_coefficients.as_slice() {
+        let expected_plaintexts =
+            pair_character_plaintexts(&scores[..], source_plan.plaintext_modulus(), ring_degree)?;
+        if ciphertexts
+            .iter()
+            .zip(expected_plaintexts.iter())
+            .any(|(ciphertext, expected)| {
+                ciphertext.auxiliary_left_coefficients.as_slice()
+                    != expected.auxiliary_left_coefficients()
+                    || ciphertext.auxiliary_right_coefficients.as_slice()
+                        != expected.auxiliary_right_coefficients()
+                    || ciphertext.message_coefficients.as_slice() != expected.message_coefficients()
+            })
+        {
             return Err(BallotValidityAdapterError::InvalidWitness);
         }
 
         Ok(Self {
             secret: Arc::new(BallotValidityEncryptionAttemptSecret {
                 scores,
-                plaintext_coefficients,
-                randomizer_coefficients,
-                error_zero_coefficients,
-                error_one_coefficients,
+                ciphertexts,
                 encryption_attempt_identifier,
             }),
         })
@@ -773,20 +845,41 @@ impl BallotValidityEncryptionAttemptWitness {
         &self.secret.scores
     }
 
-    fn plaintext_coefficients(&self) -> &[u64] {
-        &self.secret.plaintext_coefficients
+    fn auxiliary_coefficients(
+        &self,
+        ciphertext_ordinal: usize,
+        auxiliary_ordinal: usize,
+    ) -> Option<&[u64]> {
+        let ciphertext = self.secret.ciphertexts.get(ciphertext_ordinal)?;
+        match auxiliary_ordinal {
+            0 => Some(&ciphertext.auxiliary_left_coefficients),
+            1 => Some(&ciphertext.auxiliary_right_coefficients),
+            2 => Some(&ciphertext.message_coefficients),
+            _ => None,
+        }
     }
 
-    fn randomizer_coefficients(&self) -> &[i64] {
-        &self.secret.randomizer_coefficients
+    fn randomizer_coefficients(&self, ciphertext_ordinal: usize) -> Option<&[i64]> {
+        Some(
+            &self
+                .secret
+                .ciphertexts
+                .get(ciphertext_ordinal)?
+                .randomizer_coefficients,
+        )
     }
 
-    fn error_zero_coefficients(&self) -> &[i64] {
-        &self.secret.error_zero_coefficients
-    }
-
-    fn error_one_coefficients(&self) -> &[i64] {
-        &self.secret.error_one_coefficients
+    fn error_coefficients(
+        &self,
+        ciphertext_ordinal: usize,
+        component_ordinal: usize,
+    ) -> Option<&[i64]> {
+        let ciphertext = self.secret.ciphertexts.get(ciphertext_ordinal)?;
+        match component_ordinal {
+            0 => Some(&ciphertext.error_zero_coefficients),
+            1 => Some(&ciphertext.error_one_coefficients),
+            _ => None,
+        }
     }
 
     fn encryption_attempt_identifier(&self) -> [u8; 32] {
@@ -821,23 +914,29 @@ pub(crate) struct BallotValidityBoundPublicMaterial {
     verified_setup_source_hash: [u8; 64],
     ballot_ciphertext_digest: [u8; 64],
     public_key_by_limb: Box<[[BoundResiduePolynomial; 2]]>,
-    ciphertext_by_limb: Box<[[BoundResiduePolynomial; 2]]>,
+    ciphertext_by_limb: Box<[[BoundResiduePolynomial; 4]]>,
 }
 
 impl BallotValidityBoundPublicMaterial {
     fn resident_owned_payload_byte_length(&self) -> Option<u64> {
-        let array_payload = u64::try_from(size_of::<[BoundResiduePolynomial; 2]>()).ok()?;
-        let outer_payload = u64::try_from(
-            self.public_key_by_limb
-                .len()
-                .checked_add(self.ciphertext_by_limb.len())?,
-        )
-        .ok()?
-        .checked_mul(array_payload)?;
+        let public_key_array_payload = self
+            .public_key_by_limb
+            .len()
+            .checked_mul(size_of::<[BoundResiduePolynomial; 2]>())?;
+        let ciphertext_array_payload = self
+            .ciphertext_by_limb
+            .len()
+            .checked_mul(size_of::<[BoundResiduePolynomial; 4]>())?;
+        let outer_payload =
+            u64::try_from(public_key_array_payload.checked_add(ciphertext_array_payload)?).ok()?;
         self.public_key_by_limb
             .iter()
-            .chain(self.ciphertext_by_limb.iter())
             .flat_map(|components| components.iter())
+            .chain(
+                self.ciphertext_by_limb
+                    .iter()
+                    .flat_map(|components| components.iter()),
+            )
             .try_fold(outer_payload, |total, polynomial| {
                 u64::try_from(polynomial.coefficients.len())
                     .ok()?
@@ -873,7 +972,7 @@ pub(crate) struct BallotValidityPreparedProofAttempt {
     canonical_application_statement_bytes: Vec<u8>,
     application_statement_hash: [u8; 64],
     proof_coin_input: OrdinaryProofCoinInput,
-    encryption_randomness_cursors: [PrivateRandomCursor; 3],
+    encryption_randomness_cursors: [PrivateRandomCursor; 6],
     witness: BallotValidityEncryptionAttemptWitness,
     public_material: BallotValidityBoundPublicMaterial,
     generated_ciphertext: BallotValidityGeneratedCiphertext,
@@ -1092,7 +1191,7 @@ impl BallotValidityPreparedProofAttempt {
             .map_err(BallotValidityAdapterError::from)
     }
 
-    pub(crate) const fn encryption_randomness_cursors(&self) -> [PrivateRandomCursor; 3] {
+    pub(crate) const fn encryption_randomness_cursors(&self) -> [PrivateRandomCursor; 6] {
         self.encryption_randomness_cursors
     }
 
@@ -1238,84 +1337,103 @@ impl BallotValidityGeneratedCiphertext {
         public_key_polynomials: Vec<(u16, u16, u64, Arc<[u64]>)>,
         witness: &BallotValidityEncryptionAttemptWitness,
     ) -> Result<Self, BallotValidityAdapterError> {
-        let public_key_by_limb = checked_polynomial_sequence(source_plan, public_key_polynomials)?;
+        let public_key_by_limb =
+            checked_polynomial_sequence::<2>(source_plan, public_key_polynomials)?;
         let ring_degree = usize::try_from(source_plan.ring_degree())
             .map_err(|_| BallotValidityAdapterError::IntegerOverflow)?;
         let plaintext_modulus = i64::try_from(source_plan.plaintext_modulus())
             .map_err(|_| BallotValidityAdapterError::IntegerOverflow)?;
-        let mut ciphertext_by_limb = Vec::with_capacity(source_plan.data_moduli().len());
+        let mut ciphertext_by_limb: Vec<[Arc<[u64]>; 4]> =
+            Vec::with_capacity(source_plan.data_moduli().len());
         for (data_modulus_ordinal, modulus) in source_plan.data_moduli().iter().copied().enumerate()
         {
             let public_key_limb = public_key_by_limb
                 .get(data_modulus_ordinal)
                 .ok_or(BallotValidityAdapterError::InvalidPublicMaterial)?;
-            let randomizer_residues = Zeroizing::new(
-                witness
-                    .randomizer_coefficients()
-                    .iter()
-                    .copied()
-                    .map(|coefficient| signed_residue(coefficient, modulus))
-                    .collect::<Vec<_>>(),
-            );
-            let mut component_zero = negacyclic_mul(
-                &public_key_limb[0].coefficients,
-                &randomizer_residues,
-                modulus,
-            )?;
-            let mut component_one = match negacyclic_mul(
-                &public_key_limb[1].coefficients,
-                &randomizer_residues,
-                modulus,
-            ) {
-                Ok(component) => component,
-                Err(error) => {
+            let mut flattened_components = Vec::with_capacity(4);
+            for ciphertext_ordinal in 0..PAIR_CHARACTER_CIPHERTEXT_COUNT {
+                let randomizer_coefficients = witness
+                    .randomizer_coefficients(ciphertext_ordinal)
+                    .ok_or(BallotValidityAdapterError::InvalidWitness)?;
+                let randomizer_residues = Zeroizing::new(
+                    randomizer_coefficients
+                        .iter()
+                        .copied()
+                        .map(|coefficient| signed_residue(coefficient, modulus))
+                        .collect::<Vec<_>>(),
+                );
+                let mut component_zero = negacyclic_mul(
+                    &public_key_limb[0].coefficients,
+                    &randomizer_residues,
+                    modulus,
+                )?;
+                let mut component_one = match negacyclic_mul(
+                    &public_key_limb[1].coefficients,
+                    &randomizer_residues,
+                    modulus,
+                ) {
+                    Ok(component) => component,
+                    Err(error) => {
+                        component_zero.zeroize();
+                        return Err(error.into());
+                    }
+                };
+                if component_zero.len() != ring_degree || component_one.len() != ring_degree {
                     component_zero.zeroize();
-                    return Err(error.into());
+                    component_one.zeroize();
+                    return Err(BallotValidityAdapterError::InvalidPublicMaterial);
                 }
-            };
-            if component_zero.len() != ring_degree || component_one.len() != ring_degree {
-                component_zero.zeroize();
-                component_one.zeroize();
-                return Err(BallotValidityAdapterError::InvalidPublicMaterial);
-            }
-            let complete_ciphertext_components = (|| {
-                for coefficient_ordinal in 0..ring_degree {
-                    let scaled_error_zero = witness.error_zero_coefficients()[coefficient_ordinal]
-                        .checked_mul(plaintext_modulus)
-                        .ok_or(BallotValidityAdapterError::IntegerOverflow)?;
-                    let scaled_error_one = witness.error_one_coefficients()[coefficient_ordinal]
-                        .checked_mul(plaintext_modulus)
-                        .ok_or(BallotValidityAdapterError::IntegerOverflow)?;
-                    component_zero[coefficient_ordinal] = add_mod(
-                        add_mod(
-                            component_zero[coefficient_ordinal],
-                            signed_residue(scaled_error_zero, modulus),
+                let message_coefficients = witness
+                    .auxiliary_coefficients(ciphertext_ordinal, 2)
+                    .ok_or(BallotValidityAdapterError::InvalidWitness)?;
+                let error_zero_coefficients = witness
+                    .error_coefficients(ciphertext_ordinal, 0)
+                    .ok_or(BallotValidityAdapterError::InvalidWitness)?;
+                let error_one_coefficients = witness
+                    .error_coefficients(ciphertext_ordinal, 1)
+                    .ok_or(BallotValidityAdapterError::InvalidWitness)?;
+                let complete_ciphertext_components = (|| {
+                    for coefficient_ordinal in 0..ring_degree {
+                        let scaled_error_zero = error_zero_coefficients[coefficient_ordinal]
+                            .checked_mul(plaintext_modulus)
+                            .ok_or(BallotValidityAdapterError::IntegerOverflow)?;
+                        let scaled_error_one = error_one_coefficients[coefficient_ordinal]
+                            .checked_mul(plaintext_modulus)
+                            .ok_or(BallotValidityAdapterError::IntegerOverflow)?;
+                        component_zero[coefficient_ordinal] = add_mod(
+                            add_mod(
+                                component_zero[coefficient_ordinal],
+                                signed_residue(scaled_error_zero, modulus),
+                                modulus,
+                            )?,
+                            message_coefficients[coefficient_ordinal],
                             modulus,
-                        )?,
-                        witness.plaintext_coefficients()[coefficient_ordinal],
-                        modulus,
-                    )?;
-                    component_one[coefficient_ordinal] = add_mod(
-                        component_one[coefficient_ordinal],
-                        signed_residue(scaled_error_one, modulus),
-                        modulus,
-                    )?;
+                        )?;
+                        component_one[coefficient_ordinal] = add_mod(
+                            component_one[coefficient_ordinal],
+                            signed_residue(scaled_error_one, modulus),
+                            modulus,
+                        )?;
+                    }
+                    Ok::<(), BallotValidityAdapterError>(())
+                })();
+                if let Err(error) = complete_ciphertext_components {
+                    component_zero.zeroize();
+                    component_one.zeroize();
+                    return Err(error);
                 }
-                Ok::<(), BallotValidityAdapterError>(())
-            })();
-            if let Err(error) = complete_ciphertext_components {
-                component_zero.zeroize();
-                component_one.zeroize();
-                return Err(error);
+                flattened_components.push(Arc::<[u64]>::from(component_zero));
+                flattened_components.push(Arc::<[u64]>::from(component_one));
             }
-            ciphertext_by_limb.push([
-                Arc::<[u64]>::from(component_zero),
-                Arc::<[u64]>::from(component_one),
-            ]);
+            ciphertext_by_limb.push(
+                flattened_components
+                    .try_into()
+                    .map_err(|_| BallotValidityAdapterError::InvalidPublicMaterial)?,
+            );
         }
 
-        let mut polynomials = Vec::with_capacity(ciphertext_by_limb.len() * 2);
-        for component_ordinal in 0..2_u16 {
+        let mut polynomials = Vec::with_capacity(ciphertext_by_limb.len() * 4);
+        for flattened_component_ordinal in 0..4_u16 {
             for (data_modulus_ordinal, (modulus, components)) in source_plan
                 .data_moduli()
                 .iter()
@@ -1324,11 +1442,11 @@ impl BallotValidityGeneratedCiphertext {
                 .enumerate()
             {
                 polynomials.push((
-                    component_ordinal,
+                    flattened_component_ordinal,
                     u16::try_from(data_modulus_ordinal)
                         .map_err(|_| BallotValidityAdapterError::IntegerOverflow)?,
                     modulus,
-                    Arc::clone(&components[usize::from(component_ordinal)]),
+                    Arc::clone(&components[usize::from(flattened_component_ordinal)]),
                 ));
             }
         }
@@ -1394,7 +1512,7 @@ impl BallotValidityCiphertextReadback {
         source_plan: &BallotValiditySourcePlan,
         ciphertext: BallotValidityAuthenticatedCiphertext,
     ) -> Result<Self, BallotValidityAdapterError> {
-        require_checked_polynomial_sequence(source_plan, &ciphertext.polynomials)?;
+        require_checked_polynomial_sequence::<4>(source_plan, &ciphertext.polynomials)?;
         let level = source_plan
             .active_data_modulus_indices()
             .len()
@@ -1403,7 +1521,7 @@ impl BallotValidityCiphertextReadback {
             .ok_or(BallotValidityAdapterError::InvalidPublicMaterial)?;
         let mut header = [0_u8; 4];
         header[..2].copy_from_slice(&level.to_le_bytes());
-        header[2..].copy_from_slice(&2_u16.to_le_bytes());
+        header[2..].copy_from_slice(&4_u16.to_le_bytes());
         Ok(Self {
             header,
             header_byte_offset: 0,
@@ -1533,7 +1651,7 @@ impl BallotValidityCiphertextStreamDecoder {
                     byte_length
                         .checked_add(
                             polynomial_byte_length
-                                .checked_mul(2)
+                                .checked_mul(4)
                                 .ok_or(RefusalReason::OutsideSupportedProfile)?,
                         )
                         .ok_or(RefusalReason::OutsideSupportedProfile)
@@ -1558,7 +1676,7 @@ impl BallotValidityCiphertextStreamDecoder {
             partial_coefficient: [0_u8; 8],
             partial_coefficient_byte_length: 0,
             current_polynomial: Vec::with_capacity(ring_degree),
-            polynomials: Vec::with_capacity(source_plan.data_moduli().len() * 2),
+            polynomials: Vec::with_capacity(source_plan.data_moduli().len() * 4),
             refusal_reason: None,
         })
     }
@@ -1588,12 +1706,12 @@ impl BallotValidityCiphertextStreamDecoder {
             return VerificationResult::refused(refusal_reason);
         }
         if self.header_byte_length != self.header.len()
-            || self.component_ordinal != 2
+            || self.component_ordinal != 4
             || self.data_modulus_ordinal != 0
             || self.coefficient_ordinal != 0
             || self.partial_coefficient_byte_length != 0
             || !self.current_polynomial.is_empty()
-            || self.polynomials.len() != self.data_moduli.len() * 2
+            || self.polynomials.len() != self.data_moduli.len() * 4
         {
             return VerificationResult::refused(RefusalReason::WrongTypeOrLength);
         }
@@ -1617,14 +1735,14 @@ impl BallotValidityCiphertextStreamDecoder {
             if self.header_byte_length == self.header.len() {
                 let level = u16::from_le_bytes([self.header[0], self.header[1]]);
                 let component_count = u16::from_le_bytes([self.header[2], self.header[3]]);
-                if level != self.expected_level || component_count != 2 {
+                if level != self.expected_level || component_count != 4 {
                     return Err(RefusalReason::WrongTypeOrLength);
                 }
             }
         }
 
         while byte_offset < bytes.len() {
-            if self.component_ordinal >= 2 {
+            if self.component_ordinal >= 4 {
                 return Err(RefusalReason::WrongTypeOrLength);
             }
             let modulus = *self
@@ -1695,7 +1813,11 @@ fn ballot_ciphertext_total_byte_length(
     let expected_polynomial_count = source_plan
         .data_moduli()
         .len()
-        .checked_mul(2)
+        .checked_mul(
+            PAIR_CHARACTER_CIPHERTEXT_COUNT
+                .checked_mul(2)
+                .ok_or(BallotValidityAdapterError::IntegerOverflow)?,
+        )
         .ok_or(BallotValidityAdapterError::IntegerOverflow)?;
     if polynomials.len() != expected_polynomial_count {
         return Err(BallotValidityAdapterError::InvalidPublicMaterial);
@@ -1796,9 +1918,11 @@ impl BallotValidityBoundPublicMaterial {
             return Err(BallotValidityAdapterError::InvalidPublicMaterial);
         }
         let public_key_by_limb =
-            checked_polynomial_sequence(source_plan, public_key_polynomials)?.into_boxed_slice();
+            checked_polynomial_sequence::<2>(source_plan, public_key_polynomials)?
+                .into_boxed_slice();
         let ciphertext_by_limb =
-            checked_polynomial_sequence(source_plan, ciphertext_polynomials)?.into_boxed_slice();
+            checked_polynomial_sequence::<4>(source_plan, ciphertext_polynomials)?
+                .into_boxed_slice();
         Ok(Self {
             protocol_version,
             suite_identifier,
@@ -1819,18 +1943,28 @@ impl BallotValidityBoundPublicMaterial {
 
     pub(crate) fn authenticated_ciphertext_catalog(
         &self,
-    ) -> Result<Vec<(u16, u16, u64, Arc<[u64]>)>, BallotValidityAdapterError> {
-        let mut catalog = Vec::with_capacity(self.ciphertext_by_limb.len() * 2);
-        for component_ordinal in 0..2_u16 {
-            for (data_modulus_index, limb) in self.ciphertext_by_limb.iter().enumerate() {
-                let polynomial = &limb[usize::from(component_ordinal)];
-                catalog.push((
-                    component_ordinal,
-                    u16::try_from(data_modulus_index)
-                        .map_err(|_| BallotValidityAdapterError::IntegerOverflow)?,
-                    polynomial.modulus,
-                    Arc::clone(&polynomial.coefficients),
-                ));
+    ) -> Result<Vec<(u16, u16, u16, u64, Arc<[u64]>)>, BallotValidityAdapterError> {
+        let mut catalog =
+            Vec::with_capacity(self.ciphertext_by_limb.len() * PAIR_CHARACTER_CIPHERTEXT_COUNT * 2);
+        for ciphertext_ordinal in 0..PAIR_CHARACTER_CIPHERTEXT_COUNT {
+            for component_ordinal in 0..2_usize {
+                let flattened_component_ordinal = ciphertext_ordinal
+                    .checked_mul(2)
+                    .and_then(|ordinal| ordinal.checked_add(component_ordinal))
+                    .ok_or(BallotValidityAdapterError::IntegerOverflow)?;
+                for (data_modulus_index, limb) in self.ciphertext_by_limb.iter().enumerate() {
+                    let polynomial = &limb[flattened_component_ordinal];
+                    catalog.push((
+                        u16::try_from(ciphertext_ordinal)
+                            .map_err(|_| BallotValidityAdapterError::IntegerOverflow)?,
+                        u16::try_from(component_ordinal)
+                            .map_err(|_| BallotValidityAdapterError::IntegerOverflow)?,
+                        u16::try_from(data_modulus_index)
+                            .map_err(|_| BallotValidityAdapterError::IntegerOverflow)?,
+                        polynomial.modulus,
+                        Arc::clone(&polynomial.coefficients),
+                    ));
+                }
             }
         }
         Ok(catalog)
@@ -1839,53 +1973,62 @@ impl BallotValidityBoundPublicMaterial {
     fn polynomial(
         &self,
         source_kind: u16,
+        ciphertext_ordinal: u16,
         component_ordinal: u16,
         data_modulus_index: u16,
     ) -> Option<&BoundResiduePolynomial> {
-        let limbs = match source_kind {
-            1 => &self.public_key_by_limb,
-            2 => &self.ciphertext_by_limb,
-            _ => return None,
-        };
-        limbs
-            .get(usize::from(data_modulus_index))?
-            .get(usize::from(component_ordinal))
+        match source_kind {
+            1 if ciphertext_ordinal == 0 => self
+                .public_key_by_limb
+                .get(usize::from(data_modulus_index))?
+                .get(usize::from(component_ordinal)),
+            2 => {
+                let flattened_component_ordinal = usize::from(ciphertext_ordinal)
+                    .checked_mul(2)?
+                    .checked_add(usize::from(component_ordinal))?;
+                self.ciphertext_by_limb
+                    .get(usize::from(data_modulus_index))?
+                    .get(flattened_component_ordinal)
+            }
+            _ => None,
+        }
     }
 }
 
-fn checked_polynomial_sequence(
+fn checked_polynomial_sequence<const COMPONENT_COUNT: usize>(
     source_plan: &BallotValiditySourcePlan,
     polynomials: Vec<(u16, u16, u64, Arc<[u64]>)>,
-) -> Result<Vec<[BoundResiduePolynomial; 2]>, BallotValidityAdapterError> {
-    require_checked_polynomial_sequence(source_plan, &polynomials)?;
+) -> Result<Vec<[BoundResiduePolynomial; COMPONENT_COUNT]>, BallotValidityAdapterError> {
+    require_checked_polynomial_sequence::<COMPONENT_COUNT>(source_plan, &polynomials)?;
     let mut ordered_polynomials = polynomials.into_iter();
     let mut components_by_limb = (0..source_plan.data_moduli().len())
-        .map(|_| [None, None])
-        .collect::<Vec<[Option<BoundResiduePolynomial>; 2]>>();
-    for component_ordinal in 0_u16..2 {
+        .map(|_| core::array::from_fn(|_| None))
+        .collect::<Vec<[Option<BoundResiduePolynomial>; COMPONENT_COUNT]>>();
+    for component_ordinal in 0..COMPONENT_COUNT {
         for limb_ordinal in 0..source_plan.data_moduli().len() {
             let (_, _, modulus, coefficients) = ordered_polynomials
                 .next()
                 .ok_or(BallotValidityAdapterError::InvalidPublicMaterial)?;
-            components_by_limb[limb_ordinal][usize::from(component_ordinal)] =
-                Some(BoundResiduePolynomial {
-                    modulus,
-                    coefficients,
-                });
+            components_by_limb[limb_ordinal][component_ordinal] = Some(BoundResiduePolynomial {
+                modulus,
+                coefficients,
+            });
         }
     }
     components_by_limb
         .into_iter()
-        .map(|[component_zero, component_one]| {
-            Ok([
-                component_zero.ok_or(BallotValidityAdapterError::InvalidPublicMaterial)?,
-                component_one.ok_or(BallotValidityAdapterError::InvalidPublicMaterial)?,
-            ])
+        .map(|components| {
+            components
+                .into_iter()
+                .map(|component| component.ok_or(BallotValidityAdapterError::InvalidPublicMaterial))
+                .collect::<Result<Vec<_>, _>>()?
+                .try_into()
+                .map_err(|_| BallotValidityAdapterError::InvalidPublicMaterial)
         })
         .collect()
 }
 
-fn require_checked_polynomial_sequence(
+fn require_checked_polynomial_sequence<const COMPONENT_COUNT: usize>(
     source_plan: &BallotValiditySourcePlan,
     polynomials: &[(u16, u16, u64, Arc<[u64]>)],
 ) -> Result<(), BallotValidityAdapterError> {
@@ -1894,14 +2037,16 @@ fn require_checked_polynomial_sequence(
     let expected_count = source_plan
         .active_data_modulus_indices()
         .len()
-        .checked_mul(2)
+        .checked_mul(COMPONENT_COUNT)
         .ok_or(BallotValidityAdapterError::IntegerOverflow)?;
     if polynomials.len() != expected_count {
         return Err(BallotValidityAdapterError::InvalidPublicMaterial);
     }
 
     let mut ordered_polynomials = polynomials.iter();
-    for component_ordinal in 0_u16..2 {
+    for component_ordinal in 0..COMPONENT_COUNT {
+        let component_ordinal = u16::try_from(component_ordinal)
+            .map_err(|_| BallotValidityAdapterError::IntegerOverflow)?;
         for (data_modulus_index, modulus) in source_plan
             .active_data_modulus_indices()
             .iter()
@@ -1943,7 +2088,8 @@ pub(crate) struct BallotValiditySourcePolynomialAdapter {
     public_material: BallotValidityBoundPublicMaterial,
     trace_domain: ProofEvaluationDomain,
     convolution_domain: ProofEvaluationDomain,
-    randomizer_convolution_evaluations: Option<Zeroizing<Vec<ProofBaseFieldElement>>>,
+    randomizer_convolution_evaluations:
+        Option<[Zeroizing<Vec<ProofBaseFieldElement>>; PAIR_CHARACTER_CIPHERTEXT_COUNT]>,
     cached_value_source: Option<(BallotValidityWitnessValueSource, Zeroizing<Vec<i128>>)>,
     ordered_source_columns: Box<[(u32, RelationColumnDescriptor)]>,
     next_source_column_position: usize,
@@ -2040,13 +2186,24 @@ impl BallotValiditySourcePolynomialAdapter {
             .ok_or(BallotValidityAdapterError::IntegerOverflow)?;
         let trace_domain = ProofEvaluationDomain::new_subgroup(trace_size)?;
         let convolution_domain = ProofEvaluationDomain::new_subgroup(convolution_size)?;
-        let mut randomizer_convolution_evaluations = Zeroizing::new(Vec::with_capacity(trace_size));
-        for coefficient in witness.randomizer_coefficients().iter().copied() {
-            randomizer_convolution_evaluations
-                .push(base_field_from_signed(i128::from(coefficient))?);
+        let mut randomizer_convolution_evaluations =
+            Vec::with_capacity(PAIR_CHARACTER_CIPHERTEXT_COUNT);
+        for ciphertext_ordinal in 0..PAIR_CHARACTER_CIPHERTEXT_COUNT {
+            let mut evaluations = Zeroizing::new(Vec::with_capacity(trace_size));
+            for coefficient in witness
+                .randomizer_coefficients(ciphertext_ordinal)
+                .ok_or(BallotValidityAdapterError::InvalidWitness)?
+                .iter()
+                .copied()
+            {
+                evaluations.push(base_field_from_signed(i128::from(coefficient))?);
+            }
+            convolution_domain.evaluate_base_polynomial_in_place(&mut evaluations)?;
+            randomizer_convolution_evaluations.push(evaluations);
         }
-        convolution_domain
-            .evaluate_base_polynomial_in_place(&mut randomizer_convolution_evaluations)?;
+        let randomizer_convolution_evaluations = randomizer_convolution_evaluations
+            .try_into()
+            .map_err(|_| BallotValidityAdapterError::InvalidWitness)?;
         let relation_plan_variant_hash = variant.canonical_hash()?;
         let relation_plan_hash = compilation.relation_plan().canonical_hash()?;
         let ordered_source_columns = variant
@@ -2058,7 +2215,8 @@ impl BallotValiditySourcePolynomialAdapter {
                     .map_err(|_| BallotValidityAdapterError::IntegerOverflow)?;
                 Ok(compilation
                     .source_plan()
-                    .has_source(column_ordinal)
+                    .recipe(column_ordinal)
+                    .is_some()
                     .then(|| (column_ordinal, descriptor.clone())))
             })
             .collect::<Result<Vec<_>, BallotValidityAdapterError>>()?
@@ -2238,96 +2396,191 @@ impl BallotValiditySourcePolynomialAdapter {
             .map_err(|_| BallotValidityAdapterError::IntegerOverflow)?;
         let witness = self.retained_witness()?;
         match source {
-            BallotValidityWitnessValueSource::ScoreOffset { option_ordinal } => {
+            BallotValidityWitnessValueSource::ScoreIndicator {
+                option_ordinal,
+                score_bucket_ordinal,
+            } => {
                 let score = witness
                     .scores()
                     .get(usize::from(option_ordinal))
                     .copied()
                     .ok_or(BallotValidityAdapterError::InvalidWitness)?;
                 Ok(Zeroizing::new(vec![
-                    i128::from(score - MINIMUM_SCORE);
+                    i128::from(
+                        score == MINIMUM_SCORE + u64::from(score_bucket_ordinal),
+                    );
                     ring_degree
                 ]))
             }
-            BallotValidityWitnessValueSource::PlaintextCoefficient => Ok(Zeroizing::new(
+            BallotValidityWitnessValueSource::PairCharacterAuxiliaryCoefficient {
+                ciphertext_ordinal,
+                auxiliary_ordinal,
+            } => Ok(Zeroizing::new(
                 witness
-                    .plaintext_coefficients()
+                    .auxiliary_coefficients(
+                        usize::from(ciphertext_ordinal),
+                        usize::from(auxiliary_ordinal),
+                    )
+                    .ok_or(BallotValidityAdapterError::InvalidWitness)?
                     .iter()
                     .copied()
                     .map(i128::from)
                     .collect(),
             )),
-            BallotValidityWitnessValueSource::ReversedRandomizerShifted => Ok(Zeroizing::new(
+            BallotValidityWitnessValueSource::ReversedPairCharacterAuxiliaryCoefficient {
+                ciphertext_ordinal,
+                auxiliary_ordinal,
+            } => Ok(Zeroizing::new(
                 witness
-                    .randomizer_coefficients()
+                    .auxiliary_coefficients(
+                        usize::from(ciphertext_ordinal),
+                        usize::from(auxiliary_ordinal),
+                    )
+                    .ok_or(BallotValidityAdapterError::InvalidWitness)?
                     .iter()
                     .rev()
-                    .map(|coefficient| i128::from(*coefficient) + 1)
+                    .copied()
+                    .map(i128::from)
                     .collect(),
             )),
-            BallotValidityWitnessValueSource::ErrorZeroShifted => Ok(Zeroizing::new(
+            BallotValidityWitnessValueSource::ReversedRandomizerShifted { ciphertext_ordinal } => {
+                Ok(Zeroizing::new(
+                    witness
+                        .randomizer_coefficients(usize::from(ciphertext_ordinal))
+                        .ok_or(BallotValidityAdapterError::InvalidWitness)?
+                        .iter()
+                        .rev()
+                        .map(|coefficient| i128::from(*coefficient) + 1)
+                        .collect(),
+                ))
+            }
+            BallotValidityWitnessValueSource::ErrorShifted {
+                ciphertext_ordinal,
+                component_ordinal,
+            } => Ok(Zeroizing::new(
                 witness
-                    .error_zero_coefficients()
+                    .error_coefficients(
+                        usize::from(ciphertext_ordinal),
+                        usize::from(component_ordinal),
+                    )
+                    .ok_or(BallotValidityAdapterError::InvalidWitness)?
                     .iter()
                     .map(|coefficient| i128::from(*coefficient) + 2)
                     .collect(),
             )),
-            BallotValidityWitnessValueSource::ErrorOneShifted => Ok(Zeroizing::new(
-                witness
-                    .error_one_coefficients()
-                    .iter()
-                    .map(|coefficient| i128::from(*coefficient) + 2)
-                    .collect(),
-            )),
-            BallotValidityWitnessValueSource::EncoderReduction => {
+            BallotValidityWitnessValueSource::EncoderReduction {
+                ciphertext_ordinal,
+                auxiliary_ordinal,
+            } => {
+                let auxiliary_coefficients = witness
+                    .auxiliary_coefficients(
+                        usize::from(ciphertext_ordinal),
+                        usize::from(auxiliary_ordinal),
+                    )
+                    .ok_or(BallotValidityAdapterError::InvalidWitness)?;
                 let reductions = self
                     .source_plan
                     .encoder_reductions_for_scores(
                         witness.scores(),
-                        witness.plaintext_coefficients(),
+                        ciphertext_ordinal,
+                        auxiliary_ordinal,
+                        auxiliary_coefficients,
                     )
                     .ok_or(BallotValidityAdapterError::InvalidWitness)?;
                 Ok(Zeroizing::new(
                     reductions.into_iter().map(i128::from).collect(),
                 ))
             }
+            BallotValidityWitnessValueSource::PairCharacterProductQuotient {
+                ciphertext_ordinal,
+            } => self.pair_character_product_quotient(ciphertext_ordinal),
             BallotValidityWitnessValueSource::EncryptionQuotient {
+                ciphertext_ordinal,
                 data_modulus_index,
                 component_ordinal,
-            } => self.encryption_quotient(data_modulus_index, component_ordinal),
+            } => {
+                self.encryption_quotient(ciphertext_ordinal, data_modulus_index, component_ordinal)
+            }
         }
+    }
+
+    fn pair_character_product_quotient(
+        &self,
+        ciphertext_ordinal: u16,
+    ) -> Result<Zeroizing<Vec<i128>>, BallotValidityAdapterError> {
+        let witness = self.retained_witness()?;
+        let ciphertext_ordinal_usize = usize::from(ciphertext_ordinal);
+        let left = witness
+            .auxiliary_coefficients(ciphertext_ordinal_usize, 0)
+            .ok_or(BallotValidityAdapterError::InvalidWitness)?;
+        let right = witness
+            .auxiliary_coefficients(ciphertext_ordinal_usize, 1)
+            .ok_or(BallotValidityAdapterError::InvalidWitness)?;
+        let message = witness
+            .auxiliary_coefficients(ciphertext_ordinal_usize, 2)
+            .ok_or(BallotValidityAdapterError::InvalidWitness)?;
+        let product = self.exact_private_negacyclic_product(left, right)?;
+        let plaintext_modulus = i128::from(self.source_plan.plaintext_modulus());
+        let mut quotient = Zeroizing::new(Vec::with_capacity(product.len()));
+        for (message_coefficient, product_coefficient) in
+            message.iter().copied().zip(product.iter().copied())
+        {
+            let numerator = i128::from(message_coefficient)
+                .checked_sub(product_coefficient)
+                .ok_or(BallotValidityAdapterError::IntegerOverflow)?;
+            if numerator % plaintext_modulus != 0 {
+                return Err(BallotValidityAdapterError::InvalidWitness);
+            }
+            let coefficient = numerator / plaintext_modulus;
+            if coefficient.unsigned_abs()
+                > u128::from(
+                    self.source_plan
+                        .pair_character_product_quotient_absolute_bound(),
+                )
+            {
+                return Err(BallotValidityAdapterError::NoWrapBoundViolated);
+            }
+            quotient.push(coefficient);
+        }
+        Ok(quotient)
     }
 
     fn encryption_quotient(
         &self,
+        ciphertext_ordinal: u16,
         data_modulus_index: u16,
         component_ordinal: u16,
     ) -> Result<Zeroizing<Vec<i128>>, BallotValidityAdapterError> {
         let public_key = self
             .public_material
-            .polynomial(1, component_ordinal, data_modulus_index)
+            .polynomial(1, 0, component_ordinal, data_modulus_index)
             .ok_or(BallotValidityAdapterError::InvalidPublicMaterial)?;
         let ciphertext = self
             .public_material
-            .polynomial(2, component_ordinal, data_modulus_index)
+            .polynomial(2, ciphertext_ordinal, component_ordinal, data_modulus_index)
             .ok_or(BallotValidityAdapterError::InvalidPublicMaterial)?;
         if public_key.modulus != ciphertext.modulus {
             return Err(BallotValidityAdapterError::InvalidPublicMaterial);
         }
-        let mut quotient = self.exact_negacyclic_product(public_key)?;
+        let mut quotient =
+            self.exact_negacyclic_product(public_key, usize::from(ciphertext_ordinal))?;
         let witness = self.retained_witness()?;
-        let error_coefficients = match component_ordinal {
-            0 => witness.error_zero_coefficients(),
-            1 => witness.error_one_coefficients(),
-            _ => return Err(BallotValidityAdapterError::InvalidPublicMaterial),
-        };
+        let error_coefficients = witness
+            .error_coefficients(
+                usize::from(ciphertext_ordinal),
+                usize::from(component_ordinal),
+            )
+            .ok_or(BallotValidityAdapterError::InvalidWitness)?;
+        let message_coefficients = witness
+            .auxiliary_coefficients(usize::from(ciphertext_ordinal), 2)
+            .ok_or(BallotValidityAdapterError::InvalidWitness)?;
         let modulus = i128::from(public_key.modulus);
         let plaintext_modulus = i128::from(self.source_plan.plaintext_modulus());
         for (coefficient_ordinal, ciphertext_coefficient) in
             ciphertext.coefficients.iter().copied().enumerate()
         {
             let plaintext = if component_ordinal == 0 {
-                i128::from(witness.plaintext_coefficients()[coefficient_ordinal])
+                i128::from(message_coefficients[coefficient_ordinal])
             } else {
                 0
             };
@@ -2351,10 +2604,12 @@ impl BallotValiditySourcePolynomialAdapter {
     fn exact_negacyclic_product(
         &self,
         public_polynomial: &BoundResiduePolynomial,
+        ciphertext_ordinal: usize,
     ) -> Result<Zeroizing<Vec<i128>>, BallotValidityAdapterError> {
         let witness = self.retained_witness()?;
         let randomizer_l1_norm = witness
-            .randomizer_coefficients()
+            .randomizer_coefficients(ciphertext_ordinal)
+            .ok_or(BallotValidityAdapterError::InvalidWitness)?
             .iter()
             .try_fold(0_u128, |sum, coefficient| {
                 sum.checked_add(u128::from(coefficient.unsigned_abs()))
@@ -2374,10 +2629,11 @@ impl BallotValiditySourcePolynomialAdapter {
         }
         self.convolution_domain
             .evaluate_base_polynomial_in_place(&mut product_evaluations)?;
-        let randomizer_convolution_evaluations =
-            self.randomizer_convolution_evaluations
-                .as_ref()
-                .ok_or(BallotValidityAdapterError::InvalidWitness)?;
+        let randomizer_convolution_evaluations = self
+            .randomizer_convolution_evaluations
+            .as_ref()
+            .and_then(|evaluations| evaluations.get(ciphertext_ordinal))
+            .ok_or(BallotValidityAdapterError::InvalidWitness)?;
         if product_evaluations.len() != randomizer_convolution_evaluations.len() {
             return Err(BallotValidityAdapterError::InvalidPublicMaterial);
         }
@@ -2396,6 +2652,57 @@ impl BallotValiditySourcePolynomialAdapter {
             product.push(centered_base_field_value(
                 product_evaluations[coefficient_ordinal]
                     .subtract(product_evaluations[coefficient_ordinal + ring_degree]),
+            )?);
+        }
+        Ok(product)
+    }
+
+    fn exact_private_negacyclic_product(
+        &self,
+        left: &[u64],
+        right: &[u64],
+    ) -> Result<Zeroizing<Vec<i128>>, BallotValidityAdapterError> {
+        let ring_degree = self.trace_domain.size();
+        if left.len() != ring_degree || right.len() != ring_degree {
+            return Err(BallotValidityAdapterError::InvalidWitness);
+        }
+        let absolute_bound = u128::try_from(ring_degree)
+            .map_err(|_| BallotValidityAdapterError::IntegerOverflow)?
+            .checked_mul(u128::from(self.source_plan.plaintext_modulus() - 1).pow(2))
+            .ok_or(BallotValidityAdapterError::IntegerOverflow)?;
+        if absolute_bound >= u128::from(PROOF_BASE_FIELD_MODULUS / 2) {
+            return Err(BallotValidityAdapterError::NoWrapBoundViolated);
+        }
+        let mut left_evaluations = Zeroizing::new(
+            left.iter()
+                .copied()
+                .map(ProofBaseFieldElement::from_canonical)
+                .collect::<Result<Vec<_>, _>>()?,
+        );
+        let mut right_evaluations = Zeroizing::new(
+            right
+                .iter()
+                .copied()
+                .map(ProofBaseFieldElement::from_canonical)
+                .collect::<Result<Vec<_>, _>>()?,
+        );
+        self.convolution_domain
+            .evaluate_base_polynomial_in_place(&mut left_evaluations)?;
+        self.convolution_domain
+            .evaluate_base_polynomial_in_place(&mut right_evaluations)?;
+        if left_evaluations.len() != right_evaluations.len() {
+            return Err(BallotValidityAdapterError::InvalidWitness);
+        }
+        for (left_value, right_value) in left_evaluations.iter_mut().zip(right_evaluations.iter()) {
+            *left_value = left_value.multiply(*right_value);
+        }
+        self.convolution_domain
+            .interpolate_base_polynomial_in_place(&mut left_evaluations)?;
+        let mut product = Zeroizing::new(Vec::with_capacity(ring_degree));
+        for coefficient_ordinal in 0..ring_degree {
+            product.push(centered_base_field_value(
+                left_evaluations[coefficient_ordinal]
+                    .subtract(left_evaluations[coefficient_ordinal + ring_degree]),
             )?);
         }
         Ok(product)
@@ -2499,16 +2806,12 @@ fn validate_material_against_source_plan(
         return Err(BallotValidityAdapterError::InvalidPublicMaterial);
     }
     for (limb_ordinal, modulus) in source_plan.data_moduli().iter().copied().enumerate() {
-        for source in [
-            &public_material.public_key_by_limb[limb_ordinal],
-            &public_material.ciphertext_by_limb[limb_ordinal],
-        ] {
-            if source
-                .iter()
-                .any(|polynomial| polynomial.modulus != modulus)
-            {
-                return Err(BallotValidityAdapterError::InvalidPublicMaterial);
-            }
+        if public_material.public_key_by_limb[limb_ordinal]
+            .iter()
+            .chain(public_material.ciphertext_by_limb[limb_ordinal].iter())
+            .any(|polynomial| polynomial.modulus != modulus)
+        {
+            return Err(BallotValidityAdapterError::InvalidPublicMaterial);
         }
     }
     Ok(())
@@ -2649,30 +2952,61 @@ fn centered_base_field_value(
 fn canonical_recipe_bytes(recipe: BallotValiditySourceColumnRecipe) -> Vec<u8> {
     let mut bytes = Vec::new();
     match recipe.value_source() {
-        BallotValidityWitnessValueSource::ScoreOffset { option_ordinal } => {
+        BallotValidityWitnessValueSource::ScoreIndicator {
+            option_ordinal,
+            score_bucket_ordinal,
+        } => {
             bytes.extend_from_slice(&1_u16.to_le_bytes());
             bytes.extend_from_slice(&option_ordinal.to_le_bytes());
+            bytes.extend_from_slice(&score_bucket_ordinal.to_le_bytes());
         }
-        BallotValidityWitnessValueSource::PlaintextCoefficient => {
+        BallotValidityWitnessValueSource::PairCharacterAuxiliaryCoefficient {
+            ciphertext_ordinal,
+            auxiliary_ordinal,
+        } => {
             bytes.extend_from_slice(&2_u16.to_le_bytes());
+            bytes.extend_from_slice(&ciphertext_ordinal.to_le_bytes());
+            bytes.extend_from_slice(&auxiliary_ordinal.to_le_bytes());
         }
-        BallotValidityWitnessValueSource::ReversedRandomizerShifted => {
+        BallotValidityWitnessValueSource::ReversedPairCharacterAuxiliaryCoefficient {
+            ciphertext_ordinal,
+            auxiliary_ordinal,
+        } => {
             bytes.extend_from_slice(&3_u16.to_le_bytes());
+            bytes.extend_from_slice(&ciphertext_ordinal.to_le_bytes());
+            bytes.extend_from_slice(&auxiliary_ordinal.to_le_bytes());
         }
-        BallotValidityWitnessValueSource::ErrorZeroShifted => {
+        BallotValidityWitnessValueSource::ReversedRandomizerShifted { ciphertext_ordinal } => {
             bytes.extend_from_slice(&4_u16.to_le_bytes());
+            bytes.extend_from_slice(&ciphertext_ordinal.to_le_bytes());
         }
-        BallotValidityWitnessValueSource::ErrorOneShifted => {
+        BallotValidityWitnessValueSource::ErrorShifted {
+            ciphertext_ordinal,
+            component_ordinal,
+        } => {
             bytes.extend_from_slice(&5_u16.to_le_bytes());
+            bytes.extend_from_slice(&ciphertext_ordinal.to_le_bytes());
+            bytes.extend_from_slice(&component_ordinal.to_le_bytes());
         }
-        BallotValidityWitnessValueSource::EncoderReduction => {
+        BallotValidityWitnessValueSource::EncoderReduction {
+            ciphertext_ordinal,
+            auxiliary_ordinal,
+        } => {
             bytes.extend_from_slice(&6_u16.to_le_bytes());
+            bytes.extend_from_slice(&ciphertext_ordinal.to_le_bytes());
+            bytes.extend_from_slice(&auxiliary_ordinal.to_le_bytes());
+        }
+        BallotValidityWitnessValueSource::PairCharacterProductQuotient { ciphertext_ordinal } => {
+            bytes.extend_from_slice(&7_u16.to_le_bytes());
+            bytes.extend_from_slice(&ciphertext_ordinal.to_le_bytes());
         }
         BallotValidityWitnessValueSource::EncryptionQuotient {
+            ciphertext_ordinal,
             data_modulus_index,
             component_ordinal,
         } => {
-            bytes.extend_from_slice(&7_u16.to_le_bytes());
+            bytes.extend_from_slice(&8_u16.to_le_bytes());
+            bytes.extend_from_slice(&ciphertext_ordinal.to_le_bytes());
             bytes.extend_from_slice(&data_modulus_index.to_le_bytes());
             bytes.extend_from_slice(&component_ordinal.to_le_bytes());
         }
@@ -2735,16 +3069,24 @@ fn canonical_verifier_source_bytes(source: BallotValidityVerifierColumnSource) -
     match source {
         BallotValidityVerifierColumnSource::AuthenticatedPolynomial {
             source_kind,
+            ciphertext_ordinal,
             component_ordinal,
             data_modulus_index,
         } => {
             bytes.extend_from_slice(&1_u16.to_le_bytes());
             bytes.extend_from_slice(&source_kind.to_le_bytes());
+            bytes.extend_from_slice(&ciphertext_ordinal.to_le_bytes());
             bytes.extend_from_slice(&component_ordinal.to_le_bytes());
             bytes.extend_from_slice(&data_modulus_index.to_le_bytes());
         }
-        BallotValidityVerifierColumnSource::PairDifferenceEncoderWeight { option_ordinal } => {
+        BallotValidityVerifierColumnSource::PairCharacterEncoderProfile {
+            ciphertext_ordinal,
+            auxiliary_ordinal,
+            option_ordinal,
+        } => {
             bytes.extend_from_slice(&2_u16.to_le_bytes());
+            bytes.extend_from_slice(&ciphertext_ordinal.to_le_bytes());
+            bytes.extend_from_slice(&auxiliary_ordinal.to_le_bytes());
             bytes.extend_from_slice(&option_ordinal.to_le_bytes());
         }
     }
@@ -2759,11 +3101,17 @@ fn verifier_source_trace_rows(
     match source {
         BallotValidityVerifierColumnSource::AuthenticatedPolynomial {
             source_kind,
+            ciphertext_ordinal,
             component_ordinal,
             data_modulus_index,
         } => {
             let coefficients = &public_material
-                .polynomial(source_kind, component_ordinal, data_modulus_index)
+                .polynomial(
+                    source_kind,
+                    ciphertext_ordinal,
+                    component_ordinal,
+                    data_modulus_index,
+                )
                 .ok_or(BallotValidityAdapterError::InvalidPublicMaterial)?
                 .coefficients;
             coefficients
@@ -2773,9 +3121,13 @@ fn verifier_source_trace_rows(
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(Into::into)
         }
-        BallotValidityVerifierColumnSource::PairDifferenceEncoderWeight { option_ordinal } => {
+        BallotValidityVerifierColumnSource::PairCharacterEncoderProfile {
+            ciphertext_ordinal,
+            auxiliary_ordinal,
+            option_ordinal,
+        } => {
             let residues = source_plan
-                .encoder_weight_sequence(option_ordinal)
+                .encoder_profile_sequence(ciphertext_ordinal, auxiliary_ordinal, option_ordinal)
                 .ok_or(BallotValidityAdapterError::InvalidColumn)?;
             residues
                 .into_iter()
@@ -2786,25 +3138,53 @@ fn verifier_source_trace_rows(
     }
 }
 
-struct CachedEvaluationDomainColumn {
+struct CachedCoefficientColumn {
     column_ordinal: u32,
-    domain: ProofEvaluationDomain,
-    evaluations: Vec<ProofBaseFieldElement>,
+    coefficients: Vec<ProofBaseFieldElement>,
+}
+
+struct CachedPairCharacterLagrangeWeights {
+    point_coordinates: [u64; PROOF_CHALLENGE_EXTENSION_DEGREE],
+    weights: Vec<ProofChallengeExtensionElement>,
+}
+
+fn pair_character_profile_lagrange_weight_index(lane_block_ordinal: usize) -> Option<usize> {
+    (lane_block_ordinal < PAIR_CHARACTER_LANE_COUNT).then_some(lane_block_ordinal)
+}
+
+fn invert_extension_elements_in_place(
+    values: &mut [ProofChallengeExtensionElement],
+) -> Result<(), BallotValidityAdapterError> {
+    let mut prefix_products = Vec::with_capacity(values.len());
+    let mut accumulated_product = ProofChallengeExtensionElement::ONE;
+    for value in values.iter().copied() {
+        if value.is_zero() {
+            return Err(BallotValidityAdapterError::InvalidColumn);
+        }
+        prefix_products.push(accumulated_product);
+        accumulated_product = accumulated_product.multiply(value);
+    }
+    let mut accumulated_inverse = accumulated_product.inverse()?;
+    for value_ordinal in (0..values.len()).rev() {
+        let value = values[value_ordinal];
+        values[value_ordinal] = accumulated_inverse.multiply(prefix_products[value_ordinal]);
+        accumulated_inverse = accumulated_inverse.multiply(value);
+    }
+    Ok(())
 }
 
 /// Verifier-sequence adapter rebuilt only from authenticated setup and ballot
-/// ciphertext material. Coefficient polynomials are retained for DEEP-point
-/// evaluation, while one cache keyed by column and domain owns the sole full
-/// evaluation-domain vector. Building that vector moves the corresponding
-/// coefficient buffer into the in-place transform instead of cloning it.
+/// ciphertext material. One coefficient polynomial at a time is retained for
+/// authenticated DEEP-point evaluation. Deterministic encoder sequences use a
+/// compact sparse subgroup interpolation cache and are never materialized as
+/// full columns or committed in a proof tree.
 pub(crate) struct BallotValidityVerifiedColumnEvaluator {
     source_plan: BallotValiditySourcePlan,
     public_material: BallotValidityBoundPublicMaterial,
     trace_domain: ProofEvaluationDomain,
-    evaluation_domain_size: usize,
     source_by_column: Vec<Option<BallotValidityVerifierColumnSource>>,
-    coefficients_by_column: Vec<Option<Vec<ProofBaseFieldElement>>>,
-    evaluation_domain_column: Option<CachedEvaluationDomainColumn>,
+    cached_column: Option<CachedCoefficientColumn>,
+    cached_pair_character_lagrange_weights: Option<CachedPairCharacterLagrangeWeights>,
 }
 
 impl BallotValidityVerifiedColumnEvaluator {
@@ -2855,6 +3235,7 @@ impl BallotValidityVerifiedColumnEvaluator {
                 (
                     BallotValidityVerifierColumnSource::AuthenticatedPolynomial {
                         source_kind,
+                        ciphertext_ordinal,
                         component_ordinal,
                         data_modulus_index,
                     },
@@ -2870,9 +3251,20 @@ impl BallotValidityVerifiedColumnEvaluator {
                         2 => BALLOT_CIPHERTEXT_DIGEST_FIELD_ORDINAL,
                         _ => return Err(BallotValidityAdapterError::InvalidColumn),
                     };
+                    let expected_source_component_ordinal = match source_kind {
+                        1 if ciphertext_ordinal == 0 => u64::from(component_ordinal),
+                        2 => u64::from(ciphertext_ordinal)
+                            .checked_mul(2)
+                            .and_then(|ordinal| ordinal.checked_add(u64::from(component_ordinal)))
+                            .ok_or(BallotValidityAdapterError::IntegerOverflow)?,
+                        _ => return Err(BallotValidityAdapterError::InvalidColumn),
+                    };
                     if *protocol_source_kind != source_kind
                         || source_coordinates
-                            != &[u64::from(component_ordinal), u64::from(data_modulus_index)]
+                            != &[
+                                expected_source_component_ordinal,
+                                u64::from(data_modulus_index),
+                            ]
                         || statement_binding_path.len() != 1
                         || statement_binding_path[0].step_kind() != SelectorPathStepKind::TupleField
                         || statement_binding_path[0].argument() != expected_field_ordinal
@@ -2880,7 +3272,12 @@ impl BallotValidityVerifiedColumnEvaluator {
                         return Err(BallotValidityAdapterError::InvalidColumn);
                     }
                     let polynomial = public_material
-                        .polynomial(source_kind, component_ordinal, data_modulus_index)
+                        .polynomial(
+                            source_kind,
+                            ciphertext_ordinal,
+                            component_ordinal,
+                            data_modulus_index,
+                        )
                         .ok_or(BallotValidityAdapterError::InvalidPublicMaterial)?;
                     if descriptor.canonical_residue_modulus()
                         != Some(SuiteModulusReference::data(data_modulus_index))
@@ -2896,27 +3293,35 @@ impl BallotValidityVerifiedColumnEvaluator {
                     }
                 }
                 (
-                    BallotValidityVerifierColumnSource::PairDifferenceEncoderWeight {
+                    BallotValidityVerifierColumnSource::PairCharacterEncoderProfile {
+                        ciphertext_ordinal,
+                        auxiliary_ordinal,
                         option_ordinal,
                     },
-                    RelationVerifierSource::DirectBallotPairDifferenceEncoderWeights {
+                    RelationVerifierSource::DirectBallotPairCharacterEncoderProfile {
                         ring_degree,
-                        primitive_two_n_root,
-                        slot_generator,
+                        plaintext_modulus,
+                        ciphertext_ordinal: declared_ciphertext_ordinal,
+                        auxiliary_ordinal: declared_auxiliary_ordinal,
                         option_count,
                         option_ordinal: declared_option_ordinal,
                     },
                 ) => {
                     if *ring_degree != compilation.source_plan().ring_degree()
-                        || *primitive_two_n_root != compilation.source_plan().primitive_two_n_root()
-                        || *slot_generator != compilation.source_plan().slot_generator()
+                        || *plaintext_modulus != compilation.source_plan().plaintext_modulus()
+                        || *declared_ciphertext_ordinal != ciphertext_ordinal
+                        || *declared_auxiliary_ordinal != auxiliary_ordinal
                         || usize::from(*option_count) != OPTION_COUNT
                         || *declared_option_ordinal != option_ordinal
                         || descriptor.canonical_residue_modulus()
                             != Some(SuiteModulusReference::plaintext())
                         || compilation
                             .source_plan()
-                            .encoder_weight_sequence(option_ordinal)
+                            .encoder_profile_sequence(
+                                ciphertext_ordinal,
+                                auxiliary_ordinal,
+                                option_ordinal,
+                            )
                             .is_none()
                     {
                         return Err(BallotValidityAdapterError::InvalidColumn);
@@ -2943,11 +3348,9 @@ impl BallotValidityVerifiedColumnEvaluator {
             source_plan: compilation.source_plan().clone(),
             public_material,
             trace_domain,
-            evaluation_domain_size: usize::try_from(variant.evaluation_domain_size())
-                .map_err(|_| BallotValidityAdapterError::IntegerOverflow)?,
             source_by_column,
-            coefficients_by_column: (0..variant.ordered_columns().len()).map(|_| None).collect(),
-            evaluation_domain_column: None,
+            cached_column: None,
+            cached_pair_character_lagrange_weights: None,
         })
     }
 
@@ -2961,6 +3364,12 @@ impl BallotValidityVerifiedColumnEvaluator {
             .and_then(Option::as_ref)
             .copied()
             .ok_or(BallotValidityAdapterError::InvalidColumn)?;
+        if matches!(
+            source,
+            BallotValidityVerifierColumnSource::PairCharacterEncoderProfile { .. }
+        ) {
+            return Err(BallotValidityAdapterError::InvalidColumn);
+        }
         let mut coefficients =
             verifier_source_trace_rows(&self.source_plan, &self.public_material, source)?;
         self.trace_domain
@@ -2968,46 +3377,122 @@ impl BallotValidityVerifiedColumnEvaluator {
         Ok(coefficients)
     }
 
-    fn coefficients(
+    fn ensure_cached_column(
         &mut self,
         column_ordinal: u32,
-    ) -> Result<&[ProofBaseFieldElement], BallotValidityAdapterError> {
+    ) -> Result<(), BallotValidityAdapterError> {
         let column_index = usize::try_from(column_ordinal)
             .map_err(|_| BallotValidityAdapterError::IntegerOverflow)?;
-        if self
-            .coefficients_by_column
-            .get(column_index)
-            .ok_or(BallotValidityAdapterError::InvalidColumn)?
-            .is_none()
-        {
-            let coefficients = self.derive_coefficients(column_index)?;
-            self.coefficients_by_column[column_index] = Some(coefficients);
+        if column_index >= self.source_by_column.len() {
+            return Err(BallotValidityAdapterError::InvalidColumn);
         }
-        self.coefficients_by_column
-            .get(column_index)
-            .and_then(Option::as_deref)
-            .ok_or(BallotValidityAdapterError::InvalidColumn)
+        let needs_derivation = self
+            .cached_column
+            .as_ref()
+            .is_none_or(|cached| cached.column_ordinal != column_ordinal);
+        if needs_derivation {
+            let coefficients = self.derive_coefficients(column_index)?;
+            self.cached_column = Some(CachedCoefficientColumn {
+                column_ordinal,
+                coefficients,
+            });
+        }
+        Ok(())
     }
 
-    fn take_coefficients(
-        &mut self,
-        column_ordinal: u32,
-    ) -> Result<Vec<ProofBaseFieldElement>, BallotValidityAdapterError> {
-        let column_index = usize::try_from(column_ordinal)
+    fn build_pair_character_lagrange_weights(
+        &self,
+        point: ProofChallengeExtensionElement,
+    ) -> Result<CachedPairCharacterLagrangeWeights, BallotValidityAdapterError> {
+        let ring_degree = u64::try_from(self.trace_domain.size())
             .map_err(|_| BallotValidityAdapterError::IntegerOverflow)?;
-        if self
-            .coefficients_by_column
-            .get(column_index)
-            .ok_or(BallotValidityAdapterError::InvalidColumn)?
-            .is_none()
-        {
-            let coefficients = self.derive_coefficients(column_index)?;
-            self.coefficients_by_column[column_index] = Some(coefficients);
+        let vanishing_value = point
+            .power(ring_degree)
+            .subtract(ProofChallengeExtensionElement::ONE);
+        if vanishing_value.is_zero() {
+            return Err(BallotValidityAdapterError::InvalidColumn);
         }
-        self.coefficients_by_column
-            .get_mut(column_index)
-            .and_then(Option::take)
-            .ok_or(BallotValidityAdapterError::InvalidColumn)
+        let inverse_ring_degree = ProofBaseFieldElement::from_canonical(ring_degree)?.inverse()?;
+        let common_factor = vanishing_value.multiply_base(inverse_ring_degree);
+        let mut inverse_denominators =
+            Vec::with_capacity(PAIR_CHARACTER_PROFILE_LAGRANGE_WEIGHT_COUNT);
+        for lane_block_ordinal in 0..PAIR_CHARACTER_LANE_COUNT {
+            let trace_row_ordinal = lane_block_ordinal
+                .checked_mul(PAIR_CHARACTER_LANE_DEGREE)
+                .ok_or(BallotValidityAdapterError::IntegerOverflow)?;
+            let domain_point = self.trace_domain.point(trace_row_ordinal)?;
+            inverse_denominators
+                .push(point.subtract(ProofChallengeExtensionElement::from_base(domain_point)));
+        }
+        if inverse_denominators.len() != PAIR_CHARACTER_PROFILE_LAGRANGE_WEIGHT_COUNT {
+            return Err(BallotValidityAdapterError::InvalidColumn);
+        }
+        invert_extension_elements_in_place(&mut inverse_denominators)?;
+        for lane_block_ordinal in 0..PAIR_CHARACTER_LANE_COUNT {
+            let trace_row_ordinal = lane_block_ordinal
+                .checked_mul(PAIR_CHARACTER_LANE_DEGREE)
+                .ok_or(BallotValidityAdapterError::IntegerOverflow)?;
+            let weight_index = pair_character_profile_lagrange_weight_index(lane_block_ordinal)
+                .ok_or(BallotValidityAdapterError::InvalidColumn)?;
+            let domain_point = self.trace_domain.point(trace_row_ordinal)?;
+            inverse_denominators[weight_index] = common_factor
+                .multiply_base(domain_point)
+                .multiply(inverse_denominators[weight_index]);
+        }
+        Ok(CachedPairCharacterLagrangeWeights {
+            point_coordinates: point.canonical_coordinates(),
+            weights: inverse_denominators,
+        })
+    }
+
+    fn evaluate_pair_character_encoder_profile(
+        &mut self,
+        point: ProofChallengeExtensionElement,
+        ciphertext_ordinal: u16,
+        auxiliary_ordinal: u16,
+        option_ordinal: u16,
+    ) -> Result<ProofChallengeExtensionElement, BallotValidityAdapterError> {
+        let point_coordinates = point.canonical_coordinates();
+        let needs_weights = self
+            .cached_pair_character_lagrange_weights
+            .as_ref()
+            .is_none_or(|cached| cached.point_coordinates != point_coordinates);
+        if needs_weights {
+            let weights = self.build_pair_character_lagrange_weights(point)?;
+            self.cached_pair_character_lagrange_weights = Some(weights);
+        }
+        let terms = pair_character_encoder_profile_terms(
+            ciphertext_ordinal,
+            auxiliary_ordinal,
+            option_ordinal,
+        )?;
+        let weights = &self
+            .cached_pair_character_lagrange_weights
+            .as_ref()
+            .ok_or(BallotValidityAdapterError::InvalidColumn)?
+            .weights;
+        let mut evaluation = ProofChallengeExtensionElement::ZERO;
+        for term in terms {
+            let expected_trace_row_ordinal = term
+                .lane_block_ordinal()
+                .checked_mul(PAIR_CHARACTER_LANE_DEGREE)
+                .ok_or(BallotValidityAdapterError::IntegerOverflow)?;
+            if term.trace_row_ordinal() != expected_trace_row_ordinal {
+                return Err(BallotValidityAdapterError::InvalidColumn);
+            }
+            let weight_index =
+                pair_character_profile_lagrange_weight_index(term.lane_block_ordinal())
+                    .ok_or(BallotValidityAdapterError::InvalidColumn)?;
+            let term_value = ProofBaseFieldElement::from_canonical(term.value())?;
+            evaluation = evaluation.add(
+                weights
+                    .get(weight_index)
+                    .copied()
+                    .ok_or(BallotValidityAdapterError::InvalidColumn)?
+                    .multiply_base(term_value),
+            );
+        }
+        Ok(evaluation)
     }
 }
 
@@ -3038,42 +3523,35 @@ impl VerifiedRelationColumnEvaluator for BallotValidityVerifiedColumnEvaluator {
                 self.source_by_column.capacity(),
                 size_of::<Option<BallotValidityVerifierColumnSource>>(),
             )?,
-            checked_payload(
-                self.coefficients_by_column.capacity(),
-                size_of::<Option<Vec<ProofBaseFieldElement>>>(),
-            )?,
         ]
         .into_iter()
         .try_fold(0_u64, |total, value| total.checked_add(value))
         .ok_or(CommonProofVerifierError::InvalidTreeLayout)?;
-        let verifier_column_count = u64::try_from(
-            self.source_by_column
-                .iter()
-                .filter(|source| source.is_some())
-                .count(),
-        )
-        .map_err(|_| CommonProofVerifierError::InvalidTreeLayout)?;
-        if verifier_column_count == 0 {
+        if !self.source_by_column.iter().any(Option::is_some) {
             return Err(CommonProofVerifierError::InvalidTreeLayout);
         }
         let trace_column_byte_length =
             checked_payload(self.trace_domain.size(), size_of::<ProofBaseFieldElement>())?;
-        let evaluation_domain_byte_length = checked_payload(
-            self.evaluation_domain_size,
-            size_of::<ProofBaseFieldElement>(),
+        let pair_character_lagrange_cache_byte_length = checked_payload(
+            PAIR_CHARACTER_PROFILE_LAGRANGE_WEIGHT_COUNT,
+            size_of::<ProofChallengeExtensionElement>(),
         )?;
-        let maximum_cached_column_resident_byte_length = verifier_column_count
-            .checked_sub(1)
-            .and_then(|count| count.checked_mul(trace_column_byte_length))
-            .and_then(|length| length.checked_add(evaluation_domain_byte_length))
+        let maximum_cached_column_resident_byte_length = trace_column_byte_length
+            .checked_add(pair_character_lagrange_cache_byte_length)
             .ok_or(CommonProofVerifierError::InvalidTreeLayout)?;
-        // Encoder-weight derivation owns one u64 residue vector while the new
-        // field vector is installed into the already-counted cache envelope.
-        let maximum_evaluation_transient_byte_length = checked_payload(
-            usize::try_from(self.source_plan.ring_degree())
-                .map_err(|_| CommonProofVerifierError::InvalidTreeLayout)?,
-            size_of::<u64>(),
+        // A point change retains the preceding compact cache while the new
+        // denominator and prefix-product vectors coexist. An authenticated
+        // column change instead retains one trace column while deriving one.
+        let lagrange_build_transient_byte_length = pair_character_lagrange_cache_byte_length
+            .checked_mul(2)
+            .ok_or(CommonProofVerifierError::InvalidTreeLayout)?;
+        let sparse_term_transient_byte_length = checked_payload(
+            PAIR_CHARACTER_LANE_COUNT,
+            size_of::<PairCharacterEncoderProfileTerm>(),
         )?;
+        let maximum_evaluation_transient_byte_length = trace_column_byte_length
+            .max(lagrange_build_transient_byte_length)
+            .max(sparse_term_transient_byte_length);
         VerifiedRelationColumnEvaluatorMemoryAccounting::new(
             fixed_and_input_resident_byte_length,
             maximum_cached_column_resident_byte_length,
@@ -3086,54 +3564,38 @@ impl VerifiedRelationColumnEvaluator for BallotValidityVerifiedColumnEvaluator {
         column_ordinal: u32,
         point: ProofChallengeExtensionElement,
     ) -> Option<ProofChallengeExtensionElement> {
-        let coefficients = self.coefficients(column_ordinal).ok()?;
-        Some(coefficients.iter().rev().fold(
-            ProofChallengeExtensionElement::ZERO,
-            |accumulated, coefficient| {
-                accumulated
-                    .multiply(point)
-                    .add(ProofChallengeExtensionElement::from_base(*coefficient))
-            },
-        ))
-    }
-
-    fn evaluate_at_evaluation_domain_pair(
-        &mut self,
-        column_ordinal: u32,
-        evaluation_domain: ProofEvaluationDomain,
-        query_representative: u64,
-    ) -> Option<OpenedFriLayerPair> {
-        let query_representative = usize::try_from(query_representative).ok()?;
-        let half_domain_size = evaluation_domain.size().checked_div(2)?;
-        if query_representative >= half_domain_size {
-            return None;
+        let column_index = usize::try_from(column_ordinal).ok()?;
+        let source = self
+            .source_by_column
+            .get(column_index)
+            .and_then(Option::as_ref)
+            .copied()?;
+        match source {
+            BallotValidityVerifierColumnSource::PairCharacterEncoderProfile {
+                ciphertext_ordinal,
+                auxiliary_ordinal,
+                option_ordinal,
+            } => self
+                .evaluate_pair_character_encoder_profile(
+                    point,
+                    ciphertext_ordinal,
+                    auxiliary_ordinal,
+                    option_ordinal,
+                )
+                .ok(),
+            BallotValidityVerifierColumnSource::AuthenticatedPolynomial { .. } => {
+                self.ensure_cached_column(column_ordinal).ok()?;
+                let coefficients = &self.cached_column.as_ref()?.coefficients;
+                Some(coefficients.iter().rev().fold(
+                    ProofChallengeExtensionElement::ZERO,
+                    |accumulated, coefficient| {
+                        accumulated
+                            .multiply(point)
+                            .add(ProofChallengeExtensionElement::from_base(*coefficient))
+                    },
+                ))
+            }
         }
-        let needs_evaluation = self.evaluation_domain_column.as_ref().is_none_or(|cached| {
-            cached.column_ordinal != column_ordinal || cached.domain != evaluation_domain
-        });
-        if needs_evaluation {
-            self.evaluation_domain_column.take();
-            let mut evaluations = self.take_coefficients(column_ordinal).ok()?;
-            evaluation_domain
-                .evaluate_base_polynomial_in_place(&mut evaluations)
-                .ok()?;
-            self.evaluation_domain_column = Some(CachedEvaluationDomainColumn {
-                column_ordinal,
-                domain: evaluation_domain,
-                evaluations,
-            });
-        }
-        let cached = self.evaluation_domain_column.as_ref()?;
-        Some(OpenedFriLayerPair::new(
-            ProofChallengeExtensionElement::from_base(
-                *cached.evaluations.get(query_representative)?,
-            ),
-            ProofChallengeExtensionElement::from_base(
-                *cached
-                    .evaluations
-                    .get(query_representative + half_domain_size)?,
-            ),
-        ))
     }
 }
 
@@ -3178,8 +3640,8 @@ mod tests {
     fn selected_ballot_carrier_accounting_matches_production_buffers() {
         let accounting = selected_ballot_validity_carrier_buffer_accounting()
             .expect("selected ballot carrier accounting derives");
-        assert_eq!(accounting.canonical_ciphertext_byte_length(), 22_675_460);
-        assert_eq!(accounting.canonical_ciphertext_chunk_count(), 22);
+        assert_eq!(accounting.canonical_ciphertext_byte_length(), 12_058_628);
+        assert_eq!(accounting.canonical_ciphertext_chunk_count(), 12);
         assert!(accounting.canonical_ciphertext_descriptor_encoded_byte_length() > 0);
         assert_eq!(
             accounting.canonical_ciphertext_descriptor_digest_catalog_byte_length(),
@@ -3189,7 +3651,7 @@ mod tests {
         assert_eq!(
             accounting.ciphertext_readback_polynomial_catalog_byte_length(),
             u64::try_from(
-                2 * selected_ballot_validity_relation_compilation()
+                4 * selected_ballot_validity_relation_compilation()
                     .expect("selected compilation derives")
                     .source_plan()
                     .data_moduli()
@@ -3201,32 +3663,32 @@ mod tests {
         );
         assert_eq!(
             accounting.decoded_ciphertext_residue_byte_length(),
-            27_262_976,
+            24_117_248,
         );
         assert_eq!(
             accounting.provider_bound_public_residue_byte_length(),
-            54_525_952,
+            36_175_872,
         );
         assert_eq!(
             accounting.provider_witness_coefficient_byte_length(),
-            2_097_152,
+            3_145_728,
         );
         assert_eq!(
             accounting.provider_precomputed_transform_byte_length(),
             1_048_576,
         );
-        assert_eq!(accounting.provider_value_cache_byte_length(), 1_048_576);
+        assert_eq!(accounting.provider_value_cache_byte_length(), 524_288);
         assert_eq!(
             accounting.provider_transient_scratch_byte_length(),
             1_048_576,
         );
         assert_eq!(
             accounting.provider_buffer_live_set_peak_byte_length(),
-            59_768_832,
+            41_943_040,
         );
         assert_eq!(
             accounting.transferred_source_polynomial_byte_length(),
-            524_288,
+            262_144,
         );
         assert_eq!(
             accounting.maximum_boundary_copied_buffer_byte_length(),
@@ -3234,40 +3696,18 @@ mod tests {
         );
     }
 
-    const TEST_RING_DEGREE: u64 = 256;
-    const TEST_PLAINTEXT_MODULUS: u64 = 12_289;
-    const TEST_DATA_MODULUS: u64 = 65_537;
-    const TEST_EVALUATION_DOMAIN_SIZE: u64 = 1_024;
+    const TEST_RING_DEGREE: u64 = crate::bgv::direct_ballots::PAIR_CHARACTER_RING_DEGREE as u64;
+    const TEST_PLAINTEXT_MODULUS: u64 =
+        crate::bgv::direct_ballots::PAIR_CHARACTER_PLAINTEXT_MODULUS;
+    const TEST_DATA_MODULUS: u64 = crate::bgv::parameters::DATA_PRIMES[0];
+    const TEST_EVALUATION_DOMAIN_SIZE: u64 =
+        crate::bgv::proof_suite::selected_profile::SELECTED_EVALUATION_DOMAIN_SIZE;
 
     fn check_context() -> RelationPlanCheckContext {
-        let maximum_two_adic_order = 1_u64 << 32;
-        RelationPlanCheckContext {
-            base_field_modulus: PROOF_BASE_FIELD_MODULUS,
-            challenge_extension_degree: crate::bgv::proof_suite::PROOF_CHALLENGE_EXTENSION_DEGREE
-                as u16,
-            evaluation_blowup_factor: 2,
-            evaluation_domain_generator: modular_power(
-                crate::bgv::proof_suite::PROOF_BASE_FIELD_MAXIMUM_TWO_ADIC_GENERATOR,
-                maximum_two_adic_order / TEST_EVALUATION_DOMAIN_SIZE,
-                PROOF_BASE_FIELD_MODULUS,
-            ),
-            evaluation_coset_offset: 7,
-            deep_point_count: 1,
-            quotient_component_count: 4,
-            quotient_component_degree_bound_exclusive: 256,
-            fri_fold_count: 6,
-            final_polynomial_degree_bound_exclusive: 8,
-            unique_query_count: 8,
-            non_native_modular_identity_challenge_count: 1,
-            maximum_fiat_shamir_candidate_draws_per_output: 128,
-            resolved_moduli: vec![
-                ResolvedSuiteModulus::new(SuiteModulusReference::data(0), TEST_DATA_MODULUS),
-                ResolvedSuiteModulus::new(
-                    SuiteModulusReference::plaintext(),
-                    TEST_PLAINTEXT_MODULUS,
-                ),
-            ],
-        }
+        crate::bgv::proof_suite::selected_profile::selected_relation_plan_check_context(
+            crate::foundation::ProofApplicationSlotCeilings::BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER,
+        )
+        .expect("selected ballot relation context")
     }
 
     fn compilation() -> CompiledBallotValidityRelation {
@@ -3275,11 +3715,10 @@ mod tests {
             &BallotValidityRelationPlanInput {
                 ring_degree: TEST_RING_DEGREE,
                 evaluation_domain_size: TEST_EVALUATION_DOMAIN_SIZE,
-                opening_degree_bound_exclusive: 512,
+                opening_degree_bound_exclusive:
+                    crate::bgv::proof_suite::selected_profile::SELECTED_OPENING_DEGREE_BOUND_EXCLUSIVE,
                 active_data_modulus_indices: vec![0],
                 plaintext_modulus: TEST_PLAINTEXT_MODULUS,
-                primitive_two_n_root: 3_400,
-                slot_generator: 3,
                 reserved_slot_rule: 1,
             },
             &check_context(),
@@ -3293,23 +3732,26 @@ mod tests {
         let scores = (0..OPTION_COUNT)
             .map(|option_ordinal| 1 + (option_ordinal as u64 * 7 + 3) % 10)
             .collect::<Vec<_>>();
-        let plaintext_coefficients = compilation
-            .source_plan()
-            .plaintext_coefficients_for_scores(&scores)
-            .expect("direct pair-difference plaintext encoding");
-        let randomizer_coefficients = (0..TEST_RING_DEGREE)
-            .map(|ordinal| [-1_i64, 0, 1][ordinal as usize % 3])
-            .collect::<Vec<_>>();
-        let error_zero_coefficients = (0..TEST_RING_DEGREE)
-            .map(|ordinal| [-2_i64, -1, 0, 1, 2][ordinal as usize % 5])
-            .collect::<Vec<_>>();
-        let error_one_coefficients = (0..TEST_RING_DEGREE)
-            .map(|ordinal| [2_i64, 0, -2, 1, -1][ordinal as usize % 5])
-            .collect::<Vec<_>>();
+        let randomizer_coefficients = core::array::from_fn(|ciphertext_ordinal| {
+            (0..TEST_RING_DEGREE)
+                .map(|ordinal| [-1_i64, 0, 1][(ordinal as usize + ciphertext_ordinal) % 3])
+                .collect::<Vec<_>>()
+        });
+        let error_zero_coefficients = core::array::from_fn(|ciphertext_ordinal| {
+            (0..TEST_RING_DEGREE)
+                .map(|ordinal| [-2_i64, -1, 0, 1, 2][(ordinal as usize + ciphertext_ordinal) % 5])
+                .collect::<Vec<_>>()
+        });
+        let error_one_coefficients = core::array::from_fn(|ciphertext_ordinal| {
+            (0..TEST_RING_DEGREE)
+                .map(|ordinal| {
+                    [2_i64, 0, -2, 1, -1][(ordinal as usize + ciphertext_ordinal * 2) % 5]
+                })
+                .collect::<Vec<_>>()
+        });
         BallotValidityEncryptionAttemptWitness::from_encryption_attempt(
             compilation.source_plan(),
             &scores,
-            plaintext_coefficients,
             randomizer_coefficients,
             error_zero_coefficients,
             error_one_coefficients,
@@ -3318,66 +3760,60 @@ mod tests {
         .expect("valid witness")
     }
 
-    fn dense_negacyclic_product(left: &[u64], right: &[i64]) -> Vec<i128> {
-        let ring_degree = left.len();
-        let mut product = vec![0_i128; ring_degree];
-        for (left_ordinal, left_value) in left.iter().copied().enumerate() {
-            for (right_ordinal, right_value) in right.iter().copied().enumerate() {
-                let ordinary_ordinal = left_ordinal + right_ordinal;
-                let destination = ordinary_ordinal % ring_degree;
-                let sign = if ordinary_ordinal < ring_degree {
-                    1
-                } else {
-                    -1
-                };
-                product[destination] += sign * i128::from(left_value) * i128::from(right_value);
-            }
-        }
-        product
-    }
-
     fn public_material(
         compilation: &CompiledBallotValidityRelation,
         witness: &BallotValidityEncryptionAttemptWitness,
     ) -> BallotValidityBoundPublicMaterial {
-        let public_zero = (0..TEST_RING_DEGREE)
-            .map(|ordinal| (ordinal * 29 + 17) % TEST_DATA_MODULUS)
-            .collect::<Vec<_>>();
-        let public_one = (0..TEST_RING_DEGREE)
-            .map(|ordinal| (ordinal * ordinal + 31) % TEST_DATA_MODULUS)
-            .collect::<Vec<_>>();
-        let products = [
-            dense_negacyclic_product(&public_zero, witness.randomizer_coefficients()),
-            dense_negacyclic_product(&public_one, witness.randomizer_coefficients()),
+        let public_key = [
+            (0..TEST_RING_DEGREE)
+                .map(|ordinal| (ordinal * 29 + 17) % TEST_DATA_MODULUS)
+                .collect::<Vec<_>>(),
+            (0..TEST_RING_DEGREE)
+                .map(|ordinal| (ordinal * ordinal + 31) % TEST_DATA_MODULUS)
+                .collect::<Vec<_>>(),
         ];
-        let ciphertext = products
-            .iter()
-            .enumerate()
-            .map(|(component_ordinal, product)| {
-                product
-                    .iter()
-                    .copied()
-                    .enumerate()
-                    .map(|(coefficient_ordinal, product)| {
-                        let error = if component_ordinal == 0 {
-                            witness.error_zero_coefficients()[coefficient_ordinal]
-                        } else {
-                            witness.error_one_coefficients()[coefficient_ordinal]
-                        };
-                        let plaintext = if component_ordinal == 0 {
-                            witness.plaintext_coefficients()[coefficient_ordinal]
-                        } else {
-                            0
-                        };
-                        let value = product
-                            + i128::from(TEST_PLAINTEXT_MODULUS) * i128::from(error)
-                            + i128::from(plaintext);
-                        u64::try_from(value.rem_euclid(i128::from(TEST_DATA_MODULUS)))
-                            .expect("canonical residue")
-                    })
-                    .collect::<Vec<_>>()
-            })
-            .collect::<Vec<_>>();
+        let mut ciphertext = Vec::with_capacity(PAIR_CHARACTER_CIPHERTEXT_COUNT * 2);
+        for ciphertext_ordinal in 0..PAIR_CHARACTER_CIPHERTEXT_COUNT {
+            let randomizer_residues = witness
+                .randomizer_coefficients(ciphertext_ordinal)
+                .expect("ciphertext randomizer")
+                .iter()
+                .copied()
+                .map(|coefficient| signed_residue(coefficient, TEST_DATA_MODULUS))
+                .collect::<Vec<_>>();
+            for (component_ordinal, public_polynomial) in public_key.iter().enumerate() {
+                let mut encrypted =
+                    negacyclic_mul(public_polynomial, &randomizer_residues, TEST_DATA_MODULUS)
+                        .expect("test public-key product");
+                let errors = witness
+                    .error_coefficients(ciphertext_ordinal, component_ordinal)
+                    .expect("ciphertext errors");
+                let message = witness
+                    .auxiliary_coefficients(ciphertext_ordinal, 2)
+                    .expect("ciphertext message");
+                for (coefficient_ordinal, encrypted_coefficient) in encrypted.iter_mut().enumerate()
+                {
+                    let scaled_error = i64::try_from(TEST_PLAINTEXT_MODULUS)
+                        .expect("small plaintext modulus")
+                        * errors[coefficient_ordinal];
+                    *encrypted_coefficient = add_mod(
+                        *encrypted_coefficient,
+                        signed_residue(scaled_error, TEST_DATA_MODULUS),
+                        TEST_DATA_MODULUS,
+                    )
+                    .expect("canonical scaled-error sum");
+                    if component_ordinal == 0 {
+                        *encrypted_coefficient = add_mod(
+                            *encrypted_coefficient,
+                            message[coefficient_ordinal],
+                            TEST_DATA_MODULUS,
+                        )
+                        .expect("canonical message sum");
+                    }
+                }
+                ciphertext.push(encrypted);
+            }
+        }
         BallotValidityBoundPublicMaterial::from_authenticated_polynomial_sequences(
             compilation.source_plan(),
             1,
@@ -3385,13 +3821,21 @@ mod tests {
             [19_u8; 64],
             [23_u8; 64],
             vec![
-                (0, 0, TEST_DATA_MODULUS, public_zero.into()),
-                (1, 0, TEST_DATA_MODULUS, public_one.into()),
+                (0, 0, TEST_DATA_MODULUS, public_key[0].clone().into()),
+                (1, 0, TEST_DATA_MODULUS, public_key[1].clone().into()),
             ],
-            vec![
-                (0, 0, TEST_DATA_MODULUS, ciphertext[0].clone().into()),
-                (1, 0, TEST_DATA_MODULUS, ciphertext[1].clone().into()),
-            ],
+            ciphertext
+                .into_iter()
+                .enumerate()
+                .map(|(component_ordinal, coefficients)| {
+                    (
+                        u16::try_from(component_ordinal).expect("component ordinal"),
+                        0,
+                        TEST_DATA_MODULUS,
+                        coefficients.into(),
+                    )
+                })
+                .collect(),
         )
         .expect("authenticated public material")
     }
@@ -3399,8 +3843,8 @@ mod tests {
     fn ballot_ciphertext_stream_bytes(material: &BallotValidityBoundPublicMaterial) -> Vec<u8> {
         let mut bytes = Vec::new();
         bytes.extend_from_slice(&0_u16.to_le_bytes());
-        bytes.extend_from_slice(&2_u16.to_le_bytes());
-        for component_ordinal in 0..2 {
+        bytes.extend_from_slice(&4_u16.to_le_bytes());
+        for component_ordinal in 0..4 {
             for limb in &material.ciphertext_by_limb {
                 let polynomial = &limb[component_ordinal];
                 let coefficient_byte_length = canonical_modulus_byte_length(polynomial.modulus);
@@ -3454,7 +3898,7 @@ mod tests {
             authenticated.full_object_digest,
             descriptor.full_object_digest.into_bytes()
         );
-        assert_eq!(authenticated.polynomials.len(), 2);
+        assert_eq!(authenticated.polynomials.len(), 4);
         assert_eq!(
             authenticated.polynomials[1].3.as_ref(),
             material.ciphertext_by_limb[0][1].coefficients.as_ref()
@@ -3654,13 +4098,19 @@ mod tests {
         let compilation = compilation();
         let witness = witness(&compilation);
         let weak_secret = witness.secret_weak_reference();
-        let plaintext_allocation = witness.plaintext_coefficients().as_ptr();
+        let plaintext_allocation = witness
+            .auxiliary_coefficients(0, 2)
+            .expect("first ciphertext message")
+            .as_ptr();
         let shared_witness = witness.clone();
 
         assert_eq!(witness.secret_owner_count(), 2);
         assert_eq!(
             plaintext_allocation,
-            shared_witness.plaintext_coefficients().as_ptr()
+            shared_witness
+                .auxiliary_coefficients(0, 2)
+                .expect("shared first ciphertext message")
+                .as_ptr()
         );
         drop(witness);
         assert_eq!(shared_witness.secret_owner_count(), 1);
@@ -3897,16 +4347,32 @@ mod tests {
         let compilation = compilation();
         let witness = witness(&compilation);
         let material = public_material(&compilation, &witness);
-        let mut malformed_randomizer = witness.randomizer_coefficients().to_vec();
-        malformed_randomizer[17] = 2;
+        let mut randomizers = core::array::from_fn(|ciphertext_ordinal| {
+            witness
+                .randomizer_coefficients(ciphertext_ordinal)
+                .expect("ciphertext randomizer")
+                .to_vec()
+        });
+        randomizers[0][17] = 2;
+        let errors_zero = core::array::from_fn(|ciphertext_ordinal| {
+            witness
+                .error_coefficients(ciphertext_ordinal, 0)
+                .expect("ciphertext zero-component errors")
+                .to_vec()
+        });
+        let errors_one = core::array::from_fn(|ciphertext_ordinal| {
+            witness
+                .error_coefficients(ciphertext_ordinal, 1)
+                .expect("ciphertext one-component errors")
+                .to_vec()
+        });
         assert_eq!(
             BallotValidityEncryptionAttemptWitness::from_encryption_attempt(
                 compilation.source_plan(),
                 witness.scores(),
-                witness.plaintext_coefficients().to_vec(),
-                malformed_randomizer,
-                witness.error_zero_coefficients().to_vec(),
-                witness.error_one_coefficients().to_vec(),
+                randomizers,
+                errors_zero,
+                errors_one,
                 [41_u8; 32],
             )
             .err(),
@@ -3940,13 +4406,20 @@ mod tests {
             .relation_plan()
             .select_variant(None, None)
             .expect("variant");
-        let (column_ordinal, source_kind, component_ordinal, data_modulus_index) = evaluator
+        let (
+            column_ordinal,
+            source_kind,
+            ciphertext_ordinal,
+            component_ordinal,
+            data_modulus_index,
+        ) = evaluator
             .source_by_column
             .iter()
             .enumerate()
             .find_map(|(column_index, source)| {
                 let BallotValidityVerifierColumnSource::AuthenticatedPolynomial {
                     source_kind,
+                    ciphertext_ordinal,
                     component_ordinal,
                     data_modulus_index,
                 } = source.as_ref()?
@@ -3956,13 +4429,19 @@ mod tests {
                 Some((
                     u32::try_from(column_index).expect("column ordinal"),
                     *source_kind,
+                    *ciphertext_ordinal,
                     *component_ordinal,
                     *data_modulus_index,
                 ))
             })
             .expect("authenticated public polynomial source");
         let rows = material
-            .polynomial(source_kind, component_ordinal, data_modulus_index)
+            .polynomial(
+                source_kind,
+                ciphertext_ordinal,
+                component_ordinal,
+                data_modulus_index,
+            )
             .expect("polynomial")
             .coefficients
             .iter()
@@ -3989,95 +4468,144 @@ mod tests {
             evaluator.evaluate_at_extension_point(column_ordinal, point),
             Some(expected)
         );
-        let evaluation_domain = ProofEvaluationDomain::new(TEST_EVALUATION_DOMAIN_SIZE as usize, 7)
-            .expect("evaluation domain");
-        let direct_evaluations = evaluation_domain
-            .evaluate_base_polynomial(&coefficients)
-            .expect("direct evaluations");
-        let query_representative = 17_usize;
-        let half_domain_size = evaluation_domain.size() / 2;
-        let expected_pair = OpenedFriLayerPair::new(
-            ProofChallengeExtensionElement::from_base(direct_evaluations[query_representative]),
-            ProofChallengeExtensionElement::from_base(
-                direct_evaluations[query_representative + half_domain_size],
-            ),
-        );
-        assert_eq!(
-            evaluator.evaluate_at_evaluation_domain_pair(
-                column_ordinal,
-                evaluation_domain,
-                query_representative as u64,
-            ),
-            Some(expected_pair)
-        );
-        assert!(
-            evaluator.coefficients_by_column[column_ordinal as usize].is_none(),
-            "the coefficient buffer moves into the sole evaluation-domain cache"
-        );
-        let cached = evaluator
-            .evaluation_domain_column
-            .as_ref()
-            .expect("evaluation-domain cache");
+        let cached = evaluator.cached_column.as_ref().expect("coefficient cache");
         assert_eq!(cached.column_ordinal, column_ordinal);
-        assert_eq!(cached.domain, evaluation_domain);
-        assert_eq!(cached.evaluations.len(), evaluation_domain.size());
-        assert_eq!(
-            evaluator.evaluate_at_extension_point(column_ordinal, point),
-            Some(expected),
-            "extension evaluation must reconstruct coefficients after their buffer was moved"
-        );
+        assert_eq!(cached.coefficients.len(), TEST_RING_DEGREE as usize);
 
-        let (weight_column_ordinal, option_ordinal) = evaluator
-            .source_by_column
-            .iter()
-            .enumerate()
-            .find_map(|(column_index, source)| match source {
-                Some(BallotValidityVerifierColumnSource::PairDifferenceEncoderWeight {
-                    option_ordinal,
-                }) => Some((
-                    u32::try_from(column_index).expect("column ordinal"),
-                    *option_ordinal,
-                )),
-                _ => None,
-            })
-            .expect("pair-difference encoder-weight source");
-        let weight_rows = compilation
-            .source_plan()
-            .encoder_weight_sequence(option_ordinal)
-            .expect("encoder-weight sequence")
-            .into_iter()
-            .map(ProofBaseFieldElement::from_canonical)
-            .collect::<Result<Vec<_>, _>>()
-            .expect("canonical encoder weights");
-        let weight_coefficients = trace_domain
-            .interpolate_base_polynomial(&weight_rows)
-            .expect("weight interpolation");
-        let direct_weight_evaluations = evaluation_domain
-            .evaluate_base_polynomial(&weight_coefficients)
-            .expect("direct weight evaluations");
-        let expected_weight_pair = OpenedFriLayerPair::new(
-            ProofChallengeExtensionElement::from_base(
-                direct_weight_evaluations[query_representative],
-            ),
-            ProofChallengeExtensionElement::from_base(
-                direct_weight_evaluations[query_representative + half_domain_size],
-            ),
+        let selected_profile_coordinates = [(0, 0, 0), (0, 1, 19), (1, 0, 0), (1, 1, 19)];
+        let profile_columns_and_coefficients = selected_profile_coordinates.map(
+            |(expected_ciphertext_ordinal, expected_auxiliary_ordinal, expected_option_ordinal)| {
+                let column_ordinal = evaluator
+                    .source_by_column
+                    .iter()
+                    .enumerate()
+                    .find_map(|(column_index, source)| match source {
+                        Some(BallotValidityVerifierColumnSource::PairCharacterEncoderProfile {
+                            ciphertext_ordinal,
+                            auxiliary_ordinal,
+                            option_ordinal,
+                        }) if (*ciphertext_ordinal, *auxiliary_ordinal, *option_ordinal)
+                            == (
+                                expected_ciphertext_ordinal,
+                                expected_auxiliary_ordinal,
+                                expected_option_ordinal,
+                            ) =>
+                        {
+                            Some(u32::try_from(column_index).expect("column ordinal"))
+                        }
+                        _ => None,
+                    })
+                    .expect("selected pair-character encoder profile source");
+                let profile_rows = compilation
+                    .source_plan()
+                    .encoder_profile_sequence(
+                        expected_ciphertext_ordinal,
+                        expected_auxiliary_ordinal,
+                        expected_option_ordinal,
+                    )
+                    .expect("encoder profile sequence")
+                    .into_iter()
+                    .map(ProofBaseFieldElement::from_canonical)
+                    .collect::<Result<Vec<_>, _>>()
+                    .expect("canonical encoder profile");
+                assert!(
+                    profile_rows
+                        .iter()
+                        .any(|value| *value != ProofBaseFieldElement::ZERO)
+                );
+                let profile_coefficients = trace_domain
+                    .interpolate_base_polynomial(&profile_rows)
+                    .expect("independent full-sequence interpolation");
+                (column_ordinal, profile_coefficients)
+            },
         );
+        let second_point =
+            ProofChallengeExtensionElement::from_canonical_coordinates([17, 19, 23, 29, 31])
+                .expect("second extension point");
+        for evaluation_point in [point, second_point] {
+            let mut retained_cache_allocation = None;
+            for (profile_column_ordinal, profile_coefficients) in &profile_columns_and_coefficients
+            {
+                let expected_profile = profile_coefficients.iter().rev().fold(
+                    ProofChallengeExtensionElement::ZERO,
+                    |accumulated, coefficient| {
+                        accumulated
+                            .multiply(evaluation_point)
+                            .add(ProofChallengeExtensionElement::from_base(*coefficient))
+                    },
+                );
+                assert_eq!(
+                    evaluator
+                        .evaluate_at_extension_point(*profile_column_ordinal, evaluation_point,),
+                    Some(expected_profile),
+                );
+                let cached_lagrange_weights = evaluator
+                    .cached_pair_character_lagrange_weights
+                    .as_ref()
+                    .expect("compact pair-character Lagrange cache");
+                assert_eq!(
+                    cached_lagrange_weights.point_coordinates,
+                    evaluation_point.canonical_coordinates(),
+                );
+                assert_eq!(
+                    cached_lagrange_weights.weights.len(),
+                    PAIR_CHARACTER_PROFILE_LAGRANGE_WEIGHT_COUNT,
+                );
+                if let Some(allocation) = retained_cache_allocation {
+                    assert_eq!(cached_lagrange_weights.weights.as_ptr(), allocation);
+                } else {
+                    retained_cache_allocation = Some(cached_lagrange_weights.weights.as_ptr());
+                }
+            }
+        }
         assert_eq!(
-            evaluator.evaluate_at_evaluation_domain_pair(
-                weight_column_ordinal,
-                evaluation_domain,
-                query_representative as u64,
-            ),
-            Some(expected_weight_pair)
+            evaluator
+                .cached_column
+                .as_ref()
+                .expect("authenticated coefficient cache remains separate")
+                .column_ordinal,
+            column_ordinal,
+            "virtual encoder evaluation must not materialize a full trace column",
+        );
+        let subgroup_point = ProofChallengeExtensionElement::from_base(
+            trace_domain.point(17).expect("subgroup evaluation point"),
         );
         assert_eq!(
             evaluator
-                .evaluation_domain_column
+                .evaluate_at_extension_point(profile_columns_and_coefficients[0].0, subgroup_point,),
+            None,
+            "the sparse evaluator must reject a zero subgroup denominator",
+        );
+        assert_eq!(
+            evaluator
+                .cached_pair_character_lagrange_weights
                 .as_ref()
-                .expect("rekeyed evaluation-domain cache")
-                .column_ordinal,
-            weight_column_ordinal
+                .expect("prior valid compact cache")
+                .point_coordinates,
+            second_point.canonical_coordinates(),
+            "a rejected subgroup point must not replace the valid cache",
+        );
+        assert_eq!(
+            evaluator.evaluate_at_extension_point(column_ordinal, point),
+            Some(expected),
+            "switching back must derive only the requested authenticated column"
+        );
+        let evaluator_accounting = evaluator.memory_accounting().expect("memory accounting");
+        let trace_column_byte_length = u64::try_from(TEST_RING_DEGREE as usize)
+            .expect("ring degree")
+            * u64::try_from(size_of::<ProofBaseFieldElement>()).expect("field width");
+        let pair_character_lagrange_cache_byte_length =
+            u64::try_from(PAIR_CHARACTER_PROFILE_LAGRANGE_WEIGHT_COUNT)
+                .expect("profile weight count")
+                * u64::try_from(size_of::<ProofChallengeExtensionElement>())
+                    .expect("extension width");
+        assert_eq!(
+            evaluator_accounting.maximum_cached_column_resident_byte_length(),
+            trace_column_byte_length + pair_character_lagrange_cache_byte_length,
+        );
+        assert_eq!(
+            evaluator_accounting.maximum_evaluation_transient_byte_length(),
+            trace_column_byte_length.max(2 * pair_character_lagrange_cache_byte_length),
         );
         let prover_column = variant
             .ordered_columns()

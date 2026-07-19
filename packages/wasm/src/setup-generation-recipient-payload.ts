@@ -29,7 +29,6 @@ import { WasmStatusBoundary } from './wasm-status-boundary.js';
 
 const verifierCapabilityByteLength = 32;
 const wasm32MaximumUnsignedInteger = 0xffff_ffff;
-export const selectedSetupGenerationPublicKeyShareBodyByteLength = 13_631_488;
 
 type SetupGenerationKernelContext = CanonicalStreamKernelContext &
     Required<
@@ -344,14 +343,6 @@ const publicKeyShareBodyByteLength = (
                     byteLength,
                     'The setup-generation public-key-share body',
                 );
-                if (
-                    exactByteLength !==
-                    selectedSetupGenerationPublicKeyShareBodyByteLength
-                ) {
-                    throw new CanonicalStreamInternalError(
-                        'The setup-generation public-key-share body has the wrong selected-suite length.',
-                    );
-                }
                 return exactByteLength;
             } finally {
                 record.memoryBoundary.zeroAndDeallocate(

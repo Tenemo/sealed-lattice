@@ -81,7 +81,12 @@ const APPLICATION_STATEMENT_SCHEMA_IDENTIFIER: u16 = 0x1213;
 const RKG_ROUND_ONE_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER: u16 = 0x1215;
 const EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER: u16 = 0x1218;
 const TARGET_RELEASE_STATEMENT_SCHEMA_IDENTIFIER: u16 = 0x1621;
-const EVALUATION_DOMAIN_SIZE: u64 = 4_096;
+const PUBLIC_AGGREGATE_TEST_EVALUATION_DOMAIN_SIZE: u64 = 2_048;
+const PUBLIC_AGGREGATE_TEST_EVALUATION_BLOWUP_FACTOR: u32 = 4;
+const PUBLIC_AGGREGATE_TEST_RING_DEGREE: u64 = 4;
+const PUBLIC_AGGREGATE_TEST_COLUMN_DEGREE_BOUND_EXCLUSIVE: usize =
+    PUBLIC_AGGREGATE_TEST_RING_DEGREE as usize / 2;
+const PUBLIC_AGGREGATE_TEST_UNIQUE_QUERY_COUNT: u32 = PROOF_UNIQUE_QUERY_COUNT;
 const TARGET_TEST_EVALUATION_DOMAIN_SIZE: u64 = 2_048;
 const TARGET_TEST_OPENING_DEGREE_BOUND_EXCLUSIVE: u64 = 256;
 const TARGET_TEST_RING_DEGREE: usize = 64;
@@ -782,12 +787,14 @@ fn test_setup_polynomial_tree(
     .expect("the public-key-share polynomial context is canonical");
     let ordered_trace_rows = vec![vec![
         ProofBaseFieldElement::from_canonical(constant_value)
-            .expect("the toy source coefficient is canonical"),
+            .expect("the toy source coefficient is canonical");
+        PUBLIC_AGGREGATE_TEST_COLUMN_DEGREE_BOUND_EXCLUSIVE
     ]];
     SetupPublicPolynomialTree::construct(SetupPublicPolynomialTreeInput {
         context: &context,
-        evaluation_domain_size: EVALUATION_DOMAIN_SIZE as usize,
-        source_polynomial_degree_bound_exclusive: OPENING_DEGREE_BOUND_EXCLUSIVE as usize,
+        evaluation_domain_size: PUBLIC_AGGREGATE_TEST_EVALUATION_DOMAIN_SIZE as usize,
+        source_polynomial_degree_bound_exclusive:
+            PUBLIC_AGGREGATE_TEST_COLUMN_DEGREE_BOUND_EXCLUSIVE,
         ordered_trace_rows: &ordered_trace_rows,
     })
     .expect("the public-polynomial LDE tree is canonical")
@@ -828,14 +835,15 @@ struct CommonProofEngineFixture {
 
 fn relation_context() -> RelationPlanCheckContext {
     let evaluation_domain = ProofEvaluationDomain::new(
-        usize::try_from(EVALUATION_DOMAIN_SIZE).expect("the toy domain fits usize"),
+        usize::try_from(PUBLIC_AGGREGATE_TEST_EVALUATION_DOMAIN_SIZE)
+            .expect("the toy domain fits usize"),
         PROOF_EVALUATION_COSET_OFFSET,
     )
     .expect("the toy evaluation domain is valid");
     RelationPlanCheckContext {
         base_field_modulus: PROOF_BASE_FIELD_MODULUS,
         challenge_extension_degree: PROOF_CHALLENGE_EXTENSION_DEGREE as u16,
-        evaluation_blowup_factor: PROOF_EVALUATION_BLOWUP_FACTOR,
+        evaluation_blowup_factor: PUBLIC_AGGREGATE_TEST_EVALUATION_BLOWUP_FACTOR,
         evaluation_domain_generator: evaluation_domain.generator().canonical(),
         evaluation_coset_offset: PROOF_EVALUATION_COSET_OFFSET,
         deep_point_count: PROOF_DEEP_POINT_COUNT,
@@ -843,7 +851,7 @@ fn relation_context() -> RelationPlanCheckContext {
         quotient_component_degree_bound_exclusive: 2,
         fri_fold_count: 1,
         final_polynomial_degree_bound_exclusive: PROOF_FINAL_POLYNOMIAL_DEGREE_BOUND_EXCLUSIVE,
-        unique_query_count: PROOF_UNIQUE_QUERY_COUNT,
+        unique_query_count: PUBLIC_AGGREGATE_TEST_UNIQUE_QUERY_COUNT,
         non_native_modular_identity_challenge_count: PROOF_NON_NATIVE_IDENTITY_CHALLENGE_COUNT,
         maximum_fiat_shamir_candidate_draws_per_output:
             PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT,
@@ -1151,10 +1159,11 @@ fn target_relation_tree_inputs(
 
 fn public_aggregate_geometry() -> PublicAggregateRelationGeometry {
     PublicAggregateRelationGeometry {
-        ring_degree: 4,
-        evaluation_domain_size: EVALUATION_DOMAIN_SIZE,
+        ring_degree: PUBLIC_AGGREGATE_TEST_RING_DEGREE,
+        evaluation_domain_size: PUBLIC_AGGREGATE_TEST_EVALUATION_DOMAIN_SIZE,
         opening_degree_bound_exclusive: OPENING_DEGREE_BOUND_EXCLUSIVE,
-        public_polynomial_column_degree_bound_exclusive: 1,
+        public_polynomial_column_degree_bound_exclusive:
+            PUBLIC_AGGREGATE_TEST_COLUMN_DEGREE_BOUND_EXCLUSIVE as u64,
         participant_count: 2,
     }
 }
@@ -1469,7 +1478,7 @@ fn prepared_verification_worker_fixture() -> PreparedCommonProofVerification {
         stream_domain,
         proof_stream_descriptor.full_object_digest.into_bytes(),
         super::super::super::MAXIMUM_COMMON_PROOF_BYTE_LENGTH as u64,
-        PROOF_UNIQUE_QUERY_COUNT,
+        PUBLIC_AGGREGATE_TEST_UNIQUE_QUERY_COUNT,
     )
     .expect("the fixture application fits the worker safety bound");
     let verification_binding = CommonProofVerificationBinding::new(

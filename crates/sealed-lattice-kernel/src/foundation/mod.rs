@@ -8,13 +8,6 @@ mod canonical_stream;
 mod canonical_stream_runtime;
 mod canonical_tuple;
 mod ceremony;
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "foundation finality types keep later evaluator-relation composition points compiled without making them reachable"
-    )
-)]
 mod finality;
 mod finality_runtime;
 mod hash;
@@ -24,22 +17,11 @@ mod mailbox_gcm;
 mod mailbox_gcm_runtime;
 mod participant_identity;
 mod private_randomness;
-#[expect(
-    dead_code,
-    reason = "the randomness runtime keeps the opaque exact-family proof-attempt source compiled while no family adapter can consume it"
-)]
 mod private_randomness_runtime;
 mod proof_application;
 mod refusal;
 mod roster_runtime;
 mod runtime_input;
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "target descriptors remain compiled for the later exact target-release relation"
-    )
-)]
 mod schemas;
 mod selected_suite;
 mod setup_transcript_runtime;

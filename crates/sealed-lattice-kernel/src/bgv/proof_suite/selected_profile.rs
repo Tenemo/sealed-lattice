@@ -4,10 +4,7 @@ use num_bigint::BigUint;
 
 use crate::bgv::{
     evaluator::top_k::CANONICAL_TARGET_CIPHERTEXT_LEVEL,
-    parameters::{
-        DATA_PRIMES, LOGICAL_SLOT_GENERATOR, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE, SPECIAL_PRIMES,
-        root_parameters_for_modulus,
-    },
+    parameters::{DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE, SPECIAL_PRIMES},
 };
 use crate::foundation::{
     ProofApplicationSlotCeilings, SELECTED_MAXIMUM_BALLOT_ATTEMPTS_PER_PARTICIPANT,
@@ -35,10 +32,10 @@ use super::{
     compile_ballot_validity_relation,
 };
 use super::{
-    COMMITTED_MATERIAL_PROOF_EVALUATION_BLOWUP_FACTOR, COMMITTED_MATERIAL_PROOF_UNIQUE_QUERY_COUNT,
-    PROOF_BASE_FIELD_MAXIMUM_TWO_ADIC_GENERATOR, PROOF_BASE_FIELD_MODULUS,
-    PROOF_CHALLENGE_EXTENSION_DEGREE, PROOF_DEEP_POINT_COUNT, PROOF_EVALUATION_BLOWUP_FACTOR,
-    PROOF_EVALUATION_COSET_OFFSET, PROOF_FINAL_POLYNOMIAL_DEGREE_BOUND_EXCLUSIVE,
+    COMMITTED_MATERIAL_PROOF_UNIQUE_QUERY_COUNT, PROOF_BASE_FIELD_MAXIMUM_TWO_ADIC_GENERATOR,
+    PROOF_BASE_FIELD_MODULUS, PROOF_CHALLENGE_EXTENSION_DEGREE, PROOF_DEEP_POINT_COUNT,
+    PROOF_EVALUATION_BLOWUP_FACTOR, PROOF_EVALUATION_COSET_OFFSET,
+    PROOF_FINAL_POLYNOMIAL_DEGREE_BOUND_EXCLUSIVE,
     PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT,
     PROOF_NON_NATIVE_IDENTITY_CHALLENGE_COUNT, PROOF_UNIQUE_QUERY_COUNT, RelationPlanCheckContext,
     ResolvedSuiteModulus, SuiteModulusReference,
@@ -64,8 +61,6 @@ use super::{
 };
 
 pub(super) const SELECTED_OPENING_DEGREE_BOUND_EXCLUSIVE: u64 = 262_144;
-const SELECTED_COMMITTED_MATERIAL_OPENING_DEGREE_BOUND_EXCLUSIVE: u64 = 524_288;
-pub(super) const SELECTED_PUBLIC_AGGREGATE_OPENING_DEGREE_BOUND_EXCLUSIVE: u64 = 524_288;
 pub(super) const SELECTED_EVALUATION_DOMAIN_SIZE: u64 =
     SELECTED_OPENING_DEGREE_BOUND_EXCLUSIVE * PROOF_EVALUATION_BLOWUP_FACTOR as u64;
 pub(super) const SELECTED_PUBLIC_POLYNOMIAL_COLUMN_DEGREE_BOUND_EXCLUSIVE: u64 =
@@ -95,7 +90,7 @@ fn uses_committed_material_proof_schedule(
     }
 }
 
-fn uses_public_aggregate_proof_schedule(application_statement_schema_identifier: u16) -> bool {
+fn uses_public_aggregate_quotient_geometry(application_statement_schema_identifier: u16) -> bool {
     matches!(
         application_statement_schema_identifier,
         ProofApplicationSlotCeilings::COLLECTIVE_PUBLIC_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER
@@ -147,21 +142,10 @@ pub(crate) fn selected_relation_plan_check_context(
 ) -> Option<RelationPlanCheckContext> {
     let uses_committed_material_schedule =
         uses_committed_material_proof_schedule(application_statement_schema_identifier)?;
-    let uses_public_aggregate_schedule =
-        uses_public_aggregate_proof_schedule(application_statement_schema_identifier);
-    let evaluation_blowup_factor =
-        if uses_committed_material_schedule || uses_public_aggregate_schedule {
-            COMMITTED_MATERIAL_PROOF_EVALUATION_BLOWUP_FACTOR
-        } else {
-            PROOF_EVALUATION_BLOWUP_FACTOR
-        };
-    let opening_degree_bound_exclusive = if uses_committed_material_schedule {
-        SELECTED_COMMITTED_MATERIAL_OPENING_DEGREE_BOUND_EXCLUSIVE
-    } else if uses_public_aggregate_schedule {
-        SELECTED_PUBLIC_AGGREGATE_OPENING_DEGREE_BOUND_EXCLUSIVE
-    } else {
-        SELECTED_OPENING_DEGREE_BOUND_EXCLUSIVE
-    };
+    let uses_public_aggregate_quotient_geometry =
+        uses_public_aggregate_quotient_geometry(application_statement_schema_identifier);
+    let evaluation_blowup_factor = PROOF_EVALUATION_BLOWUP_FACTOR;
+    let opening_degree_bound_exclusive = SELECTED_OPENING_DEGREE_BOUND_EXCLUSIVE;
     if opening_degree_bound_exclusive.checked_mul(u64::from(evaluation_blowup_factor))?
         != SELECTED_EVALUATION_DOMAIN_SIZE
     {
@@ -227,21 +211,21 @@ pub(crate) fn selected_relation_plan_check_context(
         deep_point_count: PROOF_DEEP_POINT_COUNT,
         quotient_component_count: if uses_committed_material_schedule {
             SELECTED_COMMITTED_MATERIAL_QUOTIENT_COMPONENT_COUNT
-        } else if uses_public_aggregate_schedule {
+        } else if uses_public_aggregate_quotient_geometry {
             SELECTED_PUBLIC_AGGREGATE_QUOTIENT_COMPONENT_COUNT
         } else {
             SELECTED_QUOTIENT_COMPONENT_COUNT
         },
         quotient_component_degree_bound_exclusive: if uses_committed_material_schedule {
             selected_committed_material_quotient_component_degree_bound_exclusive().ok()?
-        } else if uses_public_aggregate_schedule {
+        } else if uses_public_aggregate_quotient_geometry {
             SELECTED_PUBLIC_AGGREGATE_QUOTIENT_COMPONENT_DEGREE_BOUND_EXCLUSIVE
         } else {
             SELECTED_QUOTIENT_COMPONENT_DEGREE_BOUND_EXCLUSIVE
         },
         fri_fold_count,
         final_polynomial_degree_bound_exclusive: PROOF_FINAL_POLYNOMIAL_DEGREE_BOUND_EXCLUSIVE,
-        unique_query_count: if uses_committed_material_schedule || uses_public_aggregate_schedule {
+        unique_query_count: if uses_committed_material_schedule {
             COMMITTED_MATERIAL_PROOF_UNIQUE_QUERY_COUNT
         } else {
             PROOF_UNIQUE_QUERY_COUNT
@@ -259,9 +243,6 @@ pub(crate) fn selected_ballot_validity_relation_compilation()
         ProofApplicationSlotCeilings::BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER,
     )
     .ok_or(super::RelationPlanError::InvalidDomain)?;
-    let primitive_two_n_root = root_parameters_for_modulus(PLAINTEXT_MODULUS)
-        .ok_or(super::RelationPlanError::InvalidDomain)?
-        .negacyclic_root;
     compile_ballot_validity_relation(
         &BallotValidityRelationPlanInput {
             ring_degree: selected_ring_degree(),
@@ -269,9 +250,6 @@ pub(crate) fn selected_ballot_validity_relation_compilation()
             opening_degree_bound_exclusive: SELECTED_OPENING_DEGREE_BOUND_EXCLUSIVE,
             active_data_modulus_indices: selected_data_modulus_indices(),
             plaintext_modulus: PLAINTEXT_MODULUS,
-            primitive_two_n_root,
-            slot_generator: u16::try_from(LOGICAL_SLOT_GENERATOR)
-                .map_err(|_| super::RelationPlanError::CountOverflow)?,
             reserved_slot_rule: RESERVED_BALLOT_SLOT_RULE,
         },
         &relation_context,
@@ -304,7 +282,7 @@ pub(crate) fn selected_target_decryption_flooding_bound() -> Result<BigUint, Pro
 
 /// Compiles the sole selected target-release relation from production suite
 /// constants. Accounting, generation adapters, and verification all consume
-/// this constructor so the six-prime factor-four geometry cannot drift.
+/// this constructor so the eight-prime factor-four geometry cannot drift.
 pub(crate) fn selected_target_release_relation()
 -> Result<CompiledTargetReleaseRelation, ProofProfileError> {
     let relation_context = selected_relation_plan_check_context(
@@ -340,7 +318,7 @@ pub(crate) fn selected_committed_material_relation_plan_input()
     Ok(CommittedMaterialRelationPlanInput {
         ring_degree: selected_ring_degree(),
         evaluation_domain_size: SELECTED_EVALUATION_DOMAIN_SIZE,
-        opening_degree_bound_exclusive: SELECTED_COMMITTED_MATERIAL_OPENING_DEGREE_BOUND_EXCLUSIVE,
+        opening_degree_bound_exclusive: SELECTED_OPENING_DEGREE_BOUND_EXCLUSIVE,
         material_column_degree_bound_exclusive: u64::try_from(
             committed_material_profile.material_column_degree_bound_exclusive(),
         )
@@ -391,6 +369,10 @@ pub(crate) fn selected_relation_plans()
         ProofApplicationSlotCeilings::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER,
     )
     .ok_or(ProofProfileError::InvalidSchedule)?;
+    let public_aggregate_context = selected_relation_plan_check_context(
+        ProofApplicationSlotCeilings::COLLECTIVE_PUBLIC_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+    )
+    .ok_or(ProofProfileError::InvalidSchedule)?;
     let evaluator_candidate = EvaluatorCandidateInput::implemented()
         .map_err(|_| ProofProfileError::InvalidRelationPlan)?;
     let commitment_data_modulus_indices = selected_commitment_data_modulus_indices()?;
@@ -407,7 +389,7 @@ pub(crate) fn selected_relation_plans()
     let aggregate_geometry = PublicAggregateRelationGeometry {
         ring_degree: selected_ring_degree(),
         evaluation_domain_size: SELECTED_EVALUATION_DOMAIN_SIZE,
-        opening_degree_bound_exclusive: SELECTED_PUBLIC_AGGREGATE_OPENING_DEGREE_BOUND_EXCLUSIVE,
+        opening_degree_bound_exclusive: SELECTED_OPENING_DEGREE_BOUND_EXCLUSIVE,
         public_polynomial_column_degree_bound_exclusive:
             SELECTED_PUBLIC_POLYNOMIAL_COLUMN_DEGREE_BOUND_EXCLUSIVE,
         participant_count: FOUNDATION_PROFILE.participant_count,
@@ -423,7 +405,7 @@ pub(crate) fn selected_relation_plans()
                     .collect::<Vec<_>>(),
             ),
         },
-        &ordinary_context,
+        &public_aggregate_context,
     )?;
 
     let (relinearization_schedule_position, relinearization_catalog_level) = evaluator_candidate
@@ -460,7 +442,7 @@ pub(crate) fn selected_relation_plans()
                 ordered_right_component_moduli: relinearization_root_component_moduli.clone(),
             }],
         },
-        &ordinary_context,
+        &public_aggregate_context,
     )?;
     let relinearization_round_two = compile_relinearization_round_two_relation_plan(
         &RelinearizationRoundTwoRelationPlanInput {
@@ -472,14 +454,9 @@ pub(crate) fn selected_relation_plans()
 
     let galois_catalog_level = evaluator_candidate
         .galois_key_schedule
-        .first()
+        .iter()
         .map(|(_, level)| *level)
-        .filter(|level| {
-            evaluator_candidate
-                .galois_key_schedule
-                .iter()
-                .all(|(_, candidate_level)| candidate_level == level)
-        })
+        .max()
         .ok_or(ProofProfileError::InvalidRelationPlan)?;
     let galois_geometry = selected_trustee_evaluation_key_geometry(
         &evaluator_candidate,
@@ -492,9 +469,6 @@ pub(crate) fn selected_relation_plans()
         .copied()
         .enumerate()
         .map(|(schedule_position, (galois_element, level))| {
-            if level != galois_catalog_level {
-                return Err(ProofProfileError::InvalidRelationPlan);
-            }
             Ok(GaloisKeyShareRelationEntryInput {
                 schedule_position: u32::try_from(schedule_position)
                     .map_err(|_| ProofProfileError::CountOverflow)?,
@@ -513,21 +487,16 @@ pub(crate) fn selected_relation_plans()
         },
         &ordinary_context,
     )?;
-    let galois_root_component_moduli = trace_half_modulus_references(
-        &ordered_trustee_root_row_modulus_references(&galois_geometry)?,
-    );
-
     let evaluator_variants = selected_evaluator_aggregate_variants(
         &evaluator_candidate,
         &relinearization_root_component_moduli,
-        &galois_root_component_moduli,
     )?;
     let evaluator_key_aggregate = compile_evaluator_key_aggregate_relation_plan(
         &EvaluatorKeyAggregatePlanInput {
             geometry: aggregate_geometry,
             ordered_variants: evaluator_variants,
         },
-        &ordinary_context,
+        &public_aggregate_context,
     )?;
 
     let ballot_validity = compile_ballot_validity_relation_plan(
@@ -537,11 +506,6 @@ pub(crate) fn selected_relation_plans()
             opening_degree_bound_exclusive: SELECTED_OPENING_DEGREE_BOUND_EXCLUSIVE,
             active_data_modulus_indices: active_data_modulus_indices.clone(),
             plaintext_modulus: PLAINTEXT_MODULUS,
-            primitive_two_n_root: root_parameters_for_modulus(PLAINTEXT_MODULUS)
-                .ok_or(ProofProfileError::InvalidRelationPlan)?
-                .negacyclic_root,
-            slot_generator: u16::try_from(LOGICAL_SLOT_GENERATOR)
-                .map_err(|_| ProofProfileError::CountOverflow)?,
             reserved_slot_rule: RESERVED_BALLOT_SLOT_RULE,
         },
         &ordinary_context,
@@ -698,14 +662,9 @@ pub(crate) fn selected_galois_key_share_relation_plan_input()
         .map_err(|_| ProofProfileError::InvalidRelationPlan)?;
     let catalog_level = evaluator_candidate
         .galois_key_schedule
-        .first()
+        .iter()
         .map(|(_, level)| *level)
-        .filter(|level| {
-            evaluator_candidate
-                .galois_key_schedule
-                .iter()
-                .all(|(_, candidate_level)| candidate_level == level)
-        })
+        .max()
         .ok_or(ProofProfileError::InvalidRelationPlan)?;
     let commitment_data_modulus_indices = SETUP_COMMITMENT_MODULUS_LIMB_INDICES
         .iter()
@@ -745,7 +704,6 @@ pub(crate) fn selected_galois_key_share_relation_plan_input()
 fn selected_evaluator_aggregate_variants(
     evaluator_candidate: &EvaluatorCandidateInput,
     ordered_relinearization_runtime_component_moduli: &[SuiteModulusReference],
-    ordered_galois_runtime_component_moduli: &[SuiteModulusReference],
 ) -> Result<Vec<EvaluatorKeyAggregateVariantInput>, ProofProfileError> {
     let key_positions = selected_evaluator_program_set()
         .and_then(|program| program.key_positions())
@@ -766,6 +724,21 @@ fn selected_evaluator_aggregate_variants(
     if key_positions.streams().len() != usize::from(FOUNDATION_PROFILE.option_count) {
         return Err(ProofProfileError::InvalidRelationPlan);
     }
+    let commitment_data_modulus_indices = selected_commitment_data_modulus_indices()?;
+    let ordered_galois_runtime_component_moduli = evaluator_candidate
+        .galois_key_schedule
+        .iter()
+        .map(|(_, catalog_level)| {
+            let geometry = selected_trustee_evaluation_key_geometry(
+                evaluator_candidate,
+                *catalog_level,
+                commitment_data_modulus_indices.clone(),
+            )?;
+            Ok(trace_half_modulus_references(
+                &ordered_trustee_root_row_modulus_references(&geometry)?,
+            ))
+        })
+        .collect::<Result<Vec<_>, ProofProfileError>>()?;
     key_positions
         .streams()
         .iter()
@@ -799,7 +772,10 @@ fn selected_evaluator_aggregate_variants(
                             schedule_position: u32::try_from(schedule_position)
                                 .map_err(|_| ProofProfileError::CountOverflow)?,
                             ordered_runtime_component_moduli:
-                                ordered_galois_runtime_component_moduli.to_vec(),
+                                ordered_galois_runtime_component_moduli
+                                    .get(schedule_position)
+                                    .ok_or(ProofProfileError::InvalidRelationPlan)?
+                                    .clone(),
                         })
                     })
                     .collect::<Result<Vec<_>, ProofProfileError>>()?,
@@ -881,8 +857,6 @@ fn modular_power(base: u64, mut exponent: u64, modulus: u64) -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeSet;
-
     use super::super::relation_plan::{
         BoundTreeConstructionKind, RelationColumnOrigin, RelationMaskKind, RelationTreeDescriptor,
     };
@@ -1015,9 +989,9 @@ mod tests {
             ProofApplicationSlotCeilings::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER,
         )
         .expect("selected committed-material proof context");
-        assert_eq!(committed_material_context.evaluation_blowup_factor, 4);
+        assert_eq!(committed_material_context.evaluation_blowup_factor, 8);
         assert_eq!(committed_material_context.unique_query_count, 192);
-        assert_eq!(committed_material_context.fri_fold_count, 11);
+        assert_eq!(committed_material_context.fri_fold_count, 10);
         assert_eq!(committed_material_context.quotient_component_count, 3);
         assert_eq!(
             committed_material_context.quotient_component_degree_bound_exclusive,
@@ -1026,7 +1000,7 @@ mod tests {
         );
         assert_eq!(
             committed_material_context.quotient_component_degree_bound_exclusive,
-            265_261
+            68_652
         );
         assert_eq!(
             committed_material_context.evaluation_domain_generator,
@@ -1039,9 +1013,9 @@ mod tests {
         ] {
             let public_aggregate_context = selected_relation_plan_check_context(family)
                 .expect("selected public-aggregate proof context");
-            assert_eq!(public_aggregate_context.evaluation_blowup_factor, 4);
-            assert_eq!(public_aggregate_context.unique_query_count, 192);
-            assert_eq!(public_aggregate_context.fri_fold_count, 11);
+            assert_eq!(public_aggregate_context.evaluation_blowup_factor, 8);
+            assert_eq!(public_aggregate_context.unique_query_count, 168);
+            assert_eq!(public_aggregate_context.fri_fold_count, 10);
             assert_eq!(public_aggregate_context.quotient_component_count, 9);
             assert_eq!(
                 public_aggregate_context.quotient_component_degree_bound_exclusive,
@@ -1063,11 +1037,19 @@ mod tests {
         let trace_domain_size = SELECTED_PUBLIC_POLYNOMIAL_COLUMN_DEGREE_BOUND_EXCLUSIVE;
         let participant_count = u64::from(FOUNDATION_PROFILE.participant_count);
         let numerator_maximum_degree = participant_count * (trace_domain_size - 1);
+        let quotient_maximum_degree = numerator_maximum_degree - trace_domain_size;
         let quotient_coefficient_count = numerator_maximum_degree - trace_domain_size + 1;
         let quotient_capacity = u64::from(SELECTED_PUBLIC_AGGREGATE_QUOTIENT_COMPONENT_COUNT)
             * SELECTED_PUBLIC_AGGREGATE_QUOTIENT_COMPONENT_DEGREE_BOUND_EXCLUSIVE;
+        assert_eq!(numerator_maximum_degree, 327_670);
+        assert_eq!(quotient_maximum_degree, 294_902);
         assert_eq!(quotient_coefficient_count, 294_903);
         assert_eq!(quotient_capacity, 294_912);
+        assert!(numerator_maximum_degree > SELECTED_OPENING_DEGREE_BOUND_EXCLUSIVE);
+        assert!(
+            SELECTED_PUBLIC_AGGREGATE_QUOTIENT_COMPONENT_DEGREE_BOUND_EXCLUSIVE
+                < SELECTED_OPENING_DEGREE_BOUND_EXCLUSIVE
+        );
         assert!(quotient_coefficient_count <= quotient_capacity);
     }
 
@@ -1186,6 +1168,10 @@ mod tests {
         .expect("selected VSS proof context");
         let input = selected_committed_material_relation_plan_input()
             .expect("selected committed-material relation input");
+        assert_eq!(
+            input.sharing_data_modulus_indices.as_slice(),
+            &[0, 1, 2, 3, 4, 5, 6, 7]
+        );
         let share_linkage_plan = compile_vss_share_linkage_relation_plan(&input, &context)
             .expect("selected VSS share-linkage relation plan");
         let aggregate_threshold_plan =
@@ -1198,19 +1184,21 @@ mod tests {
             input
                 .message_trace_domain_size()
                 .expect("selected committed-material message trace domain"),
-            32_768
+            16_384
         );
         assert_eq!(
             input
                 .relation_trace_domain_size()
                 .expect("selected committed-material packed trace domain"),
-            131_072
+            65_536
         );
-        assert_eq!(share_linkage.trace_domain_size(), 131_072);
-        assert_eq!(share_linkage.opening_degree_bound_exclusive(), 524_288);
+        assert_eq!(share_linkage.trace_domain_size(), 65_536);
+        assert_eq!(share_linkage.opening_degree_bound_exclusive(), 262_144);
         assert_eq!(share_linkage.evaluation_domain_size(), 2_097_152);
-        assert_eq!(share_linkage.ordered_columns().len(), 3_277);
-        assert_eq!(aggregate_threshold.ordered_columns().len(), 2_412);
+        assert_eq!(context.evaluation_blowup_factor, 8);
+        assert_eq!(context.fri_fold_count, 10);
+        assert_eq!(share_linkage.ordered_columns().len(), 3_451);
+        assert_eq!(aggregate_threshold.ordered_columns().len(), 2_528);
 
         let minimum_telescoping_mask_degree_bound_exclusive = u64::from(context.unique_query_count)
             .checked_mul(2)
@@ -1219,16 +1207,40 @@ mod tests {
             })
             .expect("selected telescoping-mask degree derives");
 
-        for (relation, expected_bound_root_count, expected_proof_created_column_count) in
-            [(share_linkage, 84, 2_941), (aggregate_threshold, 66, 2_148)]
-        {
+        for (
+            relation,
+            expected_bound_root_count,
+            expected_proof_created_column_count,
+            expected_constraint_count,
+        ) in [
+            (share_linkage, 112, 3_003, 3_799),
+            (aggregate_threshold, 88, 2_176, 2_672),
+        ] {
             let quotient_decomposition_stride = relation
                 .quotient_decomposition_stride(&context)
                 .expect("selected quotient decomposition stride derives");
-            assert_eq!(quotient_decomposition_stride, 133_803);
+            assert_eq!(quotient_decomposition_stride, 68_267);
             assert_eq!(
                 context.quotient_component_degree_bound_exclusive,
                 quotient_decomposition_stride + minimum_telescoping_mask_degree_bound_exclusive
+            );
+            let maximum_prover_column_degree_bound_exclusive = relation
+                .ordered_columns()
+                .iter()
+                .filter(|column| matches!(column.origin(), RelationColumnOrigin::Prover))
+                .map(|column| column.source_degree_bound_exclusive())
+                .max()
+                .expect("selected relation has prover columns");
+            assert_eq!(maximum_prover_column_degree_bound_exclusive, 67_584);
+            let maximum_ternary_range_numerator_degree =
+                (maximum_prover_column_degree_bound_exclusive - 1) * 3;
+            assert_eq!(maximum_ternary_range_numerator_degree, 202_749);
+            assert!(
+                maximum_ternary_range_numerator_degree < relation.opening_degree_bound_exclusive()
+            );
+            assert!(
+                context.quotient_component_degree_bound_exclusive
+                    < relation.opening_degree_bound_exclusive()
             );
             let telescoping_masks = relation
                 .ordered_masks()
@@ -1246,6 +1258,26 @@ mod tests {
                     .iter()
                     .filter(|column| matches!(column.origin(), RelationColumnOrigin::Prover))
                     .count(),
+                expected_proof_created_column_count
+            );
+            assert_eq!(
+                relation.ordered_constraint_count(),
+                expected_constraint_count
+            );
+            let proof_created_trees = relation
+                .ordered_trees()
+                .iter()
+                .filter_map(|tree| match tree {
+                    RelationTreeDescriptor::ProofCreated {
+                        ordered_column_ordinals,
+                        ..
+                    } => Some(ordered_column_ordinals),
+                    RelationTreeDescriptor::BoundPublic { .. } => None,
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(proof_created_trees.len(), 1);
+            assert_eq!(
+                proof_created_trees[0].len(),
                 expected_proof_created_column_count
             );
             assert_eq!(

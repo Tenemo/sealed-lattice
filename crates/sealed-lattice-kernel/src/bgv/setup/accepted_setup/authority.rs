@@ -1,5 +1,6 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
+    mem::size_of,
     sync::{Arc, Mutex, MutexGuard, OnceLock},
 };
 
@@ -9,8 +10,10 @@ use crate::{
         parameters::{DATA_PRIMES, POLYNOMIAL_DEGREE},
         proof_suite::{
             AuthenticatedCompactCommittedMaterialSource, CommittedMaterialContext,
-            CommittedMaterialRole, CompactCommittedMaterialSource, SelectedEvaluatorEntryKind,
+            CommittedMaterialRole, CommittedMaterialSharedAllocationMemoryAccounting,
+            CompactCommittedMaterialSource, SelectedEvaluatorEntryKind,
             SelectedEvaluatorEntryPosition, VerifiedEvaluatorKeyStore,
+            authenticated_committed_material_shared_allocation_byte_lengths,
             selected_committed_material_profile,
         },
         setup::{
@@ -184,6 +187,85 @@ pub(crate) struct VerifiedAcceptedSetupParticipantTargetReleaseLease {
     ordered_limbs: Box<[VerifiedAcceptedSetupParticipantTargetReleaseLeaseLimb]>,
 }
 
+pub(crate) struct VerifiedAcceptedSetupParticipantTargetReleaseLeaseMemoryAccounting {
+    unique_owned_heap_byte_length: u64,
+    shared_allocations: Box<[CommittedMaterialSharedAllocationMemoryAccounting]>,
+}
+
+/// Owner-derived allocation lengths for a target-release lease before live
+/// Arc identities exist. Selected-suite resource planning uses this same
+/// layout contract as the live lease accounting below.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct AcceptedSetupParticipantTargetReleaseLeaseAllocationByteLengths {
+    unique_owned_heap_byte_length: u64,
+    shared_allocation_byte_length: u64,
+}
+
+impl AcceptedSetupParticipantTargetReleaseLeaseAllocationByteLengths {
+    pub(crate) const fn unique_owned_heap_byte_length(self) -> u64 {
+        self.unique_owned_heap_byte_length
+    }
+
+    pub(crate) const fn shared_allocation_byte_length(self) -> u64 {
+        self.shared_allocation_byte_length
+    }
+
+    pub(crate) fn total(self) -> CanonicalResult<u64> {
+        self.unique_owned_heap_byte_length
+            .checked_add(self.shared_allocation_byte_length)
+            .ok_or_else(authority_binding_error)
+    }
+}
+
+fn target_release_lease_unique_owned_heap_byte_length(limb_count: usize) -> CanonicalResult<u64> {
+    limb_count
+        .checked_mul(size_of::<
+            VerifiedAcceptedSetupParticipantTargetReleaseLeaseLimb,
+        >())
+        .and_then(|length| u64::try_from(length).ok())
+        .ok_or_else(authority_binding_error)
+}
+
+pub(crate) fn accepted_setup_participant_target_release_lease_allocation_byte_lengths(
+    limb_count: usize,
+    canonical_coefficient_count: usize,
+) -> CanonicalResult<AcceptedSetupParticipantTargetReleaseLeaseAllocationByteLengths> {
+    if limb_count == 0 || canonical_coefficient_count == 0 {
+        return Err(authority_binding_error());
+    }
+    let shared_source_byte_length =
+        authenticated_committed_material_shared_allocation_byte_lengths(
+            canonical_coefficient_count,
+        )
+        .map_err(|_| authority_binding_error())?
+        .total()
+        .map_err(|_| authority_binding_error())?;
+    let shared_allocation_byte_length = u64::try_from(limb_count)
+        .ok()
+        .and_then(|count| count.checked_mul(shared_source_byte_length))
+        .ok_or_else(authority_binding_error)?;
+    Ok(
+        AcceptedSetupParticipantTargetReleaseLeaseAllocationByteLengths {
+            unique_owned_heap_byte_length: target_release_lease_unique_owned_heap_byte_length(
+                limb_count,
+            )?,
+            shared_allocation_byte_length,
+        },
+    )
+}
+
+impl VerifiedAcceptedSetupParticipantTargetReleaseLeaseMemoryAccounting {
+    pub(crate) const fn unique_owned_heap_byte_length(&self) -> u64 {
+        self.unique_owned_heap_byte_length
+    }
+
+    pub(crate) fn shared_allocations(
+        &self,
+    ) -> &[CommittedMaterialSharedAllocationMemoryAccounting] {
+        &self.shared_allocations
+    }
+}
+
 struct VerifiedAcceptedSetupParticipantTargetReleaseLeaseLimb {
     data_modulus_index: u16,
     modulus: u64,
@@ -201,6 +283,50 @@ impl VerifiedAcceptedSetupParticipantTargetReleaseLease {
 
     pub(crate) fn limb_count(&self) -> usize {
         self.ordered_limbs.len()
+    }
+
+    pub(crate) fn memory_accounting(
+        &self,
+    ) -> CanonicalResult<VerifiedAcceptedSetupParticipantTargetReleaseLeaseMemoryAccounting> {
+        let unique_owned_heap_byte_length =
+            target_release_lease_unique_owned_heap_byte_length(self.ordered_limbs.len())?;
+        let mut shared_allocation_byte_lengths = BTreeMap::<usize, u64>::new();
+        for limb in &self.ordered_limbs {
+            let memory = limb
+                .committed_share
+                .shared_memory_accounting()
+                .map_err(|_| authority_binding_error())?;
+            for allocation in [memory.compact_source(), memory.canonical_message()] {
+                match shared_allocation_byte_lengths.get(&allocation.owner_identifier()) {
+                    Some(byte_length) if *byte_length != allocation.retained_byte_length() => {
+                        return Err(authority_binding_error());
+                    }
+                    Some(_) => {}
+                    None => {
+                        shared_allocation_byte_lengths.insert(
+                            allocation.owner_identifier(),
+                            allocation.retained_byte_length(),
+                        );
+                    }
+                }
+            }
+        }
+        let shared_allocations = shared_allocation_byte_lengths
+            .into_iter()
+            .map(|(owner_identifier, retained_byte_length)| {
+                CommittedMaterialSharedAllocationMemoryAccounting::new(
+                    owner_identifier,
+                    retained_byte_length,
+                )
+            })
+            .collect::<Vec<_>>()
+            .into_boxed_slice();
+        Ok(
+            VerifiedAcceptedSetupParticipantTargetReleaseLeaseMemoryAccounting {
+                unique_owned_heap_byte_length,
+                shared_allocations,
+            },
+        )
     }
 
     pub(crate) fn with_limb<Output>(

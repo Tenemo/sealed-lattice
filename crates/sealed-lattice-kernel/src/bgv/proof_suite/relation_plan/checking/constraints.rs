@@ -1,7 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use num_bigint::BigInt;
-use num_traits::Zero;
 
 use crate::foundation::ProofApplicationSlotCeilings;
 
@@ -73,14 +72,25 @@ impl RelationPlanChecker<'_> {
                 _ => {}
             }
             for ordinal in tree.ordered_column_ordinals() {
-                if *ordinal as usize >= variant.ordered_columns.len()
+                let column = variant
+                    .ordered_columns
+                    .get(*ordinal as usize)
+                    .ok_or(RelationPlanError::InvalidRoot)?;
+                if matches!(column.origin, RelationColumnOrigin::VerifierSequence { .. })
                     || !owned_columns.insert(*ordinal)
                 {
                     return Err(RelationPlanError::InvalidRoot);
                 }
             }
         }
-        if owned_columns.len() != variant.ordered_columns.len() {
+        let tree_owned_column_count = variant
+            .ordered_columns
+            .iter()
+            .filter(|column| {
+                !matches!(column.origin, RelationColumnOrigin::VerifierSequence { .. })
+            })
+            .count();
+        if owned_columns.len() != tree_owned_column_count {
             return Err(RelationPlanError::MissingRoot);
         }
         Ok(())
@@ -96,6 +106,13 @@ impl RelationPlanChecker<'_> {
         }
         let mut roles = BTreeSet::new();
         let mut checked_zeroifiers = Vec::<Vec<RelationExpressionInstruction>>::new();
+        let quotient_decomposition_stride = variant.quotient_decomposition_stride(self.context)?;
+        if quotient_decomposition_stride > self.context.quotient_component_degree_bound_exclusive {
+            return Err(RelationPlanError::DegreeBoundExceeded);
+        }
+        let quotient_coefficient_capacity = quotient_decomposition_stride
+            .checked_mul(u64::from(self.context.quotient_component_count))
+            .ok_or(RelationPlanError::DegreeBoundExceeded)?;
         for constraint in &variant.ordered_constraints {
             if !roles.insert((
                 constraint.constraint_role,
@@ -109,7 +126,7 @@ impl RelationPlanChecker<'_> {
                 self.context,
                 false,
             )?;
-            if numerator.degree >= variant.opening_degree_bound_exclusive {
+            if numerator.degree >= variant.evaluation_domain_size {
                 return Err(RelationPlanError::DegreeBoundExceeded);
             }
             let zeroifier = check_expression(
@@ -120,6 +137,13 @@ impl RelationPlanChecker<'_> {
             )?;
             if zeroifier.degree == 0 && zeroifier.constant_value == Some(0) {
                 return Err(RelationPlanError::InvalidZeroifier);
+            }
+            let quotient_coefficient_count = numerator
+                .degree
+                .checked_sub(zeroifier.degree)
+                .map_or(1, |quotient_degree| quotient_degree + 1);
+            if quotient_coefficient_count > quotient_coefficient_capacity {
+                return Err(RelationPlanError::DegreeBoundExceeded);
             }
             if !checked_zeroifiers
                 .iter()

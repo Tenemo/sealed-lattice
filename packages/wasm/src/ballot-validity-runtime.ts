@@ -23,21 +23,17 @@ import {
     openClosedWorkerCommonProofVerificationFamilyAdapter,
     releaseClosedWorkerCommonProofGenerationFamilyAdapter,
     releaseClosedWorkerCommonProofVerificationFamilyAdapter,
-    runClosedWorkerCommonProofGenerationFamilyAdapterRetainingGeneratedCapability,
+    runClosedWorkerCommonProofGenerationFamilyAdapterWithExecutionOpener,
     runClosedWorkerCommonProofVerificationFamilyAdapter,
     type AuthenticatedCommonProofInputStore,
     type ClosedWorkerCommonProofGenerationFamilyAdapter,
     type ClosedWorkerCommonProofVerificationFamilyAdapter,
     type ClosedWorkerGeneratedCommonProofCapability,
     type CommonProofCanonicalOutputStore,
-    type CommonProofExternalMemoryTransactionExecutor,
-    type CommonProofGenerationWorkerOptions,
+    type CommonProofGenerationExecutionOpener,
     type CommonProofVerificationWorkerOptions,
 } from './common-proof-worker-runtime/runtime.js';
-import {
-    deriveGeneratedCommonProofDescriptor,
-    trackCanonicalCommonProofOutputChunks,
-} from './generated-common-proof-output-runtime.js';
+import { deriveGeneratedCommonProofDescriptor } from './generated-common-proof-output-runtime.js';
 import { resolveCommonProofKernelContext } from './transcript-core-bridge/common-proof-kernel-context.js';
 import type { TranscriptCoreKernelCommandRuntime } from './transcript-core-bridge/kernel-runtime.js';
 import type { TranscriptCoreKernel } from './transcript-core-bridge/kernel-types.js';
@@ -810,11 +806,9 @@ export const generateBallotValidityInClosedWorker = async (input: {
     checkpointLineageIdentifier: Uint8Array;
     ciphertextStore: CommonProofCanonicalOutputStore;
     encryptionAttemptIdentifier: Uint8Array;
-    externalMemory: CommonProofExternalMemoryTransactionExecutor;
     generationMode: BallotValidityGenerationMode;
     kernel: TranscriptCoreKernel;
-    options?: CommonProofGenerationWorkerOptions;
-    outputStore: CommonProofCanonicalOutputStore;
+    openProofGenerationExecution: CommonProofGenerationExecutionOpener;
     producerSequence: bigint;
     proofAttemptNonce: Uint8Array;
     resolveVerifiedBallotPackage(input: {
@@ -859,10 +853,7 @@ export const generateBallotValidityInClosedWorker = async (input: {
             'The action-randomness session belongs to another WASM worker.',
         );
     }
-    if (
-        (input.generationMode === 'resumed') !==
-        (input.options?.resume !== undefined)
-    ) {
+    if (input.generationMode !== 'fresh' && input.generationMode !== 'resumed') {
         throw new CanonicalStreamRefusalError('wrongContext');
     }
     const producerSequence = requireUnsigned64(input.producerSequence);
@@ -984,20 +975,16 @@ export const generateBallotValidityInClosedWorker = async (input: {
 
         const adapterForRun = familyAdapter;
         familyAdapter = undefined;
-        const trackedOutput = trackCanonicalCommonProofOutputChunks(
-            input.outputStore,
-        );
-        generatedCapability =
-            await runClosedWorkerCommonProofGenerationFamilyAdapterRetainingGeneratedCapability(
+        const execution =
+            await runClosedWorkerCommonProofGenerationFamilyAdapterWithExecutionOpener(
                 adapterForRun,
-                input.externalMemory,
-                trackedOutput.outputStore,
-                input.options,
+                input.openProofGenerationExecution,
             );
+        generatedCapability = execution.generatedCapability;
         proofDescriptorBytes = await deriveGeneratedCommonProofDescriptor({
             kernel: input.kernel,
-            outputChunkByteLengths: trackedOutput.outputChunkByteLengths,
-            outputStore: input.outputStore,
+            outputChunkByteLengths: execution.outputChunkByteLengths,
+            outputStore: execution.outputStore,
             proofFamilyLabel: 'ballot-validity',
             streamDomain: canonicalStreamDomains.ballotValidityProof,
         });
@@ -1008,17 +995,17 @@ export const generateBallotValidityInClosedWorker = async (input: {
             kernel,
             memoryBoundary,
             publicKernel: input.kernel,
-            signal: input.options?.signal,
+            signal: execution.options?.signal,
             statusBoundary,
         });
         ciphertextDescriptorBytes =
             ciphertextTransport.ciphertextDescriptorBytes;
-        throwIfAborted(input.options?.signal);
+        throwIfAborted(execution.options?.signal);
         const ballotPackageObject = await input.resolveVerifiedBallotPackage({
             ciphertextDescriptorBytes: ciphertextDescriptorBytes.slice(),
             proofDescriptorBytes: proofDescriptorBytes.slice(),
         });
-        throwIfAborted(input.options?.signal);
+        throwIfAborted(execution.options?.signal);
         const boardAuthorization =
             resolveOrderedVerifiedBoardObjectAuthorization({
                 context,
@@ -1060,11 +1047,11 @@ export const generateBallotValidityInClosedWorker = async (input: {
             ciphertextChunkByteLengths:
                 ciphertextTransport.ciphertextChunkByteLengths,
             proofByteLength: totalChunkByteLength(
-                trackedOutput.outputChunkByteLengths,
+                execution.outputChunkByteLengths,
                 'The ballot-validity proof',
             ),
             proofChunkByteLengths: Object.freeze([
-                ...trackedOutput.outputChunkByteLengths,
+                ...execution.outputChunkByteLengths,
             ]),
         });
     } catch (error) {

@@ -38,7 +38,7 @@ pub(crate) fn describe_collective_bgv_setup_parameters_from_request(
 mod tests {
     use crate::bgv::{
         base_conversion::convert_plaintext_lifted_basis,
-        encoding::encode_batch_plaintext_slots,
+        encoding::encode_batch_plaintext_lanes,
         parameters::BgvBasisKind,
         serialization::{BgvObjectKind, ciphertext_root, plaintext_root, serialize_bgv_object},
     };
@@ -46,15 +46,15 @@ mod tests {
     #[test]
     fn canonical_bgv_serialization_produces_stable_roots() {
         let encoded =
-            encode_batch_plaintext_slots(&[0, 1, 65_536, 17, 99], 0).expect("encoded plaintext");
+            encode_batch_plaintext_lanes(&[0, 1, 256, 17, 99], 0).expect("encoded plaintext");
         let encoded_bytes = serialize_bgv_object(
             BgvObjectKind::Plaintext,
             std::slice::from_ref(&encoded.polynomial),
         )
         .expect("encoded plaintext canonical bytes");
 
-        let left = encode_batch_plaintext_slots(&[1, 2, 3], 0).expect("left component");
-        let right = encode_batch_plaintext_slots(&[4, 5, 6], 0).expect("right component");
+        let left = encode_batch_plaintext_lanes(&[1, 2, 3], 0).expect("left component");
+        let right = encode_batch_plaintext_lanes(&[4, 5, 6], 0).expect("right component");
         let ciphertext_bytes = serialize_bgv_object(
             BgvObjectKind::Ciphertext,
             &[left.polynomial, right.polynomial],
@@ -62,7 +62,7 @@ mod tests {
         .expect("canonical ciphertext bytes");
         let encoded_ciphertext_root = ciphertext_root(&ciphertext_bytes);
 
-        let source = encode_batch_plaintext_slots(&[7, 8, 9, 65_536], 0).expect("source plaintext");
+        let source = encode_batch_plaintext_lanes(&[7, 8, 9, 256], 0).expect("source plaintext");
         let converted =
             convert_plaintext_lifted_basis(&source.polynomial, BgvBasisKind::Extended, 1)
                 .expect("base conversion");

@@ -1,7 +1,9 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    mem::size_of,
+};
 
-use num_bigint::{BigInt, BigUint};
-use num_traits::{One, Zero};
+use num_bigint::BigUint;
 
 use crate::bgv::setup::{SETUP_COMMITMENT_MODULE_RANK, SETUP_COMMITMENT_MODULUS_LIMB_INDICES};
 
@@ -523,6 +525,13 @@ impl AnchorOpeningWitness {
     pub(super) fn hiding_errors(&self) -> &[ShiftedSmallVector] {
         &self.hiding_errors
     }
+
+    pub(super) fn retained_heap_byte_length(&self) -> Result<u64, RelationPlanError> {
+        checked_retained_allocation_sum([
+            retained_vector_allocation_byte_length(&self.hiding_secrets),
+            retained_vector_allocation_byte_length(&self.hiding_errors),
+        ])
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -533,6 +542,10 @@ pub(super) struct AnchorQuotientWitness {
 impl AnchorQuotientWitness {
     pub(super) fn rows(&self) -> &[[u32; 2]] {
         &self.rows
+    }
+
+    pub(super) fn retained_heap_byte_length(&self) -> Result<u64, RelationPlanError> {
+        retained_vector_allocation_byte_length(&self.rows)
     }
 }
 
@@ -628,6 +641,97 @@ pub(super) struct TargetBoundedUnsignedVector {
 pub(super) struct TargetCenteredVector {
     pub(super) value: ShiftedSmallVector,
     pub(super) trits_by_half: [Vec<u32>; 2],
+}
+
+fn retained_vector_allocation_byte_length<Value>(
+    values: &Vec<Value>,
+) -> Result<u64, RelationPlanError> {
+    u64::try_from(values.capacity())
+        .ok()
+        .and_then(|count| count.checked_mul(size_of::<Value>() as u64))
+        .ok_or(RelationPlanError::CountOverflow)
+}
+
+fn checked_retained_allocation_sum(
+    byte_lengths: impl IntoIterator<Item = Result<u64, RelationPlanError>>,
+) -> Result<u64, RelationPlanError> {
+    byte_lengths
+        .into_iter()
+        .try_fold(0_u64, |total, byte_length| {
+            total
+                .checked_add(byte_length?)
+                .ok_or(RelationPlanError::CountOverflow)
+        })
+}
+
+impl BoundedMaterialDigitWitnessLayout {
+    fn retained_heap_byte_length(&self) -> Result<u64, RelationPlanError> {
+        retained_vector_allocation_byte_length(&self.trit_column_ordinals)
+    }
+}
+
+impl UpperBoundComparatorWitnessLayout {
+    fn retained_heap_byte_length(&self) -> Result<u64, RelationPlanError> {
+        checked_retained_allocation_sum(
+            [
+                retained_vector_allocation_byte_length(&self.difference_digits),
+                retained_vector_allocation_byte_length(&self.borrow_column_ordinals),
+            ]
+            .into_iter()
+            .chain(
+                self.difference_digits
+                    .iter()
+                    .map(BoundedMaterialDigitWitnessLayout::retained_heap_byte_length),
+            ),
+        )
+    }
+}
+
+impl TargetCommittedMaterialVector {
+    pub(super) fn retained_heap_byte_length(&self) -> Result<u64, RelationPlanError> {
+        checked_retained_allocation_sum(
+            self.trits_by_half
+                .iter()
+                .map(retained_vector_allocation_byte_length)
+                .chain(std::iter::once(retained_vector_allocation_byte_length(
+                    &self.upper_bound_comparators,
+                )))
+                .chain(
+                    self.upper_bound_comparators
+                        .iter()
+                        .map(UpperBoundComparatorWitnessLayout::retained_heap_byte_length),
+                ),
+        )
+    }
+}
+
+impl TargetBoundedUnsignedVector {
+    pub(super) fn retained_heap_byte_length(&self) -> Result<u64, RelationPlanError> {
+        checked_retained_allocation_sum(
+            self.digit_columns_by_half
+                .iter()
+                .chain(&self.trits_by_half)
+                .map(retained_vector_allocation_byte_length)
+                .chain(std::iter::once(retained_vector_allocation_byte_length(
+                    &self.upper_bound_comparators,
+                )))
+                .chain(
+                    self.upper_bound_comparators
+                        .iter()
+                        .map(UpperBoundComparatorWitnessLayout::retained_heap_byte_length),
+                ),
+        )
+    }
+}
+
+impl TargetCenteredVector {
+    pub(super) fn retained_heap_byte_length(&self) -> Result<u64, RelationPlanError> {
+        checked_retained_allocation_sum(
+            self.trits_by_half
+                .iter()
+                .map(retained_vector_allocation_byte_length),
+        )
+    }
 }
 
 #[derive(Default)]

@@ -15,22 +15,26 @@ pub(in crate::bgv) use accepted_setup::release_verified_accepted_setup_authority
 pub(in crate::bgv) use accepted_setup::retain_evaluator_execution_authority_for_tests;
 pub(in crate::bgv) use accepted_setup::{
     BrowserOwnedAggregateThresholdShareLimb, CanonicalAcceptedSetupPackage,
-    CanonicalPackageStreamKind, SetupGaloisGenerationPreparationError,
-    SetupGeneratedCommittedMaterial, SetupGeneratedGaloisEntry,
-    SetupGeneratedGaloisSourceAuthority, SetupGeneratedGaloisSourceComponent,
-    SetupGeneratedKeySwitchComponent, SetupGeneratedRelinearizationAggregateSourceAuthority,
+    CanonicalPackageStreamKind, SelectedSetupGenerationLifecycleState,
+    SetupGaloisGenerationPreparationError, SetupGeneratedCommittedMaterial,
+    SetupGeneratedGaloisEntry, SetupGeneratedGaloisSourceAuthority,
+    SetupGeneratedGaloisSourceComponent, SetupGeneratedKeySwitchComponent,
+    SetupGeneratedRelinearizationAggregateSourceAuthority,
     SetupGeneratedRelinearizationComponentSource,
     SetupGeneratedRelinearizationRoundOneSourceAuthority, SetupGenerationAnchorOpening,
     SetupGenerationAuthorityHandle, SetupGenerationGaloisApplication,
     SetupGenerationGaloisBatchSource, SetupGenerationGaloisPreparationSource,
     SetupGenerationKeyRelationApplication, SetupGenerationKeyRelationPreparationSource,
     SetupGenerationKeyRelationSource, SetupGenerationPublicKeyShareSourceHandle,
-    SetupGenerationRecipientPayloadSourceHandle, SetupGenerationRelinearizationRoundOneApplication,
+    SetupGenerationRecipientPayloadSourceHandle,
+    SetupGenerationRelinearizationAggregateDescriptorDimensions,
+    SetupGenerationRelinearizationRoundOneApplication,
     SetupGenerationRelinearizationRoundOnePreparationSource,
     SetupGenerationRelinearizationRoundOneSource, SetupGenerationRelinearizationRoundTwoActivation,
     SetupGenerationRelinearizationRoundTwoApplication,
     SetupGenerationRelinearizationRoundTwoPreparationSource,
-    SetupGenerationRelinearizationRoundTwoSource, SetupGenerationVssApplication,
+    SetupGenerationRelinearizationRoundTwoSource,
+    SetupGenerationRetainedStreamDescriptorDimensions, SetupGenerationVssApplication,
     SetupGenerationVssPreparationSource, SetupKeyRelationGenerationPreparationError,
     SetupKeyRelationProofFamily, SetupRelinearizationAggregateConstruction,
     SetupRelinearizationAggregateSourceReadRequest, SetupRelinearizationGenerationPreparationError,
@@ -40,6 +44,7 @@ pub(in crate::bgv) use accepted_setup::{
     VerifiedEvaluatorCommonComponentAuthority, VerifiedEvaluatorExecutionAuthority,
     absorb_setup_generation_relinearization_round_two_activation_pair,
     accepted_package_statement_source,
+    accepted_setup_participant_target_release_lease_allocation_byte_lengths,
     add_generated_proof_source_to_accepted_setup_package_builder,
     begin_setup_generation_relinearization_round_two_activation,
     cancel_collective_public_key_verification_terminal_source_reservation,
@@ -76,14 +81,16 @@ pub(in crate::bgv) use accepted_setup::{
     retain_relinearization_round_one_aggregate_verification_terminal_source,
     retain_relinearization_round_one_verification_terminal_source,
     retain_relinearization_round_two_verification_terminal_source,
+    selected_setup_generation_relinearization_round_two_activation_memory_accounting,
+    selected_setup_generation_retained_memory_accounting,
     setup_generation_public_key_share_body_byte_length,
     setup_generation_public_key_share_source_byte_length,
     setup_generation_recipient_vss_payload_byte_length,
     setup_generation_recipient_vss_payload_source_byte_length,
     setup_generation_recipient_vss_payload_source_recipient_roster_position,
-    take_prepackage_evaluator_statement_source, take_prepackage_galois_statement_source,
-    take_verified_evaluator_execution_authority, with_accepted_setup_verification_sources,
-    with_completed_prepackage_evaluator_source_catalog,
+    setup_generation_retained_memory_accounting, take_prepackage_evaluator_statement_source,
+    take_prepackage_galois_statement_source, take_verified_evaluator_execution_authority,
+    with_accepted_setup_verification_sources, with_completed_prepackage_evaluator_source_catalog,
     with_prepackage_evaluator_generation_sources, with_prepackage_generated_galois_source,
     with_prepackage_generated_relinearization_aggregate,
     with_prepackage_generated_relinearization_round_one_sources,
@@ -107,17 +114,18 @@ pub(crate) use accepted_setup::{
 };
 #[cfg(test)]
 pub(crate) use commitment::LatticeAnchorCommitment;
-pub(in crate::bgv) use commitment::{
-    setup_commitment_matrix_ntt_cache_coefficient_payload_byte_length,
-    setup_commitment_matrix_polynomial,
-};
 pub(crate) use commitment::{
     SETUP_COMMITMENT_HIDING_ERROR_WIDTH, SETUP_COMMITMENT_HIDING_SECRET_WIDTH,
     SETUP_COMMITMENT_MODULE_RANK, SETUP_COMMITMENT_MODULUS_LIMB_INDICES,
     parse_lattice_anchor_commitment_canonical_bytes,
+    selected_lattice_anchor_commitment_canonical_byte_length,
 };
 pub(crate) use commitment::{
     compute_lattice_anchor_commitment, lattice_anchor_commitment_canonical_bytes,
+};
+pub(in crate::bgv) use commitment::{
+    setup_commitment_matrix_ntt_cache_coefficient_payload_byte_length,
+    setup_commitment_matrix_polynomial,
 };
 pub(in crate::bgv) use sampling::{
     sample_collective_public_key_common_reference_limb, sample_galois_common_reference_limb,

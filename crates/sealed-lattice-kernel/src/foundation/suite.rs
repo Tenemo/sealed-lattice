@@ -1257,7 +1257,7 @@ mod tests {
     }
 
     #[test]
-    fn lattice_commitment_reference_accepts_only_the_selected_version_three_artifact() {
+    fn lattice_commitment_reference_derives_from_the_selected_artifact() {
         let artifact_bytes =
             crate::foundation::suite_artifacts::LatticeCommitmentProfile::selected()
                 .and_then(|profile| profile.encode())
@@ -1272,24 +1272,6 @@ mod tests {
             reference.artifact_kind(),
             ArtifactKind::LatticeCommitmentProfile
         );
-
-        for retired_version in [1_u16, 2] {
-            let mut retired =
-                CanonicalTuple::decode(&artifact_bytes, &CanonicalDecodeLimits::default())
-                    .expect("selected lattice commitment tuple");
-            retired.schema_version = retired_version;
-            let retired_bytes = retired.encode().expect("retired artifact bytes");
-            assert_eq!(
-                ArtifactReference::from_canonical_artifact_bytes(
-                    ArtifactKind::LatticeCommitmentProfile,
-                    &retired_bytes,
-                    &CanonicalDecodeLimits::default(),
-                )
-                .expect_err("retired lattice commitment artifact must refuse")
-                .refusal_reason,
-                RefusalReason::UnsupportedVersionOrSuite
-            );
-        }
     }
 
     #[test]

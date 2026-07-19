@@ -13,8 +13,8 @@ use crate::{
 };
 
 use super::super::{
-    OpenedFriLayerPair, ProofBaseFieldElement, ProofChallengeExtensionElement,
-    ProofEvaluationDomain, ValidatedRelationPlanArtifact, VerifiedRelationColumnEvaluator,
+    ProofBaseFieldElement, ProofChallengeExtensionElement, ProofEvaluationDomain,
+    ValidatedRelationPlanArtifact, VerifiedRelationColumnEvaluator,
     VerifiedRelationColumnEvaluatorMemoryAccounting,
 };
 use super::{
@@ -28,15 +28,9 @@ const COLLECTIVE_PUBLIC_KEY_COMMON_REFERENCE_PROTOCOL_SOURCE_KIND: u16 = 6;
 const RELINEARIZATION_COMMON_REFERENCE_PROTOCOL_SOURCE_KIND: u16 = 7;
 const GALOIS_COMMON_REFERENCE_PROTOCOL_SOURCE_KIND: u16 = 8;
 
-struct CachedEvaluationDomainColumn {
-    domain: ProofEvaluationDomain,
-    evaluations: Vec<ProofBaseFieldElement>,
-}
-
 struct CachedVerifierColumn {
     column_ordinal: u32,
     coefficients: Vec<ProofBaseFieldElement>,
-    evaluation_domain_column: Option<CachedEvaluationDomainColumn>,
 }
 
 /// Rebuilds key-relation verifier columns only from the accepted public
@@ -52,7 +46,7 @@ pub(crate) struct VerifiedKeyRelationColumnEvaluator {
 }
 
 impl VerifiedKeyRelationColumnEvaluator {
-    pub(crate) fn from_verified_public_randomness(
+    pub(in crate::bgv) fn from_verified_public_randomness(
         verified_public_randomness: &VerifiedPublicRandomness,
         validated_relation_plan: &ValidatedRelationPlanArtifact,
         selected_relation_plan_variant: &RelationPlanVariant,
@@ -163,7 +157,6 @@ impl VerifiedKeyRelationColumnEvaluator {
         self.cached_column = Some(CachedVerifierColumn {
             column_ordinal,
             coefficients: trace_rows,
-            evaluation_domain_column: None,
         });
         Ok(())
     }
@@ -334,14 +327,7 @@ impl VerifiedRelationColumnEvaluator for VerifiedKeyRelationColumnEvaluator {
             self.trace_domain.size(),
             core::mem::size_of::<ProofBaseFieldElement>(),
         )?;
-        let evaluation_cache_byte_length = checked_payload(
-            usize::try_from(self.relation_plan_variant.evaluation_domain_size())
-                .map_err(|_| super::super::CommonProofVerifierError::InvalidTreeLayout)?,
-            core::mem::size_of::<ProofBaseFieldElement>(),
-        )?;
-        let maximum_cached_column_resident_byte_length = coefficient_cache_byte_length
-            .checked_add(evaluation_cache_byte_length)
-            .ok_or(super::super::CommonProofVerifierError::InvalidTreeLayout)?;
+        let maximum_cached_column_resident_byte_length = coefficient_cache_byte_length;
         // Changing columns retains the previous cache while the new verifier
         // sequence and its trace-domain projection are derived.
         let maximum_evaluation_transient_byte_length =
@@ -369,52 +355,6 @@ impl VerifiedRelationColumnEvaluator for VerifiedKeyRelationColumnEvaluator {
                     .multiply(point)
                     .add(ProofChallengeExtensionElement::from_base(*coefficient))
             },
-        ))
-    }
-
-    fn evaluate_at_evaluation_domain_pair(
-        &mut self,
-        column_ordinal: u32,
-        evaluation_domain: ProofEvaluationDomain,
-        query_representative: u64,
-    ) -> Option<OpenedFriLayerPair> {
-        let query_representative = usize::try_from(query_representative).ok()?;
-        let half_domain_size = evaluation_domain.size().checked_div(2)?;
-        if query_representative >= half_domain_size {
-            return None;
-        }
-        self.ensure_cached_column(column_ordinal).ok()?;
-        let needs_evaluation = self
-            .cached_column
-            .as_ref()?
-            .evaluation_domain_column
-            .as_ref()
-            .is_none_or(|cached| cached.domain != evaluation_domain);
-        if needs_evaluation {
-            let mut evaluations = self.cached_column.as_ref()?.coefficients.clone();
-            evaluation_domain
-                .evaluate_base_polynomial_in_place(&mut evaluations)
-                .ok()?;
-            self.cached_column.as_mut()?.evaluation_domain_column =
-                Some(CachedEvaluationDomainColumn {
-                    domain: evaluation_domain,
-                    evaluations,
-                });
-        }
-        let cached = self
-            .cached_column
-            .as_ref()?
-            .evaluation_domain_column
-            .as_ref()?;
-        Some(OpenedFriLayerPair::new(
-            ProofChallengeExtensionElement::from_base(
-                *cached.evaluations.get(query_representative)?,
-            ),
-            ProofChallengeExtensionElement::from_base(
-                *cached
-                    .evaluations
-                    .get(query_representative.checked_add(half_domain_size)?)?,
-            ),
         ))
     }
 }

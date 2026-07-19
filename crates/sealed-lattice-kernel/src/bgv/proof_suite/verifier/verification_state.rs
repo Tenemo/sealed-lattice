@@ -1,4 +1,4 @@
-use super::super::canonical_common_proof_byte_length_ceiling;
+use super::super::{DecodedProofPhasePairLeaf, canonical_common_proof_byte_length_ceiling};
 use super::{
     CanonicalItem, CanonicalTuple, CommonProofPrivacyMode, CommonProofQueryOpeningAbsorber,
     CommonProofTranscript, CommonProofVerifierError, CompiledRelationPlan, DecodedProofBodyPrefix,
@@ -14,7 +14,7 @@ use super::{
     decode_proof_query_section_header_at, decode_proof_query_tree_at, derive_relation_tree_inputs,
     proof_body_prefix_byte_length, proof_query_tree_byte_length,
     validate_evaluator_auxiliary_root_linkage, verified_application_statement_hash,
-    verified_proof_header_hash, verify_statement_derived_deep_values,
+    verified_proof_header_hash, verify_deep_composition_with_verified_sequences,
 };
 
 /// Inputs that have already crossed their family-specific trust boundaries.
@@ -140,6 +140,29 @@ impl CommonProofVerificationResidentMemoryAccounting {
     pub(crate) const fn maximum_resident_byte_length(self) -> u64 {
         self.maximum_resident_byte_length
     }
+}
+
+fn checked_verifier_memory_add(left: u64, right: u64) -> Result<u64, CommonProofVerifierError> {
+    left.checked_add(right)
+        .ok_or(CommonProofVerifierError::InvalidTreeLayout)
+}
+
+fn checked_verifier_memory_multiply(
+    left: u64,
+    right: u64,
+) -> Result<u64, CommonProofVerifierError> {
+    left.checked_mul(right)
+        .ok_or(CommonProofVerifierError::InvalidTreeLayout)
+}
+
+fn verifier_vector_payload_byte_length<Value>(
+    count: usize,
+) -> Result<u64, CommonProofVerifierError> {
+    checked_verifier_memory_multiply(
+        u64::try_from(count).map_err(|_| CommonProofVerifierError::InvalidTreeLayout)?,
+        u64::try_from(core::mem::size_of::<Value>())
+            .map_err(|_| CommonProofVerifierError::InvalidTreeLayout)?,
+    )
 }
 
 pub(super) struct ProofBodyByteSource<'source, Source: ProofByteSource + ?Sized> {
@@ -297,6 +320,214 @@ impl CommonProofVerificationStateMachine {
             query_opening_absorber: None,
             workspace: None,
             verified_common_proof: None,
+        })
+    }
+
+    /// Derives the complete live-payload ceiling of the persistent verifier
+    /// from the state machine's checked relation, transcript schedule, and
+    /// tree catalog. The accounting is process local and is never serialized
+    /// into a proof or interpreted as a verification result.
+    pub(crate) fn resident_memory_accounting(
+        &self,
+    ) -> Result<CommonProofVerificationResidentMemoryAccounting, CommonProofVerifierError> {
+        let transcript_memory = self
+            .transcript_schedule
+            .live_payload_memory_accounting(self.application_statement_schema_identifier)
+            .map_err(|_| CommonProofVerifierError::InvalidTreeLayout)?;
+        let fixed_and_plan_resident_byte_length = [
+            u64::try_from(core::mem::size_of::<Self>())
+                .map_err(|_| CommonProofVerifierError::InvalidTreeLayout)?,
+            verifier_vector_payload_byte_length::<u8>(
+                self.canonical_application_statement_bytes.capacity(),
+            )?,
+            verifier_vector_payload_byte_length::<u8>(
+                self.canonical_proof_object_header_bytes.capacity(),
+            )?,
+            self.relation_context
+                .resident_owned_payload_byte_length()
+                .map_err(|_| CommonProofVerifierError::InvalidTreeLayout)?,
+            self.variant
+                .resident_owned_payload_byte_length()
+                .map_err(|_| CommonProofVerifierError::InvalidTreeLayout)?,
+            transcript_memory.schedule_catalog_byte_length(),
+            self.layout
+                .catalog()
+                .resident_owned_payload_byte_length()
+                .map_err(|_| CommonProofVerifierError::InvalidTreeLayout)?,
+        ]
+        .into_iter()
+        .try_fold(0_u64, checked_verifier_memory_add)?;
+
+        let catalog_entry_count = self.layout.catalog().entries().len();
+        let opening_claim_count = usize::try_from(self.transcript_schedule.opening_claim_count())
+            .map_err(|_| CommonProofVerifierError::InvalidTreeLayout)?;
+        let query_representative_count =
+            usize::try_from(self.transcript_schedule.unique_query_count())
+                .map_err(|_| CommonProofVerifierError::InvalidTreeLayout)?;
+        let fri_fold_count = usize::from(self.transcript_schedule.fri_fold_count());
+        let terminal_coefficient_count =
+            usize::try_from(self.transcript_schedule.terminal_coefficient_count())
+                .map_err(|_| CommonProofVerifierError::InvalidTreeLayout)?;
+        let workspace_payload_byte_length =
+            QueryVerificationWorkspace::maximum_resident_owned_payload_byte_length(
+                catalog_entry_count,
+                opening_claim_count,
+                query_representative_count,
+                fri_fold_count,
+                terminal_coefficient_count,
+            )
+            .ok_or(CommonProofVerifierError::InvalidTreeLayout)?;
+        let maximum_post_prefix_resident_byte_length = [
+            fixed_and_plan_resident_byte_length,
+            verifier_vector_payload_byte_length::<usize>(catalog_entry_count)?,
+            verifier_vector_payload_byte_length::<[u8; 64]>(catalog_entry_count)?,
+            verifier_vector_payload_byte_length::<u64>(query_representative_count)?,
+            transcript_memory.persistent_transcript_byte_length(),
+            workspace_payload_byte_length,
+        ]
+        .into_iter()
+        .try_fold(0_u64, checked_verifier_memory_add)?;
+
+        let proof_ceiling = canonical_common_proof_byte_length_ceiling(
+            self.canonical_proof_object_header_bytes.len(),
+            &self.layout,
+        )
+        .map_err(|_| CommonProofVerifierError::InvalidTreeLayout)?;
+        let maximum_decoding_transient_byte_length = proof_ceiling
+            .query_trees()
+            .iter()
+            .zip(self.layout.catalog().entries())
+            .try_fold(0_u64, |maximum, (tree, entry)| {
+                let opened_leaf_count = tree.opened_leaf_count_at_ceiling();
+                let frontier_node_count = tree.authentication_frontier_node_count_at_ceiling();
+                let row_width = entry
+                    .materialized_row_width()
+                    .map_err(|_| CommonProofVerifierError::InvalidTreeLayout)?;
+                let opened_leaf_value_payload = checked_verifier_memory_multiply(
+                    u64::try_from(opened_leaf_count)
+                        .map_err(|_| CommonProofVerifierError::InvalidTreeLayout)?,
+                    checked_verifier_memory_multiply(
+                        u64::try_from(row_width)
+                            .map_err(|_| CommonProofVerifierError::InvalidTreeLayout)?,
+                        u64::try_from(core::mem::size_of::<ProofTreeValue>() * 2)
+                            .map_err(|_| CommonProofVerifierError::InvalidTreeLayout)?,
+                    )?,
+                )?;
+                let decoded_opening_payload = [
+                    verifier_vector_payload_byte_length::<u64>(opened_leaf_count)?,
+                    verifier_vector_payload_byte_length::<DecodedProofPhasePairLeaf>(
+                        opened_leaf_count,
+                    )?,
+                    opened_leaf_value_payload,
+                    verifier_vector_payload_byte_length::<(u64, [u8; 64])>(opened_leaf_count)?,
+                    verifier_vector_payload_byte_length::<[u8; 64]>(frontier_node_count)?,
+                ]
+                .into_iter()
+                .try_fold(0_u64, checked_verifier_memory_add)?;
+
+                // Common-tree leaf validation temporarily owns one cloned
+                // typed phase pair and one exact canonical leaf while all
+                // previously decoded leaves remain live.
+                let common_leaf_validation_overlap = if entry.uses_common_merkle_context() {
+                    checked_verifier_memory_add(
+                        checked_verifier_memory_multiply(
+                            u64::try_from(row_width)
+                                .map_err(|_| CommonProofVerifierError::InvalidTreeLayout)?,
+                            u64::try_from(core::mem::size_of::<ProofTreeValue>() * 2)
+                                .map_err(|_| CommonProofVerifierError::InvalidTreeLayout)?,
+                        )?,
+                        u64::try_from(tree.canonical_leaf_byte_length())
+                            .map_err(|_| CommonProofVerifierError::InvalidTreeLayout)?,
+                    )?
+                } else {
+                    0
+                };
+
+                // Authentication retains the current and next digest maps,
+                // the processed-index set, and the current index vector.
+                // BTree allocator metadata is intentionally outside the live
+                // payload boundary used throughout this module.
+                let current_node_count = opened_leaf_count;
+                let next_node_count = current_node_count.div_ceil(2);
+                let authentication_payload = [
+                    verifier_vector_payload_byte_length::<(u64, [u8; 64])>(current_node_count)?,
+                    verifier_vector_payload_byte_length::<(u64, [u8; 64])>(next_node_count)?,
+                    verifier_vector_payload_byte_length::<u64>(current_node_count)?,
+                    verifier_vector_payload_byte_length::<u64>(current_node_count)?,
+                    if entry.uses_common_merkle_context() {
+                        verifier_vector_payload_byte_length::<u64>(current_node_count)?
+                    } else {
+                        0
+                    },
+                ]
+                .into_iter()
+                .try_fold(0_u64, checked_verifier_memory_add)?;
+                let tree_transient = checked_verifier_memory_add(
+                    decoded_opening_payload,
+                    common_leaf_validation_overlap.max(authentication_payload),
+                )?;
+                Ok::<u64, CommonProofVerifierError>(maximum.max(tree_transient))
+            })?;
+
+        let application_challenge_count = self
+            .transcript_schedule
+            .ordered_application_challenge_groups()
+            .iter()
+            .try_fold(0_usize, |count, group| {
+                count.checked_add(usize::from(group.coordinate_count()))
+            })
+            .ok_or(CommonProofVerifierError::InvalidTreeLayout)?;
+        let prefix_payload_byte_length = [
+            verifier_vector_payload_byte_length::<[u8; 64]>(catalog_entry_count)?,
+            verifier_vector_payload_byte_length::<super::ProofChallengeExtensionElement>(
+                opening_claim_count,
+            )?,
+            verifier_vector_payload_byte_length::<super::ProofChallengeExtensionElement>(
+                terminal_coefficient_count,
+            )?,
+        ]
+        .into_iter()
+        .try_fold(0_u64, checked_verifier_memory_add)?;
+        let prefix_construction_local_payload_byte_length = [
+            verifier_vector_payload_byte_length::<RelationApplicationChallengeAssignment>(
+                application_challenge_count,
+            )?,
+            verifier_vector_payload_byte_length::<super::ProofChallengeExtensionElement>(
+                usize::from(self.transcript_schedule.composition_challenge_count()),
+            )?,
+            verifier_vector_payload_byte_length::<super::ProofChallengeExtensionElement>(
+                usize::from(self.transcript_schedule.deep_point_count()),
+            )?,
+            verifier_vector_payload_byte_length::<super::ProofChallengeExtensionElement>(
+                self.variant.ordered_opening_points().len(),
+            )?,
+            verifier_vector_payload_byte_length::<super::ProofChallengeExtensionElement>(
+                opening_claim_count,
+            )?,
+            self.variant
+                .verifier_sequence_deep_resolution_payload_byte_length(&self.relation_context)
+                .map_err(CommonProofVerifierError::from)?,
+            verifier_vector_payload_byte_length::<u64>(query_representative_count)?,
+            transcript_memory.maximum_transient_byte_length(),
+        ]
+        .into_iter()
+        .try_fold(0_u64, checked_verifier_memory_add)?;
+        let prefix_construction_peak = [
+            maximum_post_prefix_resident_byte_length,
+            prefix_payload_byte_length,
+            prefix_construction_local_payload_byte_length,
+        ]
+        .into_iter()
+        .try_fold(0_u64, checked_verifier_memory_add)?;
+        let query_decoding_peak = checked_verifier_memory_add(
+            maximum_post_prefix_resident_byte_length,
+            maximum_decoding_transient_byte_length,
+        )?;
+        Ok(CommonProofVerificationResidentMemoryAccounting {
+            fixed_and_plan_resident_byte_length,
+            maximum_post_prefix_resident_byte_length,
+            maximum_decoding_transient_byte_length,
+            maximum_resident_byte_length: prefix_construction_peak.max(query_decoding_peak),
         })
     }
 
@@ -475,7 +706,6 @@ impl CommonProofVerificationStateMachine {
                             &self.variant,
                             self.layout.catalog(),
                             &self.sorted_query_representatives,
-                            evaluate_verified_column,
                         )?;
                 }
                 self.absorb_body_range(
@@ -612,18 +842,15 @@ impl CommonProofVerificationStateMachine {
         let opening_points = self
             .variant
             .derive_opening_points(&self.relation_context, &deep_points)?;
-        verify_statement_derived_deep_values(
+        verify_deep_composition_with_verified_sequences(
             &self.variant,
-            &opening_points,
-            prefix.deep_evaluations(),
-            evaluate_verified_column,
-        )?;
-        self.variant.verify_deep_composition(
             &self.relation_context,
             &application_challenges,
             &composition_challenges,
             &deep_points,
+            &opening_points,
             prefix.deep_evaluations(),
+            evaluate_verified_column,
         )?;
         transcript.absorb_deep_evaluations(prefix.deep_evaluations())?;
 

@@ -1,3 +1,5 @@
+use core::mem::size_of;
+
 use super::{
     SETUP_COMMITMENT_MODULUS_LIMB_INDICES, SETUP_COMMITMENT_RANDOMNESS_WIDTH,
     SETUP_COMMITMENT_ROW_COUNT, StructuralMatrixPolynomial, add_mod_fast, forward_negacyclic_ntt,
@@ -118,6 +120,42 @@ pub(crate) fn lattice_anchor_commitment_canonical_bytes(
     )
     .encode_with_limits(&limits)
     .map_err(canonical_codec_error)
+}
+
+/// Exact selected-shape encoding length without constructing the complete
+/// commitment rows. This follows the same tuple and homogeneous-list layout
+/// used by `lattice_anchor_commitment_canonical_bytes`.
+pub(crate) fn selected_lattice_anchor_commitment_canonical_byte_length(
+    commitment_data_prime_index: usize,
+) -> CanonicalResult<usize> {
+    let modulus = selected_commitment_prime(commitment_data_prime_index)?;
+    let field_element_byte_length = field_element_byte_length(modulus);
+    let field_list_byte_length = 6_usize
+        .checked_add(
+            POLYNOMIAL_DEGREE
+                .checked_mul(field_element_byte_length)
+                .ok_or_else(|| {
+                    invalid_commitment_input("lattice commitment row byte length overflows")
+                })?,
+        )
+        .ok_or_else(|| invalid_commitment_input("lattice commitment row byte length overflows"))?;
+    let row_tuple_byte_length = 8_usize
+        .checked_add(6)
+        .and_then(|length| length.checked_add(field_list_byte_length))
+        .ok_or_else(|| {
+            invalid_commitment_input("lattice commitment row tuple byte length overflows")
+        })?;
+    let row_list_byte_length = SETUP_COMMITMENT_ROW_COUNT
+        .checked_mul(row_tuple_byte_length)
+        .and_then(|length| length.checked_add(6))
+        .ok_or_else(|| {
+            invalid_commitment_input("lattice commitment row list byte length overflows")
+        })?;
+    8_usize
+        .checked_add(6 + size_of::<u16>())
+        .and_then(|length| length.checked_add(6))
+        .and_then(|length| length.checked_add(row_list_byte_length))
+        .ok_or_else(|| invalid_commitment_input("lattice commitment byte length overflows"))
 }
 
 pub(crate) fn parse_lattice_anchor_commitment_canonical_bytes(
@@ -566,6 +604,10 @@ mod tests {
                 .collect(),
         };
         let canonical_bytes = lattice_anchor_commitment_canonical_bytes(&commitment)?;
+        assert_eq!(
+            canonical_bytes.len(),
+            selected_lattice_anchor_commitment_canonical_byte_length(1)?
+        );
         assert_eq!(
             parse_lattice_anchor_commitment_canonical_bytes(&canonical_bytes)?,
             commitment

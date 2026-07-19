@@ -1,5 +1,5 @@
 use num_bigint::{BigInt, BigUint};
-use num_traits::{One, Zero};
+use num_traits::Zero;
 
 use super::super::{
     bounds::SignedIntegerInterval,

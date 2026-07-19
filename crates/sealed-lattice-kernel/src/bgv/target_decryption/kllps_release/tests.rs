@@ -18,7 +18,7 @@ fn selected_kllps_constants_match_the_spaced_monomial_construction() {
 #[test]
 fn positive_bgv_conversion_scale_matches_the_selected_full_target_basis() {
     let selected_target_primes = &DATA_PRIMES[..=CANONICAL_TARGET_CIPHERTEXT_LEVEL];
-    assert_eq!(selected_target_primes.len(), 6);
+    assert_eq!(selected_target_primes.len(), 8);
     for modulus in selected_target_primes.iter().copied() {
         assert_eq!(modulus % PLAINTEXT_MODULUS, 1);
         let conversion_scale = positive_bfv_message_conversion_scale(modulus)
@@ -113,21 +113,23 @@ fn canonical_target_decoding_rejects_every_malformed_semantic_class() {
 }
 
 #[test]
-fn selected_six_prime_target_basis_satisfies_the_exact_factor_four_theorem_bounds() {
+fn selected_eight_prime_target_basis_satisfies_the_exact_factor_four_theorem_bounds() {
     use crate::bgv::evaluator::{
         noise_recurrence::direct_ballot_target_noise_bounds,
         top_k::CANONICAL_TARGET_CIPHERTEXT_LEVEL,
     };
 
     let expected_target_primes = [
-        8_349_427_040_257,
-        8_040_189_001_729,
-        7_318_633_578_497,
-        3_401_618_423_809,
-        618_476_077_057,
-        9_586_379_194_369,
+        1_953_759_233,
+        2_256_928_769,
+        2_408_513_537,
+        2_610_626_561,
+        2_661_154_817,
+        3_014_852_609,
+        3_031_695_361,
+        3_368_550_401,
     ];
-    assert_eq!(CANONICAL_TARGET_CIPHERTEXT_LEVEL, 5);
+    assert_eq!(CANONICAL_TARGET_CIPHERTEXT_LEVEL, 7);
     assert_eq!(
         &DATA_PRIMES[..=CANONICAL_TARGET_CIPHERTEXT_LEVEL],
         &expected_target_primes,
@@ -143,21 +145,21 @@ fn selected_six_prime_target_basis_satisfies_the_exact_factor_four_theorem_bound
         .expect("the selected evaluator has at least one target");
     assert_eq!(
         evaluation_error_bound.to_str_radix(10),
-        "73764847584278672245089014901169",
+        "16870171037775988578755335442628",
     );
 
     let flooding_bound = factor_four_required_flooding_bound(&evaluation_error_bound)
         .expect("the exact factor-four flooding bound is representable");
     assert_eq!(
         flooding_bound.to_str_radix(10),
-        "3064071891057204148776006169907400586786993440215068513058309537792",
+        "350379744329557993497411231781118201360220160600365913688770609152",
     );
     ensure_factor_four_parameter_conditions(
         CANONICAL_TARGET_CIPHERTEXT_LEVEL,
         &evaluation_error_bound,
         &flooding_bound,
     )
-    .expect("the selected six-prime target basis satisfies C2 and C4");
+    .expect("the selected eight-prime target basis satisfies C2 and C4");
 
     let target_modulus = expected_target_primes
         .into_iter()
@@ -165,7 +167,7 @@ fn selected_six_prime_target_basis_satisfies_the_exact_factor_four_theorem_bound
         .product::<BigUint>();
     assert_eq!(
         target_modulus.to_str_radix(10),
-        "9908685410199340149960006079957589994067919733531874752333496893309931749377",
+        "2271682199083132530942007860211960213597483954489024377020137669658856718337",
     );
 
     let plaintext_modulus = BigUint::from(PLAINTEXT_MODULUS);
@@ -191,17 +193,17 @@ fn selected_six_prime_target_basis_satisfies_the_exact_factor_four_theorem_bound
     );
     assert_eq!(
         scaled_c2_left.to_str_radix(10),
-        "1696419823647852322155390045594025883958911317050686975850263254677721619221",
+        "63393506382058268647499619343694154005072056524437869067723828113069637",
     );
     assert_eq!(
         ((&target_modulus << 1_usize) - scaled_c2_left).to_str_radix(10),
-        "18120950996750827977764622114321154104176928150013062528816730531942141879533",
+        "4543301004659883003615368220804576733040962836921524316171207615489600367037",
         "the exact C2 margin must remain positive",
     );
 }
 
 #[test]
-fn factor_four_release_reconstructs_full_six_prime_targets_from_lowest_distinct_participants() {
+fn factor_four_release_reconstructs_full_eight_prime_targets_from_lowest_distinct_participants() {
     let binding = test_release_binding(11);
     let participant_binding = test_participant_release_binding(11, 0);
     let sharing_polynomials = test_sharing_polynomials();
@@ -275,8 +277,8 @@ fn factor_four_release_reconstructs_full_six_prime_targets_from_lowest_distinct_
         target_order_plaintext
     );
     let (identifier_slots, order_slots) = reconstructed
-        .decode_logical_slots()
-        .expect("logical target slots");
+        .decode_scalar_lanes()
+        .expect("scalar target lanes");
     assert_eq!(identifier_slots.len(), POLYNOMIAL_DEGREE);
     assert_eq!(order_slots.len(), POLYNOMIAL_DEGREE);
 
@@ -547,6 +549,60 @@ fn retained_flooding_polynomial_uses_exact_zeroizable_signed_limbs() {
     assert!(
         polynomial.zeroize_and_is_empty(),
         "explicit lifetime completion must clear every retained sign and magnitude limb",
+    );
+}
+
+#[test]
+fn paired_partial_generation_sums_nested_bigint_scratch_while_proof_callbacks_use_one_role() {
+    let accounting = selected_kllps_target_release_memory_accounting()
+        .expect("selected target-release memory accounting");
+    let source_provider = selected_kllps_target_release_source_provider_memory_accounting()
+        .expect("selected target-release proof-source accounting");
+    let incorrectly_paired_source_provider =
+        selected_target_release_source_provider_memory_accounting::<
+            KllpsTargetReleaseProofWitnessSource,
+        >(
+            accounting
+                .proof_generation_additional_persistent_resident_byte_length()
+                .expect("proof-generation custody fits u64"),
+            accounting.paired_generation_bigint_scratch_byte_length(),
+        )
+        .expect("comparison target-release proof-source accounting");
+
+    assert_eq!(
+        accounting.paired_generation_bigint_scratch_byte_length(),
+        accounting.one_role_bigint_scratch_byte_length() * 2,
+        "the two nested paired-generation callbacks coexist",
+    );
+    assert_eq!(
+        incorrectly_paired_source_provider.additional_loading_transient_byte_length()
+            - source_provider.additional_loading_transient_byte_length(),
+        accounting.one_role_bigint_scratch_byte_length(),
+        "the production proof source charges exactly one callback instead of the nested pair",
+    );
+    assert!(
+        accounting.proof_source_additional_persistent_resident_byte_length()
+            >= accounting.retained_flooding_polynomial_byte_length()
+    );
+    assert_eq!(
+        accounting.paired_partial_stream_custody_resident_byte_length(),
+        u64::try_from(size_of::<KllpsPairedPartialDecryptionStreams>())
+            .expect("the paired stream owner fits u64")
+            + u64::try_from(
+                selected_target_partial_decryption_stream_byte_length()
+                    .expect("the selected target partial stream length derives"),
+            )
+            .expect("the target partial stream length fits u64")
+                * u64::try_from(KLLPS_PAIRED_TARGET_ROLE_COUNT)
+                    .expect("the paired role count fits u64"),
+        "prepared proof generation retains the two exact output streams",
+    );
+    assert_eq!(
+        accounting
+            .proof_generation_additional_persistent_resident_byte_length()
+            .expect("proof-generation custody fits u64"),
+        accounting.proof_source_additional_persistent_resident_byte_length()
+            + accounting.paired_partial_stream_custody_resident_byte_length(),
     );
 }
 

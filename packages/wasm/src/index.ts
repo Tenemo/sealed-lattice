@@ -251,7 +251,6 @@ export type {
     CollectivePublicKeyAggregate,
     CollectivePublicKeyDescription,
     CollectivePublicKeyGenerationMode,
-    CollectivePublicKeyGenerationWorkerOptions,
     CollectivePublicKeyParticipantSource,
 } from './collective-public-key-aggregate-runtime.js';
 export type {

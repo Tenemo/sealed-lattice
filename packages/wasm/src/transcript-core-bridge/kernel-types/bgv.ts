@@ -45,6 +45,6 @@ export type BgvCollectiveSetupParametersDescription = {
     readonly boundedDomainEvaluator: {
         readonly objectType: 'BoundedDomainEvaluatorParameters';
         readonly scoreDifferenceBound: number;
-        readonly directComparisonOutputLevel: number;
+        readonly pairCharacterOutputLevel: number;
     };
 };

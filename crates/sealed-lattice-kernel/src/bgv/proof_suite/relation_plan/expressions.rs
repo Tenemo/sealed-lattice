@@ -19,7 +19,10 @@ use super::{
     },
     schema::{
         ADDITION_SCHEMA_IDENTIFIER, BASE_FIELD_CONSTANT_SCHEMA_IDENTIFIER,
-        COLUMN_VALUE_SCHEMA_IDENTIFIER, EVALUATION_VARIABLE_SCHEMA_IDENTIFIER,
+        COLUMN_VALUE_SCHEMA_IDENTIFIER,
+        CONSTANT_COLUMN_VERIFIER_SEQUENCE_PRODUCT_SUM_SCHEMA_IDENTIFIER,
+        CONSTANT_COLUMN_VERIFIER_SEQUENCE_PRODUCT_TERM_SCHEMA_IDENTIFIER,
+        EVALUATION_VARIABLE_SCHEMA_IDENTIFIER,
         FROBENIUS_CONJUGATE_SCHEMA_IDENTIFIER, MULTIPLICATION_SCHEMA_IDENTIFIER,
         NEGATION_SCHEMA_IDENTIFIER, NON_NATIVE_MODULUS_CONSTANT_SCHEMA_IDENTIFIER,
         NONNEGATIVE_POWER_SCHEMA_IDENTIFIER, RADIX_CONVOLUTION_COEFFICIENT_SCHEMA_IDENTIFIER,
@@ -27,6 +30,29 @@ use super::{
         TRANSCRIPT_CHALLENGE_SCHEMA_IDENTIFIER,
     },
 };
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct RelationConstantColumnVerifierSequenceProductTerm {
+    pub(crate) constant_column_ordinal: u32,
+    pub(crate) verifier_sequence_column_ordinal: u32,
+    pub(crate) verifier_sequence_rotation_is_negative: bool,
+    pub(crate) verifier_sequence_rotation_magnitude: u64,
+}
+
+impl RelationConstantColumnVerifierSequenceProductTerm {
+    fn canonical_tuple(self) -> CanonicalTuple {
+        CanonicalTuple::new(
+            CONSTANT_COLUMN_VERIFIER_SEQUENCE_PRODUCT_TERM_SCHEMA_IDENTIFIER,
+            SCHEMA_VERSION,
+            vec![
+                CanonicalItem::unsigned32(self.constant_column_ordinal),
+                CanonicalItem::unsigned32(self.verifier_sequence_column_ordinal),
+                CanonicalItem::boolean(self.verifier_sequence_rotation_is_negative),
+                CanonicalItem::unsigned64(self.verifier_sequence_rotation_magnitude),
+            ],
+        )
+    }
+}
 
 pub(super) fn checked_resident_payload_add(
     left: u64,
@@ -82,6 +108,10 @@ pub(crate) enum RelationExpressionInstruction {
         rotation_is_negative: bool,
         rotation_magnitude: u64,
     },
+    ConstantColumnVerifierSequenceProductSum {
+        coefficient_period: u16,
+        ordered_terms: Vec<RelationConstantColumnVerifierSequenceProductTerm>,
+    },
     TranscriptChallenge {
         challenge_role: RelationChallengeRole,
         role_coordinates: Vec<u64>,
@@ -125,6 +155,9 @@ impl RelationConstraintColumnQuery {
 impl RelationExpressionInstruction {
     pub(super) fn resident_owned_payload_byte_length(&self) -> Result<u64, RelationPlanError> {
         match self {
+            Self::ConstantColumnVerifierSequenceProductSum { ordered_terms, .. } => {
+                resident_vec_storage_byte_length(ordered_terms)
+            }
             Self::TranscriptChallenge {
                 role_coordinates, ..
             } => resident_vec_storage_byte_length(role_coordinates),
@@ -187,6 +220,21 @@ impl RelationExpressionInstruction {
                     CanonicalItem::unsigned32(*column_ordinal),
                     CanonicalItem::unsigned8(u8::from(*rotation_is_negative)),
                     CanonicalItem::unsigned64(*rotation_magnitude),
+                ],
+            ),
+            Self::ConstantColumnVerifierSequenceProductSum {
+                coefficient_period,
+                ordered_terms,
+            } => CanonicalTuple::new(
+                CONSTANT_COLUMN_VERIFIER_SEQUENCE_PRODUCT_SUM_SCHEMA_IDENTIFIER,
+                SCHEMA_VERSION,
+                vec![
+                    CanonicalItem::unsigned16(*coefficient_period),
+                    canonical_nested_list(
+                        ordered_terms.iter().copied().map(
+                            RelationConstantColumnVerifierSequenceProductTerm::canonical_tuple,
+                        ),
+                    )?,
                 ],
             ),
             Self::TranscriptChallenge {
@@ -494,6 +542,27 @@ pub(super) fn relation_column_queries(
     invalid_reference_error: RelationPlanError,
 ) -> Result<BTreeSet<RelationConstraintColumnQuery>, RelationPlanError> {
     let mut queries = BTreeSet::new();
+    visit_relation_column_queries(
+        expressions,
+        radix_convolutions,
+        invalid_reference_error,
+        |query| {
+            queries.insert(query);
+            Ok(())
+        },
+    )?;
+    Ok(queries)
+}
+
+pub(super) fn visit_relation_column_queries<Visit>(
+    expressions: &[&[RelationExpressionInstruction]],
+    radix_convolutions: &[RelationRadixConvolutionDescriptor],
+    invalid_reference_error: RelationPlanError,
+    mut visit: Visit,
+) -> Result<(), RelationPlanError>
+where
+    Visit: FnMut(RelationConstraintColumnQuery) -> Result<(), RelationPlanError>,
+{
     for instruction in expressions.iter().flat_map(|expression| expression.iter()) {
         match instruction {
             RelationExpressionInstruction::ColumnValue {
@@ -501,11 +570,28 @@ pub(super) fn relation_column_queries(
                 rotation_is_negative,
                 rotation_magnitude,
             } => {
-                queries.insert(RelationConstraintColumnQuery {
+                visit(RelationConstraintColumnQuery {
                     column_ordinal: *column_ordinal,
                     rotation_is_negative: *rotation_is_negative,
                     rotation_magnitude: *rotation_magnitude,
-                });
+                })?;
+            }
+            RelationExpressionInstruction::ConstantColumnVerifierSequenceProductSum {
+                ordered_terms,
+                ..
+            } => {
+                for term in ordered_terms {
+                    visit(RelationConstraintColumnQuery {
+                        column_ordinal: term.constant_column_ordinal,
+                        rotation_is_negative: false,
+                        rotation_magnitude: 0,
+                    })?;
+                    visit(RelationConstraintColumnQuery {
+                        column_ordinal: term.verifier_sequence_column_ordinal,
+                        rotation_is_negative: term.verifier_sequence_rotation_is_negative,
+                        rotation_magnitude: term.verifier_sequence_rotation_magnitude,
+                    })?;
+                }
             }
             RelationExpressionInstruction::RadixConvolutionCoefficient {
                 convolution_ordinal,
@@ -528,20 +614,20 @@ pub(super) fn relation_column_queries(
                             rotation_is_negative,
                             rotation_magnitude,
                         } => {
-                            queries.extend(ordered_column_ordinals.iter().map(|column_ordinal| {
-                                RelationConstraintColumnQuery {
+                            for column_ordinal in ordered_column_ordinals {
+                                visit(RelationConstraintColumnQuery {
                                     column_ordinal: *column_ordinal,
                                     rotation_is_negative: *rotation_is_negative,
                                     rotation_magnitude: *rotation_magnitude,
-                                }
-                            }));
+                                })?;
+                            }
                         }
                         RelationRadixFactorDescriptor::ScalarColumn { column_ordinal, .. } => {
-                            queries.insert(RelationConstraintColumnQuery {
+                            visit(RelationConstraintColumnQuery {
                                 column_ordinal: *column_ordinal,
                                 rotation_is_negative: false,
                                 rotation_magnitude: 0,
-                            });
+                            })?;
                         }
                         RelationRadixFactorDescriptor::ConstantDigits { .. }
                         | RelationRadixFactorDescriptor::TranscriptChallengeDigits { .. }
@@ -561,7 +647,7 @@ pub(super) fn relation_column_queries(
             | RelationExpressionInstruction::FrobeniusConjugate(_) => {}
         }
     }
-    Ok(queries)
+    Ok(())
 }
 
 #[derive(Clone, Copy)]
@@ -633,6 +719,67 @@ pub(super) fn check_expression(
                 stack.push(ExpressionShape {
                     value_type: column.value_type,
                     degree: column.source_degree_bound_exclusive - 1,
+                    constant_value: None,
+                });
+            }
+            RelationExpressionInstruction::ConstantColumnVerifierSequenceProductSum {
+                coefficient_period,
+                ordered_terms,
+            } => {
+                if zeroifier
+                    || *coefficient_period == 0
+                    || !variant
+                        .trace_domain_size
+                        .is_multiple_of(u64::from(*coefficient_period))
+                    || ordered_terms.is_empty()
+                    || ordered_terms.windows(2).any(|terms| terms[0] >= terms[1])
+                {
+                    return Err(RelationPlanError::InvalidConstraint);
+                }
+                let mut maximum_degree = None;
+                for term in ordered_terms {
+                    if (term.verifier_sequence_rotation_magnitude == 0
+                        && term.verifier_sequence_rotation_is_negative)
+                        || term.verifier_sequence_rotation_magnitude >= variant.trace_domain_size
+                    {
+                        return Err(RelationPlanError::InvalidConstraint);
+                    }
+                    let constant_column = variant
+                        .ordered_columns
+                        .get(term.constant_column_ordinal as usize)
+                        .ok_or(RelationPlanError::InvalidConstraint)?;
+                    let verifier_sequence_column = variant
+                        .ordered_columns
+                        .get(term.verifier_sequence_column_ordinal as usize)
+                        .ok_or(RelationPlanError::InvalidConstraint)?;
+                    if !matches!(constant_column.origin, super::model::RelationColumnOrigin::Prover)
+                        || !matches!(
+                            verifier_sequence_column.origin,
+                            super::model::RelationColumnOrigin::VerifierSequence { .. }
+                        )
+                        || constant_column.value_type != RelationColumnValueType::BaseField
+                        || verifier_sequence_column.value_type != RelationColumnValueType::BaseField
+                        || constant_column.source_degree_bound_exclusive
+                            >= variant.trace_domain_size.saturating_mul(2)
+                        || verifier_sequence_column.source_degree_bound_exclusive
+                            != variant.trace_domain_size
+                    {
+                        return Err(RelationPlanError::InvalidConstraint);
+                    }
+                    let product_degree = constant_column
+                        .source_degree_bound_exclusive
+                        .checked_sub(1)
+                        .and_then(|degree| {
+                            degree.checked_add(
+                                verifier_sequence_column.source_degree_bound_exclusive - 1,
+                            )
+                        })
+                        .ok_or(RelationPlanError::DegreeBoundExceeded)?;
+                    maximum_degree = Some(maximum_degree.unwrap_or(0_u64).max(product_degree));
+                }
+                stack.push(ExpressionShape {
+                    value_type: RelationColumnValueType::BaseField,
+                    degree: maximum_degree.ok_or(RelationPlanError::InvalidConstraint)?,
                     constant_value: None,
                 });
             }
@@ -910,6 +1057,24 @@ pub(super) fn evaluate_integer_interval(
                         .cloned()
                         .ok_or(RelationPlanError::InvalidSemanticCell)?,
                 );
+            }
+            RelationExpressionInstruction::ConstantColumnVerifierSequenceProductSum {
+                ordered_terms,
+                ..
+            } => {
+                let mut sum = SignedIntegerInterval::new(0, 0);
+                for term in ordered_terms {
+                    let constant = column_bounds
+                        .get(&term.constant_column_ordinal)
+                        .cloned()
+                        .ok_or(RelationPlanError::InvalidSemanticCell)?;
+                    let verifier_sequence = column_bounds
+                        .get(&term.verifier_sequence_column_ordinal)
+                        .cloned()
+                        .ok_or(RelationPlanError::InvalidSemanticCell)?;
+                    sum = sum.add(constant.multiply(verifier_sequence)?)?;
+                }
+                stack.push(sum);
             }
             RelationExpressionInstruction::RadixConvolutionCoefficient {
                 convolution_ordinal,

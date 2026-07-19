@@ -529,7 +529,7 @@ fn require_dealer_terminals_match_public_randomness(
     Ok(())
 }
 
-pub(crate) fn require_verified_vss_dealer_terminals_match_public_randomness(
+pub(in crate::bgv) fn require_verified_vss_dealer_terminals_match_public_randomness(
     verified_public_randomness: &VerifiedPublicRandomness,
     ordered_dealer_terminals: &[VerifiedVssShareLinkageTerminal],
 ) -> Result<(), RefusalReason> {
@@ -762,7 +762,7 @@ fn require_envelope_matches_dealer_terminal(
     Ok(envelope)
 }
 
-pub(crate) fn require_verified_recipient_vss_mailbox_envelope(
+pub(in crate::bgv) fn require_verified_recipient_vss_mailbox_envelope(
     verified_public_randomness: &VerifiedPublicRandomness,
     dealer_terminal: &VerifiedVssShareLinkageTerminal,
     recipient_identity: ParticipantIdentity,
@@ -2431,7 +2431,7 @@ pub(crate) fn finish_aggregate_threshold_share_verification(
     complete_vss_qualification_if_ready(recipient_authority_handle)
 }
 
-pub(crate) fn consume_verified_accepted_setup_vss_qualification(
+pub(in crate::bgv) fn consume_verified_accepted_setup_vss_qualification(
     recipient_authority_handle: u32,
 ) -> Result<VerifiedAcceptedSetupVssQualification, AggregateThresholdShareRuntimeError> {
     AGGREGATE_THRESHOLD_SHARE_RECIPIENT_AUTHORITY_REGISTRY.with(|registry| {
@@ -2441,7 +2441,7 @@ pub(crate) fn consume_verified_accepted_setup_vss_qualification(
     })
 }
 
-pub(crate) fn restore_verified_accepted_setup_vss_qualification(
+pub(in crate::bgv) fn restore_verified_accepted_setup_vss_qualification(
     recipient_authority_handle: u32,
     qualification: VerifiedAcceptedSetupVssQualification,
 ) -> Result<(), AggregateThresholdShareRuntimeError> {
@@ -2452,7 +2452,7 @@ pub(crate) fn restore_verified_accepted_setup_vss_qualification(
     })
 }
 
-pub(crate) fn with_verified_accepted_setup_vss_public_randomness<Output>(
+pub(in crate::bgv) fn with_verified_accepted_setup_vss_public_randomness<Output>(
     recipient_authority_handle: u32,
     inspect: impl FnOnce(
         &VerifiedPublicRandomness,
@@ -2471,7 +2471,7 @@ pub(crate) fn with_verified_accepted_setup_vss_public_randomness<Output>(
 /// canonical accepted-setup package. Neither hash list can be supplied or
 /// replaced by the host: all five lists remain rooted in the completed VSS
 /// authority.
-pub(crate) fn with_verified_accepted_setup_vss_package_sources<Output>(
+pub(in crate::bgv) fn with_verified_accepted_setup_vss_package_sources<Output>(
     recipient_authority_handle: u32,
     inspect: impl FnOnce(
         &VerifiedPublicRandomness,
@@ -2521,7 +2521,55 @@ pub(crate) fn discard_aggregate_threshold_share_recipient_authority(
 
 #[cfg(test)]
 mod tests {
+    use super::super::{RecipientShareLimbInput, canonical_recipient_private_vss_payload};
     use super::*;
+
+    fn decoded_selected_share_limbs() -> Box<[super::super::DecodedRecipientShareLimb]> {
+        let sharing_coordinates =
+            selected_vss_sharing_coordinates().expect("selected sharing coordinates");
+        let canonical_coefficients = sharing_coordinates
+            .iter()
+            .enumerate()
+            .map(|(limb_ordinal, (_, modulus))| {
+                (0..POLYNOMIAL_DEGREE)
+                    .map(|coefficient_ordinal| {
+                        let coefficient_ordinal = u64::try_from(coefficient_ordinal)
+                            .expect("coefficient ordinal fits u64");
+                        let limb_ordinal =
+                            u64::try_from(limb_ordinal).expect("limb ordinal fits u64");
+                        coefficient_ordinal
+                            .wrapping_mul(65_537)
+                            .wrapping_add(limb_ordinal.wrapping_mul(97))
+                            % modulus
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        let material_seeds = sharing_coordinates
+            .iter()
+            .enumerate()
+            .map(|(limb_ordinal, _)| {
+                [u8::try_from(limb_ordinal + 1).expect("limb ordinal fits u8");
+                    MATERIAL_SEED_BYTE_LENGTH]
+            })
+            .collect::<Vec<_>>();
+        let limb_inputs = sharing_coordinates
+            .iter()
+            .enumerate()
+            .map(
+                |(limb_ordinal, (sharing_limb_index, _))| RecipientShareLimbInput {
+                    sharing_limb_index: *sharing_limb_index,
+                    canonical_share_coefficients: &canonical_coefficients[limb_ordinal],
+                    recipient_share_material_seed: &material_seeds[limb_ordinal],
+                },
+            )
+            .collect::<Vec<_>>();
+        let canonical_payload = canonical_recipient_private_vss_payload(0, &limb_inputs)
+            .expect("canonical recipient payload");
+        decode_recipient_private_vss_payload(&canonical_payload)
+            .expect("canonical recipient payload decodes")
+            .into_ordered_limbs()
+    }
 
     #[test]
     fn aggregate_share_canonical_coefficients_have_one_retained_owner_after_generation() {
@@ -2557,6 +2605,62 @@ mod tests {
             sharing_limb_count
                 * u64::try_from(POLYNOMIAL_DEGREE).expect("polynomial degree fits u64")
                 * u64::try_from(size_of::<u64>()).expect("coefficient width fits u64")
+        );
+    }
+
+    #[test]
+    fn aggregate_share_update_round_trips_and_refuses_before_partial_mutation() {
+        let sharing_coordinates =
+            selected_vss_sharing_coordinates().expect("selected sharing coordinates");
+        let source_limbs = decoded_selected_share_limbs();
+        let mut aggregate_coefficients = sharing_coordinates
+            .iter()
+            .map(|_| Zeroizing::new(vec![0_u64; POLYNOMIAL_DEGREE]))
+            .collect::<Vec<_>>();
+
+        update_aggregate_with_source_shares(
+            &mut aggregate_coefficients,
+            &source_limbs,
+            AggregateSourceShareUpdate::Add,
+        )
+        .expect("valid source shares add");
+        for (aggregate_limb, source_limb) in aggregate_coefficients.iter().zip(&source_limbs) {
+            assert_eq!(
+                aggregate_limb.as_slice(),
+                source_limb.canonical_share_coefficients()
+            );
+        }
+
+        update_aggregate_with_source_shares(
+            &mut aggregate_coefficients,
+            &source_limbs,
+            AggregateSourceShareUpdate::Remove,
+        )
+        .expect("the final-source rollback is exact");
+        assert!(
+            aggregate_coefficients
+                .iter()
+                .all(|limb| limb.iter().all(|coefficient| *coefficient == 0))
+        );
+
+        aggregate_coefficients[1][POLYNOMIAL_DEGREE - 1] = sharing_coordinates[1].1;
+        assert!(matches!(
+            update_aggregate_with_source_shares(
+                &mut aggregate_coefficients,
+                &source_limbs,
+                AggregateSourceShareUpdate::Add,
+            ),
+            Err(AggregateThresholdShareRuntimeError::InvalidInput)
+        ));
+        assert!(
+            aggregate_coefficients[0]
+                .iter()
+                .all(|coefficient| *coefficient == 0),
+            "validation must finish before an earlier limb can be mutated"
+        );
+        assert_eq!(
+            aggregate_coefficients[1][POLYNOMIAL_DEGREE - 1],
+            sharing_coordinates[1].1
         );
     }
 

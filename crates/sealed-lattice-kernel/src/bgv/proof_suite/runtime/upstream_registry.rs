@@ -5,10 +5,11 @@ use super::{
     CommonProofEvaluatorAuxiliaryRootEntry, CommonProofPreverificationApplicationSourceEntry,
     CommonProofPreverificationApplicationSourceHandle, CommonProofRuntimeError,
     CommonProofSelectedSuiteCapabilityHandle, CommonProofSelectedSuiteEntry,
-    CommonProofVerificationBinding, CommonProofVerificationStateMachine,
-    CommonProofVerificationStatementSource, CommonProofVerifiedColumnEvaluatorCapabilityHandle,
-    CommonProofVerifiedColumnEvaluatorEntry, ConsumedCommonProofVerificationInputs,
-    FOUNDATION_PROFILE, MAXIMUM_COMMON_PROOF_BYTE_LENGTH, MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH,
+    CommonProofVerificationBinding, CommonProofVerificationResidentMemoryAccounting,
+    CommonProofVerificationStateMachine, CommonProofVerificationStatementSource,
+    CommonProofVerifiedColumnEvaluatorCapabilityHandle, CommonProofVerifiedColumnEvaluatorEntry,
+    ConsumedCommonProofVerificationInputs, FOUNDATION_PROFILE, MAXIMUM_COMMON_PROOF_BYTE_LENGTH,
+    MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH, MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH,
     MAXIMUM_RESIDENT_COMMON_PROOF_INPUT_CHUNKS, PollableCommonProofVerificationInput,
     RefusingVerifiedColumnEvaluator, RelationColumnOrigin, SelectedSuiteCapability,
     VerifiedCommonProofStatementSource, VerifiedEvaluatorAuxiliaryRoot,
@@ -18,6 +19,92 @@ use super::{
 };
 #[cfg(test)]
 use super::{CommonProofRelationPlanCapability, CommonProofRuntimeLimits, StreamDescriptor};
+
+fn checked_verification_operation_memory_add(
+    left: u64,
+    right: u64,
+) -> Result<u64, CommonProofRuntimeError> {
+    left.checked_add(right)
+        .ok_or(CommonProofRuntimeError::AllocationLimitExceeded)
+}
+
+fn checked_verification_operation_memory_multiply(
+    left: u64,
+    right: u64,
+) -> Result<u64, CommonProofRuntimeError> {
+    left.checked_mul(right)
+        .ok_or(CommonProofRuntimeError::AllocationLimitExceeded)
+}
+
+fn common_proof_verification_operation_resident_byte_length(
+    verifier_accounting: CommonProofVerificationResidentMemoryAccounting,
+    evaluator_accounting: super::VerifiedRelationColumnEvaluatorMemoryAccounting,
+    proof_chunk_count: usize,
+) -> Result<u64, CommonProofRuntimeError> {
+    let proof_chunk_count = u64::try_from(proof_chunk_count)
+        .map_err(|_| CommonProofRuntimeError::AllocationLimitExceeded)?;
+    let hash_byte_length = u64::try_from(core::mem::size_of::<super::Hash512>())
+        .map_err(|_| CommonProofRuntimeError::AllocationLimitExceeded)?;
+    let descriptor_digest_payload_byte_length =
+        checked_verification_operation_memory_multiply(proof_chunk_count, hash_byte_length)?;
+    let ingest_phase_payload_byte_length = checked_verification_operation_memory_add(
+        u64::try_from(core::mem::size_of::<super::CanonicalStreamVerifier>())
+            .map_err(|_| CommonProofRuntimeError::AllocationLimitExceeded)?,
+        descriptor_digest_payload_byte_length,
+    )?;
+    let resident_chunk_count = u64::try_from(MAXIMUM_RESIDENT_COMMON_PROOF_INPUT_CHUNKS)
+        .map_err(|_| CommonProofRuntimeError::AllocationLimitExceeded)?;
+    let resident_chunk_payload_byte_length = checked_verification_operation_memory_multiply(
+        resident_chunk_count,
+        u64::try_from(MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH)
+            .map_err(|_| CommonProofRuntimeError::AllocationLimitExceeded)?,
+    )?;
+    let resident_chunk_catalog_payload_byte_length =
+        checked_verification_operation_memory_multiply(
+            resident_chunk_count,
+            u64::try_from(
+                core::mem::size_of::<(usize, Vec<u8>)>()
+                    + core::mem::size_of::<super::ResidentCommonProofInputChunk<'static>>(),
+            )
+            .map_err(|_| CommonProofRuntimeError::AllocationLimitExceeded)?,
+        )?;
+    let readback_phase_payload_byte_length = [
+        u64::try_from(core::mem::size_of::<super::CanonicalStreamReadbackVerifier>())
+            .map_err(|_| CommonProofRuntimeError::AllocationLimitExceeded)?,
+        descriptor_digest_payload_byte_length,
+        checked_verification_operation_memory_multiply(
+            proof_chunk_count,
+            u64::try_from(core::mem::size_of::<bool>())
+                .map_err(|_| CommonProofRuntimeError::AllocationLimitExceeded)?,
+        )?,
+        resident_chunk_payload_byte_length,
+        resident_chunk_catalog_payload_byte_length,
+        u64::try_from(core::mem::size_of::<
+            super::ResidentCommonProofByteSource<'static>,
+        >())
+        .map_err(|_| CommonProofRuntimeError::AllocationLimitExceeded)?,
+    ]
+    .into_iter()
+    .try_fold(0_u64, checked_verification_operation_memory_add)?;
+    [
+        u64::try_from(core::mem::size_of::<super::CommonProofVerificationWorker>())
+            .map_err(|_| CommonProofRuntimeError::AllocationLimitExceeded)?,
+        verifier_accounting.maximum_resident_byte_length(),
+        evaluator_accounting.maximum_resident_byte_length(),
+        ingest_phase_payload_byte_length.max(readback_phase_payload_byte_length),
+    ]
+    .into_iter()
+    .try_fold(0_u64, checked_verification_operation_memory_add)
+}
+
+fn require_common_proof_verification_operation_resident_bound(
+    resident_byte_length: u64,
+) -> Result<(), CommonProofRuntimeError> {
+    if resident_byte_length > MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH {
+        return Err(CommonProofRuntimeError::AllocationLimitExceeded);
+    }
+    Ok(())
+}
 
 /// Process-local ownership registry between accepted suite/setup/board inputs
 /// and the common verifier. Upstream owners attach one ordered statement-tree
@@ -449,6 +536,26 @@ impl CommonProofUpstreamInputRegistry {
                 maximum_resident_window_byte_length,
             })
             .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?;
+        let verifier_memory_accounting = validation_state
+            .resident_memory_accounting()
+            .map_err(|_| CommonProofRuntimeError::AllocationLimitExceeded)?;
+        let evaluator_memory_accounting = RefusingVerifiedColumnEvaluator
+            .memory_accounting()
+            .map_err(|_| CommonProofRuntimeError::AllocationLimitExceeded)?;
+        let proof_chunk_count = statement_source
+            .application_source_authority()
+            .proof_stream_descriptor()
+            .ordered_chunk_digests
+            .len();
+        let verification_operation_resident_byte_length =
+            common_proof_verification_operation_resident_byte_length(
+                verifier_memory_accounting,
+                evaluator_memory_accounting,
+                proof_chunk_count,
+            )?;
+        require_common_proof_verification_operation_resident_bound(
+            verification_operation_resident_byte_length,
+        )?;
         drop(validation_state);
         Ok(())
     }
@@ -767,6 +874,33 @@ impl CommonProofUpstreamInputRegistry {
                     .ok_or(CommonProofRuntimeError::AllocationLimitExceeded)?,
             })
             .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?;
+        let verifier_memory_accounting = validation_state
+            .resident_memory_accounting()
+            .map_err(|_| CommonProofRuntimeError::AllocationLimitExceeded)?;
+        let evaluator_memory_accounting = match verified_column_evaluator_handle {
+            Some(handle) => self
+                .verified_column_evaluators
+                .get(&handle.0)
+                .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?
+                .evaluator
+                .memory_accounting()
+                .map_err(|_| CommonProofRuntimeError::AllocationLimitExceeded)?,
+            None => RefusingVerifiedColumnEvaluator
+                .memory_accounting()
+                .map_err(|_| CommonProofRuntimeError::AllocationLimitExceeded)?,
+        };
+        let proof_chunk_count = application
+            .statement_source
+            .proof_stream_descriptor()
+            .ordered_chunk_digests
+            .len();
+        require_common_proof_verification_operation_resident_bound(
+            common_proof_verification_operation_resident_byte_length(
+                verifier_memory_accounting,
+                evaluator_memory_accounting,
+                proof_chunk_count,
+            )?,
+        )?;
         drop(validation_state);
 
         for handle in evaluator_root_handles {
@@ -854,5 +988,24 @@ impl CommonProofUpstreamInputRegistry {
             },
         );
         Ok(CommonProofApplicationInputCapabilityHandle(handle))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn verifier_resident_bound_accepts_the_limit_and_rejects_one_byte_above_it() {
+        require_common_proof_verification_operation_resident_bound(
+            MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH,
+        )
+        .expect("the exact resident-memory limit remains admissible");
+        assert_eq!(
+            require_common_proof_verification_operation_resident_bound(
+                MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH + 1,
+            ),
+            Err(CommonProofRuntimeError::AllocationLimitExceeded)
+        );
     }
 }

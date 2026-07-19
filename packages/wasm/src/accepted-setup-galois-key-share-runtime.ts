@@ -1,5 +1,9 @@
 import { bytesToHex, hexToBytes } from '@noble/hashes/utils.js';
-import { foundationProfile, refusalReasonCodes } from '@sealed-lattice/types';
+import {
+    foundationProfile,
+    refusalReasonCodes,
+    type BrowserActionStorageWorkerKernel,
+} from '@sealed-lattice/types';
 
 import {
     createAcceptedSetupEvaluatorComponentBacking,
@@ -15,10 +19,6 @@ import {
     requireAcceptedSetupPackageBuilderKernelOwner,
     type AcceptedSetupPackageBuilder,
 } from './accepted-setup-package-builder-runtime.js';
-import {
-    resolveActionRandomnessKernelAuthorization,
-    type ActionRandomnessSession,
-} from './action-randomness-runtime.js';
 import { isUint8Array } from './byte-array.js';
 import type { VerifiedTranscriptObject } from './canonical-board-runtime.js';
 import {
@@ -35,29 +35,23 @@ import {
     openClosedWorkerCommonProofVerificationFamilyAdapter,
     releaseClosedWorkerCommonProofGenerationFamilyAdapter,
     releaseClosedWorkerCommonProofVerificationFamilyAdapter,
-    runClosedWorkerCommonProofGenerationFamilyAdapterRetainingGeneratedCapability,
+    runClosedWorkerCommonProofGenerationFamilyAdapterWithExecutionOpener,
     runClosedWorkerCommonProofVerificationFamilyAdapter,
     type AuthenticatedCommonProofInputStore,
     type ClosedWorkerCommonProofGenerationFamilyAdapter,
     type ClosedWorkerCommonProofVerificationFamilyAdapter,
     type ClosedWorkerGeneratedCommonProofCapability,
     type CommonProofCanonicalOutputStore,
-    type CommonProofExternalMemoryTransactionExecutor,
-    type CommonProofGenerationWorkerOptions,
+    type CommonProofGenerationExecutionOpener,
     type CommonProofVerificationWorkerOptions,
 } from './common-proof-worker-runtime/runtime.js';
-import {
-    deriveGeneratedCommonProofDescriptor,
-    trackCanonicalCommonProofOutputChunks,
-} from './generated-common-proof-output-runtime.js';
+import { deriveGeneratedCommonProofDescriptor } from './generated-common-proof-output-runtime.js';
+import type { ClosedWorkerProductionOperationIdentifiers } from './local-storage-root-worker-kernel/authorities.js';
+import { withClosedWorkerProductionOperationAuthority } from './local-storage-root-worker-kernel/worker-kernel.js';
 import {
     resolveSetupGenerationAuthorityKernelAuthorization,
     type BrowserOwnedSetupGenerationAuthority,
 } from './setup-generation-recipient-payload.js';
-import {
-    resolveVerifiedStateReservationKernelAuthorization,
-    type VerifiedStateReservation,
-} from './state-verifier-runtime.js';
 import { resolveCommonProofKernelContext } from './transcript-core-bridge/common-proof-kernel-context.js';
 import type { TranscriptCoreKernelCommandRuntime } from './transcript-core-bridge/kernel-runtime.js';
 import type {
@@ -866,20 +860,18 @@ const readGeneratedComponents = async (input: {
  * collecting evaluator-source catalog.
  */
 export const generateGaloisKeyShareBatchInClosedWorker = async (input: {
-    actionRandomnessSession: ActionRandomnessSession;
     canonicalSuiteRecordBytes: Uint8Array;
     checkpointLineageIdentifier: Uint8Array;
     componentStores: readonly GaloisKeyShareComponentStore[];
     evaluatorSourceCatalog: AcceptedSetupEvaluatorSourceCatalogSession;
-    externalMemory: CommonProofExternalMemoryTransactionExecutor;
     generationMode: GaloisKeyShareBatchGenerationMode;
     kernel: TranscriptCoreKernel;
-    options?: CommonProofGenerationWorkerOptions;
+    openProofGenerationExecution: CommonProofGenerationExecutionOpener;
     packageBuilder: AcceptedSetupPackageBuilder;
-    proofOutputStore: CommonProofCanonicalOutputStore;
+    productionOperationIdentifiers: ClosedWorkerProductionOperationIdentifiers;
     setupGenerationAuthority: BrowserOwnedSetupGenerationAuthority;
     setupIntentObject: VerifiedTranscriptObject;
-    verifiedReservation: VerifiedStateReservation;
+    workerKernel: BrowserActionStorageWorkerKernel;
 }): Promise<GeneratedGaloisKeyShareBatch> => {
     if (typeof globalThis.document !== 'undefined') {
         throw new CanonicalStreamInternalError(
@@ -889,8 +881,6 @@ export const generateGaloisKeyShareBatchInClosedWorker = async (input: {
     if (
         (input.generationMode !== 'fresh' &&
             input.generationMode !== 'resumed') ||
-        (input.generationMode === 'resumed') !==
-            (input.options?.resume !== undefined) ||
         input.componentStores.length === 0
     ) {
         throw new CanonicalStreamRefusalError('wrongContext');
@@ -920,20 +910,10 @@ export const generateGaloisKeyShareBatchInClosedWorker = async (input: {
         input.checkpointLineageIdentifier,
         checkpointLineageIdentifierByteLength,
     );
-    const actionRandomnessAuthorization =
-        resolveActionRandomnessKernelAuthorization(
-            input.actionRandomnessSession,
-            input.kernel,
-        );
     const setupGenerationAuthorization =
         resolveSetupGenerationAuthorityKernelAuthorization(
             input.setupGenerationAuthority,
             context,
-        );
-    const stateAuthorization =
-        resolveVerifiedStateReservationKernelAuthorization(
-            input.verifiedReservation,
-            input.kernel,
         );
     const setupIntentAuthorization =
         resolveOrderedVerifiedBoardObjectAuthorization({
@@ -948,11 +928,6 @@ export const generateGaloisKeyShareBatchInClosedWorker = async (input: {
         'collecting',
     );
     if (
-        actionRandomnessAuthorization.context.memory !== context.memory ||
-        stateAuthorization.capabilityMemory !== context.memory ||
-        stateAuthorization.capabilityPointer <= 0 ||
-        stateAuthorization.capabilityPointer + verifierCapabilityByteLength >
-            context.memory.buffer.byteLength ||
         setupIntentAuthorization.handleBytes.byteLength !== wasm32WordByteLength
     ) {
         throw new CanonicalStreamInternalError(
@@ -979,66 +954,109 @@ export const generateGaloisKeyShareBatchInClosedWorker = async (input: {
         | undefined;
     let operationFailure: unknown;
     try {
-        const prepared = context.runExclusive(
-            'Galois key-share generation preparation',
-            () => {
-                const checkpointPointer = memoryBoundary.copy(
-                    checkpointLineageIdentifier,
-                );
-                const metadataPointer = memoryBoundary.allocateZeroedWords(2);
-                try {
-                    const prepare =
-                        input.generationMode === 'fresh'
-                            ? kernel.prepareGeneration
-                            : kernel.prepareResumedGeneration;
-                    const adapterHandle = prepare(
-                        selectedSuiteHandle,
-                        setupGenerationAuthorization.handle,
-                        actionRandomnessAuthorization.handle,
-                        stateAuthorization.sessionHandle,
-                        stateAuthorization.capabilityPointer,
-                        verifierCapabilityByteLength,
-                        stateAuthorization.reservationHandle,
-                        setupIntentAuthorization.sessionHandle,
-                        setupIntentAuthorization.capabilityPointer,
-                        verifierCapabilityByteLength,
-                        new DataView(
-                            setupIntentAuthorization.handleBytes.buffer,
-                            setupIntentAuthorization.handleBytes.byteOffset,
-                            setupIntentAuthorization.handleBytes.byteLength,
-                        ).getUint32(0, true),
-                        checkpointPointer,
-                        checkpointLineageIdentifier.byteLength,
-                        metadataPointer,
-                        metadataPointer + wasm32WordByteLength,
-                    );
-                    const [sourceHandle, status] = memoryBoundary.readWords(
-                        metadataPointer,
-                        2,
-                    );
-                    statusBoundary.throwIfError(status);
-                    return Object.freeze({
-                        adapterHandle: requireLiveHandle(
-                            adapterHandle,
-                            'The Galois generation family-adapter handle',
-                        ),
-                        generationSourceHandle: requireLiveHandle(
-                            sourceHandle,
-                            'The Galois generation source handle',
-                        ),
-                    });
-                } finally {
-                    memoryBoundary.zeroAndDeallocate(
-                        metadataPointer,
-                        wasm32WordByteLength * 2,
-                    );
-                    memoryBoundary.zeroAndDeallocate(
-                        checkpointPointer,
-                        checkpointLineageIdentifier.byteLength,
-                    );
-                }
-            },
+        let prepared:
+            | Readonly<{
+                  adapterHandle: number;
+                  generationSourceHandle: number;
+              }>
+            | undefined;
+        await withClosedWorkerProductionOperationAuthority(
+            input.workerKernel,
+            input.productionOperationIdentifiers,
+            (productionOperationAuthority) =>
+                productionOperationAuthority.withExactKernelAuthorization(
+                    (authorization) => {
+                        if (authorization.kernel !== input.kernel) {
+                            throw new CanonicalStreamInternalError(
+                                'The production operation belongs to another WASM worker.',
+                            );
+                        }
+                        if (
+                            authorization.actionRandomnessContext.memory !==
+                                context.memory ||
+                            authorization.stateReservationCapabilityMemory !==
+                                context.memory ||
+                            authorization.stateReservationCapabilityPointer <=
+                                0 ||
+                            authorization.stateReservationCapabilityPointer +
+                                    verifierCapabilityByteLength >
+                                context.memory.buffer.byteLength
+                        ) {
+                            throw new CanonicalStreamInternalError(
+                                'The Galois key-share generation authorities do not belong to one WASM worker.',
+                            );
+                        }
+                        prepared = context.runExclusive(
+                            'Galois key-share generation preparation',
+                            () => {
+                                const checkpointPointer = memoryBoundary.copy(
+                                    checkpointLineageIdentifier,
+                                );
+                                const metadataPointer =
+                                    memoryBoundary.allocateZeroedWords(2);
+                                try {
+                                    const prepare =
+                                        input.generationMode === 'fresh'
+                                            ? kernel.prepareGeneration
+                                            : kernel.prepareResumedGeneration;
+                                    const adapterHandle = prepare(
+                                        selectedSuiteHandle,
+                                        setupGenerationAuthorization.handle,
+                                        authorization.actionRandomnessHandle,
+                                        authorization.stateVerifierSessionHandle,
+                                        authorization.stateReservationCapabilityPointer,
+                                        verifierCapabilityByteLength,
+                                        authorization.stateReservationHandle,
+                                        setupIntentAuthorization.sessionHandle,
+                                        setupIntentAuthorization.capabilityPointer,
+                                        verifierCapabilityByteLength,
+                                        new DataView(
+                                            setupIntentAuthorization.handleBytes.buffer,
+                                            setupIntentAuthorization.handleBytes.byteOffset,
+                                            setupIntentAuthorization.handleBytes.byteLength,
+                                        ).getUint32(0, true),
+                                        checkpointPointer,
+                                        checkpointLineageIdentifier.byteLength,
+                                        metadataPointer,
+                                        metadataPointer + wasm32WordByteLength,
+                                    );
+                                    const [sourceHandle, status] =
+                                        memoryBoundary.readWords(
+                                            metadataPointer,
+                                            2,
+                                        );
+                                    statusBoundary.throwIfError(status);
+                                    return Object.freeze({
+                                        adapterHandle: requireLiveHandle(
+                                            adapterHandle,
+                                            'The Galois generation family-adapter handle',
+                                        ),
+                                        generationSourceHandle:
+                                            requireLiveHandle(
+                                                sourceHandle,
+                                                'The Galois generation source handle',
+                                            ),
+                                    });
+                                } finally {
+                                    memoryBoundary.zeroAndDeallocate(
+                                        metadataPointer,
+                                        wasm32WordByteLength * 2,
+                                    );
+                                    memoryBoundary.zeroAndDeallocate(
+                                        checkpointPointer,
+                                        checkpointLineageIdentifier.byteLength,
+                                    );
+                                }
+                            },
+                        );
+                    },
+                ),
         );
+        if (prepared === undefined) {
+            throw new CanonicalStreamInternalError(
+                'The production operation completed without a proof-family adapter.',
+            );
+        }
         generationSourceHandle = prepared.generationSourceHandle;
         familyAdapter = openClosedWorkerCommonProofGenerationFamilyAdapter(
             context,
@@ -1055,22 +1073,17 @@ export const generateGaloisKeyShareBatchInClosedWorker = async (input: {
 
         const adapterForRun = familyAdapter;
         familyAdapter = undefined;
-        const trackedProofOutput = trackCanonicalCommonProofOutputChunks(
-            input.proofOutputStore,
-        );
-        generatedCapability =
-            await runClosedWorkerCommonProofGenerationFamilyAdapterRetainingGeneratedCapability(
+        const execution =
+            await runClosedWorkerCommonProofGenerationFamilyAdapterWithExecutionOpener(
                 adapterForRun,
-                input.externalMemory,
-                trackedProofOutput.outputStore,
-                input.options,
+                input.openProofGenerationExecution,
             );
+        generatedCapability = execution.generatedCapability;
         const proofDescriptorBytes = await deriveGeneratedCommonProofDescriptor(
             {
                 kernel: input.kernel,
-                outputChunkByteLengths:
-                    trackedProofOutput.outputChunkByteLengths,
-                outputStore: input.proofOutputStore,
+                outputChunkByteLengths: execution.outputChunkByteLengths,
+                outputStore: execution.outputStore,
                 proofFamilyLabel: 'Galois key-share batch',
                 streamDomain: canonicalStreamDomains.galoisShareProof,
             },

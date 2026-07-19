@@ -1,3 +1,8 @@
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    mem::size_of,
+};
+
 use num_traits::ToPrimitive;
 use zeroize::Zeroizing;
 
@@ -8,7 +13,8 @@ use crate::{
             SETUP_COMMITMENT_MODULE_RANK, SetupGenerationAuthorityHandle,
             SetupGenerationKeyRelationApplication, SetupGenerationKeyRelationSource,
             SetupKeyRelationProofFamily, sample_collective_public_key_common_reference_limb,
-            setup_commitment_matrix_polynomial, with_setup_generation_key_relation,
+            setup_commitment_matrix_polynomial, setup_generation_retained_memory_accounting,
+            with_setup_generation_key_relation,
         },
     },
     foundation::{Hash512, PreparedActionProofAttemptSource, RefusalReason},
@@ -16,7 +22,6 @@ use crate::{
     transcript_core::encode_hex,
 };
 
-use super::super::prover::{integer_lift_derived_columns, proof_created_tree_roles_by_column};
 use super::super::{
     CommonProofBoundTreeLeafSaltRequest, CommonProofProverError, CommonProofRelationPlanCapability,
     CommonProofSourcePolynomial, CommonProofSourcePolynomialProvider,
@@ -73,6 +78,612 @@ struct CachedQuotient {
 struct BoundMaterialTreeSource {
     tree_catalog_index: u16,
     material_ordinal: usize,
+}
+
+pub(super) fn checked_setup_provider_add(
+    left: u64,
+    right: u64,
+) -> Result<u64, CommonProofProverError> {
+    left.checked_add(right)
+        .ok_or(CommonProofProverError::CountOverflow)
+}
+
+pub(super) fn checked_setup_provider_multiply(
+    left: u64,
+    right: u64,
+) -> Result<u64, CommonProofProverError> {
+    left.checked_mul(right)
+        .ok_or(CommonProofProverError::CountOverflow)
+}
+
+pub(super) fn setup_provider_payload_for_count<Value>(
+    count: usize,
+) -> Result<u64, CommonProofProverError> {
+    checked_setup_provider_multiply(
+        u64::try_from(count).map_err(|_| CommonProofProverError::CountOverflow)?,
+        u64::try_from(size_of::<Value>()).map_err(|_| CommonProofProverError::CountOverflow)?,
+    )
+}
+
+fn setup_anchor_heap_byte_length(
+    opening: &super::key_relation::AnchorOpeningWitness,
+    commitments: &[super::key_relation::SplitIntegerVector],
+    first_matrix: &[Box<[super::key_relation::SplitIntegerVector]>],
+    second_matrix: &[super::key_relation::SplitIntegerVector],
+    quotient_heap_byte_length: u64,
+) -> Result<u64, CommonProofProverError> {
+    let first_matrix_rows = first_matrix.iter().try_fold(0_u64, |total, row| {
+        checked_setup_provider_add(
+            total,
+            setup_provider_payload_for_count::<super::key_relation::SplitIntegerVector>(row.len())?,
+        )
+    })?;
+    [
+        opening
+            .retained_heap_byte_length()
+            .map_err(CommonProofProverError::Relation)?,
+        setup_provider_payload_for_count::<super::key_relation::SplitIntegerVector>(
+            commitments.len(),
+        )?,
+        setup_provider_payload_for_count::<Box<[super::key_relation::SplitIntegerVector]>>(
+            first_matrix.len(),
+        )?,
+        first_matrix_rows,
+        setup_provider_payload_for_count::<super::key_relation::SplitIntegerVector>(
+            second_matrix.len(),
+        )?,
+        quotient_heap_byte_length,
+    ]
+    .into_iter()
+    .try_fold(0_u64, checked_setup_provider_add)
+}
+
+pub(super) fn exact_radix_catalog_heap_byte_length(
+    catalog: &ExactRadixDigitColumnCatalog,
+) -> Result<u64, CommonProofProverError> {
+    let digit_payload_byte_length = catalog.values().try_fold(0_u64, |total, digits| {
+        checked_setup_provider_add(
+            total,
+            setup_provider_payload_for_count::<u32>(digits.len())?,
+        )
+    })?;
+    checked_setup_provider_add(
+        setup_provider_payload_for_count::<(u32, Box<[u32]>)>(catalog.len())?,
+        digit_payload_byte_length,
+    )
+}
+
+fn same_secret_source_layout_heap_byte_length(
+    source_layout: &SameSecretSourceLayout,
+) -> Result<u64, CommonProofProverError> {
+    let anchor_nested_payload_byte_length =
+        source_layout
+            .ordered_anchors
+            .iter()
+            .try_fold(0_u64, |total, anchor| {
+                checked_setup_provider_add(
+                    total,
+                    setup_anchor_heap_byte_length(
+                        &anchor.opening,
+                        &anchor.commitments,
+                        &anchor.first_matrix,
+                        &anchor.second_matrix,
+                        anchor
+                            .quotients
+                            .retained_heap_byte_length()
+                            .map_err(CommonProofProverError::Relation)?,
+                    )?,
+                )
+            })?;
+    [
+        setup_provider_payload_for_count::<
+            super::same_secret_anchor::SameSecretMaterialSourceLayout,
+        >(source_layout.ordered_materials.len())?,
+        setup_provider_payload_for_count::<super::same_secret_anchor::SameSecretAnchorSourceLayout>(
+            source_layout.ordered_anchors.len(),
+        )?,
+        anchor_nested_payload_byte_length,
+        exact_radix_catalog_heap_byte_length(&source_layout.exact_radix_digits_by_column)?,
+    ]
+    .into_iter()
+    .try_fold(0_u64, checked_setup_provider_add)
+}
+
+fn public_key_share_source_layout_heap_byte_length(
+    source_layout: &PublicKeyShareSourceLayout,
+) -> Result<u64, CommonProofProverError> {
+    let anchor_nested_payload_byte_length =
+        source_layout
+            .ordered_anchors
+            .iter()
+            .try_fold(0_u64, |total, anchor| {
+                checked_setup_provider_add(
+                    total,
+                    setup_anchor_heap_byte_length(
+                        &anchor.opening,
+                        &anchor.commitments,
+                        &anchor.first_matrix,
+                        &anchor.second_matrix,
+                        anchor
+                            .quotients
+                            .retained_heap_byte_length()
+                            .map_err(CommonProofProverError::Relation)?,
+                    )?,
+                )
+            })?;
+    [
+        setup_provider_payload_for_count::<super::key_relation::SplitIntegerVector>(
+            source_layout.public_key_share_limbs.len(),
+        )?,
+        setup_provider_payload_for_count::<super::public_key_share::PublicKeyShareLimbSourceLayout>(
+            source_layout.ordered_limbs.len(),
+        )?,
+        setup_provider_payload_for_count::<
+            super::public_key_share::PublicKeyShareAnchorSourceLayout,
+        >(source_layout.ordered_anchors.len())?,
+        anchor_nested_payload_byte_length,
+        exact_radix_catalog_heap_byte_length(&source_layout.exact_radix_digits_by_column)?,
+    ]
+    .into_iter()
+    .try_fold(0_u64, checked_setup_provider_add)
+}
+
+fn insert_setup_column_dependency(
+    dependencies: &mut BTreeMap<u32, BTreeSet<u32>>,
+    target_column_ordinal: u32,
+    source_column_ordinal: u32,
+) {
+    if target_column_ordinal != source_column_ordinal {
+        dependencies
+            .entry(target_column_ordinal)
+            .or_default()
+            .insert(source_column_ordinal);
+    }
+}
+
+fn setup_key_relation_column_dependencies(
+    relation_plan_variant: &RelationPlanVariant,
+    exact_radix_digits_by_column: &ExactRadixDigitColumnCatalog,
+) -> BTreeMap<u32, BTreeSet<u32>> {
+    let mut dependencies = BTreeMap::<u32, BTreeSet<u32>>::new();
+    for (source_column_ordinal, digit_column_ordinals) in exact_radix_digits_by_column {
+        for digit_column_ordinal in digit_column_ordinals.iter().copied() {
+            insert_setup_column_dependency(
+                &mut dependencies,
+                digit_column_ordinal,
+                *source_column_ordinal,
+            );
+        }
+    }
+    for semantic_cell in &relation_plan_variant.ordered_semantic_cells {
+        let dependent_columns: &[u32] = match &semantic_cell.bound_certificate {
+            RelationBoundCertificate::UnsignedRadixRecomposition {
+                ordered_digit_column_ordinals,
+                ..
+            }
+            | RelationBoundCertificate::ShiftedRadixRecomposition {
+                ordered_digit_column_ordinals,
+                ..
+            } => ordered_digit_column_ordinals,
+            RelationBoundCertificate::CanonicalModulusRecomposition {
+                ordered_digit_column_ordinals,
+                ordered_difference_digit_column_ordinals,
+                ordered_borrow_column_ordinals,
+                ..
+            } => {
+                for dependent_column in ordered_difference_digit_column_ordinals
+                    .iter()
+                    .chain(ordered_borrow_column_ordinals)
+                    .copied()
+                {
+                    insert_setup_column_dependency(
+                        &mut dependencies,
+                        dependent_column,
+                        semantic_cell.column_ordinal,
+                    );
+                }
+                ordered_digit_column_ordinals
+            }
+            RelationBoundCertificate::Trinary { .. }
+            | RelationBoundCertificate::Binary { .. }
+            | RelationBoundCertificate::FiniteIntegerSet { .. } => &[],
+        };
+        for dependent_column in dependent_columns.iter().copied() {
+            insert_setup_column_dependency(
+                &mut dependencies,
+                dependent_column,
+                semantic_cell.column_ordinal,
+            );
+        }
+    }
+    for component in relation_plan_variant
+        .ordered_integer_lift_batches()
+        .iter()
+        .flat_map(|batch| batch.ordered_components.iter())
+    {
+        let carry_columns = component
+            .ordered_linear_terms
+            .iter()
+            .filter(|term| {
+                term.negative
+                    && term.column_offset == 0
+                    && term.coefficient
+                        == RelationIntegerLiftCoefficient::Constant(EXACT_INTEGER_LIFT_RADIX)
+            })
+            .map(|term| term.column_ordinal)
+            .collect::<BTreeSet<_>>();
+        for carry_column in carry_columns {
+            for term in &component.ordered_linear_terms {
+                if term.column_ordinal != carry_column {
+                    insert_setup_column_dependency(
+                        &mut dependencies,
+                        carry_column,
+                        term.column_ordinal,
+                    );
+                }
+            }
+            for product in &component.ordered_full_ring_negacyclic_products {
+                for source_column in [
+                    product.multiplicand_low_column_ordinal,
+                    product.multiplicand_high_column_ordinal,
+                    product.multiplier_low_column_ordinal,
+                    product.multiplier_high_column_ordinal,
+                ] {
+                    insert_setup_column_dependency(&mut dependencies, carry_column, source_column);
+                }
+            }
+        }
+    }
+    dependencies
+}
+
+fn setup_key_relation_recursive_column_closures(
+    relation_plan_variant: &RelationPlanVariant,
+    exact_radix_digits_by_column: &ExactRadixDigitColumnCatalog,
+    additional_dependencies: &[(u32, u32)],
+) -> Result<Vec<BTreeSet<u32>>, CommonProofProverError> {
+    let mut dependencies =
+        setup_key_relation_column_dependencies(relation_plan_variant, exact_radix_digits_by_column);
+    for (target_column_ordinal, source_column_ordinal) in additional_dependencies {
+        insert_setup_column_dependency(
+            &mut dependencies,
+            *target_column_ordinal,
+            *source_column_ordinal,
+        );
+    }
+    requested_source_column_ordinals(relation_plan_variant)?
+        .into_iter()
+        .map(|requested_column| {
+            let mut pending = vec![requested_column];
+            let mut visited = BTreeSet::new();
+            while let Some(column) = pending.pop() {
+                if visited.insert(column) {
+                    pending.extend(
+                        dependencies
+                            .get(&column)
+                            .into_iter()
+                            .flat_map(|sources| sources.iter().copied()),
+                    );
+                }
+            }
+            if visited.is_empty() {
+                return Err(CommonProofProverError::InvalidColumn);
+            }
+            Ok(visited)
+        })
+        .collect()
+}
+
+fn full_ring_carry_columns(relation_plan_variant: &RelationPlanVariant) -> BTreeSet<u32> {
+    relation_plan_variant
+        .ordered_integer_lift_batches()
+        .iter()
+        .flat_map(|batch| batch.ordered_components.iter())
+        .filter(|component| !component.ordered_full_ring_negacyclic_products.is_empty())
+        .flat_map(|component| component.ordered_linear_terms.iter())
+        .filter(|term| {
+            term.negative
+                && term.column_offset == 0
+                && term.coefficient
+                    == RelationIntegerLiftCoefficient::Constant(EXACT_INTEGER_LIFT_RADIX)
+        })
+        .map(|term| term.column_ordinal)
+        .collect()
+}
+
+pub(super) fn setup_key_relation_derivation_transient_byte_length(
+    relation_plan_variant: &RelationPlanVariant,
+    exact_radix_digits_by_column: &ExactRadixDigitColumnCatalog,
+    public_key_quotient_columns: &BTreeSet<u32>,
+    anchor_quotient_columns: &BTreeSet<u32>,
+    ring_degree: u64,
+) -> Result<u64, CommonProofProverError> {
+    setup_key_relation_derivation_transient_byte_length_with_dependencies(
+        relation_plan_variant,
+        exact_radix_digits_by_column,
+        public_key_quotient_columns,
+        anchor_quotient_columns,
+        ring_degree,
+        &[],
+    )
+}
+
+pub(super) fn setup_key_relation_derivation_transient_byte_length_with_dependencies(
+    relation_plan_variant: &RelationPlanVariant,
+    exact_radix_digits_by_column: &ExactRadixDigitColumnCatalog,
+    public_key_quotient_columns: &BTreeSet<u32>,
+    anchor_quotient_columns: &BTreeSet<u32>,
+    ring_degree: u64,
+    additional_dependencies: &[(u32, u32)],
+) -> Result<u64, CommonProofProverError> {
+    let trace_domain_size = relation_plan_variant.trace_domain_size();
+    if trace_domain_size.checked_mul(2) != Some(ring_degree) {
+        return Err(CommonProofProverError::InvalidColumn);
+    }
+    let i128_byte_length =
+        u64::try_from(size_of::<i128>()).map_err(|_| CommonProofProverError::CountOverflow)?;
+    let base_field_byte_length = u64::try_from(size_of::<ProofBaseFieldElement>())
+        .map_err(|_| CommonProofProverError::CountOverflow)?;
+    let trace_row_byte_length =
+        checked_setup_provider_multiply(trace_domain_size, i128_byte_length)?;
+    // Direct full-ring decoding retains at most one ring-sized i128 input and
+    // one returned half-row alongside the provider's current output row.
+    let direct_derivation_workspace_byte_length =
+        checked_setup_provider_multiply(trace_row_byte_length, 3)?;
+    // The full-ring carry path retains the accumulated half-row, four returned
+    // halves, two operands, the product result and the two in-place 2N field
+    // transforms. These are the exact simultaneously live payload vectors.
+    let full_ring_derivation_workspace_byte_length = [
+        checked_setup_provider_multiply(
+            trace_domain_size,
+            checked_setup_provider_multiply(11, i128_byte_length)?,
+        )?,
+        checked_setup_provider_multiply(
+            trace_domain_size,
+            checked_setup_provider_multiply(8, base_field_byte_length)?,
+        )?,
+    ]
+    .into_iter()
+    .try_fold(0_u64, checked_setup_provider_add)?;
+    // Public-key quotient derivation retains two ring inputs, the outer radix
+    // result and digit, two 2N field transforms, and the inner ring result.
+    let public_key_quotient_workspace_byte_length = checked_setup_provider_multiply(
+        ring_degree,
+        u64::try_from(size_of::<i128>() * 5 + size_of::<ProofBaseFieldElement>() * 4)
+            .map_err(|_| CommonProofProverError::CountOverflow)?,
+    )?;
+    let anchor_product_column_count = u64::try_from(
+        SETUP_COMMITMENT_MODULE_RANK
+            .checked_add(1)
+            .ok_or(CommonProofProverError::CountOverflow)?,
+    )
+    .map_err(|_| CommonProofProverError::CountOverflow)?;
+    // At the final anchor product, the commitment, prior products, centered
+    // matrix, hiding secret, radix result and digit, inner result, and two 2N
+    // field transforms coexist. The product-vector catalog and 128-byte seed
+    // string are separately owned allocations at that same point.
+    let anchor_quotient_workspace_byte_length = [
+        checked_setup_provider_multiply(
+            anchor_product_column_count
+                .checked_add(7)
+                .ok_or(CommonProofProverError::CountOverflow)?,
+            checked_setup_provider_multiply(ring_degree, i128_byte_length)?,
+        )?,
+        checked_setup_provider_multiply(
+            anchor_product_column_count,
+            u64::try_from(size_of::<Zeroizing<Vec<i128>>>())
+                .map_err(|_| CommonProofProverError::CountOverflow)?,
+        )?,
+        u64::try_from(Hash512::BYTE_LENGTH * 2)
+            .map_err(|_| CommonProofProverError::CountOverflow)?,
+    ]
+    .into_iter()
+    .try_fold(0_u64, checked_setup_provider_add)?;
+    let carry_columns = full_ring_carry_columns(relation_plan_variant);
+    let recursive_column_closures = setup_key_relation_recursive_column_closures(
+        relation_plan_variant,
+        exact_radix_digits_by_column,
+        additional_dependencies,
+    )?;
+    let mut maximum_cache_and_derivation_byte_length = 0_u64;
+    for closure in &recursive_column_closures {
+        let mut operation_workspace_byte_length = direct_derivation_workspace_byte_length;
+        if closure.iter().any(|column| carry_columns.contains(column)) {
+            operation_workspace_byte_length =
+                operation_workspace_byte_length.max(full_ring_derivation_workspace_byte_length);
+        }
+        if closure
+            .iter()
+            .any(|column| public_key_quotient_columns.contains(column))
+        {
+            operation_workspace_byte_length =
+                operation_workspace_byte_length.max(public_key_quotient_workspace_byte_length);
+        }
+        if closure
+            .iter()
+            .any(|column| anchor_quotient_columns.contains(column))
+        {
+            operation_workspace_byte_length =
+                operation_workspace_byte_length.max(anchor_quotient_workspace_byte_length);
+        }
+        let closure_count =
+            u64::try_from(closure.len()).map_err(|_| CommonProofProverError::CountOverflow)?;
+        let cache_before_operation_byte_length = checked_setup_provider_multiply(
+            closure_count.saturating_sub(1),
+            trace_row_byte_length,
+        )?;
+        let operation_peak_byte_length = checked_setup_provider_add(
+            cache_before_operation_byte_length,
+            operation_workspace_byte_length,
+        )?;
+        let completed_derivation_peak_byte_length = checked_setup_provider_multiply(
+            closure_count
+                .checked_add(1)
+                .ok_or(CommonProofProverError::CountOverflow)?,
+            trace_row_byte_length,
+        )?;
+        maximum_cache_and_derivation_byte_length = maximum_cache_and_derivation_byte_length
+            .max(operation_peak_byte_length)
+            .max(completed_derivation_peak_byte_length);
+    }
+    if maximum_cache_and_derivation_byte_length == 0 {
+        return Err(CommonProofProverError::InvalidColumn);
+    }
+    let column_count = relation_plan_variant.ordered_columns().len();
+    [
+        setup_provider_payload_for_count::<Option<Zeroizing<Box<[i128]>>>>(column_count)?,
+        setup_provider_payload_for_count::<bool>(column_count)?,
+        maximum_cache_and_derivation_byte_length,
+    ]
+    .into_iter()
+    .try_fold(0_u64, checked_setup_provider_add)
+}
+
+fn finish_setup_key_relation_source_provider_memory_accounting(
+    relation_plan_variant: &RelationPlanVariant,
+    relation_context: &RelationPlanCheckContext,
+    ring_degree: u64,
+    canonical_application_statement_byte_length: usize,
+    source_layout_heap_byte_length: u64,
+    exact_radix_digits_by_column: &ExactRadixDigitColumnCatalog,
+    public_key_quotient_columns: BTreeSet<u32>,
+    anchor_quotient_columns: BTreeSet<u32>,
+) -> Result<CommonProofSourceProviderMemoryAccounting, CommonProofProverError> {
+    if canonical_application_statement_byte_length == 0
+        || relation_plan_variant.trace_domain_size().checked_mul(2) != Some(ring_degree)
+    {
+        return Err(CommonProofProverError::InvalidColumn);
+    }
+    let requested_column_count = requested_source_column_ordinals(relation_plan_variant)?.len();
+    let bound_material_tree_count = relation_plan_variant
+        .ordered_trees()
+        .iter()
+        .filter(|tree| {
+            matches!(
+                tree,
+                RelationTreeDescriptor::BoundPublic {
+                    construction_kind: BoundTreeConstructionKind::CommittedMaterial,
+                    ..
+                }
+            )
+        })
+        .count();
+    let adapter_retained_byte_length = [
+        u64::try_from(size_of::<SetupKeyRelationSourcePolynomialAdapter>())
+            .map_err(|_| CommonProofProverError::CountOverflow)?,
+        u64::try_from(canonical_application_statement_byte_length)
+            .map_err(|_| CommonProofProverError::CountOverflow)?,
+        relation_plan_variant
+            .resident_owned_payload_byte_length()
+            .map_err(CommonProofProverError::Relation)?,
+        relation_context
+            .resident_owned_payload_byte_length()
+            .map_err(CommonProofProverError::Relation)?,
+        source_layout_heap_byte_length,
+        setup_provider_payload_for_count::<u32>(requested_column_count)?,
+        setup_provider_payload_for_count::<BoundMaterialTreeSource>(bound_material_tree_count)?,
+    ]
+    .into_iter()
+    .try_fold(0_u64, checked_setup_provider_add)?;
+    let cached_quotient_byte_length = checked_setup_provider_multiply(
+        ring_degree,
+        u64::try_from(size_of::<i128>()).map_err(|_| CommonProofProverError::CountOverflow)?,
+    )?;
+    let additional_loading_transient_byte_length =
+        setup_key_relation_derivation_transient_byte_length(
+            relation_plan_variant,
+            exact_radix_digits_by_column,
+            &public_key_quotient_columns,
+            &anchor_quotient_columns,
+            ring_degree,
+        )?;
+    let maximum_returned_source_polynomial_byte_length = checked_setup_provider_multiply(
+        relation_plan_variant.trace_domain_size(),
+        u64::try_from(size_of::<ProofBaseFieldElement>())
+            .map_err(|_| CommonProofProverError::CountOverflow)?,
+    )?;
+    Ok(CommonProofSourceProviderMemoryAccounting::new(
+        checked_setup_provider_add(adapter_retained_byte_length, cached_quotient_byte_length)?,
+        adapter_retained_byte_length,
+        additional_loading_transient_byte_length,
+        maximum_returned_source_polynomial_byte_length,
+    ))
+}
+
+pub(crate) fn same_secret_source_provider_memory_accounting(
+    relation_plan_variant: &RelationPlanVariant,
+    relation_context: &RelationPlanCheckContext,
+    ring_degree: u64,
+    source_layout: &SameSecretSourceLayout,
+    canonical_application_statement_byte_length: usize,
+) -> Result<CommonProofSourceProviderMemoryAccounting, CommonProofProverError> {
+    let anchor_quotient_columns = source_layout
+        .ordered_anchors
+        .iter()
+        .flat_map(|anchor| anchor.quotients.rows().iter().flatten().copied())
+        .collect();
+    finish_setup_key_relation_source_provider_memory_accounting(
+        relation_plan_variant,
+        relation_context,
+        ring_degree,
+        canonical_application_statement_byte_length,
+        same_secret_source_layout_heap_byte_length(source_layout)?,
+        &source_layout.exact_radix_digits_by_column,
+        BTreeSet::new(),
+        anchor_quotient_columns,
+    )
+}
+
+pub(crate) fn public_key_share_source_provider_memory_accounting(
+    relation_plan_variant: &RelationPlanVariant,
+    relation_context: &RelationPlanCheckContext,
+    ring_degree: u64,
+    source_layout: &PublicKeyShareSourceLayout,
+    canonical_application_statement_byte_length: usize,
+) -> Result<CommonProofSourceProviderMemoryAccounting, CommonProofProverError> {
+    let public_key_quotient_columns = source_layout
+        .ordered_limbs
+        .iter()
+        .flat_map(|limb| limb.quotient_columns)
+        .collect();
+    let anchor_quotient_columns = source_layout
+        .ordered_anchors
+        .iter()
+        .flat_map(|anchor| anchor.quotients.rows().iter().flatten().copied())
+        .collect();
+    finish_setup_key_relation_source_provider_memory_accounting(
+        relation_plan_variant,
+        relation_context,
+        ring_degree,
+        canonical_application_statement_byte_length,
+        public_key_share_source_layout_heap_byte_length(source_layout)?,
+        &source_layout.exact_radix_digits_by_column,
+        public_key_quotient_columns,
+        anchor_quotient_columns,
+    )
+}
+
+fn add_setup_authority_memory_accounting(
+    provider: CommonProofSourceProviderMemoryAccounting,
+    authority_identifier: u32,
+) -> Result<CommonProofSourceProviderMemoryAccounting, CommonProofProverError> {
+    let authority = setup_generation_retained_memory_accounting(
+        &SetupGenerationAuthorityHandle::from_identifier(authority_identifier),
+    )
+    .map_err(|_| CommonProofProverError::InvalidInput)?;
+    let authority_byte_length = authority.active_payload_byte_length();
+    Ok(CommonProofSourceProviderMemoryAccounting::new(
+        checked_setup_provider_add(
+            provider.loading_persistent_resident_byte_length(),
+            authority_byte_length,
+        )?,
+        checked_setup_provider_add(
+            provider.post_source_polynomial_finish_persistent_resident_byte_length(),
+            authority_byte_length,
+        )?,
+        provider.additional_loading_transient_byte_length(),
+        provider.maximum_returned_source_polynomial_byte_length(),
+    ))
 }
 
 /// Ordered generation-only source provider for the selected same-secret and
@@ -428,52 +1039,53 @@ impl CommonProofSourcePolynomialProvider for SetupKeyRelationSourcePolynomialAda
     fn memory_accounting(
         &self,
     ) -> Result<CommonProofSourceProviderMemoryAccounting, CommonProofProverError> {
-        let checked_add = |left: u64, right: u64| {
-            left.checked_add(right)
-                .ok_or(CommonProofProverError::CountOverflow)
+        let base = match &self.source_layout {
+            SetupKeyRelationSourceLayout::SameSecret(source_layout) => {
+                same_secret_source_provider_memory_accounting(
+                    &self.relation_plan_variant,
+                    &self.relation_context,
+                    u64::try_from(self.ring_degree)
+                        .map_err(|_| CommonProofProverError::CountOverflow)?,
+                    source_layout,
+                    self.canonical_application_statement_bytes.len(),
+                )?
+            }
+            SetupKeyRelationSourceLayout::PublicKeyShare(source_layout) => {
+                public_key_share_source_provider_memory_accounting(
+                    &self.relation_plan_variant,
+                    &self.relation_context,
+                    u64::try_from(self.ring_degree)
+                        .map_err(|_| CommonProofProverError::CountOverflow)?,
+                    source_layout,
+                    self.canonical_application_statement_bytes.len(),
+                )?
+            }
         };
-        let adapter_retained_byte_length = [
-            core::mem::size_of::<Self>() as u64,
-            u64::try_from(self.canonical_application_statement_bytes.len())
-                .map_err(|_| CommonProofProverError::CountOverflow)?,
-            self.relation_plan_variant
-                .resident_owned_payload_byte_length()
-                .map_err(CommonProofProverError::Relation)?,
-            self.relation_context
-                .resident_owned_payload_byte_length()
-                .map_err(CommonProofProverError::Relation)?,
-            u64::try_from(self.requested_column_ordinals.len())
-                .ok()
-                .and_then(|count| count.checked_mul(core::mem::size_of::<u32>() as u64))
-                .ok_or(CommonProofProverError::CountOverflow)?,
-            u64::try_from(self.bound_material_tree_sources.len())
-                .ok()
-                .and_then(|count| {
-                    count.checked_mul(core::mem::size_of::<BoundMaterialTreeSource>() as u64)
-                })
-                .ok_or(CommonProofProverError::CountOverflow)?,
-        ]
-        .into_iter()
-        .try_fold(0_u64, checked_add)?;
-        let cached_quotient_byte_length = u64::try_from(self.ring_degree)
-            .ok()
-            .and_then(|count| count.checked_mul(core::mem::size_of::<i128>() as u64))
-            .ok_or(CommonProofProverError::CountOverflow)?;
-        let trace_domain_size = self.relation_plan_variant.trace_domain_size();
-        let maximum_returned_source_polynomial_byte_length = trace_domain_size
-            .checked_mul(core::mem::size_of::<ProofBaseFieldElement>() as u64)
-            .ok_or(CommonProofProverError::CountOverflow)?;
-        let derivation_workspace_byte_length = u64::try_from(self.ring_degree)
-            .ok()
-            .and_then(|count| count.checked_mul(core::mem::size_of::<i128>() as u64))
-            .and_then(|length| length.checked_mul(8))
-            .ok_or(CommonProofProverError::CountOverflow)?;
-        Ok(CommonProofSourceProviderMemoryAccounting::new(
-            checked_add(adapter_retained_byte_length, cached_quotient_byte_length)?,
-            adapter_retained_byte_length,
-            derivation_workspace_byte_length,
-            maximum_returned_source_polynomial_byte_length,
-        ))
+        if setup_provider_payload_for_count::<u32>(self.requested_column_ordinals.len())?
+            != setup_provider_payload_for_count::<u32>(
+                requested_source_column_ordinals(&self.relation_plan_variant)?.len(),
+            )?
+            || setup_provider_payload_for_count::<BoundMaterialTreeSource>(
+                self.bound_material_tree_sources.len(),
+            )? != setup_provider_payload_for_count::<BoundMaterialTreeSource>(
+                self.relation_plan_variant
+                    .ordered_trees()
+                    .iter()
+                    .filter(|tree| {
+                        matches!(
+                            tree,
+                            RelationTreeDescriptor::BoundPublic {
+                                construction_kind: BoundTreeConstructionKind::CommittedMaterial,
+                                ..
+                            }
+                        )
+                    })
+                    .count(),
+            )?
+        {
+            return Err(CommonProofProverError::InvalidColumn);
+        }
+        add_setup_authority_memory_accounting(base, self.authority_identifier)
     }
 
     fn poll_source_polynomial(

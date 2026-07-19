@@ -675,7 +675,7 @@ fn selected_evaluator_proof_runtime_plan(
     })
 }
 
-fn resolve_collective_prepared_attempt(
+fn resolve_evaluator_prepared_attempt(
     action_randomness_handle: u32,
     verified_reservation_binding: VerifiedStateReservationRuntimeBinding,
     session_handle: u32,
@@ -852,7 +852,7 @@ fn prepare_evaluator_generation(
             checkpoint_lineage_identifier,
             checkpoint_schedule_digest,
         );
-    let fresh_prepared_attempt = resolve_collective_prepared_attempt(
+    let fresh_prepared_attempt = resolve_evaluator_prepared_attempt(
         action_randomness_handle,
         verified_reservation_binding,
         session_handle,
@@ -893,7 +893,7 @@ fn prepare_evaluator_generation(
                         .map_err(CommonProofGenerationPreparationError::Runtime)?;
                     let runtime_plan = selected_evaluator_proof_runtime_plan(&canonical_statement)
                         .map_err(resumed_generation_error)?;
-                    let attempt = resolve_collective_prepared_attempt(
+                    let attempt = resolve_evaluator_prepared_attempt(
                         action_randomness_handle,
                         verified_reservation_binding,
                         session_handle,

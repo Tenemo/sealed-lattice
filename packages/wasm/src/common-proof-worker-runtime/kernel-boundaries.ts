@@ -32,7 +32,7 @@ const generationPollCancelled = 6;
 const generationPollResumeComplete = 7;
 const generationPollAuthenticatedSourceReadReady = 8;
 const authenticatedSourceRequestByteLength = 160;
-const generationExternalMemoryAccountingByteLength = 19 * 8;
+const generationExternalMemoryAccountingByteLength = 20 * 8;
 const verificationReadbackAccountingByteLength = 4 * 8;
 const maximumExternalMemoryChunkByteLength = 49_152;
 const maximumExternalScratchByteLength = 1_073_741_824n;
@@ -133,7 +133,7 @@ export type CommonProofAuthenticatedSourceRangeRequest = Readonly<{
 }>;
 
 export type CommonProofExternalMemoryUsageAccounting = Readonly<{
-    deletedObjectCount: bigint;
+    deletedObjectLifecycleCount: bigint;
     peakStoredByteLength: bigint;
     totalReadByteLength: bigint;
     totalWrittenByteLength: bigint;
@@ -145,7 +145,8 @@ export type CommonProofGenerationExternalMemoryAccounting = Readonly<{
     compiledRequirement: Readonly<{
         maximumChunkByteLength: number;
         maximumTransactionPayloadByteLength: bigint;
-        objectCount: number;
+        distinctPhysicalObjectCount: number;
+        objectLifecycleCount: number;
         peakStoredByteLength: bigint;
         stepCount: number;
         totalReadByteLength: bigint;
@@ -267,13 +268,16 @@ const externalMemoryUsageFromDiagnostic = (
             firstWordIndex + 2,
         ),
         transactionCount: readDiagnosticUnsigned64(bytes, firstWordIndex + 3),
-        deletedObjectCount: readDiagnosticUnsigned64(bytes, firstWordIndex + 4),
+        deletedObjectLifecycleCount: readDiagnosticUnsigned64(
+            bytes,
+            firstWordIndex + 4,
+        ),
     });
 
 const usageDoesNotExceed = (
     usage: CommonProofExternalMemoryUsageAccounting,
     limits: Readonly<{
-        objectCount: bigint;
+        objectLifecycleCount: bigint;
         peakStoredByteLength: bigint;
         totalReadByteLength: bigint;
         totalWrittenByteLength: bigint;
@@ -284,7 +288,7 @@ const usageDoesNotExceed = (
     usage.totalReadByteLength <= limits.totalReadByteLength &&
     usage.peakStoredByteLength <= limits.peakStoredByteLength &&
     usage.transactionCount <= limits.transactionCount &&
-    usage.deletedObjectCount <= limits.objectCount;
+    usage.deletedObjectLifecycleCount <= limits.objectLifecycleCount;
 
 const requireExactApplicationBytes = (
     value: Uint8Array,
@@ -1183,25 +1187,30 @@ export class CommonProofGenerationKernelBoundary {
                     );
                     const maximumTransactionPayloadByteLength =
                         readDiagnosticUnsigned64(bytes, 2);
-                    const objectCount = diagnosticUnsigned32(
+                    const distinctPhysicalObjectCount = diagnosticUnsigned32(
                         readDiagnosticUnsigned64(bytes, 3),
-                        'The compiled external-memory object count',
+                        'The compiled external-memory physical object count',
+                    );
+                    const objectLifecycleCount = diagnosticUnsigned32(
+                        readDiagnosticUnsigned64(bytes, 4),
+                        'The compiled external-memory object lifecycle count',
                     );
                     const compiledRequirement = Object.freeze({
                         stepCount,
                         maximumChunkByteLength,
                         maximumTransactionPayloadByteLength,
-                        objectCount,
+                        distinctPhysicalObjectCount,
+                        objectLifecycleCount,
                         peakStoredByteLength: readDiagnosticUnsigned64(
-                            bytes,
-                            4,
-                        ),
-                        totalWrittenByteLength: readDiagnosticUnsigned64(
                             bytes,
                             5,
                         ),
-                        totalReadByteLength: readDiagnosticUnsigned64(bytes, 6),
-                        transactionCount: readDiagnosticUnsigned64(bytes, 7),
+                        totalWrittenByteLength: readDiagnosticUnsigned64(
+                            bytes,
+                            6,
+                        ),
+                        totalReadByteLength: readDiagnosticUnsigned64(bytes, 7),
+                        transactionCount: readDiagnosticUnsigned64(bytes, 8),
                     });
                     if (
                         stepCount === 0 ||
@@ -1210,8 +1219,9 @@ export class CommonProofGenerationKernelBoundary {
                         maximumTransactionPayloadByteLength === 0n ||
                         maximumTransactionPayloadByteLength >
                             maximumWorkerPayloadByteLength ||
-                        objectCount === 0 ||
-                        objectCount > maximumWorkerOperationCount ||
+                        distinctPhysicalObjectCount === 0 ||
+                        distinctPhysicalObjectCount > maximumWorkerOperationCount ||
+                        objectLifecycleCount < distinctPhysicalObjectCount ||
                         compiledRequirement.peakStoredByteLength === 0n ||
                         compiledRequirement.peakStoredByteLength >
                             maximumExternalScratchByteLength ||
@@ -1225,10 +1235,10 @@ export class CommonProofGenerationKernelBoundary {
                     }
                     const actualUsage = externalMemoryUsageFromDiagnostic(
                         bytes,
-                        8,
+                        9,
                     );
                     const compiledUsageLimits = Object.freeze({
-                        objectCount: BigInt(objectCount),
+                        objectLifecycleCount: BigInt(objectLifecycleCount),
                         peakStoredByteLength:
                             compiledRequirement.peakStoredByteLength,
                         totalReadByteLength:
@@ -1239,16 +1249,17 @@ export class CommonProofGenerationKernelBoundary {
                     });
                     if (
                         !usageDoesNotExceed(actualUsage, compiledUsageLimits) ||
-                        actualUsage.deletedObjectCount !== BigInt(objectCount)
+                        actualUsage.deletedObjectLifecycleCount !==
+                            BigInt(objectLifecycleCount)
                     ) {
                         throw kernelFailure(
                             'The common-proof kernel reported external-memory usage outside its compiled plan.',
                         );
                     }
-                    const prefixPresence = readDiagnosticUnsigned64(bytes, 13);
+                    const prefixPresence = readDiagnosticUnsigned64(bytes, 14);
                     const prefixUsage = externalMemoryUsageFromDiagnostic(
                         bytes,
-                        14,
+                        15,
                     );
                     if (
                         prefixPresence > 1n ||
@@ -1258,7 +1269,8 @@ export class CommonProofGenerationKernelBoundary {
                             )) ||
                         (prefixPresence === 1n &&
                             !usageDoesNotExceed(prefixUsage, {
-                                objectCount: actualUsage.deletedObjectCount,
+                                objectLifecycleCount:
+                                    actualUsage.deletedObjectLifecycleCount,
                                 peakStoredByteLength:
                                     actualUsage.peakStoredByteLength,
                                 totalReadByteLength:

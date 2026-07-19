@@ -1341,6 +1341,12 @@ mod tests {
     };
 
     use super::*;
+    use crate::bgv::proof_suite::{
+        CommonProofGenerationAuthorization, CommonProofRelationPlanCapability,
+        CommonProofRuntimeError, CommonProofRuntimeLimits,
+        MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH, compile_same_secret_relation_plan,
+        selected_relation_plan_check_context, selected_same_secret_relation_plan_input,
+    };
     use crate::foundation::{
         AuthenticatedCheckpointContinuationSource, FOUNDATION_PROFILE, FoundationObjectType,
         ObjectEnvelope, ProofApplicationSlot, ProofApplicationSlotCeilings, RosterEntry,
@@ -1925,32 +1931,36 @@ mod tests {
             Err(RefusalReason::OutsideSupportedProfile.canonical_code() as u32),
         );
 
-        let wrong_context_application_slot = ProofApplicationSlot::new(
-            Hash512::from_bytes([0x44; Hash512::BYTE_LENGTH]),
-            Hash512::from_bytes([0x22; Hash512::BYTE_LENGTH]),
-            Hash512::from_bytes([0x33; Hash512::BYTE_LENGTH]),
-            ProofApplicationSlotCeilings::COLLECTIVE_PUBLIC_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
-            None,
-            None,
-            None,
-        )
-        .expect("the public family slot is canonical under its supplied context");
-        assert_eq!(
-            resolve_prepared_public_only_proof_attempt_source(
-                action_randomness_handle,
-                exact_reservation_binding,
-                fixture.roster_hash,
-                wrong_context_application_slot,
-                Hash512::from_bytes([0x70; Hash512::BYTE_LENGTH]),
-                1,
-                1,
-                AuthenticatedCheckpointContinuationSource::for_fresh_common_proof_attempt(
-                    checkpoint_lineage_identifier,
-                    checkpoint_schedule_digest,
+        for (suite_identifier_byte, ceremony_context_byte, action_context_byte) in
+            [(0x44, 0x22, 0x33), (0x11, 0x44, 0x33), (0x11, 0x22, 0x44)]
+        {
+            let wrong_context_application_slot = ProofApplicationSlot::new(
+                Hash512::from_bytes([suite_identifier_byte; Hash512::BYTE_LENGTH]),
+                Hash512::from_bytes([ceremony_context_byte; Hash512::BYTE_LENGTH]),
+                Hash512::from_bytes([action_context_byte; Hash512::BYTE_LENGTH]),
+                ProofApplicationSlotCeilings::COLLECTIVE_PUBLIC_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+                None,
+                None,
+                None,
+            )
+            .expect("the public family slot is canonical under its supplied context");
+            assert_eq!(
+                resolve_prepared_public_only_proof_attempt_source(
+                    action_randomness_handle,
+                    exact_reservation_binding,
+                    fixture.roster_hash,
+                    wrong_context_application_slot,
+                    Hash512::from_bytes([0x70; Hash512::BYTE_LENGTH]),
+                    1,
+                    1,
+                    AuthenticatedCheckpointContinuationSource::for_fresh_common_proof_attempt(
+                        checkpoint_lineage_identifier,
+                        checkpoint_schedule_digest,
+                    ),
                 ),
-            ),
-            Err(RefusalReason::WrongContext.canonical_code() as u32),
-        );
+                Err(RefusalReason::WrongContext.canonical_code() as u32),
+            );
+        }
 
         assert_eq!(
             resolve_prepared_public_only_proof_attempt_source(
@@ -1967,6 +1977,114 @@ mod tests {
                 ),
             ),
             Err(RefusalReason::WrongHashOrRoot.canonical_code() as u32),
+        );
+
+        run_action_randomness_command(2, &action_randomness_handle.to_le_bytes())
+            .expect("action randomness closes");
+        cleanup.action_randomness_handle = None;
+    }
+
+    #[test]
+    fn public_only_generation_authorization_refuses_a_relation_plan_for_another_application_schema()
+    {
+        let fixture = StateProducerRuntimeFixture::new();
+        let mut registry = StateVerifierRuntimeRegistry::default();
+        let session_handle = registry
+            .begin(&fixture.configuration, fixture.capability)
+            .expect("state verifier session begins");
+        let action_randomness_output =
+            run_action_randomness_command(1, &fixture.action_randomness_open_input())
+                .expect("action randomness opens");
+        let action_randomness_handle = read_runtime_handle(&action_randomness_output);
+        let mut cleanup = StateProducerRuntimeCleanup {
+            action_randomness_handle: Some(action_randomness_handle),
+            capability: fixture.capability,
+            session_handle: None,
+        };
+        let setup_reservation_source = resolve_setup_action_randomness_reservation_source(
+            action_randomness_handle,
+            fixture.roster_hash,
+        )
+        .expect("the retained action key derives its exact setup reservation");
+        let reservation_handle = retain_test_reservation(
+            &mut registry,
+            &fixture,
+            session_handle,
+            0,
+            StateCapabilityKind::SetupActionRandomnessRoot,
+            setup_reservation_source.authorization_hash(),
+        );
+        let reservation_binding = registry
+            .reservation_binding(session_handle, &fixture.capability, reservation_handle)
+            .expect("the positively verified reservation retains its runtime authority");
+        let collective_application_slot = ProofApplicationSlot::new(
+            Hash512::from_bytes([0x11; Hash512::BYTE_LENGTH]),
+            Hash512::from_bytes([0x22; Hash512::BYTE_LENGTH]),
+            Hash512::from_bytes([0x33; Hash512::BYTE_LENGTH]),
+            ProofApplicationSlotCeilings::COLLECTIVE_PUBLIC_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+            None,
+            None,
+            None,
+        )
+        .expect("the collective aggregate slot is canonical");
+        let prepared_attempt = resolve_prepared_public_only_proof_attempt_source(
+            action_randomness_handle,
+            reservation_binding,
+            fixture.roster_hash,
+            collective_application_slot,
+            Hash512::from_bytes([0x70; Hash512::BYTE_LENGTH]),
+            1,
+            1,
+            AuthenticatedCheckpointContinuationSource::for_fresh_common_proof_attempt(
+                [0x82; 32],
+                Hash512::from_bytes([0x81; Hash512::BYTE_LENGTH]),
+            ),
+        )
+        .expect("the current public-only authority resolves the exact collective attempt");
+
+        let same_secret_schema_identifier =
+            ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER;
+        let same_secret_context =
+            selected_relation_plan_check_context(same_secret_schema_identifier)
+                .expect("the same-secret relation context is selected");
+        let same_secret_plan = compile_same_secret_relation_plan(
+            &selected_same_secret_relation_plan_input()
+                .expect("the selected same-secret relation input is valid"),
+            &same_secret_context,
+        )
+        .expect("the selected same-secret relation plan compiles");
+        let mismatched_relation_plan = CommonProofRelationPlanCapability::from_compiled_plan(
+            &same_secret_plan,
+            &same_secret_context,
+            None,
+            None,
+        )
+        .expect("the same-secret relation-plan authority is genuine");
+        assert_eq!(
+            prepared_attempt.application_statement_schema_identifier(),
+            ProofApplicationSlotCeilings::
+                COLLECTIVE_PUBLIC_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+        );
+        assert_eq!(
+            mismatched_relation_plan.application_statement_schema_identifier(),
+            same_secret_schema_identifier,
+        );
+        let limits = CommonProofRuntimeLimits::new(
+            1,
+            MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH,
+            1,
+        )
+        .expect("the minimal worker limits are canonical");
+
+        assert_eq!(
+            CommonProofGenerationAuthorization::from_public_only_authenticated_attempt(
+                prepared_attempt,
+                &mismatched_relation_plan,
+                1,
+                &[],
+                limits,
+            ),
+            Err(CommonProofRuntimeError::WrongVerificationBinding),
         );
 
         run_action_randomness_command(2, &action_randomness_handle.to_le_bytes())

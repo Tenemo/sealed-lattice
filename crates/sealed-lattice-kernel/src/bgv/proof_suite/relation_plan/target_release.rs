@@ -7,9 +7,9 @@ use super::key_relation::{
 };
 use super::*;
 use crate::bgv::proof_suite::{
-    COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH, CommonProofBoundTreeLeafSaltRequest,
-    CommonProofPrivateCoinCoordinateCapacity, CommonProofProverError,
-    CommonProofRelationPlanCapability, CommonProofSourcePolynomial,
+    COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH, CommittedMaterialSharedAllocationMemoryAccounting,
+    CommonProofBoundTreeLeafSaltRequest, CommonProofPrivateCoinCoordinateCapacity,
+    CommonProofProverError, CommonProofRelationPlanCapability, CommonProofSourcePolynomial,
     CommonProofSourcePolynomialProvider, CommonProofSourcePolynomialProviderPoll,
     CommonProofSourcePolynomialReplayIdentity, CommonProofSourcePolynomialRequest,
     CommonProofSourcePolynomialRequestContext, CommonProofSourceProviderMemoryAccounting,
@@ -130,6 +130,104 @@ impl CompiledTargetReleaseRelation {
     pub(crate) const fn relation_plan(&self) -> &CompiledRelationPlan {
         &self.relation_plan
     }
+
+    fn retained_owned_payload_byte_length(&self) -> Result<u64, RelationPlanError> {
+        target_release_compilation_retained_payload_byte_length(self)
+    }
+}
+
+fn retained_target_release_vector_allocation<Value>(
+    values: &Vec<Value>,
+) -> Result<u64, RelationPlanError> {
+    u64::try_from(values.capacity())
+        .ok()
+        .and_then(|count| count.checked_mul(core::mem::size_of::<Value>() as u64))
+        .ok_or(RelationPlanError::CountOverflow)
+}
+
+fn checked_target_release_payload_sum(
+    byte_lengths: impl IntoIterator<Item = Result<u64, RelationPlanError>>,
+) -> Result<u64, RelationPlanError> {
+    byte_lengths
+        .into_iter()
+        .try_fold(0_u64, |total, byte_length| {
+            total
+                .checked_add(byte_length?)
+                .ok_or(RelationPlanError::CountOverflow)
+        })
+}
+
+fn target_release_role_equation_retained_payload_byte_length(
+    role: &TargetReleaseRoleEquationWitnessLayout,
+) -> Result<u64, RelationPlanError> {
+    checked_target_release_payload_sum(
+        [
+            retained_target_release_vector_allocation(&role.scaled_a_digits),
+            retained_target_release_vector_allocation(&role.partial_decryption_digits),
+            retained_target_release_vector_allocation(&role.quotient_digits),
+            retained_target_release_vector_allocation(&role.carry_values),
+        ]
+        .into_iter()
+        .chain(
+            role.quotient_digits
+                .iter()
+                .chain(&role.carry_values)
+                .map(TargetCenteredVector::retained_heap_byte_length),
+        ),
+    )
+}
+
+fn target_release_modulus_retained_payload_byte_length(
+    modulus: &TargetReleaseModulusWitnessLayout,
+) -> Result<u64, RelationPlanError> {
+    checked_target_release_payload_sum(
+        [
+            modulus.material.retained_heap_byte_length(),
+            retained_target_release_vector_allocation(&modulus.share_limbs),
+            retained_target_release_vector_allocation(&modulus.role_equations),
+        ]
+        .into_iter()
+        .chain(
+            modulus
+                .role_equations
+                .iter()
+                .map(target_release_role_equation_retained_payload_byte_length),
+        ),
+    )
+}
+
+fn target_release_compilation_retained_payload_byte_length(
+    compilation: &CompiledTargetReleaseRelation,
+) -> Result<u64, RelationPlanError> {
+    let flooding_bound_digit_byte_length = compilation
+        .flooding_bound
+        .bits()
+        .div_ceil(usize::BITS as u64)
+        .checked_mul(core::mem::size_of::<usize>() as u64)
+        .ok_or(RelationPlanError::CountOverflow)?;
+    checked_target_release_payload_sum(
+        [
+            compilation
+                .relation_plan
+                .resident_owned_payload_byte_length(),
+            Ok(flooding_bound_digit_byte_length),
+            retained_target_release_vector_allocation(&compilation.flooding_by_role),
+            retained_target_release_vector_allocation(&compilation.moduli),
+        ]
+        .into_iter()
+        .chain(compilation.flooding_by_role.iter().flat_map(|flooding| {
+            [
+                flooding.bounded_shift.retained_heap_byte_length(),
+                retained_target_release_vector_allocation(&flooding.grouped_limbs),
+            ]
+        }))
+        .chain(
+            compilation
+                .moduli
+                .iter()
+                .map(target_release_modulus_retained_payload_byte_length),
+        ),
+    )
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -244,11 +342,104 @@ impl From<ProofPolynomialError> for TargetReleaseWitnessError {
     }
 }
 
+/// Exact retained and callback-scoped payload owned by a target-release
+/// witness source. Arc allocations keep their process-local owner identities
+/// so a wider action-memory calculation can de-duplicate custody and lease
+/// references without trusting a caller-supplied byte total.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct TargetReleaseWitnessSourceMemoryAccounting {
+    unique_owned_heap_byte_length: u64,
+    shared_allocations: Box<[CommittedMaterialSharedAllocationMemoryAccounting]>,
+    shared_allocation_byte_length: u64,
+    maximum_callback_transient_byte_length: u64,
+}
+
+impl TargetReleaseWitnessSourceMemoryAccounting {
+    pub(crate) fn new(
+        unique_owned_heap_byte_length: u64,
+        shared_allocations: Vec<CommittedMaterialSharedAllocationMemoryAccounting>,
+        maximum_callback_transient_byte_length: u64,
+    ) -> Result<Self, TargetReleaseWitnessError> {
+        let mut allocation_byte_lengths = BTreeMap::<usize, u64>::new();
+        for allocation in shared_allocations {
+            if allocation.retained_byte_length() == 0 {
+                return Err(TargetReleaseWitnessError::InvalidWitness);
+            }
+            match allocation_byte_lengths.get(&allocation.owner_identifier()) {
+                Some(byte_length) if *byte_length != allocation.retained_byte_length() => {
+                    return Err(TargetReleaseWitnessError::InvalidWitness);
+                }
+                Some(_) => {}
+                None => {
+                    allocation_byte_lengths.insert(
+                        allocation.owner_identifier(),
+                        allocation.retained_byte_length(),
+                    );
+                }
+            }
+        }
+        let shared_allocation_byte_length =
+            allocation_byte_lengths
+                .values()
+                .try_fold(0_u64, |total, byte_length| {
+                    total
+                        .checked_add(*byte_length)
+                        .ok_or(TargetReleaseWitnessError::CountOverflow)
+                })?;
+        let shared_allocations = allocation_byte_lengths
+            .into_iter()
+            .map(|(owner_identifier, retained_byte_length)| {
+                CommittedMaterialSharedAllocationMemoryAccounting::new(
+                    owner_identifier,
+                    retained_byte_length,
+                )
+            })
+            .collect::<Vec<_>>()
+            .into_boxed_slice();
+        Ok(Self {
+            unique_owned_heap_byte_length,
+            shared_allocations,
+            shared_allocation_byte_length,
+            maximum_callback_transient_byte_length,
+        })
+    }
+
+    pub(crate) const fn unique_owned_heap_byte_length(&self) -> u64 {
+        self.unique_owned_heap_byte_length
+    }
+
+    pub(crate) fn shared_allocations(
+        &self,
+    ) -> &[CommittedMaterialSharedAllocationMemoryAccounting] {
+        &self.shared_allocations
+    }
+
+    pub(crate) const fn shared_allocation_byte_length(&self) -> u64 {
+        self.shared_allocation_byte_length
+    }
+
+    pub(crate) const fn maximum_callback_transient_byte_length(&self) -> u64 {
+        self.maximum_callback_transient_byte_length
+    }
+
+    pub(crate) fn additional_persistent_resident_byte_length(
+        &self,
+    ) -> Result<u64, TargetReleaseWitnessError> {
+        self.unique_owned_heap_byte_length
+            .checked_add(self.shared_allocation_byte_length)
+            .ok_or(TargetReleaseWitnessError::CountOverflow)
+    }
+}
+
 /// Opaque family-owned access to the selected target witness. Implementations
 /// retain the accepted-setup authority and borrow one committed share only for
 /// the duration of a block derivation; raw share vectors never become a host
 /// input or a serialized proof-runtime field.
 pub(crate) trait TargetReleaseWitnessSource {
+    fn memory_accounting(
+        &self,
+    ) -> Result<TargetReleaseWitnessSourceMemoryAccounting, TargetReleaseWitnessError>;
+
     fn with_flooding_errors<Output, Operation>(
         &self,
         role_ordinal: usize,
@@ -899,6 +1090,109 @@ fn selected_target_release_generation_relation() -> Result<
     Ok((compilation, relation_plan, coordinate_capacity))
 }
 
+#[allow(clippy::too_many_arguments)]
+fn target_release_source_provider_memory_accounting_from_dimensions(
+    compilation: &CompiledTargetReleaseRelation,
+    provider_fixed_owner_byte_length: u64,
+    source_additional_persistent_resident_byte_length: u64,
+    source_maximum_callback_transient_byte_length: u64,
+    source_column_count: usize,
+    source_block_count: usize,
+    bound_source_count: usize,
+) -> Result<CommonProofSourceProviderMemoryAccounting, CommonProofProverError> {
+    let checked_add = |left: u64, right: u64| {
+        left.checked_add(right)
+            .ok_or(CommonProofProverError::CountOverflow)
+    };
+    let fixed_and_catalog_byte_length = [
+        provider_fixed_owner_byte_length,
+        source_additional_persistent_resident_byte_length,
+        u64::try_from(source_column_count)
+            .ok()
+            .and_then(|count| count.checked_mul(core::mem::size_of::<u32>() as u64))
+            .ok_or(CommonProofProverError::CountOverflow)?,
+        u64::try_from(source_block_count)
+            .ok()
+            .and_then(|count| {
+                count.checked_mul(core::mem::size_of::<TargetReleaseSourceBlock>() as u64)
+            })
+            .ok_or(CommonProofProverError::CountOverflow)?,
+        u64::try_from(bound_source_count)
+            .ok()
+            .and_then(|count| count.checked_mul(core::mem::size_of::<(u16, usize)>() as u64))
+            .ok_or(CommonProofProverError::CountOverflow)?,
+        compilation
+            .retained_owned_payload_byte_length()
+            .map_err(CommonProofProverError::Relation)?,
+    ]
+    .into_iter()
+    .try_fold(0_u64, checked_add)?;
+    let maximum_derived_layer_count = compilation
+        .moduli
+        .iter()
+        .flat_map(|modulus| &modulus.role_equations)
+        .map(|role| {
+            role.quotient_digits
+                .len()
+                .checked_add(role.carry_values.len())
+                .ok_or(CommonProofProverError::CountOverflow)
+        })
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .max()
+        .unwrap_or(0);
+    let cached_role_layer_byte_length = u64::try_from(maximum_derived_layer_count)
+        .ok()
+        .and_then(|count| {
+            u64::try_from(compilation.ring_degree)
+                .ok()
+                .and_then(|ring_degree| {
+                    ring_degree
+                        .checked_mul(core::mem::size_of::<i128>() as u64)
+                        .and_then(|payload| {
+                            payload.checked_add(core::mem::size_of::<Vec<i128>>() as u64)
+                        })
+                })
+                .and_then(|layer_byte_length| count.checked_mul(layer_byte_length))
+        })
+        .ok_or(CommonProofProverError::CountOverflow)?;
+    let maximum_returned_source_polynomial_byte_length = u64::try_from(compilation.ring_degree)
+        .ok()
+        .and_then(|count| count.checked_mul(core::mem::size_of::<ProofBaseFieldElement>() as u64))
+        .ok_or(CommonProofProverError::CountOverflow)?;
+    let derivation_transient_byte_length = cached_role_layer_byte_length
+        .checked_add(source_maximum_callback_transient_byte_length)
+        .ok_or(CommonProofProverError::CountOverflow)?;
+    Ok(CommonProofSourceProviderMemoryAccounting::new(
+        checked_add(fixed_and_catalog_byte_length, cached_role_layer_byte_length)?,
+        fixed_and_catalog_byte_length,
+        derivation_transient_byte_length,
+        maximum_returned_source_polynomial_byte_length,
+    ))
+}
+
+pub(crate) fn selected_target_release_source_provider_memory_accounting<Source>(
+    source_additional_persistent_resident_byte_length: u64,
+    source_maximum_callback_transient_byte_length: u64,
+) -> Result<CommonProofSourceProviderMemoryAccounting, CommonProofProverError> {
+    let compilation = crate::bgv::proof_suite::selected_profile::selected_target_release_relation()
+        .map_err(|_| CommonProofProverError::InvalidInput)?;
+    let source_blocks = target_release_source_blocks(&compilation)
+        .map_err(|_| CommonProofProverError::InvalidColumn)?;
+    if source_blocks.is_empty() || compilation.moduli.is_empty() {
+        return Err(CommonProofProverError::InvalidColumn);
+    }
+    target_release_source_provider_memory_accounting_from_dimensions(
+        &compilation,
+        core::mem::size_of::<TargetReleaseSourcePolynomialAdapter<Source>>() as u64,
+        source_additional_persistent_resident_byte_length,
+        source_maximum_callback_transient_byte_length,
+        source_blocks.len(),
+        source_blocks.len(),
+        compilation.moduli.len(),
+    )
+}
+
 impl<Source> CommonProofSourcePolynomialProvider for TargetReleaseSourcePolynomialAdapter<Source>
 where
     Source: TargetReleaseWitnessSource,
@@ -906,73 +1200,22 @@ where
     fn memory_accounting(
         &self,
     ) -> Result<CommonProofSourceProviderMemoryAccounting, CommonProofProverError> {
-        let checked_add = |left: u64, right: u64| {
-            left.checked_add(right)
-                .ok_or(CommonProofProverError::CountOverflow)
-        };
-        let fixed_and_catalog_byte_length = [
+        let source_memory_accounting = self
+            .source
+            .memory_accounting()
+            .map_err(|_| CommonProofProverError::InvalidInput)?;
+        let source_additional_persistent_resident_byte_length = source_memory_accounting
+            .additional_persistent_resident_byte_length()
+            .map_err(|_| CommonProofProverError::CountOverflow)?;
+        target_release_source_provider_memory_accounting_from_dimensions(
+            &self.compilation,
             core::mem::size_of::<Self>() as u64,
-            u64::try_from(self.ordered_source_column_ordinals.len())
-                .ok()
-                .and_then(|count| count.checked_mul(core::mem::size_of::<u32>() as u64))
-                .ok_or(CommonProofProverError::CountOverflow)?,
-            u64::try_from(self.ordered_source_blocks.len())
-                .ok()
-                .and_then(|count| {
-                    count.checked_mul(core::mem::size_of::<TargetReleaseSourceBlock>() as u64)
-                })
-                .ok_or(CommonProofProverError::CountOverflow)?,
-            u64::try_from(self.bound_sources_by_catalog_index.len())
-                .ok()
-                .and_then(|count| count.checked_mul(core::mem::size_of::<(u16, usize)>() as u64))
-                .ok_or(CommonProofProverError::CountOverflow)?,
-            self.compilation
-                .relation_plan
-                .select_variant(None, None)
-                .map_err(CommonProofProverError::Relation)?
-                .resident_owned_payload_byte_length()
-                .map_err(CommonProofProverError::Relation)?,
-        ]
-        .into_iter()
-        .try_fold(0_u64, checked_add)?;
-        let maximum_derived_layer_count = self
-            .compilation
-            .moduli
-            .iter()
-            .flat_map(|modulus| &modulus.role_equations)
-            .map(|role| {
-                role.quotient_digits
-                    .len()
-                    .checked_add(role.carry_values.len())
-                    .ok_or(CommonProofProverError::CountOverflow)
-            })
-            .collect::<Result<Vec<_>, _>>()?
-            .into_iter()
-            .max()
-            .unwrap_or(0);
-        let cached_role_layer_byte_length = u64::try_from(maximum_derived_layer_count)
-            .ok()
-            .and_then(|count| {
-                count.checked_mul(
-                    u64::try_from(self.compilation.ring_degree)
-                        .ok()?
-                        .checked_mul(core::mem::size_of::<i128>() as u64)?,
-                )
-            })
-            .ok_or(CommonProofProverError::CountOverflow)?;
-        let maximum_returned_source_polynomial_byte_length =
-            u64::try_from(self.compilation.ring_degree)
-                .ok()
-                .and_then(|count| {
-                    count.checked_mul(core::mem::size_of::<ProofBaseFieldElement>() as u64)
-                })
-                .ok_or(CommonProofProverError::CountOverflow)?;
-        Ok(CommonProofSourceProviderMemoryAccounting::new(
-            checked_add(fixed_and_catalog_byte_length, cached_role_layer_byte_length)?,
-            fixed_and_catalog_byte_length,
-            cached_role_layer_byte_length,
-            maximum_returned_source_polynomial_byte_length,
-        ))
+            source_additional_persistent_resident_byte_length,
+            source_memory_accounting.maximum_callback_transient_byte_length(),
+            self.ordered_source_column_ordinals.len(),
+            self.ordered_source_blocks.len(),
+            self.bound_sources_by_catalog_index.len(),
+        )
     }
 
     fn poll_source_polynomial(
@@ -3033,6 +3276,12 @@ mod tests {
     }
 
     impl TargetReleaseWitnessSource for BorrowedTargetReleaseWitnessSource<'_> {
+        fn memory_accounting(
+            &self,
+        ) -> Result<TargetReleaseWitnessSourceMemoryAccounting, TargetReleaseWitnessError> {
+            TargetReleaseWitnessSourceMemoryAccounting::new(0, Vec::new(), 0)
+        }
+
         fn with_flooding_errors<Output, Operation>(
             &self,
             role_ordinal: usize,

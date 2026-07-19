@@ -15,7 +15,7 @@ use crate::{
             SETUP_COMMITMENT_MODULE_RANK, SetupGeneratedGaloisEntry,
             SetupGeneratedGaloisSourceAuthority, SetupGeneratedGaloisSourceComponent,
             SetupGenerationAnchorOpening, sample_galois_common_reference_limb,
-            setup_commitment_matrix_polynomial,
+            setup_commitment_matrix_polynomial, setup_generation_retained_memory_accounting,
         },
     },
     foundation::{
@@ -47,6 +47,7 @@ use super::{
 };
 use super::{
     key_relation::{EXACT_INTEGER_LIFT_RADIX, SplitIntegerVector},
+    setup_key_relation_adapter::setup_key_relation_derivation_transient_byte_length_with_dependencies,
     trustee_evaluation_key::{
         GaloisKeyShareRelationPlanInput, GaloisKeyShareSourceLayout,
         TrusteeEvaluationKeyRelationGeometry, compile_galois_key_share_relation_with_source_layout,
@@ -87,9 +88,9 @@ struct CachedQuotient {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct GaloisKeyShareSourceProviderMemoryAccounting {
     galois_entry_count: u64,
-    selected_catalog_level: u64,
-    component_wire_byte_length: u64,
-    component_resident_byte_length: u64,
+    maximum_selected_catalog_level: u64,
+    maximum_component_wire_byte_length: u64,
+    maximum_component_resident_byte_length: u64,
     retained_canonical_component_byte_length: u64,
     retained_centered_error_byte_length: u64,
     retained_anchor_source_byte_length: u64,
@@ -115,16 +116,16 @@ impl GaloisKeyShareSourceProviderMemoryAccounting {
         self.galois_entry_count
     }
 
-    pub(crate) const fn selected_catalog_level(self) -> u64 {
-        self.selected_catalog_level
+    pub(crate) const fn maximum_selected_catalog_level(self) -> u64 {
+        self.maximum_selected_catalog_level
     }
 
-    pub(crate) const fn component_wire_byte_length(self) -> u64 {
-        self.component_wire_byte_length
+    pub(crate) const fn maximum_component_wire_byte_length(self) -> u64 {
+        self.maximum_component_wire_byte_length
     }
 
-    pub(crate) const fn component_resident_byte_length(self) -> u64 {
-        self.component_resident_byte_length
+    pub(crate) const fn maximum_component_resident_byte_length(self) -> u64 {
+        self.maximum_component_resident_byte_length
     }
 
     pub(crate) const fn retained_canonical_component_byte_length(self) -> u64 {
@@ -381,11 +382,20 @@ impl CommonProofSourcePolynomialProvider for GaloisKeyShareSourcePolynomialAdapt
     fn memory_accounting(
         &self,
     ) -> Result<CommonProofSourceProviderMemoryAccounting, CommonProofProverError> {
+        let authority = setup_generation_retained_memory_accounting(
+            &SetupGenerationAuthorityHandle::from_identifier(self.authority_identifier),
+        )
+        .map_err(|_| CommonProofProverError::InvalidInput)?;
+        let authority_byte_length = authority.active_payload_byte_length();
         Ok(CommonProofSourceProviderMemoryAccounting::new(
             self.memory_accounting
-                .loading_persistent_resident_byte_length(),
+                .loading_persistent_resident_byte_length()
+                .checked_add(authority_byte_length)
+                .ok_or(CommonProofProverError::CountOverflow)?,
             self.memory_accounting
-                .post_source_polynomial_finish_persistent_resident_byte_length(),
+                .post_source_polynomial_finish_persistent_resident_byte_length()
+                .checked_add(authority_byte_length)
+                .ok_or(CommonProofProverError::CountOverflow)?,
             self.memory_accounting
                 .additional_loading_source_polynomials_transient_byte_length(),
             self.memory_accounting
@@ -516,6 +526,10 @@ fn source_layout_heap_payload_byte_length(
         super::trustee_evaluation_key::GaloisKeyShareEntrySourceLayout,
     >(source_layout.ordered_entries.len())?;
     for entry in &source_layout.ordered_entries {
+        total = checked_memory_add(
+            total,
+            geometry_heap_payload_byte_length(&entry.relation_geometry)?,
+        )?;
         total = checked_memory_add(
             total,
             memory_payload_for_count::<SplitIntegerVector>(entry.bound_rows.len())?,
@@ -722,32 +736,6 @@ fn galois_column_dependencies(
     dependencies
 }
 
-fn maximum_recursive_cached_row_count(
-    relation_plan_variant: &RelationPlanVariant,
-    source_layout: &GaloisKeyShareSourceLayout,
-) -> Result<u64, CommonProofProverError> {
-    let dependencies = galois_column_dependencies(relation_plan_variant, source_layout);
-    requested_source_column_ordinals(relation_plan_variant)?
-        .into_iter()
-        .try_fold(0_u64, |maximum, requested_column| {
-            let mut pending = vec![requested_column];
-            let mut visited = BTreeSet::new();
-            while let Some(column) = pending.pop() {
-                if visited.insert(column) {
-                    pending.extend(
-                        dependencies
-                            .get(&column)
-                            .into_iter()
-                            .flat_map(|sources| sources.iter().copied()),
-                    );
-                }
-            }
-            Ok(maximum.max(
-                u64::try_from(visited.len()).map_err(|_| CommonProofProverError::CountOverflow)?,
-            ))
-        })
-}
-
 fn retained_anchor_source_byte_length(
     geometry: &TrusteeEvaluationKeyRelationGeometry,
 ) -> Result<u64, CommonProofProverError> {
@@ -839,116 +827,142 @@ fn galois_key_share_source_provider_memory_accounting_from_layout(
     canonical_application_statement_byte_length: usize,
 ) -> Result<GaloisKeyShareSourceProviderMemoryAccounting, CommonProofProverError> {
     let entry_count = source_layout.ordered_entries.len();
-    let first_entry = source_layout
-        .ordered_entries
-        .first()
-        .ok_or(CommonProofProverError::InvalidInput)?;
     if relation_plan_variant.schedule_position().is_none()
         || relation_plan_variant.top_count().is_some()
         || relation_plan_variant.trace_domain_size().checked_mul(2) != Some(geometry.ring_degree)
-        || source_layout.ordered_entries.iter().any(|entry| {
-            entry.selected_level != first_entry.selected_level
-                || entry.bound_rows.len()
-                    != geometry
-                        .decomposition_blocks
-                        .len()
-                        .checked_mul(
-                            geometry
-                                .data_moduli
-                                .len()
-                                .checked_add(geometry.special_moduli.len())
-                                .unwrap_or(usize::MAX),
-                        )
-                        .unwrap_or(usize::MAX)
-                || entry.errors_by_block.len() != geometry.decomposition_blocks.len()
-        })
+        || source_layout.ordered_entries.is_empty()
     {
         return Err(CommonProofProverError::InvalidInput);
     }
     let galois_entry_count =
         u64::try_from(entry_count).map_err(|_| CommonProofProverError::CountOverflow)?;
-    let selected_catalog_level = u64::try_from(first_entry.selected_level)
-        .map_err(|_| CommonProofProverError::CountOverflow)?;
     let selected_resources = selected_evaluator_resource_accounting()
         .map_err(|_| CommonProofProverError::InvalidInput)?;
-    if u64::from(selected_resources.galois_position_count()) != galois_entry_count {
-        return Err(CommonProofProverError::InvalidInput);
-    }
-    let level_resources = selected_resources
-        .levels()
-        .iter()
-        .find(|level| level.catalog_level() == first_entry.selected_level)
-        .ok_or(CommonProofProverError::InvalidInput)?;
-    let data_block_count = u64::try_from(geometry.decomposition_blocks.len())
-        .map_err(|_| CommonProofProverError::CountOverflow)?;
-    let extended_limb_count = u64::try_from(
-        geometry
-            .data_moduli
-            .len()
-            .checked_add(geometry.special_moduli.len())
-            .ok_or(CommonProofProverError::CountOverflow)?,
-    )
-    .map_err(|_| CommonProofProverError::CountOverflow)?;
-    let canonical_bytes_per_coefficient = geometry
-        .data_moduli
-        .iter()
-        .chain(&geometry.special_moduli)
-        .try_fold(0_u64, |total, modulus| {
-            checked_memory_add(
-                total,
-                u64::try_from(
-                    canonical_residue_byte_length(*modulus)
-                        .map_err(|_| CommonProofProverError::InvalidInput)?,
-                )
-                .map_err(|_| CommonProofProverError::CountOverflow)?,
-            )
-        })?;
-    let component_wire_byte_length = data_block_count
-        .checked_mul(geometry.ring_degree)
-        .and_then(|count| count.checked_mul(canonical_bytes_per_coefficient))
-        .ok_or(CommonProofProverError::CountOverflow)?;
-    let component_resident_byte_length = data_block_count
-        .checked_mul(extended_limb_count)
-        .and_then(|count| count.checked_mul(geometry.ring_degree))
-        .and_then(|count| count.checked_mul(size_of::<u64>() as u64))
-        .ok_or(CommonProofProverError::CountOverflow)?;
-    if component_wire_byte_length != level_resources.component_wire_byte_length()
-        || component_resident_byte_length != level_resources.component_resident_byte_length()
-    {
-        return Err(CommonProofProverError::InvalidInput);
-    }
-    let retained_canonical_component_byte_length = component_wire_byte_length
-        .checked_mul(galois_entry_count)
-        .ok_or(CommonProofProverError::CountOverflow)?;
-    let retained_centered_error_byte_length = galois_entry_count
-        .checked_mul(data_block_count)
-        .and_then(|count| count.checked_mul(geometry.ring_degree))
-        .ok_or(CommonProofProverError::CountOverflow)?;
-    let component_topology_heap_byte_length = extended_limb_count
-        .checked_mul((size_of::<u64>() + size_of::<u8>()) as u64)
-        .ok_or(CommonProofProverError::CountOverflow)?;
     let stream_chunk_byte_length = u64::try_from(FOUNDATION_PROFILE.stream_chunk_byte_length)
         .map_err(|_| CommonProofProverError::CountOverflow)?;
-    let stream_digest_count = component_wire_byte_length
-        .checked_add(stream_chunk_byte_length - 1)
-        .and_then(|length| length.checked_div(stream_chunk_byte_length))
-        .ok_or(CommonProofProverError::CountOverflow)?;
-    let shared_stream_digest_byte_length = galois_entry_count
-        .checked_mul(stream_digest_count)
-        .and_then(|count| count.checked_mul(Hash512::BYTE_LENGTH as u64))
-        .ok_or(CommonProofProverError::CountOverflow)?;
-    let error_vector_catalog_byte_length = galois_entry_count
-        .checked_mul(data_block_count)
-        .and_then(|count| count.checked_mul(size_of::<Zeroizing<Vec<i8>>>() as u64))
-        .ok_or(CommonProofProverError::CountOverflow)?;
+    let mut maximum_selected_catalog_level = 0_u64;
+    let mut maximum_component_wire_byte_length = 0_u64;
+    let mut maximum_component_resident_byte_length = 0_u64;
+    let mut maximum_trace_column_count = 0_u64;
+    let mut retained_canonical_component_byte_length = 0_u64;
+    let mut retained_centered_error_byte_length = 0_u64;
+    let mut retained_component_topology_heap_byte_length = 0_u64;
+    let mut shared_stream_digest_byte_length = 0_u64;
+    let mut error_vector_catalog_byte_length = 0_u64;
+    for entry in &source_layout.ordered_entries {
+        let expected_geometry = geometry
+            .selected_catalog_prefix(entry.selected_level)
+            .map_err(CommonProofProverError::Relation)?;
+        let ordered_modulus_count = entry
+            .relation_geometry
+            .data_moduli
+            .len()
+            .checked_add(entry.relation_geometry.special_moduli.len())
+            .ok_or(CommonProofProverError::CountOverflow)?;
+        let expected_bound_row_count = entry
+            .relation_geometry
+            .decomposition_blocks
+            .len()
+            .checked_mul(ordered_modulus_count)
+            .ok_or(CommonProofProverError::CountOverflow)?;
+        if entry.relation_geometry != expected_geometry
+            || entry.bound_rows.len() != expected_bound_row_count
+            || entry.errors_by_block.len() != entry.relation_geometry.decomposition_blocks.len()
+            || entry.quotients_by_row.len() != expected_bound_row_count
+        {
+            return Err(CommonProofProverError::InvalidInput);
+        }
+        let level_resources = selected_resources
+            .levels()
+            .iter()
+            .find(|level| level.catalog_level() == entry.selected_level)
+            .ok_or(CommonProofProverError::InvalidInput)?;
+        let data_block_count = u64::try_from(entry.relation_geometry.decomposition_blocks.len())
+            .map_err(|_| CommonProofProverError::CountOverflow)?;
+        let extended_limb_count = u64::try_from(ordered_modulus_count)
+            .map_err(|_| CommonProofProverError::CountOverflow)?;
+        let canonical_bytes_per_coefficient = entry
+            .relation_geometry
+            .data_moduli
+            .iter()
+            .chain(&entry.relation_geometry.special_moduli)
+            .try_fold(0_u64, |total, modulus| {
+                checked_memory_add(
+                    total,
+                    u64::try_from(
+                        canonical_residue_byte_length(*modulus)
+                            .map_err(|_| CommonProofProverError::InvalidInput)?,
+                    )
+                    .map_err(|_| CommonProofProverError::CountOverflow)?,
+                )
+            })?;
+        let component_wire_byte_length = data_block_count
+            .checked_mul(geometry.ring_degree)
+            .and_then(|count| count.checked_mul(canonical_bytes_per_coefficient))
+            .ok_or(CommonProofProverError::CountOverflow)?;
+        let component_resident_byte_length = data_block_count
+            .checked_mul(extended_limb_count)
+            .and_then(|count| count.checked_mul(geometry.ring_degree))
+            .and_then(|count| count.checked_mul(size_of::<u64>() as u64))
+            .ok_or(CommonProofProverError::CountOverflow)?;
+        if component_wire_byte_length != level_resources.component_wire_byte_length()
+            || component_resident_byte_length != level_resources.component_resident_byte_length()
+        {
+            return Err(CommonProofProverError::InvalidInput);
+        }
+        maximum_selected_catalog_level = maximum_selected_catalog_level.max(
+            u64::try_from(entry.selected_level)
+                .map_err(|_| CommonProofProverError::CountOverflow)?,
+        );
+        maximum_component_wire_byte_length =
+            maximum_component_wire_byte_length.max(component_wire_byte_length);
+        maximum_component_resident_byte_length =
+            maximum_component_resident_byte_length.max(component_resident_byte_length);
+        maximum_trace_column_count = maximum_trace_column_count.max(
+            data_block_count
+                .checked_mul(extended_limb_count)
+                .and_then(|count| count.checked_mul(2))
+                .ok_or(CommonProofProverError::CountOverflow)?,
+        );
+        retained_canonical_component_byte_length = checked_memory_add(
+            retained_canonical_component_byte_length,
+            component_wire_byte_length,
+        )?;
+        retained_centered_error_byte_length = checked_memory_add(
+            retained_centered_error_byte_length,
+            data_block_count
+                .checked_mul(geometry.ring_degree)
+                .ok_or(CommonProofProverError::CountOverflow)?,
+        )?;
+        retained_component_topology_heap_byte_length = checked_memory_add(
+            retained_component_topology_heap_byte_length,
+            extended_limb_count
+                .checked_mul((size_of::<u64>() + size_of::<u8>()) as u64)
+                .ok_or(CommonProofProverError::CountOverflow)?,
+        )?;
+        let stream_digest_count = component_wire_byte_length
+            .checked_add(stream_chunk_byte_length - 1)
+            .and_then(|length| length.checked_div(stream_chunk_byte_length))
+            .ok_or(CommonProofProverError::CountOverflow)?;
+        shared_stream_digest_byte_length = checked_memory_add(
+            shared_stream_digest_byte_length,
+            stream_digest_count
+                .checked_mul(Hash512::BYTE_LENGTH as u64)
+                .ok_or(CommonProofProverError::CountOverflow)?,
+        )?;
+        error_vector_catalog_byte_length = checked_memory_add(
+            error_vector_catalog_byte_length,
+            data_block_count
+                .checked_mul(size_of::<Zeroizing<Vec<i8>>>() as u64)
+                .ok_or(CommonProofProverError::CountOverflow)?,
+        )?;
+    }
     let retained_anchor_source_byte_length = retained_anchor_source_byte_length(geometry)?;
     let retained_original_source_byte_length = [
         memory_payload_for_count::<SetupGeneratedGaloisEntry>(entry_count)?,
         retained_canonical_component_byte_length,
         retained_centered_error_byte_length,
-        component_topology_heap_byte_length
-            .checked_mul(galois_entry_count)
-            .ok_or(CommonProofProverError::CountOverflow)?,
+        retained_component_topology_heap_byte_length,
         shared_stream_digest_byte_length,
         error_vector_catalog_byte_length,
         geometry.ring_degree,
@@ -962,9 +976,7 @@ fn galois_key_share_source_provider_memory_accounting_from_layout(
             .map_err(|_| CommonProofProverError::CountOverflow)?,
         memory_payload_for_count::<VerifiedEvaluatorAuxiliaryRoot>(entry_count)?,
         memory_payload_for_count::<SetupGeneratedGaloisSourceComponent>(entry_count)?,
-        component_topology_heap_byte_length
-            .checked_mul(galois_entry_count)
-            .ok_or(CommonProofProverError::CountOverflow)?,
+        retained_component_topology_heap_byte_length,
     ]
     .into_iter()
     .try_fold(0_u64, checked_memory_add)?;
@@ -989,57 +1001,61 @@ fn galois_key_share_source_provider_memory_accounting_from_layout(
         .ring_degree
         .checked_mul(size_of::<i128>() as u64)
         .ok_or(CommonProofProverError::CountOverflow)?;
-    let post_source_polynomial_finish_persistent_resident_byte_length = [
-        retained_original_source_byte_length,
-        generated_source_summary_byte_length,
-        adapter_retained_byte_length,
-    ]
-    .into_iter()
-    .try_fold(0_u64, checked_memory_add)?;
+    // The browser-owned setup authority is the sole owner of original and
+    // generated Galois material. The adapter retains only its compiled
+    // catalogs; live authority payload is added by the runtime provider and
+    // by the pure selected lifecycle accounting exactly once.
+    let post_source_polynomial_finish_persistent_resident_byte_length =
+        adapter_retained_byte_length;
     let loading_persistent_resident_byte_length = checked_memory_add(
         post_source_polynomial_finish_persistent_resident_byte_length,
         cached_quotient_byte_length,
     )?;
     let trace_domain_size = relation_plan_variant.trace_domain_size();
-    let cached_row_count =
-        maximum_recursive_cached_row_count(relation_plan_variant, source_layout)?;
-    let cached_row_payload_byte_length = cached_row_count
-        .checked_mul(trace_domain_size)
-        .and_then(|count| count.checked_mul(size_of::<i128>() as u64))
-        .ok_or(CommonProofProverError::CountOverflow)?;
-    let cached_row_catalog_byte_length = cached_row_count
-        .checked_mul(size_of::<(u32, Zeroizing<Vec<i128>>)>() as u64)
-        .ok_or(CommonProofProverError::CountOverflow)?;
-    let returned_signed_row_byte_length = trace_domain_size
-        .checked_mul(size_of::<i128>() as u64)
-        .ok_or(CommonProofProverError::CountOverflow)?;
-    // The quotient and full-ring integer-lift paths each use fewer than eight
-    // simultaneous full-ring i128 vectors. Charging eight keeps their scratch
-    // disjoint from the recursively cached trace rows above.
-    let full_ring_derivation_workspace_byte_length = geometry
-        .ring_degree
-        .checked_mul(size_of::<i128>() as u64)
-        .and_then(|length| length.checked_mul(8))
-        .ok_or(CommonProofProverError::CountOverflow)?;
-    let additional_loading_source_polynomials_transient_byte_length = [
-        cached_row_payload_byte_length,
-        cached_row_catalog_byte_length,
-        returned_signed_row_byte_length,
-        full_ring_derivation_workspace_byte_length,
-    ]
-    .into_iter()
-    .try_fold(0_u64, checked_memory_add)?;
+    let galois_quotient_columns = source_layout
+        .ordered_entries
+        .iter()
+        .flat_map(|entry| {
+            entry.quotients_by_row.iter().flat_map(|quotient| {
+                quotient
+                    .low_quotients
+                    .into_iter()
+                    .chain(quotient.high_carries)
+            })
+        })
+        .collect::<BTreeSet<_>>();
+    let anchor_quotient_columns = source_layout
+        .ordered_anchors
+        .iter()
+        .flat_map(|anchor| {
+            anchor.quotients.iter().flat_map(|quotient| {
+                quotient
+                    .low_quotients
+                    .into_iter()
+                    .chain(quotient.high_carries)
+            })
+        })
+        .collect::<BTreeSet<_>>();
+    let additional_dependencies = galois_column_dependencies(relation_plan_variant, source_layout)
+        .into_iter()
+        .flat_map(|(target, sources)| sources.into_iter().map(move |source| (target, source)))
+        .collect::<Vec<_>>();
+    let additional_loading_source_polynomials_transient_byte_length =
+        setup_key_relation_derivation_transient_byte_length_with_dependencies(
+            relation_plan_variant,
+            &source_layout.exact_radix_digits_by_column,
+            &galois_quotient_columns,
+            &anchor_quotient_columns,
+            geometry.ring_degree,
+            &additional_dependencies,
+        )?;
     let maximum_returned_source_polynomial_byte_length = trace_domain_size
         .checked_mul(size_of::<ProofBaseFieldElement>() as u64)
         .ok_or(CommonProofProverError::CountOverflow)?;
 
-    let trace_column_count = data_block_count
-        .checked_mul(extended_limb_count)
-        .and_then(|count| count.checked_mul(2))
-        .ok_or(CommonProofProverError::CountOverflow)?;
-    let preparation_decoded_component_byte_length = component_resident_byte_length;
-    let preparation_tree_coefficient_copy_byte_length = component_resident_byte_length;
-    let preparation_extension_column_byte_length = trace_column_count
+    let preparation_decoded_component_byte_length = maximum_component_resident_byte_length;
+    let preparation_tree_coefficient_copy_byte_length = maximum_component_resident_byte_length;
+    let preparation_extension_column_byte_length = maximum_trace_column_count
         .checked_mul(relation_plan_variant.evaluation_domain_size())
         .and_then(|count| count.checked_mul(size_of::<ProofBaseFieldElement>() as u64))
         .ok_or(CommonProofProverError::CountOverflow)?;
@@ -1049,7 +1065,7 @@ fn galois_key_share_source_provider_memory_accounting_from_layout(
         .and_then(|count| count.checked_sub(1))
         .and_then(|count| count.checked_mul(Hash512::BYTE_LENGTH as u64))
         .ok_or(CommonProofProverError::CountOverflow)?;
-    let column_vector_catalog_byte_length = trace_column_count
+    let column_vector_catalog_byte_length = maximum_trace_column_count
         .checked_mul(3)
         .and_then(|count| count.checked_mul(size_of::<Vec<ProofBaseFieldElement>>() as u64))
         .ok_or(CommonProofProverError::CountOverflow)?;
@@ -1079,7 +1095,7 @@ fn galois_key_share_source_provider_memory_accounting_from_layout(
         .checked_div(2)
         .and_then(|count| count.checked_mul(maximum_residue_byte_length))
         .ok_or(CommonProofProverError::CountOverflow)?;
-    let maximum_leaf_encoding_transient_byte_length = trace_column_count
+    let maximum_leaf_encoding_transient_byte_length = maximum_trace_column_count
         .checked_mul(16)
         .and_then(|length| length.checked_add(116))
         .ok_or(CommonProofProverError::CountOverflow)?;
@@ -1109,9 +1125,9 @@ fn galois_key_share_source_provider_memory_accounting_from_layout(
 
     Ok(GaloisKeyShareSourceProviderMemoryAccounting {
         galois_entry_count,
-        selected_catalog_level,
-        component_wire_byte_length,
-        component_resident_byte_length,
+        maximum_selected_catalog_level,
+        maximum_component_wire_byte_length,
+        maximum_component_resident_byte_length,
         retained_canonical_component_byte_length,
         retained_centered_error_byte_length,
         retained_anchor_source_byte_length,
@@ -1131,6 +1147,23 @@ fn galois_key_share_source_provider_memory_accounting_from_layout(
         preparation_peak_resident_byte_length,
         preparation_canonical_component_read_byte_length,
     })
+}
+
+#[cfg(test)]
+pub(crate) fn galois_key_share_topology_comparison_memory_accounting(
+    relation_plan_variant: &RelationPlanVariant,
+    relation_context: &RelationPlanCheckContext,
+    geometry: &TrusteeEvaluationKeyRelationGeometry,
+    source_layout: &GaloisKeyShareSourceLayout,
+    canonical_application_statement_byte_length: usize,
+) -> Result<GaloisKeyShareSourceProviderMemoryAccounting, CommonProofProverError> {
+    galois_key_share_source_provider_memory_accounting_from_layout(
+        relation_plan_variant,
+        relation_context,
+        geometry,
+        source_layout,
+        canonical_application_statement_byte_length,
+    )
 }
 
 pub(crate) fn galois_key_share_source_provider_memory_accounting(
@@ -1605,8 +1638,8 @@ impl GaloisColumnDerivation<'_, '_, '_, '_> {
             .ordered_entries()
             .get(entry_ordinal)
             .ok_or(RefusalReason::WrongTypeOrLength)?;
-        let ordered_modulus_references = self
-            .geometry
+        let ordered_modulus_references = layout
+            .relation_geometry
             .ordered_modulus_references()
             .map_err(|_| RefusalReason::InvalidArithmeticRelation)?;
         let modulus_reference = ordered_modulus_references
@@ -1657,8 +1690,8 @@ impl GaloisColumnDerivation<'_, '_, '_, '_> {
             .centered_error_polynomials_by_block()
             .get(decomposition_block_index)
             .ok_or(RefusalReason::WrongTypeOrLength)?;
-        let gadget_coefficient = self
-            .geometry
+        let gadget_coefficient = layout
+            .relation_geometry
             .gadget_coefficient(decomposition_block_index, modulus_reference)
             .map_err(|_| RefusalReason::InvalidArithmeticRelation)?;
         exact_modular_quotient(

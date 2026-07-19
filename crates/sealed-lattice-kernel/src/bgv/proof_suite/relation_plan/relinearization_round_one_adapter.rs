@@ -1,3 +1,5 @@
+use std::{collections::BTreeSet, mem::size_of};
+
 use zeroize::Zeroizing;
 
 use crate::{
@@ -10,6 +12,7 @@ use crate::{
             SetupGenerationRelinearizationRoundOneSource,
             SetupGenerationRelinearizationRoundTwoSource,
             sample_relinearization_common_reference_limb, setup_commitment_matrix_polynomial,
+            setup_generation_retained_memory_accounting,
             with_setup_generation_relinearization_round_one,
         },
     },
@@ -25,8 +28,8 @@ use super::super::{
     CommonProofSourcePolynomialProvider, CommonProofSourcePolynomialProviderPoll,
     CommonProofSourcePolynomialReplayIdentity, CommonProofSourcePolynomialRequest,
     CommonProofSourcePolynomialRequestContext, CommonProofSourceProviderMemoryAccounting,
-    ProofEvaluationDomain, ProofLeafVisibility, ProofTreeRole, ProvidedCommonProofSourcePolynomial,
-    RelationProofTreeInput, StatementOwnedProofTreeInput,
+    ProofBaseFieldElement, ProofEvaluationDomain, ProofLeafVisibility, ProofTreeRole,
+    ProvidedCommonProofSourcePolynomial, RelationProofTreeInput, StatementOwnedProofTreeInput,
 };
 use super::{
     BoundTreeConstructionKind, RelationColumnOrigin, RelationPlanCheckContext, RelationPlanVariant,
@@ -35,7 +38,6 @@ use super::{
         anchor_full_row, centered_residue, exact_modular_quotient, exact_negacyclic_product_radix,
         half_position, requested_source_column_ordinals, signed_integer_to_base_field,
         split_balanced_quotient, split_rows_match, split_signed_i8_polynomial,
-        split_signed_polynomial,
     },
     key_relation::{
         ExactRadixDigitColumnCatalog, RecenteredVerifierVectorWitness,
@@ -43,12 +45,16 @@ use super::{
     },
     setup_key_relation_adapter::{
         ExactKeyRelationActiveColumnSet, ExactKeyRelationDerivedRowCache,
-        KeyRelationColumnDerivation,
+        KeyRelationColumnDerivation, checked_setup_provider_add, checked_setup_provider_multiply,
+        exact_radix_catalog_heap_byte_length,
+        setup_key_relation_derivation_transient_byte_length_with_dependencies,
+        setup_provider_payload_for_count,
     },
     trustee_evaluation_key::{
         GaloisKeyShareAnchorSourceLayout, RelinearizationRoundOneErrorSourceLayout,
         RelinearizationRoundOneQuotientSourceLayout, RelinearizationRoundOneSourceLayout,
-        RelinearizationRoundTwoSourceLayout, TrusteeEvaluationKeyRelationGeometry,
+        RelinearizationRoundTwoSourceLayout, TrusteeEvaluationKeyDecompositionBlock,
+        TrusteeEvaluationKeyRelationGeometry,
     },
 };
 
@@ -215,6 +221,242 @@ impl<'layout> RelinearizationRoundOneSourceLayoutView<'layout> {
             exact_radix_digits_by_column: &source_layout.exact_radix_digits_by_column,
         }
     }
+}
+
+fn retained_vector_capacity_byte_length<Value>(
+    values: &Vec<Value>,
+) -> Result<u64, CommonProofProverError> {
+    checked_setup_provider_multiply(
+        u64::try_from(values.capacity()).map_err(|_| CommonProofProverError::CountOverflow)?,
+        u64::try_from(size_of::<Value>()).map_err(|_| CommonProofProverError::CountOverflow)?,
+    )
+}
+
+fn relinearization_geometry_heap_byte_length(
+    geometry: &TrusteeEvaluationKeyRelationGeometry,
+) -> Result<u64, CommonProofProverError> {
+    let decomposition_index_payload_byte_length =
+        geometry
+            .decomposition_blocks
+            .iter()
+            .try_fold(0_u64, |total, block| {
+                checked_setup_provider_add(
+                    total,
+                    retained_vector_capacity_byte_length(&block.data_modulus_indices)?,
+                )
+            })?;
+    [
+        retained_vector_capacity_byte_length(&geometry.data_moduli)?,
+        retained_vector_capacity_byte_length(&geometry.special_moduli)?,
+        retained_vector_capacity_byte_length::<TrusteeEvaluationKeyDecompositionBlock>(
+            &geometry.decomposition_blocks,
+        )?,
+        decomposition_index_payload_byte_length,
+        retained_vector_capacity_byte_length(&geometry.commitment_data_modulus_indices)?,
+    ]
+    .into_iter()
+    .try_fold(0_u64, checked_setup_provider_add)
+}
+
+fn relinearization_round_one_source_layout_heap_byte_length(
+    source_layout: RelinearizationRoundOneSourceLayoutView<'_>,
+) -> Result<u64, CommonProofProverError> {
+    let anchor_nested_payload_byte_length =
+        source_layout
+            .ordered_anchors
+            .iter()
+            .try_fold(0_u64, |total, anchor| {
+                let first_matrix_rows =
+                    anchor
+                        .first_matrix
+                        .iter()
+                        .try_fold(0_u64, |row_total, row| {
+                            checked_setup_provider_add(
+                                row_total,
+                                setup_provider_payload_for_count::<RecenteredVerifierVectorWitness>(
+                                    row.len(),
+                                )?,
+                            )
+                        })?;
+                let anchor_payload_byte_length = [
+                    retained_vector_capacity_byte_length(&anchor.opening.hiding_secrets)?,
+                    retained_vector_capacity_byte_length(&anchor.opening.hiding_errors)?,
+                    setup_provider_payload_for_count::<SplitIntegerVector>(
+                        anchor.commitments.len(),
+                    )?,
+                    setup_provider_payload_for_count::<Box<[RecenteredVerifierVectorWitness]>>(
+                        anchor.first_matrix.len(),
+                    )?,
+                    first_matrix_rows,
+                    setup_provider_payload_for_count::<RecenteredVerifierVectorWitness>(
+                        anchor.second_matrix.len(),
+                    )?,
+                    setup_provider_payload_for_count::<
+                        super::key_relation::TrusteeRadixThreeQuotientWitness,
+                    >(anchor.quotients.len())?,
+                ]
+                .into_iter()
+                .try_fold(0_u64, checked_setup_provider_add)?;
+                checked_setup_provider_add(total, anchor_payload_byte_length)
+            })?;
+    [
+        setup_provider_payload_for_count::<SplitIntegerVector>(
+            source_layout.round_one_left_rows.len(),
+        )?,
+        setup_provider_payload_for_count::<SplitIntegerVector>(
+            source_layout.round_one_right_rows.len(),
+        )?,
+        setup_provider_payload_for_count::<RelinearizationRoundOneErrorSourceLayout>(
+            source_layout.errors_by_block.len(),
+        )?,
+        setup_provider_payload_for_count::<RelinearizationRoundOneQuotientSourceLayout>(
+            source_layout.quotients_by_row.len(),
+        )?,
+        setup_provider_payload_for_count::<GaloisKeyShareAnchorSourceLayout>(
+            source_layout.ordered_anchors.len(),
+        )?,
+        anchor_nested_payload_byte_length,
+        exact_radix_catalog_heap_byte_length(source_layout.exact_radix_digits_by_column)?,
+    ]
+    .into_iter()
+    .try_fold(0_u64, checked_setup_provider_add)
+}
+
+fn relinearization_round_one_additional_dependencies(
+    source_layout: RelinearizationRoundOneSourceLayoutView<'_>,
+) -> Vec<(u32, u32)> {
+    source_layout
+        .ordered_anchors
+        .iter()
+        .flat_map(|anchor| {
+            anchor
+                .first_matrix
+                .iter()
+                .flat_map(|row| row.iter())
+                .chain(anchor.second_matrix.iter())
+        })
+        .flat_map(|matrix| {
+            (0..2).flat_map(|half_ordinal| {
+                [
+                    (
+                        matrix.centered.source.coefficients.halves[half_ordinal],
+                        matrix.canonical.halves[half_ordinal],
+                    ),
+                    (
+                        matrix.carry_columns[half_ordinal],
+                        matrix.canonical.halves[half_ordinal],
+                    ),
+                ]
+            })
+        })
+        .collect()
+}
+
+pub(crate) fn relinearization_round_one_source_provider_memory_accounting(
+    relation_plan_variant: &RelationPlanVariant,
+    relation_context: &RelationPlanCheckContext,
+    geometry: &TrusteeEvaluationKeyRelationGeometry,
+    source_layout: &RelinearizationRoundOneSourceLayout,
+    canonical_application_statement_byte_length: usize,
+) -> Result<CommonProofSourceProviderMemoryAccounting, CommonProofProverError> {
+    if canonical_application_statement_byte_length == 0
+        || relation_plan_variant.trace_domain_size().checked_mul(2) != Some(geometry.ring_degree)
+    {
+        return Err(CommonProofProverError::InvalidColumn);
+    }
+    let source_layout_view = RelinearizationRoundOneSourceLayoutView::from_round_one(source_layout);
+    let round_one_quotient_columns = source_layout_view
+        .quotients_by_row
+        .iter()
+        .flat_map(|quotient| {
+            quotient
+                .left
+                .low_quotients
+                .into_iter()
+                .chain(quotient.left.high_carries)
+                .chain(quotient.right.low_quotients)
+                .chain(quotient.right.high_carries)
+        })
+        .collect::<BTreeSet<_>>();
+    let anchor_quotient_columns = source_layout_view
+        .ordered_anchors
+        .iter()
+        .flat_map(|anchor| {
+            anchor.quotients.iter().flat_map(|quotient| {
+                quotient
+                    .low_quotients
+                    .into_iter()
+                    .chain(quotient.high_carries)
+            })
+        })
+        .collect::<BTreeSet<_>>();
+    let additional_dependencies =
+        relinearization_round_one_additional_dependencies(source_layout_view);
+    let requested_column_count = requested_source_column_ordinals(relation_plan_variant)?.len();
+    let adapter_retained_byte_length = [
+        u64::try_from(size_of::<RelinearizationRoundOneSourcePolynomialAdapter>())
+            .map_err(|_| CommonProofProverError::CountOverflow)?,
+        u64::try_from(canonical_application_statement_byte_length)
+            .map_err(|_| CommonProofProverError::CountOverflow)?,
+        relation_plan_variant
+            .resident_owned_payload_byte_length()
+            .map_err(CommonProofProverError::Relation)?,
+        relation_context
+            .resident_owned_payload_byte_length()
+            .map_err(CommonProofProverError::Relation)?,
+        relinearization_geometry_heap_byte_length(geometry)?,
+        relinearization_round_one_source_layout_heap_byte_length(source_layout_view)?,
+        setup_provider_payload_for_count::<u32>(requested_column_count)?,
+    ]
+    .into_iter()
+    .try_fold(0_u64, checked_setup_provider_add)?;
+    let cached_quotient_byte_length = checked_setup_provider_multiply(
+        geometry.ring_degree,
+        u64::try_from(size_of::<i128>()).map_err(|_| CommonProofProverError::CountOverflow)?,
+    )?;
+    let derivation_workspace_byte_length =
+        setup_key_relation_derivation_transient_byte_length_with_dependencies(
+            relation_plan_variant,
+            source_layout_view.exact_radix_digits_by_column,
+            &round_one_quotient_columns,
+            &anchor_quotient_columns,
+            geometry.ring_degree,
+            &additional_dependencies,
+        )?;
+    let maximum_returned_source_polynomial_byte_length = checked_setup_provider_multiply(
+        relation_plan_variant.trace_domain_size(),
+        u64::try_from(size_of::<ProofBaseFieldElement>())
+            .map_err(|_| CommonProofProverError::CountOverflow)?,
+    )?;
+    Ok(CommonProofSourceProviderMemoryAccounting::new(
+        checked_setup_provider_add(adapter_retained_byte_length, cached_quotient_byte_length)?,
+        adapter_retained_byte_length,
+        derivation_workspace_byte_length,
+        maximum_returned_source_polynomial_byte_length,
+    ))
+}
+
+fn add_setup_authority_memory_accounting(
+    provider: CommonProofSourceProviderMemoryAccounting,
+    authority_identifier: u32,
+) -> Result<CommonProofSourceProviderMemoryAccounting, CommonProofProverError> {
+    let authority = setup_generation_retained_memory_accounting(
+        &SetupGenerationAuthorityHandle::from_identifier(authority_identifier),
+    )
+    .map_err(|_| CommonProofProverError::InvalidInput)?;
+    let authority_byte_length = authority.active_payload_byte_length();
+    Ok(CommonProofSourceProviderMemoryAccounting::new(
+        checked_setup_provider_add(
+            provider.loading_persistent_resident_byte_length(),
+            authority_byte_length,
+        )?,
+        checked_setup_provider_add(
+            provider.post_source_polynomial_finish_persistent_resident_byte_length(),
+            authority_byte_length,
+        )?,
+        provider.additional_loading_transient_byte_length(),
+        provider.maximum_returned_source_polynomial_byte_length(),
+    ))
 }
 
 /// Ordered generation-only source provider for one participant's exact
@@ -395,47 +637,19 @@ impl CommonProofSourcePolynomialProvider for RelinearizationRoundOneSourcePolyno
     fn memory_accounting(
         &self,
     ) -> Result<CommonProofSourceProviderMemoryAccounting, CommonProofProverError> {
-        let checked_add = |left: u64, right: u64| {
-            left.checked_add(right)
-                .ok_or(CommonProofProverError::CountOverflow)
-        };
-        let adapter_retained_byte_length = [
-            core::mem::size_of::<Self>() as u64,
-            u64::try_from(self.canonical_application_statement_bytes.len())
-                .map_err(|_| CommonProofProverError::CountOverflow)?,
-            self.relation_plan_variant
-                .resident_owned_payload_byte_length()
-                .map_err(CommonProofProverError::Relation)?,
-            self.relation_context
-                .resident_owned_payload_byte_length()
-                .map_err(CommonProofProverError::Relation)?,
-            u64::try_from(self.requested_column_ordinals.len())
-                .ok()
-                .and_then(|count| count.checked_mul(core::mem::size_of::<u32>() as u64))
-                .ok_or(CommonProofProverError::CountOverflow)?,
-        ]
-        .into_iter()
-        .try_fold(0_u64, checked_add)?;
-        let ring_byte_length = self
-            .geometry
-            .ring_degree
-            .checked_mul(core::mem::size_of::<i128>() as u64)
-            .ok_or(CommonProofProverError::CountOverflow)?;
-        let cached_quotient_byte_length = ring_byte_length;
-        let maximum_returned_source_polynomial_byte_length = self
-            .relation_plan_variant
-            .trace_domain_size()
-            .checked_mul(core::mem::size_of::<super::super::ProofBaseFieldElement>() as u64)
-            .ok_or(CommonProofProverError::CountOverflow)?;
-        let derivation_workspace_byte_length = ring_byte_length
-            .checked_mul(8)
-            .ok_or(CommonProofProverError::CountOverflow)?;
-        Ok(CommonProofSourceProviderMemoryAccounting::new(
-            checked_add(adapter_retained_byte_length, cached_quotient_byte_length)?,
-            adapter_retained_byte_length,
-            derivation_workspace_byte_length,
-            maximum_returned_source_polynomial_byte_length,
-        ))
+        let requested_column_count =
+            requested_source_column_ordinals(&self.relation_plan_variant)?.len();
+        if requested_column_count != self.requested_column_ordinals.len() {
+            return Err(CommonProofProverError::InvalidColumn);
+        }
+        let provider = relinearization_round_one_source_provider_memory_accounting(
+            &self.relation_plan_variant,
+            &self.relation_context,
+            &self.geometry,
+            &self.source_layout,
+            self.canonical_application_statement_bytes.len(),
+        )?;
+        add_setup_authority_memory_accounting(provider, self.authority_identifier)
     }
 
     fn poll_source_polynomial(

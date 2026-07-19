@@ -470,6 +470,7 @@ impl BallotValidityVerificationTerminalRegistry {
 /// ballot package. Coefficients are shared immutably with the verifier
 /// material until the evaluator aggregation consumes the ballot output.
 pub(crate) struct VerifiedBallotCiphertextPolynomial {
+    ciphertext_ordinal: u16,
     component_ordinal: u16,
     data_modulus_index: u16,
     modulus: u64,
@@ -477,6 +478,10 @@ pub(crate) struct VerifiedBallotCiphertextPolynomial {
 }
 
 impl VerifiedBallotCiphertextPolynomial {
+    pub(crate) const fn ciphertext_ordinal(&self) -> u16 {
+        self.ciphertext_ordinal
+    }
+
     pub(crate) const fn component_ordinal(&self) -> u16 {
         self.component_ordinal
     }
@@ -868,8 +873,15 @@ fn finish_ballot_validity_verification_preparation(
         .authenticated_ciphertext_catalog()?
         .into_iter()
         .map(
-            |(component_ordinal, data_modulus_index, modulus, coefficients)| {
+            |(
+                ciphertext_ordinal,
+                component_ordinal,
+                data_modulus_index,
+                modulus,
+                coefficients,
+            )| {
                 VerifiedBallotCiphertextPolynomial {
+                    ciphertext_ordinal,
                     component_ordinal,
                     data_modulus_index,
                     modulus,

@@ -38,20 +38,6 @@ pub(crate) fn inverse_negacyclic_ntt_in_place(
     transform_negacyclic_in_place(values, modulus, TransformDirection::Inverse)
 }
 
-pub(crate) fn forward_negacyclic_ntt_with_parameters(
-    coefficients: &[u64],
-    parameters: NttTransformParameters,
-) -> CanonicalResult<Vec<u64>> {
-    transform_negacyclic_with_parameters(coefficients, parameters, TransformDirection::Forward)
-}
-
-pub(crate) fn inverse_negacyclic_ntt_with_parameters_in_place(
-    values: &mut [u64],
-    parameters: NttTransformParameters,
-) -> CanonicalResult<()> {
-    transform_negacyclic_with_parameters_in_place(values, parameters, TransformDirection::Inverse)
-}
-
 // Negacyclic (X^N+1) transform reduced to a cyclic NTT: weight the input by
 // powers of psi (the 2N-th root), run a cyclic NTT, then weight the output. The
 // inverse undoes both. `root_exponent = POLYNOMIAL_DEGREE/len` rescales the
@@ -65,30 +51,6 @@ fn transform_negacyclic(
     transform_negacyclic_in_place(&mut transformed, modulus, direction)?;
 
     Ok(transformed)
-}
-
-fn transform_negacyclic_with_parameters(
-    values: &[u64],
-    parameters: NttTransformParameters,
-    direction: TransformDirection,
-) -> CanonicalResult<Vec<u64>> {
-    let mut transformed = values.to_vec();
-    transform_negacyclic_with_parameters_in_place(&mut transformed, parameters, direction)?;
-
-    Ok(transformed)
-}
-
-fn transform_negacyclic_with_parameters_in_place(
-    values: &mut [u64],
-    parameters: NttTransformParameters,
-    direction: TransformDirection,
-) -> CanonicalResult<()> {
-    validate_transform_length_for_degree(values.len(), parameters.transform_degree)?;
-    validate_residues(values, parameters.roots.modulus)?;
-    let plan = build_ntt_plan_for_transform(parameters, values.len())?;
-    transform_with_plan_in_place(values, &plan, direction);
-
-    Ok(())
 }
 
 fn transform_negacyclic_in_place(
@@ -391,17 +353,12 @@ pub(crate) fn negacyclic_convolution_for_tests(
 mod tests {
     use super::{
         FullDegreeNttPlanCache, forward_negacyclic_ntt, forward_negacyclic_ntt_in_place,
-        forward_negacyclic_ntt_with_parameters, inverse_negacyclic_ntt,
-        inverse_negacyclic_ntt_in_place, inverse_negacyclic_ntt_with_parameters_in_place,
-        negacyclic_convolution_for_tests,
+        inverse_negacyclic_ntt, inverse_negacyclic_ntt_in_place, negacyclic_convolution_for_tests,
     };
     use crate::{
         bgv::{
             modular_arithmetic::sub_mod,
-            parameters::{
-                CANDIDATE_PLAINTEXT_DEGREE, CANDIDATE_PLAINTEXT_NTT_PARAMETERS, DATA_PRIMES,
-                POLYNOMIAL_DEGREE, ROOT_PARAMETERS, SPECIAL_PRIMES,
-            },
+            parameters::{DATA_PRIMES, POLYNOMIAL_DEGREE, ROOT_PARAMETERS, SPECIAL_PRIMES},
         },
         encoding::CanonicalResult,
     };
@@ -478,36 +435,6 @@ mod tests {
             assert!(forward_negacyclic_ntt(&[modulus, 0], modulus).is_err());
         }
         assert!(forward_negacyclic_ntt(&[1, 2], 97).is_err());
-    }
-
-    #[test]
-    fn even_subring_ntt_round_trips_only_its_operative_degree() {
-        let modulus = CANDIDATE_PLAINTEXT_NTT_PARAMETERS.roots.modulus;
-        let input = (0..CANDIDATE_PLAINTEXT_DEGREE)
-            .map(|coefficient_index| {
-                let coefficient = coefficient_index as u64;
-                (coefficient * 131 + coefficient.rotate_left(7) + 17) % modulus
-            })
-            .collect::<Vec<_>>();
-        let mut transformed =
-            forward_negacyclic_ntt_with_parameters(&input, CANDIDATE_PLAINTEXT_NTT_PARAMETERS)
-                .expect("even-subring forward NTT");
-        assert_ne!(transformed, input);
-        inverse_negacyclic_ntt_with_parameters_in_place(
-            &mut transformed,
-            CANDIDATE_PLAINTEXT_NTT_PARAMETERS,
-        )
-        .expect("even-subring inverse NTT");
-        assert_eq!(transformed, input);
-
-        assert!(
-            forward_negacyclic_ntt_with_parameters(
-                &vec![0; POLYNOMIAL_DEGREE],
-                CANDIDATE_PLAINTEXT_NTT_PARAMETERS,
-            )
-            .is_err(),
-            "p=65537 has no full-degree NTT and must not be treated as if it did",
-        );
     }
 
     #[test]

@@ -1,6 +1,4 @@
-use crate::bgv::parameters::BgvBasisKind;
-#[cfg(test)]
-use crate::bgv::parameters::POLYNOMIAL_DEGREE;
+use crate::bgv::parameters::{BgvBasisKind, POLYNOMIAL_DEGREE};
 use crate::encoding::CanonicalReader;
 #[cfg(test)]
 use crate::hashing::namespace_root;
@@ -89,7 +87,6 @@ pub(crate) fn parse_two_component_data_ciphertext_at_level(
 /// Exact codec ceiling for the canonical two-component data ciphertext at one
 /// suite level. The calculation lives beside the serializer so accounting
 /// cannot drift from string framing, varuint framing, or selected moduli.
-#[cfg(test)]
 pub(crate) fn two_component_data_ciphertext_canonical_byte_length_ceiling_at_level(
     expected_level: usize,
 ) -> CanonicalResult<u64> {
@@ -146,7 +143,6 @@ pub(crate) fn two_component_data_ciphertext_canonical_byte_length_ceiling_at_lev
         .ok_or_else(canonical_ceiling_length_overflow)
 }
 
-#[cfg(test)]
 const fn canonical_varuint_byte_length(mut value: u64) -> u64 {
     let mut byte_length = 1_u64;
     while value >= 0x80 {
@@ -156,7 +152,6 @@ const fn canonical_varuint_byte_length(mut value: u64) -> u64 {
     byte_length
 }
 
-#[cfg(test)]
 fn canonical_string_byte_length(value: &str) -> CanonicalResult<u64> {
     let value_byte_length = u64::try_from(value.len()).map_err(|_| {
         CanonicalError::new(
@@ -169,7 +164,6 @@ fn canonical_string_byte_length(value: &str) -> CanonicalResult<u64> {
         .ok_or_else(canonical_ceiling_length_overflow)
 }
 
-#[cfg(test)]
 fn canonical_ceiling_length_overflow() -> CanonicalError {
     CanonicalError::new(
         CanonicalErrorCode::MalformedLength,
@@ -352,7 +346,7 @@ mod tests {
     };
     use crate::{
         bgv::{
-            encoding::encode_batch_plaintext_slots,
+            encoding::encode_batch_plaintext_lanes,
             evaluator::top_k::CANONICAL_TARGET_CIPHERTEXT_LEVEL,
             parameters::{BgvBasisKind, POLYNOMIAL_DEGREE},
             rns::RnsPolynomial,
@@ -362,7 +356,7 @@ mod tests {
 
     #[test]
     fn plaintext_serialization_is_canonical_and_rooted() {
-        let encoded = encode_batch_plaintext_slots(&[1, 2, 65_536], 0).expect("encode");
+        let encoded = encode_batch_plaintext_lanes(&[1, 2, 256], 0).expect("encode");
         let canonical_bytes = serialize_bgv_object(BgvObjectKind::Plaintext, &[encoded.polynomial])
             .expect("serialize");
         let parsed = parse_bgv_object(&canonical_bytes).expect("parse");
@@ -380,8 +374,8 @@ mod tests {
 
     #[test]
     fn ciphertext_serialization_binds_component_count_layout_and_root() {
-        let left = encode_batch_plaintext_slots(&[1, 2, 3], 0).expect("left");
-        let right = encode_batch_plaintext_slots(&[4, 5, 6], 0).expect("right");
+        let left = encode_batch_plaintext_lanes(&[1, 2, 3], 0).expect("left");
+        let right = encode_batch_plaintext_lanes(&[4, 5, 6], 0).expect("right");
         let canonical_bytes = serialize_bgv_object(
             BgvObjectKind::Ciphertext,
             &[left.polynomial.clone(), right.polynomial.clone()],
@@ -400,7 +394,11 @@ mod tests {
 
     #[test]
     fn parser_rejects_trailing_bytes() {
-        let encoded = encode_batch_plaintext_slots(&vec![0; POLYNOMIAL_DEGREE], 0).expect("encode");
+        let encoded = encode_batch_plaintext_lanes(
+            &vec![0; crate::bgv::direct_ballots::PAIR_CHARACTER_LANE_COUNT],
+            0,
+        )
+        .expect("encode");
         let mut canonical_bytes =
             serialize_bgv_object(BgvObjectKind::Plaintext, &[encoded.polynomial])
                 .expect("serialize");

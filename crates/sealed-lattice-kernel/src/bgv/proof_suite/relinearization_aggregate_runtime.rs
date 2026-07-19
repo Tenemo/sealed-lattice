@@ -454,7 +454,7 @@ fn selected_aggregate_runtime_plan(
     })
 }
 
-fn resolve_collective_attempt(
+fn resolve_relinearization_aggregate_attempt(
     action_randomness_handle: u32,
     reservation_binding: VerifiedStateReservationRuntimeBinding,
     session_handle: u32,
@@ -625,7 +625,7 @@ fn prepare_generation(
             checkpoint_lineage_identifier,
             checkpoint_schedule_digest,
         );
-    let fresh_attempt = resolve_collective_attempt(
+    let fresh_attempt = resolve_relinearization_aggregate_attempt(
         action_randomness_handle,
         reservation_binding,
         session_handle,
@@ -663,7 +663,7 @@ fn prepare_generation(
                     let runtime_plan =
                         selected_aggregate_runtime_plan(&canonical_statement, schedule_position)
                             .map_err(resumed_generation_error)?;
-                    let attempt = resolve_collective_attempt(
+                    let attempt = resolve_relinearization_aggregate_attempt(
                         action_randomness_handle,
                         reservation_binding,
                         session_handle,

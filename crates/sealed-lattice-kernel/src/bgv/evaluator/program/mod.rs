@@ -10,8 +10,8 @@ use crate::{
 };
 
 use super::top_k::{
-    CANONICAL_TARGET_CIPHERTEXT_LEVEL, SELECTED_EVALUATOR_WORKING_LEVEL,
-    SELECTED_RELINEARIZATION_KEY_LEVEL, selected_evaluator_rotation_key_schedule,
+    CANONICAL_TARGET_CIPHERTEXT_LEVEL, CHARACTER_OUTPUT_LEVEL, SELECTED_RELINEARIZATION_KEY_LEVEL,
+    selected_evaluator_rotation_key_schedule,
 };
 
 mod codec;
@@ -20,20 +20,6 @@ mod executor;
 mod runtime;
 
 pub(crate) use compiler::selected_evaluator_program_set;
-#[cfg(test)]
-pub(crate) use compiler::{
-    CandidateEvaluatorRecurrenceTrace, compile_candidate_evaluator_program_measurement,
-    compile_factor_four_candidate_recurrence_trace, compiled_prepared_power_instruction_count,
-    compiled_prepared_power_level_trace,
-    selected_evaluator_program_set_with_pair_window_tile_width,
-};
-#[cfg(test)]
-pub(crate) use executor::encode_constant_coefficients;
-#[cfg(test)]
-use executor::{
-    PreparedEvaluatorExecutionSchedule, PreparedEvaluatorKeyIdentity,
-    SelectedEvaluatorExecutionAccounting,
-};
 pub(crate) use executor::{
     PreparedSelectedEvaluatorReplay, SelectedEvaluatorExecutionProgress,
     SelectedEvaluatorProgramExecution, VerifiedEvaluatorAggregate,
@@ -56,14 +42,12 @@ const MAXIMUM_LIVE_REGISTER_COUNT: usize = 64;
 #[repr(u16)]
 pub(crate) enum EvaluatorConstantKind {
     CoefficientVector = 1,
-    SlotVector = 2,
 }
 
 impl EvaluatorConstantKind {
     fn from_canonical_code(code: u16) -> CanonicalResult<Self> {
         match code {
             1 => Ok(Self::CoefficientVector),
-            2 => Ok(Self::SlotVector),
             _ => Err(program_error("evaluator constant kind is unassigned")),
         }
     }
@@ -98,18 +82,10 @@ impl EvaluatorConstant {
         if self.values.is_empty() {
             return Err(program_error("evaluator constant values must be nonempty"));
         }
-        match self.kind {
-            EvaluatorConstantKind::CoefficientVector if self.values.len() > POLYNOMIAL_DEGREE => {
-                return Err(program_error(
-                    "evaluator coefficient vector exceeds the selected ring degree",
-                ));
-            }
-            EvaluatorConstantKind::SlotVector if self.values.len() != POLYNOMIAL_DEGREE => {
-                return Err(program_error(
-                    "evaluator slot vector must contain exactly the selected logical slots",
-                ));
-            }
-            _ => {}
+        if self.values.len() > POLYNOMIAL_DEGREE {
+            return Err(program_error(
+                "evaluator coefficient vector exceeds the selected ring degree",
+            ));
         }
         if self
             .values
@@ -428,10 +404,6 @@ impl EvaluatorProgramSet {
         codec::encode_program_set(self)
     }
 
-    pub(crate) fn decode(bytes: &[u8]) -> CanonicalResult<Self> {
-        codec::decode_program_set(bytes)
-    }
-
     /// Returns the exact sorted evaluation-key catalog positions reached by
     /// each validated stream and by their union. Each Galois element retains
     /// its selected catalog level; an opcode at that level or a lower CRT
@@ -578,13 +550,16 @@ fn validate_instruction_stream(
     let scheduled_galois_levels = selected_evaluator_rotation_key_schedule(SELECTED_OPTION_COUNT)?
         .into_iter()
         .collect::<BTreeMap<_, _>>();
-    let mut register_states = vec![Some(RegisterState {
-        level: SELECTED_EVALUATOR_WORKING_LEVEL,
-        decryption_multiplier: 1,
-    })];
-    let mut expected_output_register = 1_u32;
+    let mut register_states = vec![
+        Some(RegisterState {
+            level: CHARACTER_OUTPUT_LEVEL,
+            decryption_multiplier: 1,
+        });
+        2
+    ];
+    let mut expected_output_register = 2_u32;
     let mut pending_drops = BTreeSet::new();
-    let mut maximum_live_register_count = 1_usize;
+    let mut maximum_live_register_count = 2_usize;
     let mut relinearization_catalog_levels = BTreeSet::new();
     let mut galois_catalog_positions = BTreeSet::new();
 
@@ -793,13 +768,7 @@ fn evaluate_instruction_transition(
                 .ok_or_else(|| {
                     program_error("evaluator instruction references an unknown constant")
                 })?;
-            if instruction.opcode == EvaluatorOpcode::PlaintextAdd
-                && *constant_kind != EvaluatorConstantKind::SlotVector
-            {
-                return Err(program_error(
-                    "evaluator plaintext addition requires a slot-vector constant",
-                ));
-            }
+            let _ = constant_kind;
             first
         }
         EvaluatorOpcode::CiphertextMultiplyRelinearizeAndDrop
@@ -898,6 +867,3 @@ fn require_matching_levels(inputs: &[RegisterState]) -> CanonicalResult<()> {
 fn program_error(message: impl Into<String>) -> CanonicalError {
     CanonicalError::new(CanonicalErrorCode::InvalidProtocolObject, message)
 }
-
-#[cfg(test)]
-mod tests;

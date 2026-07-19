@@ -2,8 +2,8 @@ use super::{
     CommonProofVerifierError, CompleteProofTreeCatalog, OpenedFriLayerPair,
     ProofChallengeExtensionElement, ProofEvaluationDomain, ProofFriQueryState,
     ProofFriQueryVerifier, ProofOpeningClaimEvaluation, ProofTreeCatalogSource, ProofTreeOpening,
-    ProofTreeValue, RelationColumnOrigin, RelationColumnValueType, RelationOpeningSourceClass,
-    RelationPlanVariant, VerifiedRelationColumnEvaluator, evaluate_normalized_opening_claim_pair,
+    ProofTreeValue, RelationColumnValueType, RelationOpeningSourceClass, RelationPlanVariant,
+    evaluate_normalized_opening_claim_pair,
 };
 
 #[derive(Clone, Copy)]
@@ -244,17 +244,13 @@ impl QueryVerificationWorkspace {
         })
     }
 
-    pub(super) fn consume_opening<ColumnEvaluator>(
+    pub(super) fn consume_opening(
         &mut self,
         opening: ProofTreeOpening<'_>,
         variant: &RelationPlanVariant,
         catalog: &CompleteProofTreeCatalog,
         query_representatives: &[u64],
-        evaluate_verified_column: &mut ColumnEvaluator,
-    ) -> Result<(), CommonProofVerifierError>
-    where
-        ColumnEvaluator: VerifiedRelationColumnEvaluator + ?Sized,
-    {
+    ) -> Result<(), CommonProofVerifierError> {
         let catalog_index = usize::from(opening.catalog_entry().tree_catalog_index());
         if catalog_index != self.next_catalog_index
             || catalog.entries().get(catalog_index) != Some(opening.catalog_entry())
@@ -269,7 +265,6 @@ impl QueryVerificationWorkspace {
                     opening.leaves(),
                     variant,
                     query_representatives,
-                    evaluate_verified_column,
                 )?;
             }
             ProofTreeCatalogSource::QuotientComponent { .. } => {
@@ -302,17 +297,13 @@ impl QueryVerificationWorkspace {
         Ok(())
     }
 
-    fn consume_relation_tree<ColumnEvaluator>(
+    fn consume_relation_tree(
         &mut self,
         catalog_index: usize,
         leaves: &[super::super::DecodedProofPhasePairLeaf],
         variant: &RelationPlanVariant,
         query_representatives: &[u64],
-        evaluate_verified_column: &mut ColumnEvaluator,
-    ) -> Result<(), CommonProofVerifierError>
-    where
-        ColumnEvaluator: VerifiedRelationColumnEvaluator + ?Sized,
-    {
+    ) -> Result<(), CommonProofVerifierError> {
         let tree = variant
             .ordered_trees()
             .get(catalog_index)
@@ -323,14 +314,7 @@ impl QueryVerificationWorkspace {
             .get(catalog_index)
             .ok_or(CommonProofVerifierError::InvalidOpeningClaim)?;
 
-        verify_relation_tree_columns(
-            leaves,
-            columns,
-            variant,
-            query_representatives,
-            self.evaluation_domain,
-            evaluate_verified_column,
-        )?;
+        verify_relation_tree_columns(leaves, columns, variant, query_representatives)?;
 
         accumulate_relation_tree_opening_claims(
             leaves,
@@ -466,51 +450,28 @@ impl QueryVerificationWorkspace {
     }
 }
 
-fn verify_relation_tree_columns<ColumnEvaluator>(
+fn verify_relation_tree_columns(
     leaves: &[super::super::DecodedProofPhasePairLeaf],
     columns: &[u32],
     variant: &RelationPlanVariant,
     query_representatives: &[u64],
-    evaluation_domain: ProofEvaluationDomain,
-    evaluate_verified_column: &mut ColumnEvaluator,
-) -> Result<(), CommonProofVerifierError>
-where
-    ColumnEvaluator: VerifiedRelationColumnEvaluator + ?Sized,
-{
-    verify_relation_tree_column_openings(
-        leaves,
-        columns,
-        query_representatives,
-        evaluation_domain,
-        evaluate_verified_column,
-        |column_ordinal| {
-            usize::try_from(column_ordinal)
-                .ok()
-                .and_then(|column_index| variant.ordered_columns().get(column_index))
-                .map(|column| {
-                    (
-                        column.value_type(),
-                        matches!(
-                            column.origin(),
-                            RelationColumnOrigin::VerifierSequence { .. }
-                        ),
-                    )
-                })
-        },
-    )
+) -> Result<(), CommonProofVerifierError> {
+    verify_relation_tree_column_openings(leaves, columns, query_representatives, |column_ordinal| {
+        usize::try_from(column_ordinal)
+            .ok()
+            .and_then(|column_index| variant.ordered_columns().get(column_index))
+            .map(|column| column.value_type())
+    })
 }
 
-fn verify_relation_tree_column_openings<ColumnEvaluator, ResolveColumn>(
+fn verify_relation_tree_column_openings<ResolveColumn>(
     leaves: &[super::super::DecodedProofPhasePairLeaf],
     columns: &[u32],
     query_representatives: &[u64],
-    evaluation_domain: ProofEvaluationDomain,
-    evaluate_verified_column: &mut ColumnEvaluator,
     mut resolve_column: ResolveColumn,
 ) -> Result<(), CommonProofVerifierError>
 where
-    ColumnEvaluator: VerifiedRelationColumnEvaluator + ?Sized,
-    ResolveColumn: FnMut(u32) -> Option<(RelationColumnValueType, bool)>,
+    ResolveColumn: FnMut(u32) -> Option<RelationColumnValueType>,
 {
     if leaves.len() != query_representatives.len() {
         return Err(CommonProofVerifierError::InvalidTreeLayout);
@@ -525,22 +486,10 @@ where
     }
 
     for (column_position, column_ordinal) in columns.iter().copied().enumerate() {
-        let (value_type, is_verifier_sequence) =
+        let value_type =
             resolve_column(column_ordinal).ok_or(CommonProofVerifierError::InvalidTreeLayout)?;
-        for (leaf, representative) in leaves.iter().zip(query_representatives.iter().copied()) {
-            let pair = opened_pair(leaf, column_position, value_type)?;
-            if is_verifier_sequence {
-                let expected_pair = evaluate_verified_column
-                    .evaluate_at_evaluation_domain_pair(
-                        column_ordinal,
-                        evaluation_domain,
-                        representative,
-                    )
-                    .ok_or(CommonProofVerifierError::MissingVerifiedColumnValue)?;
-                if pair != expected_pair {
-                    return Err(CommonProofVerifierError::VerifiedColumnMismatch);
-                }
-            }
+        for leaf in leaves {
+            opened_pair(leaf, column_position, value_type)?;
         }
     }
     Ok(())
@@ -662,7 +611,6 @@ fn add_pairs(left: OpenedFriLayerPair, right: OpenedFriLayerPair) -> OpenedFriLa
 mod tests {
     use crate::bgv::proof_suite::{
         DecodedProofPhasePairLeaf, PROOF_CHALLENGE_EXTENSION_DEGREE, ProofBaseFieldElement,
-        VerifiedRelationColumnEvaluatorMemoryAccounting,
     };
 
     use super::*;
@@ -670,95 +618,7 @@ mod tests {
     const TEST_COLUMNS: [u32; 4] = [7, 2, 11, 5];
     const TEST_QUERY_REPRESENTATIVES: [u64; 3] = [3, 7, 19];
     const PROVER_COLUMN_POSITION: usize = 1;
-    const EXTENSION_VERIFIER_COLUMN_POSITION: usize = 2;
-
-    struct RecordingVerifiedColumnEvaluator {
-        calls: Vec<(u32, u64)>,
-        missing_value: Option<(u32, u64)>,
-    }
-
-    impl RecordingVerifiedColumnEvaluator {
-        fn complete() -> Self {
-            Self {
-                calls: Vec::new(),
-                missing_value: None,
-            }
-        }
-
-        fn missing(column_ordinal: u32, query_representative: u64) -> Self {
-            Self {
-                missing_value: Some((column_ordinal, query_representative)),
-                ..Self::complete()
-            }
-        }
-    }
-
-    impl VerifiedRelationColumnEvaluator for RecordingVerifiedColumnEvaluator {
-        fn memory_accounting(
-            &self,
-        ) -> Result<VerifiedRelationColumnEvaluatorMemoryAccounting, CommonProofVerifierError>
-        {
-            let call_payload = u64::try_from(self.calls.capacity())
-                .ok()
-                .and_then(|count| count.checked_mul(core::mem::size_of::<(u32, u64)>() as u64))
-                .ok_or(CommonProofVerifierError::InvalidTreeLayout)?;
-            VerifiedRelationColumnEvaluatorMemoryAccounting::new(
-                (core::mem::size_of::<Self>() as u64)
-                    .checked_add(call_payload)
-                    .ok_or(CommonProofVerifierError::InvalidTreeLayout)?,
-                0,
-                0,
-            )
-        }
-
-        fn evaluate_at_extension_point(
-            &mut self,
-            _column_ordinal: u32,
-            _point: ProofChallengeExtensionElement,
-        ) -> Option<ProofChallengeExtensionElement> {
-            panic!("query verification must use the evaluation-domain pair path")
-        }
-
-        fn evaluate_at_evaluation_domain_pair(
-            &mut self,
-            column_ordinal: u32,
-            _evaluation_domain: ProofEvaluationDomain,
-            query_representative: u64,
-        ) -> Option<OpenedFriLayerPair> {
-            self.calls.push((column_ordinal, query_representative));
-            if self.missing_value == Some((column_ordinal, query_representative)) {
-                return None;
-            }
-            let (value_type, _) = test_column(column_ordinal)?;
-            Some(verifier_owned_pair(
-                column_ordinal,
-                query_representative,
-                value_type,
-            ))
-        }
-    }
-
-    #[test]
-    fn verifier_sequence_evaluation_follows_canonical_column_major_order() {
-        let leaves = test_leaves(&TEST_QUERY_REPRESENTATIVES);
-        let evaluation_domain = test_evaluation_domain();
-        let mut evaluator = RecordingVerifiedColumnEvaluator::complete();
-
-        verify_relation_tree_column_openings(
-            &leaves,
-            &TEST_COLUMNS,
-            &TEST_QUERY_REPRESENTATIVES,
-            evaluation_domain,
-            &mut evaluator,
-            test_column,
-        )
-        .expect("canonical relation leaves must match verifier-owned columns");
-
-        assert_eq!(
-            evaluator.calls,
-            vec![(7, 3), (7, 7), (7, 19), (11, 3), (11, 7), (11, 19),],
-        );
-    }
+    const EXTENSION_COLUMN_POSITION: usize = 2;
 
     #[test]
     fn relation_claims_remain_bound_to_each_query_after_column_major_verification() {
@@ -766,7 +626,7 @@ mod tests {
         let evaluation_domain = test_evaluation_domain();
         let claims = vec![
             test_runtime_claim(PROVER_COLUMN_POSITION, 3, 71, 5, 11),
-            test_runtime_claim(EXTENSION_VERIFIER_COLUMN_POSITION, 4, 73, 7, 13),
+            test_runtime_claim(EXTENSION_COLUMN_POSITION, 4, 73, 7, 13),
         ];
         let mut accumulated_pairs = vec![
             OpenedFriLayerPair::new(
@@ -788,7 +648,6 @@ mod tests {
                 TEST_COLUMNS
                     .get(column_position)
                     .and_then(|column_ordinal| test_column(*column_ordinal))
-                    .map(|(value_type, _)| value_type)
             },
         )
         .expect("the authenticated relation leaves and claims must be accepted");
@@ -817,8 +676,7 @@ mod tests {
                             test_column(
                                 TEST_COLUMNS[claim.column_position.expect("column position")],
                             )
-                            .expect("the test column exists")
-                            .0,
+                            .expect("the test column exists"),
                         )?;
                         let term = evaluate_normalized_opening_claim_pair(
                             8,
@@ -842,11 +700,11 @@ mod tests {
             resolved_column_positions,
             vec![
                 PROVER_COLUMN_POSITION,
-                EXTENSION_VERIFIER_COLUMN_POSITION,
+                EXTENSION_COLUMN_POSITION,
                 PROVER_COLUMN_POSITION,
-                EXTENSION_VERIFIER_COLUMN_POSITION,
+                EXTENSION_COLUMN_POSITION,
                 PROVER_COLUMN_POSITION,
-                EXTENSION_VERIFIER_COLUMN_POSITION,
+                EXTENSION_COLUMN_POSITION,
             ],
         );
     }
@@ -916,81 +774,14 @@ mod tests {
         assert_invalid_tree_layout(&long_opposite_row);
     }
 
-    #[test]
-    fn verifier_source_absence_and_mismatch_fail_closed() {
-        let leaves = test_leaves(&TEST_QUERY_REPRESENTATIVES);
-        let verifier_column_ordinal = TEST_COLUMNS[EXTENSION_VERIFIER_COLUMN_POSITION];
-        let missing_query_representative = TEST_QUERY_REPRESENTATIVES[1];
-        let mut missing_evaluator = RecordingVerifiedColumnEvaluator::missing(
-            verifier_column_ordinal,
-            missing_query_representative,
-        );
-        assert_eq!(
-            verify_relation_tree_column_openings(
-                &leaves,
-                &TEST_COLUMNS,
-                &TEST_QUERY_REPRESENTATIVES,
-                test_evaluation_domain(),
-                &mut missing_evaluator,
-                test_column,
-            ),
-            Err(CommonProofVerifierError::MissingVerifiedColumnValue),
-        );
-
-        let mismatched_query_index = 2;
-        let mismatched_leaf = &leaves[mismatched_query_index];
-        let mut mismatched_first_values = mismatched_leaf.first_point_values().to_vec();
-        mismatched_first_values[EXTENSION_VERIFIER_COLUMN_POSITION] =
-            ProofTreeValue::Extension(extension_from_coordinates(9_999_991));
-        let mut mismatched_leaves = leaves.clone();
-        let mismatched_leaf = DecodedProofPhasePairLeaf::from_test_values(
-            mismatched_leaf.leaf_index(),
-            mismatched_first_values,
-            mismatched_leaf.opposite_point_values().to_vec(),
-        );
-        mismatched_leaves[mismatched_query_index] = mismatched_leaf;
-        let mut evaluator = RecordingVerifiedColumnEvaluator::complete();
-        assert_eq!(
-            verify_relation_tree_column_openings(
-                &mismatched_leaves,
-                &TEST_COLUMNS,
-                &TEST_QUERY_REPRESENTATIVES,
-                test_evaluation_domain(),
-                &mut evaluator,
-                test_column,
-            ),
-            Err(CommonProofVerifierError::VerifiedColumnMismatch),
-        );
-        let mut evaluator = RecordingVerifiedColumnEvaluator::complete();
-        assert_eq!(
-            verify_relation_tree_column_openings(
-                &leaves,
-                &TEST_COLUMNS,
-                &TEST_QUERY_REPRESENTATIVES,
-                test_evaluation_domain(),
-                &mut evaluator,
-                |column_ordinal| {
-                    if column_ordinal == verifier_column_ordinal {
-                        None
-                    } else {
-                        test_column(column_ordinal)
-                    }
-                },
-            ),
-            Err(CommonProofVerifierError::InvalidTreeLayout),
-        );
-    }
-
     fn test_evaluation_domain() -> ProofEvaluationDomain {
         ProofEvaluationDomain::new(64, 7).expect("the deterministic test domain is valid")
     }
 
-    fn test_column(column_ordinal: u32) -> Option<(RelationColumnValueType, bool)> {
+    fn test_column(column_ordinal: u32) -> Option<RelationColumnValueType> {
         match column_ordinal {
-            7 => Some((RelationColumnValueType::BaseField, true)),
-            2 => Some((RelationColumnValueType::BaseField, false)),
-            11 => Some((RelationColumnValueType::ChallengeExtension, true)),
-            5 => Some((RelationColumnValueType::ChallengeExtension, false)),
+            7 | 2 => Some(RelationColumnValueType::BaseField),
+            11 | 5 => Some(RelationColumnValueType::ChallengeExtension),
             _ => None,
         }
     }
@@ -1004,13 +795,11 @@ mod tests {
                     .iter()
                     .copied()
                     .map(|column_ordinal| {
-                        let (value_type, is_verifier_sequence) =
-                            test_column(column_ordinal).expect("the test column exists");
-                        if is_verifier_sequence {
-                            verifier_owned_pair(column_ordinal, query_representative, value_type)
-                        } else {
-                            non_verifier_pair(column_ordinal, query_representative, value_type)
-                        }
+                        non_verifier_pair(
+                            column_ordinal,
+                            query_representative,
+                            test_column(column_ordinal).expect("the test column exists"),
+                        )
                     })
                     .collect::<Vec<_>>();
                 let first_point_values = TEST_COLUMNS
@@ -1018,9 +807,7 @@ mod tests {
                     .zip(&pairs)
                     .map(|(column_ordinal, pair)| {
                         typed_tree_value(
-                            test_column(*column_ordinal)
-                                .expect("the test column exists")
-                                .0,
+                            test_column(*column_ordinal).expect("the test column exists"),
                             pair.first(),
                         )
                     })
@@ -1030,9 +817,7 @@ mod tests {
                     .zip(&pairs)
                     .map(|(column_ordinal, pair)| {
                         typed_tree_value(
-                            test_column(*column_ordinal)
-                                .expect("the test column exists")
-                                .0,
+                            test_column(*column_ordinal).expect("the test column exists"),
                             pair.opposite(),
                         )
                     })
@@ -1044,14 +829,6 @@ mod tests {
                 )
             })
             .collect()
-    }
-
-    fn verifier_owned_pair(
-        column_ordinal: u32,
-        query_representative: u64,
-        value_type: RelationColumnValueType,
-    ) -> OpenedFriLayerPair {
-        deterministic_pair(column_ordinal, query_representative, value_type, 1_000_000)
     }
 
     fn non_verifier_pair(
@@ -1148,14 +925,11 @@ mod tests {
     }
 
     fn assert_invalid_tree_layout(leaves: &[DecodedProofPhasePairLeaf]) {
-        let mut evaluator = RecordingVerifiedColumnEvaluator::complete();
         assert_eq!(
             verify_relation_tree_column_openings(
                 leaves,
                 &TEST_COLUMNS,
                 &TEST_QUERY_REPRESENTATIVES,
-                test_evaluation_domain(),
-                &mut evaluator,
                 test_column,
             ),
             Err(CommonProofVerifierError::InvalidTreeLayout),

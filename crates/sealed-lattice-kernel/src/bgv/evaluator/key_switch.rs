@@ -1,11 +1,8 @@
-use num_bigint::{BigInt, BigUint, Sign};
-use num_traits::ToPrimitive;
-
 use crate::{
     bgv::{
-        evaluator::engine::{Ciphertext, signed_residue},
+        evaluator::engine::Ciphertext,
         key_switch_topology::{KEY_SWITCH_SPECIAL_PRIMES, KeySwitchDecompositionTopology},
-        modular_arithmetic::{add_mod, add_mod_fast, inverse_mod, mul_mod, mul_mod_fast, sub_mod},
+        modular_arithmetic::{add_mod_fast, inverse_mod, mul_mod, mul_mod_fast, sub_mod},
         ntt::{forward_negacyclic_ntt_in_place, inverse_negacyclic_ntt_in_place},
         parameters::{DATA_PRIMES, POLYNOMIAL_DEGREE},
     },
@@ -14,11 +11,13 @@ use crate::{
 
 #[cfg(test)]
 use crate::bgv::evaluator::{
-    engine::{DevelopmentBgvKey, negacyclic_mul},
+    engine::{DevelopmentBgvKey, negacyclic_mul, signed_residue},
     prg::DeterministicSampler,
 };
 #[cfg(test)]
 use crate::bgv::key_switch_topology::canonical_residue_byte_length;
+#[cfg(test)]
+use crate::bgv::modular_arithmetic::add_mod;
 
 mod rotation;
 
@@ -35,6 +34,7 @@ pub(crate) use rotation::rotate;
 pub(crate) const PLAINTEXT_MODULUS_I64: i64 = crate::bgv::parameters::PLAINTEXT_MODULUS as i64;
 #[cfg(test)]
 pub(crate) const KEY_SWITCH_ERROR_DOMAIN: &str = "sealed-lattice-bgv-evaluator/key-switch-error";
+#[cfg(test)]
 pub(crate) const KEY_SWITCH_SAMPLE_DOMAIN: &str = "sealed-lattice-bgv-evaluator/key-switch-sample";
 // A polynomial component held as residue vectors, one per active prime.
 type LimbMatrix = Vec<Vec<u64>>;
@@ -334,6 +334,7 @@ impl KeySwitchComponent {
             .collect()
     }
 
+    #[cfg(test)]
     fn from_coefficients(
         component_b: Vec<Vec<u64>>,
         component_a: Vec<Vec<u64>>,
@@ -350,6 +351,7 @@ impl KeySwitchComponent {
     }
 }
 
+#[cfg(test)]
 fn ntt_limbs(mut limbs: Vec<Vec<u64>>, primes: &[u64]) -> CanonicalResult<Vec<Vec<u64>>> {
     if limbs.len() != primes.len() {
         return Err(CanonicalError::new(
@@ -592,14 +594,20 @@ fn key_switch_component(
     let stored_special_limb_start = key_switch_key.level() + 1;
     let mut extended_zero_ntt = vec![vec![0_u64; POLYNOMIAL_DEGREE]; extended_moduli.len()];
     let mut extended_one_ntt = vec![vec![0_u64; POLYNOMIAL_DEGREE]; extended_moduli.len()];
+    let mut digit = CenteredBlockCoefficients(Vec::with_capacity(POLYNOMIAL_DEGREE));
+    let mut digit_ntt = Vec::with_capacity(POLYNOMIAL_DEGREE);
 
     for (block_index, component) in key_switch_key.components[..active_block_count]
         .iter()
         .enumerate()
     {
         let block_range = active_topology.data_block_range(block_index)?;
-        let digit =
-            centered_block_reconstruction(&term[block_range.clone()], &DATA_PRIMES[block_range])?;
+        write_centered_block_reconstruction(
+            &term[block_range.clone()],
+            &DATA_PRIMES[block_range],
+            None,
+            &mut digit.0,
+        )?;
         for (extended_limb_index, modulus) in extended_moduli.iter().copied().enumerate() {
             let stored_limb_index = if extended_limb_index <= term_level {
                 extended_limb_index
@@ -612,7 +620,7 @@ fn key_switch_component(
                     "hybrid key-switch component basis does not match its key level",
                 ));
             }
-            let mut digit_ntt = digit.residues(modulus)?;
+            digit.write_residues(modulus, &mut digit_ntt)?;
             forward_negacyclic_ntt_in_place(&mut digit_ntt, modulus)?;
             for (coefficient_index, digit_coefficient) in digit_ntt.iter().copied().enumerate() {
                 extended_zero_ntt[extended_limb_index][coefficient_index] = add_mod_fast(
@@ -660,37 +668,53 @@ fn key_switch_component(
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum CenteredBlockCoefficients {
-    Small(Vec<i64>),
-    Wide(Vec<BigInt>),
-}
+struct CenteredBlockCoefficients(Vec<i128>);
 
 impl CenteredBlockCoefficients {
-    fn residues(&self, modulus: u64) -> CanonicalResult<Vec<u64>> {
-        match self {
-            Self::Small(coefficients) => Ok(coefficients
-                .iter()
-                .map(|coefficient| signed_residue(*coefficient, modulus))
-                .collect()),
-            Self::Wide(coefficients) => {
-                let modulus_bigint = BigInt::from(modulus);
-                coefficients
-                    .iter()
-                    .map(|coefficient| bigint_residue_with_modulus(coefficient, &modulus_bigint))
-                    .collect()
-            }
+    fn write_residues(&self, modulus: u64, output: &mut Vec<u64>) -> CanonicalResult<()> {
+        if modulus == 0 {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidProtocolObject,
+                "centered block residue modulus is zero",
+            ));
         }
+        let modulus = i128::from(modulus);
+        output.clear();
+        output.extend(
+            self.0
+                .iter()
+                .map(|coefficient| coefficient.rem_euclid(modulus) as u64),
+        );
+        Ok(())
     }
 }
 
+#[cfg(test)]
 fn centered_block_reconstruction(
     residue_limbs: &[Vec<u64>],
     moduli: &[u64],
 ) -> CanonicalResult<CenteredBlockCoefficients> {
+    let mut coefficients = Vec::with_capacity(POLYNOMIAL_DEGREE);
+    write_centered_block_reconstruction(residue_limbs, moduli, None, &mut coefficients)?;
+    Ok(CenteredBlockCoefficients(coefficients))
+}
+
+fn write_centered_block_reconstruction(
+    residue_limbs: &[Vec<u64>],
+    moduli: &[u64],
+    residue_multipliers: Option<&[u64]>,
+    coefficients: &mut Vec<i128>,
+) -> CanonicalResult<()> {
     if residue_limbs.is_empty() || residue_limbs.len() != moduli.len() {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
             "centered block reconstruction requires one non-empty limb per modulus",
+        ));
+    }
+    if residue_multipliers.is_some_and(|multipliers| multipliers.len() != moduli.len()) {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "centered block reconstruction multiplier count does not match its modulus basis",
         ));
     }
     for (limb, modulus) in residue_limbs.iter().zip(moduli.iter()) {
@@ -701,79 +725,119 @@ fn centered_block_reconstruction(
             ));
         }
     }
-    if moduli.len() == 1 {
-        let modulus = i64::try_from(moduli[0]).map_err(|_| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidProtocolObject,
-                "single-limb centered reconstruction modulus does not fit i64",
-            )
-        })?;
-        let midpoint = moduli[0] / 2;
-        return Ok(CenteredBlockCoefficients::Small(
-            residue_limbs[0]
-                .iter()
-                .map(|residue| {
-                    let centered = i64::try_from(*residue).expect("selected modulus fits i64");
-                    if *residue > midpoint {
-                        centered - modulus
-                    } else {
-                        centered
-                    }
-                })
-                .collect(),
+    if residue_multipliers.is_some_and(|multipliers| {
+        multipliers
+            .iter()
+            .zip(moduli)
+            .any(|(multiplier, modulus)| *multiplier >= *modulus)
+    }) {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidProtocolObject,
+            "centered block reconstruction multiplier is non-canonical",
         ));
     }
-
-    let block_modulus = moduli
-        .iter()
-        .map(|modulus| BigUint::from(*modulus))
-        .product::<BigUint>();
-    let half_block_modulus = &block_modulus >> 1_usize;
-    let block_modulus_bigint = BigInt::from_biguint(Sign::Plus, block_modulus.clone());
-    let crt_basis = moduli
-        .iter()
-        .map(|modulus| {
-            let partial_modulus = &block_modulus / BigUint::from(*modulus);
-            let partial_residue = (&partial_modulus % BigUint::from(*modulus))
-                .to_u64()
-                .expect("residue fits u64");
-            let inverse = inverse_mod(partial_residue, *modulus)?;
-            Ok(partial_modulus * BigUint::from(inverse))
-        })
-        .collect::<CanonicalResult<Vec<_>>>()?;
-    let mut coefficients = Vec::with_capacity(POLYNOMIAL_DEGREE);
-    for coefficient_index in 0..POLYNOMIAL_DEGREE {
-        let residue = residue_limbs
-            .iter()
-            .zip(crt_basis.iter())
-            .map(|(limb, basis)| basis * BigUint::from(limb[coefficient_index]))
-            .sum::<BigUint>()
-            % &block_modulus;
-        let centered = if residue > half_block_modulus {
-            BigInt::from_biguint(Sign::Plus, residue) - &block_modulus_bigint
+    let mut accumulated_moduli = Vec::with_capacity(moduli.len());
+    let mut garner_inverse_by_modulus = Vec::with_capacity(moduli.len());
+    let mut accumulated_modulus = 1_u128;
+    for (modulus_index, modulus) in moduli.iter().copied().enumerate() {
+        let modulus_u128 = u128::from(modulus);
+        if modulus < 2 {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidProtocolObject,
+                "centered block reconstruction modulus is too small",
+            ));
+        }
+        let garner_inverse = if modulus_index == 0 {
+            0
         } else {
-            BigInt::from_biguint(Sign::Plus, residue)
+            inverse_mod((accumulated_modulus % modulus_u128) as u64, modulus)?
+        };
+        accumulated_modulus = accumulated_modulus
+            .checked_mul(modulus_u128)
+            .ok_or_else(centered_block_fixed_width_error)?;
+        if accumulated_modulus > i128::MAX as u128 {
+            return Err(centered_block_fixed_width_error());
+        }
+        accumulated_moduli.push(accumulated_modulus);
+        garner_inverse_by_modulus.push(garner_inverse);
+    }
+    let block_modulus = accumulated_modulus;
+    let half_block_modulus = block_modulus / 2;
+    coefficients.clear();
+    if coefficients.capacity() < POLYNOMIAL_DEGREE {
+        coefficients.reserve_exact(POLYNOMIAL_DEGREE - coefficients.capacity());
+    }
+    for coefficient_index in 0..POLYNOMIAL_DEGREE {
+        let scaled_residue = |modulus_index: usize| -> CanonicalResult<u64> {
+            let residue = residue_limbs[modulus_index][coefficient_index];
+            match residue_multipliers {
+                Some(multipliers) => {
+                    mul_mod(residue, multipliers[modulus_index], moduli[modulus_index])
+                }
+                None => Ok(residue),
+            }
+        };
+        let mut reconstructed = u128::from(scaled_residue(0)?);
+        for modulus_index in 1..moduli.len() {
+            let modulus = moduli[modulus_index];
+            let preceding_modulus = accumulated_moduli[modulus_index - 1];
+            let reconstructed_residue = (reconstructed % u128::from(modulus)) as u64;
+            let required_residue = scaled_residue(modulus_index)?;
+            let correction_residue = sub_mod(required_residue, reconstructed_residue, modulus)?;
+            let garner_digit = mul_mod(
+                correction_residue,
+                garner_inverse_by_modulus[modulus_index],
+                modulus,
+            )?;
+            let correction = preceding_modulus
+                .checked_mul(u128::from(garner_digit))
+                .ok_or_else(centered_block_fixed_width_error)?;
+            reconstructed = reconstructed
+                .checked_add(correction)
+                .ok_or_else(centered_block_fixed_width_error)?;
+            if reconstructed >= accumulated_moduli[modulus_index] {
+                return Err(CanonicalError::new(
+                    CanonicalErrorCode::InvalidProtocolObject,
+                    "centered block Garner reconstruction escaped its canonical modulus",
+                ));
+            }
+        }
+        let reconstructed =
+            i128::try_from(reconstructed).map_err(|_| centered_block_fixed_width_error())?;
+        let centered = if (reconstructed as u128) > half_block_modulus {
+            reconstructed
+                .checked_sub(block_modulus as i128)
+                .ok_or_else(centered_block_fixed_width_error)?
+        } else {
+            reconstructed
         };
         coefficients.push(centered);
     }
 
-    Ok(CenteredBlockCoefficients::Wide(coefficients))
+    Ok(())
 }
 
-fn bigint_residue(value: &BigInt, modulus: u64) -> CanonicalResult<u64> {
+fn centered_block_fixed_width_error() -> CanonicalError {
+    CanonicalError::new(
+        CanonicalErrorCode::InvalidProtocolObject,
+        "centered block reconstruction exceeds the selected fixed-width CRT bound",
+    )
+}
+
+#[cfg(test)]
+fn bigint_residue(value: &num_bigint::BigInt, modulus: u64) -> CanonicalResult<u64> {
+    use num_bigint::{BigInt, Sign};
+    use num_traits::ToPrimitive;
+
     let modulus_bigint = BigInt::from(modulus);
-    bigint_residue_with_modulus(value, &modulus_bigint)
-}
-
-fn bigint_residue_with_modulus(value: &BigInt, modulus: &BigInt) -> CanonicalResult<u64> {
-    let mut residue = value % modulus;
+    let mut residue = value % &modulus_bigint;
     if residue.sign() == Sign::Minus {
-        residue += modulus;
+        residue += modulus_bigint;
     }
     residue.to_u64().ok_or_else(|| {
         CanonicalError::new(
             CanonicalErrorCode::InvalidProtocolObject,
-            "centered block residue does not fit u64",
+            "test-oracle residue does not fit u64",
         )
     })
 }
@@ -789,7 +853,7 @@ fn hybrid_modulus_down(extended: &[Vec<u64>], level: usize) -> CanonicalResult<L
         ));
     }
     let special_limbs = &extended[data_limb_count..];
-    let scaled_special_limbs = special_limbs
+    let inverse_plaintext_modulus_by_special_prime = special_limbs
         .iter()
         .zip(KEY_SWITCH_SPECIAL_PRIMES.iter())
         .map(|(special_limb, special_modulus)| {
@@ -799,23 +863,19 @@ fn hybrid_modulus_down(extended: &[Vec<u64>], level: usize) -> CanonicalResult<L
                     "hybrid modulus-down input contains a non-canonical special-basis residue",
                 ));
             }
-            let inverse_plaintext_modulus =
-                inverse_mod(PLAINTEXT_MODULUS_I64 as u64, *special_modulus)?;
-            special_limb
-                .iter()
-                .map(|special_residue| {
-                    mul_mod(
-                        inverse_plaintext_modulus,
-                        *special_residue,
-                        *special_modulus,
-                    )
-                })
-                .collect::<CanonicalResult<Vec<_>>>()
+            inverse_mod(PLAINTEXT_MODULUS_I64 as u64, *special_modulus)
         })
         .collect::<CanonicalResult<Vec<_>>>()?;
-    let centered_scaled_special =
-        centered_block_reconstruction(&scaled_special_limbs, &KEY_SWITCH_SPECIAL_PRIMES)?;
+    let mut centered_scaled_special =
+        CenteredBlockCoefficients(Vec::with_capacity(POLYNOMIAL_DEGREE));
+    write_centered_block_reconstruction(
+        special_limbs,
+        &KEY_SWITCH_SPECIAL_PRIMES,
+        Some(&inverse_plaintext_modulus_by_special_prime),
+        &mut centered_scaled_special.0,
+    )?;
     let mut output = Vec::with_capacity(data_limb_count);
+    let mut centered_scaled_special_residues = Vec::with_capacity(POLYNOMIAL_DEGREE);
     for (data_limb_index, modulus) in DATA_PRIMES[..=level].iter().copied().enumerate() {
         if extended[data_limb_index]
             .iter()
@@ -827,7 +887,7 @@ fn hybrid_modulus_down(extended: &[Vec<u64>], level: usize) -> CanonicalResult<L
             ));
         }
         let inverse_special_modulus = inverse_mod(special_basis_modulus_residue(modulus), modulus)?;
-        let centered_scaled_special_residues = centered_scaled_special.residues(modulus)?;
+        centered_scaled_special.write_residues(modulus, &mut centered_scaled_special_residues)?;
         let limb = extended[data_limb_index]
             .iter()
             .zip(centered_scaled_special_residues.iter())
@@ -916,9 +976,10 @@ mod tests {
         rotate,
     };
     use crate::bgv::{
-        encoding::decode_plaintext_coefficients_to_logical_slots,
+        direct_ballots::PAIR_CHARACTER_LANE_COUNT,
+        encoding::decode_plaintext_coefficients_to_scalar_lanes,
         evaluator::engine::{
-            Ciphertext, DevelopmentBgvKey, ciphertext_tensor, encode_slots_to_coefficients,
+            Ciphertext, DevelopmentBgvKey, ciphertext_tensor, encode_lanes_to_coefficients,
             modulus_switch,
         },
         modular_arithmetic::add_mod,
@@ -994,18 +1055,86 @@ mod tests {
                 limb
             })
             .collect::<Vec<_>>();
-        let CenteredBlockCoefficients::Wide(actual) =
+        let CenteredBlockCoefficients(actual) =
             centered_block_reconstruction(&residue_limbs, moduli)
-                .expect("two-prime block reconstructs")
-        else {
-            panic!("two-prime block must use wide centered reconstruction");
-        };
+                .expect("two-prime block reconstructs");
+        let actual = actual[..expected.len()]
+            .iter()
+            .copied()
+            .map(BigInt::from)
+            .collect::<Vec<_>>();
 
-        assert_eq!(&actual[..expected.len()], expected.as_slice());
+        assert_eq!(actual.as_slice(), expected.as_slice());
 
         let mut malformed = residue_limbs;
         malformed[0][0] = moduli[0];
         assert!(centered_block_reconstruction(&malformed, moduli).is_err());
+    }
+
+    fn assert_fixed_width_garner_matches_bigint_crt(moduli: &[u64]) {
+        let compared_coefficient_count = 64_usize;
+        let mut residue_limbs = vec![vec![0_u64; POLYNOMIAL_DEGREE]; moduli.len()];
+        for (limb_index, (residue_limb, modulus)) in residue_limbs
+            .iter_mut()
+            .zip(moduli.iter().copied())
+            .enumerate()
+        {
+            for (coefficient_index, residue) in residue_limb
+                .iter_mut()
+                .take(compared_coefficient_count)
+                .enumerate()
+            {
+                let input = (coefficient_index as u128 + 1)
+                    .pow(3)
+                    .checked_mul(0x9e37_79b9_u128 + limb_index as u128)
+                    .expect("test input fits u128")
+                    .checked_add((limb_index as u128 + 17).pow(5))
+                    .expect("test input fits u128");
+                *residue = (input % u128::from(modulus)) as u64;
+            }
+        }
+
+        let CenteredBlockCoefficients(actual) =
+            centered_block_reconstruction(&residue_limbs, moduli)
+                .expect("selected fixed-width CRT basis reconstructs");
+        let block_modulus = moduli
+            .iter()
+            .map(|modulus| BigInt::from(*modulus))
+            .product::<BigInt>();
+        let half_block_modulus = &block_modulus / BigInt::from(2_u8);
+        for coefficient_index in 0..compared_coefficient_count {
+            let reconstructed = residue_limbs
+                .iter()
+                .zip(moduli.iter().copied())
+                .map(|(residue_limb, modulus)| {
+                    let partial_modulus = &block_modulus / BigInt::from(modulus);
+                    let partial_residue =
+                        canonical_bigint_residue(&partial_modulus, &BigInt::from(modulus));
+                    let inverse = bigint_inverse(&partial_residue, &BigInt::from(modulus));
+                    partial_modulus * inverse * BigInt::from(residue_limb[coefficient_index])
+                })
+                .sum::<BigInt>();
+            let canonical = canonical_bigint_residue(&reconstructed, &block_modulus);
+            let expected = if canonical > half_block_modulus {
+                canonical - &block_modulus
+            } else {
+                canonical
+            };
+            assert_eq!(BigInt::from(actual[coefficient_index]), expected);
+        }
+    }
+
+    #[test]
+    fn fixed_width_garner_matches_bigint_crt_for_selected_data_and_special_blocks() {
+        let topology = super::KeySwitchDecompositionTopology::for_level(DATA_PRIMES.len() - 1)
+            .expect("selected key-switch topology derives");
+        for block_index in 0..topology.data_block_count() {
+            let block_range = topology
+                .data_block_range(block_index)
+                .expect("selected key-switch block range derives");
+            assert_fixed_width_garner_matches_bigint_crt(&DATA_PRIMES[block_range]);
+        }
+        assert_fixed_width_garner_matches_bigint_crt(&SPECIAL_PRIMES);
     }
 
     #[test]
@@ -1161,12 +1290,12 @@ mod tests {
                 .expect("galois key");
         let rotated = rotate(&ciphertext, galois_element, &galois_key).expect("rotate");
 
-        let plaintext_coefficients = encode_slots_to_coefficients(&slots).expect("encode");
+        let plaintext_coefficients = encode_lanes_to_coefficients(&slots).expect("encode");
         let rotated_coefficients =
             automorphism_residues(&plaintext_coefficients, galois_element, PLAINTEXT_MODULUS)
                 .expect("plaintext automorphism");
         let expected_slots =
-            decode_plaintext_coefficients_to_logical_slots(&rotated_coefficients).expect("decode");
+            decode_plaintext_coefficients_to_scalar_lanes(&rotated_coefficients).expect("decode");
 
         assert_eq!(
             key.decrypt_to_slots(&rotated).expect("decrypt"),
@@ -1236,12 +1365,12 @@ mod tests {
             .expect("galois key");
         let rotated = rotate(&ciphertext, galois_element, &galois_key).expect("rotate");
 
-        let plaintext_coefficients = encode_slots_to_coefficients(&slots).expect("encode");
+        let plaintext_coefficients = encode_lanes_to_coefficients(&slots).expect("encode");
         let rotated_coefficients =
             automorphism_residues(&plaintext_coefficients, galois_element, PLAINTEXT_MODULUS)
                 .expect("plaintext automorphism");
         let expected_slots =
-            decode_plaintext_coefficients_to_logical_slots(&rotated_coefficients).expect("decode");
+            decode_plaintext_coefficients_to_scalar_lanes(&rotated_coefficients).expect("decode");
 
         assert_eq!(
             key.decrypt_to_slots(&rotated).expect("decrypt"),
@@ -1256,38 +1385,38 @@ mod tests {
     }
 
     #[test]
-    fn galois_generator_rotates_each_canonical_logical_slot_half() {
-        let half_slot_count = POLYNOMIAL_DEGREE / 2;
-        let mut slots = vec![0_u64; POLYNOMIAL_DEGREE];
+    fn galois_generator_rotates_each_canonical_scalar_lane_bank() {
+        let bank_lane_count = PAIR_CHARACTER_LANE_COUNT / 2;
+        let mut slots = vec![0_u64; PAIR_CHARACTER_LANE_COUNT];
         for (slot_index, slot_value) in [
             (0, 11),
             (1, 22),
             (2, 33),
             (17, 44),
-            (half_slot_count - 1, 55),
-            (half_slot_count, 66),
-            (half_slot_count + 1, 77),
-            (POLYNOMIAL_DEGREE - 1, 88),
+            (bank_lane_count - 1, 55),
+            (bank_lane_count, 66),
+            (bank_lane_count + 1, 77),
+            (PAIR_CHARACTER_LANE_COUNT - 1, 88),
         ] {
             slots[slot_index] = slot_value;
         }
-        let plaintext_coefficients = encode_slots_to_coefficients(&slots).expect("encode");
+        let plaintext_coefficients = encode_lanes_to_coefficients(&slots).expect("encode");
         let rotated_coefficients =
             automorphism_residues(&plaintext_coefficients, 3, PLAINTEXT_MODULUS)
                 .expect("apply generator automorphism");
         let rotated_slots =
-            decode_plaintext_coefficients_to_logical_slots(&rotated_coefficients).expect("decode");
-        let expected_slots = slots[..half_slot_count]
+            decode_plaintext_coefficients_to_scalar_lanes(&rotated_coefficients).expect("decode");
+        let expected_slots = slots[..bank_lane_count]
             .iter()
             .cycle()
             .skip(1)
-            .take(half_slot_count)
+            .take(bank_lane_count)
             .chain(
-                slots[half_slot_count..]
+                slots[bank_lane_count..]
                     .iter()
                     .cycle()
                     .skip(1)
-                    .take(half_slot_count),
+                    .take(bank_lane_count),
             )
             .copied()
             .collect::<Vec<_>>();

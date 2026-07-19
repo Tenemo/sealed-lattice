@@ -36,14 +36,14 @@ use super::external_polynomial::{
     ExternalStockhamTransformPlan, ExternalStockhamTransformProgress,
     external_polynomial_extension_read_resident_memory_requirement,
     external_stockham_resident_memory_requirement, external_value_byte_length,
-    map_external_polynomial_plan_error, read_external_polynomial_extension_values,
-    read_external_polynomial_value,
+    map_external_polynomial_plan_error, read_external_polynomial_base_values,
+    read_external_polynomial_extension_values, read_external_polynomial_value,
 };
 use super::merkle::{PROOF_MERKLE_NODE_SCHEMA_IDENTIFIER, minimal_frontier_coordinates};
 use super::relation_plan::{
     BoundTreeConstructionKind, CheckedRelationApplicationChallenges, ProofPrivacyMode,
     RelationColumnDescriptor, RelationColumnOrigin, RelationColumnValueType,
-    RelationConstraintColumnQuery, RelationIntegerLiftCoefficient,
+    RelationConstraintColumnQuery, RelationExpressionInstruction, RelationIntegerLiftCoefficient,
     RelationIntegerLiftComponentDescriptor, RelationIntegerLiftConvolutionKind,
     RelationIntegerLiftConvolutionProductDescriptor, RelationIntegerLiftFullRingHalf,
     RelationIntegerLiftFullRingNegacyclicProductDescriptor,
@@ -160,8 +160,12 @@ pub(crate) use merkle_storage::{
     CommonProofColumnMajorMerkleReplayMode, CommonProofColumnMajorMerkleRootPass,
     CommonProofMerkleMaterializer, CommonProofMerkleMaterializerProgress,
     CommonProofMerkleStoragePlan, CommonProofOpeningPrefetchProgress, CommonProofOpeningPrefetcher,
-    CommonProofTreeStorageError, PrefetchedCommonProofOpeningArtifact, StatementOwnedMerkleReplay,
-    StatementOwnedMerkleReplayMode, StoredCommonProofMerkleTree, common_proof_merkle_storage_plan,
+    CommonProofTreeStorageError, PrefetchedCommonProofOpeningArtifact,
+    SetupPolynomialColumnMajorMerkleReplay, SetupPolynomialColumnMajorMerkleReplayMemoryAccounting,
+    SetupPolynomialColumnMajorMerkleReplayMode, SetupPolynomialColumnMajorMerkleRootPass,
+    StatementOwnedMerkleReplay, StatementOwnedMerkleReplayMode, StoredCommonProofMerkleTree,
+    common_proof_merkle_storage_plan,
+    setup_polynomial_column_major_merkle_replay_wasm_memory_bound,
 };
 pub(crate) use private_coins::{
     CheckpointableCommonProofPrivateCoinSource, CommonProofCheckpointCursorManifestError,

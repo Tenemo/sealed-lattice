@@ -129,7 +129,6 @@ pub(super) enum MaterialRootUse {
 #[derive(Clone, Debug)]
 pub(super) struct MaterialMessageColumns {
     message_digits_by_half: [Vec<u32>; 2],
-    message_digit_radix: u64,
     packed_lane_ordinal: u64,
 }
 
@@ -372,25 +371,9 @@ impl<'context> CommittedMaterialPlanBuilder<'context> {
         target_column_ordinal: u32,
         ordered_digit_column_ordinals: &[u32],
     ) -> Result<(), RelationPlanError> {
-        self.certify_unsigned_recomposition_with_radix(
-            target_column_ordinal,
-            ordered_digit_column_ordinals,
-            TERNARY_DIGIT_RADIX,
-        )
-    }
-
-    fn certify_unsigned_recomposition_with_radix(
-        &mut self,
-        target_column_ordinal: u32,
-        ordered_digit_column_ordinals: &[u32],
-        decomposition_radix: u64,
-    ) -> Result<(), RelationPlanError> {
-        if decomposition_radix < 2 {
-            return Err(RelationPlanError::InvalidConstraint);
-        }
         let expression = radix_recomposition_expression(
             target_column_ordinal,
-            decomposition_radix,
+            TERNARY_DIGIT_RADIX,
             None,
             ordered_digit_column_ordinals,
             self.context.base_field_modulus,
@@ -404,48 +387,32 @@ impl<'context> CommittedMaterialPlanBuilder<'context> {
                 .get(digit_column_ordinal)
                 .ok_or(RelationPlanError::InvalidSemanticCell)?;
             if digit_interval.minimum != BigInt::zero()
-                || digit_interval.maximum >= BigInt::from(decomposition_radix)
+                || digit_interval.maximum >= BigInt::from(TERNARY_DIGIT_RADIX)
             {
                 return Err(RelationPlanError::InvalidBoundCertificate);
             }
             maximum += &digit_interval.maximum * &radix_power;
-            radix_power *= decomposition_radix;
+            radix_power *= TERNARY_DIGIT_RADIX;
         }
         self.insert_semantic_cell(
             target_column_ordinal,
             SignedIntegerInterval::from_bigints(BigInt::zero(), maximum)?,
             RelationBoundCertificate::UnsignedRadixRecomposition {
                 constraint_ordinal,
-                radix: decomposition_radix,
+                radix: TERNARY_DIGIT_RADIX,
                 ordered_digit_column_ordinals: ordered_digit_column_ordinals.to_vec(),
             },
         )
     }
 
     fn add_bounded_digit(&mut self, maximum: u64) -> Result<u32, RelationPlanError> {
-        self.add_bounded_radix_digit(maximum, TERNARY_DIGIT_RADIX)
-    }
-
-    fn add_bounded_radix_digit(
-        &mut self,
-        maximum: u64,
-        decomposition_radix: u64,
-    ) -> Result<u32, RelationPlanError> {
         if maximum >= MATERIAL_DIGIT_RADIX {
             return Err(RelationPlanError::InvalidConstraint);
         }
         let target = self.push_prover_column()?;
-        let digit_count = minimum_unsigned_radix_digit_count(maximum, decomposition_radix)?;
-        let digits = if decomposition_radix == TERNARY_DIGIT_RADIX {
-            self.add_ternary_digit_columns(digit_count)?
-        } else if decomposition_radix == 2 {
-            (0..digit_count)
-                .map(|_| self.add_binary_column())
-                .collect::<Result<Vec<_>, _>>()?
-        } else {
-            return Err(RelationPlanError::InvalidConstraint);
-        };
-        self.certify_unsigned_recomposition_with_radix(target, &digits, decomposition_radix)?;
+        let digit_count = minimum_unsigned_ternary_digit_count(maximum);
+        let digits = self.add_ternary_digit_columns(digit_count)?;
+        self.certify_unsigned_recomposition(target, &digits)?;
         Ok(target)
     }
 
@@ -453,19 +420,6 @@ impl<'context> CommittedMaterialPlanBuilder<'context> {
         &mut self,
         value_digits: &[u32],
         maximum_digits: &[u64],
-    ) -> Result<(), RelationPlanError> {
-        self.add_upper_bound_comparator_with_radix(
-            value_digits,
-            maximum_digits,
-            MATERIAL_DIGIT_RADIX,
-        )
-    }
-
-    fn add_upper_bound_comparator_with_radix(
-        &mut self,
-        value_digits: &[u32],
-        maximum_digits: &[u64],
-        digit_radix: u64,
     ) -> Result<(), RelationPlanError> {
         if value_digits.is_empty() || value_digits.len() != maximum_digits.len() {
             return Err(RelationPlanError::InvalidConstraint);
@@ -475,11 +429,12 @@ impl<'context> CommittedMaterialPlanBuilder<'context> {
             let difference_maximum = if digit_ordinal + 1 == maximum_digits.len() {
                 maximum_digit
             } else {
-                digit_radix
-                    .checked_sub(1)
-                    .ok_or(RelationPlanError::InvalidConstraint)?
+                MATERIAL_DIGIT_RADIX - 1
             };
-            difference_digits.push(self.add_bounded_radix_digit(difference_maximum, digit_radix)?);
+            // Comparator borrows use the material-digit radix; difference
+            // digits are independently certified by the selected ternary
+            // range relation.
+            difference_digits.push(self.add_bounded_digit(difference_maximum)?);
         }
         let internal_borrows = (0..value_digits.len().saturating_sub(1))
             .map(|_| self.add_binary_column())
@@ -503,7 +458,7 @@ impl<'context> CommittedMaterialPlanBuilder<'context> {
             if digit_ordinal + 1 < value_digits.len() {
                 terms.push(integer_term_scaled_column(
                     internal_borrows[digit_ordinal],
-                    digit_radix,
+                    MATERIAL_DIGIT_RADIX,
                     false,
                     0,
                     false,
@@ -537,9 +492,9 @@ impl<'context> CommittedMaterialPlanBuilder<'context> {
             return Err(RelationPlanError::InvalidRoot);
         }
         let modulus = self.modulus(modulus_ordinal)?;
-        let maximum_digits = fixed_radix_digits(modulus - 1, 2, MATERIAL_DIGIT_RADIX)?;
+        let maximum_digits = fixed_material_digits(modulus - 1)?;
         let high_digit_ternary_digit_count =
-            minimum_unsigned_radix_digit_count(maximum_digits[1], TERNARY_DIGIT_RADIX)?;
+            minimum_unsigned_ternary_digit_count(maximum_digits[1]);
         let mut messages = Vec::with_capacity(ordered_roots.len());
 
         for root_group in ordered_roots.chunks(COMMITTED_MATERIAL_TRACE_PACKING_FACTOR as usize) {
@@ -619,7 +574,6 @@ impl<'context> CommittedMaterialPlanBuilder<'context> {
                     }
                     messages.push(MaterialMessageColumns {
                         message_digits_by_half: message_digits_by_half.clone(),
-                        message_digit_radix: MATERIAL_DIGIT_RADIX,
                         packed_lane_ordinal,
                     });
                 } else {
@@ -647,8 +601,7 @@ impl<'context> CommittedMaterialPlanBuilder<'context> {
         if quotient_count == 0 {
             return Err(RelationPlanError::InvalidConstraint);
         }
-        let ternary_digit_count =
-            minimum_unsigned_radix_digit_count(required_maximum, TERNARY_DIGIT_RADIX)?;
+        let ternary_digit_count = minimum_unsigned_ternary_digit_count(required_maximum);
         let mut quotients = Vec::with_capacity(quotient_count);
         for group_start in
             (0..quotient_count).step_by(COMMITTED_MATERIAL_TRACE_PACKING_FACTOR as usize)
@@ -690,10 +643,9 @@ impl<'context> CommittedMaterialPlanBuilder<'context> {
         {
             let target = self.push_prover_column()?;
             let digits = self.add_ternary_digit_columns(ternary_digit_count)?;
-            let decomposition_radix = TERNARY_DIGIT_RADIX;
             let expression = radix_recomposition_expression(
                 target,
-                decomposition_radix,
+                TERNARY_DIGIT_RADIX,
                 Some(&offset_magnitude),
                 &digits,
                 self.context.base_field_modulus,
@@ -707,7 +659,7 @@ impl<'context> CommittedMaterialPlanBuilder<'context> {
                 )?,
                 RelationBoundCertificate::ShiftedRadixRecomposition {
                     constraint_ordinal,
-                    radix: decomposition_radix,
+                    radix: TERNARY_DIGIT_RADIX,
                     offset: offset_magnitude.clone(),
                     ordered_digit_column_ordinals: digits,
                 },
@@ -922,7 +874,7 @@ impl<'context> CommittedMaterialPlanBuilder<'context> {
             rotation_is_negative: false,
             rotation_magnitude: packed_rotation_magnitude,
         }];
-        let mut radix_power = message.message_digit_radix;
+        let mut radix_power = MATERIAL_DIGIT_RADIX;
         for digit_column_ordinal in message_digits.iter().copied().skip(1) {
             expression.push(RelationExpressionInstruction::ColumnValue {
                 column_ordinal: digit_column_ordinal,
@@ -935,7 +887,7 @@ impl<'context> CommittedMaterialPlanBuilder<'context> {
             expression.push(RelationExpressionInstruction::Multiplication);
             expression.push(RelationExpressionInstruction::Addition);
             radix_power = radix_power
-                .checked_mul(message.message_digit_radix)
+                .checked_mul(MATERIAL_DIGIT_RADIX)
                 .ok_or(RelationPlanError::IntegerBoundOverflow)?;
         }
         Ok(expression)
@@ -1350,132 +1302,6 @@ pub(super) fn root_path(field_ordinal: u64, list_ordinal: u64) -> Vec<RelationSe
     ]
 }
 
-/// Canonically ordered trace rows for one committed-material root.
-///
-/// The order matches the four columns bound by the relation plan: low digit
-/// for the first and second physical halves, followed by high digit for the
-/// first and second physical halves. The slices contain unmasked trace-domain
-/// values. A committed-material tree can recover the same values by evaluating
-/// its masked source polynomials on the trace subgroup, where the mask vanishes.
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct CommittedMaterialRootTraceRows<'rows> {
-    pub(crate) low_digit_first_half: &'rows [u64],
-    pub(crate) low_digit_second_half: &'rows [u64],
-    pub(crate) high_digit_first_half: &'rows [u64],
-    pub(crate) high_digit_second_half: &'rows [u64],
-}
-
-impl<'rows> CommittedMaterialRootTraceRows<'rows> {
-    fn column(self, physical_column_ordinal: usize) -> Option<&'rows [u64]> {
-        match physical_column_ordinal {
-            0 => Some(self.low_digit_first_half),
-            1 => Some(self.low_digit_second_half),
-            2 => Some(self.high_digit_first_half),
-            3 => Some(self.high_digit_second_half),
-            _ => None,
-        }
-    }
-
-    fn digit(self, physical_half_ordinal: usize, digit_ordinal: usize) -> Option<&'rows [u64]> {
-        let physical_column_ordinal = digit_ordinal
-            .checked_mul(2)?
-            .checked_add(physical_half_ordinal)?;
-        self.column(physical_column_ordinal)
-    }
-
-    /// Positively joins retained trace rows to the exact canonical lattice
-    /// message they encode. The compact source separately authenticates these
-    /// rows to its public root when it regenerates a masked source polynomial;
-    /// this check prevents a private message from being paired with detached
-    /// rows before that authority is handed to another browser-owned lifetime.
-    pub(crate) fn authenticates_canonical_message(
-        self,
-        canonical_message: &[u64],
-        canonical_modulus: u64,
-    ) -> Result<bool, RelationPlanError> {
-        let trace_domain_size = self.low_digit_first_half.len();
-        let expected_message_length = trace_domain_size
-            .checked_mul(2)
-            .ok_or(RelationPlanError::CountOverflow)?;
-        if canonical_modulus <= 1
-            || canonical_message.len() != expected_message_length
-            || self.low_digit_second_half.len() != trace_domain_size
-            || self.high_digit_first_half.len() != trace_domain_size
-            || self.high_digit_second_half.len() != trace_domain_size
-            || u128::from(canonical_modulus - 1)
-                >= u128::from(MATERIAL_DIGIT_RADIX) * u128::from(MATERIAL_DIGIT_RADIX)
-        {
-            return Ok(false);
-        }
-        for (physical_half_ordinal, (low_digits, high_digits)) in [
-            (self.low_digit_first_half, self.high_digit_first_half),
-            (self.low_digit_second_half, self.high_digit_second_half),
-        ]
-        .into_iter()
-        .enumerate()
-        {
-            let message_start = physical_half_ordinal
-                .checked_mul(trace_domain_size)
-                .ok_or(RelationPlanError::CountOverflow)?;
-            for (coefficient_ordinal, (low_digit, high_digit)) in
-                low_digits.iter().zip(high_digits).enumerate()
-            {
-                if *low_digit >= MATERIAL_DIGIT_RADIX || *high_digit >= MATERIAL_DIGIT_RADIX {
-                    return Ok(false);
-                }
-                let reconstructed_coefficient = u128::from(*low_digit)
-                    + u128::from(MATERIAL_DIGIT_RADIX) * u128::from(*high_digit);
-                let message_ordinal = message_start
-                    .checked_add(coefficient_ordinal)
-                    .ok_or(RelationPlanError::CountOverflow)?;
-                let canonical_coefficient = canonical_message[message_ordinal];
-                if canonical_coefficient >= canonical_modulus
-                    || reconstructed_coefficient != u128::from(canonical_coefficient)
-                {
-                    return Ok(false);
-                }
-            }
-        }
-        Ok(true)
-    }
-}
-
-enum CommittedMaterialTraceRootStorage<'rows> {
-    Borrowed(&'rows [CommittedMaterialRootTraceRows<'rows>]),
-    Owned(Box<[AuthenticatedCompactCommittedMaterialSource]>),
-}
-
-impl CommittedMaterialTraceRootStorage<'_> {
-    fn len(&self) -> usize {
-        match self {
-            Self::Borrowed(roots) => roots.len(),
-            Self::Owned(sources) => sources.len(),
-        }
-    }
-
-    fn material_digit(
-        &self,
-        logical_root_ordinal: usize,
-        physical_half_ordinal: usize,
-        material_digit_ordinal: usize,
-        row_ordinal: usize,
-    ) -> Result<u64, RelationPlanError> {
-        match self {
-            Self::Borrowed(roots) => roots
-                .get(logical_root_ordinal)
-                .and_then(|root| root.digit(physical_half_ordinal, material_digit_ordinal))
-                .and_then(|rows| rows.get(row_ordinal))
-                .copied()
-                .ok_or(RelationPlanError::InvalidColumn),
-            Self::Owned(sources) => sources
-                .get(logical_root_ordinal)
-                .ok_or(RelationPlanError::InvalidRoot)?
-                .material_digit(physical_half_ordinal, material_digit_ordinal, row_ordinal)
-                .map_err(|_| RelationPlanError::InvalidColumn),
-        }
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum CommittedMaterialIntegerRecipe {
     Constant(i128),
@@ -1534,9 +1360,8 @@ impl CommittedMaterialIntegerRecipe {
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum CommittedMaterialColumnRecipe {
     Integer(CommittedMaterialIntegerRecipe),
-    RadixDigit {
+    TernaryDigit {
         source: CommittedMaterialIntegerRecipe,
-        radix: u64,
         digit_ordinal: usize,
         offset: u64,
     },
@@ -1548,7 +1373,7 @@ enum CommittedMaterialColumnRecipe {
 impl CommittedMaterialColumnRecipe {
     fn nested_allocation_byte_length(&self) -> Result<usize, RelationPlanError> {
         match self {
-            Self::Integer(source) | Self::RadixDigit { source, .. } => {
+            Self::Integer(source) | Self::TernaryDigit { source, .. } => {
                 source.nested_allocation_byte_length()
             }
             Self::ShiftSelector { .. } => Ok(0),
@@ -1605,13 +1430,13 @@ impl CommittedMaterialTraceWitnessInput {
 /// A restartable, relation-owned provider for unmasked proof-created trace
 /// columns of the committed-material relations.
 ///
-/// The provider stores only checked ordinal recipes and borrowed root rows. It
-/// therefore supports deterministic repeated passes without retaining every
-/// witness column simultaneously. The common prover remains responsible for
-/// interpolation and the plan-assigned trace mask.
-pub(crate) struct CommittedMaterialTraceWitnessProvider<'rows> {
+/// The provider stores only checked ordinal recipes and authenticated compact
+/// sources. It therefore supports deterministic repeated passes without
+/// retaining every witness column simultaneously. The common prover remains
+/// responsible for interpolation and the plan-assigned trace mask.
+pub(crate) struct CommittedMaterialTraceWitnessProvider {
     input: CommittedMaterialTraceWitnessInput,
-    ordered_roots: CommittedMaterialTraceRootStorage<'rows>,
+    ordered_roots: Box<[AuthenticatedCompactCommittedMaterialSource]>,
     resolved_moduli: Box<[u64]>,
     ordered_recipes: Box<[(u32, CommittedMaterialColumnRecipe)]>,
     relation_plan_hash: [u8; 64],
@@ -1696,7 +1521,7 @@ impl CommittedMaterialTraceWitnessStructureMemoryAccounting {
     }
 }
 
-impl CommittedMaterialTraceWitnessProvider<'_> {
+impl CommittedMaterialTraceWitnessProvider {
     pub(crate) const fn relation_plan_hash(&self) -> [u8; 64] {
         self.relation_plan_hash
     }
@@ -1740,9 +1565,8 @@ impl CommittedMaterialTraceWitnessProvider<'_> {
             CommittedMaterialColumnRecipe::Integer(source) => {
                 self.integer_value(source, row_ordinal)?
             }
-            CommittedMaterialColumnRecipe::RadixDigit {
+            CommittedMaterialColumnRecipe::TernaryDigit {
                 source,
-                radix,
                 digit_ordinal,
                 offset,
             } => {
@@ -1751,13 +1575,13 @@ impl CommittedMaterialTraceWitnessProvider<'_> {
                     .checked_add(i128::from(*offset))
                     .filter(|value| *value >= 0)
                     .ok_or(RelationPlanError::InvalidColumn)?;
-                let divisor = i128::from(*radix)
+                let divisor = i128::from(TERNARY_DIGIT_RADIX)
                     .checked_pow(
                         u32::try_from(*digit_ordinal)
                             .map_err(|_| RelationPlanError::CountOverflow)?,
                     )
                     .ok_or(RelationPlanError::IntegerBoundOverflow)?;
-                shifted / divisor % i128::from(*radix)
+                shifted / divisor % i128::from(TERNARY_DIGIT_RADIX)
             }
             CommittedMaterialColumnRecipe::ShiftSelector { row_shift } => {
                 let trace_domain_size = self.input.message_trace_domain_size()?;
@@ -1770,7 +1594,8 @@ impl CommittedMaterialTraceWitnessProvider<'_> {
         canonical_proof_base_field_integer(integer_value)
     }
 
-    pub(crate) fn column_trace_values(
+    #[cfg(test)]
+    fn column_trace_values(
         &self,
         column_ordinal: u32,
     ) -> Result<Vec<u64>, RelationPlanError> {
@@ -1881,12 +1706,10 @@ impl CommittedMaterialTraceWitnessProvider<'_> {
         row_ordinal: usize,
     ) -> Result<i128, RelationPlanError> {
         self.ordered_roots
-            .material_digit(
-                logical_root_ordinal,
-                physical_half_ordinal,
-                material_digit_ordinal,
-                row_ordinal,
-            )
+            .get(logical_root_ordinal)
+            .ok_or(RelationPlanError::InvalidRoot)?
+            .material_digit(physical_half_ordinal, material_digit_ordinal, row_ordinal)
+            .map_err(|_| RelationPlanError::InvalidColumn)
             .map(i128::from)
     }
 
@@ -1921,7 +1744,7 @@ impl CommittedMaterialTraceWitnessProvider<'_> {
             .resolved_moduli
             .get(modulus_ordinal)
             .ok_or(RelationPlanError::MissingModulus)?;
-        let maximum_digits = fixed_radix_digits(modulus - 1, 2, MATERIAL_DIGIT_RADIX)?;
+        let maximum_digits = fixed_material_digits(modulus - 1)?;
         let low =
             self.material_digit(logical_root_ordinal, physical_half_ordinal, 0, row_ordinal)?;
         Ok(u64::from(low > i128::from(maximum_digits[0])))
@@ -1939,7 +1762,7 @@ impl CommittedMaterialTraceWitnessProvider<'_> {
             .resolved_moduli
             .get(modulus_ordinal)
             .ok_or(RelationPlanError::MissingModulus)?;
-        let maximum_digits = fixed_radix_digits(modulus - 1, 2, MATERIAL_DIGIT_RADIX)?;
+        let maximum_digits = fixed_material_digits(modulus - 1)?;
         let value = self.material_digit(
             logical_root_ordinal,
             physical_half_ordinal,
@@ -2175,36 +1998,6 @@ impl<'plan> CommittedMaterialTraceWitnessLayoutBuilder<'plan> {
         Ok(())
     }
 
-    fn add_radix_digits(
-        &mut self,
-        source: CommittedMaterialIntegerRecipe,
-        radix: u64,
-        digit_count: usize,
-        offset: u64,
-    ) -> Result<(), RelationPlanError> {
-        if digit_count == 0 {
-            return Err(RelationPlanError::InvalidColumn);
-        }
-        let mut source = Some(source);
-        for digit_ordinal in 0..digit_count {
-            let digit_source = if digit_ordinal + 1 == digit_count {
-                source.take().ok_or(RelationPlanError::InvalidColumn)?
-            } else {
-                source
-                    .as_ref()
-                    .ok_or(RelationPlanError::InvalidColumn)?
-                    .clone()
-            };
-            self.push_recipe(CommittedMaterialColumnRecipe::RadixDigit {
-                source: digit_source,
-                radix,
-                digit_ordinal,
-                offset,
-            })?;
-        }
-        Ok(())
-    }
-
     fn add_ternary_digits(
         &mut self,
         source: CommittedMaterialIntegerRecipe,
@@ -2214,7 +2007,23 @@ impl<'plan> CommittedMaterialTraceWitnessLayoutBuilder<'plan> {
         if ternary_digit_count == 0 {
             return Err(RelationPlanError::InvalidColumn);
         }
-        self.add_radix_digits(source, TERNARY_DIGIT_RADIX, ternary_digit_count, offset)
+        let mut source = Some(source);
+        for digit_ordinal in 0..ternary_digit_count {
+            let digit_source = if digit_ordinal + 1 == ternary_digit_count {
+                source.take().ok_or(RelationPlanError::InvalidColumn)?
+            } else {
+                source
+                    .as_ref()
+                    .ok_or(RelationPlanError::InvalidColumn)?
+                    .clone()
+            };
+            self.push_recipe(CommittedMaterialColumnRecipe::TernaryDigit {
+                source: digit_source,
+                digit_ordinal,
+                offset,
+            })?;
+        }
+        Ok(())
     }
 
     fn packed_source(
@@ -2270,9 +2079,9 @@ impl<'plan> CommittedMaterialTraceWitnessLayoutBuilder<'plan> {
         for _ in 0..root_count {
             self.consume_bound_root(4)?;
         }
-        let maximum_digits = fixed_radix_digits(modulus - 1, 2, MATERIAL_DIGIT_RADIX)?;
+        let maximum_digits = fixed_material_digits(modulus - 1)?;
         let high_digit_ternary_digit_count =
-            minimum_unsigned_radix_digit_count(maximum_digits[1], TERNARY_DIGIT_RADIX)?;
+            minimum_unsigned_ternary_digit_count(maximum_digits[1]);
         for physical_column_ordinal in 0..4 {
             self.push_recipe(CommittedMaterialColumnRecipe::Integer(
                 Self::packed_material_source(
@@ -2384,8 +2193,7 @@ impl<'plan> CommittedMaterialTraceWitnessLayoutBuilder<'plan> {
         ordered_sources: impl IntoIterator<Item = CommittedMaterialIntegerRecipe>,
         required_maximum: u64,
     ) -> Result<(), RelationPlanError> {
-        let ternary_digit_count =
-            minimum_unsigned_radix_digit_count(required_maximum, TERNARY_DIGIT_RADIX)?;
+        let ternary_digit_count = minimum_unsigned_ternary_digit_count(required_maximum);
         let mut ordered_sources = ordered_sources.into_iter().peekable();
         while ordered_sources.peek().is_some() {
             let source = Self::packed_source(
@@ -2809,41 +2617,23 @@ fn canonical_proof_base_field_integer(value: i128) -> Result<u64, RelationPlanEr
     u64::try_from(canonical).map_err(|_| RelationPlanError::IntegerBoundOverflow)
 }
 
-fn fixed_radix_digits(
-    mut value: u64,
-    count: usize,
-    radix: u64,
-) -> Result<Vec<u64>, RelationPlanError> {
-    if count == 0 || radix < 2 {
-        return Err(RelationPlanError::InvalidConstraint);
-    }
-    let mut digits = Vec::with_capacity(count);
-    for _ in 0..count {
-        digits.push(value % radix);
-        value /= radix;
-    }
-    if value != 0 {
+fn fixed_material_digits(value: u64) -> Result<[u64; 2], RelationPlanError> {
+    let low_digit = value % MATERIAL_DIGIT_RADIX;
+    let high_digit = value / MATERIAL_DIGIT_RADIX;
+    if high_digit >= MATERIAL_DIGIT_RADIX {
         return Err(RelationPlanError::IntegerBoundOverflow);
     }
-    Ok(digits)
+    Ok([low_digit, high_digit])
 }
 
-fn minimum_unsigned_radix_digit_count(
-    maximum_value: u64,
-    radix: u64,
-) -> Result<usize, RelationPlanError> {
-    if radix < 2 {
-        return Err(RelationPlanError::InvalidConstraint);
-    }
+fn minimum_unsigned_ternary_digit_count(maximum_value: u64) -> usize {
     let mut digit_count = 1_usize;
     let mut remaining = maximum_value;
-    while remaining >= radix {
-        remaining /= radix;
-        digit_count = digit_count
-            .checked_add(1)
-            .ok_or(RelationPlanError::CountOverflow)?;
+    while remaining >= TERNARY_DIGIT_RADIX {
+        remaining /= TERNARY_DIGIT_RADIX;
+        digit_count += 1;
     }
-    Ok(digit_count)
+    digit_count
 }
 
 #[derive(Clone)]
@@ -3265,15 +3055,11 @@ mod tests {
             .ordered_recipes
             .iter()
             .filter_map(|(column_ordinal, recipe)| match recipe {
-                CommittedMaterialColumnRecipe::RadixDigit {
+                CommittedMaterialColumnRecipe::TernaryDigit {
                     source,
-                    radix,
                     digit_ordinal,
                     offset,
-                } if source == &packed_low_material_source
-                    && *radix == TERNARY_DIGIT_RADIX
-                    && *offset == 0 =>
-                {
+                } if source == &packed_low_material_source && *offset == 0 => {
                     Some((*column_ordinal, *digit_ordinal))
                 }
                 _ => None,

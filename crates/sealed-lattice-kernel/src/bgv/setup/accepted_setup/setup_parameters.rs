@@ -19,12 +19,8 @@ pub(super) fn setup_parameters_value(roster: &AcceptedRosterParameters) -> Canon
     }))
 }
 
-// The bounded-domain evaluator profile binding: the score-difference domain the
-// comparison polynomial is interpolated over is a deterministic function of the
-// roster. The roster size is the maximum selected-ballot count, so this bound
-// covers every permitted nonempty subset without making the selected count an
-// unbound runtime parameter. Binding it here makes the evaluator comparison
-// domain part of the setup-parameter identity.
+// The bounded-domain evaluator profile binding. The roster fixes the complete
+// ten-ballot pair-character product and therefore its score-difference domain.
 pub(super) fn bounded_domain_evaluator_value_for_roster(
     roster: &AcceptedRosterParameters,
 ) -> CanonicalResult<Value> {
@@ -41,7 +37,7 @@ pub(super) fn bounded_domain_evaluator_value_for_roster(
     Ok(json!({
         "objectType": "BoundedDomainEvaluatorParameters",
         "scoreDifferenceBound": score_difference_bound,
-        "directComparisonOutputLevel": crate::bgv::evaluator::top_k::DIRECT_COMPARISON_OUTPUT_LEVEL,
+        "pairCharacterOutputLevel": crate::bgv::evaluator::top_k::CHARACTER_OUTPUT_LEVEL,
     }))
 }
 

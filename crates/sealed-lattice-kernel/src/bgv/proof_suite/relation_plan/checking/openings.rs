@@ -89,11 +89,12 @@ impl RelationPlanChecker<'_> {
                         .ordered_columns
                         .get(column_ordinal as usize)
                         .ok_or(RelationPlanError::InvalidOpening)?;
-                    if tree_ordinal_by_column
-                        .get(column_ordinal as usize)
-                        .copied()
-                        .flatten()
-                        != Some(claim.source_ordinal)
+                    if matches!(column.origin, RelationColumnOrigin::VerifierSequence { .. })
+                        || tree_ordinal_by_column
+                            .get(column_ordinal as usize)
+                            .copied()
+                            .flatten()
+                            != Some(claim.source_ordinal)
                         || column.source_degree_bound_exclusive
                             != claim.source_degree_bound_exclusive
                     {

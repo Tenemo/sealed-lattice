@@ -75,6 +75,17 @@ pub(crate) struct CompiledRelationPlan {
 }
 
 impl CompiledRelationPlan {
+    pub(crate) fn resident_owned_payload_byte_length(&self) -> Result<u64, RelationPlanError> {
+        self.plan.variants.iter().try_fold(
+            resident_vec_storage_byte_length(&self.plan.variants)?,
+            |total, variant| {
+                total
+                    .checked_add(variant.resident_owned_payload_byte_length()?)
+                    .ok_or(RelationPlanError::CountOverflow)
+            },
+        )
+    }
+
     pub(crate) fn canonical_tuple(&self) -> Result<CanonicalTuple, RelationPlanError> {
         self.plan.canonical_tuple()
     }

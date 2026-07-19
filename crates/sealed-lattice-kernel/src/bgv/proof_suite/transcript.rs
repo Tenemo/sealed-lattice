@@ -37,7 +37,6 @@ fn transcript_xof(
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum TranscriptError {
     CanonicalEncoding,
-    InvalidTag,
     InvalidCommonProofSchedule,
     UnexpectedCommonProofRound,
     UnexpectedCommonProofChallenge,
@@ -57,131 +56,6 @@ pub(crate) enum DistinctQuerySamplingError {
     ChallengeBlockUnavailable { output_index: usize },
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum CanonicalTranscriptEngine {
-    TrusteeEvaluationKey,
-    KeySwitchAtom,
-}
-
-impl CanonicalTranscriptEngine {
-    fn wire_label(self) -> &'static str {
-        match self {
-            Self::TrusteeEvaluationKey => "trustee-evaluation-key",
-            Self::KeySwitchAtom => "key-switch-atom",
-        }
-    }
-
-    fn accepts_round_label(self, label: &str) -> bool {
-        (match self {
-            Self::TrusteeEvaluationKey => matches!(
-                label,
-                "statement"
-                    | "fork"
-                    | "fork-index"
-                    | "witness-tree-root"
-                    | "quotient-tree-root"
-                    | "masked-consistency-claims"
-                    | "deep-evaluations"
-                    | "low-degree-purpose"
-                    | "fold-layer-root"
-                    | "final-coefficients"
-            ),
-            Self::KeySwitchAtom => matches!(
-                label,
-                "key-statement-binding"
-                    | "key-schedule-index"
-                    | "key-source"
-                    | "galois-element"
-                    | "ring-degree"
-                    | "digit-count"
-                    | "group-modulus"
-                    | "plaintext-modulus"
-                    | "digit-sample"
-                    | "digit-gadget"
-                    | "round-two-aggregate"
-                    | "key-linkage-present"
-                    | "linkage-seed-hash"
-                    | "linkage-source-limb"
-                    | "linkage-source-modulus"
-                    | "linkage-commitment-root"
-                    | "key-base-root"
-                    | "key-material-root"
-                    | "key-aux-root"
-                    | "key-lookup-terminal"
-                    | "key-table-terminals"
-                    | "key-quotient-root"
-                    | "fri-layer-root"
-                    | "fri-final"
-            ),
-        }) || cfg!(test) && matches!(label, "a" | "n" | "seed" | "x")
-    }
-
-    fn accepts_challenge_label(self, label: &str) -> bool {
-        match self {
-            Self::TrusteeEvaluationKey => {
-                matches!(
-                    label,
-                    "gamma"
-                        | "lincheck-u"
-                        | "lincheck-alpha"
-                        | "same-secret-bridge-alpha"
-                        | "private-vss-relation-alpha"
-                        | "vss-share-linkage-alpha"
-                        | "target-decryption-share-alpha"
-                        | "same-secret-source-linkage-alpha"
-                        | "linkage-alpha"
-                        | "consistency-alpha"
-                        | "consistency-vector"
-                        | "beta"
-                        | "deep-point"
-                        | "lambda"
-                        | "fold-challenge"
-                        | "shared-query-position"
-                ) || cfg!(test)
-                    && (matches!(label, "field" | "position")
-                        || dynamic_indexed_label(label, "shared-query-position")
-                        || dynamic_decimal_suffix(label, "candidate-")
-                        || dynamic_decimal_suffix(label, "nonzero-"))
-            }
-            Self::KeySwitchAtom => {
-                matches!(
-                    label,
-                    "key-gamma"
-                        | "key-delta"
-                        | "key-lookup-mu"
-                        | "key-linkage-alpha"
-                        | "key-linkage-lincheck"
-                        | "key-linkage-omega"
-                        | "key-sum-batch"
-                        | "key-support-alpha"
-                        | "key-combination"
-                        | "key-query"
-                        | "fri-fold"
-                        | "fri-query"
-                ) || cfg!(test) && matches!(label, "c" | "q")
-            }
-        }
-    }
-}
-
-fn dynamic_indexed_label(label: &str, prefix: &str) -> bool {
-    label
-        .strip_prefix(prefix)
-        .and_then(|suffix| suffix.strip_prefix('/'))
-        .is_some_and(|suffix| {
-            suffix.len() == 8
-                && suffix
-                    .bytes()
-                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-        })
-}
-
-fn dynamic_decimal_suffix(label: &str, prefix: &str) -> bool {
-    label.strip_prefix(prefix).is_some_and(|suffix| {
-        !suffix.is_empty() && suffix.bytes().all(|byte| byte.is_ascii_digit())
-    })
-}
-
 #[derive(Clone)]
 pub(crate) struct CanonicalProofTranscript {
     application_statement_schema_identifier: u16,
@@ -197,7 +71,7 @@ struct PendingCommonChallenge {
 }
 
 impl CanonicalProofTranscript {
-    pub(crate) fn try_new(
+    fn try_new(
         protocol_version: u16,
         suite_id: [u8; 64],
         application_statement_schema_identifier: u16,
@@ -217,77 +91,6 @@ impl CanonicalProofTranscript {
             )?,
             pending_common_challenge: None,
         })
-    }
-
-    /// Compatibility constructor for the two pre-common proof engines.  Their
-    /// header is an internal bounded protocol label, never hostile proof data.
-    pub(crate) fn new(
-        protocol_version: u16,
-        suite_id: [u8; 64],
-        application_statement_schema_identifier: u16,
-        canonical_proof_object_header_bytes: &[u8],
-    ) -> Self {
-        Self::try_new(
-            protocol_version,
-            suite_id,
-            application_statement_schema_identifier,
-            canonical_proof_object_header_bytes,
-        )
-        .expect("an internal proof-engine protocol label has a canonical transcript header")
-    }
-
-    pub(crate) fn absorb_engine_round(
-        &mut self,
-        engine: CanonicalTranscriptEngine,
-        round_label: &str,
-        canonical_round_message_bytes: &[u8],
-    ) -> Result<(), TranscriptError> {
-        if !engine.accepts_round_label(round_label) {
-            return Err(TranscriptError::InvalidTag);
-        }
-        let round_tag = format!(
-            "proof/{:04x}/engine/{}/{}",
-            self.application_statement_schema_identifier,
-            engine.wire_label(),
-            round_label,
-        );
-        self.state = transcript_hash(
-            TRANSCRIPT_ABSORB_DOMAIN,
-            vec![
-                CanonicalItem::hash512(self.state),
-                CanonicalItem::nonempty_ascii(&round_tag)
-                    .map_err(|_| TranscriptError::CanonicalEncoding)?,
-                CanonicalItem::variable_bytes(canonical_round_message_bytes)
-                    .map_err(|_| TranscriptError::CanonicalEncoding)?,
-            ],
-        )?;
-        Ok(())
-    }
-
-    pub(crate) fn squeeze_engine_challenge(
-        &self,
-        engine: CanonicalTranscriptEngine,
-        challenge_label: &str,
-        squeeze_counter: u64,
-    ) -> Result<[u8; 64], TranscriptError> {
-        if !engine.accepts_challenge_label(challenge_label) {
-            return Err(TranscriptError::InvalidTag);
-        }
-        let challenge_tag = format!(
-            "proof/{:04x}/engine/{}/{}",
-            self.application_statement_schema_identifier,
-            engine.wire_label(),
-            challenge_label,
-        );
-        transcript_hash(
-            TRANSCRIPT_SQUEEZE_DOMAIN,
-            vec![
-                CanonicalItem::hash512(self.state),
-                CanonicalItem::nonempty_ascii(&challenge_tag)
-                    .map_err(|_| TranscriptError::CanonicalEncoding)?,
-                CanonicalItem::unsigned64(squeeze_counter),
-            ],
-        )
     }
 
     fn absorb_common_round(

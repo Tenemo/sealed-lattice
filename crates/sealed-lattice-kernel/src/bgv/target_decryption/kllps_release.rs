@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, fmt, rc::Rc};
+use std::{collections::BTreeMap, fmt, mem::size_of, rc::Rc};
 
 use num_bigint::{BigInt, BigUint, Sign};
 use num_traits::{Signed, ToPrimitive, Zero};
@@ -7,13 +7,14 @@ use zeroize::Zeroizing;
 use super::canonical_partial_stream::{
     CanonicalTargetPartialDecryptionStream, TargetPartialDecryptionRole,
     TargetPartialDecryptionStreamError, encode_target_partial_decryption_stream,
+    selected_target_partial_decryption_stream_byte_length,
 };
 use super::ciphertext_codec::decode_verified_target_ciphertext;
 
 use crate::{
     bgv::{
         direct_ballots::{MAXIMUM_SCORE, MINIMUM_SCORE},
-        encoding::decode_plaintext_coefficients_to_logical_slots,
+        encoding::decode_plaintext_coefficients_to_scalar_lanes,
         evaluator::{
             engine::Ciphertext, noise_recurrence::direct_ballot_target_noise_bounds,
             top_k::CANONICAL_TARGET_CIPHERTEXT_LEVEL,
@@ -25,18 +26,21 @@ use crate::{
             BorrowedVerifiedCommonProofCapability, CommonProofGenerationAuthorization,
             CommonProofGenerationPreparationError, CommonProofGenerationSources,
             CommonProofProverError, CommonProofRuntimeError, CommonProofRuntimeLimits,
-            ConsumedVerifiedCommonProofCapability, PreparedCommonProofGeneration,
-            PrivateRandomnessCommonProofCoinError, PrivateRandomnessCommonProofCoinSource,
-            TargetReleaseModulusWitness, TargetReleaseRoleWitness,
-            TargetReleaseSourcePolynomialAdapter, TargetReleaseVerifiedColumnEvaluator,
-            TargetReleaseWitnessError, TargetReleaseWitnessSource,
+            CommonProofSourceProviderMemoryAccounting, ConsumedVerifiedCommonProofCapability,
+            PreparedCommonProofGeneration, PrivateRandomnessCommonProofCoinError,
+            PrivateRandomnessCommonProofCoinSource, TargetReleaseModulusWitness,
+            TargetReleaseRoleWitness, TargetReleaseSourcePolynomialAdapter,
+            TargetReleaseVerifiedColumnEvaluator, TargetReleaseWitnessError,
+            TargetReleaseWitnessSource, TargetReleaseWitnessSourceMemoryAccounting,
             VerifiedTargetReleaseModulusInput, VerifiedTargetReleaseProof,
             canonical_selected_target_share_statement, selected_target_release_relation,
+            selected_target_release_source_provider_memory_accounting,
             verified_application_statement_hash,
         },
         setup::{
             VerifiedAcceptedSetupAuthority, VerifiedAcceptedSetupAuthorityHandle,
             VerifiedAcceptedSetupParticipantTargetReleaseLease,
+            accepted_setup_participant_target_release_lease_allocation_byte_lengths,
             lease_verified_participant_target_release_source,
             with_verified_accepted_setup_authority,
             with_verified_participant_target_release_source,
@@ -415,7 +419,60 @@ struct ZeroizingSignedLimbPolynomial {
     magnitude_limbs: Zeroizing<Vec<u64>>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct SignedLimbPolynomialAllocationByteLengths {
+    retained_heap_byte_length: u64,
+    maximum_bigint_scratch_byte_length: u64,
+}
+
 impl ZeroizingSignedLimbPolynomial {
+    fn allocation_byte_lengths_from_dimensions(
+        coefficient_count: usize,
+        magnitude_limb_count: usize,
+    ) -> Result<SignedLimbPolynomialAllocationByteLengths, TargetReleaseWitnessError> {
+        if coefficient_count == 0 || magnitude_limb_count == 0 {
+            return Err(TargetReleaseWitnessError::InvalidWitness);
+        }
+        let magnitude_limb_byte_length = coefficient_count
+            .checked_mul(magnitude_limb_count)
+            .and_then(|count| count.checked_mul(size_of::<u64>()))
+            .and_then(|length| u64::try_from(length).ok())
+            .ok_or(TargetReleaseWitnessError::CountOverflow)?;
+        let negative_flag_byte_length = u64::try_from(coefficient_count)
+            .map_err(|_| TargetReleaseWitnessError::CountOverflow)?;
+        let retained_heap_byte_length = negative_flag_byte_length
+            .checked_add(magnitude_limb_byte_length)
+            .ok_or(TargetReleaseWitnessError::CountOverflow)?;
+        let bigint_catalog_byte_length = coefficient_count
+            .checked_mul(size_of::<BigInt>())
+            .and_then(|length| u64::try_from(length).ok())
+            .ok_or(TargetReleaseWitnessError::CountOverflow)?;
+        let one_coefficient_conversion_byte_length = magnitude_limb_count
+            .checked_mul(size_of::<u64>())
+            .and_then(|length| u64::try_from(length).ok())
+            .ok_or(TargetReleaseWitnessError::CountOverflow)?;
+        let maximum_bigint_scratch_byte_length = bigint_catalog_byte_length
+            .checked_add(magnitude_limb_byte_length)
+            .and_then(|length| length.checked_add(one_coefficient_conversion_byte_length))
+            .ok_or(TargetReleaseWitnessError::CountOverflow)?;
+        Ok(SignedLimbPolynomialAllocationByteLengths {
+            retained_heap_byte_length,
+            maximum_bigint_scratch_byte_length,
+        })
+    }
+
+    fn allocation_byte_lengths(
+        coefficient_count: usize,
+        maximum_magnitude: &BigUint,
+    ) -> Result<SignedLimbPolynomialAllocationByteLengths, TargetReleaseWitnessError> {
+        if maximum_magnitude.is_zero() {
+            return Err(TargetReleaseWitnessError::InvalidWitness);
+        }
+        let magnitude_limb_count = usize::try_from(maximum_magnitude.bits().div_ceil(64))
+            .map_err(|_| TargetReleaseWitnessError::CountOverflow)?;
+        Self::allocation_byte_lengths_from_dimensions(coefficient_count, magnitude_limb_count)
+    }
+
     fn new(coefficient_count: usize, maximum_magnitude: &BigUint) -> CanonicalResult<Self> {
         if coefficient_count == 0 || maximum_magnitude.is_zero() {
             return Err(invalid_release(
@@ -558,6 +615,45 @@ impl ZeroizingSignedLimbPolynomial {
             scratch.push(BigInt::from_biguint(sign, magnitude));
         }
         Ok(scratch)
+    }
+
+    fn retained_heap_byte_length(&self) -> Result<u64, TargetReleaseWitnessError> {
+        let allocation_byte_lengths = Self::allocation_byte_lengths_from_dimensions(
+            self.coefficient_count,
+            self.magnitude_limb_count,
+        )?;
+        if self.negative_flags.capacity() != self.coefficient_count
+            || self.magnitude_limbs.capacity()
+                != self
+                    .coefficient_count
+                    .checked_mul(self.magnitude_limb_count)
+                    .ok_or(TargetReleaseWitnessError::CountOverflow)?
+        {
+            return Err(TargetReleaseWitnessError::InvalidWitness);
+        }
+        Ok(allocation_byte_lengths.retained_heap_byte_length)
+    }
+
+    fn maximum_bigint_scratch_byte_length(&self) -> Result<u64, TargetReleaseWitnessError> {
+        if self.coefficient_count == 0
+            || self.magnitude_limb_count == 0
+            || self.negative_flags.len() != self.coefficient_count
+            || self.magnitude_limbs.len()
+                != self
+                    .coefficient_count
+                    .checked_mul(self.magnitude_limb_count)
+                    .ok_or(TargetReleaseWitnessError::CountOverflow)?
+        {
+            return Err(TargetReleaseWitnessError::InvalidWitness);
+        }
+        // `BigUint::from_bytes_le` retains at most the same byte width as the
+        // fixed u64 magnitude source. One callback therefore owns the full
+        // BigInt magnitude payload plus one coefficient-sized byte scratch.
+        Ok(Self::allocation_byte_lengths_from_dimensions(
+            self.coefficient_count,
+            self.magnitude_limb_count,
+        )?
+        .maximum_bigint_scratch_byte_length)
     }
 
     #[cfg(test)]
@@ -769,7 +865,129 @@ impl KllpsTargetReleaseWitnessSource {
     }
 }
 
+fn nested_u64_vector_heap_byte_length(
+    vectors: &[Vec<u64>],
+    outer_capacity: usize,
+) -> Result<u64, TargetReleaseWitnessError> {
+    let outer_catalog_byte_length = u64::try_from(outer_capacity)
+        .ok()
+        .and_then(|count| count.checked_mul(size_of::<Vec<u64>>() as u64))
+        .ok_or(TargetReleaseWitnessError::CountOverflow)?;
+    vectors
+        .iter()
+        .try_fold(outer_catalog_byte_length, |total, values| {
+            let payload = u64::try_from(values.capacity())
+                .ok()
+                .and_then(|count| count.checked_mul(size_of::<u64>() as u64))
+                .ok_or(TargetReleaseWitnessError::CountOverflow)?;
+            total
+                .checked_add(payload)
+                .ok_or(TargetReleaseWitnessError::CountOverflow)
+        })
+}
+
+fn nested_u64_vector_heap_byte_length_from_dimensions(
+    outer_count: usize,
+    inner_count: usize,
+) -> Result<u64, TargetReleaseWitnessError> {
+    let catalog_byte_length = outer_count
+        .checked_mul(size_of::<Vec<u64>>())
+        .and_then(|length| u64::try_from(length).ok())
+        .ok_or(TargetReleaseWitnessError::CountOverflow)?;
+    let payload_byte_length = outer_count
+        .checked_mul(inner_count)
+        .and_then(|count| count.checked_mul(size_of::<u64>()))
+        .and_then(|length| u64::try_from(length).ok())
+        .ok_or(TargetReleaseWitnessError::CountOverflow)?;
+    catalog_byte_length
+        .checked_add(payload_byte_length)
+        .ok_or(TargetReleaseWitnessError::CountOverflow)
+}
+
 impl TargetReleaseWitnessSource for KllpsTargetReleaseProofWitnessSource {
+    fn memory_accounting(
+        &self,
+    ) -> Result<TargetReleaseWitnessSourceMemoryAccounting, TargetReleaseWitnessError> {
+        let lease_memory_accounting = self
+            .accepted_share_lease
+            .memory_accounting()
+            .map_err(|_| TargetReleaseWitnessError::InvalidWitness)?;
+        let coordinate_catalog_byte_length =
+            u64::try_from(self.ordered_target_data_prime_coordinates.len())
+                .ok()
+                .and_then(|count| count.checked_mul(size_of::<(u16, u64)>() as u64))
+                .ok_or(TargetReleaseWitnessError::CountOverflow)?;
+        let partial_identifier_byte_length = nested_u64_vector_heap_byte_length(
+            &self
+                .authorized_partial
+                .partial_decryption
+                .target_identifier_by_limb,
+            self.authorized_partial
+                .partial_decryption
+                .target_identifier_by_limb
+                .capacity(),
+        )?;
+        let partial_order_byte_length = nested_u64_vector_heap_byte_length(
+            &self
+                .authorized_partial
+                .partial_decryption
+                .target_order_by_limb,
+            self.authorized_partial
+                .partial_decryption
+                .target_order_by_limb
+                .capacity(),
+        )?;
+        let converted_identifier_byte_length = nested_u64_vector_heap_byte_length(
+            &self.converted_target_identifier_by_limb,
+            self.converted_target_identifier_by_limb.capacity(),
+        )?;
+        let converted_order_byte_length = nested_u64_vector_heap_byte_length(
+            &self.converted_target_order_by_limb,
+            self.converted_target_order_by_limb.capacity(),
+        )?;
+        let flooding_polynomial_retained_byte_length = self
+            .authorized_partial
+            .flooding_polynomials_by_role
+            .iter()
+            .try_fold(0_u64, |total, polynomial| {
+                total
+                    .checked_add(polynomial.retained_heap_byte_length()?)
+                    .ok_or(TargetReleaseWitnessError::CountOverflow)
+            })?;
+        let maximum_callback_transient_byte_length = self
+            .authorized_partial
+            .flooding_polynomials_by_role
+            .iter()
+            .try_fold(0_u64, |maximum, polynomial| {
+                Ok::<_, TargetReleaseWitnessError>(
+                    maximum.max(polynomial.maximum_bigint_scratch_byte_length()?),
+                )
+            })?;
+        if maximum_callback_transient_byte_length == 0 {
+            return Err(TargetReleaseWitnessError::InvalidWitness);
+        }
+        let unique_owned_heap_byte_length = [
+            lease_memory_accounting.unique_owned_heap_byte_length(),
+            coordinate_catalog_byte_length,
+            partial_identifier_byte_length,
+            partial_order_byte_length,
+            converted_identifier_byte_length,
+            converted_order_byte_length,
+            flooding_polynomial_retained_byte_length,
+        ]
+        .into_iter()
+        .try_fold(0_u64, |total, byte_length| {
+            total
+                .checked_add(byte_length)
+                .ok_or(TargetReleaseWitnessError::CountOverflow)
+        })?;
+        TargetReleaseWitnessSourceMemoryAccounting::new(
+            unique_owned_heap_byte_length,
+            lease_memory_accounting.shared_allocations().to_vec(),
+            maximum_callback_transient_byte_length,
+        )
+    }
+
     fn with_flooding_errors<Output, Operation>(
         &self,
         role_ordinal: usize,
@@ -904,6 +1122,140 @@ impl TargetReleaseWitnessSource for KllpsTargetReleaseProofWitnessSource {
         }
         Ok(())
     }
+}
+
+/// Selected-suite target-release provider accounting derived from the same
+/// allocation contracts used by the live KLLPS source and accepted-share
+/// lease. No proof fixture or self-reported accounting field participates.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct SelectedKllpsTargetReleaseMemoryAccounting {
+    proof_source_additional_persistent_resident_byte_length: u64,
+    paired_partial_stream_custody_resident_byte_length: u64,
+    retained_flooding_polynomial_byte_length: u64,
+    one_role_bigint_scratch_byte_length: u64,
+    paired_generation_bigint_scratch_byte_length: u64,
+}
+
+impl SelectedKllpsTargetReleaseMemoryAccounting {
+    pub(crate) const fn proof_source_additional_persistent_resident_byte_length(self) -> u64 {
+        self.proof_source_additional_persistent_resident_byte_length
+    }
+
+    pub(crate) const fn paired_partial_stream_custody_resident_byte_length(self) -> u64 {
+        self.paired_partial_stream_custody_resident_byte_length
+    }
+
+    pub(crate) fn proof_generation_additional_persistent_resident_byte_length(
+        self,
+    ) -> Option<u64> {
+        self.proof_source_additional_persistent_resident_byte_length
+            .checked_add(self.paired_partial_stream_custody_resident_byte_length)
+    }
+
+    pub(crate) const fn retained_flooding_polynomial_byte_length(self) -> u64 {
+        self.retained_flooding_polynomial_byte_length
+    }
+
+    pub(crate) const fn one_role_bigint_scratch_byte_length(self) -> u64 {
+        self.one_role_bigint_scratch_byte_length
+    }
+
+    pub(crate) const fn paired_generation_bigint_scratch_byte_length(self) -> u64 {
+        self.paired_generation_bigint_scratch_byte_length
+    }
+}
+
+/// Separates the nested paired-partial generation scratch from the later
+/// one-role-at-a-time proof-source callback. The live generation nests the two
+/// `with_bigints_canonical` calls, so both callback scratch catalogs coexist;
+/// the proof adapter borrows only one role and therefore retains the single
+/// role maximum.
+pub(crate) fn selected_kllps_target_release_memory_accounting()
+-> Result<SelectedKllpsTargetReleaseMemoryAccounting, CommonProofProverError> {
+    let selected_target_coordinates = selected_target_data_prime_coordinates()
+        .map_err(|_| CommonProofProverError::InvalidInput)?;
+    let limb_count = selected_target_coordinates.len();
+    if limb_count == 0 {
+        return Err(CommonProofProverError::InvalidInput);
+    }
+    let lease_allocation_byte_lengths =
+        accepted_setup_participant_target_release_lease_allocation_byte_lengths(
+            limb_count,
+            POLYNOMIAL_DEGREE,
+        )
+        .map_err(|_| CommonProofProverError::InvalidInput)?;
+    let coordinate_catalog_byte_length = limb_count
+        .checked_mul(size_of::<(u16, u64)>())
+        .and_then(|length| u64::try_from(length).ok())
+        .ok_or(CommonProofProverError::CountOverflow)?;
+    let one_nested_polynomial_catalog_byte_length =
+        nested_u64_vector_heap_byte_length_from_dimensions(limb_count, POLYNOMIAL_DEGREE)
+            .map_err(|_| CommonProofProverError::CountOverflow)?;
+    let all_nested_polynomial_catalogs_byte_length = one_nested_polynomial_catalog_byte_length
+        .checked_mul(4)
+        .ok_or(CommonProofProverError::CountOverflow)?;
+    let flooding_allocation_byte_lengths = ZeroizingSignedLimbPolynomial::allocation_byte_lengths(
+        POLYNOMIAL_DEGREE,
+        &selected_factor_four_flooding_bound().map_err(|_| CommonProofProverError::InvalidInput)?,
+    )
+    .map_err(|_| CommonProofProverError::CountOverflow)?;
+    let retained_flooding_polynomial_byte_length = flooding_allocation_byte_lengths
+        .retained_heap_byte_length
+        .checked_mul(KLLPS_PAIRED_TARGET_ROLE_COUNT as u64)
+        .ok_or(CommonProofProverError::CountOverflow)?;
+    let proof_source_additional_persistent_resident_byte_length = [
+        lease_allocation_byte_lengths.unique_owned_heap_byte_length(),
+        lease_allocation_byte_lengths.shared_allocation_byte_length(),
+        coordinate_catalog_byte_length,
+        all_nested_polynomial_catalogs_byte_length,
+        retained_flooding_polynomial_byte_length,
+    ]
+    .into_iter()
+    .try_fold(0_u64, |total, byte_length| {
+        total
+            .checked_add(byte_length)
+            .ok_or(CommonProofProverError::CountOverflow)
+    })?;
+    let one_role_bigint_scratch_byte_length =
+        flooding_allocation_byte_lengths.maximum_bigint_scratch_byte_length;
+    let paired_generation_bigint_scratch_byte_length = one_role_bigint_scratch_byte_length
+        .checked_mul(KLLPS_PAIRED_TARGET_ROLE_COUNT as u64)
+        .ok_or(CommonProofProverError::CountOverflow)?;
+    let paired_partial_stream_custody_resident_byte_length = u64::try_from(
+        selected_target_partial_decryption_stream_byte_length()
+            .map_err(|_| CommonProofProverError::InvalidInput)?,
+    )
+    .ok()
+    .and_then(|byte_length| byte_length.checked_mul(KLLPS_PAIRED_TARGET_ROLE_COUNT as u64))
+    .and_then(|byte_length| {
+        byte_length.checked_add(size_of::<KllpsPairedPartialDecryptionStreams>() as u64)
+    })
+    .ok_or(CommonProofProverError::CountOverflow)?;
+    if retained_flooding_polynomial_byte_length == 0
+        || paired_partial_stream_custody_resident_byte_length == 0
+        || one_role_bigint_scratch_byte_length == 0
+        || paired_generation_bigint_scratch_byte_length <= one_role_bigint_scratch_byte_length
+    {
+        return Err(CommonProofProverError::InvalidInput);
+    }
+    Ok(SelectedKllpsTargetReleaseMemoryAccounting {
+        proof_source_additional_persistent_resident_byte_length,
+        paired_partial_stream_custody_resident_byte_length,
+        retained_flooding_polynomial_byte_length,
+        one_role_bigint_scratch_byte_length,
+        paired_generation_bigint_scratch_byte_length,
+    })
+}
+
+pub(crate) fn selected_kllps_target_release_source_provider_memory_accounting()
+-> Result<CommonProofSourceProviderMemoryAccounting, CommonProofProverError> {
+    let accounting = selected_kllps_target_release_memory_accounting()?;
+    selected_target_release_source_provider_memory_accounting::<KllpsTargetReleaseProofWitnessSource>(
+        accounting
+            .proof_generation_additional_persistent_resident_byte_length()
+            .ok_or(CommonProofProverError::CountOverflow)?,
+        accounting.one_role_bigint_scratch_byte_length(),
+    )
 }
 
 pub(crate) fn lease_authorized_target_release_witness_source(
@@ -1698,10 +2050,10 @@ struct ReconstructedKllpsTargetPair {
 
 impl ReconstructedKllpsTargetPair {
     #[cfg(test)]
-    pub(crate) fn decode_logical_slots(&self) -> CanonicalResult<(Vec<u64>, Vec<u64>)> {
+    pub(crate) fn decode_scalar_lanes(&self) -> CanonicalResult<(Vec<u64>, Vec<u64>)> {
         Ok((
-            decode_plaintext_coefficients_to_logical_slots(&self.target_identifier_coefficients)?,
-            decode_plaintext_coefficients_to_logical_slots(&self.target_order_coefficients)?,
+            decode_plaintext_coefficients_to_scalar_lanes(&self.target_identifier_coefficients)?,
+            decode_plaintext_coefficients_to_scalar_lanes(&self.target_order_coefficients)?,
         ))
     }
 
@@ -1711,9 +2063,9 @@ impl ReconstructedKllpsTargetPair {
         option_count: u16,
     ) -> CanonicalResult<Vec<u32>> {
         let target_identifier_slots =
-            decode_plaintext_coefficients_to_logical_slots(&self.target_identifier_coefficients)?;
+            decode_plaintext_coefficients_to_scalar_lanes(&self.target_identifier_coefficients)?;
         let target_order_slots =
-            decode_plaintext_coefficients_to_logical_slots(&self.target_order_coefficients)?;
+            decode_plaintext_coefficients_to_scalar_lanes(&self.target_order_coefficients)?;
         canonical_ordered_option_identifiers(
             &target_identifier_slots,
             &target_order_slots,

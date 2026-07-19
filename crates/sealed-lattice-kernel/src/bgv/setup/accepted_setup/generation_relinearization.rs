@@ -631,6 +631,25 @@ impl SetupRelinearizationRoundTwoConstruction {
             .map_err(|_| RefusalReason::OutsideSupportedProfile)
     }
 
+    /// Peak temporary coefficient payload in one residue-row generation.
+    /// The second product overlaps two centered-residue inputs, the first
+    /// retained product, and the two vectors internal to the NTT product.
+    /// The ephemeral input is dropped before the third product, so no later
+    /// point has more than these five full-degree vectors live.
+    pub(crate) fn generation_workspace_payload_peak_byte_length(
+        &self,
+    ) -> Result<u64, RefusalReason> {
+        u64::try_from(self.topology.polynomial_degree())
+            .ok()
+            .and_then(|degree| degree.checked_mul(5))
+            .and_then(|coefficient_count| {
+                u64::try_from(size_of::<u64>())
+                    .ok()
+                    .and_then(|byte_length| coefficient_count.checked_mul(byte_length))
+            })
+            .ok_or(RefusalReason::OutsideSupportedProfile)
+    }
+
     fn release_aggregate_source_row_allocations(&mut self) {
         self.aggregate_left_row = Zeroizing::new(Vec::new());
         self.aggregate_right_row = Zeroizing::new(Vec::new());
@@ -754,6 +773,7 @@ impl SetupRelinearizationRoundTwoConstruction {
         let ephemeral_times_right =
             negacyclic_product_mod(&ephemeral_residues, &self.aggregate_right_row, modulus)
                 .map_err(|_| RefusalReason::InvalidArithmeticRelation)?;
+        drop(ephemeral_residues);
         let secret_times_right =
             negacyclic_product_mod(&secret_residues, &self.aggregate_right_row, modulus)
                 .map_err(|_| RefusalReason::InvalidArithmeticRelation)?;
@@ -951,11 +971,14 @@ impl SetupGeneratedRelinearizationMaterial {
             .iter()
             .chain(self.round_one_right_errors_by_block.iter())
             .chain(self.round_two_errors_by_block.iter())
-            .try_fold(self.ephemeral_secret_coefficients.capacity(), |total, polynomial| {
-                total
-                    .checked_add(polynomial.capacity())
-                    .ok_or(RefusalReason::OutsideSupportedProfile)
-            })?;
+            .try_fold(
+                self.ephemeral_secret_coefficients.capacity(),
+                |total, polynomial| {
+                    total
+                        .checked_add(polynomial.capacity())
+                        .ok_or(RefusalReason::OutsideSupportedProfile)
+                },
+            )?;
         u64::try_from(
             component_byte_length
                 .checked_add(private_coefficient_byte_length)
@@ -2361,7 +2384,7 @@ mod tests {
                     usize::try_from(column.byte_offset() + column.byte_length()).expect("byte end");
                 column
                     .decode_authenticated_bytes(&canonical_bytes[byte_start..byte_end])
-                    .expect("legacy trace row")
+                    .expect("canonical trace row")
             })
             .collect::<Vec<_>>();
         let retained_tree = SetupPublicPolynomialTree::construct(SetupPublicPolynomialTreeInput {

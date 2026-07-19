@@ -1188,6 +1188,9 @@ pub(crate) fn canonical_selected_relinearization_round_one_aggregate_statement(
     aggregate_left_root: [u8; Hash512::BYTE_LENGTH],
     aggregate_right_root: [u8; Hash512::BYTE_LENGTH],
 ) -> Result<Vec<u8>, SelectedApplicationStatementError> {
+    if schedule_position != selected_relinearization_statement_schedule_position()? {
+        return Err(SelectedApplicationStatementError::InvalidProfile);
+    }
     if ordered_source_root_pairs.len() != usize::from(FOUNDATION_PROFILE.participant_count) {
         return Err(SelectedApplicationStatementError::WrongTypeOrLength);
     }
@@ -3147,29 +3150,6 @@ mod tests {
     }
 
     #[test]
-    fn galois_statement_rejects_the_aliased_version_one_batch_shape() {
-        let context = selected_galois_statement_context();
-        let bytes = canonical_selected_application_statement_for_ceiling(
-            ProofApplicationSlotCeilings::GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
-            context,
-        )
-        .expect("Galois statement");
-        let mut version_one_statement =
-            CanonicalTuple::decode(&bytes, &CanonicalDecodeLimits::default())
-                .expect("canonical Galois statement");
-        version_one_statement.schema_version = APPLICATION_STATEMENT_SCHEMA_VERSION;
-        let version_one_bytes = version_one_statement
-            .encode()
-            .expect("version-one alias encodes canonically");
-
-        assert_galois_statement_error(
-            &version_one_bytes,
-            context,
-            SelectedApplicationStatementError::WrongSchema,
-        );
-    }
-
-    #[test]
     fn typed_galois_statement_constructor_and_extractor_bind_all_selected_roots() {
         let anchor_commitment_roots = [
             [0x31; Hash512::BYTE_LENGTH],
@@ -3641,6 +3621,16 @@ mod tests {
         assert_eq!(aggregate.ordered_source_root_pairs(), source_root_pairs);
         assert_eq!(aggregate.aggregate_left_root(), [0x81; 64]);
         assert_eq!(aggregate.aggregate_right_root(), [0x82; 64]);
+        assert_eq!(
+            canonical_selected_relinearization_round_one_aggregate_statement(
+                setup_proof_context_hash,
+                wrong_schedule_position,
+                &source_root_pairs,
+                [0x81; Hash512::BYTE_LENGTH],
+                [0x82; Hash512::BYTE_LENGTH],
+            ),
+            Err(SelectedApplicationStatementError::InvalidProfile)
+        );
 
         let anchor_commitment_roots = [
             [0x31; Hash512::BYTE_LENGTH],

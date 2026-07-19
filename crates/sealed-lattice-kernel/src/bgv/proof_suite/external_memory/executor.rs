@@ -1,8 +1,6 @@
-use zeroize::Zeroizing;
-
 use super::plan::{
     ProofExternalMemory, ProofExternalMemoryObject, ProofExternalMemoryObjectPlan,
-    ProofExternalMemoryPlan, ProofExternalMemoryProtection,
+    ProofExternalMemoryPlan,
 };
 
 /// Cancellation is owned by the participant-operation worker.  It is checked

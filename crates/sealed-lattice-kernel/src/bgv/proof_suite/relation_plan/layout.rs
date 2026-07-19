@@ -356,6 +356,14 @@ impl RelationPlanVariant {
         &self.ordered_trees
     }
 
+    pub(crate) const fn ordered_constraint_count(&self) -> usize {
+        self.ordered_constraints.len()
+    }
+
+    pub(crate) fn ordered_constraints(&self) -> &[RelationConstraintDescriptor] {
+        &self.ordered_constraints
+    }
+
     pub(crate) fn ordered_integer_lift_batches(&self) -> &[RelationIntegerLiftBatchDescriptor] {
         &self.ordered_integer_lift_batches
     }

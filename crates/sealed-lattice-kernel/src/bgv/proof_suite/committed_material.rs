@@ -424,6 +424,100 @@ pub(crate) struct CompactCommittedMaterialSource {
     root: [u8; 64],
 }
 
+/// One process-local Arc allocation retained by an authenticated committed
+/// source. The identifier is used only to de-duplicate live process memory;
+/// it is never serialized, hashed, or admitted into a proof binding.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct CommittedMaterialSharedAllocationMemoryAccounting {
+    owner_identifier: usize,
+    retained_byte_length: u64,
+}
+
+impl CommittedMaterialSharedAllocationMemoryAccounting {
+    pub(crate) const fn new(owner_identifier: usize, retained_byte_length: u64) -> Self {
+        Self {
+            owner_identifier,
+            retained_byte_length,
+        }
+    }
+
+    pub(crate) const fn owner_identifier(self) -> usize {
+        self.owner_identifier
+    }
+
+    pub(crate) const fn retained_byte_length(self) -> u64 {
+        self.retained_byte_length
+    }
+}
+
+/// Allocation-complete memory facts for the two Arc owners carried by one
+/// authenticated compact source. Wrapper references live in their enclosing
+/// catalogs and are deliberately not counted here.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct AuthenticatedCommittedMaterialSharedMemoryAccounting {
+    compact_source: CommittedMaterialSharedAllocationMemoryAccounting,
+    canonical_message: CommittedMaterialSharedAllocationMemoryAccounting,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct AuthenticatedCommittedMaterialSharedAllocationByteLengths {
+    compact_source: u64,
+    canonical_message: u64,
+}
+
+impl AuthenticatedCommittedMaterialSharedAllocationByteLengths {
+    pub(crate) const fn compact_source(self) -> u64 {
+        self.compact_source
+    }
+
+    pub(crate) const fn canonical_message(self) -> u64 {
+        self.canonical_message
+    }
+
+    pub(crate) fn total(self) -> Result<u64, CommittedMaterialError> {
+        self.compact_source
+            .checked_add(self.canonical_message)
+            .ok_or(CommittedMaterialError::CountOverflow)
+    }
+}
+
+pub(crate) fn authenticated_committed_material_shared_allocation_byte_lengths(
+    canonical_coefficient_count: usize,
+) -> Result<AuthenticatedCommittedMaterialSharedAllocationByteLengths, CommittedMaterialError> {
+    let arc_header_byte_length = size_of::<usize>()
+        .checked_mul(2)
+        .and_then(|length| u64::try_from(length).ok())
+        .ok_or(CommittedMaterialError::CountOverflow)?;
+    let compact_source = u64::try_from(size_of::<CompactCommittedMaterialSource>())
+        .ok()
+        .and_then(|length| length.checked_add(arc_header_byte_length))
+        .ok_or(CommittedMaterialError::CountOverflow)?;
+    let canonical_message = u64::try_from(canonical_coefficient_count)
+        .ok()
+        .and_then(|count| count.checked_mul(size_of::<u64>() as u64))
+        .and_then(|length| {
+            length.checked_add(u64::try_from(size_of::<Zeroizing<Box<[u64]>>>()).ok()?)
+        })
+        .and_then(|length| length.checked_add(arc_header_byte_length))
+        .ok_or(CommittedMaterialError::CountOverflow)?;
+    Ok(AuthenticatedCommittedMaterialSharedAllocationByteLengths {
+        compact_source,
+        canonical_message,
+    })
+}
+
+impl AuthenticatedCommittedMaterialSharedMemoryAccounting {
+    pub(crate) const fn compact_source(self) -> CommittedMaterialSharedAllocationMemoryAccounting {
+        self.compact_source
+    }
+
+    pub(crate) const fn canonical_message(
+        self,
+    ) -> CommittedMaterialSharedAllocationMemoryAccounting {
+        self.canonical_message
+    }
+}
+
 /// One positively authenticated committed-material root and its compact
 /// canonical lattice coefficients. The expensive evaluation columns, Merkle
 /// layers, and digit trace rows are absent. A proof source derives only the
@@ -457,10 +551,6 @@ impl AuthenticatedCompactCommittedMaterialSource {
 
     pub(crate) fn compact_source(&self) -> &CompactCommittedMaterialSource {
         &self.compact_source
-    }
-
-    pub(crate) fn owned_compact_source(&self) -> Arc<CompactCommittedMaterialSource> {
-        Arc::clone(&self.compact_source)
     }
 
     pub(crate) fn canonical_message(&self) -> &[u64] {
@@ -533,25 +623,24 @@ impl AuthenticatedCompactCommittedMaterialSource {
         )
     }
 
-    /// Heap bytes held by this source that the proof adapter borrows through
-    /// Arc clones. The canonical coefficient allocation and compact source
-    /// object are split from wrapper and Arc-header bytes so a phase ledger
-    /// can deduplicate the shared payload exactly.
-    pub(crate) fn retained_shared_source_byte_length(&self) -> Option<usize> {
-        self.canonical_message
-            .len()
-            .checked_mul(size_of::<u64>())
-            .and_then(|length| length.checked_add(self.compact_source.retained_byte_length()))
-    }
-
-    /// Allocation metadata owned once by the two Arc allocations. Rust's Arc
-    /// allocation stores two machine-word counters. The canonical-message Arc
-    /// additionally owns the boxed-slice pointer whose coefficient payload is
-    /// reported by `retained_shared_source_byte_length`.
-    pub(crate) fn retained_shared_allocation_wrapper_byte_length(&self) -> Option<usize> {
-        size_of::<usize>()
-            .checked_mul(4)
-            .and_then(|length| length.checked_add(size_of::<Zeroizing<Box<[u64]>>>()))
+    pub(crate) fn shared_memory_accounting(
+        &self,
+    ) -> Result<AuthenticatedCommittedMaterialSharedMemoryAccounting, CommittedMaterialError> {
+        let (compact_source_owner_identifier, canonical_message_owner_identifier) =
+            self.shared_allocation_owner_identifiers();
+        let byte_lengths = authenticated_committed_material_shared_allocation_byte_lengths(
+            self.canonical_message.len(),
+        )?;
+        Ok(AuthenticatedCommittedMaterialSharedMemoryAccounting {
+            compact_source: CommittedMaterialSharedAllocationMemoryAccounting {
+                owner_identifier: compact_source_owner_identifier,
+                retained_byte_length: byte_lengths.compact_source(),
+            },
+            canonical_message: CommittedMaterialSharedAllocationMemoryAccounting {
+                owner_identifier: canonical_message_owner_identifier,
+                retained_byte_length: byte_lengths.canonical_message(),
+            },
+        })
     }
 
     pub(crate) fn maximum_regeneration_trace_byte_length(&self) -> usize {

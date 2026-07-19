@@ -1,10 +1,10 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use super::super::{PROOF_CHALLENGE_EXTENSION_DEGREE, merkle::ProofLeafVisibility};
 use super::authentication::minimal_frontier_node_count;
 use super::{
-    AUTHENTICATION_DIGEST_BYTE_LENGTH, CompleteProofTreeCatalog, ProofBodyError, ProofBodyLayout,
-    ProofTreeCatalogEntry, ProofTreeCatalogSource, ProofTreeConstruction,
+    AUTHENTICATION_DIGEST_BYTE_LENGTH, ProofBodyError, ProofBodyLayout, ProofTreeCatalogEntry,
+    ProofTreeCatalogSource, ProofTreeConstruction,
 };
 use crate::bgv::proof_suite::COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH;
 

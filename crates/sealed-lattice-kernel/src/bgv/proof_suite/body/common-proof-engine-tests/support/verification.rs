@@ -49,7 +49,7 @@ fn owned_verification_worker_authenticates_external_readback_before_minting_auth
         stream_domain,
         proof_stream_descriptor.full_object_digest.into_bytes(),
         proof_bytes.len() as u64,
-        PROOF_UNIQUE_QUERY_COUNT,
+        PUBLIC_AGGREGATE_TEST_UNIQUE_QUERY_COUNT,
     )
     .expect("the generated proof fits the exact application reservation");
     let binding = CommonProofVerificationBinding::new(
@@ -238,7 +238,10 @@ fn owned_verification_worker_authenticates_external_readback_before_minting_auth
         expected_proof_stream_full_object_digest,
     );
     assert_eq!(consumed.proof_byte_length(), proof_bytes.len() as u64);
-    assert_eq!(consumed.verified_query_count(), PROOF_UNIQUE_QUERY_COUNT);
+    assert_eq!(
+        consumed.verified_query_count(),
+        PUBLIC_AGGREGATE_TEST_UNIQUE_QUERY_COUNT
+    );
     assert_eq!(consumed.relation_plan_hash(), expected_relation_plan_hash);
     assert_eq!(
         consumed.relation_plan_variant_hash(),
@@ -287,7 +290,10 @@ fn incremental_verifier_retains_only_owned_initialization_material_across_yields
     let verified = complete_incremental_verification(verifier, &proof_bytes)
         .expect("verification continues after every borrowed initializer is released");
     assert_eq!(verified.proof_byte_length(), proof_bytes.len() as u64);
-    assert_eq!(verified.verified_query_count(), PROOF_UNIQUE_QUERY_COUNT);
+    assert_eq!(
+        verified.verified_query_count(),
+        PUBLIC_AGGREGATE_TEST_UNIQUE_QUERY_COUNT
+    );
 }
 
 #[test]

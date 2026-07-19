@@ -10,6 +10,7 @@ use crate::{
             SetupGeneratedRelinearizationAggregateSourceAuthority, SetupGenerationAuthorityHandle,
             SetupGenerationRelinearizationRoundTwoApplication,
             SetupGenerationRelinearizationRoundTwoSource,
+            setup_generation_retained_memory_accounting,
             with_setup_generation_relinearization_round_two_witness,
         },
     },
@@ -722,6 +723,23 @@ fn relinearization_round_two_column_dependencies(
             .flat_map(|row| row.iter())
             .chain(anchor.second_matrix.iter())
         {
+            for half_ordinal in 0..2 {
+                let canonical = matrix.canonical.halves[half_ordinal];
+                insert_relinearization_column_dependency(
+                    &mut dependencies,
+                    matrix.centered.source.coefficients.halves[half_ordinal],
+                    canonical,
+                );
+                insert_relinearization_column_dependency(
+                    &mut dependencies,
+                    matrix.carry_columns[half_ordinal],
+                    canonical,
+                );
+            }
+        }
+    }
+    for aggregate_row in &source_layout.aggregate_rows {
+        for matrix in [&aggregate_row.left, &aggregate_row.right] {
             for half_ordinal in 0..2 {
                 let canonical = matrix.canonical.halves[half_ordinal];
                 insert_relinearization_column_dependency(
@@ -2836,11 +2854,20 @@ impl CommonProofSourcePolynomialProvider for RelinearizationRoundTwoSourcePolyno
     fn memory_accounting(
         &self,
     ) -> Result<CommonProofSourceProviderMemoryAccounting, CommonProofProverError> {
+        let authority = setup_generation_retained_memory_accounting(
+            &SetupGenerationAuthorityHandle::from_identifier(self.authority_identifier),
+        )
+        .map_err(|_| CommonProofProverError::InvalidInput)?;
+        let authority_byte_length = authority.active_payload_byte_length();
         Ok(CommonProofSourceProviderMemoryAccounting::new(
             self.memory_accounting
-                .loading_persistent_resident_byte_length(),
+                .loading_persistent_resident_byte_length()
+                .checked_add(authority_byte_length)
+                .ok_or(CommonProofProverError::CountOverflow)?,
             self.memory_accounting
-                .post_source_polynomial_finish_persistent_resident_byte_length(),
+                .post_source_polynomial_finish_persistent_resident_byte_length()
+                .checked_add(authority_byte_length)
+                .ok_or(CommonProofProverError::CountOverflow)?,
             self.memory_accounting
                 .additional_loading_source_polynomials_transient_byte_length(),
             self.memory_accounting

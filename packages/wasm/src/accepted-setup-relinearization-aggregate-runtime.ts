@@ -1,4 +1,8 @@
-import { foundationProfile, refusalReasonCodes } from '@sealed-lattice/types';
+import {
+    foundationProfile,
+    refusalReasonCodes,
+    type BrowserActionStorageWorkerKernel,
+} from '@sealed-lattice/types';
 
 import {
     readAcceptedSetupPrepackageEvaluatorComponentExactRange,
@@ -19,10 +23,6 @@ import {
     requireAcceptedSetupPackageBuilderKernelOwner,
     type AcceptedSetupPackageBuilder,
 } from './accepted-setup-package-builder-runtime.js';
-import {
-    resolveActionRandomnessKernelAuthorization,
-    type ActionRandomnessSession,
-} from './action-randomness-runtime.js';
 import { isUint8Array } from './byte-array.js';
 import {
     canonicalStreamDomains,
@@ -36,21 +36,14 @@ import {
     applyClosedWorkerGeneratedCommonProofCapability,
     openClosedWorkerCommonProofGenerationFamilyAdapter,
     releaseClosedWorkerCommonProofGenerationFamilyAdapter,
-    runClosedWorkerCommonProofGenerationFamilyAdapterRetainingGeneratedCapability,
+    runClosedWorkerCommonProofGenerationFamilyAdapterWithExecutionOpener,
     type ClosedWorkerCommonProofGenerationFamilyAdapter,
     type ClosedWorkerGeneratedCommonProofCapability,
-    type CommonProofCanonicalOutputStore,
-    type CommonProofExternalMemoryTransactionExecutor,
-    type CommonProofGenerationWorkerOptions,
+    type CommonProofGenerationExecutionOpener,
 } from './common-proof-worker-runtime/runtime.js';
-import {
-    deriveGeneratedCommonProofDescriptor,
-    trackCanonicalCommonProofOutputChunks,
-} from './generated-common-proof-output-runtime.js';
-import {
-    resolveVerifiedStateReservationKernelAuthorization,
-    type VerifiedStateReservation,
-} from './state-verifier-runtime.js';
+import { deriveGeneratedCommonProofDescriptor } from './generated-common-proof-output-runtime.js';
+import type { ClosedWorkerProductionOperationIdentifiers } from './local-storage-root-worker-kernel/authorities.js';
+import { withClosedWorkerProductionOperationAuthority } from './local-storage-root-worker-kernel/worker-kernel.js';
 import { resolveCommonProofKernelContext } from './transcript-core-bridge/common-proof-kernel-context.js';
 import type { TranscriptCoreKernelCommandRuntime } from './transcript-core-bridge/kernel-runtime.js';
 import type {
@@ -77,10 +70,6 @@ const maximumConstructionReadCount =
     );
 
 export type RelinearizationAggregateGenerationMode = 'fresh' | 'resumed';
-type RelinearizationAggregateGenerationWorkerOptions = Omit<
-    CommonProofGenerationWorkerOptions,
-    'authenticatedSourceRangeReader'
->;
 export type RelinearizationAggregateComponentStore =
     GeneratedEvaluatorComponentStore;
 export type RelinearizationAggregateComponentDescription =
@@ -600,18 +589,16 @@ const createComponentReadback = (input: {
 };
 
 export type RelinearizationAggregateGenerationInput = Readonly<{
-    actionRandomnessSession: ActionRandomnessSession;
     checkpointLineageIdentifier: Uint8Array;
     componentStores: readonly RelinearizationAggregateComponentStore[];
     evaluatorSourceCatalog: AcceptedSetupEvaluatorSourceCatalogSession;
-    externalMemory: CommonProofExternalMemoryTransactionExecutor;
     generationMode: RelinearizationAggregateGenerationMode;
     kernel: TranscriptCoreKernel;
-    options?: RelinearizationAggregateGenerationWorkerOptions;
+    openProofGenerationExecution: CommonProofGenerationExecutionOpener;
     packageBuilder: AcceptedSetupPackageBuilder;
-    proofOutputStore: CommonProofCanonicalOutputStore;
+    productionOperationIdentifiers: ClosedWorkerProductionOperationIdentifiers;
     signal?: AbortSignal;
-    verifiedReservation: VerifiedStateReservation;
+    workerKernel: BrowserActionStorageWorkerKernel;
     yieldControl?(): Promise<void>;
 }>;
 
@@ -627,8 +614,7 @@ export const generateRelinearizationRoundOneAggregateInClosedWorker = async (
     if (
         (input.generationMode !== 'fresh' &&
             input.generationMode !== 'resumed') ||
-        (input.generationMode === 'resumed') !==
-            (input.options?.resume !== undefined) ||
+        typeof input.openProofGenerationExecution !== 'function' ||
         !isUint8Array(input.checkpointLineageIdentifier) ||
         input.checkpointLineageIdentifier.byteLength !==
             checkpointLineageIdentifierByteLength
@@ -654,25 +640,6 @@ export const generateRelinearizationRoundOneAggregateInClosedWorker = async (
         input.kernel,
         'collecting',
     );
-    const actionRandomness = resolveActionRandomnessKernelAuthorization(
-        input.actionRandomnessSession,
-        input.kernel,
-    );
-    const state = resolveVerifiedStateReservationKernelAuthorization(
-        input.verifiedReservation,
-        input.kernel,
-    );
-    if (
-        actionRandomness.context.memory !== context.memory ||
-        state.capabilityMemory !== context.memory ||
-        state.capabilityPointer <= 0 ||
-        state.capabilityPointer + verifierCapabilityByteLength >
-            context.memory.buffer.byteLength
-    ) {
-        throw new CanonicalStreamInternalError(
-            'The RKG aggregate generation authorities do not belong to one WASM worker.',
-        );
-    }
     const checkpointLineageIdentifier =
         input.checkpointLineageIdentifier.slice();
     const yieldControl = input.yieldControl ?? yieldBrowserWorkerTurn;
@@ -742,69 +709,99 @@ export const generateRelinearizationRoundOneAggregateInClosedWorker = async (
             catalog: input.evaluatorSourceCatalog,
             kernel: input.kernel,
         });
-        const adapterHandle = context.runExclusive(
-            'RKG aggregate proof preparation',
-            () => {
-                const checkpointPointer = memoryBoundary.copy(
-                    checkpointLineageIdentifier,
-                );
-                const statusPointer = memoryBoundary.allocateZeroedWords(1);
-                try {
-                    const prepare =
-                        input.generationMode === 'fresh'
-                            ? kernel.prepareGeneration
-                            : kernel.prepareResumedGeneration;
-                    const handle = prepare(
-                        sessionHandle,
-                        actionRandomness.handle,
-                        state.sessionHandle,
-                        state.capabilityPointer,
-                        verifierCapabilityByteLength,
-                        state.reservationHandle,
-                        checkpointPointer,
-                        checkpointLineageIdentifier.byteLength,
-                        statusPointer,
-                    );
-                    const [status] = memoryBoundary.readWords(statusPointer, 1);
-                    statusBoundary.throwIfError(status);
-                    return requireLiveHandle(
-                        handle,
-                        'The RKG aggregate generation adapter handle',
-                    );
-                } finally {
-                    memoryBoundary.zeroAndDeallocate(
-                        statusPointer,
-                        wasm32WordByteLength,
-                    );
-                    memoryBoundary.zeroAndDeallocate(
-                        checkpointPointer,
-                        checkpointLineageIdentifier.byteLength,
-                    );
-                }
-            },
+        let adapterHandle = 0;
+        await withClosedWorkerProductionOperationAuthority(
+            input.workerKernel,
+            input.productionOperationIdentifiers,
+            (productionOperationAuthority) =>
+                productionOperationAuthority.withExactKernelAuthorization(
+                    (authorization) => {
+                        if (
+                            authorization.kernel !== input.kernel ||
+                            authorization.actionRandomnessContext.memory !==
+                                context.memory ||
+                            authorization.stateReservationCapabilityMemory !==
+                                context.memory ||
+                            authorization.stateReservationCapabilityPointer <=
+                                0 ||
+                            authorization.stateReservationCapabilityPointer +
+                                    verifierCapabilityByteLength >
+                                context.memory.buffer.byteLength
+                        ) {
+                            throw new CanonicalStreamInternalError(
+                                'The RKG aggregate generation authorities do not belong to one WASM worker.',
+                            );
+                        }
+                        adapterHandle = context.runExclusive(
+                            'RKG aggregate proof preparation',
+                            () => {
+                                const checkpointPointer = memoryBoundary.copy(
+                                    checkpointLineageIdentifier,
+                                );
+                                const statusPointer =
+                                    memoryBoundary.allocateZeroedWords(1);
+                                try {
+                                    const prepare =
+                                        input.generationMode === 'fresh'
+                                            ? kernel.prepareGeneration
+                                            : kernel.prepareResumedGeneration;
+                                    const handle = prepare(
+                                        sessionHandle,
+                                        authorization.actionRandomnessHandle,
+                                        authorization.stateVerifierSessionHandle,
+                                        authorization.stateReservationCapabilityPointer,
+                                        verifierCapabilityByteLength,
+                                        authorization.stateReservationHandle,
+                                        checkpointPointer,
+                                        checkpointLineageIdentifier.byteLength,
+                                        statusPointer,
+                                    );
+                                    const [status] = memoryBoundary.readWords(
+                                        statusPointer,
+                                        1,
+                                    );
+                                    statusBoundary.throwIfError(status);
+                                    return requireLiveHandle(
+                                        handle,
+                                        'The RKG aggregate generation adapter handle',
+                                    );
+                                } finally {
+                                    memoryBoundary.zeroAndDeallocate(
+                                        statusPointer,
+                                        wasm32WordByteLength,
+                                    );
+                                    memoryBoundary.zeroAndDeallocate(
+                                        checkpointPointer,
+                                        checkpointLineageIdentifier.byteLength,
+                                    );
+                                }
+                            },
+                        );
+                    },
+                ),
         );
+        if (adapterHandle === 0) {
+            throw new CanonicalStreamInternalError(
+                'The production operation completed without an RKG aggregate adapter.',
+            );
+        }
         familyAdapter = openClosedWorkerCommonProofGenerationFamilyAdapter(
             context,
             adapterHandle,
         );
         const adapterForRun = familyAdapter;
         familyAdapter = undefined;
-        const trackedProofOutput = trackCanonicalCommonProofOutputChunks(
-            input.proofOutputStore,
-        );
-        generatedCapability =
-            await runClosedWorkerCommonProofGenerationFamilyAdapterRetainingGeneratedCapability(
+        const execution =
+            await runClosedWorkerCommonProofGenerationFamilyAdapterWithExecutionOpener(
                 adapterForRun,
-                input.externalMemory,
-                trackedProofOutput.outputStore,
-                input.options,
+                input.openProofGenerationExecution,
             );
+        generatedCapability = execution.generatedCapability;
         const proofDescriptorBytes = await deriveGeneratedCommonProofDescriptor(
             {
                 kernel: input.kernel,
-                outputChunkByteLengths:
-                    trackedProofOutput.outputChunkByteLengths,
-                outputStore: input.proofOutputStore,
+                outputChunkByteLengths: execution.outputChunkByteLengths,
+                outputStore: execution.outputStore,
                 proofFamilyLabel: 'RKG round-one aggregate',
                 streamDomain: canonicalStreamDomains.rkgRoundOneAggregateProof,
             },

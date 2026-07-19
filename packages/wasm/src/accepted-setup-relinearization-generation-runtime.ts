@@ -1,4 +1,8 @@
-import { foundationProfile, refusalReasonCodes } from '@sealed-lattice/types';
+import {
+    foundationProfile,
+    refusalReasonCodes,
+    type BrowserActionStorageWorkerKernel,
+} from '@sealed-lattice/types';
 
 import {
     readAcceptedSetupPrepackageEvaluatorComponentExactRange,
@@ -19,10 +23,6 @@ import {
     requireAcceptedSetupPackageBuilderKernelOwner,
     type AcceptedSetupPackageBuilder,
 } from './accepted-setup-package-builder-runtime.js';
-import {
-    resolveActionRandomnessKernelAuthorization,
-    type ActionRandomnessSession,
-} from './action-randomness-runtime.js';
 import { isUint8Array } from './byte-array.js';
 import type { VerifiedTranscriptObject } from './canonical-board-runtime.js';
 import {
@@ -32,30 +32,26 @@ import {
     CanonicalStreamRefusalError,
     CanonicalStreamResourceError,
 } from './canonical-stream-runtime.js';
-import { yieldBrowserWorkerTurn } from './common-proof-worker-runtime/kernel-boundaries.js';
+import {
+    yieldBrowserWorkerTurn,
+    type CommonProofAuthenticatedSourceRangeRequest,
+} from './common-proof-worker-runtime/kernel-boundaries.js';
 import {
     applyClosedWorkerGeneratedCommonProofCapability,
     openClosedWorkerCommonProofGenerationFamilyAdapter,
     releaseClosedWorkerCommonProofGenerationFamilyAdapter,
-    runClosedWorkerCommonProofGenerationFamilyAdapterRetainingGeneratedCapability,
+    runClosedWorkerCommonProofGenerationFamilyAdapterWithExecutionOpener,
     type ClosedWorkerCommonProofGenerationFamilyAdapter,
     type ClosedWorkerGeneratedCommonProofCapability,
-    type CommonProofCanonicalOutputStore,
-    type CommonProofExternalMemoryTransactionExecutor,
-    type CommonProofGenerationWorkerOptions,
+    type CommonProofGenerationExecutionOpener,
 } from './common-proof-worker-runtime/runtime.js';
-import {
-    deriveGeneratedCommonProofDescriptor,
-    trackCanonicalCommonProofOutputChunks,
-} from './generated-common-proof-output-runtime.js';
+import { deriveGeneratedCommonProofDescriptor } from './generated-common-proof-output-runtime.js';
+import type { ClosedWorkerProductionOperationIdentifiers } from './local-storage-root-worker-kernel/authorities.js';
+import { withClosedWorkerProductionOperationAuthority } from './local-storage-root-worker-kernel/worker-kernel.js';
 import {
     resolveSetupGenerationAuthorityKernelAuthorization,
     type BrowserOwnedSetupGenerationAuthority,
 } from './setup-generation-recipient-payload.js';
-import {
-    resolveVerifiedStateReservationKernelAuthorization,
-    type VerifiedStateReservation,
-} from './state-verifier-runtime.js';
 import { resolveCommonProofKernelContext } from './transcript-core-bridge/common-proof-kernel-context.js';
 import type { TranscriptCoreKernelCommandRuntime } from './transcript-core-bridge/kernel-runtime.js';
 import type {
@@ -89,11 +85,6 @@ const abortSignalIsAborted = (signal: AbortSignal | undefined): boolean =>
 
 type RelinearizationParticipantRound = 'roundOne' | 'roundTwo';
 export type RelinearizationGenerationMode = 'fresh' | 'resumed';
-type RelinearizationGenerationWorkerOptions = Omit<
-    CommonProofGenerationWorkerOptions,
-    'authenticatedSourceRangeReader'
->;
-
 export type RelinearizationComponentStore = GeneratedEvaluatorComponentStore;
 export type RelinearizationComponentDescription =
     GeneratedEvaluatorComponentDescription;
@@ -490,20 +481,18 @@ const createComponentReadback = (input: {
 };
 
 export type RelinearizationParticipantGenerationInput = Readonly<{
-    actionRandomnessSession: ActionRandomnessSession;
     canonicalSuiteRecordBytes: Uint8Array;
     checkpointLineageIdentifier: Uint8Array;
     componentStores: readonly RelinearizationComponentStore[];
     evaluatorSourceCatalog: AcceptedSetupEvaluatorSourceCatalogSession;
-    externalMemory: CommonProofExternalMemoryTransactionExecutor;
     generationMode: RelinearizationGenerationMode;
     kernel: TranscriptCoreKernel;
-    options?: RelinearizationGenerationWorkerOptions;
+    openProofGenerationExecution: CommonProofGenerationExecutionOpener;
     packageBuilder: AcceptedSetupPackageBuilder;
-    proofOutputStore: CommonProofCanonicalOutputStore;
+    productionOperationIdentifiers: ClosedWorkerProductionOperationIdentifiers;
     setupGenerationAuthority: BrowserOwnedSetupGenerationAuthority;
     setupIntentObject: VerifiedTranscriptObject;
-    verifiedReservation: VerifiedStateReservation;
+    workerKernel: BrowserActionStorageWorkerKernel;
 }>;
 
 const generateParticipantProof = async (
@@ -519,8 +508,7 @@ const generateParticipantProof = async (
     if (
         (input.generationMode !== 'fresh' &&
             input.generationMode !== 'resumed') ||
-        (input.generationMode === 'resumed') !==
-            (input.options?.resume !== undefined) ||
+        typeof input.openProofGenerationExecution !== 'function' ||
         input.componentStores.length !== expectedComponentCount
     ) {
         throw new CanonicalStreamRefusalError('wrongContext');
@@ -543,17 +531,9 @@ const generateParticipantProof = async (
         input.checkpointLineageIdentifier,
         checkpointLineageIdentifierByteLength,
     );
-    const actionRandomness = resolveActionRandomnessKernelAuthorization(
-        input.actionRandomnessSession,
-        input.kernel,
-    );
     const setupGeneration = resolveSetupGenerationAuthorityKernelAuthorization(
         input.setupGenerationAuthority,
         context,
-    );
-    const state = resolveVerifiedStateReservationKernelAuthorization(
-        input.verifiedReservation,
-        input.kernel,
     );
     const setupIntent = resolveOrderedVerifiedBoardObjectAuthorization({
         context,
@@ -566,14 +546,7 @@ const generateParticipantProof = async (
         input.kernel,
         'collecting',
     );
-    if (
-        actionRandomness.context.memory !== context.memory ||
-        state.capabilityMemory !== context.memory ||
-        state.capabilityPointer <= 0 ||
-        state.capabilityPointer + verifierCapabilityByteLength >
-            context.memory.buffer.byteLength ||
-        setupIntent.handleBytes.byteLength !== wasm32WordByteLength
-    ) {
+    if (setupIntent.handleBytes.byteLength !== wasm32WordByteLength) {
         throw new CanonicalStreamInternalError(
             'The RKG generation authorities do not belong to one WASM worker.',
         );
@@ -600,68 +573,112 @@ const generateParticipantProof = async (
             memoryBoundary,
             statusBoundary,
         });
-        const prepared = context.runExclusive('RKG proof preparation', () => {
-            const checkpointPointer = memoryBoundary.copy(
-                checkpointLineageIdentifier,
+        let prepared:
+            | Readonly<{
+                  adapterHandle: number;
+                  sourceHandle: number;
+              }>
+            | undefined;
+        await withClosedWorkerProductionOperationAuthority(
+            input.workerKernel,
+            input.productionOperationIdentifiers,
+            (productionOperationAuthority) =>
+                productionOperationAuthority.withExactKernelAuthorization(
+                    (authorization) => {
+                        if (
+                            authorization.kernel !== input.kernel ||
+                            authorization.actionRandomnessContext.memory !==
+                                context.memory ||
+                            authorization.stateReservationCapabilityMemory !==
+                                context.memory ||
+                            authorization.stateReservationCapabilityPointer <=
+                                0 ||
+                            authorization.stateReservationCapabilityPointer +
+                                    verifierCapabilityByteLength >
+                                context.memory.buffer.byteLength
+                        ) {
+                            throw new CanonicalStreamInternalError(
+                                'The RKG generation authorities do not belong to one WASM worker.',
+                            );
+                        }
+                        prepared = context.runExclusive(
+                            'RKG proof preparation',
+                            () => {
+                                const checkpointPointer = memoryBoundary.copy(
+                                    checkpointLineageIdentifier,
+                                );
+                                const metadataPointer =
+                                    memoryBoundary.allocateZeroedWords(2);
+                                try {
+                                    const prepare =
+                                        round === 'roundOne'
+                                            ? input.generationMode === 'fresh'
+                                                ? kernel.prepareRoundOne
+                                                : kernel.prepareResumedRoundOne
+                                            : input.generationMode === 'fresh'
+                                              ? kernel.prepareRoundTwo
+                                              : kernel.prepareResumedRoundTwo;
+                                    const adapterHandle = prepare(
+                                        selectedSuiteHandle,
+                                        setupGeneration.handle,
+                                        round === 'roundOne'
+                                            ? 0
+                                            : catalog.handle,
+                                        authorization.actionRandomnessHandle,
+                                        authorization.stateVerifierSessionHandle,
+                                        authorization.stateReservationCapabilityPointer,
+                                        verifierCapabilityByteLength,
+                                        authorization.stateReservationHandle,
+                                        setupIntent.sessionHandle,
+                                        setupIntent.capabilityPointer,
+                                        verifierCapabilityByteLength,
+                                        new DataView(
+                                            setupIntent.handleBytes.buffer,
+                                            setupIntent.handleBytes.byteOffset,
+                                            setupIntent.handleBytes.byteLength,
+                                        ).getUint32(0, true),
+                                        checkpointPointer,
+                                        checkpointLineageIdentifier.byteLength,
+                                        metadataPointer,
+                                        metadataPointer +
+                                            wasm32WordByteLength,
+                                    );
+                                    const [sourceHandle, status] =
+                                        memoryBoundary.readWords(
+                                            metadataPointer,
+                                            2,
+                                        );
+                                    statusBoundary.throwIfError(status);
+                                    return Object.freeze({
+                                        adapterHandle: requireLiveHandle(
+                                            adapterHandle,
+                                            'The RKG generation adapter handle',
+                                        ),
+                                        sourceHandle: requireLiveHandle(
+                                            sourceHandle,
+                                            'The RKG generation source handle',
+                                        ),
+                                    });
+                                } finally {
+                                    memoryBoundary.zeroAndDeallocate(
+                                        metadataPointer,
+                                        wasm32WordByteLength * 2,
+                                    );
+                                    memoryBoundary.zeroAndDeallocate(
+                                        checkpointPointer,
+                                        checkpointLineageIdentifier.byteLength,
+                                    );
+                                }
+                            },
+                        );
+                    },
+                ),
+        );
+        if (prepared === undefined) {
+            throw new CanonicalStreamInternalError(
+                'The production operation completed without an RKG adapter.',
             );
-            const metadataPointer = memoryBoundary.allocateZeroedWords(2);
-            try {
-                const prepare =
-                    round === 'roundOne'
-                        ? input.generationMode === 'fresh'
-                            ? kernel.prepareRoundOne
-                            : kernel.prepareResumedRoundOne
-                        : input.generationMode === 'fresh'
-                          ? kernel.prepareRoundTwo
-                          : kernel.prepareResumedRoundTwo;
-                const adapterHandle = prepare(
-                    selectedSuiteHandle,
-                    setupGeneration.handle,
-                    round === 'roundOne' ? 0 : catalog.handle,
-                    actionRandomness.handle,
-                    state.sessionHandle,
-                    state.capabilityPointer,
-                    verifierCapabilityByteLength,
-                    state.reservationHandle,
-                    setupIntent.sessionHandle,
-                    setupIntent.capabilityPointer,
-                    verifierCapabilityByteLength,
-                    new DataView(
-                        setupIntent.handleBytes.buffer,
-                        setupIntent.handleBytes.byteOffset,
-                        setupIntent.handleBytes.byteLength,
-                    ).getUint32(0, true),
-                    checkpointPointer,
-                    checkpointLineageIdentifier.byteLength,
-                    metadataPointer,
-                    metadataPointer + wasm32WordByteLength,
-                );
-                const [sourceHandle, status] = memoryBoundary.readWords(
-                    metadataPointer,
-                    2,
-                );
-                statusBoundary.throwIfError(status);
-                return Object.freeze({
-                    adapterHandle: requireLiveHandle(
-                        adapterHandle,
-                        'The RKG generation adapter handle',
-                    ),
-                    sourceHandle: requireLiveHandle(
-                        sourceHandle,
-                        'The RKG generation source handle',
-                    ),
-                });
-            } finally {
-                memoryBoundary.zeroAndDeallocate(
-                    metadataPointer,
-                    wasm32WordByteLength * 2,
-                );
-                memoryBoundary.zeroAndDeallocate(
-                    checkpointPointer,
-                    checkpointLineageIdentifier.byteLength,
-                );
-            }
-        });
+        }
         generationSourceHandle = prepared.sourceHandle;
         familyAdapter = openClosedWorkerCommonProofGenerationFamilyAdapter(
             context,
@@ -677,45 +694,51 @@ const generateParticipantProof = async (
 
         const adapterForRun = familyAdapter;
         familyAdapter = undefined;
-        const trackedProofOutput = trackCanonicalCommonProofOutputChunks(
-            input.proofOutputStore,
-        );
-        const workerOptions: CommonProofGenerationWorkerOptions | undefined =
-            round === 'roundTwo'
-                ? {
-                      ...input.options,
-                      authenticatedSourceRangeReader: Object.freeze({
-                          readExactRange: (request) =>
-                              readAcceptedSetupPrepackageEvaluatorComponentExactRange(
-                                  {
-                                      authenticatedByteLength:
-                                          request.sourceStreamTotalByteLength,
-                                      catalog: input.evaluatorSourceCatalog,
-                                      exactByteLength: request.exactByteLength,
-                                      fullObjectDigest:
-                                          request.sourceStreamDigest,
-                                      kernel: input.kernel,
-                                      materialRoot: request.sourceMaterialRoot,
-                                      sourceByteOffset:
-                                          request.sourceStreamByteOffset,
-                                  },
-                              ),
-                      }),
-                  }
-                : input.options;
-        generatedCapability =
-            await runClosedWorkerCommonProofGenerationFamilyAdapterRetainingGeneratedCapability(
+        const execution =
+            await runClosedWorkerCommonProofGenerationFamilyAdapterWithExecutionOpener(
                 adapterForRun,
-                input.externalMemory,
-                trackedProofOutput.outputStore,
-                workerOptions,
+                async (description) => {
+                    const opened =
+                        await input.openProofGenerationExecution(description);
+                    if (round === 'roundOne') {
+                        return opened;
+                    }
+                    return Object.freeze({
+                        ...opened,
+                        options: Object.freeze({
+                            ...opened.options,
+                            authenticatedSourceRangeReader: Object.freeze({
+                                readExactRange: (
+                                    request: CommonProofAuthenticatedSourceRangeRequest,
+                                ) =>
+                                    readAcceptedSetupPrepackageEvaluatorComponentExactRange(
+                                        {
+                                            authenticatedByteLength:
+                                                request.sourceStreamTotalByteLength,
+                                            catalog:
+                                                input.evaluatorSourceCatalog,
+                                            exactByteLength:
+                                                request.exactByteLength,
+                                            fullObjectDigest:
+                                                request.sourceStreamDigest,
+                                            kernel: input.kernel,
+                                            materialRoot:
+                                                request.sourceMaterialRoot,
+                                            sourceByteOffset:
+                                                request.sourceStreamByteOffset,
+                                        },
+                                    ),
+                            }),
+                        }),
+                    });
+                },
             );
+        generatedCapability = execution.generatedCapability;
         const proofDescriptorBytes = await deriveGeneratedCommonProofDescriptor(
             {
                 kernel: input.kernel,
-                outputChunkByteLengths:
-                    trackedProofOutput.outputChunkByteLengths,
-                outputStore: input.proofOutputStore,
+                outputChunkByteLengths: execution.outputChunkByteLengths,
+                outputStore: execution.outputStore,
                 proofFamilyLabel:
                     round === 'roundOne' ? 'RKG round one' : 'RKG round two',
                 streamDomain:

@@ -294,14 +294,14 @@ thread_local! {
         RefCell::new(BoundedVssOutputRegistry::default());
 }
 
-pub(crate) fn consume_verified_vss_share_linkage_terminal(
+pub(in crate::bgv) fn consume_verified_vss_share_linkage_terminal(
     handle: u32,
 ) -> Result<VerifiedVssShareLinkageTerminal, CommonProofRuntimeError> {
     VERIFIED_VSS_SHARE_LINKAGE_TERMINAL_REGISTRY
         .with(|registry| registry.borrow_mut().consume(handle))
 }
 
-pub(crate) fn consume_ordered_verified_vss_share_linkage_terminals(
+pub(in crate::bgv) fn consume_ordered_verified_vss_share_linkage_terminals(
     ordered_handles: &[u32],
 ) -> Result<Vec<VerifiedVssShareLinkageTerminal>, CommonProofRuntimeError> {
     VERIFIED_VSS_SHARE_LINKAGE_TERMINAL_REGISTRY.with(|registry| {

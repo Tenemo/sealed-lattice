@@ -23,6 +23,7 @@ const generationAccountingWords = Object.freeze([
     49_152n,
     49_152n,
     4n,
+    6n,
     1_000n,
     2_000n,
     3_000n,
@@ -31,7 +32,7 @@ const generationAccountingWords = Object.freeze([
     2_500n,
     900n,
     35n,
-    4n,
+    6n,
     1n,
     800n,
     1_100n,
@@ -49,7 +50,7 @@ const generationAccountingWordsWith = (
     );
 
 const freshGenerationAccountingWords = generationAccountingWords.map(
-    (word, wordIndex) => (wordIndex >= 13 ? 0n : word),
+    (word, wordIndex) => (wordIndex >= 14 ? 0n : word),
 );
 
 describe('Common-proof manual accounting boundaries', () => {
@@ -75,7 +76,7 @@ describe('Common-proof manual accounting boundaries', () => {
             ).externalMemoryAccounting(71),
         ).toEqual({
             actualUsage: {
-                deletedObjectCount: 4n,
+                deletedObjectLifecycleCount: 6n,
                 peakStoredByteLength: 900n,
                 totalReadByteLength: 2_500n,
                 totalWrittenByteLength: 2_000n,
@@ -84,7 +85,8 @@ describe('Common-proof manual accounting boundaries', () => {
             compiledRequirement: {
                 maximumChunkByteLength: 49_152,
                 maximumTransactionPayloadByteLength: 49_152n,
-                objectCount: 4,
+                distinctPhysicalObjectCount: 4,
+                objectLifecycleCount: 6,
                 peakStoredByteLength: 1_000n,
                 stepCount: 12,
                 totalReadByteLength: 3_000n,
@@ -92,7 +94,7 @@ describe('Common-proof manual accounting boundaries', () => {
                 transactionCount: 40n,
             },
             deterministicPrefixReplayUsage: {
-                deletedObjectCount: 2n,
+                deletedObjectLifecycleCount: 2n,
                 peakStoredByteLength: 700n,
                 totalReadByteLength: 1_100n,
                 totalWrittenByteLength: 800n,
@@ -123,10 +125,10 @@ describe('Common-proof manual accounting boundaries', () => {
     });
 
     it.each([
-        { words: generationAccountingWordsWith(12, 3n) },
-        { words: generationAccountingWordsWith(14, 2_001n) },
-        { words: generationAccountingWordsWith(13, 0n) },
-        { words: generationAccountingWordsWith(4, 1_073_741_825n) },
+        { words: generationAccountingWordsWith(13, 3n) },
+        { words: generationAccountingWordsWith(15, 2_001n) },
+        { words: generationAccountingWordsWith(14, 0n) },
+        { words: generationAccountingWordsWith(5, 1_073_741_825n) },
     ])('rejects inconsistent or over-bound generation usage', ({ words }) => {
         const encoded = encodeUnsigned64Words(words);
         const runtime = createMockKernelRuntime((memory) => ({

@@ -46,6 +46,7 @@ fn automorphism_permutation(
 // Apply the Galois automorphism X -> X^galois_element to a residue vector. The
 // exponent reduces modulo 2N; the upper half wraps with a sign flip because
 // X^N = -1 in the ring.
+#[cfg(test)]
 pub(super) fn automorphism_residues(
     input: &[u64],
     galois_element: usize,

@@ -8,6 +8,8 @@
 use core::slice;
 use std::{cell::RefCell, mem::size_of, sync::Arc};
 
+#[cfg(test)]
+use crate::foundation::RefusalReason;
 use crate::{
     bgv::{
         parameters::{DATA_PRIMES, POLYNOMIAL_DEGREE},
@@ -25,7 +27,7 @@ use crate::{
         AuthenticatedCheckpointContinuationSource, CanonicalDecodeLimits, CanonicalStreamDomain,
         CanonicalStreamVerifier, CanonicalStreamWriter, FOUNDATION_PROFILE, Hash512,
         PreparedPublicOnlyProofAttemptSource, ProofApplicationSlot, ProofApplicationSlotCeilings,
-        RefusalReason, STATE_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH, StreamDescriptor,
+        STATE_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH, StreamDescriptor,
         VerifiedCanonicalStreamSummary, VerifiedStateReservationRuntimeBinding,
         resolve_prepared_public_only_proof_attempt_source, verified_state_reservation_binding,
     },
@@ -1263,7 +1265,7 @@ fn selected_collective_runtime_plan(
     })
 }
 
-fn resolve_prepared_attempt(
+fn resolve_collective_public_key_prepared_attempt(
     action_randomness_handle: u32,
     verified_reservation_binding: VerifiedStateReservationRuntimeBinding,
     session_handle: u32,
@@ -1411,7 +1413,7 @@ fn prepare_generation(
             checkpoint_lineage_identifier,
             checkpoint_schedule_digest,
         );
-    let fresh_attempt = resolve_prepared_attempt(
+    let fresh_attempt = resolve_collective_public_key_prepared_attempt(
         action_randomness_handle,
         verified_reservation_binding,
         session_handle,
@@ -1445,7 +1447,7 @@ fn prepare_generation(
                         })
                     })?;
                     let runtime_plan = selected_collective_runtime_plan(&statement)?;
-                    let attempt = resolve_prepared_attempt(
+                    let attempt = resolve_collective_public_key_prepared_attempt(
                         action_randomness_handle,
                         verified_reservation_binding,
                         session_handle,
@@ -2373,10 +2375,10 @@ mod tests {
             source_provider.maximum_returned_source_polynomial_byte_length(),
             262_144,
         );
-        assert_eq!(source_provider.authenticated_source_read_count(), 130);
+        assert_eq!(source_provider.authenticated_source_read_count(), 60);
         assert_eq!(
             source_provider.authenticated_source_read_byte_length(),
-            136_314_880,
+            60_293_120,
         );
 
         assert_eq!(
@@ -2432,28 +2434,28 @@ mod tests {
                 <= MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH,
         );
 
-        assert_eq!(traffic.participant_body_byte_length(), 13_631_488);
-        assert_eq!(traffic.participant_descriptor_byte_length(), 936);
+        assert_eq!(traffic.participant_body_byte_length(), 6_029_312);
+        assert_eq!(traffic.participant_descriptor_byte_length(), 488);
         assert_eq!(
             traffic.authenticated_share_store_resident_byte_length(),
-            136_324_240,
+            60_298_000,
         );
-        assert_eq!(traffic.aggregate_output_body_byte_length(), 27_262_976);
-        assert_eq!(traffic.aggregate_output_descriptor_byte_length(), 1_768);
+        assert_eq!(traffic.aggregate_output_body_byte_length(), 12_058_624);
+        assert_eq!(traffic.aggregate_output_descriptor_byte_length(), 872);
         assert_eq!(
             traffic.aggregate_output_store_resident_byte_length(),
-            27_264_744,
+            12_059_496,
         );
-        assert_eq!(traffic.canonical_input_read_count(), 130);
-        assert_eq!(traffic.canonical_input_read_byte_length(), 136_314_880);
-        assert_eq!(traffic.proof_replay_read_count(), 130);
-        assert_eq!(traffic.proof_replay_read_byte_length(), 136_314_880);
-        assert_eq!(traffic.full_lifecycle_input_read_count(), 260);
-        assert_eq!(traffic.full_lifecycle_input_read_byte_length(), 272_629_760,);
-        assert_eq!(traffic.aggregate_output_write_count(), 26);
-        assert_eq!(traffic.aggregate_output_write_byte_length(), 27_262_976);
+        assert_eq!(traffic.canonical_input_read_count(), 60);
+        assert_eq!(traffic.canonical_input_read_byte_length(), 60_293_120);
+        assert_eq!(traffic.proof_replay_read_count(), 60);
+        assert_eq!(traffic.proof_replay_read_byte_length(), 60_293_120);
+        assert_eq!(traffic.full_lifecycle_input_read_count(), 120);
+        assert_eq!(traffic.full_lifecycle_input_read_byte_length(), 120_586_240,);
+        assert_eq!(traffic.aggregate_output_write_count(), 12);
+        assert_eq!(traffic.aggregate_output_write_byte_length(), 12_058_624);
         assert_eq!(traffic.authenticated_source_request_byte_length(), 160);
-        assert_eq!(traffic.proof_replay_request_byte_length(), 20_800);
+        assert_eq!(traffic.proof_replay_request_byte_length(), 9_600);
         assert_eq!(
             traffic.maximum_boundary_copied_buffer_byte_length(),
             1_048_576,

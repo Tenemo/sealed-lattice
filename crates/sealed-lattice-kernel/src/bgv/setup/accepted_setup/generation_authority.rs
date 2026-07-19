@@ -13,6 +13,7 @@ use super::generation_relinearization::{
 };
 
 use crate::{
+    bgv::key_switch_topology::canonical_residue_byte_length,
     bgv::parameters::{DATA_PRIMES, POLYNOMIAL_DEGREE},
     bgv::proof_suite::{
         AuthenticatedCompactCommittedMaterialSource, CommittedMaterialContext,
@@ -22,18 +23,19 @@ use crate::{
         CommonProofProverError, CommonProofRelationPlanCapability, CommonProofRuntimeError,
         CommonProofRuntimeLimits, CompactCommittedMaterialSource,
         ComponentMaterialOwnershipBinding, GaloisKeyShareSourcePolynomialAdapter,
-        KeySwitchComponentMaterialTopology, PreparedCommonProofGeneration,
-        PrivateRandomnessCommonProofCoinSource, RelationPlanVariant,
+        KeySwitchComponentMaterialTopology, MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH,
+        PreparedCommonProofGeneration, PrivateRandomnessCommonProofCoinSource, RelationPlanVariant,
         RelinearizationRoundOneSourcePolynomialAdapter,
         RelinearizationRoundTwoAuthenticatedAggregateSourcePlan,
         RelinearizationRoundTwoSourcePolynomialAdapter, SelectedEvaluatorEntryKind,
         SelectedEvaluatorEntryPosition, SelectedVssShareLinkageStatement,
         SetupKeyRelationSourcePolynomialAdapter, SetupPublicPolynomialContext,
         SetupPublicPolynomialRootBuilder, SetupPublicPolynomialTree,
-        VerifiedEvaluatorAuxiliaryRoot, VerifiedKeySwitchComponentMaterial,
-        canonical_selected_galois_key_share_statement,
-        canonical_selected_public_key_share_statement, canonical_selected_same_secret_statement,
-        canonical_selected_vss_share_linkage_statement,
+        TrusteeEvaluationKeyRelationGeometry, VerifiedEvaluatorAuxiliaryRoot,
+        VerifiedKeySwitchComponentMaterial, canonical_selected_galois_key_share_statement,
+        canonical_selected_public_key_share_statement,
+        canonical_selected_relinearization_round_two_statement,
+        canonical_selected_same_secret_statement, canonical_selected_vss_share_linkage_statement,
         compile_galois_key_share_relation_with_source_layout,
         compile_public_key_share_relation_with_source_layout,
         compile_relinearization_round_one_relation_with_source_layout,
@@ -47,20 +49,23 @@ use crate::{
         selected_galois_key_share_relation_plan_input,
         selected_public_key_share_relation_plan_input, selected_relation_plan_check_context,
         selected_relation_plans, selected_relinearization_relation_plan_inputs,
-        selected_same_secret_relation_plan_input, verified_application_statement_hash,
+        selected_same_secret_relation_plan_input,
+        setup_public_polynomial_wasm_compact_root_memory_plan, verified_application_statement_hash,
     },
     bgv::setup::{
         SETUP_COMMITMENT_HIDING_ERROR_WIDTH, SETUP_COMMITMENT_HIDING_SECRET_WIDTH,
         SETUP_COMMITMENT_MODULE_RANK, SETUP_COMMITMENT_MODULUS_LIMB_INDICES,
         parse_lattice_anchor_commitment_canonical_bytes, sample_galois_common_reference_limb,
         sampling::{DATA_MODULUS_CATALOG_IDENTIFIER, SPECIAL_MODULUS_CATALOG_IDENTIFIER},
+        selected_lattice_anchor_commitment_canonical_byte_length,
+        setup_commitment_matrix_ntt_cache_coefficient_payload_byte_length,
     },
     foundation::{
         ActionPrivateRandomness, CanonicalStreamDomain, CanonicalStreamReadbackVerifier,
-        FOUNDATION_PROFILE, Hash512, ParticipantIdentity, PersistentProofCoinInput,
-        PersistentProofWitnessCoinBinding, PreparedActionProofAttemptSource,
-        ProofApplicationSlotCeilings, RefusalReason, Roster, SelectedSuiteCapability,
-        StreamDescriptor, WitnessBoundPreparedActionProofAttemptSource,
+        FOUNDATION_PROFILE, Hash512, MAXIMUM_CANONICAL_STREAM_BYTE_LENGTH, ParticipantIdentity,
+        PersistentProofCoinInput, PersistentProofWitnessCoinBinding,
+        PreparedActionProofAttemptSource, ProofApplicationSlotCeilings, RefusalReason, Roster,
+        SelectedSuiteCapability, StreamDescriptor, WitnessBoundPreparedActionProofAttemptSource,
         bind_prepared_action_proof_attempt_to_canonical_witness,
         derive_canonical_stream_descriptor,
     },
@@ -163,6 +168,201 @@ impl SetupGenerationRetainedMemoryAccounting {
             .checked_add(additional_resident_byte_length)
             .ok_or(RefusalReason::OutsideSupportedProfile)
     }
+}
+
+/// Exact live overlap for streamed relinearization round-two activation. The
+/// aggregate source rows are released before root reconstruction, so the
+/// ingestion and root phases are accounted independently instead of summing
+/// mutually exclusive allocations.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct SetupGenerationRelinearizationRoundTwoActivationMemoryAccounting {
+    retained_authority_payload_byte_length: u64,
+    activation_binding_payload_byte_length: u64,
+    setup_matrix_cache_payload_byte_length: u64,
+    pre_root_construction_payload_byte_length: u64,
+    generation_workspace_payload_peak_byte_length: u64,
+    root_overlap_construction_payload_byte_length: u64,
+    streamed_root_transient_payload_byte_length: u64,
+    ingestion_peak_byte_length: u64,
+    root_reconstruction_peak_byte_length: u64,
+    maximum_overlap_byte_length: u64,
+}
+
+impl SetupGenerationRelinearizationRoundTwoActivationMemoryAccounting {
+    fn from_live_phase_payloads(
+        retained_authority_payload_byte_length: u64,
+        activation_binding_payload_byte_length: u64,
+        setup_matrix_cache_payload_byte_length: u64,
+        pre_root_construction_payload_byte_length: u64,
+        generation_workspace_payload_peak_byte_length: u64,
+        root_overlap_construction_payload_byte_length: u64,
+        streamed_root_transient_payload_byte_length: u64,
+    ) -> Result<Self, RefusalReason> {
+        let common_payload_byte_length = retained_authority_payload_byte_length
+            .checked_add(activation_binding_payload_byte_length)
+            .ok_or(RefusalReason::OutsideSupportedProfile)?
+            .checked_add(setup_matrix_cache_payload_byte_length)
+            .ok_or(RefusalReason::OutsideSupportedProfile)?;
+        let ingestion_peak_byte_length = common_payload_byte_length
+            .checked_add(pre_root_construction_payload_byte_length)
+            .and_then(|length| length.checked_add(generation_workspace_payload_peak_byte_length))
+            .ok_or(RefusalReason::OutsideSupportedProfile)?;
+        let root_reconstruction_peak_byte_length = common_payload_byte_length
+            .checked_add(root_overlap_construction_payload_byte_length)
+            .and_then(|length| length.checked_add(streamed_root_transient_payload_byte_length))
+            .ok_or(RefusalReason::OutsideSupportedProfile)?;
+        Ok(Self {
+            retained_authority_payload_byte_length,
+            activation_binding_payload_byte_length,
+            setup_matrix_cache_payload_byte_length,
+            pre_root_construction_payload_byte_length,
+            generation_workspace_payload_peak_byte_length,
+            root_overlap_construction_payload_byte_length,
+            streamed_root_transient_payload_byte_length,
+            ingestion_peak_byte_length,
+            root_reconstruction_peak_byte_length,
+            maximum_overlap_byte_length: ingestion_peak_byte_length
+                .max(root_reconstruction_peak_byte_length),
+        })
+    }
+
+    pub(crate) const fn retained_authority_payload_byte_length(self) -> u64 {
+        self.retained_authority_payload_byte_length
+    }
+
+    pub(crate) const fn activation_binding_payload_byte_length(self) -> u64 {
+        self.activation_binding_payload_byte_length
+    }
+
+    pub(crate) const fn setup_matrix_cache_payload_byte_length(self) -> u64 {
+        self.setup_matrix_cache_payload_byte_length
+    }
+
+    pub(crate) const fn pre_root_construction_payload_byte_length(self) -> u64 {
+        self.pre_root_construction_payload_byte_length
+    }
+
+    pub(crate) const fn generation_workspace_payload_peak_byte_length(self) -> u64 {
+        self.generation_workspace_payload_peak_byte_length
+    }
+
+    pub(crate) const fn root_overlap_construction_payload_byte_length(self) -> u64 {
+        self.root_overlap_construction_payload_byte_length
+    }
+
+    pub(crate) const fn streamed_root_transient_payload_byte_length(self) -> u64 {
+        self.streamed_root_transient_payload_byte_length
+    }
+
+    pub(crate) const fn ingestion_peak_byte_length(self) -> u64 {
+        self.ingestion_peak_byte_length
+    }
+
+    pub(crate) const fn root_reconstruction_peak_byte_length(self) -> u64 {
+        self.root_reconstruction_peak_byte_length
+    }
+
+    pub(crate) const fn maximum_overlap_byte_length(self) -> u64 {
+        self.maximum_overlap_byte_length
+    }
+
+    pub(crate) const fn wasm_resident_headroom_byte_length(self) -> u64 {
+        MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH
+            .saturating_sub(self.maximum_overlap_byte_length)
+    }
+
+    pub(crate) const fn fits_absolute_wasm_resident_bound(self) -> bool {
+        self.maximum_overlap_byte_length <= MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH
+    }
+}
+
+/// Compiler-derived facts for one canonical stream descriptor retained by a
+/// selected setup lifecycle state. The constructor rejects a chunk inventory
+/// that does not match the production stream chunk length.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct SetupGenerationRetainedStreamDescriptorDimensions {
+    total_byte_length: u64,
+    ordered_chunk_count: u64,
+}
+
+impl SetupGenerationRetainedStreamDescriptorDimensions {
+    pub(crate) fn new(
+        total_byte_length: u64,
+        ordered_chunk_count: u64,
+    ) -> Result<Self, RefusalReason> {
+        if total_byte_length > MAXIMUM_CANONICAL_STREAM_BYTE_LENGTH {
+            return Err(RefusalReason::OutsideSupportedProfile);
+        }
+        let stream_chunk_byte_length = u64::try_from(FOUNDATION_PROFILE.stream_chunk_byte_length)
+            .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
+        let expected_chunk_count = total_byte_length
+            .checked_sub(1)
+            .and_then(|length| length.checked_div(stream_chunk_byte_length))
+            .and_then(|count| count.checked_add(1))
+            .ok_or(RefusalReason::WrongTypeOrLength)?;
+        if ordered_chunk_count != expected_chunk_count {
+            return Err(RefusalReason::WrongTypeOrLength);
+        }
+        Ok(Self {
+            total_byte_length,
+            ordered_chunk_count,
+        })
+    }
+
+    pub(crate) const fn total_byte_length(self) -> u64 {
+        self.total_byte_length
+    }
+
+    pub(crate) const fn ordered_chunk_count(self) -> u64 {
+        self.ordered_chunk_count
+    }
+}
+
+/// The two proof descriptors cloned into the suite-fixed round-one aggregate
+/// binding. Component descriptors are derived from the production topology
+/// and therefore are not caller-supplied dimensions.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct SetupGenerationRelinearizationAggregateDescriptorDimensions {
+    participant_round_one_proof: SetupGenerationRetainedStreamDescriptorDimensions,
+    aggregate_round_one_proof: SetupGenerationRetainedStreamDescriptorDimensions,
+}
+
+impl SetupGenerationRelinearizationAggregateDescriptorDimensions {
+    pub(crate) const fn new(
+        participant_round_one_proof: SetupGenerationRetainedStreamDescriptorDimensions,
+        aggregate_round_one_proof: SetupGenerationRetainedStreamDescriptorDimensions,
+    ) -> Self {
+        Self {
+            participant_round_one_proof,
+            aggregate_round_one_proof,
+        }
+    }
+
+    pub(crate) const fn participant_round_one_proof(
+        self,
+    ) -> SetupGenerationRetainedStreamDescriptorDimensions {
+        self.participant_round_one_proof
+    }
+
+    pub(crate) const fn aggregate_round_one_proof(
+        self,
+    ) -> SetupGenerationRetainedStreamDescriptorDimensions {
+        self.aggregate_round_one_proof
+    }
+}
+
+/// Canonical selected setup custody points. The proof-producing states follow
+/// the destructive chronology: initial setup sources, generated round two,
+/// then the VSS-only authority after every superseded setup/RKG/Galois source
+/// has been dropped.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SelectedSetupGenerationLifecycleState {
+    SameSecretProof,
+    PublicKeyShareProof,
+    RelinearizationRoundOneProof,
+    RelinearizationRoundTwoProof(SetupGenerationRelinearizationAggregateDescriptorDimensions),
+    GaloisKeyShareProof(SetupGenerationRelinearizationAggregateDescriptorDimensions),
+    VssShareLinkageProof,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -603,7 +803,8 @@ impl SetupGeneratedPublicKeyShare {
     }
 }
 
-/// One exact lattice-anchor tree and its browser-owned reset-safe opening.
+/// One exact lattice-anchor authentication root and its browser-owned
+/// reset-safe opening.
 /// Canonical commitment bytes are retained beside the recomputed root; trace
 /// rows are decoded only when a relation column requests them. Neither a
 /// transported root nor detached opening polynomials can construct this
@@ -777,10 +978,6 @@ impl SetupGeneratedCommittedMaterial {
 
     pub(crate) fn compact_source(&self) -> &CompactCommittedMaterialSource {
         self.authenticated_source.compact_source()
-    }
-
-    pub(crate) fn owned_compact_source(&self) -> Arc<CompactCommittedMaterialSource> {
-        self.authenticated_source.owned_compact_source()
     }
 
     pub(crate) fn owned_authenticated_source(&self) -> AuthenticatedCompactCommittedMaterialSource {
@@ -1029,6 +1226,105 @@ struct SetupGenerationVssSourceAllocationAccounting {
     allocation_wrapper_byte_length: u64,
 }
 
+fn retained_stream_descriptor_digest_allocation_byte_length(
+    ordered_chunk_count: u64,
+) -> Result<u64, RefusalReason> {
+    let arc_header_byte_length = size_of::<usize>()
+        .checked_mul(2)
+        .and_then(|length| u64::try_from(length).ok())
+        .ok_or(RefusalReason::OutsideSupportedProfile)?;
+    ordered_chunk_count
+        .checked_mul(Hash512::BYTE_LENGTH as u64)
+        .and_then(|length| length.checked_add(arc_header_byte_length))
+        .ok_or(RefusalReason::OutsideSupportedProfile)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct SelectedKeySwitchTopologyMemoryDimensions {
+    polynomial_degree: u64,
+    data_block_count: u64,
+    canonical_component_byte_length: u64,
+    retained_topology_heap_byte_length: u64,
+    trace_column_count: u32,
+    half_polynomial_degree_bound_exclusive: usize,
+}
+
+impl SelectedKeySwitchTopologyMemoryDimensions {
+    fn from_relation_geometry(
+        geometry: &TrusteeEvaluationKeyRelationGeometry,
+    ) -> Result<Self, RefusalReason> {
+        let polynomial_degree = geometry.ring_degree;
+        let data_block_count = u64::try_from(geometry.decomposition_blocks.len())
+            .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
+        let extended_limb_count = geometry
+            .data_moduli
+            .len()
+            .checked_add(geometry.special_moduli.len())
+            .and_then(|count| u64::try_from(count).ok())
+            .ok_or(RefusalReason::OutsideSupportedProfile)?;
+        let bytes_per_polynomial_coefficient = geometry
+            .data_moduli
+            .iter()
+            .chain(&geometry.special_moduli)
+            .try_fold(0_u64, |total, modulus| {
+                canonical_residue_byte_length(*modulus)
+                    .map_err(|_| RefusalReason::UnsupportedVersionOrSuite)
+                    .and_then(|byte_length| {
+                        u64::try_from(byte_length)
+                            .map_err(|_| RefusalReason::OutsideSupportedProfile)
+                    })
+                    .and_then(|byte_length| {
+                        total
+                            .checked_add(byte_length)
+                            .ok_or(RefusalReason::OutsideSupportedProfile)
+                    })
+            })?;
+        let canonical_component_byte_length = data_block_count
+            .checked_mul(polynomial_degree)
+            .and_then(|count| count.checked_mul(bytes_per_polynomial_coefficient))
+            .ok_or(RefusalReason::OutsideSupportedProfile)?;
+        let retained_topology_heap_byte_length = extended_limb_count
+            .checked_mul((size_of::<u64>() + size_of::<u8>()) as u64)
+            .ok_or(RefusalReason::OutsideSupportedProfile)?;
+        let trace_column_count = data_block_count
+            .checked_mul(extended_limb_count)
+            .and_then(|count| count.checked_mul(2))
+            .and_then(|count| u32::try_from(count).ok())
+            .ok_or(RefusalReason::OutsideSupportedProfile)?;
+        let polynomial_degree_usize = usize::try_from(polynomial_degree)
+            .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
+        let half_polynomial_degree_bound_exclusive = polynomial_degree_usize
+            .checked_div(2)
+            .filter(|half_degree| *half_degree > 0 && *half_degree * 2 == polynomial_degree_usize)
+            .ok_or(RefusalReason::UnsupportedVersionOrSuite)?;
+        Ok(Self {
+            polynomial_degree,
+            data_block_count,
+            canonical_component_byte_length,
+            retained_topology_heap_byte_length,
+            trace_column_count,
+            half_polynomial_degree_bound_exclusive,
+        })
+    }
+
+    fn component_stream_descriptor_dimensions(
+        self,
+    ) -> Result<SetupGenerationRetainedStreamDescriptorDimensions, RefusalReason> {
+        let stream_chunk_byte_length = u64::try_from(FOUNDATION_PROFILE.stream_chunk_byte_length)
+            .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
+        let chunk_count = self
+            .canonical_component_byte_length
+            .checked_sub(1)
+            .and_then(|length| length.checked_div(stream_chunk_byte_length))
+            .and_then(|count| count.checked_add(1))
+            .ok_or(RefusalReason::WrongTypeOrLength)?;
+        SetupGenerationRetainedStreamDescriptorDimensions::new(
+            self.canonical_component_byte_length,
+            chunk_count,
+        )
+    }
+}
+
 #[derive(Default)]
 struct SetupGenerationDescriptorAllocationAccumulator {
     byte_length: u64,
@@ -1040,8 +1336,7 @@ impl SetupGenerationDescriptorAllocationAccumulator {
         self.byte_length = self
             .byte_length
             .checked_add(
-                u64::try_from(byte_length)
-                    .map_err(|_| RefusalReason::OutsideSupportedProfile)?,
+                u64::try_from(byte_length).map_err(|_| RefusalReason::OutsideSupportedProfile)?,
             )
             .ok_or(RefusalReason::OutsideSupportedProfile)?;
         Ok(())
@@ -1051,8 +1346,8 @@ impl SetupGenerationDescriptorAllocationAccumulator {
         &mut self,
         descriptor: &StreamDescriptor,
     ) -> Result<(), RefusalReason> {
-        let owner_identifier = Arc::as_ptr(&descriptor.ordered_chunk_digests) as *const Hash512
-            as usize;
+        let owner_identifier =
+            Arc::as_ptr(&descriptor.ordered_chunk_digests) as *const Hash512 as usize;
         let digest_payload_byte_length = descriptor
             .ordered_chunk_digests
             .len()
@@ -1071,13 +1366,12 @@ impl SetupGenerationDescriptorAllocationAccumulator {
         }
         self.descriptor_digest_owner_byte_lengths
             .insert(owner_identifier, digest_payload_byte_length);
-        let arc_header_byte_length = size_of::<usize>()
-            .checked_mul(2)
-            .ok_or(RefusalReason::OutsideSupportedProfile)?;
-        self.add_usize_byte_length(arc_header_byte_length)?;
         self.byte_length = self
             .byte_length
-            .checked_add(digest_payload_byte_length)
+            .checked_add(retained_stream_descriptor_digest_allocation_byte_length(
+                u64::try_from(descriptor.ordered_chunk_digests.len())
+                    .map_err(|_| RefusalReason::OutsideSupportedProfile)?,
+            )?)
             .ok_or(RefusalReason::OutsideSupportedProfile)?;
         Ok(())
     }
@@ -1103,14 +1397,12 @@ fn setup_generation_vss_source_allocation_accounting<'material>(
         let authenticated_source = &material.authenticated_source;
         let (compact_source_owner, canonical_message_owner) =
             authenticated_source.shared_allocation_owner_identifiers();
-        let compact_source_byte_length = u64::try_from(
-            authenticated_source.compact_source().retained_byte_length(),
-        )
-        .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
-        let canonical_message_byte_length = u64::try_from(
-            authenticated_source.retained_canonical_coefficient_byte_length(),
-        )
-        .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
+        let compact_source_byte_length =
+            u64::try_from(authenticated_source.compact_source().retained_byte_length())
+                .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
+        let canonical_message_byte_length =
+            u64::try_from(authenticated_source.retained_canonical_coefficient_byte_length())
+                .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
         for (owners, owner_identifier, byte_length) in [
             (
                 &mut compact_source_owner_byte_lengths,
@@ -1132,22 +1424,21 @@ fn setup_generation_vss_source_allocation_accounting<'material>(
             }
         }
     }
-    let compact_source_byte_length = compact_source_owner_byte_lengths.values().try_fold(
-        0_u64,
-        |total, byte_length| {
+    let compact_source_byte_length =
+        compact_source_owner_byte_lengths
+            .values()
+            .try_fold(0_u64, |total, byte_length| {
+                total
+                    .checked_add(*byte_length)
+                    .ok_or(RefusalReason::OutsideSupportedProfile)
+            })?;
+    let canonical_coefficient_byte_length = canonical_message_owner_byte_lengths
+        .values()
+        .try_fold(0_u64, |total, byte_length| {
             total
                 .checked_add(*byte_length)
                 .ok_or(RefusalReason::OutsideSupportedProfile)
-        },
-    )?;
-    let canonical_coefficient_byte_length = canonical_message_owner_byte_lengths.values().try_fold(
-        0_u64,
-        |total, byte_length| {
-            total
-                .checked_add(*byte_length)
-                .ok_or(RefusalReason::OutsideSupportedProfile)
-        },
-    )?;
+        })?;
     let shared_source_byte_length = compact_source_byte_length
         .checked_add(canonical_coefficient_byte_length)
         .ok_or(RefusalReason::OutsideSupportedProfile)?;
@@ -1164,9 +1455,7 @@ fn setup_generation_vss_source_allocation_accounting<'material>(
         .checked_mul(
             size_of::<usize>()
                 .checked_mul(2)
-                .and_then(|length| {
-                    length.checked_add(size_of::<Zeroizing<Box<[u64]>>>())
-                })
+                .and_then(|length| length.checked_add(size_of::<Zeroizing<Box<[u64]>>>()))
                 .ok_or(RefusalReason::OutsideSupportedProfile)?,
         )
         .ok_or(RefusalReason::OutsideSupportedProfile)?;
@@ -1180,6 +1469,49 @@ fn setup_generation_vss_source_allocation_accounting<'material>(
         shared_source_byte_length,
         allocation_wrapper_byte_length,
     })
+}
+
+fn selected_setup_generation_vss_source_allocation_accounting()
+-> Result<(usize, SetupGenerationVssSourceAllocationAccounting), RefusalReason> {
+    let relation_input = selected_committed_material_relation_plan_input()
+        .map_err(|_| RefusalReason::UnsupportedVersionOrSuite)?;
+    let sharing_limb_count = relation_input.sharing_data_modulus_indices.len();
+    let material_count = sharing_limb_count
+        .checked_mul(
+            usize::from(relation_input.threshold)
+                .checked_add(usize::from(relation_input.participant_count))
+                .ok_or(RefusalReason::OutsideSupportedProfile)?,
+        )
+        .ok_or(RefusalReason::OutsideSupportedProfile)?;
+    let canonical_coefficient_byte_length = u64::try_from(material_count)
+        .ok()
+        .and_then(|count| count.checked_mul(relation_input.ring_degree))
+        .and_then(|count| count.checked_mul(size_of::<u64>() as u64))
+        .ok_or(RefusalReason::OutsideSupportedProfile)?;
+    let compact_source_byte_length = u64::try_from(material_count)
+        .ok()
+        .and_then(|count| count.checked_mul(size_of::<CompactCommittedMaterialSource>() as u64))
+        .ok_or(RefusalReason::OutsideSupportedProfile)?;
+    let shared_source_byte_length = compact_source_byte_length
+        .checked_add(canonical_coefficient_byte_length)
+        .ok_or(RefusalReason::OutsideSupportedProfile)?;
+    let per_material_allocation_wrapper_byte_length = size_of::<usize>()
+        .checked_mul(4)
+        .and_then(|length| length.checked_add(size_of::<Zeroizing<Box<[u64]>>>()))
+        .ok_or(RefusalReason::OutsideSupportedProfile)?;
+    let allocation_wrapper_byte_length = material_count
+        .checked_mul(per_material_allocation_wrapper_byte_length)
+        .and_then(|length| u64::try_from(length).ok())
+        .ok_or(RefusalReason::OutsideSupportedProfile)?;
+    Ok((
+        material_count,
+        SetupGenerationVssSourceAllocationAccounting {
+            canonical_coefficient_byte_length,
+            compact_source_byte_length,
+            shared_source_byte_length,
+            allocation_wrapper_byte_length,
+        },
+    ))
 }
 
 fn add_key_switch_component_allocations(
@@ -1198,6 +1530,113 @@ fn add_verified_key_switch_component_allocations(
     accounting.add_stream_descriptor(material.stream_descriptor())
 }
 
+fn add_relinearization_aggregate_binding_allocations(
+    accounting: &mut SetupGenerationDescriptorAllocationAccumulator,
+    aggregate_binding: &SetupGenerationRelinearizationAggregateBinding,
+) -> Result<(), RefusalReason> {
+    accounting.add_usize_byte_length(
+        aggregate_binding
+            .ordered_participant_identities
+            .len()
+            .checked_mul(size_of::<[u8; Hash512::BYTE_LENGTH]>())
+            .ok_or(RefusalReason::OutsideSupportedProfile)?,
+    )?;
+    accounting.add_usize_byte_length(
+        aggregate_binding
+            .ordered_anchor_commitment_roots
+            .len()
+            .checked_mul(size_of::<[[u8; Hash512::BYTE_LENGTH]; 3]>())
+            .ok_or(RefusalReason::OutsideSupportedProfile)?,
+    )?;
+    accounting.add_usize_byte_length(
+        aggregate_binding
+            .ordered_round_one_proof_stream_descriptors
+            .len()
+            .checked_mul(size_of::<StreamDescriptor>())
+            .ok_or(RefusalReason::OutsideSupportedProfile)?,
+    )?;
+    accounting.add_usize_byte_length(
+        aggregate_binding
+            .ordered_source_root_pairs
+            .len()
+            .checked_mul(size_of::<[[u8; Hash512::BYTE_LENGTH]; 2]>())
+            .ok_or(RefusalReason::OutsideSupportedProfile)?,
+    )?;
+    for descriptor in aggregate_binding
+        .ordered_round_one_proof_stream_descriptors
+        .iter()
+        .chain([
+            &aggregate_binding.proof_stream_descriptor,
+            &aggregate_binding.aggregate_left_stream_descriptor,
+            &aggregate_binding.aggregate_right_stream_descriptor,
+        ])
+    {
+        accounting.add_stream_descriptor(descriptor)?;
+    }
+    Ok(())
+}
+
+fn add_selected_stream_descriptor_allocation(
+    accounting: &mut SetupGenerationDescriptorAllocationAccumulator,
+    dimensions: SetupGenerationRetainedStreamDescriptorDimensions,
+) -> Result<(), RefusalReason> {
+    accounting.byte_length = accounting
+        .byte_length
+        .checked_add(retained_stream_descriptor_digest_allocation_byte_length(
+            dimensions.ordered_chunk_count(),
+        )?)
+        .ok_or(RefusalReason::OutsideSupportedProfile)?;
+    Ok(())
+}
+
+fn add_selected_key_switch_component_allocations(
+    accounting: &mut SetupGenerationDescriptorAllocationAccumulator,
+    topology: SelectedKeySwitchTopologyMemoryDimensions,
+) -> Result<(), RefusalReason> {
+    accounting.byte_length = accounting
+        .byte_length
+        .checked_add(topology.retained_topology_heap_byte_length)
+        .ok_or(RefusalReason::OutsideSupportedProfile)?;
+    add_selected_stream_descriptor_allocation(
+        accounting,
+        topology.component_stream_descriptor_dimensions()?,
+    )
+}
+
+fn add_selected_relinearization_aggregate_binding_allocations(
+    accounting: &mut SetupGenerationDescriptorAllocationAccumulator,
+    dimensions: SetupGenerationRelinearizationAggregateDescriptorDimensions,
+    topology: SelectedKeySwitchTopologyMemoryDimensions,
+) -> Result<(), RefusalReason> {
+    let participant_count = usize::from(FOUNDATION_PROFILE.participant_count);
+    for byte_length in [
+        participant_count
+            .checked_mul(size_of::<[u8; Hash512::BYTE_LENGTH]>())
+            .ok_or(RefusalReason::OutsideSupportedProfile)?,
+        participant_count
+            .checked_mul(size_of::<[[u8; Hash512::BYTE_LENGTH]; 3]>())
+            .ok_or(RefusalReason::OutsideSupportedProfile)?,
+        participant_count
+            .checked_mul(size_of::<StreamDescriptor>())
+            .ok_or(RefusalReason::OutsideSupportedProfile)?,
+        participant_count
+            .checked_mul(size_of::<[[u8; Hash512::BYTE_LENGTH]; 2]>())
+            .ok_or(RefusalReason::OutsideSupportedProfile)?,
+    ] {
+        accounting.add_usize_byte_length(byte_length)?;
+    }
+    for _ in 0..participant_count {
+        add_selected_stream_descriptor_allocation(
+            accounting,
+            dimensions.participant_round_one_proof(),
+        )?;
+    }
+    add_selected_stream_descriptor_allocation(accounting, dimensions.aggregate_round_one_proof())?;
+    let component_descriptor = topology.component_stream_descriptor_dimensions()?;
+    add_selected_stream_descriptor_allocation(accounting, component_descriptor)?;
+    add_selected_stream_descriptor_allocation(accounting, component_descriptor)
+}
+
 fn setup_generation_vss_post_release_memory_accounting(
     ordered_roster: &[[u8; Hash512::BYTE_LENGTH]],
     ordered_coefficient_materials: &[SetupGeneratedCommittedMaterial],
@@ -1209,50 +1648,309 @@ fn setup_generation_vss_post_release_memory_accounting(
             .iter()
             .chain(ordered_recipient_share_materials),
     )?;
-    let mut wrappers = SetupGenerationDescriptorAllocationAccumulator::default();
-    wrappers.add_usize_byte_length(size_of::<SetupGenerationVssProofAuthority>())?;
-    wrappers.add_usize_byte_length(
-        ordered_roster
-            .len()
-            .checked_mul(size_of::<[u8; Hash512::BYTE_LENGTH]>())
-            .ok_or(RefusalReason::OutsideSupportedProfile)?,
-    )?;
-    wrappers.add_usize_byte_length(
-        ordered_coefficient_materials
-            .len()
-            .checked_add(ordered_recipient_share_materials.len())
-            .and_then(|count| count.checked_mul(size_of::<SetupGeneratedCommittedMaterial>()))
-            .ok_or(RefusalReason::OutsideSupportedProfile)?,
-    )?;
-    wrappers.add_usize_byte_length(
-        size_of::<usize>()
-            .checked_mul(2)
-            .and_then(|header| header.checked_add(size_of::<ActionPrivateRandomness>()))
-            .ok_or(RefusalReason::OutsideSupportedProfile)?,
-    )?;
-    wrappers.byte_length = wrappers
-        .byte_length
-        .checked_add(source_accounting.allocation_wrapper_byte_length)
-        .ok_or(RefusalReason::OutsideSupportedProfile)?;
+    let mut binding_wrapper_and_catalog_byte_length = 0_u64;
     if let Some(binding) = pinned_vss_public_record_binding {
-        wrappers.add_usize_byte_length(
+        let mut binding_wrappers = SetupGenerationDescriptorAllocationAccumulator::default();
+        binding_wrappers.add_usize_byte_length(
             binding
                 .ordered_recipient_envelope_hashes
                 .len()
                 .checked_mul(size_of::<Hash512>())
                 .ok_or(RefusalReason::OutsideSupportedProfile)?,
         )?;
-        wrappers.add_stream_descriptor(&binding.share_linkage_proof)?;
+        binding_wrappers.add_stream_descriptor(&binding.share_linkage_proof)?;
+        binding_wrapper_and_catalog_byte_length = binding_wrappers.byte_length;
     }
+    setup_generation_vss_post_release_memory_accounting_from_dimensions(
+        ordered_roster.len(),
+        ordered_coefficient_materials
+            .len()
+            .checked_add(ordered_recipient_share_materials.len())
+            .ok_or(RefusalReason::OutsideSupportedProfile)?,
+        source_accounting,
+        binding_wrapper_and_catalog_byte_length,
+    )
+}
+
+fn setup_generation_vss_post_release_memory_accounting_from_dimensions(
+    roster_count: usize,
+    material_count: usize,
+    source_accounting: SetupGenerationVssSourceAllocationAccounting,
+    binding_wrapper_and_catalog_byte_length: u64,
+) -> Result<(u64, u64, u64), RefusalReason> {
+    let mut wrapper_and_catalog_byte_length =
+        u64::try_from(size_of::<SetupGenerationVssProofAuthority>())
+            .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
+    for byte_length in [
+        roster_count
+            .checked_mul(size_of::<[u8; Hash512::BYTE_LENGTH]>())
+            .ok_or(RefusalReason::OutsideSupportedProfile)?,
+        material_count
+            .checked_mul(size_of::<SetupGeneratedCommittedMaterial>())
+            .ok_or(RefusalReason::OutsideSupportedProfile)?,
+        size_of::<usize>()
+            .checked_mul(2)
+            .and_then(|header| header.checked_add(size_of::<ActionPrivateRandomness>()))
+            .ok_or(RefusalReason::OutsideSupportedProfile)?,
+    ] {
+        wrapper_and_catalog_byte_length = wrapper_and_catalog_byte_length
+            .checked_add(
+                u64::try_from(byte_length).map_err(|_| RefusalReason::OutsideSupportedProfile)?,
+            )
+            .ok_or(RefusalReason::OutsideSupportedProfile)?;
+    }
+    wrapper_and_catalog_byte_length = wrapper_and_catalog_byte_length
+        .checked_add(source_accounting.allocation_wrapper_byte_length)
+        .and_then(|length| length.checked_add(binding_wrapper_and_catalog_byte_length))
+        .ok_or(RefusalReason::OutsideSupportedProfile)?;
     let post_release_payload_byte_length = source_accounting
         .shared_source_byte_length
-        .checked_add(wrappers.byte_length)
+        .checked_add(wrapper_and_catalog_byte_length)
         .ok_or(RefusalReason::OutsideSupportedProfile)?;
     Ok((
         source_accounting.shared_source_byte_length,
-        wrappers.byte_length,
+        wrapper_and_catalog_byte_length,
         post_release_payload_byte_length,
     ))
+}
+
+fn selected_setup_generation_all_family_memory_accounting(
+    aggregate_binding_dimensions: Option<
+        SetupGenerationRelinearizationAggregateDescriptorDimensions,
+    >,
+    generated_round_two_is_retained: bool,
+) -> Result<SetupGenerationRetainedMemoryAccounting, RefusalReason> {
+    if generated_round_two_is_retained != aggregate_binding_dimensions.is_some() {
+        return Err(RefusalReason::WrongContext);
+    }
+    let (round_one_input, round_two_input) = selected_relinearization_relation_plan_inputs()
+        .map_err(|_| RefusalReason::UnsupportedVersionOrSuite)?;
+    if round_one_input.schedule_position != round_two_input.schedule_position
+        || round_one_input.geometry != round_two_input.geometry
+    {
+        return Err(RefusalReason::UnsupportedVersionOrSuite);
+    }
+    let relinearization_topology =
+        SelectedKeySwitchTopologyMemoryDimensions::from_relation_geometry(
+            &round_two_input.geometry,
+        )?;
+    let galois_input = selected_galois_key_share_relation_plan_input()
+        .map_err(|_| RefusalReason::UnsupportedVersionOrSuite)?;
+    let galois_topology =
+        SelectedKeySwitchTopologyMemoryDimensions::from_relation_geometry(&galois_input.geometry)?;
+    let galois_entry_count = u64::try_from(galois_input.ordered_entries.len())
+        .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
+    let (vss_material_count, vss_source_accounting) =
+        selected_setup_generation_vss_source_allocation_accounting()?;
+    let participant_count = usize::from(FOUNDATION_PROFILE.participant_count);
+    let polynomial_degree =
+        u64::try_from(POLYNOMIAL_DEGREE).map_err(|_| RefusalReason::OutsideSupportedProfile)?;
+
+    let mut coefficient_and_canonical_payload_byte_length = u64::try_from(participant_count)
+        .ok()
+        .and_then(|count| count.checked_mul(Hash512::BYTE_LENGTH as u64))
+        .ok_or(RefusalReason::OutsideSupportedProfile)?;
+    let mut add_coefficient_payload = |byte_length: u64| -> Result<(), RefusalReason> {
+        coefficient_and_canonical_payload_byte_length =
+            coefficient_and_canonical_payload_byte_length
+                .checked_add(byte_length)
+                .ok_or(RefusalReason::OutsideSupportedProfile)?;
+        Ok(())
+    };
+    for commitment_data_prime_index in SETUP_COMMITMENT_MODULUS_LIMB_INDICES {
+        add_coefficient_payload(
+            u64::try_from(
+                selected_lattice_anchor_commitment_canonical_byte_length(
+                    commitment_data_prime_index,
+                )
+                .map_err(|_| RefusalReason::UnsupportedVersionOrSuite)?,
+            )
+            .map_err(|_| RefusalReason::OutsideSupportedProfile)?,
+        )?;
+        add_coefficient_payload(
+            u64::try_from(
+                SETUP_COMMITMENT_HIDING_SECRET_WIDTH
+                    .checked_add(SETUP_COMMITMENT_HIDING_ERROR_WIDTH)
+                    .ok_or(RefusalReason::OutsideSupportedProfile)?,
+            )
+            .ok()
+            .and_then(|count| count.checked_mul(polynomial_degree))
+            .ok_or(RefusalReason::OutsideSupportedProfile)?,
+        )?;
+    }
+    add_coefficient_payload(polynomial_degree)?;
+    add_coefficient_payload(
+        u64::try_from(DATA_PRIMES.len())
+            .ok()
+            .and_then(|count| count.checked_mul(size_of::<u16>() as u64))
+            .ok_or(RefusalReason::OutsideSupportedProfile)?,
+    )?;
+    add_coefficient_payload(
+        u64::try_from(DATA_PRIMES.len())
+            .ok()
+            .and_then(|count| count.checked_mul(polynomial_degree))
+            .and_then(|count| count.checked_mul(size_of::<u64>() as u64))
+            .ok_or(RefusalReason::OutsideSupportedProfile)?,
+    )?;
+    add_coefficient_payload(polynomial_degree)?;
+    add_coefficient_payload(vss_source_accounting.canonical_coefficient_byte_length)?;
+    add_coefficient_payload(
+        relinearization_topology
+            .canonical_component_byte_length
+            .checked_mul(2)
+            .ok_or(RefusalReason::OutsideSupportedProfile)?,
+    )?;
+    add_coefficient_payload(polynomial_degree)?;
+    add_coefficient_payload(
+        relinearization_topology
+            .data_block_count
+            .checked_mul(polynomial_degree)
+            .and_then(|length| length.checked_mul(3))
+            .ok_or(RefusalReason::OutsideSupportedProfile)?,
+    )?;
+    if generated_round_two_is_retained {
+        add_coefficient_payload(relinearization_topology.canonical_component_byte_length)?;
+    }
+    add_coefficient_payload(
+        galois_entry_count
+            .checked_mul(galois_topology.canonical_component_byte_length)
+            .ok_or(RefusalReason::OutsideSupportedProfile)?,
+    )?;
+    add_coefficient_payload(
+        galois_entry_count
+            .checked_mul(galois_topology.data_block_count)
+            .and_then(|count| count.checked_mul(polynomial_degree))
+            .ok_or(RefusalReason::OutsideSupportedProfile)?,
+    )?;
+
+    let mut wrappers = SetupGenerationDescriptorAllocationAccumulator::default();
+    wrappers.add_usize_byte_length(size_of::<SetupGenerationAuthority>())?;
+    wrappers.add_usize_byte_length(
+        size_of::<usize>()
+            .checked_mul(2)
+            .and_then(|header| header.checked_add(size_of::<ActionPrivateRandomness>()))
+            .ok_or(RefusalReason::OutsideSupportedProfile)?,
+    )?;
+    wrappers.add_usize_byte_length(
+        SETUP_COMMITMENT_MODULUS_LIMB_INDICES
+            .len()
+            .checked_mul(size_of::<SetupGenerationAnchorOpening>())
+            .ok_or(RefusalReason::OutsideSupportedProfile)?,
+    )?;
+    wrappers.add_usize_byte_length(
+        SETUP_COMMITMENT_MODULUS_LIMB_INDICES
+            .len()
+            .checked_mul(
+                SETUP_COMMITMENT_HIDING_SECRET_WIDTH
+                    .checked_add(SETUP_COMMITMENT_HIDING_ERROR_WIDTH)
+                    .ok_or(RefusalReason::OutsideSupportedProfile)?,
+            )
+            .and_then(|count| count.checked_mul(size_of::<Zeroizing<Vec<i8>>>()))
+            .ok_or(RefusalReason::OutsideSupportedProfile)?,
+    )?;
+    wrappers.add_usize_byte_length(
+        DATA_PRIMES
+            .len()
+            .checked_mul(size_of::<Zeroizing<Vec<u64>>>())
+            .ok_or(RefusalReason::OutsideSupportedProfile)?,
+    )?;
+    wrappers.add_usize_byte_length(
+        vss_material_count
+            .checked_mul(size_of::<SetupGeneratedCommittedMaterial>())
+            .ok_or(RefusalReason::OutsideSupportedProfile)?,
+    )?;
+    wrappers.add_usize_byte_length(
+        participant_count
+            .checked_mul(size_of::<Option<SetupGeneratedRecipientPrivateVssPayload>>())
+            .ok_or(RefusalReason::OutsideSupportedProfile)?,
+    )?;
+    wrappers.byte_length = wrappers
+        .byte_length
+        .checked_add(vss_source_accounting.compact_source_byte_length)
+        .and_then(|length| length.checked_add(vss_source_accounting.allocation_wrapper_byte_length))
+        .ok_or(RefusalReason::OutsideSupportedProfile)?;
+    add_selected_key_switch_component_allocations(&mut wrappers, relinearization_topology)?;
+    add_selected_key_switch_component_allocations(&mut wrappers, relinearization_topology)?;
+    wrappers.add_usize_byte_length(
+        usize::try_from(
+            relinearization_topology
+                .data_block_count
+                .checked_mul(3)
+                .ok_or(RefusalReason::OutsideSupportedProfile)?,
+        )
+        .ok()
+        .and_then(|count| count.checked_mul(size_of::<Zeroizing<Vec<i8>>>()))
+        .ok_or(RefusalReason::OutsideSupportedProfile)?,
+    )?;
+    if let Some(dimensions) = aggregate_binding_dimensions {
+        add_selected_relinearization_aggregate_binding_allocations(
+            &mut wrappers,
+            dimensions,
+            relinearization_topology,
+        )?;
+        add_selected_key_switch_component_allocations(&mut wrappers, relinearization_topology)?;
+        wrappers.byte_length = wrappers
+            .byte_length
+            .checked_add(relinearization_topology.retained_topology_heap_byte_length)
+            .ok_or(RefusalReason::OutsideSupportedProfile)?;
+        let zero_root = [0_u8; Hash512::BYTE_LENGTH];
+        let anchor_roots = [zero_root; 3];
+        wrappers.add_usize_byte_length(
+            canonical_selected_relinearization_round_two_statement(
+                zero_root,
+                zero_root,
+                0,
+                round_two_input.schedule_position,
+                &anchor_roots,
+                zero_root,
+                zero_root,
+                zero_root,
+                zero_root,
+                zero_root,
+            )
+            .map_err(|_| RefusalReason::UnsupportedVersionOrSuite)?
+            .len(),
+        )?;
+    }
+    wrappers.add_usize_byte_length(
+        galois_input
+            .ordered_entries
+            .len()
+            .checked_mul(size_of::<SetupGeneratedGaloisEntry>())
+            .ok_or(RefusalReason::OutsideSupportedProfile)?,
+    )?;
+    for _ in &galois_input.ordered_entries {
+        add_selected_key_switch_component_allocations(&mut wrappers, galois_topology)?;
+        wrappers.add_usize_byte_length(
+            usize::try_from(galois_topology.data_block_count)
+                .ok()
+                .and_then(|count| count.checked_mul(size_of::<Zeroizing<Vec<i8>>>()))
+                .ok_or(RefusalReason::OutsideSupportedProfile)?,
+        )?;
+    }
+    let all_family_payload_byte_length = coefficient_and_canonical_payload_byte_length
+        .checked_add(wrappers.byte_length)
+        .ok_or(RefusalReason::OutsideSupportedProfile)?;
+    let (
+        vss_proof_shared_source_byte_length,
+        vss_proof_wrapper_and_catalog_byte_length,
+        post_release_payload_byte_length,
+    ) = setup_generation_vss_post_release_memory_accounting_from_dimensions(
+        participant_count,
+        vss_material_count,
+        vss_source_accounting,
+        0,
+    )?;
+    Ok(SetupGenerationRetainedMemoryAccounting {
+        all_family_coefficient_and_canonical_payload_byte_length:
+            coefficient_and_canonical_payload_byte_length,
+        all_family_wrapper_and_catalog_byte_length: wrappers.byte_length,
+        all_family_payload_byte_length,
+        vss_proof_shared_source_byte_length,
+        vss_proof_wrapper_and_catalog_byte_length,
+        post_release_payload_byte_length,
+        vss_proof_phase_is_active: false,
+    })
 }
 
 impl SetupGenerationVssProofAuthority {
@@ -1586,6 +2284,58 @@ pub(crate) struct SetupGenerationRelinearizationRoundTwoActivation {
 impl SetupGenerationRelinearizationRoundTwoActivation {
     pub(crate) const fn topology(&self) -> &KeySwitchComponentMaterialTopology {
         self.construction.topology()
+    }
+
+    fn memory_accounting(
+        &self,
+        retained_authority: SetupGenerationRetainedMemoryAccounting,
+    ) -> Result<SetupGenerationRelinearizationRoundTwoActivationMemoryAccounting, RefusalReason>
+    {
+        if retained_authority.vss_proof_phase_is_active() {
+            return Err(RefusalReason::ConsumedState);
+        }
+        let retained_authority_payload_byte_length =
+            retained_authority.all_family_payload_byte_length();
+        let mut activation_binding_accounting =
+            SetupGenerationDescriptorAllocationAccumulator::default();
+        add_relinearization_aggregate_binding_allocations(
+            &mut activation_binding_accounting,
+            self.aggregate_binding
+                .as_ref()
+                .ok_or(RefusalReason::ConsumedState)?,
+        )?;
+        let activation_binding_payload_byte_length = activation_binding_accounting.byte_length;
+        let setup_matrix_cache_payload_byte_length =
+            setup_commitment_matrix_ntt_cache_coefficient_payload_byte_length(
+                self.topology().polynomial_degree(),
+            )
+            .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
+        let pre_root_construction_payload_byte_length =
+            self.construction.pre_root_retained_payload_byte_length()?;
+        let generation_workspace_payload_peak_byte_length = self
+            .construction
+            .generation_workspace_payload_peak_byte_length()?;
+        let root_overlap_construction_payload_byte_length = self
+            .construction
+            .root_overlap_retained_payload_byte_length()?;
+        let streamed_root_transient_payload_byte_length =
+            setup_public_polynomial_wasm_compact_root_memory_plan(
+                self.construction.evaluation_domain_size(),
+                self.topology().half_polynomial_degree_bound_exclusive()?,
+                u32::try_from(self.topology().trace_column_count()?)
+                    .map_err(|_| RefusalReason::OutsideSupportedProfile)?,
+            )
+            .map_err(|_| RefusalReason::OutsideSupportedProfile)?
+            .owned_payload_peak_byte_length();
+        SetupGenerationRelinearizationRoundTwoActivationMemoryAccounting::from_live_phase_payloads(
+            retained_authority_payload_byte_length,
+            activation_binding_payload_byte_length,
+            setup_matrix_cache_payload_byte_length,
+            pre_root_construction_payload_byte_length,
+            generation_workspace_payload_peak_byte_length,
+            root_overlap_construction_payload_byte_length,
+            streamed_root_transient_payload_byte_length,
+        )
     }
 }
 
@@ -2685,9 +3435,7 @@ impl SetupGenerationAuthority {
         }
         Ok(())
     }
-    fn retained_coefficient_and_canonical_payload_byte_length(
-        &self,
-    ) -> Result<u64, RefusalReason> {
+    fn retained_coefficient_and_canonical_payload_byte_length(&self) -> Result<u64, RefusalReason> {
         let checked_add = |total: u64, byte_length: usize| {
             total
                 .checked_add(
@@ -2744,7 +3492,12 @@ impl SetupGenerationAuthority {
         total = total
             .checked_add(vss_source_accounting.canonical_coefficient_byte_length)
             .ok_or(RefusalReason::OutsideSupportedProfile)?;
-        for payload in self.vss_material.recipient_private_payloads.iter().flatten() {
+        for payload in self
+            .vss_material
+            .recipient_private_payloads
+            .iter()
+            .flatten()
+        {
             total = checked_add(total, payload.canonical_bytes.capacity())?;
         }
         total = total
@@ -2755,9 +3508,7 @@ impl SetupGenerationAuthority {
             .ok_or(RefusalReason::OutsideSupportedProfile)?;
         if let Some(generated_round_two) = &self.generated_relinearization_round_two {
             total = total
-                .checked_add(
-                    generated_round_two.retained_coefficient_payload_byte_length()?,
-                )
+                .checked_add(generated_round_two.retained_coefficient_payload_byte_length()?)
                 .ok_or(RefusalReason::OutsideSupportedProfile)?;
         }
         for entry in &self.ordered_galois_entries {
@@ -2807,11 +3558,7 @@ impl SetupGenerationAuthority {
             .vss_material
             .ordered_coefficient_materials()
             .len()
-            .checked_add(
-                self.vss_material
-                    .ordered_recipient_share_materials()
-                    .len(),
-            )
+            .checked_add(self.vss_material.ordered_recipient_share_materials().len())
             .ok_or(RefusalReason::OutsideSupportedProfile)?;
         accounting.add_usize_byte_length(
             vss_material_count
@@ -2860,52 +3607,11 @@ impl SetupGenerationAuthority {
         }
 
         if let Some(aggregate_binding) = &self.relinearization_aggregate_binding {
-            accounting.add_usize_byte_length(
-                aggregate_binding
-                    .ordered_participant_identities
-                    .len()
-                    .checked_mul(size_of::<[u8; Hash512::BYTE_LENGTH]>())
-                    .ok_or(RefusalReason::OutsideSupportedProfile)?,
-            )?;
-            accounting.add_usize_byte_length(
-                aggregate_binding
-                    .ordered_anchor_commitment_roots
-                    .len()
-                    .checked_mul(size_of::<[[u8; Hash512::BYTE_LENGTH]; 3]>())
-                    .ok_or(RefusalReason::OutsideSupportedProfile)?,
-            )?;
-            accounting.add_usize_byte_length(
-                aggregate_binding
-                    .ordered_round_one_proof_stream_descriptors
-                    .len()
-                    .checked_mul(size_of::<StreamDescriptor>())
-                    .ok_or(RefusalReason::OutsideSupportedProfile)?,
-            )?;
-            accounting.add_usize_byte_length(
-                aggregate_binding
-                    .ordered_source_root_pairs
-                    .len()
-                    .checked_mul(size_of::<[[u8; Hash512::BYTE_LENGTH]; 2]>())
-                    .ok_or(RefusalReason::OutsideSupportedProfile)?,
-            )?;
-            for descriptor in aggregate_binding
-                .ordered_round_one_proof_stream_descriptors
-                .iter()
-                .chain([
-                    &aggregate_binding.proof_stream_descriptor,
-                    &aggregate_binding.aggregate_left_stream_descriptor,
-                    &aggregate_binding.aggregate_right_stream_descriptor,
-                ])
-            {
-                accounting.add_stream_descriptor(descriptor)?;
-            }
+            add_relinearization_aggregate_binding_allocations(&mut accounting, aggregate_binding)?;
         }
 
         if let Some(generated_round_two) = &self.generated_relinearization_round_two {
-            add_key_switch_component_allocations(
-                &mut accounting,
-                generated_round_two.component(),
-            )?;
+            add_key_switch_component_allocations(&mut accounting, generated_round_two.component())?;
             accounting.add_usize_byte_length(
                 generated_round_two
                     .source_authority()
@@ -2914,7 +3620,10 @@ impl SetupGenerationAuthority {
             )?;
             add_verified_key_switch_component_allocations(
                 &mut accounting,
-                generated_round_two.source_authority().component().material(),
+                generated_round_two
+                    .source_authority()
+                    .component()
+                    .material(),
             )?;
         }
 
@@ -5681,6 +6390,22 @@ impl SetupGenerationAuthorityRegistry {
     }
 }
 
+fn require_setup_generation_authority_capacity(
+    all_family_authority_count: usize,
+    vss_proof_authority_count: usize,
+) -> Result<(), RefusalReason> {
+    if all_family_authority_count
+        .checked_add(vss_proof_authority_count)
+        .filter(|retained_count| {
+            *retained_count < MAXIMUM_RETAINED_SETUP_GENERATION_AUTHORITY_COUNT
+        })
+        .is_none()
+    {
+        return Err(RefusalReason::OutsideSupportedProfile);
+    }
+    Ok(())
+}
+
 thread_local! {
     static SETUP_GENERATION_AUTHORITY_REGISTRY: RefCell<SetupGenerationAuthorityRegistry> =
         RefCell::new(SetupGenerationAuthorityRegistry::default());
@@ -5699,11 +6424,22 @@ pub(super) fn retain_browser_owned_setup_generation_authority(
     input: SetupGenerationAuthorityInput,
 ) -> Result<SetupGenerationAuthorityHandle, RefusalReason> {
     let authority = SetupGenerationAuthority::from_browser_owned_input(input)?;
+    let vss_proof_authority_count =
+        SETUP_GENERATION_VSS_PROOF_AUTHORITY_REGISTRY.with(|registry| {
+            registry
+                .try_borrow()
+                .map(|registry| registry.authorities.len())
+                .map_err(|_| RefusalReason::ConsumedState)
+        })?;
     SETUP_GENERATION_AUTHORITY_REGISTRY.with(|registry| {
-        registry
+        let mut registry = registry
             .try_borrow_mut()
-            .map_err(|_| RefusalReason::ConsumedState)?
-            .retain(authority)
+            .map_err(|_| RefusalReason::ConsumedState)?;
+        require_setup_generation_authority_capacity(
+            registry.authorities.len(),
+            vss_proof_authority_count,
+        )?;
+        registry.retain(authority)
     })
 }
 
@@ -5717,8 +6453,8 @@ pub(crate) fn setup_generation_retained_memory_accounting(
             .authorities
             .get(&handle.0)
             .map(|authority| {
-                let coefficient_and_canonical_payload_byte_length = authority
-                    .retained_coefficient_and_canonical_payload_byte_length()?;
+                let coefficient_and_canonical_payload_byte_length =
+                    authority.retained_coefficient_and_canonical_payload_byte_length()?;
                 let wrapper_and_catalog_byte_length =
                     authority.retained_wrapper_and_catalog_byte_length()?;
                 let all_family_payload_byte_length = coefficient_and_canonical_payload_byte_length
@@ -5745,16 +6481,15 @@ pub(crate) fn setup_generation_retained_memory_accounting(
             })
             .transpose()
     })?;
-    let vss_proof_accounting =
-        SETUP_GENERATION_VSS_PROOF_AUTHORITY_REGISTRY.with(|registry| {
-            registry
-                .try_borrow()
-                .map_err(|_| RefusalReason::ConsumedState)?
-                .authorities
-                .get(&handle.0)
-                .map(SetupGenerationVssProofAuthority::retained_memory_accounting)
-                .transpose()
-        })?;
+    let vss_proof_accounting = SETUP_GENERATION_VSS_PROOF_AUTHORITY_REGISTRY.with(|registry| {
+        registry
+            .try_borrow()
+            .map_err(|_| RefusalReason::ConsumedState)?
+            .authorities
+            .get(&handle.0)
+            .map(SetupGenerationVssProofAuthority::retained_memory_accounting)
+            .transpose()
+    })?;
     match (all_family_accounting, vss_proof_accounting) {
         (
             Some((
@@ -5766,17 +6501,15 @@ pub(crate) fn setup_generation_retained_memory_accounting(
                 post_release_payload_byte_length,
             )),
             None,
-        ) => {
-            Ok(SetupGenerationRetainedMemoryAccounting {
-                all_family_coefficient_and_canonical_payload_byte_length,
-                all_family_wrapper_and_catalog_byte_length,
-                all_family_payload_byte_length,
-                vss_proof_shared_source_byte_length,
-                vss_proof_wrapper_and_catalog_byte_length,
-                post_release_payload_byte_length,
-                vss_proof_phase_is_active: false,
-            })
-        }
+        ) => Ok(SetupGenerationRetainedMemoryAccounting {
+            all_family_coefficient_and_canonical_payload_byte_length,
+            all_family_wrapper_and_catalog_byte_length,
+            all_family_payload_byte_length,
+            vss_proof_shared_source_byte_length,
+            vss_proof_wrapper_and_catalog_byte_length,
+            post_release_payload_byte_length,
+            vss_proof_phase_is_active: false,
+        }),
         (
             None,
             Some((
@@ -5784,7 +6517,50 @@ pub(crate) fn setup_generation_retained_memory_accounting(
                 vss_proof_wrapper_and_catalog_byte_length,
                 post_release_payload_byte_length,
             )),
-        ) => {
+        ) => Ok(SetupGenerationRetainedMemoryAccounting {
+            all_family_coefficient_and_canonical_payload_byte_length: 0,
+            all_family_wrapper_and_catalog_byte_length: 0,
+            all_family_payload_byte_length: 0,
+            vss_proof_shared_source_byte_length,
+            vss_proof_wrapper_and_catalog_byte_length,
+            post_release_payload_byte_length,
+            vss_proof_phase_is_active: true,
+        }),
+        _ => Err(RefusalReason::ConsumedState),
+    }
+}
+
+/// Pure selected-state accounting used by the compiler-derived resource
+/// inventory. Every non-proof dimension comes from the same production
+/// relation geometry, topology, canonical codec and Rust owner types as live
+/// authority accounting; proof descriptor dimensions are validated at the
+/// boundary because their lengths are derived by the proof transport pass.
+pub(crate) fn selected_setup_generation_retained_memory_accounting(
+    state: SelectedSetupGenerationLifecycleState,
+) -> Result<SetupGenerationRetainedMemoryAccounting, RefusalReason> {
+    match state {
+        SelectedSetupGenerationLifecycleState::SameSecretProof
+        | SelectedSetupGenerationLifecycleState::PublicKeyShareProof
+        | SelectedSetupGenerationLifecycleState::RelinearizationRoundOneProof => {
+            selected_setup_generation_all_family_memory_accounting(None, false)
+        }
+        SelectedSetupGenerationLifecycleState::RelinearizationRoundTwoProof(dimensions)
+        | SelectedSetupGenerationLifecycleState::GaloisKeyShareProof(dimensions) => {
+            selected_setup_generation_all_family_memory_accounting(Some(dimensions), true)
+        }
+        SelectedSetupGenerationLifecycleState::VssShareLinkageProof => {
+            let (material_count, source_accounting) =
+                selected_setup_generation_vss_source_allocation_accounting()?;
+            let (
+                vss_proof_shared_source_byte_length,
+                vss_proof_wrapper_and_catalog_byte_length,
+                post_release_payload_byte_length,
+            ) = setup_generation_vss_post_release_memory_accounting_from_dimensions(
+                usize::from(FOUNDATION_PROFILE.participant_count),
+                material_count,
+                source_accounting,
+                0,
+            )?;
             Ok(SetupGenerationRetainedMemoryAccounting {
                 all_family_coefficient_and_canonical_payload_byte_length: 0,
                 all_family_wrapper_and_catalog_byte_length: 0,
@@ -5795,8 +6571,60 @@ pub(crate) fn setup_generation_retained_memory_accounting(
                 vss_proof_phase_is_active: true,
             })
         }
-        _ => Err(RefusalReason::ConsumedState),
     }
+}
+
+pub(crate) fn selected_setup_generation_relinearization_round_two_activation_memory_accounting(
+    aggregate_binding_dimensions: SetupGenerationRelinearizationAggregateDescriptorDimensions,
+) -> Result<SetupGenerationRelinearizationRoundTwoActivationMemoryAccounting, RefusalReason> {
+    let retained_authority = selected_setup_generation_all_family_memory_accounting(None, false)?;
+    let (_, round_two_input) = selected_relinearization_relation_plan_inputs()
+        .map_err(|_| RefusalReason::UnsupportedVersionOrSuite)?;
+    let topology = SelectedKeySwitchTopologyMemoryDimensions::from_relation_geometry(
+        &round_two_input.geometry,
+    )?;
+    let mut activation_binding = SetupGenerationDescriptorAllocationAccumulator::default();
+    add_selected_relinearization_aggregate_binding_allocations(
+        &mut activation_binding,
+        aggregate_binding_dimensions,
+        topology,
+    )?;
+    let setup_matrix_cache_payload_byte_length =
+        setup_commitment_matrix_ntt_cache_coefficient_payload_byte_length(POLYNOMIAL_DEGREE)
+            .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
+    let aggregate_source_row_payload_byte_length = topology
+        .polynomial_degree
+        .checked_mul(2)
+        .and_then(|count| count.checked_mul(size_of::<u64>() as u64))
+        .ok_or(RefusalReason::OutsideSupportedProfile)?;
+    let pre_root_construction_payload_byte_length = topology
+        .canonical_component_byte_length
+        .checked_add(aggregate_source_row_payload_byte_length)
+        .ok_or(RefusalReason::OutsideSupportedProfile)?;
+    let generation_workspace_payload_peak_byte_length = topology
+        .polynomial_degree
+        .checked_mul(5)
+        .and_then(|count| count.checked_mul(size_of::<u64>() as u64))
+        .ok_or(RefusalReason::OutsideSupportedProfile)?;
+    let evaluation_domain_size = usize::try_from(round_two_input.geometry.evaluation_domain_size)
+        .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
+    let streamed_root_transient_payload_byte_length =
+        setup_public_polynomial_wasm_compact_root_memory_plan(
+            evaluation_domain_size,
+            topology.half_polynomial_degree_bound_exclusive,
+            topology.trace_column_count,
+        )
+        .map_err(|_| RefusalReason::OutsideSupportedProfile)?
+        .owned_payload_peak_byte_length();
+    SetupGenerationRelinearizationRoundTwoActivationMemoryAccounting::from_live_phase_payloads(
+        retained_authority.all_family_payload_byte_length(),
+        activation_binding.byte_length,
+        setup_matrix_cache_payload_byte_length,
+        pre_root_construction_payload_byte_length,
+        generation_workspace_payload_peak_byte_length,
+        topology.canonical_component_byte_length,
+        streamed_root_transient_payload_byte_length,
+    )
 }
 
 pub(crate) fn resolve_setup_generation_key_relation_preparation_source(
@@ -5963,7 +6791,7 @@ pub(crate) fn begin_setup_generation_relinearization_round_two_activation(
     generated_aggregate: &SetupGeneratedRelinearizationAggregateSourceAuthority,
     aggregate_proof_stream_descriptor: &StreamDescriptor,
 ) -> Result<SetupGenerationRelinearizationRoundTwoActivation, RefusalReason> {
-    SETUP_GENERATION_AUTHORITY_REGISTRY.with(|registry| {
+    let activation = SETUP_GENERATION_AUTHORITY_REGISTRY.with(|registry| {
         let registry = registry
             .try_borrow()
             .map_err(|_| RefusalReason::ConsumedState)?;
@@ -5976,7 +6804,23 @@ pub(crate) fn begin_setup_generation_relinearization_round_two_activation(
                 generated_aggregate,
                 aggregate_proof_stream_descriptor,
             )
-    })
+    })?;
+    let memory_accounting =
+        setup_generation_relinearization_round_two_activation_memory_accounting(
+            handle,
+            &activation,
+        )?;
+    if !memory_accounting.fits_absolute_wasm_resident_bound() {
+        return Err(RefusalReason::OutsideSupportedProfile);
+    }
+    Ok(activation)
+}
+
+pub(crate) fn setup_generation_relinearization_round_two_activation_memory_accounting(
+    handle: &SetupGenerationAuthorityHandle,
+    activation: &SetupGenerationRelinearizationRoundTwoActivation,
+) -> Result<SetupGenerationRelinearizationRoundTwoActivationMemoryAccounting, RefusalReason> {
+    activation.memory_accounting(setup_generation_retained_memory_accounting(handle)?)
 }
 
 pub(crate) fn absorb_setup_generation_relinearization_round_two_activation_pair(
@@ -6705,6 +7549,237 @@ mod tests {
         StreamDescriptor::new(1, vec![hash(marker)], hash(marker.wrapping_add(1))).unwrap()
     }
 
+    fn selected_aggregate_descriptor_dimensions()
+    -> SetupGenerationRelinearizationAggregateDescriptorDimensions {
+        let descriptor = SetupGenerationRetainedStreamDescriptorDimensions::new(1, 1).unwrap();
+        SetupGenerationRelinearizationAggregateDescriptorDimensions::new(descriptor, descriptor)
+    }
+
+    #[test]
+    fn selected_setup_lifecycle_accounting_follows_the_destructive_custody_order() {
+        assert_eq!(
+            SetupGenerationRetainedStreamDescriptorDimensions::new(0, 0),
+            Err(RefusalReason::WrongTypeOrLength)
+        );
+        assert_eq!(
+            SetupGenerationRetainedStreamDescriptorDimensions::new(1, 2),
+            Err(RefusalReason::WrongTypeOrLength)
+        );
+        let maximum_stream_chunk_count = MAXIMUM_CANONICAL_STREAM_BYTE_LENGTH
+            .checked_sub(1)
+            .and_then(|length| {
+                length.checked_div(u64::try_from(FOUNDATION_PROFILE.stream_chunk_byte_length).ok()?)
+            })
+            .and_then(|count| count.checked_add(1))
+            .unwrap();
+        assert!(
+            SetupGenerationRetainedStreamDescriptorDimensions::new(
+                MAXIMUM_CANONICAL_STREAM_BYTE_LENGTH,
+                maximum_stream_chunk_count,
+            )
+            .is_ok()
+        );
+        assert_eq!(
+            SetupGenerationRetainedStreamDescriptorDimensions::new(
+                MAXIMUM_CANONICAL_STREAM_BYTE_LENGTH.checked_add(1).unwrap(),
+                maximum_stream_chunk_count,
+            ),
+            Err(RefusalReason::OutsideSupportedProfile)
+        );
+
+        let same_secret = selected_setup_generation_retained_memory_accounting(
+            SelectedSetupGenerationLifecycleState::SameSecretProof,
+        )
+        .unwrap();
+        let public_key_share = selected_setup_generation_retained_memory_accounting(
+            SelectedSetupGenerationLifecycleState::PublicKeyShareProof,
+        )
+        .unwrap();
+        let round_one = selected_setup_generation_retained_memory_accounting(
+            SelectedSetupGenerationLifecycleState::RelinearizationRoundOneProof,
+        )
+        .unwrap();
+        assert_eq!(same_secret, public_key_share);
+        assert_eq!(same_secret, round_one);
+
+        let descriptor_dimensions = selected_aggregate_descriptor_dimensions();
+        let round_two = selected_setup_generation_retained_memory_accounting(
+            SelectedSetupGenerationLifecycleState::RelinearizationRoundTwoProof(
+                descriptor_dimensions,
+            ),
+        )
+        .unwrap();
+        let galois = selected_setup_generation_retained_memory_accounting(
+            SelectedSetupGenerationLifecycleState::GaloisKeyShareProof(descriptor_dimensions),
+        )
+        .unwrap();
+        assert_eq!(round_two, galois);
+        assert!(
+            round_two.all_family_payload_byte_length() > round_one.all_family_payload_byte_length()
+        );
+
+        let vss = selected_setup_generation_retained_memory_accounting(
+            SelectedSetupGenerationLifecycleState::VssShareLinkageProof,
+        )
+        .unwrap();
+        assert_eq!(
+            same_secret.all_family_coefficient_and_canonical_payload_byte_length(),
+            223_019_904
+        );
+        assert_eq!(
+            same_secret.all_family_wrapper_and_catalog_byte_length(),
+            45_901
+        );
+        assert_eq!(same_secret.all_family_payload_byte_length(), 223_065_805);
+        assert_eq!(
+            round_two.all_family_coefficient_and_canonical_payload_byte_length(),
+            268_829_568
+        );
+        assert_eq!(
+            round_two.all_family_wrapper_and_catalog_byte_length(),
+            61_311
+        );
+        assert_eq!(round_two.all_family_payload_byte_length(), 268_890_879);
+        assert!(vss.vss_proof_phase_is_active());
+        assert_eq!(vss.all_family_payload_byte_length(), 0);
+        assert_eq!(vss.vss_proof_shared_source_byte_length(), 44_060_352);
+        assert_eq!(vss.vss_proof_wrapper_and_catalog_byte_length(), 8_216);
+        assert_eq!(vss.post_release_payload_byte_length(), 44_068_568);
+        assert_eq!(
+            vss.post_release_payload_byte_length(),
+            vss.vss_proof_shared_source_byte_length()
+                + vss.vss_proof_wrapper_and_catalog_byte_length()
+        );
+        assert!(
+            vss.post_release_payload_byte_length() < round_two.all_family_payload_byte_length()
+        );
+    }
+
+    #[test]
+    fn selected_round_two_activation_uses_the_live_phase_formulas() {
+        let base = selected_setup_generation_retained_memory_accounting(
+            SelectedSetupGenerationLifecycleState::RelinearizationRoundOneProof,
+        )
+        .unwrap();
+        let accounting =
+            selected_setup_generation_relinearization_round_two_activation_memory_accounting(
+                selected_aggregate_descriptor_dimensions(),
+            )
+            .unwrap();
+        assert_eq!(
+            accounting.retained_authority_payload_byte_length(),
+            base.all_family_payload_byte_length()
+        );
+        assert!(accounting.activation_binding_payload_byte_length() > 0);
+        assert_eq!(accounting.activation_binding_payload_byte_length(), 11_264);
+        assert_eq!(
+            accounting.setup_matrix_cache_payload_byte_length(),
+            4_718_592
+        );
+        assert_eq!(
+            accounting.generation_workspace_payload_peak_byte_length(),
+            2_621_440
+        );
+        assert_eq!(
+            accounting.streamed_root_transient_payload_byte_length(),
+            243_531_776
+        );
+        assert_eq!(accounting.ingestion_peak_byte_length(), 277_275_341);
+        assert_eq!(
+            accounting.root_reconstruction_peak_byte_length(),
+            517_137_101
+        );
+        assert_eq!(accounting.maximum_overlap_byte_length(), 517_137_101);
+        assert_eq!(accounting.wasm_resident_headroom_byte_length(), 153_951_539);
+        assert!(accounting.fits_absolute_wasm_resident_bound());
+        assert_eq!(
+            accounting.maximum_overlap_byte_length(),
+            accounting
+                .ingestion_peak_byte_length()
+                .max(accounting.root_reconstruction_peak_byte_length())
+        );
+    }
+
+    #[test]
+    fn round_two_activation_accounting_keeps_mutually_exclusive_phase_peaks_separate() {
+        let root_dominant =
+            SetupGenerationRelinearizationRoundTwoActivationMemoryAccounting::from_live_phase_payloads(
+                300, 10, 40, 90, 30, 20, 100,
+            )
+            .unwrap();
+        assert_eq!(root_dominant.activation_binding_payload_byte_length(), 10);
+        assert_eq!(root_dominant.ingestion_peak_byte_length(), 470);
+        assert_eq!(root_dominant.root_reconstruction_peak_byte_length(), 470);
+        assert_eq!(root_dominant.maximum_overlap_byte_length(), 470);
+
+        let ingestion_dominant =
+            SetupGenerationRelinearizationRoundTwoActivationMemoryAccounting::from_live_phase_payloads(
+                300, 10, 40, 190, 30, 20, 100,
+            )
+            .unwrap();
+        assert_eq!(ingestion_dominant.ingestion_peak_byte_length(), 570);
+        assert_eq!(
+            ingestion_dominant.root_reconstruction_peak_byte_length(),
+            470
+        );
+        assert_eq!(ingestion_dominant.maximum_overlap_byte_length(), 570);
+    }
+
+    #[test]
+    fn round_two_activation_accounting_rejects_every_overflow_boundary() {
+        for (
+            retained_authority_payload_byte_length,
+            activation_binding_payload_byte_length,
+            setup_matrix_cache_payload_byte_length,
+            pre_root_construction_payload_byte_length,
+            generation_workspace_payload_peak_byte_length,
+            root_overlap_construction_payload_byte_length,
+            streamed_root_transient_payload_byte_length,
+        ) in [
+            (u64::MAX, 1, 0, 0, 0, 0, 0),
+            (u64::MAX - 1, 1, 1, 0, 0, 0, 0),
+            (u64::MAX - 2, 1, 1, 1, 0, 0, 0),
+            (u64::MAX - 2, 1, 1, 0, 1, 0, 0),
+            (u64::MAX - 2, 1, 1, 0, 0, 1, 0),
+            (u64::MAX - 2, 1, 1, 0, 0, 0, 1),
+        ] {
+            assert_eq!(
+                SetupGenerationRelinearizationRoundTwoActivationMemoryAccounting::from_live_phase_payloads(
+                    retained_authority_payload_byte_length,
+                    activation_binding_payload_byte_length,
+                    setup_matrix_cache_payload_byte_length,
+                    pre_root_construction_payload_byte_length,
+                    generation_workspace_payload_peak_byte_length,
+                    root_overlap_construction_payload_byte_length,
+                    streamed_root_transient_payload_byte_length,
+                )
+                .unwrap_err(),
+                RefusalReason::OutsideSupportedProfile
+            );
+        }
+    }
+
+    #[test]
+    fn setup_generation_capacity_is_shared_across_both_lifecycle_registries() {
+        let maximum = MAXIMUM_RETAINED_SETUP_GENERATION_AUTHORITY_COUNT;
+        assert_eq!(
+            require_setup_generation_authority_capacity(maximum - 1, 0),
+            Ok(())
+        );
+        assert_eq!(
+            require_setup_generation_authority_capacity(0, maximum - 1),
+            Ok(())
+        );
+        assert_eq!(
+            require_setup_generation_authority_capacity(maximum / 2, maximum / 2),
+            Err(RefusalReason::OutsideSupportedProfile)
+        );
+        assert_eq!(
+            require_setup_generation_authority_capacity(usize::MAX, 1),
+            Err(RefusalReason::OutsideSupportedProfile)
+        );
+    }
+
     #[test]
     fn vss_public_record_binding_is_reset_safe_and_refuses_forks() {
         let ordered_recipient_envelope_hashes = (0..FOUNDATION_PROFILE.participant_count)
@@ -6804,11 +7879,11 @@ mod tests {
 
     #[test]
     fn selected_public_key_share_body_has_the_exact_full_q_length() {
-        assert_eq!(DATA_PRIMES.len(), 26);
-        assert_eq!(POLYNOMIAL_DEGREE, 65_536);
+        assert_eq!(DATA_PRIMES.len(), 23);
+        assert_eq!(POLYNOMIAL_DEGREE, 32_768);
         assert_eq!(
             SELECTED_SETUP_GENERATION_PUBLIC_KEY_SHARE_BODY_BYTE_LENGTH,
-            13_631_488
+            6_029_312
         );
     }
 

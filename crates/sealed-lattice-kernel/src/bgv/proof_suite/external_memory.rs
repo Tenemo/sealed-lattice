@@ -8,13 +8,16 @@
 //! changes only after that successful replay.  No filesystem, thread, blocking
 //! JavaScript callback, or whole proof in memory is required.
 
+#[cfg(test)]
 use std::{
     collections::{BTreeMap, BTreeSet},
     fmt,
 };
 
+#[cfg(test)]
 use zeroize::Zeroizing;
 
+#[cfg(test)]
 use crate::hashing::hash_framed_parts_512;
 
 const EXTERNAL_MEMORY_REQUEST_SCHEMA_VERSION: u16 = 1;

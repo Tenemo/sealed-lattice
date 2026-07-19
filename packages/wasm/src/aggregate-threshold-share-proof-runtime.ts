@@ -22,21 +22,16 @@ import {
     openClosedWorkerCommonProofVerificationFamilyAdapter,
     releaseClosedWorkerCommonProofGenerationFamilyAdapter,
     releaseClosedWorkerCommonProofVerificationFamilyAdapter,
-    runClosedWorkerCommonProofGenerationFamilyAdapterRetainingGeneratedCapability,
+    runClosedWorkerCommonProofGenerationFamilyAdapterWithExecutionOpener,
     runClosedWorkerCommonProofVerificationFamilyAdapter,
     type AuthenticatedCommonProofInputStore,
     type ClosedWorkerCommonProofGenerationFamilyAdapter,
     type ClosedWorkerCommonProofVerificationFamilyAdapter,
     type ClosedWorkerGeneratedCommonProofCapability,
-    type CommonProofCanonicalOutputStore,
-    type CommonProofExternalMemoryTransactionExecutor,
-    type CommonProofGenerationWorkerOptions,
+    type CommonProofGenerationExecutionOpener,
     type CommonProofVerificationWorkerOptions,
 } from './common-proof-worker-runtime/runtime.js';
-import {
-    deriveGeneratedCommonProofDescriptor,
-    trackCanonicalCommonProofOutputChunks,
-} from './generated-common-proof-output-runtime.js';
+import { deriveGeneratedCommonProofDescriptor } from './generated-common-proof-output-runtime.js';
 import type { ClosedWorkerProductionOperationIdentifiers } from './local-storage-root-worker-kernel/authorities.js';
 import { withClosedWorkerProductionOperationAuthority } from './local-storage-root-worker-kernel/worker-kernel.js';
 import { resolveCommonProofKernelContext } from './transcript-core-bridge/common-proof-kernel-context.js';
@@ -317,11 +312,9 @@ const resolveSingleBoardObjectAuthorization = (input: {
 export const generateAggregateThresholdShareInClosedWorker = async (input: {
     canonicalSuiteRecordBytes: Uint8Array;
     checkpointLineageIdentifier: Uint8Array;
-    externalMemory: CommonProofExternalMemoryTransactionExecutor;
     generationMode: AggregateThresholdShareGenerationMode;
     kernel: TranscriptCoreKernel;
-    options?: CommonProofGenerationWorkerOptions;
-    outputStore: CommonProofCanonicalOutputStore;
+    openProofGenerationExecution: CommonProofGenerationExecutionOpener;
     productionOperationIdentifiers: ClosedWorkerProductionOperationIdentifiers;
     recipientAuthority: AggregateThresholdShareRecipientAuthority;
     resolveVerifiedPrivateShareAcceptance(input: {
@@ -336,10 +329,7 @@ export const generateAggregateThresholdShareInClosedWorker = async (input: {
         );
     }
     if (
-        (input.generationMode !== 'fresh' &&
-            input.generationMode !== 'resumed') ||
-        (input.generationMode === 'resumed') !==
-            (input.options?.resume !== undefined)
+        input.generationMode !== 'fresh' && input.generationMode !== 'resumed'
     ) {
         throw new CanonicalStreamRefusalError('wrongContext');
     }
@@ -507,21 +497,17 @@ export const generateAggregateThresholdShareInClosedWorker = async (input: {
 
         const adapterForRun = familyAdapter;
         familyAdapter = undefined;
-        const trackedOutput = trackCanonicalCommonProofOutputChunks(
-            input.outputStore,
-        );
-        generatedCapability =
-            await runClosedWorkerCommonProofGenerationFamilyAdapterRetainingGeneratedCapability(
+        const execution =
+            await runClosedWorkerCommonProofGenerationFamilyAdapterWithExecutionOpener(
                 adapterForRun,
-                input.externalMemory,
-                trackedOutput.outputStore,
-                input.options,
+                input.openProofGenerationExecution,
             );
+        generatedCapability = execution.generatedCapability;
         const proofDescriptorBytes = await deriveGeneratedCommonProofDescriptor(
             {
                 kernel: input.kernel,
-                outputChunkByteLengths: trackedOutput.outputChunkByteLengths,
-                outputStore: input.outputStore,
+                outputChunkByteLengths: execution.outputChunkByteLengths,
+                outputStore: execution.outputStore,
                 proofFamilyLabel: 'aggregate-threshold-share',
                 streamDomain:
                     canonicalStreamDomains.recipientAggregateThresholdShareProof,

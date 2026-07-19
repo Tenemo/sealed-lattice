@@ -5,13 +5,16 @@ use crate::{
     hashing::derive_canonical_object_hash,
 };
 
-// Ring degree N. Powers of two are NTT-friendly; 2N divides each modulus-1.
-pub(crate) const POLYNOMIAL_DEGREE: usize = 65_536;
-pub(crate) const CANDIDATE_PLAINTEXT_DEGREE: usize = 32_768;
-pub(crate) const CANDIDATE_PLAINTEXT_MODULUS: u64 = 65_537;
-// Plaintext modulus p. The selected prime is one modulo 2N, so the complete
-// scalar slot layout has an exact length-2N transform.
-pub(crate) const PLAINTEXT_MODULUS: u64 = 786_433;
+// Ring degree N. Powers of two are NTT-friendly; 2N divides every ciphertext
+// and key-switch modulus minus one.
+pub(crate) const POLYNOMIAL_DEGREE: usize = 32_768;
+// The plaintext ring is F_257[X]/(X^N + 1). Since 257 has order 256 modulo
+// 2N, it factors into 128 degree-256 extension lanes. Pair characters use
+// monomials inside those lanes; there is no scalar-slot NTT for this suite.
+pub(crate) const PLAINTEXT_MODULUS: u64 = 257;
+pub(crate) const PLAINTEXT_EXTENSION_DEGREE: usize = 256;
+pub(crate) const PLAINTEXT_EXTENSION_LANE_COUNT: usize =
+    POLYNOMIAL_DEGREE / PLAINTEXT_EXTENSION_DEGREE;
 pub(crate) const LOGICAL_SLOT_GENERATOR: usize = 3;
 pub(crate) const DATA_BASIS_ID: &str = "sealed-lattice-bgv-rns-data-basis";
 #[cfg(test)]
@@ -22,12 +25,10 @@ pub(crate) const SPECIAL_BASIS_ID: &str = "sealed-lattice-bgv-rns-special-basis"
 mod parameter_generation;
 mod root_parameters;
 
-pub(crate) use parameter_generation::{
-    validate_candidate_plaintext_transform_parameters, validate_supported_algebraic_parameters,
-};
+pub(crate) use parameter_generation::validate_supported_algebraic_parameters;
 pub(crate) use root_parameters::{
-    BgvBasisKind, CANDIDATE_PLAINTEXT_NTT_PARAMETERS, DATA_PRIMES, NttTransformParameters,
-    ROOT_PARAMETERS, RootParameters, SPECIAL_PRIMES, root_parameters_for_modulus,
+    BgvBasisKind, DATA_PRIMES, NttTransformParameters, ROOT_PARAMETERS, RootParameters,
+    SPECIAL_PRIMES, root_parameters_for_modulus,
 };
 
 /// JSON has no lossless unsigned-64-bit integer type. Protocol descriptions
@@ -64,12 +65,12 @@ pub(crate) fn bgv_parameters_value() -> Value {
             "inverseCyclicRoot": canonical_bgv_parameter_integer_decimal_string(parameters.inverse_cyclic_root),
             "inversePolynomialDegree": canonical_bgv_parameter_integer_decimal_string(parameters.inverse_polynomial_degree),
         })).collect::<Vec<_>>(),
-        "scoreRange": {
-            "minimum": 1,
-            "maximum": 10
+        "plaintextExtension": {
+            "degree": PLAINTEXT_EXTENSION_DEGREE,
+            "laneCount": PLAINTEXT_EXTENSION_LANE_COUNT,
         },
-        "bucketCount": 10,
-        "coordinatesPerOption": 11,
+        "pairCharacterCiphertextCount": 2,
+        "pairCharacterCounts": [93, 97],
     })
 }
 
@@ -192,8 +193,8 @@ mod tests {
 
     #[test]
     fn selected_moduli_are_ntt_ready_primes() {
-        assert_eq!(POLYNOMIAL_DEGREE, 65_536);
-        assert_eq!(PLAINTEXT_MODULUS, 786_433);
+        assert_eq!(POLYNOMIAL_DEGREE, 32_768);
+        assert_eq!(PLAINTEXT_MODULUS, 257);
         assert!(
             is_prime_for_tests(PLAINTEXT_MODULUS),
             "the selected plaintext modulus must reproduce as prime"
@@ -206,10 +207,10 @@ mod tests {
         assert!(
             DATA_PRIMES
                 .iter()
-                .all(|modulus| modulus % PLAINTEXT_MODULUS == 1),
-            "every data-prime prefix must preserve exact target conversion modulo the plaintext modulus"
+                .chain(&SPECIAL_PRIMES)
+                .all(|modulus| modulus % PLAINTEXT_MODULUS == 1)
         );
-        assert!(root_parameters_for_modulus(PLAINTEXT_MODULUS).is_some());
+        assert!(root_parameters_for_modulus(PLAINTEXT_MODULUS).is_none());
     }
 
     #[test]

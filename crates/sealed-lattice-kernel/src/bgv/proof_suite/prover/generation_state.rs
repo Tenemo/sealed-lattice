@@ -2,11 +2,11 @@ use super::super::verified_application_statement_hash;
 #[cfg(test)]
 use super::CompletedCommonProofGenerationResult;
 use super::{
-    BTreeMap, BoundedCommonProofByteSink, BoundedCommonProofByteSinkError,
-    CHECKPOINT_COMMITTED_STATE_HASH_DOMAIN, COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH,
-    CommonProofAuthenticatedSourceReadRequest, CommonProofAuxiliaryColumnSynthesisCursor,
-    CommonProofBoundTreeLeafSaltRequest, CommonProofByteSink,
-    CommonProofConstraintStreamQuotientBuilder, CommonProofEncodingError,
+    BTreeMap, BoundTreeConstructionKind, BoundedCommonProofByteSink,
+    BoundedCommonProofByteSinkError, CHECKPOINT_COMMITTED_STATE_HASH_DOMAIN,
+    COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH, CommonProofAuthenticatedSourceReadRequest,
+    CommonProofAuxiliaryColumnSynthesisCursor, CommonProofBoundTreeLeafSaltRequest,
+    CommonProofByteSink, CommonProofConstraintStreamQuotientBuilder, CommonProofEncodingError,
     CommonProofExternalMemoryRequirement, CommonProofGenerationError,
     CommonProofGenerationInitializationError, CommonProofGenerationInput,
     CommonProofGenerationPollResult, CommonProofMerkleMaterializer,
@@ -25,27 +25,32 @@ use super::{
     ExternalStockhamTransform, ExternalStockhamTransformError, ExternalStockhamTransformPlan,
     ExternalStockhamTransformProgress, GeneratedCommonProofStoragePlanError, HASH_BYTE_LENGTH,
     MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH, MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH,
-    MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH, ProofBaseFieldElement,
-    ProofChallengeExtensionElement, ProofEvaluationDomain, ProofExternalMemory,
-    ProofExternalMemoryExecutor, ProofExternalMemoryExecutorError, ProofExternalMemoryUsage,
-    ProofTreeCatalogEntry, ProofTreeCatalogInput, ProofTreeCatalogSource, ProofTreeRole,
-    ProofTreeValue, RelationApplicationChallengeAssignment, RelationPlanCheckContext,
-    RelationPlanVariant, RelationProofTreeInput, RelationTreeDescriptor,
-    StatementOwnedMerkleReplay, StatementOwnedMerkleReplayMode, StoredCommonProofMerkleTree,
-    StreamingHash512, ValidatedRelationPlanArtifact, Zeroizing,
-    add_replay_polynomial_to_initial_fri, build_complete_proof_tree_catalog,
-    canonical_common_proof_query_section_header, canonical_proof_object_header_bytes,
-    common_proof_query_section_byte_length, common_proof_resident_memory_plan,
-    construct_opening_batch_mask, construct_reversed_relation_column,
-    encode_common_proof_query_tree_fragment, entry_leaf_count, evaluate_extension_at,
-    evaluate_replay_polynomial_opening, extension_polynomial_degree,
+    MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH, PrefetchedCommonProofOpeningArtifact,
+    ProofBaseFieldElement, ProofChallengeExtensionElement, ProofEvaluationDomain,
+    ProofExternalMemory, ProofExternalMemoryExecutor, ProofExternalMemoryExecutorError,
+    ProofExternalMemoryUsage, ProofTreeCatalogEntry, ProofTreeCatalogInput, ProofTreeCatalogSource,
+    ProofTreeRole, ProofTreeValue, RelationApplicationChallengeAssignment,
+    RelationPlanCheckContext, RelationPlanVariant, RelationProofTreeInput, RelationTreeDescriptor,
+    SetupPolynomialColumnMajorMerkleReplay, SetupPolynomialColumnMajorMerkleReplayMode,
+    SetupPolynomialColumnMajorMerkleRootPass, StatementOwnedMerkleReplay,
+    StatementOwnedMerkleReplayMode, StoredCommonProofMerkleTree, StreamingHash512,
+    ValidatedRelationPlanArtifact, Zeroizing, add_replay_polynomial_to_initial_fri,
+    build_complete_proof_tree_catalog, canonical_common_proof_query_section_header,
+    canonical_proof_object_header_bytes, common_proof_query_section_byte_length,
+    common_proof_resident_memory_plan, construct_opening_batch_mask,
+    construct_reversed_relation_column, encode_common_proof_query_tree_fragment, entry_leaf_count,
+    evaluate_extension_at, evaluate_replay_polynomial_opening, extension_polynomial_degree,
     fold_extension_evaluations_in_place, generated_common_proof_storage_plan,
     insert_materialized_tree, map_external_polynomial_plan_error,
     map_private_coin_generation_error, proof_created_tree_roles_by_column,
-    read_external_polynomial_extension_values, read_external_polynomial_value,
-    replay_polynomial_key_for_claim, statement_owned_tree_root, trim_extension_polynomial,
-    unique_catalog_entry, validate_generation_relation_trees, write_common_proof_prefix,
+    read_external_polynomial_base_values, read_external_polynomial_extension_values,
+    read_external_polynomial_value, replay_polynomial_key_for_claim, statement_owned_tree_root,
+    trim_extension_polynomial, unique_catalog_entry, validate_generation_relation_trees,
+    write_common_proof_prefix,
 };
+
+const SETUP_POLYNOMIAL_COLUMN_REPLAY_BINDING_DOMAIN: &str =
+    "sealed-lattice/common-proof/setup-polynomial-column-replay-binding/v1";
 
 pub(crate) fn common_proof_source_provider_is_live_during_phase(
     phase: CommonProofResidentMemoryPhase,
@@ -56,6 +61,16 @@ pub(crate) fn common_proof_source_provider_is_live_during_phase(
             | CommonProofResidentMemoryPhase::ConstructingReversedColumns
             | CommonProofResidentMemoryPhase::TransformingBaseColumns
             | CommonProofResidentMemoryPhase::MaterializingBaseTrees
+            | CommonProofResidentMemoryPhase::DerivingAuxiliaryColumns
+            | CommonProofResidentMemoryPhase::TransformingAuxiliaryColumns
+            | CommonProofResidentMemoryPhase::MaterializingAuxiliaryTrees
+            | CommonProofResidentMemoryPhase::ConstructingQuotient
+            | CommonProofResidentMemoryPhase::MaterializingQuotientTrees
+            | CommonProofResidentMemoryPhase::DerivingOpenings
+            | CommonProofResidentMemoryPhase::ConstructingInitialFri
+            | CommonProofResidentMemoryPhase::FoldingFri
+            | CommonProofResidentMemoryPhase::PreparingQueryOutput
+            | CommonProofResidentMemoryPhase::EmittingQueries
     )
 }
 
@@ -290,6 +305,46 @@ enum CommonProofRelationTransformContinuation {
     Quotient {
         transform_key: CommonProofQuotientConstraintTransformKey,
     },
+    SetupPolynomialRoot {
+        next_column_index: usize,
+    },
+    SetupPolynomialQuery {
+        catalog_index: usize,
+        next_column_position: usize,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SetupPolynomialColumnReaderPhase {
+    ReadFirstHalf,
+    ReadOppositeHalf,
+    CompleteConsumeStep,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SetupPolynomialColumnContinuation {
+    Root {
+        next_column_index: usize,
+    },
+    Query {
+        catalog_index: usize,
+        next_column_position: usize,
+    },
+}
+
+struct ActiveSetupPolynomialColumnReader {
+    vector: ExternalPolynomialVector,
+    column_ordinal: u32,
+    next_leaf_index: usize,
+    first_half_values: Option<Zeroizing<Vec<ProofBaseFieldElement>>>,
+    phase: SetupPolynomialColumnReaderPhase,
+    continuation: SetupPolynomialColumnContinuation,
+}
+
+struct ActiveSetupPolynomialReplay {
+    replay: SetupPolynomialColumnMajorMerkleReplay,
+    catalog_index: usize,
+    query_geometry: Option<CommonProofOpeningGeometry>,
 }
 
 struct ActiveRelationTreeLeafReader {
@@ -412,6 +467,7 @@ pub(crate) struct CommonProofGenerationStateMachine {
     replay_polynomial_plans:
         BTreeMap<CommonProofReplayPolynomialKey, CommonProofReplayPolynomialPlan>,
     relation_evaluation_transform_plans: BTreeMap<u32, ExternalStockhamTransformPlan>,
+    setup_polynomial_query_transform_plans: BTreeMap<u32, ExternalStockhamTransformPlan>,
     quotient_constraint_transform_plans:
         BTreeMap<CommonProofQuotientConstraintTransformKey, ExternalStockhamTransformPlan>,
     relation_evaluation_vectors: BTreeMap<u32, ExternalPolynomialVector>,
@@ -425,6 +481,8 @@ pub(crate) struct CommonProofGenerationStateMachine {
     active_replay_polynomial_writer: Option<ActiveCommonProofReplayPolynomialWriter>,
     active_replay_polynomial_reader: Option<ActiveCommonProofReplayPolynomialReader>,
     active_relation_column_transform: Option<ActiveRelationColumnTransform>,
+    active_setup_polynomial_replay: Option<ActiveSetupPolynomialReplay>,
+    active_setup_polynomial_column_reader: Option<ActiveSetupPolynomialColumnReader>,
     active_relation_tree_leaf_reader: Option<ActiveRelationTreeLeafReader>,
     pre_challenge_source_cursor: Option<CommonProofPreChallengeSourceCursor>,
     pending_authenticated_source_read: Option<CommonProofAuthenticatedSourceReadRequest>,
@@ -446,6 +504,8 @@ pub(crate) struct CommonProofGenerationStateMachine {
     opening_geometries: Vec<CommonProofOpeningGeometry>,
     tree_roots: Vec<[u8; HASH_BYTE_LENGTH]>,
     root_present: Vec<bool>,
+    setup_polynomial_root_passes: BTreeMap<u16, SetupPolynomialColumnMajorMerkleRootPass>,
+    setup_polynomial_opening_artifacts: BTreeMap<u16, PrefetchedCommonProofOpeningArtifact>,
     stored_trees: BTreeMap<u16, StoredCommonProofMerkleTree>,
     transcript: Option<CommonProofTranscript>,
     query_opening_absorber: Option<CommonProofQueryOpeningAbsorber>,
@@ -991,6 +1051,8 @@ impl CommonProofGenerationStateMachine {
             storage_tree_plans: storage_plan.tree_plans,
             replay_polynomial_plans: storage_plan.replay_polynomial_plans,
             relation_evaluation_transform_plans: storage_plan.relation_evaluation_transform_plans,
+            setup_polynomial_query_transform_plans: storage_plan
+                .setup_polynomial_query_transform_plans,
             quotient_constraint_transform_plans: storage_plan.quotient_constraint_transform_plans,
             relation_evaluation_vectors: BTreeMap::new(),
             external_memory_requirement,
@@ -1003,6 +1065,8 @@ impl CommonProofGenerationStateMachine {
             active_replay_polynomial_writer: None,
             active_replay_polynomial_reader: None,
             active_relation_column_transform: None,
+            active_setup_polynomial_replay: None,
+            active_setup_polynomial_column_reader: None,
             active_relation_tree_leaf_reader: None,
             pre_challenge_source_cursor: None,
             pending_authenticated_source_read: None,
@@ -1024,6 +1088,8 @@ impl CommonProofGenerationStateMachine {
             opening_geometries: Vec::new(),
             tree_roots,
             root_present,
+            setup_polynomial_root_passes: BTreeMap::new(),
+            setup_polynomial_opening_artifacts: BTreeMap::new(),
             stored_trees: BTreeMap::new(),
             transcript: None,
             query_opening_absorber: None,
@@ -1144,6 +1210,8 @@ impl CommonProofGenerationStateMachine {
             && self.active_replay_polynomial_writer.is_none()
             && self.active_replay_polynomial_reader.is_none()
             && self.active_relation_column_transform.is_none()
+            && self.active_setup_polynomial_replay.is_none()
+            && self.active_setup_polynomial_column_reader.is_none()
             && self.active_relation_tree_leaf_reader.is_none()
             && self.pre_challenge_source_cursor.is_none()
             && self.pending_authenticated_source_read.is_none()
@@ -1166,11 +1234,14 @@ impl CommonProofGenerationStateMachine {
             && self.storage_tree_plans.is_empty()
             && self.replay_polynomial_plans.is_empty()
             && self.relation_evaluation_transform_plans.is_empty()
+            && self.setup_polynomial_query_transform_plans.is_empty()
             && self.quotient_constraint_transform_plans.is_empty()
             && self.relation_evaluation_vectors.is_empty()
             && self.stored_trees.is_empty()
             && self.tree_roots.is_empty()
             && self.root_present.is_empty()
+            && self.setup_polynomial_root_passes.is_empty()
+            && self.setup_polynomial_opening_artifacts.is_empty()
             && self.transcript.is_none()
             && self.query_opening_absorber.is_none()
             && self.query_section_byte_length.is_none()
@@ -1192,6 +1263,8 @@ impl CommonProofGenerationStateMachine {
             || self.active_replay_polynomial_writer.is_some()
             || self.active_replay_polynomial_reader.is_some()
             || self.active_relation_column_transform.is_some()
+            || self.active_setup_polynomial_replay.is_some()
+            || self.active_setup_polynomial_column_reader.is_some()
             || self.active_relation_tree_leaf_reader.is_some()
             || self.pending_authenticated_source_read.is_some()
             || self.opening_prefetcher.is_some()
@@ -1244,6 +1317,217 @@ impl CommonProofGenerationStateMachine {
             .ok_or(CommonProofProverError::InvalidInput)
     }
 
+    fn setup_polynomial_replay_binding(
+        &self,
+    ) -> Result<[u8; HASH_BYTE_LENGTH], CommonProofProverError> {
+        if self.source_replay_identity_digest == [0_u8; HASH_BYTE_LENGTH] {
+            return Err(CommonProofProverError::InvalidInput);
+        }
+        let mut hasher = StreamingHash512::new(SETUP_POLYNOMIAL_COLUMN_REPLAY_BINDING_DOMAIN, 3);
+        hasher.absorb_part(
+            &self
+                .source_polynomial_request_context
+                .stable_generation_binding_hash(),
+        );
+        hasher.absorb_part(&self.source_replay_identity_digest);
+        hasher.absorb_part(&self.canonical_header_bytes);
+        let binding = hasher.finalize();
+        if binding == [0_u8; HASH_BYTE_LENGTH] {
+            return Err(CommonProofProverError::InvalidInput);
+        }
+        Ok(binding)
+    }
+
+    fn setup_polynomial_tree_for_column(
+        &self,
+        column_ordinal: u32,
+    ) -> Result<Option<(usize, usize)>, CommonProofProverError> {
+        let mut matched_tree = None;
+        for (catalog_index, descriptor) in self.variant.ordered_trees().iter().enumerate() {
+            let RelationTreeDescriptor::BoundPublic {
+                construction_kind: BoundTreeConstructionKind::SetupPolynomial,
+                ordered_column_ordinals,
+                ..
+            } = descriptor
+            else {
+                continue;
+            };
+            let Some(column_position) = ordered_column_ordinals
+                .iter()
+                .position(|candidate| *candidate == column_ordinal)
+            else {
+                continue;
+            };
+            let entry = self
+                .catalog
+                .entries()
+                .get(catalog_index)
+                .ok_or(CommonProofProverError::InvalidTree)?;
+            if entry.setup_polynomial_construction().is_none()
+                || entry.bound_root().is_none()
+                || entry.uses_common_merkle_context()
+                || matched_tree.is_some()
+            {
+                return Err(CommonProofProverError::InvalidTree);
+            }
+            matched_tree = Some((catalog_index, column_position));
+        }
+        Ok(matched_tree)
+    }
+
+    fn prepare_setup_polynomial_query_transform(
+        &mut self,
+        catalog_index: usize,
+        column_position: usize,
+    ) -> Result<(), CommonProofGenerationInitializationError> {
+        if self.active_relation_column_transform.is_some()
+            || self.active_setup_polynomial_column_reader.is_some()
+        {
+            return Err(CommonProofGenerationInitializationError::Prover(
+                CommonProofProverError::InvalidColumn,
+            ));
+        }
+        let column_ordinal = {
+            let active = self.active_setup_polynomial_replay.as_ref().ok_or(
+                CommonProofGenerationInitializationError::Prover(
+                    CommonProofProverError::InvalidTree,
+                ),
+            )?;
+            let column_ordinal = active
+                .replay
+                .ordered_column_ordinals()
+                .get(column_position)
+                .copied()
+                .ok_or(CommonProofGenerationInitializationError::Prover(
+                    CommonProofProverError::InvalidColumn,
+                ))?;
+            if active.catalog_index != catalog_index
+                || active.query_geometry.is_none()
+                || active.replay.mode() != SetupPolynomialColumnMajorMerkleReplayMode::OpeningPass
+                || active.replay.next_column_ordinal() != Some(column_ordinal)
+            {
+                return Err(CommonProofGenerationInitializationError::Prover(
+                    CommonProofProverError::InvalidTree,
+                ));
+            }
+            column_ordinal
+        };
+        let plan = self
+            .setup_polynomial_query_transform_plans
+            .remove(&column_ordinal)
+            .ok_or(CommonProofGenerationInitializationError::Prover(
+                CommonProofProverError::InvalidColumn,
+            ))?;
+        let transform = ExternalStockhamTransform::new(plan)
+            .map_err(map_external_polynomial_plan_error)
+            .map_err(CommonProofGenerationInitializationError::StoragePlan)?;
+        let next_column_position = column_position.checked_add(1).ok_or(
+            CommonProofGenerationInitializationError::Prover(CommonProofProverError::CountOverflow),
+        )?;
+        self.active_relation_column_transform = Some(ActiveRelationColumnTransform {
+            column_ordinal,
+            transform,
+            continuation: CommonProofRelationTransformContinuation::SetupPolynomialQuery {
+                catalog_index,
+                next_column_position,
+            },
+        });
+        Ok(())
+    }
+
+    fn prepare_next_setup_polynomial_opening_replay(
+        &mut self,
+    ) -> Result<bool, CommonProofGenerationInitializationError> {
+        let Some(column_ordinal) = self
+            .setup_polynomial_query_transform_plans
+            .keys()
+            .next()
+            .copied()
+        else {
+            return Ok(false);
+        };
+        if self.active_setup_polynomial_replay.is_some()
+            || self.active_setup_polynomial_column_reader.is_some()
+            || self.active_relation_column_transform.is_some()
+        {
+            return Err(CommonProofGenerationInitializationError::Prover(
+                CommonProofProverError::InvalidTree,
+            ));
+        }
+        let (catalog_index, column_position) = self
+            .setup_polynomial_tree_for_column(column_ordinal)
+            .map_err(CommonProofGenerationInitializationError::Prover)?
+            .ok_or(CommonProofGenerationInitializationError::Prover(
+                CommonProofProverError::InvalidColumn,
+            ))?;
+        if column_position != 0 {
+            return Err(CommonProofGenerationInitializationError::Prover(
+                CommonProofProverError::InvalidColumn,
+            ));
+        }
+        let entry = self.catalog.entries().get(catalog_index).ok_or(
+            CommonProofGenerationInitializationError::Prover(CommonProofProverError::InvalidTree),
+        )?;
+        let ordered_column_ordinals = match self.variant.ordered_trees().get(catalog_index) {
+            Some(RelationTreeDescriptor::BoundPublic {
+                construction_kind: BoundTreeConstructionKind::SetupPolynomial,
+                ordered_column_ordinals,
+                ..
+            }) => ordered_column_ordinals.as_slice(),
+            _ => {
+                return Err(CommonProofGenerationInitializationError::Prover(
+                    CommonProofProverError::InvalidTree,
+                ));
+            }
+        };
+        let tree_catalog_index = entry.tree_catalog_index();
+        if self
+            .setup_polynomial_opening_artifacts
+            .contains_key(&tree_catalog_index)
+        {
+            return Err(CommonProofGenerationInitializationError::Prover(
+                CommonProofProverError::InvalidTree,
+            ));
+        }
+        let geometry = *self.opening_geometries.get(catalog_index).ok_or(
+            CommonProofGenerationInitializationError::Prover(CommonProofProverError::InvalidTree),
+        )?;
+        let replay_binding = self
+            .setup_polynomial_replay_binding()
+            .map_err(CommonProofGenerationInitializationError::Prover)?;
+        let replay = SetupPolynomialColumnMajorMerkleReplay::new_opening_pass(
+            entry,
+            self.catalog.evaluation_domain_size(),
+            ordered_column_ordinals,
+            replay_binding,
+            self.setup_polynomial_root_passes
+                .get(&tree_catalog_index)
+                .ok_or(CommonProofGenerationInitializationError::Prover(
+                    CommonProofProverError::InvalidTree,
+                ))?,
+            &self.sorted_query_representatives,
+            self.maximum_prefetched_query_byte_length,
+        )
+        .map_err(CommonProofGenerationInitializationError::Prover)?;
+        if replay
+            .memory_accounting()
+            .map_err(CommonProofGenerationInitializationError::Prover)?
+            .wasm_total_resident_owned_byte_length()
+            > MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH
+        {
+            return Err(CommonProofGenerationInitializationError::Prover(
+                CommonProofProverError::ResidentMemoryLimitExceeded,
+            ));
+        }
+        self.active_setup_polynomial_replay = Some(ActiveSetupPolynomialReplay {
+            replay,
+            catalog_index,
+            query_geometry: Some(geometry),
+        });
+        self.prepare_setup_polynomial_query_transform(catalog_index, 0)?;
+        Ok(true)
+    }
+
     fn retain_statement_owned_replay_vectors(&mut self) {
         let variant = &self.variant;
         let catalog = &self.catalog;
@@ -1259,6 +1543,8 @@ impl CommonProofGenerationStateMachine {
                         }) && matches!(
                             descriptor,
                             RelationTreeDescriptor::BoundPublic {
+                                construction_kind:
+                                    BoundTreeConstructionKind::CommittedMaterial,
                                 ordered_column_ordinals,
                                 ..
                             } if ordered_column_ordinals.contains(column_ordinal)
@@ -1355,7 +1641,347 @@ impl CommonProofGenerationStateMachine {
                             .map_err(CommonProofGenerationError::Prover)?;
                         CommonProofGenerationPhase::ConstructingQuotientConstraints
                     }
+                    CommonProofRelationTransformContinuation::SetupPolynomialRoot {
+                        next_column_index,
+                    } => {
+                        if self.active_setup_polynomial_column_reader.is_some() {
+                            return Err(CommonProofGenerationError::Prover(
+                                CommonProofProverError::InvalidColumn,
+                            ));
+                        }
+                        self.active_setup_polynomial_column_reader =
+                            Some(ActiveSetupPolynomialColumnReader {
+                                vector,
+                                column_ordinal: active.column_ordinal,
+                                next_leaf_index: 0,
+                                first_half_values: None,
+                                phase: SetupPolynomialColumnReaderPhase::ReadFirstHalf,
+                                continuation: SetupPolynomialColumnContinuation::Root {
+                                    next_column_index,
+                                },
+                            });
+                        self.phase
+                    }
+                    CommonProofRelationTransformContinuation::SetupPolynomialQuery {
+                        catalog_index,
+                        next_column_position,
+                    } => {
+                        if self.active_setup_polynomial_column_reader.is_some() {
+                            return Err(CommonProofGenerationError::Prover(
+                                CommonProofProverError::InvalidColumn,
+                            ));
+                        }
+                        self.active_setup_polynomial_column_reader =
+                            Some(ActiveSetupPolynomialColumnReader {
+                                vector,
+                                column_ordinal: active.column_ordinal,
+                                next_leaf_index: 0,
+                                first_half_values: None,
+                                phase: SetupPolynomialColumnReaderPhase::ReadFirstHalf,
+                                continuation: SetupPolynomialColumnContinuation::Query {
+                                    catalog_index,
+                                    next_column_position,
+                                },
+                            });
+                        self.phase
+                    }
                 };
+                Ok(CommonProofGenerationPoll::StorageTransactionCompleted)
+            }
+        }
+    }
+
+    fn poll_active_setup_polynomial_column_reader<Storage, CoinError, SinkError>(
+        &mut self,
+        storage: &mut Storage,
+    ) -> Result<
+        CommonProofGenerationPoll,
+        CommonProofGenerationError<Storage::Error, CoinError, SinkError>,
+    >
+    where
+        Storage: ProofExternalMemory,
+    {
+        let leaf_count = self.evaluation_domain.size() / 2;
+        let maximum_element_count = usize::try_from(
+            self.external_memory_requirement.maximum_chunk_byte_length()
+                / u32::try_from(core::mem::size_of::<u64>()).map_err(|_| {
+                    CommonProofGenerationError::Prover(CommonProofProverError::CountOverflow)
+                })?,
+        )
+        .map_err(|_| CommonProofGenerationError::Prover(CommonProofProverError::CountOverflow))?;
+        if leaf_count == 0 || maximum_element_count == 0 {
+            return Err(CommonProofGenerationError::Prover(
+                CommonProofProverError::InvalidColumn,
+            ));
+        }
+        let reader_phase = self
+            .active_setup_polynomial_column_reader
+            .as_ref()
+            .ok_or(CommonProofGenerationError::Prover(
+                CommonProofProverError::InvalidColumn,
+            ))?
+            .phase;
+        match reader_phase {
+            SetupPolynomialColumnReaderPhase::ReadFirstHalf => {
+                let (vector, element_offset, element_count) = {
+                    let reader = self.active_setup_polynomial_column_reader.as_ref().ok_or(
+                        CommonProofGenerationError::Prover(CommonProofProverError::InvalidColumn),
+                    )?;
+                    if reader.first_half_values.is_some() || reader.next_leaf_index >= leaf_count {
+                        return Err(CommonProofGenerationError::Prover(
+                            CommonProofProverError::InvalidColumn,
+                        ));
+                    }
+                    (
+                        reader.vector,
+                        reader.next_leaf_index,
+                        maximum_element_count.min(leaf_count - reader.next_leaf_index),
+                    )
+                };
+                let values = read_external_polynomial_base_values(
+                    self.executor
+                        .as_mut()
+                        .ok_or(CommonProofGenerationError::Prover(
+                            CommonProofProverError::InvalidInput,
+                        ))?,
+                    storage,
+                    vector,
+                    element_offset,
+                    element_count,
+                )
+                .map_err(|error| match error {
+                    ExternalStockhamTransformError::Polynomial(error) => {
+                        CommonProofGenerationError::StoragePlan(map_external_polynomial_plan_error(
+                            error,
+                        ))
+                    }
+                    ExternalStockhamTransformError::Storage(error) => {
+                        CommonProofGenerationError::Storage(error)
+                    }
+                })?;
+                let reader = self.active_setup_polynomial_column_reader.as_mut().ok_or(
+                    CommonProofGenerationError::Prover(CommonProofProverError::InvalidColumn),
+                )?;
+                reader.first_half_values = Some(values);
+                reader.phase = SetupPolynomialColumnReaderPhase::ReadOppositeHalf;
+                Ok(CommonProofGenerationPoll::StorageTransactionCompleted)
+            }
+            SetupPolynomialColumnReaderPhase::ReadOppositeHalf => {
+                let (vector, column_ordinal, first_leaf_index, first_half_value_count) = {
+                    let reader = self.active_setup_polynomial_column_reader.as_ref().ok_or(
+                        CommonProofGenerationError::Prover(CommonProofProverError::InvalidColumn),
+                    )?;
+                    let first_half_value_count = reader
+                        .first_half_values
+                        .as_ref()
+                        .ok_or(CommonProofGenerationError::Prover(
+                            CommonProofProverError::InvalidColumn,
+                        ))?
+                        .len();
+                    (
+                        reader.vector,
+                        reader.column_ordinal,
+                        reader.next_leaf_index,
+                        first_half_value_count,
+                    )
+                };
+                let opposite_offset = leaf_count.checked_add(first_leaf_index).ok_or(
+                    CommonProofGenerationError::Prover(CommonProofProverError::CountOverflow),
+                )?;
+                let opposite_half_values = read_external_polynomial_base_values(
+                    self.executor
+                        .as_mut()
+                        .ok_or(CommonProofGenerationError::Prover(
+                            CommonProofProverError::InvalidInput,
+                        ))?,
+                    storage,
+                    vector,
+                    opposite_offset,
+                    first_half_value_count,
+                )
+                .map_err(|error| match error {
+                    ExternalStockhamTransformError::Polynomial(error) => {
+                        CommonProofGenerationError::StoragePlan(map_external_polynomial_plan_error(
+                            error,
+                        ))
+                    }
+                    ExternalStockhamTransformError::Storage(error) => {
+                        CommonProofGenerationError::Storage(error)
+                    }
+                })?;
+                let first_half_values = self
+                    .active_setup_polynomial_column_reader
+                    .as_mut()
+                    .ok_or(CommonProofGenerationError::Prover(
+                        CommonProofProverError::InvalidColumn,
+                    ))?
+                    .first_half_values
+                    .take()
+                    .ok_or(CommonProofGenerationError::Prover(
+                        CommonProofProverError::InvalidColumn,
+                    ))?;
+                self.active_setup_polynomial_replay
+                    .as_mut()
+                    .ok_or(CommonProofGenerationError::Prover(
+                        CommonProofProverError::InvalidTree,
+                    ))?
+                    .replay
+                    .supply_next_column_chunk(
+                        column_ordinal,
+                        first_leaf_index,
+                        &first_half_values,
+                        &opposite_half_values,
+                    )
+                    .map_err(CommonProofGenerationError::Prover)?;
+                let next_leaf_index = first_leaf_index
+                    .checked_add(first_half_values.len())
+                    .ok_or(CommonProofGenerationError::Prover(
+                        CommonProofProverError::CountOverflow,
+                    ))?;
+                let reader = self.active_setup_polynomial_column_reader.as_mut().ok_or(
+                    CommonProofGenerationError::Prover(CommonProofProverError::InvalidColumn),
+                )?;
+                reader.next_leaf_index = next_leaf_index;
+                reader.phase = if next_leaf_index == leaf_count {
+                    SetupPolynomialColumnReaderPhase::CompleteConsumeStep
+                } else {
+                    SetupPolynomialColumnReaderPhase::ReadFirstHalf
+                };
+                Ok(CommonProofGenerationPoll::StorageTransactionCompleted)
+            }
+            SetupPolynomialColumnReaderPhase::CompleteConsumeStep => {
+                {
+                    let reader = self.active_setup_polynomial_column_reader.as_ref().ok_or(
+                        CommonProofGenerationError::Prover(CommonProofProverError::InvalidColumn),
+                    )?;
+                    if reader.next_leaf_index != leaf_count || reader.first_half_values.is_some() {
+                        return Err(CommonProofGenerationError::Prover(
+                            CommonProofProverError::InvalidColumn,
+                        ));
+                    }
+                }
+                self.executor
+                    .as_mut()
+                    .ok_or(CommonProofGenerationError::Prover(
+                        CommonProofProverError::InvalidInput,
+                    ))?
+                    .complete_step(storage)
+                    .map_err(CommonProofGenerationError::Storage)?;
+                let reader = self.active_setup_polynomial_column_reader.take().ok_or(
+                    CommonProofGenerationError::Prover(CommonProofProverError::InvalidColumn),
+                )?;
+                match reader.continuation {
+                    SetupPolynomialColumnContinuation::Root { next_column_index } => {
+                        let replay_complete = self
+                            .active_setup_polynomial_replay
+                            .as_ref()
+                            .ok_or(CommonProofGenerationError::Prover(
+                                CommonProofProverError::InvalidTree,
+                            ))?
+                            .replay
+                            .next_column_ordinal()
+                            .is_none();
+                        if replay_complete {
+                            let active = self.active_setup_polynomial_replay.take().ok_or(
+                                CommonProofGenerationError::Prover(
+                                    CommonProofProverError::InvalidTree,
+                                ),
+                            )?;
+                            if active.query_geometry.is_some()
+                                || active.replay.mode()
+                                    != SetupPolynomialColumnMajorMerkleReplayMode::RootPass
+                            {
+                                return Err(CommonProofGenerationError::Prover(
+                                    CommonProofProverError::InvalidTree,
+                                ));
+                            }
+                            let root_pass = active
+                                .replay
+                                .finish_root_pass()
+                                .map_err(CommonProofGenerationError::Prover)?;
+                            let tree_catalog_index = root_pass.tree_catalog_index();
+                            let catalog_index = usize::from(tree_catalog_index);
+                            if catalog_index != active.catalog_index
+                                || self.tree_roots.get(catalog_index).copied()
+                                    != Some(root_pass.root())
+                                || self.root_present.get(catalog_index).copied() != Some(true)
+                                || self
+                                    .setup_polynomial_root_passes
+                                    .insert(tree_catalog_index, root_pass)
+                                    .is_some()
+                            {
+                                return Err(CommonProofGenerationError::Prover(
+                                    CommonProofProverError::InvalidTree,
+                                ));
+                            }
+                        }
+                        self.phase = CommonProofGenerationPhase::TransformingBaseColumns {
+                            next_column_index,
+                        };
+                    }
+                    SetupPolynomialColumnContinuation::Query {
+                        catalog_index,
+                        next_column_position,
+                    } => {
+                        let next_column_ordinal = self
+                            .active_setup_polynomial_replay
+                            .as_ref()
+                            .ok_or(CommonProofGenerationError::Prover(
+                                CommonProofProverError::InvalidTree,
+                            ))?
+                            .replay
+                            .next_column_ordinal();
+                        if next_column_ordinal.is_some() {
+                            self.prepare_setup_polynomial_query_transform(
+                                catalog_index,
+                                next_column_position,
+                            )
+                            .map_err(map_generation_initialization_error)?;
+                        } else {
+                            let active = self.active_setup_polynomial_replay.take().ok_or(
+                                CommonProofGenerationError::Prover(
+                                    CommonProofProverError::InvalidTree,
+                                ),
+                            )?;
+                            if active.catalog_index != catalog_index
+                                || active.query_geometry.is_none()
+                                || active.replay.mode()
+                                    != SetupPolynomialColumnMajorMerkleReplayMode::OpeningPass
+                            {
+                                return Err(CommonProofGenerationError::Prover(
+                                    CommonProofProverError::InvalidTree,
+                                ));
+                            }
+                            let tree_catalog_index = self
+                                .catalog
+                                .entries()
+                                .get(catalog_index)
+                                .ok_or(CommonProofGenerationError::Prover(
+                                    CommonProofProverError::InvalidTree,
+                                ))?
+                                .tree_catalog_index();
+                            let artifact = active
+                                .replay
+                                .finish_opening_pass(
+                                    self.setup_polynomial_root_passes
+                                        .get(&tree_catalog_index)
+                                        .ok_or(CommonProofGenerationError::Prover(
+                                            CommonProofProverError::InvalidTree,
+                                        ))?,
+                                )
+                                .map_err(CommonProofGenerationError::Prover)?;
+                            if self
+                                .setup_polynomial_opening_artifacts
+                                .insert(tree_catalog_index, artifact)
+                                .is_some()
+                            {
+                                return Err(CommonProofGenerationError::Prover(
+                                    CommonProofProverError::InvalidTree,
+                                ));
+                            }
+                        }
+                    }
+                }
                 Ok(CommonProofGenerationPoll::StorageTransactionCompleted)
             }
         }
@@ -1920,6 +2546,24 @@ impl CommonProofGenerationStateMachine {
             let CommonProofTreeContinuation::Base { next_tree_index } = continuation else {
                 return Err(CommonProofProverError::InvalidTree);
             };
+            if entry.setup_polynomial_construction().is_some() {
+                let root_pass = self
+                    .setup_polynomial_root_passes
+                    .get(&entry.tree_catalog_index())
+                    .ok_or(CommonProofProverError::InvalidTree)?;
+                if root_pass.root()
+                    != entry
+                        .bound_root()
+                        .ok_or(CommonProofProverError::InvalidTree)?
+                    || self.tree_roots.get(catalog_index).copied() != Some(root_pass.root())
+                    || self.root_present.get(catalog_index).copied() != Some(true)
+                {
+                    return Err(CommonProofProverError::InvalidTree);
+                }
+                self.pending_tree_continuation =
+                    Some(CommonProofTreeContinuation::Base { next_tree_index });
+                return Ok(());
+            }
             let replay = StatementOwnedMerkleReplay::new_root_pass(
                 entry,
                 self.catalog.evaluation_domain_size(),
@@ -2090,6 +2734,9 @@ impl CommonProofGenerationStateMachine {
             self.apply_tree_continuation(continuation)
                 .map_err(map_generation_initialization_error)?;
             return Ok(CommonProofGenerationPoll::StorageTransactionCompleted);
+        }
+        if self.active_setup_polynomial_column_reader.is_some() {
+            return self.poll_active_setup_polynomial_column_reader(storage);
         }
         if self.active_relation_tree_leaf_reader.is_some() {
             return self.poll_active_relation_tree_leaf_reader(storage, coins);
@@ -2330,6 +2977,11 @@ impl CommonProofGenerationStateMachine {
                             CommonProofProverError::InvalidColumn,
                         ));
                     }
+                    if self.active_setup_polynomial_replay.is_some() {
+                        return Err(CommonProofGenerationError::Prover(
+                            CommonProofProverError::InvalidTree,
+                        ));
+                    }
                     self.phase =
                         CommonProofGenerationPhase::MaterializingBaseTrees { next_tree_index: 0 };
                     return Ok(CommonProofGenerationPoll::ArithmeticStepCompleted);
@@ -2337,6 +2989,76 @@ impl CommonProofGenerationStateMachine {
                 let column_ordinal = u32::try_from(column_index).map_err(|_| {
                     CommonProofGenerationError::Prover(CommonProofProverError::CountOverflow)
                 })?;
+                let setup_polynomial_tree = self
+                    .setup_polynomial_tree_for_column(column_ordinal)
+                    .map_err(CommonProofGenerationError::Prover)?;
+                if let Some((catalog_index, column_position)) = setup_polynomial_tree {
+                    let ordered_column_ordinals =
+                        match self.variant.ordered_trees().get(catalog_index) {
+                            Some(RelationTreeDescriptor::BoundPublic {
+                                construction_kind: BoundTreeConstructionKind::SetupPolynomial,
+                                ordered_column_ordinals,
+                                ..
+                            }) => ordered_column_ordinals.as_slice(),
+                            _ => {
+                                return Err(CommonProofGenerationError::Prover(
+                                    CommonProofProverError::InvalidTree,
+                                ));
+                            }
+                        };
+                    if column_position == 0 {
+                        if self.active_setup_polynomial_replay.is_some() {
+                            return Err(CommonProofGenerationError::Prover(
+                                CommonProofProverError::InvalidTree,
+                            ));
+                        }
+                        let entry = self.catalog.entries().get(catalog_index).ok_or(
+                            CommonProofGenerationError::Prover(CommonProofProverError::InvalidTree),
+                        )?;
+                        let replay = SetupPolynomialColumnMajorMerkleReplay::new_root_pass(
+                            entry,
+                            self.catalog.evaluation_domain_size(),
+                            ordered_column_ordinals,
+                            self.setup_polynomial_replay_binding()
+                                .map_err(CommonProofGenerationError::Prover)?,
+                        )
+                        .map_err(CommonProofGenerationError::Prover)?;
+                        if replay
+                            .memory_accounting()
+                            .map_err(CommonProofGenerationError::Prover)?
+                            .wasm_total_resident_owned_byte_length()
+                            > MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH
+                        {
+                            return Err(CommonProofGenerationError::Prover(
+                                CommonProofProverError::ResidentMemoryLimitExceeded,
+                            ));
+                        }
+                        self.active_setup_polynomial_replay = Some(ActiveSetupPolynomialReplay {
+                            replay,
+                            catalog_index,
+                            query_geometry: None,
+                        });
+                    } else {
+                        let active = self.active_setup_polynomial_replay.as_ref().ok_or(
+                            CommonProofGenerationError::Prover(CommonProofProverError::InvalidTree),
+                        )?;
+                        if active.catalog_index != catalog_index
+                            || active.replay.ordered_column_ordinals() != ordered_column_ordinals
+                            || active.query_geometry.is_some()
+                            || active.replay.mode()
+                                != SetupPolynomialColumnMajorMerkleReplayMode::RootPass
+                            || active.replay.next_column_ordinal() != Some(column_ordinal)
+                        {
+                            return Err(CommonProofGenerationError::Prover(
+                                CommonProofProverError::InvalidTree,
+                            ));
+                        }
+                    }
+                } else if self.active_setup_polynomial_replay.is_some() {
+                    return Err(CommonProofGenerationError::Prover(
+                        CommonProofProverError::InvalidTree,
+                    ));
+                }
                 let plan = self
                     .relation_evaluation_transform_plans
                     .remove(&column_ordinal)
@@ -2349,12 +3071,22 @@ impl CommonProofGenerationStateMachine {
                 self.active_relation_column_transform = Some(ActiveRelationColumnTransform {
                     column_ordinal,
                     transform,
-                    continuation: CommonProofRelationTransformContinuation::Base {
-                        next_column_index: column_index.checked_add(1).ok_or(
-                            CommonProofGenerationError::Prover(
-                                CommonProofProverError::CountOverflow,
-                            ),
-                        )?,
+                    continuation: if setup_polynomial_tree.is_some() {
+                        CommonProofRelationTransformContinuation::SetupPolynomialRoot {
+                            next_column_index: column_index.checked_add(1).ok_or(
+                                CommonProofGenerationError::Prover(
+                                    CommonProofProverError::CountOverflow,
+                                ),
+                            )?,
+                        }
+                    } else {
+                        CommonProofRelationTransformContinuation::Base {
+                            next_column_index: column_index.checked_add(1).ok_or(
+                                CommonProofGenerationError::Prover(
+                                    CommonProofProverError::CountOverflow,
+                                ),
+                            )?,
+                        }
                     },
                 });
                 Ok(CommonProofGenerationPoll::ArithmeticStepCompleted)
@@ -2371,6 +3103,10 @@ impl CommonProofGenerationStateMachine {
                             proof_tree_role: 1,
                             ordered_column_ordinals,
                         } => Some((tree_index, ordered_column_ordinals.clone())),
+                        RelationTreeDescriptor::BoundPublic {
+                            construction_kind: BoundTreeConstructionKind::SetupPolynomial,
+                            ..
+                        } => Some((tree_index, Vec::new())),
                         RelationTreeDescriptor::BoundPublic {
                             ordered_column_ordinals,
                             ..
@@ -3333,7 +4069,31 @@ impl CommonProofGenerationStateMachine {
                 Ok(CommonProofGenerationPoll::OutputFragmentAccepted)
             }
             CommonProofGenerationPhase::EmittingQueries { next_catalog_index } => {
+                if !self.setup_polynomial_query_transform_plans.is_empty() {
+                    if self.pending_output_fragment.is_some() || self.opening_prefetcher.is_some() {
+                        return Err(CommonProofGenerationError::Prover(
+                            CommonProofProverError::InvalidTree,
+                        ));
+                    }
+                    if !self
+                        .prepare_next_setup_polynomial_opening_replay()
+                        .map_err(map_generation_initialization_error)?
+                    {
+                        return Err(CommonProofGenerationError::Prover(
+                            CommonProofProverError::InvalidTree,
+                        ));
+                    }
+                    return Ok(CommonProofGenerationPoll::ArithmeticStepCompleted);
+                }
                 if next_catalog_index >= self.catalog.entries().len() {
+                    if self.active_setup_polynomial_replay.is_some()
+                        || self.active_setup_polynomial_column_reader.is_some()
+                        || !self.setup_polynomial_opening_artifacts.is_empty()
+                    {
+                        return Err(CommonProofGenerationError::Prover(
+                            CommonProofProverError::InvalidTree,
+                        ));
+                    }
                     self.source_polynomial_provider
                         .as_deref_mut()
                         .ok_or(CommonProofGenerationError::Prover(
@@ -3343,6 +4103,7 @@ impl CommonProofGenerationStateMachine {
                         .map_err(CommonProofGenerationError::Prover)?;
                     self.source_polynomial_provider = None;
                     self.relation_evaluation_vectors.clear();
+                    self.setup_polynomial_root_passes.clear();
                     let absorber = self.query_opening_absorber.take().ok_or(
                         CommonProofGenerationError::Prover(CommonProofProverError::InvalidInput),
                     )?;
@@ -3399,6 +4160,36 @@ impl CommonProofGenerationStateMachine {
                             CommonProofProverError::InvalidTree,
                         ));
                     };
+                    if entry.setup_polynomial_construction().is_some() {
+                        let artifact = self
+                            .setup_polynomial_opening_artifacts
+                            .remove(&entry.tree_catalog_index())
+                            .ok_or(CommonProofGenerationError::Prover(
+                                CommonProofProverError::InvalidOpening,
+                            ))?;
+                        self.pending_output_fragment = Some(
+                            encode_common_proof_query_tree_fragment(
+                                &self.catalog,
+                                next_catalog_index,
+                                geometry,
+                                &self.sorted_query_representatives,
+                                &artifact,
+                                self.maximum_output_fragment_byte_length,
+                            )
+                            .map_err(|error| match error {
+                                CommonProofEncodingError::Prover(error) => {
+                                    CommonProofGenerationError::Prover(error)
+                                }
+                                CommonProofEncodingError::Sink(error) => {
+                                    map_bounded_fragment_error(error)
+                                }
+                                CommonProofEncodingError::Artifact(error) => {
+                                    CommonProofGenerationError::Prover(error)
+                                }
+                            })?,
+                        );
+                        return Ok(CommonProofGenerationPoll::ArithmeticStepCompleted);
+                    }
                     let replay = StatementOwnedMerkleReplay::new_opening_pass(
                         entry,
                         self.catalog.evaluation_domain_size(),
@@ -3530,6 +4321,8 @@ impl CommonProofGenerationStateMachine {
         self.active_replay_polynomial_writer = None;
         self.active_replay_polynomial_reader = None;
         self.active_relation_column_transform = None;
+        self.active_setup_polynomial_replay = None;
+        self.active_setup_polynomial_column_reader = None;
         self.active_relation_tree_leaf_reader = None;
         if let Some(source_polynomial_provider) = self.source_polynomial_provider.as_deref_mut() {
             source_polynomial_provider.cancel_pending_authenticated_source_read();
@@ -3557,11 +4350,14 @@ impl CommonProofGenerationStateMachine {
         self.storage_tree_plans = BTreeMap::new();
         self.replay_polynomial_plans = BTreeMap::new();
         self.relation_evaluation_transform_plans = BTreeMap::new();
+        self.setup_polynomial_query_transform_plans = BTreeMap::new();
         self.quotient_constraint_transform_plans = BTreeMap::new();
         self.relation_evaluation_vectors = BTreeMap::new();
         self.stored_trees = BTreeMap::new();
         self.tree_roots = Vec::new();
         self.root_present = Vec::new();
+        self.setup_polynomial_root_passes = BTreeMap::new();
+        self.setup_polynomial_opening_artifacts = BTreeMap::new();
         self.transcript = None;
         self.query_opening_absorber = None;
         self.query_section_byte_length = None;
@@ -3640,16 +4436,12 @@ mod source_provider_resident_memory_tests {
     use super::*;
 
     #[test]
-    fn source_provider_lifetime_covers_exactly_the_four_base_relation_phases() {
+    fn source_provider_lifetime_covers_every_phase_until_query_emission_finishes() {
         for phase in [
             CommonProofResidentMemoryPhase::LoadingSourcePolynomials,
             CommonProofResidentMemoryPhase::ConstructingReversedColumns,
             CommonProofResidentMemoryPhase::TransformingBaseColumns,
             CommonProofResidentMemoryPhase::MaterializingBaseTrees,
-        ] {
-            assert!(common_proof_source_provider_is_live_during_phase(phase));
-        }
-        for phase in [
             CommonProofResidentMemoryPhase::DerivingAuxiliaryColumns,
             CommonProofResidentMemoryPhase::TransformingAuxiliaryColumns,
             CommonProofResidentMemoryPhase::MaterializingAuxiliaryTrees,
@@ -3661,7 +4453,7 @@ mod source_provider_resident_memory_tests {
             CommonProofResidentMemoryPhase::PreparingQueryOutput,
             CommonProofResidentMemoryPhase::EmittingQueries,
         ] {
-            assert!(!common_proof_source_provider_is_live_during_phase(phase));
+            assert!(common_proof_source_provider_is_live_during_phase(phase));
         }
     }
 }

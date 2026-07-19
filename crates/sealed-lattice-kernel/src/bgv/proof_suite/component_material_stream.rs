@@ -48,7 +48,7 @@ impl KeySwitchComponentMaterialTopology {
         )
     }
 
-    fn from_suite_algebra(
+    pub(crate) fn from_suite_algebra(
         ordered_data_moduli: &[u64],
         ordered_special_moduli: &[u64],
         data_primes_per_block: usize,

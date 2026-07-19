@@ -1,6 +1,8 @@
+use std::collections::BTreeSet;
+#[cfg(test)]
 use std::{
     cell::{Cell, RefCell},
-    collections::{BTreeMap, BTreeSet},
+    collections::BTreeMap,
 };
 
 use zeroize::Zeroizing;
@@ -13,8 +15,7 @@ use crate::foundation::{
 use super::{
     COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH, ProofBaseFieldElement,
     committed_material::COMMITTED_MATERIAL_PHASE_PAIR_LEAF_SCHEMA_IDENTIFIER,
-    decoder::{BoundedProofDecoder, ProofByteSource, ProofDecodeError},
-    field::ProofChallengeExtensionElement,
+    decoder::ProofDecodeError,
     merkle::{
         PROOF_ORACLE_PHASE_PAIR_LEAF_SCHEMA_IDENTIFIER, ProofLeafVisibility, ProofMerkleError,
         ProofMerkleTreeContext, ProofOraclePhasePairLeaf, ProofTreeRole, ProofTreeValue,
@@ -27,10 +28,13 @@ use super::{
         canonical_setup_public_polynomial_phase_pair_leaf_bytes_from_iterators,
         setup_public_polynomial_leaf_digest, setup_public_polynomial_merkle_node_digest,
     },
-    transcript::{
-        CommonProofPrivacyMode, CommonProofQueryOpeningAbsorber, CommonProofTranscriptSchedule,
-        TranscriptError,
-    },
+    transcript::{CommonProofPrivacyMode, CommonProofTranscriptSchedule, TranscriptError},
+};
+#[cfg(test)]
+use super::{
+    decoder::{BoundedProofDecoder, ProofByteSource},
+    field::ProofChallengeExtensionElement,
+    transcript::CommonProofQueryOpeningAbsorber,
 };
 
 pub(super) const PROOF_QUERY_OPENING_RECORD_SCHEMA_IDENTIFIER: u16 = 0x0107;
@@ -240,6 +244,18 @@ impl ProofTreeCatalogEntry {
             &self.construction,
             ProofTreeConstruction::SetupPolynomial { .. }
         )
+    }
+
+    pub(crate) const fn setup_polynomial_construction(&self) -> Option<([u8; 64], u32)> {
+        match &self.construction {
+            ProofTreeConstruction::SetupPolynomial {
+                public_polynomial_context_hash,
+                row_width,
+            } => Some((*public_polynomial_context_hash, *row_width)),
+            ProofTreeConstruction::Common(_) | ProofTreeConstruction::CommittedMaterial { .. } => {
+                None
+            }
+        }
     }
 
     pub(crate) fn oracle_equation_namespace(
@@ -1000,18 +1016,21 @@ pub(super) use authentication::minimal_frontier_node_count;
 use authentication::{
     TreeValueKind, authenticate_opening, hash_canonical_leaf, statement_owned_node_digest,
 };
+#[cfg(test)]
+pub(crate) use decoding::{DecodedProofBody, DecodedProofTreeOpening, PendingProofBodyQueries};
 pub(crate) use decoding::{
-    DecodedProofBody, DecodedProofBodyPrefix, DecodedProofPhasePairLeaf, DecodedProofTreeOpening,
-    PendingProofBodyQueries, ProofTreeOpening, decode_proof_body_prefix,
+    DecodedProofBodyPrefix, DecodedProofPhasePairLeaf, ProofTreeOpening, decode_proof_body_prefix,
     decode_proof_body_prefix_owned, decode_proof_query_section_header_at,
     decode_proof_query_tree_at,
 };
 pub(super) use sizing::maximum_minimal_frontier_node_count;
 pub(crate) use sizing::{
-    CommonProofByteLengthCeiling, CommonProofComponentByteLengths, ProofQueryTreeByteLengthCeiling,
-    canonical_common_proof_byte_length_ceiling, canonical_leaf_byte_length, entry_leaf_count,
-    proof_body_prefix_byte_length, proof_query_tree_byte_length,
+    CommonProofByteLengthCeiling, canonical_common_proof_byte_length_ceiling,
+    canonical_leaf_byte_length, entry_leaf_count, proof_body_prefix_byte_length,
+    proof_query_tree_byte_length,
 };
+#[cfg(test)]
+pub(crate) use sizing::{CommonProofComponentByteLengths, ProofQueryTreeByteLengthCeiling};
 
 #[cfg(test)]
 #[path = "body/common-proof-engine-tests.rs"]

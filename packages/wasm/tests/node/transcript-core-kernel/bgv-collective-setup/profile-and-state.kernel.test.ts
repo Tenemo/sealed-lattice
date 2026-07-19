@@ -22,12 +22,14 @@ describe('collective BGV setup kernel commands', () => {
         );
         expect(explicitPrototypeParameters).toEqual(selectedParameters);
         expect(selectedParameters.qShare.primes).toEqual([
-            '8349427040257',
-            '8040189001729',
-            '7318633578497',
-            '3401618423809',
-            '618476077057',
-            '9586379194369',
+            '1953759233',
+            '2256928769',
+            '2408513537',
+            '2610626561',
+            '2661154817',
+            '3014852609',
+            '3031695361',
+            '3368550401',
         ]);
 
         for (const malformedParticipantCount of [-1, 3.5]) {

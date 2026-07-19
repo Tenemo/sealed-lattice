@@ -12,8 +12,7 @@ use super::super::{
     decoder::{BoundedProofDecoder, ProofByteSource},
     merkle::{
         ProofLeafVisibility, ProofMerkleError, ProofMerkleTreeContext, ProofOraclePhasePairLeaf,
-        ProofTreeRole, ProofTreeValue, minimal_frontier_coordinates,
-        verify_authentication_frontier,
+        ProofTreeValue, minimal_frontier_coordinates, verify_authentication_frontier,
     },
 };
 use super::decoding::{

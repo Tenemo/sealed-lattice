@@ -8,7 +8,7 @@ use crate::{
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
 };
 
-pub(crate) const KEY_SWITCH_DATA_PRIMES_PER_BLOCK: usize = 10;
+pub(crate) const KEY_SWITCH_DATA_PRIMES_PER_BLOCK: usize = 3;
 pub(crate) const KEY_SWITCH_SPECIAL_PRIMES: [u64; SPECIAL_PRIMES.len()] = SPECIAL_PRIMES;
 
 pub(crate) fn key_switch_special_basis_modulus_product() -> BigUint {
@@ -256,6 +256,7 @@ fn component_byte_length_overflow() -> CanonicalError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::bgv::parameters::POLYNOMIAL_DEGREE;
 
     #[test]
     fn topology_uses_contiguous_data_blocks_and_the_full_special_basis() {
@@ -361,36 +362,54 @@ mod tests {
             KEY_SWITCH_DATA_PRIMES_PER_BLOCK,
         )
         .expect("full selected topology");
+        let coefficient_count = topology
+            .data_block_count()
+            .checked_mul(POLYNOMIAL_DEGREE)
+            .expect("selected component coefficient count");
+        let wire_bytes_per_coefficient = topology
+            .extended_moduli()
+            .iter()
+            .map(|modulus| canonical_residue_byte_length(*modulus).expect("selected residue width"))
+            .sum::<usize>();
+        let expected_wire_byte_length = coefficient_count
+            .checked_mul(wire_bytes_per_coefficient)
+            .and_then(|length| u64::try_from(length).ok())
+            .expect("selected wire length fits u64");
+        let expected_resident_byte_length = coefficient_count
+            .checked_mul(topology.extended_limb_count())
+            .and_then(|length| length.checked_mul(std::mem::size_of::<u64>()))
+            .and_then(|length| u64::try_from(length).ok())
+            .expect("selected resident length fits u64");
 
         assert_eq!(
             topology
-                .canonical_component_wire_byte_length(65_536)
+                .canonical_component_wire_byte_length(POLYNOMIAL_DEGREE)
                 .expect("wire length"),
-            51_707_904
+            expected_wire_byte_length
         );
         assert_eq!(
             topology
-                .resident_component_byte_length(65_536)
+                .resident_component_byte_length(POLYNOMIAL_DEGREE)
                 .expect("resident length"),
-            55_050_240
+            expected_resident_byte_length
         );
+        assert!(expected_wire_byte_length < expected_resident_byte_length);
         assert!(topology.resident_component_byte_length(usize::MAX).is_err());
     }
 
     #[test]
-    fn selected_topology_keeps_exact_three_block_geometry_with_dominating_special_modulus() {
+    fn selected_topology_keeps_exact_block_geometry_with_dominating_special_modulus() {
         let topology = KeySwitchDecompositionTopology::for_level(DATA_PRIMES.len() - 1)
             .expect("full selected topology");
         let special_basis_modulus_product = key_switch_special_basis_modulus_product();
+        let selected_block_ranges = [0..3, 3..6, 6..9, 9..12, 12..15, 15..18, 18..21, 21..23];
 
-        assert_eq!(topology.data_block_count(), 3);
-        assert_eq!(topology.data_block_range(0).expect("block zero"), 0..10);
-        assert_eq!(topology.data_block_range(1).expect("block one"), 10..20);
-        assert_eq!(topology.data_block_range(2).expect("block two"), 20..26);
-        for block_index in 0..topology.data_block_count() {
+        assert_eq!(topology.data_block_count(), selected_block_ranges.len());
+        for (block_index, expected_block_range) in selected_block_ranges.into_iter().enumerate() {
             let block_range = topology
                 .data_block_range(block_index)
                 .expect("selected block range");
+            assert_eq!(block_range, expected_block_range);
             let data_block_modulus_product = DATA_PRIMES[block_range]
                 .iter()
                 .map(|modulus| BigUint::from(*modulus))

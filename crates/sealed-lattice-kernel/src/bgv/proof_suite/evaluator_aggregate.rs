@@ -33,7 +33,7 @@ use super::{
     },
     selected_evaluator_entry_positions,
     selected_profile::{
-        SELECTED_EVALUATION_DOMAIN_SIZE, SELECTED_PUBLIC_AGGREGATE_OPENING_DEGREE_BOUND_EXCLUSIVE,
+        SELECTED_EVALUATION_DOMAIN_SIZE, SELECTED_OPENING_DEGREE_BOUND_EXCLUSIVE,
         SELECTED_PUBLIC_POLYNOMIAL_COLUMN_DEGREE_BOUND_EXCLUSIVE,
         selected_relation_plan_check_context,
     },
@@ -105,8 +105,7 @@ pub(crate) fn selected_evaluator_aggregate_relation_plan()
                 ring_degree: u64::try_from(POLYNOMIAL_DEGREE)
                     .map_err(|_| SelectedEvaluatorAggregatePlanError::CountOverflow)?,
                 evaluation_domain_size: SELECTED_EVALUATION_DOMAIN_SIZE,
-                opening_degree_bound_exclusive:
-                    SELECTED_PUBLIC_AGGREGATE_OPENING_DEGREE_BOUND_EXCLUSIVE,
+                opening_degree_bound_exclusive: SELECTED_OPENING_DEGREE_BOUND_EXCLUSIVE,
                 public_polynomial_column_degree_bound_exclusive:
                     SELECTED_PUBLIC_POLYNOMIAL_COLUMN_DEGREE_BOUND_EXCLUSIVE,
                 participant_count: FOUNDATION_PROFILE.participant_count,

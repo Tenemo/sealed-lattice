@@ -45,13 +45,18 @@ const boundaryMocks = vi.hoisted(() => {
         generatedConsumptionOutcomes,
         openGenerationAdapter: vi.fn(() => Object.freeze({})),
         releaseGenerationAdapter: vi.fn(),
-        runGeneration: vi.fn(() => Promise.resolve(generatedCapability)),
-        trackOutput: vi.fn((outputStore: unknown) =>
-            Object.freeze({
+        runGeneration: vi.fn(async (_adapter: unknown, openExecution: (description: unknown) => unknown) => {
+            const execution = (await openExecution(Object.freeze({}))) as {
+                options?: unknown;
+                outputStore: unknown;
+            };
+            return Object.freeze({
+                generatedCapability,
+                options: execution.options,
                 outputChunkByteLengths: Object.freeze([2]),
-                outputStore,
-            }),
-        ),
+                outputStore: execution.outputStore,
+            });
+        }),
         verifyGeneratedPublicKeyShare: vi.fn(
             (
                 _input: unknown,
@@ -69,25 +74,40 @@ const boundaryMocks = vi.hoisted(() => {
     };
 });
 
-vi.mock('#packages/wasm/src/action-randomness-runtime', () => ({
-    resolveActionRandomnessKernelAuthorization: () => ({
-        context: boundaryMocks.activeContext.value,
-        handle: 13,
-    }),
-}));
-
 vi.mock('#packages/wasm/src/setup-generation-recipient-payload', () => ({
     resolveSetupGenerationAuthorityKernelAuthorization: () => ({ handle: 14 }),
 }));
 
-vi.mock('#packages/wasm/src/state-verifier-runtime', () => ({
-    resolveVerifiedStateReservationKernelAuthorization: () => ({
-        capabilityMemory: boundaryMocks.activeContext.value?.memory,
-        capabilityPointer: 128,
-        reservationHandle: 15,
-        sessionHandle: 16,
+vi.mock(
+    '#packages/wasm/src/local-storage-root-worker-kernel/worker-kernel',
+    () => ({
+        withClosedWorkerProductionOperationAuthority: async (
+            workerKernel: { kernel: TranscriptCoreKernel },
+            _productionOperationIdentifiers: unknown,
+            operation: (authority: unknown) => unknown,
+        ) =>
+            operation(
+                Object.freeze({
+                    withExactKernelAuthorization: <Result>(
+                        callback: (authorization: unknown) => Result,
+                    ): Result =>
+                        callback(
+                            Object.freeze({
+                                actionRandomnessContext:
+                                    boundaryMocks.activeContext.value,
+                                actionRandomnessHandle: 13,
+                                kernel: workerKernel.kernel,
+                                stateReservationCapabilityMemory:
+                                    boundaryMocks.activeContext.value?.memory,
+                                stateReservationCapabilityPointer: 128,
+                                stateReservationHandle: 15,
+                                stateVerifierSessionHandle: 16,
+                            }),
+                        ),
+                }),
+            ),
     }),
-}));
+);
 
 vi.mock('#packages/wasm/src/vss-share-linkage-verification-runtime', () => ({
     resolveOrderedVerifiedBoardObjectAuthorization: () => {
@@ -103,7 +123,6 @@ vi.mock('#packages/wasm/src/vss-share-linkage-verification-runtime', () => ({
 
 vi.mock('#packages/wasm/src/generated-common-proof-output-runtime', () => ({
     deriveGeneratedCommonProofDescriptor: boundaryMocks.deriveProofDescriptor,
-    trackCanonicalCommonProofOutputChunks: boundaryMocks.trackOutput,
 }));
 
 vi.mock('#packages/wasm/src/common-proof-worker-runtime/runtime', () => ({
@@ -113,7 +132,7 @@ vi.mock('#packages/wasm/src/common-proof-worker-runtime/runtime', () => ({
         boundaryMocks.openGenerationAdapter,
     releaseClosedWorkerCommonProofGenerationFamilyAdapter:
         boundaryMocks.releaseGenerationAdapter,
-    runClosedWorkerCommonProofGenerationFamilyAdapterRetainingGeneratedCapability:
+    runClosedWorkerCommonProofGenerationFamilyAdapterWithExecutionOpener:
         boundaryMocks.runGeneration,
 }));
 
@@ -352,20 +371,25 @@ const generationInput = (
     runtime: FakeSetupKeyRelationRuntime,
     mode: GenerationMode,
 ) => ({
-    actionRandomnessSession: Object.freeze({}),
     canonicalSuiteRecordBytes: Uint8Array.of(1, 2, 3),
     checkpointLineageIdentifier: new Uint8Array(32).fill(7),
-    externalMemory: Object.freeze({}),
     generationMode: mode,
-    generationOptions:
-        mode === 'resumed'
-            ? Object.freeze({ resume: Object.freeze({}) })
-            : undefined,
     kernel: runtime.kernel,
-    outputStore: Object.freeze({}),
+    openProofGenerationExecution: () =>
+        Promise.resolve(
+            Object.freeze({
+                externalMemory: Object.freeze({}),
+                options:
+                    mode === 'resumed'
+                        ? Object.freeze({ resume: Object.freeze({}) })
+                        : undefined,
+                outputStore: Object.freeze({}),
+            }),
+        ),
+    productionOperationIdentifiers: Object.freeze({}),
     setupGenerationAuthority: Object.freeze({}),
     setupIntentObject: Object.freeze({}),
-    verifiedReservation: Object.freeze({}),
+    workerKernel: Object.freeze({ kernel: runtime.kernel }),
 });
 
 const verificationInput = (
@@ -462,18 +486,18 @@ describe('accepted-setup key-relation generation', () => {
         },
     );
 
-    it('refuses a fresh/resume mismatch before preparing any family', async () => {
+    it('refuses unsupported generation modes before preparing any family', async () => {
         const runtime = createFakeRuntime();
         await expect(
             generateAcceptedSetupSameSecretInClosedWorker({
                 ...generationInput(runtime, 'fresh'),
-                generationOptions: { resume: Object.freeze({}) },
+                generationMode: 'invalid',
             } as never),
         ).rejects.toThrow(/wrongContext/u);
         await expect(
             generateAcceptedSetupPublicKeyShareInClosedWorker({
                 ...generationInput(runtime, 'resumed'),
-                generationOptions: undefined,
+                generationMode: undefined,
             } as never),
         ).rejects.toThrow(/wrongContext/u);
         expect(runtime.generationPreparations).toEqual([]);

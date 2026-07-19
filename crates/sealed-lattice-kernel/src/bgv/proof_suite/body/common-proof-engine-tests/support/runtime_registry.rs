@@ -130,7 +130,10 @@ fn runtime_registry_accepts_only_terminal_verifier_tokens_and_retires_stale_hand
             prepared.proof_byte_length(),
             prepared.verified_query_count()
         ),
-        (proof_bytes.len() as u64, PROOF_UNIQUE_QUERY_COUNT),
+        (
+            proof_bytes.len() as u64,
+            PUBLIC_AGGREGATE_TEST_UNIQUE_QUERY_COUNT,
+        ),
     );
     let durable_frame = prepared.durable_authorization_frame();
     let durable_frame_digest = prepared.durable_authorization_frame_digest();
@@ -194,7 +197,7 @@ fn runtime_registry_accepts_only_terminal_verifier_tokens_and_retires_stale_hand
     );
     assert_eq!(
         u32::from_le_bytes(durable_frame[670..674].try_into().unwrap()),
-        PROOF_UNIQUE_QUERY_COUNT,
+        PUBLIC_AGGREGATE_TEST_UNIQUE_QUERY_COUNT,
     );
     assert_eq!(
         &durable_frame[674..738],
@@ -413,7 +416,7 @@ fn upstream_input_registry_consumes_only_one_complete_application_owned_capabili
         CanonicalStreamDomain::CollectivePublicKeyAggregateProof,
         [0x44; 64],
         super::super::super::super::MAXIMUM_COMMON_PROOF_BYTE_LENGTH as u64,
-        PROOF_UNIQUE_QUERY_COUNT,
+        PUBLIC_AGGREGATE_TEST_UNIQUE_QUERY_COUNT,
     )
     .expect("the application reservation fits the worker safety bound");
     let binding = CommonProofVerificationBinding::new(

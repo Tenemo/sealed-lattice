@@ -283,7 +283,7 @@ impl ReplayableCommonProofPrivateCoinCatalogSource for CommonProofWorkerPrivateC
 }
 
 /// Owned exact-family sources used by one generated proof. Source errors are
-/// collapsed only to the private-randomness authority boundary. The host
+/// collapsed only to the proof-source authority boundary. The host
 /// cannot install the source through FFI.
 pub(crate) struct CommonProofGenerationSources {
     private_coins: CommonProofWorkerPrivateCoinSource,

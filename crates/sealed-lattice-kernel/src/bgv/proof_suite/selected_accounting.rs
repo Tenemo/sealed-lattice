@@ -1,21 +1,40 @@
 //! Canonical proof ceilings and runtime limits for the selected suite.
 
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    sync::OnceLock,
-};
+use std::{collections::BTreeSet, sync::OnceLock};
 
 use crate::{
-    bgv::evaluator::program::{EvaluatorProgramKeyPositions, selected_evaluator_program_set},
+    bgv::{
+        evaluator::program::{EvaluatorProgramKeyPositions, selected_evaluator_program_set},
+        evaluator::top_k::CANONICAL_TARGET_CIPHERTEXT_LEVEL,
+        serialization::two_component_data_ciphertext_canonical_byte_length_ceiling_at_level,
+        setup::{
+            SelectedSetupGenerationLifecycleState,
+            SetupGenerationRelinearizationAggregateDescriptorDimensions,
+            SetupGenerationRetainedStreamDescriptorDimensions,
+            selected_setup_generation_relinearization_round_two_activation_memory_accounting,
+            selected_setup_generation_retained_memory_accounting,
+        },
+        target_decryption::{
+            kllps_release::{
+                KLLPS_PAIRED_TARGET_ROLE_COUNT, selected_kllps_target_release_memory_accounting,
+                selected_kllps_target_release_source_provider_memory_accounting,
+            },
+            selected_target_partial_decryption_stream_byte_length,
+        },
+    },
     foundation::{
         CanonicalDecodeLimits, FOUNDATION_PROFILE, Hash512, MAXIMUM_CANONICAL_STREAM_BYTE_LENGTH,
         ProofApplicationSlotCeilings, ProofObjectHeader,
         SELECTED_MAXIMUM_BALLOT_ATTEMPTS_PER_PARTICIPANT,
+        SELECTED_MAXIMUM_CANDIDATE_PACKAGES_PER_ACTION, selected_evaluator_resource_accounting,
     },
 };
 
 use super::body::minimal_frontier_node_count;
-use super::external_memory::MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_STORED_BYTE_LENGTH;
+use super::external_memory::{
+    MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_OBJECT_COUNT,
+    MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_STORED_BYTE_LENGTH,
+};
 use super::prover::{
     CommonProofResidentMemoryPhase, CommonProofResidentMemoryPlan,
     common_proof_external_memory_requirement, common_proof_resident_memory_requirement,
@@ -27,18 +46,27 @@ use super::relation_plan::{
 };
 use super::relation_plan::{
     CollectivePublicKeySourceProviderMemoryAccounting,
-    CommittedMaterialSourceProviderMemoryAccounting, GaloisKeyShareSourceProviderMemoryAccounting,
-    ProofPrivacyMode, RelationMaskKind,
+    CommittedMaterialSourceProviderMemoryAccounting, ProofPrivacyMode, RelationMaskKind,
     aggregate_threshold_share_source_provider_memory_accounting,
     collective_public_key_source_provider_memory_accounting,
+    compile_public_key_share_relation_with_source_layout,
+    compile_relinearization_round_one_relation_with_source_layout,
+    compile_relinearization_round_two_relation_with_source_layout,
+    compile_same_secret_relation_with_source_layout,
     galois_key_share_source_provider_memory_accounting,
+    public_key_share_source_provider_memory_accounting,
+    relinearization_round_one_source_provider_memory_accounting,
+    relinearization_round_two_source_provider_memory_accounting,
+    same_secret_source_provider_memory_accounting,
     vss_share_linkage_source_provider_memory_accounting,
 };
 use super::selected_profile::selected_proof_application_slot_ceilings;
 use super::{
     CollectivePublicKeyApplicationMemoryAccounting,
-    CommonProofGenerationCheckpointCustodyRequirement, CommonProofTranscriptSchedule,
+    CommonProofGenerationCheckpointCustodyRequirement, CommonProofSourceProviderMemoryAccounting,
+    CommonProofTranscriptSchedule, KeySwitchComponentMaterialTopology,
     MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH, MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH,
+    PROOF_BASE_FIELD_MODULUS, PROOF_CHALLENGE_EXTENSION_DEGREE, PROOF_DEEP_POINT_COUNT,
     SelectedApplicationStatementContext, SelectedBallotCiphertextReadbackMemoryAccounting,
     SelectedBallotValidityCarrierBufferAccounting,
     SelectedEvaluatorAggregateSourceProviderMemoryAccounting,
@@ -51,14 +79,17 @@ use super::{
     selected_ballot_validity_carrier_buffer_accounting,
     selected_committed_material_relation_plan_input, selected_evaluator_entry_positions,
     selected_galois_key_share_batch_schedule, selected_galois_key_share_relation_plan_input,
-    selected_proof_profile_set,
+    selected_proof_profile_set, selected_public_key_share_relation_plan_input,
+    selected_recipient_private_vss_payload_byte_length,
+    selected_relinearization_relation_plan_inputs, selected_same_secret_relation_plan_input,
 };
 use super::{
     CommonProofByteLengthCeiling, CommonProofRuntimeLimits, MAXIMUM_COMMON_PROOF_BYTE_LENGTH,
     MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH, ProofBodyLayout, ProofLeafVisibility,
-    ProofTreeCatalogInput, ProofTreeRole, RelationProofTreeInput, StatementOwnedProofTreeInput,
-    build_complete_proof_tree_catalog, canonical_common_proof_byte_length_ceiling,
-    proof_query_tree_byte_length, selected_relation_plan_check_context,
+    ProofTreeCatalogInput, ProofTreeCatalogSource, ProofTreeRole, RelationProofTreeInput,
+    StatementOwnedProofTreeInput, build_complete_proof_tree_catalog,
+    canonical_common_proof_byte_length_ceiling, proof_query_tree_byte_length,
+    selected_relation_plan_check_context,
 };
 
 struct SelectedProofTransportSizing {
@@ -170,6 +201,139 @@ fn selected_runtime_limits_from_sizing(
         transport_sizing.maximum_prefetched_query_byte_length,
     )
     .map_err(|_| SelectedProofAccountingError::ResourcePlanning)
+}
+
+fn selected_proof_component_byte_accounting(
+    ceiling: &CommonProofByteLengthCeiling,
+) -> Result<SelectedProofComponentByteAccounting, SelectedProofAccountingError> {
+    let component_byte_lengths = ceiling.component_byte_lengths();
+    let accounting = SelectedProofComponentByteAccounting {
+        canonical_framing_byte_length: u64::try_from(component_byte_lengths.canonical_framing())
+            .map_err(|_| SelectedProofAccountingError::CountOverflow)?,
+        relation_commitments_and_openings_byte_length: u64::try_from(
+            component_byte_lengths.relation_commitments_and_openings(),
+        )
+        .map_err(|_| SelectedProofAccountingError::CountOverflow)?,
+        quotient_commitments_and_openings_byte_length: u64::try_from(
+            component_byte_lengths.quotient_commitments_and_openings(),
+        )
+        .map_err(|_| SelectedProofAccountingError::CountOverflow)?,
+        transcript_opening_claims_byte_length: u64::try_from(
+            component_byte_lengths.transcript_opening_claims(),
+        )
+        .map_err(|_| SelectedProofAccountingError::CountOverflow)?,
+        fri_byte_length: u64::try_from(component_byte_lengths.fri())
+            .map_err(|_| SelectedProofAccountingError::CountOverflow)?,
+    };
+    if accounting.proof_byte_length()
+        != Some(
+            u64::try_from(ceiling.proof_byte_length())
+                .map_err(|_| SelectedProofAccountingError::CountOverflow)?,
+        )
+    {
+        return Err(SelectedProofAccountingError::InvalidTreeGeometry);
+    }
+    Ok(accounting)
+}
+
+fn selected_proof_query_tree_resource_accounting(
+    transport_sizing: &SelectedProofTransportSizing,
+) -> Result<(Box<[SelectedProofQueryTreeResourceAccounting]>, u32, u64), SelectedProofAccountingError>
+{
+    let catalog_entries = transport_sizing.layout.catalog().entries();
+    let query_trees = transport_sizing.ceiling.query_trees();
+    if catalog_entries.len() != query_trees.len() {
+        return Err(SelectedProofAccountingError::InvalidTreeGeometry);
+    }
+    let mut rows = Vec::new();
+    rows.try_reserve_exact(query_trees.len())
+        .map_err(|_| SelectedProofAccountingError::AllocationLimitExceeded)?;
+    let mut bound_public_tree_count = 0_u32;
+    let mut total_materialized_row_width = 0_u64;
+    for (entry, tree) in catalog_entries.iter().zip(query_trees) {
+        if entry.tree_catalog_index() != tree.tree_catalog_index()
+            || entry.source() != tree.source()
+        {
+            return Err(SelectedProofAccountingError::InvalidTreeGeometry);
+        }
+        let is_bound_public_tree = entry.bound_root().is_some();
+        bound_public_tree_count = bound_public_tree_count
+            .checked_add(u32::from(is_bound_public_tree))
+            .ok_or(SelectedProofAccountingError::CountOverflow)?;
+        let materialized_row_width = u64::try_from(
+            entry
+                .materialized_row_width()
+                .map_err(|_| SelectedProofAccountingError::InvalidTreeGeometry)?,
+        )
+        .map_err(|_| SelectedProofAccountingError::CountOverflow)?;
+        total_materialized_row_width = total_materialized_row_width
+            .checked_add(materialized_row_width)
+            .ok_or(SelectedProofAccountingError::CountOverflow)?;
+        rows.push(SelectedProofQueryTreeResourceAccounting {
+            tree_catalog_index: tree.tree_catalog_index(),
+            source: tree.source(),
+            is_bound_public_tree,
+            materialized_row_width,
+            tree_height: tree.tree_height(),
+            leaf_count: u64::try_from(tree.leaf_count())
+                .map_err(|_| SelectedProofAccountingError::CountOverflow)?,
+            canonical_leaf_byte_length: u64::try_from(tree.canonical_leaf_byte_length())
+                .map_err(|_| SelectedProofAccountingError::CountOverflow)?,
+            minimum_opened_leaf_count: u64::try_from(tree.minimum_opened_leaf_count())
+                .map_err(|_| SelectedProofAccountingError::CountOverflow)?,
+            maximum_opened_leaf_count: u64::try_from(tree.maximum_opened_leaf_count())
+                .map_err(|_| SelectedProofAccountingError::CountOverflow)?,
+            opened_leaf_count_at_ceiling: u64::try_from(tree.opened_leaf_count_at_ceiling())
+                .map_err(|_| SelectedProofAccountingError::CountOverflow)?,
+            authentication_frontier_node_count_at_ceiling: u64::try_from(
+                tree.authentication_frontier_node_count_at_ceiling(),
+            )
+            .map_err(|_| SelectedProofAccountingError::CountOverflow)?,
+            opened_leaf_payload_byte_length: u64::try_from(tree.opened_leaf_payload_byte_length())
+                .map_err(|_| SelectedProofAccountingError::CountOverflow)?,
+            authentication_frontier_digest_byte_length: u64::try_from(
+                tree.authentication_frontier_digest_byte_length(),
+            )
+            .map_err(|_| SelectedProofAccountingError::CountOverflow)?,
+            canonical_framing_byte_length: u64::try_from(tree.canonical_framing_byte_length())
+                .map_err(|_| SelectedProofAccountingError::CountOverflow)?,
+            byte_length: u64::try_from(tree.byte_length())
+                .map_err(|_| SelectedProofAccountingError::CountOverflow)?,
+        });
+    }
+    Ok((
+        rows.into_boxed_slice(),
+        bound_public_tree_count,
+        total_materialized_row_width,
+    ))
+}
+
+fn selected_setup_stream_descriptor_dimensions(
+    total_byte_length: u64,
+) -> Result<SetupGenerationRetainedStreamDescriptorDimensions, SelectedProofAccountingError> {
+    let stream_chunk_byte_length = u64::try_from(FOUNDATION_PROFILE.stream_chunk_byte_length)
+        .map_err(|_| SelectedProofAccountingError::CountOverflow)?;
+    let ordered_chunk_count = total_byte_length.div_ceil(stream_chunk_byte_length);
+    SetupGenerationRetainedStreamDescriptorDimensions::new(total_byte_length, ordered_chunk_count)
+        .map_err(|_| SelectedProofAccountingError::ResourcePlanning)
+}
+
+fn add_persistent_source_owner(
+    provider: CommonProofSourceProviderMemoryAccounting,
+    owner_payload_byte_length: u64,
+) -> Result<CommonProofSourceProviderMemoryAccounting, SelectedProofAccountingError> {
+    Ok(CommonProofSourceProviderMemoryAccounting::new(
+        provider
+            .loading_persistent_resident_byte_length()
+            .checked_add(owner_payload_byte_length)
+            .ok_or(SelectedProofAccountingError::CountOverflow)?,
+        provider
+            .post_source_polynomial_finish_persistent_resident_byte_length()
+            .checked_add(owner_payload_byte_length)
+            .ok_or(SelectedProofAccountingError::CountOverflow)?,
+        provider.additional_loading_transient_byte_length(),
+        provider.maximum_returned_source_polynomial_byte_length(),
+    ))
 }
 
 pub(crate) fn selected_proof_runtime_limits(
@@ -384,9 +548,191 @@ fn selected_query_ceiling_witness(
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct SelectedProofComponentByteAccounting {
+    canonical_framing_byte_length: u64,
+    relation_commitments_and_openings_byte_length: u64,
+    quotient_commitments_and_openings_byte_length: u64,
+    transcript_opening_claims_byte_length: u64,
+    fri_byte_length: u64,
+}
+
+impl SelectedProofComponentByteAccounting {
+    pub(crate) const fn canonical_framing_byte_length(self) -> u64 {
+        self.canonical_framing_byte_length
+    }
+
+    pub(crate) const fn relation_commitments_and_openings_byte_length(self) -> u64 {
+        self.relation_commitments_and_openings_byte_length
+    }
+
+    pub(crate) const fn quotient_commitments_and_openings_byte_length(self) -> u64 {
+        self.quotient_commitments_and_openings_byte_length
+    }
+
+    pub(crate) const fn transcript_opening_claims_byte_length(self) -> u64 {
+        self.transcript_opening_claims_byte_length
+    }
+
+    pub(crate) const fn fri_byte_length(self) -> u64 {
+        self.fri_byte_length
+    }
+
+    pub(crate) fn proof_byte_length(self) -> Option<u64> {
+        self.canonical_framing_byte_length
+            .checked_add(self.relation_commitments_and_openings_byte_length)
+            .and_then(|length| {
+                length.checked_add(self.quotient_commitments_and_openings_byte_length)
+            })
+            .and_then(|length| length.checked_add(self.transcript_opening_claims_byte_length))
+            .and_then(|length| length.checked_add(self.fri_byte_length))
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct SelectedProofQueryTreeResourceAccounting {
+    tree_catalog_index: u16,
+    source: ProofTreeCatalogSource,
+    is_bound_public_tree: bool,
+    materialized_row_width: u64,
+    tree_height: u32,
+    leaf_count: u64,
+    canonical_leaf_byte_length: u64,
+    minimum_opened_leaf_count: u64,
+    maximum_opened_leaf_count: u64,
+    opened_leaf_count_at_ceiling: u64,
+    authentication_frontier_node_count_at_ceiling: u64,
+    opened_leaf_payload_byte_length: u64,
+    authentication_frontier_digest_byte_length: u64,
+    canonical_framing_byte_length: u64,
+    byte_length: u64,
+}
+
+impl SelectedProofQueryTreeResourceAccounting {
+    pub(crate) const fn tree_catalog_index(self) -> u16 {
+        self.tree_catalog_index
+    }
+
+    pub(crate) const fn source(self) -> ProofTreeCatalogSource {
+        self.source
+    }
+
+    pub(crate) const fn is_bound_public_tree(self) -> bool {
+        self.is_bound_public_tree
+    }
+
+    pub(crate) const fn materialized_row_width(self) -> u64 {
+        self.materialized_row_width
+    }
+
+    pub(crate) const fn tree_height(self) -> u32 {
+        self.tree_height
+    }
+
+    pub(crate) const fn leaf_count(self) -> u64 {
+        self.leaf_count
+    }
+
+    pub(crate) const fn canonical_leaf_byte_length(self) -> u64 {
+        self.canonical_leaf_byte_length
+    }
+
+    pub(crate) const fn minimum_opened_leaf_count(self) -> u64 {
+        self.minimum_opened_leaf_count
+    }
+
+    pub(crate) const fn maximum_opened_leaf_count(self) -> u64 {
+        self.maximum_opened_leaf_count
+    }
+
+    pub(crate) const fn opened_leaf_count_at_ceiling(self) -> u64 {
+        self.opened_leaf_count_at_ceiling
+    }
+
+    pub(crate) const fn authentication_frontier_node_count_at_ceiling(self) -> u64 {
+        self.authentication_frontier_node_count_at_ceiling
+    }
+
+    pub(crate) const fn opened_leaf_payload_byte_length(self) -> u64 {
+        self.opened_leaf_payload_byte_length
+    }
+
+    pub(crate) const fn authentication_frontier_digest_byte_length(self) -> u64 {
+        self.authentication_frontier_digest_byte_length
+    }
+
+    pub(crate) const fn canonical_framing_byte_length(self) -> u64 {
+        self.canonical_framing_byte_length
+    }
+
+    pub(crate) const fn byte_length(self) -> u64 {
+        self.byte_length
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct SelectedProofResidentPhaseResourceAccounting {
+    phase: CommonProofResidentMemoryPhase,
+    prover_resident_byte_length: u64,
+    source_provider_persistent_resident_byte_length: u64,
+    source_provider_loading_transient_byte_length: u64,
+    application_runtime_persistent_resident_byte_length: u64,
+    application_runtime_boundary_overlap_byte_length: u64,
+    checkpoint_custody_byte_length: u64,
+    combined_wasm_resident_byte_length: u64,
+}
+
+impl SelectedProofResidentPhaseResourceAccounting {
+    pub(crate) const fn phase(self) -> CommonProofResidentMemoryPhase {
+        self.phase
+    }
+
+    pub(crate) const fn prover_resident_byte_length(self) -> u64 {
+        self.prover_resident_byte_length
+    }
+
+    pub(crate) const fn source_provider_persistent_resident_byte_length(self) -> u64 {
+        self.source_provider_persistent_resident_byte_length
+    }
+
+    pub(crate) const fn source_provider_loading_transient_byte_length(self) -> u64 {
+        self.source_provider_loading_transient_byte_length
+    }
+
+    pub(crate) const fn application_runtime_persistent_resident_byte_length(self) -> u64 {
+        self.application_runtime_persistent_resident_byte_length
+    }
+
+    pub(crate) const fn application_runtime_boundary_overlap_byte_length(self) -> u64 {
+        self.application_runtime_boundary_overlap_byte_length
+    }
+
+    pub(crate) const fn checkpoint_custody_byte_length(self) -> u64 {
+        self.checkpoint_custody_byte_length
+    }
+
+    pub(crate) const fn combined_wasm_resident_byte_length(self) -> u64 {
+        self.combined_wasm_resident_byte_length
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct SelectedResidentMemoryBounds {
+    maximum_combined_wasm_resident_byte_length: u64,
+    ordered_phases: Box<[SelectedProofResidentPhaseResourceAccounting]>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct SelectedProofVariantResourceBounds {
     maximum_combined_wasm_resident_byte_length: u64,
+    resident_phases: Box<[SelectedProofResidentPhaseResourceAccounting]>,
+    maximum_prefetched_query_byte_length: u64,
+    maximum_external_memory_transaction_payload_byte_length: u64,
+    maximum_proof_output_chunk_byte_length: u64,
+    proof_output_chunk_count: u64,
+    maximum_copied_buffer_byte_length: u64,
     external_memory_peak_stored_byte_length: u64,
+    external_memory_distinct_physical_object_count: u32,
+    external_memory_object_lifecycle_count: u32,
     external_memory_total_written_byte_length: u64,
     external_memory_total_read_byte_length: u64,
     external_memory_transaction_count: u64,
@@ -395,14 +741,48 @@ struct SelectedProofVariantResourceBounds {
 
 /// One compiler-derived selected-suite proof variant. This is process-local
 /// accounting, not a serialized proof field or an acceptance claim.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct SelectedProofVariantResourceAccounting {
     application_statement_schema_identifier: u16,
     schedule_position: Option<u32>,
     top_count: Option<u16>,
+    complete_action_application_multiplicity: u32,
+    logical_entry_count: u32,
+    trace_domain_size: u64,
+    evaluation_domain_size: u64,
+    opening_degree_bound_exclusive: u64,
+    relation_column_count: u32,
+    verifier_sequence_relation_column_count: u32,
+    bound_tree_relation_column_count: u32,
+    prover_relation_column_count: u32,
+    relation_constraint_count: u32,
+    opening_point_count: u32,
+    quotient_decomposition_stride: u64,
+    quotient_component_degree_bound_exclusive: u64,
+    quotient_component_count: u16,
+    opening_claim_count: u32,
+    fri_fold_count: u16,
+    terminal_coefficient_count: u32,
+    unique_query_count: u32,
+    query_orbit_count: u64,
+    canonical_header_byte_length: u64,
+    body_prefix_byte_length: u64,
+    query_section_byte_length: u64,
     proof_byte_length: usize,
+    proof_component_byte_accounting: SelectedProofComponentByteAccounting,
+    ordered_query_trees: Box<[SelectedProofQueryTreeResourceAccounting]>,
+    bound_public_tree_count: u32,
+    total_materialized_row_width: u64,
     maximum_combined_wasm_resident_byte_length: u64,
+    resident_phases: Box<[SelectedProofResidentPhaseResourceAccounting]>,
+    maximum_prefetched_query_byte_length: u64,
+    maximum_external_memory_transaction_payload_byte_length: u64,
+    maximum_proof_output_chunk_byte_length: u64,
+    proof_output_chunk_count: u64,
+    maximum_copied_buffer_byte_length: u64,
     external_memory_peak_stored_byte_length: u64,
+    external_memory_distinct_physical_object_count: u32,
+    external_memory_object_lifecycle_count: u32,
     external_memory_total_written_byte_length: u64,
     external_memory_total_read_byte_length: u64,
     external_memory_transaction_count: u64,
@@ -410,43 +790,181 @@ pub(crate) struct SelectedProofVariantResourceAccounting {
 }
 
 impl SelectedProofVariantResourceAccounting {
-    pub(crate) const fn application_statement_schema_identifier(self) -> u16 {
+    pub(crate) const fn application_statement_schema_identifier(&self) -> u16 {
         self.application_statement_schema_identifier
     }
 
-    pub(crate) const fn schedule_position(self) -> Option<u32> {
+    pub(crate) const fn schedule_position(&self) -> Option<u32> {
         self.schedule_position
     }
 
-    pub(crate) const fn top_count(self) -> Option<u16> {
+    pub(crate) const fn top_count(&self) -> Option<u16> {
         self.top_count
     }
 
-    pub(crate) const fn proof_byte_length(self) -> usize {
+    pub(crate) const fn complete_action_application_multiplicity(&self) -> u32 {
+        self.complete_action_application_multiplicity
+    }
+
+    pub(crate) const fn logical_entry_count(&self) -> u32 {
+        self.logical_entry_count
+    }
+
+    pub(crate) const fn trace_domain_size(&self) -> u64 {
+        self.trace_domain_size
+    }
+
+    pub(crate) const fn evaluation_domain_size(&self) -> u64 {
+        self.evaluation_domain_size
+    }
+
+    pub(crate) const fn opening_degree_bound_exclusive(&self) -> u64 {
+        self.opening_degree_bound_exclusive
+    }
+
+    pub(crate) const fn relation_column_count(&self) -> u32 {
+        self.relation_column_count
+    }
+
+    pub(crate) const fn verifier_sequence_relation_column_count(&self) -> u32 {
+        self.verifier_sequence_relation_column_count
+    }
+
+    pub(crate) const fn bound_tree_relation_column_count(&self) -> u32 {
+        self.bound_tree_relation_column_count
+    }
+
+    pub(crate) const fn prover_relation_column_count(&self) -> u32 {
+        self.prover_relation_column_count
+    }
+
+    pub(crate) const fn relation_constraint_count(&self) -> u32 {
+        self.relation_constraint_count
+    }
+
+    pub(crate) const fn opening_point_count(&self) -> u32 {
+        self.opening_point_count
+    }
+
+    pub(crate) const fn quotient_decomposition_stride(&self) -> u64 {
+        self.quotient_decomposition_stride
+    }
+
+    pub(crate) const fn quotient_component_degree_bound_exclusive(&self) -> u64 {
+        self.quotient_component_degree_bound_exclusive
+    }
+
+    pub(crate) const fn quotient_component_count(&self) -> u16 {
+        self.quotient_component_count
+    }
+
+    pub(crate) const fn opening_claim_count(&self) -> u32 {
+        self.opening_claim_count
+    }
+
+    pub(crate) const fn fri_fold_count(&self) -> u16 {
+        self.fri_fold_count
+    }
+
+    pub(crate) const fn terminal_coefficient_count(&self) -> u32 {
+        self.terminal_coefficient_count
+    }
+
+    pub(crate) const fn unique_query_count(&self) -> u32 {
+        self.unique_query_count
+    }
+
+    pub(crate) const fn query_orbit_count(&self) -> u64 {
+        self.query_orbit_count
+    }
+
+    pub(crate) const fn canonical_header_byte_length(&self) -> u64 {
+        self.canonical_header_byte_length
+    }
+
+    pub(crate) const fn body_prefix_byte_length(&self) -> u64 {
+        self.body_prefix_byte_length
+    }
+
+    pub(crate) const fn query_section_byte_length(&self) -> u64 {
+        self.query_section_byte_length
+    }
+
+    pub(crate) const fn proof_byte_length(&self) -> usize {
         self.proof_byte_length
     }
 
-    pub(crate) const fn maximum_combined_wasm_resident_byte_length(self) -> u64 {
+    pub(crate) const fn proof_component_byte_accounting(
+        &self,
+    ) -> SelectedProofComponentByteAccounting {
+        self.proof_component_byte_accounting
+    }
+
+    pub(crate) fn ordered_query_trees(&self) -> &[SelectedProofQueryTreeResourceAccounting] {
+        &self.ordered_query_trees
+    }
+
+    pub(crate) const fn bound_public_tree_count(&self) -> u32 {
+        self.bound_public_tree_count
+    }
+
+    pub(crate) const fn total_materialized_row_width(&self) -> u64 {
+        self.total_materialized_row_width
+    }
+
+    pub(crate) const fn maximum_combined_wasm_resident_byte_length(&self) -> u64 {
         self.maximum_combined_wasm_resident_byte_length
     }
 
-    pub(crate) const fn external_memory_peak_stored_byte_length(self) -> u64 {
+    pub(crate) fn resident_phases(&self) -> &[SelectedProofResidentPhaseResourceAccounting] {
+        &self.resident_phases
+    }
+
+    pub(crate) const fn maximum_prefetched_query_byte_length(&self) -> u64 {
+        self.maximum_prefetched_query_byte_length
+    }
+
+    pub(crate) const fn maximum_external_memory_transaction_payload_byte_length(&self) -> u64 {
+        self.maximum_external_memory_transaction_payload_byte_length
+    }
+
+    pub(crate) const fn maximum_proof_output_chunk_byte_length(&self) -> u64 {
+        self.maximum_proof_output_chunk_byte_length
+    }
+
+    pub(crate) const fn proof_output_chunk_count(&self) -> u64 {
+        self.proof_output_chunk_count
+    }
+
+    pub(crate) const fn maximum_copied_buffer_byte_length(&self) -> u64 {
+        self.maximum_copied_buffer_byte_length
+    }
+
+    pub(crate) const fn external_memory_peak_stored_byte_length(&self) -> u64 {
         self.external_memory_peak_stored_byte_length
     }
 
-    pub(crate) const fn external_memory_total_written_byte_length(self) -> u64 {
+    pub(crate) const fn external_memory_distinct_physical_object_count(&self) -> u32 {
+        self.external_memory_distinct_physical_object_count
+    }
+
+    pub(crate) const fn external_memory_object_lifecycle_count(&self) -> u32 {
+        self.external_memory_object_lifecycle_count
+    }
+
+    pub(crate) const fn external_memory_total_written_byte_length(&self) -> u64 {
         self.external_memory_total_written_byte_length
     }
 
-    pub(crate) const fn external_memory_total_read_byte_length(self) -> u64 {
+    pub(crate) const fn external_memory_total_read_byte_length(&self) -> u64 {
         self.external_memory_total_read_byte_length
     }
 
-    pub(crate) const fn external_memory_transaction_count(self) -> u64 {
+    pub(crate) const fn external_memory_transaction_count(&self) -> u64 {
         self.external_memory_transaction_count
     }
 
-    pub(crate) const fn checkpoint_boundary_peak_resident_byte_length(self) -> u64 {
+    pub(crate) const fn checkpoint_boundary_peak_resident_byte_length(&self) -> u64 {
         self.checkpoint_boundary_peak_resident_byte_length
     }
 }
@@ -472,9 +990,74 @@ fn derive_selected_proof_variant_resource_inventory()
     let key_positions = selected_evaluator_program_set()
         .and_then(|program| program.key_positions())
         .map_err(|_| SelectedProofAccountingError::InvalidProfile)?;
+    let application_slot_ceilings = selected_proof_application_slot_ceilings()
+        .map_err(|_| SelectedProofAccountingError::InvalidProfile)?;
     if key_positions.streams().len() != usize::from(FOUNDATION_PROFILE.option_count) {
         return Err(SelectedProofAccountingError::InvalidProfile);
     }
+
+    // Round-two and Galois setup custody retain the two exact round-one proof
+    // stream descriptors. Derive those dimensions from the transport compiler
+    // before calculating any provider-resident overlap.
+    let mut participant_round_one_proof_byte_length = None::<u64>;
+    let mut aggregate_round_one_proof_byte_length = None::<u64>;
+    for relation_plan in proof_profile.relation_plans() {
+        let schema_identifier = relation_plan.application_statement_schema_identifier();
+        if !matches!(
+            schema_identifier,
+            ProofApplicationSlotCeilings::RELINEARIZATION_ROUND_ONE_STATEMENT_SCHEMA_IDENTIFIER
+                | ProofApplicationSlotCeilings::RKG_ROUND_ONE_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER
+        ) {
+            continue;
+        }
+        let relation_context = selected_relation_plan_check_context(schema_identifier)
+            .ok_or(SelectedProofAccountingError::InvalidProfile)?;
+        for variant in relation_plan.compiled_plan().variants() {
+            let statement_context = SelectedApplicationStatementContext::new(
+                FOUNDATION_PROFILE.protocol_version,
+                [0; Hash512::BYTE_LENGTH],
+                variant.schedule_position(),
+                variant.top_count(),
+            );
+            let canonical_application_statement_bytes =
+                canonical_selected_application_statement_for_ceiling(
+                    schema_identifier,
+                    statement_context,
+                )
+                .map_err(|_| SelectedProofAccountingError::CanonicalEncoding)?;
+            let proof_byte_length = u64::try_from(
+                selected_proof_transport_sizing(
+                    schema_identifier,
+                    &canonical_application_statement_bytes,
+                    variant,
+                    &relation_context,
+                )?
+                .ceiling
+                .proof_byte_length(),
+            )
+            .map_err(|_| SelectedProofAccountingError::CountOverflow)?;
+            let target = if schema_identifier
+                == ProofApplicationSlotCeilings::RELINEARIZATION_ROUND_ONE_STATEMENT_SCHEMA_IDENTIFIER
+            {
+                &mut participant_round_one_proof_byte_length
+            } else {
+                &mut aggregate_round_one_proof_byte_length
+            };
+            *target =
+                Some((*target).map_or(proof_byte_length, |current| current.max(proof_byte_length)));
+        }
+    }
+    let setup_aggregate_descriptor_dimensions =
+        SetupGenerationRelinearizationAggregateDescriptorDimensions::new(
+            selected_setup_stream_descriptor_dimensions(
+                participant_round_one_proof_byte_length
+                    .ok_or(SelectedProofAccountingError::InvalidProfile)?,
+            )?,
+            selected_setup_stream_descriptor_dimensions(
+                aggregate_round_one_proof_byte_length
+                    .ok_or(SelectedProofAccountingError::InvalidProfile)?,
+            )?,
+        );
 
     let mut compiler_ceilings = Vec::new();
     for relation_plan in proof_profile.relation_plans() {
@@ -543,35 +1126,147 @@ fn derive_selected_proof_variant_resource_inventory()
                 &relation_context,
                 &transport_sizing,
                 committed_material_source_provider_memory_accounting,
+                setup_aggregate_descriptor_dimensions,
             )?;
+            let complete_action_application_multiplicity =
+                selected_complete_action_variant_multiplicity(
+                    application_statement_schema_identifier,
+                    variant,
+                    &application_slot_ceilings,
+                    &key_positions,
+                )?;
+            let logical_entry_count = selected_variant_logical_entry_count(
+                application_statement_schema_identifier,
+                variant,
+            )?;
+            let proof_component_byte_accounting =
+                selected_proof_component_byte_accounting(&transport_sizing.ceiling)?;
+            let (ordered_query_trees, bound_public_tree_count, total_materialized_row_width) =
+                selected_proof_query_tree_resource_accounting(&transport_sizing)?;
+            let relation_column_count = u32::try_from(variant.ordered_columns().len())
+                .map_err(|_| SelectedProofAccountingError::CountOverflow)?;
+            let mut verifier_sequence_relation_column_count = 0_u32;
+            let mut bound_tree_relation_column_count = 0_u32;
+            let mut prover_relation_column_count = 0_u32;
+            for column in variant.ordered_columns() {
+                let target = match column.origin() {
+                    RelationColumnOrigin::VerifierSequence { .. } => {
+                        &mut verifier_sequence_relation_column_count
+                    }
+                    RelationColumnOrigin::BoundTree { .. } => &mut bound_tree_relation_column_count,
+                    RelationColumnOrigin::Prover => &mut prover_relation_column_count,
+                };
+                *target = target
+                    .checked_add(1)
+                    .ok_or(SelectedProofAccountingError::CountOverflow)?;
+            }
+            if verifier_sequence_relation_column_count
+                .checked_add(bound_tree_relation_column_count)
+                .and_then(|count| count.checked_add(prover_relation_column_count))
+                != Some(relation_column_count)
+            {
+                return Err(SelectedProofAccountingError::InvalidProfile);
+            }
+            let relation_constraint_count = u32::try_from(variant.ordered_constraint_count())
+                .map_err(|_| SelectedProofAccountingError::CountOverflow)?;
+            let opening_point_count = u32::try_from(variant.ordered_opening_points().len())
+                .map_err(|_| SelectedProofAccountingError::CountOverflow)?;
+            let quotient_decomposition_stride = variant
+                .quotient_decomposition_stride(&relation_context)
+                .map_err(|_| SelectedProofAccountingError::InvalidProfile)?;
+            let quotient_component_degree_bound_exclusive =
+                relation_context.quotient_component_degree_bound_exclusive;
+            let SelectedProofVariantResourceBounds {
+                maximum_combined_wasm_resident_byte_length,
+                resident_phases,
+                maximum_prefetched_query_byte_length,
+                maximum_external_memory_transaction_payload_byte_length,
+                maximum_proof_output_chunk_byte_length,
+                proof_output_chunk_count,
+                maximum_copied_buffer_byte_length,
+                external_memory_peak_stored_byte_length,
+                external_memory_distinct_physical_object_count,
+                external_memory_object_lifecycle_count,
+                external_memory_total_written_byte_length,
+                external_memory_total_read_byte_length,
+                external_memory_transaction_count,
+                checkpoint_boundary_peak_resident_byte_length,
+            } = resource_bounds;
             compiler_ceilings.push(SelectedProofVariantResourceAccounting {
                 application_statement_schema_identifier,
                 schedule_position: variant.schedule_position(),
                 top_count: variant.top_count(),
+                complete_action_application_multiplicity,
+                logical_entry_count,
+                trace_domain_size: variant.trace_domain_size(),
+                evaluation_domain_size: variant.evaluation_domain_size(),
+                opening_degree_bound_exclusive: variant.opening_degree_bound_exclusive(),
+                relation_column_count,
+                verifier_sequence_relation_column_count,
+                bound_tree_relation_column_count,
+                prover_relation_column_count,
+                relation_constraint_count,
+                opening_point_count,
+                quotient_decomposition_stride,
+                quotient_component_degree_bound_exclusive,
+                quotient_component_count: transport_sizing
+                    .transcript_schedule
+                    .quotient_component_count(),
+                opening_claim_count: transport_sizing.transcript_schedule.opening_claim_count(),
+                fri_fold_count: transport_sizing.transcript_schedule.fri_fold_count(),
+                terminal_coefficient_count: transport_sizing
+                    .transcript_schedule
+                    .terminal_coefficient_count(),
+                unique_query_count: transport_sizing.transcript_schedule.unique_query_count(),
+                query_orbit_count: transport_sizing.transcript_schedule.query_orbit_count(),
+                canonical_header_byte_length: u64::try_from(
+                    transport_sizing.ceiling.canonical_header_byte_length(),
+                )
+                .map_err(|_| SelectedProofAccountingError::CountOverflow)?,
+                body_prefix_byte_length: u64::try_from(
+                    transport_sizing.ceiling.body_prefix_byte_length(),
+                )
+                .map_err(|_| SelectedProofAccountingError::CountOverflow)?,
+                query_section_byte_length: u64::try_from(
+                    transport_sizing.ceiling.query_section_byte_length(),
+                )
+                .map_err(|_| SelectedProofAccountingError::CountOverflow)?,
                 proof_byte_length: transport_sizing.ceiling.proof_byte_length(),
-                maximum_combined_wasm_resident_byte_length: resource_bounds
-                    .maximum_combined_wasm_resident_byte_length,
-                external_memory_peak_stored_byte_length: resource_bounds
-                    .external_memory_peak_stored_byte_length,
-                external_memory_total_written_byte_length: resource_bounds
-                    .external_memory_total_written_byte_length,
-                external_memory_total_read_byte_length: resource_bounds
-                    .external_memory_total_read_byte_length,
-                external_memory_transaction_count: resource_bounds
-                    .external_memory_transaction_count,
-                checkpoint_boundary_peak_resident_byte_length: resource_bounds
-                    .checkpoint_boundary_peak_resident_byte_length,
+                proof_component_byte_accounting,
+                ordered_query_trees,
+                bound_public_tree_count,
+                total_materialized_row_width,
+                maximum_combined_wasm_resident_byte_length,
+                resident_phases,
+                maximum_prefetched_query_byte_length,
+                maximum_external_memory_transaction_payload_byte_length,
+                maximum_proof_output_chunk_byte_length,
+                proof_output_chunk_count,
+                maximum_copied_buffer_byte_length,
+                external_memory_peak_stored_byte_length,
+                external_memory_distinct_physical_object_count,
+                external_memory_object_lifecycle_count,
+                external_memory_total_written_byte_length,
+                external_memory_total_read_byte_length,
+                external_memory_transaction_count,
+                checkpoint_boundary_peak_resident_byte_length,
             });
         }
     }
-    require_selected_variant_selector_inventory(&compiler_ceilings, &key_positions)?;
+    require_selected_variant_selector_inventory(
+        &compiler_ceilings,
+        &key_positions,
+        &application_slot_ceilings,
+    )?;
     Ok(compiler_ceilings.into_boxed_slice())
 }
 
 fn require_selected_variant_selector_inventory(
     compiler_ceilings: &[SelectedProofVariantResourceAccounting],
     key_positions: &EvaluatorProgramKeyPositions,
+    application_slot_ceilings: &ProofApplicationSlotCeilings,
 ) -> Result<(), SelectedProofAccountingError> {
+    require_selected_global_proof_backend_geometry(compiler_ceilings)?;
     let mut observed_selectors =
         std::collections::BTreeMap::<u16, BTreeSet<(Option<u32>, Option<u16>)>>::new();
     for ceiling in compiler_ceilings {
@@ -649,7 +1344,260 @@ fn require_selected_variant_selector_inventory(
     if observed_selectors != expected_selectors {
         return Err(SelectedProofAccountingError::InvalidProfile);
     }
+    for family in application_slot_ceilings.ordered_family_ceilings() {
+        let observed_application_multiplicity = compiler_ceilings
+            .iter()
+            .filter(|variant| {
+                variant.application_statement_schema_identifier()
+                    == family.application_statement_schema_identifier
+            })
+            .try_fold(0_u32, |total, variant| {
+                total
+                    .checked_add(variant.complete_action_application_multiplicity())
+                    .ok_or(SelectedProofAccountingError::CountOverflow)
+            })?;
+        if observed_application_multiplicity != family.application_slot_ceiling {
+            return Err(SelectedProofAccountingError::InvalidProfile);
+        }
+    }
+    let selected_complete_list_variants = compiler_ceilings
+        .iter()
+        .filter(|variant| {
+            variant.application_statement_schema_identifier()
+                == ProofApplicationSlotCeilings::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER
+                && variant.complete_action_application_multiplicity() != 0
+        })
+        .collect::<Vec<_>>();
+    if selected_complete_list_variants.len() != 1
+        || selected_complete_list_variants[0].top_count() != Some(FOUNDATION_PROFILE.option_count)
+        || selected_complete_list_variants[0].complete_action_application_multiplicity() != 1
+    {
+        return Err(SelectedProofAccountingError::InvalidProfile);
+    }
     Ok(())
+}
+
+fn require_selected_global_proof_backend_geometry(
+    compiler_ceilings: &[SelectedProofVariantResourceAccounting],
+) -> Result<(), SelectedProofAccountingError> {
+    const SELECTED_BASE_FIELD_MODULUS: u64 = 18_446_744_069_414_584_321;
+    const SELECTED_CHALLENGE_EXTENSION_DEGREE: usize = 5;
+    const SELECTED_OPENING_DEGREE_BOUND_EXCLUSIVE: u64 = 262_144;
+    const SELECTED_EVALUATION_DOMAIN_SIZE: u64 = 2_097_152;
+    const SELECTED_DEEP_POINT_COUNT: u16 = 1;
+    const SELECTED_FRI_FOLD_COUNT: u16 = 10;
+    const SELECTED_TERMINAL_COEFFICIENT_COUNT: u32 = 256;
+    const COMMITTED_MATERIAL_QUOTIENT_DECOMPOSITION_STRIDE: u64 = 68_267;
+    const PUBLIC_AGGREGATE_QUOTIENT_DECOMPOSITION_STRIDE: u64 = 32_768;
+    const COMMITTED_MATERIAL_QUOTIENT_COMPONENT_DEGREE_BOUND_EXCLUSIVE: u64 = 68_652;
+    const PUBLIC_AGGREGATE_QUOTIENT_COMPONENT_DEGREE_BOUND_EXCLUSIVE: u64 = 32_768;
+    const OTHER_FAMILY_QUOTIENT_COMPONENT_DEGREE_BOUND_EXCLUSIVE: u64 = 33_884;
+    const COMMITTED_MATERIAL_QUERY_COUNT: u32 = 192;
+    const OTHER_FAMILY_QUERY_COUNT: u32 = 168;
+    const COMMITTED_MATERIAL_QUOTIENT_COMPONENT_COUNT: u16 = 3;
+    const PUBLIC_AGGREGATE_QUOTIENT_COMPONENT_COUNT: u16 = 9;
+    const OTHER_FAMILY_QUOTIENT_COMPONENT_COUNT: u16 = 8;
+
+    let observed_families = compiler_ceilings
+        .iter()
+        .map(|variant| variant.application_statement_schema_identifier())
+        .collect::<BTreeSet<_>>();
+    let expected_families = crate::bgv::proof_suite::FIRST_PROFILE_APPLICATION_FAMILIES
+        .into_iter()
+        .collect::<BTreeSet<_>>();
+    if PROOF_BASE_FIELD_MODULUS != SELECTED_BASE_FIELD_MODULUS
+        || PROOF_CHALLENGE_EXTENSION_DEGREE != SELECTED_CHALLENGE_EXTENSION_DEGREE
+        || PROOF_DEEP_POINT_COUNT != SELECTED_DEEP_POINT_COUNT
+        || observed_families != expected_families
+        || observed_families.len()
+            != crate::bgv::proof_suite::FIRST_PROFILE_APPLICATION_FAMILIES.len()
+    {
+        return Err(SelectedProofAccountingError::InvalidProfile);
+    }
+
+    for variant in compiler_ceilings {
+        let schema_identifier = variant.application_statement_schema_identifier();
+        let is_committed_material = matches!(
+            schema_identifier,
+            ProofApplicationSlotCeilings::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER
+                | ProofApplicationSlotCeilings::AGGREGATE_THRESHOLD_SHARE_STATEMENT_SCHEMA_IDENTIFIER
+        );
+        let is_public_aggregate =
+            ProofApplicationSlotCeilings::PUBLIC_ONLY_FAMILY_SCHEMA_IDENTIFIERS
+                .contains(&schema_identifier);
+        let expected_query_count = if is_committed_material {
+            COMMITTED_MATERIAL_QUERY_COUNT
+        } else {
+            OTHER_FAMILY_QUERY_COUNT
+        };
+        let expected_quotient_component_count = if is_committed_material {
+            COMMITTED_MATERIAL_QUOTIENT_COMPONENT_COUNT
+        } else if is_public_aggregate {
+            PUBLIC_AGGREGATE_QUOTIENT_COMPONENT_COUNT
+        } else {
+            OTHER_FAMILY_QUOTIENT_COMPONENT_COUNT
+        };
+        let expected_quotient_component_degree_bound_exclusive = if is_committed_material {
+            COMMITTED_MATERIAL_QUOTIENT_COMPONENT_DEGREE_BOUND_EXCLUSIVE
+        } else if is_public_aggregate {
+            PUBLIC_AGGREGATE_QUOTIENT_COMPONENT_DEGREE_BOUND_EXCLUSIVE
+        } else {
+            OTHER_FAMILY_QUOTIENT_COMPONENT_DEGREE_BOUND_EXCLUSIVE
+        };
+        let quotient_decomposition_stride_is_selected = if is_committed_material {
+            variant.quotient_decomposition_stride()
+                == COMMITTED_MATERIAL_QUOTIENT_DECOMPOSITION_STRIDE
+        } else if is_public_aggregate {
+            variant.quotient_decomposition_stride()
+                == PUBLIC_AGGREGATE_QUOTIENT_DECOMPOSITION_STRIDE
+        } else {
+            variant.quotient_decomposition_stride() > 0
+                && variant.quotient_decomposition_stride()
+                    <= expected_quotient_component_degree_bound_exclusive
+        };
+        if variant.opening_degree_bound_exclusive() != SELECTED_OPENING_DEGREE_BOUND_EXCLUSIVE
+            || variant.evaluation_domain_size() != SELECTED_EVALUATION_DOMAIN_SIZE
+            || variant.evaluation_domain_size() / variant.opening_degree_bound_exclusive() != 8
+            || variant.quotient_component_degree_bound_exclusive()
+                != expected_quotient_component_degree_bound_exclusive
+            || !quotient_decomposition_stride_is_selected
+            || variant.fri_fold_count() != SELECTED_FRI_FOLD_COUNT
+            || variant.terminal_coefficient_count() != SELECTED_TERMINAL_COEFFICIENT_COUNT
+            || variant.query_orbit_count() != variant.evaluation_domain_size() / 2
+            || variant.unique_query_count() != expected_query_count
+            || variant.quotient_component_count() != expected_quotient_component_count
+        {
+            return Err(SelectedProofAccountingError::InvalidProfile);
+        }
+    }
+
+    let vss = compiler_ceilings
+        .iter()
+        .find(|variant| {
+            variant.application_statement_schema_identifier()
+                == ProofApplicationSlotCeilings::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER
+        })
+        .ok_or(SelectedProofAccountingError::InvalidProfile)?;
+    let aggregate = compiler_ceilings
+        .iter()
+        .find(|variant| {
+            variant.application_statement_schema_identifier()
+                == ProofApplicationSlotCeilings::AGGREGATE_THRESHOLD_SHARE_STATEMENT_SCHEMA_IDENTIFIER
+        })
+        .ok_or(SelectedProofAccountingError::InvalidProfile)?;
+    if (
+        vss.relation_column_count(),
+        vss.verifier_sequence_relation_column_count(),
+        vss.bound_tree_relation_column_count(),
+        vss.prover_relation_column_count(),
+        vss.relation_constraint_count(),
+    ) != (3_451, 0, 448, 3_003, 3_799)
+        || (
+            aggregate.relation_column_count(),
+            aggregate.verifier_sequence_relation_column_count(),
+            aggregate.bound_tree_relation_column_count(),
+            aggregate.prover_relation_column_count(),
+            aggregate.relation_constraint_count(),
+        ) != (2_528, 0, 352, 2_176, 2_672)
+    {
+        return Err(SelectedProofAccountingError::InvalidProfile);
+    }
+    Ok(())
+}
+
+fn selected_variant_logical_entry_count(
+    application_statement_schema_identifier: u16,
+    variant: &RelationPlanVariant,
+) -> Result<u32, SelectedProofAccountingError> {
+    match application_statement_schema_identifier {
+        ProofApplicationSlotCeilings::GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER => {
+            u32::try_from(
+                selected_galois_key_share_relation_plan_input()
+                    .map_err(|_| SelectedProofAccountingError::InvalidProfile)?
+                    .ordered_entries
+                    .len(),
+            )
+            .map_err(|_| SelectedProofAccountingError::CountOverflow)
+            .and_then(|count| {
+                if count == 0 {
+                    Err(SelectedProofAccountingError::InvalidProfile)
+                } else {
+                    Ok(count)
+                }
+            })
+        }
+        ProofApplicationSlotCeilings::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER => {
+            let top_count = variant
+                .top_count()
+                .ok_or(SelectedProofAccountingError::InvalidProfile)?;
+            u32::try_from(
+                selected_evaluator_entry_positions(top_count)
+                    .map_err(|_| SelectedProofAccountingError::InvalidProfile)?
+                    .len(),
+            )
+            .map_err(|_| SelectedProofAccountingError::CountOverflow)
+            .and_then(|count| {
+                if count == 0 {
+                    Err(SelectedProofAccountingError::InvalidProfile)
+                } else {
+                    Ok(count)
+                }
+            })
+        }
+        _ => Ok(1),
+    }
+}
+
+fn selected_complete_action_variant_multiplicity(
+    application_statement_schema_identifier: u16,
+    variant: &RelationPlanVariant,
+    application_slot_ceilings: &ProofApplicationSlotCeilings,
+    key_positions: &EvaluatorProgramKeyPositions,
+) -> Result<u32, SelectedProofAccountingError> {
+    let family_slot_count = application_slot_ceilings
+        .family_ceiling(application_statement_schema_identifier)
+        .ok_or(SelectedProofAccountingError::InvalidProfile)?;
+    match application_statement_schema_identifier {
+        ProofApplicationSlotCeilings::RELINEARIZATION_ROUND_ONE_STATEMENT_SCHEMA_IDENTIFIER
+        | ProofApplicationSlotCeilings::RKG_ROUND_ONE_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER
+        | ProofApplicationSlotCeilings::RELINEARIZATION_ROUND_TWO_STATEMENT_SCHEMA_IDENTIFIER => {
+            let schedule_count =
+                u32::try_from(key_positions.relinearization_catalog_levels().len())
+                    .map_err(|_| SelectedProofAccountingError::CountOverflow)?;
+            if schedule_count == 0
+                || variant.schedule_position().is_none()
+                || family_slot_count % schedule_count != 0
+            {
+                return Err(SelectedProofAccountingError::InvalidProfile);
+            }
+            Ok(family_slot_count / schedule_count)
+        }
+        ProofApplicationSlotCeilings::GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER => {
+            let schedule_count = u32::try_from(selected_galois_key_share_batch_schedule().len())
+                .map_err(|_| SelectedProofAccountingError::CountOverflow)?;
+            if schedule_count == 0
+                || variant.schedule_position().is_none()
+                || family_slot_count % schedule_count != 0
+            {
+                return Err(SelectedProofAccountingError::InvalidProfile);
+            }
+            Ok(family_slot_count / schedule_count)
+        }
+        ProofApplicationSlotCeilings::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER => {
+            if variant.schedule_position().is_some() || family_slot_count != 1 {
+                return Err(SelectedProofAccountingError::InvalidProfile);
+            }
+            Ok(u32::from(
+                variant.top_count() == Some(FOUNDATION_PROFILE.option_count),
+            ))
+        }
+        _ => {
+            if variant.schedule_position().is_some() || variant.top_count().is_some() {
+                return Err(SelectedProofAccountingError::InvalidProfile);
+            }
+            Ok(family_slot_count)
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -657,8 +1605,8 @@ enum SourceProviderMemoryAccounting {
     BallotValidity(SelectedBallotValidityCarrierBufferAccounting),
     CollectivePublicKey(CollectivePublicKeySourceProviderMemoryAccounting),
     EvaluatorAggregate(SelectedEvaluatorAggregateSourceProviderMemoryAccounting),
-    GaloisKeyShare(GaloisKeyShareSourceProviderMemoryAccounting),
     CommittedMaterial(CommittedMaterialSourceProviderMemoryAccounting),
+    Common(CommonProofSourceProviderMemoryAccounting),
 }
 
 impl SourceProviderMemoryAccounting {
@@ -673,12 +1621,10 @@ impl SourceProviderMemoryAccounting {
             Self::EvaluatorAggregate(accounting) => {
                 accounting.loading_persistent_resident_byte_length()
             }
-            Self::GaloisKeyShare(accounting) => {
-                accounting.loading_persistent_resident_byte_length()
-            }
             Self::CommittedMaterial(accounting) => {
                 accounting.loading_persistent_resident_byte_length()
             }
+            Self::Common(accounting) => accounting.loading_persistent_resident_byte_length(),
         }
     }
 
@@ -693,10 +1639,10 @@ impl SourceProviderMemoryAccounting {
             Self::EvaluatorAggregate(accounting) => {
                 accounting.post_source_polynomial_finish_persistent_resident_byte_length()
             }
-            Self::GaloisKeyShare(accounting) => {
+            Self::CommittedMaterial(accounting) => {
                 accounting.post_source_polynomial_finish_persistent_resident_byte_length()
             }
-            Self::CommittedMaterial(accounting) => {
+            Self::Common(accounting) => {
                 accounting.post_source_polynomial_finish_persistent_resident_byte_length()
             }
         }
@@ -713,12 +1659,10 @@ impl SourceProviderMemoryAccounting {
             Self::EvaluatorAggregate(accounting) => {
                 accounting.additional_loading_source_polynomials_transient_byte_length()
             }
-            Self::GaloisKeyShare(accounting) => {
-                accounting.additional_loading_source_polynomials_transient_byte_length()
-            }
             Self::CommittedMaterial(accounting) => {
                 accounting.additional_loading_source_polynomials_transient_byte_length()
             }
+            Self::Common(accounting) => accounting.additional_loading_transient_byte_length(),
         }
     }
 
@@ -733,12 +1677,10 @@ impl SourceProviderMemoryAccounting {
             Self::EvaluatorAggregate(accounting) => {
                 accounting.maximum_returned_source_polynomial_byte_length()
             }
-            Self::GaloisKeyShare(accounting) => {
-                accounting.maximum_returned_source_polynomial_byte_length()
-            }
             Self::CommittedMaterial(accounting) => {
                 accounting.maximum_returned_source_polynomial_byte_length()
             }
+            Self::Common(accounting) => accounting.maximum_returned_source_polynomial_byte_length(),
         }
     }
 }
@@ -787,8 +1729,83 @@ fn require_selected_variant_resource_bounds(
     committed_material_source_provider_memory_accounting: Option<
         CommittedMaterialSourceProviderMemoryAccounting,
     >,
+    setup_aggregate_descriptor_dimensions: SetupGenerationRelinearizationAggregateDescriptorDimensions,
 ) -> Result<SelectedProofVariantResourceBounds, SelectedProofAccountingError> {
     let source_provider_memory_accounting = match application_statement_schema_identifier {
+        ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER => {
+            let relation_input = selected_same_secret_relation_plan_input()
+                .map_err(|_| SelectedProofAccountingError::InvalidProfile)?;
+            let compiled = compile_same_secret_relation_with_source_layout(
+                &relation_input,
+                relation_context,
+            )
+            .map_err(|_| SelectedProofAccountingError::InvalidProfile)?;
+            let expected_variant = compiled
+                .relation_plan
+                .select_variant(variant.schedule_position(), variant.top_count())
+                .map_err(|_| SelectedProofAccountingError::InvalidProfile)?;
+            if expected_variant
+                .canonical_hash()
+                .map_err(|_| SelectedProofAccountingError::InvalidProfile)?
+                != variant
+                    .canonical_hash()
+                    .map_err(|_| SelectedProofAccountingError::InvalidProfile)?
+            {
+                return Err(SelectedProofAccountingError::InvalidProfile);
+            }
+            let provider = same_secret_source_provider_memory_accounting(
+                variant,
+                relation_context,
+                relation_input.ring_degree,
+                &compiled.source_layout,
+                canonical_application_statement_bytes.len(),
+            )
+            .map_err(|_| SelectedProofAccountingError::ResourcePlanning)?;
+            let authority = selected_setup_generation_retained_memory_accounting(
+                SelectedSetupGenerationLifecycleState::SameSecretProof,
+            )
+            .map_err(|_| SelectedProofAccountingError::ResourcePlanning)?;
+            Some(SourceProviderMemoryAccounting::Common(
+                add_persistent_source_owner(provider, authority.active_payload_byte_length())?,
+            ))
+        }
+        ProofApplicationSlotCeilings::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER => {
+            let relation_input = selected_public_key_share_relation_plan_input()
+                .map_err(|_| SelectedProofAccountingError::InvalidProfile)?;
+            let compiled = compile_public_key_share_relation_with_source_layout(
+                &relation_input,
+                relation_context,
+            )
+            .map_err(|_| SelectedProofAccountingError::InvalidProfile)?;
+            let expected_variant = compiled
+                .relation_plan
+                .select_variant(variant.schedule_position(), variant.top_count())
+                .map_err(|_| SelectedProofAccountingError::InvalidProfile)?;
+            if expected_variant
+                .canonical_hash()
+                .map_err(|_| SelectedProofAccountingError::InvalidProfile)?
+                != variant
+                    .canonical_hash()
+                    .map_err(|_| SelectedProofAccountingError::InvalidProfile)?
+            {
+                return Err(SelectedProofAccountingError::InvalidProfile);
+            }
+            let provider = public_key_share_source_provider_memory_accounting(
+                variant,
+                relation_context,
+                relation_input.ring_degree,
+                &compiled.source_layout,
+                canonical_application_statement_bytes.len(),
+            )
+            .map_err(|_| SelectedProofAccountingError::ResourcePlanning)?;
+            let authority = selected_setup_generation_retained_memory_accounting(
+                SelectedSetupGenerationLifecycleState::PublicKeyShareProof,
+            )
+            .map_err(|_| SelectedProofAccountingError::ResourcePlanning)?;
+            Some(SourceProviderMemoryAccounting::Common(
+                add_persistent_source_owner(provider, authority.active_payload_byte_length())?,
+            ))
+        }
         ProofApplicationSlotCeilings::BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER => {
             Some(SourceProviderMemoryAccounting::BallotValidity(
                 selected_ballot_validity_carrier_buffer_accounting()
@@ -801,14 +1818,132 @@ fn require_selected_variant_resource_bounds(
                     .map_err(|_| SelectedProofAccountingError::ResourcePlanning)?,
             ))
         }
-        ProofApplicationSlotCeilings::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER => {
+        ProofApplicationSlotCeilings::RKG_ROUND_ONE_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER
+        | ProofApplicationSlotCeilings::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER => {
             Some(SourceProviderMemoryAccounting::EvaluatorAggregate(
                 evaluator_aggregate_source_provider_memory_accounting(variant, relation_context)
                     .map_err(|_| SelectedProofAccountingError::ResourcePlanning)?,
             ))
         }
-        ProofApplicationSlotCeilings::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER
-        | ProofApplicationSlotCeilings::AGGREGATE_THRESHOLD_SHARE_STATEMENT_SCHEMA_IDENTIFIER => {
+        ProofApplicationSlotCeilings::RELINEARIZATION_ROUND_ONE_STATEMENT_SCHEMA_IDENTIFIER => {
+            let (relation_input, _) = selected_relinearization_relation_plan_inputs()
+                .map_err(|_| SelectedProofAccountingError::InvalidProfile)?;
+            let compiled = compile_relinearization_round_one_relation_with_source_layout(
+                &relation_input,
+                relation_context,
+            )
+            .map_err(|_| SelectedProofAccountingError::InvalidProfile)?;
+            let expected_variant = compiled
+                .relation_plan
+                .select_variant(variant.schedule_position(), variant.top_count())
+                .map_err(|_| SelectedProofAccountingError::InvalidProfile)?;
+            if expected_variant
+                .canonical_hash()
+                .map_err(|_| SelectedProofAccountingError::InvalidProfile)?
+                != variant
+                    .canonical_hash()
+                    .map_err(|_| SelectedProofAccountingError::InvalidProfile)?
+            {
+                return Err(SelectedProofAccountingError::InvalidProfile);
+            }
+            let provider = relinearization_round_one_source_provider_memory_accounting(
+                variant,
+                relation_context,
+                &relation_input.geometry,
+                &compiled.source_layout,
+                canonical_application_statement_bytes.len(),
+            )
+            .map_err(|_| SelectedProofAccountingError::ResourcePlanning)?;
+            let authority = selected_setup_generation_retained_memory_accounting(
+                SelectedSetupGenerationLifecycleState::RelinearizationRoundOneProof,
+            )
+            .map_err(|_| SelectedProofAccountingError::ResourcePlanning)?;
+            Some(SourceProviderMemoryAccounting::Common(
+                add_persistent_source_owner(provider, authority.active_payload_byte_length())?,
+            ))
+        }
+        ProofApplicationSlotCeilings::RELINEARIZATION_ROUND_TWO_STATEMENT_SCHEMA_IDENTIFIER => {
+            let (_, relation_input) = selected_relinearization_relation_plan_inputs()
+                .map_err(|_| SelectedProofAccountingError::InvalidProfile)?;
+            let compiled = compile_relinearization_round_two_relation_with_source_layout(
+                &relation_input,
+                relation_context,
+            )
+            .map_err(|_| SelectedProofAccountingError::InvalidProfile)?;
+            let expected_variant = compiled
+                .relation_plan
+                .select_variant(variant.schedule_position(), variant.top_count())
+                .map_err(|_| SelectedProofAccountingError::InvalidProfile)?;
+            if expected_variant
+                .canonical_hash()
+                .map_err(|_| SelectedProofAccountingError::InvalidProfile)?
+                != variant
+                    .canonical_hash()
+                    .map_err(|_| SelectedProofAccountingError::InvalidProfile)?
+            {
+                return Err(SelectedProofAccountingError::InvalidProfile);
+            }
+            let data_primes_per_block = relation_input
+                .geometry
+                .decomposition_blocks
+                .first()
+                .map(|block| block.data_modulus_indices.len())
+                .filter(|count| *count != 0)
+                .ok_or(SelectedProofAccountingError::InvalidProfile)?;
+            let aggregate_topology = KeySwitchComponentMaterialTopology::from_suite_algebra(
+                &relation_input.geometry.data_moduli,
+                &relation_input.geometry.special_moduli,
+                data_primes_per_block,
+                usize::try_from(relation_input.geometry.ring_degree)
+                    .map_err(|_| SelectedProofAccountingError::CountOverflow)?,
+            )
+            .map_err(|_| SelectedProofAccountingError::InvalidProfile)?;
+            let accounting = relinearization_round_two_source_provider_memory_accounting(
+                variant,
+                relation_context,
+                &relation_input.geometry,
+                &compiled.source_layout,
+                &aggregate_topology,
+                canonical_application_statement_bytes.len(),
+            )
+            .map_err(|_| SelectedProofAccountingError::ResourcePlanning)?;
+            let provider = CommonProofSourceProviderMemoryAccounting::new(
+                accounting.loading_persistent_resident_byte_length(),
+                accounting.post_source_polynomial_finish_persistent_resident_byte_length(),
+                accounting.additional_loading_source_polynomials_transient_byte_length(),
+                accounting.maximum_returned_source_polynomial_byte_length(),
+            );
+            let authority = selected_setup_generation_retained_memory_accounting(
+                SelectedSetupGenerationLifecycleState::RelinearizationRoundTwoProof(
+                    setup_aggregate_descriptor_dimensions,
+                ),
+            )
+            .map_err(|_| SelectedProofAccountingError::ResourcePlanning)?;
+            Some(SourceProviderMemoryAccounting::Common(
+                add_persistent_source_owner(provider, authority.active_payload_byte_length())?,
+            ))
+        }
+        ProofApplicationSlotCeilings::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER => {
+            let committed = committed_material_source_provider_memory_accounting
+                .ok_or(SelectedProofAccountingError::ResourcePlanning)?;
+            let authority = selected_setup_generation_retained_memory_accounting(
+                SelectedSetupGenerationLifecycleState::VssShareLinkageProof,
+            )
+            .map_err(|_| SelectedProofAccountingError::ResourcePlanning)?;
+            let provider = CommonProofSourceProviderMemoryAccounting::new(
+                committed.loading_persistent_resident_byte_length(),
+                committed.post_source_polynomial_finish_persistent_resident_byte_length(),
+                committed.additional_loading_source_polynomials_transient_byte_length(),
+                committed.maximum_returned_source_polynomial_byte_length(),
+            );
+            Some(SourceProviderMemoryAccounting::Common(
+                add_persistent_source_owner(
+                    provider,
+                    authority.vss_proof_wrapper_and_catalog_byte_length(),
+                )?,
+            ))
+        }
+        ProofApplicationSlotCeilings::AGGREGATE_THRESHOLD_SHARE_STATEMENT_SCHEMA_IDENTIFIER => {
             Some(SourceProviderMemoryAccounting::CommittedMaterial(
                 committed_material_source_provider_memory_accounting
                     .ok_or(SelectedProofAccountingError::ResourcePlanning)?,
@@ -817,14 +1952,33 @@ fn require_selected_variant_resource_bounds(
         ProofApplicationSlotCeilings::GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER => {
             let relation_input = selected_galois_key_share_relation_plan_input()
                 .map_err(|_| SelectedProofAccountingError::InvalidProfile)?;
-            Some(SourceProviderMemoryAccounting::GaloisKeyShare(
-                galois_key_share_source_provider_memory_accounting(
-                    &relation_input,
-                    variant,
-                    relation_context,
-                    canonical_application_statement_bytes.len(),
-                )
-                .map_err(|_| SelectedProofAccountingError::ResourcePlanning)?,
+            let accounting = galois_key_share_source_provider_memory_accounting(
+                &relation_input,
+                variant,
+                relation_context,
+                canonical_application_statement_bytes.len(),
+            )
+            .map_err(|_| SelectedProofAccountingError::ResourcePlanning)?;
+            let provider = CommonProofSourceProviderMemoryAccounting::new(
+                accounting.loading_persistent_resident_byte_length(),
+                accounting.post_source_polynomial_finish_persistent_resident_byte_length(),
+                accounting.additional_loading_source_polynomials_transient_byte_length(),
+                accounting.maximum_returned_source_polynomial_byte_length(),
+            );
+            let authority = selected_setup_generation_retained_memory_accounting(
+                SelectedSetupGenerationLifecycleState::GaloisKeyShareProof(
+                    setup_aggregate_descriptor_dimensions,
+                ),
+            )
+            .map_err(|_| SelectedProofAccountingError::ResourcePlanning)?;
+            Some(SourceProviderMemoryAccounting::Common(
+                add_persistent_source_owner(provider, authority.active_payload_byte_length())?,
+            ))
+        }
+        ProofApplicationSlotCeilings::TARGET_SHARE_PROOF_STATEMENT_SCHEMA_IDENTIFIER => {
+            Some(SourceProviderMemoryAccounting::Common(
+                selected_kllps_target_release_source_provider_memory_accounting()
+                    .map_err(|_| SelectedProofAccountingError::ResourcePlanning)?,
             ))
         }
         _ => None,
@@ -913,7 +2067,7 @@ fn require_selected_variant_resource_bounds(
             .map_err(|_| SelectedProofAccountingError::CountOverflow)?,
     )
     .map_err(|_| SelectedProofAccountingError::ResourcePlanning)?;
-    let maximum_combined_wasm_resident_byte_length = require_selected_resident_memory_bounds(
+    let resident_memory_bounds = require_selected_resident_memory_bounds(
         &resident_memory_requirement,
         checkpoint_custody_requirement,
         transport_sizing.transcript_schedule.fri_fold_count(),
@@ -939,11 +2093,32 @@ fn require_selected_variant_resource_bounds(
             .map_err(|_| SelectedProofAccountingError::CountOverflow)?,
         u64::from(checkpoint_custody_requirement.peak_copied_buffer_byte_length()),
     ];
+    let maximum_copied_buffer_byte_length_for_variant = copied_buffer_requirements
+        .iter()
+        .copied()
+        .max()
+        .ok_or(SelectedProofAccountingError::ResourcePlanning)?;
+    let proof_byte_length = u64::try_from(runtime_limits.proof_byte_length())
+        .map_err(|_| SelectedProofAccountingError::CountOverflow)?;
+    let maximum_proof_output_chunk_byte_length =
+        u64::try_from(MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH)
+            .map_err(|_| SelectedProofAccountingError::CountOverflow)?
+            .min(proof_byte_length);
+    let proof_output_chunk_count = proof_byte_length.div_ceil(
+        u64::try_from(MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH)
+            .map_err(|_| SelectedProofAccountingError::CountOverflow)?,
+    );
     if u64::try_from(runtime_limits.proof_byte_length())
         .map_err(|_| SelectedProofAccountingError::CountOverflow)?
         > MAXIMUM_CANONICAL_STREAM_BYTE_LENGTH
         || external_memory_requirement.peak_stored_byte_length()
             > MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_STORED_BYTE_LENGTH
+        || usize::try_from(external_memory_requirement.distinct_physical_object_count())
+            .ok()
+            .is_none_or(|count| count > MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_OBJECT_COUNT)
+        || external_memory_requirement.distinct_physical_object_count() == 0
+        || external_memory_requirement.object_lifecycle_count()
+            < external_memory_requirement.distinct_physical_object_count()
         || checkpoint_custody_requirement.restore_workspace_byte_ceiling()
             > MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH
         || copied_buffer_requirements
@@ -953,9 +2128,21 @@ fn require_selected_variant_resource_bounds(
         return Err(SelectedProofAccountingError::ResourcePlanning);
     }
     Ok(SelectedProofVariantResourceBounds {
-        maximum_combined_wasm_resident_byte_length,
+        maximum_combined_wasm_resident_byte_length: resident_memory_bounds
+            .maximum_combined_wasm_resident_byte_length,
+        resident_phases: resident_memory_bounds.ordered_phases,
+        maximum_prefetched_query_byte_length: runtime_limits.prefetched_query_byte_length(),
+        maximum_external_memory_transaction_payload_byte_length: external_memory_requirement
+            .maximum_transaction_payload_byte_length(),
+        maximum_proof_output_chunk_byte_length,
+        proof_output_chunk_count,
+        maximum_copied_buffer_byte_length: maximum_copied_buffer_byte_length_for_variant,
         external_memory_peak_stored_byte_length: external_memory_requirement
             .peak_stored_byte_length(),
+        external_memory_distinct_physical_object_count: external_memory_requirement
+            .distinct_physical_object_count(),
+        external_memory_object_lifecycle_count: external_memory_requirement
+            .object_lifecycle_count(),
         external_memory_total_written_byte_length: external_memory_requirement
             .total_written_byte_length(),
         external_memory_total_read_byte_length: external_memory_requirement
@@ -1015,7 +2202,7 @@ fn require_selected_resident_memory_bounds(
     fri_fold_count: u16,
     source_provider_memory_accounting: Option<SourceProviderMemoryAccounting>,
     application_runtime_memory_accounting: Option<ApplicationRuntimeMemoryAccounting>,
-) -> Result<u64, SelectedProofAccountingError> {
+) -> Result<SelectedResidentMemoryBounds, SelectedProofAccountingError> {
     let retained_cursor_state_byte_length = checkpoint_custody_requirement
         .cursor_manifest_requirement()
         .retained_cursor_state_byte_ceiling();
@@ -1041,6 +2228,10 @@ fn require_selected_resident_memory_bounds(
 
     let mut observed_checkpoint_phase_mask = 0_u8;
     let mut maximum_combined_wasm_resident_byte_length = 0_u64;
+    let mut ordered_phases = Vec::new();
+    ordered_phases
+        .try_reserve_exact(resident_memory_requirement.phases().len())
+        .map_err(|_| SelectedProofAccountingError::AllocationLimitExceeded)?;
     for phase_plan in resident_memory_requirement.phases() {
         let (checkpoint_phase_bit, checkpoint_boundary_count) = match phase_plan.phase() {
             CommonProofResidentMemoryPhase::DerivingAuxiliaryColumns => (1_u8, 1_u16),
@@ -1111,11 +2302,29 @@ fn require_selected_resident_memory_bounds(
         }
         maximum_combined_wasm_resident_byte_length =
             maximum_combined_wasm_resident_byte_length.max(combined_byte_length);
+        ordered_phases.push(SelectedProofResidentPhaseResourceAccounting {
+            phase: phase_plan.phase(),
+            prover_resident_byte_length: phase_plan.total_byte_length(),
+            source_provider_persistent_resident_byte_length,
+            source_provider_loading_transient_byte_length,
+            application_runtime_persistent_resident_byte_length,
+            application_runtime_boundary_overlap_byte_length,
+            checkpoint_custody_byte_length,
+            combined_wasm_resident_byte_length: combined_byte_length,
+        });
     }
-    if observed_checkpoint_phase_mask != 31 {
+    if observed_checkpoint_phase_mask != 31
+        || ordered_phases.len() != resident_memory_requirement.phases().len()
+        || ordered_phases
+            .windows(2)
+            .any(|pair| pair[0].phase as u8 >= pair[1].phase as u8)
+    {
         return Err(SelectedProofAccountingError::ResourcePlanning);
     }
-    Ok(maximum_combined_wasm_resident_byte_length)
+    Ok(SelectedResidentMemoryBounds {
+        maximum_combined_wasm_resident_byte_length,
+        ordered_phases: ordered_phases.into_boxed_slice(),
+    })
 }
 
 /// One physical proof family in the complete selected action. Variant rows are
@@ -1126,11 +2335,15 @@ pub(crate) struct SelectedPhysicalProofFamilyResourceAccounting {
     application_statement_schema_identifier: u16,
     physical_proof_count: u32,
     compiler_variant_count: u32,
+    selected_variant_count: u32,
     maximum_logical_entry_count_per_proof: u32,
+    complete_action_logical_entry_count: u64,
     maximum_proof_byte_length: u64,
     complete_action_proof_byte_ceiling: u64,
     maximum_wasm_resident_byte_length: u64,
     maximum_external_memory_peak_stored_byte_length: u64,
+    maximum_external_memory_distinct_physical_object_count: u32,
+    complete_action_external_memory_object_lifecycle_count: u64,
     complete_action_external_memory_written_byte_length: u64,
     complete_action_external_memory_read_byte_length: u64,
     complete_action_external_memory_transaction_count: u64,
@@ -1149,8 +2362,16 @@ impl SelectedPhysicalProofFamilyResourceAccounting {
         self.compiler_variant_count
     }
 
+    pub(crate) const fn selected_variant_count(self) -> u32 {
+        self.selected_variant_count
+    }
+
     pub(crate) const fn maximum_logical_entry_count_per_proof(self) -> u32 {
         self.maximum_logical_entry_count_per_proof
+    }
+
+    pub(crate) const fn complete_action_logical_entry_count(self) -> u64 {
+        self.complete_action_logical_entry_count
     }
 
     pub(crate) const fn maximum_proof_byte_length(self) -> u64 {
@@ -1169,6 +2390,14 @@ impl SelectedPhysicalProofFamilyResourceAccounting {
         self.maximum_external_memory_peak_stored_byte_length
     }
 
+    pub(crate) const fn maximum_external_memory_distinct_physical_object_count(self) -> u32 {
+        self.maximum_external_memory_distinct_physical_object_count
+    }
+
+    pub(crate) const fn complete_action_external_memory_object_lifecycle_count(self) -> u64 {
+        self.complete_action_external_memory_object_lifecycle_count
+    }
+
     pub(crate) const fn complete_action_external_memory_written_byte_length(self) -> u64 {
         self.complete_action_external_memory_written_byte_length
     }
@@ -1182,16 +2411,270 @@ impl SelectedPhysicalProofFamilyResourceAccounting {
     }
 }
 
+/// Exact production-derived non-proof material for the same selected action.
+/// Fixed-width streams are exact generated lengths; canonical BGV object
+/// values are codec ceilings because residue varuint lengths depend on the
+/// generated coefficients. Signed-envelope overhead remains owned by the
+/// verified generated-mailbox catalog and is not guessed here. The ballot
+/// corpus covers all selected action slots; it is traffic/storage volume, not
+/// an assertion that all candidate packages are simultaneously live or enter
+/// the evaluator aggregate.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct SelectedCompleteActionMaterialResourceAccounting {
+    one_dealer_recipient_private_vss_payload_byte_length: u64,
+    one_dealer_private_vss_payload_upload_byte_length: u64,
+    one_recipient_private_vss_payload_download_byte_length: u64,
+    ceremony_private_vss_payload_byte_length: u64,
+    evaluator_source_wire_byte_length_per_participant: u64,
+    evaluator_source_resident_byte_length_per_participant: u64,
+    final_evaluator_key_store_wire_byte_length: u64,
+    final_evaluator_key_store_resident_byte_length: u64,
+    ceremony_evaluator_setup_wire_byte_length: u64,
+    ceremony_evaluator_source_and_final_resident_volume_byte_length: u64,
+    one_ballot_ciphertext_stream_byte_length: u64,
+    one_ballot_ciphertext_stream_chunk_count: u32,
+    complete_action_ballot_candidate_package_corpus_byte_length: u64,
+    complete_action_ballot_candidate_package_corpus_chunk_count: u64,
+    ballot_prover_material_live_set_peak_byte_length: u64,
+    one_target_ciphertext_canonical_byte_length_ceiling: u64,
+    paired_target_ciphertext_canonical_byte_length_ceiling: u64,
+    one_target_partial_stream_byte_length: u64,
+    one_participant_paired_target_partial_stream_byte_length: u64,
+    ceremony_paired_target_partial_stream_byte_length: u64,
+    target_release_proof_source_persistent_resident_byte_length: u64,
+    target_release_paired_partial_stream_custody_resident_byte_length: u64,
+    target_release_paired_generation_scratch_byte_length: u64,
+    target_release_one_role_proof_callback_scratch_byte_length: u64,
+}
+
+impl SelectedCompleteActionMaterialResourceAccounting {
+    pub(crate) const fn one_dealer_recipient_private_vss_payload_byte_length(self) -> u64 {
+        self.one_dealer_recipient_private_vss_payload_byte_length
+    }
+
+    pub(crate) const fn one_dealer_private_vss_payload_upload_byte_length(self) -> u64 {
+        self.one_dealer_private_vss_payload_upload_byte_length
+    }
+
+    pub(crate) const fn one_recipient_private_vss_payload_download_byte_length(self) -> u64 {
+        self.one_recipient_private_vss_payload_download_byte_length
+    }
+
+    pub(crate) const fn ceremony_private_vss_payload_byte_length(self) -> u64 {
+        self.ceremony_private_vss_payload_byte_length
+    }
+
+    pub(crate) const fn evaluator_source_wire_byte_length_per_participant(self) -> u64 {
+        self.evaluator_source_wire_byte_length_per_participant
+    }
+
+    pub(crate) const fn evaluator_source_resident_byte_length_per_participant(self) -> u64 {
+        self.evaluator_source_resident_byte_length_per_participant
+    }
+
+    pub(crate) const fn final_evaluator_key_store_wire_byte_length(self) -> u64 {
+        self.final_evaluator_key_store_wire_byte_length
+    }
+
+    pub(crate) const fn final_evaluator_key_store_resident_byte_length(self) -> u64 {
+        self.final_evaluator_key_store_resident_byte_length
+    }
+
+    pub(crate) const fn ceremony_evaluator_setup_wire_byte_length(self) -> u64 {
+        self.ceremony_evaluator_setup_wire_byte_length
+    }
+
+    pub(crate) const fn ceremony_evaluator_source_and_final_resident_volume_byte_length(
+        self,
+    ) -> u64 {
+        self.ceremony_evaluator_source_and_final_resident_volume_byte_length
+    }
+
+    pub(crate) const fn one_ballot_ciphertext_stream_byte_length(self) -> u64 {
+        self.one_ballot_ciphertext_stream_byte_length
+    }
+
+    pub(crate) const fn one_ballot_ciphertext_stream_chunk_count(self) -> u32 {
+        self.one_ballot_ciphertext_stream_chunk_count
+    }
+
+    pub(crate) const fn complete_action_ballot_candidate_package_corpus_byte_length(self) -> u64 {
+        self.complete_action_ballot_candidate_package_corpus_byte_length
+    }
+
+    pub(crate) const fn complete_action_ballot_candidate_package_corpus_chunk_count(self) -> u64 {
+        self.complete_action_ballot_candidate_package_corpus_chunk_count
+    }
+
+    pub(crate) const fn ballot_prover_material_live_set_peak_byte_length(self) -> u64 {
+        self.ballot_prover_material_live_set_peak_byte_length
+    }
+
+    pub(crate) const fn one_target_ciphertext_canonical_byte_length_ceiling(self) -> u64 {
+        self.one_target_ciphertext_canonical_byte_length_ceiling
+    }
+
+    pub(crate) const fn paired_target_ciphertext_canonical_byte_length_ceiling(self) -> u64 {
+        self.paired_target_ciphertext_canonical_byte_length_ceiling
+    }
+
+    pub(crate) const fn one_target_partial_stream_byte_length(self) -> u64 {
+        self.one_target_partial_stream_byte_length
+    }
+
+    pub(crate) const fn one_participant_paired_target_partial_stream_byte_length(self) -> u64 {
+        self.one_participant_paired_target_partial_stream_byte_length
+    }
+
+    pub(crate) const fn ceremony_paired_target_partial_stream_byte_length(self) -> u64 {
+        self.ceremony_paired_target_partial_stream_byte_length
+    }
+
+    pub(crate) const fn target_release_proof_source_persistent_resident_byte_length(self) -> u64 {
+        self.target_release_proof_source_persistent_resident_byte_length
+    }
+
+    pub(crate) const fn target_release_paired_partial_stream_custody_resident_byte_length(
+        self,
+    ) -> u64 {
+        self.target_release_paired_partial_stream_custody_resident_byte_length
+    }
+
+    pub(crate) const fn target_release_paired_generation_scratch_byte_length(self) -> u64 {
+        self.target_release_paired_generation_scratch_byte_length
+    }
+
+    pub(crate) const fn target_release_one_role_proof_callback_scratch_byte_length(self) -> u64 {
+        self.target_release_one_role_proof_callback_scratch_byte_length
+    }
+}
+
+fn derive_selected_complete_action_material_resource_accounting()
+-> Result<SelectedCompleteActionMaterialResourceAccounting, SelectedProofAccountingError> {
+    let participant_count = u64::from(FOUNDATION_PROFILE.participant_count);
+    let private_vss_payload_byte_length = selected_recipient_private_vss_payload_byte_length()
+        .map_err(|_| SelectedProofAccountingError::ResourcePlanning)?;
+    let one_dealer_private_vss_payload_upload_byte_length = private_vss_payload_byte_length
+        .checked_mul(participant_count)
+        .ok_or(SelectedProofAccountingError::CountOverflow)?;
+    let ceremony_private_vss_payload_byte_length =
+        one_dealer_private_vss_payload_upload_byte_length
+            .checked_mul(participant_count)
+            .ok_or(SelectedProofAccountingError::CountOverflow)?;
+
+    let evaluator = selected_evaluator_resource_accounting()
+        .map_err(|_| SelectedProofAccountingError::ResourcePlanning)?;
+    let ballot = selected_ballot_validity_carrier_buffer_accounting()
+        .map_err(|_| SelectedProofAccountingError::ResourcePlanning)?;
+    let complete_action_ballot_candidate_package_corpus_byte_length = ballot
+        .canonical_ciphertext_byte_length()
+        .checked_mul(u64::from(SELECTED_MAXIMUM_CANDIDATE_PACKAGES_PER_ACTION))
+        .ok_or(SelectedProofAccountingError::CountOverflow)?;
+    let complete_action_ballot_candidate_package_corpus_chunk_count =
+        u64::from(ballot.canonical_ciphertext_chunk_count())
+            .checked_mul(u64::from(SELECTED_MAXIMUM_CANDIDATE_PACKAGES_PER_ACTION))
+            .ok_or(SelectedProofAccountingError::CountOverflow)?;
+
+    let one_target_ciphertext_canonical_byte_length_ceiling =
+        two_component_data_ciphertext_canonical_byte_length_ceiling_at_level(
+            CANONICAL_TARGET_CIPHERTEXT_LEVEL,
+        )
+        .map_err(|_| SelectedProofAccountingError::CanonicalEncoding)?;
+    let paired_target_role_count = u64::try_from(KLLPS_PAIRED_TARGET_ROLE_COUNT)
+        .map_err(|_| SelectedProofAccountingError::CountOverflow)?;
+    let paired_target_ciphertext_canonical_byte_length_ceiling =
+        one_target_ciphertext_canonical_byte_length_ceiling
+            .checked_mul(paired_target_role_count)
+            .ok_or(SelectedProofAccountingError::CountOverflow)?;
+    let one_target_partial_stream_byte_length = u64::try_from(
+        selected_target_partial_decryption_stream_byte_length()
+            .map_err(|_| SelectedProofAccountingError::ResourcePlanning)?,
+    )
+    .map_err(|_| SelectedProofAccountingError::CountOverflow)?;
+    let one_participant_paired_target_partial_stream_byte_length =
+        one_target_partial_stream_byte_length
+            .checked_mul(paired_target_role_count)
+            .ok_or(SelectedProofAccountingError::CountOverflow)?;
+    let ceremony_paired_target_partial_stream_byte_length =
+        one_participant_paired_target_partial_stream_byte_length
+            .checked_mul(participant_count)
+            .ok_or(SelectedProofAccountingError::CountOverflow)?;
+    let release = selected_kllps_target_release_memory_accounting()
+        .map_err(|_| SelectedProofAccountingError::ResourcePlanning)?;
+
+    let accounting = SelectedCompleteActionMaterialResourceAccounting {
+        one_dealer_recipient_private_vss_payload_byte_length: private_vss_payload_byte_length,
+        one_dealer_private_vss_payload_upload_byte_length,
+        one_recipient_private_vss_payload_download_byte_length:
+            one_dealer_private_vss_payload_upload_byte_length,
+        ceremony_private_vss_payload_byte_length,
+        evaluator_source_wire_byte_length_per_participant: evaluator
+            .source_wire_byte_length_per_participant(),
+        evaluator_source_resident_byte_length_per_participant: evaluator
+            .source_resident_byte_length_per_participant(),
+        final_evaluator_key_store_wire_byte_length: evaluator
+            .final_evaluator_key_store_wire_byte_length(),
+        final_evaluator_key_store_resident_byte_length: evaluator
+            .final_evaluator_key_store_resident_byte_length(),
+        ceremony_evaluator_setup_wire_byte_length: evaluator.ceremony_setup_wire_byte_length(),
+        ceremony_evaluator_source_and_final_resident_volume_byte_length: evaluator
+            .ceremony_source_and_final_resident_volume_byte_length(),
+        one_ballot_ciphertext_stream_byte_length: ballot.canonical_ciphertext_byte_length(),
+        one_ballot_ciphertext_stream_chunk_count: ballot.canonical_ciphertext_chunk_count(),
+        complete_action_ballot_candidate_package_corpus_byte_length,
+        complete_action_ballot_candidate_package_corpus_chunk_count,
+        ballot_prover_material_live_set_peak_byte_length: ballot
+            .provider_buffer_live_set_peak_byte_length(),
+        one_target_ciphertext_canonical_byte_length_ceiling,
+        paired_target_ciphertext_canonical_byte_length_ceiling,
+        one_target_partial_stream_byte_length,
+        one_participant_paired_target_partial_stream_byte_length,
+        ceremony_paired_target_partial_stream_byte_length,
+        target_release_proof_source_persistent_resident_byte_length: release
+            .proof_source_additional_persistent_resident_byte_length(),
+        target_release_paired_partial_stream_custody_resident_byte_length: release
+            .paired_partial_stream_custody_resident_byte_length(),
+        target_release_paired_generation_scratch_byte_length: release
+            .paired_generation_bigint_scratch_byte_length(),
+        target_release_one_role_proof_callback_scratch_byte_length: release
+            .one_role_bigint_scratch_byte_length(),
+    };
+    if accounting.one_dealer_recipient_private_vss_payload_byte_length == 0
+        || accounting.one_ballot_ciphertext_stream_byte_length == 0
+        || accounting.one_target_ciphertext_canonical_byte_length_ceiling == 0
+        || accounting.one_target_partial_stream_byte_length == 0
+        || accounting.target_release_paired_generation_scratch_byte_length
+            != accounting
+                .target_release_one_role_proof_callback_scratch_byte_length
+                .checked_mul(paired_target_role_count)
+                .ok_or(SelectedProofAccountingError::CountOverflow)?
+    {
+        return Err(SelectedProofAccountingError::ResourcePlanning);
+    }
+    Ok(accounting)
+}
+
 /// Production-derived worst-case proof resources for all physical proof slots
 /// in one complete selected action. It deliberately separates one-browser
 /// peak memory from additive ceremony storage and traffic.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct SelectedCompleteProofResourceAccounting {
     ordered_families: Box<[SelectedPhysicalProofFamilyResourceAccounting]>,
+    material_resources: SelectedCompleteActionMaterialResourceAccounting,
     physical_proof_count: u32,
+    complete_action_logical_entry_count: u64,
     complete_action_proof_byte_ceiling: u64,
+    setup_physical_proof_count: u32,
+    setup_proof_byte_ceiling: u64,
+    ballot_physical_proof_count: u32,
+    ballot_proof_byte_ceiling: u64,
+    target_release_physical_proof_count: u32,
+    target_release_proof_byte_ceiling: u64,
+    setup_relinearization_round_two_activation_peak_wasm_resident_byte_length: u64,
     maximum_one_browser_wasm_resident_byte_length: u64,
     maximum_one_proof_external_memory_peak_stored_byte_length: u64,
+    maximum_one_proof_external_memory_distinct_physical_object_count: u32,
+    complete_action_external_memory_object_lifecycle_count: u64,
     complete_action_external_memory_written_byte_length: u64,
     complete_action_external_memory_read_byte_length: u64,
     complete_action_external_memory_transaction_count: u64,
@@ -1202,12 +2685,52 @@ impl SelectedCompleteProofResourceAccounting {
         &self.ordered_families
     }
 
+    pub(crate) const fn material_resources(
+        &self,
+    ) -> SelectedCompleteActionMaterialResourceAccounting {
+        self.material_resources
+    }
+
     pub(crate) const fn physical_proof_count(&self) -> u32 {
         self.physical_proof_count
     }
 
+    pub(crate) const fn complete_action_logical_entry_count(&self) -> u64 {
+        self.complete_action_logical_entry_count
+    }
+
     pub(crate) const fn complete_action_proof_byte_ceiling(&self) -> u64 {
         self.complete_action_proof_byte_ceiling
+    }
+
+    pub(crate) const fn setup_physical_proof_count(&self) -> u32 {
+        self.setup_physical_proof_count
+    }
+
+    pub(crate) const fn setup_proof_byte_ceiling(&self) -> u64 {
+        self.setup_proof_byte_ceiling
+    }
+
+    pub(crate) const fn ballot_physical_proof_count(&self) -> u32 {
+        self.ballot_physical_proof_count
+    }
+
+    pub(crate) const fn ballot_proof_byte_ceiling(&self) -> u64 {
+        self.ballot_proof_byte_ceiling
+    }
+
+    pub(crate) const fn target_release_physical_proof_count(&self) -> u32 {
+        self.target_release_physical_proof_count
+    }
+
+    pub(crate) const fn target_release_proof_byte_ceiling(&self) -> u64 {
+        self.target_release_proof_byte_ceiling
+    }
+
+    pub(crate) const fn setup_relinearization_round_two_activation_peak_wasm_resident_byte_length(
+        &self,
+    ) -> u64 {
+        self.setup_relinearization_round_two_activation_peak_wasm_resident_byte_length
     }
 
     pub(crate) const fn maximum_one_browser_wasm_resident_byte_length(&self) -> u64 {
@@ -1216,6 +2739,16 @@ impl SelectedCompleteProofResourceAccounting {
 
     pub(crate) const fn maximum_one_proof_external_memory_peak_stored_byte_length(&self) -> u64 {
         self.maximum_one_proof_external_memory_peak_stored_byte_length
+    }
+
+    pub(crate) const fn maximum_one_proof_external_memory_distinct_physical_object_count(
+        &self,
+    ) -> u32 {
+        self.maximum_one_proof_external_memory_distinct_physical_object_count
+    }
+
+    pub(crate) const fn complete_action_external_memory_object_lifecycle_count(&self) -> u64 {
+        self.complete_action_external_memory_object_lifecycle_count
     }
 
     pub(crate) const fn complete_action_external_memory_written_byte_length(&self) -> u64 {
@@ -1246,18 +2779,41 @@ pub(crate) fn selected_complete_proof_resource_accounting()
 fn derive_selected_complete_proof_resource_accounting()
 -> Result<SelectedCompleteProofResourceAccounting, SelectedProofAccountingError> {
     let variants = selected_proof_variant_resource_inventory()?;
+    let material_resources = derive_selected_complete_action_material_resource_accounting()?;
     let slot_ceilings = selected_proof_application_slot_ceilings()
         .map_err(|_| SelectedProofAccountingError::InvalidProfile)?;
-    let galois_logical_entry_count = u32::try_from(
-        selected_galois_key_share_relation_plan_input()
-            .map_err(|_| SelectedProofAccountingError::InvalidProfile)?
-            .ordered_entries
-            .len(),
-    )
-    .map_err(|_| SelectedProofAccountingError::CountOverflow)?;
-    if galois_logical_entry_count == 0 {
-        return Err(SelectedProofAccountingError::InvalidProfile);
+    let proof_byte_length_for_schema = |schema_identifier| {
+        variants
+            .iter()
+            .filter(|variant| {
+                variant.application_statement_schema_identifier() == schema_identifier
+            })
+            .map(|variant| u64::try_from(variant.proof_byte_length()))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| SelectedProofAccountingError::CountOverflow)?
+            .into_iter()
+            .max()
+            .ok_or(SelectedProofAccountingError::InvalidProfile)
+    };
+    let setup_aggregate_descriptor_dimensions =
+        SetupGenerationRelinearizationAggregateDescriptorDimensions::new(
+            selected_setup_stream_descriptor_dimensions(proof_byte_length_for_schema(
+                ProofApplicationSlotCeilings::RELINEARIZATION_ROUND_ONE_STATEMENT_SCHEMA_IDENTIFIER,
+            )?)?,
+            selected_setup_stream_descriptor_dimensions(proof_byte_length_for_schema(
+                ProofApplicationSlotCeilings::RKG_ROUND_ONE_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+            )?)?,
+        );
+    let setup_relinearization_round_two_activation =
+        selected_setup_generation_relinearization_round_two_activation_memory_accounting(
+            setup_aggregate_descriptor_dimensions,
+        )
+        .map_err(|_| SelectedProofAccountingError::ResourcePlanning)?;
+    if !setup_relinearization_round_two_activation.fits_absolute_wasm_resident_bound() {
+        return Err(SelectedProofAccountingError::ResourcePlanning);
     }
+    let setup_relinearization_round_two_activation_peak_wasm_resident_byte_length =
+        setup_relinearization_round_two_activation.maximum_overlap_byte_length();
 
     let mut ordered_families = Vec::new();
     ordered_families
@@ -1265,9 +2821,19 @@ fn derive_selected_complete_proof_resource_accounting()
         .map_err(|_| SelectedProofAccountingError::AllocationLimitExceeded)?;
     let mut observed_variant_schema_identifiers = BTreeSet::new();
     let mut physical_proof_count = 0_u32;
+    let mut complete_action_logical_entry_count = 0_u64;
     let mut complete_action_proof_byte_ceiling = 0_u64;
-    let mut maximum_one_browser_wasm_resident_byte_length = 0_u64;
+    let mut setup_physical_proof_count = 0_u32;
+    let mut setup_proof_byte_ceiling = 0_u64;
+    let mut ballot_physical_proof_count = 0_u32;
+    let mut ballot_proof_byte_ceiling = 0_u64;
+    let mut target_release_physical_proof_count = 0_u32;
+    let mut target_release_proof_byte_ceiling = 0_u64;
+    let mut maximum_one_browser_wasm_resident_byte_length =
+        setup_relinearization_round_two_activation_peak_wasm_resident_byte_length;
     let mut maximum_one_proof_external_memory_peak_stored_byte_length = 0_u64;
+    let mut maximum_one_proof_external_memory_distinct_physical_object_count = 0_u32;
+    let mut complete_action_external_memory_object_lifecycle_count = 0_u64;
     let mut complete_action_external_memory_written_byte_length = 0_u64;
     let mut complete_action_external_memory_read_byte_length = 0_u64;
     let mut complete_action_external_memory_transaction_count = 0_u64;
@@ -1284,10 +2850,30 @@ fn derive_selected_complete_proof_resource_accounting()
             return Err(SelectedProofAccountingError::InvalidProfile);
         }
         observed_variant_schema_identifiers.insert(schema_identifier);
-        let physical_count = family_ceiling.application_slot_ceiling;
+        let selected_family_variants = family_variants
+            .iter()
+            .copied()
+            .filter(|variant| variant.complete_action_application_multiplicity() != 0)
+            .collect::<Vec<_>>();
+        if selected_family_variants.is_empty() {
+            return Err(SelectedProofAccountingError::InvalidProfile);
+        }
+        let physical_count =
+            selected_family_variants
+                .iter()
+                .try_fold(0_u32, |total, variant| {
+                    total
+                        .checked_add(variant.complete_action_application_multiplicity())
+                        .ok_or(SelectedProofAccountingError::CountOverflow)
+                })?;
+        if physical_count != family_ceiling.application_slot_ceiling {
+            return Err(SelectedProofAccountingError::InvalidProfile);
+        }
         let compiler_variant_count = u32::try_from(family_variants.len())
             .map_err(|_| SelectedProofAccountingError::CountOverflow)?;
-        let maximum_proof_byte_length = family_variants
+        let selected_variant_count = u32::try_from(selected_family_variants.len())
+            .map_err(|_| SelectedProofAccountingError::CountOverflow)?;
+        let maximum_proof_byte_length = selected_family_variants
             .iter()
             .map(|variant| u64::try_from(variant.proof_byte_length()))
             .collect::<Result<Vec<_>, _>>()
@@ -1295,84 +2881,146 @@ fn derive_selected_complete_proof_resource_accounting()
             .into_iter()
             .max()
             .ok_or(SelectedProofAccountingError::InvalidProfile)?;
-        let maximum_wasm_resident_byte_length = family_variants
+        let maximum_wasm_resident_byte_length = selected_family_variants
             .iter()
             .map(|variant| variant.maximum_combined_wasm_resident_byte_length())
             .max()
             .ok_or(SelectedProofAccountingError::InvalidProfile)?;
-        let maximum_external_memory_peak_stored_byte_length = family_variants
+        let maximum_external_memory_peak_stored_byte_length = selected_family_variants
             .iter()
             .map(|variant| variant.external_memory_peak_stored_byte_length())
             .max()
             .ok_or(SelectedProofAccountingError::InvalidProfile)?;
-        let maximum_external_memory_written_byte_length = family_variants
+        let maximum_external_memory_distinct_physical_object_count = selected_family_variants
             .iter()
-            .map(|variant| variant.external_memory_total_written_byte_length())
+            .map(|variant| variant.external_memory_distinct_physical_object_count())
             .max()
             .ok_or(SelectedProofAccountingError::InvalidProfile)?;
-        let maximum_external_memory_read_byte_length = family_variants
+        let maximum_logical_entry_count_per_proof = selected_family_variants
             .iter()
-            .map(|variant| variant.external_memory_total_read_byte_length())
+            .map(|variant| variant.logical_entry_count())
             .max()
+            .filter(|count| *count != 0)
             .ok_or(SelectedProofAccountingError::InvalidProfile)?;
-        let maximum_external_memory_transaction_count = family_variants
-            .iter()
-            .map(|variant| variant.external_memory_transaction_count())
-            .max()
-            .ok_or(SelectedProofAccountingError::InvalidProfile)?;
-        let maximum_logical_entry_count_per_proof = match schema_identifier {
-            ProofApplicationSlotCeilings::GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER => {
-                galois_logical_entry_count
-            }
-            ProofApplicationSlotCeilings::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER => {
-                family_variants
-                    .iter()
-                    .map(|variant| {
-                        variant
-                            .top_count()
-                            .ok_or(SelectedProofAccountingError::InvalidProfile)
-                            .and_then(|top_count| {
-                                selected_evaluator_entry_positions(top_count)
-                                    .map_err(|_| SelectedProofAccountingError::InvalidProfile)
-                            })
-                            .and_then(|positions| {
-                                u32::try_from(positions.len())
-                                    .map_err(|_| SelectedProofAccountingError::CountOverflow)
-                            })
-                    })
-                    .collect::<Result<Vec<_>, _>>()?
-                    .into_iter()
-                    .max()
-                    .filter(|count| *count != 0)
-                    .ok_or(SelectedProofAccountingError::InvalidProfile)?
-            }
-            _ => 1,
-        };
-        let physical_count_u64 = u64::from(physical_count);
-        let family_proof_byte_ceiling = maximum_proof_byte_length
-            .checked_mul(physical_count_u64)
-            .ok_or(SelectedProofAccountingError::CountOverflow)?;
-        let family_external_written_byte_length = maximum_external_memory_written_byte_length
-            .checked_mul(physical_count_u64)
-            .ok_or(SelectedProofAccountingError::CountOverflow)?;
-        let family_external_read_byte_length = maximum_external_memory_read_byte_length
-            .checked_mul(physical_count_u64)
-            .ok_or(SelectedProofAccountingError::CountOverflow)?;
-        let family_external_transaction_count = maximum_external_memory_transaction_count
-            .checked_mul(physical_count_u64)
-            .ok_or(SelectedProofAccountingError::CountOverflow)?;
+        let family_logical_entry_count =
+            selected_family_variants
+                .iter()
+                .try_fold(0_u64, |total, variant| {
+                    u64::from(variant.logical_entry_count())
+                        .checked_mul(u64::from(
+                            variant.complete_action_application_multiplicity(),
+                        ))
+                        .and_then(|count| total.checked_add(count))
+                        .ok_or(SelectedProofAccountingError::CountOverflow)
+                })?;
+        let family_proof_byte_ceiling =
+            selected_family_variants
+                .iter()
+                .try_fold(0_u64, |total, variant| {
+                    let proof_byte_length = u64::try_from(variant.proof_byte_length())
+                        .map_err(|_| SelectedProofAccountingError::CountOverflow)?;
+                    proof_byte_length
+                        .checked_mul(u64::from(
+                            variant.complete_action_application_multiplicity(),
+                        ))
+                        .and_then(|length| total.checked_add(length))
+                        .ok_or(SelectedProofAccountingError::CountOverflow)
+                })?;
+        let family_external_object_lifecycle_count =
+            selected_family_variants
+                .iter()
+                .try_fold(0_u64, |total, variant| {
+                    u64::from(variant.external_memory_object_lifecycle_count())
+                        .checked_mul(u64::from(
+                            variant.complete_action_application_multiplicity(),
+                        ))
+                        .and_then(|count| total.checked_add(count))
+                        .ok_or(SelectedProofAccountingError::CountOverflow)
+                })?;
+        let family_external_written_byte_length =
+            selected_family_variants
+                .iter()
+                .try_fold(0_u64, |total, variant| {
+                    variant
+                        .external_memory_total_written_byte_length()
+                        .checked_mul(u64::from(
+                            variant.complete_action_application_multiplicity(),
+                        ))
+                        .and_then(|length| total.checked_add(length))
+                        .ok_or(SelectedProofAccountingError::CountOverflow)
+                })?;
+        let family_external_read_byte_length =
+            selected_family_variants
+                .iter()
+                .try_fold(0_u64, |total, variant| {
+                    variant
+                        .external_memory_total_read_byte_length()
+                        .checked_mul(u64::from(
+                            variant.complete_action_application_multiplicity(),
+                        ))
+                        .and_then(|length| total.checked_add(length))
+                        .ok_or(SelectedProofAccountingError::CountOverflow)
+                })?;
+        let family_external_transaction_count =
+            selected_family_variants
+                .iter()
+                .try_fold(0_u64, |total, variant| {
+                    variant
+                        .external_memory_transaction_count()
+                        .checked_mul(u64::from(
+                            variant.complete_action_application_multiplicity(),
+                        ))
+                        .and_then(|count| total.checked_add(count))
+                        .ok_or(SelectedProofAccountingError::CountOverflow)
+                })?;
 
         physical_proof_count = physical_proof_count
             .checked_add(physical_count)
             .ok_or(SelectedProofAccountingError::CountOverflow)?;
+        complete_action_logical_entry_count = complete_action_logical_entry_count
+            .checked_add(family_logical_entry_count)
+            .ok_or(SelectedProofAccountingError::CountOverflow)?;
         complete_action_proof_byte_ceiling = complete_action_proof_byte_ceiling
             .checked_add(family_proof_byte_ceiling)
             .ok_or(SelectedProofAccountingError::CountOverflow)?;
+        match schema_identifier {
+            ProofApplicationSlotCeilings::BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER => {
+                ballot_physical_proof_count = ballot_physical_proof_count
+                    .checked_add(physical_count)
+                    .ok_or(SelectedProofAccountingError::CountOverflow)?;
+                ballot_proof_byte_ceiling = ballot_proof_byte_ceiling
+                    .checked_add(family_proof_byte_ceiling)
+                    .ok_or(SelectedProofAccountingError::CountOverflow)?;
+            }
+            ProofApplicationSlotCeilings::TARGET_SHARE_PROOF_STATEMENT_SCHEMA_IDENTIFIER => {
+                target_release_physical_proof_count = target_release_physical_proof_count
+                    .checked_add(physical_count)
+                    .ok_or(SelectedProofAccountingError::CountOverflow)?;
+                target_release_proof_byte_ceiling = target_release_proof_byte_ceiling
+                    .checked_add(family_proof_byte_ceiling)
+                    .ok_or(SelectedProofAccountingError::CountOverflow)?;
+            }
+            _ => {
+                setup_physical_proof_count = setup_physical_proof_count
+                    .checked_add(physical_count)
+                    .ok_or(SelectedProofAccountingError::CountOverflow)?;
+                setup_proof_byte_ceiling = setup_proof_byte_ceiling
+                    .checked_add(family_proof_byte_ceiling)
+                    .ok_or(SelectedProofAccountingError::CountOverflow)?;
+            }
+        }
         maximum_one_browser_wasm_resident_byte_length =
             maximum_one_browser_wasm_resident_byte_length.max(maximum_wasm_resident_byte_length);
         maximum_one_proof_external_memory_peak_stored_byte_length =
             maximum_one_proof_external_memory_peak_stored_byte_length
                 .max(maximum_external_memory_peak_stored_byte_length);
+        maximum_one_proof_external_memory_distinct_physical_object_count =
+            maximum_one_proof_external_memory_distinct_physical_object_count
+                .max(maximum_external_memory_distinct_physical_object_count);
+        complete_action_external_memory_object_lifecycle_count =
+            complete_action_external_memory_object_lifecycle_count
+                .checked_add(family_external_object_lifecycle_count)
+                .ok_or(SelectedProofAccountingError::CountOverflow)?;
         complete_action_external_memory_written_byte_length =
             complete_action_external_memory_written_byte_length
                 .checked_add(family_external_written_byte_length)
@@ -1389,11 +3037,16 @@ fn derive_selected_complete_proof_resource_accounting()
             application_statement_schema_identifier: schema_identifier,
             physical_proof_count: physical_count,
             compiler_variant_count,
+            selected_variant_count,
             maximum_logical_entry_count_per_proof,
+            complete_action_logical_entry_count: family_logical_entry_count,
             maximum_proof_byte_length,
             complete_action_proof_byte_ceiling: family_proof_byte_ceiling,
             maximum_wasm_resident_byte_length,
             maximum_external_memory_peak_stored_byte_length,
+            maximum_external_memory_distinct_physical_object_count,
+            complete_action_external_memory_object_lifecycle_count:
+                family_external_object_lifecycle_count,
             complete_action_external_memory_written_byte_length:
                 family_external_written_byte_length,
             complete_action_external_memory_read_byte_length: family_external_read_byte_length,
@@ -1407,18 +3060,40 @@ fn derive_selected_complete_proof_resource_accounting()
         .collect::<BTreeSet<_>>();
     if observed_variant_schema_identifiers != expected_variant_schema_identifiers
         || physical_proof_count != slot_ceilings.total_application_slot_ceiling()
+        || setup_physical_proof_count
+            .checked_add(ballot_physical_proof_count)
+            .and_then(|count| count.checked_add(target_release_physical_proof_count))
+            != Some(physical_proof_count)
+        || setup_proof_byte_ceiling
+            .checked_add(ballot_proof_byte_ceiling)
+            .and_then(|length| length.checked_add(target_release_proof_byte_ceiling))
+            != Some(complete_action_proof_byte_ceiling)
         || maximum_one_browser_wasm_resident_byte_length
             > MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH
+        || usize::try_from(maximum_one_proof_external_memory_distinct_physical_object_count)
+            .ok()
+            .is_none_or(|count| count > MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_OBJECT_COUNT)
     {
         return Err(SelectedProofAccountingError::ResourcePlanning);
     }
 
     Ok(SelectedCompleteProofResourceAccounting {
         ordered_families: ordered_families.into_boxed_slice(),
+        material_resources,
         physical_proof_count,
+        complete_action_logical_entry_count,
         complete_action_proof_byte_ceiling,
+        setup_physical_proof_count,
+        setup_proof_byte_ceiling,
+        ballot_physical_proof_count,
+        ballot_proof_byte_ceiling,
+        target_release_physical_proof_count,
+        target_release_proof_byte_ceiling,
+        setup_relinearization_round_two_activation_peak_wasm_resident_byte_length,
         maximum_one_browser_wasm_resident_byte_length,
         maximum_one_proof_external_memory_peak_stored_byte_length,
+        maximum_one_proof_external_memory_distinct_physical_object_count,
+        complete_action_external_memory_object_lifecycle_count,
         complete_action_external_memory_written_byte_length,
         complete_action_external_memory_read_byte_length,
         complete_action_external_memory_transaction_count,
@@ -1428,14 +3103,25 @@ fn derive_selected_complete_proof_resource_accounting()
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeMap;
+
+    use crate::foundation::{CanonicalItem, CanonicalItemType, CanonicalTuple};
 
     #[test]
-    fn resource_inventory_covers_every_selected_relation_plan_variant() {
+    fn one_packed_deep_fri_backend_compiles_every_selected_relation_plan_variant() {
         let inventory = selected_proof_variant_resource_inventory()
             .expect("the selected resource inventory derives");
         let proof_profile =
             selected_proof_profile_set(SELECTED_MAXIMUM_BALLOT_ATTEMPTS_PER_PARTICIPANT)
                 .expect("the selected proof profile derives");
+        assert_eq!(
+            proof_profile
+                .relation_plans()
+                .iter()
+                .map(|plan| plan.application_statement_schema_identifier())
+                .collect::<Vec<_>>(),
+            crate::bgv::proof_suite::FIRST_PROFILE_APPLICATION_FAMILIES,
+        );
         let expected_selectors = proof_profile
             .relation_plans()
             .iter()
@@ -1472,6 +3158,55 @@ mod tests {
                 && u64::try_from(ceiling.proof_byte_length())
                     .is_ok_and(|length| length <= MAXIMUM_CANONICAL_STREAM_BYTE_LENGTH)
         }));
+
+        for relation_plan in proof_profile.relation_plans() {
+            let schema_identifier = relation_plan.application_statement_schema_identifier();
+            let relation_context = selected_relation_plan_check_context(schema_identifier)
+                .expect("the selected relation has one common-proof context");
+            for variant in relation_plan.compiled_plan().variants() {
+                let statement_context = SelectedApplicationStatementContext::new(
+                    FOUNDATION_PROFILE.protocol_version,
+                    [0; Hash512::BYTE_LENGTH],
+                    variant.schedule_position(),
+                    variant.top_count(),
+                );
+                let statement_bytes = canonical_selected_application_statement_for_ceiling(
+                    schema_identifier,
+                    statement_context,
+                )
+                .expect("the production-derived statement encodes");
+                let sizing = selected_proof_transport_sizing(
+                    schema_identifier,
+                    &statement_bytes,
+                    variant,
+                    &relation_context,
+                )
+                .expect("the relation variant compiles through the packed common-proof backend");
+                let nonterminal_fri_tree_count = sizing
+                    .layout
+                    .catalog()
+                    .entries()
+                    .iter()
+                    .filter(|entry| {
+                        matches!(
+                            entry.source(),
+                            super::ProofTreeCatalogSource::NonterminalFriLayer { .. }
+                        )
+                    })
+                    .count();
+                assert_eq!(
+                    nonterminal_fri_tree_count,
+                    usize::from(sizing.transcript_schedule.fri_fold_count() - 1),
+                    "one packed initial polynomial must feed one complete FRI chain",
+                );
+                assert_eq!(
+                    sizing.transcript_schedule.opening_claim_count(),
+                    u32::try_from(variant.ordered_opening_claims().len())
+                        .expect("the checked opening-claim count fits u32"),
+                    "every ordered DEEP claim must enter the one packed initial polynomial",
+                );
+            }
+        }
     }
 
     #[test]
@@ -1527,23 +3262,142 @@ mod tests {
     }
 
     #[test]
+    fn exact_variant_rows_reconcile_transport_frontiers_memory_and_copies() {
+        let inventory = selected_proof_variant_resource_inventory()
+            .expect("the selected resource inventory derives");
+        assert!(!inventory.is_empty());
+
+        for variant in inventory {
+            let proof_byte_length =
+                u64::try_from(variant.proof_byte_length()).expect("proof length fits u64");
+            assert_eq!(
+                variant
+                    .proof_component_byte_accounting()
+                    .proof_byte_length(),
+                Some(proof_byte_length)
+            );
+            assert_eq!(
+                variant
+                    .canonical_header_byte_length()
+                    .checked_add(variant.body_prefix_byte_length())
+                    .and_then(|length| length.checked_add(variant.query_section_byte_length())),
+                Some(proof_byte_length)
+            );
+
+            let mut observed_bound_public_tree_count = 0_u32;
+            let mut observed_materialized_row_width = 0_u64;
+            let mut observed_query_section_byte_length = 0_u64;
+            for (tree_index, tree) in variant.ordered_query_trees().iter().enumerate() {
+                observed_bound_public_tree_count += u32::from(tree.is_bound_public_tree());
+                observed_materialized_row_width += tree.materialized_row_width();
+                observed_query_section_byte_length += tree.byte_length();
+                assert_eq!(
+                    tree.authentication_frontier_digest_byte_length(),
+                    tree.authentication_frontier_node_count_at_ceiling()
+                        * u64::try_from(Hash512::BYTE_LENGTH).expect("digest length fits u64")
+                );
+                assert_eq!(
+                    tree.opened_leaf_payload_byte_length()
+                        + tree.authentication_frontier_digest_byte_length()
+                        + tree.canonical_framing_byte_length(),
+                    tree.byte_length()
+                );
+                assert!(
+                    tree.minimum_opened_leaf_count() <= tree.opened_leaf_count_at_ceiling()
+                        && tree.opened_leaf_count_at_ceiling() <= tree.maximum_opened_leaf_count()
+                        && tree.maximum_opened_leaf_count() <= tree.leaf_count()
+                );
+                assert_eq!(
+                    tree.tree_catalog_index(),
+                    u16::try_from(tree_index).expect("catalog index fits u16")
+                );
+            }
+            assert_eq!(
+                observed_bound_public_tree_count,
+                variant.bound_public_tree_count()
+            );
+            assert_eq!(
+                observed_materialized_row_width,
+                variant.total_materialized_row_width()
+            );
+            assert_eq!(
+                observed_query_section_byte_length,
+                variant.query_section_byte_length()
+            );
+
+            assert_eq!(variant.resident_phases().len(), 14);
+            let mut resident_peak = 0_u64;
+            for (phase_index, phase) in variant.resident_phases().iter().enumerate() {
+                assert_eq!(
+                    phase.phase() as u8,
+                    u8::try_from(phase_index + 1).expect("phase ordinal fits u8")
+                );
+                assert_eq!(
+                    phase
+                        .prover_resident_byte_length()
+                        .checked_add(phase.source_provider_persistent_resident_byte_length())
+                        .and_then(|length| {
+                            length
+                                .checked_add(phase.source_provider_loading_transient_byte_length())
+                        })
+                        .and_then(|length| {
+                            length.checked_add(
+                                phase.application_runtime_persistent_resident_byte_length(),
+                            )
+                        })
+                        .and_then(|length| {
+                            length.checked_add(
+                                phase.application_runtime_boundary_overlap_byte_length(),
+                            )
+                        })
+                        .and_then(|length| {
+                            length.checked_add(phase.checkpoint_custody_byte_length())
+                        }),
+                    Some(phase.combined_wasm_resident_byte_length())
+                );
+                resident_peak = resident_peak.max(phase.combined_wasm_resident_byte_length());
+            }
+            assert_eq!(
+                resident_peak,
+                variant.maximum_combined_wasm_resident_byte_length()
+            );
+
+            assert!(
+                variant.maximum_copied_buffer_byte_length()
+                    >= variant.maximum_prefetched_query_byte_length()
+                    && variant.maximum_copied_buffer_byte_length()
+                        >= variant.maximum_external_memory_transaction_payload_byte_length()
+                    && variant.maximum_copied_buffer_byte_length()
+                        >= variant.maximum_proof_output_chunk_byte_length()
+                    && variant.maximum_copied_buffer_byte_length()
+                        <= u64::try_from(FOUNDATION_PROFILE.maximum_copied_buffer_byte_length)
+                            .expect("copied-buffer bound fits u64")
+            );
+            let output_chunk_byte_length = u64::try_from(MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH)
+                .expect("output chunk length fits u64");
+            assert_eq!(
+                variant.proof_output_chunk_count(),
+                proof_byte_length.div_ceil(output_chunk_byte_length)
+            );
+        }
+    }
+
+    #[test]
     fn complete_action_accounting_derives_all_physical_proof_slots() {
         let accounting = selected_complete_proof_resource_accounting()
             .expect("the complete selected accounting derives");
-        let expected_physical_counts = BTreeMap::from([
-            (0x2110, 10),
-            (0x2111, 10),
-            (0x1211, 10),
-            (0x1212, 10),
-            (0x1213, 1),
-            (0x1214, 10),
-            (0x1215, 1),
-            (0x1216, 10),
-            (0x1217, 10),
-            (0x1218, 1),
-            (0x1302, 20),
-            (0x1621, 10),
-        ]);
+        let application_slot_ceilings = selected_proof_application_slot_ceilings()
+            .expect("the selected application slot ceilings derive");
+        let expected_physical_counts = application_slot_ceilings
+            .ordered_family_ceilings()
+            .iter()
+            .map(|family| {
+                (
+                    family.application_statement_schema_identifier,
+                    family.application_slot_ceiling,
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
         let observed_physical_counts = accounting
             .ordered_families()
             .iter()
@@ -1556,7 +3410,236 @@ mod tests {
             .collect::<BTreeMap<_, _>>();
 
         assert_eq!(observed_physical_counts, expected_physical_counts);
-        assert_eq!(accounting.physical_proof_count(), 103);
+        assert_eq!(
+            accounting.physical_proof_count(),
+            application_slot_ceilings.total_application_slot_ceiling()
+        );
+        let galois_physical_proof_count = application_slot_ceilings
+            .family_ceiling(
+                ProofApplicationSlotCeilings::GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+            )
+            .expect("the selected Galois family has an application ceiling");
+        let galois_logical_entry_count_per_proof = u64::try_from(
+            selected_galois_key_share_relation_plan_input()
+                .expect("the selected Galois relation input derives")
+                .ordered_entries
+                .len(),
+        )
+        .expect("the Galois logical entry count fits u64");
+        let evaluator_physical_proof_count = application_slot_ceilings
+            .family_ceiling(
+                ProofApplicationSlotCeilings::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+            )
+            .expect("the selected evaluator family has an application ceiling");
+        let evaluator_logical_entry_count_per_proof = u64::try_from(
+            selected_evaluator_entry_positions(FOUNDATION_PROFILE.option_count)
+                .expect("the selected complete evaluator entry positions derive")
+                .len(),
+        )
+        .expect("the evaluator logical entry count fits u64");
+        let expected_logical_entry_count =
+            u64::from(application_slot_ceilings.total_application_slot_ceiling())
+                .checked_add(
+                    u64::from(galois_physical_proof_count)
+                        .checked_mul(galois_logical_entry_count_per_proof - 1)
+                        .expect("the Galois logical entry count fits u64"),
+                )
+                .and_then(|count| {
+                    count.checked_add(
+                        u64::from(evaluator_physical_proof_count)
+                            .checked_mul(evaluator_logical_entry_count_per_proof - 1)?,
+                    )
+                })
+                .expect("the complete logical entry count fits u64");
+        assert_eq!(
+            accounting.complete_action_logical_entry_count(),
+            expected_logical_entry_count
+        );
+        let expected_ballot_physical_proof_count = application_slot_ceilings
+            .family_ceiling(
+                ProofApplicationSlotCeilings::BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER,
+            )
+            .expect("the selected ballot family has an application ceiling");
+        let expected_target_release_physical_proof_count = application_slot_ceilings
+            .family_ceiling(
+                ProofApplicationSlotCeilings::TARGET_SHARE_PROOF_STATEMENT_SCHEMA_IDENTIFIER,
+            )
+            .expect("the selected target release family has an application ceiling");
+        let expected_setup_physical_proof_count = application_slot_ceilings
+            .total_application_slot_ceiling()
+            .checked_sub(expected_ballot_physical_proof_count)
+            .and_then(|count| count.checked_sub(expected_target_release_physical_proof_count))
+            .expect("the selected setup proof count fits u32");
+        assert_eq!(
+            accounting.setup_physical_proof_count(),
+            expected_setup_physical_proof_count
+        );
+        assert_eq!(
+            accounting.ballot_physical_proof_count(),
+            expected_ballot_physical_proof_count
+        );
+        assert_eq!(
+            accounting.target_release_physical_proof_count(),
+            expected_target_release_physical_proof_count
+        );
+        let materials = accounting.material_resources();
+        let participant_count = u64::from(FOUNDATION_PROFILE.participant_count);
+        assert_eq!(
+            materials.one_dealer_private_vss_payload_upload_byte_length(),
+            materials.one_dealer_recipient_private_vss_payload_byte_length() * participant_count
+        );
+        assert_eq!(
+            materials.one_recipient_private_vss_payload_download_byte_length(),
+            materials.one_dealer_private_vss_payload_upload_byte_length()
+        );
+        assert_eq!(
+            materials.ceremony_private_vss_payload_byte_length(),
+            materials.one_dealer_private_vss_payload_upload_byte_length() * participant_count
+        );
+        assert_eq!(
+            materials.complete_action_ballot_candidate_package_corpus_byte_length(),
+            materials.one_ballot_ciphertext_stream_byte_length()
+                * u64::from(SELECTED_MAXIMUM_CANDIDATE_PACKAGES_PER_ACTION)
+        );
+        assert_eq!(
+            materials.complete_action_ballot_candidate_package_corpus_chunk_count(),
+            u64::from(materials.one_ballot_ciphertext_stream_chunk_count())
+                * u64::from(SELECTED_MAXIMUM_CANDIDATE_PACKAGES_PER_ACTION)
+        );
+        assert_eq!(
+            (
+                materials.one_ballot_ciphertext_stream_byte_length(),
+                materials.one_ballot_ciphertext_stream_chunk_count(),
+            ),
+            (12_058_628, 12)
+        );
+        assert_eq!(
+            (
+                materials.complete_action_ballot_candidate_package_corpus_byte_length(),
+                materials.complete_action_ballot_candidate_package_corpus_chunk_count(),
+            ),
+            (241_172_560, 240)
+        );
+        let ballot_carrier = selected_ballot_validity_carrier_buffer_accounting()
+            .expect("the selected ballot carrier accounting derives");
+        assert_eq!(
+            (
+                ballot_carrier.decoded_ciphertext_residue_byte_length(),
+                ballot_carrier.provider_bound_public_residue_byte_length(),
+                ballot_carrier.provider_witness_coefficient_byte_length(),
+                ballot_carrier.provider_precomputed_transform_byte_length(),
+                ballot_carrier.provider_value_cache_byte_length(),
+                ballot_carrier.provider_transient_scratch_byte_length(),
+                ballot_carrier.provider_buffer_live_set_peak_byte_length(),
+                ballot_carrier.transferred_source_polynomial_byte_length(),
+                ballot_carrier.maximum_boundary_copied_buffer_byte_length(),
+            ),
+            (
+                24_117_248, 36_175_872, 3_145_728, 1_048_576, 524_288, 1_048_576, 41_943_040,
+                262_144, 1_048_576,
+            )
+        );
+        assert_eq!(
+            materials.paired_target_ciphertext_canonical_byte_length_ceiling(),
+            materials.one_target_ciphertext_canonical_byte_length_ceiling() * 2
+        );
+        assert_eq!(
+            materials.one_participant_paired_target_partial_stream_byte_length(),
+            materials.one_target_partial_stream_byte_length() * 2
+        );
+        assert_eq!(
+            materials.ceremony_paired_target_partial_stream_byte_length(),
+            materials.one_participant_paired_target_partial_stream_byte_length()
+                * participant_count
+        );
+        assert!(
+            materials.target_release_paired_partial_stream_custody_resident_byte_length()
+                > materials.one_participant_paired_target_partial_stream_byte_length(),
+            "proof generation retains both output payloads and their in-memory owner",
+        );
+        assert_eq!(
+            materials.target_release_paired_generation_scratch_byte_length(),
+            materials.target_release_one_role_proof_callback_scratch_byte_length() * 2
+        );
+        assert_eq!(
+            (
+                materials.evaluator_source_wire_byte_length_per_participant(),
+                materials.evaluator_source_resident_byte_length_per_participant(),
+                materials.final_evaluator_key_store_wire_byte_length(),
+                materials.final_evaluator_key_store_resident_byte_length(),
+                materials.ceremony_evaluator_setup_wire_byte_length(),
+                materials.ceremony_evaluator_source_and_final_resident_volume_byte_length(),
+            ),
+            (
+                183_631_872,
+                355_467_712,
+                155_582_464,
+                300_941_312,
+                1_991_901_184,
+                3_855_618_432,
+            )
+        );
+        let evaluator = selected_evaluator_resource_accounting()
+            .expect("the selected evaluator material accounting derives");
+        for level in evaluator.levels() {
+            assert_eq!(
+                level.source_wire_byte_length_per_participant(),
+                level.component_wire_byte_length() * level.source_component_count_per_participant()
+            );
+            assert_eq!(
+                level.source_resident_byte_length_per_participant(),
+                level.component_resident_byte_length()
+                    * level.source_component_count_per_participant()
+            );
+            assert_eq!(
+                level.final_wire_byte_length(),
+                level.component_wire_byte_length() * level.final_component_count()
+            );
+            assert_eq!(
+                level.final_resident_byte_length(),
+                level.component_resident_byte_length() * level.final_component_count()
+            );
+        }
+        assert_eq!(
+            evaluator
+                .levels()
+                .iter()
+                .map(|level| (
+                    level.catalog_level(),
+                    level.component_wire_byte_length(),
+                    level.component_resident_byte_length(),
+                    level.source_component_count_per_participant(),
+                    level.final_component_count(),
+                ))
+                .collect::<Vec<_>>(),
+            vec![
+                (14, 12_288_000, 23_592_960, 3, 3),
+                (18, 20_873_216, 40_370_176, 3, 3),
+                (22, 28_049_408, 54_525_952, 3, 2),
+            ]
+        );
+        assert_eq!(
+            (
+                evaluator.relinearization_position_count(),
+                evaluator.galois_position_count(),
+                evaluator.source_component_count_per_participant(),
+                evaluator.final_component_count(),
+                evaluator.source_public_polynomial_context_hash_count_per_participant(),
+                evaluator
+                    .source_public_polynomial_context_hash_resident_byte_length_per_participant(),
+            ),
+            (1, 6, 9, 8, 7, 448)
+        );
+        assert!(materials.ballot_prover_material_live_set_peak_byte_length() > 0);
+        assert_eq!(
+            accounting
+                .setup_proof_byte_ceiling()
+                .checked_add(accounting.ballot_proof_byte_ceiling())
+                .and_then(|length| {
+                    length.checked_add(accounting.target_release_proof_byte_ceiling())
+                }),
+            Some(accounting.complete_action_proof_byte_ceiling())
+        );
         assert_eq!(
             accounting
                 .ordered_families()
@@ -1567,19 +3650,44 @@ mod tests {
                 })
                 .expect("the Galois family is present")
                 .maximum_logical_entry_count_per_proof(),
-            3
+            6
         );
         assert_eq!(
-            accounting
+            {
+                let evaluator_family = accounting
                 .ordered_families()
                 .iter()
                 .find(|family| {
                     family.application_statement_schema_identifier()
                         == ProofApplicationSlotCeilings::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER
                 })
-                .expect("the evaluator family is present")
-                .maximum_logical_entry_count_per_proof(),
+                .expect("the evaluator family is present");
+                assert_eq!(evaluator_family.compiler_variant_count(), 20);
+                assert_eq!(evaluator_family.selected_variant_count(), 1);
+                assert_eq!(evaluator_family.complete_action_logical_entry_count(), 4);
+                evaluator_family.maximum_logical_entry_count_per_proof()
+            },
             4
+        );
+        let complete_list_variants = selected_proof_variant_resource_inventory()
+            .expect("the selected variant inventory derives")
+            .iter()
+            .filter(|variant| {
+                variant.application_statement_schema_identifier()
+                    == ProofApplicationSlotCeilings::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(complete_list_variants.len(), 20);
+        assert_eq!(
+            complete_list_variants
+                .iter()
+                .filter(|variant| variant.complete_action_application_multiplicity() != 0)
+                .map(|variant| (
+                    variant.top_count(),
+                    variant.complete_action_application_multiplicity()
+                ))
+                .collect::<Vec<_>>(),
+            vec![(Some(FOUNDATION_PROFILE.option_count), 1)]
         );
         assert!(accounting.complete_action_proof_byte_ceiling() > 0);
         assert!(
@@ -1601,5 +3709,203 @@ mod tests {
                 ..
             }) if observed == proof_byte_length
         ));
+    }
+
+    #[test]
+    fn report_one_mixed_galois_batch_against_two_level_shards() {
+        use crate::bgv::proof_suite::relation_plan::{
+            GaloisKeyShareRelationPlanInput, compile_galois_key_share_relation_topology_comparison,
+            galois_key_share_topology_comparison_memory_accounting,
+        };
+
+        fn statement_bytes(
+            batch_schedule_position: u32,
+            entries: &[super::super::relation_plan::GaloisKeyShareRelationEntryInput],
+        ) -> Vec<u8> {
+            let anchor_items = (0..3)
+                .map(|_| CanonicalItem::hash512([0; Hash512::BYTE_LENGTH]))
+                .collect::<Vec<_>>();
+            let entry_items = entries
+                .iter()
+                .map(|entry| {
+                    CanonicalItem::nested_tuple(&CanonicalTuple::new(
+                        0x121d,
+                        1,
+                        vec![
+                            CanonicalItem::unsigned32(entry.schedule_position),
+                            CanonicalItem::hash512([0; Hash512::BYTE_LENGTH]),
+                        ],
+                    ))
+                    .expect("comparison entry encodes")
+                })
+                .collect::<Vec<_>>();
+            CanonicalTuple::new(
+                ProofApplicationSlotCeilings::GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+                2,
+                vec![
+                    CanonicalItem::hash512([0; Hash512::BYTE_LENGTH]),
+                    CanonicalItem::participant_identity([0; Hash512::BYTE_LENGTH]),
+                    CanonicalItem::unsigned16(0),
+                    CanonicalItem::unsigned32(batch_schedule_position),
+                    CanonicalItem::homogeneous_list(CanonicalItemType::Hash512, &anchor_items)
+                        .expect("comparison anchors encode"),
+                    CanonicalItem::homogeneous_list(CanonicalItemType::NestedTuple, &entry_items)
+                        .expect("comparison entries encode"),
+                ],
+            )
+            .encode()
+            .expect("comparison statement encodes")
+        }
+
+        #[derive(Clone, Copy, Debug)]
+        struct Measurement {
+            plan_bytes: u64,
+            proof_bytes: u64,
+            relation_columns: u64,
+            relation_constraints: u64,
+            retained_source_bytes: u64,
+            adapter_retained_bytes: u64,
+            loading_persistent_bytes: u64,
+            loading_transient_bytes: u64,
+            preparation_workspace_bytes: u64,
+            preparation_peak_bytes: u64,
+        }
+
+        fn measure(
+            input: &GaloisKeyShareRelationPlanInput,
+            context: &RelationPlanCheckContext,
+        ) -> Measurement {
+            let compiled = compile_galois_key_share_relation_topology_comparison(input, context)
+                .expect("comparison relation compiles");
+            let variant = compiled
+                .relation_plan
+                .select_variant(Some(input.batch_schedule_position), None)
+                .expect("comparison variant");
+            let statement = statement_bytes(input.batch_schedule_position, &input.ordered_entries);
+            let transport = selected_proof_transport_sizing(
+                ProofApplicationSlotCeilings::GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+                &statement,
+                variant,
+                context,
+            )
+            .expect("comparison transport sizing");
+            let memory = galois_key_share_topology_comparison_memory_accounting(
+                variant,
+                context,
+                &input.geometry,
+                &compiled.source_layout,
+                statement.len(),
+            )
+            .expect("comparison memory accounting");
+            Measurement {
+                plan_bytes: compiled
+                    .relation_plan
+                    .canonical_byte_length_and_hash()
+                    .expect("comparison plan bytes")
+                    .0,
+                proof_bytes: u64::try_from(transport.ceiling.proof_byte_length())
+                    .expect("proof length fits u64"),
+                relation_columns: u64::try_from(variant.ordered_columns().len())
+                    .expect("column count fits u64"),
+                relation_constraints: u64::try_from(variant.ordered_constraint_count())
+                    .expect("constraint count fits u64"),
+                retained_source_bytes: memory.retained_original_source_byte_length(),
+                adapter_retained_bytes: memory.adapter_retained_byte_length(),
+                loading_persistent_bytes: memory.loading_persistent_resident_byte_length(),
+                loading_transient_bytes: memory
+                    .additional_loading_source_polynomials_transient_byte_length(),
+                preparation_workspace_bytes: memory.preparation_tree_workspace_byte_length(),
+                preparation_peak_bytes: memory.preparation_peak_resident_byte_length(),
+            }
+        }
+
+        let full_input = selected_galois_key_share_relation_plan_input()
+            .expect("selected Galois relation input");
+        let context = selected_relation_plan_check_context(
+            ProofApplicationSlotCeilings::GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+        )
+        .expect("selected Galois context");
+        let maximum_level = full_input
+            .ordered_entries
+            .iter()
+            .map(|entry| entry.selected_level)
+            .max()
+            .expect("selected Galois entries");
+        let full = measure(&full_input, &context);
+        let shards = [
+            maximum_level,
+            full_input
+                .ordered_entries
+                .iter()
+                .map(|entry| entry.selected_level)
+                .min()
+                .expect("selected Galois entries"),
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(batch_schedule_position, level)| {
+            let ordered_entries = full_input
+                .ordered_entries
+                .iter()
+                .filter(|entry| entry.selected_level == level)
+                .cloned()
+                .collect::<Vec<_>>();
+            measure(
+                &GaloisKeyShareRelationPlanInput {
+                    batch_schedule_position: u32::try_from(batch_schedule_position)
+                        .expect("batch position fits u32"),
+                    ordered_entries,
+                    geometry: full_input
+                        .geometry
+                        .selected_catalog_prefix(level)
+                        .expect("shard geometry"),
+                },
+                &context,
+            )
+        })
+        .collect::<Vec<_>>();
+        eprintln!("one mixed batch: {full:?}");
+        eprintln!("two level shards: {shards:?}");
+        eprintln!(
+            "two level shard totals: plan_bytes={}, proof_bytes={}, relation_columns={}, relation_constraints={}, retained_source_bytes={}, adapter_retained_bytes={}, maximum_loading_persistent_bytes={}, maximum_loading_transient_bytes={}, maximum_preparation_workspace_bytes={}, maximum_preparation_peak_bytes={}",
+            shards.iter().map(|value| value.plan_bytes).sum::<u64>(),
+            shards.iter().map(|value| value.proof_bytes).sum::<u64>(),
+            shards
+                .iter()
+                .map(|value| value.relation_columns)
+                .sum::<u64>(),
+            shards
+                .iter()
+                .map(|value| value.relation_constraints)
+                .sum::<u64>(),
+            shards
+                .iter()
+                .map(|value| value.retained_source_bytes)
+                .sum::<u64>(),
+            shards
+                .iter()
+                .map(|value| value.adapter_retained_bytes)
+                .sum::<u64>(),
+            shards
+                .iter()
+                .map(|value| value.loading_persistent_bytes)
+                .max()
+                .unwrap(),
+            shards
+                .iter()
+                .map(|value| value.loading_transient_bytes)
+                .max()
+                .unwrap(),
+            shards
+                .iter()
+                .map(|value| value.preparation_workspace_bytes)
+                .max()
+                .unwrap(),
+            shards
+                .iter()
+                .map(|value| value.preparation_peak_bytes)
+                .max()
+                .unwrap(),
+        );
     }
 }

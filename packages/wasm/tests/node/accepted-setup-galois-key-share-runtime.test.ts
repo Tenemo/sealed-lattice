@@ -14,6 +14,9 @@ const boundaryMocks = vi.hoisted(() => {
     const activeContext: {
         value: TranscriptCoreKernelCommandRuntime | undefined;
     } = { value: undefined };
+    const activeKernel: { value: TranscriptCoreKernel | undefined } = {
+        value: undefined,
+    };
     const retainedBackingInputs: Array<{
         readExactRange(
             sourceByteOffset: bigint,
@@ -31,6 +34,7 @@ const boundaryMocks = vi.hoisted(() => {
     });
     return {
         activeContext,
+        activeKernel,
         applyGenerated: vi.fn(
             (
                 _capability: unknown,
@@ -61,7 +65,21 @@ const boundaryMocks = vi.hoisted(() => {
         releaseGenerationAdapter: vi.fn(),
         releaseVerificationAdapter: vi.fn(),
         retainedBackingInputs,
-        runGeneration: vi.fn(() => Promise.resolve(generatedCapability)),
+        runGeneration: vi.fn(
+            async (
+                _adapter: unknown,
+                openExecution: (description: unknown) => Promise<{
+                    outputStore: unknown;
+                }>,
+            ) => {
+                const execution = await openExecution(Object.freeze({}));
+                return Object.freeze({
+                    generatedCapability,
+                    outputChunkByteLengths: Object.freeze([2]),
+                    outputStore: execution.outputStore,
+                });
+            },
+        ),
         runVerification: vi.fn(() => Promise.resolve(verifiedCapability)),
         trackOutput: vi.fn((outputStore: unknown) =>
             Object.freeze({
@@ -73,25 +91,38 @@ const boundaryMocks = vi.hoisted(() => {
     };
 });
 
-vi.mock('#packages/wasm/src/action-randomness-runtime', () => ({
-    resolveActionRandomnessKernelAuthorization: () => ({
-        context: boundaryMocks.activeContext.value,
-        handle: 13,
-    }),
-}));
-
 vi.mock('#packages/wasm/src/setup-generation-recipient-payload', () => ({
     resolveSetupGenerationAuthorityKernelAuthorization: () => ({ handle: 14 }),
 }));
 
-vi.mock('#packages/wasm/src/state-verifier-runtime', () => ({
-    resolveVerifiedStateReservationKernelAuthorization: () => ({
-        capabilityMemory: boundaryMocks.activeContext.value?.memory,
-        capabilityPointer: 128,
-        reservationHandle: 15,
-        sessionHandle: 16,
+vi.mock(
+    '#packages/wasm/src/local-storage-root-worker-kernel/worker-kernel',
+    () => ({
+        withClosedWorkerProductionOperationAuthority: (
+            _workerKernel: unknown,
+            _identifiers: unknown,
+            operation: (authority: {
+                withExactKernelAuthorization(
+                    operation: (authorization: unknown) => void,
+                ): void;
+            }) => Promise<void> | void,
+        ) =>
+            operation({
+                withExactKernelAuthorization: (innerOperation) =>
+                    innerOperation({
+                        actionRandomnessContext:
+                            boundaryMocks.activeContext.value,
+                        actionRandomnessHandle: 13,
+                        kernel: boundaryMocks.activeKernel.value,
+                        stateReservationCapabilityMemory:
+                            boundaryMocks.activeContext.value?.memory,
+                        stateReservationCapabilityPointer: 128,
+                        stateReservationHandle: 15,
+                        stateVerifierSessionHandle: 16,
+                    }),
+            }),
     }),
-}));
+);
 
 vi.mock('#packages/wasm/src/vss-share-linkage-verification-runtime', () => ({
     resolveOrderedVerifiedBoardObjectAuthorization: () => {
@@ -122,7 +153,7 @@ vi.mock('#packages/wasm/src/common-proof-worker-runtime/runtime', () => ({
         boundaryMocks.releaseGenerationAdapter,
     releaseClosedWorkerCommonProofVerificationFamilyAdapter:
         boundaryMocks.releaseVerificationAdapter,
-    runClosedWorkerCommonProofGenerationFamilyAdapterRetainingGeneratedCapability:
+    runClosedWorkerCommonProofGenerationFamilyAdapterWithExecutionOpener:
         boundaryMocks.runGeneration,
     runClosedWorkerCommonProofVerificationFamilyAdapter:
         boundaryMocks.runVerification,
@@ -478,6 +509,7 @@ const createFakeRuntime = (): FakeGaloisRuntime => {
     } as unknown as TranscriptCoreKernelCommandRuntime;
     registerCommonProofKernelContext(kernel, context);
     boundaryMocks.activeContext.value = context;
+    boundaryMocks.activeKernel.value = kernel;
     return Object.freeze({
         absorbedComponents,
         cancelledReadbacks,
@@ -518,23 +550,22 @@ const generationInput = (
     generationMode: GenerationMode,
     componentStores: readonly GaloisKeyShareComponentStore[],
 ) => ({
-    actionRandomnessSession: Object.freeze({}),
     canonicalSuiteRecordBytes: Uint8Array.of(1, 2, 3),
     checkpointLineageIdentifier: new Uint8Array(32).fill(7),
     componentStores,
     evaluatorSourceCatalog: Object.freeze({}),
-    externalMemory: Object.freeze({}),
     generationMode,
     kernel: runtime.kernel,
-    options:
-        generationMode === 'resumed'
-            ? Object.freeze({ resume: Object.freeze({}) })
-            : undefined,
+    openProofGenerationExecution: () =>
+        Promise.resolve({
+            externalMemory: Object.freeze({}),
+            outputStore: Object.freeze({}),
+        }),
     packageBuilder: Object.freeze({}),
-    proofOutputStore: Object.freeze({}),
+    productionOperationIdentifiers: Object.freeze({}),
     setupGenerationAuthority: Object.freeze({}),
     setupIntentObject: Object.freeze({}),
-    verifiedReservation: Object.freeze({}),
+    workerKernel: Object.freeze({}),
 });
 
 beforeEach(() => {

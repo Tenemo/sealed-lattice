@@ -57,21 +57,24 @@ const boundaryMocks = vi.hoisted(() => {
         openVerificationAdapter: vi.fn(() => Object.freeze({})),
         releaseGenerationAdapter: vi.fn(),
         releaseVerificationAdapter: vi.fn(),
-        runGeneration: vi.fn(() => {
+        runGeneration: vi.fn(async (_adapter: unknown, openExecution: (description: unknown) => unknown) => {
             if (productionAuthorityActive.value) {
                 throw new Error(
                     'The asynchronous proof run retained the serialized production-authority lease.',
                 );
             }
-            return Promise.resolve(generatedCapability);
+            const execution = (await openExecution(Object.freeze({}))) as {
+                options?: unknown;
+                outputStore: unknown;
+            };
+            return Object.freeze({
+                generatedCapability,
+                options: execution.options,
+                outputChunkByteLengths: Object.freeze([2]),
+                outputStore: execution.outputStore,
+            });
         }),
         runVerification: vi.fn(() => Promise.resolve(verifiedCapability)),
-        trackOutput: vi.fn((outputStore: unknown) =>
-            Object.freeze({
-                outputChunkByteLengths: Object.freeze([2]),
-                outputStore,
-            }),
-        ),
         verifiedCapabilityRelease,
         withProductionAuthority: vi.fn(
             (
@@ -168,7 +171,6 @@ vi.mock('#packages/wasm/src/vss-share-linkage-verification-runtime', () => ({
 
 vi.mock('#packages/wasm/src/generated-common-proof-output-runtime', () => ({
     deriveGeneratedCommonProofDescriptor: boundaryMocks.deriveProofDescriptor,
-    trackCanonicalCommonProofOutputChunks: boundaryMocks.trackOutput,
 }));
 
 vi.mock('#packages/wasm/src/common-proof-worker-runtime/runtime', () => ({
@@ -183,7 +185,7 @@ vi.mock('#packages/wasm/src/common-proof-worker-runtime/runtime', () => ({
         boundaryMocks.releaseGenerationAdapter,
     releaseClosedWorkerCommonProofVerificationFamilyAdapter:
         boundaryMocks.releaseVerificationAdapter,
-    runClosedWorkerCommonProofGenerationFamilyAdapterRetainingGeneratedCapability:
+    runClosedWorkerCommonProofGenerationFamilyAdapterWithExecutionOpener:
         boundaryMocks.runGeneration,
     runClosedWorkerCommonProofVerificationFamilyAdapter:
         boundaryMocks.runVerification,
@@ -438,14 +440,19 @@ const generationInput = (
 ) => ({
     canonicalSuiteRecordBytes: Uint8Array.of(1, 2, 3),
     checkpointLineageIdentifier: new Uint8Array(32).fill(0x71),
-    externalMemory: Object.freeze({}),
     generationMode,
     kernel: runtime.kernel,
-    options:
-        generationMode === 'resumed'
-            ? Object.freeze({ resume: Object.freeze({}) })
-            : undefined,
-    outputStore: Object.freeze({}),
+    openProofGenerationExecution: () =>
+        Promise.resolve(
+            Object.freeze({
+                externalMemory: Object.freeze({}),
+                options:
+                    generationMode === 'resumed'
+                        ? Object.freeze({ resume: Object.freeze({}) })
+                        : undefined,
+                outputStore: Object.freeze({}),
+            }),
+        ),
     productionOperationIdentifiers: Object.freeze({
         actionRandomnessSessionIdentifier: 'action-randomness',
         stateReservationIdentifier: 'state-reservation',

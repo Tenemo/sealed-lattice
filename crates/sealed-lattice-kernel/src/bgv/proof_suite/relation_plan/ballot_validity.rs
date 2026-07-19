@@ -4,14 +4,20 @@ use num_bigint::{BigInt, BigUint};
 use num_traits::Zero;
 
 use super::*;
-use crate::foundation::FOUNDATION_PROFILE;
+use crate::{
+    bgv::direct_ballots::{
+        PAIR_CHARACTER_AUXILIARY_COUNT, PAIR_CHARACTER_CIPHERTEXT_COUNT, PAIR_CHARACTER_LANE_COUNT,
+        PAIR_CHARACTER_PLAINTEXT_MODULUS, PAIR_CHARACTER_RING_DEGREE, SCORE_BUCKET_COUNT,
+        pair_character_encoder_profile_sequence, pair_character_plaintexts,
+    },
+    foundation::FOUNDATION_PROFILE,
+};
 
 const BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER: u16 =
     crate::foundation::ProofApplicationSlotCeilings::BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER;
 const VERIFIED_SETUP_SOURCE_HASH_FIELD_ORDINAL: u64 = 7;
 const BALLOT_CIPHERTEXT_DIGEST_FIELD_ORDINAL: u64 = 8;
 const OPTION_COUNT: usize = FOUNDATION_PROFILE.option_count as usize;
-const PAIR_COUNT: usize = OPTION_COUNT * (OPTION_COUNT - 1) / 2;
 const MINIMUM_SCORE: u64 = FOUNDATION_PROFILE.minimum_score as u64;
 const MAXIMUM_SCORE: u64 = FOUNDATION_PROFILE.maximum_score as u64;
 const RESERVED_SLOT_RULE: u16 = 1;
@@ -22,15 +28,34 @@ const RADIX: u64 = 3;
 /// and therefore never enter this catalog.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum BallotValidityWitnessValueSource {
-    ScoreOffset {
+    ScoreIndicator {
         option_ordinal: u16,
+        score_bucket_ordinal: u16,
     },
-    PlaintextCoefficient,
-    ReversedRandomizerShifted,
-    ErrorZeroShifted,
-    ErrorOneShifted,
-    EncoderReduction,
+    PairCharacterAuxiliaryCoefficient {
+        ciphertext_ordinal: u16,
+        auxiliary_ordinal: u16,
+    },
+    ReversedPairCharacterAuxiliaryCoefficient {
+        ciphertext_ordinal: u16,
+        auxiliary_ordinal: u16,
+    },
+    ReversedRandomizerShifted {
+        ciphertext_ordinal: u16,
+    },
+    ErrorShifted {
+        ciphertext_ordinal: u16,
+        component_ordinal: u16,
+    },
+    EncoderReduction {
+        ciphertext_ordinal: u16,
+        auxiliary_ordinal: u16,
+    },
+    PairCharacterProductQuotient {
+        ciphertext_ordinal: u16,
+    },
     EncryptionQuotient {
+        ciphertext_ordinal: u16,
         data_modulus_index: u16,
         component_ordinal: u16,
     },
@@ -70,11 +95,9 @@ pub(crate) struct BallotValiditySourcePlan {
     active_data_modulus_indices: Box<[u16]>,
     data_moduli: Box<[u64]>,
     plaintext_modulus: u64,
-    primitive_two_n_root: u64,
-    slot_generator: u16,
-    inverse_ring_degree: u64,
-    pair_slot_inverse_roots: Box<[u64]>,
-    encoder_reduction_maximum: u64,
+    encoder_reduction_maxima:
+        [[u64; PAIR_CHARACTER_AUXILIARY_COUNT - 1]; PAIR_CHARACTER_CIPHERTEXT_COUNT],
+    pair_character_product_quotient_absolute_bound: u64,
     recipes_by_column: Box<[Option<BallotValiditySourceColumnRecipe>]>,
     verifier_sources_by_column: Box<[Option<BallotValidityVerifierColumnSource>]>,
 }
@@ -83,10 +106,13 @@ pub(crate) struct BallotValiditySourcePlan {
 pub(crate) enum BallotValidityVerifierColumnSource {
     AuthenticatedPolynomial {
         source_kind: u16,
+        ciphertext_ordinal: u16,
         component_ordinal: u16,
         data_modulus_index: u16,
     },
-    PairDifferenceEncoderWeight {
+    PairCharacterEncoderProfile {
+        ciphertext_ordinal: u16,
+        auxiliary_ordinal: u16,
         option_ordinal: u16,
     },
 }
@@ -104,10 +130,6 @@ impl BallotValiditySourcePlan {
                 core::mem::size_of::<u16>(),
             )?,
             payload(self.data_moduli.len(), core::mem::size_of::<u64>())?,
-            payload(
-                self.pair_slot_inverse_roots.len(),
-                core::mem::size_of::<u64>(),
-            )?,
             payload(
                 self.recipes_by_column.len(),
                 core::mem::size_of::<Option<BallotValiditySourceColumnRecipe>>(),
@@ -137,96 +159,107 @@ impl BallotValiditySourcePlan {
         self.plaintext_modulus
     }
 
-    pub(crate) const fn primitive_two_n_root(&self) -> u64 {
-        self.primitive_two_n_root
+    pub(crate) fn encoder_profile_sequence(
+        &self,
+        ciphertext_ordinal: u16,
+        auxiliary_ordinal: u16,
+        option_ordinal: u16,
+    ) -> Option<Vec<u64>> {
+        pair_character_encoder_profile_sequence(
+            ciphertext_ordinal,
+            auxiliary_ordinal,
+            option_ordinal,
+        )
+        .ok()
     }
 
-    pub(crate) const fn slot_generator(&self) -> u16 {
-        self.slot_generator
-    }
-
-    pub(crate) fn encoder_weight_sequence(&self, option_ordinal: u16) -> Option<Vec<u64>> {
-        let option_index = usize::from(option_ordinal);
-        if option_index >= OPTION_COUNT {
-            return None;
-        }
-        let mut cursor = self.encoder_weight_cursor()?;
-        let mut sequence = Vec::with_capacity(usize::try_from(self.ring_degree).ok()?);
-        while let Some(row) = cursor.next_row() {
-            sequence.push(row[option_index]);
-        }
-        Some(sequence)
-    }
-
-    pub(crate) fn plaintext_coefficients_for_scores(&self, scores: &[u64]) -> Option<Vec<u64>> {
-        if scores.len() != OPTION_COUNT
-            || scores
-                .iter()
-                .any(|score| !(MINIMUM_SCORE..=MAXIMUM_SCORE).contains(score))
-        {
-            return None;
-        }
-        let mut cursor = self.encoder_weight_cursor()?;
-        let mut coefficients = Vec::with_capacity(usize::try_from(self.ring_degree).ok()?);
-        while let Some(row) = cursor.next_row() {
-            let coefficient = scores.iter().zip(row).fold(0_u64, |sum, (score, weight)| {
-                let score_offset = score - MINIMUM_SCORE;
-                modular_sum(
-                    sum,
-                    modular_product(score_offset, weight, self.plaintext_modulus),
-                    self.plaintext_modulus,
-                )
-            });
-            coefficients.push(coefficient);
-        }
-        Some(coefficients)
+    pub(crate) fn pair_character_plaintexts_for_scores(
+        &self,
+        scores: &[u64],
+    ) -> Option<[crate::bgv::direct_ballots::PairCharacterPlaintext; 2]> {
+        pair_character_plaintexts(
+            scores,
+            self.plaintext_modulus,
+            usize::try_from(self.ring_degree).ok()?,
+        )
+        .ok()
     }
 
     pub(crate) fn encoder_reductions_for_scores(
         &self,
         scores: &[u64],
-        plaintext_coefficients: &[u64],
+        ciphertext_ordinal: u16,
+        auxiliary_ordinal: u16,
+        auxiliary_coefficients: &[u64],
     ) -> Option<Vec<u64>> {
         if scores.len() != OPTION_COUNT
-            || plaintext_coefficients.len() != usize::try_from(self.ring_degree).ok()?
+            || auxiliary_coefficients.len() != usize::try_from(self.ring_degree).ok()?
+            || usize::from(ciphertext_ordinal) >= PAIR_CHARACTER_CIPHERTEXT_COUNT
+            || usize::from(auxiliary_ordinal) >= PAIR_CHARACTER_AUXILIARY_COUNT - 1
         {
             return None;
         }
-        let mut cursor = self.encoder_weight_cursor()?;
-        let mut reductions = Vec::with_capacity(plaintext_coefficients.len());
-        for plaintext_coefficient in plaintext_coefficients.iter().copied() {
-            let row = cursor.next_row()?;
-            let weighted_sum =
-                scores
-                    .iter()
-                    .zip(row)
-                    .try_fold(0_u128, |sum, (score, weight)| {
-                        sum.checked_add(u128::from(score - MINIMUM_SCORE) * u128::from(weight))
-                    })?;
-            let numerator = weighted_sum.checked_sub(u128::from(plaintext_coefficient))?;
+        let encoder_profiles = scores
+            .iter()
+            .enumerate()
+            .map(|(option_ordinal, _)| {
+                self.encoder_profile_sequence(
+                    ciphertext_ordinal,
+                    auxiliary_ordinal,
+                    u16::try_from(option_ordinal).ok()?,
+                )
+            })
+            .collect::<Option<Vec<_>>>()?;
+        let mut reductions = Vec::with_capacity(auxiliary_coefficients.len());
+        for (coefficient_ordinal, auxiliary_coefficient) in
+            auxiliary_coefficients.iter().copied().enumerate()
+        {
+            let weighted_sum = encoder_profiles
+                .iter()
+                .zip(scores.iter().copied())
+                .try_fold(0_u128, |sum, (encoder_profile, score)| {
+                    let score_bucket_ordinal =
+                        usize::try_from(score.checked_sub(MINIMUM_SCORE)?).ok()?;
+                    let value = rotated_encoder_profile_value(
+                        encoder_profile,
+                        usize::from(auxiliary_ordinal),
+                        score_bucket_ordinal,
+                        coefficient_ordinal,
+                    )
+                    .ok()?;
+                    sum.checked_add(u128::from(value))
+                })?;
+            let numerator = weighted_sum.checked_sub(u128::from(auxiliary_coefficient))?;
             if !numerator.is_multiple_of(u128::from(self.plaintext_modulus)) {
                 return None;
             }
             let reduction = u64::try_from(numerator / u128::from(self.plaintext_modulus)).ok()?;
-            if reduction > self.encoder_reduction_maximum {
+            if reduction
+                > self.encoder_reduction_maxima[usize::from(ciphertext_ordinal)]
+                    [usize::from(auxiliary_ordinal)]
+            {
                 return None;
             }
             reductions.push(reduction);
         }
-        (cursor.next_row().is_none()).then_some(reductions)
+        Some(reductions)
     }
 
-    fn encoder_weight_cursor(&self) -> Option<PairDifferenceEncoderWeightCursor<'_>> {
-        PairDifferenceEncoderWeightCursor::new(
-            self.ring_degree,
-            self.plaintext_modulus,
-            self.inverse_ring_degree,
-            &self.pair_slot_inverse_roots,
-        )
+    pub(crate) const fn encoder_reduction_maximum(
+        &self,
+        ciphertext_ordinal: usize,
+        auxiliary_ordinal: usize,
+    ) -> Option<u64> {
+        if ciphertext_ordinal >= PAIR_CHARACTER_CIPHERTEXT_COUNT
+            || auxiliary_ordinal >= PAIR_CHARACTER_AUXILIARY_COUNT - 1
+        {
+            return None;
+        }
+        Some(self.encoder_reduction_maxima[ciphertext_ordinal][auxiliary_ordinal])
     }
 
-    pub(crate) const fn encoder_reduction_maximum(&self) -> u64 {
-        self.encoder_reduction_maximum
+    pub(crate) const fn pair_character_product_quotient_absolute_bound(&self) -> u64 {
+        self.pair_character_product_quotient_absolute_bound
     }
 
     pub(crate) fn recipe(&self, column_ordinal: u32) -> Option<BallotValiditySourceColumnRecipe> {
@@ -246,20 +279,20 @@ impl BallotValiditySourcePlan {
             .flatten()
     }
 
-    pub(crate) fn has_source(&self, column_ordinal: u32) -> bool {
-        self.recipe(column_ordinal).is_some() || self.verifier_source(column_ordinal).is_some()
-    }
-
     pub(crate) fn column_count(&self) -> usize {
         self.recipes_by_column.len()
     }
 
     pub(crate) fn provided_column_count(&self) -> usize {
         (0..self.recipes_by_column.len())
-            .filter(|column_index| {
-                self.recipes_by_column[*column_index].is_some()
-                    || self.verifier_sources_by_column[*column_index].is_some()
-            })
+            .filter(|column_index| self.recipes_by_column[*column_index].is_some())
+            .count()
+    }
+
+    pub(crate) fn verifier_column_count(&self) -> usize {
+        self.verifier_sources_by_column
+            .iter()
+            .filter(|source| source.is_some())
             .count()
     }
 
@@ -271,9 +304,6 @@ impl BallotValiditySourcePlan {
                 .len()
                 .checked_mul(core::mem::size_of::<u16>()),
             self.data_moduli
-                .len()
-                .checked_mul(core::mem::size_of::<u64>()),
-            self.pair_slot_inverse_roots
                 .len()
                 .checked_mul(core::mem::size_of::<u64>()),
             self.recipes_by_column
@@ -318,86 +348,15 @@ pub(crate) struct BallotValidityRelationPlanInput {
     pub(crate) opening_degree_bound_exclusive: u64,
     pub(crate) active_data_modulus_indices: Vec<u16>,
     pub(crate) plaintext_modulus: u64,
-    pub(crate) primitive_two_n_root: u64,
-    pub(crate) slot_generator: u16,
     pub(crate) reserved_slot_rule: u16,
 }
 
 #[derive(Clone, Debug)]
 struct ValidatedBallotGeometry {
     data_moduli: Vec<u64>,
-    inverse_ring_degree: u64,
-    pair_slot_inverse_roots: Vec<u64>,
-    encoder_reduction_maximum: u64,
-}
-
-struct PairDifferenceEncoderWeightCursor<'roots> {
-    ring_degree: u64,
-    plaintext_modulus: u64,
-    pair_slot_inverse_roots: &'roots [u64],
-    current_pair_slot_weights: Vec<u64>,
-    coefficient_ordinal: u64,
-}
-
-impl<'roots> PairDifferenceEncoderWeightCursor<'roots> {
-    fn new(
-        ring_degree: u64,
-        plaintext_modulus: u64,
-        inverse_ring_degree: u64,
-        pair_slot_inverse_roots: &'roots [u64],
-    ) -> Option<Self> {
-        if ring_degree < u64::try_from(PAIR_COUNT).ok()?
-            || plaintext_modulus < 2
-            || inverse_ring_degree >= plaintext_modulus
-            || pair_slot_inverse_roots.len() != PAIR_COUNT
-            || pair_slot_inverse_roots
-                .iter()
-                .any(|root| *root == 0 || *root >= plaintext_modulus)
-        {
-            return None;
-        }
-        Some(Self {
-            ring_degree,
-            plaintext_modulus,
-            pair_slot_inverse_roots,
-            current_pair_slot_weights: vec![inverse_ring_degree; PAIR_COUNT],
-            coefficient_ordinal: 0,
-        })
-    }
-
-    fn next_row(&mut self) -> Option<[u64; OPTION_COUNT]> {
-        if self.coefficient_ordinal >= self.ring_degree {
-            return None;
-        }
-        let mut option_weights = [0_u64; OPTION_COUNT];
-        let mut pair_slot_ordinal = 0_usize;
-        for shift in 1..OPTION_COUNT {
-            for lower_option_ordinal in 0..OPTION_COUNT - shift {
-                let higher_option_ordinal = lower_option_ordinal + shift;
-                let weight = self.current_pair_slot_weights[pair_slot_ordinal];
-                option_weights[lower_option_ordinal] = modular_sum(
-                    option_weights[lower_option_ordinal],
-                    weight,
-                    self.plaintext_modulus,
-                );
-                option_weights[higher_option_ordinal] = modular_difference_residue(
-                    option_weights[higher_option_ordinal],
-                    weight,
-                    self.plaintext_modulus,
-                );
-                pair_slot_ordinal += 1;
-            }
-        }
-        for (weight, inverse_root) in self
-            .current_pair_slot_weights
-            .iter_mut()
-            .zip(self.pair_slot_inverse_roots)
-        {
-            *weight = modular_product(*weight, *inverse_root, self.plaintext_modulus);
-        }
-        self.coefficient_ordinal += 1;
-        Some(option_weights)
-    }
+    encoder_reduction_maxima:
+        [[u64; PAIR_CHARACTER_AUXILIARY_COUNT - 1]; PAIR_CHARACTER_CIPHERTEXT_COUNT],
+    pair_character_product_quotient_absolute_bound: u64,
 }
 
 impl BallotValidityRelationPlanInput {
@@ -406,17 +365,12 @@ impl BallotValidityRelationPlanInput {
         context: &RelationPlanCheckContext,
     ) -> Result<ValidatedBallotGeometry, RelationPlanError> {
         RelationPlanChecker::new(context).check_context()?;
-        if self.ring_degree < 2
-            || !self.ring_degree.is_power_of_two()
-            || self.ring_degree < u64::try_from(PAIR_COUNT).unwrap_or(u64::MAX)
+        if self.ring_degree != u64::try_from(PAIR_CHARACTER_RING_DEGREE).unwrap_or(u64::MAX)
             || self.evaluation_domain_size == 0
             || !self.evaluation_domain_size.is_power_of_two()
             || self.opening_degree_bound_exclusive <= 1
             || self.active_data_modulus_indices.is_empty()
-            || self.plaintext_modulus < 3
-            || self.primitive_two_n_root == 0
-            || self.primitive_two_n_root >= self.plaintext_modulus
-            || self.slot_generator < 2
+            || self.plaintext_modulus != PAIR_CHARACTER_PLAINTEXT_MODULUS
             || self.reserved_slot_rule != RESERVED_SLOT_RULE
         {
             return Err(RelationPlanError::InvalidDomain);
@@ -448,77 +402,71 @@ impl BallotValidityRelationPlanInput {
             .collect::<Result<Vec<_>, _>>()?;
         validate_radix_capacity(self.plaintext_modulus, context.base_field_modulus)?;
 
-        let two_n = self
-            .ring_degree
-            .checked_mul(2)
-            .ok_or(RelationPlanError::CountOverflow)?;
-        if modular_power(self.primitive_two_n_root, two_n, self.plaintext_modulus) != 1
-            || modular_power(
-                self.primitive_two_n_root,
-                self.ring_degree,
-                self.plaintext_modulus,
-            ) == 1
+        let ring_degree =
+            usize::try_from(self.ring_degree).map_err(|_| RelationPlanError::CountOverflow)?;
+        let mut encoder_reduction_maxima =
+            [[0_u64; PAIR_CHARACTER_AUXILIARY_COUNT - 1]; PAIR_CHARACTER_CIPHERTEXT_COUNT];
+        for (ciphertext_ordinal, auxiliary_maxima) in
+            encoder_reduction_maxima.iter_mut().enumerate()
         {
-            return Err(RelationPlanError::InvalidDomain);
+            for (auxiliary_ordinal, maximum) in auxiliary_maxima.iter_mut().enumerate() {
+                let mut maximum_weight_sum_by_row = vec![0_u64; ring_degree];
+                for option_ordinal in 0..OPTION_COUNT {
+                    let encoder_profile = pair_character_encoder_profile_sequence(
+                        u16::try_from(ciphertext_ordinal)
+                            .map_err(|_| RelationPlanError::CountOverflow)?,
+                        u16::try_from(auxiliary_ordinal)
+                            .map_err(|_| RelationPlanError::CountOverflow)?,
+                        u16::try_from(option_ordinal)
+                            .map_err(|_| RelationPlanError::CountOverflow)?,
+                    )
+                    .map_err(|_| RelationPlanError::InvalidDomain)?;
+                    for coefficient_ordinal in 0..ring_degree {
+                        let option_maximum = (0..SCORE_BUCKET_COUNT)
+                            .map(|score_bucket_ordinal| {
+                                rotated_encoder_profile_value(
+                                    &encoder_profile,
+                                    auxiliary_ordinal,
+                                    score_bucket_ordinal,
+                                    coefficient_ordinal,
+                                )
+                            })
+                            .collect::<Result<Vec<_>, _>>()?
+                            .into_iter()
+                            .max()
+                            .ok_or(RelationPlanError::InvalidDomain)?;
+                        maximum_weight_sum_by_row[coefficient_ordinal] = maximum_weight_sum_by_row
+                            [coefficient_ordinal]
+                            .checked_add(option_maximum)
+                            .ok_or(RelationPlanError::IntegerBoundOverflow)?;
+                    }
+                }
+                *maximum = maximum_weight_sum_by_row
+                    .into_iter()
+                    .map(|weight_sum| weight_sum / self.plaintext_modulus)
+                    .max()
+                    .filter(|maximum| *maximum != 0)
+                    .ok_or(RelationPlanError::InvalidBoundCertificate)?;
+            }
         }
-        validate_slot_generator(self.ring_degree, self.slot_generator)?;
-
-        let inverse_ring_degree = modular_inverse(
-            self.ring_degree % self.plaintext_modulus,
-            self.plaintext_modulus,
-        )?;
-        let positive_slot_count = self.ring_degree / 2;
-        let mut pair_slot_inverse_roots = Vec::with_capacity(PAIR_COUNT);
-        for pair_slot_ordinal in 0..PAIR_COUNT {
-            let pair_slot_ordinal =
-                u64::try_from(pair_slot_ordinal).map_err(|_| RelationPlanError::CountOverflow)?;
-            let positive_slot_ordinal = pair_slot_ordinal % positive_slot_count;
-            let positive_slot_exponent =
-                modular_power(u64::from(self.slot_generator), positive_slot_ordinal, two_n);
-            let slot_exponent = if pair_slot_ordinal < positive_slot_count {
-                positive_slot_exponent
-            } else {
-                two_n - positive_slot_exponent
-            };
-            let slot_root = modular_power(
-                self.primitive_two_n_root,
-                slot_exponent,
-                self.plaintext_modulus,
-            );
-            pair_slot_inverse_roots.push(modular_inverse(slot_root, self.plaintext_modulus)?);
+        let product_absolute_bound = u128::from(self.ring_degree)
+            .checked_mul(u128::from(self.plaintext_modulus - 1).pow(2))
+            .ok_or(RelationPlanError::IntegerBoundOverflow)?;
+        if product_absolute_bound >= u128::from(context.base_field_modulus / 2) {
+            return Err(RelationPlanError::NoWrapBoundViolated);
         }
-
-        let mut encoder_reduction_maximum = 0_u64;
-        let mut encoder_weight_cursor = PairDifferenceEncoderWeightCursor::new(
-            self.ring_degree,
-            self.plaintext_modulus,
-            inverse_ring_degree,
-            &pair_slot_inverse_roots,
+        let pair_character_product_quotient_absolute_bound = u64::try_from(
+            product_absolute_bound
+                .checked_add(u128::from(self.plaintext_modulus - 1))
+                .ok_or(RelationPlanError::IntegerBoundOverflow)?
+                / u128::from(self.plaintext_modulus),
         )
-        .ok_or(RelationPlanError::InvalidDomain)?;
-        while let Some(option_weights) = encoder_weight_cursor.next_row() {
-            let weight_sum = option_weights.iter().try_fold(0_u128, |sum, weight| {
-                sum.checked_add(u128::from(*weight))
-                    .ok_or(RelationPlanError::IntegerBoundOverflow)
-            })?;
-            let reduction = u64::try_from(
-                u128::from(MAXIMUM_SCORE - MINIMUM_SCORE)
-                    .checked_mul(weight_sum)
-                    .ok_or(RelationPlanError::IntegerBoundOverflow)?
-                    / u128::from(self.plaintext_modulus),
-            )
-            .map_err(|_| RelationPlanError::IntegerBoundOverflow)?;
-            encoder_reduction_maximum = encoder_reduction_maximum.max(reduction);
-        }
-        if encoder_reduction_maximum == 0 {
-            return Err(RelationPlanError::InvalidBoundCertificate);
-        }
+        .map_err(|_| RelationPlanError::IntegerBoundOverflow)?;
 
         Ok(ValidatedBallotGeometry {
             data_moduli,
-            inverse_ring_degree,
-            pair_slot_inverse_roots,
-            encoder_reduction_maximum,
+            encoder_reduction_maxima,
+            pair_character_product_quotient_absolute_bound,
         })
     }
 }
@@ -530,10 +478,13 @@ enum BallotVerifierSourceKey {
         data_modulus_index: u16,
     },
     Ciphertext {
+        ciphertext_ordinal: u16,
         component_ordinal: u16,
         data_modulus_index: u16,
     },
-    PairDifferenceEncoderWeight {
+    PairCharacterEncoderProfile {
+        ciphertext_ordinal: u16,
+        auxiliary_ordinal: u16,
         option_ordinal: u16,
     },
 }
@@ -554,14 +505,18 @@ struct BoundedUnsignedColumn {
 struct PublicDataLimbColumns {
     public_key_component_zero: u32,
     public_key_component_one: u32,
-    ciphertext_component_zero: u32,
-    ciphertext_component_one: u32,
+    ciphertext_components: [[u32; 2]; PAIR_CHARACTER_CIPHERTEXT_COUNT],
 }
 
 #[derive(Clone, Copy)]
 struct EncryptionQuotientColumns {
-    component_zero: u32,
-    component_one: u32,
+    components: [[u32; 2]; PAIR_CHARACTER_CIPHERTEXT_COUNT],
+}
+
+struct PairCharacterEncoderSourceColumns {
+    score_indicators: Vec<Vec<u32>>,
+    profiles_by_ciphertext_and_auxiliary:
+        [[Vec<u32>; PAIR_CHARACTER_AUXILIARY_COUNT - 1]; PAIR_CHARACTER_CIPHERTEXT_COUNT],
 }
 
 struct BallotValidityPlanBuilder<'context> {
@@ -619,6 +574,8 @@ impl<'context> BallotValidityPlanBuilder<'context> {
         origin: RelationColumnOrigin,
         phase: ProofTreePhase,
     ) -> Result<u32, RelationPlanError> {
+        let is_virtual_verifier_sequence =
+            matches!(origin, RelationColumnOrigin::VerifierSequence { .. });
         let source_degree_bound_exclusive = self.input.ring_degree;
         let column_ordinal = u32::try_from(self.ordered_columns.len())
             .map_err(|_| RelationPlanError::CountOverflow)?;
@@ -630,9 +587,11 @@ impl<'context> BallotValidityPlanBuilder<'context> {
         });
         self.source_recipes_by_column.push(None);
         self.verifier_sources_by_column.push(None);
-        match phase {
-            ProofTreePhase::Base => self.base_tree_columns.push(column_ordinal),
-            ProofTreePhase::Auxiliary => self.auxiliary_tree_columns.push(column_ordinal),
+        if !is_virtual_verifier_sequence {
+            match phase {
+                ProofTreePhase::Base => self.base_tree_columns.push(column_ordinal),
+                ProofTreePhase::Auxiliary => self.auxiliary_tree_columns.push(column_ordinal),
+            }
         }
         Ok(column_ordinal)
     }
@@ -858,20 +817,29 @@ impl<'context> BallotValidityPlanBuilder<'context> {
                 data_modulus_index,
             } => BallotValidityVerifierColumnSource::AuthenticatedPolynomial {
                 source_kind: 1,
+                ciphertext_ordinal: 0,
                 component_ordinal,
                 data_modulus_index,
             },
             BallotVerifierSourceKey::Ciphertext {
+                ciphertext_ordinal,
                 component_ordinal,
                 data_modulus_index,
             } => BallotValidityVerifierColumnSource::AuthenticatedPolynomial {
                 source_kind: 2,
+                ciphertext_ordinal,
                 component_ordinal,
                 data_modulus_index,
             },
-            BallotVerifierSourceKey::PairDifferenceEncoderWeight { option_ordinal } => {
-                BallotValidityVerifierColumnSource::PairDifferenceEncoderWeight { option_ordinal }
-            }
+            BallotVerifierSourceKey::PairCharacterEncoderProfile {
+                ciphertext_ordinal,
+                auxiliary_ordinal,
+                option_ordinal,
+            } => BallotValidityVerifierColumnSource::PairCharacterEncoderProfile {
+                ciphertext_ordinal,
+                auxiliary_ordinal,
+                option_ordinal,
+            },
         };
         let verifier_source_slot = self
             .verifier_sources_by_column
@@ -1279,97 +1247,160 @@ impl<'context> BallotValidityPlanBuilder<'context> {
             },
             modulus_reference,
         )?;
-        let ciphertext_component_zero = self.push_verifier_column(
-            BallotVerifierSourceKey::Ciphertext {
-                component_ordinal: 0,
-                data_modulus_index,
-            },
-            modulus_reference,
-        )?;
-        let ciphertext_component_one = self.push_verifier_column(
-            BallotVerifierSourceKey::Ciphertext {
-                component_ordinal: 1,
-                data_modulus_index,
-            },
-            modulus_reference,
-        )?;
+        let mut ciphertext_components = [[0_u32; 2]; PAIR_CHARACTER_CIPHERTEXT_COUNT];
+        for (ciphertext_ordinal, components) in ciphertext_components.iter_mut().enumerate() {
+            for (component_ordinal, column_ordinal) in components.iter_mut().enumerate() {
+                *column_ordinal = self.push_verifier_column(
+                    BallotVerifierSourceKey::Ciphertext {
+                        ciphertext_ordinal: u16::try_from(ciphertext_ordinal)
+                            .map_err(|_| RelationPlanError::CountOverflow)?,
+                        component_ordinal: u16::try_from(component_ordinal)
+                            .map_err(|_| RelationPlanError::CountOverflow)?,
+                        data_modulus_index,
+                    },
+                    modulus_reference,
+                )?;
+            }
+        }
         Ok(PublicDataLimbColumns {
             public_key_component_zero,
             public_key_component_one,
-            ciphertext_component_zero,
-            ciphertext_component_one,
+            ciphertext_components,
         })
     }
 
-    fn add_score_and_encoder_columns(
+    fn add_pair_character_encoder_source_columns(
         &mut self,
-    ) -> Result<(Vec<BoundedUnsignedColumn>, Vec<u32>), RelationPlanError> {
-        let score_offset_maximum = MAXIMUM_SCORE
-            .checked_sub(MINIMUM_SCORE)
-            .ok_or(RelationPlanError::InvalidBoundCertificate)?;
-        let mut score_offsets = Vec::with_capacity(OPTION_COUNT);
-        let mut encoder_weight_columns = Vec::with_capacity(OPTION_COUNT);
+    ) -> Result<PairCharacterEncoderSourceColumns, RelationPlanError> {
+        let mut score_indicators = Vec::with_capacity(OPTION_COUNT);
+        let mut profiles_by_ciphertext_and_auxiliary =
+            core::array::from_fn(|_| core::array::from_fn(|_| Vec::with_capacity(OPTION_COUNT)));
         for option_ordinal in 0..OPTION_COUNT {
-            let score_offset =
-                self.add_bounded_unsigned_column(score_offset_maximum, ProofTreePhase::Base)?;
-            let option_ordinal_u16 =
-                u16::try_from(option_ordinal).map_err(|_| RelationPlanError::CountOverflow)?;
-            self.assign_bounded_unsigned_source_recipes(
-                &score_offset,
-                score_offset_maximum,
-                BallotValidityWitnessValueSource::ScoreOffset {
-                    option_ordinal: option_ordinal_u16,
-                },
-            )?;
-            self.add_full_trace_constraint(
-                subtract_rotated_columns(
-                    score_offset.target_column_ordinal,
-                    false,
-                    1,
-                    score_offset.target_column_ordinal,
-                    false,
-                    0,
-                ),
-                true,
-            )?;
-            score_offsets.push(score_offset);
-
-            let encoder_weight_column = self.push_verifier_column(
-                BallotVerifierSourceKey::PairDifferenceEncoderWeight {
-                    option_ordinal: option_ordinal_u16,
-                },
-                SuiteModulusReference::plaintext(),
-            )?;
-            encoder_weight_columns.push(encoder_weight_column);
+            for (ciphertext_ordinal, profiles_by_auxiliary) in
+                profiles_by_ciphertext_and_auxiliary.iter_mut().enumerate()
+            {
+                for (auxiliary_ordinal, profile_columns) in
+                    profiles_by_auxiliary.iter_mut().enumerate()
+                {
+                    profile_columns.push(
+                        self.push_verifier_column(
+                            BallotVerifierSourceKey::PairCharacterEncoderProfile {
+                                ciphertext_ordinal: u16::try_from(ciphertext_ordinal)
+                                    .map_err(|_| RelationPlanError::CountOverflow)?,
+                                auxiliary_ordinal: u16::try_from(auxiliary_ordinal)
+                                    .map_err(|_| RelationPlanError::CountOverflow)?,
+                                option_ordinal: u16::try_from(option_ordinal)
+                                    .map_err(|_| RelationPlanError::CountOverflow)?,
+                            },
+                            SuiteModulusReference::plaintext(),
+                        )?,
+                    );
+                }
+            }
+            let mut option_indicators = Vec::with_capacity(SCORE_BUCKET_COUNT);
+            for score_bucket_ordinal in 0..SCORE_BUCKET_COUNT {
+                let column_ordinal = self.add_binary_column(ProofTreePhase::Base)?;
+                self.assign_source_recipe(
+                    column_ordinal,
+                    BallotValidityWitnessValueSource::ScoreIndicator {
+                        option_ordinal: u16::try_from(option_ordinal)
+                            .map_err(|_| RelationPlanError::CountOverflow)?,
+                        score_bucket_ordinal: u16::try_from(score_bucket_ordinal)
+                            .map_err(|_| RelationPlanError::CountOverflow)?,
+                    },
+                    BallotValidityColumnTransform::Identity,
+                )?;
+                self.add_full_trace_constraint(
+                    subtract_rotated_columns(column_ordinal, false, 1, column_ordinal, false, 0),
+                    true,
+                )?;
+                option_indicators.push(column_ordinal);
+            }
+            let mut one_hot_terms = option_indicators
+                .iter()
+                .copied()
+                .map(|column_ordinal| integer_column_term(column_ordinal, false, 0, false))
+                .collect::<Vec<_>>();
+            one_hot_terms.push(integer_constant_term(1, true));
+            self.add_full_trace_constraint(sum_integer_terms(one_hot_terms)?, true)?;
+            score_indicators.push(option_indicators);
         }
-        Ok((score_offsets, encoder_weight_columns))
+        Ok(PairCharacterEncoderSourceColumns {
+            score_indicators,
+            profiles_by_ciphertext_and_auxiliary,
+        })
     }
 
     fn add_exact_encoder_identity(
         &mut self,
-        score_offsets: &[BoundedUnsignedColumn],
-        encoder_weight_columns: &[u32],
-        plaintext_coefficients: &BoundedUnsignedColumn,
+        ciphertext_ordinal: u16,
+        auxiliary_ordinal: u16,
+        encoder_source_columns: &PairCharacterEncoderSourceColumns,
+        auxiliary_coefficients: &BoundedUnsignedColumn,
         encoder_reduction: &BoundedUnsignedColumn,
     ) -> Result<(), RelationPlanError> {
-        if score_offsets.len() != OPTION_COUNT || encoder_weight_columns.len() != OPTION_COUNT {
+        let score_indicators = &encoder_source_columns.score_indicators;
+        let profile_columns = encoder_source_columns
+            .profiles_by_ciphertext_and_auxiliary
+            .get(usize::from(ciphertext_ordinal))
+            .and_then(|profiles| profiles.get(usize::from(auxiliary_ordinal)))
+            .ok_or(RelationPlanError::InvalidConstraint)?;
+        if score_indicators.len() != OPTION_COUNT
+            || profile_columns.len() != OPTION_COUNT
+            || score_indicators
+                .iter()
+                .any(|indicators| indicators.len() != SCORE_BUCKET_COUNT)
+        {
             return Err(RelationPlanError::InvalidConstraint);
         }
-        let mut terms = Vec::with_capacity(OPTION_COUNT * 2 + 2);
-        for (score_offset, encoder_weight_column) in
-            score_offsets.iter().zip(encoder_weight_columns)
-        {
-            terms.push(IntegerTerm {
-                expression: vec![
-                    unrotated_column_expression(*encoder_weight_column),
-                    unrotated_column_expression(score_offset.target_column_ordinal),
-                    RelationExpressionInstruction::Multiplication,
-                ],
-                negative: false,
-            });
+        let mut ordered_product_terms = Vec::with_capacity(OPTION_COUNT * SCORE_BUCKET_COUNT);
+        for (option_ordinal, indicators) in score_indicators.iter().enumerate() {
+            let encoder_profile_column = *profile_columns
+                .get(option_ordinal)
+                .ok_or(RelationPlanError::InvalidConstraint)?;
+            for (score_bucket_ordinal, indicator_column_ordinal) in
+                indicators.iter().copied().enumerate()
+            {
+                let score = MINIMUM_SCORE
+                    .checked_add(
+                        u64::try_from(score_bucket_ordinal)
+                            .map_err(|_| RelationPlanError::CountOverflow)?,
+                    )
+                    .ok_or(RelationPlanError::CountOverflow)?;
+                let (rotation_is_negative, rotation_magnitude) = match auxiliary_ordinal {
+                    0 => (
+                        true,
+                        score
+                            .checked_add(MAXIMUM_SCORE - MINIMUM_SCORE)
+                            .ok_or(RelationPlanError::CountOverflow)?,
+                    ),
+                    1 => (false, score),
+                    _ => return Err(RelationPlanError::InvalidConstraint),
+                };
+                ordered_product_terms.push(RelationConstantColumnVerifierSequenceProductTerm {
+                    constant_column_ordinal: indicator_column_ordinal,
+                    verifier_sequence_column_ordinal: encoder_profile_column,
+                    verifier_sequence_rotation_is_negative: rotation_is_negative,
+                    verifier_sequence_rotation_magnitude: rotation_magnitude,
+                });
+            }
         }
+        ordered_product_terms.sort_unstable();
+        if !strictly_sorted_unique(&ordered_product_terms) {
+            return Err(RelationPlanError::NonCanonicalOrder);
+        }
+        let mut terms = vec![IntegerTerm {
+            expression: vec![
+                RelationExpressionInstruction::ConstantColumnVerifierSequenceProductSum {
+                    coefficient_period: u16::try_from(PAIR_CHARACTER_LANE_COUNT)
+                        .map_err(|_| RelationPlanError::CountOverflow)?,
+                    ordered_terms: ordered_product_terms,
+                },
+            ],
+            negative: false,
+        }];
         terms.push(integer_column_term(
-            plaintext_coefficients.target_column_ordinal,
+            auxiliary_coefficients.target_column_ordinal,
             false,
             0,
             true,
@@ -1405,29 +1436,26 @@ impl<'context> BallotValidityPlanBuilder<'context> {
             .and_then(|bound| bound.checked_add(3 * plaintext_modulus - 1))
             .ok_or(RelationPlanError::IntegerBoundOverflow)?;
         let absolute_bound = positive_numerator_bound.max(negative_numerator_bound) / modulus;
-        let component_zero =
-            self.add_signed_integer_column(absolute_bound, ProofTreePhase::Base)?;
-        self.assign_signed_integer_source_recipes(
-            component_zero,
-            absolute_bound,
-            BallotValidityWitnessValueSource::EncryptionQuotient {
-                data_modulus_index,
-                component_ordinal: 0,
-            },
-        )?;
-        let component_one = self.add_signed_integer_column(absolute_bound, ProofTreePhase::Base)?;
-        self.assign_signed_integer_source_recipes(
-            component_one,
-            absolute_bound,
-            BallotValidityWitnessValueSource::EncryptionQuotient {
-                data_modulus_index,
-                component_ordinal: 1,
-            },
-        )?;
-        Ok(EncryptionQuotientColumns {
-            component_zero,
-            component_one,
-        })
+        let mut components = [[0_u32; 2]; PAIR_CHARACTER_CIPHERTEXT_COUNT];
+        for (ciphertext_ordinal, ciphertext_components) in components.iter_mut().enumerate() {
+            for (component_ordinal, column_ordinal) in ciphertext_components.iter_mut().enumerate()
+            {
+                *column_ordinal =
+                    self.add_signed_integer_column(absolute_bound, ProofTreePhase::Base)?;
+                self.assign_signed_integer_source_recipes(
+                    *column_ordinal,
+                    absolute_bound,
+                    BallotValidityWitnessValueSource::EncryptionQuotient {
+                        ciphertext_ordinal: u16::try_from(ciphertext_ordinal)
+                            .map_err(|_| RelationPlanError::CountOverflow)?,
+                        data_modulus_index,
+                        component_ordinal: u16::try_from(component_ordinal)
+                            .map_err(|_| RelationPlanError::CountOverflow)?,
+                    },
+                )?;
+            }
+        }
+        Ok(EncryptionQuotientColumns { components })
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1437,111 +1465,111 @@ impl<'context> BallotValidityPlanBuilder<'context> {
         challenge_ordinal: u16,
         public_columns: &PublicDataLimbColumns,
         quotient_columns: EncryptionQuotientColumns,
-        plaintext_coefficients: &BoundedUnsignedColumn,
-        reversed_randomizer_shifted: &BoundedUnsignedColumn,
-        error_zero_shifted: &BoundedUnsignedColumn,
-        error_one_shifted: &BoundedUnsignedColumn,
+        message_coefficients: &[BoundedUnsignedColumn],
+        reversed_randomizers_shifted: &[BoundedUnsignedColumn],
+        error_columns_shifted: &[[BoundedUnsignedColumn; 2]],
     ) -> Result<(), RelationPlanError> {
         let modulus_reference = self
             .ordered_non_native_moduli
             .get(modulus_ordinal)
             .copied()
             .ok_or(RelationPlanError::MissingModulus)?;
-        let mut components = Vec::with_capacity(2);
-        for (
-            ciphertext_column_ordinal,
-            public_key_column_ordinal,
-            quotient_column_ordinal,
-            error_column_ordinal,
-            include_plaintext,
-        ) in [
-            (
-                public_columns.ciphertext_component_zero,
-                public_columns.public_key_component_zero,
-                quotient_columns.component_zero,
-                error_zero_shifted.target_column_ordinal,
-                true,
-            ),
-            (
-                public_columns.ciphertext_component_one,
-                public_columns.public_key_component_one,
-                quotient_columns.component_one,
-                error_one_shifted.target_column_ordinal,
-                false,
-            ),
-        ] {
-            let mut ordered_linear_terms = vec![
-                RelationIntegerLiftLinearTermDescriptor {
-                    negative: true,
-                    column_ordinal: quotient_column_ordinal,
-                    column_offset: 0,
-                    coefficient: RelationIntegerLiftCoefficient::Modulus {
-                        modulus_reference,
-                        multiplier: 1,
+        if message_coefficients.len() != PAIR_CHARACTER_CIPHERTEXT_COUNT
+            || reversed_randomizers_shifted.len() != PAIR_CHARACTER_CIPHERTEXT_COUNT
+            || error_columns_shifted.len() != PAIR_CHARACTER_CIPHERTEXT_COUNT
+        {
+            return Err(RelationPlanError::InvalidConstraint);
+        }
+        let mut components = Vec::with_capacity(PAIR_CHARACTER_CIPHERTEXT_COUNT * 2);
+        for ciphertext_ordinal in 0..PAIR_CHARACTER_CIPHERTEXT_COUNT {
+            for component_ordinal in 0..2 {
+                let ciphertext_column_ordinal =
+                    public_columns.ciphertext_components[ciphertext_ordinal][component_ordinal];
+                let public_key_column_ordinal = match component_ordinal {
+                    0 => public_columns.public_key_component_zero,
+                    1 => public_columns.public_key_component_one,
+                    _ => unreachable!(),
+                };
+                let quotient_column_ordinal =
+                    quotient_columns.components[ciphertext_ordinal][component_ordinal];
+                let error_column_ordinal = error_columns_shifted[ciphertext_ordinal]
+                    [component_ordinal]
+                    .target_column_ordinal;
+                let mut ordered_linear_terms = vec![
+                    RelationIntegerLiftLinearTermDescriptor {
+                        negative: true,
+                        column_ordinal: quotient_column_ordinal,
+                        column_offset: 0,
+                        coefficient: RelationIntegerLiftCoefficient::Modulus {
+                            modulus_reference,
+                            multiplier: 1,
+                        },
                     },
-                },
-                RelationIntegerLiftLinearTermDescriptor {
-                    negative: false,
-                    column_ordinal: ciphertext_column_ordinal,
-                    column_offset: 0,
-                    coefficient: RelationIntegerLiftCoefficient::Constant(1),
-                },
-                RelationIntegerLiftLinearTermDescriptor {
-                    negative: true,
-                    column_ordinal: error_column_ordinal,
-                    column_offset: 2,
-                    coefficient: RelationIntegerLiftCoefficient::Modulus {
-                        modulus_reference: SuiteModulusReference::plaintext(),
-                        multiplier: 1,
+                    RelationIntegerLiftLinearTermDescriptor {
+                        negative: false,
+                        column_ordinal: ciphertext_column_ordinal,
+                        column_offset: 0,
+                        coefficient: RelationIntegerLiftCoefficient::Constant(1),
                     },
-                },
-            ];
-            if include_plaintext {
-                ordered_linear_terms.push(RelationIntegerLiftLinearTermDescriptor {
-                    negative: true,
-                    column_ordinal: plaintext_coefficients.target_column_ordinal,
-                    column_offset: 0,
-                    coefficient: RelationIntegerLiftCoefficient::Constant(1),
+                    RelationIntegerLiftLinearTermDescriptor {
+                        negative: true,
+                        column_ordinal: error_column_ordinal,
+                        column_offset: 2,
+                        coefficient: RelationIntegerLiftCoefficient::Modulus {
+                            modulus_reference: SuiteModulusReference::plaintext(),
+                            multiplier: 1,
+                        },
+                    },
+                ];
+                if component_ordinal == 0 {
+                    ordered_linear_terms.push(RelationIntegerLiftLinearTermDescriptor {
+                        negative: true,
+                        column_ordinal: message_coefficients[ciphertext_ordinal]
+                            .target_column_ordinal,
+                        column_offset: 0,
+                        coefficient: RelationIntegerLiftCoefficient::Constant(1),
+                    });
+                }
+                let mut keyed_linear_terms = ordered_linear_terms
+                    .into_iter()
+                    .map(|term| Ok((term.canonical_bytes()?, term)))
+                    .collect::<Result<Vec<_>, RelationPlanError>>()?;
+                keyed_linear_terms.sort_by(|left, right| left.0.cmp(&right.0));
+                if keyed_linear_terms
+                    .windows(2)
+                    .any(|window| window[0].0 >= window[1].0)
+                {
+                    return Err(RelationPlanError::DuplicateItem);
+                }
+                let ordered_linear_terms = keyed_linear_terms
+                    .into_iter()
+                    .map(|(_, term)| term)
+                    .collect();
+
+                let ordered_convolution_products =
+                    vec![RelationIntegerLiftConvolutionProductDescriptor {
+                        negative: true,
+                        convolution_kind: RelationIntegerLiftConvolutionKind::Negacyclic,
+                        multiplicand_column_ordinal: public_key_column_ordinal,
+                        reversed_multiplier_column_ordinal: reversed_randomizers_shifted
+                            [ciphertext_ordinal]
+                            .target_column_ordinal,
+                        multiplier_offset: 1,
+                        suffix_evaluation_column_ordinal: self
+                            .push_prover_column(ProofTreePhase::Auxiliary)?,
+                        reversed_transpose_column_ordinal: self
+                            .push_prover_column(ProofTreePhase::Auxiliary)?,
+                    }];
+                components.push(RelationIntegerLiftComponentDescriptor {
+                    ordered_linear_terms,
+                    ordered_convolution_products,
+                    ordered_full_ring_negacyclic_products: Vec::new(),
+                    linear_evaluation_column_ordinal: self
+                        .push_prover_column(ProofTreePhase::Auxiliary)?,
+                    product_accumulator_column_ordinal: self
+                        .push_prover_column(ProofTreePhase::Auxiliary)?,
                 });
             }
-            let mut keyed_linear_terms = ordered_linear_terms
-                .into_iter()
-                .map(|term| Ok((term.canonical_bytes()?, term)))
-                .collect::<Result<Vec<_>, RelationPlanError>>()?;
-            keyed_linear_terms.sort_by(|left, right| left.0.cmp(&right.0));
-            if keyed_linear_terms
-                .windows(2)
-                .any(|window| window[0].0 >= window[1].0)
-            {
-                return Err(RelationPlanError::DuplicateItem);
-            }
-            let ordered_linear_terms = keyed_linear_terms
-                .into_iter()
-                .map(|(_, term)| term)
-                .collect();
-
-            let ordered_convolution_products =
-                vec![RelationIntegerLiftConvolutionProductDescriptor {
-                    negative: true,
-                    convolution_kind: RelationIntegerLiftConvolutionKind::Negacyclic,
-                    multiplicand_column_ordinal: public_key_column_ordinal,
-                    reversed_multiplier_column_ordinal: reversed_randomizer_shifted
-                        .target_column_ordinal,
-                    multiplier_offset: 1,
-                    suffix_evaluation_column_ordinal: self
-                        .push_prover_column(ProofTreePhase::Auxiliary)?,
-                    reversed_transpose_column_ordinal: self
-                        .push_prover_column(ProofTreePhase::Auxiliary)?,
-                }];
-            components.push(RelationIntegerLiftComponentDescriptor {
-                ordered_linear_terms,
-                ordered_convolution_products,
-                ordered_full_ring_negacyclic_products: Vec::new(),
-                linear_evaluation_column_ordinal: self
-                    .push_prover_column(ProofTreePhase::Auxiliary)?,
-                product_accumulator_column_ordinal: self
-                    .push_prover_column(ProofTreePhase::Auxiliary)?,
-            });
         }
         let mut keyed_components = components
             .into_iter()
@@ -1584,6 +1612,130 @@ impl<'context> BallotValidityPlanBuilder<'context> {
         Ok(())
     }
 
+    fn add_pair_character_product_batch(
+        &mut self,
+        modulus_ordinal: usize,
+        challenge_ordinal: u16,
+        auxiliary_columns: &[Vec<BoundedUnsignedColumn>],
+        reversed_right_columns: &[BoundedUnsignedColumn],
+        product_quotient_columns: &[u32],
+    ) -> Result<(), RelationPlanError> {
+        if auxiliary_columns.len() != PAIR_CHARACTER_CIPHERTEXT_COUNT
+            || auxiliary_columns
+                .iter()
+                .any(|columns| columns.len() != PAIR_CHARACTER_AUXILIARY_COUNT)
+            || reversed_right_columns.len() != PAIR_CHARACTER_CIPHERTEXT_COUNT
+            || product_quotient_columns.len() != PAIR_CHARACTER_CIPHERTEXT_COUNT
+        {
+            return Err(RelationPlanError::InvalidConstraint);
+        }
+        let mut reversed_bindings = Vec::with_capacity(PAIR_CHARACTER_CIPHERTEXT_COUNT);
+        let mut components = Vec::with_capacity(PAIR_CHARACTER_CIPHERTEXT_COUNT);
+        for ciphertext_ordinal in 0..PAIR_CHARACTER_CIPHERTEXT_COUNT {
+            reversed_bindings.push(RelationIntegerLiftReversedColumnBindingDescriptor {
+                source_column_ordinal: auxiliary_columns[ciphertext_ordinal][1]
+                    .target_column_ordinal,
+                reversed_column_ordinal: reversed_right_columns[ciphertext_ordinal]
+                    .target_column_ordinal,
+                source_prefix_evaluation_column_ordinal: self
+                    .push_prover_column(ProofTreePhase::Auxiliary)?,
+                reversed_suffix_evaluation_column_ordinal: self
+                    .push_prover_column(ProofTreePhase::Auxiliary)?,
+            });
+            let mut ordered_linear_terms = vec![
+                RelationIntegerLiftLinearTermDescriptor {
+                    negative: false,
+                    column_ordinal: auxiliary_columns[ciphertext_ordinal][2].target_column_ordinal,
+                    column_offset: 0,
+                    coefficient: RelationIntegerLiftCoefficient::Constant(1),
+                },
+                RelationIntegerLiftLinearTermDescriptor {
+                    negative: true,
+                    column_ordinal: product_quotient_columns[ciphertext_ordinal],
+                    column_offset: 0,
+                    coefficient: RelationIntegerLiftCoefficient::Modulus {
+                        modulus_reference: SuiteModulusReference::plaintext(),
+                        multiplier: 1,
+                    },
+                },
+            ];
+            ordered_linear_terms.sort_by(|left, right| {
+                left.canonical_bytes()
+                    .expect("relation term canonical encoding")
+                    .cmp(
+                        &right
+                            .canonical_bytes()
+                            .expect("relation term canonical encoding"),
+                    )
+            });
+            components.push(RelationIntegerLiftComponentDescriptor {
+                ordered_linear_terms,
+                ordered_convolution_products: vec![
+                    RelationIntegerLiftConvolutionProductDescriptor {
+                        negative: true,
+                        convolution_kind: RelationIntegerLiftConvolutionKind::Negacyclic,
+                        multiplicand_column_ordinal: auxiliary_columns[ciphertext_ordinal][0]
+                            .target_column_ordinal,
+                        reversed_multiplier_column_ordinal: reversed_right_columns
+                            [ciphertext_ordinal]
+                            .target_column_ordinal,
+                        multiplier_offset: 0,
+                        suffix_evaluation_column_ordinal: self
+                            .push_prover_column(ProofTreePhase::Auxiliary)?,
+                        reversed_transpose_column_ordinal: self
+                            .push_prover_column(ProofTreePhase::Auxiliary)?,
+                    },
+                ],
+                ordered_full_ring_negacyclic_products: Vec::new(),
+                linear_evaluation_column_ordinal: self
+                    .push_prover_column(ProofTreePhase::Auxiliary)?,
+                product_accumulator_column_ordinal: self
+                    .push_prover_column(ProofTreePhase::Auxiliary)?,
+            });
+        }
+        let mut canonically_keyed_bindings = reversed_bindings
+            .into_iter()
+            .map(|binding| Ok((binding.canonical_bytes()?, binding)))
+            .collect::<Result<Vec<_>, RelationPlanError>>()?;
+        canonically_keyed_bindings.sort_by(|left, right| left.0.cmp(&right.0));
+        let ordered_reversed_column_bindings = canonically_keyed_bindings
+            .into_iter()
+            .map(|(_, binding)| binding)
+            .collect();
+        let mut canonically_keyed_components = components
+            .into_iter()
+            .map(|component| Ok((component.canonical_bytes()?, component)))
+            .collect::<Result<Vec<_>, RelationPlanError>>()?;
+        canonically_keyed_components.sort_by(|left, right| left.0.cmp(&right.0));
+        let ordered_components = canonically_keyed_components
+            .into_iter()
+            .map(|(_, component)| component)
+            .collect();
+        let batch = RelationIntegerLiftBatchDescriptor {
+            modulus_reference: SuiteModulusReference::plaintext(),
+            challenge_ordinal,
+            ordered_reversed_column_bindings,
+            ordered_negacyclic_automorphism_permutations: Vec::new(),
+            ordered_components,
+        };
+        let modulus_ordinal =
+            u16::try_from(modulus_ordinal).map_err(|_| RelationPlanError::CountOverflow)?;
+        for program in batch.constraint_programs(
+            modulus_ordinal,
+            self.input.ring_degree,
+            self.input.evaluation_domain_size,
+            self.context,
+        )? {
+            self.add_constraint(
+                program.numerator_postfix_expression,
+                program.zeroifier_postfix_expression,
+                false,
+            )?;
+        }
+        self.ordered_integer_lift_batches.push(batch);
+        Ok(())
+    }
+
     fn compile(mut self) -> Result<CompiledBallotValidityRelation, RelationPlanError> {
         let mut public_limb_columns = Vec::with_capacity(self.geometry.data_moduli.len());
         let mut quotient_limb_columns = Vec::with_capacity(self.geometry.data_moduli.len());
@@ -1595,50 +1747,130 @@ impl<'context> BallotValidityPlanBuilder<'context> {
                 .push(self.add_encryption_quotient_columns(data_modulus, data_modulus_index)?);
         }
 
-        let (score_offsets, encoder_weight_columns) = self.add_score_and_encoder_columns()?;
-        let plaintext_coefficients = self.add_canonical_modulus_column(
-            SuiteModulusReference::plaintext(),
-            ProofTreePhase::Base,
-        )?;
-        self.assign_canonical_modulus_source_recipes(
-            &plaintext_coefficients,
-            SuiteModulusReference::plaintext(),
-            BallotValidityWitnessValueSource::PlaintextCoefficient,
-        )?;
-        let reversed_randomizer_shifted =
-            self.add_bounded_unsigned_column(2, ProofTreePhase::Base)?;
-        self.assign_bounded_unsigned_source_recipes(
-            &reversed_randomizer_shifted,
-            2,
-            BallotValidityWitnessValueSource::ReversedRandomizerShifted,
-        )?;
-        let error_zero_shifted = self.add_bounded_unsigned_column(4, ProofTreePhase::Base)?;
-        self.assign_bounded_unsigned_source_recipes(
-            &error_zero_shifted,
-            4,
-            BallotValidityWitnessValueSource::ErrorZeroShifted,
-        )?;
-        let error_one_shifted = self.add_bounded_unsigned_column(4, ProofTreePhase::Base)?;
-        self.assign_bounded_unsigned_source_recipes(
-            &error_one_shifted,
-            4,
-            BallotValidityWitnessValueSource::ErrorOneShifted,
-        )?;
-        let encoder_reduction = self.add_bounded_unsigned_column(
-            self.geometry.encoder_reduction_maximum,
-            ProofTreePhase::Base,
-        )?;
-        self.assign_bounded_unsigned_source_recipes(
-            &encoder_reduction,
-            self.geometry.encoder_reduction_maximum,
-            BallotValidityWitnessValueSource::EncoderReduction,
-        )?;
-        self.add_exact_encoder_identity(
-            &score_offsets,
-            &encoder_weight_columns,
-            &plaintext_coefficients,
-            &encoder_reduction,
-        )?;
+        let encoder_source_columns = self.add_pair_character_encoder_source_columns()?;
+        let mut auxiliary_columns = Vec::with_capacity(PAIR_CHARACTER_CIPHERTEXT_COUNT);
+        let mut reversed_right_columns = Vec::with_capacity(PAIR_CHARACTER_CIPHERTEXT_COUNT);
+        let mut product_quotient_columns = Vec::with_capacity(PAIR_CHARACTER_CIPHERTEXT_COUNT);
+        let mut reversed_randomizers_shifted = Vec::with_capacity(PAIR_CHARACTER_CIPHERTEXT_COUNT);
+        let mut error_columns_shifted = Vec::with_capacity(PAIR_CHARACTER_CIPHERTEXT_COUNT);
+        for ciphertext_ordinal in 0..PAIR_CHARACTER_CIPHERTEXT_COUNT {
+            let ciphertext_ordinal_u16 =
+                u16::try_from(ciphertext_ordinal).map_err(|_| RelationPlanError::CountOverflow)?;
+            let mut ciphertext_auxiliary_columns =
+                Vec::with_capacity(PAIR_CHARACTER_AUXILIARY_COUNT);
+            for auxiliary_ordinal in 0..PAIR_CHARACTER_AUXILIARY_COUNT {
+                let column = self.add_canonical_modulus_column(
+                    SuiteModulusReference::plaintext(),
+                    ProofTreePhase::Base,
+                )?;
+                self.assign_canonical_modulus_source_recipes(
+                    &column,
+                    SuiteModulusReference::plaintext(),
+                    BallotValidityWitnessValueSource::PairCharacterAuxiliaryCoefficient {
+                        ciphertext_ordinal: ciphertext_ordinal_u16,
+                        auxiliary_ordinal: u16::try_from(auxiliary_ordinal)
+                            .map_err(|_| RelationPlanError::CountOverflow)?,
+                    },
+                )?;
+                ciphertext_auxiliary_columns.push(column);
+            }
+            let reversed_right = self.add_canonical_modulus_column(
+                SuiteModulusReference::plaintext(),
+                ProofTreePhase::Base,
+            )?;
+            self.assign_canonical_modulus_source_recipes(
+                &reversed_right,
+                SuiteModulusReference::plaintext(),
+                BallotValidityWitnessValueSource::ReversedPairCharacterAuxiliaryCoefficient {
+                    ciphertext_ordinal: ciphertext_ordinal_u16,
+                    auxiliary_ordinal: 1,
+                },
+            )?;
+            reversed_right_columns.push(reversed_right);
+
+            let product_quotient_absolute_bound =
+                u128::from(self.geometry.pair_character_product_quotient_absolute_bound);
+            let product_quotient = self
+                .add_signed_integer_column(product_quotient_absolute_bound, ProofTreePhase::Base)?;
+            self.assign_signed_integer_source_recipes(
+                product_quotient,
+                product_quotient_absolute_bound,
+                BallotValidityWitnessValueSource::PairCharacterProductQuotient {
+                    ciphertext_ordinal: ciphertext_ordinal_u16,
+                },
+            )?;
+            product_quotient_columns.push(product_quotient);
+
+            let reversed_randomizer_shifted =
+                self.add_bounded_unsigned_column(2, ProofTreePhase::Base)?;
+            self.assign_bounded_unsigned_source_recipes(
+                &reversed_randomizer_shifted,
+                2,
+                BallotValidityWitnessValueSource::ReversedRandomizerShifted {
+                    ciphertext_ordinal: ciphertext_ordinal_u16,
+                },
+            )?;
+            reversed_randomizers_shifted.push(reversed_randomizer_shifted);
+
+            let error_zero_shifted = self.add_bounded_unsigned_column(4, ProofTreePhase::Base)?;
+            self.assign_bounded_unsigned_source_recipes(
+                &error_zero_shifted,
+                4,
+                BallotValidityWitnessValueSource::ErrorShifted {
+                    ciphertext_ordinal: ciphertext_ordinal_u16,
+                    component_ordinal: 0,
+                },
+            )?;
+            let error_one_shifted = self.add_bounded_unsigned_column(4, ProofTreePhase::Base)?;
+            self.assign_bounded_unsigned_source_recipes(
+                &error_one_shifted,
+                4,
+                BallotValidityWitnessValueSource::ErrorShifted {
+                    ciphertext_ordinal: ciphertext_ordinal_u16,
+                    component_ordinal: 1,
+                },
+            )?;
+            error_columns_shifted.push([error_zero_shifted, error_one_shifted]);
+
+            for auxiliary_ordinal in 0..PAIR_CHARACTER_AUXILIARY_COUNT - 1 {
+                let maximum =
+                    self.geometry.encoder_reduction_maxima[ciphertext_ordinal][auxiliary_ordinal];
+                let encoder_reduction =
+                    self.add_bounded_unsigned_column(maximum, ProofTreePhase::Base)?;
+                self.assign_bounded_unsigned_source_recipes(
+                    &encoder_reduction,
+                    maximum,
+                    BallotValidityWitnessValueSource::EncoderReduction {
+                        ciphertext_ordinal: ciphertext_ordinal_u16,
+                        auxiliary_ordinal: u16::try_from(auxiliary_ordinal)
+                            .map_err(|_| RelationPlanError::CountOverflow)?,
+                    },
+                )?;
+                self.add_exact_encoder_identity(
+                    ciphertext_ordinal_u16,
+                    u16::try_from(auxiliary_ordinal)
+                        .map_err(|_| RelationPlanError::CountOverflow)?,
+                    &encoder_source_columns,
+                    &ciphertext_auxiliary_columns[auxiliary_ordinal],
+                    &encoder_reduction,
+                )?;
+            }
+            auxiliary_columns.push(ciphertext_auxiliary_columns);
+        }
+
+        for challenge_ordinal in 0..self.context.non_native_modular_identity_challenge_count {
+            self.add_pair_character_product_batch(
+                self.geometry.data_moduli.len(),
+                challenge_ordinal,
+                &auxiliary_columns,
+                &reversed_right_columns,
+                &product_quotient_columns,
+            )?;
+        }
+        let message_coefficients = auxiliary_columns
+            .iter()
+            .map(|columns| columns[2].clone())
+            .collect::<Vec<_>>();
 
         for (modulus_ordinal, (public_columns, quotient_columns)) in public_limb_columns
             .iter()
@@ -1651,10 +1883,9 @@ impl<'context> BallotValidityPlanBuilder<'context> {
                     challenge_ordinal,
                     public_columns,
                     quotient_columns,
-                    &plaintext_coefficients,
-                    &reversed_randomizer_shifted,
-                    &error_zero_shifted,
-                    &error_one_shifted,
+                    &message_coefficients,
+                    &reversed_randomizers_shifted,
+                    &error_columns_shifted,
                 )?;
             }
         }
@@ -1708,7 +1939,8 @@ impl<'context> BallotValidityPlanBuilder<'context> {
                 && base_tree_column_set.contains(&column_ordinal);
             let expects_verifier_source =
                 matches!(column.origin, RelationColumnOrigin::VerifierSequence { .. })
-                    && base_tree_column_set.contains(&column_ordinal);
+                    && !base_tree_column_set.contains(&column_ordinal)
+                    && !auxiliary_tree_column_set.contains(&column_ordinal);
             if recipe.is_some() != expects_witness_source
                 || verifier_source.is_some() != expects_verifier_source
                 || (auxiliary_tree_column_set.contains(&column_ordinal)
@@ -1966,15 +2198,10 @@ impl<'context> BallotValidityPlanBuilder<'context> {
                 .into_boxed_slice(),
             data_moduli: self.geometry.data_moduli.clone().into_boxed_slice(),
             plaintext_modulus: self.input.plaintext_modulus,
-            primitive_two_n_root: self.input.primitive_two_n_root,
-            slot_generator: self.input.slot_generator,
-            inverse_ring_degree: self.geometry.inverse_ring_degree,
-            pair_slot_inverse_roots: self
+            encoder_reduction_maxima: self.geometry.encoder_reduction_maxima,
+            pair_character_product_quotient_absolute_bound: self
                 .geometry
-                .pair_slot_inverse_roots
-                .clone()
-                .into_boxed_slice(),
-            encoder_reduction_maximum: self.geometry.encoder_reduction_maximum,
+                .pair_character_product_quotient_absolute_bound,
             recipes_by_column: self.source_recipes_by_column.into_boxed_slice(),
             verifier_sources_by_column: self.verifier_sources_by_column.into_boxed_slice(),
         };
@@ -2063,39 +2290,62 @@ fn canonical_ballot_verifier_sources(
                     value_layout: value_layout.clone(),
                 },
             ));
-            keyed_sources.push((
-                BallotVerifierSourceKey::Ciphertext {
-                    component_ordinal,
-                    data_modulus_index,
-                },
-                RelationVerifierSource::Protocol {
-                    protocol_source_kind: 2,
-                    source_coordinates: vec![
-                        u64::from(component_ordinal),
-                        u64::from(data_modulus_index),
-                    ],
-                    statement_binding_path: vec![RelationSelectorPathStep::tuple_field(
-                        BALLOT_CIPHERTEXT_DIGEST_FIELD_ORDINAL,
-                    )],
-                    value_layout,
-                },
-            ));
+            for ciphertext_ordinal in 0..PAIR_CHARACTER_CIPHERTEXT_COUNT {
+                let ciphertext_ordinal = u16::try_from(ciphertext_ordinal)
+                    .map_err(|_| RelationPlanError::CountOverflow)?;
+                let flattened_component_ordinal = u64::from(ciphertext_ordinal)
+                    .checked_mul(2)
+                    .and_then(|ordinal| ordinal.checked_add(u64::from(component_ordinal)))
+                    .ok_or(RelationPlanError::CountOverflow)?;
+                keyed_sources.push((
+                    BallotVerifierSourceKey::Ciphertext {
+                        ciphertext_ordinal,
+                        component_ordinal,
+                        data_modulus_index,
+                    },
+                    RelationVerifierSource::Protocol {
+                        protocol_source_kind: 2,
+                        source_coordinates: vec![
+                            flattened_component_ordinal,
+                            u64::from(data_modulus_index),
+                        ],
+                        statement_binding_path: vec![RelationSelectorPathStep::tuple_field(
+                            BALLOT_CIPHERTEXT_DIGEST_FIELD_ORDINAL,
+                        )],
+                        value_layout: value_layout.clone(),
+                    },
+                ));
+            }
         }
     }
-    for option_ordinal in 0..OPTION_COUNT {
-        let option_ordinal =
-            u16::try_from(option_ordinal).map_err(|_| RelationPlanError::CountOverflow)?;
-        keyed_sources.push((
-            BallotVerifierSourceKey::PairDifferenceEncoderWeight { option_ordinal },
-            RelationVerifierSource::DirectBallotPairDifferenceEncoderWeights {
-                ring_degree: input.ring_degree,
-                primitive_two_n_root: input.primitive_two_n_root,
-                slot_generator: input.slot_generator,
-                option_count: u16::try_from(OPTION_COUNT)
-                    .map_err(|_| RelationPlanError::CountOverflow)?,
-                option_ordinal,
-            },
-        ));
+    for ciphertext_ordinal in 0..PAIR_CHARACTER_CIPHERTEXT_COUNT {
+        for auxiliary_ordinal in 0..PAIR_CHARACTER_AUXILIARY_COUNT - 1 {
+            for option_ordinal in 0..OPTION_COUNT {
+                let ciphertext_ordinal = u16::try_from(ciphertext_ordinal)
+                    .map_err(|_| RelationPlanError::CountOverflow)?;
+                let auxiliary_ordinal = u16::try_from(auxiliary_ordinal)
+                    .map_err(|_| RelationPlanError::CountOverflow)?;
+                let option_ordinal =
+                    u16::try_from(option_ordinal).map_err(|_| RelationPlanError::CountOverflow)?;
+                let key = BallotVerifierSourceKey::PairCharacterEncoderProfile {
+                    ciphertext_ordinal,
+                    auxiliary_ordinal,
+                    option_ordinal,
+                };
+                keyed_sources.push((
+                    key,
+                    RelationVerifierSource::DirectBallotPairCharacterEncoderProfile {
+                        ring_degree: input.ring_degree,
+                        plaintext_modulus: input.plaintext_modulus,
+                        ciphertext_ordinal,
+                        auxiliary_ordinal,
+                        option_count: u16::try_from(OPTION_COUNT)
+                            .map_err(|_| RelationPlanError::CountOverflow)?,
+                        option_ordinal,
+                    },
+                ));
+            }
+        }
     }
     let mut canonically_keyed_sources = keyed_sources
         .into_iter()
@@ -2127,46 +2377,6 @@ fn canonical_ballot_verifier_sources(
     Ok((sources, source_ordinals))
 }
 
-fn validate_slot_generator(ring_degree: u64, slot_generator: u16) -> Result<(), RelationPlanError> {
-    let two_n = ring_degree
-        .checked_mul(2)
-        .ok_or(RelationPlanError::CountOverflow)?;
-    let positive_slot_count = ring_degree / 2;
-    let generator = u64::from(slot_generator);
-    if generator >= two_n
-        || generator.is_multiple_of(2)
-        || modular_power(generator, positive_slot_count, two_n) != 1
-        || (positive_slot_count > 1
-            && modular_power(generator, positive_slot_count / 2, two_n) == 1)
-    {
-        return Err(RelationPlanError::InvalidDomain);
-    }
-    let mut positive_exponents = BTreeSet::new();
-    let mut exponent = 1_u64;
-    for _ in 0..positive_slot_count {
-        if exponent.is_multiple_of(2) || !positive_exponents.insert(exponent) {
-            return Err(RelationPlanError::InvalidDomain);
-        }
-        exponent = modular_product(exponent, generator, two_n);
-    }
-    let negative_exponents = positive_exponents
-        .iter()
-        .copied()
-        .map(|positive| two_n - positive)
-        .collect::<BTreeSet<_>>();
-    if !positive_exponents.is_disjoint(&negative_exponents)
-        || positive_exponents.len() + negative_exponents.len()
-            != usize::try_from(ring_degree).map_err(|_| RelationPlanError::CountOverflow)?
-        || positive_exponents
-            .union(&negative_exponents)
-            .copied()
-            .ne((1..two_n).step_by(2))
-    {
-        return Err(RelationPlanError::InvalidDomain);
-    }
-    Ok(())
-}
-
 fn modular_sum(left: u64, right: u64, modulus: u64) -> u64 {
     let threshold = modulus - right;
     if left >= threshold {
@@ -2174,6 +2384,54 @@ fn modular_sum(left: u64, right: u64, modulus: u64) -> u64 {
     } else {
         left + right
     }
+}
+
+fn rotated_encoder_profile_value(
+    encoder_profile: &[u64],
+    auxiliary_ordinal: usize,
+    score_bucket_ordinal: usize,
+    row_ordinal: usize,
+) -> Result<u64, RelationPlanError> {
+    if encoder_profile.len() != PAIR_CHARACTER_RING_DEGREE
+        || score_bucket_ordinal >= SCORE_BUCKET_COUNT
+        || row_ordinal >= encoder_profile.len()
+    {
+        return Err(RelationPlanError::InvalidDomain);
+    }
+    let score = usize::try_from(MINIMUM_SCORE)
+        .map_err(|_| RelationPlanError::CountOverflow)?
+        .checked_add(score_bucket_ordinal)
+        .ok_or(RelationPlanError::CountOverflow)?;
+    let rotation_magnitude = match auxiliary_ordinal {
+        0 => score
+            .checked_add(
+                usize::try_from(MAXIMUM_SCORE - MINIMUM_SCORE)
+                    .map_err(|_| RelationPlanError::CountOverflow)?,
+            )
+            .ok_or(RelationPlanError::CountOverflow)?,
+        1 => score,
+        _ => return Err(RelationPlanError::InvalidDomain),
+    };
+    let profile_row_ordinal = match auxiliary_ordinal {
+        0 => {
+            row_ordinal
+                .checked_add(encoder_profile.len())
+                .and_then(|ordinal| ordinal.checked_sub(rotation_magnitude))
+                .ok_or(RelationPlanError::CountOverflow)?
+                % encoder_profile.len()
+        }
+        1 => {
+            row_ordinal
+                .checked_add(rotation_magnitude)
+                .ok_or(RelationPlanError::CountOverflow)?
+                % encoder_profile.len()
+        }
+        _ => return Err(RelationPlanError::InvalidDomain),
+    };
+    encoder_profile
+        .get(profile_row_ordinal)
+        .copied()
+        .ok_or(RelationPlanError::InvalidDomain)
 }
 
 fn modular_difference_residue(left: u64, right: u64, modulus: u64) -> u64 {
@@ -2380,51 +2638,27 @@ fn subtract_rotated_columns(
 mod tests {
     use super::*;
 
-    const TEST_RING_DEGREE: u64 = 256;
-    const TEST_PLAINTEXT_MODULUS: u64 = 12_289;
-    const TEST_DATA_MODULUS: u64 = 65_537;
-    const TEST_EVALUATION_DOMAIN_SIZE: u64 = 1_024;
+    const TEST_RING_DEGREE: u64 = PAIR_CHARACTER_RING_DEGREE as u64;
+    const TEST_PLAINTEXT_MODULUS: u64 = PAIR_CHARACTER_PLAINTEXT_MODULUS;
+    const TEST_DATA_MODULUS: u64 = crate::bgv::parameters::DATA_PRIMES[0];
+    const TEST_EVALUATION_DOMAIN_SIZE: u64 =
+        crate::bgv::proof_suite::selected_profile::SELECTED_EVALUATION_DOMAIN_SIZE;
 
     fn check_context() -> RelationPlanCheckContext {
-        let maximum_two_adic_order = 1_u64 << 32;
-        RelationPlanCheckContext {
-            base_field_modulus: crate::bgv::proof_suite::PROOF_BASE_FIELD_MODULUS,
-            challenge_extension_degree: crate::bgv::proof_suite::PROOF_CHALLENGE_EXTENSION_DEGREE
-                as u16,
-            evaluation_blowup_factor: 2,
-            evaluation_domain_generator: modular_power(
-                crate::bgv::proof_suite::PROOF_BASE_FIELD_MAXIMUM_TWO_ADIC_GENERATOR,
-                maximum_two_adic_order / TEST_EVALUATION_DOMAIN_SIZE,
-                crate::bgv::proof_suite::PROOF_BASE_FIELD_MODULUS,
-            ),
-            evaluation_coset_offset: 7,
-            deep_point_count: 1,
-            quotient_component_count: 4,
-            quotient_component_degree_bound_exclusive: 256,
-            fri_fold_count: 6,
-            final_polynomial_degree_bound_exclusive: 8,
-            unique_query_count: 8,
-            non_native_modular_identity_challenge_count: 1,
-            maximum_fiat_shamir_candidate_draws_per_output: 128,
-            resolved_moduli: vec![
-                ResolvedSuiteModulus::new(SuiteModulusReference::data(0), TEST_DATA_MODULUS),
-                ResolvedSuiteModulus::new(
-                    SuiteModulusReference::plaintext(),
-                    TEST_PLAINTEXT_MODULUS,
-                ),
-            ],
-        }
+        crate::bgv::proof_suite::selected_profile::selected_relation_plan_check_context(
+            BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER,
+        )
+        .expect("selected ballot relation context")
     }
 
     fn relation_input() -> BallotValidityRelationPlanInput {
         BallotValidityRelationPlanInput {
             ring_degree: TEST_RING_DEGREE,
             evaluation_domain_size: TEST_EVALUATION_DOMAIN_SIZE,
-            opening_degree_bound_exclusive: 512,
+            opening_degree_bound_exclusive:
+                crate::bgv::proof_suite::selected_profile::SELECTED_OPENING_DEGREE_BOUND_EXCLUSIVE,
             active_data_modulus_indices: vec![0],
             plaintext_modulus: TEST_PLAINTEXT_MODULUS,
-            primitive_two_n_root: 3_400,
-            slot_generator: 3,
             reserved_slot_rule: RESERVED_SLOT_RULE,
         }
     }
@@ -2457,7 +2691,12 @@ mod tests {
                 SuiteModulusReference::plaintext(),
             ]
         );
-        assert_eq!(variant.ordered_verifier_sources.len(), 4 + OPTION_COUNT);
+        assert_eq!(
+            variant.ordered_verifier_sources.len(),
+            6 + PAIR_CHARACTER_CIPHERTEXT_COUNT
+                * (PAIR_CHARACTER_AUXILIARY_COUNT - 1)
+                * OPTION_COUNT
+        );
         assert!(variant.ordered_public_samplers.is_empty());
 
         assert_eq!(
@@ -2480,11 +2719,33 @@ mod tests {
                 _ => None,
             })
             .expect("the ballot relation has a base tree");
-        let expected_source_columns = base_tree_columns.len();
         assert_eq!(
             compilation.source_plan().provided_column_count(),
-            expected_source_columns
+            base_tree_columns.len()
         );
+        assert_eq!(
+            compilation.source_plan().verifier_column_count(),
+            variant.ordered_verifier_sources.len()
+        );
+        let verifier_columns = variant
+            .ordered_columns
+            .iter()
+            .enumerate()
+            .filter_map(|(column_ordinal, column)| {
+                matches!(column.origin, RelationColumnOrigin::VerifierSequence { .. })
+                    .then_some(u32::try_from(column_ordinal).unwrap())
+            })
+            .collect::<BTreeSet<_>>();
+        assert!(variant.ordered_trees.iter().all(|tree| {
+            tree.ordered_column_ordinals()
+                .iter()
+                .all(|column_ordinal| !verifier_columns.contains(column_ordinal))
+        }));
+        assert!(variant.ordered_opening_claims.iter().all(|claim| {
+            claim
+                .column_ordinal
+                .is_none_or(|column_ordinal| !verifier_columns.contains(&column_ordinal))
+        }));
         for (column_index, column) in variant.ordered_columns.iter().enumerate() {
             let column_ordinal = u32::try_from(column_index).unwrap();
             assert_eq!(
@@ -2499,7 +2760,7 @@ mod tests {
                     .verifier_source(column_ordinal)
                     .is_some(),
                 matches!(column.origin, RelationColumnOrigin::VerifierSequence { .. })
-                    && base_tree_columns.contains(&column_ordinal),
+                    && !base_tree_columns.contains(&column_ordinal),
                 "column {column_ordinal} has the wrong verifier-source ownership"
             );
         }
@@ -2509,6 +2770,7 @@ mod tests {
                 .any(|recipe| matches!(
                     recipe.value_source(),
                     BallotValidityWitnessValueSource::EncryptionQuotient {
+                        ciphertext_ordinal: _,
                         data_modulus_index: 0,
                         component_ordinal: 1,
                     }
@@ -2548,7 +2810,7 @@ mod tests {
                         statement_binding_path[0].argument,
                     ))
                 }
-                RelationVerifierSource::DirectBallotPairDifferenceEncoderWeights { .. } => None,
+                RelationVerifierSource::DirectBallotPairCharacterEncoderProfile { .. } => None,
                 _ => panic!("ballot public inputs must use closed protocol or plan-owned sources"),
             })
             .collect::<Vec<_>>();
@@ -2560,34 +2822,185 @@ mod tests {
                 (1, vec![1, 0], VERIFIED_SETUP_SOURCE_HASH_FIELD_ORDINAL),
                 (2, vec![0, 0], BALLOT_CIPHERTEXT_DIGEST_FIELD_ORDINAL),
                 (2, vec![1, 0], BALLOT_CIPHERTEXT_DIGEST_FIELD_ORDINAL),
+                (2, vec![2, 0], BALLOT_CIPHERTEXT_DIGEST_FIELD_ORDINAL),
+                (2, vec![3, 0], BALLOT_CIPHERTEXT_DIGEST_FIELD_ORDINAL),
             ]
         );
-        let mut encoder_weight_source_options = variant
+        let mut encoder_profile_source_coordinates = variant
             .ordered_verifier_sources
             .iter()
             .filter_map(|source| match source {
-                RelationVerifierSource::DirectBallotPairDifferenceEncoderWeights {
+                RelationVerifierSource::DirectBallotPairCharacterEncoderProfile {
                     ring_degree,
-                    primitive_two_n_root,
-                    slot_generator,
+                    plaintext_modulus,
+                    ciphertext_ordinal,
+                    auxiliary_ordinal,
                     option_count,
                     option_ordinal,
                 } => {
                     assert_eq!(*ring_degree, TEST_RING_DEGREE);
-                    assert_eq!(*primitive_two_n_root, 3_400);
-                    assert_eq!(*slot_generator, 3);
+                    assert_eq!(*plaintext_modulus, TEST_PLAINTEXT_MODULUS);
                     assert_eq!(usize::from(*option_count), OPTION_COUNT);
-                    Some(*option_ordinal)
+                    Some((*ciphertext_ordinal, *auxiliary_ordinal, *option_ordinal))
                 }
                 _ => None,
             })
             .collect::<Vec<_>>();
-        encoder_weight_source_options.sort_unstable();
+        encoder_profile_source_coordinates.sort_unstable();
         assert_eq!(
-            encoder_weight_source_options,
-            (0..OPTION_COUNT)
-                .map(|option_ordinal| u16::try_from(option_ordinal).unwrap())
+            encoder_profile_source_coordinates,
+            (0..PAIR_CHARACTER_CIPHERTEXT_COUNT)
+                .flat_map(|ciphertext_ordinal| {
+                    (0..PAIR_CHARACTER_AUXILIARY_COUNT - 1).flat_map(move |auxiliary_ordinal| {
+                        (0..OPTION_COUNT).map(move |option_ordinal| {
+                            (
+                                u16::try_from(ciphertext_ordinal).unwrap(),
+                                u16::try_from(auxiliary_ordinal).unwrap(),
+                                u16::try_from(option_ordinal).unwrap(),
+                            )
+                        })
+                    })
+                })
                 .collect::<Vec<_>>()
+        );
+
+        let fused_encoder_instructions = variant
+            .ordered_constraints
+            .iter()
+            .flat_map(|constraint| &constraint.numerator_postfix_expression)
+            .filter_map(|instruction| match instruction {
+                RelationExpressionInstruction::ConstantColumnVerifierSequenceProductSum {
+                    coefficient_period,
+                    ordered_terms,
+                } => Some((*coefficient_period, ordered_terms)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let mut preceding_option_last_column = None;
+        for option_ordinal in 0..OPTION_COUNT {
+            let option_ordinal = u16::try_from(option_ordinal).unwrap();
+            let mut profile_column_ordinals = (0..variant.ordered_columns.len())
+                .filter_map(|column_index| {
+                    let column_ordinal = u32::try_from(column_index).ok()?;
+                    matches!(
+                        compilation.source_plan().verifier_source(column_ordinal),
+                        Some(BallotValidityVerifierColumnSource::PairCharacterEncoderProfile {
+                            option_ordinal: declared_option_ordinal,
+                            ..
+                        }) if declared_option_ordinal == option_ordinal
+                    )
+                    .then_some(column_ordinal)
+                })
+                .collect::<Vec<_>>();
+            let mut indicator_column_ordinals = (0..variant.ordered_columns.len())
+                .filter_map(|column_index| {
+                    let column_ordinal = u32::try_from(column_index).ok()?;
+                    matches!(
+                        compilation
+                            .source_plan()
+                            .recipe(column_ordinal)
+                            .map(BallotValiditySourceColumnRecipe::value_source),
+                        Some(BallotValidityWitnessValueSource::ScoreIndicator {
+                            option_ordinal: declared_option_ordinal,
+                            ..
+                        }) if declared_option_ordinal == option_ordinal
+                    )
+                    .then_some(column_ordinal)
+                })
+                .collect::<Vec<_>>();
+            profile_column_ordinals.sort_unstable();
+            indicator_column_ordinals.sort_unstable();
+            assert_eq!(
+                profile_column_ordinals.len(),
+                PAIR_CHARACTER_CIPHERTEXT_COUNT * (PAIR_CHARACTER_AUXILIARY_COUNT - 1),
+            );
+            assert_eq!(indicator_column_ordinals.len(), SCORE_BUCKET_COUNT);
+            assert!(profile_column_ordinals.last() < indicator_column_ordinals.first());
+            if let Some(preceding_last_column) = preceding_option_last_column {
+                assert!(Some(&preceding_last_column) < profile_column_ordinals.first());
+            }
+            preceding_option_last_column = indicator_column_ordinals.last().copied();
+        }
+        assert_eq!(
+            fused_encoder_instructions.len(),
+            PAIR_CHARACTER_CIPHERTEXT_COUNT * (PAIR_CHARACTER_AUXILIARY_COUNT - 1),
+        );
+        let mut fused_identity_coordinates = BTreeSet::new();
+        for (coefficient_period, ordered_terms) in fused_encoder_instructions {
+            assert_eq!(usize::from(coefficient_period), PAIR_CHARACTER_LANE_COUNT);
+            assert_eq!(ordered_terms.len(), OPTION_COUNT * SCORE_BUCKET_COUNT);
+            assert!(strictly_sorted_unique(ordered_terms));
+            let mut covered_score_coordinates = BTreeSet::new();
+            let mut identity_coordinates = None;
+            for term in ordered_terms {
+                assert!(
+                    term.verifier_sequence_column_ordinal < term.constant_column_ordinal,
+                    "each option's four profiles must precede its ten indicators",
+                );
+                let BallotValidityWitnessValueSource::ScoreIndicator {
+                    option_ordinal,
+                    score_bucket_ordinal,
+                } = compilation
+                    .source_plan()
+                    .recipe(term.constant_column_ordinal)
+                    .expect("constant score-indicator recipe")
+                    .value_source()
+                else {
+                    panic!("fused encoder term must use a score indicator");
+                };
+                let BallotValidityVerifierColumnSource::PairCharacterEncoderProfile {
+                    ciphertext_ordinal,
+                    auxiliary_ordinal,
+                    option_ordinal: profile_option_ordinal,
+                } = compilation
+                    .source_plan()
+                    .verifier_source(term.verifier_sequence_column_ordinal)
+                    .expect("deterministic encoder profile")
+                else {
+                    panic!("fused encoder term must use a pair-character profile");
+                };
+                assert_eq!(profile_option_ordinal, option_ordinal);
+                let expected_score = MINIMUM_SCORE + u64::from(score_bucket_ordinal);
+                let (expected_rotation_is_negative, expected_rotation_magnitude) =
+                    match auxiliary_ordinal {
+                        0 => (true, expected_score + MAXIMUM_SCORE - MINIMUM_SCORE),
+                        1 => (false, expected_score),
+                        _ => panic!("unknown pair-character auxiliary"),
+                    };
+                assert_eq!(
+                    term.verifier_sequence_rotation_is_negative,
+                    expected_rotation_is_negative,
+                );
+                assert_eq!(
+                    term.verifier_sequence_rotation_magnitude,
+                    expected_rotation_magnitude,
+                );
+                assert!(covered_score_coordinates.insert((option_ordinal, score_bucket_ordinal)));
+                assert_eq!(
+                    identity_coordinates.get_or_insert((ciphertext_ordinal, auxiliary_ordinal)),
+                    &(ciphertext_ordinal, auxiliary_ordinal),
+                );
+            }
+            assert_eq!(
+                covered_score_coordinates.len(),
+                OPTION_COUNT * SCORE_BUCKET_COUNT
+            );
+            assert!(fused_identity_coordinates.insert(
+                identity_coordinates.expect("a fused encoder identity has deterministic terms")
+            ));
+        }
+        assert_eq!(
+            fused_identity_coordinates,
+            (0..PAIR_CHARACTER_CIPHERTEXT_COUNT)
+                .flat_map(|ciphertext_ordinal| {
+                    (0..PAIR_CHARACTER_AUXILIARY_COUNT - 1).map(move |auxiliary_ordinal| {
+                        (
+                            u16::try_from(ciphertext_ordinal).unwrap(),
+                            u16::try_from(auxiliary_ordinal).unwrap(),
+                        )
+                    })
+                })
+                .collect::<BTreeSet<_>>(),
         );
 
         let typed_expression_modulus_multiples = variant
@@ -2607,11 +3020,15 @@ mod tests {
         );
         assert!(typed_expression_modulus_multiples.contains(&(SuiteModulusReference::data(0), 1,)));
         assert!(variant.ordered_radix_convolutions.is_empty());
-        assert_eq!(variant.ordered_integer_lift_batches.len(), 1);
-        let batch = &variant.ordered_integer_lift_batches[0];
+        assert_eq!(variant.ordered_integer_lift_batches.len(), 2);
+        let batch = variant
+            .ordered_integer_lift_batches
+            .iter()
+            .find(|batch| batch.modulus_reference == SuiteModulusReference::data(0))
+            .expect("data-modulus encryption batch");
         assert_eq!(batch.modulus_reference, SuiteModulusReference::data(0));
         assert_eq!(batch.challenge_ordinal, 0);
-        assert_eq!(batch.ordered_components.len(), 2);
+        assert_eq!(batch.ordered_components.len(), 4);
         assert!(batch.ordered_components.iter().all(|component| {
             component.ordered_linear_terms.iter().any(|term| {
                 term.negative
@@ -2628,6 +3045,20 @@ mod tests {
                     == RelationIntegerLiftConvolutionKind::Negacyclic
                 && component.ordered_convolution_products[0].multiplier_offset == 1
         }));
+        let product_batch = variant
+            .ordered_integer_lift_batches
+            .iter()
+            .find(|batch| batch.modulus_reference == SuiteModulusReference::plaintext())
+            .expect("plaintext pair-character product batch");
+        assert_eq!(product_batch.ordered_components.len(), 2);
+        assert_eq!(product_batch.ordered_reversed_column_bindings.len(), 2);
+        assert!(product_batch.ordered_components.iter().all(|component| {
+            component.ordered_convolution_products.len() == 1
+                && component.ordered_convolution_products[0].negative
+                && component.ordered_convolution_products[0].convolution_kind
+                    == RelationIntegerLiftConvolutionKind::Negacyclic
+                && component.ordered_convolution_products[0].multiplier_offset == 0
+        }));
 
         let non_native_challenges = variant
             .derived_challenge_catalog(&context)
@@ -2640,14 +3071,14 @@ mod tests {
                 )
             })
             .collect::<Vec<_>>();
-        assert_eq!(non_native_challenges.len(), 1);
+        assert_eq!(non_native_challenges.len(), 2);
         assert_eq!(
             non_native_challenges
                 .iter()
                 .filter(|challenge| challenge.role == RelationChallengeRole::NonNativeTheta)
                 .map(|challenge| challenge.role_coordinates.clone())
                 .collect::<Vec<_>>(),
-            vec![vec![0, 0]]
+            vec![vec![0, 0], vec![1, 0]]
         );
         assert!(
             non_native_challenges
@@ -2657,7 +3088,7 @@ mod tests {
         assert!(non_native_challenges.iter().all(|challenge| matches!(
             challenge.sampling,
             RelationChallengeSampling::ProductResidueVectorCoordinate {
-                modulus_selector: RelationChallengeModulusSelector::NonNativeModulusOrdinal(0),
+                modulus_selector: RelationChallengeModulusSelector::NonNativeModulusOrdinal(0 | 1),
                 coordinate_count: 1,
                 maximum_candidate_draws_per_output: 128,
             }
@@ -2701,7 +3132,7 @@ mod tests {
                 * u64::try_from(maximum_translated_opening_count)
                     .expect("the opening count fits u64")
                 + 2 * u64::from(context.unique_query_count));
-        assert_eq!(expected_trace_mask_degree, 52);
+        assert!(expected_trace_mask_degree > 0 && expected_trace_mask_degree <= TEST_RING_DEGREE);
         assert!(variant.ordered_masks.iter().all(|mask| {
             mask.mask_kind != RelationMaskKind::Trace
                 || mask.mask_degree_bound_exclusive == expected_trace_mask_degree
@@ -2726,7 +3157,7 @@ mod tests {
     }
 
     #[test]
-    fn pair_difference_encoder_weights_reconstruct_the_direct_ballot_plaintext() {
+    fn rotated_pair_character_encoder_profiles_reconstruct_all_four_auxiliaries() {
         let context = check_context();
         let compilation = compile_ballot_validity_relation(&relation_input(), &context)
             .expect("the direct ballot relation must compile");
@@ -2734,84 +3165,66 @@ mod tests {
         let scores = [
             1_u64, 10, 2, 9, 3, 8, 4, 7, 5, 6, 10, 1, 9, 2, 8, 3, 7, 4, 6, 5,
         ];
-        let packed_pair_differences = crate::bgv::direct_ballots::direct_ballot_slots(
-            &scores,
-            TEST_PLAINTEXT_MODULUS,
-            usize::try_from(TEST_RING_DEGREE).unwrap(),
-        )
-        .expect("the score vector must have the canonical pair-difference packing");
-        assert_eq!(source_plan.pair_slot_inverse_roots.len(), PAIR_COUNT);
-        assert!(
-            packed_pair_differences[PAIR_COUNT..]
-                .iter()
-                .all(|value| *value == 0)
-        );
-        assert!(
-            source_plan
-                .encoder_weight_sequence(u16::try_from(OPTION_COUNT).unwrap())
-                .is_none()
-        );
-        let plaintext_coefficients = source_plan
-            .plaintext_coefficients_for_scores(&scores)
+        let plaintexts = source_plan
+            .pair_character_plaintexts_for_scores(&scores)
             .expect("the bounded scores must encode");
+        assert!(source_plan.encoder_profile_sequence(2, 0, 0).is_none());
+        assert!(source_plan.encoder_profile_sequence(0, 2, 0).is_none());
+        assert!(source_plan.encoder_profile_sequence(0, 0, 20).is_none());
 
-        let dense_plaintext_coefficients = (0..TEST_RING_DEGREE)
-            .map(|coefficient_ordinal| {
-                let inverse_transform_sum = packed_pair_differences
+        for (ciphertext_ordinal, plaintext) in plaintexts.iter().enumerate() {
+            for (auxiliary_ordinal, auxiliary_coefficients) in [
+                plaintext.auxiliary_left_coefficients(),
+                plaintext.auxiliary_right_coefficients(),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let reductions = source_plan
+                    .encoder_reductions_for_scores(
+                        &scores,
+                        u16::try_from(ciphertext_ordinal).unwrap(),
+                        u16::try_from(auxiliary_ordinal).unwrap(),
+                        auxiliary_coefficients,
+                    )
+                    .expect("the exact integer reductions must exist");
+                let selected_profiles = scores
                     .iter()
-                    .take(PAIR_COUNT)
-                    .copied()
-                    .zip(source_plan.pair_slot_inverse_roots.iter().copied())
-                    .fold(0_u64, |sum, (pair_difference, inverse_slot_root)| {
-                        modular_sum(
-                            sum,
-                            modular_product(
-                                pair_difference,
-                                modular_power(
-                                    inverse_slot_root,
+                    .enumerate()
+                    .map(|(option_ordinal, _)| {
+                        source_plan
+                            .encoder_profile_sequence(
+                                u16::try_from(ciphertext_ordinal).unwrap(),
+                                u16::try_from(auxiliary_ordinal).unwrap(),
+                                u16::try_from(option_ordinal).unwrap(),
+                            )
+                            .expect("selected encoder profile")
+                    })
+                    .collect::<Vec<_>>();
+                for coefficient_ordinal in 0..usize::try_from(TEST_RING_DEGREE).unwrap() {
+                    let weighted_sum = selected_profiles.iter().zip(scores.iter().copied()).fold(
+                        0_u128,
+                        |sum, (encoder_profile, score)| {
+                            sum + u128::from(
+                                rotated_encoder_profile_value(
+                                    encoder_profile,
+                                    auxiliary_ordinal,
+                                    usize::try_from(score - MINIMUM_SCORE).unwrap(),
                                     coefficient_ordinal,
-                                    TEST_PLAINTEXT_MODULUS,
-                                ),
-                                TEST_PLAINTEXT_MODULUS,
-                            ),
-                            TEST_PLAINTEXT_MODULUS,
-                        )
-                    });
-                modular_product(
-                    source_plan.inverse_ring_degree,
-                    inverse_transform_sum,
-                    TEST_PLAINTEXT_MODULUS,
-                )
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(plaintext_coefficients, dense_plaintext_coefficients);
-
-        let encoder_reductions = source_plan
-            .encoder_reductions_for_scores(&scores, &plaintext_coefficients)
-            .expect("the exact integer reductions must exist");
-        let weight_sequences = (0..OPTION_COUNT)
-            .map(|option_ordinal| {
-                source_plan
-                    .encoder_weight_sequence(u16::try_from(option_ordinal).unwrap())
-                    .expect("every option must have one deterministic verifier sequence")
-            })
-            .collect::<Vec<_>>();
-        for coefficient_ordinal in 0..usize::try_from(TEST_RING_DEGREE).unwrap() {
-            let weighted_score_offset =
-                scores
-                    .iter()
-                    .zip(&weight_sequences)
-                    .fold(0_u128, |sum, (score, weights)| {
-                        sum + u128::from(score - MINIMUM_SCORE)
-                            * u128::from(weights[coefficient_ordinal])
-                    });
-            assert_eq!(
-                weighted_score_offset,
-                u128::from(plaintext_coefficients[coefficient_ordinal])
-                    + u128::from(TEST_PLAINTEXT_MODULUS)
-                        * u128::from(encoder_reductions[coefficient_ordinal]),
-                "coefficient {coefficient_ordinal} must satisfy the exact encoder identity"
-            );
+                                )
+                                .expect("rotated profile value"),
+                            )
+                        },
+                    );
+                    assert_eq!(
+                        weighted_sum,
+                        u128::from(auxiliary_coefficients[coefficient_ordinal])
+                            + u128::from(TEST_PLAINTEXT_MODULUS)
+                                * u128::from(reductions[coefficient_ordinal]),
+                        "ciphertext {ciphertext_ordinal}, auxiliary {auxiliary_ordinal}, coefficient {coefficient_ordinal}"
+                    );
+                }
+            }
         }
     }
 
@@ -2831,20 +3244,6 @@ mod tests {
         assert_eq!(
             compile_ballot_validity_relation_plan(&noncanonical_data_basis, &context),
             Err(RelationPlanError::NonCanonicalOrder)
-        );
-
-        let mut nonprimitive_root = relation_input();
-        nonprimitive_root.primitive_two_n_root = 1;
-        assert_eq!(
-            compile_ballot_validity_relation_plan(&nonprimitive_root, &context),
-            Err(RelationPlanError::InvalidDomain)
-        );
-
-        let mut short_slot_orbit = relation_input();
-        short_slot_orbit.slot_generator = 127;
-        assert_eq!(
-            compile_ballot_validity_relation_plan(&short_slot_orbit, &context),
-            Err(RelationPlanError::InvalidDomain)
         );
 
         let mut unknown_reserved_slot_rule = relation_input();

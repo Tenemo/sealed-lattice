@@ -2,10 +2,10 @@ use super::{
     ProofChallengeExtensionElement,
     merkle::{leaf_hash, node_hash},
     transcript::{
-        CanonicalProofTranscript, CanonicalTranscriptEngine, CommonProofApplicationChallengeGroup,
-        CommonProofChallenge, CommonProofPrivacyMode, CommonProofTranscript,
-        CommonProofTranscriptSchedule, DistinctQuerySamplingError, TranscriptError,
-        sample_distinct_query_positions_from_values, sample_distinct_query_positions_with_blocks,
+        CommonProofApplicationChallengeGroup, CommonProofChallenge, CommonProofPrivacyMode,
+        CommonProofTranscript, CommonProofTranscriptSchedule, DistinctQuerySamplingError,
+        TranscriptError, sample_distinct_query_positions_from_values,
+        sample_distinct_query_positions_with_blocks,
     },
 };
 
@@ -219,41 +219,20 @@ fn public_common_proof_transcript_rejects_a_secret_mode_round() {
 }
 
 #[test]
-fn transcript_and_distinct_query_sampler_are_deterministic_and_bounded() {
-    let suite_identifier = [0x41_u8; 64];
-    let mut first = CanonicalProofTranscript::new(1, suite_identifier, 0x2110, b"header");
-    let mut second = CanonicalProofTranscript::new(1, suite_identifier, 0x2110, b"header");
-    for transcript in [&mut first, &mut second] {
-        transcript
-            .absorb_engine_round(
-                CanonicalTranscriptEngine::TrusteeEvaluationKey,
-                "witness-tree-root",
-                b"root",
-            )
-            .expect("enumerated round tag");
-    }
-    let sample = |transcript: &CanonicalProofTranscript| {
+fn distinct_query_sampler_is_deterministic_and_bounded() {
+    let sample = || {
         sample_distinct_query_positions_with_blocks(1 << 16, 168, 64, |output, counter| {
-            transcript
-                .squeeze_engine_challenge(
-                    CanonicalTranscriptEngine::TrusteeEvaluationKey,
-                    &format!("shared-query-position/{output:08x}"),
-                    counter,
-                )
-                .ok()
+            let mut block = [0_u8; 64];
+            let candidate = u16::try_from(output)
+                .expect("the selected query count fits u16")
+                .wrapping_add(u16::try_from(counter).expect("the selected draw ceiling fits u16"));
+            block[..2].copy_from_slice(&candidate.to_le_bytes());
+            Some(block)
         })
     };
     assert_eq!(
-        sample(&first).expect("first query sample"),
-        sample(&second).expect("second query sample"),
-    );
-    assert_eq!(
-        first.absorb_engine_round(
-            CanonicalTranscriptEngine::TrusteeEvaluationKey,
-            "unknown-root",
-            b"wrong tag",
-        ),
-        Err(TranscriptError::InvalidTag),
+        sample().expect("deterministic query sample"),
+        (0..168).collect::<Vec<_>>(),
     );
 
     assert_eq!(

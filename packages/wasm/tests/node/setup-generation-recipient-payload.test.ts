@@ -20,7 +20,6 @@ import {
 } from '#packages/wasm/src/local-storage-root-worker-kernel/authorities';
 import {
     openBrowserOwnedSetupGenerationAuthorityInClosedWorker,
-    selectedSetupGenerationPublicKeyShareBodyByteLength,
     type BrowserOwnedSetupGenerationAuthority,
     type BrowserOwnedSetupGenerationAuthorityInput,
 } from '#packages/wasm/src/setup-generation-recipient-payload';
@@ -31,6 +30,9 @@ import type { TranscriptCoreKernel } from '#packages/wasm/src/transcript-core-br
 const boundaryMocks = vi.hoisted(() => ({
     resolvePublicRandomnessBoardAuthorization: vi.fn(),
 }));
+
+const testPublicKeyShareBodyByteLength =
+    foundationProfile.streamChunkByteLength + 37;
 
 vi.mock('#packages/wasm/src/vss-share-linkage-verification-runtime', () => ({
     resolveAggregatePublicRandomnessBoardAuthorization:
@@ -200,7 +202,7 @@ const createMockSetupGenerationContext = (
         ): bigint {
             expect(authorityHandle).toBe(41);
             writeStatus(statusPointer, 0);
-            return BigInt(selectedSetupGenerationPublicKeyShareBodyByteLength);
+            return BigInt(testPublicKeyShareBodyByteLength);
         },
         setupGenerationPublicKeyShareBodyOpen(
             authorityHandle: number,
@@ -222,7 +224,7 @@ const createMockSetupGenerationContext = (
             writeStatus(statusPointer, 0);
             return (
                 input?.reportedPublicKeyShareSourceByteLength ??
-                BigInt(selectedSetupGenerationPublicKeyShareBodyByteLength)
+                BigInt(testPublicKeyShareBodyByteLength)
             );
         },
         setupGenerationPublicKeyShareBodyRead(
@@ -250,7 +252,7 @@ const createMockSetupGenerationContext = (
             publicKeyShareSourceNextOffset += outputByteLength;
             if (
                 publicKeyShareSourceNextOffset ===
-                selectedSetupGenerationPublicKeyShareBodyByteLength
+                testPublicKeyShareBodyByteLength
             ) {
                 publicKeyShareSourceActive = false;
             }
@@ -534,13 +536,15 @@ describe('Setup-generation recipient payload custody', () => {
         expect(mock.deallocatedRangesWereZeroed()).toBe(true);
     });
 
-    it('streams the exact full-Q public-key-share body with monotonic offsets', async () => {
+    it('streams the Rust-selected public-key-share body with monotonic offsets', async () => {
         const mock = createMockSetupGenerationContext();
         const authority = await openAuthority(mock);
 
-        expect(authority.publicKeyShareBodyByteLength()).toBe(13_631_488);
+        expect(authority.publicKeyShareBodyByteLength()).toBe(
+            testPublicKeyShareBodyByteLength,
+        );
         const source = authority.openPublicKeyShareBody();
-        expect(source.byteLength).toBe(13_631_488);
+        expect(source.byteLength).toBe(testPublicKeyShareBodyByteLength);
         expect(() =>
             source.read({ expectedOffset: 1, requestedByteLength: 7 }),
         ).toThrowError(CanonicalStreamRefusalError);
@@ -571,7 +575,9 @@ describe('Setup-generation recipient payload custody', () => {
 
     it('cancels a public-key-share source whose Rust length is not the exact selected body', async () => {
         const mock = createMockSetupGenerationContext({
-            reportedPublicKeyShareSourceByteLength: 13_631_480n,
+            reportedPublicKeyShareSourceByteLength: BigInt(
+                testPublicKeyShareBodyByteLength - 8,
+            ),
         });
         const authority = await openAuthority(mock);
 

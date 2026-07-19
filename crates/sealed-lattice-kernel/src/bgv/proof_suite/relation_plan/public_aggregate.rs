@@ -98,7 +98,7 @@ impl PublicAggregateRelationGeometry {
                     .ok_or(RelationPlanError::DegreeBoundExceeded)?,
             )
             .ok_or(RelationPlanError::DegreeBoundExceeded)?;
-        if exact_product_degree >= self.opening_degree_bound_exclusive {
+        if exact_product_degree >= self.evaluation_domain_size {
             return Err(RelationPlanError::DegreeBoundExceeded);
         }
         let next_degree_domain = self
@@ -696,7 +696,7 @@ mod tests {
             ring_degree: 16,
             evaluation_domain_size: 128,
             opening_degree_bound_exclusive: 64,
-            public_polynomial_column_degree_bound_exclusive: 16,
+            public_polynomial_column_degree_bound_exclusive: 8,
             participant_count: 3,
         }
     }
@@ -731,6 +731,87 @@ mod tests {
                 == 3
                 && !constraint.enforce_proof_base_field_no_wrap
         }));
+    }
+
+    #[test]
+    fn quotient_decomposition_allows_a_numerator_wider_than_the_opening_bound() {
+        let mut context = check_context();
+        context.quotient_component_count = 8;
+        context.quotient_component_degree_bound_exclusive = 8;
+        let mut decomposed_geometry = geometry();
+        decomposed_geometry.participant_count = 10;
+
+        let plan = compile_collective_public_key_aggregate_relation_plan(
+            &CollectivePublicKeyAggregatePlanInput {
+                geometry: decomposed_geometry.clone(),
+                ordered_component_moduli: vec![SuiteModulusReference::data(0)],
+            },
+            &context,
+        )
+        .expect("the exact quotient decomposition covers the wider numerator");
+        let numerator_maximum_degree = u64::from(decomposed_geometry.participant_count)
+            * (decomposed_geometry.public_polynomial_column_degree_bound_exclusive - 1);
+        let quotient_coefficient_count = numerator_maximum_degree
+            - decomposed_geometry
+                .trace_domain_size()
+                .expect("trace domain")
+            + 1;
+
+        assert_eq!(numerator_maximum_degree, 70);
+        assert!(numerator_maximum_degree >= decomposed_geometry.opening_degree_bound_exclusive);
+        assert_eq!(quotient_coefficient_count, 63);
+        assert!(
+            quotient_coefficient_count
+                <= u64::from(context.quotient_component_count)
+                    * decomposed_geometry
+                        .trace_domain_size()
+                        .expect("trace domain")
+        );
+        assert_eq!(plan.variants()[0].opening_degree_bound_exclusive(), 64);
+
+        decomposed_geometry.participant_count = 11;
+        assert!(matches!(
+            compile_collective_public_key_aggregate_relation_plan(
+                &CollectivePublicKeyAggregatePlanInput {
+                    geometry: decomposed_geometry,
+                    ordered_component_moduli: vec![SuiteModulusReference::data(0)],
+                },
+                &context,
+            ),
+            Err(RelationPlanError::DegreeBoundExceeded)
+        ));
+    }
+
+    #[test]
+    fn public_aggregate_geometry_requires_the_exact_half_ring_column_domain() {
+        for invalid_column_degree_bound_exclusive in [0, 7, 9, 16] {
+            let mut invalid_geometry = geometry();
+            invalid_geometry.public_polynomial_column_degree_bound_exclusive =
+                invalid_column_degree_bound_exclusive;
+            assert!(matches!(
+                compile_collective_public_key_aggregate_relation_plan(
+                    &CollectivePublicKeyAggregatePlanInput {
+                        geometry: invalid_geometry,
+                        ordered_component_moduli: vec![SuiteModulusReference::data(0)],
+                    },
+                    &check_context(),
+                ),
+                Err(RelationPlanError::InvalidDomain)
+            ));
+        }
+
+        let mut odd_ring_geometry = geometry();
+        odd_ring_geometry.ring_degree = 15;
+        assert!(matches!(
+            compile_collective_public_key_aggregate_relation_plan(
+                &CollectivePublicKeyAggregatePlanInput {
+                    geometry: odd_ring_geometry,
+                    ordered_component_moduli: vec![SuiteModulusReference::data(0)],
+                },
+                &check_context(),
+            ),
+            Err(RelationPlanError::InvalidDomain)
+        ));
     }
 
     #[test]

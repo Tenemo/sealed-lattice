@@ -84,6 +84,42 @@ describe('Desktop-browser proof measurements', () => {
         consoleInfo.mockRestore();
     });
 
+    it('lets a worker return one record without emitting a duplicate console event', () => {
+        const consoleInfo = vi
+            .spyOn(console, 'info')
+            .mockImplementation(() => undefined);
+        const measurement = beginDesktopBrowserProofMeasurement({
+            caseIdentifier: 'galois-key-share-batch-generation-resumed',
+            emitConsoleEvent: false,
+            executionKind: 'resumed-generation',
+            memoryReaders: {
+                wasmLinearMemoryByteLength: () => 65_536,
+            },
+            runOrdinal: 1,
+            suiteId: 'cd'.repeat(64),
+            wasmSha256Hex: 'ef'.repeat(32),
+        });
+
+        expect(
+            measurement.finish({
+                canonicalInputByteLength: 128,
+                canonicalInputSha512Hex: '12'.repeat(64),
+                canonicalOutputByteLength: 256,
+                copiedBufferPeakByteLength: 0,
+                externalScratchPeakByteLength: 0,
+                externalScratchReadByteLength: 0,
+                externalScratchTransactionCount: 0,
+                externalScratchWriteByteLength: 0,
+                fullBufferCopiedByteLength: 0,
+                fullBufferCopyCount: 0,
+                observedHostAllocationVolumeByteLength: 0,
+                outputSha512Hex: 'ab'.repeat(64),
+            }).executionKind,
+        ).toBe('resumed-generation');
+        expect(consoleInfo).not.toHaveBeenCalled();
+        consoleInfo.mockRestore();
+    });
+
     it('accepts complete zero copy and scratch accounting groups', () => {
         const record = {
             ...validMeasurement(),

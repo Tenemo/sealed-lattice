@@ -69,7 +69,6 @@ pub(crate) const PROOF_EVALUATION_COSET_OFFSET: u64 = 7;
 pub(crate) const PROOF_DEEP_POINT_COUNT: u16 = 1;
 pub(crate) const PROOF_FINAL_POLYNOMIAL_DEGREE_BOUND_EXCLUSIVE: u32 = 256;
 pub(crate) const PROOF_UNIQUE_QUERY_COUNT: u32 = 168;
-pub(crate) const COMMITTED_MATERIAL_PROOF_EVALUATION_BLOWUP_FACTOR: u32 = 4;
 pub(crate) const COMMITTED_MATERIAL_PROOF_UNIQUE_QUERY_COUNT: u32 = 192;
 pub(crate) const PROOF_NON_NATIVE_IDENTITY_CHALLENGE_COUNT: u16 = 9;
 pub(crate) const PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT: u32 = 128;
@@ -159,25 +158,18 @@ pub(crate) struct ProofFieldSchedule {
 
 impl ProofFieldSchedule {
     fn selected(application_statement_schema_identifier: u16) -> Self {
-        let uses_high_degree_schedule = matches!(
+        let uses_committed_material_query_schedule = matches!(
             application_statement_schema_identifier,
             ProofFamilies::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER
                 | ProofFamilies::AGGREGATE_THRESHOLD_SHARE_STATEMENT_SCHEMA_IDENTIFIER
-                | ProofFamilies::COLLECTIVE_PUBLIC_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER
-                | ProofFamilies::RKG_ROUND_ONE_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER
-                | ProofFamilies::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER
         );
         Self {
             proof_field_index: 0,
-            evaluation_blowup_factor: if uses_high_degree_schedule {
-                COMMITTED_MATERIAL_PROOF_EVALUATION_BLOWUP_FACTOR
-            } else {
-                PROOF_EVALUATION_BLOWUP_FACTOR
-            },
+            evaluation_blowup_factor: PROOF_EVALUATION_BLOWUP_FACTOR,
             evaluation_coset_offset: PROOF_EVALUATION_COSET_OFFSET,
             deep_point_count: PROOF_DEEP_POINT_COUNT,
             final_polynomial_degree_bound_exclusive: PROOF_FINAL_POLYNOMIAL_DEGREE_BOUND_EXCLUSIVE,
-            unique_query_count: if uses_high_degree_schedule {
+            unique_query_count: if uses_committed_material_query_schedule {
                 COMMITTED_MATERIAL_PROOF_UNIQUE_QUERY_COUNT
             } else {
                 PROOF_UNIQUE_QUERY_COUNT
@@ -2221,7 +2213,7 @@ mod tests {
         ] {
             assert_eq!(
                 ProofFieldSchedule::selected(public_aggregate_family),
-                ProofFieldSchedule::selected(committed_material_family)
+                ProofFieldSchedule::selected(ordinary_family)
             );
             assert_eq!(
                 ProofFieldSchedule::selected(public_aggregate_family)
@@ -2409,9 +2401,6 @@ mod tests {
                 family,
                 ProofFamilies::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER
                     | ProofFamilies::AGGREGATE_THRESHOLD_SHARE_STATEMENT_SCHEMA_IDENTIFIER
-                    | ProofFamilies::COLLECTIVE_PUBLIC_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER
-                    | ProofFamilies::RKG_ROUND_ONE_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER
-                    | ProofFamilies::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER
             ) {
                 192
             } else {

@@ -1,4 +1,7 @@
-import { refusalReasonCodes } from '@sealed-lattice/types';
+import {
+    refusalReasonCodes,
+    type BrowserActionStorageWorkerKernel,
+} from '@sealed-lattice/types';
 import { describe, expect, it, vi } from 'vitest';
 
 import type {
@@ -6,7 +9,6 @@ import type {
     AcceptedSetupVerificationSession,
 } from '#packages/wasm/src/accepted-setup-assembly-runtime';
 import type { AcceptedSetupPackageBuilder } from '#packages/wasm/src/accepted-setup-package-builder-runtime';
-import type { ActionRandomnessSession } from '#packages/wasm/src/action-randomness-runtime';
 import {
     CanonicalStreamInternalError,
     CanonicalStreamRefusalError,
@@ -15,6 +17,8 @@ import type {
     AuthenticatedCommonProofInputStore,
     CommonProofCanonicalOutputStore,
     CommonProofExternalMemoryTransactionExecutor,
+    CommonProofGenerationExecutionOpener,
+    CommonProofGenerationWorkerOptions,
 } from '#packages/wasm/src/common-proof-worker-runtime';
 import {
     constructEvaluatorAggregateInClosedWorker,
@@ -24,7 +28,7 @@ import {
     activateSelectedSuiteRecordSource,
     releaseSelectedSuiteRecordSource,
 } from '#packages/wasm/src/selected-suite-record-source';
-import type { VerifiedStateReservation } from '#packages/wasm/src/state-verifier-runtime';
+import type { ClosedWorkerProductionOperationIdentifiers } from '#packages/wasm/src/local-storage-root-worker-kernel/authorities';
 import { registerCommonProofKernelContext } from '#packages/wasm/src/transcript-core-bridge/common-proof-kernel-context';
 import type { TranscriptCoreKernelCommandRuntime } from '#packages/wasm/src/transcript-core-bridge/kernel-runtime';
 import type { TranscriptCoreKernel } from '#packages/wasm/src/transcript-core-bridge/kernel-types';
@@ -32,7 +36,6 @@ import type { TranscriptCoreKernel } from '#packages/wasm/src/transcript-core-br
 type FakeRuntimeState = {
     readonly acceptedSetupVerification: AcceptedSetupVerificationSession;
     readonly acceptedSetupPackageBuilder: AcceptedSetupPackageBuilder;
-    readonly actionRandomnessSession: ActionRandomnessSession;
     readonly allocations: Map<number, number>;
     readonly canonicalSuiteRecordBytes: Uint8Array<ArrayBuffer>;
     catalogPhase: 'collecting' | 'complete';
@@ -54,6 +57,7 @@ type FakeRuntimeState = {
     }>;
     packageContributionStatuses: number[];
     packageStatementBindCount: number;
+    readonly productionOperationIdentifiers: ClosedWorkerProductionOperationIdentifiers;
     readonly readSourceOrdinals: number[];
     resumedGenerationPreparationCount: number;
     readonly runtimeTreeChunks: Uint8Array<ArrayBuffer>[];
@@ -63,10 +67,11 @@ type FakeRuntimeState = {
     storeConstructionPollStatus: number;
     storeOutputAcknowledged: boolean;
     wrongSourceLength: boolean;
-    readonly verifiedReservation: VerifiedStateReservation;
+    readonly workerKernel: BrowserActionStorageWorkerKernel;
 };
 
 const fakeStates = vi.hoisted(() => new WeakMap<object, FakeRuntimeState>());
+const workerStates = vi.hoisted(() => new WeakMap<object, FakeRuntimeState>());
 const generatedCapabilityRelease = vi.hoisted(() => vi.fn());
 const verifiedCapabilityRelease = vi.hoisted(() => vi.fn());
 
@@ -137,38 +142,49 @@ vi.mock('#packages/wasm/src/accepted-setup-package-builder-runtime', () => ({
     },
 }));
 
-vi.mock('#packages/wasm/src/action-randomness-runtime', () => ({
-    resolveActionRandomnessKernelAuthorization: (
-        session: ActionRandomnessSession,
-        kernel: TranscriptCoreKernel,
-    ) => {
-        const state = fakeStates.get(kernel);
-        if (state?.actionRandomnessSession !== session) {
-            throw new CanonicalStreamRefusalError('wrongContext');
-        }
-        const context = resolveFakeContext(kernel);
-        return Object.freeze({ context, handle: 41 });
-    },
-}));
-
-vi.mock('#packages/wasm/src/state-verifier-runtime', () => ({
-    resolveVerifiedStateReservationKernelAuthorization: (
-        reservation: VerifiedStateReservation,
-        kernel: TranscriptCoreKernel,
-    ) => {
-        const state = fakeStates.get(kernel);
-        if (state?.verifiedReservation !== reservation) {
-            throw new CanonicalStreamRefusalError('wrongContext');
-        }
-        const context = resolveFakeContext(kernel);
-        return Object.freeze({
-            capabilityMemory: context.memory,
-            capabilityPointer: 64,
-            reservationHandle: 43,
-            sessionHandle: 42,
-        });
-    },
-}));
+vi.mock(
+    '#packages/wasm/src/local-storage-root-worker-kernel/worker-kernel',
+    () => ({
+        withClosedWorkerProductionOperationAuthority: async (
+            workerKernel: BrowserActionStorageWorkerKernel,
+            productionOperationIdentifiers: ClosedWorkerProductionOperationIdentifiers,
+            operation: (authority: {
+                withExactKernelAuthorization<Result>(
+                    callback: (authorization: object) => Result,
+                ): Result;
+            }) => unknown,
+        ) => {
+            const state = workerStates.get(workerKernel);
+            if (
+                state === undefined ||
+                state.productionOperationIdentifiers !==
+                    productionOperationIdentifiers
+            ) {
+                throw new CanonicalStreamRefusalError('wrongContext');
+            }
+            const context = resolveFakeContext(state.kernel);
+            return operation(
+                Object.freeze({
+                    withExactKernelAuthorization: <Result>(
+                        callback: (authorization: object) => Result,
+                    ): Result =>
+                        callback(
+                            Object.freeze({
+                                actionRandomnessContext: context,
+                                actionRandomnessHandle: 41,
+                                kernel: state.kernel,
+                                stateReservationCapabilityMemory:
+                                    context.memory,
+                                stateReservationCapabilityPointer: 64,
+                                stateReservationHandle: 43,
+                                stateVerifierSessionHandle: 42,
+                            }),
+                        ),
+                }),
+            );
+        },
+    }),
+);
 
 vi.mock('#packages/wasm/src/common-proof-worker-runtime/runtime', () => ({
     applyClosedWorkerGeneratedCommonProofCapability: (
@@ -192,14 +208,26 @@ vi.mock('#packages/wasm/src/common-proof-worker-runtime/runtime', () => ({
         Object.freeze({}),
     releaseClosedWorkerCommonProofGenerationFamilyAdapter: vi.fn(),
     releaseClosedWorkerCommonProofVerificationFamilyAdapter: vi.fn(),
-    runClosedWorkerCommonProofGenerationFamilyAdapterRetainingGeneratedCapability:
-        async (
-            _adapter: object,
-            _externalMemory: CommonProofExternalMemoryTransactionExecutor,
-            outputStore: CommonProofCanonicalOutputStore,
-        ) => {
-            await outputStore.commitChunk(0, Uint8Array.of(0x51, 0x52));
-            return Object.freeze({ release: generatedCapabilityRelease });
+    runClosedWorkerCommonProofGenerationFamilyAdapterWithExecutionOpener:
+        async (_adapter: object, openExecution: CommonProofGenerationExecutionOpener) => {
+            const execution = await openExecution(
+                Object.freeze({
+                    commonProofRuntimeBindingHash: new Uint8Array(64),
+                    proofAttemptLineageIdentifier: new Uint8Array(32),
+                }) as never,
+            );
+            await execution.outputStore.commitChunk(
+                0,
+                Uint8Array.of(0x51, 0x52),
+            );
+            return Object.freeze({
+                generatedCapability: Object.freeze({
+                    release: generatedCapabilityRelease,
+                }),
+                options: execution.options,
+                outputChunkByteLengths: Object.freeze([2]),
+                outputStore: execution.outputStore,
+            });
         },
     runClosedWorkerCommonProofVerificationFamilyAdapter: () =>
         Promise.resolve(Object.freeze({ release: verifiedCapabilityRelease })),
@@ -208,25 +236,6 @@ vi.mock('#packages/wasm/src/common-proof-worker-runtime/runtime', () => ({
 vi.mock('#packages/wasm/src/generated-common-proof-output-runtime', () => ({
     deriveGeneratedCommonProofDescriptor: () =>
         Promise.resolve(Uint8Array.of(0xd1, 0xd2)),
-    trackCanonicalCommonProofOutputChunks: (
-        outputStore: CommonProofCanonicalOutputStore,
-    ) => {
-        const outputChunkByteLengths: number[] = [];
-        return Object.freeze({
-            outputChunkByteLengths,
-            outputStore: Object.freeze({
-                commitChunk: async (
-                    chunkIndex: number,
-                    chunkBytes: Uint8Array<ArrayBuffer>,
-                ): Promise<void> => {
-                    await outputStore.commitChunk(chunkIndex, chunkBytes);
-                    outputChunkByteLengths.push(chunkBytes.byteLength);
-                },
-                readChunk: (chunkIndex: number, exactByteLength: number) =>
-                    outputStore.readChunk(chunkIndex, exactByteLength),
-            }),
-        });
-    },
 }));
 
 const contextRecords = new WeakMap<
@@ -291,6 +300,12 @@ const createFakeRuntime = (): FakeRuntimeState => {
         allocations.delete(pointer);
     };
     const kernel = Object.freeze(Object.create(null)) as TranscriptCoreKernel;
+    const productionOperationIdentifiers = Object.freeze(
+        Object.create(null),
+    ) as ClosedWorkerProductionOperationIdentifiers;
+    const workerKernel = Object.freeze(
+        Object.create(null),
+    ) as BrowserActionStorageWorkerKernel;
     const state: FakeRuntimeState = {
         acceptedSetupVerification: Object.freeze(
             {},
@@ -298,7 +313,6 @@ const createFakeRuntime = (): FakeRuntimeState => {
         acceptedSetupPackageBuilder: Object.freeze(
             {},
         ) as unknown as AcceptedSetupPackageBuilder,
-        actionRandomnessSession: Object.freeze({}) as ActionRandomnessSession,
         allocations,
         canonicalSuiteRecordBytes: Uint8Array.of(0xa1),
         catalogPhase: 'collecting',
@@ -318,6 +332,7 @@ const createFakeRuntime = (): FakeRuntimeState => {
         packageContributions: [],
         packageContributionStatuses: [],
         packageStatementBindCount: 0,
+        productionOperationIdentifiers,
         readSourceOrdinals: [],
         resumedGenerationPreparationCount: 0,
         runtimeTreeChunks: [],
@@ -326,9 +341,10 @@ const createFakeRuntime = (): FakeRuntimeState => {
         sourceRequestOrdinal: 0,
         storeConstructionPollStatus: 0,
         storeOutputAcknowledged: false,
-        verifiedReservation: Object.freeze({}) as VerifiedStateReservation,
+        workerKernel,
         wrongSourceLength: false,
     };
+    workerStates.set(workerKernel, state);
     const context = {
         allocate,
         deallocate,
@@ -717,6 +733,16 @@ const emptyExternalMemory = Object.freeze(() =>
     Promise.resolve(Object.freeze({ readResults: [] })),
 ) as unknown as CommonProofExternalMemoryTransactionExecutor;
 
+const createGenerationExecutionOpener = (
+    outputStore: CommonProofCanonicalOutputStore,
+    options?: CommonProofGenerationWorkerOptions,
+): CommonProofGenerationExecutionOpener =>
+    Object.freeze(() =>
+        Promise.resolve(
+            Object.freeze({ externalMemory: emptyExternalMemory, options, outputStore }),
+        ),
+    );
+
 const unusedProofInputStore: AuthenticatedCommonProofInputStore = Object.freeze(
     {
         declaredByteLength: 2,
@@ -759,13 +785,15 @@ describe('Evaluator aggregate Rust/WASM lifecycle', () => {
 
         const proofOutputChunks = new Map<number, Uint8Array<ArrayBuffer>>();
         const descriptor = await session.generate({
-            actionRandomnessSession: state.actionRandomnessSession,
             checkpointLineageIdentifier: new Uint8Array(32).fill(0x31),
-            externalMemory: emptyExternalMemory,
             generationMode: 'fresh',
-            options: { yieldControl: () => Promise.resolve() },
-            proofOutputStore: createStore(proofOutputChunks),
-            verifiedReservation: state.verifiedReservation,
+            openProofGenerationExecution: createGenerationExecutionOpener(
+                createStore(proofOutputChunks),
+                { yieldControl: () => Promise.resolve() },
+            ),
+            productionOperationIdentifiers:
+                state.productionOperationIdentifiers,
+            workerKernel: state.workerKernel,
         });
         expect(descriptor).toEqual(Uint8Array.of(0xd1, 0xd2));
         expect(state.freshGenerationPreparationCount).toBe(1);
@@ -805,35 +833,38 @@ describe('Evaluator aggregate Rust/WASM lifecycle', () => {
         ).toThrow(CanonicalStreamRefusalError);
         await expect(
             session.generate({
-                actionRandomnessSession: state.actionRandomnessSession,
                 checkpointLineageIdentifier: new Uint8Array(32),
-                externalMemory: emptyExternalMemory,
-                generationMode: 'fresh',
-                options: unusedResumeOptions,
-                proofOutputStore: createStore(new Map()),
-                verifiedReservation: state.verifiedReservation,
+                generationMode: 'invalid' as never,
+                openProofGenerationExecution:
+                    createGenerationExecutionOpener(createStore(new Map())),
+                productionOperationIdentifiers:
+                    state.productionOperationIdentifiers,
+                workerKernel: state.workerKernel,
             }),
         ).rejects.toThrow(CanonicalStreamRefusalError);
         await session.generate({
-            actionRandomnessSession: state.actionRandomnessSession,
             checkpointLineageIdentifier: new Uint8Array(32).fill(0x32),
-            externalMemory: emptyExternalMemory,
             generationMode: 'resumed',
-            options: unusedResumeOptions,
-            proofOutputStore: createStore(new Map()),
-            verifiedReservation: state.verifiedReservation,
+            openProofGenerationExecution: createGenerationExecutionOpener(
+                createStore(new Map()),
+                unusedResumeOptions,
+            ),
+            productionOperationIdentifiers:
+                state.productionOperationIdentifiers,
+            workerKernel: state.workerKernel,
         });
         session.contributeToPackage(state.acceptedSetupPackageBuilder);
         expect(state.freshGenerationPreparationCount).toBe(0);
         expect(state.resumedGenerationPreparationCount).toBe(1);
         await expect(
             session.generate({
-                actionRandomnessSession: state.actionRandomnessSession,
                 checkpointLineageIdentifier: new Uint8Array(32),
-                externalMemory: emptyExternalMemory,
                 generationMode: 'fresh',
-                proofOutputStore: createStore(new Map()),
-                verifiedReservation: state.verifiedReservation,
+                openProofGenerationExecution:
+                    createGenerationExecutionOpener(createStore(new Map())),
+                productionOperationIdentifiers:
+                    state.productionOperationIdentifiers,
+                workerKernel: state.workerKernel,
             }),
         ).rejects.toThrow(CanonicalStreamRefusalError);
 
@@ -846,12 +877,13 @@ describe('Evaluator aggregate Rust/WASM lifecycle', () => {
         const state = createFakeRuntime();
         const session = await constructSession(state);
         await session.generate({
-            actionRandomnessSession: state.actionRandomnessSession,
             checkpointLineageIdentifier: new Uint8Array(32).fill(0x33),
-            externalMemory: emptyExternalMemory,
             generationMode: 'fresh',
-            proofOutputStore: createStore(new Map()),
-            verifiedReservation: state.verifiedReservation,
+            openProofGenerationExecution:
+                createGenerationExecutionOpener(createStore(new Map())),
+            productionOperationIdentifiers:
+                state.productionOperationIdentifiers,
+            workerKernel: state.workerKernel,
         });
 
         state.packageStatementTakeStatuses.push(

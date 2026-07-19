@@ -1,4 +1,7 @@
-import { foundationProfile } from '@sealed-lattice/types';
+import {
+    foundationProfile,
+    type BrowserActionStorageWorkerKernel,
+} from '@sealed-lattice/types';
 
 import {
     requireAcceptedSetupVerificationAssemblyKernelOwner,
@@ -6,10 +9,6 @@ import {
 } from './accepted-setup-assembly-runtime.js';
 import type { AcceptedSetupPackageBuilder } from './accepted-setup-package-builder-runtime.js';
 import { requireAcceptedSetupPackageBuilderKernelOwner } from './accepted-setup-package-builder-runtime.js';
-import {
-    resolveActionRandomnessKernelAuthorization,
-    type ActionRandomnessSession,
-} from './action-randomness-runtime.js';
 import {
     requireAggregateThresholdShareRecipientAuthorityKernelOwner,
     type AggregateThresholdShareRecipientAuthority,
@@ -33,32 +32,24 @@ import {
     openClosedWorkerCommonProofVerificationFamilyAdapter,
     releaseClosedWorkerCommonProofGenerationFamilyAdapter,
     releaseClosedWorkerCommonProofVerificationFamilyAdapter,
-    runClosedWorkerCommonProofGenerationFamilyAdapterRetainingGeneratedCapability,
+    runClosedWorkerCommonProofGenerationFamilyAdapterWithExecutionOpener,
     runClosedWorkerCommonProofVerificationFamilyAdapter,
     type AuthenticatedCommonProofInputStore,
     type ClosedWorkerCommonProofGenerationFamilyAdapter,
     type ClosedWorkerCommonProofVerificationFamilyAdapter,
     type ClosedWorkerGeneratedCommonProofCapability,
-    type CommonProofCanonicalOutputStore,
-    type CommonProofExternalMemoryTransactionExecutor,
-    type CommonProofGenerationWorkerOptions,
+    type CommonProofGenerationExecutionOpener,
     type CommonProofVerificationWorkerOptions,
     type VerifiedCommonProofCapability,
 } from './common-proof-worker-runtime/runtime.js';
-import {
-    deriveGeneratedCommonProofDescriptor,
-    trackCanonicalCommonProofOutputChunks,
-} from './generated-common-proof-output-runtime.js';
+import { deriveGeneratedCommonProofDescriptor } from './generated-common-proof-output-runtime.js';
+import type { ClosedWorkerProductionOperationIdentifiers } from './local-storage-root-worker-kernel/authorities.js';
+import { withClosedWorkerProductionOperationAuthority } from './local-storage-root-worker-kernel/worker-kernel.js';
 import {
     requireSelectedSuiteRecordSourceKernelOwner,
     type SelectedSuiteRecordSource,
 } from './selected-suite-record-source.js';
-import { selectedSetupGenerationPublicKeyShareBodyByteLength } from './setup-generation-recipient-payload.js';
 import { stateVerifierCapabilityByteLength } from './state-verifier-runtime/contracts.js';
-import {
-    resolveVerifiedStateReservationKernelAuthorization,
-    type VerifiedStateReservation,
-} from './state-verifier-runtime.js';
 import { resolveCommonProofKernelContext } from './transcript-core-bridge/common-proof-kernel-context.js';
 import type { TranscriptCoreKernelCommandRuntime } from './transcript-core-bridge/kernel-runtime.js';
 import type {
@@ -118,11 +109,6 @@ export type CollectivePublicKeyParticipantSource = Readonly<{
     inputStore: AuthenticatedCommonProofInputStore;
 }>;
 
-export type CollectivePublicKeyGenerationWorkerOptions = Omit<
-    CommonProofGenerationWorkerOptions,
-    'authenticatedSourceRangeReader'
->;
-
 const collectivePublicKeyAggregateBrand = Symbol(
     'collective public-key aggregate',
 );
@@ -135,13 +121,11 @@ export type CollectivePublicKeyAggregate = Readonly<{
     copyCanonicalApplicationStatement(): Uint8Array<ArrayBuffer>;
     describeCollectivePublicKey(): CollectivePublicKeyDescription;
     generate(input: {
-        actionRandomnessSession: ActionRandomnessSession;
         checkpointLineageIdentifier: Uint8Array;
-        externalMemory: CommonProofExternalMemoryTransactionExecutor;
         generationMode: CollectivePublicKeyGenerationMode;
-        options?: CollectivePublicKeyGenerationWorkerOptions;
-        proofOutputStore: CommonProofCanonicalOutputStore;
-        verifiedReservation: VerifiedStateReservation;
+        openProofGenerationExecution: CommonProofGenerationExecutionOpener;
+        productionOperationIdentifiers: ClosedWorkerProductionOperationIdentifiers;
+        workerKernel: BrowserActionStorageWorkerKernel;
     }): Promise<Uint8Array<ArrayBuffer>>;
     readCollectivePublicKeyRange(
         sourceByteOffset: bigint,
@@ -168,6 +152,7 @@ type CollectivePublicKeyAggregateRecord = {
     readonly context: CollectivePublicKeyAggregateContext;
     generatedProof: ClosedWorkerGeneratedCommonProofCapability | undefined;
     readonly kernel: TranscriptCoreKernel;
+    readonly participantBodyByteLength: number;
     readonly participantSources: readonly ParticipantSourceRecord[];
     phase: CollectivePublicKeyAggregatePhase;
     readonly sessionHandle: number;
@@ -307,6 +292,7 @@ const requireFixedOwnedBytes = (
 
 const requireParticipantSources = (
     value: readonly CollectivePublicKeyParticipantSource[],
+    participantBodyByteLength: number,
 ): readonly PreparedParticipantSource[] => {
     if (
         !Array.isArray(value) ||
@@ -328,7 +314,7 @@ const requireParticipantSources = (
                 typeof source.inputStore !== 'object' ||
                 source.inputStore === null ||
                 source.inputStore.declaredByteLength !==
-                    selectedSetupGenerationPublicKeyShareBodyByteLength ||
+                    participantBodyByteLength ||
                 typeof source.inputStore.readCommittedChunk !== 'function'
             ) {
                 throw new CanonicalStreamRefusalError('wrongTypeOrLength');
@@ -350,14 +336,16 @@ const requireParticipantBodyByteLength = (
             context.wasmExports.sealed_lattice_collective_public_key_aggregate_participant_body_byte_length(),
     );
     if (
-        reportedByteLength !==
-        BigInt(selectedSetupGenerationPublicKeyShareBodyByteLength)
+        reportedByteLength <= 0n ||
+        reportedByteLength > BigInt(Number.MAX_SAFE_INTEGER) ||
+        reportedByteLength >
+            BigInt(foundationProfile.maximumCanonicalStreamByteLength)
     ) {
-        throw new CanonicalStreamInternalError(
-            'The collective public-key participant body has the wrong selected-suite length.',
+        throw new CanonicalStreamResourceError(
+            'The collective public-key participant body exceeds the canonical-stream safety bound.',
         );
     }
-    return selectedSetupGenerationPublicKeyShareBodyByteLength;
+    return Number(reportedByteLength);
 };
 
 const requireFreshOwnedStoreChunk = async (input: {
@@ -384,6 +372,7 @@ const requireFreshOwnedStoreChunk = async (input: {
 };
 
 const copyParticipantSourceDescription = (input: {
+    bodyByteLength: number;
     context: CollectivePublicKeyAggregateContext;
     inputStore: AuthenticatedCommonProofInputStore;
     rosterPosition: number;
@@ -417,10 +406,7 @@ const copyParticipantSourceDescription = (input: {
             fixedHashByteLength * 2,
             true,
         );
-        if (
-            totalByteLength !==
-            BigInt(selectedSetupGenerationPublicKeyShareBodyByteLength)
-        ) {
+        if (totalByteLength !== BigInt(input.bodyByteLength)) {
             description.fill(0);
             throw new CanonicalStreamInternalError(
                 'The collective public-key participant source description has the wrong length.',
@@ -523,6 +509,7 @@ const ingestParticipantSource = async (input: {
     );
     statusBoundary.throwIfError(finishStatus);
     return copyParticipantSourceDescription({
+        bodyByteLength: input.bodyByteLength,
         context: input.context,
         inputStore: input.participantSource.inputStore,
         rosterPosition: input.rosterPosition,
@@ -534,9 +521,7 @@ const readAuthenticatedParticipantSourceRange = async (
     record: CollectivePublicKeyAggregateRecord,
     request: CommonProofAuthenticatedSourceRangeRequest,
 ): Promise<Uint8Array<ArrayBuffer>> => {
-    const expectedTotalByteLength = BigInt(
-        selectedSetupGenerationPublicKeyShareBodyByteLength,
-    );
+    const expectedTotalByteLength = BigInt(record.participantBodyByteLength);
     const chunkByteLength = BigInt(foundationProfile.streamChunkByteLength);
     const expectedChunkIndex = Number(
         request.sourceStreamByteOffset / chunkByteLength,
@@ -574,7 +559,7 @@ const readAuthenticatedParticipantSourceRange = async (
     const [matchingSource] = matchingSources;
     if (
         matchingSource.inputStore.declaredByteLength !==
-        selectedSetupGenerationPublicKeyShareBodyByteLength
+        record.participantBodyByteLength
     ) {
         throw new CanonicalStreamRefusalError('wrongContext');
     }
@@ -807,28 +792,6 @@ const generate = async (
         input.checkpointLineageIdentifier,
         attemptIdentifierByteLength,
     );
-    const actionRandomnessAuthorization =
-        resolveActionRandomnessKernelAuthorization(
-            input.actionRandomnessSession,
-            record.kernel,
-        );
-    const stateAuthorization =
-        resolveVerifiedStateReservationKernelAuthorization(
-            input.verifiedReservation,
-            record.kernel,
-        );
-    if (
-        actionRandomnessAuthorization.context.memory !==
-            record.context.memory ||
-        stateAuthorization.capabilityMemory !== record.context.memory ||
-        stateAuthorization.capabilityPointer <= 0 ||
-        stateAuthorization.capabilityPointer +
-            stateVerifierCapabilityByteLength >
-            record.context.memory.buffer.byteLength
-    ) {
-        checkpointLineageIdentifier.fill(0);
-        throw new CanonicalStreamRefusalError('wrongContext');
-    }
     const memoryBoundary = createMemoryBoundary(record.context);
     const statusBoundary = createStatusBoundary();
     let familyAdapter:
@@ -837,80 +800,120 @@ const generate = async (
     let generatedProof: ClosedWorkerGeneratedCommonProofCapability | undefined;
     record.phase = 'generating';
     try {
-        const adapterHandle = record.context.runExclusive(
-            'collective public-key proof generation preparation',
-            () => {
-                const checkpointPointer = memoryBoundary.copy(
-                    checkpointLineageIdentifier,
-                );
-                const statusPointer = memoryBoundary.allocateZeroedWords(1);
-                try {
-                    const prepare =
-                        input.generationMode === 'fresh'
-                            ? record.context.wasmExports
-                                  .sealed_lattice_collective_public_key_aggregate_prepare_generation
-                            : record.context.wasmExports
-                                  .sealed_lattice_collective_public_key_aggregate_prepare_resumed_generation;
-                    const handle = prepare(
-                        record.sessionHandle,
-                        actionRandomnessAuthorization.handle,
-                        stateAuthorization.sessionHandle,
-                        stateAuthorization.capabilityPointer,
-                        stateVerifierCapabilityByteLength,
-                        stateAuthorization.reservationHandle,
-                        checkpointPointer,
-                        checkpointLineageIdentifier.byteLength,
-                        statusPointer,
-                    );
-                    const [status] = memoryBoundary.readWords(statusPointer, 1);
-                    statusBoundary.throwIfError(status);
-                    return requireLiveHandle(
-                        handle,
-                        'The collective public-key generation adapter handle',
-                    );
-                } finally {
-                    memoryBoundary.zeroAndDeallocate(
-                        statusPointer,
-                        wasm32WordByteLength,
-                    );
-                    memoryBoundary.zeroAndDeallocate(
-                        checkpointPointer,
-                        checkpointLineageIdentifier.byteLength,
-                    );
-                }
-            },
+        let adapterHandle: number | undefined;
+        await withClosedWorkerProductionOperationAuthority(
+            input.workerKernel,
+            input.productionOperationIdentifiers,
+            (productionOperationAuthority) =>
+                productionOperationAuthority.withExactKernelAuthorization(
+                    (authorization) => {
+                        if (
+                            authorization.kernel !== record.kernel ||
+                            authorization.actionRandomnessContext.memory !==
+                                record.context.memory ||
+                            authorization.stateReservationCapabilityMemory !==
+                                record.context.memory ||
+                            authorization.stateReservationCapabilityPointer <=
+                                0 ||
+                            authorization.stateReservationCapabilityPointer +
+                                    stateVerifierCapabilityByteLength >
+                                record.context.memory.buffer.byteLength
+                        ) {
+                            throw new CanonicalStreamRefusalError(
+                                'wrongContext',
+                            );
+                        }
+                        adapterHandle = record.context.runExclusive(
+                            'collective public-key proof generation preparation',
+                            () => {
+                                const checkpointPointer = memoryBoundary.copy(
+                                    checkpointLineageIdentifier,
+                                );
+                                const statusPointer =
+                                    memoryBoundary.allocateZeroedWords(1);
+                                try {
+                                    const prepare =
+                                        input.generationMode === 'fresh'
+                                            ? record.context.wasmExports
+                                                  .sealed_lattice_collective_public_key_aggregate_prepare_generation
+                                            : record.context.wasmExports
+                                                  .sealed_lattice_collective_public_key_aggregate_prepare_resumed_generation;
+                                    const handle = prepare(
+                                        record.sessionHandle,
+                                        authorization.actionRandomnessHandle,
+                                        authorization.stateVerifierSessionHandle,
+                                        authorization.stateReservationCapabilityPointer,
+                                        stateVerifierCapabilityByteLength,
+                                        authorization.stateReservationHandle,
+                                        checkpointPointer,
+                                        checkpointLineageIdentifier.byteLength,
+                                        statusPointer,
+                                    );
+                                    const [status] =
+                                        memoryBoundary.readWords(
+                                            statusPointer,
+                                            1,
+                                        );
+                                    statusBoundary.throwIfError(status);
+                                    return requireLiveHandle(
+                                        handle,
+                                        'The collective public-key generation adapter handle',
+                                    );
+                                } finally {
+                                    memoryBoundary.zeroAndDeallocate(
+                                        statusPointer,
+                                        wasm32WordByteLength,
+                                    );
+                                    memoryBoundary.zeroAndDeallocate(
+                                        checkpointPointer,
+                                        checkpointLineageIdentifier.byteLength,
+                                    );
+                                }
+                            },
+                        );
+                    },
+                ),
         );
+        if (adapterHandle === undefined) {
+            throw new CanonicalStreamInternalError(
+                'The production operation completed without a collective public-key adapter.',
+            );
+        }
         familyAdapter = openClosedWorkerCommonProofGenerationFamilyAdapter(
             record.context,
             adapterHandle,
         );
-        const trackedOutput = trackCanonicalCommonProofOutputChunks(
-            input.proofOutputStore,
-        );
         const adapterForRun = familyAdapter;
         familyAdapter = undefined;
-        generatedProof =
-            await runClosedWorkerCommonProofGenerationFamilyAdapterRetainingGeneratedCapability(
+        const execution =
+            await runClosedWorkerCommonProofGenerationFamilyAdapterWithExecutionOpener(
                 adapterForRun,
-                input.externalMemory,
-                trackedOutput.outputStore,
-                Object.freeze({
-                    ...input.options,
-                    authenticatedSourceRangeReader: Object.freeze({
-                        readExactRange: (
-                            request: CommonProofAuthenticatedSourceRangeRequest,
-                        ) =>
-                            readAuthenticatedParticipantSourceRange(
-                                record,
-                                request,
-                            ),
-                    }),
-                }),
+                async (description) => {
+                    const opened =
+                        await input.openProofGenerationExecution(description);
+                    return Object.freeze({
+                        externalMemory: opened.externalMemory,
+                        options: Object.freeze({
+                            ...opened.options,
+                            authenticatedSourceRangeReader: Object.freeze({
+                                readExactRange: (
+                                    request: CommonProofAuthenticatedSourceRangeRequest,
+                                ) =>
+                                    readAuthenticatedParticipantSourceRange(
+                                        record,
+                                        request,
+                                    ),
+                            }),
+                        }),
+                        outputStore: opened.outputStore,
+                    });
+                },
             );
+        generatedProof = execution.generatedCapability;
         const proofDescriptor = await deriveGeneratedCommonProofDescriptor({
             kernel: record.kernel,
-            outputChunkByteLengths: trackedOutput.outputChunkByteLengths,
-            outputStore: input.proofOutputStore,
+            outputChunkByteLengths: execution.outputChunkByteLengths,
+            outputStore: execution.outputStore,
             proofFamilyLabel: 'collective public-key aggregate',
             streamDomain:
                 canonicalStreamDomains.collectivePublicKeyAggregateProof,
@@ -1248,10 +1251,11 @@ export const beginCollectivePublicKeyAggregate = async (input: {
             input.vssRecipientAuthority,
             input.kernel,
         );
+    const bodyByteLength = requireParticipantBodyByteLength(context);
     const participantSources = requireParticipantSources(
         input.participantSources,
+        bodyByteLength,
     );
-    const bodyByteLength = requireParticipantBodyByteLength(context);
     const memoryBoundary = createMemoryBoundary(context);
     const statusBoundary = createStatusBoundary();
     const participantSourceRecords: ParticipantSourceRecord[] = [];
@@ -1309,6 +1313,7 @@ export const beginCollectivePublicKeyAggregate = async (input: {
             context,
             generatedProof: undefined,
             kernel: input.kernel,
+            participantBodyByteLength: bodyByteLength,
             participantSources: Object.freeze([...participantSourceRecords]),
             phase: 'prepared',
             sessionHandle,

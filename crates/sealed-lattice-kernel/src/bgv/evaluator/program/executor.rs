@@ -5,8 +5,8 @@ use crate::{
         evaluator::{
             engine::{
                 Ciphertext, add_plaintext_coefficients, ciphertext_add, ciphertext_canonical_bytes,
-                ciphertext_negate, ciphertext_sub, ciphertext_tensor, encode_slots_to_coefficients,
-                modulus_switch, modulus_switch_to, normalize_scaling, plaintext_mul,
+                ciphertext_negate, ciphertext_sub, ciphertext_tensor, modulus_switch,
+                modulus_switch_to, normalize_scaling, plaintext_mul,
             },
             replay::{
                 EvaluatorKeyStoreReadRequest, VerifiedEvaluatorKeyReplay,
@@ -1247,16 +1247,12 @@ pub(crate) fn encode_constant_coefficients(
         .copied()
         .map(u64::from)
         .collect::<Vec<_>>();
-    match constant.kind() {
-        EvaluatorConstantKind::CoefficientVector => {
-            let mut coefficients = values;
-            coefficients.resize(POLYNOMIAL_DEGREE, 0);
-            Ok(coefficients)
-        }
-        EvaluatorConstantKind::SlotVector => {
-            encode_slots_to_coefficients(&values).map_err(evaluator_refusal)
-        }
+    if constant.kind() != EvaluatorConstantKind::CoefficientVector {
+        return Err(RefusalReason::UnsupportedVersionOrSuite);
     }
+    let mut coefficients = values;
+    coefficients.resize(POLYNOMIAL_DEGREE, 0);
+    Ok(coefficients)
 }
 
 fn take_register(

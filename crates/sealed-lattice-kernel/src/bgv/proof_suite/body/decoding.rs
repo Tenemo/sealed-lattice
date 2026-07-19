@@ -1,7 +1,4 @@
-use std::{
-    cell::{Cell, RefCell},
-    collections::BTreeSet,
-};
+use std::cell::{Cell, RefCell};
 
 use crate::foundation::CanonicalItemType;
 
@@ -9,10 +6,7 @@ use super::super::{
     decoder::{BoundedProofDecoder, ProofByteSource, ProofDecodeError},
     field::ProofChallengeExtensionElement,
     merkle::{ProofTreeRole, ProofTreeValue},
-    transcript::{
-        CommonProofPrivacyMode, CommonProofQueryOpeningAbsorber, CommonProofTranscriptSchedule,
-        TranscriptError,
-    },
+    transcript::{CommonProofQueryOpeningAbsorber, TranscriptError},
 };
 use super::authentication::{
     authenticate_opening, decode_phase_pair_leaf, minimal_frontier_node_count,
@@ -23,8 +17,8 @@ use super::sizing::{
     raw_byte_list_byte_length,
 };
 use super::{
-    CompleteProofTreeCatalog, PROOF_QUERY_OPENING_RECORD_SCHEMA_IDENTIFIER, ProofBodyError,
-    ProofBodyLayout, ProofTreeCatalogEntry, ProofTreeCatalogSource, SCHEMA_VERSION,
+    PROOF_QUERY_OPENING_RECORD_SCHEMA_IDENTIFIER, ProofBodyError, ProofBodyLayout,
+    ProofTreeCatalogEntry, ProofTreeCatalogSource, SCHEMA_VERSION,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]

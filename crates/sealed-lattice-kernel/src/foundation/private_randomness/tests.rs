@@ -203,27 +203,6 @@ fn structured_commitment_opening_context_is_canonical_and_binds_every_coordinate
             RefusalReason::WrongTypeOrLength,
         );
     }
-
-    for unsupported_version in [1, 2] {
-        let unsupported = CanonicalTuple::new(
-            SETUP_STRUCTURED_COMMITMENT_OPENING_CONTEXT_SCHEMA_IDENTIFIER,
-            unsupported_version,
-            vec![
-                CanonicalItem::hash512(hash(0x91).into_bytes()),
-                CanonicalItem::unsigned16(1),
-                CanonicalItem::unsigned16(11),
-                CanonicalItem::unsigned16(1),
-            ],
-        )
-        .encode()
-        .expect("unsupported-version tuple encodes");
-        assert_eq!(
-            SetupStructuredCommitmentOpeningContext::decode(&unsupported, &limits)
-                .expect_err("retired context version refuses")
-                .refusal_reason,
-            RefusalReason::UnsupportedVersionOrSuite,
-        );
-    }
 }
 
 #[test]

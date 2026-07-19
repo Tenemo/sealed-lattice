@@ -4,7 +4,19 @@ pub(super) fn prepared_generation_worker_fixture_for_checkpoint(
     authenticated_checkpoint_state: Option<&[u8]>,
     checkpoint_source_lineage_delta: u64,
 ) -> Result<(PreparedCommonProofGeneration, Vec<u8>), CommonProofRuntimeError> {
-    let mut fixture = common_proof_engine_fixture();
+    prepared_generation_worker_fixture_for_public_family(
+        APPLICATION_STATEMENT_SCHEMA_IDENTIFIER,
+        authenticated_checkpoint_state,
+        checkpoint_source_lineage_delta,
+    )
+}
+
+fn prepared_generation_worker_fixture_for_public_family(
+    family_schema_identifier: u16,
+    authenticated_checkpoint_state: Option<&[u8]>,
+    checkpoint_source_lineage_delta: u64,
+) -> Result<(PreparedCommonProofGeneration, Vec<u8>), CommonProofRuntimeError> {
+    let mut fixture = common_proof_engine_fixture_for_public_family(family_schema_identifier);
     let expected_proof_bytes = generate_fixture_proof(&mut fixture);
     let proof_header_hash = ProofObjectHeader::from_canonical_application_statement(
         fixture.canonical_application_statement_bytes.clone(),
@@ -23,9 +35,9 @@ pub(super) fn prepared_generation_worker_fixture_for_checkpoint(
         Hash512::from_bytes([0x11; 64]),
         Hash512::from_bytes([0x83; 64]),
         Hash512::from_bytes([0x84; 64]),
-        APPLICATION_STATEMENT_SCHEMA_IDENTIFIER,
+        family_schema_identifier,
         None,
-        None,
+        fixture.schedule_position,
         None,
     )
     .expect("the aggregate proof application has one exact slot");
@@ -36,7 +48,7 @@ pub(super) fn prepared_generation_worker_fixture_for_checkpoint(
             verified_application_statement_hash(
                 1,
                 [0x11; 64],
-                APPLICATION_STATEMENT_SCHEMA_IDENTIFIER,
+                family_schema_identifier,
                 &fixture.canonical_application_statement_bytes,
             ),
             proof_header_hash.into_bytes(),
@@ -79,7 +91,7 @@ pub(super) fn prepared_generation_worker_fixture_for_checkpoint(
     );
     let sources = CommonProofGenerationSources::new(
         PublicOnlyCommonProofCoinSource::new(
-            APPLICATION_STATEMENT_SCHEMA_IDENTIFIER,
+            family_schema_identifier,
             Hash512::from_bytes([0x51; Hash512::BYTE_LENGTH]),
             source_attempt_lineage,
         )
@@ -106,6 +118,67 @@ pub(super) fn prepared_generation_worker_fixture_for_checkpoint(
         ),
     };
     Ok((prepared, expected_proof_bytes))
+}
+
+fn common_proof_engine_fixture_for_public_family(
+    family_schema_identifier: u16,
+) -> CommonProofEngineFixture {
+    match family_schema_identifier {
+        APPLICATION_STATEMENT_SCHEMA_IDENTIFIER => common_proof_engine_fixture(),
+        RKG_ROUND_ONE_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER => {
+            let context = relation_context();
+            let relation_plan = compile_rkg_round_one_aggregate_relation_plan(
+                &RkgRoundOneAggregatePlanInput {
+                    geometry: public_aggregate_geometry(),
+                    ordered_variants: vec![RkgRoundOneAggregateVariantInput {
+                        schedule_position: 7,
+                        ordered_left_component_moduli: vec![SuiteModulusReference::data(0)],
+                        ordered_right_component_moduli: vec![SuiteModulusReference::data(0)],
+                    }],
+                },
+                &context,
+            )
+            .expect("the round-one aggregate relation compiles");
+            public_aggregate_common_proof_fixture(
+                context,
+                relation_plan,
+                &[7, 11, 18, 13, 17, 30],
+                canonical_rkg_round_one_aggregate_statement,
+                Some(7),
+                None,
+            )
+        }
+        EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER => {
+            let context = relation_context();
+            let relation_plan = compile_evaluator_key_aggregate_relation_plan(
+                &EvaluatorKeyAggregatePlanInput {
+                    geometry: public_aggregate_geometry(),
+                    ordered_variants: (1..=FOUNDATION_PROFILE.option_count)
+                        .map(|top_count| EvaluatorKeyAggregateVariantInput {
+                            top_count,
+                            ordered_entries: vec![EvaluatorKeyAggregateEntryPlanInput {
+                                schedule_position: 3,
+                                ordered_runtime_component_moduli: vec![
+                                    SuiteModulusReference::data(0),
+                                ],
+                            }],
+                        })
+                        .collect(),
+                },
+                &context,
+            )
+            .expect("the evaluator aggregate relation compiles");
+            public_aggregate_common_proof_fixture(
+                context,
+                relation_plan,
+                &[5, 9, 14],
+                canonical_evaluator_key_aggregate_statement,
+                None,
+                Some(FOUNDATION_PROFILE.option_count),
+            )
+        }
+        _ => panic!("the generation worker fixture requires a public-only proof family"),
+    }
 }
 
 fn execute_generation_storage_request(
@@ -248,7 +321,15 @@ fn drive_generation_worker_to_complete(
 }
 
 pub(super) fn capture_first_generation_checkpoint() -> (Vec<u8>, Vec<u8>, [u8; 64], Vec<u8>) {
-    let (prepared, expected_proof_bytes) = prepared_generation_worker_fixture();
+    capture_first_generation_checkpoint_for_public_family(APPLICATION_STATEMENT_SCHEMA_IDENTIFIER)
+}
+
+fn capture_first_generation_checkpoint_for_public_family(
+    family_schema_identifier: u16,
+) -> (Vec<u8>, Vec<u8>, [u8; 64], Vec<u8>) {
+    let (prepared, expected_proof_bytes) =
+        prepared_generation_worker_fixture_for_public_family(family_schema_identifier, None, 0)
+            .expect("the fresh public-only generation fixture starts at checkpoint genesis");
     let mut registry = CommonProofRuntimeRegistry::default();
     let operation = registry
         .begin_owned_generation(prepared)
@@ -398,36 +479,44 @@ fn owned_generation_worker_replays_storage_and_authenticates_every_output_chunk(
 }
 
 #[test]
-fn owned_generation_worker_replays_from_zero_and_produces_byte_identical_output() {
-    let (
-        authenticated_checkpoint_state,
-        _cursor_manifest_bytes,
-        stable_attempt_binding_hash,
-        expected_proof_bytes,
-    ) = capture_first_generation_checkpoint();
-    assert_ne!(stable_attempt_binding_hash, [0_u8; 64]);
-    let (prepared, independently_generated_proof_bytes) =
-        prepared_generation_worker_fixture_for_checkpoint(Some(&authenticated_checkpoint_state), 0)
+fn owned_generation_worker_replays_every_public_family_from_zero_with_byte_identical_output() {
+    for family_schema_identifier in
+        ProofApplicationSlotCeilings::PUBLIC_ONLY_FAMILY_SCHEMA_IDENTIFIERS
+    {
+        let (
+            authenticated_checkpoint_state,
+            _cursor_manifest_bytes,
+            stable_attempt_binding_hash,
+            expected_proof_bytes,
+        ) = capture_first_generation_checkpoint_for_public_family(family_schema_identifier);
+        assert_ne!(stable_attempt_binding_hash, [0_u8; 64]);
+        let (prepared, independently_generated_proof_bytes) =
+            prepared_generation_worker_fixture_for_public_family(
+                family_schema_identifier,
+                Some(&authenticated_checkpoint_state),
+                0,
+            )
             .expect("authenticated checkpoint coordinates prepare the same exact attempt");
-    assert_eq!(prepared.runtime_binding_hash(), stable_attempt_binding_hash);
-    assert_eq!(independently_generated_proof_bytes, expected_proof_bytes);
-    let mut registry = CommonProofRuntimeRegistry::default();
-    let operation = registry
-        .resume_owned_generation(prepared, &authenticated_checkpoint_state)
-        .expect("the authenticated checkpoint starts deterministic prefix replay");
-    let mut replay_storage =
-        BoundedInMemoryExternalMemory::new(MAXIMUM_EXTERNAL_MEMORY_BYTE_LENGTH);
-    let (resumed_proof_bytes, resume_complete_count) =
-        drive_generation_worker_to_complete(&mut registry, operation, &mut replay_storage);
+        assert_eq!(prepared.runtime_binding_hash(), stable_attempt_binding_hash);
+        assert_eq!(independently_generated_proof_bytes, expected_proof_bytes);
+        let mut registry = CommonProofRuntimeRegistry::default();
+        let operation = registry
+            .resume_owned_generation(prepared, &authenticated_checkpoint_state)
+            .expect("the authenticated checkpoint starts deterministic prefix replay");
+        let mut replay_storage =
+            BoundedInMemoryExternalMemory::new(MAXIMUM_EXTERNAL_MEMORY_BYTE_LENGTH);
+        let (resumed_proof_bytes, resume_complete_count) =
+            drive_generation_worker_to_complete(&mut registry, operation, &mut replay_storage);
 
-    assert_eq!(resume_complete_count, 1);
-    assert_eq!(resumed_proof_bytes, expected_proof_bytes);
-    let generated_capability = registry
-        .finish_owned_generation(operation)
-        .expect("only the byte-identical terminal proof mints generation authority");
-    registry
-        .release_generated_proof(generated_capability)
-        .expect("the resumed generated capability remains linear");
+        assert_eq!(resume_complete_count, 1);
+        assert_eq!(resumed_proof_bytes, expected_proof_bytes);
+        let generated_capability = registry
+            .finish_owned_generation(operation)
+            .expect("only the byte-identical terminal proof mints generation authority");
+        registry
+            .release_generated_proof(generated_capability)
+            .expect("the resumed generated capability remains linear");
+    }
 }
 
 #[test]
@@ -804,14 +893,21 @@ fn generation_state_enforces_reports_and_releases_its_complete_resident_live_set
         .find(|phase| phase.phase() == CommonProofResidentMemoryPhase::DerivingAuxiliaryColumns)
         .expect("the descriptor-local auxiliary-column phase is explicit");
     assert!(deriving_auxiliary_columns.relation_polynomial_working_set_byte_length() > 0);
-    assert!(deriving_auxiliary_columns.auxiliary_trace_workspace_byte_length() > 0);
+    assert_eq!(
+        deriving_auxiliary_columns.auxiliary_trace_workspace_byte_length(),
+        0,
+        "the maskless public-aggregate fixture has no auxiliary trace columns",
+    );
 
     let constructing_quotient = resident_memory_plan
         .phases()
         .iter()
         .find(|phase| phase.phase() == CommonProofResidentMemoryPhase::ConstructingQuotient)
         .expect("the quotient constraint-stream phase is explicit");
-    assert_eq!(constructing_quotient.replay_polynomial_byte_length(), 0);
+    assert!(
+        constructing_quotient.replay_polynomial_byte_length() > 0,
+        "compact setup root-pass records remain live until query emission",
+    );
     assert!(constructing_quotient.primary_vector_byte_length() > 0);
     assert_eq!(constructing_quotient.secondary_vector_byte_length(), 0);
     assert!(constructing_quotient.relation_rotation_block_byte_length() > 0);
@@ -841,6 +937,8 @@ fn generation_state_enforces_reports_and_releases_its_complete_resident_live_set
             u64::try_from(core::mem::size_of::<u64>()).expect("the limb byte length fits u64"),
         )
         .expect("the extension value byte length fits u64");
+    let base_value_byte_length =
+        u64::try_from(core::mem::size_of::<u64>()).expect("the base value byte length fits u64");
     let aligned_extension_scan_byte_length = external_memory_chunk_byte_length
         .checked_div(extension_value_byte_length)
         .expect("the extension value byte length is nonzero")
@@ -851,7 +949,7 @@ fn generation_state_enforces_reports_and_releases_its_complete_resident_live_set
         .and_then(|byte_length| byte_length.checked_add(external_memory_chunk_byte_length))
         .expect("the Stockham working set byte length fits u64");
     let replay_writer_working_set_byte_length = external_memory_chunk_byte_length
-        .checked_add(extension_value_byte_length)
+        .checked_add(base_value_byte_length)
         .expect("the replay writer working set byte length fits u64");
     assert!(
         transforming_auxiliary_columns.external_working_set_byte_length()

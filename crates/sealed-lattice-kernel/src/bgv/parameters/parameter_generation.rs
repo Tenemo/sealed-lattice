@@ -3,9 +3,9 @@ use std::sync::OnceLock;
 
 use super::root_parameters::MULTIPLICATIVE_GROUP_PRIME_FACTORS;
 use super::{
-    CANDIDATE_PLAINTEXT_DEGREE, CANDIDATE_PLAINTEXT_MODULUS, CANDIDATE_PLAINTEXT_NTT_PARAMETERS,
-    DATA_PRIMES, LOGICAL_SLOT_GENERATOR, NttTransformParameters, PLAINTEXT_MODULUS,
-    POLYNOMIAL_DEGREE, ROOT_PARAMETERS, RootParameters, SPECIAL_PRIMES,
+    DATA_PRIMES, LOGICAL_SLOT_GENERATOR, NttTransformParameters, PLAINTEXT_EXTENSION_DEGREE,
+    PLAINTEXT_EXTENSION_LANE_COUNT, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE, ROOT_PARAMETERS,
+    RootParameters, SPECIAL_PRIMES,
 };
 
 const DATA_PRIME_COUNT: usize = DATA_PRIMES.len();
@@ -47,9 +47,7 @@ pub(crate) fn regenerate_supported_data_root_parameters()
 }
 
 /// Deterministically regenerates the complete special basis used by hybrid
-/// key switching. Unlike the data basis, these primes only need the 2N root
-/// congruence; requiring the plaintext congruence would needlessly reduce the
-/// available basis.
+/// key switching.
 #[cfg(test)]
 pub(crate) fn regenerate_supported_special_root_parameters()
 -> Result<[RootParameters; SPECIAL_PRIME_COUNT], ParameterGenerationError> {
@@ -162,26 +160,6 @@ fn verify_ntt_transform_parameters_with_factors(
         ) == 1
 }
 
-pub(crate) fn validate_candidate_plaintext_transform_parameters()
--> Result<(), ParameterGenerationError> {
-    static VALIDATION: OnceLock<Result<(), ParameterGenerationError>> = OnceLock::new();
-    *VALIDATION.get_or_init(validate_candidate_plaintext_transform_parameters_uncached)
-}
-
-fn validate_candidate_plaintext_transform_parameters_uncached()
--> Result<(), ParameterGenerationError> {
-    let parameters = CANDIDATE_PLAINTEXT_NTT_PARAMETERS;
-    if parameters.transform_degree != CANDIDATE_PLAINTEXT_DEGREE
-        || parameters.roots.modulus != CANDIDATE_PLAINTEXT_MODULUS
-        || !verify_ntt_transform_parameters_with_factors(parameters, &[2])
-        || !verify_logical_slot_layout_for_transform_degree(parameters.transform_degree)
-    {
-        return Err(ParameterGenerationError::InvalidCertificate);
-    }
-
-    Ok(())
-}
-
 fn verify_complete_prime_factor_certificate(
     multiplicative_group_order: u64,
     prime_factors: &[u64],
@@ -215,18 +193,14 @@ pub(crate) fn validate_supported_algebraic_parameters() -> Result<(), ParameterG
 }
 
 fn validate_supported_algebraic_parameters_uncached() -> Result<(), ParameterGenerationError> {
-    let plaintext_parameters = ROOT_PARAMETERS[0];
-    if plaintext_parameters.modulus != PLAINTEXT_MODULUS
-        || !verify_ntt_root_parameters(plaintext_parameters)
-        || !verify_logical_slot_layout_for_transform_degree(POLYNOMIAL_DEGREE)
-    {
+    if !is_prime(PLAINTEXT_MODULUS) || !verify_plaintext_extension_lane_layout() {
         return Err(ParameterGenerationError::InvalidCertificate);
     }
 
     for (expected_modulus, parameters) in DATA_PRIMES
         .iter()
         .copied()
-        .zip(ROOT_PARAMETERS[1..=DATA_PRIME_COUNT].iter().copied())
+        .zip(ROOT_PARAMETERS[..DATA_PRIME_COUNT].iter().copied())
     {
         if parameters.modulus != expected_modulus || !verify_data_root_parameters(parameters) {
             return Err(ParameterGenerationError::InvalidCertificate);
@@ -234,7 +208,7 @@ fn validate_supported_algebraic_parameters_uncached() -> Result<(), ParameterGen
     }
 
     for (expected_modulus, parameters) in SPECIAL_PRIMES.iter().copied().zip(
-        ROOT_PARAMETERS[DATA_PRIME_COUNT + 1..DATA_PRIME_COUNT + 1 + SPECIAL_PRIME_COUNT]
+        ROOT_PARAMETERS[DATA_PRIME_COUNT..DATA_PRIME_COUNT + SPECIAL_PRIME_COUNT]
             .iter()
             .copied(),
     ) {
@@ -255,35 +229,47 @@ fn validate_supported_algebraic_parameters_uncached() -> Result<(), ParameterGen
     Ok(())
 }
 
-fn verify_logical_slot_layout_for_transform_degree(transform_degree: usize) -> bool {
-    let Some(ring_order) = transform_degree.checked_mul(2) else {
+fn verify_plaintext_extension_lane_layout() -> bool {
+    let extension_order = PLAINTEXT_EXTENSION_DEGREE;
+    let positive_lane_count = PLAINTEXT_EXTENSION_LANE_COUNT / 2;
+    if PLAINTEXT_EXTENSION_DEGREE * PLAINTEXT_EXTENSION_LANE_COUNT != POLYNOMIAL_DEGREE
+        || modular_power(
+            PLAINTEXT_MODULUS,
+            PLAINTEXT_EXTENSION_DEGREE as u64,
+            TWICE_POLYNOMIAL_DEGREE,
+        ) != 1
+        || modular_power(
+            PLAINTEXT_MODULUS,
+            (PLAINTEXT_EXTENSION_DEGREE / 2) as u64,
+            TWICE_POLYNOMIAL_DEGREE,
+        ) == 1
+    {
         return false;
-    };
-    let positive_slot_count = transform_degree / 2;
+    }
     if LOGICAL_SLOT_GENERATOR <= 1
-        || LOGICAL_SLOT_GENERATOR >= ring_order
+        || LOGICAL_SLOT_GENERATOR >= extension_order
         || LOGICAL_SLOT_GENERATOR.is_multiple_of(2)
         || modular_power(
             LOGICAL_SLOT_GENERATOR as u64,
-            positive_slot_count as u64,
-            ring_order as u64,
+            positive_lane_count as u64,
+            extension_order as u64,
         ) != 1
         || modular_power(
             LOGICAL_SLOT_GENERATOR as u64,
-            (positive_slot_count / 2) as u64,
-            ring_order as u64,
+            (positive_lane_count / 2) as u64,
+            extension_order as u64,
         ) == 1
     {
         return false;
     }
 
-    let mut seen_odd_exponents = vec![false; transform_degree];
+    let mut seen_odd_exponents = vec![false; PLAINTEXT_EXTENSION_LANE_COUNT];
     let mut exponent = 1_usize;
-    for _ in 0..positive_slot_count {
-        if exponent.is_multiple_of(2) || exponent == ring_order - 1 {
+    for _ in 0..positive_lane_count {
+        if exponent.is_multiple_of(2) || exponent == extension_order - 1 {
             return false;
         }
-        for represented_exponent in [exponent, ring_order - exponent] {
+        for represented_exponent in [exponent, extension_order - exponent] {
             let natural_transform_index = (represented_exponent - 1) / 2;
             let Some(was_seen) = seen_odd_exponents.get_mut(natural_transform_index) else {
                 return false;
@@ -293,7 +279,7 @@ fn verify_logical_slot_layout_for_transform_degree(transform_degree: usize) -> b
             }
             *was_seen = true;
         }
-        exponent = exponent * LOGICAL_SLOT_GENERATOR % ring_order;
+        exponent = exponent * LOGICAL_SLOT_GENERATOR % extension_order;
     }
 
     exponent == 1 && seen_odd_exponents.into_iter().all(|was_seen| was_seen)
@@ -482,14 +468,16 @@ fn multiply_modular(left: u64, right: u64, modulus: u64) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bgv::parameters::{DATA_PRIMES, ROOT_PARAMETERS, SPECIAL_PRIMES};
+    use crate::bgv::parameters::{
+        DATA_PRIMES, ROOT_PARAMETERS, SPECIAL_PRIMES, root_parameters_for_modulus,
+    };
 
     #[test]
     fn deterministic_generation_reproduces_the_complete_data_basis() {
         let generated = regenerate_supported_data_root_parameters()
             .expect("the supported data basis regenerates");
         assert_eq!(generated.map(|parameters| parameters.modulus), DATA_PRIMES);
-        assert_eq!(generated.as_slice(), &ROOT_PARAMETERS[1..=DATA_PRIME_COUNT]);
+        assert_eq!(generated.as_slice(), &ROOT_PARAMETERS[..DATA_PRIME_COUNT]);
         assert!(
             generated
                 .iter()
@@ -507,7 +495,7 @@ mod tests {
         );
         assert_eq!(
             generated.as_slice(),
-            &ROOT_PARAMETERS[DATA_PRIME_COUNT + 1..DATA_PRIME_COUNT + 1 + SPECIAL_PRIME_COUNT]
+            &ROOT_PARAMETERS[DATA_PRIME_COUNT..DATA_PRIME_COUNT + SPECIAL_PRIME_COUNT]
         );
         assert!(
             generated
@@ -531,7 +519,7 @@ mod tests {
 
     #[test]
     fn certificate_verification_rejects_each_mutated_root_component() {
-        let valid = ROOT_PARAMETERS[1];
+        let valid = ROOT_PARAMETERS[0];
         for mutated in [
             RootParameters {
                 primitive_generator: valid.primitive_generator + 1,
@@ -569,51 +557,12 @@ mod tests {
     }
 
     #[test]
-    fn even_subring_plaintext_transform_certificate_reproduces_exactly() {
-        validate_candidate_plaintext_transform_parameters()
-            .expect("the candidate plaintext transform certificate must reproduce");
-
-        let parameters = CANDIDATE_PLAINTEXT_NTT_PARAMETERS;
-        assert_eq!(parameters.transform_degree, 32_768);
-        assert_eq!(parameters.roots.modulus, 65_537);
-        assert_eq!(parameters.roots.primitive_generator, 3);
-        assert_eq!(parameters.roots.negacyclic_root, 3);
-        assert_eq!(parameters.roots.cyclic_root, 9);
-        assert_eq!(parameters.roots.inverse_negacyclic_root, 21_846);
-        assert_eq!(parameters.roots.inverse_cyclic_root, 7_282);
-        assert_eq!(parameters.roots.inverse_polynomial_degree, 65_535);
-        assert!(!(parameters.roots.modulus - 1).is_multiple_of(2 * POLYNOMIAL_DEGREE as u64));
-        assert!(verify_ntt_transform_parameters_with_factors(
-            parameters,
-            &[2]
-        ));
-    }
-
-    #[test]
-    fn even_subring_plaintext_certificate_rejects_full_ring_and_mutated_roots() {
-        let valid = CANDIDATE_PLAINTEXT_NTT_PARAMETERS;
-        for mutated in [
-            NttTransformParameters {
-                transform_degree: POLYNOMIAL_DEGREE,
-                ..valid
-            },
-            NttTransformParameters {
-                roots: RootParameters {
-                    negacyclic_root: valid.roots.negacyclic_root + 1,
-                    ..valid.roots
-                },
-                ..valid
-            },
-            NttTransformParameters {
-                roots: RootParameters {
-                    inverse_polynomial_degree: valid.roots.inverse_polynomial_degree + 1,
-                    ..valid.roots
-                },
-                ..valid
-            },
-        ] {
-            assert!(!verify_ntt_transform_parameters_with_factors(mutated, &[2]));
-        }
+    fn plaintext_extension_lane_certificate_reproduces_exactly() {
+        assert_eq!(PLAINTEXT_MODULUS, 257);
+        assert_eq!(PLAINTEXT_EXTENSION_DEGREE, 256);
+        assert_eq!(PLAINTEXT_EXTENSION_LANE_COUNT, 128);
+        assert!(verify_plaintext_extension_lane_layout());
+        assert!(root_parameters_for_modulus(PLAINTEXT_MODULUS).is_none());
     }
 
     #[test]
@@ -628,19 +577,19 @@ mod tests {
             ));
         }
 
-        let group_order = ROOT_PARAMETERS[1].modulus - 1;
-        let complete_factors = MULTIPLICATIVE_GROUP_PRIME_FACTORS[1];
+        let group_order = ROOT_PARAMETERS[0].modulus - 1;
+        let complete_factors = MULTIPLICATIVE_GROUP_PRIME_FACTORS[0];
         assert!(!verify_complete_prime_factor_certificate(
             group_order,
             &complete_factors[..complete_factors.len() - 1],
         ));
         assert!(!verify_complete_prime_factor_certificate(
             group_order,
-            &[2, 2, 3, 786_433],
+            &[2, 2, 29, 257],
         ));
         assert!(!verify_complete_prime_factor_certificate(
             group_order,
-            &[2, 3, 786_433, 1_572_866],
+            &[2, 29, 257, 514],
         ));
     }
 

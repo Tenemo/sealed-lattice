@@ -16,12 +16,16 @@ use super::{
     CanonicalItem, CanonicalTuple, FOUNDATION_PROFILE, FoundationSchemaError, RefusalReason,
 };
 use crate::bgv::{
-    direct_ballots::direct_ballot_slots,
+    direct_ballots::{
+        PAIR_CHARACTER_AUXILIARY_COUNT, PAIR_CHARACTER_CIPHERTEXT_COUNT, PAIR_CHARACTER_LANE_COUNT,
+        PAIR_CHARACTER_LANE_DEGREE, pair_character_lane_value, pair_character_plaintexts,
+        selected_pair_character_lane_assignments,
+    },
     evaluator::program::selected_evaluator_program_set,
     evaluator::top_k::CANONICAL_TARGET_CIPHERTEXT_LEVEL,
     parameters::{
-        DATA_PRIMES, LOGICAL_SLOT_GENERATOR, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE,
-        root_parameters_for_modulus, validate_supported_algebraic_parameters,
+        DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE, root_parameters_for_modulus,
+        validate_supported_algebraic_parameters,
     },
     proof_suite::{
         PROOF_EVALUATION_BLOWUP_FACTOR, ProofProfileError, selected_committed_material_profile,
@@ -38,23 +42,24 @@ pub(crate) const LATTICE_COMMITMENT_PROFILE_SCHEMA_IDENTIFIER: u16 = 0x2122;
 pub(crate) const TARGET_DECRYPTION_PROFILE_SCHEMA_IDENTIFIER: u16 = 0x1630;
 
 const SCHEMA_VERSION: u16 = 1;
-const ENCODER_AND_BALLOT_LAYOUT_VERSION: u16 = 2;
+const ENCODER_AND_BALLOT_LAYOUT_VERSION: u16 = 3;
 const LATTICE_COMMITMENT_PROFILE_VERSION: u16 = 3;
 const COMMITTED_MATERIAL_PROOF_FIELD_INDEX: u16 = 0;
-const RESERVED_BALLOT_SLOT_RULE: u16 = 1;
 const LOWER_MINUS_HIGHER_PAIR_DIFFERENCE_RULE: u16 = 1;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct EncoderAndBallotLayout {
     polynomial_degree: u32,
     primitive_two_n_root: u64,
-    slot_generator: u16,
-    reserved_slot_rule: u16,
+    extension_degree: u16,
+    lane_count: u16,
+    ciphertext_count: u16,
+    auxiliary_count: u16,
     option_count: u16,
     minimum_score: u16,
     maximum_score: u16,
     pair_difference_rule: u16,
-    ordered_pair_ordinals: Vec<u16>,
+    ordered_pair_character_assignments: Vec<u16>,
 }
 
 impl EncoderAndBallotLayout {
@@ -63,19 +68,23 @@ impl EncoderAndBallotLayout {
         let primitive_two_n_root = root_parameters_for_modulus(PLAINTEXT_MODULUS)
             .ok_or_else(invalid_selected_artifact)?
             .negacyclic_root;
-        let slot_generator =
-            u16::try_from(LOGICAL_SLOT_GENERATOR).map_err(|_| invalid_selected_artifact())?;
         let artifact = Self {
             polynomial_degree: u32::try_from(POLYNOMIAL_DEGREE)
                 .map_err(|_| invalid_selected_artifact())?,
             primitive_two_n_root,
-            slot_generator,
-            reserved_slot_rule: RESERVED_BALLOT_SLOT_RULE,
+            extension_degree: u16::try_from(PAIR_CHARACTER_LANE_DEGREE)
+                .map_err(|_| invalid_selected_artifact())?,
+            lane_count: u16::try_from(PAIR_CHARACTER_LANE_COUNT)
+                .map_err(|_| invalid_selected_artifact())?,
+            ciphertext_count: u16::try_from(PAIR_CHARACTER_CIPHERTEXT_COUNT)
+                .map_err(|_| invalid_selected_artifact())?,
+            auxiliary_count: u16::try_from(PAIR_CHARACTER_AUXILIARY_COUNT)
+                .map_err(|_| invalid_selected_artifact())?,
             option_count: FOUNDATION_PROFILE.option_count,
             minimum_score: FOUNDATION_PROFILE.minimum_score,
             maximum_score: FOUNDATION_PROFILE.maximum_score,
             pair_difference_rule: LOWER_MINUS_HIGHER_PAIR_DIFFERENCE_RULE,
-            ordered_pair_ordinals: selected_ordered_pair_ordinals()?,
+            ordered_pair_character_assignments: selected_pair_character_assignment_catalog()?,
         };
         artifact.validate()?;
         Ok(artifact)
@@ -88,18 +97,20 @@ impl EncoderAndBallotLayout {
             &tuple,
             ENCODER_AND_BALLOT_LAYOUT_SCHEMA_IDENTIFIER,
             ENCODER_AND_BALLOT_LAYOUT_VERSION,
-            9,
+            11,
         )?;
         let artifact = Self {
             polynomial_degree: read_u32(&tuple.items[0])?,
             primitive_two_n_root: read_u64(&tuple.items[1])?,
-            slot_generator: read_u16(&tuple.items[2])?,
-            reserved_slot_rule: read_u16(&tuple.items[3])?,
-            option_count: read_u16(&tuple.items[4])?,
-            minimum_score: read_u16(&tuple.items[5])?,
-            maximum_score: read_u16(&tuple.items[6])?,
-            pair_difference_rule: read_u16(&tuple.items[7])?,
-            ordered_pair_ordinals: read_unsigned16_list(&tuple.items[8])?,
+            extension_degree: read_u16(&tuple.items[2])?,
+            lane_count: read_u16(&tuple.items[3])?,
+            ciphertext_count: read_u16(&tuple.items[4])?,
+            auxiliary_count: read_u16(&tuple.items[5])?,
+            option_count: read_u16(&tuple.items[6])?,
+            minimum_score: read_u16(&tuple.items[7])?,
+            maximum_score: read_u16(&tuple.items[8])?,
+            pair_difference_rule: read_u16(&tuple.items[9])?,
+            ordered_pair_character_assignments: read_unsigned16_list(&tuple.items[10])?,
         };
         artifact.validate()?;
         Ok(artifact)
@@ -113,13 +124,15 @@ impl EncoderAndBallotLayout {
             vec![
                 CanonicalItem::unsigned32(self.polynomial_degree),
                 CanonicalItem::unsigned64(self.primitive_two_n_root),
-                CanonicalItem::unsigned16(self.slot_generator),
-                CanonicalItem::unsigned16(self.reserved_slot_rule),
+                CanonicalItem::unsigned16(self.extension_degree),
+                CanonicalItem::unsigned16(self.lane_count),
+                CanonicalItem::unsigned16(self.ciphertext_count),
+                CanonicalItem::unsigned16(self.auxiliary_count),
                 CanonicalItem::unsigned16(self.option_count),
                 CanonicalItem::unsigned16(self.minimum_score),
                 CanonicalItem::unsigned16(self.maximum_score),
                 CanonicalItem::unsigned16(self.pair_difference_rule),
-                unsigned16_list(&self.ordered_pair_ordinals)?,
+                unsigned16_list(&self.ordered_pair_character_assignments)?,
             ],
         )
         .encode()?)
@@ -131,59 +144,41 @@ impl EncoderAndBallotLayout {
             .negacyclic_root;
         if usize::try_from(self.polynomial_degree).ok() != Some(POLYNOMIAL_DEGREE)
             || self.primitive_two_n_root != selected_root
-            || usize::from(self.slot_generator) != LOGICAL_SLOT_GENERATOR
-            || self.reserved_slot_rule != RESERVED_BALLOT_SLOT_RULE
+            || usize::from(self.extension_degree) != PAIR_CHARACTER_LANE_DEGREE
+            || usize::from(self.lane_count) != PAIR_CHARACTER_LANE_COUNT
+            || usize::from(self.ciphertext_count) != PAIR_CHARACTER_CIPHERTEXT_COUNT
+            || usize::from(self.auxiliary_count) != PAIR_CHARACTER_AUXILIARY_COUNT
             || self.option_count != FOUNDATION_PROFILE.option_count
             || self.minimum_score != FOUNDATION_PROFILE.minimum_score
             || self.maximum_score != FOUNDATION_PROFILE.maximum_score
             || self.minimum_score > self.maximum_score
             || self.pair_difference_rule != LOWER_MINUS_HIGHER_PAIR_DIFFERENCE_RULE
-            || self.ordered_pair_ordinals != selected_ordered_pair_ordinals()?
+            || self.ordered_pair_character_assignments
+                != selected_pair_character_assignment_catalog()?
         {
             return Err(invalid_selected_artifact());
         }
-        require_pairwise_ballot_codec_layout(&self.ordered_pair_ordinals)?;
+        require_pair_character_ballot_codec_layout()?;
         Ok(())
     }
 }
 
-fn selected_ordered_pair_ordinals() -> SchemaResult<Vec<u16>> {
-    let option_count = usize::from(FOUNDATION_PROFILE.option_count);
-    let pair_count = option_count
-        .checked_mul(
-            option_count
-                .checked_sub(1)
-                .ok_or_else(invalid_selected_artifact)?,
-        )
-        .and_then(|product| product.checked_div(2))
-        .ok_or_else(invalid_selected_artifact)?;
-    let flattened_ordinal_count = pair_count
-        .checked_mul(2)
-        .ok_or_else(invalid_selected_artifact)?;
-    let mut ordered_pair_ordinals = Vec::new();
-    ordered_pair_ordinals
-        .try_reserve_exact(flattened_ordinal_count)
-        .map_err(|_| invalid_selected_artifact())?;
-    for shift in 1..option_count {
-        for lower_option_ordinal in 0..option_count - shift {
-            let higher_option_ordinal = lower_option_ordinal
-                .checked_add(shift)
-                .ok_or_else(invalid_selected_artifact)?;
-            ordered_pair_ordinals.push(
-                u16::try_from(lower_option_ordinal).map_err(|_| invalid_selected_artifact())?,
-            );
-            ordered_pair_ordinals.push(
-                u16::try_from(higher_option_ordinal).map_err(|_| invalid_selected_artifact())?,
-            );
-        }
-    }
-    if ordered_pair_ordinals.len() != flattened_ordinal_count {
-        return Err(invalid_selected_artifact());
-    }
-    Ok(ordered_pair_ordinals)
+fn selected_pair_character_assignment_catalog() -> SchemaResult<Vec<u16>> {
+    Ok(selected_pair_character_lane_assignments()
+        .map_err(|_| invalid_selected_artifact())?
+        .into_iter()
+        .flat_map(|assignment| {
+            [
+                assignment.ciphertext_ordinal(),
+                assignment.lane_ordinal(),
+                assignment.lower_option_ordinal(),
+                assignment.higher_option_ordinal(),
+            ]
+        })
+        .collect::<Vec<_>>())
 }
 
-fn require_pairwise_ballot_codec_layout(ordered_pair_ordinals: &[u16]) -> SchemaResult<()> {
+fn require_pair_character_ballot_codec_layout() -> SchemaResult<()> {
     let option_count = usize::from(FOUNDATION_PROFILE.option_count);
     let ordinal_scores = (0..option_count)
         .map(|option_ordinal| {
@@ -193,31 +188,46 @@ fn require_pairwise_ballot_codec_layout(ordered_pair_ordinals: &[u16]) -> Schema
                 .ok_or_else(invalid_selected_artifact)
         })
         .collect::<SchemaResult<Vec<_>>>()?;
-    let actual_slots = direct_ballot_slots(&ordinal_scores, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE)
-        .map_err(|_| invalid_selected_artifact())?;
-    let pair_count = ordered_pair_ordinals.len() / 2;
-    if ordered_pair_ordinals.len() % 2 != 0
-        || pair_count > actual_slots.len()
-        || actual_slots[pair_count..].iter().any(|slot| *slot != 0)
-    {
-        return Err(invalid_selected_artifact());
-    }
-    for (pair_ordinal, pair) in ordered_pair_ordinals.chunks_exact(2).enumerate() {
-        let lower_option_ordinal = usize::from(pair[0]);
-        let higher_option_ordinal = usize::from(pair[1]);
-        let lower_score = *ordinal_scores
-            .get(lower_option_ordinal)
-            .ok_or_else(invalid_selected_artifact)?;
-        let higher_score = *ordinal_scores
-            .get(higher_option_ordinal)
-            .ok_or_else(invalid_selected_artifact)?;
-        let expected_difference = if lower_score >= higher_score {
-            lower_score - higher_score
-        } else {
-            PLAINTEXT_MODULUS - (higher_score - lower_score)
-        };
-        if actual_slots[pair_ordinal] != expected_difference {
-            return Err(invalid_selected_artifact());
+    let plaintexts =
+        pair_character_plaintexts(&ordinal_scores, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE)
+            .map_err(|_| invalid_selected_artifact())?;
+    let assignments =
+        selected_pair_character_lane_assignments().map_err(|_| invalid_selected_artifact())?;
+    for ciphertext_ordinal in 0..PAIR_CHARACTER_CIPHERTEXT_COUNT {
+        let plaintext = &plaintexts[ciphertext_ordinal];
+        for lane_ordinal in 0..PAIR_CHARACTER_LANE_COUNT {
+            let assignment = assignments.iter().find(|assignment| {
+                usize::from(assignment.ciphertext_ordinal()) == ciphertext_ordinal
+                    && usize::from(assignment.lane_ordinal()) == lane_ordinal
+            });
+            let mut expected_message = [0_u64; PAIR_CHARACTER_LANE_DEGREE];
+            let mut expected_auxiliary_left = [0_u64; PAIR_CHARACTER_LANE_DEGREE];
+            let mut expected_auxiliary_right = [0_u64; PAIR_CHARACTER_LANE_DEGREE];
+            if let Some(assignment) = assignment {
+                let lower_score = ordinal_scores[usize::from(assignment.lower_option_ordinal())];
+                let higher_score = ordinal_scores[usize::from(assignment.higher_option_ordinal())];
+                let score_span =
+                    u64::from(FOUNDATION_PROFILE.maximum_score - FOUNDATION_PROFILE.minimum_score);
+                expected_message[usize::try_from(lower_score + score_span - higher_score)
+                    .map_err(|_| invalid_selected_artifact())?] = 1;
+                expected_auxiliary_left[usize::try_from(lower_score + score_span)
+                    .map_err(|_| invalid_selected_artifact())?] = 1;
+                expected_auxiliary_right[PAIR_CHARACTER_LANE_DEGREE
+                    - usize::try_from(higher_score).map_err(|_| invalid_selected_artifact())?] =
+                    PLAINTEXT_MODULUS - 1;
+            }
+            if pair_character_lane_value(plaintext.message_coefficients(), lane_ordinal)
+                .map_err(|_| invalid_selected_artifact())?
+                != expected_message
+                || pair_character_lane_value(plaintext.auxiliary_left_coefficients(), lane_ordinal)
+                    .map_err(|_| invalid_selected_artifact())?
+                    != expected_auxiliary_left
+                || pair_character_lane_value(plaintext.auxiliary_right_coefficients(), lane_ordinal)
+                    .map_err(|_| invalid_selected_artifact())?
+                    != expected_auxiliary_right
+            {
+                return Err(invalid_selected_artifact());
+            }
         }
     }
     Ok(())
@@ -632,7 +642,7 @@ mod tests {
 
         let mut drifted_encoder_tuple = CanonicalTuple::decode(&encoder_bytes, &limits)
             .expect("selected encoder tuple decodes");
-        drifted_encoder_tuple.items[5] =
+        drifted_encoder_tuple.items[7] =
             CanonicalItem::unsigned16(FOUNDATION_PROFILE.maximum_score);
         let drifted_encoder = drifted_encoder_tuple
             .encode()
@@ -693,30 +703,6 @@ mod tests {
     }
 
     #[test]
-    fn retired_lattice_commitment_versions_refuse() {
-        let selected = LatticeCommitmentProfile::selected().expect("selected commitment profile");
-        for retired_version in [1_u16, 2] {
-            let bytes = CanonicalTuple::new(
-                LATTICE_COMMITMENT_PROFILE_SCHEMA_IDENTIFIER,
-                retired_version,
-                vec![
-                    CanonicalItem::unsigned16(selected.commitment_module_rank),
-                    unsigned16_list(&selected.ordered_commitment_data_prime_indexes)
-                        .expect("commitment index list"),
-                ],
-            )
-            .encode()
-            .expect("retired commitment artifact");
-            assert_eq!(
-                LatticeCommitmentProfile::decode(&bytes, &CanonicalDecodeLimits::default())
-                    .expect_err("retired version must refuse")
-                    .refusal_reason,
-                RefusalReason::UnsupportedVersionOrSuite
-            );
-        }
-    }
-
-    #[test]
     fn committed_material_profile_matches_the_selected_common_proof_domain() {
         let profile = CommittedMaterialFieldProfile::selected().expect("selected material profile");
         assert_eq!(profile.proof_field_index, 0);
@@ -724,6 +710,6 @@ mod tests {
         assert_eq!(profile.evaluation_coset_offset, 7);
         assert_eq!(profile.masking_polynomial_maximum_degree, 2_047);
         assert_eq!(profile.committed_polynomial_degree_bound_exclusive, 262_144);
-        assert_eq!(crate::bgv::parameters::POLYNOMIAL_DEGREE, 65_536);
+        assert_eq!(crate::bgv::parameters::POLYNOMIAL_DEGREE, 32_768);
     }
 }

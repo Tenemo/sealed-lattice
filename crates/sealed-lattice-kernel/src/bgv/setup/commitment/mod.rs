@@ -66,6 +66,7 @@ pub(crate) use lattice_anchor::LatticeAnchorCommitment;
 pub(crate) use lattice_anchor::{
     compute_lattice_anchor_commitment, lattice_anchor_commitment_canonical_bytes,
     parse_lattice_anchor_commitment_canonical_bytes,
+    selected_lattice_anchor_commitment_canonical_byte_length,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

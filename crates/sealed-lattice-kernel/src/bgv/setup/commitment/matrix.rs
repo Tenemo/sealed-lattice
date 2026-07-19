@@ -24,13 +24,11 @@ pub(in crate::bgv) fn setup_commitment_matrix_ntt_cache_coefficient_payload_byte
     validate_ring_degree(ring_degree)?;
     let sampled_coordinate_count_per_modulus = (0..SETUP_COMMITMENT_ROW_COUNT)
         .flat_map(|matrix_row_index| {
-            (0..SETUP_COMMITMENT_RANDOMNESS_WIDTH).map(move |randomness_column_index| {
-                (matrix_row_index, randomness_column_index)
-            })
+            (0..SETUP_COMMITMENT_RANDOMNESS_WIDTH)
+                .map(move |randomness_column_index| (matrix_row_index, randomness_column_index))
         })
         .filter(|(matrix_row_index, randomness_column_index)| {
-            structural_matrix_polynomial_kind(*matrix_row_index, *randomness_column_index)
-                .is_none()
+            structural_matrix_polynomial_kind(*matrix_row_index, *randomness_column_index).is_none()
         })
         .count();
     u64::try_from(SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len())
@@ -271,6 +269,16 @@ pub(in super::super) fn structural_matrix_polynomial_kind(
 mod tests {
     use super::*;
     use crate::transcript_core::encode_hex;
+
+    #[test]
+    fn selected_matrix_cache_accounting_matches_the_live_sampled_coordinates() -> CanonicalResult<()>
+    {
+        assert_eq!(
+            setup_commitment_matrix_ntt_cache_coefficient_payload_byte_length(POLYNOMIAL_DEGREE,)?,
+            4_718_592
+        );
+        Ok(())
+    }
 
     #[test]
     fn matrix_sampler_customization_has_the_exact_version_three_encoding() -> CanonicalResult<()> {

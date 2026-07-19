@@ -100,6 +100,35 @@ export type CommonProofGenerationWorkerOptions = Readonly<{
     yieldControl?: () => Promise<void>;
 }>;
 
+/**
+ * Opens browser-owned proof storage only after Rust has fixed the exact
+ * family adapter and exposed its canonical custody bindings. This prevents a
+ * caller from guessing or self-attesting the runtime and attempt namespaces
+ * used for secret scratch, checkpoints, and canonical output.
+ */
+export type CommonProofGenerationExecutionOpener = (
+    description: ClosedWorkerCommonProofGenerationFamilyAdapterDescription,
+) =>
+    | Promise<
+          Readonly<{
+              externalMemory: CommonProofExternalMemoryTransactionExecutor;
+              options?: CommonProofGenerationWorkerOptions;
+              outputStore: CommonProofCanonicalOutputStore;
+          }>
+      >
+    | Readonly<{
+          externalMemory: CommonProofExternalMemoryTransactionExecutor;
+          options?: CommonProofGenerationWorkerOptions;
+          outputStore: CommonProofCanonicalOutputStore;
+      }>;
+
+export type ClosedWorkerGeneratedCommonProofExecution = Readonly<{
+    generatedCapability: ClosedWorkerGeneratedCommonProofCapability;
+    options?: CommonProofGenerationWorkerOptions;
+    outputChunkByteLengths: readonly number[];
+    outputStore: CommonProofCanonicalOutputStore;
+}>;
+
 /** Browser custody transports only the exact range selected by Rust. */
 export type CommonProofAuthenticatedSourceRangeReader = Readonly<{
     readExactRange(
@@ -1120,6 +1149,85 @@ export const runClosedWorkerCommonProofGenerationFamilyAdapterRetainingGenerated
             authenticatedCheckpointState?.fill(0);
             destroyClosedWorkerCommonProofGenerationFamilyAdapterRecord(record);
         }
+    };
+
+/**
+ * Runs one exact-family adapter with storage opened from the adapter's
+ * verifier-derived custody bindings. The returned output shape is observed at
+ * the canonical sink boundary and is therefore suitable for descriptor
+ * derivation without a second proof copy.
+ */
+export const runClosedWorkerCommonProofGenerationFamilyAdapterWithExecutionOpener =
+    async (
+        familyAdapter: ClosedWorkerCommonProofGenerationFamilyAdapter,
+        openExecution: CommonProofGenerationExecutionOpener,
+    ): Promise<ClosedWorkerGeneratedCommonProofExecution> => {
+        const description =
+            describeClosedWorkerCommonProofGenerationFamilyAdapter(
+                familyAdapter,
+            );
+        let execution:
+            | Awaited<ReturnType<CommonProofGenerationExecutionOpener>>
+            | undefined;
+        try {
+            execution = await openExecution(description);
+        } catch (error) {
+            try {
+                releaseClosedWorkerCommonProofGenerationFamilyAdapter(
+                    familyAdapter,
+                );
+            } catch (releaseError) {
+                throw permanentRetirementFailure(
+                    { executionOpenError: error, releaseError },
+                    'Common-proof execution custody could not open and the exact family adapter could not be retired.',
+                );
+            }
+            throw error;
+        } finally {
+            description.checkpointLineageIdentifier.fill(0);
+            description.commonProofGenerationAuthorizationHash.fill(0);
+            description.commonProofRuntimeBindingHash.fill(0);
+            description.proofAttemptLineageIdentifier.fill(0);
+        }
+        const outputChunkByteLengths: number[] = [];
+        const trackedOutputStore: CommonProofCanonicalOutputStore =
+            Object.freeze({
+                commitChunk: async (chunkIndex, chunkBytes) => {
+                    if (chunkIndex !== outputChunkByteLengths.length) {
+                        throw new CommonProofWorkerRuntimeError(
+                            'WrongStorageResult',
+                            'The proof output store received a non-canonical chunk order.',
+                        );
+                    }
+                    await execution.outputStore.commitChunk(
+                        chunkIndex,
+                        chunkBytes,
+                    );
+                    outputChunkByteLengths.push(chunkBytes.byteLength);
+                },
+                readChunk: (chunkIndex, exactByteLength) =>
+                    execution.outputStore.readChunk(
+                        chunkIndex,
+                        exactByteLength,
+                    ),
+            });
+        const generatedCapability =
+            await runClosedWorkerCommonProofGenerationFamilyAdapterRetainingGeneratedCapability(
+                familyAdapter,
+                execution.externalMemory,
+                trackedOutputStore,
+                execution.options,
+            );
+        return Object.freeze({
+            generatedCapability,
+            ...(execution.options === undefined
+                ? {}
+                : { options: execution.options }),
+            outputChunkByteLengths: Object.freeze([
+                ...outputChunkByteLengths,
+            ]),
+            outputStore: execution.outputStore,
+        });
     };
 
 export const runClosedWorkerCommonProofGenerationFamilyAdapter = async (

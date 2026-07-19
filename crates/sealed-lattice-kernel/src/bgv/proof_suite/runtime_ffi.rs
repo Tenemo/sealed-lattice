@@ -54,7 +54,7 @@ const GENERATION_POLL_CANCELLED: u32 = 6;
 const GENERATION_POLL_RESUME_COMPLETE: u32 = 7;
 const GENERATION_POLL_AUTHENTICATED_SOURCE_READ_READY: u32 = 8;
 const AUTHENTICATED_SOURCE_READ_REQUEST_BYTE_LENGTH: usize = 160;
-const GENERATION_EXTERNAL_MEMORY_ACCOUNTING_WORD_COUNT: usize = 19;
+const GENERATION_EXTERNAL_MEMORY_ACCOUNTING_WORD_COUNT: usize = 20;
 const GENERATION_EXTERNAL_MEMORY_ACCOUNTING_BYTE_LENGTH: usize =
     GENERATION_EXTERNAL_MEMORY_ACCOUNTING_WORD_COUNT * size_of::<u64>();
 const VERIFICATION_READBACK_ACCOUNTING_WORD_COUNT: usize = 4;
@@ -77,6 +77,7 @@ fn encode_generation_external_memory_accounting(
         u64::from(requirement.step_count()),
         u64::from(requirement.maximum_chunk_byte_length()),
         requirement.maximum_transaction_payload_byte_length(),
+        u64::from(requirement.distinct_physical_object_count()),
         u64::from(requirement.object_lifecycle_count()),
         requirement.peak_stored_byte_length(),
         requirement.total_written_byte_length(),

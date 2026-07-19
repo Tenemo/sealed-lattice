@@ -1,4 +1,7 @@
-import { foundationProfile } from '@sealed-lattice/types';
+import {
+    foundationProfile,
+    type BrowserActionStorageWorkerKernel,
+} from '@sealed-lattice/types';
 
 import {
     bindAcceptedSetupEvaluatorGeneratedProofsToPackage,
@@ -12,10 +15,6 @@ import {
     requireAcceptedSetupPackageBuilderKernelOwner,
     type AcceptedSetupPackageBuilder,
 } from './accepted-setup-package-builder-runtime.js';
-import {
-    resolveActionRandomnessKernelAuthorization,
-    type ActionRandomnessSession,
-} from './action-randomness-runtime.js';
 import { isUint8Array } from './byte-array.js';
 import {
     canonicalStreamDomains,
@@ -33,31 +32,25 @@ import {
     openClosedWorkerCommonProofVerificationFamilyAdapter,
     releaseClosedWorkerCommonProofGenerationFamilyAdapter,
     releaseClosedWorkerCommonProofVerificationFamilyAdapter,
-    runClosedWorkerCommonProofGenerationFamilyAdapterRetainingGeneratedCapability,
+    runClosedWorkerCommonProofGenerationFamilyAdapterWithExecutionOpener,
     runClosedWorkerCommonProofVerificationFamilyAdapter,
     type AuthenticatedCommonProofInputStore,
     type ClosedWorkerCommonProofGenerationFamilyAdapter,
     type ClosedWorkerCommonProofVerificationFamilyAdapter,
     type ClosedWorkerGeneratedCommonProofCapability,
     type CommonProofCanonicalOutputStore,
-    type CommonProofExternalMemoryTransactionExecutor,
-    type CommonProofGenerationWorkerOptions,
+    type CommonProofGenerationExecutionOpener,
     type CommonProofVerificationWorkerOptions,
     type VerifiedCommonProofCapability,
 } from './common-proof-worker-runtime/runtime.js';
-import {
-    deriveGeneratedCommonProofDescriptor,
-    trackCanonicalCommonProofOutputChunks,
-} from './generated-common-proof-output-runtime.js';
+import { deriveGeneratedCommonProofDescriptor } from './generated-common-proof-output-runtime.js';
+import type { ClosedWorkerProductionOperationIdentifiers } from './local-storage-root-worker-kernel/authorities.js';
+import { withClosedWorkerProductionOperationAuthority } from './local-storage-root-worker-kernel/worker-kernel.js';
 import {
     copySelectedSuiteRecordSourceBytes,
     type SelectedSuiteRecordSource,
 } from './selected-suite-record-source.js';
 import { stateVerifierCapabilityByteLength } from './state-verifier-runtime/contracts.js';
-import {
-    resolveVerifiedStateReservationKernelAuthorization,
-    type VerifiedStateReservation,
-} from './state-verifier-runtime.js';
 import { resolveCommonProofKernelContext } from './transcript-core-bridge/common-proof-kernel-context.js';
 import type { TranscriptCoreKernelCommandRuntime } from './transcript-core-bridge/kernel-runtime.js';
 import type {
@@ -154,13 +147,11 @@ export type EvaluatorAggregateSession = Readonly<{
     copyCanonicalApplicationStatement(): Uint8Array<ArrayBuffer>;
     describeStore(): EvaluatorKeyStoreDescription;
     generate(input: {
-        actionRandomnessSession: ActionRandomnessSession;
         checkpointLineageIdentifier: Uint8Array;
-        externalMemory: CommonProofExternalMemoryTransactionExecutor;
         generationMode: EvaluatorAggregateGenerationMode;
-        options?: CommonProofGenerationWorkerOptions;
-        proofOutputStore: CommonProofCanonicalOutputStore;
-        verifiedReservation: VerifiedStateReservation;
+        openProofGenerationExecution: CommonProofGenerationExecutionOpener;
+        productionOperationIdentifiers: ClosedWorkerProductionOperationIdentifiers;
+        workerKernel: BrowserActionStorageWorkerKernel;
     }): Promise<Uint8Array<ArrayBuffer>>;
     verify(input: {
         options?: CommonProofVerificationWorkerOptions;
@@ -1346,12 +1337,6 @@ const generate = async (
     ) {
         throw new CanonicalStreamRefusalError('wrongTypeOrLength');
     }
-    if (
-        (input.generationMode === 'resumed') !==
-        (input.options?.resume !== undefined)
-    ) {
-        throw new CanonicalStreamRefusalError('wrongContext');
-    }
     requireAcceptedSetupEvaluatorSourceCatalogKernelOwner(
         record.catalog,
         record.kernel,
@@ -1362,38 +1347,6 @@ const generate = async (
     const checkpointLineageIdentifier = requireAttemptIdentifier(
         input.checkpointLineageIdentifier,
     );
-    let actionRandomnessAuthorization: ReturnType<
-        typeof resolveActionRandomnessKernelAuthorization
-    >;
-    let stateAuthorization: ReturnType<
-        typeof resolveVerifiedStateReservationKernelAuthorization
-    >;
-    try {
-        actionRandomnessAuthorization =
-            resolveActionRandomnessKernelAuthorization(
-                input.actionRandomnessSession,
-                record.kernel,
-            );
-        stateAuthorization = resolveVerifiedStateReservationKernelAuthorization(
-            input.verifiedReservation,
-            record.kernel,
-        );
-    } catch (error) {
-        checkpointLineageIdentifier.fill(0);
-        throw error;
-    }
-    if (
-        actionRandomnessAuthorization.context.memory !==
-            record.context.memory ||
-        stateAuthorization.capabilityMemory !== record.context.memory ||
-        stateAuthorization.capabilityPointer <= 0 ||
-        stateAuthorization.capabilityPointer +
-            stateVerifierCapabilityByteLength >
-            record.context.memory.buffer.byteLength
-    ) {
-        checkpointLineageIdentifier.fill(0);
-        throw new CanonicalStreamRefusalError('wrongContext');
-    }
     let familyAdapter:
         | ClosedWorkerCommonProofGenerationFamilyAdapter
         | undefined;
@@ -1403,70 +1356,102 @@ const generate = async (
     let operationFailure: unknown;
     record.phase = 'generating';
     try {
-        const adapterHandle = record.context.runExclusive(
-            'evaluator aggregate generation preparation',
-            () => {
-                const checkpointPointer = memoryBoundary.copy(
-                    checkpointLineageIdentifier,
-                );
-                const statusPointer = memoryBoundary.allocateZeroedWords(1);
-                try {
-                    const prepare =
-                        input.generationMode === 'fresh'
-                            ? record.context.wasmExports
-                                  .sealed_lattice_evaluator_aggregate_prepare_generation
-                            : record.context.wasmExports
-                                  .sealed_lattice_evaluator_aggregate_prepare_resumed_generation;
-                    const handle = prepare(
-                        record.sessionHandle,
-                        actionRandomnessAuthorization.handle,
-                        stateAuthorization.sessionHandle,
-                        stateAuthorization.capabilityPointer,
-                        stateVerifierCapabilityByteLength,
-                        stateAuthorization.reservationHandle,
-                        checkpointPointer,
-                        checkpointLineageIdentifier.byteLength,
-                        statusPointer,
-                    );
-                    const [status] = memoryBoundary.readWords(statusPointer, 1);
-                    statusBoundary.throwIfError(status);
-                    return requireLiveHandle(
-                        handle,
-                        'The evaluator aggregate generation adapter handle',
-                    );
-                } finally {
-                    memoryBoundary.zeroAndDeallocate(
-                        statusPointer,
-                        wasm32WordByteLength,
-                    );
-                    memoryBoundary.zeroAndDeallocate(
-                        checkpointPointer,
-                        checkpointLineageIdentifier.byteLength,
-                    );
-                }
-            },
+        let adapterHandle: number | undefined;
+        await withClosedWorkerProductionOperationAuthority(
+            input.workerKernel,
+            input.productionOperationIdentifiers,
+            (productionOperationAuthority) =>
+                productionOperationAuthority.withExactKernelAuthorization(
+                    (authorization) => {
+                        if (
+                            authorization.kernel !== record.kernel ||
+                            authorization.actionRandomnessContext.memory !==
+                                record.context.memory ||
+                            authorization.stateReservationCapabilityMemory !==
+                                record.context.memory ||
+                            authorization.stateReservationCapabilityPointer <=
+                                0 ||
+                            authorization.stateReservationCapabilityPointer +
+                                    stateVerifierCapabilityByteLength >
+                                record.context.memory.buffer.byteLength
+                        ) {
+                            throw new CanonicalStreamRefusalError(
+                                'wrongContext',
+                            );
+                        }
+                        adapterHandle = record.context.runExclusive(
+                            'evaluator aggregate generation preparation',
+                            () => {
+                                const checkpointPointer = memoryBoundary.copy(
+                                    checkpointLineageIdentifier,
+                                );
+                                const statusPointer =
+                                    memoryBoundary.allocateZeroedWords(1);
+                                try {
+                                    const prepare =
+                                        input.generationMode === 'fresh'
+                                            ? record.context.wasmExports
+                                                  .sealed_lattice_evaluator_aggregate_prepare_generation
+                                            : record.context.wasmExports
+                                                  .sealed_lattice_evaluator_aggregate_prepare_resumed_generation;
+                                    const handle = prepare(
+                                        record.sessionHandle,
+                                        authorization.actionRandomnessHandle,
+                                        authorization.stateVerifierSessionHandle,
+                                        authorization.stateReservationCapabilityPointer,
+                                        stateVerifierCapabilityByteLength,
+                                        authorization.stateReservationHandle,
+                                        checkpointPointer,
+                                        checkpointLineageIdentifier.byteLength,
+                                        statusPointer,
+                                    );
+                                    const [status] =
+                                        memoryBoundary.readWords(
+                                            statusPointer,
+                                            1,
+                                        );
+                                    statusBoundary.throwIfError(status);
+                                    return requireLiveHandle(
+                                        handle,
+                                        'The evaluator aggregate generation adapter handle',
+                                    );
+                                } finally {
+                                    memoryBoundary.zeroAndDeallocate(
+                                        statusPointer,
+                                        wasm32WordByteLength,
+                                    );
+                                    memoryBoundary.zeroAndDeallocate(
+                                        checkpointPointer,
+                                        checkpointLineageIdentifier.byteLength,
+                                    );
+                                }
+                            },
+                        );
+                    },
+                ),
         );
+        if (adapterHandle === undefined) {
+            throw new CanonicalStreamInternalError(
+                'The production operation completed without an evaluator aggregate adapter.',
+            );
+        }
         familyAdapter = openClosedWorkerCommonProofGenerationFamilyAdapter(
             record.context,
             adapterHandle,
         );
-        const trackedOutput = trackCanonicalCommonProofOutputChunks(
-            input.proofOutputStore,
-        );
         const adapterForRun = familyAdapter;
         familyAdapter = undefined;
-        generatedCapability =
-            await runClosedWorkerCommonProofGenerationFamilyAdapterRetainingGeneratedCapability(
+        const execution =
+            await runClosedWorkerCommonProofGenerationFamilyAdapterWithExecutionOpener(
                 adapterForRun,
-                input.externalMemory,
-                trackedOutput.outputStore,
-                input.options,
+                input.openProofGenerationExecution,
             );
+        generatedCapability = execution.generatedCapability;
         const proofDescriptorBytes = await deriveGeneratedCommonProofDescriptor(
             {
                 kernel: record.kernel,
-                outputChunkByteLengths: trackedOutput.outputChunkByteLengths,
-                outputStore: input.proofOutputStore,
+                outputChunkByteLengths: execution.outputChunkByteLengths,
+                outputStore: execution.outputStore,
                 proofFamilyLabel: 'evaluator aggregate',
                 streamDomain: canonicalStreamDomains.evaluatorKeyAggregateProof,
             },

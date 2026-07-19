@@ -222,6 +222,7 @@ pub(crate) struct GaloisKeyShareEntrySourceLayout {
     pub(super) schedule_position: u32,
     pub(super) galois_element: u64,
     pub(super) selected_level: usize,
+    pub(super) relation_geometry: TrusteeEvaluationKeyRelationGeometry,
     pub(super) automorphed_secret: ShiftedSmallVector,
     pub(super) bound_rows: Box<[SplitIntegerVector]>,
     pub(super) errors_by_block: Box<[ShiftedSmallVector]>,
@@ -238,6 +239,55 @@ pub(crate) struct GaloisKeyShareAnchorSourceLayout {
 }
 
 impl TrusteeEvaluationKeyRelationGeometry {
+    pub(crate) fn selected_catalog_prefix(
+        &self,
+        catalog_level: usize,
+    ) -> Result<Self, RelationPlanError> {
+        let topology = KeySwitchDecompositionTopology::for_level(catalog_level)
+            .map_err(|_| RelationPlanError::InvalidDomain)?;
+        let data_modulus_count = topology.data_prime_count();
+        let selected_data_moduli = self
+            .data_moduli
+            .get(..data_modulus_count)
+            .ok_or(RelationPlanError::InvalidModulus)?;
+        let selected_special_moduli = topology
+            .extended_moduli()
+            .get(data_modulus_count..)
+            .ok_or(RelationPlanError::InvalidModulus)?;
+        if selected_data_moduli != topology.active_data_moduli()
+            || self.special_moduli != selected_special_moduli
+        {
+            return Err(RelationPlanError::InvalidModulus);
+        }
+        let decomposition_blocks = (0..topology.data_block_count())
+            .map(|block_index| {
+                Ok(TrusteeEvaluationKeyDecompositionBlock {
+                    data_modulus_indices: topology
+                        .data_block_range(block_index)
+                        .map_err(|_| RelationPlanError::InvalidDomain)?
+                        .map(|modulus_index| {
+                            u16::try_from(modulus_index)
+                                .map_err(|_| RelationPlanError::CountOverflow)
+                        })
+                        .collect::<Result<Vec<_>, _>>()?,
+                })
+            })
+            .collect::<Result<Vec<_>, RelationPlanError>>()?;
+        Ok(Self {
+            ring_degree: self.ring_degree,
+            evaluation_domain_size: self.evaluation_domain_size,
+            opening_degree_bound_exclusive: self.opening_degree_bound_exclusive,
+            public_polynomial_column_degree_bound_exclusive: self
+                .public_polynomial_column_degree_bound_exclusive,
+            data_moduli: selected_data_moduli.to_vec(),
+            special_moduli: self.special_moduli.clone(),
+            plaintext_modulus: self.plaintext_modulus,
+            decomposition_blocks,
+            commitment_data_modulus_indices: self.commitment_data_modulus_indices.clone(),
+            commitment_module_rank: self.commitment_module_rank,
+        })
+    }
+
     fn validate_common(
         &self,
         check_context: &RelationPlanCheckContext,
@@ -1237,9 +1287,39 @@ fn compile_galois_key_share_relation_batch(
             return Err(RelationPlanError::InvalidDomain);
         }
     }
+    let maximum_selected_level = input
+        .ordered_entries
+        .iter()
+        .map(|entry| entry.selected_level)
+        .max()
+        .ok_or(RelationPlanError::InvalidDomain)?;
+    if input
+        .geometry
+        .selected_catalog_prefix(maximum_selected_level)?
+        != input.geometry
+    {
+        return Err(RelationPlanError::InvalidDomain);
+    }
+    let entry_geometries = input
+        .ordered_entries
+        .iter()
+        .map(|entry| {
+            let geometry = input
+                .geometry
+                .selected_catalog_prefix(entry.selected_level)?;
+            geometry.validate_common(check_context)?;
+            geometry.validate_round_one_quotient_bounds()?;
+            Ok(geometry)
+        })
+        .collect::<Result<Vec<_>, RelationPlanError>>()?;
 
     let mut sources = Vec::new();
-    for (entry_ordinal, entry) in input.ordered_entries.iter().enumerate() {
+    for (entry_ordinal, (entry, entry_geometry)) in input
+        .ordered_entries
+        .iter()
+        .zip(&entry_geometries)
+        .enumerate()
+    {
         let entry_ordinal =
             u64::try_from(entry_ordinal).map_err(|_| RelationPlanError::CountOverflow)?;
         sources.push(nested_statement_root_source(
@@ -1249,7 +1329,7 @@ fn compile_galois_key_share_relation_batch(
         ));
         append_galois_relation_sources(
             &mut sources,
-            &input.geometry,
+            entry_geometry,
             entry.schedule_position,
             entry.galois_element,
         )?;
@@ -1268,7 +1348,12 @@ fn compile_galois_key_share_relation_batch(
     let relation_started = std::time::Instant::now();
     let secret = builder.add_reversible_signed_ternary_vector()?;
     let mut entry_source_layouts = Vec::with_capacity(input.ordered_entries.len());
-    for (entry_ordinal, entry) in input.ordered_entries.iter().enumerate() {
+    for (entry_ordinal, (entry, entry_geometry)) in input
+        .ordered_entries
+        .iter()
+        .zip(entry_geometries)
+        .enumerate()
+    {
         #[cfg(test)]
         let entry_started = std::time::Instant::now();
         let automorphed_secret = builder.add_signed_ternary_vector()?;
@@ -1283,7 +1368,7 @@ fn compile_galois_key_share_relation_batch(
         )?;
         let galois_key_share_source_rows = add_statement_root_rows(
             &mut builder,
-            &input.geometry,
+            &entry_geometry,
             &nested_statement_root_key(
                 GALOIS_KEY_SHARE_ROOT_FIELD_ORDINAL,
                 u64::try_from(entry_ordinal).map_err(|_| RelationPlanError::CountOverflow)?,
@@ -1293,7 +1378,7 @@ fn compile_galois_key_share_relation_batch(
         )?;
         let (errors_by_block, quotients_by_row) = add_galois_relations(
             &mut builder,
-            &input.geometry,
+            &entry_geometry,
             entry.schedule_position,
             &galois_key_share_source_rows,
             &secret,
@@ -1304,6 +1389,7 @@ fn compile_galois_key_share_relation_batch(
             schedule_position: entry.schedule_position,
             galois_element: entry.galois_element,
             selected_level: entry.selected_level,
+            relation_geometry: entry_geometry,
             automorphed_secret,
             bound_rows: galois_key_share_source_rows.into_boxed_slice(),
             errors_by_block,
@@ -1348,6 +1434,30 @@ fn compile_galois_key_share_relation_batch(
 }
 
 #[cfg(test)]
+pub(crate) fn compile_galois_key_share_relation_topology_comparison(
+    input: &GaloisKeyShareRelationPlanInput,
+    check_context: &RelationPlanCheckContext,
+) -> Result<CompiledGaloisKeyShareRelation, RelationPlanError> {
+    let expected_entries = input
+        .ordered_entries
+        .iter()
+        .map(|entry| {
+            (
+                entry.schedule_position,
+                entry.galois_element,
+                entry.selected_level,
+            )
+        })
+        .collect::<Vec<_>>();
+    compile_galois_key_share_relation_batch(
+        input,
+        check_context,
+        input.batch_schedule_position,
+        &expected_entries,
+    )
+}
+
+#[cfg(test)]
 mod tests {
     use std::collections::{BTreeMap, BTreeSet};
 
@@ -1370,7 +1480,7 @@ mod tests {
     };
     use super::*;
     use crate::bgv::{
-        evaluator::top_k::DIRECT_COMPARISON_OUTPUT_LEVEL,
+        evaluator::top_k::{SCATTER_KEY_LEVEL, TRACE_KEY_LEVEL},
         parameters::{DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE, SPECIAL_PRIMES},
     };
     fn check_context() -> RelationPlanCheckContext {
@@ -1413,29 +1523,22 @@ mod tests {
         }
     }
 
-    fn selected_uniform_galois_catalog_level(
+    fn selected_galois_relation_geometry_level(
         evaluator_candidate: &EvaluatorCandidateInput,
     ) -> usize {
-        let catalog_level = evaluator_candidate
+        evaluator_candidate
             .galois_key_schedule
-            .first()
+            .iter()
             .map(|(_, catalog_level)| *catalog_level)
-            .expect("the selected Galois catalog is nonempty");
-        assert!(
-            evaluator_candidate
-                .galois_key_schedule
-                .iter()
-                .all(|(_, candidate_level)| *candidate_level == catalog_level),
-            "the selected Galois batch has one exact catalog level"
-        );
-        catalog_level
+            .max()
+            .expect("the selected Galois catalog is nonempty")
     }
 
     fn galois_input() -> GaloisKeyShareRelationPlanInput {
         let evaluator_candidate = EvaluatorCandidateInput::implemented()
             .expect("selected evaluator candidate is canonical");
-        let selected_level = selected_uniform_galois_catalog_level(&evaluator_candidate);
-        assert_eq!(selected_level, DIRECT_COMPARISON_OUTPUT_LEVEL);
+        let selected_level = selected_galois_relation_geometry_level(&evaluator_candidate);
+        assert_eq!(selected_level, TRACE_KEY_LEVEL);
         let relation_basis = trustee_evaluation_key_relation_basis_for_catalog_level(
             &evaluator_candidate,
             selected_level,
@@ -1491,9 +1594,15 @@ mod tests {
         else {
             panic!("the selected suite has exactly one relinearization catalog position");
         };
-        assert_eq!(evaluator_candidate.galois_key_schedule.len(), 3);
-        let galois_catalog_level = selected_uniform_galois_catalog_level(&evaluator_candidate);
-        assert_eq!(galois_catalog_level, DIRECT_COMPARISON_OUTPUT_LEVEL);
+        assert_eq!(evaluator_candidate.galois_key_schedule.len(), 6);
+        assert_eq!(
+            evaluator_candidate
+                .galois_key_schedule
+                .iter()
+                .map(|(_, level)| *level)
+                .collect::<BTreeSet<_>>(),
+            BTreeSet::from([SCATTER_KEY_LEVEL, TRACE_KEY_LEVEL]),
+        );
         assert_eq!(
             evaluator_candidate
                 .galois_key_schedule
@@ -1510,15 +1619,26 @@ mod tests {
             *relinearization_catalog_level,
         )
         .expect("selected relinearization relation basis");
-        let galois_basis = trustee_evaluation_key_relation_basis_for_catalog_level(
-            &evaluator_candidate,
-            galois_catalog_level,
-        )
-        .expect("selected Galois relation basis");
-        for (catalog_level, basis) in [
-            (*relinearization_catalog_level, relinearization_basis),
-            (galois_catalog_level, galois_basis),
-        ] {
+        let mut family_bases = vec![(*relinearization_catalog_level, relinearization_basis)];
+        family_bases.extend(
+            evaluator_candidate
+                .galois_key_schedule
+                .iter()
+                .map(|(_, catalog_level)| *catalog_level)
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .map(|catalog_level| {
+                    (
+                        catalog_level,
+                        trustee_evaluation_key_relation_basis_for_catalog_level(
+                            &evaluator_candidate,
+                            catalog_level,
+                        )
+                        .expect("selected Galois relation basis"),
+                    )
+                }),
+        );
+        for (catalog_level, basis) in family_bases {
             assert_eq!(basis.data_moduli.len(), catalog_level + 1);
             assert_eq!(
                 basis.data_moduli,
@@ -1879,8 +1999,36 @@ mod tests {
             .into_iter()
             .map(|(galois_element, _)| galois_element)
             .collect::<Vec<_>>();
-        let plan = compile_galois_key_share_relation_plan(&input, &context)
+        let compiled = compile_galois_key_share_relation_with_source_layout(&input, &context)
             .expect("exact Galois-key-share relation plan");
+        let plan = compiled.relation_plan;
+        assert_eq!(
+            compiled
+                .source_layout
+                .ordered_entries
+                .iter()
+                .map(|entry| (
+                    entry.selected_level,
+                    entry.relation_geometry.data_moduli.len(),
+                    entry.relation_geometry.decomposition_blocks.len(),
+                ))
+                .collect::<Vec<_>>(),
+            input
+                .ordered_entries
+                .iter()
+                .map(|entry| {
+                    let entry_geometry = input
+                        .geometry
+                        .selected_catalog_prefix(entry.selected_level)
+                        .expect("selected entry geometry");
+                    (
+                        entry.selected_level,
+                        entry_geometry.data_moduli.len(),
+                        entry_geometry.decomposition_blocks.len(),
+                    )
+                })
+                .collect::<Vec<_>>()
+        );
         assert_eq!(
             plan.application_statement_schema_identifier(),
             GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER
@@ -2086,6 +2234,12 @@ mod tests {
                 panic!("the leading Galois trees must be statement-bound");
             };
             if bound_tree_ordinal < entry_count {
+                let entry_geometry = input
+                    .geometry
+                    .selected_catalog_prefix(
+                        input.ordered_entries[bound_tree_ordinal].selected_level,
+                    )
+                    .expect("selected entry geometry");
                 assert_eq!(
                     *expected_root_source_ordinal,
                     u32::try_from(bound_tree_ordinal + anchor_count)
@@ -2094,8 +2248,8 @@ mod tests {
                 assert_eq!(*root_use, BoundTreeRootUse::Output);
                 assert_eq!(
                     ordered_column_ordinals.len(),
-                    2 * input.geometry.decomposition_blocks.len()
-                        * (input.geometry.data_moduli.len() + input.geometry.special_moduli.len())
+                    2 * entry_geometry.decomposition_blocks.len()
+                        * (entry_geometry.data_moduli.len() + entry_geometry.special_moduli.len())
                 );
             } else {
                 assert_eq!(
@@ -2154,14 +2308,23 @@ mod tests {
                 common_reference_count_by_schedule_position[schedule_position] += 1;
             }
         }
-        let selected_modulus_count = input
-            .geometry
-            .ordered_modulus_references()
-            .expect("selected modulus order")
-            .len();
         assert_eq!(
             common_reference_count_by_schedule_position,
-            vec![input.geometry.decomposition_blocks.len() * selected_modulus_count; entry_count]
+            input
+                .ordered_entries
+                .iter()
+                .map(|entry| {
+                    let entry_geometry = input
+                        .geometry
+                        .selected_catalog_prefix(entry.selected_level)
+                        .expect("selected entry geometry");
+                    entry_geometry.decomposition_blocks.len()
+                        * entry_geometry
+                            .ordered_modulus_references()
+                            .expect("selected modulus order")
+                            .len()
+                })
+                .collect::<Vec<_>>()
         );
 
         let mut even_automorphism = input.clone();

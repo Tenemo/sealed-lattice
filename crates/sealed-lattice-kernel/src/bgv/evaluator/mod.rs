@@ -24,6 +24,7 @@ macro_rules! evaluator_parallel_iterator {
     };
 }
 
+#[cfg(test)]
 pub(crate) mod prg;
 
 pub(crate) mod ballot_aggregation;
@@ -36,6 +37,3 @@ pub(crate) mod program;
 pub(crate) mod records;
 pub(crate) mod replay;
 pub(crate) mod top_k;
-
-#[cfg(test)]
-mod stochastic_modulus_down;

@@ -130,6 +130,7 @@ export const createStateVerifierTestVector = (
         actionContextHash?: Uint8Array;
         ceremonyContextHash?: Uint8Array;
         setupActionRandomnessAuthorizationHash?: Uint8Array;
+        subjectRosterPosition?: number;
         suiteIdentifier?: Uint8Array;
     } = {},
 ): StateVerifierTestVector => {
@@ -147,6 +148,16 @@ export const createStateVerifierTestVector = (
                 `The ${fieldName} value must contain exactly 64 bytes.`,
             );
         }
+    }
+    const subjectRosterPosition = input.subjectRosterPosition ?? 0;
+    if (
+        !Number.isSafeInteger(subjectRosterPosition) ||
+        subjectRosterPosition < 0 ||
+        subjectRosterPosition >= foundationProfile.participantCount
+    ) {
+        throw new TypeError(
+            'The subjectRosterPosition value must name one participant in the fixed roster.',
+        );
     }
     const signingKeyPairs = createCanonicalCarrierSigningKeyPairFixtures(
         foundationProfile.participantCount,
@@ -178,6 +189,25 @@ export const createStateVerifierTestVector = (
                 canonicalItem(0x01, publicKey),
             ),
         );
+        const stateWitnessRosterPositions = Array.from(
+            { length: foundationProfile.participantCount },
+            (_unused, rosterPosition) => rosterPosition,
+        )
+            .filter(
+                (rosterPosition) =>
+                    rosterPosition !== subjectRosterPosition,
+            )
+            .slice(0, foundationProfile.stateWitnessQuorum);
+        const witnessRosterPosition = stateWitnessRosterPositions[0];
+        if (
+            stateWitnessRosterPositions.length !==
+                foundationProfile.stateWitnessQuorum ||
+            witnessRosterPosition === undefined
+        ) {
+            throw new Error(
+                'The deterministic state vector could not select its fixed-roster witnesses.',
+            );
+        }
 
         const signedCarrier = (carrierInput: {
             objectType: number;
@@ -262,7 +292,7 @@ export const createStateVerifierTestVector = (
                 unsigned16Item(targetReleaseCapabilityKind),
                 hashItem(authorizationHash),
             ),
-            producerRosterPosition: 0,
+            producerRosterPosition: subjectRosterPosition,
             producerSequence: 0n,
             signaturePurpose: 'state-reservation-intent',
         });
@@ -271,11 +301,11 @@ export const createStateVerifierTestVector = (
             canonicalStateCertificate: certificateFor(
                 reservationCarrier.objectHash,
                 1n,
-                [1, 2, 3, 4, 5, 6, 7],
+                stateWitnessRosterPositions,
             ),
             objectHash: reservationCarrier.objectHash,
         };
-        const reservationVoteCarriers = [1, 2, 3, 4, 5, 6, 7].map(
+        const reservationVoteCarriers = stateWitnessRosterPositions.map(
             (producerRosterPosition) =>
                 signedCarrier({
                     objectType: stateWitnessVoteObjectType,
@@ -297,7 +327,7 @@ export const createStateVerifierTestVector = (
                 unsigned16Item(targetReleaseCapabilityKind),
                 hashItem(conflictingAuthorizationHash),
             ),
-            producerRosterPosition: 0,
+            producerRosterPosition: subjectRosterPosition,
             producerSequence: 0n,
             signaturePurpose: 'state-reservation-intent',
         });
@@ -307,7 +337,7 @@ export const createStateVerifierTestVector = (
             canonicalStateCertificate: certificateFor(
                 conflictingReservationCarrier.objectHash,
                 1n,
-                [1, 2, 3, 4, 5, 6, 7],
+                stateWitnessRosterPositions,
             ),
             objectHash: conflictingReservationCarrier.objectHash,
         };
@@ -328,7 +358,7 @@ export const createStateVerifierTestVector = (
                     unsigned16Item(capabilityKind),
                     hashItem(reservationAuthorizationHash),
                 ),
-                producerRosterPosition: 0,
+                producerRosterPosition: subjectRosterPosition,
                 producerSequence: 0n,
                 signaturePurpose: 'state-reservation-intent',
             });
@@ -339,7 +369,7 @@ export const createStateVerifierTestVector = (
                     canonicalStateCertificate: certificateFor(
                         carrier.objectHash,
                         1n,
-                        [1, 2, 3, 4, 5, 6, 7],
+                        stateWitnessRosterPositions,
                     ),
                     objectHash: carrier.objectHash,
                 },
@@ -368,7 +398,7 @@ export const createStateVerifierTestVector = (
                     ),
                 ),
             ),
-            producerRosterPosition: 0,
+            producerRosterPosition: subjectRosterPosition,
             producerSequence: 0n,
             signaturePurpose: 'state-output-intent',
         });
@@ -377,14 +407,24 @@ export const createStateVerifierTestVector = (
             canonicalStateCertificate: certificateFor(
                 outputCarrier.objectHash,
                 2n,
-                [1, 2, 3, 4, 5, 6, 7],
+                stateWitnessRosterPositions,
             ),
             objectHash: outputCarrier.objectHash,
         };
         const invalidExtraOutputCertificate = certificateFor(
             outputCarrier.objectHash,
             2n,
-            [1, 2, 3, 4, 5, 6, 7, 8],
+            [
+                ...stateWitnessRosterPositions,
+                ...Array.from(
+                    { length: foundationProfile.participantCount },
+                    (_unused, rosterPosition) => rosterPosition,
+                ).filter(
+                    (rosterPosition) =>
+                        rosterPosition !== subjectRosterPosition &&
+                        !stateWitnessRosterPositions.includes(rosterPosition),
+                ),
+            ].slice(0, foundationProfile.stateWitnessQuorum + 1),
             true,
         );
 
@@ -401,9 +441,11 @@ export const createStateVerifierTestVector = (
             reservationVoteCarriers,
             reservationOnly,
             rosterHash,
-            subjectParticipantIdentity: participantIdentities[0],
+            subjectParticipantIdentity:
+                participantIdentities[subjectRosterPosition],
             suiteIdentifier,
-            witnessParticipantIdentity: participantIdentities[1],
+            witnessParticipantIdentity:
+                participantIdentities[witnessRosterPosition],
         };
     } finally {
         for (const { secretKey } of signingKeyPairs) {

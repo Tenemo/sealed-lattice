@@ -45,7 +45,7 @@ impl<'context> KeyRelationPlanBuilder<'context> {
                     self.geometry
                         .public_polynomial_column_degree_bound_exclusive,
                     Some(modulus_reference),
-                    Some(ProofTreePhase::Base),
+                    None,
                 )?,
             );
         }
@@ -80,7 +80,7 @@ impl<'context> KeyRelationPlanBuilder<'context> {
                     self.geometry
                         .public_polynomial_column_degree_bound_exclusive,
                     None,
-                    Some(ProofTreePhase::Base),
+                    None,
                 )?,
             );
         }
@@ -120,7 +120,7 @@ impl<'context> KeyRelationPlanBuilder<'context> {
                     },
                     trace_domain_size,
                     None,
-                    Some(ProofTreePhase::Base),
+                    None,
                 )?,
             );
         }

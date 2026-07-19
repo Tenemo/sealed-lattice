@@ -1,9 +1,8 @@
-import { refusalReasonCodes } from '@sealed-lattice/types';
-
 import {
-    resolveActionRandomnessKernelAuthorization,
-    type ActionRandomnessSession,
-} from './action-randomness-runtime.js';
+    refusalReasonCodes,
+    type BrowserActionStorageWorkerKernel,
+} from '@sealed-lattice/types';
+
 import { isUint8Array } from './byte-array.js';
 import { type VerifiedTranscriptObject } from './canonical-board-runtime.js';
 import {
@@ -16,25 +15,18 @@ import {
     applyClosedWorkerGeneratedCommonProofCapability,
     openClosedWorkerCommonProofGenerationFamilyAdapter,
     releaseClosedWorkerCommonProofGenerationFamilyAdapter,
-    runClosedWorkerCommonProofGenerationFamilyAdapterRetainingGeneratedCapability,
-    type CommonProofCanonicalOutputStore,
-    type CommonProofExternalMemoryTransactionExecutor,
-    type CommonProofGenerationWorkerOptions,
+    runClosedWorkerCommonProofGenerationFamilyAdapterWithExecutionOpener,
     type ClosedWorkerCommonProofGenerationFamilyAdapter,
     type ClosedWorkerGeneratedCommonProofCapability,
+    type CommonProofGenerationExecutionOpener,
 } from './common-proof-worker-runtime/runtime.js';
-import {
-    deriveGeneratedCommonProofDescriptor,
-    trackCanonicalCommonProofOutputChunks,
-} from './generated-common-proof-output-runtime.js';
+import { deriveGeneratedCommonProofDescriptor } from './generated-common-proof-output-runtime.js';
+import type { ClosedWorkerProductionOperationIdentifiers } from './local-storage-root-worker-kernel/authorities.js';
+import { withClosedWorkerProductionOperationAuthority } from './local-storage-root-worker-kernel/worker-kernel.js';
 import {
     resolveSetupGenerationAuthorityKernelAuthorization,
     type BrowserOwnedSetupGenerationAuthority,
 } from './setup-generation-recipient-payload.js';
-import {
-    resolveVerifiedStateReservationKernelAuthorization,
-    type VerifiedStateReservation,
-} from './state-verifier-runtime.js';
 import { resolveCommonProofKernelContext } from './transcript-core-bridge/common-proof-kernel-context.js';
 import type { TranscriptCoreKernelCommandRuntime } from './transcript-core-bridge/kernel-runtime.js';
 import type {
@@ -299,20 +291,18 @@ const resolveVerifiedBoardCatalogAuthorization = (input: {
  * record, and verify that record in the same worker.
  */
 export const generateVssShareLinkageInClosedWorker = async (input: {
-    actionRandomnessSession: ActionRandomnessSession;
     canonicalSuiteRecordBytes: Uint8Array;
     checkpointLineageIdentifier: Uint8Array;
-    externalMemory: CommonProofExternalMemoryTransactionExecutor;
     generationMode: VssShareLinkageGenerationMode;
     kernel: TranscriptCoreKernel;
-    options?: CommonProofGenerationWorkerOptions;
-    outputStore: CommonProofCanonicalOutputStore;
+    openProofGenerationExecution: CommonProofGenerationExecutionOpener;
+    productionOperationIdentifiers: ClosedWorkerProductionOperationIdentifiers;
     resolveVerifiedBoardCatalog(input: {
         proofDescriptorBytes: Uint8Array<ArrayBuffer>;
     }): Promise<VerifiedVssShareLinkageBoardCatalog>;
     setupGenerationAuthority: BrowserOwnedSetupGenerationAuthority;
     setupIntentObject: VerifiedTranscriptObject;
-    verifiedReservation: VerifiedStateReservation;
+    workerKernel: BrowserActionStorageWorkerKernel;
 }): Promise<void> => {
     if (typeof globalThis.document !== 'undefined') {
         throw new CanonicalStreamInternalError(
@@ -339,20 +329,10 @@ export const generateVssShareLinkageInClosedWorker = async (input: {
         input.checkpointLineageIdentifier,
         attemptIdentifierByteLength,
     );
-    const actionRandomnessAuthorization =
-        resolveActionRandomnessKernelAuthorization(
-            input.actionRandomnessSession,
-            input.kernel,
-        );
     const setupGenerationAuthorization =
         resolveSetupGenerationAuthorityKernelAuthorization(
             input.setupGenerationAuthority,
             context,
-        );
-    const stateAuthorization =
-        resolveVerifiedStateReservationKernelAuthorization(
-            input.verifiedReservation,
-            input.kernel,
         );
     const setupIntentAuthorization =
         resolveOrderedVerifiedBoardObjectAuthorization({
@@ -361,18 +341,6 @@ export const generateVssShareLinkageInClosedWorker = async (input: {
             kernel: input.kernel,
             objects: [input.setupIntentObject],
         });
-    requireSameWorkerAuthorization({
-        capabilityMemory: stateAuthorization.capabilityMemory,
-        capabilityPointer: stateAuthorization.capabilityPointer,
-        context,
-        label: 'The state-verifier reservation authority',
-    });
-    if (actionRandomnessAuthorization.context.memory !== context.memory) {
-        throw new CanonicalStreamInternalError(
-            'The action-randomness session belongs to another WASM worker.',
-        );
-    }
-
     let boardBindingSourceHandle = 0;
     let familyAdapter:
         | ClosedWorkerCommonProofGenerationFamilyAdapter
@@ -390,66 +358,110 @@ export const generateVssShareLinkageInClosedWorker = async (input: {
     let operationFailed = false;
     let operationFailure: unknown;
     try {
-        const prepared = context.runExclusive(
-            'VSS generation preparation',
-            () => {
-                const checkpointPointer = memoryBoundary.copy(
-                    checkpointLineageIdentifier,
-                );
-                const metadataPointer = memoryBoundary.allocateZeroedWords(2);
-                try {
-                    const prepare =
-                        input.generationMode === 'fresh'
-                            ? kernel.prepareGeneration
-                            : kernel.prepareResumedGeneration;
-                    const adapterHandle = prepare(
-                        selectedSuiteHandle,
-                        setupGenerationAuthorization.handle,
-                        actionRandomnessAuthorization.handle,
-                        stateAuthorization.sessionHandle,
-                        stateAuthorization.capabilityPointer,
-                        verifierCapabilityByteLength,
-                        stateAuthorization.reservationHandle,
-                        setupIntentAuthorization.sessionHandle,
-                        setupIntentAuthorization.capabilityPointer,
-                        verifierCapabilityByteLength,
-                        new DataView(
-                            setupIntentAuthorization.handleBytes.buffer,
-                            setupIntentAuthorization.handleBytes.byteOffset,
-                            setupIntentAuthorization.handleBytes.byteLength,
-                        ).getUint32(0, true),
-                        checkpointPointer,
-                        checkpointLineageIdentifier.byteLength,
-                        metadataPointer,
-                        metadataPointer + wasm32WordByteLength,
-                    );
-                    const [sourceHandle, status] = memoryBoundary.readWords(
-                        metadataPointer,
-                        2,
-                    );
-                    statusBoundary.throwIfError(status);
-                    return Object.freeze({
-                        adapterHandle: requireLiveHandle(
-                            adapterHandle,
-                            'The VSS generation family-adapter handle',
-                        ),
-                        boardBindingSourceHandle: requireLiveHandle(
-                            sourceHandle,
-                            'The VSS generation board-binding source handle',
-                        ),
-                    });
-                } finally {
-                    memoryBoundary.zeroAndDeallocate(
-                        metadataPointer,
-                        wasm32WordByteLength * 2,
-                    );
-                    memoryBoundary.zeroAndDeallocate(
-                        checkpointPointer,
-                        checkpointLineageIdentifier.byteLength,
-                    );
-                }
-            },
+        let prepared:
+            | Readonly<{
+                  adapterHandle: number;
+                  boardBindingSourceHandle: number;
+              }>
+            | undefined;
+        await withClosedWorkerProductionOperationAuthority(
+            input.workerKernel,
+            input.productionOperationIdentifiers,
+            (productionOperationAuthority) =>
+                productionOperationAuthority.withExactKernelAuthorization(
+                    (authorization) => {
+                        if (authorization.kernel !== input.kernel) {
+                            throw new CanonicalStreamInternalError(
+                                'The production operation belongs to another WASM worker.',
+                            );
+                        }
+                        requireSameWorkerAuthorization({
+                            capabilityMemory:
+                                authorization.stateReservationCapabilityMemory,
+                            capabilityPointer:
+                                authorization.stateReservationCapabilityPointer,
+                            context,
+                            label: 'The state-verifier reservation authority',
+                        });
+                        if (
+                            authorization.actionRandomnessContext.memory !==
+                            context.memory
+                        ) {
+                            throw new CanonicalStreamInternalError(
+                                'The action-randomness authority belongs to another WASM worker.',
+                            );
+                        }
+                        prepared = context.runExclusive(
+                            'VSS generation preparation',
+                            () => {
+                                const checkpointPointer = memoryBoundary.copy(
+                                    checkpointLineageIdentifier,
+                                );
+                                const metadataPointer =
+                                    memoryBoundary.allocateZeroedWords(2);
+                                try {
+                                    const prepare =
+                                        input.generationMode === 'fresh'
+                                            ? kernel.prepareGeneration
+                                            : kernel.prepareResumedGeneration;
+                                    const adapterHandle = prepare(
+                                        selectedSuiteHandle,
+                                        setupGenerationAuthorization.handle,
+                                        authorization.actionRandomnessHandle,
+                                        authorization.stateVerifierSessionHandle,
+                                        authorization.stateReservationCapabilityPointer,
+                                        verifierCapabilityByteLength,
+                                        authorization.stateReservationHandle,
+                                        setupIntentAuthorization.sessionHandle,
+                                        setupIntentAuthorization.capabilityPointer,
+                                        verifierCapabilityByteLength,
+                                        new DataView(
+                                            setupIntentAuthorization.handleBytes.buffer,
+                                            setupIntentAuthorization.handleBytes.byteOffset,
+                                            setupIntentAuthorization.handleBytes.byteLength,
+                                        ).getUint32(0, true),
+                                        checkpointPointer,
+                                        checkpointLineageIdentifier.byteLength,
+                                        metadataPointer,
+                                        metadataPointer + wasm32WordByteLength,
+                                    );
+                                    const [sourceHandle, status] =
+                                        memoryBoundary.readWords(
+                                            metadataPointer,
+                                            2,
+                                        );
+                                    statusBoundary.throwIfError(status);
+                                    return Object.freeze({
+                                        adapterHandle: requireLiveHandle(
+                                            adapterHandle,
+                                            'The VSS generation family-adapter handle',
+                                        ),
+                                        boardBindingSourceHandle:
+                                            requireLiveHandle(
+                                                sourceHandle,
+                                                'The VSS generation board-binding source handle',
+                                            ),
+                                    });
+                                } finally {
+                                    memoryBoundary.zeroAndDeallocate(
+                                        metadataPointer,
+                                        wasm32WordByteLength * 2,
+                                    );
+                                    memoryBoundary.zeroAndDeallocate(
+                                        checkpointPointer,
+                                        checkpointLineageIdentifier.byteLength,
+                                    );
+                                }
+                            },
+                        );
+                    },
+                ),
         );
+        if (prepared === undefined) {
+            throw new CanonicalStreamInternalError(
+                'The production operation completed without a proof-family adapter.',
+            );
+        }
         boardBindingSourceHandle = prepared.boardBindingSourceHandle;
         familyAdapter = openClosedWorkerCommonProofGenerationFamilyAdapter(
             context,
@@ -466,21 +478,17 @@ export const generateVssShareLinkageInClosedWorker = async (input: {
 
         const adapterForRun = familyAdapter;
         familyAdapter = undefined;
-        const trackedOutput = trackCanonicalCommonProofOutputChunks(
-            input.outputStore,
-        );
-        generatedCapability =
-            await runClosedWorkerCommonProofGenerationFamilyAdapterRetainingGeneratedCapability(
+        const execution =
+            await runClosedWorkerCommonProofGenerationFamilyAdapterWithExecutionOpener(
                 adapterForRun,
-                input.externalMemory,
-                trackedOutput.outputStore,
-                input.options,
+                input.openProofGenerationExecution,
             );
+        generatedCapability = execution.generatedCapability;
         const proofDescriptorBytes = await deriveGeneratedCommonProofDescriptor(
             {
                 kernel: input.kernel,
-                outputChunkByteLengths: trackedOutput.outputChunkByteLengths,
-                outputStore: input.outputStore,
+                outputChunkByteLengths: execution.outputChunkByteLengths,
+                outputStore: execution.outputStore,
                 proofFamilyLabel: 'VSS share-linkage',
                 streamDomain: canonicalStreamDomains.dealerVssShareLinkageProof,
             },

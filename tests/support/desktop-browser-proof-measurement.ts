@@ -399,6 +399,13 @@ const yieldBrowserTurn = (): Promise<void> =>
 
 export const beginDesktopBrowserProofMeasurement = (input: {
     caseIdentifier: string;
+    /**
+     * A dedicated worker can return the parsed record to its owning test and
+     * let that one reporter-visible realm emit it. This prevents the same
+     * operation from being recorded twice when browser tooling forwards
+     * worker console output.
+     */
+    emitConsoleEvent?: boolean;
     executionKind: DesktopBrowserProofExecutionKind;
     memoryReaders: MemoryReaders;
     runOrdinal: number;
@@ -525,9 +532,11 @@ export const beginDesktopBrowserProofMeasurement = (input: {
                 wasmLinearMemoryStartByteLength:
                     start.wasmLinearMemoryByteLength,
             });
-            console.info(
-                `${desktopBrowserProofMeasurementConsolePrefix}${JSON.stringify(record)}`,
-            );
+            if (input.emitConsoleEvent !== false) {
+                console.info(
+                    `${desktopBrowserProofMeasurementConsolePrefix}${JSON.stringify(record)}`,
+                );
+            }
             return record;
         },
         sample,

@@ -10,7 +10,6 @@ import {
     beginCollectivePublicKeyAggregate,
     type CollectivePublicKeyParticipantSource,
 } from '#packages/wasm/src/collective-public-key-aggregate-runtime';
-import { selectedSetupGenerationPublicKeyShareBodyByteLength } from '#packages/wasm/src/setup-generation-recipient-payload';
 import { registerCommonProofKernelContext } from '#packages/wasm/src/transcript-core-bridge/common-proof-kernel-context';
 import type { TranscriptCoreKernelCommandRuntime } from '#packages/wasm/src/transcript-core-bridge/kernel-runtime';
 import type { TranscriptCoreKernel } from '#packages/wasm/src/transcript-core-bridge/kernel-types';
@@ -25,6 +24,13 @@ type FakeCollectiveState = {
 };
 
 const fakeStates = vi.hoisted(() => new WeakMap<object, FakeCollectiveState>());
+
+const testParticipantBodyByteLength =
+    foundationProfile.streamChunkByteLength + 17;
+const testParticipantChunkCount = Math.ceil(
+    testParticipantBodyByteLength / foundationProfile.streamChunkByteLength,
+);
+const testAggregateBodyByteLength = testParticipantBodyByteLength * 2;
 
 vi.mock(
     '#packages/wasm/src/aggregate-threshold-share-authenticated-recipient',
@@ -127,7 +133,7 @@ const createFakeCollectiveState = (): FakeCollectiveState => {
                     );
                     const expectedByteLength = Math.min(
                         foundationProfile.streamChunkByteLength,
-                        selectedSetupGenerationPublicKeyShareBodyByteLength -
+                        testParticipantBodyByteLength -
                             chunkIndex *
                                 foundationProfile.streamChunkByteLength,
                     );
@@ -195,9 +201,7 @@ const createFakeCollectiveState = (): FakeCollectiveState => {
                     output[64] = rosterPosition + 33;
                     new DataView(memory.buffer).setBigUint64(
                         outputPointer + 128,
-                        BigInt(
-                            selectedSetupGenerationPublicKeyShareBodyByteLength,
-                        ),
+                        BigInt(testParticipantBodyByteLength),
                         true,
                     );
                     return 0;
@@ -227,7 +231,7 @@ const createFakeCollectiveState = (): FakeCollectiveState => {
                 expect(outputByteLength).toBe(72);
                 new DataView(memory.buffer).setBigUint64(
                     outputPointer,
-                    27_262_976n,
+                    BigInt(testAggregateBodyByteLength),
                     true,
                 );
                 new Uint8Array(memory.buffer, outputPointer + 8, 64).fill(0xa5);
@@ -248,7 +252,9 @@ const createFakeCollectiveState = (): FakeCollectiveState => {
             ) => {
                 expect(sessionHandle).toBe(11);
                 expect(rosterPosition).toBe(activeRosterPosition);
-                expect(state.absorbedChunkCounts[rosterPosition]).toBe(13);
+                expect(state.absorbedChunkCounts[rosterPosition]).toBe(
+                    testParticipantChunkCount,
+                );
                 activeRosterPosition = undefined;
                 nextRosterPosition += 1;
                 return 0;
@@ -265,8 +271,7 @@ const createFakeCollectiveState = (): FakeCollectiveState => {
             sealed_lattice_collective_public_key_aggregate_finish_verification:
                 () => 0,
             sealed_lattice_collective_public_key_aggregate_participant_body_byte_length:
-                () =>
-                    BigInt(selectedSetupGenerationPublicKeyShareBodyByteLength),
+                () => BigInt(testParticipantBodyByteLength),
             sealed_lattice_collective_public_key_aggregate_prepare_generation:
                 () => 1,
             sealed_lattice_collective_public_key_aggregate_prepare_resumed_generation:
@@ -295,8 +300,7 @@ const participantSources = (input: {
                 Object.freeze({
                     descriptorBytes: Uint8Array.of(rosterPosition + 1),
                     inputStore: Object.freeze({
-                        declaredByteLength:
-                            selectedSetupGenerationPublicKeyShareBodyByteLength,
+                        declaredByteLength: testParticipantBodyByteLength,
                         readCommittedChunk: (
                             chunkIndex: number,
                             exactByteLength: number,
@@ -327,7 +331,7 @@ describe('Collective public-key aggregate runtime', () => {
         expect(state.absorbedChunkCounts).toEqual(
             Array.from(
                 { length: foundationProfile.participantCount },
-                () => 13,
+                () => testParticipantChunkCount,
             ),
         );
         expect(aggregate.copyCanonicalApplicationStatement()).toEqual(
@@ -335,7 +339,7 @@ describe('Collective public-key aggregate runtime', () => {
         );
         expect(aggregate.describeCollectivePublicKey()).toEqual({
             fullObjectDigest: new Uint8Array(64).fill(0xa5),
-            totalByteLength: 27_262_976n,
+            totalByteLength: BigInt(testAggregateBodyByteLength),
         });
 
         aggregate.cancel();
@@ -366,8 +370,7 @@ describe('Collective public-key aggregate runtime', () => {
             ...sources[0],
             inputStore: Object.freeze({
                 ...sources[0].inputStore,
-                declaredByteLength:
-                    selectedSetupGenerationPublicKeyShareBodyByteLength - 1,
+                declaredByteLength: testParticipantBodyByteLength - 1,
             }),
         });
 

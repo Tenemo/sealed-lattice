@@ -92,44 +92,6 @@ pub(crate) fn ciphertext_sub(left: &Ciphertext, right: &Ciphertext) -> Canonical
     ciphertext_add(left, &ciphertext_negate(right)?)
 }
 
-fn centered_plaintext_scalar(scalar: i64) -> i64 {
-    let residue = signed_residue(scalar, PLAINTEXT_MODULUS);
-    if residue > PLAINTEXT_MODULUS / 2 {
-        i64::try_from(i128::from(residue) - i128::from(PLAINTEXT_MODULUS))
-            .expect("centered plaintext scalar fits i64")
-    } else {
-        i64::try_from(residue).expect("centered plaintext scalar fits i64")
-    }
-}
-
-pub(crate) fn scalar_mul(ciphertext: &Ciphertext, scalar: i64) -> CanonicalResult<Ciphertext> {
-    let primes = ciphertext.primes();
-    let centered_scalar = centered_plaintext_scalar(scalar);
-    let components = ciphertext
-        .components
-        .iter()
-        .map(|component| {
-            component
-                .iter()
-                .enumerate()
-                .map(|(limb_index, limb)| {
-                    let modulus = primes[limb_index];
-                    let scalar_lift = signed_residue(centered_scalar, modulus);
-                    limb.iter()
-                        .map(|value| mul_mod(*value, scalar_lift, modulus))
-                        .collect::<CanonicalResult<Vec<_>>>()
-                })
-                .collect::<CanonicalResult<Vec<_>>>()
-        })
-        .collect::<CanonicalResult<Vec<_>>>()?;
-
-    Ok(Ciphertext {
-        components,
-        level: ciphertext.level,
-        decrypt_scaling: ciphertext.decrypt_scaling,
-    })
-}
-
 pub(crate) fn add_plaintext_coefficients(
     ciphertext: &Ciphertext,
     plaintext_coefficients: &[u64],

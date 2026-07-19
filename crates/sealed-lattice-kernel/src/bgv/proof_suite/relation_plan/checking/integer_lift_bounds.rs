@@ -55,17 +55,11 @@ pub(super) fn integer_lift_require_pre_challenge_column(
         .ordered_columns
         .get(column_ordinal as usize)
         .ok_or(RelationPlanError::InvalidColumn)?;
-    let role = tree_roles_by_column
-        .get(&column_ordinal)
-        .copied()
-        .ok_or(RelationPlanError::MissingRoot)?;
+    let role = tree_roles_by_column.get(&column_ordinal).copied();
     match column.origin {
-        RelationColumnOrigin::Prover | RelationColumnOrigin::VerifierSequence { .. }
-            if role == Some(1) =>
-        {
-            Ok(())
-        }
-        RelationColumnOrigin::BoundTree { .. } if role.is_none() => Ok(()),
+        RelationColumnOrigin::Prover if role == Some(Some(1)) => Ok(()),
+        RelationColumnOrigin::VerifierSequence { .. } if role.is_none() => Ok(()),
+        RelationColumnOrigin::BoundTree { .. } if role == Some(None) => Ok(()),
         _ => Err(RelationPlanError::InvalidConstraint),
     }
 }

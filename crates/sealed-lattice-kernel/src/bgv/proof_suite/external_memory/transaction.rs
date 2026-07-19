@@ -1,5 +1,3 @@
-use std::collections::BTreeMap;
-
 use zeroize::Zeroizing;
 
 use crate::hashing::hash_framed_parts_512;

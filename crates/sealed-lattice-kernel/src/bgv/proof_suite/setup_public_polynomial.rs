@@ -731,7 +731,27 @@ where
     }
     let row_width_u32 =
         u32::try_from(row_width).map_err(|_| SetupPublicPolynomialError::CountOverflow)?;
-    let leaf_byte_length = setup_public_polynomial_leaf_byte_length(row_width_u32)?;
+    let mut canonical_bytes = setup_public_polynomial_leaf_canonical_prefix(
+        public_polynomial_context_hash,
+        leaf_index,
+        row_width_u32,
+    )?;
+    for (first_point_value, opposite_point_value) in first_point_values.zip(opposite_point_values) {
+        canonical_bytes.extend_from_slice(&first_point_value.canonical().to_le_bytes());
+        canonical_bytes.extend_from_slice(&opposite_point_value.canonical().to_le_bytes());
+    }
+    if canonical_bytes.len() != setup_public_polynomial_leaf_byte_length(row_width_u32)? {
+        return Err(SetupPublicPolynomialError::CanonicalEncoding);
+    }
+    Ok(canonical_bytes)
+}
+
+fn setup_public_polynomial_leaf_canonical_prefix(
+    public_polynomial_context_hash: [u8; 64],
+    leaf_index: u64,
+    row_width: u32,
+) -> Result<Vec<u8>, SetupPublicPolynomialError> {
+    let leaf_byte_length = setup_public_polynomial_leaf_byte_length(row_width)?;
     let mut canonical_bytes = Vec::new();
     canonical_bytes
         .try_reserve_exact(leaf_byte_length)
@@ -749,16 +769,76 @@ where
     canonical_bytes.extend_from_slice(&8_u32.to_le_bytes());
     canonical_bytes.extend_from_slice(&leaf_index.to_le_bytes());
     canonical_bytes.extend_from_slice(
-        &setup_public_polynomial_leaf_index_and_list_header(leaf_index, row_width_u32)?[14..],
+        &setup_public_polynomial_leaf_index_and_list_header(leaf_index, row_width)?[14..],
     );
-    for (first_point_value, opposite_point_value) in first_point_values.zip(opposite_point_values) {
-        canonical_bytes.extend_from_slice(&first_point_value.canonical().to_le_bytes());
-        canonical_bytes.extend_from_slice(&opposite_point_value.canonical().to_le_bytes());
-    }
-    if canonical_bytes.len() != leaf_byte_length {
+    if canonical_bytes.len() != SETUP_PUBLIC_POLYNOMIAL_FIXED_LEAF_BYTE_LENGTH {
         return Err(SetupPublicPolynomialError::CanonicalEncoding);
     }
     Ok(canonical_bytes)
+}
+
+/// Incremental canonical bytes for one queried setup-polynomial leaf. The
+/// deployed v3 encoding interleaves the first and opposite evaluation for
+/// each column, so replay can append one exact pair as each column arrives.
+pub(crate) struct SetupPublicPolynomialLeafByteBuilder {
+    canonical_bytes: Vec<u8>,
+    canonical_leaf_byte_length: usize,
+    expected_column_count: usize,
+    absorbed_column_count: usize,
+}
+
+impl SetupPublicPolynomialLeafByteBuilder {
+    pub(crate) fn new(
+        public_polynomial_context_hash: [u8; 64],
+        leaf_index: u64,
+        row_width: u32,
+    ) -> Result<Self, SetupPublicPolynomialError> {
+        let canonical_leaf_byte_length = setup_public_polynomial_leaf_byte_length(row_width)?;
+        let canonical_bytes = setup_public_polynomial_leaf_canonical_prefix(
+            public_polynomial_context_hash,
+            leaf_index,
+            row_width,
+        )?;
+        Ok(Self {
+            canonical_bytes,
+            canonical_leaf_byte_length,
+            expected_column_count: usize::try_from(row_width)
+                .map_err(|_| SetupPublicPolynomialError::CountOverflow)?,
+            absorbed_column_count: 0,
+        })
+    }
+
+    pub(crate) fn absorb_column_pair(
+        &mut self,
+        first_point_value: ProofBaseFieldElement,
+        opposite_point_value: ProofBaseFieldElement,
+    ) -> Result<(), SetupPublicPolynomialError> {
+        if self.absorbed_column_count >= self.expected_column_count {
+            return Err(SetupPublicPolynomialError::InvalidInput);
+        }
+        self.canonical_bytes
+            .extend_from_slice(&first_point_value.canonical().to_le_bytes());
+        self.canonical_bytes
+            .extend_from_slice(&opposite_point_value.canonical().to_le_bytes());
+        self.absorbed_column_count += 1;
+        Ok(())
+    }
+
+    pub(crate) fn finish(self) -> Result<Vec<u8>, SetupPublicPolynomialError> {
+        if self.absorbed_column_count != self.expected_column_count
+            || self.canonical_bytes.len() != self.canonical_leaf_byte_length
+        {
+            return Err(SetupPublicPolynomialError::InvalidInput);
+        }
+        Ok(self.canonical_bytes)
+    }
+
+    pub(crate) fn resident_owned_payload_byte_length(
+        &self,
+    ) -> Result<u64, SetupPublicPolynomialError> {
+        u64::try_from(self.canonical_bytes.capacity())
+            .map_err(|_| SetupPublicPolynomialError::CountOverflow)
+    }
 }
 
 pub(super) fn setup_public_polynomial_leaf_digest(
@@ -859,16 +939,17 @@ pub(super) fn setup_public_polynomial_leaf_byte_length(
         .ok_or(SetupPublicPolynomialError::CountOverflow)
 }
 
-struct SetupPublicPolynomialLeafHashArena {
+pub(crate) struct SetupPublicPolynomialLeafHashArena {
     public_polynomial_context_hash: [u8; 64],
     leaf_hash_states: Vec<Shake>,
     leaf_count: usize,
     expected_column_count: usize,
     absorbed_column_count: usize,
+    next_leaf_index: usize,
 }
 
 impl SetupPublicPolynomialLeafHashArena {
-    fn new(
+    pub(crate) fn new(
         public_polynomial_context_hash: [u8; 64],
         leaf_count: usize,
         row_width: u32,
@@ -900,6 +981,7 @@ impl SetupPublicPolynomialLeafHashArena {
             leaf_count,
             expected_column_count,
             absorbed_column_count: 0,
+            next_leaf_index: 0,
         })
     }
 
@@ -916,25 +998,91 @@ impl SetupPublicPolynomialLeafHashArena {
         {
             return Err(SetupPublicPolynomialError::InvalidInput);
         }
-        for (leaf_index, leaf_hash_state) in self.leaf_hash_states.iter_mut().enumerate() {
+        self.absorb_extension_column_chunk(
+            0,
+            &extension_column[..self.leaf_count],
+            &extension_column[self.leaf_count..],
+        )
+    }
+
+    pub(crate) const fn next_leaf_index(&self) -> usize {
+        self.next_leaf_index
+    }
+
+    pub(crate) fn native_resident_owned_payload_byte_length(
+        &self,
+    ) -> Result<u64, SetupPublicPolynomialError> {
+        u64::try_from(self.leaf_hash_states.capacity())
+            .ok()
+            .and_then(|capacity| {
+                u64::try_from(core::mem::size_of::<Shake>())
+                    .ok()
+                    .and_then(|state_byte_length| capacity.checked_mul(state_byte_length))
+            })
+            .ok_or(SetupPublicPolynomialError::CountOverflow)
+    }
+
+    pub(crate) fn wasm_resident_owned_payload_byte_length(
+        &self,
+    ) -> Result<u64, SetupPublicPolynomialError> {
+        u64::try_from(self.leaf_hash_states.capacity())
+            .ok()
+            .and_then(|capacity| {
+                u64::try_from(WASM_SETUP_PUBLIC_POLYNOMIAL_LEAF_HASH_STATE_BYTE_LENGTH)
+                    .ok()
+                    .and_then(|state_byte_length| capacity.checked_mul(state_byte_length))
+            })
+            .ok_or(SetupPublicPolynomialError::CountOverflow)
+    }
+
+    /// Absorbs one bounded range from the next canonical column. Both slices
+    /// name the same leaf indexes in the first and opposite domain halves.
+    /// Completing the final range advances exactly one column; a changed
+    /// range start or column order cannot silently advance the arena.
+    pub(crate) fn absorb_extension_column_chunk(
+        &mut self,
+        first_leaf_index: usize,
+        first_point_values: &[ProofBaseFieldElement],
+        opposite_point_values: &[ProofBaseFieldElement],
+    ) -> Result<(), SetupPublicPolynomialError> {
+        let end_leaf_index = first_leaf_index
+            .checked_add(first_point_values.len())
+            .ok_or(SetupPublicPolynomialError::CountOverflow)?;
+        if self.absorbed_column_count >= self.expected_column_count
+            || first_point_values.is_empty()
+            || first_point_values.len() != opposite_point_values.len()
+            || first_leaf_index != self.next_leaf_index
+            || end_leaf_index > self.leaf_count
+        {
+            return Err(SetupPublicPolynomialError::InvalidInput);
+        }
+        let leaf_hash_states = self
+            .leaf_hash_states
+            .get_mut(first_leaf_index..end_leaf_index)
+            .ok_or(SetupPublicPolynomialError::InvalidInput)?;
+        for ((leaf_hash_state, first_point_value), opposite_point_value) in leaf_hash_states
+            .iter_mut()
+            .zip(first_point_values)
+            .zip(opposite_point_values)
+        {
             let mut interleaved_values =
                 [0_u8; SETUP_PUBLIC_POLYNOMIAL_INTERLEAVED_VALUE_BYTE_LENGTH_PER_COLUMN];
             interleaved_values[..SETUP_PUBLIC_POLYNOMIAL_FIELD_ELEMENT_BYTE_LENGTH]
-                .copy_from_slice(&extension_column[leaf_index].canonical().to_le_bytes());
+                .copy_from_slice(&first_point_value.canonical().to_le_bytes());
             interleaved_values[SETUP_PUBLIC_POLYNOMIAL_FIELD_ELEMENT_BYTE_LENGTH..]
-                .copy_from_slice(
-                    &extension_column[self.leaf_count + leaf_index]
-                        .canonical()
-                        .to_le_bytes(),
-                );
+                .copy_from_slice(&opposite_point_value.canonical().to_le_bytes());
             leaf_hash_state.update(&interleaved_values);
         }
-        self.absorbed_column_count += 1;
+        self.next_leaf_index = end_leaf_index;
+        if self.next_leaf_index == self.leaf_count {
+            self.next_leaf_index = 0;
+            self.absorbed_column_count += 1;
+        }
         Ok(())
     }
 
     fn finish_root(self) -> Result<[u8; 64], SetupPublicPolynomialError> {
-        if self.absorbed_column_count != self.expected_column_count {
+        if self.absorbed_column_count != self.expected_column_count || self.next_leaf_index != 0 {
             return Err(SetupPublicPolynomialError::InvalidInput);
         }
         let mut root_accumulator = SetupPublicPolynomialOnlineMerkleRoot::new(
@@ -948,6 +1096,17 @@ impl SetupPublicPolynomialLeafHashArena {
             root_accumulator.absorb_leaf(leaf_digest)?;
         }
         root_accumulator.finish()
+    }
+
+    pub(crate) fn finish_leaf_digests(
+        self,
+    ) -> Result<SetupPublicPolynomialLeafDigestIterator, SetupPublicPolynomialError> {
+        if self.absorbed_column_count != self.expected_column_count || self.next_leaf_index != 0 {
+            return Err(SetupPublicPolynomialError::InvalidInput);
+        }
+        Ok(SetupPublicPolynomialLeafDigestIterator {
+            states: self.leaf_hash_states.into_iter(),
+        })
     }
 
     #[cfg(test)]
@@ -969,6 +1128,28 @@ impl SetupPublicPolynomialLeafHashArena {
         Ok(leaf_digests)
     }
 }
+
+pub(crate) struct SetupPublicPolynomialLeafDigestIterator {
+    states: std::vec::IntoIter<Shake>,
+}
+
+impl Iterator for SetupPublicPolynomialLeafDigestIterator {
+    type Item = [u8; AUTHENTICATION_DIGEST_BYTE_LENGTH];
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.states.next().map(|state| {
+            let mut digest = [0_u8; AUTHENTICATION_DIGEST_BYTE_LENGTH];
+            state.finalize(&mut digest);
+            digest
+        })
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.states.size_hint()
+    }
+}
+
+impl ExactSizeIterator for SetupPublicPolynomialLeafDigestIterator {}
 
 fn setup_public_polynomial_common_leaf_hash_state(
     public_polynomial_context_hash: [u8; 64],
@@ -1143,7 +1324,7 @@ pub(crate) struct SetupPublicPolynomialCompactRootMemoryPlan {
     owned_payload_peak_byte_length: u64,
 }
 
-const WASM_SETUP_PUBLIC_POLYNOMIAL_LEAF_HASH_STATE_BYTE_LENGTH: usize = 216;
+pub(crate) const WASM_SETUP_PUBLIC_POLYNOMIAL_LEAF_HASH_STATE_BYTE_LENGTH: usize = 216;
 
 impl SetupPublicPolynomialCompactRootMemoryPlan {
     pub(crate) const fn leaf_hash_state_arena_payload_byte_length(self) -> u64 {
@@ -1319,7 +1500,10 @@ mod tests {
     use super::*;
     use crate::bgv::{
         parameters::POLYNOMIAL_DEGREE,
-        proof_suite::{MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH, PROOF_BASE_FIELD_MODULUS},
+        proof_suite::{
+            MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH, PROOF_BASE_FIELD_MODULUS,
+            selected_relinearization_relation_plan_inputs,
+        },
         setup::{
             LatticeAnchorCommitment, SETUP_COMMITMENT_MODULE_RANK,
             lattice_anchor_commitment_canonical_bytes,
@@ -1515,7 +1699,6 @@ mod tests {
 
     #[test]
     fn root_only_canonical_rows_match_the_retained_tree_and_require_the_exact_width() {
-        let context = public_key_share_context();
         let canonical_rows = vec![vec![3, 5, 0, 1], vec![7, 0, 0, 0]];
         let field_rows = canonical_rows
             .iter()
@@ -1526,29 +1709,36 @@ mod tests {
             })
             .collect::<Result<Vec<_>, _>>()
             .expect("the test rows are canonical");
-        let retained_tree = SetupPublicPolynomialTree::construct(SetupPublicPolynomialTreeInput {
-            context: &context,
-            evaluation_domain_size: 8,
-            source_polynomial_degree_bound_exclusive: 4,
-            ordered_trace_rows: &field_rows,
-        })
-        .expect("the retained tree is canonical");
-
-        let (context_hash, root) =
-            SetupPublicPolynomialTree::construct_root_from_canonical_trace_rows(
-                &context,
-                8,
-                4,
-                canonical_rows.len(),
-                canonical_rows.iter().map(Vec::as_slice),
-            )
-            .expect("the root-only construction is canonical");
-        assert_eq!(context_hash, retained_tree.public_polynomial_context_hash());
-        assert_eq!(root, retained_tree.root());
+        let contexts = [
+            public_key_share_context(),
+            SetupPublicPolynomialContext::galois_common([0x91; 64], 3)
+                .expect("the Galois-common context is canonical"),
+        ];
+        for context in &contexts {
+            let retained_tree =
+                SetupPublicPolynomialTree::construct(SetupPublicPolynomialTreeInput {
+                    context,
+                    evaluation_domain_size: 8,
+                    source_polynomial_degree_bound_exclusive: 4,
+                    ordered_trace_rows: &field_rows,
+                })
+                .expect("the retained tree is canonical");
+            let (context_hash, root) =
+                SetupPublicPolynomialTree::construct_root_from_canonical_trace_rows(
+                    context,
+                    8,
+                    4,
+                    canonical_rows.len(),
+                    canonical_rows.iter().map(Vec::as_slice),
+                )
+                .expect("the root-only construction is canonical");
+            assert_eq!(context_hash, retained_tree.public_polynomial_context_hash());
+            assert_eq!(root, retained_tree.root());
+        }
 
         assert_eq!(
             SetupPublicPolynomialTree::construct_root_from_canonical_trace_rows(
-                &context,
+                &contexts[0],
                 8,
                 4,
                 canonical_rows.len(),
@@ -1558,7 +1748,7 @@ mod tests {
         );
         assert_eq!(
             SetupPublicPolynomialTree::construct_root_from_canonical_trace_rows(
-                &context,
+                &contexts[0],
                 8,
                 4,
                 canonical_rows.len(),
@@ -1753,7 +1943,7 @@ mod tests {
     }
 
     #[test]
-    fn leaf_order_index_context_and_v3_domains_are_root_binding() {
+    fn leaf_order_index_and_context_are_root_binding() {
         let extension_columns = synthetic_extension_columns(3, 8);
         let original_leaf_digests = one_shot_leaf_digests_for_test([0x11; 64], &extension_columns);
         let original_root =
@@ -1801,37 +1991,6 @@ mod tests {
             setup_public_polynomial_leaf_digest(&leaf_zero).expect("leaf zero hashes"),
             setup_public_polynomial_leaf_digest(&leaf_one).expect("leaf one hashes"),
         );
-        let legacy_domain_digest = hash_foundation_tuple_512(
-            "sealed-lattice/setup/public-polynomial/phase-pair-leaf/v2",
-            &[CanonicalItem::variable_bytes(&leaf_zero).expect("the leaf fits raw bytes")],
-        )
-        .expect("the legacy-domain comparison hashes")
-        .into_bytes();
-        assert_ne!(
-            setup_public_polynomial_leaf_digest(&leaf_zero).expect("the v3 leaf hashes"),
-            legacy_domain_digest,
-        );
-        let v3_node = setup_public_polynomial_merkle_node_digest(
-            [0x11; 64],
-            1,
-            0,
-            original_leaf_digests[0],
-            original_leaf_digests[1],
-        )
-        .expect("the v3 node hashes");
-        let legacy_node = hash_foundation_tuple_512(
-            "sealed-lattice/setup/public-polynomial/merkle-node/v2",
-            &[
-                CanonicalItem::hash512([0x11; 64]),
-                CanonicalItem::unsigned32(1),
-                CanonicalItem::unsigned64(0),
-                CanonicalItem::hash512(original_leaf_digests[0]),
-                CanonicalItem::hash512(original_leaf_digests[1]),
-            ],
-        )
-        .expect("the legacy-domain comparison node hashes")
-        .into_bytes();
-        assert_ne!(v3_node, legacy_node);
     }
 
     #[test]
@@ -1842,9 +2001,35 @@ mod tests {
         #[cfg(all(not(target_arch = "wasm32"), target_pointer_width = "64"))]
         assert_eq!(std::mem::size_of::<Shake>(), 224);
 
-        let wasm_plan =
-            setup_public_polynomial_wasm_compact_root_memory_plan(2_097_152, 32_768, 100)
-                .expect("the selected Wasm root plan is representable");
+        let (_, round_two_input) = selected_relinearization_relation_plan_inputs()
+            .expect("the selected round-two relation input derives");
+        let relation_geometry = round_two_input.geometry;
+        let selected_root_row_width = relation_geometry
+            .decomposition_blocks
+            .len()
+            .checked_mul(
+                relation_geometry
+                    .data_moduli
+                    .len()
+                    .checked_add(relation_geometry.special_moduli.len())
+                    .expect("the selected extended-limb count fits usize"),
+            )
+            .and_then(|count| count.checked_mul(2))
+            .and_then(|count| u32::try_from(count).ok())
+            .expect("the selected root row width fits u32");
+        assert_eq!(selected_root_row_width, 46);
+        let evaluation_domain_size = usize::try_from(relation_geometry.evaluation_domain_size)
+            .expect("the selected evaluation domain fits usize");
+        let public_polynomial_degree_bound_exclusive =
+            usize::try_from(relation_geometry.public_polynomial_column_degree_bound_exclusive)
+                .expect("the selected public-polynomial degree bound fits usize");
+
+        let wasm_plan = setup_public_polynomial_wasm_compact_root_memory_plan(
+            evaluation_domain_size,
+            public_polynomial_degree_bound_exclusive,
+            selected_root_row_width,
+        )
+        .expect("the selected Wasm root plan is representable");
         assert_eq!(
             wasm_plan.leaf_hash_state_arena_payload_byte_length(),
             226_492_416,
@@ -1854,7 +2039,7 @@ mod tests {
         assert_eq!(wasm_plan.online_merkle_stack_payload_byte_length(), 1_280,);
         assert_eq!(
             wasm_plan.retained_trace_rows_payload_byte_length(),
-            26_214_400,
+            12_058_624,
         );
         assert_eq!(
             wasm_plan.column_pipeline_payload_peak_byte_length(),
@@ -1871,9 +2056,12 @@ mod tests {
             427_556_864,
         );
 
-        let current_target_plan =
-            setup_public_polynomial_compact_root_memory_plan(2_097_152, 32_768, 100)
-                .expect("the current-target root plan is representable");
+        let current_target_plan = setup_public_polynomial_compact_root_memory_plan(
+            evaluation_domain_size,
+            public_polynomial_degree_bound_exclusive,
+            selected_root_row_width,
+        )
+        .expect("the current-target root plan is representable");
         assert_eq!(
             current_target_plan.leaf_hash_state_arena_payload_byte_length(),
             1_048_576 * std::mem::size_of::<Shake>() as u64,

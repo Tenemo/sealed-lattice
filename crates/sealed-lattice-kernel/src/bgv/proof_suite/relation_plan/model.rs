@@ -14,7 +14,7 @@ use super::{
     schema::{
         APPLICATION_SLOT_SOURCE_SCHEMA_IDENTIFIER, APPLICATION_STATEMENT_SOURCE_SCHEMA_IDENTIFIER,
         BOUND_PUBLIC_TREE_SCHEMA_IDENTIFIER, BOUND_TREE_COLUMN_ORIGIN_SCHEMA_IDENTIFIER,
-        DIRECT_BALLOT_PAIR_DIFFERENCE_ENCODER_WEIGHTS_SOURCE_SCHEMA_IDENTIFIER,
+        DIRECT_BALLOT_PAIR_CHARACTER_ENCODER_PROFILE_SOURCE_SCHEMA_IDENTIFIER,
         NEGACYCLIC_AUTOMORPHISM_MAPPING_SOURCE_SCHEMA_IDENTIFIER,
         PROOF_CREATED_TREE_SCHEMA_IDENTIFIER, PROTOCOL_SOURCE_SCHEMA_IDENTIFIER,
         PROVER_COLUMN_ORIGIN_SCHEMA_IDENTIFIER, PUBLIC_ONLY_FAMILIES,
@@ -350,12 +350,14 @@ pub(crate) enum RelationVerifierSource {
         ring_degree: u64,
         galois_element: u64,
     },
-    /// The verifier-derived coefficient weights for one score in the direct
-    /// ballot's canonical packed pair-difference slot layout.
-    DirectBallotPairDifferenceEncoderWeights {
+    /// One verifier-derived sparse coefficient profile in the suite-fixed
+    /// pair-character encoder. Its ten fixed rotations linearly map one
+    /// option's shared score indicators into one ciphertext's U/V auxiliary.
+    DirectBallotPairCharacterEncoderProfile {
         ring_degree: u64,
-        primitive_two_n_root: u64,
-        slot_generator: u16,
+        plaintext_modulus: u64,
+        ciphertext_ordinal: u16,
+        auxiliary_ordinal: u16,
         option_count: u16,
         option_ordinal: u16,
     },
@@ -410,7 +412,7 @@ impl RelationVerifierSource {
             ),
             Self::SamplerOutput { .. }
             | Self::NegacyclicAutomorphismMapping { .. }
-            | Self::DirectBallotPairDifferenceEncoderWeights { .. } => Ok(0),
+            | Self::DirectBallotPairCharacterEncoderProfile { .. } => Ok(0),
         }
     }
 
@@ -474,7 +476,7 @@ impl RelationVerifierSource {
                 ],
                 embedding_kind: RelationEmbeddingKind::Identity,
             }),
-            Self::DirectBallotPairDifferenceEncoderWeights { ring_degree, .. } => {
+            Self::DirectBallotPairCharacterEncoderProfile { ring_degree, .. } => {
                 Ok(RelationValueLayout::residue_vector(
                     SuiteModulusReference::plaintext(),
                     *ring_degree,
@@ -562,18 +564,20 @@ impl RelationVerifierSource {
                     CanonicalItem::unsigned64(*galois_element),
                 ],
             ),
-            Self::DirectBallotPairDifferenceEncoderWeights {
+            Self::DirectBallotPairCharacterEncoderProfile {
                 ring_degree,
-                primitive_two_n_root,
-                slot_generator,
+                plaintext_modulus,
+                ciphertext_ordinal,
+                auxiliary_ordinal,
                 option_count,
                 option_ordinal,
             } => (
-                DIRECT_BALLOT_PAIR_DIFFERENCE_ENCODER_WEIGHTS_SOURCE_SCHEMA_IDENTIFIER,
+                DIRECT_BALLOT_PAIR_CHARACTER_ENCODER_PROFILE_SOURCE_SCHEMA_IDENTIFIER,
                 vec![
                     CanonicalItem::unsigned64(*ring_degree),
-                    CanonicalItem::unsigned64(*primitive_two_n_root),
-                    CanonicalItem::unsigned16(*slot_generator),
+                    CanonicalItem::unsigned64(*plaintext_modulus),
+                    CanonicalItem::unsigned16(*ciphertext_ordinal),
+                    CanonicalItem::unsigned16(*auxiliary_ordinal),
                     CanonicalItem::unsigned16(*option_count),
                     CanonicalItem::unsigned16(*option_ordinal),
                 ],
@@ -671,10 +675,11 @@ impl RelationVerifierSource {
                 ring_degree,
                 galois_element,
             } => validate_negacyclic_automorphism(*ring_degree, *galois_element),
-            Self::DirectBallotPairDifferenceEncoderWeights {
+            Self::DirectBallotPairCharacterEncoderProfile {
                 ring_degree,
-                primitive_two_n_root,
-                slot_generator,
+                plaintext_modulus,
+                ciphertext_ordinal,
+                auxiliary_ordinal,
                 option_count,
                 option_ordinal,
             } => {
@@ -686,10 +691,12 @@ impl RelationVerifierSource {
                 if *ring_degree < 2
                     || !ring_degree.is_power_of_two()
                     || option_count < 2
-                    || pair_count > *ring_degree
+                    || pair_count > 256
                     || u64::from(*option_ordinal) >= option_count
-                    || *primitive_two_n_root == 0
-                    || *slot_generator < 2
+                    || *ring_degree != 32_768
+                    || *plaintext_modulus != 257
+                    || *ciphertext_ordinal >= 2
+                    || *auxiliary_ordinal >= 2
                 {
                     return Err(RelationPlanError::InvalidSource);
                 }

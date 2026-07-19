@@ -54,7 +54,6 @@ pub(crate) enum CommonProofVerifierError {
     InvalidTreeLayout,
     InvalidOpeningClaim,
     MissingVerifiedColumnValue,
-    VerifiedColumnMismatch,
     Profile(ProofProfileError),
     Relation(RelationPlanError),
     Body(ProofBodyError),
@@ -119,7 +118,8 @@ pub(crate) use core_verification::{
 };
 pub(crate) use verification_state::{
     CommonProofRequiredByteRange, CommonProofVerificationInput, CommonProofVerificationPoll,
-    CommonProofVerificationStateMachine, PollableCommonProofVerificationInput,
+    CommonProofVerificationResidentMemoryAccounting, CommonProofVerificationStateMachine,
+    PollableCommonProofVerificationInput,
 };
 pub(crate) use verified_values::{
     VerifiedCommonProof, VerifiedEvaluatorAuxiliaryRoot, VerifiedEvaluatorKeyStore,
@@ -130,7 +130,7 @@ pub(crate) use verified_values::{
 use core_verification::{
     absorb_relation_roots, catalog_root, decode_application_statement, derive_relation_tree_inputs,
     validate_evaluator_auxiliary_root_linkage, verified_proof_header_hash,
-    verify_statement_derived_deep_values,
+    verify_deep_composition_with_verified_sequences,
 };
 use query_verification::{QueryVerificationWorkspace, build_runtime_claim_groups};
 #[cfg(test)]

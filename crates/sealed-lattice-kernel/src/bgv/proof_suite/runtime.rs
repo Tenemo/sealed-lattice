@@ -34,7 +34,8 @@ use super::{
     CommonProofGenerationPoll, CommonProofGenerationStage, CommonProofGenerationStateMachine,
     CommonProofPrivateCoinCoordinate, CommonProofPrivateCoinSource, CommonProofRequiredByteRange,
     CommonProofSourcePolynomialProvider, CommonProofVerificationPoll,
-    CommonProofVerificationStateMachine, CommonProofVerifierError, CompiledRelationPlan,
+    CommonProofVerificationResidentMemoryAccounting, CommonProofVerificationStateMachine,
+    CommonProofVerifierError, CompiledRelationPlan, MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH,
     PollableCommonProofVerificationInput, ProofExternalMemory, ProofExternalMemoryExecutorError,
     ProofExternalMemoryProtection, ProofExternalMemoryTransactionAdapterError,
     ProofExternalMemoryTransactionRecorder, ProofExternalMemoryTransactionReplay,
@@ -665,7 +666,7 @@ impl VerifiedCommonProofStatementSource {
     /// commitment, and reveal objects as the retained public-randomness
     /// terminal. The caller-provided binding cannot select a different slot or
     /// descriptor.
-    pub(crate) fn from_exact_family_verified_accepted_setup_package(
+    pub(in crate::bgv) fn from_exact_family_verified_accepted_setup_package(
         setup_package: &CanonicalAcceptedSetupPackage,
         verified_public_randomness: &VerifiedPublicRandomness,
         proof_descriptor_index: usize,
@@ -915,7 +916,9 @@ impl CommonProofVerificationStatementSource {
 
     pub(super) const fn proof_stream_descriptor(&self) -> &StreamDescriptor {
         match self {
-            Self::Exact(source) => source.proof_application_binding.proof_stream_descriptor(),
+            Self::Exact(source) => source
+                .application_source_authority
+                .proof_stream_descriptor(),
             #[cfg(test)]
             Self::TestFixture {
                 proof_stream_descriptor,

@@ -82,7 +82,8 @@ use checking::{
 use expressions::*;
 
 pub(crate) use expressions::{
-    RelationConstraintColumnQuery, RelationExpressionInstruction,
+    RelationConstantColumnVerifierSequenceProductTerm, RelationConstraintColumnQuery,
+    RelationExpressionInstruction,
     finite_integer_set_constraint_expressions, ordered_injective_integer_factor_product_expression,
     unsigned_radix_comparator_digit_expression,
 };
@@ -133,13 +134,11 @@ pub(crate) use collective_public_key_adapter::{
     collective_public_key_source_provider_memory_accounting,
 };
 pub(crate) use committed_material::{
-    CommittedMaterialRelationPlanInput, CommittedMaterialRootTraceRows,
-    CommittedMaterialTraceWitnessProvider, CommittedMaterialTraceWitnessStructureMemoryAccounting,
+    CommittedMaterialRelationPlanInput, CommittedMaterialTraceWitnessProvider,
+    CommittedMaterialTraceWitnessStructureMemoryAccounting,
     aggregate_threshold_share_trace_witness_structure_memory_accounting,
-    derive_aggregate_threshold_share_trace_witness_provider,
     derive_owned_aggregate_threshold_share_trace_witness_provider,
     derive_owned_vss_share_linkage_trace_witness_provider,
-    derive_vss_share_linkage_trace_witness_provider,
     vss_share_linkage_trace_witness_structure_memory_accounting,
 };
 pub(crate) use committed_material_adapter::{
@@ -147,6 +146,8 @@ pub(crate) use committed_material_adapter::{
     aggregate_threshold_share_source_provider_memory_accounting,
     vss_share_linkage_source_provider_memory_accounting,
 };
+#[cfg(test)]
+pub(crate) use galois_key_share_adapter::galois_key_share_topology_comparison_memory_accounting;
 pub(crate) use galois_key_share_adapter::{
     GaloisKeyShareSourcePolynomialAdapter, GaloisKeyShareSourceProviderMemoryAccounting,
     galois_key_share_source_provider_memory_accounting, galois_relation_tree_inputs,
@@ -169,6 +170,7 @@ pub(crate) use public_key_share::{
 };
 pub(crate) use relinearization_round_one_adapter::{
     RelinearizationRoundOneSourcePolynomialAdapter, relinearization_round_one_relation_tree_inputs,
+    relinearization_round_one_source_provider_memory_accounting,
 };
 pub(crate) use relinearization_round_one_aggregate_adapter::prepare_relinearization_round_one_aggregate_source;
 pub(crate) use relinearization_round_two_adapter::{
@@ -184,16 +186,21 @@ pub(crate) use same_secret_anchor::{
 };
 pub(crate) use setup_key_relation_adapter::{
     SetupKeyRelationSourcePolynomialAdapter, public_key_share_relation_tree_inputs,
-    same_secret_relation_tree_inputs,
+    public_key_share_source_provider_memory_accounting, same_secret_relation_tree_inputs,
+    same_secret_source_provider_memory_accounting,
 };
 pub(crate) use target_release::{
     CompiledTargetReleaseRelation, TargetReleaseCapabilityError, TargetReleaseModulusWitness,
     TargetReleaseRelationPlanInput, TargetReleaseRoleWitness, TargetReleaseSourcePolynomialAdapter,
     TargetReleaseVerifiedColumnEvaluator, TargetReleaseWitness, TargetReleaseWitnessError,
-    TargetReleaseWitnessSource, VerifiedTargetReleaseModulusInput, VerifiedTargetReleaseProof,
-    compile_target_release_relation, compile_target_release_relation_plan,
+    TargetReleaseWitnessSource, TargetReleaseWitnessSourceMemoryAccounting,
+    VerifiedTargetReleaseModulusInput, VerifiedTargetReleaseProof, compile_target_release_relation,
+    compile_target_release_relation_plan,
+    selected_target_release_source_provider_memory_accounting,
     target_release_radix_semantics_match,
 };
+#[cfg(test)]
+pub(crate) use trustee_evaluation_key::compile_galois_key_share_relation_topology_comparison;
 pub(crate) use trustee_evaluation_key::{
     CompiledRelinearizationRoundOneRelation, CompiledRelinearizationRoundTwoRelation,
     GaloisKeyShareRelationEntryInput, GaloisKeyShareRelationPlanInput,

@@ -345,6 +345,55 @@ impl ExternalStockhamTransformPlan {
         maximum_chunk_byte_length: u32,
         protection: ProofExternalMemoryProtection,
     ) -> Result<Self, ExternalPolynomialError> {
+        Self::new_with_optional_output_objects(
+            domain,
+            direction,
+            source,
+            first_object_ordinal,
+            None,
+            first_executor_step,
+            final_output_last_use_step,
+            maximum_chunk_byte_length,
+            protection,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn new_with_output_objects(
+        domain: ProofEvaluationDomain,
+        direction: ExternalStockhamTransformDirection,
+        source: ExternalPolynomialVector,
+        output_objects: &[ProofExternalMemoryObject],
+        first_executor_step: u32,
+        final_output_last_use_step: u32,
+        maximum_chunk_byte_length: u32,
+        protection: ProofExternalMemoryProtection,
+    ) -> Result<Self, ExternalPolynomialError> {
+        Self::new_with_optional_output_objects(
+            domain,
+            direction,
+            source,
+            0,
+            Some(output_objects),
+            first_executor_step,
+            final_output_last_use_step,
+            maximum_chunk_byte_length,
+            protection,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn new_with_optional_output_objects(
+        domain: ProofEvaluationDomain,
+        direction: ExternalStockhamTransformDirection,
+        source: ExternalPolynomialVector,
+        first_object_ordinal: u32,
+        output_objects: Option<&[ProofExternalMemoryObject]>,
+        first_executor_step: u32,
+        final_output_last_use_step: u32,
+        maximum_chunk_byte_length: u32,
+        protection: ProofExternalMemoryProtection,
+    ) -> Result<Self, ExternalPolynomialError> {
         let domain_size = domain.size();
         if domain_size < 2 || !domain_size.is_power_of_two() || source.element_count > domain_size {
             return Err(ExternalPolynomialError::InvalidDomain);
@@ -356,6 +405,15 @@ impl ExternalStockhamTransformPlan {
             .filter(|count| *count != 0)
             .ok_or(ExternalPolynomialError::InvalidPlan)?;
         let pass_count = domain_size.trailing_zeros();
+        let pass_count_usize =
+            usize::try_from(pass_count).map_err(|_| ExternalPolynomialError::CountOverflow)?;
+        if output_objects.is_some_and(|objects| {
+            objects.len() != pass_count_usize
+                || objects.iter().any(|object| *object == source.object())
+                || objects.windows(2).any(|pair| pair[0] == pair[1])
+        }) {
+            return Err(ExternalPolynomialError::InvalidPlan);
+        }
         let next_executor_step = first_executor_step
             .checked_add(pass_count)
             .ok_or(ExternalPolynomialError::CountOverflow)?;
@@ -388,10 +446,20 @@ impl ExternalStockhamTransformPlan {
             let executor_step = first_executor_step
                 .checked_add(stage_ordinal)
                 .ok_or(ExternalPolynomialError::CountOverflow)?;
-            let object = ProofExternalMemoryObject::new(next_object_ordinal);
-            next_object_ordinal = next_object_ordinal
-                .checked_add(1)
-                .ok_or(ExternalPolynomialError::CountOverflow)?;
+            let object = if let Some(objects) = output_objects {
+                *objects
+                    .get(
+                        usize::try_from(stage_ordinal)
+                            .map_err(|_| ExternalPolynomialError::CountOverflow)?,
+                    )
+                    .ok_or(ExternalPolynomialError::InvalidPlan)?
+            } else {
+                let object = ProofExternalMemoryObject::new(next_object_ordinal);
+                next_object_ordinal = next_object_ordinal
+                    .checked_add(1)
+                    .ok_or(ExternalPolynomialError::CountOverflow)?;
+                object
+            };
             let output = ExternalPolynomialVector::new(object, source.value_type, domain_size)?;
             let last_use_step = if stage_ordinal + 1 == pass_count {
                 final_output_last_use_step
@@ -457,6 +525,14 @@ impl ExternalStockhamTransformPlan {
             input = output;
         }
         let final_output = input;
+        if let Some(objects) = output_objects {
+            next_object_ordinal = objects
+                .iter()
+                .map(|object| object.ordinal())
+                .max()
+                .and_then(|ordinal| ordinal.checked_add(1))
+                .ok_or(ExternalPolynomialError::InvalidPlan)?;
+        }
         let pass_count_u64 = u64::from(pass_count);
         let total_written_byte_length = output_exact_byte_length
             .checked_mul(pass_count_u64)
@@ -699,6 +775,15 @@ impl ExternalPolynomialValues {
                 Ok(Zeroizing::new(extension_values))
             }
             Self::Extension(values) => Ok(values),
+        }
+    }
+
+    fn into_base_values(
+        self,
+    ) -> Result<Zeroizing<Vec<ProofBaseFieldElement>>, ExternalPolynomialError> {
+        match self {
+            Self::Base(values) => Ok(values),
+            Self::Extension(_) => Err(ExternalPolynomialError::InvalidVector),
         }
     }
 }
@@ -1357,6 +1442,37 @@ pub(crate) fn read_external_polynomial_extension_values<Storage: ProofExternalMe
     values.into_extension_values().map_err(Into::into)
 }
 
+pub(crate) fn read_external_polynomial_base_values<Storage: ProofExternalMemory>(
+    executor: &mut ProofExternalMemoryExecutor,
+    storage: &mut Storage,
+    vector: ExternalPolynomialVector,
+    element_offset: usize,
+    element_count: usize,
+) -> Result<Zeroizing<Vec<ProofBaseFieldElement>>, ExternalStockhamTransformError<Storage::Error>> {
+    if vector.value_type() != RelationColumnValueType::BaseField
+        || element_count == 0
+        || element_offset
+            .checked_add(element_count)
+            .filter(|end| *end <= vector.element_count())
+            .is_none()
+    {
+        return Err(ExternalPolynomialError::InvalidVector.into());
+    }
+    let mut values = ExternalPolynomialValues::with_capacity(vector.value_type(), element_count)?;
+    if !read_external_values(
+        executor,
+        storage,
+        vector,
+        element_offset,
+        element_count,
+        &mut values,
+    )? || values.len() != element_count
+    {
+        return Err(ExternalPolynomialError::InvalidVector.into());
+    }
+    values.into_base_values().map_err(Into::into)
+}
+
 pub(crate) const fn external_value_byte_length(value_type: RelationColumnValueType) -> u64 {
     match value_type {
         RelationColumnValueType::BaseField => BASE_FIELD_ELEMENT_BYTE_LENGTH as u64,
@@ -1690,6 +1806,24 @@ mod tests {
         encoded_source: &[u8],
         maximum_chunk_byte_length: u32,
     ) -> CompletedTransform {
+        execute_transform_with_output_objects(
+            domain,
+            value_type,
+            direction,
+            encoded_source,
+            maximum_chunk_byte_length,
+            None,
+        )
+    }
+
+    fn execute_transform_with_output_objects(
+        domain: ProofEvaluationDomain,
+        value_type: RelationColumnValueType,
+        direction: ExternalStockhamTransformDirection,
+        encoded_source: &[u8],
+        maximum_chunk_byte_length: u32,
+        output_objects: Option<&[ProofExternalMemoryObject]>,
+    ) -> CompletedTransform {
         let domain_size = domain.size();
         let value_byte_length = usize::try_from(external_value_byte_length(value_type))
             .expect("the value byte length fits usize");
@@ -1712,16 +1846,29 @@ mod tests {
             .expect("source length fits usize")
         );
         let first_transform_step = 1;
-        let transform_plan = ExternalStockhamTransformPlan::new(
-            domain,
-            direction,
-            source,
-            1,
-            first_transform_step,
-            first_transform_step + domain_size.trailing_zeros(),
-            maximum_chunk_byte_length,
-            ProofExternalMemoryProtection::PublicIntegrity,
-        )
+        let transform_plan = if let Some(output_objects) = output_objects {
+            ExternalStockhamTransformPlan::new_with_output_objects(
+                domain,
+                direction,
+                source,
+                output_objects,
+                first_transform_step,
+                first_transform_step + domain_size.trailing_zeros(),
+                maximum_chunk_byte_length,
+                ProofExternalMemoryProtection::PublicIntegrity,
+            )
+        } else {
+            ExternalStockhamTransformPlan::new(
+                domain,
+                direction,
+                source,
+                1,
+                first_transform_step,
+                first_transform_step + domain_size.trailing_zeros(),
+                maximum_chunk_byte_length,
+                ProofExternalMemoryProtection::PublicIntegrity,
+            )
+        }
         .expect("the external transform plan is valid");
         let final_step = transform_plan.next_executor_step();
         let mut object_plans = vec![ProofExternalMemoryObjectPlan::new(
@@ -1941,6 +2088,51 @@ mod tests {
                 extension_coefficients,
             );
         }
+    }
+
+    #[test]
+    fn stockham_backend_reuses_two_intermediate_objects_without_changing_output() {
+        let domain = ProofEvaluationDomain::new(32, PROOF_EVALUATION_COSET_OFFSET)
+            .expect("the test domain is valid");
+        let coefficients = (0..17)
+            .map(|index| extension(index as u64 + 9))
+            .collect::<Vec<_>>();
+        let encoded_coefficients = encode_extension(&coefficients);
+        let output_objects = [
+            ProofExternalMemoryObject::new(1),
+            ProofExternalMemoryObject::new(2),
+            ProofExternalMemoryObject::new(1),
+            ProofExternalMemoryObject::new(2),
+            ProofExternalMemoryObject::new(3),
+        ];
+        let reused = execute_transform_with_output_objects(
+            domain,
+            RelationColumnValueType::ChallengeExtension,
+            ExternalStockhamTransformDirection::Forward,
+            &encoded_coefficients,
+            80,
+            Some(&output_objects),
+        );
+        let ordinary = execute_transform(
+            domain,
+            RelationColumnValueType::ChallengeExtension,
+            ExternalStockhamTransformDirection::Forward,
+            &encoded_coefficients,
+            80,
+        );
+        assert_eq!(reused.encoded_output, ordinary.encoded_output);
+        assert_eq!(
+            reused
+                .plan
+                .object_plans()
+                .iter()
+                .map(|plan| plan.object())
+                .collect::<BTreeSet<_>>()
+                .len(),
+            3,
+        );
+        assert_eq!(reused.plan.object_plans().len(), 5);
+        assert_eq!(reused.usage.deleted_object_count(), 6);
     }
 
     #[test]

@@ -419,6 +419,7 @@ pub(crate) fn resolve_prepared_public_only_proof_attempt_source(
             PUBLIC_ONLY_PROOF_ATTEMPT_LINEAGE_DOMAIN,
             &[
                 randomness.setup_attempt_identifier().as_bytes(),
+                verified_reservation_binding.authorization_hash.as_bytes(),
                 application_slot_hash.as_bytes(),
                 application_statement_hash.as_bytes(),
             ],
