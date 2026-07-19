@@ -65,8 +65,6 @@ impl From<RelationPlanError> for SelectedEvaluatorAggregatePlanError {
 pub(crate) fn selected_evaluator_aggregate_relation_plan()
 -> Result<CompiledRelationPlan, SelectedEvaluatorAggregatePlanError> {
     if KEY_SWITCH_DATA_PRIMES_PER_BLOCK == 0
-        || DATA_PRIMES.is_empty()
-        || SPECIAL_PRIMES.is_empty()
         || POLYNOMIAL_DEGREE < 2
         || POLYNOMIAL_DEGREE / 2
             != usize::try_from(SELECTED_PUBLIC_POLYNOMIAL_COLUMN_DEGREE_BOUND_EXCLUSIVE)
@@ -697,13 +695,12 @@ impl SelectedEvaluatorStoreConstruction {
         if output_chunk.is_some()
             && self.ready_output_chunks.is_empty()
             && self.store_finish_pending
+            && let Err(reason) = self.finish_store_writer()
         {
-            if let Err(reason) = self.finish_store_writer() {
-                self.refusal_reason = Some(reason);
-                self.store_pending_chunk.clear();
-                self.ready_output_chunks.clear();
-                return Err(reason);
-            }
+            self.refusal_reason = Some(reason);
+            self.store_pending_chunk.clear();
+            self.ready_output_chunks.clear();
+            return Err(reason);
         }
         Ok(output_chunk)
     }

@@ -775,7 +775,9 @@ fn construct_vss_material(
             )?);
         }
 
-        for recipient_roster_position in 0..participant_count {
+        for (recipient_roster_position, recipient_payload_limb_list) in
+            recipient_payload_limbs.iter_mut().enumerate()
+        {
             let canonical_share_coefficients = evaluate_recipient_share(
                 &sharing_coefficients,
                 recipient_roster_position,
@@ -809,7 +811,7 @@ fn construct_vss_material(
                 &canonical_share_coefficients,
                 modulus,
             )?);
-            recipient_payload_limbs[recipient_roster_position].push(RecipientPayloadLimb {
+            recipient_payload_limb_list.push(RecipientPayloadLimb {
                 sharing_limb_index,
                 canonical_share_coefficients,
                 recipient_share_material_seed: material_seed,
@@ -858,7 +860,7 @@ fn construct_committed_material(
     canonical_message: &[u64],
     canonical_modulus: u64,
 ) -> Result<SetupGeneratedCommittedMaterial, RefusalReason> {
-    let (tree, trace_rows) = CommittedMaterialTree::from_canonical_message(
+    let tree = CommittedMaterialTree::from_canonical_message(
         committed_material_profile,
         material_context_hash,
         material_seed,
@@ -866,7 +868,6 @@ fn construct_committed_material(
         canonical_modulus,
     )
     .map_err(|_| RefusalReason::InvalidArithmeticRelation)?;
-    drop(trace_rows);
     SetupGeneratedCommittedMaterial::from_recomputed_tree_and_canonical_message(
         tree,
         Zeroizing::new(canonical_message.to_vec().into_boxed_slice()),
@@ -957,80 +958,6 @@ fn construct_galois_entries(
         )?);
     }
     Ok(ordered_entries)
-}
-
-/// Produces the exact runtime component consumed by production replay while
-/// keeping test fixtures on the suite-owned common-reference sampler. Zero is
-/// a valid bounded error witness.
-#[cfg(test)]
-pub(crate) fn deterministic_galois_runtime_component_bytes_for_tests(
-    selected_suite: &SelectedSuiteCapability,
-    evaluator_position: crate::bgv::proof_suite::SelectedEvaluatorEntryPosition,
-    common_secret_coefficients: &[i64],
-    public_setup_seed: &[u8; Hash512::BYTE_LENGTH],
-) -> Result<Vec<u8>, RefusalReason> {
-    if !selected_evaluator_galois_entry_positions()
-        .map_err(|_| RefusalReason::UnsupportedVersionOrSuite)?
-        .contains(&evaluator_position)
-    {
-        return Err(RefusalReason::WrongContext);
-    }
-    let SelectedEvaluatorEntryKind::Galois {
-        galois_element,
-        catalog_level,
-    } = evaluator_position.key_kind()
-    else {
-        return Err(RefusalReason::WrongTypeOrLength);
-    };
-    let ring_degree = usize::try_from(selected_suite.polynomial_degree())
-        .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
-    if common_secret_coefficients.len() != ring_degree
-        || common_secret_coefficients
-            .iter()
-            .any(|coefficient| !(-1..=1).contains(coefficient))
-    {
-        return Err(RefusalReason::WrongTypeOrLength);
-    }
-    let common_secret_coefficients = Zeroizing::new(
-        common_secret_coefficients
-            .iter()
-            .copied()
-            .map(|coefficient| {
-                i8::try_from(coefficient).map_err(|_| RefusalReason::OutsideSupportedProfile)
-            })
-            .collect::<Result<Vec<_>, _>>()?,
-    );
-    let common_secret_i64 = Zeroizing::new(
-        common_secret_coefficients
-            .iter()
-            .copied()
-            .map(i64::from)
-            .collect::<Vec<_>>(),
-    );
-    let automorphed_secret_coefficients = Zeroizing::new(
-        apply_negacyclic_automorphism(
-            &common_secret_i64,
-            u64::try_from(galois_element).map_err(|_| RefusalReason::OutsideSupportedProfile)?,
-        )
-        .map_err(|_| RefusalReason::InvalidArithmeticRelation)?,
-    );
-    let topology = KeySwitchComponentMaterialTopology::from_selected_suite_at_level(
-        selected_suite,
-        catalog_level,
-    )?;
-    let centered_error_polynomials_by_block = (0..topology.data_block_count())
-        .map(|_| Zeroizing::new(vec![0_i8; ring_degree]))
-        .collect::<Vec<_>>();
-    construct_galois_component_bytes(
-        selected_suite,
-        &topology,
-        evaluator_position.schedule_position(),
-        catalog_level,
-        &common_secret_coefficients,
-        &automorphed_secret_coefficients,
-        &centered_error_polynomials_by_block,
-        public_setup_seed,
-    )
 }
 
 #[allow(clippy::too_many_arguments)]

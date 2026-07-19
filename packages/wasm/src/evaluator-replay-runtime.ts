@@ -203,6 +203,46 @@ const throwIfCancelled = (signal?: AbortSignal): void => {
     }
 };
 
+const awaitAbortableHostOperation = async <Result>(
+    signal: AbortSignal | undefined,
+    startOperation: () => Promise<Result>,
+    disposeLateResult?: (result: Result) => void,
+): Promise<Result> => {
+    if (signal === undefined) {
+        return await startOperation();
+    }
+    throwIfCancelled(signal);
+
+    const cancellationError = new CanonicalStreamCancellationError();
+    const operationState = { cancellationWon: false };
+    let abortListener = (): void => undefined;
+    const cancellationPromise = new Promise<never>((_resolve, reject) => {
+        abortListener = (): void => {
+            operationState.cancellationWon = true;
+            reject(cancellationError);
+        };
+    });
+    signal.addEventListener('abort', abortListener, { once: true });
+    if (signal.aborted) {
+        abortListener();
+    }
+
+    const hostOperationPromise = Promise.resolve()
+        .then(startOperation)
+        .then((result) => {
+            if (operationState.cancellationWon) {
+                disposeLateResult?.(result);
+                throw cancellationError;
+            }
+            return result;
+        });
+    try {
+        return await Promise.race([hostOperationPromise, cancellationPromise]);
+    } finally {
+        signal.removeEventListener('abort', abortListener);
+    }
+};
+
 const decodeProgress = (bytes: Uint8Array): EvaluatorExecutionProgress => {
     if (bytes.byteLength !== evaluatorProgressByteLength) {
         throw new CanonicalStreamInternalError(
@@ -607,11 +647,16 @@ export const prepareEvaluatorReplayInClosedWorker = async (input: {
                 memoryBoundary.validateAllocationByteLength(
                     progress.exactByteLength,
                 );
-                const chunkBytes = await readExactStoreRange({
-                    exactByteLength: progress.exactByteLength,
-                    source: input.evaluatorKeyStore,
-                    storeByteOffset: progress.storeByteOffset,
-                });
+                const chunkBytes = await awaitAbortableHostOperation(
+                    signal,
+                    () =>
+                        readExactStoreRange({
+                            exactByteLength: progress.exactByteLength,
+                            source: input.evaluatorKeyStore,
+                            storeByteOffset: progress.storeByteOffset,
+                        }),
+                    (lateChunkBytes) => lateChunkBytes.fill(0),
+                );
                 try {
                     input.options?.observeEvaluatorKeyStoreRangeRead?.(
                         Object.freeze({
@@ -648,7 +693,7 @@ export const prepareEvaluatorReplayInClosedWorker = async (input: {
                 } finally {
                     chunkBytes.fill(0);
                 }
-                await yieldControl();
+                await awaitAbortableHostOperation(signal, yieldControl);
             }
         } finally {
             memoryBoundary.zeroAndDeallocate(

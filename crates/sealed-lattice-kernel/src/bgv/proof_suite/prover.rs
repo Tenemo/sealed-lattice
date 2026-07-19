@@ -8,15 +8,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use zeroize::{Zeroize, Zeroizing};
 
-use crate::foundation::{
-    ActionPrivateRandomness, CanonicalDecodeLimits, CanonicalItem, CanonicalItemType,
-    CanonicalTuple, FoundationSchemaError, Hash512, PRIVATE_PROOF_SALT_PURPOSE,
-    PrivateRandomCursor, PrivateRandomnessAttemptIdentifier, PrivateRandomnessDomain,
-    PrivateRandomnessKmacInputClassAccounting, PrivateRandomnessStream, ProofObjectHeader,
-    hash_foundation_tuple_512, private_randomness_stream_block_count_for_byte_length,
-    private_randomness_stream_block_count_for_modulo_outputs,
-    proof_attempt_identifier_derivation_count,
-};
+use crate::foundation::{CanonicalDecodeLimits, CanonicalItemType, ProofObjectHeader};
 use crate::hashing::StreamingHash512;
 
 use super::body::{
@@ -39,7 +31,7 @@ use super::external_polynomial::{
     map_external_polynomial_plan_error, read_external_polynomial_base_values,
     read_external_polynomial_extension_values, read_external_polynomial_value,
 };
-use super::merkle::{PROOF_MERKLE_NODE_SCHEMA_IDENTIFIER, minimal_frontier_coordinates};
+use super::merkle::minimal_frontier_coordinates;
 use super::relation_plan::{
     BoundTreeConstructionKind, CheckedRelationApplicationChallenges, ProofPrivacyMode,
     RelationColumnDescriptor, RelationColumnOrigin, RelationColumnValueType,
@@ -48,16 +40,15 @@ use super::relation_plan::{
     RelationIntegerLiftConvolutionProductDescriptor, RelationIntegerLiftFullRingHalf,
     RelationIntegerLiftFullRingNegacyclicProductDescriptor,
     RelationIntegerLiftLinearTermDescriptor,
-    RelationIntegerLiftNegacyclicAutomorphismPermutationDescriptor, RelationMaskCoordinate,
-    RelationMaskDescriptor, RelationMaskKind, RelationMaskTargetClass,
-    RelationOpeningClaimDescriptor, RelationOpeningSourceClass, RelationTreeDescriptor,
+    RelationIntegerLiftNegacyclicAutomorphismPermutationDescriptor, RelationMaskDescriptor,
+    RelationMaskKind, RelationMaskTargetClass, RelationOpeningClaimDescriptor,
+    RelationOpeningSourceClass, RelationTreeDescriptor,
 };
 use super::{
     COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH, CommonProofChallenge, CommonProofPrivacyMode,
     CommonProofQueryOpeningAbsorber, CommonProofTranscript, CommonProofTranscriptSchedule,
     CompiledRelationPlan, CompleteProofTreeCatalog, MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH,
-    MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH, PROOF_BASE_FIELD_MODULUS,
-    PROOF_CHALLENGE_EXTENSION_DEGREE, PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT,
+    MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH, PROOF_CHALLENGE_EXTENSION_DEGREE,
     ProofBaseFieldElement, ProofBodyError, ProofChallengeExtensionElement, ProofEvaluationDomain,
     ProofFieldError, ProofLeafVisibility, ProofMerkleError, ProofMerkleTreeContext,
     ProofOraclePhasePairLeaf, ProofPolynomialError, ProofProfileError, ProofTreeCatalogEntry,
@@ -66,12 +57,10 @@ use super::{
     RelationPlanVariant, RelationProofTreeInput, StatementOwnedProofTreeInput,
     SuiteModulusReference, TranscriptError, ValidatedRelationPlanArtifact,
     build_complete_proof_tree_catalog, divide_extension_polynomial_by_linear_in_place,
-    evaluate_extension_at, extension_polynomial_degree, fold_extension_evaluations,
-    fold_extension_evaluations_in_place,
+    evaluate_extension_at, extension_polynomial_degree, fold_extension_evaluations_in_place,
 };
 
 const SCHEMA_VERSION: u16 = 1;
-const PROOF_MERKLE_NODE_HASH_DOMAIN: &str = "sealed-lattice/proof/merkle/node/v1";
 const HASH_BYTE_LENGTH: usize = 64;
 const AUTHENTICATION_DIGEST_BYTE_LENGTH: usize = 64;
 const CHECKPOINT_COMMITTED_STATE_HASH_DOMAIN: &str =
@@ -131,15 +120,12 @@ mod relation_columns;
 
 pub(crate) use encoding::{
     BoundedCommonProofByteSink, BoundedCommonProofByteSinkError, CommonProofByteSink,
-    CommonProofEncodingError, CommonProofOpeningGeometry, CommonProofTranscriptQuerySink,
-    CommonProofTranscriptQuerySinkError, canonical_common_proof_query_section_header,
-    canonical_proof_object_header_bytes, common_proof_query_section_byte_length,
-    encode_common_proof_query_tree_fragment, write_common_proof_prefix,
+    CommonProofEncodingError, CommonProofOpeningGeometry,
+    canonical_common_proof_query_section_header, canonical_proof_object_header_bytes,
+    common_proof_query_section_byte_length, encode_common_proof_query_tree_fragment,
+    write_common_proof_prefix,
 };
-pub(crate) use fri::{
-    construct_fri_terminal_coefficients, construct_initial_fri_polynomial,
-    construct_next_fri_layer, construct_opening_batch_mask, evaluate_ordered_deep_openings,
-};
+pub(crate) use fri::construct_opening_batch_mask;
 #[cfg(test)]
 pub(crate) use generation_state::generate_common_proof;
 pub(crate) use generation_state::{
@@ -149,22 +135,18 @@ pub(crate) use generation_state::{
 pub(crate) use generation_storage::{
     CommonProofExternalMemoryRequirement, CommonProofGenerationError,
     CommonProofGenerationInitializationError, CommonProofGenerationInput,
-    CommonProofResidentInfrastructurePayloadAccounting, CommonProofResidentMemoryPhase,
-    CommonProofResidentMemoryPhasePlan, CommonProofResidentMemoryPlan,
+    CommonProofResidentMemoryPhase, CommonProofResidentMemoryPlan,
     GeneratedCommonProofStoragePlanError, MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH,
     common_proof_external_memory_requirement, common_proof_resident_memory_plan,
     common_proof_resident_memory_requirement,
 };
 pub(crate) use merkle_storage::{
-    CommonProofColumnMajorMerkleReplay, CommonProofColumnMajorMerkleReplayMemoryAccounting,
-    CommonProofColumnMajorMerkleReplayMode, CommonProofColumnMajorMerkleRootPass,
     CommonProofMerkleMaterializer, CommonProofMerkleMaterializerProgress,
     CommonProofMerkleStoragePlan, CommonProofOpeningPrefetchProgress, CommonProofOpeningPrefetcher,
     CommonProofTreeStorageError, PrefetchedCommonProofOpeningArtifact,
-    SetupPolynomialColumnMajorMerkleReplay, SetupPolynomialColumnMajorMerkleReplayMemoryAccounting,
-    SetupPolynomialColumnMajorMerkleReplayMode, SetupPolynomialColumnMajorMerkleRootPass,
-    StatementOwnedMerkleReplay, StatementOwnedMerkleReplayMode, StoredCommonProofMerkleTree,
-    common_proof_merkle_storage_plan,
+    SetupPolynomialColumnMajorMerkleReplay, SetupPolynomialColumnMajorMerkleReplayMode,
+    SetupPolynomialColumnMajorMerkleRootPass, StatementOwnedMerkleReplay,
+    StatementOwnedMerkleReplayMode, StoredCommonProofMerkleTree, common_proof_merkle_storage_plan,
     setup_polynomial_column_major_merkle_replay_wasm_memory_bound,
 };
 pub(crate) use private_coins::{
@@ -172,16 +154,14 @@ pub(crate) use private_coins::{
     CommonProofCheckpointCursorManifestRequirement, CommonProofPrivateCoinCoordinate,
     CommonProofPrivateCoinCoordinateCapacity, CommonProofPrivateCoinReplayCursor,
     CommonProofPrivateCoinReplaySpan, CommonProofPrivateCoinReplaySpanStart,
-    CommonProofPrivateCoinSource, CommonProofPrivateRandomnessAccountingError,
-    MAXIMUM_COMMON_PROOF_CHECKPOINT_CURSOR_MANIFEST_BYTE_LENGTH,
-    MAXIMUM_COMMON_PROOF_CHECKPOINT_CURSOR_MANIFEST_RUN_COUNT,
-    PrivateRandomnessCommonProofCoinError, PrivateRandomnessCommonProofCoinSource,
-    PublicOnlyCommonProofCoinError, PublicOnlyCommonProofCoinSource,
+    CommonProofPrivateCoinSource, PrivateRandomnessCommonProofCoinError,
+    PrivateRandomnessCommonProofCoinSource, PublicOnlyCommonProofCoinSource,
     ReplayableCommonProofPrivateCoinCatalogSource, ReplayableCommonProofPrivateCoinSource,
-    common_proof_checkpoint_cursor_manifest_requirement,
     common_proof_checkpoint_cursor_manifest_requirement_for_variant,
+};
+#[cfg(test)]
+pub(crate) use private_coins::{
     common_proof_private_coin_coordinate_derivation_context_hash,
-    common_proof_private_randomness_kmac_input_accounting,
     encode_common_proof_checkpoint_cursor_manifest,
 };
 #[cfg(test)]
@@ -192,20 +172,18 @@ pub(crate) use quotient::{
 };
 #[cfg(test)]
 pub(crate) use relation_columns::ResidentCommonProofSourcePolynomialProvider;
+#[cfg(test)]
+pub(crate) use relation_columns::construct_pre_challenge_relation_columns;
 pub(crate) use relation_columns::{
     CommonProofAuthenticatedSourceReadRequest, CommonProofAuxiliaryColumnSynthesisCursor,
-    CommonProofBoundTreeLeafSaltRequest, CommonProofColumnEvaluations,
-    CommonProofPreChallengeRelationColumns, CommonProofPreChallengeSourceCursor,
+    CommonProofBoundTreeLeafSaltRequest, CommonProofPreChallengeSourceCursor,
     CommonProofPreChallengeSourcePoll, CommonProofPrivateCoinError, CommonProofSourcePolynomial,
     CommonProofSourcePolynomialProvider, CommonProofSourcePolynomialProviderPoll,
     CommonProofSourcePolynomialReplayIdentity, CommonProofSourcePolynomialRequest,
     CommonProofSourcePolynomialRequestContext, CommonProofSourceProviderMemoryAccounting,
-    ProvidedCommonProofSourcePolynomial, apply_trace_mask, base_trace_rows,
-    construct_post_challenge_relation_columns, construct_pre_challenge_relation_columns,
-    construct_reversed_relation_column, evaluate_common_proof_tree_columns,
-    evaluate_pre_challenge_common_proof_tree_columns, integer_lift_derived_columns,
-    maximum_auxiliary_synthesis_trace_vector_count, proof_created_tree_roles_by_column,
-    relation_column_replay_requirements, sample_private_base_polynomial,
+    ProvidedCommonProofSourcePolynomial, apply_trace_mask, construct_reversed_relation_column,
+    integer_lift_derived_columns, maximum_auxiliary_synthesis_trace_vector_count,
+    proof_created_tree_roles_by_column, relation_column_replay_requirements,
     sample_private_extension_polynomial,
 };
 
@@ -223,7 +201,7 @@ use generation_storage::{
     CommonProofGenerationPollResult, CommonProofReplayPolynomialKey,
     CommonProofReplayPolynomialPlan, CommonProofReplayPolynomialReader,
     CommonProofReplayPolynomialRef, CommonProofReplayPolynomialWriter,
-    GeneratedCommonProofStoragePlan, generated_common_proof_storage_plan, insert_materialized_tree,
+    generated_common_proof_storage_plan, insert_materialized_tree,
     map_private_coin_generation_error, statement_owned_tree_root, unique_catalog_entry,
     validate_generation_relation_trees,
 };

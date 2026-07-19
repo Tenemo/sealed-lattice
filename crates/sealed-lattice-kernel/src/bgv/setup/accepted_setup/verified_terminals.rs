@@ -2089,8 +2089,7 @@ mod tests {
         assert_eq!(
             catalog
                 .require_matches_verified_qualification(&qualification)
-                .err()
-                .expect("a different compact dealer authority refuses"),
+                .expect_err("a different compact dealer authority refuses"),
             RefusalReason::WrongContext
         );
     }
@@ -2116,16 +2115,16 @@ mod tests {
             .iter()
             .map(Vec::as_slice)
             .collect::<Vec<_>>();
-        assert_eq!(
+        let refusal_reason = match
             VerifiedGeneratedPrivateVssMailboxCorpusByteLengthCatalog::from_verified_dealer_terminals(
                 &verified_public_randomness,
                 &dealer_terminals,
                 GeneratedPrivateVssMailboxCorpusInput::new(&canonical_envelope_references),
-            )
-            .err()
-            .expect("an envelope outside the verified matrix refuses"),
-            RefusalReason::WrongHashOrRoot
-        );
+            ) {
+                Ok(_) => panic!("an envelope outside the verified matrix must refuse"),
+                Err(refusal_reason) => refusal_reason,
+            };
+        assert_eq!(refusal_reason, RefusalReason::WrongHashOrRoot);
     }
 
     #[test]
@@ -2142,16 +2141,16 @@ mod tests {
             .collect::<Vec<_>>();
         let mut incomplete_envelope_references = canonical_envelope_references.clone();
         incomplete_envelope_references.pop();
-        assert_eq!(
+        let refusal_reason = match
             VerifiedGeneratedPrivateVssMailboxCorpusByteLengthCatalog::from_verified_dealer_terminals(
                 &verified_public_randomness,
                 &dealer_terminals,
                 GeneratedPrivateVssMailboxCorpusInput::new(&incomplete_envelope_references),
-            )
-            .err()
-            .expect("an incomplete selected-roster mailbox corpus refuses"),
-            RefusalReason::WrongTypeOrLength,
-        );
+            ) {
+                Ok(_) => panic!("an incomplete selected-roster mailbox corpus must refuse"),
+                Err(refusal_reason) => refusal_reason,
+            };
+        assert_eq!(refusal_reason, RefusalReason::WrongTypeOrLength);
 
         let restored_catalog =
             VerifiedGeneratedPrivateVssMailboxCorpusByteLengthCatalog::from_verified_dealer_terminals(

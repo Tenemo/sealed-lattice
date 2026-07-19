@@ -711,6 +711,27 @@ mod tests {
     }
 
     #[test]
+    fn resident_evaluator_key_guard_releases_ownership_on_drop() {
+        let resident_key_active = Rc::new(Cell::new(false));
+        let first_guard = ResidentEvaluatorKeyGuard::acquire(Rc::clone(&resident_key_active))
+            .expect("the first resident evaluator key guard is available");
+        assert!(resident_key_active.get());
+        assert!(matches!(
+            ResidentEvaluatorKeyGuard::acquire(Rc::clone(&resident_key_active)),
+            Err(RefusalReason::ConsumedState)
+        ));
+
+        drop(first_guard);
+        assert!(!resident_key_active.get());
+
+        let reused_guard = ResidentEvaluatorKeyGuard::acquire(Rc::clone(&resident_key_active))
+            .expect("the resident evaluator key guard is reusable after drop");
+        assert!(resident_key_active.get());
+        drop(reused_guard);
+        assert!(!resident_key_active.get());
+    }
+
+    #[test]
     fn component_decoder_streams_exact_block_limb_order_across_unaligned_chunks() {
         let topology = test_topology();
         let bytes = test_component_bytes();

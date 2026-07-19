@@ -79,10 +79,10 @@ pub(crate) fn negacyclic_mul(
 pub(crate) struct Ciphertext {
     pub(crate) components: Vec<Vec<Vec<u64>>>,
     pub(crate) level: usize,
-    // The plaintext-field scaling factor f such that raw decryption recovers
-    // m * f (mod plaintext modulus). Modulus switching multiplies f by the
-    // dropped prime's inverse and multiplication multiplies the two factors, so
-    // decryption divides the raw result by this tracked factor.
+    // The nonzero plaintext-field decryption multiplier delta. Raw decryption
+    // recovers delta^(-1) * m modulo the plaintext modulus, and decoding
+    // multiplies by delta. Modulus switching multiplies delta by the dropped
+    // prime, while ciphertext multiplication multiplies the operand multipliers.
     pub(crate) decrypt_scaling: u64,
 }
 
@@ -567,41 +567,46 @@ mod tests {
     }
 
     #[test]
-    fn modulus_switch_chain_preserves_slots_and_drops_levels() {
+    fn selected_modulus_switch_chain_preserves_slots_and_unit_scaling() {
         let key = shared_key();
         let ciphertext = key
-            .encrypt_slots(&[11, 22, 65_500], "aa10")
+            .encrypt_slots(&[11, 22, PLAINTEXT_MODULUS - 1], "aa10")
             .expect("encrypt");
         let switched = modulus_switch(&ciphertext).expect("modulus switch");
         assert_eq!(switched.level, ciphertext.level - 1);
-        assert_eq!(decrypt_prefix(key, &switched, 3), vec![11, 22, 65_500]);
+        assert_eq!(switched.decrypt_scaling, 1);
+        assert_eq!(
+            decrypt_prefix(key, &switched, 3),
+            vec![11, 22, PLAINTEXT_MODULUS - 1]
+        );
 
         let mut ciphertext = key.encrypt_slots(&[42, 9, 100], "aa11").expect("encrypt");
         for _ in 0..4 {
             ciphertext = modulus_switch(&ciphertext).expect("modulus switch");
+            assert_eq!(ciphertext.decrypt_scaling, 1);
         }
         assert_eq!(ciphertext.level, super::EVALUATOR_FULL_LEVEL - 4);
         assert_eq!(decrypt_prefix(key, &ciphertext, 3), vec![42, 9, 100]);
     }
 
     #[test]
-    fn exact_level_switch_and_scaling_normalization_preserve_plaintext() {
+    fn selected_exact_level_switch_keeps_unit_scaling_and_normalization_is_a_no_op() {
         let key = shared_key();
-        let plaintext = vec![0, 1, 17, 32_768, PLAINTEXT_MODULUS - 1];
+        let plaintext = vec![0, 1, 17, PLAINTEXT_MODULUS / 2, PLAINTEXT_MODULUS - 1];
         let ciphertext = key
-            .encrypt_slots(&plaintext, "exact-level-and-scaling")
+            .encrypt_slots(&plaintext, "selected-exact-level-and-scaling")
             .expect("encrypt");
         let target_level = ciphertext.level - 3;
 
         let switched = modulus_switch_to(&ciphertext, target_level).expect("switch to exact level");
         assert_eq!(switched.level, target_level);
-        assert_ne!(switched.decrypt_scaling, 1);
+        assert_eq!(switched.decrypt_scaling, 1);
         assert_eq!(decrypt_prefix(key, &switched, plaintext.len()), plaintext);
 
         let normalized = normalize_scaling(&switched).expect("normalize scaling");
         assert_eq!(normalized.level, target_level);
         assert_eq!(normalized.decrypt_scaling, 1);
-        assert_ne!(normalized.components, switched.components);
+        assert_eq!(normalized.components, switched.components);
         assert_eq!(decrypt_prefix(key, &normalized, plaintext.len()), plaintext);
 
         let unchanged = modulus_switch_to(&normalized, target_level + 1)

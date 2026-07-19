@@ -6,10 +6,12 @@ use crate::bgv::{
     evaluator::top_k::CANONICAL_TARGET_CIPHERTEXT_LEVEL,
     parameters::{DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE, SPECIAL_PRIMES},
 };
+use crate::foundation::{ProofApplicationSlotCeilings, selected_sharing_data_prime_coordinates};
+
+#[cfg(test)]
 use crate::foundation::{
-    ProofApplicationSlotCeilings, SELECTED_MAXIMUM_BALLOT_ATTEMPTS_PER_PARTICIPANT,
+    SELECTED_MAXIMUM_BALLOT_ATTEMPTS_PER_PARTICIPANT,
     SELECTED_MAXIMUM_CANDIDATE_PACKAGES_PER_ACTION, selected_evaluator_resource_accounting,
-    selected_sharing_data_prime_coordinates,
 };
 
 use crate::{
@@ -45,20 +47,23 @@ use super::{
     CollectivePublicKeyAggregatePlanInput, CommittedMaterialProfile,
     CommittedMaterialRelationPlanInput, CompiledTargetReleaseRelation,
     EvaluatorKeyAggregateEntryPlanInput, EvaluatorKeyAggregatePlanInput,
-    EvaluatorKeyAggregateVariantInput, FirstProfileRootTopology, GaloisKeyShareRelationEntryInput,
-    GaloisKeyShareRelationPlanInput, ProofProfileError, ProofProfileSet,
-    PublicAggregateRelationGeometry, PublicKeyShareRelationPlanInput,
-    RelinearizationRoundOneRelationPlanInput, RelinearizationRoundTwoRelationPlanInput,
-    RkgRoundOneAggregatePlanInput, RkgRoundOneAggregateVariantInput, SameSecretRelationPlanInput,
-    TargetReleaseRelationPlanInput, TrusteeEvaluationKeyRelationGeometry,
-    ValidatedRelationPlanArtifact, compile_aggregate_threshold_share_relation_plan,
-    compile_ballot_validity_relation_plan, compile_collective_public_key_aggregate_relation_plan,
+    EvaluatorKeyAggregateVariantInput, GaloisKeyShareRelationEntryInput,
+    GaloisKeyShareRelationPlanInput, ProofProfileError, PublicAggregateRelationGeometry,
+    PublicKeyShareRelationPlanInput, RelinearizationRoundOneRelationPlanInput,
+    RelinearizationRoundTwoRelationPlanInput, RkgRoundOneAggregatePlanInput,
+    RkgRoundOneAggregateVariantInput, SameSecretRelationPlanInput, TargetReleaseRelationPlanInput,
+    TrusteeEvaluationKeyRelationGeometry, ValidatedRelationPlanArtifact,
+    compile_aggregate_threshold_share_relation_plan, compile_ballot_validity_relation_plan,
+    compile_collective_public_key_aggregate_relation_plan,
     compile_evaluator_key_aggregate_relation_plan, compile_galois_key_share_relation_plan,
     compile_public_key_share_relation_plan, compile_relinearization_round_one_relation_plan,
     compile_relinearization_round_two_relation_plan, compile_rkg_round_one_aggregate_relation_plan,
     compile_same_secret_relation_plan, compile_target_release_relation,
     compile_vss_share_linkage_relation_plan, selected_galois_key_share_batch_schedule,
 };
+
+#[cfg(test)]
+use super::{FirstProfileRootTopology, ProofProfileSet};
 
 pub(super) const SELECTED_OPENING_DEGREE_BOUND_EXCLUSIVE: u64 = 262_144;
 pub(super) const SELECTED_EVALUATION_DOMAIN_SIZE: u64 =
@@ -99,6 +104,7 @@ fn uses_public_aggregate_quotient_geometry(application_statement_schema_identifi
     )
 }
 
+#[cfg(test)]
 pub(crate) fn selected_proof_application_slot_ceilings()
 -> Result<ProofApplicationSlotCeilings, ProofProfileError> {
     let root_topology =
@@ -256,6 +262,7 @@ pub(crate) fn selected_ballot_validity_relation_compilation()
     )
 }
 
+#[cfg(test)]
 pub(crate) fn selected_proof_profile_set(
     maximum_ballot_attempts_per_participant: u16,
 ) -> Result<ProofProfileSet, ProofProfileError> {

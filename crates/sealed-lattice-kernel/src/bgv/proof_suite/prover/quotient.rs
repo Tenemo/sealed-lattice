@@ -1,14 +1,15 @@
+#[cfg(test)]
+use super::CommonProofColumnEvaluations;
 use super::{
-    BTreeMap, BTreeSet, CheckedRelationApplicationChallenges, CommonProofColumnEvaluations,
-    CommonProofPrivateCoinCoordinate, CommonProofPrivateCoinError, CommonProofPrivateCoinSource,
-    CommonProofProverError, CommonProofSourcePolynomial, ExternalPolynomialVector,
-    ProofBaseFieldElement, ProofChallengeExtensionElement, ProofEvaluationDomain, ProofPrivacyMode,
+    BTreeMap, BTreeSet, CheckedRelationApplicationChallenges, CommonProofPrivateCoinCoordinate,
+    CommonProofPrivateCoinError, CommonProofPrivateCoinSource, CommonProofProverError,
+    CommonProofSourcePolynomial, ExternalPolynomialVector, ProofBaseFieldElement,
+    ProofChallengeExtensionElement, ProofEvaluationDomain, ProofPrivacyMode,
     RelationApplicationChallengeAssignment, RelationColumnValueType, RelationConstraintColumnQuery,
-    RelationExpressionInstruction,
-    RelationMaskDescriptor, RelationMaskKind, RelationMaskTargetClass, RelationPlanCheckContext,
-    RelationPlanError, RelationPlanVariant, Zeroizing, add_shifted_extension_polynomial,
-    external_value_byte_length, sample_private_extension_polynomial, subtract_extension_polynomial,
-    trim_extension_polynomial,
+    RelationExpressionInstruction, RelationMaskDescriptor, RelationMaskKind,
+    RelationMaskTargetClass, RelationPlanCheckContext, RelationPlanError, RelationPlanVariant,
+    Zeroizing, add_shifted_extension_polynomial, external_value_byte_length,
+    sample_private_extension_polynomial, subtract_extension_polynomial, trim_extension_polynomial,
 };
 
 pub(super) fn validate_column_polynomials(
@@ -308,8 +309,9 @@ impl CommonProofFusedProductSumKey {
 struct CommonProofFusedProductSumDescriptor {
     key: CommonProofFusedProductSumKey,
     coefficient_period: usize,
-    ordered_terms:
-        Vec<crate::bgv::proof_suite::relation_plan::RelationConstantColumnVerifierSequenceProductTerm>,
+    ordered_terms: Vec<
+        crate::bgv::proof_suite::relation_plan::RelationConstantColumnVerifierSequenceProductTerm,
+    >,
     coefficient_count: usize,
 }
 
@@ -318,8 +320,8 @@ fn common_proof_fused_product_sum_descriptors(
 ) -> Result<Vec<CommonProofFusedProductSumDescriptor>, CommonProofProverError> {
     let mut descriptors = Vec::new();
     for (constraint_index, constraint) in variant.ordered_constraints().iter().enumerate() {
-        let constraint_ordinal = u32::try_from(constraint_index)
-            .map_err(|_| CommonProofProverError::CountOverflow)?;
+        let constraint_ordinal =
+            u32::try_from(constraint_index).map_err(|_| CommonProofProverError::CountOverflow)?;
         let mut instruction_ordinal = 0_u32;
         for instruction in constraint.numerator_postfix_expression() {
             let RelationExpressionInstruction::ConstantColumnVerifierSequenceProductSum {
@@ -351,12 +353,13 @@ fn common_proof_fused_product_sum_descriptors(
                     .and_then(|count| count.checked_sub(1))
                     .ok_or(CommonProofProverError::CountOverflow)?;
                 maximum_product_coefficient_count = Some(
-                    maximum_product_coefficient_count
-                        .map_or(coefficient_count, |maximum: u64| maximum.max(coefficient_count)),
+                    maximum_product_coefficient_count.map_or(coefficient_count, |maximum: u64| {
+                        maximum.max(coefficient_count)
+                    }),
                 );
             }
-            let maximum_product_coefficient_count = maximum_product_coefficient_count
-                .ok_or(CommonProofProverError::InvalidQuotient)?;
+            let maximum_product_coefficient_count =
+                maximum_product_coefficient_count.ok_or(CommonProofProverError::InvalidQuotient)?;
             descriptors.push(CommonProofFusedProductSumDescriptor {
                 key: CommonProofFusedProductSumKey {
                     constraint_ordinal,
@@ -438,13 +441,11 @@ impl CommonProofFusedProductSumAccumulator {
         }
         let trace_domain_size = usize::try_from(variant.trace_domain_size())
             .map_err(|_| CommonProofProverError::CountOverflow)?;
-        let evaluation_generator = ProofBaseFieldElement::from_canonical(
-            context.evaluation_domain_generator,
-        )
-        .map_err(CommonProofProverError::from)?;
-        let trace_generator = evaluation_generator.power(
-            variant.evaluation_domain_size() / variant.trace_domain_size(),
-        );
+        let evaluation_generator =
+            ProofBaseFieldElement::from_canonical(context.evaluation_domain_generator)
+                .map_err(CommonProofProverError::from)?;
+        let trace_generator = evaluation_generator
+            .power(variant.evaluation_domain_size() / variant.trace_domain_size());
         let mut descriptor_indices_by_constant_column = BTreeMap::<u32, Vec<_>>::new();
         let mut profile_periods = BTreeMap::new();
         let mut profile_use_counts = BTreeMap::<u32, usize>::new();
@@ -591,8 +592,10 @@ impl CommonProofFusedProductSumAccumulator {
 
     pub(super) fn finish(
         self,
-    ) -> Result<BTreeMap<CommonProofFusedProductSumKey, CommonProofSourcePolynomial>, CommonProofProverError>
-    {
+    ) -> Result<
+        BTreeMap<CommonProofFusedProductSumKey, CommonProofSourcePolynomial>,
+        CommonProofProverError,
+    > {
         if !self.retained_profiles.is_empty() {
             return Err(CommonProofProverError::InvalidColumn);
         }
@@ -660,13 +663,11 @@ fn add_exact_constant_trace_product(
         if reduced == 0 {
             return Err(CommonProofProverError::InvalidColumn);
         }
-        u64::try_from(trace_domain_size)
-            .map_err(|_| CommonProofProverError::CountOverflow)?
+        u64::try_from(trace_domain_size).map_err(|_| CommonProofProverError::CountOverflow)?
             - reduced
     } else {
         rotation_magnitude
-            % u64::try_from(trace_domain_size)
-                .map_err(|_| CommonProofProverError::CountOverflow)?
+            % u64::try_from(trace_domain_size).map_err(|_| CommonProofProverError::CountOverflow)?
     };
     let rotation_multiplier = trace_generator.power(signed_rotation);
     let mut multiplier_power = ProofBaseFieldElement::ONE;
@@ -688,8 +689,8 @@ fn add_exact_constant_trace_product(
         return Err(CommonProofProverError::InvalidQuotient);
     }
     for (coefficient_index, profile_coefficient) in rotated_profile.iter().copied().enumerate() {
-        accumulated[coefficient_index] = accumulated[coefficient_index]
-            .add(profile_coefficient.multiply(constant_value));
+        accumulated[coefficient_index] =
+            accumulated[coefficient_index].add(profile_coefficient.multiply(constant_value));
     }
     let mask = constant_coefficients
         .get(trace_domain_size..)
@@ -702,8 +703,7 @@ fn add_exact_constant_trace_product(
         &rotated_profile,
         coefficient_period,
         rotation_multiplier.power(
-            u64::try_from(coefficient_period)
-                .map_err(|_| CommonProofProverError::CountOverflow)?,
+            u64::try_from(coefficient_period).map_err(|_| CommonProofProverError::CountOverflow)?,
         ),
     )?;
     for (coefficient_index, product_coefficient) in product.iter().copied().enumerate() {
@@ -748,8 +748,8 @@ fn multiply_by_quasiperiodic_polynomial(
     let copied_lower_length = recurrence_start.min(right.len()).min(lower.len());
     product[..copied_lower_length].copy_from_slice(&lower[..copied_lower_length]);
     for coefficient_index in recurrence_start..right.len() {
-        product[coefficient_index] = product[coefficient_index - coefficient_period]
-            .multiply(period_ratio);
+        product[coefficient_index] =
+            product[coefficient_index - coefficient_period].multiply(period_ratio);
     }
     if left.len() > 1 {
         let reversed_left = left.iter().rev().copied().collect::<Vec<_>>();

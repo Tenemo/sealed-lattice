@@ -10,7 +10,7 @@ export type RustTestInventoryEntry = {
     readonly testName: string;
 };
 
-const parseLibtestListOutput = (output: string): readonly string[] =>
+export const parseLibtestListOutput = (output: string): readonly string[] =>
     [
         ...new Set(
             output
@@ -23,6 +23,18 @@ const parseLibtestListOutput = (output: string): readonly string[] =>
                 ),
         ),
     ].sort((left, right) => left.localeCompare(right));
+
+export const classifyRustTestInventory = (input: {
+    readonly allTests: readonly string[];
+    readonly ignoredTests: readonly string[];
+}): readonly RustTestInventoryEntry[] => {
+    const ignoredTestSet = new Set(input.ignoredTests);
+
+    return input.allTests.map((testName) => ({
+        ignored: ignoredTestSet.has(testName),
+        testName,
+    }));
+};
 
 const listFocusedTests = async (input: {
     readonly environment?: NodeJS.ProcessEnv;
@@ -71,12 +83,10 @@ export const collectFocusedRustKernelTestInventory = async (input: {
         ...input,
         ignoredOnly: false,
     });
-    const ignoredTests = new Set(
-        await listFocusedTests({ ...input, ignoredOnly: true }),
-    );
+    const ignoredTests = await listFocusedTests({
+        ...input,
+        ignoredOnly: true,
+    });
 
-    return allTests.map((testName) => ({
-        ignored: ignoredTests.has(testName),
-        testName,
-    }));
+    return classifyRustTestInventory({ allTests, ignoredTests });
 };

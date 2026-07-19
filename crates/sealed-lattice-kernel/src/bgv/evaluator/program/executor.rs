@@ -1193,12 +1193,14 @@ impl PreparedSelectedEvaluatorReplay {
 
         let verified_replay = VerifiedEvaluatorReplay::from_verified_relation(
             replay_object,
-            Hash512::from_bytes(self.roster_hash),
-            self.top_count,
-            self.target_level,
-            self.decrypt_scaling,
-            self.target_identifier_stream.clone(),
-            self.target_order_stream.clone(),
+            crate::foundation::VerifiedEvaluatorReplayRelationOutput {
+                roster_hash: Hash512::from_bytes(self.roster_hash),
+                top_count: self.top_count,
+                target_level: self.target_level,
+                decrypt_scaling: self.decrypt_scaling,
+                target_identifier_stream: self.target_identifier_stream.clone(),
+                target_order_stream: self.target_order_stream.clone(),
+            },
             limits,
         )
         .map_err(|error| error.refusal_reason)?;

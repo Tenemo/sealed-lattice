@@ -160,6 +160,8 @@ pub(crate) use polynomial::{
     evaluate_extension_at, extension_polynomial_degree, fold_extension_evaluations,
     fold_extension_evaluations_in_place,
 };
+#[cfg(test)]
+pub(crate) use profile::ProofProfileSet;
 pub(crate) use profile::{
     COMMITTED_MATERIAL_PROOF_UNIQUE_QUERY_COUNT, PROOF_DEEP_POINT_COUNT,
     PROOF_EVALUATION_BLOWUP_FACTOR, PROOF_EVALUATION_COSET_OFFSET,
@@ -168,9 +170,7 @@ pub(crate) use profile::{
     PROOF_NON_NATIVE_IDENTITY_CHALLENGE_COUNT, PROOF_UNIQUE_QUERY_COUNT, ProofProfileError,
     ValidatedRelationPlanArtifact,
 };
-pub(crate) use profile::{
-    FIRST_PROFILE_APPLICATION_FAMILIES, FirstProfileRootTopology, ProofProfileSet,
-};
+pub(crate) use profile::{FIRST_PROFILE_APPLICATION_FAMILIES, FirstProfileRootTopology};
 #[cfg(test)]
 pub(crate) use prover::{
     BoundedCommonProofByteSink, CommonProofResidentMemoryPhase, PublicOnlyCommonProofCoinSource,
@@ -293,14 +293,15 @@ pub(crate) use runtime_ffi::runtime_error_status;
 pub(crate) use selected_accounting::selected_complete_proof_resource_accounting;
 pub(crate) use selected_accounting::{SelectedProofAccountingError, selected_proof_runtime_limits};
 #[cfg(test)]
+pub(crate) use selected_profile::selected_proof_profile_set;
+#[cfg(test)]
 pub(crate) use selected_profile::selected_target_decryption_flooding_bound;
 pub(crate) use selected_profile::{
     selected_ballot_validity_relation_compilation, selected_committed_material_profile,
     selected_committed_material_relation_plan_input, selected_galois_key_share_relation_plan_input,
-    selected_proof_profile_set, selected_public_key_share_relation_plan_input,
-    selected_relation_plan_check_context, selected_relation_plans,
-    selected_relinearization_relation_plan_inputs, selected_same_secret_relation_plan_input,
-    selected_target_release_relation,
+    selected_public_key_share_relation_plan_input, selected_relation_plan_check_context,
+    selected_relation_plans, selected_relinearization_relation_plan_inputs,
+    selected_same_secret_relation_plan_input, selected_target_release_relation,
 };
 pub(crate) use setup_generation_runtime::{
     begin_setup_generation_authority, cancel_setup_generation_public_key_share_body_by_identifier,

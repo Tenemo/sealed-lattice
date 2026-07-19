@@ -35,10 +35,6 @@ pub(in crate::bgv) use self::authority::{
     lease_verified_participant_target_release_source, take_verified_evaluator_execution_authority,
     with_verified_accepted_setup_authority, with_verified_participant_target_release_source,
 };
-#[cfg(test)]
-pub(in crate::bgv) use self::authority::{
-    release_verified_accepted_setup_authority, retain_evaluator_execution_authority_for_tests,
-};
 pub(in crate::bgv) use self::canonical_package::CanonicalAcceptedSetupPackage;
 pub(crate) use self::canonical_package_builder::{
     CanonicalPackageStreamKind, add_generated_proof_source_to_accepted_setup_package_builder,
@@ -108,8 +104,6 @@ pub(in crate::bgv) use self::generation_authority::{
 pub(crate) use self::generation_authority::{
     SetupGenerationDealerPublicRecordSource, resolve_setup_generation_dealer_public_record_source,
 };
-#[cfg(test)]
-pub(in crate::bgv) use self::generation_population::deterministic_galois_runtime_component_bytes_for_tests;
 pub(in crate::bgv) use self::generation_population::populate_browser_owned_setup_generation_authority;
 pub(in crate::bgv) use self::generation_relinearization::{
     SetupGeneratedRelinearizationAggregateSourceAuthority,

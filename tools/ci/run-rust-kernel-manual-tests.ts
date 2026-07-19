@@ -2,9 +2,10 @@ import path from 'node:path';
 
 import {
     buildGuardedRustKernelCommand,
+    buildGuardedRustEnvironment,
     runGuardedRustKernelCommands,
 } from './guarded-rust-kernel-runner.js';
-import { runWithLocalRunLog } from './local-run-log.js';
+import { runWithLocalRunLog, type ActiveLocalRunLog } from './local-run-log.js';
 import {
     focusedRustLaneScripts,
     fullProfileEvidenceRustTests,
@@ -24,6 +25,42 @@ const laneLabels = {
     'rust-full-profile-evidence': 'Rust full-profile evidence',
     'rust-measurements': 'Rust measurements',
 } as const satisfies Record<ManualRustKernelLane, string>;
+
+type ManualRustLaneSelectionVerifier = (input: {
+    readonly environment?: NodeJS.ProcessEnv;
+    readonly lane: ManualRustKernelLane;
+    readonly runLog?: ActiveLocalRunLog;
+    readonly testFilter: string;
+}) => Promise<void>;
+
+export const preflightAndRunManualRustKernelLane = async (input: {
+    readonly environment?: NodeJS.ProcessEnv;
+    readonly lane: ManualRustKernelLane;
+    readonly runGuardedCommands: () => Promise<void>;
+    readonly runLog?: ActiveLocalRunLog;
+    readonly testFilters: readonly string[];
+    readonly verifyLaneSelection?: ManualRustLaneSelectionVerifier;
+}): Promise<void> => {
+    const requestedScript = focusedRustLaneScripts[input.lane];
+    if (input.testFilters.length === 0) {
+        throw new Error(`${requestedScript} has no configured Rust tests.`);
+    }
+
+    const verifyLaneSelection =
+        input.verifyLaneSelection ?? verifyFocusedRustLaneSelection;
+    for (const testFilter of input.testFilters) {
+        await verifyLaneSelection({
+            ...(input.environment === undefined
+                ? {}
+                : { environment: input.environment }),
+            lane: input.lane,
+            ...(input.runLog === undefined ? {} : { runLog: input.runLog }),
+            testFilter,
+        });
+    }
+
+    await input.runGuardedCommands();
+};
 
 const parseArguments = (
     commandArguments: readonly string[],
@@ -97,31 +134,35 @@ export const runRustKernelManualTests = async (): Promise<void> => {
                 'target',
                 `${parsed.lane}-${parsed.focusedFilter === undefined ? 'accelerated' : 'focused'}`,
             );
-            const commands = testFilters.map((testFilter) => ({
-                builtCommand: buildGuardedRustKernelCommand(testFilter, {
-                    logFileSlug: `cargo-test-${parsed.lane}`,
-                    progressLabel: parsed.lane,
-                    runName: label,
-                    targetDirectoryPath,
-                }),
-                expectedTestFilter: testFilter,
-            }));
-
-            if (parsed.focusedFilter !== undefined) {
-                await verifyFocusedRustLaneSelection({
-                    environment: commands[0]?.builtCommand.command.env,
-                    lane: parsed.lane,
-                    runLog,
-                    testFilter: parsed.focusedFilter,
-                });
-            }
-
-            await runGuardedRustKernelCommands({
-                commands,
-                laneLabel: `${label}${
-                    parsed.focusedFilter === undefined ? '' : ' focused'
-                }`,
+            const environment = buildGuardedRustEnvironment({
+                targetDirectoryPath,
+            });
+            await preflightAndRunManualRustKernelLane({
+                environment,
+                lane: parsed.lane,
+                runGuardedCommands: async () => {
+                    const commands = testFilters.map((testFilter) => ({
+                        builtCommand: buildGuardedRustKernelCommand(
+                            testFilter,
+                            {
+                                logFileSlug: `cargo-test-${parsed.lane}`,
+                                progressLabel: parsed.lane,
+                                runName: label,
+                                targetDirectoryPath,
+                            },
+                        ),
+                        expectedTestFilter: testFilter,
+                    }));
+                    await runGuardedRustKernelCommands({
+                        commands,
+                        laneLabel: `${label}${
+                            parsed.focusedFilter === undefined ? '' : ' focused'
+                        }`,
+                        runLog,
+                    });
+                },
                 runLog,
+                testFilters,
             });
         },
     );

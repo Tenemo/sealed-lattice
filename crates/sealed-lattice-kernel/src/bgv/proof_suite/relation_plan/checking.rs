@@ -248,9 +248,10 @@ mod integer_lift_bounds;
 mod model;
 mod openings;
 
-pub(super) use constraints::{
-    full_trace_zeroifier_expression, zeroifier_roots_are_confined_to_trace_domain,
-};
+pub(super) use constraints::full_trace_zeroifier_expression;
+#[cfg(test)]
+pub(super) use constraints::zeroifier_roots_are_confined_to_trace_domain;
+#[cfg(test)]
 pub(super) use integer_lift_bounds::{
     derive_semantic_cell_interval, integer_lift_maximum_absolute_product,
 };

@@ -6,21 +6,10 @@ import {
 } from './rust-test-inventory.js';
 
 export const fullProfileEvidenceRustTests = [
-    'bgv::target_decryption::tests::evaluator_replay::prototype_profile_evaluator_replay_matches_plaintext_oracle_and_binds_target_roots',
+    'foundation::selected_suite::tests::candidate_suite_gate_derives_one_complete_canonical_record',
 ] as const;
 
-export const measurementRustTests = [
-    'bgv::evaluator::noise_recurrence::tests::selected_evaluator_depth_drop_allocation_search_reports_exact_candidates',
-    'bgv::evaluator::noise_recurrence::tests::selected_evaluator_joint_topology_parallel_prefix_reports_guarded_peak',
-    'bgv::evaluator::noise_recurrence::tests::selected_evaluator_joint_topology_search_reports_exact_pareto',
-    'bgv::evaluator::noise_recurrence::tests::prospective_28_prime_p5_b7_exhaustive_search_reports_exact_finalists',
-    'bgv::evaluator::noise_recurrence::tests::target_heavy_block_balanced_six_special_seven_data_block_search_reports_exact_finalists',
-    'bgv::evaluator::noise_recurrence::tests::six_special_six_data_block_early_preparation_drop_candidate_reports_exact_bounds',
-    'bgv::evaluator::noise_recurrence::tests::six_special_six_data_block_pairwise_ballot_candidate_reports_exact_bounds',
-    'bgv::evaluator::noise_recurrence::tests::six_special_seven_data_block_minimum_three_pre_comparison_drop_search_reports_exact_finalists',
-    'bgv::evaluator::noise_recurrence::tests::six_special_seven_data_block_prime_order_beam_search_reports_exact_candidates',
-    'bgv::evaluator::top_k::tests::level_budget_probe::production_rank_lookup_level_budget_measurement',
-] as const;
+export const measurementRustTests = [] as const;
 
 type FocusedRustLane =
     | 'rust-full-profile-evidence'

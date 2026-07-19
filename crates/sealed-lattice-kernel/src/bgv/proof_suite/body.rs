@@ -9,7 +9,7 @@ use zeroize::Zeroizing;
 
 use crate::foundation::{
     CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple,
-    canonical_foundation_variable_bytes_hash_preimage, hash_foundation_tuple_512,
+    hash_foundation_tuple_512,
 };
 
 use super::{
@@ -19,7 +19,6 @@ use super::{
     merkle::{
         PROOF_ORACLE_PHASE_PAIR_LEAF_SCHEMA_IDENTIFIER, ProofLeafVisibility, ProofMerkleError,
         ProofMerkleTreeContext, ProofOraclePhasePairLeaf, ProofTreeRole, ProofTreeValue,
-        proof_merkle_node_hash_preimage,
     },
     setup_public_polynomial::{
         SETUP_PUBLIC_POLYNOMIAL_LEAF_HASH_DOMAIN, SETUP_PUBLIC_POLYNOMIAL_LEAF_SCHEMA_VERSION,
@@ -152,25 +151,6 @@ enum ProofTreeConstruction {
     },
 }
 
-/// Unbound identifier for the random-oracle input namespace used by one proof
-/// tree. The verifier ledger uses this only to establish that its per-tree
-/// equation sum does not silently count the same tree construction twice.
-/// Distinct namespaces imply distinct leaf inputs, and, in the collision-free
-/// database game, distinct child digests propagate that distinction through
-/// every position-bound parent equation.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) enum ProofTreeOracleEquationNamespace {
-    Common(Vec<u8>),
-    CommittedMaterial {
-        material_context_hash: [u8; 64],
-        row_width: u32,
-    },
-    SetupPolynomial {
-        public_polynomial_context_hash: [u8; 64],
-        row_width: u32,
-    },
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ProofTreeCatalogEntry {
     tree_catalog_index: u16,
@@ -196,45 +176,6 @@ impl ProofTreeCatalogEntry {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn common_catalog_identity_matches(
-        &self,
-        suite_identifier: [u8; 64],
-        canonical_proof_object_header_bytes: &[u8],
-        application_statement_schema_identifier: u16,
-        proof_field_index: u16,
-        tree_role: ProofTreeRole,
-        tree_ordinal: u16,
-        domain_size: u64,
-        row_width: u32,
-        leaf_visibility: ProofLeafVisibility,
-    ) -> Result<bool, ProofBodyError> {
-        let proof_header_hash = hash_foundation_tuple_512(
-            PROOF_HEADER_HASH_DOMAIN,
-            &[
-                CanonicalItem::variable_bytes(canonical_proof_object_header_bytes)
-                    .map_err(|_| ProofBodyError::CanonicalEncoding)?,
-            ],
-        )
-        .map_err(|_| ProofBodyError::CanonicalEncoding)?
-        .into_bytes();
-        let expected = ProofMerkleTreeContext::new(
-            suite_identifier,
-            proof_header_hash,
-            application_statement_schema_identifier,
-            proof_field_index,
-            tree_role,
-            tree_ordinal,
-            domain_size,
-            row_width,
-            leaf_visibility,
-        )?;
-        Ok(matches!(
-            &self.construction,
-            ProofTreeConstruction::Common(observed) if observed == &expected
-        ))
-    }
-
     pub(crate) fn uses_common_merkle_context(&self) -> bool {
         matches!(&self.construction, ProofTreeConstruction::Common(_))
     }
@@ -255,30 +196,6 @@ impl ProofTreeCatalogEntry {
             ProofTreeConstruction::Common(_) | ProofTreeConstruction::CommittedMaterial { .. } => {
                 None
             }
-        }
-    }
-
-    pub(crate) fn oracle_equation_namespace(
-        &self,
-    ) -> Result<ProofTreeOracleEquationNamespace, ProofBodyError> {
-        match &self.construction {
-            ProofTreeConstruction::Common(context) => Ok(ProofTreeOracleEquationNamespace::Common(
-                context.canonical_bytes()?,
-            )),
-            ProofTreeConstruction::CommittedMaterial {
-                material_context_hash,
-                row_width,
-            } => Ok(ProofTreeOracleEquationNamespace::CommittedMaterial {
-                material_context_hash: *material_context_hash,
-                row_width: *row_width,
-            }),
-            ProofTreeConstruction::SetupPolynomial {
-                public_polynomial_context_hash,
-                row_width,
-            } => Ok(ProofTreeOracleEquationNamespace::SetupPolynomial {
-                public_polynomial_context_hash: *public_polynomial_context_hash,
-                row_width: *row_width,
-            }),
         }
     }
 
@@ -380,83 +297,6 @@ impl ProofTreeCatalogEntry {
         }
     }
 
-    /// Exact byte string presented to the deployed leaf hash. This performs
-    /// no SHAKE evaluation and exists only so the round-by-round security
-    /// experiment can match an observed oracle-query preimage.
-    pub(crate) fn materialized_leaf_hash_preimage(
-        &self,
-        leaf_index: u64,
-        salt: Option<[u8; COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH]>,
-        first_point_values: Zeroizing<Vec<ProofTreeValue>>,
-        opposite_point_values: Zeroizing<Vec<ProofTreeValue>>,
-    ) -> Result<Zeroizing<Vec<u8>>, ProofBodyError> {
-        let expected_row_width = self.materialized_row_width()?;
-        if first_point_values.len() != expected_row_width
-            || opposite_point_values.len() != expected_row_width
-        {
-            return Err(ProofBodyError::InvalidLeaf);
-        }
-        match &self.construction {
-            ProofTreeConstruction::Common(context) => {
-                let expected_salt = context.leaf_visibility() == ProofLeafVisibility::SecretBearing;
-                if salt.is_some() != expected_salt {
-                    return Err(ProofBodyError::InvalidLeaf);
-                }
-                Ok(ProofOraclePhasePairLeaf::new_protected(
-                    context,
-                    leaf_index,
-                    salt,
-                    first_point_values,
-                    opposite_point_values,
-                )?
-                .hash_preimage()?)
-            }
-            ProofTreeConstruction::CommittedMaterial {
-                material_context_hash,
-                ..
-            } => {
-                let salt = salt.ok_or(ProofBodyError::InvalidLeaf)?;
-                let canonical_bytes =
-                    Zeroizing::new(canonical_committed_material_phase_pair_leaf_bytes(
-                        *material_context_hash,
-                        leaf_index,
-                        salt,
-                        first_point_values.as_slice(),
-                        opposite_point_values.as_slice(),
-                    )?);
-                canonical_foundation_variable_bytes_hash_preimage(
-                    COMMITTED_MATERIAL_LEAF_HASH_DOMAIN,
-                    canonical_bytes.as_slice(),
-                )
-                .map_err(|_| ProofBodyError::CanonicalEncoding)
-            }
-            ProofTreeConstruction::SetupPolynomial {
-                public_polynomial_context_hash,
-                ..
-            } => {
-                if salt.is_some() {
-                    return Err(ProofBodyError::InvalidLeaf);
-                }
-                validate_base_field_values(first_point_values.as_slice())?;
-                validate_base_field_values(opposite_point_values.as_slice())?;
-                let canonical_bytes = Zeroizing::new(
-                    canonical_setup_public_polynomial_phase_pair_leaf_bytes_from_iterators(
-                        *public_polynomial_context_hash,
-                        leaf_index,
-                        first_point_values.iter().map(base_field_value),
-                        opposite_point_values.iter().map(base_field_value),
-                    )
-                    .map_err(|_| ProofBodyError::CanonicalEncoding)?,
-                );
-                canonical_foundation_variable_bytes_hash_preimage(
-                    SETUP_PUBLIC_POLYNOMIAL_LEAF_HASH_DOMAIN,
-                    canonical_bytes.as_slice(),
-                )
-                .map_err(|_| ProofBodyError::CanonicalEncoding)
-            }
-        }
-    }
-
     pub(crate) fn materialized_parent_digest(
         &self,
         level: u32,
@@ -505,36 +345,6 @@ impl ProofTreeCatalogEntry {
                 | SetupPublicPolynomialError::Field(_)
                 | SetupPublicPolynomialError::Polynomial(_) => ProofBodyError::CanonicalEncoding,
             }),
-        }
-    }
-
-    /// Exact byte string presented to the deployed parent hash. This is the
-    /// experiment-only preimage counterpart of `materialized_parent_digest`.
-    pub(crate) fn materialized_parent_hash_preimage(
-        &self,
-        level: u32,
-        parent_index: u64,
-        left_child_digest: [u8; 64],
-        right_child_digest: [u8; 64],
-    ) -> Result<Zeroizing<Vec<u8>>, ProofBodyError> {
-        match &self.construction {
-            ProofTreeConstruction::Common(context) => Ok(proof_merkle_node_hash_preimage(
-                context.context_hash()?,
-                level,
-                parent_index,
-                left_child_digest,
-                right_child_digest,
-            )?),
-            ProofTreeConstruction::CommittedMaterial { .. }
-            | ProofTreeConstruction::SetupPolynomial { .. } => {
-                authentication::statement_owned_node_hash_preimage(
-                    &self.construction,
-                    level,
-                    parent_index,
-                    left_child_digest,
-                    right_child_digest,
-                )
-            }
         }
     }
 
@@ -639,19 +449,6 @@ impl CompleteProofTreeCatalog {
         self.evaluation_domain_size
     }
 
-    /// Checks the source-authoritative namespace identity used by leaf and
-    /// parent hashing before an exact across-tree equation sum is formed.
-    pub(crate) fn has_pairwise_distinct_oracle_equation_namespaces(
-        &self,
-    ) -> Result<bool, ProofBodyError> {
-        let mut namespaces = BTreeSet::new();
-        for entry in &self.entries {
-            if !namespaces.insert(entry.oracle_equation_namespace()?) {
-                return Ok(false);
-            }
-        }
-        Ok(true)
-    }
 }
 
 pub(crate) fn build_complete_proof_tree_catalog(

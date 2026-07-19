@@ -2,10 +2,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::bgv::proof_suite::COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH;
 use crate::foundation::{
-    CanonicalItem, CanonicalItemType, canonical_foundation_tuple_hash_preimage,
-    hash_foundation_tuple_512,
+    CanonicalItem, CanonicalItemType, hash_foundation_tuple_512,
 };
-use zeroize::Zeroizing;
 
 use super::super::{
     PROOF_CHALLENGE_EXTENSION_DEGREE,
@@ -482,24 +480,6 @@ pub(super) fn statement_owned_node_digest(
     Ok(hash_foundation_tuple_512(domain, &items)
         .map_err(|_| ProofBodyError::CanonicalEncoding)?
         .into_bytes())
-}
-
-pub(super) fn statement_owned_node_hash_preimage(
-    construction: &ProofTreeConstruction,
-    level: u32,
-    parent_index: u64,
-    left_child_digest: [u8; 64],
-    right_child_digest: [u8; 64],
-) -> Result<Zeroizing<Vec<u8>>, ProofBodyError> {
-    let (domain, items) = statement_owned_node_hash_input(
-        construction,
-        level,
-        parent_index,
-        left_child_digest,
-        right_child_digest,
-    )?;
-    canonical_foundation_tuple_hash_preimage(domain, &items)
-        .map_err(|_| ProofBodyError::CanonicalEncoding)
 }
 
 fn statement_owned_node_hash_input(

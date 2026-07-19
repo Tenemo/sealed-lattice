@@ -8,8 +8,6 @@
 use core::slice;
 use std::{cell::RefCell, mem::size_of, sync::Arc};
 
-#[cfg(test)]
-use crate::foundation::RefusalReason;
 use crate::{
     bgv::{
         parameters::{DATA_PRIMES, POLYNOMIAL_DEGREE},
@@ -268,7 +266,7 @@ impl CollectivePublicKeySession {
             .as_mut()
             .filter(|active| active.roster_position == roster_position)
             .ok_or(CommonProofRuntimeError::WrongOperationPhase)?;
-        if chunk_bytes.is_empty() || chunk_bytes.len() % size_of::<u64>() != 0 {
+        if chunk_bytes.is_empty() || !chunk_bytes.len().is_multiple_of(size_of::<u64>()) {
             return Err(CommonProofRuntimeError::WrongVerificationBinding);
         }
         active
@@ -1700,7 +1698,8 @@ fn construct_trace_half_tree(
     evaluation_domain_size: usize,
     polynomials: &[Arc<[u64]>],
 ) -> Result<SetupPublicPolynomialTree, CommonProofRuntimeError> {
-    if polynomials.len() != DATA_PRIMES.len() || POLYNOMIAL_DEGREE % TRACE_HALF_COUNT != 0 {
+    if polynomials.len() != DATA_PRIMES.len() || !POLYNOMIAL_DEGREE.is_multiple_of(TRACE_HALF_COUNT)
+    {
         return Err(CommonProofRuntimeError::WrongVerificationBinding);
     }
     let mut columns = Vec::new();
@@ -1745,7 +1744,7 @@ fn construct_trace_half_root(
     polynomials: &[Arc<[u64]>],
 ) -> Result<([u8; Hash512::BYTE_LENGTH], [u8; Hash512::BYTE_LENGTH]), CommonProofRuntimeError> {
     if polynomials.len() != DATA_PRIMES.len()
-        || POLYNOMIAL_DEGREE % TRACE_HALF_COUNT != 0
+        || !POLYNOMIAL_DEGREE.is_multiple_of(TRACE_HALF_COUNT)
         || polynomials
             .iter()
             .zip(DATA_PRIMES)

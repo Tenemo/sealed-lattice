@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 
 import {
     fullProfileEvidenceRustTests,
-    measurementRustTests,
     validateFocusedRustLaneSelection,
 } from '#tools/ci/rust-focused-lane-selection';
 
@@ -14,7 +13,6 @@ describe('focused Rust lane selection', () => {
             true,
             'bgv::tests::heavy_rust_kernel_expensive_relation',
         ],
-        ['rust-measurements' as const, true, measurementRustTests[0]],
         [
             'rust-full-profile-evidence' as const,
             true,

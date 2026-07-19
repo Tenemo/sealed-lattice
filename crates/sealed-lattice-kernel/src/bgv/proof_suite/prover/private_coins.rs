@@ -7,8 +7,8 @@ use crate::{
     foundation::{
         ActionPrivateRandomness, FoundationSchemaError, Hash512, PRIVATE_PROOF_SALT_PURPOSE,
         PrivateRandomCursor, PrivateRandomnessAttemptIdentifier, PrivateRandomnessDomain,
-        PrivateRandomnessKmacInputClassAccounting, PrivateRandomnessStream,
-        ProofApplicationSlotCeilings, private_randomness_stream_block_count_for_byte_length,
+        PrivateRandomnessKmacInputClassAccounting, ProofApplicationSlotCeilings,
+        private_randomness_stream_block_count_for_byte_length,
         private_randomness_stream_block_count_for_modulo_outputs,
         proof_attempt_identifier_derivation_count,
     },

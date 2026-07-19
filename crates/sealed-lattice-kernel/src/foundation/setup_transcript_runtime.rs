@@ -388,13 +388,15 @@ fn validate_ordered_setup_intents(
         let expected_identity = roster_entry.participant_identity().map_err(codec_status)?;
         require_source_coordinate(
             source,
-            FoundationObjectType::SetupIntent,
-            derivation.suite_identifier(),
-            derivation.ceremony_context_hash(),
-            derivation.action_context_hash(),
-            roster_hash,
-            expected_roster_position,
-            expected_identity,
+            ExpectedSetupSourceCoordinate {
+                object_type: FoundationObjectType::SetupIntent,
+                suite_identifier: derivation.suite_identifier(),
+                ceremony_context_hash: derivation.ceremony_context_hash(),
+                action_context_hash: derivation.action_context_hash(),
+                roster_hash,
+                roster_position: expected_roster_position,
+                participant_identity: expected_identity,
+            },
         )?;
         if expected_roster_position == source_roster_position
             && source
@@ -426,13 +428,15 @@ fn validate_reveal_sources(
     let expected_identity = roster_entry.participant_identity().map_err(codec_status)?;
     require_source_coordinate(
         setup_intent_source,
-        FoundationObjectType::SetupIntent,
-        derivation.suite_identifier(),
-        derivation.ceremony_context_hash(),
-        derivation.action_context_hash(),
-        roster_hash,
-        source_roster_position,
-        expected_identity,
+        ExpectedSetupSourceCoordinate {
+            object_type: FoundationObjectType::SetupIntent,
+            suite_identifier: derivation.suite_identifier(),
+            ceremony_context_hash: derivation.ceremony_context_hash(),
+            action_context_hash: derivation.action_context_hash(),
+            roster_hash,
+            roster_position: source_roster_position,
+            participant_identity: expected_identity,
+        },
     )?;
     if setup_intent_source
         .setup_intent_payload()
@@ -444,13 +448,15 @@ fn validate_reveal_sources(
     }
     require_source_coordinate(
         commitment_source,
-        FoundationObjectType::PublicRandomnessCommitment,
-        derivation.suite_identifier(),
-        derivation.ceremony_context_hash(),
-        derivation.action_context_hash(),
-        roster_hash,
-        source_roster_position,
-        expected_identity,
+        ExpectedSetupSourceCoordinate {
+            object_type: FoundationObjectType::PublicRandomnessCommitment,
+            suite_identifier: derivation.suite_identifier(),
+            ceremony_context_hash: derivation.ceremony_context_hash(),
+            action_context_hash: derivation.action_context_hash(),
+            roster_hash,
+            roster_position: source_roster_position,
+            participant_identity: expected_identity,
+        },
     )?;
     let ordered_setup_intent_hashes = commitment_source
         .public_randomness_commitment_payload()
@@ -466,24 +472,28 @@ fn validate_reveal_sources(
     Ok(ordered_setup_intent_hashes)
 }
 
-#[allow(clippy::too_many_arguments)]
-fn require_source_coordinate(
-    source: &VerifiedBoardApplicationSource,
-    expected_object_type: FoundationObjectType,
+#[derive(Clone, Copy)]
+struct ExpectedSetupSourceCoordinate {
+    object_type: FoundationObjectType,
     suite_identifier: Hash512,
     ceremony_context_hash: Hash512,
     action_context_hash: Hash512,
     roster_hash: Hash512,
     roster_position: u16,
     participant_identity: ParticipantIdentity,
+}
+
+fn require_source_coordinate(
+    source: &VerifiedBoardApplicationSource,
+    expected: ExpectedSetupSourceCoordinate,
 ) -> RuntimeResult<()> {
-    if source.object_type() != expected_object_type
-        || source.suite_identifier() != suite_identifier
-        || source.ceremony_context_hash() != ceremony_context_hash
-        || source.action_context_hash() != action_context_hash
-        || source.roster_hash() != roster_hash
-        || source.producer_roster_position() != Some(roster_position)
-        || source.producer_participant_identity() != Some(participant_identity)
+    if source.object_type() != expected.object_type
+        || source.suite_identifier() != expected.suite_identifier
+        || source.ceremony_context_hash() != expected.ceremony_context_hash
+        || source.action_context_hash() != expected.action_context_hash
+        || source.roster_hash() != expected.roster_hash
+        || source.producer_roster_position() != Some(expected.roster_position)
+        || source.producer_participant_identity() != Some(expected.participant_identity)
         || source.producer_sequence() != 0
     {
         return Err(refusal_status(RefusalReason::WrongContext));
@@ -491,14 +501,16 @@ fn require_source_coordinate(
     Ok(())
 }
 
+type PrivatePublicRandomnessSourcePair = (
+    Zeroizing<[u8; PUBLIC_RANDOMNESS_COMPONENT_BYTE_LENGTH]>,
+    Zeroizing<[u8; PUBLIC_RANDOMNESS_COMPONENT_BYTE_LENGTH]>,
+);
+
 fn derive_private_public_randomness_source(
     randomness: &ActionPrivateRandomness,
     roster_hash: Hash512,
     ordered_setup_intent_hashes: &[Hash512],
-) -> RuntimeResult<(
-    Zeroizing<[u8; PUBLIC_RANDOMNESS_COMPONENT_BYTE_LENGTH]>,
-    Zeroizing<[u8; PUBLIC_RANDOMNESS_COMPONENT_BYTE_LENGTH]>,
-)> {
+) -> RuntimeResult<PrivatePublicRandomnessSourcePair> {
     let derivation = randomness.derivation_input();
     let hash_items = ordered_setup_intent_hashes
         .iter()

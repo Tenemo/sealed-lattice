@@ -179,7 +179,9 @@ const createFixture = (suiteArtifactVariant: number) => {
             ),
         ),
     );
-    const suiteRecordBytes = createCanonicalSuiteRecordFixture(artifacts);
+    const suiteRecordBytes = createCanonicalSuiteRecordFixture({
+        artifactBytes: artifacts,
+    });
     const suiteIdentifier = deriveHash(
         createSuiteIdentifierAccumulator(BigInt(suiteRecordBytes.byteLength)),
         suiteRecordBytes,

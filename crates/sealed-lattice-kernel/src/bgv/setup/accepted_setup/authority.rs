@@ -209,12 +209,6 @@ impl AcceptedSetupParticipantTargetReleaseLeaseAllocationByteLengths {
     pub(crate) const fn shared_allocation_byte_length(self) -> u64 {
         self.shared_allocation_byte_length
     }
-
-    pub(crate) fn total(self) -> CanonicalResult<u64> {
-        self.unique_owned_heap_byte_length
-            .checked_add(self.shared_allocation_byte_length)
-            .ok_or_else(authority_binding_error)
-    }
 }
 
 fn target_release_lease_unique_owned_heap_byte_length(limb_count: usize) -> CanonicalResult<u64> {
@@ -1406,104 +1400,6 @@ pub(super) fn retain_verified_accepted_setup_authority(
     verified_evaluator_key_store: VerifiedEvaluatorKeyStore,
 ) -> CanonicalResult<VerifiedAcceptedSetupAuthorityHandle> {
     Ok(prepare_verified_accepted_setup_authority(input, verified_evaluator_key_store)?.commit())
-}
-
-/// Retains a production accepted-setup authority around a descriptor-
-/// authenticated evaluator store for guarded executor tests. Context checks,
-/// collective-key stream authentication, one-shot store transfer, and common-
-/// component derivation all remain on the production path.
-#[cfg(test)]
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn retain_evaluator_execution_authority_for_tests(
-    suite_identifier: [u8; 64],
-    ceremony_context_hash: [u8; 64],
-    action_context_hash: [u8; 64],
-    manifest_hash: [u8; 64],
-    roster_hash: [u8; 64],
-    setup_proof_context_hash: [u8; 64],
-    exact_verified_setup_source_hash: [u8; 64],
-    public_setup_seed: [u8; 64],
-    collective_public_key_b_polynomials: &[Vec<u64>],
-    verified_evaluator_key_store: VerifiedEvaluatorKeyStore,
-) -> CanonicalResult<VerifiedAcceptedSetupAuthorityHandle> {
-    let collective_public_key_b_polynomials = collective_public_key_b_polynomials
-        .iter()
-        .cloned()
-        .map(Arc::<[u64]>::from)
-        .collect::<Vec<_>>();
-    let mut digest_accumulator =
-        CollectivePublicKeyDigestAccumulator::new(POLYNOMIAL_DEGREE, DATA_PRIMES.len())?;
-    for polynomial in &collective_public_key_b_polynomials {
-        digest_accumulator.absorb_polynomial(polynomial)?;
-    }
-    for data_modulus_index in 0..DATA_PRIMES.len() {
-        let data_modulus_index =
-            u16::try_from(data_modulus_index).map_err(|_| authority_size_error())?;
-        let common_reference_polynomial = sample_collective_public_key_common_reference_limb(
-            &public_setup_seed,
-            data_modulus_index,
-            POLYNOMIAL_DEGREE,
-        )?;
-        digest_accumulator.absorb_polynomial(&common_reference_polynomial)?;
-    }
-    let collective_public_key_full_object_digest =
-        digest_accumulator.finish()?.full_object_digest.into_bytes();
-    let participant_release_materials = (0..FOUNDATION_PROFILE.participant_count)
-        .map(|roster_position| {
-            let participant_byte = u8::try_from(
-                roster_position
-                    .checked_add(1)
-                    .ok_or_else(authority_size_error)?,
-            )
-            .map_err(|_| authority_size_error())?;
-            let selected_sharing_limb_count = selected_sharing_data_prime_coordinates()
-                .map_err(|_| authority_size_error())?
-                .len();
-            let ordered_aggregate_threshold_roots = (0..selected_sharing_limb_count)
-                .map(|data_modulus_index| {
-                    let data_modulus_byte =
-                        u8::try_from(data_modulus_index).map_err(|_| authority_size_error())?;
-                    Ok([participant_byte.wrapping_add(data_modulus_byte); 64])
-                })
-                .collect::<CanonicalResult<Vec<_>>>()?;
-            Ok(
-                VerifiedAcceptedSetupParticipantReleaseMaterial::from_test_values(
-                    [participant_byte; 64],
-                    roster_position,
-                    ordered_aggregate_threshold_roots,
-                ),
-            )
-        })
-        .collect::<CanonicalResult<Vec<_>>>()?;
-    retain_verified_accepted_setup_authority(
-        VerifiedAcceptedSetupAuthorityInput {
-            protocol_version: FOUNDATION_PROFILE.protocol_version,
-            suite_identifier,
-            ceremony_context_hash,
-            action_context_hash,
-            manifest_hash,
-            roster_hash,
-            setup_proof_context_hash,
-            exact_verified_setup_source_hash,
-            ring_degree: POLYNOMIAL_DEGREE,
-            ordered_data_modulus_indices: (0..DATA_PRIMES.len())
-                .map(|index| u16::try_from(index).map_err(|_| authority_size_error()))
-                .collect::<CanonicalResult<Vec<_>>>()?,
-            ordered_data_moduli: DATA_PRIMES.to_vec(),
-            participant_release_materials,
-            participant_target_release_sources: Vec::new(),
-            collective_public_key_root: collective_public_key_full_object_digest,
-            collective_public_key_full_object_digest,
-            collective_public_key_b_polynomials,
-            public_setup_seed,
-            accepted_setup_consumed_object_byte_lengths:
-                VerifiedAcceptedSetupConsumedObjectByteLengthCatalog::deterministic_for_authority_custody_tests(
-                    0xa1,
-                ),
-            private_vss_mailbox_byte_lengths: None,
-        },
-        verified_evaluator_key_store,
-    )
 }
 
 pub(super) fn prepare_verified_accepted_setup_authority(

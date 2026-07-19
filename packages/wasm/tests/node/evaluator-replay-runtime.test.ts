@@ -1,5 +1,5 @@
 import { refusalReasonCodes } from '@sealed-lattice/types';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
     createVerifiedAcceptedSetupAuthorityKernelOwner,
@@ -21,7 +21,10 @@ import {
     type CanonicalBoardVerifierSession,
     type VerifiedTranscriptObject,
 } from '#packages/wasm/src/canonical-board-runtime';
-import { CanonicalStreamRefusalError } from '#packages/wasm/src/canonical-stream-runtime';
+import {
+    CanonicalStreamCancellationError,
+    CanonicalStreamRefusalError,
+} from '#packages/wasm/src/canonical-stream-runtime';
 import {
     prepareEvaluatorReplayInClosedWorker,
     type EvaluatorKeyStoreRangeReadObservation,
@@ -34,6 +37,70 @@ import type { TranscriptCoreKernel } from '#packages/wasm/src/transcript-core-br
 
 const evaluatorStoreByteOffset = 0x0020_0000_0000_0001n;
 const replayCarrier = Uint8Array.of(0xa1, 0xb2, 0xc3);
+
+type DeferredPromise<Value> = Readonly<{
+    promise: Promise<Value>;
+    reject(reason?: unknown): void;
+    resolve(value: Value | PromiseLike<Value>): void;
+}>;
+
+const createDeferredPromise = <Value>(): DeferredPromise<Value> => {
+    let rejectPromise = (_reason?: unknown): void => undefined;
+    let resolvePromise = (_value: Value | PromiseLike<Value>): void =>
+        undefined;
+    const promise = new Promise<Value>((resolve, reject) => {
+        rejectPromise = reject;
+        resolvePromise = resolve;
+    });
+    return Object.freeze({
+        promise,
+        reject: rejectPromise,
+        resolve: resolvePromise,
+    });
+};
+
+const waitForNextHostTask = (): Promise<void> =>
+    new Promise((resolve) => {
+        const channel = new MessageChannel();
+        channel.port1.onmessage = () => {
+            channel.port1.close();
+            channel.port2.close();
+            resolve();
+        };
+        channel.port2.postMessage(undefined);
+    });
+
+type PromptPromiseSettlement<Value> =
+    | Readonly<{ kind: 'fulfilled'; value: Value }>
+    | Readonly<{ error: unknown; kind: 'rejected' }>
+    | Readonly<{ kind: 'pending' }>;
+
+const settleBeforeNextHostTask = async <Value>(
+    promise: Promise<Value>,
+): Promise<PromptPromiseSettlement<Value>> =>
+    await Promise.race([
+        promise.then(
+            (value) => Object.freeze({ kind: 'fulfilled' as const, value }),
+            (error: unknown) =>
+                Object.freeze({ error, kind: 'rejected' as const }),
+        ),
+        waitForNextHostTask().then(() =>
+            Object.freeze({ kind: 'pending' as const }),
+        ),
+    ]);
+
+const expectPromptCancellation = async (
+    promise: Promise<unknown>,
+): Promise<void> => {
+    const settlement = await settleBeforeNextHostTask(promise);
+    expect(settlement.kind).toBe('rejected');
+    if (settlement.kind !== 'rejected') {
+        throw new Error(
+            'The evaluator replay did not reject before the next host task.',
+        );
+    }
+    expect(settlement.error).toBeInstanceOf(CanonicalStreamCancellationError);
+};
 
 const boardContextInput = (): CanonicalBoardContextInput => ({
     actionIdentifier: 'action',
@@ -71,6 +138,7 @@ type FakeEvaluatorRuntime = Readonly<{
     boardSession: CanonicalBoardVerifierSession;
     createVerifiedBallot(handle: number): VerifiedBallotOutput;
     evaluatorCancelHandles: number[];
+    evaluatorPollHandles: number[];
     evaluatorReplayReleaseHandles: number[];
     kernel: TranscriptCoreKernel;
     verifyBoardCarrier(carrier: Uint8Array): VerifiedTranscriptObject;
@@ -94,6 +162,7 @@ const createFakeEvaluatorRuntime = (
     const ballotReleaseHandles: number[] = [];
     const boardCarrierInputs: Uint8Array[] = [];
     const evaluatorCancelHandles: number[] = [];
+    const evaluatorPollHandles: number[] = [];
     const evaluatorReplayReleaseHandles: number[] = [];
     const bindReplayStatuses = [...(options.bindReplayStatuses ?? [0])];
     const evaluatorPollStatuses = [...(options.evaluatorPollStatuses ?? [])];
@@ -198,6 +267,7 @@ const createFakeEvaluatorRuntime = (
                 _verifiedAggregateHandle: number,
                 statusPointer: number,
             ) => {
+                evaluatorHasAbsorbedStoreRange = false;
                 writeStatus(statusPointer, 0);
                 return 31;
             },
@@ -232,10 +302,11 @@ const createFakeEvaluatorRuntime = (
             },
             sealed_lattice_evaluator_execution_finish: () => 0,
             sealed_lattice_evaluator_execution_poll: (
-                _executionHandle: number,
+                executionHandle: number,
                 outputPointer: number,
                 outputByteLength: number,
             ) => {
+                evaluatorPollHandles.push(executionHandle);
                 const status = evaluatorPollStatuses.shift() ?? 0;
                 if (status !== 0) {
                     return status;
@@ -369,6 +440,7 @@ const createFakeEvaluatorRuntime = (
         boardSession,
         createVerifiedBallot,
         evaluatorCancelHandles,
+        evaluatorPollHandles,
         evaluatorReplayReleaseHandles,
         kernel,
         verifyBoardCarrier,
@@ -391,6 +463,29 @@ const aggregateVerifiedBallots = (
         aggregateAuthority: aggregation.finish(aggregateObject),
         aggregateObject,
     };
+};
+
+const completeAnotherEvaluatorReplay = async (
+    runtime: FakeEvaluatorRuntime,
+): Promise<void> => {
+    const { aggregateAuthority, aggregateObject } =
+        aggregateVerifiedBallots(runtime);
+    const prepared = await prepareEvaluatorReplayInClosedWorker({
+        acceptedSetupAuthority: runtime.acceptedSetupAuthority,
+        evaluatorKeyStore: {
+            readExactRange: () => Promise.resolve(Uint8Array.of(1, 2, 3)),
+        },
+        kernel: runtime.kernel,
+        options: { yieldControl: () => Promise.resolve() },
+        verifiedAggregateAuthority: aggregateAuthority,
+    });
+    const replayObject = runtime.verifyBoardCarrier(
+        prepared.copyCanonicalCarrier(),
+    );
+    const verifiedReplay = prepared.bind(replayObject);
+    releaseVerifiedEvaluatorReplay(verifiedReplay);
+    runtime.boardSession.release(replayObject);
+    runtime.boardSession.release(aggregateObject);
 };
 
 describe('evaluator replay worker runtime', () => {
@@ -472,6 +567,51 @@ describe('evaluator replay worker runtime', () => {
         expect(runtime.allocations.size).toBe(0);
     });
 
+    it('removes abort listeners after store reads and scheduler yields complete', async () => {
+        const runtime = createFakeEvaluatorRuntime();
+        const { aggregateAuthority, aggregateObject } =
+            aggregateVerifiedBallots(runtime);
+        const abortController = new AbortController();
+        const addEventListener = vi.spyOn(
+            abortController.signal,
+            'addEventListener',
+        );
+        const removeEventListener = vi.spyOn(
+            abortController.signal,
+            'removeEventListener',
+        );
+
+        const prepared = await prepareEvaluatorReplayInClosedWorker({
+            acceptedSetupAuthority: runtime.acceptedSetupAuthority,
+            evaluatorKeyStore: {
+                readExactRange: () => Promise.resolve(Uint8Array.of(1, 2, 3)),
+            },
+            kernel: runtime.kernel,
+            options: {
+                signal: abortController.signal,
+                yieldControl: () => Promise.resolve(),
+            },
+            verifiedAggregateAuthority: aggregateAuthority,
+        });
+
+        expect(addEventListener).toHaveBeenCalledTimes(2);
+        expect(removeEventListener).toHaveBeenCalledTimes(2);
+        for (const [eventType, listener] of addEventListener.mock.calls) {
+            expect(removeEventListener).toHaveBeenCalledWith(
+                eventType,
+                listener,
+            );
+        }
+        addEventListener.mockRestore();
+        removeEventListener.mockRestore();
+
+        prepared.cancel();
+        runtime.boardSession.release(aggregateObject);
+        runtime.acceptedSetupAuthority.release();
+        runtime.boardSession.close();
+        expect(runtime.allocations.size).toBe(0);
+    });
+
     it('keeps a prepared replay live after a board-binding refusal and accepts a corrected retry', async () => {
         const runtime = createFakeEvaluatorRuntime({
             bindReplayStatuses: [refusalReasonCodes.wrongHashOrRoot, 0],
@@ -529,6 +669,185 @@ describe('evaluator replay worker runtime', () => {
         expect(runtime.ballotReleaseHandles).toEqual([62]);
         expect(runtime.aggregateCancelHandles).toEqual([11]);
         expect(runtime.aggregateDiscardHandles).toEqual([]);
+
+        runtime.boardSession.release(aggregateObject);
+        runtime.acceptedSetupAuthority.release();
+        runtime.boardSession.close();
+        expect(runtime.allocations.size).toBe(0);
+    });
+
+    it('cancels promptly while a store read remains permanently pending and reuses the worker', async () => {
+        const runtime = createFakeEvaluatorRuntime();
+        const { aggregateAuthority, aggregateObject } =
+            aggregateVerifiedBallots(runtime);
+        const allocationCountBeforeEvaluatorReplay = runtime.allocations.size;
+        const pendingStoreRead = createDeferredPromise<Uint8Array>();
+        const storeReadStarted = createDeferredPromise<void>();
+        const abortController = new AbortController();
+        const replayPromise = prepareEvaluatorReplayInClosedWorker({
+            acceptedSetupAuthority: runtime.acceptedSetupAuthority,
+            evaluatorKeyStore: {
+                readExactRange: () => {
+                    storeReadStarted.resolve(undefined);
+                    return pendingStoreRead.promise;
+                },
+            },
+            kernel: runtime.kernel,
+            options: {
+                signal: abortController.signal,
+                yieldControl: () => Promise.resolve(),
+            },
+            verifiedAggregateAuthority: aggregateAuthority,
+        });
+        await storeReadStarted.promise;
+
+        abortController.abort();
+        await expectPromptCancellation(replayPromise);
+
+        expect(runtime.evaluatorCancelHandles).toEqual([31]);
+        expect(runtime.absorbedStoreRanges).toEqual([]);
+        expect(runtime.allocations.size).toBe(
+            allocationCountBeforeEvaluatorReplay,
+        );
+        await completeAnotherEvaluatorReplay(runtime);
+        expect(runtime.evaluatorCancelHandles).toEqual([31]);
+
+        runtime.boardSession.release(aggregateObject);
+        runtime.acceptedSetupAuthority.release();
+        runtime.boardSession.close();
+        expect(runtime.allocations.size).toBe(0);
+    });
+
+    it('zeroes a store range that resolves after prompt cancellation and does not absorb it', async () => {
+        const runtime = createFakeEvaluatorRuntime();
+        const { aggregateAuthority, aggregateObject } =
+            aggregateVerifiedBallots(runtime);
+        const allocationCountBeforeEvaluatorReplay = runtime.allocations.size;
+        const lateStoreRead = createDeferredPromise<Uint8Array>();
+        const storeReadStarted = createDeferredPromise<void>();
+        const abortController = new AbortController();
+        const replayPromise = prepareEvaluatorReplayInClosedWorker({
+            acceptedSetupAuthority: runtime.acceptedSetupAuthority,
+            evaluatorKeyStore: {
+                readExactRange: () => {
+                    storeReadStarted.resolve(undefined);
+                    return lateStoreRead.promise;
+                },
+            },
+            kernel: runtime.kernel,
+            options: {
+                signal: abortController.signal,
+                yieldControl: () => Promise.resolve(),
+            },
+            verifiedAggregateAuthority: aggregateAuthority,
+        });
+        await storeReadStarted.promise;
+
+        abortController.abort();
+        await expectPromptCancellation(replayPromise);
+        const lateStoreBytes = Uint8Array.of(0x31, 0x32, 0x33);
+        lateStoreRead.resolve(lateStoreBytes);
+        await waitForNextHostTask();
+
+        expect(lateStoreBytes).toEqual(new Uint8Array(3));
+        expect(runtime.absorbedStoreRanges).toEqual([]);
+        expect(runtime.evaluatorCancelHandles).toEqual([31]);
+        expect(runtime.allocations.size).toBe(
+            allocationCountBeforeEvaluatorReplay,
+        );
+        await completeAnotherEvaluatorReplay(runtime);
+        expect(runtime.evaluatorCancelHandles).toEqual([31]);
+
+        runtime.boardSession.release(aggregateObject);
+        runtime.acceptedSetupAuthority.release();
+        runtime.boardSession.close();
+        expect(runtime.allocations.size).toBe(0);
+    });
+
+    it('cancels promptly while a scheduler yield remains permanently pending and reuses the worker', async () => {
+        const runtime = createFakeEvaluatorRuntime();
+        const { aggregateAuthority, aggregateObject } =
+            aggregateVerifiedBallots(runtime);
+        const allocationCountBeforeEvaluatorReplay = runtime.allocations.size;
+        const returnedRange = Uint8Array.of(1, 2, 3);
+        const pendingSchedulerYield = createDeferredPromise<void>();
+        const schedulerYieldStarted = createDeferredPromise<void>();
+        const abortController = new AbortController();
+        const replayPromise = prepareEvaluatorReplayInClosedWorker({
+            acceptedSetupAuthority: runtime.acceptedSetupAuthority,
+            evaluatorKeyStore: {
+                readExactRange: () => Promise.resolve(returnedRange),
+            },
+            kernel: runtime.kernel,
+            options: {
+                signal: abortController.signal,
+                yieldControl: () => {
+                    schedulerYieldStarted.resolve(undefined);
+                    return pendingSchedulerYield.promise;
+                },
+            },
+            verifiedAggregateAuthority: aggregateAuthority,
+        });
+        await schedulerYieldStarted.promise;
+
+        abortController.abort();
+        await expectPromptCancellation(replayPromise);
+
+        expect(returnedRange).toEqual(new Uint8Array(3));
+        expect(runtime.absorbedStoreRanges).toHaveLength(1);
+        expect(runtime.evaluatorCancelHandles).toEqual([31]);
+        expect(runtime.allocations.size).toBe(
+            allocationCountBeforeEvaluatorReplay,
+        );
+        await completeAnotherEvaluatorReplay(runtime);
+        expect(runtime.evaluatorCancelHandles).toEqual([31]);
+
+        runtime.boardSession.release(aggregateObject);
+        runtime.acceptedSetupAuthority.release();
+        runtime.boardSession.close();
+        expect(runtime.allocations.size).toBe(0);
+    });
+
+    it('does not resume evaluator polling when a scheduler yield resolves after cancellation', async () => {
+        const runtime = createFakeEvaluatorRuntime();
+        const { aggregateAuthority, aggregateObject } =
+            aggregateVerifiedBallots(runtime);
+        const allocationCountBeforeEvaluatorReplay = runtime.allocations.size;
+        const lateSchedulerYield = createDeferredPromise<void>();
+        const schedulerYieldStarted = createDeferredPromise<void>();
+        const abortController = new AbortController();
+        const replayPromise = prepareEvaluatorReplayInClosedWorker({
+            acceptedSetupAuthority: runtime.acceptedSetupAuthority,
+            evaluatorKeyStore: {
+                readExactRange: () => Promise.resolve(Uint8Array.of(1, 2, 3)),
+            },
+            kernel: runtime.kernel,
+            options: {
+                signal: abortController.signal,
+                yieldControl: () => {
+                    schedulerYieldStarted.resolve(undefined);
+                    return lateSchedulerYield.promise;
+                },
+            },
+            verifiedAggregateAuthority: aggregateAuthority,
+        });
+        await schedulerYieldStarted.promise;
+        const pollCountBeforeCancellation = runtime.evaluatorPollHandles.length;
+
+        abortController.abort();
+        await expectPromptCancellation(replayPromise);
+        lateSchedulerYield.resolve(undefined);
+        await waitForNextHostTask();
+
+        expect(runtime.evaluatorPollHandles).toHaveLength(
+            pollCountBeforeCancellation,
+        );
+        expect(runtime.evaluatorCancelHandles).toEqual([31]);
+        expect(runtime.allocations.size).toBe(
+            allocationCountBeforeEvaluatorReplay,
+        );
+        await completeAnotherEvaluatorReplay(runtime);
+        expect(runtime.evaluatorCancelHandles).toEqual([31]);
 
         runtime.boardSession.release(aggregateObject);
         runtime.acceptedSetupAuthority.release();

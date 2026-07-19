@@ -22,8 +22,8 @@ use super::{
     CompiledRelationPlan, RelationColumnDescriptor, RelationColumnOrigin, RelationPlanCheckContext,
     RelationTreeDescriptor, aggregate_threshold_share_trace_witness_structure_memory_accounting,
     compile_aggregate_threshold_share_relation_plan, compile_vss_share_linkage_relation_plan,
-    derive_owned_aggregate_threshold_share_trace_witness_provider,
-    derive_owned_vss_share_linkage_trace_witness_provider,
+    derive_aggregate_threshold_share_trace_witness_provider,
+    derive_vss_share_linkage_trace_witness_provider,
     vss_share_linkage_trace_witness_structure_memory_accounting,
 };
 
@@ -603,7 +603,7 @@ pub(crate) struct CommittedMaterialSourcePolynomialAdapter {
     ordered_columns: Option<Box<[RelationColumnDescriptor]>>,
     relation_tree_inputs: Option<Box<[RelationProofTreeInput]>>,
     trace_domain: ProofEvaluationDomain,
-    trace_witness: Option<CommittedMaterialTraceWitnessProvider<'static>>,
+    trace_witness: Option<CommittedMaterialTraceWitnessProvider>,
     bound_material_by_column: Option<Box<[Option<BoundMaterialColumn>]>>,
     bound_sources_by_catalog_index: Box<[(u16, AuthenticatedCompactCommittedMaterialSource)]>,
     memory_accounting: CommittedMaterialSourceProviderMemoryAccounting,
@@ -744,14 +744,14 @@ impl CommittedMaterialSourcePolynomialAdapter {
             );
         let trace_witness = match relation_kind {
             SelectedCommittedMaterialRelationKind::VssShareLinkage => {
-                derive_owned_vss_share_linkage_trace_witness_provider(
+                derive_vss_share_linkage_trace_witness_provider(
                     &input,
                     context,
                     ordered_sources.to_vec(),
                 )
             }
             SelectedCommittedMaterialRelationKind::AggregateThresholdShare => {
-                derive_owned_aggregate_threshold_share_trace_witness_provider(
+                derive_aggregate_threshold_share_trace_witness_provider(
                     &input,
                     context,
                     ordered_sources.to_vec(),

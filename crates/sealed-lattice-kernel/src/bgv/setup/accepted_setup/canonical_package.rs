@@ -104,21 +104,38 @@ pub(in crate::bgv) struct CanonicalAcceptedSetupPackage {
     ordered_proof_descriptors: Box<[StreamDescriptor]>,
 }
 
+/// Exact verifier-owned sources used to encode one accepted-setup package.
+/// Keeping the inventory as one typed value prevents descriptor or hash-list
+/// positions from being confused at the encoding boundary.
+pub(super) struct AcceptedSetupPackageAuthoritativeInventory<'source> {
+    pub(super) setup_intent_object_hashes: &'source [Hash512],
+    pub(super) public_randomness_commitment_object_hashes: &'source [Hash512],
+    pub(super) public_randomness_reveal_object_hashes: &'source [Hash512],
+    pub(super) dealer_public_record_object_hashes: &'source [Hash512],
+    pub(super) private_share_acceptance_object_hashes: &'source [Hash512],
+    pub(super) collective_public_key_descriptor: &'source StreamDescriptor,
+    pub(super) evaluator_key_store_descriptor: &'source StreamDescriptor,
+    pub(super) ordered_proof_descriptors: &'source [StreamDescriptor],
+}
+
 impl CanonicalAcceptedSetupPackage {
     /// Encodes the exact selected package inventory from verifier-owned
     /// sources. Callers cannot use this constructor to bypass positive source
     /// checks because it remains private to the accepted-setup implementation;
     /// the capability builder is the only production caller.
     pub(super) fn encode_authoritative_inventory(
-        setup_intent_object_hashes: &[Hash512],
-        public_randomness_commitment_object_hashes: &[Hash512],
-        public_randomness_reveal_object_hashes: &[Hash512],
-        dealer_public_record_object_hashes: &[Hash512],
-        private_share_acceptance_object_hashes: &[Hash512],
-        collective_public_key_descriptor: &StreamDescriptor,
-        evaluator_key_store_descriptor: &StreamDescriptor,
-        ordered_proof_descriptors: &[StreamDescriptor],
+        inventory: AcceptedSetupPackageAuthoritativeInventory<'_>,
     ) -> Result<Vec<u8>, AcceptedSetupPackageError> {
+        let AcceptedSetupPackageAuthoritativeInventory {
+            setup_intent_object_hashes,
+            public_randomness_commitment_object_hashes,
+            public_randomness_reveal_object_hashes,
+            dealer_public_record_object_hashes,
+            private_share_acceptance_object_hashes,
+            collective_public_key_descriptor,
+            evaluator_key_store_descriptor,
+            ordered_proof_descriptors,
+        } = inventory;
         let participant_count = usize::from(FOUNDATION_PROFILE.participant_count);
         if [
             setup_intent_object_hashes.len(),

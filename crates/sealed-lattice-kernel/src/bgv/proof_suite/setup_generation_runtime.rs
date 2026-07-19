@@ -65,9 +65,7 @@ pub(crate) fn begin_setup_generation_authority(
         || state_verifier_session_capability.len() != STATE_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH
         || ordered_public_randomness_object_handles.len()
             != expected_public_randomness_object_handle_count()?
-        || ordered_public_randomness_object_handles
-            .iter()
-            .any(|handle| *handle == 0)
+        || ordered_public_randomness_object_handles.contains(&0)
     {
         return Err(refusal_status(RefusalReason::WrongTypeOrLength));
     }

@@ -315,15 +315,18 @@ impl FinalityTestFixture {
             .expect("replay capability");
         VerifiedEvaluatorReplay::from_verified_relation(
             replay_object,
-            self.roster_hash,
-            4,
-            1,
-            1,
-            self.verified_stream(
-                CanonicalStreamDomain::ReplayTargetIdentifierCiphertext,
-                0xc4,
-            ),
-            self.verified_stream(CanonicalStreamDomain::ReplayTargetOrderCiphertext, 0xc5),
+            VerifiedEvaluatorReplayRelationOutput {
+                roster_hash: self.roster_hash,
+                top_count: 4,
+                target_level: 1,
+                decrypt_scaling: 1,
+                target_identifier_stream: self.verified_stream(
+                    CanonicalStreamDomain::ReplayTargetIdentifierCiphertext,
+                    0xc4,
+                ),
+                target_order_stream: self
+                    .verified_stream(CanonicalStreamDomain::ReplayTargetOrderCiphertext, 0xc5),
+            },
             &CanonicalDecodeLimits::default(),
         )
         .expect("verified replay relation fixture")

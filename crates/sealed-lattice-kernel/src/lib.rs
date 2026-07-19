@@ -395,9 +395,11 @@ unsafe fn prepare_aggregate_threshold_share_generation_from_ffi_inputs(
 }
 
 /// Retains a fresh aggregate-threshold-share common-proof generation adapter
-/// from the browser-owned recipient authority. The exact statement, all 260
-/// source roots, all 26 aggregate roots, trace rows, and proof coins remain in
-/// Rust and are bound to the authenticated action attempt.
+/// from the browser-owned recipient authority. The exact statement, source-root
+/// and aggregate-root catalogs, authenticated compact committed-material
+/// sources, and proof coins remain in Rust and are bound to the authenticated
+/// action attempt. Physical source columns are regenerated on demand and
+/// dropped after their final consumer.
 ///
 /// # Safety
 ///
@@ -1265,7 +1267,9 @@ pub unsafe extern "C" fn sealed_lattice_mailbox_gcm_finish_authentication(
     finish_mailbox_gcm_authentication(handle, &tag).map_or_else(|status| status, |()| 0)
 }
 
-/// Decrypts one already-authenticated staged ciphertext fragment in place.
+/// Provisionally decrypts one staged second-pass ciphertext fragment in place.
+/// The complete second-pass ciphertext must match the first-pass authenticated
+/// digest before the runtime mints a plaintext capability.
 ///
 /// # Safety
 ///

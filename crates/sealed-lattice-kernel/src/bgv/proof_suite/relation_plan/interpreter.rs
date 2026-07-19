@@ -11,11 +11,12 @@ use super::super::{
     field::{ProofBaseFieldElement, ProofChallengeExtensionElement},
     transcript::CommonProofChallenge,
 };
+#[cfg(test)]
+use super::RelationRadixFactorDescriptor;
 use super::{
     RelationChallengeRole, RelationColumnOrigin, RelationConstraintColumnQuery,
     RelationExpressionInstruction, RelationPlanCheckContext, RelationPlanError,
-    RelationPlanVariant, RelationRadixFactorDescriptor, modular_power, relation_column_queries,
-    visit_relation_column_queries,
+    RelationPlanVariant, modular_power, relation_column_queries, visit_relation_column_queries,
 };
 
 #[derive(Clone, Copy)]

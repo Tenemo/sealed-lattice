@@ -780,11 +780,6 @@ fn validate_fixed_algebra() -> SchemaResult<()> {
         .ok()
         .and_then(|degree| degree.checked_mul(2))
         .ok_or_else(invalid_fixed_algebra)?;
-    if !(PLAINTEXT_MODULUS - 1).is_multiple_of(twice_polynomial_degree)
-        || root_parameters_for_modulus(PLAINTEXT_MODULUS).is_none()
-    {
-        return Err(invalid_fixed_algebra());
-    }
     let mut all_ciphertext_moduli = DATA_PRIMES.to_vec();
     all_ciphertext_moduli.extend(ORDERED_SPECIAL_PRIMES);
     all_ciphertext_moduli.sort_unstable();

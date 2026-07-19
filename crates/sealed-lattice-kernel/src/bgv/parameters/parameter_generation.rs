@@ -193,7 +193,7 @@ pub(crate) fn validate_supported_algebraic_parameters() -> Result<(), ParameterG
 }
 
 fn validate_supported_algebraic_parameters_uncached() -> Result<(), ParameterGenerationError> {
-    if !is_prime(PLAINTEXT_MODULUS) || !verify_plaintext_extension_lane_layout() {
+    if !verify_plaintext_extension_lane_layout() {
         return Err(ParameterGenerationError::InvalidCertificate);
     }
 
@@ -230,22 +230,17 @@ fn validate_supported_algebraic_parameters_uncached() -> Result<(), ParameterGen
 }
 
 fn verify_plaintext_extension_lane_layout() -> bool {
-    let extension_order = PLAINTEXT_EXTENSION_DEGREE;
-    let positive_lane_count = PLAINTEXT_EXTENSION_LANE_COUNT / 2;
-    if PLAINTEXT_EXTENSION_DEGREE * PLAINTEXT_EXTENSION_LANE_COUNT != POLYNOMIAL_DEGREE
-        || modular_power(
-            PLAINTEXT_MODULUS,
-            PLAINTEXT_EXTENSION_DEGREE as u64,
-            TWICE_POLYNOMIAL_DEGREE,
-        ) != 1
-        || modular_power(
-            PLAINTEXT_MODULUS,
-            (PLAINTEXT_EXTENSION_DEGREE / 2) as u64,
-            TWICE_POLYNOMIAL_DEGREE,
-        ) == 1
+    let Some((extension_order, lane_count)) =
+        plaintext_extension_lane_dimensions(PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE)
+    else {
+        return false;
+    };
+    if extension_order != PLAINTEXT_EXTENSION_DEGREE
+        || lane_count != PLAINTEXT_EXTENSION_LANE_COUNT
     {
         return false;
     }
+    let positive_lane_count = lane_count / 2;
     if LOGICAL_SLOT_GENERATOR <= 1
         || LOGICAL_SLOT_GENERATOR >= extension_order
         || LOGICAL_SLOT_GENERATOR.is_multiple_of(2)
@@ -283,6 +278,46 @@ fn verify_plaintext_extension_lane_layout() -> bool {
     }
 
     exponent == 1 && seen_odd_exponents.into_iter().all(|was_seen| was_seen)
+}
+
+fn plaintext_extension_lane_dimensions(
+    plaintext_modulus: u64,
+    polynomial_degree: usize,
+) -> Option<(usize, usize)> {
+    if polynomial_degree == 0
+        || !polynomial_degree.is_power_of_two()
+        || !is_prime(plaintext_modulus)
+    {
+        return None;
+    }
+    let twice_polynomial_degree = u64::try_from(polynomial_degree).ok()?.checked_mul(2)?;
+    let extension_degree = usize::try_from(multiplicative_order_modulo_power_of_two(
+        plaintext_modulus,
+        twice_polynomial_degree,
+    )?)
+    .ok()?;
+    if extension_degree == 0 || !polynomial_degree.is_multiple_of(extension_degree) {
+        return None;
+    }
+    Some((extension_degree, polynomial_degree / extension_degree))
+}
+
+fn multiplicative_order_modulo_power_of_two(value: u64, modulus: u64) -> Option<u64> {
+    if modulus < 4 || !modulus.is_power_of_two() || value.is_multiple_of(2) {
+        return None;
+    }
+
+    // The unit group modulo 2^k has order 2^(k - 1). Every element order
+    // therefore divides this power of two, so repeated halving finds the exact
+    // order without trusting a stored factorization result.
+    let mut order = modulus / 2;
+    if modular_power(value, order, modulus) != 1 {
+        return None;
+    }
+    while order > 1 && modular_power(value, order / 2, modulus) == 1 {
+        order /= 2;
+    }
+    Some(order)
 }
 
 #[cfg(test)]
@@ -505,7 +540,7 @@ mod tests {
     }
 
     #[test]
-    fn every_target_prefix_has_exact_plaintext_conversion_congruence() {
+    fn every_selected_data_basis_prefix_has_unit_plaintext_conversion_multiplier() {
         let mut prefix_product_modulo_plaintext = 1_u64;
         for modulus in DATA_PRIMES {
             prefix_product_modulo_plaintext = multiply_modular(
@@ -551,6 +586,41 @@ mod tests {
     }
 
     #[test]
+    fn every_ciphertext_modulus_requires_its_authenticated_root_certificate() {
+        const DATA_MODULUS_MUTATION_INCREMENT: u64 = 65_536 * 257;
+        const SPECIAL_MODULUS_MUTATION_INCREMENT: u64 = 65_536;
+
+        for valid in ROOT_PARAMETERS[..DATA_PRIME_COUNT].iter().copied() {
+            let mutated = RootParameters {
+                modulus: valid
+                    .modulus
+                    .checked_add(DATA_MODULUS_MUTATION_INCREMENT)
+                    .expect("the data-modulus mutation fits u64"),
+                ..valid
+            };
+            assert_eq!(mutated.modulus % TWICE_POLYNOMIAL_DEGREE, 1);
+            assert_eq!(mutated.modulus % PLAINTEXT_MODULUS, 1);
+            assert!(!verify_data_root_parameters(mutated));
+        }
+
+        for valid in ROOT_PARAMETERS
+            [DATA_PRIME_COUNT..DATA_PRIME_COUNT + SPECIAL_PRIME_COUNT]
+            .iter()
+            .copied()
+        {
+            let mutated = RootParameters {
+                modulus: valid
+                    .modulus
+                    .checked_add(SPECIAL_MODULUS_MUTATION_INCREMENT)
+                    .expect("the special-modulus mutation fits u64"),
+                ..valid
+            };
+            assert_eq!(mutated.modulus % TWICE_POLYNOMIAL_DEGREE, 1);
+            assert!(!verify_ntt_root_parameters(mutated));
+        }
+    }
+
+    #[test]
     fn complete_algebraic_certificate_reproduces() {
         validate_supported_algebraic_parameters()
             .expect("the fixed algebraic parameter certificate must reproduce");
@@ -561,8 +631,33 @@ mod tests {
         assert_eq!(PLAINTEXT_MODULUS, 257);
         assert_eq!(PLAINTEXT_EXTENSION_DEGREE, 256);
         assert_eq!(PLAINTEXT_EXTENSION_LANE_COUNT, 128);
+        assert_eq!(
+            plaintext_extension_lane_dimensions(PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE),
+            Some((PLAINTEXT_EXTENSION_DEGREE, PLAINTEXT_EXTENSION_LANE_COUNT))
+        );
         assert!(verify_plaintext_extension_lane_layout());
         assert!(root_parameters_for_modulus(PLAINTEXT_MODULUS).is_none());
+    }
+
+    #[test]
+    fn plaintext_extension_lane_certificate_rejects_a_prime_with_the_wrong_order() {
+        const WRONG_ORDER_PLAINTEXT_MODULUS: u64 = 251;
+
+        assert!(is_prime(WRONG_ORDER_PLAINTEXT_MODULUS));
+        assert_eq!(
+            plaintext_extension_lane_dimensions(
+                WRONG_ORDER_PLAINTEXT_MODULUS,
+                POLYNOMIAL_DEGREE
+            ),
+            Some((16_384, 2))
+        );
+        assert_ne!(
+            plaintext_extension_lane_dimensions(
+                WRONG_ORDER_PLAINTEXT_MODULUS,
+                POLYNOMIAL_DEGREE
+            ),
+            Some((PLAINTEXT_EXTENSION_DEGREE, PLAINTEXT_EXTENSION_LANE_COUNT))
+        );
     }
 
     #[test]

@@ -525,10 +525,12 @@ impl AggregatePayload {
         &self.aggregate_ciphertext_descriptor
     }
 
+    #[cfg(test)]
     pub(crate) fn encode(&self) -> SchemaResult<Vec<u8>> {
         Ok(self.canonical_tuple()?.encode()?)
     }
 
+    #[cfg(test)]
     fn canonical_tuple(&self) -> SchemaResult<CanonicalTuple> {
         let selected_ballot_object_hashes = self
             .selected_ballot_object_hashes

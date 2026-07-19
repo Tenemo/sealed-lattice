@@ -1,18 +1,14 @@
 mod accepted_setup;
 mod commitment;
 mod sampling;
+#[cfg(test)]
 mod sharing;
+#[cfg(test)]
 mod vss;
 
 #[cfg(test)]
 mod tests;
 
-#[cfg(test)]
-pub(in crate::bgv) use accepted_setup::deterministic_galois_runtime_component_bytes_for_tests;
-#[cfg(test)]
-pub(in crate::bgv) use accepted_setup::release_verified_accepted_setup_authority;
-#[cfg(test)]
-pub(in crate::bgv) use accepted_setup::retain_evaluator_execution_authority_for_tests;
 pub(in crate::bgv) use accepted_setup::{
     BrowserOwnedAggregateThresholdShareLimb, CanonicalAcceptedSetupPackage,
     CanonicalPackageStreamKind, SelectedSetupGenerationLifecycleState,

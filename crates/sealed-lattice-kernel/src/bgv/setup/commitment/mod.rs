@@ -3,8 +3,6 @@ use crate::bgv::coefficient_codec::coefficient_vector_hash512;
 #[cfg(test)]
 use crate::hashing::derive_canonical_object_hash;
 #[cfg(test)]
-use num_bigint::BigUint;
-#[cfg(test)]
 use serde_json::{Value, json};
 
 use crate::{

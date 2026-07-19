@@ -1006,21 +1006,18 @@ mod verification_worker;
 
 pub(crate) use authorization_registry::{
     BorrowedVerifiedCommonProofCapability, CommonProofApplicationBinding,
-    CommonProofAuthenticatedLedgerHeadCapabilityHandle,
-    CommonProofAuthenticatedLedgerTransitionCapabilityHandle, CommonProofGenerationOperationHandle,
-    CommonProofRuntimeRegistry, CommonProofVerificationBinding,
-    CommonProofVerificationOperationHandle, ConsumedVerifiedCommonProofCapability,
-    GeneratedCommonProofCapabilityHandle, PendingCommonProofAuthorizationHandle,
-    PreparedCommonProofAuthorization, VerifiedCommonProofCapabilityHandle,
+    CommonProofGenerationOperationHandle, CommonProofRuntimeRegistry,
+    CommonProofVerificationBinding, CommonProofVerificationOperationHandle,
+    ConsumedVerifiedCommonProofCapability, GeneratedCommonProofCapabilityHandle,
+    PendingCommonProofAuthorizationHandle, VerifiedCommonProofCapabilityHandle,
     durable_authorization_frame_digest,
 };
 pub(crate) use generation_worker::{
     AuthenticatedCommonProofGenerationCheckpoint, CommonProofGenerationAuthorization,
     CommonProofGenerationCheckpointCustodyRequirement,
     CommonProofGenerationExternalMemoryAccounting, CommonProofGenerationPreparationError,
-    CommonProofGenerationSourceError, CommonProofGenerationSources,
-    CommonProofGenerationWorkerError, CommonProofGenerationWorkerPoll,
-    PreparedCommonProofGeneration,
+    CommonProofGenerationSources, CommonProofGenerationWorkerError,
+    CommonProofGenerationWorkerPoll, PreparedCommonProofGeneration,
     common_proof_generation_checkpoint_custody_requirement_for_variant,
 };
 pub(crate) use storage_transport::{
@@ -1039,8 +1036,8 @@ pub(crate) use verification_worker::{
 use authorization_registry::take_replacement_handle_before_consuming_source;
 use authorization_registry::{common_proof_stream_domain, take_nonrepeating_handle};
 use generation_worker::{
-    CommonProofGenerationCheckpointState, CommonProofGenerationWorker, GeneratedCommonProof,
-    PendingCommonProofGenerationCheckpoint, required_chunk_indices,
+    CommonProofGenerationWorker, GeneratedCommonProof, PendingCommonProofGenerationCheckpoint,
+    required_chunk_indices,
 };
 use verification_worker::CommonProofVerificationWorker;
 

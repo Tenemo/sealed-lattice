@@ -22,12 +22,11 @@ use super::{
         COLUMN_VALUE_SCHEMA_IDENTIFIER,
         CONSTANT_COLUMN_VERIFIER_SEQUENCE_PRODUCT_SUM_SCHEMA_IDENTIFIER,
         CONSTANT_COLUMN_VERIFIER_SEQUENCE_PRODUCT_TERM_SCHEMA_IDENTIFIER,
-        EVALUATION_VARIABLE_SCHEMA_IDENTIFIER,
-        FROBENIUS_CONJUGATE_SCHEMA_IDENTIFIER, MULTIPLICATION_SCHEMA_IDENTIFIER,
-        NEGATION_SCHEMA_IDENTIFIER, NON_NATIVE_MODULUS_CONSTANT_SCHEMA_IDENTIFIER,
-        NONNEGATIVE_POWER_SCHEMA_IDENTIFIER, RADIX_CONVOLUTION_COEFFICIENT_SCHEMA_IDENTIFIER,
-        SCHEMA_VERSION, TRACE_DOMAIN_EXCEPT_ROOTS_SCHEMA_IDENTIFIER,
-        TRANSCRIPT_CHALLENGE_SCHEMA_IDENTIFIER,
+        EVALUATION_VARIABLE_SCHEMA_IDENTIFIER, FROBENIUS_CONJUGATE_SCHEMA_IDENTIFIER,
+        MULTIPLICATION_SCHEMA_IDENTIFIER, NEGATION_SCHEMA_IDENTIFIER,
+        NON_NATIVE_MODULUS_CONSTANT_SCHEMA_IDENTIFIER, NONNEGATIVE_POWER_SCHEMA_IDENTIFIER,
+        RADIX_CONVOLUTION_COEFFICIENT_SCHEMA_IDENTIFIER, SCHEMA_VERSION,
+        TRACE_DOMAIN_EXCEPT_ROOTS_SCHEMA_IDENTIFIER, TRANSCRIPT_CHALLENGE_SCHEMA_IDENTIFIER,
     },
 };
 
@@ -225,18 +224,18 @@ impl RelationExpressionInstruction {
             Self::ConstantColumnVerifierSequenceProductSum {
                 coefficient_period,
                 ordered_terms,
-            } => CanonicalTuple::new(
-                CONSTANT_COLUMN_VERIFIER_SEQUENCE_PRODUCT_SUM_SCHEMA_IDENTIFIER,
-                SCHEMA_VERSION,
-                vec![
-                    CanonicalItem::unsigned16(*coefficient_period),
-                    canonical_nested_list(
-                        ordered_terms.iter().copied().map(
+            } => {
+                CanonicalTuple::new(
+                    CONSTANT_COLUMN_VERIFIER_SEQUENCE_PRODUCT_SUM_SCHEMA_IDENTIFIER,
+                    SCHEMA_VERSION,
+                    vec![
+                        CanonicalItem::unsigned16(*coefficient_period),
+                        canonical_nested_list(ordered_terms.iter().copied().map(
                             RelationConstantColumnVerifierSequenceProductTerm::canonical_tuple,
-                        ),
-                    )?,
-                ],
-            ),
+                        ))?,
+                    ],
+                )
+            }
             Self::TranscriptChallenge {
                 challenge_role,
                 role_coordinates,
@@ -752,12 +751,13 @@ pub(super) fn check_expression(
                         .ordered_columns
                         .get(term.verifier_sequence_column_ordinal as usize)
                         .ok_or(RelationPlanError::InvalidConstraint)?;
-                    if !matches!(constant_column.origin, super::model::RelationColumnOrigin::Prover)
-                        || !matches!(
-                            verifier_sequence_column.origin,
-                            super::model::RelationColumnOrigin::VerifierSequence { .. }
-                        )
-                        || constant_column.value_type != RelationColumnValueType::BaseField
+                    if !matches!(
+                        constant_column.origin,
+                        super::model::RelationColumnOrigin::Prover
+                    ) || !matches!(
+                        verifier_sequence_column.origin,
+                        super::model::RelationColumnOrigin::VerifierSequence { .. }
+                    ) || constant_column.value_type != RelationColumnValueType::BaseField
                         || verifier_sequence_column.value_type != RelationColumnValueType::BaseField
                         || constant_column.source_degree_bound_exclusive
                             >= variant.trace_domain_size.saturating_mul(2)

@@ -1145,9 +1145,7 @@ impl SelectedKllpsTargetReleaseMemoryAccounting {
         self.paired_partial_stream_custody_resident_byte_length
     }
 
-    pub(crate) fn proof_generation_additional_persistent_resident_byte_length(
-        self,
-    ) -> Option<u64> {
+    pub(crate) fn proof_generation_additional_persistent_resident_byte_length(self) -> Option<u64> {
         self.proof_source_additional_persistent_resident_byte_length
             .checked_add(self.paired_partial_stream_custody_resident_byte_length)
     }

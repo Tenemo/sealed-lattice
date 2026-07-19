@@ -285,17 +285,32 @@ pub struct VerifiedEvaluatorReplay {
     target_order_stream: VerifiedCanonicalStreamSummary,
 }
 
+/// Recomputed outputs of the deterministic evaluator relation. This value is
+/// crate-private and becomes authoritative only when joined to the exact
+/// board-ingested replay object below.
+pub(crate) struct VerifiedEvaluatorReplayRelationOutput {
+    pub(crate) roster_hash: Hash512,
+    pub(crate) top_count: u16,
+    pub(crate) target_level: u16,
+    pub(crate) decrypt_scaling: u64,
+    pub(crate) target_identifier_stream: VerifiedCanonicalStreamSummary,
+    pub(crate) target_order_stream: VerifiedCanonicalStreamSummary,
+}
+
 impl VerifiedEvaluatorReplay {
     pub(crate) fn from_verified_relation(
         object: &VerifiedTranscriptObject,
-        roster_hash: Hash512,
-        top_count: u16,
-        target_level: u16,
-        decrypt_scaling: u64,
-        target_identifier_stream: VerifiedCanonicalStreamSummary,
-        target_order_stream: VerifiedCanonicalStreamSummary,
+        relation_output: VerifiedEvaluatorReplayRelationOutput,
         limits: &CanonicalDecodeLimits,
     ) -> SchemaResult<Self> {
+        let VerifiedEvaluatorReplayRelationOutput {
+            roster_hash,
+            top_count,
+            target_level,
+            decrypt_scaling,
+            target_identifier_stream,
+            target_order_stream,
+        } = relation_output;
         if top_count == 0 || top_count > FOUNDATION_PROFILE.option_count {
             return Err(schema_error(
                 RefusalReason::OutsideSupportedProfile,
@@ -433,7 +448,9 @@ pub struct VerifiedFinality {
     finality_hash: Hash512,
     verified_evaluator_replay: VerifiedEvaluatorReplay,
     finality_objects: Vec<VerifiedTranscriptObject>,
-    state_outputs: Vec<VerifiedStateOutput>,
+    // Retaining these opaque outputs keeps the exact state capabilities that
+    // authorized finality alive for the lifetime of this capability.
+    _retained_state_outputs: Vec<VerifiedStateOutput>,
 }
 
 impl VerifiedFinality {
@@ -533,8 +550,9 @@ impl VerifiedFinality {
             .collect()
     }
 
+    #[cfg(test)]
     pub(crate) fn state_outputs(&self) -> &[VerifiedStateOutput] {
-        &self.state_outputs
+        &self._retained_state_outputs
     }
 }
 
@@ -694,7 +712,7 @@ impl FinalityVerifier {
             finality_hash,
             verified_evaluator_replay: input.verified_evaluator_replay.retained_clone(),
             finality_objects: retained_finality_objects,
-            state_outputs,
+            _retained_state_outputs: state_outputs,
         })
     }
 

@@ -1595,10 +1595,7 @@ impl CommittedMaterialTraceWitnessProvider {
     }
 
     #[cfg(test)]
-    fn column_trace_values(
-        &self,
-        column_ordinal: u32,
-    ) -> Result<Vec<u64>, RelationPlanError> {
+    fn column_trace_values(&self, column_ordinal: u32) -> Result<Vec<u64>, RelationPlanError> {
         let trace_domain_size = usize::try_from(self.input.relation_trace_domain_size()?)
             .map_err(|_| RelationPlanError::CountOverflow)?;
         (0..trace_domain_size)
@@ -2324,45 +2321,11 @@ pub(crate) fn vss_share_linkage_trace_witness_structure_memory_accounting(
     )
 }
 
-pub(crate) fn derive_vss_share_linkage_trace_witness_provider<'rows>(
-    input: &'rows CommittedMaterialRelationPlanInput,
-    context: &RelationPlanCheckContext,
-    ordered_roots: &'rows [CommittedMaterialRootTraceRows<'rows>],
-) -> Result<CommittedMaterialTraceWitnessProvider<'rows>, RelationPlanError> {
-    let layout = derive_vss_share_linkage_trace_witness_layout(input, context)?;
-    let expected_root_count = layout
-        .resolved_moduli
-        .len()
-        .checked_mul(layout.roots_per_limb)
-        .ok_or(RelationPlanError::CountOverflow)?;
-    validate_committed_material_root_trace_rows(
-        input,
-        ordered_roots,
-        &layout.resolved_moduli,
-        layout.roots_per_limb,
-    )?;
-    if ordered_roots.len() != expected_root_count {
-        return Err(RelationPlanError::InvalidRoot);
-    }
-    Ok(CommittedMaterialTraceWitnessProvider {
-        input: CommittedMaterialTraceWitnessInput::from_relation_input(input),
-        ordered_roots: CommittedMaterialTraceRootStorage::Borrowed(ordered_roots),
-        resolved_moduli: layout
-            .resolved_moduli
-            .into_iter()
-            .map(|(_, modulus)| modulus)
-            .collect::<Vec<_>>()
-            .into_boxed_slice(),
-        ordered_recipes: layout.ordered_recipes,
-        relation_plan_hash: layout.relation_plan_hash,
-    })
-}
-
-pub(crate) fn derive_owned_vss_share_linkage_trace_witness_provider(
+pub(crate) fn derive_vss_share_linkage_trace_witness_provider(
     input: &CommittedMaterialRelationPlanInput,
     context: &RelationPlanCheckContext,
     ordered_sources: Vec<AuthenticatedCompactCommittedMaterialSource>,
-) -> Result<CommittedMaterialTraceWitnessProvider<'static>, RelationPlanError> {
+) -> Result<CommittedMaterialTraceWitnessProvider, RelationPlanError> {
     let layout = derive_vss_share_linkage_trace_witness_layout(input, context)?;
     validate_authenticated_committed_material_sources(
         input,
@@ -2372,7 +2335,7 @@ pub(crate) fn derive_owned_vss_share_linkage_trace_witness_provider(
     )?;
     Ok(CommittedMaterialTraceWitnessProvider {
         input: CommittedMaterialTraceWitnessInput::from_relation_input(input),
-        ordered_roots: CommittedMaterialTraceRootStorage::Owned(ordered_sources.into_boxed_slice()),
+        ordered_roots: ordered_sources.into_boxed_slice(),
         resolved_moduli: layout
             .resolved_moduli
             .into_iter()
@@ -2458,45 +2421,11 @@ pub(crate) fn aggregate_threshold_share_trace_witness_structure_memory_accountin
     )
 }
 
-pub(crate) fn derive_aggregate_threshold_share_trace_witness_provider<'rows>(
-    input: &'rows CommittedMaterialRelationPlanInput,
-    context: &RelationPlanCheckContext,
-    ordered_roots: &'rows [CommittedMaterialRootTraceRows<'rows>],
-) -> Result<CommittedMaterialTraceWitnessProvider<'rows>, RelationPlanError> {
-    let layout = derive_aggregate_threshold_share_trace_witness_layout(input, context)?;
-    let expected_root_count = layout
-        .resolved_moduli
-        .len()
-        .checked_mul(layout.roots_per_limb)
-        .ok_or(RelationPlanError::CountOverflow)?;
-    validate_committed_material_root_trace_rows(
-        input,
-        ordered_roots,
-        &layout.resolved_moduli,
-        layout.roots_per_limb,
-    )?;
-    if ordered_roots.len() != expected_root_count {
-        return Err(RelationPlanError::InvalidRoot);
-    }
-    Ok(CommittedMaterialTraceWitnessProvider {
-        input: CommittedMaterialTraceWitnessInput::from_relation_input(input),
-        ordered_roots: CommittedMaterialTraceRootStorage::Borrowed(ordered_roots),
-        resolved_moduli: layout
-            .resolved_moduli
-            .into_iter()
-            .map(|(_, modulus)| modulus)
-            .collect::<Vec<_>>()
-            .into_boxed_slice(),
-        ordered_recipes: layout.ordered_recipes,
-        relation_plan_hash: layout.relation_plan_hash,
-    })
-}
-
-pub(crate) fn derive_owned_aggregate_threshold_share_trace_witness_provider(
+pub(crate) fn derive_aggregate_threshold_share_trace_witness_provider(
     input: &CommittedMaterialRelationPlanInput,
     context: &RelationPlanCheckContext,
     ordered_sources: Vec<AuthenticatedCompactCommittedMaterialSource>,
-) -> Result<CommittedMaterialTraceWitnessProvider<'static>, RelationPlanError> {
+) -> Result<CommittedMaterialTraceWitnessProvider, RelationPlanError> {
     let layout = derive_aggregate_threshold_share_trace_witness_layout(input, context)?;
     validate_authenticated_committed_material_sources(
         input,
@@ -2506,7 +2435,7 @@ pub(crate) fn derive_owned_aggregate_threshold_share_trace_witness_provider(
     )?;
     Ok(CommittedMaterialTraceWitnessProvider {
         input: CommittedMaterialTraceWitnessInput::from_relation_input(input),
-        ordered_roots: CommittedMaterialTraceRootStorage::Owned(ordered_sources.into_boxed_slice()),
+        ordered_roots: ordered_sources.into_boxed_slice(),
         resolved_moduli: layout
             .resolved_moduli
             .into_iter()
@@ -2558,54 +2487,6 @@ fn validate_authenticated_committed_material_sources(
                 .any(|coefficient| *coefficient >= modulus)
         {
             return Err(RelationPlanError::InvalidRoot);
-        }
-    }
-    Ok(())
-}
-
-fn validate_committed_material_root_trace_rows(
-    input: &CommittedMaterialRelationPlanInput,
-    ordered_roots: &[CommittedMaterialRootTraceRows<'_>],
-    resolved_moduli: &[(SuiteModulusReference, u64)],
-    roots_per_limb: usize,
-) -> Result<(), RelationPlanError> {
-    let trace_domain_size = usize::try_from(input.message_trace_domain_size()?)
-        .map_err(|_| RelationPlanError::CountOverflow)?;
-    for (logical_root_ordinal, root) in ordered_roots.iter().copied().enumerate() {
-        let modulus_ordinal = logical_root_ordinal / roots_per_limb;
-        let modulus = resolved_moduli
-            .get(modulus_ordinal)
-            .map(|(_, modulus)| *modulus)
-            .ok_or(RelationPlanError::InvalidRoot)?;
-        for physical_column_ordinal in 0..4 {
-            let rows = root
-                .column(physical_column_ordinal)
-                .ok_or(RelationPlanError::InvalidColumn)?;
-            if rows.len() != trace_domain_size
-                || rows.iter().any(|value| *value >= MATERIAL_DIGIT_RADIX)
-            {
-                return Err(RelationPlanError::InvalidColumn);
-            }
-        }
-        for physical_half_ordinal in 0..2 {
-            let low = root
-                .digit(physical_half_ordinal, 0)
-                .ok_or(RelationPlanError::InvalidColumn)?;
-            let high = root
-                .digit(physical_half_ordinal, 1)
-                .ok_or(RelationPlanError::InvalidColumn)?;
-            for (low, high) in low.iter().copied().zip(high.iter().copied()) {
-                let value = u128::from(low)
-                    .checked_add(
-                        u128::from(high)
-                            .checked_mul(u128::from(MATERIAL_DIGIT_RADIX))
-                            .ok_or(RelationPlanError::IntegerBoundOverflow)?,
-                    )
-                    .ok_or(RelationPlanError::IntegerBoundOverflow)?;
-                if value >= u128::from(modulus) {
-                    return Err(RelationPlanError::InvalidColumn);
-                }
-            }
         }
     }
     Ok(())
@@ -2751,49 +2632,25 @@ mod tests {
     use super::{
         COMMITTED_MATERIAL_TRACE_PACKING_FACTOR, CommittedMaterialColumnRecipe,
         CommittedMaterialIntegerRecipe, CommittedMaterialRelationPlanInput,
-        CommittedMaterialRootTraceRows, MATERIAL_DIGIT_TERNARY_DIGIT_COUNT, MonomialActionBranch,
-        RelationBoundCertificate, RelationColumnOrigin, RelationPlanCheckContext,
-        RelationPlanError, ResolvedSuiteModulus, SuiteModulusReference, TERNARY_DIGIT_RADIX,
+        MATERIAL_DIGIT_TERNARY_DIGIT_COUNT, MonomialActionBranch, RelationBoundCertificate,
+        RelationColumnOrigin, RelationPlanCheckContext, RelationPlanError, ResolvedSuiteModulus,
+        SuiteModulusReference, TERNARY_DIGIT_RADIX,
         derive_aggregate_threshold_share_trace_witness_provider,
         derive_vss_share_linkage_trace_witness_provider, modular_power, monomial_action_branches,
         vss_share_linkage_trace_witness_structure_memory_accounting,
+    };
+    use crate::bgv::proof_suite::{
+        AuthenticatedCompactCommittedMaterialSource, CommittedMaterialProfile,
+        CommittedMaterialTree,
     };
     use crate::foundation::{
         MAXIMUM_CONFIGURABLE_PARTICIPANT_COUNT, MINIMUM_CONFIGURABLE_PARTICIPANT_COUNT,
         derive_foundation_roster_parameters,
     };
-
-    #[derive(Clone, Debug)]
-    struct TestCommittedMaterialRootTraceRows {
-        ordered_columns: [Vec<u64>; 4],
-    }
-
-    impl TestCommittedMaterialRootTraceRows {
-        fn from_dense_message(message: &[u64]) -> Self {
-            assert!(message.len().is_power_of_two() && message.len() >= 4);
-            let trace_domain_size = message.len() / 2;
-            Self {
-                ordered_columns: [
-                    message[..trace_domain_size].to_vec(),
-                    message[trace_domain_size..].to_vec(),
-                    vec![0; trace_domain_size],
-                    vec![0; trace_domain_size],
-                ],
-            }
-        }
-
-        fn borrowed(&self) -> CommittedMaterialRootTraceRows<'_> {
-            CommittedMaterialRootTraceRows {
-                low_digit_first_half: &self.ordered_columns[0],
-                low_digit_second_half: &self.ordered_columns[1],
-                high_digit_first_half: &self.ordered_columns[2],
-                high_digit_second_half: &self.ordered_columns[3],
-            }
-        }
-    }
+    use zeroize::Zeroizing;
 
     fn trace_witness_context() -> RelationPlanCheckContext {
-        let evaluation_domain_size = 1_024_u64;
+        let evaluation_domain_size = 4_096_u64;
         let relation_input = trace_witness_input();
         let quotient_component_count = 3_u64;
         let deep_point_count = 1_u64;
@@ -2817,7 +2674,7 @@ mod tests {
             base_field_modulus: crate::bgv::proof_suite::PROOF_BASE_FIELD_MODULUS,
             challenge_extension_degree: crate::bgv::proof_suite::PROOF_CHALLENGE_EXTENSION_DEGREE
                 as u16,
-            evaluation_blowup_factor: 2,
+            evaluation_blowup_factor: crate::bgv::proof_suite::PROOF_EVALUATION_BLOWUP_FACTOR,
             evaluation_domain_generator: modular_power(
                 crate::bgv::proof_suite::PROOF_BASE_FIELD_MAXIMUM_TWO_ADIC_GENERATOR,
                 (1_u64 << 32) / evaluation_domain_size,
@@ -2853,14 +2710,51 @@ mod tests {
             .expect("test trace mask degree derives");
         CommittedMaterialRelationPlanInput {
             ring_degree: 64,
-            evaluation_domain_size: 1_024,
+            evaluation_domain_size: 4_096,
             opening_degree_bound_exclusive: 512,
-            material_column_degree_bound_exclusive: 10,
+            material_column_degree_bound_exclusive: 64,
             participant_count: 3,
             threshold: 2,
             sharing_data_modulus_indices: vec![0],
             trace_mask_degree_bound_exclusive,
         }
+    }
+
+    fn authenticated_compact_source(
+        input: &CommittedMaterialRelationPlanInput,
+        canonical_message: &[u64],
+        canonical_modulus: u64,
+        logical_root_ordinal: usize,
+    ) -> AuthenticatedCompactCommittedMaterialSource {
+        let ring_degree = usize::try_from(input.ring_degree).expect("test ring degree fits usize");
+        assert_eq!(canonical_message.len(), ring_degree);
+        let profile = CommittedMaterialProfile::for_common_proof_evaluation_domain(
+            ring_degree,
+            usize::try_from(input.evaluation_domain_size)
+                .expect("test evaluation domain size fits usize"),
+        )
+        .expect("test committed-material profile derives");
+        assert_eq!(
+            profile.material_column_degree_bound_exclusive(),
+            usize::try_from(input.material_column_degree_bound_exclusive)
+                .expect("test material-column bound fits usize")
+        );
+        let root_fill =
+            u8::try_from(logical_root_ordinal + 1).expect("test logical root ordinal fits u8");
+        let tree = CommittedMaterialTree::from_canonical_message(
+            profile,
+            [root_fill; 64],
+            [root_fill.wrapping_add(0x40); 64],
+            canonical_message,
+            canonical_modulus,
+        )
+        .expect("test committed-material tree derives");
+        AuthenticatedCompactCommittedMaterialSource::from_recomputed_tree_and_canonical_message(
+            tree,
+            Zeroizing::new(canonical_message.to_vec().into_boxed_slice()),
+            canonical_modulus,
+        )
+        .expect("test committed-material source authenticates")
     }
 
     #[test]
@@ -2955,10 +2849,7 @@ mod tests {
             .map(|coefficient_ordinal| (53 * coefficient_ordinal + 71) % MODULUS)
             .collect::<Vec<_>>();
         let point_stride = input.point_stride().expect("test point stride");
-        let mut owned_roots = vec![
-            TestCommittedMaterialRootTraceRows::from_dense_message(&first_coefficient),
-            TestCommittedMaterialRootTraceRows::from_dense_message(&second_coefficient),
-        ];
+        let mut ordered_messages = vec![first_coefficient.clone(), second_coefficient.clone()];
         for recipient_ordinal in 0..usize::from(input.participant_count) {
             let acted_second = dense_negacyclic_monomial_action(
                 &second_coefficient,
@@ -2966,16 +2857,18 @@ mod tests {
                 MODULUS,
             );
             let share = add_dense_messages(&first_coefficient, &acted_second, MODULUS);
-            owned_roots.push(TestCommittedMaterialRootTraceRows::from_dense_message(
-                &share,
-            ));
+            ordered_messages.push(share);
         }
-        let borrowed_roots = owned_roots
+        let ordered_sources = ordered_messages
             .iter()
-            .map(TestCommittedMaterialRootTraceRows::borrowed)
+            .enumerate()
+            .map(|(logical_root_ordinal, message)| {
+                authenticated_compact_source(&input, message, MODULUS, logical_root_ordinal)
+            })
             .collect::<Vec<_>>();
+        let ordered_source_count = ordered_sources.len();
         let provider =
-            derive_vss_share_linkage_trace_witness_provider(&input, &context, &borrowed_roots)
+            derive_vss_share_linkage_trace_witness_provider(&input, &context, ordered_sources)
                 .expect("honest VSS trace witness provider");
         let plan = super::super::vss_share_linkage::compile_vss_share_linkage_relation_plan(
             &input, &context,
@@ -2988,7 +2881,7 @@ mod tests {
             .count();
         let ordered_column_ordinals = provider.ordered_column_ordinals().collect::<Vec<_>>();
         assert_eq!(ordered_column_ordinals.len(), expected_prover_column_count);
-        assert_eq!(provider.logical_root_count(), borrowed_roots.len());
+        assert_eq!(provider.logical_root_count(), ordered_source_count);
         assert_eq!(
             provider.relation_plan_hash(),
             plan.canonical_hash().expect("test VSS plan hash")
@@ -3116,20 +3009,20 @@ mod tests {
                 .expect("restart pass")
         );
 
-        let mut broken_roots = owned_roots.clone();
+        let mut broken_messages = ordered_messages.clone();
         let recipient_root_ordinal = usize::from(input.threshold);
-        broken_roots[recipient_root_ordinal].ordered_columns[0][0] =
-            (broken_roots[recipient_root_ordinal].ordered_columns[0][0] + 1) % MODULUS;
-        let broken_borrowed_roots = broken_roots
+        broken_messages[recipient_root_ordinal][0] =
+            (broken_messages[recipient_root_ordinal][0] + 1) % MODULUS;
+        let broken_sources = broken_messages
             .iter()
-            .map(TestCommittedMaterialRootTraceRows::borrowed)
+            .enumerate()
+            .map(|(logical_root_ordinal, message)| {
+                authenticated_compact_source(&input, message, MODULUS, logical_root_ordinal)
+            })
             .collect::<Vec<_>>();
-        let broken_provider = derive_vss_share_linkage_trace_witness_provider(
-            &input,
-            &context,
-            &broken_borrowed_roots,
-        )
-        .expect("a canonical but inconsistent share reaches relation evaluation");
+        let broken_provider =
+            derive_vss_share_linkage_trace_witness_provider(&input, &context, broken_sources)
+                .expect("a canonical but inconsistent share reaches relation evaluation");
         assert!(
             broken_provider
                 .ordered_column_ordinals()
@@ -3144,7 +3037,7 @@ mod tests {
     }
 
     #[test]
-    fn aggregate_trace_witness_provider_covers_carries_and_rejects_noncanonical_roots() {
+    fn aggregate_trace_witness_provider_covers_carries_and_rejects_wrong_modulus_sources() {
         const MODULUS: u64 = 97;
         let context = trace_witness_context();
         let input = trace_witness_input();
@@ -3164,21 +3057,19 @@ mod tests {
             vec![0; usize::try_from(input.ring_degree).unwrap()],
             |accumulated, source| add_dense_messages(&accumulated, source, MODULUS),
         );
-        let mut owned_roots = source_messages
+        let mut ordered_messages = source_messages;
+        ordered_messages.push(aggregate);
+        let ordered_sources = ordered_messages
             .iter()
-            .map(|source| TestCommittedMaterialRootTraceRows::from_dense_message(source))
-            .collect::<Vec<_>>();
-        owned_roots.push(TestCommittedMaterialRootTraceRows::from_dense_message(
-            &aggregate,
-        ));
-        let borrowed_roots = owned_roots
-            .iter()
-            .map(TestCommittedMaterialRootTraceRows::borrowed)
+            .enumerate()
+            .map(|(logical_root_ordinal, message)| {
+                authenticated_compact_source(&input, message, MODULUS, logical_root_ordinal)
+            })
             .collect::<Vec<_>>();
         let provider = derive_aggregate_threshold_share_trace_witness_provider(
             &input,
             &context,
-            &borrowed_roots,
+            ordered_sources,
         )
         .expect("honest aggregate trace witness provider");
         let plan = super::super::aggregate_threshold_share::compile_aggregate_threshold_share_relation_plan(
@@ -3199,17 +3090,20 @@ mod tests {
                 .expect("honest aggregate witness column");
         }
 
-        let mut invalid_roots = owned_roots.clone();
-        invalid_roots[0].ordered_columns[0][0] = MODULUS;
-        let invalid_borrowed_roots = invalid_roots
+        let mut wrong_modulus_sources = ordered_messages
             .iter()
-            .map(TestCommittedMaterialRootTraceRows::borrowed)
+            .enumerate()
+            .map(|(logical_root_ordinal, message)| {
+                authenticated_compact_source(&input, message, MODULUS, logical_root_ordinal)
+            })
             .collect::<Vec<_>>();
+        wrong_modulus_sources[0] =
+            authenticated_compact_source(&input, &ordered_messages[0], 101, 0);
         assert!(
             derive_aggregate_threshold_share_trace_witness_provider(
                 &input,
                 &context,
-                &invalid_borrowed_roots,
+                wrong_modulus_sources,
             )
             .is_err()
         );

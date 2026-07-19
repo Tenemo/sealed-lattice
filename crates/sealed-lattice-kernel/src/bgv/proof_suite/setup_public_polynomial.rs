@@ -393,7 +393,7 @@ impl SetupPublicPolynomialRootBuilder {
         if residue_byte_length == 0
             || residue_byte_length > size_of::<u64>()
             || canonical_modulus < 2
-            || encoded_residues.len() % residue_byte_length != 0
+            || !encoded_residues.len().is_multiple_of(residue_byte_length)
             || encoded_residues.len() / residue_byte_length
                 != self.source_polynomial_degree_bound_exclusive
         {

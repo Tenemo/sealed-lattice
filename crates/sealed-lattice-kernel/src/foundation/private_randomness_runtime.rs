@@ -149,12 +149,6 @@ impl PreparedActionProofAttemptSource {
         *self.attempt_identifier.as_bytes()
     }
 
-    pub(crate) const fn private_randomness_attempt_identifier(
-        &self,
-    ) -> PrivateRandomnessAttemptIdentifier {
-        self.attempt_identifier
-    }
-
     pub(crate) const fn application_slot(&self) -> ProofApplicationSlot {
         self.application_slot
     }
@@ -575,33 +569,6 @@ impl ActionRandomnessRegistry {
                     .map(|_| entry.mailbox_encapsulation_key)
             })
             .ok_or(RefusalReason::WrongContext.canonical_code() as u32)
-    }
-
-    fn setup_source_matches_roster_position(
-        &self,
-        handle: u32,
-        roster_hash: Hash512,
-        source_roster_position: u16,
-        expected_source_identity: ParticipantIdentity,
-    ) -> RuntimeResult<()> {
-        let roster = self
-            .setup_rosters
-            .get(&handle)
-            .ok_or(RefusalReason::MissingPrerequisite.canonical_code() as u32)?;
-        if roster.roster_hash != roster_hash {
-            return Err(RefusalReason::WrongHashOrRoot.canonical_code() as u32);
-        }
-        let source_identity = roster
-            .roster
-            .entries
-            .get(usize::from(source_roster_position))
-            .ok_or(RefusalReason::WrongContext.canonical_code() as u32)?
-            .participant_identity()
-            .map_err(schema_status)?;
-        if source_identity != expected_source_identity {
-            return Err(RefusalReason::WrongContext.canonical_code() as u32);
-        }
-        Ok(())
     }
 }
 

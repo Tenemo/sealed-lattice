@@ -11,43 +11,39 @@ import {
 } from '#packages/wasm/tests/canonical-tuple-test-helpers';
 
 const orderedDataPrimes = [
-    140_700_980_543_489n,
-    140_546_359_361_537n,
-    140_507_704_066_049n,
-    140_417_508_376_577n,
-    140_396_033_212_417n,
-    140_383_148_113_921n,
-    140_365_967_982_593n,
-    140_280_067_325_953n,
-    140_061_020_651_521n,
-    139_992_300_126_209n,
-    139_880_629_272_577n,
-    139_764_663_386_113n,
-    139_708_827_959_297n,
-    139_670_172_663_809n,
-    139_541_321_678_849n,
-    139_451_125_989_377n,
-    139_399_585_595_393n,
+    1_953_759_233n,
+    2_256_928_769n,
+    2_408_513_537n,
+    2_610_626_561n,
+    2_661_154_817n,
+    3_014_852_609n,
+    3_031_695_361n,
+    3_368_550_401n,
+    84_213_761n,
+    235_798_529n,
+    336_855_041n,
+    1_010_565_121n,
+    690_552_833n,
+    1_313_734_657n,
+    1_397_948_417n,
+    437_911_553n,
+    404_226_049n,
+    606_339_073n,
+    1_061_093_377n,
+    1_819_017_217n,
+    555_810_817n,
+    1_869_545_473n,
+    1_903_230_977n,
 ] as const;
 
 const orderedSpecialPrimes = [
-    140_737_487_306_753n,
-    140_737_486_716_929n,
-    140_737_486_520_321n,
-    140_737_485_864_961n,
-    140_737_484_685_313n,
-    140_737_483_898_881n,
-    140_737_482_981_377n,
-    140_737_481_801_729n,
-    140_737_481_342_977n,
-    140_737_480_949_761n,
-    140_737_480_359_937n,
-    140_737_479_639_041n,
-    140_737_476_100_097n,
-    140_737_472_299_009n,
-    140_737_471_971_329n,
-    140_737_471_774_721n,
-    140_737_471_578_113n,
+    275_513_737_217n,
+    275_530_579_969n,
+    275_968_491_521n,
+] as const;
+
+const orderedTargetAndSharingDataPrimeIndexes = [
+    0, 1, 2, 3, 4, 5, 6, 7,
 ] as const;
 
 const unsigned32Item = (value: number): Uint8Array =>
@@ -89,12 +85,20 @@ const artifactReference = (
     );
 };
 
+type CanonicalSuiteRecordFixtureInput = Readonly<{
+    artifactBytes?: readonly Uint8Array[];
+    polynomialDegree?: number;
+}>;
+
 export const createCanonicalSuiteRecordFixture = (
-    artifactBytes: readonly Uint8Array[] = Array.from(
-        { length: 6 },
-        (_unused, artifactIndex) => Uint8Array.of(artifactIndex + 1),
-    ),
+    input: CanonicalSuiteRecordFixtureInput = {},
 ): Uint8Array => {
+    const artifactBytes =
+        input.artifactBytes ??
+        Array.from({ length: 6 }, (_unused, artifactIndex) =>
+            Uint8Array.of(artifactIndex + 1),
+        );
+    const polynomialDegree = input.polynomialDegree ?? 32_768;
     if (
         artifactBytes.length !== 6 ||
         artifactBytes.some(
@@ -103,6 +107,15 @@ export const createCanonicalSuiteRecordFixture = (
     ) {
         throw new TypeError(
             'The canonical suite fixture requires six nonempty artifact byte strings.',
+        );
+    }
+    if (
+        !Number.isInteger(polynomialDegree) ||
+        polynomialDegree < 0 ||
+        polynomialDegree > 0xffff_ffff
+    ) {
+        throw new RangeError(
+            'The canonical suite fixture polynomial degree must fit unsigned 32-bit encoding.',
         );
     }
     const ternaryPurposes = new Set([1, 3, 8, 11, 12]);
@@ -124,8 +137,8 @@ export const createCanonicalSuiteRecordFixture = (
         unsigned16Item(3),
         unsigned16Item(4),
         unsigned16Item(7),
-        unsigned32Item(32_768),
-        unsigned64Item(65_537n),
+        unsigned32Item(polynomialDegree),
+        unsigned64Item(257n),
         homogeneousListItem(
             0x05,
             orderedDataPrimes.map(unsigned64LittleEndian),
@@ -134,22 +147,23 @@ export const createCanonicalSuiteRecordFixture = (
             0x05,
             orderedSpecialPrimes.map(unsigned64LittleEndian),
         ),
-        homogeneousListItem(0x03, [0, 1].map(unsigned16LittleEndian)),
         homogeneousListItem(
             0x03,
-            Array.from({ length: 17 }, (_value, index) =>
-                unsigned16LittleEndian(index),
-            ),
+            orderedTargetAndSharingDataPrimeIndexes.map(unsigned16LittleEndian),
+        ),
+        homogeneousListItem(
+            0x03,
+            orderedTargetAndSharingDataPrimeIndexes.map(unsigned16LittleEndian),
         ),
         unsigned16Item(1),
-        unsigned16Item(orderedSpecialPrimes.length),
+        unsigned16Item(3),
         unsigned16Item(1),
         unsigned16Item(3),
         unsigned16Item(10),
         unsigned32Item(64),
         unsigned32Item(128),
         unsigned32Item(20),
-        unsigned32Item(100),
+        unsigned32Item(103),
         homogeneousListItem(0x09, distributions),
         homogeneousListItem(
             0x09,

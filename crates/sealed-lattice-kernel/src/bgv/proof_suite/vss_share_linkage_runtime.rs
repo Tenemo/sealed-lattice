@@ -247,7 +247,7 @@ impl<Output> BoundedVssOutputRegistry<Output> {
         expected_count: usize,
     ) -> Result<Vec<Output>, CommonProofRuntimeError> {
         if ordered_handles.len() != expected_count
-            || ordered_handles.iter().any(|handle| *handle == 0)
+            || ordered_handles.contains(&0)
             || ordered_handles
                 .iter()
                 .copied()

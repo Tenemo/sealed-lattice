@@ -30,7 +30,7 @@ use super::{
     ProofExternalMemory, ProofExternalMemoryExecutor, ProofExternalMemoryExecutorError,
     ProofExternalMemoryUsage, ProofTreeCatalogEntry, ProofTreeCatalogInput, ProofTreeCatalogSource,
     ProofTreeRole, ProofTreeValue, RelationApplicationChallengeAssignment,
-    RelationPlanCheckContext, RelationPlanVariant, RelationProofTreeInput, RelationTreeDescriptor,
+    RelationPlanCheckContext, RelationPlanVariant, RelationTreeDescriptor,
     SetupPolynomialColumnMajorMerkleReplay, SetupPolynomialColumnMajorMerkleReplayMode,
     SetupPolynomialColumnMajorMerkleRootPass, StatementOwnedMerkleReplay,
     StatementOwnedMerkleReplayMode, StoredCommonProofMerkleTree, StreamingHash512,

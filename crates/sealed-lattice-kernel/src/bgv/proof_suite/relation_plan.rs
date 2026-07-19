@@ -6,20 +6,14 @@
 //! second pass over the generated value and does not trust compiler-side
 //! counters or ordering decisions.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
+#[cfg(test)]
+use std::collections::BTreeSet;
 
-use num_bigint::{BigInt, BigUint, Sign};
+use num_bigint::{BigInt, BigUint};
 use num_traits::{One, Zero};
 
-use crate::foundation::{
-    CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple,
-    ProofApplicationSlotCeilings, StreamingFoundationTupleHash512,
-};
-
-use super::transcript::{
-    CommonProofApplicationChallengeGroup, CommonProofChallenge, CommonProofPrivacyMode,
-    CommonProofTranscriptSchedule,
-};
+use crate::foundation::ProofApplicationSlotCeilings;
 
 mod bounds;
 mod compiled_plan;
@@ -29,11 +23,12 @@ mod model;
 mod schema;
 
 #[cfg(test)]
-use bounds::signed_integer_from_magnitude;
-use bounds::{canonical_signed_integer_tuple, canonical_unsigned_magnitude_item};
+use bounds::{
+    canonical_signed_integer_tuple, canonical_unsigned_magnitude_item,
+    signed_integer_from_magnitude,
+};
 use compiled_plan::RelationPlan;
-use layout::challenge_descriptor;
-use model::{canonical_encoding_error, validate_negacyclic_automorphism};
+#[cfg(test)]
 use schema::*;
 
 pub(crate) use bounds::{
@@ -41,15 +36,14 @@ pub(crate) use bounds::{
     SignedIntegerInterval,
 };
 pub(crate) use compiled_plan::{
-    CompiledRelationPlan, ProofApplicationSlotTemplate, RelationPlanCheckContext,
-    ResolvedSuiteModulus, merge_checked_relation_plan_variants,
+    CompiledRelationPlan, RelationPlanCheckContext, ResolvedSuiteModulus,
 };
 pub(crate) use integer_lift::{
     RelationCoefficientLocalIdentityBatchDescriptor, RelationCoefficientLocalResidualDescriptor,
     RelationIntegerLiftBatchDescriptor, RelationIntegerLiftCoefficient,
-    RelationIntegerLiftComponentDescriptor, RelationIntegerLiftConstraintProgram,
-    RelationIntegerLiftConvolutionKind, RelationIntegerLiftConvolutionProductDescriptor,
-    RelationIntegerLiftFullRingHalf, RelationIntegerLiftFullRingNegacyclicProductDescriptor,
+    RelationIntegerLiftComponentDescriptor, RelationIntegerLiftConvolutionKind,
+    RelationIntegerLiftConvolutionProductDescriptor, RelationIntegerLiftFullRingHalf,
+    RelationIntegerLiftFullRingNegacyclicProductDescriptor,
     RelationIntegerLiftLinearTermDescriptor,
     RelationIntegerLiftNegacyclicAutomorphismPermutationDescriptor,
     RelationIntegerLiftReversedColumnBindingDescriptor, resolved_modulus_radix_digit,
@@ -61,30 +55,34 @@ pub(crate) use layout::{
 };
 pub(crate) use model::{
     BoundTreeConstructionKind, BoundTreeRootUse, ModulusCatalog, ProofPrivacyMode,
-    RelationChallengeDescriptor, RelationChallengeEpochCatalog,
-    RelationChallengeEpochPrecedingMessage, RelationChallengeModulusSelector,
-    RelationChallengeRole, RelationChallengeSampling, RelationColumnDescriptor,
-    RelationColumnOrigin, RelationColumnValueType, RelationElementKind, RelationEmbeddingKind,
-    RelationPlanError, RelationPublicSamplerDescriptor, RelationRadixConvolutionDescriptor,
-    RelationRadixFactorDescriptor, RelationRadixProductTermDescriptor, RelationSelectorPathStep,
-    RelationTreeDescriptor, RelationValueLayout, RelationVerifierSource,
-    ResolvedRelationChallengeSampling, SelectorPathStepKind, SuiteModulusReference,
-    apply_negacyclic_automorphism, negacyclic_automorphism_mapping_values,
-    negacyclic_automorphism_semantics_match, radix_decompose_scaled_residues,
+    RelationChallengeRole, RelationColumnDescriptor, RelationColumnOrigin, RelationColumnValueType,
+    RelationElementKind, RelationEmbeddingKind, RelationPlanError, RelationRadixFactorDescriptor,
+    RelationSelectorPathStep, RelationTreeDescriptor, RelationValueLayout, RelationVerifierSource,
+    SelectorPathStepKind, SuiteModulusReference, apply_negacyclic_automorphism,
+    negacyclic_automorphism_mapping_values, radix_decompose_scaled_residues,
+};
+#[cfg(test)]
+pub(crate) use model::{
+    RelationChallengeModulusSelector, RelationChallengeSampling,
+    RelationRadixConvolutionDescriptor, RelationRadixProductTermDescriptor,
+    negacyclic_automorphism_semantics_match,
 };
 mod checking;
 mod expressions;
 
+use checking::{RelationPlanChecker, full_trace_zeroifier_expression};
+#[cfg(test)]
 use checking::{
-    RelationPlanChecker, derive_semantic_cell_interval, full_trace_zeroifier_expression,
-    integer_lift_maximum_absolute_product, zeroifier_roots_are_confined_to_trace_domain,
+    derive_semantic_cell_interval, integer_lift_maximum_absolute_product,
+    zeroifier_roots_are_confined_to_trace_domain,
 };
 use expressions::*;
 
+#[cfg(test)]
+pub(crate) use expressions::finite_integer_set_constraint_expressions;
 pub(crate) use expressions::{
     RelationConstantColumnVerifierSequenceProductTerm, RelationConstraintColumnQuery,
-    RelationExpressionInstruction,
-    finite_integer_set_constraint_expressions, ordered_injective_integer_factor_product_expression,
+    RelationExpressionInstruction, ordered_injective_integer_factor_product_expression,
     unsigned_radix_comparator_digit_expression,
 };
 
@@ -118,14 +116,10 @@ pub(crate) use ballot_validity::{
 };
 pub(crate) use ballot_validity_adapter::{
     BallotValidityAcceptedSetupBinding, BallotValidityAdapterError,
-    BallotValidityAuthenticatedCiphertext, BallotValidityBoundPublicMaterial,
-    BallotValidityCiphertextReadback, BallotValidityCiphertextStreamDecoder,
-    BallotValidityEncryptionAttemptWitness, BallotValidityGeneratedCiphertext,
-    BallotValidityGenerationPreparationError, BallotValidityPreparedProofAttempt,
-    BallotValiditySourcePolynomialAdapter, BallotValidityVerifiedColumnEvaluator,
+    BallotValidityBoundPublicMaterial, BallotValidityCiphertextReadback,
+    BallotValidityCiphertextStreamDecoder, BallotValidityGenerationPreparationError,
+    BallotValidityPreparedProofAttempt, BallotValidityVerifiedColumnEvaluator,
     SelectedBallotValidityCarrierBufferAccounting,
-    ballot_encryption_private_randomness_kmac_input_accounting,
-    proof_created_relation_tree_inputs_from_checked_variant,
     selected_ballot_validity_carrier_buffer_accounting,
 };
 pub(crate) use collective_public_key_adapter::{
@@ -137,8 +131,8 @@ pub(crate) use committed_material::{
     CommittedMaterialRelationPlanInput, CommittedMaterialTraceWitnessProvider,
     CommittedMaterialTraceWitnessStructureMemoryAccounting,
     aggregate_threshold_share_trace_witness_structure_memory_accounting,
-    derive_owned_aggregate_threshold_share_trace_witness_provider,
-    derive_owned_vss_share_linkage_trace_witness_provider,
+    derive_aggregate_threshold_share_trace_witness_provider,
+    derive_vss_share_linkage_trace_witness_provider,
     vss_share_linkage_trace_witness_structure_memory_accounting,
 };
 pub(crate) use committed_material_adapter::{
@@ -149,12 +143,11 @@ pub(crate) use committed_material_adapter::{
 #[cfg(test)]
 pub(crate) use galois_key_share_adapter::galois_key_share_topology_comparison_memory_accounting;
 pub(crate) use galois_key_share_adapter::{
-    GaloisKeyShareSourcePolynomialAdapter, GaloisKeyShareSourceProviderMemoryAccounting,
-    galois_key_share_source_provider_memory_accounting, galois_relation_tree_inputs,
+    GaloisKeyShareSourcePolynomialAdapter, galois_key_share_source_provider_memory_accounting,
+    galois_relation_tree_inputs,
 };
 pub(crate) use interpreter::{
     CheckedRelationApplicationChallenges, RelationApplicationChallengeAssignment,
-    RelationConstraintEvaluation,
 };
 pub(crate) use key_relation::{PublicKeyShareRelationPlanInput, SameSecretRelationPlanInput};
 pub(crate) use public_aggregate::{
@@ -175,9 +168,7 @@ pub(crate) use relinearization_round_one_adapter::{
 pub(crate) use relinearization_round_one_aggregate_adapter::prepare_relinearization_round_one_aggregate_source;
 pub(crate) use relinearization_round_two_adapter::{
     RelinearizationRoundTwoAuthenticatedAggregateSourcePlan,
-    RelinearizationRoundTwoSourcePolynomialAdapter,
-    RelinearizationRoundTwoSourceProviderMemoryAccounting,
-    relinearization_round_two_relation_tree_inputs,
+    RelinearizationRoundTwoSourcePolynomialAdapter, relinearization_round_two_relation_tree_inputs,
     relinearization_round_two_source_provider_memory_accounting,
 };
 pub(crate) use same_secret_anchor::{
@@ -189,24 +180,21 @@ pub(crate) use setup_key_relation_adapter::{
     public_key_share_source_provider_memory_accounting, same_secret_relation_tree_inputs,
     same_secret_source_provider_memory_accounting,
 };
+#[cfg(test)]
+pub(crate) use target_release::TargetReleaseWitness;
 pub(crate) use target_release::{
-    CompiledTargetReleaseRelation, TargetReleaseCapabilityError, TargetReleaseModulusWitness,
-    TargetReleaseRelationPlanInput, TargetReleaseRoleWitness, TargetReleaseSourcePolynomialAdapter,
-    TargetReleaseVerifiedColumnEvaluator, TargetReleaseWitness, TargetReleaseWitnessError,
-    TargetReleaseWitnessSource, TargetReleaseWitnessSourceMemoryAccounting,
-    VerifiedTargetReleaseModulusInput, VerifiedTargetReleaseProof, compile_target_release_relation,
-    compile_target_release_relation_plan,
+    CompiledTargetReleaseRelation, TargetReleaseModulusWitness, TargetReleaseRelationPlanInput,
+    TargetReleaseRoleWitness, TargetReleaseSourcePolynomialAdapter,
+    TargetReleaseVerifiedColumnEvaluator, TargetReleaseWitnessError, TargetReleaseWitnessSource,
+    TargetReleaseWitnessSourceMemoryAccounting, VerifiedTargetReleaseModulusInput,
+    VerifiedTargetReleaseProof, compile_target_release_relation,
     selected_target_release_source_provider_memory_accounting,
-    target_release_radix_semantics_match,
 };
 #[cfg(test)]
 pub(crate) use trustee_evaluation_key::compile_galois_key_share_relation_topology_comparison;
 pub(crate) use trustee_evaluation_key::{
-    CompiledRelinearizationRoundOneRelation, CompiledRelinearizationRoundTwoRelation,
     GaloisKeyShareRelationEntryInput, GaloisKeyShareRelationPlanInput,
-    RelinearizationRoundOneRelationPlanInput, RelinearizationRoundOneSourceLayout,
-    RelinearizationRoundTwoRelationPlanInput, RelinearizationRoundTwoSourceLayout,
-    TrusteeEvaluationKeyDecompositionBlock, TrusteeEvaluationKeyRelationBasis,
+    RelinearizationRoundOneRelationPlanInput, RelinearizationRoundTwoRelationPlanInput,
     TrusteeEvaluationKeyRelationGeometry, compile_galois_key_share_relation_plan,
     compile_galois_key_share_relation_with_source_layout,
     compile_relinearization_round_one_relation_plan,

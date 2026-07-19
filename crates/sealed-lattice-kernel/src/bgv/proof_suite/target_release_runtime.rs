@@ -1618,7 +1618,10 @@ fn finish_target_release_verification(
 fn decode_verified_target_share_handles(
     canonical_handle_bytes: &[u8],
 ) -> Result<Vec<u32>, TargetReleaseRuntimeError> {
-    if canonical_handle_bytes.len() % HANDLE_BYTE_LENGTH != 0 {
+    if !canonical_handle_bytes
+        .len()
+        .is_multiple_of(HANDLE_BYTE_LENGTH)
+    {
         return Err(TargetReleaseRuntimeError::InvalidInput);
     }
     let handle_count = canonical_handle_bytes.len() / HANDLE_BYTE_LENGTH;

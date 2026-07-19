@@ -372,7 +372,7 @@ impl KeySwitchComponentTraceColumn {
     ) -> Result<Vec<ProofBaseFieldElement>, RefusalReason> {
         if u64::try_from(bytes.len()).ok() != Some(self.byte_length)
             || self.residue_byte_length == 0
-            || bytes.len() % self.residue_byte_length != 0
+            || !bytes.len().is_multiple_of(self.residue_byte_length)
             || bytes.len() / self.residue_byte_length != self.coefficient_count
         {
             return Err(RefusalReason::WrongTypeOrLength);

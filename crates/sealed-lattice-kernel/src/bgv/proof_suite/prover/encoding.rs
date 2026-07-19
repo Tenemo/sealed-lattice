@@ -1,10 +1,10 @@
 use super::{
     AUTHENTICATION_DIGEST_BYTE_LENGTH, BTreeSet, CanonicalDecodeLimits, CanonicalItemType,
-    CommonProofProverError, CommonProofQueryOpeningAbsorber, CommonProofTranscriptSchedule,
-    CompleteProofTreeCatalog, HASH_BYTE_LENGTH, PROOF_AUTHENTICATION_FRONTIER_SCHEMA_IDENTIFIER,
+    CommonProofProverError, CommonProofTranscriptSchedule, CompleteProofTreeCatalog,
+    HASH_BYTE_LENGTH, PROOF_AUTHENTICATION_FRONTIER_SCHEMA_IDENTIFIER,
     PROOF_AUTHENTICATION_FRONTIER_SCHEMA_VERSION, PROOF_QUERY_OPENING_RECORD_SCHEMA_IDENTIFIER,
     PrefetchedCommonProofOpeningArtifact, ProofChallengeExtensionElement, ProofObjectHeader,
-    ProofTreeCatalogEntry, ProofTreeCatalogSource, ProofTreeRole, SCHEMA_VERSION, TranscriptError,
+    ProofTreeCatalogEntry, ProofTreeCatalogSource, ProofTreeRole, SCHEMA_VERSION,
     canonical_common_proof_leaf_byte_length, common_proof_tree_value_type,
     minimal_frontier_coordinates,
 };
@@ -143,43 +143,6 @@ pub(crate) fn encode_common_proof_query_tree_fragment(
     )?;
     write_authentication_frontier(&mut sink, entry.tree_catalog_index(), artifact)?;
     Ok(sink.finish())
-}
-
-/// Couples the streamed query-section bytes to the transcript without ever
-/// buffering the section.  A fragment reaches the transcript only after the
-/// output sink accepts the identical bytes, so a sink failure cannot advance
-/// the Fiat-Shamir state past the durable proof stream.
-pub(crate) struct CommonProofTranscriptQuerySink<'borrow, Sink> {
-    sink: &'borrow mut Sink,
-    absorber: &'borrow mut CommonProofQueryOpeningAbsorber,
-}
-
-impl<'borrow, Sink> CommonProofTranscriptQuerySink<'borrow, Sink> {
-    pub(crate) const fn new(
-        sink: &'borrow mut Sink,
-        absorber: &'borrow mut CommonProofQueryOpeningAbsorber,
-    ) -> Self {
-        Self { sink, absorber }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum CommonProofTranscriptQuerySinkError<SinkError> {
-    Sink(SinkError),
-    Transcript(TranscriptError),
-}
-
-impl<Sink: CommonProofByteSink> CommonProofByteSink for CommonProofTranscriptQuerySink<'_, Sink> {
-    type Error = CommonProofTranscriptQuerySinkError<Sink::Error>;
-
-    fn write_bytes(&mut self, bytes: &[u8]) -> Result<(), Self::Error> {
-        self.sink
-            .write_bytes(bytes)
-            .map_err(CommonProofTranscriptQuerySinkError::Sink)?;
-        self.absorber
-            .absorb(bytes)
-            .map_err(CommonProofTranscriptQuerySinkError::Transcript)
-    }
 }
 
 #[derive(Debug, PartialEq, Eq)]

@@ -1906,13 +1906,13 @@ pub extern "C" fn sealed_lattice_evaluator_aggregate_discard_session(session_han
         .with(|registry| registry.borrow_mut().take(session_handle));
     match result {
         Ok(mut session) => {
-            if let Some(statement_source) = session.package_statement_source.take() {
-                if let Err(error) = restore_prepackage_evaluator_statement_source(
+            if let Some(statement_source) = session.package_statement_source.take()
+                && let Err(error) = restore_prepackage_evaluator_statement_source(
                     session.prepackage_catalog_handle,
                     statement_source,
-                ) {
-                    return super::runtime_ffi::runtime_error_status(error);
-                }
+                )
+            {
+                return super::runtime_ffi::runtime_error_status(error);
             }
             0
         }

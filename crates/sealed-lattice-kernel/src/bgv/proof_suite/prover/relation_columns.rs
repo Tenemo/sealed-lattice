@@ -2,11 +2,11 @@ use super::{
     BTreeMap, BTreeSet, COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH, CommonProofChallenge,
     CommonProofPrivateCoinCoordinate, CommonProofPrivateCoinSource, CommonProofProverError,
     ProofBaseFieldElement, ProofChallengeExtensionElement, ProofEvaluationDomain, ProofPrivacyMode,
-    ProofTreeRole, ProofTreeValue, RelationApplicationChallengeAssignment,
-    RelationColumnDescriptor, RelationColumnOrigin, RelationColumnValueType,
-    RelationIntegerLiftCoefficient, RelationIntegerLiftComponentDescriptor,
-    RelationIntegerLiftConvolutionKind, RelationIntegerLiftConvolutionProductDescriptor,
-    RelationIntegerLiftFullRingHalf, RelationIntegerLiftFullRingNegacyclicProductDescriptor,
+    ProofTreeRole, RelationApplicationChallengeAssignment, RelationColumnDescriptor,
+    RelationColumnOrigin, RelationColumnValueType, RelationIntegerLiftCoefficient,
+    RelationIntegerLiftComponentDescriptor, RelationIntegerLiftConvolutionKind,
+    RelationIntegerLiftConvolutionProductDescriptor, RelationIntegerLiftFullRingHalf,
+    RelationIntegerLiftFullRingNegacyclicProductDescriptor,
     RelationIntegerLiftLinearTermDescriptor,
     RelationIntegerLiftNegacyclicAutomorphismPermutationDescriptor, RelationMaskDescriptor,
     RelationMaskKind, RelationMaskTargetClass, RelationPlanCheckContext, RelationPlanVariant,
@@ -917,12 +917,14 @@ where
     )
 }
 
+#[cfg(test)]
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum CommonProofColumnEvaluations {
     Base(Zeroizing<Vec<ProofBaseFieldElement>>),
     Extension(Zeroizing<Vec<ProofChallengeExtensionElement>>),
 }
 
+#[cfg(test)]
 impl CommonProofColumnEvaluations {
     pub(super) fn extension_value(
         &self,
@@ -937,97 +939,6 @@ impl CommonProofColumnEvaluations {
         }
         .ok_or(CommonProofProverError::InvalidColumn)
     }
-
-    fn tree_value(&self, position: usize) -> Result<ProofTreeValue, CommonProofProverError> {
-        match self {
-            Self::Base(values) => values.get(position).copied().map(ProofTreeValue::Base),
-            Self::Extension(values) => values.get(position).copied().map(ProofTreeValue::Extension),
-        }
-        .ok_or(CommonProofProverError::InvalidColumn)
-    }
-}
-
-/// Evaluates one homogeneous tree row at a time.  Callers should materialize
-/// and discard each relation tree before evaluating the next one; peak working
-/// memory is therefore one tree row rather than the complete oracle catalog.
-pub(crate) fn evaluate_common_proof_tree_columns(
-    evaluation_domain: &ProofEvaluationDomain,
-    columns: &[CommonProofSourcePolynomial],
-    ordered_column_ordinals: &[u32],
-) -> Result<Vec<CommonProofColumnEvaluations>, CommonProofProverError> {
-    if ordered_column_ordinals.is_empty() {
-        return Err(CommonProofProverError::InvalidTree);
-    }
-    let mut evaluations = Vec::new();
-    evaluations
-        .try_reserve_exact(ordered_column_ordinals.len())
-        .map_err(|_| CommonProofProverError::AllocationLimitExceeded)?;
-    let mut expected_value_type = None;
-    for column_ordinal in ordered_column_ordinals {
-        let column = columns
-            .get(
-                usize::try_from(*column_ordinal)
-                    .map_err(|_| CommonProofProverError::CountOverflow)?,
-            )
-            .ok_or(CommonProofProverError::InvalidColumn)?;
-        let value_type = column.value_type();
-        match expected_value_type {
-            None => expected_value_type = Some(value_type),
-            Some(expected) if expected == value_type => {}
-            Some(_) => return Err(CommonProofProverError::InvalidTree),
-        }
-        evaluations.push(match column {
-            CommonProofSourcePolynomial::Base(coefficients) => CommonProofColumnEvaluations::Base(
-                Zeroizing::new(evaluation_domain.evaluate_base_polynomial(coefficients)?),
-            ),
-            CommonProofSourcePolynomial::Extension(coefficients) => {
-                CommonProofColumnEvaluations::Extension(Zeroizing::new(
-                    evaluation_domain.evaluate_extension_polynomial(coefficients)?,
-                ))
-            }
-        });
-    }
-    Ok(evaluations)
-}
-
-/// Evaluates a base tree while auxiliary columns are intentionally absent.
-/// The requested ordinals must all have been constructed in the
-/// pre-challenge phase.
-pub(crate) fn evaluate_pre_challenge_common_proof_tree_columns(
-    evaluation_domain: &ProofEvaluationDomain,
-    columns: &CommonProofPreChallengeRelationColumns,
-    ordered_column_ordinals: &[u32],
-) -> Result<Vec<CommonProofColumnEvaluations>, CommonProofProverError> {
-    if ordered_column_ordinals.is_empty() {
-        return Err(CommonProofProverError::InvalidTree);
-    }
-    let mut evaluations = Vec::new();
-    evaluations
-        .try_reserve_exact(ordered_column_ordinals.len())
-        .map_err(|_| CommonProofProverError::AllocationLimitExceeded)?;
-    let mut expected_value_type = None;
-    for column_ordinal in ordered_column_ordinals {
-        let column = columns
-            .column(*column_ordinal)
-            .ok_or(CommonProofProverError::InvalidColumn)?;
-        let value_type = column.value_type();
-        match expected_value_type {
-            None => expected_value_type = Some(value_type),
-            Some(expected) if expected == value_type => {}
-            Some(_) => return Err(CommonProofProverError::InvalidTree),
-        }
-        evaluations.push(match column {
-            CommonProofSourcePolynomial::Base(coefficients) => CommonProofColumnEvaluations::Base(
-                Zeroizing::new(evaluation_domain.evaluate_base_polynomial(coefficients)?),
-            ),
-            CommonProofSourcePolynomial::Extension(coefficients) => {
-                CommonProofColumnEvaluations::Extension(Zeroizing::new(
-                    evaluation_domain.evaluate_extension_polynomial(coefficients)?,
-                ))
-            }
-        });
-    }
-    Ok(evaluations)
 }
 
 /// Samples one uniform base-field polynomial of degree below the exclusive
@@ -1179,12 +1090,14 @@ pub(crate) fn apply_trace_mask(
 /// Columns constructed before the common transcript releases the complete
 /// non-native challenge vector.  Auxiliary-tree entries remain absent, so a
 /// caller cannot accidentally commit a challenge-dependent column early.
+#[cfg(test)]
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct CommonProofPreChallengeRelationColumns {
     columns: Vec<Option<CommonProofSourcePolynomial>>,
     source_replay_identity_digest: [u8; 64],
 }
 
+#[cfg(test)]
 impl CommonProofPreChallengeRelationColumns {
     pub(crate) fn column(&self, column_ordinal: u32) -> Option<&CommonProofSourcePolynomial> {
         self.columns
@@ -1202,6 +1115,7 @@ impl CommonProofPreChallengeRelationColumns {
 /// columns.  Reversed multiplier columns are derived here from their checked
 /// source descriptors; supplying either a reversed or an auxiliary column is
 /// rejected.
+#[cfg(test)]
 pub(crate) fn construct_pre_challenge_relation_columns<Coins>(
     variant: &RelationPlanVariant,
     request_context: CommonProofSourcePolynomialRequestContext,
@@ -1388,213 +1302,6 @@ where
         columns,
         source_replay_identity_digest,
     })
-}
-
-/// Synthesizes every auxiliary column from the checked integer-lift
-/// descriptors and the complete transcript challenge vector, then applies the
-/// plan-assigned masks.  The function handles every batch in one call so no
-/// prover message can be inserted between consecutive theta or alpha draws.
-pub(crate) fn construct_post_challenge_relation_columns<Coins>(
-    variant: &RelationPlanVariant,
-    context: &RelationPlanCheckContext,
-    mut pre_challenge_columns: CommonProofPreChallengeRelationColumns,
-    application_challenges: &[RelationApplicationChallengeAssignment],
-    coins: &mut Coins,
-    maximum_candidate_draws_per_output: u32,
-) -> Result<Vec<CommonProofSourcePolynomial>, CommonProofPrivateCoinError<Coins::Error>>
-where
-    Coins: CommonProofPrivateCoinSource,
-{
-    if pre_challenge_columns.columns.len() != variant.ordered_columns().len() {
-        return Err(CommonProofPrivateCoinError::Prover(
-            CommonProofProverError::InvalidColumn,
-        ));
-    }
-    let tree_roles =
-        proof_created_tree_roles_by_column(variant).map_err(CommonProofPrivateCoinError::Prover)?;
-    let (_, integer_lift_auxiliary_columns) =
-        integer_lift_derived_columns(variant).map_err(CommonProofPrivateCoinError::Prover)?;
-    let trace_masks =
-        trace_masks_by_column(variant).map_err(CommonProofPrivateCoinError::Prover)?;
-
-    for column_index in 0..variant.ordered_columns().len() {
-        let column_ordinal = u32::try_from(column_index).map_err(|_| {
-            CommonProofPrivateCoinError::Prover(CommonProofProverError::CountOverflow)
-        })?;
-        match tree_roles.get(&column_ordinal) {
-            Some(ProofTreeRole::AuxiliaryOracle) => {
-                if !integer_lift_auxiliary_columns.contains(&column_ordinal)
-                    || pre_challenge_columns.columns[column_index].is_some()
-                {
-                    return Err(CommonProofPrivateCoinError::Prover(
-                        CommonProofProverError::InvalidColumn,
-                    ));
-                }
-            }
-            _ => {
-                if pre_challenge_columns.columns[column_index].is_none() {
-                    return Err(CommonProofPrivateCoinError::Prover(
-                        CommonProofProverError::InvalidColumn,
-                    ));
-                }
-            }
-        }
-    }
-
-    let trace_domain =
-        ProofEvaluationDomain::new_subgroup(usize::try_from(variant.trace_domain_size()).map_err(
-            |_| CommonProofPrivateCoinError::Prover(CommonProofProverError::CountOverflow),
-        )?)
-        .map_err(CommonProofProverError::from)
-        .map_err(CommonProofPrivateCoinError::Prover)?;
-    let auxiliary_trace_row_context = AuxiliaryTraceRowInsertionContext::new(
-        variant,
-        &tree_roles,
-        &trace_masks,
-        trace_domain,
-        maximum_candidate_draws_per_output,
-    );
-    let mut trace_rows_by_column = BTreeMap::<u32, ProtectedBaseTraceRows>::new();
-
-    for batch in variant.ordered_integer_lift_batches() {
-        let theta = integer_lift_theta(
-            variant,
-            context,
-            batch.modulus_reference(),
-            batch.challenge_ordinal(),
-            application_challenges,
-        )
-        .map_err(CommonProofPrivateCoinError::Prover)?;
-
-        for permutation in &batch.ordered_negacyclic_automorphism_permutations {
-            synthesize_negacyclic_automorphism_permutation(
-                variant,
-                permutation,
-                theta,
-                &tree_roles,
-                &trace_masks,
-                &mut pre_challenge_columns.columns,
-                &mut trace_rows_by_column,
-                trace_domain,
-                coins,
-                maximum_candidate_draws_per_output,
-            )?;
-        }
-
-        for binding in &batch.ordered_reversed_column_bindings {
-            ensure_base_trace_rows(
-                &pre_challenge_columns.columns,
-                &mut trace_rows_by_column,
-                binding.source_column_ordinal,
-                trace_domain,
-            )
-            .map_err(CommonProofPrivateCoinError::Prover)?;
-            ensure_base_trace_rows(
-                &pre_challenge_columns.columns,
-                &mut trace_rows_by_column,
-                binding.reversed_column_ordinal,
-                trace_domain,
-            )
-            .map_err(CommonProofPrivateCoinError::Prover)?;
-            let source_rows = trace_rows_by_column
-                .get(&binding.source_column_ordinal)
-                .ok_or_else(|| {
-                    CommonProofPrivateCoinError::Prover(CommonProofProverError::InvalidColumn)
-                })?;
-            let reversed_rows = trace_rows_by_column
-                .get(&binding.reversed_column_ordinal)
-                .ok_or_else(|| {
-                    CommonProofPrivateCoinError::Prover(CommonProofProverError::InvalidColumn)
-                })?;
-            let prefix_rows = prefix_evaluation_rows(source_rows, theta);
-            let suffix_rows = suffix_evaluation_rows(reversed_rows, theta);
-            insert_auxiliary_trace_rows(
-                auxiliary_trace_row_context,
-                &mut pre_challenge_columns.columns,
-                binding.source_prefix_evaluation_column_ordinal,
-                prefix_rows,
-                coins,
-            )?;
-            insert_auxiliary_trace_rows(
-                auxiliary_trace_row_context,
-                &mut pre_challenge_columns.columns,
-                binding.reversed_suffix_evaluation_column_ordinal,
-                suffix_rows,
-                coins,
-            )?;
-        }
-
-        for component in &batch.ordered_components {
-            let linear_rows = integer_lift_linear_evaluation_rows(
-                context,
-                component,
-                theta,
-                &pre_challenge_columns.columns,
-                &mut trace_rows_by_column,
-                trace_domain,
-            )
-            .map_err(CommonProofPrivateCoinError::Prover)?;
-            let mut product_rows =
-                Zeroizing::new(vec![ProofBaseFieldElement::ZERO; trace_domain.size()]);
-
-            for product in &component.ordered_convolution_products {
-                synthesize_convolution_product(
-                    variant,
-                    product,
-                    theta,
-                    &tree_roles,
-                    &trace_masks,
-                    &mut pre_challenge_columns.columns,
-                    &mut trace_rows_by_column,
-                    &mut product_rows,
-                    trace_domain,
-                    coins,
-                    maximum_candidate_draws_per_output,
-                )?;
-            }
-            for product in &component.ordered_full_ring_negacyclic_products {
-                synthesize_full_ring_product(
-                    variant,
-                    product,
-                    theta,
-                    &tree_roles,
-                    &trace_masks,
-                    &mut pre_challenge_columns.columns,
-                    &mut trace_rows_by_column,
-                    &mut product_rows,
-                    trace_domain,
-                    coins,
-                    maximum_candidate_draws_per_output,
-                )?;
-            }
-
-            let accumulator_rows = product_accumulator_rows(&product_rows);
-            insert_auxiliary_trace_rows(
-                auxiliary_trace_row_context,
-                &mut pre_challenge_columns.columns,
-                component.linear_evaluation_column_ordinal,
-                linear_rows,
-                coins,
-            )?;
-            insert_auxiliary_trace_rows(
-                auxiliary_trace_row_context,
-                &mut pre_challenge_columns.columns,
-                component.product_accumulator_column_ordinal,
-                accumulator_rows,
-                coins,
-            )?;
-        }
-    }
-
-    let columns = pre_challenge_columns
-        .columns
-        .into_iter()
-        .collect::<Option<Vec<_>>>()
-        .ok_or_else(|| {
-            CommonProofPrivateCoinError::Prover(CommonProofProverError::InvalidColumn)
-        })?;
-    validate_column_polynomials(variant, &columns).map_err(CommonProofPrivateCoinError::Prover)?;
-    Ok(columns)
 }
 
 pub(crate) fn proof_created_tree_roles_by_column(

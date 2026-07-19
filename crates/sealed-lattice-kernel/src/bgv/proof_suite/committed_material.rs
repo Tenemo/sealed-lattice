@@ -414,9 +414,10 @@ pub(crate) struct CommittedMaterialTree {
 
 /// Compact regeneration authority retained after a committed-material root is
 /// constructed. The evaluation columns and Merkle layers are deliberately
-/// absent: the common prover rebuilds one source polynomial at a time from
-/// the authenticated trace row and obtains only the leaf salt it is currently
-/// materializing. The seed never crosses the Rust/Wasm boundary.
+/// absent: together with an authenticated canonical message, the common prover
+/// rebuilds one source polynomial at a time from its recipe-derived trace row
+/// and obtains only the leaf salt it is currently materializing. The seed never
+/// crosses the Rust/Wasm boundary.
 pub(crate) struct CompactCommittedMaterialSource {
     profile: CommittedMaterialProfile,
     material_context_hash: [u8; 64],
@@ -675,9 +676,10 @@ impl CompactCommittedMaterialSource {
         self.root
     }
 
-    /// Rebuilds exactly one masked physical column from its authenticated
-    /// unmasked trace row. This is the only large scratch allocation retained
-    /// by the caller for source-polynomial delivery.
+    /// Rebuilds exactly one masked physical column from one caller-supplied
+    /// unmasked trace row. The authenticated wrapper derives that row from its
+    /// canonical message. This is the only large scratch allocation retained by
+    /// the caller for source-polynomial delivery.
     pub(crate) fn regenerate_masked_coefficients(
         &self,
         physical_column_ordinal: usize,
@@ -835,17 +837,16 @@ impl fmt::Debug for CommittedMaterialTree {
 }
 
 impl CommittedMaterialTree {
-    /// Constructs the persistent tree and its exact physical trace rows from
-    /// one canonical lattice message. Digit decomposition and physical-column
-    /// ordering remain inside Rust so a caller cannot detach rows from the
-    /// message whose root is being retained.
+    /// Constructs the persistent tree from one canonical lattice message.
+    /// Digit decomposition and physical-column ordering remain inside Rust so
+    /// a caller cannot detach rows from the message whose root is retained.
     pub(crate) fn from_canonical_message(
         profile: CommittedMaterialProfile,
         material_context_hash: [u8; 64],
         material_seed: [u8; 64],
         canonical_message: &[u64],
         canonical_modulus: u64,
-    ) -> Result<(Self, [Vec<u64>; MATERIAL_COLUMN_COUNT]), CommittedMaterialError> {
+    ) -> Result<Self, CommittedMaterialError> {
         let expected_message_length = profile
             .trace_domain_size
             .checked_mul(2)
@@ -861,7 +862,7 @@ impl CommittedMaterialTree {
             return Err(CommittedMaterialError::InvalidInput);
         }
 
-        let mut message_digit_columns = vec![
+        let message_digit_columns = vec![
             canonical_message
                 .iter()
                 .map(|coefficient| coefficient % MATERIAL_DIGIT_RADIX)
@@ -878,24 +879,10 @@ impl CommittedMaterialTree {
             message_digit_columns: &message_digit_columns,
         })?;
 
-        let mut high_digit_column = message_digit_columns
-            .pop()
-            .ok_or(CommittedMaterialError::InvalidInput)?;
-        let mut low_digit_column = message_digit_columns
-            .pop()
-            .ok_or(CommittedMaterialError::InvalidInput)?;
-        let high_digit_second_half = high_digit_column.split_off(profile.trace_domain_size);
-        let low_digit_second_half = low_digit_column.split_off(profile.trace_domain_size);
-        let trace_rows = [
-            low_digit_column,
-            low_digit_second_half,
-            high_digit_column,
-            high_digit_second_half,
-        ];
         if !tree.authenticates_canonical_message(canonical_message, canonical_modulus)? {
             return Err(CommittedMaterialError::InvalidInput);
         }
-        Ok((tree, trace_rows))
+        Ok(tree)
     }
 
     pub(crate) fn construct(
@@ -1083,7 +1070,17 @@ impl CommittedMaterialTree {
             let digit_ordinal = physical_column_ordinal / 2;
             let half_ordinal = physical_column_ordinal % 2;
             let start = half_ordinal * trace_domain_size;
-            let trace_values = trace_domain.evaluate_base_polynomial(masked_coefficients)?;
+            let mut trace_restriction_coefficients =
+                Zeroizing::new(vec![ProofBaseFieldElement::ZERO; trace_domain_size]);
+            for (coefficient_ordinal, coefficient) in
+                masked_coefficients.iter().copied().enumerate()
+            {
+                let trace_coefficient_ordinal = coefficient_ordinal % trace_domain_size;
+                trace_restriction_coefficients[trace_coefficient_ordinal] =
+                    trace_restriction_coefficients[trace_coefficient_ordinal].add(coefficient);
+            }
+            let trace_values =
+                trace_domain.evaluate_base_polynomial(&trace_restriction_coefficients)?;
             if trace_values
                 .iter()
                 .zip(&canonical_message[start..start + trace_domain_size])
@@ -1306,7 +1303,7 @@ mod tests {
         ];
         let profile = CommittedMaterialProfile::selected(canonical_message.len())
             .expect("small committed-material profile");
-        let (tree, _) = CommittedMaterialTree::from_canonical_message(
+        let tree = CommittedMaterialTree::from_canonical_message(
             profile,
             [0x31; 64],
             [0x52; 64],
@@ -1332,7 +1329,7 @@ mod tests {
         ];
         let profile = CommittedMaterialProfile::selected(canonical_message.len())
             .expect("small committed-material profile");
-        let (tree, trace_rows) = CommittedMaterialTree::from_canonical_message(
+        let tree = CommittedMaterialTree::from_canonical_message(
             profile,
             [0x17; 64],
             [0x81; 64],
@@ -1340,39 +1337,52 @@ mod tests {
             canonical_modulus,
         )
         .expect("canonical message constructs");
+        let source = AuthenticatedCompactCommittedMaterialSource::
+            from_recomputed_tree_and_canonical_message(
+                tree,
+                Zeroizing::new(canonical_message.to_vec().into_boxed_slice()),
+                canonical_modulus,
+            )
+            .expect("canonical message authenticates");
         let trace_size = profile.trace_domain_size();
+        let material_digits = |physical_half_ordinal, material_digit_ordinal| {
+            (0..trace_size)
+                .map(|row_ordinal| {
+                    source
+                        .material_digit(physical_half_ordinal, material_digit_ordinal, row_ordinal)
+                        .expect("authenticated material digit derives")
+                })
+                .collect::<Vec<_>>()
+        };
         assert_eq!(
-            trace_rows[0],
+            material_digits(0, 0),
             canonical_message[..trace_size]
                 .iter()
                 .map(|coefficient| coefficient % MATERIAL_DIGIT_RADIX)
                 .collect::<Vec<_>>()
         );
         assert_eq!(
-            trace_rows[1],
+            material_digits(1, 0),
             canonical_message[trace_size..]
                 .iter()
                 .map(|coefficient| coefficient % MATERIAL_DIGIT_RADIX)
                 .collect::<Vec<_>>()
         );
         assert_eq!(
-            trace_rows[2],
+            material_digits(0, 1),
             canonical_message[..trace_size]
                 .iter()
                 .map(|coefficient| coefficient / MATERIAL_DIGIT_RADIX)
                 .collect::<Vec<_>>()
         );
         assert_eq!(
-            trace_rows[3],
+            material_digits(1, 1),
             canonical_message[trace_size..]
                 .iter()
                 .map(|coefficient| coefficient / MATERIAL_DIGIT_RADIX)
                 .collect::<Vec<_>>()
         );
-        assert!(
-            tree.authenticates_canonical_message(&canonical_message, canonical_modulus)
-                .expect("exact opening check")
-        );
+        assert!(source.authenticates_canonical_message(&canonical_message, canonical_modulus));
     }
 
     #[test]
@@ -1440,49 +1450,52 @@ mod tests {
 
     #[test]
     fn compact_source_regenerates_every_masked_column_and_leaf_salt_without_tree_storage() {
-        let (tree, _, _) = committed_message_fixture();
+        let (tree, canonical_message, canonical_modulus) = committed_message_fixture();
         let profile = tree.profile();
         let expected_root = tree.root();
         let expected_columns = tree.masked_coefficients_by_physical_column().to_vec();
-        let trace_domain =
-            ProofEvaluationDomain::new_subgroup(profile.trace_domain_size()).expect("trace domain");
-        let trace_rows = expected_columns
-            .iter()
-            .map(|coefficients| {
-                trace_domain
-                    .evaluate_base_polynomial(coefficients)
-                    .expect("trace values")
-                    .into_iter()
-                    .map(ProofBaseFieldElement::canonical)
-                    .collect::<Vec<_>>()
-            })
-            .collect::<Vec<_>>();
-
-        let source = tree.into_compact_source();
-        assert_eq!(source.root(), expected_root);
-        assert_eq!(source.profile(), profile);
-        for (physical_column_ordinal, (trace_row, expected_coefficients)) in
-            trace_rows.iter().zip(&expected_columns).enumerate()
+        let source = AuthenticatedCompactCommittedMaterialSource::
+            from_recomputed_tree_and_canonical_message(
+                tree,
+                Zeroizing::new(canonical_message.into_boxed_slice()),
+                canonical_modulus,
+            )
+            .expect("canonical source authenticates");
+        assert_eq!(source.compact_source().root(), expected_root);
+        assert_eq!(source.compact_source().profile(), profile);
+        for (physical_column_ordinal, expected_coefficients) in expected_columns.iter().enumerate()
         {
             assert_eq!(
                 source
-                    .regenerate_masked_coefficients(physical_column_ordinal, trace_row)
+                    .regenerate_masked_coefficients(physical_column_ordinal)
                     .expect("the compact source regenerates the canonical column"),
                 *expected_coefficients
             );
         }
         assert_ne!(
-            source.persistent_leaf_salt(0).expect("first leaf salt"),
-            source.persistent_leaf_salt(1).expect("second leaf salt")
+            source
+                .compact_source()
+                .persistent_leaf_salt(0)
+                .expect("first leaf salt"),
+            source
+                .compact_source()
+                .persistent_leaf_salt(1)
+                .expect("second leaf salt")
         );
         assert!(
             source
+                .compact_source()
                 .persistent_leaf_salt(profile.evaluation_domain_size() / 2)
                 .is_err()
         );
-        assert_eq!(source.retained_byte_length(), size_of_val(&source));
         assert_eq!(
-            source.maximum_regenerated_column_byte_length(),
+            source.compact_source().retained_byte_length(),
+            size_of_val(source.compact_source())
+        );
+        assert_eq!(
+            source
+                .compact_source()
+                .maximum_regenerated_column_byte_length(),
             profile.material_column_degree_bound_exclusive() * size_of::<ProofBaseFieldElement>()
         );
     }

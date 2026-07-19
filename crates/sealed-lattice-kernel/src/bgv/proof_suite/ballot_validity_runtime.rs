@@ -873,13 +873,7 @@ fn finish_ballot_validity_verification_preparation(
         .authenticated_ciphertext_catalog()?
         .into_iter()
         .map(
-            |(
-                ciphertext_ordinal,
-                component_ordinal,
-                data_modulus_index,
-                modulus,
-                coefficients,
-            )| {
+            |(ciphertext_ordinal, component_ordinal, data_modulus_index, modulus, coefficients)| {
                 VerifiedBallotCiphertextPolynomial {
                     ciphertext_ordinal,
                     component_ordinal,

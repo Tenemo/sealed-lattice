@@ -383,9 +383,8 @@ fn validate_package_and_verified_sources(
         return Err(refusal_status(RefusalReason::WrongContext));
     }
 
-    for roster_position in 0..participant_count {
+    for (roster_position, release_material) in participant_release_materials.iter().enumerate() {
         let expected_identity = public_randomness.ordered_participant_identities()[roster_position];
-        let release_material = &participant_release_materials[roster_position];
         if vss_qualification.ordered_participant_identities()[roster_position] != expected_identity
             || public_proof_catalog.ordered_participant_identities()[roster_position]
                 != expected_identity.into_bytes()

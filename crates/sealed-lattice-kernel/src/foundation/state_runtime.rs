@@ -48,8 +48,8 @@ enum RuntimeVerifiedStateObject {
 }
 
 enum CertifiedRuntimeStateObject {
-    Reservation(VerifiedStateReservation),
-    Output(VerifiedStateOutput),
+    Reservation(Box<VerifiedStateReservation>),
+    Output(Box<VerifiedStateOutput>),
 }
 
 struct StateVerifierRuntimeSession {
@@ -490,7 +490,6 @@ impl StateVerifierRuntimeRegistry {
         Ok(object_handle)
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn certify_intent(
         &mut self,
         session_handle: u32,
@@ -507,12 +506,14 @@ impl StateVerifierRuntimeRegistry {
                     .verifier
                     .certify_reservation_intent(intent, canonical_state_certificate)
                     .into_result()
+                    .map(Box::new)
                     .map(CertifiedRuntimeStateObject::Reservation)
                     .map_err(refusal_status)?,
                 Some(RuntimeVerifiedStateObject::OutputIntent(intent)) => session
                     .verifier
                     .certify_output_intent(intent, canonical_state_certificate)
                     .into_result()
+                    .map(Box::new)
                     .map(CertifiedRuntimeStateObject::Output)
                     .map_err(refusal_status)?,
                 Some(_) => return Err(refusal_status(RefusalReason::WrongTypeOrLength)),
@@ -522,9 +523,11 @@ impl StateVerifierRuntimeRegistry {
         let object_handle = take_nonrepeating_handle(&mut self.next_verified_object_handle)?;
         let runtime_object = match certified_object {
             CertifiedRuntimeStateObject::Reservation(value) => {
-                RuntimeVerifiedStateObject::Reservation(value)
+                RuntimeVerifiedStateObject::Reservation(*value)
             }
-            CertifiedRuntimeStateObject::Output(value) => RuntimeVerifiedStateObject::Output(value),
+            CertifiedRuntimeStateObject::Output(value) => {
+                RuntimeVerifiedStateObject::Output(*value)
+            }
         };
         self.require_active_session_mut(session_handle, capability)?
             .verified_objects
@@ -550,6 +553,7 @@ impl StateVerifierRuntimeRegistry {
                         canonical_vote_carriers,
                     )
                     .into_result()
+                    .map(Box::new)
                     .map(CertifiedRuntimeStateObject::Reservation)
                     .map_err(refusal_status)?,
                 Some(RuntimeVerifiedStateObject::OutputIntent(intent)) => session
@@ -559,6 +563,7 @@ impl StateVerifierRuntimeRegistry {
                         canonical_vote_carriers,
                     )
                     .into_result()
+                    .map(Box::new)
                     .map(CertifiedRuntimeStateObject::Output)
                     .map_err(refusal_status)?,
                 Some(_) => return Err(refusal_status(RefusalReason::WrongTypeOrLength)),
@@ -568,9 +573,11 @@ impl StateVerifierRuntimeRegistry {
         let object_handle = take_nonrepeating_handle(&mut self.next_verified_object_handle)?;
         let runtime_object = match certified_object {
             CertifiedRuntimeStateObject::Reservation(value) => {
-                RuntimeVerifiedStateObject::Reservation(value)
+                RuntimeVerifiedStateObject::Reservation(*value)
             }
-            CertifiedRuntimeStateObject::Output(value) => RuntimeVerifiedStateObject::Output(value),
+            CertifiedRuntimeStateObject::Output(value) => {
+                RuntimeVerifiedStateObject::Output(*value)
+            }
         };
         self.require_active_session_mut(session_handle, capability)?
             .verified_objects

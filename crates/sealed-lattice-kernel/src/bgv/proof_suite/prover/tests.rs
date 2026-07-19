@@ -3,8 +3,8 @@ use std::rc::Rc;
 use super::*;
 use crate::foundation::{
     ACTION_RANDOMNESS_ROOT_BYTE_LENGTH, ActionPrivateRandomness, ActionRandomnessDerivationInput,
-    ActionRandomnessRoot, ParticipantIdentity, PersistentProofCoinInput,
-    PrivateRandomnessAttemptIdentifier, ProofApplicationSlot,
+    ActionRandomnessRoot, CanonicalItem, CanonicalTuple, Hash512, ParticipantIdentity,
+    PersistentProofCoinInput, PrivateRandomnessAttemptIdentifier, ProofApplicationSlot,
 };
 
 fn base(value: u64) -> ProofBaseFieldElement {

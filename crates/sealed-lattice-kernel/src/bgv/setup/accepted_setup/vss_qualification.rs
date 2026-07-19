@@ -163,10 +163,10 @@ fn unique_local_recipient_position(
         )
         .context_hash()
         .map_err(|_| RefusalReason::WrongContext)?;
-        if expected_context_hash == first_material_context_hash {
-            if matching_position.replace(recipient_position).is_some() {
-                return Err(RefusalReason::WrongContext);
-            }
+        if expected_context_hash == first_material_context_hash
+            && matching_position.replace(recipient_position).is_some()
+        {
+            return Err(RefusalReason::WrongContext);
         }
     }
     matching_position.ok_or(RefusalReason::WrongContext)

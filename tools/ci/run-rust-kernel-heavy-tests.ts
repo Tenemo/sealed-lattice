@@ -106,14 +106,12 @@ export const runRustKernelHeavyTests = async (
                     'process-memory-guard-rust-kernel-heavy.jsonl',
                 ),
             );
-            if (rawArguments.some((argument) => argument !== '--')) {
-                await verifyFocusedRustLaneSelection({
-                    environment: command.env,
-                    lane: 'rust-kernel-heavy',
-                    runLog,
-                    testFilter: parsedArguments.testFilter,
-                });
-            }
+            await verifyFocusedRustLaneSelection({
+                environment: command.env,
+                lane: 'rust-kernel-heavy',
+                runLog,
+                testFilter: parsedArguments.testFilter,
+            });
             const progressReporter = createHeavyTestProgressReporter({
                 eventFilePath: path.join(
                     runLog.runDirectoryPath,

@@ -9,16 +9,10 @@
 //! JavaScript callback, or whole proof in memory is required.
 
 #[cfg(test)]
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    fmt,
-};
+use std::collections::BTreeMap;
 
 #[cfg(test)]
 use zeroize::Zeroizing;
-
-#[cfg(test)]
-use crate::hashing::hash_framed_parts_512;
 
 const EXTERNAL_MEMORY_REQUEST_SCHEMA_VERSION: u16 = 1;
 const EXTERNAL_MEMORY_REQUEST_MESSAGE_KIND: u16 = 1;

@@ -10,7 +10,7 @@
 use core::slice;
 use std::{
     cell::RefCell,
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, btree_map::Entry},
 };
 
 use crate::{
@@ -30,8 +30,8 @@ use crate::{
 
 use super::{
     canonical_package::{
-        CanonicalAcceptedSetupPackage, SelectedAcceptedSetupPublicProofSlot,
-        selected_accepted_setup_public_proof_slots,
+        AcceptedSetupPackageAuthoritativeInventory, CanonicalAcceptedSetupPackage,
+        SelectedAcceptedSetupPublicProofSlot, selected_accepted_setup_public_proof_slots,
     },
     verification_assembly::begin_accepted_setup_verification_assembly,
 };
@@ -356,14 +356,21 @@ impl CanonicalAcceptedSetupPackageBuilder {
             self.vss_recipient_authority_handle,
             |verified_public_randomness, verified_vss_qualification| {
                 CanonicalAcceptedSetupPackage::encode_authoritative_inventory(
-                    verified_public_randomness.ordered_setup_intent_object_hashes(),
-                    verified_public_randomness.ordered_commitment_object_hashes(),
-                    verified_public_randomness.ordered_reveal_object_hashes(),
-                    verified_vss_qualification.ordered_dealer_public_record_object_hashes(),
-                    verified_vss_qualification.ordered_private_share_acceptance_object_hashes(),
-                    &collective_public_key_descriptor,
-                    &evaluator_key_store_descriptor,
-                    &ordered_proof_descriptors,
+                    AcceptedSetupPackageAuthoritativeInventory {
+                        setup_intent_object_hashes: verified_public_randomness
+                            .ordered_setup_intent_object_hashes(),
+                        public_randomness_commitment_object_hashes: verified_public_randomness
+                            .ordered_commitment_object_hashes(),
+                        public_randomness_reveal_object_hashes: verified_public_randomness
+                            .ordered_reveal_object_hashes(),
+                        dealer_public_record_object_hashes: verified_vss_qualification
+                            .ordered_dealer_public_record_object_hashes(),
+                        private_share_acceptance_object_hashes: verified_vss_qualification
+                            .ordered_private_share_acceptance_object_hashes(),
+                        collective_public_key_descriptor: &collective_public_key_descriptor,
+                        evaluator_key_store_descriptor: &evaluator_key_store_descriptor,
+                        ordered_proof_descriptors: &ordered_proof_descriptors,
+                    },
                 )
                 .map_err(|_| {
                     AggregateThresholdShareRuntimeError::Runtime(
@@ -511,10 +518,16 @@ impl CanonicalAcceptedSetupPackageBuilderRegistry {
         handle: u32,
         builder: CanonicalAcceptedSetupPackageBuilder,
     ) -> Result<(), CommonProofRuntimeError> {
-        if handle == 0 || self.builders.insert(handle, builder).is_some() {
+        if handle == 0 {
             return Err(CommonProofRuntimeError::AllocationLimitExceeded);
         }
-        Ok(())
+        match self.builders.entry(handle) {
+            Entry::Vacant(entry) => {
+                entry.insert(builder);
+                Ok(())
+            }
+            Entry::Occupied(_) => Err(CommonProofRuntimeError::AllocationLimitExceeded),
+        }
     }
 }
 

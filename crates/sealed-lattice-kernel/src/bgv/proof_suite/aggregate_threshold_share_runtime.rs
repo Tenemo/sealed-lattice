@@ -924,7 +924,7 @@ fn reconstruct_dealer_source_materials(
         .map_err(|_| {
             AggregateThresholdShareRuntimeError::Refusal(RefusalReason::MalformedEncoding)
         })?;
-        let (tree, trace_rows) = CommittedMaterialTree::from_canonical_message(
+        let tree = CommittedMaterialTree::from_canonical_message(
             profile,
             material_context_hash,
             *decoded_limb.recipient_share_material_seed(),
@@ -950,7 +950,6 @@ fn reconstruct_dealer_source_materials(
                 RefusalReason::WrongHashOrRoot,
             ));
         }
-        drop(trace_rows);
         ordered_source_materials.push(
             SetupGeneratedCommittedMaterial::from_recomputed_tree_and_canonical_message(
                 tree,
@@ -1137,7 +1136,7 @@ fn derive_aggregate_generation_material(
                 setup_attempt_identifier,
             )?
             .fill_bytes(material_seed.as_mut())?;
-        let (tree, trace_rows) = CommittedMaterialTree::from_canonical_message(
+        let tree = CommittedMaterialTree::from_canonical_message(
             profile,
             material_context_hash,
             *material_seed,
@@ -1147,7 +1146,6 @@ fn derive_aggregate_generation_material(
         .map_err(|_| {
             AggregateThresholdShareRuntimeError::Refusal(RefusalReason::InvalidArithmeticRelation)
         })?;
-        drop(trace_rows);
         ordered_aggregate_materials.push(
             SetupGeneratedCommittedMaterial::from_recomputed_tree_and_canonical_message(
                 tree,
