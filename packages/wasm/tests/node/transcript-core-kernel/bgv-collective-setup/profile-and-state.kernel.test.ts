@@ -21,6 +21,14 @@ describe('collective BGV setup kernel commands', () => {
             foundationProfile.participantCount,
         );
         expect(explicitPrototypeParameters).toEqual(selectedParameters);
+        expect(selectedParameters.qShare.primes).toEqual([
+            '8349427040257',
+            '8040189001729',
+            '7318633578497',
+            '3401618423809',
+            '618476077057',
+            '9586379194369',
+        ]);
 
         for (const malformedParticipantCount of [-1, 3.5]) {
             expect(() =>

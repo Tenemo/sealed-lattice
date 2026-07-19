@@ -26,7 +26,54 @@ use super::{
 /// suite, slot, sampler, or protocol sources. Proof bytes never supply these
 /// values. Implementations retaining a verifier column over the evaluation
 /// domain should override the pair method to avoid per-query interpolation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct VerifiedRelationColumnEvaluatorMemoryAccounting {
+    fixed_and_input_resident_byte_length: u64,
+    maximum_cached_column_resident_byte_length: u64,
+    maximum_evaluation_transient_byte_length: u64,
+    maximum_resident_byte_length: u64,
+}
+
+impl VerifiedRelationColumnEvaluatorMemoryAccounting {
+    pub(crate) fn new(
+        fixed_and_input_resident_byte_length: u64,
+        maximum_cached_column_resident_byte_length: u64,
+        maximum_evaluation_transient_byte_length: u64,
+    ) -> Result<Self, CommonProofVerifierError> {
+        let maximum_resident_byte_length = fixed_and_input_resident_byte_length
+            .checked_add(maximum_cached_column_resident_byte_length)
+            .and_then(|length| length.checked_add(maximum_evaluation_transient_byte_length))
+            .ok_or(CommonProofVerifierError::InvalidTreeLayout)?;
+        Ok(Self {
+            fixed_and_input_resident_byte_length,
+            maximum_cached_column_resident_byte_length,
+            maximum_evaluation_transient_byte_length,
+            maximum_resident_byte_length,
+        })
+    }
+
+    pub(crate) const fn fixed_and_input_resident_byte_length(self) -> u64 {
+        self.fixed_and_input_resident_byte_length
+    }
+
+    pub(crate) const fn maximum_cached_column_resident_byte_length(self) -> u64 {
+        self.maximum_cached_column_resident_byte_length
+    }
+
+    pub(crate) const fn maximum_evaluation_transient_byte_length(self) -> u64 {
+        self.maximum_evaluation_transient_byte_length
+    }
+
+    pub(crate) const fn maximum_resident_byte_length(self) -> u64 {
+        self.maximum_resident_byte_length
+    }
+}
+
 pub(crate) trait VerifiedRelationColumnEvaluator {
+    fn memory_accounting(
+        &self,
+    ) -> Result<VerifiedRelationColumnEvaluatorMemoryAccounting, CommonProofVerifierError>;
+
     fn evaluate_at_extension_point(
         &mut self,
         column_ordinal: u32,

@@ -7,8 +7,8 @@ use crate::{
             BorrowedVerifiedCommonProofCapability, BoundTreeConstructionKind, BoundTreeRootUse,
             CommonProofVerifierError, ConsumedVerifiedCommonProofCapability,
             RelationTreeDescriptor, SelectedApplicationStatementContext,
-            SetupPublicPolynomialContext, SetupPublicPolynomialRootRole, SetupPublicPolynomialTree,
-            SuiteModulusReference, VerifiedStatementOwnedTree, VerifiedStreamedProofTreeTerminal,
+            SetupPublicPolynomialContext, SetupPublicPolynomialTree, SuiteModulusReference,
+            VerifiedStatementOwnedTree, VerifiedStreamedProofTreeTerminal,
             VerifiedStreamedProofTreeTerminalPreflight,
             decode_selected_aggregate_threshold_share_statement,
             decode_selected_collective_public_key_aggregate_statement,
@@ -22,6 +22,7 @@ use crate::{
         CanonicalStreamDomain, FOUNDATION_PROFILE, Hash512, ParticipantIdentity,
         ProofApplicationSlot, ProofApplicationSlotCeilings, RefusalReason, StreamDescriptor,
         VerifiedBoardApplicationSource, hash_foundation_tuple_512,
+        selected_sharing_data_prime_coordinates,
     },
 };
 
@@ -33,8 +34,8 @@ const COLLECTIVE_PUBLIC_KEY_AGGREGATE_TREE_ORDINAL: u32 =
     FOUNDATION_PROFILE.participant_count as u32;
 const COLLECTIVE_PUBLIC_KEY_AGGREGATE_ROOT_SOURCE_ORDINAL: u32 =
     FOUNDATION_PROFILE.participant_count as u32;
-const COLLECTIVE_PUBLIC_KEY_QUARTER_COLUMN_COUNT: usize = DATA_PRIMES.len() * 4;
-const COLLECTIVE_PUBLIC_KEY_QUARTER_DEGREE: usize = POLYNOMIAL_DEGREE / 4;
+const COLLECTIVE_PUBLIC_KEY_TRACE_COLUMN_COUNT: usize = DATA_PRIMES.len() * 2;
+const COLLECTIVE_PUBLIC_KEY_TRACE_HALF_DEGREE: usize = POLYNOMIAL_DEGREE / 2;
 const RECIPIENT_INPUT_ROOT_DOMAIN: &str = "sealed-lattice/setup/recipient-input/v1";
 
 /// Compact terminal for one participant's complete selected same-secret proof.
@@ -73,19 +74,6 @@ impl VerifiedSameSecretTerminalPreflight {
 }
 
 impl VerifiedSameSecretTerminal {
-    pub(in crate::bgv) fn from_consumed_common_proof(
-        verified_proof: ConsumedVerifiedCommonProofCapability,
-        canonical_application_statement_bytes: &[u8],
-        verified_public_randomness: &VerifiedPublicRandomness,
-    ) -> Result<Self, CommonProofVerifierError> {
-        let preflight = Self::preflight_from_borrowed_common_proof(
-            verified_proof.borrowed(),
-            canonical_application_statement_bytes,
-            verified_public_randomness,
-        )?;
-        Ok(preflight.complete(verified_proof))
-    }
-
     pub(in crate::bgv) fn preflight_from_borrowed_common_proof(
         verified_proof: BorrowedVerifiedCommonProofCapability<'_>,
         canonical_application_statement_bytes: &[u8],
@@ -252,19 +240,6 @@ impl VerifiedPublicKeyShareTerminalPreflight {
 }
 
 impl VerifiedPublicKeyShareTerminal {
-    pub(in crate::bgv) fn from_consumed_common_proof(
-        verified_proof: ConsumedVerifiedCommonProofCapability,
-        canonical_application_statement_bytes: &[u8],
-        verified_public_randomness: &VerifiedPublicRandomness,
-    ) -> Result<Self, CommonProofVerifierError> {
-        let preflight = Self::preflight_from_borrowed_common_proof(
-            verified_proof.borrowed(),
-            canonical_application_statement_bytes,
-            verified_public_randomness,
-        )?;
-        Ok(preflight.complete(verified_proof))
-    }
-
     pub(in crate::bgv) fn preflight_from_borrowed_common_proof(
         verified_proof: BorrowedVerifiedCommonProofCapability<'_>,
         canonical_application_statement_bytes: &[u8],
@@ -405,7 +380,6 @@ pub(in crate::bgv) struct VerifiedCollectivePublicKeyTerminal {
     action_context_hash: [u8; Hash512::BYTE_LENGTH],
     roster_hash: [u8; Hash512::BYTE_LENGTH],
     setup_proof_context_hash: [u8; Hash512::BYTE_LENGTH],
-    board_object_hash: [u8; Hash512::BYTE_LENGTH],
     proof_stream_descriptor: StreamDescriptor,
     ordered_public_key_share_roots: Box<[[u8; Hash512::BYTE_LENGTH]]>,
     collective_public_key_root: [u8; Hash512::BYTE_LENGTH],
@@ -467,7 +441,6 @@ impl VerifiedCollectivePublicKeyTerminal {
     ) -> Result<VerifiedCollectivePublicKeyTerminalPreflight, CommonProofVerifierError> {
         let protocol_version = verified_proof.protocol_version();
         let suite_identifier = verified_proof.suite_identifier();
-        let board_object_hash = verified_proof.board_object_hash();
         let proof_stream_descriptor = verified_proof.proof_stream_descriptor().clone();
         let statement = decode_selected_collective_public_key_aggregate_statement(
             canonical_application_statement_bytes,
@@ -567,10 +540,10 @@ impl VerifiedCollectivePublicKeyTerminal {
                 != verified_proof.relation_plan_variant_hash()
             || collective_public_key_tree.root() != statement.collective_public_key_root()
             || collective_public_key_tree.source_polynomial_degree_bound_exclusive()
-                != COLLECTIVE_PUBLIC_KEY_QUARTER_DEGREE
+                != COLLECTIVE_PUBLIC_KEY_TRACE_HALF_DEGREE
             || usize::try_from(collective_public_key_tree.row_width()).ok()
-                != Some(COLLECTIVE_PUBLIC_KEY_QUARTER_COLUMN_COUNT)
-            || expected_relation_column_count != COLLECTIVE_PUBLIC_KEY_QUARTER_COLUMN_COUNT
+                != Some(COLLECTIVE_PUBLIC_KEY_TRACE_COLUMN_COUNT)
+            || expected_relation_column_count != COLLECTIVE_PUBLIC_KEY_TRACE_COLUMN_COUNT
             || statement_tree.ordered_canonical_residue_moduli()
                 != expected_column_moduli.as_slice()
         {
@@ -578,7 +551,7 @@ impl VerifiedCollectivePublicKeyTerminal {
         }
 
         let collective_public_key_b_polynomials = compact_collective_public_key_b_polynomials(
-            collective_public_key_tree.ordered_coefficient_columns(),
+            collective_public_key_tree.ordered_trace_rows(),
         )?;
         let tree_preflight =
             VerifiedStreamedProofTreeTerminal::preflight_from_recomputed_public_polynomial_tree(
@@ -602,7 +575,6 @@ impl VerifiedCollectivePublicKeyTerminal {
                 action_context_hash: verified_proof.action_context_hash(),
                 roster_hash,
                 setup_proof_context_hash: statement.setup_proof_context_hash(),
-                board_object_hash,
                 proof_stream_descriptor,
                 ordered_public_key_share_roots: statement.ordered_public_key_share_roots().into(),
                 collective_public_key_root: statement.collective_public_key_root(),
@@ -636,10 +608,6 @@ impl VerifiedCollectivePublicKeyTerminal {
 
     pub(super) const fn setup_proof_context_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
         self.setup_proof_context_hash
-    }
-
-    pub(super) const fn board_object_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
-        self.board_object_hash
     }
 
     pub(super) const fn proof_stream_descriptor(&self) -> &StreamDescriptor {
@@ -1127,7 +1095,9 @@ impl VerifiedVssQualificationTerminals {
         ordered_recipient_terminals: Vec<VerifiedAggregateThresholdShareTerminal>,
     ) -> Result<Self, RefusalReason> {
         let participant_count = usize::from(FOUNDATION_PROFILE.participant_count);
-        let sharing_limb_count = DATA_PRIMES.len();
+        let sharing_limb_count = selected_sharing_data_prime_coordinates()
+            .map_err(|error| error.refusal_reason)?
+            .len();
         let reconstruction_threshold = usize::from(FOUNDATION_PROFILE.reconstruction_threshold);
         let expected_coefficient_root_count = sharing_limb_count
             .checked_mul(reconstruction_threshold)
@@ -1354,8 +1324,9 @@ impl VerifiedVssQualificationTerminals {
         &self,
         dealer_roster_position: usize,
     ) -> Option<&[[u8; Hash512::BYTE_LENGTH]]> {
-        let start = dealer_roster_position.checked_mul(DATA_PRIMES.len())?;
-        let end = start.checked_add(DATA_PRIMES.len())?;
+        let sharing_limb_count = selected_sharing_data_prime_coordinates().ok()?.len();
+        let start = dealer_roster_position.checked_mul(sharing_limb_count)?;
+        let end = start.checked_add(sharing_limb_count)?;
         self.ordered_degree_zero_vss_material_roots.get(start..end)
     }
 
@@ -1363,8 +1334,9 @@ impl VerifiedVssQualificationTerminals {
         &self,
         recipient_roster_position: usize,
     ) -> Option<&[[u8; Hash512::BYTE_LENGTH]]> {
-        let start = recipient_roster_position.checked_mul(DATA_PRIMES.len())?;
-        let end = start.checked_add(DATA_PRIMES.len())?;
+        let sharing_limb_count = selected_sharing_data_prime_coordinates().ok()?.len();
+        let start = recipient_roster_position.checked_mul(sharing_limb_count)?;
+        let end = start.checked_add(sharing_limb_count)?;
         self.ordered_aggregate_threshold_share_material_roots
             .get(start..end)
     }
@@ -1491,13 +1463,13 @@ fn require_selected_unscheduled_relation_plan(
 
 fn expected_collective_public_key_column_moduli()
 -> Result<Vec<Option<SuiteModulusReference>>, CommonProofVerifierError> {
-    let mut ordered_moduli = Vec::with_capacity(COLLECTIVE_PUBLIC_KEY_QUARTER_COLUMN_COUNT);
+    let mut ordered_moduli = Vec::with_capacity(COLLECTIVE_PUBLIC_KEY_TRACE_COLUMN_COUNT);
     for data_modulus_index in 0..DATA_PRIMES.len() {
         let reference = SuiteModulusReference::data(
             u16::try_from(data_modulus_index)
                 .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?,
         );
-        ordered_moduli.extend([Some(reference); 4]);
+        ordered_moduli.extend([Some(reference); 2]);
     }
     Ok(ordered_moduli)
 }
@@ -1505,22 +1477,22 @@ fn expected_collective_public_key_column_moduli()
 fn compact_collective_public_key_b_polynomials(
     columns: &[Vec<crate::bgv::proof_suite::ProofBaseFieldElement>],
 ) -> Result<Box<[Arc<[u64]>]>, CommonProofVerifierError> {
-    if columns.len() != COLLECTIVE_PUBLIC_KEY_QUARTER_COLUMN_COUNT {
+    if columns.len() != COLLECTIVE_PUBLIC_KEY_TRACE_COLUMN_COUNT {
         return Err(CommonProofVerifierError::InvalidBoundTree);
     }
     columns
-        .chunks_exact(4)
+        .chunks_exact(2)
         .zip(DATA_PRIMES)
         .map(|(split_columns, modulus)| {
             if split_columns
                 .iter()
-                .any(|quarter| quarter.len() != COLLECTIVE_PUBLIC_KEY_QUARTER_DEGREE)
+                .any(|half| half.len() != COLLECTIVE_PUBLIC_KEY_TRACE_HALF_DEGREE)
             {
                 return Err(CommonProofVerifierError::InvalidBoundTree);
             }
             let coefficients = split_columns
                 .iter()
-                .flat_map(|quarter| quarter.iter())
+                .flat_map(|half| half.iter())
                 .map(|coefficient| coefficient.canonical())
                 .collect::<Vec<_>>();
             if coefficients.len() != POLYNOMIAL_DEGREE
@@ -1586,6 +1558,12 @@ mod tests {
         .unwrap()
     }
 
+    fn selected_sharing_limb_count() -> usize {
+        selected_sharing_data_prime_coordinates()
+            .expect("selected sharing coordinates")
+            .len()
+    }
+
     fn vss_qualification_fixture() -> (
         VerifiedPublicRandomness,
         Vec<VerifiedVssShareLinkageTerminal>,
@@ -1612,7 +1590,7 @@ mod tests {
 
         let dealer_terminals = (0..participant_count)
             .map(|dealer_roster_position| {
-                let ordered_coefficient_material_roots = (0..DATA_PRIMES.len())
+                let ordered_coefficient_material_roots = (0..selected_sharing_limb_count())
                     .flat_map(|sharing_limb_ordinal| {
                         (0..reconstruction_threshold).map(move |coefficient_ordinal| {
                             test_hash(
@@ -1624,7 +1602,7 @@ mod tests {
                         })
                     })
                     .collect::<Vec<_>>();
-                let ordered_recipient_share_material_roots = (0..DATA_PRIMES.len())
+                let ordered_recipient_share_material_roots = (0..selected_sharing_limb_count())
                     .flat_map(|sharing_limb_ordinal| {
                         (0..participant_count).map(move |recipient_roster_position| {
                             test_hash(
@@ -1692,14 +1670,14 @@ mod tests {
                 let ordered_source_share_roots = dealer_terminals
                     .iter()
                     .flat_map(|dealer_terminal| {
-                        (0..DATA_PRIMES.len()).map(move |sharing_limb_ordinal| {
+                        (0..selected_sharing_limb_count()).map(move |sharing_limb_ordinal| {
                             dealer_terminal.ordered_recipient_share_material_roots()
                                 [sharing_limb_ordinal * participant_count
                                     + recipient_roster_position]
                         })
                     })
                     .collect::<Vec<_>>();
-                let ordered_aggregate_threshold_roots = (0..DATA_PRIMES.len())
+                let ordered_aggregate_threshold_roots = (0..selected_sharing_limb_count())
                     .map(|sharing_limb_ordinal| {
                         test_hash(0x91, recipient_roster_position, sharing_limb_ordinal, 0)
                     })
@@ -1750,12 +1728,14 @@ mod tests {
             .copied()
             .map(Hash512::from_bytes)
             .collect::<Vec<_>>();
-        ordered_roots.extend((0..DATA_PRIMES.len()).map(|sharing_limb_ordinal| {
-            Hash512::from_bytes(
-                dealer_terminal.ordered_recipient_share_material_roots()
-                    [sharing_limb_ordinal * participant_count + recipient_roster_position],
-            )
-        }));
+        ordered_roots.extend(
+            (0..selected_sharing_limb_count()).map(|sharing_limb_ordinal| {
+                Hash512::from_bytes(
+                    dealer_terminal.ordered_recipient_share_material_roots()
+                        [sharing_limb_ordinal * participant_count + recipient_roster_position],
+                )
+            }),
+        );
         ordered_roots
     }
 
@@ -1915,17 +1895,17 @@ mod tests {
         }
     }
 
-    fn quarter_columns_with_distinct_values() -> Vec<Vec<ProofBaseFieldElement>> {
+    fn trace_half_columns_with_distinct_values() -> Vec<Vec<ProofBaseFieldElement>> {
         DATA_PRIMES
             .iter()
             .copied()
             .enumerate()
             .flat_map(|(modulus_ordinal, modulus)| {
-                (0..4).map(move |quarter_ordinal| {
-                    (0..COLLECTIVE_PUBLIC_KEY_QUARTER_DEGREE)
+                (0..2).map(move |half_ordinal| {
+                    (0..COLLECTIVE_PUBLIC_KEY_TRACE_HALF_DEGREE)
                         .map(|coefficient_ordinal| {
                             let value = (u64::try_from(modulus_ordinal).unwrap() * 101
-                                + u64::try_from(quarter_ordinal).unwrap() * 17
+                                + u64::try_from(half_ordinal).unwrap() * 17
                                 + u64::try_from(coefficient_ordinal).unwrap())
                                 % modulus;
                             ProofBaseFieldElement::from_canonical(value).unwrap()
@@ -1937,11 +1917,11 @@ mod tests {
     }
 
     #[test]
-    fn collective_key_terminal_compacts_adjacent_quarters_in_ring_order() {
-        let columns = quarter_columns_with_distinct_values();
-        let expected_first_quarter_end =
-            columns[0][COLLECTIVE_PUBLIC_KEY_QUARTER_DEGREE - 1].canonical();
-        let expected_second_quarter_start = columns[1][0].canonical();
+    fn collective_key_terminal_compacts_adjacent_trace_halves_in_ring_order() {
+        let columns = trace_half_columns_with_distinct_values();
+        let expected_first_half_end =
+            columns[0][COLLECTIVE_PUBLIC_KEY_TRACE_HALF_DEGREE - 1].canonical();
+        let expected_second_half_start = columns[1][0].canonical();
         let polynomials = compact_collective_public_key_b_polynomials(&columns)
             .expect("the exact selected split layout compacts");
         assert_eq!(polynomials.len(), DATA_PRIMES.len());
@@ -1951,12 +1931,12 @@ mod tests {
                 .all(|polynomial| polynomial.len() == POLYNOMIAL_DEGREE)
         );
         assert_eq!(
-            polynomials[0][COLLECTIVE_PUBLIC_KEY_QUARTER_DEGREE - 1],
-            expected_first_quarter_end
+            polynomials[0][COLLECTIVE_PUBLIC_KEY_TRACE_HALF_DEGREE - 1],
+            expected_first_half_end
         );
         assert_eq!(
-            polynomials[0][COLLECTIVE_PUBLIC_KEY_QUARTER_DEGREE],
-            expected_second_quarter_start
+            polynomials[0][COLLECTIVE_PUBLIC_KEY_TRACE_HALF_DEGREE],
+            expected_second_half_start
         );
         assert!(
             polynomials
@@ -1970,15 +1950,15 @@ mod tests {
 
     #[test]
     fn collective_key_terminal_rejects_missing_short_and_noncanonical_columns() {
-        let mut missing = quarter_columns_with_distinct_values();
+        let mut missing = trace_half_columns_with_distinct_values();
         missing.pop();
         assert!(compact_collective_public_key_b_polynomials(&missing).is_err());
 
-        let mut short = quarter_columns_with_distinct_values();
+        let mut short = trace_half_columns_with_distinct_values();
         short[4].pop();
         assert!(compact_collective_public_key_b_polynomials(&short).is_err());
 
-        let mut noncanonical = quarter_columns_with_distinct_values();
+        let mut noncanonical = trace_half_columns_with_distinct_values();
         noncanonical[2][19] = ProofBaseFieldElement::from_canonical(DATA_PRIMES[1]).unwrap();
         assert!(compact_collective_public_key_b_polynomials(&noncanonical).is_err());
     }
@@ -2149,6 +2129,46 @@ mod tests {
     }
 
     #[test]
+    fn generated_private_vss_mailbox_catalog_refuses_missing_input_without_consuming_terminals() {
+        let (
+            verified_public_randomness,
+            dealer_terminals,
+            _recipient_terminals,
+            canonical_envelope_corpus,
+        ) = generated_mailbox_catalog_fixture();
+        let canonical_envelope_references = canonical_envelope_corpus
+            .iter()
+            .map(Vec::as_slice)
+            .collect::<Vec<_>>();
+        let mut incomplete_envelope_references = canonical_envelope_references.clone();
+        incomplete_envelope_references.pop();
+        assert_eq!(
+            VerifiedGeneratedPrivateVssMailboxCorpusByteLengthCatalog::from_verified_dealer_terminals(
+                &verified_public_randomness,
+                &dealer_terminals,
+                GeneratedPrivateVssMailboxCorpusInput::new(&incomplete_envelope_references),
+            )
+            .err()
+            .expect("an incomplete selected-roster mailbox corpus refuses"),
+            RefusalReason::WrongTypeOrLength,
+        );
+
+        let restored_catalog =
+            VerifiedGeneratedPrivateVssMailboxCorpusByteLengthCatalog::from_verified_dealer_terminals(
+                &verified_public_randomness,
+                &dealer_terminals,
+                GeneratedPrivateVssMailboxCorpusInput::new(&canonical_envelope_references),
+            )
+            .expect("failed preflight leaves all exact dealer terminals available");
+        let participant_count = usize::from(FOUNDATION_PROFILE.participant_count);
+        assert_eq!(participant_count, 10);
+        assert_eq!(
+            restored_catalog.ordered_mailbox_byte_lengths().len(),
+            participant_count * participant_count,
+        );
+    }
+
+    #[test]
     fn vss_qualification_compacts_exact_roster_order_after_recipient_transpose_joins() {
         let (verified_public_randomness, dealer_terminals, recipient_terminals) =
             vss_qualification_fixture();
@@ -2168,7 +2188,7 @@ mod tests {
             .iter()
             .map(VerifiedAggregateThresholdShareTerminal::board_object_canonical_byte_length)
             .collect::<Vec<_>>();
-        let expected_first_degree_zero_roots = (0..DATA_PRIMES.len())
+        let expected_first_degree_zero_roots = (0..selected_sharing_limb_count())
             .map(|sharing_limb_ordinal| {
                 dealer_terminals[0].ordered_coefficient_material_roots()[sharing_limb_ordinal
                     * usize::from(FOUNDATION_PROFILE.reconstruction_threshold)]

@@ -126,8 +126,9 @@ const stateBytesFor = (seed: number): Uint8Array => {
 };
 
 const privateRandomCursorManifestFor = (seed: number): Uint8Array =>
-    Uint8Array.from({ length: 96 }, (_unused, index) =>
-        (seed * 37 + index * 113) & 0xff,
+    Uint8Array.from(
+        { length: 96 },
+        (_unused, index) => (seed * 37 + index * 113) & 0xff,
     );
 
 const emptyPrivateRandomCursorManifest = (): Uint8Array<ArrayBuffer> =>
@@ -193,8 +194,7 @@ const expectedBoundary = (
     boundary: CheckpointBoundary,
 ): ExpectedCheckpointBoundary => ({
     operationKind: boundary.operationKind,
-    privateRandomCursorManifestBytes:
-        boundary.privateRandomCursorManifestBytes,
+    privateRandomCursorManifestBytes: boundary.privateRandomCursorManifestBytes,
     ...(boundary.privateRandomnessStreamAttemptIdentifier === undefined
         ? {}
         : {
@@ -386,8 +386,7 @@ describe('Authenticated checkpoint store', () => {
                 maximumActiveOperationIdentityCount: 1,
             },
         });
-        const reservation =
-            await checkpointStore.reserveCheckpointLineage();
+        const reservation = await checkpointStore.reserveCheckpointLineage();
         const reservedLineageIdentifier =
             reservation.checkpointLineageIdentifier;
         expect(reservedLineageIdentifier).toHaveLength(32);
@@ -399,8 +398,7 @@ describe('Authenticated checkpoint store', () => {
         await expect(
             checkpointStore.publish({
                 boundary: deterministicBoundaryFor({ stateBytes }),
-                identity:
-                    reservation as unknown as CheckpointOperationIdentity,
+                identity: reservation as unknown as CheckpointOperationIdentity,
                 stateChunks: [stateBytes],
             }),
         ).rejects.toMatchObject({ code: 'InvalidInput' });
@@ -749,8 +747,7 @@ describe('Authenticated checkpoint store', () => {
             expectedBoundary: expectedBoundary(boundary),
         });
         expect(
-            resumed.operationIdentity
-                .privateRandomnessStreamAttemptIdentifier,
+            resumed.operationIdentity.privateRandomnessStreamAttemptIdentifier,
         ).toBeUndefined();
         expect(await restoreBytes(resumed)).toEqual(stateBytes);
     });
@@ -1062,7 +1059,8 @@ describe('Authenticated checkpoint store', () => {
             ...advancedBoundary,
             privateRandomCursorManifestBytes:
                 advancedBoundary.privateRandomCursorManifestBytes.map(
-                    (byte, byteIndex) => (byteIndex === 17 ? byte ^ 0x80 : byte),
+                    (byte, byteIndex) =>
+                        byteIndex === 17 ? byte ^ 0x80 : byte,
                 ),
         };
         await checkpointStore.publish({
@@ -1079,8 +1077,7 @@ describe('Authenticated checkpoint store', () => {
             }),
         ).rejects.toMatchObject({ code: 'AuthenticationFailed' });
         const resumedReplacement = await checkpointStore.resume({
-            checkpointLineageIdentifier:
-                identity.checkpointLineageIdentifier,
+            checkpointLineageIdentifier: identity.checkpointLineageIdentifier,
             expectedBoundary: expectedBoundary(replacementBoundary),
         });
         expect(await restoreBytes(resumedReplacement)).toEqual(
@@ -1296,7 +1293,7 @@ describe('Authenticated checkpoint store', () => {
         }
     });
 
-    it('rejects forged identities, unissued attempts, and oversized opaque manifests', async () => {
+    it('rejects forged identities, missing or unissued attempts, and oversized opaque manifests', async () => {
         const checkpointStore = openStore();
         const identity = await checkpointStore.beginOperation(
             proofAttemptIdentifier(),
@@ -1313,6 +1310,17 @@ describe('Authenticated checkpoint store', () => {
             checkpointStore.publish({
                 boundary,
                 identity: forgedIdentity,
+                stateChunks: chunkState(stateBytes),
+            }),
+        ).rejects.toMatchObject({ code: 'InvalidInput' });
+        const {
+            privateRandomnessStreamAttemptIdentifier: _omittedAttempt,
+            ...identityFreeBoundary
+        } = boundary;
+        await expect(
+            checkpointStore.publish({
+                boundary: identityFreeBoundary,
+                identity,
                 stateChunks: chunkState(stateBytes),
             }),
         ).rejects.toMatchObject({ code: 'InvalidInput' });
@@ -1361,9 +1369,7 @@ describe('Authenticated checkpoint store', () => {
         const repeatingIdentifierStore = openStore({
             cryptoProvider: repeatingCryptoProvider,
         });
-        await repeatingIdentifierStore.beginOperation(
-            proofAttemptIdentifier(),
-        );
+        await repeatingIdentifierStore.beginOperation(proofAttemptIdentifier());
         await expect(
             repeatingIdentifierStore.beginOperation(proofAttemptIdentifier()),
         ).rejects.toMatchObject({ code: 'EntropyFailure' });

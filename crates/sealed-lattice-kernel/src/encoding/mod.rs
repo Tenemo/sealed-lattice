@@ -312,13 +312,6 @@ pub fn run_transcript_core_command(input: &[u8]) -> Vec<u8> {
     }
 }
 
-pub(crate) fn run_accepted_setup_command(input: &[u8], session_handle: u32) -> Vec<u8> {
-    match command::run_accepted_setup_command_inner(input, session_handle) {
-        Ok(value) => encode_success(value),
-        Err(error) => encode_error(error),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
@@ -438,25 +431,6 @@ mod tests {
                 .as_bytes(),
             )
             .is_err()
-        );
-    }
-
-    #[test]
-    fn generic_command_refuses_setup_verification_without_an_opaque_session() {
-        let error = super::run_transcript_core_command_inner(
-            serde_json::json!({
-                "command": "VerifyCollectiveBgvSetup",
-                "setupPackage": {},
-            })
-            .to_string()
-            .as_bytes(),
-        )
-        .expect_err("the generic command cannot own accepted-setup material roots");
-
-        assert_eq!(error.code, CanonicalErrorCode::InvalidProtocolObject);
-        assert_eq!(
-            error.message,
-            "accepted setup verification requires an opaque material-ownership session"
         );
     }
 }

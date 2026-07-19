@@ -5,8 +5,8 @@ export type CommonProofGenerationCheckpoint = Readonly<{
     canonicalStateBytes: Uint8Array<ArrayBuffer>;
     /** Canonical compact cursor manifest produced and authenticated by Rust. */
     privateRandomCursorManifestBytes: Uint8Array<ArrayBuffer>;
-    /** Shared reset-safe attempt identity embedded once in a non-empty manifest. */
-    privateRandomnessStreamAttemptIdentifier?: Uint8Array<ArrayBuffer>;
+    /** Shared reset-safe attempt identity embedded once, even at zero cursors. */
+    privateRandomnessStreamAttemptIdentifier: Uint8Array<ArrayBuffer>;
     safeBoundaryOrdinal: number;
     /** Stable authenticated binding for this exact generation attempt. */
     stableAttemptBindingHash: Uint8Array<ArrayBuffer>;

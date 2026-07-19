@@ -5,6 +5,11 @@ import {
 } from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
 
+import { createBrowserLocalSigningOperations } from '#packages/crypto/tests/support/browser-local-key-operations';
+import {
+    createCanonicalCarrierMailboxKeyPairFixtures,
+    createCanonicalCarrierSigningKeyPairFixtures,
+} from '#packages/crypto/tests/support/canonical-carrier-signature-fixtures';
 import {
     createWasmBrowserActionStorageWorkerKernel,
     loadFreshTranscriptCoreKernel,
@@ -12,6 +17,7 @@ import {
 import {
     closeWorkerActionRandomness,
     createAndSealWorkerActionRandomness,
+    openClosedWorkerSetupMailboxRandomness,
     openSealedWorkerActionRandomness,
     withClosedWorkerProductionOperationAuthority,
 } from '#packages/wasm/src/local-storage-root-worker-kernel';
@@ -76,8 +82,7 @@ const openProductionOperationAuthorityFixture = async () => {
     }
     const reservationVector = stateVector.reservationOnly.find(
         ({ capabilityKind }) =>
-            capabilityKind ===
-            stateCapabilityKinds.setupActionRandomnessRoot,
+            capabilityKind === stateCapabilityKinds.setupActionRandomnessRoot,
     );
     if (reservationVector === undefined) {
         throw new Error('Missing action-randomness reservation vector.');
@@ -114,7 +119,6 @@ const openProductionOperationAuthorityFixture = async () => {
             stateVerifierSessionIdentifier: stateVerifierSession.value,
         }),
         kernel,
-        stateVector,
         workerKernel,
     });
 };
@@ -270,8 +274,8 @@ describe('Local storage-root real-WASM worker kernel', () => {
             await withClosedWorkerProductionOperationAuthority(
                 fixture.workerKernel,
                 fixture.identifiers,
-                (authority) => {
-                    authority.withExactKernelAuthorization(() => {
+                async (authority) => {
+                    await authority.withExactKernelAuthorization(() => {
                         subsequentCallbackEntered = true;
                     });
                 },
@@ -282,10 +286,67 @@ describe('Local storage-root real-WASM worker kernel', () => {
         }
     });
 
-    it('refuses cross-kernel and cross-session production-operation identifiers before callback entry', async () => {
+    it('produces a signed setup intent from worker-owned randomness and state authority', async () => {
+        const fixture = await openProductionOperationAuthorityFixture();
+        const signingKeyPairs = createCanonicalCarrierSigningKeyPairFixtures(
+            foundationProfile.participantCount,
+        );
+        const mailboxKeyPairs = createCanonicalCarrierMailboxKeyPairFixtures(
+            foundationProfile.participantCount,
+        );
+        const sourceSigningKeyPair = signingKeyPairs[0];
+        const sourceMailboxKeyPair = mailboxKeyPairs[0];
+        if (
+            sourceSigningKeyPair === undefined ||
+            sourceMailboxKeyPair === undefined
+        ) {
+            throw new Error('The deterministic source key pairs are missing.');
+        }
+        const signingOperations =
+            createBrowserLocalSigningOperations(sourceSigningKeyPair);
+        let setupRandomness:
+            | Awaited<ReturnType<typeof openClosedWorkerSetupMailboxRandomness>>
+            | undefined;
+        try {
+            setupRandomness = await openClosedWorkerSetupMailboxRandomness(
+                fixture.workerKernel,
+                {
+                    actionRandomnessSessionIdentifier:
+                        fixture.identifiers.actionRandomnessSessionIdentifier,
+                    signing: signingOperations,
+                    sourceMailboxEncapsulationKey:
+                        sourceMailboxKeyPair.publicKey,
+                    stateReservationIdentifier:
+                        fixture.identifiers.stateReservationIdentifier,
+                },
+            );
+
+            const canonicalSetupIntentCarrier =
+                setupRandomness.produceSetupIntentCarrier();
+            expect(canonicalSetupIntentCarrier.byteLength).toBeGreaterThan(
+                3_309,
+            );
+
+            setupRandomness.revoke();
+            expect(() => setupRandomness?.produceSetupIntentCarrier()).toThrow(
+                BrowserActionStorageCustodyError,
+            );
+        } finally {
+            setupRandomness?.revoke();
+            signingOperations.revoke();
+            for (const signingKeyPair of signingKeyPairs) {
+                signingKeyPair.secretKey.fill(0);
+            }
+            for (const mailboxKeyPair of mailboxKeyPairs) {
+                mailboxKeyPair.secretKey.fill(0);
+            }
+            await fixture.close();
+        }
+    });
+
+    it('refuses cross-kernel production-operation identifiers before callback entry', async () => {
         const sourceFixture = await openProductionOperationAuthorityFixture();
         const otherFixture = await openProductionOperationAuthorityFixture();
-        let additionalStateVerifierSessionIdentifier: string | undefined;
         try {
             let crossKernelCallbackEntryCount = 0;
             await expectCustodyErrorCode(
@@ -323,41 +384,8 @@ describe('Local storage-root real-WASM worker kernel', () => {
                 'InvalidState',
             );
 
-            const additionalStateVerifierSession =
-                await sourceFixture.workerKernel.openActionStateVerifierSession(
-                    {
-                        canonicalRosterBytes:
-                            sourceFixture.stateVector.canonicalRosterBytes,
-                    },
-                );
-            if (!additionalStateVerifierSession.isValid) {
-                throw new Error(
-                    'Additional state-verifier session did not open.',
-                );
-            }
-            additionalStateVerifierSessionIdentifier =
-                additionalStateVerifierSession.value;
-            await expectCustodyErrorCode(
-                withClosedWorkerProductionOperationAuthority(
-                    sourceFixture.workerKernel,
-                    {
-                        ...sourceFixture.identifiers,
-                        stateVerifierSessionIdentifier:
-                            additionalStateVerifierSession.value,
-                    },
-                    () => {
-                        crossKernelCallbackEntryCount += 1;
-                    },
-                ),
-                'InvalidState',
-            );
             expect(crossKernelCallbackEntryCount).toBe(0);
         } finally {
-            if (additionalStateVerifierSessionIdentifier !== undefined) {
-                await sourceFixture.workerKernel.closeActionStateVerifierSession(
-                    additionalStateVerifierSessionIdentifier,
-                );
-            }
             await sourceFixture.close();
             await otherFixture.close();
         }

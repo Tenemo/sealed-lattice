@@ -324,7 +324,7 @@ impl VerifiedRelinearizationRoundOneSourceMaterial {
                 || tree.source_polynomial_degree_bound_exclusive()
                     != material
                         .topology()
-                        .quarter_polynomial_degree_bound_exclusive()
+                        .half_polynomial_degree_bound_exclusive()
                         .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?
                 || usize::try_from(tree.row_width()).ok() != Some(expected_column_count)
                 || statement_tree.ordered_canonical_residue_moduli()
@@ -747,7 +747,7 @@ impl VerifiedRelinearizationSourceMaterial {
             || contribution_tree.source_polynomial_degree_bound_exclusive()
                 != material
                     .topology()
-                    .quarter_polynomial_degree_bound_exclusive()
+                    .half_polynomial_degree_bound_exclusive()
                     .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?
             || statement_tree.ordered_canonical_residue_moduli() != expected_column_moduli.as_ref()
             || usize::try_from(contribution_tree.row_width()).ok() != Some(expected_column_count)
@@ -1188,7 +1188,7 @@ impl VerifiedRelinearizationAggregateMaterial {
                 || tree.source_polynomial_degree_bound_exclusive()
                     != material
                         .topology()
-                        .quarter_polynomial_degree_bound_exclusive()
+                        .half_polynomial_degree_bound_exclusive()
                         .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?
                 || usize::try_from(tree.row_width()).ok() != Some(expected_column_count)
                 || statement_tree.ordered_canonical_residue_moduli()

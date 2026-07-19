@@ -1342,9 +1342,11 @@ mod tests {
 
     use super::*;
     use crate::foundation::{
-        FOUNDATION_PROFILE, FoundationObjectType, ObjectEnvelope, RosterEntry, SignedCarrier,
-        StateCertificate, StateReservationIntentPayload, StateWitnessVoteKind,
-        StateWitnessVotePayload, derive_state_witness_vote_sequence, run_action_randomness_command,
+        AuthenticatedCheckpointContinuationSource, FOUNDATION_PROFILE, FoundationObjectType,
+        ObjectEnvelope, ProofApplicationSlot, ProofApplicationSlotCeilings, RosterEntry,
+        SignedCarrier, StateCertificate, StateReservationIntentPayload, StateWitnessVoteKind,
+        StateWitnessVotePayload, derive_state_witness_vote_sequence,
+        resolve_prepared_public_only_proof_attempt_source, run_action_randomness_command,
         signature_message,
     };
 
@@ -1645,6 +1647,331 @@ mod tests {
         );
         configuration.extend_from_slice(&roster_bytes);
         configuration
+    }
+
+    #[test]
+    fn public_only_attempts_require_the_exact_setup_reservation_and_resume_same_lineage() {
+        let fixture = StateProducerRuntimeFixture::new();
+        let mut registry = StateVerifierRuntimeRegistry::default();
+        let session_handle = registry
+            .begin(&fixture.configuration, fixture.capability)
+            .expect("state verifier session begins");
+        let action_randomness_output =
+            run_action_randomness_command(1, &fixture.action_randomness_open_input())
+                .expect("action randomness opens");
+        let action_randomness_handle = read_runtime_handle(&action_randomness_output);
+        let mut cleanup = StateProducerRuntimeCleanup {
+            action_randomness_handle: Some(action_randomness_handle),
+            capability: fixture.capability,
+            session_handle: None,
+        };
+        let setup_reservation_source = resolve_setup_action_randomness_reservation_source(
+            action_randomness_handle,
+            fixture.roster_hash,
+        )
+        .expect("the retained action key derives its exact setup reservation");
+        let exact_reservation_handle = retain_test_reservation(
+            &mut registry,
+            &fixture,
+            session_handle,
+            0,
+            StateCapabilityKind::SetupActionRandomnessRoot,
+            setup_reservation_source.authorization_hash(),
+        );
+        let different_reservation_handle = retain_test_reservation(
+            &mut registry,
+            &fixture,
+            session_handle,
+            0,
+            StateCapabilityKind::SetupActionRandomnessRoot,
+            Hash512::from_bytes([0xd4; Hash512::BYTE_LENGTH]),
+        );
+        let wrong_capability_reservation_handle = retain_test_reservation(
+            &mut registry,
+            &fixture,
+            session_handle,
+            0,
+            StateCapabilityKind::SetupTerminalPackage,
+            setup_reservation_source.authorization_hash(),
+        );
+        let wrong_subject_reservation_handle = retain_test_reservation(
+            &mut registry,
+            &fixture,
+            session_handle,
+            1,
+            StateCapabilityKind::SetupActionRandomnessRoot,
+            setup_reservation_source.authorization_hash(),
+        );
+        let exact_reservation_binding = registry
+            .reservation_binding(
+                session_handle,
+                &fixture.capability,
+                exact_reservation_handle,
+            )
+            .expect("the exact setup reservation retains its verifier-derived binding");
+        let different_reservation_binding = registry
+            .reservation_binding(
+                session_handle,
+                &fixture.capability,
+                different_reservation_handle,
+            )
+            .expect("the different setup reservation is independently verified");
+        let wrong_capability_reservation_binding = registry
+            .reservation_binding(
+                session_handle,
+                &fixture.capability,
+                wrong_capability_reservation_handle,
+            )
+            .expect("the wrong capability reservation is independently verified");
+        let wrong_subject_reservation_binding = registry
+            .reservation_binding(
+                session_handle,
+                &fixture.capability,
+                wrong_subject_reservation_handle,
+            )
+            .expect("the wrong subject reservation is independently verified");
+        let checkpoint_schedule_digest = Hash512::from_bytes([0x81; Hash512::BYTE_LENGTH]);
+        let checkpoint_lineage_identifier = [0x82; 32];
+        let mut public_family_lineages = Vec::new();
+
+        for (family_schema_identifier, schedule_position) in [
+            (
+                ProofApplicationSlotCeilings::COLLECTIVE_PUBLIC_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+                None,
+            ),
+            (
+                ProofApplicationSlotCeilings::RKG_ROUND_ONE_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+                Some(0),
+            ),
+            (
+                ProofApplicationSlotCeilings::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+                None,
+            ),
+        ] {
+            let application_slot = ProofApplicationSlot::new(
+                Hash512::from_bytes([0x11; Hash512::BYTE_LENGTH]),
+                Hash512::from_bytes([0x22; Hash512::BYTE_LENGTH]),
+                Hash512::from_bytes([0x33; Hash512::BYTE_LENGTH]),
+                family_schema_identifier,
+                None,
+                schedule_position,
+                None,
+            )
+            .expect("the public-only family has one canonical application slot");
+            let application_statement_hash =
+                Hash512::from_bytes([0x70; Hash512::BYTE_LENGTH]);
+            let fresh_attempt = resolve_prepared_public_only_proof_attempt_source(
+                action_randomness_handle,
+                exact_reservation_binding,
+                fixture.roster_hash,
+                application_slot,
+                application_statement_hash,
+                1,
+                1,
+                AuthenticatedCheckpointContinuationSource::for_fresh_common_proof_attempt(
+                    checkpoint_lineage_identifier,
+                    checkpoint_schedule_digest,
+                ),
+            )
+            .expect("the exact public-only attempt is authorized without private coins");
+            let resumed_attempt = resolve_prepared_public_only_proof_attempt_source(
+                action_randomness_handle,
+                exact_reservation_binding,
+                fixture.roster_hash,
+                application_slot,
+                application_statement_hash,
+                1,
+                1,
+                AuthenticatedCheckpointContinuationSource::from_authenticated_common_proof_checkpoint(
+                    checkpoint_lineage_identifier,
+                    checkpoint_schedule_digest,
+                    1,
+                    Hash512::from_bytes([0x83; Hash512::BYTE_LENGTH]),
+                ),
+            )
+            .expect("the authenticated continuation resolves the same public-only attempt");
+
+            assert_eq!(
+                fresh_attempt.attempt_lineage_identifier(),
+                resumed_attempt.attempt_lineage_identifier(),
+            );
+            assert_eq!(fresh_attempt.application_slot(), application_slot);
+            assert_eq!(fresh_attempt.application_statement_hash(), application_statement_hash);
+            assert_eq!(fresh_attempt.expected_proof_byte_length(), 1);
+            assert_eq!(fresh_attempt.expected_query_count(), 1);
+            assert_eq!(fresh_attempt.checkpoint_continuation().next_event_index(), 0);
+            assert_eq!(resumed_attempt.checkpoint_continuation().next_event_index(), 1);
+            public_family_lineages.push((
+                family_schema_identifier,
+                fresh_attempt.attempt_lineage_identifier(),
+            ));
+
+            assert_eq!(
+                resolve_prepared_public_only_proof_attempt_source(
+                    action_randomness_handle,
+                    different_reservation_binding,
+                    fixture.roster_hash,
+                    application_slot,
+                    application_statement_hash,
+                    1,
+                    1,
+                    AuthenticatedCheckpointContinuationSource::for_fresh_common_proof_attempt(
+                        checkpoint_lineage_identifier,
+                        checkpoint_schedule_digest,
+                    ),
+                ),
+                Err(RefusalReason::WrongHashOrRoot.canonical_code() as u32),
+            );
+        }
+
+        for left_index in 0..public_family_lineages.len() {
+            for right_index in (left_index + 1)..public_family_lineages.len() {
+                assert_ne!(
+                    public_family_lineages[left_index].1, public_family_lineages[right_index].1,
+                    "distinct public family slots must derive distinct attempt lineages",
+                );
+            }
+        }
+
+        let collective_application_slot = ProofApplicationSlot::new(
+            Hash512::from_bytes([0x11; Hash512::BYTE_LENGTH]),
+            Hash512::from_bytes([0x22; Hash512::BYTE_LENGTH]),
+            Hash512::from_bytes([0x33; Hash512::BYTE_LENGTH]),
+            ProofApplicationSlotCeilings::COLLECTIVE_PUBLIC_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+            None,
+            None,
+            None,
+        )
+        .expect("the collective aggregate slot is canonical");
+        let changed_statement_attempt = resolve_prepared_public_only_proof_attempt_source(
+            action_randomness_handle,
+            exact_reservation_binding,
+            fixture.roster_hash,
+            collective_application_slot,
+            Hash512::from_bytes([0x71; Hash512::BYTE_LENGTH]),
+            1,
+            1,
+            AuthenticatedCheckpointContinuationSource::for_fresh_common_proof_attempt(
+                checkpoint_lineage_identifier,
+                checkpoint_schedule_digest,
+            ),
+        )
+        .expect("a different canonical statement derives its own authorized attempt");
+        let collective_lineage_identifier = public_family_lineages
+            .iter()
+            .find_map(|(family_schema_identifier, lineage_identifier)| {
+                (*family_schema_identifier
+                    == ProofApplicationSlotCeilings::COLLECTIVE_PUBLIC_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER)
+                    .then_some(*lineage_identifier)
+            })
+            .expect("the collective public family lineage was recorded");
+        assert_ne!(
+            changed_statement_attempt.attempt_lineage_identifier(),
+            collective_lineage_identifier,
+        );
+
+        for (reservation_binding, refusal_reason) in [
+            (
+                wrong_capability_reservation_binding,
+                RefusalReason::WrongTypeOrLength,
+            ),
+            (
+                wrong_subject_reservation_binding,
+                RefusalReason::WrongContext,
+            ),
+        ] {
+            assert_eq!(
+                resolve_prepared_public_only_proof_attempt_source(
+                    action_randomness_handle,
+                    reservation_binding,
+                    fixture.roster_hash,
+                    collective_application_slot,
+                    Hash512::from_bytes([0x70; Hash512::BYTE_LENGTH]),
+                    1,
+                    1,
+                    AuthenticatedCheckpointContinuationSource::for_fresh_common_proof_attempt(
+                        checkpoint_lineage_identifier,
+                        checkpoint_schedule_digest,
+                    ),
+                ),
+                Err(refusal_reason.canonical_code() as u32),
+            );
+        }
+
+        let secret_bearing_application_slot = ProofApplicationSlot::new(
+            Hash512::from_bytes([0x11; Hash512::BYTE_LENGTH]),
+            Hash512::from_bytes([0x22; Hash512::BYTE_LENGTH]),
+            Hash512::from_bytes([0x33; Hash512::BYTE_LENGTH]),
+            ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER,
+            Some(0),
+            None,
+            None,
+        )
+        .expect("the secret-bearing family has a canonical slot of its own");
+        assert_eq!(
+            resolve_prepared_public_only_proof_attempt_source(
+                action_randomness_handle,
+                exact_reservation_binding,
+                fixture.roster_hash,
+                secret_bearing_application_slot,
+                Hash512::from_bytes([0x70; Hash512::BYTE_LENGTH]),
+                1,
+                1,
+                AuthenticatedCheckpointContinuationSource::for_fresh_common_proof_attempt(
+                    checkpoint_lineage_identifier,
+                    checkpoint_schedule_digest,
+                ),
+            ),
+            Err(RefusalReason::OutsideSupportedProfile.canonical_code() as u32),
+        );
+
+        let wrong_context_application_slot = ProofApplicationSlot::new(
+            Hash512::from_bytes([0x44; Hash512::BYTE_LENGTH]),
+            Hash512::from_bytes([0x22; Hash512::BYTE_LENGTH]),
+            Hash512::from_bytes([0x33; Hash512::BYTE_LENGTH]),
+            ProofApplicationSlotCeilings::COLLECTIVE_PUBLIC_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+            None,
+            None,
+            None,
+        )
+        .expect("the public family slot is canonical under its supplied context");
+        assert_eq!(
+            resolve_prepared_public_only_proof_attempt_source(
+                action_randomness_handle,
+                exact_reservation_binding,
+                fixture.roster_hash,
+                wrong_context_application_slot,
+                Hash512::from_bytes([0x70; Hash512::BYTE_LENGTH]),
+                1,
+                1,
+                AuthenticatedCheckpointContinuationSource::for_fresh_common_proof_attempt(
+                    checkpoint_lineage_identifier,
+                    checkpoint_schedule_digest,
+                ),
+            ),
+            Err(RefusalReason::WrongContext.canonical_code() as u32),
+        );
+
+        assert_eq!(
+            resolve_prepared_public_only_proof_attempt_source(
+                action_randomness_handle,
+                exact_reservation_binding,
+                Hash512::from_bytes([0x99; Hash512::BYTE_LENGTH]),
+                collective_application_slot,
+                Hash512::from_bytes([0x70; Hash512::BYTE_LENGTH]),
+                1,
+                1,
+                AuthenticatedCheckpointContinuationSource::for_fresh_common_proof_attempt(
+                    checkpoint_lineage_identifier,
+                    checkpoint_schedule_digest,
+                ),
+            ),
+            Err(RefusalReason::WrongHashOrRoot.canonical_code() as u32),
+        );
+
+        run_action_randomness_command(2, &action_randomness_handle.to_le_bytes())
+            .expect("action randomness closes");
+        cleanup.action_randomness_handle = None;
     }
 
     #[test]

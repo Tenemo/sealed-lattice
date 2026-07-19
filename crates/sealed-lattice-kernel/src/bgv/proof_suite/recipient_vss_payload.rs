@@ -515,7 +515,10 @@ mod tests {
             decoded.recipient_roster_position(),
             FOUNDATION_PROFILE.participant_count - 1
         );
-        assert_eq!(decoded.ordered_limbs().len(), DATA_PRIMES.len());
+        assert_eq!(
+            decoded.ordered_limbs().len(),
+            layout.ordered_sharing_limb_indices.len()
+        );
         for (limb_ordinal, decoded_limb) in decoded.ordered_limbs().iter().enumerate() {
             assert_eq!(
                 decoded_limb.sharing_limb_index(),
@@ -533,7 +536,8 @@ mod tests {
     }
 
     #[test]
-    fn recipient_private_vss_payload_refuses_wrong_order_count_and_residues() {
+    fn recipient_private_vss_payload_refuses_missing_extra_reordered_substituted_and_noncanonical_limbs()
+     {
         let layout =
             SelectedRecipientVssPayloadLayout::derive().expect("selected recipient VSS layout");
         let mut test_limbs = test_limbs();
@@ -550,13 +554,44 @@ mod tests {
                 },
             )
             .collect::<Vec<_>>();
-        inputs[1].sharing_limb_index = inputs[0].sharing_limb_index;
+        let extra_limb_ordinal = inputs.len() - 1;
+        inputs.push(RecipientShareLimbInput {
+            sharing_limb_index: layout.ordered_sharing_limb_indices[extra_limb_ordinal] + 1,
+            canonical_share_coefficients: &test_limbs[extra_limb_ordinal].0,
+            recipient_share_material_seed: &test_limbs[extra_limb_ordinal].1,
+        });
         assert_eq!(
             canonical_recipient_private_vss_payload(0, &inputs)
                 .err()
-                .expect("wrong limb order refuses"),
+                .expect("extra limb refuses"),
+            RecipientPrivateVssPayloadError::WrongTypeOrLength
+        );
+        inputs.pop();
+
+        inputs.swap(0, 1);
+        assert_eq!(
+            canonical_recipient_private_vss_payload(0, &inputs)
+                .err()
+                .expect("reordered limbs refuse"),
             RecipientPrivateVssPayloadError::WrongValue
         );
+        inputs.swap(0, 1);
+
+        let first_expected_index = inputs[0].sharing_limb_index;
+        inputs[0].sharing_limb_index = layout
+            .ordered_sharing_limb_indices
+            .last()
+            .copied()
+            .expect("selected sharing basis")
+            + 1;
+        assert_eq!(
+            canonical_recipient_private_vss_payload(0, &inputs)
+                .err()
+                .expect("substituted limb refuses"),
+            RecipientPrivateVssPayloadError::WrongValue
+        );
+        inputs[0].sharing_limb_index = first_expected_index;
+
         inputs.pop();
         assert_eq!(
             canonical_recipient_private_vss_payload(0, &inputs)

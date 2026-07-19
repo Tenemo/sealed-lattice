@@ -5,6 +5,7 @@ import type {
     AcceptedSetupEvaluatorSourceCatalogSession,
     AcceptedSetupVerificationSession,
 } from '#packages/wasm/src/accepted-setup-assembly-runtime';
+import type { AcceptedSetupPackageBuilder } from '#packages/wasm/src/accepted-setup-package-builder-runtime';
 import type { ActionRandomnessSession } from '#packages/wasm/src/action-randomness-runtime';
 import {
     CanonicalStreamInternalError,
@@ -30,6 +31,7 @@ import type { TranscriptCoreKernel } from '#packages/wasm/src/transcript-core-br
 
 type FakeRuntimeState = {
     readonly acceptedSetupVerification: AcceptedSetupVerificationSession;
+    readonly acceptedSetupPackageBuilder: AcceptedSetupPackageBuilder;
     readonly actionRandomnessSession: ActionRandomnessSession;
     readonly allocations: Map<number, number>;
     readonly canonicalSuiteRecordBytes: Uint8Array<ArrayBuffer>;
@@ -45,6 +47,13 @@ type FakeRuntimeState = {
     readonly outputChunks: Map<number, Uint8Array<ArrayBuffer>>;
     packageStatementTakeCount: number;
     packageStatementTakeStatuses: number[];
+    packageContributions: Array<{
+        builderHandle: number;
+        generatedProofHandle: number;
+        statement: Uint8Array<ArrayBuffer>;
+    }>;
+    packageContributionStatuses: number[];
+    packageStatementBindCount: number;
     readonly readSourceOrdinals: number[];
     resumedGenerationPreparationCount: number;
     readonly runtimeTreeChunks: Uint8Array<ArrayBuffer>[];
@@ -57,14 +66,21 @@ type FakeRuntimeState = {
     readonly verifiedReservation: VerifiedStateReservation;
 };
 
-const fakeStates = vi.hoisted(
-    () => new WeakMap<object, FakeRuntimeState>(),
-);
+const fakeStates = vi.hoisted(() => new WeakMap<object, FakeRuntimeState>());
 const generatedCapabilityRelease = vi.hoisted(() => vi.fn());
 const verifiedCapabilityRelease = vi.hoisted(() => vi.fn());
 
 vi.mock('#packages/wasm/src/accepted-setup-assembly-runtime', () => ({
-    readAcceptedSetupPrepackageEvaluatorComponentExactRange: async (input: {
+    bindAcceptedSetupEvaluatorGeneratedProofsToPackage: (input: {
+        kernel: TranscriptCoreKernel;
+    }): void => {
+        const state = fakeStates.get(input.kernel);
+        if (state === undefined) {
+            throw new Error('Unknown fake evaluator kernel.');
+        }
+        state.packageStatementBindCount += 1;
+    },
+    readAcceptedSetupPrepackageEvaluatorComponentExactRange: (input: {
         exactByteLength: number;
         kernel: TranscriptCoreKernel;
         materialRoot: Uint8Array;
@@ -78,7 +94,9 @@ vi.mock('#packages/wasm/src/accepted-setup-assembly-runtime', () => ({
         const byteLength = state.wrongSourceLength
             ? input.exactByteLength - 1
             : input.exactByteLength;
-        return new Uint8Array(byteLength).fill(sourceOrdinal + 1);
+        return Promise.resolve(
+            new Uint8Array(byteLength).fill(sourceOrdinal + 1),
+        );
     },
     requireAcceptedSetupEvaluatorSourceCatalogKernelOwner: (
         catalog: AcceptedSetupEvaluatorSourceCatalogSession,
@@ -99,12 +117,23 @@ vi.mock('#packages/wasm/src/accepted-setup-assembly-runtime', () => ({
         kernel: TranscriptCoreKernel,
     ) => {
         const state = fakeStates.get(kernel);
-        if (
-            state?.acceptedSetupVerification !== acceptedSetupVerification
-        ) {
+        if (state?.acceptedSetupVerification !== acceptedSetupVerification) {
             throw new CanonicalStreamRefusalError('wrongContext');
         }
         return Object.freeze({ handle: 31, kernel });
+    },
+}));
+
+vi.mock('#packages/wasm/src/accepted-setup-package-builder-runtime', () => ({
+    requireAcceptedSetupPackageBuilderKernelOwner: (
+        builder: AcceptedSetupPackageBuilder,
+        kernel: TranscriptCoreKernel,
+    ) => {
+        const state = fakeStates.get(kernel);
+        if (state?.acceptedSetupPackageBuilder !== builder) {
+            throw new CanonicalStreamRefusalError('wrongContext');
+        }
+        return Object.freeze({ handle: 71, kernel });
     },
 }));
 
@@ -147,7 +176,7 @@ vi.mock('#packages/wasm/src/common-proof-worker-runtime/runtime', () => ({
         _context: TranscriptCoreKernelCommandRuntime,
         apply: (handle: number) => Readonly<{
             consumed: boolean;
-            result: number;
+            result: unknown;
         }>,
     ) => apply(91).result,
     applyClosedWorkerVerifiedCommonProofCapability: (
@@ -158,8 +187,7 @@ vi.mock('#packages/wasm/src/common-proof-worker-runtime/runtime', () => ({
             result: number;
         }>,
     ) => apply(92).result,
-    openClosedWorkerCommonProofGenerationFamilyAdapter: () =>
-        Object.freeze({}),
+    openClosedWorkerCommonProofGenerationFamilyAdapter: () => Object.freeze({}),
     openClosedWorkerCommonProofVerificationFamilyAdapter: () =>
         Object.freeze({}),
     releaseClosedWorkerCommonProofGenerationFamilyAdapter: vi.fn(),
@@ -170,19 +198,16 @@ vi.mock('#packages/wasm/src/common-proof-worker-runtime/runtime', () => ({
             _externalMemory: CommonProofExternalMemoryTransactionExecutor,
             outputStore: CommonProofCanonicalOutputStore,
         ) => {
-            await outputStore.commitChunk(
-                0,
-                Uint8Array.of(0x51, 0x52),
-            );
+            await outputStore.commitChunk(0, Uint8Array.of(0x51, 0x52));
             return Object.freeze({ release: generatedCapabilityRelease });
         },
-    runClosedWorkerCommonProofVerificationFamilyAdapter: async () =>
-        Object.freeze({ release: verifiedCapabilityRelease }),
+    runClosedWorkerCommonProofVerificationFamilyAdapter: () =>
+        Promise.resolve(Object.freeze({ release: verifiedCapabilityRelease })),
 }));
 
 vi.mock('#packages/wasm/src/generated-common-proof-output-runtime', () => ({
-    deriveGeneratedCommonProofDescriptor: async () =>
-        Uint8Array.of(0xd1, 0xd2),
+    deriveGeneratedCommonProofDescriptor: () =>
+        Promise.resolve(Uint8Array.of(0xd1, 0xd2)),
     trackCanonicalCommonProofOutputChunks: (
         outputStore: CommonProofCanonicalOutputStore,
     ) => {
@@ -248,10 +273,7 @@ const writeStoreSourceRequest = (
 const createFakeRuntime = (): FakeRuntimeState => {
     const memory = new WebAssembly.Memory({ initial: 2 });
     const allocations = new Map<number, number>();
-    const selectedSuiteRecords = new Map<
-        number,
-        Uint8Array<ArrayBuffer>
-    >();
+    const selectedSuiteRecords = new Map<number, Uint8Array<ArrayBuffer>>();
     let nextPointer = 1024;
     let nextSelectedSuiteHandle = 51;
     const allocate = (byteLength: number): number => {
@@ -270,8 +292,12 @@ const createFakeRuntime = (): FakeRuntimeState => {
     };
     const kernel = Object.freeze(Object.create(null)) as TranscriptCoreKernel;
     const state: FakeRuntimeState = {
-        acceptedSetupVerification:
-            Object.freeze({}) as AcceptedSetupVerificationSession,
+        acceptedSetupVerification: Object.freeze(
+            {},
+        ) as AcceptedSetupVerificationSession,
+        acceptedSetupPackageBuilder: Object.freeze(
+            {},
+        ) as unknown as AcceptedSetupPackageBuilder,
         actionRandomnessSession: Object.freeze({}) as ActionRandomnessSession,
         allocations,
         canonicalSuiteRecordBytes: Uint8Array.of(0xa1),
@@ -279,8 +305,9 @@ const createFakeRuntime = (): FakeRuntimeState => {
         commitGeneratedProofCalls: [],
         commitVerifiedStoreCalls: [],
         commitVerifiedStoreStatuses: [],
-        evaluatorSourceCatalog:
-            Object.freeze({}) as AcceptedSetupEvaluatorSourceCatalogSession,
+        evaluatorSourceCatalog: Object.freeze(
+            {},
+        ) as AcceptedSetupEvaluatorSourceCatalogSession,
         finishVerificationCalls: [],
         freshGenerationPreparationCount: 0,
         kernel,
@@ -288,6 +315,9 @@ const createFakeRuntime = (): FakeRuntimeState => {
         outputChunks: new Map(),
         packageStatementTakeCount: 0,
         packageStatementTakeStatuses: [],
+        packageContributions: [],
+        packageContributionStatuses: [],
+        packageStatementBindCount: 0,
         readSourceOrdinals: [],
         resumedGenerationPreparationCount: 0,
         runtimeTreeChunks: [],
@@ -316,9 +346,8 @@ const createFakeRuntime = (): FakeRuntimeState => {
                 outputPointer: number,
                 outputByteLength: number,
             ) => {
-                const suiteRecord = selectedSuiteRecords.get(
-                    selectedSuiteHandle,
-                );
+                const suiteRecord =
+                    selectedSuiteRecords.get(selectedSuiteHandle);
                 if (suiteRecord === undefined) {
                     return refusalReasonCodes.consumedState;
                 }
@@ -362,9 +391,8 @@ const createFakeRuntime = (): FakeRuntimeState => {
                 selectedSuiteHandle: number,
                 statusPointer: number,
             ) => {
-                const suiteRecord = selectedSuiteRecords.get(
-                    selectedSuiteHandle,
-                );
+                const suiteRecord =
+                    selectedSuiteRecords.get(selectedSuiteHandle);
                 writeStatus(
                     memory,
                     statusPointer,
@@ -374,25 +402,24 @@ const createFakeRuntime = (): FakeRuntimeState => {
                 );
                 return suiteRecord?.byteLength ?? 0;
             },
-            sealed_lattice_evaluator_aggregate_absorb_runtime_component_chunk:
-                (
-                    _sessionHandle: number,
-                    _logicalComponentOrdinal: number,
-                    _chunkIndex: number,
-                    chunkPointer: number,
-                    chunkByteLength: number,
-                ) => {
-                    state.runtimeTreeChunks.push(
-                        Uint8Array.from(
-                            new Uint8Array(
-                                memory.buffer,
-                                chunkPointer,
-                                chunkByteLength,
-                            ),
+            sealed_lattice_evaluator_aggregate_absorb_runtime_component_chunk: (
+                _sessionHandle: number,
+                _logicalComponentOrdinal: number,
+                _chunkIndex: number,
+                chunkPointer: number,
+                chunkByteLength: number,
+            ) => {
+                state.runtimeTreeChunks.push(
+                    Uint8Array.from(
+                        new Uint8Array(
+                            memory.buffer,
+                            chunkPointer,
+                            chunkByteLength,
                         ),
-                    );
-                    return 0;
-                },
+                    ),
+                );
+                return 0;
+            },
             sealed_lattice_evaluator_aggregate_absorb_store_material_chunk: (
                 _sessionHandle: number,
                 _chunkIndex: number,
@@ -420,6 +447,26 @@ const createFakeRuntime = (): FakeRuntimeState => {
                     writeStatus(memory, statusPointer, 0);
                     return 3n;
                 },
+            sealed_lattice_evaluator_aggregate_contribute_package: (
+                _sessionHandle: number,
+                packageBuilderHandle: number,
+                generatedProofHandle: number,
+                statementPointer: number,
+                statementByteLength: number,
+            ) => {
+                state.packageContributions.push({
+                    builderHandle: packageBuilderHandle,
+                    generatedProofHandle,
+                    statement: Uint8Array.from(
+                        new Uint8Array(
+                            memory.buffer,
+                            statementPointer,
+                            statementByteLength,
+                        ),
+                    ),
+                });
+                return state.packageContributionStatuses.shift() ?? 0;
+            },
             sealed_lattice_evaluator_aggregate_begin_runtime_component_tree:
                 () => 0,
             sealed_lattice_evaluator_aggregate_begin_store_construction: (
@@ -487,11 +534,7 @@ const createFakeRuntime = (): FakeRuntimeState => {
                 _sessionHandle: number,
                 outputPointer: number,
             ) => {
-                const bytes = new Uint8Array(
-                    memory.buffer,
-                    outputPointer,
-                    72,
-                );
+                const bytes = new Uint8Array(memory.buffer, outputPointer, 72);
                 new DataView(memory.buffer, outputPointer, 72).setBigUint64(
                     0,
                     4n,
@@ -516,9 +559,7 @@ const createFakeRuntime = (): FakeRuntimeState => {
                 _sessionHandle: number,
                 verifiedCommonProofHandle: number,
             ) => {
-                state.finishVerificationCalls.push(
-                    verifiedCommonProofHandle,
-                );
+                state.finishVerificationCalls.push(verifiedCommonProofHandle);
                 return 0;
             },
             sealed_lattice_evaluator_aggregate_prepare_generation: (
@@ -608,9 +649,7 @@ const createFakeRuntime = (): FakeRuntimeState => {
                             sourceByteLength,
                         ),
                     ),
-                ).toEqual(
-                    new Array(4).fill(state.sourceRequestOrdinal + 1),
-                );
+                ).toEqual(new Array(4).fill(state.sourceRequestOrdinal + 1));
                 state.sourceRangeSuppliedCount += 1;
                 state.sourceRequestOrdinal += 1;
                 return 0;
@@ -632,13 +671,14 @@ const createStore = (
     chunks: Map<number, Uint8Array<ArrayBuffer>>,
 ): CommonProofCanonicalOutputStore =>
     Object.freeze({
-        commitChunk: async (
+        commitChunk: (
             chunkIndex: number,
             chunkBytes: Uint8Array<ArrayBuffer>,
         ): Promise<void> => {
             chunks.set(chunkIndex, Uint8Array.from(chunkBytes));
+            return Promise.resolve();
         },
-        readChunk: async (
+        readChunk: (
             chunkIndex: number,
             exactByteLength: number,
         ): Promise<Uint8Array<ArrayBuffer>> => {
@@ -646,7 +686,7 @@ const createStore = (
             if (chunk?.byteLength !== exactByteLength) {
                 throw new Error('The fake store has no exact chunk.');
             }
-            return Uint8Array.from(chunk);
+            return Promise.resolve(Uint8Array.from(chunk));
         },
     });
 
@@ -661,7 +701,7 @@ const constructSession = async (
         return await constructEvaluatorAggregateInClosedWorker({
             evaluatorSourceCatalog: state.evaluatorSourceCatalog,
             kernel: state.kernel,
-            options: { yieldControl: async () => undefined },
+            options: { yieldControl: () => Promise.resolve() },
             selectedSuiteRecordSource,
             store: createStore(state.outputChunks),
         });
@@ -673,25 +713,27 @@ const constructSession = async (
     }
 };
 
-const emptyExternalMemory = Object.freeze(
-    async () => Object.freeze({ readResults: [] }),
+const emptyExternalMemory = Object.freeze(() =>
+    Promise.resolve(Object.freeze({ readResults: [] })),
 ) as unknown as CommonProofExternalMemoryTransactionExecutor;
 
-const unusedProofInputStore: AuthenticatedCommonProofInputStore =
-    Object.freeze({
+const unusedProofInputStore: AuthenticatedCommonProofInputStore = Object.freeze(
+    {
         declaredByteLength: 2,
-        readCommittedChunk: async () => Uint8Array.of(0x51, 0x52),
-    });
+        readCommittedChunk: () => Promise.resolve(Uint8Array.of(0x51, 0x52)),
+    },
+);
 
 const unusedResumeOptions = Object.freeze({
     resume: Object.freeze({
         checkpointCustody: Object.freeze({
-            publishAuthenticatedCheckpoint: async () => undefined,
-            restoreAuthenticatedCheckpointState: async () =>
-                new Uint8Array(),
+            publishAuthenticatedCheckpoint: () => Promise.resolve(),
+            restoreAuthenticatedCheckpointState: () =>
+                Promise.resolve(new Uint8Array()),
         }),
         prefixReplayExternalMemory: Object.freeze({
-            executeDeterministicPrefixReplayTransaction: async () => [],
+            executeDeterministicPrefixReplayTransaction: () =>
+                Promise.resolve([]),
         }),
     }),
 });
@@ -715,16 +757,13 @@ describe('Evaluator aggregate Rust/WASM lifecycle', () => {
             totalByteLength: 4n,
         });
 
-        const proofOutputChunks = new Map<
-            number,
-            Uint8Array<ArrayBuffer>
-        >();
+        const proofOutputChunks = new Map<number, Uint8Array<ArrayBuffer>>();
         const descriptor = await session.generate({
             actionRandomnessSession: state.actionRandomnessSession,
             checkpointLineageIdentifier: new Uint8Array(32).fill(0x31),
             externalMemory: emptyExternalMemory,
             generationMode: 'fresh',
-            options: { yieldControl: async () => undefined },
+            options: { yieldControl: () => Promise.resolve() },
             proofOutputStore: createStore(proofOutputChunks),
             verifiedReservation: state.verifiedReservation,
         });
@@ -732,7 +771,8 @@ describe('Evaluator aggregate Rust/WASM lifecycle', () => {
         expect(state.freshGenerationPreparationCount).toBe(1);
         expect(state.commitGeneratedProofCalls).toEqual([91]);
 
-        session.takePackageStatement();
+        session.contributeToPackage(state.acceptedSetupPackageBuilder);
+        session.bindPackageStatement(state.acceptedSetupVerification);
         await expect(
             session.verify({ proofInputStore: unusedProofInputStore }),
         ).rejects.toThrow(CanonicalStreamRefusalError);
@@ -741,6 +781,14 @@ describe('Evaluator aggregate Rust/WASM lifecycle', () => {
         session.commitVerifiedStore(state.acceptedSetupVerification);
 
         expect(state.packageStatementTakeCount).toBe(1);
+        expect(state.packageStatementBindCount).toBe(1);
+        expect(state.packageContributions).toEqual([
+            {
+                builderHandle: 71,
+                generatedProofHandle: 91,
+                statement: Uint8Array.of(0xb1, 0xb2, 0xb3),
+            },
+        ]);
         expect(state.finishVerificationCalls).toEqual([92]);
         expect(state.commitVerifiedStoreCalls).toEqual([31]);
         expect(state.sessionDiscardHandles).toEqual([7]);
@@ -752,9 +800,9 @@ describe('Evaluator aggregate Rust/WASM lifecycle', () => {
         const state = createFakeRuntime();
         const session = await constructSession(state);
 
-        expect(() => session.takePackageStatement()).toThrow(
-            CanonicalStreamRefusalError,
-        );
+        expect(() =>
+            session.contributeToPackage(state.acceptedSetupPackageBuilder),
+        ).toThrow(CanonicalStreamRefusalError);
         await expect(
             session.generate({
                 actionRandomnessSession: state.actionRandomnessSession,
@@ -775,6 +823,7 @@ describe('Evaluator aggregate Rust/WASM lifecycle', () => {
             proofOutputStore: createStore(new Map()),
             verifiedReservation: state.verifiedReservation,
         });
+        session.contributeToPackage(state.acceptedSetupPackageBuilder);
         expect(state.freshGenerationPreparationCount).toBe(0);
         expect(state.resumedGenerationPreparationCount).toBe(1);
         await expect(
@@ -809,10 +858,22 @@ describe('Evaluator aggregate Rust/WASM lifecycle', () => {
             refusalReasonCodes.missingPrerequisite,
             0,
         );
-        expect(() => session.takePackageStatement()).toThrow(
-            CanonicalStreamRefusalError,
+        state.packageContributionStatuses.push(
+            refusalReasonCodes.missingPrerequisite,
+            0,
         );
-        expect(() => session.takePackageStatement()).not.toThrow();
+        expect(() =>
+            session.contributeToPackage(state.acceptedSetupPackageBuilder),
+        ).toThrow(CanonicalStreamRefusalError);
+        expect(() =>
+            session.contributeToPackage(state.acceptedSetupPackageBuilder),
+        ).not.toThrow();
+        expect(() =>
+            session.bindPackageStatement(state.acceptedSetupVerification),
+        ).toThrow(CanonicalStreamRefusalError);
+        expect(() =>
+            session.bindPackageStatement(state.acceptedSetupVerification),
+        ).not.toThrow();
         state.catalogPhase = 'complete';
         await session.verify({ proofInputStore: unusedProofInputStore });
 
@@ -829,6 +890,8 @@ describe('Evaluator aggregate Rust/WASM lifecycle', () => {
         ).not.toThrow();
 
         expect(state.packageStatementTakeCount).toBe(2);
+        expect(state.packageContributions).toHaveLength(2);
+        expect(state.packageStatementBindCount).toBe(1);
         expect(state.commitVerifiedStoreCalls).toEqual([31, 31]);
         expect(state.sessionDiscardHandles).toEqual([7]);
         expect(state.allocations.size).toBe(0);

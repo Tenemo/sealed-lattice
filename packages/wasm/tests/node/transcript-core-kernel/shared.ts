@@ -66,38 +66,6 @@ const createMockKernelExports = ({
         instance: {
             exports: {
                 memory,
-                sealed_lattice_accepted_setup_canonical_stream_begin: vi.fn(
-                    () => 1,
-                ),
-                sealed_lattice_accepted_setup_command_with_length: vi.fn(
-                    (
-                        pointer: number,
-                        length: number,
-                        _sessionHandle: number,
-                        outputLengthPointer: number,
-                    ) => {
-                        const encodedCommand = new Uint8Array(
-                            memory.buffer,
-                            pointer,
-                            length,
-                        );
-                        onCommand?.(
-                            JSON.parse(textDecoder.decode(encodedCommand)),
-                        );
-                        new Uint8Array(memory.buffer).set(
-                            encodedCommandResponse,
-                            commandPointer,
-                        );
-                        new DataView(memory.buffer).setUint32(
-                            outputLengthPointer,
-                            encodedCommandResponse.length,
-                            true,
-                        );
-                        return commandPointer;
-                    },
-                ),
-                sealed_lattice_accepted_setup_session_begin: vi.fn(() => 1),
-                sealed_lattice_accepted_setup_session_cancel: vi.fn(() => 0),
                 sealed_lattice_allocate: vi.fn(
                     () => allocationPointers.shift() ?? allocationPointer,
                 ),
@@ -140,22 +108,6 @@ const createMockKernelExports = ({
         .mockResolvedValue(instantiatedSource);
     vi.spyOn(WebAssembly.Module, 'exports').mockReturnValue([
         { kind: 'memory', name: 'memory' },
-        {
-            kind: 'function',
-            name: 'sealed_lattice_accepted_setup_canonical_stream_begin',
-        },
-        {
-            kind: 'function',
-            name: 'sealed_lattice_accepted_setup_command_with_length',
-        },
-        {
-            kind: 'function',
-            name: 'sealed_lattice_accepted_setup_session_begin',
-        },
-        {
-            kind: 'function',
-            name: 'sealed_lattice_accepted_setup_session_cancel',
-        },
         { kind: 'function', name: 'sealed_lattice_allocate' },
         { kind: 'function', name: 'sealed_lattice_deallocate' },
         {

@@ -12,4 +12,10 @@ export const actionRandomnessCommandIdentifiers = Object.freeze({
     validateSetupMailboxSourceKeys: 11,
     setupMailboxSignatureHedge: 12,
     setupObjectSignatureHedge: 16,
+    prepareSetupIntentCarrier: 17,
+    preparePublicRandomnessCommitmentCarrier: 18,
+    preparePublicRandomnessRevealCarrier: 19,
+    finishSetupTranscriptCarrier: 20,
+    cancelSetupTranscriptCarrier: 21,
+    prepareDealerPublicRecordCarrier: 22,
 } as const);

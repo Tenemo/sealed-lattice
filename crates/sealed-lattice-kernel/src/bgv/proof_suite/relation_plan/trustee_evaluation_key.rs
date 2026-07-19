@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 use crate::bgv::{
     evaluator::candidate_evidence::EvaluatorCandidateInput,
@@ -7,10 +7,11 @@ use crate::bgv::{
 };
 
 use super::key_relation::{
-    BoundPolynomialRootUse, KeyRelationGeometry, KeyRelationPlanBuilder, KeyVerifierSourceKey,
-    QuarterBackedSplitIntegerVector, RecenteredVerifierVectorWitness, ReversibleShiftedSmallVector,
-    ShiftedSmallVector, SplitIntegerVector, TRUSTEE_QUOTIENT_MAXIMUM_ABSOLUTE_VALUE,
-    TrusteeAnchorOpeningWitness, TrusteeKeyRelationGeometryInput, TrusteeRadixThreeQuotientWitness,
+    BoundPolynomialRootUse, ExactRadixDigitColumnCatalog, KeyRelationGeometry,
+    KeyRelationPlanBuilder, KeyVerifierSourceKey, RecenteredVerifierVectorWitness,
+    ReversibleShiftedSmallVector, ShiftedSmallVector, SplitIntegerVector,
+    TRUSTEE_QUOTIENT_MAXIMUM_ABSOLUTE_VALUE, TrusteeAnchorOpeningWitness,
+    TrusteeKeyRelationGeometryInput, TrusteeRadixThreeQuotientWitness,
     galois_common_reference_source, negacyclic_automorphism_mapping_source,
     nested_statement_root_source, relinearization_common_reference_source, statement_root_source,
     trustee_bdlop_matrix_source,
@@ -169,29 +170,29 @@ pub(crate) struct CompiledRelinearizationRoundTwoRelation {
 pub(crate) struct RelinearizationRoundOneSourceLayout {
     pub(super) common_secret: ReversibleShiftedSmallVector,
     pub(super) ephemeral_secret: ReversibleShiftedSmallVector,
-    pub(super) round_one_left_rows: Box<[QuarterBackedSplitIntegerVector]>,
-    pub(super) round_one_right_rows: Box<[QuarterBackedSplitIntegerVector]>,
+    pub(super) round_one_left_rows: Box<[SplitIntegerVector]>,
+    pub(super) round_one_right_rows: Box<[SplitIntegerVector]>,
     pub(super) errors_by_block: Box<[RelinearizationRoundOneErrorSourceLayout]>,
     pub(super) quotients_by_row: Box<[RelinearizationRoundOneQuotientSourceLayout]>,
     pub(super) ordered_anchors: Box<[GaloisKeyShareAnchorSourceLayout]>,
-    pub(super) exact_radix_digits_by_column: BTreeMap<u32, Box<[u32]>>,
+    pub(super) exact_radix_digits_by_column: ExactRadixDigitColumnCatalog,
 }
 
 pub(crate) struct RelinearizationRoundTwoSourceLayout {
     pub(super) common_secret: ReversibleShiftedSmallVector,
     pub(super) ephemeral_secret: ReversibleShiftedSmallVector,
-    pub(super) round_one_left_rows: Box<[QuarterBackedSplitIntegerVector]>,
-    pub(super) round_one_right_rows: Box<[QuarterBackedSplitIntegerVector]>,
-    pub(super) aggregate_round_one_left_rows: Box<[QuarterBackedSplitIntegerVector]>,
-    pub(super) aggregate_round_one_right_rows: Box<[QuarterBackedSplitIntegerVector]>,
-    pub(super) round_two_rows: Box<[QuarterBackedSplitIntegerVector]>,
+    pub(super) round_one_left_rows: Box<[SplitIntegerVector]>,
+    pub(super) round_one_right_rows: Box<[SplitIntegerVector]>,
+    pub(super) aggregate_round_one_left_rows: Box<[SplitIntegerVector]>,
+    pub(super) aggregate_round_one_right_rows: Box<[SplitIntegerVector]>,
+    pub(super) round_two_rows: Box<[SplitIntegerVector]>,
     pub(super) round_one_errors_by_block: Box<[RelinearizationRoundOneErrorSourceLayout]>,
     pub(super) round_one_quotients_by_row: Box<[RelinearizationRoundOneQuotientSourceLayout]>,
     pub(super) aggregate_rows: Box<[RelinearizationRoundTwoAggregateRowSourceLayout]>,
     pub(super) round_two_errors_by_block: Box<[ShiftedSmallVector]>,
     pub(super) round_two_quotients_by_row: Box<[TrusteeRadixThreeQuotientWitness]>,
     pub(super) ordered_anchors: Box<[GaloisKeyShareAnchorSourceLayout]>,
-    pub(super) exact_radix_digits_by_column: BTreeMap<u32, Box<[u32]>>,
+    pub(super) exact_radix_digits_by_column: ExactRadixDigitColumnCatalog,
 }
 
 pub(crate) struct RelinearizationRoundOneErrorSourceLayout {
@@ -214,7 +215,7 @@ pub(crate) struct GaloisKeyShareSourceLayout {
     pub(super) common_secret: ReversibleShiftedSmallVector,
     pub(super) ordered_entries: Box<[GaloisKeyShareEntrySourceLayout]>,
     pub(super) ordered_anchors: Box<[GaloisKeyShareAnchorSourceLayout]>,
-    pub(super) exact_radix_digits_by_column: BTreeMap<u32, Box<[u32]>>,
+    pub(super) exact_radix_digits_by_column: ExactRadixDigitColumnCatalog,
 }
 
 pub(crate) struct GaloisKeyShareEntrySourceLayout {
@@ -222,7 +223,7 @@ pub(crate) struct GaloisKeyShareEntrySourceLayout {
     pub(super) galois_element: u64,
     pub(super) selected_level: usize,
     pub(super) automorphed_secret: ShiftedSmallVector,
-    pub(super) bound_rows: Box<[QuarterBackedSplitIntegerVector]>,
+    pub(super) bound_rows: Box<[SplitIntegerVector]>,
     pub(super) errors_by_block: Box<[ShiftedSmallVector]>,
     pub(super) quotients_by_row: Box<[TrusteeRadixThreeQuotientWitness]>,
 }
@@ -624,16 +625,12 @@ fn add_statement_root_rows(
     geometry: &TrusteeEvaluationKeyRelationGeometry,
     source_key: &KeyVerifierSourceKey,
     root_use: BoundPolynomialRootUse,
-) -> Result<Vec<QuarterBackedSplitIntegerVector>, RelationPlanError> {
+) -> Result<Vec<SplitIntegerVector>, RelationPlanError> {
     builder.add_setup_polynomial_rows_root(
         source_key,
         &geometry.ordered_root_row_modulus_references()?,
         root_use,
     )
-}
-
-fn half_projection_rows(rows: &[QuarterBackedSplitIntegerVector]) -> Vec<SplitIntegerVector> {
-    rows.iter().map(|row| row.half_projections).collect()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1017,14 +1014,12 @@ pub(crate) fn compile_relinearization_round_one_relation_with_source_layout(
         &statement_root_key(ROUND_ONE_RIGHT_ROOT_FIELD_ORDINAL),
         BoundPolynomialRootUse::Output,
     )?;
-    let round_one_left_rows = half_projection_rows(&round_one_left_source_rows);
-    let round_one_right_rows = half_projection_rows(&round_one_right_source_rows);
     let (errors_by_block, quotients_by_row) = add_round_one_relations(
         &mut builder,
         &input.geometry,
         input.schedule_position,
-        &round_one_left_rows,
-        &round_one_right_rows,
+        &round_one_left_source_rows,
+        &round_one_right_source_rows,
         &secret,
         &ephemeral_secret,
         check_context,
@@ -1120,18 +1115,12 @@ pub(crate) fn compile_relinearization_round_two_relation_with_source_layout(
         &statement_root_key(ROUND_TWO_ROOT_FIELD_ORDINAL),
         BoundPolynomialRootUse::Output,
     )?;
-    let round_one_left_rows = half_projection_rows(&round_one_left_source_rows);
-    let round_one_right_rows = half_projection_rows(&round_one_right_source_rows);
-    let aggregate_round_one_left_rows = half_projection_rows(&aggregate_round_one_left_source_rows);
-    let aggregate_round_one_right_rows =
-        half_projection_rows(&aggregate_round_one_right_source_rows);
-    let round_two_rows = half_projection_rows(&round_two_source_rows);
     let (round_one_errors_by_block, round_one_quotients_by_row) = add_round_one_relations(
         &mut builder,
         &input.geometry,
         input.schedule_position,
-        &round_one_left_rows,
-        &round_one_right_rows,
+        &round_one_left_source_rows,
+        &round_one_right_source_rows,
         &secret,
         &ephemeral_secret,
         check_context,
@@ -1140,9 +1129,9 @@ pub(crate) fn compile_relinearization_round_two_relation_with_source_layout(
         add_round_two_relations(
             &mut builder,
             &input.geometry,
-            &round_two_rows,
-            &aggregate_round_one_left_rows,
-            &aggregate_round_one_right_rows,
+            &round_two_source_rows,
+            &aggregate_round_one_left_source_rows,
+            &aggregate_round_one_right_source_rows,
             &secret,
             &ephemeral_secret,
             check_context,
@@ -1302,12 +1291,11 @@ fn compile_galois_key_share_relation_batch(
             ),
             BoundPolynomialRootUse::Output,
         )?;
-        let galois_key_share_rows = half_projection_rows(&galois_key_share_source_rows);
         let (errors_by_block, quotients_by_row) = add_galois_relations(
             &mut builder,
             &input.geometry,
             entry.schedule_position,
-            &galois_key_share_rows,
+            &galois_key_share_source_rows,
             &secret,
             &automorphed_secret,
             check_context,
@@ -1381,8 +1369,9 @@ mod tests {
         negacyclic_automorphism_semantics_match,
     };
     use super::*;
-    use crate::bgv::parameters::{
-        DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE, SPECIAL_PRIMES,
+    use crate::bgv::{
+        evaluator::top_k::DIRECT_COMPARISON_OUTPUT_LEVEL,
+        parameters::{DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE, SPECIAL_PRIMES},
     };
     fn check_context() -> RelationPlanCheckContext {
         let mut context = key_relation_check_context(true);
@@ -1424,10 +1413,29 @@ mod tests {
         }
     }
 
+    fn selected_uniform_galois_catalog_level(
+        evaluator_candidate: &EvaluatorCandidateInput,
+    ) -> usize {
+        let catalog_level = evaluator_candidate
+            .galois_key_schedule
+            .first()
+            .map(|(_, catalog_level)| *catalog_level)
+            .expect("the selected Galois catalog is nonempty");
+        assert!(
+            evaluator_candidate
+                .galois_key_schedule
+                .iter()
+                .all(|(_, candidate_level)| *candidate_level == catalog_level),
+            "the selected Galois batch has one exact catalog level"
+        );
+        catalog_level
+    }
+
     fn galois_input() -> GaloisKeyShareRelationPlanInput {
         let evaluator_candidate = EvaluatorCandidateInput::implemented()
             .expect("selected evaluator candidate is canonical");
-        let selected_level = evaluator_candidate.evaluator_working_level;
+        let selected_level = selected_uniform_galois_catalog_level(&evaluator_candidate);
+        assert_eq!(selected_level, DIRECT_COMPARISON_OUTPUT_LEVEL);
         let relation_basis = trustee_evaluation_key_relation_basis_for_catalog_level(
             &evaluator_candidate,
             selected_level,
@@ -1483,14 +1491,9 @@ mod tests {
         else {
             panic!("the selected suite has exactly one relinearization catalog position");
         };
-        assert_eq!(evaluator_candidate.galois_key_schedule.len(), 4);
-        assert!(
-            evaluator_candidate
-                .galois_key_schedule
-                .iter()
-                .all(|(_, catalog_level)| *catalog_level
-                    == evaluator_candidate.evaluator_working_level)
-        );
+        assert_eq!(evaluator_candidate.galois_key_schedule.len(), 3);
+        let galois_catalog_level = selected_uniform_galois_catalog_level(&evaluator_candidate);
+        assert_eq!(galois_catalog_level, DIRECT_COMPARISON_OUTPUT_LEVEL);
         assert_eq!(
             evaluator_candidate
                 .galois_key_schedule
@@ -1509,12 +1512,12 @@ mod tests {
         .expect("selected relinearization relation basis");
         let galois_basis = trustee_evaluation_key_relation_basis_for_catalog_level(
             &evaluator_candidate,
-            evaluator_candidate.evaluator_working_level,
+            galois_catalog_level,
         )
         .expect("selected Galois relation basis");
         for (catalog_level, basis) in [
             (*relinearization_catalog_level, relinearization_basis),
-            (evaluator_candidate.evaluator_working_level, galois_basis),
+            (galois_catalog_level, galois_basis),
         ] {
             assert_eq!(basis.data_moduli.len(), catalog_level + 1);
             assert_eq!(
@@ -2169,14 +2172,14 @@ mod tests {
         );
 
         let mut reordered = input.clone();
-        reordered.ordered_entries.swap(4, 5);
+        reordered.ordered_entries.swap(1, 2);
         assert_eq!(
             compile_galois_key_share_relation_plan(&reordered, &context),
             Err(RelationPlanError::NonCanonicalOrder)
         );
 
         let mut wrong_level = input;
-        wrong_level.ordered_entries[7].selected_level = wrong_level.ordered_entries[7]
+        wrong_level.ordered_entries[2].selected_level = wrong_level.ordered_entries[2]
             .selected_level
             .checked_add(1)
             .expect("selected level increment fits usize");

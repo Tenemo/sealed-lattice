@@ -544,7 +544,7 @@ fn build_selected_evaluator_auxiliary_capabilities() -> Vec<VerifiedEvaluatorAux
             context: &context,
             evaluation_domain_size: 8,
             source_polynomial_degree_bound_exclusive: 4,
-            ordered_coefficient_columns: &coefficients,
+            ordered_trace_rows: &coefficients,
         })
         .expect("verifier-derived Galois public-polynomial tree");
         capabilities.push(
@@ -617,7 +617,7 @@ fn evaluator_public_polynomial_tree(
         context: &context,
         evaluation_domain_size: 8,
         source_polynomial_degree_bound_exclusive: 4,
-        ordered_coefficient_columns: &coefficients,
+        ordered_trace_rows: &coefficients,
     })
     .expect("verifier-recomputed evaluator public-polynomial tree")
 }

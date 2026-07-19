@@ -214,8 +214,8 @@ impl DescriptorAuthenticatedKeySwitchComponentPublicPolynomialStream {
             evaluation_domain_size,
             source_polynomial_degree_bound_exclusive: self
                 .topology
-                .quarter_polynomial_degree_bound_exclusive()?,
-            ordered_coefficient_columns: &self.ordered_trace_columns,
+                .half_polynomial_degree_bound_exclusive()?,
+            ordered_trace_rows: &self.ordered_trace_columns,
         })?;
         Ok(DescriptorAuthenticatedKeySwitchComponentTree {
             canonical_stream_summary,
@@ -365,10 +365,10 @@ impl KeySwitchComponentPublicPolynomialStream {
             evaluation_domain_size,
             source_polynomial_degree_bound_exclusive: self
                 .topology
-                .quarter_polynomial_degree_bound_exclusive()?,
-            ordered_coefficient_columns: &self.ordered_trace_columns,
+                .half_polynomial_degree_bound_exclusive()?,
+            ordered_trace_rows: &self.ordered_trace_columns,
         })?;
-        material.authenticate_setup_tree_trace_columns(tree.ordered_coefficient_columns())?;
+        material.authenticate_setup_tree_trace_columns(tree.ordered_trace_rows())?;
         Ok(RecomputedKeySwitchComponentTree { material, tree })
     }
 

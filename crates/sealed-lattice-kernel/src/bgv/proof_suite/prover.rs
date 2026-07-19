@@ -20,14 +20,15 @@ use crate::foundation::{
 use crate::hashing::StreamingHash512;
 
 use super::body::{
-    PROOF_AUTHENTICATION_FRONTIER_SCHEMA_IDENTIFIER, PROOF_QUERY_OPENING_RECORD_SCHEMA_IDENTIFIER,
-    canonical_leaf_byte_length, entry_leaf_count, maximum_minimal_frontier_node_count,
+    PROOF_AUTHENTICATION_FRONTIER_SCHEMA_IDENTIFIER, PROOF_AUTHENTICATION_FRONTIER_SCHEMA_VERSION,
+    PROOF_QUERY_OPENING_RECORD_SCHEMA_IDENTIFIER, canonical_leaf_byte_length, entry_leaf_count,
+    maximum_minimal_frontier_node_count,
 };
 use super::external_memory;
 use super::external_memory::{
     ProofExternalMemory, ProofExternalMemoryError, ProofExternalMemoryExecutor,
     ProofExternalMemoryExecutorError, ProofExternalMemoryObject, ProofExternalMemoryObjectPlan,
-    ProofExternalMemoryPlan, ProofExternalMemoryProtection,
+    ProofExternalMemoryPlan, ProofExternalMemoryProtection, ProofExternalMemoryUsage,
 };
 use super::external_polynomial::{
     ExternalPolynomialError, ExternalPolynomialValue, ExternalPolynomialVector,
@@ -155,19 +156,24 @@ pub(crate) use generation_storage::{
     common_proof_resident_memory_requirement,
 };
 pub(crate) use merkle_storage::{
+    CommonProofColumnMajorMerkleReplay, CommonProofColumnMajorMerkleReplayMemoryAccounting,
+    CommonProofColumnMajorMerkleReplayMode, CommonProofColumnMajorMerkleRootPass,
     CommonProofMerkleMaterializer, CommonProofMerkleMaterializerProgress,
     CommonProofMerkleStoragePlan, CommonProofOpeningPrefetchProgress, CommonProofOpeningPrefetcher,
-    CommonProofTreeStorageError, PrefetchedCommonProofOpeningArtifact, StoredCommonProofMerkleTree,
-    common_proof_merkle_storage_plan,
+    CommonProofTreeStorageError, PrefetchedCommonProofOpeningArtifact, StatementOwnedMerkleReplay,
+    StatementOwnedMerkleReplayMode, StoredCommonProofMerkleTree, common_proof_merkle_storage_plan,
 };
 pub(crate) use private_coins::{
     CheckpointableCommonProofPrivateCoinSource, CommonProofCheckpointCursorManifestError,
     CommonProofCheckpointCursorManifestRequirement, CommonProofPrivateCoinCoordinate,
-    CommonProofPrivateCoinCoordinateCapacity, CommonProofPrivateCoinSource,
-    CommonProofPrivateRandomnessAccountingError,
+    CommonProofPrivateCoinCoordinateCapacity, CommonProofPrivateCoinReplayCursor,
+    CommonProofPrivateCoinReplaySpan, CommonProofPrivateCoinReplaySpanStart,
+    CommonProofPrivateCoinSource, CommonProofPrivateRandomnessAccountingError,
     MAXIMUM_COMMON_PROOF_CHECKPOINT_CURSOR_MANIFEST_BYTE_LENGTH,
     MAXIMUM_COMMON_PROOF_CHECKPOINT_CURSOR_MANIFEST_RUN_COUNT,
     PrivateRandomnessCommonProofCoinError, PrivateRandomnessCommonProofCoinSource,
+    PublicOnlyCommonProofCoinError, PublicOnlyCommonProofCoinSource,
+    ReplayableCommonProofPrivateCoinCatalogSource, ReplayableCommonProofPrivateCoinSource,
     common_proof_checkpoint_cursor_manifest_requirement,
     common_proof_checkpoint_cursor_manifest_requirement_for_variant,
     common_proof_private_coin_coordinate_derivation_context_hash,
@@ -189,13 +195,14 @@ pub(crate) use relation_columns::{
     CommonProofPreChallengeSourcePoll, CommonProofPrivateCoinError, CommonProofSourcePolynomial,
     CommonProofSourcePolynomialProvider, CommonProofSourcePolynomialProviderPoll,
     CommonProofSourcePolynomialReplayIdentity, CommonProofSourcePolynomialRequest,
-    CommonProofSourcePolynomialRequestContext, ProvidedCommonProofSourcePolynomial,
-    apply_trace_mask, base_trace_rows, construct_post_challenge_relation_columns,
-    construct_pre_challenge_relation_columns, construct_reversed_relation_column,
-    evaluate_common_proof_tree_columns, evaluate_pre_challenge_common_proof_tree_columns,
-    integer_lift_derived_columns, maximum_auxiliary_synthesis_trace_vector_count,
-    proof_created_tree_roles_by_column, relation_column_replay_requirements,
-    sample_private_base_polynomial, sample_private_extension_polynomial,
+    CommonProofSourcePolynomialRequestContext, CommonProofSourceProviderMemoryAccounting,
+    ProvidedCommonProofSourcePolynomial, apply_trace_mask, base_trace_rows,
+    construct_post_challenge_relation_columns, construct_pre_challenge_relation_columns,
+    construct_reversed_relation_column, evaluate_common_proof_tree_columns,
+    evaluate_pre_challenge_common_proof_tree_columns, integer_lift_derived_columns,
+    maximum_auxiliary_synthesis_trace_vector_count, proof_created_tree_roles_by_column,
+    relation_column_replay_requirements, sample_private_base_polynomial,
+    sample_private_extension_polynomial,
 };
 
 use encoding::opened_leaf_indexes;

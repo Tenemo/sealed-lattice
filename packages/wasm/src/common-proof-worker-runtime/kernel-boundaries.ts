@@ -12,6 +12,7 @@ import type {
 import {
     CommonProofWorkerRuntimeError,
     maximumEncodedRequestByteLength,
+    maximumWorkerOperationCount,
     maximumWorkerPayloadByteLength,
     requestHeaderByteLength,
     type CommonProofDiscardExportName,
@@ -31,6 +32,10 @@ const generationPollCancelled = 6;
 const generationPollResumeComplete = 7;
 const generationPollAuthenticatedSourceReadReady = 8;
 const authenticatedSourceRequestByteLength = 160;
+const generationExternalMemoryAccountingByteLength = 19 * 8;
+const verificationReadbackAccountingByteLength = 4 * 8;
+const maximumExternalMemoryChunkByteLength = 49_152;
+const maximumExternalScratchByteLength = 1_073_741_824n;
 const firstGenerationStage = 1;
 const finalGenerationStage = 14;
 const verificationPollNeedsReadback = 1;
@@ -60,7 +65,7 @@ const checkpointCursorManifestStreamAttemptIdentifierOffset =
 
 const copyCheckpointPrivateRandomnessStreamAttemptIdentifier = (
     manifestBytes: Uint8Array<ArrayBuffer>,
-): Uint8Array<ArrayBuffer> | undefined => {
+): Uint8Array<ArrayBuffer> => {
     if (
         manifestBytes.byteLength < checkpointCursorManifestPrefixByteLength ||
         checkpointCursorManifestMagic.some(
@@ -83,30 +88,22 @@ const copyCheckpointPrivateRandomnessStreamAttemptIdentifier = (
     const logicalCursorCount = view.getUint32(15, true);
     if (
         version !== checkpointCursorManifestVersion ||
-        (hasIdentity !== 0 && hasIdentity !== 1) ||
-        (hasIdentity === 0 &&
-            (runCount !== 0 ||
-                logicalCursorCount !== 0 ||
-                manifestBytes.byteLength !==
-                    checkpointCursorManifestPrefixByteLength)) ||
-        (hasIdentity === 1 &&
-            (runCount === 0 ||
-                logicalCursorCount === 0 ||
-                manifestBytes.byteLength <
-                    checkpointCursorManifestPrefixByteLength +
-                        checkpointCursorManifestIdentityByteLength))
+        hasIdentity !== 1 ||
+        (runCount === 0) !== (logicalCursorCount === 0) ||
+        runCount > logicalCursorCount ||
+        manifestBytes.byteLength <
+            checkpointCursorManifestPrefixByteLength +
+                checkpointCursorManifestIdentityByteLength
     ) {
         throw new CommonProofWorkerRuntimeError(
             'KernelFailure',
             'The common-proof kernel exposed an inconsistent checkpoint cursor manifest.',
         );
     }
-    return hasIdentity === 0
-        ? undefined
-        : manifestBytes.slice(
-              checkpointCursorManifestStreamAttemptIdentifierOffset,
-              checkpointCursorManifestStreamAttemptIdentifierOffset + 32,
-          );
+    return manifestBytes.slice(
+        checkpointCursorManifestStreamAttemptIdentifierOffset,
+        checkpointCursorManifestStreamAttemptIdentifierOffset + 32,
+    );
 };
 export const maximumCommonProofOutputChunkCount = Math.ceil(
     maximumCommonProofByteLength / canonicalCommonProofChunkByteLength,
@@ -133,6 +130,36 @@ export type CommonProofAuthenticatedSourceRangeRequest = Readonly<{
     sourceStreamDigest: Uint8Array<ArrayBuffer>;
     sourceStreamTotalByteLength: bigint;
     storageByteOffset: bigint;
+}>;
+
+export type CommonProofExternalMemoryUsageAccounting = Readonly<{
+    deletedObjectCount: bigint;
+    peakStoredByteLength: bigint;
+    totalReadByteLength: bigint;
+    totalWrittenByteLength: bigint;
+    transactionCount: bigint;
+}>;
+
+export type CommonProofGenerationExternalMemoryAccounting = Readonly<{
+    actualUsage: CommonProofExternalMemoryUsageAccounting;
+    compiledRequirement: Readonly<{
+        maximumChunkByteLength: number;
+        maximumTransactionPayloadByteLength: bigint;
+        objectCount: number;
+        peakStoredByteLength: bigint;
+        stepCount: number;
+        totalReadByteLength: bigint;
+        totalWrittenByteLength: bigint;
+        transactionCount: bigint;
+    }>;
+    deterministicPrefixReplayUsage?: CommonProofExternalMemoryUsageAccounting;
+}>;
+
+export type CommonProofVerificationReadbackAccounting = Readonly<{
+    logicalRequiredByteLength: bigint;
+    logicalRequiredRangeCount: bigint;
+    suppliedFullChunkByteLength: bigint;
+    suppliedFullChunkCount: bigint;
 }>;
 
 type CommonProofGenerationKernelPoll =
@@ -208,6 +235,56 @@ export const requireUnsigned64 = (value: bigint, label: string): bigint => {
     }
     return value;
 };
+
+const readDiagnosticUnsigned64 = (
+    bytes: Uint8Array,
+    wordIndex: number,
+): bigint =>
+    new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getBigUint64(
+        wordIndex * 8,
+        true,
+    );
+
+const diagnosticUnsigned32 = (value: bigint, label: string): number => {
+    if (value > 0xffff_ffffn) {
+        throw kernelFailure(`${label} exceeds the unsigned 32-bit range.`);
+    }
+    return Number(value);
+};
+
+const externalMemoryUsageFromDiagnostic = (
+    bytes: Uint8Array,
+    firstWordIndex: number,
+): CommonProofExternalMemoryUsageAccounting =>
+    Object.freeze({
+        totalWrittenByteLength: readDiagnosticUnsigned64(bytes, firstWordIndex),
+        totalReadByteLength: readDiagnosticUnsigned64(
+            bytes,
+            firstWordIndex + 1,
+        ),
+        peakStoredByteLength: readDiagnosticUnsigned64(
+            bytes,
+            firstWordIndex + 2,
+        ),
+        transactionCount: readDiagnosticUnsigned64(bytes, firstWordIndex + 3),
+        deletedObjectCount: readDiagnosticUnsigned64(bytes, firstWordIndex + 4),
+    });
+
+const usageDoesNotExceed = (
+    usage: CommonProofExternalMemoryUsageAccounting,
+    limits: Readonly<{
+        objectCount: bigint;
+        peakStoredByteLength: bigint;
+        totalReadByteLength: bigint;
+        totalWrittenByteLength: bigint;
+        transactionCount: bigint;
+    }>,
+): boolean =>
+    usage.totalWrittenByteLength <= limits.totalWrittenByteLength &&
+    usage.totalReadByteLength <= limits.totalReadByteLength &&
+    usage.peakStoredByteLength <= limits.peakStoredByteLength &&
+    usage.transactionCount <= limits.transactionCount &&
+    usage.deletedObjectCount <= limits.objectCount;
 
 const requireExactApplicationBytes = (
     value: Uint8Array,
@@ -821,9 +898,7 @@ export class CommonProofGenerationKernelBoundary {
             return Object.freeze({
                 canonicalStateBytes,
                 privateRandomCursorManifestBytes,
-                ...(privateRandomnessStreamAttemptIdentifier === undefined
-                    ? {}
-                    : { privateRandomnessStreamAttemptIdentifier }),
+                privateRandomnessStreamAttemptIdentifier,
                 stableAttemptBindingHash,
                 safeBoundaryOrdinal,
             });
@@ -1054,6 +1129,165 @@ export class CommonProofGenerationKernelBoundary {
                     readbackPointer,
                     readbackBytes.byteLength,
                 ),
+        );
+    }
+
+    /** Reads terminal production counters for manual evidence before finish. */
+    public externalMemoryAccounting(
+        operationHandle: number,
+    ): CommonProofGenerationExternalMemoryAccounting {
+        requireLiveHandle(
+            operationHandle,
+            'The common-proof generation operation handle',
+        );
+        return this.#context.runExclusive(
+            'common-proof generation external-memory accounting',
+            () => {
+                const declaredByteLength = requireUnsigned32(
+                    resolveNumberExport(
+                        this.#context.wasmExports,
+                        'sealed_lattice_common_proof_generation_external_memory_accounting_byte_length',
+                    )(),
+                    'The generation external-memory accounting byte length',
+                );
+                if (
+                    declaredByteLength !==
+                    generationExternalMemoryAccountingByteLength
+                ) {
+                    throw kernelFailure(
+                        'The common-proof kernel exposed a malformed generation external-memory accounting length.',
+                    );
+                }
+                const outputPointer =
+                    this.#memoryBoundary.allocate(declaredByteLength);
+                try {
+                    requireKernelSuccess(
+                        resolveNumberExport(
+                            this.#context.wasmExports,
+                            'sealed_lattice_common_proof_generation_copy_external_memory_accounting',
+                        )(operationHandle, outputPointer, declaredByteLength),
+                        'generation external-memory accounting copy',
+                    );
+                    const bytes = new Uint8Array(
+                        this.#context.memory.buffer,
+                        outputPointer,
+                        declaredByteLength,
+                    );
+                    const stepCount = diagnosticUnsigned32(
+                        readDiagnosticUnsigned64(bytes, 0),
+                        'The compiled external-memory step count',
+                    );
+                    const maximumChunkByteLength = diagnosticUnsigned32(
+                        readDiagnosticUnsigned64(bytes, 1),
+                        'The compiled external-memory chunk byte length',
+                    );
+                    const maximumTransactionPayloadByteLength =
+                        readDiagnosticUnsigned64(bytes, 2);
+                    const objectCount = diagnosticUnsigned32(
+                        readDiagnosticUnsigned64(bytes, 3),
+                        'The compiled external-memory object count',
+                    );
+                    const compiledRequirement = Object.freeze({
+                        stepCount,
+                        maximumChunkByteLength,
+                        maximumTransactionPayloadByteLength,
+                        objectCount,
+                        peakStoredByteLength: readDiagnosticUnsigned64(
+                            bytes,
+                            4,
+                        ),
+                        totalWrittenByteLength: readDiagnosticUnsigned64(
+                            bytes,
+                            5,
+                        ),
+                        totalReadByteLength: readDiagnosticUnsigned64(bytes, 6),
+                        transactionCount: readDiagnosticUnsigned64(bytes, 7),
+                    });
+                    if (
+                        stepCount === 0 ||
+                        maximumChunkByteLength !==
+                            maximumExternalMemoryChunkByteLength ||
+                        maximumTransactionPayloadByteLength === 0n ||
+                        maximumTransactionPayloadByteLength >
+                            maximumWorkerPayloadByteLength ||
+                        objectCount === 0 ||
+                        objectCount > maximumWorkerOperationCount ||
+                        compiledRequirement.peakStoredByteLength === 0n ||
+                        compiledRequirement.peakStoredByteLength >
+                            maximumExternalScratchByteLength ||
+                        compiledRequirement.totalWrittenByteLength === 0n ||
+                        compiledRequirement.totalReadByteLength === 0n ||
+                        compiledRequirement.transactionCount === 0n
+                    ) {
+                        throw kernelFailure(
+                            'The common-proof kernel exposed malformed compiled external-memory accounting.',
+                        );
+                    }
+                    const actualUsage = externalMemoryUsageFromDiagnostic(
+                        bytes,
+                        8,
+                    );
+                    const compiledUsageLimits = Object.freeze({
+                        objectCount: BigInt(objectCount),
+                        peakStoredByteLength:
+                            compiledRequirement.peakStoredByteLength,
+                        totalReadByteLength:
+                            compiledRequirement.totalReadByteLength,
+                        totalWrittenByteLength:
+                            compiledRequirement.totalWrittenByteLength,
+                        transactionCount: compiledRequirement.transactionCount,
+                    });
+                    if (
+                        !usageDoesNotExceed(actualUsage, compiledUsageLimits) ||
+                        actualUsage.deletedObjectCount !== BigInt(objectCount)
+                    ) {
+                        throw kernelFailure(
+                            'The common-proof kernel reported external-memory usage outside its compiled plan.',
+                        );
+                    }
+                    const prefixPresence = readDiagnosticUnsigned64(bytes, 13);
+                    const prefixUsage = externalMemoryUsageFromDiagnostic(
+                        bytes,
+                        14,
+                    );
+                    if (
+                        prefixPresence > 1n ||
+                        (prefixPresence === 0n &&
+                            Object.values(prefixUsage).some(
+                                (value) => value !== 0n,
+                            )) ||
+                        (prefixPresence === 1n &&
+                            !usageDoesNotExceed(prefixUsage, {
+                                objectCount: actualUsage.deletedObjectCount,
+                                peakStoredByteLength:
+                                    actualUsage.peakStoredByteLength,
+                                totalReadByteLength:
+                                    actualUsage.totalReadByteLength,
+                                totalWrittenByteLength:
+                                    actualUsage.totalWrittenByteLength,
+                                transactionCount: actualUsage.transactionCount,
+                            }))
+                    ) {
+                        throw kernelFailure(
+                            'The common-proof kernel exposed malformed deterministic-prefix external-memory accounting.',
+                        );
+                    }
+                    return Object.freeze({
+                        actualUsage,
+                        compiledRequirement,
+                        ...(prefixPresence === 1n
+                            ? {
+                                  deterministicPrefixReplayUsage: prefixUsage,
+                              }
+                            : {}),
+                    });
+                } finally {
+                    this.#memoryBoundary.zeroAndDeallocate(
+                        outputPointer,
+                        declaredByteLength,
+                    );
+                }
+            },
         );
     }
 
@@ -1425,6 +1659,75 @@ export class CommonProofVerificationKernelBoundary {
                     this.#context.wasmExports,
                     'sealed_lattice_common_proof_verification_supply_readback_chunk',
                 )(operationHandle, chunkIndex, pointer, chunkBytes.byteLength),
+        );
+    }
+
+    /** Reads process-local traversal counters for manual evidence before finish. */
+    public readbackAccounting(
+        operationHandle: number,
+    ): CommonProofVerificationReadbackAccounting {
+        requireLiveHandle(
+            operationHandle,
+            'The common-proof verification operation handle',
+        );
+        return this.#context.runExclusive(
+            'common-proof verification readback accounting',
+            () => {
+                const declaredByteLength = requireUnsigned32(
+                    resolveNumberExport(
+                        this.#context.wasmExports,
+                        'sealed_lattice_common_proof_verification_readback_accounting_byte_length',
+                    )(),
+                    'The verification readback accounting byte length',
+                );
+                if (
+                    declaredByteLength !==
+                    verificationReadbackAccountingByteLength
+                ) {
+                    throw kernelFailure(
+                        'The common-proof kernel exposed a malformed verification readback accounting length.',
+                    );
+                }
+                const outputPointer =
+                    this.#memoryBoundary.allocate(declaredByteLength);
+                try {
+                    requireKernelSuccess(
+                        resolveNumberExport(
+                            this.#context.wasmExports,
+                            'sealed_lattice_common_proof_verification_copy_readback_accounting',
+                        )(operationHandle, outputPointer, declaredByteLength),
+                        'verification readback accounting copy',
+                    );
+                    const bytes = new Uint8Array(
+                        this.#context.memory.buffer,
+                        outputPointer,
+                        declaredByteLength,
+                    );
+                    return Object.freeze({
+                        logicalRequiredRangeCount: readDiagnosticUnsigned64(
+                            bytes,
+                            0,
+                        ),
+                        logicalRequiredByteLength: readDiagnosticUnsigned64(
+                            bytes,
+                            1,
+                        ),
+                        suppliedFullChunkCount: readDiagnosticUnsigned64(
+                            bytes,
+                            2,
+                        ),
+                        suppliedFullChunkByteLength: readDiagnosticUnsigned64(
+                            bytes,
+                            3,
+                        ),
+                    });
+                } finally {
+                    this.#memoryBoundary.zeroAndDeallocate(
+                        outputPointer,
+                        declaredByteLength,
+                    );
+                }
+            },
         );
     }
 

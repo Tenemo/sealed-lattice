@@ -4,27 +4,11 @@ use super::sharing::{
 };
 use super::vss::{evaluate_unreduced_shamir_polynomial, verify_carry_aware_vss_share_opening};
 use super::{
-    DATA_PRIMES, describe_collective_bgv_setup_parameters,
-    verify_private_vss_share_envelope_from_request,
-};
-use super::{
-    commitment::{
-        SETUP_COMMITMENT_RANDOMNESS_WIDTH, compute_setup_commitment_for_degree,
-        parse_setup_commitment_full_value, setup_commitment_full_value, setup_commitment_root,
-    },
-    private_vss_share_proof::{
-        PrivateVssShareSuccinctProofGenerationInput, PrivateVssShareSuccinctProofVerificationInput,
-        PrivateVssShareSuccinctProofWitness, private_vss_share_succinct_proof_bytes_hash_for_tests,
-        verify_private_vss_share_succinct_relation_proof,
-    },
+    commitment::{SETUP_COMMITMENT_RANDOMNESS_WIDTH, compute_setup_commitment_for_degree},
     vss::{CarryAwareVssCommitmentOpeningInput, verify_carry_aware_vss_commitment_opening},
 };
-use crate::bgv::modular_arithmetic::{add_mod, mul_mod, sub_mod};
-use crate::bgv::parameters::PLAINTEXT_MODULUS;
-use crate::hashing::derive_canonical_object_hash;
+use crate::bgv::parameters::DATA_PRIMES;
 
-mod accepted_setup;
-mod private_vss;
 mod sharing_algebra;
 mod vss_share_relation;
 

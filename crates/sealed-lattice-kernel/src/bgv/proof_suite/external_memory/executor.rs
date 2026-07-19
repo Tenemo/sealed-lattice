@@ -4,10 +4,6 @@ use super::plan::{
     ProofExternalMemory, ProofExternalMemoryObject, ProofExternalMemoryObjectPlan,
     ProofExternalMemoryPlan, ProofExternalMemoryProtection,
 };
-use super::{
-    MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_OBJECT_COUNT,
-    MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_STORED_BYTE_LENGTH,
-};
 
 /// Cancellation is owned by the participant-operation worker.  It is checked
 /// between every bounded storage transaction and every arithmetic chunk.
@@ -32,6 +28,28 @@ pub(crate) struct ProofExternalMemoryUsage {
     pub(crate) peak_stored_byte_length: u64,
     pub(crate) transaction_count: u64,
     pub(crate) deleted_object_count: u32,
+}
+
+impl ProofExternalMemoryUsage {
+    pub(crate) const fn total_written_byte_length(self) -> u64 {
+        self.total_written_byte_length
+    }
+
+    pub(crate) const fn total_read_byte_length(self) -> u64 {
+        self.total_read_byte_length
+    }
+
+    pub(crate) const fn peak_stored_byte_length(self) -> u64 {
+        self.peak_stored_byte_length
+    }
+
+    pub(crate) const fn transaction_count(self) -> u64 {
+        self.transaction_count
+    }
+
+    pub(crate) const fn deleted_object_count(self) -> u32 {
+        self.deleted_object_count
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -71,7 +89,7 @@ impl<StorageError> From<ProofExternalMemoryError>
 pub(crate) struct ProofExternalMemoryExecutor {
     plan: ProofExternalMemoryPlan,
     current_step: u32,
-    states: Box<[(ProofExternalMemoryObject, ProofExternalMemoryObjectState)]>,
+    states: Box<[ProofExternalMemoryObjectState]>,
     current_stored_byte_length: u64,
     usage: ProofExternalMemoryUsage,
     terminal: bool,
@@ -93,11 +111,7 @@ impl ProofExternalMemoryExecutor {
             .ok()
             .and_then(|length| {
                 length.checked_mul(
-                    u64::try_from(std::mem::size_of::<(
-                        ProofExternalMemoryObject,
-                        ProofExternalMemoryObjectState,
-                    )>())
-                    .ok()?,
+                    u64::try_from(std::mem::size_of::<ProofExternalMemoryObjectState>()).ok()?,
                 )
             })
             .ok_or(ProofExternalMemoryError::ResourceLimitExceeded)?;
@@ -106,13 +120,10 @@ impl ProofExternalMemoryExecutor {
             .ok_or(ProofExternalMemoryError::ResourceLimitExceeded)
     }
 
-    pub(crate) fn new(plan: ProofExternalMemoryPlan) -> Self {
-        let mut states = plan
-            .objects
-            .iter()
-            .map(|object| (object.object, ProofExternalMemoryObjectState::Issued))
-            .collect::<Vec<_>>();
-        states.sort_unstable_by_key(|(object, _)| *object);
+    pub(crate) fn new(mut plan: ProofExternalMemoryPlan) -> Self {
+        plan.objects
+            .sort_unstable_by_key(|object| (object.object, object.issued_step));
+        let states = vec![ProofExternalMemoryObjectState::Issued; plan.objects.len()];
         Self {
             plan,
             current_step: 0,
@@ -141,9 +152,10 @@ impl ProofExternalMemoryExecutor {
         object: ProofExternalMemoryObject,
     ) -> Result<(), ProofExternalMemoryExecutorError<Storage::Error>> {
         self.require_active()?;
-        let object_plan = self.object_plan(object)?;
+        let plan_index = self.issued_object_plan_index(object)?;
+        let object_plan = self.plan.objects[plan_index];
         if self.current_step != object_plan.issued_step
-            || self.state(object)? != ProofExternalMemoryObjectState::Issued
+            || self.state(plan_index)? != ProofExternalMemoryObjectState::Issued
         {
             return Err(ProofExternalMemoryError::WrongStep.into());
         }
@@ -163,7 +175,7 @@ impl ProofExternalMemoryExecutor {
             )
         })?;
         self.set_state(
-            object,
+            plan_index,
             ProofExternalMemoryObjectState::Writing {
                 written_byte_length: 0,
             },
@@ -190,14 +202,15 @@ impl ProofExternalMemoryExecutor {
         {
             return Err(ProofExternalMemoryError::WrongOffsetOrLength.into());
         }
-        let object_plan = self.object_plan(object)?;
+        let plan_index = self.active_object_plan_index(object)?;
+        let object_plan = self.plan.objects[plan_index];
         if self.current_step < object_plan.issued_step || self.current_step > object_plan.seal_step
         {
             return Err(ProofExternalMemoryError::WrongStep.into());
         }
         let ProofExternalMemoryObjectState::Writing {
             written_byte_length,
-        } = self.state(object)?
+        } = self.state(plan_index)?
         else {
             return Err(ProofExternalMemoryError::InvalidLifecycle.into());
         };
@@ -230,7 +243,7 @@ impl ProofExternalMemoryExecutor {
             storage.append_object_bytes(object, written_byte_length, bytes)
         })?;
         self.set_state(
-            object,
+            plan_index,
             ProofExternalMemoryObjectState::Writing {
                 written_byte_length: next_object_byte_length,
             },
@@ -245,9 +258,10 @@ impl ProofExternalMemoryExecutor {
         object: ProofExternalMemoryObject,
     ) -> Result<(), ProofExternalMemoryExecutorError<Storage::Error>> {
         self.require_active()?;
-        let object_plan = self.object_plan(object)?;
+        let plan_index = self.active_object_plan_index(object)?;
+        let object_plan = self.plan.objects[plan_index];
         if self.current_step > object_plan.seal_step
-            || self.state(object)?
+            || self.state(plan_index)?
                 != (ProofExternalMemoryObjectState::Writing {
                     written_byte_length: object_plan.exact_byte_length,
                 })
@@ -255,7 +269,7 @@ impl ProofExternalMemoryExecutor {
             return Err(ProofExternalMemoryError::Incomplete.into());
         }
         self.run_mutating_transaction(storage, 0, |storage| storage.seal_object(object))?;
-        self.set_state(object, ProofExternalMemoryObjectState::Sealed)?;
+        self.set_state(plan_index, ProofExternalMemoryObjectState::Sealed)?;
         Ok(())
     }
 
@@ -274,11 +288,12 @@ impl ProofExternalMemoryExecutor {
         {
             return Err(ProofExternalMemoryError::WrongOffsetOrLength.into());
         }
-        let object_plan = self.object_plan(object)?;
+        let plan_index = self.active_object_plan_index(object)?;
+        let object_plan = self.plan.objects[plan_index];
         if self.current_step < object_plan.seal_step
             || self.current_step > object_plan.last_use_step
             || !matches!(
-                self.state(object)?,
+                self.state(plan_index)?,
                 ProofExternalMemoryObjectState::Sealed | ProofExternalMemoryObjectState::Claimed
             )
         {
@@ -308,7 +323,7 @@ impl ProofExternalMemoryExecutor {
             return Err(ProofExternalMemoryExecutorError::StorageCommit(error));
         }
         self.record_transaction()?;
-        self.set_state(object, ProofExternalMemoryObjectState::Claimed)?;
+        self.set_state(plan_index, ProofExternalMemoryObjectState::Claimed)?;
         self.usage.total_read_byte_length = next_total_read;
         Ok(())
     }
@@ -321,10 +336,10 @@ impl ProofExternalMemoryExecutor {
         storage: &mut Storage,
     ) -> Result<(), ProofExternalMemoryExecutorError<Storage::Error>> {
         self.require_active()?;
-        for object_plan in &self.plan.objects {
+        for (plan_index, object_plan) in self.plan.objects.iter().enumerate() {
             if object_plan.seal_step == self.current_step
                 && matches!(
-                    self.state(object_plan.object)?,
+                    self.state(plan_index)?,
                     ProofExternalMemoryObjectState::Issued
                         | ProofExternalMemoryObjectState::Writing { .. }
                 )
@@ -337,12 +352,13 @@ impl ProofExternalMemoryExecutor {
             .plan
             .objects
             .iter()
-            .filter(|object| object.last_use_step == self.current_step)
             .copied()
+            .enumerate()
+            .filter(|(_, object)| object.last_use_step == self.current_step)
             .collect::<Vec<_>>();
-        for object in &due_for_deletion {
+        for (plan_index, _) in &due_for_deletion {
             if !matches!(
-                self.state(object.object)?,
+                self.state(*plan_index)?,
                 ProofExternalMemoryObjectState::Sealed | ProofExternalMemoryObjectState::Claimed
             ) {
                 return Err(ProofExternalMemoryError::Incomplete.into());
@@ -351,7 +367,7 @@ impl ProofExternalMemoryExecutor {
 
         if !due_for_deletion.is_empty() {
             self.begin_transaction(storage)?;
-            for object in &due_for_deletion {
+            for (_, object) in &due_for_deletion {
                 if let Err(operation_error) = storage.delete_object(object.object) {
                     return Err(abort_after_storage_error(storage, operation_error));
                 }
@@ -360,8 +376,8 @@ impl ProofExternalMemoryExecutor {
                 return Err(ProofExternalMemoryExecutorError::StorageCommit(error));
             }
             self.record_transaction()?;
-            for object in &due_for_deletion {
-                self.set_state(object.object, ProofExternalMemoryObjectState::Consumed)?;
+            for (plan_index, object) in &due_for_deletion {
+                self.set_state(*plan_index, ProofExternalMemoryObjectState::Consumed)?;
                 self.current_stored_byte_length = self
                     .current_stored_byte_length
                     .checked_sub(object.exact_byte_length)
@@ -383,7 +399,7 @@ impl ProofExternalMemoryExecutor {
                 || self
                     .states
                     .iter()
-                    .any(|(_, state)| *state != ProofExternalMemoryObjectState::Consumed)
+                    .any(|state| *state != ProofExternalMemoryObjectState::Consumed)
             {
                 return Err(ProofExternalMemoryError::Incomplete.into());
             }
@@ -418,18 +434,20 @@ impl ProofExternalMemoryExecutor {
             return Ok(());
         }
         let live_objects = self
-            .states
+            .plan
+            .objects
             .iter()
-            .filter_map(|(object, state)| {
+            .zip(self.states.iter())
+            .filter_map(|(object_plan, state)| {
                 matches!(
                     state,
                     ProofExternalMemoryObjectState::Writing { .. }
                         | ProofExternalMemoryObjectState::Sealed
                         | ProofExternalMemoryObjectState::Claimed
                 )
-                .then_some(*object)
+                .then_some(object_plan.object)
             })
-            .collect::<Vec<_>>();
+            .collect::<std::collections::BTreeSet<_>>();
         if !live_objects.is_empty() {
             self.begin_transaction(storage)?;
             for object in &live_objects {
@@ -442,7 +460,7 @@ impl ProofExternalMemoryExecutor {
             }
             self.record_transaction()?;
         }
-        for (_, state) in self.states.iter_mut() {
+        for state in self.states.iter_mut() {
             if *state != ProofExternalMemoryObjectState::Consumed {
                 *state = ProofExternalMemoryObjectState::Cancelled;
             }
@@ -462,40 +480,71 @@ impl ProofExternalMemoryExecutor {
         Ok(self.usage)
     }
 
-    fn object_plan(
+    fn object_plan_range(
         &self,
         object: ProofExternalMemoryObject,
-    ) -> Result<ProofExternalMemoryObjectPlan, ProofExternalMemoryError> {
-        self.plan
+    ) -> Result<core::ops::Range<usize>, ProofExternalMemoryError> {
+        let first = self
+            .plan
             .objects
-            .iter()
-            .find(|entry| entry.object == object)
-            .copied()
-            .ok_or(ProofExternalMemoryError::UnknownObject)
+            .partition_point(|entry| entry.object < object);
+        let end = self
+            .plan
+            .objects
+            .partition_point(|entry| entry.object <= object);
+        if first == end {
+            return Err(ProofExternalMemoryError::UnknownObject);
+        }
+        Ok(first..end)
+    }
+
+    fn issued_object_plan_index(
+        &self,
+        object: ProofExternalMemoryObject,
+    ) -> Result<usize, ProofExternalMemoryError> {
+        self.object_plan_range(object)?
+            .find(|index| self.plan.objects[*index].issued_step == self.current_step)
+            .ok_or(ProofExternalMemoryError::WrongStep)
+    }
+
+    fn active_object_plan_index(
+        &self,
+        object: ProofExternalMemoryObject,
+    ) -> Result<usize, ProofExternalMemoryError> {
+        let range = self.object_plan_range(object)?;
+        let candidate_count = self.plan.objects[range.clone()]
+            .partition_point(|entry| entry.issued_step <= self.current_step);
+        let plan_index = range
+            .start
+            .checked_add(candidate_count)
+            .and_then(|end| end.checked_sub(1))
+            .ok_or(ProofExternalMemoryError::WrongStep)?;
+        let plan = self.plan.objects[plan_index];
+        if self.current_step > plan.last_use_step {
+            return Err(ProofExternalMemoryError::WrongStep);
+        }
+        Ok(plan_index)
     }
 
     fn state(
         &self,
-        object: ProofExternalMemoryObject,
+        plan_index: usize,
     ) -> Result<ProofExternalMemoryObjectState, ProofExternalMemoryError> {
         self.states
-            .binary_search_by_key(&object, |(catalog_object, _)| *catalog_object)
-            .ok()
-            .and_then(|index| self.states.get(index))
-            .map(|(_, state)| *state)
+            .get(plan_index)
+            .copied()
             .ok_or(ProofExternalMemoryError::UnknownObject)
     }
 
     fn set_state(
         &mut self,
-        object: ProofExternalMemoryObject,
+        plan_index: usize,
         state: ProofExternalMemoryObjectState,
     ) -> Result<(), ProofExternalMemoryError> {
-        let index = self
+        *self
             .states
-            .binary_search_by_key(&object, |(catalog_object, _)| *catalog_object)
-            .map_err(|_| ProofExternalMemoryError::UnknownObject)?;
-        self.states[index].1 = state;
+            .get_mut(plan_index)
+            .ok_or(ProofExternalMemoryError::UnknownObject)? = state;
         Ok(())
     }
 

@@ -15,7 +15,9 @@ use crate::{
         VerifiedRelinearizationRoundOneSourceMaterial,
         VerifiedRelinearizationRoundOneSourceMaterialPreflight,
         VerifiedRelinearizationSourceMaterial, VerifiedStatementOwnedTree,
-        preflight_and_consume_verified_common_proof_with_family_terminal, runtime_error_status,
+        bind_generated_common_proof_to_verified_statement_source,
+        preflight_and_consume_verified_common_proof_with_family_terminal,
+        preflight_generated_common_proof_pending_statement, runtime_error_status,
     },
     foundation::Hash512,
 };
@@ -107,6 +109,7 @@ impl VerificationTerminalSource {
 struct VerificationTerminalSourceRegistry {
     next_handle: u32,
     sources: BTreeMap<u32, VerificationTerminalSource>,
+    reservations: BTreeMap<u32, VerificationTerminalFamily>,
 }
 
 impl Default for VerificationTerminalSourceRegistry {
@@ -114,6 +117,7 @@ impl Default for VerificationTerminalSourceRegistry {
         Self {
             next_handle: 1,
             sources: BTreeMap::new(),
+            reservations: BTreeMap::new(),
         }
     }
 }
@@ -123,7 +127,13 @@ impl VerificationTerminalSourceRegistry {
         &mut self,
         source: VerificationTerminalSource,
     ) -> Result<u32, CommonProofRuntimeError> {
-        if self.sources.len() >= MAXIMUM_RETAINED_TERMINAL_SOURCES || self.next_handle == 0 {
+        if self
+            .sources
+            .len()
+            .checked_add(self.reservations.len())
+            .is_none_or(|count| count >= MAXIMUM_RETAINED_TERMINAL_SOURCES)
+            || self.next_handle == 0
+        {
             return Err(CommonProofRuntimeError::AllocationLimitExceeded);
         }
         let handle = self.next_handle;
@@ -135,6 +145,59 @@ impl VerificationTerminalSourceRegistry {
             return Err(CommonProofRuntimeError::AllocationLimitExceeded);
         }
         Ok(handle)
+    }
+
+    fn reserve(
+        &mut self,
+        family: VerificationTerminalFamily,
+    ) -> Result<u32, CommonProofRuntimeError> {
+        if self
+            .sources
+            .len()
+            .checked_add(self.reservations.len())
+            .is_none_or(|count| count >= MAXIMUM_RETAINED_TERMINAL_SOURCES)
+            || self.next_handle == 0
+        {
+            return Err(CommonProofRuntimeError::AllocationLimitExceeded);
+        }
+        let handle = self.next_handle;
+        self.next_handle = handle
+            .checked_add(1)
+            .filter(|next_handle| *next_handle != 0)
+            .ok_or(CommonProofRuntimeError::AllocationLimitExceeded)?;
+        if self.reservations.insert(handle, family).is_some() {
+            return Err(CommonProofRuntimeError::AllocationLimitExceeded);
+        }
+        Ok(handle)
+    }
+
+    fn commit_reservation(
+        &mut self,
+        handle: u32,
+        source: VerificationTerminalSource,
+    ) -> Result<(), CommonProofRuntimeError> {
+        if self.reservations.get(&handle).copied() != Some(source.family())
+            || self.sources.contains_key(&handle)
+        {
+            return Err(CommonProofRuntimeError::WrongVerificationBinding);
+        }
+        self.reservations.remove(&handle);
+        if self.sources.insert(handle, source).is_some() {
+            return Err(CommonProofRuntimeError::AllocationLimitExceeded);
+        }
+        Ok(())
+    }
+
+    fn cancel_reservation(
+        &mut self,
+        handle: u32,
+        family: VerificationTerminalFamily,
+    ) -> Result<(), CommonProofRuntimeError> {
+        if self.reservations.get(&handle).copied() != Some(family) {
+            return Err(CommonProofRuntimeError::WrongVerificationBinding);
+        }
+        self.reservations.remove(&handle);
+        Ok(())
     }
 
     fn take(
@@ -166,33 +229,59 @@ impl VerificationTerminalSourceRegistry {
     }
 }
 
-thread_local! {
-    static VERIFICATION_TERMINAL_SOURCE_REGISTRY:
-        RefCell<VerificationTerminalSourceRegistry> =
-            RefCell::new(VerificationTerminalSourceRegistry::default());
+pub(crate) fn reserve_collective_public_key_verification_terminal_source()
+-> Result<u32, CommonProofRuntimeError> {
+    VERIFICATION_TERMINAL_SOURCE_REGISTRY.with(|registry| {
+        registry
+            .borrow_mut()
+            .reserve(VerificationTerminalFamily::CollectivePublicKey)
+    })
 }
 
-pub(crate) fn retain_collective_public_key_verification_terminal_source(
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn commit_reserved_collective_public_key_verification_terminal_source(
+    reservation_handle: u32,
     verification_assembly_handle: u32,
     canonical_application_statement_bytes: Vec<u8>,
     roster_hash: [u8; Hash512::BYTE_LENGTH],
     statement_trees: Vec<VerifiedStatementOwnedTree>,
     collective_public_key_tree: SetupPublicPolynomialTree,
-) -> Result<u32, CommonProofRuntimeError> {
+) {
     VERIFICATION_TERMINAL_SOURCE_REGISTRY.with(|registry| {
         registry
             .borrow_mut()
-            .retain(VerificationTerminalSource::CollectivePublicKey(
-                CollectivePublicKeyTerminalSource {
-                    verification_assembly_handle,
-                    canonical_application_statement_bytes: canonical_application_statement_bytes
-                        .into_boxed_slice(),
-                    roster_hash,
-                    statement_trees: statement_trees.into_boxed_slice(),
-                    collective_public_key_tree,
-                },
-            ))
+            .commit_reservation(
+                reservation_handle,
+                VerificationTerminalSource::CollectivePublicKey(
+                    CollectivePublicKeyTerminalSource {
+                        verification_assembly_handle,
+                        canonical_application_statement_bytes:
+                            canonical_application_statement_bytes.into_boxed_slice(),
+                        roster_hash,
+                        statement_trees: statement_trees.into_boxed_slice(),
+                        collective_public_key_tree,
+                    },
+                ),
+            )
+            .expect("a collective terminal reservation commits its exact preflighted source");
+    });
+}
+
+pub(crate) fn cancel_collective_public_key_verification_terminal_source_reservation(
+    reservation_handle: u32,
+) -> Result<(), CommonProofRuntimeError> {
+    VERIFICATION_TERMINAL_SOURCE_REGISTRY.with(|registry| {
+        registry.borrow_mut().cancel_reservation(
+            reservation_handle,
+            VerificationTerminalFamily::CollectivePublicKey,
+        )
     })
+}
+
+thread_local! {
+    static VERIFICATION_TERMINAL_SOURCE_REGISTRY:
+        RefCell<VerificationTerminalSourceRegistry> =
+            RefCell::new(VerificationTerminalSourceRegistry::default());
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -287,6 +376,7 @@ fn restore_terminal_source(
 fn finish_collective_public_key_verification(
     verified_common_proof_handle: u32,
     terminal_source_handle: u32,
+    generated_common_proof_handle: u32,
 ) -> Result<(), CommonProofRuntimeError> {
     let terminal_source = VERIFICATION_TERMINAL_SOURCE_REGISTRY.with(|registry| {
         registry.borrow_mut().take(
@@ -298,6 +388,34 @@ fn finish_collective_public_key_verification(
         unreachable!("family-checked terminal source variant")
     };
     let terminal_source = RefCell::new(Some(terminal_source));
+    let generated_proof_descriptor = {
+        let preliminary_result = (|| {
+            let source = terminal_source.borrow();
+            let source = source
+                .as_ref()
+                .ok_or(CommonProofRuntimeError::WrongVerificationBinding)?;
+            preflight_generated_common_proof_pending_statement(
+                generated_common_proof_handle,
+                crate::foundation::ProofApplicationSlotCeilings::COLLECTIVE_PUBLIC_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+                None,
+                None,
+                &source.canonical_application_statement_bytes,
+            )
+        })();
+        match preliminary_result {
+            Ok(descriptor) => descriptor,
+            Err(error) => {
+                let source = terminal_source
+                    .into_inner()
+                    .expect("generated-proof preflight retained the collective terminal source");
+                restore_terminal_source(
+                    terminal_source_handle,
+                    VerificationTerminalSource::CollectivePublicKey(source),
+                )?;
+                return Err(error);
+            }
+        }
+    };
     let result = preflight_and_consume_verified_common_proof_with_family_terminal(
         &VerifiedCommonProofCapabilityHandle::from_identifier(verified_common_proof_handle),
         |verified_proof| {
@@ -305,6 +423,9 @@ fn finish_collective_public_key_verification(
             let source = source
                 .as_ref()
                 .ok_or(CommonProofRuntimeError::WrongVerificationBinding)?;
+            if verified_proof.proof_stream_descriptor() != &generated_proof_descriptor {
+                return Err(CommonProofRuntimeError::WrongVerificationBinding);
+            }
             let terminal_preflight =
                 VerifiedCollectivePublicKeyTerminal::preflight_from_borrowed_common_proof_and_tree(
                     verified_proof,
@@ -321,6 +442,13 @@ fn finish_collective_public_key_verification(
             Ok((terminal_preflight, prepared_slot))
         },
         |verified_proof, (terminal_preflight, prepared_slot)| {
+            bind_generated_common_proof_to_verified_statement_source(
+                generated_common_proof_handle,
+                verified_proof
+                    .statement_source()
+                    .expect("collective preflight retained its package statement source"),
+            )
+            .expect("collective preflight established the generated package binding");
             let source = terminal_source
                 .borrow_mut()
                 .take()
@@ -586,9 +714,14 @@ fn discard_verification_terminal_source(
 pub extern "C" fn sealed_lattice_collective_public_key_aggregate_finish_verification(
     verified_common_proof_handle: u32,
     terminal_source_handle: u32,
+    generated_common_proof_handle: u32,
 ) -> u32 {
-    finish_collective_public_key_verification(verified_common_proof_handle, terminal_source_handle)
-        .map_or_else(runtime_error_status, |()| 0)
+    finish_collective_public_key_verification(
+        verified_common_proof_handle,
+        terminal_source_handle,
+        generated_common_proof_handle,
+    )
+    .map_or_else(runtime_error_status, |()| 0)
 }
 
 #[unsafe(no_mangle)]

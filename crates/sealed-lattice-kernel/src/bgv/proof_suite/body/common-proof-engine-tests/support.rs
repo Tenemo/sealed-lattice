@@ -18,6 +18,11 @@ use crate::foundation::{
     derive_canonical_stream_descriptor,
 };
 
+use super::super::super::prover::{
+    CommonProofPrivateCoinReplayCursor, CommonProofPrivateCoinReplaySpan,
+    CommonProofPrivateCoinReplaySpanStart, ReplayableCommonProofPrivateCoinCatalogSource,
+    ReplayableCommonProofPrivateCoinSource,
+};
 use super::super::super::relation_plan::{
     BoundTreeConstructionKind, RelationColumnOrigin, RelationTreeDescriptor,
 };
@@ -50,15 +55,16 @@ use super::super::super::{
     ProofExternalMemoryObject, ProofExternalMemoryProtection,
     ProofExternalMemoryTransactionOperation, ProofExternalMemoryTransactionRequest,
     ProofLeafVisibility, ProofProfileError, ProofTreeRole, PublicAggregateRelationGeometry,
-    RelationPlanCheckContext, RelationProofTreeInput, ResidentCommonProofByteSource,
-    ResidentCommonProofInputChunk, ResidentCommonProofSourcePolynomialProvider,
-    ResolvedSuiteModulus, RkgRoundOneAggregatePlanInput, RkgRoundOneAggregateVariantInput,
-    SameSecretRelationPlanInput, SetupPublicPolynomialContext, SetupPublicPolynomialTree,
-    SetupPublicPolynomialTreeInput, StatementOwnedProofTreeInput, SuiteModulusReference,
-    TargetReleaseModulusWitness, TargetReleaseRelationPlanInput, TargetReleaseRoleWitness,
-    TargetReleaseWitness, VerifiedCommonProof, VerifiedCommonProofCapabilityHandle,
-    VerifiedRelationColumnEvaluator, VerifiedStatementOwnedTree, VerifiedTargetReleaseModulusInput,
-    canonical_proof_object_header_bytes,
+    PublicOnlyCommonProofCoinSource, RelationPlanCheckContext, RelationProofTreeInput,
+    ResidentCommonProofByteSource, ResidentCommonProofInputChunk,
+    ResidentCommonProofSourcePolynomialProvider, ResolvedSuiteModulus,
+    RkgRoundOneAggregatePlanInput, RkgRoundOneAggregateVariantInput, SameSecretRelationPlanInput,
+    SetupPublicPolynomialContext, SetupPublicPolynomialTree, SetupPublicPolynomialTreeInput,
+    StatementOwnedProofTreeInput, SuiteModulusReference, TargetReleaseModulusWitness,
+    TargetReleaseRelationPlanInput, TargetReleaseRoleWitness, TargetReleaseWitness,
+    VerifiedCommonProof, VerifiedCommonProofCapabilityHandle, VerifiedRelationColumnEvaluator,
+    VerifiedRelationColumnEvaluatorMemoryAccounting, VerifiedStatementOwnedTree,
+    VerifiedTargetReleaseModulusInput, canonical_proof_object_header_bytes,
     common_proof_private_coin_coordinate_derivation_context_hash,
     compile_collective_public_key_aggregate_relation_plan,
     compile_evaluator_key_aggregate_relation_plan, compile_rkg_round_one_aggregate_relation_plan,
@@ -396,24 +402,37 @@ enum TestPrivateCoinError {
     CallLimitExceeded,
     ByteLimitExceeded,
     InvalidModulus,
+    ReplaySourceMismatch,
+    ReplayCursorMismatch,
+    ReplaySpanAlreadyActive,
+    ReplaySpanNotActive,
+    ReplayAttemptInvalidated,
 }
 
 struct BoundedDeterministicTestPrivateCoins {
-    next_value: u64,
     remaining_call_count: u32,
     remaining_byte_count: usize,
     calls_by_coordinate: BTreeMap<CommonProofPrivateCoinCoordinate, u64>,
     checkpoint_cursor_family_schema_identifier: u16,
+    replay_instance_binding: Rc<()>,
+    replay_reset_epoch: u64,
+    next_replay_span_identifier: u64,
+    active_replay_span: Option<(bool, u64)>,
+    replay_invalidated: bool,
 }
 
 impl BoundedDeterministicTestPrivateCoins {
     fn new(maximum_call_count: u32, maximum_byte_count: usize) -> Self {
         Self {
-            next_value: 1,
             remaining_call_count: maximum_call_count,
             remaining_byte_count: maximum_byte_count,
             calls_by_coordinate: BTreeMap::new(),
             checkpoint_cursor_family_schema_identifier: APPLICATION_STATEMENT_SCHEMA_IDENTIFIER,
+            replay_instance_binding: Rc::new(()),
+            replay_reset_epoch: 0,
+            next_replay_span_identifier: 1,
+            active_replay_span: None,
+            replay_invalidated: false,
         }
     }
 
@@ -433,15 +452,82 @@ impl BoundedDeterministicTestPrivateCoins {
     fn consume_call(
         &mut self,
         coordinate: CommonProofPrivateCoinCoordinate,
-    ) -> Result<(), TestPrivateCoinError> {
+    ) -> Result<u64, TestPrivateCoinError> {
         self.remaining_call_count = self
             .remaining_call_count
             .checked_sub(1)
             .ok_or(TestPrivateCoinError::CallLimitExceeded)?;
         let call_count = self.calls_by_coordinate.entry(coordinate).or_default();
+        let call_ordinal = *call_count;
         *call_count = call_count
             .checked_add(1)
             .ok_or(TestPrivateCoinError::CallLimitExceeded)?;
+        Ok(call_ordinal)
+    }
+
+    fn proof_salt_replay_cursor(&self) -> PrivateRandomCursor {
+        let coordinate = CommonProofPrivateCoinCoordinate::proof_salt();
+        PrivateRandomCursor::new(
+            self.checkpoint_cursor_family_schema_identifier,
+            coordinate.purpose_class(),
+            common_proof_private_coin_coordinate_derivation_context_hash(
+                Hash512::from_bytes([0x51; 64]),
+                coordinate,
+            ),
+            [0x52; 32],
+            self.calls_by_coordinate
+                .get(&coordinate)
+                .copied()
+                .unwrap_or(0),
+            None,
+        )
+        .expect("the common-proof test salt coordinate is assigned")
+    }
+
+    fn replay_cursor(
+        &self,
+        coordinate: CommonProofPrivateCoinCoordinate,
+        call_count: u64,
+    ) -> PrivateRandomCursor {
+        PrivateRandomCursor::new(
+            self.checkpoint_cursor_family_schema_identifier,
+            coordinate.purpose_class(),
+            common_proof_private_coin_coordinate_derivation_context_hash(
+                Hash512::from_bytes([0x51; 64]),
+                coordinate,
+            ),
+            [0x52; 32],
+            call_count,
+            None,
+        )
+        .expect("the common-proof test coordinate is assigned")
+    }
+
+    fn replay_cursor_catalog(
+        &self,
+    ) -> Box<[(CommonProofPrivateCoinCoordinate, PrivateRandomCursor)]> {
+        self.calls_by_coordinate
+            .iter()
+            .map(|(coordinate, call_count)| {
+                (*coordinate, self.replay_cursor(*coordinate, *call_count))
+            })
+            .collect::<Vec<_>>()
+            .into_boxed_slice()
+    }
+
+    fn validate_replay_cursor_catalog(
+        &self,
+        cursors: &[(CommonProofPrivateCoinCoordinate, PrivateRandomCursor)],
+    ) -> Result<(), TestPrivateCoinError> {
+        let mut previous_coordinate = None;
+        for (coordinate, cursor) in cursors {
+            if previous_coordinate.is_some_and(|previous| previous >= *coordinate)
+                || *cursor != self.replay_cursor(*coordinate, cursor.next_counter())
+            {
+                return Err(TestPrivateCoinError::ReplayCursorMismatch);
+            }
+            previous_coordinate = Some(*coordinate);
+        }
         Ok(())
     }
 }
@@ -455,13 +541,14 @@ impl CommonProofPrivateCoinSource for BoundedDeterministicTestPrivateCoins {
         modulus: u64,
         maximum_candidate_draws_per_output: u32,
     ) -> Result<u64, Self::Error> {
-        self.consume_call(coordinate)?;
+        let call_ordinal = self.consume_call(coordinate)?;
         if modulus < 2 || maximum_candidate_draws_per_output == 0 {
             return Err(TestPrivateCoinError::InvalidModulus);
         }
-        let value = self.next_value % modulus;
-        self.next_value = self.next_value.wrapping_add(1);
-        Ok(value)
+        Ok(call_ordinal
+            .wrapping_add(u64::from(coordinate.purpose_class()) << 32)
+            .wrapping_add(u64::from(coordinate.ordinal()))
+            % modulus)
     }
 
     fn fill_raw_bytes(
@@ -469,18 +556,183 @@ impl CommonProofPrivateCoinSource for BoundedDeterministicTestPrivateCoins {
         coordinate: CommonProofPrivateCoinCoordinate,
         destination: &mut [u8],
     ) -> Result<(), Self::Error> {
-        self.consume_call(coordinate)?;
+        let call_ordinal = self.consume_call(coordinate)?;
         self.remaining_byte_count = self
             .remaining_byte_count
             .checked_sub(destination.len())
             .ok_or(TestPrivateCoinError::ByteLimitExceeded)?;
+        let byte_stream_start = call_ordinal
+            .wrapping_mul(u64::try_from(destination.len()).unwrap_or(u64::MAX))
+            .wrapping_add(u64::from(coordinate.purpose_class()) << 32)
+            .wrapping_add(u64::from(coordinate.ordinal()));
         for (offset, byte) in destination.iter_mut().enumerate() {
-            *byte = self.next_value.wrapping_add(offset as u64) as u8;
+            *byte = byte_stream_start.wrapping_add(offset as u64) as u8;
         }
-        self.next_value = self
-            .next_value
-            .wrapping_add(u64::try_from(destination.len()).unwrap_or(u64::MAX));
         Ok(())
+    }
+}
+
+impl ReplayableCommonProofPrivateCoinSource for BoundedDeterministicTestPrivateCoins {
+    fn capture_proof_salt_replay_cursor(
+        &self,
+    ) -> Result<CommonProofPrivateCoinReplayCursor, Self::Error> {
+        Ok(CommonProofPrivateCoinReplayCursor::new(
+            &self.replay_instance_binding,
+            self.proof_salt_replay_cursor(),
+        ))
+    }
+
+    fn restore_proof_salt_replay_cursor(
+        &mut self,
+        replay_cursor: &CommonProofPrivateCoinReplayCursor,
+    ) -> Result<(), Self::Error> {
+        if !replay_cursor.belongs_to(&self.replay_instance_binding) {
+            return Err(TestPrivateCoinError::ReplaySourceMismatch);
+        }
+        let expected_cursor = self.proof_salt_replay_cursor();
+        let cursor = replay_cursor.cursor();
+        if cursor.family() != expected_cursor.family()
+            || cursor.purpose() != expected_cursor.purpose()
+            || cursor.derivation_context_hash() != expected_cursor.derivation_context_hash()
+            || cursor.stream_attempt_identifier() != expected_cursor.stream_attempt_identifier()
+            || cursor.next_unread_bit_offset_in_buffered_block().is_some()
+        {
+            return Err(TestPrivateCoinError::ReplayCursorMismatch);
+        }
+        self.calls_by_coordinate.insert(
+            CommonProofPrivateCoinCoordinate::proof_salt(),
+            cursor.next_counter(),
+        );
+        Ok(())
+    }
+
+    fn proof_salt_replay_cursor_matches(
+        &self,
+        replay_cursor: &CommonProofPrivateCoinReplayCursor,
+    ) -> Result<bool, Self::Error> {
+        if !replay_cursor.belongs_to(&self.replay_instance_binding) {
+            return Err(TestPrivateCoinError::ReplaySourceMismatch);
+        }
+        Ok(replay_cursor.cursor() == self.proof_salt_replay_cursor())
+    }
+}
+
+impl ReplayableCommonProofPrivateCoinCatalogSource for BoundedDeterministicTestPrivateCoins {
+    fn begin_all_coordinate_replay_span(
+        &mut self,
+    ) -> Result<CommonProofPrivateCoinReplaySpanStart, Self::Error> {
+        if self.replay_invalidated {
+            return Err(TestPrivateCoinError::ReplayAttemptInvalidated);
+        }
+        if self.active_replay_span.is_some() {
+            return Err(TestPrivateCoinError::ReplaySpanAlreadyActive);
+        }
+        let span_identifier = self.next_replay_span_identifier;
+        self.next_replay_span_identifier = self
+            .next_replay_span_identifier
+            .checked_add(1)
+            .ok_or(TestPrivateCoinError::ReplayAttemptInvalidated)?;
+        let start = CommonProofPrivateCoinReplaySpanStart::new(
+            &self.replay_instance_binding,
+            self.checkpoint_cursor_family_schema_identifier,
+            Hash512::from_bytes([0x51; 64]),
+            [0x52; 32],
+            self.replay_reset_epoch,
+            span_identifier,
+            self.replay_cursor_catalog(),
+        )
+        .map_err(|_| TestPrivateCoinError::ReplayCursorMismatch)?;
+        self.active_replay_span = Some((false, span_identifier));
+        Ok(start)
+    }
+
+    fn finish_all_coordinate_replay_span(
+        &mut self,
+        start: CommonProofPrivateCoinReplaySpanStart,
+    ) -> Result<CommonProofPrivateCoinReplaySpan, Self::Error> {
+        if self.replay_invalidated {
+            return Err(TestPrivateCoinError::ReplayAttemptInvalidated);
+        }
+        if self.active_replay_span != Some((false, start.span_identifier())) {
+            return Err(TestPrivateCoinError::ReplaySpanNotActive);
+        }
+        if !start.belongs_to(
+            &self.replay_instance_binding,
+            self.checkpoint_cursor_family_schema_identifier,
+            Hash512::from_bytes([0x51; 64]),
+            [0x52; 32],
+            self.replay_reset_epoch,
+        ) {
+            return Err(TestPrivateCoinError::ReplaySourceMismatch);
+        }
+        let span = CommonProofPrivateCoinReplaySpan::from_completed_capture(
+            start,
+            self.replay_cursor_catalog(),
+        )
+        .map_err(|_| TestPrivateCoinError::ReplayCursorMismatch)?;
+        self.active_replay_span = None;
+        Ok(span)
+    }
+
+    fn restore_all_coordinate_replay_span(
+        &mut self,
+        span: &CommonProofPrivateCoinReplaySpan,
+    ) -> Result<(), Self::Error> {
+        if self.replay_invalidated {
+            return Err(TestPrivateCoinError::ReplayAttemptInvalidated);
+        }
+        if self.active_replay_span.is_some() {
+            return Err(TestPrivateCoinError::ReplaySpanAlreadyActive);
+        }
+        if !span.belongs_to(
+            &self.replay_instance_binding,
+            self.checkpoint_cursor_family_schema_identifier,
+            Hash512::from_bytes([0x51; 64]),
+            [0x52; 32],
+            self.replay_reset_epoch,
+        ) {
+            return Err(TestPrivateCoinError::ReplaySourceMismatch);
+        }
+        self.validate_replay_cursor_catalog(span.start_cursors())?;
+        self.calls_by_coordinate = span
+            .start_cursors()
+            .iter()
+            .map(|(coordinate, cursor)| (*coordinate, cursor.next_counter()))
+            .collect();
+        self.active_replay_span = Some((true, span.span_identifier()));
+        Ok(())
+    }
+
+    fn complete_all_coordinate_replay_span(
+        &mut self,
+        span: &CommonProofPrivateCoinReplaySpan,
+    ) -> Result<(), Self::Error> {
+        if self.replay_invalidated {
+            return Err(TestPrivateCoinError::ReplayAttemptInvalidated);
+        }
+        if self.active_replay_span != Some((true, span.span_identifier())) {
+            return Err(TestPrivateCoinError::ReplaySpanNotActive);
+        }
+        if !span.belongs_to(
+            &self.replay_instance_binding,
+            self.checkpoint_cursor_family_schema_identifier,
+            Hash512::from_bytes([0x51; 64]),
+            [0x52; 32],
+            self.replay_reset_epoch,
+        ) || self.replay_cursor_catalog().as_ref() != span.end_cursors()
+        {
+            self.invalidate_all_coordinate_replay_state();
+            return Err(TestPrivateCoinError::ReplayCursorMismatch);
+        }
+        self.active_replay_span = None;
+        Ok(())
+    }
+
+    fn invalidate_all_coordinate_replay_state(&mut self) {
+        self.replay_invalidated = true;
+        self.replay_reset_epoch = self.replay_reset_epoch.wrapping_add(1);
+        self.active_replay_span = None;
+        self.calls_by_coordinate.clear();
     }
 }
 
@@ -528,7 +780,7 @@ fn test_setup_polynomial_tree(
         u16::try_from(tree_catalog_index).expect("the toy owner position fits u16"),
     )
     .expect("the public-key-share polynomial context is canonical");
-    let ordered_coefficient_columns = vec![vec![
+    let ordered_trace_rows = vec![vec![
         ProofBaseFieldElement::from_canonical(constant_value)
             .expect("the toy source coefficient is canonical"),
     ]];
@@ -536,7 +788,7 @@ fn test_setup_polynomial_tree(
         context: &context,
         evaluation_domain_size: EVALUATION_DOMAIN_SIZE as usize,
         source_polynomial_degree_bound_exclusive: OPENING_DEGREE_BOUND_EXCLUSIVE as usize,
-        ordered_coefficient_columns: &ordered_coefficient_columns,
+        ordered_trace_rows: &ordered_trace_rows,
     })
     .expect("the public-polynomial LDE tree is canonical")
 }
@@ -544,6 +796,16 @@ fn test_setup_polynomial_tree(
 struct NoVerifiedSequenceColumns;
 
 impl VerifiedRelationColumnEvaluator for NoVerifiedSequenceColumns {
+    fn memory_accounting(
+        &self,
+    ) -> Result<VerifiedRelationColumnEvaluatorMemoryAccounting, CommonProofVerifierError> {
+        VerifiedRelationColumnEvaluatorMemoryAccounting::new(
+            core::mem::size_of::<Self>() as u64,
+            0,
+            0,
+        )
+    }
+
     fn evaluate_at_extension_point(
         &mut self,
         _column_ordinal: u32,
@@ -1119,7 +1381,18 @@ fn verify_fixture_proof(
 fn generate_fixture_proof(fixture: &mut CommonProofEngineFixture) -> Vec<u8> {
     let mut external_memory =
         BoundedInMemoryExternalMemory::new(MAXIMUM_EXTERNAL_MEMORY_BYTE_LENGTH);
-    let mut private_coins = BoundedDeterministicTestPrivateCoins::new(1_024, 1_024 * 1_024);
+    let family_schema_identifier = CanonicalTuple::decode(
+        &fixture.canonical_application_statement_bytes,
+        &CanonicalDecodeLimits::default(),
+    )
+    .expect("the public aggregate statement is canonical")
+    .schema_identifier;
+    let mut public_only_source = PublicOnlyCommonProofCoinSource::new(
+        family_schema_identifier,
+        Hash512::from_bytes([0x51; Hash512::BYTE_LENGTH]),
+        [0x52; 32],
+    )
+    .expect("the public aggregate fixture has no private proof-coin domain");
     let mut sink = BoundedCommonProofByteSink::new(MAXIMUM_PROOF_BYTE_LENGTH)
         .expect("the bounded proof sink initializes");
     generate_common_proof(
@@ -1141,7 +1414,7 @@ fn generate_fixture_proof(fixture: &mut CommonProofEngineFixture) -> Vec<u8> {
             maximum_prefetched_query_byte_length: MAXIMUM_PROOF_BYTE_LENGTH as u64,
         },
         &mut external_memory,
-        &mut private_coins,
+        &mut public_only_source,
         &mut sink,
     )
     .expect("the checked public aggregate relation produces one complete canonical proof");

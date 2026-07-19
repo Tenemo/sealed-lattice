@@ -18,6 +18,46 @@ pub(crate) fn key_switch_special_basis_modulus_product() -> BigUint {
         .product()
 }
 
+/// Requires the special-basis modulus to strictly dominate every active
+/// decomposition-block modulus. Hybrid modulus down relies on this inequality;
+/// equality is not sufficient for centered reconstruction.
+pub(crate) fn validate_key_switch_special_basis_dominates_data_blocks(
+    data_moduli: &[u64],
+    special_moduli: &[u64],
+    data_primes_per_block: usize,
+) -> CanonicalResult<()> {
+    if data_moduli.is_empty()
+        || special_moduli.is_empty()
+        || data_primes_per_block == 0
+        || data_moduli
+            .iter()
+            .chain(special_moduli)
+            .any(|modulus| *modulus < 2)
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidProtocolObject,
+            "hybrid key-switch dominance requires non-empty valid moduli and a positive block size",
+        ));
+    }
+    let special_basis_modulus = special_moduli
+        .iter()
+        .map(|modulus| BigUint::from(*modulus))
+        .product::<BigUint>();
+    for data_block in data_moduli.chunks(data_primes_per_block) {
+        let data_block_modulus = data_block
+            .iter()
+            .map(|modulus| BigUint::from(*modulus))
+            .product::<BigUint>();
+        if special_basis_modulus <= data_block_modulus {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidProtocolObject,
+                "hybrid key-switch special basis does not strictly dominate an active data block",
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Canonical little-endian residue width for one modulus-owned stream.
 ///
 /// The modulus is suite-owned, so the payload does not repeat this width.
@@ -72,6 +112,12 @@ impl KeySwitchDecompositionTopology {
                 "hybrid key-switch block size must be positive",
             ));
         }
+
+        validate_key_switch_special_basis_dominates_data_blocks(
+            &DATA_PRIMES[..data_prime_count],
+            &KEY_SWITCH_SPECIAL_PRIMES,
+            data_primes_per_block,
+        )?;
 
         let data_block_ranges: Vec<Range<usize>> = (0..data_prime_count)
             .step_by(data_primes_per_block)
@@ -258,6 +304,57 @@ mod tests {
     }
 
     #[test]
+    fn special_basis_dominance_is_strict_and_covers_every_active_block() {
+        assert!(
+            validate_key_switch_special_basis_dominates_data_blocks(&[2, 3, 5], &[7], 2).is_ok()
+        );
+        assert!(
+            validate_key_switch_special_basis_dominates_data_blocks(&[2, 3], &[6], 2).is_err(),
+            "an equal special and data-block product must be rejected"
+        );
+        assert!(
+            validate_key_switch_special_basis_dominates_data_blocks(&[2, 3], &[5], 2).is_err(),
+            "a smaller special-basis product must be rejected"
+        );
+        assert!(
+            validate_key_switch_special_basis_dominates_data_blocks(&[2, 3, 5], &[5], 2).is_err(),
+            "every block, not only the final partial block, must be dominated"
+        );
+        assert!(validate_key_switch_special_basis_dominates_data_blocks(&[], &[7], 1).is_err());
+        assert!(validate_key_switch_special_basis_dominates_data_blocks(&[2], &[], 1).is_err());
+        assert!(validate_key_switch_special_basis_dominates_data_blocks(&[2], &[7], 0).is_err());
+        assert!(validate_key_switch_special_basis_dominates_data_blocks(&[1], &[7], 1).is_err());
+    }
+
+    #[test]
+    fn every_level_and_block_size_matches_the_exact_dominance_inequality() {
+        let special_basis_modulus_product = key_switch_special_basis_modulus_product();
+        for level in 0..DATA_PRIMES.len() {
+            for data_primes_per_block in 1..=DATA_PRIMES.len() + 1 {
+                let expected_to_pass =
+                    DATA_PRIMES[..=level]
+                        .chunks(data_primes_per_block)
+                        .all(|data_block| {
+                            let data_block_modulus_product = data_block
+                                .iter()
+                                .map(|modulus| BigUint::from(*modulus))
+                                .product::<BigUint>();
+                            special_basis_modulus_product > data_block_modulus_product
+                        });
+                assert_eq!(
+                    KeySwitchDecompositionTopology::for_level_with_data_primes_per_block(
+                        level,
+                        data_primes_per_block,
+                    )
+                    .is_ok(),
+                    expected_to_pass,
+                    "dominance decision drifted at level {level} and block size {data_primes_per_block}",
+                );
+            }
+        }
+    }
+
+    #[test]
     fn component_lengths_distinguish_compact_wire_bytes_from_resident_words() {
         let topology = KeySwitchDecompositionTopology::for_level_with_data_primes_per_block(
             DATA_PRIMES.len() - 1,
@@ -281,7 +378,7 @@ mod tests {
     }
 
     #[test]
-    fn selected_topology_keeps_exact_three_block_geometry_when_special_modulus_is_smaller() {
+    fn selected_topology_keeps_exact_three_block_geometry_with_dominating_special_modulus() {
         let topology = KeySwitchDecompositionTopology::for_level(DATA_PRIMES.len() - 1)
             .expect("full selected topology");
         let special_basis_modulus_product = key_switch_special_basis_modulus_product();
@@ -290,10 +387,15 @@ mod tests {
         assert_eq!(topology.data_block_range(0).expect("block zero"), 0..10);
         assert_eq!(topology.data_block_range(1).expect("block one"), 10..20);
         assert_eq!(topology.data_block_range(2).expect("block two"), 20..26);
-        let largest_block_product = DATA_PRIMES[10..20]
-            .iter()
-            .map(|modulus| BigUint::from(*modulus))
-            .product::<BigUint>();
-        assert!(largest_block_product > special_basis_modulus_product);
+        for block_index in 0..topology.data_block_count() {
+            let block_range = topology
+                .data_block_range(block_index)
+                .expect("selected block range");
+            let data_block_modulus_product = DATA_PRIMES[block_range]
+                .iter()
+                .map(|modulus| BigUint::from(*modulus))
+                .product::<BigUint>();
+            assert!(special_basis_modulus_product > data_block_modulus_product);
+        }
     }
 }

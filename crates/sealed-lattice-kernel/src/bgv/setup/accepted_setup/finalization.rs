@@ -4,8 +4,9 @@ use crate::{
     bgv::parameters::{DATA_PRIMES, POLYNOMIAL_DEGREE},
     foundation::{
         CanonicalItem, FOUNDATION_PROFILE, Hash512, ParticipantIdentity, RefusalReason,
-        VerifiedStateReservation, commit_accepted_setup_state_reservations,
-        hash_foundation_tuple_512,
+        VerifiedSetupComplaintResolutionReservationHandle, VerifiedStateReservation,
+        commit_accepted_setup_state_reservations, consume_verified_setup_complaint_resolution,
+        hash_foundation_tuple_512, with_reserved_verified_setup_complaint_resolution,
     },
 };
 
@@ -39,6 +40,8 @@ pub(in crate::bgv) struct VerifiedAcceptedSetupFinalizationInput {
     pub(in crate::bgv) package: CanonicalAcceptedSetupPackage,
     pub(in crate::bgv) vss_qualification: VerifiedAcceptedSetupVssQualification,
     pub(in crate::bgv) public_proof_catalog: VerifiedAcceptedSetupPublicProofCatalog,
+    pub(in crate::bgv) complaint_resolution_handle:
+        VerifiedSetupComplaintResolutionReservationHandle,
 }
 
 struct VerifiedAcceptedSetupFinalizationPreflight {
@@ -60,6 +63,8 @@ struct VerifiedAcceptedSetupFinalizationPreflight {
     collective_public_key_full_object_digest: [u8; Hash512::BYTE_LENGTH],
     collective_public_key_b_polynomials: Vec<std::sync::Arc<[u64]>>,
     public_setup_seed: [u8; Hash512::BYTE_LENGTH],
+    accepted_setup_consumed_object_byte_lengths:
+        VerifiedAcceptedSetupConsumedObjectByteLengthCatalog,
 }
 
 /// Publishes one accepted setup and consumes its reset-safe state reservations
@@ -169,6 +174,7 @@ pub(in crate::bgv) fn finalize_verified_accepted_setup(
                 package: _,
                 vss_qualification,
                 public_proof_catalog,
+                complaint_resolution_handle,
             } = input
                 .borrow_mut()
                 .take()
@@ -178,6 +184,7 @@ pub(in crate::bgv) fn finalize_verified_accepted_setup(
                 _vss_qualification_terminals,
                 participant_release_materials,
                 local_target_release_source,
+                private_vss_mailbox_byte_lengths,
             ) = vss_qualification.into_finalization_parts();
             let (collective_public_key_terminal, verified_evaluator_key_store) =
                 public_proof_catalog.into_authority_material();
@@ -201,14 +208,23 @@ pub(in crate::bgv) fn finalize_verified_accepted_setup(
                     .collective_public_key_full_object_digest,
                 collective_public_key_b_polynomials: preflight.collective_public_key_b_polynomials,
                 public_setup_seed: preflight.public_setup_seed,
+                accepted_setup_consumed_object_byte_lengths: preflight
+                    .accepted_setup_consumed_object_byte_lengths,
+                private_vss_mailbox_byte_lengths,
             };
-            Ok(preflight
-                .destination
-                .take()
-                .expect("authority destination was reserved before source consumption")
-                .complete(authority_input, verified_evaluator_key_store))
+            Ok((
+                preflight
+                    .destination
+                    .take()
+                    .expect("authority destination was reserved before source consumption")
+                    .complete(authority_input, verified_evaluator_key_store),
+                complaint_resolution_handle,
+            ))
         },
-        |prepared_authority| prepared_authority.commit(),
+        |(prepared_authority, complaint_resolution_handle)| {
+            consume_verified_setup_complaint_resolution(&complaint_resolution_handle);
+            prepared_authority.commit()
+        },
     )
 }
 
@@ -225,7 +241,7 @@ fn preflight_verified_accepted_setup_finalization(
     let public_proof_catalog = &input.public_proof_catalog;
     let participant_target_release_sources =
         slice::from_ref(vss_qualification.local_target_release_source());
-    validate_package_and_verified_sources(
+    let accepted_setup_consumed_object_byte_lengths = validate_package_and_verified_sources(
         package,
         public_randomness,
         vss_qualification.qualification_terminals(),
@@ -235,6 +251,21 @@ fn preflight_verified_accepted_setup_finalization(
     )?;
 
     let context = public_randomness.context();
+    with_reserved_verified_setup_complaint_resolution(
+        &input.complaint_resolution_handle,
+        |resolution| {
+            resolution.require_matches(
+                context.suite_identifier(),
+                context.manifest_hash(),
+                context.ceremony_context_hash(),
+                context.action_context_hash(),
+                context.roster_hash(),
+                package.private_share_acceptance_object_hashes(),
+            )
+        },
+    )
+    .map_err(|_| refusal_status(RefusalReason::ConsumedState))?
+    .map_err(refusal_status)?;
     let setup_package_hash = package.setup_package_hash();
     let expected_terminal_package_authorization_hash = setup_terminal_package_authorization_hash(
         context.suite_identifier(),
@@ -304,6 +335,7 @@ fn preflight_verified_accepted_setup_finalization(
             .collective_public_key_b_polynomials()
             .to_vec(),
         public_setup_seed,
+        accepted_setup_consumed_object_byte_lengths,
     })
 }
 
@@ -314,10 +346,10 @@ fn validate_package_and_verified_sources(
     public_proof_catalog: &VerifiedAcceptedSetupPublicProofCatalog,
     participant_release_materials: &[VerifiedAcceptedSetupParticipantReleaseMaterial],
     participant_target_release_sources: &[VerifiedAcceptedSetupParticipantTargetReleaseSource],
-) -> Result<(), u32> {
+) -> Result<VerifiedAcceptedSetupConsumedObjectByteLengthCatalog, u32> {
     let participant_count = usize::from(FOUNDATION_PROFILE.participant_count);
     let context = public_randomness.context();
-    let _verified_consumed_object_byte_lengths =
+    let verified_consumed_object_byte_lengths =
         VerifiedAcceptedSetupConsumedObjectByteLengthCatalog::from_verified_terminals(
             package,
             public_randomness,
@@ -378,7 +410,7 @@ fn validate_package_and_verified_sources(
     {
         return Err(refusal_status(RefusalReason::WrongContext));
     }
-    Ok(())
+    Ok(verified_consumed_object_byte_lengths)
 }
 
 fn setup_action_randomness_authorization_hash(

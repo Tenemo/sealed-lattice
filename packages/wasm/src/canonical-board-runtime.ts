@@ -185,6 +185,13 @@ type VerifiedTranscriptObjectKernelAuthorization = Readonly<{
     sessionHandle: number;
 }>;
 
+export type CanonicalBoardVerifierSessionKernelAuthorization = Readonly<{
+    capabilityByteLength: number;
+    capabilityMemory: WebAssembly.Memory;
+    capabilityPointer: number;
+    sessionHandle: number;
+}>;
+
 export const resolveVerifiedTranscriptObjectKernelAuthorization = (
     object: VerifiedTranscriptObject,
     kernel: TranscriptCoreKernel,
@@ -620,6 +627,25 @@ class CanonicalBoardVerifierSessionImplementation implements CanonicalBoardVerif
         return this.#state;
     }
 
+    public sessionKernelAuthorization(
+        kernel: TranscriptCoreKernel,
+    ): CanonicalBoardVerifierSessionKernelAuthorization {
+        if (this.#state !== 'active' || this.#capabilityPointer === 0) {
+            throw new TypeError('The canonical-board session is unavailable.');
+        }
+        if (kernel !== this.#kernel) {
+            throw new TypeError(
+                'The canonical-board session belongs to another WASM kernel.',
+            );
+        }
+        return Object.freeze({
+            capabilityByteLength: boardVerifierCapabilityByteLength,
+            capabilityMemory: this.#context.memory,
+            capabilityPointer: this.#capabilityPointer,
+            sessionHandle: this.#handle,
+        });
+    }
+
     public kernelAuthorization(
         record: VerifiedObjectRecord,
         kernel: TranscriptCoreKernel,
@@ -988,6 +1014,18 @@ class CanonicalBoardVerifierSessionImplementation implements CanonicalBoardVerif
         return { record };
     }
 }
+
+export const resolveCanonicalBoardVerifierSessionKernelAuthorization = (
+    session: CanonicalBoardVerifierSession,
+    kernel: TranscriptCoreKernel,
+): CanonicalBoardVerifierSessionKernelAuthorization => {
+    if (!(session instanceof CanonicalBoardVerifierSessionImplementation)) {
+        throw new TypeError(
+            'The canonical-board session was not issued by this runtime.',
+        );
+    }
+    return session.sessionKernelAuthorization(kernel);
+};
 
 export const openCanonicalBoardVerifierSession = (input: {
     readonly contextInput: CanonicalBoardContextInput;

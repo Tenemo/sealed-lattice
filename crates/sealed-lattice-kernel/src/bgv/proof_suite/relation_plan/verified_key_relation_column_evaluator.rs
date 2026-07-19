@@ -15,6 +15,7 @@ use crate::{
 use super::super::{
     OpenedFriLayerPair, ProofBaseFieldElement, ProofChallengeExtensionElement,
     ProofEvaluationDomain, ValidatedRelationPlanArtifact, VerifiedRelationColumnEvaluator,
+    VerifiedRelationColumnEvaluatorMemoryAccounting,
 };
 use super::{
     ModulusCatalog, RelationColumnOrigin, RelationColumnValueType, RelationPlanCheckContext,
@@ -298,6 +299,62 @@ impl VerifiedKeyRelationColumnEvaluator {
 }
 
 impl VerifiedRelationColumnEvaluator for VerifiedKeyRelationColumnEvaluator {
+    fn memory_accounting(
+        &self,
+    ) -> Result<
+        VerifiedRelationColumnEvaluatorMemoryAccounting,
+        super::super::CommonProofVerifierError,
+    > {
+        let checked_payload = |count: usize, value_byte_length: usize| {
+            u64::try_from(count)
+                .ok()
+                .and_then(|count| {
+                    u64::try_from(value_byte_length)
+                        .ok()
+                        .and_then(|width| count.checked_mul(width))
+                })
+                .ok_or(super::super::CommonProofVerifierError::InvalidTreeLayout)
+        };
+        let fixed_and_input_resident_byte_length = u64::try_from(core::mem::size_of::<Self>())
+            .ok()
+            .and_then(|fixed| {
+                self.relation_plan_variant
+                    .resident_owned_payload_byte_length()
+                    .ok()
+                    .and_then(|payload| fixed.checked_add(payload))
+            })
+            .and_then(|length| {
+                self.relation_context
+                    .resident_owned_payload_byte_length()
+                    .ok()
+                    .and_then(|payload| length.checked_add(payload))
+            })
+            .ok_or(super::super::CommonProofVerifierError::InvalidTreeLayout)?;
+        let coefficient_cache_byte_length = checked_payload(
+            self.trace_domain.size(),
+            core::mem::size_of::<ProofBaseFieldElement>(),
+        )?;
+        let evaluation_cache_byte_length = checked_payload(
+            usize::try_from(self.relation_plan_variant.evaluation_domain_size())
+                .map_err(|_| super::super::CommonProofVerifierError::InvalidTreeLayout)?,
+            core::mem::size_of::<ProofBaseFieldElement>(),
+        )?;
+        let maximum_cached_column_resident_byte_length = coefficient_cache_byte_length
+            .checked_add(evaluation_cache_byte_length)
+            .ok_or(super::super::CommonProofVerifierError::InvalidTreeLayout)?;
+        // Changing columns retains the previous cache while the new verifier
+        // sequence and its trace-domain projection are derived.
+        let maximum_evaluation_transient_byte_length =
+            checked_payload(self.ring_degree, core::mem::size_of::<u64>())?
+                .checked_add(coefficient_cache_byte_length)
+                .ok_or(super::super::CommonProofVerifierError::InvalidTreeLayout)?;
+        VerifiedRelationColumnEvaluatorMemoryAccounting::new(
+            fixed_and_input_resident_byte_length,
+            maximum_cached_column_resident_byte_length,
+            maximum_evaluation_transient_byte_length,
+        )
+    }
+
     fn evaluate_at_extension_point(
         &mut self,
         column_ordinal: u32,

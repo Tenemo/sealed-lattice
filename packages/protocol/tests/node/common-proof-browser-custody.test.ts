@@ -797,6 +797,8 @@ describe('Common-proof browser custody', () => {
         await first.custody.checkpointCustody?.publishAuthenticatedCheckpoint({
             canonicalStateBytes: checkpointState,
             privateRandomCursorManifestBytes: cursorBytes,
+            privateRandomnessStreamAttemptIdentifier:
+                proofAttemptLineageIdentifier.slice(),
             safeBoundaryOrdinal: 6,
             stableAttemptBindingHash: new Uint8Array(64).fill(0x31),
         });
@@ -921,6 +923,8 @@ describe('Common-proof browser custody', () => {
             canonicalStateBytes: new Uint8Array(64).fill(0x17),
             privateRandomCursorManifestBytes:
                 emptyPrivateRandomCursorManifest(),
+            privateRandomnessStreamAttemptIdentifier:
+                proofAttemptLineageIdentifier.slice(),
             safeBoundaryOrdinal: 2,
             stableAttemptBindingHash: new Uint8Array(64).fill(0x29),
         });
@@ -999,6 +1003,8 @@ describe('Common-proof browser custody', () => {
             canonicalStateBytes: new Uint8Array(128).fill(0x41),
             privateRandomCursorManifestBytes:
                 emptyPrivateRandomCursorManifest(),
+            privateRandomnessStreamAttemptIdentifier:
+                proofAttemptLineageIdentifier.slice(),
             safeBoundaryOrdinal: 3,
             stableAttemptBindingHash: new Uint8Array(64).fill(0x52),
         });
@@ -1225,6 +1231,8 @@ describe('Common-proof browser custody', () => {
             canonicalStateBytes: new Uint8Array(97).fill(0x61),
             privateRandomCursorManifestBytes:
                 emptyPrivateRandomCursorManifest(),
+            privateRandomnessStreamAttemptIdentifier:
+                proofAttemptLineageIdentifier.slice(),
             safeBoundaryOrdinal: 4,
             stableAttemptBindingHash: new Uint8Array(64).fill(0x72),
         });

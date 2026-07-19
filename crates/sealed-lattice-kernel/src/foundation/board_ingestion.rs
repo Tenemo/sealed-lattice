@@ -202,6 +202,10 @@ enum ProducerSlot {
         producer_participant_id: ParticipantIdentity,
         producer_sequence: u64,
     },
+    SetupVssResponse {
+        producer_participant_id: ParticipantIdentity,
+        producer_sequence: u64,
+    },
     StatefulSubject {
         object_type: FoundationObjectType,
         state_key: Hash512,
@@ -342,6 +346,51 @@ impl CanonicalBoardVerifier {
 
     pub(crate) const fn roster_hash(&self) -> Hash512 {
         self.roster_hash
+    }
+
+    /// Returns the exact frozen-roster VSS response catalog only when every
+    /// participant's shared response slot contains one authenticated
+    /// acceptance. A complaint and an acceptance share that slot, so neither
+    /// batch order nor later delivery can replace a verified complaint with a
+    /// positive response.
+    pub(crate) fn complete_setup_vss_acceptance_object_hashes(
+        &self,
+    ) -> Result<Vec<Hash512>, CanonicalBoardError> {
+        let mut ordered_acceptance_object_hashes = Vec::with_capacity(self.roster.entries.len());
+        for entry in &self.roster.entries {
+            let participant_identity = entry.participant_identity()?;
+            let response_slot = ProducerSlot::SetupVssResponse {
+                producer_participant_id: participant_identity,
+                producer_sequence: 0,
+            };
+            let object_hash = self
+                .object_hashes_by_producer_slot
+                .get(&response_slot)
+                .copied()
+                .ok_or_else(CanonicalBoardError::missing_prerequisite)?;
+            let response = self
+                .objects_by_hash
+                .get(&object_hash)
+                .ok_or_else(CanonicalBoardError::missing_prerequisite)?;
+            match response.envelope.object_type {
+                FoundationObjectType::PrivateShareAcceptance => {
+                    ordered_acceptance_object_hashes.push(object_hash);
+                }
+                FoundationObjectType::Complaint => {
+                    return Err(CanonicalBoardError::new(
+                        RefusalReason::InvalidArithmeticRelation,
+                        "a verified VSS complaint prevents setup acceptance",
+                    ));
+                }
+                _ => {
+                    return Err(CanonicalBoardError::new(
+                        RefusalReason::WrongTypeOrLength,
+                        "a setup VSS response slot contains the wrong object family",
+                    ));
+                }
+            }
+        }
+        Ok(ordered_acceptance_object_hashes)
     }
 
     pub fn verify_unordered_carriers<Carrier: AsRef<[u8]>>(
@@ -640,6 +689,13 @@ impl CanonicalBoardVerifier {
             }),
             state_intent: None,
         };
+        let setup_vss_response_slot = |producer_participant_id| ResolvedSemantics {
+            producer_slot: Some(ProducerSlot::SetupVssResponse {
+                producer_participant_id,
+                producer_sequence: envelope.producer_sequence,
+            }),
+            state_intent: None,
+        };
 
         match &parsed.payload {
             TypedPayload::SetupIntent => {
@@ -673,7 +729,7 @@ impl CanonicalBoardVerifier {
             TypedPayload::PrivateShareAcceptance => {
                 let producer = self.require_signed_envelope(envelope, 0)?;
                 require_sequence(envelope, 0)?;
-                Ok(participant_slot(producer))
+                Ok(setup_vss_response_slot(producer))
             }
             TypedPayload::Complaint {
                 accused_participant_id,
@@ -681,7 +737,7 @@ impl CanonicalBoardVerifier {
                 let producer = self.require_signed_envelope(envelope, 0)?;
                 require_sequence(envelope, 0)?;
                 self.roster_position(*accused_participant_id)?;
-                Ok(participant_slot(producer))
+                Ok(setup_vss_response_slot(producer))
             }
             TypedPayload::DealerPublicRecord {
                 dealer_roster_position,

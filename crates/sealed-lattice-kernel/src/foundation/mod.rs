@@ -3,10 +3,6 @@
 mod authenticated_mailbox;
 mod board_ingestion;
 mod board_ingestion_ffi;
-#[expect(
-    dead_code,
-    reason = "the board runtime keeps opaque application-source resolution compiled for later exact-family adapters"
-)]
 mod board_ingestion_runtime;
 mod canonical_stream;
 mod canonical_stream_runtime;
@@ -20,10 +16,6 @@ mod ceremony;
     )
 )]
 mod finality;
-#[expect(
-    dead_code,
-    reason = "the finality runtime keeps the later evaluator-replay capability bridge compiled while that operation remains unavailable"
-)]
 mod finality_runtime;
 mod hash;
 mod local_encrypted_storage;
@@ -50,6 +42,7 @@ mod runtime_input;
 )]
 mod schemas;
 mod selected_suite;
+mod setup_transcript_runtime;
 mod state;
 mod state_runtime;
 mod suite;
@@ -71,9 +64,11 @@ pub use board_ingestion::{
 };
 pub(crate) use board_ingestion_runtime::{
     BOARD_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH, VerifiedBallotPackageApplicationPayload,
-    VerifiedBoardApplicationSource, VerifiedDealerPublicRecordApplicationPayload,
-    VerifiedPrivateShareAcceptanceApplicationPayload, resolve_verified_action_top_count,
-    resolve_verified_board_application_sources, resolve_verified_transcript_objects,
+    VerifiedBoardApplicationSource, VerifiedSetupComplaintResolutionReservationHandle,
+    consume_verified_setup_complaint_resolution, reserve_verified_setup_complaint_resolution,
+    resolve_verified_action_top_count, resolve_verified_board_application_sources,
+    resolve_verified_transcript_objects, restore_verified_setup_complaint_resolution,
+    with_reserved_verified_setup_complaint_resolution,
 };
 pub use canonical_stream::{
     CanonicalStreamDomain, CanonicalStreamVerifier, CanonicalStreamWriter,
@@ -81,10 +76,8 @@ pub use canonical_stream::{
 };
 pub(crate) use canonical_stream::{
     CanonicalStreamReadbackVerifier, VerifiedCanonicalStreamSummary,
-    VerifiedTargetReleaseOutputBundle,
 };
 pub(crate) use canonical_stream_runtime::{
-    CANONICAL_STREAM_RUNTIME_INTERNAL_FAILURE, CANONICAL_STREAM_RUNTIME_INVALID_SESSION,
     CanonicalStreamRuntimeBegin, absorb_canonical_stream_chunk, begin_canonical_stream_verifier,
     begin_canonical_stream_writer, cancel_canonical_stream, finish_canonical_stream_verifier,
     finish_canonical_stream_verifier_with_summary, finish_canonical_stream_writer,
@@ -104,9 +97,6 @@ pub use finality::{
     FINALITY_SIGNER_INPUT_SCHEMA_IDENTIFIER, FINALITY_STATEMENT_SCHEMA_IDENTIFIER,
     FinalityCertificate, FinalitySignaturePayload, FinalitySignerInput, FinalityStatement,
     FinalityVerificationInput, FinalityVerifier, VerifiedEvaluatorReplay, VerifiedFinality,
-};
-pub(crate) use finality::{
-    VerifiedFinalityCarrierByteLengths, VerifiedFinalitySignerCarrierByteLengths,
 };
 pub(crate) use finality_runtime::{
     FINALITY_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH, VERIFIED_FINALITY_DESCRIPTION_BYTE_LENGTH,
@@ -169,21 +159,17 @@ pub(crate) use private_randomness::{
     private_randomness_stream_block_count_for_bit_length,
     private_randomness_stream_block_count_for_byte_length,
     private_randomness_stream_block_count_for_modulo_outputs,
-    private_randomness_stream_block_count_for_rejection_sampling,
     proof_attempt_identifier_derivation_count,
-    selected_action_root_private_randomness_kmac_input_accounting,
 };
 pub(crate) use private_randomness_runtime::{
     ACTION_RANDOMNESS_RUNTIME_RESOURCE_LIMIT, ACTION_RANDOMNESS_RUNTIME_STALE_HANDLE,
     AuthenticatedCheckpointContinuationSource, PreparedActionProofAttemptSource,
-    WitnessBoundPreparedActionProofAttemptSource,
+    PreparedPublicOnlyProofAttemptSource, WitnessBoundPreparedActionProofAttemptSource,
     bind_prepared_action_proof_attempt_to_canonical_witness,
-    resolve_prepared_action_proof_attempt_source,
-    resolve_prepared_collective_action_proof_attempt_source,
-    resolve_prepared_ordinary_proof_attempt_source,
+    resolve_prepared_action_proof_attempt_source, resolve_prepared_ordinary_proof_attempt_source,
+    resolve_prepared_public_only_proof_attempt_source,
     resolve_setup_action_randomness_reservation_source,
     retain_action_private_randomness_for_exact_family, run_action_randomness_command,
-    selected_setup_transport_private_randomness_kmac_input_accounting,
 };
 pub use proof_application::{
     PROOF_APPLICATION_BINDING_SCHEMA_IDENTIFIER, PROOF_OBJECT_HEADER_SCHEMA_IDENTIFIER,
@@ -191,8 +177,6 @@ pub use proof_application::{
     ProofFamilyApplicationCeiling, ProofObjectHeader,
 };
 pub use refusal::{RefusalReason, VerificationResult};
-#[cfg(test)]
-pub(crate) use schemas::PROTOTYPE_PARTICIPANT_COUNT;
 pub(crate) use schemas::{AggregatePayload, encode_evaluator_replay_carrier};
 pub use schemas::{
     FOUNDATION_PROFILE, FoundationObjectType, FoundationProfile, FoundationRosterParameters,
@@ -203,20 +187,20 @@ pub use schemas::{
     SIGNED_CARRIER_SCHEMA_IDENTIFIER, STREAM_DESCRIPTOR_SCHEMA_IDENTIFIER, SignedCarrier,
     StreamDescriptor, derive_foundation_roster_parameters, signature_message,
 };
-#[cfg(test)]
-pub(crate) use selected_suite::selected_suite_capability_for_tests;
 pub(crate) use selected_suite::{
     SELECTED_MAXIMUM_BALLOT_ATTEMPTS_PER_PARTICIPANT,
     SELECTED_MAXIMUM_CANDIDATE_PACKAGES_PER_ACTION,
     SELECTED_MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT,
-    SelectedEvaluatorResourceAccounting, selected_evaluator_resource_accounting,
-    selected_maximum_proof_objects_per_action,
+    SELECTED_MAXIMUM_PUBLIC_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT,
+    selected_evaluator_resource_accounting,
 };
 pub(crate) use selected_suite::{SelectedSuiteCapability, select_suite_record};
-pub(crate) use state::{
-    PreparedStateReservationIntent, VerifiedStateOutputCarrierByteLengths,
-    VerifiedStateReservationCarrierByteLengths, VerifiedStateWitnessCarrierByteLength,
+#[cfg(test)]
+pub(crate) use selected_suite::{
+    selected_maximum_proof_objects_per_action, selected_suite_capability_for_tests,
 };
+pub(crate) use setup_transcript_runtime::derive_public_randomness_contribution_commitment;
+pub(crate) use state::PreparedStateReservationIntent;
 pub use state::{
     STATE_CERTIFICATE_SCHEMA_IDENTIFIER, STATE_OUTPUT_INTENT_SCHEMA_IDENTIFIER,
     STATE_RESERVATION_INTENT_SCHEMA_IDENTIFIER, STATE_WITNESS_VOTE_SCHEMA_IDENTIFIER,
@@ -238,17 +222,11 @@ pub(crate) use state_runtime::{
     verify_state_reservation, verify_state_reservation_intent, with_verified_state_reservation,
     with_verified_state_reservation_and_output,
 };
+pub(crate) use suite::selected_sharing_data_prime_coordinates;
 pub(crate) use suite::selected_target_data_prime_coordinates;
 pub use suite::{
     ARTIFACT_REFERENCE_SCHEMA_IDENTIFIER, ArtifactKind, ArtifactReference,
     DISTRIBUTION_RECORD_SCHEMA_IDENTIFIER, DistributionKind, DistributionPurpose,
     DistributionRecord, SUITE_RECORD_SCHEMA_IDENTIFIER, SuiteCountLimits, SuiteRecord,
-};
-#[cfg(test)]
-pub(crate) use suite_artifacts::{
-    selected_encoder_and_ballot_layout_artifact_bytes, selected_evaluator_program_artifact_bytes,
-    selected_lattice_commitment_profile_artifact_bytes, selected_proof_profile_artifact_bytes,
-    selected_target_decryption_profile_artifact_bytes,
-    selected_verifiable_secret_sharing_profile_artifact_bytes,
 };
 pub use text::{DisplayTextError, StabilizedDisplayText};

@@ -1,5 +1,6 @@
 import {
     BrowserActionStorageCustodyError,
+    foundationProfile,
     stateCapabilityKinds,
     type BrowserActionProofAttemptBinding,
     type BrowserActionRandomnessReservationCertificationInput,
@@ -38,12 +39,20 @@ import {
 } from '../aggregate-threshold-share-authenticated-recipient.js';
 import { byteArraysEqual } from '../byte-array.js';
 import {
+    resolveVerifiedTranscriptObjectKernelAuthorization,
+    type VerifiedTranscriptObject,
+} from '../canonical-board-runtime.js';
+import {
     abortVerifiedCommonProofApplication,
     confirmVerifiedCommonProofApplication,
     prepareVerifiedCommonProofApplication,
     type CommonProofApplicationFreshnessCoordinate,
     type VerifiedCommonProofCapability,
 } from '../common-proof-worker-runtime.js';
+import {
+    resolveSetupGenerationAuthorityKernelAuthorization,
+    type BrowserOwnedSetupGenerationAuthority,
+} from '../setup-generation-recipient-payload.js';
 import {
     constructVerifiedStateWitnessVoteCarrierForWorker,
     openStateVerifierSession,
@@ -167,6 +176,10 @@ const localStorageRootStatuses = Object.freeze({
     wrongHashOrRoot: 0x0006,
     wrongTypeOrLength: 0x0005,
 } as const);
+
+const canonicalBoardCapabilityByteLength = 32;
+const preparedSetupCarrierDescriptionByteLength =
+    handleByteLength + foundationHashByteLength;
 
 type DecodedDeviceEnvelope = Readonly<{
     canonicalAssociatedData: Uint8Array<ArrayBuffer>;
@@ -568,11 +581,10 @@ export class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorag
             );
         }
 
-        const actionRandomnessSessionIdentifier =
-            requireOpaqueWorkerIdentifier(
-                identifiers.actionRandomnessSessionIdentifier,
-                'Action-randomness session identifier',
-            );
+        const actionRandomnessSessionIdentifier = requireOpaqueWorkerIdentifier(
+            identifiers.actionRandomnessSessionIdentifier,
+            'Action-randomness session identifier',
+        );
         const stateReservationIdentifier = requireOpaqueWorkerIdentifier(
             identifiers.stateReservationIdentifier,
             'State-reservation identifier',
@@ -611,8 +623,9 @@ export class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorag
             );
         }
 
-        const actionRandomnessContext =
-            resolveActionRandomnessKernelContext(this.#kernel);
+        const actionRandomnessContext = resolveActionRandomnessKernelContext(
+            this.#kernel,
+        );
         if (actionRandomnessContext !== this.#actionRandomnessContext) {
             throw new BrowserActionStorageCustodyError(
                 'OwnedWorkerFailure',
@@ -1716,6 +1729,402 @@ export class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorag
             });
         };
 
+        const requireSetupObjectSource = (): Readonly<{
+            reservation: Extract<
+                WorkerStateObject,
+                Readonly<{ kind: 'reservation' }>
+            >;
+            sessionHandle: number;
+        }> => {
+            if (revoked) {
+                throw new BrowserActionStorageCustodyError(
+                    'InvalidState',
+                    'The setup-object production capability was revoked.',
+                );
+            }
+            const binding = this.#requireActiveLease().binding;
+            return Object.freeze({
+                reservation: this.#requireStateReservation(
+                    stateReservationIdentifier,
+                    stateCapabilityKinds.setupActionRandomnessRoot,
+                    binding,
+                ),
+                sessionHandle: this.#requireActionRandomnessSession(
+                    actionRandomnessSessionIdentifier,
+                ),
+            });
+        };
+
+        const signSetupObject = ({
+            signatureMessageHash,
+        }: Readonly<{
+            signatureMessageHash: ProtocolHash;
+        }>): Uint8Array<ArrayBuffer> => {
+            const { reservation, sessionHandle } = requireSetupObjectSource();
+            const setupObjectReservationAuthorization =
+                this.#reservationAuthorizationBytes(reservation.value);
+            const signatureMessageHashBytes = protocolHashBytes(
+                signatureMessageHash,
+                'Setup-object signature-message hash',
+            );
+            let hedge: Uint8Array<ArrayBuffer> | undefined;
+            let providerContext: Uint8Array | undefined;
+            let providerHedge: Uint8Array | undefined;
+            let providerMessage: Uint8Array | undefined;
+            let providerSignature: Uint8Array | undefined;
+            try {
+                hedge = this.#runActionRandomnessCommand(
+                    actionRandomnessCommandIdentifiers.setupObjectSignatureHedge,
+                    concatenateBytes(
+                        encodeUnsigned32(sessionHandle),
+                        setupObjectReservationAuthorization,
+                        rosterHashBytes,
+                        signatureMessageHashBytes,
+                    ),
+                    'sign a reset-safe setup object',
+                    'runtime',
+                );
+                if (hedge.byteLength !== attemptIdentifierByteLength) {
+                    throw new BrowserActionStorageCustodyError(
+                        'OwnedWorkerFailure',
+                        'The WASM action-randomness kernel returned a malformed setup-object signature hedge.',
+                    );
+                }
+                providerContext = objectSignatureContext.slice();
+                providerHedge = hedge.slice();
+                providerMessage = signatureMessageHashBytes.slice();
+                providerSignature = input.signing.signClosedMessage({
+                    context: providerContext,
+                    hedge: providerHedge,
+                    message: providerMessage,
+                });
+                return copyExactBytes(
+                    providerSignature,
+                    mlDsa65SignatureByteLength,
+                    'Setup-object source signature',
+                );
+            } finally {
+                hedge?.fill(0);
+                providerContext?.fill(0);
+                providerHedge?.fill(0);
+                providerMessage?.fill(0);
+                providerSignature?.fill(0);
+                setupObjectReservationAuthorization.fill(0);
+                signatureMessageHashBytes.fill(0);
+            }
+        };
+
+        const authenticatedSetupObjectSourceInput =
+            (): Uint8Array<ArrayBuffer> => {
+                const { reservation, sessionHandle } =
+                    requireSetupObjectSource();
+                const setupSourceReservationAuthorization =
+                    this.#reservationAuthorizationBytes(reservation.value);
+                try {
+                    return concatenateBytes(
+                        encodeUnsigned32(sessionHandle),
+                        setupSourceReservationAuthorization,
+                    );
+                } finally {
+                    setupSourceReservationAuthorization.fill(0);
+                }
+            };
+
+        const encodeVerifiedBoardObjectAuthorization = (
+            objects: readonly VerifiedTranscriptObject[],
+        ): Uint8Array<ArrayBuffer> => {
+            if (!Array.isArray(objects) || objects.length === 0) {
+                throw new BrowserActionStorageCustodyError(
+                    'InvalidInput',
+                    'Setup transcript production requires verified canonical-board objects.',
+                );
+            }
+            const verifiedObjects =
+                objects as readonly VerifiedTranscriptObject[];
+            let expectedSessionHandle: number | undefined;
+            let expectedCapabilityPointer: number | undefined;
+            let capabilityBytes: Uint8Array<ArrayBuffer> | undefined;
+            const objectHandles = new Uint8Array(
+                verifiedObjects.length * handleByteLength,
+            );
+            const objectHandleView = new DataView(objectHandles.buffer);
+            try {
+                for (
+                    let objectIndex = 0;
+                    objectIndex < verifiedObjects.length;
+                    objectIndex += 1
+                ) {
+                    const authorization =
+                        resolveVerifiedTranscriptObjectKernelAuthorization(
+                            verifiedObjects[objectIndex],
+                            this.#kernel,
+                        );
+                    if (
+                        authorization.capabilityMemory !==
+                            this.#actionRandomnessContext.memory ||
+                        authorization.capabilityPointer <= 0 ||
+                        authorization.capabilityPointer +
+                            canonicalBoardCapabilityByteLength >
+                            authorization.capabilityMemory.buffer.byteLength ||
+                        authorization.objectHandle === 0
+                    ) {
+                        throw new BrowserActionStorageCustodyError(
+                            'OwnedWorkerFailure',
+                            'The canonical-board verifier returned malformed setup-object authorization.',
+                        );
+                    }
+                    if (expectedSessionHandle === undefined) {
+                        expectedSessionHandle = authorization.sessionHandle;
+                        expectedCapabilityPointer =
+                            authorization.capabilityPointer;
+                        capabilityBytes = new Uint8Array(
+                            authorization.capabilityMemory.buffer,
+                            authorization.capabilityPointer,
+                            canonicalBoardCapabilityByteLength,
+                        ).slice();
+                    } else if (
+                        authorization.sessionHandle !== expectedSessionHandle ||
+                        authorization.capabilityPointer !==
+                            expectedCapabilityPointer
+                    ) {
+                        throw new BrowserActionStorageCustodyError(
+                            'InvalidInput',
+                            'Setup transcript board objects must belong to one live verifier session.',
+                        );
+                    }
+                    objectHandleView.setUint32(
+                        objectIndex * handleByteLength,
+                        authorization.objectHandle,
+                        true,
+                    );
+                }
+                if (
+                    expectedSessionHandle === undefined ||
+                    capabilityBytes === undefined
+                ) {
+                    throw new BrowserActionStorageCustodyError(
+                        'OwnedWorkerFailure',
+                        'The canonical-board authorization was not retained.',
+                    );
+                }
+                return concatenateBytes(
+                    encodeUnsigned32(expectedSessionHandle),
+                    capabilityBytes,
+                    objectHandles,
+                );
+            } finally {
+                capabilityBytes?.fill(0);
+                objectHandles.fill(0);
+            }
+        };
+
+        const setupCarrierPreparationInput = (
+            verifiedBoardObjects?: readonly VerifiedTranscriptObject[],
+        ): Uint8Array<ArrayBuffer> => {
+            const sourceInput = authenticatedSetupObjectSourceInput();
+            if (verifiedBoardObjects === undefined) {
+                return sourceInput;
+            }
+            let boardAuthorization: Uint8Array<ArrayBuffer> | undefined;
+            try {
+                boardAuthorization =
+                    encodeVerifiedBoardObjectAuthorization(
+                        verifiedBoardObjects,
+                    );
+                return concatenateBytes(sourceInput, boardAuthorization);
+            } finally {
+                sourceInput.fill(0);
+                boardAuthorization?.fill(0);
+            }
+        };
+
+        const dealerPublicRecordCarrierPreparationInput = (carrierInput: {
+            readonly orderedRecipientEnvelopeHashes: readonly ProtocolHash[];
+            readonly proofDescriptorBytes: Uint8Array;
+            readonly setupGenerationAuthority: BrowserOwnedSetupGenerationAuthority;
+        }): Uint8Array<ArrayBuffer> => {
+            if (
+                !Array.isArray(carrierInput.orderedRecipientEnvelopeHashes) ||
+                carrierInput.orderedRecipientEnvelopeHashes.length !==
+                    foundationProfile.participantCount
+            ) {
+                throw new BrowserActionStorageCustodyError(
+                    'InvalidInput',
+                    `Dealer public-record production requires exactly ${String(foundationProfile.participantCount)} recipient envelope hashes in frozen-roster order.`,
+                );
+            }
+            const commonProofContext = resolveCommonProofKernelContext(
+                this.#kernel,
+            );
+            if (commonProofContext === undefined) {
+                throw new BrowserActionStorageCustodyError(
+                    'OwnedWorkerFailure',
+                    'The loaded WASM kernel has no setup-generation context.',
+                );
+            }
+            const setupGenerationAuthorization =
+                resolveSetupGenerationAuthorityKernelAuthorization(
+                    carrierInput.setupGenerationAuthority,
+                    commonProofContext,
+                );
+            let sourceInput: Uint8Array<ArrayBuffer> | undefined;
+            let setupGenerationAuthorityHandleBytes:
+                | Uint8Array<ArrayBuffer>
+                | undefined;
+            let proofDescriptorBytes: Uint8Array<ArrayBuffer> | undefined;
+            let proofDescriptorByteLength: Uint8Array<ArrayBuffer> | undefined;
+            let orderedRecipientEnvelopeHashBytes:
+                | Uint8Array<ArrayBuffer>
+                | undefined;
+            try {
+                sourceInput = authenticatedSetupObjectSourceInput();
+                setupGenerationAuthorityHandleBytes = encodeUnsigned32(
+                    setupGenerationAuthorization.handle,
+                );
+                proofDescriptorBytes = copyBoundedBytes(
+                    carrierInput.proofDescriptorBytes,
+                    'VSS proof descriptor',
+                );
+                proofDescriptorByteLength = encodeCanonicalUnsigned32(
+                    proofDescriptorBytes.byteLength,
+                    'VSS proof descriptor byte length',
+                );
+                orderedRecipientEnvelopeHashBytes = new Uint8Array(
+                    foundationProfile.participantCount *
+                        foundationHashByteLength,
+                );
+                for (
+                    let recipientIndex = 0;
+                    recipientIndex < foundationProfile.participantCount;
+                    recipientIndex += 1
+                ) {
+                    const envelopeHashBytes = protocolHashBytes(
+                        carrierInput.orderedRecipientEnvelopeHashes[
+                            recipientIndex
+                        ],
+                        `Recipient envelope hash at frozen-roster position ${String(recipientIndex)}`,
+                    );
+                    try {
+                        orderedRecipientEnvelopeHashBytes.set(
+                            envelopeHashBytes,
+                            recipientIndex * foundationHashByteLength,
+                        );
+                    } finally {
+                        envelopeHashBytes.fill(0);
+                    }
+                }
+                return concatenateBytes(
+                    sourceInput,
+                    setupGenerationAuthorityHandleBytes,
+                    proofDescriptorByteLength,
+                    proofDescriptorBytes,
+                    orderedRecipientEnvelopeHashBytes,
+                );
+            } finally {
+                sourceInput?.fill(0);
+                setupGenerationAuthorityHandleBytes?.fill(0);
+                proofDescriptorByteLength?.fill(0);
+                proofDescriptorBytes?.fill(0);
+                orderedRecipientEnvelopeHashBytes?.fill(0);
+            }
+        };
+
+        const cancelPreparedSetupCarrier = (preparedHandle: number): void => {
+            const output = this.#runActionRandomnessCommand(
+                actionRandomnessCommandIdentifiers.cancelSetupTranscriptCarrier,
+                encodeUnsigned32(preparedHandle),
+                'cancel a prepared setup transcript carrier',
+                'runtime',
+            );
+            try {
+                if (output.byteLength !== 0) {
+                    throw new BrowserActionStorageCustodyError(
+                        'OwnedWorkerFailure',
+                        'The WASM setup-carrier cancellation returned unexpected bytes.',
+                    );
+                }
+            } finally {
+                output.fill(0);
+            }
+        };
+
+        const prepareSignAndFinishSetupCarrier = (
+            preparationCommand: number,
+            preparationInput: Uint8Array<ArrayBuffer>,
+            operationName: string,
+        ): Uint8Array<ArrayBuffer> => {
+            let preparedDescription: Uint8Array<ArrayBuffer> | undefined;
+            let preparedHandle = 0;
+            let signature: Uint8Array<ArrayBuffer> | undefined;
+            try {
+                preparedDescription = this.#runActionRandomnessCommand(
+                    preparationCommand,
+                    preparationInput,
+                    `prepare ${operationName}`,
+                    'runtime',
+                );
+                if (
+                    preparedDescription.byteLength !==
+                    preparedSetupCarrierDescriptionByteLength
+                ) {
+                    throw new BrowserActionStorageCustodyError(
+                        'OwnedWorkerFailure',
+                        'The WASM setup-carrier preparation returned a malformed description.',
+                    );
+                }
+                preparedHandle = decodeUnsigned32(preparedDescription, 0);
+                if (preparedHandle === 0) {
+                    throw new BrowserActionStorageCustodyError(
+                        'OwnedWorkerFailure',
+                        'The WASM setup-carrier preparation returned a zero handle.',
+                    );
+                }
+                signature = signSetupObject({
+                    signatureMessageHash: bytesToHex(
+                        preparedDescription.subarray(handleByteLength),
+                    ),
+                });
+                const canonicalCarrier = this.#runActionRandomnessCommand(
+                    actionRandomnessCommandIdentifiers.finishSetupTranscriptCarrier,
+                    concatenateBytes(
+                        encodeUnsigned32(preparedHandle),
+                        signature,
+                    ),
+                    `finish ${operationName}`,
+                    'runtime',
+                );
+                preparedHandle = 0;
+                if (canonicalCarrier.byteLength === 0) {
+                    canonicalCarrier.fill(0);
+                    throw new BrowserActionStorageCustodyError(
+                        'OwnedWorkerFailure',
+                        'The WASM setup-carrier producer returned an empty carrier.',
+                    );
+                }
+                return canonicalCarrier;
+            } catch (error) {
+                if (preparedHandle !== 0) {
+                    try {
+                        cancelPreparedSetupCarrier(preparedHandle);
+                    } catch (cleanupError) {
+                        throw new BrowserActionStorageCustodyError(
+                            'OwnedWorkerFailure',
+                            'Setup-carrier production and cancellation both failed.',
+                            Object.freeze({
+                                cancellationFailure: cleanupError,
+                                productionFailure: error,
+                            }),
+                        );
+                    }
+                }
+                throw error;
+            } finally {
+                preparationInput.fill(0);
+                preparedDescription?.fill(0);
+                signature?.fill(0);
+            }
+        };
+
         return Object.freeze({
             actionContextHash,
             ceremonyContextHash,
@@ -1849,74 +2258,39 @@ export class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorag
                     slotHashBytes.fill(0);
                 }
             },
-            signSetupObject: ({ signatureMessageHash }) => {
-                if (revoked) {
-                    throw new BrowserActionStorageCustodyError(
-                        'InvalidState',
-                        'The setup-object signing capability was revoked.',
-                    );
-                }
-                const binding = this.#requireActiveLease().binding;
-                const sessionHandle = this.#requireActionRandomnessSession(
-                    actionRandomnessSessionIdentifier,
-                );
-                const reservation = this.#requireStateReservation(
-                    stateReservationIdentifier,
-                    stateCapabilityKinds.setupActionRandomnessRoot,
-                    binding,
-                );
-                const setupObjectReservationAuthorization =
-                    this.#reservationAuthorizationBytes(reservation.value);
-                const signatureMessageHashBytes = protocolHashBytes(
-                    signatureMessageHash,
-                    'Setup-object signature-message hash',
-                );
-                let hedge: Uint8Array<ArrayBuffer> | undefined;
-                let providerContext: Uint8Array | undefined;
-                let providerHedge: Uint8Array | undefined;
-                let providerMessage: Uint8Array | undefined;
-                let providerSignature: Uint8Array | undefined;
-                try {
-                    hedge = this.#runActionRandomnessCommand(
-                        actionRandomnessCommandIdentifiers.setupObjectSignatureHedge,
-                        concatenateBytes(
-                            encodeUnsigned32(sessionHandle),
-                            setupObjectReservationAuthorization,
-                            rosterHashBytes,
-                            signatureMessageHashBytes,
-                        ),
-                        'sign a reset-safe setup object',
-                        'runtime',
-                    );
-                    if (hedge.byteLength !== attemptIdentifierByteLength) {
-                        throw new BrowserActionStorageCustodyError(
-                            'OwnedWorkerFailure',
-                            'The WASM action-randomness kernel returned a malformed setup-object signature hedge.',
-                        );
-                    }
-                    providerContext = objectSignatureContext.slice();
-                    providerHedge = hedge.slice();
-                    providerMessage = signatureMessageHashBytes.slice();
-                    providerSignature = input.signing.signClosedMessage({
-                        context: providerContext,
-                        hedge: providerHedge,
-                        message: providerMessage,
-                    });
-                    return copyExactBytes(
-                        providerSignature,
-                        mlDsa65SignatureByteLength,
-                        'Setup-object source signature',
-                    );
-                } finally {
-                    hedge?.fill(0);
-                    providerContext?.fill(0);
-                    providerHedge?.fill(0);
-                    providerMessage?.fill(0);
-                    providerSignature?.fill(0);
-                    setupObjectReservationAuthorization.fill(0);
-                    signatureMessageHashBytes.fill(0);
-                }
-            },
+            signSetupObject,
+            produceSetupIntentCarrier: () =>
+                prepareSignAndFinishSetupCarrier(
+                    actionRandomnessCommandIdentifiers.prepareSetupIntentCarrier,
+                    setupCarrierPreparationInput(),
+                    'a canonical setup-intent carrier',
+                ),
+            producePublicRandomnessCommitmentCarrier: ({
+                orderedSetupIntentObjects,
+            }) =>
+                prepareSignAndFinishSetupCarrier(
+                    actionRandomnessCommandIdentifiers.preparePublicRandomnessCommitmentCarrier,
+                    setupCarrierPreparationInput(orderedSetupIntentObjects),
+                    'a canonical public-randomness commitment carrier',
+                ),
+            producePublicRandomnessRevealCarrier: ({
+                publicRandomnessCommitmentObject,
+                setupIntentObject,
+            }) =>
+                prepareSignAndFinishSetupCarrier(
+                    actionRandomnessCommandIdentifiers.preparePublicRandomnessRevealCarrier,
+                    setupCarrierPreparationInput([
+                        setupIntentObject,
+                        publicRandomnessCommitmentObject,
+                    ]),
+                    'a canonical public-randomness reveal carrier',
+                ),
+            produceDealerPublicRecordCarrier: (carrierInput) =>
+                prepareSignAndFinishSetupCarrier(
+                    actionRandomnessCommandIdentifiers.prepareDealerPublicRecordCarrier,
+                    dealerPublicRecordCarrierPreparationInput(carrierInput),
+                    'a canonical dealer public-record carrier',
+                ),
             revoke: () => {
                 if (revoked) {
                     return;

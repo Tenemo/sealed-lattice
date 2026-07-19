@@ -40,19 +40,21 @@ use crate::bgv::proof_suite::{
     CommonProofRelationPlanCapability, CommonProofRuntimeError, CommonProofRuntimeLimits,
     CommonProofSourcePolynomial, CommonProofSourcePolynomialProvider,
     CommonProofSourcePolynomialProviderPoll, CommonProofSourcePolynomialReplayIdentity,
-    CommonProofSourcePolynomialRequest, OpenedFriLayerPair, PROOF_BASE_FIELD_MODULUS,
+    CommonProofSourcePolynomialRequest, CommonProofSourceProviderMemoryAccounting,
+    CommonProofVerifierError, OpenedFriLayerPair, PROOF_BASE_FIELD_MODULUS,
     PreparedCommonProofGeneration, PrivateRandomnessCommonProofCoinError,
     PrivateRandomnessCommonProofCoinSource, ProofBaseFieldElement, ProofChallengeExtensionElement,
     ProofEvaluationDomain, ProofFieldError, ProofLeafVisibility, ProofPolynomialError,
     ProofTreeRole, ProvidedCommonProofSourcePolynomial, RelationProofTreeInput,
     SelectedApplicationStatementContext, VerifiedRelationColumnEvaluator,
-    canonical_selected_ballot_validity_statement, decode_selected_ballot_validity_statement,
-    selected_ballot_validity_relation_compilation, verified_application_statement_hash,
+    VerifiedRelationColumnEvaluatorMemoryAccounting, canonical_selected_ballot_validity_statement,
+    decode_selected_ballot_validity_statement, selected_ballot_validity_relation_compilation,
+    verified_application_statement_hash,
 };
 
-const OPTION_COUNT: usize = 20;
-const MINIMUM_SCORE: u64 = 1;
-const MAXIMUM_SCORE: u64 = 10;
+const OPTION_COUNT: usize = FOUNDATION_PROFILE.option_count as usize;
+const MINIMUM_SCORE: u64 = FOUNDATION_PROFILE.minimum_score as u64;
+const MAXIMUM_SCORE: u64 = FOUNDATION_PROFILE.maximum_score as u64;
 const RADIX: i128 = 3;
 const VERIFIED_SETUP_SOURCE_HASH_FIELD_ORDINAL: u64 = 7;
 const BALLOT_CIPHERTEXT_DIGEST_FIELD_ORDINAL: u64 = 8;
@@ -820,6 +822,29 @@ pub(crate) struct BallotValidityBoundPublicMaterial {
     ballot_ciphertext_digest: [u8; 64],
     public_key_by_limb: Box<[[BoundResiduePolynomial; 2]]>,
     ciphertext_by_limb: Box<[[BoundResiduePolynomial; 2]]>,
+}
+
+impl BallotValidityBoundPublicMaterial {
+    fn resident_owned_payload_byte_length(&self) -> Option<u64> {
+        let array_payload = u64::try_from(size_of::<[BoundResiduePolynomial; 2]>()).ok()?;
+        let outer_payload = u64::try_from(
+            self.public_key_by_limb
+                .len()
+                .checked_add(self.ciphertext_by_limb.len())?,
+        )
+        .ok()?
+        .checked_mul(array_payload)?;
+        self.public_key_by_limb
+            .iter()
+            .chain(self.ciphertext_by_limb.iter())
+            .flat_map(|components| components.iter())
+            .try_fold(outer_payload, |total, polynomial| {
+                u64::try_from(polynomial.coefficients.len())
+                    .ok()?
+                    .checked_mul(u64::try_from(size_of::<u64>()).ok()?)
+                    .and_then(|payload| total.checked_add(payload))
+            })
+    }
 }
 
 /// Ciphertext polynomials retained only after a complete ballot-ciphertext
@@ -2121,8 +2146,7 @@ impl BallotValiditySourcePolynomialAdapter {
             .canonical_tuple()?
             .encode()
             .map_err(|_| BallotValidityAdapterError::InvalidColumn)?;
-        let source_derivation_bytes =
-            canonical_source_derivation_bytes(recipe, verifier_source)?;
+        let source_derivation_bytes = canonical_source_derivation_bytes(recipe, verifier_source)?;
         Ok(hash_framed_parts_512(
             BALLOT_SOURCE_POLYNOMIAL_REPLAY_DOMAIN,
             &[
@@ -2385,26 +2409,17 @@ impl Drop for BallotValiditySourcePolynomialAdapter {
 }
 
 impl CommonProofSourcePolynomialProvider for BallotValiditySourcePolynomialAdapter {
-    fn persistent_resident_memory_byte_length(&self) -> Result<u64, CommonProofProverError> {
-        ballot_validity_carrier_buffer_accounting(&self.source_plan)
-            .map(SelectedBallotValidityCarrierBufferAccounting::provider_loading_persistent_resident_byte_length)
-            .map_err(|_| CommonProofProverError::CountOverflow)
-    }
-
-    fn post_source_polynomial_finish_persistent_resident_memory_byte_length(
+    fn memory_accounting(
         &self,
-    ) -> Result<u64, CommonProofProverError> {
-        ballot_validity_carrier_buffer_accounting(&self.source_plan)
-            .map(SelectedBallotValidityCarrierBufferAccounting::provider_post_source_finish_persistent_resident_byte_length)
-            .map_err(|_| CommonProofProverError::CountOverflow)
-    }
-
-    fn loading_source_polynomials_transient_byte_length(
-        &self,
-    ) -> Result<u64, CommonProofProverError> {
-        ballot_validity_carrier_buffer_accounting(&self.source_plan)
-            .map(SelectedBallotValidityCarrierBufferAccounting::provider_additional_loading_transient_byte_length)
-            .map_err(|_| CommonProofProverError::CountOverflow)
+    ) -> Result<CommonProofSourceProviderMemoryAccounting, CommonProofProverError> {
+        let accounting = ballot_validity_carrier_buffer_accounting(&self.source_plan)
+            .map_err(|_| CommonProofProverError::CountOverflow)?;
+        Ok(CommonProofSourceProviderMemoryAccounting::new(
+            accounting.provider_loading_persistent_resident_byte_length(),
+            accounting.provider_post_source_finish_persistent_resident_byte_length(),
+            accounting.provider_additional_loading_transient_byte_length(),
+            accounting.transferred_source_polynomial_byte_length(),
+        ))
     }
 
     fn poll_source_polynomial(
@@ -2505,7 +2520,10 @@ fn validate_source_descriptor(
     is_verifier_source: bool,
 ) -> Result<(), BallotValidityAdapterError> {
     let origin_matches_source = if is_verifier_source {
-        matches!(descriptor.origin(), RelationColumnOrigin::VerifierSequence { .. })
+        matches!(
+            descriptor.origin(),
+            RelationColumnOrigin::VerifierSequence { .. }
+        )
     } else {
         matches!(descriptor.origin(), RelationColumnOrigin::Prover)
     };
@@ -2738,45 +2756,55 @@ fn verifier_source_trace_rows(
     public_material: &BallotValidityBoundPublicMaterial,
     source: BallotValidityVerifierColumnSource,
 ) -> Result<Vec<ProofBaseFieldElement>, BallotValidityAdapterError> {
-    let residues = match source {
+    match source {
         BallotValidityVerifierColumnSource::AuthenticatedPolynomial {
             source_kind,
             component_ordinal,
             data_modulus_index,
-        } => public_material
-            .polynomial(source_kind, component_ordinal, data_modulus_index)
-            .ok_or(BallotValidityAdapterError::InvalidPublicMaterial)?
-            .coefficients
-            .to_vec(),
-        BallotValidityVerifierColumnSource::PairDifferenceEncoderWeight { option_ordinal } => {
-            source_plan
-                .encoder_weight_sequence(option_ordinal)
-                .ok_or(BallotValidityAdapterError::InvalidColumn)?
+        } => {
+            let coefficients = &public_material
+                .polynomial(source_kind, component_ordinal, data_modulus_index)
+                .ok_or(BallotValidityAdapterError::InvalidPublicMaterial)?
+                .coefficients;
+            coefficients
+                .iter()
+                .copied()
+                .map(ProofBaseFieldElement::from_canonical)
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(Into::into)
         }
-    };
-    residues
-        .into_iter()
-        .map(ProofBaseFieldElement::from_canonical)
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(Into::into)
+        BallotValidityVerifierColumnSource::PairDifferenceEncoderWeight { option_ordinal } => {
+            let residues = source_plan
+                .encoder_weight_sequence(option_ordinal)
+                .ok_or(BallotValidityAdapterError::InvalidColumn)?;
+            residues
+                .into_iter()
+                .map(ProofBaseFieldElement::from_canonical)
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(Into::into)
+        }
+    }
 }
 
 struct CachedEvaluationDomainColumn {
+    column_ordinal: u32,
     domain: ProofEvaluationDomain,
     evaluations: Vec<ProofBaseFieldElement>,
 }
 
 /// Verifier-sequence adapter rebuilt only from authenticated setup and ballot
-/// ciphertext material. It retains at most one coefficient polynomial and one
-/// evaluation vector per public column, with all underlying residue bytes
-/// shared through `Arc`.
+/// ciphertext material. Coefficient polynomials are retained for DEEP-point
+/// evaluation, while one cache keyed by column and domain owns the sole full
+/// evaluation-domain vector. Building that vector moves the corresponding
+/// coefficient buffer into the in-place transform instead of cloning it.
 pub(crate) struct BallotValidityVerifiedColumnEvaluator {
     source_plan: BallotValiditySourcePlan,
     public_material: BallotValidityBoundPublicMaterial,
     trace_domain: ProofEvaluationDomain,
+    evaluation_domain_size: usize,
     source_by_column: Vec<Option<BallotValidityVerifierColumnSource>>,
     coefficients_by_column: Vec<Option<Vec<ProofBaseFieldElement>>>,
-    evaluations_by_column: Vec<Option<CachedEvaluationDomainColumn>>,
+    evaluation_domain_column: Option<CachedEvaluationDomainColumn>,
 }
 
 impl BallotValidityVerifiedColumnEvaluator {
@@ -2846,8 +2874,7 @@ impl BallotValidityVerifiedColumnEvaluator {
                         || source_coordinates
                             != &[u64::from(component_ordinal), u64::from(data_modulus_index)]
                         || statement_binding_path.len() != 1
-                        || statement_binding_path[0].step_kind()
-                            != SelectorPathStepKind::TupleField
+                        || statement_binding_path[0].step_kind() != SelectorPathStepKind::TupleField
                         || statement_binding_path[0].argument() != expected_field_ordinal
                     {
                         return Err(BallotValidityAdapterError::InvalidColumn);
@@ -2881,8 +2908,7 @@ impl BallotValidityVerifiedColumnEvaluator {
                     },
                 ) => {
                     if *ring_degree != compilation.source_plan().ring_degree()
-                        || *primitive_two_n_root
-                            != compilation.source_plan().primitive_two_n_root()
+                        || *primitive_two_n_root != compilation.source_plan().primitive_two_n_root()
                         || *slot_generator != compilation.source_plan().slot_generator()
                         || usize::from(*option_count) != OPTION_COUNT
                         || *declared_option_ordinal != option_ordinal
@@ -2917,10 +2943,29 @@ impl BallotValidityVerifiedColumnEvaluator {
             source_plan: compilation.source_plan().clone(),
             public_material,
             trace_domain,
+            evaluation_domain_size: usize::try_from(variant.evaluation_domain_size())
+                .map_err(|_| BallotValidityAdapterError::IntegerOverflow)?,
             source_by_column,
             coefficients_by_column: (0..variant.ordered_columns().len()).map(|_| None).collect(),
-            evaluations_by_column: (0..variant.ordered_columns().len()).map(|_| None).collect(),
+            evaluation_domain_column: None,
         })
+    }
+
+    fn derive_coefficients(
+        &self,
+        column_index: usize,
+    ) -> Result<Vec<ProofBaseFieldElement>, BallotValidityAdapterError> {
+        let source = self
+            .source_by_column
+            .get(column_index)
+            .and_then(Option::as_ref)
+            .copied()
+            .ok_or(BallotValidityAdapterError::InvalidColumn)?;
+        let mut coefficients =
+            verifier_source_trace_rows(&self.source_plan, &self.public_material, source)?;
+        self.trace_domain
+            .interpolate_base_polynomial_in_place(&mut coefficients)?;
+        Ok(coefficients)
     }
 
     fn coefficients(
@@ -2935,18 +2980,7 @@ impl BallotValidityVerifiedColumnEvaluator {
             .ok_or(BallotValidityAdapterError::InvalidColumn)?
             .is_none()
         {
-            let source = self
-                .source_by_column
-                .get(column_index)
-                .and_then(Option::as_ref)
-                .copied()
-                .ok_or(BallotValidityAdapterError::InvalidColumn)?;
-            let rows = verifier_source_trace_rows(
-                &self.source_plan,
-                &self.public_material,
-                source,
-            )?;
-            let coefficients = self.trace_domain.interpolate_base_polynomial(&rows)?;
+            let coefficients = self.derive_coefficients(column_index)?;
             self.coefficients_by_column[column_index] = Some(coefficients);
         }
         self.coefficients_by_column
@@ -2954,9 +2988,99 @@ impl BallotValidityVerifiedColumnEvaluator {
             .and_then(Option::as_deref)
             .ok_or(BallotValidityAdapterError::InvalidColumn)
     }
+
+    fn take_coefficients(
+        &mut self,
+        column_ordinal: u32,
+    ) -> Result<Vec<ProofBaseFieldElement>, BallotValidityAdapterError> {
+        let column_index = usize::try_from(column_ordinal)
+            .map_err(|_| BallotValidityAdapterError::IntegerOverflow)?;
+        if self
+            .coefficients_by_column
+            .get(column_index)
+            .ok_or(BallotValidityAdapterError::InvalidColumn)?
+            .is_none()
+        {
+            let coefficients = self.derive_coefficients(column_index)?;
+            self.coefficients_by_column[column_index] = Some(coefficients);
+        }
+        self.coefficients_by_column
+            .get_mut(column_index)
+            .and_then(Option::take)
+            .ok_or(BallotValidityAdapterError::InvalidColumn)
+    }
 }
 
 impl VerifiedRelationColumnEvaluator for BallotValidityVerifiedColumnEvaluator {
+    fn memory_accounting(
+        &self,
+    ) -> Result<VerifiedRelationColumnEvaluatorMemoryAccounting, CommonProofVerifierError> {
+        let checked_payload = |count: usize, value_byte_length: usize| {
+            u64::try_from(count)
+                .ok()
+                .and_then(|count| {
+                    u64::try_from(value_byte_length)
+                        .ok()
+                        .and_then(|width| count.checked_mul(width))
+                })
+                .ok_or(CommonProofVerifierError::InvalidTreeLayout)
+        };
+        let fixed_and_input_resident_byte_length = [
+            u64::try_from(size_of::<Self>())
+                .map_err(|_| CommonProofVerifierError::InvalidTreeLayout)?,
+            self.source_plan
+                .resident_owned_payload_byte_length()
+                .ok_or(CommonProofVerifierError::InvalidTreeLayout)?,
+            self.public_material
+                .resident_owned_payload_byte_length()
+                .ok_or(CommonProofVerifierError::InvalidTreeLayout)?,
+            checked_payload(
+                self.source_by_column.capacity(),
+                size_of::<Option<BallotValidityVerifierColumnSource>>(),
+            )?,
+            checked_payload(
+                self.coefficients_by_column.capacity(),
+                size_of::<Option<Vec<ProofBaseFieldElement>>>(),
+            )?,
+        ]
+        .into_iter()
+        .try_fold(0_u64, |total, value| total.checked_add(value))
+        .ok_or(CommonProofVerifierError::InvalidTreeLayout)?;
+        let verifier_column_count = u64::try_from(
+            self.source_by_column
+                .iter()
+                .filter(|source| source.is_some())
+                .count(),
+        )
+        .map_err(|_| CommonProofVerifierError::InvalidTreeLayout)?;
+        if verifier_column_count == 0 {
+            return Err(CommonProofVerifierError::InvalidTreeLayout);
+        }
+        let trace_column_byte_length =
+            checked_payload(self.trace_domain.size(), size_of::<ProofBaseFieldElement>())?;
+        let evaluation_domain_byte_length = checked_payload(
+            self.evaluation_domain_size,
+            size_of::<ProofBaseFieldElement>(),
+        )?;
+        let maximum_cached_column_resident_byte_length = verifier_column_count
+            .checked_sub(1)
+            .and_then(|count| count.checked_mul(trace_column_byte_length))
+            .and_then(|length| length.checked_add(evaluation_domain_byte_length))
+            .ok_or(CommonProofVerifierError::InvalidTreeLayout)?;
+        // Encoder-weight derivation owns one u64 residue vector while the new
+        // field vector is installed into the already-counted cache envelope.
+        let maximum_evaluation_transient_byte_length = checked_payload(
+            usize::try_from(self.source_plan.ring_degree())
+                .map_err(|_| CommonProofVerifierError::InvalidTreeLayout)?,
+            size_of::<u64>(),
+        )?;
+        VerifiedRelationColumnEvaluatorMemoryAccounting::new(
+            fixed_and_input_resident_byte_length,
+            maximum_cached_column_resident_byte_length,
+            maximum_evaluation_transient_byte_length,
+        )
+    }
+
     fn evaluate_at_extension_point(
         &mut self,
         column_ordinal: u32,
@@ -2984,27 +3108,22 @@ impl VerifiedRelationColumnEvaluator for BallotValidityVerifiedColumnEvaluator {
         if query_representative >= half_domain_size {
             return None;
         }
-        let needs_evaluation = self
-            .evaluations_by_column
-            .get(column_ordinal as usize)
-            .and_then(Option::as_ref)
-            .is_none_or(|cached| cached.domain != evaluation_domain);
+        let needs_evaluation = self.evaluation_domain_column.as_ref().is_none_or(|cached| {
+            cached.column_ordinal != column_ordinal || cached.domain != evaluation_domain
+        });
         if needs_evaluation {
-            let coefficients = self.coefficients(column_ordinal).ok()?.to_vec();
-            let evaluations = evaluation_domain
-                .evaluate_base_polynomial(&coefficients)
+            self.evaluation_domain_column.take();
+            let mut evaluations = self.take_coefficients(column_ordinal).ok()?;
+            evaluation_domain
+                .evaluate_base_polynomial_in_place(&mut evaluations)
                 .ok()?;
-            *self
-                .evaluations_by_column
-                .get_mut(column_ordinal as usize)? = Some(CachedEvaluationDomainColumn {
+            self.evaluation_domain_column = Some(CachedEvaluationDomainColumn {
+                column_ordinal,
                 domain: evaluation_domain,
                 evaluations,
             });
         }
-        let cached = self
-            .evaluations_by_column
-            .get(column_ordinal as usize)?
-            .as_ref()?;
+        let cached = self.evaluation_domain_column.as_ref()?;
         Some(OpenedFriLayerPair::new(
             ProofChallengeExtensionElement::from_base(
                 *cached.evaluations.get(query_representative)?,
@@ -3115,9 +3234,9 @@ mod tests {
         );
     }
 
-    const TEST_RING_DEGREE: u64 = 64;
-    const TEST_PLAINTEXT_MODULUS: u64 = 257;
-    const TEST_DATA_MODULUS: u64 = 769;
+    const TEST_RING_DEGREE: u64 = 256;
+    const TEST_PLAINTEXT_MODULUS: u64 = 12_289;
+    const TEST_DATA_MODULUS: u64 = 65_537;
     const TEST_EVALUATION_DOMAIN_SIZE: u64 = 1_024;
 
     fn check_context() -> RelationPlanCheckContext {
@@ -3159,7 +3278,7 @@ mod tests {
                 opening_degree_bound_exclusive: 512,
                 active_data_modulus_indices: vec![0],
                 plaintext_modulus: TEST_PLAINTEXT_MODULUS,
-                primitive_two_n_root: 9,
+                primitive_two_n_root: 3_400,
                 slot_generator: 3,
                 reserved_slot_rule: 1,
             },
@@ -3174,25 +3293,10 @@ mod tests {
         let scores = (0..OPTION_COUNT)
             .map(|option_ordinal| 1 + (option_ordinal as u64 * 7 + 3) % 10)
             .collect::<Vec<_>>();
-        let plaintext_coefficients = (0..TEST_RING_DEGREE as usize)
-            .map(|coefficient_ordinal| {
-                scores
-                    .iter()
-                    .copied()
-                    .enumerate()
-                    .map(|(option_ordinal, score)| {
-                        modular_product_for_adapter(
-                            score,
-                            compilation
-                                .source_plan()
-                                .encoder_weight(option_ordinal as u16, coefficient_ordinal)
-                                .expect("weight"),
-                            TEST_PLAINTEXT_MODULUS,
-                        )
-                    })
-                    .fold(0_u64, |sum, term| (sum + term) % TEST_PLAINTEXT_MODULUS)
-            })
-            .collect::<Vec<_>>();
+        let plaintext_coefficients = compilation
+            .source_plan()
+            .plaintext_coefficients_for_scores(&scores)
+            .expect("direct pair-difference plaintext encoding");
         let randomizer_coefficients = (0..TEST_RING_DEGREE)
             .map(|ordinal| [-1_i64, 0, 1][ordinal as usize % 3])
             .collect::<Vec<_>>();
@@ -3836,20 +3940,29 @@ mod tests {
             .relation_plan()
             .select_variant(None, None)
             .expect("variant");
-        let (column_ordinal, source) = evaluator
+        let (column_ordinal, source_kind, component_ordinal, data_modulus_index) = evaluator
             .source_by_column
             .iter()
             .enumerate()
             .find_map(|(column_index, source)| {
-                source.map(|source| (u32::try_from(column_index).expect("column ordinal"), source))
+                let BallotValidityVerifierColumnSource::AuthenticatedPolynomial {
+                    source_kind,
+                    component_ordinal,
+                    data_modulus_index,
+                } = source.as_ref()?
+                else {
+                    return None;
+                };
+                Some((
+                    u32::try_from(column_index).expect("column ordinal"),
+                    *source_kind,
+                    *component_ordinal,
+                    *data_modulus_index,
+                ))
             })
-            .expect("public source");
+            .expect("authenticated public polynomial source");
         let rows = material
-            .polynomial(
-                source.source_kind,
-                source.component_ordinal,
-                source.data_modulus_index,
-            )
+            .polynomial(source_kind, component_ordinal, data_modulus_index)
             .expect("polynomial")
             .coefficients
             .iter()
@@ -3864,11 +3977,107 @@ mod tests {
             .expect("interpolation");
         let point = ProofChallengeExtensionElement::from_canonical_coordinates([7, 11, 0, 0, 0])
             .expect("extension point");
-        let expected =
-            CommonProofSourcePolynomial::from_base_coefficients(coefficients).evaluate_at(point);
+        let expected = coefficients.iter().rev().fold(
+            ProofChallengeExtensionElement::ZERO,
+            |accumulated, coefficient| {
+                accumulated
+                    .multiply(point)
+                    .add(ProofChallengeExtensionElement::from_base(*coefficient))
+            },
+        );
         assert_eq!(
             evaluator.evaluate_at_extension_point(column_ordinal, point),
             Some(expected)
+        );
+        let evaluation_domain = ProofEvaluationDomain::new(TEST_EVALUATION_DOMAIN_SIZE as usize, 7)
+            .expect("evaluation domain");
+        let direct_evaluations = evaluation_domain
+            .evaluate_base_polynomial(&coefficients)
+            .expect("direct evaluations");
+        let query_representative = 17_usize;
+        let half_domain_size = evaluation_domain.size() / 2;
+        let expected_pair = OpenedFriLayerPair::new(
+            ProofChallengeExtensionElement::from_base(direct_evaluations[query_representative]),
+            ProofChallengeExtensionElement::from_base(
+                direct_evaluations[query_representative + half_domain_size],
+            ),
+        );
+        assert_eq!(
+            evaluator.evaluate_at_evaluation_domain_pair(
+                column_ordinal,
+                evaluation_domain,
+                query_representative as u64,
+            ),
+            Some(expected_pair)
+        );
+        assert!(
+            evaluator.coefficients_by_column[column_ordinal as usize].is_none(),
+            "the coefficient buffer moves into the sole evaluation-domain cache"
+        );
+        let cached = evaluator
+            .evaluation_domain_column
+            .as_ref()
+            .expect("evaluation-domain cache");
+        assert_eq!(cached.column_ordinal, column_ordinal);
+        assert_eq!(cached.domain, evaluation_domain);
+        assert_eq!(cached.evaluations.len(), evaluation_domain.size());
+        assert_eq!(
+            evaluator.evaluate_at_extension_point(column_ordinal, point),
+            Some(expected),
+            "extension evaluation must reconstruct coefficients after their buffer was moved"
+        );
+
+        let (weight_column_ordinal, option_ordinal) = evaluator
+            .source_by_column
+            .iter()
+            .enumerate()
+            .find_map(|(column_index, source)| match source {
+                Some(BallotValidityVerifierColumnSource::PairDifferenceEncoderWeight {
+                    option_ordinal,
+                }) => Some((
+                    u32::try_from(column_index).expect("column ordinal"),
+                    *option_ordinal,
+                )),
+                _ => None,
+            })
+            .expect("pair-difference encoder-weight source");
+        let weight_rows = compilation
+            .source_plan()
+            .encoder_weight_sequence(option_ordinal)
+            .expect("encoder-weight sequence")
+            .into_iter()
+            .map(ProofBaseFieldElement::from_canonical)
+            .collect::<Result<Vec<_>, _>>()
+            .expect("canonical encoder weights");
+        let weight_coefficients = trace_domain
+            .interpolate_base_polynomial(&weight_rows)
+            .expect("weight interpolation");
+        let direct_weight_evaluations = evaluation_domain
+            .evaluate_base_polynomial(&weight_coefficients)
+            .expect("direct weight evaluations");
+        let expected_weight_pair = OpenedFriLayerPair::new(
+            ProofChallengeExtensionElement::from_base(
+                direct_weight_evaluations[query_representative],
+            ),
+            ProofChallengeExtensionElement::from_base(
+                direct_weight_evaluations[query_representative + half_domain_size],
+            ),
+        );
+        assert_eq!(
+            evaluator.evaluate_at_evaluation_domain_pair(
+                weight_column_ordinal,
+                evaluation_domain,
+                query_representative as u64,
+            ),
+            Some(expected_weight_pair)
+        );
+        assert_eq!(
+            evaluator
+                .evaluation_domain_column
+                .as_ref()
+                .expect("rekeyed evaluation-domain cache")
+                .column_ordinal,
+            weight_column_ordinal
         );
         let prover_column = variant
             .ordered_columns()

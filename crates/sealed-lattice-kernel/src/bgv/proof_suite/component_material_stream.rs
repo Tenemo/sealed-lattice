@@ -142,6 +142,18 @@ impl KeySwitchComponentMaterialTopology {
         &self.ordered_moduli
     }
 
+    pub(crate) fn retained_heap_payload_byte_length(&self) -> Option<usize> {
+        self.ordered_moduli
+            .len()
+            .checked_mul(size_of::<u64>())
+            .and_then(|length| {
+                self.residue_byte_lengths
+                    .len()
+                    .checked_mul(size_of::<u8>())
+                    .and_then(|residue_length| length.checked_add(residue_length))
+            })
+    }
+
     pub(crate) const fn polynomial_degree(&self) -> usize {
         self.polynomial_degree
     }
@@ -153,42 +165,40 @@ impl KeySwitchComponentMaterialTopology {
     pub(crate) fn trace_column_count(&self) -> Result<usize, RefusalReason> {
         self.data_block_count
             .checked_mul(self.extended_limb_count())
-            .and_then(|column_count| column_count.checked_mul(4))
+            .and_then(|column_count| column_count.checked_mul(2))
             .ok_or(RefusalReason::OutsideSupportedProfile)
     }
 
-    pub(crate) fn quarter_polynomial_degree_bound_exclusive(&self) -> Result<usize, RefusalReason> {
+    pub(crate) fn half_polynomial_degree_bound_exclusive(&self) -> Result<usize, RefusalReason> {
         self.polynomial_degree
-            .checked_div(4)
-            .filter(|quarter_degree| {
-                *quarter_degree > 0 && *quarter_degree * 4 == self.polynomial_degree
-            })
+            .checked_div(2)
+            .filter(|half_degree| *half_degree > 0 && *half_degree * 2 == self.polynomial_degree)
             .ok_or(RefusalReason::UnsupportedVersionOrSuite)
     }
 
     /// Maps one relation-plan column to its sole contiguous range in the
     /// authenticated headerless component stream. Full-ring residue vectors
-    /// are split into four contiguous coefficient quarters in block, limb,
-    /// quarter order, exactly matching the setup-polynomial relation plans.
+    /// are split into contiguous low and high coefficient halves in block,
+    /// limb, half order, exactly matching the setup-polynomial relation plans.
     pub(crate) fn trace_column(
         &self,
         column_ordinal: usize,
     ) -> Result<KeySwitchComponentTraceColumn, RefusalReason> {
         let columns_per_block = self
             .extended_limb_count()
-            .checked_mul(4)
+            .checked_mul(2)
             .ok_or(RefusalReason::OutsideSupportedProfile)?;
         if column_ordinal >= self.trace_column_count()? || self.polynomial_degree < 2 {
             return Err(RefusalReason::WrongTypeOrLength);
         }
         let block_index = column_ordinal / columns_per_block;
         let column_within_block = column_ordinal % columns_per_block;
-        let limb_index = column_within_block / 4;
-        let quarter = KeySwitchComponentTraceQuarter::from_ordinal(column_within_block % 4)?;
-        let quarter_degree = self.quarter_polynomial_degree_bound_exclusive()?;
-        let coefficient_start = quarter
+        let limb_index = column_within_block / 2;
+        let half = KeySwitchComponentTraceHalf::from_ordinal(column_within_block % 2)?;
+        let half_degree = self.half_polynomial_degree_bound_exclusive()?;
+        let coefficient_start = half
             .ordinal()
-            .checked_mul(quarter_degree)
+            .checked_mul(half_degree)
             .ok_or(RefusalReason::OutsideSupportedProfile)?;
         let residue_byte_length = self.residue_byte_length(limb_index)?;
         let bytes_per_block =
@@ -222,7 +232,7 @@ impl KeySwitchComponentMaterialTopology {
                     .and_then(|half_offset| offset.checked_add(half_offset))
             })
             .ok_or(RefusalReason::OutsideSupportedProfile)?;
-        let byte_length = u64::try_from(quarter_degree)
+        let byte_length = u64::try_from(half_degree)
             .ok()
             .and_then(|degree| degree.checked_mul(u64::try_from(residue_byte_length).ok()?))
             .ok_or(RefusalReason::OutsideSupportedProfile)?;
@@ -231,11 +241,11 @@ impl KeySwitchComponentMaterialTopology {
             column_ordinal,
             block_index,
             limb_index,
-            quarter,
+            half,
             modulus: self.modulus(limb_index)?,
             residue_byte_length,
             coefficient_start,
-            coefficient_count: quarter_degree,
+            coefficient_count: half_degree,
             byte_offset,
             byte_length,
         })
@@ -273,30 +283,24 @@ impl KeySwitchComponentMaterialTopology {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum KeySwitchComponentTraceQuarter {
-    First,
-    Second,
-    Third,
-    Fourth,
+pub(crate) enum KeySwitchComponentTraceHalf {
+    Low,
+    High,
 }
 
-impl KeySwitchComponentTraceQuarter {
+impl KeySwitchComponentTraceHalf {
     fn from_ordinal(ordinal: usize) -> Result<Self, RefusalReason> {
         match ordinal {
-            0 => Ok(Self::First),
-            1 => Ok(Self::Second),
-            2 => Ok(Self::Third),
-            3 => Ok(Self::Fourth),
+            0 => Ok(Self::Low),
+            1 => Ok(Self::High),
             _ => Err(RefusalReason::WrongTypeOrLength),
         }
     }
 
     pub(crate) const fn ordinal(self) -> usize {
         match self {
-            Self::First => 0,
-            Self::Second => 1,
-            Self::Third => 2,
-            Self::Fourth => 3,
+            Self::Low => 0,
+            Self::High => 1,
         }
     }
 }
@@ -309,7 +313,7 @@ pub(crate) struct KeySwitchComponentTraceColumn {
     column_ordinal: usize,
     block_index: usize,
     limb_index: usize,
-    quarter: KeySwitchComponentTraceQuarter,
+    half: KeySwitchComponentTraceHalf,
     modulus: u64,
     residue_byte_length: usize,
     coefficient_start: usize,
@@ -331,8 +335,8 @@ impl KeySwitchComponentTraceColumn {
         self.limb_index
     }
 
-    pub(crate) const fn quarter(self) -> KeySwitchComponentTraceQuarter {
-        self.quarter
+    pub(crate) const fn half(self) -> KeySwitchComponentTraceHalf {
+        self.half
     }
 
     pub(crate) const fn modulus(self) -> u64 {
@@ -496,7 +500,7 @@ impl VerifiedKeySwitchComponentMaterial {
     }
 
     /// Re-encodes the exact block, limb, coefficient order authenticated by
-    /// this material terminal from a setup tree's quarter trace columns. A
+    /// this material terminal from a setup tree's low/high trace rows. A
     /// matching descriptor proves that the tree and the later component
     /// readback refer to the same canonical bytes; a detached root or digest
     /// cannot establish this linkage.
@@ -506,11 +510,11 @@ impl VerifiedKeySwitchComponentMaterial {
     ) -> Result<(), RefusalReason> {
         let topology = &self.topology;
         let expected_column_count = topology.trace_column_count()?;
-        let quarter_degree = topology.quarter_polynomial_degree_bound_exclusive()?;
+        let half_degree = topology.half_polynomial_degree_bound_exclusive()?;
         if ordered_trace_columns.len() != expected_column_count
             || ordered_trace_columns
                 .iter()
-                .any(|column| column.len() != quarter_degree)
+                .any(|column| column.len() != half_degree)
         {
             return Err(RefusalReason::WrongTypeOrLength);
         }
@@ -526,14 +530,14 @@ impl VerifiedKeySwitchComponentMaterial {
             for limb_index in 0..topology.extended_limb_count() {
                 let modulus = topology.modulus(limb_index)?;
                 let residue_byte_length = topology.residue_byte_length(limb_index)?;
-                let first_quarter_column_ordinal = block_index
+                let first_half_column_ordinal = block_index
                     .checked_mul(topology.extended_limb_count())
                     .and_then(|ordinal| ordinal.checked_add(limb_index))
-                    .and_then(|ordinal| ordinal.checked_mul(4))
+                    .and_then(|ordinal| ordinal.checked_mul(2))
                     .ok_or(RefusalReason::OutsideSupportedProfile)?;
-                for quarter_ordinal in 0..4_usize {
+                for half_ordinal in 0..2_usize {
                     let column = ordered_trace_columns
-                        .get(first_quarter_column_ordinal + quarter_ordinal)
+                        .get(first_half_column_ordinal + half_ordinal)
                         .ok_or(RefusalReason::WrongTypeOrLength)?;
                     for coefficient in column {
                         let canonical_coefficient = coefficient.canonical();
@@ -888,51 +892,23 @@ mod tests {
     }
 
     #[test]
-    fn trace_columns_map_exactly_to_quarter_authenticated_stream_ranges() {
+    fn trace_rows_map_exactly_to_half_authenticated_stream_ranges() {
         let topology = test_topology();
         let bytes = encoded_material(&topology);
 
-        assert_eq!(topology.trace_column_count(), Ok(40));
+        assert_eq!(topology.trace_column_count(), Ok(20));
         let expected_columns = [
-            (0, 0, 0, KeySwitchComponentTraceQuarter::First, 0, 2, 0, 4),
-            (1, 0, 0, KeySwitchComponentTraceQuarter::Second, 2, 2, 4, 4),
-            (2, 0, 0, KeySwitchComponentTraceQuarter::Third, 4, 2, 8, 4),
-            (
-                19,
-                0,
-                4,
-                KeySwitchComponentTraceQuarter::Fourth,
-                6,
-                2,
-                104,
-                8,
-            ),
-            (
-                20,
-                1,
-                0,
-                KeySwitchComponentTraceQuarter::First,
-                0,
-                2,
-                112,
-                4,
-            ),
-            (
-                39,
-                1,
-                4,
-                KeySwitchComponentTraceQuarter::Fourth,
-                6,
-                2,
-                216,
-                8,
-            ),
+            (0, 0, 0, KeySwitchComponentTraceHalf::Low, 0, 4, 0, 8),
+            (1, 0, 0, KeySwitchComponentTraceHalf::High, 4, 4, 8, 8),
+            (9, 0, 4, KeySwitchComponentTraceHalf::High, 4, 4, 96, 16),
+            (10, 1, 0, KeySwitchComponentTraceHalf::Low, 0, 4, 112, 8),
+            (19, 1, 4, KeySwitchComponentTraceHalf::High, 4, 4, 208, 16),
         ];
         for (
             column_ordinal,
             expected_block,
             expected_limb,
-            expected_quarter,
+            expected_half,
             expected_coefficient_start,
             expected_coefficient_count,
             expected_byte_offset,
@@ -945,7 +921,7 @@ mod tests {
             assert_eq!(column.column_ordinal(), column_ordinal);
             assert_eq!(column.block_index(), expected_block);
             assert_eq!(column.limb_index(), expected_limb);
-            assert_eq!(column.quarter(), expected_quarter);
+            assert_eq!(column.half(), expected_half);
             assert_eq!(column.coefficient_start(), expected_coefficient_start);
             assert_eq!(column.coefficient_count(), expected_coefficient_count);
             assert_eq!(column.byte_offset(), expected_byte_offset);

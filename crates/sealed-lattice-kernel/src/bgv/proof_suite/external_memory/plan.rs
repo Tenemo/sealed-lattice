@@ -1,4 +1,7 @@
-use std::{collections::BTreeSet, fmt};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fmt,
+};
 
 use zeroize::Zeroizing;
 
@@ -147,15 +150,11 @@ impl ProofExternalMemoryPlan {
         {
             return Err(ProofExternalMemoryError::InvalidPlan);
         }
-        if self.objects.len()
-            > usize::try_from(self.maximum_transaction_operation_count)
-                .map_err(|_| ProofExternalMemoryError::ResourceLimitExceeded)?
-            || self.objects.len() > MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_OBJECT_COUNT
-            || usize::try_from(self.maximum_transaction_operation_count)
-                .ok()
-                .is_none_or(|operation_count| {
-                    operation_count > MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_OBJECT_COUNT
-                })
+        if usize::try_from(self.maximum_transaction_operation_count)
+            .ok()
+            .is_none_or(|operation_count| {
+                operation_count > MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_OBJECT_COUNT
+            })
             || self.maximum_stored_byte_length
                 > MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_STORED_BYTE_LENGTH
         {
@@ -163,6 +162,11 @@ impl ProofExternalMemoryPlan {
         }
 
         let mut object_ordinals = BTreeSet::new();
+        let mut lifecycle_intervals = Vec::new();
+        lifecycle_intervals
+            .try_reserve_exact(self.objects.len())
+            .map_err(|_| ProofExternalMemoryError::ResourceLimitExceeded)?;
+        let mut deletion_count_by_step = BTreeMap::<u32, u32>::new();
         let mut scheduled_total_write = 0_u64;
         let event_count = self
             .objects
@@ -178,10 +182,17 @@ impl ProofExternalMemoryPlan {
                 || object.issued_step > object.seal_step
                 || object.seal_step > object.last_use_step
                 || object.last_use_step >= self.step_count
-                || !object_ordinals.insert(object.object)
             {
                 return Err(ProofExternalMemoryError::InvalidPlan);
             }
+            object_ordinals.insert(object.object);
+            lifecycle_intervals.push((object.object, object.issued_step, object.last_use_step));
+            let deletion_count = deletion_count_by_step
+                .entry(object.last_use_step)
+                .or_default();
+            *deletion_count = deletion_count
+                .checked_add(1)
+                .ok_or(ProofExternalMemoryError::ResourceLimitExceeded)?;
             scheduled_total_write = scheduled_total_write
                 .checked_add(object.exact_byte_length)
                 .ok_or(ProofExternalMemoryError::ResourceLimitExceeded)?;
@@ -194,6 +205,21 @@ impl ProofExternalMemoryPlan {
                 false,
                 object.exact_byte_length,
             ));
+        }
+        if object_ordinals.len() > MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_OBJECT_COUNT
+            || deletion_count_by_step.values().copied().max().unwrap_or(0)
+                > self.maximum_transaction_operation_count
+        {
+            return Err(ProofExternalMemoryError::ResourceLimitExceeded);
+        }
+        lifecycle_intervals
+            .sort_unstable_by_key(|(object, issued_step, _)| (*object, *issued_step));
+        if lifecycle_intervals.windows(2).any(|pair| {
+            let (previous_object, _, previous_last_use_step) = pair[0];
+            let (next_object, next_issued_step, _) = pair[1];
+            previous_object == next_object && previous_last_use_step >= next_issued_step
+        }) {
+            return Err(ProofExternalMemoryError::InvalidPlan);
         }
         if scheduled_total_write > self.maximum_total_written_byte_length {
             return Err(ProofExternalMemoryError::ResourceLimitExceeded);
@@ -239,6 +265,22 @@ impl ProofExternalMemoryPlan {
 
     pub(crate) fn objects(&self) -> &[ProofExternalMemoryObjectPlan] {
         &self.objects
+    }
+
+    pub(crate) fn physical_object_count(&self) -> Result<u32, ProofExternalMemoryError> {
+        u32::try_from(
+            self.objects
+                .iter()
+                .map(|object| object.object)
+                .collect::<BTreeSet<_>>()
+                .len(),
+        )
+        .map_err(|_| ProofExternalMemoryError::ResourceLimitExceeded)
+    }
+
+    pub(crate) fn object_lifecycle_count(&self) -> Result<u32, ProofExternalMemoryError> {
+        u32::try_from(self.objects.len())
+            .map_err(|_| ProofExternalMemoryError::ResourceLimitExceeded)
     }
 }
 

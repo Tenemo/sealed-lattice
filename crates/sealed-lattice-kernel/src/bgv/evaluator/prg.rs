@@ -48,14 +48,6 @@ impl DeterministicSampler {
         byte[0]
     }
 
-    // Raw stream bytes, used for development commitment salts.
-    pub(crate) fn bytes(&mut self, count: usize) -> Vec<u8> {
-        let mut output = vec![0_u8; count];
-        self.reader.read(&mut output);
-
-        output
-    }
-
     // Rejection-sampled uniform residues in [0, modulus). The rejection zone
     // removes modulo bias; for the selected ~47-bit primes the rejection rate is
     // negligible.

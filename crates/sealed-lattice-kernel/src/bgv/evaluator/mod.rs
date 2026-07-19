@@ -36,3 +36,6 @@ pub(crate) mod program;
 pub(crate) mod records;
 pub(crate) mod replay;
 pub(crate) mod top_k;
+
+#[cfg(test)]
+mod stochastic_modulus_down;

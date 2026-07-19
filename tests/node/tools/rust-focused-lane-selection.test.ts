@@ -10,11 +10,6 @@ describe('focused Rust lane selection', () => {
     it.each([
         ['rust-kernel-fast' as const, false, 'foundation::tests::ordinary'],
         [
-            'rust-accepted-setup' as const,
-            false,
-            'bgv::setup::tests::accepted_setup::ordinary_case',
-        ],
-        [
             'rust-kernel-heavy' as const,
             true,
             'bgv::tests::heavy_rust_kernel_expensive_relation',
@@ -71,21 +66,5 @@ describe('focused Rust lane selection', () => {
                 ],
             }),
         ).toThrow('dedicated guarded command');
-    });
-
-    it('rejects test names that overlap guarded groups', () => {
-        expect(() =>
-            validateFocusedRustLaneSelection({
-                lane: 'rust-accepted-setup',
-                testFilter: 'overlap',
-                tests: [
-                    {
-                        ignored: true,
-                        testName:
-                            'bgv::setup::tests::accepted_setup::heavy_rust_kernel_overlap',
-                    },
-                ],
-            }),
-        ).toThrow('multiple guarded groups');
     });
 });

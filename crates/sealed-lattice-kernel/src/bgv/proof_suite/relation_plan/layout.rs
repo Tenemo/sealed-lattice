@@ -1,8 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use num_bigint::BigUint;
-use num_traits::{One, Zero};
-
 use crate::foundation::{CanonicalItem, CanonicalItemType, CanonicalTuple};
 
 use super::super::transcript::{
@@ -13,9 +10,9 @@ use super::{
     bounds::{RelationConstraintDescriptor, SemanticCellDescriptor},
     compiled_plan::RelationPlanCheckContext,
     expressions::{
-        RelationExpressionInstruction, canonical_nested_list, check_expression,
-        checked_resident_payload_add, encode_generated_tuple, hash_generated_variable_bytes,
-        resident_vec_storage_byte_length, validate_challenge_catalog,
+        RelationExpressionInstruction, canonical_nested_list, checked_resident_payload_add,
+        encode_generated_tuple, hash_generated_variable_bytes, resident_vec_storage_byte_length,
+        validate_challenge_catalog,
     },
     integer_lift::{
         RelationCoefficientLocalIdentityBatchDescriptor, RelationIntegerLiftBatchDescriptor,
@@ -379,160 +376,6 @@ impl RelationPlanVariant {
 
     pub(crate) fn ordered_masks(&self) -> &[RelationMaskDescriptor] {
         &self.ordered_masks
-    }
-
-    /// Degree of the cross-multiplied DEEP identity used after the quotient
-    /// roots are fixed. The bound is derived from the checked expression
-    /// programs and canonical quotient decomposition; it is an input to the
-    /// round-by-round application theorem, not a proof-body assertion.
-    pub(crate) fn application_deep_identity_degree_bound(
-        &self,
-        context: &RelationPlanCheckContext,
-    ) -> Result<u64, RelationPlanError> {
-        let mut distinct_zeroifier_degrees = BTreeMap::<Vec<u8>, u64>::new();
-        let mut numerator_and_zeroifier_degrees = Vec::new();
-        for constraint in &self.ordered_constraints {
-            let numerator = check_expression(
-                &constraint.numerator_postfix_expression,
-                self,
-                context,
-                false,
-            )?;
-            let zeroifier = check_expression(
-                &constraint.zeroifier_postfix_expression,
-                self,
-                context,
-                true,
-            )?;
-            let zeroifier_key = canonical_nested_list(
-                constraint
-                    .zeroifier_postfix_expression
-                    .iter()
-                    .map(RelationExpressionInstruction::canonical_tuple)
-                    .collect::<Result<Vec<_>, _>>()?,
-            )?
-            .canonical_bytes()
-            .to_vec();
-            distinct_zeroifier_degrees
-                .entry(zeroifier_key)
-                .or_insert(zeroifier.degree);
-            numerator_and_zeroifier_degrees.push((numerator.degree, zeroifier.degree));
-        }
-        let total_zeroifier_degree = distinct_zeroifier_degrees
-            .values()
-            .try_fold(0_u64, |total, degree| total.checked_add(*degree))
-            .ok_or(RelationPlanError::DegreeBoundExceeded)?;
-        let quotient_component_degree = context
-            .quotient_component_degree_bound_exclusive
-            .checked_sub(1)
-            .ok_or(RelationPlanError::DegreeBoundExceeded)?;
-        let quotient_degree = u64::from(
-            context
-                .quotient_component_count
-                .checked_sub(1)
-                .ok_or(RelationPlanError::DegreeBoundExceeded)?,
-        )
-        .checked_mul(self.quotient_decomposition_stride(context)?)
-        .and_then(|degree| degree.checked_add(quotient_component_degree))
-        .ok_or(RelationPlanError::DegreeBoundExceeded)?;
-        let quotient_term_degree = quotient_degree
-            .checked_add(total_zeroifier_degree)
-            .ok_or(RelationPlanError::DegreeBoundExceeded)?;
-        numerator_and_zeroifier_degrees.into_iter().try_fold(
-            quotient_term_degree,
-            |maximum_degree, (numerator_degree, zeroifier_degree)| {
-                let term_degree = numerator_degree
-                    .checked_add(total_zeroifier_degree)
-                    .and_then(|degree| degree.checked_sub(zeroifier_degree))
-                    .ok_or(RelationPlanError::DegreeBoundExceeded)?;
-                Ok(maximum_degree.max(term_degree))
-            },
-        )
-    }
-
-    /// Conservative cardinality of the values rejected while sampling the
-    /// last DEEP center. Rotations and Frobenius maps are bijections, so a
-    /// union bound over their inverse images covers trace roots, the evaluation
-    /// coset, every checked zeroifier root, direct equality with an earlier
-    /// center, and translated-orbit collisions with earlier centers.
-    pub(crate) fn application_deep_forbidden_candidate_count_bound(
-        &self,
-        context: &RelationPlanCheckContext,
-    ) -> Result<BigUint, RelationPlanError> {
-        let mut distinct_zeroifier_degrees = BTreeMap::<Vec<u8>, u64>::new();
-        for constraint in &self.ordered_constraints {
-            let zeroifier = check_expression(
-                &constraint.zeroifier_postfix_expression,
-                self,
-                context,
-                true,
-            )?;
-            let zeroifier_key = canonical_nested_list(
-                constraint
-                    .zeroifier_postfix_expression
-                    .iter()
-                    .map(RelationExpressionInstruction::canonical_tuple)
-                    .collect::<Result<Vec<_>, _>>()?,
-            )?
-            .canonical_bytes()
-            .to_vec();
-            distinct_zeroifier_degrees
-                .entry(zeroifier_key)
-                .or_insert(zeroifier.degree);
-        }
-        let total_zeroifier_degree = distinct_zeroifier_degrees
-            .values()
-            .try_fold(0_u64, |total, degree| total.checked_add(*degree))
-            .ok_or(RelationPlanError::DegreeBoundExceeded)?;
-        let opening_point_count_per_center = u64::try_from(
-            self.ordered_opening_points
-                .iter()
-                .filter(|point| point.deep_point_ordinal == 0)
-                .count(),
-        )
-        .map_err(|_| RelationPlanError::CountOverflow)?;
-        if opening_point_count_per_center == 0 {
-            return Err(RelationPlanError::InvalidOpening);
-        }
-        let excluded_per_translated_point = self
-            .trace_domain_size
-            .checked_add(self.evaluation_domain_size)
-            .and_then(|count| count.checked_add(total_zeroifier_degree))
-            .ok_or(RelationPlanError::CountOverflow)?;
-        let prior_center_count = u64::from(
-            context
-                .deep_point_count
-                .checked_sub(1)
-                .ok_or(RelationPlanError::InvalidOpening)?,
-        );
-        let mut non_full_degree_element_bound = BigUint::zero();
-        for proper_subfield_degree in 1..context.challenge_extension_degree {
-            if context
-                .challenge_extension_degree
-                .is_multiple_of(proper_subfield_degree)
-            {
-                non_full_degree_element_bound += BigUint::from(context.base_field_modulus)
-                    .pow(u32::from(proper_subfield_degree));
-            }
-        }
-        let opening_point_count = BigUint::from(opening_point_count_per_center);
-        let extension_degree = BigUint::from(context.challenge_extension_degree);
-        let prior_orbit_collision_bound = &opening_point_count
-            * &opening_point_count
-            * BigUint::from(prior_center_count)
-            * &extension_degree;
-        let current_orbit_collision_pair_count = opening_point_count_per_center
-            .checked_mul(opening_point_count_per_center.saturating_sub(1))
-            .and_then(|count| count.checked_div(2))
-            .ok_or(RelationPlanError::CountOverflow)?;
-        let current_orbit_collision_bound =
-            BigUint::from(current_orbit_collision_pair_count) * &extension_degree;
-        Ok(BigUint::one()
-            + &opening_point_count * BigUint::from(excluded_per_translated_point)
-            + &opening_point_count * non_full_degree_element_bound
-            + BigUint::from(prior_center_count)
-            + prior_orbit_collision_bound
-            + current_orbit_collision_bound)
     }
 
     pub(super) fn canonical_tuple(&self) -> Result<CanonicalTuple, RelationPlanError> {

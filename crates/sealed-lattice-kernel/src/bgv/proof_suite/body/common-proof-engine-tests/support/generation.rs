@@ -2,7 +2,7 @@ use super::*;
 
 pub(super) fn prepared_generation_worker_fixture_for_checkpoint(
     authenticated_checkpoint_state: Option<&[u8]>,
-    checkpoint_cursor_counter_delta: u64,
+    checkpoint_source_lineage_delta: u64,
 ) -> Result<(PreparedCommonProofGeneration, Vec<u8>), CommonProofRuntimeError> {
     let mut fixture = common_proof_engine_fixture();
     let expected_proof_bytes = generate_fixture_proof(&mut fixture);
@@ -72,9 +72,18 @@ pub(super) fn prepared_generation_worker_fixture_for_checkpoint(
         maximum_prefetched_query_byte_length: limits.prefetched_query_byte_length(),
     })
     .expect("the genuine generation state owns the checked relation inputs");
+    let mut source_attempt_lineage = [0x52_u8; 32];
+    source_attempt_lineage[31] = source_attempt_lineage[31].wrapping_add(
+        u8::try_from(checkpoint_source_lineage_delta)
+            .expect("the test source-lineage delta fits u8"),
+    );
     let sources = CommonProofGenerationSources::new(
-        BoundedDeterministicTestPrivateCoins::new(1_024, 1_024 * 1_024)
-            .with_checkpoint_cursor_counter_delta(checkpoint_cursor_counter_delta),
+        PublicOnlyCommonProofCoinSource::new(
+            APPLICATION_STATEMENT_SCHEMA_IDENTIFIER,
+            Hash512::from_bytes([0x51; Hash512::BYTE_LENGTH]),
+            source_attempt_lineage,
+        )
+        .expect("the public aggregate worker fixture has no private proof-coin domain"),
         ResidentCommonProofSourcePolynomialProvider::new(BTreeMap::new()),
     );
     let prepared = match authenticated_checkpoint_state {
@@ -400,6 +409,7 @@ fn owned_generation_worker_replays_from_zero_and_produces_byte_identical_output(
     let (prepared, independently_generated_proof_bytes) =
         prepared_generation_worker_fixture_for_checkpoint(Some(&authenticated_checkpoint_state), 0)
             .expect("authenticated checkpoint coordinates prepare the same exact attempt");
+    assert_eq!(prepared.runtime_binding_hash(), stable_attempt_binding_hash);
     assert_eq!(independently_generated_proof_bytes, expected_proof_bytes);
     let mut registry = CommonProofRuntimeRegistry::default();
     let operation = registry
@@ -458,7 +468,7 @@ fn owned_generation_worker_rejects_changed_checkpoint_bindings_and_replayed_stat
 
     let mut changed_committed_state = authenticated_checkpoint_state.clone();
     changed_committed_state[264] ^= 1;
-    for (bound_checkpoint_state, replay_target, cursor_counter_delta) in [
+    for (bound_checkpoint_state, replay_target, source_lineage_delta) in [
         (
             authenticated_checkpoint_state.clone(),
             changed_committed_state,
@@ -472,13 +482,13 @@ fn owned_generation_worker_rejects_changed_checkpoint_bindings_and_replayed_stat
     ] {
         let (prepared, _) = prepared_generation_worker_fixture_for_checkpoint(
             Some(&bound_checkpoint_state),
-            cursor_counter_delta,
+            source_lineage_delta,
         )
         .expect("the authenticated checkpoint prepares a replay attempt");
         let mut registry = CommonProofRuntimeRegistry::default();
         let operation = registry
             .resume_owned_generation(prepared, &replay_target)
-            .expect("hostile committed-state or cursor input reaches deterministic replay");
+            .expect("hostile committed-state or source-lineage input reaches deterministic replay");
         let mut replay_storage =
             BoundedInMemoryExternalMemory::new(MAXIMUM_EXTERNAL_MEMORY_BYTE_LENGTH);
         loop {

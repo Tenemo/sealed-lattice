@@ -25,16 +25,22 @@ use crate::{
 
 use super::top_k::{
     CANONICAL_TARGET_CIPHERTEXT_LEVEL, EvaluatorModulusSchedule, RANK_LOOKUP_BABY_STEP_COUNT,
-    SELECTED_EVALUATOR_MODULUS_SCHEDULE, SELECTED_EVALUATOR_WORKING_LEVEL, comparison_polynomials,
-    direct_comparison_baby_step_count, galois_power, generator_exponent_or_conjugated,
-    generator_inverse_power_basis_for_exponent, generator_power_basis_for_exponent,
-    interpolate_coefficients, packed_pair_lower_mask, packed_score_slot_selector,
-    packed_score_weighted_selector, scheduled_power_table_products,
+    SELECTED_EVALUATOR_MODULUS_SCHEDULE, comparison_polynomials, direct_comparison_baby_step_count,
+    galois_power, generator_exponent_or_conjugated, generator_inverse_power_basis_for_exponent,
+    generator_power_basis_for_exponent, interpolate_coefficients, packed_pair_lower_mask,
+    packed_score_slot_selector, packed_score_weighted_selector, scheduled_power_table_products,
 };
 
 const CENTERED_PLAINTEXT_BOUND: u64 = PLAINTEXT_MODULUS / 2;
 const FRESH_ERROR_COEFFICIENT_BOUND: u64 = 2;
 const FRESH_RANDOMIZER_COEFFICIENT_BOUND: u64 = 1;
+const MAXIMUM_CANONICAL_PLAINTEXT_LIFT_OFFSET: u64 = 1;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum EvaluationKeyErrorKind {
+    Relinearization,
+    Galois,
+}
 
 fn broadcast_constant_coefficients(value: u64) -> Vec<u64> {
     let mut coefficients = vec![0_u64; POLYNOMIAL_DEGREE];
@@ -54,9 +60,21 @@ pub(crate) struct SymbolicCiphertextBound {
     data_primes: Arc<[u64]>,
     key_switch_data_primes_per_block: usize,
     key_switch_special_basis_modulus: Arc<BigUint>,
+    #[cfg(test)]
+    stochastic_rounding_correction_bound: Option<Arc<BigUint>>,
 }
 
 impl SymbolicCiphertextBound {
+    #[cfg(test)]
+    fn with_stochastic_rounding_correction_bound(
+        mut self,
+        stochastic_rounding_correction_bound: BigUint,
+    ) -> Self {
+        self.stochastic_rounding_correction_bound =
+            Some(Arc::new(stochastic_rounding_correction_bound));
+        self
+    }
+
     pub(crate) fn fresh_direct_ballot(
         collective_secret_coefficient_bound: u64,
     ) -> CanonicalResult<Self> {
@@ -83,15 +101,19 @@ impl SymbolicCiphertextBound {
         // The collective public-key error is the sum of one eta-two error per
         // trustee. For b = t*e_pk - a*s and ciphertext errors e0,e1,
         //
-        //   c0 + c1*s = m + t*(e_pk*u + e0 + e1*s).
+        //   c0 + c1*s = M + t*(e_pk*u + e0 + e1*s + Z),
+        //
+        // where the runtime's canonical plaintext lift is m = M + t*Z for
+        // centered M and Z in {0, 1}.
         //
         // Both e_pk*u and e1*s use the collective coefficient bound.
         let convolution_factor = BigUint::from(POLYNOMIAL_DEGREE)
             * BigUint::from(FRESH_ERROR_COEFFICIENT_BOUND)
             * BigUint::from(FRESH_RANDOMIZER_COEFFICIENT_BOUND)
             * BigUint::from(collective_secret_coefficient_bound);
-        let error_coefficient_bound =
-            (&convolution_factor << 1_usize) + BigUint::from(FRESH_ERROR_COEFFICIENT_BOUND);
+        let error_coefficient_bound = (&convolution_factor << 1_usize)
+            + BigUint::from(FRESH_ERROR_COEFFICIENT_BOUND)
+            + BigUint::from(MAXIMUM_CANONICAL_PLAINTEXT_LIFT_OFFSET);
         let mut bound = Self {
             level: data_primes.len() - 1,
             decrypt_scaling: 1,
@@ -103,6 +125,8 @@ impl SymbolicCiphertextBound {
             data_primes,
             key_switch_data_primes_per_block,
             key_switch_special_basis_modulus,
+            #[cfg(test)]
+            stochastic_rounding_correction_bound: None,
         };
         bound.minimum_decryption_margin = bound.final_decryption_margin();
 
@@ -195,13 +219,15 @@ impl SymbolicCiphertextBound {
         &self,
         plaintext_coefficients: &[u64],
     ) -> CanonicalResult<Self> {
-        let (plaintext_infinity_bound, _) = plaintext_polynomial_norms(plaintext_coefficients);
-        self.add_plaintext_with_infinity_bound(&plaintext_infinity_bound)
+        let (plaintext_infinity_bound, _, canonical_lift_offset_bound) =
+            plaintext_polynomial_norms(plaintext_coefficients);
+        self.add_plaintext_with_bounds(&plaintext_infinity_bound, &canonical_lift_offset_bound)
     }
 
-    fn add_plaintext_with_infinity_bound(
+    fn add_plaintext_with_bounds(
         &self,
         plaintext_infinity_bound: &BigUint,
+        canonical_lift_offset_bound: &BigUint,
     ) -> CanonicalResult<Self> {
         let scaling = centered_residue_i128(self.decrypt_scaling);
         let inverse_scaling = self.scaling_inverse()?;
@@ -213,7 +239,8 @@ impl SymbolicCiphertextBound {
         let message_carry_bound = centered_reduction_carry_bound(&unreduced_message_bound);
         let error_coefficient_bound = &self.error_coefficient_bound
             + (absolute_i128(inverse_scaling_centered) * message_carry_bound)
-            + (absolute_i128(scaling_product_carry) * plaintext_infinity_bound);
+            + (absolute_i128(scaling_product_carry) * plaintext_infinity_bound)
+            + canonical_lift_offset_bound;
 
         self.derived(
             self.level,
@@ -229,7 +256,7 @@ impl SymbolicCiphertextBound {
         &self,
         plaintext_coefficients: &[u64],
     ) -> CanonicalResult<Self> {
-        let (_, plaintext_l1_norm) = plaintext_polynomial_norms(plaintext_coefficients);
+        let (_, plaintext_l1_norm, _) = plaintext_polynomial_norms(plaintext_coefficients);
         self.plaintext_multiply_with_norm(&plaintext_l1_norm)
     }
 
@@ -253,7 +280,7 @@ impl SymbolicCiphertextBound {
         if self.decrypt_scaling == 1 {
             return Ok(self.clone());
         }
-        let scaling = centered_residue_i128(self.decrypt_scaling);
+        let scaling = i128::from(self.decrypt_scaling);
         let inverse_scaling = centered_residue_i128(self.scaling_inverse()?);
         let scaling_product_carry = (scaling * inverse_scaling - 1) / i128::from(PLAINTEXT_MODULUS);
         let error_coefficient_bound = (absolute_i128(scaling) * &self.error_coefficient_bound)
@@ -330,20 +357,46 @@ impl SymbolicCiphertextBound {
         )
     }
 
-    pub(crate) fn key_switch(&self) -> CanonicalResult<Self> {
+    fn key_switch(&self, evaluation_key_kind: EvaluationKeyErrorKind) -> CanonicalResult<Self> {
         if self.component_count < 2 || self.component_count > 3 {
             return Err(invalid_recurrence(
                 "key switching requires a two- or three-component ciphertext bound",
             ));
         }
-        let error_coefficient_bound = &self.error_coefficient_bound
-            + hybrid_key_switch_error_bound(
+        #[cfg(test)]
+        let key_switch_error_bound = if let Some(stochastic_rounding_correction_bound) =
+            &self.stochastic_rounding_correction_bound
+        {
+            hybrid_key_switch_decomposed_error_bound(
+                self.level,
+                self.key_switch_data_primes_per_block,
+                &self.data_primes,
+                &self.key_switch_special_basis_modulus,
+                &collective_evaluation_key_error_bound(
+                    evaluation_key_kind,
+                    self.collective_secret_coefficient_bound,
+                ),
+            )? + stochastic_rounding_correction_bound.as_ref()
+        } else {
+            hybrid_key_switch_error_bound(
                 self.level,
                 self.collective_secret_coefficient_bound,
                 self.key_switch_data_primes_per_block,
                 &self.data_primes,
                 &self.key_switch_special_basis_modulus,
-            )?;
+                evaluation_key_kind,
+            )?
+        };
+        #[cfg(not(test))]
+        let key_switch_error_bound = hybrid_key_switch_error_bound(
+            self.level,
+            self.collective_secret_coefficient_bound,
+            self.key_switch_data_primes_per_block,
+            &self.data_primes,
+            &self.key_switch_special_basis_modulus,
+            evaluation_key_kind,
+        )?;
+        let error_coefficient_bound = &self.error_coefficient_bound + key_switch_error_bound;
 
         self.derived(
             self.level,
@@ -373,15 +426,35 @@ impl SymbolicCiphertextBound {
         let scaling_transition_carry = (input_inverse_scaling
             - (i128::from(dropped_modulus) * output_inverse_scaling))
             / i128::from(PLAINTEXT_MODULUS);
-        let half_dropped_modulus = BigUint::from(dropped_modulus / 2);
-        let secret_l1_bound = BigUint::from(POLYNOMIAL_DEGREE)
-            * BigUint::from(self.collective_secret_coefficient_bound);
-        let correction_bound = half_dropped_modulus * (BigUint::one() + secret_l1_bound);
-        let numerator_bound = &self.error_coefficient_bound
-            + correction_bound
-            + (absolute_i128(scaling_transition_carry) * &self.message_coefficient_bound);
-        let error_coefficient_bound =
-            divide_with_ceiling(&numerator_bound, &BigUint::from(dropped_modulus));
+        let scaling_transition_bound =
+            absolute_i128(scaling_transition_carry) * &self.message_coefficient_bound;
+        #[cfg(test)]
+        let error_coefficient_bound = if let Some(stochastic_rounding_correction_bound) =
+            &self.stochastic_rounding_correction_bound
+        {
+            divide_with_ceiling(
+                &(&self.error_coefficient_bound + &scaling_transition_bound),
+                &BigUint::from(dropped_modulus),
+            ) + stochastic_rounding_correction_bound.as_ref()
+        } else {
+            let half_dropped_modulus = BigUint::from(dropped_modulus / 2);
+            let secret_l1_bound = BigUint::from(POLYNOMIAL_DEGREE)
+                * BigUint::from(self.collective_secret_coefficient_bound);
+            let correction_bound = half_dropped_modulus * (BigUint::one() + secret_l1_bound);
+            let numerator_bound =
+                &self.error_coefficient_bound + correction_bound + &scaling_transition_bound;
+            divide_with_ceiling(&numerator_bound, &BigUint::from(dropped_modulus))
+        };
+        #[cfg(not(test))]
+        let error_coefficient_bound = {
+            let half_dropped_modulus = BigUint::from(dropped_modulus / 2);
+            let secret_l1_bound = BigUint::from(POLYNOMIAL_DEGREE)
+                * BigUint::from(self.collective_secret_coefficient_bound);
+            let correction_bound = half_dropped_modulus * (BigUint::one() + secret_l1_bound);
+            let numerator_bound =
+                &self.error_coefficient_bound + correction_bound + scaling_transition_bound;
+            divide_with_ceiling(&numerator_bound, &BigUint::from(dropped_modulus))
+        };
 
         self.derived(
             self.level - 1,
@@ -420,7 +493,7 @@ impl SymbolicCiphertextBound {
         let left = self.modulus_switch_to(target_level)?;
         let right = other.modulus_switch_to(target_level)?;
         left.tensor(&right)?
-            .key_switch()?
+            .key_switch(EvaluationKeyErrorKind::Relinearization)?
             .modulus_switch_to(target_level - modulus_drop_count)
     }
 
@@ -428,11 +501,12 @@ impl SymbolicCiphertextBound {
         let target_level = self.level.min(other.level);
         let left = self.modulus_switch_to(target_level)?;
         let right = other.modulus_switch_to(target_level)?;
-        left.tensor(&right)?.key_switch()
+        left.tensor(&right)?
+            .key_switch(EvaluationKeyErrorKind::Relinearization)
     }
 
     pub(crate) fn rotate_once(&self) -> CanonicalResult<Self> {
-        self.key_switch()
+        self.key_switch(EvaluationKeyErrorKind::Galois)
     }
 
     pub(crate) fn final_decryption_margin(&self) -> BigInt {
@@ -451,6 +525,17 @@ impl SymbolicCiphertextBound {
             || self.data_primes != other.data_primes
             || self.key_switch_data_primes_per_block != other.key_switch_data_primes_per_block
             || self.key_switch_special_basis_modulus != other.key_switch_special_basis_modulus
+            || {
+                #[cfg(test)]
+                {
+                    self.stochastic_rounding_correction_bound
+                        != other.stochastic_rounding_correction_bound
+                }
+                #[cfg(not(test))]
+                {
+                    false
+                }
+            }
         {
             return Err(invalid_recurrence(format!(
                 "symbolic {operation} requires equal levels, scaling, and secret profile"
@@ -488,6 +573,11 @@ impl SymbolicCiphertextBound {
             data_primes: Arc::clone(&self.data_primes),
             key_switch_data_primes_per_block: self.key_switch_data_primes_per_block,
             key_switch_special_basis_modulus: Arc::clone(&self.key_switch_special_basis_modulus),
+            #[cfg(test)]
+            stochastic_rounding_correction_bound: self
+                .stochastic_rounding_correction_bound
+                .as_ref()
+                .map(Arc::clone),
         };
         let final_decryption_margin = output.final_decryption_margin();
         output.minimum_decryption_margin = output
@@ -505,10 +595,37 @@ fn hybrid_key_switch_error_bound(
     data_primes_per_block: usize,
     data_primes: &[u64],
     special_basis_modulus: &BigUint,
+    evaluation_key_kind: EvaluationKeyErrorKind,
+) -> CanonicalResult<BigUint> {
+    let decomposed_error = hybrid_key_switch_decomposed_error_bound(
+        level,
+        data_primes_per_block,
+        data_primes,
+        special_basis_modulus,
+        &collective_evaluation_key_error_bound(
+            evaluation_key_kind,
+            collective_secret_coefficient_bound,
+        ),
+    )?;
+    let ring_degree = BigUint::from(POLYNOMIAL_DEGREE);
+    let trustee_bound = BigUint::from(collective_secret_coefficient_bound);
+    let component_b_correction = BigUint::one();
+    let component_a_secret_correction =
+        divide_with_ceiling(&(&ring_degree * trustee_bound), &BigUint::from(2_u8));
+
+    Ok(decomposed_error + component_b_correction + component_a_secret_correction)
+}
+
+fn hybrid_key_switch_decomposed_error_bound(
+    level: usize,
+    data_primes_per_block: usize,
+    data_primes: &[u64],
+    special_basis_modulus: &BigUint,
+    collective_evaluation_key_error_bound: &BigUint,
 ) -> CanonicalResult<BigUint> {
     if level >= data_primes.len()
         || data_primes_per_block == 0
-        || collective_secret_coefficient_bound == 0
+        || collective_evaluation_key_error_bound.is_zero()
     {
         return Err(invalid_recurrence(
             "hybrid key-switch recurrence received an invalid level, block size, or secret bound",
@@ -527,24 +644,32 @@ fn hybrid_key_switch_error_bound(
         .max()
         .expect("active data basis has at least one block");
     let ring_degree = BigUint::from(POLYNOMIAL_DEGREE);
-    let trustee_bound = BigUint::from(collective_secret_coefficient_bound);
-    let collective_rkg_error_bound = BigUint::from(2_u8)
-        * &ring_degree
-        * &trustee_bound
-        * (BigUint::from(2_u8) * &trustee_bound)
-        + (BigUint::from(2_u8) * &trustee_bound);
     let decomposed_error_numerator = BigUint::from(active_block_count)
         * &ring_degree
         * maximum_block_modulus
-        * collective_rkg_error_bound;
+        * collective_evaluation_key_error_bound;
     let twice_special_basis_modulus = BigUint::from(2_u8) * special_basis_modulus;
     let decomposed_error =
         divide_with_ceiling(&decomposed_error_numerator, &twice_special_basis_modulus);
-    let component_b_correction = BigUint::one();
-    let component_a_secret_correction =
-        divide_with_ceiling(&(&ring_degree * trustee_bound), &BigUint::from(2_u8));
+    Ok(decomposed_error)
+}
 
-    Ok(decomposed_error + component_b_correction + component_a_secret_correction)
+fn collective_evaluation_key_error_bound(
+    evaluation_key_kind: EvaluationKeyErrorKind,
+    collective_secret_coefficient_bound: u64,
+) -> BigUint {
+    let twice_trustee_bound =
+        BigUint::from(2_u8) * BigUint::from(collective_secret_coefficient_bound);
+    match evaluation_key_kind {
+        EvaluationKeyErrorKind::Relinearization => {
+            BigUint::from(2_u8)
+                * BigUint::from(POLYNOMIAL_DEGREE)
+                * BigUint::from(collective_secret_coefficient_bound)
+                * &twice_trustee_bound
+                + twice_trustee_bound
+        }
+        EvaluationKeyErrorKind::Galois => twice_trustee_bound,
+    }
 }
 
 fn raw_decryption_bound(bound: &SymbolicCiphertextBound) -> BigUint {
@@ -563,16 +688,20 @@ fn active_modulus(level: usize, data_primes: &[u64]) -> BigUint {
         .product()
 }
 
-fn plaintext_polynomial_norms(coefficients: &[u64]) -> (BigUint, BigUint) {
+fn plaintext_polynomial_norms(coefficients: &[u64]) -> (BigUint, BigUint, BigUint) {
     let mut infinity_bound = BigUint::zero();
     let mut l1_norm = BigUint::zero();
+    let mut canonical_lift_offset_bound = BigUint::zero();
     for coefficient in coefficients {
         let absolute_coefficient = absolute_i128(centered_residue_i128(*coefficient));
         infinity_bound = infinity_bound.max(absolute_coefficient.clone());
         l1_norm += absolute_coefficient;
+        if coefficient % PLAINTEXT_MODULUS > CENTERED_PLAINTEXT_BOUND {
+            canonical_lift_offset_bound = BigUint::one();
+        }
     }
 
-    (infinity_bound, l1_norm)
+    (infinity_bound, l1_norm, canonical_lift_offset_bound)
 }
 
 fn centered_reduction_carry_bound(unreduced_bound: &BigUint) -> BigUint {
@@ -653,14 +782,17 @@ impl DirectBallotTargetNoiseBound {
 struct ExactPlaintextPolynomialNorms {
     infinity_bound: BigUint,
     l1_norm: BigUint,
+    canonical_lift_offset_bound: BigUint,
 }
 
 impl ExactPlaintextPolynomialNorms {
     fn from_coefficients(coefficients: &[u64]) -> Self {
-        let (infinity_bound, l1_norm) = plaintext_polynomial_norms(coefficients);
+        let (infinity_bound, l1_norm, canonical_lift_offset_bound) =
+            plaintext_polynomial_norms(coefficients);
         Self {
             infinity_bound,
             l1_norm,
+            canonical_lift_offset_bound,
         }
     }
 }
@@ -699,6 +831,7 @@ struct PreparedDirectBallotTargetNoiseRecurrence {
     option_count: usize,
     score_slot_selector: ExactPlaintextPolynomialNorms,
     comparison_shift_constant: ExactPlaintextPolynomialNorms,
+    pairwise_comparison_shift: ExactPlaintextPolynomialNorms,
     greater_or_equal_polynomial: Vec<u64>,
     comparison_baby_step_count: usize,
     pair_windows: Vec<PreparedPackedRankPairWindow>,
@@ -727,6 +860,16 @@ impl PreparedDirectBallotTargetNoiseRecurrence {
         );
         let comparison_shift_constant = ExactPlaintextPolynomialNorms::from_coefficients(
             &broadcast_constant_coefficients(score_domain_maximum),
+        );
+        let pair_count = option_count
+            .checked_mul(option_count.saturating_sub(1))
+            .and_then(|product| product.checked_div(2))
+            .ok_or_else(|| invalid_recurrence("pairwise comparison lane count overflowed"))?;
+        let pairwise_comparison_shift_weights = (0..pair_count)
+            .map(|logical_index| (logical_index, score_domain_maximum))
+            .collect::<Vec<_>>();
+        let pairwise_comparison_shift = ExactPlaintextPolynomialNorms::from_coefficients(
+            &packed_score_weighted_selector(&pairwise_comparison_shift_weights)?,
         );
         let (_, greater_or_equal_polynomial) = comparison_polynomials(score_domain_maximum)?;
 
@@ -791,6 +934,7 @@ impl PreparedDirectBallotTargetNoiseRecurrence {
             option_count,
             score_slot_selector,
             comparison_shift_constant,
+            pairwise_comparison_shift,
             greater_or_equal_polynomial,
             comparison_baby_step_count: direct_comparison_baby_step_count(score_domain_maximum)?,
             pair_windows,
@@ -952,94 +1096,10 @@ fn direct_ballot_target_noise_bounds_with_prepared_topology(
         ),
     )?;
     let working_aggregate = aggregate.modulus_switch_to(working_level)?;
-    let packed_scores = symbolic_pack_direct_score_slots_with_prepared_selector(
-        &working_aggregate,
-        prepared_recurrence.option_count,
-        &prepared_recurrence.score_slot_selector,
-    )?;
-    let packed_ranks = symbolic_packed_rank_evaluation_with_prepared_plaintexts(
-        &packed_scores,
-        working_level,
-        modulus_schedule,
-        prepared_recurrence,
-    )?;
-    let normalized_rank = packed_ranks
-        .modulus_switch_to(working_level)?
-        .normalize_scaling()?;
-    let rank_powers = symbolic_prepare_polynomial_powers(
-        &normalized_rank,
-        prepared_recurrence.option_count,
-        RANK_LOOKUP_BABY_STEP_COUNT,
-        working_level,
-        &modulus_schedule.rank_depth_drop_counts,
-    )?;
-
-    prepared_recurrence
-        .target_projections
-        .iter()
-        .map(|projection| {
-            let (target_identifier, target_order) =
-                symbolic_sparse_target_projection_with_prepared_plaintexts(
-                    &packed_ranks,
-                    &rank_powers,
-                    target_level,
-                    projection,
-                    &prepared_recurrence.identifier_selector,
-                    &prepared_recurrence.option_slot_mask,
-                )?;
-            Ok(DirectBallotTargetNoiseBound {
-                top_count: projection.top_count,
-                target_identifier,
-                target_order,
-            })
-        })
-        .collect()
-}
-
-#[cfg(test)]
-#[allow(clippy::too_many_arguments)]
-fn direct_ballot_target_noise_bounds_with_prepared_pairwise_ballot_topology(
-    participant_count: u64,
-    ballot_count: usize,
-    modulus_schedule: &EvaluatorModulusSchedule,
-    data_primes: &[u64],
-    key_switch_data_primes_per_block: usize,
-    special_primes: &[u64],
-    target_level: usize,
-    prepared_recurrence: &PreparedDirectBallotTargetNoiseRecurrence,
-) -> CanonicalResult<Vec<DirectBallotTargetNoiseBound>> {
-    let working_level = data_primes
-        .len()
-        .checked_sub(1)
-        .ok_or_else(|| invalid_recurrence("evaluator data basis is empty"))?;
-    if target_level >= working_level
-        || key_switch_data_primes_per_block == 0
-        || special_primes.is_empty()
-        || modulus_schedule.total_drop_count() != working_level.saturating_sub(target_level)
-    {
-        return Err(invalid_recurrence(
-            "pairwise-ballot evaluator topology does not consume its exact level budget",
-        ));
-    }
-
-    // Each proved ballot plaintext already contains the ordered pairwise score
-    // differences. Aggregation is therefore the exact linear map that the old
-    // score-packing and pair-window preparation implemented homomorphically.
-    // The public shift remains after aggregation so its value and comparison
-    // domain are unchanged for every ballot count in the fixed roster.
-    let aggregate = SymbolicCiphertextBound::aggregate_fresh_direct_ballots_with_data_primes(
-        participant_count,
-        ballot_count,
-        Arc::from(data_primes),
-        key_switch_data_primes_per_block,
-        Arc::new(
-            special_primes
-                .iter()
-                .map(|prime| BigUint::from(*prime))
-                .product(),
-        ),
-    )?;
-    let working_aggregate = aggregate.modulus_switch_to(working_level)?;
+    // The direct-ballot relation and compiler place ordered pairwise score
+    // differences in the encrypted plaintext. Aggregation is therefore the
+    // exact linear preparation step; the public comparison-domain shift is
+    // still applied after aggregation by the pairwise recurrence below.
     let packed_ranks = symbolic_pairwise_ballot_rank_evaluation_with_prepared_plaintexts(
         &working_aggregate,
         working_level,
@@ -1257,11 +1317,12 @@ fn symbolic_packed_rank_evaluation_with_prepared_plaintexts(
         let shifted_scores =
             symbolic_rotate_positive(packed_scores, galois_power(pair_window.shift)?)?;
         let difference = packed_scores.subtract(&shifted_scores)?;
-        let shifted_difference = difference
-            .normalize_scaling()?
-            .add_plaintext_with_infinity_bound(
-                &prepared_recurrence.comparison_shift_constant.infinity_bound,
-            )?;
+        let shifted_difference = difference.normalize_scaling()?.add_plaintext_with_bounds(
+            &prepared_recurrence.comparison_shift_constant.infinity_bound,
+            &prepared_recurrence
+                .comparison_shift_constant
+                .canonical_lift_offset_bound,
+        )?;
         let lower_pair_inputs = shifted_difference
             .normalize_scaling()?
             .plaintext_multiply_with_norm(&pair_window.lower_pair_mask.l1_norm)?;
@@ -1305,7 +1366,6 @@ fn symbolic_packed_rank_evaluation_with_prepared_plaintexts(
     )
 }
 
-#[cfg(test)]
 fn symbolic_pairwise_ballot_rank_evaluation_with_prepared_plaintexts(
     packed_pairwise_differences: &SymbolicCiphertextBound,
     working_level: usize,
@@ -1314,8 +1374,11 @@ fn symbolic_pairwise_ballot_rank_evaluation_with_prepared_plaintexts(
 ) -> CanonicalResult<SymbolicCiphertextBound> {
     let comparison_inputs = packed_pairwise_differences
         .normalize_scaling()?
-        .add_plaintext_with_infinity_bound(
-            &prepared_recurrence.comparison_shift_constant.infinity_bound,
+        .add_plaintext_with_bounds(
+            &prepared_recurrence.pairwise_comparison_shift.infinity_bound,
+            &prepared_recurrence
+                .pairwise_comparison_shift
+                .canonical_lift_offset_bound,
         )?;
     let refreshed_comparison_inputs = comparison_inputs.modulus_switch_to(
         comparison_inputs
@@ -1340,7 +1403,7 @@ fn symbolic_pairwise_ballot_rank_evaluation_with_prepared_plaintexts(
         ));
     }
 
-    symbolic_finish_packed_rank_evaluation_with_prepared_plaintexts(
+    symbolic_finish_pairwise_ballot_rank_evaluation_with_prepared_plaintexts(
         &comparison_outputs,
         comparison_output_level,
         &prepared_recurrence.pair_windows,
@@ -1464,7 +1527,10 @@ fn symbolic_finish_packed_rank_evaluation_with_prepared_plaintexts(
         let higher_beats_lower_for_lower_slots = lower_beats_higher_for_lower_slots
             .normalize_scaling()?
             .negate()
-            .add_plaintext_with_infinity_bound(&pair_window.lower_pair_mask.infinity_bound)?;
+            .add_plaintext_with_bounds(
+                &pair_window.lower_pair_mask.infinity_bound,
+                &pair_window.lower_pair_mask.canonical_lift_offset_bound,
+            )?;
         let lower_beats_higher_for_return =
             lower_beats_higher_for_lower_slots.modulus_switch_to(comparison_output_level)?;
         let lower_beats_higher_at_higher_slot =
@@ -1474,6 +1540,126 @@ fn symbolic_finish_packed_rank_evaluation_with_prepared_plaintexts(
     }
 
     rank_sum.ok_or_else(|| invalid_recurrence("packed-rank recurrence produced no rank terms"))
+}
+
+fn pairwise_ballot_forward_rotation_hop_count(shift: usize) -> CanonicalResult<usize> {
+    if shift >= POLYNOMIAL_DEGREE / 2 {
+        return Err(invalid_recurrence(
+            "pairwise-ballot forward rotation exceeds the generator subgroup",
+        ));
+    }
+    if shift == 0 {
+        return Ok(0);
+    }
+
+    // The selected directed basis contains +38, -7, and -1. Every positive
+    // pair-window offset first advances by the minimum number of +38 hops and
+    // then removes the exact overshoot with -7 and -1. This is the canonical
+    // path used by the concrete evaluator compiler and its suite-fixed keys.
+    let positive_thirty_eight_hops = shift.div_ceil(38);
+    let overshoot = positive_thirty_eight_hops
+        .checked_mul(38)
+        .and_then(|advanced| advanced.checked_sub(shift))
+        .ok_or_else(|| invalid_recurrence("pairwise-ballot forward rotation overflowed"))?;
+    Ok(positive_thirty_eight_hops + overshoot / 7 + overshoot % 7)
+}
+
+fn pairwise_ballot_inverse_rotation_hop_count(shift: usize) -> CanonicalResult<usize> {
+    if shift >= POLYNOMIAL_DEGREE / 2 {
+        return Err(invalid_recurrence(
+            "pairwise-ballot inverse rotation exceeds the generator subgroup",
+        ));
+    }
+    Ok(shift / 7 + shift % 7)
+}
+
+fn symbolic_rotate_pairwise_ballot_forward(
+    ciphertext: &SymbolicCiphertextBound,
+    shift: usize,
+) -> CanonicalResult<SymbolicCiphertextBound> {
+    let mut rotated = ciphertext.clone();
+    for _ in 0..pairwise_ballot_forward_rotation_hop_count(shift)? {
+        rotated = rotated.rotate_once()?;
+    }
+    Ok(rotated)
+}
+
+fn symbolic_rotate_pairwise_ballot_inverse(
+    ciphertext: &SymbolicCiphertextBound,
+    shift: usize,
+) -> CanonicalResult<SymbolicCiphertextBound> {
+    let mut rotated = ciphertext.clone();
+    for _ in 0..pairwise_ballot_inverse_rotation_hop_count(shift)? {
+        rotated = rotated.rotate_once()?;
+    }
+    Ok(rotated)
+}
+
+fn symbolic_finish_pairwise_ballot_rank_evaluation(
+    comparison_outputs: &SymbolicCiphertextBound,
+    option_count: usize,
+    comparison_output_level: usize,
+    pair_windows: &[(usize, usize, usize)],
+) -> CanonicalResult<SymbolicCiphertextBound> {
+    let mut rank_sum = None;
+    for &(shift, window_offset, pair_window_size) in pair_windows {
+        let window_logical_indices =
+            (window_offset..(window_offset + pair_window_size)).collect::<Vec<_>>();
+        let windowed_lower_beats_higher = comparison_outputs
+            .normalize_scaling()?
+            .plaintext_multiply(&packed_score_slot_selector(&window_logical_indices)?)?;
+        let lower_beats_higher =
+            symbolic_rotate_pairwise_ballot_forward(&windowed_lower_beats_higher, window_offset)?;
+        let lower_pair_mask = packed_pair_lower_mask(option_count, shift)?;
+        let lower_beats_higher_for_lower_slots = lower_beats_higher.normalize_scaling()?;
+        let higher_beats_lower_for_lower_slots = lower_beats_higher_for_lower_slots
+            .normalize_scaling()?
+            .negate()
+            .add_plaintext_coefficients(&lower_pair_mask)?;
+        let lower_beats_higher_for_return =
+            lower_beats_higher_for_lower_slots.modulus_switch_to(comparison_output_level)?;
+        let lower_beats_higher_at_higher_slot =
+            symbolic_rotate_pairwise_ballot_inverse(&lower_beats_higher_for_return, shift)?;
+        symbolic_add_to_aligned_sum(&mut rank_sum, higher_beats_lower_for_lower_slots)?;
+        symbolic_add_to_aligned_sum(&mut rank_sum, lower_beats_higher_at_higher_slot)?;
+    }
+
+    rank_sum.ok_or_else(|| invalid_recurrence("pairwise-ballot recurrence produced no rank terms"))
+}
+
+fn symbolic_finish_pairwise_ballot_rank_evaluation_with_prepared_plaintexts(
+    comparison_outputs: &SymbolicCiphertextBound,
+    comparison_output_level: usize,
+    pair_windows: &[PreparedPackedRankPairWindow],
+) -> CanonicalResult<SymbolicCiphertextBound> {
+    let mut rank_sum = None;
+    for pair_window in pair_windows {
+        let windowed_lower_beats_higher = comparison_outputs
+            .normalize_scaling()?
+            .plaintext_multiply_with_norm(&pair_window.window_selector.l1_norm)?;
+        let lower_beats_higher = symbolic_rotate_pairwise_ballot_forward(
+            &windowed_lower_beats_higher,
+            pair_window.window_offset,
+        )?;
+        let lower_beats_higher_for_lower_slots = lower_beats_higher.normalize_scaling()?;
+        let higher_beats_lower_for_lower_slots = lower_beats_higher_for_lower_slots
+            .normalize_scaling()?
+            .negate()
+            .add_plaintext_with_bounds(
+                &pair_window.lower_pair_mask.infinity_bound,
+                &pair_window.lower_pair_mask.canonical_lift_offset_bound,
+            )?;
+        let lower_beats_higher_for_return =
+            lower_beats_higher_for_lower_slots.modulus_switch_to(comparison_output_level)?;
+        let lower_beats_higher_at_higher_slot = symbolic_rotate_pairwise_ballot_inverse(
+            &lower_beats_higher_for_return,
+            pair_window.shift,
+        )?;
+        symbolic_add_to_aligned_sum(&mut rank_sum, higher_beats_lower_for_lower_slots)?;
+        symbolic_add_to_aligned_sum(&mut rank_sum, lower_beats_higher_at_higher_slot)?;
+    }
+
+    rank_sum.ok_or_else(|| invalid_recurrence("pairwise-ballot recurrence produced no rank terms"))
 }
 
 fn symbolic_sparse_target_projection(
@@ -1546,10 +1732,14 @@ fn symbolic_sparse_target_projection_with_prepared_plaintexts(
         PreparedTargetProjectionKind::CompleteList => {
             let normalized_ranks = packed_ranks.normalize_scaling()?;
             let encrypted_zero = normalized_ranks.scalar_multiply(0)?;
-            let target_identifier = encrypted_zero
-                .add_plaintext_with_infinity_bound(&identifier_selector.infinity_bound)?;
-            let target_order = normalized_ranks
-                .add_plaintext_with_infinity_bound(&option_slot_mask.infinity_bound)?;
+            let target_identifier = encrypted_zero.add_plaintext_with_bounds(
+                &identifier_selector.infinity_bound,
+                &identifier_selector.canonical_lift_offset_bound,
+            )?;
+            let target_order = normalized_ranks.add_plaintext_with_bounds(
+                &option_slot_mask.infinity_bound,
+                &option_slot_mask.canonical_lift_offset_bound,
+            )?;
             Ok((
                 target_identifier.modulus_switch_to(target_level)?,
                 target_order.modulus_switch_to(target_level)?,
@@ -1918,6 +2108,9 @@ fn symbolic_rotate_inverse(
 }
 
 #[cfg(test)]
+mod stochastic_rounding;
+
+#[cfg(test)]
 mod tests {
     use std::{
         cell::RefCell,
@@ -1939,15 +2132,14 @@ mod tests {
     use serde_json::{Value, json};
 
     use super::{
-        CANONICAL_TARGET_CIPHERTEXT_LEVEL, DirectBallotTargetNoiseBound,
+        CANONICAL_TARGET_CIPHERTEXT_LEVEL, DirectBallotTargetNoiseBound, EvaluationKeyErrorKind,
         PreparedDirectBallotTargetNoiseRecurrence, SymbolicCiphertextBound,
         SymbolicPackedRankComparison, SymbolicPolynomialPowers, SymbolicPowerBound,
-        broadcast_constant_coefficients, direct_ballot_target_noise_bounds,
-        direct_ballot_target_noise_bounds_with_prepared_pairwise_ballot_topology,
+        collective_evaluation_key_error_bound, direct_ballot_target_noise_bounds,
         direct_ballot_target_noise_bounds_with_prepared_topology,
         direct_ballot_target_noise_bounds_with_prepared_topology_and_early_preparation_drop,
         direct_ballot_target_noise_bounds_with_schedule_and_data_primes,
-        direct_ballot_target_noise_bounds_with_topology, direct_comparison_baby_step_count,
+        direct_comparison_baby_step_count, hybrid_key_switch_decomposed_error_bound,
         symbolic_evaluate_polynomial_from_prepared_powers, symbolic_finish_packed_rank_evaluation,
         symbolic_pack_direct_score_slots, symbolic_packed_rank_evaluation,
         symbolic_prepare_packed_rank_comparison, symbolic_prepare_polynomial_powers,
@@ -1961,12 +2153,17 @@ mod tests {
         evaluator::top_k::{
             COMPARISON_SWITCHED_MULTIPLICATION_DEPTH_COUNT, EvaluatorModulusSchedule,
             RANK_LOOKUP_BABY_STEP_COUNT, RANK_SWITCHED_MULTIPLICATION_DEPTH_COUNT,
-            SELECTED_EVALUATOR_WORKING_LEVEL, ScheduledMultiplicationLevelTrace,
-            comparison_polynomials, prepared_polynomial_power_level_trace,
-            scheduled_power_table_products,
+            SELECTED_EVALUATOR_MODULUS_SCHEDULE, SELECTED_EVALUATOR_WORKING_LEVEL,
+            ScheduledMultiplicationLevelTrace, comparison_polynomials,
+            prepared_polynomial_power_level_trace, scheduled_power_table_products,
         },
-        key_switch_topology::canonical_residue_byte_length,
-        parameters::{DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE, SPECIAL_PRIMES},
+        key_switch_topology::{
+            canonical_residue_byte_length, validate_key_switch_special_basis_dominates_data_blocks,
+        },
+        parameters::{
+            DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE, SPECIAL_PRIMES,
+            root_parameters_for_modulus,
+        },
         target_decryption::kllps_release::{
             ensure_factor_four_parameter_conditions,
             ensure_factor_four_parameter_conditions_with_data_primes,
@@ -4166,10 +4363,15 @@ mod tests {
             .len()
             .checked_sub(1)
             .ok_or_else(|| super::invalid_recurrence("evaluator data basis is empty"))?;
+        let comparison_shift_weights = (0..190)
+            .map(|logical_index| (logical_index, 90_u64))
+            .collect::<Vec<_>>();
         let comparison_inputs = aggregate
             .modulus_switch_to(working_level)?
             .normalize_scaling()?
-            .add_plaintext_coefficients(&broadcast_constant_coefficients(90))?;
+            .add_plaintext_coefficients(&super::packed_score_weighted_selector(
+                &comparison_shift_weights,
+            )?)?;
         let (_, greater_or_equal_polynomial) = comparison_polynomials(90)?;
         let mut pair_windows = Vec::with_capacity(19);
         let mut next_window_offset = 0_usize;
@@ -4197,6 +4399,12 @@ mod tests {
         CollapseDominated,
     }
 
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum ComparisonSearchResourceFilter {
+        CurrentEvaluatorMaterial,
+        MeasurePairwiseMaterialAfterComparison,
+    }
+
     fn search_frontier_key(
         partition: PreComparisonFrontierPartition,
         state: &PowerDagSearchState,
@@ -4218,6 +4426,7 @@ mod tests {
             comparison,
             counts,
             PreComparisonFrontierPartition::CollapseDominated,
+            ComparisonSearchResourceFilter::CurrentEvaluatorMaterial,
         )
     }
 
@@ -4226,6 +4435,7 @@ mod tests {
         comparison: &SymbolicPackedRankComparison,
         counts: &mut SearchPruningCounts,
         partition: PreComparisonFrontierPartition,
+        resource_filter: ComparisonSearchResourceFilter,
     ) -> crate::encoding::CanonicalResult<Vec<CachedPowerDagSearchState>> {
         let working_level = comparison
             .comparison_inputs
@@ -4237,11 +4447,13 @@ mod tests {
         let mut states_by_pre_and_total =
             BTreeMap::<(usize, usize), NondominatedSearchFrontier>::new();
         for pre_comparison_drop_count in 0..=*total_drop_range.end() {
-            if !topology_pre_comparison_drop_meets_stream_bound(
-                topology,
-                &comparison.comparison_inputs.data_primes,
-                pre_comparison_drop_count,
-            )? {
+            if resource_filter == ComparisonSearchResourceFilter::CurrentEvaluatorMaterial
+                && !topology_pre_comparison_drop_meets_stream_bound(
+                    topology,
+                    &comparison.comparison_inputs.data_primes,
+                    pre_comparison_drop_count,
+                )?
+            {
                 counts.resource_rejected_prefix_count += 1;
                 for total_drop_count in total_drop_range.clone() {
                     let Some(remaining_drop_count) =
@@ -4426,12 +4638,24 @@ mod tests {
                         "comparison search reached an inconsistent output level",
                     ));
                 }
-                let packed_ranks = symbolic_finish_packed_rank_evaluation(
-                    &comparison_outputs,
-                    20,
-                    comparison_output_level,
-                    &comparison.pair_windows,
-                )?;
+                let packed_ranks = match resource_filter {
+                    ComparisonSearchResourceFilter::CurrentEvaluatorMaterial => {
+                        symbolic_finish_packed_rank_evaluation(
+                            &comparison_outputs,
+                            20,
+                            comparison_output_level,
+                            &comparison.pair_windows,
+                        )?
+                    }
+                    ComparisonSearchResourceFilter::MeasurePairwiseMaterialAfterComparison => {
+                        super::symbolic_finish_pairwise_ballot_rank_evaluation(
+                            &comparison_outputs,
+                            20,
+                            comparison_output_level,
+                            &comparison.pair_windows,
+                        )?
+                    }
+                };
                 let normalized_rank = packed_ranks
                     .modulus_switch_to(state.working_level)?
                     .normalize_scaling()?;
@@ -6409,6 +6633,7 @@ mod tests {
             &comparison,
             &mut separate_counts,
             PreComparisonFrontierPartition::Separate,
+            ComparisonSearchResourceFilter::CurrentEvaluatorMaterial,
         )
         .expect("separate pre-comparison frontier search");
         let mut collapsed_counts = SearchPruningCounts::default();
@@ -6417,6 +6642,7 @@ mod tests {
             &comparison,
             &mut collapsed_counts,
             PreComparisonFrontierPartition::CollapseDominated,
+            ComparisonSearchResourceFilter::CurrentEvaluatorMaterial,
         )
         .expect("collapsed pre-comparison frontier search");
 
@@ -7085,12 +7311,29 @@ mod tests {
         let data_primes = &THREE_PRE_COMPARISON_DROP_CANDIDATE_DATA_PRIMES;
         let comparison = prepare_joint_pairwise_ballot_comparison(topology, data_primes)
             .expect("pairwise-ballot comparison prepares exactly");
+        let exact_rotation_hop_count = comparison
+            .pair_windows
+            .iter()
+            .map(|(shift, window_offset, _)| {
+                super::pairwise_ballot_forward_rotation_hop_count(*window_offset).and_then(
+                    |forward_hops| {
+                        super::pairwise_ballot_inverse_rotation_hop_count(*shift)
+                            .map(|inverse_hops| forward_hops + inverse_hops)
+                    },
+                )
+            })
+            .collect::<crate::encoding::CanonicalResult<Vec<_>>>()
+            .expect("pairwise-ballot rotation paths are canonical")
+            .into_iter()
+            .sum::<usize>();
+        assert_eq!(exact_rotation_hop_count, 211);
         let mut pruning_counts = SearchPruningCounts::default();
         let comparison_states = generate_comparison_search_states_with_partition(
             topology,
             &comparison,
             &mut pruning_counts,
             PreComparisonFrontierPartition::Separate,
+            ComparisonSearchResourceFilter::MeasurePairwiseMaterialAfterComparison,
         )
         .expect("pairwise-ballot comparison schedule frontier");
         let complete_states = generate_complete_rank_search_states_with_partition(
@@ -7116,7 +7359,7 @@ mod tests {
                 schedule.total_drop_count(),
                 data_primes.len() - 1 - TARGET_LEVEL
             );
-            let bounds = direct_ballot_target_noise_bounds_with_prepared_pairwise_ballot_topology(
+            let bounds = direct_ballot_target_noise_bounds_with_prepared_topology(
                 10,
                 10,
                 &schedule,
@@ -7271,6 +7514,553 @@ mod tests {
             finalist_count > 0,
             "the exact pairwise-ballot frontier found no schedule satisfying every operative bound"
         );
+    }
+
+    #[test]
+    #[ignore = "focused live-order evaluator candidate measurement; remove after selecting the evaluator topology"]
+    fn live_data_order_six_special_six_data_block_candidate_reports_exact_bounds() {
+        const TARGET_LEVEL: usize = 5;
+        const MAXIMUM_TERNARY_VSS_MODULUS_EXCLUSIVE: u64 = 16_677_181_699_666_569;
+
+        let topology = joint_topology_candidates()[0];
+        assert_eq!(topology.label, "P6/B6");
+        assert_eq!(topology.special_prime_count, 6);
+        assert_eq!(topology.data_primes_per_block, 6);
+        let data_primes = &DATA_PRIMES;
+        let special_primes = &SPECIAL_PRIMES[..topology.special_prime_count];
+
+        assert!(
+            data_primes[..=TARGET_LEVEL]
+                .iter()
+                .all(|modulus| *modulus < MAXIMUM_TERNARY_VSS_MODULUS_EXCLUSIVE),
+            "the active target prefix must fit the selected ternary VSS capacity"
+        );
+        assert_eq!(
+            data_primes.iter().copied().collect::<BTreeSet<_>>().len(),
+            data_primes.len(),
+            "the live data basis must contain no duplicate modulus"
+        );
+        let two_ring_degree = u64::try_from(POLYNOMIAL_DEGREE)
+            .expect("ring degree fits u64")
+            .checked_mul(2)
+            .expect("twice the ring degree fits u64");
+        for modulus in data_primes {
+            assert_eq!((modulus - 1) % PLAINTEXT_MODULUS, 0);
+            assert_eq!((modulus - 1) % two_ring_degree, 0);
+        }
+        for modulus in data_primes[..=TARGET_LEVEL].iter().chain(special_primes) {
+            assert!(
+                root_parameters_for_modulus(*modulus).is_some(),
+                "candidate modulus {modulus} has no selected NTT root parameters"
+            );
+        }
+        validate_key_switch_special_basis_dominates_data_blocks(
+            data_primes,
+            special_primes,
+            topology.data_primes_per_block,
+        )
+        .expect("candidate special basis strictly dominates every active data block");
+
+        let schedule = SELECTED_EVALUATOR_MODULUS_SCHEDULE;
+        assert_eq!(
+            schedule.total_drop_count(),
+            data_primes.len() - 1 - TARGET_LEVEL,
+            "the live schedule must consume the exact target-level budget"
+        );
+        let comparison = prepare_joint_pairwise_ballot_comparison(topology, data_primes)
+            .expect("live-order pairwise comparison prepares exactly");
+        let exact_rotation_hop_count = comparison
+            .pair_windows
+            .iter()
+            .map(|(shift, window_offset, _)| {
+                super::pairwise_ballot_forward_rotation_hop_count(*window_offset).and_then(
+                    |forward_hop_count| {
+                        super::pairwise_ballot_inverse_rotation_hop_count(*shift)
+                            .map(|inverse_hop_count| forward_hop_count + inverse_hop_count)
+                    },
+                )
+            })
+            .collect::<crate::encoding::CanonicalResult<Vec<_>>>()
+            .expect("live-order rotation paths are canonical")
+            .into_iter()
+            .sum::<usize>();
+        assert_eq!(exact_rotation_hop_count, 211);
+
+        let prepared_recurrence = PreparedDirectBallotTargetNoiseRecurrence::prepare(20, 90)
+            .expect("live-order plaintext recurrence prepares exactly once");
+        let bounds = direct_ballot_target_noise_bounds_with_prepared_topology(
+            10,
+            10,
+            &schedule,
+            data_primes,
+            topology.data_primes_per_block,
+            special_primes,
+            TARGET_LEVEL,
+            &prepared_recurrence,
+        )
+        .expect("live-order pairwise recurrence derives exact bounds");
+        assert_eq!(bounds.len(), 20);
+        let maximum_error_bound = bounds
+            .iter()
+            .map(DirectBallotTargetNoiseBound::maximum_error_coefficient_bound)
+            .max()
+            .cloned()
+            .expect("live-order evaluator has target bounds");
+        let minimum_margin = bounds
+            .iter()
+            .flat_map(|bound| {
+                [
+                    bound.target_identifier.minimum_decryption_margin.clone(),
+                    bound.target_order.minimum_decryption_margin.clone(),
+                    bound.target_identifier.final_decryption_margin(),
+                    bound.target_order.final_decryption_margin(),
+                ]
+            })
+            .min()
+            .expect("live-order evaluator has operative margins");
+        let flooding_bound = factor_four_required_flooding_bound(&maximum_error_bound)
+            .expect("live-order factor-four flooding bound derives");
+        let factor_four_conditions_hold = ensure_factor_four_parameter_conditions_with_data_primes(
+            TARGET_LEVEL,
+            &maximum_error_bound,
+            &flooding_bound,
+            data_primes,
+        )
+        .is_ok();
+
+        let relinearization_level = data_primes.len() - 1 - schedule.pre_comparison_drop_count;
+        let galois_level = relinearization_level
+            .checked_sub(schedule.comparison_drop_count())
+            .expect("comparison drops fit the live relinearization level");
+        let relinearization_component_byte_length = component_material_wire_byte_length(
+            relinearization_level,
+            data_primes,
+            special_primes,
+            topology.data_primes_per_block,
+        )
+        .expect("live-order relinearization component accounting");
+        let galois_component_byte_length = component_material_wire_byte_length(
+            galois_level,
+            data_primes,
+            special_primes,
+            topology.data_primes_per_block,
+        )
+        .expect("live-order Galois component accounting");
+        let participant_source_wire_byte_length = relinearization_component_byte_length
+            .checked_mul(3)
+            .and_then(|relinearization_byte_length| {
+                galois_component_byte_length
+                    .checked_mul(3)
+                    .and_then(|galois_byte_length| {
+                        relinearization_byte_length.checked_add(galois_byte_length)
+                    })
+            })
+            .expect("live-order participant source accounting");
+        let final_evaluator_store_wire_byte_length = relinearization_component_byte_length
+            .checked_mul(2)
+            .and_then(|relinearization_byte_length| {
+                galois_component_byte_length
+                    .checked_mul(3)
+                    .and_then(|galois_byte_length| {
+                        relinearization_byte_length.checked_add(galois_byte_length)
+                    })
+            })
+            .expect("live-order final store accounting");
+        let ceremony_evaluator_wire_byte_length = participant_source_wire_byte_length
+            .checked_mul(10)
+            .and_then(|source_byte_length| {
+                source_byte_length.checked_add(final_evaluator_store_wire_byte_length)
+            })
+            .expect("live-order ceremony accounting");
+        let compiled_measurement =
+            compile_candidate_evaluator_program_measurement(&schedule, TARGET_LEVEL, data_primes)
+                .expect("live-order evaluator compiler accepts the exact candidate");
+        let active_target_modulus = data_primes[..=TARGET_LEVEL]
+            .iter()
+            .map(|modulus| BigUint::from(*modulus))
+            .product::<BigUint>();
+
+        println!(
+            "liveOrderP6B6 activeTargetModulus={} activeTargetModulusBits={} maximumError={} maximumErrorBits={} minimumMargin={} minimumMarginPositive={} minimumMarginBits={} factorFour={} rkgLevel={} galoisLevel={} rkgComponentBytes={} galoisComponentBytes={} participantBytes={} finalStoreBytes={} ceremonyBytes={} minimumInstructionCount={} maximumInstructionCount={} rotationHops={}",
+            active_target_modulus,
+            active_target_modulus.bits(),
+            maximum_error_bound,
+            maximum_error_bound.bits(),
+            minimum_margin,
+            minimum_margin.is_positive(),
+            minimum_margin.magnitude().bits(),
+            factor_four_conditions_hold,
+            relinearization_level,
+            galois_level,
+            relinearization_component_byte_length,
+            galois_component_byte_length,
+            participant_source_wire_byte_length,
+            final_evaluator_store_wire_byte_length,
+            ceremony_evaluator_wire_byte_length,
+            compiled_measurement.minimum_instruction_count,
+            compiled_measurement.maximum_instruction_count,
+            exact_rotation_hop_count,
+        );
+        assert!(minimum_margin.is_positive());
+        assert!(factor_four_conditions_hold);
+        assert!(ceremony_evaluator_wire_byte_length <= MAXIMUM_CANONICAL_STREAM_BYTE_LENGTH);
+    }
+
+    #[test]
+    #[ignore = "focused current-prime schedule diagnosis; run through the guarded measurements runner"]
+    fn current_prime_fixed_schedule_screen_reports_first_recurrence_divergence() {
+        const TARGET_LEVEL: usize = 5;
+        let schedules = [
+            ("selected-uniform", SELECTED_EVALUATOR_MODULUS_SCHEDULE),
+            (
+                "candidate-zero-pre",
+                EvaluatorModulusSchedule {
+                    pre_comparison_drop_count: 0,
+                    comparison_depth_drop_counts: [2, 1, 1, 1, 1, 1, 1, 2],
+                    rank_depth_drop_counts: [5, 1, 2, 0, 2],
+                },
+            ),
+            (
+                "candidate-two-pre",
+                EvaluatorModulusSchedule {
+                    pre_comparison_drop_count: 2,
+                    comparison_depth_drop_counts: [1, 1, 1, 1, 1, 1, 2, 1],
+                    rank_depth_drop_counts: [5, 1, 2, 1, 0],
+                },
+            ),
+        ];
+        let topologies = [
+            joint_topology_candidates()[4],
+            joint_topology_candidates()[0],
+        ];
+        let prepared_recurrence = PreparedDirectBallotTargetNoiseRecurrence::prepare(20, 90)
+            .expect("current-prime plaintext recurrence prepares exactly once");
+        for topology in topologies {
+            let special_primes = &SPECIAL_PRIMES[..topology.special_prime_count];
+            validate_key_switch_special_basis_dominates_data_blocks(
+                &DATA_PRIMES,
+                special_primes,
+                topology.data_primes_per_block,
+            )
+            .expect("screened special basis dominates every current data block");
+            for (schedule_label, schedule) in schedules {
+                assert_eq!(
+                    schedule.total_drop_count(),
+                    DATA_PRIMES.len() - 1 - TARGET_LEVEL
+                );
+                let bounds = direct_ballot_target_noise_bounds_with_prepared_topology(
+                    10,
+                    10,
+                    &schedule,
+                    &DATA_PRIMES,
+                    topology.data_primes_per_block,
+                    special_primes,
+                    TARGET_LEVEL,
+                    &prepared_recurrence,
+                )
+                .expect("current-prime fixed schedule recurrence");
+                let maximum_error_bound = bounds
+                    .iter()
+                    .map(DirectBallotTargetNoiseBound::maximum_error_coefficient_bound)
+                    .max()
+                    .cloned()
+                    .expect("current-prime evaluator has target bounds");
+                let minimum_margin = bounds
+                    .iter()
+                    .flat_map(|bound| {
+                        [
+                            bound.target_identifier.minimum_decryption_margin.clone(),
+                            bound.target_order.minimum_decryption_margin.clone(),
+                            bound.target_identifier.final_decryption_margin(),
+                            bound.target_order.final_decryption_margin(),
+                        ]
+                    })
+                    .min()
+                    .expect("current-prime evaluator has operative margins");
+                let flooding_bound = factor_four_required_flooding_bound(&maximum_error_bound)
+                    .expect("current-prime flooding bound");
+                let factor_four_conditions_hold =
+                    ensure_factor_four_parameter_conditions_with_data_primes(
+                        TARGET_LEVEL,
+                        &maximum_error_bound,
+                        &flooding_bound,
+                        &DATA_PRIMES,
+                    )
+                    .is_ok();
+                let target_modulus = DATA_PRIMES[..=TARGET_LEVEL]
+                    .iter()
+                    .map(|prime| BigUint::from(*prime))
+                    .product::<BigUint>();
+                let plaintext_modulus = BigUint::from(PLAINTEXT_MODULUS);
+                let scaled_c2_left = &plaintext_modulus
+                    * ((&maximum_error_bound << 4_usize)
+                        + &plaintext_modulus * BigUint::from(5_u8)
+                        + &flooding_bound * BigUint::from(16_u64 * 44));
+                let factor_four_c2_margin =
+                    BigInt::from(&target_modulus << 1_usize) - BigInt::from(scaled_c2_left);
+                let relinearization_level =
+                    DATA_PRIMES.len() - 1 - schedule.pre_comparison_drop_count;
+                let galois_level = relinearization_level
+                    .checked_sub(schedule.comparison_drop_count())
+                    .expect("comparison drops fit the current working level");
+                let relinearization_component_byte_length = component_material_wire_byte_length(
+                    relinearization_level,
+                    &DATA_PRIMES,
+                    special_primes,
+                    topology.data_primes_per_block,
+                )
+                .expect("current-prime RKG component accounting");
+                let galois_component_byte_length = component_material_wire_byte_length(
+                    galois_level,
+                    &DATA_PRIMES,
+                    special_primes,
+                    topology.data_primes_per_block,
+                )
+                .expect("current-prime Galois component accounting");
+                let participant_source_wire_byte_length = relinearization_component_byte_length
+                    .checked_mul(3)
+                    .and_then(|rkg_byte_length| {
+                        galois_component_byte_length
+                            .checked_mul(3)
+                            .and_then(|galois_byte_length| {
+                                rkg_byte_length.checked_add(galois_byte_length)
+                            })
+                    })
+                    .expect("current-prime participant accounting");
+                let final_store_wire_byte_length = relinearization_component_byte_length
+                    .checked_mul(2)
+                    .and_then(|rkg_byte_length| {
+                        galois_component_byte_length
+                            .checked_mul(3)
+                            .and_then(|galois_byte_length| {
+                                rkg_byte_length.checked_add(galois_byte_length)
+                            })
+                    })
+                    .expect("current-prime final-store accounting");
+                let ceremony_wire_byte_length = participant_source_wire_byte_length
+                    .checked_mul(10)
+                    .and_then(|source_byte_length| {
+                        source_byte_length.checked_add(final_store_wire_byte_length)
+                    })
+                    .expect("current-prime ceremony accounting");
+                let compiled_measurement = compile_candidate_evaluator_program_measurement(
+                    &schedule,
+                    TARGET_LEVEL,
+                    &DATA_PRIMES,
+                )
+                .expect("current-prime fixed schedule compiler measurement");
+                println!(
+                    "currentPrimeScreen topology={} schedule={} pre={} comparison={:?} rank={:?} maximumErrorBits={} minimumMarginPositive={} minimumMarginBits={} factorFourC2Margin={} factorFour={} rkgLevel={} galoisLevel={} rkgComponentBytes={} galoisComponentBytes={} participantBytes={} finalStoreBytes={} ceremonyBytes={} streamBound={} minimumInstructions={} maximumInstructions={}",
+                    topology.label,
+                    schedule_label,
+                    schedule.pre_comparison_drop_count,
+                    schedule.comparison_depth_drop_counts,
+                    schedule.rank_depth_drop_counts,
+                    maximum_error_bound.bits(),
+                    minimum_margin.is_positive(),
+                    minimum_margin.magnitude().bits(),
+                    factor_four_c2_margin,
+                    factor_four_conditions_hold,
+                    relinearization_level,
+                    galois_level,
+                    relinearization_component_byte_length,
+                    galois_component_byte_length,
+                    participant_source_wire_byte_length,
+                    final_store_wire_byte_length,
+                    ceremony_wire_byte_length,
+                    ceremony_wire_byte_length <= MAXIMUM_CANONICAL_STREAM_BYTE_LENGTH,
+                    compiled_measurement.minimum_instruction_count,
+                    compiled_measurement.maximum_instruction_count,
+                );
+                trace_current_prime_recurrence(
+                    topology.label,
+                    schedule_label,
+                    schedule,
+                    topology.data_primes_per_block,
+                    special_primes,
+                    &prepared_recurrence,
+                )
+                .expect("current-prime operation trace");
+            }
+        }
+    }
+
+    struct CurrentPrimeRecurrenceTrace {
+        topology_label: &'static str,
+        schedule_label: &'static str,
+        operation_ordinal: usize,
+        first_nonpositive_margin: Option<String>,
+    }
+
+    impl CurrentPrimeRecurrenceTrace {
+        fn observe(&mut self, operation: impl Into<String>, bound: &SymbolicCiphertextBound) {
+            let operation = operation.into();
+            let margin = bound.final_decryption_margin();
+            println!(
+                "currentPrimeTrace topology={} schedule={} operationOrdinal={} operation={} level={} messageBits={} errorBits={} rawBoundBits={} marginPositive={} marginBits={}",
+                self.topology_label,
+                self.schedule_label,
+                self.operation_ordinal,
+                operation,
+                bound.level,
+                bound.message_coefficient_bound.bits(),
+                bound.error_coefficient_bound.bits(),
+                super::raw_decryption_bound(bound).bits(),
+                margin.is_positive(),
+                margin.magnitude().bits(),
+            );
+            if !margin.is_positive() && self.first_nonpositive_margin.is_none() {
+                self.first_nonpositive_margin = Some(operation);
+            }
+            self.operation_ordinal += 1;
+        }
+    }
+
+    fn trace_current_prime_prepared_powers(
+        phase_label: &str,
+        prepared_powers: &SymbolicPolynomialPowers,
+        trace: &mut CurrentPrimeRecurrenceTrace,
+    ) {
+        for product in scheduled_power_table_products(prepared_powers.baby_step_count, 0)
+            .expect("current-prime baby power schedule")
+        {
+            let output = prepared_powers.baby_powers[product.output_power]
+                .as_ref()
+                .expect("current-prime baby power output");
+            trace.observe(
+                format!(
+                    "{phase_label}-baby-power-{}-depth-{}",
+                    product.output_power, product.multiplication_depth
+                ),
+                &output.ciphertext_bound,
+            );
+        }
+        let giant_base_depth = prepared_powers.baby_powers[prepared_powers.baby_step_count]
+            .as_ref()
+            .expect("current-prime giant base")
+            .multiplication_depth;
+        for product in scheduled_power_table_products(
+            prepared_powers.block_count.saturating_sub(1),
+            giant_base_depth,
+        )
+        .expect("current-prime giant power schedule")
+        {
+            let output = prepared_powers.giant_powers[product.output_power]
+                .as_ref()
+                .expect("current-prime giant power output");
+            trace.observe(
+                format!(
+                    "{phase_label}-giant-power-{}-depth-{}",
+                    product.output_power, product.multiplication_depth
+                ),
+                &output.ciphertext_bound,
+            );
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn trace_current_prime_recurrence(
+        topology_label: &'static str,
+        schedule_label: &'static str,
+        schedule: EvaluatorModulusSchedule,
+        data_primes_per_block: usize,
+        special_primes: &[u64],
+        prepared_recurrence: &PreparedDirectBallotTargetNoiseRecurrence,
+    ) -> crate::encoding::CanonicalResult<()> {
+        let special_basis_modulus = special_primes
+            .iter()
+            .map(|prime| BigUint::from(*prime))
+            .product::<BigUint>();
+        let mut trace = CurrentPrimeRecurrenceTrace {
+            topology_label,
+            schedule_label,
+            operation_ordinal: 0,
+            first_nonpositive_margin: None,
+        };
+        let aggregate = SymbolicCiphertextBound::aggregate_fresh_direct_ballots_with_data_primes(
+            10,
+            10,
+            Arc::from(DATA_PRIMES),
+            data_primes_per_block,
+            Arc::new(special_basis_modulus),
+        )?;
+        trace.observe("aggregate", &aggregate);
+        let comparison_inputs = aggregate.normalize_scaling()?.add_plaintext_with_bounds(
+            &prepared_recurrence.pairwise_comparison_shift.infinity_bound,
+            &prepared_recurrence
+                .pairwise_comparison_shift
+                .canonical_lift_offset_bound,
+        )?;
+        trace.observe("comparison-shift", &comparison_inputs);
+        let refreshed_comparison_inputs = comparison_inputs.modulus_switch_to(
+            comparison_inputs
+                .level
+                .checked_sub(schedule.pre_comparison_drop_count)
+                .expect("current-prime pre-comparison drop fits"),
+        )?;
+        trace.observe("comparison-pre-drop", &refreshed_comparison_inputs);
+        let comparison_powers = symbolic_prepare_polynomial_powers(
+            &refreshed_comparison_inputs,
+            prepared_recurrence.greater_or_equal_polynomial.len(),
+            prepared_recurrence.comparison_baby_step_count,
+            DATA_PRIMES.len() - 1,
+            &schedule.comparison_depth_drop_counts,
+        )?;
+        trace_current_prime_prepared_powers("comparison", &comparison_powers, &mut trace);
+        let comparison_outputs = symbolic_evaluate_polynomial_from_prepared_powers(
+            &comparison_powers,
+            &prepared_recurrence.greater_or_equal_polynomial,
+        )?;
+        trace.observe("comparison-polynomial-fold", &comparison_outputs);
+        let comparison_output_level = DATA_PRIMES.len()
+            - 1
+            - schedule.pre_comparison_drop_count
+            - schedule.comparison_drop_count();
+        let packed_ranks =
+            super::symbolic_finish_pairwise_ballot_rank_evaluation_with_prepared_plaintexts(
+                &comparison_outputs,
+                comparison_output_level,
+                &prepared_recurrence.pair_windows,
+            )?;
+        trace.observe("pairwise-rank-rotation-fold", &packed_ranks);
+        let normalized_rank = packed_ranks
+            .modulus_switch_to(DATA_PRIMES.len() - 1)?
+            .normalize_scaling()?;
+        trace.observe("rank-normalization", &normalized_rank);
+        let rank_powers = symbolic_prepare_polynomial_powers(
+            &normalized_rank,
+            prepared_recurrence.option_count,
+            RANK_LOOKUP_BABY_STEP_COUNT,
+            DATA_PRIMES.len() - 1,
+            &schedule.rank_depth_drop_counts,
+        )?;
+        trace_current_prime_prepared_powers("rank", &rank_powers, &mut trace);
+        for projection in &prepared_recurrence.target_projections {
+            let (target_identifier, target_order) =
+                super::symbolic_sparse_target_projection_with_prepared_plaintexts(
+                    &packed_ranks,
+                    &rank_powers,
+                    5,
+                    projection,
+                    &prepared_recurrence.identifier_selector,
+                    &prepared_recurrence.option_slot_mask,
+                )?;
+            trace.observe(
+                format!("target-{}-identifier", projection.top_count),
+                &target_identifier,
+            );
+            trace.observe(
+                format!("target-{}-order", projection.top_count),
+                &target_order,
+            );
+        }
+        println!(
+            "currentPrimeFirstDivergence topology={} schedule={} firstNonpositiveMargin={}",
+            topology_label,
+            schedule_label,
+            trace.first_nonpositive_margin.as_deref().unwrap_or("none"),
+        );
+        Ok(())
     }
 
     #[test]
@@ -8230,13 +9020,114 @@ mod tests {
         let fresh = SymbolicCiphertextBound::fresh_direct_ballot(10).unwrap();
         assert_eq!(
             fresh.error_coefficient_bound,
-            BigUint::from(40_u8) * BigUint::from(POLYNOMIAL_DEGREE) + BigUint::from(2_u8)
+            BigUint::from(40_u8) * BigUint::from(POLYNOMIAL_DEGREE) + BigUint::from(3_u8)
         );
 
         let aggregate = SymbolicCiphertextBound::aggregate_fresh_direct_ballots(10, 10).unwrap();
         assert_eq!(
             aggregate.error_coefficient_bound,
             BigUint::from(10_u8) * fresh.error_coefficient_bound + BigUint::from(9_u8)
+        );
+    }
+
+    #[test]
+    fn key_switch_error_uses_the_exact_relinearization_or_galois_key_distribution() {
+        let collective_secret_coefficient_bound = 10_u64;
+        let special_basis_modulus = SPECIAL_PRIMES[..6]
+            .iter()
+            .map(|prime| BigUint::from(*prime))
+            .product::<BigUint>();
+        let relinearization_key_error = collective_evaluation_key_error_bound(
+            EvaluationKeyErrorKind::Relinearization,
+            collective_secret_coefficient_bound,
+        );
+        let galois_key_error = collective_evaluation_key_error_bound(
+            EvaluationKeyErrorKind::Galois,
+            collective_secret_coefficient_bound,
+        );
+        assert_eq!(relinearization_key_error, BigUint::from(26_214_420_u64));
+        assert_eq!(galois_key_error, BigUint::from(20_u8));
+
+        let relinearization_decomposed_error = hybrid_key_switch_decomposed_error_bound(
+            DATA_PRIMES.len() - 1,
+            7,
+            &DATA_PRIMES,
+            &special_basis_modulus,
+            &relinearization_key_error,
+        )
+        .expect("P6/B7 relinearization decomposition bound");
+        let galois_decomposed_error = hybrid_key_switch_decomposed_error_bound(
+            DATA_PRIMES.len() - 1,
+            7,
+            &DATA_PRIMES,
+            &special_basis_modulus,
+            &galois_key_error,
+        )
+        .expect("P6/B7 Galois decomposition bound");
+        assert_eq!(
+            relinearization_decomposed_error,
+            BigUint::from(1_999_741_091_069_u64)
+        );
+        assert_eq!(galois_decomposed_error, BigUint::from(1_525_681_u64));
+
+        let two_component_bound = SymbolicCiphertextBound::fresh_direct_ballot_with_data_primes(
+            collective_secret_coefficient_bound,
+            Arc::from(DATA_PRIMES),
+            7,
+            Arc::new(special_basis_modulus),
+        )
+        .expect("P6/B7 two-component bound");
+        let rotated = two_component_bound
+            .rotate_once()
+            .expect("Galois key switch bound");
+        assert_eq!(
+            &rotated.error_coefficient_bound - &two_component_bound.error_coefficient_bound,
+            galois_decomposed_error + BigUint::from(327_681_u64)
+        );
+
+        let mut three_component_bound = two_component_bound.clone();
+        three_component_bound.component_count = 3;
+        let relinearized = three_component_bound
+            .key_switch(EvaluationKeyErrorKind::Relinearization)
+            .expect("relinearization key switch bound");
+        assert_eq!(
+            &relinearized.error_coefficient_bound - &three_component_bound.error_coefficient_bound,
+            relinearization_decomposed_error + BigUint::from(327_681_u64)
+        );
+    }
+
+    #[test]
+    fn canonical_plaintext_lifts_and_scaling_multipliers_are_accounted_exactly() {
+        let mut zero_bound = SymbolicCiphertextBound::fresh_direct_ballot(10).unwrap();
+        zero_bound.message_coefficient_bound = BigUint::zero();
+        zero_bound.error_coefficient_bound = BigUint::zero();
+
+        let small_canonical_plaintext = zero_bound
+            .add_plaintext_coefficients(&[1])
+            .expect("small canonical plaintext addition");
+        assert_eq!(
+            small_canonical_plaintext.error_coefficient_bound,
+            BigUint::zero()
+        );
+        let lifted_negative_plaintext = zero_bound
+            .add_plaintext_coefficients(&[PLAINTEXT_MODULUS - 1])
+            .expect("lifted negative plaintext addition");
+        assert_eq!(
+            lifted_negative_plaintext.error_coefficient_bound,
+            BigUint::one()
+        );
+
+        let mut noncentered_scaling_bound = zero_bound;
+        noncentered_scaling_bound.decrypt_scaling = PLAINTEXT_MODULUS - 1;
+        noncentered_scaling_bound.message_coefficient_bound = BigUint::from(7_u8);
+        noncentered_scaling_bound.error_coefficient_bound = BigUint::from(11_u8);
+        let normalized = noncentered_scaling_bound
+            .normalize_scaling()
+            .expect("canonical scaling normalization");
+        assert_eq!(normalized.decrypt_scaling, 1);
+        assert_eq!(
+            normalized.error_coefficient_bound,
+            BigUint::from(PLAINTEXT_MODULUS - 1) * BigUint::from(11_u8) + BigUint::from(7_u8)
         );
     }
 

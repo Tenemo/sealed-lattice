@@ -124,6 +124,50 @@ impl VerifiedAcceptedSetupConsumedObjectByteLengthCatalog {
     ) -> &[StreamDescriptor] {
         &self.ordered_aggregate_threshold_share_proof_descriptors
     }
+
+    #[cfg(test)]
+    pub(in crate::bgv) fn deterministic_for_authority_custody_tests(marker: u8) -> Self {
+        let participant_count = usize::from(FOUNDATION_PROFILE.participant_count);
+        let ordered_lengths = |offset: u64| {
+            (0..participant_count)
+                .map(|roster_position| {
+                    offset
+                        .checked_add(u64::try_from(roster_position).unwrap())
+                        .unwrap()
+                })
+                .collect::<Vec<_>>()
+                .into_boxed_slice()
+        };
+        let proof_descriptor = |ordinal: usize| {
+            let mut chunk_digest = [marker; Hash512::BYTE_LENGTH];
+            chunk_digest[..8].copy_from_slice(&u64::try_from(ordinal).unwrap().to_le_bytes());
+            let mut full_object_digest = [marker.wrapping_add(1); Hash512::BYTE_LENGTH];
+            full_object_digest[..8].copy_from_slice(&u64::try_from(ordinal).unwrap().to_le_bytes());
+            StreamDescriptor::new(
+                1,
+                vec![Hash512::from_bytes(chunk_digest)],
+                Hash512::from_bytes(full_object_digest),
+            )
+            .unwrap()
+        };
+
+        Self {
+            ordered_setup_intent_canonical_byte_lengths: ordered_lengths(101),
+            ordered_public_randomness_commitment_canonical_byte_lengths: ordered_lengths(201),
+            ordered_public_randomness_reveal_canonical_byte_lengths: ordered_lengths(301),
+            ordered_dealer_public_record_canonical_byte_lengths: ordered_lengths(401),
+            ordered_private_share_acceptance_canonical_byte_lengths: ordered_lengths(501),
+            ordered_vss_share_linkage_proof_descriptors: (0..participant_count)
+                .map(&proof_descriptor)
+                .collect::<Vec<_>>()
+                .into_boxed_slice(),
+            ordered_aggregate_threshold_share_proof_descriptors: (participant_count
+                ..participant_count * 2)
+                .map(&proof_descriptor)
+                .collect::<Vec<_>>()
+                .into_boxed_slice(),
+        }
+    }
 }
 
 fn require_exact_verified_object_catalog(

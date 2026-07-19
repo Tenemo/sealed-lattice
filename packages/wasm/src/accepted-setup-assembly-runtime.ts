@@ -40,7 +40,6 @@ type AcceptedSetupVerificationAssemblyExports = Required<
     Pick<
         TranscriptCoreKernelExports,
         | 'sealed_lattice_accepted_setup_authority_release'
-        | 'sealed_lattice_accepted_setup_verification_begin'
         | 'sealed_lattice_accepted_setup_verification_cancel'
         | 'sealed_lattice_accepted_setup_verification_complete_evaluator_sources'
         | 'sealed_lattice_accepted_setup_verification_complete_public_proofs'
@@ -121,7 +120,7 @@ type AcceptedSetupEvaluatorComponentBackingRecord = {
     readonly readExactRange: (
         sourceByteOffset: bigint,
         exactByteLength: number,
-    ) => Promise<Uint8Array>;
+    ) => Promise<Uint8Array<ArrayBuffer>>;
     readonly release: () => void;
     retained: boolean;
     released: boolean;
@@ -187,11 +186,7 @@ const requireEvaluatorComponentBackingRecord = (
     kernel: TranscriptCoreKernel,
 ): AcceptedSetupEvaluatorComponentBackingRecord => {
     const record = evaluatorComponentBackingRecords.get(backing);
-    if (
-        record === undefined ||
-        record.kernel !== kernel ||
-        record.released
-    ) {
+    if (record === undefined || record.kernel !== kernel || record.released) {
         throw new CanonicalStreamRefusalError('consumedState');
     }
     return record;
@@ -222,7 +217,12 @@ const releaseEvaluatorComponentBackingMap = (
     }
     backings.clear();
     if (firstFailure !== undefined) {
-        throw firstFailure;
+        throw firstFailure instanceof Error
+            ? firstFailure
+            : new CanonicalStreamInternalError(
+                  'The evaluator component backing release failed.',
+                  firstFailure,
+              );
     }
 };
 
@@ -270,8 +270,6 @@ const requireAssemblyContext = (
         wasmExports === undefined ||
         typeof wasmExports.sealed_lattice_accepted_setup_authority_release !==
             'function' ||
-        typeof wasmExports.sealed_lattice_accepted_setup_verification_begin !==
-            'function' ||
         typeof wasmExports.sealed_lattice_accepted_setup_verification_cancel !==
             'function' ||
         typeof wasmExports.sealed_lattice_accepted_setup_verification_complete_evaluator_sources !==
@@ -312,13 +310,6 @@ const requireEvaluatorSourceCatalogContext = (
         );
     }
     return context as AcceptedSetupEvaluatorSourceCatalogContext;
-};
-
-const requireCanonicalPackageBytes = (value: Uint8Array): Uint8Array => {
-    if (!isUint8Array(value) || value.byteLength === 0) {
-        throw new CanonicalStreamRefusalError('wrongTypeOrLength');
-    }
-    return value;
 };
 
 const requireSessionRecord = (
@@ -767,6 +758,34 @@ const createEvaluatorSourceCatalogSession = (
     return session;
 };
 
+/**
+ * Adopts an assembly handle minted by another exact Rust-owned package ingress.
+ * The handle remains opaque and the completed VSS authority stays bound to the
+ * same worker for finalization.
+ */
+export const adoptAcceptedSetupVerificationAssemblyFromKernelHandle = (input: {
+    assemblyHandle: number;
+    kernel: TranscriptCoreKernel;
+    vssRecipientAuthority: AggregateThresholdShareRecipientAuthority;
+}): AcceptedSetupVerificationSession => {
+    const context = requireAssemblyContext(input.kernel);
+    requireAggregateThresholdShareRecipientAuthorityKernelOwner(
+        input.vssRecipientAuthority,
+        input.kernel,
+    );
+    return createSession({
+        context,
+        evaluatorComponentBackings: new Map(),
+        handle: requireWasm32Handle(
+            input.assemblyHandle,
+            'The accepted-setup verification assembly handle',
+        ),
+        kernel: input.kernel,
+        phase: 'collecting',
+        vssRecipientAuthority: input.vssRecipientAuthority,
+    });
+};
+
 /** Begins a non-serializable catalog from the completed VSS authority. */
 export const beginAcceptedSetupEvaluatorSourceCatalog = (input: {
     kernel: TranscriptCoreKernel;
@@ -839,90 +858,6 @@ export const beginAcceptedSetupEvaluatorSourceCatalog = (input: {
     }
 };
 
-/** Begins verification from one canonical package and the completed VSS source. */
-export const beginAcceptedSetupVerification = (input: {
-    canonicalPackageBytes: Uint8Array;
-    kernel: TranscriptCoreKernel;
-    vssRecipientAuthority: AggregateThresholdShareRecipientAuthority;
-}): AcceptedSetupVerificationSession => {
-    const context = requireAssemblyContext(input.kernel);
-    const canonicalPackageBytes = requireCanonicalPackageBytes(
-        input.canonicalPackageBytes,
-    );
-    const vssAuthorityOwner =
-        requireAggregateThresholdShareRecipientAuthorityKernelOwner(
-            input.vssRecipientAuthority,
-            input.kernel,
-        );
-    const memoryBoundary = new WasmMemoryBoundary({
-        context,
-        createInternalError: (message) =>
-            new CanonicalStreamInternalError(message),
-        createResourceError: (message) =>
-            new CanonicalStreamResourceError(message),
-        label: 'accepted-setup canonical package',
-    });
-    const statusBoundary = createStatusBoundary();
-    let packagePointer = 0;
-    let statusPointer = 0;
-    let assemblyHandle = 0;
-    try {
-        packagePointer = memoryBoundary.copy(canonicalPackageBytes);
-        statusPointer = memoryBoundary.allocateZeroedWords(1);
-        assemblyHandle = context.runExclusive(
-            'accepted-setup verification assembly begin',
-            () =>
-                context.wasmExports.sealed_lattice_accepted_setup_verification_begin(
-                    vssAuthorityOwner.handle,
-                    packagePointer,
-                    canonicalPackageBytes.byteLength,
-                    statusPointer,
-                ),
-        );
-        const [status] = memoryBoundary.readWords(statusPointer, 1);
-        statusBoundary.throwIfError(status);
-        requireWasm32Handle(
-            assemblyHandle,
-            'The accepted-setup verification assembly handle',
-        );
-        const session = createSession({
-            context,
-            evaluatorComponentBackings: new Map(),
-            handle: assemblyHandle,
-            kernel: input.kernel,
-            phase: 'collecting',
-            vssRecipientAuthority: input.vssRecipientAuthority,
-        });
-        assemblyHandle = 0;
-        return session;
-    } catch (operationFailure) {
-        if (assemblyHandle !== 0) {
-            try {
-                const cleanupStatus = context.runExclusive(
-                    'unwrapped accepted-setup verification assembly cancellation',
-                    () =>
-                        context.wasmExports.sealed_lattice_accepted_setup_verification_cancel(
-                            assemblyHandle,
-                        ),
-                );
-                statusBoundary.throwIfError(cleanupStatus);
-            } catch (cleanupFailure) {
-                throw new CanonicalStreamCleanupError(
-                    operationFailure,
-                    cleanupFailure,
-                );
-            }
-        }
-        throw operationFailure;
-    } finally {
-        memoryBoundary.zeroAndDeallocate(statusPointer, wasm32WordByteLength);
-        memoryBoundary.zeroAndDeallocate(
-            packagePointer,
-            canonicalPackageBytes.byteLength,
-        );
-    }
-};
-
 /** Internal same-worker borrow for one phase-specific family verifier. */
 export const requireAcceptedSetupVerificationAssemblyKernelOwner = (
     session: AcceptedSetupVerificationSession,
@@ -971,7 +906,7 @@ export const createAcceptedSetupEvaluatorComponentBacking = (input: {
     readExactRange(
         sourceByteOffset: bigint,
         exactByteLength: number,
-    ): Promise<Uint8Array>;
+    ): Promise<Uint8Array<ArrayBuffer>>;
     release(): void;
 }): AcceptedSetupEvaluatorComponentBacking => {
     if (
@@ -995,8 +930,9 @@ export const createAcceptedSetupEvaluatorComponentBacking = (input: {
             input.materialRoot,
             'The evaluator component material root',
         ),
-        readExactRange: input.readExactRange,
-        release: input.release,
+        readExactRange: (sourceByteOffset, exactByteLength) =>
+            input.readExactRange(sourceByteOffset, exactByteLength),
+        release: () => input.release(),
         retained: false,
         released: false,
     };
@@ -1037,15 +973,15 @@ const prepareAcceptedSetupEvaluatorComponentBackingRetention = (input: {
         );
         if (
             record.retained ||
-            catalogRecord.evaluatorComponentBackings.has(
-                record.materialRootHex,
-            )
+            catalogRecord.evaluatorComponentBackings.has(record.materialRootHex)
         ) {
             throw new CanonicalStreamRefusalError('wrongHashOrRoot');
         }
         return { backing, materialRootHex: record.materialRootHex };
     });
-    const distinctRoots = new Set(prepared.map((entry) => entry.materialRootHex));
+    const distinctRoots = new Set(
+        prepared.map((entry) => entry.materialRootHex),
+    );
     if (distinctRoots.size !== prepared.length) {
         throw new CanonicalStreamRefusalError('wrongHashOrRoot');
     }
@@ -1056,15 +992,14 @@ const prepareAcceptedSetupEvaluatorComponentBackingRetention = (input: {
 };
 
 /** Rejects component-custody conflicts before consuming Rust proof authority. */
-export const requireAcceptedSetupEvaluatorComponentBackingsRetainable = (
-    input: {
+export const requireAcceptedSetupEvaluatorComponentBackingsRetainable =
+    (input: {
         backings: readonly AcceptedSetupEvaluatorComponentBacking[];
         catalog: AcceptedSetupEvaluatorSourceCatalogSession;
         kernel: TranscriptCoreKernel;
-    },
-): void => {
-    prepareAcceptedSetupEvaluatorComponentBackingRetention(input);
-};
+    }): void => {
+        prepareAcceptedSetupEvaluatorComponentBackingRetention(input);
+    };
 
 /** Gives the prepackage catalog custody of Rust-minted component carriers. */
 export const retainAcceptedSetupEvaluatorComponentBackings = (input: {
@@ -1107,7 +1042,12 @@ export const releaseUnretainedAcceptedSetupEvaluatorComponentBackings = (
         }
     }
     if (firstFailure !== undefined) {
-        throw firstFailure;
+        throw firstFailure instanceof Error
+            ? firstFailure
+            : new CanonicalStreamInternalError(
+                  'The unretained evaluator component backing release failed.',
+                  firstFailure,
+              );
     }
 };
 
@@ -1126,7 +1066,10 @@ const resolveEvaluatorComponentBacking = (input: {
     if (backing === undefined) {
         throw new CanonicalStreamRefusalError('missingPrerequisite');
     }
-    const record = requireEvaluatorComponentBackingRecord(backing, input.kernel);
+    const record = requireEvaluatorComponentBackingRecord(
+        backing,
+        input.kernel,
+    );
     if (
         record.authenticatedByteLength !== input.authenticatedByteLength ||
         record.fullObjectDigestHex !==
@@ -1140,62 +1083,66 @@ const resolveEvaluatorComponentBacking = (input: {
     return record;
 };
 
-export const readAcceptedSetupPrepackageEvaluatorComponentExactRange = async (input: {
-    authenticatedByteLength: bigint;
-    catalog: AcceptedSetupEvaluatorSourceCatalogSession;
-    exactByteLength: number;
-    fullObjectDigest: Uint8Array;
-    kernel: TranscriptCoreKernel;
-    materialRoot: Uint8Array;
-    sourceByteOffset: bigint;
-}): Promise<Uint8Array> => {
-    const catalogRecord = requireEvaluatorSourceCatalogSessionRecord(
-        input.catalog,
-    );
-    if (catalogRecord.kernel !== input.kernel) {
-        throw new CanonicalStreamRefusalError('consumedState');
-    }
-    const backing = resolveEvaluatorComponentBacking({
-        authenticatedByteLength: input.authenticatedByteLength,
-        backings: catalogRecord.evaluatorComponentBackings,
-        fullObjectDigest: input.fullObjectDigest,
-        kernel: input.kernel,
-        materialRoot: input.materialRoot,
-    });
-    return backing.readExactRange(
-        input.sourceByteOffset,
-        input.exactByteLength,
-    );
-};
+export const readAcceptedSetupPrepackageEvaluatorComponentExactRange =
+    async (input: {
+        authenticatedByteLength: bigint;
+        catalog: AcceptedSetupEvaluatorSourceCatalogSession;
+        exactByteLength: number;
+        fullObjectDigest: Uint8Array;
+        kernel: TranscriptCoreKernel;
+        materialRoot: Uint8Array;
+        sourceByteOffset: bigint;
+    }): Promise<Uint8Array<ArrayBuffer>> => {
+        const catalogRecord = requireEvaluatorSourceCatalogSessionRecord(
+            input.catalog,
+        );
+        if (catalogRecord.kernel !== input.kernel) {
+            throw new CanonicalStreamRefusalError('consumedState');
+        }
+        const backing = resolveEvaluatorComponentBacking({
+            authenticatedByteLength: input.authenticatedByteLength,
+            backings: catalogRecord.evaluatorComponentBackings,
+            fullObjectDigest: input.fullObjectDigest,
+            kernel: input.kernel,
+            materialRoot: input.materialRoot,
+        });
+        return backing.readExactRange(
+            input.sourceByteOffset,
+            input.exactByteLength,
+        );
+    };
 
-export const readAcceptedSetupVerificationEvaluatorComponentExactRange = async (input: {
-    acceptedSetupVerification: AcceptedSetupVerificationSession;
-    authenticatedByteLength: bigint;
-    exactByteLength: number;
-    fullObjectDigest: Uint8Array;
-    kernel: TranscriptCoreKernel;
-    materialRoot: Uint8Array;
-    sourceByteOffset: bigint;
-}): Promise<Uint8Array> => {
-    const assemblyRecord = requireSessionRecord(input.acceptedSetupVerification);
-    if (
-        assemblyRecord.kernel !== input.kernel ||
-        assemblyRecord.phase !== 'collecting'
-    ) {
-        throw new CanonicalStreamRefusalError('consumedState');
-    }
-    const backing = resolveEvaluatorComponentBacking({
-        authenticatedByteLength: input.authenticatedByteLength,
-        backings: assemblyRecord.evaluatorComponentBackings,
-        fullObjectDigest: input.fullObjectDigest,
-        kernel: input.kernel,
-        materialRoot: input.materialRoot,
-    });
-    return backing.readExactRange(
-        input.sourceByteOffset,
-        input.exactByteLength,
-    );
-};
+export const readAcceptedSetupVerificationEvaluatorComponentExactRange =
+    async (input: {
+        acceptedSetupVerification: AcceptedSetupVerificationSession;
+        authenticatedByteLength: bigint;
+        exactByteLength: number;
+        fullObjectDigest: Uint8Array;
+        kernel: TranscriptCoreKernel;
+        materialRoot: Uint8Array;
+        sourceByteOffset: bigint;
+    }): Promise<Uint8Array<ArrayBuffer>> => {
+        const assemblyRecord = requireSessionRecord(
+            input.acceptedSetupVerification,
+        );
+        if (
+            assemblyRecord.kernel !== input.kernel ||
+            assemblyRecord.phase !== 'collecting'
+        ) {
+            throw new CanonicalStreamRefusalError('consumedState');
+        }
+        const backing = resolveEvaluatorComponentBacking({
+            authenticatedByteLength: input.authenticatedByteLength,
+            backings: assemblyRecord.evaluatorComponentBackings,
+            fullObjectDigest: input.fullObjectDigest,
+            kernel: input.kernel,
+            materialRoot: input.materialRoot,
+        });
+        return backing.readExactRange(
+            input.sourceByteOffset,
+            input.exactByteLength,
+        );
+    };
 
 /** Releases participant component carriers after the evaluator terminal. */
 export const releaseAcceptedSetupVerificationEvaluatorComponentBackings = (

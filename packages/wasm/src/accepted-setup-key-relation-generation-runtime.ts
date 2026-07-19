@@ -1,14 +1,18 @@
 import { refusalReasonCodes } from '@sealed-lattice/types';
 
 import {
-    resolveActionRandomnessKernelAuthorization,
-    type ActionRandomnessSession,
-} from './action-randomness-runtime.js';
+    requireAcceptedSetupPackageBuilderKernelOwner,
+    type AcceptedSetupPackageBuilder,
+} from './accepted-setup-package-builder-runtime.js';
 import {
     verifyGeneratedAcceptedSetupPublicKeyShareCapabilityInClosedWorker,
     verifyGeneratedAcceptedSetupSameSecretCapabilityInClosedWorker,
     type AcceptedSetupProofVerificationInput,
 } from './accepted-setup-proof-verification-runtime.js';
+import {
+    resolveActionRandomnessKernelAuthorization,
+    type ActionRandomnessSession,
+} from './action-randomness-runtime.js';
 import { isUint8Array } from './byte-array.js';
 import type { VerifiedTranscriptObject } from './canonical-board-runtime.js';
 import {
@@ -19,6 +23,7 @@ import {
     CanonicalStreamResourceError,
 } from './canonical-stream-runtime.js';
 import {
+    applyClosedWorkerGeneratedCommonProofCapability,
     openClosedWorkerCommonProofGenerationFamilyAdapter,
     releaseClosedWorkerCommonProofGenerationFamilyAdapter,
     runClosedWorkerCommonProofGenerationFamilyAdapterRetainingGeneratedCapability,
@@ -66,18 +71,17 @@ const generatedAcceptedSetupKeyRelationProofBrand = Symbol(
 /** Same-worker custody of one generated proof until positive package verification. */
 export type GeneratedAcceptedSetupKeyRelationProof = Readonly<{
     readonly [generatedAcceptedSetupKeyRelationProofBrand]: true;
-    copyCanonicalApplicationStatementBytes(): Uint8Array<ArrayBuffer>;
     copyProofDescriptorBytes(): Uint8Array<ArrayBuffer>;
     release(): void;
 }>;
 
 type GeneratedAcceptedSetupKeyRelationProofRecord = Readonly<{
-    canonicalApplicationStatementBytes: Uint8Array<ArrayBuffer>;
     capability: ClosedWorkerGeneratedCommonProofCapability;
     context: TranscriptCoreKernelCommandRuntime;
     family: AcceptedSetupKeyRelationProofFamily;
     kernel: TranscriptCoreKernel;
     proofDescriptorBytes: Uint8Array<ArrayBuffer>;
+    statementSourceHandle: number;
 }>;
 
 const generatedProofRecords = new WeakMap<
@@ -107,9 +111,18 @@ export type GeneratedAcceptedSetupKeyRelationProofVerificationInput = Omit<
         generatedProof: GeneratedAcceptedSetupKeyRelationProof;
     }>;
 
+export type GeneratedAcceptedSetupKeyRelationPackageContributionInput =
+    Readonly<{
+        generatedProof: GeneratedAcceptedSetupKeyRelationProof;
+        packageBuilder: AcceptedSetupPackageBuilder;
+    }>;
+
 type SetupKeyRelationGenerationKernel = Readonly<{
-    copyAndReleaseStatementSource: NonNullable<
-        TranscriptCoreKernelExports['sealed_lattice_setup_key_relation_generation_statement_copy_and_release']
+    cancelGeneratedSource: NonNullable<
+        TranscriptCoreKernelExports['sealed_lattice_same_secret_generation_cancel']
+    >;
+    contributePackage: NonNullable<
+        TranscriptCoreKernelExports['sealed_lattice_same_secret_generation_contribute_package']
     >;
     discardStatementSource: NonNullable<
         TranscriptCoreKernelExports['sealed_lattice_setup_key_relation_generation_statement_discard']
@@ -125,9 +138,6 @@ type SetupKeyRelationGenerationKernel = Readonly<{
     >;
     selectSuite: NonNullable<
         TranscriptCoreKernelExports['sealed_lattice_common_proof_select_suite']
-    >;
-    statementSourceByteLength: NonNullable<
-        TranscriptCoreKernelExports['sealed_lattice_setup_key_relation_generation_statement_byte_length']
     >;
 }>;
 
@@ -185,10 +195,6 @@ const requireGenerationKernel = (
     const {
         sealed_lattice_common_proof_release_suite: releaseSelectedSuite,
         sealed_lattice_common_proof_select_suite: selectSuite,
-        sealed_lattice_setup_key_relation_generation_statement_byte_length:
-            statementSourceByteLength,
-        sealed_lattice_setup_key_relation_generation_statement_copy_and_release:
-            copyAndReleaseStatementSource,
         sealed_lattice_setup_key_relation_generation_statement_discard:
             discardStatementSource,
     } = context.wasmExports;
@@ -203,11 +209,22 @@ const requireGenerationKernel = (
                   .sealed_lattice_same_secret_prepare_resumed_generation
             : context.wasmExports
                   .sealed_lattice_public_key_share_prepare_resumed_generation;
+    const cancelGeneratedSource =
+        family === 'sameSecret'
+            ? context.wasmExports.sealed_lattice_same_secret_generation_cancel
+            : context.wasmExports
+                  .sealed_lattice_public_key_share_generation_cancel;
+    const contributePackage =
+        family === 'sameSecret'
+            ? context.wasmExports
+                  .sealed_lattice_same_secret_generation_contribute_package
+            : context.wasmExports
+                  .sealed_lattice_public_key_share_generation_contribute_package;
     if (
+        typeof cancelGeneratedSource !== 'function' ||
+        typeof contributePackage !== 'function' ||
         typeof releaseSelectedSuite !== 'function' ||
         typeof selectSuite !== 'function' ||
-        typeof statementSourceByteLength !== 'function' ||
-        typeof copyAndReleaseStatementSource !== 'function' ||
         typeof discardStatementSource !== 'function' ||
         typeof prepareGeneration !== 'function' ||
         typeof prepareResumedGeneration !== 'function'
@@ -217,13 +234,13 @@ const requireGenerationKernel = (
         );
     }
     return Object.freeze({
-        copyAndReleaseStatementSource,
+        cancelGeneratedSource,
+        contributePackage,
         discardStatementSource,
         prepareGeneration,
         prepareResumedGeneration,
         releaseSelectedSuite,
         selectSuite,
-        statementSourceByteLength,
     });
 };
 
@@ -306,57 +323,6 @@ const discardStatementSource = (input: {
     input.statusBoundary.throwIfError(status);
 };
 
-const copyAndReleaseStatementSource = (input: {
-    context: TranscriptCoreKernelCommandRuntime;
-    handle: number;
-    kernel: SetupKeyRelationGenerationKernel;
-    memoryBoundary: WasmMemoryBoundary;
-    statusBoundary: WasmStatusBoundary;
-}): Uint8Array<ArrayBuffer> =>
-    input.context.runExclusive(
-        'accepted-setup key-relation statement-source readback',
-        () => {
-            const statusPointer = input.memoryBoundary.allocateZeroedWords(1);
-            let outputPointer = 0;
-            let outputByteLength = 0;
-            try {
-                outputByteLength = input.kernel.statementSourceByteLength(
-                    input.handle,
-                    statusPointer,
-                );
-                const [lengthStatus] = input.memoryBoundary.readWords(
-                    statusPointer,
-                    1,
-                );
-                input.statusBoundary.throwIfError(lengthStatus);
-                input.memoryBoundary.validateAllocationByteLength(
-                    outputByteLength,
-                );
-                outputPointer = input.memoryBoundary.allocate(outputByteLength);
-                const copyStatus = input.kernel.copyAndReleaseStatementSource(
-                    input.handle,
-                    outputPointer,
-                    outputByteLength,
-                );
-                input.statusBoundary.throwIfError(copyStatus);
-                return new Uint8Array(
-                    input.context.memory.buffer,
-                    outputPointer,
-                    outputByteLength,
-                ).slice();
-            } finally {
-                input.memoryBoundary.zeroAndDeallocate(
-                    outputPointer,
-                    outputByteLength,
-                );
-                input.memoryBoundary.zeroAndDeallocate(
-                    statusPointer,
-                    wasm32WordByteLength,
-                );
-            }
-        },
-    );
-
 const requireGeneratedProofRecord = (
     proof: GeneratedAcceptedSetupKeyRelationProof,
 ): GeneratedAcceptedSetupKeyRelationProofRecord => {
@@ -370,11 +336,38 @@ const requireGeneratedProofRecord = (
     return record;
 };
 
+const cancelGeneratedSource = (input: {
+    capability: ClosedWorkerGeneratedCommonProofCapability;
+    context: TranscriptCoreKernelCommandRuntime;
+    family: AcceptedSetupKeyRelationProofFamily;
+    statementSourceHandle: number;
+}): void => {
+    const kernel = requireGenerationKernel(input.context, input.family);
+    const status = applyClosedWorkerGeneratedCommonProofCapability(
+        input.capability,
+        input.context,
+        (generatedCommonProofHandle) => {
+            const result = input.context.runExclusive(
+                `accepted-setup ${input.family} generated-source cancellation`,
+                () =>
+                    kernel.cancelGeneratedSource(
+                        input.statementSourceHandle,
+                        generatedCommonProofHandle,
+                    ),
+            );
+            return Object.freeze({
+                consumed: result === 0,
+                result,
+            });
+        },
+    );
+    createStatusBoundary(input.family).throwIfError(status);
+};
+
 const retireConsumedGeneratedProof = (
     proof: GeneratedAcceptedSetupKeyRelationProof,
     record: GeneratedAcceptedSetupKeyRelationProofRecord,
 ): void => {
-    record.canonicalApplicationStatementBytes.fill(0);
     record.proofDescriptorBytes.fill(0);
     generatedProofRecords.delete(proof);
 };
@@ -382,18 +375,18 @@ const retireConsumedGeneratedProof = (
 const createGeneratedProof = (
     record: GeneratedAcceptedSetupKeyRelationProofRecord,
 ): GeneratedAcceptedSetupKeyRelationProof => {
-    let proof: GeneratedAcceptedSetupKeyRelationProof;
-    proof = Object.freeze({
+    const proof: GeneratedAcceptedSetupKeyRelationProof = Object.freeze({
         [generatedAcceptedSetupKeyRelationProofBrand]: true as const,
-        copyCanonicalApplicationStatementBytes: () =>
-            requireGeneratedProofRecord(
-                proof,
-            ).canonicalApplicationStatementBytes.slice(),
         copyProofDescriptorBytes: () =>
             requireGeneratedProofRecord(proof).proofDescriptorBytes.slice(),
         release: (): void => {
             const activeRecord = requireGeneratedProofRecord(proof);
-            activeRecord.capability.release();
+            cancelGeneratedSource({
+                capability: activeRecord.capability,
+                context: activeRecord.context,
+                family: activeRecord.family,
+                statementSourceHandle: activeRecord.statementSourceHandle,
+            });
             retireConsumedGeneratedProof(proof, activeRecord);
         },
     });
@@ -481,9 +474,6 @@ const generateAcceptedSetupKeyRelationInClosedWorker = async (
     let generatedCapability:
         | ClosedWorkerGeneratedCommonProofCapability
         | undefined;
-    let canonicalApplicationStatementBytes:
-        | Uint8Array<ArrayBuffer>
-        | undefined;
     let proofDescriptorBytes: Uint8Array<ArrayBuffer> | undefined;
     let result: GeneratedAcceptedSetupKeyRelationProof | undefined;
     let operationFailure: unknown;
@@ -561,14 +551,6 @@ const generateAcceptedSetupKeyRelationInClosedWorker = async (
             context,
             prepared.adapterHandle,
         );
-        canonicalApplicationStatementBytes = copyAndReleaseStatementSource({
-            context,
-            handle: statementSourceHandle,
-            kernel,
-            memoryBoundary,
-            statusBoundary,
-        });
-        statementSourceHandle = 0;
         releaseSelectedSuite({
             context,
             handle: selectedSuiteHandle,
@@ -595,9 +577,7 @@ const generateAcceptedSetupKeyRelationInClosedWorker = async (
             outputChunkByteLengths: trackedOutput.outputChunkByteLengths,
             outputStore: input.outputStore,
             proofFamilyLabel:
-                family === 'sameSecret'
-                    ? 'same-secret'
-                    : 'public-key-share',
+                family === 'sameSecret' ? 'same-secret' : 'public-key-share',
             streamDomain:
                 family === 'sameSecret'
                     ? canonicalStreamDomains.sameSecretProof
@@ -605,15 +585,16 @@ const generateAcceptedSetupKeyRelationInClosedWorker = async (
         });
         result = createGeneratedProof(
             Object.freeze({
-                canonicalApplicationStatementBytes,
                 capability: generatedCapability,
                 context,
                 family,
                 kernel: input.kernel,
                 proofDescriptorBytes,
+                statementSourceHandle,
             }),
         );
         generatedCapability = undefined;
+        statementSourceHandle = 0;
     } catch (error) {
         operationFailed = true;
         operationFailure = error;
@@ -640,6 +621,20 @@ const generateAcceptedSetupKeyRelationInClosedWorker = async (
             releaseClosedWorkerCommonProofGenerationFamilyAdapter(
                 familyAdapter,
             );
+        } catch (cleanupFailure) {
+            cleanupFailures.push(cleanupFailure);
+        }
+    }
+    if (generatedCapability !== undefined && statementSourceHandle !== 0) {
+        try {
+            cancelGeneratedSource({
+                capability: generatedCapability,
+                context,
+                family,
+                statementSourceHandle,
+            });
+            generatedCapability = undefined;
+            statementSourceHandle = 0;
         } catch (cleanupFailure) {
             cleanupFailures.push(cleanupFailure);
         }
@@ -687,10 +682,7 @@ const generateAcceptedSetupKeyRelationInClosedWorker = async (
 export const generateAcceptedSetupSameSecretInClosedWorker = (
     input: AcceptedSetupKeyRelationGenerationInput,
 ): Promise<GeneratedAcceptedSetupKeyRelationProof> =>
-    generateAcceptedSetupKeyRelationInClosedWorker(
-        'sameSecret',
-        input,
-    );
+    generateAcceptedSetupKeyRelationInClosedWorker('sameSecret', input);
 
 /**
  * Generates one public-key-share proof for later positive package verification.
@@ -698,7 +690,58 @@ export const generateAcceptedSetupSameSecretInClosedWorker = (
 export const generateAcceptedSetupPublicKeyShareInClosedWorker = (
     input: AcceptedSetupKeyRelationGenerationInput,
 ): Promise<GeneratedAcceptedSetupKeyRelationProof> =>
-    generateAcceptedSetupKeyRelationInClosedWorker(
+    generateAcceptedSetupKeyRelationInClosedWorker('publicKeyShare', input);
+
+const contributeGeneratedAcceptedSetupKeyRelationToPackage = (
+    family: AcceptedSetupKeyRelationProofFamily,
+    input: GeneratedAcceptedSetupKeyRelationPackageContributionInput,
+): void => {
+    const record = requireGeneratedProofRecord(input.generatedProof);
+    if (record.family !== family) {
+        throw new CanonicalStreamRefusalError('wrongContext');
+    }
+    const builderOwner = requireAcceptedSetupPackageBuilderKernelOwner(
+        input.packageBuilder,
+        record.kernel,
+    );
+    if (builderOwner.context !== record.context) {
+        throw new CanonicalStreamRefusalError('wrongContext');
+    }
+    const kernel = requireGenerationKernel(record.context, family);
+    const status = applyClosedWorkerGeneratedCommonProofCapability(
+        record.capability,
+        record.context,
+        (generatedCommonProofHandle) =>
+            Object.freeze({
+                consumed: false,
+                result: record.context.runExclusive(
+                    `accepted-setup ${family} generated package contribution`,
+                    () =>
+                        kernel.contributePackage(
+                            builderOwner.handle,
+                            record.statementSourceHandle,
+                            generatedCommonProofHandle,
+                        ),
+                ),
+            }),
+    );
+    createStatusBoundary(family).throwIfError(status);
+};
+
+/** Contributes one locally generated same-secret source to the exact package. */
+export const contributeGeneratedAcceptedSetupSameSecretToPackage = (
+    input: GeneratedAcceptedSetupKeyRelationPackageContributionInput,
+): void =>
+    contributeGeneratedAcceptedSetupKeyRelationToPackage('sameSecret', input);
+
+/**
+ * Contributes one locally generated public-key-share source to the exact
+ * package.
+ */
+export const contributeGeneratedAcceptedSetupPublicKeyShareToPackage = (
+    input: GeneratedAcceptedSetupKeyRelationPackageContributionInput,
+): void =>
+    contributeGeneratedAcceptedSetupKeyRelationToPackage(
         'publicKeyShare',
         input,
     );
@@ -717,25 +760,24 @@ const verifyGeneratedAcceptedSetupKeyRelationInClosedWorker = async (
     ) {
         throw new CanonicalStreamRefusalError('wrongContext');
     }
-    const verificationInput: AcceptedSetupProofVerificationInput =
-        Object.freeze({
-            assembly: input.assembly,
-            canonicalApplicationStatementBytes:
-                record.canonicalApplicationStatementBytes,
-            canonicalSuiteRecordBytes: input.canonicalSuiteRecordBytes,
-            inputStore: input.inputStore,
-            kernel: input.kernel,
-            options: input.options,
-        });
+    const verificationInput = Object.freeze({
+        assembly: input.assembly,
+        canonicalSuiteRecordBytes: input.canonicalSuiteRecordBytes,
+        inputStore: input.inputStore,
+        kernel: input.kernel,
+        options: input.options,
+    });
     if (family === 'sameSecret') {
         await verifyGeneratedAcceptedSetupSameSecretCapabilityInClosedWorker(
             verificationInput,
             record.capability,
+            record.statementSourceHandle,
         );
     } else {
         await verifyGeneratedAcceptedSetupPublicKeyShareCapabilityInClosedWorker(
             verificationInput,
             record.capability,
+            record.statementSourceHandle,
         );
     }
     retireConsumedGeneratedProof(input.generatedProof, record);
@@ -745,10 +787,7 @@ const verifyGeneratedAcceptedSetupKeyRelationInClosedWorker = async (
 export const verifyGeneratedAcceptedSetupSameSecretInClosedWorker = (
     input: GeneratedAcceptedSetupKeyRelationProofVerificationInput,
 ): Promise<void> =>
-    verifyGeneratedAcceptedSetupKeyRelationInClosedWorker(
-        'sameSecret',
-        input,
-    );
+    verifyGeneratedAcceptedSetupKeyRelationInClosedWorker('sameSecret', input);
 
 /**
  * Positively verifies one generated public-key-share proof from its exact

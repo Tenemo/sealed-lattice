@@ -194,6 +194,14 @@ impl KeySwitchKeyNttBuilder {
             .flatten()
     }
 
+    /// Exact number of authenticated coefficient limbs already transformed
+    /// into the resident key's NTT representation.
+    pub(crate) fn transformed_limb_count(&self) -> CanonicalResult<usize> {
+        self.next_runtime_limb_ordinal
+            .checked_add(self.next_auxiliary_limb_ordinal)
+            .ok_or_else(key_switch_replay_size_error)
+    }
+
     pub(crate) fn absorb_runtime_limb(&mut self, coefficients: Vec<u64>) -> CanonicalResult<()> {
         let position = self.next_runtime_limb().ok_or_else(|| {
             CanonicalError::new(

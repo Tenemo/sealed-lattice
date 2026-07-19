@@ -1,15 +1,19 @@
-use std::{cell::RefCell, collections::BTreeMap, rc::Rc, sync::Arc};
+use std::{cell::RefCell, collections::BTreeMap, mem::size_of, rc::Rc, sync::Arc};
 
 use zeroize::{Zeroize, Zeroizing};
 
 use super::generation_relinearization::{
-    SetupGeneratedRelinearizationMaterial, SetupGeneratedRelinearizationRoundOneSourceAuthority,
+    SetupGeneratedRelinearizationAggregateSourceAuthority, SetupGeneratedRelinearizationMaterial,
+    SetupGeneratedRelinearizationRoundOneSourceAuthority,
     SetupGeneratedRelinearizationRoundTwoGeneration,
     SetupGeneratedRelinearizationRoundTwoSourceAuthority,
     SetupGenerationRelinearizationRoundOnePreparationSource,
+    SetupRelinearizationRoundTwoConstruction, authenticate_setup_generated_component_material,
+    recompute_setup_generated_component_public_polynomial_root,
 };
 
 use crate::{
+    bgv::parameters::{DATA_PRIMES, POLYNOMIAL_DEGREE},
     bgv::proof_suite::{
         AuthenticatedCompactCommittedMaterialSource, CommittedMaterialContext,
         CommittedMaterialRole, CommittedMaterialSourcePolynomialAdapter, CommittedMaterialTree,
@@ -17,49 +21,62 @@ use crate::{
         CommonProofGenerationSources, CommonProofPrivateCoinCoordinateCapacity,
         CommonProofProverError, CommonProofRelationPlanCapability, CommonProofRuntimeError,
         CommonProofRuntimeLimits, CompactCommittedMaterialSource,
-        ComponentMaterialOwnershipBinding, ComponentPublicPolynomialRuntimeError,
-        GaloisKeyShareSourcePolynomialAdapter, KeySwitchComponentMaterialTopology,
-        KeySwitchComponentPublicPolynomialStream, PreparedCommonProofGeneration,
-        PrivateRandomnessCommonProofCoinSource, ProofBaseFieldElement, ProofEvaluationDomain,
-        RelationPlanVariant, SelectedEvaluatorEntryKind, SelectedEvaluatorEntryPosition,
-        SelectedVssShareLinkageStatement, SetupKeyRelationSourcePolynomialAdapter,
-        SetupPublicPolynomialContext, SetupPublicPolynomialTree, SetupPublicPolynomialTreeInput,
+        ComponentMaterialOwnershipBinding, GaloisKeyShareSourcePolynomialAdapter,
+        KeySwitchComponentMaterialTopology, PreparedCommonProofGeneration,
+        PrivateRandomnessCommonProofCoinSource, RelationPlanVariant,
+        RelinearizationRoundOneSourcePolynomialAdapter,
+        RelinearizationRoundTwoAuthenticatedAggregateSourcePlan,
+        RelinearizationRoundTwoSourcePolynomialAdapter, SelectedEvaluatorEntryKind,
+        SelectedEvaluatorEntryPosition, SelectedVssShareLinkageStatement,
+        SetupKeyRelationSourcePolynomialAdapter, SetupPublicPolynomialContext,
+        SetupPublicPolynomialRootBuilder, SetupPublicPolynomialTree,
         VerifiedEvaluatorAuxiliaryRoot, VerifiedKeySwitchComponentMaterial,
-        VerifiedRelinearizationAggregateMaterial, canonical_selected_galois_key_share_statement,
+        canonical_selected_galois_key_share_statement,
         canonical_selected_public_key_share_statement, canonical_selected_same_secret_statement,
         canonical_selected_vss_share_linkage_statement,
         compile_galois_key_share_relation_with_source_layout,
         compile_public_key_share_relation_with_source_layout,
+        compile_relinearization_round_one_relation_with_source_layout,
+        compile_relinearization_round_two_relation_with_source_layout,
         compile_same_secret_relation_with_source_layout, compile_vss_share_linkage_relation_plan,
         decode_recipient_private_vss_payload, galois_relation_tree_inputs,
-        public_key_share_relation_tree_inputs, same_secret_relation_tree_inputs,
+        public_key_share_relation_tree_inputs, relinearization_round_one_relation_tree_inputs,
+        relinearization_round_two_relation_tree_inputs, same_secret_relation_tree_inputs,
         selected_committed_material_profile, selected_committed_material_relation_plan_input,
         selected_evaluator_galois_entry_positions, selected_galois_key_share_batch_schedule,
         selected_galois_key_share_relation_plan_input,
         selected_public_key_share_relation_plan_input, selected_relation_plan_check_context,
-        selected_relation_plans, selected_same_secret_relation_plan_input,
-        verified_application_statement_hash,
+        selected_relation_plans, selected_relinearization_relation_plan_inputs,
+        selected_same_secret_relation_plan_input, verified_application_statement_hash,
     },
     bgv::setup::{
         SETUP_COMMITMENT_HIDING_ERROR_WIDTH, SETUP_COMMITMENT_HIDING_SECRET_WIDTH,
         SETUP_COMMITMENT_MODULE_RANK, SETUP_COMMITMENT_MODULUS_LIMB_INDICES,
-        sample_galois_common_reference_limb,
+        parse_lattice_anchor_commitment_canonical_bytes, sample_galois_common_reference_limb,
         sampling::{DATA_MODULUS_CATALOG_IDENTIFIER, SPECIAL_MODULUS_CATALOG_IDENTIFIER},
     },
     foundation::{
         ActionPrivateRandomness, CanonicalStreamDomain, CanonicalStreamReadbackVerifier,
-        FOUNDATION_PROFILE, Hash512, PersistentProofCoinInput, PersistentProofWitnessCoinBinding,
-        PreparedActionProofAttemptSource, ProofApplicationSlotCeilings, RefusalReason,
-        SelectedSuiteCapability, StreamDescriptor, WitnessBoundPreparedActionProofAttemptSource,
+        FOUNDATION_PROFILE, Hash512, ParticipantIdentity, PersistentProofCoinInput,
+        PersistentProofWitnessCoinBinding, PreparedActionProofAttemptSource,
+        ProofApplicationSlotCeilings, RefusalReason, Roster, SelectedSuiteCapability,
+        StreamDescriptor, WitnessBoundPreparedActionProofAttemptSource,
         bind_prepared_action_proof_attempt_to_canonical_witness,
         derive_canonical_stream_descriptor,
     },
 };
 
 const MAXIMUM_RETAINED_SETUP_GENERATION_AUTHORITY_COUNT: usize = 16;
+const MAXIMUM_RETAINED_SETUP_GENERATION_PUBLIC_KEY_SHARE_SOURCE_COUNT: usize =
+    MAXIMUM_RETAINED_SETUP_GENERATION_AUTHORITY_COUNT;
 const MAXIMUM_RETAINED_SETUP_GENERATION_RECIPIENT_PAYLOAD_SOURCE_COUNT: usize =
     MAXIMUM_RETAINED_SETUP_GENERATION_AUTHORITY_COUNT
         * FOUNDATION_PROFILE.participant_count as usize;
+const PUBLIC_KEY_SHARE_COEFFICIENT_BYTE_LENGTH: usize = size_of::<u64>();
+pub(crate) const SELECTED_SETUP_GENERATION_PUBLIC_KEY_SHARE_BODY_BYTE_LENGTH: u64 =
+    DATA_PRIMES.len() as u64
+        * POLYNOMIAL_DEGREE as u64
+        * PUBLIC_KEY_SHARE_COEFFICIENT_BYTE_LENGTH as u64;
 const GALOIS_KEY_SHARE_CANONICAL_SEMANTIC_WITNESS_DOMAIN: &[u8] =
     b"sealed-lattice/galois-key-share/canonical-semantic-witness/v1";
 const RELINEARIZATION_ROUND_ONE_CANONICAL_SEMANTIC_WITNESS_DOMAIN: &[u8] =
@@ -70,17 +87,6 @@ const SAME_SECRET_CANONICAL_SEMANTIC_WITNESS_DOMAIN: &[u8] =
     b"sealed-lattice/same-secret/canonical-semantic-witness/v1";
 const PUBLIC_KEY_SHARE_CANONICAL_SEMANTIC_WITNESS_DOMAIN: &[u8] =
     b"sealed-lattice/public-key-share/canonical-semantic-witness/v1";
-
-const fn generated_galois_stream_refusal(
-    error: ComponentPublicPolynomialRuntimeError,
-) -> RefusalReason {
-    match error {
-        ComponentPublicPolynomialRuntimeError::Refusal(refusal_reason) => refusal_reason,
-        ComponentPublicPolynomialRuntimeError::PublicPolynomial(_) => {
-            RefusalReason::WrongHashOrRoot
-        }
-    }
-}
 
 /// Opaque browser-owned setup-generation capability. It is deliberately not
 /// cloneable or serializable; JavaScript can retain only the numeric handle
@@ -94,6 +100,68 @@ impl SetupGenerationAuthorityHandle {
 
     pub(crate) const fn identifier(&self) -> u32 {
         self.0
+    }
+}
+
+/// Nonserialized live-set accounting for the mutually exclusive setup
+/// authority lifetimes. Shared VSS sources are split from their wrappers so a
+/// prepared proof adapter can borrow the same Arc allocations without making
+/// a second resident-memory owner.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct SetupGenerationRetainedMemoryAccounting {
+    all_family_coefficient_and_canonical_payload_byte_length: u64,
+    all_family_wrapper_and_catalog_byte_length: u64,
+    all_family_payload_byte_length: u64,
+    vss_proof_shared_source_byte_length: u64,
+    vss_proof_wrapper_and_catalog_byte_length: u64,
+    post_release_payload_byte_length: u64,
+    vss_proof_phase_is_active: bool,
+}
+
+impl SetupGenerationRetainedMemoryAccounting {
+    pub(crate) const fn all_family_coefficient_and_canonical_payload_byte_length(self) -> u64 {
+        self.all_family_coefficient_and_canonical_payload_byte_length
+    }
+
+    pub(crate) const fn all_family_wrapper_and_catalog_byte_length(self) -> u64 {
+        self.all_family_wrapper_and_catalog_byte_length
+    }
+
+    pub(crate) const fn all_family_payload_byte_length(self) -> u64 {
+        self.all_family_payload_byte_length
+    }
+
+    pub(crate) const fn vss_proof_shared_source_byte_length(self) -> u64 {
+        self.vss_proof_shared_source_byte_length
+    }
+
+    pub(crate) const fn vss_proof_wrapper_and_catalog_byte_length(self) -> u64 {
+        self.vss_proof_wrapper_and_catalog_byte_length
+    }
+
+    pub(crate) const fn post_release_payload_byte_length(self) -> u64 {
+        self.post_release_payload_byte_length
+    }
+
+    pub(crate) const fn vss_proof_phase_is_active(self) -> bool {
+        self.vss_proof_phase_is_active
+    }
+
+    pub(crate) const fn active_payload_byte_length(self) -> u64 {
+        if self.vss_proof_phase_is_active {
+            self.post_release_payload_byte_length
+        } else {
+            self.all_family_payload_byte_length
+        }
+    }
+
+    pub(crate) fn checked_maximum_overlap_byte_length(
+        self,
+        additional_resident_byte_length: u64,
+    ) -> Result<u64, RefusalReason> {
+        self.active_payload_byte_length()
+            .checked_add(additional_resident_byte_length)
+            .ok_or(RefusalReason::OutsideSupportedProfile)
     }
 }
 
@@ -119,6 +187,18 @@ impl SetupKeyRelationProofFamily {
 pub(crate) struct SetupGenerationRecipientPayloadSourceHandle(u32);
 
 impl SetupGenerationRecipientPayloadSourceHandle {
+    pub(crate) const fn from_identifier(identifier: u32) -> Self {
+        Self(identifier)
+    }
+
+    pub(crate) const fn identifier(&self) -> u32 {
+        self.0
+    }
+}
+
+pub(crate) struct SetupGenerationPublicKeyShareSourceHandle(u32);
+
+impl SetupGenerationPublicKeyShareSourceHandle {
     pub(crate) const fn from_identifier(identifier: u32) -> Self {
         Self(identifier)
     }
@@ -159,6 +239,32 @@ impl SetupGeneratedKeySwitchComponent {
         })
     }
 
+    /// Installs bytes whose length, descriptor and public-polynomial source
+    /// were already recomputed successfully by the streamed setup generator.
+    /// Keeping this final move infallible preserves activation phase atomicity
+    /// without cloning the complete component.
+    pub(crate) fn from_authenticated_canonical_bytes(
+        evaluator_position: SelectedEvaluatorEntryPosition,
+        topology: KeySwitchComponentMaterialTopology,
+        stream_descriptor: StreamDescriptor,
+        canonical_bytes: Vec<u8>,
+    ) -> Self {
+        debug_assert_eq!(
+            u64::try_from(canonical_bytes.len()).ok(),
+            Some(topology.expected_byte_length())
+        );
+        debug_assert_eq!(
+            u64::try_from(canonical_bytes.len()).ok(),
+            Some(stream_descriptor.total_byte_length)
+        );
+        Self {
+            evaluator_position,
+            topology,
+            stream_descriptor,
+            canonical_bytes: canonical_bytes.into_boxed_slice(),
+        }
+    }
+
     pub(crate) const fn evaluator_position(&self) -> SelectedEvaluatorEntryPosition {
         self.evaluator_position
     }
@@ -173,41 +279,6 @@ impl SetupGeneratedKeySwitchComponent {
 
     pub(crate) fn canonical_bytes(&self) -> &[u8] {
         &self.canonical_bytes
-    }
-
-    fn recompute_public_polynomial_tree(
-        &self,
-        context: &SetupPublicPolynomialContext,
-        evaluation_domain_size: usize,
-    ) -> Result<SetupPublicPolynomialTree, RefusalReason> {
-        let trace_column_count = self.topology.trace_column_count()?;
-        let mut ordered_columns = Vec::with_capacity(trace_column_count);
-        for column_ordinal in 0..trace_column_count {
-            let trace_column = self.topology.trace_column(column_ordinal)?;
-            let byte_start = usize::try_from(trace_column.byte_offset())
-                .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
-            let byte_end = usize::try_from(
-                trace_column
-                    .byte_offset()
-                    .checked_add(trace_column.byte_length())
-                    .ok_or(RefusalReason::OutsideSupportedProfile)?,
-            )
-            .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
-            let bytes = self
-                .canonical_bytes
-                .get(byte_start..byte_end)
-                .ok_or(RefusalReason::WrongTypeOrLength)?;
-            ordered_columns.push(trace_column.decode_authenticated_bytes(bytes)?);
-        }
-        SetupPublicPolynomialTree::construct(SetupPublicPolynomialTreeInput {
-            context,
-            evaluation_domain_size,
-            source_polynomial_degree_bound_exclusive: self
-                .topology
-                .quarter_polynomial_degree_bound_exclusive()?,
-            ordered_coefficient_columns: &ordered_columns,
-        })
-        .map_err(|_| RefusalReason::WrongHashOrRoot)
     }
 }
 
@@ -375,16 +446,10 @@ impl SetupGeneratedPublicKeyShare {
             roster_position,
         )
         .map_err(|_| RefusalReason::WrongContext)?;
-        let quarter_degree = ring_degree
-            .checked_div(4)
-            .filter(|quarter_degree| *quarter_degree > 0 && *quarter_degree * 4 == ring_degree)
+        let trace_half_degree = ring_degree
+            .checked_div(2)
+            .filter(|half_degree| *half_degree > 0 && *half_degree * 2 == ring_degree)
             .ok_or(RefusalReason::OutsideSupportedProfile)?;
-        let mut ordered_coefficient_columns = Vec::with_capacity(
-            ordered_limb_coefficients
-                .len()
-                .checked_mul(4)
-                .ok_or(RefusalReason::OutsideSupportedProfile)?,
-        );
         for (data_modulus_index, coefficients) in ordered_data_modulus_indices
             .iter()
             .copied()
@@ -400,30 +465,26 @@ impl SetupGeneratedPublicKeyShare {
             {
                 return Err(RefusalReason::WrongTypeOrLength);
             }
-            for quarter_ordinal in 0_usize..4_usize {
-                let start = quarter_ordinal
-                    .checked_mul(quarter_degree)
-                    .ok_or(RefusalReason::OutsideSupportedProfile)?;
-                ordered_coefficient_columns.push(
-                    coefficients[start..start + quarter_degree]
-                        .iter()
-                        .copied()
-                        .map(ProofBaseFieldElement::from_canonical)
-                        .collect::<Result<Vec<_>, _>>()
-                        .map_err(|_| RefusalReason::InvalidArithmeticRelation)?,
-                );
-            }
         }
-        let tree = SetupPublicPolynomialTree::construct(SetupPublicPolynomialTreeInput {
-            context: &context,
-            evaluation_domain_size,
-            source_polynomial_degree_bound_exclusive: quarter_degree,
-            ordered_coefficient_columns: &ordered_coefficient_columns,
-        })
-        .map_err(|_| RefusalReason::InvalidArithmeticRelation)?;
+        let row_width = ordered_limb_coefficients
+            .len()
+            .checked_mul(2)
+            .ok_or(RefusalReason::OutsideSupportedProfile)?;
+        let ordered_trace_rows = ordered_limb_coefficients
+            .iter()
+            .flat_map(|coefficients| coefficients.chunks_exact(trace_half_degree));
+        let (public_polynomial_context_hash, root) =
+            SetupPublicPolynomialTree::construct_root_from_canonical_trace_rows(
+                &context,
+                evaluation_domain_size,
+                trace_half_degree,
+                row_width,
+                ordered_trace_rows,
+            )
+            .map_err(|_| RefusalReason::InvalidArithmeticRelation)?;
         Ok(Self {
-            public_polynomial_context_hash: tree.public_polynomial_context_hash(),
-            root: tree.root(),
+            public_polynomial_context_hash,
+            root,
             ordered_data_modulus_indices: ordered_data_modulus_indices.into_boxed_slice(),
             ordered_limb_coefficients: ordered_limb_coefficients.into_boxed_slice(),
             centered_error_coefficients,
@@ -449,11 +510,103 @@ impl SetupGeneratedPublicKeyShare {
     pub(crate) fn centered_error_coefficients(&self) -> &[i8] {
         &self.centered_error_coefficients
     }
+
+    fn body_byte_length(&self) -> Result<usize, RefusalReason> {
+        self.ordered_limb_coefficients
+            .iter()
+            .try_fold(0_usize, |byte_length, coefficients| {
+                coefficients
+                    .len()
+                    .checked_mul(PUBLIC_KEY_SHARE_COEFFICIENT_BYTE_LENGTH)
+                    .and_then(|limb_byte_length| byte_length.checked_add(limb_byte_length))
+                    .ok_or(RefusalReason::OutsideSupportedProfile)
+            })
+    }
+
+    fn selected_body_byte_length(&self) -> Result<usize, RefusalReason> {
+        if self.ordered_data_modulus_indices.len() != DATA_PRIMES.len()
+            || self
+                .ordered_data_modulus_indices
+                .iter()
+                .copied()
+                .enumerate()
+                .any(|(expected_index, data_modulus_index)| {
+                    usize::from(data_modulus_index) != expected_index
+                })
+            || self
+                .ordered_limb_coefficients
+                .iter()
+                .any(|coefficients| coefficients.len() != POLYNOMIAL_DEGREE)
+        {
+            return Err(RefusalReason::WrongTypeOrLength);
+        }
+        let body_byte_length = self.body_byte_length()?;
+        if u64::try_from(body_byte_length).ok()
+            != Some(SELECTED_SETUP_GENERATION_PUBLIC_KEY_SHARE_BODY_BYTE_LENGTH)
+        {
+            return Err(RefusalReason::WrongTypeOrLength);
+        }
+        Ok(body_byte_length)
+    }
+
+    fn write_body_range(
+        &self,
+        expected_offset: usize,
+        output: &mut [u8],
+    ) -> Result<bool, RefusalReason> {
+        if output.is_empty() {
+            return Err(RefusalReason::WrongTypeOrLength);
+        }
+        let body_byte_length = self.body_byte_length()?;
+        let range_end = expected_offset
+            .checked_add(output.len())
+            .filter(|range_end| *range_end <= body_byte_length)
+            .ok_or(RefusalReason::WrongTypeOrLength)?;
+        let ring_degree = self
+            .ordered_limb_coefficients
+            .first()
+            .map(|coefficients| coefficients.len())
+            .filter(|ring_degree| *ring_degree > 0)
+            .ok_or(RefusalReason::WrongTypeOrLength)?;
+        if self
+            .ordered_limb_coefficients
+            .iter()
+            .any(|coefficients| coefficients.len() != ring_degree)
+        {
+            return Err(RefusalReason::WrongTypeOrLength);
+        }
+
+        let mut body_offset = expected_offset;
+        let mut output_offset = 0_usize;
+        while output_offset < output.len() {
+            let coefficient_ordinal = body_offset / PUBLIC_KEY_SHARE_COEFFICIENT_BYTE_LENGTH;
+            let coefficient_byte_offset = body_offset % PUBLIC_KEY_SHARE_COEFFICIENT_BYTE_LENGTH;
+            let limb_ordinal = coefficient_ordinal / ring_degree;
+            let coefficient_index = coefficient_ordinal % ring_degree;
+            let coefficient_bytes = self
+                .ordered_limb_coefficients
+                .get(limb_ordinal)
+                .and_then(|coefficients| coefficients.get(coefficient_index))
+                .ok_or(RefusalReason::WrongTypeOrLength)?
+                .to_le_bytes();
+            let copied_byte_length = (PUBLIC_KEY_SHARE_COEFFICIENT_BYTE_LENGTH
+                - coefficient_byte_offset)
+                .min(output.len() - output_offset);
+            output[output_offset..output_offset + copied_byte_length].copy_from_slice(
+                &coefficient_bytes
+                    [coefficient_byte_offset..coefficient_byte_offset + copied_byte_length],
+            );
+            output_offset += copied_byte_length;
+            body_offset += copied_byte_length;
+        }
+        Ok(range_end == body_byte_length)
+    }
 }
 
 /// One exact lattice-anchor tree and its browser-owned reset-safe opening.
-/// Canonical commitment bytes are retained beside the recomputed tree; neither
-/// a transported root nor detached opening polynomials can construct this
+/// Canonical commitment bytes are retained beside the recomputed root; trace
+/// rows are decoded only when a relation column requests them. Neither a
+/// transported root nor detached opening polynomials can construct this
 /// source.
 pub(crate) struct SetupGenerationAnchorOpening {
     commitment_data_prime_index: u16,
@@ -461,7 +614,6 @@ pub(crate) struct SetupGenerationAnchorOpening {
     public_polynomial_context_hash: [u8; Hash512::BYTE_LENGTH],
     root: [u8; Hash512::BYTE_LENGTH],
     source_polynomial_degree_bound_exclusive: usize,
-    ordered_coefficient_columns: Box<[Vec<ProofBaseFieldElement>]>,
     hiding_secret_polynomials: Box<[Zeroizing<Vec<i8>>]>,
     hiding_error_polynomials: Box<[Zeroizing<Vec<i8>>]>,
 }
@@ -485,14 +637,22 @@ impl SetupGenerationAnchorOpening {
             commitment_data_prime_index,
         )
         .map_err(|_| RefusalReason::WrongContext)?;
-        let tree = SetupPublicPolynomialTree::from_lattice_anchor_canonical_bytes(
+        let (
+            public_polynomial_context_hash,
+            root,
+            source_polynomial_degree_bound_exclusive,
+            row_width,
+        ) = SetupPublicPolynomialTree::construct_lattice_anchor_root_from_canonical_bytes(
             &context,
             evaluation_domain_size,
             &canonical_commitment_bytes,
         )
         .map_err(|_| RefusalReason::MalformedEncoding)?;
-        let ring_degree = tree.source_polynomial_degree_bound_exclusive();
-        if hiding_secret_polynomials.len() != SETUP_COMMITMENT_HIDING_SECRET_WIDTH
+        let ring_degree = source_polynomial_degree_bound_exclusive
+            .checked_mul(2)
+            .ok_or(RefusalReason::OutsideSupportedProfile)?;
+        if usize::try_from(row_width).ok() != Some((SETUP_COMMITMENT_MODULE_RANK + 1) * 2)
+            || hiding_secret_polynomials.len() != SETUP_COMMITMENT_HIDING_SECRET_WIDTH
             || hiding_error_polynomials.len() != SETUP_COMMITMENT_HIDING_ERROR_WIDTH
             || hiding_secret_polynomials.iter().any(|polynomial| {
                 polynomial.len() != ring_degree
@@ -509,19 +669,12 @@ impl SetupGenerationAnchorOpening {
         {
             return Err(RefusalReason::WrongTypeOrLength);
         }
-        let public_polynomial_context_hash = tree.public_polynomial_context_hash();
-        let root = tree.root();
-        let source_polynomial_degree_bound_exclusive =
-            tree.source_polynomial_degree_bound_exclusive();
-        let ordered_coefficient_columns =
-            tree.into_ordered_coefficient_columns().into_boxed_slice();
         Ok(Self {
             commitment_data_prime_index,
             canonical_commitment_bytes: canonical_commitment_bytes.into_boxed_slice(),
             public_polynomial_context_hash,
             root,
             source_polynomial_degree_bound_exclusive,
-            ordered_coefficient_columns,
             hiding_secret_polynomials: hiding_secret_polynomials.into_boxed_slice(),
             hiding_error_polynomials: hiding_error_polynomials.into_boxed_slice(),
         })
@@ -547,8 +700,46 @@ impl SetupGenerationAnchorOpening {
         self.source_polynomial_degree_bound_exclusive
     }
 
-    pub(crate) fn ordered_coefficient_columns(&self) -> &[Vec<ProofBaseFieldElement>] {
-        &self.ordered_coefficient_columns
+    pub(crate) fn commitment_trace_row_half(
+        &self,
+        row_ordinal: usize,
+        half_ordinal: usize,
+    ) -> Result<Zeroizing<Vec<i128>>, RefusalReason> {
+        let commitment =
+            parse_lattice_anchor_commitment_canonical_bytes(&self.canonical_commitment_bytes)
+                .map_err(|_| RefusalReason::MalformedEncoding)?;
+        let logical_row = commitment
+            .rows
+            .get(row_ordinal)
+            .filter(|row| row.len() == commitment.ring_degree)
+            .ok_or(RefusalReason::WrongTypeOrLength)?;
+        let coefficient_start = half_ordinal
+            .checked_mul(self.source_polynomial_degree_bound_exclusive)
+            .filter(|start| half_ordinal < 2 && *start < logical_row.len())
+            .ok_or(RefusalReason::WrongTypeOrLength)?;
+        let coefficient_end = coefficient_start
+            .checked_add(self.source_polynomial_degree_bound_exclusive)
+            .filter(|end| *end <= logical_row.len())
+            .ok_or(RefusalReason::WrongTypeOrLength)?;
+        Ok(Zeroizing::new(
+            logical_row[coefficient_start..coefficient_end]
+                .iter()
+                .copied()
+                .map(i128::from)
+                .collect(),
+        ))
+    }
+
+    pub(crate) fn commitment_row(&self, row_ordinal: usize) -> Result<Vec<i128>, RefusalReason> {
+        let commitment =
+            parse_lattice_anchor_commitment_canonical_bytes(&self.canonical_commitment_bytes)
+                .map_err(|_| RefusalReason::MalformedEncoding)?;
+        commitment
+            .rows
+            .get(row_ordinal)
+            .filter(|row| row.len() == commitment.ring_degree)
+            .map(|row| row.iter().copied().map(i128::from).collect())
+            .ok_or(RefusalReason::WrongTypeOrLength)
     }
 
     pub(crate) fn hiding_secret_polynomials(&self) -> &[Zeroizing<Vec<i8>>] {
@@ -590,10 +781,6 @@ impl SetupGeneratedCommittedMaterial {
 
     pub(crate) fn owned_compact_source(&self) -> Arc<CompactCommittedMaterialSource> {
         self.authenticated_source.owned_compact_source()
-    }
-
-    pub(crate) fn into_owned_compact_source(self) -> Arc<CompactCommittedMaterialSource> {
-        self.authenticated_source.into_owned_compact_source()
     }
 
     pub(crate) fn owned_authenticated_source(&self) -> AuthenticatedCompactCommittedMaterialSource {
@@ -718,6 +905,23 @@ impl SetupGeneratedVssMaterial {
             .take()
             .ok_or(RefusalReason::ConsumedState)
     }
+
+    fn private_payloads_are_all_moved_out(&self) -> bool {
+        self.recipient_private_payloads.iter().all(Option::is_none)
+    }
+
+    fn into_proof_materials(
+        self,
+    ) -> (
+        Box<[SetupGeneratedCommittedMaterial]>,
+        Box<[SetupGeneratedCommittedMaterial]>,
+    ) {
+        debug_assert!(self.private_payloads_are_all_moved_out());
+        (
+            self.ordered_coefficient_materials,
+            self.ordered_recipient_share_materials,
+        )
+    }
 }
 
 impl SetupGeneratedGaloisEntry {
@@ -790,11 +994,508 @@ struct PinnedProofAttempt {
     application_statement_hash: [u8; Hash512::BYTE_LENGTH],
 }
 
-/// Exact verifier-derived aggregate identity retained between round-two
-/// activation and fresh or resumed proof generation. Every field comes from a
-/// positively verified aggregate capability; no transport-facing constructor
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct SetupGenerationVssPublicRecordBinding {
+    ordered_recipient_envelope_hashes: Box<[Hash512]>,
+    share_linkage_proof: StreamDescriptor,
+}
+
+impl SetupGenerationVssPublicRecordBinding {
+    fn pin_exact(
+        retained_binding: &mut Option<Self>,
+        ordered_recipient_envelope_hashes: &[Hash512],
+        share_linkage_proof: &StreamDescriptor,
+    ) -> Result<(), RefusalReason> {
+        let candidate_binding = Self {
+            ordered_recipient_envelope_hashes: ordered_recipient_envelope_hashes.into(),
+            share_linkage_proof: share_linkage_proof.clone(),
+        };
+        if let Some(existing_binding) = retained_binding {
+            if existing_binding != &candidate_binding {
+                return Err(RefusalReason::ConsumedState);
+            }
+        } else {
+            *retained_binding = Some(candidate_binding);
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct SetupGenerationVssSourceAllocationAccounting {
+    canonical_coefficient_byte_length: u64,
+    compact_source_byte_length: u64,
+    shared_source_byte_length: u64,
+    allocation_wrapper_byte_length: u64,
+}
+
+#[derive(Default)]
+struct SetupGenerationDescriptorAllocationAccumulator {
+    byte_length: u64,
+    descriptor_digest_owner_byte_lengths: BTreeMap<usize, u64>,
+}
+
+impl SetupGenerationDescriptorAllocationAccumulator {
+    fn add_usize_byte_length(&mut self, byte_length: usize) -> Result<(), RefusalReason> {
+        self.byte_length = self
+            .byte_length
+            .checked_add(
+                u64::try_from(byte_length)
+                    .map_err(|_| RefusalReason::OutsideSupportedProfile)?,
+            )
+            .ok_or(RefusalReason::OutsideSupportedProfile)?;
+        Ok(())
+    }
+
+    fn add_stream_descriptor(
+        &mut self,
+        descriptor: &StreamDescriptor,
+    ) -> Result<(), RefusalReason> {
+        let owner_identifier = Arc::as_ptr(&descriptor.ordered_chunk_digests) as *const Hash512
+            as usize;
+        let digest_payload_byte_length = descriptor
+            .ordered_chunk_digests
+            .len()
+            .checked_mul(size_of::<Hash512>())
+            .ok_or(RefusalReason::OutsideSupportedProfile)?;
+        let digest_payload_byte_length = u64::try_from(digest_payload_byte_length)
+            .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
+        if let Some(retained_byte_length) = self
+            .descriptor_digest_owner_byte_lengths
+            .get(&owner_identifier)
+        {
+            if *retained_byte_length != digest_payload_byte_length {
+                return Err(RefusalReason::WrongTypeOrLength);
+            }
+            return Ok(());
+        }
+        self.descriptor_digest_owner_byte_lengths
+            .insert(owner_identifier, digest_payload_byte_length);
+        let arc_header_byte_length = size_of::<usize>()
+            .checked_mul(2)
+            .ok_or(RefusalReason::OutsideSupportedProfile)?;
+        self.add_usize_byte_length(arc_header_byte_length)?;
+        self.byte_length = self
+            .byte_length
+            .checked_add(digest_payload_byte_length)
+            .ok_or(RefusalReason::OutsideSupportedProfile)?;
+        Ok(())
+    }
+
+    fn add_topology(
+        &mut self,
+        topology: &KeySwitchComponentMaterialTopology,
+    ) -> Result<(), RefusalReason> {
+        self.add_usize_byte_length(
+            topology
+                .retained_heap_payload_byte_length()
+                .ok_or(RefusalReason::OutsideSupportedProfile)?,
+        )
+    }
+}
+
+fn setup_generation_vss_source_allocation_accounting<'material>(
+    materials: impl Iterator<Item = &'material SetupGeneratedCommittedMaterial>,
+) -> Result<SetupGenerationVssSourceAllocationAccounting, RefusalReason> {
+    let mut compact_source_owner_byte_lengths = BTreeMap::<usize, u64>::new();
+    let mut canonical_message_owner_byte_lengths = BTreeMap::<usize, u64>::new();
+    for material in materials {
+        let authenticated_source = &material.authenticated_source;
+        let (compact_source_owner, canonical_message_owner) =
+            authenticated_source.shared_allocation_owner_identifiers();
+        let compact_source_byte_length = u64::try_from(
+            authenticated_source.compact_source().retained_byte_length(),
+        )
+        .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
+        let canonical_message_byte_length = u64::try_from(
+            authenticated_source.retained_canonical_coefficient_byte_length(),
+        )
+        .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
+        for (owners, owner_identifier, byte_length) in [
+            (
+                &mut compact_source_owner_byte_lengths,
+                compact_source_owner,
+                compact_source_byte_length,
+            ),
+            (
+                &mut canonical_message_owner_byte_lengths,
+                canonical_message_owner,
+                canonical_message_byte_length,
+            ),
+        ] {
+            if let Some(retained_byte_length) = owners.get(&owner_identifier) {
+                if *retained_byte_length != byte_length {
+                    return Err(RefusalReason::WrongTypeOrLength);
+                }
+            } else {
+                owners.insert(owner_identifier, byte_length);
+            }
+        }
+    }
+    let compact_source_byte_length = compact_source_owner_byte_lengths.values().try_fold(
+        0_u64,
+        |total, byte_length| {
+            total
+                .checked_add(*byte_length)
+                .ok_or(RefusalReason::OutsideSupportedProfile)
+        },
+    )?;
+    let canonical_coefficient_byte_length = canonical_message_owner_byte_lengths.values().try_fold(
+        0_u64,
+        |total, byte_length| {
+            total
+                .checked_add(*byte_length)
+                .ok_or(RefusalReason::OutsideSupportedProfile)
+        },
+    )?;
+    let shared_source_byte_length = compact_source_byte_length
+        .checked_add(canonical_coefficient_byte_length)
+        .ok_or(RefusalReason::OutsideSupportedProfile)?;
+    let compact_source_arc_header_byte_length = compact_source_owner_byte_lengths
+        .len()
+        .checked_mul(
+            size_of::<usize>()
+                .checked_mul(2)
+                .ok_or(RefusalReason::OutsideSupportedProfile)?,
+        )
+        .ok_or(RefusalReason::OutsideSupportedProfile)?;
+    let canonical_message_allocation_wrapper_byte_length = canonical_message_owner_byte_lengths
+        .len()
+        .checked_mul(
+            size_of::<usize>()
+                .checked_mul(2)
+                .and_then(|length| {
+                    length.checked_add(size_of::<Zeroizing<Box<[u64]>>>())
+                })
+                .ok_or(RefusalReason::OutsideSupportedProfile)?,
+        )
+        .ok_or(RefusalReason::OutsideSupportedProfile)?;
+    let allocation_wrapper_byte_length = compact_source_arc_header_byte_length
+        .checked_add(canonical_message_allocation_wrapper_byte_length)
+        .and_then(|length| u64::try_from(length).ok())
+        .ok_or(RefusalReason::OutsideSupportedProfile)?;
+    Ok(SetupGenerationVssSourceAllocationAccounting {
+        canonical_coefficient_byte_length,
+        compact_source_byte_length,
+        shared_source_byte_length,
+        allocation_wrapper_byte_length,
+    })
+}
+
+fn add_key_switch_component_allocations(
+    accounting: &mut SetupGenerationDescriptorAllocationAccumulator,
+    component: &SetupGeneratedKeySwitchComponent,
+) -> Result<(), RefusalReason> {
+    accounting.add_topology(component.topology())?;
+    accounting.add_stream_descriptor(component.stream_descriptor())
+}
+
+fn add_verified_key_switch_component_allocations(
+    accounting: &mut SetupGenerationDescriptorAllocationAccumulator,
+    material: &VerifiedKeySwitchComponentMaterial,
+) -> Result<(), RefusalReason> {
+    accounting.add_topology(material.topology())?;
+    accounting.add_stream_descriptor(material.stream_descriptor())
+}
+
+fn setup_generation_vss_post_release_memory_accounting(
+    ordered_roster: &[[u8; Hash512::BYTE_LENGTH]],
+    ordered_coefficient_materials: &[SetupGeneratedCommittedMaterial],
+    ordered_recipient_share_materials: &[SetupGeneratedCommittedMaterial],
+    pinned_vss_public_record_binding: Option<&SetupGenerationVssPublicRecordBinding>,
+) -> Result<(u64, u64, u64), RefusalReason> {
+    let source_accounting = setup_generation_vss_source_allocation_accounting(
+        ordered_coefficient_materials
+            .iter()
+            .chain(ordered_recipient_share_materials),
+    )?;
+    let mut wrappers = SetupGenerationDescriptorAllocationAccumulator::default();
+    wrappers.add_usize_byte_length(size_of::<SetupGenerationVssProofAuthority>())?;
+    wrappers.add_usize_byte_length(
+        ordered_roster
+            .len()
+            .checked_mul(size_of::<[u8; Hash512::BYTE_LENGTH]>())
+            .ok_or(RefusalReason::OutsideSupportedProfile)?,
+    )?;
+    wrappers.add_usize_byte_length(
+        ordered_coefficient_materials
+            .len()
+            .checked_add(ordered_recipient_share_materials.len())
+            .and_then(|count| count.checked_mul(size_of::<SetupGeneratedCommittedMaterial>()))
+            .ok_or(RefusalReason::OutsideSupportedProfile)?,
+    )?;
+    wrappers.add_usize_byte_length(
+        size_of::<usize>()
+            .checked_mul(2)
+            .and_then(|header| header.checked_add(size_of::<ActionPrivateRandomness>()))
+            .ok_or(RefusalReason::OutsideSupportedProfile)?,
+    )?;
+    wrappers.byte_length = wrappers
+        .byte_length
+        .checked_add(source_accounting.allocation_wrapper_byte_length)
+        .ok_or(RefusalReason::OutsideSupportedProfile)?;
+    if let Some(binding) = pinned_vss_public_record_binding {
+        wrappers.add_usize_byte_length(
+            binding
+                .ordered_recipient_envelope_hashes
+                .len()
+                .checked_mul(size_of::<Hash512>())
+                .ok_or(RefusalReason::OutsideSupportedProfile)?,
+        )?;
+        wrappers.add_stream_descriptor(&binding.share_linkage_proof)?;
+    }
+    let post_release_payload_byte_length = source_accounting
+        .shared_source_byte_length
+        .checked_add(wrappers.byte_length)
+        .ok_or(RefusalReason::OutsideSupportedProfile)?;
+    Ok((
+        source_accounting.shared_source_byte_length,
+        wrappers.byte_length,
+        post_release_payload_byte_length,
+    ))
+}
+
+impl SetupGenerationVssProofAuthority {
+    fn ordered_coefficient_materials(&self) -> &[SetupGeneratedCommittedMaterial] {
+        &self.ordered_coefficient_materials
+    }
+
+    fn ordered_recipient_share_materials(&self) -> &[SetupGeneratedCommittedMaterial] {
+        &self.ordered_recipient_share_materials
+    }
+
+    fn retained_memory_accounting(&self) -> Result<(u64, u64, u64), RefusalReason> {
+        setup_generation_vss_post_release_memory_accounting(
+            &self.ordered_roster,
+            self.ordered_coefficient_materials(),
+            self.ordered_recipient_share_materials(),
+            self.pinned_vss_public_record_binding.as_ref(),
+        )
+    }
+
+    fn vss_preparation_source(&self) -> Result<SetupGenerationVssPreparationSource, RefusalReason> {
+        let ordered_coefficient_material_roots = self
+            .ordered_coefficient_materials()
+            .iter()
+            .map(|material| material.compact_source().root())
+            .collect::<Vec<_>>();
+        let ordered_recipient_share_material_roots = self
+            .ordered_recipient_share_materials()
+            .iter()
+            .map(|material| material.compact_source().root())
+            .collect::<Vec<_>>();
+        let canonical_application_statement_bytes = canonical_selected_vss_share_linkage_statement(
+            self.protocol_version,
+            self.suite_identifier,
+            self.ceremony_context_hash,
+            self.action_context_hash,
+            self.roster_hash,
+            self.public_setup_seed,
+            self.participant_identity,
+            self.roster_position,
+            &ordered_coefficient_material_roots,
+            &ordered_recipient_share_material_roots,
+        )
+        .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
+        Ok(SetupGenerationVssPreparationSource {
+            protocol_version: self.protocol_version,
+            suite_identifier: self.suite_identifier,
+            manifest_hash: self.manifest_hash,
+            ceremony_context_hash: self.ceremony_context_hash,
+            action_context_hash: self.action_context_hash,
+            roster_hash: self.roster_hash,
+            setup_proof_context_hash: self.setup_proof_context_hash,
+            source_setup_intent_object_hash: self.source_setup_intent_object_hash,
+            participant_identity: self.participant_identity,
+            roster_position: self.roster_position,
+            action_randomness_authorization_hash: self.action_randomness_authorization_hash,
+            public_setup_seed: self.public_setup_seed,
+            canonical_application_statement_bytes,
+        })
+    }
+
+    fn pin_vss_application(
+        &mut self,
+        application: &SetupGenerationVssApplication<'_>,
+    ) -> Result<(), RefusalReason> {
+        let application_slot = application.prepared_attempt.application_slot();
+        if application.statement.protocol_version() != self.protocol_version
+            || application.statement.suite_identifier() != self.suite_identifier
+            || application.statement.ceremony_context_hash() != self.ceremony_context_hash
+            || application.statement.action_context_hash() != self.action_context_hash
+            || application.statement.roster_hash() != self.roster_hash
+            || application.statement.public_setup_seed() != self.public_setup_seed
+            || application.statement.participant_identity() != self.participant_identity
+            || application.statement.roster_position() != self.roster_position
+            || application_slot.suite_identifier().into_bytes() != self.suite_identifier
+            || application_slot.ceremony_context_hash().into_bytes() != self.ceremony_context_hash
+            || application_slot.action_context_hash().into_bytes() != self.action_context_hash
+            || application_slot.application_statement_schema_identifier()
+                != ProofApplicationSlotCeilings::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER
+            || application_slot.roster_position() != Some(self.roster_position)
+            || application_slot.schedule_position().is_some()
+            || application_slot.producer_sequence().is_some()
+            || application
+                .statement
+                .ordered_coefficient_material_roots()
+                .len()
+                != self.ordered_coefficient_materials.len()
+            || application
+                .statement
+                .ordered_recipient_share_material_roots()
+                .len()
+                != self.ordered_recipient_share_materials.len()
+            || application
+                .statement
+                .ordered_coefficient_material_roots()
+                .iter()
+                .zip(self.ordered_coefficient_materials())
+                .any(|(expected_root, material)| *expected_root != material.compact_source().root())
+            || application
+                .statement
+                .ordered_recipient_share_material_roots()
+                .iter()
+                .zip(self.ordered_recipient_share_materials())
+                .any(|(expected_root, material)| *expected_root != material.compact_source().root())
+            || application
+                .prepared_attempt
+                .application_statement_hash()
+                .into_bytes()
+                != verified_application_statement_hash(
+                    self.protocol_version,
+                    self.suite_identifier,
+                    ProofApplicationSlotCeilings::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER,
+                    application.canonical_application_statement_bytes,
+                )
+        {
+            return Err(RefusalReason::WrongContext);
+        }
+        let pinned = PinnedProofAttempt {
+            attempt_identifier: application.prepared_attempt.attempt_identifier(),
+            application_slot_hash: application
+                .prepared_attempt
+                .application_slot_hash()
+                .into_bytes(),
+            application_statement_hash: application
+                .prepared_attempt
+                .application_statement_hash()
+                .into_bytes(),
+        };
+        if let Some(existing) = &self.pinned_vss_proof_attempt {
+            if existing.attempt_identifier != pinned.attempt_identifier
+                || existing.application_slot_hash != pinned.application_slot_hash
+                || existing.application_statement_hash != pinned.application_statement_hash
+            {
+                return Err(RefusalReason::ConsumedState);
+            }
+        } else {
+            self.pinned_vss_proof_attempt = Some(pinned);
+        }
+        Ok(())
+    }
+
+    fn dealer_public_record_source(
+        &mut self,
+        action_private_randomness: &ActionPrivateRandomness,
+        roster: &Roster,
+        roster_hash: Hash512,
+        source_roster_position: u16,
+        ordered_recipient_envelope_hashes: &[Hash512],
+        share_linkage_proof: &StreamDescriptor,
+    ) -> Result<SetupGenerationDealerPublicRecordSource, RefusalReason> {
+        let ordered_roster = roster
+            .entries
+            .iter()
+            .map(|entry| {
+                entry
+                    .participant_identity()
+                    .map(ParticipantIdentity::into_bytes)
+                    .map_err(|_| RefusalReason::WrongContext)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let derivation_input = action_private_randomness.derivation_input();
+        let expected_authorization_hash = action_private_randomness
+            .setup_action_randomness_authorization(roster_hash)
+            .map_err(|_| RefusalReason::WrongContext)?;
+        if self.pinned_vss_proof_attempt.is_none()
+            || !std::ptr::eq(
+                self.action_private_randomness.as_ref(),
+                action_private_randomness,
+            )
+            || self.suite_identifier != derivation_input.suite_identifier().into_bytes()
+            || self.ceremony_context_hash != derivation_input.ceremony_context_hash().into_bytes()
+            || self.action_context_hash != derivation_input.action_context_hash().into_bytes()
+            || self.participant_identity != derivation_input.participant_identity().into_bytes()
+            || self.roster_hash != roster_hash.into_bytes()
+            || self.ordered_roster.as_ref() != ordered_roster.as_slice()
+            || self.roster_position != source_roster_position
+            || &self.setup_attempt_identifier
+                != action_private_randomness
+                    .setup_attempt_identifier()
+                    .as_bytes()
+            || self.action_randomness_authorization_hash != expected_authorization_hash.into_bytes()
+            || ordered_recipient_envelope_hashes.len()
+                != usize::from(FOUNDATION_PROFILE.participant_count)
+        {
+            return Err(RefusalReason::WrongContext);
+        }
+
+        let ordered_coefficient_material_roots = self
+            .ordered_coefficient_materials()
+            .iter()
+            .map(|material| Hash512::from_bytes(material.compact_source().root()))
+            .collect::<Vec<_>>();
+        let ordered_recipient_share_material_roots = self
+            .ordered_recipient_share_materials()
+            .iter()
+            .map(|material| Hash512::from_bytes(material.compact_source().root()))
+            .collect::<Vec<_>>();
+        let relation_input = selected_committed_material_relation_plan_input()
+            .map_err(|_| RefusalReason::UnsupportedVersionOrSuite)?;
+        let expected_coefficient_material_count = relation_input
+            .sharing_data_modulus_indices
+            .len()
+            .checked_mul(usize::from(FOUNDATION_PROFILE.reconstruction_threshold))
+            .ok_or(RefusalReason::OutsideSupportedProfile)?;
+        let expected_recipient_share_material_count = relation_input
+            .sharing_data_modulus_indices
+            .len()
+            .checked_mul(usize::from(FOUNDATION_PROFILE.participant_count))
+            .ok_or(RefusalReason::OutsideSupportedProfile)?;
+        if ordered_coefficient_material_roots.len() != expected_coefficient_material_count
+            || ordered_recipient_share_material_roots.len()
+                != expected_recipient_share_material_count
+        {
+            return Err(RefusalReason::WrongTypeOrLength);
+        }
+        SetupGenerationVssPublicRecordBinding::pin_exact(
+            &mut self.pinned_vss_public_record_binding,
+            ordered_recipient_envelope_hashes,
+            share_linkage_proof,
+        )?;
+        Ok(SetupGenerationDealerPublicRecordSource {
+            suite_identifier: Hash512::from_bytes(self.suite_identifier),
+            ceremony_context_hash: Hash512::from_bytes(self.ceremony_context_hash),
+            action_context_hash: Hash512::from_bytes(self.action_context_hash),
+            participant_identity: ParticipantIdentity::from_bytes(self.participant_identity),
+            roster_position: self.roster_position,
+            public_setup_seed: Hash512::from_bytes(self.public_setup_seed),
+            ordered_coefficient_material_roots: ordered_coefficient_material_roots
+                .into_boxed_slice(),
+            ordered_recipient_share_material_roots: ordered_recipient_share_material_roots
+                .into_boxed_slice(),
+            ordered_recipient_envelope_hashes: ordered_recipient_envelope_hashes.into(),
+            share_linkage_proof: share_linkage_proof.clone(),
+        })
+    }
+}
+
+/// Exact generated aggregate identity retained between round-two activation
+/// and fresh or resumed proof generation. The aggregate and its proof
+/// descriptor come from the prepackage catalog after the generated proof has
+/// been bound to its canonical statement; no transport-facing constructor
 /// accepts any of these bindings separately.
-struct SetupGenerationVerifiedRelinearizationAggregateBinding {
+struct SetupGenerationRelinearizationAggregateBinding {
     protocol_version: u16,
     suite_identifier: [u8; Hash512::BYTE_LENGTH],
     ceremony_context_hash: [u8; Hash512::BYTE_LENGTH],
@@ -814,8 +1515,11 @@ struct SetupGenerationVerifiedRelinearizationAggregateBinding {
     aggregate_right_stream_descriptor: StreamDescriptor,
 }
 
-impl SetupGenerationVerifiedRelinearizationAggregateBinding {
-    fn from_verified(aggregate: &VerifiedRelinearizationAggregateMaterial) -> Self {
+impl SetupGenerationRelinearizationAggregateBinding {
+    fn from_generated(
+        aggregate: &SetupGeneratedRelinearizationAggregateSourceAuthority,
+        proof_stream_descriptor: &StreamDescriptor,
+    ) -> Self {
         Self {
             protocol_version: aggregate.protocol_version(),
             suite_identifier: aggregate.suite_identifier(),
@@ -831,18 +1535,21 @@ impl SetupGenerationVerifiedRelinearizationAggregateBinding {
                 .ordered_round_one_proof_stream_descriptors()
                 .into(),
             ordered_source_root_pairs: aggregate.ordered_source_root_pairs().into(),
-            proof_stream_descriptor: aggregate.proof_stream_descriptor().clone(),
-            aggregate_left_material_root: aggregate.aggregate_left_material().material_root(),
-            aggregate_left_stream_descriptor: aggregate
-                .aggregate_left_material()
+            proof_stream_descriptor: proof_stream_descriptor.clone(),
+            aggregate_left_material_root: aggregate.components()[0].material_root(),
+            aggregate_left_stream_descriptor: aggregate.components()[0].stream_descriptor().clone(),
+            aggregate_right_material_root: aggregate.components()[1].material_root(),
+            aggregate_right_stream_descriptor: aggregate.components()[1]
                 .stream_descriptor()
                 .clone(),
-            aggregate_right_material_root: aggregate.material().material_root(),
-            aggregate_right_stream_descriptor: aggregate.material().stream_descriptor().clone(),
         }
     }
 
-    fn binds(&self, aggregate: &VerifiedRelinearizationAggregateMaterial) -> bool {
+    fn binds(
+        &self,
+        aggregate: &SetupGeneratedRelinearizationAggregateSourceAuthority,
+        proof_stream_descriptor: &StreamDescriptor,
+    ) -> bool {
         self.protocol_version == aggregate.protocol_version()
             && self.suite_identifier == aggregate.suite_identifier()
             && self.ceremony_context_hash == aggregate.ceremony_context_hash()
@@ -858,13 +1565,27 @@ impl SetupGenerationVerifiedRelinearizationAggregateBinding {
             && self.ordered_round_one_proof_stream_descriptors.as_ref()
                 == aggregate.ordered_round_one_proof_stream_descriptors()
             && self.ordered_source_root_pairs.as_ref() == aggregate.ordered_source_root_pairs()
-            && self.proof_stream_descriptor == *aggregate.proof_stream_descriptor()
-            && self.aggregate_left_material_root
-                == aggregate.aggregate_left_material().material_root()
+            && self.proof_stream_descriptor == *proof_stream_descriptor
+            && self.aggregate_left_material_root == aggregate.components()[0].material_root()
             && self.aggregate_left_stream_descriptor
-                == *aggregate.aggregate_left_material().stream_descriptor()
-            && self.aggregate_right_material_root == aggregate.material().material_root()
-            && self.aggregate_right_stream_descriptor == *aggregate.material().stream_descriptor()
+                == *aggregate.components()[0].stream_descriptor()
+            && self.aggregate_right_material_root == aggregate.components()[1].material_root()
+            && self.aggregate_right_stream_descriptor
+                == *aggregate.components()[1].stream_descriptor()
+    }
+}
+
+/// Uncommitted round-two activation state. The aggregate binding is retained
+/// beside the bounded construction until finish reopens the same catalog
+/// source and installs both authority fields atomically.
+pub(crate) struct SetupGenerationRelinearizationRoundTwoActivation {
+    aggregate_binding: Option<SetupGenerationRelinearizationAggregateBinding>,
+    construction: SetupRelinearizationRoundTwoConstruction,
+}
+
+impl SetupGenerationRelinearizationRoundTwoActivation {
+    pub(crate) const fn topology(&self) -> &KeySwitchComponentMaterialTopology {
+        self.construction.topology()
     }
 }
 
@@ -888,19 +1609,48 @@ struct SetupGenerationAuthority {
     anchor_openings: Box<[SetupGenerationAnchorOpening]>,
     common_secret_coefficients: Zeroizing<Vec<i8>>,
     public_key_share: SetupGeneratedPublicKeyShare,
+    public_key_share_body_source_opened: bool,
+    public_key_share_body_stream_completed: bool,
     vss_material: SetupGeneratedVssMaterial,
+    completed_recipient_private_payload_count: usize,
     relinearization_material: SetupGeneratedRelinearizationMaterial,
-    verified_relinearization_aggregate_binding:
-        Option<SetupGenerationVerifiedRelinearizationAggregateBinding>,
+    relinearization_aggregate_binding: Option<SetupGenerationRelinearizationAggregateBinding>,
     generated_relinearization_round_two: Option<SetupGeneratedRelinearizationRoundTwoGeneration>,
     galois_batch_schedule_position: u32,
     ordered_galois_entries: Box<[SetupGeneratedGaloisEntry]>,
     pinned_vss_proof_attempt: Option<PinnedProofAttempt>,
+    pinned_vss_public_record_binding: Option<SetupGenerationVssPublicRecordBinding>,
     pinned_relinearization_round_one_proof_attempt: Option<PinnedProofAttempt>,
     pinned_relinearization_round_two_proof_attempt: Option<PinnedProofAttempt>,
     pinned_galois_proof_attempt: Option<PinnedProofAttempt>,
     pinned_same_secret_proof_attempt: Option<PinnedProofAttempt>,
     pinned_public_key_share_proof_attempt: Option<PinnedProofAttempt>,
+}
+
+/// Checkpoint-stable final setup proof authority. Entering this phase moves
+/// only the VSS committed sources and their transcript bindings out of the
+/// all-family setup authority; every superseded setup, RKG and Galois witness
+/// allocation is dropped before common-proof preparation begins.
+struct SetupGenerationVssProofAuthority {
+    protocol_version: u16,
+    suite_identifier: [u8; Hash512::BYTE_LENGTH],
+    manifest_hash: [u8; Hash512::BYTE_LENGTH],
+    ceremony_context_hash: [u8; Hash512::BYTE_LENGTH],
+    action_context_hash: [u8; Hash512::BYTE_LENGTH],
+    roster_hash: [u8; Hash512::BYTE_LENGTH],
+    ordered_roster: Box<[[u8; Hash512::BYTE_LENGTH]]>,
+    setup_proof_context_hash: [u8; Hash512::BYTE_LENGTH],
+    source_setup_intent_object_hash: [u8; Hash512::BYTE_LENGTH],
+    participant_identity: [u8; Hash512::BYTE_LENGTH],
+    roster_position: u16,
+    setup_attempt_identifier: [u8; 32],
+    action_randomness_authorization_hash: [u8; Hash512::BYTE_LENGTH],
+    action_private_randomness: Rc<ActionPrivateRandomness>,
+    public_setup_seed: [u8; Hash512::BYTE_LENGTH],
+    ordered_coefficient_materials: Box<[SetupGeneratedCommittedMaterial]>,
+    ordered_recipient_share_materials: Box<[SetupGeneratedCommittedMaterial]>,
+    pinned_vss_proof_attempt: Option<PinnedProofAttempt>,
+    pinned_vss_public_record_binding: Option<SetupGenerationVssPublicRecordBinding>,
 }
 
 impl SetupGenerationAuthority {
@@ -961,9 +1711,9 @@ impl SetupGenerationAuthority {
                 .iter()
                 .any(|coefficient| !(-1..=1).contains(coefficient))
             || input.public_key_share.ordered_data_modulus_indices()
-                != selected_committed_material_relation_plan_input()
+                != selected_public_key_share_relation_plan_input()
                     .map_err(|_| RefusalReason::UnsupportedVersionOrSuite)?
-                    .sharing_data_modulus_indices
+                    .data_modulus_indices
             || input.public_key_share.centered_error_coefficients().len() != ring_degree
             || input.public_key_share.public_polynomial_context_hash()
                 != expected_public_key_share_context_hash
@@ -992,9 +1742,7 @@ impl SetupGenerationAuthority {
             .map_err(|_| RefusalReason::WrongContext)?;
             if usize::from(anchor.commitment_data_prime_index()) != expected_data_prime_index
                 || anchor.public_polynomial_context_hash() != expected_context_hash
-                || anchor.source_polynomial_degree_bound_exclusive() != ring_degree
-                || anchor.ordered_coefficient_columns().len()
-                    != (SETUP_COMMITMENT_MODULE_RANK + 1) * 2
+                || anchor.source_polynomial_degree_bound_exclusive() != ring_degree / 2
                 || anchor.root() != input.anchor_commitment_roots[anchor_ordinal]
             {
                 return Err(RefusalReason::WrongHashOrRoot);
@@ -1158,13 +1906,17 @@ impl SetupGenerationAuthority {
             anchor_openings: input.anchor_openings.into_boxed_slice(),
             common_secret_coefficients: input.common_secret_coefficients,
             public_key_share: input.public_key_share,
+            public_key_share_body_source_opened: false,
+            public_key_share_body_stream_completed: false,
             vss_material: input.vss_material,
+            completed_recipient_private_payload_count: 0,
             relinearization_material: input.relinearization_material,
-            verified_relinearization_aggregate_binding: None,
+            relinearization_aggregate_binding: None,
             generated_relinearization_round_two: None,
             galois_batch_schedule_position: input.galois_batch_schedule_position,
             ordered_galois_entries: input.ordered_galois_entries.into_boxed_slice(),
             pinned_vss_proof_attempt: None,
+            pinned_vss_public_record_binding: None,
             pinned_relinearization_round_one_proof_attempt: None,
             pinned_relinearization_round_two_proof_attempt: None,
             pinned_galois_proof_attempt: None,
@@ -1322,32 +2074,32 @@ impl SetupGenerationAuthority {
             .map_err(|_| RefusalReason::OutsideSupportedProfile)
     }
 
-    fn exact_local_round_one_source_in_verified_aggregate(
+    fn exact_local_round_one_source_in_generated_aggregate(
         &self,
         round_one_source: &SetupGeneratedRelinearizationRoundOneSourceAuthority,
-        verified_aggregate: &VerifiedRelinearizationAggregateMaterial,
+        generated_aggregate: &SetupGeneratedRelinearizationAggregateSourceAuthority,
     ) -> Result<(), RefusalReason> {
         let roster_index = usize::from(self.roster_position);
         let round_one_root_pair = round_one_source.root_pair();
-        if verified_aggregate.ordered_participant_identities().len()
+        if generated_aggregate.ordered_participant_identities().len()
             != usize::from(FOUNDATION_PROFILE.participant_count)
-            || verified_aggregate.ordered_anchor_commitment_roots().len()
+            || generated_aggregate.ordered_anchor_commitment_roots().len()
                 != usize::from(FOUNDATION_PROFILE.participant_count)
-            || verified_aggregate.ordered_source_root_pairs().len()
+            || generated_aggregate.ordered_source_root_pairs().len()
                 != usize::from(FOUNDATION_PROFILE.participant_count)
-            || verified_aggregate
+            || generated_aggregate
                 .ordered_round_one_proof_stream_descriptors()
                 .len()
                 != usize::from(FOUNDATION_PROFILE.participant_count)
-            || verified_aggregate
+            || generated_aggregate
                 .ordered_participant_identities()
                 .get(roster_index)
                 != Some(&self.participant_identity)
-            || verified_aggregate
+            || generated_aggregate
                 .ordered_anchor_commitment_roots()
                 .get(roster_index)
                 != Some(&self.anchor_commitment_roots)
-            || verified_aggregate
+            || generated_aggregate
                 .ordered_source_root_pairs()
                 .get(roster_index)
                 != Some(&round_one_root_pair)
@@ -1357,15 +2109,14 @@ impl SetupGenerationAuthority {
         Ok(())
     }
 
-    fn activate_relinearization_round_two(
-        &mut self,
+    fn begin_relinearization_round_two_activation(
+        &self,
         selected_suite: &SelectedSuiteCapability,
-        verified_aggregate: &VerifiedRelinearizationAggregateMaterial,
-        aggregate_round_one_left_bytes: &[u8],
-        aggregate_round_one_right_bytes: &[u8],
-    ) -> Result<SetupGenerationRelinearizationRoundTwoPreparationSource, RefusalReason> {
+        generated_aggregate: &SetupGeneratedRelinearizationAggregateSourceAuthority,
+        aggregate_proof_stream_descriptor: &StreamDescriptor,
+    ) -> Result<SetupGenerationRelinearizationRoundTwoActivation, RefusalReason> {
         if self.generated_relinearization_round_two.is_some()
-            || self.verified_relinearization_aggregate_binding.is_some()
+            || self.relinearization_aggregate_binding.is_some()
         {
             return Err(RefusalReason::ConsumedState);
         }
@@ -1376,26 +2127,88 @@ impl SetupGenerationAuthority {
             return Err(RefusalReason::MissingPrerequisite);
         }
         let round_one_source = self.generated_relinearization_round_one_source_authority()?;
-        self.exact_local_round_one_source_in_verified_aggregate(
+        self.exact_local_round_one_source_in_generated_aggregate(
             &round_one_source,
-            verified_aggregate,
+            generated_aggregate,
         )?;
-        let generated_round_two = self.relinearization_material.generated_round_two(
+        let construction = self.relinearization_material.begin_round_two_construction(
             selected_suite,
-            &self.common_secret_coefficients,
             &round_one_source,
-            verified_aggregate,
-            aggregate_round_one_left_bytes,
-            aggregate_round_one_right_bytes,
+            generated_aggregate,
             self.relinearization_round_two_evaluation_domain_size()?,
         )?;
-        let aggregate_binding =
-            SetupGenerationVerifiedRelinearizationAggregateBinding::from_verified(
-                verified_aggregate,
+        Ok(SetupGenerationRelinearizationRoundTwoActivation {
+            aggregate_binding: Some(
+                SetupGenerationRelinearizationAggregateBinding::from_generated(
+                    generated_aggregate,
+                    aggregate_proof_stream_descriptor,
+                ),
+            ),
+            construction,
+        })
+    }
+
+    fn absorb_relinearization_round_two_activation_pair(
+        &self,
+        activation: &mut SetupGenerationRelinearizationRoundTwoActivation,
+        aggregate_left_bytes: &[u8],
+        aggregate_right_bytes: &[u8],
+    ) -> Result<(), RefusalReason> {
+        if self.generated_relinearization_round_two.is_some()
+            || self.relinearization_aggregate_binding.is_some()
+            || self
+                .pinned_relinearization_round_one_proof_attempt
+                .is_none()
+            || activation.aggregate_binding.is_none()
+        {
+            return Err(RefusalReason::ConsumedState);
+        }
+        activation.construction.absorb_authenticated_source_pair(
+            &self.common_secret_coefficients,
+            self.relinearization_material
+                .ephemeral_secret_coefficients(),
+            self.relinearization_material.round_two_errors_by_block(),
+            aggregate_left_bytes,
+            aggregate_right_bytes,
+        )
+    }
+
+    fn finish_relinearization_round_two_activation(
+        &mut self,
+        activation: &mut SetupGenerationRelinearizationRoundTwoActivation,
+        generated_aggregate: &SetupGeneratedRelinearizationAggregateSourceAuthority,
+        aggregate_proof_stream_descriptor: &StreamDescriptor,
+    ) -> Result<SetupGenerationRelinearizationRoundTwoPreparationSource, RefusalReason> {
+        if self.generated_relinearization_round_two.is_some()
+            || self.relinearization_aggregate_binding.is_some()
+            || self
+                .pinned_relinearization_round_one_proof_attempt
+                .is_none()
+        {
+            return Err(RefusalReason::ConsumedState);
+        }
+        let round_one_source = self.generated_relinearization_round_one_source_authority()?;
+        self.exact_local_round_one_source_in_generated_aggregate(
+            &round_one_source,
+            generated_aggregate,
+        )?;
+        let aggregate_binding = activation
+            .aggregate_binding
+            .as_ref()
+            .filter(|binding| binding.binds(generated_aggregate, aggregate_proof_stream_descriptor))
+            .ok_or(RefusalReason::WrongContext)?;
+        let _ = aggregate_binding;
+        let generated_round_two = activation.construction.finish()?;
+        let preparation_source =
+            SetupGenerationRelinearizationRoundTwoPreparationSource::from_generated_source(
+                generated_round_two.source_authority(),
+                self.manifest_hash,
+                self.source_setup_intent_object_hash,
+                self.action_randomness_authorization_hash,
             );
-        self.verified_relinearization_aggregate_binding = Some(aggregate_binding);
+        self.relinearization_aggregate_binding = activation.aggregate_binding.take();
         self.generated_relinearization_round_two = Some(generated_round_two);
-        self.relinearization_round_two_preparation_source()
+        Ok(preparation_source)
     }
 
     fn relinearization_round_two_preparation_source(
@@ -1405,7 +2218,7 @@ impl SetupGenerationAuthority {
             .generated_relinearization_round_two
             .as_ref()
             .ok_or(RefusalReason::MissingPrerequisite)?;
-        if self.verified_relinearization_aggregate_binding.is_none() {
+        if self.relinearization_aggregate_binding.is_none() {
             return Err(RefusalReason::MissingPrerequisite);
         }
         Ok(
@@ -1420,13 +2233,14 @@ impl SetupGenerationAuthority {
 
     fn validate_relinearization_round_two_aggregate(
         &self,
-        verified_aggregate: &VerifiedRelinearizationAggregateMaterial,
+        generated_aggregate: &SetupGeneratedRelinearizationAggregateSourceAuthority,
+        aggregate_proof_stream_descriptor: &StreamDescriptor,
     ) -> Result<(), RefusalReason> {
         let binding = self
-            .verified_relinearization_aggregate_binding
+            .relinearization_aggregate_binding
             .as_ref()
             .ok_or(RefusalReason::MissingPrerequisite)?;
-        if !binding.binds(verified_aggregate) {
+        if !binding.binds(generated_aggregate, aggregate_proof_stream_descriptor) {
             return Err(RefusalReason::WrongContext);
         }
         Ok(())
@@ -1463,10 +2277,13 @@ impl SetupGenerationAuthority {
                 None,
             )
             .map_err(|_| RefusalReason::WrongContext)?;
-            let tree = entry
-                .component()
-                .recompute_public_polynomial_tree(&context, evaluation_domain_size)?;
-            ordered_contribution_roots.push(tree.root());
+            let public_polynomial_root =
+                recompute_setup_generated_component_public_polynomial_root(
+                    entry.component(),
+                    &context,
+                    evaluation_domain_size,
+                )?;
+            ordered_contribution_roots.push(public_polynomial_root.root());
         }
         let canonical_application_statement_bytes = canonical_selected_galois_key_share_statement(
             self.setup_proof_context_hash,
@@ -1666,7 +2483,7 @@ impl SetupGenerationAuthority {
             .generated_relinearization_round_two
             .as_ref()
             .ok_or(RefusalReason::MissingPrerequisite)?;
-        if self.verified_relinearization_aggregate_binding.is_none() {
+        if self.relinearization_aggregate_binding.is_none() {
             return Err(RefusalReason::MissingPrerequisite);
         }
         let source = generated.source_authority();
@@ -1867,6 +2684,397 @@ impl SetupGenerationAuthority {
             self.pinned_vss_proof_attempt = Some(pinned);
         }
         Ok(())
+    }
+    fn retained_coefficient_and_canonical_payload_byte_length(
+        &self,
+    ) -> Result<u64, RefusalReason> {
+        let checked_add = |total: u64, byte_length: usize| {
+            total
+                .checked_add(
+                    u64::try_from(byte_length)
+                        .map_err(|_| RefusalReason::OutsideSupportedProfile)?,
+                )
+                .ok_or(RefusalReason::OutsideSupportedProfile)
+        };
+        let mut total = checked_add(
+            0,
+            self.ordered_roster
+                .len()
+                .checked_mul(Hash512::BYTE_LENGTH)
+                .ok_or(RefusalReason::OutsideSupportedProfile)?,
+        )?;
+        for anchor in &self.anchor_openings {
+            total = checked_add(total, anchor.canonical_commitment_bytes.len())?;
+            for polynomial in anchor
+                .hiding_secret_polynomials
+                .iter()
+                .chain(anchor.hiding_error_polynomials.iter())
+            {
+                total = checked_add(total, polynomial.capacity())?;
+            }
+        }
+        total = checked_add(total, self.common_secret_coefficients.capacity())?;
+        total = checked_add(
+            total,
+            self.public_key_share
+                .ordered_data_modulus_indices
+                .len()
+                .checked_mul(size_of::<u16>())
+                .ok_or(RefusalReason::OutsideSupportedProfile)?,
+        )?;
+        for coefficients in &self.public_key_share.ordered_limb_coefficients {
+            total = checked_add(
+                total,
+                coefficients
+                    .capacity()
+                    .checked_mul(size_of::<u64>())
+                    .ok_or(RefusalReason::OutsideSupportedProfile)?,
+            )?;
+        }
+        total = checked_add(
+            total,
+            self.public_key_share.centered_error_coefficients.capacity(),
+        )?;
+        let vss_source_accounting = setup_generation_vss_source_allocation_accounting(
+            self.vss_material
+                .ordered_coefficient_materials()
+                .iter()
+                .chain(self.vss_material.ordered_recipient_share_materials()),
+        )?;
+        total = total
+            .checked_add(vss_source_accounting.canonical_coefficient_byte_length)
+            .ok_or(RefusalReason::OutsideSupportedProfile)?;
+        for payload in self.vss_material.recipient_private_payloads.iter().flatten() {
+            total = checked_add(total, payload.canonical_bytes.capacity())?;
+        }
+        total = total
+            .checked_add(
+                self.relinearization_material
+                    .retained_coefficient_payload_byte_length()?,
+            )
+            .ok_or(RefusalReason::OutsideSupportedProfile)?;
+        if let Some(generated_round_two) = &self.generated_relinearization_round_two {
+            total = total
+                .checked_add(
+                    generated_round_two.retained_coefficient_payload_byte_length()?,
+                )
+                .ok_or(RefusalReason::OutsideSupportedProfile)?;
+        }
+        for entry in &self.ordered_galois_entries {
+            total = checked_add(total, entry.component.canonical_bytes.len())?;
+            for polynomial in &entry.centered_error_polynomials_by_block {
+                total = checked_add(total, polynomial.capacity())?;
+            }
+        }
+        Ok(total)
+    }
+
+    fn retained_wrapper_and_catalog_byte_length(&self) -> Result<u64, RefusalReason> {
+        let mut accounting = SetupGenerationDescriptorAllocationAccumulator::default();
+        accounting.add_usize_byte_length(size_of::<Self>())?;
+        accounting.add_usize_byte_length(
+            size_of::<usize>()
+                .checked_mul(2)
+                .and_then(|header| header.checked_add(size_of::<ActionPrivateRandomness>()))
+                .ok_or(RefusalReason::OutsideSupportedProfile)?,
+        )?;
+
+        accounting.add_usize_byte_length(
+            self.anchor_openings
+                .len()
+                .checked_mul(size_of::<SetupGenerationAnchorOpening>())
+                .ok_or(RefusalReason::OutsideSupportedProfile)?,
+        )?;
+        for anchor in &self.anchor_openings {
+            accounting.add_usize_byte_length(
+                anchor
+                    .hiding_secret_polynomials
+                    .len()
+                    .checked_add(anchor.hiding_error_polynomials.len())
+                    .and_then(|count| count.checked_mul(size_of::<Zeroizing<Vec<i8>>>()))
+                    .ok_or(RefusalReason::OutsideSupportedProfile)?,
+            )?;
+        }
+        accounting.add_usize_byte_length(
+            self.public_key_share
+                .ordered_limb_coefficients
+                .len()
+                .checked_mul(size_of::<Zeroizing<Vec<u64>>>())
+                .ok_or(RefusalReason::OutsideSupportedProfile)?,
+        )?;
+
+        let vss_material_count = self
+            .vss_material
+            .ordered_coefficient_materials()
+            .len()
+            .checked_add(
+                self.vss_material
+                    .ordered_recipient_share_materials()
+                    .len(),
+            )
+            .ok_or(RefusalReason::OutsideSupportedProfile)?;
+        accounting.add_usize_byte_length(
+            vss_material_count
+                .checked_mul(size_of::<SetupGeneratedCommittedMaterial>())
+                .ok_or(RefusalReason::OutsideSupportedProfile)?,
+        )?;
+        accounting.add_usize_byte_length(
+            self.vss_material
+                .recipient_private_payloads
+                .len()
+                .checked_mul(size_of::<Option<SetupGeneratedRecipientPrivateVssPayload>>())
+                .ok_or(RefusalReason::OutsideSupportedProfile)?,
+        )?;
+        let vss_source_accounting = setup_generation_vss_source_allocation_accounting(
+            self.vss_material
+                .ordered_coefficient_materials()
+                .iter()
+                .chain(self.vss_material.ordered_recipient_share_materials()),
+        )?;
+        accounting.byte_length = accounting
+            .byte_length
+            .checked_add(vss_source_accounting.compact_source_byte_length)
+            .and_then(|length| {
+                length.checked_add(vss_source_accounting.allocation_wrapper_byte_length)
+            })
+            .ok_or(RefusalReason::OutsideSupportedProfile)?;
+
+        let relinearization_material = &self.relinearization_material;
+        for component in [
+            relinearization_material.round_one_left_component(),
+            relinearization_material.round_one_right_component(),
+        ] {
+            add_key_switch_component_allocations(&mut accounting, component)?;
+        }
+        for error_catalog in [
+            relinearization_material.round_one_left_errors_by_block(),
+            relinearization_material.round_one_right_errors_by_block(),
+            relinearization_material.round_two_errors_by_block(),
+        ] {
+            accounting.add_usize_byte_length(
+                error_catalog
+                    .len()
+                    .checked_mul(size_of::<Zeroizing<Vec<i8>>>())
+                    .ok_or(RefusalReason::OutsideSupportedProfile)?,
+            )?;
+        }
+
+        if let Some(aggregate_binding) = &self.relinearization_aggregate_binding {
+            accounting.add_usize_byte_length(
+                aggregate_binding
+                    .ordered_participant_identities
+                    .len()
+                    .checked_mul(size_of::<[u8; Hash512::BYTE_LENGTH]>())
+                    .ok_or(RefusalReason::OutsideSupportedProfile)?,
+            )?;
+            accounting.add_usize_byte_length(
+                aggregate_binding
+                    .ordered_anchor_commitment_roots
+                    .len()
+                    .checked_mul(size_of::<[[u8; Hash512::BYTE_LENGTH]; 3]>())
+                    .ok_or(RefusalReason::OutsideSupportedProfile)?,
+            )?;
+            accounting.add_usize_byte_length(
+                aggregate_binding
+                    .ordered_round_one_proof_stream_descriptors
+                    .len()
+                    .checked_mul(size_of::<StreamDescriptor>())
+                    .ok_or(RefusalReason::OutsideSupportedProfile)?,
+            )?;
+            accounting.add_usize_byte_length(
+                aggregate_binding
+                    .ordered_source_root_pairs
+                    .len()
+                    .checked_mul(size_of::<[[u8; Hash512::BYTE_LENGTH]; 2]>())
+                    .ok_or(RefusalReason::OutsideSupportedProfile)?,
+            )?;
+            for descriptor in aggregate_binding
+                .ordered_round_one_proof_stream_descriptors
+                .iter()
+                .chain([
+                    &aggregate_binding.proof_stream_descriptor,
+                    &aggregate_binding.aggregate_left_stream_descriptor,
+                    &aggregate_binding.aggregate_right_stream_descriptor,
+                ])
+            {
+                accounting.add_stream_descriptor(descriptor)?;
+            }
+        }
+
+        if let Some(generated_round_two) = &self.generated_relinearization_round_two {
+            add_key_switch_component_allocations(
+                &mut accounting,
+                generated_round_two.component(),
+            )?;
+            accounting.add_usize_byte_length(
+                generated_round_two
+                    .source_authority()
+                    .canonical_application_statement_bytes()
+                    .len(),
+            )?;
+            add_verified_key_switch_component_allocations(
+                &mut accounting,
+                generated_round_two.source_authority().component().material(),
+            )?;
+        }
+
+        accounting.add_usize_byte_length(
+            self.ordered_galois_entries
+                .len()
+                .checked_mul(size_of::<SetupGeneratedGaloisEntry>())
+                .ok_or(RefusalReason::OutsideSupportedProfile)?,
+        )?;
+        for entry in &self.ordered_galois_entries {
+            add_key_switch_component_allocations(&mut accounting, entry.component())?;
+            accounting.add_usize_byte_length(
+                entry
+                    .centered_error_polynomials_by_block()
+                    .len()
+                    .checked_mul(size_of::<Zeroizing<Vec<i8>>>())
+                    .ok_or(RefusalReason::OutsideSupportedProfile)?,
+            )?;
+        }
+
+        if let Some(binding) = &self.pinned_vss_public_record_binding {
+            accounting.add_usize_byte_length(
+                binding
+                    .ordered_recipient_envelope_hashes
+                    .len()
+                    .checked_mul(size_of::<Hash512>())
+                    .ok_or(RefusalReason::OutsideSupportedProfile)?,
+            )?;
+            accounting.add_stream_descriptor(&binding.share_linkage_proof)?;
+        }
+        Ok(accounting.byte_length)
+    }
+
+    fn require_vss_proof_phase_release_prerequisites(&self) -> Result<(), RefusalReason> {
+        if !self.public_key_share_body_stream_completed
+            || self.completed_recipient_private_payload_count
+                != usize::from(FOUNDATION_PROFILE.participant_count)
+            || !self.vss_material.private_payloads_are_all_moved_out()
+            || self.relinearization_aggregate_binding.is_none()
+            || self.generated_relinearization_round_two.is_none()
+            || self.pinned_vss_proof_attempt.is_none()
+            || self
+                .pinned_relinearization_round_one_proof_attempt
+                .is_none()
+            || self
+                .pinned_relinearization_round_two_proof_attempt
+                .is_none()
+            || self.pinned_galois_proof_attempt.is_none()
+            || self.pinned_same_secret_proof_attempt.is_none()
+            || self.pinned_public_key_share_proof_attempt.is_none()
+        {
+            return Err(RefusalReason::MissingPrerequisite);
+        }
+        Ok(())
+    }
+
+    fn into_vss_proof_authority(self) -> SetupGenerationVssProofAuthority {
+        debug_assert!(self.require_vss_proof_phase_release_prerequisites().is_ok());
+        let Self {
+            protocol_version,
+            suite_identifier,
+            manifest_hash,
+            ceremony_context_hash,
+            action_context_hash,
+            roster_hash,
+            ordered_roster,
+            setup_proof_context_hash,
+            source_setup_intent_object_hash,
+            participant_identity,
+            roster_position,
+            setup_attempt_identifier,
+            action_randomness_authorization_hash,
+            action_private_randomness,
+            public_setup_seed,
+            vss_material,
+            pinned_vss_proof_attempt,
+            pinned_vss_public_record_binding,
+            ..
+        } = self;
+        let (ordered_coefficient_materials, ordered_recipient_share_materials) =
+            vss_material.into_proof_materials();
+        SetupGenerationVssProofAuthority {
+            protocol_version,
+            suite_identifier,
+            manifest_hash,
+            ceremony_context_hash,
+            action_context_hash,
+            roster_hash,
+            ordered_roster,
+            setup_proof_context_hash,
+            source_setup_intent_object_hash,
+            participant_identity,
+            roster_position,
+            setup_attempt_identifier,
+            action_randomness_authorization_hash,
+            action_private_randomness,
+            public_setup_seed,
+            ordered_coefficient_materials,
+            ordered_recipient_share_materials,
+            pinned_vss_proof_attempt,
+            pinned_vss_public_record_binding,
+        }
+    }
+}
+
+/// Public record facts recomputed from one live browser-owned setup authority.
+/// The roots stay inside Rust and are exposed only to the canonical carrier
+/// encoder in this WASM instance.
+pub(crate) struct SetupGenerationDealerPublicRecordSource {
+    suite_identifier: Hash512,
+    ceremony_context_hash: Hash512,
+    action_context_hash: Hash512,
+    participant_identity: ParticipantIdentity,
+    roster_position: u16,
+    public_setup_seed: Hash512,
+    ordered_coefficient_material_roots: Box<[Hash512]>,
+    ordered_recipient_share_material_roots: Box<[Hash512]>,
+    ordered_recipient_envelope_hashes: Box<[Hash512]>,
+    share_linkage_proof: StreamDescriptor,
+}
+
+impl SetupGenerationDealerPublicRecordSource {
+    pub(crate) const fn suite_identifier(&self) -> Hash512 {
+        self.suite_identifier
+    }
+
+    pub(crate) const fn ceremony_context_hash(&self) -> Hash512 {
+        self.ceremony_context_hash
+    }
+
+    pub(crate) const fn action_context_hash(&self) -> Hash512 {
+        self.action_context_hash
+    }
+
+    pub(crate) const fn participant_identity(&self) -> ParticipantIdentity {
+        self.participant_identity
+    }
+
+    pub(crate) const fn roster_position(&self) -> u16 {
+        self.roster_position
+    }
+
+    pub(crate) const fn public_setup_seed(&self) -> Hash512 {
+        self.public_setup_seed
+    }
+
+    pub(crate) fn ordered_coefficient_material_roots(&self) -> &[Hash512] {
+        &self.ordered_coefficient_material_roots
+    }
+
+    pub(crate) fn ordered_recipient_share_material_roots(&self) -> &[Hash512] {
+        &self.ordered_recipient_share_material_roots
+    }
+
+    pub(crate) fn ordered_recipient_envelope_hashes(&self) -> &[Hash512] {
+        &self.ordered_recipient_envelope_hashes
+    }
+
+    pub(crate) const fn share_linkage_proof(&self) -> &StreamDescriptor {
+        &self.share_linkage_proof
     }
 }
 
@@ -2197,12 +3405,12 @@ impl SetupGenerationKeyRelationSource<'_, '_> {
         self.authority.public_setup_seed
     }
 
-    pub(crate) fn ring_degree(&self) -> usize {
-        self.authority.common_secret_coefficients.len()
-    }
-
     pub(crate) fn common_secret_coefficients(&self) -> &[i8] {
         self.authority.common_secret_coefficients.as_slice()
+    }
+
+    pub(crate) fn ring_degree(&self) -> usize {
+        self.authority.common_secret_coefficients.len()
     }
 
     pub(crate) fn anchor_openings(&self) -> &[SetupGenerationAnchorOpening] {
@@ -2590,6 +3798,40 @@ pub(crate) enum SetupGaloisGenerationPreparationError {
     Preparation(CommonProofGenerationPreparationError),
 }
 
+#[derive(Debug)]
+pub(crate) enum SetupRelinearizationGenerationPreparationError {
+    Refusal(RefusalReason),
+    Prover(CommonProofProverError),
+    Runtime(CommonProofRuntimeError),
+    Preparation(CommonProofGenerationPreparationError),
+}
+
+impl From<RefusalReason> for SetupRelinearizationGenerationPreparationError {
+    fn from(error: RefusalReason) -> Self {
+        Self::Refusal(error)
+    }
+}
+
+impl From<CommonProofProverError> for SetupRelinearizationGenerationPreparationError {
+    fn from(error: CommonProofProverError) -> Self {
+        Self::Prover(error)
+    }
+}
+
+impl From<CommonProofRuntimeError> for SetupRelinearizationGenerationPreparationError {
+    fn from(error: CommonProofRuntimeError) -> Self {
+        Self::Runtime(error)
+    }
+}
+
+impl From<CommonProofGenerationPreparationError>
+    for SetupRelinearizationGenerationPreparationError
+{
+    fn from(error: CommonProofGenerationPreparationError) -> Self {
+        Self::Preparation(error)
+    }
+}
+
 impl From<RefusalReason> for SetupGaloisGenerationPreparationError {
     fn from(error: RefusalReason) -> Self {
         Self::Refusal(error)
@@ -2664,7 +3906,7 @@ impl<'statement> SetupGenerationVssApplication<'statement> {
 /// and secret witness values remain inside the Rust callback that constructs
 /// the exact family adapter.
 pub(crate) struct SetupGenerationVssSource<'authority, 'statement> {
-    authority: &'authority SetupGenerationAuthority,
+    authority: &'authority SetupGenerationVssProofAuthority,
     application: &'authority SetupGenerationVssApplication<'statement>,
 }
 
@@ -2721,18 +3963,12 @@ impl SetupGenerationVssSource<'_, '_> {
         self.authority.public_setup_seed
     }
 
-    pub(crate) fn common_secret_coefficients(&self) -> &[i8] {
-        self.authority.common_secret_coefficients.as_slice()
-    }
-
     pub(crate) fn ordered_coefficient_materials(&self) -> &[SetupGeneratedCommittedMaterial] {
-        self.authority.vss_material.ordered_coefficient_materials()
+        self.authority.ordered_coefficient_materials()
     }
 
     pub(crate) fn ordered_recipient_share_materials(&self) -> &[SetupGeneratedCommittedMaterial] {
-        self.authority
-            .vss_material
-            .ordered_recipient_share_materials()
+        self.authority.ordered_recipient_share_materials()
     }
 
     pub(crate) const fn prepared_attempt(&self) -> &PreparedActionProofAttemptSource {
@@ -3130,10 +4366,72 @@ impl SetupGenerationRelinearizationRoundOneSource<'_, '_> {
         )
         .map_err(|_| RefusalReason::WrongContext)
     }
+
+    pub(crate) fn prepare_common_generation(
+        &self,
+        relation_plan: CommonProofRelationPlanCapability,
+        limits: CommonProofRuntimeLimits,
+    ) -> Result<PreparedCommonProofGeneration, SetupRelinearizationGenerationPreparationError> {
+        let statement_schema_identifier =
+            ProofApplicationSlotCeilings::RELINEARIZATION_ROUND_ONE_STATEMENT_SCHEMA_IDENTIFIER;
+        let relation_context = selected_relation_plan_check_context(statement_schema_identifier)
+            .ok_or(RefusalReason::UnsupportedVersionOrSuite)?;
+        let (relation_input, _) = selected_relinearization_relation_plan_inputs()
+            .map_err(|_| RefusalReason::UnsupportedVersionOrSuite)?;
+        if relation_input.schedule_position != self.schedule_position() {
+            return Err(RefusalReason::WrongContext.into());
+        }
+        let compiled_relation = compile_relinearization_round_one_relation_with_source_layout(
+            &relation_input,
+            &relation_context,
+        )
+        .map_err(|_| RefusalReason::UnsupportedVersionOrSuite)?;
+        let relation_plan_variant = compiled_relation
+            .relation_plan
+            .select_variant(Some(self.schedule_position()), None)
+            .map_err(|_| CommonProofProverError::InvalidColumn)?
+            .clone();
+        let relation_trees = relinearization_round_one_relation_tree_inputs(
+            self,
+            &relation_plan_variant,
+            &compiled_relation.source_layout,
+        )?;
+        let source_polynomials = RelinearizationRoundOneSourcePolynomialAdapter::new(
+            self,
+            &relation_plan,
+            relation_plan_variant.clone(),
+            relation_context,
+            relation_input.geometry,
+            compiled_relation.source_layout,
+        )?;
+        let witness_bound_attempt = self.witness_bound_attempt()?;
+        let authorization =
+            CommonProofGenerationAuthorization::from_witness_bound_authenticated_attempt(
+                witness_bound_attempt,
+                &relation_plan,
+                self.protocol_version(),
+                self.canonical_application_statement_bytes(),
+                limits,
+            )?;
+        let private_coins = self.private_coin_source(
+            authorization.binding_hash(),
+            &relation_plan_variant,
+            witness_bound_attempt,
+        )?;
+        PreparedCommonProofGeneration::from_exact_family_sources(
+            authorization,
+            relation_plan,
+            self.canonical_application_statement_bytes().to_vec(),
+            relation_trees,
+            limits,
+            CommonProofGenerationSources::new(private_coins, source_polynomials),
+        )
+        .map_err(SetupRelinearizationGenerationPreparationError::from)
+    }
 }
 
 /// Public preparation facts derived from the retained round-two generation.
-/// The generated component and verifier-derived aggregate binding remain in
+/// The generated component and generated aggregate binding remain in
 /// the setup-generation authority across fresh and resumed proof attempts.
 #[derive(Clone)]
 pub(crate) struct SetupGenerationRelinearizationRoundTwoPreparationSource {
@@ -3295,18 +4593,17 @@ impl<'statement> SetupGenerationRelinearizationRoundTwoApplication<'statement> {
 }
 
 /// Retained browser-worker authority for the exact `0x1216` witness and its
-/// positively verified round-one aggregate. Aggregate material remains a
-/// verifier-minted capability; the caller cannot replace it with detached
-/// roots, descriptors, or statement bytes.
-pub(crate) struct SetupGenerationRelinearizationRoundTwoSource<'authority, 'statement, 'aggregate> {
+/// generated round-one aggregate. Aggregate identity remains bound to the
+/// catalog-retained generated proof; the caller cannot replace it with
+/// detached roots, descriptors, or statement bytes.
+pub(crate) struct SetupGenerationRelinearizationRoundTwoSource<'authority, 'statement> {
     authority_identifier: u32,
     authority: &'authority SetupGenerationAuthority,
     application: &'authority SetupGenerationRelinearizationRoundTwoApplication<'statement>,
     generated_round_two: &'authority SetupGeneratedRelinearizationRoundTwoGeneration,
-    verified_aggregate: &'aggregate VerifiedRelinearizationAggregateMaterial,
 }
 
-impl SetupGenerationRelinearizationRoundTwoSource<'_, '_, '_> {
+impl SetupGenerationRelinearizationRoundTwoSource<'_, '_> {
     pub(crate) const fn authority_identifier(&self) -> u32 {
         self.authority_identifier
     }
@@ -3428,24 +4725,6 @@ impl SetupGenerationRelinearizationRoundTwoSource<'_, '_, '_> {
             .generated_relinearization_round_one_source_authority()
     }
 
-    pub(crate) const fn verified_relinearization_aggregate(
-        &self,
-    ) -> &VerifiedRelinearizationAggregateMaterial {
-        self.verified_aggregate
-    }
-
-    pub(crate) const fn aggregate_round_one_left_material(
-        &self,
-    ) -> &VerifiedKeySwitchComponentMaterial {
-        self.verified_aggregate.aggregate_left_material()
-    }
-
-    pub(crate) const fn aggregate_round_one_right_material(
-        &self,
-    ) -> &VerifiedKeySwitchComponentMaterial {
-        self.verified_aggregate.material()
-    }
-
     pub(crate) const fn prepared_attempt(&self) -> &PreparedActionProofAttemptSource {
         &self.application.prepared_attempt
     }
@@ -3537,6 +4816,70 @@ impl SetupGenerationRelinearizationRoundTwoSource<'_, '_, '_> {
             coordinate_capacity,
         )
         .map_err(|_| RefusalReason::WrongContext)
+    }
+
+    pub(crate) fn prepare_common_generation(
+        &self,
+        relation_plan: CommonProofRelationPlanCapability,
+        limits: CommonProofRuntimeLimits,
+        aggregate_source_plan: RelinearizationRoundTwoAuthenticatedAggregateSourcePlan,
+    ) -> Result<PreparedCommonProofGeneration, SetupRelinearizationGenerationPreparationError> {
+        let statement_schema_identifier =
+            ProofApplicationSlotCeilings::RELINEARIZATION_ROUND_TWO_STATEMENT_SCHEMA_IDENTIFIER;
+        let relation_context = selected_relation_plan_check_context(statement_schema_identifier)
+            .ok_or(RefusalReason::UnsupportedVersionOrSuite)?;
+        let (_, relation_input) = selected_relinearization_relation_plan_inputs()
+            .map_err(|_| RefusalReason::UnsupportedVersionOrSuite)?;
+        if relation_input.schedule_position != self.schedule_position() {
+            return Err(RefusalReason::WrongContext.into());
+        }
+        let compiled_relation = compile_relinearization_round_two_relation_with_source_layout(
+            &relation_input,
+            &relation_context,
+        )
+        .map_err(|_| RefusalReason::UnsupportedVersionOrSuite)?;
+        let relation_plan_variant = compiled_relation
+            .relation_plan
+            .select_variant(Some(self.schedule_position()), None)
+            .map_err(|_| CommonProofProverError::InvalidColumn)?
+            .clone();
+        let relation_trees = relinearization_round_two_relation_tree_inputs(
+            self,
+            &relation_plan_variant,
+            &compiled_relation.source_layout,
+        )?;
+        let source_polynomials = RelinearizationRoundTwoSourcePolynomialAdapter::new(
+            self,
+            &relation_plan,
+            relation_plan_variant.clone(),
+            relation_context,
+            relation_input.geometry,
+            compiled_relation.source_layout,
+            aggregate_source_plan,
+        )?;
+        let witness_bound_attempt = self.witness_bound_attempt()?;
+        let authorization =
+            CommonProofGenerationAuthorization::from_witness_bound_authenticated_attempt(
+                witness_bound_attempt,
+                &relation_plan,
+                self.protocol_version(),
+                self.canonical_application_statement_bytes(),
+                limits,
+            )?;
+        let private_coins = self.private_coin_source(
+            authorization.binding_hash(),
+            &relation_plan_variant,
+            witness_bound_attempt,
+        )?;
+        PreparedCommonProofGeneration::from_exact_family_sources(
+            authorization,
+            relation_plan,
+            self.canonical_application_statement_bytes().to_vec(),
+            relation_trees,
+            limits,
+            CommonProofGenerationSources::new(private_coins, source_polynomials),
+        )
+        .map_err(SetupRelinearizationGenerationPreparationError::from)
     }
 }
 
@@ -3889,17 +5232,30 @@ impl SetupGenerationGaloisBatchSource<'_, '_> {
             .ok_or(RefusalReason::OutsideSupportedProfile)?;
         let polynomial_degree = topology.polynomial_degree();
         let extended_limb_count = topology.extended_limb_count();
-        let quarter_polynomial_degree_bound_exclusive = polynomial_degree / 4;
+        let trace_half_degree_bound_exclusive = polynomial_degree / 2;
         if active_data_limb_count > extended_limb_count
-            || quarter_polynomial_degree_bound_exclusive == 0
-            || quarter_polynomial_degree_bound_exclusive.checked_mul(4) != Some(polynomial_degree)
+            || trace_half_degree_bound_exclusive == 0
+            || trace_half_degree_bound_exclusive.checked_mul(2) != Some(polynomial_degree)
         {
             return Err(RefusalReason::WrongTypeOrLength);
         }
 
         let expected_column_count = topology.trace_column_count()?;
         let public_setup_seed = self.public_setup_seed();
-        let mut ordered_coefficient_columns = Vec::with_capacity(expected_column_count);
+        let public_polynomial_context = SetupPublicPolynomialContext::galois_common(
+            self.setup_proof_context_hash(),
+            position.schedule_position(),
+        )
+        .map_err(|_| RefusalReason::WrongContext)?;
+        let mut root_builder = SetupPublicPolynomialRootBuilder::new(
+            &public_polynomial_context,
+            evaluation_domain_size,
+            trace_half_degree_bound_exclusive,
+            u32::try_from(expected_column_count)
+                .map_err(|_| RefusalReason::OutsideSupportedProfile)?,
+        )
+        .map_err(|_| RefusalReason::WrongHashOrRoot)?;
+        let mut absorbed_column_count = 0_usize;
         for decomposition_block_index in 0..topology.data_block_count() {
             let decomposition_block_coordinate = u16::try_from(decomposition_block_index)
                 .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
@@ -3930,44 +5286,34 @@ impl SetupGenerationGaloisBatchSource<'_, '_> {
                 if common_reference_coefficients.len() != polynomial_degree {
                     return Err(RefusalReason::WrongTypeOrLength);
                 }
-                for quarter_ordinal in 0_usize..4_usize {
-                    let coefficient_start = quarter_ordinal
-                        .checked_mul(quarter_polynomial_degree_bound_exclusive)
+                for half_ordinal in 0_usize..2_usize {
+                    let coefficient_start = half_ordinal
+                        .checked_mul(trace_half_degree_bound_exclusive)
                         .ok_or(RefusalReason::OutsideSupportedProfile)?;
-                    let physical_column = &common_reference_coefficients[coefficient_start
-                        ..coefficient_start + quarter_polynomial_degree_bound_exclusive];
-                    ordered_coefficient_columns.push(
-                        physical_column
-                            .iter()
-                            .copied()
-                            .map(ProofBaseFieldElement::from_canonical)
-                            .collect::<Result<Vec<_>, _>>()
-                            .map_err(|_| RefusalReason::InvalidArithmeticRelation)?,
-                    );
+                    let physical_column = &common_reference_coefficients
+                        [coefficient_start..coefficient_start + trace_half_degree_bound_exclusive];
+                    root_builder
+                        .absorb_canonical_trace_row(physical_column)
+                        .map_err(|_| RefusalReason::InvalidArithmeticRelation)?;
+                    absorbed_column_count = absorbed_column_count
+                        .checked_add(1)
+                        .ok_or(RefusalReason::OutsideSupportedProfile)?;
                 }
             }
         }
-        if ordered_coefficient_columns.len() != expected_column_count {
+        if absorbed_column_count != expected_column_count {
             return Err(RefusalReason::WrongTypeOrLength);
         }
-
-        let public_polynomial_context = SetupPublicPolynomialContext::galois_common(
-            self.setup_proof_context_hash(),
-            position.schedule_position(),
-        )
-        .map_err(|_| RefusalReason::WrongContext)?;
-        let tree = SetupPublicPolynomialTree::construct(SetupPublicPolynomialTreeInput {
-            context: &public_polynomial_context,
-            evaluation_domain_size,
-            source_polynomial_degree_bound_exclusive: quarter_polynomial_degree_bound_exclusive,
-            ordered_coefficient_columns: &ordered_coefficient_columns,
-        })
-        .map_err(|_| RefusalReason::WrongHashOrRoot)?;
-        VerifiedEvaluatorAuxiliaryRoot::from_galois_common_public_polynomial_tree(
+        let (public_polynomial_context_hash, root) = root_builder
+            .finish()
+            .map_err(|_| RefusalReason::WrongHashOrRoot)?;
+        VerifiedEvaluatorAuxiliaryRoot::from_recomputed_galois_common_public_polynomial_root(
             position.schedule_position(),
             galois_element,
             catalog_level,
-            &tree,
+            &public_polynomial_context,
+            public_polynomial_context_hash,
+            root,
         )
         .map_err(|_| RefusalReason::WrongContext)
     }
@@ -3993,6 +5339,7 @@ impl SetupGenerationGaloisBatchSource<'_, '_> {
                 .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
         let mut ordered_public_polynomial_contexts =
             Vec::with_capacity(self.ordered_entries().len());
+        let mut ordered_public_polynomial_roots = Vec::with_capacity(self.ordered_entries().len());
         let mut ordered_contribution_roots = Vec::with_capacity(self.ordered_entries().len());
         for (component_ordinal, entry) in self.ordered_entries().iter().enumerate() {
             let logical_schedule_position = u32::try_from(component_ordinal)
@@ -4007,13 +5354,16 @@ impl SetupGenerationGaloisBatchSource<'_, '_> {
             )
             .map_err(|_| RefusalReason::WrongContext)?;
             let component = entry.component();
-            let tree = component.recompute_public_polynomial_tree(
-                &public_polynomial_context,
-                evaluation_domain_size,
-            )?;
-            let contribution_root = tree.root();
+            let public_polynomial_root =
+                recompute_setup_generated_component_public_polynomial_root(
+                    component,
+                    &public_polynomial_context,
+                    evaluation_domain_size,
+                )?;
+            let contribution_root = public_polynomial_root.root();
             ordered_contribution_roots.push(contribution_root);
             ordered_public_polynomial_contexts.push(public_polynomial_context);
+            ordered_public_polynomial_roots.push(public_polynomial_root);
         }
         let canonical_application_statement_bytes = canonical_selected_galois_key_share_statement(
             self.setup_proof_context_hash(),
@@ -4039,40 +5389,32 @@ impl SetupGenerationGaloisBatchSource<'_, '_> {
             application_statement_hash,
         );
         let mut ordered_components = Vec::with_capacity(self.ordered_entries().len());
-        for ((entry, public_polynomial_context), contribution_root) in self
+        for ((entry, public_polynomial_context), public_polynomial_root) in self
             .ordered_entries()
             .iter()
             .zip(ordered_public_polynomial_contexts)
-            .zip(ordered_contribution_roots.iter().copied())
+            .zip(ordered_public_polynomial_roots)
         {
             let component = entry.component();
-            let mut component_stream = KeySwitchComponentPublicPolynomialStream::begin(
-                component.topology.clone(),
+            let material = authenticate_setup_generated_component_material(
+                &component.topology,
+                &component.canonical_bytes,
+                &component.stream_descriptor,
                 material_ownership,
-                component.stream_descriptor.clone(),
-            )
-            .map_err(generated_galois_stream_refusal)?;
-            for (chunk_index, chunk_bytes) in component
-                .canonical_bytes
-                .chunks(FOUNDATION_PROFILE.stream_chunk_byte_length)
-                .enumerate()
+            )?;
+            if public_polynomial_context
+                .context_hash()
+                .map_err(|_| RefusalReason::WrongContext)?
+                != public_polynomial_root.public_polynomial_context_hash()
             {
-                component_stream
-                    .absorb_chunk(chunk_index, chunk_bytes)
-                    .map_err(generated_galois_stream_refusal)?;
-            }
-            let recomputed = component_stream
-                .finish(public_polynomial_context)
-                .map_err(generated_galois_stream_refusal)?;
-            let (material, tree) = recomputed.into_parts();
-            if tree.root() != contribution_root {
                 return Err(RefusalReason::WrongHashOrRoot);
             }
             ordered_components.push(SetupGeneratedGaloisSourceComponent {
                 evaluator_position: component.evaluator_position,
                 material,
-                contribution_root,
-                public_polynomial_context_hash: tree.public_polynomial_context_hash(),
+                contribution_root: public_polynomial_root.root(),
+                public_polynomial_context_hash: public_polynomial_root
+                    .public_polynomial_context_hash(),
             });
         }
         let ordered_auxiliary_roots = self
@@ -4171,6 +5513,84 @@ struct SetupGenerationAuthorityRegistry {
     authorities: BTreeMap<u32, SetupGenerationAuthority>,
 }
 
+#[derive(Default)]
+struct SetupGenerationVssProofAuthorityRegistry {
+    authorities: BTreeMap<u32, SetupGenerationVssProofAuthority>,
+}
+
+struct SetupGenerationPublicKeyShareSource {
+    owner_authority_identifier: u32,
+    body_byte_length: usize,
+    next_offset: usize,
+}
+
+impl SetupGenerationPublicKeyShareSource {
+    fn read_into(
+        &mut self,
+        public_key_share: &SetupGeneratedPublicKeyShare,
+        expected_offset: usize,
+        output: &mut [u8],
+    ) -> Result<bool, RefusalReason> {
+        if self.next_offset != expected_offset {
+            return Err(RefusalReason::WrongContext);
+        }
+        if public_key_share.body_byte_length()? != self.body_byte_length {
+            return Err(RefusalReason::WrongTypeOrLength);
+        }
+        let finished = public_key_share.write_body_range(expected_offset, output)?;
+        self.next_offset = self
+            .next_offset
+            .checked_add(output.len())
+            .ok_or(RefusalReason::OutsideSupportedProfile)?;
+        if finished != (self.next_offset == self.body_byte_length) {
+            return Err(RefusalReason::WrongTypeOrLength);
+        }
+        Ok(finished)
+    }
+}
+
+#[derive(Default)]
+struct SetupGenerationPublicKeyShareSourceRegistry {
+    next_handle: u32,
+    sources: BTreeMap<u32, SetupGenerationPublicKeyShareSource>,
+}
+
+impl SetupGenerationPublicKeyShareSourceRegistry {
+    fn next_available_handle(
+        &self,
+    ) -> Result<SetupGenerationPublicKeyShareSourceHandle, RefusalReason> {
+        if self.sources.len() >= MAXIMUM_RETAINED_SETUP_GENERATION_PUBLIC_KEY_SHARE_SOURCE_COUNT {
+            return Err(RefusalReason::OutsideSupportedProfile);
+        }
+        self.next_handle
+            .checked_add(1)
+            .map(SetupGenerationPublicKeyShareSourceHandle)
+            .ok_or(RefusalReason::OutsideSupportedProfile)
+    }
+
+    fn retain_at(
+        &mut self,
+        handle: SetupGenerationPublicKeyShareSourceHandle,
+        source: SetupGenerationPublicKeyShareSource,
+    ) -> SetupGenerationPublicKeyShareSourceHandle {
+        self.next_handle = handle.0;
+        let replaced = self.sources.insert(handle.0, source);
+        debug_assert!(replaced.is_none());
+        handle
+    }
+
+    fn release_for_authority(&mut self, authority_identifier: u32) {
+        self.sources
+            .retain(|_, source| source.owner_authority_identifier != authority_identifier);
+    }
+
+    fn contains_source_for_authority(&self, authority_identifier: u32) -> bool {
+        self.sources
+            .values()
+            .any(|source| source.owner_authority_identifier == authority_identifier)
+    }
+}
+
 struct SetupGenerationRecipientPayloadSource {
     owner_authority_identifier: u32,
     recipient_roster_position: u16,
@@ -4236,6 +5656,12 @@ impl SetupGenerationRecipientPayloadSourceRegistry {
         self.sources
             .retain(|_, source| source.owner_authority_identifier != authority_identifier);
     }
+
+    fn contains_source_for_authority(&self, authority_identifier: u32) -> bool {
+        self.sources
+            .values()
+            .any(|source| source.owner_authority_identifier == authority_identifier)
+    }
 }
 
 impl SetupGenerationAuthorityRegistry {
@@ -4258,9 +5684,15 @@ impl SetupGenerationAuthorityRegistry {
 thread_local! {
     static SETUP_GENERATION_AUTHORITY_REGISTRY: RefCell<SetupGenerationAuthorityRegistry> =
         RefCell::new(SetupGenerationAuthorityRegistry::default());
+    static SETUP_GENERATION_PUBLIC_KEY_SHARE_SOURCE_REGISTRY:
+        RefCell<SetupGenerationPublicKeyShareSourceRegistry> =
+            RefCell::new(SetupGenerationPublicKeyShareSourceRegistry::default());
     static SETUP_GENERATION_RECIPIENT_PAYLOAD_SOURCE_REGISTRY:
         RefCell<SetupGenerationRecipientPayloadSourceRegistry> =
             RefCell::new(SetupGenerationRecipientPayloadSourceRegistry::default());
+    static SETUP_GENERATION_VSS_PROOF_AUTHORITY_REGISTRY:
+        RefCell<SetupGenerationVssProofAuthorityRegistry> =
+            RefCell::new(SetupGenerationVssProofAuthorityRegistry::default());
 }
 
 pub(super) fn retain_browser_owned_setup_generation_authority(
@@ -4273,6 +5705,98 @@ pub(super) fn retain_browser_owned_setup_generation_authority(
             .map_err(|_| RefusalReason::ConsumedState)?
             .retain(authority)
     })
+}
+
+pub(crate) fn setup_generation_retained_memory_accounting(
+    handle: &SetupGenerationAuthorityHandle,
+) -> Result<SetupGenerationRetainedMemoryAccounting, RefusalReason> {
+    let all_family_accounting = SETUP_GENERATION_AUTHORITY_REGISTRY.with(|registry| {
+        registry
+            .try_borrow()
+            .map_err(|_| RefusalReason::ConsumedState)?
+            .authorities
+            .get(&handle.0)
+            .map(|authority| {
+                let coefficient_and_canonical_payload_byte_length = authority
+                    .retained_coefficient_and_canonical_payload_byte_length()?;
+                let wrapper_and_catalog_byte_length =
+                    authority.retained_wrapper_and_catalog_byte_length()?;
+                let all_family_payload_byte_length = coefficient_and_canonical_payload_byte_length
+                    .checked_add(wrapper_and_catalog_byte_length)
+                    .ok_or(RefusalReason::OutsideSupportedProfile)?;
+                let (
+                    vss_proof_shared_source_byte_length,
+                    vss_proof_wrapper_and_catalog_byte_length,
+                    post_release_payload_byte_length,
+                ) = setup_generation_vss_post_release_memory_accounting(
+                    &authority.ordered_roster,
+                    authority.vss_material.ordered_coefficient_materials(),
+                    authority.vss_material.ordered_recipient_share_materials(),
+                    authority.pinned_vss_public_record_binding.as_ref(),
+                )?;
+                Ok::<_, RefusalReason>((
+                    coefficient_and_canonical_payload_byte_length,
+                    wrapper_and_catalog_byte_length,
+                    all_family_payload_byte_length,
+                    vss_proof_shared_source_byte_length,
+                    vss_proof_wrapper_and_catalog_byte_length,
+                    post_release_payload_byte_length,
+                ))
+            })
+            .transpose()
+    })?;
+    let vss_proof_accounting =
+        SETUP_GENERATION_VSS_PROOF_AUTHORITY_REGISTRY.with(|registry| {
+            registry
+                .try_borrow()
+                .map_err(|_| RefusalReason::ConsumedState)?
+                .authorities
+                .get(&handle.0)
+                .map(SetupGenerationVssProofAuthority::retained_memory_accounting)
+                .transpose()
+        })?;
+    match (all_family_accounting, vss_proof_accounting) {
+        (
+            Some((
+                all_family_coefficient_and_canonical_payload_byte_length,
+                all_family_wrapper_and_catalog_byte_length,
+                all_family_payload_byte_length,
+                vss_proof_shared_source_byte_length,
+                vss_proof_wrapper_and_catalog_byte_length,
+                post_release_payload_byte_length,
+            )),
+            None,
+        ) => {
+            Ok(SetupGenerationRetainedMemoryAccounting {
+                all_family_coefficient_and_canonical_payload_byte_length,
+                all_family_wrapper_and_catalog_byte_length,
+                all_family_payload_byte_length,
+                vss_proof_shared_source_byte_length,
+                vss_proof_wrapper_and_catalog_byte_length,
+                post_release_payload_byte_length,
+                vss_proof_phase_is_active: false,
+            })
+        }
+        (
+            None,
+            Some((
+                vss_proof_shared_source_byte_length,
+                vss_proof_wrapper_and_catalog_byte_length,
+                post_release_payload_byte_length,
+            )),
+        ) => {
+            Ok(SetupGenerationRetainedMemoryAccounting {
+                all_family_coefficient_and_canonical_payload_byte_length: 0,
+                all_family_wrapper_and_catalog_byte_length: 0,
+                all_family_payload_byte_length: 0,
+                vss_proof_shared_source_byte_length,
+                vss_proof_wrapper_and_catalog_byte_length,
+                post_release_payload_byte_length,
+                vss_proof_phase_is_active: true,
+            })
+        }
+        _ => Err(RefusalReason::ConsumedState),
+    }
 }
 
 pub(crate) fn resolve_setup_generation_key_relation_preparation_source(
@@ -4320,7 +5844,20 @@ where
 pub(crate) fn resolve_setup_generation_vss_preparation_source(
     handle: &SetupGenerationAuthorityHandle,
 ) -> Result<SetupGenerationVssPreparationSource, RefusalReason> {
-    SETUP_GENERATION_AUTHORITY_REGISTRY.with(|registry| {
+    let retained_source = SETUP_GENERATION_AUTHORITY_REGISTRY.with(|registry| {
+        let registry = registry
+            .try_borrow()
+            .map_err(|_| RefusalReason::ConsumedState)?;
+        registry
+            .authorities
+            .get(&handle.0)
+            .map(SetupGenerationAuthority::vss_preparation_source)
+            .transpose()
+    })?;
+    if let Some(source) = retained_source {
+        return Ok(source);
+    }
+    SETUP_GENERATION_VSS_PROOF_AUTHORITY_REGISTRY.with(|registry| {
         registry
             .try_borrow()
             .map_err(|_| RefusalReason::ConsumedState)?
@@ -4328,6 +5865,33 @@ pub(crate) fn resolve_setup_generation_vss_preparation_source(
             .get(&handle.0)
             .ok_or(RefusalReason::ConsumedState)?
             .vss_preparation_source()
+    })
+}
+
+pub(crate) fn resolve_setup_generation_dealer_public_record_source(
+    authority_identifier: u32,
+    action_private_randomness: &ActionPrivateRandomness,
+    roster: &Roster,
+    roster_hash: Hash512,
+    source_roster_position: u16,
+    ordered_recipient_envelope_hashes: &[Hash512],
+    share_linkage_proof: &StreamDescriptor,
+) -> Result<SetupGenerationDealerPublicRecordSource, RefusalReason> {
+    SETUP_GENERATION_VSS_PROOF_AUTHORITY_REGISTRY.with(|registry| {
+        registry
+            .try_borrow_mut()
+            .map_err(|_| RefusalReason::ConsumedState)?
+            .authorities
+            .get_mut(&authority_identifier)
+            .ok_or(RefusalReason::ConsumedState)?
+            .dealer_public_record_source(
+                action_private_randomness,
+                roster,
+                roster_hash,
+                source_roster_position,
+                ordered_recipient_envelope_hashes,
+                share_linkage_proof,
+            )
     })
 }
 
@@ -4359,16 +5923,89 @@ pub(crate) fn resolve_setup_generation_relinearization_round_one_preparation_sou
     })
 }
 
-/// Activates the one suite-fixed round-two generation after the exact ordered
-/// round-one aggregate has been positively verified. The aggregate bytes are
-/// authenticated against that verifier capability before the generated
-/// component or preparation source is retained.
-pub(crate) fn activate_setup_generation_relinearization_round_two(
+pub(crate) fn resolve_setup_generated_relinearization_round_one_source_authority(
+    handle: &SetupGenerationAuthorityHandle,
+) -> Result<SetupGeneratedRelinearizationRoundOneSourceAuthority, RefusalReason> {
+    SETUP_GENERATION_AUTHORITY_REGISTRY.with(|registry| {
+        registry
+            .try_borrow()
+            .map_err(|_| RefusalReason::ConsumedState)?
+            .authorities
+            .get(&handle.0)
+            .ok_or(RefusalReason::ConsumedState)?
+            .generated_relinearization_round_one_source_authority()
+    })
+}
+
+pub(crate) fn resolve_setup_generated_relinearization_round_two_source_authority(
+    handle: &SetupGenerationAuthorityHandle,
+) -> Result<SetupGeneratedRelinearizationRoundTwoSourceAuthority, RefusalReason> {
+    SETUP_GENERATION_AUTHORITY_REGISTRY.with(|registry| {
+        registry
+            .try_borrow()
+            .map_err(|_| RefusalReason::ConsumedState)?
+            .authorities
+            .get(&handle.0)
+            .ok_or(RefusalReason::ConsumedState)?
+            .generated_relinearization_round_two
+            .as_ref()
+            .ok_or(RefusalReason::MissingPrerequisite)?
+            .recreate_source_authority()
+    })
+}
+
+/// Begins the one suite-fixed round-two generation without changing the
+/// retained setup authority. The returned state is installed only after its
+/// two catalog-owned streams have been authenticated completely.
+pub(crate) fn begin_setup_generation_relinearization_round_two_activation(
     handle: &SetupGenerationAuthorityHandle,
     selected_suite: &SelectedSuiteCapability,
-    verified_aggregate: &VerifiedRelinearizationAggregateMaterial,
-    aggregate_round_one_left_bytes: &[u8],
-    aggregate_round_one_right_bytes: &[u8],
+    generated_aggregate: &SetupGeneratedRelinearizationAggregateSourceAuthority,
+    aggregate_proof_stream_descriptor: &StreamDescriptor,
+) -> Result<SetupGenerationRelinearizationRoundTwoActivation, RefusalReason> {
+    SETUP_GENERATION_AUTHORITY_REGISTRY.with(|registry| {
+        let registry = registry
+            .try_borrow()
+            .map_err(|_| RefusalReason::ConsumedState)?;
+        registry
+            .authorities
+            .get(&handle.0)
+            .ok_or(RefusalReason::ConsumedState)?
+            .begin_relinearization_round_two_activation(
+                selected_suite,
+                generated_aggregate,
+                aggregate_proof_stream_descriptor,
+            )
+    })
+}
+
+pub(crate) fn absorb_setup_generation_relinearization_round_two_activation_pair(
+    handle: &SetupGenerationAuthorityHandle,
+    activation: &mut SetupGenerationRelinearizationRoundTwoActivation,
+    aggregate_left_bytes: &[u8],
+    aggregate_right_bytes: &[u8],
+) -> Result<(), RefusalReason> {
+    SETUP_GENERATION_AUTHORITY_REGISTRY.with(|registry| {
+        let registry = registry
+            .try_borrow()
+            .map_err(|_| RefusalReason::ConsumedState)?;
+        registry
+            .authorities
+            .get(&handle.0)
+            .ok_or(RefusalReason::ConsumedState)?
+            .absorb_relinearization_round_two_activation_pair(
+                activation,
+                aggregate_left_bytes,
+                aggregate_right_bytes,
+            )
+    })
+}
+
+pub(crate) fn finish_setup_generation_relinearization_round_two_activation(
+    handle: &SetupGenerationAuthorityHandle,
+    activation: &mut SetupGenerationRelinearizationRoundTwoActivation,
+    generated_aggregate: &SetupGeneratedRelinearizationAggregateSourceAuthority,
+    aggregate_proof_stream_descriptor: &StreamDescriptor,
 ) -> Result<SetupGenerationRelinearizationRoundTwoPreparationSource, RefusalReason> {
     SETUP_GENERATION_AUTHORITY_REGISTRY.with(|registry| {
         let mut registry = registry
@@ -4378,18 +6015,17 @@ pub(crate) fn activate_setup_generation_relinearization_round_two(
             .authorities
             .get_mut(&handle.0)
             .ok_or(RefusalReason::ConsumedState)?
-            .activate_relinearization_round_two(
-                selected_suite,
-                verified_aggregate,
-                aggregate_round_one_left_bytes,
-                aggregate_round_one_right_bytes,
+            .finish_relinearization_round_two_activation(
+                activation,
+                generated_aggregate,
+                aggregate_proof_stream_descriptor,
             )
     })
 }
 
 /// Reopens the public preparation facts after activation without regenerating
 /// the retained round-two component. This is the reset-safe checkpoint-resume
-/// path; the verifier-derived aggregate binding remains inside the authority.
+/// path; the generated aggregate binding remains inside the authority.
 pub(crate) fn resolve_setup_generation_relinearization_round_two_preparation_source(
     handle: &SetupGenerationAuthorityHandle,
 ) -> Result<SetupGenerationRelinearizationRoundTwoPreparationSource, RefusalReason> {
@@ -4434,10 +6070,9 @@ where
 pub(crate) fn with_setup_generation_relinearization_round_two<Value, Error>(
     handle: &SetupGenerationAuthorityHandle,
     application: &SetupGenerationRelinearizationRoundTwoApplication<'_>,
-    verified_aggregate: &VerifiedRelinearizationAggregateMaterial,
-    operation: impl FnOnce(
-        SetupGenerationRelinearizationRoundTwoSource<'_, '_, '_>,
-    ) -> Result<Value, Error>,
+    generated_aggregate: &SetupGeneratedRelinearizationAggregateSourceAuthority,
+    aggregate_proof_stream_descriptor: &StreamDescriptor,
+    operation: impl FnOnce(SetupGenerationRelinearizationRoundTwoSource<'_, '_>) -> Result<Value, Error>,
 ) -> Result<Value, Error>
 where
     Error: From<RefusalReason>,
@@ -4451,7 +6086,10 @@ where
             .get_mut(&handle.0)
             .ok_or_else(|| Error::from(RefusalReason::ConsumedState))?;
         authority
-            .validate_relinearization_round_two_aggregate(verified_aggregate)
+            .validate_relinearization_round_two_aggregate(
+                generated_aggregate,
+                aggregate_proof_stream_descriptor,
+            )
             .map_err(Error::from)?;
         authority
             .pin_relinearization_round_two_application(application)
@@ -4465,7 +6103,42 @@ where
             authority,
             application,
             generated_round_two,
-            verified_aggregate,
+        })
+    })
+}
+
+/// Reenters the retained round-two witness after its aggregate bytes and
+/// generated binding were authenticated during activation. This is the proof
+/// provider's restart path; it accepts no caller-described aggregate roots,
+/// descriptors, topology, or bytes.
+pub(crate) fn with_setup_generation_relinearization_round_two_witness<Value, Error>(
+    handle: &SetupGenerationAuthorityHandle,
+    application: &SetupGenerationRelinearizationRoundTwoApplication<'_>,
+    operation: impl FnOnce(SetupGenerationRelinearizationRoundTwoSource<'_, '_>) -> Result<Value, Error>,
+) -> Result<Value, Error>
+where
+    Error: From<RefusalReason>,
+{
+    SETUP_GENERATION_AUTHORITY_REGISTRY.with(|registry| {
+        let mut registry = registry
+            .try_borrow_mut()
+            .map_err(|_| Error::from(RefusalReason::ConsumedState))?;
+        let authority = registry
+            .authorities
+            .get_mut(&handle.0)
+            .ok_or_else(|| Error::from(RefusalReason::ConsumedState))?;
+        authority
+            .pin_relinearization_round_two_application(application)
+            .map_err(Error::from)?;
+        let generated_round_two = authority
+            .generated_relinearization_round_two
+            .as_ref()
+            .ok_or_else(|| Error::from(RefusalReason::MissingPrerequisite))?;
+        operation(SetupGenerationRelinearizationRoundTwoSource {
+            authority_identifier: handle.0,
+            authority,
+            application,
+            generated_round_two,
         })
     })
 }
@@ -4650,7 +6323,66 @@ pub(crate) fn with_setup_generation_vss_material<Value, Error>(
 where
     Error: From<RefusalReason>,
 {
-    SETUP_GENERATION_AUTHORITY_REGISTRY.with(|registry| {
+    let vss_phase_is_already_active =
+        SETUP_GENERATION_VSS_PROOF_AUTHORITY_REGISTRY.with(|registry| {
+            registry
+                .try_borrow()
+                .map(|registry| registry.authorities.contains_key(&handle.0))
+                .map_err(|_| Error::from(RefusalReason::ConsumedState))
+        })?;
+    if !vss_phase_is_already_active {
+        let public_key_source_is_live =
+            SETUP_GENERATION_PUBLIC_KEY_SHARE_SOURCE_REGISTRY.with(|registry| {
+                registry
+                    .try_borrow()
+                    .map(|registry| registry.contains_source_for_authority(handle.0))
+                    .map_err(|_| Error::from(RefusalReason::ConsumedState))
+            })?;
+        let recipient_source_is_live =
+            SETUP_GENERATION_RECIPIENT_PAYLOAD_SOURCE_REGISTRY.with(|registry| {
+                registry
+                    .try_borrow()
+                    .map(|registry| registry.contains_source_for_authority(handle.0))
+                    .map_err(|_| Error::from(RefusalReason::ConsumedState))
+            })?;
+        if public_key_source_is_live || recipient_source_is_live {
+            return Err(Error::from(RefusalReason::MissingPrerequisite));
+        }
+        SETUP_GENERATION_VSS_PROOF_AUTHORITY_REGISTRY.with(|registry| {
+            let mut registry = registry
+                .try_borrow_mut()
+                .map_err(|_| Error::from(RefusalReason::ConsumedState))?;
+            if registry.authorities.contains_key(&handle.0)
+                || registry.authorities.len() >= MAXIMUM_RETAINED_SETUP_GENERATION_AUTHORITY_COUNT
+            {
+                return Err(Error::from(RefusalReason::ConsumedState));
+            }
+            let vss_proof_authority = SETUP_GENERATION_AUTHORITY_REGISTRY.with(|registry| {
+                let mut registry = registry
+                    .try_borrow_mut()
+                    .map_err(|_| Error::from(RefusalReason::ConsumedState))?;
+                let authority = registry
+                    .authorities
+                    .get_mut(&handle.0)
+                    .ok_or_else(|| Error::from(RefusalReason::ConsumedState))?;
+                authority
+                    .pin_vss_application(application)
+                    .map_err(Error::from)?;
+                authority
+                    .require_vss_proof_phase_release_prerequisites()
+                    .map_err(Error::from)?;
+                registry
+                    .authorities
+                    .remove(&handle.0)
+                    .map(SetupGenerationAuthority::into_vss_proof_authority)
+                    .ok_or_else(|| Error::from(RefusalReason::ConsumedState))
+            })?;
+            let replaced = registry.authorities.insert(handle.0, vss_proof_authority);
+            debug_assert!(replaced.is_none());
+            Ok::<_, Error>(())
+        })?;
+    }
+    SETUP_GENERATION_VSS_PROOF_AUTHORITY_REGISTRY.with(|registry| {
         let mut registry = registry
             .try_borrow_mut()
             .map_err(|_| Error::from(RefusalReason::ConsumedState))?;
@@ -4671,22 +6403,153 @@ where
 pub(crate) fn release_setup_generation_authority(
     handle: SetupGenerationAuthorityHandle,
 ) -> Result<(), RefusalReason> {
-    SETUP_GENERATION_RECIPIENT_PAYLOAD_SOURCE_REGISTRY.with(|source_registry| {
+    SETUP_GENERATION_RECIPIENT_PAYLOAD_SOURCE_REGISTRY.with(|recipient_source_registry| {
+        let mut recipient_source_registry = recipient_source_registry
+            .try_borrow_mut()
+            .map_err(|_| RefusalReason::ConsumedState)?;
+        SETUP_GENERATION_PUBLIC_KEY_SHARE_SOURCE_REGISTRY.with(|public_source_registry| {
+            let mut public_source_registry = public_source_registry
+                .try_borrow_mut()
+                .map_err(|_| RefusalReason::ConsumedState)?;
+            SETUP_GENERATION_VSS_PROOF_AUTHORITY_REGISTRY.with(|vss_authority_registry| {
+                let mut vss_authority_registry = vss_authority_registry
+                    .try_borrow_mut()
+                    .map_err(|_| RefusalReason::ConsumedState)?;
+                SETUP_GENERATION_AUTHORITY_REGISTRY.with(|authority_registry| {
+                    let mut authority_registry = authority_registry
+                        .try_borrow_mut()
+                        .map_err(|_| RefusalReason::ConsumedState)?;
+                    if !authority_registry.authorities.contains_key(&handle.0)
+                        && !vss_authority_registry.authorities.contains_key(&handle.0)
+                    {
+                        return Err(RefusalReason::ConsumedState);
+                    }
+                    recipient_source_registry.release_for_authority(handle.0);
+                    public_source_registry.release_for_authority(handle.0);
+                    authority_registry.authorities.remove(&handle.0);
+                    vss_authority_registry.authorities.remove(&handle.0);
+                    Ok(())
+                })
+            })
+        })
+    })
+}
+
+pub(crate) fn setup_generation_public_key_share_body_byte_length(
+    authority_handle: &SetupGenerationAuthorityHandle,
+) -> Result<u64, RefusalReason> {
+    SETUP_GENERATION_AUTHORITY_REGISTRY.with(|registry| {
+        let registry = registry
+            .try_borrow()
+            .map_err(|_| RefusalReason::ConsumedState)?;
+        let authority = registry
+            .authorities
+            .get(&authority_handle.0)
+            .ok_or(RefusalReason::ConsumedState)?;
+        u64::try_from(authority.public_key_share.selected_body_byte_length()?)
+            .map_err(|_| RefusalReason::OutsideSupportedProfile)
+    })
+}
+
+pub(crate) fn open_setup_generation_public_key_share_body(
+    authority_handle: &SetupGenerationAuthorityHandle,
+) -> Result<SetupGenerationPublicKeyShareSourceHandle, RefusalReason> {
+    SETUP_GENERATION_PUBLIC_KEY_SHARE_SOURCE_REGISTRY.with(|source_registry| {
         let mut source_registry = source_registry
             .try_borrow_mut()
             .map_err(|_| RefusalReason::ConsumedState)?;
+        let source_handle = source_registry.next_available_handle()?;
         SETUP_GENERATION_AUTHORITY_REGISTRY.with(|authority_registry| {
             let mut authority_registry = authority_registry
                 .try_borrow_mut()
                 .map_err(|_| RefusalReason::ConsumedState)?;
-            if !authority_registry.authorities.contains_key(&handle.0) {
+            let authority = authority_registry
+                .authorities
+                .get_mut(&authority_handle.0)
+                .ok_or(RefusalReason::ConsumedState)?;
+            if authority.public_key_share_body_source_opened {
                 return Err(RefusalReason::ConsumedState);
             }
-            source_registry.release_for_authority(handle.0);
-            let removed_authority = authority_registry.authorities.remove(&handle.0);
-            debug_assert!(removed_authority.is_some());
-            Ok(())
+            let body_byte_length = authority.public_key_share.selected_body_byte_length()?;
+            authority.public_key_share_body_source_opened = true;
+            Ok(source_registry.retain_at(
+                source_handle,
+                SetupGenerationPublicKeyShareSource {
+                    owner_authority_identifier: authority_handle.0,
+                    body_byte_length,
+                    next_offset: 0,
+                },
+            ))
         })
+    })
+}
+
+pub(crate) fn setup_generation_public_key_share_source_byte_length(
+    source_handle: &SetupGenerationPublicKeyShareSourceHandle,
+) -> Result<u64, RefusalReason> {
+    SETUP_GENERATION_PUBLIC_KEY_SHARE_SOURCE_REGISTRY.with(|registry| {
+        let registry = registry
+            .try_borrow()
+            .map_err(|_| RefusalReason::ConsumedState)?;
+        let source = registry
+            .sources
+            .get(&source_handle.0)
+            .ok_or(RefusalReason::ConsumedState)?;
+        u64::try_from(source.body_byte_length).map_err(|_| RefusalReason::OutsideSupportedProfile)
+    })
+}
+
+pub(crate) fn read_setup_generation_public_key_share_body(
+    source_handle: &SetupGenerationPublicKeyShareSourceHandle,
+    expected_offset: u64,
+    output: &mut [u8],
+) -> Result<(), RefusalReason> {
+    let expected_offset =
+        usize::try_from(expected_offset).map_err(|_| RefusalReason::OutsideSupportedProfile)?;
+    SETUP_GENERATION_PUBLIC_KEY_SHARE_SOURCE_REGISTRY.with(|source_registry| {
+        let mut source_registry = source_registry
+            .try_borrow_mut()
+            .map_err(|_| RefusalReason::ConsumedState)?;
+        let finished = {
+            let source = source_registry
+                .sources
+                .get_mut(&source_handle.0)
+                .ok_or(RefusalReason::ConsumedState)?;
+            SETUP_GENERATION_AUTHORITY_REGISTRY.with(|authority_registry| {
+                let mut authority_registry = authority_registry
+                    .try_borrow_mut()
+                    .map_err(|_| RefusalReason::ConsumedState)?;
+                let authority = authority_registry
+                    .authorities
+                    .get_mut(&source.owner_authority_identifier)
+                    .ok_or(RefusalReason::ConsumedState)?;
+                let finished =
+                    source.read_into(&authority.public_key_share, expected_offset, output)?;
+                if finished {
+                    authority.public_key_share_body_stream_completed = true;
+                }
+                Ok(finished)
+            })?
+        };
+        if finished {
+            let removed_source = source_registry.sources.remove(&source_handle.0);
+            debug_assert!(removed_source.is_some());
+        }
+        Ok(())
+    })
+}
+
+pub(crate) fn cancel_setup_generation_public_key_share_body(
+    source_handle: SetupGenerationPublicKeyShareSourceHandle,
+) -> Result<(), RefusalReason> {
+    SETUP_GENERATION_PUBLIC_KEY_SHARE_SOURCE_REGISTRY.with(|registry| {
+        registry
+            .try_borrow_mut()
+            .map_err(|_| RefusalReason::ConsumedState)?
+            .sources
+            .remove(&source_handle.0)
+            .map(|_| ())
+            .ok_or(RefusalReason::ConsumedState)
     })
 }
 
@@ -4784,12 +6647,31 @@ pub(crate) fn read_setup_generation_recipient_vss_payload_chunk(
         let mut registry = registry
             .try_borrow_mut()
             .map_err(|_| RefusalReason::ConsumedState)?;
-        let (chunk, finished) = registry
-            .sources
-            .get_mut(&source_handle.0)
-            .ok_or(RefusalReason::ConsumedState)?
-            .read_chunk(expected_offset, requested_byte_length)?;
+        let (chunk, finished, owner_authority_identifier) = {
+            let source = registry
+                .sources
+                .get_mut(&source_handle.0)
+                .ok_or(RefusalReason::ConsumedState)?;
+            let owner_authority_identifier = source.owner_authority_identifier;
+            let (chunk, finished) = source.read_chunk(expected_offset, requested_byte_length)?;
+            (chunk, finished, owner_authority_identifier)
+        };
         if finished {
+            SETUP_GENERATION_AUTHORITY_REGISTRY.with(|authority_registry| {
+                let mut authority_registry = authority_registry
+                    .try_borrow_mut()
+                    .map_err(|_| RefusalReason::ConsumedState)?;
+                let authority = authority_registry
+                    .authorities
+                    .get_mut(&owner_authority_identifier)
+                    .ok_or(RefusalReason::ConsumedState)?;
+                authority.completed_recipient_private_payload_count = authority
+                    .completed_recipient_private_payload_count
+                    .checked_add(1)
+                    .filter(|count| *count <= usize::from(FOUNDATION_PROFILE.participant_count))
+                    .ok_or(RefusalReason::OutsideSupportedProfile)?;
+                Ok(())
+            })?;
             let removed_source = registry.sources.remove(&source_handle.0);
             debug_assert!(removed_source.is_some());
         }
@@ -4815,6 +6697,65 @@ pub(crate) fn cancel_setup_generation_recipient_vss_payload(
 mod tests {
     use super::*;
 
+    fn hash(marker: u8) -> Hash512 {
+        Hash512::from_bytes([marker; Hash512::BYTE_LENGTH])
+    }
+
+    fn stream_descriptor(marker: u8) -> StreamDescriptor {
+        StreamDescriptor::new(1, vec![hash(marker)], hash(marker.wrapping_add(1))).unwrap()
+    }
+
+    #[test]
+    fn vss_public_record_binding_is_reset_safe_and_refuses_forks() {
+        let ordered_recipient_envelope_hashes = (0..FOUNDATION_PROFILE.participant_count)
+            .map(|roster_position| hash(u8::try_from(roster_position).unwrap().wrapping_add(10)))
+            .collect::<Vec<_>>();
+        let share_linkage_proof = stream_descriptor(40);
+        let mut retained_binding = None;
+
+        SetupGenerationVssPublicRecordBinding::pin_exact(
+            &mut retained_binding,
+            &ordered_recipient_envelope_hashes,
+            &share_linkage_proof,
+        )
+        .unwrap();
+        SetupGenerationVssPublicRecordBinding::pin_exact(
+            &mut retained_binding,
+            &ordered_recipient_envelope_hashes,
+            &share_linkage_proof,
+        )
+        .unwrap();
+
+        assert_eq!(
+            SetupGenerationVssPublicRecordBinding::pin_exact(
+                &mut retained_binding,
+                &ordered_recipient_envelope_hashes,
+                &stream_descriptor(50),
+            )
+            .unwrap_err(),
+            RefusalReason::ConsumedState
+        );
+        let mut changed_recipient_envelope_hashes = ordered_recipient_envelope_hashes.clone();
+        changed_recipient_envelope_hashes[3] = hash(90);
+        assert_eq!(
+            SetupGenerationVssPublicRecordBinding::pin_exact(
+                &mut retained_binding,
+                &changed_recipient_envelope_hashes,
+                &share_linkage_proof,
+            )
+            .unwrap_err(),
+            RefusalReason::ConsumedState
+        );
+        assert_eq!(
+            retained_binding.unwrap(),
+            SetupGenerationVssPublicRecordBinding {
+                ordered_recipient_envelope_hashes: ordered_recipient_envelope_hashes
+                    .into_boxed_slice(),
+                share_linkage_proof,
+            }
+        );
+    }
+
     fn recipient_payload_source(
         owner_authority_identifier: u32,
         recipient_roster_position: u16,
@@ -4826,6 +6767,184 @@ mod tests {
             canonical_bytes: Zeroizing::new(canonical_bytes.to_vec()),
             next_offset: 0,
         }
+    }
+
+    fn public_key_share_for_source_test(
+        ordered_limb_coefficients: &[&[u64]],
+    ) -> SetupGeneratedPublicKeyShare {
+        SetupGeneratedPublicKeyShare {
+            public_polynomial_context_hash: [1_u8; Hash512::BYTE_LENGTH],
+            root: [2_u8; Hash512::BYTE_LENGTH],
+            ordered_data_modulus_indices: (0..ordered_limb_coefficients.len())
+                .map(|data_modulus_index| u16::try_from(data_modulus_index).unwrap())
+                .collect::<Vec<_>>()
+                .into_boxed_slice(),
+            ordered_limb_coefficients: ordered_limb_coefficients
+                .iter()
+                .map(|coefficients| Zeroizing::new(coefficients.to_vec()))
+                .collect::<Vec<_>>()
+                .into_boxed_slice(),
+            centered_error_coefficients: Zeroizing::new(vec![
+                0;
+                ordered_limb_coefficients[0].len()
+            ]),
+        }
+    }
+
+    fn public_key_share_source(
+        owner_authority_identifier: u32,
+        body_byte_length: usize,
+    ) -> SetupGenerationPublicKeyShareSource {
+        SetupGenerationPublicKeyShareSource {
+            owner_authority_identifier,
+            body_byte_length,
+            next_offset: 0,
+        }
+    }
+
+    #[test]
+    fn selected_public_key_share_body_has_the_exact_full_q_length() {
+        assert_eq!(DATA_PRIMES.len(), 26);
+        assert_eq!(POLYNOMIAL_DEGREE, 65_536);
+        assert_eq!(
+            SELECTED_SETUP_GENERATION_PUBLIC_KEY_SHARE_BODY_BYTE_LENGTH,
+            13_631_488
+        );
+    }
+
+    #[test]
+    fn public_key_share_body_ranges_follow_limb_coefficient_little_endian_order() {
+        let first_limb = [0x0807_0605_0403_0201_u64, 0x1817_1615_1413_1211_u64];
+        let second_limb = [0x2827_2625_2423_2221_u64, 0x3837_3635_3433_3231_u64];
+        let public_key_share = public_key_share_for_source_test(&[&first_limb, &second_limb]);
+        let expected_body = first_limb
+            .into_iter()
+            .chain(second_limb)
+            .flat_map(u64::to_le_bytes)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            public_key_share.body_byte_length().unwrap(),
+            expected_body.len()
+        );
+
+        let mut unaligned_range = [0_u8; 19];
+        assert!(
+            !public_key_share
+                .write_body_range(5, &mut unaligned_range)
+                .unwrap()
+        );
+        assert_eq!(unaligned_range.as_slice(), &expected_body[5..24]);
+
+        let mut final_range = [0_u8; 8];
+        assert!(
+            public_key_share
+                .write_body_range(expected_body.len() - final_range.len(), &mut final_range)
+                .unwrap()
+        );
+        assert_eq!(
+            final_range.as_slice(),
+            &expected_body[expected_body.len() - final_range.len()..]
+        );
+        assert_eq!(
+            public_key_share
+                .write_body_range(expected_body.len(), &mut [0_u8; 1])
+                .unwrap_err(),
+            RefusalReason::WrongTypeOrLength
+        );
+    }
+
+    #[test]
+    fn public_key_share_source_requires_monotonic_nonempty_ranges() {
+        let limb = [0x0807_0605_0403_0201_u64, 0x1817_1615_1413_1211_u64];
+        let public_key_share = public_key_share_for_source_test(&[&limb]);
+        let mut source = public_key_share_source(17, 16);
+
+        assert_eq!(
+            source
+                .read_into(&public_key_share, 1, &mut [0_u8; 4])
+                .unwrap_err(),
+            RefusalReason::WrongContext
+        );
+        assert_eq!(
+            source.read_into(&public_key_share, 0, &mut []).unwrap_err(),
+            RefusalReason::WrongTypeOrLength
+        );
+        assert_eq!(source.next_offset, 0);
+
+        let mut first_range = [0_u8; 7];
+        assert!(
+            !source
+                .read_into(&public_key_share, 0, &mut first_range)
+                .unwrap()
+        );
+        assert_eq!(first_range, [1, 2, 3, 4, 5, 6, 7]);
+        assert_eq!(source.next_offset, 7);
+        assert_eq!(
+            source
+                .read_into(&public_key_share, 0, &mut [0_u8; 1])
+                .unwrap_err(),
+            RefusalReason::WrongContext
+        );
+
+        let mut final_range = [0_u8; 9];
+        assert!(
+            source
+                .read_into(&public_key_share, 7, &mut final_range)
+                .unwrap()
+        );
+        assert_eq!(final_range, [8, 17, 18, 19, 20, 21, 22, 23, 24]);
+        assert_eq!(source.next_offset, 16);
+    }
+
+    #[test]
+    fn public_key_share_source_registry_uses_monotonic_handles_and_release_invalidates() {
+        let mut registry = SetupGenerationPublicKeyShareSourceRegistry::default();
+        let first_handle = {
+            let reserved_handle = registry.next_available_handle().unwrap();
+            assert_eq!(reserved_handle.identifier(), 1);
+            registry.retain_at(reserved_handle, public_key_share_source(7, 16))
+        };
+        let second_handle = {
+            let reserved_handle = registry.next_available_handle().unwrap();
+            assert_eq!(reserved_handle.identifier(), 2);
+            registry.retain_at(reserved_handle, public_key_share_source(8, 24))
+        };
+
+        registry.release_for_authority(7);
+
+        assert!(!registry.sources.contains_key(&first_handle.identifier()));
+        assert!(registry.sources.contains_key(&second_handle.identifier()));
+        assert_eq!(
+            registry
+                .sources
+                .get(&second_handle.identifier())
+                .unwrap()
+                .body_byte_length,
+            24
+        );
+    }
+
+    #[test]
+    fn cancelling_public_key_share_source_invalidates_the_handle() {
+        let source_handle = SETUP_GENERATION_PUBLIC_KEY_SHARE_SOURCE_REGISTRY.with(|registry| {
+            let mut registry = registry.borrow_mut();
+            let handle = registry.next_available_handle().unwrap();
+            registry.retain_at(handle, public_key_share_source(23, 32))
+        });
+
+        assert_eq!(
+            setup_generation_public_key_share_source_byte_length(&source_handle).unwrap(),
+            32
+        );
+        let source_identifier = source_handle.identifier();
+        cancel_setup_generation_public_key_share_body(source_handle).unwrap();
+        assert_eq!(
+            setup_generation_public_key_share_source_byte_length(
+                &SetupGenerationPublicKeyShareSourceHandle::from_identifier(source_identifier)
+            )
+            .unwrap_err(),
+            RefusalReason::ConsumedState
+        );
     }
 
     #[test]

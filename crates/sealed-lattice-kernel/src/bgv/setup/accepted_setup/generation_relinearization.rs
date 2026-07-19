@@ -1,3 +1,5 @@
+use core::mem::size_of;
+
 use zeroize::Zeroizing;
 
 use crate::{
@@ -7,13 +9,11 @@ use crate::{
         modular_arithmetic::{add_mod_fast, mul_mod_fast, sub_mod_fast},
         parameters::PLAINTEXT_MODULUS,
         proof_suite::{
-            ComponentMaterialOwnershipBinding, ComponentPublicPolynomialRuntimeError,
-            KeySwitchComponentMaterialTopology, KeySwitchComponentPublicPolynomialStream,
+            ComponentMaterialOwnershipBinding, KeySwitchComponentMaterialTopology,
             SelectedEvaluatorEntryKind, SelectedEvaluatorEntryPosition,
-            SetupPublicPolynomialContext, SetupPublicPolynomialRootRole, SetupPublicPolynomialTree,
-            SetupPublicPolynomialTreeInput, VerifiedKeySwitchComponentMaterial,
-            VerifiedRelinearizationAggregateMaterial,
-            VerifiedRelinearizationRoundOneSourceMaterial,
+            SetupPublicPolynomialContext, SetupPublicPolynomialRootBuilder,
+            SetupPublicPolynomialRootRole, VerifiedKeySwitchComponentMaterial,
+            VerifiedKeySwitchComponentMaterialStream,
             canonical_selected_relinearization_round_one_aggregate_statement,
             canonical_selected_relinearization_round_one_statement,
             canonical_selected_relinearization_round_two_statement,
@@ -29,7 +29,7 @@ use crate::{
         CanonicalStreamReadbackVerifier, CanonicalStreamVerifier, CanonicalTuple,
         FOUNDATION_PROFILE, Hash512, PrivateRandomnessAttemptIdentifier, PrivateRandomnessDomain,
         ProofApplicationSlotCeilings, RefusalReason, SelectedSuiteCapability, StreamDescriptor,
-        hash_foundation_tuple_512,
+        derive_canonical_stream_descriptor, hash_foundation_tuple_512,
     },
 };
 
@@ -59,6 +59,10 @@ pub(crate) struct SetupGeneratedRelinearizationComponentSource {
 }
 
 impl SetupGeneratedRelinearizationComponentSource {
+    pub(crate) const fn material(&self) -> &VerifiedKeySwitchComponentMaterial {
+        &self.material
+    }
+
     pub(crate) const fn topology(&self) -> &KeySwitchComponentMaterialTopology {
         self.material.topology()
     }
@@ -286,6 +290,7 @@ pub(crate) struct SetupGeneratedRelinearizationAggregateSourceAuthority {
     roster_hash: [u8; Hash512::BYTE_LENGTH],
     setup_proof_context_hash: [u8; Hash512::BYTE_LENGTH],
     schedule_position: u32,
+    evaluator_position: SelectedEvaluatorEntryPosition,
     ordered_participant_identities: Box<[[u8; Hash512::BYTE_LENGTH]]>,
     ordered_anchor_commitment_roots: Box<[[[u8; Hash512::BYTE_LENGTH]; 3]]>,
     ordered_round_one_proof_stream_descriptors: Box<[StreamDescriptor]>,
@@ -321,6 +326,10 @@ impl SetupGeneratedRelinearizationAggregateSourceAuthority {
 
     pub(crate) const fn schedule_position(&self) -> u32 {
         self.schedule_position
+    }
+
+    pub(crate) const fn evaluator_position(&self) -> SelectedEvaluatorEntryPosition {
+        self.evaluator_position
     }
 
     pub(crate) fn ordered_participant_identities(&self) -> &[[u8; Hash512::BYTE_LENGTH]] {
@@ -384,6 +393,7 @@ impl SetupGeneratedRelinearizationAggregateGeneration {
 pub(crate) struct SetupGeneratedRelinearizationRoundTwoGeneration {
     component: SetupGeneratedKeySwitchComponent,
     source_authority: SetupGeneratedRelinearizationRoundTwoSourceAuthority,
+    evaluation_domain_size: usize,
 }
 
 impl SetupGeneratedRelinearizationRoundTwoGeneration {
@@ -397,6 +407,64 @@ impl SetupGeneratedRelinearizationRoundTwoGeneration {
         &self.source_authority
     }
 
+    pub(crate) fn recreate_source_authority(
+        &self,
+    ) -> Result<SetupGeneratedRelinearizationRoundTwoSourceAuthority, RefusalReason> {
+        let retained = &self.source_authority;
+        let context = participant_component_context(
+            retained.setup_proof_context_hash,
+            SetupPublicPolynomialRootRole::RelinearizationRoundTwo,
+            retained.participant_identity,
+            retained.roster_position,
+            retained.schedule_position,
+        )?;
+        let public_polynomial_root = recompute_setup_generated_component_public_polynomial_root(
+            &self.component,
+            &context,
+            self.evaluation_domain_size,
+        )?;
+        if public_polynomial_root.public_polynomial_context_hash()
+            != retained.component.public_polynomial_context_hash()
+            || public_polynomial_root.root() != retained.component.contribution_root()
+        {
+            return Err(RefusalReason::WrongHashOrRoot);
+        }
+        let application_statement_hash = verified_application_statement_hash(
+            retained.protocol_version,
+            retained.suite_identifier,
+            ProofApplicationSlotCeilings::RELINEARIZATION_ROUND_TWO_STATEMENT_SCHEMA_IDENTIFIER,
+            &retained.canonical_application_statement_bytes,
+        );
+        let material_ownership = ComponentMaterialOwnershipBinding::from_generated_application(
+            retained.suite_identifier,
+            retained.action_context_hash,
+            application_statement_hash,
+        );
+        let component = generated_component_source(
+            &self.component,
+            material_ownership,
+            public_polynomial_root,
+        )?;
+        Ok(SetupGeneratedRelinearizationRoundTwoSourceAuthority {
+            protocol_version: retained.protocol_version,
+            suite_identifier: retained.suite_identifier,
+            ceremony_context_hash: retained.ceremony_context_hash,
+            action_context_hash: retained.action_context_hash,
+            roster_hash: retained.roster_hash,
+            setup_proof_context_hash: retained.setup_proof_context_hash,
+            participant_identity: retained.participant_identity,
+            roster_position: retained.roster_position,
+            schedule_position: retained.schedule_position,
+            anchor_commitment_roots: retained.anchor_commitment_roots,
+            round_one_root_pair: retained.round_one_root_pair,
+            aggregate_round_one_root_pair: retained.aggregate_round_one_root_pair,
+            canonical_application_statement_bytes: retained
+                .canonical_application_statement_bytes
+                .clone(),
+            component,
+        })
+    }
+
     pub(crate) fn into_parts(
         self,
     ) -> (
@@ -404,6 +472,11 @@ impl SetupGeneratedRelinearizationRoundTwoGeneration {
         SetupGeneratedRelinearizationRoundTwoSourceAuthority,
     ) {
         (self.component, self.source_authority)
+    }
+
+    pub(super) fn retained_coefficient_payload_byte_length(&self) -> Result<u64, RefusalReason> {
+        u64::try_from(self.component.canonical_bytes().len())
+            .map_err(|_| RefusalReason::OutsideSupportedProfile)
     }
 }
 
@@ -465,6 +538,359 @@ impl SetupGeneratedRelinearizationRoundTwoSourceAuthority {
     }
 }
 
+struct SetupRelinearizationRoundTwoGenerationContext {
+    protocol_version: u16,
+    suite_identifier: [u8; Hash512::BYTE_LENGTH],
+    ceremony_context_hash: [u8; Hash512::BYTE_LENGTH],
+    action_context_hash: [u8; Hash512::BYTE_LENGTH],
+    roster_hash: [u8; Hash512::BYTE_LENGTH],
+    setup_proof_context_hash: [u8; Hash512::BYTE_LENGTH],
+    participant_identity: [u8; Hash512::BYTE_LENGTH],
+    roster_position: u16,
+    schedule_position: u32,
+    anchor_commitment_roots: [[u8; Hash512::BYTE_LENGTH]; 3],
+    round_one_root_pair: [[u8; Hash512::BYTE_LENGTH]; 2],
+    aggregate_round_one_root_pair: [[u8; Hash512::BYTE_LENGTH]; 2],
+}
+
+/// Bounded, key-resident construction state for the streamed RKG round-two
+/// activation. Only one paired residue row and the generated component are
+/// retained; neither aggregate input component enters this authority.
+pub(crate) struct SetupRelinearizationRoundTwoConstruction {
+    evaluator_position: SelectedEvaluatorEntryPosition,
+    topology: KeySwitchComponentMaterialTopology,
+    evaluation_domain_size: usize,
+    generation_context: SetupRelinearizationRoundTwoGenerationContext,
+    canonical_bytes: Zeroizing<Vec<u8>>,
+    aggregate_left_row: Zeroizing<Vec<u64>>,
+    aggregate_right_row: Zeroizing<Vec<u64>>,
+    partial_left_residue: Zeroizing<[u8; 8]>,
+    partial_right_residue: Zeroizing<[u8; 8]>,
+    partial_residue_byte_length: usize,
+    decomposition_block_index: usize,
+    extended_limb_ordinal: usize,
+    absorbed_byte_length: u64,
+}
+
+impl SetupRelinearizationRoundTwoConstruction {
+    fn new(
+        evaluator_position: SelectedEvaluatorEntryPosition,
+        topology: KeySwitchComponentMaterialTopology,
+        evaluation_domain_size: usize,
+        generation_context: SetupRelinearizationRoundTwoGenerationContext,
+    ) -> Result<Self, RefusalReason> {
+        let expected_byte_length = usize::try_from(topology.expected_byte_length())
+            .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
+        let ring_degree = topology.polynomial_degree();
+        if evaluation_domain_size == 0 || ring_degree == 0 || expected_byte_length == 0 {
+            return Err(RefusalReason::WrongTypeOrLength);
+        }
+        Ok(Self {
+            evaluator_position,
+            topology,
+            evaluation_domain_size,
+            generation_context,
+            canonical_bytes: Zeroizing::new(Vec::with_capacity(expected_byte_length)),
+            aggregate_left_row: Zeroizing::new(Vec::with_capacity(ring_degree)),
+            aggregate_right_row: Zeroizing::new(Vec::with_capacity(ring_degree)),
+            partial_left_residue: Zeroizing::new([0_u8; 8]),
+            partial_right_residue: Zeroizing::new([0_u8; 8]),
+            partial_residue_byte_length: 0,
+            decomposition_block_index: 0,
+            extended_limb_ordinal: 0,
+            absorbed_byte_length: 0,
+        })
+    }
+
+    pub(crate) const fn topology(&self) -> &KeySwitchComponentMaterialTopology {
+        &self.topology
+    }
+
+    pub(crate) const fn evaluation_domain_size(&self) -> usize {
+        self.evaluation_domain_size
+    }
+
+    pub(crate) fn pre_root_retained_payload_byte_length(&self) -> Result<u64, RefusalReason> {
+        let canonical_component_byte_length = self.canonical_bytes.capacity();
+        let aggregate_source_row_byte_length = self
+            .aggregate_left_row
+            .capacity()
+            .checked_add(self.aggregate_right_row.capacity())
+            .and_then(|coefficient_count| coefficient_count.checked_mul(size_of::<u64>()))
+            .ok_or(RefusalReason::OutsideSupportedProfile)?;
+        u64::try_from(
+            canonical_component_byte_length
+                .checked_add(aggregate_source_row_byte_length)
+                .ok_or(RefusalReason::OutsideSupportedProfile)?,
+        )
+        .map_err(|_| RefusalReason::OutsideSupportedProfile)
+    }
+
+    pub(crate) fn root_overlap_retained_payload_byte_length(&self) -> Result<u64, RefusalReason> {
+        u64::try_from(self.canonical_bytes.capacity())
+            .map_err(|_| RefusalReason::OutsideSupportedProfile)
+    }
+
+    fn release_aggregate_source_row_allocations(&mut self) {
+        self.aggregate_left_row = Zeroizing::new(Vec::new());
+        self.aggregate_right_row = Zeroizing::new(Vec::new());
+    }
+
+    pub(crate) fn absorb_authenticated_source_pair(
+        &mut self,
+        common_secret_coefficients: &[i8],
+        ephemeral_secret_coefficients: &[i8],
+        round_two_errors_by_block: &[Zeroizing<Vec<i8>>],
+        aggregate_left_bytes: &[u8],
+        aggregate_right_bytes: &[u8],
+    ) -> Result<(), RefusalReason> {
+        if aggregate_left_bytes.is_empty()
+            || aggregate_left_bytes.len() != aggregate_right_bytes.len()
+            || self.decomposition_block_index >= self.topology.data_block_count()
+            || self
+                .absorbed_byte_length
+                .checked_add(
+                    u64::try_from(aggregate_left_bytes.len())
+                        .map_err(|_| RefusalReason::OutsideSupportedProfile)?,
+                )
+                .is_none_or(|length| length > self.topology.expected_byte_length())
+        {
+            return Err(RefusalReason::WrongTypeOrLength);
+        }
+        let mut source_byte_offset = 0_usize;
+        while source_byte_offset < aggregate_left_bytes.len() {
+            let modulus = self
+                .topology
+                .ordered_moduli()
+                .get(self.extended_limb_ordinal)
+                .copied()
+                .ok_or(RefusalReason::WrongTypeOrLength)?;
+            let residue_byte_length = canonical_residue_byte_length(modulus)
+                .map_err(|_| RefusalReason::UnsupportedVersionOrSuite)?;
+            let remaining_residue_byte_length = residue_byte_length
+                .checked_sub(self.partial_residue_byte_length)
+                .ok_or(RefusalReason::WrongTypeOrLength)?;
+            let copied_byte_length =
+                remaining_residue_byte_length.min(aggregate_left_bytes.len() - source_byte_offset);
+            let partial_end = self
+                .partial_residue_byte_length
+                .checked_add(copied_byte_length)
+                .ok_or(RefusalReason::OutsideSupportedProfile)?;
+            let source_end = source_byte_offset
+                .checked_add(copied_byte_length)
+                .ok_or(RefusalReason::OutsideSupportedProfile)?;
+            self.partial_left_residue[self.partial_residue_byte_length..partial_end]
+                .copy_from_slice(&aggregate_left_bytes[source_byte_offset..source_end]);
+            self.partial_right_residue[self.partial_residue_byte_length..partial_end]
+                .copy_from_slice(&aggregate_right_bytes[source_byte_offset..source_end]);
+            self.partial_residue_byte_length = partial_end;
+            source_byte_offset = source_end;
+            if self.partial_residue_byte_length != residue_byte_length {
+                continue;
+            }
+            let aggregate_left_residue = u64::from_le_bytes(*self.partial_left_residue);
+            let aggregate_right_residue = u64::from_le_bytes(*self.partial_right_residue);
+            self.partial_left_residue.fill(0);
+            self.partial_right_residue.fill(0);
+            self.partial_residue_byte_length = 0;
+            if aggregate_left_residue >= modulus || aggregate_right_residue >= modulus {
+                return Err(RefusalReason::MalformedEncoding);
+            }
+            self.aggregate_left_row.push(aggregate_left_residue);
+            self.aggregate_right_row.push(aggregate_right_residue);
+            if self.aggregate_left_row.len() == self.topology.polynomial_degree() {
+                self.finish_current_residue_row(
+                    common_secret_coefficients,
+                    ephemeral_secret_coefficients,
+                    round_two_errors_by_block,
+                    modulus,
+                    residue_byte_length,
+                )?;
+            }
+        }
+        self.absorbed_byte_length = self
+            .absorbed_byte_length
+            .checked_add(
+                u64::try_from(aggregate_left_bytes.len())
+                    .map_err(|_| RefusalReason::OutsideSupportedProfile)?,
+            )
+            .ok_or(RefusalReason::OutsideSupportedProfile)?;
+        Ok(())
+    }
+
+    fn finish_current_residue_row(
+        &mut self,
+        common_secret_coefficients: &[i8],
+        ephemeral_secret_coefficients: &[i8],
+        round_two_errors_by_block: &[Zeroizing<Vec<i8>>],
+        modulus: u64,
+        residue_byte_length: usize,
+    ) -> Result<(), RefusalReason> {
+        let ring_degree = self.topology.polynomial_degree();
+        let round_two_errors = round_two_errors_by_block
+            .get(self.decomposition_block_index)
+            .filter(|errors| errors.len() == ring_degree)
+            .ok_or(RefusalReason::WrongTypeOrLength)?;
+        if common_secret_coefficients.len() != ring_degree
+            || ephemeral_secret_coefficients.len() != ring_degree
+            || self.aggregate_left_row.len() != ring_degree
+            || self.aggregate_right_row.len() != ring_degree
+        {
+            return Err(RefusalReason::WrongTypeOrLength);
+        }
+        let secret_residues = common_secret_coefficients
+            .iter()
+            .copied()
+            .map(|coefficient| centered_i8_residue(coefficient, modulus))
+            .collect::<Vec<_>>();
+        let ephemeral_residues = ephemeral_secret_coefficients
+            .iter()
+            .copied()
+            .map(|coefficient| centered_i8_residue(coefficient, modulus))
+            .collect::<Vec<_>>();
+        let secret_times_left =
+            negacyclic_product_mod(&secret_residues, &self.aggregate_left_row, modulus)
+                .map_err(|_| RefusalReason::InvalidArithmeticRelation)?;
+        let ephemeral_times_right =
+            negacyclic_product_mod(&ephemeral_residues, &self.aggregate_right_row, modulus)
+                .map_err(|_| RefusalReason::InvalidArithmeticRelation)?;
+        let secret_times_right =
+            negacyclic_product_mod(&secret_residues, &self.aggregate_right_row, modulus)
+                .map_err(|_| RefusalReason::InvalidArithmeticRelation)?;
+        for coefficient_ordinal in 0..ring_degree {
+            let round_two = add_mod_fast(
+                sub_mod_fast(
+                    add_mod_fast(
+                        secret_times_left[coefficient_ordinal],
+                        ephemeral_times_right[coefficient_ordinal],
+                        modulus,
+                    ),
+                    secret_times_right[coefficient_ordinal],
+                    modulus,
+                ),
+                mul_mod_fast(
+                    PLAINTEXT_MODULUS % modulus,
+                    centered_i8_residue(round_two_errors[coefficient_ordinal], modulus),
+                    modulus,
+                ),
+                modulus,
+            );
+            self.canonical_bytes
+                .extend_from_slice(&round_two.to_le_bytes()[..residue_byte_length]);
+        }
+        self.aggregate_left_row.clear();
+        self.aggregate_right_row.clear();
+        self.extended_limb_ordinal = self
+            .extended_limb_ordinal
+            .checked_add(1)
+            .ok_or(RefusalReason::OutsideSupportedProfile)?;
+        if self.extended_limb_ordinal == self.topology.extended_limb_count() {
+            self.extended_limb_ordinal = 0;
+            self.decomposition_block_index = self
+                .decomposition_block_index
+                .checked_add(1)
+                .ok_or(RefusalReason::OutsideSupportedProfile)?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn finish(
+        &mut self,
+    ) -> Result<SetupGeneratedRelinearizationRoundTwoGeneration, RefusalReason> {
+        if self.absorbed_byte_length != self.topology.expected_byte_length()
+            || self.decomposition_block_index != self.topology.data_block_count()
+            || self.extended_limb_ordinal != 0
+            || self.partial_residue_byte_length != 0
+            || !self.aggregate_left_row.is_empty()
+            || !self.aggregate_right_row.is_empty()
+            || u64::try_from(self.canonical_bytes.len()).ok()
+                != Some(self.topology.expected_byte_length())
+        {
+            return Err(RefusalReason::MissingPrerequisite);
+        }
+        self.release_aggregate_source_row_allocations();
+        let generation_context = &self.generation_context;
+        let component_context = participant_component_context(
+            generation_context.setup_proof_context_hash,
+            SetupPublicPolynomialRootRole::RelinearizationRoundTwo,
+            generation_context.participant_identity,
+            generation_context.roster_position,
+            generation_context.schedule_position,
+        )?;
+        let public_polynomial_root =
+            recompute_setup_generated_component_public_polynomial_root_from_bytes(
+                &self.topology,
+                &self.canonical_bytes,
+                &component_context,
+                self.evaluation_domain_size,
+            )?;
+        let canonical_application_statement_bytes =
+            canonical_selected_relinearization_round_two_statement(
+                generation_context.setup_proof_context_hash,
+                generation_context.participant_identity,
+                generation_context.roster_position,
+                generation_context.schedule_position,
+                &generation_context.anchor_commitment_roots,
+                generation_context.round_one_root_pair[0],
+                generation_context.round_one_root_pair[1],
+                generation_context.aggregate_round_one_root_pair[0],
+                generation_context.aggregate_round_one_root_pair[1],
+                public_polynomial_root.root(),
+            )
+            .map_err(|_| RefusalReason::WrongContext)?;
+        let application_statement_hash = verified_application_statement_hash(
+            generation_context.protocol_version,
+            generation_context.suite_identifier,
+            ProofApplicationSlotCeilings::RELINEARIZATION_ROUND_TWO_STATEMENT_SCHEMA_IDENTIFIER,
+            &canonical_application_statement_bytes,
+        );
+        let material_ownership = ComponentMaterialOwnershipBinding::from_generated_application(
+            generation_context.suite_identifier,
+            generation_context.action_context_hash,
+            application_statement_hash,
+        );
+        let stream_descriptor = derive_canonical_stream_descriptor(
+            CanonicalStreamDomain::EvaluatorKeyStore,
+            &self.canonical_bytes,
+        )?;
+        let component_source = generated_component_source_from_canonical_bytes(
+            &self.topology,
+            &self.canonical_bytes,
+            &stream_descriptor,
+            material_ownership,
+            public_polynomial_root,
+        )?;
+        let canonical_bytes = core::mem::take(&mut *self.canonical_bytes);
+        let component = SetupGeneratedKeySwitchComponent::from_authenticated_canonical_bytes(
+            self.evaluator_position,
+            self.topology.clone(),
+            stream_descriptor,
+            canonical_bytes,
+        );
+        Ok(SetupGeneratedRelinearizationRoundTwoGeneration {
+            component,
+            evaluation_domain_size: self.evaluation_domain_size,
+            source_authority: SetupGeneratedRelinearizationRoundTwoSourceAuthority {
+                protocol_version: generation_context.protocol_version,
+                suite_identifier: generation_context.suite_identifier,
+                ceremony_context_hash: generation_context.ceremony_context_hash,
+                action_context_hash: generation_context.action_context_hash,
+                roster_hash: generation_context.roster_hash,
+                setup_proof_context_hash: generation_context.setup_proof_context_hash,
+                participant_identity: generation_context.participant_identity,
+                roster_position: generation_context.roster_position,
+                schedule_position: generation_context.schedule_position,
+                anchor_commitment_roots: generation_context.anchor_commitment_roots,
+                round_one_root_pair: generation_context.round_one_root_pair,
+                aggregate_round_one_root_pair: generation_context.aggregate_round_one_root_pair,
+                canonical_application_statement_bytes: canonical_application_statement_bytes
+                    .into_boxed_slice(),
+                component: component_source,
+            },
+        })
+    }
+}
+
 /// Exact generation-only witness and public component material for one
 /// participant's suite-fixed relinearization schedule entry. The ephemeral
 /// secret and all three error families remain process-local and are reused by
@@ -513,36 +939,29 @@ impl SetupGeneratedRelinearizationMaterial {
         &self.round_two_errors_by_block
     }
 
-    pub(crate) fn construct_round_two_component(
-        &self,
-        selected_suite: &SelectedSuiteCapability,
-        common_secret_coefficients: &[i8],
-        aggregate_round_one_left_bytes: &[u8],
-        aggregate_round_one_right_bytes: &[u8],
-    ) -> Result<SetupGeneratedKeySwitchComponent, RefusalReason> {
-        let topology = self.round_one_left_component.topology().clone();
-        if self.round_one_right_component.topology() != &topology
-            || u64::try_from(aggregate_round_one_left_bytes.len()).ok()
-                != Some(topology.expected_byte_length())
-            || u64::try_from(aggregate_round_one_right_bytes.len()).ok()
-                != Some(topology.expected_byte_length())
-        {
-            return Err(RefusalReason::WrongTypeOrLength);
-        }
-        let canonical_bytes = construct_round_two_component_bytes(
-            selected_suite,
-            &topology,
-            common_secret_coefficients,
-            self.ephemeral_secret_coefficients(),
-            self.round_two_errors_by_block(),
-            aggregate_round_one_left_bytes,
-            aggregate_round_one_right_bytes,
-        )?;
-        SetupGeneratedKeySwitchComponent::from_canonical_bytes(
-            self.evaluator_position,
-            topology,
-            canonical_bytes,
+    pub(super) fn retained_coefficient_payload_byte_length(&self) -> Result<u64, RefusalReason> {
+        let component_byte_length = self
+            .round_one_left_component
+            .canonical_bytes()
+            .len()
+            .checked_add(self.round_one_right_component.canonical_bytes().len())
+            .ok_or(RefusalReason::OutsideSupportedProfile)?;
+        let private_coefficient_byte_length = self
+            .round_one_left_errors_by_block
+            .iter()
+            .chain(self.round_one_right_errors_by_block.iter())
+            .chain(self.round_two_errors_by_block.iter())
+            .try_fold(self.ephemeral_secret_coefficients.capacity(), |total, polynomial| {
+                total
+                    .checked_add(polynomial.capacity())
+                    .ok_or(RefusalReason::OutsideSupportedProfile)
+            })?;
+        u64::try_from(
+            component_byte_length
+                .checked_add(private_coefficient_byte_length)
+                .ok_or(RefusalReason::OutsideSupportedProfile)?,
         )
+        .map_err(|_| RefusalReason::OutsideSupportedProfile)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -572,12 +991,12 @@ impl SetupGeneratedRelinearizationMaterial {
             roster_position,
             self.schedule_position,
         )?;
-        let left_tree = recompute_component_tree(
+        let left_root = recompute_setup_generated_component_public_polynomial_root(
             &self.round_one_left_component,
             &left_context,
             evaluation_domain_size,
         )?;
-        let right_tree = recompute_component_tree(
+        let right_root = recompute_setup_generated_component_public_polynomial_root(
             &self.round_one_right_component,
             &right_context,
             evaluation_domain_size,
@@ -589,8 +1008,8 @@ impl SetupGeneratedRelinearizationMaterial {
                 roster_position,
                 self.schedule_position,
                 &anchor_commitment_roots,
-                left_tree.root(),
-                right_tree.root(),
+                left_root.root(),
+                right_root.root(),
             )
             .map_err(|_| RefusalReason::WrongContext)?;
         let application_statement_hash = verified_application_statement_hash(
@@ -608,14 +1027,12 @@ impl SetupGeneratedRelinearizationMaterial {
             generated_component_source(
                 &self.round_one_left_component,
                 material_ownership,
-                &left_context,
-                left_tree.root(),
+                left_root,
             )?,
             generated_component_source(
                 &self.round_one_right_component,
                 material_ownership,
-                &right_context,
-                right_tree.root(),
+                right_root,
             )?,
         ];
         Ok(SetupGeneratedRelinearizationRoundOneSourceAuthority {
@@ -635,92 +1052,45 @@ impl SetupGeneratedRelinearizationMaterial {
         })
     }
 
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn generated_round_two(
+    pub(crate) fn begin_round_two_construction(
         &self,
         selected_suite: &SelectedSuiteCapability,
-        common_secret_coefficients: &[i8],
         round_one_source: &SetupGeneratedRelinearizationRoundOneSourceAuthority,
-        verified_aggregate: &VerifiedRelinearizationAggregateMaterial,
-        aggregate_round_one_left_bytes: &[u8],
-        aggregate_round_one_right_bytes: &[u8],
+        generated_aggregate: &SetupGeneratedRelinearizationAggregateSourceAuthority,
         evaluation_domain_size: usize,
-    ) -> Result<SetupGeneratedRelinearizationRoundTwoGeneration, RefusalReason> {
-        let aggregate_root_pair = [
-            verified_aggregate.aggregate_left_root(),
-            verified_aggregate.aggregate_right_root(),
-        ];
-        if verified_aggregate.protocol_version() != round_one_source.protocol_version
-            || verified_aggregate.suite_identifier() != round_one_source.suite_identifier
-            || verified_aggregate.ceremony_context_hash() != round_one_source.ceremony_context_hash
-            || verified_aggregate.action_context_hash() != round_one_source.action_context_hash
-            || verified_aggregate.roster_hash() != round_one_source.roster_hash
-            || verified_aggregate.setup_proof_context_hash()
+    ) -> Result<SetupRelinearizationRoundTwoConstruction, RefusalReason> {
+        let aggregate_root_pair = generated_aggregate.root_pair();
+        let topology = self.round_one_left_component.topology().clone();
+        if generated_aggregate.protocol_version() != round_one_source.protocol_version
+            || generated_aggregate.suite_identifier() != round_one_source.suite_identifier
+            || generated_aggregate.ceremony_context_hash() != round_one_source.ceremony_context_hash
+            || generated_aggregate.action_context_hash() != round_one_source.action_context_hash
+            || generated_aggregate.roster_hash() != round_one_source.roster_hash
+            || generated_aggregate.setup_proof_context_hash()
                 != round_one_source.setup_proof_context_hash
-            || verified_aggregate.schedule_position() != self.schedule_position
-            || verified_aggregate.evaluator_position() != self.evaluator_position
+            || generated_aggregate.schedule_position() != self.schedule_position
+            || generated_aggregate.evaluator_position() != self.evaluator_position
             || round_one_source.schedule_position != self.schedule_position
+            || self.round_one_right_component.topology() != &topology
+            || generated_aggregate.components()[0].topology() != &topology
+            || generated_aggregate.components()[1].topology() != &topology
+            || generated_aggregate.components()[0]
+                .stream_descriptor()
+                .total_byte_length
+                != topology.expected_byte_length()
+            || generated_aggregate.components()[1]
+                .stream_descriptor()
+                .total_byte_length
+                != topology.expected_byte_length()
         {
             return Err(RefusalReason::WrongContext);
         }
-        authenticate_complete_component_bytes(
-            verified_aggregate.aggregate_left_material(),
-            aggregate_round_one_left_bytes,
-        )?;
-        authenticate_complete_component_bytes(
-            verified_aggregate.material(),
-            aggregate_round_one_right_bytes,
-        )?;
-        let component = self.construct_round_two_component(
-            selected_suite,
-            common_secret_coefficients,
-            aggregate_round_one_left_bytes,
-            aggregate_round_one_right_bytes,
-        )?;
-        let component_context = participant_component_context(
-            round_one_source.setup_proof_context_hash,
-            SetupPublicPolynomialRootRole::RelinearizationRoundTwo,
-            round_one_source.participant_identity,
-            round_one_source.roster_position,
-            self.schedule_position,
-        )?;
-        let component_tree =
-            recompute_component_tree(&component, &component_context, evaluation_domain_size)?;
-        let round_one_root_pair = round_one_source.root_pair();
-        let canonical_application_statement_bytes =
-            canonical_selected_relinearization_round_two_statement(
-                round_one_source.setup_proof_context_hash,
-                round_one_source.participant_identity,
-                round_one_source.roster_position,
-                self.schedule_position,
-                &round_one_source.anchor_commitment_roots,
-                round_one_root_pair[0],
-                round_one_root_pair[1],
-                aggregate_root_pair[0],
-                aggregate_root_pair[1],
-                component_tree.root(),
-            )
-            .map_err(|_| RefusalReason::WrongContext)?;
-        let application_statement_hash = verified_application_statement_hash(
-            round_one_source.protocol_version,
-            round_one_source.suite_identifier,
-            ProofApplicationSlotCeilings::RELINEARIZATION_ROUND_TWO_STATEMENT_SCHEMA_IDENTIFIER,
-            &canonical_application_statement_bytes,
-        );
-        let material_ownership = ComponentMaterialOwnershipBinding::from_generated_application(
-            round_one_source.suite_identifier,
-            round_one_source.action_context_hash,
-            application_statement_hash,
-        );
-        let component_source = generated_component_source(
-            &component,
-            material_ownership,
-            &component_context,
-            component_tree.root(),
-        )?;
-        Ok(SetupGeneratedRelinearizationRoundTwoGeneration {
-            component,
-            source_authority: SetupGeneratedRelinearizationRoundTwoSourceAuthority {
+        let _active_data_modulus_count = active_data_modulus_count(&topology, selected_suite)?;
+        SetupRelinearizationRoundTwoConstruction::new(
+            self.evaluator_position,
+            topology,
+            evaluation_domain_size,
+            SetupRelinearizationRoundTwoGenerationContext {
                 protocol_version: round_one_source.protocol_version,
                 suite_identifier: round_one_source.suite_identifier,
                 ceremony_context_hash: round_one_source.ceremony_context_hash,
@@ -731,13 +1101,10 @@ impl SetupGeneratedRelinearizationMaterial {
                 roster_position: round_one_source.roster_position,
                 schedule_position: self.schedule_position,
                 anchor_commitment_roots: round_one_source.anchor_commitment_roots,
-                round_one_root_pair,
+                round_one_root_pair: round_one_source.root_pair(),
                 aggregate_round_one_root_pair: aggregate_root_pair,
-                canonical_application_statement_bytes: canonical_application_statement_bytes
-                    .into_boxed_slice(),
-                component: component_source,
             },
-        })
+        )
     }
 }
 
@@ -849,6 +1216,7 @@ pub(crate) fn construct_relinearization_material(
 pub(crate) struct SetupRelinearizationAggregateSourceReadRequest {
     roster_position: u16,
     component_ordinal: u16,
+    source_material_root: [u8; Hash512::BYTE_LENGTH],
     source_stream_byte_offset: u64,
     source_corpus_byte_offset: u64,
     source_stream_full_object_digest: [u8; Hash512::BYTE_LENGTH],
@@ -864,6 +1232,10 @@ impl SetupRelinearizationAggregateSourceReadRequest {
 
     pub(crate) const fn component_ordinal(&self) -> u16 {
         self.component_ordinal
+    }
+
+    pub(crate) const fn source_material_root(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.source_material_root
     }
 
     pub(crate) const fn source_corpus_byte_offset(&self) -> u64 {
@@ -908,6 +1280,7 @@ pub(crate) struct SetupRelinearizationAggregateConstruction {
     ordered_anchor_commitment_roots: Box<[[[u8; Hash512::BYTE_LENGTH]; 3]]>,
     ordered_round_one_proof_stream_descriptors: Box<[StreamDescriptor]>,
     ordered_source_root_pairs: Box<[[[u8; Hash512::BYTE_LENGTH]; 2]]>,
+    ordered_component_material_roots: Box<[[[u8; Hash512::BYTE_LENGTH]; 2]]>,
     ordered_component_stream_descriptors: Box<[[StreamDescriptor; 2]]>,
     ordered_component_corpus_byte_offsets: Box<[[u64; 2]]>,
     source_corpus_byte_length: u64,
@@ -961,6 +1334,12 @@ impl SetupRelinearizationAggregateConstruction {
                 .map_err(|_| RefusalReason::OutsideSupportedProfile)?,
             component_ordinal: u16::try_from(self.current_component_ordinal)
                 .map_err(|_| RefusalReason::OutsideSupportedProfile)?,
+            source_material_root: self
+                .ordered_component_material_roots
+                .get(self.current_roster_ordinal)
+                .and_then(|roots| roots.get(self.current_component_ordinal))
+                .copied()
+                .ok_or(RefusalReason::WrongTypeOrLength)?,
             source_stream_byte_offset: u64::try_from(byte_start)
                 .map_err(|_| RefusalReason::OutsideSupportedProfile)?,
             source_corpus_byte_offset: self
@@ -1198,10 +1577,12 @@ impl SetupRelinearizationAggregateConstruction {
 }
 
 pub(crate) fn construct_generated_relinearization_aggregate(
-    ordered_sources: &[&VerifiedRelinearizationRoundOneSourceMaterial],
+    ordered_sources: &[&SetupGeneratedRelinearizationRoundOneSourceAuthority],
+    ordered_round_one_proof_stream_descriptors: &[StreamDescriptor],
     evaluation_domain_size: usize,
 ) -> Result<SetupRelinearizationAggregateConstruction, RefusalReason> {
     if ordered_sources.len() != usize::from(FOUNDATION_PROFILE.participant_count)
+        || ordered_round_one_proof_stream_descriptors.len() != ordered_sources.len()
         || FOUNDATION_PROFILE.participant_count != 10
         || evaluation_domain_size == 0
     {
@@ -1212,20 +1593,20 @@ pub(crate) fn construct_generated_relinearization_aggregate(
         .copied()
         .ok_or(RefusalReason::MissingPrerequisite)?;
     let schedule_position = first_source.schedule_position();
-    let [first_left_material, first_right_material] = first_source.component_materials();
+    let [first_left_material, first_right_material] = first_source.components();
     if first_left_material.topology() != first_right_material.topology() {
         return Err(RefusalReason::WrongTypeOrLength);
     }
     let topology = first_left_material.topology().clone();
     let mut ordered_participant_identities = Vec::with_capacity(ordered_sources.len());
     let mut ordered_anchor_commitment_roots = Vec::with_capacity(ordered_sources.len());
-    let mut ordered_round_one_proof_stream_descriptors = Vec::with_capacity(ordered_sources.len());
     let mut ordered_source_root_pairs = Vec::with_capacity(ordered_sources.len());
+    let mut ordered_component_material_roots = Vec::with_capacity(ordered_sources.len());
     let mut ordered_component_stream_descriptors = Vec::with_capacity(ordered_sources.len());
     for (roster_ordinal, source) in ordered_sources.iter().copied().enumerate() {
         let roster_position =
             u16::try_from(roster_ordinal).map_err(|_| RefusalReason::OutsideSupportedProfile)?;
-        let [left_material, right_material] = source.component_materials();
+        let [left_material, right_material] = source.components();
         if source.protocol_version() != first_source.protocol_version()
             || source.suite_identifier() != first_source.suite_identifier()
             || source.ceremony_context_hash() != first_source.ceremony_context_hash()
@@ -1242,8 +1623,11 @@ pub(crate) fn construct_generated_relinearization_aggregate(
         }
         ordered_participant_identities.push(source.participant_identity());
         ordered_anchor_commitment_roots.push(source.anchor_commitment_roots());
-        ordered_round_one_proof_stream_descriptors.push(source.proof_stream_descriptor().clone());
         ordered_source_root_pairs.push(source.root_pair());
+        ordered_component_material_roots.push([
+            left_material.material_root().into_bytes(),
+            right_material.material_root().into_bytes(),
+        ]);
         ordered_component_stream_descriptors.push([
             left_material.stream_descriptor().clone(),
             right_material.stream_descriptor().clone(),
@@ -1280,8 +1664,10 @@ pub(crate) fn construct_generated_relinearization_aggregate(
         ordered_participant_identities: ordered_participant_identities.into_boxed_slice(),
         ordered_anchor_commitment_roots: ordered_anchor_commitment_roots.into_boxed_slice(),
         ordered_round_one_proof_stream_descriptors: ordered_round_one_proof_stream_descriptors
+            .to_vec()
             .into_boxed_slice(),
         ordered_source_root_pairs: ordered_source_root_pairs.into_boxed_slice(),
+        ordered_component_material_roots: ordered_component_material_roots.into_boxed_slice(),
         ordered_component_stream_descriptors: ordered_component_stream_descriptors
             .into_boxed_slice(),
         ordered_component_corpus_byte_offsets: ordered_component_corpus_byte_offsets
@@ -1334,13 +1720,13 @@ fn finish_generated_relinearization_aggregate(
             construction.schedule_position,
         )?,
     ];
-    let trees = [
-        recompute_component_tree(
+    let public_polynomial_roots = [
+        recompute_setup_generated_component_public_polynomial_root(
             &aggregate_components[0],
             &contexts[0],
             construction.evaluation_domain_size,
         )?,
-        recompute_component_tree(
+        recompute_setup_generated_component_public_polynomial_root(
             &aggregate_components[1],
             &contexts[1],
             construction.evaluation_domain_size,
@@ -1351,8 +1737,8 @@ fn finish_generated_relinearization_aggregate(
             construction.setup_proof_context_hash,
             construction.schedule_position,
             &construction.ordered_source_root_pairs,
-            trees[0].root(),
-            trees[1].root(),
+            public_polynomial_roots[0].root(),
+            public_polynomial_roots[1].root(),
         )
         .map_err(|_| RefusalReason::WrongContext)?;
     let application_statement_hash = verified_application_statement_hash(
@@ -1370,14 +1756,12 @@ fn finish_generated_relinearization_aggregate(
         generated_component_source(
             &aggregate_components[0],
             material_ownership,
-            &contexts[0],
-            trees[0].root(),
+            public_polynomial_roots[0],
         )?,
         generated_component_source(
             &aggregate_components[1],
             material_ownership,
-            &contexts[1],
-            trees[1].root(),
+            public_polynomial_roots[1],
         )?,
     ];
     Ok(SetupGeneratedRelinearizationAggregateGeneration {
@@ -1390,6 +1774,7 @@ fn finish_generated_relinearization_aggregate(
             roster_hash: construction.roster_hash,
             setup_proof_context_hash: construction.setup_proof_context_hash,
             schedule_position: construction.schedule_position,
+            evaluator_position,
             ordered_participant_identities: construction.ordered_participant_identities,
             ordered_anchor_commitment_roots: construction.ordered_anchor_commitment_roots,
             ordered_round_one_proof_stream_descriptors: construction
@@ -1590,114 +1975,6 @@ fn construct_round_one_component_bytes(
     Ok((left_bytes, right_bytes))
 }
 
-#[allow(clippy::too_many_arguments)]
-fn construct_round_two_component_bytes(
-    selected_suite: &SelectedSuiteCapability,
-    topology: &KeySwitchComponentMaterialTopology,
-    common_secret_coefficients: &[i8],
-    ephemeral_secret_coefficients: &[i8],
-    round_two_errors_by_block: &[Zeroizing<Vec<i8>>],
-    aggregate_round_one_left_bytes: &[u8],
-    aggregate_round_one_right_bytes: &[u8],
-) -> Result<Vec<u8>, RefusalReason> {
-    let _active_data_modulus_count = active_data_modulus_count(topology, selected_suite)?;
-    let ring_degree = topology.polynomial_degree();
-    if common_secret_coefficients.len() != ring_degree
-        || ephemeral_secret_coefficients.len() != ring_degree
-        || round_two_errors_by_block.len() != topology.data_block_count()
-    {
-        return Err(RefusalReason::WrongTypeOrLength);
-    }
-    let mut round_two_bytes = Vec::with_capacity(
-        usize::try_from(topology.expected_byte_length())
-            .map_err(|_| RefusalReason::OutsideSupportedProfile)?,
-    );
-    let mut byte_offset = 0_usize;
-    for decomposition_block_index in 0..topology.data_block_count() {
-        for modulus in topology.ordered_moduli().iter().copied() {
-            let residue_byte_length = canonical_residue_byte_length(modulus)
-                .map_err(|_| RefusalReason::UnsupportedVersionOrSuite)?;
-            let mut aggregate_left = Vec::with_capacity(ring_degree);
-            let mut aggregate_right = Vec::with_capacity(ring_degree);
-            for coefficient_ordinal in 0..ring_degree {
-                let coefficient_offset = coefficient_ordinal
-                    .checked_mul(residue_byte_length)
-                    .and_then(|offset| byte_offset.checked_add(offset))
-                    .ok_or(RefusalReason::OutsideSupportedProfile)?;
-                aggregate_left.push(decode_canonical_residue(
-                    aggregate_round_one_left_bytes,
-                    coefficient_offset,
-                    residue_byte_length,
-                    modulus,
-                )?);
-                aggregate_right.push(decode_canonical_residue(
-                    aggregate_round_one_right_bytes,
-                    coefficient_offset,
-                    residue_byte_length,
-                    modulus,
-                )?);
-            }
-            let secret_residues = common_secret_coefficients
-                .iter()
-                .copied()
-                .map(|coefficient| centered_i8_residue(coefficient, modulus))
-                .collect::<Vec<_>>();
-            let ephemeral_residues = ephemeral_secret_coefficients
-                .iter()
-                .copied()
-                .map(|coefficient| centered_i8_residue(coefficient, modulus))
-                .collect::<Vec<_>>();
-            let secret_times_left =
-                negacyclic_product_mod(&secret_residues, &aggregate_left, modulus)
-                    .map_err(|_| RefusalReason::InvalidArithmeticRelation)?;
-            let ephemeral_times_right =
-                negacyclic_product_mod(&ephemeral_residues, &aggregate_right, modulus)
-                    .map_err(|_| RefusalReason::InvalidArithmeticRelation)?;
-            let secret_times_right =
-                negacyclic_product_mod(&secret_residues, &aggregate_right, modulus)
-                    .map_err(|_| RefusalReason::InvalidArithmeticRelation)?;
-            for coefficient_ordinal in 0..ring_degree {
-                let round_two = add_mod_fast(
-                    sub_mod_fast(
-                        add_mod_fast(
-                            secret_times_left[coefficient_ordinal],
-                            ephemeral_times_right[coefficient_ordinal],
-                            modulus,
-                        ),
-                        secret_times_right[coefficient_ordinal],
-                        modulus,
-                    ),
-                    mul_mod_fast(
-                        PLAINTEXT_MODULUS % modulus,
-                        centered_i8_residue(
-                            round_two_errors_by_block[decomposition_block_index]
-                                [coefficient_ordinal],
-                            modulus,
-                        ),
-                        modulus,
-                    ),
-                    modulus,
-                );
-                round_two_bytes.extend_from_slice(&round_two.to_le_bytes()[..residue_byte_length]);
-            }
-            byte_offset = byte_offset
-                .checked_add(
-                    ring_degree
-                        .checked_mul(residue_byte_length)
-                        .ok_or(RefusalReason::OutsideSupportedProfile)?,
-                )
-                .ok_or(RefusalReason::OutsideSupportedProfile)?;
-        }
-    }
-    if round_two_bytes.len()
-        != usize::try_from(topology.expected_byte_length())
-            .map_err(|_| RefusalReason::OutsideSupportedProfile)?
-    {
-        return Err(RefusalReason::WrongTypeOrLength);
-    }
-    Ok(round_two_bytes)
-}
-
 fn participant_component_context(
     setup_proof_context_hash: [u8; Hash512::BYTE_LENGTH],
     root_role: SetupPublicPolynomialRootRole,
@@ -1732,14 +2009,54 @@ fn unowned_component_context(
     .map_err(|_| RefusalReason::WrongContext)
 }
 
-fn recompute_component_tree(
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct SetupGeneratedComponentPublicPolynomialRoot {
+    public_polynomial_context_hash: [u8; Hash512::BYTE_LENGTH],
+    root: [u8; Hash512::BYTE_LENGTH],
+}
+
+impl SetupGeneratedComponentPublicPolynomialRoot {
+    pub(super) const fn public_polynomial_context_hash(self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.public_polynomial_context_hash
+    }
+
+    pub(super) const fn root(self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.root
+    }
+}
+
+pub(super) fn recompute_setup_generated_component_public_polynomial_root(
     component: &SetupGeneratedKeySwitchComponent,
     context: &SetupPublicPolynomialContext,
     evaluation_domain_size: usize,
-) -> Result<SetupPublicPolynomialTree, RefusalReason> {
-    let topology = component.topology();
+) -> Result<SetupGeneratedComponentPublicPolynomialRoot, RefusalReason> {
+    recompute_setup_generated_component_public_polynomial_root_from_bytes(
+        component.topology(),
+        component.canonical_bytes(),
+        context,
+        evaluation_domain_size,
+    )
+}
+
+fn recompute_setup_generated_component_public_polynomial_root_from_bytes(
+    topology: &KeySwitchComponentMaterialTopology,
+    canonical_bytes: &[u8],
+    context: &SetupPublicPolynomialContext,
+    evaluation_domain_size: usize,
+) -> Result<SetupGeneratedComponentPublicPolynomialRoot, RefusalReason> {
+    if u64::try_from(canonical_bytes.len()).ok() != Some(topology.expected_byte_length()) {
+        return Err(RefusalReason::WrongTypeOrLength);
+    }
     let trace_column_count = topology.trace_column_count()?;
-    let mut ordered_columns = Vec::with_capacity(trace_column_count);
+    let row_width =
+        u32::try_from(trace_column_count).map_err(|_| RefusalReason::OutsideSupportedProfile)?;
+    let mut root_builder = SetupPublicPolynomialRootBuilder::new(
+        context,
+        evaluation_domain_size,
+        topology.half_polynomial_degree_bound_exclusive()?,
+        row_width,
+    )
+    .map_err(|_| RefusalReason::WrongHashOrRoot)?;
     for column_ordinal in 0..trace_column_count {
         let trace_column = topology.trace_column(column_ordinal)?;
         let byte_start = usize::try_from(trace_column.byte_offset())
@@ -1751,91 +2068,83 @@ fn recompute_component_tree(
                 .ok_or(RefusalReason::OutsideSupportedProfile)?,
         )
         .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
-        let canonical_bytes = component
-            .canonical_bytes()
+        let trace_column_bytes = canonical_bytes
             .get(byte_start..byte_end)
             .ok_or(RefusalReason::WrongTypeOrLength)?;
-        ordered_columns.push(trace_column.decode_authenticated_bytes(canonical_bytes)?);
+        root_builder
+            .absorb_canonical_residue_trace_row(
+                trace_column_bytes,
+                trace_column.residue_byte_length(),
+                trace_column.modulus(),
+            )
+            .map_err(|_| RefusalReason::WrongHashOrRoot)?;
     }
-    SetupPublicPolynomialTree::construct(SetupPublicPolynomialTreeInput {
-        context,
-        evaluation_domain_size,
-        source_polynomial_degree_bound_exclusive: topology
-            .quarter_polynomial_degree_bound_exclusive()?,
-        ordered_coefficient_columns: &ordered_columns,
+    let (public_polynomial_context_hash, root) = root_builder
+        .finish()
+        .map_err(|_| RefusalReason::WrongHashOrRoot)?;
+    Ok(SetupGeneratedComponentPublicPolynomialRoot {
+        public_polynomial_context_hash,
+        root,
     })
-    .map_err(|_| RefusalReason::WrongHashOrRoot)
 }
 
 fn generated_component_source(
     component: &SetupGeneratedKeySwitchComponent,
     material_ownership: ComponentMaterialOwnershipBinding,
-    context: &SetupPublicPolynomialContext,
-    expected_root: [u8; Hash512::BYTE_LENGTH],
+    public_polynomial_root: SetupGeneratedComponentPublicPolynomialRoot,
 ) -> Result<SetupGeneratedRelinearizationComponentSource, RefusalReason> {
-    let mut stream = KeySwitchComponentPublicPolynomialStream::begin(
-        component.topology().clone(),
+    generated_component_source_from_canonical_bytes(
+        component.topology(),
+        component.canonical_bytes(),
+        component.stream_descriptor(),
         material_ownership,
-        component.stream_descriptor().clone(),
+        public_polynomial_root,
     )
-    .map_err(generated_component_runtime_refusal)?;
-    for (chunk_index, chunk_bytes) in component
-        .canonical_bytes()
+}
+
+fn generated_component_source_from_canonical_bytes(
+    topology: &KeySwitchComponentMaterialTopology,
+    canonical_bytes: &[u8],
+    stream_descriptor: &StreamDescriptor,
+    material_ownership: ComponentMaterialOwnershipBinding,
+    public_polynomial_root: SetupGeneratedComponentPublicPolynomialRoot,
+) -> Result<SetupGeneratedRelinearizationComponentSource, RefusalReason> {
+    let material = authenticate_setup_generated_component_material(
+        topology,
+        canonical_bytes,
+        stream_descriptor,
+        material_ownership,
+    )?;
+    Ok(SetupGeneratedRelinearizationComponentSource {
+        material,
+        contribution_root: public_polynomial_root.root(),
+        public_polynomial_context_hash: public_polynomial_root.public_polynomial_context_hash(),
+    })
+}
+
+pub(super) fn authenticate_setup_generated_component_material(
+    topology: &KeySwitchComponentMaterialTopology,
+    canonical_bytes: &[u8],
+    stream_descriptor: &StreamDescriptor,
+    material_ownership: ComponentMaterialOwnershipBinding,
+) -> Result<VerifiedKeySwitchComponentMaterial, RefusalReason> {
+    if u64::try_from(canonical_bytes.len()).ok() != Some(topology.expected_byte_length()) {
+        return Err(RefusalReason::WrongTypeOrLength);
+    }
+    let mut stream = VerifiedKeySwitchComponentMaterialStream::begin(
+        topology.clone(),
+        material_ownership,
+        stream_descriptor.clone(),
+    )?;
+    for (chunk_index, chunk_bytes) in canonical_bytes
         .chunks(FOUNDATION_PROFILE.stream_chunk_byte_length)
         .enumerate()
     {
         stream
             .absorb_chunk(chunk_index, chunk_bytes)
-            .map_err(generated_component_runtime_refusal)?;
+            .into_result()?;
     }
-    let recomputed = stream
-        .finish(context.clone())
-        .map_err(generated_component_runtime_refusal)?;
-    let (material, tree) = recomputed.into_parts();
-    if tree.root() != expected_root {
-        return Err(RefusalReason::WrongHashOrRoot);
-    }
-    Ok(SetupGeneratedRelinearizationComponentSource {
-        material,
-        contribution_root: expected_root,
-        public_polynomial_context_hash: tree.public_polynomial_context_hash(),
-    })
-}
-
-fn authenticate_complete_component_bytes(
-    material: &VerifiedKeySwitchComponentMaterial,
-    canonical_bytes: &[u8],
-) -> Result<(), RefusalReason> {
-    if u64::try_from(canonical_bytes.len()).ok()
-        != Some(material.stream_descriptor().total_byte_length)
-    {
-        return Err(RefusalReason::WrongTypeOrLength);
-    }
-    let mut readback = material.begin_authenticated_readback()?;
-    for (chunk_index, chunk_bytes) in canonical_bytes
-        .chunks(FOUNDATION_PROFILE.stream_chunk_byte_length)
-        .enumerate()
-    {
-        readback
-            .authenticate_chunk(chunk_index, chunk_bytes)
-            .map_err(|_| RefusalReason::WrongHashOrRoot)?;
-    }
-    readback
-        .finish()
-        .into_result()
-        .map(|_| ())
-        .map_err(|_| RefusalReason::WrongHashOrRoot)
-}
-
-const fn generated_component_runtime_refusal(
-    error: ComponentPublicPolynomialRuntimeError,
-) -> RefusalReason {
-    match error {
-        ComponentPublicPolynomialRuntimeError::Refusal(refusal_reason) => refusal_reason,
-        ComponentPublicPolynomialRuntimeError::PublicPolynomial(_) => {
-            RefusalReason::WrongHashOrRoot
-        }
-    }
+    stream.finish().into_result()
 }
 
 fn active_data_modulus_count(
@@ -1915,6 +2224,7 @@ fn require_component_byte_lengths(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::bgv::proof_suite::{SetupPublicPolynomialTree, SetupPublicPolynomialTreeInput};
     use crate::foundation::derive_canonical_stream_descriptor;
 
     fn test_topology() -> KeySwitchComponentMaterialTopology {
@@ -1984,6 +2294,11 @@ mod tests {
                 usize::from(FOUNDATION_PROFILE.participant_count)
             ]
             .into_boxed_slice(),
+            ordered_component_material_roots: vec![
+                [[0x99; Hash512::BYTE_LENGTH]; 2];
+                usize::from(FOUNDATION_PROFILE.participant_count)
+            ]
+            .into_boxed_slice(),
             ordered_component_stream_descriptors: vec![
                 [descriptor.clone(), descriptor];
                 usize::from(
@@ -2015,6 +2330,55 @@ mod tests {
             partial_residue_byte_length: 0,
             refusal_reason: None,
         }
+    }
+
+    #[test]
+    fn streamed_component_root_is_byte_identical_to_the_canonical_retained_tree() {
+        let topology = test_topology();
+        let canonical_bytes = encoded_component(&topology, 7);
+        let context = participant_component_context(
+            [0x51; Hash512::BYTE_LENGTH],
+            SetupPublicPolynomialRootRole::RelinearizationRoundTwo,
+            [0x61; Hash512::BYTE_LENGTH],
+            2,
+            3,
+        )
+        .expect("test component context");
+        let evaluation_domain_size = 16;
+        let streamed = recompute_setup_generated_component_public_polynomial_root_from_bytes(
+            &topology,
+            &canonical_bytes,
+            &context,
+            evaluation_domain_size,
+        )
+        .expect("streamed setup root");
+
+        let ordered_trace_rows = (0..topology.trace_column_count().expect("trace count"))
+            .map(|column_ordinal| {
+                let column = topology.trace_column(column_ordinal).expect("trace column");
+                let byte_start = usize::try_from(column.byte_offset()).expect("byte start");
+                let byte_end =
+                    usize::try_from(column.byte_offset() + column.byte_length()).expect("byte end");
+                column
+                    .decode_authenticated_bytes(&canonical_bytes[byte_start..byte_end])
+                    .expect("legacy trace row")
+            })
+            .collect::<Vec<_>>();
+        let retained_tree = SetupPublicPolynomialTree::construct(SetupPublicPolynomialTreeInput {
+            context: &context,
+            evaluation_domain_size,
+            source_polynomial_degree_bound_exclusive: topology
+                .half_polynomial_degree_bound_exclusive()
+                .expect("half degree"),
+            ordered_trace_rows: &ordered_trace_rows,
+        })
+        .expect("canonical retained tree");
+
+        assert_eq!(
+            streamed.public_polynomial_context_hash(),
+            retained_tree.public_polynomial_context_hash()
+        );
+        assert_eq!(streamed.root(), retained_tree.root());
     }
 
     #[test]

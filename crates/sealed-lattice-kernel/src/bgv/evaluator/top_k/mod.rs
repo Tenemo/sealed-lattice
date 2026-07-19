@@ -1,12 +1,15 @@
+#[cfg(test)]
+pub(crate) mod character_comparison;
 mod comparison;
 mod interpolation;
+#[cfg(test)]
+pub(crate) mod pairwise_topology;
 mod rotations;
 mod score_packing;
 pub(crate) use comparison::*;
 pub(crate) use interpolation::*;
 pub(crate) use rotations::*;
 pub(crate) use score_packing::*;
-use std::collections::BTreeSet;
 
 use crate::bgv::{
     evaluator::engine::encode_slots_to_coefficients,
@@ -18,10 +21,9 @@ use crate::{
 };
 
 // The frozen evaluator working level for the selected multi-ballot parameters:
-// the aggregate is mod-switched to this level before packing, every rotation
-// and multiplication happens at or below it, and one relinearization key plus
-// the packing/forward rotation keys are generated here (lower levels use the
-// same keys through CRT-idempotent truncation).
+// the pair-difference aggregate enters at this level and every multiplication
+// happens at or below it. The directed Galois keys are generated separately at
+// the exact comparison-output level where their first opcode consumes them.
 pub(crate) const SELECTED_EVALUATOR_WORKING_LEVEL: usize = 25;
 pub(crate) const COMPARISON_SWITCHED_MULTIPLICATION_DEPTH_COUNT: usize = 8;
 pub(crate) const RANK_SWITCHED_MULTIPLICATION_DEPTH_COUNT: usize = 5;
@@ -55,16 +57,6 @@ impl EvaluatorModulusSchedule {
         let mut depth = 0;
         while depth < self.comparison_depth_drop_counts.len() {
             total += self.comparison_depth_drop_counts[depth];
-            depth += 1;
-        }
-        total
-    }
-
-    pub(crate) const fn rank_drop_count(&self) -> usize {
-        let mut total = 0;
-        let mut depth = 0;
-        while depth < self.rank_depth_drop_counts.len() {
-            total += self.rank_depth_drop_counts[depth];
             depth += 1;
         }
         total

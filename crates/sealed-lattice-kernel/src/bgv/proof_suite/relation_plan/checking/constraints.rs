@@ -7,6 +7,7 @@ use crate::foundation::ProofApplicationSlotCeilings;
 
 use super::super::{
     bounds::SignedIntegerInterval,
+    committed_material::COMMITTED_MATERIAL_TRACE_PACKING_FACTOR,
     expressions::{
         RelationExpressionInstruction, canonical_nested_list, check_expression,
         compile_base_field_polynomial, evaluate_integer_interval, evaluate_polynomial,
@@ -650,17 +651,13 @@ impl RelationPlanChecker<'_> {
 fn packed_coefficient_local_identity_zeroifier(
     trace_domain_size: u64,
 ) -> Result<Vec<RelationExpressionInstruction>, RelationPlanError> {
-    // The selected committed-material relations pack eight independently
-    // rooted logical rows into one physical trace. Their coefficient-local
-    // identities therefore hold on the exact logical-row subgroup H0, not on
-    // all eight cosets of the packed trace. Recompute that subgroup from the
-    // canonical trace geometry instead of accepting an arbitrary divisor or
-    // trusting a separately declared domain size.
-    const PACKED_ROW_COUNT: u64 = 8;
-    if !trace_domain_size.is_multiple_of(PACKED_ROW_COUNT) {
+    // Coefficient-local identities hold on the logical-row subgroup, not on
+    // every coset of the packed trace. The relation owner is the sole packing
+    // authority, so the compiler and checker cannot silently drift apart.
+    if !trace_domain_size.is_multiple_of(COMMITTED_MATERIAL_TRACE_PACKING_FACTOR) {
         return Err(RelationPlanError::InvalidConstraint);
     }
-    let identity_domain_size = trace_domain_size / PACKED_ROW_COUNT;
+    let identity_domain_size = trace_domain_size / COMMITTED_MATERIAL_TRACE_PACKING_FACTOR;
     if identity_domain_size == 0 || !identity_domain_size.is_power_of_two() {
         return Err(RelationPlanError::InvalidConstraint);
     }
@@ -727,4 +724,42 @@ pub(in crate::bgv::proof_suite::relation_plan) fn full_trace_zeroifier_expressio
         RelationExpressionInstruction::Negation,
         RelationExpressionInstruction::Addition,
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        COMMITTED_MATERIAL_TRACE_PACKING_FACTOR, full_trace_zeroifier_expression,
+        packed_coefficient_local_identity_zeroifier,
+    };
+    use crate::bgv::proof_suite::relation_plan::committed_material::CommittedMaterialRelationPlanInput;
+
+    #[test]
+    fn coefficient_local_zeroifier_uses_the_relation_owned_packing_factor() {
+        let input = CommittedMaterialRelationPlanInput {
+            ring_degree: 32,
+            evaluation_domain_size: 1_024,
+            opening_degree_bound_exclusive: 512,
+            material_column_degree_bound_exclusive: 10,
+            participant_count: 3,
+            threshold: 2,
+            sharing_data_modulus_indices: vec![0],
+            trace_mask_degree_bound_exclusive: 14,
+        };
+        let message_trace_domain_size = input
+            .message_trace_domain_size()
+            .expect("test message trace domain derives");
+        let relation_trace_domain_size = input
+            .relation_trace_domain_size()
+            .expect("test relation trace domain derives");
+        assert_eq!(
+            relation_trace_domain_size,
+            message_trace_domain_size * COMMITTED_MATERIAL_TRACE_PACKING_FACTOR
+        );
+        assert_eq!(
+            packed_coefficient_local_identity_zeroifier(relation_trace_domain_size)
+                .expect("packed coefficient-local zeroifier derives"),
+            full_trace_zeroifier_expression(message_trace_domain_size)
+        );
+    }
 }

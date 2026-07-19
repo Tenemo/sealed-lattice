@@ -4,15 +4,16 @@ use num_bigint::{BigInt, BigUint};
 use num_traits::Zero;
 
 use super::*;
+use crate::foundation::FOUNDATION_PROFILE;
 
 const BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER: u16 =
     crate::foundation::ProofApplicationSlotCeilings::BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER;
 const VERIFIED_SETUP_SOURCE_HASH_FIELD_ORDINAL: u64 = 7;
 const BALLOT_CIPHERTEXT_DIGEST_FIELD_ORDINAL: u64 = 8;
-const OPTION_COUNT: usize = 20;
+const OPTION_COUNT: usize = FOUNDATION_PROFILE.option_count as usize;
 const PAIR_COUNT: usize = OPTION_COUNT * (OPTION_COUNT - 1) / 2;
-const MINIMUM_SCORE: u64 = 1;
-const MAXIMUM_SCORE: u64 = 10;
+const MINIMUM_SCORE: u64 = FOUNDATION_PROFILE.minimum_score as u64;
+const MAXIMUM_SCORE: u64 = FOUNDATION_PROFILE.maximum_score as u64;
 const RESERVED_SLOT_RULE: u16 = 1;
 const RADIX: u64 = 3;
 
@@ -91,6 +92,35 @@ pub(crate) enum BallotValidityVerifierColumnSource {
 }
 
 impl BallotValiditySourcePlan {
+    pub(crate) fn resident_owned_payload_byte_length(&self) -> Option<u64> {
+        let payload = |count: usize, value_byte_length: usize| {
+            u64::try_from(count)
+                .ok()?
+                .checked_mul(u64::try_from(value_byte_length).ok()?)
+        };
+        [
+            payload(
+                self.active_data_modulus_indices.len(),
+                core::mem::size_of::<u16>(),
+            )?,
+            payload(self.data_moduli.len(), core::mem::size_of::<u64>())?,
+            payload(
+                self.pair_slot_inverse_roots.len(),
+                core::mem::size_of::<u64>(),
+            )?,
+            payload(
+                self.recipes_by_column.len(),
+                core::mem::size_of::<Option<BallotValiditySourceColumnRecipe>>(),
+            )?,
+            payload(
+                self.verifier_sources_by_column.len(),
+                core::mem::size_of::<Option<BallotValidityVerifierColumnSource>>(),
+            )?,
+        ]
+        .into_iter()
+        .try_fold(0_u64, u64::checked_add)
+    }
+
     pub(crate) const fn ring_degree(&self) -> u64 {
         self.ring_degree
     }
@@ -166,9 +196,13 @@ impl BallotValiditySourcePlan {
         let mut reductions = Vec::with_capacity(plaintext_coefficients.len());
         for plaintext_coefficient in plaintext_coefficients.iter().copied() {
             let row = cursor.next_row()?;
-            let weighted_sum = scores.iter().zip(row).try_fold(0_u128, |sum, (score, weight)| {
-                sum.checked_add(u128::from(score - MINIMUM_SCORE) * u128::from(weight))
-            })?;
+            let weighted_sum =
+                scores
+                    .iter()
+                    .zip(row)
+                    .try_fold(0_u128, |sum, (score, weight)| {
+                        sum.checked_add(u128::from(score - MINIMUM_SCORE) * u128::from(weight))
+                    })?;
             let numerator = weighted_sum.checked_sub(u128::from(plaintext_coefficient))?;
             if !numerator.is_multiple_of(u128::from(self.plaintext_modulus)) {
                 return None;
@@ -247,7 +281,9 @@ impl BallotValiditySourcePlan {
                 .checked_mul(core::mem::size_of::<Option<BallotValiditySourceColumnRecipe>>()),
             self.verifier_sources_by_column
                 .len()
-                .checked_mul(core::mem::size_of::<Option<BallotValidityVerifierColumnSource>>()),
+                .checked_mul(core::mem::size_of::<
+                    Option<BallotValidityVerifierColumnSource>,
+                >()),
         ]
         .into_iter()
         .try_fold(0_usize, |total, length| total.checked_add(length?))
@@ -434,14 +470,11 @@ impl BallotValidityRelationPlanInput {
         let positive_slot_count = self.ring_degree / 2;
         let mut pair_slot_inverse_roots = Vec::with_capacity(PAIR_COUNT);
         for pair_slot_ordinal in 0..PAIR_COUNT {
-            let pair_slot_ordinal = u64::try_from(pair_slot_ordinal)
-                .map_err(|_| RelationPlanError::CountOverflow)?;
+            let pair_slot_ordinal =
+                u64::try_from(pair_slot_ordinal).map_err(|_| RelationPlanError::CountOverflow)?;
             let positive_slot_ordinal = pair_slot_ordinal % positive_slot_count;
-            let positive_slot_exponent = modular_power(
-                u64::from(self.slot_generator),
-                positive_slot_ordinal,
-                two_n,
-            );
+            let positive_slot_exponent =
+                modular_power(u64::from(self.slot_generator), positive_slot_ordinal, two_n);
             let slot_exponent = if pair_slot_ordinal < positive_slot_count {
                 positive_slot_exponent
             } else {
@@ -452,8 +485,7 @@ impl BallotValidityRelationPlanInput {
                 slot_exponent,
                 self.plaintext_modulus,
             );
-            pair_slot_inverse_roots
-                .push(modular_inverse(slot_root, self.plaintext_modulus)?);
+            pair_slot_inverse_roots.push(modular_inverse(slot_root, self.plaintext_modulus)?);
         }
 
         let mut encoder_reduction_maximum = 0_u64;
@@ -838,9 +870,7 @@ impl<'context> BallotValidityPlanBuilder<'context> {
                 data_modulus_index,
             },
             BallotVerifierSourceKey::PairDifferenceEncoderWeight { option_ordinal } => {
-                BallotValidityVerifierColumnSource::PairDifferenceEncoderWeight {
-                    option_ordinal,
-                }
+                BallotValidityVerifierColumnSource::PairDifferenceEncoderWeight { option_ordinal }
             }
         };
         let verifier_source_slot = self
@@ -1273,7 +1303,7 @@ impl<'context> BallotValidityPlanBuilder<'context> {
 
     fn add_score_and_encoder_columns(
         &mut self,
-    ) -> Result<(Vec<BoundedUnsignedColumn>, Vec<BoundedUnsignedColumn>), RelationPlanError> {
+    ) -> Result<(Vec<BoundedUnsignedColumn>, Vec<u32>), RelationPlanError> {
         let score_offset_maximum = MAXIMUM_SCORE
             .checked_sub(MINIMUM_SCORE)
             .ok_or(RelationPlanError::InvalidBoundCertificate)?;
@@ -1676,10 +1706,9 @@ impl<'context> BallotValidityPlanBuilder<'context> {
                 u32::try_from(column_index).map_err(|_| RelationPlanError::CountOverflow)?;
             let expects_witness_source = matches!(column.origin, RelationColumnOrigin::Prover)
                 && base_tree_column_set.contains(&column_ordinal);
-            let expects_verifier_source = matches!(
-                column.origin,
-                RelationColumnOrigin::VerifierSequence { .. }
-            ) && base_tree_column_set.contains(&column_ordinal);
+            let expects_verifier_source =
+                matches!(column.origin, RelationColumnOrigin::VerifierSequence { .. })
+                    && base_tree_column_set.contains(&column_ordinal);
             if recipe.is_some() != expects_witness_source
                 || verifier_source.is_some() != expects_verifier_source
                 || (auxiliary_tree_column_set.contains(&column_ordinal)
@@ -2351,9 +2380,9 @@ fn subtract_rotated_columns(
 mod tests {
     use super::*;
 
-    const TEST_RING_DEGREE: u64 = 64;
-    const TEST_PLAINTEXT_MODULUS: u64 = 257;
-    const TEST_DATA_MODULUS: u64 = 769;
+    const TEST_RING_DEGREE: u64 = 256;
+    const TEST_PLAINTEXT_MODULUS: u64 = 12_289;
+    const TEST_DATA_MODULUS: u64 = 65_537;
     const TEST_EVALUATION_DOMAIN_SIZE: u64 = 1_024;
 
     fn check_context() -> RelationPlanCheckContext {
@@ -2394,7 +2423,7 @@ mod tests {
             opening_degree_bound_exclusive: 512,
             active_data_modulus_indices: vec![0],
             plaintext_modulus: TEST_PLAINTEXT_MODULUS,
-            primitive_two_n_root: 9,
+            primitive_two_n_root: 3_400,
             slot_generator: 3,
             reserved_slot_rule: RESERVED_SLOT_RULE,
         }
@@ -2428,7 +2457,7 @@ mod tests {
                 SuiteModulusReference::plaintext(),
             ]
         );
-        assert_eq!(variant.ordered_verifier_sources.len(), 4);
+        assert_eq!(variant.ordered_verifier_sources.len(), 4 + OPTION_COUNT);
         assert!(variant.ordered_public_samplers.is_empty());
 
         assert_eq!(
@@ -2451,18 +2480,10 @@ mod tests {
                 _ => None,
             })
             .expect("the ballot relation has a base tree");
-        let expected_family_source_columns = variant
-            .ordered_columns
-            .iter()
-            .enumerate()
-            .filter(|(column_index, column)| {
-                matches!(column.origin, RelationColumnOrigin::Prover)
-                    && base_tree_columns.contains(&u32::try_from(*column_index).unwrap())
-            })
-            .count();
+        let expected_source_columns = base_tree_columns.len();
         assert_eq!(
             compilation.source_plan().provided_column_count(),
-            expected_family_source_columns
+            expected_source_columns
         );
         for (column_index, column) in variant.ordered_columns.iter().enumerate() {
             let column_ordinal = u32::try_from(column_index).unwrap();
@@ -2471,6 +2492,15 @@ mod tests {
                 matches!(column.origin, RelationColumnOrigin::Prover)
                     && base_tree_columns.contains(&column_ordinal),
                 "column {column_ordinal} has the wrong family-source ownership"
+            );
+            assert_eq!(
+                compilation
+                    .source_plan()
+                    .verifier_source(column_ordinal)
+                    .is_some(),
+                matches!(column.origin, RelationColumnOrigin::VerifierSequence { .. })
+                    && base_tree_columns.contains(&column_ordinal),
+                "column {column_ordinal} has the wrong verifier-source ownership"
             );
         }
         assert!(
@@ -2491,7 +2521,7 @@ mod tests {
         let mut source_bindings = variant
             .ordered_verifier_sources
             .iter()
-            .map(|source| match source {
+            .filter_map(|source| match source {
                 RelationVerifierSource::Protocol {
                     protocol_source_kind,
                     source_coordinates,
@@ -2512,13 +2542,14 @@ mod tests {
                         statement_binding_path[0].step_kind,
                         SelectorPathStepKind::TupleField
                     );
-                    (
+                    Some((
                         *protocol_source_kind,
                         source_coordinates.clone(),
                         statement_binding_path[0].argument,
-                    )
+                    ))
                 }
-                _ => panic!("ballot public inputs must use closed protocol sources"),
+                RelationVerifierSource::DirectBallotPairDifferenceEncoderWeights { .. } => None,
+                _ => panic!("ballot public inputs must use closed protocol or plan-owned sources"),
             })
             .collect::<Vec<_>>();
         source_bindings.sort_unstable();
@@ -2530,6 +2561,33 @@ mod tests {
                 (2, vec![0, 0], BALLOT_CIPHERTEXT_DIGEST_FIELD_ORDINAL),
                 (2, vec![1, 0], BALLOT_CIPHERTEXT_DIGEST_FIELD_ORDINAL),
             ]
+        );
+        let mut encoder_weight_source_options = variant
+            .ordered_verifier_sources
+            .iter()
+            .filter_map(|source| match source {
+                RelationVerifierSource::DirectBallotPairDifferenceEncoderWeights {
+                    ring_degree,
+                    primitive_two_n_root,
+                    slot_generator,
+                    option_count,
+                    option_ordinal,
+                } => {
+                    assert_eq!(*ring_degree, TEST_RING_DEGREE);
+                    assert_eq!(*primitive_two_n_root, 3_400);
+                    assert_eq!(*slot_generator, 3);
+                    assert_eq!(usize::from(*option_count), OPTION_COUNT);
+                    Some(*option_ordinal)
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        encoder_weight_source_options.sort_unstable();
+        assert_eq!(
+            encoder_weight_source_options,
+            (0..OPTION_COUNT)
+                .map(|option_ordinal| u16::try_from(option_ordinal).unwrap())
+                .collect::<Vec<_>>()
         );
 
         let typed_expression_modulus_multiples = variant
@@ -2668,8 +2726,105 @@ mod tests {
     }
 
     #[test]
+    fn pair_difference_encoder_weights_reconstruct_the_direct_ballot_plaintext() {
+        let context = check_context();
+        let compilation = compile_ballot_validity_relation(&relation_input(), &context)
+            .expect("the direct ballot relation must compile");
+        let source_plan = compilation.source_plan();
+        let scores = [
+            1_u64, 10, 2, 9, 3, 8, 4, 7, 5, 6, 10, 1, 9, 2, 8, 3, 7, 4, 6, 5,
+        ];
+        let packed_pair_differences = crate::bgv::direct_ballots::direct_ballot_slots(
+            &scores,
+            TEST_PLAINTEXT_MODULUS,
+            usize::try_from(TEST_RING_DEGREE).unwrap(),
+        )
+        .expect("the score vector must have the canonical pair-difference packing");
+        assert_eq!(source_plan.pair_slot_inverse_roots.len(), PAIR_COUNT);
+        assert!(
+            packed_pair_differences[PAIR_COUNT..]
+                .iter()
+                .all(|value| *value == 0)
+        );
+        assert!(
+            source_plan
+                .encoder_weight_sequence(u16::try_from(OPTION_COUNT).unwrap())
+                .is_none()
+        );
+        let plaintext_coefficients = source_plan
+            .plaintext_coefficients_for_scores(&scores)
+            .expect("the bounded scores must encode");
+
+        let dense_plaintext_coefficients = (0..TEST_RING_DEGREE)
+            .map(|coefficient_ordinal| {
+                let inverse_transform_sum = packed_pair_differences
+                    .iter()
+                    .take(PAIR_COUNT)
+                    .copied()
+                    .zip(source_plan.pair_slot_inverse_roots.iter().copied())
+                    .fold(0_u64, |sum, (pair_difference, inverse_slot_root)| {
+                        modular_sum(
+                            sum,
+                            modular_product(
+                                pair_difference,
+                                modular_power(
+                                    inverse_slot_root,
+                                    coefficient_ordinal,
+                                    TEST_PLAINTEXT_MODULUS,
+                                ),
+                                TEST_PLAINTEXT_MODULUS,
+                            ),
+                            TEST_PLAINTEXT_MODULUS,
+                        )
+                    });
+                modular_product(
+                    source_plan.inverse_ring_degree,
+                    inverse_transform_sum,
+                    TEST_PLAINTEXT_MODULUS,
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(plaintext_coefficients, dense_plaintext_coefficients);
+
+        let encoder_reductions = source_plan
+            .encoder_reductions_for_scores(&scores, &plaintext_coefficients)
+            .expect("the exact integer reductions must exist");
+        let weight_sequences = (0..OPTION_COUNT)
+            .map(|option_ordinal| {
+                source_plan
+                    .encoder_weight_sequence(u16::try_from(option_ordinal).unwrap())
+                    .expect("every option must have one deterministic verifier sequence")
+            })
+            .collect::<Vec<_>>();
+        for coefficient_ordinal in 0..usize::try_from(TEST_RING_DEGREE).unwrap() {
+            let weighted_score_offset =
+                scores
+                    .iter()
+                    .zip(&weight_sequences)
+                    .fold(0_u128, |sum, (score, weights)| {
+                        sum + u128::from(score - MINIMUM_SCORE)
+                            * u128::from(weights[coefficient_ordinal])
+                    });
+            assert_eq!(
+                weighted_score_offset,
+                u128::from(plaintext_coefficients[coefficient_ordinal])
+                    + u128::from(TEST_PLAINTEXT_MODULUS)
+                        * u128::from(encoder_reductions[coefficient_ordinal]),
+                "coefficient {coefficient_ordinal} must satisfy the exact encoder identity"
+            );
+        }
+    }
+
+    #[test]
     fn ballot_geometry_rejects_noncanonical_or_inexact_encoder_domains() {
         let context = check_context();
+
+        let mut insufficient_pair_slots = relation_input();
+        insufficient_pair_slots.ring_degree = 128;
+        assert_eq!(
+            compile_ballot_validity_relation_plan(&insufficient_pair_slots, &context),
+            Err(RelationPlanError::InvalidDomain)
+        );
 
         let mut noncanonical_data_basis = relation_input();
         noncanonical_data_basis.active_data_modulus_indices = vec![1];

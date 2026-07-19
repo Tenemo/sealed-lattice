@@ -1,5 +1,6 @@
 use super::*;
 use crate::bgv::parameters::LOGICAL_SLOT_GENERATOR;
+use crate::foundation::FOUNDATION_PROFILE;
 use std::sync::OnceLock;
 
 static GALOIS_ELEMENT_POSITIONS: OnceLock<Vec<Option<(bool, usize)>>> = OnceLock::new();
@@ -107,6 +108,103 @@ fn modular_power(mut base: usize, mut exponent: usize, modulus: usize) -> usize 
     result
 }
 
+const SELECTED_OPTION_COUNT: usize = FOUNDATION_PROFILE.option_count as usize;
+const SELECTED_PAIR_COUNT: usize = SELECTED_OPTION_COUNT * (SELECTED_OPTION_COUNT - 1) / 2;
+const FORWARD_PAIR_WINDOW_LARGE_STEP: usize = 38;
+const INVERSE_PAIR_SHIFT_LARGE_STEP: usize = 7;
+pub(crate) const NEGATIVE_SEVEN_GALOIS_ELEMENT: usize = 7_971;
+pub(crate) const NEGATIVE_ONE_GALOIS_ELEMENT: usize = 43_691;
+pub(crate) const POSITIVE_THIRTY_EIGHT_GALOIS_ELEMENT: usize = 130_393;
+
+fn validate_selected_directed_rotation_basis() -> CanonicalResult<()> {
+    let expected_negative_one = inverse_galois_element(galois_power(1)?)?;
+    let expected_negative_seven = inverse_galois_element(galois_power(7)?)?;
+    let expected_positive_thirty_eight = galois_power(FORWARD_PAIR_WINDOW_LARGE_STEP)?;
+    if expected_negative_one != NEGATIVE_ONE_GALOIS_ELEMENT
+        || expected_negative_seven != NEGATIVE_SEVEN_GALOIS_ELEMENT
+        || expected_positive_thirty_eight != POSITIVE_THIRTY_EIGHT_GALOIS_ELEMENT
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidProtocolObject,
+            "selected directed Galois basis disagrees with the ring parameters",
+        ));
+    }
+    Ok(())
+}
+
+/// Returns the selected directed path that moves a comparison window at the
+/// given shift-major offset back to the first logical slot. The path advances
+/// by thirty-eight until it reaches or passes the offset, then removes the
+/// exact overshoot with negative-seven and negative-one steps.
+pub(crate) fn forward_pair_window_rotation_path(
+    window_offset: usize,
+) -> CanonicalResult<Vec<usize>> {
+    if window_offset >= SELECTED_PAIR_COUNT {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidProtocolObject,
+            "pair-window offset is outside the selected shift-major layout",
+        ));
+    }
+    validate_selected_directed_rotation_basis()?;
+    if window_offset == 0 {
+        return Ok(Vec::new());
+    }
+
+    let positive_step_count = window_offset.div_ceil(FORWARD_PAIR_WINDOW_LARGE_STEP);
+    let overshoot = positive_step_count
+        .checked_mul(FORWARD_PAIR_WINDOW_LARGE_STEP)
+        .and_then(|reached_offset| reached_offset.checked_sub(window_offset))
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidProtocolObject,
+                "pair-window rotation path arithmetic overflowed",
+            )
+        })?;
+    let negative_seven_step_count = overshoot / INVERSE_PAIR_SHIFT_LARGE_STEP;
+    let negative_one_step_count = overshoot % INVERSE_PAIR_SHIFT_LARGE_STEP;
+    let mut path = Vec::with_capacity(
+        positive_step_count + negative_seven_step_count + negative_one_step_count,
+    );
+    path.extend(std::iter::repeat_n(
+        POSITIVE_THIRTY_EIGHT_GALOIS_ELEMENT,
+        positive_step_count,
+    ));
+    path.extend(std::iter::repeat_n(
+        NEGATIVE_SEVEN_GALOIS_ELEMENT,
+        negative_seven_step_count,
+    ));
+    path.extend(std::iter::repeat_n(
+        NEGATIVE_ONE_GALOIS_ELEMENT,
+        negative_one_step_count,
+    ));
+    Ok(path)
+}
+
+/// Returns the selected negative-seven then negative-one path that moves a
+/// pairwise comparison result from the lower option slot to the higher option
+/// slot for the given option shift.
+pub(crate) fn inverse_pair_shift_rotation_path(shift: usize) -> CanonicalResult<Vec<usize>> {
+    if shift >= SELECTED_OPTION_COUNT {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidProtocolObject,
+            "pair shift is outside the selected option geometry",
+        ));
+    }
+    validate_selected_directed_rotation_basis()?;
+    let negative_seven_step_count = shift / INVERSE_PAIR_SHIFT_LARGE_STEP;
+    let negative_one_step_count = shift % INVERSE_PAIR_SHIFT_LARGE_STEP;
+    let mut path = Vec::with_capacity(negative_seven_step_count + negative_one_step_count);
+    path.extend(std::iter::repeat_n(
+        NEGATIVE_SEVEN_GALOIS_ELEMENT,
+        negative_seven_step_count,
+    ));
+    path.extend(std::iter::repeat_n(
+        NEGATIVE_ONE_GALOIS_ELEMENT,
+        negative_one_step_count,
+    ));
+    Ok(path)
+}
+
 const SIGNED_GENERATOR_LARGE_STEP: usize = 17;
 
 // Decompose a logical rotation into the shortest canonical signed path over
@@ -203,82 +301,30 @@ pub(crate) fn generator_inverse_power_basis_for_exponent(
         .collect()
 }
 
-fn largest_packed_rank_shift(option_count: usize) -> CanonicalResult<usize> {
-    if option_count < 2 || option_count * 2 > POLYNOMIAL_DEGREE {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidProtocolObject,
-            "packed rank compact rotation basis requires 2 <= option count and a valid slot window",
-        ));
-    }
-    Ok(option_count * (option_count - 1) / 2 - 1)
-}
-
-pub(crate) fn direct_score_packing_basis_galois_elements(
-    option_count: usize,
-) -> CanonicalResult<Vec<usize>> {
-    let exact_rotations = direct_score_packing_galois_elements(option_count)?;
-    let inverse_basis = generator_inverse_power_basis_for_exponent(option_count)?;
-    let composed_rotation = inverse_basis.iter().fold(1_usize, |accumulated, rotation| {
-        (accumulated * rotation) % (2 * POLYNOMIAL_DEGREE)
-    });
-    if exact_rotations.as_slice() != [composed_rotation] {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidProtocolObject,
-            "direct score-packing rotation does not match the canonical logical-slot basis",
-        ));
-    }
-
-    Ok(inverse_basis)
-}
-
-pub(crate) fn packed_rank_forward_basis_galois_elements(
-    option_count: usize,
-) -> CanonicalResult<Vec<usize>> {
-    let largest_shift = largest_packed_rank_shift(option_count)?;
-    let mut basis = BTreeSet::new();
-    for exponent in 1..=largest_shift {
-        basis.extend(generator_power_basis_for_exponent(exponent)?);
-    }
-    Ok(basis.into_iter().collect())
-}
-
-pub(crate) fn packed_rank_return_basis_galois_elements(
-    option_count: usize,
-) -> CanonicalResult<Vec<usize>> {
-    let largest_shift = largest_packed_rank_shift(option_count)?;
-    let mut basis = BTreeSet::new();
-    for exponent in 1..=largest_shift {
-        basis.extend(generator_inverse_power_basis_for_exponent(exponent)?);
-    }
-    Ok(basis.into_iter().collect())
-}
-
-// The frozen four-key signed rotation schedule sits at the evaluator working
-// level. Lower-level consumers use the same keys through truncation.
+// The three selected directed rotations are first used after comparison, so
+// their suite-fixed catalog entries are generated at that exact level.
 pub(crate) fn selected_evaluator_rotation_key_schedule(
     option_count: usize,
 ) -> CanonicalResult<Vec<(usize, usize)>> {
-    if SELECTED_EVALUATOR_WORKING_LEVEL >= crate::bgv::parameters::DATA_PRIMES.len()
+    if option_count != SELECTED_OPTION_COUNT
+        || DIRECT_COMPARISON_OUTPUT_LEVEL >= crate::bgv::parameters::DATA_PRIMES.len()
         || DIRECT_COMPARISON_OUTPUT_LEVEL > SELECTED_EVALUATOR_WORKING_LEVEL
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidProtocolObject,
-            "selected evaluator rotation schedule levels must fit the data basis",
+            "selected evaluator rotation schedule disagrees with the exact suite geometry",
         ));
     }
-    let mut required = BTreeSet::new();
-    for galois_element in direct_score_packing_basis_galois_elements(option_count)? {
-        required.insert((galois_element, SELECTED_EVALUATOR_WORKING_LEVEL));
-    }
-    for galois_element in packed_rank_forward_basis_galois_elements(option_count)? {
-        required.insert((galois_element, SELECTED_EVALUATOR_WORKING_LEVEL));
-    }
-    // Inverse-basis rotations run at the working level (pair-window
-    // realignment) and at the comparison output level (rank return); one key
-    // at the working level serves both through truncation.
-    for galois_element in packed_rank_return_basis_galois_elements(option_count)? {
-        required.insert((galois_element, SELECTED_EVALUATOR_WORKING_LEVEL));
-    }
-
-    Ok(required.into_iter().collect())
+    validate_selected_directed_rotation_basis()?;
+    Ok(vec![
+        (
+            NEGATIVE_SEVEN_GALOIS_ELEMENT,
+            DIRECT_COMPARISON_OUTPUT_LEVEL,
+        ),
+        (NEGATIVE_ONE_GALOIS_ELEMENT, DIRECT_COMPARISON_OUTPUT_LEVEL),
+        (
+            POSITIVE_THIRTY_EIGHT_GALOIS_ELEMENT,
+            DIRECT_COMPARISON_OUTPUT_LEVEL,
+        ),
+    ])
 }

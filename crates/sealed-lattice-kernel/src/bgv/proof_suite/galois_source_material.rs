@@ -310,7 +310,7 @@ impl VerifiedGaloisSourceMaterialBatchPreflight {
                 || contribution_tree.source_polynomial_degree_bound_exclusive()
                     != material
                         .topology()
-                        .quarter_polynomial_degree_bound_exclusive()
+                        .half_polynomial_degree_bound_exclusive()
                         .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?
                 || !material.binds_ownership(material_ownership)
                 || !material_topology_matches_selected_catalog_level(
@@ -649,7 +649,7 @@ impl VerifiedGaloisSourceMaterialBatch {
                 || contribution_tree.source_polynomial_degree_bound_exclusive()
                     != material
                         .topology()
-                        .quarter_polynomial_degree_bound_exclusive()
+                        .half_polynomial_degree_bound_exclusive()
                         .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?
                 || material
                     .topology()

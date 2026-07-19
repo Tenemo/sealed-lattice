@@ -19,10 +19,12 @@ import type {
     AggregateThresholdShareRecipientAuthority,
     ClosedWorkerAggregateThresholdShareRecipientAuthorityInput,
 } from '../aggregate-threshold-share-authenticated-recipient.js';
+import type { VerifiedTranscriptObject } from '../canonical-board-runtime.js';
 import type {
     CommonProofApplicationFreshnessCoordinate,
     VerifiedCommonProofCapability,
 } from '../common-proof-worker-runtime.js';
+import type { BrowserOwnedSetupGenerationAuthority } from '../setup-generation-recipient-payload.js';
 import type {
     StateVerifierSession,
     VerifiedStateDurableBinding,
@@ -140,7 +142,8 @@ const requireLiveClosedWorkerProductionOperationAuthorityRecord = (
 };
 
 const defineBorrowedAuthorizationProperty = <
-    PropertyName extends keyof ClosedWorkerProductionOperationKernelAuthorization,
+    PropertyName extends
+        keyof ClosedWorkerProductionOperationKernelAuthorization,
 >(
     target: object,
     authority: ClosedWorkerProductionOperationAuthority,
@@ -162,8 +165,9 @@ export const createClosedWorkerProductionOperationAuthority = (input: {
     authority: ClosedWorkerProductionOperationAuthority;
     revoke(): void;
 }> => {
-    let authority: ClosedWorkerProductionOperationAuthority;
     const authorityTarget = Object.create(null) as object;
+    const authority =
+        authorityTarget as ClosedWorkerProductionOperationAuthority;
     Object.defineProperty(authorityTarget, 'withExactKernelAuthorization', {
         configurable: false,
         enumerable: false,
@@ -216,9 +220,7 @@ export const createClosedWorkerProductionOperationAuthority = (input: {
         },
         writable: false,
     });
-    authority = Object.freeze(
-        authorityTarget,
-    ) as ClosedWorkerProductionOperationAuthority;
+    Object.freeze(authorityTarget);
     const record: ClosedWorkerProductionOperationAuthorityRecord = {
         authorization: input.authorization,
         state: 'active',
@@ -264,6 +266,19 @@ export type ClosedWorkerSetupMailboxRandomnessOperations = Readonly<{
     }): Uint8Array<ArrayBuffer>;
     signSetupObject(input: {
         readonly signatureMessageHash: ProtocolHash;
+    }): Uint8Array<ArrayBuffer>;
+    produceSetupIntentCarrier(): Uint8Array<ArrayBuffer>;
+    producePublicRandomnessCommitmentCarrier(input: {
+        readonly orderedSetupIntentObjects: readonly VerifiedTranscriptObject[];
+    }): Uint8Array<ArrayBuffer>;
+    producePublicRandomnessRevealCarrier(input: {
+        readonly publicRandomnessCommitmentObject: VerifiedTranscriptObject;
+        readonly setupIntentObject: VerifiedTranscriptObject;
+    }): Uint8Array<ArrayBuffer>;
+    produceDealerPublicRecordCarrier(input: {
+        readonly orderedRecipientEnvelopeHashes: readonly ProtocolHash[];
+        readonly proofDescriptorBytes: Uint8Array;
+        readonly setupGenerationAuthority: BrowserOwnedSetupGenerationAuthority;
     }): Uint8Array<ArrayBuffer>;
     revoke(): void;
 }>;

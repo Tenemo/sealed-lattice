@@ -33,8 +33,8 @@ const SUITE_ARTIFACT_HASH_DOMAIN: &str = "sealed-lattice/foundation/suite-artifa
 const ORDERED_SPECIAL_PRIMES: [u64; SPECIAL_PRIMES.len()] = SPECIAL_PRIMES;
 const ORDERED_TARGET_DATA_PRIME_INDEXES: [u16; CANONICAL_TARGET_CIPHERTEXT_LEVEL + 1] =
     ordered_target_data_prime_indexes();
-const ORDERED_SHARING_DATA_PRIME_INDEXES: [u16; DATA_PRIMES.len()] =
-    ordered_sharing_data_prime_indexes();
+const ORDERED_SHARING_DATA_PRIME_INDEXES: [u16; CANONICAL_TARGET_CIPHERTEXT_LEVEL + 1] =
+    ORDERED_TARGET_DATA_PRIME_INDEXES;
 
 const fn ordered_target_data_prime_indexes() -> [u16; CANONICAL_TARGET_CIPHERTEXT_LEVEL + 1] {
     let mut indexes = [0_u16; CANONICAL_TARGET_CIPHERTEXT_LEVEL + 1];
@@ -46,27 +46,23 @@ const fn ordered_target_data_prime_indexes() -> [u16; CANONICAL_TARGET_CIPHERTEX
     indexes
 }
 
-const fn ordered_sharing_data_prime_indexes() -> [u16; DATA_PRIMES.len()] {
-    let mut indexes = [0_u16; DATA_PRIMES.len()];
-    let mut position = 0;
-    while position < indexes.len() {
-        indexes[position] = position as u16;
-        position += 1;
-    }
-    indexes
-}
-
 /// Resolves the exact selected target-basis subset in its canonical suite
-/// order. Consumers retain the sharing-basis index beside each modulus so a
+/// order. Consumers retain the full-data index beside each modulus so a
 /// target-only capability cannot silently reinterpret its compact ordinal as
-/// a different one of the complete sharing-basis limbs.
+/// a different one of the complete data-basis limbs.
 pub(crate) fn selected_target_data_prime_coordinates() -> SchemaResult<Box<[(u16, u64)]>> {
-    target_data_prime_coordinates(&ORDERED_TARGET_DATA_PRIME_INDEXES)
+    data_prime_coordinates(&ORDERED_TARGET_DATA_PRIME_INDEXES)
 }
 
-fn target_data_prime_coordinates(
-    ordered_data_prime_indexes: &[u16],
-) -> SchemaResult<Box<[(u16, u64)]>> {
+/// Resolves the exact selected VSS sharing basis independently of the active
+/// data basis and target consumers. The selected suite requires this sequence
+/// to equal the target sequence, while callers retain the full-data index next
+/// to each modulus rather than treating its compact ordinal as that index.
+pub(crate) fn selected_sharing_data_prime_coordinates() -> SchemaResult<Box<[(u16, u64)]>> {
+    data_prime_coordinates(&ORDERED_SHARING_DATA_PRIME_INDEXES)
+}
+
+fn data_prime_coordinates(ordered_data_prime_indexes: &[u16]) -> SchemaResult<Box<[(u16, u64)]>> {
     if ordered_data_prime_indexes.is_empty() {
         return Err(invalid_fixed_algebra());
     }
@@ -300,10 +296,10 @@ impl ArtifactKind {
 
     pub const fn artifact_schema_version(self) -> u16 {
         match self {
+            Self::EncoderAndBallotLayout => 2,
             Self::LatticeCommitmentProfile => 3,
             Self::ProofProfileSet => 2,
-            Self::EncoderAndBallotLayout
-            | Self::VerifiableSecretSharingProfile
+            Self::VerifiableSecretSharingProfile
             | Self::EvaluatorProgramSet
             | Self::TargetDecryptionProfile => FOUNDATION_SCHEMA_VERSION,
         }
@@ -421,6 +417,7 @@ pub struct SuiteCountLimits {
 }
 
 impl SuiteCountLimits {
+    #[cfg(test)]
     pub(crate) fn new(
         maximum_ballot_attempts_per_participant: u16,
         maximum_target_share_submissions: u16,
@@ -528,7 +525,7 @@ pub struct SuiteRecord {
 
 impl SuiteRecord {
     #[cfg(test)]
-    pub(crate) fn new(
+    pub(super) fn new(
         count_limits: SuiteCountLimits,
         artifacts: Vec<ArtifactReference>,
     ) -> SchemaResult<Self> {
@@ -810,9 +807,7 @@ fn validate_fixed_algebra() -> SchemaResult<()> {
             .iter()
             .enumerate()
             .any(|(position, index)| usize::from(*index) != position)
-        || !ORDERED_TARGET_DATA_PRIME_INDEXES
-            .iter()
-            .all(|index| ORDERED_SHARING_DATA_PRIME_INDEXES.contains(index))
+        || ORDERED_TARGET_DATA_PRIME_INDEXES != ORDERED_SHARING_DATA_PRIME_INDEXES
     {
         return Err(invalid_fixed_algebra());
     }
@@ -1011,9 +1006,12 @@ mod tests {
     }
 
     #[test]
-    fn selected_target_coordinates_preserve_order_and_reject_invalid_subsets() {
+    fn selected_target_and_sharing_coordinates_preserve_the_same_exact_order() {
         let coordinates =
             selected_target_data_prime_coordinates().expect("selected target coordinates resolve");
+        let sharing_coordinates = selected_sharing_data_prime_coordinates()
+            .expect("selected sharing coordinates resolve");
+        assert_eq!(coordinates, sharing_coordinates);
         assert_eq!(coordinates.len(), ORDERED_TARGET_DATA_PRIME_INDEXES.len());
         assert!(coordinates.iter().enumerate().all(
             |(target_basis_position, (data_prime_index, modulus))| {
@@ -1024,7 +1022,7 @@ mod tests {
 
         for invalid_indexes in [Vec::new(), vec![0, 0], vec![0, u16::MAX]] {
             assert_eq!(
-                target_data_prime_coordinates(&invalid_indexes)
+                data_prime_coordinates(&invalid_indexes)
                     .expect_err("invalid target subset is refused")
                     .refusal_reason,
                 RefusalReason::InvalidArithmeticRelation
@@ -1057,7 +1055,7 @@ mod tests {
         );
         assert_eq!(
             suite.ordered_sharing_data_prime_indexes(),
-            &(0..DATA_PRIMES.len() as u16).collect::<Vec<_>>()
+            &(0..=CANONICAL_TARGET_CIPHERTEXT_LEVEL as u16).collect::<Vec<_>>()
         );
         assert_eq!(suite.distributions(), FIXED_DISTRIBUTIONS);
     }
@@ -1157,6 +1155,31 @@ mod tests {
                 .refusal_reason,
             RefusalReason::UnsupportedVersionOrSuite
         );
+    }
+
+    #[test]
+    fn suite_decode_refuses_missing_extra_reordered_and_substituted_sharing_coordinates() {
+        for invalid_sharing_indexes in [
+            vec![0, 1, 2, 3, 4],
+            vec![0, 1, 2, 3, 4, 5, 6],
+            vec![0, 1, 2, 3, 5, 4],
+            vec![0, 1, 2, 3, 4, 6],
+        ] {
+            let mut tuple = sample_suite()
+                .canonical_tuple()
+                .expect("suite tuple derives");
+            tuple.items[10] =
+                unsigned16_list(&invalid_sharing_indexes).expect("sharing index list encodes");
+            assert_eq!(
+                SuiteRecord::decode(
+                    &tuple.encode().expect("mutated suite encodes"),
+                    &CanonicalDecodeLimits::default(),
+                )
+                .expect_err("noncanonical sharing coordinates must refuse")
+                .refusal_reason,
+                RefusalReason::UnsupportedVersionOrSuite
+            );
+        }
     }
 
     #[test]

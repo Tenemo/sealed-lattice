@@ -265,6 +265,103 @@ fn executor_enforces_chunked_writes_random_reads_and_exact_last_use() {
 }
 
 #[test]
+fn executor_reuses_one_physical_ordinal_across_non_overlapping_lifecycles() {
+    let physical_object = ProofExternalMemoryObject::new(7);
+    let reusable_plan = ProofExternalMemoryPlan::new(
+        2,
+        4,
+        4,
+        1,
+        4,
+        8,
+        8,
+        16,
+        vec![
+            ProofExternalMemoryObjectPlan::new(
+                physical_object,
+                ProofExternalMemoryProtection::SecretAuthenticatedEncryption,
+                4,
+                0,
+                0,
+                0,
+            ),
+            ProofExternalMemoryObjectPlan::new(
+                physical_object,
+                ProofExternalMemoryProtection::SecretAuthenticatedEncryption,
+                4,
+                1,
+                1,
+                1,
+            ),
+        ],
+    )
+    .expect("non-overlapping lifecycles may reuse one physical ordinal");
+    assert_eq!(reusable_plan.physical_object_count(), Ok(1));
+    assert_eq!(reusable_plan.object_lifecycle_count(), Ok(2));
+
+    let mut executor = ProofExternalMemoryExecutor::new(reusable_plan);
+    let mut storage = TestStorage::default();
+    for (step, expected_bytes) in [[1_u8, 2, 3, 4], [5_u8, 6, 7, 8]].into_iter().enumerate() {
+        executor
+            .begin_object(&mut storage, physical_object)
+            .expect("the current lifecycle begins after the prior deletion");
+        executor
+            .append_object_bytes(&mut storage, physical_object, &expected_bytes)
+            .expect("the current lifecycle writes exact bytes");
+        executor
+            .seal_object(&mut storage, physical_object)
+            .expect("the current lifecycle seals");
+        let mut observed = [0_u8; 4];
+        executor
+            .read_object_bytes(&mut storage, physical_object, 0, &mut observed)
+            .expect("the current lifecycle is the only addressable generation");
+        assert_eq!(observed, expected_bytes);
+        executor
+            .complete_step(&mut storage)
+            .unwrap_or_else(|error| panic!("reused lifecycle step {step} failed: {error:?}"));
+        assert!(!storage.committed.contains_key(&physical_object));
+    }
+    let usage = executor.finish().expect("both lifecycles are consumed");
+    assert_eq!(usage.total_written_byte_length(), 8);
+    assert_eq!(usage.total_read_byte_length(), 8);
+    assert_eq!(usage.peak_stored_byte_length(), 4);
+    assert_eq!(usage.deleted_object_count(), 2);
+
+    assert_eq!(
+        ProofExternalMemoryPlan::new(
+            2,
+            4,
+            4,
+            1,
+            8,
+            8,
+            1,
+            1,
+            vec![
+                ProofExternalMemoryObjectPlan::new(
+                    physical_object,
+                    ProofExternalMemoryProtection::PublicIntegrity,
+                    4,
+                    0,
+                    0,
+                    1,
+                ),
+                ProofExternalMemoryObjectPlan::new(
+                    physical_object,
+                    ProofExternalMemoryProtection::PublicIntegrity,
+                    4,
+                    1,
+                    1,
+                    1,
+                ),
+            ],
+        ),
+        Err(ProofExternalMemoryError::InvalidPlan),
+        "overlapping lifecycles cannot alias one physical ordinal",
+    );
+}
+
+#[test]
 fn executor_accepts_only_full_intermediate_chunks_and_the_exact_declared_tail() {
     let object = ProofExternalMemoryObject::new(0);
     let mut executor = ProofExternalMemoryExecutor::new(single_object_write_plan(4, 10));

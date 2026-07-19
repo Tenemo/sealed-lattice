@@ -159,14 +159,17 @@ pub(crate) struct ProofFieldSchedule {
 
 impl ProofFieldSchedule {
     fn selected(application_statement_schema_identifier: u16) -> Self {
-        let uses_committed_material_schedule = matches!(
+        let uses_high_degree_schedule = matches!(
             application_statement_schema_identifier,
             ProofFamilies::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER
                 | ProofFamilies::AGGREGATE_THRESHOLD_SHARE_STATEMENT_SCHEMA_IDENTIFIER
+                | ProofFamilies::COLLECTIVE_PUBLIC_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER
+                | ProofFamilies::RKG_ROUND_ONE_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER
+                | ProofFamilies::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER
         );
         Self {
             proof_field_index: 0,
-            evaluation_blowup_factor: if uses_committed_material_schedule {
+            evaluation_blowup_factor: if uses_high_degree_schedule {
                 COMMITTED_MATERIAL_PROOF_EVALUATION_BLOWUP_FACTOR
             } else {
                 PROOF_EVALUATION_BLOWUP_FACTOR
@@ -174,7 +177,7 @@ impl ProofFieldSchedule {
             evaluation_coset_offset: PROOF_EVALUATION_COSET_OFFSET,
             deep_point_count: PROOF_DEEP_POINT_COUNT,
             final_polynomial_degree_bound_exclusive: PROOF_FINAL_POLYNOMIAL_DEGREE_BOUND_EXCLUSIVE,
-            unique_query_count: if uses_committed_material_schedule {
+            unique_query_count: if uses_high_degree_schedule {
                 COMMITTED_MATERIAL_PROOF_UNIQUE_QUERY_COUNT
             } else {
                 PROOF_UNIQUE_QUERY_COUNT
@@ -929,7 +932,6 @@ struct RelationRootColumnShape {
 struct RelationRootShape {
     trace_domain_size: u64,
     evaluation_domain_size: u64,
-    opening_degree_bound_exclusive: u64,
     ordered_columns: Vec<RelationRootColumnShape>,
 }
 
@@ -1030,7 +1032,6 @@ fn root_shape(
     Ok(RelationRootShape {
         trace_domain_size: variant.trace_domain_size(),
         evaluation_domain_size: variant.evaluation_domain_size(),
-        opening_degree_bound_exclusive: variant.opening_degree_bound_exclusive(),
         ordered_columns,
     })
 }
@@ -2184,7 +2185,6 @@ mod tests {
             shape: RelationRootShape {
                 trace_domain_size: 1 << 15,
                 evaluation_domain_size: 1 << 19,
-                opening_degree_bound_exclusive: 1 << 16,
                 ordered_columns: vec![RelationRootColumnShape {
                     value_type: RelationColumnValueType::BaseField,
                     source_degree_bound_exclusive: 1 << 15,
@@ -2214,6 +2214,21 @@ mod tests {
             ProofFieldSchedule::selected(ordinary_family),
             ProofFieldSchedule::selected(committed_material_family)
         );
+        for public_aggregate_family in [
+            ProofFamilies::COLLECTIVE_PUBLIC_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+            ProofFamilies::RKG_ROUND_ONE_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+            ProofFamilies::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+        ] {
+            assert_eq!(
+                ProofFieldSchedule::selected(public_aggregate_family),
+                ProofFieldSchedule::selected(committed_material_family)
+            );
+            assert_eq!(
+                ProofFieldSchedule::selected(public_aggregate_family)
+                    .validate(public_aggregate_family, 1),
+                Ok(())
+            );
+        }
 
         let mut wrong_field = field.clone();
         wrong_field.maximum_two_adic_subgroup_generator = 1;
@@ -2394,6 +2409,9 @@ mod tests {
                 family,
                 ProofFamilies::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER
                     | ProofFamilies::AGGREGATE_THRESHOLD_SHARE_STATEMENT_SCHEMA_IDENTIFIER
+                    | ProofFamilies::COLLECTIVE_PUBLIC_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER
+                    | ProofFamilies::RKG_ROUND_ONE_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER
+                    | ProofFamilies::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER
             ) {
                 192
             } else {

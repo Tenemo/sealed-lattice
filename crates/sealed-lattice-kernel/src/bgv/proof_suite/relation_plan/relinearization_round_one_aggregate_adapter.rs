@@ -4,7 +4,10 @@ use crate::{
             CompleteListSetupPolynomialSourceInput,
             SelectedEvaluatorAggregateSourcePolynomialProvider,
         },
-        setup::SetupGeneratedRelinearizationAggregateSourceAuthority,
+        setup::{
+            SetupGeneratedRelinearizationAggregateSourceAuthority,
+            SetupGeneratedRelinearizationRoundOneSourceAuthority,
+        },
     },
     foundation::{FOUNDATION_PROFILE, Hash512, ProofApplicationSlotCeilings, StreamDescriptor},
     hashing::hash_framed_parts_512,
@@ -14,7 +17,6 @@ use super::super::{
     CommonProofProverError, CommonProofSourcePolynomialRequestContext, RelationProofTreeInput,
     SelectedApplicationStatementContext, SelectedEvaluatorStoreSource,
     SetupPublicPolynomialContext, SetupPublicPolynomialRootRole,
-    VerifiedRelinearizationRoundOneSourceMaterial,
     decode_selected_relinearization_round_one_aggregate_statement,
     verified_application_statement_hash,
 };
@@ -37,11 +39,11 @@ fn stream_descriptor_binding(descriptor: &StreamDescriptor) -> ([u8; 64], [u8; 8
 }
 
 fn source_binding(
-    source: &VerifiedRelinearizationRoundOneSourceMaterial,
+    source: &SetupGeneratedRelinearizationRoundOneSourceAuthority,
+    proof_descriptor: &StreamDescriptor,
 ) -> [u8; Hash512::BYTE_LENGTH] {
-    let proof_descriptor = source.proof_stream_descriptor();
     let (proof_digest, proof_byte_length) = stream_descriptor_binding(proof_descriptor);
-    let [left_material, right_material] = source.component_materials();
+    let [left_material, right_material] = source.components();
     let (left_digest, left_byte_length) =
         stream_descriptor_binding(left_material.stream_descriptor());
     let (right_digest, right_byte_length) =
@@ -88,19 +90,6 @@ fn aggregate_component_binding(
     )
 }
 
-fn authenticated_verified_source(
-    material: &super::super::VerifiedKeySwitchComponentMaterial,
-) -> Result<SelectedEvaluatorStoreSource, CommonProofProverError> {
-    Ok(SelectedEvaluatorStoreSource::from_authenticated_authority(
-        material.topology().clone(),
-        material.material_root().into_bytes(),
-        material.stream_descriptor().clone(),
-        material
-            .begin_authenticated_readback()
-            .map_err(|_| CommonProofProverError::InvalidInput)?,
-    ))
-}
-
 fn authenticated_generated_source(
     component: &crate::bgv::setup::SetupGeneratedRelinearizationComponentSource,
 ) -> Result<SelectedEvaluatorStoreSource, CommonProofProverError> {
@@ -122,7 +111,8 @@ fn authenticated_generated_source(
 /// descriptor, or ordinal map participates in the construction.
 pub(crate) fn prepare_relinearization_round_one_aggregate_source(
     relation_plan: &CompiledRelationPlan,
-    ordered_sources: &[&VerifiedRelinearizationRoundOneSourceMaterial],
+    ordered_sources: &[&SetupGeneratedRelinearizationRoundOneSourceAuthority],
+    ordered_round_one_proof_stream_descriptors: &[StreamDescriptor],
     aggregate_authority: &SetupGeneratedRelinearizationAggregateSourceAuthority,
 ) -> Result<
     (
@@ -139,6 +129,7 @@ pub(crate) fn prepare_relinearization_round_one_aggregate_source(
         || relation_plan.application_statement_schema_identifier()
             != ProofApplicationSlotCeilings::RKG_ROUND_ONE_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER
         || ordered_sources.len() != participant_count
+        || ordered_round_one_proof_stream_descriptors.len() != participant_count
         || aggregate_authority.ordered_participant_identities().len() != participant_count
         || aggregate_authority.ordered_anchor_commitment_roots().len() != participant_count
         || aggregate_authority
@@ -198,7 +189,12 @@ pub(crate) fn prepare_relinearization_round_one_aggregate_source(
     observed_identities
         .try_reserve_exact(participant_count)
         .map_err(|_| CommonProofProverError::CountOverflow)?;
-    for (roster_ordinal, source) in ordered_sources.iter().copied().enumerate() {
+    for (roster_ordinal, (source, proof_descriptor)) in ordered_sources
+        .iter()
+        .copied()
+        .zip(ordered_round_one_proof_stream_descriptors)
+        .enumerate()
+    {
         let roster_position =
             u16::try_from(roster_ordinal).map_err(|_| CommonProofProverError::CountOverflow)?;
         if source.protocol_version() != aggregate_authority.protocol_version()
@@ -221,7 +217,7 @@ pub(crate) fn prepare_relinearization_round_one_aggregate_source(
             || aggregate_authority
                 .ordered_round_one_proof_stream_descriptors()
                 .get(roster_ordinal)
-                != Some(source.proof_stream_descriptor())
+                != Some(proof_descriptor)
             || aggregate_authority
                 .ordered_source_root_pairs()
                 .get(roster_ordinal)
@@ -230,7 +226,7 @@ pub(crate) fn prepare_relinearization_round_one_aggregate_source(
             return Err(CommonProofProverError::InvalidInput);
         }
         observed_identities.push(source.participant_identity());
-        source_bindings.push(source_binding(source));
+        source_bindings.push(source_binding(source, proof_descriptor));
     }
     let source_binding_parts = source_bindings
         .iter()
@@ -285,7 +281,7 @@ pub(crate) fn prepare_relinearization_round_one_aggregate_source(
                 storage_byte_offset;
             storage_byte_offset = storage_byte_offset
                 .checked_add(
-                    source.component_materials()[component_ordinal]
+                    source.components()[component_ordinal]
                         .stream_descriptor()
                         .total_byte_length,
                 )
@@ -316,7 +312,7 @@ pub(crate) fn prepare_relinearization_round_one_aggregate_source(
             _ => return Err(CommonProofProverError::InvalidInput),
         };
         for (source_ordinal, source) in ordered_sources.iter().copied().enumerate() {
-            let material = source.component_materials()[component_ordinal];
+            let material = &source.components()[component_ordinal];
             let public_polynomial_context_hash = SetupPublicPolynomialContext::new(
                 source.setup_proof_context_hash(),
                 source_role,
@@ -329,7 +325,7 @@ pub(crate) fn prepare_relinearization_round_one_aggregate_source(
             .map_err(|_| CommonProofProverError::InvalidInput)?;
             ordered_source_inputs.push(
                 CompleteListSetupPolynomialSourceInput::from_authenticated_source(
-                    authenticated_verified_source(material)?,
+                    authenticated_generated_source(material)?,
                     ordered_source_storage_byte_offsets[source_ordinal][component_ordinal],
                     public_polynomial_context_hash,
                     source.root_pair()[component_ordinal],

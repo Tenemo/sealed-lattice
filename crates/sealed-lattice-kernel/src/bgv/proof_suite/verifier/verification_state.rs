@@ -1,19 +1,20 @@
+use super::super::canonical_common_proof_byte_length_ceiling;
 use super::{
     CanonicalItem, CanonicalTuple, CommonProofPrivacyMode, CommonProofQueryOpeningAbsorber,
     CommonProofTranscript, CommonProofVerifierError, CompiledRelationPlan, DecodedProofBodyPrefix,
     PROOF_OBJECT_HEADER_SCHEMA_IDENTIFIER, PROOF_OBJECT_HEADER_SCHEMA_VERSION, ProofBodyError,
     ProofBodyLayout, ProofByteSource, ProofDecodeError, ProofEvaluationDomain,
     ProofFriQueryVerifier, ProofTreeCatalogInput, ProofTreeCatalogSource, ProofTreeRole,
-    QueryVerificationWorkspace, RelationApplicationChallengeAssignment, RelationPlanCheckContext,
-    RelationPlanVariant, SELECTED_PROOF_FIELD_INDEX, ValidatedRelationPlanArtifact,
-    VerifiedCommonProof, VerifiedEvaluatorAuxiliaryRoot, VerifiedRelationColumnEvaluator,
-    VerifiedStatementOwnedTree, absorb_relation_roots, build_complete_proof_tree_catalog,
-    build_runtime_claim_groups, catalog_root, decode_application_statement,
-    decode_proof_body_prefix_owned, decode_proof_query_section_header_at,
-    decode_proof_query_tree_at, derive_relation_tree_inputs, proof_body_prefix_byte_length,
-    proof_query_tree_byte_length, validate_evaluator_auxiliary_root_linkage,
-    verified_application_statement_hash, verified_proof_header_hash,
-    verify_statement_derived_deep_values,
+    ProofTreeValue, QueryVerificationWorkspace, RelationApplicationChallengeAssignment,
+    RelationPlanCheckContext, RelationPlanVariant, SELECTED_PROOF_FIELD_INDEX,
+    ValidatedRelationPlanArtifact, VerifiedCommonProof, VerifiedEvaluatorAuxiliaryRoot,
+    VerifiedRelationColumnEvaluator, VerifiedStatementOwnedTree, absorb_relation_roots,
+    build_complete_proof_tree_catalog, build_runtime_claim_groups, catalog_root,
+    decode_application_statement, decode_proof_body_prefix_owned,
+    decode_proof_query_section_header_at, decode_proof_query_tree_at, derive_relation_tree_inputs,
+    proof_body_prefix_byte_length, proof_query_tree_byte_length,
+    validate_evaluator_auxiliary_root_linkage, verified_application_statement_hash,
+    verified_proof_header_hash, verify_statement_derived_deep_values,
 };
 
 /// Inputs that have already crossed their family-specific trust boundaries.
@@ -113,6 +114,32 @@ pub(crate) struct CommonProofVerificationStateMachine {
     query_opening_absorber: Option<CommonProofQueryOpeningAbsorber>,
     workspace: Option<QueryVerificationWorkspace>,
     verified_common_proof: Option<VerifiedCommonProof>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct CommonProofVerificationResidentMemoryAccounting {
+    fixed_and_plan_resident_byte_length: u64,
+    maximum_post_prefix_resident_byte_length: u64,
+    maximum_decoding_transient_byte_length: u64,
+    maximum_resident_byte_length: u64,
+}
+
+impl CommonProofVerificationResidentMemoryAccounting {
+    pub(crate) const fn fixed_and_plan_resident_byte_length(self) -> u64 {
+        self.fixed_and_plan_resident_byte_length
+    }
+
+    pub(crate) const fn maximum_post_prefix_resident_byte_length(self) -> u64 {
+        self.maximum_post_prefix_resident_byte_length
+    }
+
+    pub(crate) const fn maximum_decoding_transient_byte_length(self) -> u64 {
+        self.maximum_decoding_transient_byte_length
+    }
+
+    pub(crate) const fn maximum_resident_byte_length(self) -> u64 {
+        self.maximum_resident_byte_length
+    }
 }
 
 pub(super) struct ProofBodyByteSource<'source, Source: ProofByteSource + ?Sized> {

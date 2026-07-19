@@ -114,7 +114,8 @@ mod verified_values;
 #[cfg(test)]
 pub(crate) use core_verification::verify_common_proof;
 pub(crate) use core_verification::{
-    VerifiedRelationColumnEvaluator, verified_application_statement_hash,
+    VerifiedRelationColumnEvaluator, VerifiedRelationColumnEvaluatorMemoryAccounting,
+    verified_application_statement_hash,
 };
 pub(crate) use verification_state::{
     CommonProofRequiredByteRange, CommonProofVerificationInput, CommonProofVerificationPoll,

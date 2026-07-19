@@ -1,9 +1,11 @@
 use super::*;
 use crate::{
     bgv::{
+        direct_ballots::direct_ballot_slots,
         evaluator::{
             engine::{DevelopmentBgvKey, modulus_switch_to, normalize_scaling},
             key_switch::generate_relinearization_key,
+            top_k::DIRECT_COMPARISON_OUTPUT_LEVEL,
         },
         proof_suite::{
             ComponentMaterialOwnershipBinding, KeySwitchComponentMaterialTopology,
@@ -165,7 +167,7 @@ fn evaluator_store_fixture(
         store_bytes.len(),
         usize::try_from(expected_store_byte_length).expect("store length fits usize")
     );
-    assert_eq!(ordered_component_descriptors.len(), 6);
+    assert_eq!(ordered_component_descriptors.len(), 5);
     EvaluatorStoreFixture {
         bytes: store_bytes,
         ordered_component_descriptors,
@@ -247,7 +249,7 @@ fn small_valid_program_set() -> EvaluatorProgramSet {
             EvaluatorOpcode::ModulusSwitchToLevel,
             Some(1),
             vec![0],
-            1,
+            u64::try_from(CANONICAL_TARGET_CIPHERTEXT_LEVEL).expect("target level fits u64"),
             0,
             None,
         )
@@ -326,7 +328,7 @@ fn selected_program_round_trips_and_uses_the_exact_compact_key_catalog() {
             },
         )
         .collect::<Vec<_>>();
-    assert_eq!(expected_galois_positions.len(), 4);
+    assert_eq!(expected_galois_positions.len(), 3);
     assert_eq!(
         positions.galois_catalog_positions(),
         expected_galois_positions
@@ -341,6 +343,213 @@ fn selected_program_round_trips_and_uses_the_exact_compact_key_catalog() {
         assert_eq!(
             stream_positions.galois_catalog_positions(),
             expected_galois_positions
+        );
+    }
+}
+
+#[test]
+fn selected_streams_use_canonical_pair_differences_and_the_exact_directed_rotations() {
+    const PAIR_COUNT: usize = SELECTED_OPTION_COUNT * (SELECTED_OPTION_COUNT - 1) / 2;
+
+    let program = selected_evaluator_program_set().expect("selected evaluator program");
+    let constant_kinds_by_hash = program
+        .validated_constant_catalog()
+        .expect("selected constant catalog validates");
+    let scheduled_galois_levels = selected_evaluator_rotation_key_schedule(SELECTED_OPTION_COUNT)
+        .expect("selected Galois schedule")
+        .into_iter()
+        .collect::<BTreeMap<_, _>>();
+
+    for stream in program.streams() {
+        let operative_instructions = stream
+            .instructions()
+            .iter()
+            .filter(|instruction| instruction.opcode != EvaluatorOpcode::DropRegister)
+            .collect::<Vec<_>>();
+        let pair_shift_instruction = operative_instructions[0];
+        assert_eq!(pair_shift_instruction.opcode, EvaluatorOpcode::PlaintextAdd);
+        let pair_shift = program
+            .constants()
+            .iter()
+            .find(|constant| {
+                Some(constant.constant_hash().expect("constant hash"))
+                    == pair_shift_instruction.constant_hash
+            })
+            .expect("pair shift constant");
+        assert!(
+            pair_shift.values()[..PAIR_COUNT]
+                .iter()
+                .all(|value| *value == 90)
+        );
+        assert!(
+            pair_shift.values()[PAIR_COUNT..]
+                .iter()
+                .all(|value| *value == 0)
+        );
+        assert!(
+            stream
+                .instructions()
+                .iter()
+                .all(|instruction| instruction.opcode != EvaluatorOpcode::CiphertextSubtract)
+        );
+
+        let galois_instructions = stream
+            .instructions()
+            .iter()
+            .filter(|instruction| instruction.opcode == EvaluatorOpcode::GaloisRotate)
+            .collect::<Vec<_>>();
+        assert_eq!(galois_instructions.len(), 211);
+        assert_eq!(
+            galois_instructions
+                .iter()
+                .map(|instruction| instruction.immediate0)
+                .collect::<BTreeSet<_>>(),
+            [7_971_u64, 43_691, 130_393].into_iter().collect()
+        );
+
+        let mut register_states = vec![Some(RegisterState {
+            level: SELECTED_EVALUATOR_WORKING_LEVEL,
+            decryption_multiplier: 1,
+        })];
+        for instruction in stream.instructions() {
+            if instruction.opcode == EvaluatorOpcode::DropRegister {
+                let register_index = usize::try_from(instruction.input_registers[0])
+                    .expect("register number fits usize");
+                register_states[register_index] = None;
+                continue;
+            }
+            let input_states = instruction
+                .input_registers
+                .iter()
+                .map(|register| read_live_register(&register_states, *register))
+                .collect::<CanonicalResult<Vec<_>>>()
+                .expect("compiled input states remain live");
+            if instruction.opcode == EvaluatorOpcode::GaloisRotate {
+                assert_eq!(input_states[0].level, DIRECT_COMPARISON_OUTPUT_LEVEL);
+            }
+            let output_state = evaluate_instruction_transition(
+                instruction,
+                &input_states,
+                &constant_kinds_by_hash,
+                &scheduled_galois_levels,
+            )
+            .expect("compiled transition validates");
+            if instruction.opcode.produces_register() {
+                register_states.push(output_state);
+            }
+        }
+    }
+}
+
+#[test]
+fn prepared_execution_schedules_keep_canonical_order_and_account_every_top_count() {
+    let program = selected_evaluator_program_set().expect("selected evaluator program");
+    let canonical_program_bytes = program.encode().expect("selected program encodes");
+    let mut observed_accounting = Vec::with_capacity(program.streams().len());
+
+    for stream in program.streams() {
+        let schedule = PreparedEvaluatorExecutionSchedule::derive(stream.instructions())
+            .expect("prepared evaluator schedule derives from canonical instructions");
+        let accounting = schedule.accounting();
+        let expected_key_operation_count = stream
+            .instructions()
+            .iter()
+            .filter(|instruction| {
+                matches!(
+                    instruction.opcode(),
+                    EvaluatorOpcode::CiphertextMultiplyRelinearizeAndDrop
+                        | EvaluatorOpcode::CiphertextMultiplyAndRelinearize
+                        | EvaluatorOpcode::GaloisRotate
+                )
+            })
+            .count();
+        assert_eq!(
+            accounting.key_operation_count(),
+            expected_key_operation_count
+        );
+        assert!(accounting.key_load_count() < accounting.key_operation_count());
+        assert!(accounting.key_store_read_byte_count() > 0);
+        assert!(accounting.key_store_reread_byte_count() > 0);
+        assert!(accounting.key_ntt_transform_count() > 0);
+        assert!(accounting.maximum_live_ciphertext_count() <= MAXIMUM_LIVE_REGISTER_COUNT);
+
+        for (instruction_ordinal, instruction) in stream.instructions().iter().enumerate() {
+            let required_key = schedule
+                .required_key(instruction_ordinal)
+                .expect("canonical instruction has a prepared key entry");
+            match instruction.opcode() {
+                EvaluatorOpcode::CiphertextMultiplyRelinearizeAndDrop
+                | EvaluatorOpcode::CiphertextMultiplyAndRelinearize => assert_eq!(
+                    required_key,
+                    Some(PreparedEvaluatorKeyIdentity::Relinearization {
+                        catalog_level: SELECTED_RELINEARIZATION_KEY_LEVEL,
+                    })
+                ),
+                EvaluatorOpcode::GaloisRotate => {
+                    let PreparedEvaluatorKeyIdentity::Galois {
+                        galois_element,
+                        catalog_level,
+                    } = required_key.expect("rotation has a prepared Galois key")
+                    else {
+                        panic!("rotation prepared the wrong evaluator-key role");
+                    };
+                    assert_eq!(
+                        galois_element,
+                        usize::try_from(instruction.immediate0())
+                            .expect("Galois element fits usize")
+                    );
+                    assert_eq!(catalog_level, DIRECT_COMPARISON_OUTPUT_LEVEL);
+                }
+                _ => assert_eq!(required_key, None),
+            }
+        }
+        observed_accounting.push(accounting);
+    }
+
+    println!("prepared evaluator accounting: {observed_accounting:#?}");
+    assert_eq!(
+        program.encode().expect("selected program re-encodes"),
+        canonical_program_bytes,
+        "the prepared schedule must remain an internal derivative of canonical bytes"
+    );
+}
+
+#[test]
+fn pair_window_tile_width_screen_reports_exact_prepared_schedule_costs() {
+    for pair_window_tile_width in 1..=10 {
+        let program =
+            selected_evaluator_program_set_with_pair_window_tile_width(pair_window_tile_width)
+                .expect("candidate pair-window program compiles");
+        let mut minimum_instruction_count = usize::MAX;
+        let mut maximum_instruction_count = 0_usize;
+        let mut maximum_accounting = SelectedEvaluatorExecutionAccounting::default();
+        let mut maximum_peak = None;
+        let mut maximum_peak_top_count = 0_u16;
+
+        for stream in program.streams() {
+            minimum_instruction_count = minimum_instruction_count.min(stream.instructions().len());
+            maximum_instruction_count = maximum_instruction_count.max(stream.instructions().len());
+            let schedule = PreparedEvaluatorExecutionSchedule::derive(stream.instructions())
+                .expect("candidate prepared schedule derives");
+            let accounting = schedule.accounting();
+            if accounting.maximum_live_ciphertext_coefficient_byte_count()
+                > maximum_accounting.maximum_live_ciphertext_coefficient_byte_count()
+            {
+                maximum_accounting = accounting;
+                maximum_peak = Some(schedule.liveness_peak());
+                maximum_peak_top_count = stream.top_count();
+            }
+        }
+
+        let maximum_peak = maximum_peak.expect("candidate program has a liveness peak");
+        let maximum_peak_stream = program
+            .streams()
+            .iter()
+            .find(|stream| stream.top_count() == maximum_peak_top_count)
+            .expect("peak stream is present");
+        println!(
+            "pair-window width {pair_window_tile_width}: instructions={minimum_instruction_count}..={maximum_instruction_count}, accounting={maximum_accounting:?}, peak_top_count={maximum_peak_top_count}, peak={maximum_peak:?}, peak_instruction={:?}",
+            maximum_peak_stream.instructions()[maximum_peak.instruction_ordinal]
         );
     }
 }
@@ -412,6 +621,30 @@ fn validation_refuses_unknown_or_wrong_kind_constants_and_unsupported_rotations(
 }
 
 #[test]
+fn validation_maps_a_lower_level_rotation_to_its_exact_catalog_level() {
+    assert!(CANONICAL_TARGET_CIPHERTEXT_LEVEL <= DIRECT_COMPARISON_OUTPUT_LEVEL);
+    let mut lower_level_rotation = small_valid_program_set();
+    for stream in &mut lower_level_rotation.streams {
+        stream.instructions[2].opcode = EvaluatorOpcode::GaloisRotate;
+        stream.instructions[2].immediate0 = 7_971;
+        stream.instructions[2].constant_hash = None;
+    }
+    lower_level_rotation
+        .validate()
+        .expect("a lower CRT prefix can consume the selected catalog key");
+    assert_eq!(
+        lower_level_rotation
+            .key_positions()
+            .expect("lower-level rotation positions validate")
+            .galois_catalog_positions(),
+        &[EvaluatorGaloisKeyPosition {
+            galois_element: 7_971,
+            catalog_level: DIRECT_COMPARISON_OUTPUT_LEVEL,
+        }]
+    );
+}
+
+#[test]
 fn validation_refuses_noncanonical_constants_and_terminal_state_drift() {
     let mut noncanonical_constant = small_valid_program_set();
     noncanonical_constant.constants[0].values[0] =
@@ -420,14 +653,19 @@ fn validation_refuses_noncanonical_constants_and_terminal_state_drift() {
 
     let mut terminal_level_drift = small_valid_program_set();
     for stream in &mut terminal_level_drift.streams {
-        stream.instructions[0].immediate0 = 2;
+        stream.instructions[0].immediate0 = u64::try_from(
+            CANONICAL_TARGET_CIPHERTEXT_LEVEL
+                .checked_add(1)
+                .expect("terminal drift level fits usize"),
+        )
+        .expect("terminal drift level fits u64");
     }
     assert!(terminal_level_drift.validate().is_err());
 }
 
 #[test]
 #[ignore = "heavy Rust kernel evaluator test; run pnpm run test:rust:kernel:heavy"]
-fn heavy_rust_kernel_production_executor_preserves_score_packing_tie_order_and_sparse_targets() {
+fn heavy_rust_kernel_production_executor_preserves_pairwise_tie_order_and_sparse_targets() {
     let selected_suite = selected_suite_capability_for_tests();
     let context = ExecutorTestContext::new(selected_suite.suite_identifier());
     let development_key = DevelopmentBgvKey::generate("production-executor-development-key")
@@ -438,25 +676,37 @@ fn heavy_rust_kernel_production_executor_preserves_score_packing_tie_order_and_s
         &context.public_setup_seed,
     );
     let cases = [
-        ("all ties with one retained target", [55_u64; 20], 1_u16),
         (
-            "ties crossing a sparse cutoff",
-            [
-                72, 100, 49, 91, 72, 20, 80, 91, 10, 60, 72, 30, 91, 80, 60, 72, 49, 20, 10, 30,
-            ],
+            "one ballot with all ties and one retained target",
+            [5_u64; 20],
+            1_u16,
+            1_u16,
+        ),
+        (
+            "ten ballots with modular negatives and ties crossing a sparse cutoff",
+            [7, 10, 4, 9, 7, 2, 8, 9, 1, 6, 7, 3, 9, 8, 6, 7, 4, 2, 1, 3],
+            10,
             7,
         ),
         (
-            "paired extremes with one excluded target",
-            [
-                10, 100, 20, 90, 30, 80, 40, 70, 50, 60, 60, 50, 70, 40, 80, 30, 90, 20, 100, 10,
-            ],
+            "ten ballots at score extremes with one excluded target",
+            [1, 10, 2, 9, 3, 8, 4, 7, 5, 6, 6, 5, 7, 4, 8, 3, 9, 2, 10, 1],
+            10,
             19,
         ),
-        ("all ties with every retained target", [55_u64; 20], 20),
+        (
+            "one ballot with all ties and every retained target",
+            [5_u64; 20],
+            1,
+            20,
+        ),
     ];
 
-    for (case_description, aggregate_scores, top_count) in cases {
+    for (case_description, ballot_scores, ballot_count, top_count) in cases {
+        let aggregate_scores = ballot_scores.map(|score| score * u64::from(ballot_count));
+        let aggregate_pair_differences =
+            direct_ballot_slots(&aggregate_scores, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE)
+                .expect("aggregate pair-difference slots derive");
         let store_material = authenticated_evaluator_store_material(
             &selected_suite,
             context,
@@ -496,10 +746,10 @@ fn heavy_rust_kernel_production_executor_preserves_score_packing_tie_order_and_s
 
         let full_level_aggregate = development_key
             .encrypt_slots(
-                &aggregate_scores,
+                &aggregate_pair_differences,
                 &format!("production-executor-aggregate-{top_count}"),
             )
-            .expect("aggregate scores encrypt");
+            .expect("aggregate pair differences encrypt");
         let working_level_aggregate =
             modulus_switch_to(&full_level_aggregate, SELECTED_EVALUATOR_WORKING_LEVEL)
                 .expect("aggregate reaches the selected evaluator level");
@@ -509,15 +759,13 @@ fn heavy_rust_kernel_production_executor_preserves_score_packing_tie_order_and_s
             .decrypt_to_slots(&aggregate_ciphertext)
             .expect("working aggregate decrypts");
         assert_eq!(
-            &aggregate_slots[..SELECTED_OPTION_COUNT],
-            aggregate_scores.as_slice(),
-            "input score packing drifted for {case_description}"
+            &aggregate_slots[..190],
+            &aggregate_pair_differences[..190],
+            "input pair-difference packing drifted for {case_description}"
         );
         assert!(
-            aggregate_slots[SELECTED_OPTION_COUNT..]
-                .iter()
-                .all(|slot| *slot == 0),
-            "input packing leaked outside the score slots for {case_description}"
+            aggregate_slots[190..].iter().all(|slot| *slot == 0),
+            "input packing leaked outside the pair-difference slots for {case_description}"
         );
         let verified_aggregate = VerifiedEvaluatorAggregate::from_verified_ballot_aggregate(
             FOUNDATION_PROFILE.protocol_version,
@@ -527,7 +775,7 @@ fn heavy_rust_kernel_production_executor_preserves_score_packing_tie_order_and_s
             context.roster_hash,
             context.verified_setup_source_hash,
             context.verified_aggregate_source_hash,
-            FOUNDATION_PROFILE.participant_count,
+            ballot_count,
             top_count,
             aggregate_ciphertext,
         )
@@ -554,13 +802,51 @@ fn heavy_rust_kernel_production_executor_preserves_score_packing_tie_order_and_s
                 SelectedEvaluatorExecutionProgress::Complete => break,
             }
         }
+        let observed_accounting = execution.execution_accounting();
+        let (
+            expected_key_operation_count,
+            expected_key_load_count,
+            expected_store_read_byte_count,
+            expected_store_reread_byte_count,
+            expected_ntt_transform_count,
+        ) = if top_count == 20 {
+            (247, 11, 325_320_704, 163_315_712, 1_198)
+        } else {
+            (259, 12, 417_333_248, 255_328_256, 1_396)
+        };
+        assert_eq!(
+            observed_accounting.key_operation_count(),
+            expected_key_operation_count,
+            "key-operation accounting drifted for {case_description}"
+        );
+        assert_eq!(
+            observed_accounting.key_load_count(),
+            expected_key_load_count,
+            "key-load accounting drifted for {case_description}"
+        );
+        assert_eq!(
+            observed_accounting.key_store_read_byte_count(),
+            expected_store_read_byte_count,
+            "key-store traffic drifted for {case_description}"
+        );
+        assert_eq!(
+            observed_accounting.key_store_reread_byte_count(),
+            expected_store_reread_byte_count,
+            "key-store reread traffic drifted for {case_description}"
+        );
+        assert_eq!(
+            observed_accounting.key_ntt_transform_count(),
+            expected_ntt_transform_count,
+            "key NTT accounting drifted for {case_description}"
+        );
+        assert!(
+            observed_accounting.maximum_live_ciphertext_count() <= MAXIMUM_LIVE_REGISTER_COUNT,
+            "live ciphertext bound drifted for {case_description}"
+        );
         let verified_execution = execution
             .finish()
             .expect("production evaluator execution finishes");
-        assert_eq!(
-            verified_execution.ballot_count(),
-            FOUNDATION_PROFILE.participant_count
-        );
+        assert_eq!(verified_execution.ballot_count(), ballot_count);
         assert_eq!(verified_execution.top_count(), top_count);
         let target_identifier_slots = development_key
             .decrypt_to_slots(verified_execution.target_identifier())

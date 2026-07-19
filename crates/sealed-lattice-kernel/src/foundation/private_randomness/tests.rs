@@ -707,6 +707,7 @@ fn proof_application_slots_enforce_closed_coordinate_shapes() {
         (0x1214, Some(9), Some(0), None),
         (0x1213, None, None, None),
         (0x1215, None, Some(u32::MAX), None),
+        (0x1218, None, None, None),
         (ORDINARY_BALLOT_PROOF_FAMILY, Some(1), None, Some(0)),
     ] {
         assert!(
@@ -728,6 +729,7 @@ fn proof_application_slots_enforce_closed_coordinate_shapes() {
         (0x1214, Some(0), None, None),
         (0x1213, Some(0), None, None),
         (0x1215, None, None, None),
+        (0x1218, Some(0), None, None),
         (ORDINARY_BALLOT_PROOF_FAMILY, Some(0), None, None),
         (0xffff, None, None, None),
     ] {
@@ -759,10 +761,44 @@ fn proof_application_slots_enforce_closed_coordinate_shapes() {
 }
 
 #[test]
-fn public_only_and_unassigned_randomness_domains_refuse() {
-    for public_family in PUBLIC_ONLY_PROOF_FAMILIES {
+fn every_public_only_family_refuses_private_attempts_and_randomness_domains() {
+    for (public_family, schedule_position) in [
+        (
+            ProofFamilyIdentifiers::COLLECTIVE_PUBLIC_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+            None,
+        ),
+        (
+            ProofFamilyIdentifiers::RKG_ROUND_ONE_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+            Some(0),
+        ),
+        (
+            ProofFamilyIdentifiers::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+            None,
+        ),
+    ] {
+        let application_slot = ProofApplicationSlot::new(
+            hash(1),
+            hash(2),
+            hash(3),
+            public_family,
+            None,
+            schedule_position,
+            None,
+        )
+        .expect("the public-only family has one canonical slot shape");
+
         assert!(PrivateRandomnessDomain::reset_safe_proof(public_family, 1).is_err());
+        assert!(PersistentProofCoinInput::new(application_slot, hash(4)).is_err());
+        assert_eq!(
+            proof_attempt_identifier_derivation_count(public_family),
+            Some(0)
+        );
     }
+    assert_eq!(
+        PUBLIC_ONLY_PROOF_FAMILIES,
+        ProofFamilyIdentifiers::PUBLIC_ONLY_FAMILY_SCHEMA_IDENTIFIERS,
+    );
+
     for invalid_purpose in [0, 8, 9, 10, 13, u16::MAX] {
         assert!(PrivateRandomnessDomain::setup_suite_distribution(invalid_purpose).is_err());
     }

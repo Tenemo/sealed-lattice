@@ -11,9 +11,9 @@ use super::{
     ProofExternalMemoryExecutorError, ProofExternalMemoryObject, ProofExternalMemoryObjectPlan,
     ProofExternalMemoryPlan, ProofExternalMemoryProtection, ProofLeafVisibility, ProofPrivacyMode,
     ProofProfileError, ProofTreeCatalogEntry, ProofTreeCatalogSource, ProofTreeRole,
-    RelationApplicationChallengeAssignment, RelationColumnOrigin, RelationColumnValueType,
-    RelationMaskKind, RelationMaskTargetClass, RelationPlanCheckContext, RelationPlanError,
-    RelationPlanVariant, RelationProofTreeInput, RelationTreeDescriptor,
+    ProofTreeValue, RelationApplicationChallengeAssignment, RelationColumnOrigin,
+    RelationColumnValueType, RelationMaskKind, RelationMaskTargetClass, RelationPlanCheckContext,
+    RelationPlanError, RelationPlanVariant, RelationProofTreeInput, RelationTreeDescriptor,
     StatementOwnedProofTreeInput, StoredCommonProofMerkleTree, TranscriptError, Zeroize, Zeroizing,
     canonical_common_proof_leaf_byte_length, canonical_leaf_byte_length,
     common_proof_merkle_storage_plan, common_proof_tree_value_type, entry_leaf_count,
@@ -80,6 +80,7 @@ pub(super) type CompletedCommonProofGenerationResult<Storage, Coins, Sink> = Res
 
 pub(crate) struct GeneratedCommonProofStoragePlan {
     pub(super) external_memory_plan: ProofExternalMemoryPlan,
+    pub(super) external_memory_requirement: CommonProofExternalMemoryRequirement,
     pub(super) tree_plans: BTreeMap<u16, CommonProofMerkleStoragePlan>,
     pub(super) replay_polynomial_plans:
         BTreeMap<CommonProofReplayPolynomialKey, CommonProofReplayPolynomialPlan>,
@@ -194,7 +195,8 @@ struct GeneratedCommonProofStorageGeometry {
     maximum_chunk_byte_length: u32,
     maximum_transaction_payload_byte_length: u64,
     maximum_transaction_operation_count: u32,
-    object_count: u32,
+    distinct_physical_object_count: u32,
+    object_lifecycle_count: u32,
     maximum_stored_byte_length: u64,
     maximum_total_written_byte_length: u64,
     maximum_total_read_byte_length: u64,
@@ -213,7 +215,8 @@ pub(crate) struct CommonProofExternalMemoryRequirement {
     step_count: u32,
     maximum_chunk_byte_length: u32,
     maximum_transaction_payload_byte_length: u64,
-    object_count: u32,
+    distinct_physical_object_count: u32,
+    object_lifecycle_count: u32,
     peak_stored_byte_length: u64,
     total_written_byte_length: u64,
     total_read_byte_length: u64,
@@ -233,8 +236,12 @@ impl CommonProofExternalMemoryRequirement {
         self.maximum_transaction_payload_byte_length
     }
 
-    pub(crate) const fn object_count(self) -> u32 {
-        self.object_count
+    pub(crate) const fn distinct_physical_object_count(self) -> u32 {
+        self.distinct_physical_object_count
+    }
+
+    pub(crate) const fn object_lifecycle_count(self) -> u32 {
+        self.object_lifecycle_count
     }
 
     pub(crate) const fn peak_stored_byte_length(self) -> u64 {
@@ -1018,6 +1025,10 @@ fn common_tree_materialization_phase(source: ProofTreeCatalogSource) -> Option<u
     }
 }
 
+fn entry_uses_statement_owned_replay(entry: &ProofTreeCatalogEntry) -> bool {
+    entry.bound_root().is_some() && !entry.uses_common_merkle_context()
+}
+
 /// Generates the exact object liveness graph for every common tree.  Read and
 /// transaction ceilings include worst-case query collisions and frontiers;
 /// they are operational limits, never proof fields.
@@ -1250,6 +1261,27 @@ fn derive_generated_common_proof_storage_geometry(
         }
     }
     let query_step = next_post_auxiliary_tree_step;
+    for (tree_index, descriptor) in variant.ordered_trees().iter().enumerate() {
+        let RelationTreeDescriptor::BoundPublic {
+            ordered_column_ordinals,
+            ..
+        } = descriptor
+        else {
+            continue;
+        };
+        let entry = catalog.entries().get(tree_index).ok_or(
+            GeneratedCommonProofStoragePlanError::Prover(CommonProofProverError::InvalidTree),
+        )?;
+        if !entry_uses_statement_owned_replay(entry) {
+            continue;
+        }
+        for column_ordinal in ordered_column_ordinals {
+            last_relation_evaluation_use_steps
+                .entry(*column_ordinal)
+                .and_modify(|last_use_step| *last_use_step = (*last_use_step).max(query_step))
+                .or_insert(query_step);
+        }
+    }
     let quotient_component_tree_count = u32::try_from(
         common_entries
             .iter()
@@ -1308,6 +1340,92 @@ fn derive_generated_common_proof_storage_geometry(
         let materialization_step = *materialization_steps.get(catalog_index).ok_or(
             GeneratedCommonProofStoragePlanError::Prover(CommonProofProverError::InvalidTree),
         )?;
+        if entry_uses_statement_owned_replay(entry) {
+            let descriptor = variant
+                .ordered_trees()
+                .get(usize::from(*catalog_index))
+                .ok_or(GeneratedCommonProofStoragePlanError::Prover(
+                    CommonProofProverError::InvalidTree,
+                ))?;
+            let RelationTreeDescriptor::BoundPublic {
+                ordered_column_ordinals,
+                ..
+            } = descriptor
+            else {
+                return Err(GeneratedCommonProofStoragePlanError::Prover(
+                    CommonProofProverError::InvalidTree,
+                ));
+            };
+            let leaf_count = u64::try_from(
+                entry_leaf_count(entry, variant.evaluation_domain_size()).map_err(|error| {
+                    match error {
+                        ProofBodyError::CountOverflow => {
+                            GeneratedCommonProofStoragePlanError::Prover(
+                                CommonProofProverError::CountOverflow,
+                            )
+                        }
+                        ProofBodyError::AllocationLimitExceeded => {
+                            GeneratedCommonProofStoragePlanError::Prover(
+                                CommonProofProverError::AllocationLimitExceeded,
+                            )
+                        }
+                        _ => GeneratedCommonProofStoragePlanError::Prover(
+                            CommonProofProverError::InvalidTree,
+                        ),
+                    }
+                })?,
+            )
+            .map_err(|_| {
+                GeneratedCommonProofStoragePlanError::Prover(CommonProofProverError::CountOverflow)
+            })?;
+            let mut row_byte_length = 0_u64;
+            for column_ordinal in ordered_column_ordinals {
+                let column = variant
+                    .ordered_columns()
+                    .get(usize::try_from(*column_ordinal).map_err(|_| {
+                        GeneratedCommonProofStoragePlanError::Prover(
+                            CommonProofProverError::CountOverflow,
+                        )
+                    })?)
+                    .ok_or(GeneratedCommonProofStoragePlanError::Prover(
+                        CommonProofProverError::InvalidColumn,
+                    ))?;
+                if column.value_type() != RelationColumnValueType::BaseField {
+                    return Err(GeneratedCommonProofStoragePlanError::Prover(
+                        CommonProofProverError::InvalidColumn,
+                    ));
+                }
+                row_byte_length = checked_add_u64(
+                    row_byte_length,
+                    resident_value_byte_length(column.value_type()),
+                )?;
+            }
+            let paired_leaf_value_count =
+                leaf_count
+                    .checked_mul(2)
+                    .ok_or(GeneratedCommonProofStoragePlanError::Prover(
+                        CommonProofProverError::CountOverflow,
+                    ))?;
+            let one_pass_read_byte_length =
+                checked_multiply_u64(paired_leaf_value_count, row_byte_length)?;
+            maximum_total_read_byte_length = checked_add_u64(
+                maximum_total_read_byte_length,
+                checked_multiply_u64(one_pass_read_byte_length, 2)?,
+            )?;
+            let one_pass_transaction_count = checked_multiply_u64(
+                paired_leaf_value_count,
+                u64::try_from(ordered_column_ordinals.len()).map_err(|_| {
+                    GeneratedCommonProofStoragePlanError::Prover(
+                        CommonProofProverError::CountOverflow,
+                    )
+                })?,
+            )?;
+            maximum_transaction_count = checked_add_u64(
+                maximum_transaction_count,
+                checked_multiply_u64(one_pass_transaction_count, 2)?,
+            )?;
+            continue;
+        }
         let tree_plan = common_proof_merkle_storage_plan(
             entry,
             variant.evaluation_domain_size(),
@@ -2053,17 +2171,28 @@ fn derive_generated_common_proof_storage_geometry(
     })?;
     maximum_transaction_count =
         checked_add_u64(maximum_transaction_count, deletion_transaction_count)?;
-    let object_count = u32::try_from(object_plans.len()).map_err(|_| {
+    let object_lifecycle_count = u32::try_from(object_plans.len()).map_err(|_| {
         GeneratedCommonProofStoragePlanError::Prover(CommonProofProverError::CountOverflow)
     })?;
-    let maximum_transaction_operation_count = object_count;
+    let distinct_physical_object_count = u32::try_from(
+        object_plans
+            .iter()
+            .map(|plan| plan.object())
+            .collect::<BTreeSet<_>>()
+            .len(),
+    )
+    .map_err(|_| {
+        GeneratedCommonProofStoragePlanError::Prover(CommonProofProverError::CountOverflow)
+    })?;
+    let maximum_transaction_operation_count = distinct_physical_object_count;
     let maximum_stored_byte_length = exact_peak_stored_byte_length(&object_plans)?;
     Ok(GeneratedCommonProofStorageGeometry {
         step_count,
         maximum_chunk_byte_length,
         maximum_transaction_payload_byte_length: chunk_byte_length,
         maximum_transaction_operation_count,
-        object_count,
+        distinct_physical_object_count,
+        object_lifecycle_count,
         maximum_stored_byte_length,
         maximum_total_written_byte_length,
         maximum_total_read_byte_length,
@@ -2097,7 +2226,8 @@ pub(super) fn generated_common_proof_storage_plan(
         maximum_chunk_byte_length,
         maximum_transaction_payload_byte_length,
         maximum_transaction_operation_count,
-        object_count: _,
+        distinct_physical_object_count,
+        object_lifecycle_count,
         maximum_stored_byte_length,
         maximum_total_written_byte_length,
         maximum_total_read_byte_length,
@@ -2108,6 +2238,17 @@ pub(super) fn generated_common_proof_storage_plan(
         relation_evaluation_transform_plans,
         quotient_constraint_transform_plans,
     } = geometry;
+    let external_memory_requirement = CommonProofExternalMemoryRequirement {
+        step_count,
+        maximum_chunk_byte_length,
+        maximum_transaction_payload_byte_length,
+        distinct_physical_object_count,
+        object_lifecycle_count,
+        peak_stored_byte_length: maximum_stored_byte_length,
+        total_written_byte_length: maximum_total_written_byte_length,
+        total_read_byte_length: maximum_total_read_byte_length,
+        transaction_count: maximum_transaction_count,
+    };
     let external_memory_plan = ProofExternalMemoryPlan::new(
         step_count,
         maximum_chunk_byte_length,
@@ -2122,6 +2263,7 @@ pub(super) fn generated_common_proof_storage_plan(
     .map_err(GeneratedCommonProofStoragePlanError::Storage)?;
     Ok(GeneratedCommonProofStoragePlan {
         external_memory_plan,
+        external_memory_requirement,
         tree_plans,
         replay_polynomial_plans,
         relation_evaluation_transform_plans,
@@ -2151,7 +2293,8 @@ pub(crate) fn common_proof_external_memory_requirement(
         step_count: geometry.step_count,
         maximum_chunk_byte_length: geometry.maximum_chunk_byte_length,
         maximum_transaction_payload_byte_length: geometry.maximum_transaction_payload_byte_length,
-        object_count: geometry.object_count,
+        distinct_physical_object_count: geometry.distinct_physical_object_count,
+        object_lifecycle_count: geometry.object_lifecycle_count,
         peak_stored_byte_length: geometry.maximum_stored_byte_length,
         total_written_byte_length: geometry.maximum_total_written_byte_length,
         total_read_byte_length: geometry.maximum_total_read_byte_length,
@@ -2608,6 +2751,24 @@ fn common_proof_query_prefetch_requirement(
             .map_err(|_| CommonProofProverError::CountOverflow)?
             .checked_add(1)
             .ok_or(CommonProofProverError::CountOverflow)?;
+        let statement_owned_replay_transient_byte_length =
+            if entry_uses_statement_owned_replay(entry) {
+                let row_width = entry
+                    .materialized_row_width()
+                    .map_err(|_| CommonProofProverError::InvalidTree)?;
+                row_width
+                    .checked_mul(2)
+                    .and_then(|value_count| {
+                        value_count.checked_mul(core::mem::size_of::<ProofTreeValue>())
+                    })
+                    .and_then(|length| length.checked_add(canonical_leaf_byte_length))
+                    .and_then(|length| {
+                        length.checked_add(row_width.checked_mul(core::mem::size_of::<u32>())?)
+                    })
+                    .ok_or(CommonProofProverError::CountOverflow)?
+            } else {
+                0
+            };
         for opened_leaf_count in minimum_opened_leaf_count..=maximum_opened_leaf_count {
             let frontier_node_count =
                 maximum_minimal_frontier_node_count(leaf_count, opened_leaf_count).map_err(
@@ -2640,10 +2801,25 @@ fn common_proof_query_prefetch_requirement(
                     )
                 })
                 .and_then(|length| {
-                    length.checked_add(
-                        digest_level_count
-                            .checked_mul(core::mem::size_of::<ProofExternalMemoryObject>())?,
-                    )
+                    if entry_uses_statement_owned_replay(entry) {
+                        length
+                            .checked_add(
+                                frontier_node_count.checked_mul(core::mem::size_of::<u8>())?,
+                            )?
+                            .checked_add(
+                                digest_level_count
+                                    .checked_sub(1)?
+                                    .checked_mul(HASH_BYTE_LENGTH)?,
+                            )
+                            .and_then(|length| {
+                                length.checked_add(statement_owned_replay_transient_byte_length)
+                            })
+                    } else {
+                        length.checked_add(
+                            digest_level_count
+                                .checked_mul(core::mem::size_of::<ProofExternalMemoryObject>())?,
+                        )
+                    }
                 })
                 .ok_or(CommonProofProverError::CountOverflow)?;
             maximum_payload_byte_length = maximum_payload_byte_length.max(
@@ -2791,7 +2967,7 @@ fn resident_infrastructure_payload_accounting(
             storage_plan.relation_evaluation_transform_plans.len(),
         )?;
     let opening_geometry_catalog_byte_length = checked_resident_multiply(
-        u64::try_from(storage_plan.tree_plans.len())
+        u64::try_from(catalog.entries().len())
             .map_err(|_| CommonProofProverError::CountOverflow)?,
         u64::try_from(std::mem::size_of::<CommonProofOpeningGeometry>())
             .map_err(|_| CommonProofProverError::CountOverflow)?,
@@ -3019,6 +3195,41 @@ fn derive_common_proof_resident_memory_plan(
             canonical_leaf_byte_length(entry).map_err(|_| CommonProofProverError::InvalidTree)?,
         )
         .map_err(|_| CommonProofProverError::CountOverflow)?;
+        if entry_uses_statement_owned_replay(entry) {
+            let row_width = u64::try_from(
+                entry
+                    .materialized_row_width()
+                    .map_err(|_| CommonProofProverError::InvalidTree)?,
+            )
+            .map_err(|_| CommonProofProverError::CountOverflow)?;
+            let paired_typed_value_byte_length = checked_resident_multiply(
+                checked_resident_multiply(row_width, 2)?,
+                u64::try_from(core::mem::size_of::<ProofTreeValue>())
+                    .map_err(|_| CommonProofProverError::CountOverflow)?,
+            )?;
+            let online_merkle_stack_byte_length = checked_resident_multiply(
+                u64::from(leaf_count.trailing_zeros()),
+                HASH_BYTE_LENGTH as u64,
+            )?;
+            let column_ordinal_byte_length = checked_resident_multiply(
+                row_width,
+                u64::try_from(core::mem::size_of::<u32>())
+                    .map_err(|_| CommonProofProverError::CountOverflow)?,
+            )?;
+            let working_set_byte_length = checked_resident_add(
+                checked_resident_add(
+                    checked_resident_add(
+                        paired_typed_value_byte_length,
+                        canonical_leaf_byte_length,
+                    )?,
+                    online_merkle_stack_byte_length,
+                )?,
+                column_ordinal_byte_length,
+            )?;
+            maximum_relation_merkle_working_set_byte_length =
+                maximum_relation_merkle_working_set_byte_length.max(working_set_byte_length);
+            continue;
+        }
         // The materializer owns one canonical leaf, both typed phase values,
         // the two child plus one parent digests, and two external-memory write
         // chunks that gather exact object-wide records. All complete levels

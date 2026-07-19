@@ -7,6 +7,8 @@ use crate::{
 
 // Ring degree N. Powers of two are NTT-friendly; 2N divides each modulus-1.
 pub(crate) const POLYNOMIAL_DEGREE: usize = 65_536;
+pub(crate) const CANDIDATE_PLAINTEXT_DEGREE: usize = 32_768;
+pub(crate) const CANDIDATE_PLAINTEXT_MODULUS: u64 = 65_537;
 // Plaintext modulus p. The selected prime is one modulo 2N, so the complete
 // scalar slot layout has an exact length-2N transform.
 pub(crate) const PLAINTEXT_MODULUS: u64 = 786_433;
@@ -20,28 +22,47 @@ pub(crate) const SPECIAL_BASIS_ID: &str = "sealed-lattice-bgv-rns-special-basis"
 mod parameter_generation;
 mod root_parameters;
 
-pub(crate) use parameter_generation::validate_supported_algebraic_parameters;
-pub(crate) use root_parameters::{
-    BgvBasisKind, DATA_PRIMES, ROOT_PARAMETERS, RootParameters, SPECIAL_PRIMES,
-    root_parameters_for_modulus,
+pub(crate) use parameter_generation::{
+    validate_candidate_plaintext_transform_parameters, validate_supported_algebraic_parameters,
 };
+pub(crate) use root_parameters::{
+    BgvBasisKind, CANDIDATE_PLAINTEXT_NTT_PARAMETERS, DATA_PRIMES, NttTransformParameters,
+    ROOT_PARAMETERS, RootParameters, SPECIAL_PRIMES, root_parameters_for_modulus,
+};
+
+/// JSON has no lossless unsigned-64-bit integer type. Protocol descriptions
+/// therefore carry moduli and field elements as canonical base-ten strings.
+/// Counts and indexes remain JSON numbers because their selected maxima are
+/// inside the JavaScript-safe integer range.
+pub(crate) fn canonical_bgv_parameter_integer_decimal_string(value: u64) -> String {
+    value.to_string()
+}
+
 // The single canonical identity for the fixed BGV parameter set. It binds the
 // ring arithmetic and the fixed score and batch layout used by the protocol.
 pub(crate) fn bgv_parameters_value() -> Value {
+    let data_primes = DATA_PRIMES
+        .into_iter()
+        .map(canonical_bgv_parameter_integer_decimal_string)
+        .collect::<Vec<_>>();
+    let special_primes = SPECIAL_PRIMES
+        .into_iter()
+        .map(canonical_bgv_parameter_integer_decimal_string)
+        .collect::<Vec<_>>();
     json!({
         "objectType": "BgvParameters",
         "polynomialDegree": POLYNOMIAL_DEGREE,
-        "plaintextModulus": PLAINTEXT_MODULUS,
-        "dataPrimes": DATA_PRIMES,
-        "specialPrimes": SPECIAL_PRIMES,
+        "plaintextModulus": canonical_bgv_parameter_integer_decimal_string(PLAINTEXT_MODULUS),
+        "dataPrimes": data_primes,
+        "specialPrimes": special_primes,
         "nttRootParameters": ROOT_PARAMETERS.iter().map(|parameters| json!({
-            "modulus": parameters.modulus,
-            "primitiveGenerator": parameters.primitive_generator,
-            "negacyclicRoot": parameters.negacyclic_root,
-            "cyclicRoot": parameters.cyclic_root,
-            "inverseNegacyclicRoot": parameters.inverse_negacyclic_root,
-            "inverseCyclicRoot": parameters.inverse_cyclic_root,
-            "inversePolynomialDegree": parameters.inverse_polynomial_degree,
+            "modulus": canonical_bgv_parameter_integer_decimal_string(parameters.modulus),
+            "primitiveGenerator": canonical_bgv_parameter_integer_decimal_string(parameters.primitive_generator),
+            "negacyclicRoot": canonical_bgv_parameter_integer_decimal_string(parameters.negacyclic_root),
+            "cyclicRoot": canonical_bgv_parameter_integer_decimal_string(parameters.cyclic_root),
+            "inverseNegacyclicRoot": canonical_bgv_parameter_integer_decimal_string(parameters.inverse_negacyclic_root),
+            "inverseCyclicRoot": canonical_bgv_parameter_integer_decimal_string(parameters.inverse_cyclic_root),
+            "inversePolynomialDegree": canonical_bgv_parameter_integer_decimal_string(parameters.inverse_polynomial_degree),
         })).collect::<Vec<_>>(),
         "scoreRange": {
             "minimum": 1,
@@ -65,10 +86,75 @@ pub(crate) fn bgv_parameters_hash() -> CanonicalResult<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        BgvBasisKind, DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE, SPECIAL_PRIMES,
-        root_parameters_for_modulus,
+        BgvBasisKind, DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE, ROOT_PARAMETERS,
+        SPECIAL_PRIMES, bgv_parameters_hash, bgv_parameters_value, root_parameters_for_modulus,
     };
     use crate::bgv::modular_arithmetic::is_prime_for_tests;
+
+    #[test]
+    fn parameter_description_preserves_every_unsigned_64_bit_value_as_decimal_text() {
+        let parameters = bgv_parameters_value();
+        assert_eq!(
+            parameters["plaintextModulus"].as_str(),
+            Some(PLAINTEXT_MODULUS.to_string().as_str())
+        );
+        let described_data_primes = parameters["dataPrimes"]
+            .as_array()
+            .expect("data primes are an array");
+        assert_eq!(described_data_primes.len(), DATA_PRIMES.len());
+        for (described, expected) in described_data_primes.iter().zip(DATA_PRIMES) {
+            assert_eq!(
+                described
+                    .as_str()
+                    .expect("data prime is canonical decimal text")
+                    .parse::<u64>()
+                    .expect("data prime decimal text parses exactly"),
+                expected
+            );
+        }
+        let described_special_primes = parameters["specialPrimes"]
+            .as_array()
+            .expect("special primes are an array");
+        assert_eq!(described_special_primes.len(), SPECIAL_PRIMES.len());
+        for (described, expected) in described_special_primes.iter().zip(SPECIAL_PRIMES) {
+            assert_eq!(
+                described
+                    .as_str()
+                    .expect("special prime is canonical decimal text")
+                    .parse::<u64>()
+                    .expect("special prime decimal text parses exactly"),
+                expected
+            );
+        }
+        let described_roots = parameters["nttRootParameters"]
+            .as_array()
+            .expect("root parameters are an array");
+        assert_eq!(described_roots.len(), ROOT_PARAMETERS.len());
+        for (described, expected) in described_roots.iter().zip(ROOT_PARAMETERS) {
+            for (field_name, expected_value) in [
+                ("modulus", expected.modulus),
+                ("primitiveGenerator", expected.primitive_generator),
+                ("negacyclicRoot", expected.negacyclic_root),
+                ("cyclicRoot", expected.cyclic_root),
+                ("inverseNegacyclicRoot", expected.inverse_negacyclic_root),
+                ("inverseCyclicRoot", expected.inverse_cyclic_root),
+                (
+                    "inversePolynomialDegree",
+                    expected.inverse_polynomial_degree,
+                ),
+            ] {
+                assert_eq!(
+                    described[field_name]
+                        .as_str()
+                        .expect("root parameter is canonical decimal text")
+                        .parse::<u64>()
+                        .expect("root parameter decimal text parses exactly"),
+                    expected_value
+                );
+            }
+        }
+        assert!(bgv_parameters_hash().is_ok());
+    }
 
     fn pow_mod(base: u64, mut exponent: u64, modulus: u64) -> u64 {
         let mut result = 1_u128;

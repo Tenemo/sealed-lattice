@@ -1,6 +1,13 @@
+use super::super::prover::{
+    CommonProofExternalMemoryRequirement, CommonProofPrivateCoinReplayCursor,
+    CommonProofPrivateCoinReplaySpan, CommonProofPrivateCoinReplaySpanStart,
+    PublicOnlyCommonProofCoinSource, ReplayableCommonProofPrivateCoinCatalogSource,
+    ReplayableCommonProofPrivateCoinSource,
+};
 use super::super::{
     CommonProofAuthenticatedSourceReadRequest, CommonProofCheckpointCursorManifestError,
-    CommonProofCheckpointCursorManifestRequirement, CommonProofProverError, RelationPlanVariant,
+    CommonProofCheckpointCursorManifestRequirement, CommonProofProverError,
+    ProofExternalMemoryUsage, RelationPlanVariant,
     common_proof_checkpoint_cursor_manifest_requirement_for_variant,
 };
 #[cfg(test)]
@@ -27,7 +34,9 @@ use super::{
     StreamDescriptor, VerifiedBoardApplicationSource, Zeroizing, common_proof_stream_domain,
     hash_framed_parts_512, verified_application_statement_hash,
 };
-use crate::foundation::WitnessBoundPreparedActionProofAttemptSource;
+use crate::foundation::{
+    PreparedPublicOnlyProofAttemptSource, WitnessBoundPreparedActionProofAttemptSource,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CommonProofGenerationSourceError {
@@ -49,6 +58,41 @@ trait ErasedCommonProofPrivateCoinSource {
     ) -> Result<(), CommonProofGenerationSourceError>;
 
     fn checkpoint_cursor_manifest(&self) -> Result<Vec<u8>, CommonProofGenerationSourceError>;
+
+    fn capture_proof_salt_replay_cursor(
+        &self,
+    ) -> Result<CommonProofPrivateCoinReplayCursor, CommonProofGenerationSourceError>;
+
+    fn restore_proof_salt_replay_cursor(
+        &mut self,
+        replay_cursor: &CommonProofPrivateCoinReplayCursor,
+    ) -> Result<(), CommonProofGenerationSourceError>;
+
+    fn proof_salt_replay_cursor_matches(
+        &self,
+        replay_cursor: &CommonProofPrivateCoinReplayCursor,
+    ) -> Result<bool, CommonProofGenerationSourceError>;
+
+    fn begin_all_coordinate_replay_span(
+        &mut self,
+    ) -> Result<CommonProofPrivateCoinReplaySpanStart, CommonProofGenerationSourceError>;
+
+    fn finish_all_coordinate_replay_span(
+        &mut self,
+        start: CommonProofPrivateCoinReplaySpanStart,
+    ) -> Result<CommonProofPrivateCoinReplaySpan, CommonProofGenerationSourceError>;
+
+    fn restore_all_coordinate_replay_span(
+        &mut self,
+        span: &CommonProofPrivateCoinReplaySpan,
+    ) -> Result<(), CommonProofGenerationSourceError>;
+
+    fn complete_all_coordinate_replay_span(
+        &mut self,
+        span: &CommonProofPrivateCoinReplaySpan,
+    ) -> Result<(), CommonProofGenerationSourceError>;
+
+    fn invalidate_all_coordinate_replay_state(&mut self);
 }
 
 struct ErasedCommonProofPrivateCoinSourceAdapter<Source>(Source);
@@ -56,7 +100,9 @@ struct ErasedCommonProofPrivateCoinSourceAdapter<Source>(Source);
 impl<Source> ErasedCommonProofPrivateCoinSource
     for ErasedCommonProofPrivateCoinSourceAdapter<Source>
 where
-    Source: CheckpointableCommonProofPrivateCoinSource,
+    Source: CheckpointableCommonProofPrivateCoinSource
+        + ReplayableCommonProofPrivateCoinCatalogSource
+        + ReplayableCommonProofPrivateCoinSource,
 {
     fn sample_modulo(
         &mut self,
@@ -83,6 +129,71 @@ where
         self.0
             .checkpoint_cursor_manifest()
             .map_err(|_| CommonProofGenerationSourceError::PrivateCoinSource)
+    }
+
+    fn capture_proof_salt_replay_cursor(
+        &self,
+    ) -> Result<CommonProofPrivateCoinReplayCursor, CommonProofGenerationSourceError> {
+        self.0
+            .capture_proof_salt_replay_cursor()
+            .map_err(|_| CommonProofGenerationSourceError::PrivateCoinSource)
+    }
+
+    fn restore_proof_salt_replay_cursor(
+        &mut self,
+        replay_cursor: &CommonProofPrivateCoinReplayCursor,
+    ) -> Result<(), CommonProofGenerationSourceError> {
+        self.0
+            .restore_proof_salt_replay_cursor(replay_cursor)
+            .map_err(|_| CommonProofGenerationSourceError::PrivateCoinSource)
+    }
+
+    fn proof_salt_replay_cursor_matches(
+        &self,
+        replay_cursor: &CommonProofPrivateCoinReplayCursor,
+    ) -> Result<bool, CommonProofGenerationSourceError> {
+        self.0
+            .proof_salt_replay_cursor_matches(replay_cursor)
+            .map_err(|_| CommonProofGenerationSourceError::PrivateCoinSource)
+    }
+
+    fn begin_all_coordinate_replay_span(
+        &mut self,
+    ) -> Result<CommonProofPrivateCoinReplaySpanStart, CommonProofGenerationSourceError> {
+        self.0
+            .begin_all_coordinate_replay_span()
+            .map_err(|_| CommonProofGenerationSourceError::PrivateCoinSource)
+    }
+
+    fn finish_all_coordinate_replay_span(
+        &mut self,
+        start: CommonProofPrivateCoinReplaySpanStart,
+    ) -> Result<CommonProofPrivateCoinReplaySpan, CommonProofGenerationSourceError> {
+        self.0
+            .finish_all_coordinate_replay_span(start)
+            .map_err(|_| CommonProofGenerationSourceError::PrivateCoinSource)
+    }
+
+    fn restore_all_coordinate_replay_span(
+        &mut self,
+        span: &CommonProofPrivateCoinReplaySpan,
+    ) -> Result<(), CommonProofGenerationSourceError> {
+        self.0
+            .restore_all_coordinate_replay_span(span)
+            .map_err(|_| CommonProofGenerationSourceError::PrivateCoinSource)
+    }
+
+    fn complete_all_coordinate_replay_span(
+        &mut self,
+        span: &CommonProofPrivateCoinReplaySpan,
+    ) -> Result<(), CommonProofGenerationSourceError> {
+        self.0
+            .complete_all_coordinate_replay_span(span)
+            .map_err(|_| CommonProofGenerationSourceError::PrivateCoinSource)
+    }
+
+    fn invalidate_all_coordinate_replay_state(&mut self) {
+        self.0.invalidate_all_coordinate_replay_state();
     }
 }
 
@@ -116,6 +227,61 @@ impl CommonProofPrivateCoinSource for CommonProofWorkerPrivateCoinSource {
     }
 }
 
+impl ReplayableCommonProofPrivateCoinSource for CommonProofWorkerPrivateCoinSource {
+    fn capture_proof_salt_replay_cursor(
+        &self,
+    ) -> Result<CommonProofPrivateCoinReplayCursor, Self::Error> {
+        self.0.capture_proof_salt_replay_cursor()
+    }
+
+    fn restore_proof_salt_replay_cursor(
+        &mut self,
+        replay_cursor: &CommonProofPrivateCoinReplayCursor,
+    ) -> Result<(), Self::Error> {
+        self.0.restore_proof_salt_replay_cursor(replay_cursor)
+    }
+
+    fn proof_salt_replay_cursor_matches(
+        &self,
+        replay_cursor: &CommonProofPrivateCoinReplayCursor,
+    ) -> Result<bool, Self::Error> {
+        self.0.proof_salt_replay_cursor_matches(replay_cursor)
+    }
+}
+
+impl ReplayableCommonProofPrivateCoinCatalogSource for CommonProofWorkerPrivateCoinSource {
+    fn begin_all_coordinate_replay_span(
+        &mut self,
+    ) -> Result<CommonProofPrivateCoinReplaySpanStart, Self::Error> {
+        self.0.begin_all_coordinate_replay_span()
+    }
+
+    fn finish_all_coordinate_replay_span(
+        &mut self,
+        start: CommonProofPrivateCoinReplaySpanStart,
+    ) -> Result<CommonProofPrivateCoinReplaySpan, Self::Error> {
+        self.0.finish_all_coordinate_replay_span(start)
+    }
+
+    fn restore_all_coordinate_replay_span(
+        &mut self,
+        span: &CommonProofPrivateCoinReplaySpan,
+    ) -> Result<(), Self::Error> {
+        self.0.restore_all_coordinate_replay_span(span)
+    }
+
+    fn complete_all_coordinate_replay_span(
+        &mut self,
+        span: &CommonProofPrivateCoinReplaySpan,
+    ) -> Result<(), Self::Error> {
+        self.0.complete_all_coordinate_replay_span(span)
+    }
+
+    fn invalidate_all_coordinate_replay_state(&mut self) {
+        self.0.invalidate_all_coordinate_replay_state();
+    }
+}
+
 /// Owned exact-family sources used by one generated proof. Source errors are
 /// collapsed only to the private-randomness authority boundary. The host
 /// cannot install the source through FFI.
@@ -130,7 +296,10 @@ impl CommonProofGenerationSources {
         source_polynomial_provider: SourcePolynomials,
     ) -> Self
     where
-        Coins: CheckpointableCommonProofPrivateCoinSource + 'static,
+        Coins: CheckpointableCommonProofPrivateCoinSource
+            + ReplayableCommonProofPrivateCoinCatalogSource
+            + ReplayableCommonProofPrivateCoinSource
+            + 'static,
         SourcePolynomials: CommonProofSourcePolynomialProvider + 'static,
     {
         Self {
@@ -139,6 +308,29 @@ impl CommonProofGenerationSources {
             )),
             source_polynomial_provider: Some(Box::new(source_polynomial_provider)),
         }
+    }
+
+    pub(crate) fn public_only<SourcePolynomials>(
+        family_schema_identifier: u16,
+        derivation_binding_hash: Hash512,
+        attempt_lineage: [u8; 32],
+        source_polynomial_provider: SourcePolynomials,
+    ) -> Result<Self, CommonProofGenerationSourceError>
+    where
+        SourcePolynomials: CommonProofSourcePolynomialProvider + 'static,
+    {
+        if !ProofApplicationSlotCeilings::PUBLIC_ONLY_FAMILY_SCHEMA_IDENTIFIERS
+            .contains(&family_schema_identifier)
+        {
+            return Err(CommonProofGenerationSourceError::PrivateCoinSource);
+        }
+        let public_only_coins = PublicOnlyCommonProofCoinSource::new(
+            family_schema_identifier,
+            derivation_binding_hash,
+            attempt_lineage,
+        )
+        .map_err(|_| CommonProofGenerationSourceError::PrivateCoinSource)?;
+        Ok(Self::new(public_only_coins, source_polynomial_provider))
     }
 
     fn take_source_polynomial_provider(
@@ -211,32 +403,22 @@ impl CommonProofGenerationAuthorization {
         )
     }
 
-    pub(crate) fn from_collective_authenticated_attempt(
-        attempt_source: PreparedActionProofAttemptSource,
+    pub(crate) fn from_public_only_authenticated_attempt(
+        attempt_source: PreparedPublicOnlyProofAttemptSource,
         relation_plan: &CommonProofRelationPlanCapability,
         protocol_version: u16,
         canonical_application_statement_bytes: &[u8],
         limits: CommonProofRuntimeLimits,
     ) -> Result<Self, CommonProofRuntimeError> {
-        if attempt_source.application_statement_schema_identifier()
-            != ProofApplicationSlotCeilings::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER
-            || attempt_source
-                .application_slot()
-                .roster_position()
-                .is_some()
-            || attempt_source
-                .application_slot()
-                .schedule_position()
-                .is_some()
-            || attempt_source
-                .application_slot()
-                .producer_sequence()
-                .is_some()
+        if !ProofApplicationSlotCeilings::PUBLIC_ONLY_FAMILY_SCHEMA_IDENTIFIERS
+            .contains(&attempt_source.application_statement_schema_identifier())
+            || relation_plan.application_statement_schema_identifier()
+                != attempt_source.application_statement_schema_identifier()
         {
             return Err(CommonProofRuntimeError::WrongVerificationBinding);
         }
         Self::from_attempt_fields(
-            CommonProofGenerationAttemptFields::from_ordinary(attempt_source),
+            CommonProofGenerationAttemptFields::from_public_only(attempt_source),
             relation_plan,
             protocol_version,
             canonical_application_statement_bytes,
@@ -442,6 +624,20 @@ impl CommonProofGenerationAttemptFields {
             expected_proof_byte_length: source.expected_proof_byte_length(),
             expected_query_count: source.expected_query_count(),
             attempt_identifier: source.attempt_identifier(),
+            checkpoint_continuation: *source.checkpoint_continuation(),
+        }
+    }
+
+    const fn from_public_only(source: PreparedPublicOnlyProofAttemptSource) -> Self {
+        Self {
+            application_slot: source.application_slot(),
+            application_slot_hash: source.application_slot_hash(),
+            application_statement_schema_identifier: source
+                .application_statement_schema_identifier(),
+            application_statement_hash: source.application_statement_hash(),
+            expected_proof_byte_length: source.expected_proof_byte_length(),
+            expected_query_count: source.expected_query_count(),
+            attempt_identifier: source.attempt_lineage_identifier(),
             checkpoint_continuation: *source.checkpoint_continuation(),
         }
     }
@@ -1161,6 +1357,32 @@ pub(super) struct GeneratedCommonProof {
     post_output_binding: CommonProofPostOutputApplicationBinding,
 }
 
+/// Process-local production scratch accounting retained until the generation
+/// operation is consumed. It is available only to manual runtime evidence and
+/// is never serialized or bound into a proof, capability, or package.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct CommonProofGenerationExternalMemoryAccounting {
+    compiled_requirement: CommonProofExternalMemoryRequirement,
+    actual_usage: ProofExternalMemoryUsage,
+    deterministic_prefix_replay_usage: Option<ProofExternalMemoryUsage>,
+}
+
+impl CommonProofGenerationExternalMemoryAccounting {
+    pub(crate) const fn compiled_requirement(self) -> CommonProofExternalMemoryRequirement {
+        self.compiled_requirement
+    }
+
+    pub(crate) const fn actual_usage(self) -> ProofExternalMemoryUsage {
+        self.actual_usage
+    }
+
+    pub(crate) const fn deterministic_prefix_replay_usage(
+        self,
+    ) -> Option<ProofExternalMemoryUsage> {
+        self.deterministic_prefix_replay_usage
+    }
+}
+
 impl GeneratedCommonProof {
     /// Checks the exact family statement and application coordinates retained
     /// beside a prepackage proof without joining a package source or consuming
@@ -1198,6 +1420,38 @@ impl GeneratedCommonProof {
             return Err(CommonProofRuntimeError::WrongVerificationBinding);
         }
         Ok(self.stream_descriptor.clone())
+    }
+
+    /// Extends the pending-statement check with the ceremony bindings owned
+    /// by a canonical package builder. Selected setup statements intentionally
+    /// omit these outer transcript coordinates, so the builder must compare
+    /// them against the prover authorization separately.
+    pub(super) fn preflight_pending_package(
+        &self,
+        expected_suite_identifier: [u8; HASH_BYTE_LENGTH],
+        expected_ceremony_context_hash: [u8; HASH_BYTE_LENGTH],
+        expected_action_context_hash: [u8; HASH_BYTE_LENGTH],
+        expected_application_statement_schema_identifier: u16,
+        expected_roster_position: Option<u16>,
+        expected_schedule_position: Option<u32>,
+        canonical_application_statement_bytes: &[u8],
+    ) -> Result<StreamDescriptor, CommonProofRuntimeError> {
+        let descriptor = self.preflight_pending_statement(
+            expected_application_statement_schema_identifier,
+            expected_roster_position,
+            expected_schedule_position,
+            canonical_application_statement_bytes,
+        )?;
+        let authorization = self.binding.authorization;
+        let application_slot = authorization.application_slot;
+        if authorization.suite_identifier != expected_suite_identifier
+            || application_slot.ceremony_context_hash().into_bytes()
+                != expected_ceremony_context_hash
+            || application_slot.action_context_hash().into_bytes() != expected_action_context_hash
+        {
+            return Err(CommonProofRuntimeError::WrongVerificationBinding);
+        }
+        Ok(descriptor)
     }
 
     pub(super) fn bind_verified_board_source(
@@ -1290,6 +1544,7 @@ pub(super) struct CommonProofGenerationWorker {
     last_checkpoint_position: Option<[u8; 16]>,
     pending_checkpoint: Option<PendingCommonProofGenerationCheckpoint>,
     resume_target: Option<CommonProofGenerationCheckpointState>,
+    deterministic_prefix_replay_external_memory_usage: Option<ProofExternalMemoryUsage>,
     generation_complete: bool,
     cancellation_requested: bool,
     generation_transaction_must_replay_before_cancellation: bool,
@@ -1349,6 +1604,7 @@ impl CommonProofGenerationWorker {
             last_checkpoint_position: None,
             pending_checkpoint: None,
             resume_target,
+            deterministic_prefix_replay_external_memory_usage: None,
             generation_complete: false,
             cancellation_requested: false,
             generation_transaction_must_replay_before_cancellation: false,
@@ -1581,6 +1837,11 @@ impl CommonProofGenerationWorker {
                 if &checkpoint.state != target {
                     return Err(CommonProofRuntimeError::WrongVerificationBinding.into());
                 }
+                self.deterministic_prefix_replay_external_memory_usage = Some(
+                    self.state
+                        .external_memory_usage()
+                        .ok_or(CommonProofRuntimeError::WrongOperationPhase)?,
+                );
                 self.resume_target = None;
                 return Ok(CommonProofGenerationWorkerPoll::ResumeComplete { stage });
             }
@@ -1675,6 +1936,27 @@ impl CommonProofGenerationWorker {
             }
             Err(error) => Err(CommonProofGenerationWorkerError::Cleanup(error)),
         }
+    }
+
+    pub(super) fn external_memory_accounting(
+        &self,
+    ) -> Result<CommonProofGenerationExternalMemoryAccounting, CommonProofRuntimeError> {
+        if self.cancellation_requested
+            || !self.generation_complete
+            || self.terminal_stream_descriptor.is_none()
+        {
+            return Err(CommonProofRuntimeError::WrongOperationPhase);
+        }
+        let actual_usage = self
+            .state
+            .terminal_external_memory_usage()
+            .ok_or(CommonProofRuntimeError::WrongOperationPhase)?;
+        Ok(CommonProofGenerationExternalMemoryAccounting {
+            compiled_requirement: self.state.external_memory_requirement(),
+            actual_usage,
+            deterministic_prefix_replay_usage: self
+                .deterministic_prefix_replay_external_memory_usage,
+        })
     }
 
     pub(super) fn finish(self) -> Result<GeneratedCommonProof, CommonProofRuntimeError> {

@@ -12,11 +12,12 @@ use crate::bgv::proof_suite::{
     CommonProofRelationPlanCapability, CommonProofSourcePolynomial,
     CommonProofSourcePolynomialProvider, CommonProofSourcePolynomialProviderPoll,
     CommonProofSourcePolynomialReplayIdentity, CommonProofSourcePolynomialRequest,
-    CommonProofSourcePolynomialRequestContext, CompactCommittedMaterialSource,
-    PROOF_BASE_FIELD_MODULUS, ProofBaseFieldElement, ProofChallengeExtensionElement,
-    ProofEvaluationDomain, ProofFieldError, ProofLeafVisibility, ProofPolynomialError,
-    ProofTreeRole, ProvidedCommonProofSourcePolynomial, RelationProofTreeInput,
-    StatementOwnedProofTreeInput, VerifiedCommonProof, VerifiedRelationColumnEvaluator,
+    CommonProofSourcePolynomialRequestContext, CommonProofSourceProviderMemoryAccounting,
+    CommonProofVerifierError, CompactCommittedMaterialSource, PROOF_BASE_FIELD_MODULUS,
+    ProofBaseFieldElement, ProofChallengeExtensionElement, ProofEvaluationDomain, ProofFieldError,
+    ProofLeafVisibility, ProofPolynomialError, ProofTreeRole, ProvidedCommonProofSourcePolynomial,
+    RelationProofTreeInput, StatementOwnedProofTreeInput, VerifiedCommonProof,
+    VerifiedRelationColumnEvaluator, VerifiedRelationColumnEvaluatorMemoryAccounting,
 };
 use crate::foundation::PersistentProofWitnessCoinBinding;
 use crate::hashing::hash_framed_parts_512;
@@ -161,18 +162,51 @@ pub(crate) struct VerifiedTargetReleaseModulusInput<'input> {
 /// derived from verified target streams and is the sole target-family adapter
 /// consumed by the common verifier.
 pub(crate) struct TargetReleaseVerifiedColumnEvaluator {
-    columns: BTreeMap<u32, CommonProofSourcePolynomial>,
+    columns: Box<[(u32, CommonProofSourcePolynomial)]>,
 }
 
 impl VerifiedRelationColumnEvaluator for TargetReleaseVerifiedColumnEvaluator {
+    fn memory_accounting(
+        &self,
+    ) -> Result<VerifiedRelationColumnEvaluatorMemoryAccounting, CommonProofVerifierError> {
+        let fixed_and_catalog_byte_length = u64::try_from(core::mem::size_of::<Self>())
+            .ok()
+            .and_then(|fixed| {
+                u64::try_from(self.columns.len()).ok().and_then(|count| {
+                    u64::try_from(core::mem::size_of::<(u32, CommonProofSourcePolynomial)>())
+                        .ok()
+                        .and_then(|width| count.checked_mul(width))
+                        .and_then(|payload| fixed.checked_add(payload))
+                })
+            })
+            .ok_or(CommonProofVerifierError::InvalidTreeLayout)?;
+        let fixed_and_input_resident_byte_length = self.columns.iter().try_fold(
+            fixed_and_catalog_byte_length,
+            |total, (_, polynomial)| {
+                polynomial
+                    .resident_payload_byte_length()
+                    .ok()
+                    .and_then(|payload| total.checked_add(payload))
+                    .ok_or(CommonProofVerifierError::InvalidTreeLayout)
+            },
+        )?;
+        VerifiedRelationColumnEvaluatorMemoryAccounting::new(
+            fixed_and_input_resident_byte_length,
+            0,
+            0,
+        )
+    }
+
     fn evaluate_at_extension_point(
         &mut self,
         column_ordinal: u32,
         point: ProofChallengeExtensionElement,
     ) -> Option<ProofChallengeExtensionElement> {
         self.columns
-            .get(&column_ordinal)
-            .map(|column| column.evaluate_at(point))
+            .binary_search_by_key(&column_ordinal, |(ordinal, _)| *ordinal)
+            .ok()
+            .and_then(|index| self.columns.get(index))
+            .map(|(_, column)| column.evaluate_at(point))
     }
 }
 
@@ -869,6 +903,78 @@ impl<Source> CommonProofSourcePolynomialProvider for TargetReleaseSourcePolynomi
 where
     Source: TargetReleaseWitnessSource,
 {
+    fn memory_accounting(
+        &self,
+    ) -> Result<CommonProofSourceProviderMemoryAccounting, CommonProofProverError> {
+        let checked_add = |left: u64, right: u64| {
+            left.checked_add(right)
+                .ok_or(CommonProofProverError::CountOverflow)
+        };
+        let fixed_and_catalog_byte_length = [
+            core::mem::size_of::<Self>() as u64,
+            u64::try_from(self.ordered_source_column_ordinals.len())
+                .ok()
+                .and_then(|count| count.checked_mul(core::mem::size_of::<u32>() as u64))
+                .ok_or(CommonProofProverError::CountOverflow)?,
+            u64::try_from(self.ordered_source_blocks.len())
+                .ok()
+                .and_then(|count| {
+                    count.checked_mul(core::mem::size_of::<TargetReleaseSourceBlock>() as u64)
+                })
+                .ok_or(CommonProofProverError::CountOverflow)?,
+            u64::try_from(self.bound_sources_by_catalog_index.len())
+                .ok()
+                .and_then(|count| count.checked_mul(core::mem::size_of::<(u16, usize)>() as u64))
+                .ok_or(CommonProofProverError::CountOverflow)?,
+            self.compilation
+                .relation_plan
+                .select_variant(None, None)
+                .map_err(CommonProofProverError::Relation)?
+                .resident_owned_payload_byte_length()
+                .map_err(CommonProofProverError::Relation)?,
+        ]
+        .into_iter()
+        .try_fold(0_u64, checked_add)?;
+        let maximum_derived_layer_count = self
+            .compilation
+            .moduli
+            .iter()
+            .flat_map(|modulus| &modulus.role_equations)
+            .map(|role| {
+                role.quotient_digits
+                    .len()
+                    .checked_add(role.carry_values.len())
+                    .ok_or(CommonProofProverError::CountOverflow)
+            })
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .max()
+            .unwrap_or(0);
+        let cached_role_layer_byte_length = u64::try_from(maximum_derived_layer_count)
+            .ok()
+            .and_then(|count| {
+                count.checked_mul(
+                    u64::try_from(self.compilation.ring_degree)
+                        .ok()?
+                        .checked_mul(core::mem::size_of::<i128>() as u64)?,
+                )
+            })
+            .ok_or(CommonProofProverError::CountOverflow)?;
+        let maximum_returned_source_polynomial_byte_length =
+            u64::try_from(self.compilation.ring_degree)
+                .ok()
+                .and_then(|count| {
+                    count.checked_mul(core::mem::size_of::<ProofBaseFieldElement>() as u64)
+                })
+                .ok_or(CommonProofProverError::CountOverflow)?;
+        Ok(CommonProofSourceProviderMemoryAccounting::new(
+            checked_add(fixed_and_catalog_byte_length, cached_role_layer_byte_length)?,
+            fixed_and_catalog_byte_length,
+            cached_role_layer_byte_length,
+            maximum_returned_source_polynomial_byte_length,
+        ))
+    }
+
     fn poll_source_polynomial(
         &mut self,
         request: CommonProofSourcePolynomialRequest<'_>,
@@ -2818,7 +2924,9 @@ impl CompiledTargetReleaseRelation {
                 return Err(TargetReleaseWitnessError::InvalidWitness);
             }
         }
-        Ok(TargetReleaseVerifiedColumnEvaluator { columns })
+        Ok(TargetReleaseVerifiedColumnEvaluator {
+            columns: columns.into_iter().collect::<Vec<_>>().into_boxed_slice(),
+        })
     }
 }
 

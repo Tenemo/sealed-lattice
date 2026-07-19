@@ -10,7 +10,6 @@ pub(crate) mod bgv;
 mod encoding;
 pub mod foundation;
 pub(crate) mod hashing;
-pub(crate) mod protocol_signatures;
 pub(crate) mod transcript_core;
 
 use core::{ptr, slice};
@@ -28,20 +27,17 @@ use bgv::proof_suite::{
     prepare_aggregate_threshold_share_verification,
 };
 use bgv::proof_suite::{
-    begin_setup_generation_authority, cancel_setup_generation_recipient_payload,
-    open_setup_generation_recipient_payload, read_setup_generation_recipient_payload,
-    release_setup_generation_authority_by_identifier,
+    begin_setup_generation_authority, cancel_setup_generation_public_key_share_body_by_identifier,
+    cancel_setup_generation_recipient_payload,
+    open_setup_generation_public_key_share_body_by_identifier,
+    open_setup_generation_recipient_payload,
+    read_setup_generation_public_key_share_body_by_identifier,
+    read_setup_generation_recipient_payload, release_setup_generation_authority_by_identifier,
+    setup_generation_public_key_share_body_byte_length_by_identifier,
+    setup_generation_public_key_share_source_byte_length_by_identifier,
     setup_generation_recipient_payload_byte_length,
     setup_generation_recipient_payload_source_byte_length,
     setup_generation_recipient_payload_source_recipient_roster_position,
-};
-use bgv::{
-    absorb_bgv_canonical_stream_chunk, active_accepted_setup_proof_binding_session,
-    begin_accepted_setup_canonical_stream, begin_accepted_setup_proof_binding_session,
-    begin_bgv_canonical_material_reader, begin_bgv_canonical_stream,
-    cancel_accepted_setup_proof_binding_session, cancel_bgv_canonical_material_reader,
-    cancel_bgv_canonical_stream, finish_bgv_canonical_material_reader, finish_bgv_canonical_stream,
-    read_bgv_canonical_material_chunk,
 };
 use foundation::{
     CanonicalStreamRuntimeBegin, FINALITY_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH,
@@ -61,7 +57,6 @@ use foundation::{
     verify_state_reservation, verify_state_reservation_intent,
 };
 
-use encoding::run_accepted_setup_command;
 pub use encoding::run_transcript_core_command;
 
 fn leak_bytes(bytes: Vec<u8>) -> *mut u8 {
@@ -755,6 +750,112 @@ pub unsafe extern "C" fn sealed_lattice_setup_generation_authority_begin(
     }
 }
 
+/// Returns the exact raw full-Q public-key-share body length before its source
+/// is opened. The body is the limb-major, coefficient-major little-endian
+/// `u64` payload consumed by the selected collective-key corpus.
+///
+/// # Safety
+///
+/// A non-null status pointer must point to one writable `u32`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_setup_generation_public_key_share_body_byte_length(
+    authority_handle: u32,
+    status_pointer: *mut u32,
+) -> u64 {
+    match setup_generation_public_key_share_body_byte_length_by_identifier(authority_handle) {
+        Ok(byte_length) => {
+            unsafe { write_u32_if_present(status_pointer, 0) };
+            byte_length
+        }
+        Err(status) => {
+            unsafe { write_u32_if_present(status_pointer, status) };
+            0
+        }
+    }
+}
+
+/// Opens the authority-owned raw public-key-share body exactly once without
+/// copying its retained coefficient matrix.
+///
+/// # Safety
+///
+/// A non-null status pointer must point to one writable `u32`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_setup_generation_public_key_share_body_open(
+    authority_handle: u32,
+    status_pointer: *mut u32,
+) -> u32 {
+    match open_setup_generation_public_key_share_body_by_identifier(authority_handle) {
+        Ok(source_handle) => {
+            unsafe { write_u32_if_present(status_pointer, 0) };
+            source_handle
+        }
+        Err(status) => {
+            unsafe { write_u32_if_present(status_pointer, status) };
+            0
+        }
+    }
+}
+
+/// Returns the exact body length bound to an opened public-key-share source.
+///
+/// # Safety
+///
+/// A non-null status pointer must point to one writable `u32`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_setup_generation_public_key_share_source_byte_length(
+    source_handle: u32,
+    status_pointer: *mut u32,
+) -> u64 {
+    match setup_generation_public_key_share_source_byte_length_by_identifier(source_handle) {
+        Ok(byte_length) => {
+            unsafe { write_u32_if_present(status_pointer, 0) };
+            byte_length
+        }
+        Err(status) => {
+            unsafe { write_u32_if_present(status_pointer, status) };
+            0
+        }
+    }
+}
+
+/// Writes the next exact sequential public-key-share body range directly into
+/// caller-owned WASM memory. The source removes itself after its final byte.
+///
+/// # Safety
+///
+/// The output pointer must name its declared writable range.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_setup_generation_public_key_share_body_read(
+    source_handle: u32,
+    expected_offset: u64,
+    output_pointer: *mut u8,
+    output_byte_length: usize,
+) -> u32 {
+    if output_pointer.is_null()
+        || output_byte_length == 0
+        || output_byte_length > foundation::FOUNDATION_PROFILE.stream_chunk_byte_length
+    {
+        let _ = cancel_setup_generation_public_key_share_body_by_identifier(source_handle);
+        return u32::from(foundation::RefusalReason::WrongTypeOrLength.canonical_code());
+    }
+    let output = unsafe { slice::from_raw_parts_mut(output_pointer, output_byte_length) };
+    read_setup_generation_public_key_share_body_by_identifier(
+        source_handle,
+        expected_offset,
+        output,
+    )
+    .map_or_else(|status| status, |()| 0)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn sealed_lattice_setup_generation_public_key_share_body_cancel(
+    source_handle: u32,
+) -> u32 {
+    cancel_setup_generation_public_key_share_body_by_identifier(source_handle)
+        .map_or_else(|status| status, |()| 0)
+}
+
 /// Returns the exact canonical 0x2107 byte length before the recipient slot is
 /// opened and consumed.
 ///
@@ -1193,211 +1294,6 @@ pub extern "C" fn sealed_lattice_mailbox_gcm_finish_decryptor(handle: u32) -> u3
 #[unsafe(no_mangle)]
 pub extern "C" fn sealed_lattice_mailbox_gcm_cancel(handle: u32) -> u32 {
     cancel_mailbox_gcm(handle).map_or_else(|status| status, |()| 0)
-}
-
-/// Begins a BGV large-object sink whose framing and integrity are owned by the
-/// canonical stream verifier.
-///
-/// # Safety
-///
-/// Every input pointer must name its declared readable range. Every non-null
-/// output pointer must point to one writable `u32` in WASM memory.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn sealed_lattice_bgv_canonical_stream_begin(
-    family_code: u32,
-    material_root_pointer: *const u8,
-    material_root_length: usize,
-    descriptor_pointer: *const u8,
-    descriptor_length: usize,
-    status_pointer: *mut u32,
-    total_byte_length_pointer: *mut u32,
-) -> u32 {
-    let material_root =
-        unsafe { canonical_stream_input(material_root_pointer, material_root_length) };
-    let descriptor = unsafe { canonical_stream_input(descriptor_pointer, descriptor_length) };
-    let result = begin_bgv_canonical_stream(family_code, material_root, descriptor);
-    unsafe { write_canonical_stream_begin(result, status_pointer, total_byte_length_pointer) }
-}
-
-/// Opens an opaque accepted-setup material-ownership session before any setup
-/// source is streamed.
-///
-/// # Safety
-///
-/// `status_pointer` must be null or point to one writable `u32`.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn sealed_lattice_accepted_setup_session_begin(
-    status_pointer: *mut u32,
-) -> u32 {
-    match begin_accepted_setup_proof_binding_session() {
-        Ok(session_handle) => {
-            unsafe { write_u32_if_present(status_pointer, 0) };
-            session_handle
-        }
-        Err(_) => {
-            unsafe {
-                write_u32_if_present(
-                    status_pointer,
-                    foundation::CANONICAL_STREAM_RUNTIME_INVALID_SESSION,
-                )
-            };
-            0
-        }
-    }
-}
-
-/// Begins an accepted-setup stream whose finished material remains owned by
-/// the owning setup session until terminal verification or cancellation.
-///
-/// # Safety
-///
-/// Every input pointer must name its declared readable range. Every non-null
-/// output pointer must point to one writable `u32` in WASM memory.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn sealed_lattice_accepted_setup_canonical_stream_begin(
-    setup_session_handle: u32,
-    family_code: u32,
-    material_root_pointer: *const u8,
-    material_root_length: usize,
-    descriptor_pointer: *const u8,
-    descriptor_length: usize,
-    status_pointer: *mut u32,
-    total_byte_length_pointer: *mut u32,
-) -> u32 {
-    let accepted_setup_session =
-        match active_accepted_setup_proof_binding_session(setup_session_handle) {
-            Ok(session) => session,
-            Err(_) => {
-                unsafe {
-                    write_canonical_stream_begin(
-                        Err(foundation::CANONICAL_STREAM_RUNTIME_INVALID_SESSION),
-                        status_pointer,
-                        total_byte_length_pointer,
-                    )
-                };
-                return 0;
-            }
-        };
-    let material_root =
-        unsafe { canonical_stream_input(material_root_pointer, material_root_length) };
-    let descriptor = unsafe { canonical_stream_input(descriptor_pointer, descriptor_length) };
-    let result = begin_accepted_setup_canonical_stream(
-        family_code,
-        material_root,
-        descriptor,
-        accepted_setup_session,
-    );
-    unsafe { write_canonical_stream_begin(result, status_pointer, total_byte_length_pointer) }
-}
-
-/// Cancels an accepted-setup session and drains every material root it owns.
-#[unsafe(no_mangle)]
-pub extern "C" fn sealed_lattice_accepted_setup_session_cancel(session_handle: u32) -> u32 {
-    cancel_accepted_setup_proof_binding_session(session_handle).map_or_else(
-        |_| foundation::CANONICAL_STREAM_RUNTIME_INVALID_SESSION,
-        |()| 0,
-    )
-}
-
-/// Executes terminal accepted-setup verification under the already-open opaque
-/// material session. The session handle is a direct ABI value, not a field of
-/// the protocol request.
-///
-/// # Safety
-///
-/// Input pointers must name their declared readable ranges.
-/// `output_length_pointer` must be null or point to one writable `usize`.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn sealed_lattice_accepted_setup_command_with_length(
-    pointer: *const u8,
-    length: usize,
-    session_handle: u32,
-    output_length_pointer: *mut usize,
-) -> *mut u8 {
-    let input = unsafe { canonical_stream_input(pointer, length) };
-    let output = run_accepted_setup_command(input, session_handle);
-    // Terminal verification consumes the session on every ordinary outcome. If
-    // parsing or command selection failed before dispatch, cancel the still-live
-    // session so its reserved and finished roots are drained.
-    let _ = cancel_accepted_setup_proof_binding_session(session_handle);
-    let output_length = output.len();
-    if !output_length_pointer.is_null() {
-        unsafe { output_length_pointer.write(output_length) };
-    }
-    leak_bytes(output)
-}
-
-/// # Safety
-///
-/// Every input pointer must name its declared readable range.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn sealed_lattice_bgv_canonical_stream_absorb_chunk(
-    handle: u32,
-    chunk_index: u32,
-    chunk_pointer: *const u8,
-    chunk_length: usize,
-) -> u32 {
-    let chunk = unsafe { canonical_stream_input(chunk_pointer, chunk_length) };
-    absorb_bgv_canonical_stream_chunk(handle, chunk_index, chunk)
-        .map_or_else(|status| status, |()| 0)
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn sealed_lattice_bgv_canonical_stream_finish(handle: u32) -> u32 {
-    finish_bgv_canonical_stream(handle).map_or_else(|status| status, |()| 0)
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn sealed_lattice_bgv_canonical_stream_cancel(handle: u32) -> u32 {
-    cancel_bgv_canonical_stream(handle).map_or_else(|status| status, |()| 0)
-}
-
-/// # Safety
-///
-/// Every input pointer must name its declared readable range. Non-null output
-/// pointers must each point to one writable value of the declared type.
-#[unsafe(no_mangle)]
-#[allow(clippy::too_many_arguments)]
-pub unsafe extern "C" fn sealed_lattice_bgv_canonical_material_reader_begin(
-    family_code: u32,
-    material_root_pointer: *const u8,
-    material_root_length: usize,
-    status_pointer: *mut u32,
-    total_byte_length_pointer: *mut u32,
-) -> u32 {
-    let material_root =
-        unsafe { canonical_stream_input(material_root_pointer, material_root_length) };
-    let result = begin_bgv_canonical_material_reader(family_code, material_root);
-    unsafe { write_canonical_stream_begin(result, status_pointer, total_byte_length_pointer) }
-}
-
-/// # Safety
-///
-/// The output pointer must name its declared writable range.
-#[unsafe(no_mangle)]
-#[allow(clippy::too_many_arguments)]
-pub unsafe extern "C" fn sealed_lattice_bgv_canonical_material_reader_read_chunk(
-    handle: u32,
-    chunk_index: u32,
-    output_pointer: *mut u8,
-    output_length: usize,
-) -> u32 {
-    if output_pointer.is_null() {
-        return foundation::RefusalReason::WrongTypeOrLength.canonical_code() as u32;
-    }
-    let output = unsafe { slice::from_raw_parts_mut(output_pointer, output_length) };
-    read_bgv_canonical_material_chunk(handle, chunk_index, output)
-        .map_or_else(|status| status, |()| 0)
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn sealed_lattice_bgv_canonical_material_reader_finish(handle: u32) -> u32 {
-    finish_bgv_canonical_material_reader(handle).map_or_else(|status| status, |()| 0)
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn sealed_lattice_bgv_canonical_material_reader_cancel(handle: u32) -> u32 {
-    cancel_bgv_canonical_material_reader(handle).map_or_else(|status| status, |()| 0)
 }
 
 /// Opens the sole finality-verifier session in this WASM instance. The session

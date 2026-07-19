@@ -11,9 +11,10 @@ use crate::{
     bgv::setup::{
         SetupGaloisGenerationPreparationError, SetupGeneratedGaloisSourceAuthority,
         SetupGenerationAuthorityHandle, SetupGenerationGaloisApplication,
-        SetupGenerationGaloisPreparationSource, commit_prepackage_galois_source,
-        commit_prepackage_generated_galois_source, preflight_prepackage_galois_source_slot,
-        preflight_prepackage_generated_galois_source_slot,
+        SetupGenerationGaloisPreparationSource,
+        add_generated_proof_source_to_accepted_setup_package_builder,
+        commit_prepackage_galois_source, commit_prepackage_generated_galois_source,
+        preflight_prepackage_galois_source_slot, preflight_prepackage_generated_galois_source_slot,
         resolve_setup_generation_galois_preparation_source,
         restore_prepackage_galois_statement_source, take_prepackage_galois_statement_source,
         with_prepackage_generated_galois_source, with_prepackage_relinearization_source,
@@ -1580,6 +1581,7 @@ fn finish_galois_verification(
 }
 
 fn commit_generated_galois_source(
+    accepted_setup_package_builder_handle: u32,
     prepackage_catalog_handle: u32,
     generated_common_proof_handle: u32,
     generation_source_handle: u32,
@@ -1600,6 +1602,16 @@ fn commit_generated_galois_source(
             return Err(error);
         }
     };
+    if let Err(error) = add_generated_proof_source_to_accepted_setup_package_builder(
+        accepted_setup_package_builder_handle,
+        generated_common_proof_handle,
+        pending_source
+            .generated_source_authority()
+            .canonical_application_statement_bytes(),
+    ) {
+        restore_pending_generated_galois_source(generation_source_handle, pending_source)?;
+        return Err(error);
+    }
     commit_prepackage_generated_galois_source(
         preflight,
         pending_source.into_generated_source_authority(),
@@ -2257,17 +2269,20 @@ pub extern "C" fn sealed_lattice_galois_key_share_component_readback_cancel(
         .map_or_else(super::runtime_ffi::runtime_error_status, |()| 0)
 }
 
-/// Atomically transfers one completed generated proof and its exact
-/// generation-only source into the prepackage catalog. The generic generated
-/// proof remains there pending joint package binding and cannot be reused by
-/// this adapter.
+/// Atomically retains one completed generated proof in the next exact package
+/// slot, then transfers its generation-only source into the prepackage
+/// catalog. The package builder receives the authority-owned canonical
+/// statement before the catalog commit; no caller-supplied statement can
+/// select or alter the proof binding.
 #[unsafe(no_mangle)]
 pub extern "C" fn sealed_lattice_galois_key_share_commit_generated_source(
+    accepted_setup_package_builder_handle: u32,
     prepackage_catalog_handle: u32,
     generated_common_proof_handle: u32,
     generation_source_handle: u32,
 ) -> u32 {
     commit_generated_galois_source(
+        accepted_setup_package_builder_handle,
         prepackage_catalog_handle,
         generated_common_proof_handle,
         generation_source_handle,

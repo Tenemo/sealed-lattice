@@ -424,35 +424,61 @@ pub(crate) enum CommonProofSourcePolynomialProviderPoll {
     Ready(ProvidedCommonProofSourcePolynomial),
 }
 
+/// Exact provider-owned memory that can overlap the common prover.
+///
+/// Returned polynomial bytes belong to the common prover's relation working
+/// set. They are retained here only as a cross-check that the loading phase is
+/// large enough, never added to the provider-owned total a second time.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct CommonProofSourceProviderMemoryAccounting {
+    loading_persistent_resident_byte_length: u64,
+    post_source_polynomial_finish_persistent_resident_byte_length: u64,
+    additional_loading_transient_byte_length: u64,
+    maximum_returned_source_polynomial_byte_length: u64,
+}
+
+impl CommonProofSourceProviderMemoryAccounting {
+    pub(crate) const fn new(
+        loading_persistent_resident_byte_length: u64,
+        post_source_polynomial_finish_persistent_resident_byte_length: u64,
+        additional_loading_transient_byte_length: u64,
+        maximum_returned_source_polynomial_byte_length: u64,
+    ) -> Self {
+        Self {
+            loading_persistent_resident_byte_length,
+            post_source_polynomial_finish_persistent_resident_byte_length,
+            additional_loading_transient_byte_length,
+            maximum_returned_source_polynomial_byte_length,
+        }
+    }
+
+    pub(crate) const fn loading_persistent_resident_byte_length(self) -> u64 {
+        self.loading_persistent_resident_byte_length
+    }
+
+    pub(crate) const fn post_source_polynomial_finish_persistent_resident_byte_length(self) -> u64 {
+        self.post_source_polynomial_finish_persistent_resident_byte_length
+    }
+
+    pub(crate) const fn additional_loading_transient_byte_length(self) -> u64 {
+        self.additional_loading_transient_byte_length
+    }
+
+    pub(crate) const fn maximum_returned_source_polynomial_byte_length(self) -> u64 {
+        self.maximum_returned_source_polynomial_byte_length
+    }
+}
+
 /// Exact, ordered application source boundary for the common prover. A
 /// provider must consume each request deterministically and refuse leftovers
 /// in `finish`; the engine never accepts an ordinal-keyed host map.
 pub(crate) trait CommonProofSourcePolynomialProvider {
-    /// Bytes retained exclusively by this provider while source polynomials
-    /// are still being loaded. Returned polynomials belong to the common
-    /// prover phase working set and must not be included here.
-    fn persistent_resident_memory_byte_length(&self) -> Result<u64, CommonProofProverError> {
-        Ok(0)
-    }
-
-    /// Bytes retained after `finish` has consumed the ordered source catalog,
-    /// but before the provider is released after base-tree materialization.
-    /// Providers without a smaller post-finish representation conservatively
-    /// retain their loading-phase accounting.
-    fn post_source_polynomial_finish_persistent_resident_memory_byte_length(
+    /// Every provider must account explicitly. There is deliberately no zero
+    /// default because an omitted implementation would bypass the production
+    /// resident-memory bound.
+    fn memory_accounting(
         &self,
-    ) -> Result<u64, CommonProofProverError> {
-        self.persistent_resident_memory_byte_length()
-    }
-
-    /// Maximum provider-owned transient allocation that overlaps the common
-    /// prover's loading-phase working set. This excludes the returned source
-    /// polynomial, which is already charged by the common phase plan.
-    fn loading_source_polynomials_transient_byte_length(
-        &self,
-    ) -> Result<u64, CommonProofProverError> {
-        Ok(0)
-    }
+    ) -> Result<CommonProofSourceProviderMemoryAccounting, CommonProofProverError>;
 
     fn poll_source_polynomial(
         &mut self,
@@ -482,6 +508,13 @@ pub(crate) trait CommonProofSourcePolynomialProvider {
     fn finish_bound_tree_leaf_salts(&mut self) -> Result<(), CommonProofProverError> {
         Ok(())
     }
+
+    /// Rewinds only the authenticated persistent-salt traversal after one
+    /// exact completed pass. Providers without committed-material trees have
+    /// no salt state and therefore complete this operation trivially.
+    fn rewind_bound_tree_leaf_salts(&mut self) -> Result<(), CommonProofProverError> {
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -498,6 +531,31 @@ impl ResidentCommonProofSourcePolynomialProvider {
 
 #[cfg(test)]
 impl CommonProofSourcePolynomialProvider for ResidentCommonProofSourcePolynomialProvider {
+    fn memory_accounting(
+        &self,
+    ) -> Result<CommonProofSourceProviderMemoryAccounting, CommonProofProverError> {
+        let maximum_returned_source_polynomial_byte_length = self
+            .columns
+            .values()
+            .map(CommonProofSourcePolynomial::resident_payload_byte_length)
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .max()
+            .unwrap_or(0);
+        let retained_polynomial_byte_length =
+            self.columns.values().try_fold(0_u64, |total, polynomial| {
+                total
+                    .checked_add(polynomial.resident_payload_byte_length()?)
+                    .ok_or(CommonProofProverError::CountOverflow)
+            })?;
+        Ok(CommonProofSourceProviderMemoryAccounting::new(
+            retained_polynomial_byte_length,
+            0,
+            0,
+            maximum_returned_source_polynomial_byte_length,
+        ))
+    }
+
     fn poll_source_polynomial(
         &mut self,
         request: CommonProofSourcePolynomialRequest<'_>,
@@ -575,6 +633,27 @@ impl CommonProofSourcePolynomial {
             Self::Base(coefficients) => coefficients.len(),
             Self::Extension(coefficients) => coefficients.len(),
         }
+    }
+
+    pub(crate) fn resident_payload_byte_length(&self) -> Result<u64, CommonProofProverError> {
+        let (coefficient_count, coefficient_byte_length) = match self {
+            Self::Base(coefficients) => (
+                coefficients.len(),
+                core::mem::size_of::<ProofBaseFieldElement>(),
+            ),
+            Self::Extension(coefficients) => (
+                coefficients.len(),
+                core::mem::size_of::<ProofChallengeExtensionElement>(),
+            ),
+        };
+        u64::try_from(coefficient_count)
+            .ok()
+            .and_then(|count| {
+                u64::try_from(coefficient_byte_length)
+                    .ok()
+                    .and_then(|width| count.checked_mul(width))
+            })
+            .ok_or(CommonProofProverError::CountOverflow)
     }
 
     pub(crate) fn evaluate_at(

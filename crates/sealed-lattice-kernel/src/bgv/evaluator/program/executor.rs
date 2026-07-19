@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::{
     bgv::{
@@ -12,9 +12,14 @@ use crate::{
                 EvaluatorKeyStoreReadRequest, VerifiedEvaluatorKeyReplay,
                 VerifiedEvaluatorKeyResolver,
             },
-            top_k::SELECTED_EVALUATOR_WORKING_LEVEL,
+            top_k::{
+                SELECTED_EVALUATOR_WORKING_LEVEL, SELECTED_RELINEARIZATION_KEY_LEVEL,
+                selected_evaluator_rotation_key_schedule,
+            },
         },
+        key_switch_topology::KeySwitchDecompositionTopology,
         parameters::{DATA_PRIMES, POLYNOMIAL_DEGREE},
+        proof_suite::{SelectedEvaluatorEntryKind, SelectedEvaluatorEntryPosition},
         setup::{
             VerifiedAcceptedSetupAuthorityHandle, take_verified_evaluator_execution_authority,
         },
@@ -90,9 +95,407 @@ pub(crate) enum SelectedEvaluatorExecutionProgress {
     Complete,
 }
 
-struct PendingEvaluatorKeyOperation {
-    instruction: EvaluatorInstruction,
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(super) enum PreparedEvaluatorKeyIdentity {
+    Relinearization {
+        catalog_level: usize,
+    },
+    Galois {
+        galois_element: usize,
+        catalog_level: usize,
+    },
+}
+
+impl PreparedEvaluatorKeyIdentity {
+    fn matches_position(self, position: SelectedEvaluatorEntryPosition) -> bool {
+        match (self, position.key_kind()) {
+            (
+                Self::Relinearization { catalog_level },
+                SelectedEvaluatorEntryKind::Relinearization {
+                    catalog_level: position_level,
+                },
+            ) => catalog_level == position_level,
+            (
+                Self::Galois {
+                    galois_element,
+                    catalog_level,
+                },
+                SelectedEvaluatorEntryKind::Galois {
+                    galois_element: position_element,
+                    catalog_level: position_level,
+                },
+            ) => galois_element == position_element && catalog_level == position_level,
+            _ => false,
+        }
+    }
+
+    const fn catalog_level(self) -> usize {
+        match self {
+            Self::Relinearization { catalog_level } | Self::Galois { catalog_level, .. } => {
+                catalog_level
+            }
+        }
+    }
+
+    const fn physical_store_component_count(self) -> u64 {
+        match self {
+            Self::Relinearization { .. } => 2,
+            Self::Galois { .. } => 1,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) struct SelectedEvaluatorExecutionAccounting {
+    key_operation_count: usize,
+    key_load_count: usize,
+    key_store_read_byte_count: u64,
+    key_store_reread_byte_count: u64,
+    key_ntt_transform_count: usize,
+    maximum_live_ciphertext_count: usize,
+    maximum_live_ciphertext_coefficient_byte_count: u64,
+}
+
+impl SelectedEvaluatorExecutionAccounting {
+    pub(super) const fn key_operation_count(self) -> usize {
+        self.key_operation_count
+    }
+
+    pub(super) const fn key_load_count(self) -> usize {
+        self.key_load_count
+    }
+
+    pub(super) const fn key_store_read_byte_count(self) -> u64 {
+        self.key_store_read_byte_count
+    }
+
+    pub(super) const fn key_store_reread_byte_count(self) -> u64 {
+        self.key_store_reread_byte_count
+    }
+
+    pub(super) const fn key_ntt_transform_count(self) -> usize {
+        self.key_ntt_transform_count
+    }
+
+    pub(super) const fn maximum_live_ciphertext_count(self) -> usize {
+        self.maximum_live_ciphertext_count
+    }
+
+    pub(super) const fn maximum_live_ciphertext_coefficient_byte_count(self) -> u64 {
+        self.maximum_live_ciphertext_coefficient_byte_count
+    }
+}
+
+pub(super) struct PreparedEvaluatorExecutionSchedule {
+    required_keys: Box<[Option<PreparedEvaluatorKeyIdentity>]>,
+    next_required_keys: Box<[Option<PreparedEvaluatorKeyIdentity>]>,
+    accounting: SelectedEvaluatorExecutionAccounting,
+    #[cfg(test)]
+    liveness_peak: PreparedEvaluatorLivenessPeak,
+}
+
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct PreparedEvaluatorLivenessPeak {
+    pub(super) instruction_ordinal: usize,
+    pub(super) opcode: EvaluatorOpcode,
+    pub(super) live_ciphertext_count: usize,
+    pub(super) live_ciphertext_coefficient_byte_count: u64,
+}
+
+struct PendingEvaluatorKeyLoad {
+    key_identity: PreparedEvaluatorKeyIdentity,
+    counts_as_reread: bool,
     replay: VerifiedEvaluatorKeyReplay,
+}
+
+impl PreparedEvaluatorExecutionSchedule {
+    /// Derives key-resident phases without changing canonical instruction
+    /// order. Non-key instructions between two uses of the same key remain in
+    /// their original positions while that one verified NTT key stays
+    /// resident. The first different key ends the phase. This makes the
+    /// canonical stream, its register numbering, and every last-use drop the
+    /// complete dependency proof for the prepared schedule.
+    pub(super) fn derive(instructions: &[EvaluatorInstruction]) -> Result<Self, RefusalReason> {
+        if instructions.is_empty() {
+            return Err(RefusalReason::WrongTypeOrLength);
+        }
+        let galois_catalog_levels =
+            selected_evaluator_rotation_key_schedule(usize::from(FOUNDATION_PROFILE.option_count))
+                .map_err(evaluator_refusal)?
+                .into_iter()
+                .collect::<BTreeMap<_, _>>();
+        let mut required_keys = Vec::with_capacity(instructions.len());
+        let mut live_register_levels = vec![Some(SELECTED_EVALUATOR_WORKING_LEVEL)];
+        let mut live_ciphertext_count = 1_usize;
+        let mut maximum_live_ciphertext_count = 1_usize;
+        let mut live_ciphertext_coefficient_byte_count =
+            ciphertext_coefficient_byte_count(SELECTED_EVALUATOR_WORKING_LEVEL)?;
+        let mut maximum_live_ciphertext_coefficient_byte_count =
+            live_ciphertext_coefficient_byte_count;
+        #[cfg(test)]
+        let mut liveness_peak = None;
+
+        for instruction in instructions {
+            for register in instruction.input_registers() {
+                let register_index = usize::try_from(*register)
+                    .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
+                if live_register_levels
+                    .get(register_index)
+                    .and_then(|level| *level)
+                    .is_none()
+                {
+                    return Err(RefusalReason::MissingPrerequisite);
+                }
+            }
+
+            let required_key = match instruction.opcode() {
+                EvaluatorOpcode::CiphertextMultiplyRelinearizeAndDrop
+                | EvaluatorOpcode::CiphertextMultiplyAndRelinearize => {
+                    Some(PreparedEvaluatorKeyIdentity::Relinearization {
+                        catalog_level: SELECTED_RELINEARIZATION_KEY_LEVEL,
+                    })
+                }
+                EvaluatorOpcode::GaloisRotate => {
+                    let galois_element = usize::try_from(instruction.immediate0())
+                        .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
+                    let catalog_level = galois_catalog_levels
+                        .get(&galois_element)
+                        .copied()
+                        .ok_or(RefusalReason::UnsupportedVersionOrSuite)?;
+                    Some(PreparedEvaluatorKeyIdentity::Galois {
+                        galois_element,
+                        catalog_level,
+                    })
+                }
+                _ => None,
+            };
+            required_keys.push(required_key);
+
+            if instruction.opcode() == EvaluatorOpcode::DropRegister {
+                let register = *instruction
+                    .input_registers()
+                    .first()
+                    .ok_or(RefusalReason::WrongTypeOrLength)?;
+                let register_index = usize::try_from(register)
+                    .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
+                let live_level = live_register_levels
+                    .get_mut(register_index)
+                    .ok_or(RefusalReason::MissingPrerequisite)?;
+                let live_level = live_level
+                    .take()
+                    .ok_or(RefusalReason::MissingPrerequisite)?;
+                live_ciphertext_count = live_ciphertext_count
+                    .checked_sub(1)
+                    .ok_or(RefusalReason::WrongTypeOrLength)?;
+                live_ciphertext_coefficient_byte_count = live_ciphertext_coefficient_byte_count
+                    .checked_sub(ciphertext_coefficient_byte_count(live_level)?)
+                    .ok_or(RefusalReason::WrongTypeOrLength)?;
+            } else if let Some(output_register) = instruction.output_register() {
+                if usize::try_from(output_register).ok() != Some(live_register_levels.len()) {
+                    return Err(RefusalReason::WrongTypeOrLength);
+                }
+                let output_level =
+                    prepared_instruction_output_level(instruction, &live_register_levels)?
+                        .ok_or(RefusalReason::WrongTypeOrLength)?;
+                live_register_levels.push(Some(output_level));
+                live_ciphertext_count = live_ciphertext_count
+                    .checked_add(1)
+                    .ok_or(RefusalReason::OutsideSupportedProfile)?;
+                live_ciphertext_coefficient_byte_count = live_ciphertext_coefficient_byte_count
+                    .checked_add(ciphertext_coefficient_byte_count(output_level)?)
+                    .ok_or(RefusalReason::OutsideSupportedProfile)?;
+                maximum_live_ciphertext_count =
+                    maximum_live_ciphertext_count.max(live_ciphertext_count);
+                if live_ciphertext_coefficient_byte_count
+                    > maximum_live_ciphertext_coefficient_byte_count
+                {
+                    maximum_live_ciphertext_coefficient_byte_count =
+                        live_ciphertext_coefficient_byte_count;
+                    #[cfg(test)]
+                    {
+                        liveness_peak = Some(PreparedEvaluatorLivenessPeak {
+                            instruction_ordinal: required_keys.len() - 1,
+                            opcode: instruction.opcode(),
+                            live_ciphertext_count,
+                            live_ciphertext_coefficient_byte_count,
+                        });
+                    }
+                }
+            }
+        }
+        if live_ciphertext_count != 2 {
+            return Err(RefusalReason::WrongTypeOrLength);
+        }
+
+        let mut next_required_keys = vec![None; required_keys.len() + 1];
+        let mut next_required_key = None;
+        for instruction_ordinal in (0..required_keys.len()).rev() {
+            if let Some(required_key) = required_keys[instruction_ordinal] {
+                next_required_key = Some(required_key);
+            }
+            next_required_keys[instruction_ordinal] = next_required_key;
+        }
+
+        let mut accounting = SelectedEvaluatorExecutionAccounting {
+            maximum_live_ciphertext_count,
+            maximum_live_ciphertext_coefficient_byte_count,
+            ..SelectedEvaluatorExecutionAccounting::default()
+        };
+        let mut active_key = None;
+        let mut loaded_keys = BTreeSet::new();
+        for required_key in required_keys.iter().flatten().copied() {
+            accounting.key_operation_count = accounting
+                .key_operation_count
+                .checked_add(1)
+                .ok_or(RefusalReason::OutsideSupportedProfile)?;
+            if active_key == Some(required_key) {
+                continue;
+            }
+            active_key = Some(required_key);
+            accounting.key_load_count = accounting
+                .key_load_count
+                .checked_add(1)
+                .ok_or(RefusalReason::OutsideSupportedProfile)?;
+            let topology = KeySwitchDecompositionTopology::for_level(required_key.catalog_level())
+                .map_err(evaluator_refusal)?;
+            let component_byte_count = topology
+                .canonical_component_wire_byte_length(POLYNOMIAL_DEGREE)
+                .map_err(evaluator_refusal)?;
+            let key_store_byte_count = component_byte_count
+                .checked_mul(required_key.physical_store_component_count())
+                .ok_or(RefusalReason::OutsideSupportedProfile)?;
+            accounting.key_store_read_byte_count = accounting
+                .key_store_read_byte_count
+                .checked_add(key_store_byte_count)
+                .ok_or(RefusalReason::OutsideSupportedProfile)?;
+            if !loaded_keys.insert(required_key) {
+                accounting.key_store_reread_byte_count = accounting
+                    .key_store_reread_byte_count
+                    .checked_add(key_store_byte_count)
+                    .ok_or(RefusalReason::OutsideSupportedProfile)?;
+            }
+            let transformed_limb_count = topology
+                .data_block_count()
+                .checked_mul(topology.extended_limb_count())
+                .and_then(|limb_count| limb_count.checked_mul(2))
+                .ok_or(RefusalReason::OutsideSupportedProfile)?;
+            accounting.key_ntt_transform_count = accounting
+                .key_ntt_transform_count
+                .checked_add(transformed_limb_count)
+                .ok_or(RefusalReason::OutsideSupportedProfile)?;
+        }
+
+        Ok(Self {
+            required_keys: required_keys.into_boxed_slice(),
+            next_required_keys: next_required_keys.into_boxed_slice(),
+            accounting,
+            #[cfg(test)]
+            liveness_peak: liveness_peak.ok_or(RefusalReason::WrongTypeOrLength)?,
+        })
+    }
+
+    pub(super) fn required_key(
+        &self,
+        instruction_ordinal: usize,
+    ) -> Result<Option<PreparedEvaluatorKeyIdentity>, RefusalReason> {
+        self.required_keys
+            .get(instruction_ordinal)
+            .copied()
+            .ok_or(RefusalReason::WrongTypeOrLength)
+    }
+
+    fn next_required_key(
+        &self,
+        next_instruction_ordinal: usize,
+    ) -> Result<Option<PreparedEvaluatorKeyIdentity>, RefusalReason> {
+        self.next_required_keys
+            .get(next_instruction_ordinal)
+            .copied()
+            .ok_or(RefusalReason::WrongTypeOrLength)
+    }
+
+    pub(super) const fn accounting(&self) -> SelectedEvaluatorExecutionAccounting {
+        self.accounting
+    }
+
+    #[cfg(test)]
+    pub(super) const fn liveness_peak(&self) -> PreparedEvaluatorLivenessPeak {
+        self.liveness_peak
+    }
+}
+
+fn prepared_instruction_output_level(
+    instruction: &EvaluatorInstruction,
+    live_register_levels: &[Option<usize>],
+) -> Result<Option<usize>, RefusalReason> {
+    let input_level = |input_ordinal: usize| -> Result<usize, RefusalReason> {
+        let register = instruction
+            .input_registers()
+            .get(input_ordinal)
+            .copied()
+            .ok_or(RefusalReason::WrongTypeOrLength)?;
+        live_register_levels
+            .get(usize::try_from(register).map_err(|_| RefusalReason::OutsideSupportedProfile)?)
+            .and_then(|level| *level)
+            .ok_or(RefusalReason::MissingPrerequisite)
+    };
+    match instruction.opcode() {
+        EvaluatorOpcode::ModulusSwitchToLevel => {
+            let source_level = input_level(0)?;
+            let target_level = usize::try_from(instruction.immediate0())
+                .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
+            if target_level >= source_level {
+                return Err(RefusalReason::WrongTypeOrLength);
+            }
+            Ok(Some(target_level))
+        }
+        EvaluatorOpcode::NormalizeDecryptionMultiplier
+        | EvaluatorOpcode::CiphertextNegate
+        | EvaluatorOpcode::PlaintextAdd
+        | EvaluatorOpcode::PlaintextMultiply
+        | EvaluatorOpcode::GaloisRotate => Ok(Some(input_level(0)?)),
+        EvaluatorOpcode::CiphertextAdd | EvaluatorOpcode::CiphertextSubtract => {
+            let left_level = input_level(0)?;
+            if input_level(1)? != left_level {
+                return Err(RefusalReason::WrongTypeOrLength);
+            }
+            Ok(Some(left_level))
+        }
+        EvaluatorOpcode::CiphertextMultiplyAndRelinearize => {
+            let left_level = input_level(0)?;
+            if input_level(1)? != left_level {
+                return Err(RefusalReason::WrongTypeOrLength);
+            }
+            Ok(Some(left_level))
+        }
+        EvaluatorOpcode::CiphertextMultiplyRelinearizeAndDrop => {
+            let left_level = input_level(0)?;
+            if input_level(1)? != left_level {
+                return Err(RefusalReason::WrongTypeOrLength);
+            }
+            Ok(Some(
+                left_level
+                    .checked_sub(1)
+                    .ok_or(RefusalReason::WrongTypeOrLength)?,
+            ))
+        }
+        EvaluatorOpcode::DropRegister | EvaluatorOpcode::DeclareOutput => Ok(None),
+    }
+}
+
+fn ciphertext_coefficient_byte_count(level: usize) -> Result<u64, RefusalReason> {
+    u64::try_from(level)
+        .ok()
+        .and_then(|level| level.checked_add(1))
+        .and_then(|limb_count| {
+            u64::try_from(POLYNOMIAL_DEGREE)
+                .ok()
+                .and_then(|degree| limb_count.checked_mul(degree))
+        })
+        .and_then(|coefficient_count| coefficient_count.checked_mul(2))
+        .and_then(|coefficient_count| coefficient_count.checked_mul(u64::from(u64::BITS / 8)))
+        .ok_or(RefusalReason::OutsideSupportedProfile)
 }
 
 /// Pollable execution of one suite-fixed evaluator stream. The worker runs
@@ -104,9 +507,15 @@ pub(crate) struct SelectedEvaluatorProgramExecution {
     program: EvaluatorProgramSet,
     constant_ordinals: BTreeMap<[u8; Hash512::BYTE_LENGTH], usize>,
     selected_stream_ordinal: usize,
+    execution_schedule: PreparedEvaluatorExecutionSchedule,
     next_instruction_ordinal: usize,
     registers: Vec<Option<Ciphertext>>,
-    pending_key_operation: Option<PendingEvaluatorKeyOperation>,
+    live_ciphertext_count: usize,
+    live_ciphertext_coefficient_byte_count: u64,
+    resident_key_context: Option<super::super::replay::VerifiedEvaluatorKeyContext>,
+    pending_key_load: Option<PendingEvaluatorKeyLoad>,
+    loaded_key_identities: BTreeSet<PreparedEvaluatorKeyIdentity>,
+    execution_accounting: SelectedEvaluatorExecutionAccounting,
     target_identifier_register: Option<u32>,
     target_order_register: Option<u32>,
     evaluator_replay_context_hash: [u8; Hash512::BYTE_LENGTH],
@@ -142,6 +551,13 @@ impl SelectedEvaluatorProgramExecution {
         {
             return Err(RefusalReason::UnsupportedVersionOrSuite);
         }
+        let execution_schedule = PreparedEvaluatorExecutionSchedule::derive(
+            program
+                .streams()
+                .get(selected_stream_ordinal)
+                .ok_or(RefusalReason::UnsupportedVersionOrSuite)?
+                .instructions(),
+        )?;
         let mut constant_ordinals = BTreeMap::new();
         for (constant_ordinal, constant) in program.constants().iter().enumerate() {
             let constant_hash = constant.constant_hash().map_err(evaluator_refusal)?;
@@ -174,9 +590,23 @@ impl SelectedEvaluatorProgramExecution {
             program,
             constant_ordinals,
             selected_stream_ordinal,
+            execution_schedule,
             next_instruction_ordinal: 0,
             registers: vec![Some(aggregate.aggregate_ciphertext)],
-            pending_key_operation: None,
+            live_ciphertext_count: 1,
+            live_ciphertext_coefficient_byte_count: ciphertext_coefficient_byte_count(
+                SELECTED_EVALUATOR_WORKING_LEVEL,
+            )?,
+            resident_key_context: None,
+            pending_key_load: None,
+            loaded_key_identities: BTreeSet::new(),
+            execution_accounting: SelectedEvaluatorExecutionAccounting {
+                maximum_live_ciphertext_count: 1,
+                maximum_live_ciphertext_coefficient_byte_count: ciphertext_coefficient_byte_count(
+                    SELECTED_EVALUATOR_WORKING_LEVEL,
+                )?,
+                ..SelectedEvaluatorExecutionAccounting::default()
+            },
             target_identifier_register: None,
             target_order_register: None,
             evaluator_replay_context_hash,
@@ -205,27 +635,34 @@ impl SelectedEvaluatorProgramExecution {
 
     fn advance_inner(&mut self) -> Result<SelectedEvaluatorExecutionProgress, RefusalReason> {
         loop {
-            if let Some(pending) = self.pending_key_operation.as_ref() {
+            if let Some(pending) = self.pending_key_load.as_ref() {
                 if let Some(request) = pending.replay.next_read_request() {
                     return Ok(SelectedEvaluatorExecutionProgress::StoreReadRequired(
                         request,
                     ));
                 }
                 let pending = self
-                    .pending_key_operation
+                    .pending_key_load
                     .take()
                     .ok_or(RefusalReason::ConsumedState)?;
                 let key_context = pending.replay.finish()?;
-                if key_context.resolver_context_hash() != self.evaluator_replay_context_hash {
+                if key_context.resolver_context_hash() != self.evaluator_replay_context_hash
+                    || !pending
+                        .key_identity
+                        .matches_position(key_context.position())
+                {
                     return Err(RefusalReason::WrongContext);
                 }
-                let output = self.execute_key_instruction(&pending.instruction, &key_context)?;
-                drop(key_context);
-                self.push_instruction_output(&pending.instruction, output)?;
-                self.next_instruction_ordinal = self
-                    .next_instruction_ordinal
-                    .checked_add(1)
+                self.execution_accounting.key_ntt_transform_count = self
+                    .execution_accounting
+                    .key_ntt_transform_count
+                    .checked_add(key_context.ntt_transform_count())
                     .ok_or(RefusalReason::OutsideSupportedProfile)?;
+                let was_first_load = self.loaded_key_identities.insert(pending.key_identity);
+                if was_first_load == pending.counts_as_reread {
+                    return Err(RefusalReason::WrongTypeOrLength);
+                }
+                self.resident_key_context = Some(key_context);
                 continue;
             }
 
@@ -242,33 +679,87 @@ impl SelectedEvaluatorProgramExecution {
                 .get(self.next_instruction_ordinal)
                 .cloned()
                 .ok_or(RefusalReason::WrongTypeOrLength)?;
-            match instruction.opcode() {
-                EvaluatorOpcode::CiphertextMultiplyRelinearizeAndDrop
-                | EvaluatorOpcode::CiphertextMultiplyAndRelinearize => {
-                    let replay = self.resolver.begin_relinearization_key_replay()?;
-                    self.pending_key_operation = Some(PendingEvaluatorKeyOperation {
-                        instruction,
-                        replay,
-                    });
+            let required_key = self
+                .execution_schedule
+                .required_key(self.next_instruction_ordinal)?;
+            if let Some(required_key) = required_key {
+                let resident_matches = self
+                    .resident_key_context
+                    .as_ref()
+                    .is_some_and(|context| required_key.matches_position(context.position()));
+                if !resident_matches {
+                    self.resident_key_context = None;
+                    self.begin_key_load(required_key)?;
+                    continue;
                 }
-                EvaluatorOpcode::GaloisRotate => {
-                    let galois_element = usize::try_from(instruction.immediate0())
-                        .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
-                    let replay = self.resolver.begin_galois_key_replay(galois_element)?;
-                    self.pending_key_operation = Some(PendingEvaluatorKeyOperation {
-                        instruction,
-                        replay,
-                    });
-                }
-                _ => {
-                    self.execute_non_key_instruction(&instruction)?;
-                    self.next_instruction_ordinal = self
-                        .next_instruction_ordinal
-                        .checked_add(1)
-                        .ok_or(RefusalReason::OutsideSupportedProfile)?;
-                }
+                let output = {
+                    let key_context = self
+                        .resident_key_context
+                        .as_ref()
+                        .ok_or(RefusalReason::ConsumedState)?;
+                    self.execute_key_instruction(&instruction, key_context)?
+                };
+                self.push_instruction_output(&instruction, output)?;
+                self.execution_accounting.key_operation_count = self
+                    .execution_accounting
+                    .key_operation_count
+                    .checked_add(1)
+                    .ok_or(RefusalReason::OutsideSupportedProfile)?;
+            } else {
+                self.execute_non_key_instruction(&instruction)?;
             }
+            self.next_instruction_ordinal = self
+                .next_instruction_ordinal
+                .checked_add(1)
+                .ok_or(RefusalReason::OutsideSupportedProfile)?;
+            self.release_resident_key_after_completed_phase()?;
         }
+    }
+
+    fn begin_key_load(
+        &mut self,
+        key_identity: PreparedEvaluatorKeyIdentity,
+    ) -> Result<(), RefusalReason> {
+        if self.resident_key_context.is_some() || self.pending_key_load.is_some() {
+            return Err(RefusalReason::ConsumedState);
+        }
+        let replay = match key_identity {
+            PreparedEvaluatorKeyIdentity::Relinearization { .. } => {
+                self.resolver.begin_relinearization_key_replay()?
+            }
+            PreparedEvaluatorKeyIdentity::Galois { galois_element, .. } => {
+                self.resolver.begin_galois_key_replay(galois_element)?
+            }
+        };
+        let counts_as_reread = self.loaded_key_identities.contains(&key_identity);
+        self.execution_accounting.key_load_count = self
+            .execution_accounting
+            .key_load_count
+            .checked_add(1)
+            .ok_or(RefusalReason::OutsideSupportedProfile)?;
+        self.pending_key_load = Some(PendingEvaluatorKeyLoad {
+            key_identity,
+            counts_as_reread,
+            replay,
+        });
+        Ok(())
+    }
+
+    fn release_resident_key_after_completed_phase(&mut self) -> Result<(), RefusalReason> {
+        let Some(resident_position) = self
+            .resident_key_context
+            .as_ref()
+            .map(|context| context.position())
+        else {
+            return Ok(());
+        };
+        let next_required_key = self
+            .execution_schedule
+            .next_required_key(self.next_instruction_ordinal)?;
+        if !next_required_key.is_some_and(|key| key.matches_position(resident_position)) {
+            self.resident_key_context = None;
+        }
+        Ok(())
     }
 
     pub(crate) fn absorb_next_store_chunk(
@@ -279,15 +770,32 @@ impl SelectedEvaluatorProgramExecution {
         if let Some(reason) = self.refusal_reason {
             return Err(reason);
         }
-        let result = self
-            .pending_key_operation
-            .as_mut()
-            .ok_or(RefusalReason::ConsumedState)
-            .and_then(|pending| {
+        let (counts_as_reread, result) = match self.pending_key_load.as_mut() {
+            Some(pending) => (
+                pending.counts_as_reread,
                 pending
                     .replay
-                    .absorb_next_store_chunk(store_byte_offset, chunk_bytes)
-            });
+                    .absorb_next_store_chunk(store_byte_offset, chunk_bytes),
+            ),
+            None => (false, Err(RefusalReason::ConsumedState)),
+        };
+        let result = result.and_then(|()| {
+            let chunk_byte_count = u64::try_from(chunk_bytes.len())
+                .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
+            self.execution_accounting.key_store_read_byte_count = self
+                .execution_accounting
+                .key_store_read_byte_count
+                .checked_add(chunk_byte_count)
+                .ok_or(RefusalReason::OutsideSupportedProfile)?;
+            if counts_as_reread {
+                self.execution_accounting.key_store_reread_byte_count = self
+                    .execution_accounting
+                    .key_store_reread_byte_count
+                    .checked_add(chunk_byte_count)
+                    .ok_or(RefusalReason::OutsideSupportedProfile)?;
+            }
+            Ok(())
+        });
         if let Err(reason) = result {
             self.refuse(reason);
         }
@@ -298,10 +806,15 @@ impl SelectedEvaluatorProgramExecution {
         if let Some(reason) = self.refusal_reason {
             return Err(reason);
         }
-        if self.pending_key_operation.is_some()
+        if self.pending_key_load.is_some()
+            || self.resident_key_context.is_some()
             || self.next_instruction_ordinal != self.selected_instructions()?.len()
+            || self.live_ciphertext_count != 2
         {
             return Err(RefusalReason::ConsumedState);
+        }
+        if self.execution_accounting != self.execution_schedule.accounting() {
+            return Err(RefusalReason::WrongTypeOrLength);
         }
         let target_identifier_register = self
             .target_identifier_register
@@ -318,7 +831,6 @@ impl SelectedEvaluatorProgramExecution {
             return Err(RefusalReason::WrongTypeOrLength);
         }
         Ok(VerifiedSelectedEvaluatorExecution {
-            evaluator_replay_context_hash: self.evaluator_replay_context_hash,
             suite_identifier: self.suite_identifier,
             ceremony_context_hash: self.ceremony_context_hash,
             action_context_hash: self.action_context_hash,
@@ -330,6 +842,11 @@ impl SelectedEvaluatorProgramExecution {
             target_identifier,
             target_order,
         })
+    }
+
+    #[cfg(test)]
+    pub(super) const fn execution_accounting(&self) -> SelectedEvaluatorExecutionAccounting {
+        self.execution_accounting
     }
 
     fn selected_instructions(&self) -> Result<&[EvaluatorInstruction], RefusalReason> {
@@ -397,7 +914,15 @@ impl SelectedEvaluatorProgramExecution {
                     .input_registers()
                     .first()
                     .ok_or(RefusalReason::WrongTypeOrLength)?;
-                take_register(&mut self.registers, register)?;
+                let dropped = take_register(&mut self.registers, register)?;
+                self.live_ciphertext_count = self
+                    .live_ciphertext_count
+                    .checked_sub(1)
+                    .ok_or(RefusalReason::WrongTypeOrLength)?;
+                self.live_ciphertext_coefficient_byte_count = self
+                    .live_ciphertext_coefficient_byte_count
+                    .checked_sub(ciphertext_coefficient_byte_count(dropped.level)?)
+                    .ok_or(RefusalReason::WrongTypeOrLength)?;
                 None
             }
             EvaluatorOpcode::DeclareOutput => {
@@ -430,6 +955,13 @@ impl SelectedEvaluatorProgramExecution {
         instruction: &EvaluatorInstruction,
         key_context: &super::super::replay::VerifiedEvaluatorKeyContext,
     ) -> Result<Ciphertext, RefusalReason> {
+        let required_key = self
+            .execution_schedule
+            .required_key(self.next_instruction_ordinal)?
+            .ok_or(RefusalReason::WrongTypeOrLength)?;
+        if !required_key.matches_position(key_context.position()) {
+            return Err(RefusalReason::WrongContext);
+        }
         match instruction.opcode() {
             EvaluatorOpcode::CiphertextMultiplyRelinearizeAndDrop
             | EvaluatorOpcode::CiphertextMultiplyAndRelinearize => {
@@ -485,7 +1017,25 @@ impl SelectedEvaluatorProgramExecution {
         if usize::try_from(output_register).ok() != Some(self.registers.len()) {
             return Err(RefusalReason::WrongTypeOrLength);
         }
+        let output_coefficient_byte_count = ciphertext_coefficient_byte_count(output.level)?;
         self.registers.push(Some(output));
+        self.live_ciphertext_count = self
+            .live_ciphertext_count
+            .checked_add(1)
+            .ok_or(RefusalReason::OutsideSupportedProfile)?;
+        self.live_ciphertext_coefficient_byte_count = self
+            .live_ciphertext_coefficient_byte_count
+            .checked_add(output_coefficient_byte_count)
+            .ok_or(RefusalReason::OutsideSupportedProfile)?;
+        self.execution_accounting.maximum_live_ciphertext_count = self
+            .execution_accounting
+            .maximum_live_ciphertext_count
+            .max(self.live_ciphertext_count);
+        self.execution_accounting
+            .maximum_live_ciphertext_coefficient_byte_count = self
+            .execution_accounting
+            .maximum_live_ciphertext_coefficient_byte_count
+            .max(self.live_ciphertext_coefficient_byte_count);
         Ok(())
     }
 
@@ -510,8 +1060,11 @@ impl SelectedEvaluatorProgramExecution {
     }
 
     fn refuse(&mut self, reason: RefusalReason) {
-        self.pending_key_operation = None;
+        self.pending_key_load = None;
+        self.resident_key_context = None;
         self.registers.clear();
+        self.live_ciphertext_count = 0;
+        self.live_ciphertext_coefficient_byte_count = 0;
         self.refusal_reason = Some(reason);
     }
 }
@@ -519,7 +1072,6 @@ impl SelectedEvaluatorProgramExecution {
 /// Opaque result of running the canonical instruction stream with only
 /// accepted aggregate and complete-store capabilities.
 pub(crate) struct VerifiedSelectedEvaluatorExecution {
-    evaluator_replay_context_hash: [u8; Hash512::BYTE_LENGTH],
     suite_identifier: [u8; Hash512::BYTE_LENGTH],
     ceremony_context_hash: [u8; Hash512::BYTE_LENGTH],
     action_context_hash: [u8; Hash512::BYTE_LENGTH],
@@ -533,18 +1085,6 @@ pub(crate) struct VerifiedSelectedEvaluatorExecution {
 }
 
 impl VerifiedSelectedEvaluatorExecution {
-    pub(crate) const fn evaluator_replay_context_hash(&self) -> [u8; 64] {
-        self.evaluator_replay_context_hash
-    }
-
-    pub(crate) const fn verified_setup_source_hash(&self) -> [u8; 64] {
-        self.verified_setup_source_hash
-    }
-
-    pub(crate) const fn verified_aggregate_source_hash(&self) -> [u8; 64] {
-        self.verified_aggregate_source_hash
-    }
-
     pub(crate) const fn ballot_count(&self) -> u16 {
         self.ballot_count
     }
@@ -698,7 +1238,9 @@ fn canonical_ciphertext_stream_summary(
     writer.finish_generated_summary()
 }
 
-fn encode_constant_coefficients(constant: &EvaluatorConstant) -> Result<Vec<u64>, RefusalReason> {
+pub(crate) fn encode_constant_coefficients(
+    constant: &EvaluatorConstant,
+) -> Result<Vec<u64>, RefusalReason> {
     let values = constant
         .values()
         .iter()

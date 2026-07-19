@@ -38,6 +38,7 @@ use crate::{
             VerifiedAcceptedSetupAuthority, VerifiedAcceptedSetupAuthorityHandle,
             VerifiedAcceptedSetupParticipantTargetReleaseLease,
             lease_verified_participant_target_release_source,
+            with_verified_accepted_setup_authority,
             with_verified_participant_target_release_source,
         },
     },
@@ -46,15 +47,11 @@ use crate::{
         ActionPrivateRandomness, CanonicalStreamDomain, CanonicalStreamReadbackVerifier,
         FOUNDATION_PROFILE, Hash512, PersistentProofCoinInput, PersistentProofWitnessCoinBinding,
         PreparedActionProofAttemptSource, PrivateRandomCursor, PrivateRandomnessDomain,
-        PrivateRandomnessKmacInputClassAccounting, ProofApplicationSlot,
-        ProofApplicationSlotCeilings, RefusalReason,
-        SELECTED_MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT, SelectedSuiteCapability,
+        ProofApplicationSlot, ProofApplicationSlotCeilings, RefusalReason, SelectedSuiteCapability,
         StateCapabilityKind, StateVerifier, StreamDescriptor, VerificationResult,
         VerifiedCanonicalStreamSummary, VerifiedFinality, VerifiedStateOutput,
         VerifiedStateReservation, bind_prepared_action_proof_attempt_to_canonical_witness,
-        derive_canonical_stream_descriptor,
-        private_randomness_stream_block_count_for_rejection_sampling,
-        selected_target_data_prime_coordinates,
+        derive_canonical_stream_descriptor, selected_target_data_prime_coordinates,
     },
     hashing::hash_framed_parts_512,
 };
@@ -63,6 +60,7 @@ pub(crate) const KLLPS_PARTICIPANT_COUNT: usize = 10;
 pub(crate) const KLLPS_RECONSTRUCTION_THRESHOLD: usize = 4;
 pub(crate) const KLLPS_DENOMINATOR_CLEARING_FACTOR: u64 = 4;
 pub(crate) const KLLPS_THRESHOLD_SIMULATION_BIT_LENGTH: u32 = 96;
+pub(crate) const KLLPS_PAIRED_TARGET_ROLE_COUNT: usize = 2;
 const KLLPS_SPACED_POINT_COUNT: usize = 16;
 const KLLPS_SUBRING_DEGREE: usize = KLLPS_SPACED_POINT_COUNT / 2;
 pub(crate) const KLLPS_POINT_STRIDE: usize = (2 * POLYNOMIAL_DEGREE) / KLLPS_SPACED_POINT_COUNT;
@@ -113,10 +111,13 @@ pub(crate) struct KllpsTargetPair {
 
 /// Finalized cross-participant target authority used only after individual
 /// paired shares have already passed their participant state and board gates.
-/// It deliberately carries no participant reservation binding.
+/// It retains the verifier-derived action selection geometry and deliberately
+/// carries no participant reservation binding.
 #[derive(Debug)]
 pub(crate) struct KllpsReconstructionTargetPair {
     binding: KllpsReleaseBinding,
+    option_count: u16,
+    top_count: u16,
     target_identifier: Ciphertext,
     target_order: Ciphertext,
 }
@@ -124,9 +125,17 @@ pub(crate) struct KllpsReconstructionTargetPair {
 impl KllpsReconstructionTargetPair {
     fn from_verified_finality(
         binding: KllpsReleaseBinding,
+        top_count: u16,
         target_identifier: Ciphertext,
         target_order: Ciphertext,
     ) -> CanonicalResult<Self> {
+        let option_count = FOUNDATION_PROFILE.option_count;
+        if top_count == 0 || top_count > option_count {
+            return Err(invalid_release(
+                CanonicalErrorCode::InvalidProtocolObject,
+                "KLLPS reconstruction top count is outside the verified action profile",
+            ));
+        }
         validate_target_ciphertext(&target_identifier)?;
         validate_target_ciphertext(&target_order)?;
         if target_identifier.level != target_order.level
@@ -139,6 +148,8 @@ impl KllpsReconstructionTargetPair {
         }
         Ok(Self {
             binding,
+            option_count,
+            top_count,
             target_identifier,
             target_order,
         })
@@ -278,6 +289,7 @@ pub(crate) fn verify_finalized_kllps_reconstruction_target_pair(
     .and_then(|(binding, target_identifier, target_order)| {
         KllpsReconstructionTargetPair::from_verified_finality(
             binding,
+            verified_finality.top_count(),
             target_identifier,
             target_order,
         )
@@ -566,8 +578,8 @@ pub(crate) struct AuthorizedKllpsPairedPartialDecryption {
     application_slot: ProofApplicationSlot,
     participant_binding: KllpsParticipantReleaseBinding,
     partial_decryption: KllpsPairedPartialDecryption,
-    flooding_polynomials_by_role: [ZeroizingSignedLimbPolynomial; 2],
-    flooding_cursors_by_role: [PrivateRandomCursor; 2],
+    flooding_polynomials_by_role: [ZeroizingSignedLimbPolynomial; KLLPS_PAIRED_TARGET_ROLE_COUNT],
+    flooding_cursors_by_role: [PrivateRandomCursor; KLLPS_PAIRED_TARGET_ROLE_COUNT],
 }
 
 impl AuthorizedKllpsPairedPartialDecryption {
@@ -670,10 +682,6 @@ impl From<TargetReleaseWitnessError> for KllpsTargetReleaseGenerationPreparation
 }
 
 impl KllpsTargetReleaseWitnessSource {
-    pub(crate) fn partial_streams(&self) -> &KllpsPairedPartialDecryptionStreams {
-        &self.partial_streams
-    }
-
     pub(crate) const fn application_slot(&self) -> ProofApplicationSlot {
         self.proof_witness.authorized_partial.application_slot
     }
@@ -853,7 +861,7 @@ impl TargetReleaseWitnessSource for KllpsTargetReleaseProofWitnessSource {
         binding
             .absorb_canonical_bytes(&2_u16.to_le_bytes())
             .map_err(map_binding_error)?;
-        for role_ordinal in 0..2 {
+        for role_ordinal in 0..KLLPS_PAIRED_TARGET_ROLE_COUNT {
             binding
                 .absorb_canonical_bytes(&(role_ordinal as u16).to_le_bytes())
                 .map_err(map_binding_error)?;
@@ -934,6 +942,20 @@ pub(crate) fn lease_authorized_target_release_witness_source(
             "target-release witness does not match the finalized target",
         ));
     }
+    let accepted_roots_by_limb = with_verified_accepted_setup_authority(
+        accepted_setup_authority_handle,
+        |accepted_setup_authority| {
+            accepted_setup_authority
+                .participant_release_material(participant_binding.subject_participant_id)
+                .ok_or_else(|| {
+                    invalid_release(
+                        CanonicalErrorCode::ComponentMismatch,
+                        "accepted setup has no public release material for the target-share subject",
+                    )
+                })?
+                .selected_target_aggregate_threshold_roots()
+        },
+    )?;
     let accepted_share_lease = lease_verified_participant_target_release_source(
         accepted_setup_authority_handle,
         participant_binding.subject_participant_id,
@@ -942,6 +964,7 @@ pub(crate) fn lease_authorized_target_release_witness_source(
         || usize::from(accepted_share_lease.roster_position())
             != authorized_partial.partial_decryption.roster_position
         || accepted_share_lease.limb_count() != active_limb_count
+        || accepted_roots_by_limb.len() != active_limb_count
     {
         return Err(invalid_release(
             CanonicalErrorCode::ComponentMismatch,
@@ -1007,11 +1030,19 @@ pub(crate) fn lease_authorized_target_release_witness_source(
             )
         })?
         .to_le_bytes();
-    let mut accepted_roots_by_limb = Vec::with_capacity(active_limb_count);
     for (target_basis_position, (expected_data_modulus_index, expected_modulus)) in
         selected_target_coordinates.iter().copied().enumerate()
     {
-        let accepted_root = accepted_share_lease
+        let expected_root = accepted_roots_by_limb
+            .get(target_basis_position)
+            .copied()
+            .ok_or_else(|| {
+                invalid_release(
+                    CanonicalErrorCode::ComponentMismatch,
+                    "accepted setup public roots do not cover the selected target basis",
+                )
+            })?;
+        let leased_root = accepted_share_lease
             .with_limb(
                 target_basis_position,
                 |data_modulus_index, modulus, _, committed_share| {
@@ -1030,7 +1061,12 @@ pub(crate) fn lease_authorized_target_release_witness_source(
                     "accepted setup target limb is outside the selected ordered basis",
                 )
             })?;
-        accepted_roots_by_limb.push(accepted_root);
+        if leased_root != expected_root {
+            return Err(invalid_release(
+                CanonicalErrorCode::ComponentMismatch,
+                "accepted setup private target opening does not match its verifier-accepted public root",
+            ));
+        }
     }
     let target_identifier_descriptor = partial_streams.target_identifier_descriptor()?;
     let target_order_descriptor = partial_streams.target_order_descriptor()?;
@@ -1551,6 +1587,8 @@ fn preflight_kllps_paired_share_binding(
             "accepted setup participant identity does not match the release subject",
         ));
     }
+    let accepted_roots_by_limb =
+        participant_material.selected_target_aggregate_threshold_roots()?;
 
     let roster_position = usize::from(participant_material.roster_position());
     let partial_decryption = KllpsPairedPartialDecryptionStreams::decode_partial(
@@ -1571,7 +1609,7 @@ fn preflight_kllps_paired_share_binding(
         participant_binding.reservation_intent_object_hash,
         participant_binding.subject_participant_id,
         participant_material.roster_position(),
-        participant_material.ordered_aggregate_threshold_roots(),
+        &accepted_roots_by_limb,
         output_bundle.target_identifier_descriptor(),
         output_bundle.target_order_descriptor(),
     )
@@ -1653,18 +1691,142 @@ impl VerifiedKllpsPairedShare {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct ReconstructedKllpsTargetPair {
-    pub(crate) target_identifier_coefficients: Vec<u64>,
-    pub(crate) target_order_coefficients: Vec<u64>,
+struct ReconstructedKllpsTargetPair {
+    target_identifier_coefficients: Vec<u64>,
+    target_order_coefficients: Vec<u64>,
 }
 
 impl ReconstructedKllpsTargetPair {
+    #[cfg(test)]
     pub(crate) fn decode_logical_slots(&self) -> CanonicalResult<(Vec<u64>, Vec<u64>)> {
         Ok((
             decode_plaintext_coefficients_to_logical_slots(&self.target_identifier_coefficients)?,
             decode_plaintext_coefficients_to_logical_slots(&self.target_order_coefficients)?,
         ))
     }
+
+    fn decode_ordered_option_identifiers(
+        &self,
+        top_count: u16,
+        option_count: u16,
+    ) -> CanonicalResult<Vec<u32>> {
+        let target_identifier_slots =
+            decode_plaintext_coefficients_to_logical_slots(&self.target_identifier_coefficients)?;
+        let target_order_slots =
+            decode_plaintext_coefficients_to_logical_slots(&self.target_order_coefficients)?;
+        canonical_ordered_option_identifiers(
+            &target_identifier_slots,
+            &target_order_slots,
+            usize::from(top_count),
+            usize::from(option_count),
+        )
+    }
+}
+
+fn canonical_ordered_option_identifiers(
+    target_identifier_slots: &[u64],
+    target_order_slots: &[u64],
+    top_count: usize,
+    option_count: usize,
+) -> CanonicalResult<Vec<u32>> {
+    if top_count == 0 || top_count > option_count {
+        return Err(invalid_release(
+            CanonicalErrorCode::InvalidProtocolObject,
+            "decoded KLLPS target top count is outside the action profile",
+        ));
+    }
+    if target_identifier_slots.len() != target_order_slots.len()
+        || target_identifier_slots.len() < option_count
+    {
+        return Err(invalid_release(
+            CanonicalErrorCode::MalformedLength,
+            "decoded KLLPS target roles do not cover one common logical-slot layout",
+        ));
+    }
+
+    let mut ordered_option_identifiers = vec![0_u32; top_count];
+    let mut selected_option_count = 0_usize;
+    for option_index in 0..option_count {
+        let target_identifier = target_identifier_slots[option_index];
+        let target_order = target_order_slots[option_index];
+        if (target_identifier == 0) != (target_order == 0) {
+            return Err(invalid_release(
+                CanonicalErrorCode::InvalidProtocolObject,
+                "decoded KLLPS target roles select different option support",
+            ));
+        }
+        if target_identifier == 0 {
+            continue;
+        }
+
+        let expected_identifier = u64::try_from(option_index)
+            .ok()
+            .and_then(|index| index.checked_add(1))
+            .ok_or_else(|| {
+                invalid_release(
+                    CanonicalErrorCode::MalformedLength,
+                    "decoded KLLPS target option identifier overflows",
+                )
+            })?;
+        if target_identifier != expected_identifier {
+            return Err(invalid_release(
+                CanonicalErrorCode::InvalidProtocolObject,
+                "decoded KLLPS target identifier is outside its canonical option slot",
+            ));
+        }
+        let target_order_index = usize::try_from(target_order)
+            .ok()
+            .and_then(|order| order.checked_sub(1))
+            .filter(|order_index| *order_index < top_count)
+            .ok_or_else(|| {
+                invalid_release(
+                    CanonicalErrorCode::InvalidProtocolObject,
+                    "decoded KLLPS target order is outside the action-selected range",
+                )
+            })?;
+        let canonical_identifier = u32::try_from(target_identifier).map_err(|_| {
+            invalid_release(
+                CanonicalErrorCode::InvalidProtocolObject,
+                "decoded KLLPS target identifier does not fit the canonical result",
+            )
+        })?;
+        if ordered_option_identifiers[target_order_index] != 0 {
+            return Err(invalid_release(
+                CanonicalErrorCode::InvalidProtocolObject,
+                "decoded KLLPS target repeats an action-selected order",
+            ));
+        }
+        ordered_option_identifiers[target_order_index] = canonical_identifier;
+        selected_option_count = selected_option_count.checked_add(1).ok_or_else(|| {
+            invalid_release(
+                CanonicalErrorCode::MalformedLength,
+                "decoded KLLPS target selected-option count overflows",
+            )
+        })?;
+    }
+
+    if target_identifier_slots[option_count..]
+        .iter()
+        .chain(&target_order_slots[option_count..])
+        .any(|slot| *slot != 0)
+    {
+        return Err(invalid_release(
+            CanonicalErrorCode::InvalidProtocolObject,
+            "decoded KLLPS target has a nonzero reserved slot",
+        ));
+    }
+    if selected_option_count != top_count
+        || ordered_option_identifiers
+            .iter()
+            .any(|identifier| *identifier == 0)
+    {
+        return Err(invalid_release(
+            CanonicalErrorCode::InvalidProtocolObject,
+            "decoded KLLPS target does not contain exactly the action-selected rank permutation",
+        ));
+    }
+
+    Ok(ordered_option_identifiers)
 }
 
 pub(crate) fn generate_authorized_factor_four_paired_partial_decryption(
@@ -1753,6 +1915,8 @@ where
         ));
     }
     validate_threshold_share(threshold_share_by_limb, target_pair.level())?;
+    let accepted_roots_by_limb =
+        participant_material.selected_target_aggregate_threshold_roots()?;
 
     let flooding_coefficient_bound = selected_factor_four_flooding_bound()?;
     let attempt_identifier = action_private_randomness
@@ -1763,7 +1927,7 @@ where
         accepted_setup_authority,
         target_pair,
         application_slot,
-        participant_material.ordered_aggregate_threshold_roots(),
+        &accepted_roots_by_limb,
         &flooding_coefficient_bound,
     )?;
     let maximum_candidate_draws =
@@ -1872,7 +2036,7 @@ fn target_flooding_context_hash(
     accepted_setup_authority: &VerifiedAcceptedSetupAuthority,
     target_pair: &KllpsTargetPair,
     application_slot: ProofApplicationSlot,
-    ordered_aggregate_threshold_roots: &[[u8; 64]],
+    ordered_selected_target_aggregate_threshold_roots: &[[u8; 64]],
     flooding_coefficient_bound: &BigUint,
 ) -> CanonicalResult<Hash512> {
     let binding = target_pair.binding();
@@ -1891,7 +2055,7 @@ fn target_flooding_context_hash(
         })?
         .to_le_bytes();
     let decrypt_scaling = target_pair.target_identifier.decrypt_scaling.to_le_bytes();
-    let root_count = u64::try_from(ordered_aggregate_threshold_roots.len())
+    let root_count = u64::try_from(ordered_selected_target_aggregate_threshold_roots.len())
         .map_err(|_| {
             invalid_release(
                 CanonicalErrorCode::MalformedLength,
@@ -1899,7 +2063,7 @@ fn target_flooding_context_hash(
             )
         })?
         .to_le_bytes();
-    let ordered_roots = ordered_aggregate_threshold_roots
+    let ordered_roots = ordered_selected_target_aggregate_threshold_roots
         .iter()
         .flatten()
         .copied()
@@ -2000,14 +2164,22 @@ fn private_randomness_error(error: crate::foundation::FoundationSchemaError) -> 
     )
 }
 
+/// The evaluator decrypts with the positive-message BGV convention
+/// `c0 + c1 * s = m + p * e`. For every selected `q = 1 mod p`, the positive
+/// BFV message scale is `(q - 1) / p = -p^-1 mod q`; using the opposite sign
+/// would make the final full-modulus rounding recover `-m`.
+fn positive_bfv_message_conversion_scale(modulus: u64) -> CanonicalResult<u64> {
+    let inverse_plaintext = inverse_mod(PLAINTEXT_MODULUS % modulus, modulus)?;
+    Ok(sub_mod_fast(0, inverse_plaintext, modulus))
+}
+
 fn factor_four_partial_limb(
     bgv_component_one: &[u64],
     threshold_share_transform: &[u64],
     flooding_error: &[BigInt],
     modulus: u64,
 ) -> CanonicalResult<Vec<u64>> {
-    let inverse_plaintext = inverse_mod(PLAINTEXT_MODULUS % modulus, modulus)?;
-    let converted_scale = sub_mod_fast(0, inverse_plaintext, modulus);
+    let converted_scale = positive_bfv_message_conversion_scale(modulus)?;
     let factor_four_converted_scale = mul_mod_fast(
         KLLPS_DENOMINATOR_CLEARING_FACTOR % modulus,
         converted_scale,
@@ -2054,8 +2226,7 @@ fn converted_target_component(
             "KLLPS target component is not a canonical selected-basis polynomial",
         ));
     }
-    let inverse_plaintext = inverse_mod(PLAINTEXT_MODULUS % modulus, modulus)?;
-    let converted_scale = sub_mod_fast(0, inverse_plaintext, modulus);
+    let converted_scale = positive_bfv_message_conversion_scale(modulus)?;
     Ok(bgv_component_one
         .iter()
         .copied()
@@ -2063,7 +2234,8 @@ fn converted_target_component(
         .collect())
 }
 
-pub(crate) fn reconstruct_factor_four_target_pair(
+#[cfg(test)]
+fn reconstruct_factor_four_target_pair(
     target_pair: &KllpsTargetPair,
     verified_shares: &[&VerifiedKllpsPairedShare],
 ) -> CanonicalResult<ReconstructedKllpsTargetPair> {
@@ -2075,16 +2247,20 @@ pub(crate) fn reconstruct_factor_four_target_pair(
     )
 }
 
-pub(crate) fn reconstruct_factor_four_finalized_target_pair(
+pub(crate) fn reconstruct_factor_four_finalized_target_result(
     target_pair: &KllpsReconstructionTargetPair,
     verified_shares: &[&VerifiedKllpsPairedShare],
-) -> CanonicalResult<ReconstructedKllpsTargetPair> {
+) -> CanonicalResult<Vec<u32>> {
     reconstruct_factor_four_target_pair_from_sources(
         &target_pair.binding,
         &target_pair.target_identifier,
         &target_pair.target_order,
         verified_shares,
     )
+    .and_then(|reconstructed| {
+        reconstructed
+            .decode_ordered_option_identifiers(target_pair.top_count, target_pair.option_count)
+    })
 }
 
 fn reconstruct_factor_four_target_pair_from_sources(
@@ -2204,8 +2380,7 @@ fn reconstruct_role(
     }
     let mut accumulator_by_limb = Vec::with_capacity(active_primes.len());
     for (limb_index, modulus) in active_primes.iter().copied().enumerate() {
-        let inverse_plaintext = inverse_mod(PLAINTEXT_MODULUS % modulus, modulus)?;
-        let converted_scale = sub_mod_fast(0, inverse_plaintext, modulus);
+        let converted_scale = positive_bfv_message_conversion_scale(modulus)?;
         let scaled_converted_component_zero =
             mul_mod_fast(KLLPS_DENOMINATOR_CLEARING_FACTOR, converted_scale, modulus);
         let mut accumulator = ciphertext.components[0][limb_index]
@@ -2492,49 +2667,6 @@ pub(crate) fn selected_factor_four_flooding_bound() -> CanonicalResult<BigUint> 
         &flooding_coefficient_bound,
     )?;
     Ok(flooding_coefficient_bound)
-}
-
-/// Source-owned count for one paired target-release flooding attempt. The two
-/// roles use independent streams under one release-attempt identifier and the
-/// exact candidate width derived by the production sampler.
-pub(crate) fn selected_target_release_private_randomness_kmac_input_accounting()
--> CanonicalResult<PrivateRandomnessKmacInputClassAccounting> {
-    let flooding_bound = selected_factor_four_flooding_bound()?;
-    let sample_range = flooding_bound * 2_u8 + BigUint::from(1_u8);
-    let sample_byte_length = sample_range.bits().div_ceil(8);
-    let role_stream_block_count = private_randomness_stream_block_count_for_rejection_sampling(
-        u64::try_from(POLYNOMIAL_DEGREE).map_err(|_| {
-            invalid_release(
-                CanonicalErrorCode::MalformedLength,
-                "target flooding ring degree does not fit accounting",
-            )
-        })?,
-        sample_byte_length,
-        SELECTED_MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT,
-    )
-    .ok_or_else(|| {
-        invalid_release(
-            CanonicalErrorCode::MalformedLength,
-            "target flooding private-randomness count overflowed",
-        )
-    })?;
-    PrivateRandomnessKmacInputClassAccounting::checked_new(
-        0,
-        1,
-        role_stream_block_count.checked_mul(2).ok_or_else(|| {
-            invalid_release(
-                CanonicalErrorCode::MalformedLength,
-                "target flooding role-stream count overflowed",
-            )
-        })?,
-        0,
-    )
-    .ok_or_else(|| {
-        invalid_release(
-            CanonicalErrorCode::MalformedLength,
-            "target flooding private-randomness total overflowed",
-        )
-    })
 }
 
 pub(crate) fn factor_four_required_flooding_bound(

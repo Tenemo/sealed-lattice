@@ -23,10 +23,11 @@ use super::decoding::{
 use super::{
     AUTHENTICATION_DIGEST_BYTE_LENGTH, COMMITTED_MATERIAL_LEAF_HASH_DOMAIN,
     COMMITTED_MATERIAL_NODE_HASH_DOMAIN, COMMITTED_MATERIAL_PHASE_PAIR_LEAF_SCHEMA_IDENTIFIER,
-    COMMITTED_MATERIAL_ROW_WIDTH, PROOF_AUTHENTICATION_FRONTIER_SCHEMA_IDENTIFIER,
+    PROOF_AUTHENTICATION_FRONTIER_SCHEMA_IDENTIFIER, PROOF_AUTHENTICATION_FRONTIER_SCHEMA_VERSION,
     PROOF_ORACLE_PHASE_PAIR_LEAF_SCHEMA_IDENTIFIER, ProofBodyError, ProofTreeCatalogEntry,
     ProofTreeCatalogSource, ProofTreeConstruction, SCHEMA_VERSION,
-    SETUP_PUBLIC_POLYNOMIAL_LEAF_HASH_DOMAIN, SETUP_PUBLIC_POLYNOMIAL_NODE_HASH_DOMAIN,
+    SETUP_PUBLIC_POLYNOMIAL_LEAF_HASH_DOMAIN, SETUP_PUBLIC_POLYNOMIAL_LEAF_SCHEMA_VERSION,
+    SETUP_PUBLIC_POLYNOMIAL_NODE_HASH_DOMAIN,
     SETUP_PUBLIC_POLYNOMIAL_PHASE_PAIR_LEAF_SCHEMA_IDENTIFIER,
 };
 
@@ -47,12 +48,12 @@ pub(super) fn decode_phase_pair_leaf(
         }
         ProofTreeConstruction::CommittedMaterial {
             material_context_hash,
-        } => decode_statement_owned_phase_pair_leaf(
-            StatementLeafLayout {
+            row_width,
+        } => decode_committed_material_phase_pair_leaf(
+            CommittedMaterialLeafLayout {
                 schema_identifier: COMMITTED_MATERIAL_PHASE_PAIR_LEAF_SCHEMA_IDENTIFIER,
                 context_hash: *material_context_hash,
-                row_width: COMMITTED_MATERIAL_ROW_WIDTH,
-                secret_salt: true,
+                row_width: *row_width,
                 leaf_hash_domain: COMMITTED_MATERIAL_LEAF_HASH_DOMAIN,
             },
             expected_leaf_index,
@@ -61,14 +62,9 @@ pub(super) fn decode_phase_pair_leaf(
         ProofTreeConstruction::SetupPolynomial {
             public_polynomial_context_hash,
             row_width,
-        } => decode_statement_owned_phase_pair_leaf(
-            StatementLeafLayout {
-                schema_identifier: SETUP_PUBLIC_POLYNOMIAL_PHASE_PAIR_LEAF_SCHEMA_IDENTIFIER,
-                context_hash: *public_polynomial_context_hash,
-                row_width: *row_width,
-                secret_salt: false,
-                leaf_hash_domain: SETUP_PUBLIC_POLYNOMIAL_LEAF_HASH_DOMAIN,
-            },
+        } => decode_setup_public_polynomial_phase_pair_leaf(
+            *public_polynomial_context_hash,
+            *row_width,
             expected_leaf_index,
             canonical_bytes,
         ),
@@ -91,6 +87,7 @@ fn decode_common_phase_pair_leaf(
     read_tuple_header(
         &mut decoder,
         PROOF_ORACLE_PHASE_PAIR_LEAF_SCHEMA_IDENTIFIER,
+        SCHEMA_VERSION,
         expected_item_count,
     )?;
     if read_hash_item(&mut decoder)? != context.context_hash()? {
@@ -151,39 +148,35 @@ fn decode_common_phase_pair_leaf(
 }
 
 #[derive(Clone, Copy)]
-struct StatementLeafLayout {
+struct CommittedMaterialLeafLayout {
     schema_identifier: u16,
     context_hash: [u8; 64],
     row_width: u32,
-    secret_salt: bool,
     leaf_hash_domain: &'static str,
 }
 
-fn decode_statement_owned_phase_pair_leaf(
-    layout: StatementLeafLayout,
+fn decode_committed_material_phase_pair_leaf(
+    layout: CommittedMaterialLeafLayout,
     expected_leaf_index: u64,
     canonical_bytes: &[u8],
 ) -> Result<(DecodedProofPhasePairLeaf, [u8; 64]), ProofBodyError> {
-    let expected_item_count = if layout.secret_salt { 5 } else { 4 };
     let mut decoder = BoundedProofDecoder::new(
         canonical_bytes,
         canonical_bytes.len(),
         canonical_bytes.len(),
     )?;
-    read_tuple_header(&mut decoder, layout.schema_identifier, expected_item_count)?;
+    read_tuple_header(&mut decoder, layout.schema_identifier, SCHEMA_VERSION, 5)?;
     if read_hash_item(&mut decoder)? != layout.context_hash
         || read_u64_item(&mut decoder)? != expected_leaf_index
     {
         return Err(ProofBodyError::InvalidLeaf);
     }
-    if layout.secret_salt {
-        read_item_header(
-            &mut decoder,
-            CanonicalItemType::RawBytes,
-            COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH,
-        )?;
-        let _ = decoder.read_array::<COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH>()?;
-    }
+    read_item_header(
+        &mut decoder,
+        CanonicalItemType::RawBytes,
+        COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH,
+    )?;
+    let _ = decoder.read_array::<COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH>()?;
     let row_width = usize::try_from(layout.row_width).map_err(|_| ProofBodyError::CountOverflow)?;
     let first_point_values =
         read_tree_value_list_item(&mut decoder, TreeValueKind::Base, row_width)?;
@@ -191,6 +184,70 @@ fn decode_statement_owned_phase_pair_leaf(
         read_tree_value_list_item(&mut decoder, TreeValueKind::Base, row_width)?;
     decoder.finish()?;
     let digest = hash_canonical_leaf(layout.leaf_hash_domain, canonical_bytes)?;
+    Ok((
+        DecodedProofPhasePairLeaf {
+            leaf_index: expected_leaf_index,
+            first_point_values,
+            opposite_point_values,
+        },
+        digest,
+    ))
+}
+
+fn decode_setup_public_polynomial_phase_pair_leaf(
+    public_polynomial_context_hash: [u8; 64],
+    row_width: u32,
+    expected_leaf_index: u64,
+    canonical_bytes: &[u8],
+) -> Result<(DecodedProofPhasePairLeaf, [u8; 64]), ProofBodyError> {
+    let mut decoder = BoundedProofDecoder::new(
+        canonical_bytes,
+        canonical_bytes.len(),
+        canonical_bytes.len(),
+    )?;
+    read_tuple_header(
+        &mut decoder,
+        SETUP_PUBLIC_POLYNOMIAL_PHASE_PAIR_LEAF_SCHEMA_IDENTIFIER,
+        SETUP_PUBLIC_POLYNOMIAL_LEAF_SCHEMA_VERSION,
+        3,
+    )?;
+    if read_hash_item(&mut decoder)? != public_polynomial_context_hash
+        || read_u64_item(&mut decoder)? != expected_leaf_index
+    {
+        return Err(ProofBodyError::InvalidLeaf);
+    }
+    let row_width = usize::try_from(row_width).map_err(|_| ProofBodyError::CountOverflow)?;
+    let interleaved_value_count = row_width
+        .checked_mul(2)
+        .ok_or(ProofBodyError::CountOverflow)?;
+    let list_byte_length = interleaved_value_count
+        .checked_mul(8)
+        .and_then(|length| length.checked_add(6))
+        .ok_or(ProofBodyError::CountOverflow)?;
+    read_item_header(
+        &mut decoder,
+        CanonicalItemType::HomogeneousList,
+        list_byte_length,
+    )?;
+    read_list_header(
+        &mut decoder,
+        CanonicalItemType::FieldElement,
+        interleaved_value_count,
+    )?;
+    let mut first_point_values = Vec::new();
+    first_point_values
+        .try_reserve_exact(row_width)
+        .map_err(|_| ProofBodyError::AllocationLimitExceeded)?;
+    let mut opposite_point_values = Vec::new();
+    opposite_point_values
+        .try_reserve_exact(row_width)
+        .map_err(|_| ProofBodyError::AllocationLimitExceeded)?;
+    for _ in 0..row_width {
+        first_point_values.push(ProofTreeValue::Base(decoder.read_base_field_element()?));
+        opposite_point_values.push(ProofTreeValue::Base(decoder.read_base_field_element()?));
+    }
+    decoder.finish()?;
+    let digest = hash_canonical_leaf(SETUP_PUBLIC_POLYNOMIAL_LEAF_HASH_DOMAIN, canonical_bytes)?;
     Ok((
         DecodedProofPhasePairLeaf {
             leaf_index: expected_leaf_index,
@@ -271,7 +328,12 @@ pub(super) fn read_authentication_frontier<Source: ProofByteSource + ?Sized>(
     expected_tree_catalog_index: u16,
     expected_node_count: usize,
 ) -> Result<Vec<[u8; AUTHENTICATION_DIGEST_BYTE_LENGTH]>, ProofBodyError> {
-    read_tuple_header(decoder, PROOF_AUTHENTICATION_FRONTIER_SCHEMA_IDENTIFIER, 2)?;
+    read_tuple_header(
+        decoder,
+        PROOF_AUTHENTICATION_FRONTIER_SCHEMA_IDENTIFIER,
+        PROOF_AUTHENTICATION_FRONTIER_SCHEMA_VERSION,
+        2,
+    )?;
     read_u16_item(
         decoder,
         expected_tree_catalog_index,

@@ -1,5 +1,3 @@
-use super::*;
-
 use sha3::{
     CShake256, CShake256Core,
     digest::{ExtendableOutput, Update, XofReader},
@@ -8,9 +6,14 @@ use sha3::{
 use crate::bgv::{
     modular_arithmetic::mul_mod,
     ntt::{forward_negacyclic_ntt_in_place, inverse_negacyclic_ntt_in_place},
-    parameters::SPECIAL_PRIMES,
+    parameters::{DATA_PRIMES, POLYNOMIAL_DEGREE, SPECIAL_PRIMES},
 };
-use crate::foundation::{CanonicalItem, CanonicalTuple};
+use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
+use crate::foundation::{
+    CanonicalItem, CanonicalTuple, SELECTED_MAXIMUM_PUBLIC_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT,
+};
+#[cfg(test)]
+use crate::hashing::hash_framed_parts_512 as hash512;
 use crate::transcript_core::decode_hex;
 
 const PUBLIC_SETUP_SAMPLER_CUSTOMIZATION_SCHEMA_IDENTIFIER: u16 = 0x1208;
@@ -24,10 +27,6 @@ const RELINEARIZATION_COMMON_REFERENCE_DOMAIN: &str =
 const GALOIS_COMMON_REFERENCE_DOMAIN: &str = "sealed-lattice/setup/galois-common-a/v1";
 pub(super) const DATA_MODULUS_CATALOG_IDENTIFIER: u16 = 1;
 pub(super) const SPECIAL_MODULUS_CATALOG_IDENTIFIER: u16 = 2;
-
-// These JSON setup paths do not receive suite-provided sampling limits, so a
-// fixed cap keeps deterministic rejection work finite.
-pub(super) const MAXIMUM_DETERMINISTIC_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT: u32 = 64;
 
 /// Samples one complete public role-coordinate stream from the ceremony's
 /// public setup seed. The customization bytes already contain the canonical
@@ -88,7 +87,7 @@ fn sample_public_setup_residues_from_seed(
         usize::try_from(modulus_bit_length.div_ceil(8)).map_err(|_| public_sampler_size_error())?;
     let maximum_stream_byte_length = output_count
         .checked_mul(
-            usize::try_from(MAXIMUM_DETERMINISTIC_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT)
+            usize::try_from(SELECTED_MAXIMUM_PUBLIC_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT)
                 .map_err(|_| public_sampler_size_error())?,
         )
         .and_then(|value| value.checked_mul(candidate_byte_length))
@@ -109,7 +108,7 @@ fn sample_public_setup_residues_from_seed(
 
     for _ in 0..output_count {
         let mut accepted_residue = None;
-        for _ in 0..MAXIMUM_DETERMINISTIC_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT {
+        for _ in 0..SELECTED_MAXIMUM_PUBLIC_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT {
             let mut candidate_bytes = [0_u8; 8];
             reader.read(&mut candidate_bytes[..candidate_byte_length]);
             consumed_stream_byte_length = consumed_stream_byte_length
@@ -398,7 +397,7 @@ pub(super) fn sample_residue(
     let modulus_text = modulus.to_string();
     let mut block_index = 0_u64;
     let mut candidate_draw_count = 0_u32;
-    while candidate_draw_count < MAXIMUM_DETERMINISTIC_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT {
+    while candidate_draw_count < SELECTED_MAXIMUM_PUBLIC_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT {
         let block_index_text = block_index.to_string();
         let output = hash512(
             "sealed-lattice-bgv-rns/sample-residue",
@@ -414,7 +413,7 @@ pub(super) fn sample_residue(
             &output,
             modulus,
             &mut candidate_draw_count,
-            MAXIMUM_DETERMINISTIC_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT,
+            SELECTED_MAXIMUM_PUBLIC_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT,
         )? {
             return Ok(reduced_value);
         }
@@ -462,6 +461,38 @@ mod tests {
         assert_eq!(candidate_draw_count, 8);
         assert_eq!(error.code, CanonicalErrorCode::InvalidProtocolObject);
         assert!(error.message.contains("candidate-draw limit was exhausted"));
+    }
+
+    #[test]
+    fn public_sampler_uses_the_selected_suite_fixed_128_draw_cap() {
+        assert_eq!(
+            SELECTED_MAXIMUM_PUBLIC_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT,
+            128
+        );
+        let rejected_candidates = [u8::MAX; 64];
+        let mut candidate_draw_count = 0;
+        for _ in 0..15 {
+            assert_eq!(
+                first_accepted_candidate_from_block(
+                    &rejected_candidates,
+                    (1_u64 << 63) + 1,
+                    &mut candidate_draw_count,
+                    SELECTED_MAXIMUM_PUBLIC_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT,
+                )
+                .expect("the selected cap has not yet been exhausted"),
+                None
+            );
+        }
+        let error = first_accepted_candidate_from_block(
+            &rejected_candidates,
+            (1_u64 << 63) + 1,
+            &mut candidate_draw_count,
+            SELECTED_MAXIMUM_PUBLIC_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT,
+        )
+        .expect_err("the sixteenth eight-draw block exhausts the selected cap");
+
+        assert_eq!(candidate_draw_count, 128);
+        assert_eq!(error.code, CanonicalErrorCode::InvalidProtocolObject);
     }
 
     #[test]

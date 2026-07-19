@@ -22,7 +22,7 @@ use super::super::{
     },
 };
 use super::{
-    ApplicationExtractorPhaseColumns, RelationPlanChecker,
+    ApplicationChallengePhaseColumns, RelationPlanChecker,
     integer_lift_bounds::{
         integer_lift_coefficient_value, integer_lift_column_interval,
         integer_lift_maximum_absolute_product, integer_lift_require_auxiliary_column,
@@ -37,9 +37,9 @@ impl RelationPlanChecker<'_> {
         application_statement_schema_identifier: u16,
         variant: &RelationPlanVariant,
         semantic_bounds: &BTreeMap<u32, SignedIntegerInterval>,
-    ) -> Result<ApplicationExtractorPhaseColumns, RelationPlanError> {
+    ) -> Result<ApplicationChallengePhaseColumns, RelationPlanError> {
         if variant.ordered_integer_lift_batches.is_empty() {
-            return Ok(ApplicationExtractorPhaseColumns::default());
+            return Ok(ApplicationChallengePhaseColumns::default());
         }
         let canonical_batch_bytes = variant
             .ordered_integer_lift_batches
@@ -723,7 +723,7 @@ impl RelationPlanChecker<'_> {
                 return Err(RelationPlanError::InvalidConstraint);
             }
         }
-        Ok(ApplicationExtractorPhaseColumns {
+        Ok(ApplicationChallengePhaseColumns {
             derived_base_columns,
             derived_auxiliary_columns: descriptor_auxiliary_columns,
         })
@@ -732,13 +732,12 @@ impl RelationPlanChecker<'_> {
     /// Ensures the first application oracle contains every essential witness
     /// value. Later application oracles may contain only columns whose values
     /// are determined by the checked integer-lift grammar and the preceding
-    /// public challenge. This is the phase boundary used by the application
-    /// knowledge extractor: it never relies on a witness first supplied after
-    /// a verifier challenge.
-    pub(super) fn check_application_extractor_phase_ownership(
+    /// public challenge. This prevents a prover from first supplying a
+    /// semantic witness after observing that challenge.
+    pub(super) fn check_application_challenge_phase_ownership(
         &self,
         variant: &RelationPlanVariant,
-        phase_columns: &ApplicationExtractorPhaseColumns,
+        phase_columns: &ApplicationChallengePhaseColumns,
     ) -> Result<(), RelationPlanError> {
         let tree_roles_by_column = integer_lift_tree_roles_by_column(variant)?;
         let semantic_prover_columns = variant

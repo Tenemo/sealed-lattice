@@ -1,10 +1,8 @@
 use crate::{
-    bgv::{
-        parameters::DATA_PRIMES,
-        proof_suite::{VerifiedEvaluatorKeyStore, VerifiedRelinearizationAggregateMaterial},
-    },
+    bgv::proof_suite::{VerifiedEvaluatorKeyStore, VerifiedRelinearizationAggregateMaterial},
     foundation::{
         FOUNDATION_PROFILE, Hash512, ProofApplicationSlotCeilings, RefusalReason, StreamDescriptor,
+        selected_sharing_data_prime_coordinates,
     },
 };
 
@@ -171,9 +169,12 @@ impl VerifiedAcceptedSetupPublicProofCatalog {
         }
 
         let mut ordered_participant_identities = Vec::with_capacity(participant_count);
+        let sharing_limb_count = selected_sharing_data_prime_coordinates()
+            .map_err(|error| error.refusal_reason)?
+            .len();
         let mut ordered_degree_zero_commitment_roots = Vec::with_capacity(
             participant_count
-                .checked_mul(DATA_PRIMES.len())
+                .checked_mul(sharing_limb_count)
                 .ok_or(RefusalReason::OutsideSupportedProfile)?,
         );
         for roster_index in 0..participant_count {
@@ -193,7 +194,7 @@ impl VerifiedAcceptedSetupPublicProofCatalog {
                 roster_hash,
                 setup_proof_context_hash,
             ) || same_secret.roster_position() != roster_position
-                || same_secret.ordered_degree_zero_commitment_roots().len() != DATA_PRIMES.len()
+                || same_secret.ordered_degree_zero_commitment_roots().len() != sharing_limb_count
                 || !public_key_share_matches_context(
                     public_key_share,
                     protocol_version,
@@ -394,8 +395,9 @@ impl VerifiedAcceptedSetupPublicProofCatalog {
         &self,
         roster_position: usize,
     ) -> Option<&[[u8; Hash512::BYTE_LENGTH]]> {
-        let start = roster_position.checked_mul(DATA_PRIMES.len())?;
-        let end = start.checked_add(DATA_PRIMES.len())?;
+        let sharing_limb_count = selected_sharing_data_prime_coordinates().ok()?.len();
+        let start = roster_position.checked_mul(sharing_limb_count)?;
+        let end = start.checked_add(sharing_limb_count)?;
         self.ordered_degree_zero_commitment_roots.get(start..end)
     }
 

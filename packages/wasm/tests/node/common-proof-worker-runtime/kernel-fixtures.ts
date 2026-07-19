@@ -12,6 +12,7 @@ import type { TranscriptCoreKernelExports } from '../../../src/transcript-core-b
 import {
     hashByteLength,
     installedCommonProofVerificationBindingHash,
+    installedProofAttemptLineageIdentifier,
 } from './wire-fixtures.js';
 
 export const noSecondPollValue = 0xffff_ffff;
@@ -97,28 +98,31 @@ export const writeGenerationPoll = (
     return 0;
 };
 
+export const createResetSafeCommonProofCursorManifest = (
+    streamAttemptIdentifier: Uint8Array = installedProofAttemptLineageIdentifier,
+): Uint8Array<ArrayBuffer> => {
+    if (streamAttemptIdentifier.byteLength !== 32) {
+        throw new TypeError(
+            'The cursor-manifest stream-attempt identifier must contain exactly 32 bytes.',
+        );
+    }
+    const prefixByteLength = 19;
+    const identityByteLength = 98;
+    const manifest = new Uint8Array(prefixByteLength + identityByteLength);
+    manifest.set(Uint8Array.of(0x53, 0x4c, 0x43, 0x50, 0x43, 0x4d, 0x30, 0x33));
+    const view = new DataView(manifest.buffer);
+    view.setUint16(8, 3, true);
+    manifest[10] = 1;
+    view.setUint32(11, 0, true);
+    view.setUint32(15, 0, true);
+    view.setUint16(19, 0x1217, true);
+    manifest.set(installedCommonProofVerificationBindingHash, 21);
+    manifest.set(streamAttemptIdentifier, 85);
+    return manifest;
+};
+
 export const createCheckpointGenerationKernelFixture = (
-    checkpointCursorManifestBytes: Uint8Array = Uint8Array.of(
-        0x53,
-        0x4c,
-        0x43,
-        0x50,
-        0x43,
-        0x4d,
-        0x30,
-        0x33,
-        0x03,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-    ),
+    checkpointCursorManifestBytes: Uint8Array = createResetSafeCommonProofCursorManifest(),
 ): Readonly<{
     canonicalStateBytes: Uint8Array<ArrayBuffer>;
     cursorManifestBytes: Uint8Array<ArrayBuffer>;
@@ -131,9 +135,7 @@ export const createCheckpointGenerationKernelFixture = (
     stableAttemptBindingHash: Uint8Array<ArrayBuffer>;
 }> => {
     const canonicalStateBytes = new Uint8Array(37).fill(0x91);
-    const cursorManifestBytes = Uint8Array.from(
-        checkpointCursorManifestBytes,
-    );
+    const cursorManifestBytes = Uint8Array.from(checkpointCursorManifestBytes);
     const stableAttemptBindingHash = new Uint8Array(hashByteLength).fill(0x62);
     const observations = {
         acknowledgedCheckpointCount: 0,
@@ -203,18 +205,15 @@ export const createCheckpointGenerationKernelFixture = (
             );
             return 0;
         },
-        sealed_lattice_common_proof_generation_copy_checkpoint_cursor_manifest: (
-            operationHandle,
-            outputPointer,
-            outputByteLength,
-        ) => {
-            expect(operationHandle).toBe(91);
-            expect(outputByteLength).toBe(cursorManifestBytes.byteLength);
-            memoryBytes(memory, outputPointer, outputByteLength).set(
-                cursorManifestBytes,
-            );
-            return 0;
-        },
+        sealed_lattice_common_proof_generation_copy_checkpoint_cursor_manifest:
+            (operationHandle, outputPointer, outputByteLength) => {
+                expect(operationHandle).toBe(91);
+                expect(outputByteLength).toBe(cursorManifestBytes.byteLength);
+                memoryBytes(memory, outputPointer, outputByteLength).set(
+                    cursorManifestBytes,
+                );
+                return 0;
+            },
         sealed_lattice_common_proof_generation_copy_checkpoint_stable_attempt_binding_hash:
             (operationHandle, outputPointer, outputByteLength) => {
                 expect(operationHandle).toBe(91);

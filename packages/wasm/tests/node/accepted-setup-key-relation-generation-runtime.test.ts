@@ -1,7 +1,8 @@
-import { foundationProfile } from '@sealed-lattice/types';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+    contributeGeneratedAcceptedSetupPublicKeyShareToPackage,
+    contributeGeneratedAcceptedSetupSameSecretToPackage,
     generateAcceptedSetupPublicKeyShareInClosedWorker,
     generateAcceptedSetupSameSecretInClosedWorker,
     verifyGeneratedAcceptedSetupPublicKeyShareInClosedWorker,
@@ -20,14 +21,31 @@ const boundaryMocks = vi.hoisted(() => {
     const generatedCapability = Object.freeze({
         release: generatedCapabilityRelease,
     });
+    const generatedConsumptionOutcomes: boolean[] = [];
     return {
         activeContext,
-        deriveProofDescriptor: vi.fn(async () => Uint8Array.of(0xd1, 0xd2)),
+        applyGeneratedCapability: vi.fn(
+            (
+                _capability: unknown,
+                _context: unknown,
+                apply: (
+                    handle: number,
+                ) => Readonly<{ consumed: boolean; result: number }>,
+            ) => {
+                const outcome = apply(301);
+                generatedConsumptionOutcomes.push(outcome.consumed);
+                return outcome.result;
+            },
+        ),
+        deriveProofDescriptor: vi.fn(() =>
+            Promise.resolve(Uint8Array.of(0xd1, 0xd2)),
+        ),
         generatedCapability,
         generatedCapabilityRelease,
+        generatedConsumptionOutcomes,
         openGenerationAdapter: vi.fn(() => Object.freeze({})),
         releaseGenerationAdapter: vi.fn(),
-        runGeneration: vi.fn(async () => generatedCapability),
+        runGeneration: vi.fn(() => Promise.resolve(generatedCapability)),
         trackOutput: vi.fn((outputStore: unknown) =>
             Object.freeze({
                 outputChunkByteLengths: Object.freeze([2]),
@@ -35,10 +53,18 @@ const boundaryMocks = vi.hoisted(() => {
             }),
         ),
         verifyGeneratedPublicKeyShare: vi.fn(
-            async (_input: unknown, _capability: unknown) => undefined,
+            (
+                _input: unknown,
+                _capability: unknown,
+                _statementSourceHandle: number,
+            ) => Promise.resolve(undefined),
         ),
         verifyGeneratedSameSecret: vi.fn(
-            async (_input: unknown, _capability: unknown) => undefined,
+            (
+                _input: unknown,
+                _capability: unknown,
+                _statementSourceHandle: number,
+            ) => Promise.resolve(undefined),
         ),
     };
 });
@@ -76,18 +102,30 @@ vi.mock('#packages/wasm/src/vss-share-linkage-verification-runtime', () => ({
 }));
 
 vi.mock('#packages/wasm/src/generated-common-proof-output-runtime', () => ({
-    deriveGeneratedCommonProofDescriptor:
-        boundaryMocks.deriveProofDescriptor,
+    deriveGeneratedCommonProofDescriptor: boundaryMocks.deriveProofDescriptor,
     trackCanonicalCommonProofOutputChunks: boundaryMocks.trackOutput,
 }));
 
 vi.mock('#packages/wasm/src/common-proof-worker-runtime/runtime', () => ({
+    applyClosedWorkerGeneratedCommonProofCapability:
+        boundaryMocks.applyGeneratedCapability,
     openClosedWorkerCommonProofGenerationFamilyAdapter:
         boundaryMocks.openGenerationAdapter,
     releaseClosedWorkerCommonProofGenerationFamilyAdapter:
         boundaryMocks.releaseGenerationAdapter,
     runClosedWorkerCommonProofGenerationFamilyAdapterRetainingGeneratedCapability:
         boundaryMocks.runGeneration,
+}));
+
+vi.mock('#packages/wasm/src/accepted-setup-package-builder-runtime', () => ({
+    requireAcceptedSetupPackageBuilderKernelOwner: (
+        _builder: unknown,
+        kernel: TranscriptCoreKernel,
+    ) => ({
+        context: boundaryMocks.activeContext.value,
+        handle: 41,
+        kernel,
+    }),
 }));
 
 vi.mock('#packages/wasm/src/accepted-setup-proof-verification-runtime', () => ({
@@ -102,14 +140,27 @@ type GenerationMode = 'fresh' | 'resumed';
 
 type FakeSetupKeyRelationRuntime = Readonly<{
     allocations: ReadonlyMap<number, number>;
-    copiedStatementSources: Array<Readonly<{ handle: number; output: number[] }>>;
+    cancelledGeneratedSources: Array<
+        Readonly<{
+            family: SetupKeyRelationFamily;
+            generatedProofHandle: number;
+            statementSourceHandle: number;
+        }>
+    >;
+    contributedGeneratedSources: Array<
+        Readonly<{
+            builderHandle: number;
+            family: SetupKeyRelationFamily;
+            generatedProofHandle: number;
+            statementSourceHandle: number;
+        }>
+    >;
     discardedStatementSources: number[];
     generationPreparations: Array<
         Readonly<{ family: SetupKeyRelationFamily; mode: GenerationMode }>
     >;
     kernel: TranscriptCoreKernel;
     selectedSuiteReleases: number[];
-    statementByteLength: { value: number };
 }>;
 
 const writeStatus = (
@@ -123,15 +174,26 @@ const writeStatus = (
 const createFakeRuntime = (): FakeSetupKeyRelationRuntime => {
     const memory = new WebAssembly.Memory({ initial: 2 });
     const allocations = new Map<number, number>();
-    const copiedStatementSources: Array<
-        Readonly<{ handle: number; output: number[] }>
+    const cancelledGeneratedSources: Array<
+        Readonly<{
+            family: SetupKeyRelationFamily;
+            generatedProofHandle: number;
+            statementSourceHandle: number;
+        }>
+    > = [];
+    const contributedGeneratedSources: Array<
+        Readonly<{
+            builderHandle: number;
+            family: SetupKeyRelationFamily;
+            generatedProofHandle: number;
+            statementSourceHandle: number;
+        }>
     > = [];
     const discardedStatementSources: number[] = [];
     const generationPreparations: Array<
         Readonly<{ family: SetupKeyRelationFamily; mode: GenerationMode }>
     > = [];
     const selectedSuiteReleases: number[] = [];
-    const statementByteLength = { value: 4 };
     let nextPointer = 1_024;
 
     const allocate = (byteLength: number): number => {
@@ -180,12 +242,38 @@ const createFakeRuntime = (): FakeSetupKeyRelationRuntime => {
         number,
         number,
     ];
-    const preparation = (
-        family: SetupKeyRelationFamily,
-        mode: GenerationMode,
-    ) =>
+    const preparation =
+        (family: SetupKeyRelationFamily, mode: GenerationMode) =>
         (...parameters: PrepareArguments): number =>
             prepare(family, mode, parameters[13], parameters[14]);
+    const cancelGeneratedSource =
+        (family: SetupKeyRelationFamily) =>
+        (
+            statementSourceHandle: number,
+            generatedProofHandle: number,
+        ): number => {
+            cancelledGeneratedSources.push({
+                family,
+                generatedProofHandle,
+                statementSourceHandle,
+            });
+            return 0;
+        };
+    const contributeGeneratedSource =
+        (family: SetupKeyRelationFamily) =>
+        (
+            builderHandle: number,
+            statementSourceHandle: number,
+            generatedProofHandle: number,
+        ): number => {
+            contributedGeneratedSources.push({
+                builderHandle,
+                family,
+                generatedProofHandle,
+                statementSourceHandle,
+            });
+            return 0;
+        };
 
     const wasmExports = {
         sealed_lattice_common_proof_release_suite: (handle: number) => {
@@ -204,8 +292,14 @@ const createFakeRuntime = (): FakeSetupKeyRelationRuntime => {
             'publicKeyShare',
             'fresh',
         ),
-        sealed_lattice_public_key_share_prepare_resumed_generation:
-            preparation('publicKeyShare', 'resumed'),
+        sealed_lattice_public_key_share_prepare_resumed_generation: preparation(
+            'publicKeyShare',
+            'resumed',
+        ),
+        sealed_lattice_public_key_share_generation_cancel:
+            cancelGeneratedSource('publicKeyShare'),
+        sealed_lattice_public_key_share_generation_contribute_package:
+            contributeGeneratedSource('publicKeyShare'),
         sealed_lattice_same_secret_prepare_generation: preparation(
             'sameSecret',
             'fresh',
@@ -214,29 +308,10 @@ const createFakeRuntime = (): FakeSetupKeyRelationRuntime => {
             'sameSecret',
             'resumed',
         ),
-        sealed_lattice_setup_key_relation_generation_statement_byte_length: (
-            _handle: number,
-            statusPointer: number,
-        ) => {
-            writeStatus(memory, statusPointer, 0);
-            return statementByteLength.value;
-        },
-        sealed_lattice_setup_key_relation_generation_statement_copy_and_release:
-            (handle: number, outputPointer: number, outputByteLength: number) => {
-                const output = new Uint8Array(
-                    memory.buffer,
-                    outputPointer,
-                    outputByteLength,
-                );
-                output.forEach((_value, byteIndex) => {
-                    output[byteIndex] = handle + byteIndex;
-                });
-                copiedStatementSources.push({
-                    handle,
-                    output: Array.from(output),
-                });
-                return 0;
-            },
+        sealed_lattice_same_secret_generation_cancel:
+            cancelGeneratedSource('sameSecret'),
+        sealed_lattice_same_secret_generation_contribute_package:
+            contributeGeneratedSource('sameSecret'),
         sealed_lattice_setup_key_relation_generation_statement_discard: (
             handle: number,
         ) => {
@@ -249,7 +324,9 @@ const createFakeRuntime = (): FakeSetupKeyRelationRuntime => {
         allocate,
         deallocate,
         executeCommand: () => {
-            throw new Error('The focused key-relation test does not use commands.');
+            throw new Error(
+                'The focused key-relation test does not use commands.',
+            );
         },
         memory,
         runExclusive: <Result>(
@@ -262,12 +339,12 @@ const createFakeRuntime = (): FakeSetupKeyRelationRuntime => {
     boundaryMocks.activeContext.value = context;
     return Object.freeze({
         allocations,
-        copiedStatementSources,
+        cancelledGeneratedSources,
+        contributedGeneratedSources,
         discardedStatementSources,
         generationPreparations,
         kernel,
         selectedSuiteReleases,
-        statementByteLength,
     });
 };
 
@@ -306,6 +383,7 @@ const verificationInput = (
 
 beforeEach(() => {
     vi.clearAllMocks();
+    boundaryMocks.generatedConsumptionOutcomes.splice(0);
     boundaryMocks.deriveProofDescriptor.mockResolvedValue(
         Uint8Array.of(0xd1, 0xd2),
     );
@@ -358,25 +436,6 @@ describe('accepted-setup key-relation generation', () => {
             );
 
             expect(runtime.generationPreparations).toEqual([{ family, mode }]);
-            expect(runtime.copiedStatementSources).toEqual([
-                {
-                    handle: statementSourceHandle,
-                    output: [
-                        statementSourceHandle,
-                        statementSourceHandle + 1,
-                        statementSourceHandle + 2,
-                        statementSourceHandle + 3,
-                    ],
-                },
-            ]);
-            expect(proof.copyCanonicalApplicationStatementBytes()).toEqual(
-                Uint8Array.of(
-                    statementSourceHandle,
-                    statementSourceHandle + 1,
-                    statementSourceHandle + 2,
-                    statementSourceHandle + 3,
-                ),
-            );
             expect(proof.copyProofDescriptorBytes()).toEqual(
                 Uint8Array.of(0xd1, 0xd2),
             );
@@ -388,12 +447,18 @@ describe('accepted-setup key-relation generation', () => {
             expect(runtime.allocations.size).toBe(0);
 
             proof.release();
-            expect(boundaryMocks.generatedCapabilityRelease).toHaveBeenCalledTimes(
-                1,
-            );
-            expect(() =>
-                proof.copyCanonicalApplicationStatementBytes(),
-            ).toThrow(/consumed/u);
+            expect(runtime.cancelledGeneratedSources).toEqual([
+                {
+                    family,
+                    generatedProofHandle: 301,
+                    statementSourceHandle,
+                },
+            ]);
+            expect(boundaryMocks.generatedConsumptionOutcomes).toEqual([true]);
+            expect(
+                boundaryMocks.generatedCapabilityRelease,
+            ).not.toHaveBeenCalled();
+            expect(() => proof.copyProofDescriptorBytes()).toThrow(/consumed/u);
         },
     );
 
@@ -415,21 +480,6 @@ describe('accepted-setup key-relation generation', () => {
         expect(runtime.allocations.size).toBe(0);
     });
 
-    it('discards the statement source when its exact bytes exceed the copy bound', async () => {
-        const runtime = createFakeRuntime();
-        runtime.statementByteLength.value =
-            foundationProfile.maximumCopiedBufferByteLength + 1;
-        await expect(
-            generateAcceptedSetupSameSecretInClosedWorker(
-                generationInput(runtime, 'fresh') as never,
-            ),
-        ).rejects.toThrow(/bound/u);
-        expect(runtime.discardedStatementSources).toEqual([21]);
-        expect(boundaryMocks.releaseGenerationAdapter).toHaveBeenCalledTimes(1);
-        expect(boundaryMocks.runGeneration).not.toHaveBeenCalled();
-        expect(runtime.allocations.size).toBe(0);
-    });
-
     it('releases generated authority when proof-descriptor derivation fails', async () => {
         const runtime = createFakeRuntime();
         boundaryMocks.deriveProofDescriptor.mockRejectedValueOnce(
@@ -440,9 +490,14 @@ describe('accepted-setup key-relation generation', () => {
                 generationInput(runtime, 'fresh') as never,
             ),
         ).rejects.toThrow('descriptor failed');
-        expect(boundaryMocks.generatedCapabilityRelease).toHaveBeenCalledTimes(
-            1,
-        );
+        expect(runtime.cancelledGeneratedSources).toEqual([
+            {
+                family: 'publicKeyShare',
+                generatedProofHandle: 301,
+                statementSourceHandle: 22,
+            },
+        ]);
+        expect(boundaryMocks.generatedCapabilityRelease).not.toHaveBeenCalled();
         expect(runtime.selectedSuiteReleases).toEqual([11]);
         expect(runtime.allocations.size).toBe(0);
     });
@@ -472,16 +527,17 @@ describe('generated accepted-setup key-relation verification', () => {
             );
 
             expect(verifyCapability).toHaveBeenCalledTimes(1);
-            expect(verifyCapability.mock.calls[0]?.[0]).toEqual(
-                expect.objectContaining({
-                    canonicalApplicationStatementBytes:
-                        expect.any(Uint8Array),
-                }),
-            );
             expect(verifyCapability.mock.calls[0]?.[1]).toBe(
                 boundaryMocks.generatedCapability,
             );
-            expect(boundaryMocks.generatedCapabilityRelease).not.toHaveBeenCalled();
+            expect(verifyCapability.mock.calls[0]?.[2]).toBe(
+                generate === generateAcceptedSetupSameSecretInClosedWorker
+                    ? 21
+                    : 22,
+            );
+            expect(
+                boundaryMocks.generatedCapabilityRelease,
+            ).not.toHaveBeenCalled();
             expect(() => proof.copyProofDescriptorBytes()).toThrow(/consumed/u);
         },
     );
@@ -511,7 +567,9 @@ describe('generated accepted-setup key-relation verification', () => {
         await verifyGeneratedAcceptedSetupSameSecretInClosedWorker(
             verificationInput(runtime.kernel, proof) as never,
         );
-        expect(boundaryMocks.verifyGeneratedSameSecret).toHaveBeenCalledTimes(2);
+        expect(boundaryMocks.verifyGeneratedSameSecret).toHaveBeenCalledTimes(
+            2,
+        );
         expect(() => proof.copyProofDescriptorBytes()).toThrow(/consumed/u);
     });
 
@@ -529,6 +587,68 @@ describe('generated accepted-setup key-relation verification', () => {
         expect(proof.copyProofDescriptorBytes()).toEqual(
             Uint8Array.of(0xd1, 0xd2),
         );
+        proof.release();
+    });
+});
+
+describe('generated accepted-setup package contribution', () => {
+    it.each([
+        [
+            'sameSecret',
+            generateAcceptedSetupSameSecretInClosedWorker,
+            contributeGeneratedAcceptedSetupSameSecretToPackage,
+            21,
+        ],
+        [
+            'publicKeyShare',
+            generateAcceptedSetupPublicKeyShareInClosedWorker,
+            contributeGeneratedAcceptedSetupPublicKeyShareToPackage,
+            22,
+        ],
+    ] as const)(
+        'contributes the retained %s source and proof without host descriptors',
+        async (family, generate, contribute, statementSourceHandle) => {
+            const runtime = createFakeRuntime();
+            const proof = await generate(
+                generationInput(runtime, 'fresh') as never,
+            );
+
+            contribute({
+                generatedProof: proof,
+                packageBuilder: Object.freeze({}) as never,
+            });
+
+            expect(runtime.contributedGeneratedSources).toEqual([
+                {
+                    builderHandle: 41,
+                    family,
+                    generatedProofHandle: 301,
+                    statementSourceHandle,
+                },
+            ]);
+            expect(boundaryMocks.generatedConsumptionOutcomes).toEqual([false]);
+
+            proof.release();
+        },
+    );
+
+    it('rejects a cross-family contribution without changing source custody', async () => {
+        const runtime = createFakeRuntime();
+        const proof = await generateAcceptedSetupSameSecretInClosedWorker(
+            generationInput(runtime, 'fresh') as never,
+        );
+
+        expect(() =>
+            contributeGeneratedAcceptedSetupPublicKeyShareToPackage({
+                generatedProof: proof,
+                packageBuilder: Object.freeze({}) as never,
+            }),
+        ).toThrow(/wrongContext/u);
+        expect(runtime.contributedGeneratedSources).toEqual([]);
+        expect(proof.copyProofDescriptorBytes()).toEqual(
+            Uint8Array.of(0xd1, 0xd2),
+        );
+
         proof.release();
     });
 });

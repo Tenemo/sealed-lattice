@@ -3,8 +3,9 @@ use std::sync::OnceLock;
 
 use super::root_parameters::MULTIPLICATIVE_GROUP_PRIME_FACTORS;
 use super::{
-    DATA_PRIMES, LOGICAL_SLOT_GENERATOR, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE, ROOT_PARAMETERS,
-    RootParameters, SPECIAL_PRIMES,
+    CANDIDATE_PLAINTEXT_DEGREE, CANDIDATE_PLAINTEXT_MODULUS, CANDIDATE_PLAINTEXT_NTT_PARAMETERS,
+    DATA_PRIMES, LOGICAL_SLOT_GENERATOR, NttTransformParameters, PLAINTEXT_MODULUS,
+    POLYNOMIAL_DEGREE, ROOT_PARAMETERS, RootParameters, SPECIAL_PRIMES,
 };
 
 const DATA_PRIME_COUNT: usize = DATA_PRIMES.len();
@@ -67,50 +68,63 @@ pub(crate) fn verify_ntt_root_parameters(parameters: RootParameters) -> bool {
     else {
         return false;
     };
-    verify_ntt_root_parameters_with_factors(
-        parameters,
+    verify_ntt_transform_parameters_with_factors(
+        NttTransformParameters {
+            transform_degree: POLYNOMIAL_DEGREE,
+            roots: parameters,
+        },
         MULTIPLICATIVE_GROUP_PRIME_FACTORS[parameter_index],
     )
 }
 
-fn verify_ntt_root_parameters_with_factors(
-    parameters: RootParameters,
+fn verify_ntt_transform_parameters_with_factors(
+    parameters: NttTransformParameters,
     multiplicative_group_prime_factors: &[u64],
 ) -> bool {
-    if !is_prime(parameters.modulus)
-        || parameters.modulus % TWICE_POLYNOMIAL_DEGREE != 1
-        || parameters.primitive_generator <= 1
-        || parameters.primitive_generator >= parameters.modulus
+    let roots = parameters.roots;
+    let Some(twice_transform_degree) = parameters.transform_degree.checked_mul(2) else {
+        return false;
+    };
+    let Ok(twice_transform_degree) = u64::try_from(twice_transform_degree) else {
+        return false;
+    };
+    if parameters.transform_degree == 0
+        || !parameters.transform_degree.is_power_of_two()
+        || !POLYNOMIAL_DEGREE.is_multiple_of(parameters.transform_degree)
+        || !is_prime(roots.modulus)
+        || roots.modulus % twice_transform_degree != 1
+        || roots.primitive_generator <= 1
+        || roots.primitive_generator >= roots.modulus
         || [
-            parameters.negacyclic_root,
-            parameters.cyclic_root,
-            parameters.inverse_negacyclic_root,
-            parameters.inverse_cyclic_root,
-            parameters.inverse_polynomial_degree,
+            roots.negacyclic_root,
+            roots.cyclic_root,
+            roots.inverse_negacyclic_root,
+            roots.inverse_cyclic_root,
+            roots.inverse_polynomial_degree,
         ]
         .into_iter()
-        .any(|component| component == 0 || component >= parameters.modulus)
+        .any(|component| component == 0 || component >= roots.modulus)
     {
         return false;
     }
 
-    let multiplicative_group_order = parameters.modulus - 1;
+    let multiplicative_group_order = roots.modulus - 1;
     if !verify_complete_prime_factor_certificate(
         multiplicative_group_order,
         multiplicative_group_prime_factors,
     ) || modular_power(
-        parameters.primitive_generator,
+        roots.primitive_generator,
         multiplicative_group_order,
-        parameters.modulus,
+        roots.modulus,
     ) != 1
         || multiplicative_group_prime_factors
             .iter()
             .copied()
             .any(|prime_factor| {
                 modular_power(
-                    parameters.primitive_generator,
+                    roots.primitive_generator,
                     multiplicative_group_order / prime_factor,
-                    parameters.modulus,
+                    roots.modulus,
                 ) == 1
             })
     {
@@ -118,46 +132,54 @@ fn verify_ntt_root_parameters_with_factors(
     }
 
     modular_power(
-        parameters.negacyclic_root,
-        POLYNOMIAL_DEGREE as u64,
-        parameters.modulus,
-    ) == parameters.modulus - 1
+        roots.negacyclic_root,
+        parameters.transform_degree as u64,
+        roots.modulus,
+    ) == roots.modulus - 1
+        && modular_power(roots.negacyclic_root, twice_transform_degree, roots.modulus) == 1
+        && roots.cyclic_root
+            == multiply_modular(roots.negacyclic_root, roots.negacyclic_root, roots.modulus)
         && modular_power(
-            parameters.negacyclic_root,
-            TWICE_POLYNOMIAL_DEGREE,
-            parameters.modulus,
-        ) == 1
-        && parameters.cyclic_root
-            == multiply_modular(
-                parameters.negacyclic_root,
-                parameters.negacyclic_root,
-                parameters.modulus,
-            )
-        && modular_power(
-            parameters.cyclic_root,
-            POLYNOMIAL_DEGREE as u64,
-            parameters.modulus,
+            roots.cyclic_root,
+            parameters.transform_degree as u64,
+            roots.modulus,
         ) == 1
         && modular_power(
-            parameters.cyclic_root,
-            (POLYNOMIAL_DEGREE / 2) as u64,
-            parameters.modulus,
+            roots.cyclic_root,
+            (parameters.transform_degree / 2) as u64,
+            roots.modulus,
         ) != 1
         && multiply_modular(
-            parameters.negacyclic_root,
-            parameters.inverse_negacyclic_root,
-            parameters.modulus,
+            roots.negacyclic_root,
+            roots.inverse_negacyclic_root,
+            roots.modulus,
         ) == 1
+        && multiply_modular(roots.cyclic_root, roots.inverse_cyclic_root, roots.modulus) == 1
         && multiply_modular(
-            parameters.cyclic_root,
-            parameters.inverse_cyclic_root,
-            parameters.modulus,
+            parameters.transform_degree as u64,
+            roots.inverse_polynomial_degree,
+            roots.modulus,
         ) == 1
-        && multiply_modular(
-            POLYNOMIAL_DEGREE as u64,
-            parameters.inverse_polynomial_degree,
-            parameters.modulus,
-        ) == 1
+}
+
+pub(crate) fn validate_candidate_plaintext_transform_parameters()
+-> Result<(), ParameterGenerationError> {
+    static VALIDATION: OnceLock<Result<(), ParameterGenerationError>> = OnceLock::new();
+    *VALIDATION.get_or_init(validate_candidate_plaintext_transform_parameters_uncached)
+}
+
+fn validate_candidate_plaintext_transform_parameters_uncached()
+-> Result<(), ParameterGenerationError> {
+    let parameters = CANDIDATE_PLAINTEXT_NTT_PARAMETERS;
+    if parameters.transform_degree != CANDIDATE_PLAINTEXT_DEGREE
+        || parameters.roots.modulus != CANDIDATE_PLAINTEXT_MODULUS
+        || !verify_ntt_transform_parameters_with_factors(parameters, &[2])
+        || !verify_logical_slot_layout_for_transform_degree(parameters.transform_degree)
+    {
+        return Err(ParameterGenerationError::InvalidCertificate);
+    }
+
+    Ok(())
 }
 
 fn verify_complete_prime_factor_certificate(
@@ -196,7 +218,7 @@ fn validate_supported_algebraic_parameters_uncached() -> Result<(), ParameterGen
     let plaintext_parameters = ROOT_PARAMETERS[0];
     if plaintext_parameters.modulus != PLAINTEXT_MODULUS
         || !verify_ntt_root_parameters(plaintext_parameters)
-        || !verify_logical_slot_layout()
+        || !verify_logical_slot_layout_for_transform_degree(POLYNOMIAL_DEGREE)
     {
         return Err(ParameterGenerationError::InvalidCertificate);
     }
@@ -233,9 +255,11 @@ fn validate_supported_algebraic_parameters_uncached() -> Result<(), ParameterGen
     Ok(())
 }
 
-fn verify_logical_slot_layout() -> bool {
-    let ring_order = 2 * POLYNOMIAL_DEGREE;
-    let positive_slot_count = POLYNOMIAL_DEGREE / 2;
+fn verify_logical_slot_layout_for_transform_degree(transform_degree: usize) -> bool {
+    let Some(ring_order) = transform_degree.checked_mul(2) else {
+        return false;
+    };
+    let positive_slot_count = transform_degree / 2;
     if LOGICAL_SLOT_GENERATOR <= 1
         || LOGICAL_SLOT_GENERATOR >= ring_order
         || LOGICAL_SLOT_GENERATOR.is_multiple_of(2)
@@ -253,7 +277,7 @@ fn verify_logical_slot_layout() -> bool {
         return false;
     }
 
-    let mut seen_odd_exponents = vec![false; POLYNOMIAL_DEGREE];
+    let mut seen_odd_exponents = vec![false; transform_degree];
     let mut exponent = 1_usize;
     for _ in 0..positive_slot_count {
         if exponent.is_multiple_of(2) || exponent == ring_order - 1 {
@@ -542,6 +566,54 @@ mod tests {
     fn complete_algebraic_certificate_reproduces() {
         validate_supported_algebraic_parameters()
             .expect("the fixed algebraic parameter certificate must reproduce");
+    }
+
+    #[test]
+    fn even_subring_plaintext_transform_certificate_reproduces_exactly() {
+        validate_candidate_plaintext_transform_parameters()
+            .expect("the candidate plaintext transform certificate must reproduce");
+
+        let parameters = CANDIDATE_PLAINTEXT_NTT_PARAMETERS;
+        assert_eq!(parameters.transform_degree, 32_768);
+        assert_eq!(parameters.roots.modulus, 65_537);
+        assert_eq!(parameters.roots.primitive_generator, 3);
+        assert_eq!(parameters.roots.negacyclic_root, 3);
+        assert_eq!(parameters.roots.cyclic_root, 9);
+        assert_eq!(parameters.roots.inverse_negacyclic_root, 21_846);
+        assert_eq!(parameters.roots.inverse_cyclic_root, 7_282);
+        assert_eq!(parameters.roots.inverse_polynomial_degree, 65_535);
+        assert!(!(parameters.roots.modulus - 1).is_multiple_of(2 * POLYNOMIAL_DEGREE as u64));
+        assert!(verify_ntt_transform_parameters_with_factors(
+            parameters,
+            &[2]
+        ));
+    }
+
+    #[test]
+    fn even_subring_plaintext_certificate_rejects_full_ring_and_mutated_roots() {
+        let valid = CANDIDATE_PLAINTEXT_NTT_PARAMETERS;
+        for mutated in [
+            NttTransformParameters {
+                transform_degree: POLYNOMIAL_DEGREE,
+                ..valid
+            },
+            NttTransformParameters {
+                roots: RootParameters {
+                    negacyclic_root: valid.roots.negacyclic_root + 1,
+                    ..valid.roots
+                },
+                ..valid
+            },
+            NttTransformParameters {
+                roots: RootParameters {
+                    inverse_polynomial_degree: valid.roots.inverse_polynomial_degree + 1,
+                    ..valid.roots
+                },
+                ..valid
+            },
+        ] {
+            assert!(!verify_ntt_transform_parameters_with_factors(mutated, &[2]));
+        }
     }
 
     #[test]

@@ -1,8 +1,15 @@
 use crate::foundation::{CanonicalItem, CanonicalItemType, CanonicalTuple};
 
+use super::super::setup_public_polynomial::canonical_setup_public_polynomial_phase_pair_leaf_bytes;
 use super::super::{
     CommonProofTranscript, PROOF_BASE_FIELD_MODULUS, ResidentCommonProofByteSource,
-    ResidentCommonProofInputChunk, field::ProofBaseFieldElement, merkle::CanonicalProofMerkleTree,
+    ResidentCommonProofInputChunk,
+    field::ProofBaseFieldElement,
+    merkle::CanonicalProofMerkleTree,
+    prover::{
+        CommonProofOpeningGeometry, CommonProofProverError, StatementOwnedMerkleReplay,
+        encode_common_proof_query_tree_fragment,
+    },
 };
 use super::*;
 
@@ -171,6 +178,25 @@ fn statement_leaf_bytes(
     leaf_index: u64,
     value_seed: u64,
 ) -> Vec<u8> {
+    if !secret_salt {
+        assert_eq!(
+            schema_identifier,
+            SETUP_PUBLIC_POLYNOMIAL_PHASE_PAIR_LEAF_SCHEMA_IDENTIFIER,
+        );
+        let first_values = (0..row_width)
+            .map(|column_index| base_value(value_seed + column_index as u64))
+            .collect::<Vec<_>>();
+        let opposite_values = (0..row_width)
+            .map(|column_index| base_value(value_seed + 31 + column_index as u64))
+            .collect::<Vec<_>>();
+        return canonical_setup_public_polynomial_phase_pair_leaf_bytes(
+            context_hash,
+            leaf_index,
+            &first_values,
+            &opposite_values,
+        )
+        .expect("setup polynomial leaf encodes");
+    }
     let first_values = (0..row_width)
         .map(|column_index| ProofTreeValue::Base(base_value(value_seed + column_index as u64)))
         .collect::<Vec<_>>();
@@ -183,8 +209,10 @@ fn statement_leaf_bytes(
     ];
     if secret_salt {
         items.push(
-            CanonicalItem::fixed_bytes([leaf_index as u8 + 0x51; 48])
-                .expect("fixed material salt encodes"),
+            CanonicalItem::fixed_bytes(
+                [leaf_index as u8 + 0x51; COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH],
+            )
+            .expect("fixed material salt encodes"),
         );
     }
     items.push(canonical_tree_value_list(&first_values));
@@ -275,7 +303,7 @@ fn canonical_frontier(
         .collect::<Vec<_>>();
     CanonicalTuple::new(
         PROOF_AUTHENTICATION_FRONTIER_SCHEMA_IDENTIFIER,
-        SCHEMA_VERSION,
+        PROOF_AUTHENTICATION_FRONTIER_SCHEMA_VERSION,
         vec![
             CanonicalItem::unsigned16(tree_catalog_index),
             CanonicalItem::homogeneous_list(CanonicalItemType::Hash512, &nodes)
@@ -284,6 +312,33 @@ fn canonical_frontier(
     )
     .encode()
     .expect("frontier encodes")
+}
+
+#[test]
+fn authentication_frontier_uses_version_two_and_rejects_the_version_one_digest_list_alias() {
+    let canonical_bytes = canonical_frontier(0, &[[0x31; AUTHENTICATION_DIGEST_BYTE_LENGTH]]);
+    assert_eq!(
+        &canonical_bytes[..4],
+        &[
+            0x08,
+            0x01,
+            PROOF_AUTHENTICATION_FRONTIER_SCHEMA_VERSION as u8,
+            0x00,
+        ]
+    );
+
+    let mut version_one_bytes = canonical_bytes;
+    version_one_bytes[2..4].copy_from_slice(&SCHEMA_VERSION.to_le_bytes());
+    let mut decoder = BoundedProofDecoder::new(
+        version_one_bytes.as_slice(),
+        version_one_bytes.len(),
+        version_one_bytes.len(),
+    )
+    .expect("bounded proof decoder");
+    assert_eq!(
+        authentication::read_authentication_frontier(&mut decoder, 0, 1),
+        Err(ProofBodyError::InvalidSchemaVersion)
+    );
 }
 
 fn encode_body(
@@ -815,6 +870,7 @@ fn statement_owned_material_and_setup_trees_use_their_exact_leaf_and_node_equati
     let setup_context_hash = [0x74; 64];
     let material_construction = ProofTreeConstruction::CommittedMaterial {
         material_context_hash,
+        row_width: COMMITTED_MATERIAL_ROW_WIDTH,
     };
     let setup_construction = ProofTreeConstruction::SetupPolynomial {
         public_polynomial_context_hash: setup_context_hash,
@@ -883,6 +939,21 @@ fn statement_owned_material_and_setup_trees_use_their_exact_leaf_and_node_equati
         &[extension_value(29)],
         &[extension_value(39)],
     );
+    for (entry, opening) in layout.catalog.entries().iter().zip(&tree_openings) {
+        assert_eq!(
+            opening.opened_leaf_bytes[0].len(),
+            canonical_leaf_byte_length(entry).expect("planned leaf length derives"),
+            "materialized leaf length must equal its storage and proof plan",
+        );
+    }
+    let canonical_header_byte_length = 96;
+    let ceiling = canonical_common_proof_byte_length_ceiling(canonical_header_byte_length, &layout)
+        .expect("exact statement-owned proof length derives");
+    assert_eq!(
+        canonical_header_byte_length + bytes.len(),
+        ceiling.proof_byte_length(),
+        "the complete materialized proof must equal its exact one-query plan",
+    );
     let mut observed_widths = Vec::new();
     let pending = decode_proof_body_prefix(&bytes, bytes.len(), bytes.len(), &layout)
         .expect("bound prefix decodes");
@@ -898,6 +969,391 @@ fn statement_owned_material_and_setup_trees_use_their_exact_leaf_and_node_equati
         .finish_query_openings(absorber)
         .expect("streamed query bytes finish");
     assert_eq!(observed_widths, [4, 2, 1, 1]);
+}
+
+#[test]
+fn planned_secret_leaf_lengths_match_the_production_materializer() {
+    let material_context_hash = [0x83; 64];
+    let schedule = transcript_schedule(
+        CommonProofPrivacyMode::SecretBearing,
+        vec![0],
+        Vec::new(),
+        1,
+        1,
+        1,
+        1,
+        2,
+    );
+    let catalog = build_complete_proof_tree_catalog(
+        catalog_input(
+            4,
+            vec![
+                RelationProofTreeInput::BoundPublic(
+                    StatementOwnedProofTreeInput::CommittedMaterial {
+                        material_context_hash,
+                        expected_root: [0x91; 64],
+                    },
+                ),
+                RelationProofTreeInput::ProofCreated {
+                    tree_role: ProofTreeRole::BaseOracle,
+                    row_width: 3,
+                    leaf_visibility: ProofLeafVisibility::SecretBearing,
+                },
+            ],
+        ),
+        &schedule,
+    )
+    .expect("secret materializer catalog derives");
+
+    for entry in catalog.entries().iter().filter(|entry| {
+        matches!(
+            entry.source(),
+            ProofTreeCatalogSource::RelationBoundPublic
+                | ProofTreeCatalogSource::RelationProofCreated { .. }
+        )
+    }) {
+        let row_width = entry
+            .materialized_row_width()
+            .expect("materialized row width derives");
+        let first_point_values = Zeroizing::new(
+            (0..row_width)
+                .map(|column_ordinal| ProofTreeValue::Base(base_value(101 + column_ordinal as u64)))
+                .collect(),
+        );
+        let opposite_point_values = Zeroizing::new(
+            (0..row_width)
+                .map(|column_ordinal| ProofTreeValue::Base(base_value(211 + column_ordinal as u64)))
+                .collect(),
+        );
+        let (canonical_bytes, _) = entry
+            .encode_materialized_leaf(
+                0,
+                Some([0xa7; COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH]),
+                first_point_values,
+                opposite_point_values,
+            )
+            .expect("production leaf materializer accepts planned values");
+        assert_eq!(
+            canonical_bytes.len(),
+            canonical_leaf_byte_length(entry).expect("planned leaf length derives"),
+            "planned and materialized secret leaf lengths must remain identical",
+        );
+    }
+}
+
+#[test]
+fn setup_polynomial_two_pass_replay_emits_exact_decoder_accepted_opening() {
+    let context_hash = [0x6d; 64];
+    let construction = ProofTreeConstruction::SetupPolynomial {
+        public_polynomial_context_hash: context_hash,
+        row_width: 2,
+    };
+    let expected_opening = statement_tree_opening(
+        construction.clone(),
+        SETUP_PUBLIC_POLYNOMIAL_LEAF_HASH_DOMAIN,
+        SETUP_PUBLIC_POLYNOMIAL_PHASE_PAIR_LEAF_SCHEMA_IDENTIFIER,
+        context_hash,
+        2,
+        false,
+    );
+    let entry = ProofTreeCatalogEntry {
+        tree_catalog_index: 0,
+        source: ProofTreeCatalogSource::RelationBoundPublic,
+        construction,
+        bound_root: Some(expected_opening.root),
+    };
+    let leaf_values = |value_seed: u64| {
+        (
+            Zeroizing::new(
+                (0..2)
+                    .map(|column_index| ProofTreeValue::Base(base_value(value_seed + column_index)))
+                    .collect(),
+            ),
+            Zeroizing::new(
+                (0..2)
+                    .map(|column_index| {
+                        ProofTreeValue::Base(base_value(value_seed + 31 + column_index))
+                    })
+                    .collect(),
+            ),
+        )
+    };
+
+    let mut root_pass = StatementOwnedMerkleReplay::new_root_pass(&entry, 4)
+        .expect("the compact root pass initializes");
+    assert_eq!(
+        root_pass
+            .resident_owned_payload_byte_length()
+            .expect("the root-pass payload is measurable"),
+        64,
+        "the root pass retains exactly one digest for the sole tree level",
+    );
+    for value_seed in [101, 211] {
+        let (first_values, opposite_values) = leaf_values(value_seed);
+        root_pass
+            .supply_next_leaf(first_values, opposite_values)
+            .expect("the root pass accepts the canonical leaf stream");
+    }
+    let pass_one_root = root_pass
+        .finish_root_pass()
+        .expect("the root pass reproduces the statement root");
+    assert_eq!(pass_one_root, expected_opening.root);
+
+    let mut opening_pass = StatementOwnedMerkleReplay::new_opening_pass(&entry, 4, &[0], 1_048_576)
+        .expect("the compact opening pass initializes");
+    assert_eq!(
+        opening_pass
+            .resident_owned_payload_byte_length()
+            .expect("the opening-pass payload is measurable"),
+        u64::try_from(
+            expected_opening.opened_leaf_bytes[0].len()
+                + core::mem::size_of::<u64>()
+                + core::mem::size_of::<(u32, u64)>()
+                + 64
+                + 1
+                + 64
+        )
+        .expect("the small exact payload fits u64"),
+        "the opening pass retains one leaf, one frontier digest, their indexes, and one stack digest",
+    );
+    for value_seed in [101, 211] {
+        let (first_values, opposite_values) = leaf_values(value_seed);
+        opening_pass
+            .supply_next_leaf(first_values, opposite_values)
+            .expect("the opening pass accepts the identical canonical leaf stream");
+    }
+    let artifact = opening_pass
+        .finish_opening_pass(pass_one_root)
+        .expect("the second pass reproduces the first root and compact frontier");
+    assert_eq!(artifact.opened_leaf_indexes(), &[0]);
+    assert_eq!(
+        artifact
+            .canonical_leaf_bytes_by_position(0)
+            .expect("the opened leaf is present"),
+        expected_opening.opened_leaf_bytes[0],
+    );
+    assert_eq!(artifact.frontier_coordinates(), &[(0, 1)]);
+    assert_eq!(
+        artifact
+            .frontier_digest_by_position(0)
+            .expect("the sibling digest is present"),
+        expected_opening.frontier[0],
+    );
+
+    let catalog = CompleteProofTreeCatalog {
+        evaluation_domain_size: 4,
+        entries: vec![entry],
+    };
+    let geometry = CommonProofOpeningGeometry {
+        tree_catalog_index: 0,
+        leaf_count: 2,
+        canonical_leaf_byte_length: expected_opening.opened_leaf_bytes[0].len(),
+    };
+    let encoded =
+        encode_common_proof_query_tree_fragment(&catalog, 0, geometry, &[0], &artifact, 1_048_576)
+            .expect("the recomputed compact opening encodes");
+    let expected_bytes = [
+        canonical_opening_record(0, &expected_opening.opened_leaf_bytes),
+        canonical_frontier(0, &expected_opening.frontier),
+    ]
+    .concat();
+    assert_eq!(encoded, expected_bytes);
+
+    let schedule = transcript_schedule(
+        CommonProofPrivacyMode::PublicOnly,
+        Vec::new(),
+        Vec::new(),
+        1,
+        1,
+        1,
+        1,
+        2,
+    );
+    let layout =
+        ProofBodyLayout::new(catalog, &schedule, 1).expect("the exact decoder layout is valid");
+    let source = ResidentCommonProofByteSource::new(
+        encoded.len(),
+        vec![ResidentCommonProofInputChunk::new(0, &encoded)],
+    )
+    .expect("the compact opening is resident");
+    let (next_offset, decoded) =
+        decode_proof_query_tree_at(&source, 0, &layout, 0, pass_one_root, &[0])
+            .expect("the production decoder authenticates the two-pass opening");
+    assert_eq!(next_offset, encoded.len());
+    assert_eq!(
+        decoded
+            .as_opening(&layout.catalog.entries[0])
+            .leaves()
+            .len(),
+        1
+    );
+}
+
+#[test]
+fn committed_material_two_pass_replay_requires_and_replays_persistent_salts() {
+    let material_context_hash = [0x75; 64];
+    let construction = ProofTreeConstruction::CommittedMaterial {
+        material_context_hash,
+        row_width: 2,
+    };
+    let expected_opening = statement_tree_opening(
+        construction.clone(),
+        COMMITTED_MATERIAL_LEAF_HASH_DOMAIN,
+        COMMITTED_MATERIAL_PHASE_PAIR_LEAF_SCHEMA_IDENTIFIER,
+        material_context_hash,
+        2,
+        true,
+    );
+    let entry = ProofTreeCatalogEntry {
+        tree_catalog_index: 0,
+        source: ProofTreeCatalogSource::RelationBoundPublic,
+        construction,
+        bound_root: Some(expected_opening.root),
+    };
+    let leaf_values = |value_seed: u64| {
+        (
+            Zeroizing::new(
+                (0..2)
+                    .map(|column_index| ProofTreeValue::Base(base_value(value_seed + column_index)))
+                    .collect(),
+            ),
+            Zeroizing::new(
+                (0..2)
+                    .map(|column_index| {
+                        ProofTreeValue::Base(base_value(value_seed + 31 + column_index))
+                    })
+                    .collect(),
+            ),
+        )
+    };
+
+    let mut root_pass = StatementOwnedMerkleReplay::new_root_pass(&entry, 4)
+        .expect("the committed-material root pass initializes");
+    for (leaf_index, value_seed) in [101, 211].into_iter().enumerate() {
+        let (first_values, opposite_values) = leaf_values(value_seed);
+        root_pass
+            .supply_next_leaf_with_persistent_salt(
+                Some(
+                    [u8::try_from(leaf_index).expect("test leaf index fits u8") + 0x51;
+                        COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH],
+                ),
+                first_values,
+                opposite_values,
+            )
+            .expect("the root pass accepts the authenticated salt stream");
+    }
+    let pass_one_root = root_pass
+        .finish_root_pass()
+        .expect("the compact pass reproduces the committed root");
+
+    let mut opening_pass = StatementOwnedMerkleReplay::new_opening_pass(&entry, 4, &[0], 1_048_576)
+        .expect("the committed-material opening pass initializes");
+    for (leaf_index, value_seed) in [101, 211].into_iter().enumerate() {
+        let (first_values, opposite_values) = leaf_values(value_seed);
+        opening_pass
+            .supply_next_leaf_with_persistent_salt(
+                Some(
+                    [u8::try_from(leaf_index).expect("test leaf index fits u8") + 0x51;
+                        COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH],
+                ),
+                first_values,
+                opposite_values,
+            )
+            .expect("the opening pass accepts the identical authenticated salt stream");
+    }
+    let artifact = opening_pass
+        .finish_opening_pass(pass_one_root)
+        .expect("the compact opening authenticates against the committed root");
+    assert_eq!(
+        artifact
+            .canonical_leaf_bytes_by_position(0)
+            .expect("the selected committed leaf is retained"),
+        expected_opening.opened_leaf_bytes[0],
+    );
+    assert_eq!(
+        artifact
+            .frontier_digest_by_position(0)
+            .expect("the committed sibling digest is retained"),
+        expected_opening.frontier[0],
+    );
+
+    let (first_values, opposite_values) = leaf_values(101);
+    let mut missing_salt = StatementOwnedMerkleReplay::new_root_pass(&entry, 4)
+        .expect("the negative root pass initializes");
+    assert_eq!(
+        missing_salt.supply_next_leaf(first_values, opposite_values),
+        Err(CommonProofProverError::InvalidTree),
+    );
+}
+
+#[test]
+fn setup_polynomial_two_pass_replay_rejects_stale_or_reset_source_material() {
+    let context_hash = [0x7d; 64];
+    let construction = ProofTreeConstruction::SetupPolynomial {
+        public_polynomial_context_hash: context_hash,
+        row_width: 1,
+    };
+    let expected_opening = statement_tree_opening(
+        construction.clone(),
+        SETUP_PUBLIC_POLYNOMIAL_LEAF_HASH_DOMAIN,
+        SETUP_PUBLIC_POLYNOMIAL_PHASE_PAIR_LEAF_SCHEMA_IDENTIFIER,
+        context_hash,
+        1,
+        false,
+    );
+    let entry = ProofTreeCatalogEntry {
+        tree_catalog_index: 0,
+        source: ProofTreeCatalogSource::RelationBoundPublic,
+        construction,
+        bound_root: Some(expected_opening.root),
+    };
+    let values = |seed: u64| {
+        (
+            Zeroizing::new(vec![ProofTreeValue::Base(base_value(seed))]),
+            Zeroizing::new(vec![ProofTreeValue::Base(base_value(seed + 31))]),
+        )
+    };
+
+    let mut incomplete = StatementOwnedMerkleReplay::new_root_pass(&entry, 4)
+        .expect("the first attempt initializes");
+    let (first_values, opposite_values) = values(101);
+    incomplete
+        .supply_next_leaf(first_values, opposite_values)
+        .expect("the first attempt accepts one leaf");
+    assert_eq!(
+        incomplete.finish_root_pass(),
+        Err(CommonProofProverError::InvalidTree),
+        "an interrupted pass is never upgraded into a reusable root",
+    );
+
+    let mut fresh = StatementOwnedMerkleReplay::new_root_pass(&entry, 4)
+        .expect("a fresh reset starts from leaf zero");
+    for seed in [101, 211] {
+        let (first_values, opposite_values) = values(seed);
+        fresh
+            .supply_next_leaf(first_values, opposite_values)
+            .expect("the fresh pass accepts canonical values");
+    }
+    let pass_one_root = fresh
+        .finish_root_pass()
+        .expect("the fresh pass reaches the bound root");
+
+    let mut stale_opening =
+        StatementOwnedMerkleReplay::new_opening_pass(&entry, 4, &[0], 1_048_576)
+            .expect("the opening replay initializes");
+    for seed in [101, 212] {
+        let (first_values, opposite_values) = values(seed);
+        stale_opening
+            .supply_next_leaf(first_values, opposite_values)
+            .expect("each stale value remains a canonical field value");
+    }
+    assert!(
+        matches!(
+            stale_opening.finish_opening_pass(pass_one_root),
+            Err(CommonProofProverError::InvalidTree)
+        ),
+        "a stale second-pass source cannot open the first-pass root",
+    );
 }
 
 #[test]
@@ -973,6 +1429,7 @@ fn statement_owned_frontier_accepts_equal_digests_at_distinct_derived_coordinate
     let material_context_hash = [0x63; 64];
     let construction = ProofTreeConstruction::CommittedMaterial {
         material_context_hash,
+        row_width: COMMITTED_MATERIAL_ROW_WIDTH,
     };
     let opened_leaf_digest = [0x41; 64];
     let repeated_frontier_digest = [0x5a; 64];
@@ -1174,7 +1631,7 @@ fn decoder_rejects_wrong_roots_indices_lengths_noncanonical_fields_and_trailing_
         Err(ProofBodyError::InvalidItemLength)
     );
 
-    let frontier_header = [0x08, 0x01, 0x01, 0x00, 0x02, 0x00, 0x00, 0x00];
+    let frontier_header = [0x08, 0x01, 0x02, 0x00, 0x02, 0x00, 0x00, 0x00];
     let frontier_offset = canonical_bytes
         .windows(frontier_header.len())
         .position(|window| window == frontier_header)

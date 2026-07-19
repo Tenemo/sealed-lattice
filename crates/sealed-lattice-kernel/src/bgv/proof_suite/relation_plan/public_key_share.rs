@@ -1,11 +1,9 @@
-use std::collections::BTreeMap;
-
 use super::key_relation::{
     AnchorEquationInputs, AnchorOpeningWitness, AnchorQuotientWitness, BoundPolynomialRootUse,
-    KeyRelationGeometry, KeyRelationPlanBuilder, KeyVerifierSourceKey, PublicKeyEquationInputs,
-    PublicKeyShareRelationPlanInput, QuarterBackedSplitIntegerVector, ReversibleShiftedSmallVector,
-    ShiftedSmallVector, SplitIntegerVector, public_key_common_reference_source,
-    statement_root_source,
+    ExactRadixDigitColumnCatalog, KeyRelationGeometry, KeyRelationPlanBuilder,
+    KeyVerifierSourceKey, PublicKeyEquationInputs, PublicKeyShareRelationPlanInput,
+    ReversibleShiftedSmallVector, ShiftedSmallVector, SplitIntegerVector,
+    public_key_common_reference_source, statement_root_source,
 };
 use super::same_secret_anchor::{add_matrix_columns, append_matrix_sources};
 use super::*;
@@ -23,10 +21,10 @@ pub(crate) struct CompiledPublicKeyShareRelation {
 pub(crate) struct PublicKeyShareSourceLayout {
     pub(super) common_secret: ReversibleShiftedSmallVector,
     pub(super) public_key_error: ShiftedSmallVector,
-    pub(super) public_key_share_limbs: Box<[QuarterBackedSplitIntegerVector]>,
+    pub(super) public_key_share_limbs: Box<[SplitIntegerVector]>,
     pub(super) ordered_limbs: Box<[PublicKeyShareLimbSourceLayout]>,
     pub(super) ordered_anchors: Box<[PublicKeyShareAnchorSourceLayout]>,
-    pub(super) exact_radix_digits_by_column: BTreeMap<u32, Box<[u32]>>,
+    pub(super) exact_radix_digits_by_column: ExactRadixDigitColumnCatalog,
 }
 
 pub(super) struct PublicKeyShareLimbSourceLayout {
@@ -116,7 +114,7 @@ pub(crate) fn compile_public_key_share_relation_with_source_layout(
                 modulus_reference,
                 challenge_ordinal,
                 PublicKeyEquationInputs::new(
-                    &public_key_share_limbs[limb_ordinal].half_projections,
+                    &public_key_share_limbs[limb_ordinal],
                     &common_reference,
                     &secret,
                     &public_key_error,

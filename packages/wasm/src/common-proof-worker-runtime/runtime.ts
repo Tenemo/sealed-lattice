@@ -657,6 +657,7 @@ const clearGenerationCheckpoint = (
     checkpoint.canonicalStateBytes.fill(0);
     checkpoint.stableAttemptBindingHash.fill(0);
     checkpoint.privateRandomCursorManifestBytes.fill(0);
+    checkpoint.privateRandomnessStreamAttemptIdentifier.fill(0);
 };
 
 const permanentRetirementFailure = (
@@ -875,8 +876,7 @@ export const describeClosedWorkerCommonProofGenerationFamilyAdapter = (
         familyAdapter,
     );
     return Object.freeze({
-        checkpointLineageIdentifier:
-            record.checkpointLineageIdentifier.slice(),
+        checkpointLineageIdentifier: record.checkpointLineageIdentifier.slice(),
         commonProofGenerationAuthorizationHash:
             record.commonProofGenerationAuthorizationHash.slice(),
         commonProofRuntimeBindingHash:

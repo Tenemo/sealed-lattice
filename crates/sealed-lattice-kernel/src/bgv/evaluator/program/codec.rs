@@ -27,14 +27,27 @@ const MAXIMUM_EVALUATOR_CANONICAL_LIST_COUNT: usize = crate::bgv::parameters::PO
 
 pub(super) fn encode_program_set(program_set: &EvaluatorProgramSet) -> CanonicalResult<Vec<u8>> {
     program_set.validate()?;
+    encode_program_components(&program_set.constants, &program_set.streams)
+}
+
+#[cfg(test)]
+pub(super) fn encode_candidate_recurrence_trace(
+    constants: &[EvaluatorConstant],
+    streams: &[EvaluatorInstructionStream],
+) -> CanonicalResult<Vec<u8>> {
+    encode_program_components(constants, streams)
+}
+
+fn encode_program_components(
+    constants: &[EvaluatorConstant],
+    streams: &[EvaluatorInstructionStream],
+) -> CanonicalResult<Vec<u8>> {
     let limits = evaluator_program_decode_limits();
-    let constant_items = program_set
-        .constants
+    let constant_items = constants
         .iter()
         .map(|constant| nested_tuple_item(constant_tuple(constant)?, &limits))
         .collect::<CanonicalResult<Vec<_>>>()?;
-    let stream_items = program_set
-        .streams
+    let stream_items = streams
         .iter()
         .map(|stream| nested_tuple_item(instruction_stream_tuple(stream, &limits)?, &limits))
         .collect::<CanonicalResult<Vec<_>>>()?;
@@ -61,6 +74,20 @@ pub(super) fn encode_program_set(program_set: &EvaluatorProgramSet) -> Canonical
 }
 
 pub(super) fn decode_program_set(bytes: &[u8]) -> CanonicalResult<EvaluatorProgramSet> {
+    let (constants, streams) = decode_program_components(bytes)?;
+    EvaluatorProgramSet::new(constants, streams)
+}
+
+#[cfg(test)]
+pub(super) fn decode_candidate_recurrence_trace(
+    bytes: &[u8],
+) -> CanonicalResult<(Vec<EvaluatorConstant>, Vec<EvaluatorInstructionStream>)> {
+    decode_program_components(bytes)
+}
+
+fn decode_program_components(
+    bytes: &[u8],
+) -> CanonicalResult<(Vec<EvaluatorConstant>, Vec<EvaluatorInstructionStream>)> {
     let limits = evaluator_program_decode_limits();
     let tuple = CanonicalTuple::decode(bytes, &limits).map_err(map_codec_error)?;
     require_header(&tuple, EVALUATOR_PROGRAM_SET_SCHEMA_IDENTIFIER, 2)?;
@@ -85,7 +112,7 @@ pub(super) fn decode_program_set(bytes: &[u8]) -> CanonicalResult<EvaluatorProgr
         .map(|stream| decode_instruction_stream_tuple(stream, &limits))
         .collect::<CanonicalResult<Vec<_>>>()?;
 
-    EvaluatorProgramSet::new(constants, streams)
+    Ok((constants, streams))
 }
 
 pub(super) fn hash_constant(

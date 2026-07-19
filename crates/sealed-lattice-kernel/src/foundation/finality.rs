@@ -9,8 +9,8 @@ use super::{
     FoundationObjectType, FoundationSchemaError, Hash512, ObjectEnvelope, ParticipantIdentity,
     RefusalReason, Roster, SignedCarrier, StateCapabilityKind, StateCertificate, StateError,
     StateReservationVerificationInput, StateVerifier, StreamDescriptor, VerificationResult,
-    VerifiedCanonicalStreamSummary, VerifiedStateOutput, VerifiedStateOutputCarrierByteLengths,
-    VerifiedTranscriptObject, derive_canonical_stream_descriptor, hash_foundation_tuple_512,
+    VerifiedCanonicalStreamSummary, VerifiedStateOutput, VerifiedTranscriptObject,
+    derive_canonical_stream_descriptor, hash_foundation_tuple_512,
 };
 
 pub const FINALITY_STATEMENT_SCHEMA_IDENTIFIER: u16 = 0x1600;
@@ -356,10 +356,6 @@ impl VerifiedEvaluatorReplay {
         self.object.object_hash()
     }
 
-    pub(crate) fn canonical_carrier_byte_length(&self) -> u64 {
-        self.object.canonical_carrier_bytes().len() as u64
-    }
-
     pub(crate) const fn suite_identifier(&self) -> Hash512 {
         self.suite_identifier
     }
@@ -430,80 +426,14 @@ impl VerifiedEvaluatorReplay {
     }
 }
 
-#[derive(Clone)]
-struct VerifiedFinalitySignerCarrierProvenance {
-    signer_participant_id: ParticipantIdentity,
-    finality_object_hash: Hash512,
-    canonical_finality_carrier_byte_length: u64,
-}
-
-struct VerifiedFinalityCarrierProvenance {
-    canonical_certificate_byte_length: u64,
-    ordered_signers: Vec<VerifiedFinalitySignerCarrierProvenance>,
-}
-
-/// Opaque, nonserialized view of one finality signer and the exact authenticated
-/// state carriers consumed for that signer.
-pub(crate) struct VerifiedFinalitySignerCarrierByteLengths<'provenance> {
-    provenance: &'provenance VerifiedFinalitySignerCarrierProvenance,
-    state_output: &'provenance VerifiedStateOutput,
-}
-
-impl VerifiedFinalitySignerCarrierByteLengths<'_> {
-    pub(crate) const fn signer_participant_id(&self) -> ParticipantIdentity {
-        self.provenance.signer_participant_id
-    }
-
-    pub(crate) const fn canonical_finality_carrier_byte_length(&self) -> u64 {
-        self.provenance.canonical_finality_carrier_byte_length
-    }
-
-    pub(crate) fn state_carriers(&self) -> VerifiedStateOutputCarrierByteLengths<'_> {
-        self.state_output.consumed_carrier_byte_lengths()
-    }
-}
-
-/// Opaque, nonserialized view of exact carrier lengths retained by finality.
-/// It cannot influence acceptance and does not expose the retained object-hash
-/// join used to keep these lengths attached to the verified carrier set.
-pub(crate) struct VerifiedFinalityCarrierByteLengths<'provenance> {
-    verified_finality: &'provenance VerifiedFinality,
-}
-
-impl<'provenance> VerifiedFinalityCarrierByteLengths<'provenance> {
-    pub(crate) const fn canonical_certificate_byte_length(&self) -> u64 {
-        self.verified_finality
-            .carrier_provenance
-            .canonical_certificate_byte_length
-    }
-
-    pub(crate) fn ordered_signers(
-        &self,
-    ) -> impl ExactSizeIterator<Item = VerifiedFinalitySignerCarrierByteLengths<'_>> + '_ {
-        self.verified_finality
-            .carrier_provenance
-            .ordered_signers
-            .iter()
-            .zip(self.verified_finality.state_outputs.iter())
-            .map(
-                |(provenance, state_output)| VerifiedFinalitySignerCarrierByteLengths {
-                    provenance,
-                    state_output,
-                },
-            )
-    }
-}
-
 /// Non-serializable finality capability. It retains the exact replay source,
-/// accepted finality objects, verifier-created state outputs, and private
-/// consumed-carrier byte-length provenance.
+/// accepted finality objects, and verifier-created state outputs.
 pub struct VerifiedFinality {
     statement: FinalityStatement,
     finality_hash: Hash512,
     verified_evaluator_replay: VerifiedEvaluatorReplay,
     finality_objects: Vec<VerifiedTranscriptObject>,
     state_outputs: Vec<VerifiedStateOutput>,
-    carrier_provenance: VerifiedFinalityCarrierProvenance,
 }
 
 impl VerifiedFinality {
@@ -517,10 +447,6 @@ impl VerifiedFinality {
 
     pub fn verified_evaluator_replay_object_hash(&self) -> Hash512 {
         self.verified_evaluator_replay.object_hash()
-    }
-
-    pub(crate) const fn verified_evaluator_replay(&self) -> &VerifiedEvaluatorReplay {
-        &self.verified_evaluator_replay
     }
 
     pub const fn verified_setup_source_hash(&self) -> Hash512 {
@@ -610,31 +536,6 @@ impl VerifiedFinality {
     pub(crate) fn state_outputs(&self) -> &[VerifiedStateOutput] {
         &self.state_outputs
     }
-
-    pub(crate) fn consumed_carrier_byte_lengths(&self) -> VerifiedFinalityCarrierByteLengths<'_> {
-        debug_assert_eq!(
-            self.carrier_provenance.ordered_signers.len(),
-            self.finality_objects.len()
-        );
-        debug_assert_eq!(
-            self.carrier_provenance.ordered_signers.len(),
-            self.state_outputs.len()
-        );
-        for (provenance, finality_object) in self
-            .carrier_provenance
-            .ordered_signers
-            .iter()
-            .zip(self.finality_objects.iter())
-        {
-            debug_assert_eq!(
-                provenance.finality_object_hash,
-                finality_object.object_hash()
-            );
-        }
-        VerifiedFinalityCarrierByteLengths {
-            verified_finality: self,
-        }
-    }
 }
 
 pub struct FinalityVerificationInput<'input> {
@@ -706,12 +607,10 @@ impl FinalityVerifier {
                 "finality provenance lists do not match the signer count",
             ));
         }
-        let canonical_certificate_byte_length = input.certificate.encode()?.len() as u64;
         let finality_hash = input.statement.finality_hash()?;
         let mut previous_roster_position = None;
         let mut retained_finality_objects = Vec::with_capacity(signer_inputs.len());
         let mut state_outputs = Vec::with_capacity(signer_inputs.len());
-        let mut ordered_signer_provenance = Vec::with_capacity(signer_inputs.len());
         for (signer_index, signer_input) in signer_inputs.iter().enumerate() {
             let finality_carrier = SignedCarrier::decode(
                 signer_input.canonical_signed_finality_carrier(),
@@ -788,13 +687,6 @@ impl FinalityVerifier {
             }
             retained_finality_objects.push((*verified_finality_object).clone());
             state_outputs.push(verified_output);
-            ordered_signer_provenance.push(VerifiedFinalitySignerCarrierProvenance {
-                signer_participant_id: signer,
-                finality_object_hash,
-                canonical_finality_carrier_byte_length: signer_input
-                    .canonical_signed_finality_carrier()
-                    .len() as u64,
-            });
         }
 
         Ok(VerifiedFinality {
@@ -803,10 +695,6 @@ impl FinalityVerifier {
             verified_evaluator_replay: input.verified_evaluator_replay.retained_clone(),
             finality_objects: retained_finality_objects,
             state_outputs,
-            carrier_provenance: VerifiedFinalityCarrierProvenance {
-                canonical_certificate_byte_length,
-                ordered_signers: ordered_signer_provenance,
-            },
         })
     }
 

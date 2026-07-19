@@ -68,7 +68,8 @@ const checkpointLineageIdentifierByteLength = 32;
 const wasm32WordByteLength = Uint32Array.BYTES_PER_ELEMENT;
 const maximumWasm32UnsignedInteger = 0xffff_ffff;
 const targetReleasePartialRoleCount = 2;
-const targetReleaseReconstructionThreshold = 4;
+const targetReleaseReconstructionThreshold =
+    foundationProfile.reconstructionThreshold;
 
 export type TargetReleaseGenerationMode = 'fresh' | 'resumed';
 export type TargetReleasePartialRole = 'targetIdentifier' | 'targetOrder';
@@ -98,10 +99,9 @@ export type VerifiedTargetReleaseShare = Readonly<{
     release(): void;
 }>;
 
-/** Fixed-order logical slots reconstructed from one threshold share set. */
+/** Canonical one-based option identifiers in increasing result rank. */
 export type ReconstructedTargetRelease = Readonly<{
-    targetIdentifierSlots: Uint32Array<ArrayBuffer>;
-    targetOrderSlots: Uint32Array<ArrayBuffer>;
+    orderedOptionIdentifiers: Uint32Array<ArrayBuffer>;
 }>;
 
 type VerifiedTargetReleaseShareRecord = Readonly<{
@@ -134,11 +134,11 @@ type TargetReleaseKernel = Readonly<{
     reconstructVerifiedShares: NonNullable<
         TranscriptCoreKernelExports['sealed_lattice_target_release_reconstruct_verified_shares']
     >;
-    reconstructedSlotCount: NonNullable<
-        TranscriptCoreKernelExports['sealed_lattice_target_release_reconstructed_slot_count']
+    reconstructedSelectedOptionCount: NonNullable<
+        TranscriptCoreKernelExports['sealed_lattice_target_release_reconstructed_selected_option_count']
     >;
-    copyReconstructedRole: NonNullable<
-        TranscriptCoreKernelExports['sealed_lattice_target_release_copy_reconstructed_role']
+    copyReconstructedOptionIdentifiers: NonNullable<
+        TranscriptCoreKernelExports['sealed_lattice_target_release_copy_reconstructed_option_identifiers']
     >;
     finishReconstruction: NonNullable<
         TranscriptCoreKernelExports['sealed_lattice_target_release_finish_reconstruction']
@@ -199,10 +199,10 @@ const requireTargetReleaseKernel = (
             wasmExports.sealed_lattice_target_release_discard_verified_share,
         reconstructVerifiedShares:
             wasmExports.sealed_lattice_target_release_reconstruct_verified_shares,
-        reconstructedSlotCount:
-            wasmExports.sealed_lattice_target_release_reconstructed_slot_count,
-        copyReconstructedRole:
-            wasmExports.sealed_lattice_target_release_copy_reconstructed_role,
+        reconstructedSelectedOptionCount:
+            wasmExports.sealed_lattice_target_release_reconstructed_selected_option_count,
+        copyReconstructedOptionIdentifiers:
+            wasmExports.sealed_lattice_target_release_copy_reconstructed_option_identifiers,
         finishReconstruction:
             wasmExports.sealed_lattice_target_release_finish_reconstruction,
         discardReconstruction:
@@ -1322,24 +1322,22 @@ export const verifyTargetReleaseInClosedWorker = async (input: {
     return verifiedShare;
 };
 
-const copyReconstructedTargetRole = (input: {
+const copyReconstructedOptionIdentifiers = (input: {
     context: TranscriptCoreKernelCommandRuntime;
     kernel: TargetReleaseKernel;
     memoryBoundary: WasmMemoryBoundary;
-    reconstructedTargetPairHandle: number;
-    roleByteLength: number;
-    roleOrdinal: number;
-    slotCount: number;
+    reconstructedTargetResultHandle: number;
+    resultByteLength: number;
+    optionCount: number;
     statusBoundary: WasmStatusBoundary;
     statusPointer: number;
 }): Uint32Array<ArrayBuffer> => {
-    const outputPointer = input.memoryBoundary.allocate(input.roleByteLength);
+    const outputPointer = input.memoryBoundary.allocate(input.resultByteLength);
     try {
-        const returnedStatus = input.kernel.copyReconstructedRole(
-            input.reconstructedTargetPairHandle,
-            input.roleOrdinal,
+        const returnedStatus = input.kernel.copyReconstructedOptionIdentifiers(
+            input.reconstructedTargetResultHandle,
             outputPointer,
-            input.roleByteLength,
+            input.resultByteLength,
             input.statusPointer,
         );
         input.statusBoundary.throwIfError(returnedStatus);
@@ -1348,30 +1346,36 @@ const copyReconstructedTargetRole = (input: {
             1,
         );
         input.statusBoundary.throwIfError(writtenStatus);
-        const encodedSlots = new DataView(
+        const encodedOptionIdentifiers = new DataView(
             input.context.memory.buffer,
             outputPointer,
-            input.roleByteLength,
+            input.resultByteLength,
         );
-        const slots = new Uint32Array(input.slotCount);
-        for (let slotIndex = 0; slotIndex < input.slotCount; slotIndex += 1) {
-            slots[slotIndex] = encodedSlots.getUint32(
-                slotIndex * wasm32WordByteLength,
-                true,
-            );
+        const orderedOptionIdentifiers = new Uint32Array(input.optionCount);
+        for (
+            let optionIndex = 0;
+            optionIndex < input.optionCount;
+            optionIndex += 1
+        ) {
+            orderedOptionIdentifiers[optionIndex] =
+                encodedOptionIdentifiers.getUint32(
+                    optionIndex * wasm32WordByteLength,
+                    true,
+                );
         }
-        return slots;
+        return orderedOptionIdentifiers;
     } finally {
         input.memoryBoundary.zeroAndDeallocate(
             outputPointer,
-            input.roleByteLength,
+            input.resultByteLength,
         );
     }
 };
 
 /**
- * Consumes four distinct Rust-owned paired shares and reconstructs the exact
- * finalized target in fixed target-identifier then target-order slot order.
+ * Consumes four through ten distinct Rust-owned paired shares, deterministically
+ * selects the four lowest verified roster positions, and reconstructs the exact
+ * finalized target as canonical one-based option identifiers in result order.
  * Constructing and certifying the subsequent state-output carrier remains a
  * separate protocol orchestration step.
  */
@@ -1416,7 +1420,8 @@ export const reconstructTargetReleaseInClosedWorker = (input: {
     });
     if (
         !Array.isArray(input.verifiedShares) ||
-        input.verifiedShares.length !== targetReleaseReconstructionThreshold
+        input.verifiedShares.length < targetReleaseReconstructionThreshold ||
+        input.verifiedShares.length > foundationProfile.participantCount
     ) {
         throw new CanonicalStreamRefusalError('wrongTypeOrLength');
     }
@@ -1435,7 +1440,7 @@ export const reconstructTargetReleaseInClosedWorker = (input: {
     });
     if (
         new Set(verifiedShareRecords.map((record) => record.handle)).size !==
-        targetReleaseReconstructionThreshold
+        verifiedShareRecords.length
     ) {
         throw new CanonicalStreamRefusalError('wrongContext');
     }
@@ -1443,8 +1448,9 @@ export const reconstructTargetReleaseInClosedWorker = (input: {
     let finalizedTargetIdentifierBytes: Uint8Array<ArrayBuffer> | undefined;
     let finalizedTargetOrderBytes: Uint8Array<ArrayBuffer> | undefined;
     let verifiedShareHandleBytes: Uint8Array<ArrayBuffer> | undefined;
-    let reconstructedTargetPairHandle = 0;
+    let reconstructedTargetResultHandle = 0;
     let shareOwnershipTransferred = false;
+    let sharesConsumedByReconstruction = false;
     let reconstructedTargetRelease: ReconstructedTargetRelease | undefined;
     let operationFailure: unknown;
     let operationFailed = false;
@@ -1456,7 +1462,7 @@ export const reconstructTargetReleaseInClosedWorker = (input: {
             input.finalizedTargetOrderBytes,
         );
         const encodedVerifiedShareHandles = new Uint8Array(
-            targetReleaseReconstructionThreshold * wasm32WordByteLength,
+            verifiedShareRecords.length * wasm32WordByteLength,
         );
         finalizedTargetIdentifierBytes = ownedTargetIdentifierBytes;
         finalizedTargetOrderBytes = ownedTargetOrderBytes;
@@ -1482,10 +1488,9 @@ export const reconstructTargetReleaseInClosedWorker = (input: {
                 let targetOrderPointer = 0;
                 let shareHandlesPointer = 0;
                 let statusPointer = 0;
-                let targetIdentifierSlots:
+                let orderedOptionIdentifiers:
                     | Uint32Array<ArrayBuffer>
                     | undefined;
-                let targetOrderSlots: Uint32Array<ArrayBuffer> | undefined;
                 try {
                     targetIdentifierPointer = memoryBoundary.copy(
                         ownedTargetIdentifierBytes,
@@ -1512,75 +1517,68 @@ export const reconstructTargetReleaseInClosedWorker = (input: {
                             statusPointer,
                         ) >>> 0;
                     if (returnedHandle !== 0) {
-                        reconstructedTargetPairHandle = returnedHandle;
+                        reconstructedTargetResultHandle = returnedHandle;
                     }
                     const [reconstructionStatus] = memoryBoundary.readWords(
                         statusPointer,
                         1,
                     );
                     statusBoundary.throwIfError(reconstructionStatus);
-                    reconstructedTargetPairHandle = requireLiveHandle(
+                    reconstructedTargetResultHandle = requireLiveHandle(
                         returnedHandle,
-                        'The reconstructed target-pair handle',
+                        'The reconstructed target-result handle',
                     );
+                    sharesConsumedByReconstruction = true;
 
-                    const slotCount = kernel.reconstructedSlotCount(
-                        reconstructedTargetPairHandle,
+                    const selectedOptionCount =
+                        kernel.reconstructedSelectedOptionCount(
+                        reconstructedTargetResultHandle,
                         statusPointer,
                     );
-                    const [slotCountStatus] = memoryBoundary.readWords(
+                    const [selectedOptionCountStatus] = memoryBoundary.readWords(
                         statusPointer,
                         1,
                     );
-                    statusBoundary.throwIfError(slotCountStatus);
-                    if (!Number.isSafeInteger(slotCount) || slotCount <= 0) {
+                    statusBoundary.throwIfError(selectedOptionCountStatus);
+                    if (
+                        !Number.isSafeInteger(selectedOptionCount) ||
+                        selectedOptionCount <= 0 ||
+                        selectedOptionCount > foundationProfile.optionCount
+                    ) {
                         throw new CanonicalStreamInternalError(
-                            'The reconstructed target pair has an invalid logical-slot count.',
+                            'The reconstructed target result has an invalid option count.',
                         );
                     }
-                    const roleByteLength = slotCount * wasm32WordByteLength;
+                    const resultByteLength =
+                        selectedOptionCount * wasm32WordByteLength;
                     memoryBoundary.validateAllocationByteLength(
-                        roleByteLength,
+                        resultByteLength,
                     );
-                    const copiedTargetIdentifierSlots =
-                        copyReconstructedTargetRole({
+                    const copiedOrderedOptionIdentifiers =
+                        copyReconstructedOptionIdentifiers({
                             context,
                             kernel,
                             memoryBoundary,
-                            reconstructedTargetPairHandle,
-                            roleByteLength,
-                            roleOrdinal: 0,
-                            slotCount,
+                            reconstructedTargetResultHandle,
+                            resultByteLength,
+                            optionCount: selectedOptionCount,
                             statusBoundary,
                             statusPointer,
                         });
-                    targetIdentifierSlots = copiedTargetIdentifierSlots;
-                    const copiedTargetOrderSlots =
-                        copyReconstructedTargetRole({
-                            context,
-                            kernel,
-                            memoryBoundary,
-                            reconstructedTargetPairHandle,
-                            roleByteLength,
-                            roleOrdinal: 1,
-                            slotCount,
-                            statusBoundary,
-                            statusPointer,
-                        });
-                    targetOrderSlots = copiedTargetOrderSlots;
+                    orderedOptionIdentifiers =
+                        copiedOrderedOptionIdentifiers;
                     statusBoundary.throwIfError(
                         kernel.finishReconstruction(
-                            reconstructedTargetPairHandle,
+                            reconstructedTargetResultHandle,
                         ),
                     );
-                    reconstructedTargetPairHandle = 0;
+                    reconstructedTargetResultHandle = 0;
                     return Object.freeze({
-                        targetIdentifierSlots: copiedTargetIdentifierSlots,
-                        targetOrderSlots: copiedTargetOrderSlots,
+                        orderedOptionIdentifiers:
+                            copiedOrderedOptionIdentifiers,
                     });
                 } catch (error) {
-                    targetIdentifierSlots?.fill(0);
-                    targetOrderSlots?.fill(0);
+                    orderedOptionIdentifiers?.fill(0);
                     throw error;
                 } finally {
                     if (statusPointer !== 0) {
@@ -1620,12 +1618,12 @@ export const reconstructTargetReleaseInClosedWorker = (input: {
     }
 
     const cleanupFailures: unknown[] = [];
-    if (reconstructedTargetPairHandle !== 0) {
+    if (reconstructedTargetResultHandle !== 0) {
         try {
             discardHandle({
                 context,
                 discard: kernel.discardReconstruction,
-                handle: reconstructedTargetPairHandle,
+                handle: reconstructedTargetResultHandle,
                 operationName: 'target-release reconstruction discard',
                 statusBoundary,
             });
@@ -1635,6 +1633,7 @@ export const reconstructTargetReleaseInClosedWorker = (input: {
     }
     if (
         shareOwnershipTransferred &&
+        !sharesConsumedByReconstruction &&
         reconstructedTargetRelease === undefined
     ) {
         for (const record of verifiedShareRecords) {
@@ -1663,7 +1662,7 @@ export const reconstructTargetReleaseInClosedWorker = (input: {
     }
     if (reconstructedTargetRelease === undefined) {
         throw new CanonicalStreamInternalError(
-            'Target-release reconstruction completed without a paired result.',
+            'Target-release reconstruction completed without a canonical result.',
         );
     }
     return reconstructedTargetRelease;

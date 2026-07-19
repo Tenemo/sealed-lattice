@@ -1,8 +1,6 @@
 /** @alias Generated SDK runtime bridge contract. */
 export type {
-    AcceptedSetupSession,
     BgvCollectiveSetupParametersDescription,
-    BgvCollectiveSetupVerification,
     BgvRnsParametersDescription,
     DecodedPrivateRandomCursor,
     EncodedPrivateRandomCursor,

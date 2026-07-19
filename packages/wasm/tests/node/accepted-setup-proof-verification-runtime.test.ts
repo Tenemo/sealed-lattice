@@ -57,7 +57,7 @@ const boundaryMocks = vi.hoisted(() => {
             (_assembly: unknown, kernel: TranscriptCoreKernel) =>
                 Object.freeze({ handle: 19, kernel }),
         ),
-        runVerification: vi.fn(async () => verifiedCapability),
+        runVerification: vi.fn(() => Promise.resolve(verifiedCapability)),
         verifiedCapabilityRelease,
         verifiedConsumptionOutcomes,
     };
@@ -106,6 +106,12 @@ type FakeAcceptedSetupProofVerificationRuntime = Readonly<{
     preparedStatements: Array<
         Readonly<{ bytes: number[]; family: VerificationFamily }>
     >;
+    preparedGeneratedSources: Array<
+        Readonly<{
+            family: VerificationFamily;
+            generationStatementSourceHandle: number;
+        }>
+    >;
     selectedSuiteReleases: number[];
 }>;
 
@@ -139,6 +145,12 @@ const createFakeRuntime = (): FakeAcceptedSetupProofVerificationRuntime => {
     > = [];
     const preparedStatements: Array<
         Readonly<{ bytes: number[]; family: VerificationFamily }>
+    > = [];
+    const preparedGeneratedSources: Array<
+        Readonly<{
+            family: VerificationFamily;
+            generationStatementSourceHandle: number;
+        }>
     > = [];
     const selectedSuiteReleases: number[] = [];
     let nextPointer = 1_024;
@@ -196,6 +208,24 @@ const createFakeRuntime = (): FakeAcceptedSetupProofVerificationRuntime => {
         });
         return finishStatus.value;
     };
+    const prepareGenerated = (
+        family: VerificationFamily,
+        generationStatementSourceHandle: number,
+        sourceHandlePointer: number,
+        statusPointer: number,
+    ): number => {
+        preparedGeneratedSources.push({
+            family,
+            generationStatementSourceHandle,
+        });
+        new DataView(memory.buffer).setUint32(
+            sourceHandlePointer,
+            family === 'sameSecret' ? 61 : 62,
+            true,
+        );
+        writeStatus(memory, statusPointer, 0);
+        return family === 'sameSecret' ? 71 : 72;
+    };
     const finishOrdinary = (
         family: VerificationFamily,
         verifiedProofHandle: number,
@@ -251,6 +281,20 @@ const createFakeRuntime = (): FakeAcceptedSetupProofVerificationRuntime => {
                 sourceHandlePointer,
                 statusPointer,
             ),
+        sealed_lattice_accepted_setup_public_key_share_prepare_generated_verification:
+            (
+                _selectedSuiteHandle: number,
+                _assemblyHandle: number,
+                generationStatementSourceHandle: number,
+                sourceHandlePointer: number,
+                statusPointer: number,
+            ) =>
+                prepareGenerated(
+                    'publicKeyShare',
+                    generationStatementSourceHandle,
+                    sourceHandlePointer,
+                    statusPointer,
+                ),
         sealed_lattice_accepted_setup_same_secret_discard_terminal_source: (
             handle: number,
         ) => {
@@ -293,6 +337,20 @@ const createFakeRuntime = (): FakeAcceptedSetupProofVerificationRuntime => {
                 sourceHandlePointer,
                 statusPointer,
             ),
+        sealed_lattice_accepted_setup_same_secret_prepare_generated_verification:
+            (
+                _selectedSuiteHandle: number,
+                _assemblyHandle: number,
+                generationStatementSourceHandle: number,
+                sourceHandlePointer: number,
+                statusPointer: number,
+            ) =>
+                prepareGenerated(
+                    'sameSecret',
+                    generationStatementSourceHandle,
+                    sourceHandlePointer,
+                    statusPointer,
+                ),
         sealed_lattice_common_proof_release_suite: (handle: number) => {
             selectedSuiteReleases.push(handle);
             return 0;
@@ -330,6 +388,7 @@ const createFakeRuntime = (): FakeAcceptedSetupProofVerificationRuntime => {
         generatedFinishes,
         kernel,
         ordinaryFinishes,
+        preparedGeneratedSources,
         preparedStatements,
         selectedSuiteReleases,
     });
@@ -368,6 +427,7 @@ describe('accepted-setup generated proof verification', () => {
             await verifyGenerated(
                 verificationInput(runtime.kernel) as never,
                 boundaryMocks.generatedCapability,
+                51,
             );
 
             expect(runtime.generatedFinishes).toEqual([
@@ -380,9 +440,20 @@ describe('accepted-setup generated proof verification', () => {
             ]);
             expect(boundaryMocks.generatedConsumptionOutcomes).toEqual([true]);
             expect(boundaryMocks.verifiedConsumptionOutcomes).toEqual([true]);
-            expect(boundaryMocks.generatedCapabilityRelease).not.toHaveBeenCalled();
-            expect(boundaryMocks.verifiedCapabilityRelease).not.toHaveBeenCalled();
+            expect(
+                boundaryMocks.generatedCapabilityRelease,
+            ).not.toHaveBeenCalled();
+            expect(
+                boundaryMocks.verifiedCapabilityRelease,
+            ).not.toHaveBeenCalled();
             expect(runtime.discardedTerminalSources).toEqual([]);
+            expect(runtime.preparedGeneratedSources).toEqual([
+                {
+                    family,
+                    generationStatementSourceHandle: 51,
+                },
+            ]);
+            expect(runtime.preparedStatements).toEqual([]);
             expect(runtime.selectedSuiteReleases).toEqual([11]);
             expect(runtime.allocations.size).toBe(0);
         },
@@ -395,13 +466,16 @@ describe('accepted-setup generated proof verification', () => {
             verifyGeneratedAcceptedSetupSameSecretCapabilityInClosedWorker(
                 verificationInput(runtime.kernel) as never,
                 boundaryMocks.generatedCapability,
+                51,
             ),
         ).rejects.toThrow(/wrongContext/u);
 
         expect(boundaryMocks.generatedConsumptionOutcomes).toEqual([false]);
         expect(boundaryMocks.verifiedConsumptionOutcomes).toEqual([false]);
         expect(boundaryMocks.generatedCapabilityRelease).not.toHaveBeenCalled();
-        expect(boundaryMocks.verifiedCapabilityRelease).toHaveBeenCalledTimes(1);
+        expect(boundaryMocks.verifiedCapabilityRelease).toHaveBeenCalledTimes(
+            1,
+        );
         expect(runtime.discardedTerminalSources).toEqual([61]);
         expect(runtime.allocations.size).toBe(0);
     });

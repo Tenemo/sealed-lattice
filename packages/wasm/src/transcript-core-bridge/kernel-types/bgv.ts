@@ -1,11 +1,20 @@
-import type { ProtocolHash, VerificationResult } from '@sealed-lattice/types';
+import type { ProtocolHash } from '@sealed-lattice/types';
 
 export type BgvRnsParametersDescription = {
     readonly parameters: {
         readonly polynomialDegree: number;
-        readonly plaintextModulus: number;
-        readonly dataPrimes: readonly number[];
-        readonly specialPrimes: readonly number[];
+        readonly plaintextModulus: string;
+        readonly dataPrimes: readonly string[];
+        readonly specialPrimes: readonly string[];
+        readonly nttRootParameters: readonly {
+            readonly modulus: string;
+            readonly primitiveGenerator: string;
+            readonly negacyclicRoot: string;
+            readonly cyclicRoot: string;
+            readonly inverseNegacyclicRoot: string;
+            readonly inverseCyclicRoot: string;
+            readonly inversePolynomialDegree: string;
+        }[];
         readonly scoreRange: {
             readonly minimum: number;
             readonly maximum: number;
@@ -21,7 +30,7 @@ export type BgvCollectiveSetupParametersDescription = {
     readonly participantCount: number;
     readonly reconstructionThreshold: number;
     readonly qShare: {
-        readonly primes: readonly number[];
+        readonly primes: readonly string[];
     };
     readonly evaluatorKeySchedule: {
         readonly objectType: 'EvaluatorKeySchedule';
@@ -39,5 +48,3 @@ export type BgvCollectiveSetupParametersDescription = {
         readonly directComparisonOutputLevel: number;
     };
 };
-
-export type BgvCollectiveSetupVerification = VerificationResult<void>;

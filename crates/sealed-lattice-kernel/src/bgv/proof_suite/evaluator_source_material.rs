@@ -51,14 +51,14 @@ pub(super) fn expected_component_column_moduli(
                 u16::try_from(data_limb_index)
                     .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?,
             ));
-            references.extend([modulus_reference; 4]);
+            references.extend([modulus_reference; 2]);
         }
         for special_limb_index in 0..selected_candidate.special_primes.len() {
             let modulus_reference = Some(SuiteModulusReference::special(
                 u16::try_from(special_limb_index)
                     .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?,
             ));
-            references.extend([modulus_reference; 4]);
+            references.extend([modulus_reference; 2]);
         }
     }
     Ok(references.into_boxed_slice())

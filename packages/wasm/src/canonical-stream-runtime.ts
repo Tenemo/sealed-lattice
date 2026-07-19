@@ -221,38 +221,6 @@ type CanonicalStreamKernelContext = Readonly<{
         totalByteLength: number,
         statusPointer: number,
     ): number;
-    bgvAbsorbChunk?: (
-        handle: number,
-        chunkIndex: number,
-        chunkPointer: number,
-        chunkLength: number,
-    ) => number;
-    bgvBegin?: (
-        familyCode: number,
-        materialRootPointer: number,
-        materialRootLength: number,
-        descriptorPointer: number,
-        descriptorLength: number,
-        statusPointer: number,
-        totalByteLengthPointer: number,
-    ) => number;
-    bgvCancel?: (handle: number) => number;
-    bgvFinish?: (handle: number) => number;
-    bgvMaterialReaderBegin?: (
-        familyCode: number,
-        materialRootPointer: number,
-        materialRootLength: number,
-        statusPointer: number,
-        totalByteLengthPointer: number,
-    ) => number;
-    bgvMaterialReaderCancel?: (handle: number) => number;
-    bgvMaterialReaderFinish?: (handle: number) => number;
-    bgvMaterialReaderReadChunk?: (
-        handle: number,
-        chunkIndex: number,
-        outputPointer: number,
-        outputLength: number,
-    ) => number;
     cancel(handle: number): number;
     deallocate(pointer: number, length: number): void;
     absorbChunk(
@@ -330,6 +298,25 @@ type CanonicalStreamKernelContext = Readonly<{
         statusPointer: number,
     ) => number;
     setupGenerationAuthorityRelease?: (authorityHandle: number) => number;
+    setupGenerationPublicKeyShareBodyByteLength?: (
+        authorityHandle: number,
+        statusPointer: number,
+    ) => bigint;
+    setupGenerationPublicKeyShareBodyOpen?: (
+        authorityHandle: number,
+        statusPointer: number,
+    ) => number;
+    setupGenerationPublicKeyShareSourceByteLength?: (
+        sourceHandle: number,
+        statusPointer: number,
+    ) => bigint;
+    setupGenerationPublicKeyShareBodyRead?: (
+        sourceHandle: number,
+        expectedOffset: bigint,
+        outputPointer: number,
+        outputByteLength: number,
+    ) => number;
+    setupGenerationPublicKeyShareBodyCancel?: (sourceHandle: number) => number;
     setupGenerationRecipientVssPayloadByteLength?: (
         authorityHandle: number,
         recipientRosterPosition: number,
@@ -354,9 +341,7 @@ type CanonicalStreamKernelContext = Readonly<{
         outputPointer: number,
         outputByteLength: number,
     ) => number;
-    setupGenerationRecipientVssPayloadCancel?: (
-        sourceHandle: number,
-    ) => number;
+    setupGenerationRecipientVssPayloadCancel?: (sourceHandle: number) => number;
     runExclusive<Result>(
         operationName: string,
         operation: () => Result,

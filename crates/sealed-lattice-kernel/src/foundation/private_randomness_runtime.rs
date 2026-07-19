@@ -6,26 +6,34 @@ use fips203::{
 };
 use zeroize::Zeroizing;
 
+use crate::hashing::hash_framed_parts_512;
+
 use super::board_ingestion_runtime::VerifiedBoardApplicationSource;
 use super::local_storage_runtime::{
     LOCAL_STORAGE_ROOT_CAPABILITY_BYTE_LENGTH, open_action_randomness_root,
     seal_action_randomness_root,
 };
 use super::runtime_input::RuntimeInputReader as InputReader;
+use super::setup_transcript_runtime::{
+    COMMAND_CANCEL_SETUP_TRANSCRIPT_CARRIER, COMMAND_FINISH_SETUP_TRANSCRIPT_CARRIER,
+    COMMAND_PREPARE_DEALER_PUBLIC_RECORD_CARRIER,
+    COMMAND_PREPARE_PUBLIC_RANDOMNESS_COMMITMENT_CARRIER,
+    COMMAND_PREPARE_PUBLIC_RANDOMNESS_REVEAL_CARRIER, COMMAND_PREPARE_SETUP_INTENT_CARRIER,
+    run_setup_transcript_command,
+};
 use super::state_runtime::{
     STATE_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH, VerifiedStateReservationRuntimeBinding,
     verified_state_reservation_binding,
 };
 use super::{
     ACTION_RANDOMNESS_ROOT_BYTE_LENGTH, ActionPrivateRandomness, ActionRandomnessDerivationInput,
-    ActionRandomnessRoot, CanonicalDecodeLimits, FOUNDATION_PROFILE, FoundationObjectType, Hash512,
-    LOCAL_RECORD_NONCE_BYTE_LENGTH, LocalStorageBinding, ML_DSA_65_VERIFICATION_KEY_BYTE_LENGTH,
+    ActionRandomnessRoot, CanonicalDecodeLimits, Hash512, LOCAL_RECORD_NONCE_BYTE_LENGTH,
+    LocalStorageBinding, ML_DSA_65_VERIFICATION_KEY_BYTE_LENGTH,
     ML_KEM_768_ENCAPSULATION_KEY_BYTE_LENGTH, OrdinaryProofCoinInput, ParticipantIdentity,
     PersistentProofCoinInput, PersistentProofWitnessCoinBinding,
-    PrivateRandomnessAttemptIdentifier, PrivateRandomnessDomain,
-    PrivateRandomnessKmacInputClassAccounting, ProofApplicationSlot,
+    PrivateRandomnessAttemptIdentifier, PrivateRandomnessDomain, ProofApplicationSlot,
     ProofApplicationSlotCeilings as ProofFamilyIdentifiers, RefusalReason, Roster,
-    StateCapabilityKind, private_randomness_stream_block_count_for_byte_length,
+    StateCapabilityKind,
 };
 
 const COMMAND_OPEN: u32 = 1;
@@ -45,37 +53,8 @@ const HANDLE_BYTE_LENGTH: usize = 4;
 const HASH_BYTE_LENGTH: usize = 64;
 const ATTEMPT_IDENTIFIER_BYTE_LENGTH: usize = 32;
 const MAXIMUM_ACTIVE_SESSION_COUNT: usize = 256;
-
-const SUCCESSFUL_SETUP_SIGNED_OBJECT_TYPES: [FoundationObjectType; 5] = [
-    FoundationObjectType::SetupIntent,
-    FoundationObjectType::PublicRandomnessCommitment,
-    FoundationObjectType::PublicRandomnessReveal,
-    FoundationObjectType::PublicSetupRecord,
-    FoundationObjectType::PrivateShareAcceptance,
-];
-
-/// Source-owned count for setup mailbox coins and signature hedges on the
-/// successful selected setup path. Complaint signing is an alternative
-/// terminal path and is not added to the successful-path ceiling.
-pub(crate) fn selected_setup_transport_private_randomness_kmac_input_accounting()
--> Option<PrivateRandomnessKmacInputClassAccounting> {
-    let participant_count = u64::from(FOUNDATION_PROFILE.participant_count);
-    let directed_mailbox_count =
-        participant_count.checked_mul(participant_count.checked_sub(1)?)?;
-    let one_short_stream_block_count = private_randomness_stream_block_count_for_byte_length(
-        u64::try_from(ATTEMPT_IDENTIFIER_BYTE_LENGTH).ok()?,
-    )?;
-    let mailbox_stream_block_count =
-        directed_mailbox_count.checked_mul(one_short_stream_block_count.checked_mul(3)?)?;
-    let setup_object_signature_stream_block_count = participant_count
-        .checked_mul(u64::try_from(SUCCESSFUL_SETUP_SIGNED_OBJECT_TYPES.len()).ok()?)?;
-    PrivateRandomnessKmacInputClassAccounting::checked_new(
-        0,
-        0,
-        mailbox_stream_block_count.checked_add(setup_object_signature_stream_block_count)?,
-        0,
-    )
-}
+const PUBLIC_ONLY_PROOF_ATTEMPT_LINEAGE_DOMAIN: &str =
+    "sealed-lattice/proof/public-only/local-attempt-lineage/v1";
 
 pub(crate) const ACTION_RANDOMNESS_RUNTIME_RESOURCE_LIMIT: u32 = 0x0001_0000;
 pub(crate) const ACTION_RANDOMNESS_RUNTIME_STALE_HANDLE: u32 = 0x0001_0001;
@@ -216,6 +195,58 @@ pub(crate) struct WitnessBoundPreparedActionProofAttemptSource {
     attempt_identifier: PrivateRandomnessAttemptIdentifier,
 }
 
+/// Opaque local generation authority for one exact public-only proof. It is
+/// bound to the browser-owned action key, setup reservation, application slot,
+/// canonical statement, selected proof limits, and checkpoint continuation,
+/// but it does not authorize or derive any private proof-coin coordinate.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct PreparedPublicOnlyProofAttemptSource {
+    attempt_lineage_identifier: [u8; ATTEMPT_IDENTIFIER_BYTE_LENGTH],
+    application_slot: ProofApplicationSlot,
+    application_slot_hash: Hash512,
+    application_statement_schema_identifier: u16,
+    application_statement_hash: Hash512,
+    expected_proof_byte_length: u64,
+    expected_query_count: u32,
+    checkpoint_continuation: AuthenticatedCheckpointContinuationSource,
+}
+
+impl PreparedPublicOnlyProofAttemptSource {
+    pub(crate) const fn attempt_lineage_identifier(&self) -> [u8; ATTEMPT_IDENTIFIER_BYTE_LENGTH] {
+        self.attempt_lineage_identifier
+    }
+
+    pub(crate) const fn application_slot(&self) -> ProofApplicationSlot {
+        self.application_slot
+    }
+
+    pub(crate) const fn application_slot_hash(&self) -> Hash512 {
+        self.application_slot_hash
+    }
+
+    pub(crate) const fn application_statement_schema_identifier(&self) -> u16 {
+        self.application_statement_schema_identifier
+    }
+
+    pub(crate) const fn application_statement_hash(&self) -> Hash512 {
+        self.application_statement_hash
+    }
+
+    pub(crate) const fn expected_proof_byte_length(&self) -> u64 {
+        self.expected_proof_byte_length
+    }
+
+    pub(crate) const fn expected_query_count(&self) -> u32 {
+        self.expected_query_count
+    }
+
+    pub(crate) const fn checkpoint_continuation(
+        &self,
+    ) -> &AuthenticatedCheckpointContinuationSource {
+        &self.checkpoint_continuation
+    }
+}
+
 impl WitnessBoundPreparedActionProofAttemptSource {
     pub(crate) const fn attempt_identifier(&self) -> [u8; ATTEMPT_IDENTIFIER_BYTE_LENGTH] {
         *self.attempt_identifier.as_bytes()
@@ -341,31 +372,32 @@ pub(crate) fn resolve_prepared_action_proof_attempt_source(
     })
 }
 
-/// Resolves one locally owned reset-safe attempt for a collective setup proof
-/// whose canonical application slot has no producer coordinates. The live
-/// action key and its positively verified state reservation still belong to
-/// the participant performing the proof; that local ownership is deliberately
-/// absent from the public proof slot.
+/// Resolves one locally owned public-only setup proof attempt. The exact
+/// family slot and canonical statement are joined to the participant's live
+/// setup reservation solely to authorize generation and checkpoint custody.
+/// No private proof-coin input, witness binding, mask, or salt domain exists
+/// for this path.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn resolve_prepared_collective_action_proof_attempt_source(
+pub(crate) fn resolve_prepared_public_only_proof_attempt_source(
     action_randomness_handle: u32,
     verified_reservation_binding: VerifiedStateReservationRuntimeBinding,
+    roster_hash: Hash512,
     application_slot: ProofApplicationSlot,
     application_statement_hash: Hash512,
     expected_proof_byte_length: u64,
     expected_query_count: u32,
     checkpoint_continuation: AuthenticatedCheckpointContinuationSource,
-) -> RuntimeResult<PreparedActionProofAttemptSource> {
-    if application_slot.application_statement_schema_identifier()
-        != ProofFamilyIdentifiers::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER
-        || application_slot.roster_position().is_some()
-        || application_slot.schedule_position().is_some()
-        || application_slot.producer_sequence().is_some()
+) -> RuntimeResult<PreparedPublicOnlyProofAttemptSource> {
+    let statement_schema_identifier = application_slot.application_statement_schema_identifier();
+    if !ProofFamilyIdentifiers::PUBLIC_ONLY_FAMILY_SCHEMA_IDENTIFIERS
+        .contains(&statement_schema_identifier)
         || expected_proof_byte_length == 0
         || expected_query_count == 0
+        || application_statement_hash.into_bytes() == [0_u8; HASH_BYTE_LENGTH]
     {
         return Err(RefusalReason::OutsideSupportedProfile.canonical_code() as u32);
     }
+
     ACTION_RANDOMNESS_REGISTRY.with(|registry| {
         let registry = registry.borrow();
         let randomness = registry.get(action_randomness_handle)?;
@@ -376,22 +408,30 @@ pub(crate) fn resolve_prepared_collective_action_proof_attempt_source(
         {
             return Err(RefusalReason::WrongContext.canonical_code() as u32);
         }
-        require_matching_reservation(
+        require_matching_setup_action_randomness_reservation(
             randomness,
             verified_reservation_binding,
-            StateCapabilityKind::SetupActionRandomnessRoot,
+            roster_hash,
         )?;
-        let input = PersistentProofCoinInput::new(application_slot, application_statement_hash)
-            .map_err(schema_status)?;
-        let attempt_identifier = randomness
-            .persistent_proof_preparation_identifier(&input)
-            .map_err(schema_status)?;
-        Ok(PreparedActionProofAttemptSource {
-            attempt_identifier,
+
+        let application_slot_hash = application_slot.hash().map_err(schema_status)?;
+        let lineage_digest = hash_framed_parts_512(
+            PUBLIC_ONLY_PROOF_ATTEMPT_LINEAGE_DOMAIN,
+            &[
+                randomness.setup_attempt_identifier().as_bytes(),
+                application_slot_hash.as_bytes(),
+                application_statement_hash.as_bytes(),
+            ],
+        );
+        let mut attempt_lineage_identifier = [0_u8; ATTEMPT_IDENTIFIER_BYTE_LENGTH];
+        attempt_lineage_identifier
+            .copy_from_slice(&lineage_digest[..ATTEMPT_IDENTIFIER_BYTE_LENGTH]);
+
+        Ok(PreparedPublicOnlyProofAttemptSource {
+            attempt_lineage_identifier,
             application_slot,
-            application_slot_hash: application_slot.hash().map_err(schema_status)?,
-            application_statement_schema_identifier:
-                ProofFamilyIdentifiers::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+            application_slot_hash,
+            application_statement_schema_identifier: statement_schema_identifier,
             application_statement_hash,
             expected_proof_byte_length,
             expected_query_count,
@@ -454,11 +494,7 @@ pub(crate) fn resolve_prepared_ordinary_proof_attempt_source(
 }
 
 struct ValidatedSetupRoster {
-    mailbox_encapsulation_keys: Vec<(
-        ParticipantIdentity,
-        [u8; ML_KEM_768_ENCAPSULATION_KEY_BYTE_LENGTH],
-    )>,
-    participant_identities: Vec<ParticipantIdentity>,
+    roster: Roster,
     roster_hash: Hash512,
 }
 
@@ -527,10 +563,15 @@ impl ActionRandomnessRegistry {
             return Err(RefusalReason::WrongHashOrRoot.canonical_code() as u32);
         }
         roster
-            .mailbox_encapsulation_keys
+            .roster
+            .entries
             .iter()
-            .find_map(|(participant_identity, key)| {
-                (*participant_identity == recipient_participant_identity).then_some(*key)
+            .find_map(|entry| {
+                entry
+                    .participant_identity()
+                    .ok()
+                    .filter(|identity| *identity == recipient_participant_identity)
+                    .map(|_| entry.mailbox_encapsulation_key)
             })
             .ok_or(RefusalReason::WrongContext.canonical_code() as u32)
     }
@@ -549,11 +590,14 @@ impl ActionRandomnessRegistry {
         if roster.roster_hash != roster_hash {
             return Err(RefusalReason::WrongHashOrRoot.canonical_code() as u32);
         }
-        if roster
-            .participant_identities
+        let source_identity = roster
+            .roster
+            .entries
             .get(usize::from(source_roster_position))
-            != Some(&expected_source_identity)
-        {
+            .ok_or(RefusalReason::WrongContext.canonical_code() as u32)?
+            .participant_identity()
+            .map_err(schema_status)?;
+        if source_identity != expected_source_identity {
             return Err(RefusalReason::WrongContext.canonical_code() as u32);
         }
         Ok(())
@@ -614,6 +658,48 @@ pub(crate) fn retain_action_private_randomness_for_exact_family(
     })
 }
 
+/// Borrows the one action-randomness source whose selected roster and genuine
+/// setup reservation were already authenticated by the closed worker. The
+/// operation receives no serializable secret material and cannot outlive the
+/// action-randomness registry borrow.
+pub(crate) fn with_authenticated_setup_object_source<Value>(
+    action_randomness_handle: u32,
+    verified_reservation_binding: VerifiedStateReservationRuntimeBinding,
+    operation: impl FnOnce(&ActionPrivateRandomness, &Roster, Hash512, u16) -> RuntimeResult<Value>,
+) -> RuntimeResult<Value> {
+    ACTION_RANDOMNESS_REGISTRY.with(|registry| {
+        let registry = registry.borrow();
+        let randomness = registry.get(action_randomness_handle)?;
+        let retained_roster = registry
+            .setup_rosters
+            .get(&action_randomness_handle)
+            .ok_or(RefusalReason::MissingPrerequisite.canonical_code() as u32)?;
+        require_matching_setup_action_randomness_reservation(
+            randomness,
+            verified_reservation_binding,
+            retained_roster.roster_hash,
+        )?;
+        let participant_identity = randomness.derivation_input().participant_identity();
+        let source_roster_position = retained_roster
+            .roster
+            .entries
+            .iter()
+            .position(|entry| {
+                entry
+                    .participant_identity()
+                    .is_ok_and(|identity| identity == participant_identity)
+            })
+            .and_then(|position| u16::try_from(position).ok())
+            .ok_or(RefusalReason::WrongContext.canonical_code() as u32)?;
+        operation(
+            randomness,
+            &retained_roster.roster,
+            retained_roster.roster_hash,
+            source_roster_position,
+        )
+    })
+}
+
 pub(crate) fn run_action_randomness_command(command: u32, input: &[u8]) -> RuntimeResult<Vec<u8>> {
     match command {
         COMMAND_OPEN => open(input),
@@ -630,6 +716,12 @@ pub(crate) fn run_action_randomness_command(command: u32, input: &[u8]) -> Runti
             setup_action_randomness_authorization(input)
         }
         COMMAND_VALIDATE_SETUP_MAILBOX_SOURCE_KEYS => validate_setup_mailbox_source_keys(input),
+        COMMAND_PREPARE_SETUP_INTENT_CARRIER
+        | COMMAND_PREPARE_DEALER_PUBLIC_RECORD_CARRIER
+        | COMMAND_PREPARE_PUBLIC_RANDOMNESS_COMMITMENT_CARRIER
+        | COMMAND_PREPARE_PUBLIC_RANDOMNESS_REVEAL_CARRIER
+        | COMMAND_FINISH_SETUP_TRANSCRIPT_CARRIER
+        | COMMAND_CANCEL_SETUP_TRANSCRIPT_CARRIER => run_setup_transcript_command(command, input),
         _ => Err(malformed_status()),
     }
 }
@@ -762,13 +854,8 @@ fn validate_setup_mailbox_source_keys(input: &[u8]) -> RuntimeResult<Vec<u8>> {
         )?;
         let expected_participant_identity = randomness.derivation_input().participant_identity();
         let mut source_keys_match = false;
-        let mut mailbox_encapsulation_keys = Vec::with_capacity(roster.entries.len());
-        let mut participant_identities = Vec::with_capacity(roster.entries.len());
         for entry in &roster.entries {
             let participant_identity = entry.participant_identity().map_err(schema_status)?;
-            participant_identities.push(participant_identity);
-            mailbox_encapsulation_keys
-                .push((participant_identity, entry.mailbox_encapsulation_key));
             if participant_identity == expected_participant_identity {
                 source_keys_match = entry.signing_verification_key
                     == supplied_signing_verification_key
@@ -781,8 +868,7 @@ fn validate_setup_mailbox_source_keys(input: &[u8]) -> RuntimeResult<Vec<u8>> {
         registry.retain_setup_roster(
             handle,
             ValidatedSetupRoster {
-                mailbox_encapsulation_keys,
-                participant_identities,
+                roster,
                 roster_hash,
             },
         )?;

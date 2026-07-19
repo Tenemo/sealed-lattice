@@ -7,7 +7,7 @@
 //! its private-witness or verified-input capability. There is no alternate
 //! fixture suite or raw-plan export.
 
-use core::slice;
+use core::{mem::size_of, slice};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use zeroize::Zeroizing;
@@ -21,21 +21,22 @@ use crate::foundation::{
 };
 
 use super::runtime::{
-    common_proof_registry_entry_count, require_common_proof_worker_process_admission_capacity,
+    CommonProofVerificationReadbackAccounting, common_proof_registry_entry_count,
+    require_common_proof_worker_process_admission_capacity,
     require_common_proof_worker_process_ownership_limits,
 };
 use super::{
     AuthenticatedCommonProofGenerationCheckpoint, BorrowedVerifiedCommonProofCapability,
     COMMON_PROOF_CHECKPOINT_STATE_BYTE_LENGTH, CommonProofAuthenticatedSourceReadRequest,
-    CommonProofGenerationOperationHandle, CommonProofGenerationPreparationError,
-    CommonProofGenerationWorkerError, CommonProofGenerationWorkerPoll, CommonProofRuntimeError,
-    CommonProofRuntimeRegistry, CommonProofUpstreamInputRegistry,
-    CommonProofVerificationOperationHandle, CommonProofVerificationWorkerError,
-    CommonProofVerificationWorkerPoll, ConsumedVerifiedCommonProofCapability,
-    DURABLE_AUTHORIZATION_FRAME_BYTE_LENGTH, GeneratedCommonProofCapabilityHandle,
-    PendingCommonProofAuthorizationHandle, PreparedCommonProofGeneration,
-    PreparedCommonProofVerification, VerifiedCommonProofCapabilityHandle,
-    durable_authorization_frame_digest,
+    CommonProofGenerationExternalMemoryAccounting, CommonProofGenerationOperationHandle,
+    CommonProofGenerationPreparationError, CommonProofGenerationWorkerError,
+    CommonProofGenerationWorkerPoll, CommonProofRuntimeError, CommonProofRuntimeRegistry,
+    CommonProofUpstreamInputRegistry, CommonProofVerificationOperationHandle,
+    CommonProofVerificationWorkerError, CommonProofVerificationWorkerPoll,
+    ConsumedVerifiedCommonProofCapability, DURABLE_AUTHORIZATION_FRAME_BYTE_LENGTH,
+    GeneratedCommonProofCapabilityHandle, PendingCommonProofAuthorizationHandle,
+    PreparedCommonProofGeneration, PreparedCommonProofVerification,
+    VerifiedCommonProofCapabilityHandle, durable_authorization_frame_digest,
 };
 
 const NO_SECOND_POLL_VALUE: u32 = u32::MAX;
@@ -53,6 +54,67 @@ const GENERATION_POLL_CANCELLED: u32 = 6;
 const GENERATION_POLL_RESUME_COMPLETE: u32 = 7;
 const GENERATION_POLL_AUTHENTICATED_SOURCE_READ_READY: u32 = 8;
 const AUTHENTICATED_SOURCE_READ_REQUEST_BYTE_LENGTH: usize = 160;
+const GENERATION_EXTERNAL_MEMORY_ACCOUNTING_WORD_COUNT: usize = 19;
+const GENERATION_EXTERNAL_MEMORY_ACCOUNTING_BYTE_LENGTH: usize =
+    GENERATION_EXTERNAL_MEMORY_ACCOUNTING_WORD_COUNT * size_of::<u64>();
+const VERIFICATION_READBACK_ACCOUNTING_WORD_COUNT: usize = 4;
+const VERIFICATION_READBACK_ACCOUNTING_BYTE_LENGTH: usize =
+    VERIFICATION_READBACK_ACCOUNTING_WORD_COUNT * size_of::<u64>();
+
+fn write_diagnostic_u64(output: &mut [u8], word_index: usize, value: u64) {
+    let offset = word_index * size_of::<u64>();
+    output[offset..offset + size_of::<u64>()].copy_from_slice(&value.to_le_bytes());
+}
+
+fn encode_generation_external_memory_accounting(
+    accounting: CommonProofGenerationExternalMemoryAccounting,
+) -> [u8; GENERATION_EXTERNAL_MEMORY_ACCOUNTING_BYTE_LENGTH] {
+    let requirement = accounting.compiled_requirement();
+    let actual = accounting.actual_usage();
+    let prefix = accounting.deterministic_prefix_replay_usage();
+    let mut output = [0_u8; GENERATION_EXTERNAL_MEMORY_ACCOUNTING_BYTE_LENGTH];
+    let values = [
+        u64::from(requirement.step_count()),
+        u64::from(requirement.maximum_chunk_byte_length()),
+        requirement.maximum_transaction_payload_byte_length(),
+        u64::from(requirement.object_lifecycle_count()),
+        requirement.peak_stored_byte_length(),
+        requirement.total_written_byte_length(),
+        requirement.total_read_byte_length(),
+        requirement.transaction_count(),
+        actual.total_written_byte_length(),
+        actual.total_read_byte_length(),
+        actual.peak_stored_byte_length(),
+        actual.transaction_count(),
+        u64::from(actual.deleted_object_count()),
+        if prefix.is_some() { 1 } else { 0 },
+        prefix.map_or(0, |usage| usage.total_written_byte_length()),
+        prefix.map_or(0, |usage| usage.total_read_byte_length()),
+        prefix.map_or(0, |usage| usage.peak_stored_byte_length()),
+        prefix.map_or(0, |usage| usage.transaction_count()),
+        prefix.map_or(0, |usage| u64::from(usage.deleted_object_count())),
+    ];
+    for (word_index, value) in values.into_iter().enumerate() {
+        write_diagnostic_u64(&mut output, word_index, value);
+    }
+    output
+}
+
+fn encode_verification_readback_accounting(
+    accounting: CommonProofVerificationReadbackAccounting,
+) -> [u8; VERIFICATION_READBACK_ACCOUNTING_BYTE_LENGTH] {
+    let mut output = [0_u8; VERIFICATION_READBACK_ACCOUNTING_BYTE_LENGTH];
+    let values = [
+        accounting.logical_required_range_count(),
+        accounting.logical_required_byte_length(),
+        accounting.supplied_full_chunk_count(),
+        accounting.supplied_full_chunk_byte_length(),
+    ];
+    for (word_index, value) in values.into_iter().enumerate() {
+        write_diagnostic_u64(&mut output, word_index, value);
+    }
+    output
+}
 
 fn encode_authenticated_source_read_request(
     request: CommonProofAuthenticatedSourceReadRequest,
@@ -78,6 +140,18 @@ pub const extern "C" fn sealed_lattice_common_proof_generation_authenticated_sou
 pub const extern "C" fn sealed_lattice_common_proof_generation_checkpoint_state_byte_length() -> u32
 {
     COMMON_PROOF_CHECKPOINT_STATE_BYTE_LENGTH as u32
+}
+
+#[unsafe(no_mangle)]
+pub const extern "C" fn sealed_lattice_common_proof_generation_external_memory_accounting_byte_length()
+-> u32 {
+    GENERATION_EXTERNAL_MEMORY_ACCOUNTING_BYTE_LENGTH as u32
+}
+
+#[unsafe(no_mangle)]
+pub const extern "C" fn sealed_lattice_common_proof_verification_readback_accounting_byte_length()
+-> u32 {
+    VERIFICATION_READBACK_ACCOUNTING_BYTE_LENGTH as u32
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -768,6 +842,76 @@ pub(crate) fn preflight_generated_common_proof_pending_statement(
                 expected_schedule_position,
                 canonical_application_statement_bytes,
             )
+    })
+}
+
+pub(crate) fn preflight_generated_common_proof_pending_package(
+    generated_proof_handle: u32,
+    expected_suite_identifier: [u8; Hash512::BYTE_LENGTH],
+    expected_ceremony_context_hash: [u8; Hash512::BYTE_LENGTH],
+    expected_action_context_hash: [u8; Hash512::BYTE_LENGTH],
+    expected_application_statement_schema_identifier: u16,
+    expected_roster_position: Option<u16>,
+    expected_schedule_position: Option<u32>,
+    canonical_application_statement_bytes: &[u8],
+) -> Result<StreamDescriptor, CommonProofRuntimeError> {
+    COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        registry
+            .borrow()
+            .runtime
+            .preflight_generated_proof_pending_package(
+                &GeneratedCommonProofCapabilityHandle::from_identifier(generated_proof_handle),
+                expected_suite_identifier,
+                expected_ceremony_context_hash,
+                expected_action_context_hash,
+                expected_application_statement_schema_identifier,
+                expected_roster_position,
+                expected_schedule_position,
+                canonical_application_statement_bytes,
+            )
+    })
+}
+
+/// Borrows one positively verified proof without consuming its exact-family
+/// terminal authority and derives the descriptor that may enter a pending
+/// canonical package. The checked slot and canonical statement come from the
+/// package builder's fixed inventory; no host-supplied descriptor is read.
+pub(crate) fn preflight_verified_common_proof_pending_package(
+    verified_proof_handle: u32,
+    expected_suite_identifier: [u8; Hash512::BYTE_LENGTH],
+    expected_ceremony_context_hash: [u8; Hash512::BYTE_LENGTH],
+    expected_action_context_hash: [u8; Hash512::BYTE_LENGTH],
+    expected_application_statement_schema_identifier: u16,
+    expected_roster_position: Option<u16>,
+    expected_schedule_position: Option<u32>,
+    canonical_application_statement_bytes: &[u8],
+) -> Result<StreamDescriptor, CommonProofRuntimeError> {
+    COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        registry.borrow().runtime.with_verified_proof_for_protocol(
+            &VerifiedCommonProofCapabilityHandle::from_identifier(verified_proof_handle),
+            |verified_proof| {
+                let statement_source = verified_proof.statement_source()?;
+                let source_authority = statement_source.application_source_authority();
+                if verified_proof.application_statement_schema_identifier()
+                    != expected_application_statement_schema_identifier
+                    || verified_proof.suite_identifier() != expected_suite_identifier
+                    || verified_proof.ceremony_context_hash() != expected_ceremony_context_hash
+                    || verified_proof.action_context_hash() != expected_action_context_hash
+                    || verified_proof.schedule_position() != expected_schedule_position
+                    || source_authority.application_statement_schema_identifier()
+                        != expected_application_statement_schema_identifier
+                    || source_authority.producer_roster_position() != expected_roster_position
+                    || source_authority.schedule_position() != expected_schedule_position
+                    || statement_source.canonical_application_statement_bytes()
+                        != canonical_application_statement_bytes
+                    || source_authority.proof_stream_descriptor()
+                        != verified_proof.proof_stream_descriptor()
+                {
+                    return Err(CommonProofRuntimeError::WrongVerificationBinding);
+                }
+                Ok(verified_proof.proof_stream_descriptor().clone())
+            },
+        )?
     })
 }
 
@@ -1867,6 +2011,37 @@ pub extern "C" fn sealed_lattice_common_proof_generation_retire_failed(
     })
 }
 
+/// Copies process-local production scratch accounting after terminal output
+/// authentication and before the generation operation is consumed. The
+/// diagnostic record is not a canonical protocol object and is never bound
+/// into the generated proof or capability.
+///
+/// # Safety
+///
+/// The output pointer must name exactly the diagnostic record's writable
+/// range in WASM memory.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_common_proof_generation_copy_external_memory_accounting(
+    operation_handle: u32,
+    output_pointer: *mut u8,
+    output_byte_length: usize,
+) -> u32 {
+    COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        let accounting = match registry
+            .borrow()
+            .runtime
+            .generation_external_memory_accounting(
+                CommonProofGenerationOperationHandle::from_identifier(operation_handle),
+            ) {
+            Ok(accounting) => accounting,
+            Err(error) => return runtime_error_status(error),
+        };
+        let encoded = encode_generation_external_memory_accounting(accounting);
+        unsafe { copy_exact_output_bytes(output_pointer, output_byte_length, &encoded) }
+            .map_or_else(core::convert::identity, |()| 0)
+    })
+}
+
 /// # Safety
 ///
 /// A non-null status pointer must name one writable `u32` in WASM memory.
@@ -2064,6 +2239,33 @@ pub unsafe extern "C" fn sealed_lattice_common_proof_verification_supply_readbac
                 chunk_bytes,
             )
             .map_or_else(verification_worker_error_status, |()| 0)
+    })
+}
+
+/// Copies process-local verifier traversal traffic before the verification
+/// worker is consumed. The diagnostic record is not a proof field, verifier
+/// result, capability, or durable authorization input.
+///
+/// # Safety
+///
+/// The output pointer must name exactly the diagnostic record's writable
+/// range in WASM memory.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_common_proof_verification_copy_readback_accounting(
+    operation_handle: u32,
+    output_pointer: *mut u8,
+    output_byte_length: usize,
+) -> u32 {
+    COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
+        let accounting = match registry.borrow().runtime.verification_readback_accounting(
+            CommonProofVerificationOperationHandle::from_identifier(operation_handle),
+        ) {
+            Ok(accounting) => accounting,
+            Err(error) => return runtime_error_status(error),
+        };
+        let encoded = encode_verification_readback_accounting(accounting);
+        unsafe { copy_exact_output_bytes(output_pointer, output_byte_length, &encoded) }
+            .map_or_else(core::convert::identity, |()| 0)
     })
 }
 

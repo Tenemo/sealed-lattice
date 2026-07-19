@@ -1,10 +1,10 @@
 import path from 'node:path';
 
-import { runWithLocalRunLog } from './local-run-log.js';
 import {
-    buildFocusedCommand,
+    buildGuardedRustKernelCommand,
     runGuardedRustKernelCommands,
-} from './run-rust-kernel-accepted-setup-tests.js';
+} from './guarded-rust-kernel-runner.js';
+import { runWithLocalRunLog } from './local-run-log.js';
 import {
     focusedRustLaneScripts,
     fullProfileEvidenceRustTests,
@@ -98,7 +98,7 @@ export const runRustKernelManualTests = async (): Promise<void> => {
                 `${parsed.lane}-${parsed.focusedFilter === undefined ? 'accelerated' : 'focused'}`,
             );
             const commands = testFilters.map((testFilter) => ({
-                builtCommand: buildFocusedCommand(testFilter, 'accelerated', {
+                builtCommand: buildGuardedRustKernelCommand(testFilter, {
                     logFileSlug: `cargo-test-${parsed.lane}`,
                     progressLabel: parsed.lane,
                     runName: label,
@@ -120,7 +120,7 @@ export const runRustKernelManualTests = async (): Promise<void> => {
                 commands,
                 laneLabel: `${label}${
                     parsed.focusedFilter === undefined ? '' : ' focused'
-                } (accelerated)`,
+                }`,
                 runLog,
             });
         },

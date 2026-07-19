@@ -273,6 +273,17 @@ impl ProofTreeValue {
             }
         }
     }
+
+    fn append_canonical_bytes(self, destination: &mut Vec<u8>) {
+        match self {
+            Self::Base(value) => destination.extend_from_slice(&value.canonical().to_le_bytes()),
+            Self::Extension(value) => {
+                for coordinate in value.canonical_coordinates() {
+                    destination.extend_from_slice(&coordinate.to_le_bytes());
+                }
+            }
+        }
+    }
 }
 
 fn append_canonical_item(
@@ -324,6 +335,81 @@ fn append_phase_pair_value_list_header(
     Ok(())
 }
 
+fn phase_pair_leaf_canonical_byte_length(
+    secret_salt_is_present: bool,
+    value_type: CanonicalItemType,
+    value_count: usize,
+) -> Result<usize, ProofMerkleError> {
+    let value_byte_length = match value_type {
+        CanonicalItemType::FieldElement => 8_usize,
+        CanonicalItemType::ChallengeExtensionElement => PROOF_CHALLENGE_EXTENSION_DEGREE
+            .checked_mul(8)
+            .ok_or(ProofMerkleError::CountOverflow)?,
+        _ => return Err(ProofMerkleError::InvalidLeaf),
+    };
+    let item_count = if secret_salt_is_present {
+        6_usize
+    } else {
+        5_usize
+    };
+    let fixed_item_payload_byte_length = 64_usize
+        .checked_add(8)
+        .and_then(|length| length.checked_add(2))
+        .and_then(|length| {
+            length.checked_add(if secret_salt_is_present {
+                COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH
+            } else {
+                0
+            })
+        })
+        .ok_or(ProofMerkleError::CountOverflow)?;
+    let row_payload_byte_length = value_count
+        .checked_mul(value_byte_length)
+        .and_then(|length| length.checked_add(6))
+        .ok_or(ProofMerkleError::CountOverflow)?;
+    8_usize
+        .checked_add(
+            item_count
+                .checked_mul(6)
+                .ok_or(ProofMerkleError::CountOverflow)?,
+        )
+        .and_then(|length| length.checked_add(fixed_item_payload_byte_length))
+        .and_then(|length| length.checked_add(row_payload_byte_length.checked_mul(2)?))
+        .ok_or(ProofMerkleError::CountOverflow)
+}
+
+fn phase_pair_leaf_canonical_prefix(
+    proof_tree_context_hash: [u8; 64],
+    leaf_index: u64,
+    leaf_visibility: ProofLeafVisibility,
+    secret_salt: Option<[u8; COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH]>,
+    value_type: CanonicalItemType,
+    value_count: usize,
+) -> Result<Vec<u8>, ProofMerkleError> {
+    let item_count = if secret_salt.is_some() { 6_u32 } else { 5_u32 };
+    let mut prefix = Vec::new();
+    prefix.extend_from_slice(&PROOF_ORACLE_PHASE_PAIR_LEAF_SCHEMA_IDENTIFIER.to_le_bytes());
+    prefix.extend_from_slice(&SCHEMA_VERSION.to_le_bytes());
+    prefix.extend_from_slice(&item_count.to_le_bytes());
+    append_canonical_item(
+        &mut prefix,
+        &CanonicalItem::hash512(proof_tree_context_hash),
+    )?;
+    append_canonical_item(&mut prefix, &CanonicalItem::unsigned64(leaf_index))?;
+    append_canonical_item(
+        &mut prefix,
+        &CanonicalItem::unsigned16(leaf_visibility as u16),
+    )?;
+    if let Some(secret_salt) = secret_salt {
+        append_canonical_item(
+            &mut prefix,
+            &CanonicalItem::fixed_bytes(secret_salt).map_err(canonical_encoding_error)?,
+        )?;
+    }
+    append_phase_pair_value_list_header(&mut prefix, value_type, value_count)?;
+    Ok(prefix)
+}
+
 /// Incremental canonical digest for one phase-pair leaf. The row widths and
 /// item lengths are committed before values are accepted, so a column-major
 /// producer can retain only this hash state while preserving the exact leaf
@@ -338,7 +424,9 @@ pub(crate) struct ProofOraclePhasePairLeafDigestBuilder {
 }
 
 impl ProofOraclePhasePairLeafDigestBuilder {
-    fn new(leaf: &ProofOraclePhasePairLeaf) -> Result<Self, ProofMerkleError> {
+    pub(in crate::bgv::proof_suite) fn new(
+        leaf: &ProofOraclePhasePairLeaf,
+    ) -> Result<Self, ProofMerkleError> {
         let first_value = leaf
             .first_point_values
             .first()
@@ -356,33 +444,71 @@ impl ProofOraclePhasePairLeafDigestBuilder {
             return Err(ProofMerkleError::InvalidLeaf);
         }
 
-        let item_count = if leaf.secret_salt.is_some() {
-            6_u32
-        } else {
-            5_u32
-        };
-        let mut prefix = Vec::new();
-        prefix.extend_from_slice(&PROOF_ORACLE_PHASE_PAIR_LEAF_SCHEMA_IDENTIFIER.to_le_bytes());
-        prefix.extend_from_slice(&SCHEMA_VERSION.to_le_bytes());
-        prefix.extend_from_slice(&item_count.to_le_bytes());
-        append_canonical_item(
-            &mut prefix,
-            &CanonicalItem::hash512(leaf.proof_tree_context_hash),
-        )?;
-        append_canonical_item(&mut prefix, &CanonicalItem::unsigned64(leaf.leaf_index))?;
-        append_canonical_item(
-            &mut prefix,
-            &CanonicalItem::unsigned16(leaf.leaf_visibility as u16),
-        )?;
-        if let Some(secret_salt) = leaf.secret_salt {
-            append_canonical_item(
-                &mut prefix,
-                &CanonicalItem::fixed_bytes(secret_salt).map_err(canonical_encoding_error)?,
-            )?;
-        }
-        append_phase_pair_value_list_header(&mut prefix, value_type, expected_value_count)?;
+        Self::new_from_parts(
+            leaf.proof_tree_context_hash,
+            leaf.leaf_index,
+            leaf.leaf_visibility,
+            leaf.secret_salt,
+            value_type,
+            expected_value_count,
+        )
+    }
 
-        let canonical_leaf_byte_length = leaf.canonical_leaf_byte_length(value_type)?;
+    pub(in crate::bgv::proof_suite) fn new_from_context(
+        context: &ProofMerkleTreeContext,
+        leaf_index: u64,
+        secret_salt: Option<[u8; COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH]>,
+        value_example: ProofTreeValue,
+        expected_value_count: usize,
+    ) -> Result<Self, ProofMerkleError> {
+        let expected_context_value_count =
+            usize::try_from(context.row_width).map_err(|_| ProofMerkleError::CountOverflow)?;
+        let value_type = value_example.item_type();
+        if leaf_index >= context.domain_size / 2
+            || expected_value_count == 0
+            || expected_value_count != expected_context_value_count
+            || secret_salt.is_some()
+                != (context.leaf_visibility == ProofLeafVisibility::SecretBearing)
+            || (matches!(
+                context.tree_role,
+                ProofTreeRole::QuotientComponent
+                    | ProofTreeRole::OpeningBatchMask
+                    | ProofTreeRole::NonterminalFriLayer
+            ) && value_type != CanonicalItemType::ChallengeExtensionElement)
+        {
+            return Err(ProofMerkleError::InvalidLeaf);
+        }
+        Self::new_from_parts(
+            context.context_hash()?,
+            leaf_index,
+            context.leaf_visibility,
+            secret_salt,
+            value_type,
+            expected_value_count,
+        )
+    }
+
+    fn new_from_parts(
+        proof_tree_context_hash: [u8; 64],
+        leaf_index: u64,
+        leaf_visibility: ProofLeafVisibility,
+        secret_salt: Option<[u8; COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH]>,
+        value_type: CanonicalItemType,
+        expected_value_count: usize,
+    ) -> Result<Self, ProofMerkleError> {
+        let prefix = phase_pair_leaf_canonical_prefix(
+            proof_tree_context_hash,
+            leaf_index,
+            leaf_visibility,
+            secret_salt,
+            value_type,
+            expected_value_count,
+        )?;
+        let canonical_leaf_byte_length = phase_pair_leaf_canonical_byte_length(
+            secret_salt.is_some(),
+            value_type,
+            expected_value_count,
+        )?;
         let mut digest_builder = StreamingFoundationTupleHash512::new_variable_bytes(
             PROOF_PHASE_PAIR_LEAF_HASH_DOMAIN,
             &[],
@@ -463,6 +589,139 @@ impl ProofOraclePhasePairLeafDigestBuilder {
             .finalize()
             .map_err(canonical_encoding_error)?
             .into_bytes())
+    }
+}
+
+/// Incremental canonical byte encoder for the small set of queried leaves.
+/// It follows the same state transitions as the digest builder while owning
+/// only one exact-size final leaf buffer per retained query.
+pub(in crate::bgv::proof_suite) struct ProofOraclePhasePairLeafByteBuilder {
+    canonical_bytes: Zeroizing<Vec<u8>>,
+    canonical_leaf_byte_length: usize,
+    value_type: CanonicalItemType,
+    expected_value_count: usize,
+    absorbed_first_value_count: usize,
+    absorbed_opposite_value_count: usize,
+    opposite_header_absorbed: bool,
+}
+
+impl ProofOraclePhasePairLeafByteBuilder {
+    pub(in crate::bgv::proof_suite) fn new_from_context(
+        context: &ProofMerkleTreeContext,
+        leaf_index: u64,
+        secret_salt: Option<[u8; COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH]>,
+        value_example: ProofTreeValue,
+        expected_value_count: usize,
+    ) -> Result<Self, ProofMerkleError> {
+        let expected_context_value_count =
+            usize::try_from(context.row_width).map_err(|_| ProofMerkleError::CountOverflow)?;
+        let value_type = value_example.item_type();
+        if leaf_index >= context.domain_size / 2
+            || expected_value_count == 0
+            || expected_value_count != expected_context_value_count
+            || secret_salt.is_some()
+                != (context.leaf_visibility == ProofLeafVisibility::SecretBearing)
+            || (matches!(
+                context.tree_role,
+                ProofTreeRole::QuotientComponent
+                    | ProofTreeRole::OpeningBatchMask
+                    | ProofTreeRole::NonterminalFriLayer
+            ) && value_type != CanonicalItemType::ChallengeExtensionElement)
+        {
+            return Err(ProofMerkleError::InvalidLeaf);
+        }
+        let mut canonical_bytes = Vec::new();
+        let canonical_leaf_byte_length = phase_pair_leaf_canonical_byte_length(
+            secret_salt.is_some(),
+            value_type,
+            expected_value_count,
+        )?;
+        canonical_bytes
+            .try_reserve_exact(canonical_leaf_byte_length)
+            .map_err(|_| ProofMerkleError::CountOverflow)?;
+        canonical_bytes.extend_from_slice(&phase_pair_leaf_canonical_prefix(
+            context.context_hash()?,
+            leaf_index,
+            context.leaf_visibility,
+            secret_salt,
+            value_type,
+            expected_value_count,
+        )?);
+        Ok(Self {
+            canonical_bytes: Zeroizing::new(canonical_bytes),
+            canonical_leaf_byte_length,
+            value_type,
+            expected_value_count,
+            absorbed_first_value_count: 0,
+            absorbed_opposite_value_count: 0,
+            opposite_header_absorbed: false,
+        })
+    }
+
+    pub(in crate::bgv::proof_suite) fn absorb_first_value(
+        &mut self,
+        value: ProofTreeValue,
+    ) -> Result<(), ProofMerkleError> {
+        if self.opposite_header_absorbed
+            || self.absorbed_first_value_count >= self.expected_value_count
+            || value.item_type() != self.value_type
+        {
+            return Err(ProofMerkleError::InvalidLeaf);
+        }
+        value.append_canonical_bytes(&mut self.canonical_bytes);
+        self.absorbed_first_value_count += 1;
+        Ok(())
+    }
+
+    pub(in crate::bgv::proof_suite) fn begin_opposite_values(
+        &mut self,
+    ) -> Result<(), ProofMerkleError> {
+        if self.opposite_header_absorbed
+            || self.absorbed_first_value_count != self.expected_value_count
+        {
+            return Err(ProofMerkleError::InvalidLeaf);
+        }
+        append_phase_pair_value_list_header(
+            &mut self.canonical_bytes,
+            self.value_type,
+            self.expected_value_count,
+        )?;
+        self.opposite_header_absorbed = true;
+        Ok(())
+    }
+
+    pub(in crate::bgv::proof_suite) fn absorb_opposite_value(
+        &mut self,
+        value: ProofTreeValue,
+    ) -> Result<(), ProofMerkleError> {
+        if !self.opposite_header_absorbed
+            || self.absorbed_opposite_value_count >= self.expected_value_count
+            || value.item_type() != self.value_type
+        {
+            return Err(ProofMerkleError::InvalidLeaf);
+        }
+        value.append_canonical_bytes(&mut self.canonical_bytes);
+        self.absorbed_opposite_value_count += 1;
+        Ok(())
+    }
+
+    pub(in crate::bgv::proof_suite) fn finish(
+        self,
+    ) -> Result<Zeroizing<Vec<u8>>, ProofMerkleError> {
+        if !self.opposite_header_absorbed
+            || self.absorbed_first_value_count != self.expected_value_count
+            || self.absorbed_opposite_value_count != self.expected_value_count
+            || self.canonical_bytes.len() != self.canonical_leaf_byte_length
+        {
+            return Err(ProofMerkleError::InvalidLeaf);
+        }
+        Ok(self.canonical_bytes)
+    }
+
+    pub(in crate::bgv::proof_suite) fn resident_owned_payload_byte_length(
+        &self,
+    ) -> Result<u64, ProofMerkleError> {
+        u64::try_from(self.canonical_bytes.capacity()).map_err(|_| ProofMerkleError::CountOverflow)
     }
 }
 
@@ -598,44 +857,11 @@ impl ProofOraclePhasePairLeaf {
         &self,
         value_type: CanonicalItemType,
     ) -> Result<usize, ProofMerkleError> {
-        let value_byte_length = match value_type {
-            CanonicalItemType::FieldElement => 8_usize,
-            CanonicalItemType::ChallengeExtensionElement => PROOF_CHALLENGE_EXTENSION_DEGREE
-                .checked_mul(8)
-                .ok_or(ProofMerkleError::CountOverflow)?,
-            _ => return Err(ProofMerkleError::InvalidLeaf),
-        };
-        let item_count = if self.secret_salt.is_some() {
-            6_usize
-        } else {
-            5_usize
-        };
-        let fixed_item_payload_byte_length = 64_usize
-            .checked_add(8)
-            .and_then(|length| length.checked_add(2))
-            .and_then(|length| {
-                length.checked_add(if self.secret_salt.is_some() {
-                    COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH
-                } else {
-                    0
-                })
-            })
-            .ok_or(ProofMerkleError::CountOverflow)?;
-        let row_payload_byte_length = self
-            .first_point_values
-            .len()
-            .checked_mul(value_byte_length)
-            .and_then(|length| length.checked_add(6))
-            .ok_or(ProofMerkleError::CountOverflow)?;
-        8_usize
-            .checked_add(
-                item_count
-                    .checked_mul(6)
-                    .ok_or(ProofMerkleError::CountOverflow)?,
-            )
-            .and_then(|length| length.checked_add(fixed_item_payload_byte_length))
-            .and_then(|length| length.checked_add(row_payload_byte_length.checked_mul(2)?))
-            .ok_or(ProofMerkleError::CountOverflow)
+        phase_pair_leaf_canonical_byte_length(
+            self.secret_salt.is_some(),
+            value_type,
+            self.first_point_values.len(),
+        )
     }
 
     pub(crate) fn digest(&self) -> Result<[u8; 64], ProofMerkleError> {

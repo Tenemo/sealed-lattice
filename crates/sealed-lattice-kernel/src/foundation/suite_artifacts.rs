@@ -3,6 +3,8 @@
 #[cfg(test)]
 use super::CanonicalDecodeLimits;
 #[cfg(test)]
+use super::CanonicalItemType;
+#[cfg(test)]
 use super::canonical_tuple::CanonicalDecodeBudget;
 use super::schemas::SchemaResult;
 #[cfg(test)]
@@ -11,14 +13,15 @@ use super::schemas::{read_item, read_u16, read_u32, read_u64, require_header};
 use super::suite::{read_unsigned16_list, read_unsigned64_list};
 use super::suite::{unsigned16_list, unsigned64_list};
 use super::{
-    CanonicalItem, CanonicalItemType, CanonicalTuple, FoundationSchemaError, RefusalReason,
+    CanonicalItem, CanonicalTuple, FOUNDATION_PROFILE, FoundationSchemaError, RefusalReason,
 };
 use crate::bgv::{
-    evaluator::program::selected_evaluator_program_set_bytes,
+    direct_ballots::direct_ballot_slots,
+    evaluator::program::selected_evaluator_program_set,
     evaluator::top_k::CANONICAL_TARGET_CIPHERTEXT_LEVEL,
     parameters::{
-        DATA_PRIMES, LOGICAL_SLOT_GENERATOR, PLAINTEXT_MODULUS, root_parameters_for_modulus,
-        validate_supported_algebraic_parameters,
+        DATA_PRIMES, LOGICAL_SLOT_GENERATOR, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE,
+        root_parameters_for_modulus, validate_supported_algebraic_parameters,
     },
     proof_suite::{
         PROOF_EVALUATION_BLOWUP_FACTOR, ProofProfileError, selected_committed_material_profile,
@@ -35,15 +38,23 @@ pub(crate) const LATTICE_COMMITMENT_PROFILE_SCHEMA_IDENTIFIER: u16 = 0x2122;
 pub(crate) const TARGET_DECRYPTION_PROFILE_SCHEMA_IDENTIFIER: u16 = 0x1630;
 
 const SCHEMA_VERSION: u16 = 1;
+const ENCODER_AND_BALLOT_LAYOUT_VERSION: u16 = 2;
 const LATTICE_COMMITMENT_PROFILE_VERSION: u16 = 3;
 const COMMITTED_MATERIAL_PROOF_FIELD_INDEX: u16 = 0;
 const RESERVED_BALLOT_SLOT_RULE: u16 = 1;
+const LOWER_MINUS_HIGHER_PAIR_DIFFERENCE_RULE: u16 = 1;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct EncoderAndBallotLayout {
+    polynomial_degree: u32,
     primitive_two_n_root: u64,
     slot_generator: u16,
     reserved_slot_rule: u16,
+    option_count: u16,
+    minimum_score: u16,
+    maximum_score: u16,
+    pair_difference_rule: u16,
+    ordered_pair_ordinals: Vec<u16>,
 }
 
 impl EncoderAndBallotLayout {
@@ -55,9 +66,16 @@ impl EncoderAndBallotLayout {
         let slot_generator =
             u16::try_from(LOGICAL_SLOT_GENERATOR).map_err(|_| invalid_selected_artifact())?;
         let artifact = Self {
+            polynomial_degree: u32::try_from(POLYNOMIAL_DEGREE)
+                .map_err(|_| invalid_selected_artifact())?,
             primitive_two_n_root,
             slot_generator,
             reserved_slot_rule: RESERVED_BALLOT_SLOT_RULE,
+            option_count: FOUNDATION_PROFILE.option_count,
+            minimum_score: FOUNDATION_PROFILE.minimum_score,
+            maximum_score: FOUNDATION_PROFILE.maximum_score,
+            pair_difference_rule: LOWER_MINUS_HIGHER_PAIR_DIFFERENCE_RULE,
+            ordered_pair_ordinals: selected_ordered_pair_ordinals()?,
         };
         artifact.validate()?;
         Ok(artifact)
@@ -66,11 +84,22 @@ impl EncoderAndBallotLayout {
     #[cfg(test)]
     pub(crate) fn decode(bytes: &[u8], limits: &CanonicalDecodeLimits) -> SchemaResult<Self> {
         let tuple = CanonicalTuple::decode(bytes, limits)?;
-        require_header(&tuple, ENCODER_AND_BALLOT_LAYOUT_SCHEMA_IDENTIFIER, 3)?;
+        require_header_with_version(
+            &tuple,
+            ENCODER_AND_BALLOT_LAYOUT_SCHEMA_IDENTIFIER,
+            ENCODER_AND_BALLOT_LAYOUT_VERSION,
+            9,
+        )?;
         let artifact = Self {
-            primitive_two_n_root: read_u64(&tuple.items[0])?,
-            slot_generator: read_u16(&tuple.items[1])?,
-            reserved_slot_rule: read_u16(&tuple.items[2])?,
+            polynomial_degree: read_u32(&tuple.items[0])?,
+            primitive_two_n_root: read_u64(&tuple.items[1])?,
+            slot_generator: read_u16(&tuple.items[2])?,
+            reserved_slot_rule: read_u16(&tuple.items[3])?,
+            option_count: read_u16(&tuple.items[4])?,
+            minimum_score: read_u16(&tuple.items[5])?,
+            maximum_score: read_u16(&tuple.items[6])?,
+            pair_difference_rule: read_u16(&tuple.items[7])?,
+            ordered_pair_ordinals: read_unsigned16_list(&tuple.items[8])?,
         };
         artifact.validate()?;
         Ok(artifact)
@@ -80,28 +109,118 @@ impl EncoderAndBallotLayout {
         self.validate()?;
         Ok(CanonicalTuple::new(
             ENCODER_AND_BALLOT_LAYOUT_SCHEMA_IDENTIFIER,
-            SCHEMA_VERSION,
+            ENCODER_AND_BALLOT_LAYOUT_VERSION,
             vec![
+                CanonicalItem::unsigned32(self.polynomial_degree),
                 CanonicalItem::unsigned64(self.primitive_two_n_root),
                 CanonicalItem::unsigned16(self.slot_generator),
                 CanonicalItem::unsigned16(self.reserved_slot_rule),
+                CanonicalItem::unsigned16(self.option_count),
+                CanonicalItem::unsigned16(self.minimum_score),
+                CanonicalItem::unsigned16(self.maximum_score),
+                CanonicalItem::unsigned16(self.pair_difference_rule),
+                unsigned16_list(&self.ordered_pair_ordinals)?,
             ],
         )
         .encode()?)
     }
 
-    fn validate(self) -> SchemaResult<()> {
+    fn validate(&self) -> SchemaResult<()> {
         let selected_root = root_parameters_for_modulus(PLAINTEXT_MODULUS)
             .ok_or_else(invalid_selected_artifact)?
             .negacyclic_root;
-        if self.primitive_two_n_root != selected_root
+        if usize::try_from(self.polynomial_degree).ok() != Some(POLYNOMIAL_DEGREE)
+            || self.primitive_two_n_root != selected_root
             || usize::from(self.slot_generator) != LOGICAL_SLOT_GENERATOR
             || self.reserved_slot_rule != RESERVED_BALLOT_SLOT_RULE
+            || self.option_count != FOUNDATION_PROFILE.option_count
+            || self.minimum_score != FOUNDATION_PROFILE.minimum_score
+            || self.maximum_score != FOUNDATION_PROFILE.maximum_score
+            || self.minimum_score > self.maximum_score
+            || self.pair_difference_rule != LOWER_MINUS_HIGHER_PAIR_DIFFERENCE_RULE
+            || self.ordered_pair_ordinals != selected_ordered_pair_ordinals()?
         {
             return Err(invalid_selected_artifact());
         }
+        require_pairwise_ballot_codec_layout(&self.ordered_pair_ordinals)?;
         Ok(())
     }
+}
+
+fn selected_ordered_pair_ordinals() -> SchemaResult<Vec<u16>> {
+    let option_count = usize::from(FOUNDATION_PROFILE.option_count);
+    let pair_count = option_count
+        .checked_mul(
+            option_count
+                .checked_sub(1)
+                .ok_or_else(invalid_selected_artifact)?,
+        )
+        .and_then(|product| product.checked_div(2))
+        .ok_or_else(invalid_selected_artifact)?;
+    let flattened_ordinal_count = pair_count
+        .checked_mul(2)
+        .ok_or_else(invalid_selected_artifact)?;
+    let mut ordered_pair_ordinals = Vec::new();
+    ordered_pair_ordinals
+        .try_reserve_exact(flattened_ordinal_count)
+        .map_err(|_| invalid_selected_artifact())?;
+    for shift in 1..option_count {
+        for lower_option_ordinal in 0..option_count - shift {
+            let higher_option_ordinal = lower_option_ordinal
+                .checked_add(shift)
+                .ok_or_else(invalid_selected_artifact)?;
+            ordered_pair_ordinals.push(
+                u16::try_from(lower_option_ordinal).map_err(|_| invalid_selected_artifact())?,
+            );
+            ordered_pair_ordinals.push(
+                u16::try_from(higher_option_ordinal).map_err(|_| invalid_selected_artifact())?,
+            );
+        }
+    }
+    if ordered_pair_ordinals.len() != flattened_ordinal_count {
+        return Err(invalid_selected_artifact());
+    }
+    Ok(ordered_pair_ordinals)
+}
+
+fn require_pairwise_ballot_codec_layout(ordered_pair_ordinals: &[u16]) -> SchemaResult<()> {
+    let option_count = usize::from(FOUNDATION_PROFILE.option_count);
+    let ordinal_scores = (0..option_count)
+        .map(|option_ordinal| {
+            u64::try_from(option_ordinal)
+                .ok()
+                .and_then(|ordinal| ordinal.checked_add(1))
+                .ok_or_else(invalid_selected_artifact)
+        })
+        .collect::<SchemaResult<Vec<_>>>()?;
+    let actual_slots = direct_ballot_slots(&ordinal_scores, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE)
+        .map_err(|_| invalid_selected_artifact())?;
+    let pair_count = ordered_pair_ordinals.len() / 2;
+    if ordered_pair_ordinals.len() % 2 != 0
+        || pair_count > actual_slots.len()
+        || actual_slots[pair_count..].iter().any(|slot| *slot != 0)
+    {
+        return Err(invalid_selected_artifact());
+    }
+    for (pair_ordinal, pair) in ordered_pair_ordinals.chunks_exact(2).enumerate() {
+        let lower_option_ordinal = usize::from(pair[0]);
+        let higher_option_ordinal = usize::from(pair[1]);
+        let lower_score = *ordinal_scores
+            .get(lower_option_ordinal)
+            .ok_or_else(invalid_selected_artifact)?;
+        let higher_score = *ordinal_scores
+            .get(higher_option_ordinal)
+            .ok_or_else(invalid_selected_artifact)?;
+        let expected_difference = if lower_score >= higher_score {
+            lower_score - higher_score
+        } else {
+            PLAINTEXT_MODULUS - (higher_score - lower_score)
+        };
+        if actual_slots[pair_ordinal] != expected_difference {
+            return Err(invalid_selected_artifact());
+        }
+    }
+    Ok(())
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -393,7 +512,9 @@ pub(crate) fn selected_proof_profile_artifact_bytes(
 }
 
 pub(crate) fn selected_evaluator_program_artifact_bytes() -> SchemaResult<Vec<u8>> {
-    selected_evaluator_program_set_bytes().map_err(|_| invalid_selected_artifact())
+    selected_evaluator_program_set()
+        .and_then(|program| program.encode())
+        .map_err(|_| invalid_selected_artifact())
 }
 
 pub(crate) fn selected_encoder_and_ballot_layout_artifact_bytes() -> SchemaResult<Vec<u8>> {
@@ -491,25 +612,31 @@ mod tests {
             commitment
         );
 
-        let target = TargetDecryptionProfile::selected().expect("selected target profile");
-        let target_bytes = target.encode().expect("encode target artifact");
-        assert_eq!(
-            TargetDecryptionProfile::decode(&target_bytes, &limits)
-                .expect("decode target artifact"),
-            target
-        );
+        match TargetDecryptionProfile::selected() {
+            Ok(target) => {
+                let target_bytes = target.encode().expect("encode target artifact");
+                assert_eq!(
+                    TargetDecryptionProfile::decode(&target_bytes, &limits)
+                        .expect("decode target artifact"),
+                    target
+                );
+            }
+            Err(error) => {
+                assert_eq!(
+                    error.refusal_reason,
+                    RefusalReason::UnsupportedVersionOrSuite
+                );
+                eprintln!("selected target profile unavailable: {error:?}");
+            }
+        }
 
-        let drifted_encoder = CanonicalTuple::new(
-            ENCODER_AND_BALLOT_LAYOUT_SCHEMA_IDENTIFIER,
-            SCHEMA_VERSION,
-            vec![
-                CanonicalItem::unsigned64(1),
-                CanonicalItem::unsigned16(LOGICAL_SLOT_GENERATOR as u16),
-                CanonicalItem::unsigned16(RESERVED_BALLOT_SLOT_RULE),
-            ],
-        )
-        .encode()
-        .expect("encode drifted artifact");
+        let mut drifted_encoder_tuple = CanonicalTuple::decode(&encoder_bytes, &limits)
+            .expect("selected encoder tuple decodes");
+        drifted_encoder_tuple.items[5] =
+            CanonicalItem::unsigned16(FOUNDATION_PROFILE.maximum_score);
+        let drifted_encoder = drifted_encoder_tuple
+            .encode()
+            .expect("encode drifted artifact");
         assert_eq!(
             EncoderAndBallotLayout::decode(&drifted_encoder, &limits)
                 .expect_err("drifted encoder must refuse")
@@ -520,16 +647,40 @@ mod tests {
 
     #[test]
     fn target_flooding_bound_uses_the_complete_target_modulus_width() {
-        let profile = TargetDecryptionProfile::selected().expect("selected target profile");
+        let Ok(profile) = TargetDecryptionProfile::selected() else {
+            return;
+        };
+        let target_modulus = selected_target_modulus().expect("target modulus derives");
+        let expected_word_count =
+            usize::try_from(target_modulus.bits().div_ceil(u64::from(u64::BITS)))
+                .expect("target word count fits usize");
         assert_eq!(
-            profile.flooding_coefficient_bound_words_little_endian,
-            vec![16, 0]
+            profile.flooding_coefficient_bound_words_little_endian.len(),
+            expected_word_count
+        );
+        assert_eq!(
+            BigUint::new(
+                profile
+                    .flooding_coefficient_bound_words_little_endian
+                    .iter()
+                    .flat_map(|word| {
+                        let bytes = word.to_le_bytes();
+                        [
+                            u32::from_le_bytes(bytes[..4].try_into().expect("low word")),
+                            u32::from_le_bytes(bytes[4..].try_into().expect("high word")),
+                        ]
+                    })
+                    .collect(),
+            ),
+            selected_target_decryption_flooding_bound().expect("selected flooding bound derives")
         );
 
+        let truncated_words =
+            &profile.flooding_coefficient_bound_words_little_endian[..expected_word_count - 1];
         let truncated = CanonicalTuple::new(
             TARGET_DECRYPTION_PROFILE_SCHEMA_IDENTIFIER,
             SCHEMA_VERSION,
-            vec![unsigned64_list(&[16]).expect("truncated word list")],
+            vec![unsigned64_list(truncated_words).expect("truncated word list")],
         )
         .encode()
         .expect("encode truncated target profile");

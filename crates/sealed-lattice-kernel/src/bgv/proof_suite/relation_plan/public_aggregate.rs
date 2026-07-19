@@ -80,14 +80,13 @@ impl PublicAggregateRelationGeometry {
 
     fn validate(&self, context: &RelationPlanCheckContext) -> Result<(), RelationPlanError> {
         RelationPlanChecker::new(context).check_context()?;
-        self.trace_domain_size()?;
+        let trace_domain_size = self.trace_domain_size()?;
         if self.ring_degree < 2
             || !self.ring_degree.is_power_of_two()
             || self.evaluation_domain_size == 0
             || !self.evaluation_domain_size.is_power_of_two()
             || self.opening_degree_bound_exclusive <= 1
-            || self.public_polynomial_column_degree_bound_exclusive == 0
-            || self.public_polynomial_column_degree_bound_exclusive > self.ring_degree
+            || self.public_polynomial_column_degree_bound_exclusive != trace_domain_size
             || self.participant_count < 2
         {
             return Err(RelationPlanError::InvalidDomain);
@@ -820,6 +819,67 @@ mod tests {
             plan.check(&check_context()),
             Err(RelationPlanError::InvalidConstraint)
         );
+    }
+
+    #[test]
+    fn honest_nonconstant_carry_trace_satisfies_the_finite_factor_relation() {
+        let context = check_context();
+        let plan = compile_collective_public_key_aggregate_relation_plan(
+            &CollectivePublicKeyAggregatePlanInput {
+                geometry: geometry(),
+                ordered_component_moduli: vec![SuiteModulusReference::data(0)],
+            },
+            &context,
+        )
+        .expect("exact collective public-key aggregate plan");
+        let variant = &plan.variants()[0];
+        let checked_challenges = variant
+            .checked_application_challenges(&context, &[])
+            .expect("the public aggregate has no application challenges");
+        let evaluation_generator =
+            ProofBaseFieldElement::from_canonical(context.evaluation_domain_generator)
+                .expect("the test evaluation generator is canonical");
+        let trace_generator =
+            evaluation_generator.power(variant.evaluation_domain_size / variant.trace_domain_size);
+
+        for trace_ordinal in 0..variant.trace_domain_size {
+            let source_values = match trace_ordinal % 3 {
+                0 => [trace_ordinal % 17, 2, 3],
+                1 => [96, 1, 0],
+                _ => [96, 96, 96],
+            };
+            let source_sum = source_values.into_iter().sum::<u64>();
+            let aggregate_value = source_sum % 97;
+            let carry = source_sum / 97;
+            assert_eq!(carry, trace_ordinal % 3);
+            let ordered_values = [
+                source_values[0],
+                source_values[1],
+                source_values[2],
+                aggregate_value,
+            ];
+            let evaluation = variant
+                .evaluate_constraint_programs_at_point(
+                    &context,
+                    0,
+                    ProofChallengeExtensionElement::from_base(trace_generator.power(trace_ordinal)),
+                    &checked_challenges,
+                    &mut |column_ordinal, _, _| {
+                        ordered_values
+                            .get(usize::try_from(column_ordinal).unwrap())
+                            .copied()
+                            .ok_or(RelationPlanError::InvalidColumn)
+                            .and_then(|value| {
+                                ProofBaseFieldElement::from_canonical(value)
+                                    .map(ProofChallengeExtensionElement::from_base)
+                                    .map_err(|_| RelationPlanError::InvalidColumn)
+                            })
+                    },
+                )
+                .expect("the honest aggregate constraint evaluates on the trace");
+            assert!(evaluation.zeroifier.is_zero());
+            assert!(evaluation.numerator.is_zero());
+        }
     }
 
     #[test]

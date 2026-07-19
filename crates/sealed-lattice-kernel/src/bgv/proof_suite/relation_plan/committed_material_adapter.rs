@@ -7,9 +7,10 @@ use crate::{
         CommonProofRelationPlanCapability, CommonProofSourcePolynomial,
         CommonProofSourcePolynomialProvider, CommonProofSourcePolynomialProviderPoll,
         CommonProofSourcePolynomialReplayIdentity, CommonProofSourcePolynomialRequest,
-        CommonProofSourcePolynomialRequestContext, CompactCommittedMaterialSource,
-        ProofBaseFieldElement, ProofEvaluationDomain, ProofLeafVisibility, ProofTreeRole,
-        ProvidedCommonProofSourcePolynomial, RelationProofTreeInput, StatementOwnedProofTreeInput,
+        CommonProofSourcePolynomialRequestContext, CommonProofSourceProviderMemoryAccounting,
+        CompactCommittedMaterialSource, ProofBaseFieldElement, ProofEvaluationDomain,
+        ProofLeafVisibility, ProofTreeRole, ProvidedCommonProofSourcePolynomial,
+        RelationProofTreeInput, StatementOwnedProofTreeInput,
     },
     foundation::PersistentProofWitnessCoinBinding,
     hashing::hash_framed_parts_512,
@@ -1027,26 +1028,19 @@ impl CommittedMaterialSourcePolynomialAdapter {
 }
 
 impl CommonProofSourcePolynomialProvider for CommittedMaterialSourcePolynomialAdapter {
-    fn persistent_resident_memory_byte_length(&self) -> Result<u64, CommonProofProverError> {
-        Ok(self
-            .memory_accounting
-            .loading_persistent_resident_byte_length())
-    }
-
-    fn post_source_polynomial_finish_persistent_resident_memory_byte_length(
+    fn memory_accounting(
         &self,
-    ) -> Result<u64, CommonProofProverError> {
-        Ok(self
-            .memory_accounting
-            .post_source_polynomial_finish_persistent_resident_byte_length())
-    }
-
-    fn loading_source_polynomials_transient_byte_length(
-        &self,
-    ) -> Result<u64, CommonProofProverError> {
-        Ok(self
-            .memory_accounting
-            .additional_loading_source_polynomials_transient_byte_length())
+    ) -> Result<CommonProofSourceProviderMemoryAccounting, CommonProofProverError> {
+        Ok(CommonProofSourceProviderMemoryAccounting::new(
+            self.memory_accounting
+                .loading_persistent_resident_byte_length(),
+            self.memory_accounting
+                .post_source_polynomial_finish_persistent_resident_byte_length(),
+            self.memory_accounting
+                .additional_loading_source_polynomials_transient_byte_length(),
+            self.memory_accounting
+                .maximum_returned_source_polynomial_byte_length(),
+        ))
     }
 
     fn poll_source_polynomial(
@@ -1197,6 +1191,21 @@ impl CommonProofSourcePolynomialProvider for CommittedMaterialSourcePolynomialAd
             && self.next_leaf_salt_index == 0
         {
             self.leaf_salts_finished = true;
+            Ok(())
+        } else {
+            Err(CommonProofProverError::InvalidTree)
+        }
+    }
+
+    fn rewind_bound_tree_leaf_salts(&mut self) -> Result<(), CommonProofProverError> {
+        if self.source_polynomials_finished
+            && self.leaf_salts_finished
+            && self.next_leaf_salt_source_ordinal == self.bound_sources_by_catalog_index.len()
+            && self.next_leaf_salt_index == 0
+        {
+            self.next_leaf_salt_source_ordinal = 0;
+            self.next_leaf_salt_index = 0;
+            self.leaf_salts_finished = false;
             Ok(())
         } else {
             Err(CommonProofProverError::InvalidTree)

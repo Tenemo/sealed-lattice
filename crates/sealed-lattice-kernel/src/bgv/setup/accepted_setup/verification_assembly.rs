@@ -3,22 +3,23 @@ use std::{cell::RefCell, collections::BTreeMap, slice};
 use crate::{
     bgv::proof_suite::{
         AggregateThresholdShareRuntimeError, CommonProofRuntimeError, VerifiedEvaluatorKeyStore,
-        VerifiedGaloisSourceMaterialBatch, VerifiedRelinearizationAggregateMaterial,
-        VerifiedRelinearizationSourceMaterial, aggregate_threshold_share_runtime_error_status,
+        VerifiedRelinearizationAggregateMaterial, aggregate_threshold_share_runtime_error_status,
         consume_verified_accepted_setup_vss_qualification,
         restore_verified_accepted_setup_vss_qualification, runtime_error_status,
         with_verified_accepted_setup_vss_public_randomness,
     },
-    foundation::{CanonicalDecodeLimits, FOUNDATION_PROFILE, RefusalReason},
+    foundation::{
+        CanonicalDecodeLimits, FOUNDATION_PROFILE, RefusalReason,
+        VerifiedSetupComplaintResolutionReservationHandle,
+        restore_verified_setup_complaint_resolution,
+        with_reserved_verified_setup_complaint_resolution,
+    },
 };
 
 use super::{
     authority::{VerifiedAcceptedSetupAuthorityHandle, release_verified_accepted_setup_authority},
     canonical_package::CanonicalAcceptedSetupPackage,
-    evaluator_source::{
-        VerifiedAcceptedSetupEvaluatorSourceCatalog,
-        VerifiedAcceptedSetupParticipantEvaluatorSource,
-    },
+    evaluator_source::VerifiedAcceptedSetupEvaluatorSourceCatalog,
     finalization::{VerifiedAcceptedSetupFinalizationInput, finalize_verified_accepted_setup},
     prepackage_evaluator_source_catalog::{
         consume_completed_prepackage_evaluator_source_catalog,
@@ -38,6 +39,7 @@ use super::{
 /// populate a slot.
 struct AcceptedSetupVerificationAssembly {
     vss_recipient_authority_handle: u32,
+    complaint_resolution_handle: VerifiedSetupComplaintResolutionReservationHandle,
     package: Option<CanonicalAcceptedSetupPackage>,
     expected_protocol_version: u16,
     expected_suite_identifier: [u8; 64],
@@ -51,8 +53,6 @@ struct AcceptedSetupVerificationAssembly {
     public_key_share_terminals: BTreeMap<u16, VerifiedPublicKeyShareTerminal>,
     collective_public_key_terminal: Option<VerifiedCollectivePublicKeyTerminal>,
     relinearization_aggregate: Option<VerifiedRelinearizationAggregateMaterial>,
-    relinearization_sources: BTreeMap<u16, VerifiedRelinearizationSourceMaterial>,
-    galois_sources: BTreeMap<u16, VerifiedGaloisSourceMaterialBatch>,
     evaluator_source_catalog: Option<VerifiedAcceptedSetupEvaluatorSourceCatalog>,
     evaluator_sources_completed: bool,
     verified_evaluator_key_store: Option<VerifiedEvaluatorKeyStore>,
@@ -62,6 +62,7 @@ struct AcceptedSetupVerificationAssembly {
 impl AcceptedSetupVerificationAssembly {
     fn new(
         vss_recipient_authority_handle: u32,
+        complaint_resolution_handle: VerifiedSetupComplaintResolutionReservationHandle,
         package: CanonicalAcceptedSetupPackage,
         verified_public_randomness: &VerifiedPublicRandomness,
     ) -> Result<Self, CommonProofRuntimeError> {
@@ -81,6 +82,21 @@ impl AcceptedSetupVerificationAssembly {
         {
             return Err(CommonProofRuntimeError::WrongVerificationBinding);
         }
+        with_reserved_verified_setup_complaint_resolution(
+            &complaint_resolution_handle,
+            |resolution| {
+                resolution.require_matches(
+                    context.suite_identifier(),
+                    context.manifest_hash(),
+                    context.ceremony_context_hash(),
+                    context.action_context_hash(),
+                    context.roster_hash(),
+                    package.private_share_acceptance_object_hashes(),
+                )
+            },
+        )
+        .map_err(|_| CommonProofRuntimeError::UnknownOrStaleHandle)?
+        .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?;
         let selected_slots = package
             .selected_public_proof_slots()
             .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?;
@@ -90,6 +106,7 @@ impl AcceptedSetupVerificationAssembly {
 
         Ok(Self {
             vss_recipient_authority_handle,
+            complaint_resolution_handle,
             package: Some(package),
             expected_protocol_version: context.protocol_version(),
             expected_suite_identifier: context.suite_identifier().into_bytes(),
@@ -110,8 +127,6 @@ impl AcceptedSetupVerificationAssembly {
             public_key_share_terminals: BTreeMap::new(),
             collective_public_key_terminal: None,
             relinearization_aggregate: None,
-            relinearization_sources: BTreeMap::new(),
-            galois_sources: BTreeMap::new(),
             evaluator_source_catalog: None,
             evaluator_sources_completed: false,
             verified_evaluator_key_store: None,
@@ -143,205 +158,15 @@ impl AcceptedSetupVerificationAssembly {
             )
     }
 
-    fn retain_same_secret_terminal(
-        &mut self,
-        terminal: VerifiedSameSecretTerminal,
-    ) -> Result<(), CommonProofRuntimeError> {
-        self.require_collecting()?;
-        let roster_position = terminal.roster_position();
-        if usize::from(roster_position) >= usize::from(FOUNDATION_PROFILE.participant_count)
-            || self.same_secret_terminals.contains_key(&roster_position)
-        {
-            return Err(CommonProofRuntimeError::WrongVerificationBinding);
-        }
-        self.same_secret_terminals.insert(roster_position, terminal);
-        Ok(())
-    }
-
-    fn retain_public_key_share_terminal(
-        &mut self,
-        terminal: VerifiedPublicKeyShareTerminal,
-    ) -> Result<(), CommonProofRuntimeError> {
-        self.require_collecting()?;
-        let roster_position = terminal.roster_position();
-        if usize::from(roster_position) >= usize::from(FOUNDATION_PROFILE.participant_count)
-            || self
-                .public_key_share_terminals
-                .contains_key(&roster_position)
-        {
-            return Err(CommonProofRuntimeError::WrongVerificationBinding);
-        }
-        self.public_key_share_terminals
-            .insert(roster_position, terminal);
-        Ok(())
-    }
-
-    fn retain_collective_public_key_terminal(
-        &mut self,
-        terminal: VerifiedCollectivePublicKeyTerminal,
-    ) -> Result<(), CommonProofRuntimeError> {
-        self.require_collecting()?;
-        if self.collective_public_key_terminal.is_some() {
-            return Err(CommonProofRuntimeError::WrongVerificationBinding);
-        }
-        self.collective_public_key_terminal = Some(terminal);
-        Ok(())
-    }
-
-    fn retain_relinearization_aggregate(
-        &mut self,
-        aggregate: VerifiedRelinearizationAggregateMaterial,
-    ) -> Result<(), CommonProofRuntimeError> {
-        self.require_collecting()?;
-        if self.relinearization_aggregate.is_some() {
-            return Err(CommonProofRuntimeError::WrongVerificationBinding);
-        }
-        self.relinearization_aggregate = Some(aggregate);
-        Ok(())
-    }
-
-    fn retain_relinearization_source(
-        &mut self,
-        source: VerifiedRelinearizationSourceMaterial,
-    ) -> Result<(), CommonProofRuntimeError> {
-        self.require_collecting()?;
-        let roster_position = source.roster_position();
-        if usize::from(roster_position) >= usize::from(FOUNDATION_PROFILE.participant_count)
-            || self.relinearization_sources.contains_key(&roster_position)
-        {
-            return Err(CommonProofRuntimeError::WrongVerificationBinding);
-        }
-        self.relinearization_sources.insert(roster_position, source);
-        Ok(())
-    }
-
-    fn retain_galois_source(
-        &mut self,
-        source: VerifiedGaloisSourceMaterialBatch,
-    ) -> Result<(), CommonProofRuntimeError> {
-        self.require_collecting()?;
-        let roster_position = source.roster_position();
-        if usize::from(roster_position) >= usize::from(FOUNDATION_PROFILE.participant_count)
-            || self.galois_sources.contains_key(&roster_position)
-        {
-            return Err(CommonProofRuntimeError::WrongVerificationBinding);
-        }
-        self.galois_sources.insert(roster_position, source);
-        Ok(())
-    }
-
     fn complete_evaluator_source_catalog(&mut self) -> Result<(), CommonProofRuntimeError> {
         self.require_collecting()?;
         if self.evaluator_sources_completed {
             return Err(CommonProofRuntimeError::WrongOperationPhase);
         }
-        if self.evaluator_source_catalog.is_some() {
-            if self.relinearization_aggregate.is_none()
-                || !self.relinearization_sources.is_empty()
-                || !self.galois_sources.is_empty()
-            {
-                return Err(CommonProofRuntimeError::WrongVerificationBinding);
-            }
-            self.evaluator_sources_completed = true;
-            return Ok(());
-        }
-        let participant_count = usize::from(FOUNDATION_PROFILE.participant_count);
-        if self.relinearization_aggregate.is_none()
-            || self.relinearization_sources.len() != participant_count
-            || self.galois_sources.len() != participant_count
-        {
+        if self.evaluator_source_catalog.is_none() || self.relinearization_aggregate.is_none() {
             return Err(CommonProofRuntimeError::WrongOperationPhase);
         }
-
-        let mut borrowed_ordered_sources = Vec::new();
-        borrowed_ordered_sources
-            .try_reserve_exact(participant_count)
-            .map_err(|_| CommonProofRuntimeError::AllocationLimitExceeded)?;
-        for roster_position in 0..FOUNDATION_PROFILE.participant_count {
-            let relinearization = self
-                .relinearization_sources
-                .get(&roster_position)
-                .ok_or(CommonProofRuntimeError::WrongVerificationBinding)?;
-            let galois = self
-                .galois_sources
-                .get(&roster_position)
-                .ok_or(CommonProofRuntimeError::WrongVerificationBinding)?;
-            borrowed_ordered_sources.push((relinearization, galois));
-        }
-        let (first_relinearization, first_galois) = borrowed_ordered_sources
-            .first()
-            .copied()
-            .ok_or(CommonProofRuntimeError::WrongVerificationBinding)?;
-        if first_relinearization.protocol_version() != self.expected_protocol_version
-            || first_relinearization.suite_identifier() != self.expected_suite_identifier
-            || first_relinearization.ceremony_context_hash() != self.expected_ceremony_context_hash
-            || first_relinearization.action_context_hash() != self.expected_action_context_hash
-            || first_relinearization.setup_proof_context_hash()
-                != self.expected_setup_proof_context_hash
-            || first_galois.protocol_version() != self.expected_protocol_version
-            || first_galois.suite_identifier() != self.expected_suite_identifier
-            || first_galois.ceremony_context_hash() != self.expected_ceremony_context_hash
-            || first_galois.action_context_hash() != self.expected_action_context_hash
-            || first_galois.setup_proof_context_hash() != self.expected_setup_proof_context_hash
-        {
-            return Err(CommonProofRuntimeError::WrongVerificationBinding);
-        }
-        let preflight =
-            VerifiedAcceptedSetupEvaluatorSourceCatalog::preflight_from_verified_participant_sources(
-                &self.expected_ordered_participant_identities,
-                self.expected_manifest_hash,
-                self.expected_roster_hash,
-                self.relinearization_aggregate
-                    .as_ref()
-                    .ok_or(CommonProofRuntimeError::WrongVerificationBinding)?,
-                &borrowed_ordered_sources,
-            )
-            .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?;
-        drop(borrowed_ordered_sources);
-
-        let mut ordered_participants = Vec::new();
-        ordered_participants
-            .try_reserve_exact(participant_count)
-            .map_err(|_| CommonProofRuntimeError::AllocationLimitExceeded)?;
-        for roster_position in 0..FOUNDATION_PROFILE.participant_count {
-            let relinearization = self
-                .relinearization_sources
-                .remove(&roster_position)
-                .expect("borrowed preflight established the exact relinearization source");
-            let galois = self
-                .galois_sources
-                .remove(&roster_position)
-                .expect("borrowed preflight established the exact Galois source");
-            ordered_participants.push(
-                VerifiedAcceptedSetupParticipantEvaluatorSource::from_verified_sources(
-                    relinearization,
-                    galois,
-                ),
-            );
-        }
-        let catalog =
-            VerifiedAcceptedSetupEvaluatorSourceCatalog::from_preflighted_participant_sources(
-                preflight,
-                ordered_participants,
-            );
-        assert!(self.evaluator_catalog_matches_expected_context(&catalog));
-        self.evaluator_source_catalog = Some(catalog);
         self.evaluator_sources_completed = true;
-        Ok(())
-    }
-
-    fn retain_verified_evaluator_key_store(
-        &mut self,
-        store: VerifiedEvaluatorKeyStore,
-    ) -> Result<(), CommonProofRuntimeError> {
-        self.require_collecting()?;
-        if !self.evaluator_sources_completed
-            || self.evaluator_source_catalog.is_none()
-            || self.verified_evaluator_key_store.is_some()
-        {
-            return Err(CommonProofRuntimeError::WrongOperationPhase);
-        }
-        self.verified_evaluator_key_store = Some(store);
         Ok(())
     }
 
@@ -518,11 +343,13 @@ thread_local! {
 
 fn retain_accepted_setup_verification_assembly(
     vss_recipient_authority_handle: u32,
+    complaint_resolution_handle: VerifiedSetupComplaintResolutionReservationHandle,
     package: CanonicalAcceptedSetupPackage,
     verified_public_randomness: &VerifiedPublicRandomness,
 ) -> Result<u32, CommonProofRuntimeError> {
     let assembly = AcceptedSetupVerificationAssembly::new(
         vss_recipient_authority_handle,
+        complaint_resolution_handle,
         package,
         verified_public_randomness,
     )?;
@@ -532,6 +359,7 @@ fn retain_accepted_setup_verification_assembly(
 
 pub(crate) fn begin_accepted_setup_verification_assembly(
     vss_recipient_authority_handle: u32,
+    complaint_resolution_handle: VerifiedSetupComplaintResolutionReservationHandle,
     canonical_package_bytes: &[u8],
 ) -> Result<u32, CommonProofRuntimeError> {
     let package = CanonicalAcceptedSetupPackage::decode(
@@ -544,6 +372,7 @@ pub(crate) fn begin_accepted_setup_verification_assembly(
         |verified_public_randomness| {
             retain_accepted_setup_verification_assembly(
                 vss_recipient_authority_handle,
+                complaint_resolution_handle,
                 package,
                 verified_public_randomness,
             )
@@ -611,20 +440,6 @@ pub(crate) struct PreparedVerifiedPublicKeyShareTerminalSlot {
 
 pub(crate) struct PreparedVerifiedCollectivePublicKeyTerminalSlot {
     assembly_handle: u32,
-}
-
-pub(crate) struct PreparedVerifiedRelinearizationAggregateSlot {
-    assembly_handle: u32,
-}
-
-pub(crate) struct PreparedVerifiedRelinearizationSourceSlot {
-    assembly_handle: u32,
-    roster_position: u16,
-}
-
-pub(crate) struct PreparedVerifiedGaloisSourceSlot {
-    assembly_handle: u32,
-    roster_position: u16,
 }
 
 pub(crate) struct PreparedVerifiedEvaluatorKeyStoreSlot {
@@ -798,125 +613,6 @@ pub(crate) fn commit_preflighted_verified_collective_public_key_terminal(
     });
 }
 
-pub(crate) fn preflight_verified_relinearization_aggregate_slot(
-    assembly_handle: u32,
-) -> Result<PreparedVerifiedRelinearizationAggregateSlot, CommonProofRuntimeError> {
-    ACCEPTED_SETUP_VERIFICATION_ASSEMBLY_REGISTRY.with(|registry| {
-        let registry = registry.borrow();
-        let assembly = registry.get(assembly_handle)?;
-        assembly.require_collecting()?;
-        if assembly.relinearization_aggregate.is_some()
-            || assembly.evaluator_source_catalog.is_some()
-        {
-            return Err(CommonProofRuntimeError::WrongVerificationBinding);
-        }
-        Ok(PreparedVerifiedRelinearizationAggregateSlot { assembly_handle })
-    })
-}
-
-pub(crate) fn commit_preflighted_verified_relinearization_aggregate(
-    prepared_slot: PreparedVerifiedRelinearizationAggregateSlot,
-    aggregate: VerifiedRelinearizationAggregateMaterial,
-) {
-    ACCEPTED_SETUP_VERIFICATION_ASSEMBLY_REGISTRY.with(|registry| {
-        let mut registry = registry.borrow_mut();
-        let assembly = registry
-            .assemblies
-            .get_mut(&prepared_slot.assembly_handle)
-            .expect("preflight retained the exact accepted-setup assembly");
-        assert!(
-            assembly
-                .relinearization_aggregate
-                .replace(aggregate)
-                .is_none()
-        );
-    });
-}
-
-pub(crate) fn preflight_verified_relinearization_source_slot(
-    assembly_handle: u32,
-    roster_position: u16,
-) -> Result<PreparedVerifiedRelinearizationSourceSlot, CommonProofRuntimeError> {
-    ACCEPTED_SETUP_VERIFICATION_ASSEMBLY_REGISTRY.with(|registry| {
-        let registry = registry.borrow();
-        let assembly = registry.get(assembly_handle)?;
-        assembly.require_collecting()?;
-        if assembly.evaluator_source_catalog.is_some()
-            || usize::from(roster_position) >= usize::from(FOUNDATION_PROFILE.participant_count)
-            || assembly
-                .relinearization_sources
-                .contains_key(&roster_position)
-        {
-            return Err(CommonProofRuntimeError::WrongVerificationBinding);
-        }
-        Ok(PreparedVerifiedRelinearizationSourceSlot {
-            assembly_handle,
-            roster_position,
-        })
-    })
-}
-
-pub(crate) fn commit_preflighted_verified_relinearization_source(
-    prepared_slot: PreparedVerifiedRelinearizationSourceSlot,
-    source: VerifiedRelinearizationSourceMaterial,
-) {
-    ACCEPTED_SETUP_VERIFICATION_ASSEMBLY_REGISTRY.with(|registry| {
-        let mut registry = registry.borrow_mut();
-        let assembly = registry
-            .assemblies
-            .get_mut(&prepared_slot.assembly_handle)
-            .expect("preflight retained the exact accepted-setup assembly");
-        assert_eq!(source.roster_position(), prepared_slot.roster_position);
-        assert!(
-            assembly
-                .relinearization_sources
-                .insert(prepared_slot.roster_position, source)
-                .is_none()
-        );
-    });
-}
-
-pub(crate) fn preflight_verified_galois_source_slot(
-    assembly_handle: u32,
-    roster_position: u16,
-) -> Result<PreparedVerifiedGaloisSourceSlot, CommonProofRuntimeError> {
-    ACCEPTED_SETUP_VERIFICATION_ASSEMBLY_REGISTRY.with(|registry| {
-        let registry = registry.borrow();
-        let assembly = registry.get(assembly_handle)?;
-        assembly.require_collecting()?;
-        if assembly.evaluator_source_catalog.is_some()
-            || usize::from(roster_position) >= usize::from(FOUNDATION_PROFILE.participant_count)
-            || assembly.galois_sources.contains_key(&roster_position)
-        {
-            return Err(CommonProofRuntimeError::WrongVerificationBinding);
-        }
-        Ok(PreparedVerifiedGaloisSourceSlot {
-            assembly_handle,
-            roster_position,
-        })
-    })
-}
-
-pub(crate) fn commit_preflighted_verified_galois_source(
-    prepared_slot: PreparedVerifiedGaloisSourceSlot,
-    source: VerifiedGaloisSourceMaterialBatch,
-) {
-    ACCEPTED_SETUP_VERIFICATION_ASSEMBLY_REGISTRY.with(|registry| {
-        let mut registry = registry.borrow_mut();
-        let assembly = registry
-            .assemblies
-            .get_mut(&prepared_slot.assembly_handle)
-            .expect("preflight retained the exact accepted-setup assembly");
-        assert_eq!(source.roster_position(), prepared_slot.roster_position);
-        assert!(
-            assembly
-                .galois_sources
-                .insert(prepared_slot.roster_position, source)
-                .is_none()
-        );
-    });
-}
-
 fn preflight_prepackage_evaluator_source_catalog_transfer(
     assembly_handle: u32,
     catalog: &VerifiedAcceptedSetupEvaluatorSourceCatalog,
@@ -929,8 +625,6 @@ fn preflight_prepackage_evaluator_source_catalog_transfer(
         if assembly.evaluator_source_catalog.is_some()
             || assembly.evaluator_sources_completed
             || assembly.relinearization_aggregate.is_some()
-            || !assembly.relinearization_sources.is_empty()
-            || !assembly.galois_sources.is_empty()
         {
             return Err(CommonProofRuntimeError::WrongOperationPhase);
         }
@@ -961,8 +655,6 @@ fn commit_prepackage_evaluator_source_catalog_transfer(
             .get_mut(&prepared_transfer.assembly_handle)
             .expect("preflight retained the exact accepted-setup assembly");
         assert!(!assembly.evaluator_sources_completed);
-        assert!(assembly.relinearization_sources.is_empty());
-        assert!(assembly.galois_sources.is_empty());
         assert!(assembly.evaluator_source_catalog.replace(catalog).is_none());
         assert!(
             assembly
@@ -1051,116 +743,6 @@ pub(crate) fn complete_accepted_setup_public_proof_catalog(
     })
 }
 
-pub(crate) fn retain_verified_same_secret_terminal(
-    assembly_handle: u32,
-    terminal: VerifiedSameSecretTerminal,
-) -> Result<(), CommonProofRuntimeError> {
-    ACCEPTED_SETUP_VERIFICATION_ASSEMBLY_REGISTRY.with(|registry| {
-        registry
-            .borrow_mut()
-            .get_mut(assembly_handle)?
-            .retain_same_secret_terminal(terminal)
-    })
-}
-
-pub(crate) fn retain_verified_public_key_share_terminal(
-    assembly_handle: u32,
-    terminal: VerifiedPublicKeyShareTerminal,
-) -> Result<(), CommonProofRuntimeError> {
-    ACCEPTED_SETUP_VERIFICATION_ASSEMBLY_REGISTRY.with(|registry| {
-        registry
-            .borrow_mut()
-            .get_mut(assembly_handle)?
-            .retain_public_key_share_terminal(terminal)
-    })
-}
-
-pub(crate) fn retain_verified_collective_public_key_terminal(
-    assembly_handle: u32,
-    terminal: VerifiedCollectivePublicKeyTerminal,
-) -> Result<(), CommonProofRuntimeError> {
-    ACCEPTED_SETUP_VERIFICATION_ASSEMBLY_REGISTRY.with(|registry| {
-        registry
-            .borrow_mut()
-            .get_mut(assembly_handle)?
-            .retain_collective_public_key_terminal(terminal)
-    })
-}
-
-pub(crate) fn retain_verified_relinearization_aggregate(
-    assembly_handle: u32,
-    aggregate: VerifiedRelinearizationAggregateMaterial,
-) -> Result<(), CommonProofRuntimeError> {
-    ACCEPTED_SETUP_VERIFICATION_ASSEMBLY_REGISTRY.with(|registry| {
-        registry
-            .borrow_mut()
-            .get_mut(assembly_handle)?
-            .retain_relinearization_aggregate(aggregate)
-    })
-}
-
-pub(crate) fn retain_verified_relinearization_source(
-    assembly_handle: u32,
-    source: VerifiedRelinearizationSourceMaterial,
-) -> Result<(), CommonProofRuntimeError> {
-    ACCEPTED_SETUP_VERIFICATION_ASSEMBLY_REGISTRY.with(|registry| {
-        registry
-            .borrow_mut()
-            .get_mut(assembly_handle)?
-            .retain_relinearization_source(source)
-    })
-}
-
-pub(crate) fn retain_verified_galois_source(
-    assembly_handle: u32,
-    source: VerifiedGaloisSourceMaterialBatch,
-) -> Result<(), CommonProofRuntimeError> {
-    ACCEPTED_SETUP_VERIFICATION_ASSEMBLY_REGISTRY.with(|registry| {
-        registry
-            .borrow_mut()
-            .get_mut(assembly_handle)?
-            .retain_galois_source(source)
-    })
-}
-
-pub(crate) fn with_verified_accepted_setup_evaluator_construction_sources<Output>(
-    assembly_handle: u32,
-    inspect: impl FnOnce(
-        &VerifiedAcceptedSetupEvaluatorSourceCatalog,
-        &VerifiedRelinearizationAggregateMaterial,
-    ) -> Result<Output, CommonProofRuntimeError>,
-) -> Result<Output, CommonProofRuntimeError> {
-    ACCEPTED_SETUP_VERIFICATION_ASSEMBLY_REGISTRY.with(|registry| {
-        let registry = registry.borrow();
-        let assembly = registry.get(assembly_handle)?;
-        if !assembly.evaluator_sources_completed {
-            return Err(CommonProofRuntimeError::WrongOperationPhase);
-        }
-        inspect(
-            assembly
-                .evaluator_source_catalog
-                .as_ref()
-                .ok_or(CommonProofRuntimeError::WrongOperationPhase)?,
-            assembly
-                .relinearization_aggregate
-                .as_ref()
-                .ok_or(CommonProofRuntimeError::WrongOperationPhase)?,
-        )
-    })
-}
-
-pub(crate) fn retain_verified_evaluator_key_store(
-    assembly_handle: u32,
-    store: VerifiedEvaluatorKeyStore,
-) -> Result<(), CommonProofRuntimeError> {
-    ACCEPTED_SETUP_VERIFICATION_ASSEMBLY_REGISTRY.with(|registry| {
-        registry
-            .borrow_mut()
-            .get_mut(assembly_handle)?
-            .retain_verified_evaluator_key_store(store)
-    })
-}
-
 fn take_completed_accepted_setup_verification_assembly(
     assembly_handle: u32,
 ) -> Result<AcceptedSetupVerificationAssembly, CommonProofRuntimeError> {
@@ -1208,6 +790,7 @@ pub(crate) fn finalize_completed_accepted_setup_verification_assembly(
         package,
         vss_qualification,
         public_proof_catalog,
+        complaint_resolution_handle: assembly.complaint_resolution_handle,
     }));
     let result = finalize_verified_accepted_setup(
         state_session_handle,
@@ -1223,6 +806,7 @@ pub(crate) fn finalize_completed_accepted_setup_verification_assembly(
                 package,
                 vss_qualification,
                 public_proof_catalog,
+                complaint_resolution_handle: _,
             } = finalization_input
                 .into_inner()
                 .expect("a failed finalization leaves every exact source unconsumed");
@@ -1243,14 +827,15 @@ pub(crate) fn finalize_completed_accepted_setup_verification_assembly(
 pub(crate) fn cancel_accepted_setup_verification_assembly(
     assembly_handle: u32,
 ) -> Result<(), CommonProofRuntimeError> {
-    ACCEPTED_SETUP_VERIFICATION_ASSEMBLY_REGISTRY.with(|registry| {
+    let assembly = ACCEPTED_SETUP_VERIFICATION_ASSEMBLY_REGISTRY.with(|registry| {
         registry
             .borrow_mut()
             .assemblies
             .remove(&assembly_handle)
-            .map(|_| ())
             .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)
-    })
+    })?;
+    restore_verified_setup_complaint_resolution(&assembly.complaint_resolution_handle)
+        .map_err(|_| CommonProofRuntimeError::UnknownOrStaleHandle)
 }
 
 unsafe fn ffi_input<'input>(
@@ -1281,39 +866,6 @@ fn decode_u32_handles(bytes: &[u8]) -> Result<Vec<u32>, CommonProofRuntimeError>
 unsafe fn write_status(status_pointer: *mut u32, status: u32) {
     if !status_pointer.is_null() {
         unsafe { status_pointer.write(status) };
-    }
-}
-
-/// Begins the sole accepted-setup verification assembly from one exact
-/// canonical package and the completed browser-local VSS authority.
-///
-/// # Safety
-///
-/// The package pointer must name its declared readable range. A non-null
-/// status pointer must name one writable `u32`.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn sealed_lattice_accepted_setup_verification_begin(
-    vss_recipient_authority_handle: u32,
-    canonical_package_pointer: *const u8,
-    canonical_package_byte_length: usize,
-    status_pointer: *mut u32,
-) -> u32 {
-    let result = unsafe { ffi_input(canonical_package_pointer, canonical_package_byte_length) }
-        .and_then(|canonical_package_bytes| {
-            begin_accepted_setup_verification_assembly(
-                vss_recipient_authority_handle,
-                canonical_package_bytes,
-            )
-        });
-    match result {
-        Ok(assembly_handle) => {
-            unsafe { write_status(status_pointer, 0) };
-            assembly_handle
-        }
-        Err(error) => {
-            unsafe { write_status(status_pointer, runtime_error_status(error)) };
-            0
-        }
     }
 }
 

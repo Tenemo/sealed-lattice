@@ -285,4 +285,116 @@ impl VerifiedGeneratedPrivateVssMailboxCorpusByteLengthCatalog {
     pub(in crate::bgv) const fn maximum_canonical_signed_envelope_byte_length(&self) -> u64 {
         self.maximum_canonical_signed_envelope_byte_length
     }
+
+    #[cfg(test)]
+    pub(in crate::bgv) fn deterministic_for_authority_custody_tests(marker: u8) -> Self {
+        use crate::foundation::ParticipantIdentity;
+
+        let participant_count = usize::from(FOUNDATION_PROFILE.participant_count);
+        let participant_identities = (0..participant_count)
+            .map(|roster_position| {
+                let mut identity = [marker; Hash512::BYTE_LENGTH];
+                identity[..2]
+                    .copy_from_slice(&u16::try_from(roster_position).unwrap().to_le_bytes());
+                ParticipantIdentity::from_bytes(identity)
+            })
+            .collect::<Vec<_>>();
+        let verified_public_randomness = VerifiedPublicRandomness::from_test_values(
+            Hash512::from_bytes([marker.wrapping_add(1); Hash512::BYTE_LENGTH]),
+            Hash512::from_bytes([marker.wrapping_add(2); Hash512::BYTE_LENGTH]),
+            Hash512::from_bytes([marker.wrapping_add(3); Hash512::BYTE_LENGTH]),
+            Hash512::from_bytes([marker.wrapping_add(4); Hash512::BYTE_LENGTH]),
+            Hash512::from_bytes([marker.wrapping_add(5); Hash512::BYTE_LENGTH]),
+            participant_identities,
+            Hash512::from_bytes([marker.wrapping_add(6); Hash512::BYTE_LENGTH]),
+        );
+        let mailbox_count = participant_count.checked_mul(participant_count).unwrap();
+        let ordered_mailbox_byte_lengths = (0..mailbox_count)
+            .map(|mailbox_ordinal| {
+                let ordinal = u64::try_from(mailbox_ordinal).unwrap();
+                let ciphertext_stream_byte_length = 1_001_u64.checked_add(ordinal).unwrap();
+                let canonical_signed_envelope_byte_length = 201_u64.checked_add(ordinal).unwrap();
+                VerifiedGeneratedPrivateVssMailboxByteLengths {
+                    ciphertext_stream_byte_length,
+                    ciphertext_descriptor_byte_length: 71_u64.checked_add(ordinal).unwrap(),
+                    canonical_signed_envelope_byte_length,
+                    complete_recipient_private_wire_byte_length: ciphertext_stream_byte_length
+                        .checked_add(canonical_signed_envelope_byte_length)
+                        .unwrap(),
+                }
+            })
+            .collect::<Vec<_>>();
+        let ordered_dealer_upload_byte_lengths = ordered_mailbox_byte_lengths
+            .chunks_exact(participant_count)
+            .map(|dealer_mailboxes| {
+                dealer_mailboxes
+                    .iter()
+                    .map(|mailbox| mailbox.complete_recipient_private_wire_byte_length)
+                    .sum::<u64>()
+            })
+            .collect::<Vec<_>>();
+        let ordered_recipient_download_byte_lengths = (0..participant_count)
+            .map(|recipient_roster_position| {
+                ordered_mailbox_byte_lengths
+                    .iter()
+                    .skip(recipient_roster_position)
+                    .step_by(participant_count)
+                    .map(|mailbox| mailbox.complete_recipient_private_wire_byte_length)
+                    .sum::<u64>()
+            })
+            .collect::<Vec<_>>();
+        let ciphertext_stream_byte_length = ordered_mailbox_byte_lengths
+            .iter()
+            .map(|mailbox| mailbox.ciphertext_stream_byte_length)
+            .sum::<u64>();
+        let canonical_signed_envelope_byte_length = ordered_mailbox_byte_lengths
+            .iter()
+            .map(|mailbox| mailbox.canonical_signed_envelope_byte_length)
+            .sum::<u64>();
+        let complete_recipient_private_wire_byte_length = ordered_mailbox_byte_lengths
+            .iter()
+            .map(|mailbox| mailbox.complete_recipient_private_wire_byte_length)
+            .sum::<u64>();
+        let maximum_ciphertext_descriptor_byte_length = ordered_mailbox_byte_lengths
+            .iter()
+            .map(|mailbox| mailbox.ciphertext_descriptor_byte_length)
+            .max()
+            .unwrap();
+        let maximum_canonical_signed_envelope_byte_length = ordered_mailbox_byte_lengths
+            .iter()
+            .map(|mailbox| mailbox.canonical_signed_envelope_byte_length)
+            .max()
+            .unwrap();
+        let ordered_hashes = |family_marker: u8, count: usize| {
+            (0..count)
+                .map(|ordinal| {
+                    let mut bytes = [family_marker; Hash512::BYTE_LENGTH];
+                    bytes[..8].copy_from_slice(&u64::try_from(ordinal).unwrap().to_le_bytes());
+                    Hash512::from_bytes(bytes)
+                })
+                .collect::<Vec<_>>()
+                .into_boxed_slice()
+        };
+
+        Self {
+            context: verified_public_randomness.context(),
+            public_setup_seed: verified_public_randomness.public_setup_seed(),
+            setup_proof_context_hash: verified_public_randomness.setup_proof_context_hash(),
+            ordered_dealer_public_record_object_hashes: ordered_hashes(
+                marker.wrapping_add(7),
+                participant_count,
+            ),
+            ordered_envelope_hashes: ordered_hashes(marker.wrapping_add(8), mailbox_count),
+            ordered_mailbox_byte_lengths: ordered_mailbox_byte_lengths.into_boxed_slice(),
+            ordered_dealer_upload_byte_lengths: ordered_dealer_upload_byte_lengths
+                .into_boxed_slice(),
+            ordered_recipient_download_byte_lengths: ordered_recipient_download_byte_lengths
+                .into_boxed_slice(),
+            ciphertext_stream_byte_length,
+            canonical_signed_envelope_byte_length,
+            complete_recipient_private_wire_byte_length,
+            maximum_ciphertext_descriptor_byte_length,
+            maximum_canonical_signed_envelope_byte_length,
+        }
+    }
 }

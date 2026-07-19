@@ -6,7 +6,7 @@ use crate::{
         parameters::{DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE},
     },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
-    foundation::Hash512,
+    foundation::{FOUNDATION_PROFILE, Hash512},
 };
 
 use super::top_k::{
@@ -22,14 +22,21 @@ mod runtime;
 pub(crate) use compiler::selected_evaluator_program_set;
 #[cfg(test)]
 pub(crate) use compiler::{
-    CandidateCompiledEvaluatorMeasurement, compile_candidate_evaluator_program_measurement,
-    compiled_prepared_power_instruction_count, compiled_prepared_power_level_trace,
-    selected_evaluator_program_set_bytes,
+    CandidateEvaluatorRecurrenceTrace, compile_candidate_evaluator_program_measurement,
+    compile_factor_four_candidate_recurrence_trace, compiled_prepared_power_instruction_count,
+    compiled_prepared_power_level_trace,
+    selected_evaluator_program_set_with_pair_window_tile_width,
+};
+#[cfg(test)]
+pub(crate) use executor::encode_constant_coefficients;
+#[cfg(test)]
+use executor::{
+    PreparedEvaluatorExecutionSchedule, PreparedEvaluatorKeyIdentity,
+    SelectedEvaluatorExecutionAccounting,
 };
 pub(crate) use executor::{
     PreparedSelectedEvaluatorReplay, SelectedEvaluatorExecutionProgress,
     SelectedEvaluatorProgramExecution, VerifiedEvaluatorAggregate,
-    VerifiedSelectedEvaluatorExecution,
 };
 
 pub(crate) const EVALUATOR_PROGRAM_SET_SCHEMA_IDENTIFIER: u16 = 0x1500;
@@ -39,8 +46,8 @@ pub(crate) const EVALUATOR_INSTRUCTION_STREAM_SCHEMA_IDENTIFIER: u16 = 0x1504;
 
 const EVALUATOR_PROGRAM_SCHEMA_VERSION: u16 = 1;
 const EVALUATOR_CONSTANT_HASH_DOMAIN: &str = "sealed-lattice/evaluator/constant/v1";
-const SELECTED_OPTION_COUNT: usize = 20;
-const SELECTED_STREAM_COUNT: usize = 20;
+const SELECTED_OPTION_COUNT: usize = FOUNDATION_PROFILE.option_count as usize;
+const SELECTED_STREAM_COUNT: usize = SELECTED_OPTION_COUNT;
 const MAXIMUM_EVALUATOR_CONSTANT_COUNT: usize = 1_024;
 const MAXIMUM_INSTRUCTIONS_PER_STREAM: usize = 4_096;
 const MAXIMUM_LIVE_REGISTER_COUNT: usize = 64;
@@ -426,10 +433,10 @@ impl EvaluatorProgramSet {
     }
 
     /// Returns the exact sorted evaluation-key catalog positions reached by
-    /// each validated stream and by their union. Lower-level opcode uses map
-    /// to the one selected working-level key whose CRT prefix serves them; the
-    /// returned positions therefore describe serialized setup material, not a
-    /// duplicate key for every runtime level.
+    /// each validated stream and by their union. Each Galois element retains
+    /// its selected catalog level; an opcode at that level or a lower CRT
+    /// prefix maps to the same serialized setup position rather than creating
+    /// a duplicate key for every runtime level.
     pub(crate) fn key_positions(&self) -> CanonicalResult<EvaluatorProgramKeyPositions> {
         let constant_kinds_by_hash = self.validated_constant_catalog()?;
         validate_stream_catalog_shape(&self.streams)?;
@@ -568,10 +575,9 @@ fn validate_instruction_stream(
         }
     }
 
-    let supported_rotations = selected_evaluator_rotation_key_schedule(SELECTED_OPTION_COUNT)?
+    let scheduled_galois_levels = selected_evaluator_rotation_key_schedule(SELECTED_OPTION_COUNT)?
         .into_iter()
-        .map(|(galois_element, _)| galois_element)
-        .collect::<BTreeSet<_>>();
+        .collect::<BTreeMap<_, _>>();
     let mut register_states = vec![Some(RegisterState {
         level: SELECTED_EVALUATOR_WORKING_LEVEL,
         decryption_multiplier: 1,
@@ -618,7 +624,7 @@ fn validate_instruction_stream(
             instruction,
             &input_states,
             constant_kinds_by_hash,
-            &supported_rotations,
+            &scheduled_galois_levels,
         )?;
         match instruction.opcode {
             EvaluatorOpcode::CiphertextMultiplyRelinearizeAndDrop
@@ -626,11 +632,19 @@ fn validate_instruction_stream(
                 relinearization_catalog_levels.insert(SELECTED_RELINEARIZATION_KEY_LEVEL);
             }
             EvaluatorOpcode::GaloisRotate => {
+                let galois_element = usize::try_from(instruction.immediate0)
+                    .map_err(|_| program_error("evaluator Galois element does not fit usize"))?;
+                let catalog_level =
+                    *scheduled_galois_levels
+                        .get(&galois_element)
+                        .ok_or_else(|| {
+                            program_error(
+                                "evaluator rotation is absent from the selected suite catalog",
+                            )
+                        })?;
                 galois_catalog_positions.insert(EvaluatorGaloisKeyPosition {
-                    galois_element: usize::try_from(instruction.immediate0).map_err(|_| {
-                        program_error("evaluator Galois element does not fit usize")
-                    })?,
-                    catalog_level: SELECTED_EVALUATOR_WORKING_LEVEL,
+                    galois_element,
+                    catalog_level,
                 });
             }
             _ => {}
@@ -721,7 +735,7 @@ fn evaluate_instruction_transition(
     instruction: &EvaluatorInstruction,
     inputs: &[RegisterState],
     constant_kinds_by_hash: &BTreeMap<[u8; Hash512::BYTE_LENGTH], EvaluatorConstantKind>,
-    supported_rotations: &BTreeSet<usize>,
+    scheduled_galois_levels: &BTreeMap<usize, usize>,
 ) -> CanonicalResult<Option<RegisterState>> {
     let first = inputs.first().copied();
     let transition = match instruction.opcode {
@@ -828,10 +842,17 @@ fn evaluate_instruction_transition(
             let input = first.expect("shape validation requires one input");
             let galois_element = usize::try_from(instruction.immediate0)
                 .map_err(|_| program_error("evaluator Galois element does not fit usize"))?;
+            let catalog_level = scheduled_galois_levels
+                .get(&galois_element)
+                .copied()
+                .ok_or_else(|| {
+                    program_error(
+                        "evaluator rotation is not supported by the selected suite catalog",
+                    )
+                })?;
             if galois_element == 1
                 || galois_element.is_multiple_of(2)
-                || !supported_rotations.contains(&galois_element)
-                || input.level > SELECTED_EVALUATOR_WORKING_LEVEL
+                || input.level > catalog_level
             {
                 return Err(program_error(
                     "evaluator rotation is not supported by the selected suite catalog",

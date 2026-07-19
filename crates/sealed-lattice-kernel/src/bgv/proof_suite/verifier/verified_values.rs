@@ -204,7 +204,7 @@ impl VerifiedStatementOwnedTree {
 
     /// Resolves the complete `0x1217` statement-tree catalog from one exact
     /// package statement, the positively verified participant RKG source, and
-    /// the four descriptor-authenticated Galois component trees. Anchor roots
+    /// the three descriptor-authenticated Galois component trees. Anchor roots
     /// cannot be supplied independently, and every output root is recomputed
     /// from its component bytes.
     pub(crate) fn from_verified_galois_key_share_statement_sources(
@@ -334,8 +334,8 @@ impl VerifiedStatementOwnedTree {
     }
 
     /// Resolves the complete selected `0x1218` statement-tree batch from the
-    /// positive participant-source catalog and the five runtime component
-    /// trees recomputed from the exact evaluator-store bytes. The fifty
+    /// positive participant-source catalog and the four runtime component
+    /// trees recomputed from the exact evaluator-store bytes. The forty
     /// participant roots and context hashes retain their earlier positive
     /// `0x1216`/`0x1217` authority; no detached root list is accepted here.
     pub(crate) fn from_verified_evaluator_aggregate_statement_sources(
@@ -1885,7 +1885,7 @@ impl VerifiedStreamedProofTreeTerminal {
         tree: &SetupPublicPolynomialTree,
     ) -> Result<VerifiedStreamedProofTreeTerminalPreflight, CommonProofVerifierError> {
         source_material
-            .authenticate_setup_tree_trace_columns(tree.ordered_coefficient_columns())
+            .authenticate_setup_tree_trace_columns(tree.ordered_trace_rows())
             .map_err(|_| CommonProofVerifierError::InvalidBoundTree)?;
         let mut preflight = Self::preflight_from_recomputed_public_polynomial_tree(
             verified_proof,
@@ -2014,8 +2014,8 @@ impl VerifiedStreamedProofTreeTerminal {
         self.tree.root()
     }
 
-    pub(crate) fn ordered_coefficient_columns(&self) -> &[Vec<ProofBaseFieldElement>] {
-        self.tree.ordered_coefficient_columns()
+    pub(crate) fn ordered_trace_rows(&self) -> &[Vec<ProofBaseFieldElement>] {
+        self.tree.ordered_trace_rows()
     }
 
     pub(crate) fn statement_owned_tree(&self) -> VerifiedStatementOwnedTree {
@@ -2065,6 +2065,38 @@ pub(crate) struct VerifiedEvaluatorAuxiliaryRoot {
 }
 
 impl VerifiedEvaluatorAuxiliaryRoot {
+    /// Retains the recomputed RKG A-component authority while constructing the
+    /// same-worker evaluator proof. This is generation custody only: accepted
+    /// package verification still derives its terminal from the positively
+    /// verified aggregate proof and never accepts this local source directly.
+    pub(crate) fn from_generated_relinearization_aggregate_source(
+        source: &crate::bgv::setup::SetupGeneratedRelinearizationAggregateSourceAuthority,
+    ) -> Result<Self, CommonProofVerifierError> {
+        let position = source.evaluator_position();
+        let catalog_level = match position.key_kind() {
+            SelectedEvaluatorEntryKind::Relinearization { catalog_level } => catalog_level,
+            SelectedEvaluatorEntryKind::Galois { .. } => {
+                return Err(CommonProofVerifierError::InvalidApplicationStatement);
+            }
+        };
+        let selected_candidate = EvaluatorCandidateInput::implemented()
+            .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?;
+        let auxiliary_component = &source.components()[1];
+        if !material_topology_matches_selected_catalog_level(
+            &selected_candidate,
+            catalog_level,
+            auxiliary_component.material(),
+        ) {
+            return Err(CommonProofVerifierError::InvalidApplicationStatement);
+        }
+        Ok(Self {
+            position,
+            auxiliary_component_root: auxiliary_component.contribution_root(),
+            source_material_root: Some(auxiliary_component.material_root().into_bytes()),
+            source_stream_descriptor: Some(auxiliary_component.stream_descriptor().clone()),
+        })
+    }
+
     /// Retains the relinearization A-component authority from the accepted
     /// aggregate material. The position, root, and authenticated carrier all
     /// come from the verifier-owned aggregate; callers cannot restate them.
@@ -2257,6 +2289,46 @@ impl VerifiedEvaluatorAuxiliaryRoot {
         Ok(Self {
             position,
             auxiliary_component_root: tree.root(),
+            source_material_root: None,
+            source_stream_descriptor: None,
+        })
+    }
+
+    /// Mints the same Galois A linkage from the setup-domain incremental root
+    /// builder. Both the context hash and root are outputs of that builder;
+    /// callers cannot replace the role or schedule with detached metadata.
+    pub(crate) fn from_recomputed_galois_common_public_polynomial_root(
+        schedule_position: u32,
+        galois_element: usize,
+        catalog_level: usize,
+        context: &SetupPublicPolynomialContext,
+        recomputed_context_hash: [u8; 64],
+        recomputed_root: [u8; 64],
+    ) -> Result<Self, CommonProofVerifierError> {
+        let position = selected_evaluator_entry_positions(FOUNDATION_PROFILE.option_count)
+            .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?
+            .into_iter()
+            .find(|position| {
+                position.schedule_position() == schedule_position
+                    && position.key_kind()
+                        == SelectedEvaluatorEntryKind::Galois {
+                            galois_element,
+                            catalog_level,
+                        }
+            })
+            .ok_or(CommonProofVerifierError::InvalidApplicationStatement)?;
+        if context.root_role() != SetupPublicPolynomialRootRole::GaloisCommon
+            || context.schedule_position() != Some(schedule_position)
+            || context
+                .context_hash()
+                .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?
+                != recomputed_context_hash
+        {
+            return Err(CommonProofVerifierError::InvalidApplicationStatement);
+        }
+        Ok(Self {
+            position,
+            auxiliary_component_root: recomputed_root,
             source_material_root: None,
             source_stream_descriptor: None,
         })
@@ -2569,7 +2641,7 @@ impl VerifiedEvaluatorKeyStorePreflight {
                     != component
                         .material()
                         .topology()
-                        .quarter_polynomial_degree_bound_exclusive()
+                        .half_polynomial_degree_bound_exclusive()
                         .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?
                 || usize::try_from(runtime_tree.row_width()).ok()
                     != Some(expected_ordered_column_count)
@@ -3019,7 +3091,7 @@ impl VerifiedEvaluatorKeyStore {
                     != component
                         .material()
                         .topology()
-                        .quarter_polynomial_degree_bound_exclusive()
+                        .half_polynomial_degree_bound_exclusive()
                         .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?
                 || usize::try_from(runtime_tree.row_width()).ok()
                     != Some(expected_ordered_column_count)

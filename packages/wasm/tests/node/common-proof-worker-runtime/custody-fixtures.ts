@@ -25,6 +25,7 @@ import type { TranscriptCoreKernel } from '../../../src/transcript-core-bridge/k
 
 import {
     createMockKernelRuntime,
+    createResetSafeCommonProofCursorManifest,
     createVerifiedApplicationFixture,
     memoryBytes,
     noSecondPollValue,
@@ -108,28 +109,7 @@ type InstalledCustodyCommonProofExecutionEnvironment = Awaited<
 
 export const createCommonProofGenerationCursorFixtureBytes = (
     _kernel?: TranscriptCoreKernel,
-): Uint8Array<ArrayBuffer> =>
-    Uint8Array.of(
-        0x53,
-        0x4c,
-        0x43,
-        0x50,
-        0x43,
-        0x4d,
-        0x30,
-        0x33,
-        0x03,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-    );
+): Uint8Array<ArrayBuffer> => createResetSafeCommonProofCursorManifest();
 
 const foundationWitnessServiceLimits: DurableStateWitnessServiceLimits =
     Object.freeze({
@@ -1384,18 +1364,15 @@ export const createInstalledCommonProofGenerationFixture = (
             );
             return 0;
         },
-        sealed_lattice_common_proof_generation_copy_checkpoint_cursor_manifest: (
-            operationHandle,
-            outputPointer,
-            outputByteLength,
-        ) => {
-            expect(operationHandle).toBe(301);
-            expect(outputByteLength).toBe(checkpointCursorBytes.byteLength);
-            memoryBytes(memory, outputPointer, outputByteLength).set(
-                checkpointCursorBytes,
-            );
-            return 0;
-        },
+        sealed_lattice_common_proof_generation_copy_checkpoint_cursor_manifest:
+            (operationHandle, outputPointer, outputByteLength) => {
+                expect(operationHandle).toBe(301);
+                expect(outputByteLength).toBe(checkpointCursorBytes.byteLength);
+                memoryBytes(memory, outputPointer, outputByteLength).set(
+                    checkpointCursorBytes,
+                );
+                return 0;
+            },
         sealed_lattice_common_proof_generation_copy_checkpoint_stable_attempt_binding_hash:
             (operationHandle, outputPointer, outputByteLength) => {
                 expect(operationHandle).toBe(301);
@@ -1718,10 +1695,8 @@ export const openReservedInstalledCommonProofGenerationFixture = async (
         >;
     }>
 > => {
-    const {
-        generationFamilyAdapterHandle = 101,
-        ...generationFixtureOptions
-    } = options;
+    const { generationFamilyAdapterHandle = 101, ...generationFixtureOptions } =
+        options;
     const checkpointLineageReservation =
         await reserveCommonProofCheckpointLineageInInstalledCustodyWorker(
             host.installedHost,
@@ -1731,19 +1706,16 @@ export const openReservedInstalledCommonProofGenerationFixture = async (
             checkpointLineageReservation,
         );
     let generationFamilyAdapter:
-        | ReturnType<
-              typeof openClosedWorkerCommonProofGenerationFamilyAdapter
-          >
+        | ReturnType<typeof openClosedWorkerCommonProofGenerationFamilyAdapter>
         | undefined;
     try {
-        const generationFixture =
-            createInstalledCommonProofGenerationFixture(
-                checkpointCursorBytes,
-                {
-                    ...generationFixtureOptions,
-                    checkpointLineageIdentifier,
-                },
-            );
+        const generationFixture = createInstalledCommonProofGenerationFixture(
+            checkpointCursorBytes,
+            {
+                ...generationFixtureOptions,
+                checkpointLineageIdentifier,
+            },
+        );
         generationFamilyAdapter =
             openClosedWorkerCommonProofGenerationFamilyAdapter(
                 generationFixture.freshRuntime,

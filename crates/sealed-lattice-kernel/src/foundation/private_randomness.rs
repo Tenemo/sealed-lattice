@@ -47,7 +47,7 @@ const APPLICATION_SLOT_HASH_DOMAIN: &str = "sealed-lattice/proof/application-slo
 const SETUP_STRUCTURED_COMMITMENT_OPENING_CONTEXT_HASH_DOMAIN: &str =
     "sealed-lattice/setup/structured-commitment-opening-context/v3";
 
-const RESET_SAFE_PROOF_FAMILIES: [u16; 9] = [
+const RESET_SAFE_PROOF_FAMILIES: [u16; 8] = [
     ProofFamilyIdentifiers::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER,
     ProofFamilyIdentifiers::AGGREGATE_THRESHOLD_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
     ProofFamilyIdentifiers::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER,
@@ -56,12 +56,9 @@ const RESET_SAFE_PROOF_FAMILIES: [u16; 9] = [
     ProofFamilyIdentifiers::RELINEARIZATION_ROUND_TWO_STATEMENT_SCHEMA_IDENTIFIER,
     ProofFamilyIdentifiers::GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
     TARGET_DECRYPTION_SHARE_PROOF_FAMILY,
-    ProofFamilyIdentifiers::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
 ];
-const PUBLIC_ONLY_PROOF_FAMILIES: [u16; 2] = [
-    ProofFamilyIdentifiers::COLLECTIVE_PUBLIC_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
-    ProofFamilyIdentifiers::RKG_ROUND_ONE_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
-];
+const PUBLIC_ONLY_PROOF_FAMILIES: [u16; 3] =
+    ProofFamilyIdentifiers::PUBLIC_ONLY_FAMILY_SCHEMA_IDENTIFIERS;
 
 mod domain;
 mod material;
@@ -90,27 +87,16 @@ pub(crate) struct PrivateRandomnessKmacInputClassAccounting {
     attempt_identifier_derivation_count: u64,
     private_stream_block_count: u64,
     committed_material_inner_derivation_count: u64,
-    total_count: u64,
 }
 
 impl PrivateRandomnessKmacInputClassAccounting {
-    pub(crate) const fn zero() -> Self {
-        Self {
-            action_key_hierarchy_derivation_count: 0,
-            attempt_identifier_derivation_count: 0,
-            private_stream_block_count: 0,
-            committed_material_inner_derivation_count: 0,
-            total_count: 0,
-        }
-    }
-
     pub(crate) fn checked_new(
         action_key_hierarchy_derivation_count: u64,
         attempt_identifier_derivation_count: u64,
         private_stream_block_count: u64,
         committed_material_inner_derivation_count: u64,
     ) -> Option<Self> {
-        let total_count = action_key_hierarchy_derivation_count
+        action_key_hierarchy_derivation_count
             .checked_add(attempt_identifier_derivation_count)?
             .checked_add(private_stream_block_count)?
             .checked_add(committed_material_inner_derivation_count)?;
@@ -119,7 +105,6 @@ impl PrivateRandomnessKmacInputClassAccounting {
             attempt_identifier_derivation_count,
             private_stream_block_count,
             committed_material_inner_derivation_count,
-            total_count,
         })
     }
 
@@ -135,51 +120,6 @@ impl PrivateRandomnessKmacInputClassAccounting {
                 .checked_add(right.committed_material_inner_derivation_count)?,
         )
     }
-
-    pub(crate) fn checked_multiply(self, multiplicity: u64) -> Option<Self> {
-        Self::checked_new(
-            self.action_key_hierarchy_derivation_count
-                .checked_mul(multiplicity)?,
-            self.attempt_identifier_derivation_count
-                .checked_mul(multiplicity)?,
-            self.private_stream_block_count.checked_mul(multiplicity)?,
-            self.committed_material_inner_derivation_count
-                .checked_mul(multiplicity)?,
-        )
-    }
-
-    pub(crate) const fn action_key_hierarchy_derivation_count(self) -> u64 {
-        self.action_key_hierarchy_derivation_count
-    }
-
-    pub(crate) const fn attempt_identifier_derivation_count(self) -> u64 {
-        self.attempt_identifier_derivation_count
-    }
-
-    pub(crate) const fn private_stream_block_count(self) -> u64 {
-        self.private_stream_block_count
-    }
-
-    pub(crate) const fn committed_material_inner_derivation_count(self) -> u64 {
-        self.committed_material_inner_derivation_count
-    }
-
-    pub(crate) const fn total_count(self) -> u64 {
-        self.total_count
-    }
-}
-
-/// Source-owned ceremony-wide count for the selected participants' action
-/// key hierarchies and their one shared reset-safe setup attempt each.
-pub(crate) fn selected_action_root_private_randomness_kmac_input_accounting()
--> Option<PrivateRandomnessKmacInputClassAccounting> {
-    let participant_count = u64::from(super::FOUNDATION_PROFILE.participant_count);
-    PrivateRandomnessKmacInputClassAccounting::checked_new(
-        participant_count,
-        participant_count,
-        0,
-        0,
-    )
 }
 
 /// Maximum distinct block inputs consumed by one byte-oriented stream. A

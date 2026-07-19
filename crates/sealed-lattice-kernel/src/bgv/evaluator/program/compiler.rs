@@ -16,15 +16,40 @@ use super::{
 #[cfg(test)]
 use crate::bgv::evaluator::top_k::ScheduledMultiplicationLevelTrace;
 use crate::bgv::evaluator::top_k::{
-    CANONICAL_TARGET_CIPHERTEXT_LEVEL, EvaluatorModulusSchedule, RANK_LOOKUP_BABY_STEP_COUNT,
-    SELECTED_EVALUATOR_MODULUS_SCHEDULE, SELECTED_EVALUATOR_WORKING_LEVEL, comparison_polynomials,
-    direct_comparison_baby_step_count, galois_power, generator_exponent_or_conjugated,
-    generator_inverse_power_basis_for_exponent, generator_power_basis_for_exponent,
-    interpolate_coefficients, scheduled_power_table_products,
+    CANONICAL_TARGET_CIPHERTEXT_LEVEL, EvaluatorModulusSchedule, NEGATIVE_ONE_GALOIS_ELEMENT,
+    NEGATIVE_SEVEN_GALOIS_ELEMENT, POSITIVE_THIRTY_EIGHT_GALOIS_ELEMENT,
+    RANK_LOOKUP_BABY_STEP_COUNT, SELECTED_EVALUATOR_MODULUS_SCHEDULE, comparison_polynomials,
+    direct_comparison_baby_step_count, forward_pair_window_rotation_path, interpolate_coefficients,
+    inverse_pair_shift_rotation_path, scheduled_power_table_products,
 };
+
+#[cfg(test)]
+use super::super::top_k::SELECTED_EVALUATOR_WORKING_LEVEL;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 struct Register(u32);
+
+const SELECTED_PAIR_COUNT: usize = SELECTED_OPTION_COUNT * (SELECTED_OPTION_COUNT - 1) / 2;
+// Ten is the smallest fixed width that covers the nineteen pair windows in
+// two tiles. Widths eleven through fifteen retain more ciphertexts with the
+// same ten Galois phases. Widths sixteen through eighteen save only one phase
+// while sharply increasing the live set, width nine requires a third tile and
+// four additional phases, and the one-tile width nineteen exceeds the
+// execution-memory bound once its live ciphertexts and resident key-switch
+// workspace coexist.
+const SELECTED_PAIR_WINDOW_TILE_WIDTH: usize = 10;
+
+struct PreparedPairWindow {
+    shift: usize,
+    register: Register,
+    rotation_path: Box<[usize]>,
+    next_rotation_ordinal: usize,
+}
+
+struct PreparedPairWindowTerms {
+    higher_beats_lower: Register,
+    lower_beats_higher: PreparedPairWindow,
+}
 
 #[derive(Default)]
 struct ConstantCatalog {
@@ -185,22 +210,6 @@ impl<'catalog> ProgramBuilder<'catalog> {
         )
     }
 
-    fn subtract(&mut self, left: Register, right: Register) -> CanonicalResult<Register> {
-        let left_state = self.state(left);
-        if left_state != self.state(right) {
-            return Err(program_error(
-                "compiled evaluator subtraction operands are not aligned",
-            ));
-        }
-        self.emit_register(
-            EvaluatorOpcode::CiphertextSubtract,
-            &[left, right],
-            0,
-            None,
-            left_state,
-        )
-    }
-
     fn negate(&mut self, register: Register) -> CanonicalResult<Register> {
         self.emit_register(
             EvaluatorOpcode::CiphertextNegate,
@@ -261,10 +270,6 @@ impl<'catalog> ProgramBuilder<'catalog> {
             Some(constant_hash),
             self.state(register),
         )
-    }
-
-    fn multiply(&mut self, left: Register, right: Register) -> CanonicalResult<Register> {
-        self.multiply_with_modulus_drop_count(left, right, 1)
     }
 
     fn multiply_with_modulus_drop_count(
@@ -454,7 +459,7 @@ pub(crate) fn selected_evaluator_program_set() -> CanonicalResult<EvaluatorProgr
             .checked_sub(FOUNDATION_PROFILE.minimum_score)
             .ok_or_else(|| program_error("selected score range is inverted"))?,
     );
-    let score_domain_max = score_span
+    let maximum_aggregate_score_difference = score_span
         .checked_mul(u64::from(FOUNDATION_PROFILE.participant_count))
         .ok_or_else(|| program_error("selected comparison domain overflowed u64"))?;
 
@@ -464,7 +469,7 @@ pub(crate) fn selected_evaluator_program_set() -> CanonicalResult<EvaluatorProgr
         streams.push(compile_stream(
             &mut constants,
             u16::try_from(top_count).expect("selected top count fits u16"),
-            score_domain_max,
+            maximum_aggregate_score_difference,
             &SELECTED_EVALUATOR_MODULUS_SCHEDULE,
             &DATA_PRIMES,
             CANONICAL_TARGET_CIPHERTEXT_LEVEL,
@@ -473,8 +478,33 @@ pub(crate) fn selected_evaluator_program_set() -> CanonicalResult<EvaluatorProgr
     EvaluatorProgramSet::new(constants.into_sorted_constants(), streams)
 }
 
-pub(crate) fn selected_evaluator_program_set_bytes() -> CanonicalResult<Vec<u8>> {
-    selected_evaluator_program_set()?.encode()
+#[cfg(test)]
+pub(crate) fn selected_evaluator_program_set_with_pair_window_tile_width(
+    pair_window_tile_width: usize,
+) -> CanonicalResult<EvaluatorProgramSet> {
+    let score_span = u64::from(
+        FOUNDATION_PROFILE
+            .maximum_score
+            .checked_sub(FOUNDATION_PROFILE.minimum_score)
+            .ok_or_else(|| program_error("selected score range is inverted"))?,
+    );
+    let maximum_aggregate_score_difference = score_span
+        .checked_mul(u64::from(FOUNDATION_PROFILE.participant_count))
+        .ok_or_else(|| program_error("selected comparison domain overflowed u64"))?;
+    let mut constants = ConstantCatalog::default();
+    let mut streams = Vec::with_capacity(SELECTED_OPTION_COUNT);
+    for top_count in 1..=SELECTED_OPTION_COUNT {
+        streams.push(compile_stream_with_pair_window_tile_width(
+            &mut constants,
+            u16::try_from(top_count).expect("selected top count fits u16"),
+            maximum_aggregate_score_difference,
+            &SELECTED_EVALUATOR_MODULUS_SCHEDULE,
+            &DATA_PRIMES,
+            CANONICAL_TARGET_CIPHERTEXT_LEVEL,
+            pair_window_tile_width,
+        )?);
+    }
+    EvaluatorProgramSet::new(constants.into_sorted_constants(), streams)
 }
 
 #[cfg(test)]
@@ -485,39 +515,131 @@ pub(crate) struct CandidateCompiledEvaluatorMeasurement {
 }
 
 #[cfg(test)]
-pub(crate) fn compile_candidate_evaluator_program_measurement(
-    modulus_schedule: &EvaluatorModulusSchedule,
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct CandidateEvaluatorRecurrenceTrace {
+    constants: Vec<EvaluatorConstant>,
+    streams: Vec<EvaluatorInstructionStream>,
+}
+
+#[cfg(test)]
+impl CandidateEvaluatorRecurrenceTrace {
+    pub(crate) fn constants(&self) -> &[EvaluatorConstant] {
+        &self.constants
+    }
+
+    pub(crate) fn streams(&self) -> &[EvaluatorInstructionStream] {
+        &self.streams
+    }
+
+    pub(crate) fn encode(&self) -> CanonicalResult<Vec<u8>> {
+        super::codec::encode_candidate_recurrence_trace(&self.constants, &self.streams)
+    }
+
+    pub(crate) fn decode(bytes: &[u8]) -> CanonicalResult<Self> {
+        let (constants, streams) = super::codec::decode_candidate_recurrence_trace(bytes)?;
+        Ok(Self { constants, streams })
+    }
+}
+
+#[cfg(test)]
+const FACTOR_FOUR_CANDIDATE_MODULUS_SCHEDULE: EvaluatorModulusSchedule = EvaluatorModulusSchedule {
+    pre_comparison_drop_count: 0,
+    comparison_depth_drop_counts: [2, 1, 1, 1, 1, 1, 1, 2],
+    rank_depth_drop_counts: [5, 1, 2, 0, 2],
+};
+
+/// Compiles the exact factor-four candidate into the same instruction and
+/// constant types as the runtime program. This deliberately returns a
+/// compiler-owned recurrence trace instead of a validated selected-suite
+/// program: the candidate's first multiplication is above the currently
+/// frozen relinearization-key catalog level, so it must not be mistaken for
+/// an executable selected-suite program before the suite is replaced.
+#[cfg(test)]
+pub(crate) fn compile_factor_four_candidate_recurrence_trace(
     target_level: usize,
     data_primes: &[u64],
-) -> CanonicalResult<CandidateCompiledEvaluatorMeasurement> {
+) -> CanonicalResult<CandidateEvaluatorRecurrenceTrace> {
     let score_span = u64::from(
         FOUNDATION_PROFILE
             .maximum_score
             .checked_sub(FOUNDATION_PROFILE.minimum_score)
             .ok_or_else(|| program_error("selected score range is inverted"))?,
     );
-    let score_domain_max = score_span
+    let maximum_aggregate_score_difference = score_span
         .checked_mul(u64::from(FOUNDATION_PROFILE.participant_count))
         .ok_or_else(|| program_error("selected comparison domain overflowed u64"))?;
     let mut constants = ConstantCatalog::default();
-    let mut minimum_instruction_count = usize::MAX;
-    let mut maximum_instruction_count = 0_usize;
+    let mut streams = Vec::with_capacity(SELECTED_OPTION_COUNT);
     for top_count in 1..=SELECTED_OPTION_COUNT {
-        let stream = compile_stream(
+        streams.push(compile_stream(
             &mut constants,
             u16::try_from(top_count).expect("selected top count fits u16"),
-            score_domain_max,
-            modulus_schedule,
+            maximum_aggregate_score_difference,
+            &FACTOR_FOUR_CANDIDATE_MODULUS_SCHEDULE,
             data_primes,
             target_level,
-        )?;
-        minimum_instruction_count = minimum_instruction_count.min(stream.instructions().len());
-        maximum_instruction_count = maximum_instruction_count.max(stream.instructions().len());
+        )?);
     }
+    Ok(CandidateEvaluatorRecurrenceTrace {
+        constants: constants.into_sorted_constants(),
+        streams,
+    })
+}
+
+#[cfg(test)]
+pub(crate) fn compile_candidate_evaluator_program_measurement(
+    modulus_schedule: &EvaluatorModulusSchedule,
+    target_level: usize,
+    data_primes: &[u64],
+) -> CanonicalResult<CandidateCompiledEvaluatorMeasurement> {
+    let program_set =
+        compile_candidate_evaluator_program_set(modulus_schedule, target_level, data_primes)?;
+    let minimum_instruction_count = program_set
+        .streams()
+        .iter()
+        .map(|stream| stream.instructions().len())
+        .min()
+        .expect("candidate evaluator has a stream for every selected top count");
+    let maximum_instruction_count = program_set
+        .streams()
+        .iter()
+        .map(|stream| stream.instructions().len())
+        .max()
+        .expect("candidate evaluator has a stream for every selected top count");
     Ok(CandidateCompiledEvaluatorMeasurement {
         minimum_instruction_count,
         maximum_instruction_count,
     })
+}
+
+#[cfg(test)]
+pub(crate) fn compile_candidate_evaluator_program_set(
+    modulus_schedule: &EvaluatorModulusSchedule,
+    target_level: usize,
+    data_primes: &[u64],
+) -> CanonicalResult<EvaluatorProgramSet> {
+    let score_span = u64::from(
+        FOUNDATION_PROFILE
+            .maximum_score
+            .checked_sub(FOUNDATION_PROFILE.minimum_score)
+            .ok_or_else(|| program_error("selected score range is inverted"))?,
+    );
+    let maximum_aggregate_score_difference = score_span
+        .checked_mul(u64::from(FOUNDATION_PROFILE.participant_count))
+        .ok_or_else(|| program_error("selected comparison domain overflowed u64"))?;
+    let mut constants = ConstantCatalog::default();
+    let mut streams = Vec::with_capacity(SELECTED_OPTION_COUNT);
+    for top_count in 1..=SELECTED_OPTION_COUNT {
+        streams.push(compile_stream(
+            &mut constants,
+            u16::try_from(top_count).expect("selected top count fits u16"),
+            maximum_aggregate_score_difference,
+            modulus_schedule,
+            data_primes,
+            target_level,
+        )?);
+    }
+    EvaluatorProgramSet::new(constants.into_sorted_constants(), streams)
 }
 
 #[cfg(test)]
@@ -578,10 +700,30 @@ pub(crate) fn compiled_prepared_power_instruction_count(
 fn compile_stream(
     constants: &mut ConstantCatalog,
     top_count: u16,
-    score_domain_max: u64,
+    maximum_aggregate_score_difference: u64,
     modulus_schedule: &EvaluatorModulusSchedule,
     data_primes: &[u64],
     target_level: usize,
+) -> CanonicalResult<EvaluatorInstructionStream> {
+    compile_stream_with_pair_window_tile_width(
+        constants,
+        top_count,
+        maximum_aggregate_score_difference,
+        modulus_schedule,
+        data_primes,
+        target_level,
+        SELECTED_PAIR_WINDOW_TILE_WIDTH,
+    )
+}
+
+fn compile_stream_with_pair_window_tile_width(
+    constants: &mut ConstantCatalog,
+    top_count: u16,
+    maximum_aggregate_score_difference: u64,
+    modulus_schedule: &EvaluatorModulusSchedule,
+    data_primes: &[u64],
+    target_level: usize,
+    pair_window_tile_width: usize,
 ) -> CanonicalResult<EvaluatorInstructionStream> {
     let mut builder = ProgramBuilder::new_with_data_primes(constants, data_primes)?;
     let working_level = builder.working_level;
@@ -592,13 +734,13 @@ fn compile_stream(
             "compiled evaluator schedule does not consume its exact target-level budget",
         ));
     }
-    let aggregate_input = builder.input();
-    let packed_scores = pack_direct_score_slots(&mut builder, aggregate_input)?;
+    let aggregate_pair_differences = builder.input();
     let packed_ranks = evaluate_packed_ranks(
         &mut builder,
-        packed_scores,
-        score_domain_max,
+        aggregate_pair_differences,
+        maximum_aggregate_score_difference,
         modulus_schedule,
+        pair_window_tile_width,
     )?;
     let (target_identifier, target_order) = project_sparse_target(
         &mut builder,
@@ -617,25 +759,21 @@ fn compile_stream(
     builder.finish(top_count, target_identifier, target_order)
 }
 
-fn pack_direct_score_slots(
-    builder: &mut ProgramBuilder<'_>,
-    aggregate: Register,
-) -> CanonicalResult<Register> {
-    let aggregate = builder.normalize(aggregate)?;
-    let selected_scores =
-        builder.plaintext_multiply_slots(aggregate, slot_selector(0..SELECTED_OPTION_COUNT)?)?;
-    let duplicated_scores = rotate_inverse(builder, selected_scores, SELECTED_OPTION_COUNT)?;
-    builder.sum_aligned(&[selected_scores, duplicated_scores])
-}
-
 fn evaluate_packed_ranks(
     builder: &mut ProgramBuilder<'_>,
-    packed_scores: Register,
-    score_domain_max: u64,
+    aggregate_pair_differences: Register,
+    maximum_aggregate_score_difference: u64,
     modulus_schedule: &EvaluatorModulusSchedule,
+    pair_window_tile_width: usize,
 ) -> CanonicalResult<Register> {
-    let (_, greater_or_equal_polynomial) = comparison_polynomials(score_domain_max)?;
-    let comparison_point_count = score_domain_max
+    if !(1..SELECTED_OPTION_COUNT).contains(&pair_window_tile_width) {
+        return Err(program_error(
+            "compiled evaluator pair-window tile width is outside the selected geometry",
+        ));
+    }
+    let (_, greater_or_equal_polynomial) =
+        comparison_polynomials(maximum_aggregate_score_difference)?;
+    let comparison_point_count = maximum_aggregate_score_difference
         .checked_mul(2)
         .and_then(|maximum| maximum.checked_add(1))
         .and_then(|point_count| usize::try_from(point_count).ok())
@@ -645,30 +783,15 @@ fn evaluate_packed_ranks(
             "selected comparison interpolation has the wrong roster-derived degree",
         ));
     }
-    let mut comparison_input_sum = None;
-    let mut pair_windows = Vec::with_capacity(SELECTED_OPTION_COUNT - 1);
-    let mut next_window_offset = 0_usize;
-    for shift in 1..SELECTED_OPTION_COUNT {
-        let pair_window_size = SELECTED_OPTION_COUNT - shift;
-        pair_windows.push((shift, next_window_offset, pair_window_size));
-        let shifted_scores = rotate_positive(builder, packed_scores, galois_power(shift)?)?;
-        let difference = builder.subtract(packed_scores, shifted_scores)?;
-        let difference = builder.normalize(difference)?;
-        let shifted_difference =
-            builder.plaintext_add_slots(difference, broadcast_slots(score_domain_max)?)?;
-        let shifted_difference = builder.normalize(shifted_difference)?;
-        let lower_pair_inputs =
-            builder.plaintext_multiply_slots(shifted_difference, lower_pair_mask(shift)?)?;
-        let windowed_inputs = if next_window_offset == 0 {
-            lower_pair_inputs
-        } else {
-            rotate_inverse(builder, lower_pair_inputs, next_window_offset)?
-        };
-        builder.add_to_aligned_sum(&mut comparison_input_sum, windowed_inputs)?;
-        next_window_offset += pair_window_size;
-    }
-    let comparison_inputs = comparison_input_sum
-        .ok_or_else(|| program_error("selected evaluator produced no comparison inputs"))?;
+    let aggregate_pair_differences = builder.normalize(aggregate_pair_differences)?;
+    // The ballot relation binds every slot outside the canonical pair-difference
+    // prefix to zero. Reapplying that slot mask is plaintext-equivalent, but its
+    // dense coefficient encoding needlessly amplifies ciphertext error before
+    // both polynomial evaluations.
+    let comparison_inputs = builder.plaintext_add_slots(
+        aggregate_pair_differences,
+        pair_difference_shift_slots(maximum_aggregate_score_difference)?,
+    )?;
     let comparison_input_target_level = builder
         .state(comparison_inputs)
         .level
@@ -676,7 +799,7 @@ fn evaluate_packed_ranks(
         .ok_or_else(|| program_error("compiled comparison pre-drop exceeds the active level"))?;
     let comparison_inputs =
         builder.modulus_switch_to(comparison_inputs, comparison_input_target_level)?;
-    let baby_step_count = direct_comparison_baby_step_count(score_domain_max)?;
+    let baby_step_count = direct_comparison_baby_step_count(maximum_aggregate_score_difference)?;
     let comparison_outputs = evaluate_polynomial(
         builder,
         comparison_inputs,
@@ -695,37 +818,112 @@ fn evaluate_packed_ranks(
         ));
     }
 
-    let mut rank_sum = None;
-    for (shift, window_offset, pair_window_size) in pair_windows {
-        let comparison_outputs_normalized = builder.normalize(comparison_outputs)?;
-        let windowed_lower_beats_higher = builder.plaintext_multiply_slots(
-            comparison_outputs_normalized,
-            slot_selector(window_offset..window_offset + pair_window_size)?,
-        )?;
-        let lower_beats_higher = if window_offset == 0 {
-            windowed_lower_beats_higher
-        } else {
-            rotate_positive(
-                builder,
-                windowed_lower_beats_higher,
-                galois_power(window_offset)?,
-            )?
-        };
-        let lower_pair_mask = lower_pair_mask(shift)?;
-        let lower_beats_higher = builder.normalize(lower_beats_higher)?;
-        let lower_beats_higher_for_lower_slots =
-            builder.plaintext_multiply_slots(lower_beats_higher, lower_pair_mask.clone())?;
-        let lower_for_negation = builder.normalize(lower_beats_higher_for_lower_slots)?;
-        let higher_beats_lower_for_lower_slots = builder.negate(lower_for_negation)?;
-        let higher_beats_lower_for_lower_slots =
-            builder.plaintext_add_slots(higher_beats_lower_for_lower_slots, lower_pair_mask)?;
-        let lower_beats_higher_for_return = builder
-            .modulus_switch_to(lower_beats_higher_for_lower_slots, comparison_output_level)?;
-        let lower_beats_higher_at_higher_slot =
-            rotate_inverse(builder, lower_beats_higher_for_return, shift)?;
-        builder.add_to_aligned_sum(&mut rank_sum, higher_beats_lower_for_lower_slots)?;
-        builder.add_to_aligned_sum(&mut rank_sum, lower_beats_higher_at_higher_slot)?;
+    let comparison_outputs_normalized = builder.normalize(comparison_outputs)?;
+    let mut pair_window_geometries = Vec::with_capacity(SELECTED_OPTION_COUNT - 1);
+    let mut window_offset = 0_usize;
+    for shift in 1..SELECTED_OPTION_COUNT {
+        let pair_window_size = SELECTED_OPTION_COUNT - shift;
+        pair_window_geometries.push((shift, window_offset, pair_window_size));
+        window_offset += pair_window_size;
     }
+    if window_offset != SELECTED_PAIR_COUNT {
+        return Err(program_error(
+            "selected evaluator did not consume the complete pair-difference layout",
+        ));
+    }
+
+    let mut rank_sum = None;
+    for geometry_tile in pair_window_geometries.chunks(pair_window_tile_width) {
+        let mut prepared_windows = Vec::with_capacity(geometry_tile.len());
+        for (shift, window_offset, pair_window_size) in geometry_tile.iter().copied() {
+            let windowed_lower_beats_higher = builder.plaintext_multiply_slots(
+                comparison_outputs_normalized,
+                slot_selector(window_offset..window_offset + pair_window_size)?,
+            )?;
+            prepared_windows.push(PreparedPairWindow {
+                shift,
+                register: windowed_lower_beats_higher,
+                rotation_path: forward_pair_window_rotation_path(window_offset)?.into_boxed_slice(),
+                next_rotation_ordinal: 0,
+            });
+        }
+
+        // Every window depends only on its disjoint masked input until the
+        // final ordered sum. Interleaving equal-key path segments therefore
+        // preserves each path while making the canonical stream itself own
+        // the one-key-at-a-time execution phases.
+        rotate_prepared_pair_window_phase(
+            builder,
+            &mut prepared_windows,
+            POSITIVE_THIRTY_EIGHT_GALOIS_ELEMENT,
+        )?;
+        rotate_prepared_pair_window_phase(
+            builder,
+            &mut prepared_windows,
+            NEGATIVE_SEVEN_GALOIS_ELEMENT,
+        )?;
+        rotate_prepared_pair_window_phase(
+            builder,
+            &mut prepared_windows,
+            NEGATIVE_ONE_GALOIS_ELEMENT,
+        )?;
+        require_completed_pair_window_paths(&prepared_windows)?;
+
+        let mut prepared_terms = Vec::with_capacity(prepared_windows.len());
+        for prepared_window in prepared_windows {
+            let lower_pair_mask = lower_pair_mask(prepared_window.shift)?;
+            // The pre-rotation selector has exact source support
+            // `window_offset..window_offset + pair_window_size`. The directed
+            // Galois path maps that support bijectively to
+            // `0..pair_window_size`, which is this lower-pair mask. Applying
+            // the mask again is plaintext-equivalent, but it would convolve
+            // the error introduced by the Galois key switches with the dense
+            // coefficient encoding. Keep the mask only for constructing
+            // `1 - lower_beats_higher` below.
+            let lower_beats_higher_for_lower_slots = builder.normalize(prepared_window.register)?;
+            let lower_for_negation = builder.normalize(lower_beats_higher_for_lower_slots)?;
+            let higher_beats_lower = builder.negate(lower_for_negation)?;
+            let higher_beats_lower =
+                builder.plaintext_add_slots(higher_beats_lower, lower_pair_mask)?;
+            let lower_beats_higher_for_return = builder
+                .modulus_switch_to(lower_beats_higher_for_lower_slots, comparison_output_level)?;
+            prepared_terms.push(PreparedPairWindowTerms {
+                higher_beats_lower,
+                lower_beats_higher: PreparedPairWindow {
+                    shift: prepared_window.shift,
+                    register: lower_beats_higher_for_return,
+                    rotation_path: inverse_pair_shift_rotation_path(prepared_window.shift)?
+                        .into_boxed_slice(),
+                    next_rotation_ordinal: 0,
+                },
+            });
+        }
+
+        rotate_prepared_pair_window_term_phase(
+            builder,
+            &mut prepared_terms,
+            NEGATIVE_SEVEN_GALOIS_ELEMENT,
+        )?;
+        rotate_prepared_pair_window_term_phase(
+            builder,
+            &mut prepared_terms,
+            NEGATIVE_ONE_GALOIS_ELEMENT,
+        )?;
+        for prepared_terms in &prepared_terms {
+            require_completed_pair_window_paths(core::slice::from_ref(
+                &prepared_terms.lower_beats_higher,
+            ))?;
+        }
+
+        // Preserve the original higher-term then returned-lower-term order so
+        // the ciphertext output is identical, not merely plaintext-equivalent.
+        for prepared_terms in prepared_terms {
+            builder.add_to_aligned_sum(&mut rank_sum, prepared_terms.higher_beats_lower)?;
+            builder
+                .add_to_aligned_sum(&mut rank_sum, prepared_terms.lower_beats_higher.register)?;
+        }
+    }
+
     rank_sum.ok_or_else(|| program_error("selected evaluator produced no packed-rank terms"))
 }
 
@@ -931,7 +1129,23 @@ fn evaluate_polynomial_from_prepared_powers(
         ));
     }
 
-    let mut terms = Vec::new();
+    let accumulated_term_level = (0..prepared_powers.block_count)
+        .map(|block_index| {
+            prepared_polynomial_block_term_level(
+                builder,
+                prepared_powers,
+                coefficients,
+                block_index,
+            )
+        })
+        .collect::<CanonicalResult<Vec<_>>>()?
+        .into_iter()
+        .flatten()
+        .min();
+    let Some(accumulated_term_level) = accumulated_term_level else {
+        return builder.plaintext_multiply_scalar(prepared_powers.working_input, 0);
+    };
+    let mut accumulated_terms = None;
     for (block_index, giant_power) in prepared_powers
         .giant_powers
         .iter()
@@ -955,27 +1169,83 @@ fn evaluate_polynomial_from_prepared_powers(
             &prepared_powers.baby_powers,
             block_coefficients,
         )?;
-        if block_index == 0 {
-            terms.push(block_value);
-            continue;
-        }
-        let giant_power =
-            giant_power.ok_or_else(|| program_error("compiled evaluator omitted a giant power"))?;
-        if block_coefficients[1..]
-            .iter()
-            .all(|coefficient| *coefficient == 0)
-        {
-            terms.push(
-                builder.plaintext_multiply_scalar(giant_power.register, block_coefficients[0])?,
-            );
+        let term = if block_index == 0 {
+            block_value
         } else {
-            terms.push(builder.multiply_without_drop(block_value, giant_power.register)?);
-        }
+            let giant_power = giant_power
+                .ok_or_else(|| program_error("compiled evaluator omitted a giant power"))?;
+            if block_coefficients[1..]
+                .iter()
+                .all(|coefficient| *coefficient == 0)
+            {
+                builder.plaintext_multiply_scalar(giant_power.register, block_coefficients[0])?
+            } else {
+                builder.multiply_without_drop(block_value, giant_power.register)?
+            }
+        };
+        // The original ordered fold aligns every block term to this global
+        // minimum. Deriving it before emission lets each term be aligned,
+        // normalized, and folded immediately, retaining the exact operation
+        // order and ciphertext output without keeping every term resident.
+        let term = builder.modulus_switch_to(term, accumulated_term_level)?;
+        let term = builder.normalize(term)?;
+        accumulated_terms = Some(match accumulated_terms {
+            Some(accumulated_terms) => builder.add(accumulated_terms, term)?,
+            None => term,
+        });
     }
-    if terms.is_empty() {
-        return builder.plaintext_multiply_scalar(prepared_powers.working_input, 0);
+    accumulated_terms.ok_or_else(|| program_error("compiled polynomial produced no block terms"))
+}
+
+fn prepared_polynomial_block_term_level(
+    builder: &ProgramBuilder<'_>,
+    prepared_powers: &PreparedRegisterPowers,
+    coefficients: &[u64],
+    block_index: usize,
+) -> CanonicalResult<Option<usize>> {
+    let start = block_index
+        .checked_mul(prepared_powers.baby_step_count)
+        .ok_or_else(|| program_error("compiled polynomial block offset overflowed"))?;
+    let end = coefficients
+        .len()
+        .min(start + prepared_powers.baby_step_count);
+    let block_coefficients = coefficients
+        .get(start..end)
+        .ok_or_else(|| program_error("compiled polynomial block is outside its coefficients"))?;
+    if block_coefficients
+        .iter()
+        .all(|coefficient| *coefficient == 0)
+    {
+        return Ok(None);
     }
-    builder.sum_aligned(&terms)
+
+    let block_value_level = block_coefficients
+        .iter()
+        .enumerate()
+        .skip(1)
+        .filter(|(_, coefficient)| **coefficient != 0)
+        .filter_map(|(power, _)| {
+            prepared_powers.baby_powers[power].map(|power| builder.state(power.register).level)
+        })
+        .min()
+        .unwrap_or_else(|| builder.state(prepared_powers.working_input).level);
+    if block_index == 0 {
+        return Ok(Some(block_value_level));
+    }
+    let giant_power = prepared_powers
+        .giant_powers
+        .get(block_index)
+        .and_then(|power| *power)
+        .ok_or_else(|| program_error("compiled evaluator omitted a giant power"))?;
+    let giant_power_level = builder.state(giant_power.register).level;
+    if block_coefficients[1..]
+        .iter()
+        .all(|coefficient| *coefficient == 0)
+    {
+        Ok(Some(giant_power_level))
+    } else {
+        Ok(Some(block_value_level.min(giant_power_level)))
+    }
 }
 
 fn evaluate_polynomial_by_power_table(
@@ -1070,36 +1340,63 @@ fn linear_combination_from_powers(
     Ok(result)
 }
 
-fn rotate_positive(
+fn rotate_prepared_pair_window_phase(
     builder: &mut ProgramBuilder<'_>,
-    register: Register,
+    prepared_windows: &mut [PreparedPairWindow],
     galois_element: usize,
-) -> CanonicalResult<Register> {
-    if galois_element == 1 {
-        return Ok(register);
+) -> CanonicalResult<()> {
+    for prepared_window in prepared_windows {
+        rotate_one_prepared_pair_window_phase(builder, prepared_window, galois_element)?;
     }
-    let ring_order = 2 * POLYNOMIAL_DEGREE;
-    let (requires_conjugation, exponent) = generator_exponent_or_conjugated(galois_element)?;
-    let mut rotated = register;
-    if requires_conjugation {
-        rotated = builder.rotate(rotated, ring_order - 1)?;
-    }
-    for basis_rotation in generator_power_basis_for_exponent(exponent)? {
-        rotated = builder.rotate(rotated, basis_rotation)?;
-    }
-    Ok(rotated)
+    Ok(())
 }
 
-fn rotate_inverse(
+fn rotate_prepared_pair_window_term_phase(
     builder: &mut ProgramBuilder<'_>,
-    register: Register,
-    shift: usize,
-) -> CanonicalResult<Register> {
-    let mut rotated = register;
-    for basis_rotation in generator_inverse_power_basis_for_exponent(shift)? {
-        rotated = builder.rotate(rotated, basis_rotation)?;
+    prepared_terms: &mut [PreparedPairWindowTerms],
+    galois_element: usize,
+) -> CanonicalResult<()> {
+    for prepared_terms in prepared_terms {
+        rotate_one_prepared_pair_window_phase(
+            builder,
+            &mut prepared_terms.lower_beats_higher,
+            galois_element,
+        )?;
     }
-    Ok(rotated)
+    Ok(())
+}
+
+fn rotate_one_prepared_pair_window_phase(
+    builder: &mut ProgramBuilder<'_>,
+    prepared_window: &mut PreparedPairWindow,
+    galois_element: usize,
+) -> CanonicalResult<()> {
+    while prepared_window
+        .rotation_path
+        .get(prepared_window.next_rotation_ordinal)
+        .copied()
+        == Some(galois_element)
+    {
+        prepared_window.register = builder.rotate(prepared_window.register, galois_element)?;
+        prepared_window.next_rotation_ordinal = prepared_window
+            .next_rotation_ordinal
+            .checked_add(1)
+            .ok_or_else(|| program_error("prepared pair-window rotation ordinal overflowed"))?;
+    }
+    Ok(())
+}
+
+fn require_completed_pair_window_paths(
+    prepared_windows: &[PreparedPairWindow],
+) -> CanonicalResult<()> {
+    if prepared_windows.iter().any(|prepared_window| {
+        prepared_window.next_rotation_ordinal != prepared_window.rotation_path.len()
+    }) {
+        return Err(program_error(
+            "prepared pair-window phase order did not consume an exact directed path",
+        ));
+    }
+    Ok(())
 }
 
 fn lower_pair_mask(shift: usize) -> CanonicalResult<Vec<u32>> {
@@ -1123,6 +1420,13 @@ fn weighted_slot_selector(
                 .map_err(|_| program_error("compiled slot-selector weight does not fit u64"))?,
         )?;
     }
+    Ok(slots)
+}
+
+fn pair_difference_shift_slots(score_difference_bound: u64) -> CanonicalResult<Vec<u32>> {
+    let shifted_value = field_value(score_difference_bound)?;
+    let mut slots = vec![0_u32; POLYNOMIAL_DEGREE];
+    slots[..SELECTED_PAIR_COUNT].fill(shifted_value);
     Ok(slots)
 }
 

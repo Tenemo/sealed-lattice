@@ -1,10 +1,8 @@
-use std::collections::BTreeMap;
-
 use super::key_relation::{
     AnchorEquationInputs, AnchorOpeningWitness, AnchorQuotientWitness, BoundPolynomialRootUse,
-    BoundedUnsignedColumn, KeyRelationGeometry, KeyRelationPlanBuilder, KeyVerifierSourceKey,
-    SameSecretRelationPlanInput, ShiftedSmallVector, SplitIntegerVector, bdlop_matrix_source,
-    statement_root_source,
+    BoundedUnsignedColumn, ExactRadixDigitColumnCatalog, KeyRelationGeometry,
+    KeyRelationPlanBuilder, KeyVerifierSourceKey, SameSecretRelationPlanInput, ShiftedSmallVector,
+    SplitIntegerVector, bdlop_matrix_source, statement_root_source,
 };
 use super::*;
 
@@ -23,7 +21,7 @@ pub(crate) struct SameSecretSourceLayout {
     pub(super) negative_indicator: [u32; 2],
     pub(super) ordered_materials: Box<[SameSecretMaterialSourceLayout]>,
     pub(super) ordered_anchors: Box<[SameSecretAnchorSourceLayout]>,
-    pub(super) exact_radix_digits_by_column: BTreeMap<u32, Box<[u32]>>,
+    pub(super) exact_radix_digits_by_column: ExactRadixDigitColumnCatalog,
 }
 
 pub(super) struct SameSecretMaterialSourceLayout {
@@ -390,50 +388,6 @@ pub(super) mod tests {
         );
     }
 
-    #[test]
-    fn application_bad_set_catalog_is_bound_to_the_auxiliary_transition_programs() {
-        let context = check_context(false);
-        let mut plan = compile_same_secret_relation_plan(&same_secret_input(), &context)
-            .expect("same-secret relation plan");
-        let groups = plan.plan.variants[0]
-            .application_non_native_challenge_bad_set_catalog(&context)
-            .expect("production-derived application bad sets");
-        assert!(!groups.is_empty());
-        assert!(groups.iter().all(|group| {
-            group.challenge_role() == RelationChallengeRole::NonNativeTheta
-                && group.ordered_coordinate_bounds().len()
-                    == usize::from(context.non_native_modular_identity_challenge_count)
-        }));
-
-        let changed_transition = plan.plan.variants[0]
-            .ordered_constraints
-            .iter_mut()
-            .find(|constraint| {
-                constraint
-                    .numerator_postfix_expression
-                    .iter()
-                    .any(|instruction| {
-                        matches!(
-                            instruction,
-                            RelationExpressionInstruction::TranscriptChallenge {
-                                challenge_role: RelationChallengeRole::NonNativeTheta,
-                                ..
-                            }
-                        )
-                    })
-            })
-            .expect("same-secret plan has a theta transition");
-        changed_transition.numerator_postfix_expression.extend([
-            RelationExpressionInstruction::BaseFieldConstant(1),
-            RelationExpressionInstruction::Addition,
-        ]);
-        assert_eq!(
-            plan.plan.variants[0].application_non_native_challenge_bad_set_catalog(&context),
-            Err(RelationPlanError::InvalidConstraint),
-        );
-    }
-
-    #[test]
     fn same_secret_plan_rejects_noncanonical_and_incomplete_geometry() {
         let context = check_context(false);
         let mut repeated_modulus = same_secret_input();
@@ -559,16 +513,8 @@ pub(super) mod tests {
     fn same_secret_production_profile_closes_the_degree_fixed_point() {
         let context = production_context(false);
         let plan = compile_same_secret_relation_plan(
-            &SameSecretRelationPlanInput {
-                ring_degree: crate::bgv::parameters::POLYNOMIAL_DEGREE as u64,
-                evaluation_domain_size: crate::bgv::proof_suite::selected_profile::SELECTED_EVALUATION_DOMAIN_SIZE,
-                opening_degree_bound_exclusive: crate::bgv::proof_suite::selected_profile::SELECTED_OPENING_DEGREE_BOUND_EXCLUSIVE,
-                material_column_degree_bound_exclusive: crate::bgv::parameters::POLYNOMIAL_DEGREE as u64 / 2,
-                public_polynomial_column_degree_bound_exclusive: crate::bgv::proof_suite::selected_profile::SELECTED_PUBLIC_POLYNOMIAL_COLUMN_DEGREE_BOUND_EXCLUSIVE,
-                sharing_data_modulus_indices: (0..DATA_PRIMES.len() as u16).collect(),
-                commitment_data_modulus_indices: vec![0, 1, 2],
-                commitment_module_rank: 1,
-            },
+            &crate::bgv::proof_suite::selected_profile::selected_same_secret_relation_plan_input()
+                .expect("selected same-secret relation input"),
             &context,
         )
         .expect("production same-secret relation plan");

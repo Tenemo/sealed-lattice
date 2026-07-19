@@ -3,15 +3,14 @@ use std::{
     sync::{Arc, Mutex, MutexGuard, OnceLock},
 };
 
-use zeroize::Zeroizing;
-
 use crate::{
     bgv::{
         key_switch_topology::KeySwitchDecompositionTopology,
         parameters::{DATA_PRIMES, POLYNOMIAL_DEGREE},
         proof_suite::{
-            CommittedMaterialContext, CommittedMaterialRole, CompactCommittedMaterialSource,
-            SelectedEvaluatorEntryKind, SelectedEvaluatorEntryPosition, VerifiedEvaluatorKeyStore,
+            AuthenticatedCompactCommittedMaterialSource, CommittedMaterialContext,
+            CommittedMaterialRole, CompactCommittedMaterialSource, SelectedEvaluatorEntryKind,
+            SelectedEvaluatorEntryPosition, VerifiedEvaluatorKeyStore,
             selected_committed_material_profile,
         },
         setup::{
@@ -21,11 +20,14 @@ use crate::{
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
     foundation::{
         CanonicalItem, CanonicalStreamDomain, CanonicalStreamWriter, FOUNDATION_PROFILE, Hash512,
-        RefusalReason, hash_foundation_tuple_512, selected_target_data_prime_coordinates,
+        RefusalReason, hash_foundation_tuple_512, selected_sharing_data_prime_coordinates,
+        selected_target_data_prime_coordinates,
     },
 };
 
 use super::{
+    consumed_object_byte_lengths::VerifiedAcceptedSetupConsumedObjectByteLengthCatalog,
+    generated_mailbox_byte_lengths::VerifiedGeneratedPrivateVssMailboxCorpusByteLengthCatalog,
     generation_authority::SetupGeneratedCommittedMaterial,
     verified_terminals::{
         VerifiedAggregateThresholdShareTerminal, VerifiedCollectivePublicKeyTerminal,
@@ -77,6 +79,24 @@ impl VerifiedAcceptedSetupParticipantReleaseMaterial {
         &self.ordered_aggregate_threshold_roots
     }
 
+    /// Derives the exact public-root sequence consumed by the selected
+    /// target-share relation from the complete verifier-accepted sharing
+    /// basis. The target-basis coordinates remain the sole ordering authority.
+    pub(crate) fn selected_target_aggregate_threshold_roots(
+        &self,
+    ) -> CanonicalResult<Box<[[u8; 64]]>> {
+        let selected_target_coordinates =
+            selected_target_data_prime_coordinates().map_err(|_| authority_binding_error())?;
+        let selected_sharing_coordinates =
+            selected_sharing_data_prime_coordinates().map_err(|_| authority_binding_error())?;
+        if selected_target_coordinates != selected_sharing_coordinates
+            || self.ordered_aggregate_threshold_roots.len() != selected_sharing_coordinates.len()
+        {
+            return Err(authority_binding_error());
+        }
+        Ok(self.ordered_aggregate_threshold_roots.clone())
+    }
+
     pub(super) fn from_verified_aggregate_threshold_share(
         terminal: &VerifiedAggregateThresholdShareTerminal,
     ) -> Self {
@@ -109,19 +129,16 @@ impl VerifiedAcceptedSetupParticipantReleaseMaterial {
 /// join below positively matches both the root and the masked tree opening.
 pub(in crate::bgv) struct BrowserOwnedAggregateThresholdShareLimb {
     data_modulus_index: u16,
-    threshold_share: Zeroizing<Vec<u64>>,
     committed_share: SetupGeneratedCommittedMaterial,
 }
 
 impl BrowserOwnedAggregateThresholdShareLimb {
     pub(in crate::bgv) fn from_proof_generation_source(
         data_modulus_index: u16,
-        threshold_share: Zeroizing<Vec<u64>>,
         committed_share: SetupGeneratedCommittedMaterial,
     ) -> Self {
         Self {
             data_modulus_index,
-            threshold_share,
             committed_share,
         }
     }
@@ -140,8 +157,7 @@ impl BrowserOwnedAggregateThresholdShareLimb {
 pub(crate) struct VerifiedAcceptedSetupParticipantTargetReleaseLimb {
     data_modulus_index: u16,
     modulus: u64,
-    threshold_share: Arc<Zeroizing<Vec<u64>>>,
-    committed_share_source: Arc<CompactCommittedMaterialSource>,
+    committed_share: AuthenticatedCompactCommittedMaterialSource,
 }
 
 impl VerifiedAcceptedSetupParticipantTargetReleaseLimb {
@@ -154,11 +170,11 @@ impl VerifiedAcceptedSetupParticipantTargetReleaseLimb {
     }
 
     pub(crate) fn threshold_share(&self) -> &[u64] {
-        self.threshold_share.as_slice()
+        self.committed_share.canonical_message()
     }
 
     pub(crate) fn committed_share_source(&self) -> &CompactCommittedMaterialSource {
-        &self.committed_share_source
+        self.committed_share.compact_source()
     }
 }
 
@@ -171,8 +187,7 @@ pub(crate) struct VerifiedAcceptedSetupParticipantTargetReleaseLease {
 struct VerifiedAcceptedSetupParticipantTargetReleaseLeaseLimb {
     data_modulus_index: u16,
     modulus: u64,
-    threshold_share: Arc<Zeroizing<Vec<u64>>>,
-    committed_share_source: Arc<CompactCommittedMaterialSource>,
+    committed_share: AuthenticatedCompactCommittedMaterialSource,
 }
 
 impl VerifiedAcceptedSetupParticipantTargetReleaseLease {
@@ -197,8 +212,8 @@ impl VerifiedAcceptedSetupParticipantTargetReleaseLease {
         Some(operation(
             limb.data_modulus_index,
             limb.modulus,
-            limb.threshold_share.as_slice(),
-            &limb.committed_share_source,
+            limb.committed_share.canonical_message(),
+            limb.committed_share.compact_source(),
         ))
     }
 }
@@ -220,17 +235,23 @@ impl VerifiedAcceptedSetupParticipantTargetReleaseSource {
     ) -> CanonicalResult<Self> {
         let selected_target_coordinates =
             selected_target_data_prime_coordinates().map_err(|_| authority_binding_error())?;
+        let selected_sharing_coordinates =
+            selected_sharing_data_prime_coordinates().map_err(|_| authority_binding_error())?;
         if browser_owned_limbs.len() != selected_target_coordinates.len()
-            || terminal.ordered_aggregate_threshold_roots().len() != DATA_PRIMES.len()
+            || selected_target_coordinates != selected_sharing_coordinates
+            || terminal.ordered_aggregate_threshold_roots().len()
+                != selected_sharing_coordinates.len()
         {
             return Err(authority_binding_error());
         }
         let selected_profile =
             selected_committed_material_profile().map_err(|_| authority_binding_error())?;
         let mut ordered_limbs = Vec::with_capacity(selected_target_coordinates.len());
-        for (browser_owned_limb, (expected_data_modulus_index, modulus)) in browser_owned_limbs
-            .into_iter()
-            .zip(selected_target_coordinates.iter().copied())
+        for (sharing_limb_ordinal, (browser_owned_limb, (expected_data_modulus_index, modulus))) in
+            browser_owned_limbs
+                .into_iter()
+                .zip(selected_target_coordinates.iter().copied())
+                .enumerate()
         {
             let expected_context_hash = CommittedMaterialContext::new(
                 terminal.suite_identifier(),
@@ -243,40 +264,28 @@ impl VerifiedAcceptedSetupParticipantTargetReleaseSource {
             )
             .context_hash()
             .map_err(|_| authority_binding_error())?;
+            let committed_share = browser_owned_limb
+                .committed_share
+                .owned_authenticated_source();
             if browser_owned_limb.data_modulus_index != expected_data_modulus_index
-                || browser_owned_limb
-                    .committed_share
-                    .compact_source()
-                    .profile()
-                    != selected_profile
-                || browser_owned_limb
-                    .committed_share
-                    .compact_source()
-                    .material_context_hash()
-                    != expected_context_hash
-                || browser_owned_limb.committed_share.compact_source().root()
-                    != terminal.ordered_aggregate_threshold_roots()
-                        [usize::from(expected_data_modulus_index)]
-                || !browser_owned_limb
-                    .committed_share
-                    .authenticates_canonical_message(
-                        browser_owned_limb.threshold_share.as_slice(),
-                        modulus,
-                    )
-                    .map_err(|_| authority_binding_error())?
+                || committed_share.compact_source().profile() != selected_profile
+                || committed_share.compact_source().material_context_hash() != expected_context_hash
+                || committed_share.compact_source().root()
+                    != terminal.ordered_aggregate_threshold_roots()[sharing_limb_ordinal]
+                || committed_share.canonical_message().len() != POLYNOMIAL_DEGREE
+                || committed_share
+                    .canonical_message()
+                    .iter()
+                    .any(|coefficient| *coefficient >= modulus)
+                || !committed_share
+                    .authenticates_canonical_message(committed_share.canonical_message(), modulus)
             {
                 return Err(authority_binding_error());
             }
-            let BrowserOwnedAggregateThresholdShareLimb {
-                threshold_share,
-                committed_share,
-                ..
-            } = browser_owned_limb;
             ordered_limbs.push(VerifiedAcceptedSetupParticipantTargetReleaseLimb {
                 data_modulus_index: expected_data_modulus_index,
                 modulus,
-                threshold_share: Arc::new(threshold_share),
-                committed_share_source: committed_share.into_owned_compact_source(),
+                committed_share,
             });
         }
         Ok(Self {
@@ -309,8 +318,7 @@ impl VerifiedAcceptedSetupParticipantTargetReleaseSource {
                     |limb| VerifiedAcceptedSetupParticipantTargetReleaseLeaseLimb {
                         data_modulus_index: limb.data_modulus_index,
                         modulus: limb.modulus,
-                        threshold_share: Arc::clone(&limb.threshold_share),
-                        committed_share_source: Arc::clone(&limb.committed_share_source),
+                        committed_share: limb.committed_share.clone(),
                     },
                 )
                 .collect::<Vec<_>>()
@@ -343,6 +351,10 @@ pub(crate) struct VerifiedAcceptedSetupAuthority {
     collective_public_key_b_polynomials: Box<[Arc<[u64]>]>,
     public_setup_seed: [u8; 64],
     verified_evaluator_key_store: Option<VerifiedEvaluatorKeyStore>,
+    accepted_setup_consumed_object_byte_lengths:
+        VerifiedAcceptedSetupConsumedObjectByteLengthCatalog,
+    private_vss_mailbox_byte_lengths:
+        Option<VerifiedGeneratedPrivateVssMailboxCorpusByteLengthCatalog>,
 }
 
 /// Opaque, non-serializable authority for the public common components needed
@@ -851,6 +863,10 @@ pub(super) struct VerifiedAcceptedSetupAuthorityInput {
     pub(super) collective_public_key_full_object_digest: [u8; 64],
     pub(super) collective_public_key_b_polynomials: Vec<Arc<[u64]>>,
     pub(super) public_setup_seed: [u8; 64],
+    pub(super) accepted_setup_consumed_object_byte_lengths:
+        VerifiedAcceptedSetupConsumedObjectByteLengthCatalog,
+    pub(super) private_vss_mailbox_byte_lengths:
+        Option<VerifiedGeneratedPrivateVssMailboxCorpusByteLengthCatalog>,
 }
 
 pub(super) struct VerifiedAcceptedSetupAuthorityBorrowedInput<'input> {
@@ -942,6 +958,9 @@ impl VerifiedAcceptedSetupAuthority {
                 .into_boxed_slice(),
             public_setup_seed: input.public_setup_seed,
             verified_evaluator_key_store,
+            accepted_setup_consumed_object_byte_lengths: input
+                .accepted_setup_consumed_object_byte_lengths,
+            private_vss_mailbox_byte_lengths: input.private_vss_mailbox_byte_lengths,
         }
     }
 }
@@ -967,9 +986,12 @@ fn validate_verified_accepted_setup_authority_borrowed(
     {
         validate_polynomial(polynomial, input.ring_degree, *modulus)?;
     }
+    let selected_sharing_limb_count = selected_sharing_data_prime_coordinates()
+        .map_err(|_| authority_binding_error())?
+        .len();
     validate_participant_release_materials_borrowed(
         input.participant_release_materials,
-        input.ordered_data_moduli.len(),
+        selected_sharing_limb_count,
     )?;
     validate_participant_target_release_sources_borrowed(
         input.participant_target_release_sources,
@@ -1069,7 +1091,10 @@ fn validate_participant_target_release_sources_borrowed(
 ) -> CanonicalResult<()> {
     let selected_target_coordinates =
         selected_target_data_prime_coordinates().map_err(|_| authority_binding_error())?;
+    let selected_sharing_coordinates =
+        selected_sharing_data_prime_coordinates().map_err(|_| authority_binding_error())?;
     if participant_target_release_sources.len() > usize::from(FOUNDATION_PROFILE.participant_count)
+        || selected_target_coordinates != selected_sharing_coordinates
     {
         return Err(authority_binding_error());
     }
@@ -1086,20 +1111,32 @@ fn validate_participant_target_release_sources_borrowed(
         {
             return Err(authority_binding_error());
         }
-        for (limb, (expected_data_modulus_index, expected_modulus)) in source
-            .ordered_limbs
-            .iter()
-            .zip(selected_target_coordinates.iter().copied())
+        for (sharing_limb_ordinal, (limb, (expected_data_modulus_index, expected_modulus))) in
+            source
+                .ordered_limbs
+                .iter()
+                .zip(selected_target_coordinates.iter().copied())
+                .enumerate()
         {
             if limb.data_modulus_index != expected_data_modulus_index
                 || limb.modulus != expected_modulus
-                || limb.committed_share_source.profile() != selected_profile
+                || limb.committed_share.compact_source().profile() != selected_profile
                 || release_material
                     .ordered_aggregate_threshold_roots
-                    .get(usize::from(expected_data_modulus_index))
+                    .get(sharing_limb_ordinal)
                     .is_none_or(|expected_root| {
-                        *expected_root != limb.committed_share_source.root()
+                        *expected_root != limb.committed_share.compact_source().root()
                     })
+                || limb.committed_share.canonical_message().len() != POLYNOMIAL_DEGREE
+                || limb
+                    .committed_share
+                    .canonical_message()
+                    .iter()
+                    .any(|coefficient| *coefficient >= expected_modulus)
+                || !limb.committed_share.authenticates_canonical_message(
+                    limb.committed_share.canonical_message(),
+                    expected_modulus,
+                )
             {
                 return Err(authority_binding_error());
             }
@@ -1293,7 +1330,10 @@ pub(crate) fn retain_evaluator_execution_authority_for_tests(
                     .ok_or_else(authority_size_error)?,
             )
             .map_err(|_| authority_size_error())?;
-            let ordered_aggregate_threshold_roots = (0..DATA_PRIMES.len())
+            let selected_sharing_limb_count = selected_sharing_data_prime_coordinates()
+                .map_err(|_| authority_size_error())?
+                .len();
+            let ordered_aggregate_threshold_roots = (0..selected_sharing_limb_count)
                 .map(|data_modulus_index| {
                     let data_modulus_byte =
                         u8::try_from(data_modulus_index).map_err(|_| authority_size_error())?;
@@ -1330,6 +1370,11 @@ pub(crate) fn retain_evaluator_execution_authority_for_tests(
             collective_public_key_full_object_digest,
             collective_public_key_b_polynomials,
             public_setup_seed,
+            accepted_setup_consumed_object_byte_lengths:
+                VerifiedAcceptedSetupConsumedObjectByteLengthCatalog::deterministic_for_authority_custody_tests(
+                    0xa1,
+                ),
+            private_vss_mailbox_byte_lengths: None,
         },
         verified_evaluator_key_store,
     )
@@ -1388,6 +1433,36 @@ pub(crate) fn with_verified_accepted_setup_authority<Output>(
         authority_state_error("accepted-setup authority handle is unknown or released")
     })?;
     operation(authority)
+}
+
+/// Borrows exact, verifier-derived setup accounting sources only while the
+/// same-kernel accepted-setup authority remains locked. The immutable borrow
+/// is deliberately repeatable, so a failed accounting derivation cannot
+/// consume evidence needed by a corrected retry. Cryptographic acceptance
+/// does not require the private mailbox catalog, but an accounting request
+/// fails loudly unless all selected-roster mailbox envelopes were positively
+/// verified and retained before VSS terminal compaction.
+pub(crate) fn with_verified_accepted_setup_development_evidence<Output>(
+    handle: &VerifiedAcceptedSetupAuthorityHandle,
+    operation: impl FnOnce(
+        &VerifiedAcceptedSetupConsumedObjectByteLengthCatalog,
+        &VerifiedGeneratedPrivateVssMailboxCorpusByteLengthCatalog,
+    ) -> CanonicalResult<Output>,
+) -> CanonicalResult<Output> {
+    with_verified_accepted_setup_authority(handle, |authority| {
+        let private_vss_mailbox_byte_lengths = authority
+            .private_vss_mailbox_byte_lengths
+            .as_ref()
+            .ok_or_else(|| {
+                authority_state_error(
+                    "accepted-setup authority has no complete verified private VSS mailbox development evidence",
+                )
+            })?;
+        operation(
+            &authority.accepted_setup_consumed_object_byte_lengths,
+            private_vss_mailbox_byte_lengths,
+        )
+    })
 }
 
 /// Validates the caller's aggregate binding while the retained authority is
@@ -1517,6 +1592,12 @@ fn authority_state_error(message: &'static str) -> CanonicalError {
 mod tests {
     use super::*;
 
+    fn selected_sharing_limb_count() -> usize {
+        selected_sharing_data_prime_coordinates()
+            .expect("selected sharing coordinates")
+            .len()
+    }
+
     fn deterministic_b_polynomials() -> Vec<Arc<[u64]>> {
         DATA_PRIMES
             .iter()
@@ -1543,7 +1624,7 @@ mod tests {
                 VerifiedAcceptedSetupParticipantReleaseMaterial::from_test_values(
                     [u8::try_from(roster_position + 1).unwrap(); 64],
                     roster_position,
-                    (0..DATA_PRIMES.len())
+                    (0..selected_sharing_limb_count())
                         .map(|modulus_ordinal| {
                             [u8::try_from(usize::from(roster_position) + modulus_ordinal + 1)
                                 .unwrap(); 64]
@@ -1611,7 +1692,22 @@ mod tests {
             collective_public_key_full_object_digest,
             collective_public_key_b_polynomials: b_polynomials,
             public_setup_seed,
+            accepted_setup_consumed_object_byte_lengths:
+                VerifiedAcceptedSetupConsumedObjectByteLengthCatalog::deterministic_for_authority_custody_tests(
+                    0xb1,
+                ),
+            private_vss_mailbox_byte_lengths: None,
         }
+    }
+
+    fn authority_input_with_complete_development_evidence() -> VerifiedAcceptedSetupAuthorityInput {
+        let mut input = authority_input(true);
+        input.private_vss_mailbox_byte_lengths = Some(
+            VerifiedGeneratedPrivateVssMailboxCorpusByteLengthCatalog::deterministic_for_authority_custody_tests(
+                0xc1,
+            ),
+        );
+        input
     }
 
     #[test]
@@ -1632,6 +1728,14 @@ mod tests {
                 assert_eq!(authority.roster_hash(), [0x44; 64]);
                 assert_eq!(authority.exact_verified_setup_source_hash(), [0x55; 64]);
                 assert_eq!(authority.ring_degree(), POLYNOMIAL_DEGREE);
+                assert_eq!(
+                    authority.ordered_data_modulus_indices(),
+                    &(0..DATA_PRIMES.len())
+                        .map(|data_prime_index| {
+                            u16::try_from(data_prime_index).expect("data prime index fits u16")
+                        })
+                        .collect::<Vec<_>>()
+                );
                 assert_eq!(authority.ordered_data_moduli(), DATA_PRIMES);
                 assert_eq!(authority.collective_public_key_root(), [0x66; 64]);
                 let participant = authority
@@ -1641,7 +1745,13 @@ mod tests {
                 assert_eq!(participant.roster_position(), 0);
                 assert_eq!(
                     participant.ordered_aggregate_threshold_roots().len(),
-                    DATA_PRIMES.len()
+                    selected_sharing_limb_count()
+                );
+                assert_eq!(
+                    participant
+                        .selected_target_aggregate_threshold_roots()?
+                        .as_ref(),
+                    &[[1; 64], [2; 64], [3; 64], [4; 64], [5; 64], [6; 64],]
                 );
                 Ok((
                     authority.begin_collective_public_key_readback()?,
@@ -1732,5 +1842,99 @@ mod tests {
         registry.commit_reserved(reserved_handle, authority);
         assert!(registry.authorities.contains_key(&reserved_handle));
         assert_eq!(registry.next_handle, reserved_handle.checked_add(1));
+    }
+
+    #[test]
+    fn exact_setup_development_evidence_is_scoped_repeatable_and_restored_after_failure() {
+        let participant_count = usize::from(FOUNDATION_PROFILE.participant_count);
+        assert_eq!(participant_count, 10);
+        let handle = retain_verified_accepted_setup_authority_without_evaluator_store(
+            authority_input_with_complete_development_evidence(),
+        )
+        .expect("complete exact evidence retains with the authority");
+
+        let failed_derivation = with_verified_accepted_setup_development_evidence(
+            &handle,
+            |consumed_object_byte_lengths, private_mailbox_byte_lengths| {
+                assert_eq!(
+                    consumed_object_byte_lengths
+                        .ordered_setup_intent_canonical_byte_lengths()
+                        .len(),
+                    participant_count,
+                );
+                assert_eq!(
+                    private_mailbox_byte_lengths
+                        .ordered_mailbox_byte_lengths()
+                        .len(),
+                    participant_count * participant_count,
+                );
+                Err::<(), _>(authority_state_error(
+                    "injected accounting derivation failure",
+                ))
+            },
+        );
+        assert!(failed_derivation.is_err());
+
+        for _ in 0..2 {
+            let (setup_intent_count, mailbox_count, dealer_count, recipient_count) =
+                with_verified_accepted_setup_development_evidence(
+                    &handle,
+                    |consumed_object_byte_lengths, private_mailbox_byte_lengths| {
+                        Ok((
+                            consumed_object_byte_lengths
+                                .ordered_setup_intent_canonical_byte_lengths()
+                                .len(),
+                            private_mailbox_byte_lengths
+                                .ordered_mailbox_byte_lengths()
+                                .len(),
+                            private_mailbox_byte_lengths
+                                .ordered_dealer_upload_byte_lengths()
+                                .len(),
+                            private_mailbox_byte_lengths
+                                .ordered_recipient_download_byte_lengths()
+                                .len(),
+                        ))
+                    },
+                )
+                .expect("a failed scoped derivation leaves exact evidence available");
+            assert_eq!(setup_intent_count, participant_count);
+            assert_eq!(mailbox_count, participant_count * participant_count);
+            assert_eq!(dealer_count, participant_count);
+            assert_eq!(recipient_count, participant_count);
+        }
+
+        release_verified_accepted_setup_authority(handle).expect("authority releases once");
+    }
+
+    #[test]
+    fn exact_setup_development_evidence_refuses_missing_mailbox_corpus_and_released_authority() {
+        let missing_mailbox_handle =
+            retain_verified_accepted_setup_authority_without_evaluator_store(authority_input(true))
+                .expect("cryptographic authority does not require development evidence");
+        assert!(
+            with_verified_accepted_setup_development_evidence(&missing_mailbox_handle, |_, _| Ok(
+                ()
+            ),)
+            .is_err(),
+            "exact accounting must fail when the complete verified mailbox corpus was not retained",
+        );
+        release_verified_accepted_setup_authority(missing_mailbox_handle)
+            .expect("authority without accounting evidence releases");
+
+        let released_handle = retain_verified_accepted_setup_authority_without_evaluator_store(
+            authority_input_with_complete_development_evidence(),
+        )
+        .expect("complete evidence retains before release");
+        let released_identifier = released_handle.identifier();
+        release_verified_accepted_setup_authority(released_handle)
+            .expect("complete-evidence authority releases");
+        assert!(
+            with_verified_accepted_setup_development_evidence(
+                &VerifiedAcceptedSetupAuthorityHandle::from_identifier(released_identifier),
+                |_, _| Ok(()),
+            )
+            .is_err(),
+            "released authority cannot reopen development evidence",
+        );
     }
 }

@@ -28,7 +28,7 @@ use crate::{
             generate_authorized_factor_four_paired_partial_decryption,
             lease_authorized_target_release_witness_source,
             preflight_kllps_paired_share_from_borrowed_common_proof,
-            reconstruct_factor_four_finalized_target_pair,
+            reconstruct_factor_four_finalized_target_result,
             verified_target_release_column_evaluator,
             verify_finalized_kllps_reconstruction_target_pair, verify_finalized_kllps_target_pair,
         },
@@ -72,7 +72,7 @@ use super::{
 const CHECKPOINT_LINEAGE_IDENTIFIER_BYTE_LENGTH: usize = 32;
 const HANDLE_BYTE_LENGTH: usize = core::mem::size_of::<u32>();
 const TARGET_ROLE_COUNT: usize = 2;
-const RECONSTRUCTED_SLOT_BYTE_LENGTH: usize = core::mem::size_of::<u32>();
+const RESULT_OPTION_IDENTIFIER_BYTE_LENGTH: usize = core::mem::size_of::<u32>();
 
 #[derive(Debug)]
 enum TargetReleaseRuntimeError {
@@ -289,14 +289,16 @@ impl BoundedVerifiedTargetShareRegistry {
         &mut self,
         target_pair: &KllpsReconstructionTargetPair,
         verified_share_handles: &[u32],
-    ) -> Result<PendingReconstructedTargetPair, TargetReleaseRuntimeError> {
-        if verified_share_handles.len() != KLLPS_RECONSTRUCTION_THRESHOLD
+    ) -> Result<PendingReconstructedTargetResult, TargetReleaseRuntimeError> {
+        let verified_share_count = verified_share_handles.len();
+        if verified_share_count < KLLPS_RECONSTRUCTION_THRESHOLD
+            || verified_share_count > usize::from(FOUNDATION_PROFILE.participant_count)
             || verified_share_handles
                 .iter()
                 .copied()
                 .collect::<BTreeSet<_>>()
                 .len()
-                != KLLPS_RECONSTRUCTION_THRESHOLD
+                != verified_share_count
         {
             return Err(TargetReleaseRuntimeError::InvalidInput);
         }
@@ -308,117 +310,91 @@ impl BoundedVerifiedTargetShareRegistry {
                     .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)
             })
             .collect::<Result<Vec<_>, _>>()?;
-        let reconstructed =
-            reconstruct_factor_four_finalized_target_pair(target_pair, &verified_shares)?;
-        let (target_identifier_slots, target_order_slots) = reconstructed.decode_logical_slots()?;
-        let pending_target_pair =
-            PendingReconstructedTargetPair::new(target_identifier_slots, target_order_slots)?;
+        let ordered_option_identifiers =
+            reconstruct_factor_four_finalized_target_result(target_pair, &verified_shares)?;
+        let pending_target_result =
+            PendingReconstructedTargetResult::new(ordered_option_identifiers)?;
         for handle in verified_share_handles {
             assert!(
                 self.shares.remove(handle).is_some(),
                 "preflighted target-release reconstruction shares remain present until commit"
             );
         }
-        Ok(pending_target_pair)
+        Ok(pending_target_result)
     }
 }
 
-struct PendingReconstructedTargetPair {
-    role_slots: [Option<Vec<u32>>; TARGET_ROLE_COUNT],
-    next_role_ordinal: usize,
+struct PendingReconstructedTargetResult {
+    ordered_option_identifiers: Option<Vec<u32>>,
 }
 
-impl PendingReconstructedTargetPair {
-    fn new(
-        target_identifier_slots: Vec<u64>,
-        target_order_slots: Vec<u64>,
-    ) -> Result<Self, TargetReleaseRuntimeError> {
-        let encoded_role_byte_length = target_identifier_slots
+impl PendingReconstructedTargetResult {
+    fn new(ordered_option_identifiers: Vec<u32>) -> Result<Self, TargetReleaseRuntimeError> {
+        let encoded_result_byte_length = ordered_option_identifiers
             .len()
-            .checked_mul(RECONSTRUCTED_SLOT_BYTE_LENGTH)
+            .checked_mul(RESULT_OPTION_IDENTIFIER_BYTE_LENGTH)
             .ok_or(TargetReleaseRuntimeError::InvalidInput)?;
-        if target_identifier_slots.is_empty()
-            || target_identifier_slots.len() != target_order_slots.len()
-            || encoded_role_byte_length > FOUNDATION_PROFILE.maximum_copied_buffer_byte_length
+        if ordered_option_identifiers.is_empty()
+            || ordered_option_identifiers.len() > usize::from(FOUNDATION_PROFILE.option_count)
+            || encoded_result_byte_length > FOUNDATION_PROFILE.maximum_copied_buffer_byte_length
         {
             return Err(TargetReleaseRuntimeError::InvalidInput);
         }
-        let target_identifier_slots = target_identifier_slots
-            .into_iter()
-            .map(u32::try_from)
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|_| TargetReleaseRuntimeError::InvalidInput)?;
-        let target_order_slots = target_order_slots
-            .into_iter()
-            .map(u32::try_from)
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|_| TargetReleaseRuntimeError::InvalidInput)?;
         Ok(Self {
-            role_slots: [Some(target_identifier_slots), Some(target_order_slots)],
-            next_role_ordinal: 0,
+            ordered_option_identifiers: Some(ordered_option_identifiers),
         })
     }
 
-    fn slot_count(&self) -> Result<u32, TargetReleaseRuntimeError> {
-        let slot_count = self
-            .role_slots
-            .iter()
-            .filter_map(Option::as_ref)
-            .next()
+    fn option_count(&self) -> Result<u32, TargetReleaseRuntimeError> {
+        let option_count = self
+            .ordered_option_identifiers
+            .as_ref()
             .map(Vec::len)
             .ok_or(TargetReleaseRuntimeError::Runtime(
                 CommonProofRuntimeError::WrongOperationPhase,
             ))?;
-        u32::try_from(slot_count).map_err(|_| TargetReleaseRuntimeError::InvalidInput)
+        u32::try_from(option_count).map_err(|_| TargetReleaseRuntimeError::InvalidInput)
     }
 
-    fn copy_role(
+    fn copy_ordered_option_identifiers(
         &mut self,
-        role_ordinal: usize,
         output: &mut [u8],
     ) -> Result<(), TargetReleaseRuntimeError> {
-        if role_ordinal != self.next_role_ordinal {
-            return Err(TargetReleaseRuntimeError::Runtime(
-                CommonProofRuntimeError::WrongOperationPhase,
-            ));
-        }
-        let slots = self
-            .role_slots
-            .get(role_ordinal)
-            .and_then(Option::as_ref)
-            .ok_or(TargetReleaseRuntimeError::Runtime(
-                CommonProofRuntimeError::WrongOperationPhase,
-            ))?;
-        let expected_byte_length = slots
+        let ordered_option_identifiers =
+            self.ordered_option_identifiers
+                .as_ref()
+                .ok_or(TargetReleaseRuntimeError::Runtime(
+                    CommonProofRuntimeError::WrongOperationPhase,
+                ))?;
+        let expected_byte_length = ordered_option_identifiers
             .len()
-            .checked_mul(RECONSTRUCTED_SLOT_BYTE_LENGTH)
+            .checked_mul(RESULT_OPTION_IDENTIFIER_BYTE_LENGTH)
             .ok_or(TargetReleaseRuntimeError::InvalidInput)?;
         if output.len() != expected_byte_length {
             return Err(TargetReleaseRuntimeError::InvalidInput);
         }
-        for (slot, output_word) in slots
+        for (option_identifier, output_word) in ordered_option_identifiers
             .iter()
-            .zip(output.chunks_exact_mut(RECONSTRUCTED_SLOT_BYTE_LENGTH))
+            .zip(output.chunks_exact_mut(RESULT_OPTION_IDENTIFIER_BYTE_LENGTH))
         {
-            output_word.copy_from_slice(&slot.to_le_bytes());
+            output_word.copy_from_slice(&option_identifier.to_le_bytes());
         }
-        self.role_slots[role_ordinal].take();
-        self.next_role_ordinal += 1;
+        self.ordered_option_identifiers.take();
         Ok(())
     }
 
-    const fn is_complete(&self) -> bool {
-        self.next_role_ordinal == TARGET_ROLE_COUNT
+    fn is_complete(&self) -> bool {
+        self.ordered_option_identifiers.is_none()
     }
 }
 
-struct ReconstructedTargetPairRegistry {
-    active: Option<(u32, PendingReconstructedTargetPair)>,
+struct ReconstructedTargetResultRegistry {
+    active: Option<(u32, PendingReconstructedTargetResult)>,
     reserved_handle: Option<u32>,
     next_handle: u32,
 }
 
-impl Default for ReconstructedTargetPairRegistry {
+impl Default for ReconstructedTargetResultRegistry {
     fn default() -> Self {
         Self {
             active: None,
@@ -428,7 +404,7 @@ impl Default for ReconstructedTargetPairRegistry {
     }
 }
 
-impl ReconstructedTargetPairRegistry {
+impl ReconstructedTargetResultRegistry {
     fn reserve(&mut self) -> Result<u32, CommonProofRuntimeError> {
         if self.active.is_some() || self.reserved_handle.is_some() {
             return Err(CommonProofRuntimeError::AllocationLimitExceeded);
@@ -445,7 +421,11 @@ impl ReconstructedTargetPairRegistry {
         Ok(handle)
     }
 
-    fn commit_reserved(&mut self, handle: u32, target_pair: PendingReconstructedTargetPair) -> u32 {
+    fn commit_reserved(
+        &mut self,
+        handle: u32,
+        target_result: PendingReconstructedTargetResult,
+    ) -> u32 {
         assert_eq!(
             self.reserved_handle.take(),
             Some(handle),
@@ -455,7 +435,7 @@ impl ReconstructedTargetPairRegistry {
             self.active.is_none(),
             "reconstructed target destination remains vacant during commit"
         );
-        self.active = Some((handle, target_pair));
+        self.active = Some((handle, target_result));
         handle
     }
 
@@ -470,7 +450,7 @@ impl ReconstructedTargetPairRegistry {
     fn source(
         &self,
         handle: u32,
-    ) -> Result<&PendingReconstructedTargetPair, CommonProofRuntimeError> {
+    ) -> Result<&PendingReconstructedTargetResult, CommonProofRuntimeError> {
         self.active
             .as_ref()
             .filter(|(active_handle, _)| *active_handle == handle)
@@ -482,7 +462,7 @@ impl ReconstructedTargetPairRegistry {
         &mut self,
         handle: u32,
         operation: impl FnOnce(
-            &mut PendingReconstructedTargetPair,
+            &mut PendingReconstructedTargetResult,
         ) -> Result<Output, TargetReleaseRuntimeError>,
     ) -> Result<Output, TargetReleaseRuntimeError> {
         let source = self
@@ -497,7 +477,7 @@ impl ReconstructedTargetPairRegistry {
     fn take(
         &mut self,
         handle: u32,
-    ) -> Result<PendingReconstructedTargetPair, CommonProofRuntimeError> {
+    ) -> Result<PendingReconstructedTargetResult, CommonProofRuntimeError> {
         self.source(handle)?;
         self.active
             .take()
@@ -625,8 +605,8 @@ thread_local! {
         RefCell::new(SingleActiveTargetReleaseRegistry::default());
     static VERIFIED_TARGET_SHARE_REGISTRY: RefCell<BoundedVerifiedTargetShareRegistry> =
         RefCell::new(BoundedVerifiedTargetShareRegistry::default());
-    static RECONSTRUCTED_TARGET_PAIR_REGISTRY: RefCell<ReconstructedTargetPairRegistry> =
-        RefCell::new(ReconstructedTargetPairRegistry::default());
+    static RECONSTRUCTED_TARGET_RESULT_REGISTRY: RefCell<ReconstructedTargetResultRegistry> =
+        RefCell::new(ReconstructedTargetResultRegistry::default());
 }
 
 struct SelectedTargetReleaseRuntimePlan {
@@ -1402,19 +1382,15 @@ fn prepare_target_release_verification(
     let accepted_roots = with_verified_accepted_setup_authority(
         &accepted_setup_authority,
         |accepted_setup_authority| {
-            accepted_setup_authority
+            let participant_material = accepted_setup_authority
                 .participant_release_material(participant_binding.subject_participant_id)
-                .map(|participant_material| {
-                    participant_material
-                        .ordered_aggregate_threshold_roots()
-                        .to_vec()
-                })
                 .ok_or_else(|| {
                     CanonicalError::new(
                         CanonicalErrorCode::ComponentMismatch,
                         "accepted setup has no release roots for the target-share subject",
                     )
-                })
+                })?;
+            participant_material.selected_target_aggregate_threshold_roots()
         },
     )?;
     let canonical_application_statement_bytes = canonical_selected_target_share_statement(
@@ -1641,21 +1617,28 @@ fn finish_target_release_verification(
 
 fn decode_verified_target_share_handles(
     canonical_handle_bytes: &[u8],
-) -> Result<[u32; KLLPS_RECONSTRUCTION_THRESHOLD], TargetReleaseRuntimeError> {
-    let expected_byte_length = KLLPS_RECONSTRUCTION_THRESHOLD
-        .checked_mul(HANDLE_BYTE_LENGTH)
-        .ok_or(TargetReleaseRuntimeError::InvalidInput)?;
-    if canonical_handle_bytes.len() != expected_byte_length {
+) -> Result<Vec<u32>, TargetReleaseRuntimeError> {
+    if canonical_handle_bytes.len() % HANDLE_BYTE_LENGTH != 0 {
         return Err(TargetReleaseRuntimeError::InvalidInput);
     }
-    let mut handles = [0_u32; KLLPS_RECONSTRUCTION_THRESHOLD];
-    for (handle, handle_bytes) in handles
-        .iter_mut()
-        .zip(canonical_handle_bytes.chunks_exact(HANDLE_BYTE_LENGTH))
+    let handle_count = canonical_handle_bytes.len() / HANDLE_BYTE_LENGTH;
+    if handle_count < KLLPS_RECONSTRUCTION_THRESHOLD
+        || handle_count > usize::from(FOUNDATION_PROFILE.participant_count)
     {
+        return Err(TargetReleaseRuntimeError::InvalidInput);
+    }
+    let mut handles = Vec::with_capacity(handle_count);
+    for handle_bytes in canonical_handle_bytes.chunks_exact(HANDLE_BYTE_LENGTH) {
         let handle_bytes = <[u8; HANDLE_BYTE_LENGTH]>::try_from(handle_bytes)
             .map_err(|_| TargetReleaseRuntimeError::InvalidInput)?;
-        *handle = u32::from_le_bytes(handle_bytes);
+        let handle = u32::from_le_bytes(handle_bytes);
+        if handle == 0 {
+            return Err(TargetReleaseRuntimeError::InvalidInput);
+        }
+        handles.push(handle);
+    }
+    if handles.iter().copied().collect::<BTreeSet<_>>().len() != handles.len() {
+        return Err(TargetReleaseRuntimeError::InvalidInput);
     }
     Ok(handles)
 }
@@ -1668,8 +1651,8 @@ fn reconstruct_verified_target_release_shares(
     target_order_bytes: &[u8],
     verified_share_handles: &[u32],
 ) -> Result<u32, TargetReleaseRuntimeError> {
-    let reserved_target_pair_handle =
-        RECONSTRUCTED_TARGET_PAIR_REGISTRY.with(|registry| registry.borrow_mut().reserve())?;
+    let reserved_target_result_handle =
+        RECONSTRUCTED_TARGET_RESULT_REGISTRY.with(|registry| registry.borrow_mut().reserve())?;
     let result = (|| {
         let target_pair = with_verified_finality(
             finality_verifier_session_handle,
@@ -1686,22 +1669,22 @@ fn reconstruct_verified_target_release_shares(
             },
         )
         .map_err(TargetReleaseRuntimeError::AuthorityRuntime)?;
-        let pending_target_pair = VERIFIED_TARGET_SHARE_REGISTRY.with(|registry| {
+        let pending_target_result = VERIFIED_TARGET_SHARE_REGISTRY.with(|registry| {
             registry
                 .borrow_mut()
                 .reconstruct_and_consume(&target_pair, verified_share_handles)
         })?;
-        Ok(RECONSTRUCTED_TARGET_PAIR_REGISTRY.with(|registry| {
+        Ok(RECONSTRUCTED_TARGET_RESULT_REGISTRY.with(|registry| {
             registry
                 .borrow_mut()
-                .commit_reserved(reserved_target_pair_handle, pending_target_pair)
+                .commit_reserved(reserved_target_result_handle, pending_target_result)
         }))
     })();
     if result.is_err() {
-        RECONSTRUCTED_TARGET_PAIR_REGISTRY.with(|registry| {
+        RECONSTRUCTED_TARGET_RESULT_REGISTRY.with(|registry| {
             registry
                 .borrow_mut()
-                .release_reservation(reserved_target_pair_handle)
+                .release_reservation(reserved_target_result_handle)
         })?;
     }
     result
@@ -2404,8 +2387,8 @@ pub extern "C" fn sealed_lattice_target_release_discard_verified_share(
 /// # Safety
 ///
 /// Every input pointer must name its declared readable range. Share handles
-/// are exactly four little-endian `u32` values. A non-null status pointer must
-/// name one writable `u32`.
+/// contain between four and ten distinct little-endian `u32` values. A
+/// non-null status pointer must name one writable `u32`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn sealed_lattice_target_release_reconstruct_verified_shares(
     finality_verifier_session_handle: u32,
@@ -2449,9 +2432,9 @@ pub unsafe extern "C" fn sealed_lattice_target_release_reconstruct_verified_shar
         )
     })();
     match result {
-        Ok(reconstructed_target_pair_handle) => {
+        Ok(reconstructed_target_result_handle) => {
             unsafe { write_status(status_pointer, 0) };
-            reconstructed_target_pair_handle
+            reconstructed_target_result_handle
         }
         Err(error) => {
             unsafe { write_status(status_pointer, runtime_error_status(error)) };
@@ -2460,26 +2443,27 @@ pub unsafe extern "C" fn sealed_lattice_target_release_reconstruct_verified_shar
     }
 }
 
-/// Returns the common logical-slot count for the retained target pair.
+/// Returns the number of canonical ordered option identifiers in the retained
+/// target result.
 ///
 /// # Safety
 ///
 /// A non-null status pointer must name one writable `u32`.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn sealed_lattice_target_release_reconstructed_slot_count(
-    reconstructed_target_pair_handle: u32,
+pub unsafe extern "C" fn sealed_lattice_target_release_reconstructed_selected_option_count(
+    reconstructed_target_result_handle: u32,
     status_pointer: *mut u32,
 ) -> u32 {
-    let result = RECONSTRUCTED_TARGET_PAIR_REGISTRY.with(|registry| {
+    let result = RECONSTRUCTED_TARGET_RESULT_REGISTRY.with(|registry| {
         registry
             .borrow()
-            .source(reconstructed_target_pair_handle)?
-            .slot_count()
+            .source(reconstructed_target_result_handle)?
+            .option_count()
     });
     match result {
-        Ok(slot_count) => {
+        Ok(option_count) => {
             unsafe { write_status(status_pointer, 0) };
-            slot_count
+            option_count
         }
         Err(error) => {
             unsafe { write_status(status_pointer, runtime_error_status(error)) };
@@ -2488,17 +2472,16 @@ pub unsafe extern "C" fn sealed_lattice_target_release_reconstructed_slot_count(
     }
 }
 
-/// Copies one reconstructed target role in strict target-identifier then
-/// target-order sequence as little-endian `u32` logical slots.
+/// Copies the canonical one-based option identifiers in increasing result rank
+/// as little-endian `u32` values.
 ///
 /// # Safety
 ///
 /// The output pointer must name its declared writable range. A non-null status
 /// pointer must name one writable `u32`.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn sealed_lattice_target_release_copy_reconstructed_role(
-    reconstructed_target_pair_handle: u32,
-    role_ordinal: u32,
+pub unsafe extern "C" fn sealed_lattice_target_release_copy_reconstructed_option_identifiers(
+    reconstructed_target_result_handle: u32,
     output_pointer: *mut u8,
     output_byte_length: usize,
     status_pointer: *mut u32,
@@ -2507,14 +2490,12 @@ pub unsafe extern "C" fn sealed_lattice_target_release_copy_reconstructed_role(
         if output_pointer.is_null() {
             return Err(TargetReleaseRuntimeError::InvalidInput);
         }
-        let role_ordinal =
-            usize::try_from(role_ordinal).map_err(|_| TargetReleaseRuntimeError::InvalidInput)?;
         let output = unsafe { slice::from_raw_parts_mut(output_pointer, output_byte_length) };
-        RECONSTRUCTED_TARGET_PAIR_REGISTRY.with(|registry| {
+        RECONSTRUCTED_TARGET_RESULT_REGISTRY.with(|registry| {
             registry
                 .borrow_mut()
-                .with_mut(reconstructed_target_pair_handle, |source| {
-                    source.copy_role(role_ordinal, output)
+                .with_mut(reconstructed_target_result_handle, |source| {
+                    source.copy_ordered_option_identifiers(output)
                 })
         })
     })();
@@ -2531,15 +2512,15 @@ pub unsafe extern "C" fn sealed_lattice_target_release_copy_reconstructed_role(
     }
 }
 
-/// Retires a reconstructed target only after both fixed roles were copied.
+/// Retires a reconstructed target only after its canonical result was copied.
 #[unsafe(no_mangle)]
 pub extern "C" fn sealed_lattice_target_release_finish_reconstruction(
-    reconstructed_target_pair_handle: u32,
+    reconstructed_target_result_handle: u32,
 ) -> u32 {
-    RECONSTRUCTED_TARGET_PAIR_REGISTRY.with(|registry| {
+    RECONSTRUCTED_TARGET_RESULT_REGISTRY.with(|registry| {
         registry
             .borrow_mut()
-            .finish(reconstructed_target_pair_handle)
+            .finish(reconstructed_target_result_handle)
             .map_or_else(super::runtime_ffi::runtime_error_status, |()| 0)
     })
 }
@@ -2547,12 +2528,12 @@ pub extern "C" fn sealed_lattice_target_release_finish_reconstruction(
 /// Permanently discards an incomplete reconstructed target after cancellation.
 #[unsafe(no_mangle)]
 pub extern "C" fn sealed_lattice_target_release_discard_reconstruction(
-    reconstructed_target_pair_handle: u32,
+    reconstructed_target_result_handle: u32,
 ) -> u32 {
-    RECONSTRUCTED_TARGET_PAIR_REGISTRY.with(|registry| {
+    RECONSTRUCTED_TARGET_RESULT_REGISTRY.with(|registry| {
         registry
             .borrow_mut()
-            .take(reconstructed_target_pair_handle)
+            .take(reconstructed_target_result_handle)
             .map_or_else(super::runtime_ffi::runtime_error_status, |_| 0)
     })
 }
@@ -2560,63 +2541,58 @@ pub extern "C" fn sealed_lattice_target_release_discard_reconstruction(
 #[cfg(test)]
 mod tests {
     use super::{
-        CommonProofRuntimeError, KLLPS_RECONSTRUCTION_THRESHOLD, PendingReconstructedTargetPair,
-        ReconstructedTargetPairRegistry, TargetReleaseRuntimeError,
+        CommonProofRuntimeError, KLLPS_RECONSTRUCTION_THRESHOLD, PendingReconstructedTargetResult,
+        ReconstructedTargetResultRegistry, TargetReleaseRuntimeError,
         decode_verified_target_share_handles,
     };
 
     #[test]
-    fn reconstructed_target_pair_requires_fixed_role_order_and_complete_copy() {
-        let pending = PendingReconstructedTargetPair::new(vec![101, 202, 303], vec![7, 8, 9])
-            .expect("bounded paired slots are accepted");
-        let mut registry = ReconstructedTargetPairRegistry::default();
+    fn reconstructed_target_result_requires_one_complete_copy() {
+        let pending = PendingReconstructedTargetResult::new(vec![5, 20, 2, 10])
+            .expect("bounded canonical result is accepted");
+        let mut registry = ReconstructedTargetResultRegistry::default();
         let handle = registry.reserve().expect("one destination is available");
         assert_eq!(registry.commit_reserved(handle, pending), handle);
         assert_eq!(
             registry
                 .source(handle)
-                .expect("retained pair remains live")
-                .slot_count()
-                .expect("slot count is available before copying"),
-            3
+                .expect("retained result remains live")
+                .option_count()
+                .expect("option count is available before copying"),
+            4
         );
+        assert!(matches!(
+            registry.finish(handle),
+            Err(CommonProofRuntimeError::WrongOperationPhase)
+        ));
 
-        let mut target_order_bytes = [0_u8; 12];
+        let mut wrong_length_bytes = [0_u8; 12];
         assert!(matches!(
             registry.with_mut(handle, |source| source
-                .copy_role(1, &mut target_order_bytes)),
+                .copy_ordered_option_identifiers(&mut wrong_length_bytes)),
+            Err(TargetReleaseRuntimeError::InvalidInput)
+        ));
+
+        let mut result_bytes = [0_u8; 16];
+        registry
+            .with_mut(handle, |source| {
+                source.copy_ordered_option_identifiers(&mut result_bytes)
+            })
+            .expect("canonical target result copies once");
+        assert_eq!(
+            result_bytes,
+            [5, 0, 0, 0, 20, 0, 0, 0, 2, 0, 0, 0, 10, 0, 0, 0]
+        );
+        assert!(matches!(
+            registry.with_mut(handle, |source| source
+                .copy_ordered_option_identifiers(&mut result_bytes)),
             Err(TargetReleaseRuntimeError::Runtime(
                 CommonProofRuntimeError::WrongOperationPhase
             ))
         ));
-        assert!(matches!(
-            registry.finish(handle),
-            Err(CommonProofRuntimeError::WrongOperationPhase)
-        ));
-
-        let mut target_identifier_bytes = [0_u8; 12];
-        registry
-            .with_mut(handle, |source| {
-                source.copy_role(0, &mut target_identifier_bytes)
-            })
-            .expect("target identifier copies first");
-        assert_eq!(
-            target_identifier_bytes,
-            [101, 0, 0, 0, 202, 0, 0, 0, 47, 1, 0, 0]
-        );
-        assert!(matches!(
-            registry.finish(handle),
-            Err(CommonProofRuntimeError::WrongOperationPhase)
-        ));
-        registry
-            .with_mut(handle, |source| {
-                source.copy_role(1, &mut target_order_bytes)
-            })
-            .expect("target order copies second");
-        assert_eq!(target_order_bytes, [7, 0, 0, 0, 8, 0, 0, 0, 9, 0, 0, 0]);
         registry
             .finish(handle)
-            .expect("complete paired copy retires the result");
+            .expect("complete result copy retires the authority");
         assert!(matches!(
             registry.source(handle),
             Err(CommonProofRuntimeError::UnknownOrStaleHandle)
@@ -2624,24 +2600,47 @@ mod tests {
     }
 
     #[test]
-    fn target_share_handle_decoder_requires_one_exact_threshold_array() {
-        let expected_handles = [19_u32, 4, 91, 12];
-        let encoded_handles = expected_handles
-            .iter()
-            .flat_map(|handle| handle.to_le_bytes())
-            .collect::<Vec<_>>();
-        assert_eq!(
-            decode_verified_target_share_handles(&encoded_handles)
-                .expect("exact little-endian threshold array decodes"),
-            expected_handles
-        );
-        assert_eq!(expected_handles.len(), KLLPS_RECONSTRUCTION_THRESHOLD);
+    fn target_share_handle_decoder_accepts_four_through_ten_distinct_handles() {
+        for handle_count in KLLPS_RECONSTRUCTION_THRESHOLD..=10 {
+            let expected_handles = (1..=u32::try_from(handle_count).expect("small count"))
+                .rev()
+                .collect::<Vec<_>>();
+            let encoded_handles = expected_handles
+                .iter()
+                .flat_map(|handle| handle.to_le_bytes())
+                .collect::<Vec<_>>();
+            assert_eq!(
+                decode_verified_target_share_handles(&encoded_handles)
+                    .expect("bounded distinct little-endian handles decode"),
+                expected_handles,
+            );
+        }
+    }
+
+    #[test]
+    fn target_share_handle_decoder_rejects_wrong_counts_duplicates_zero_and_misalignment() {
+        let encode = |handles: &[u32]| {
+            handles
+                .iter()
+                .flat_map(|handle| handle.to_le_bytes())
+                .collect::<Vec<_>>()
+        };
+        for malformed_handles in [
+            vec![],
+            vec![1, 2, 3],
+            vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+            vec![1, 2, 2, 4],
+            vec![1, 2, 3, 0],
+        ] {
+            assert!(matches!(
+                decode_verified_target_share_handles(&encode(&malformed_handles)),
+                Err(TargetReleaseRuntimeError::InvalidInput)
+            ));
+        }
+        let mut misaligned = encode(&[1, 2, 3, 4]);
+        misaligned.pop();
         assert!(matches!(
-            decode_verified_target_share_handles(&encoded_handles[..encoded_handles.len() - 1]),
-            Err(TargetReleaseRuntimeError::InvalidInput)
-        ));
-        assert!(matches!(
-            decode_verified_target_share_handles(&[]),
+            decode_verified_target_share_handles(&misaligned),
             Err(TargetReleaseRuntimeError::InvalidInput)
         ));
     }

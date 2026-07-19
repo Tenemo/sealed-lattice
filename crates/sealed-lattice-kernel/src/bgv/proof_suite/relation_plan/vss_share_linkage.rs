@@ -1,5 +1,3 @@
-#[cfg(test)]
-use super::committed_material::CommittedMaterialRangeCandidate;
 use super::committed_material::{
     CommittedMaterialPlanBuilder, CommittedMaterialRelationPlanInput, IntegerTerm, MaterialRootUse,
     root_path,
@@ -14,28 +12,6 @@ const RECIPIENT_SHARE_MATERIAL_ROOTS_FIELD_ORDINAL: u64 = 9;
 pub(crate) fn compile_vss_share_linkage_relation_plan(
     input: &CommittedMaterialRelationPlanInput,
     check_context: &RelationPlanCheckContext,
-) -> Result<CompiledRelationPlan, RelationPlanError> {
-    compile_vss_share_linkage_relation_plan_inner(
-        input,
-        check_context,
-        #[cfg(test)]
-        None,
-    )
-}
-
-#[cfg(test)]
-pub(crate) fn compile_vss_share_linkage_range_candidate(
-    input: &CommittedMaterialRelationPlanInput,
-    check_context: &RelationPlanCheckContext,
-    range_candidate: CommittedMaterialRangeCandidate,
-) -> Result<CompiledRelationPlan, RelationPlanError> {
-    compile_vss_share_linkage_relation_plan_inner(input, check_context, Some(range_candidate))
-}
-
-fn compile_vss_share_linkage_relation_plan_inner(
-    input: &CommittedMaterialRelationPlanInput,
-    check_context: &RelationPlanCheckContext,
-    #[cfg(test)] range_candidate: Option<CommittedMaterialRangeCandidate>,
 ) -> Result<CompiledRelationPlan, RelationPlanError> {
     let sharing_limb_count = input.sharing_data_modulus_indices.len();
     let threshold = usize::from(input.threshold);
@@ -78,10 +54,6 @@ fn compile_vss_share_linkage_relation_plan_inner(
         check_context,
         root_paths,
     )?;
-    #[cfg(test)]
-    if let Some(range_candidate) = range_candidate {
-        builder.use_range_candidate(range_candidate);
-    }
     let mut coefficient_messages = Vec::with_capacity(sharing_limb_count);
     let mut recipient_messages = Vec::with_capacity(sharing_limb_count);
     let mut logical_root_ordinal = 0_usize;

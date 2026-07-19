@@ -1,13 +1,12 @@
 use crate::foundation::{
     CanonicalCodecError, CanonicalCodecErrorKind, CanonicalItem, CanonicalItemType,
     FOUNDATION_PROFILE, FoundationObjectType, Hash512, ParticipantIdentity, RefusalReason,
-    VerifiedBoardApplicationSource, hash_foundation_tuple_512,
+    VerifiedBoardApplicationSource, derive_public_randomness_contribution_commitment,
+    hash_foundation_tuple_512,
 };
 
 const PUBLIC_RANDOMNESS_COMMITMENT_ROOT_DOMAIN: &str =
     "sealed-lattice/setup/public-randomness-commitment-root/v1";
-const PUBLIC_RANDOMNESS_COMMITMENT_DOMAIN: &str =
-    "sealed-lattice/setup/public-randomness-commitment/v1";
 const PUBLIC_RANDOMNESS_SEED_DOMAIN: &str = "sealed-lattice/setup/public-randomness-seed/v1";
 const SETUP_PROOF_CONTEXT_HASH_DOMAIN: &str = "sealed-lattice/setup/proof-context/v1";
 const PUBLIC_RANDOMNESS_COMPONENT_BYTE_LENGTH: usize = 32;
@@ -265,8 +264,15 @@ pub(in crate::bgv) fn verify_public_randomness_board_sources(
             &contribution_and_salt[PUBLIC_RANDOMNESS_COMPONENT_BYTE_LENGTH..],
         )
         .map_err(|_| RefusalReason::WrongTypeOrLength)?;
-        let expected_commitment =
-            derive_contribution_commitment(context, participant_identity, contribution, salt)?;
+        let expected_commitment = derive_public_randomness_contribution_commitment(
+            context.suite_identifier,
+            context.ceremony_context_hash,
+            context.action_context_hash,
+            participant_identity,
+            contribution,
+            salt,
+        )
+        .map_err(|error| error.refusal_reason)?;
         if expected_commitment != ordered_contribution_commitments[roster_position] {
             return Err(RefusalReason::WrongHashOrRoot);
         }
@@ -353,26 +359,6 @@ fn derive_randomness_commitment_root(
             CanonicalItem::hash512(context.roster_hash.into_bytes()),
             CanonicalItem::homogeneous_list(CanonicalItemType::Hash512, &commitment_items)
                 .map_err(canonical_codec_refusal)?,
-        ],
-    )
-    .map_err(canonical_codec_refusal)
-}
-
-fn derive_contribution_commitment(
-    context: VerifiedSetupVerificationContext,
-    participant_identity: ParticipantIdentity,
-    contribution: [u8; PUBLIC_RANDOMNESS_COMPONENT_BYTE_LENGTH],
-    salt: [u8; PUBLIC_RANDOMNESS_COMPONENT_BYTE_LENGTH],
-) -> Result<Hash512, RefusalReason> {
-    hash_foundation_tuple_512(
-        PUBLIC_RANDOMNESS_COMMITMENT_DOMAIN,
-        &[
-            CanonicalItem::hash512(context.suite_identifier.into_bytes()),
-            CanonicalItem::hash512(context.ceremony_context_hash.into_bytes()),
-            CanonicalItem::hash512(context.action_context_hash.into_bytes()),
-            CanonicalItem::participant_identity(participant_identity.into_bytes()),
-            CanonicalItem::fixed_bytes(contribution).map_err(canonical_codec_refusal)?,
-            CanonicalItem::fixed_bytes(salt).map_err(canonical_codec_refusal)?,
         ],
     )
     .map_err(canonical_codec_refusal)
@@ -610,13 +596,16 @@ mod tests {
                     let salt = contributions_and_salts[roster_position][32..]
                         .try_into()
                         .unwrap();
-                    let mut contribution_commitment = derive_contribution_commitment(
-                        self.context,
-                        self.participant_identities[roster_position],
-                        contribution,
-                        salt,
-                    )
-                    .unwrap();
+                    let mut contribution_commitment =
+                        derive_public_randomness_contribution_commitment(
+                            self.context.suite_identifier,
+                            self.context.ceremony_context_hash,
+                            self.context.action_context_hash,
+                            self.participant_identities[roster_position],
+                            contribution,
+                            salt,
+                        )
+                        .unwrap();
                     if corrupted_commitment_position == Some(roster_position) {
                         let mut bytes = contribution_commitment.into_bytes();
                         bytes[17] ^= 1;

@@ -24,6 +24,7 @@ import {
     encodeRequest,
     fourByteReadRequest,
     hashByteLength,
+    installedProofAttemptLineageIdentifier,
     readResult,
     runtimeBinding,
 } from './wire-fixtures.js';
@@ -867,11 +868,14 @@ describe('common-proof generation runtime', () => {
         expect(retiredOperationCount).toBe(1);
     });
 
-    it('publishes and acknowledges a complete checkpoint before continuing', async () => {
+    it('publishes a reset-safe checkpoint before the first cursor is consumed', async () => {
         const fixture = createCheckpointGenerationKernelFixture();
         let publishedCheckpoint: CommonProofGenerationCheckpoint | undefined;
         let committedStateBytes: Uint8Array<ArrayBuffer> | undefined;
         let committedCursorBytes: Uint8Array<ArrayBuffer> | undefined;
+        let committedStreamAttemptIdentifier:
+            | Uint8Array<ArrayBuffer>
+            | undefined;
         let committedStableAttemptBindingHash:
             | Uint8Array<ArrayBuffer>
             | undefined;
@@ -909,6 +913,8 @@ describe('common-proof generation runtime', () => {
                             checkpoint.canonicalStateBytes.slice();
                         committedCursorBytes =
                             checkpoint.privateRandomCursorManifestBytes.slice();
+                        committedStreamAttemptIdentifier =
+                            checkpoint.privateRandomnessStreamAttemptIdentifier.slice();
                         committedStableAttemptBindingHash =
                             checkpoint.stableAttemptBindingHash.slice();
                         return Promise.resolve();
@@ -933,6 +939,9 @@ describe('common-proof generation runtime', () => {
         expect([...(committedCursorBytes ?? [])]).toEqual([
             ...fixture.cursorManifestBytes,
         ]);
+        expect([...(committedStreamAttemptIdentifier ?? [])]).toEqual([
+            ...installedProofAttemptLineageIdentifier,
+        ]);
         expect([...(committedStableAttemptBindingHash ?? [])]).toEqual([
             ...fixture.stableAttemptBindingHash,
         ]);
@@ -949,7 +958,51 @@ describe('common-proof generation runtime', () => {
         expect([...publishedCheckpoint.stableAttemptBindingHash]).toEqual(
             Array(hashByteLength).fill(0),
         );
+        expect([
+            ...publishedCheckpoint.privateRandomnessStreamAttemptIdentifier,
+        ]).toEqual(
+            Array(installedProofAttemptLineageIdentifier.length).fill(0),
+        );
         capability.release();
+    });
+
+    it('retires an identity-free early checkpoint before publication', async () => {
+        const identityFreeManifest = new Uint8Array(19);
+        identityFreeManifest.set(
+            Uint8Array.of(0x53, 0x4c, 0x43, 0x50, 0x43, 0x4d, 0x30, 0x33, 0x03),
+        );
+        const fixture =
+            createCheckpointGenerationKernelFixture(identityFreeManifest);
+        let publicationAttempted = false;
+
+        await expect(
+            runPreparedCommonProofGenerationWorker(
+                fixture.runtime,
+                81,
+                { executeTransaction: () => Promise.resolve([]) },
+                {
+                    commitChunk: () => Promise.resolve(),
+                    readChunk: () => Promise.resolve(new Uint8Array()),
+                },
+                {
+                    checkpointCustody: {
+                        publishAuthenticatedCheckpoint: () => {
+                            publicationAttempted = true;
+                            return Promise.resolve();
+                        },
+                        restoreAuthenticatedCheckpointState: () =>
+                            Promise.reject(
+                                new Error('A fresh operation cannot restore.'),
+                            ),
+                    },
+                },
+            ),
+        ).rejects.toMatchObject({
+            code: 'KernelFailure',
+            permanentRetirementRequired: true,
+        });
+        expect(publicationAttempted).toBe(false);
+        expect(fixture.observations.retiredOperationCount).toBe(1);
     });
 
     it('explicitly discards a ready checkpoint when custody is absent', async () => {

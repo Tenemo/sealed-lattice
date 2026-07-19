@@ -5,18 +5,21 @@
 //! derives aggregate seeds from retained action randomness, and exposes no
 //! caller-selected statement, root, row, seed, or aggregate coefficient.
 
-use std::{cell::RefCell, collections::BTreeMap, rc::Rc};
+use std::{cell::RefCell, collections::BTreeMap, mem::size_of, rc::Rc};
 
 use zeroize::Zeroizing;
 
 use crate::{
     bgv::{
-        parameters::{DATA_PRIMES, POLYNOMIAL_DEGREE},
+        modular_arithmetic::{add_mod_fast, sub_mod_fast},
+        parameters::POLYNOMIAL_DEGREE,
         setup::{
-            BrowserOwnedAggregateThresholdShareLimb, SetupGeneratedCommittedMaterial,
-            VerifiedAcceptedSetupVssQualification, VerifiedAggregateThresholdShareTerminal,
-            VerifiedPublicRandomness, VerifiedVssShareLinkageTerminal, derive_recipient_input_root,
-            verify_public_randomness_board_sources,
+            BrowserOwnedAggregateThresholdShareLimb, GeneratedPrivateVssMailboxCorpusInput,
+            SetupGeneratedCommittedMaterial, VerifiedAcceptedSetupVssQualification,
+            VerifiedAggregateThresholdShareTerminal,
+            VerifiedGeneratedPrivateVssMailboxCorpusByteLengthCatalog, VerifiedPublicRandomness,
+            VerifiedVssQualificationTerminals, VerifiedVssShareLinkageTerminal,
+            derive_recipient_input_root, verify_public_randomness_board_sources,
         },
     },
     foundation::{
@@ -31,8 +34,8 @@ use crate::{
         bind_prepared_action_proof_attempt_to_canonical_witness,
         consume_authenticated_mailbox_plaintext_capability,
         resolve_prepared_action_proof_attempt_source, resolve_verified_board_application_sources,
-        retain_action_private_randomness_for_exact_family, selected_target_data_prime_coordinates,
-        verified_state_reservation_binding,
+        retain_action_private_randomness_for_exact_family, selected_sharing_data_prime_coordinates,
+        selected_target_data_prime_coordinates, verified_state_reservation_binding,
     },
 };
 
@@ -67,13 +70,90 @@ const AGGREGATE_MATERIAL_RANDOMNESS_PURPOSE: u16 = 3;
 const EXPECTED_PUBLIC_RANDOMNESS_OBJECTS_PER_PARTICIPANT: usize = 3;
 const ATTEMPT_IDENTIFIER_BYTE_LENGTH: usize = 32;
 
+/// Exact ownership accounting for the canonical aggregate-share coefficients.
+/// The committed-material source is the sole retained owner after the final
+/// source is absorbed and remains that sole owner in accepted setup state.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct AggregateThresholdShareCanonicalCoefficientMemoryAccounting {
+    retained_before_final_source_byte_length: u64,
+    maximum_transient_byte_length: u64,
+    retained_after_final_source_byte_length: u64,
+    removed_generation_duplicate_byte_length: u64,
+    retained_target_release_byte_length: u64,
+    removed_persistent_duplicate_byte_length: u64,
+}
+
+impl AggregateThresholdShareCanonicalCoefficientMemoryAccounting {
+    pub(crate) const fn retained_before_final_source_byte_length(self) -> u64 {
+        self.retained_before_final_source_byte_length
+    }
+
+    pub(crate) const fn maximum_transient_byte_length(self) -> u64 {
+        self.maximum_transient_byte_length
+    }
+
+    pub(crate) const fn retained_after_final_source_byte_length(self) -> u64 {
+        self.retained_after_final_source_byte_length
+    }
+
+    pub(crate) const fn removed_generation_duplicate_byte_length(self) -> u64 {
+        self.removed_generation_duplicate_byte_length
+    }
+
+    pub(crate) const fn retained_target_release_byte_length(self) -> u64 {
+        self.retained_target_release_byte_length
+    }
+
+    pub(crate) const fn removed_persistent_duplicate_byte_length(self) -> u64 {
+        self.removed_persistent_duplicate_byte_length
+    }
+}
+
+pub(crate) fn aggregate_threshold_share_canonical_coefficient_memory_accounting() -> Result<
+    AggregateThresholdShareCanonicalCoefficientMemoryAccounting,
+    AggregateThresholdShareRuntimeError,
+> {
+    let sharing_limb_count = u64::try_from(selected_vss_sharing_coordinates()?.len())
+        .map_err(|_| AggregateThresholdShareRuntimeError::InvalidInput)?;
+    let polynomial_degree = u64::try_from(POLYNOMIAL_DEGREE)
+        .map_err(|_| AggregateThresholdShareRuntimeError::InvalidInput)?;
+    let coefficient_byte_length = u64::try_from(size_of::<u64>())
+        .map_err(|_| AggregateThresholdShareRuntimeError::InvalidInput)?;
+    let canonical_owner_byte_length = sharing_limb_count
+        .checked_mul(polynomial_degree)
+        .and_then(|length| length.checked_mul(coefficient_byte_length))
+        .ok_or(AggregateThresholdShareRuntimeError::InvalidInput)?;
+    let maximum_transient_byte_length = canonical_owner_byte_length
+        .checked_mul(2)
+        .ok_or(AggregateThresholdShareRuntimeError::InvalidInput)?;
+    let removed_generation_duplicate_byte_length = canonical_owner_byte_length
+        .checked_mul(2)
+        .ok_or(AggregateThresholdShareRuntimeError::InvalidInput)?;
+
+    Ok(
+        AggregateThresholdShareCanonicalCoefficientMemoryAccounting {
+            retained_before_final_source_byte_length: canonical_owner_byte_length,
+            maximum_transient_byte_length,
+            retained_after_final_source_byte_length: canonical_owner_byte_length,
+            removed_generation_duplicate_byte_length,
+            retained_target_release_byte_length: canonical_owner_byte_length,
+            removed_persistent_duplicate_byte_length: canonical_owner_byte_length,
+        },
+    )
+}
+
+fn selected_vss_sharing_coordinates()
+-> Result<Box<[(u16, u64)]>, AggregateThresholdShareRuntimeError> {
+    selected_sharing_data_prime_coordinates().map_err(Into::into)
+}
+
 /// Source-owned count for the aggregate committed-material population created
 /// by one recipient. The setup-attempt identifier is shared with all setup
 /// streams and is therefore owned by the ceremony-level attempt catalog.
 pub(crate) fn aggregate_threshold_share_private_randomness_kmac_input_accounting()
 -> Result<PrivateRandomnessKmacInputClassAccounting, AggregateThresholdShareRuntimeError> {
     let profile = selected_committed_material_profile()?;
-    let physical_root_count = u64::try_from(DATA_PRIMES.len())
+    let physical_root_count = u64::try_from(selected_vss_sharing_coordinates()?.len())
         .map_err(|_| AggregateThresholdShareRuntimeError::InvalidInput)?;
     let full_salted_leaf_count = physical_root_count
         .checked_mul(
@@ -162,7 +242,6 @@ impl From<CommonProofRuntimeError> for AggregateThresholdShareRuntimeError {
 
 struct AggregateThresholdShareGenerationMaterial {
     ordered_aggregate_materials: Box<[SetupGeneratedCommittedMaterial]>,
-    local_target_release_shares: Box<[Zeroizing<Vec<u64>>]>,
     canonical_application_statement_bytes: Vec<u8>,
     pinned_proof_attempt: Option<PinnedAggregateProofAttempt>,
 }
@@ -180,9 +259,11 @@ struct AggregateThresholdShareRecipientAuthority {
     local_recipient_roster_position: u16,
     action_private_randomness: Rc<ActionPrivateRandomness>,
     ordered_source_materials_by_dealer: Box<[Option<Box<[SetupGeneratedCommittedMaterial]>>]>,
-    aggregate_share_coefficients: Box<[Zeroizing<Vec<u64>>]>,
+    aggregate_share_coefficients: Option<Box<[Zeroizing<Vec<u64>>]>>,
     generation_material: Option<AggregateThresholdShareGenerationMaterial>,
     ordered_recipient_terminals: Box<[Option<VerifiedAggregateThresholdShareTerminal>]>,
+    private_vss_mailbox_byte_lengths:
+        Option<VerifiedGeneratedPrivateVssMailboxCorpusByteLengthCatalog>,
 }
 
 struct AggregateThresholdShareRecipientAuthorityRegistry {
@@ -400,12 +481,11 @@ fn require_dealer_terminals_match_public_randomness(
     ordered_dealer_terminals: &[VerifiedVssShareLinkageTerminal],
 ) -> Result<(), AggregateThresholdShareRuntimeError> {
     let participant_count = usize::from(FOUNDATION_PROFILE.participant_count);
-    let expected_coefficient_root_count = DATA_PRIMES
-        .len()
+    let sharing_limb_count = selected_vss_sharing_coordinates()?.len();
+    let expected_coefficient_root_count = sharing_limb_count
         .checked_mul(usize::from(FOUNDATION_PROFILE.reconstruction_threshold))
         .ok_or(AggregateThresholdShareRuntimeError::InvalidInput)?;
-    let expected_recipient_root_count = DATA_PRIMES
-        .len()
+    let expected_recipient_root_count = sharing_limb_count
         .checked_mul(participant_count)
         .ok_or(AggregateThresholdShareRuntimeError::InvalidInput)?;
     if ordered_dealer_terminals.len() != participant_count {
@@ -504,7 +584,7 @@ pub(crate) fn begin_aggregate_threshold_share_recipient_authority(
     )?;
 
     let participant_count = usize::from(FOUNDATION_PROFILE.participant_count);
-    let aggregate_share_coefficients = DATA_PRIMES
+    let aggregate_share_coefficients = selected_vss_sharing_coordinates()?
         .iter()
         .map(|_| Zeroizing::new(vec![0_u64; POLYNOMIAL_DEGREE]))
         .collect::<Vec<_>>()
@@ -519,15 +599,52 @@ pub(crate) fn begin_aggregate_threshold_share_recipient_authority(
             .take(participant_count)
             .collect::<Vec<_>>()
             .into_boxed_slice(),
-        aggregate_share_coefficients,
+        aggregate_share_coefficients: Some(aggregate_share_coefficients),
         generation_material: None,
         ordered_recipient_terminals: std::iter::repeat_with(|| None)
             .take(participant_count)
             .collect::<Vec<_>>()
             .into_boxed_slice(),
+        private_vss_mailbox_byte_lengths: None,
     };
     AGGREGATE_THRESHOLD_SHARE_RECIPIENT_AUTHORITY_REGISTRY
         .with(|registry| registry.borrow_mut().retain(authority))
+}
+
+/// Positively verifies the complete dealer-major mailbox corpus while the
+/// exact dealer terminals are still owned by the recipient authority. The
+/// resulting byte-length catalog is development evidence only; omitting it
+/// cannot change cryptographic qualification, while requesting exact
+/// accounting later fails unless this complete corpus was retained.
+pub(crate) fn retain_verified_generated_private_vss_mailbox_corpus_byte_lengths(
+    recipient_authority_handle: u32,
+    ordered_canonical_signed_envelope_bytes: &[&[u8]],
+) -> Result<(), AggregateThresholdShareRuntimeError> {
+    AGGREGATE_THRESHOLD_SHARE_RECIPIENT_AUTHORITY_REGISTRY.with(|registry| {
+        let mut registry = registry.borrow_mut();
+        let authority = registry.authority_mut(recipient_authority_handle)?;
+        if authority.private_vss_mailbox_byte_lengths.is_some() {
+            return Err(AggregateThresholdShareRuntimeError::Refusal(
+                RefusalReason::ConsumedState,
+            ));
+        }
+        let verified_public_randomness = authority.verified_public_randomness.as_ref().ok_or(
+            AggregateThresholdShareRuntimeError::Refusal(RefusalReason::ConsumedState),
+        )?;
+        let ordered_dealer_terminals = authority.ordered_dealer_terminals.as_ref().ok_or(
+            AggregateThresholdShareRuntimeError::Refusal(RefusalReason::ConsumedState),
+        )?;
+        let catalog =
+            VerifiedGeneratedPrivateVssMailboxCorpusByteLengthCatalog::from_verified_dealer_terminals(
+                verified_public_randomness,
+                ordered_dealer_terminals,
+                GeneratedPrivateVssMailboxCorpusInput::new(
+                    ordered_canonical_signed_envelope_bytes,
+                ),
+            )?;
+        authority.private_vss_mailbox_byte_lengths = Some(catalog);
+        Ok(())
+    })
 }
 
 fn canonical_dealer_vss_statement_bytes(
@@ -555,12 +672,13 @@ fn expected_mailbox_material_roots(
     recipient_roster_position: u16,
 ) -> Result<Vec<Hash512>, AggregateThresholdShareRuntimeError> {
     let participant_count = usize::from(FOUNDATION_PROFILE.participant_count);
+    let sharing_limb_count = selected_vss_sharing_coordinates()?.len();
     let recipient_roster_position = usize::from(recipient_roster_position);
     let mut ordered_roots = Vec::with_capacity(
         dealer_terminal
             .ordered_coefficient_material_roots()
             .len()
-            .checked_add(DATA_PRIMES.len())
+            .checked_add(sharing_limb_count)
             .ok_or(AggregateThresholdShareRuntimeError::InvalidInput)?,
     );
     ordered_roots.extend(
@@ -570,7 +688,7 @@ fn expected_mailbox_material_roots(
             .copied()
             .map(Hash512::from_bytes),
     );
-    for sharing_limb_ordinal in 0..DATA_PRIMES.len() {
+    for sharing_limb_ordinal in 0..sharing_limb_count {
         let root_ordinal = sharing_limb_ordinal
             .checked_mul(participant_count)
             .and_then(|offset| offset.checked_add(recipient_roster_position))
@@ -772,7 +890,8 @@ fn reconstruct_dealer_source_materials(
         ));
     }
     let decoded_limbs = decoded_payload.into_ordered_limbs();
-    if decoded_limbs.len() != DATA_PRIMES.len() {
+    let sharing_coordinates = selected_vss_sharing_coordinates()?;
+    if decoded_limbs.len() != sharing_coordinates.len() {
         return Err(AggregateThresholdShareRuntimeError::Refusal(
             RefusalReason::WrongTypeOrLength,
         ));
@@ -780,11 +899,13 @@ fn reconstruct_dealer_source_materials(
     let profile = selected_committed_material_profile()?;
     let context = verified_public_randomness.context();
     let participant_count = usize::from(FOUNDATION_PROFILE.participant_count);
-    let mut ordered_source_materials = Vec::with_capacity(DATA_PRIMES.len());
-    for (sharing_limb_ordinal, decoded_limb) in decoded_limbs.iter().enumerate() {
-        let expected_sharing_limb_index = u16::try_from(sharing_limb_ordinal)
-            .map_err(|_| AggregateThresholdShareRuntimeError::InvalidInput)?;
-        let modulus = DATA_PRIMES[sharing_limb_ordinal];
+    let mut ordered_source_materials = Vec::with_capacity(sharing_coordinates.len());
+    for (sharing_limb_ordinal, (decoded_limb, (expected_sharing_limb_index, modulus))) in
+        decoded_limbs
+            .iter()
+            .zip(sharing_coordinates.iter().copied())
+            .enumerate()
+    {
         if decoded_limb.sharing_limb_index() != expected_sharing_limb_index {
             return Err(AggregateThresholdShareRuntimeError::Refusal(
                 RefusalReason::WrongContext,
@@ -846,36 +967,61 @@ fn reconstruct_dealer_source_materials(
     Ok((ordered_source_materials.into_boxed_slice(), decoded_limbs))
 }
 
-fn add_source_shares_to_aggregate(
+#[derive(Clone, Copy)]
+enum AggregateSourceShareUpdate {
+    Add,
+    Remove,
+}
+
+fn update_aggregate_with_source_shares(
     aggregate_share_coefficients: &mut [Zeroizing<Vec<u64>>],
     source_limbs: &[super::DecodedRecipientShareLimb],
+    update: AggregateSourceShareUpdate,
 ) -> Result<(), AggregateThresholdShareRuntimeError> {
-    if aggregate_share_coefficients.len() != DATA_PRIMES.len()
-        || source_limbs.len() != DATA_PRIMES.len()
+    let sharing_coordinates = selected_vss_sharing_coordinates()?;
+    if aggregate_share_coefficients.len() != sharing_coordinates.len()
+        || source_limbs.len() != sharing_coordinates.len()
     {
         return Err(AggregateThresholdShareRuntimeError::InvalidInput);
     }
-    for (sharing_limb_ordinal, (aggregate_coefficients, source_limb)) in
-        aggregate_share_coefficients
-            .iter_mut()
-            .zip(source_limbs)
-            .enumerate()
+    if aggregate_share_coefficients
+        .iter()
+        .zip(source_limbs)
+        .zip(sharing_coordinates.iter())
+        .any(
+            |((aggregate_coefficients, source_limb), (expected_sharing_limb_index, modulus))| {
+                source_limb.sharing_limb_index() != *expected_sharing_limb_index
+                    || aggregate_coefficients.len() != POLYNOMIAL_DEGREE
+                    || source_limb.canonical_share_coefficients().len() != POLYNOMIAL_DEGREE
+                    || aggregate_coefficients
+                        .iter()
+                        .any(|coefficient| *coefficient >= *modulus)
+                    || source_limb
+                        .canonical_share_coefficients()
+                        .iter()
+                        .any(|coefficient| *coefficient >= *modulus)
+            },
+        )
     {
-        let modulus = DATA_PRIMES[sharing_limb_ordinal];
+        return Err(AggregateThresholdShareRuntimeError::InvalidInput);
+    }
+    for ((aggregate_coefficients, source_limb), (_, modulus)) in aggregate_share_coefficients
+        .iter_mut()
+        .zip(source_limbs)
+        .zip(sharing_coordinates.iter().copied())
+    {
         let source_coefficients = source_limb.canonical_share_coefficients();
-        if aggregate_coefficients.len() != POLYNOMIAL_DEGREE
-            || source_coefficients.len() != POLYNOMIAL_DEGREE
-        {
-            return Err(AggregateThresholdShareRuntimeError::InvalidInput);
-        }
         for (aggregate_coefficient, source_coefficient) in
             aggregate_coefficients.iter_mut().zip(source_coefficients)
         {
-            *aggregate_coefficient = u64::try_from(
-                (u128::from(*aggregate_coefficient) + u128::from(*source_coefficient))
-                    % u128::from(modulus),
-            )
-            .map_err(|_| AggregateThresholdShareRuntimeError::InvalidInput)?;
+            *aggregate_coefficient = match update {
+                AggregateSourceShareUpdate::Add => {
+                    add_mod_fast(*aggregate_coefficient, *source_coefficient, modulus)
+                }
+                AggregateSourceShareUpdate::Remove => {
+                    sub_mod_fast(*aggregate_coefficient, *source_coefficient, modulus)
+                }
+            };
         }
     }
     Ok(())
@@ -923,13 +1069,14 @@ fn ordered_source_share_roots_for_recipient(
     recipient_roster_position: u16,
 ) -> Result<Vec<[u8; 64]>, AggregateThresholdShareRuntimeError> {
     let participant_count = usize::from(FOUNDATION_PROFILE.participant_count);
+    let sharing_limb_count = selected_vss_sharing_coordinates()?.len();
     let mut ordered_roots = Vec::with_capacity(
         participant_count
-            .checked_mul(DATA_PRIMES.len())
+            .checked_mul(sharing_limb_count)
             .ok_or(AggregateThresholdShareRuntimeError::InvalidInput)?,
     );
     for dealer_terminal in ordered_dealer_terminals {
-        for sharing_limb_ordinal in 0..DATA_PRIMES.len() {
+        for sharing_limb_ordinal in 0..sharing_limb_count {
             let root_ordinal = sharing_limb_ordinal
                 .checked_mul(participant_count)
                 .and_then(|offset| offset.checked_add(usize::from(recipient_roster_position)))
@@ -955,7 +1102,8 @@ fn derive_aggregate_generation_material(
     action_private_randomness: &ActionPrivateRandomness,
     aggregate_share_coefficients: &[Zeroizing<Vec<u64>>],
 ) -> Result<AggregateThresholdShareGenerationMaterial, AggregateThresholdShareRuntimeError> {
-    if aggregate_share_coefficients.len() != DATA_PRIMES.len() {
+    let sharing_coordinates = selected_vss_sharing_coordinates()?;
+    if aggregate_share_coefficients.len() != sharing_coordinates.len() {
         return Err(AggregateThresholdShareRuntimeError::InvalidInput);
     }
     let profile = selected_committed_material_profile()?;
@@ -963,13 +1111,11 @@ fn derive_aggregate_generation_material(
     let randomness_domain =
         PrivateRandomnessDomain::vss_expansion(AGGREGATE_MATERIAL_RANDOMNESS_PURPOSE)?;
     let setup_attempt_identifier = action_private_randomness.setup_attempt_identifier();
-    let mut ordered_aggregate_materials = Vec::with_capacity(DATA_PRIMES.len());
-    for (sharing_limb_ordinal, aggregate_coefficients) in
-        aggregate_share_coefficients.iter().enumerate()
+    let mut ordered_aggregate_materials = Vec::with_capacity(sharing_coordinates.len());
+    for (aggregate_coefficients, (sharing_limb_index, modulus)) in aggregate_share_coefficients
+        .iter()
+        .zip(sharing_coordinates.iter().copied())
     {
-        let sharing_limb_index = u16::try_from(sharing_limb_ordinal)
-            .map_err(|_| AggregateThresholdShareRuntimeError::InvalidInput)?;
-        let modulus = DATA_PRIMES[sharing_limb_ordinal];
         let material_context_hash = CommittedMaterialContext::new(
             context.suite_identifier().into_bytes(),
             context.ceremony_context_hash().into_bytes(),
@@ -1039,19 +1185,11 @@ fn derive_aggregate_generation_material(
         .map_err(|_| {
             AggregateThresholdShareRuntimeError::Refusal(RefusalReason::WrongTypeOrLength)
         })?;
-    let local_target_release_shares = selected_target_data_prime_coordinates()?
-        .iter()
-        .map(|(data_modulus_index, _)| {
-            aggregate_share_coefficients
-                .get(usize::from(*data_modulus_index))
-                .cloned()
-                .ok_or(AggregateThresholdShareRuntimeError::InvalidInput)
-        })
-        .collect::<Result<Vec<_>, _>>()?
-        .into_boxed_slice();
+    if selected_target_data_prime_coordinates()? != sharing_coordinates {
+        return Err(AggregateThresholdShareRuntimeError::InvalidInput);
+    }
     Ok(AggregateThresholdShareGenerationMaterial {
         ordered_aggregate_materials: ordered_aggregate_materials.into_boxed_slice(),
-        local_target_release_shares,
         canonical_application_statement_bytes,
         pinned_proof_attempt: None,
     })
@@ -1154,22 +1292,47 @@ fn absorb_joined_recipient_vss_payload(
             .checked_add(1)
             .is_some_and(|count| count == usize::from(FOUNDATION_PROFILE.participant_count));
         if final_source {
-            let mut completed_aggregate = authority.aggregate_share_coefficients.clone();
-            add_source_shares_to_aggregate(&mut completed_aggregate, &decoded_limbs)?;
-            let generation_material = derive_aggregate_generation_material(
+            let mut completed_aggregate = authority.aggregate_share_coefficients.take().ok_or(
+                AggregateThresholdShareRuntimeError::Refusal(RefusalReason::ConsumedState),
+            )?;
+            if let Err(error) = update_aggregate_with_source_shares(
+                &mut completed_aggregate,
+                &decoded_limbs,
+                AggregateSourceShareUpdate::Add,
+            ) {
+                authority.aggregate_share_coefficients = Some(completed_aggregate);
+                return Err(error);
+            }
+            let generation_result = derive_aggregate_generation_material(
                 verified_public_randomness,
                 ordered_dealer_terminals,
                 authority.local_recipient_identity,
                 authority.local_recipient_roster_position,
                 &authority.action_private_randomness,
                 &completed_aggregate,
-            )?;
-            authority.aggregate_share_coefficients = completed_aggregate;
-            authority.generation_material = Some(generation_material);
+            );
+            match generation_result {
+                Ok(generation_material) => {
+                    authority.generation_material = Some(generation_material);
+                }
+                Err(error) => {
+                    let rollback_result = update_aggregate_with_source_shares(
+                        &mut completed_aggregate,
+                        &decoded_limbs,
+                        AggregateSourceShareUpdate::Remove,
+                    );
+                    authority.aggregate_share_coefficients = Some(completed_aggregate);
+                    rollback_result?;
+                    return Err(error);
+                }
+            }
         } else {
-            add_source_shares_to_aggregate(
-                &mut authority.aggregate_share_coefficients,
+            update_aggregate_with_source_shares(
+                authority.aggregate_share_coefficients.as_mut().ok_or(
+                    AggregateThresholdShareRuntimeError::Refusal(RefusalReason::ConsumedState),
+                )?,
                 &decoded_limbs,
+                AggregateSourceShareUpdate::Add,
             )?;
         }
         let source_slot = authority
@@ -1489,8 +1652,8 @@ fn prepare_aggregate_common_generation(
             compile_aggregate_threshold_share_relation_plan(&relation_input, &relation_context)?;
         let variant = compiled_relation_plan.select_variant(None, None)?;
         let participant_count = usize::from(FOUNDATION_PROFILE.participant_count);
-        let expected_root_count = DATA_PRIMES
-            .len()
+        let sharing_limb_count = selected_vss_sharing_coordinates()?.len();
+        let expected_root_count = sharing_limb_count
             .checked_mul(
                 participant_count
                     .checked_add(1)
@@ -1498,7 +1661,7 @@ fn prepare_aggregate_common_generation(
             )
             .ok_or(AggregateThresholdShareRuntimeError::InvalidInput)?;
         let mut ordered_sources = Vec::with_capacity(expected_root_count);
-        for sharing_limb_ordinal in 0..DATA_PRIMES.len() {
+        for sharing_limb_ordinal in 0..sharing_limb_count {
             for dealer_ordinal in 0..participant_count {
                 let material = authority
                     .ordered_source_materials_by_dealer
@@ -1844,7 +2007,8 @@ fn resolve_private_share_acceptance_source(
     )?;
     if source.object_type() != FoundationObjectType::PrivateShareAcceptance
         || source.producer_sequence() != 0
-        || payload.aggregate_threshold_share_material_roots().len() != DATA_PRIMES.len()
+        || payload.aggregate_threshold_share_material_roots().len()
+            != selected_vss_sharing_coordinates()?.len()
         || verified_public_randomness
             .ordered_participant_identities()
             .get(usize::from(recipient_roster_position))
@@ -1874,7 +2038,8 @@ fn canonical_aggregate_statement_for_acceptance(
     )?;
     if board_source.object_type() != FoundationObjectType::PrivateShareAcceptance
         || board_source.producer_sequence() != 0
-        || payload.aggregate_threshold_share_material_roots().len() != DATA_PRIMES.len()
+        || payload.aggregate_threshold_share_material_roots().len()
+            != selected_vss_sharing_coordinates()?.len()
         || verified_public_randomness
             .ordered_participant_identities()
             .get(usize::from(recipient_roster_position))
@@ -2181,43 +2346,33 @@ fn complete_vss_qualification_if_ready(
         AggregateThresholdShareRuntimeError::Refusal(RefusalReason::MissingPrerequisite),
     )?;
     let selected_target_coordinates = selected_target_data_prime_coordinates()?;
-    if generation_material.local_target_release_shares.len() != selected_target_coordinates.len() {
+    let selected_sharing_coordinates = selected_vss_sharing_coordinates()?;
+    if selected_target_coordinates != selected_sharing_coordinates
+        || generation_material.ordered_aggregate_materials.len()
+            != selected_target_coordinates.len()
+    {
         return Err(AggregateThresholdShareRuntimeError::Refusal(
             RefusalReason::WrongTypeOrLength,
         ));
     }
-    let mut aggregate_material_slots = generation_material
+    let local_target_release_limbs = generation_material
         .ordered_aggregate_materials
         .into_vec()
         .into_iter()
-        .map(Some)
-        .collect::<Vec<_>>();
-    let local_target_release_limbs = generation_material
-        .local_target_release_shares
-        .into_vec()
-        .into_iter()
         .zip(selected_target_coordinates.iter().copied())
-        .map(|(threshold_share, (data_modulus_index, _))| {
-            let committed_share = aggregate_material_slots
-                .get_mut(usize::from(data_modulus_index))
-                .and_then(Option::take)
-                .ok_or(AggregateThresholdShareRuntimeError::Refusal(
-                    RefusalReason::MissingPrerequisite,
-                ))?;
-            Ok(
-                BrowserOwnedAggregateThresholdShareLimb::from_proof_generation_source(
-                    data_modulus_index,
-                    threshold_share,
-                    committed_share,
-                ),
+        .map(|(committed_share, (data_modulus_index, _))| {
+            BrowserOwnedAggregateThresholdShareLimb::from_proof_generation_source(
+                data_modulus_index,
+                committed_share,
             )
         })
-        .collect::<Result<Vec<_>, AggregateThresholdShareRuntimeError>>()?;
+        .collect::<Vec<_>>();
     let qualification = VerifiedAcceptedSetupVssQualification::from_verified_terminals(
         public_randomness,
         ordered_dealer_terminals,
         ordered_recipient_terminals,
         local_target_release_limbs,
+        authority.private_vss_mailbox_byte_lengths.take(),
     )?;
     AGGREGATE_THRESHOLD_SHARE_RECIPIENT_AUTHORITY_REGISTRY.with(|registry| {
         registry
@@ -2312,6 +2467,29 @@ pub(crate) fn with_verified_accepted_setup_vss_public_randomness<Output>(
     })
 }
 
+/// Borrows the verifier-owned object-hash sources needed to construct the
+/// canonical accepted-setup package. Neither hash list can be supplied or
+/// replaced by the host: all five lists remain rooted in the completed VSS
+/// authority.
+pub(crate) fn with_verified_accepted_setup_vss_package_sources<Output>(
+    recipient_authority_handle: u32,
+    inspect: impl FnOnce(
+        &VerifiedPublicRandomness,
+        &VerifiedVssQualificationTerminals,
+    ) -> Result<Output, AggregateThresholdShareRuntimeError>,
+) -> Result<Output, AggregateThresholdShareRuntimeError> {
+    AGGREGATE_THRESHOLD_SHARE_RECIPIENT_AUTHORITY_REGISTRY.with(|registry| {
+        registry
+            .borrow()
+            .with_complete(recipient_authority_handle, |qualification| {
+                inspect(
+                    qualification.verified_public_randomness(),
+                    qualification.qualification_terminals(),
+                )
+            })?
+    })
+}
+
 pub(crate) fn discard_aggregate_threshold_share_generation_board_binding_source(
     board_binding_source_handle: u32,
 ) -> Result<(), AggregateThresholdShareRuntimeError> {
@@ -2344,6 +2522,43 @@ pub(crate) fn discard_aggregate_threshold_share_recipient_authority(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn aggregate_share_canonical_coefficients_have_one_retained_owner_after_generation() {
+        let accounting = aggregate_threshold_share_canonical_coefficient_memory_accounting()
+            .expect("selected aggregate-share coefficient accounting");
+
+        assert_eq!(
+            accounting.retained_before_final_source_byte_length(),
+            3_145_728
+        );
+        assert_eq!(accounting.maximum_transient_byte_length(), 6_291_456);
+        assert_eq!(
+            accounting.retained_after_final_source_byte_length(),
+            3_145_728
+        );
+        assert_eq!(
+            accounting.removed_generation_duplicate_byte_length(),
+            6_291_456
+        );
+        assert_eq!(accounting.retained_target_release_byte_length(), 3_145_728);
+        assert_eq!(
+            accounting.removed_persistent_duplicate_byte_length(),
+            3_145_728
+        );
+        let sharing_limb_count = u64::try_from(
+            selected_vss_sharing_coordinates()
+                .expect("selected sharing coordinates")
+                .len(),
+        )
+        .expect("selected sharing limb count fits u64");
+        assert_eq!(
+            accounting.retained_before_final_source_byte_length(),
+            sharing_limb_count
+                * u64::try_from(POLYNOMIAL_DEGREE).expect("polynomial degree fits u64")
+                * u64::try_from(size_of::<u64>()).expect("coefficient width fits u64")
+        );
+    }
 
     #[test]
     fn single_active_source_registry_is_bounded_one_shot_and_restorable_before_consumption() {

@@ -40,7 +40,8 @@ use super::{
     ProofExternalMemoryTransactionRecorder, ProofExternalMemoryTransactionReplay,
     ProofExternalMemoryTransactionRequest, ProofProfileError, RelationPlanCheckContext,
     RelationPlanError, RelationProofTreeInput, ValidatedRelationPlanArtifact, VerifiedCommonProof,
-    VerifiedEvaluatorAuxiliaryRoot, VerifiedRelationColumnEvaluator, VerifiedStatementOwnedTree,
+    VerifiedEvaluatorAuxiliaryRoot, VerifiedRelationColumnEvaluator,
+    VerifiedRelationColumnEvaluatorMemoryAccounting, VerifiedStatementOwnedTree,
     verified_application_statement_hash,
 };
 #[cfg(test)]
@@ -274,6 +275,10 @@ impl CommonProofRelationPlanCapability {
 
     pub(crate) const fn relation_plan_variant_hash(&self) -> [u8; HASH_BYTE_LENGTH] {
         self.relation_plan_variant_hash
+    }
+
+    pub(crate) const fn application_statement_schema_identifier(&self) -> u16 {
+        self.relation_plan.application_statement_schema_identifier()
     }
 
     pub(crate) fn proof_query_count(&self) -> Result<u32, CommonProofRuntimeError> {
@@ -970,6 +975,17 @@ struct CommonProofVerifiedColumnEvaluatorEntry {
 struct RefusingVerifiedColumnEvaluator;
 
 impl VerifiedRelationColumnEvaluator for RefusingVerifiedColumnEvaluator {
+    fn memory_accounting(
+        &self,
+    ) -> Result<VerifiedRelationColumnEvaluatorMemoryAccounting, CommonProofVerifierError> {
+        VerifiedRelationColumnEvaluatorMemoryAccounting::new(
+            u64::try_from(core::mem::size_of::<Self>())
+                .map_err(|_| CommonProofVerifierError::InvalidTreeLayout)?,
+            0,
+            0,
+        )
+    }
+
     fn evaluate_at_extension_point(
         &mut self,
         _column_ordinal: u32,
@@ -997,7 +1013,8 @@ pub(crate) use authorization_registry::{
 };
 pub(crate) use generation_worker::{
     AuthenticatedCommonProofGenerationCheckpoint, CommonProofGenerationAuthorization,
-    CommonProofGenerationCheckpointCustodyRequirement, CommonProofGenerationPreparationError,
+    CommonProofGenerationCheckpointCustodyRequirement,
+    CommonProofGenerationExternalMemoryAccounting, CommonProofGenerationPreparationError,
     CommonProofGenerationSourceError, CommonProofGenerationSources,
     CommonProofGenerationWorkerError, CommonProofGenerationWorkerPoll,
     PreparedCommonProofGeneration,

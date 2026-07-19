@@ -1,5 +1,6 @@
 use std::{
     collections::HashMap,
+    mem::size_of,
     sync::{Mutex, OnceLock},
 };
 
@@ -12,6 +13,45 @@ use crate::bgv::setup::sampling::sample_public_setup_residues;
 
 static SETUP_COMMITMENT_MATRIX_NTT_CACHE: OnceLock<Mutex<SetupCommitmentMatrixNttCache>> =
     OnceLock::new();
+
+/// Coefficient payload retained when every sampled matrix coordinate for the
+/// selected commitment primes is resident in the process cache. Structural
+/// zero and identity coordinates never enter the cache and are excluded by
+/// the same predicate used by commitment computation.
+pub(in crate::bgv) fn setup_commitment_matrix_ntt_cache_coefficient_payload_byte_length(
+    ring_degree: usize,
+) -> CanonicalResult<u64> {
+    validate_ring_degree(ring_degree)?;
+    let sampled_coordinate_count_per_modulus = (0..SETUP_COMMITMENT_ROW_COUNT)
+        .flat_map(|matrix_row_index| {
+            (0..SETUP_COMMITMENT_RANDOMNESS_WIDTH).map(move |randomness_column_index| {
+                (matrix_row_index, randomness_column_index)
+            })
+        })
+        .filter(|(matrix_row_index, randomness_column_index)| {
+            structural_matrix_polynomial_kind(*matrix_row_index, *randomness_column_index)
+                .is_none()
+        })
+        .count();
+    u64::try_from(SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len())
+        .ok()
+        .and_then(|modulus_count| {
+            u64::try_from(sampled_coordinate_count_per_modulus)
+                .ok()
+                .and_then(|coordinate_count| modulus_count.checked_mul(coordinate_count))
+        })
+        .and_then(|coordinate_count| {
+            u64::try_from(ring_degree)
+                .ok()
+                .and_then(|degree| coordinate_count.checked_mul(degree))
+        })
+        .and_then(|coefficient_count| {
+            u64::try_from(size_of::<u64>())
+                .ok()
+                .and_then(|byte_length| coefficient_count.checked_mul(byte_length))
+        })
+        .ok_or_else(|| invalid_commitment_input("setup commitment matrix cache size overflowed"))
+}
 
 // Version three binds the prime-local rank-one layout. Purpose eleven supplies
 // two ternary columns and purpose twelve supplies one independently sampled
@@ -135,28 +175,6 @@ pub(super) fn setup_commitment_matrix_ntt(
     }
 
     Ok(matrix_ntt)
-}
-
-// Coefficient-form matrix polynomial through the process-wide NTT cache: the
-// expensive hash sampling happens once per coordinate set and seed.
-pub(in super::super) fn setup_commitment_matrix_coefficients_cached(
-    public_matrix_seed_hash: &str,
-    commitment_modulus_index: usize,
-    matrix_row_index: usize,
-    randomness_column_index: usize,
-    ring_degree: usize,
-    modulus: u64,
-) -> CanonicalResult<Vec<u64>> {
-    let matrix_ntt = setup_commitment_matrix_ntt(
-        public_matrix_seed_hash,
-        commitment_modulus_index,
-        matrix_row_index,
-        randomness_column_index,
-        ring_degree,
-        modulus,
-    )?;
-
-    inverse_negacyclic_ntt(&matrix_ntt, modulus)
 }
 
 fn setup_commitment_matrix_sampler_customization(

@@ -1745,7 +1745,10 @@ describe('authenticated mailbox', () => {
             ...createBrowserLocalKeyOperations(wrongRecipientKeys),
         });
         const plaintext = textEncoder.encode(
-            canonicalJson({ objectType: 'PrivateVssShareEnvelope', value: 3 }),
+            canonicalJson({
+                objectType: 'RecipientPrivateVssPayload',
+                value: 3,
+            }),
         );
         const fixture = createAuthenticatedMailboxFixture({
             plaintext,

@@ -32,6 +32,41 @@ pub(super) const TRUSTEE_QUOTIENT_MAXIMUM_ABSOLUTE_VALUE: u64 = 147_622;
 pub(super) const EXACT_INTEGER_LIFT_RADIX: u64 = TRUSTEE_QUOTIENT_HIGH_RADIX as u64;
 pub(super) const EXACT_INTEGER_LIFT_RADIX_TRIT_COUNT: usize = TRUSTEE_QUOTIENT_LOW_TRIT_COUNT;
 
+pub(super) struct ExactRadixDigitColumnCatalog {
+    ordered_entries: Box<[(u32, Box<[u32]>)]>,
+}
+
+impl ExactRadixDigitColumnCatalog {
+    pub(super) fn len(&self) -> usize {
+        self.ordered_entries.len()
+    }
+
+    pub(super) fn iter(&self) -> impl Iterator<Item = &(u32, Box<[u32]>)> {
+        self.ordered_entries.iter()
+    }
+
+    pub(super) fn values(&self) -> impl Iterator<Item = &Box<[u32]>> {
+        self.ordered_entries.iter().map(|(_, values)| values)
+    }
+}
+
+impl FromIterator<(u32, Box<[u32]>)> for ExactRadixDigitColumnCatalog {
+    fn from_iter<Entries: IntoIterator<Item = (u32, Box<[u32]>)>>(entries: Entries) -> Self {
+        Self {
+            ordered_entries: entries.into_iter().collect::<Vec<_>>().into_boxed_slice(),
+        }
+    }
+}
+
+impl<'catalog> IntoIterator for &'catalog ExactRadixDigitColumnCatalog {
+    type Item = &'catalog (u32, Box<[u32]>);
+    type IntoIter = core::slice::Iter<'catalog, (u32, Box<[u32]>)>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.ordered_entries.iter()
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct SameSecretRelationPlanInput {
     pub(crate) ring_degree: u64,
@@ -461,16 +496,6 @@ pub(super) struct UpperBoundComparatorWitnessLayout {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) struct SplitIntegerVector {
     pub(super) halves: [u32; 2],
-}
-
-/// Canonical public-polynomial source columns and the two load-bearing half
-/// projections consumed by the existing full-ring integer-lift relations.
-/// The relation compiler always binds each half projection to its two source
-/// quarters; an authenticated root alone is not authority for that link.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub(super) struct QuarterBackedSplitIntegerVector {
-    pub(super) quarters: [u32; 4],
-    pub(super) half_projections: SplitIntegerVector,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]

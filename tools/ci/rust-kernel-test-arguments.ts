@@ -1,6 +1,3 @@
-export const acceptedSetupTestModulePattern =
-    'bgv::setup::tests::accepted_setup';
-
 export const heavyRustKernelTestNamePrefix = 'heavy_rust_kernel_';
 
 export const normalizeRustTestFilter = (filter: string): string => {
@@ -23,8 +20,6 @@ export const cargoTestArgumentsForRustKernelFast = (
     'sealed-lattice-kernel',
     ...(testFilter === undefined ? [] : [testFilter]),
     '--',
-    '--skip',
-    acceptedSetupTestModulePattern,
     // Proof and evaluator tests use Rayon internally. Serial libtest scheduling
     // prevents nested CPU and memory oversubscription.
     '--test-threads',

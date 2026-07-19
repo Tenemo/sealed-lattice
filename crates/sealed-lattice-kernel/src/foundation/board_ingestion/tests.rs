@@ -8,10 +8,18 @@ use fips204::{
 };
 
 use super::*;
-use crate::bgv::parameters::DATA_PRIMES;
-use crate::foundation::{RosterEntry, VerifiedBoardApplicationSource, signature_message};
+use crate::foundation::{
+    RosterEntry, VerifiedBoardApplicationSource, selected_sharing_data_prime_coordinates,
+    signature_message,
+};
 
 const OBJECT_SIGNATURE_CONTEXT: &[u8] = b"sealed-lattice/object-signature/v1";
+
+fn selected_sharing_limb_count() -> usize {
+    selected_sharing_data_prime_coordinates()
+        .expect("selected sharing coordinates")
+        .len()
+}
 
 struct BoardFixture {
     suite_id: Hash512,
@@ -250,10 +258,10 @@ impl BoardFixture {
         producer_roster_position: usize,
         public_setup_seed: Hash512,
     ) -> Vec<u8> {
-        let coefficient_root_count =
-            DATA_PRIMES.len() * usize::from(FOUNDATION_PROFILE.reconstruction_threshold);
+        let coefficient_root_count = selected_sharing_limb_count()
+            * usize::from(FOUNDATION_PROFILE.reconstruction_threshold);
         let recipient_root_count =
-            DATA_PRIMES.len() * usize::from(FOUNDATION_PROFILE.participant_count);
+            selected_sharing_limb_count() * usize::from(FOUNDATION_PROFILE.participant_count);
         let payload = CanonicalTuple::new(
             DEALER_PUBLIC_RECORD_PAYLOAD_SCHEMA_IDENTIFIER,
             FOUNDATION_SCHEMA_VERSION,
@@ -286,7 +294,7 @@ impl BoardFixture {
             FOUNDATION_SCHEMA_VERSION,
             vec![
                 CanonicalItem::hash512([0xe1; Hash512::BYTE_LENGTH]),
-                test_hash_list_item(DATA_PRIMES.len(), 0xe2),
+                test_hash_list_item(selected_sharing_limb_count(), 0xe2),
                 test_stream_descriptor_item(0xe3),
             ],
         )
@@ -302,6 +310,37 @@ impl BoardFixture {
                 payload,
             ),
             0x72,
+        )
+    }
+
+    fn complaint(
+        &self,
+        producer_roster_position: usize,
+        accused_roster_position: usize,
+    ) -> Vec<u8> {
+        let payload = CanonicalTuple::new(
+            COMPLAINT_PAYLOAD_SCHEMA_IDENTIFIER,
+            FOUNDATION_SCHEMA_VERSION,
+            vec![
+                CanonicalItem::participant_identity(
+                    self.participant_identities[accused_roster_position].into_bytes(),
+                ),
+                CanonicalItem::hash512([0xef; Hash512::BYTE_LENGTH]),
+                CanonicalItem::unsigned16(RefusalReason::InvalidProof.canonical_code()),
+            ],
+        )
+        .encode()
+        .expect("complaint payload encodes");
+        self.sign_envelope(
+            producer_roster_position,
+            self.envelope(
+                producer_roster_position,
+                FoundationObjectType::Complaint,
+                0,
+                Vec::new(),
+                payload,
+            ),
+            0x73,
         )
     }
 
@@ -396,6 +435,124 @@ fn carrier_object_hash(carrier_bytes: &[u8]) -> Hash512 {
 }
 
 #[test]
+fn complete_setup_vss_response_catalog_requires_every_roster_acceptance() {
+    let fixture = BoardFixture::new();
+    let acceptances = (0..usize::from(FOUNDATION_PROFILE.participant_count))
+        .map(|roster_position| fixture.private_share_acceptance(roster_position))
+        .collect::<Vec<_>>();
+    let expected_hashes = acceptances
+        .iter()
+        .map(|carrier| carrier_object_hash(carrier))
+        .collect::<Vec<_>>();
+    let mut verifier = fixture.verifier();
+    verifier
+        .verify_unordered_carriers(&acceptances)
+        .into_result()
+        .expect("the complete acceptance catalog verifies");
+    assert_eq!(
+        verifier
+            .complete_setup_vss_acceptance_object_hashes()
+            .expect("the verifier scans every frozen-roster response slot"),
+        expected_hashes
+    );
+
+    let mut incomplete_verifier = fixture.verifier();
+    incomplete_verifier
+        .verify_unordered_carriers(&acceptances[..acceptances.len() - 1])
+        .into_result()
+        .expect("the available acceptance prefix verifies");
+    assert_eq!(
+        incomplete_verifier
+            .complete_setup_vss_acceptance_object_hashes()
+            .expect_err("an omitted roster response prevents resolution")
+            .refusal_reason,
+        RefusalReason::MissingPrerequisite
+    );
+}
+
+#[test]
+fn verified_setup_complaint_prevents_positive_resolution() {
+    let fixture = BoardFixture::new();
+    let complaining_roster_position = 4;
+    let mut responses = (0..usize::from(FOUNDATION_PROFILE.participant_count))
+        .map(|roster_position| fixture.private_share_acceptance(roster_position))
+        .collect::<Vec<_>>();
+    let accused_roster_position =
+        (complaining_roster_position + 1) % usize::from(FOUNDATION_PROFILE.participant_count);
+    responses[complaining_roster_position] =
+        fixture.complaint(complaining_roster_position, accused_roster_position);
+    let mut verifier = fixture.verifier();
+    verifier
+        .verify_unordered_carriers(&responses)
+        .into_result()
+        .expect("the authenticated complaint catalog verifies structurally");
+    assert_eq!(
+        verifier
+            .complete_setup_vss_acceptance_object_hashes()
+            .expect_err("a verified complaint prevents positive resolution")
+            .refusal_reason,
+        RefusalReason::InvalidArithmeticRelation
+    );
+}
+
+#[test]
+fn acceptance_and_complaint_conflict_in_either_batch_order() {
+    let fixture = BoardFixture::new();
+    let acceptance = fixture.private_share_acceptance(2);
+    let complaint = fixture.complaint(2, 3);
+    for carriers in [
+        vec![acceptance.clone(), complaint.clone()],
+        vec![complaint.clone(), acceptance.clone()],
+    ] {
+        let mut verifier = fixture.verifier();
+        assert_eq!(
+            verifier
+                .verify_unordered_carriers(&carriers)
+                .into_result()
+                .expect_err("two authenticated responses in one slot are equivocation"),
+            RefusalReason::Equivocation
+        );
+        verifier
+            .verify_unordered_carriers(std::slice::from_ref(&acceptance))
+            .into_result()
+            .expect("the refused batch did not partially occupy the response slot");
+    }
+}
+
+#[test]
+fn later_acceptance_and_complaint_delivery_is_equivocation_in_either_direction() {
+    let fixture = BoardFixture::new();
+    let acceptance = fixture.private_share_acceptance(7);
+    let complaint = fixture.complaint(7, 8);
+
+    let mut acceptance_first = fixture.verifier();
+    acceptance_first
+        .verify_unordered_carriers(std::slice::from_ref(&acceptance))
+        .into_result()
+        .expect("the first acceptance occupies the shared response slot");
+    assert_eq!(
+        acceptance_first
+            .verify_unordered_carriers(std::slice::from_ref(&complaint))
+            .into_result()
+            .expect_err("a later complaint cannot replace an acceptance"),
+        RefusalReason::Equivocation
+    );
+
+    let mut complaint_first = fixture.verifier();
+    complaint_first
+        .verify_unordered_carriers(std::slice::from_ref(&complaint))
+        .into_result()
+        .expect("the first complaint occupies the shared response slot");
+    assert_eq!(
+        complaint_first
+            .verify_unordered_carriers(std::slice::from_ref(&acceptance))
+            .into_result()
+            .expect_err("a later acceptance cannot replace a complaint"),
+        RefusalReason::Equivocation
+    );
+}
+
+#[test]
 fn board_authority_rejects_a_nonselected_structural_roster() {
     let fixture = BoardFixture::new();
     let roster = Roster::new(fixture.roster.entries.iter().take(3).cloned().collect())
@@ -459,14 +616,15 @@ fn verified_application_sources_retain_exact_setup_payloads_and_manifest() {
     assert_eq!(
         dealer_payload.coefficient_material_roots(),
         test_hash_list(
-            DATA_PRIMES.len() * usize::from(FOUNDATION_PROFILE.reconstruction_threshold),
+            selected_sharing_limb_count()
+                * usize::from(FOUNDATION_PROFILE.reconstruction_threshold),
             0xd1,
         )
     );
     assert_eq!(
         dealer_payload.recipient_share_material_roots(),
         test_hash_list(
-            DATA_PRIMES.len() * usize::from(FOUNDATION_PROFILE.participant_count),
+            selected_sharing_limb_count() * usize::from(FOUNDATION_PROFILE.participant_count),
             0xd2,
         )
     );
@@ -498,7 +656,7 @@ fn verified_application_sources_retain_exact_setup_payloads_and_manifest() {
     );
     assert_eq!(
         acceptance_payload.aggregate_threshold_share_material_roots(),
-        test_hash_list(DATA_PRIMES.len(), 0xe2)
+        test_hash_list(selected_sharing_limb_count(), 0xe2)
     );
     assert_eq!(
         acceptance_payload.aggregate_threshold_share_proof(),

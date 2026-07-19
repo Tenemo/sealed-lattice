@@ -1,15 +1,18 @@
-use std::rc::Rc;
+use std::{
+    fmt,
+    rc::{Rc, Weak},
+};
 
 use crate::{
     foundation::{
         ActionPrivateRandomness, FoundationSchemaError, Hash512, PRIVATE_PROOF_SALT_PURPOSE,
         PrivateRandomCursor, PrivateRandomnessAttemptIdentifier, PrivateRandomnessDomain,
         PrivateRandomnessKmacInputClassAccounting, PrivateRandomnessStream,
-        private_randomness_stream_block_count_for_byte_length,
+        ProofApplicationSlotCeilings, private_randomness_stream_block_count_for_byte_length,
         private_randomness_stream_block_count_for_modulo_outputs,
         proof_attempt_identifier_derivation_count,
     },
-    hashing::hash_framed_parts_512,
+    hashing::{StreamingHash512, hash_framed_parts_512},
 };
 
 use super::super::{
@@ -23,6 +26,10 @@ use super::super::{
 
 const COMMON_PROOF_PRIVATE_COIN_COORDINATE_HASH_DOMAIN: &str =
     "sealed-lattice/common-proof/private-coin-coordinate/v1";
+const COMMON_PROOF_PRIVATE_COIN_REPLAY_CATALOG_DOMAIN: &str =
+    "sealed-lattice/common-proof/private-coin-replay-catalog/v1";
+const COMMON_PROOF_PRIVATE_COIN_REPLAY_SPAN_DOMAIN: &str =
+    "sealed-lattice/common-proof/private-coin-replay-span/v1";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CommonProofPrivateRandomnessAccountingError {
@@ -230,6 +237,359 @@ pub(crate) trait CommonProofPrivateCoinSource {
     ) -> Result<(), Self::Error>;
 }
 
+/// In-memory capability for replaying the proof-salt stream within one proof
+/// attempt. The cursor already binds the family, statement derivation context,
+/// and attempt identifier. The weak instance binding additionally makes a
+/// token stale as soon as its exact source is reset or dropped. Tokens are
+/// never serialized and contain no private coin bytes.
+#[derive(Clone)]
+pub(crate) struct CommonProofPrivateCoinReplayCursor {
+    source_instance_binding: Weak<()>,
+    cursor: PrivateRandomCursor,
+}
+
+impl fmt::Debug for CommonProofPrivateCoinReplayCursor {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("CommonProofPrivateCoinReplayCursor")
+            .field("source_instance", &"[REDACTED]")
+            .field("cursor", &self.cursor)
+            .finish()
+    }
+}
+
+impl CommonProofPrivateCoinReplayCursor {
+    pub(crate) fn new(source_instance_binding: &Rc<()>, cursor: PrivateRandomCursor) -> Self {
+        Self {
+            source_instance_binding: Rc::downgrade(source_instance_binding),
+            cursor,
+        }
+    }
+
+    pub(crate) fn belongs_to(&self, source_instance_binding: &Rc<()>) -> bool {
+        self.source_instance_binding
+            .upgrade()
+            .is_some_and(|observed| Rc::ptr_eq(&observed, source_instance_binding))
+    }
+
+    pub(crate) const fn cursor(&self) -> PrivateRandomCursor {
+        self.cursor
+    }
+}
+
+/// A replayable source can rewind only its proof-salt coordinate and only by
+/// presenting a capability captured from that exact live source instance.
+/// The caller must compare the terminal cursor after consuming the complete
+/// tree span; a partial replay is not an acceptable terminal state.
+pub(crate) trait ReplayableCommonProofPrivateCoinSource:
+    CommonProofPrivateCoinSource
+{
+    fn capture_proof_salt_replay_cursor(
+        &self,
+    ) -> Result<CommonProofPrivateCoinReplayCursor, Self::Error>;
+
+    fn restore_proof_salt_replay_cursor(
+        &mut self,
+        cursor: &CommonProofPrivateCoinReplayCursor,
+    ) -> Result<(), Self::Error>;
+
+    fn proof_salt_replay_cursor_matches(
+        &self,
+        cursor: &CommonProofPrivateCoinReplayCursor,
+    ) -> Result<bool, Self::Error>;
+}
+
+#[derive(Clone)]
+struct CommonProofPrivateCoinReplaySpanIdentity {
+    source_instance_binding: Weak<()>,
+    family_schema_identifier: u16,
+    derivation_binding_hash: Hash512,
+    attempt_identifier: [u8; 32],
+    reset_epoch: u64,
+    span_identifier: u64,
+}
+
+impl fmt::Debug for CommonProofPrivateCoinReplaySpanIdentity {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("CommonProofPrivateCoinReplaySpanIdentity")
+            .field("source_instance", &"[REDACTED]")
+            .field("family_schema_identifier", &self.family_schema_identifier)
+            .field("derivation_binding_hash", &self.derivation_binding_hash)
+            .field("attempt_identifier", &"[REDACTED]")
+            .field("reset_epoch", &self.reset_epoch)
+            .field("span_identifier", &self.span_identifier)
+            .finish()
+    }
+}
+
+impl CommonProofPrivateCoinReplaySpanIdentity {
+    fn new(
+        source_instance_binding: &Rc<()>,
+        family_schema_identifier: u16,
+        derivation_binding_hash: Hash512,
+        attempt_identifier: [u8; 32],
+        reset_epoch: u64,
+        span_identifier: u64,
+    ) -> Self {
+        Self {
+            source_instance_binding: Rc::downgrade(source_instance_binding),
+            family_schema_identifier,
+            derivation_binding_hash,
+            attempt_identifier,
+            reset_epoch,
+            span_identifier,
+        }
+    }
+
+    fn belongs_to(
+        &self,
+        source_instance_binding: &Rc<()>,
+        family_schema_identifier: u16,
+        derivation_binding_hash: Hash512,
+        attempt_identifier: [u8; 32],
+        reset_epoch: u64,
+    ) -> bool {
+        self.source_instance_binding
+            .upgrade()
+            .is_some_and(|observed| Rc::ptr_eq(&observed, source_instance_binding))
+            && self.family_schema_identifier == family_schema_identifier
+            && self.derivation_binding_hash == derivation_binding_hash
+            && self.attempt_identifier == attempt_identifier
+            && self.reset_epoch == reset_epoch
+    }
+}
+
+fn common_proof_private_coin_cursor_catalog_digest(
+    identity: &CommonProofPrivateCoinReplaySpanIdentity,
+    cursors: &[(CommonProofPrivateCoinCoordinate, PrivateRandomCursor)],
+) -> Result<[u8; 64], CommonProofPrivateCoinReplayTokenError> {
+    let cursor_part_count = u64::try_from(cursors.len())
+        .map_err(|_| CommonProofPrivateCoinReplayTokenError::AllocationLimitExceeded)?
+        .checked_mul(2)
+        .and_then(|count| count.checked_add(6))
+        .ok_or(CommonProofPrivateCoinReplayTokenError::AllocationLimitExceeded)?;
+    let mut hasher = StreamingHash512::new(
+        COMMON_PROOF_PRIVATE_COIN_REPLAY_CATALOG_DOMAIN,
+        cursor_part_count,
+    );
+    hasher.absorb_part(&identity.family_schema_identifier.to_le_bytes());
+    hasher.absorb_part(&identity.derivation_binding_hash.into_bytes());
+    hasher.absorb_part(&identity.attempt_identifier);
+    hasher.absorb_part(&identity.reset_epoch.to_le_bytes());
+    hasher.absorb_part(&identity.span_identifier.to_le_bytes());
+    hasher.absorb_part(
+        &u64::try_from(cursors.len())
+            .map_err(|_| CommonProofPrivateCoinReplayTokenError::AllocationLimitExceeded)?
+            .to_le_bytes(),
+    );
+    for (coordinate, cursor) in cursors {
+        let mut coordinate_bytes = [0_u8; 6];
+        coordinate_bytes[..2].copy_from_slice(&coordinate.purpose_class().to_le_bytes());
+        coordinate_bytes[2..].copy_from_slice(&coordinate.ordinal().to_le_bytes());
+        hasher.absorb_part(&coordinate_bytes);
+        hasher.absorb_part(
+            &cursor
+                .encode()
+                .map_err(CommonProofPrivateCoinReplayTokenError::CanonicalEncoding)?,
+        );
+    }
+    Ok(hasher.finalize())
+}
+
+#[derive(Debug)]
+pub(crate) enum CommonProofPrivateCoinReplayTokenError {
+    AllocationLimitExceeded,
+    CanonicalEncoding(FoundationSchemaError),
+}
+
+/// Single-use start capability for capturing one exact all-coordinate replay
+/// span. It is source-instance bound and never serialized.
+pub(crate) struct CommonProofPrivateCoinReplaySpanStart {
+    identity: CommonProofPrivateCoinReplaySpanIdentity,
+    start_cursors: Box<[(CommonProofPrivateCoinCoordinate, PrivateRandomCursor)]>,
+    start_catalog_digest: [u8; 64],
+}
+
+impl fmt::Debug for CommonProofPrivateCoinReplaySpanStart {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("CommonProofPrivateCoinReplaySpanStart")
+            .field("identity", &self.identity)
+            .field("cursor_count", &self.start_cursors.len())
+            .field("start_catalog_digest", &self.start_catalog_digest)
+            .finish()
+    }
+}
+
+impl CommonProofPrivateCoinReplaySpanStart {
+    pub(crate) fn new(
+        source_instance_binding: &Rc<()>,
+        family_schema_identifier: u16,
+        derivation_binding_hash: Hash512,
+        attempt_identifier: [u8; 32],
+        reset_epoch: u64,
+        span_identifier: u64,
+        start_cursors: Box<[(CommonProofPrivateCoinCoordinate, PrivateRandomCursor)]>,
+    ) -> Result<Self, CommonProofPrivateCoinReplayTokenError> {
+        let identity = CommonProofPrivateCoinReplaySpanIdentity::new(
+            source_instance_binding,
+            family_schema_identifier,
+            derivation_binding_hash,
+            attempt_identifier,
+            reset_epoch,
+            span_identifier,
+        );
+        let start_catalog_digest =
+            common_proof_private_coin_cursor_catalog_digest(&identity, &start_cursors)?;
+        Ok(Self {
+            identity,
+            start_cursors,
+            start_catalog_digest,
+        })
+    }
+
+    pub(crate) fn belongs_to(
+        &self,
+        source_instance_binding: &Rc<()>,
+        family_schema_identifier: u16,
+        derivation_binding_hash: Hash512,
+        attempt_identifier: [u8; 32],
+        reset_epoch: u64,
+    ) -> bool {
+        self.identity.belongs_to(
+            source_instance_binding,
+            family_schema_identifier,
+            derivation_binding_hash,
+            attempt_identifier,
+            reset_epoch,
+        )
+    }
+
+    pub(crate) const fn span_identifier(&self) -> u64 {
+        self.identity.span_identifier
+    }
+}
+
+/// Completed exact all-coordinate replay span. It holds only independent
+/// private-randomness cursor states and their binding digests, never sampled
+/// bytes, polynomial coefficients, field elements, or leaf salts.
+#[derive(Clone)]
+pub(crate) struct CommonProofPrivateCoinReplaySpan {
+    identity: CommonProofPrivateCoinReplaySpanIdentity,
+    start_cursors: Box<[(CommonProofPrivateCoinCoordinate, PrivateRandomCursor)]>,
+    end_cursors: Box<[(CommonProofPrivateCoinCoordinate, PrivateRandomCursor)]>,
+    start_catalog_digest: [u8; 64],
+    end_catalog_digest: [u8; 64],
+    binding_hash: [u8; 64],
+}
+
+impl fmt::Debug for CommonProofPrivateCoinReplaySpan {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("CommonProofPrivateCoinReplaySpan")
+            .field("identity", &self.identity)
+            .field("start_cursor_count", &self.start_cursors.len())
+            .field("end_cursor_count", &self.end_cursors.len())
+            .field("start_catalog_digest", &self.start_catalog_digest)
+            .field("end_catalog_digest", &self.end_catalog_digest)
+            .field("binding_hash", &self.binding_hash)
+            .finish()
+    }
+}
+
+impl CommonProofPrivateCoinReplaySpan {
+    pub(crate) fn from_completed_capture(
+        start: CommonProofPrivateCoinReplaySpanStart,
+        end_cursors: Box<[(CommonProofPrivateCoinCoordinate, PrivateRandomCursor)]>,
+    ) -> Result<Self, CommonProofPrivateCoinReplayTokenError> {
+        let end_catalog_digest =
+            common_proof_private_coin_cursor_catalog_digest(&start.identity, &end_cursors)?;
+        let binding_hash = hash_framed_parts_512(
+            COMMON_PROOF_PRIVATE_COIN_REPLAY_SPAN_DOMAIN,
+            &[
+                &start.identity.family_schema_identifier.to_le_bytes(),
+                &start.identity.derivation_binding_hash.into_bytes(),
+                &start.identity.attempt_identifier,
+                &start.identity.reset_epoch.to_le_bytes(),
+                &start.identity.span_identifier.to_le_bytes(),
+                &start.start_catalog_digest,
+                &end_catalog_digest,
+            ],
+        );
+        Ok(Self {
+            identity: start.identity,
+            start_cursors: start.start_cursors,
+            end_cursors,
+            start_catalog_digest: start.start_catalog_digest,
+            end_catalog_digest,
+            binding_hash,
+        })
+    }
+
+    pub(crate) fn belongs_to(
+        &self,
+        source_instance_binding: &Rc<()>,
+        family_schema_identifier: u16,
+        derivation_binding_hash: Hash512,
+        attempt_identifier: [u8; 32],
+        reset_epoch: u64,
+    ) -> bool {
+        self.identity.belongs_to(
+            source_instance_binding,
+            family_schema_identifier,
+            derivation_binding_hash,
+            attempt_identifier,
+            reset_epoch,
+        )
+    }
+
+    pub(crate) const fn span_identifier(&self) -> u64 {
+        self.identity.span_identifier
+    }
+
+    pub(crate) const fn binding_hash(&self) -> [u8; 64] {
+        self.binding_hash
+    }
+
+    pub(crate) fn start_cursors(
+        &self,
+    ) -> &[(CommonProofPrivateCoinCoordinate, PrivateRandomCursor)] {
+        &self.start_cursors
+    }
+
+    pub(crate) fn end_cursors(&self) -> &[(CommonProofPrivateCoinCoordinate, PrivateRandomCursor)] {
+        &self.end_cursors
+    }
+}
+
+/// Reset-safe in-memory replay lifecycle for every private-coin coordinate
+/// consumed by one live proof attempt.
+pub(crate) trait ReplayableCommonProofPrivateCoinCatalogSource:
+    CommonProofPrivateCoinSource
+{
+    fn begin_all_coordinate_replay_span(
+        &mut self,
+    ) -> Result<CommonProofPrivateCoinReplaySpanStart, Self::Error>;
+
+    fn finish_all_coordinate_replay_span(
+        &mut self,
+        start: CommonProofPrivateCoinReplaySpanStart,
+    ) -> Result<CommonProofPrivateCoinReplaySpan, Self::Error>;
+
+    fn restore_all_coordinate_replay_span(
+        &mut self,
+        span: &CommonProofPrivateCoinReplaySpan,
+    ) -> Result<(), Self::Error>;
+
+    fn complete_all_coordinate_replay_span(
+        &mut self,
+        span: &CommonProofPrivateCoinReplaySpan,
+    ) -> Result<(), Self::Error>;
+
+    fn invalidate_all_coordinate_replay_state(&mut self);
+}
+
 /// Private proof coins that can expose their exact authenticated stream
 /// positions at a completed commitment boundary. The cursors contain no coin
 /// bytes and are never used to initialize deterministic-prefix replay: replay
@@ -337,10 +697,11 @@ struct CommonProofCheckpointCursorRunSummary {
 
 /// Exact compact checkpoint representation for one common-proof coin source.
 /// The source-wide family, derivation binding and attempt identifier occur
-/// once. Every maximal consecutive ordinal interval inside one purpose class
-/// forms one run. A two-pass encoder counts exact state overrides before it
-/// writes directly into the sole output allocation; it never constructs an
-/// expanded cursor list or a nested run graph.
+/// once, including before the first cursor is consumed. Every maximal
+/// consecutive ordinal interval inside one purpose class forms one run. A
+/// two-pass encoder counts exact state overrides before it writes directly
+/// into the sole output allocation; it never constructs an expanded cursor
+/// list or a nested run graph.
 pub(crate) fn encode_common_proof_checkpoint_cursor_manifest<OrderedCursors>(
     family_schema_identifier: u16,
     derivation_binding_hash: Hash512,
@@ -418,13 +779,8 @@ where
     if run_count > MAXIMUM_COMMON_PROOF_CHECKPOINT_CURSOR_MANIFEST_RUN_COUNT {
         return Err(CommonProofCheckpointCursorManifestError::OutsideSupportedProfile);
     }
-    let has_identity = logical_cursor_count != 0;
     let byte_length = COMMON_PROOF_CHECKPOINT_CURSOR_MANIFEST_PREFIX_BYTE_LENGTH
-        .checked_add(
-            has_identity
-                .then_some(COMMON_PROOF_CHECKPOINT_CURSOR_MANIFEST_IDENTITY_BYTE_LENGTH)
-                .unwrap_or(0),
-        )
+        .checked_add(COMMON_PROOF_CHECKPOINT_CURSOR_MANIFEST_IDENTITY_BYTE_LENGTH)
         .and_then(|length| {
             length.checked_add(
                 usize::try_from(run_count)
@@ -446,14 +802,12 @@ where
         .map_err(|_| CommonProofCheckpointCursorManifestError::AllocationLimitExceeded)?;
     output.extend_from_slice(&COMMON_PROOF_CHECKPOINT_CURSOR_MANIFEST_MAGIC);
     output.extend_from_slice(&COMMON_PROOF_CHECKPOINT_CURSOR_MANIFEST_VERSION.to_le_bytes());
-    output.push(u8::from(has_identity));
+    output.push(1);
     output.extend_from_slice(&run_count.to_le_bytes());
     output.extend_from_slice(&logical_cursor_count.to_le_bytes());
-    if has_identity {
-        output.extend_from_slice(&family_schema_identifier.to_le_bytes());
-        output.extend_from_slice(&derivation_binding_hash.into_bytes());
-        output.extend_from_slice(&stream_attempt_identifier);
-    }
+    output.extend_from_slice(&family_schema_identifier.to_le_bytes());
+    output.extend_from_slice(&derivation_binding_hash.into_bytes());
+    output.extend_from_slice(&stream_attempt_identifier);
 
     let mut cursor_iterator = ordered_cursors.into_iter();
     for run in run_summaries.into_iter().flatten() {
@@ -526,12 +880,9 @@ pub(crate) fn common_proof_checkpoint_cursor_manifest_requirement(
     let maximum_override_count = maximum_logical_cursor_count
         .checked_sub(maximum_consecutive_coordinate_run_count)
         .ok_or(CommonProofCheckpointCursorManifestError::CountOverflow)?;
-    let identity_byte_length = (maximum_logical_cursor_count != 0)
-        .then_some(COMMON_PROOF_CHECKPOINT_CURSOR_MANIFEST_IDENTITY_BYTE_LENGTH)
-        .unwrap_or(0);
     let maximum_canonical_byte_length = u32::try_from(
         COMMON_PROOF_CHECKPOINT_CURSOR_MANIFEST_PREFIX_BYTE_LENGTH
-            .checked_add(identity_byte_length)
+            .checked_add(COMMON_PROOF_CHECKPOINT_CURSOR_MANIFEST_IDENTITY_BYTE_LENGTH)
             .and_then(|length| {
                 length.checked_add(
                     usize::try_from(maximum_consecutive_coordinate_run_count)
@@ -654,6 +1005,11 @@ pub(crate) enum PrivateRandomnessCommonProofCoinError {
     AllocationLimitExceeded,
     CoordinateOutsidePlan,
     DuplicateCursorCoordinate,
+    ReplaySourceMismatch,
+    ReplayCursorMismatch,
+    ReplaySpanAlreadyActive,
+    ReplaySpanNotActive,
+    ReplayAttemptInvalidated,
 }
 
 impl From<FoundationSchemaError> for PrivateRandomnessCommonProofCoinError {
@@ -662,6 +1018,20 @@ impl From<FoundationSchemaError> for PrivateRandomnessCommonProofCoinError {
     }
 }
 
+impl From<CommonProofPrivateCoinReplayTokenError> for PrivateRandomnessCommonProofCoinError {
+    fn from(error: CommonProofPrivateCoinReplayTokenError) -> Self {
+        match error {
+            CommonProofPrivateCoinReplayTokenError::AllocationLimitExceeded => {
+                Self::AllocationLimitExceeded
+            }
+            CommonProofPrivateCoinReplayTokenError::CanonicalEncoding(error) => {
+                Self::Custody(error)
+            }
+        }
+    }
+}
+
+#[derive(Clone)]
 struct RetainedCommonProofPrivateCoinCursors {
     trace_masks: Box<[Option<PrivateRandomCursor>]>,
     telescoping_masks: Box<[Option<PrivateRandomCursor>]>,
@@ -760,6 +1130,305 @@ impl RetainedCommonProofPrivateCoinCursors {
                 cursor.map(|cursor| (CommonProofPrivateCoinCoordinate::proof_salt(), cursor))
             }))
     }
+
+    fn cursor_catalog(
+        &self,
+    ) -> Result<
+        Box<[(CommonProofPrivateCoinCoordinate, PrivateRandomCursor)]>,
+        PrivateRandomnessCommonProofCoinError,
+    > {
+        let cursor_count = self.cursors().count();
+        let mut cursors = Vec::new();
+        cursors
+            .try_reserve_exact(cursor_count)
+            .map_err(|_| PrivateRandomnessCommonProofCoinError::AllocationLimitExceeded)?;
+        cursors.extend(self.cursors());
+        Ok(cursors.into_boxed_slice())
+    }
+
+    fn clear(&mut self) {
+        self.trace_masks.fill(None);
+        self.telescoping_masks.fill(None);
+        self.opening_masks.fill(None);
+        if let Some(proof_salt) = &mut self.proof_salt {
+            *proof_salt = None;
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CommonProofPrivateCoinReplayLifecycle {
+    Idle,
+    Capturing(u64),
+    Replaying(u64),
+    Invalidated,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum PublicOnlyCommonProofCoinError {
+    InvalidIdentity,
+    PrivateCoordinateUnavailable,
+    ReplaySourceMismatch,
+    ReplaySpanAlreadyActive,
+    ReplaySpanNotActive,
+    ReplayAttemptInvalidated,
+    ReplayTokenInvalid,
+}
+
+/// Explicit zero-private-coordinate authority for public-only proof families.
+/// It binds checkpoint and replay state to one local authenticated attempt,
+/// but cannot sample masks or proof salts and never creates a private domain.
+pub(crate) struct PublicOnlyCommonProofCoinSource {
+    family_schema_identifier: u16,
+    derivation_binding_hash: Hash512,
+    attempt_lineage: [u8; 32],
+    replay_instance_binding: Rc<()>,
+    replay_reset_epoch: u64,
+    next_replay_span_identifier: u64,
+    replay_lifecycle: CommonProofPrivateCoinReplayLifecycle,
+}
+
+impl PublicOnlyCommonProofCoinSource {
+    pub(crate) fn new(
+        family_schema_identifier: u16,
+        derivation_binding_hash: Hash512,
+        attempt_lineage: [u8; 32],
+    ) -> Result<Self, PublicOnlyCommonProofCoinError> {
+        if !ProofApplicationSlotCeilings::PUBLIC_ONLY_FAMILY_SCHEMA_IDENTIFIERS
+            .contains(&family_schema_identifier)
+            || derivation_binding_hash == Hash512::from_bytes([0_u8; Hash512::BYTE_LENGTH])
+            || attempt_lineage == [0_u8; 32]
+        {
+            return Err(PublicOnlyCommonProofCoinError::InvalidIdentity);
+        }
+        Ok(Self {
+            family_schema_identifier,
+            derivation_binding_hash,
+            attempt_lineage,
+            replay_instance_binding: Rc::new(()),
+            replay_reset_epoch: 0,
+            next_replay_span_identifier: 1,
+            replay_lifecycle: CommonProofPrivateCoinReplayLifecycle::Idle,
+        })
+    }
+
+    fn validate_span_identity(
+        &self,
+        span: &CommonProofPrivateCoinReplaySpan,
+    ) -> Result<(), PublicOnlyCommonProofCoinError> {
+        if self.replay_lifecycle == CommonProofPrivateCoinReplayLifecycle::Invalidated {
+            return Err(PublicOnlyCommonProofCoinError::ReplayAttemptInvalidated);
+        }
+        if !span.belongs_to(
+            &self.replay_instance_binding,
+            self.family_schema_identifier,
+            self.derivation_binding_hash,
+            self.attempt_lineage,
+            self.replay_reset_epoch,
+        ) {
+            return Err(PublicOnlyCommonProofCoinError::ReplaySourceMismatch);
+        }
+        let expected_binding_hash = hash_framed_parts_512(
+            COMMON_PROOF_PRIVATE_COIN_REPLAY_SPAN_DOMAIN,
+            &[
+                &self.family_schema_identifier.to_le_bytes(),
+                &self.derivation_binding_hash.into_bytes(),
+                &self.attempt_lineage,
+                &self.replay_reset_epoch.to_le_bytes(),
+                &span.span_identifier().to_le_bytes(),
+                &span.start_catalog_digest,
+                &span.end_catalog_digest,
+            ],
+        );
+        if span.binding_hash() != expected_binding_hash
+            || !span.start_cursors().is_empty()
+            || !span.end_cursors().is_empty()
+        {
+            return Err(PublicOnlyCommonProofCoinError::ReplayTokenInvalid);
+        }
+        Ok(())
+    }
+
+    fn poison_replay_attempt(&mut self) {
+        self.replay_lifecycle = CommonProofPrivateCoinReplayLifecycle::Invalidated;
+        self.replay_reset_epoch = self.replay_reset_epoch.saturating_add(1);
+    }
+}
+
+impl CommonProofPrivateCoinSource for PublicOnlyCommonProofCoinSource {
+    type Error = PublicOnlyCommonProofCoinError;
+
+    fn sample_modulo(
+        &mut self,
+        _coordinate: CommonProofPrivateCoinCoordinate,
+        _modulus: u64,
+        _maximum_candidate_draws_per_output: u32,
+    ) -> Result<u64, Self::Error> {
+        Err(PublicOnlyCommonProofCoinError::PrivateCoordinateUnavailable)
+    }
+
+    fn fill_raw_bytes(
+        &mut self,
+        _coordinate: CommonProofPrivateCoinCoordinate,
+        _destination: &mut [u8],
+    ) -> Result<(), Self::Error> {
+        Err(PublicOnlyCommonProofCoinError::PrivateCoordinateUnavailable)
+    }
+}
+
+impl ReplayableCommonProofPrivateCoinSource for PublicOnlyCommonProofCoinSource {
+    fn capture_proof_salt_replay_cursor(
+        &self,
+    ) -> Result<CommonProofPrivateCoinReplayCursor, Self::Error> {
+        Err(PublicOnlyCommonProofCoinError::PrivateCoordinateUnavailable)
+    }
+
+    fn restore_proof_salt_replay_cursor(
+        &mut self,
+        _cursor: &CommonProofPrivateCoinReplayCursor,
+    ) -> Result<(), Self::Error> {
+        Err(PublicOnlyCommonProofCoinError::PrivateCoordinateUnavailable)
+    }
+
+    fn proof_salt_replay_cursor_matches(
+        &self,
+        _cursor: &CommonProofPrivateCoinReplayCursor,
+    ) -> Result<bool, Self::Error> {
+        Err(PublicOnlyCommonProofCoinError::PrivateCoordinateUnavailable)
+    }
+}
+
+impl ReplayableCommonProofPrivateCoinCatalogSource for PublicOnlyCommonProofCoinSource {
+    fn begin_all_coordinate_replay_span(
+        &mut self,
+    ) -> Result<CommonProofPrivateCoinReplaySpanStart, Self::Error> {
+        match self.replay_lifecycle {
+            CommonProofPrivateCoinReplayLifecycle::Idle => {}
+            CommonProofPrivateCoinReplayLifecycle::Invalidated => {
+                return Err(PublicOnlyCommonProofCoinError::ReplayAttemptInvalidated);
+            }
+            CommonProofPrivateCoinReplayLifecycle::Capturing(_)
+            | CommonProofPrivateCoinReplayLifecycle::Replaying(_) => {
+                return Err(PublicOnlyCommonProofCoinError::ReplaySpanAlreadyActive);
+            }
+        }
+        let span_identifier = self.next_replay_span_identifier;
+        let Some(next_span_identifier) = self.next_replay_span_identifier.checked_add(1) else {
+            self.poison_replay_attempt();
+            return Err(PublicOnlyCommonProofCoinError::ReplayAttemptInvalidated);
+        };
+        self.next_replay_span_identifier = next_span_identifier;
+        let start = CommonProofPrivateCoinReplaySpanStart::new(
+            &self.replay_instance_binding,
+            self.family_schema_identifier,
+            self.derivation_binding_hash,
+            self.attempt_lineage,
+            self.replay_reset_epoch,
+            span_identifier,
+            Vec::new().into_boxed_slice(),
+        )
+        .map_err(|_| PublicOnlyCommonProofCoinError::ReplayTokenInvalid)?;
+        self.replay_lifecycle = CommonProofPrivateCoinReplayLifecycle::Capturing(span_identifier);
+        Ok(start)
+    }
+
+    fn finish_all_coordinate_replay_span(
+        &mut self,
+        start: CommonProofPrivateCoinReplaySpanStart,
+    ) -> Result<CommonProofPrivateCoinReplaySpan, Self::Error> {
+        if self.replay_lifecycle == CommonProofPrivateCoinReplayLifecycle::Invalidated {
+            return Err(PublicOnlyCommonProofCoinError::ReplayAttemptInvalidated);
+        }
+        if self.replay_lifecycle
+            != CommonProofPrivateCoinReplayLifecycle::Capturing(start.span_identifier())
+        {
+            self.poison_replay_attempt();
+            return Err(PublicOnlyCommonProofCoinError::ReplaySpanNotActive);
+        }
+        if !start.belongs_to(
+            &self.replay_instance_binding,
+            self.family_schema_identifier,
+            self.derivation_binding_hash,
+            self.attempt_lineage,
+            self.replay_reset_epoch,
+        ) {
+            self.poison_replay_attempt();
+            return Err(PublicOnlyCommonProofCoinError::ReplaySourceMismatch);
+        }
+        let span = match CommonProofPrivateCoinReplaySpan::from_completed_capture(
+            start,
+            Vec::new().into_boxed_slice(),
+        ) {
+            Ok(span) => span,
+            Err(_) => {
+                self.poison_replay_attempt();
+                return Err(PublicOnlyCommonProofCoinError::ReplayTokenInvalid);
+            }
+        };
+        self.replay_lifecycle = CommonProofPrivateCoinReplayLifecycle::Idle;
+        Ok(span)
+    }
+
+    fn restore_all_coordinate_replay_span(
+        &mut self,
+        span: &CommonProofPrivateCoinReplaySpan,
+    ) -> Result<(), Self::Error> {
+        match self.replay_lifecycle {
+            CommonProofPrivateCoinReplayLifecycle::Idle => {}
+            CommonProofPrivateCoinReplayLifecycle::Invalidated => {
+                return Err(PublicOnlyCommonProofCoinError::ReplayAttemptInvalidated);
+            }
+            CommonProofPrivateCoinReplayLifecycle::Capturing(_)
+            | CommonProofPrivateCoinReplayLifecycle::Replaying(_) => {
+                return Err(PublicOnlyCommonProofCoinError::ReplaySpanAlreadyActive);
+            }
+        }
+        if let Err(error) = self.validate_span_identity(span) {
+            self.poison_replay_attempt();
+            return Err(error);
+        }
+        self.replay_lifecycle =
+            CommonProofPrivateCoinReplayLifecycle::Replaying(span.span_identifier());
+        Ok(())
+    }
+
+    fn complete_all_coordinate_replay_span(
+        &mut self,
+        span: &CommonProofPrivateCoinReplaySpan,
+    ) -> Result<(), Self::Error> {
+        if self.replay_lifecycle == CommonProofPrivateCoinReplayLifecycle::Invalidated {
+            return Err(PublicOnlyCommonProofCoinError::ReplayAttemptInvalidated);
+        }
+        if self.replay_lifecycle
+            != CommonProofPrivateCoinReplayLifecycle::Replaying(span.span_identifier())
+        {
+            self.poison_replay_attempt();
+            return Err(PublicOnlyCommonProofCoinError::ReplaySpanNotActive);
+        }
+        if let Err(error) = self.validate_span_identity(span) {
+            self.poison_replay_attempt();
+            return Err(error);
+        }
+        self.replay_lifecycle = CommonProofPrivateCoinReplayLifecycle::Idle;
+        Ok(())
+    }
+
+    fn invalidate_all_coordinate_replay_state(&mut self) {
+        self.poison_replay_attempt();
+    }
+}
+
+impl CheckpointableCommonProofPrivateCoinSource for PublicOnlyCommonProofCoinSource {
+    fn checkpoint_cursor_manifest(
+        &self,
+    ) -> Result<Vec<u8>, CommonProofCheckpointCursorManifestError> {
+        encode_common_proof_checkpoint_cursor_manifest(
+            self.family_schema_identifier,
+            self.derivation_binding_hash,
+            self.attempt_lineage,
+            core::iter::empty::<(CommonProofPrivateCoinCoordinate, PrivateRandomCursor)>(),
+        )
+    }
 }
 
 /// Owns the independent private-randomness cursor for every coordinate consumed by
@@ -771,6 +1440,10 @@ pub(crate) struct PrivateRandomnessCommonProofCoinSource {
     derivation_binding_hash: Hash512,
     attempt_identifier: PrivateRandomnessAttemptIdentifier,
     retained_cursors: RetainedCommonProofPrivateCoinCursors,
+    replay_instance_binding: Rc<()>,
+    replay_reset_epoch: u64,
+    next_replay_span_identifier: u64,
+    replay_lifecycle: CommonProofPrivateCoinReplayLifecycle,
 }
 
 impl PrivateRandomnessCommonProofCoinSource {
@@ -801,6 +1474,10 @@ impl PrivateRandomnessCommonProofCoinSource {
             derivation_binding_hash,
             attempt_identifier,
             retained_cursors: RetainedCommonProofPrivateCoinCursors::new(coordinate_capacity)?,
+            replay_instance_binding: Rc::new(()),
+            replay_reset_epoch: 0,
+            next_replay_span_identifier: 1,
+            replay_lifecycle: CommonProofPrivateCoinReplayLifecycle::Idle,
         })
     }
 
@@ -893,6 +1570,146 @@ impl PrivateRandomnessCommonProofCoinSource {
             .ok_or(PrivateRandomnessCommonProofCoinError::CoordinateOutsidePlan)? = Some(cursor);
         Ok(())
     }
+
+    fn current_proof_salt_cursor(
+        &self,
+    ) -> Result<PrivateRandomCursor, PrivateRandomnessCommonProofCoinError> {
+        if self.replay_lifecycle == CommonProofPrivateCoinReplayLifecycle::Invalidated {
+            return Err(PrivateRandomnessCommonProofCoinError::ReplayAttemptInvalidated);
+        }
+        let coordinate = CommonProofPrivateCoinCoordinate::proof_salt();
+        let (domain, derivation_context_hash, retained_cursor) =
+            self.stream_identity_for_coordinate(coordinate)?;
+        if let Some(cursor) = retained_cursor {
+            return Ok(cursor);
+        }
+        let stream = self.action_private_randomness.begin_stream(
+            domain,
+            derivation_context_hash,
+            self.attempt_identifier,
+        )?;
+        let cursor = stream.cursor();
+        drop(stream);
+        Ok(cursor)
+    }
+
+    fn validate_replay_cursor(
+        &self,
+        replay_cursor: &CommonProofPrivateCoinReplayCursor,
+    ) -> Result<PrivateRandomCursor, PrivateRandomnessCommonProofCoinError> {
+        if self.replay_lifecycle == CommonProofPrivateCoinReplayLifecycle::Invalidated {
+            return Err(PrivateRandomnessCommonProofCoinError::ReplayAttemptInvalidated);
+        }
+        if !replay_cursor.belongs_to(&self.replay_instance_binding) {
+            return Err(PrivateRandomnessCommonProofCoinError::ReplaySourceMismatch);
+        }
+        let coordinate = CommonProofPrivateCoinCoordinate::proof_salt();
+        let cursor = replay_cursor.cursor();
+        validate_manifest_cursor_identity(
+            self.family_schema_identifier,
+            self.derivation_binding_hash,
+            *self.attempt_identifier.as_bytes(),
+            coordinate,
+            cursor,
+        )
+        .map_err(|_| PrivateRandomnessCommonProofCoinError::ReplayCursorMismatch)?;
+        Ok(cursor)
+    }
+
+    fn validate_all_coordinate_replay_span_identity(
+        &self,
+        span: &CommonProofPrivateCoinReplaySpan,
+    ) -> Result<(), PrivateRandomnessCommonProofCoinError> {
+        if self.replay_lifecycle == CommonProofPrivateCoinReplayLifecycle::Invalidated {
+            return Err(PrivateRandomnessCommonProofCoinError::ReplayAttemptInvalidated);
+        }
+        if !span.belongs_to(
+            &self.replay_instance_binding,
+            self.family_schema_identifier,
+            self.derivation_binding_hash,
+            *self.attempt_identifier.as_bytes(),
+            self.replay_reset_epoch,
+        ) {
+            return Err(PrivateRandomnessCommonProofCoinError::ReplaySourceMismatch);
+        }
+        let expected_binding_hash = hash_framed_parts_512(
+            COMMON_PROOF_PRIVATE_COIN_REPLAY_SPAN_DOMAIN,
+            &[
+                &self.family_schema_identifier.to_le_bytes(),
+                &self.derivation_binding_hash.into_bytes(),
+                self.attempt_identifier.as_bytes(),
+                &self.replay_reset_epoch.to_le_bytes(),
+                &span.span_identifier().to_le_bytes(),
+                &span.start_catalog_digest,
+                &span.end_catalog_digest,
+            ],
+        );
+        if span.binding_hash() != expected_binding_hash {
+            return Err(PrivateRandomnessCommonProofCoinError::ReplayCursorMismatch);
+        }
+        Ok(())
+    }
+
+    fn validate_cursor_catalog(
+        &self,
+        cursor_catalog: &[(CommonProofPrivateCoinCoordinate, PrivateRandomCursor)],
+    ) -> Result<(), PrivateRandomnessCommonProofCoinError> {
+        let mut previous_coordinate = None;
+        for (coordinate, cursor) in cursor_catalog {
+            if previous_coordinate.is_some_and(|previous| previous >= *coordinate)
+                || self.retained_cursors.slot(*coordinate).is_none()
+            {
+                return Err(PrivateRandomnessCommonProofCoinError::ReplayCursorMismatch);
+            }
+            validate_manifest_cursor_identity(
+                self.family_schema_identifier,
+                self.derivation_binding_hash,
+                *self.attempt_identifier.as_bytes(),
+                *coordinate,
+                *cursor,
+            )
+            .map_err(|_| PrivateRandomnessCommonProofCoinError::ReplayCursorMismatch)?;
+            let domain = PrivateRandomnessDomain::from_assigned_pair(
+                self.family_schema_identifier,
+                coordinate.purpose_class(),
+            )?;
+            let derivation_context_hash =
+                common_proof_private_coin_coordinate_derivation_context_hash(
+                    self.derivation_binding_hash,
+                    *coordinate,
+                );
+            drop(self.action_private_randomness.resume_stream(
+                domain,
+                derivation_context_hash,
+                self.attempt_identifier,
+                *cursor,
+            )?);
+            previous_coordinate = Some(*coordinate);
+        }
+        Ok(())
+    }
+
+    fn restore_cursor_catalog(
+        &mut self,
+        cursor_catalog: &[(CommonProofPrivateCoinCoordinate, PrivateRandomCursor)],
+    ) -> Result<(), PrivateRandomnessCommonProofCoinError> {
+        self.validate_cursor_catalog(cursor_catalog)?;
+        self.retained_cursors.clear();
+        for (coordinate, cursor) in cursor_catalog {
+            *self
+                .retained_cursors
+                .slot_mut(*coordinate)
+                .ok_or(PrivateRandomnessCommonProofCoinError::CoordinateOutsidePlan)? =
+                Some(*cursor);
+        }
+        Ok(())
+    }
+
+    fn poison_replay_attempt(&mut self) {
+        self.replay_lifecycle = CommonProofPrivateCoinReplayLifecycle::Invalidated;
+        self.replay_reset_epoch = self.replay_reset_epoch.saturating_add(1);
+        self.retained_cursors.clear();
+    }
 }
 
 impl CommonProofPrivateCoinSource for PrivateRandomnessCommonProofCoinSource {
@@ -904,6 +1721,9 @@ impl CommonProofPrivateCoinSource for PrivateRandomnessCommonProofCoinSource {
         modulus: u64,
         maximum_candidate_draws_per_output: u32,
     ) -> Result<u64, Self::Error> {
+        if self.replay_lifecycle == CommonProofPrivateCoinReplayLifecycle::Invalidated {
+            return Err(PrivateRandomnessCommonProofCoinError::ReplayAttemptInvalidated);
+        }
         let (domain, derivation_context_hash, retained_cursor) =
             self.stream_identity_for_coordinate(coordinate)?;
         let action_private_randomness = Rc::clone(&self.action_private_randomness);
@@ -934,6 +1754,9 @@ impl CommonProofPrivateCoinSource for PrivateRandomnessCommonProofCoinSource {
         coordinate: CommonProofPrivateCoinCoordinate,
         destination: &mut [u8],
     ) -> Result<(), Self::Error> {
+        if self.replay_lifecycle == CommonProofPrivateCoinReplayLifecycle::Invalidated {
+            return Err(PrivateRandomnessCommonProofCoinError::ReplayAttemptInvalidated);
+        }
         let (domain, derivation_context_hash, retained_cursor) =
             self.stream_identity_for_coordinate(coordinate)?;
         let action_private_randomness = Rc::clone(&self.action_private_randomness);
@@ -960,6 +1783,194 @@ impl CommonProofPrivateCoinSource for PrivateRandomnessCommonProofCoinSource {
     }
 }
 
+impl ReplayableCommonProofPrivateCoinSource for PrivateRandomnessCommonProofCoinSource {
+    fn capture_proof_salt_replay_cursor(
+        &self,
+    ) -> Result<CommonProofPrivateCoinReplayCursor, Self::Error> {
+        Ok(CommonProofPrivateCoinReplayCursor::new(
+            &self.replay_instance_binding,
+            self.current_proof_salt_cursor()?,
+        ))
+    }
+
+    fn restore_proof_salt_replay_cursor(
+        &mut self,
+        replay_cursor: &CommonProofPrivateCoinReplayCursor,
+    ) -> Result<(), Self::Error> {
+        let cursor = self.validate_replay_cursor(replay_cursor)?;
+        let coordinate = CommonProofPrivateCoinCoordinate::proof_salt();
+        let (domain, derivation_context_hash, _) =
+            self.stream_identity_for_coordinate(coordinate)?;
+        drop(self.action_private_randomness.resume_stream(
+            domain,
+            derivation_context_hash,
+            self.attempt_identifier,
+            cursor,
+        )?);
+        self.retain_cursor(coordinate, cursor)
+    }
+
+    fn proof_salt_replay_cursor_matches(
+        &self,
+        replay_cursor: &CommonProofPrivateCoinReplayCursor,
+    ) -> Result<bool, Self::Error> {
+        let expected_cursor = self.validate_replay_cursor(replay_cursor)?;
+        Ok(self.current_proof_salt_cursor()? == expected_cursor)
+    }
+}
+
+impl ReplayableCommonProofPrivateCoinCatalogSource for PrivateRandomnessCommonProofCoinSource {
+    fn begin_all_coordinate_replay_span(
+        &mut self,
+    ) -> Result<CommonProofPrivateCoinReplaySpanStart, Self::Error> {
+        match self.replay_lifecycle {
+            CommonProofPrivateCoinReplayLifecycle::Idle => {}
+            CommonProofPrivateCoinReplayLifecycle::Invalidated => {
+                return Err(PrivateRandomnessCommonProofCoinError::ReplayAttemptInvalidated);
+            }
+            CommonProofPrivateCoinReplayLifecycle::Capturing(_)
+            | CommonProofPrivateCoinReplayLifecycle::Replaying(_) => {
+                return Err(PrivateRandomnessCommonProofCoinError::ReplaySpanAlreadyActive);
+            }
+        }
+        let span_identifier = self.next_replay_span_identifier;
+        let Some(next_span_identifier) = self.next_replay_span_identifier.checked_add(1) else {
+            self.poison_replay_attempt();
+            return Err(PrivateRandomnessCommonProofCoinError::ReplayAttemptInvalidated);
+        };
+        self.next_replay_span_identifier = next_span_identifier;
+        let start = CommonProofPrivateCoinReplaySpanStart::new(
+            &self.replay_instance_binding,
+            self.family_schema_identifier,
+            self.derivation_binding_hash,
+            *self.attempt_identifier.as_bytes(),
+            self.replay_reset_epoch,
+            span_identifier,
+            self.retained_cursors.cursor_catalog()?,
+        )
+        .map_err(PrivateRandomnessCommonProofCoinError::from)?;
+        self.replay_lifecycle = CommonProofPrivateCoinReplayLifecycle::Capturing(span_identifier);
+        Ok(start)
+    }
+
+    fn finish_all_coordinate_replay_span(
+        &mut self,
+        start: CommonProofPrivateCoinReplaySpanStart,
+    ) -> Result<CommonProofPrivateCoinReplaySpan, Self::Error> {
+        if self.replay_lifecycle == CommonProofPrivateCoinReplayLifecycle::Invalidated {
+            return Err(PrivateRandomnessCommonProofCoinError::ReplayAttemptInvalidated);
+        }
+        if self.replay_lifecycle
+            != CommonProofPrivateCoinReplayLifecycle::Capturing(start.span_identifier())
+        {
+            self.poison_replay_attempt();
+            return Err(PrivateRandomnessCommonProofCoinError::ReplaySpanNotActive);
+        }
+        if !start.belongs_to(
+            &self.replay_instance_binding,
+            self.family_schema_identifier,
+            self.derivation_binding_hash,
+            *self.attempt_identifier.as_bytes(),
+            self.replay_reset_epoch,
+        ) {
+            self.poison_replay_attempt();
+            return Err(PrivateRandomnessCommonProofCoinError::ReplaySourceMismatch);
+        }
+        let end_cursors = match self.retained_cursors.cursor_catalog() {
+            Ok(cursors) => cursors,
+            Err(error) => {
+                self.poison_replay_attempt();
+                return Err(error);
+            }
+        };
+        let span =
+            match CommonProofPrivateCoinReplaySpan::from_completed_capture(start, end_cursors) {
+                Ok(span) => span,
+                Err(error) => {
+                    self.poison_replay_attempt();
+                    return Err(PrivateRandomnessCommonProofCoinError::from(error));
+                }
+            };
+        self.replay_lifecycle = CommonProofPrivateCoinReplayLifecycle::Idle;
+        Ok(span)
+    }
+
+    fn restore_all_coordinate_replay_span(
+        &mut self,
+        span: &CommonProofPrivateCoinReplaySpan,
+    ) -> Result<(), Self::Error> {
+        match self.replay_lifecycle {
+            CommonProofPrivateCoinReplayLifecycle::Idle => {}
+            CommonProofPrivateCoinReplayLifecycle::Invalidated => {
+                return Err(PrivateRandomnessCommonProofCoinError::ReplayAttemptInvalidated);
+            }
+            CommonProofPrivateCoinReplayLifecycle::Capturing(_)
+            | CommonProofPrivateCoinReplayLifecycle::Replaying(_) => {
+                return Err(PrivateRandomnessCommonProofCoinError::ReplaySpanAlreadyActive);
+            }
+        }
+        if let Err(error) = self.validate_all_coordinate_replay_span_identity(span) {
+            self.poison_replay_attempt();
+            return Err(error);
+        }
+        if let Err(error) = self.restore_cursor_catalog(span.start_cursors()) {
+            self.poison_replay_attempt();
+            return Err(error);
+        }
+        self.replay_lifecycle =
+            CommonProofPrivateCoinReplayLifecycle::Replaying(span.span_identifier());
+        Ok(())
+    }
+
+    fn complete_all_coordinate_replay_span(
+        &mut self,
+        span: &CommonProofPrivateCoinReplaySpan,
+    ) -> Result<(), Self::Error> {
+        if self.replay_lifecycle == CommonProofPrivateCoinReplayLifecycle::Invalidated {
+            return Err(PrivateRandomnessCommonProofCoinError::ReplayAttemptInvalidated);
+        }
+        if self.replay_lifecycle
+            != CommonProofPrivateCoinReplayLifecycle::Replaying(span.span_identifier())
+        {
+            self.poison_replay_attempt();
+            return Err(PrivateRandomnessCommonProofCoinError::ReplaySpanNotActive);
+        }
+        if let Err(error) = self.validate_all_coordinate_replay_span_identity(span) {
+            self.poison_replay_attempt();
+            return Err(error);
+        }
+        let observed_cursors = match self.retained_cursors.cursor_catalog() {
+            Ok(cursors) => cursors,
+            Err(error) => {
+                self.poison_replay_attempt();
+                return Err(error);
+            }
+        };
+        let observed_digest = match common_proof_private_coin_cursor_catalog_digest(
+            &span.identity,
+            &observed_cursors,
+        ) {
+            Ok(digest) => digest,
+            Err(error) => {
+                self.poison_replay_attempt();
+                return Err(PrivateRandomnessCommonProofCoinError::from(error));
+            }
+        };
+        if observed_cursors.as_ref() != span.end_cursors()
+            || observed_digest != span.end_catalog_digest
+        {
+            self.poison_replay_attempt();
+            return Err(PrivateRandomnessCommonProofCoinError::ReplayCursorMismatch);
+        }
+        self.replay_lifecycle = CommonProofPrivateCoinReplayLifecycle::Idle;
+        Ok(())
+    }
+
+    fn invalidate_all_coordinate_replay_state(&mut self) {
+        self.poison_replay_attempt();
+    }
+}
+
 impl CheckpointableCommonProofPrivateCoinSource for PrivateRandomnessCommonProofCoinSource {
     fn checkpoint_cursor_manifest(
         &self,
@@ -970,5 +1981,190 @@ impl CheckpointableCommonProofPrivateCoinSource for PrivateRandomnessCommonProof
             *self.attempt_identifier.as_bytes(),
             self.cursors(),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn zero_cursor_manifest_retains_reset_safe_source_identity() {
+        let family_schema_identifier = 0x1217;
+        let derivation_binding_hash = [0x53_u8; Hash512::BYTE_LENGTH];
+        let stream_attempt_identifier = [0xa6_u8; 32];
+        let empty_cursors: [(CommonProofPrivateCoinCoordinate, PrivateRandomCursor); 0] = [];
+
+        let encoded = encode_common_proof_checkpoint_cursor_manifest(
+            family_schema_identifier,
+            Hash512::from_bytes(derivation_binding_hash),
+            stream_attempt_identifier,
+            empty_cursors,
+        )
+        .expect("a checkpoint before the first cursor remains reset-safe");
+
+        assert_eq!(
+            encoded.len(),
+            COMMON_PROOF_CHECKPOINT_CURSOR_MANIFEST_PREFIX_BYTE_LENGTH
+                + COMMON_PROOF_CHECKPOINT_CURSOR_MANIFEST_IDENTITY_BYTE_LENGTH
+        );
+        assert_eq!(
+            &encoded[..COMMON_PROOF_CHECKPOINT_CURSOR_MANIFEST_MAGIC.len()],
+            &COMMON_PROOF_CHECKPOINT_CURSOR_MANIFEST_MAGIC
+        );
+        assert_eq!(
+            u16::from_le_bytes(encoded[8..10].try_into().expect("version bytes")),
+            COMMON_PROOF_CHECKPOINT_CURSOR_MANIFEST_VERSION
+        );
+        assert_eq!(encoded[10], 1);
+        assert_eq!(
+            u32::from_le_bytes(encoded[11..15].try_into().expect("run-count bytes")),
+            0
+        );
+        assert_eq!(
+            u32::from_le_bytes(
+                encoded[15..19]
+                    .try_into()
+                    .expect("logical-cursor-count bytes")
+            ),
+            0
+        );
+        assert_eq!(
+            u16::from_le_bytes(encoded[19..21].try_into().expect("family bytes")),
+            family_schema_identifier
+        );
+        assert_eq!(&encoded[21..85], &derivation_binding_hash);
+        assert_eq!(&encoded[85..117], &stream_attempt_identifier);
+    }
+
+    #[test]
+    fn zero_cursor_capacity_accounts_for_the_unconditional_identity() {
+        let requirement = common_proof_checkpoint_cursor_manifest_requirement(
+            CommonProofPrivateCoinCoordinateCapacity::for_test(0, 0, 0, false),
+        )
+        .expect("zero cursor capacity remains representable");
+
+        assert_eq!(requirement.logical_cursor_count(), 0);
+        assert_eq!(requirement.consecutive_coordinate_run_count(), 0);
+        assert_eq!(requirement.maximum_override_count(), 0);
+        assert_eq!(
+            requirement.canonical_manifest_byte_ceiling(),
+            u32::try_from(
+                COMMON_PROOF_CHECKPOINT_CURSOR_MANIFEST_PREFIX_BYTE_LENGTH
+                    + COMMON_PROOF_CHECKPOINT_CURSOR_MANIFEST_IDENTITY_BYTE_LENGTH
+            )
+            .expect("manifest constants fit u32")
+        );
+        assert!(requirement.fits_absolute_bounds());
+    }
+
+    #[test]
+    fn public_only_coin_source_has_no_private_domain_and_replays_only_empty_catalogs() {
+        for family_schema_identifier in
+            ProofApplicationSlotCeilings::PUBLIC_ONLY_FAMILY_SCHEMA_IDENTIFIERS
+        {
+            assert!(
+                PublicOnlyCommonProofCoinSource::new(
+                    family_schema_identifier,
+                    Hash512::from_bytes([0x35_u8; Hash512::BYTE_LENGTH]),
+                    [0x74_u8; 32],
+                )
+                .is_ok()
+            );
+        }
+        for rejected_family in [
+            ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER,
+            ProofApplicationSlotCeilings::BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER,
+            0xffff,
+        ] {
+            assert!(matches!(
+                PublicOnlyCommonProofCoinSource::new(
+                    rejected_family,
+                    Hash512::from_bytes([0x35_u8; Hash512::BYTE_LENGTH]),
+                    [0x74_u8; 32],
+                ),
+                Err(PublicOnlyCommonProofCoinError::InvalidIdentity)
+            ));
+        }
+
+        let family_schema_identifier =
+            ProofApplicationSlotCeilings::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER;
+        let derivation_binding_hash = Hash512::from_bytes([0x35_u8; Hash512::BYTE_LENGTH]);
+        let attempt_lineage = [0x74_u8; 32];
+        let mut source = PublicOnlyCommonProofCoinSource::new(
+            family_schema_identifier,
+            derivation_binding_hash,
+            attempt_lineage,
+        )
+        .expect("the public-only source identity is complete");
+
+        let expected_manifest = encode_common_proof_checkpoint_cursor_manifest(
+            family_schema_identifier,
+            derivation_binding_hash,
+            attempt_lineage,
+            core::iter::empty::<(CommonProofPrivateCoinCoordinate, PrivateRandomCursor)>(),
+        )
+        .expect("the empty cursor catalog is canonical");
+        assert_eq!(
+            source
+                .checkpoint_cursor_manifest()
+                .expect("the public-only checkpoint is representable"),
+            expected_manifest
+        );
+
+        assert!(matches!(
+            source.sample_modulo(
+                CommonProofPrivateCoinCoordinate::mask(1, 0)
+                    .expect("trace-mask coordinates use purpose class one"),
+                17,
+                8
+            ),
+            Err(PublicOnlyCommonProofCoinError::PrivateCoordinateUnavailable)
+        ));
+        assert!(matches!(
+            source.fill_raw_bytes(
+                CommonProofPrivateCoinCoordinate::proof_salt(),
+                &mut [0_u8; 32]
+            ),
+            Err(PublicOnlyCommonProofCoinError::PrivateCoordinateUnavailable)
+        ));
+        assert!(matches!(
+            source.capture_proof_salt_replay_cursor(),
+            Err(PublicOnlyCommonProofCoinError::PrivateCoordinateUnavailable)
+        ));
+
+        let start = source
+            .begin_all_coordinate_replay_span()
+            .expect("an empty public-only replay span can begin");
+        assert!(matches!(
+            source.begin_all_coordinate_replay_span(),
+            Err(PublicOnlyCommonProofCoinError::ReplaySpanAlreadyActive)
+        ));
+        let span = source
+            .finish_all_coordinate_replay_span(start)
+            .expect("the empty public-only replay span can finish");
+        assert!(span.start_cursors().is_empty());
+        assert!(span.end_cursors().is_empty());
+        source
+            .restore_all_coordinate_replay_span(&span)
+            .expect("the exact source can restore its empty replay span");
+        source
+            .complete_all_coordinate_replay_span(&span)
+            .expect("the exact source completes with the same empty catalog");
+
+        let mut other_source = PublicOnlyCommonProofCoinSource::new(
+            family_schema_identifier,
+            derivation_binding_hash,
+            attempt_lineage,
+        )
+        .expect("the second source has the same public identity but a distinct live authority");
+        assert!(matches!(
+            other_source.restore_all_coordinate_replay_span(&span),
+            Err(PublicOnlyCommonProofCoinError::ReplaySourceMismatch)
+        ));
+        assert!(matches!(
+            other_source.begin_all_coordinate_replay_span(),
+            Err(PublicOnlyCommonProofCoinError::ReplayAttemptInvalidated)
+        ));
     }
 }

@@ -105,6 +105,70 @@ pub(in crate::bgv) struct CanonicalAcceptedSetupPackage {
 }
 
 impl CanonicalAcceptedSetupPackage {
+    /// Encodes the exact selected package inventory from verifier-owned
+    /// sources. Callers cannot use this constructor to bypass positive source
+    /// checks because it remains private to the accepted-setup implementation;
+    /// the capability builder is the only production caller.
+    pub(super) fn encode_authoritative_inventory(
+        setup_intent_object_hashes: &[Hash512],
+        public_randomness_commitment_object_hashes: &[Hash512],
+        public_randomness_reveal_object_hashes: &[Hash512],
+        dealer_public_record_object_hashes: &[Hash512],
+        private_share_acceptance_object_hashes: &[Hash512],
+        collective_public_key_descriptor: &StreamDescriptor,
+        evaluator_key_store_descriptor: &StreamDescriptor,
+        ordered_proof_descriptors: &[StreamDescriptor],
+    ) -> Result<Vec<u8>, AcceptedSetupPackageError> {
+        let participant_count = usize::from(FOUNDATION_PROFILE.participant_count);
+        if [
+            setup_intent_object_hashes.len(),
+            public_randomness_commitment_object_hashes.len(),
+            public_randomness_reveal_object_hashes.len(),
+            dealer_public_record_object_hashes.len(),
+            private_share_acceptance_object_hashes.len(),
+        ]
+        .into_iter()
+        .any(|count| count != participant_count)
+            || ordered_proof_descriptors.len()
+                != selected_accepted_setup_public_proof_slots()?.len()
+        {
+            return Err(AcceptedSetupPackageError::new(
+                RefusalReason::WrongTypeOrLength,
+                "accepted setup package authoritative inventory has the wrong count",
+            ));
+        }
+
+        let limits = CanonicalDecodeLimits::default();
+        let collective_descriptor_item =
+            nested_stream_descriptor_item(collective_public_key_descriptor, &limits)?;
+        let evaluator_descriptor_item =
+            nested_stream_descriptor_item(evaluator_key_store_descriptor, &limits)?;
+        let proof_descriptor_items = ordered_proof_descriptors
+            .iter()
+            .map(|descriptor| nested_stream_descriptor_item(descriptor, &limits))
+            .collect::<Result<Vec<_>, _>>()?;
+        let canonical_package_bytes = CanonicalTuple::new(
+            ACCEPTED_SETUP_PACKAGE_SCHEMA_IDENTIFIER,
+            ACCEPTED_SETUP_PACKAGE_SCHEMA_VERSION,
+            vec![
+                canonical_hash_list(setup_intent_object_hashes)?,
+                canonical_hash_list(public_randomness_commitment_object_hashes)?,
+                canonical_hash_list(public_randomness_reveal_object_hashes)?,
+                canonical_hash_list(dealer_public_record_object_hashes)?,
+                canonical_hash_list(private_share_acceptance_object_hashes)?,
+                collective_descriptor_item,
+                evaluator_descriptor_item,
+                CanonicalItem::homogeneous_list(
+                    CanonicalItemType::NestedTuple,
+                    &proof_descriptor_items,
+                )?,
+            ],
+        )
+        .encode()?;
+        Self::decode(&canonical_package_bytes, &limits)?;
+        Ok(canonical_package_bytes)
+    }
+
     pub(in crate::bgv) fn decode(
         canonical_package_bytes: &[u8],
         limits: &CanonicalDecodeLimits,
@@ -255,6 +319,28 @@ impl CanonicalAcceptedSetupPackage {
     }
 }
 
+fn canonical_hash_list(hashes: &[Hash512]) -> Result<CanonicalItem, AcceptedSetupPackageError> {
+    let items = hashes
+        .iter()
+        .map(|hash| CanonicalItem::hash512(hash.into_bytes()))
+        .collect::<Vec<_>>();
+    Ok(CanonicalItem::homogeneous_list(
+        CanonicalItemType::Hash512,
+        &items,
+    )?)
+}
+
+fn nested_stream_descriptor_item(
+    descriptor: &StreamDescriptor,
+    limits: &CanonicalDecodeLimits,
+) -> Result<CanonicalItem, AcceptedSetupPackageError> {
+    Ok(CanonicalItem::from_canonical_bytes(
+        CanonicalItemType::NestedTuple,
+        descriptor.encode()?,
+        limits,
+    )?)
+}
+
 /// Positive kind-eight state-reservation facts for one terminal package hash.
 ///
 /// This is process authority, not a serializable package field. Construction
@@ -262,7 +348,6 @@ impl CanonicalAcceptedSetupPackage {
 /// its owned result can enter the preflighted authority insertion without
 /// removing those reservations early.
 pub(in crate::bgv) struct VerifiedSetupTerminalReservationSet {
-    reservation_count: usize,
     suite_identifier: Hash512,
     ceremony_context_hash: Hash512,
     action_context_hash: Hash512,
@@ -332,7 +417,6 @@ impl VerifiedSetupTerminalReservationSet {
             }
         }
         Ok(Self {
-            reservation_count: reservations.len(),
             suite_identifier,
             ceremony_context_hash,
             action_context_hash,
@@ -367,10 +451,6 @@ impl VerifiedSetupTerminalReservationSet {
 
     pub(in crate::bgv) fn ordered_subject_participant_identities(&self) -> &[ParticipantIdentity] {
         &self.ordered_subject_participant_identities
-    }
-
-    pub(in crate::bgv) fn reservation_count(&self) -> usize {
-        self.reservation_count
     }
 }
 

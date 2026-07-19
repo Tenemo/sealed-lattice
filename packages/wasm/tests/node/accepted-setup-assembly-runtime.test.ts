@@ -2,8 +2,8 @@ import { refusalReasonCodes } from '@sealed-lattice/types';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
+    adoptAcceptedSetupVerificationAssemblyFromKernelHandle,
     beginAcceptedSetupEvaluatorSourceCatalog,
-    beginAcceptedSetupVerification,
     bindAcceptedSetupEvaluatorGeneratedProofsToPackage,
     createAcceptedSetupEvaluatorComponentBacking,
     readAcceptedSetupPrepackageEvaluatorComponentExactRange,
@@ -75,7 +75,6 @@ type FakeAcceptedSetupRuntime = Readonly<{
 
 const createFakeAcceptedSetupRuntime = (
     options: Readonly<{
-        acceptedSetupHandle?: number;
         catalogCancellationStatuses?: readonly number[];
         catalogCompletionStatuses?: readonly number[];
         catalogHandle?: number;
@@ -101,9 +100,7 @@ const createFakeAcceptedSetupRuntime = (
         ...(options.catalogCompletionStatuses ?? [0]),
     ];
     const transferStatuses = [...(options.transferStatuses ?? [0])];
-    const packageBindingStatuses = [
-        ...(options.packageBindingStatuses ?? [0]),
-    ];
+    const packageBindingStatuses = [...(options.packageBindingStatuses ?? [0])];
     let nextPointer = 8;
 
     const allocate = (byteLength: number): number => {
@@ -143,15 +140,6 @@ const createFakeAcceptedSetupRuntime = (
         ): Result => operation(),
         wasmExports: {
             sealed_lattice_accepted_setup_authority_release: () => 0,
-            sealed_lattice_accepted_setup_verification_begin: (
-                _aggregateAuthorityHandle: number,
-                _canonicalPackagePointer: number,
-                _canonicalPackageByteLength: number,
-                statusPointer: number,
-            ) => {
-                writeStatus(statusPointer, 0);
-                return options.acceptedSetupHandle ?? 31;
-            },
             sealed_lattice_accepted_setup_verification_cancel: (
                 acceptedSetupHandle: number,
             ) => {
@@ -187,14 +175,16 @@ const createFakeAcceptedSetupRuntime = (
                 catalogCompletionHandles.push(catalogHandle);
                 return catalogCompletionStatuses.shift() ?? 0;
             },
-            sealed_lattice_prepackage_evaluator_generated_proofs_bind_package:
-                (acceptedSetupHandle: number, catalogHandle: number) => {
-                    packageBindingCalls.push({
-                        acceptedSetupHandle,
-                        catalogHandle,
-                    });
-                    return packageBindingStatuses.shift() ?? 0;
-                },
+            sealed_lattice_prepackage_evaluator_generated_proofs_bind_package: (
+                acceptedSetupHandle: number,
+                catalogHandle: number,
+            ) => {
+                packageBindingCalls.push({
+                    acceptedSetupHandle,
+                    catalogHandle,
+                });
+                return packageBindingStatuses.shift() ?? 0;
+            },
         },
     } as unknown as TranscriptCoreKernelCommandRuntime;
     registerCommonProofKernelContext(kernel, context);
@@ -221,8 +211,8 @@ const beginAcceptedSetup = (
     runtime: FakeAcceptedSetupRuntime,
     aggregateAuthority: AggregateThresholdShareRecipientAuthority,
 ) =>
-    beginAcceptedSetupVerification({
-        canonicalPackageBytes: Uint8Array.of(0xa1, 0xb2),
+    adoptAcceptedSetupVerificationAssemblyFromKernelHandle({
+        assemblyHandle: 31,
         kernel: runtime.kernel,
         vssRecipientAuthority: aggregateAuthority,
     });
@@ -239,13 +229,13 @@ describe('Accepted-setup evaluator-source catalog runtime', () => {
         const fullObjectDigest = new Uint8Array(64).fill(0x42);
         const release = vi.fn();
         const readExactRange = vi.fn(
-            async (
+            (
                 sourceByteOffset: bigint,
                 exactByteLength: number,
-            ): Promise<Uint8Array> => {
+            ): Promise<Uint8Array<ArrayBuffer>> => {
                 const bytes = new Uint8Array(exactByteLength);
                 bytes.fill(Number(sourceByteOffset));
-                return bytes;
+                return Promise.resolve(bytes);
             },
         );
         const backing = createAcceptedSetupEvaluatorComponentBacking({
@@ -345,10 +335,7 @@ describe('Accepted-setup evaluator-source catalog runtime', () => {
 
     it('leaves package binding retryable when Rust refuses before consumption', () => {
         const runtime = createFakeAcceptedSetupRuntime({
-            packageBindingStatuses: [
-                refusalReasonCodes.missingPrerequisite,
-                0,
-            ],
+            packageBindingStatuses: [refusalReasonCodes.missingPrerequisite, 0],
         });
         const aggregateAuthority = runtime.createAggregateAuthority(9);
         const catalog = beginAcceptedSetupEvaluatorSourceCatalog({
@@ -522,19 +509,5 @@ describe('Accepted-setup evaluator-source catalog runtime', () => {
             invalidHandle,
         ]);
         expect(catalogRuntime.allocations.size).toBe(0);
-
-        const acceptedSetupRuntime = createFakeAcceptedSetupRuntime({
-            acceptedSetupHandle: invalidHandle,
-        });
-        expect(() =>
-            beginAcceptedSetup(
-                acceptedSetupRuntime,
-                acceptedSetupRuntime.createAggregateAuthority(18),
-            ),
-        ).toThrow(CanonicalStreamInternalError);
-        expect(acceptedSetupRuntime.acceptedSetupCancellationHandles).toEqual([
-            invalidHandle,
-        ]);
-        expect(acceptedSetupRuntime.allocations.size).toBe(0);
     });
 });

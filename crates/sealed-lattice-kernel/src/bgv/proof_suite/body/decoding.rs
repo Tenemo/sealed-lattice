@@ -402,6 +402,7 @@ impl<'source, 'layout, Source: ProofByteSource + ?Sized>
             read_tuple_header(
                 &mut decoder,
                 PROOF_QUERY_OPENING_RECORD_SCHEMA_IDENTIFIER,
+                SCHEMA_VERSION,
                 2,
             )?;
             read_u16_item(
@@ -565,6 +566,7 @@ pub(crate) fn decode_proof_query_tree_at<Source: ProofByteSource + ?Sized>(
     read_tuple_header(
         &mut decoder,
         PROOF_QUERY_OPENING_RECORD_SCHEMA_IDENTIFIER,
+        SCHEMA_VERSION,
         2,
     )?;
     read_u16_item(
@@ -664,12 +666,13 @@ pub(super) fn read_extension_value_list<Source: ProofByteSource + ?Sized>(
 pub(super) fn read_tuple_header<Source: ProofByteSource + ?Sized>(
     decoder: &mut BoundedProofDecoder<'_, Source>,
     expected_schema_identifier: u16,
+    expected_schema_version: u16,
     expected_item_count: u32,
 ) -> Result<(), ProofBodyError> {
     if decoder.read_u16()? != expected_schema_identifier {
         return Err(ProofBodyError::InvalidSchema);
     }
-    if decoder.read_u16()? != SCHEMA_VERSION {
+    if decoder.read_u16()? != expected_schema_version {
         return Err(ProofBodyError::InvalidSchemaVersion);
     }
     if decoder.read_u32()? != expected_item_count {

@@ -133,33 +133,6 @@ jobs:
                   name: rust-heavy-logs-${{ github.run_id }}-${{ github.run_attempt }}
                   path: logs
 
-    rust-accepted-setup:
-        name: rust accepted setup
-        needs:
-            - changes
-        if: ${{ needs.changes.outputs.run_heavy == 'true' }}
-        runs-on: ubuntu-24.04
-        timeout-minutes: 370
-        steps:
-            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
-              with:
-                  persist-credentials: false
-            - uses: ./.github/actions/bootstrap-pnpm
-            - uses: dtolnay/rust-toolchain@b18f7037bce1ea84c086f4d5e9493f853c0ce412
-              with:
-                  toolchain: 1.90.0
-            - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
-            - name: Run Rust accepted setup proof tests
-              timeout-minutes: 350
-              run: pnpm run test:rust:kernel:accepted-setup -- --ci
-            - name: Upload Rust accepted setup logs
-              if: ${{ always() }}
-              uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-              with:
-                  if-no-files-found: warn
-                  name: rust-accepted-setup-logs-${{ github.run_id }}-${{ github.run_attempt }}
-                  path: logs
-
     verify:
         name: verify
         runs-on: ubuntu-24.04
@@ -169,7 +142,6 @@ jobs:
             - routine
             - rust-fast
             - rust-heavy
-            - rust-accepted-setup
         if: ${{ always() }}
         steps:
             - name: Check verify jobs
@@ -190,7 +162,6 @@ jobs:
                   const allowedSkippedJobs = new Set();
                   if (process.env.RUN_HEAVY === 'false') {
                     allowedSkippedJobs.add('rust-heavy');
-                    allowedSkippedJobs.add('rust-accepted-setup');
                   }
                   if (process.env.RUN_ROUTINE === 'false') {
                     allowedSkippedJobs.add('routine');

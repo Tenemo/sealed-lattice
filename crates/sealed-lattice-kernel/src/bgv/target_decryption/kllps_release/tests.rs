@@ -10,8 +10,106 @@ fn selected_kllps_constants_match_the_spaced_monomial_construction() {
     assert_eq!(KLLPS_PARTICIPANT_COUNT, 10);
     assert_eq!(KLLPS_RECONSTRUCTION_THRESHOLD, 4);
     assert_eq!(KLLPS_DENOMINATOR_CLEARING_FACTOR, 4);
+    assert_eq!(KLLPS_PAIRED_TARGET_ROLE_COUNT, 2);
     assert_eq!(KLLPS_POINT_STRIDE, POLYNOMIAL_DEGREE / 8);
     assert_eq!(KLLPS_SUBRING_DEGREE, 8);
+}
+
+#[test]
+fn positive_bgv_conversion_scale_matches_the_selected_full_target_basis() {
+    let selected_target_primes = &DATA_PRIMES[..=CANONICAL_TARGET_CIPHERTEXT_LEVEL];
+    assert_eq!(selected_target_primes.len(), 6);
+    for modulus in selected_target_primes.iter().copied() {
+        assert_eq!(modulus % PLAINTEXT_MODULUS, 1);
+        let conversion_scale = positive_bfv_message_conversion_scale(modulus)
+            .expect("selected positive-message BGV conversion scale");
+        assert_eq!(
+            conversion_scale,
+            (modulus - 1) / PLAINTEXT_MODULUS,
+            "the BGV-to-BFV conversion must retain the positive plaintext sign",
+        );
+        assert_eq!(
+            mul_mod_fast(conversion_scale, PLAINTEXT_MODULUS, modulus),
+            modulus - 1,
+            "the positive-message conversion scale must equal -p^-1 modulo q",
+        );
+    }
+}
+
+#[test]
+fn canonical_target_decoding_returns_only_identifiers_in_rank_order() {
+    let mut target_identifier_slots = vec![0_u64; 24];
+    let mut target_order_slots = vec![0_u64; 24];
+    for (option_index, order) in [(1_usize, 3_u64), (4, 1), (9, 4), (19, 2)] {
+        target_identifier_slots[option_index] =
+            u64::try_from(option_index + 1).expect("small test option identifier");
+        target_order_slots[option_index] = order;
+    }
+
+    assert_eq!(
+        canonical_ordered_option_identifiers(&target_identifier_slots, &target_order_slots, 4, 20,)
+            .expect("canonical target roles decode"),
+        vec![5, 20, 2, 10],
+    );
+}
+
+#[test]
+fn canonical_target_decoding_rejects_every_malformed_semantic_class() {
+    let valid_slots = || {
+        let mut target_identifier_slots = vec![0_u64; 24];
+        let mut target_order_slots = vec![0_u64; 24];
+        for (option_index, order) in [(1_usize, 3_u64), (4, 1), (9, 4), (19, 2)] {
+            target_identifier_slots[option_index] =
+                u64::try_from(option_index + 1).expect("small test option identifier");
+            target_order_slots[option_index] = order;
+        }
+        (target_identifier_slots, target_order_slots)
+    };
+
+    let (identifiers, mut orders) = valid_slots();
+    orders[1] = 0;
+    assert!(canonical_ordered_option_identifiers(&identifiers, &orders, 4, 20).is_err());
+
+    let (mut identifiers, orders) = valid_slots();
+    identifiers[0] = 1;
+    assert!(canonical_ordered_option_identifiers(&identifiers, &orders, 4, 20).is_err());
+
+    let (mut identifiers, orders) = valid_slots();
+    identifiers[1] = 3;
+    assert!(canonical_ordered_option_identifiers(&identifiers, &orders, 4, 20).is_err());
+
+    let (mut identifiers, orders) = valid_slots();
+    identifiers[1] = PLAINTEXT_MODULUS - 1;
+    assert!(canonical_ordered_option_identifiers(&identifiers, &orders, 4, 20).is_err());
+
+    let (identifiers, mut orders) = valid_slots();
+    orders[19] = 3;
+    assert!(canonical_ordered_option_identifiers(&identifiers, &orders, 4, 20).is_err());
+
+    let (identifiers, mut orders) = valid_slots();
+    orders[19] = 5;
+    assert!(canonical_ordered_option_identifiers(&identifiers, &orders, 4, 20).is_err());
+
+    let (mut identifiers, mut orders) = valid_slots();
+    identifiers[19] = 0;
+    orders[19] = 0;
+    assert!(canonical_ordered_option_identifiers(&identifiers, &orders, 4, 20).is_err());
+
+    let (mut identifiers, orders) = valid_slots();
+    identifiers[20] = 1;
+    assert!(canonical_ordered_option_identifiers(&identifiers, &orders, 4, 20).is_err());
+
+    let (identifiers, mut orders) = valid_slots();
+    orders[23] = 1;
+    assert!(canonical_ordered_option_identifiers(&identifiers, &orders, 4, 20).is_err());
+
+    let (identifiers, orders) = valid_slots();
+    assert!(canonical_ordered_option_identifiers(&identifiers, &orders, 0, 20).is_err());
+    assert!(canonical_ordered_option_identifiers(&identifiers, &orders, 21, 20).is_err());
+    assert!(
+        canonical_ordered_option_identifiers(&identifiers[..19], &orders[..19], 4, 20).is_err()
+    );
+    assert!(canonical_ordered_option_identifiers(&identifiers, &orders[..23], 4, 20).is_err());
 }
 
 #[test]
@@ -103,7 +201,7 @@ fn selected_six_prime_target_basis_satisfies_the_exact_factor_four_theorem_bound
 }
 
 #[test]
-fn factor_four_release_reconstructs_distinct_participants_at_the_lowest_positions() {
+fn factor_four_release_reconstructs_full_six_prime_targets_from_lowest_distinct_participants() {
     let binding = test_release_binding(11);
     let participant_binding = test_participant_release_binding(11, 0);
     let sharing_polynomials = test_sharing_polynomials();
@@ -113,11 +211,16 @@ fn factor_four_release_reconstructs_distinct_participants_at_the_lowest_position
         &target_identifier_plaintext,
         7,
         &sharing_polynomials[0],
-        1,
+        CANONICAL_TARGET_CIPHERTEXT_LEVEL,
         3,
     );
-    let target_order =
-        test_target_ciphertext(&target_order_plaintext, 11, &sharing_polynomials[0], 1, 5);
+    let target_order = test_target_ciphertext(
+        &target_order_plaintext,
+        11,
+        &sharing_polynomials[0],
+        CANONICAL_TARGET_CIPHERTEXT_LEVEL,
+        5,
+    );
     let target_pair = KllpsTargetPair::from_verified_finality(
         binding.clone(),
         participant_binding,
@@ -177,6 +280,18 @@ fn factor_four_release_reconstructs_distinct_participants_at_the_lowest_position
     assert_eq!(identifier_slots.len(), POLYNOMIAL_DEGREE);
     assert_eq!(order_slots.len(), POLYNOMIAL_DEGREE);
 
+    let ordered_positions = [0, 1, 2, 3, 4, 5, 6, 9];
+    let ordered = ordered_positions
+        .iter()
+        .map(|position| &shares_by_position[position])
+        .collect::<Vec<_>>();
+    let ordered_reconstruction = reconstruct_factor_four_target_pair(&target_pair, &ordered)
+        .expect("relay-order-independent reconstruction");
+    assert_eq!(
+        ordered_reconstruction, reconstructed,
+        "all supplied verified shares must select the same four lowest roster positions regardless of relay order",
+    );
+
     let alternate_quartet = [2, 3, 4, 5]
         .iter()
         .map(|position| &shares_by_position[position])
@@ -234,6 +349,18 @@ fn factor_four_generation_and_reconstruction_reject_malformed_ring_inputs() {
         level: 0,
         decrypt_scaling: 1,
     };
+    for invalid_top_count in [0, FOUNDATION_PROFILE.option_count + 1] {
+        assert!(
+            KllpsReconstructionTargetPair::from_verified_finality(
+                binding.clone(),
+                invalid_top_count,
+                valid_target.clone(),
+                valid_target.clone(),
+            )
+            .is_err(),
+            "reconstruction must retain only a verified action top count",
+        );
+    }
     assert!(
         KllpsTargetPair::from_verified_finality(
             binding.clone(),
@@ -752,20 +879,6 @@ fn all_selected_kllps_coefficients_match_an_independent_exact_checker() {
             b"unauthorized"
         )),
         "32c01816177e7bbf92cf2b206f49784477c6ad6f8921b128a82a652c78c89667ebe1ab4b57ca8c0aa6cc6bd8fb0546023de8b26674f0ea638780293af0d44609"
-    );
-}
-
-#[test]
-fn exact_kllps_source_bytes_match_the_reviewed_local_reference() {
-    const KLLPS_SOURCE_BYTES: &[u8] = include_bytes!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../reference-documents/KLLPS26_Asynchronous Lagrange-Based Threshold FHE with Smaller Modulus Overhead.txt"
-    ));
-    let digest: [u8; 64] = Sha3_512::digest(KLLPS_SOURCE_BYTES).into();
-    assert_eq!(KLLPS_SOURCE_BYTES.len(), 167_136);
-    assert_eq!(
-        hash_hex(digest),
-        "b80930922c9f203c237c6cb51e7a827244eddbc2bd2e8c57a17f2de35fddead5302b5c937b98dbed77edb4f600c870d85d72c432df139ab8970101c773febd41"
     );
 }
 

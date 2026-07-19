@@ -1,13 +1,13 @@
 use super::{
-    GENERATOR_SUBGROUP_ORDER, SELECTED_EVALUATOR_WORKING_LEVEL,
-    direct_score_packing_basis_galois_elements, direct_score_packing_galois_elements,
-    galois_element_moving_slot_to_target, generator_inverse_power_basis_for_exponent,
-    generator_power_basis_for_exponent, interpolate_coefficients, logical_slot_galois_element,
-    packed_rank_forward_basis_galois_elements, packed_rank_return_basis_galois_elements,
-    selected_evaluator_rotation_key_schedule,
+    DIRECT_COMPARISON_OUTPUT_LEVEL, GENERATOR_SUBGROUP_ORDER, NEGATIVE_ONE_GALOIS_ELEMENT,
+    NEGATIVE_SEVEN_GALOIS_ELEMENT, POSITIVE_THIRTY_EIGHT_GALOIS_ELEMENT,
+    forward_pair_window_rotation_path, galois_power, generator_exponent_or_conjugated,
+    interpolate_coefficients, inverse_galois_element, inverse_pair_shift_rotation_path,
+    logical_slot_galois_element, selected_evaluator_rotation_key_schedule,
 };
 use crate::bgv::modular_arithmetic::{add_mod, mul_mod, pow_mod};
 use crate::bgv::parameters::{PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE};
+use crate::foundation::FOUNDATION_PROFILE;
 
 mod interpolation;
 mod rotation_schedule;

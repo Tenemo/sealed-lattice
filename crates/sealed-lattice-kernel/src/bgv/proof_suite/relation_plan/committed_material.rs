@@ -8,16 +8,9 @@ use crate::bgv::proof_suite::{AuthenticatedCompactCommittedMaterialSource, Proof
 
 const MATERIAL_DIGIT_TERNARY_DIGIT_COUNT: usize = 17;
 const TERNARY_DIGIT_RADIX: u64 = 3;
-const COMPACT_TERNARY_DIGIT_RADIX: u64 = TERNARY_DIGIT_RADIX * TERNARY_DIGIT_RADIX;
 const MATERIAL_DIGIT_RADIX: u64 = 129_140_163;
-const COMMITTED_MATERIAL_TRACE_PACKING_FACTOR: u64 = 8;
-
-#[cfg(test)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum CommittedMaterialRangeCandidate {
-    FullTernary,
-    AdjacentPairNonary,
-}
+pub(super) const COMMITTED_MATERIAL_TRACE_PACKING_FACTOR: u64 = 4;
+const COMMITTED_MATERIAL_RANGE_CONSTRAINT_ARITY: u64 = TERNARY_DIGIT_RADIX;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct CommittedMaterialRelationPlanInput {
@@ -68,6 +61,15 @@ impl CommittedMaterialRelationPlanInput {
             .ok_or(RelationPlanError::DegreeBoundExceeded)
     }
 
+    fn maximum_range_constraint_numerator_degree(&self) -> Result<u64, RelationPlanError> {
+        self.prover_column_degree_bound_exclusive()?
+            .checked_sub(1)
+            .and_then(|maximum_source_degree| {
+                maximum_source_degree.checked_mul(COMMITTED_MATERIAL_RANGE_CONSTRAINT_ARITY)
+            })
+            .ok_or(RelationPlanError::DegreeBoundExceeded)
+    }
+
     pub(super) fn validate(
         &self,
         context: &RelationPlanCheckContext,
@@ -91,6 +93,10 @@ impl CommittedMaterialRelationPlanInput {
             || self.prover_column_degree_bound_exclusive()? > self.opening_degree_bound_exclusive
         {
             return Err(RelationPlanError::InvalidDomain);
+        }
+        if self.maximum_range_constraint_numerator_degree()? >= self.opening_degree_bound_exclusive
+        {
+            return Err(RelationPlanError::DegreeBoundExceeded);
         }
         let message_capacity = MATERIAL_DIGIT_RADIX
             .checked_mul(MATERIAL_DIGIT_RADIX)
@@ -122,7 +128,8 @@ pub(super) enum MaterialRootUse {
 
 #[derive(Clone, Debug)]
 pub(super) struct MaterialMessageColumns {
-    pub(super) message_digits_by_half: [[u32; 2]; 2],
+    message_digits_by_half: [Vec<u32>; 2],
+    message_digit_radix: u64,
     packed_lane_ordinal: u64,
 }
 
@@ -167,8 +174,6 @@ pub(super) struct CommittedMaterialPlanBuilder<'context> {
         Vec<RelationCoefficientLocalIdentityBatchDescriptor>,
     shift_selectors: BTreeMap<u64, u32>,
     used_rotations: BTreeSet<(bool, u64)>,
-    #[cfg(test)]
-    range_candidate: CommittedMaterialRangeCandidate,
 }
 
 impl<'context> CommittedMaterialPlanBuilder<'context> {
@@ -198,14 +203,7 @@ impl<'context> CommittedMaterialPlanBuilder<'context> {
             ordered_coefficient_local_identity_batches: Vec::new(),
             shift_selectors: BTreeMap::new(),
             used_rotations,
-            #[cfg(test)]
-            range_candidate: CommittedMaterialRangeCandidate::AdjacentPairNonary,
         })
-    }
-
-    #[cfg(test)]
-    pub(super) fn use_range_candidate(&mut self, range_candidate: CommittedMaterialRangeCandidate) {
-        self.range_candidate = range_candidate;
     }
 
     pub(super) fn modulus(&self, modulus_ordinal: usize) -> Result<u64, RelationPlanError> {
@@ -347,60 +345,15 @@ impl<'context> CommittedMaterialPlanBuilder<'context> {
         )
     }
 
-    fn certify_nonary_column(&mut self, column_ordinal: u32) -> Result<(), RelationPlanError> {
-        let ordered_values = (0..COMPACT_TERNARY_DIGIT_RADIX)
-            .map(BigInt::from)
-            .collect::<Vec<_>>();
-        let (expression, ordered_factor_expressions) = finite_integer_set_constraint_expressions(
-            column_ordinal,
-            &ordered_values,
-            self.context.base_field_modulus,
-        )?;
-        let constraint_ordinal = self.add_constraint_with_integer_factors(
-            expression,
-            full_trace_zeroifier_expression(self.geometry.relation_trace_domain_size()?),
-            false,
-            ordered_factor_expressions,
-        )?;
-        self.insert_semantic_cell(
-            column_ordinal,
-            SignedIntegerInterval::new(0, i128::from(COMPACT_TERNARY_DIGIT_RADIX - 1)),
-            RelationBoundCertificate::FiniteIntegerSet {
-                constraint_ordinal,
-                ordered_values,
-            },
-        )
-    }
-
-    /// Packs each adjacent low-to-high ternary digit pair into one canonical
-    /// radix-nine column. An odd highest ternary digit remains a trinary
-    /// column, so recomposition with increasing powers of nine preserves the
-    /// exact base-three value without changing persistent material roots.
-    fn add_compact_ternary_digit_columns(
+    fn add_ternary_digit_columns(
         &mut self,
         ternary_digit_count: usize,
     ) -> Result<Vec<u32>, RelationPlanError> {
         if ternary_digit_count == 0 {
             return Err(RelationPlanError::InvalidConstraint);
         }
-        #[cfg(test)]
-        if self.range_candidate == CommittedMaterialRangeCandidate::FullTernary {
-            let mut columns = Vec::with_capacity(ternary_digit_count);
-            for _ in 0..ternary_digit_count {
-                let column = self.push_prover_column()?;
-                self.certify_trit_column(column)?;
-                columns.push(column);
-            }
-            return Ok(columns);
-        }
-        let adjacent_pair_count = ternary_digit_count / 2;
-        let mut columns = Vec::with_capacity(ternary_digit_count.div_ceil(2));
-        for _ in 0..adjacent_pair_count {
-            let column = self.push_prover_column()?;
-            self.certify_nonary_column(column)?;
-            columns.push(column);
-        }
-        if !ternary_digit_count.is_multiple_of(2) {
+        let mut columns = Vec::with_capacity(ternary_digit_count);
+        for _ in 0..ternary_digit_count {
             let column = self.push_prover_column()?;
             self.certify_trit_column(column)?;
             columns.push(column);
@@ -419,13 +372,22 @@ impl<'context> CommittedMaterialPlanBuilder<'context> {
         target_column_ordinal: u32,
         ordered_digit_column_ordinals: &[u32],
     ) -> Result<(), RelationPlanError> {
-        #[cfg(test)]
-        let decomposition_radix = match self.range_candidate {
-            CommittedMaterialRangeCandidate::FullTernary => TERNARY_DIGIT_RADIX,
-            CommittedMaterialRangeCandidate::AdjacentPairNonary => COMPACT_TERNARY_DIGIT_RADIX,
-        };
-        #[cfg(not(test))]
-        let decomposition_radix = COMPACT_TERNARY_DIGIT_RADIX;
+        self.certify_unsigned_recomposition_with_radix(
+            target_column_ordinal,
+            ordered_digit_column_ordinals,
+            TERNARY_DIGIT_RADIX,
+        )
+    }
+
+    fn certify_unsigned_recomposition_with_radix(
+        &mut self,
+        target_column_ordinal: u32,
+        ordered_digit_column_ordinals: &[u32],
+        decomposition_radix: u64,
+    ) -> Result<(), RelationPlanError> {
+        if decomposition_radix < 2 {
+            return Err(RelationPlanError::InvalidConstraint);
+        }
         let expression = radix_recomposition_expression(
             target_column_ordinal,
             decomposition_radix,
@@ -461,13 +423,29 @@ impl<'context> CommittedMaterialPlanBuilder<'context> {
     }
 
     fn add_bounded_digit(&mut self, maximum: u64) -> Result<u32, RelationPlanError> {
+        self.add_bounded_radix_digit(maximum, TERNARY_DIGIT_RADIX)
+    }
+
+    fn add_bounded_radix_digit(
+        &mut self,
+        maximum: u64,
+        decomposition_radix: u64,
+    ) -> Result<u32, RelationPlanError> {
         if maximum >= MATERIAL_DIGIT_RADIX {
             return Err(RelationPlanError::InvalidConstraint);
         }
         let target = self.push_prover_column()?;
-        let ternary_digit_count = minimum_unsigned_radix_digit_count(maximum, TERNARY_DIGIT_RADIX)?;
-        let digits = self.add_compact_ternary_digit_columns(ternary_digit_count)?;
-        self.certify_unsigned_recomposition(target, &digits)?;
+        let digit_count = minimum_unsigned_radix_digit_count(maximum, decomposition_radix)?;
+        let digits = if decomposition_radix == TERNARY_DIGIT_RADIX {
+            self.add_ternary_digit_columns(digit_count)?
+        } else if decomposition_radix == 2 {
+            (0..digit_count)
+                .map(|_| self.add_binary_column())
+                .collect::<Result<Vec<_>, _>>()?
+        } else {
+            return Err(RelationPlanError::InvalidConstraint);
+        };
+        self.certify_unsigned_recomposition_with_radix(target, &digits, decomposition_radix)?;
         Ok(target)
     }
 
@@ -475,6 +453,19 @@ impl<'context> CommittedMaterialPlanBuilder<'context> {
         &mut self,
         value_digits: &[u32],
         maximum_digits: &[u64],
+    ) -> Result<(), RelationPlanError> {
+        self.add_upper_bound_comparator_with_radix(
+            value_digits,
+            maximum_digits,
+            MATERIAL_DIGIT_RADIX,
+        )
+    }
+
+    fn add_upper_bound_comparator_with_radix(
+        &mut self,
+        value_digits: &[u32],
+        maximum_digits: &[u64],
+        digit_radix: u64,
     ) -> Result<(), RelationPlanError> {
         if value_digits.is_empty() || value_digits.len() != maximum_digits.len() {
             return Err(RelationPlanError::InvalidConstraint);
@@ -484,9 +475,11 @@ impl<'context> CommittedMaterialPlanBuilder<'context> {
             let difference_maximum = if digit_ordinal + 1 == maximum_digits.len() {
                 maximum_digit
             } else {
-                MATERIAL_DIGIT_RADIX - 1
+                digit_radix
+                    .checked_sub(1)
+                    .ok_or(RelationPlanError::InvalidConstraint)?
             };
-            difference_digits.push(self.add_bounded_digit(difference_maximum)?);
+            difference_digits.push(self.add_bounded_radix_digit(difference_maximum, digit_radix)?);
         }
         let internal_borrows = (0..value_digits.len().saturating_sub(1))
             .map(|_| self.add_binary_column())
@@ -510,7 +503,7 @@ impl<'context> CommittedMaterialPlanBuilder<'context> {
             if digit_ordinal + 1 < value_digits.len() {
                 terms.push(integer_term_scaled_column(
                     internal_borrows[digit_ordinal],
-                    MATERIAL_DIGIT_RADIX,
+                    digit_radix,
                     false,
                     0,
                     false,
@@ -528,6 +521,14 @@ impl<'context> CommittedMaterialPlanBuilder<'context> {
     }
 
     pub(super) fn add_material_messages(
+        &mut self,
+        ordered_roots: &[(usize, MaterialRootUse)],
+        modulus_ordinal: usize,
+    ) -> Result<Vec<MaterialMessageColumns>, RelationPlanError> {
+        self.add_selected_material_messages(ordered_roots, modulus_ordinal)
+    }
+
+    fn add_selected_material_messages(
         &mut self,
         ordered_roots: &[(usize, MaterialRootUse)],
         modulus_ordinal: usize,
@@ -580,22 +581,21 @@ impl<'context> CommittedMaterialPlanBuilder<'context> {
                 self.push_prover_column()?,
                 self.push_prover_column()?,
             ];
-            let mut message_digits_by_half = [[0_u32; 2]; 2];
+            let mut message_digits_by_half = [Vec::new(), Vec::new()];
             for physical_half_ordinal in 0..2 {
                 let low_digit_column = packed_message_columns[physical_half_ordinal];
                 let high_digit_column = packed_message_columns[2 + physical_half_ordinal];
-                let low_compact_digits =
-                    self.add_compact_ternary_digit_columns(MATERIAL_DIGIT_TERNARY_DIGIT_COUNT)?;
-                let high_compact_digits =
-                    self.add_compact_ternary_digit_columns(high_digit_ternary_digit_count)?;
-                self.certify_unsigned_recomposition(low_digit_column, &low_compact_digits)?;
-                self.certify_unsigned_recomposition(high_digit_column, &high_compact_digits)?;
+                let low_digits =
+                    self.add_ternary_digit_columns(MATERIAL_DIGIT_TERNARY_DIGIT_COUNT)?;
+                let high_digits = self.add_ternary_digit_columns(high_digit_ternary_digit_count)?;
+                self.certify_unsigned_recomposition(low_digit_column, &low_digits)?;
+                self.certify_unsigned_recomposition(high_digit_column, &high_digits)?;
                 self.add_upper_bound_comparator(
                     &[low_digit_column, high_digit_column],
                     &maximum_digits,
                 )?;
                 message_digits_by_half[physical_half_ordinal] =
-                    [low_digit_column, high_digit_column];
+                    vec![low_digit_column, high_digit_column];
             }
 
             for packed_lane_ordinal in 0..COMMITTED_MATERIAL_TRACE_PACKING_FACTOR {
@@ -618,7 +618,8 @@ impl<'context> CommittedMaterialPlanBuilder<'context> {
                         )?;
                     }
                     messages.push(MaterialMessageColumns {
-                        message_digits_by_half,
+                        message_digits_by_half: message_digits_by_half.clone(),
+                        message_digit_radix: MATERIAL_DIGIT_RADIX,
                         packed_lane_ordinal,
                     });
                 } else {
@@ -653,7 +654,7 @@ impl<'context> CommittedMaterialPlanBuilder<'context> {
             (0..quotient_count).step_by(COMMITTED_MATERIAL_TRACE_PACKING_FACTOR as usize)
         {
             let target = self.push_prover_column()?;
-            let digits = self.add_compact_ternary_digit_columns(ternary_digit_count)?;
+            let digits = self.add_ternary_digit_columns(ternary_digit_count)?;
             self.certify_unsigned_recomposition(target, &digits)?;
             self.append_packed_scalar_group(&mut quotients, target, group_start, quotient_count)?;
         }
@@ -688,14 +689,8 @@ impl<'context> CommittedMaterialPlanBuilder<'context> {
             (0..quotient_count).step_by(COMMITTED_MATERIAL_TRACE_PACKING_FACTOR as usize)
         {
             let target = self.push_prover_column()?;
-            let digits = self.add_compact_ternary_digit_columns(ternary_digit_count)?;
-            #[cfg(test)]
-            let decomposition_radix = match self.range_candidate {
-                CommittedMaterialRangeCandidate::FullTernary => TERNARY_DIGIT_RADIX,
-                CommittedMaterialRangeCandidate::AdjacentPairNonary => COMPACT_TERNARY_DIGIT_RADIX,
-            };
-            #[cfg(not(test))]
-            let decomposition_radix = COMPACT_TERNARY_DIGIT_RADIX;
+            let digits = self.add_ternary_digit_columns(ternary_digit_count)?;
+            let decomposition_radix = TERNARY_DIGIT_RADIX;
             let expression = radix_recomposition_expression(
                 target,
                 decomposition_radix,
@@ -918,21 +913,32 @@ impl<'context> CommittedMaterialPlanBuilder<'context> {
             .ok_or(RelationPlanError::InvalidConstraint)?;
         self.used_rotations
             .insert((false, packed_rotation_magnitude));
-        Ok(vec![
-            RelationExpressionInstruction::ColumnValue {
-                column_ordinal: message_digits[0],
+        let first_digit = message_digits
+            .first()
+            .copied()
+            .ok_or(RelationPlanError::InvalidConstraint)?;
+        let mut expression = vec![RelationExpressionInstruction::ColumnValue {
+            column_ordinal: first_digit,
+            rotation_is_negative: false,
+            rotation_magnitude: packed_rotation_magnitude,
+        }];
+        let mut radix_power = message.message_digit_radix;
+        for digit_column_ordinal in message_digits.iter().copied().skip(1) {
+            expression.push(RelationExpressionInstruction::ColumnValue {
+                column_ordinal: digit_column_ordinal,
                 rotation_is_negative: false,
                 rotation_magnitude: packed_rotation_magnitude,
-            },
-            RelationExpressionInstruction::ColumnValue {
-                column_ordinal: message_digits[1],
-                rotation_is_negative: false,
-                rotation_magnitude: packed_rotation_magnitude,
-            },
-            RelationExpressionInstruction::BaseFieldConstant(MATERIAL_DIGIT_RADIX),
-            RelationExpressionInstruction::Multiplication,
-            RelationExpressionInstruction::Addition,
-        ])
+            });
+            expression.push(RelationExpressionInstruction::BaseFieldConstant(
+                radix_power,
+            ));
+            expression.push(RelationExpressionInstruction::Multiplication);
+            expression.push(RelationExpressionInstruction::Addition);
+            radix_power = radix_power
+                .checked_mul(message.message_digit_radix)
+                .ok_or(RelationPlanError::IntegerBoundOverflow)?;
+        }
+        Ok(expression)
     }
 
     fn shift_selector(&mut self, row_shift: u64) -> Result<u32, RelationPlanError> {
@@ -2099,8 +2105,6 @@ struct CommittedMaterialTraceWitnessLayoutBuilder<'plan> {
     variant: &'plan RelationPlanVariant,
     next_column_ordinal: usize,
     ordered_recipes: Vec<(u32, CommittedMaterialColumnRecipe)>,
-    #[cfg(test)]
-    range_candidate: CommittedMaterialRangeCandidate,
 }
 
 impl<'plan> CommittedMaterialTraceWitnessLayoutBuilder<'plan> {
@@ -2118,18 +2122,14 @@ impl<'plan> CommittedMaterialTraceWitnessLayoutBuilder<'plan> {
             variant,
             next_column_ordinal: 0,
             ordered_recipes,
-            #[cfg(test)]
-            range_candidate: CommittedMaterialRangeCandidate::AdjacentPairNonary,
         })
     }
 
-    #[cfg(test)]
-    fn use_range_candidate(&mut self, range_candidate: CommittedMaterialRangeCandidate) {
-        self.range_candidate = range_candidate;
-    }
-
-    fn consume_bound_root(&mut self) -> Result<(), RelationPlanError> {
-        for _ in 0..4 {
+    fn consume_bound_root(&mut self, column_count: usize) -> Result<(), RelationPlanError> {
+        if column_count == 0 {
+            return Err(RelationPlanError::InvalidColumn);
+        }
+        for _ in 0..column_count {
             let column = self
                 .variant
                 .ordered_columns
@@ -2205,7 +2205,7 @@ impl<'plan> CommittedMaterialTraceWitnessLayoutBuilder<'plan> {
         Ok(())
     }
 
-    fn add_compact_ternary_digits(
+    fn add_ternary_digits(
         &mut self,
         source: CommittedMaterialIntegerRecipe,
         ternary_digit_count: usize,
@@ -2214,16 +2214,7 @@ impl<'plan> CommittedMaterialTraceWitnessLayoutBuilder<'plan> {
         if ternary_digit_count == 0 {
             return Err(RelationPlanError::InvalidColumn);
         }
-        #[cfg(test)]
-        if self.range_candidate == CommittedMaterialRangeCandidate::FullTernary {
-            return self.add_radix_digits(source, TERNARY_DIGIT_RADIX, ternary_digit_count, offset);
-        }
-        self.add_radix_digits(
-            source,
-            COMPACT_TERNARY_DIGIT_RADIX,
-            ternary_digit_count.div_ceil(2),
-            offset,
-        )
+        self.add_radix_digits(source, TERNARY_DIGIT_RADIX, ternary_digit_count, offset)
     }
 
     fn packed_source(
@@ -2277,7 +2268,7 @@ impl<'plan> CommittedMaterialTraceWitnessLayoutBuilder<'plan> {
             return Err(RelationPlanError::InvalidRoot);
         }
         for _ in 0..root_count {
-            self.consume_bound_root()?;
+            self.consume_bound_root(4)?;
         }
         let maximum_digits = fixed_radix_digits(modulus - 1, 2, MATERIAL_DIGIT_RADIX)?;
         let high_digit_ternary_digit_count =
@@ -2292,7 +2283,7 @@ impl<'plan> CommittedMaterialTraceWitnessLayoutBuilder<'plan> {
             ))?;
         }
         for physical_half_ordinal in 0..2 {
-            self.add_compact_ternary_digits(
+            self.add_ternary_digits(
                 Self::packed_material_source(
                     first_logical_root_ordinal,
                     root_count,
@@ -2301,7 +2292,7 @@ impl<'plan> CommittedMaterialTraceWitnessLayoutBuilder<'plan> {
                 MATERIAL_DIGIT_TERNARY_DIGIT_COUNT,
                 0,
             )?;
-            self.add_compact_ternary_digits(
+            self.add_ternary_digits(
                 Self::packed_material_source(
                     first_logical_root_ordinal,
                     root_count,
@@ -2328,7 +2319,7 @@ impl<'plan> CommittedMaterialTraceWitnessLayoutBuilder<'plan> {
                     )),
                 )?;
                 self.push_recipe(CommittedMaterialColumnRecipe::Integer(difference.clone()))?;
-                self.add_compact_ternary_digits(difference, ternary_digit_count, 0)?;
+                self.add_ternary_digits(difference, ternary_digit_count, 0)?;
             }
             let borrow = Self::packed_source(
                 (0..root_count).map(|lane_ordinal| {
@@ -2383,7 +2374,7 @@ impl<'plan> CommittedMaterialTraceWitnessLayoutBuilder<'plan> {
                 CommittedMaterialIntegerRecipe::Constant(0),
             )?;
             self.push_recipe(CommittedMaterialColumnRecipe::Integer(source.clone()))?;
-            self.add_compact_ternary_digits(source, ternary_digit_count, offset)?;
+            self.add_ternary_digits(source, ternary_digit_count, offset)?;
         }
         Ok(())
     }
@@ -2404,7 +2395,7 @@ impl<'plan> CommittedMaterialTraceWitnessLayoutBuilder<'plan> {
                 CommittedMaterialIntegerRecipe::Constant(0),
             )?;
             self.push_recipe(CommittedMaterialColumnRecipe::Integer(source.clone()))?;
-            self.add_compact_ternary_digits(source, ternary_digit_count, 0)?;
+            self.add_ternary_digits(source, ternary_digit_count, 0)?;
         }
         Ok(())
     }
@@ -2436,32 +2427,7 @@ fn derive_vss_share_linkage_trace_witness_layout(
     input: &CommittedMaterialRelationPlanInput,
     context: &RelationPlanCheckContext,
 ) -> Result<VssShareLinkageTraceWitnessLayout, RelationPlanError> {
-    derive_vss_share_linkage_trace_witness_layout_inner(
-        input,
-        context,
-        #[cfg(test)]
-        None,
-    )
-}
-
-fn derive_vss_share_linkage_trace_witness_layout_inner(
-    input: &CommittedMaterialRelationPlanInput,
-    context: &RelationPlanCheckContext,
-    #[cfg(test)] range_candidate: Option<CommittedMaterialRangeCandidate>,
-) -> Result<VssShareLinkageTraceWitnessLayout, RelationPlanError> {
     let resolved = input.validate(context)?;
-    #[cfg(test)]
-    let compiled = match range_candidate {
-        Some(range_candidate) => {
-            super::vss_share_linkage::compile_vss_share_linkage_range_candidate(
-                input,
-                context,
-                range_candidate,
-            )
-        }
-        None => super::vss_share_linkage::compile_vss_share_linkage_relation_plan(input, context),
-    }?;
-    #[cfg(not(test))]
     let compiled =
         super::vss_share_linkage::compile_vss_share_linkage_relation_plan(input, context)?;
     let variant = compiled
@@ -2475,10 +2441,6 @@ fn derive_vss_share_linkage_trace_witness_layout_inner(
         .checked_add(participant_count)
         .ok_or(RelationPlanError::CountOverflow)?;
     let mut layout = CommittedMaterialTraceWitnessLayoutBuilder::new(variant)?;
-    #[cfg(test)]
-    if let Some(range_candidate) = range_candidate {
-        layout.use_range_candidate(range_candidate);
-    }
     let mut logical_root_ordinal = 0_usize;
     for (modulus_ordinal, (_, modulus)) in resolved.iter().copied().enumerate() {
         for group_start in
@@ -2548,20 +2510,6 @@ pub(crate) fn vss_share_linkage_trace_witness_structure_memory_accounting(
     context: &RelationPlanCheckContext,
 ) -> Result<CommittedMaterialTraceWitnessStructureMemoryAccounting, RelationPlanError> {
     let layout = derive_vss_share_linkage_trace_witness_layout(input, context)?;
-    CommittedMaterialTraceWitnessStructureMemoryAccounting::from_catalog_dimensions(
-        layout.resolved_moduli.len(),
-        &layout.ordered_recipes,
-    )
-}
-
-#[cfg(test)]
-pub(super) fn vss_share_linkage_range_candidate_trace_witness_structure_memory_accounting(
-    input: &CommittedMaterialRelationPlanInput,
-    context: &RelationPlanCheckContext,
-    range_candidate: CommittedMaterialRangeCandidate,
-) -> Result<CommittedMaterialTraceWitnessStructureMemoryAccounting, RelationPlanError> {
-    let layout =
-        derive_vss_share_linkage_trace_witness_layout_inner(input, context, Some(range_candidate))?;
     CommittedMaterialTraceWitnessStructureMemoryAccounting::from_catalog_dimensions(
         layout.resolved_moduli.len(),
         &layout.ordered_recipes,
@@ -3010,14 +2958,12 @@ fn add_constant_to_expression(
 mod tests {
     use std::collections::BTreeSet;
 
-    use num_bigint::BigInt;
-
     use super::{
-        COMPACT_TERNARY_DIGIT_RADIX, CommittedMaterialColumnRecipe, CommittedMaterialIntegerRecipe,
-        CommittedMaterialRelationPlanInput, CommittedMaterialRootTraceRows,
-        MATERIAL_DIGIT_TERNARY_DIGIT_COUNT, MonomialActionBranch, RelationBoundCertificate,
-        RelationColumnOrigin, RelationPlanCheckContext, ResolvedSuiteModulus,
-        SuiteModulusReference, TERNARY_DIGIT_RADIX,
+        COMMITTED_MATERIAL_TRACE_PACKING_FACTOR, CommittedMaterialColumnRecipe,
+        CommittedMaterialIntegerRecipe, CommittedMaterialRelationPlanInput,
+        CommittedMaterialRootTraceRows, MATERIAL_DIGIT_TERNARY_DIGIT_COUNT, MonomialActionBranch,
+        RelationBoundCertificate, RelationColumnOrigin, RelationPlanCheckContext,
+        RelationPlanError, ResolvedSuiteModulus, SuiteModulusReference, TERNARY_DIGIT_RADIX,
         derive_aggregate_threshold_share_trace_witness_provider,
         derive_vss_share_linkage_trace_witness_provider, modular_power, monomial_action_branches,
         vss_share_linkage_trace_witness_structure_memory_accounting,
@@ -3058,6 +3004,25 @@ mod tests {
 
     fn trace_witness_context() -> RelationPlanCheckContext {
         let evaluation_domain_size = 1_024_u64;
+        let relation_input = trace_witness_input();
+        let quotient_component_count = 3_u64;
+        let deep_point_count = 1_u64;
+        let unique_query_count = 1_u64;
+        let rounded_mask_degree = quotient_component_count
+            .checked_add(1)
+            .and_then(|count| count.checked_mul(relation_input.trace_mask_degree_bound_exclusive))
+            .and_then(|degree| degree.checked_add(quotient_component_count - 1))
+            .and_then(|degree| degree.checked_div(quotient_component_count))
+            .expect("test quotient mask degree derives");
+        let quotient_decomposition_stride = relation_input
+            .relation_trace_domain_size()
+            .expect("test relation trace domain derives")
+            .checked_add(rounded_mask_degree)
+            .expect("test quotient decomposition stride derives");
+        let minimum_telescoping_mask_degree_bound_exclusive = unique_query_count
+            .checked_mul(2)
+            .and_then(|query_coordinate_count| query_coordinate_count.checked_add(deep_point_count))
+            .expect("test telescoping mask degree derives");
         RelationPlanCheckContext {
             base_field_modulus: crate::bgv::proof_suite::PROOF_BASE_FIELD_MODULUS,
             challenge_extension_degree: crate::bgv::proof_suite::PROOF_CHALLENGE_EXTENSION_DEGREE
@@ -3069,12 +3034,16 @@ mod tests {
                 crate::bgv::proof_suite::PROOF_BASE_FIELD_MODULUS,
             ),
             evaluation_coset_offset: 7,
-            deep_point_count: 1,
-            quotient_component_count: 3,
-            quotient_component_degree_bound_exclusive: 150,
+            deep_point_count: u16::try_from(deep_point_count).expect("test deep-point count fits"),
+            quotient_component_count: u32::try_from(quotient_component_count)
+                .expect("test quotient component count fits"),
+            quotient_component_degree_bound_exclusive: quotient_decomposition_stride
+                .checked_add(minimum_telescoping_mask_degree_bound_exclusive)
+                .expect("test quotient component degree bound derives"),
             fri_fold_count: 6,
             final_polynomial_degree_bound_exclusive: 8,
-            unique_query_count: 1,
+            unique_query_count: u32::try_from(unique_query_count)
+                .expect("test unique-query count fits"),
             non_native_modular_identity_challenge_count: 1,
             maximum_fiat_shamir_candidate_draws_per_output: 128,
             resolved_moduli: vec![ResolvedSuiteModulus::new(
@@ -3085,16 +3054,51 @@ mod tests {
     }
 
     fn trace_witness_input() -> CommittedMaterialRelationPlanInput {
+        let trace_mask_degree_bound_exclusive = COMMITTED_MATERIAL_TRACE_PACKING_FACTOR
+            .checked_mul(
+                u64::try_from(crate::bgv::proof_suite::PROOF_CHALLENGE_EXTENSION_DEGREE)
+                    .expect("test challenge extension degree fits"),
+            )
+            .and_then(|deep_coordinate_count| deep_coordinate_count.checked_add(2))
+            .expect("test trace mask degree derives");
         CommittedMaterialRelationPlanInput {
-            ring_degree: 32,
+            ring_degree: 64,
             evaluation_domain_size: 1_024,
             opening_degree_bound_exclusive: 512,
             material_column_degree_bound_exclusive: 10,
             participant_count: 3,
             threshold: 2,
             sharing_data_modulus_indices: vec![0],
-            trace_mask_degree_bound_exclusive: 14,
+            trace_mask_degree_bound_exclusive,
         }
+    }
+
+    #[test]
+    fn committed_material_compilers_reject_invalid_range_degree_before_building_columns() {
+        let context = trace_witness_context();
+        let mut input = trace_witness_input();
+        input.opening_degree_bound_exclusive = input
+            .maximum_range_constraint_numerator_degree()
+            .expect("test range numerator degree derives");
+        assert!(
+            input.prover_column_degree_bound_exclusive().unwrap()
+                < input.opening_degree_bound_exclusive
+        );
+
+        assert_eq!(
+            super::super::vss_share_linkage::compile_vss_share_linkage_relation_plan(
+                &input, &context,
+            )
+            .unwrap_err(),
+            RelationPlanError::DegreeBoundExceeded
+        );
+        assert_eq!(
+            super::super::aggregate_threshold_share::compile_aggregate_threshold_share_relation_plan(
+                &input, &context,
+            )
+            .unwrap_err(),
+            RelationPlanError::DegreeBoundExceeded
+        );
     }
 
     fn dense_negacyclic_monomial_action(source: &[u64], exponent: u64, modulus: u64) -> Vec<u64> {
@@ -3257,7 +3261,7 @@ mod tests {
         let source_value = provider
             .trace_value(packed_low_material_column_ordinal, 0)
             .expect("first packed low material value");
-        let ordered_compact_digit_columns = provider
+        let ordered_ternary_digit_columns = provider
             .ordered_recipes
             .iter()
             .filter_map(|(column_ordinal, recipe)| match recipe {
@@ -3267,7 +3271,7 @@ mod tests {
                     digit_ordinal,
                     offset,
                 } if source == &packed_low_material_source
-                    && *radix == COMPACT_TERNARY_DIGIT_RADIX
+                    && *radix == TERNARY_DIGIT_RADIX
                     && *offset == 0 =>
                 {
                     Some((*column_ordinal, *digit_ordinal))
@@ -3276,57 +3280,34 @@ mod tests {
             })
             .collect::<Vec<_>>();
         assert_eq!(
-            ordered_compact_digit_columns.len(),
-            MATERIAL_DIGIT_TERNARY_DIGIT_COUNT.div_ceil(2)
+            ordered_ternary_digit_columns.len(),
+            MATERIAL_DIGIT_TERNARY_DIGIT_COUNT
         );
         for (expected_digit_ordinal, (column_ordinal, digit_ordinal)) in
-            ordered_compact_digit_columns.iter().copied().enumerate()
+            ordered_ternary_digit_columns.iter().copied().enumerate()
         {
             assert_eq!(digit_ordinal, expected_digit_ordinal);
-            let low_trit_ordinal = expected_digit_ordinal * 2;
-            let low_trit = source_value
-                / TERNARY_DIGIT_RADIX
-                    .pow(u32::try_from(low_trit_ordinal).expect("test trit ordinal fits u32"))
+            let trit = source_value
+                / TERNARY_DIGIT_RADIX.pow(
+                    u32::try_from(expected_digit_ordinal).expect("test trit ordinal fits u32"),
+                )
                 % TERNARY_DIGIT_RADIX;
-            let high_trit = if low_trit_ordinal + 1 < MATERIAL_DIGIT_TERNARY_DIGIT_COUNT {
-                source_value
-                    / TERNARY_DIGIT_RADIX.pow(
-                        u32::try_from(low_trit_ordinal + 1).expect("test trit ordinal fits u32"),
-                    )
-                    % TERNARY_DIGIT_RADIX
-            } else {
-                0
-            };
             assert_eq!(
                 provider
                     .trace_value(column_ordinal, 0)
-                    .expect("compact material digit"),
-                low_trit + TERNARY_DIGIT_RADIX * high_trit
+                    .expect("ternary material digit"),
+                trit
             );
 
             let semantic_cell = plan.variants()[0]
                 .ordered_semantic_cells
                 .iter()
                 .find(|semantic_cell| semantic_cell.column_ordinal == column_ordinal)
-                .expect("compact material digit semantic cell");
-            if low_trit_ordinal + 1 < MATERIAL_DIGIT_TERNARY_DIGIT_COUNT {
-                let RelationBoundCertificate::FiniteIntegerSet { ordered_values, .. } =
-                    &semantic_cell.bound_certificate
-                else {
-                    panic!("paired compact material digit must use a finite nonary range");
-                };
-                assert_eq!(
-                    ordered_values,
-                    &(0..COMPACT_TERNARY_DIGIT_RADIX)
-                        .map(BigInt::from)
-                        .collect::<Vec<_>>()
-                );
-            } else {
-                assert!(matches!(
-                    semantic_cell.bound_certificate,
-                    RelationBoundCertificate::Trinary { .. }
-                ));
-            }
+                .expect("ternary material digit semantic cell");
+            assert!(matches!(
+                semantic_cell.bound_certificate,
+                RelationBoundCertificate::Trinary { .. }
+            ));
         }
 
         for column_ordinal in &ordered_column_ordinals {

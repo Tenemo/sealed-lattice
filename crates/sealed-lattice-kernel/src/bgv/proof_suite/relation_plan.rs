@@ -21,21 +21,11 @@ use super::transcript::{
     CommonProofTranscriptSchedule,
 };
 
-mod application_extractor;
-mod application_soundness;
 mod bounds;
 mod compiled_plan;
 mod integer_lift;
 mod layout;
 mod model;
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the round-by-round security experiment is exercised only by its module tests"
-    )
-)]
-mod round_by_round_extractor;
 mod schema;
 
 #[cfg(test)]
@@ -46,16 +36,6 @@ use layout::challenge_descriptor;
 use model::{canonical_encoding_error, validate_negacyclic_automorphism};
 use schema::*;
 
-pub(crate) use application_extractor::{
-    ApplicationExtractionError, ApplicationExtractionInput, ApplicationRootBinding,
-    CheckedApplicationExtractionPlan, ExtractedApplicationWitness,
-    ExtractedLowDegreeApplicationTree, ExtractedSemanticColumn, PackedCommonWitnessClass,
-    PackedCommonWitnessJoin,
-};
-pub(crate) use application_soundness::{
-    RelationApplicationChallengeBadSetCoordinate, RelationApplicationChallengeBadSetGroup,
-    RelationApplicationDeepAllowedSetRootBound, RelationApplicationRoundByRoundTransitionCatalog,
-};
 pub(crate) use bounds::{
     RelationBoundCertificate, RelationConstraintDescriptor, SemanticCellDescriptor,
     SignedIntegerInterval,
@@ -110,6 +90,7 @@ pub(crate) use expressions::{
 mod aggregate_threshold_share;
 mod ballot_validity;
 mod ballot_validity_adapter;
+mod collective_public_key_adapter;
 mod committed_material;
 mod committed_material_adapter;
 mod galois_key_share_adapter;
@@ -119,22 +100,20 @@ mod public_aggregate;
 mod public_key_share;
 mod relinearization_round_one_adapter;
 mod relinearization_round_one_aggregate_adapter;
+mod relinearization_round_two_adapter;
 mod same_secret_anchor;
 mod setup_key_relation_adapter;
 mod target_release;
 mod trustee_evaluation_key;
 mod verified_key_relation_column_evaluator;
-#[cfg(test)]
-mod vss_range_candidate_comparison;
 mod vss_share_linkage;
 
 pub(crate) use aggregate_threshold_share::compile_aggregate_threshold_share_relation_plan;
 pub(crate) use ballot_validity::{
     BallotValidityColumnTransform, BallotValidityRelationPlanInput,
-    BallotValiditySourceColumnRecipe, BallotValiditySourcePlan, BallotValidityWitnessValueSource,
-    BallotValidityVerifierColumnSource, CompiledBallotValidityRelation,
-    compile_ballot_validity_relation,
-    compile_ballot_validity_relation_plan,
+    BallotValiditySourceColumnRecipe, BallotValiditySourcePlan, BallotValidityVerifierColumnSource,
+    BallotValidityWitnessValueSource, CompiledBallotValidityRelation,
+    compile_ballot_validity_relation, compile_ballot_validity_relation_plan,
 };
 pub(crate) use ballot_validity_adapter::{
     BallotValidityAcceptedSetupBinding, BallotValidityAdapterError,
@@ -147,6 +126,11 @@ pub(crate) use ballot_validity_adapter::{
     ballot_encryption_private_randomness_kmac_input_accounting,
     proof_created_relation_tree_inputs_from_checked_variant,
     selected_ballot_validity_carrier_buffer_accounting,
+};
+pub(crate) use collective_public_key_adapter::{
+    CollectivePublicKeySetupPolynomialSource, CollectivePublicKeySourcePolynomialProvider,
+    CollectivePublicKeySourceProviderMemoryAccounting,
+    collective_public_key_source_provider_memory_accounting,
 };
 pub(crate) use committed_material::{
     CommittedMaterialRelationPlanInput, CommittedMaterialRootTraceRows,
@@ -164,7 +148,8 @@ pub(crate) use committed_material_adapter::{
     vss_share_linkage_source_provider_memory_accounting,
 };
 pub(crate) use galois_key_share_adapter::{
-    GaloisKeyShareSourcePolynomialAdapter, galois_relation_tree_inputs,
+    GaloisKeyShareSourcePolynomialAdapter, GaloisKeyShareSourceProviderMemoryAccounting,
+    galois_key_share_source_provider_memory_accounting, galois_relation_tree_inputs,
 };
 pub(crate) use interpreter::{
     CheckedRelationApplicationChallenges, RelationApplicationChallengeAssignment,
@@ -186,6 +171,13 @@ pub(crate) use relinearization_round_one_adapter::{
     RelinearizationRoundOneSourcePolynomialAdapter, relinearization_round_one_relation_tree_inputs,
 };
 pub(crate) use relinearization_round_one_aggregate_adapter::prepare_relinearization_round_one_aggregate_source;
+pub(crate) use relinearization_round_two_adapter::{
+    RelinearizationRoundTwoAuthenticatedAggregateSourcePlan,
+    RelinearizationRoundTwoSourcePolynomialAdapter,
+    RelinearizationRoundTwoSourceProviderMemoryAccounting,
+    relinearization_round_two_relation_tree_inputs,
+    relinearization_round_two_source_provider_memory_accounting,
+};
 pub(crate) use same_secret_anchor::{
     SameSecretSourceLayout, compile_same_secret_relation_plan,
     compile_same_secret_relation_with_source_layout,

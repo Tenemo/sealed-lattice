@@ -2,9 +2,9 @@ use super::{
     AUTHENTICATION_DIGEST_BYTE_LENGTH, BTreeSet, CanonicalDecodeLimits, CanonicalItemType,
     CommonProofProverError, CommonProofQueryOpeningAbsorber, CommonProofTranscriptSchedule,
     CompleteProofTreeCatalog, HASH_BYTE_LENGTH, PROOF_AUTHENTICATION_FRONTIER_SCHEMA_IDENTIFIER,
-    PROOF_QUERY_OPENING_RECORD_SCHEMA_IDENTIFIER, PrefetchedCommonProofOpeningArtifact,
-    ProofChallengeExtensionElement, ProofObjectHeader, ProofTreeCatalogEntry,
-    ProofTreeCatalogSource, ProofTreeRole, SCHEMA_VERSION, TranscriptError,
+    PROOF_AUTHENTICATION_FRONTIER_SCHEMA_VERSION, PROOF_QUERY_OPENING_RECORD_SCHEMA_IDENTIFIER,
+    PrefetchedCommonProofOpeningArtifact, ProofChallengeExtensionElement, ProofObjectHeader,
+    ProofTreeCatalogEntry, ProofTreeCatalogSource, ProofTreeRole, SCHEMA_VERSION, TranscriptError,
     canonical_common_proof_leaf_byte_length, common_proof_tree_value_type,
     minimal_frontier_coordinates,
 };
@@ -415,7 +415,12 @@ where
     Sink: CommonProofByteSink,
 {
     let opened_indexes = artifact.opened_leaf_indexes();
-    write_tuple_header(sink, PROOF_QUERY_OPENING_RECORD_SCHEMA_IDENTIFIER, 2)?;
+    write_tuple_header(
+        sink,
+        PROOF_QUERY_OPENING_RECORD_SCHEMA_IDENTIFIER,
+        SCHEMA_VERSION,
+        2,
+    )?;
     write_u16_item(sink, tree_catalog_index)?;
     let list_payload_length = opened_indexes
         .len()
@@ -463,7 +468,12 @@ where
 {
     let frontier_coordinates = artifact.frontier_coordinates();
     let frontier_count = frontier_coordinates.len();
-    write_tuple_header(sink, PROOF_AUTHENTICATION_FRONTIER_SCHEMA_IDENTIFIER, 2)?;
+    write_tuple_header(
+        sink,
+        PROOF_AUTHENTICATION_FRONTIER_SCHEMA_IDENTIFIER,
+        PROOF_AUTHENTICATION_FRONTIER_SCHEMA_VERSION,
+        2,
+    )?;
     write_u16_item(sink, tree_catalog_index)?;
     let list_payload_length = frontier_count
         .checked_mul(AUTHENTICATION_DIGEST_BYTE_LENGTH)
@@ -569,6 +579,7 @@ fn minimal_frontier_node_count(
 fn write_tuple_header<Sink, ArtifactError>(
     sink: &mut Sink,
     schema_identifier: u16,
+    schema_version: u16,
     item_count: u32,
 ) -> Result<(), CommonProofEncodingError<Sink::Error, ArtifactError>>
 where
@@ -576,7 +587,7 @@ where
 {
     sink.write_bytes(&schema_identifier.to_le_bytes())
         .map_err(CommonProofEncodingError::Sink)?;
-    sink.write_bytes(&SCHEMA_VERSION.to_le_bytes())
+    sink.write_bytes(&schema_version.to_le_bytes())
         .map_err(CommonProofEncodingError::Sink)?;
     sink.write_bytes(&item_count.to_le_bytes())
         .map_err(CommonProofEncodingError::Sink)

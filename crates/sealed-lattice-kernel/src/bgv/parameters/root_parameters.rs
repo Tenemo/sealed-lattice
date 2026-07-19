@@ -1,4 +1,4 @@
-use super::DATA_BASIS_ID;
+use super::{CANDIDATE_PLAINTEXT_DEGREE, CANDIDATE_PLAINTEXT_MODULUS, DATA_BASIS_ID};
 #[cfg(test)]
 use super::{EXTENDED_BASIS_ID, SPECIAL_BASIS_ID};
 
@@ -117,6 +117,29 @@ pub(crate) struct RootParameters {
     pub(crate) inverse_cyclic_root: u64,
     pub(crate) inverse_polynomial_degree: u64,
 }
+
+/// Exact roots for one supported negacyclic transform degree. Ciphertext
+/// arithmetic uses the full ring degree, while an embedded plaintext subring
+/// may use a smaller degree that divides it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct NttTransformParameters {
+    pub(crate) transform_degree: usize,
+    pub(crate) roots: RootParameters,
+}
+
+pub(crate) const CANDIDATE_PLAINTEXT_NTT_PARAMETERS: NttTransformParameters =
+    NttTransformParameters {
+        transform_degree: CANDIDATE_PLAINTEXT_DEGREE,
+        roots: RootParameters {
+            modulus: CANDIDATE_PLAINTEXT_MODULUS,
+            primitive_generator: 3,
+            negacyclic_root: 3,
+            cyclic_root: 9,
+            inverse_negacyclic_root: 21_846,
+            inverse_cyclic_root: 7_282,
+            inverse_polynomial_degree: 65_535,
+        },
+    };
 
 // Precomputed exact-order NTT roots for the plaintext, data, and special
 // moduli in their canonical suite order.

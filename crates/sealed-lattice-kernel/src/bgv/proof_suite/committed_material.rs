@@ -463,10 +463,6 @@ impl AuthenticatedCompactCommittedMaterialSource {
         Arc::clone(&self.compact_source)
     }
 
-    pub(crate) fn into_owned_compact_source(self) -> Arc<CompactCommittedMaterialSource> {
-        self.compact_source
-    }
-
     pub(crate) fn canonical_message(&self) -> &[u64] {
         &self.canonical_message
     }
@@ -524,6 +520,38 @@ impl AuthenticatedCompactCommittedMaterialSource {
         self.canonical_message
             .len()
             .saturating_mul(size_of::<u64>())
+    }
+
+    /// Process-local identities for the two Arc-backed allocations shared by
+    /// generation custody and a prepared committed-material proof provider.
+    /// They are never serialized or bound into a transcript; memory
+    /// accounting uses them only to count each live allocation once.
+    pub(crate) fn shared_allocation_owner_identifiers(&self) -> (usize, usize) {
+        (
+            Arc::as_ptr(&self.compact_source) as usize,
+            Arc::as_ptr(&self.canonical_message) as usize,
+        )
+    }
+
+    /// Heap bytes held by this source that the proof adapter borrows through
+    /// Arc clones. The canonical coefficient allocation and compact source
+    /// object are split from wrapper and Arc-header bytes so a phase ledger
+    /// can deduplicate the shared payload exactly.
+    pub(crate) fn retained_shared_source_byte_length(&self) -> Option<usize> {
+        self.canonical_message
+            .len()
+            .checked_mul(size_of::<u64>())
+            .and_then(|length| length.checked_add(self.compact_source.retained_byte_length()))
+    }
+
+    /// Allocation metadata owned once by the two Arc allocations. Rust's Arc
+    /// allocation stores two machine-word counters. The canonical-message Arc
+    /// additionally owns the boxed-slice pointer whose coefficient payload is
+    /// reported by `retained_shared_source_byte_length`.
+    pub(crate) fn retained_shared_allocation_wrapper_byte_length(&self) -> Option<usize> {
+        size_of::<usize>()
+            .checked_mul(4)
+            .and_then(|length| length.checked_add(size_of::<Zeroizing<Box<[u64]>>>()))
     }
 
     pub(crate) fn maximum_regeneration_trace_byte_length(&self) -> usize {

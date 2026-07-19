@@ -21,6 +21,8 @@ pub(crate) const MAILBOX_GCM_KEY_BYTE_LENGTH: usize = 32;
 pub(crate) const MAILBOX_GCM_NONCE_BYTE_LENGTH: usize = 12;
 
 const GCM_BLOCK_BYTE_LENGTH: usize = 16;
+const AUTHENTICATED_MAILBOX_CIPHERTEXT_DIGEST_DOMAIN: &str =
+    "sealed-lattice/authenticated-mailbox/ciphertext/v1";
 const AUTHENTICATED_MAILBOX_PLAINTEXT_DIGEST_DOMAIN: &str =
     "sealed-lattice/authenticated-mailbox/plaintext/v1";
 
@@ -257,6 +259,7 @@ impl MailboxGcmEncryptor {
 pub(crate) struct MailboxGcmVerifier {
     associated_data: Box<[u8]>,
     authentication: MailboxGcmAuthentication,
+    ciphertext_digest: StreamingFoundationTupleHash512,
     key: Zeroizing<[u8; MAILBOX_GCM_KEY_BYTE_LENGTH]>,
     nonce: [u8; MAILBOX_GCM_NONCE_BYTE_LENGTH],
 }
@@ -276,16 +279,39 @@ impl MailboxGcmVerifier {
             expected_ciphertext_byte_length,
         )?;
         drop(unused_counter);
+        let ciphertext_digest = StreamingFoundationTupleHash512::new_variable_bytes(
+            AUTHENTICATED_MAILBOX_CIPHERTEXT_DIGEST_DOMAIN,
+            &[],
+            usize::try_from(expected_ciphertext_byte_length).map_err(|_| {
+                schema_error(
+                    RefusalReason::OutsideSupportedProfile,
+                    "mailbox ciphertext length exceeds the runtime address space",
+                )
+            })?,
+        )
+        .map_err(|_| {
+            schema_error(
+                RefusalReason::OutsideSupportedProfile,
+                "mailbox ciphertext digest input exceeds the supported profile",
+            )
+        })?;
         Ok(Self {
             associated_data: associated_data.into(),
             authentication,
+            ciphertext_digest,
             key,
             nonce,
         })
     }
 
     pub(crate) fn absorb_ciphertext(&mut self, ciphertext: &[u8]) -> SchemaResult<()> {
-        self.authentication.absorb_ciphertext(ciphertext)
+        self.authentication.absorb_ciphertext(ciphertext)?;
+        self.ciphertext_digest.absorb(ciphertext).map_err(|_| {
+            schema_error(
+                RefusalReason::WrongTypeOrLength,
+                "mailbox ciphertext exceeds its authenticated digest length",
+            )
+        })
     }
 
     pub(crate) fn finish(
@@ -295,6 +321,7 @@ impl MailboxGcmVerifier {
         let Self {
             associated_data,
             authentication,
+            ciphertext_digest,
             key,
             nonce,
         } = self;
@@ -306,8 +333,15 @@ impl MailboxGcmVerifier {
                 "mailbox AES-GCM authentication failed",
             ));
         }
+        let authenticated_ciphertext_digest = ciphertext_digest.finalize().map_err(|_| {
+            schema_error(
+                RefusalReason::WrongTypeOrLength,
+                "mailbox ciphertext is shorter than its authenticated digest length",
+            )
+        })?;
         Ok(VerifiedMailboxGcmOpening {
             associated_data,
+            authenticated_ciphertext_digest,
             expected_ciphertext_byte_length,
             key,
             nonce,
@@ -317,6 +351,7 @@ impl MailboxGcmVerifier {
 
 pub(crate) struct VerifiedMailboxGcmOpening {
     associated_data: Box<[u8]>,
+    authenticated_ciphertext_digest: Hash512,
     expected_ciphertext_byte_length: u64,
     key: Zeroizing<[u8; MAILBOX_GCM_KEY_BYTE_LENGTH]>,
     nonce: [u8; MAILBOX_GCM_NONCE_BYTE_LENGTH],
@@ -346,6 +381,23 @@ impl VerifiedMailboxGcmOpening {
             })?;
         Ok(MailboxGcmDecryptor {
             associated_data: self.associated_data,
+            authenticated_ciphertext_digest: self.authenticated_ciphertext_digest,
+            ciphertext_digest: StreamingFoundationTupleHash512::new_variable_bytes(
+                AUTHENTICATED_MAILBOX_CIPHERTEXT_DIGEST_DOMAIN,
+                &[],
+                usize::try_from(self.expected_ciphertext_byte_length).map_err(|_| {
+                    schema_error(
+                        RefusalReason::OutsideSupportedProfile,
+                        "mailbox ciphertext length exceeds the runtime address space",
+                    )
+                })?,
+            )
+            .map_err(|_| {
+                schema_error(
+                    RefusalReason::OutsideSupportedProfile,
+                    "mailbox ciphertext digest input exceeds the supported profile",
+                )
+            })?,
             counter,
             decrypted_ciphertext_byte_length: 0,
             expected_ciphertext_byte_length: self.expected_ciphertext_byte_length,
@@ -371,6 +423,8 @@ impl VerifiedMailboxGcmOpening {
 
 pub(crate) struct MailboxGcmDecryptor {
     associated_data: Box<[u8]>,
+    authenticated_ciphertext_digest: Hash512,
+    ciphertext_digest: StreamingFoundationTupleHash512,
     counter: Aes256Counter,
     decrypted_ciphertext_byte_length: u64,
     expected_ciphertext_byte_length: u64,
@@ -400,6 +454,13 @@ impl MailboxGcmDecryptor {
                 "mailbox ciphertext exceeds its authenticated length",
             ));
         }
+        self.ciphertext_digest.absorb(ciphertext).map_err(|_| {
+            ciphertext.zeroize();
+            schema_error(
+                RefusalReason::WrongTypeOrLength,
+                "mailbox ciphertext exceeds its authenticated digest length",
+            )
+        })?;
         self.counter.try_apply_keystream(ciphertext).map_err(|_| {
             ciphertext.zeroize();
             schema_error(
@@ -423,6 +484,22 @@ impl MailboxGcmDecryptor {
             return Err(schema_error(
                 RefusalReason::WrongTypeOrLength,
                 "mailbox ciphertext is shorter than its authenticated length",
+            ));
+        }
+        let decrypted_ciphertext_digest = self.ciphertext_digest.finalize().map_err(|_| {
+            schema_error(
+                RefusalReason::WrongTypeOrLength,
+                "mailbox ciphertext is shorter than its authenticated digest length",
+            )
+        })?;
+        if !bool::from(
+            self.authenticated_ciphertext_digest
+                .as_bytes()
+                .ct_eq(decrypted_ciphertext_digest.as_bytes()),
+        ) {
+            return Err(schema_error(
+                RefusalReason::InvalidArithmeticRelation,
+                "mailbox decryption ciphertext does not match the authenticated bytes",
             ));
         }
         let plaintext_digest = self.plaintext_digest.finalize().map_err(|_| {
@@ -614,7 +691,7 @@ mod tests {
     }
 
     #[test]
-    fn authenticates_before_issuing_a_decryptor_and_preserves_fragment_positions() {
+    fn authenticates_exact_ciphertext_before_issuing_a_decryptor_across_fragmentations() {
         let key = [0x29_u8; 32];
         let nonce = [0x71_u8; 12];
         let associated_data = b"canonical mailbox associated data";
@@ -668,6 +745,46 @@ mod tests {
             .finish(&tampered_tag)
             .err()
             .expect("tampered tag refuses before decryptor issuance");
+        assert_eq!(
+            error.refusal_reason,
+            RefusalReason::InvalidArithmeticRelation
+        );
+    }
+
+    #[test]
+    fn rejects_same_length_ciphertext_substitution_between_authentication_and_decryption() {
+        let key = [0x59_u8; MAILBOX_GCM_KEY_BYTE_LENGTH];
+        let nonce = [0x83_u8; MAILBOX_GCM_NONCE_BYTE_LENGTH];
+        let associated_data = b"canonical mailbox substitution binding";
+        let plaintext = (0_u16..=512).flat_map(u16::to_be_bytes).collect::<Vec<_>>();
+        let (ciphertext, tag) = encrypt_with_fragments(key, nonce, associated_data, &plaintext, 19);
+
+        let mut verifier = MailboxGcmVerifier::new(
+            key,
+            nonce,
+            associated_data,
+            u64::try_from(ciphertext.len()).expect("test length"),
+        )
+        .expect("verifier starts");
+        for fragment in ciphertext.chunks(23) {
+            verifier
+                .absorb_ciphertext(fragment)
+                .expect("original ciphertext authenticates");
+        }
+        let opening = verifier.finish(&tag).expect("tag authenticates");
+
+        let mut substituted_ciphertext = ciphertext;
+        substituted_ciphertext[97] ^= 0x40;
+        let mut decryptor = opening.begin_decryption().expect("decryptor starts");
+        for fragment in substituted_ciphertext.chunks_mut(11) {
+            decryptor
+                .decrypt_chunk(fragment)
+                .expect("same-length ciphertext decrypts provisionally");
+        }
+        let error = decryptor
+            .finish()
+            .err()
+            .expect("substituted ciphertext cannot issue a capability");
         assert_eq!(
             error.refusal_reason,
             RefusalReason::InvalidArithmeticRelation

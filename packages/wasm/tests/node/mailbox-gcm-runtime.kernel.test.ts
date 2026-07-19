@@ -187,6 +187,45 @@ describe('Mailbox AES-GCM real-WASM runtime', () => {
         );
     });
 
+    it('refuses same-length ciphertext substituted between authentication and decryption', () => {
+        const key = deterministicBytes(32, 41);
+        const nonce = deterministicBytes(12, 43);
+        const associatedData = deterministicBytes(37, 47);
+        const plaintext = deterministicBytes(4097, 53);
+        const runtime = openMailboxGcmRuntime({ kernel });
+        const encryptor = runtime.openEncryptor({
+            associatedData,
+            key,
+            nonce,
+            totalByteLength: plaintext.byteLength,
+        });
+        const ciphertextBuffer = plaintext.slice().buffer;
+        encryptor.encryptChunk(ciphertextBuffer);
+        const ciphertext = new Uint8Array(ciphertextBuffer.slice(0));
+        const tag = encryptor.finish();
+
+        const verifier = runtime.openVerifier({
+            associatedData,
+            key,
+            nonce,
+            totalByteLength: ciphertext.byteLength,
+        });
+        for (const fragment of fragments(ciphertext, 29)) {
+            verifier.authenticateChunk(fragment);
+        }
+        verifier.finishAuthentication(tag);
+
+        const substitutedCiphertext = ciphertext.slice();
+        substitutedCiphertext[2053] ^= 0x20;
+        for (const fragment of fragments(substitutedCiphertext, 17)) {
+            verifier.decryptChunk(fragment);
+        }
+        expect(() => verifier.finishDecryption()).toThrow(
+            CanonicalStreamRefusalError,
+        );
+        expect(verifier.state()).toBe('failed');
+    });
+
     it('refuses truncated, overlong, and cancelled lifecycles without retaining a session', () => {
         const key = deterministicBytes(32, 19);
         const nonce = deterministicBytes(12, 23);

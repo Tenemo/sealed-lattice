@@ -2,23 +2,37 @@
 //!
 //! Both rounds derive their canonical statement and witness from the retained
 //! setup-generation authority. Round two additionally reenters the exact
-//! positively verified round-one aggregate retained by the prepackage source
-//! catalog. JavaScript receives only reset-safe common-prover handles and a
-//! bounded read-once canonical statement source.
+//! generated round-one aggregate and bound proof descriptor retained by the
+//! prepackage source catalog. JavaScript receives only reset-safe common-prover handles and
+//! authenticated component readbacks; canonical statements remain authority-owned in Rust.
 
 use core::slice;
 use std::{cell::RefCell, collections::BTreeMap};
 
+use zeroize::Zeroizing;
+
 use crate::{
     bgv::setup::{
-        SetupGeneratedRelinearizationComponentSource,
-        SetupGenerationAuthorityHandle, SetupGenerationRelinearizationRoundOneApplication,
+        SetupGeneratedRelinearizationComponentSource, SetupGenerationAuthorityHandle,
+        SetupGenerationRelinearizationRoundOneApplication,
         SetupGenerationRelinearizationRoundOnePreparationSource,
+        SetupGenerationRelinearizationRoundTwoActivation,
         SetupGenerationRelinearizationRoundTwoApplication,
         SetupGenerationRelinearizationRoundTwoPreparationSource,
+        SetupRelinearizationGenerationPreparationError,
+        absorb_setup_generation_relinearization_round_two_activation_pair,
+        add_generated_proof_source_to_accepted_setup_package_builder,
+        begin_setup_generation_relinearization_round_two_activation,
+        commit_prepackage_generated_relinearization_round_one_source,
+        commit_prepackage_generated_relinearization_round_two_source,
+        finish_setup_generation_relinearization_round_two_activation,
+        preflight_prepackage_generated_relinearization_round_one_source_slot,
+        preflight_prepackage_generated_relinearization_round_two_source_slot,
+        resolve_setup_generated_relinearization_round_one_source_authority,
+        resolve_setup_generated_relinearization_round_two_source_authority,
         resolve_setup_generation_relinearization_round_one_preparation_source,
         resolve_setup_generation_relinearization_round_two_preparation_source,
-        with_prepackage_relinearization_aggregate,
+        with_prepackage_generated_relinearization_aggregate,
         with_setup_generation_relinearization_round_one,
         with_setup_generation_relinearization_round_one_component_chunk,
         with_setup_generation_relinearization_round_two,
@@ -28,10 +42,10 @@ use crate::{
         BOARD_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH, CanonicalStreamReadbackVerifier,
         FOUNDATION_PROFILE, FoundationObjectType, FoundationSchemaError, Hash512,
         ParticipantIdentity, PreparedActionProofAttemptSource, ProofApplicationSlot,
-        ProofApplicationSlotCeilings, RefusalReason, StreamDescriptor,
-        STATE_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH, VerifiedBoardApplicationSource,
-        VerifiedStateReservationRuntimeBinding, resolve_prepared_action_proof_attempt_source,
-        resolve_verified_board_application_sources, verified_state_reservation_binding,
+        ProofApplicationSlotCeilings, RefusalReason, STATE_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH,
+        StreamDescriptor, VerifiedBoardApplicationSource, VerifiedStateReservationRuntimeBinding,
+        resolve_prepared_action_proof_attempt_source, resolve_verified_board_application_sources,
+        verified_state_reservation_binding,
     },
 };
 
@@ -43,8 +57,8 @@ use super::runtime_ffi::{
 use super::{
     CommonProofGenerationPreparationError, CommonProofRelationPlanCapability,
     CommonProofRelationPlanCapabilityError, CommonProofRuntimeError, CommonProofRuntimeLimits,
-    ProofProfileError, RelationPlanError, SelectedApplicationStatementContext,
-    SelectedProofAccountingError, SetupRelinearizationGenerationPreparationError,
+    ProofProfileError, RelationPlanError, RelinearizationRoundTwoAuthenticatedAggregateSourcePlan,
+    SelectedApplicationStatementContext, SelectedProofAccountingError,
     decode_selected_relinearization_round_one_statement, selected_proof_runtime_limits,
     selected_relation_plan_check_context, selected_relation_plans,
     verified_application_statement_hash,
@@ -52,6 +66,7 @@ use super::{
 
 const ATTEMPT_IDENTIFIER_BYTE_LENGTH: usize = 32;
 const MAXIMUM_RETAINED_RELINEARIZATION_STATEMENT_SOURCE_COUNT: usize = 32;
+const MAXIMUM_RETAINED_RELINEARIZATION_ACTIVATION_COUNT: usize = 16;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum RelinearizationProofRound {
@@ -243,8 +258,6 @@ struct SelectedRelinearizationProofRuntimePlan {
 
 struct GeneratedRelinearizationComponentReadback {
     material_root: [u8; 64],
-    public_polynomial_context_hash: [u8; 64],
-    contribution_root: [u8; 64],
     stream_descriptor: StreamDescriptor,
     encoded_stream_descriptor: Box<[u8]>,
     authenticated_readback: Option<CanonicalStreamReadbackVerifier>,
@@ -257,8 +270,6 @@ impl GeneratedRelinearizationComponentReadback {
         let stream_descriptor = source.stream_descriptor().clone();
         Ok(Self {
             material_root: source.material_root().into_bytes(),
-            public_polynomial_context_hash: source.public_polynomial_context_hash(),
-            contribution_root: source.contribution_root(),
             encoded_stream_descriptor: stream_descriptor.encode()?.into_boxed_slice(),
             authenticated_readback: Some(source.begin_authenticated_readback()?),
             stream_descriptor,
@@ -269,13 +280,110 @@ impl GeneratedRelinearizationComponentReadback {
 struct RelinearizationGenerationSource {
     proof_round: RelinearizationProofRound,
     setup_generation_authority_identifier: u32,
-    canonical_application_statement_bytes: Option<Box<[u8]>>,
     ordered_components: Box<[GeneratedRelinearizationComponentReadback]>,
     next_component_ordinal: usize,
     next_chunk_index: usize,
 }
 
 impl RelinearizationGenerationSource {
+    fn component_count(&self) -> usize {
+        self.ordered_components.len()
+    }
+
+    fn current_component(
+        &self,
+        component_ordinal: usize,
+    ) -> Result<&GeneratedRelinearizationComponentReadback, CommonProofRuntimeError> {
+        if component_ordinal != self.next_component_ordinal {
+            return Err(CommonProofRuntimeError::WrongOperationPhase);
+        }
+        self.ordered_components
+            .get(component_ordinal)
+            .ok_or(CommonProofRuntimeError::WrongOperationPhase)
+    }
+
+    fn current_component_mut(
+        &mut self,
+        component_ordinal: usize,
+    ) -> Result<&mut GeneratedRelinearizationComponentReadback, CommonProofRuntimeError> {
+        if component_ordinal != self.next_component_ordinal {
+            return Err(CommonProofRuntimeError::WrongOperationPhase);
+        }
+        self.ordered_components
+            .get_mut(component_ordinal)
+            .ok_or(CommonProofRuntimeError::WrongOperationPhase)
+    }
+
+    fn expected_chunk_byte_length(
+        &self,
+        component_ordinal: usize,
+        chunk_index: usize,
+    ) -> Result<usize, RelinearizationRuntimeError> {
+        if chunk_index != self.next_chunk_index {
+            return Err(RelinearizationRuntimeError::Runtime(
+                CommonProofRuntimeError::WrongOperationPhase,
+            ));
+        }
+        let component = self.current_component(component_ordinal)?;
+        if chunk_index >= component.stream_descriptor.ordered_chunk_digests.len() {
+            return Err(RelinearizationRuntimeError::Runtime(
+                CommonProofRuntimeError::WrongOperationPhase,
+            ));
+        }
+        let byte_start = chunk_index
+            .checked_mul(FOUNDATION_PROFILE.stream_chunk_byte_length)
+            .ok_or(RelinearizationRuntimeError::InvalidInput)?;
+        let total_byte_length = usize::try_from(component.stream_descriptor.total_byte_length)
+            .map_err(|_| RelinearizationRuntimeError::InvalidInput)?;
+        Ok(total_byte_length
+            .checked_sub(byte_start)
+            .ok_or(RelinearizationRuntimeError::InvalidInput)?
+            .min(FOUNDATION_PROFILE.stream_chunk_byte_length))
+    }
+
+    fn authenticate_and_copy_chunk(
+        &mut self,
+        component_ordinal: usize,
+        chunk_index: usize,
+        source_chunk: &[u8],
+        output: &mut [u8],
+    ) -> Result<(), RelinearizationRuntimeError> {
+        let expected_byte_length =
+            self.expected_chunk_byte_length(component_ordinal, chunk_index)?;
+        if source_chunk.len() != expected_byte_length || output.len() != expected_byte_length {
+            return Err(RelinearizationRuntimeError::InvalidInput);
+        }
+        let is_final_component_chunk = {
+            let component = self.current_component_mut(component_ordinal)?;
+            let readback = component.authenticated_readback.as_mut().ok_or(
+                RelinearizationRuntimeError::Runtime(CommonProofRuntimeError::WrongOperationPhase),
+            )?;
+            readback.authenticate_chunk(chunk_index, source_chunk)?;
+            output.copy_from_slice(source_chunk);
+            chunk_index + 1 == component.stream_descriptor.ordered_chunk_digests.len()
+        };
+        self.next_chunk_index = self
+            .next_chunk_index
+            .checked_add(1)
+            .ok_or(RelinearizationRuntimeError::InvalidInput)?;
+        if is_final_component_chunk {
+            let readback = self
+                .current_component_mut(component_ordinal)?
+                .authenticated_readback
+                .take()
+                .ok_or(RelinearizationRuntimeError::Runtime(
+                    CommonProofRuntimeError::WrongOperationPhase,
+                ))?;
+            readback.finish().into_result()?;
+            self.next_component_ordinal = self
+                .next_component_ordinal
+                .checked_add(1)
+                .ok_or(RelinearizationRuntimeError::InvalidInput)?;
+            self.next_chunk_index = 0;
+        }
+        Ok(())
+    }
+
     fn is_component_readback_complete(&self) -> bool {
         self.next_component_ordinal == self.ordered_components.len()
             && self.next_chunk_index == 0
@@ -286,8 +394,7 @@ impl RelinearizationGenerationSource {
     }
 
     fn can_release(&self) -> bool {
-        self.canonical_application_statement_bytes.is_none()
-            && self.is_component_readback_complete()
+        self.is_component_readback_complete()
     }
 }
 
@@ -352,12 +459,318 @@ impl RelinearizationGenerationSourceRegistry {
             .remove(&handle)
             .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)
     }
+
+    fn restore(
+        &mut self,
+        handle: u32,
+        source: RelinearizationGenerationSource,
+    ) -> Result<(), CommonProofRuntimeError> {
+        if handle == 0 || self.sources.contains_key(&handle) {
+            return Err(CommonProofRuntimeError::WrongOperationPhase);
+        }
+        self.sources.insert(handle, source);
+        Ok(())
+    }
 }
 
 thread_local! {
     static RELINEARIZATION_GENERATION_SOURCE_REGISTRY:
         RefCell<RelinearizationGenerationSourceRegistry> =
         RefCell::new(RelinearizationGenerationSourceRegistry::default());
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct RelinearizationRoundTwoActivationReadRequest {
+    component_ordinal: usize,
+    material_root: [u8; Hash512::BYTE_LENGTH],
+    stream_digest: [u8; Hash512::BYTE_LENGTH],
+    total_byte_length: u64,
+    stream_byte_offset: u64,
+    chunk_index: usize,
+    source_byte_length: usize,
+}
+
+struct RelinearizationRoundTwoActivationSource {
+    material_root: [u8; Hash512::BYTE_LENGTH],
+    stream_digest: [u8; Hash512::BYTE_LENGTH],
+    total_byte_length: u64,
+    chunk_count: usize,
+    readback: Option<CanonicalStreamReadbackVerifier>,
+}
+
+impl RelinearizationRoundTwoActivationSource {
+    fn from_generated_source(
+        source: &SetupGeneratedRelinearizationComponentSource,
+    ) -> Result<Self, RelinearizationRuntimeError> {
+        let stream_descriptor = source.stream_descriptor();
+        if stream_descriptor.total_byte_length == 0
+            || stream_descriptor.ordered_chunk_digests.is_empty()
+        {
+            return Err(RelinearizationRuntimeError::InvalidInput);
+        }
+        Ok(Self {
+            material_root: source.material_root().into_bytes(),
+            stream_digest: stream_descriptor.full_object_digest.into_bytes(),
+            total_byte_length: stream_descriptor.total_byte_length,
+            chunk_count: stream_descriptor.ordered_chunk_digests.len(),
+            readback: Some(source.begin_authenticated_readback()?),
+        })
+    }
+}
+
+struct RelinearizationRoundTwoActivationSession {
+    setup_generation_authority_identifier: u32,
+    prepackage_catalog_identifier: u32,
+    authority_activation: SetupGenerationRelinearizationRoundTwoActivation,
+    sources: [RelinearizationRoundTwoActivationSource; 2],
+    next_component_ordinal: usize,
+    next_chunk_index: usize,
+    pending_left_chunk: Option<Zeroizing<Box<[u8]>>>,
+    readbacks_complete: bool,
+    poisoned: bool,
+}
+
+impl RelinearizationRoundTwoActivationSession {
+    fn new(
+        setup_generation_authority_identifier: u32,
+        prepackage_catalog_identifier: u32,
+        authority_activation: SetupGenerationRelinearizationRoundTwoActivation,
+        generated_aggregate: &crate::bgv::setup::SetupGeneratedRelinearizationAggregateSourceAuthority,
+    ) -> Result<Self, RelinearizationRuntimeError> {
+        let sources = [
+            RelinearizationRoundTwoActivationSource::from_generated_source(
+                &generated_aggregate.components()[0],
+            )?,
+            RelinearizationRoundTwoActivationSource::from_generated_source(
+                &generated_aggregate.components()[1],
+            )?,
+        ];
+        if setup_generation_authority_identifier == 0
+            || prepackage_catalog_identifier == 0
+            || sources[0].total_byte_length != sources[1].total_byte_length
+            || sources[0].chunk_count != sources[1].chunk_count
+            || sources[0].total_byte_length
+                != authority_activation.topology().expected_byte_length()
+        {
+            return Err(RelinearizationRuntimeError::InvalidInput);
+        }
+        Ok(Self {
+            setup_generation_authority_identifier,
+            prepackage_catalog_identifier,
+            authority_activation,
+            sources,
+            next_component_ordinal: 0,
+            next_chunk_index: 0,
+            pending_left_chunk: None,
+            readbacks_complete: false,
+            poisoned: false,
+        })
+    }
+
+    fn next_read_request(
+        &self,
+    ) -> Result<Option<RelinearizationRoundTwoActivationReadRequest>, RelinearizationRuntimeError>
+    {
+        if self.poisoned {
+            return Err(CommonProofRuntimeError::WrongOperationPhase.into());
+        }
+        if self.readbacks_complete {
+            return Ok(None);
+        }
+        let source = self
+            .sources
+            .get(self.next_component_ordinal)
+            .ok_or(RelinearizationRuntimeError::InvalidInput)?;
+        if self.next_chunk_index >= source.chunk_count {
+            return Err(CommonProofRuntimeError::WrongOperationPhase.into());
+        }
+        let stream_byte_offset = self
+            .next_chunk_index
+            .checked_mul(FOUNDATION_PROFILE.stream_chunk_byte_length)
+            .and_then(|offset| u64::try_from(offset).ok())
+            .ok_or(RelinearizationRuntimeError::InvalidInput)?;
+        let source_byte_length = source
+            .total_byte_length
+            .checked_sub(stream_byte_offset)
+            .map(|remaining| remaining.min(FOUNDATION_PROFILE.stream_chunk_byte_length as u64))
+            .and_then(|length| usize::try_from(length).ok())
+            .filter(|length| *length > 0)
+            .ok_or(RelinearizationRuntimeError::InvalidInput)?;
+        Ok(Some(RelinearizationRoundTwoActivationReadRequest {
+            component_ordinal: self.next_component_ordinal,
+            material_root: source.material_root,
+            stream_digest: source.stream_digest,
+            total_byte_length: source.total_byte_length,
+            stream_byte_offset,
+            chunk_index: self.next_chunk_index,
+            source_byte_length,
+        }))
+    }
+
+    fn absorb_source(
+        &mut self,
+        supplied_request: RelinearizationRoundTwoActivationReadRequest,
+        source_bytes: &[u8],
+    ) -> Result<(), RelinearizationRuntimeError> {
+        let result = self.absorb_source_inner(supplied_request, source_bytes);
+        if result.is_err() {
+            self.poisoned = true;
+        }
+        result
+    }
+
+    fn absorb_source_inner(
+        &mut self,
+        supplied_request: RelinearizationRoundTwoActivationReadRequest,
+        source_bytes: &[u8],
+    ) -> Result<(), RelinearizationRuntimeError> {
+        let expected_request = self
+            .next_read_request()?
+            .ok_or(CommonProofRuntimeError::WrongOperationPhase)?;
+        if supplied_request != expected_request
+            || source_bytes.len() != expected_request.source_byte_length
+        {
+            return Err(RelinearizationRuntimeError::Refusal(
+                RefusalReason::WrongContext,
+            ));
+        }
+        self.sources[expected_request.component_ordinal]
+            .readback
+            .as_mut()
+            .ok_or(CommonProofRuntimeError::WrongOperationPhase)?
+            .authenticate_chunk(expected_request.chunk_index, source_bytes)?;
+        if expected_request.component_ordinal == 0 {
+            if self.pending_left_chunk.is_some() {
+                return Err(CommonProofRuntimeError::WrongOperationPhase.into());
+            }
+            self.pending_left_chunk = Some(Zeroizing::new(source_bytes.into()));
+            self.next_component_ordinal = 1;
+            return Ok(());
+        }
+        let aggregate_left_bytes = self
+            .pending_left_chunk
+            .take()
+            .ok_or(CommonProofRuntimeError::WrongOperationPhase)?;
+        let authority_handle = SetupGenerationAuthorityHandle::from_identifier(
+            self.setup_generation_authority_identifier,
+        );
+        absorb_setup_generation_relinearization_round_two_activation_pair(
+            &authority_handle,
+            &mut self.authority_activation,
+            &aggregate_left_bytes,
+            source_bytes,
+        )?;
+        self.next_component_ordinal = 0;
+        self.next_chunk_index = self
+            .next_chunk_index
+            .checked_add(1)
+            .ok_or(RelinearizationRuntimeError::InvalidInput)?;
+        if self.next_chunk_index == self.sources[0].chunk_count {
+            for source in &mut self.sources {
+                source
+                    .readback
+                    .take()
+                    .ok_or(CommonProofRuntimeError::WrongOperationPhase)?
+                    .finish()
+                    .into_result()?;
+            }
+            self.readbacks_complete = true;
+        }
+        Ok(())
+    }
+
+    fn can_finish(&self) -> bool {
+        !self.poisoned
+            && self.readbacks_complete
+            && self.pending_left_chunk.is_none()
+            && self.next_component_ordinal == 0
+            && self.next_chunk_index == self.sources[0].chunk_count
+            && self.sources.iter().all(|source| source.readback.is_none())
+    }
+}
+
+struct RelinearizationRoundTwoActivationRegistry {
+    next_handle: u32,
+    sessions: BTreeMap<u32, RelinearizationRoundTwoActivationSession>,
+}
+
+impl Default for RelinearizationRoundTwoActivationRegistry {
+    fn default() -> Self {
+        Self {
+            next_handle: 1,
+            sessions: BTreeMap::new(),
+        }
+    }
+}
+
+impl RelinearizationRoundTwoActivationRegistry {
+    fn retain(
+        &mut self,
+        session: RelinearizationRoundTwoActivationSession,
+    ) -> Result<u32, CommonProofRuntimeError> {
+        if self.sessions.len() >= MAXIMUM_RETAINED_RELINEARIZATION_ACTIVATION_COUNT
+            || self.next_handle == 0
+            || self.sessions.values().any(|retained| {
+                retained.setup_generation_authority_identifier
+                    == session.setup_generation_authority_identifier
+            })
+        {
+            return Err(CommonProofRuntimeError::AllocationLimitExceeded);
+        }
+        let handle = self.next_handle;
+        self.next_handle = handle
+            .checked_add(1)
+            .filter(|next| *next != 0)
+            .ok_or(CommonProofRuntimeError::AllocationLimitExceeded)?;
+        if self.sessions.insert(handle, session).is_some() {
+            return Err(CommonProofRuntimeError::AllocationLimitExceeded);
+        }
+        Ok(handle)
+    }
+
+    fn get(
+        &self,
+        handle: u32,
+    ) -> Result<&RelinearizationRoundTwoActivationSession, CommonProofRuntimeError> {
+        self.sessions
+            .get(&handle)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)
+    }
+
+    fn get_mut(
+        &mut self,
+        handle: u32,
+    ) -> Result<&mut RelinearizationRoundTwoActivationSession, CommonProofRuntimeError> {
+        self.sessions
+            .get_mut(&handle)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)
+    }
+
+    fn take(
+        &mut self,
+        handle: u32,
+    ) -> Result<RelinearizationRoundTwoActivationSession, CommonProofRuntimeError> {
+        self.sessions
+            .remove(&handle)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)
+    }
+
+    fn restore(
+        &mut self,
+        handle: u32,
+        session: RelinearizationRoundTwoActivationSession,
+    ) -> Result<(), CommonProofRuntimeError> {
+        if handle == 0 || self.sessions.insert(handle, session).is_some() {
+            return Err(CommonProofRuntimeError::WrongOperationPhase);
+        }
+        Ok(())
+    }
+}
+
+thread_local! {
+    static RELINEARIZATION_ROUND_TWO_ACTIVATION_REGISTRY:
+        RefCell<RelinearizationRoundTwoActivationRegistry> =
+        RefCell::new(RelinearizationRoundTwoActivationRegistry::default());
 }
 
 fn selected_relinearization_proof_runtime_plan(
@@ -378,10 +791,9 @@ fn selected_relinearization_proof_runtime_plan(
         .ok_or(RelinearizationRuntimeError::Relation(
             RelationPlanError::InvalidDomain,
         ))?;
-    let relation_plan_variant = selected_plan.compiled_plan().select_variant(
-        Some(preparation_source.schedule_position()),
-        None,
-    )?;
+    let relation_plan_variant = selected_plan
+        .compiled_plan()
+        .select_variant(Some(preparation_source.schedule_position()), None)?;
     let limits = selected_proof_runtime_limits(
         statement_schema_identifier,
         preparation_source.canonical_application_statement_bytes(),
@@ -568,14 +980,15 @@ fn prepare_common_generation(
                 ),
             )
             .map_err(|_| RelinearizationRuntimeError::Refusal(RefusalReason::WrongContext))?;
-            let application = SetupGenerationRelinearizationRoundOneApplication::from_decoded_statement(
-                prepared_attempt,
-                preparation_source.canonical_application_statement_bytes(),
-                statement.setup_proof_context_hash(),
-                statement.participant_identity(),
-                statement.roster_position(),
-                statement.schedule_position(),
-            );
+            let application =
+                SetupGenerationRelinearizationRoundOneApplication::from_decoded_statement(
+                    prepared_attempt,
+                    preparation_source.canonical_application_statement_bytes(),
+                    statement.setup_proof_context_hash(),
+                    statement.participant_identity(),
+                    statement.roster_position(),
+                    statement.schedule_position(),
+                );
             with_setup_generation_relinearization_round_one(
                 &authority_handle,
                 &application,
@@ -607,43 +1020,52 @@ fn prepare_common_generation(
                 ),
             )
             .map_err(|_| RelinearizationRuntimeError::Refusal(RefusalReason::WrongContext))?;
-            let application = SetupGenerationRelinearizationRoundTwoApplication::from_decoded_statement(
-                prepared_attempt,
-                preparation_source.canonical_application_statement_bytes(),
-                statement.setup_proof_context_hash(),
-                statement.participant_identity(),
-                statement.roster_position(),
-                statement.schedule_position(),
-                statement.anchor_commitment_roots(),
-                [
-                    statement.round_one_left_root(),
-                    statement.round_one_right_root(),
-                ],
-                [
-                    statement.aggregate_round_one_left_root(),
-                    statement.aggregate_round_one_right_root(),
-                ],
-                statement.contribution_root(),
-            );
-            with_prepackage_relinearization_aggregate::<_, RelinearizationRuntimeError>(
+            let application =
+                SetupGenerationRelinearizationRoundTwoApplication::from_decoded_statement(
+                    prepared_attempt,
+                    preparation_source.canonical_application_statement_bytes(),
+                    statement.setup_proof_context_hash(),
+                    statement.participant_identity(),
+                    statement.roster_position(),
+                    statement.schedule_position(),
+                    statement.anchor_commitment_roots(),
+                    [
+                        statement.round_one_left_root(),
+                        statement.round_one_right_root(),
+                    ],
+                    [
+                        statement.aggregate_round_one_left_root(),
+                        statement.aggregate_round_one_right_root(),
+                    ],
+                    statement.contribution_root(),
+                );
+            with_prepackage_generated_relinearization_aggregate::<_, RelinearizationRuntimeError>(
                 prepackage_catalog_handle,
-                |verified_aggregate| {
+                |generated_aggregate, aggregate_proof_stream_descriptor| {
+                    let aggregate_source_plan =
+                        RelinearizationRoundTwoAuthenticatedAggregateSourcePlan::from_catalog_source(
+                            generated_aggregate,
+                            aggregate_proof_stream_descriptor,
+                        )
+                        .map_err(SetupRelinearizationGenerationPreparationError::from)?;
                     with_setup_generation_relinearization_round_two(
                         &authority_handle,
                         &application,
-                        verified_aggregate,
+                        generated_aggregate,
+                        aggregate_proof_stream_descriptor,
                         |source| {
                             let ordered_components = [source
                                 .generated_source_authority()
                                 .component()]
                             .into_iter()
-                            .map(
-                                GeneratedRelinearizationComponentReadback::from_generated_source,
-                            )
+                            .map(GeneratedRelinearizationComponentReadback::from_generated_source)
                             .collect::<Result<Vec<_>, _>>()?
                             .into_boxed_slice();
-                            let prepared_generation =
-                                source.prepare_common_generation(relation_plan, limits)?;
+                            let prepared_generation = source.prepare_common_generation(
+                                relation_plan,
+                                limits,
+                                aggregate_source_plan,
+                            )?;
                             Ok((prepared_generation, ordered_components))
                         },
                     )
@@ -718,10 +1140,8 @@ fn prepare_generation(
     generation_mode: RelinearizationGenerationMode,
 ) -> Result<(u32, u32), RelinearizationRuntimeError> {
     if checkpoint_lineage_identifier == [0_u8; ATTEMPT_IDENTIFIER_BYTE_LENGTH]
-        || (proof_round == RelinearizationProofRound::RoundOne
-            && prepackage_catalog_handle != 0)
-        || (proof_round == RelinearizationProofRound::RoundTwo
-            && prepackage_catalog_handle == 0)
+        || (proof_round == RelinearizationProofRound::RoundOne && prepackage_catalog_handle != 0)
+        || (proof_round == RelinearizationProofRound::RoundTwo && prepackage_catalog_handle == 0)
     {
         return Err(RelinearizationRuntimeError::InvalidInput);
     }
@@ -830,22 +1250,16 @@ fn prepare_generation(
         }
     };
     let generation_source_handle = RELINEARIZATION_GENERATION_SOURCE_REGISTRY.with(|registry| {
-            registry
-                .borrow_mut()
-                .retain(RelinearizationGenerationSource {
-                    proof_round,
-                    setup_generation_authority_identifier: setup_generation_authority_handle,
-                    canonical_application_statement_bytes: Some(
-                        preparation_source
-                            .canonical_application_statement_bytes()
-                            .to_vec()
-                            .into_boxed_slice(),
-                    ),
-                    ordered_components,
-                    next_component_ordinal: 0,
-                    next_chunk_index: 0,
-                })
-        })?;
+        registry
+            .borrow_mut()
+            .retain(RelinearizationGenerationSource {
+                proof_round,
+                setup_generation_authority_identifier: setup_generation_authority_handle,
+                ordered_components,
+                next_component_ordinal: 0,
+                next_chunk_index: 0,
+            })
+    })?;
     match retain_common_proof_generation_family_adapter(generation_family_adapter) {
         Ok(adapter_handle) => Ok((adapter_handle, generation_source_handle)),
         Err(error) => {
@@ -854,6 +1268,166 @@ fn prepare_generation(
             Err(RelinearizationRuntimeError::Runtime(error))
         }
     }
+}
+
+fn read_generated_relinearization_component_chunk(
+    generation_source_handle: u32,
+    component_ordinal: usize,
+    chunk_index: usize,
+    output: &mut [u8],
+) -> Result<(), RelinearizationRuntimeError> {
+    RELINEARIZATION_GENERATION_SOURCE_REGISTRY.with(|registry| {
+        let mut registry = registry.borrow_mut();
+        let source = registry.source_mut(generation_source_handle)?;
+        let expected_byte_length =
+            source.expected_chunk_byte_length(component_ordinal, chunk_index)?;
+        if output.len() != expected_byte_length {
+            return Err(RelinearizationRuntimeError::InvalidInput);
+        }
+        let authority_handle = SetupGenerationAuthorityHandle::from_identifier(
+            source.setup_generation_authority_identifier,
+        );
+        let descriptor = source
+            .current_component(component_ordinal)?
+            .stream_descriptor
+            .clone();
+        match source.proof_round {
+            RelinearizationProofRound::RoundOne => {
+                with_setup_generation_relinearization_round_one_component_chunk(
+                    &authority_handle,
+                    component_ordinal,
+                    &descriptor,
+                    chunk_index,
+                    |source_chunk| {
+                        source.authenticate_and_copy_chunk(
+                            component_ordinal,
+                            chunk_index,
+                            source_chunk,
+                            output,
+                        )
+                    },
+                )??;
+            }
+            RelinearizationProofRound::RoundTwo => {
+                if component_ordinal != 0 {
+                    return Err(RelinearizationRuntimeError::InvalidInput);
+                }
+                with_setup_generation_relinearization_round_two_component_chunk(
+                    &authority_handle,
+                    &descriptor,
+                    chunk_index,
+                    |source_chunk| {
+                        source.authenticate_and_copy_chunk(
+                            component_ordinal,
+                            chunk_index,
+                            source_chunk,
+                            output,
+                        )
+                    },
+                )??;
+            }
+        }
+        Ok(())
+    })
+}
+
+fn commit_relinearization_generation_source(
+    accepted_setup_package_builder_handle: u32,
+    prepackage_catalog_handle: u32,
+    generated_proof_handle: u32,
+    generation_source_handle: u32,
+) -> Result<(), RelinearizationRuntimeError> {
+    if accepted_setup_package_builder_handle == 0
+        || prepackage_catalog_handle == 0
+        || generated_proof_handle == 0
+    {
+        return Err(RelinearizationRuntimeError::InvalidInput);
+    }
+    RELINEARIZATION_GENERATION_SOURCE_REGISTRY.with(|registry| {
+        consume_relinearization_generation_source_atomically(
+            &mut registry.borrow_mut(),
+            generation_source_handle,
+            |pending_source| {
+                let authority_handle = SetupGenerationAuthorityHandle::from_identifier(
+                    pending_source.setup_generation_authority_identifier,
+                );
+                match pending_source.proof_round {
+                    RelinearizationProofRound::RoundOne => {
+                        let source =
+                            resolve_setup_generated_relinearization_round_one_source_authority(
+                                &authority_handle,
+                            )?;
+                        let prepared_slot =
+                            preflight_prepackage_generated_relinearization_round_one_source_slot(
+                                prepackage_catalog_handle,
+                                generated_proof_handle,
+                                &source,
+                            )?;
+                        add_generated_proof_source_to_accepted_setup_package_builder(
+                            accepted_setup_package_builder_handle,
+                            generated_proof_handle,
+                            source.canonical_application_statement_bytes(),
+                        )?;
+                        commit_prepackage_generated_relinearization_round_one_source(
+                            prepared_slot,
+                            source,
+                        );
+                    }
+                    RelinearizationProofRound::RoundTwo => {
+                        let source =
+                            resolve_setup_generated_relinearization_round_two_source_authority(
+                                &authority_handle,
+                            )?;
+                        let prepared_slot =
+                            preflight_prepackage_generated_relinearization_round_two_source_slot(
+                                prepackage_catalog_handle,
+                                generated_proof_handle,
+                                &source,
+                            )?;
+                        add_generated_proof_source_to_accepted_setup_package_builder(
+                            accepted_setup_package_builder_handle,
+                            generated_proof_handle,
+                            source.canonical_application_statement_bytes(),
+                        )?;
+                        commit_prepackage_generated_relinearization_round_two_source(
+                            prepared_slot,
+                            source,
+                        );
+                    }
+                }
+                Ok(())
+            },
+        )
+    })
+}
+
+fn consume_relinearization_generation_source_atomically(
+    registry: &mut RelinearizationGenerationSourceRegistry,
+    generation_source_handle: u32,
+    operation: impl FnOnce(&RelinearizationGenerationSource) -> Result<(), RelinearizationRuntimeError>,
+) -> Result<(), RelinearizationRuntimeError> {
+    let pending_source = registry.take(generation_source_handle)?;
+    let result = if pending_source.can_release() {
+        operation(&pending_source)
+    } else {
+        Err(CommonProofRuntimeError::WrongOperationPhase.into())
+    };
+    if let Err(error) = result {
+        registry.restore(generation_source_handle, pending_source)?;
+        return Err(error);
+    }
+    Ok(())
+}
+
+fn discard_relinearization_generation_source(
+    generation_source_handle: u32,
+) -> Result<(), CommonProofRuntimeError> {
+    RELINEARIZATION_GENERATION_SOURCE_REGISTRY.with(|registry| {
+        registry
+            .borrow_mut()
+            .take(generation_source_handle)
+            .map(|_| ())
+    })
 }
 
 const fn refusal_status(refusal_reason: RefusalReason) -> u32 {
@@ -932,6 +1506,233 @@ unsafe fn write_status(status_pointer: *mut u32, status: u32) {
     }
 }
 
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_relinearization_round_two_activation_begin(
+    selected_suite_handle: u32,
+    setup_generation_authority_handle: u32,
+    prepackage_catalog_handle: u32,
+    status_pointer: *mut u32,
+) -> u32 {
+    let result = (|| {
+        if selected_suite_handle == 0
+            || setup_generation_authority_handle == 0
+            || prepackage_catalog_handle == 0
+        {
+            return Err(RelinearizationRuntimeError::InvalidInput);
+        }
+        let authority_handle =
+            SetupGenerationAuthorityHandle::from_identifier(setup_generation_authority_handle);
+        let session = with_common_proof_selected_suite(selected_suite_handle, |selected_suite| {
+            with_prepackage_generated_relinearization_aggregate::<_, RelinearizationRuntimeError>(
+                prepackage_catalog_handle,
+                |generated_aggregate, aggregate_proof_stream_descriptor| {
+                    let authority_activation =
+                        begin_setup_generation_relinearization_round_two_activation(
+                            &authority_handle,
+                            selected_suite,
+                            generated_aggregate,
+                            aggregate_proof_stream_descriptor,
+                        )?;
+                    RelinearizationRoundTwoActivationSession::new(
+                        setup_generation_authority_handle,
+                        prepackage_catalog_handle,
+                        authority_activation,
+                        generated_aggregate,
+                    )
+                },
+            )
+        })
+        .map_err(RelinearizationRuntimeError::Runtime)??;
+        RELINEARIZATION_ROUND_TWO_ACTIVATION_REGISTRY
+            .with(|registry| registry.borrow_mut().retain(session))
+            .map_err(RelinearizationRuntimeError::Runtime)
+    })();
+    match result {
+        Ok(handle) => {
+            unsafe { write_status(status_pointer, 0) };
+            handle
+        }
+        Err(error) => {
+            unsafe { write_status(status_pointer, runtime_error_status(error)) };
+            0
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_relinearization_round_two_activation_next_source_read(
+    activation_handle: u32,
+    component_ordinal_pointer: *mut u32,
+    source_material_root_pointer: *mut u8,
+    source_material_root_byte_length: usize,
+    source_stream_digest_pointer: *mut u8,
+    source_stream_digest_byte_length: usize,
+    source_stream_total_byte_length_pointer: *mut u64,
+    source_stream_byte_offset_pointer: *mut u64,
+    chunk_index_pointer: *mut u32,
+    source_byte_length_pointer: *mut u32,
+    status_pointer: *mut u32,
+) -> u32 {
+    let result = (|| {
+        if component_ordinal_pointer.is_null()
+            || source_material_root_pointer.is_null()
+            || source_material_root_byte_length != Hash512::BYTE_LENGTH
+            || source_stream_digest_pointer.is_null()
+            || source_stream_digest_byte_length != Hash512::BYTE_LENGTH
+            || source_stream_total_byte_length_pointer.is_null()
+            || source_stream_byte_offset_pointer.is_null()
+            || chunk_index_pointer.is_null()
+            || source_byte_length_pointer.is_null()
+        {
+            return Err(RelinearizationRuntimeError::InvalidInput);
+        }
+        let request = RELINEARIZATION_ROUND_TWO_ACTIVATION_REGISTRY.with(|registry| {
+            registry
+                .borrow()
+                .get(activation_handle)?
+                .next_read_request()
+        })?;
+        let Some(request) = request else {
+            return Ok(0);
+        };
+        unsafe {
+            component_ordinal_pointer.write(
+                u32::try_from(request.component_ordinal)
+                    .map_err(|_| RelinearizationRuntimeError::InvalidInput)?,
+            );
+            slice::from_raw_parts_mut(source_material_root_pointer, Hash512::BYTE_LENGTH)
+                .copy_from_slice(&request.material_root);
+            slice::from_raw_parts_mut(source_stream_digest_pointer, Hash512::BYTE_LENGTH)
+                .copy_from_slice(&request.stream_digest);
+            source_stream_total_byte_length_pointer.write(request.total_byte_length);
+            source_stream_byte_offset_pointer.write(request.stream_byte_offset);
+            chunk_index_pointer.write(
+                u32::try_from(request.chunk_index)
+                    .map_err(|_| RelinearizationRuntimeError::InvalidInput)?,
+            );
+            source_byte_length_pointer.write(
+                u32::try_from(request.source_byte_length)
+                    .map_err(|_| RelinearizationRuntimeError::InvalidInput)?,
+            );
+        }
+        Ok(1)
+    })();
+    match result {
+        Ok(poll) => {
+            unsafe { write_status(status_pointer, 0) };
+            poll
+        }
+        Err(error) => {
+            unsafe { write_status(status_pointer, runtime_error_status(error)) };
+            0
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_relinearization_round_two_activation_absorb_source(
+    activation_handle: u32,
+    component_ordinal: u32,
+    source_material_root_pointer: *const u8,
+    source_material_root_byte_length: usize,
+    source_stream_digest_pointer: *const u8,
+    source_stream_digest_byte_length: usize,
+    source_stream_total_byte_length: u64,
+    source_stream_byte_offset: u64,
+    chunk_index: u32,
+    source_bytes_pointer: *const u8,
+    source_byte_length: usize,
+) -> u32 {
+    let result = (|| {
+        if source_bytes_pointer.is_null() || source_byte_length == 0 {
+            return Err(RelinearizationRuntimeError::InvalidInput);
+        }
+        let source_material_root = unsafe {
+            fixed_input::<{ Hash512::BYTE_LENGTH }>(
+                source_material_root_pointer,
+                source_material_root_byte_length,
+            )
+        }?;
+        let source_stream_digest = unsafe {
+            fixed_input::<{ Hash512::BYTE_LENGTH }>(
+                source_stream_digest_pointer,
+                source_stream_digest_byte_length,
+            )
+        }?;
+        let supplied_request = RelinearizationRoundTwoActivationReadRequest {
+            component_ordinal: usize::try_from(component_ordinal)
+                .map_err(|_| RelinearizationRuntimeError::InvalidInput)?,
+            material_root: source_material_root,
+            stream_digest: source_stream_digest,
+            total_byte_length: source_stream_total_byte_length,
+            stream_byte_offset: source_stream_byte_offset,
+            chunk_index: usize::try_from(chunk_index)
+                .map_err(|_| RelinearizationRuntimeError::InvalidInput)?,
+            source_byte_length,
+        };
+        let source_bytes =
+            unsafe { slice::from_raw_parts(source_bytes_pointer, source_byte_length) };
+        RELINEARIZATION_ROUND_TWO_ACTIVATION_REGISTRY.with(|registry| {
+            registry
+                .borrow_mut()
+                .get_mut(activation_handle)?
+                .absorb_source(supplied_request, source_bytes)
+        })
+    })();
+    result.map_or_else(runtime_error_status, |()| 0)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn sealed_lattice_relinearization_round_two_activation_finish(
+    activation_handle: u32,
+) -> u32 {
+    let result = (|| {
+        let mut session = RELINEARIZATION_ROUND_TWO_ACTIVATION_REGISTRY
+            .with(|registry| registry.borrow_mut().take(activation_handle))?;
+        let operation_result = (|| {
+            if !session.can_finish() {
+                return Err(CommonProofRuntimeError::WrongOperationPhase.into());
+            }
+            let authority_handle = SetupGenerationAuthorityHandle::from_identifier(
+                session.setup_generation_authority_identifier,
+            );
+            with_prepackage_generated_relinearization_aggregate::<_, RelinearizationRuntimeError>(
+                session.prepackage_catalog_identifier,
+                |generated_aggregate, aggregate_proof_stream_descriptor| {
+                    finish_setup_generation_relinearization_round_two_activation(
+                        &authority_handle,
+                        &mut session.authority_activation,
+                        generated_aggregate,
+                        aggregate_proof_stream_descriptor,
+                    )
+                    .map(|_| ())
+                    .map_err(RelinearizationRuntimeError::from)
+                },
+            )
+        })();
+        if let Err(error) = operation_result {
+            RELINEARIZATION_ROUND_TWO_ACTIVATION_REGISTRY
+                .with(|registry| registry.borrow_mut().restore(activation_handle, session))?;
+            return Err(error);
+        }
+        Ok(())
+    })();
+    result.map_or_else(runtime_error_status, |()| 0)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn sealed_lattice_relinearization_round_two_activation_discard(
+    activation_handle: u32,
+) -> u32 {
+    RELINEARIZATION_ROUND_TWO_ACTIVATION_REGISTRY
+        .with(|registry| registry.borrow_mut().take(activation_handle))
+        .map(|_| ())
+        .map_err(RelinearizationRuntimeError::from)
+        .map_or_else(runtime_error_status, |()| 0)
+}
+
 #[allow(clippy::too_many_arguments)]
 unsafe fn prepare_generation_from_ffi_inputs(
     proof_round: RelinearizationProofRound,
@@ -949,12 +1750,12 @@ unsafe fn prepare_generation_from_ffi_inputs(
     setup_intent_object_handle: u32,
     checkpoint_lineage_identifier_pointer: *const u8,
     checkpoint_lineage_identifier_byte_length: usize,
-    statement_source_handle_output_pointer: *mut u32,
+    generation_source_handle_output_pointer: *mut u32,
     status_pointer: *mut u32,
     generation_mode: RelinearizationGenerationMode,
 ) -> u32 {
     let result = (|| {
-        if statement_source_handle_output_pointer.is_null() {
+        if generation_source_handle_output_pointer.is_null() {
             return Err(RelinearizationRuntimeError::InvalidInput);
         }
         let state_verifier_session_capability = unsafe {
@@ -992,9 +1793,9 @@ unsafe fn prepare_generation_from_ffi_inputs(
         )
     })();
     match result {
-        Ok((adapter_handle, statement_source_handle)) => {
+        Ok((adapter_handle, generation_source_handle)) => {
             unsafe {
-                statement_source_handle_output_pointer.write(statement_source_handle);
+                generation_source_handle_output_pointer.write(generation_source_handle);
                 write_status(status_pointer, 0);
             }
             adapter_handle
@@ -1024,7 +1825,7 @@ macro_rules! relinearization_generation_entry_point {
             setup_intent_object_handle: u32,
             checkpoint_lineage_identifier_pointer: *const u8,
             checkpoint_lineage_identifier_byte_length: usize,
-            statement_source_handle_output_pointer: *mut u32,
+            generation_source_handle_output_pointer: *mut u32,
             status_pointer: *mut u32,
         ) -> u32 {
             unsafe {
@@ -1044,7 +1845,7 @@ macro_rules! relinearization_generation_entry_point {
                     setup_intent_object_handle,
                     checkpoint_lineage_identifier_pointer,
                     checkpoint_lineage_identifier_byte_length,
-                    statement_source_handle_output_pointer,
+                    generation_source_handle_output_pointer,
                     status_pointer,
                     $generation_mode,
                 )
@@ -1075,21 +1876,57 @@ relinearization_generation_entry_point!(
 );
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn sealed_lattice_relinearization_generation_statement_byte_length(
-    statement_source_handle: u32,
+pub unsafe extern "C" fn sealed_lattice_relinearization_generation_component_count(
+    generation_source_handle: u32,
     status_pointer: *mut u32,
-) -> usize {
+) -> u32 {
     let result = RELINEARIZATION_GENERATION_SOURCE_REGISTRY.with(|registry| {
-        Ok::<usize, CommonProofRuntimeError>(
+        u32::try_from(
             registry
                 .borrow()
-                .source(statement_source_handle)?
-                .canonical_application_statement_bytes
-                .as_ref()
-                .ok_or(CommonProofRuntimeError::WrongOperationPhase)?
-                .len(),
+                .source(generation_source_handle)?
+                .component_count(),
         )
+        .map_err(|_| CommonProofRuntimeError::AllocationLimitExceeded)
     });
+    match result {
+        Ok(component_count) => {
+            unsafe { write_status(status_pointer, 0) };
+            component_count
+        }
+        Err(error) => {
+            unsafe {
+                write_status(
+                    status_pointer,
+                    super::runtime_ffi::runtime_error_status(error),
+                )
+            };
+            0
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_relinearization_generation_component_descriptor_byte_length(
+    generation_source_handle: u32,
+    component_ordinal: u32,
+    status_pointer: *mut u32,
+) -> u32 {
+    let result = (|| {
+        let component_ordinal = usize::try_from(component_ordinal)
+            .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?;
+        RELINEARIZATION_GENERATION_SOURCE_REGISTRY.with(|registry| {
+            u32::try_from(
+                registry
+                    .borrow()
+                    .source(generation_source_handle)?
+                    .current_component(component_ordinal)?
+                    .encoded_stream_descriptor
+                    .len(),
+            )
+            .map_err(|_| CommonProofRuntimeError::AllocationLimitExceeded)
+        })
+    })();
     match result {
         Ok(byte_length) => {
             unsafe { write_status(status_pointer, 0) };
@@ -1108,28 +1945,29 @@ pub unsafe extern "C" fn sealed_lattice_relinearization_generation_statement_byt
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn sealed_lattice_relinearization_generation_statement_copy_and_release(
-    statement_source_handle: u32,
+pub unsafe extern "C" fn sealed_lattice_relinearization_generation_component_copy_descriptor(
+    generation_source_handle: u32,
+    component_ordinal: u32,
     output_pointer: *mut u8,
     output_byte_length: usize,
 ) -> u32 {
     let result = (|| {
-        if output_pointer.is_null() || output_byte_length == 0 {
+        if output_pointer.is_null() {
             return Err(CommonProofRuntimeError::WrongVerificationBinding);
         }
+        let component_ordinal = usize::try_from(component_ordinal)
+            .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?;
         RELINEARIZATION_GENERATION_SOURCE_REGISTRY.with(|registry| {
-            let mut registry = registry.borrow_mut();
-            let source = registry.source_mut(statement_source_handle)?;
-            let statement = source
-                .canonical_application_statement_bytes
-                .as_ref()
-                .ok_or(CommonProofRuntimeError::WrongOperationPhase)?;
-            if statement.len() != output_byte_length {
+            let registry = registry.borrow();
+            let descriptor = &registry
+                .source(generation_source_handle)?
+                .current_component(component_ordinal)?
+                .encoded_stream_descriptor;
+            if descriptor.len() != output_byte_length {
                 return Err(CommonProofRuntimeError::WrongVerificationBinding);
             }
             let output = unsafe { slice::from_raw_parts_mut(output_pointer, output_byte_length) };
-            output.copy_from_slice(statement);
-            source.canonical_application_statement_bytes = None;
+            output.copy_from_slice(descriptor);
             Ok(())
         })
     })();
@@ -1137,18 +1975,189 @@ pub unsafe extern "C" fn sealed_lattice_relinearization_generation_statement_cop
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn sealed_lattice_relinearization_generation_statement_discard(
-    statement_source_handle: u32,
+pub unsafe extern "C" fn sealed_lattice_relinearization_generation_component_copy_material_root(
+    generation_source_handle: u32,
+    component_ordinal: u32,
+    output_pointer: *mut u8,
+    output_byte_length: usize,
 ) -> u32 {
-    RELINEARIZATION_GENERATION_SOURCE_REGISTRY
-        .with(|registry| {
-            let mut registry = registry.borrow_mut();
-            let source = registry.source_mut(statement_source_handle)?;
-            source
-                .canonical_application_statement_bytes
-                .take()
-                .ok_or(CommonProofRuntimeError::WrongOperationPhase)?;
+    let result = (|| {
+        if output_pointer.is_null() || output_byte_length != Hash512::BYTE_LENGTH {
+            return Err(CommonProofRuntimeError::WrongVerificationBinding);
+        }
+        let component_ordinal = usize::try_from(component_ordinal)
+            .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?;
+        RELINEARIZATION_GENERATION_SOURCE_REGISTRY.with(|registry| {
+            let registry = registry.borrow();
+            let material_root = registry
+                .source(generation_source_handle)?
+                .current_component(component_ordinal)?
+                .material_root;
+            let output = unsafe { slice::from_raw_parts_mut(output_pointer, output_byte_length) };
+            output.copy_from_slice(&material_root);
             Ok(())
         })
+    })();
+    result.map_or_else(super::runtime_ffi::runtime_error_status, |()| 0)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_relinearization_generation_component_total_byte_length(
+    generation_source_handle: u32,
+    component_ordinal: u32,
+    status_pointer: *mut u32,
+) -> u64 {
+    let result = (|| {
+        let component_ordinal = usize::try_from(component_ordinal)
+            .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?;
+        RELINEARIZATION_GENERATION_SOURCE_REGISTRY.with(|registry| {
+            Ok::<u64, CommonProofRuntimeError>(
+                registry
+                    .borrow()
+                    .source(generation_source_handle)?
+                    .current_component(component_ordinal)?
+                    .stream_descriptor
+                    .total_byte_length,
+            )
+        })
+    })();
+    match result {
+        Ok(total_byte_length) => {
+            unsafe { write_status(status_pointer, 0) };
+            total_byte_length
+        }
+        Err(error) => {
+            unsafe {
+                write_status(
+                    status_pointer,
+                    super::runtime_ffi::runtime_error_status(error),
+                )
+            };
+            0
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_relinearization_generation_component_read_chunk(
+    generation_source_handle: u32,
+    component_ordinal: u32,
+    chunk_index: u32,
+    output_pointer: *mut u8,
+    output_byte_length: usize,
+    status_pointer: *mut u32,
+) -> u32 {
+    let result = (|| {
+        if output_pointer.is_null() || output_byte_length == 0 {
+            return Err(RelinearizationRuntimeError::InvalidInput);
+        }
+        let component_ordinal = usize::try_from(component_ordinal)
+            .map_err(|_| RelinearizationRuntimeError::InvalidInput)?;
+        let chunk_index =
+            usize::try_from(chunk_index).map_err(|_| RelinearizationRuntimeError::InvalidInput)?;
+        let output = unsafe { slice::from_raw_parts_mut(output_pointer, output_byte_length) };
+        read_generated_relinearization_component_chunk(
+            generation_source_handle,
+            component_ordinal,
+            chunk_index,
+            output,
+        )
+    })();
+    match result {
+        Ok(()) => {
+            unsafe { write_status(status_pointer, 0) };
+            0
+        }
+        Err(error) => {
+            let status = runtime_error_status(error);
+            unsafe { write_status(status_pointer, status) };
+            status
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn sealed_lattice_relinearization_generation_source_commit(
+    accepted_setup_package_builder_handle: u32,
+    prepackage_catalog_handle: u32,
+    generated_proof_handle: u32,
+    generation_source_handle: u32,
+) -> u32 {
+    commit_relinearization_generation_source(
+        accepted_setup_package_builder_handle,
+        prepackage_catalog_handle,
+        generated_proof_handle,
+        generation_source_handle,
+    )
+    .map_or_else(runtime_error_status, |()| 0)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn sealed_lattice_relinearization_generation_source_discard(
+    generation_source_handle: u32,
+) -> u32 {
+    discard_relinearization_generation_source(generation_source_handle)
         .map_or_else(super::runtime_ffi::runtime_error_status, |()| 0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ready_generation_source(
+        proof_round: RelinearizationProofRound,
+        setup_generation_authority_identifier: u32,
+    ) -> RelinearizationGenerationSource {
+        RelinearizationGenerationSource {
+            proof_round,
+            setup_generation_authority_identifier,
+            ordered_components: Vec::new().into_boxed_slice(),
+            next_component_ordinal: 0,
+            next_chunk_index: 0,
+        }
+    }
+
+    #[test]
+    fn atomic_generation_commit_restores_the_exact_source_after_refusal_and_consumes_once() {
+        let mut registry = RelinearizationGenerationSourceRegistry::default();
+        let generation_source_handle = registry
+            .retain(ready_generation_source(
+                RelinearizationProofRound::RoundTwo,
+                47,
+            ))
+            .expect("generation source should be retained");
+
+        let refusal = consume_relinearization_generation_source_atomically(
+            &mut registry,
+            generation_source_handle,
+            |source| {
+                assert_eq!(source.proof_round, RelinearizationProofRound::RoundTwo);
+                assert_eq!(source.setup_generation_authority_identifier, 47);
+                Err(RelinearizationRuntimeError::Refusal(
+                    RefusalReason::WrongContext,
+                ))
+            },
+        );
+        assert!(matches!(
+            refusal,
+            Err(RelinearizationRuntimeError::Refusal(
+                RefusalReason::WrongContext
+            ))
+        ));
+
+        consume_relinearization_generation_source_atomically(
+            &mut registry,
+            generation_source_handle,
+            |source| {
+                assert_eq!(source.proof_round, RelinearizationProofRound::RoundTwo);
+                assert_eq!(source.setup_generation_authority_identifier, 47);
+                Ok(())
+            },
+        )
+        .expect("the restored generation source should remain retryable");
+        assert!(matches!(
+            registry.source(generation_source_handle),
+            Err(CommonProofRuntimeError::UnknownOrStaleHandle)
+        ));
+    }
 }

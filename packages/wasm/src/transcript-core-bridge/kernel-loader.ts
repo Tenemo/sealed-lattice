@@ -145,7 +145,7 @@ export const createTranscriptCoreKernelLoader = (
             'sealed_lattice_state_verifier_verify_reservation',
         );
         const kernel: TranscriptCoreKernel = {
-            ...createPublishedSdkKernelBindings(runtime, () => kernel),
+            ...createPublishedSdkKernelBindings(runtime),
             deriveCanonicalObjectHash: (input): ProtocolHash =>
                 executeCommand<{
                     readonly canonicalObjectHash: ProtocolHash;

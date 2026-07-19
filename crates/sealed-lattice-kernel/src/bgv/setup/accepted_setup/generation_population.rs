@@ -16,6 +16,7 @@ use crate::{
             maximum_committed_material_kmac_input_accounting, selected_committed_material_profile,
             selected_committed_material_relation_plan_input, selected_evaluator_entry_positions,
             selected_evaluator_galois_entry_positions, selected_galois_key_share_batch_schedule,
+            selected_public_key_share_relation_plan_input,
         },
         setup::{
             SETUP_COMMITMENT_HIDING_ERROR_WIDTH, SETUP_COMMITMENT_HIDING_SECRET_WIDTH,
@@ -361,7 +362,7 @@ fn construct_public_key_share(
     common_secret_coefficients: &[i8],
     evaluation_domain_size: usize,
 ) -> Result<SetupGeneratedPublicKeyShare, RefusalReason> {
-    let relation_input = selected_committed_material_relation_plan_input()
+    let relation_input = selected_public_key_share_relation_plan_input()
         .map_err(|_| RefusalReason::UnsupportedVersionOrSuite)?;
     let ring_degree = usize::try_from(relation_input.ring_degree)
         .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
@@ -380,8 +381,8 @@ fn construct_public_key_share(
         ring_degree,
     )?;
     let mut ordered_limb_coefficients =
-        Vec::with_capacity(relation_input.sharing_data_modulus_indices.len());
-    for data_modulus_index in relation_input.sharing_data_modulus_indices.iter().copied() {
+        Vec::with_capacity(relation_input.data_modulus_indices.len());
+    for data_modulus_index in relation_input.data_modulus_indices.iter().copied() {
         let modulus = *selected_suite
             .ordered_data_primes()
             .get(usize::from(data_modulus_index))
@@ -392,35 +393,12 @@ fn construct_public_key_share(
             ring_degree,
         )
         .map_err(|_| RefusalReason::InvalidArithmeticRelation)?;
-        let secret_residues = Zeroizing::new(
-            common_secret_coefficients
-                .iter()
-                .copied()
-                .map(|coefficient| centered_i8_residue(coefficient, modulus))
-                .collect::<Vec<_>>(),
-        );
-        let common_reference_secret_product = Zeroizing::new(
-            negacyclic_product_mod(&common_reference, &secret_residues, modulus)
-                .map_err(|_| RefusalReason::InvalidArithmeticRelation)?,
-        );
-        ordered_limb_coefficients.push(Zeroizing::new(
-            centered_error_coefficients
-                .iter()
-                .copied()
-                .zip(common_reference_secret_product.iter().copied())
-                .map(|(error, product)| {
-                    sub_mod_fast(
-                        mul_mod_fast(
-                            PLAINTEXT_MODULUS % modulus,
-                            centered_i32_residue(i32::from(error), modulus),
-                            modulus,
-                        ),
-                        product,
-                        modulus,
-                    )
-                })
-                .collect::<Vec<_>>(),
-        ));
+        ordered_limb_coefficients.push(construct_public_key_share_limb(
+            &common_reference,
+            common_secret_coefficients,
+            &centered_error_coefficients,
+            modulus,
+        )?);
     }
     SetupGeneratedPublicKeyShare::from_browser_owned_witness(
         bindings.setup_proof_context_hash,
@@ -428,10 +406,62 @@ fn construct_public_key_share(
         bindings.roster_position,
         evaluation_domain_size,
         ring_degree,
-        relation_input.sharing_data_modulus_indices,
+        relation_input.data_modulus_indices,
         ordered_limb_coefficients,
         centered_error_coefficients,
     )
+}
+
+fn construct_public_key_share_limb(
+    common_reference: &[u64],
+    common_secret_coefficients: &[i8],
+    centered_error_coefficients: &[i8],
+    modulus: u64,
+) -> Result<Zeroizing<Vec<u64>>, RefusalReason> {
+    if common_reference.is_empty()
+        || common_reference.len() != common_secret_coefficients.len()
+        || common_reference.len() != centered_error_coefficients.len()
+        || common_reference
+            .iter()
+            .any(|coefficient| *coefficient >= modulus)
+        || common_secret_coefficients
+            .iter()
+            .any(|coefficient| !(-1..=1).contains(coefficient))
+        || centered_error_coefficients
+            .iter()
+            .any(|coefficient| !(-2..=2).contains(coefficient))
+    {
+        return Err(RefusalReason::WrongTypeOrLength);
+    }
+    let secret_residues = Zeroizing::new(
+        common_secret_coefficients
+            .iter()
+            .copied()
+            .map(|coefficient| centered_i8_residue(coefficient, modulus))
+            .collect::<Vec<_>>(),
+    );
+    let common_reference_secret_product = Zeroizing::new(
+        negacyclic_product_mod(common_reference, &secret_residues, modulus)
+            .map_err(|_| RefusalReason::InvalidArithmeticRelation)?,
+    );
+    Ok(Zeroizing::new(
+        centered_error_coefficients
+            .iter()
+            .copied()
+            .zip(common_reference_secret_product.iter().copied())
+            .map(|(error, product)| {
+                sub_mod_fast(
+                    mul_mod_fast(
+                        PLAINTEXT_MODULUS % modulus,
+                        centered_i32_residue(i32::from(error), modulus),
+                        modulus,
+                    ),
+                    product,
+                    modulus,
+                )
+            })
+            .collect::<Vec<_>>(),
+    ))
 }
 
 fn validate_setup_generation_bindings(
@@ -1370,6 +1400,84 @@ fn centered_i64_residue(coefficient: i64, modulus: u64) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn naive_negacyclic_product(left: &[u64], right: &[u64], modulus: u64) -> Vec<u64> {
+        assert_eq!(left.len(), right.len());
+        let ring_degree = left.len();
+        let mut product = vec![0_u64; ring_degree];
+        for (left_index, left_coefficient) in left.iter().copied().enumerate() {
+            for (right_index, right_coefficient) in right.iter().copied().enumerate() {
+                let term = mul_mod_fast(left_coefficient, right_coefficient, modulus);
+                let degree = left_index + right_index;
+                let coefficient_index = degree % ring_degree;
+                product[coefficient_index] = if degree < ring_degree {
+                    add_mod_fast(product[coefficient_index], term, modulus)
+                } else {
+                    sub_mod_fast(product[coefficient_index], term, modulus)
+                };
+            }
+        }
+        product
+    }
+
+    #[test]
+    fn public_key_share_uses_every_selected_data_modulus_while_vss_stays_six_limb() {
+        let public_key_relation = selected_public_key_share_relation_plan_input()
+            .expect("selected public-key relation derives");
+        let expected_public_indices = (0..DATA_PRIMES.len())
+            .map(|data_modulus_index| u16::try_from(data_modulus_index).unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            public_key_relation.data_modulus_indices,
+            expected_public_indices
+        );
+        assert_eq!(public_key_relation.data_modulus_indices.len(), 26);
+
+        let committed_material_relation = selected_committed_material_relation_plan_input()
+            .expect("selected committed-material relation derives");
+        assert_eq!(
+            committed_material_relation
+                .sharing_data_modulus_indices
+                .len(),
+            6
+        );
+    }
+
+    #[test]
+    fn public_key_share_limb_satisfies_the_rlwe_equation_with_one_shared_error() {
+        let modulus = DATA_PRIMES[0];
+        let common_reference = [2_u64, 5, 9, 14, 20, 27, 35, 44];
+        let common_secret = [1_i8, -1, 0, 1, 0, -1, 1, 0];
+        let centered_error = [2_i8, -2, 1, 0, -1, 2, 0, -2];
+        let public_key_share = construct_public_key_share_limb(
+            &common_reference,
+            &common_secret,
+            &centered_error,
+            modulus,
+        )
+        .expect("the selected modulus supports the small negacyclic test ring");
+        let secret_residues = common_secret
+            .iter()
+            .copied()
+            .map(|coefficient| centered_i8_residue(coefficient, modulus))
+            .collect::<Vec<_>>();
+        let independently_computed_product =
+            naive_negacyclic_product(&common_reference, &secret_residues, modulus);
+
+        for coefficient_index in 0..common_reference.len() {
+            let recovered_error_term = add_mod_fast(
+                public_key_share[coefficient_index],
+                independently_computed_product[coefficient_index],
+                modulus,
+            );
+            let expected_error_term = mul_mod_fast(
+                PLAINTEXT_MODULUS % modulus,
+                centered_i8_residue(centered_error[coefficient_index], modulus),
+                modulus,
+            );
+            assert_eq!(recovered_error_term, expected_error_term);
+        }
+    }
 
     #[test]
     fn recipient_share_uses_spaced_negacyclic_monomial_points() {

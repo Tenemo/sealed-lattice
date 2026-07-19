@@ -8,7 +8,8 @@ use super::ProofExternalMemoryTransactionRequest;
 use super::{
     BTreeMap, BrowserWorkerAuthenticatedStorageHeadSource,
     BrowserWorkerAuthenticatedStorageTransitionSource, CanonicalStreamDomain,
-    CommonProofGenerationWorker, CommonProofGenerationWorkerError, CommonProofGenerationWorkerPoll,
+    CommonProofGenerationExternalMemoryAccounting, CommonProofGenerationWorker,
+    CommonProofGenerationWorkerError, CommonProofGenerationWorkerPoll,
     CommonProofRelationPlanCapability, CommonProofRuntimeCancellation, CommonProofRuntimeError,
     CommonProofRuntimeLimits, CommonProofVerificationReadbackAccounting,
     CommonProofVerificationStatementSource, CommonProofVerificationWorker,
@@ -824,6 +825,17 @@ impl CommonProofRuntimeRegistry {
             .ok_or(CommonProofRuntimeError::TransactionResponseMissing)
     }
 
+    pub(crate) fn generation_external_memory_accounting(
+        &self,
+        handle: CommonProofGenerationOperationHandle,
+    ) -> Result<CommonProofGenerationExternalMemoryAccounting, CommonProofRuntimeError> {
+        self.generation_operations
+            .get(&handle)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?
+            .worker
+            .external_memory_accounting()
+    }
+
     pub(crate) fn generation_authenticated_source_read_request(
         &self,
         handle: CommonProofGenerationOperationHandle,
@@ -1104,6 +1116,32 @@ impl CommonProofRuntimeRegistry {
             .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?
             .proof
             .preflight_pending_statement(
+                expected_application_statement_schema_identifier,
+                expected_roster_position,
+                expected_schedule_position,
+                canonical_application_statement_bytes,
+            )
+    }
+
+    pub(crate) fn preflight_generated_proof_pending_package(
+        &self,
+        handle: &GeneratedCommonProofCapabilityHandle,
+        expected_suite_identifier: [u8; HASH_BYTE_LENGTH],
+        expected_ceremony_context_hash: [u8; HASH_BYTE_LENGTH],
+        expected_action_context_hash: [u8; HASH_BYTE_LENGTH],
+        expected_application_statement_schema_identifier: u16,
+        expected_roster_position: Option<u16>,
+        expected_schedule_position: Option<u32>,
+        canonical_application_statement_bytes: &[u8],
+    ) -> Result<StreamDescriptor, CommonProofRuntimeError> {
+        self.generated_capabilities
+            .get(handle)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?
+            .proof
+            .preflight_pending_package(
+                expected_suite_identifier,
+                expected_ceremony_context_hash,
+                expected_action_context_hash,
                 expected_application_statement_schema_identifier,
                 expected_roster_position,
                 expected_schedule_position,

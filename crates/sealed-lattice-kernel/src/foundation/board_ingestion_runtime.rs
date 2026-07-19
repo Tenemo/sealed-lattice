@@ -17,14 +17,17 @@ use super::board_ingestion::{
 };
 use super::runtime_input::{RuntimeInputReader as InputReader, refusal_status};
 use super::{
-    ActionContext, ActionDefinition, BoardPolicy, CanonicalDecodeLimits, CeremonyContext,
-    FOUNDATION_PROFILE, FoundationObjectType, Hash512, Manifest, ParticipantIdentity,
-    RefusalReason, Roster, SignedCarrier, StreamDescriptor, SuiteRecord,
+    ActionContext, ActionDefinition, BoardPolicy, CanonicalDecodeLimits, CanonicalItem,
+    CanonicalItemType, CeremonyContext, FOUNDATION_PROFILE, FoundationObjectType, Hash512,
+    Manifest, ParticipantIdentity, RefusalReason, Roster, SignedCarrier, StreamDescriptor,
+    SuiteRecord, hash_foundation_tuple_512,
 };
 
 pub(crate) const BOARD_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH: usize = 32;
 pub(crate) const VERIFIED_TRANSCRIPT_OBJECT_DESCRIPTION_BYTE_LENGTH: usize =
     2 + 2 + Hash512::BYTE_LENGTH;
+const SETUP_COMPLAINT_RESOLUTION_ROOT_DOMAIN: &str =
+    "sealed-lattice/setup/vss-complaint-resolution/v1";
 
 type RuntimeResult<Value> = Result<Value, u32>;
 
@@ -53,6 +56,102 @@ pub(crate) struct VerifiedBoardApplicationSource {
     action_context_hash: Hash512,
     roster_hash: Hash512,
     producer_roster_position: Option<u16>,
+}
+
+/// Opaque authority proving that the canonical-board verifier scanned every
+/// frozen-roster VSS response slot for one setup attempt and found the exact
+/// ordered acceptance catalog with no complaint. Only the recomputed root is
+/// retained; the accepted package already carries the ordered object hashes.
+pub(crate) struct VerifiedSetupComplaintResolution {
+    resolution_root: Hash512,
+}
+
+/// One process-local reservation of the complaint-resolution authority. The
+/// identifier never crosses the JavaScript boundary and cannot be recreated
+/// from the root or package bytes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct VerifiedSetupComplaintResolutionReservationHandle(u32);
+
+impl VerifiedSetupComplaintResolutionReservationHandle {
+    const fn get(&self) -> u32 {
+        self.0
+    }
+}
+
+impl VerifiedSetupComplaintResolution {
+    fn from_complete_board_session(
+        session: &BoardVerifierRuntimeSession,
+    ) -> Result<Self, RefusalReason> {
+        let ordered_acceptance_object_hashes = session
+            .verifier
+            .complete_setup_vss_acceptance_object_hashes()
+            .map_err(|error| error.refusal_reason)?;
+        let resolution_root = setup_complaint_resolution_root(
+            session.verifier.suite_id(),
+            session.manifest_hash,
+            session.verifier.ceremony_context_hash(),
+            session.verifier.action_context_hash(),
+            session.verifier.roster_hash(),
+            &ordered_acceptance_object_hashes,
+        )?;
+        Ok(Self { resolution_root })
+    }
+
+    pub(crate) fn require_matches(
+        &self,
+        suite_identifier: Hash512,
+        manifest_hash: Hash512,
+        ceremony_context_hash: Hash512,
+        action_context_hash: Hash512,
+        roster_hash: Hash512,
+        ordered_acceptance_object_hashes: &[Hash512],
+    ) -> Result<(), RefusalReason> {
+        let expected_root = setup_complaint_resolution_root(
+            suite_identifier,
+            manifest_hash,
+            ceremony_context_hash,
+            action_context_hash,
+            roster_hash,
+            ordered_acceptance_object_hashes,
+        )?;
+        if expected_root != self.resolution_root {
+            return Err(RefusalReason::WrongHashOrRoot);
+        }
+        Ok(())
+    }
+}
+
+fn setup_complaint_resolution_root(
+    suite_identifier: Hash512,
+    manifest_hash: Hash512,
+    ceremony_context_hash: Hash512,
+    action_context_hash: Hash512,
+    roster_hash: Hash512,
+    ordered_acceptance_object_hashes: &[Hash512],
+) -> Result<Hash512, RefusalReason> {
+    if ordered_acceptance_object_hashes.len() != usize::from(FOUNDATION_PROFILE.participant_count) {
+        return Err(RefusalReason::WrongTypeOrLength);
+    }
+    let acceptance_items = ordered_acceptance_object_hashes
+        .iter()
+        .map(|object_hash| CanonicalItem::hash512(object_hash.into_bytes()))
+        .collect::<Vec<_>>();
+    let ordered_acceptance_item =
+        CanonicalItem::homogeneous_list(CanonicalItemType::Hash512, &acceptance_items)
+            .map_err(|_| RefusalReason::MalformedEncoding)?;
+    hash_foundation_tuple_512(
+        SETUP_COMPLAINT_RESOLUTION_ROOT_DOMAIN,
+        &[
+            CanonicalItem::unsigned16(FOUNDATION_PROFILE.protocol_version),
+            CanonicalItem::hash512(suite_identifier.into_bytes()),
+            CanonicalItem::hash512(manifest_hash.into_bytes()),
+            CanonicalItem::hash512(ceremony_context_hash.into_bytes()),
+            CanonicalItem::hash512(action_context_hash.into_bytes()),
+            CanonicalItem::hash512(roster_hash.into_bytes()),
+            ordered_acceptance_item,
+        ],
+    )
+    .map_err(|_| RefusalReason::MalformedEncoding)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -482,12 +581,99 @@ struct BoardVerifierRuntimeSession {
     verifier: CanonicalBoardVerifier,
     verified_objects: HashMap<u32, VerifiedTranscriptObject>,
     object_handles_by_hash: HashMap<Hash512, u32>,
+    setup_complaint_resolution: SetupComplaintResolutionState,
+}
+
+enum SetupComplaintResolutionState {
+    Unresolved,
+    Available(VerifiedSetupComplaintResolution),
+    Reserved {
+        handle: u32,
+        authority: VerifiedSetupComplaintResolution,
+    },
+    Consumed,
+}
+
+impl SetupComplaintResolutionState {
+    fn reserve(
+        &mut self,
+        handle: VerifiedSetupComplaintResolutionReservationHandle,
+        freshly_verified_authority: Option<VerifiedSetupComplaintResolution>,
+    ) -> RuntimeResult<()> {
+        let previous = core::mem::replace(self, Self::Consumed);
+        let authority = match (previous, freshly_verified_authority) {
+            (Self::Unresolved, Some(authority)) | (Self::Available(authority), None) => authority,
+            (state @ (Self::Reserved { .. } | Self::Consumed), None) => {
+                *self = state;
+                return Err(refusal_status(RefusalReason::ConsumedState));
+            }
+            (state, _) => {
+                *self = state;
+                unreachable!("the caller derives authority only for an unresolved state")
+            }
+        };
+        *self = Self::Reserved {
+            handle: handle.get(),
+            authority,
+        };
+        Ok(())
+    }
+
+    fn with_reserved<Output>(
+        &self,
+        handle: &VerifiedSetupComplaintResolutionReservationHandle,
+        inspect: impl FnOnce(&VerifiedSetupComplaintResolution) -> Output,
+    ) -> RuntimeResult<Output> {
+        match self {
+            Self::Reserved {
+                handle: reserved_handle,
+                authority,
+            } if *reserved_handle == handle.get() => Ok(inspect(authority)),
+            _ => Err(refusal_status(RefusalReason::ConsumedState)),
+        }
+    }
+
+    fn restore(
+        &mut self,
+        handle: &VerifiedSetupComplaintResolutionReservationHandle,
+    ) -> RuntimeResult<()> {
+        let previous = core::mem::replace(self, Self::Consumed);
+        match previous {
+            Self::Reserved {
+                handle: reserved_handle,
+                authority,
+            } if reserved_handle == handle.get() => {
+                *self = Self::Available(authority);
+                Ok(())
+            }
+            other => {
+                *self = other;
+                Err(refusal_status(RefusalReason::ConsumedState))
+            }
+        }
+    }
+
+    fn consume(
+        &mut self,
+        handle: &VerifiedSetupComplaintResolutionReservationHandle,
+    ) -> RuntimeResult<()> {
+        match self {
+            Self::Reserved {
+                handle: reserved_handle,
+                ..
+            } if *reserved_handle == handle.get() => {}
+            _ => return Err(refusal_status(RefusalReason::ConsumedState)),
+        }
+        *self = Self::Consumed;
+        Ok(())
+    }
 }
 
 struct BoardVerifierRuntimeRegistry {
     active_session: Option<BoardVerifierRuntimeSession>,
     next_session_handle: u32,
     next_verified_object_handle: u32,
+    next_setup_complaint_resolution_handle: u32,
 }
 
 impl Default for BoardVerifierRuntimeRegistry {
@@ -496,6 +682,7 @@ impl Default for BoardVerifierRuntimeRegistry {
             active_session: None,
             next_session_handle: 1,
             next_verified_object_handle: 1,
+            next_setup_complaint_resolution_handle: 1,
         }
     }
 }
@@ -532,6 +719,7 @@ impl BoardVerifierRuntimeRegistry {
             verifier,
             verified_objects: HashMap::new(),
             object_handles_by_hash: HashMap::new(),
+            setup_complaint_resolution: SetupComplaintResolutionState::Unresolved,
         });
         Ok(handle)
     }
@@ -629,9 +817,79 @@ impl BoardVerifierRuntimeRegistry {
     }
 
     fn cancel(&mut self, session_handle: u32, capability: &[u8]) -> RuntimeResult<()> {
-        require_active_session(&self.active_session, session_handle, capability)?;
+        let session = require_active_session(&self.active_session, session_handle, capability)?;
+        if matches!(
+            session.setup_complaint_resolution,
+            SetupComplaintResolutionState::Reserved { .. }
+        ) {
+            return Err(refusal_status(RefusalReason::ConsumedState));
+        }
         self.active_session = None;
         Ok(())
+    }
+
+    fn reserve_setup_complaint_resolution(
+        &mut self,
+        session_handle: u32,
+        capability: &[u8],
+    ) -> RuntimeResult<VerifiedSetupComplaintResolutionReservationHandle> {
+        let session =
+            require_active_session_mut(&mut self.active_session, session_handle, capability)?;
+        let requires_fresh_verification = match &session.setup_complaint_resolution {
+            SetupComplaintResolutionState::Unresolved => true,
+            SetupComplaintResolutionState::Available(_) => false,
+            SetupComplaintResolutionState::Reserved { .. }
+            | SetupComplaintResolutionState::Consumed => {
+                return Err(refusal_status(RefusalReason::ConsumedState));
+            }
+        };
+        let freshly_verified_authority = requires_fresh_verification
+            .then(|| VerifiedSetupComplaintResolution::from_complete_board_session(session))
+            .transpose()
+            .map_err(refusal_status)?;
+        let handle = VerifiedSetupComplaintResolutionReservationHandle(take_nonrepeating_handle(
+            &mut self.next_setup_complaint_resolution_handle,
+        )?);
+        session
+            .setup_complaint_resolution
+            .reserve(handle, freshly_verified_authority)?;
+        Ok(handle)
+    }
+
+    fn with_reserved_setup_complaint_resolution<Output>(
+        &self,
+        handle: &VerifiedSetupComplaintResolutionReservationHandle,
+        inspect: impl FnOnce(&VerifiedSetupComplaintResolution) -> Output,
+    ) -> RuntimeResult<Output> {
+        let session = self
+            .active_session
+            .as_ref()
+            .ok_or_else(|| refusal_status(RefusalReason::ConsumedState))?;
+        session
+            .setup_complaint_resolution
+            .with_reserved(handle, inspect)
+    }
+
+    fn restore_setup_complaint_resolution(
+        &mut self,
+        handle: &VerifiedSetupComplaintResolutionReservationHandle,
+    ) -> RuntimeResult<()> {
+        let session = self
+            .active_session
+            .as_mut()
+            .ok_or_else(|| refusal_status(RefusalReason::ConsumedState))?;
+        session.setup_complaint_resolution.restore(handle)
+    }
+
+    fn consume_setup_complaint_resolution(
+        &mut self,
+        handle: &VerifiedSetupComplaintResolutionReservationHandle,
+    ) -> RuntimeResult<()> {
+        let session = self
+            .active_session
+            .as_mut()
+            .ok_or_else(|| refusal_status(RefusalReason::ConsumedState))?;
+        session.setup_complaint_resolution.consume(handle)
     }
 }
 
@@ -708,6 +966,41 @@ pub(crate) fn cancel_board_verifier_session(
     capability: &[u8],
 ) -> RuntimeResult<()> {
     with_runtime_registry(|registry| registry.cancel(session_handle, capability))
+}
+
+/// Reserves the exact complete complaint-resolution authority from the live
+/// board session. No caller-supplied object list participates in minting it.
+pub(crate) fn reserve_verified_setup_complaint_resolution(
+    session_handle: u32,
+    capability: &[u8],
+) -> RuntimeResult<VerifiedSetupComplaintResolutionReservationHandle> {
+    with_runtime_registry(|registry| {
+        registry.reserve_setup_complaint_resolution(session_handle, capability)
+    })
+}
+
+pub(crate) fn with_reserved_verified_setup_complaint_resolution<Output>(
+    handle: &VerifiedSetupComplaintResolutionReservationHandle,
+    inspect: impl FnOnce(&VerifiedSetupComplaintResolution) -> Output,
+) -> RuntimeResult<Output> {
+    with_runtime_registry(|registry| {
+        registry.with_reserved_setup_complaint_resolution(handle, inspect)
+    })
+}
+
+pub(crate) fn restore_verified_setup_complaint_resolution(
+    handle: &VerifiedSetupComplaintResolutionReservationHandle,
+) -> RuntimeResult<()> {
+    with_runtime_registry(|registry| registry.restore_setup_complaint_resolution(handle))
+}
+
+/// Consumes the terminal only from an accepted-setup transaction's infallible
+/// commit. The preceding preflight has already borrowed and matched it.
+pub(crate) fn consume_verified_setup_complaint_resolution(
+    handle: &VerifiedSetupComplaintResolutionReservationHandle,
+) {
+    with_runtime_registry(|registry| registry.consume_setup_complaint_resolution(handle))
+        .expect("accepted-setup preflight retained the exact complaint-resolution reservation");
 }
 
 /// Resolves live board capabilities for another verifier inside this WASM
@@ -1020,4 +1313,158 @@ fn with_runtime_registry<Value>(
         }
     };
     operation(&mut registry)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn hash(byte: u8) -> Hash512 {
+        Hash512::from_bytes([byte; Hash512::BYTE_LENGTH])
+    }
+
+    fn test_acceptance_hashes() -> Vec<Hash512> {
+        (0..FOUNDATION_PROFILE.participant_count)
+            .map(|roster_position| {
+                hash(u8::try_from(roster_position + 1).expect("roster position fits u8"))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn complaint_resolution_root_binds_exact_catalog_and_setup_attempt() {
+        let suite_identifier = hash(0x11);
+        let manifest_hash = hash(0x12);
+        let ceremony_context_hash = hash(0x13);
+        let action_context_hash = hash(0x14);
+        let roster_hash = hash(0x15);
+        let acceptance_hashes = test_acceptance_hashes();
+        let authority = VerifiedSetupComplaintResolution {
+            resolution_root: setup_complaint_resolution_root(
+                suite_identifier,
+                manifest_hash,
+                ceremony_context_hash,
+                action_context_hash,
+                roster_hash,
+                &acceptance_hashes,
+            )
+            .expect("the complete catalog hashes"),
+        };
+
+        authority
+            .require_matches(
+                suite_identifier,
+                manifest_hash,
+                ceremony_context_hash,
+                action_context_hash,
+                roster_hash,
+                &acceptance_hashes,
+            )
+            .expect("the exact catalog and setup attempt match");
+
+        let mut substituted_hashes = acceptance_hashes.clone();
+        substituted_hashes[3] = hash(0xa3);
+        assert_eq!(
+            authority.require_matches(
+                suite_identifier,
+                manifest_hash,
+                ceremony_context_hash,
+                action_context_hash,
+                roster_hash,
+                &substituted_hashes,
+            ),
+            Err(RefusalReason::WrongHashOrRoot)
+        );
+
+        let mut reordered_hashes = acceptance_hashes.clone();
+        reordered_hashes.swap(2, 7);
+        assert_eq!(
+            authority.require_matches(
+                suite_identifier,
+                manifest_hash,
+                ceremony_context_hash,
+                action_context_hash,
+                roster_hash,
+                &reordered_hashes,
+            ),
+            Err(RefusalReason::WrongHashOrRoot)
+        );
+        assert_eq!(
+            authority.require_matches(
+                suite_identifier,
+                manifest_hash,
+                ceremony_context_hash,
+                hash(0x94),
+                roster_hash,
+                &acceptance_hashes,
+            ),
+            Err(RefusalReason::WrongHashOrRoot)
+        );
+        assert_eq!(
+            authority.require_matches(
+                suite_identifier,
+                manifest_hash,
+                ceremony_context_hash,
+                action_context_hash,
+                roster_hash,
+                &acceptance_hashes[..acceptance_hashes.len() - 1],
+            ),
+            Err(RefusalReason::WrongTypeOrLength)
+        );
+    }
+
+    #[test]
+    fn complaint_resolution_reservation_restores_after_failure_and_consumes_once() {
+        let resolution_root = hash(0x61);
+        let mut state =
+            SetupComplaintResolutionState::Available(VerifiedSetupComplaintResolution {
+                resolution_root,
+            });
+        let first_handle = VerifiedSetupComplaintResolutionReservationHandle(41);
+        let wrong_handle = VerifiedSetupComplaintResolutionReservationHandle(42);
+        state
+            .reserve(first_handle, None)
+            .expect("the available authority reserves once");
+
+        let failed_operation = state
+            .with_reserved(&first_handle, |_| {
+                Err::<(), u32>(refusal_status(RefusalReason::WrongHashOrRoot))
+            })
+            .expect("the exact handle inspects its authority");
+        assert_eq!(
+            failed_operation,
+            Err(refusal_status(RefusalReason::WrongHashOrRoot))
+        );
+        assert_eq!(
+            state.restore(&wrong_handle),
+            Err(refusal_status(RefusalReason::ConsumedState))
+        );
+        assert_eq!(
+            state
+                .with_reserved(&first_handle, |authority| authority.resolution_root)
+                .expect("a wrong restoration handle did not lose the reservation"),
+            resolution_root
+        );
+        state
+            .restore(&first_handle)
+            .expect("the failed operation restores the exact authority");
+
+        let second_handle = VerifiedSetupComplaintResolutionReservationHandle(43);
+        state
+            .reserve(second_handle, None)
+            .expect("the restored authority can be retried");
+        assert_eq!(
+            state
+                .with_reserved(&second_handle, |authority| authority.resolution_root)
+                .expect("the retry retains the same authority"),
+            resolution_root
+        );
+        state
+            .consume(&second_handle)
+            .expect("successful finalization consumes the authority");
+        assert_eq!(
+            state.reserve(VerifiedSetupComplaintResolutionReservationHandle(44), None,),
+            Err(refusal_status(RefusalReason::ConsumedState))
+        );
+    }
 }

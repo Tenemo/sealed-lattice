@@ -2,15 +2,16 @@
 //!
 //! The host owns the large source and evaluator-store byte arrays. Rust owns
 //! every descriptor, authenticated readback, relation coordinate, runtime
-//! tree, statement binding, and reset-safe proof attempt.
+//! tree, statement binding, and reset-safe public-only proof attempt.
 
 use core::slice;
-use std::{cell::RefCell, rc::Rc};
+use std::cell::RefCell;
 
 use crate::{
     bgv::setup::{
-        commit_preflighted_verified_evaluator_key_store,
+        CanonicalPackageStreamKind, commit_preflighted_verified_evaluator_key_store,
         commit_prepackage_generated_evaluator_proof,
+        contribute_generated_canonical_package_proof_and_stream_source,
         preflight_prepackage_generated_evaluator_proof_slot,
         preflight_verified_evaluator_key_store_slot, restore_prepackage_evaluator_statement_source,
         take_prepackage_evaluator_statement_source,
@@ -19,11 +20,10 @@ use crate::{
     },
     foundation::{
         AuthenticatedCheckpointContinuationSource, FOUNDATION_PROFILE, Hash512,
-        PreparedActionProofAttemptSource, ProofApplicationSlot, ProofApplicationSlotCeilings,
+        PreparedPublicOnlyProofAttemptSource, ProofApplicationSlot, ProofApplicationSlotCeilings,
         RefusalReason, STATE_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH, StreamDescriptor,
-        VerifiedStateReservationRuntimeBinding,
-        resolve_prepared_collective_action_proof_attempt_source,
-        retain_action_private_randomness_for_exact_family, verified_state_reservation_binding,
+        VerifiedStateReservationRuntimeBinding, resolve_prepared_public_only_proof_attempt_source,
+        verified_state_reservation_binding,
     },
 };
 
@@ -38,21 +38,21 @@ use super::runtime_ffi::{
 };
 use super::{
     CommonProofGenerationAuthorization, CommonProofGenerationPreparationError,
-    CommonProofGenerationSources, CommonProofPrivateCoinCoordinateCapacity, CommonProofProverError,
-    CommonProofRelationPlanCapability, CommonProofRelationPlanCapabilityError,
-    CommonProofRuntimeError, CommonProofRuntimeLimits, CommonProofSelectedSuiteCapabilityHandle,
-    ComponentMaterialOwnershipBinding, ComponentPublicPolynomialRuntimeError,
+    CommonProofGenerationSources, CommonProofProverError, CommonProofRelationPlanCapability,
+    CommonProofRelationPlanCapabilityError, CommonProofRuntimeError, CommonProofRuntimeLimits,
+    CommonProofSelectedSuiteCapabilityHandle, ComponentMaterialOwnershipBinding,
+    ComponentPublicPolynomialRuntimeError,
     DescriptorAuthenticatedKeySwitchComponentPublicPolynomialStream, EvaluatorKeyStorePhysicalRole,
-    PreparedCommonProofGeneration, PrivateRandomnessCommonProofCoinSource, ProofProfileError,
-    RelationPlanError, SelectedEvaluatorAggregatePlanError,
-    SelectedEvaluatorAggregateSourcePolynomialProvider, SelectedEvaluatorEntryKind,
-    SelectedEvaluatorStoreConstruction, SelectedEvaluatorStoreConstructionOutput,
-    SelectedEvaluatorStoreOutputChunk, SelectedEvaluatorStoreSourceReadRequest,
-    SelectedProofAccountingError, SetupPublicPolynomialContext, SetupPublicPolynomialRootRole,
-    SetupPublicPolynomialTree, VerifiedCommonProofCapabilityHandle,
-    VerifiedCommonProofStatementSource, VerifiedEvaluatorAuxiliaryRoot, VerifiedEvaluatorKeyStore,
-    VerifiedEvaluatorKeyStoreMaterial, VerifiedEvaluatorKeyStoreMaterialStream,
-    VerifiedEvaluatorKeyStorePreflight, VerifiedEvaluatorRuntimeRoot, VerifiedStatementOwnedTree,
+    PreparedCommonProofGeneration, ProofProfileError, RelationPlanError,
+    SelectedEvaluatorAggregatePlanError, SelectedEvaluatorAggregateSourcePolynomialProvider,
+    SelectedEvaluatorEntryKind, SelectedEvaluatorStoreConstruction,
+    SelectedEvaluatorStoreConstructionOutput, SelectedEvaluatorStoreOutputChunk,
+    SelectedEvaluatorStoreSourceReadRequest, SelectedProofAccountingError,
+    SetupPublicPolynomialContext, SetupPublicPolynomialRootRole, SetupPublicPolynomialTree,
+    VerifiedCommonProofCapabilityHandle, VerifiedCommonProofStatementSource,
+    VerifiedEvaluatorAuxiliaryRoot, VerifiedEvaluatorKeyStore, VerifiedEvaluatorKeyStoreMaterial,
+    VerifiedEvaluatorKeyStoreMaterialStream, VerifiedEvaluatorKeyStorePreflight,
+    VerifiedEvaluatorRuntimeRoot, VerifiedStatementOwnedTree,
     selected_evaluator_aggregate_relation_plan, selected_evaluator_entry_positions,
     selected_proof_runtime_limits, selected_relation_plan_check_context,
     verified_application_statement_hash,
@@ -165,7 +165,7 @@ struct EvaluatorAggregateSession {
     package_statement_source: Option<VerifiedCommonProofStatementSource>,
     statement_trees: Option<Vec<VerifiedStatementOwnedTree>>,
     verified_evaluator_key_store: Option<VerifiedEvaluatorKeyStore>,
-    generated_proof_committed: bool,
+    generated_proof_handle: Option<u32>,
 }
 
 impl EvaluatorAggregateSession {
@@ -196,7 +196,7 @@ impl EvaluatorAggregateSession {
             package_statement_source: None,
             statement_trees: None,
             verified_evaluator_key_store: None,
-            generated_proof_committed: false,
+            generated_proof_handle: None,
         })
     }
 
@@ -681,23 +681,29 @@ fn resolve_collective_prepared_attempt(
     session_handle: u32,
     runtime_plan: &SelectedEvaluatorProofRuntimePlan,
     checkpoint_continuation: AuthenticatedCheckpointContinuationSource,
-) -> Result<PreparedActionProofAttemptSource, EvaluatorAggregateRuntimeError> {
-    let (suite_identifier, ceremony_context_hash, action_context_hash, canonical_statement) =
-        EVALUATOR_AGGREGATE_SESSION_REGISTRY.with(|registry| {
-            registry.borrow().with(session_handle, |session| {
-                with_prepackage_evaluator_generation_sources(
-                    session.prepackage_catalog_handle,
-                    |source_catalog, _, _| {
-                        Ok((
-                            source_catalog.suite_identifier(),
-                            source_catalog.ceremony_context_hash(),
-                            source_catalog.action_context_hash(),
-                            session.canonical_statement()?.to_vec(),
-                        ))
-                    },
-                )
-            })
-        })?;
+) -> Result<PreparedPublicOnlyProofAttemptSource, EvaluatorAggregateRuntimeError> {
+    let (
+        suite_identifier,
+        ceremony_context_hash,
+        action_context_hash,
+        roster_hash,
+        canonical_statement,
+    ) = EVALUATOR_AGGREGATE_SESSION_REGISTRY.with(|registry| {
+        registry.borrow().with(session_handle, |session| {
+            with_prepackage_evaluator_generation_sources(
+                session.prepackage_catalog_handle,
+                |source_catalog, _, _| {
+                    Ok((
+                        source_catalog.suite_identifier(),
+                        source_catalog.ceremony_context_hash(),
+                        source_catalog.action_context_hash(),
+                        source_catalog.roster_hash(),
+                        session.canonical_statement()?.to_vec(),
+                    ))
+                },
+            )
+        })
+    })?;
     let application_slot = ProofApplicationSlot::new(
         Hash512::from_bytes(suite_identifier),
         Hash512::from_bytes(ceremony_context_hash),
@@ -714,9 +720,10 @@ fn resolve_collective_prepared_attempt(
         ProofApplicationSlotCeilings::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
         &canonical_statement,
     ));
-    resolve_prepared_collective_action_proof_attempt_source(
+    resolve_prepared_public_only_proof_attempt_source(
         action_randomness_handle,
         verified_reservation_binding,
+        Hash512::from_bytes(roster_hash),
         application_slot,
         statement_hash,
         u64::try_from(runtime_plan.limits.proof_byte_length())
@@ -729,8 +736,7 @@ fn resolve_collective_prepared_attempt(
 
 fn prepare_evaluator_common_generation(
     session_handle: u32,
-    action_randomness_handle: u32,
-    prepared_attempt: PreparedActionProofAttemptSource,
+    prepared_attempt: PreparedPublicOnlyProofAttemptSource,
     runtime_plan: SelectedEvaluatorProofRuntimePlan,
 ) -> Result<PreparedCommonProofGeneration, EvaluatorAggregateRuntimeError> {
     let (canonical_statement, relation_trees, source_provider) =
@@ -754,28 +760,18 @@ fn prepare_evaluator_common_generation(
                 )
             })
         })?;
-    let variant = runtime_plan
-        .compiled_relation_plan
-        .select_variant(None, Some(FOUNDATION_PROFILE.option_count))?;
-    let authorization = CommonProofGenerationAuthorization::from_collective_authenticated_attempt(
+    let authorization = CommonProofGenerationAuthorization::from_public_only_authenticated_attempt(
         prepared_attempt,
         &runtime_plan.relation_plan,
         FOUNDATION_PROFILE.protocol_version,
         &canonical_statement,
         runtime_plan.limits,
     )?;
-    let coordinate_capacity =
-        CommonProofPrivateCoinCoordinateCapacity::from_relation_plan_variant(variant)
-            .map_err(|_| EvaluatorAggregateRuntimeError::InvalidInput)?;
-    let action_private_randomness =
-        retain_action_private_randomness_for_exact_family(action_randomness_handle)
-            .map_err(EvaluatorAggregateRuntimeError::ActionRandomnessRuntime)?;
-    let private_coins = PrivateRandomnessCommonProofCoinSource::new(
-        Rc::clone(&action_private_randomness),
+    let sources = CommonProofGenerationSources::public_only(
         prepared_attempt.application_statement_schema_identifier(),
         Hash512::from_bytes(authorization.binding_hash()),
-        prepared_attempt.private_randomness_attempt_identifier(),
-        coordinate_capacity,
+        prepared_attempt.attempt_lineage_identifier(),
+        source_provider,
     )
     .map_err(|_| EvaluatorAggregateRuntimeError::InvalidInput)?;
     PreparedCommonProofGeneration::from_exact_family_sources(
@@ -784,7 +780,7 @@ fn prepare_evaluator_common_generation(
         canonical_statement,
         relation_trees,
         runtime_plan.limits,
-        CommonProofGenerationSources::new(private_coins, source_provider),
+        sources,
     )
     .map_err(|error| match error {
         CommonProofGenerationPreparationError::Runtime(error) => {
@@ -830,7 +826,7 @@ fn prepare_evaluator_generation(
     EVALUATOR_AGGREGATE_SESSION_REGISTRY.with(|registry| {
         registry.borrow().with(session_handle, |session| {
             session.verified_store_material()?;
-            if session.generated_proof_committed {
+            if session.generated_proof_handle.is_some() {
                 return Err(CommonProofRuntimeError::WrongOperationPhase);
             }
             Ok(())
@@ -867,7 +863,6 @@ fn prepare_evaluator_generation(
         EvaluatorGenerationMode::Fresh => {
             CommonProofGenerationFamilyAdapter::fresh(prepare_evaluator_common_generation(
                 session_handle,
-                action_randomness_handle,
                 fresh_prepared_attempt,
                 runtime_plan,
             )?)
@@ -875,7 +870,6 @@ fn prepare_evaluator_generation(
         EvaluatorGenerationMode::Resume => {
             let fresh_preparation = prepare_evaluator_common_generation(
                 session_handle,
-                action_randomness_handle,
                 fresh_prepared_attempt,
                 runtime_plan,
             )?;
@@ -907,13 +901,8 @@ fn prepare_evaluator_generation(
                         continuation,
                     )
                     .map_err(resumed_generation_error)?;
-                    prepare_evaluator_common_generation(
-                        session_handle,
-                        action_randomness_handle,
-                        attempt,
-                        runtime_plan,
-                    )
-                    .map_err(resumed_generation_error)
+                    prepare_evaluator_common_generation(session_handle, attempt, runtime_plan)
+                        .map_err(resumed_generation_error)
                 }),
             )
         }
@@ -928,7 +917,7 @@ fn commit_generated_evaluator_proof(
 ) -> Result<(), CommonProofRuntimeError> {
     let preflight = EVALUATOR_AGGREGATE_SESSION_REGISTRY.with(|registry| {
         registry.borrow().with(session_handle, |session| {
-            if session.generated_proof_committed {
+            if session.generated_proof_handle.is_some() {
                 return Err(CommonProofRuntimeError::WrongOperationPhase);
             }
             preflight_prepackage_generated_evaluator_proof_slot(
@@ -944,16 +933,60 @@ fn commit_generated_evaluator_proof(
     commit_prepackage_generated_evaluator_proof(preflight);
     EVALUATOR_AGGREGATE_SESSION_REGISTRY.with(|registry| {
         registry.borrow_mut().with_mut(session_handle, |session| {
-            session.generated_proof_committed = true;
+            session.generated_proof_handle = Some(generated_common_proof_handle);
             Ok(())
         })
     })
 }
 
+fn evaluator_package_stream_descriptor(
+    session_handle: u32,
+) -> Result<StreamDescriptor, CommonProofRuntimeError> {
+    EVALUATOR_AGGREGATE_SESSION_REGISTRY.with(|registry| {
+        registry.borrow().with(session_handle, |session| {
+            if session.generated_proof_handle.is_none() {
+                return Err(CommonProofRuntimeError::WrongOperationPhase);
+            }
+            Ok(session
+                .verified_store_material()?
+                .store_descriptor()
+                .clone())
+        })
+    })
+}
+
+fn contribute_evaluator_package(
+    session_handle: u32,
+    package_builder_handle: u32,
+    generated_common_proof_handle: u32,
+    canonical_application_statement_bytes: &[u8],
+) -> Result<(), CommonProofRuntimeError> {
+    EVALUATOR_AGGREGATE_SESSION_REGISTRY.with(|registry| {
+        registry.borrow().with(session_handle, |session| {
+            if session.generated_proof_handle != Some(generated_common_proof_handle)
+                || session.canonical_statement()? != canonical_application_statement_bytes
+            {
+                return Err(CommonProofRuntimeError::WrongVerificationBinding);
+            }
+            Ok(())
+        })
+    })?;
+    contribute_generated_canonical_package_proof_and_stream_source(
+        package_builder_handle,
+        CanonicalPackageStreamKind::EvaluatorKeyStore,
+        session_handle,
+        evaluator_package_stream_descriptor,
+        generated_common_proof_handle,
+        canonical_application_statement_bytes,
+    )
+}
+
 fn take_package_statement_source(session_handle: u32) -> Result<(), CommonProofRuntimeError> {
     let prepackage_catalog_handle = EVALUATOR_AGGREGATE_SESSION_REGISTRY.with(|registry| {
         registry.borrow().with(session_handle, |session| {
-            if !session.generated_proof_committed || session.package_statement_source.is_some() {
+            if session.generated_proof_handle.is_none()
+                || session.package_statement_source.is_some()
+            {
                 return Err(CommonProofRuntimeError::WrongOperationPhase);
             }
             Ok(session.prepackage_catalog_handle)
@@ -994,7 +1027,7 @@ fn prepare_evaluator_verification_adapter(
     let adapter_reservation_handle = reserve_common_proof_verification_family_adapter()?;
     let borrowed_preflight = EVALUATOR_AGGREGATE_SESSION_REGISTRY.with(|registry| {
         registry.borrow().with(session_handle, |session| {
-            if !session.generated_proof_committed
+            if session.generated_proof_handle.is_none()
                 || session.statement_trees.is_some()
                 || session.verified_evaluator_key_store.is_some()
             {
@@ -1782,6 +1815,37 @@ pub extern "C" fn sealed_lattice_evaluator_aggregate_commit_generated_proof(
 ) -> u32 {
     commit_generated_evaluator_proof(session_handle, generated_common_proof_handle)
         .map_or_else(super::runtime_ffi::runtime_error_status, |()| 0)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sealed_lattice_evaluator_aggregate_contribute_package(
+    session_handle: u32,
+    package_builder_handle: u32,
+    generated_common_proof_handle: u32,
+    canonical_application_statement_pointer: *const u8,
+    canonical_application_statement_byte_length: usize,
+) -> u32 {
+    let result: Result<(), EvaluatorAggregateRuntimeError> = (|| {
+        if canonical_application_statement_byte_length
+            > FOUNDATION_PROFILE.maximum_copied_buffer_byte_length
+        {
+            return Err(EvaluatorAggregateRuntimeError::InvalidInput);
+        }
+        let statement = unsafe {
+            exact_input(
+                canonical_application_statement_pointer,
+                canonical_application_statement_byte_length,
+            )
+        }?;
+        contribute_evaluator_package(
+            session_handle,
+            package_builder_handle,
+            generated_common_proof_handle,
+            statement,
+        )?;
+        Ok(())
+    })();
+    result.map_or_else(runtime_error_status, |()| 0)
 }
 
 #[unsafe(no_mangle)]

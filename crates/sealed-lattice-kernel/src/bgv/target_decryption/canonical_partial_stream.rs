@@ -8,8 +8,6 @@ use crate::bgv::{
 const TARGET_ROLE_BYTE_LENGTH: usize = size_of::<u16>();
 const TARGET_PRIME_BYTE_LENGTH: usize = size_of::<u64>();
 const CANONICAL_RESIDUE_BYTE_LENGTH: usize = size_of::<u64>();
-const TARGET_PARTIAL_DECRYPTION_ROLE_COUNT: usize = 2;
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u16)]
 pub(crate) enum TargetPartialDecryptionRole {
@@ -191,22 +189,6 @@ pub(crate) fn selected_target_partial_decryption_stream_byte_length()
         .ok_or(TargetPartialDecryptionStreamError::CountOverflow)
 }
 
-pub(crate) fn selected_target_paired_partial_decryption_stream_byte_length()
--> Result<usize, TargetPartialDecryptionStreamError> {
-    selected_target_partial_decryption_stream_byte_length()?
-        .checked_mul(TARGET_PARTIAL_DECRYPTION_ROLE_COUNT)
-        .ok_or(TargetPartialDecryptionStreamError::CountOverflow)
-}
-
-pub(crate) fn selected_target_paired_partial_decryption_residue_byte_length()
--> Result<usize, TargetPartialDecryptionStreamError> {
-    selected_target_data_prime_count()
-        .checked_mul(POLYNOMIAL_DEGREE)
-        .and_then(|coefficient_count| coefficient_count.checked_mul(CANONICAL_RESIDUE_BYTE_LENGTH))
-        .and_then(|byte_length| byte_length.checked_mul(TARGET_PARTIAL_DECRYPTION_ROLE_COUNT))
-        .ok_or(TargetPartialDecryptionStreamError::CountOverflow)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -248,25 +230,6 @@ mod tests {
             None
         );
         assert_eq!(decoded.coefficient(0, POLYNOMIAL_DEGREE), None);
-    }
-
-    #[test]
-    fn selected_paired_stream_lengths_derive_from_the_canonical_codec() {
-        let role_byte_length =
-            selected_target_partial_decryption_stream_byte_length().expect("role length");
-        assert_eq!(
-            selected_target_paired_partial_decryption_stream_byte_length()
-                .expect("paired stream length"),
-            role_byte_length * TARGET_PARTIAL_DECRYPTION_ROLE_COUNT
-        );
-        assert_eq!(
-            selected_target_paired_partial_decryption_residue_byte_length()
-                .expect("paired residue length"),
-            TARGET_PARTIAL_DECRYPTION_ROLE_COUNT
-                * selected_target_data_prime_count()
-                * POLYNOMIAL_DEGREE
-                * size_of::<u64>()
-        );
     }
 
     #[test]

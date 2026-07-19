@@ -5,12 +5,12 @@ use crate::{
         evaluator::{
             candidate_evidence::EvaluatorCandidateInput, program::selected_evaluator_program_set,
         },
-        parameters::DATA_PRIMES,
         target_decryption::selected_target_partial_decryption_stream_byte_length,
     },
     foundation::{
         CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple,
         FOUNDATION_PROFILE, Hash512, ProofApplicationSlotCeilings, StreamDescriptor,
+        selected_sharing_data_prime_coordinates, selected_target_data_prime_coordinates,
     },
 };
 
@@ -18,7 +18,30 @@ const ROUND_ONE_SOURCE_ROOT_PAIR_SCHEMA_IDENTIFIER: u16 = 0x1219;
 const EVALUATOR_KEY_AGGREGATE_ENTRY_SCHEMA_IDENTIFIER: u16 = 0x121a;
 const GALOIS_KEY_SHARE_ENTRY_SCHEMA_IDENTIFIER: u16 = 0x121d;
 const APPLICATION_STATEMENT_SCHEMA_VERSION: u16 = 1;
+const GALOIS_KEY_SHARE_STATEMENT_SCHEMA_VERSION: u16 = 2;
 const SELECTED_GALOIS_KEY_SHARE_BATCH_SCHEDULE_POSITION: u32 = 0;
+
+const fn selected_application_statement_schema_version(schema_identifier: u16) -> u16 {
+    if schema_identifier
+        == ProofApplicationSlotCeilings::GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER
+    {
+        GALOIS_KEY_SHARE_STATEMENT_SCHEMA_VERSION
+    } else {
+        APPLICATION_STATEMENT_SCHEMA_VERSION
+    }
+}
+
+fn selected_target_share_root_count() -> Result<usize, SelectedApplicationStatementError> {
+    selected_target_data_prime_coordinates()
+        .map(|coordinates| coordinates.len())
+        .map_err(|_| SelectedApplicationStatementError::InvalidProfile)
+}
+
+fn selected_sharing_limb_count() -> Result<usize, SelectedApplicationStatementError> {
+    selected_sharing_data_prime_coordinates()
+        .map(|coordinates| coordinates.len())
+        .map_err(|_| SelectedApplicationStatementError::InvalidProfile)
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SelectedApplicationStatementError {
@@ -649,7 +672,7 @@ pub(crate) fn decode_selected_same_secret_statement(
         roster_position: read_unsigned16(&statement.items[2])?,
         ordered_degree_zero_commitment_roots: read_hash_list_values(
             &statement.items[3],
-            DATA_PRIMES.len(),
+            selected_sharing_limb_count()?,
         )?
         .into_boxed_slice(),
         anchor_commitment_roots,
@@ -702,7 +725,7 @@ pub(crate) fn decode_selected_aggregate_threshold_share_statement(
         .into_boxed_slice(),
         ordered_aggregate_threshold_roots: read_hash_list_values(
             &statement.items[9],
-            DATA_PRIMES.len(),
+            selected_sharing_limb_count()?,
         )?
         .into_boxed_slice(),
     })
@@ -880,7 +903,7 @@ pub(crate) fn canonical_selected_application_statement_for_ceiling(
         .collect::<Result<Vec<_>, _>>()?;
     let canonical_bytes = CanonicalTuple::new(
         schema_identifier,
-        APPLICATION_STATEMENT_SCHEMA_VERSION,
+        selected_application_statement_schema_version(schema_identifier),
         items,
     )
     .encode()
@@ -976,7 +999,7 @@ pub(crate) fn canonical_selected_aggregate_threshold_share_statement(
 ) -> Result<Vec<u8>, SelectedApplicationStatementError> {
     if roster_position >= FOUNDATION_PROFILE.participant_count
         || ordered_source_share_roots.len() != vss_recipient_share_material_root_count()?
-        || ordered_aggregate_threshold_roots.len() != DATA_PRIMES.len()
+        || ordered_aggregate_threshold_roots.len() != selected_sharing_limb_count()?
     {
         return Err(SelectedApplicationStatementError::WrongTypeOrLength);
     }
@@ -1012,7 +1035,7 @@ pub(crate) fn canonical_selected_same_secret_statement(
     anchor_commitment_roots: &[[u8; Hash512::BYTE_LENGTH]],
 ) -> Result<Vec<u8>, SelectedApplicationStatementError> {
     if roster_position >= FOUNDATION_PROFILE.participant_count
-        || ordered_degree_zero_commitment_roots.len() != DATA_PRIMES.len()
+        || ordered_degree_zero_commitment_roots.len() != selected_sharing_limb_count()?
         || anchor_commitment_roots.len() != 3
     {
         return Err(SelectedApplicationStatementError::WrongTypeOrLength);
@@ -1133,7 +1156,7 @@ pub(crate) fn canonical_selected_galois_key_share_statement(
     }
     let canonical_bytes = CanonicalTuple::new(
         ProofApplicationSlotCeilings::GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
-        APPLICATION_STATEMENT_SCHEMA_VERSION,
+        GALOIS_KEY_SHARE_STATEMENT_SCHEMA_VERSION,
         vec![
             CanonicalItem::hash512(setup_proof_context_hash),
             CanonicalItem::participant_identity(participant_identity),
@@ -1391,7 +1414,7 @@ pub(crate) fn canonical_selected_target_share_statement(
     target_order_descriptor: &StreamDescriptor,
 ) -> Result<Vec<u8>, SelectedApplicationStatementError> {
     if roster_position >= FOUNDATION_PROFILE.participant_count
-        || ordered_aggregate_threshold_roots.len() != DATA_PRIMES.len()
+        || ordered_aggregate_threshold_roots.len() != selected_target_share_root_count()?
     {
         return Err(SelectedApplicationStatementError::WrongTypeOrLength);
     }
@@ -1444,7 +1467,8 @@ fn validate_selected_application_statement(
     context: SelectedApplicationStatementContext,
 ) -> Result<(), SelectedApplicationStatementError> {
     if statement.schema_identifier != expected_schema_identifier
-        || statement.schema_version != APPLICATION_STATEMENT_SCHEMA_VERSION
+        || statement.schema_version
+            != selected_application_statement_schema_version(expected_schema_identifier)
     {
         return Err(SelectedApplicationStatementError::WrongSchema);
     }
@@ -1524,7 +1548,7 @@ fn selected_statement_field_shapes(
                 roster_position,
                 hash.clone(),
                 StatementFieldShape::HashList(vss_recipient_share_material_root_count()?),
-                StatementFieldShape::HashList(DATA_PRIMES.len()),
+                StatementFieldShape::HashList(selected_sharing_limb_count()?),
             ]
         }
         ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER => {
@@ -1534,7 +1558,7 @@ fn selected_statement_field_shapes(
                 hash.clone(),
                 participant,
                 roster_position,
-                StatementFieldShape::HashList(DATA_PRIMES.len()),
+                StatementFieldShape::HashList(selected_sharing_limb_count()?),
                 StatementFieldShape::HashList(3),
             ]
         }
@@ -1661,7 +1685,7 @@ fn selected_statement_field_shapes(
                 hash.clone(),
                 participant,
                 roster_position,
-                StatementFieldShape::HashList(DATA_PRIMES.len()),
+                StatementFieldShape::HashList(selected_target_share_root_count()?),
                 StatementFieldShape::StreamDescriptor {
                     exact_total_byte_length: target_stream_byte_length,
                 },
@@ -1877,15 +1901,13 @@ pub(crate) fn selected_evaluator_aggregate_entry_roots_in_order(
 }
 
 fn vss_coefficient_material_root_count() -> Result<usize, SelectedApplicationStatementError> {
-    DATA_PRIMES
-        .len()
+    selected_sharing_limb_count()?
         .checked_mul(usize::from(FOUNDATION_PROFILE.reconstruction_threshold))
         .ok_or(SelectedApplicationStatementError::CountOverflow)
 }
 
 fn vss_recipient_share_material_root_count() -> Result<usize, SelectedApplicationStatementError> {
-    DATA_PRIMES
-        .len()
+    selected_sharing_limb_count()?
         .checked_mul(usize::from(FOUNDATION_PROFILE.participant_count))
         .ok_or(SelectedApplicationStatementError::CountOverflow)
 }
@@ -2407,11 +2429,13 @@ mod tests {
 
         assert_eq!(
             coefficient_root_count,
-            DATA_PRIMES.len() * usize::from(FOUNDATION_PROFILE.reconstruction_threshold)
+            selected_sharing_limb_count().expect("selected sharing limb count")
+                * usize::from(FOUNDATION_PROFILE.reconstruction_threshold)
         );
         assert_eq!(
             recipient_root_count,
-            DATA_PRIMES.len() * usize::from(FOUNDATION_PROFILE.participant_count)
+            selected_sharing_limb_count().expect("selected sharing limb count")
+                * usize::from(FOUNDATION_PROFILE.participant_count)
         );
         assert_eq!(decoded.public_setup_seed(), [0x25; Hash512::BYTE_LENGTH]);
         assert_eq!(
@@ -2515,7 +2539,8 @@ mod tests {
             .expect("selected source root count"))
             .map(|root_ordinal| [0x30_u8.wrapping_add(root_ordinal as u8); 64])
             .collect::<Vec<_>>();
-        let ordered_aggregate_roots = (0..DATA_PRIMES.len())
+        let ordered_aggregate_roots = (0..selected_sharing_limb_count()
+            .expect("selected sharing limb count"))
             .map(|modulus_ordinal| [0x80_u8.wrapping_add(modulus_ordinal as u8); 64])
             .collect::<Vec<_>>();
         let canonical_bytes = canonical_selected_aggregate_threshold_share_statement(
@@ -2607,7 +2632,7 @@ mod tests {
     }
 
     #[test]
-    fn typed_target_share_statement_binds_all_release_sources_and_exact_streams() {
+    fn typed_target_share_statement_binds_active_release_roots_and_exact_streams() {
         let target_byte_length = u64::try_from(
             selected_target_partial_decryption_stream_byte_length()
                 .expect("selected target stream length"),
@@ -2615,7 +2640,9 @@ mod tests {
         .expect("selected target stream length fits u64");
         let target_identifier_descriptor = target_partial_descriptor(0x61, target_byte_length);
         let target_order_descriptor = target_partial_descriptor(0x71, target_byte_length);
-        let ordered_roots = (0..DATA_PRIMES.len())
+        let target_root_count = selected_target_share_root_count()
+            .expect("selected target root count resolves from suite coordinates");
+        let ordered_roots = (0..target_root_count)
             .map(|modulus_index| [0x80_u8.wrapping_add(modulus_index as u8); 64])
             .collect::<Vec<_>>();
         let canonical_bytes = canonical_selected_target_share_statement(
@@ -2647,7 +2674,7 @@ mod tests {
         .expect("typed target-share statement decodes");
         assert_eq!(decoded.items.len(), 13);
         assert_eq!(
-            read_hash_list_values(&decoded.items[10], DATA_PRIMES.len()),
+            read_hash_list_values(&decoded.items[10], target_root_count),
             Ok(ordered_roots.clone())
         );
 
@@ -2668,6 +2695,47 @@ mod tests {
         )
         .expect("changed finality statement");
         assert_ne!(canonical_bytes, changed_finality);
+
+        let mut changed_roots = ordered_roots.clone();
+        changed_roots[2][0] ^= 0x01;
+        let changed_root_statement = canonical_selected_target_share_statement(
+            FOUNDATION_PROFILE.protocol_version,
+            [0x11; 64],
+            [0x21; 64],
+            [0x22; 64],
+            [0x23; 64],
+            [0x24; 64],
+            [0x25; 64],
+            [0x26; 64],
+            [0x27; 64],
+            FOUNDATION_PROFILE.participant_count - 1,
+            &changed_roots,
+            &target_identifier_descriptor,
+            &target_order_descriptor,
+        )
+        .expect("changed active root statement");
+        assert_ne!(canonical_bytes, changed_root_statement);
+
+        let mut reordered_roots = ordered_roots.clone();
+        reordered_roots.swap(1, 2);
+        let reordered_root_statement = canonical_selected_target_share_statement(
+            FOUNDATION_PROFILE.protocol_version,
+            [0x11; 64],
+            [0x21; 64],
+            [0x22; 64],
+            [0x23; 64],
+            [0x24; 64],
+            [0x25; 64],
+            [0x26; 64],
+            [0x27; 64],
+            FOUNDATION_PROFILE.participant_count - 1,
+            &reordered_roots,
+            &target_identifier_descriptor,
+            &target_order_descriptor,
+        )
+        .expect("reordered active root statement");
+        assert_ne!(canonical_bytes, reordered_root_statement);
+
         assert!(
             canonical_selected_target_share_statement(
                 FOUNDATION_PROFILE.protocol_version,
@@ -2685,7 +2753,28 @@ mod tests {
                 &target_order_descriptor,
             )
             .is_err(),
-            "an incomplete accepted-setup root list must refuse",
+            "a short active-root list must refuse",
+        );
+        let mut extended_roots = ordered_roots.clone();
+        extended_roots.push([0xff; 64]);
+        assert!(
+            canonical_selected_target_share_statement(
+                FOUNDATION_PROFILE.protocol_version,
+                [0x11; 64],
+                [0x21; 64],
+                [0x22; 64],
+                [0x23; 64],
+                [0x24; 64],
+                [0x25; 64],
+                [0x26; 64],
+                [0x27; 64],
+                0,
+                &extended_roots,
+                &target_identifier_descriptor,
+                &target_order_descriptor,
+            )
+            .is_err(),
+            "an extended active-root list must refuse",
         );
         let wrong_length_descriptor = target_partial_descriptor(0x61, target_byte_length + 1);
         assert!(
@@ -3019,6 +3108,10 @@ mod tests {
             context,
         )
         .expect("Galois statement decodes");
+        assert_eq!(
+            statement.schema_version,
+            GALOIS_KEY_SHARE_STATEMENT_SCHEMA_VERSION
+        );
         assert_eq!(read_unsigned32(&statement.items[3]), Ok(0));
         let selected_entry_count = selected_galois_key_share_entry_count();
         let entries = decode_nested_tuple_list(&statement.items[5], selected_entry_count)
@@ -3050,6 +3143,29 @@ mod tests {
             )
             .err(),
             Some(SelectedApplicationStatementError::InvalidProfile),
+        );
+    }
+
+    #[test]
+    fn galois_statement_rejects_the_aliased_version_one_batch_shape() {
+        let context = selected_galois_statement_context();
+        let bytes = canonical_selected_application_statement_for_ceiling(
+            ProofApplicationSlotCeilings::GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+            context,
+        )
+        .expect("Galois statement");
+        let mut version_one_statement =
+            CanonicalTuple::decode(&bytes, &CanonicalDecodeLimits::default())
+                .expect("canonical Galois statement");
+        version_one_statement.schema_version = APPLICATION_STATEMENT_SCHEMA_VERSION;
+        let version_one_bytes = version_one_statement
+            .encode()
+            .expect("version-one alias encodes canonically");
+
+        assert_galois_statement_error(
+            &version_one_bytes,
+            context,
+            SelectedApplicationStatementError::WrongSchema,
         );
     }
 
@@ -3189,7 +3305,7 @@ mod tests {
         );
 
         let mut reordered_entries = entries.clone();
-        reordered_entries.swap(4, 5);
+        reordered_entries.swap(1, 2);
         assert_galois_statement_error(
             &replace_galois_entries(&statement, &reordered_entries),
             context,
@@ -3197,7 +3313,7 @@ mod tests {
         );
 
         let mut duplicate_position_entries = entries.clone();
-        duplicate_position_entries[7].items[0] = CanonicalItem::unsigned32(6);
+        duplicate_position_entries[2].items[0] = CanonicalItem::unsigned32(1);
         assert_galois_statement_error(
             &replace_galois_entries(&statement, &duplicate_position_entries),
             context,
@@ -3205,7 +3321,7 @@ mod tests {
         );
 
         let mut wrong_schema_entries = entries.clone();
-        wrong_schema_entries[3].schema_identifier ^= 1;
+        wrong_schema_entries[2].schema_identifier ^= 1;
         assert_galois_statement_error(
             &replace_galois_entries(&statement, &wrong_schema_entries),
             context,
@@ -3213,7 +3329,7 @@ mod tests {
         );
 
         let mut wrong_version_entries = entries.clone();
-        wrong_version_entries[3].schema_version += 1;
+        wrong_version_entries[2].schema_version += 1;
         assert_galois_statement_error(
             &replace_galois_entries(&statement, &wrong_version_entries),
             context,
@@ -3221,7 +3337,7 @@ mod tests {
         );
 
         let mut wrong_root_type_entries = entries.clone();
-        wrong_root_type_entries[9].items[1] = CanonicalItem::unsigned64(0);
+        wrong_root_type_entries[2].items[1] = CanonicalItem::unsigned64(0);
         assert_galois_statement_error(
             &replace_galois_entries(&statement, &wrong_root_type_entries),
             context,
@@ -3278,7 +3394,7 @@ mod tests {
         }
         assert_eq!(read_unsigned32(&entries[0].items[0]), Ok(0));
         assert_eq!(read_unsigned32(&entries[1].items[0]), Ok(0));
-        assert_eq!(read_unsigned32(&entries[4].items[0]), Ok(3));
+        assert_eq!(read_unsigned32(&entries[3].items[0]), Ok(2));
         assert!(
             canonical_selected_application_statement_for_ceiling(
                 ProofApplicationSlotCeilings::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
@@ -3350,7 +3466,7 @@ mod tests {
         );
 
         let mut wrong_position_entries = entries;
-        wrong_position_entries[4].items[0] = CanonicalItem::unsigned32(2);
+        wrong_position_entries[3].items[0] = CanonicalItem::unsigned32(1);
         let wrong_position = replace_evaluator_entries(&tuple, &wrong_position_entries);
         assert_eq!(
             decode_selected_application_statement(
@@ -3608,7 +3724,8 @@ mod tests {
         );
         let setup_proof_context_hash = [0x61; Hash512::BYTE_LENGTH];
         let participant_identity = [0x62; Hash512::BYTE_LENGTH];
-        let degree_zero_roots = (0..DATA_PRIMES.len())
+        let degree_zero_roots = (0..selected_sharing_limb_count()
+            .expect("selected sharing limb count"))
             .map(|ordinal| [0x70_u8.wrapping_add(ordinal as u8); Hash512::BYTE_LENGTH])
             .collect::<Vec<_>>();
         let anchor_roots = [

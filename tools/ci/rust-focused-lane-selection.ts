@@ -1,15 +1,11 @@
 import type { ActiveLocalRunLog } from './local-run-log.js';
-import {
-    acceptedSetupTestModulePattern,
-    heavyRustKernelTestNamePrefix,
-} from './rust-kernel-test-arguments.js';
+import { heavyRustKernelTestNamePrefix } from './rust-kernel-test-arguments.js';
 import {
     collectFocusedRustKernelTestInventory,
     type RustTestInventoryEntry,
 } from './rust-test-inventory.js';
 
 export const fullProfileEvidenceRustTests = [
-    'bgv::setup::tests::private_vss::private_vss_share_envelope_verifier_accepts_foundation_roster_succinct_private_share_proofs',
     'bgv::target_decryption::tests::evaluator_replay::prototype_profile_evaluator_replay_matches_plaintext_oracle_and_binds_target_roots',
 ] as const;
 
@@ -24,20 +20,15 @@ export const measurementRustTests = [
     'bgv::evaluator::noise_recurrence::tests::six_special_seven_data_block_minimum_three_pre_comparison_drop_search_reports_exact_finalists',
     'bgv::evaluator::noise_recurrence::tests::six_special_seven_data_block_prime_order_beam_search_reports_exact_candidates',
     'bgv::evaluator::top_k::tests::level_budget_probe::production_rank_lookup_level_budget_measurement',
-    'bgv::proof_suite::selected_accounting::tests::selected_exact_family_and_action_proof_accounting_reports_measurements',
-    'bgv::proof_suite::relation_plan::vss_range_candidate_comparison::selected_vss_range_candidates_report_exact_compiler_comparison',
-    'bgv::setup::limb_group_key_switch_atom::family_backend::bench::round_one_key_prover_cost',
 ] as const;
 
 type FocusedRustLane =
-    | 'rust-accepted-setup'
     | 'rust-full-profile-evidence'
     | 'rust-kernel-fast'
     | 'rust-kernel-heavy'
     | 'rust-measurements';
 
 export const focusedRustLaneScripts = {
-    'rust-accepted-setup': 'test:rust:kernel:accepted-setup',
     'rust-full-profile-evidence': 'test:rust:kernel:full-profile-evidence',
     'rust-kernel-fast': 'test:rust:kernel',
     'rust-kernel-heavy': 'test:rust:kernel:heavy',
@@ -49,9 +40,6 @@ const measurementTestSet = new Set<string>(measurementRustTests);
 
 const lanesForTest = (test: RustTestInventoryEntry): FocusedRustLane[] => {
     const lanes: FocusedRustLane[] = [];
-    if (test.testName.startsWith(`${acceptedSetupTestModulePattern}::`)) {
-        lanes.push('rust-accepted-setup');
-    }
     if (test.testName.includes(heavyRustKernelTestNamePrefix)) {
         lanes.push('rust-kernel-heavy');
     }

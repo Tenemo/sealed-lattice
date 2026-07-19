@@ -3,7 +3,7 @@
 //!
 //! Canonical statements and every witness source are derived from retained
 //! setup-generation authority. JavaScript receives only the generic prover
-//! adapter and a bounded, read-once source for the canonical public statement.
+//! adapter and an opaque retained source for the canonical public statement.
 
 use core::slice;
 use std::{cell::RefCell, collections::BTreeMap};
@@ -786,64 +786,6 @@ generation_entry_point!(
 );
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn sealed_lattice_setup_key_relation_generation_statement_byte_length(
-    statement_source_handle: u32,
-    status_pointer: *mut u32,
-) -> usize {
-    let result = SETUP_KEY_RELATION_GENERATION_STATEMENT_SOURCE_REGISTRY.with(|registry| {
-        Ok::<usize, CommonProofRuntimeError>(
-            registry
-                .borrow()
-                .source(statement_source_handle)?
-                .canonical_application_statement_bytes
-                .len(),
-        )
-    });
-    match result {
-        Ok(byte_length) => {
-            unsafe { write_status(status_pointer, 0) };
-            byte_length
-        }
-        Err(error) => {
-            unsafe {
-                write_status(
-                    status_pointer,
-                    super::runtime_ffi::runtime_error_status(error),
-                )
-            };
-            0
-        }
-    }
-}
-
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn sealed_lattice_setup_key_relation_generation_statement_copy_and_release(
-    statement_source_handle: u32,
-    output_pointer: *mut u8,
-    output_byte_length: usize,
-) -> u32 {
-    let result = (|| {
-        if output_pointer.is_null() || output_byte_length == 0 {
-            return Err(CommonProofRuntimeError::WrongVerificationBinding);
-        }
-        SETUP_KEY_RELATION_GENERATION_STATEMENT_SOURCE_REGISTRY.with(|registry| {
-            let mut registry = registry.borrow_mut();
-            let source = registry.source(statement_source_handle)?;
-            if source.canonical_application_statement_bytes.len() != output_byte_length {
-                return Err(CommonProofRuntimeError::WrongVerificationBinding);
-            }
-            let family = source.family;
-            let output = unsafe { slice::from_raw_parts_mut(output_pointer, output_byte_length) };
-            output.copy_from_slice(&source.canonical_application_statement_bytes);
-            let released = registry.take(statement_source_handle)?;
-            debug_assert_eq!(released.family, family);
-            Ok(())
-        })
-    })();
-    result.map_or_else(super::runtime_ffi::runtime_error_status, |()| 0)
-}
-
-#[unsafe(no_mangle)]
 pub extern "C" fn sealed_lattice_setup_key_relation_generation_statement_discard(
     statement_source_handle: u32,
 ) -> u32 {
@@ -924,81 +866,5 @@ mod tests {
             )),
             Err(CommonProofRuntimeError::AllocationLimitExceeded)
         ));
-    }
-
-    #[test]
-    fn statement_source_ffi_requires_an_exact_read_and_consumes_it_once() {
-        let statement_source_handle =
-            SETUP_KEY_RELATION_GENERATION_STATEMENT_SOURCE_REGISTRY.with(|registry| {
-                registry
-                    .borrow_mut()
-                    .retain(statement_source(
-                        SetupKeyRelationProofFamily::SameSecret,
-                        &[9, 8, 7, 6],
-                    ))
-                    .expect("statement source retains")
-            });
-        let mut status = u32::MAX;
-        let byte_length = unsafe {
-            sealed_lattice_setup_key_relation_generation_statement_byte_length(
-                statement_source_handle,
-                &raw mut status,
-            )
-        };
-        assert_eq!(status, 0);
-        assert_eq!(byte_length, 4);
-
-        let mut wrong_length_output = [0_u8; 3];
-        assert_ne!(
-            unsafe {
-                sealed_lattice_setup_key_relation_generation_statement_copy_and_release(
-                    statement_source_handle,
-                    wrong_length_output.as_mut_ptr(),
-                    wrong_length_output.len(),
-                )
-            },
-            0
-        );
-        assert_eq!(wrong_length_output, [0; 3]);
-        status = u32::MAX;
-        assert_eq!(
-            unsafe {
-                sealed_lattice_setup_key_relation_generation_statement_byte_length(
-                    statement_source_handle,
-                    &raw mut status,
-                )
-            },
-            4
-        );
-        assert_eq!(status, 0);
-
-        let mut exact_output = [0_u8; 4];
-        assert_eq!(
-            unsafe {
-                sealed_lattice_setup_key_relation_generation_statement_copy_and_release(
-                    statement_source_handle,
-                    exact_output.as_mut_ptr(),
-                    exact_output.len(),
-                )
-            },
-            0
-        );
-        assert_eq!(exact_output, [9, 8, 7, 6]);
-
-        status = 0;
-        assert_eq!(
-            unsafe {
-                sealed_lattice_setup_key_relation_generation_statement_byte_length(
-                    statement_source_handle,
-                    &raw mut status,
-                )
-            },
-            0
-        );
-        assert_ne!(status, 0);
-        assert_ne!(
-            sealed_lattice_setup_key_relation_generation_statement_discard(statement_source_handle),
-            0
-        );
     }
 }

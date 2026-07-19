@@ -11,12 +11,6 @@ const ciWorkflowPath = fileURLToPath(new URL('ci.yml', workflowDirectoryUrl));
 const releaseWorkflowPath = fileURLToPath(
     new URL('release.yml', workflowDirectoryUrl),
 );
-const tenParticipantEvidenceWorkflowPath = fileURLToPath(
-    new URL(
-        'ten-participant-accepted-setup-evidence.yml',
-        workflowDirectoryUrl,
-    ),
-);
 
 describe('CI workflow policy', () => {
     it('runs routine JavaScript and WASM checks after one workspace build', async () => {
@@ -29,32 +23,6 @@ describe('CI workflow policy', () => {
         expect(ciWorkflow).toMatch(/^ {4}routine:\r?$/mu);
         expect(ciWorkflow).toContain('run: pnpm run test:node:built');
         expect(ciWorkflow).toContain('run: pnpm run test:browser:built');
-    });
-
-    it('keeps ten-participant accepted-setup evidence out of pull request CI', async () => {
-        const [ciWorkflow, tenParticipantEvidenceWorkflow] = await Promise.all([
-            readFile(ciWorkflowPath, 'utf8'),
-            readFile(tenParticipantEvidenceWorkflowPath, 'utf8'),
-        ]);
-
-        expect(ciWorkflow).not.toContain(
-            'rust-ten-participant-accepted-setup-evidence',
-        );
-        expect(ciWorkflow).not.toContain(
-            'test:rust:kernel:accepted-setup:ten-participant-evidence',
-        );
-        expect(tenParticipantEvidenceWorkflow).toMatch(
-            /^on:\r?\n {4}workflow_dispatch:[ \t]*\r?$/mu,
-        );
-        expect(tenParticipantEvidenceWorkflow).not.toMatch(
-            /^ {4}(?:pull_request|push):/mu,
-        );
-        expect(tenParticipantEvidenceWorkflow).toContain(
-            'run: pnpm run test:rust:kernel:accepted-setup:ten-participant-evidence',
-        );
-        expect(tenParticipantEvidenceWorkflow).toContain(
-            'cancel-in-progress: false',
-        );
     });
 
     it('waits for exact-source CI before releasing without repeating the CI graph', async () => {
@@ -70,8 +38,35 @@ describe('CI workflow policy', () => {
             'run: pnpm exec tsx ./tools/ci/release-gates.ts await-ci',
         );
         expect(releaseWorkflow).not.toContain('pnpm run check');
-        expect(releaseWorkflow).not.toContain(
-            'pnpm run test:rust:kernel:accepted-setup',
+    });
+
+    it('uses the repository deploy key for the protected release push', async () => {
+        const releaseWorkflow = await readFile(releaseWorkflowPath, 'utf8');
+        const pushReleaseStart = releaseWorkflow.indexOf('    push-release:');
+        const publishNpmStart = releaseWorkflow.indexOf('    publish-npm:');
+
+        expect(pushReleaseStart).toBeGreaterThan(-1);
+        expect(publishNpmStart).toBeGreaterThan(pushReleaseStart);
+
+        const pushReleaseJob = releaseWorkflow.slice(
+            pushReleaseStart,
+            publishNpmStart,
         );
+
+        expect(pushReleaseJob).toContain('            contents: read');
+        expect(pushReleaseJob).not.toContain('contents: write');
+        expect(pushReleaseJob).toContain(
+            'RELEASE_DEPLOY_KEY: ${{ secrets.RELEASE_DEPLOY_KEY }}',
+        );
+        expect(pushReleaseJob).toContain('persist-credentials: true');
+        expect(pushReleaseJob).toContain(
+            'ssh-key: ${{ secrets.RELEASE_DEPLOY_KEY }}',
+        );
+        expect(pushReleaseJob).toContain(
+            'git remote set-url origin "git@github.com:${GITHUB_REPOSITORY}.git"',
+        );
+        expect(pushReleaseJob).toContain('git push --atomic origin');
+        expect(pushReleaseJob).not.toContain('GH_TOKEN');
+        expect(pushReleaseJob).not.toContain('gh auth setup-git');
     });
 });

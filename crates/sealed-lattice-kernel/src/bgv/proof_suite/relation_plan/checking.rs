@@ -10,7 +10,7 @@ use super::{
 };
 
 #[derive(Default)]
-struct ApplicationExtractorPhaseColumns {
+struct ApplicationChallengePhaseColumns {
     derived_base_columns: BTreeSet<u32>,
     derived_auxiliary_columns: BTreeSet<u32>,
 }
@@ -180,7 +180,7 @@ impl<'context> RelationPlanChecker<'context> {
         );
         #[cfg(test)]
         let phase_started = std::time::Instant::now();
-        let extractor_phase_columns = self.check_integer_lift_batches(
+        let challenge_phase_columns = self.check_integer_lift_batches(
             application_statement_schema_identifier,
             variant,
             &semantic_bounds,
@@ -192,10 +192,10 @@ impl<'context> RelationPlanChecker<'context> {
         );
         #[cfg(test)]
         let phase_started = std::time::Instant::now();
-        self.check_application_extractor_phase_ownership(variant, &extractor_phase_columns)?;
+        self.check_application_challenge_phase_ownership(variant, &challenge_phase_columns)?;
         #[cfg(test)]
         eprintln!(
-            "relation checker extractor ownership: {:?}",
+            "relation checker challenge-phase ownership: {:?}",
             phase_started.elapsed()
         );
         #[cfg(test)]

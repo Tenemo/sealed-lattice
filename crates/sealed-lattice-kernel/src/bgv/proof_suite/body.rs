@@ -11,7 +11,7 @@ use crate::foundation::{
 };
 
 use super::{
-    COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH,
+    COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH, ProofBaseFieldElement,
     committed_material::COMMITTED_MATERIAL_PHASE_PAIR_LEAF_SCHEMA_IDENTIFIER,
     decoder::{BoundedProofDecoder, ProofByteSource, ProofDecodeError},
     field::ProofChallengeExtensionElement,
@@ -20,7 +20,13 @@ use super::{
         ProofMerkleTreeContext, ProofOraclePhasePairLeaf, ProofTreeRole, ProofTreeValue,
         proof_merkle_node_hash_preimage,
     },
-    setup_public_polynomial::SETUP_PUBLIC_POLYNOMIAL_PHASE_PAIR_LEAF_SCHEMA_IDENTIFIER,
+    setup_public_polynomial::{
+        SETUP_PUBLIC_POLYNOMIAL_LEAF_HASH_DOMAIN, SETUP_PUBLIC_POLYNOMIAL_LEAF_SCHEMA_VERSION,
+        SETUP_PUBLIC_POLYNOMIAL_NODE_HASH_DOMAIN,
+        SETUP_PUBLIC_POLYNOMIAL_PHASE_PAIR_LEAF_SCHEMA_IDENTIFIER, SetupPublicPolynomialError,
+        canonical_setup_public_polynomial_phase_pair_leaf_bytes_from_iterators,
+        setup_public_polynomial_leaf_digest, setup_public_polynomial_merkle_node_digest,
+    },
     transcript::{
         CommonProofPrivacyMode, CommonProofQueryOpeningAbsorber, CommonProofTranscriptSchedule,
         TranscriptError,
@@ -29,6 +35,7 @@ use super::{
 
 pub(super) const PROOF_QUERY_OPENING_RECORD_SCHEMA_IDENTIFIER: u16 = 0x0107;
 pub(super) const PROOF_AUTHENTICATION_FRONTIER_SCHEMA_IDENTIFIER: u16 = 0x0108;
+pub(super) const PROOF_AUTHENTICATION_FRONTIER_SCHEMA_VERSION: u16 = 2;
 const SCHEMA_VERSION: u16 = 1;
 const COMMITTED_MATERIAL_ROW_WIDTH: u32 = 4;
 const AUTHENTICATION_DIGEST_BYTE_LENGTH: usize = 64;
@@ -38,10 +45,6 @@ const COMMITTED_MATERIAL_LEAF_HASH_DOMAIN: &str =
     "sealed-lattice/setup/vss-committed-material/phase-pair-leaf/v1";
 const COMMITTED_MATERIAL_NODE_HASH_DOMAIN: &str =
     "sealed-lattice/setup/vss-committed-material/merkle-node/v1";
-const SETUP_PUBLIC_POLYNOMIAL_LEAF_HASH_DOMAIN: &str =
-    "sealed-lattice/setup/public-polynomial/phase-pair-leaf/v1";
-const SETUP_PUBLIC_POLYNOMIAL_NODE_HASH_DOMAIN: &str =
-    "sealed-lattice/setup/public-polynomial/merkle-node/v1";
 const PROOF_HEADER_HASH_DOMAIN: &str = "sealed-lattice/proof/header/v1";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -137,6 +140,7 @@ enum ProofTreeConstruction {
     Common(ProofMerkleTreeContext),
     CommittedMaterial {
         material_context_hash: [u8; 64],
+        row_width: u32,
     },
     SetupPolynomial {
         public_polynomial_context_hash: [u8; 64],
@@ -155,6 +159,7 @@ pub(crate) enum ProofTreeOracleEquationNamespace {
     Common(Vec<u8>),
     CommittedMaterial {
         material_context_hash: [u8; 64],
+        row_width: u32,
     },
     SetupPolynomial {
         public_polynomial_context_hash: [u8; 64],
@@ -230,6 +235,13 @@ impl ProofTreeCatalogEntry {
         matches!(&self.construction, ProofTreeConstruction::Common(_))
     }
 
+    pub(crate) fn uses_setup_polynomial_construction(&self) -> bool {
+        matches!(
+            &self.construction,
+            ProofTreeConstruction::SetupPolynomial { .. }
+        )
+    }
+
     pub(crate) fn oracle_equation_namespace(
         &self,
     ) -> Result<ProofTreeOracleEquationNamespace, ProofBodyError> {
@@ -239,8 +251,10 @@ impl ProofTreeCatalogEntry {
             )),
             ProofTreeConstruction::CommittedMaterial {
                 material_context_hash,
+                row_width,
             } => Ok(ProofTreeOracleEquationNamespace::CommittedMaterial {
                 material_context_hash: *material_context_hash,
+                row_width: *row_width,
             }),
             ProofTreeConstruction::SetupPolynomial {
                 public_polynomial_context_hash,
@@ -259,7 +273,7 @@ impl ProofTreeCatalogEntry {
     pub(crate) fn materialized_row_width(&self) -> Result<usize, ProofBodyError> {
         let row_width = match &self.construction {
             ProofTreeConstruction::Common(context) => context.row_width(),
-            ProofTreeConstruction::CommittedMaterial { .. } => COMMITTED_MATERIAL_ROW_WIDTH,
+            ProofTreeConstruction::CommittedMaterial { row_width, .. } => *row_width,
             ProofTreeConstruction::SetupPolynomial { row_width, .. } => *row_width,
         };
         usize::try_from(row_width).map_err(|_| ProofBodyError::CountOverflow)
@@ -310,13 +324,13 @@ impl ProofTreeCatalogEntry {
             }
             ProofTreeConstruction::CommittedMaterial {
                 material_context_hash,
+                ..
             } => {
                 let salt = salt.ok_or(ProofBodyError::InvalidLeaf)?;
-                let canonical_bytes = canonical_statement_owned_leaf_bytes(
-                    COMMITTED_MATERIAL_PHASE_PAIR_LEAF_SCHEMA_IDENTIFIER,
+                let canonical_bytes = canonical_committed_material_phase_pair_leaf_bytes(
                     *material_context_hash,
                     leaf_index,
-                    Some(salt),
+                    salt,
                     first_point_values.as_slice(),
                     opposite_point_values.as_slice(),
                 )?;
@@ -333,18 +347,18 @@ impl ProofTreeCatalogEntry {
                 if salt.is_some() {
                     return Err(ProofBodyError::InvalidLeaf);
                 }
-                let canonical_bytes = canonical_statement_owned_leaf_bytes(
-                    SETUP_PUBLIC_POLYNOMIAL_PHASE_PAIR_LEAF_SCHEMA_IDENTIFIER,
-                    *public_polynomial_context_hash,
-                    leaf_index,
-                    None,
-                    first_point_values.as_slice(),
-                    opposite_point_values.as_slice(),
-                )?;
-                let digest = authentication::hash_canonical_leaf(
-                    SETUP_PUBLIC_POLYNOMIAL_LEAF_HASH_DOMAIN,
-                    &canonical_bytes,
-                )?;
+                validate_base_field_values(first_point_values.as_slice())?;
+                validate_base_field_values(opposite_point_values.as_slice())?;
+                let canonical_bytes =
+                    canonical_setup_public_polynomial_phase_pair_leaf_bytes_from_iterators(
+                        *public_polynomial_context_hash,
+                        leaf_index,
+                        first_point_values.iter().map(base_field_value),
+                        opposite_point_values.iter().map(base_field_value),
+                    )
+                    .map_err(|_| ProofBodyError::CanonicalEncoding)?;
+                let digest = setup_public_polynomial_leaf_digest(&canonical_bytes)
+                    .map_err(|_| ProofBodyError::CanonicalEncoding)?;
                 Ok((canonical_bytes, digest))
             }
         }
@@ -383,16 +397,17 @@ impl ProofTreeCatalogEntry {
             }
             ProofTreeConstruction::CommittedMaterial {
                 material_context_hash,
+                ..
             } => {
                 let salt = salt.ok_or(ProofBodyError::InvalidLeaf)?;
-                let canonical_bytes = Zeroizing::new(canonical_statement_owned_leaf_bytes(
-                    COMMITTED_MATERIAL_PHASE_PAIR_LEAF_SCHEMA_IDENTIFIER,
-                    *material_context_hash,
-                    leaf_index,
-                    Some(salt),
-                    first_point_values.as_slice(),
-                    opposite_point_values.as_slice(),
-                )?);
+                let canonical_bytes =
+                    Zeroizing::new(canonical_committed_material_phase_pair_leaf_bytes(
+                        *material_context_hash,
+                        leaf_index,
+                        salt,
+                        first_point_values.as_slice(),
+                        opposite_point_values.as_slice(),
+                    )?);
                 canonical_foundation_variable_bytes_hash_preimage(
                     COMMITTED_MATERIAL_LEAF_HASH_DOMAIN,
                     canonical_bytes.as_slice(),
@@ -406,14 +421,17 @@ impl ProofTreeCatalogEntry {
                 if salt.is_some() {
                     return Err(ProofBodyError::InvalidLeaf);
                 }
-                let canonical_bytes = Zeroizing::new(canonical_statement_owned_leaf_bytes(
-                    SETUP_PUBLIC_POLYNOMIAL_PHASE_PAIR_LEAF_SCHEMA_IDENTIFIER,
-                    *public_polynomial_context_hash,
-                    leaf_index,
-                    None,
-                    first_point_values.as_slice(),
-                    opposite_point_values.as_slice(),
-                )?);
+                validate_base_field_values(first_point_values.as_slice())?;
+                validate_base_field_values(opposite_point_values.as_slice())?;
+                let canonical_bytes = Zeroizing::new(
+                    canonical_setup_public_polynomial_phase_pair_leaf_bytes_from_iterators(
+                        *public_polynomial_context_hash,
+                        leaf_index,
+                        first_point_values.iter().map(base_field_value),
+                        opposite_point_values.iter().map(base_field_value),
+                    )
+                    .map_err(|_| ProofBodyError::CanonicalEncoding)?,
+                );
                 canonical_foundation_variable_bytes_hash_preimage(
                     SETUP_PUBLIC_POLYNOMIAL_LEAF_HASH_DOMAIN,
                     canonical_bytes.as_slice(),
@@ -440,8 +458,7 @@ impl ProofTreeCatalogEntry {
                     right_child_digest,
                 )?)
             }
-            ProofTreeConstruction::CommittedMaterial { .. }
-            | ProofTreeConstruction::SetupPolynomial { .. } => {
+            ProofTreeConstruction::CommittedMaterial { .. } => {
                 authentication::statement_owned_node_digest(
                     &self.construction,
                     level,
@@ -450,6 +467,28 @@ impl ProofTreeCatalogEntry {
                     right_child_digest,
                 )
             }
+            ProofTreeConstruction::SetupPolynomial {
+                public_polynomial_context_hash,
+                ..
+            } => setup_public_polynomial_merkle_node_digest(
+                *public_polynomial_context_hash,
+                level,
+                parent_index,
+                left_child_digest,
+                right_child_digest,
+            )
+            .map_err(|error| match error {
+                SetupPublicPolynomialError::CountOverflow => ProofBodyError::CountOverflow,
+                SetupPublicPolynomialError::AllocationLimitExceeded => {
+                    ProofBodyError::AllocationLimitExceeded
+                }
+                SetupPublicPolynomialError::InvalidContext
+                | SetupPublicPolynomialError::InvalidInput
+                | SetupPublicPolynomialError::InvalidLatticeAnchor
+                | SetupPublicPolynomialError::CanonicalEncoding
+                | SetupPublicPolynomialError::Field(_)
+                | SetupPublicPolynomialError::Polynomial(_) => ProofBodyError::CanonicalEncoding,
+            }),
         }
     }
 
@@ -492,29 +531,28 @@ impl ProofTreeCatalogEntry {
     }
 }
 
-fn canonical_statement_owned_leaf_bytes(
-    schema_identifier: u16,
+fn canonical_committed_material_phase_pair_leaf_bytes(
     context_hash: [u8; 64],
     leaf_index: u64,
-    salt: Option<[u8; COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH]>,
+    salt: [u8; COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH],
     first_point_values: &[ProofTreeValue],
     opposite_point_values: &[ProofTreeValue],
 ) -> Result<Vec<u8>, ProofBodyError> {
     let first_values = canonical_base_field_list(first_point_values)?;
     let opposite_values = canonical_base_field_list(opposite_point_values)?;
-    let mut items = Vec::with_capacity(if salt.is_some() { 5 } else { 4 });
-    items.push(CanonicalItem::hash512(context_hash));
-    items.push(CanonicalItem::unsigned64(leaf_index));
-    if let Some(salt) = salt {
-        items.push(
-            CanonicalItem::fixed_bytes(&salt).map_err(|_| ProofBodyError::CanonicalEncoding)?,
-        );
-    }
-    items.push(first_values);
-    items.push(opposite_values);
-    CanonicalTuple::new(schema_identifier, SCHEMA_VERSION, items)
-        .encode()
-        .map_err(|_| ProofBodyError::CanonicalEncoding)
+    CanonicalTuple::new(
+        COMMITTED_MATERIAL_PHASE_PAIR_LEAF_SCHEMA_IDENTIFIER,
+        SCHEMA_VERSION,
+        vec![
+            CanonicalItem::hash512(context_hash),
+            CanonicalItem::unsigned64(leaf_index),
+            CanonicalItem::fixed_bytes(salt).map_err(|_| ProofBodyError::CanonicalEncoding)?,
+            first_values,
+            opposite_values,
+        ],
+    )
+    .encode()
+    .map_err(|_| ProofBodyError::CanonicalEncoding)
 }
 
 fn canonical_base_field_list(values: &[ProofTreeValue]) -> Result<CanonicalItem, ProofBodyError> {
@@ -540,6 +578,24 @@ fn canonical_base_field_list(values: &[ProofTreeValue]) -> Result<CanonicalItem,
     }
     CanonicalItem::homogeneous_list(CanonicalItemType::FieldElement, &items)
         .map_err(|_| ProofBodyError::CanonicalEncoding)
+}
+
+fn validate_base_field_values(values: &[ProofTreeValue]) -> Result<(), ProofBodyError> {
+    if values.is_empty()
+        || values
+            .iter()
+            .any(|value| !matches!(value, ProofTreeValue::Base(_)))
+    {
+        return Err(ProofBodyError::InvalidLeaf);
+    }
+    Ok(())
+}
+
+fn base_field_value(value: &ProofTreeValue) -> ProofBaseFieldElement {
+    match value {
+        ProofTreeValue::Base(value) => *value,
+        ProofTreeValue::Extension(_) => unreachable!("base-field values were validated"),
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -703,6 +759,7 @@ pub(crate) fn build_complete_proof_tree_catalog(
                     ProofTreeCatalogSource::RelationBoundPublic,
                     ProofTreeConstruction::CommittedMaterial {
                         material_context_hash: *material_context_hash,
+                        row_width: COMMITTED_MATERIAL_ROW_WIDTH,
                     },
                     Some(*expected_root),
                 )?,

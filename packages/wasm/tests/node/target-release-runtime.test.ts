@@ -154,13 +154,8 @@ type FakeTargetReleaseRuntime = Readonly<{
     partialReadCalls: Array<
         Readonly<{ chunkIndex: number; roleOrdinal: number }>
     >;
-    reconstructedRoleCopyCalls: Array<
-        Readonly<{ handle: number; roleOrdinal: number }>
-    >;
-    reconstructedRoleCopyRefusal: {
-        roleOrdinal: number | undefined;
-        status: number;
-    };
+    reconstructedResultCopyCalls: number[];
+    reconstructedResultCopyRefusal: { status: number };
     reconstructionCalls: Array<
         Readonly<{
             finalityHandle: number;
@@ -199,13 +194,8 @@ const createFakeTargetReleaseRuntime = (): FakeTargetReleaseRuntime => {
     const partialReadCalls: Array<
         Readonly<{ chunkIndex: number; roleOrdinal: number }>
     > = [];
-    const reconstructedRoleCopyCalls: Array<
-        Readonly<{ handle: number; roleOrdinal: number }>
-    > = [];
-    const reconstructedRoleCopyRefusal: {
-        roleOrdinal: number | undefined;
-        status: number;
-    } = { roleOrdinal: undefined, status: 0 };
+    const reconstructedResultCopyCalls: number[] = [];
+    const reconstructedResultCopyRefusal = { status: 0 };
     const reconstructionCalls: Array<
         Readonly<{
             finalityHandle: number;
@@ -225,8 +215,8 @@ const createFakeTargetReleaseRuntime = (): FakeTargetReleaseRuntime => {
     const verificationTerminalSourceDiscards: number[] = [];
     const activeReconstructionHandles = new Set<number>();
     const activeVerifiedShareHandles = new Set<number>();
-    const copiedReconstructionRoles = new Map<number, number[]>();
-    let nextReconstructedTargetPairHandle = 60;
+    const copiedReconstructionResults = new Set<number>();
+    let nextReconstructedTargetResultHandle = 60;
     let nextVerifiedShareHandle = 46;
     let nextPointer = 1_024;
 
@@ -358,8 +348,10 @@ const createFakeTargetReleaseRuntime = (): FakeTargetReleaseRuntime => {
                 return 0;
             }
             if (
-                verifiedShareHandles.length !== 4 ||
-                new Set(verifiedShareHandles).size !== 4 ||
+                verifiedShareHandles.length < 4 ||
+                verifiedShareHandles.length > foundationProfile.participantCount ||
+                new Set(verifiedShareHandles).size !==
+                    verifiedShareHandles.length ||
                 !verifiedShareHandles.every((handle) =>
                     activeVerifiedShareHandles.has(handle),
                 )
@@ -374,59 +366,49 @@ const createFakeTargetReleaseRuntime = (): FakeTargetReleaseRuntime => {
             verifiedShareHandles.forEach((handle) => {
                 activeVerifiedShareHandles.delete(handle);
             });
-            const reconstructedTargetPairHandle =
-                nextReconstructedTargetPairHandle;
-            nextReconstructedTargetPairHandle += 1;
-            activeReconstructionHandles.add(reconstructedTargetPairHandle);
-            copiedReconstructionRoles.set(reconstructedTargetPairHandle, []);
+            const reconstructedTargetResultHandle =
+                nextReconstructedTargetResultHandle;
+            nextReconstructedTargetResultHandle += 1;
+            activeReconstructionHandles.add(reconstructedTargetResultHandle);
             writeWord(memory, statusPointer, 0);
-            return reconstructedTargetPairHandle;
+            return reconstructedTargetResultHandle;
         },
-        sealed_lattice_target_release_reconstructed_slot_count: (
-            reconstructedTargetPairHandle: number,
+        sealed_lattice_target_release_reconstructed_selected_option_count: (
+            reconstructedTargetResultHandle: number,
             statusPointer: number,
         ) => {
             const status = activeReconstructionHandles.has(
-                reconstructedTargetPairHandle,
+                reconstructedTargetResultHandle,
             )
                 ? 0
                 : refusalReasonCodes.consumedState;
             writeWord(memory, statusPointer, status);
-            return status === 0 ? 3 : 0;
+            return status === 0 ? 4 : 0;
         },
-        sealed_lattice_target_release_copy_reconstructed_role: (
-            reconstructedTargetPairHandle: number,
-            roleOrdinal: number,
+        sealed_lattice_target_release_copy_reconstructed_option_identifiers: (
+            reconstructedTargetResultHandle: number,
             outputPointer: number,
             outputByteLength: number,
             statusPointer: number,
         ) => {
-            reconstructedRoleCopyCalls.push(
-                Object.freeze({
-                    handle: reconstructedTargetPairHandle,
-                    roleOrdinal,
-                }),
-            );
+            reconstructedResultCopyCalls.push(reconstructedTargetResultHandle);
             let status = activeReconstructionHandles.has(
-                reconstructedTargetPairHandle,
+                reconstructedTargetResultHandle,
             )
                 ? 0
                 : refusalReasonCodes.consumedState;
-            if (
-                status === 0 &&
-                reconstructedRoleCopyRefusal.roleOrdinal === roleOrdinal
-            ) {
-                status = reconstructedRoleCopyRefusal.status;
+            if (status === 0 && reconstructedResultCopyRefusal.status !== 0) {
+                status = reconstructedResultCopyRefusal.status;
             }
             if (status !== 0) {
                 writeWord(memory, statusPointer, status);
                 return status;
             }
-            const slots =
-                roleOrdinal === 0 ? [101, 202, 303] : [7, 8, 9];
+            const orderedOptionIdentifiers = [5, 20, 2, 10];
             if (
                 outputByteLength !==
-                slots.length * Uint32Array.BYTES_PER_ELEMENT
+                orderedOptionIdentifiers.length *
+                    Uint32Array.BYTES_PER_ELEMENT
             ) {
                 writeWord(
                     memory,
@@ -440,51 +422,49 @@ const createFakeTargetReleaseRuntime = (): FakeTargetReleaseRuntime => {
                 outputPointer,
                 outputByteLength,
             );
-            slots.forEach((slot, slotIndex) => {
+            orderedOptionIdentifiers.forEach((optionIdentifier, optionIndex) => {
                 outputView.setUint32(
-                    slotIndex * Uint32Array.BYTES_PER_ELEMENT,
-                    slot,
+                    optionIndex * Uint32Array.BYTES_PER_ELEMENT,
+                    optionIdentifier,
                     true,
                 );
             });
-            copiedReconstructionRoles
-                .get(reconstructedTargetPairHandle)
-                ?.push(roleOrdinal);
+            copiedReconstructionResults.add(reconstructedTargetResultHandle);
             writeWord(memory, statusPointer, 0);
             return 0;
         },
         sealed_lattice_target_release_finish_reconstruction: (
-            reconstructedTargetPairHandle: number,
+            reconstructedTargetResultHandle: number,
         ) => {
-            reconstructionFinishes.push(reconstructedTargetPairHandle);
+            reconstructionFinishes.push(reconstructedTargetResultHandle);
             if (
                 !activeReconstructionHandles.has(
-                    reconstructedTargetPairHandle,
+                    reconstructedTargetResultHandle,
                 ) ||
-                copiedReconstructionRoles
-                    .get(reconstructedTargetPairHandle)
-                    ?.join(',') !== '0,1'
-            ) {
-                return refusalReasonCodes.consumedState;
-            }
-            activeReconstructionHandles.delete(
-                reconstructedTargetPairHandle,
-            );
-            copiedReconstructionRoles.delete(reconstructedTargetPairHandle);
-            return 0;
-        },
-        sealed_lattice_target_release_discard_reconstruction: (
-            reconstructedTargetPairHandle: number,
-        ) => {
-            reconstructionDiscards.push(reconstructedTargetPairHandle);
-            if (
-                !activeReconstructionHandles.delete(
-                    reconstructedTargetPairHandle,
+                !copiedReconstructionResults.has(
+                    reconstructedTargetResultHandle,
                 )
             ) {
                 return refusalReasonCodes.consumedState;
             }
-            copiedReconstructionRoles.delete(reconstructedTargetPairHandle);
+            activeReconstructionHandles.delete(
+                reconstructedTargetResultHandle,
+            );
+            copiedReconstructionResults.delete(reconstructedTargetResultHandle);
+            return 0;
+        },
+        sealed_lattice_target_release_discard_reconstruction: (
+            reconstructedTargetResultHandle: number,
+        ) => {
+            reconstructionDiscards.push(reconstructedTargetResultHandle);
+            if (
+                !activeReconstructionHandles.delete(
+                    reconstructedTargetResultHandle,
+                )
+            ) {
+                return refusalReasonCodes.consumedState;
+            }
+            copiedReconstructionResults.delete(reconstructedTargetResultHandle);
             return 0;
         },
         sealed_lattice_target_release_finish_verification: (
@@ -581,8 +561,8 @@ const createFakeTargetReleaseRuntime = (): FakeTargetReleaseRuntime => {
         generationSourceDiscards,
         kernel,
         partialReadCalls,
-        reconstructedRoleCopyCalls,
-        reconstructedRoleCopyRefusal,
+        reconstructedResultCopyCalls,
+        reconstructedResultCopyRefusal,
         reconstructionCalls,
         reconstructionDiscards,
         reconstructionFinishes,
@@ -879,9 +859,9 @@ describe('target-release closed-worker lifecycle', () => {
         expect(runtime.allocations.size).toBe(0);
     });
 
-    it('consumes four distinct shares and copies the paired logical slots in fixed order', async () => {
+    it('consumes distinct shares and returns only canonical identifiers in rank order', async () => {
         const runtime = createFakeTargetReleaseRuntime();
-        const shares = await mintVerifiedTargetReleaseShares(runtime);
+        const shares = await mintVerifiedTargetReleaseShares(runtime, 7);
 
         const result = reconstructTargetReleaseInClosedWorker({
             finalizedTargetIdentifierBytes: Uint8Array.of(0x41, 0x42),
@@ -897,17 +877,13 @@ describe('target-release closed-worker lifecycle', () => {
                 finalitySessionHandle: 17,
                 targetIdentifierBytes: [0x41, 0x42],
                 targetOrderBytes: [0x51, 0x52],
-                verifiedShareHandles: [46, 47, 48, 49],
+                verifiedShareHandles: [46, 47, 48, 49, 50, 51, 52],
             },
         ]);
-        expect(runtime.reconstructedRoleCopyCalls).toEqual([
-            { handle: 60, roleOrdinal: 0 },
-            { handle: 60, roleOrdinal: 1 },
+        expect(runtime.reconstructedResultCopyCalls).toEqual([60]);
+        expect(Array.from(result.orderedOptionIdentifiers)).toEqual([
+            5, 20, 2, 10,
         ]);
-        expect(Array.from(result.targetIdentifierSlots)).toEqual([
-            101, 202, 303,
-        ]);
-        expect(Array.from(result.targetOrderSlots)).toEqual([7, 8, 9]);
         expect(runtime.reconstructionFinishes).toEqual([60]);
         expect(runtime.reconstructionDiscards).toEqual([]);
         expect(runtime.verifiedShareDiscards).toEqual([]);
@@ -915,6 +891,54 @@ describe('target-release closed-worker lifecycle', () => {
             expect(() => share.release()).toThrow('consumedState');
         }
         expect(runtime.allocations.size).toBe(0);
+    });
+
+    it('accepts all ten verified shares without letting relay order change the result', async () => {
+        const firstRuntime = createFakeTargetReleaseRuntime();
+        const firstShares = await mintVerifiedTargetReleaseShares(
+            firstRuntime,
+            foundationProfile.participantCount,
+        );
+        const firstRelayOrder = [
+            firstShares[9]!,
+            firstShares[1]!,
+            firstShares[7]!,
+            firstShares[3]!,
+            firstShares[5]!,
+            firstShares[0]!,
+            firstShares[8]!,
+            firstShares[2]!,
+            firstShares[6]!,
+            firstShares[4]!,
+        ];
+        const firstResult = reconstructTargetReleaseInClosedWorker({
+            finalizedTargetIdentifierBytes: Uint8Array.of(0x41),
+            finalizedTargetOrderBytes: Uint8Array.of(0x51),
+            kernel: firstRuntime.kernel,
+            verifiedFinality: Object.freeze({}) as never,
+            verifiedShares: firstRelayOrder,
+        });
+        expect(
+            firstRuntime.reconstructionCalls[0]?.verifiedShareHandles,
+        ).toEqual([55, 47, 53, 49, 51, 46, 54, 48, 52, 50]);
+
+        const secondRuntime = createFakeTargetReleaseRuntime();
+        const secondShares = await mintVerifiedTargetReleaseShares(
+            secondRuntime,
+            foundationProfile.participantCount,
+        );
+        const secondResult = reconstructTargetReleaseInClosedWorker({
+            finalizedTargetIdentifierBytes: Uint8Array.of(0x41),
+            finalizedTargetOrderBytes: Uint8Array.of(0x51),
+            kernel: secondRuntime.kernel,
+            verifiedFinality: Object.freeze({}) as never,
+            verifiedShares: secondShares,
+        });
+        expect(Array.from(firstResult.orderedOptionIdentifiers)).toEqual(
+            Array.from(secondResult.orderedOptionIdentifiers),
+        );
+        expect(firstRuntime.allocations.size).toBe(0);
+        expect(secondRuntime.allocations.size).toBe(0);
     });
 
     it('rejects incomplete and repeated share selections before transferring ownership', async () => {
@@ -966,6 +990,33 @@ describe('target-release closed-worker lifecycle', () => {
         expect(runtime.allocations.size).toBe(0);
     });
 
+    it('rejects more verified shares than the fixed roster before transferring ownership', async () => {
+        const runtime = createFakeTargetReleaseRuntime();
+        const shares = await mintVerifiedTargetReleaseShares(
+            runtime,
+            foundationProfile.participantCount + 1,
+        );
+
+        expect(() =>
+            reconstructTargetReleaseInClosedWorker({
+                finalizedTargetIdentifierBytes: Uint8Array.of(0x41),
+                finalizedTargetOrderBytes: Uint8Array.of(0x51),
+                kernel: runtime.kernel,
+                verifiedFinality: Object.freeze({}) as never,
+                verifiedShares: shares,
+            }),
+        ).toThrow('wrongTypeOrLength');
+        expect(runtime.reconstructionCalls).toEqual([]);
+
+        for (const share of shares) {
+            share.release();
+        }
+        expect(runtime.verifiedShareDiscards).toEqual([
+            46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56,
+        ]);
+        expect(runtime.allocations.size).toBe(0);
+    });
+
     it('retires every poisoned share after reconstruction refusal', async () => {
         const runtime = createFakeTargetReleaseRuntime();
         const shares = await mintVerifiedTargetReleaseShares(runtime);
@@ -996,11 +1047,10 @@ describe('target-release closed-worker lifecycle', () => {
         expect(runtime.allocations.size).toBe(0);
     });
 
-    it('discards the paired result when the second fixed role cannot be copied', async () => {
+    it('discards the reconstructed result when its canonical identifiers cannot be copied', async () => {
         const runtime = createFakeTargetReleaseRuntime();
         const shares = await mintVerifiedTargetReleaseShares(runtime);
-        runtime.reconstructedRoleCopyRefusal.roleOrdinal = 1;
-        runtime.reconstructedRoleCopyRefusal.status =
+        runtime.reconstructedResultCopyRefusal.status =
             refusalReasonCodes.wrongHashOrRoot;
 
         let copyFailure: unknown;
@@ -1019,13 +1069,10 @@ describe('target-release closed-worker lifecycle', () => {
         expect(copyFailure).toMatchObject({
             refusalReason: 'wrongHashOrRoot',
         });
-        expect(runtime.reconstructedRoleCopyCalls).toEqual([
-            { handle: 60, roleOrdinal: 0 },
-            { handle: 60, roleOrdinal: 1 },
-        ]);
+        expect(runtime.reconstructedResultCopyCalls).toEqual([60]);
         expect(runtime.reconstructionFinishes).toEqual([]);
         expect(runtime.reconstructionDiscards).toEqual([60]);
-        expect(runtime.verifiedShareDiscards).toEqual([46, 47, 48, 49]);
+        expect(runtime.verifiedShareDiscards).toEqual([]);
         for (const share of shares) {
             expect(() => share.release()).toThrow('consumedState');
         }

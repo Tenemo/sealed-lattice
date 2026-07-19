@@ -2,8 +2,9 @@ use std::rc::Rc;
 
 use super::*;
 use crate::foundation::{
-    ACTION_RANDOMNESS_ROOT_BYTE_LENGTH, ActionRandomnessDerivationInput, ActionRandomnessRoot,
-    ParticipantIdentity, PersistentProofCoinInput, ProofApplicationSlot,
+    ACTION_RANDOMNESS_ROOT_BYTE_LENGTH, ActionPrivateRandomness, ActionRandomnessDerivationInput,
+    ActionRandomnessRoot, ParticipantIdentity, PersistentProofCoinInput,
+    PrivateRandomnessAttemptIdentifier, ProofApplicationSlot,
 };
 
 fn base(value: u64) -> ProofBaseFieldElement {
@@ -401,6 +402,190 @@ fn proof_header_delegates_to_the_foundation_schema() {
         canonical_proof_object_header_bytes(&[]),
         Err(CommonProofProverError::InvalidInput)
     );
+}
+
+fn test_common_proof_private_coin_authority() -> (
+    Rc<ActionPrivateRandomness>,
+    PrivateRandomnessAttemptIdentifier,
+    Hash512,
+) {
+    let suite_identifier = Hash512::from_bytes([0x81; 64]);
+    let ceremony_context_hash = Hash512::from_bytes([0x82; 64]);
+    let action_context_hash = Hash512::from_bytes([0x83; 64]);
+    let participant_identity =
+        ParticipantIdentity::from_bytes([0x84; ParticipantIdentity::BYTE_LENGTH]);
+    let action_private_randomness = Rc::new(
+        ActionRandomnessRoot::from_injected_bytes(Zeroizing::new(
+            [0x85; ACTION_RANDOMNESS_ROOT_BYTE_LENGTH],
+        ))
+        .derive(ActionRandomnessDerivationInput::new(
+            suite_identifier,
+            ceremony_context_hash,
+            action_context_hash,
+            participant_identity,
+        ))
+        .expect("test action private randomness derives"),
+    );
+    let application_slot = ProofApplicationSlot::new(
+        suite_identifier,
+        ceremony_context_hash,
+        action_context_hash,
+        0x1211,
+        Some(3),
+        None,
+        None,
+    )
+    .expect("test proof slot is assigned");
+    let attempt_input =
+        PersistentProofCoinInput::new(application_slot, Hash512::from_bytes([0x86; 64]))
+            .expect("test proof attempt input is valid");
+    let mut witness_binding = action_private_randomness
+        .begin_persistent_proof_witness_coin_binding(&attempt_input)
+        .expect("test proof witness binding starts");
+    witness_binding
+        .absorb_canonical_bytes(b"sealed-lattice/test/private-coin-replay-span/v1")
+        .expect("test witness domain is absorbed");
+    witness_binding
+        .absorb_canonical_u64_values(&[1, 2, 3, 5, 8, 13])
+        .expect("test witness is absorbed");
+    let attempt_identifier = witness_binding
+        .finish()
+        .expect("test proof attempt derives");
+    (
+        action_private_randomness,
+        attempt_identifier,
+        Hash512::from_bytes([0x87; 64]),
+    )
+}
+
+fn test_common_proof_private_coin_source() -> PrivateRandomnessCommonProofCoinSource {
+    let (action_private_randomness, attempt_identifier, derivation_context_hash) =
+        test_common_proof_private_coin_authority();
+    PrivateRandomnessCommonProofCoinSource::new(
+        action_private_randomness,
+        0x1211,
+        derivation_context_hash,
+        attempt_identifier,
+        CommonProofPrivateCoinCoordinateCapacity::for_test(2, 1, 1, true),
+    )
+    .expect("test common-proof private-coin source starts")
+}
+
+#[test]
+fn private_coin_replay_span_is_exact_single_source_and_attempt_poisoning() {
+    let trace_coordinate =
+        CommonProofPrivateCoinCoordinate::mask(1, 0).expect("trace coordinate is assigned");
+    let telescoping_coordinate =
+        CommonProofPrivateCoinCoordinate::mask(2, 0).expect("telescoping coordinate is assigned");
+    let opening_coordinate =
+        CommonProofPrivateCoinCoordinate::mask(3, 0).expect("opening coordinate is assigned");
+    let proof_salt_coordinate = CommonProofPrivateCoinCoordinate::proof_salt();
+
+    let mut source = test_common_proof_private_coin_source();
+    let capture_start = source
+        .begin_all_coordinate_replay_span()
+        .expect("the first replay capture starts");
+    assert!(matches!(
+        source.begin_all_coordinate_replay_span(),
+        Err(PrivateRandomnessCommonProofCoinError::ReplaySpanAlreadyActive),
+    ));
+    let expected_trace = source
+        .sample_modulo(trace_coordinate, super::super::PROOF_BASE_FIELD_MODULUS, 64)
+        .expect("trace coin is sampled");
+    let expected_telescoping = source
+        .sample_modulo(
+            telescoping_coordinate,
+            super::super::PROOF_BASE_FIELD_MODULUS,
+            64,
+        )
+        .expect("telescoping coin is sampled");
+    let expected_opening = source
+        .sample_modulo(
+            opening_coordinate,
+            super::super::PROOF_BASE_FIELD_MODULUS,
+            64,
+        )
+        .expect("opening coin is sampled");
+    let mut expected_salt = [0_u8; COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH];
+    source
+        .fill_raw_bytes(proof_salt_coordinate, &mut expected_salt)
+        .expect("proof salt is sampled");
+    let span = source
+        .finish_all_coordinate_replay_span(capture_start)
+        .expect("the complete replay span is sealed");
+
+    let mut other_source = test_common_proof_private_coin_source();
+    assert_eq!(
+        other_source.restore_all_coordinate_replay_span(&span),
+        Err(PrivateRandomnessCommonProofCoinError::ReplaySourceMismatch),
+    );
+
+    source
+        .restore_all_coordinate_replay_span(&span)
+        .expect("the exact source restores its span start");
+    assert_eq!(
+        source
+            .sample_modulo(trace_coordinate, super::super::PROOF_BASE_FIELD_MODULUS, 64)
+            .expect("trace replay is sampled"),
+        expected_trace,
+    );
+    assert_eq!(
+        source
+            .sample_modulo(
+                telescoping_coordinate,
+                super::super::PROOF_BASE_FIELD_MODULUS,
+                64,
+            )
+            .expect("telescoping replay is sampled"),
+        expected_telescoping,
+    );
+    assert_eq!(
+        source
+            .sample_modulo(
+                opening_coordinate,
+                super::super::PROOF_BASE_FIELD_MODULUS,
+                64
+            )
+            .expect("opening replay is sampled"),
+        expected_opening,
+    );
+    let mut replayed_salt = [0_u8; COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH];
+    source
+        .fill_raw_bytes(proof_salt_coordinate, &mut replayed_salt)
+        .expect("proof salt replay is sampled");
+    assert_eq!(replayed_salt, expected_salt);
+    source
+        .complete_all_coordinate_replay_span(&span)
+        .expect("the exact terminal cursor catalog closes the replay");
+
+    let incomplete_capture_start = source
+        .begin_all_coordinate_replay_span()
+        .expect("a second capture starts after exact completion");
+    source
+        .sample_modulo(trace_coordinate, super::super::PROOF_BASE_FIELD_MODULUS, 64)
+        .expect("the second span advances one coordinate");
+    let incomplete_span = source
+        .finish_all_coordinate_replay_span(incomplete_capture_start)
+        .expect("the second span is sealed");
+    source
+        .restore_all_coordinate_replay_span(&incomplete_span)
+        .expect("the second span start restores");
+    assert_eq!(
+        source.complete_all_coordinate_replay_span(&incomplete_span),
+        Err(PrivateRandomnessCommonProofCoinError::ReplayCursorMismatch),
+    );
+    assert_eq!(
+        source.sample_modulo(trace_coordinate, super::super::PROOF_BASE_FIELD_MODULUS, 64),
+        Err(PrivateRandomnessCommonProofCoinError::ReplayAttemptInvalidated),
+    );
+    assert!(matches!(
+        source.capture_proof_salt_replay_cursor(),
+        Err(PrivateRandomnessCommonProofCoinError::ReplayAttemptInvalidated),
+    ));
+    assert!(matches!(
+        source.begin_all_coordinate_replay_span(),
+        Err(PrivateRandomnessCommonProofCoinError::ReplayAttemptInvalidated),
+    ));
 }
 
 #[test]

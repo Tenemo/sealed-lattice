@@ -9,6 +9,8 @@ use aggregation::*;
 use encryption::*;
 pub(crate) use request::direct_ballot_slots;
 
+use crate::foundation::FOUNDATION_PROFILE;
+
 #[cfg(test)]
 use crate::bgv::{
     evaluator::engine::{ciphertext_add, encode_slots_to_coefficients},
@@ -22,13 +24,13 @@ use crate::{
     hashing::hash512_hex,
 };
 
-const OPTION_COUNT: usize = 20;
+const OPTION_COUNT: usize = FOUNDATION_PROFILE.option_count as usize;
 #[cfg(test)]
 const PAIR_COUNT: usize = OPTION_COUNT * (OPTION_COUNT - 1) / 2;
 // pub(crate): the setup-parameter identity binds the bounded-domain evaluator
 // profile (score span times roster size) from these score-domain constants.
-pub(crate) const MINIMUM_SCORE: u64 = 1;
-pub(crate) const MAXIMUM_SCORE: u64 = 10;
+pub(crate) const MINIMUM_SCORE: u64 = FOUNDATION_PROFILE.minimum_score as u64;
+pub(crate) const MAXIMUM_SCORE: u64 = FOUNDATION_PROFILE.maximum_score as u64;
 #[cfg(test)]
 const SCORE_BUCKET_COUNT: usize = (MAXIMUM_SCORE - MINIMUM_SCORE + 1) as usize;
 

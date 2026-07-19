@@ -583,11 +583,22 @@ pub(crate) fn canonical_leaf_byte_length(
                 .and_then(|length| length.checked_add(salt_item_byte_length))
                 .ok_or(ProofBodyError::CountOverflow)
         }
-        ProofTreeConstruction::CommittedMaterial { .. } => Ok(234),
+        ProofTreeConstruction::CommittedMaterial { row_width, .. } => {
+            let row_width =
+                usize::try_from(*row_width).map_err(|_| ProofBodyError::CountOverflow)?;
+            122_usize
+                .checked_add(COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH)
+                .and_then(|fixed_byte_length| {
+                    row_width
+                        .checked_mul(16)
+                        .and_then(|row_byte_length| fixed_byte_length.checked_add(row_byte_length))
+                })
+                .ok_or(ProofBodyError::CountOverflow)
+        }
         ProofTreeConstruction::SetupPolynomial { row_width, .. } => {
             let row_width =
                 usize::try_from(*row_width).map_err(|_| ProofBodyError::CountOverflow)?;
-            116_usize
+            104_usize
                 .checked_add(
                     row_width
                         .checked_mul(16)

@@ -33,6 +33,25 @@ fn check_context() -> RelationPlanCheckContext {
 fn committed_material_check_context() -> RelationPlanCheckContext {
     let evaluation_domain_size = 1_024_u64;
     let maximum_two_adic_order = 1_u64 << 32;
+    let quotient_component_count = 16_u64;
+    let unique_query_count = 1_u64;
+    let deep_point_count = 1_u64;
+    let relation_input = committed_material_input();
+    let rounded_mask_degree = quotient_component_count
+        .checked_add(1)
+        .and_then(|count| count.checked_mul(relation_input.trace_mask_degree_bound_exclusive))
+        .and_then(|degree| degree.checked_add(quotient_component_count - 1))
+        .and_then(|degree| degree.checked_div(quotient_component_count))
+        .expect("test quotient mask degree derives");
+    let quotient_decomposition_stride = relation_input
+        .relation_trace_domain_size()
+        .expect("test relation trace domain derives")
+        .checked_add(rounded_mask_degree)
+        .expect("test quotient decomposition stride derives");
+    let minimum_telescoping_mask_degree_bound_exclusive = unique_query_count
+        .checked_mul(2)
+        .and_then(|query_coordinate_count| query_coordinate_count.checked_add(deep_point_count))
+        .expect("test telescoping mask degree derives");
     RelationPlanCheckContext {
         base_field_modulus: crate::bgv::proof_suite::PROOF_BASE_FIELD_MODULUS,
         challenge_extension_degree: crate::bgv::proof_suite::PROOF_CHALLENGE_EXTENSION_DEGREE
@@ -44,12 +63,16 @@ fn committed_material_check_context() -> RelationPlanCheckContext {
             crate::bgv::proof_suite::PROOF_BASE_FIELD_MODULUS,
         ),
         evaluation_coset_offset: 7,
-        deep_point_count: 1,
-        quotient_component_count: 16,
-        quotient_component_degree_bound_exclusive: 64,
+        deep_point_count: u16::try_from(deep_point_count).expect("test deep-point count fits"),
+        quotient_component_count: u32::try_from(quotient_component_count)
+            .expect("test quotient component count fits"),
+        quotient_component_degree_bound_exclusive: quotient_decomposition_stride
+            .checked_add(minimum_telescoping_mask_degree_bound_exclusive)
+            .expect("test quotient component degree bound derives"),
         fri_fold_count: 6,
         final_polynomial_degree_bound_exclusive: 8,
-        unique_query_count: 1,
+        unique_query_count: u32::try_from(unique_query_count)
+            .expect("test unique-query count fits"),
         non_native_modular_identity_challenge_count: 1,
         maximum_fiat_shamir_candidate_draws_per_output: 128,
         resolved_moduli: vec![ResolvedSuiteModulus::new(
@@ -70,15 +93,16 @@ fn trace_zeroifier_check_context() -> RelationPlanCheckContext {
 }
 
 fn committed_material_input() -> CommittedMaterialRelationPlanInput {
+    let ring_degree = 64_u64;
     CommittedMaterialRelationPlanInput {
-        ring_degree: 32,
+        ring_degree,
         evaluation_domain_size: 1_024,
         opening_degree_bound_exclusive: 512,
         material_column_degree_bound_exclusive: 10,
         participant_count: 3,
         threshold: 2,
         sharing_data_modulus_indices: vec![0],
-        trace_mask_degree_bound_exclusive: 14,
+        trace_mask_degree_bound_exclusive: ring_degree / 2,
     }
 }
 
@@ -688,19 +712,19 @@ fn bound_checker_derives_trinary_and_recomposition_intervals() {
 }
 
 #[test]
-fn bound_checker_derives_mixed_top_digit_recomposition_interval() {
-    let ordered_nonary_values = (0..9).map(BigInt::from).collect::<Vec<_>>();
-    let (nonary_expression, ordered_nonary_factor_expressions) =
-        finite_integer_set_constraint_expressions(0, &ordered_nonary_values, TEST_BASE_FIELD)
-            .expect("nonary constraint expression");
+fn bound_checker_derives_finite_set_and_recomposition_intervals() {
+    let ordered_finite_set_values = (0..9).map(BigInt::from).collect::<Vec<_>>();
+    let (finite_set_expression, ordered_finite_set_factor_expressions) =
+        finite_integer_set_constraint_expressions(0, &ordered_finite_set_values, TEST_BASE_FIELD)
+            .expect("finite-set constraint expression");
     let constraints = vec![
         RelationConstraintDescriptor {
             constraint_role: 1,
             role_coordinates: Vec::new(),
-            numerator_postfix_expression: nonary_expression,
+            numerator_postfix_expression: finite_set_expression,
             zeroifier_postfix_expression: full_trace_zeroifier_expression(16),
             enforce_proof_base_field_no_wrap: false,
-            ordered_injective_integer_factor_expressions: ordered_nonary_factor_expressions,
+            ordered_injective_integer_factor_expressions: ordered_finite_set_factor_expressions,
         },
         bound_constraint(2, trinary_constraint_expression(1)),
         bound_constraint(
@@ -716,7 +740,7 @@ fn bound_checker_derives_mixed_top_digit_recomposition_interval() {
             claimed_interval: SignedIntegerInterval::new(0, 8),
             bound_certificate: RelationBoundCertificate::FiniteIntegerSet {
                 constraint_ordinal: 0,
-                ordered_values: ordered_nonary_values,
+                ordered_values: ordered_finite_set_values,
             },
         },
         SemanticCellDescriptor {
@@ -831,6 +855,15 @@ fn bound_checker_rejects_self_attested_or_mismatched_intervals() {
 fn generated_committed_material_plans_cover_the_exact_root_directions() {
     let context = committed_material_check_context();
     let input = committed_material_input();
+    assert_eq!(
+        input
+            .relation_trace_domain_size()
+            .expect("factor-four relation trace domain"),
+        input
+            .message_trace_domain_size()
+            .expect("message trace domain")
+            * committed_material::COMMITTED_MATERIAL_TRACE_PACKING_FACTOR,
+    );
     let vss_plan = compile_vss_share_linkage_relation_plan(&input, &context)
         .expect("exact VSS share-linkage relation plan");
     let aggregate_plan = compile_aggregate_threshold_share_relation_plan(&input, &context)
@@ -864,6 +897,50 @@ fn generated_committed_material_plans_cover_the_exact_root_directions() {
             .canonical_hash()
             .expect("aggregate plan hash")
     );
+
+    for plan in [&vss_plan, &aggregate_plan] {
+        let variant = &plan.variants()[0];
+        let expected_base_oracle_columns = variant
+            .ordered_columns
+            .iter()
+            .enumerate()
+            .filter_map(|(column_ordinal, column)| {
+                matches!(column.origin, RelationColumnOrigin::Prover)
+                    .then(|| u32::try_from(column_ordinal).expect("column ordinal fits"))
+            })
+            .collect::<Vec<_>>();
+        let proof_created_trees = variant
+            .ordered_trees
+            .iter()
+            .filter_map(|tree| match tree {
+                RelationTreeDescriptor::ProofCreated {
+                    proof_tree_role,
+                    ordered_column_ordinals,
+                } => Some((*proof_tree_role, ordered_column_ordinals.as_slice())),
+                RelationTreeDescriptor::BoundPublic { .. } => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            proof_created_trees,
+            vec![(1, expected_base_oracle_columns.as_slice())],
+            "every proof-created committed-material column shares one base-oracle leaf"
+        );
+
+        let transcript_schedule = variant
+            .common_proof_transcript_schedule(&context)
+            .expect("committed-material transcript schedule");
+        assert_eq!(
+            usize::try_from(transcript_schedule.opening_claim_count())
+                .expect("opening-claim count fits"),
+            variant.ordered_opening_claims.len(),
+            "the one initial FRI polynomial consumes every ordered DEEP claim"
+        );
+        assert_eq!(
+            transcript_schedule.fri_fold_count(),
+            context.fri_fold_count,
+            "the committed-material proof carries one schedule-fixed fold chain"
+        );
+    }
 
     let vss_bound_uses = vss_plan.variants()[0]
         .ordered_trees
@@ -1062,7 +1139,7 @@ fn generated_plan_checker_rejects_rotated_factor_and_opening_catalog_tampering()
 }
 
 #[test]
-fn application_extractor_rejects_semantic_witness_first_committed_after_challenge() {
+fn relation_plan_rejects_semantic_witness_first_committed_after_challenge() {
     let context = committed_material_check_context();
     let input = committed_material_input();
     let mut plan = compile_vss_share_linkage_relation_plan(&input, &context)

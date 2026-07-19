@@ -381,12 +381,14 @@ impl VerifiedEvaluatorKeyReplay {
                 return Err(RefusalReason::WrongTypeOrLength);
             }
         }
-        let key = self
+        let key_builder = self
             .key_builder
             .take()
-            .ok_or(RefusalReason::ConsumedState)?
-            .finish()
+            .ok_or(RefusalReason::ConsumedState)?;
+        let ntt_transform_count = key_builder
+            .transformed_limb_count()
             .map_err(canonical_replay_refusal)?;
+        let key = key_builder.finish().map_err(canonical_replay_refusal)?;
         Ok(VerifiedEvaluatorKeyContext {
             evaluator_replay_context_hash: self
                 .common_component_authority
@@ -394,6 +396,7 @@ impl VerifiedEvaluatorKeyReplay {
             _resident_key_guard: self.resident_key_guard,
             position: self.position,
             key,
+            ntt_transform_count,
         })
     }
 }
@@ -406,6 +409,7 @@ pub(crate) struct VerifiedEvaluatorKeyContext {
     _resident_key_guard: ResidentEvaluatorKeyGuard,
     position: SelectedEvaluatorEntryPosition,
     key: KeySwitchKey,
+    ntt_transform_count: usize,
 }
 
 impl VerifiedEvaluatorKeyContext {
@@ -433,6 +437,10 @@ impl VerifiedEvaluatorKeyContext {
 
     pub(crate) const fn resolver_context_hash(&self) -> [u8; 64] {
         self.evaluator_replay_context_hash
+    }
+
+    pub(crate) const fn ntt_transform_count(&self) -> usize {
+        self.ntt_transform_count
     }
 }
 

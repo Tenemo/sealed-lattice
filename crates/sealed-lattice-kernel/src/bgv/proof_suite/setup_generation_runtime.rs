@@ -8,10 +8,15 @@
 
 use crate::{
     bgv::setup::{
-        SetupGenerationAuthorityHandle, SetupGenerationRecipientPayloadSourceHandle,
-        cancel_setup_generation_recipient_vss_payload, open_setup_generation_recipient_vss_payload,
+        SetupGenerationAuthorityHandle, SetupGenerationPublicKeyShareSourceHandle,
+        SetupGenerationRecipientPayloadSourceHandle, cancel_setup_generation_public_key_share_body,
+        cancel_setup_generation_recipient_vss_payload, open_setup_generation_public_key_share_body,
+        open_setup_generation_recipient_vss_payload,
         populate_browser_owned_setup_generation_authority,
+        read_setup_generation_public_key_share_body,
         read_setup_generation_recipient_vss_payload_chunk, release_setup_generation_authority,
+        setup_generation_public_key_share_body_byte_length,
+        setup_generation_public_key_share_source_byte_length,
         setup_generation_recipient_vss_payload_byte_length,
         setup_generation_recipient_vss_payload_source_byte_length,
         setup_generation_recipient_vss_payload_source_recipient_roster_position,
@@ -112,6 +117,56 @@ pub(crate) fn begin_setup_generation_authority(
         )
     })
     .map_err(runtime_error_status)?
+    .map_err(refusal_status)
+}
+
+pub(crate) fn setup_generation_public_key_share_body_byte_length_by_identifier(
+    authority_handle: u32,
+) -> Result<u64, u32> {
+    setup_generation_public_key_share_body_byte_length(
+        &SetupGenerationAuthorityHandle::from_identifier(authority_handle),
+    )
+    .map_err(refusal_status)
+}
+
+pub(crate) fn open_setup_generation_public_key_share_body_by_identifier(
+    authority_handle: u32,
+) -> Result<u32, u32> {
+    open_setup_generation_public_key_share_body(&SetupGenerationAuthorityHandle::from_identifier(
+        authority_handle,
+    ))
+    .map(|source_handle| source_handle.identifier())
+    .map_err(refusal_status)
+}
+
+pub(crate) fn setup_generation_public_key_share_source_byte_length_by_identifier(
+    source_handle: u32,
+) -> Result<u64, u32> {
+    setup_generation_public_key_share_source_byte_length(
+        &SetupGenerationPublicKeyShareSourceHandle::from_identifier(source_handle),
+    )
+    .map_err(refusal_status)
+}
+
+pub(crate) fn read_setup_generation_public_key_share_body_by_identifier(
+    source_handle: u32,
+    expected_offset: u64,
+    output: &mut [u8],
+) -> Result<(), u32> {
+    read_setup_generation_public_key_share_body(
+        &SetupGenerationPublicKeyShareSourceHandle::from_identifier(source_handle),
+        expected_offset,
+        output,
+    )
+    .map_err(refusal_status)
+}
+
+pub(crate) fn cancel_setup_generation_public_key_share_body_by_identifier(
+    source_handle: u32,
+) -> Result<(), u32> {
+    cancel_setup_generation_public_key_share_body(
+        SetupGenerationPublicKeyShareSourceHandle::from_identifier(source_handle),
+    )
     .map_err(refusal_status)
 }
 

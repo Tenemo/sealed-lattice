@@ -237,6 +237,7 @@ pub(crate) struct VerifiedTargetReleaseOutputBundle {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg(test)]
 pub(crate) struct TargetReleaseOutputBundleByteLengths {
     header: u64,
     signed_carrier: u64,
@@ -246,6 +247,7 @@ pub(crate) struct TargetReleaseOutputBundleByteLengths {
     total: u64,
 }
 
+#[cfg(test)]
 impl TargetReleaseOutputBundleByteLengths {
     pub(crate) const fn header(self) -> u64 {
         self.header
@@ -297,6 +299,7 @@ impl VerifiedTargetReleaseOutputBundle {
         self.malicious_share_proof_stream.stream_descriptor()
     }
 
+    #[cfg(test)]
     pub(crate) fn byte_lengths(
         &self,
     ) -> Result<TargetReleaseOutputBundleByteLengths, RefusalReason> {
@@ -347,6 +350,7 @@ impl VerifiedTargetReleaseOutputBundle {
         )
     }
 
+    #[cfg(test)]
     pub(crate) fn open_malicious_share_proof_readback(
         &self,
     ) -> Result<CanonicalStreamReadbackVerifier, RefusalReason> {

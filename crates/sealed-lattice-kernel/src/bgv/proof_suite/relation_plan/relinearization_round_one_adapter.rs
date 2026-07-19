@@ -1,5 +1,3 @@
-use std::collections::{BTreeMap, BTreeSet};
-
 use zeroize::Zeroizing;
 
 use crate::{
@@ -10,6 +8,7 @@ use crate::{
             SetupGenerationAnchorOpening, SetupGenerationAuthorityHandle,
             SetupGenerationRelinearizationRoundOneApplication,
             SetupGenerationRelinearizationRoundOneSource,
+            SetupGenerationRelinearizationRoundTwoSource,
             sample_relinearization_common_reference_limb, setup_commitment_matrix_polynomial,
             with_setup_generation_relinearization_round_one,
         },
@@ -25,24 +24,27 @@ use super::super::{
     CommonProofProverError, CommonProofRelationPlanCapability, CommonProofSourcePolynomial,
     CommonProofSourcePolynomialProvider, CommonProofSourcePolynomialProviderPoll,
     CommonProofSourcePolynomialReplayIdentity, CommonProofSourcePolynomialRequest,
-    CommonProofSourcePolynomialRequestContext, ProofEvaluationDomain, ProofLeafVisibility,
-    ProofTreeRole, ProvidedCommonProofSourcePolynomial, RelationProofTreeInput,
-    StatementOwnedProofTreeInput,
+    CommonProofSourcePolynomialRequestContext, CommonProofSourceProviderMemoryAccounting,
+    ProofEvaluationDomain, ProofLeafVisibility, ProofTreeRole, ProvidedCommonProofSourcePolynomial,
+    RelationProofTreeInput, StatementOwnedProofTreeInput,
 };
 use super::{
     BoundTreeConstructionKind, RelationColumnOrigin, RelationPlanCheckContext, RelationPlanVariant,
     RelationTreeDescriptor, RelationVerifierSource, SuiteModulusReference,
     galois_key_share_adapter::{
         anchor_full_row, centered_residue, exact_modular_quotient, exact_negacyclic_product_radix,
-        half_position, quarter_rows_match, requested_source_column_ordinals,
-        signed_integer_to_base_field, split_balanced_quotient, split_rows_match,
-        split_signed_i8_polynomial, split_signed_polynomial,
+        half_position, requested_source_column_ordinals, signed_integer_to_base_field,
+        split_balanced_quotient, split_rows_match, split_signed_i8_polynomial,
+        split_signed_polynomial,
     },
     key_relation::{
-        QuarterBackedSplitIntegerVector, RecenteredVerifierVectorWitness,
-        ReversibleShiftedSmallVector,
+        ExactRadixDigitColumnCatalog, RecenteredVerifierVectorWitness,
+        ReversibleShiftedSmallVector, SplitIntegerVector,
     },
-    setup_key_relation_adapter::KeyRelationColumnDerivation,
+    setup_key_relation_adapter::{
+        ExactKeyRelationActiveColumnSet, ExactKeyRelationDerivedRowCache,
+        KeyRelationColumnDerivation,
+    },
     trustee_evaluation_key::{
         GaloisKeyShareAnchorSourceLayout, RelinearizationRoundOneErrorSourceLayout,
         RelinearizationRoundOneQuotientSourceLayout, RelinearizationRoundOneSourceLayout,
@@ -133,16 +135,54 @@ impl RelinearizationRoundOneWitnessSource for SetupGenerationRelinearizationRoun
     }
 }
 
+impl RelinearizationRoundOneWitnessSource for SetupGenerationRelinearizationRoundTwoSource<'_, '_> {
+    fn public_setup_seed(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.public_setup_seed()
+    }
+
+    fn schedule_position(&self) -> u32 {
+        self.schedule_position()
+    }
+
+    fn common_secret_coefficients(&self) -> &[i8] {
+        self.common_secret_coefficients()
+    }
+
+    fn ephemeral_secret_coefficients(&self) -> &[i8] {
+        self.ephemeral_secret_coefficients()
+    }
+
+    fn round_one_left_component(&self) -> &SetupGeneratedKeySwitchComponent {
+        self.round_one_left_component()
+    }
+
+    fn round_one_right_component(&self) -> &SetupGeneratedKeySwitchComponent {
+        self.round_one_right_component()
+    }
+
+    fn round_one_left_errors_by_block(&self) -> &[Zeroizing<Vec<i8>>] {
+        self.round_one_left_errors_by_block()
+    }
+
+    fn round_one_right_errors_by_block(&self) -> &[Zeroizing<Vec<i8>>] {
+        self.round_one_right_errors_by_block()
+    }
+
+    fn anchor_openings(&self) -> &[SetupGenerationAnchorOpening] {
+        self.anchor_openings()
+    }
+}
+
 #[derive(Clone, Copy)]
 pub(super) struct RelinearizationRoundOneSourceLayoutView<'layout> {
     pub(super) common_secret: &'layout ReversibleShiftedSmallVector,
     pub(super) ephemeral_secret: &'layout ReversibleShiftedSmallVector,
-    pub(super) round_one_left_rows: &'layout [QuarterBackedSplitIntegerVector],
-    pub(super) round_one_right_rows: &'layout [QuarterBackedSplitIntegerVector],
+    pub(super) round_one_left_rows: &'layout [SplitIntegerVector],
+    pub(super) round_one_right_rows: &'layout [SplitIntegerVector],
     pub(super) errors_by_block: &'layout [RelinearizationRoundOneErrorSourceLayout],
     pub(super) quotients_by_row: &'layout [RelinearizationRoundOneQuotientSourceLayout],
     pub(super) ordered_anchors: &'layout [GaloisKeyShareAnchorSourceLayout],
-    pub(super) exact_radix_digits_by_column: &'layout BTreeMap<u32, Box<[u32]>>,
+    pub(super) exact_radix_digits_by_column: &'layout ExactRadixDigitColumnCatalog,
 }
 
 impl<'layout> RelinearizationRoundOneSourceLayoutView<'layout> {
@@ -324,8 +364,12 @@ impl RelinearizationRoundOneSourcePolynomialAdapter {
                     source_layout: RelinearizationRoundOneSourceLayoutView::from_round_one(
                         source_layout,
                     ),
-                    cached_rows: BTreeMap::new(),
-                    active_columns: BTreeSet::new(),
+                    cached_rows: ExactKeyRelationDerivedRowCache::new(
+                        relation_plan_variant.ordered_columns().len(),
+                    ),
+                    active_columns: ExactKeyRelationActiveColumnSet::new(
+                        relation_plan_variant.ordered_columns().len(),
+                    ),
                     cached_quotient,
                 };
                 let signed_rows = derivation.derive_rows(column_ordinal)?;
@@ -338,28 +382,62 @@ impl RelinearizationRoundOneSourcePolynomialAdapter {
             },
         )
         .map_err(|_| CommonProofProverError::InvalidColumn)?;
-        let descriptor = self
-            .relation_plan_variant
-            .ordered_columns()
-            .get(
-                usize::try_from(column_ordinal)
-                    .map_err(|_| CommonProofProverError::CountOverflow)?,
-            )
-            .ok_or(CommonProofProverError::InvalidColumn)?;
-        if !matches!(descriptor.origin(), RelationColumnOrigin::BoundTree { .. })
-            && !is_public_polynomial_half_projection(&self.source_layout, column_ordinal)
-        {
-            ProofEvaluationDomain::new_subgroup(
-                usize::try_from(self.relation_plan_variant.trace_domain_size())
-                    .map_err(|_| CommonProofProverError::CountOverflow)?,
-            )?
-            .interpolate_base_polynomial_in_place(&mut field_values)?;
-        }
+        ProofEvaluationDomain::new_subgroup(
+            usize::try_from(self.relation_plan_variant.trace_domain_size())
+                .map_err(|_| CommonProofProverError::CountOverflow)?,
+        )?
+        .interpolate_base_polynomial_in_place(&mut field_values)?;
         Ok(CommonProofSourcePolynomial::from_protected_base_coefficients(field_values))
     }
 }
 
 impl CommonProofSourcePolynomialProvider for RelinearizationRoundOneSourcePolynomialAdapter {
+    fn memory_accounting(
+        &self,
+    ) -> Result<CommonProofSourceProviderMemoryAccounting, CommonProofProverError> {
+        let checked_add = |left: u64, right: u64| {
+            left.checked_add(right)
+                .ok_or(CommonProofProverError::CountOverflow)
+        };
+        let adapter_retained_byte_length = [
+            core::mem::size_of::<Self>() as u64,
+            u64::try_from(self.canonical_application_statement_bytes.len())
+                .map_err(|_| CommonProofProverError::CountOverflow)?,
+            self.relation_plan_variant
+                .resident_owned_payload_byte_length()
+                .map_err(CommonProofProverError::Relation)?,
+            self.relation_context
+                .resident_owned_payload_byte_length()
+                .map_err(CommonProofProverError::Relation)?,
+            u64::try_from(self.requested_column_ordinals.len())
+                .ok()
+                .and_then(|count| count.checked_mul(core::mem::size_of::<u32>() as u64))
+                .ok_or(CommonProofProverError::CountOverflow)?,
+        ]
+        .into_iter()
+        .try_fold(0_u64, checked_add)?;
+        let ring_byte_length = self
+            .geometry
+            .ring_degree
+            .checked_mul(core::mem::size_of::<i128>() as u64)
+            .ok_or(CommonProofProverError::CountOverflow)?;
+        let cached_quotient_byte_length = ring_byte_length;
+        let maximum_returned_source_polynomial_byte_length = self
+            .relation_plan_variant
+            .trace_domain_size()
+            .checked_mul(core::mem::size_of::<super::super::ProofBaseFieldElement>() as u64)
+            .ok_or(CommonProofProverError::CountOverflow)?;
+        let derivation_workspace_byte_length = ring_byte_length
+            .checked_mul(8)
+            .ok_or(CommonProofProverError::CountOverflow)?;
+        Ok(CommonProofSourceProviderMemoryAccounting::new(
+            checked_add(adapter_retained_byte_length, cached_quotient_byte_length)?,
+            adapter_retained_byte_length,
+            derivation_workspace_byte_length,
+            maximum_returned_source_polynomial_byte_length,
+        ))
+    }
+
     fn poll_source_polynomial(
         &mut self,
         request: CommonProofSourcePolynomialRequest<'_>,
@@ -465,12 +543,12 @@ pub(crate) fn relinearization_round_one_relation_tree_inputs(
             } => {
                 let row_width = u32::try_from(ordered_column_ordinals.len())
                     .map_err(|_| CommonProofProverError::CountOverflow)?;
-                let component_source = if quarter_rows_match(
+                let component_source = if split_rows_match(
                     &source_layout.round_one_left_rows,
                     ordered_column_ordinals,
                 ) {
                     component_sources.first()
-                } else if quarter_rows_match(
+                } else if split_rows_match(
                     &source_layout.round_one_right_rows,
                     ordered_column_ordinals,
                 ) {
@@ -515,25 +593,14 @@ pub(crate) fn relinearization_round_one_relation_tree_inputs(
     Ok(relation_trees)
 }
 
-fn is_public_polynomial_half_projection(
-    source_layout: &RelinearizationRoundOneSourceLayout,
-    column_ordinal: u32,
-) -> bool {
-    source_layout
-        .round_one_left_rows
-        .iter()
-        .chain(source_layout.round_one_right_rows.iter())
-        .any(|row| row.half_projections.halves.contains(&column_ordinal))
-}
-
 pub(super) struct RelinearizationRoundOneColumnDerivation<'source, 'plan> {
     pub(super) source: &'source dyn RelinearizationRoundOneWitnessSource,
     pub(super) relation_plan_variant: &'plan RelationPlanVariant,
     pub(super) relation_context: &'plan RelationPlanCheckContext,
     pub(super) geometry: &'plan TrusteeEvaluationKeyRelationGeometry,
     pub(super) source_layout: RelinearizationRoundOneSourceLayoutView<'plan>,
-    pub(super) cached_rows: BTreeMap<u32, Zeroizing<Vec<i128>>>,
-    pub(super) active_columns: BTreeSet<u32>,
+    pub(super) cached_rows: ExactKeyRelationDerivedRowCache,
+    pub(super) active_columns: ExactKeyRelationActiveColumnSet,
     pub(super) cached_quotient: &'plan mut Option<CachedQuotient>,
 }
 
@@ -546,19 +613,19 @@ impl KeyRelationColumnDerivation for RelinearizationRoundOneColumnDerivation<'_,
         self.relation_context
     }
 
-    fn exact_radix_digits_by_column(&self) -> &BTreeMap<u32, Box<[u32]>> {
+    fn exact_radix_digits_by_column(&self) -> &ExactRadixDigitColumnCatalog {
         self.source_layout.exact_radix_digits_by_column
     }
 
-    fn cached_rows(&self) -> &BTreeMap<u32, Zeroizing<Vec<i128>>> {
+    fn cached_rows(&self) -> &ExactKeyRelationDerivedRowCache {
         &self.cached_rows
     }
 
-    fn cached_rows_mut(&mut self) -> &mut BTreeMap<u32, Zeroizing<Vec<i128>>> {
+    fn cached_rows_mut(&mut self) -> &mut ExactKeyRelationDerivedRowCache {
         &mut self.cached_rows
     }
 
-    fn active_columns_mut(&mut self) -> &mut BTreeSet<u32> {
+    fn active_columns_mut(&mut self) -> &mut ExactKeyRelationActiveColumnSet {
         &mut self.active_columns
     }
 
@@ -779,22 +846,7 @@ impl RelinearizationRoundOneColumnDerivation<'_, '_> {
             for (row_ordinal, commitment_layout) in layout.commitments.iter().copied().enumerate() {
                 if let Some(half_ordinal) = half_position(commitment_layout, column_ordinal) {
                     return anchor
-                        .ordered_coefficient_columns()
-                        .get(
-                            row_ordinal
-                                .checked_mul(2)
-                                .and_then(|value| value.checked_add(half_ordinal))
-                                .ok_or(RefusalReason::OutsideSupportedProfile)?,
-                        )
-                        .map(|column| {
-                            Zeroizing::new(
-                                column
-                                    .iter()
-                                    .map(|value| i128::from(value.canonical()))
-                                    .collect(),
-                            )
-                        })
-                        .ok_or(RefusalReason::WrongTypeOrLength)
+                        .commitment_trace_row_half(row_ordinal, half_ordinal)
                         .map(Some);
                 }
             }
@@ -1121,19 +1173,29 @@ impl RelinearizationRoundOneColumnDerivation<'_, '_> {
 
 pub(super) fn component_direct_witness_rows(
     component: &SetupGeneratedKeySwitchComponent,
-    rows: &[super::key_relation::QuarterBackedSplitIntegerVector],
+    rows: &[super::key_relation::SplitIntegerVector],
+    column_ordinal: u32,
+) -> Result<Option<Zeroizing<Vec<i128>>>, RefusalReason> {
+    component_bytes_direct_witness_rows(
+        component.topology(),
+        component.canonical_bytes(),
+        rows,
+        column_ordinal,
+    )
+}
+
+pub(super) fn component_bytes_direct_witness_rows(
+    topology: &crate::bgv::proof_suite::KeySwitchComponentMaterialTopology,
+    canonical_bytes: &[u8],
+    rows: &[super::key_relation::SplitIntegerVector],
     column_ordinal: u32,
 ) -> Result<Option<Zeroizing<Vec<i128>>>, RefusalReason> {
     for (row_ordinal, row) in rows.iter().copied().enumerate() {
-        if let Some(quarter_ordinal) = row
-            .quarters
-            .iter()
-            .position(|candidate| *candidate == column_ordinal)
-        {
-            let trace_column = component.topology().trace_column(
+        if let Some(half_ordinal) = half_position(row, column_ordinal) {
+            let trace_column = topology.trace_column(
                 row_ordinal
-                    .checked_mul(4)
-                    .and_then(|value| value.checked_add(quarter_ordinal))
+                    .checked_mul(2)
+                    .and_then(|value| value.checked_add(half_ordinal))
                     .ok_or(RefusalReason::OutsideSupportedProfile)?,
             )?;
             let byte_start = usize::try_from(trace_column.byte_offset())
@@ -1146,8 +1208,7 @@ pub(super) fn component_direct_witness_rows(
             )
             .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
             let values = trace_column.decode_authenticated_bytes(
-                component
-                    .canonical_bytes()
+                canonical_bytes
                     .get(byte_start..byte_end)
                     .ok_or(RefusalReason::WrongTypeOrLength)?,
             )?;
@@ -1158,11 +1219,6 @@ pub(super) fn component_direct_witness_rows(
                     .collect(),
             )));
         }
-        if let Some(half_ordinal) = half_position(row.half_projections, column_ordinal) {
-            return decode_component_full_row(component, row_ordinal)
-                .and_then(|coefficients| split_signed_polynomial(&coefficients, half_ordinal))
-                .map(Some);
-        }
     }
     Ok(None)
 }
@@ -1171,14 +1227,25 @@ pub(super) fn decode_component_full_row(
     component: &SetupGeneratedKeySwitchComponent,
     row_ordinal: usize,
 ) -> Result<Zeroizing<Vec<i128>>, RefusalReason> {
-    let quarter_count = 4_usize;
-    let mut coefficients =
-        Zeroizing::new(Vec::with_capacity(component.topology().polynomial_degree()));
-    for quarter_ordinal in 0..quarter_count {
-        let trace_column = component.topology().trace_column(
+    decode_component_full_row_from_bytes(
+        component.topology(),
+        component.canonical_bytes(),
+        row_ordinal,
+    )
+}
+
+pub(super) fn decode_component_full_row_from_bytes(
+    topology: &crate::bgv::proof_suite::KeySwitchComponentMaterialTopology,
+    canonical_bytes: &[u8],
+    row_ordinal: usize,
+) -> Result<Zeroizing<Vec<i128>>, RefusalReason> {
+    let half_count = 2_usize;
+    let mut coefficients = Zeroizing::new(Vec::with_capacity(topology.polynomial_degree()));
+    for half_ordinal in 0..half_count {
+        let trace_column = topology.trace_column(
             row_ordinal
-                .checked_mul(quarter_count)
-                .and_then(|value| value.checked_add(quarter_ordinal))
+                .checked_mul(half_count)
+                .and_then(|value| value.checked_add(half_ordinal))
                 .ok_or(RefusalReason::OutsideSupportedProfile)?,
         )?;
         let byte_start = usize::try_from(trace_column.byte_offset())
@@ -1193,8 +1260,7 @@ pub(super) fn decode_component_full_row(
         coefficients.extend(
             trace_column
                 .decode_authenticated_bytes(
-                    component
-                        .canonical_bytes()
+                    canonical_bytes
                         .get(byte_start..byte_end)
                         .ok_or(RefusalReason::WrongTypeOrLength)?,
                 )?
@@ -1202,7 +1268,7 @@ pub(super) fn decode_component_full_row(
                 .map(|value| i128::from(value.canonical())),
         );
     }
-    if coefficients.len() != component.topology().polynomial_degree() {
+    if coefficients.len() != topology.polynomial_degree() {
         return Err(RefusalReason::WrongTypeOrLength);
     }
     Ok(coefficients)

@@ -19,11 +19,11 @@ use super::{
     CommonProofSourcePolynomial, CommonProofSourcePolynomialProvider,
     CommonProofSourcePolynomialProviderPoll, CommonProofSourcePolynomialReplayIdentity,
     CommonProofSourcePolynomialRequest, CommonProofSourcePolynomialRequestContext,
-    CompiledRelationPlan, KeySwitchComponentMaterialTopology, KeySwitchComponentTraceColumn,
-    ProofBaseFieldElement, ProvidedCommonProofSourcePolynomial, RelationPlanCheckContext,
-    RelationPlanVariant, RelationProofTreeInput, RelationTreeDescriptor,
-    SelectedApplicationStatementContext, SelectedEvaluatorEntryKind,
-    SelectedEvaluatorEntryPosition, SelectedEvaluatorStoreSource,
+    CommonProofSourceProviderMemoryAccounting, CompiledRelationPlan,
+    KeySwitchComponentMaterialTopology, KeySwitchComponentTraceColumn, ProofBaseFieldElement,
+    ProvidedCommonProofSourcePolynomial, RelationPlanCheckContext, RelationPlanVariant,
+    RelationProofTreeInput, RelationTreeDescriptor, SelectedApplicationStatementContext,
+    SelectedEvaluatorEntryKind, SelectedEvaluatorEntryPosition, SelectedEvaluatorStoreSource,
     SelectedEvaluatorStoreSourceCatalog, SetupPublicPolynomialContext,
     SetupPublicPolynomialRootRole, StatementOwnedProofTreeInput, VerifiedEvaluatorKeyStoreMaterial,
     VerifiedEvaluatorRuntimeRoot, VerifiedKeySwitchComponentMaterial,
@@ -1011,26 +1011,19 @@ impl SelectedEvaluatorAggregateSourcePolynomialProvider {
 }
 
 impl CommonProofSourcePolynomialProvider for SelectedEvaluatorAggregateSourcePolynomialProvider {
-    fn persistent_resident_memory_byte_length(&self) -> Result<u64, CommonProofProverError> {
-        Ok(self
-            .memory_accounting
-            .loading_persistent_resident_byte_length())
-    }
-
-    fn post_source_polynomial_finish_persistent_resident_memory_byte_length(
+    fn memory_accounting(
         &self,
-    ) -> Result<u64, CommonProofProverError> {
-        Ok(self
-            .memory_accounting
-            .post_source_polynomial_finish_persistent_resident_byte_length())
-    }
-
-    fn loading_source_polynomials_transient_byte_length(
-        &self,
-    ) -> Result<u64, CommonProofProverError> {
-        Ok(self
-            .memory_accounting
-            .additional_loading_source_polynomials_transient_byte_length())
+    ) -> Result<CommonProofSourceProviderMemoryAccounting, CommonProofProverError> {
+        Ok(CommonProofSourceProviderMemoryAccounting::new(
+            self.memory_accounting
+                .loading_persistent_resident_byte_length(),
+            self.memory_accounting
+                .post_source_polynomial_finish_persistent_resident_byte_length(),
+            self.memory_accounting
+                .additional_loading_source_polynomials_transient_byte_length(),
+            self.memory_accounting
+                .maximum_returned_source_polynomial_byte_length(),
+        ))
     }
 
     fn poll_source_polynomial(

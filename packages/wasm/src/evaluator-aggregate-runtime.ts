@@ -1,12 +1,17 @@
 import { foundationProfile } from '@sealed-lattice/types';
 
 import {
+    bindAcceptedSetupEvaluatorGeneratedProofsToPackage,
     readAcceptedSetupPrepackageEvaluatorComponentExactRange,
     requireAcceptedSetupEvaluatorSourceCatalogKernelOwner,
     requireAcceptedSetupVerificationAssemblyKernelOwner,
     type AcceptedSetupEvaluatorSourceCatalogSession,
     type AcceptedSetupVerificationSession,
 } from './accepted-setup-assembly-runtime.js';
+import {
+    requireAcceptedSetupPackageBuilderKernelOwner,
+    type AcceptedSetupPackageBuilder,
+} from './accepted-setup-package-builder-runtime.js';
 import {
     resolveActionRandomnessKernelAuthorization,
     type ActionRandomnessSession,
@@ -48,11 +53,11 @@ import {
     copySelectedSuiteRecordSourceBytes,
     type SelectedSuiteRecordSource,
 } from './selected-suite-record-source.js';
+import { stateVerifierCapabilityByteLength } from './state-verifier-runtime/contracts.js';
 import {
     resolveVerifiedStateReservationKernelAuthorization,
     type VerifiedStateReservation,
 } from './state-verifier-runtime.js';
-import { stateVerifierCapabilityByteLength } from './state-verifier-runtime/contracts.js';
 import { resolveCommonProofKernelContext } from './transcript-core-bridge/common-proof-kernel-context.js';
 import type { TranscriptCoreKernelCommandRuntime } from './transcript-core-bridge/kernel-runtime.js';
 import type {
@@ -93,6 +98,7 @@ type EvaluatorAggregateExports = Required<
         | 'sealed_lattice_evaluator_aggregate_begin_store_construction'
         | 'sealed_lattice_evaluator_aggregate_commit_generated_proof'
         | 'sealed_lattice_evaluator_aggregate_commit_verified_store'
+        | 'sealed_lattice_evaluator_aggregate_contribute_package'
         | 'sealed_lattice_evaluator_aggregate_copy_application_statement'
         | 'sealed_lattice_evaluator_aggregate_copy_store_output_chunk'
         | 'sealed_lattice_evaluator_aggregate_copy_store_source_request'
@@ -141,6 +147,10 @@ export type EvaluatorAggregateSession = Readonly<{
     commitVerifiedStore(
         acceptedSetupVerification: AcceptedSetupVerificationSession,
     ): void;
+    bindPackageStatement(
+        acceptedSetupVerification: AcceptedSetupVerificationSession,
+    ): void;
+    contributeToPackage(builder: AcceptedSetupPackageBuilder): void;
     copyCanonicalApplicationStatement(): Uint8Array<ArrayBuffer>;
     describeStore(): EvaluatorKeyStoreDescription;
     generate(input: {
@@ -152,7 +162,6 @@ export type EvaluatorAggregateSession = Readonly<{
         proofOutputStore: CommonProofCanonicalOutputStore;
         verifiedReservation: VerifiedStateReservation;
     }): Promise<Uint8Array<ArrayBuffer>>;
-    takePackageStatement(): void;
     verify(input: {
         options?: CommonProofVerificationWorkerOptions;
         proofInputStore: AuthenticatedCommonProofInputStore;
@@ -163,6 +172,8 @@ type EvaluatorAggregatePhase =
     | 'prepared'
     | 'generating'
     | 'generated'
+    | 'packageContributed'
+    | 'packageBound'
     | 'packageStatementRetained'
     | 'verifying'
     | 'verified'
@@ -192,6 +203,7 @@ type EvaluatorAggregateSessionRecord = {
     readonly canonicalSuiteRecordBytes: Uint8Array<ArrayBuffer>;
     readonly catalog: AcceptedSetupEvaluatorSourceCatalogSession;
     readonly context: EvaluatorAggregateContext;
+    generatedProof: ClosedWorkerGeneratedCommonProofCapability | undefined;
     readonly kernel: TranscriptCoreKernel;
     phase: EvaluatorAggregatePhase;
     readonly sessionHandle: number;
@@ -245,6 +257,7 @@ const requireEvaluatorAggregateContext = (
         'sealed_lattice_evaluator_aggregate_begin_store_construction',
         'sealed_lattice_evaluator_aggregate_commit_generated_proof',
         'sealed_lattice_evaluator_aggregate_commit_verified_store',
+        'sealed_lattice_evaluator_aggregate_contribute_package',
         'sealed_lattice_evaluator_aggregate_copy_application_statement',
         'sealed_lattice_evaluator_aggregate_copy_store_output_chunk',
         'sealed_lattice_evaluator_aggregate_copy_store_source_request',
@@ -499,8 +512,7 @@ const observePhysicalComponent = (input: {
                 'The evaluator store constructor exposed a noncanonical physical-component sequence.',
             );
         }
-        const previous =
-            input.observations[input.observations.length - 1];
+        const previous = input.observations[input.observations.length - 1];
         input.observations.push({
             maximumSourceOrdinal: 0,
             sourceOrdinalMask: 1,
@@ -714,8 +726,7 @@ const readStoreExactRange = async (input: {
     const result = new Uint8Array(input.exactByteLength);
     let copiedByteLength = 0;
     while (copiedByteLength < input.exactByteLength) {
-        const absoluteByteOffset =
-            input.sourceByteOffset + copiedByteLength;
+        const absoluteByteOffset = input.sourceByteOffset + copiedByteLength;
         const chunkIndex = Math.floor(
             absoluteByteOffset / foundationProfile.streamChunkByteLength,
         );
@@ -767,8 +778,10 @@ const copyCanonicalApplicationStatement = (input: {
                         input.sessionHandle,
                         statusPointer,
                     );
-                const [status] =
-                    input.memoryBoundary.readWords(statusPointer, 1);
+                const [status] = input.memoryBoundary.readWords(
+                    statusPointer,
+                    1,
+                );
                 input.statusBoundary.throwIfError(status);
                 return result;
             } finally {
@@ -1295,9 +1308,30 @@ const destroyRecordBytes = (record: EvaluatorAggregateSessionRecord): void => {
 
 const cancelSession = (session: EvaluatorAggregateSession): void => {
     const record = requireSessionRecord(session);
-    discardKernelSession(record);
-    sessionRecords.delete(session);
-    destroyRecordBytes(record);
+    let operationFailure: unknown;
+    try {
+        record.generatedProof?.release();
+        record.generatedProof = undefined;
+    } catch (error) {
+        operationFailure = error;
+    }
+    try {
+        discardKernelSession(record);
+        sessionRecords.delete(session);
+        destroyRecordBytes(record);
+    } catch (cleanupFailure) {
+        throw operationFailure === undefined
+            ? cleanupFailure
+            : new CanonicalStreamCleanupError(operationFailure, cleanupFailure);
+    }
+    if (operationFailure !== undefined) {
+        throw operationFailure instanceof Error
+            ? operationFailure
+            : new CanonicalStreamInternalError(
+                  'The evaluator aggregate generated-proof release failed.',
+                  operationFailure,
+              );
+    }
 };
 
 const generate = async (
@@ -1340,11 +1374,10 @@ const generate = async (
                 input.actionRandomnessSession,
                 record.kernel,
             );
-        stateAuthorization =
-            resolveVerifiedStateReservationKernelAuthorization(
-                input.verifiedReservation,
-                record.kernel,
-            );
+        stateAuthorization = resolveVerifiedStateReservationKernelAuthorization(
+            input.verifiedReservation,
+            record.kernel,
+        );
     } catch (error) {
         checkpointLineageIdentifier.fill(0);
         throw error;
@@ -1395,8 +1428,7 @@ const generate = async (
                         checkpointLineageIdentifier.byteLength,
                         statusPointer,
                     );
-                    const [status] =
-                        memoryBoundary.readWords(statusPointer, 1);
+                    const [status] = memoryBoundary.readWords(statusPointer, 1);
                     statusBoundary.throwIfError(status);
                     return requireLiveHandle(
                         handle,
@@ -1457,7 +1489,7 @@ const generate = async (
                         ),
                 );
                 return Object.freeze({
-                    consumed: commitStatus === 0,
+                    consumed: false,
                     result: commitStatus,
                 });
             },
@@ -1467,6 +1499,7 @@ const generate = async (
             generatedCapability = undefined;
             statusBoundary.throwIfError(status);
         }
+        record.generatedProof = generatedCapability;
         generatedCapability = undefined;
         record.phase = 'generated';
         return proofDescriptorBytes;
@@ -1508,14 +1541,96 @@ const generate = async (
     throw operationFailure;
 };
 
-const takePackageStatement = (session: EvaluatorAggregateSession): void => {
+const contributeToPackage = (
+    session: EvaluatorAggregateSession,
+    builder: AcceptedSetupPackageBuilder,
+): void => {
     const record = requireSessionRecord(session);
     requirePhase(record, 'generated');
+    const generatedProof = record.generatedProof;
+    if (generatedProof === undefined) {
+        throw new CanonicalStreamInternalError(
+            'The evaluator aggregate generated proof is unavailable.',
+        );
+    }
+    const builderOwner = requireAcceptedSetupPackageBuilderKernelOwner(
+        builder,
+        record.kernel,
+        'collecting',
+    );
     requireAcceptedSetupEvaluatorSourceCatalogKernelOwner(
         record.catalog,
         record.kernel,
         'collecting',
     );
+    const memoryBoundary = createMemoryBoundary(record.context);
+    let statementPointer = 0;
+    try {
+        statementPointer = memoryBoundary.copy(
+            record.canonicalApplicationStatement,
+        );
+        const status = applyClosedWorkerGeneratedCommonProofCapability(
+            generatedProof,
+            record.context,
+            (generatedProofHandle) =>
+                Object.freeze({
+                    consumed: false,
+                    result: record.context.runExclusive(
+                        'evaluator aggregate package contribution',
+                        () =>
+                            record.context.wasmExports.sealed_lattice_evaluator_aggregate_contribute_package(
+                                record.sessionHandle,
+                                builderOwner.handle,
+                                generatedProofHandle,
+                                statementPointer,
+                                record.canonicalApplicationStatement.byteLength,
+                            ),
+                    ),
+                }),
+        );
+        createStatusBoundary().throwIfError(status);
+        record.phase = 'packageContributed';
+    } finally {
+        memoryBoundary.zeroAndDeallocate(
+            statementPointer,
+            record.canonicalApplicationStatement.byteLength,
+        );
+    }
+};
+
+const bindPackageStatement = (
+    session: EvaluatorAggregateSession,
+    acceptedSetupVerification: AcceptedSetupVerificationSession,
+): void => {
+    const record = requireSessionRecord(session);
+    if (record.phase === 'packageContributed') {
+        const generatedProof = record.generatedProof;
+        if (generatedProof === undefined) {
+            throw new CanonicalStreamInternalError(
+                'The evaluator aggregate generated proof is unavailable.',
+            );
+        }
+        requireAcceptedSetupVerificationAssemblyKernelOwner(
+            acceptedSetupVerification,
+            record.kernel,
+            'collecting',
+        );
+        applyClosedWorkerGeneratedCommonProofCapability(
+            generatedProof,
+            record.context,
+            () => {
+                bindAcceptedSetupEvaluatorGeneratedProofsToPackage({
+                    acceptedSetupVerification,
+                    catalog: record.catalog,
+                    kernel: record.kernel,
+                });
+                return Object.freeze({ consumed: true, result: undefined });
+            },
+        );
+        record.generatedProof = undefined;
+        record.phase = 'packageBound';
+    }
+    requirePhase(record, 'packageBound');
     const status = record.context.runExclusive(
         'evaluator aggregate package-statement handoff',
         () =>
@@ -1565,8 +1680,7 @@ const verify = async (
                             record.sessionHandle,
                             statusPointer,
                         );
-                    const [status] =
-                        memoryBoundary.readWords(statusPointer, 1);
+                    const [status] = memoryBoundary.readWords(statusPointer, 1);
                     statusBoundary.throwIfError(status);
                     return requireLiveHandle(
                         handle,
@@ -1714,6 +1828,8 @@ const createSession = (
 ): EvaluatorAggregateSession => {
     const session: EvaluatorAggregateSession = Object.freeze({
         [evaluatorAggregateSessionBrand]: true as const,
+        bindPackageStatement: (acceptedSetupVerification): void =>
+            bindPackageStatement(session, acceptedSetupVerification),
         cancel: (): void => cancelSession(session),
         commitVerifiedStore: (acceptedSetupVerification): void =>
             commitVerifiedStore(session, acceptedSetupVerification),
@@ -1724,15 +1840,14 @@ const createSession = (
         describeStore: (): EvaluatorKeyStoreDescription => {
             const description = requireSessionRecord(session).storeDescription;
             return Object.freeze({
-                fullObjectDigest: Uint8Array.from(
-                    description.fullObjectDigest,
-                ),
+                fullObjectDigest: Uint8Array.from(description.fullObjectDigest),
                 totalByteLength: description.totalByteLength,
             });
         },
         generate: (input): Promise<Uint8Array<ArrayBuffer>> =>
             generate(session, input),
-        takePackageStatement: (): void => takePackageStatement(session),
+        contributeToPackage: (builder): void =>
+            contributeToPackage(session, builder),
         verify: (input): Promise<void> => verify(session, input),
     });
     sessionRecords.set(session, record);
@@ -1757,12 +1872,11 @@ export const constructEvaluatorAggregateInClosedWorker = async (input: {
         );
     }
     const context = requireEvaluatorAggregateContext(input.kernel);
-    const catalogOwner =
-        requireAcceptedSetupEvaluatorSourceCatalogKernelOwner(
-            input.evaluatorSourceCatalog,
-            input.kernel,
-            'collecting',
-        );
+    const catalogOwner = requireAcceptedSetupEvaluatorSourceCatalogKernelOwner(
+        input.evaluatorSourceCatalog,
+        input.kernel,
+        'collecting',
+    );
     const memoryBoundary = createMemoryBoundary(context);
     const statusBoundary = createStatusBoundary();
     const canonicalSuiteRecordBytes = copySelectedSuiteRecordSourceBytes({
@@ -1785,8 +1899,7 @@ export const constructEvaluatorAggregateInClosedWorker = async (input: {
                             catalogOwner.handle,
                             statusPointer,
                         );
-                    const [status] =
-                        memoryBoundary.readWords(statusPointer, 1);
+                    const [status] = memoryBoundary.readWords(statusPointer, 1);
                     statusBoundary.throwIfError(status);
                     return requireLiveHandle(
                         handle,
@@ -1833,6 +1946,7 @@ export const constructEvaluatorAggregateInClosedWorker = async (input: {
             canonicalSuiteRecordBytes,
             catalog: input.evaluatorSourceCatalog,
             context,
+            generatedProof: undefined,
             kernel: input.kernel,
             phase: 'prepared',
             sessionHandle,
@@ -1862,10 +1976,7 @@ export const constructEvaluatorAggregateInClosedWorker = async (input: {
     unretainedCanonicalApplicationStatement?.fill(0);
     canonicalSuiteRecordBytes.fill(0);
     if (cleanupFailure !== undefined) {
-        throw new CanonicalStreamCleanupError(
-            operationFailure,
-            cleanupFailure,
-        );
+        throw new CanonicalStreamCleanupError(operationFailure, cleanupFailure);
     }
     throw operationFailure;
 };

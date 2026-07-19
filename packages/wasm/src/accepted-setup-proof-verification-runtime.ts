@@ -52,6 +52,13 @@ type AcceptedSetupProofVerificationKernel = Readonly<{
         terminalSourceHandleOutputPointer: number,
         statusPointer: number,
     ): number;
+    prepareGeneratedVerification(
+        selectedSuiteHandle: number,
+        assemblyHandle: number,
+        generationStatementSourceHandle: number,
+        terminalSourceHandleOutputPointer: number,
+        statusPointer: number,
+    ): number;
     releaseSelectedSuite(selectedSuiteHandle: number): number;
     selectSuite(
         canonicalSuiteRecordPointer: number,
@@ -68,6 +75,22 @@ export type AcceptedSetupProofVerificationInput = Readonly<{
     kernel: TranscriptCoreKernel;
     options?: CommonProofVerificationWorkerOptions;
 }>;
+
+type AcceptedSetupProofVerificationCoreInput = Omit<
+    AcceptedSetupProofVerificationInput,
+    'canonicalApplicationStatementBytes'
+>;
+
+type AcceptedSetupProofVerificationSource =
+    | Readonly<{
+          canonicalApplicationStatementBytes: Uint8Array;
+          kind: 'transported';
+      }>
+    | Readonly<{
+          generatedCommonProofCapability: ClosedWorkerGeneratedCommonProofCapability;
+          generationStatementSourceHandle: number;
+          kind: 'generated';
+      }>;
 
 const createStatusBoundary = (
     family: AcceptedSetupProofFamily,
@@ -114,6 +137,12 @@ const requireVerificationKernel = (
                   .sealed_lattice_accepted_setup_same_secret_prepare_verification
             : context.wasmExports
                   .sealed_lattice_accepted_setup_public_key_share_prepare_verification;
+    const prepareGeneratedVerification =
+        family === 'sameSecret'
+            ? context.wasmExports
+                  .sealed_lattice_accepted_setup_same_secret_prepare_generated_verification
+            : context.wasmExports
+                  .sealed_lattice_accepted_setup_public_key_share_prepare_generated_verification;
     const finishVerification =
         family === 'sameSecret'
             ? context.wasmExports
@@ -136,6 +165,7 @@ const requireVerificationKernel = (
         typeof releaseSelectedSuite !== 'function' ||
         typeof selectSuite !== 'function' ||
         typeof prepareVerification !== 'function' ||
+        typeof prepareGeneratedVerification !== 'function' ||
         typeof finishVerification !== 'function' ||
         typeof finishGeneratedVerification !== 'function' ||
         typeof discardTerminalSource !== 'function'
@@ -148,6 +178,7 @@ const requireVerificationKernel = (
         discardTerminalSource,
         finishGeneratedVerification,
         finishVerification,
+        prepareGeneratedVerification,
         prepareVerification,
         releaseSelectedSuite,
         selectSuite,
@@ -232,8 +263,8 @@ const discardTerminalSource = (input: {
 
 const verifyAcceptedSetupProofInClosedWorker = async (
     family: AcceptedSetupProofFamily,
-    input: AcceptedSetupProofVerificationInput,
-    generatedCommonProofCapability?: ClosedWorkerGeneratedCommonProofCapability,
+    input: AcceptedSetupProofVerificationCoreInput,
+    source: AcceptedSetupProofVerificationSource,
 ): Promise<void> => {
     if (typeof globalThis.document !== 'undefined') {
         throw new CanonicalStreamInternalError(
@@ -251,9 +282,16 @@ const verifyAcceptedSetupProofInClosedWorker = async (
         input.kernel,
         'collecting',
     );
-    const canonicalApplicationStatementBytes = requireCanonicalBytes(
-        input.canonicalApplicationStatementBytes,
-    );
+    const canonicalApplicationStatementBytes =
+        source.kind === 'transported'
+            ? requireCanonicalBytes(source.canonicalApplicationStatementBytes)
+            : undefined;
+    if (source.kind === 'generated') {
+        requireWasm32Handle(
+            source.generationStatementSourceHandle,
+            'The generation statement-source handle',
+        );
+    }
     const kernel = requireVerificationKernel(context, family);
     const statusBoundary = createStatusBoundary(family);
     const memoryBoundary = new WasmMemoryBoundary({
@@ -282,19 +320,33 @@ const verifyAcceptedSetupProofInClosedWorker = async (
         const prepared = context.runExclusive(
             `accepted-setup ${family} verification preparation`,
             () => {
-                const statementPointer = memoryBoundary.copy(
-                    canonicalApplicationStatementBytes,
-                );
+                const statementPointer =
+                    canonicalApplicationStatementBytes === undefined
+                        ? 0
+                        : memoryBoundary.copy(
+                              canonicalApplicationStatementBytes,
+                          );
                 const metadataPointer = memoryBoundary.allocateZeroedWords(2);
                 try {
-                    const adapterHandle = kernel.prepareVerification(
-                        selectedSuiteHandle,
-                        assemblyOwner.handle,
-                        statementPointer,
-                        canonicalApplicationStatementBytes.byteLength,
-                        metadataPointer,
-                        metadataPointer + wasm32WordByteLength,
-                    );
+                    const statementByteLength =
+                        canonicalApplicationStatementBytes?.byteLength ?? 0;
+                    const adapterHandle =
+                        source.kind === 'generated'
+                            ? kernel.prepareGeneratedVerification(
+                                  selectedSuiteHandle,
+                                  assemblyOwner.handle,
+                                  source.generationStatementSourceHandle,
+                                  metadataPointer,
+                                  metadataPointer + wasm32WordByteLength,
+                              )
+                            : kernel.prepareVerification(
+                                  selectedSuiteHandle,
+                                  assemblyOwner.handle,
+                                  statementPointer,
+                                  statementByteLength,
+                                  metadataPointer,
+                                  metadataPointer + wasm32WordByteLength,
+                              );
                     const [sourceHandle, status] = memoryBoundary.readWords(
                         metadataPointer,
                         2,
@@ -317,7 +369,7 @@ const verifyAcceptedSetupProofInClosedWorker = async (
                     );
                     memoryBoundary.zeroAndDeallocate(
                         statementPointer,
-                        canonicalApplicationStatementBytes.byteLength,
+                        canonicalApplicationStatementBytes?.byteLength ?? 0,
                     );
                 }
             },
@@ -349,7 +401,7 @@ const verifyAcceptedSetupProofInClosedWorker = async (
                     context,
                     (verifiedCommonProofHandle) => {
                         const status =
-                            generatedCommonProofCapability === undefined
+                            source.kind === 'transported'
                                 ? context.runExclusive(
                                       `accepted-setup ${family} verification finish`,
                                       () =>
@@ -359,7 +411,7 @@ const verifyAcceptedSetupProofInClosedWorker = async (
                                           ),
                                   )
                                 : applyClosedWorkerGeneratedCommonProofCapability(
-                                      generatedCommonProofCapability,
+                                      source.generatedCommonProofCapability,
                                       context,
                                       (generatedCommonProofHandle) => {
                                           const generatedFinishStatus =
@@ -461,38 +513,50 @@ const verifyAcceptedSetupProofInClosedWorker = async (
 /** Verifies and inserts one selected same-secret proof into its exact slot. */
 export const verifyAcceptedSetupSameSecretInClosedWorker = (
     input: AcceptedSetupProofVerificationInput,
-): Promise<void> => verifyAcceptedSetupProofInClosedWorker('sameSecret', input);
+): Promise<void> =>
+    verifyAcceptedSetupProofInClosedWorker('sameSecret', input, {
+        canonicalApplicationStatementBytes:
+            input.canonicalApplicationStatementBytes,
+        kind: 'transported',
+    });
 
 /** Verifies and inserts one selected public-key-share proof into its exact slot. */
 export const verifyAcceptedSetupPublicKeyShareInClosedWorker = (
     input: AcceptedSetupProofVerificationInput,
 ): Promise<void> =>
-    verifyAcceptedSetupProofInClosedWorker('publicKeyShare', input);
+    verifyAcceptedSetupProofInClosedWorker('publicKeyShare', input, {
+        canonicalApplicationStatementBytes:
+            input.canonicalApplicationStatementBytes,
+        kind: 'transported',
+    });
 
 /**
  * Internal same-worker handoff that requires a locally generated same-secret
  * proof to match the positive accepted-package verifier terminal exactly.
  */
 export const verifyGeneratedAcceptedSetupSameSecretCapabilityInClosedWorker = (
-    input: AcceptedSetupProofVerificationInput,
+    input: AcceptedSetupProofVerificationCoreInput,
     generatedCommonProofCapability: ClosedWorkerGeneratedCommonProofCapability,
+    generationStatementSourceHandle: number,
 ): Promise<void> =>
-    verifyAcceptedSetupProofInClosedWorker(
-        'sameSecret',
-        input,
+    verifyAcceptedSetupProofInClosedWorker('sameSecret', input, {
         generatedCommonProofCapability,
-    );
+        generationStatementSourceHandle,
+        kind: 'generated',
+    });
 
 /**
  * Internal same-worker handoff that requires a locally generated public-key-
  * share proof to match the positive accepted-package verifier terminal exactly.
  */
-export const verifyGeneratedAcceptedSetupPublicKeyShareCapabilityInClosedWorker = (
-    input: AcceptedSetupProofVerificationInput,
-    generatedCommonProofCapability: ClosedWorkerGeneratedCommonProofCapability,
-): Promise<void> =>
-    verifyAcceptedSetupProofInClosedWorker(
-        'publicKeyShare',
-        input,
-        generatedCommonProofCapability,
-    );
+export const verifyGeneratedAcceptedSetupPublicKeyShareCapabilityInClosedWorker =
+    (
+        input: AcceptedSetupProofVerificationCoreInput,
+        generatedCommonProofCapability: ClosedWorkerGeneratedCommonProofCapability,
+        generationStatementSourceHandle: number,
+    ): Promise<void> =>
+        verifyAcceptedSetupProofInClosedWorker('publicKeyShare', input, {
+            generatedCommonProofCapability,
+            generationStatementSourceHandle,
+            kind: 'generated',
+        });
