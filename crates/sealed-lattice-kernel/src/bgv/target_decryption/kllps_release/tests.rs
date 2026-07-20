@@ -607,6 +607,59 @@ fn flooding_callback_allocation_accounting_separates_ready_and_construction_byte
 }
 
 #[test]
+fn nested_limb_accounting_requires_exact_lengths_and_capacities() {
+    let mut exact_vectors = Vec::with_capacity(2);
+    for _ in 0..2 {
+        let mut values = Vec::with_capacity(3);
+        values.resize(3, 0_u64);
+        exact_vectors.push(values);
+    }
+    let expected_byte_length = u64::try_from(2 * size_of::<Vec<u64>>() + 6 * size_of::<u64>())
+        .expect("the test allocation byte length fits u64");
+    assert_eq!(
+        nested_u64_vector_heap_byte_length(&exact_vectors, exact_vectors.capacity(), 2, 3),
+        Ok(expected_byte_length),
+    );
+
+    let mut excess_outer_capacity = Vec::with_capacity(3);
+    excess_outer_capacity.extend(exact_vectors.iter().cloned());
+    assert_eq!(
+        nested_u64_vector_heap_byte_length(
+            &excess_outer_capacity,
+            excess_outer_capacity.capacity(),
+            2,
+            3,
+        ),
+        Err(TargetReleaseWitnessError::InvalidWitness),
+    );
+
+    let mut excess_inner_capacity = exact_vectors.clone();
+    let mut oversized_values = Vec::with_capacity(4);
+    oversized_values.resize(3, 0_u64);
+    excess_inner_capacity[1] = oversized_values;
+    assert_eq!(
+        nested_u64_vector_heap_byte_length(
+            &excess_inner_capacity,
+            excess_inner_capacity.capacity(),
+            2,
+            3,
+        ),
+        Err(TargetReleaseWitnessError::InvalidWitness),
+    );
+
+    let missing_inner_value = vec![vec![0_u64; 3], vec![0_u64; 2]];
+    assert_eq!(
+        nested_u64_vector_heap_byte_length(
+            &missing_inner_value,
+            missing_inner_value.capacity(),
+            2,
+            3,
+        ),
+        Err(TargetReleaseWitnessError::InvalidWitness),
+    );
+}
+
+#[test]
 fn factor_four_bounds_use_exact_arbitrary_width_inequalities() {
     let evaluation_error_bound = BigUint::from(1_u8);
     let minimum_flooding_bound = factor_four_required_flooding_bound(&evaluation_error_bound)

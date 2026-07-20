@@ -92,6 +92,7 @@ pub(crate) use committed_material::{
     AuthenticatedCompactCommittedMaterialSource, CommittedMaterialContext,
     CommittedMaterialProfile, CommittedMaterialRole,
     CommittedMaterialSharedAllocationMemoryAccounting, CompactCommittedMaterialSource,
+    authenticated_committed_material_shared_allocation_byte_lengths,
 };
 #[cfg(test)]
 pub(crate) use committed_material::{CommittedMaterialError, CommittedMaterialTreeInput};
@@ -252,6 +253,7 @@ pub(crate) use relation_plan::{
 pub(crate) use relation_plan::{
     SelectedBallotValidityCarrierBufferAccounting,
     selected_ballot_validity_carrier_buffer_accounting,
+    target_release_source_provider_memory_accounting_for_source,
 };
 pub(crate) use relinearization_source_material::{
     VerifiedRelinearizationAggregateMaterial, VerifiedRelinearizationAggregateMaterialPreflight,

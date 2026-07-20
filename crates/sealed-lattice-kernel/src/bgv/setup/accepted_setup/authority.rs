@@ -13,6 +13,7 @@ use crate::{
             CommittedMaterialRole, CommittedMaterialSharedAllocationMemoryAccounting,
             CompactCommittedMaterialSource, SelectedEvaluatorEntryKind,
             SelectedEvaluatorEntryPosition, VerifiedEvaluatorKeyStore,
+            authenticated_committed_material_shared_allocation_byte_lengths,
             selected_committed_material_profile,
         },
         setup::{
@@ -215,6 +216,31 @@ impl VerifiedAcceptedSetupParticipantTargetReleaseLease {
 
     pub(crate) fn limb_count(&self) -> usize {
         self.ordered_limbs.len()
+    }
+
+    pub(crate) fn memory_byte_lengths_from_dimensions(
+        limb_count: usize,
+        canonical_coefficient_count: usize,
+    ) -> CanonicalResult<(u64, u64)> {
+        if limb_count == 0 || canonical_coefficient_count == 0 {
+            return Err(authority_binding_error());
+        }
+        let unique_owned_heap_byte_length =
+            target_release_lease_unique_owned_heap_byte_length(limb_count)?;
+        let allocation_byte_lengths =
+            authenticated_committed_material_shared_allocation_byte_lengths(
+                canonical_coefficient_count,
+            )
+            .map_err(|_| authority_binding_error())?;
+        let one_limb_shared_allocation_byte_length = allocation_byte_lengths
+            .compact_source()
+            .checked_add(allocation_byte_lengths.canonical_message())
+            .ok_or_else(authority_binding_error)?;
+        let shared_allocation_byte_length = u64::try_from(limb_count)
+            .ok()
+            .and_then(|count| count.checked_mul(one_limb_shared_allocation_byte_length))
+            .ok_or_else(authority_binding_error)?;
+        Ok((unique_owned_heap_byte_length, shared_allocation_byte_length))
     }
 
     pub(crate) fn memory_accounting(

@@ -184,13 +184,13 @@ fn evaluator_key_store_statement_requires_the_complete_selected_list() {
         CanonicalStreamDomain::EvaluatorKeyStore,
         b"canonical evaluator key store",
     );
-    let entry_count = selected_evaluator_entry_positions(1)
-        .expect("selected top-count-one positions")
+    let complete_entry_count = selected_evaluator_entry_positions(FOUNDATION_PROFILE.option_count)
+        .expect("selected complete evaluator positions")
         .len();
     let source_roots = [[0x61; 64]; FOUNDATION_PROFILE.participant_count as usize];
-    let entries = auxiliary_capabilities[..entry_count]
+    let mut entries = auxiliary_capabilities[..complete_entry_count]
         .iter()
-        .zip(&runtime_capabilities[..entry_count])
+        .zip(&runtime_capabilities[..complete_entry_count])
         .map(|(auxiliary, runtime)| {
             SelectedEvaluatorAggregateEntryInput::new(
                 &source_roots,
@@ -199,6 +199,9 @@ fn evaluator_key_store_statement_requires_the_complete_selected_list() {
             )
         })
         .collect::<Vec<_>>();
+    entries
+        .pop()
+        .expect("the selected complete evaluator list is non-empty");
     assert_eq!(
         canonical_selected_evaluator_aggregate_statement(
             [0x62; 64],

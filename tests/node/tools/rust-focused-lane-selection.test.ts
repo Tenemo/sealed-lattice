@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
     fullProfileEvidenceRustTests,
+    measurementRustTests,
     validateFocusedRustLaneSelection,
 } from '#tools/ci/rust-focused-lane-selection';
 
@@ -18,6 +19,7 @@ describe('focused Rust lane selection', () => {
             true,
             fullProfileEvidenceRustTests[0],
         ],
+        ['rust-measurements' as const, true, measurementRustTests[0]],
     ])(
         'accepts %s tests only in their owning lane',
         (lane, ignored, testName) => {
@@ -64,5 +66,20 @@ describe('focused Rust lane selection', () => {
                 ],
             }),
         ).toThrow('dedicated guarded command');
+    });
+
+    it('rejects registered guarded tests that would also run in the fast lane', () => {
+        expect(() =>
+            validateFocusedRustLaneSelection({
+                lane: 'rust-measurements',
+                testFilter: measurementRustTests[0],
+                tests: [
+                    {
+                        ignored: false,
+                        testName: measurementRustTests[0],
+                    },
+                ],
+            }),
+        ).toThrow('multiple Rust lanes');
     });
 });

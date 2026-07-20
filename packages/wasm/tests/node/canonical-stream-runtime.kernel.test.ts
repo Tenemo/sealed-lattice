@@ -17,6 +17,7 @@ import {
     loadFreshTranscriptCoreKernel,
     type TranscriptCoreKernel,
 } from '#packages/wasm/src/index';
+import { createStateVerifierTestVector } from '#packages/wasm/tests/state-verifier-test-vectors';
 import { canonicalStreamChunkBuffers as chunkBuffers } from '#tests/support/canonical-stream-chunk-buffers';
 
 const createBytes = (
@@ -94,7 +95,12 @@ describe('Canonical stream real-WASM runtime', () => {
                     : domainIndex % 3 === 1
                       ? foundationProfile.streamChunkByteLength
                       : foundationProfile.streamChunkByteLength + 17;
-            const bytes = createBytes(byteLength, domainIndex + 1);
+            const bytes =
+                streamDomain ===
+                canonicalStreamDomains.stateTargetReleaseExactOutput
+                    ? createStateVerifierTestVector().exactOutputBytes
+                    : createBytes(byteLength, domainIndex + 1);
+            expect(bytes.byteLength).toBe(byteLength);
             const descriptor = writeDescriptor(runtime, streamDomain, bytes);
             const verifier = runtime.openVerifier({
                 descriptorBytes: descriptor,

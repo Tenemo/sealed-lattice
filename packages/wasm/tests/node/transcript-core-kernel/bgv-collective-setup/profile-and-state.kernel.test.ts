@@ -80,18 +80,20 @@ describe('collective BGV setup kernel commands', () => {
     it('exposes the canonical logical-slot rotation schedule', async () => {
         const kernel = await loadTranscriptCoreKernel();
         const parameters = kernel.describeCollectiveBgvSetupParameters();
-        const expectedRotations = [
-            3, 9, 81, 385, 2657, 6561, 16001, 17153, 18609, 31233, 34305, 36409,
-            43691, 47297, 48385, 55105,
+        const expectedSchedule = [
+            { rotation: 15, level: 14 },
+            { rotation: 19, level: 14 },
+            { rotation: 219, level: 14 },
+            { rotation: 257, level: 18 },
+            { rotation: 1025, level: 18 },
+            { rotation: 8193, level: 18 },
         ];
 
         expect(
             parameters.evaluatorKeySchedule.requiredGaloisKeySchedule,
-        ).toEqual(
-            expectedRotations.map((rotation) => ({ rotation, level: 16 })),
-        );
+        ).toEqual(expectedSchedule);
         expect(parameters.setupParametersHash).toBe(
-            'faf7e7a20ec6c45c08aa0083a5c596ae45a06c703c22653cac5d1672cdcc8667e8e2da7def0edd14224747ac9842de7286043e83e92f86b899bed8a91605d9b7',
+            '2f08fa04dce5ee8106ea47079012765fc7037dee77ab352ad1685c3983ca20a552bd148802ad49e5ae51d8a52307e086cbd2cce2255e4341cf52f7559453e8b4',
         );
     });
 });

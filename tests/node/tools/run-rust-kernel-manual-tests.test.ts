@@ -17,12 +17,12 @@ describe('manual Rust kernel preflight', () => {
 
         await expect(
             preflightAndRunManualRustKernelLane({
+                configuredTestNames: [currentTestName, missingTestName],
                 lane: 'rust-full-profile-evidence',
                 runGuardedCommands: () => {
                     guardedExecutorCallCount += 1;
                     return Promise.resolve();
                 },
-                testFilters: [currentTestName, missingTestName],
                 verifyLaneSelection: (input) => {
                     verifiedTestFilters.push(input.testFilter);
                     validateFocusedRustLaneSelection({
@@ -53,12 +53,12 @@ describe('manual Rust kernel preflight', () => {
 
         await expect(
             preflightAndRunManualRustKernelLane({
+                configuredTestNames: [],
                 lane: 'rust-measurements',
                 runGuardedCommands: () => {
                     guardedExecutorCallCount += 1;
                     return Promise.resolve();
                 },
-                testFilters: measurementRustTests,
                 verifyLaneSelection: () => {
                     verifierCallCount += 1;
                     return Promise.resolve();
@@ -68,5 +68,52 @@ describe('manual Rust kernel preflight', () => {
 
         expect(verifierCallCount).toBe(0);
         expect(guardedExecutorCallCount).toBe(0);
+    });
+
+    it('refuses a focused filter outside the exact registry before inventory or execution', async () => {
+        let guardedExecutorCallCount = 0;
+        let verifierCallCount = 0;
+
+        await expect(
+            preflightAndRunManualRustKernelLane({
+                configuredTestNames: measurementRustTests,
+                focusedFilter: 'deleted_selected_measurement',
+                lane: 'rust-measurements',
+                runGuardedCommands: () => {
+                    guardedExecutorCallCount += 1;
+                    return Promise.resolve();
+                },
+                verifyLaneSelection: () => {
+                    verifierCallCount += 1;
+                    return Promise.resolve();
+                },
+            }),
+        ).rejects.toThrow('selects zero configured Rust tests');
+
+        expect(verifierCallCount).toBe(0);
+        expect(guardedExecutorCallCount).toBe(0);
+    });
+
+    it('resolves a libtest substring inside the exact registry before preflight', async () => {
+        const focusedFilter = 'packed_deep_fri_resource_inventory';
+        const verifiedTestFilters: string[] = [];
+        let executedTestFilters: readonly string[] = [];
+
+        await preflightAndRunManualRustKernelLane({
+            configuredTestNames: measurementRustTests,
+            focusedFilter,
+            lane: 'rust-measurements',
+            runGuardedCommands: (testFilters) => {
+                executedTestFilters = testFilters;
+                return Promise.resolve();
+            },
+            verifyLaneSelection: (input) => {
+                verifiedTestFilters.push(input.testFilter);
+                return Promise.resolve();
+            },
+        });
+
+        expect(verifiedTestFilters).toEqual([focusedFilter]);
+        expect(executedTestFilters).toEqual([focusedFilter]);
     });
 });

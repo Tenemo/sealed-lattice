@@ -1,7 +1,11 @@
 import { resolve as resolvePath } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-import { foundationProfile } from '@sealed-lattice/types';
+import {
+    foundationProfile,
+    isProtocolHash,
+    refusalReasonCodes,
+} from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -145,7 +149,9 @@ describe('foundation ceremony Rust/WASM boundary', () => {
                     commandRuntime.memory.buffer,
                 ).getUint32(statusPointer, true);
                 expect(selectedSuiteHandle).toBe(0);
-                expect(refusalCode).toBe(12);
+                expect(refusalCode).toBe(
+                    refusalReasonCodes.unsupportedVersionOrSuite,
+                );
             } finally {
                 commandRuntime.deallocate(statusPointer, 4);
                 commandRuntime.deallocate(
@@ -289,7 +295,7 @@ describe('foundation ceremony Rust/WASM boundary', () => {
                 `The exact suite record was refused: ${suiteVerification.refusalReason}`,
             );
         }
-        expect(suiteVerification.value.suiteId).toHaveLength(64);
+        expect(isProtocolHash(suiteVerification.value.suiteId)).toBe(true);
 
         const wrongDegreeSuiteBytes = createCanonicalSuiteRecordFixture({
             polynomialDegree: 16_384,

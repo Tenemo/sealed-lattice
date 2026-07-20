@@ -316,6 +316,49 @@ fn selected_negacyclic_transpose_rows_match_sparse_direct_oracle() {
 }
 
 #[test]
+#[ignore = "manual guarded selected-degree dense negacyclic transpose oracle"]
+fn heavy_rust_kernel_selected_negacyclic_transpose_rows_match_dense_direct_oracle() {
+    let multiplicand = (0..PAIR_CHARACTER_RING_DEGREE)
+        .map(|row_ordinal| {
+            let magnitude = i64::try_from(row_ordinal % 17 + 1)
+                .expect("the bounded deterministic magnitude fits i64");
+            signed_base(if row_ordinal % 3 == 0 {
+                -magnitude
+            } else {
+                magnitude
+            })
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        multiplicand
+            .iter()
+            .all(|coefficient| *coefficient != ProofBaseFieldElement::ZERO),
+        "the selected-degree oracle fixture is dense"
+    );
+    let theta = base(super::super::PROOF_BASE_FIELD_MODULUS / 2 + 123_457);
+    let suffix = suffix_evaluation_rows(&multiplicand, theta);
+    let actual = convolution_transpose_rows(
+        RelationIntegerLiftConvolutionKind::Negacyclic,
+        &multiplicand,
+        &suffix,
+        theta,
+    )
+    .expect("the selected dense negacyclic transpose is valid");
+    let expected = direct_negacyclic_transpose_rows(&multiplicand, theta);
+
+    for (row_ordinal, (actual_row, expected_row)) in
+        actual.iter().copied().zip(expected).enumerate()
+    {
+        assert_eq!(
+            actual_row,
+            expected_row,
+            "selected dense row={row_ordinal}, theta={}",
+            theta.canonical(),
+        );
+    }
+}
+
+#[test]
 fn full_ring_transposes_match_both_negacyclic_product_halves() {
     for half_ring_degree in [4_usize, 8] {
         let multiplicand_low = (0..half_ring_degree)

@@ -402,6 +402,14 @@ impl TargetReleaseWitnessSourceMemoryAccounting {
         self.flooding_callback_ready_resident_byte_length
     }
 
+    pub(crate) const fn unique_owned_heap_byte_length(&self) -> u64 {
+        self.unique_owned_heap_byte_length
+    }
+
+    pub(crate) const fn shared_allocation_byte_length(&self) -> u64 {
+        self.shared_allocation_byte_length
+    }
+
     pub(crate) const fn flooding_callback_construction_transient_byte_length(&self) -> u64 {
         self.flooding_callback_construction_transient_byte_length
     }
@@ -1848,6 +1856,36 @@ fn target_release_source_provider_memory_accounting_from_dimensions(
     ))
 }
 
+pub(crate) fn target_release_source_provider_memory_accounting_for_source<Source>(
+    compilation: &CompiledTargetReleaseRelation,
+    source_additional_persistent_resident_byte_length: u64,
+    flooding_callback_ready_resident_byte_length: u64,
+    flooding_callback_construction_transient_byte_length: u64,
+    modulus_callback_transient_byte_length: u64,
+) -> Result<CommonProofSourceProviderMemoryAccounting, CommonProofProverError>
+where
+    Source: TargetReleaseWitnessSource,
+{
+    let source_blocks = target_release_source_blocks(compilation)
+        .map_err(|_| CommonProofProverError::InvalidColumn)?;
+    let source_count = source_blocks.len();
+    let adapter_fixed_byte_length = u64::try_from(core::mem::size_of::<
+        TargetReleaseSourcePolynomialAdapter<Source>,
+    >())
+    .map_err(|_| CommonProofProverError::CountOverflow)?;
+    target_release_source_provider_memory_accounting_from_dimensions(
+        compilation,
+        adapter_fixed_byte_length,
+        source_additional_persistent_resident_byte_length,
+        flooding_callback_ready_resident_byte_length,
+        flooding_callback_construction_transient_byte_length,
+        modulus_callback_transient_byte_length,
+        source_count,
+        source_count,
+        compilation.moduli.len(),
+    )
+}
+
 impl<Source> CommonProofSourcePolynomialProvider for TargetReleaseSourcePolynomialAdapter<Source>
 where
     Source: TargetReleaseWitnessSource,
@@ -1862,16 +1900,12 @@ where
         let source_additional_persistent_resident_byte_length = source_memory_accounting
             .additional_persistent_resident_byte_length()
             .map_err(|_| CommonProofProverError::CountOverflow)?;
-        target_release_source_provider_memory_accounting_from_dimensions(
+        target_release_source_provider_memory_accounting_for_source::<Source>(
             &self.compilation,
-            core::mem::size_of::<Self>() as u64,
             source_additional_persistent_resident_byte_length,
             source_memory_accounting.flooding_callback_ready_resident_byte_length(),
             source_memory_accounting.flooding_callback_construction_transient_byte_length(),
             source_memory_accounting.modulus_callback_transient_byte_length(),
-            self.ordered_source_column_ordinals.len(),
-            self.ordered_source_blocks.len(),
-            self.bound_sources_by_catalog_index.len(),
         )
     }
 

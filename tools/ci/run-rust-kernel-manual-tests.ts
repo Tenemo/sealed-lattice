@@ -33,22 +33,57 @@ type ManualRustLaneSelectionVerifier = (input: {
     readonly testFilter: string;
 }) => Promise<void>;
 
-export const preflightAndRunManualRustKernelLane = async (input: {
-    readonly environment?: NodeJS.ProcessEnv;
+const resolveManualRustKernelTestFilters = (input: {
+    readonly configuredTestNames: readonly string[];
+    readonly focusedFilter?: string;
     readonly lane: ManualRustKernelLane;
-    readonly runGuardedCommands: () => Promise<void>;
-    readonly runLog?: ActiveLocalRunLog;
-    readonly testFilters: readonly string[];
-    readonly verifyLaneSelection?: ManualRustLaneSelectionVerifier;
-}): Promise<void> => {
+}): readonly string[] => {
     const requestedScript = focusedRustLaneScripts[input.lane];
-    if (input.testFilters.length === 0) {
+    if (input.configuredTestNames.length === 0) {
         throw new Error(`${requestedScript} has no configured Rust tests.`);
     }
+    const focusedFilter = input.focusedFilter;
+    if (focusedFilter === undefined) {
+        return input.configuredTestNames;
+    }
+    if (focusedFilter === '') {
+        throw new Error(`${requestedScript} requires a non-empty filter.`);
+    }
+    if (
+        !input.configuredTestNames.some((testName) =>
+            testName.includes(focusedFilter),
+        )
+    ) {
+        throw new Error(
+            `${requestedScript} filter ${focusedFilter} selects zero configured Rust tests.`,
+        );
+    }
+
+    return [focusedFilter];
+};
+
+export const preflightAndRunManualRustKernelLane = async (input: {
+    readonly configuredTestNames: readonly string[];
+    readonly environment?: NodeJS.ProcessEnv;
+    readonly focusedFilter?: string;
+    readonly lane: ManualRustKernelLane;
+    readonly runGuardedCommands: (
+        testFilters: readonly string[],
+    ) => Promise<void>;
+    readonly runLog?: ActiveLocalRunLog;
+    readonly verifyLaneSelection?: ManualRustLaneSelectionVerifier;
+}): Promise<void> => {
+    const testFilters = resolveManualRustKernelTestFilters({
+        configuredTestNames: input.configuredTestNames,
+        ...(input.focusedFilter === undefined
+            ? {}
+            : { focusedFilter: input.focusedFilter }),
+        lane: input.lane,
+    });
 
     const verifyLaneSelection =
         input.verifyLaneSelection ?? verifyFocusedRustLaneSelection;
-    for (const testFilter of input.testFilters) {
+    for (const testFilter of testFilters) {
         await verifyLaneSelection({
             ...(input.environment === undefined
                 ? {}
@@ -59,7 +94,7 @@ export const preflightAndRunManualRustKernelLane = async (input: {
         });
     }
 
-    await input.runGuardedCommands();
+    await input.runGuardedCommands(testFilters);
 };
 
 const parseArguments = (
@@ -125,10 +160,6 @@ export const runRustKernelManualTests = async (): Promise<void> => {
         async (runLog) => {
             const parsed = parseArguments(rawArguments);
             const label = laneLabels[parsed.lane];
-            const testFilters =
-                parsed.focusedFilter === undefined
-                    ? manualRustKernelTests[parsed.lane]
-                    : [parsed.focusedFilter];
             const targetDirectoryPath = path.resolve(
                 process.cwd(),
                 'target',
@@ -138,9 +169,13 @@ export const runRustKernelManualTests = async (): Promise<void> => {
                 targetDirectoryPath,
             });
             await preflightAndRunManualRustKernelLane({
+                configuredTestNames: manualRustKernelTests[parsed.lane],
                 environment,
+                ...(parsed.focusedFilter === undefined
+                    ? {}
+                    : { focusedFilter: parsed.focusedFilter }),
                 lane: parsed.lane,
-                runGuardedCommands: async () => {
+                runGuardedCommands: async (testFilters) => {
                     const commands = testFilters.map((testFilter) => ({
                         builtCommand: buildGuardedRustKernelCommand(
                             testFilter,
@@ -162,7 +197,6 @@ export const runRustKernelManualTests = async (): Promise<void> => {
                     });
                 },
                 runLog,
-                testFilters,
             });
         },
     );

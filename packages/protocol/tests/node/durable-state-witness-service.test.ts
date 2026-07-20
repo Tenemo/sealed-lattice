@@ -71,7 +71,6 @@ const serviceLimits = {
 const objectSignatureContext = new TextEncoder().encode(
     'sealed-lattice/object-signature/v1',
 );
-const stateOutputIntentObjectType = 0x0052;
 const stateWitnessVoteObjectType = 0x0053;
 
 const byteArraysEqual = (left: Uint8Array, right: Uint8Array): boolean =>
@@ -169,28 +168,29 @@ const createSignedCarrier = (
 const createConflictingOutputIntent = (
     vector: StateVerifierTestVector,
 ): Readonly<{ canonicalCarrier: Uint8Array; exactOutputBytes: Uint8Array }> => {
-    const exactOutputBytes = vector.exactOutputBytes.slice();
-    exactOutputBytes[exactOutputBytes.byteLength - 1] ^= 1;
-    const exactOutputHash = foundationHash512(
-        'sealed-lattice/state/exact-output/v1',
-        unsigned16Item(stateCapabilityKinds.targetRelease),
-        unsigned64Item(BigInt(exactOutputBytes.byteLength)),
-        variableBytesItem(exactOutputBytes),
-    );
+    const conflictingVector = createStateVerifierTestVector({
+        actionContextHash: vector.actionContextHash,
+        ceremonyContextHash: vector.ceremonyContextHash,
+        suiteIdentifier: vector.suiteIdentifier,
+        targetReleaseOutputSeedByte: 0xd3,
+    });
+    if (
+        !byteArraysEqual(
+            conflictingVector.reservation.objectHash,
+            vector.reservation.objectHash,
+        ) ||
+        byteArraysEqual(
+            conflictingVector.exactOutputBytes,
+            vector.exactOutputBytes,
+        )
+    ) {
+        throw new Error(
+            'The conflicting output fixture did not preserve its reservation while changing its exact output.',
+        );
+    }
     return {
-        canonicalCarrier: createSignedCarrier(vector, {
-            objectType: stateOutputIntentObjectType,
-            payloadBytes: canonicalTuple(
-                0x1611,
-                hashItem(vector.reservation.objectHash),
-                hashItem(exactOutputHash),
-            ),
-            producerParticipantIdentity: vector.subjectParticipantIdentity,
-            producerRosterPosition: 0,
-            producerSequence: 0n,
-            signaturePurpose: 'state-output-intent',
-        }).canonicalCarrier,
-        exactOutputBytes,
+        canonicalCarrier: conflictingVector.output.canonicalIntentCarrier,
+        exactOutputBytes: conflictingVector.exactOutputBytes,
     };
 };
 

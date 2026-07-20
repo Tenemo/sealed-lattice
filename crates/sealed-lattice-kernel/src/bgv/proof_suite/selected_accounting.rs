@@ -14,7 +14,10 @@ use crate::{
         evaluator::top_k::CANONICAL_TARGET_CIPHERTEXT_LEVEL,
         serialization::two_component_data_ciphertext_canonical_byte_length_ceiling_at_level,
         target_decryption::{
-            kllps_release::KLLPS_PAIRED_TARGET_ROLE_COUNT,
+            kllps_release::{
+                KLLPS_PAIRED_TARGET_ROLE_COUNT,
+                selected_kllps_target_release_source_provider_memory_accounting,
+            },
             selected_target_partial_decryption_stream_byte_length,
         },
     },
@@ -92,6 +95,7 @@ use super::{
     selected_proof_profile_set, selected_public_key_share_relation_plan_input,
     selected_recipient_private_vss_payload_byte_length,
     selected_relinearization_relation_plan_inputs, selected_same_secret_relation_plan_input,
+    selected_target_release_relation,
 };
 
 #[cfg(test)]
@@ -1545,6 +1549,244 @@ mod resource_accounting {
         }
     }
 
+    fn selected_source_provider_memory_accounting(
+        application_statement_schema_identifier: u16,
+        canonical_application_statement_bytes: &[u8],
+        variant: &RelationPlanVariant,
+        relation_context: &RelationPlanCheckContext,
+        committed_material_source_provider_memory_accounting: Option<
+            CommittedMaterialSourceProviderMemoryAccounting,
+        >,
+    ) -> Result<SourceProviderMemoryAccounting, SelectedProofAccountingError> {
+        match application_statement_schema_identifier {
+            ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER => {
+                let relation_input = selected_same_secret_relation_plan_input()
+                    .map_err(|_| SelectedProofAccountingError::InvalidProfile)?;
+                let compiled = compile_same_secret_relation_with_source_layout(
+                    &relation_input,
+                    relation_context,
+                )
+                .map_err(|_| SelectedProofAccountingError::InvalidProfile)?;
+                let expected_variant = compiled
+                    .relation_plan
+                    .select_variant(variant.schedule_position(), variant.top_count())
+                    .map_err(|_| SelectedProofAccountingError::InvalidProfile)?;
+                if expected_variant
+                    .canonical_hash()
+                    .map_err(|_| SelectedProofAccountingError::InvalidProfile)?
+                    != variant
+                        .canonical_hash()
+                        .map_err(|_| SelectedProofAccountingError::InvalidProfile)?
+                {
+                    return Err(SelectedProofAccountingError::InvalidProfile);
+                }
+                let provider = same_secret_source_provider_memory_accounting(
+                    variant,
+                    relation_context,
+                    relation_input.ring_degree,
+                    &compiled.source_layout,
+                    canonical_application_statement_bytes.len(),
+                )
+                .map_err(|_| SelectedProofAccountingError::ResourcePlanning)?;
+                Ok(SourceProviderMemoryAccounting::Common(provider))
+            }
+            ProofApplicationSlotCeilings::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER => {
+                let relation_input = selected_public_key_share_relation_plan_input()
+                    .map_err(|_| SelectedProofAccountingError::InvalidProfile)?;
+                let compiled = compile_public_key_share_relation_with_source_layout(
+                    &relation_input,
+                    relation_context,
+                )
+                .map_err(|_| SelectedProofAccountingError::InvalidProfile)?;
+                let expected_variant = compiled
+                    .relation_plan
+                    .select_variant(variant.schedule_position(), variant.top_count())
+                    .map_err(|_| SelectedProofAccountingError::InvalidProfile)?;
+                if expected_variant
+                    .canonical_hash()
+                    .map_err(|_| SelectedProofAccountingError::InvalidProfile)?
+                    != variant
+                        .canonical_hash()
+                        .map_err(|_| SelectedProofAccountingError::InvalidProfile)?
+                {
+                    return Err(SelectedProofAccountingError::InvalidProfile);
+                }
+                let provider = public_key_share_source_provider_memory_accounting(
+                    variant,
+                    relation_context,
+                    relation_input.ring_degree,
+                    &compiled.source_layout,
+                    canonical_application_statement_bytes.len(),
+                )
+                .map_err(|_| SelectedProofAccountingError::ResourcePlanning)?;
+                Ok(SourceProviderMemoryAccounting::Common(provider))
+            }
+            ProofApplicationSlotCeilings::BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER => {
+                Ok(SourceProviderMemoryAccounting::BallotValidity(
+                    selected_ballot_validity_carrier_buffer_accounting()
+                        .map_err(|_| SelectedProofAccountingError::ResourcePlanning)?,
+                ))
+            }
+            ProofApplicationSlotCeilings::COLLECTIVE_PUBLIC_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER => {
+                Ok(SourceProviderMemoryAccounting::CollectivePublicKey(
+                    collective_public_key_source_provider_memory_accounting(variant)
+                        .map_err(|_| SelectedProofAccountingError::ResourcePlanning)?,
+                ))
+            }
+            ProofApplicationSlotCeilings::RKG_ROUND_ONE_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER
+            | ProofApplicationSlotCeilings::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER => {
+                Ok(SourceProviderMemoryAccounting::EvaluatorAggregate(
+                    evaluator_aggregate_source_provider_memory_accounting(
+                        variant,
+                        relation_context,
+                    )
+                    .map_err(|_| SelectedProofAccountingError::ResourcePlanning)?,
+                ))
+            }
+            ProofApplicationSlotCeilings::RELINEARIZATION_ROUND_ONE_STATEMENT_SCHEMA_IDENTIFIER => {
+                let (relation_input, _) = selected_relinearization_relation_plan_inputs()
+                    .map_err(|_| SelectedProofAccountingError::InvalidProfile)?;
+                let compiled = compile_relinearization_round_one_relation_with_source_layout(
+                    &relation_input,
+                    relation_context,
+                )
+                .map_err(|_| SelectedProofAccountingError::InvalidProfile)?;
+                let expected_variant = compiled
+                    .relation_plan
+                    .select_variant(variant.schedule_position(), variant.top_count())
+                    .map_err(|_| SelectedProofAccountingError::InvalidProfile)?;
+                if expected_variant
+                    .canonical_hash()
+                    .map_err(|_| SelectedProofAccountingError::InvalidProfile)?
+                    != variant
+                        .canonical_hash()
+                        .map_err(|_| SelectedProofAccountingError::InvalidProfile)?
+                {
+                    return Err(SelectedProofAccountingError::InvalidProfile);
+                }
+                let provider = relinearization_round_one_source_provider_memory_accounting(
+                    variant,
+                    relation_context,
+                    &relation_input.geometry,
+                    &compiled.source_layout,
+                    canonical_application_statement_bytes.len(),
+                )
+                .map_err(|_| SelectedProofAccountingError::ResourcePlanning)?;
+                Ok(SourceProviderMemoryAccounting::Common(provider))
+            }
+            ProofApplicationSlotCeilings::RELINEARIZATION_ROUND_TWO_STATEMENT_SCHEMA_IDENTIFIER => {
+                let (_, relation_input) = selected_relinearization_relation_plan_inputs()
+                    .map_err(|_| SelectedProofAccountingError::InvalidProfile)?;
+                let compiled = compile_relinearization_round_two_relation_with_source_layout(
+                    &relation_input,
+                    relation_context,
+                )
+                .map_err(|_| SelectedProofAccountingError::InvalidProfile)?;
+                let expected_variant = compiled
+                    .relation_plan
+                    .select_variant(variant.schedule_position(), variant.top_count())
+                    .map_err(|_| SelectedProofAccountingError::InvalidProfile)?;
+                if expected_variant
+                    .canonical_hash()
+                    .map_err(|_| SelectedProofAccountingError::InvalidProfile)?
+                    != variant
+                        .canonical_hash()
+                        .map_err(|_| SelectedProofAccountingError::InvalidProfile)?
+                {
+                    return Err(SelectedProofAccountingError::InvalidProfile);
+                }
+                let data_primes_per_block = relation_input
+                    .geometry
+                    .decomposition_blocks
+                    .first()
+                    .map(|block| block.data_modulus_indices.len())
+                    .filter(|count| *count != 0)
+                    .ok_or(SelectedProofAccountingError::InvalidProfile)?;
+                let aggregate_topology = KeySwitchComponentMaterialTopology::from_suite_algebra(
+                    &relation_input.geometry.data_moduli,
+                    &relation_input.geometry.special_moduli,
+                    data_primes_per_block,
+                    usize::try_from(relation_input.geometry.ring_degree)
+                        .map_err(|_| SelectedProofAccountingError::CountOverflow)?,
+                )
+                .map_err(|_| SelectedProofAccountingError::InvalidProfile)?;
+                let accounting = relinearization_round_two_source_provider_memory_accounting(
+                    variant,
+                    relation_context,
+                    &relation_input.geometry,
+                    &compiled.source_layout,
+                    &aggregate_topology,
+                    canonical_application_statement_bytes.len(),
+                )
+                .map_err(|_| SelectedProofAccountingError::ResourcePlanning)?;
+                let provider = CommonProofSourceProviderMemoryAccounting::new(
+                    accounting.loading_persistent_resident_byte_length(),
+                    accounting.post_source_polynomial_finish_persistent_resident_byte_length(),
+                    accounting.additional_loading_source_polynomials_transient_byte_length(),
+                    accounting.maximum_returned_source_polynomial_byte_length(),
+                );
+                Ok(SourceProviderMemoryAccounting::Common(provider))
+            }
+            ProofApplicationSlotCeilings::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER => {
+                let committed = committed_material_source_provider_memory_accounting
+                    .ok_or(SelectedProofAccountingError::ResourcePlanning)?;
+                let provider = CommonProofSourceProviderMemoryAccounting::new(
+                    committed.loading_persistent_resident_byte_length(),
+                    committed.post_source_polynomial_finish_persistent_resident_byte_length(),
+                    committed.additional_loading_source_polynomials_transient_byte_length(),
+                    committed.maximum_returned_source_polynomial_byte_length(),
+                );
+                Ok(SourceProviderMemoryAccounting::Common(provider))
+            }
+            ProofApplicationSlotCeilings::AGGREGATE_THRESHOLD_SHARE_STATEMENT_SCHEMA_IDENTIFIER => {
+                Ok(SourceProviderMemoryAccounting::CommittedMaterial(
+                    committed_material_source_provider_memory_accounting
+                        .ok_or(SelectedProofAccountingError::ResourcePlanning)?,
+                ))
+            }
+            ProofApplicationSlotCeilings::GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER => {
+                let relation_input = selected_galois_key_share_relation_plan_input()
+                    .map_err(|_| SelectedProofAccountingError::InvalidProfile)?;
+                let accounting = galois_key_share_source_provider_memory_accounting(
+                    &relation_input,
+                    variant,
+                    relation_context,
+                    canonical_application_statement_bytes.len(),
+                )
+                .map_err(|_| SelectedProofAccountingError::ResourcePlanning)?;
+                let provider = CommonProofSourceProviderMemoryAccounting::new(
+                    accounting.loading_persistent_resident_byte_length(),
+                    accounting.post_source_polynomial_finish_persistent_resident_byte_length(),
+                    accounting.additional_loading_source_polynomials_transient_byte_length(),
+                    accounting.maximum_returned_source_polynomial_byte_length(),
+                );
+                Ok(SourceProviderMemoryAccounting::Common(provider))
+            }
+            ProofApplicationSlotCeilings::TARGET_SHARE_PROOF_STATEMENT_SCHEMA_IDENTIFIER => {
+                let compilation = selected_target_release_relation()
+                    .map_err(|_| SelectedProofAccountingError::InvalidProfile)?;
+                let expected_variant = compilation
+                    .relation_plan()
+                    .select_variant(variant.schedule_position(), variant.top_count())
+                    .map_err(|_| SelectedProofAccountingError::InvalidProfile)?;
+                if expected_variant
+                    .canonical_hash()
+                    .map_err(|_| SelectedProofAccountingError::InvalidProfile)?
+                    != variant
+                        .canonical_hash()
+                        .map_err(|_| SelectedProofAccountingError::InvalidProfile)?
+                {
+                    return Err(SelectedProofAccountingError::InvalidProfile);
+                }
+                let provider =
+                    selected_kllps_target_release_source_provider_memory_accounting()
+                        .map_err(|_| SelectedProofAccountingError::ResourcePlanning)?;
+                Ok(SourceProviderMemoryAccounting::Common(provider))
+            }
+            _ => Err(SelectedProofAccountingError::InvalidProfile),
+        }
+    }
+
     fn require_selected_variant_resource_bounds(
         application_statement_schema_identifier: u16,
         canonical_application_statement_bytes: &[u8],
@@ -1555,244 +1797,47 @@ mod resource_accounting {
             CommittedMaterialSourceProviderMemoryAccounting,
         >,
     ) -> Result<SelectedProofVariantResourceBounds, SelectedProofAccountingError> {
-        let source_provider_memory_accounting = match application_statement_schema_identifier {
-        ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER => {
-            let relation_input = selected_same_secret_relation_plan_input()
-                .map_err(|_| SelectedProofAccountingError::InvalidProfile)?;
-            let compiled = compile_same_secret_relation_with_source_layout(
-                &relation_input,
-                relation_context,
-            )
-            .map_err(|_| SelectedProofAccountingError::InvalidProfile)?;
-            let expected_variant = compiled
-                .relation_plan
-                .select_variant(variant.schedule_position(), variant.top_count())
-                .map_err(|_| SelectedProofAccountingError::InvalidProfile)?;
-            if expected_variant
-                .canonical_hash()
-                .map_err(|_| SelectedProofAccountingError::InvalidProfile)?
-                != variant
-                    .canonical_hash()
-                    .map_err(|_| SelectedProofAccountingError::InvalidProfile)?
-            {
-                return Err(SelectedProofAccountingError::InvalidProfile);
-            }
-            let provider = same_secret_source_provider_memory_accounting(
-                variant,
-                relation_context,
-                relation_input.ring_degree,
-                &compiled.source_layout,
-                canonical_application_statement_bytes.len(),
-            )
-            .map_err(|_| SelectedProofAccountingError::ResourcePlanning)?;
-            Some(SourceProviderMemoryAccounting::Common(provider))
-        }
-        ProofApplicationSlotCeilings::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER => {
-            let relation_input = selected_public_key_share_relation_plan_input()
-                .map_err(|_| SelectedProofAccountingError::InvalidProfile)?;
-            let compiled = compile_public_key_share_relation_with_source_layout(
-                &relation_input,
-                relation_context,
-            )
-            .map_err(|_| SelectedProofAccountingError::InvalidProfile)?;
-            let expected_variant = compiled
-                .relation_plan
-                .select_variant(variant.schedule_position(), variant.top_count())
-                .map_err(|_| SelectedProofAccountingError::InvalidProfile)?;
-            if expected_variant
-                .canonical_hash()
-                .map_err(|_| SelectedProofAccountingError::InvalidProfile)?
-                != variant
-                    .canonical_hash()
-                    .map_err(|_| SelectedProofAccountingError::InvalidProfile)?
-            {
-                return Err(SelectedProofAccountingError::InvalidProfile);
-            }
-            let provider = public_key_share_source_provider_memory_accounting(
-                variant,
-                relation_context,
-                relation_input.ring_degree,
-                &compiled.source_layout,
-                canonical_application_statement_bytes.len(),
-            )
-            .map_err(|_| SelectedProofAccountingError::ResourcePlanning)?;
-            Some(SourceProviderMemoryAccounting::Common(provider))
-        }
-        ProofApplicationSlotCeilings::BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER => {
-            Some(SourceProviderMemoryAccounting::BallotValidity(
-                selected_ballot_validity_carrier_buffer_accounting()
-                    .map_err(|_| SelectedProofAccountingError::ResourcePlanning)?,
-            ))
-        }
-        ProofApplicationSlotCeilings::COLLECTIVE_PUBLIC_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER => {
-            Some(SourceProviderMemoryAccounting::CollectivePublicKey(
-                collective_public_key_source_provider_memory_accounting(variant)
-                    .map_err(|_| SelectedProofAccountingError::ResourcePlanning)?,
-            ))
-        }
-        ProofApplicationSlotCeilings::RKG_ROUND_ONE_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER
-        | ProofApplicationSlotCeilings::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER => {
-            Some(SourceProviderMemoryAccounting::EvaluatorAggregate(
-                evaluator_aggregate_source_provider_memory_accounting(variant, relation_context)
-                    .map_err(|_| SelectedProofAccountingError::ResourcePlanning)?,
-            ))
-        }
-        ProofApplicationSlotCeilings::RELINEARIZATION_ROUND_ONE_STATEMENT_SCHEMA_IDENTIFIER => {
-            let (relation_input, _) = selected_relinearization_relation_plan_inputs()
-                .map_err(|_| SelectedProofAccountingError::InvalidProfile)?;
-            let compiled = compile_relinearization_round_one_relation_with_source_layout(
-                &relation_input,
-                relation_context,
-            )
-            .map_err(|_| SelectedProofAccountingError::InvalidProfile)?;
-            let expected_variant = compiled
-                .relation_plan
-                .select_variant(variant.schedule_position(), variant.top_count())
-                .map_err(|_| SelectedProofAccountingError::InvalidProfile)?;
-            if expected_variant
-                .canonical_hash()
-                .map_err(|_| SelectedProofAccountingError::InvalidProfile)?
-                != variant
-                    .canonical_hash()
-                    .map_err(|_| SelectedProofAccountingError::InvalidProfile)?
-            {
-                return Err(SelectedProofAccountingError::InvalidProfile);
-            }
-            let provider = relinearization_round_one_source_provider_memory_accounting(
-                variant,
-                relation_context,
-                &relation_input.geometry,
-                &compiled.source_layout,
-                canonical_application_statement_bytes.len(),
-            )
-            .map_err(|_| SelectedProofAccountingError::ResourcePlanning)?;
-            Some(SourceProviderMemoryAccounting::Common(provider))
-        }
-        ProofApplicationSlotCeilings::RELINEARIZATION_ROUND_TWO_STATEMENT_SCHEMA_IDENTIFIER => {
-            let (_, relation_input) = selected_relinearization_relation_plan_inputs()
-                .map_err(|_| SelectedProofAccountingError::InvalidProfile)?;
-            let compiled = compile_relinearization_round_two_relation_with_source_layout(
-                &relation_input,
-                relation_context,
-            )
-            .map_err(|_| SelectedProofAccountingError::InvalidProfile)?;
-            let expected_variant = compiled
-                .relation_plan
-                .select_variant(variant.schedule_position(), variant.top_count())
-                .map_err(|_| SelectedProofAccountingError::InvalidProfile)?;
-            if expected_variant
-                .canonical_hash()
-                .map_err(|_| SelectedProofAccountingError::InvalidProfile)?
-                != variant
-                    .canonical_hash()
-                    .map_err(|_| SelectedProofAccountingError::InvalidProfile)?
-            {
-                return Err(SelectedProofAccountingError::InvalidProfile);
-            }
-            let data_primes_per_block = relation_input
-                .geometry
-                .decomposition_blocks
-                .first()
-                .map(|block| block.data_modulus_indices.len())
-                .filter(|count| *count != 0)
-                .ok_or(SelectedProofAccountingError::InvalidProfile)?;
-            let aggregate_topology = KeySwitchComponentMaterialTopology::from_suite_algebra(
-                &relation_input.geometry.data_moduli,
-                &relation_input.geometry.special_moduli,
-                data_primes_per_block,
-                usize::try_from(relation_input.geometry.ring_degree)
-                    .map_err(|_| SelectedProofAccountingError::CountOverflow)?,
-            )
-            .map_err(|_| SelectedProofAccountingError::InvalidProfile)?;
-            let accounting = relinearization_round_two_source_provider_memory_accounting(
-                variant,
-                relation_context,
-                &relation_input.geometry,
-                &compiled.source_layout,
-                &aggregate_topology,
-                canonical_application_statement_bytes.len(),
-            )
-            .map_err(|_| SelectedProofAccountingError::ResourcePlanning)?;
-            let provider = CommonProofSourceProviderMemoryAccounting::new(
-                accounting.loading_persistent_resident_byte_length(),
-                accounting.post_source_polynomial_finish_persistent_resident_byte_length(),
-                accounting.additional_loading_source_polynomials_transient_byte_length(),
-                accounting.maximum_returned_source_polynomial_byte_length(),
-            );
-            Some(SourceProviderMemoryAccounting::Common(provider))
-        }
-        ProofApplicationSlotCeilings::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER => {
-            let committed = committed_material_source_provider_memory_accounting
-                .ok_or(SelectedProofAccountingError::ResourcePlanning)?;
-            let provider = CommonProofSourceProviderMemoryAccounting::new(
-                committed.loading_persistent_resident_byte_length(),
-                committed.post_source_polynomial_finish_persistent_resident_byte_length(),
-                committed.additional_loading_source_polynomials_transient_byte_length(),
-                committed.maximum_returned_source_polynomial_byte_length(),
-            );
-            Some(SourceProviderMemoryAccounting::Common(provider))
-        }
-        ProofApplicationSlotCeilings::AGGREGATE_THRESHOLD_SHARE_STATEMENT_SCHEMA_IDENTIFIER => {
-            Some(SourceProviderMemoryAccounting::CommittedMaterial(
-                committed_material_source_provider_memory_accounting
-                    .ok_or(SelectedProofAccountingError::ResourcePlanning)?,
-            ))
-        }
-        ProofApplicationSlotCeilings::GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER => {
-            let relation_input = selected_galois_key_share_relation_plan_input()
-                .map_err(|_| SelectedProofAccountingError::InvalidProfile)?;
-            let accounting = galois_key_share_source_provider_memory_accounting(
-                &relation_input,
-                variant,
-                relation_context,
-                canonical_application_statement_bytes.len(),
-            )
-            .map_err(|_| SelectedProofAccountingError::ResourcePlanning)?;
-            let provider = CommonProofSourceProviderMemoryAccounting::new(
-                accounting.loading_persistent_resident_byte_length(),
-                accounting.post_source_polynomial_finish_persistent_resident_byte_length(),
-                accounting.additional_loading_source_polynomials_transient_byte_length(),
-                accounting.maximum_returned_source_polynomial_byte_length(),
-            );
-            Some(SourceProviderMemoryAccounting::Common(provider))
-        }
-        ProofApplicationSlotCeilings::TARGET_SHARE_PROOF_STATEMENT_SCHEMA_IDENTIFIER => None,
-        _ => None,
-    };
+        let source_provider_memory_accounting = selected_source_provider_memory_accounting(
+            application_statement_schema_identifier,
+            canonical_application_statement_bytes,
+            variant,
+            relation_context,
+            committed_material_source_provider_memory_accounting,
+        )?;
         let application_runtime_memory_accounting = match (
-        application_statement_schema_identifier,
-        source_provider_memory_accounting,
-    ) {
-        (
-            ProofApplicationSlotCeilings::BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER,
-            Some(SourceProviderMemoryAccounting::BallotValidity(carrier_accounting)),
-        ) => Some(ApplicationRuntimeMemoryAccounting::BallotValidity(
-            selected_ballot_ciphertext_readback_memory_accounting(
-                u64::try_from(canonical_application_statement_bytes.len())
-                    .map_err(|_| SelectedProofAccountingError::CountOverflow)?,
-                carrier_accounting,
-            )?,
-        )),
-        (
-            ProofApplicationSlotCeilings::COLLECTIVE_PUBLIC_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
-            Some(SourceProviderMemoryAccounting::CollectivePublicKey(provider_accounting)),
-        ) => Some(ApplicationRuntimeMemoryAccounting::CollectivePublicKey(
-            collective_public_key_application_memory_accounting(
-                u64::try_from(canonical_application_statement_bytes.len())
-                    .map_err(|_| SelectedProofAccountingError::CountOverflow)?,
-                provider_accounting,
-            )
-            .map_err(|_| SelectedProofAccountingError::ResourcePlanning)?,
-        )),
-        (ProofApplicationSlotCeilings::BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER, _)
-        | (
-            ProofApplicationSlotCeilings::COLLECTIVE_PUBLIC_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
-            _,
-        ) => return Err(SelectedProofAccountingError::ResourcePlanning),
-        _ => None,
-    };
+            application_statement_schema_identifier,
+            source_provider_memory_accounting,
+        ) {
+            (
+                ProofApplicationSlotCeilings::BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER,
+                SourceProviderMemoryAccounting::BallotValidity(carrier_accounting),
+            ) => Some(ApplicationRuntimeMemoryAccounting::BallotValidity(
+                selected_ballot_ciphertext_readback_memory_accounting(
+                    u64::try_from(canonical_application_statement_bytes.len())
+                        .map_err(|_| SelectedProofAccountingError::CountOverflow)?,
+                    carrier_accounting,
+                )?,
+            )),
+            (
+                ProofApplicationSlotCeilings::COLLECTIVE_PUBLIC_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+                SourceProviderMemoryAccounting::CollectivePublicKey(provider_accounting),
+            ) => Some(ApplicationRuntimeMemoryAccounting::CollectivePublicKey(
+                collective_public_key_application_memory_accounting(
+                    u64::try_from(canonical_application_statement_bytes.len())
+                        .map_err(|_| SelectedProofAccountingError::CountOverflow)?,
+                    provider_accounting,
+                )
+                .map_err(|_| SelectedProofAccountingError::ResourcePlanning)?,
+            )),
+            (ProofApplicationSlotCeilings::BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER, _)
+            | (
+                ProofApplicationSlotCeilings::COLLECTIVE_PUBLIC_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+                _,
+            ) => return Err(SelectedProofAccountingError::ResourcePlanning),
+            _ => None,
+        };
         if let (
-            Some(SourceProviderMemoryAccounting::CollectivePublicKey(provider_accounting)),
+            SourceProviderMemoryAccounting::CollectivePublicKey(provider_accounting),
             Some(ApplicationRuntimeMemoryAccounting::CollectivePublicKey(application_accounting)),
         ) = (
             source_provider_memory_accounting,
@@ -1971,7 +2016,7 @@ mod resource_accounting {
         resident_memory_requirement: &CommonProofResidentMemoryPlan,
         checkpoint_custody_requirement: CommonProofGenerationCheckpointCustodyRequirement,
         fri_fold_count: u16,
-        source_provider_memory_accounting: Option<SourceProviderMemoryAccounting>,
+        source_provider_memory_accounting: SourceProviderMemoryAccounting,
         application_runtime_memory_accounting: Option<ApplicationRuntimeMemoryAccounting>,
     ) -> Result<SelectedResidentMemoryBounds, SelectedProofAccountingError> {
         let retained_cursor_state_byte_length = checkpoint_custody_requirement
@@ -1981,18 +2026,17 @@ mod resource_accounting {
             checkpoint_custody_requirement.boundary_peak_additional_resident_byte_ceiling();
         if boundary_checkpoint_custody_byte_length < retained_cursor_state_byte_length
             || !checkpoint_custody_requirement.fits_absolute_bounds()
-            || source_provider_memory_accounting.is_some_and(|accounting| {
-                resident_memory_requirement
-                    .phases()
-                    .iter()
-                    .find(|phase| {
-                        phase.phase() == CommonProofResidentMemoryPhase::LoadingSourcePolynomials
-                    })
-                    .is_none_or(|phase| {
-                        phase.relation_polynomial_working_set_byte_length()
-                            < accounting.maximum_returned_source_polynomial_byte_length()
-                    })
-            })
+            || resident_memory_requirement
+                .phases()
+                .iter()
+                .find(|phase| {
+                    phase.phase() == CommonProofResidentMemoryPhase::LoadingSourcePolynomials
+                })
+                .is_none_or(|phase| {
+                    phase.relation_polynomial_working_set_byte_length()
+                        < source_provider_memory_accounting
+                            .maximum_returned_source_polynomial_byte_length()
+                })
         {
             return Err(SelectedProofAccountingError::ResourcePlanning);
         }
@@ -2025,29 +2069,13 @@ mod resource_accounting {
             } else {
                 boundary_checkpoint_custody_byte_length
             };
-            let source_provider_persistent_resident_byte_length =
-                if common_proof_source_provider_is_live_during_phase(phase_plan.phase()) {
-                    source_provider_memory_accounting.map_or(0, |accounting| {
-                        if phase_plan.phase()
-                            == CommonProofResidentMemoryPhase::LoadingSourcePolynomials
-                        {
-                            accounting.loading_persistent_resident_byte_length()
-                        } else {
-                            accounting.post_source_finish_persistent_resident_byte_length()
-                        }
-                    })
-                } else {
-                    0
-                };
-            let source_provider_loading_transient_byte_length =
-                if phase_plan.phase() == CommonProofResidentMemoryPhase::LoadingSourcePolynomials {
-                    source_provider_memory_accounting.map_or(
-                        0,
-                        SourceProviderMemoryAccounting::additional_loading_transient_byte_length,
-                    )
-                } else {
-                    0
-                };
+            let (
+                source_provider_persistent_resident_byte_length,
+                source_provider_loading_transient_byte_length,
+            ) = selected_source_provider_phase_memory_byte_lengths(
+                phase_plan.phase(),
+                source_provider_memory_accounting,
+            );
             let application_runtime_persistent_resident_byte_length =
                 application_runtime_memory_accounting.map_or(0, |accounting| {
                     if phase_plan.phase()
@@ -2104,6 +2132,33 @@ mod resource_accounting {
             maximum_combined_wasm_resident_byte_length,
             ordered_phases: ordered_phases.into_boxed_slice(),
         })
+    }
+
+    fn selected_source_provider_phase_memory_byte_lengths(
+        phase: CommonProofResidentMemoryPhase,
+        source_provider_memory_accounting: SourceProviderMemoryAccounting,
+    ) -> (u64, u64) {
+        let persistent_resident_byte_length =
+            if common_proof_source_provider_is_live_during_phase(phase) {
+                if phase == CommonProofResidentMemoryPhase::LoadingSourcePolynomials {
+                    source_provider_memory_accounting.loading_persistent_resident_byte_length()
+                } else {
+                    source_provider_memory_accounting
+                        .post_source_finish_persistent_resident_byte_length()
+                }
+            } else {
+                0
+            };
+        let loading_transient_byte_length =
+            if phase == CommonProofResidentMemoryPhase::LoadingSourcePolynomials {
+                source_provider_memory_accounting.additional_loading_transient_byte_length()
+            } else {
+                0
+            };
+        (
+            persistent_resident_byte_length,
+            loading_transient_byte_length,
+        )
     }
 
     /// One physical proof family in the complete selected action. Variant rows are
@@ -2634,7 +2689,110 @@ mod resource_accounting {
         use crate::foundation::{CanonicalItem, CanonicalItemType, CanonicalTuple};
 
         #[test]
-        fn one_packed_deep_fri_backend_compiles_every_selected_relation_plan_variant() {
+        fn selected_target_share_resident_rows_include_the_production_source_provider() {
+            let schema_identifier =
+                ProofApplicationSlotCeilings::TARGET_SHARE_PROOF_STATEMENT_SCHEMA_IDENTIFIER;
+            let relation_context = selected_relation_plan_check_context(schema_identifier)
+                .expect("the selected target-share relation has one common-proof context");
+            let compilation = selected_target_release_relation()
+                .expect("the selected target-share relation compiles");
+            let variant = compilation
+                .relation_plan()
+                .select_variant(None, None)
+                .expect("the selected target-share relation has one variant");
+            let statement_context = SelectedApplicationStatementContext::new(
+                FOUNDATION_PROFILE.protocol_version,
+                [0; Hash512::BYTE_LENGTH],
+                variant.schedule_position(),
+                variant.top_count(),
+            );
+            let statement_bytes = canonical_selected_application_statement_for_ceiling(
+                schema_identifier,
+                statement_context,
+            )
+            .expect("the selected target-share ceiling statement encodes");
+            let classified_provider = selected_source_provider_memory_accounting(
+                schema_identifier,
+                &statement_bytes,
+                variant,
+                &relation_context,
+                None,
+            )
+            .expect("the selected target-share provider accounting derives");
+            let expected_provider =
+                selected_kllps_target_release_source_provider_memory_accounting()
+                    .expect("the production KLLPS provider accounting derives");
+            let SourceProviderMemoryAccounting::Common(classified_provider) = classified_provider
+            else {
+                panic!("the selected target-share schema must use the common source provider");
+            };
+            assert_eq!(classified_provider, expected_provider);
+            assert!(classified_provider.loading_persistent_resident_byte_length() > 0);
+            assert!(
+                classified_provider.post_source_polynomial_finish_persistent_resident_byte_length()
+                    > 0
+            );
+            assert!(classified_provider.additional_loading_transient_byte_length() > 0);
+            assert!(classified_provider.maximum_returned_source_polynomial_byte_length() > 0);
+            assert!(matches!(
+                selected_source_provider_memory_accounting(
+                    u16::MAX,
+                    &statement_bytes,
+                    variant,
+                    &relation_context,
+                    None,
+                ),
+                Err(SelectedProofAccountingError::InvalidProfile)
+            ));
+
+            for phase in [
+                CommonProofResidentMemoryPhase::LoadingSourcePolynomials,
+                CommonProofResidentMemoryPhase::ConstructingReversedColumns,
+                CommonProofResidentMemoryPhase::TransformingBaseColumns,
+                CommonProofResidentMemoryPhase::MaterializingBaseTrees,
+                CommonProofResidentMemoryPhase::DerivingAuxiliaryColumns,
+                CommonProofResidentMemoryPhase::TransformingAuxiliaryColumns,
+                CommonProofResidentMemoryPhase::MaterializingAuxiliaryTrees,
+                CommonProofResidentMemoryPhase::ConstructingQuotient,
+                CommonProofResidentMemoryPhase::MaterializingQuotientTrees,
+                CommonProofResidentMemoryPhase::DerivingOpenings,
+                CommonProofResidentMemoryPhase::ConstructingInitialFri,
+                CommonProofResidentMemoryPhase::FoldingFri,
+                CommonProofResidentMemoryPhase::PreparingQueryOutput,
+                CommonProofResidentMemoryPhase::EmittingQueries,
+            ] {
+                let (persistent_byte_length, loading_transient_byte_length) =
+                    selected_source_provider_phase_memory_byte_lengths(
+                        phase,
+                        SourceProviderMemoryAccounting::Common(classified_provider),
+                    );
+                let expected_persistent_byte_length =
+                    if phase == CommonProofResidentMemoryPhase::LoadingSourcePolynomials {
+                        expected_provider.loading_persistent_resident_byte_length()
+                    } else {
+                        expected_provider
+                            .post_source_polynomial_finish_persistent_resident_byte_length()
+                    };
+                let expected_loading_transient_byte_length =
+                    if phase == CommonProofResidentMemoryPhase::LoadingSourcePolynomials {
+                        expected_provider.additional_loading_transient_byte_length()
+                    } else {
+                        0
+                    };
+                assert_eq!(
+                    persistent_byte_length, expected_persistent_byte_length,
+                    "the target-share provider persistent bytes must follow phase {phase:?}",
+                );
+                assert_eq!(
+                    loading_transient_byte_length, expected_loading_transient_byte_length,
+                    "the target-share provider loading scratch must follow phase {phase:?}",
+                );
+            }
+        }
+
+        #[test]
+        #[ignore = "guarded selected proof resource measurement"]
+        fn selected_candidate_packed_deep_fri_resource_inventory_derives_every_variant() {
             let inventory = selected_proof_variant_resource_inventory()
                 .expect("the selected resource inventory derives");
             let proof_profile =
@@ -2738,6 +2896,7 @@ mod resource_accounting {
         }
 
         #[test]
+        #[ignore = "guarded selected proof resource measurement"]
         fn runtime_limits_match_resource_ceilings_for_every_selected_variant() {
             let inventory = selected_proof_variant_resource_inventory()
                 .expect("the selected resource inventory derives");
@@ -2790,6 +2949,7 @@ mod resource_accounting {
         }
 
         #[test]
+        #[ignore = "guarded selected proof resource measurement"]
         fn exact_variant_rows_reconcile_transport_frontiers_memory_and_copies() {
             let inventory = selected_proof_variant_resource_inventory()
                 .expect("the selected resource inventory derives");
@@ -2914,6 +3074,7 @@ mod resource_accounting {
         }
 
         #[test]
+        #[ignore = "guarded selected proof resource measurement"]
         fn complete_action_accounting_derives_all_physical_proof_slots() {
             let accounting = selected_complete_proof_resource_accounting()
                 .expect("the complete selected accounting derives");
@@ -3237,6 +3398,7 @@ mod resource_accounting {
         }
 
         #[test]
+        #[ignore = "guarded selected proof resource measurement"]
         fn report_one_mixed_galois_batch_against_two_level_shards() {
             use crate::bgv::proof_suite::relation_plan::{
                 GaloisKeyShareRelationPlanInput,

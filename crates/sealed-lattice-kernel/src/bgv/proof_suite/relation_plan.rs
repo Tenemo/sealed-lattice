@@ -203,6 +203,8 @@ pub(crate) use setup_key_relation_adapter::{
     public_key_share_source_provider_memory_accounting,
     same_secret_source_provider_memory_accounting,
 };
+#[cfg(test)]
+pub(crate) use target_release::target_release_source_provider_memory_accounting_for_source;
 pub(crate) use target_release::{
     CompiledTargetReleaseRelation, TargetReleaseModulusWitness, TargetReleaseRelationPlanInput,
     TargetReleaseRoleWitness, TargetReleaseSourcePolynomialAdapter,

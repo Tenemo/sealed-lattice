@@ -9,7 +9,13 @@ export const fullProfileEvidenceRustTests = [
     'foundation::selected_suite::tests::candidate_suite_gate_derives_one_complete_canonical_record',
 ] as const;
 
-export const measurementRustTests = [] as const;
+export const measurementRustTests = [
+    'bgv::proof_suite::selected_accounting::resource_accounting::tests::selected_candidate_packed_deep_fri_resource_inventory_derives_every_variant',
+    'bgv::proof_suite::selected_accounting::resource_accounting::tests::runtime_limits_match_resource_ceilings_for_every_selected_variant',
+    'bgv::proof_suite::selected_accounting::resource_accounting::tests::exact_variant_rows_reconcile_transport_frontiers_memory_and_copies',
+    'bgv::proof_suite::selected_accounting::resource_accounting::tests::complete_action_accounting_derives_all_physical_proof_slots',
+    'bgv::proof_suite::selected_accounting::resource_accounting::tests::report_one_mixed_galois_batch_against_two_level_shards',
+] as const;
 
 type FocusedRustLane =
     | 'rust-full-profile-evidence'
@@ -38,7 +44,7 @@ const lanesForTest = (test: RustTestInventoryEntry): FocusedRustLane[] => {
     if (measurementTestSet.has(test.testName)) {
         lanes.push('rust-measurements');
     }
-    if (!test.ignored && lanes.length === 0) {
+    if (!test.ignored) {
         lanes.push('rust-kernel-fast');
     }
 
@@ -64,7 +70,7 @@ export const validateFocusedRustLaneSelection = (input: {
         }
         if (lanes.length > 1) {
             throw new Error(
-                `${requestedScript} filter ${input.testFilter} selects ${test.testName}, which belongs to multiple guarded groups: ${lanes.map((lane) => focusedRustLaneScripts[lane]).join(', ')}.`,
+                `${requestedScript} filter ${input.testFilter} selects ${test.testName}, which belongs to multiple Rust lanes: ${lanes.map((lane) => focusedRustLaneScripts[lane]).join(', ')}.`,
             );
         }
         const correctScript =

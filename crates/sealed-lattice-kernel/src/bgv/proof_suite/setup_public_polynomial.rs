@@ -2037,6 +2037,7 @@ mod tests {
         let public_polynomial_degree_bound_exclusive =
             usize::try_from(relation_geometry.public_polynomial_column_degree_bound_exclusive)
                 .expect("the selected public-polynomial degree bound fits usize");
+        assert_eq!(public_polynomial_degree_bound_exclusive, 16_384);
 
         let wasm_plan = setup_public_polynomial_wasm_compact_root_memory_plan(
             evaluation_domain_size,
@@ -2048,18 +2049,18 @@ mod tests {
             wasm_plan.leaf_hash_state_arena_payload_byte_length(),
             226_492_416,
         );
-        assert_eq!(wasm_plan.source_column_payload_byte_length(), 262_144);
+        assert_eq!(wasm_plan.source_column_payload_byte_length(), 131_072);
         assert_eq!(wasm_plan.extension_column_payload_byte_length(), 16_777_216,);
         assert_eq!(wasm_plan.online_merkle_stack_payload_byte_length(), 1_280,);
         assert_eq!(
             wasm_plan.retained_trace_rows_payload_byte_length(),
-            109_051_904,
+            54_525_952,
         );
         assert_eq!(
             wasm_plan.column_pipeline_payload_peak_byte_length(),
-            243_531_776,
+            243_400_704,
         );
-        assert_eq!(wasm_plan.owned_payload_peak_byte_length(), 243_531_776);
+        assert_eq!(wasm_plan.owned_payload_peak_byte_length(), 243_400_704);
         assert!(
             wasm_plan.owned_payload_peak_byte_length()
                 <= MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH,
@@ -2067,7 +2068,7 @@ mod tests {
         assert_eq!(
             MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH
                 - wasm_plan.owned_payload_peak_byte_length(),
-            427_556_864,
+            427_687_936,
         );
 
         let current_target_plan = setup_public_polynomial_compact_root_memory_plan(

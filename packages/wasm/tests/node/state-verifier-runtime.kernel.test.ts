@@ -484,14 +484,21 @@ describe('State verifier real-WASM runtime in Node', () => {
     });
 
     it('binds the output intent to every exact streamed byte', () => {
+        const changedOutputVector = createStateVerifierTestVector({
+            targetReleaseOutputSeedByte: 0xd3,
+        });
+        expect(changedOutputVector.reservation.objectHash).toEqual(
+            vector.reservation.objectHash,
+        );
+        expect(changedOutputVector.exactOutputBytes).not.toEqual(
+            vector.exactOutputBytes,
+        );
         const session = openSession(kernel, vector);
         try {
             const reservation = verifyReservation(session, vector);
             if (!reservation.isValid) {
                 throw new Error(reservation.refusalReason);
             }
-            const changedOutputBytes = Uint8Array.from(vector.exactOutputBytes);
-            changedOutputBytes[changedOutputBytes.byteLength - 1] ^= 1;
             const openedOutput = session.openOutputVerification({
                 canonicalOutputIntentCarrier:
                     vector.output.canonicalIntentCarrier,
@@ -500,7 +507,7 @@ describe('State verifier real-WASM runtime in Node', () => {
                 exactOutputDescriptorBytes: descriptorFor(
                     kernel,
                     canonicalStreamDomains.stateTargetReleaseExactOutput,
-                    changedOutputBytes,
+                    changedOutputVector.exactOutputBytes,
                 ),
                 verifiedReservation: reservation.value,
             });
@@ -508,7 +515,7 @@ describe('State verifier real-WASM runtime in Node', () => {
                 throw new Error(openedOutput.refusalReason);
             }
             for (const [chunkIndex, chunk] of chunkBuffers(
-                changedOutputBytes,
+                changedOutputVector.exactOutputBytes,
             ).entries()) {
                 expect(
                     openedOutput.value.absorbChunk(chunkIndex, chunk).isValid,
