@@ -108,7 +108,7 @@ pub(crate) fn compile_public_key_share_relation_with_source_layout(
             modulus_reference,
         )?;
         let quotient_columns = builder.add_public_key_quotient_witness()?;
-        for challenge_ordinal in 0..check_context.non_native_modular_identity_challenge_count {
+        for challenge_ordinal in 0..check_context.non_native_theta_repetition_count {
             builder.add_public_key_equation(
                 modulus_reference,
                 challenge_ordinal,
@@ -152,7 +152,7 @@ pub(crate) fn compile_public_key_share_relation_with_source_layout(
         let (first_matrix, second_matrix) =
             add_matrix_columns(&mut builder, data_modulus_index, rank)?;
         let quotients = builder.add_anchor_quotient_witness()?;
-        for challenge_ordinal in 0..check_context.non_native_modular_identity_challenge_count {
+        for challenge_ordinal in 0..check_context.non_native_theta_repetition_count {
             builder.add_anchor_equations(
                 modulus_reference,
                 challenge_ordinal,

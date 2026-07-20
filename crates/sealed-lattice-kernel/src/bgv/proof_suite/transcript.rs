@@ -13,6 +13,7 @@ use crate::foundation::{
 use super::field::{
     PROOF_BASE_FIELD_MODULUS, PROOF_CHALLENGE_EXTENSION_DEGREE, ProofChallengeExtensionElement,
 };
+use super::relation_plan::RelationApplicationChallengeAssignment;
 
 const TRANSCRIPT_INITIAL_DOMAIN: &str = "sealed-lattice/proof/transcript/v1";
 const TRANSCRIPT_ABSORB_DOMAIN: &str = "sealed-lattice/proof/transcript/absorb/v1";
@@ -481,7 +482,7 @@ impl CommonProofRound {
 pub(crate) enum CommonProofChallenge {
     Theta { modulus_ordinal: u16 },
     Alpha { modulus_ordinal: u16 },
-    Composition { constraint_ordinal: u16 },
+    Composition { constraint_ordinal: u32 },
     DeepPoint { point_ordinal: u16 },
     OpeningBatch { claim_ordinal: u32 },
     FriFold { fold_ordinal: u16 },
@@ -514,6 +515,14 @@ impl CommonProofChallenge {
         }
     }
 
+    fn accepts_application_modulus(self, modulus: u64) -> bool {
+        match self {
+            Self::Theta { .. } => modulus == PROOF_BASE_FIELD_MODULUS,
+            Self::Alpha { .. } => modulus > 1 && modulus < PROOF_BASE_FIELD_MODULUS,
+            _ => false,
+        }
+    }
+
     fn is_application_challenge(self) -> bool {
         matches!(self, Self::Theta { .. } | Self::Alpha { .. })
     }
@@ -539,19 +548,15 @@ impl CommonProofApplicationChallengeGroup {
         modulus: u64,
         coordinate_count: u16,
     ) -> Result<Self, TranscriptError> {
+        if !challenge.accepts_application_modulus(modulus) || coordinate_count == 0 {
+            return Err(TranscriptError::InvalidCommonProofSchedule);
+        }
         let candidate_byte_length =
             product_residue_candidate_byte_length(modulus, coordinate_count).and_then(
                 |length| {
                     u64::try_from(length).map_err(|_| TranscriptError::ChallengeCounterOverflow)
                 },
             )?;
-        if !challenge.is_application_challenge()
-            || modulus <= 1
-            || modulus >= PROOF_BASE_FIELD_MODULUS
-            || coordinate_count == 0
-        {
-            return Err(TranscriptError::InvalidCommonProofSchedule);
-        }
         Ok(Self {
             challenge,
             modulus,
@@ -562,6 +567,11 @@ impl CommonProofApplicationChallengeGroup {
 
     pub(crate) fn challenge(self) -> CommonProofChallenge {
         self.challenge
+    }
+
+    #[cfg(test)]
+    pub(crate) const fn modulus(self) -> u64 {
+        self.modulus
     }
 
     pub(crate) fn coordinate_count(self) -> u16 {
@@ -591,17 +601,14 @@ pub(crate) struct CommonProofApplicationChallengeSamplerAccounting {
 }
 
 impl CommonProofApplicationChallengeSamplerAccounting {
-    #[cfg(test)]
     pub(crate) const fn challenge(self) -> CommonProofChallenge {
         self.challenge
     }
 
-    #[cfg(test)]
     pub(crate) const fn modulus(self) -> u64 {
         self.modulus
     }
 
-    #[cfg(test)]
     pub(crate) const fn coordinate_count(self) -> u16 {
         self.coordinate_count
     }
@@ -610,7 +617,6 @@ impl CommonProofApplicationChallengeSamplerAccounting {
         self.candidate_byte_length
     }
 
-    #[cfg(test)]
     pub(crate) const fn maximum_candidate_draw_count(self) -> u32 {
         self.maximum_candidate_draw_count
     }
@@ -629,7 +635,6 @@ impl CommonProofApplicationChallengeSamplerAccounting {
         self.candidate_xof_query_count_ceiling
     }
 
-    #[cfg(test)]
     pub(crate) const fn total_xof_query_count_ceiling(self) -> u64 {
         self.total_xof_query_count_ceiling
     }
@@ -1045,7 +1050,7 @@ pub(crate) struct CommonProofTranscriptSchedule {
     ordered_base_tree_ordinals: Vec<u16>,
     ordered_application_challenge_groups: Vec<CommonProofApplicationChallengeGroup>,
     ordered_auxiliary_tree_ordinals: Vec<u16>,
-    composition_challenge_count: u16,
+    composition_challenge_count: u32,
     quotient_component_count: u16,
     deep_point_count: u16,
     opening_claim_count: u32,
@@ -1063,7 +1068,7 @@ impl CommonProofTranscriptSchedule {
         ordered_base_tree_ordinals: Vec<u16>,
         ordered_application_challenge_groups: Vec<CommonProofApplicationChallengeGroup>,
         ordered_auxiliary_tree_ordinals: Vec<u16>,
-        composition_challenge_count: u16,
+        composition_challenge_count: u32,
         quotient_component_count: u16,
         deep_point_count: u16,
         opening_claim_count: u32,
@@ -1104,9 +1109,7 @@ impl CommonProofTranscriptSchedule {
                 .ordered_application_challenge_groups
                 .iter()
                 .any(|entry| {
-                    !entry.challenge.is_application_challenge()
-                        || entry.modulus <= 1
-                        || entry.modulus >= PROOF_BASE_FIELD_MODULUS
+                    !entry.challenge.accepts_application_modulus(entry.modulus)
                         || entry.coordinate_count == 0
                         || entry.candidate_byte_length == 0
                 })
@@ -1480,7 +1483,7 @@ impl CommonProofTranscriptSchedule {
         })
     }
 
-    pub(crate) const fn composition_challenge_count(&self) -> u16 {
+    pub(crate) const fn composition_challenge_count(&self) -> u32 {
         self.composition_challenge_count
     }
 
@@ -1603,6 +1606,42 @@ impl CommonProofTranscriptSchedule {
             )?);
         Ok(maximum_output_byte_length)
     }
+}
+
+pub(crate) fn sample_relation_application_challenges(
+    transcript: &mut CommonProofTranscript,
+    schedule: &CommonProofTranscriptSchedule,
+) -> Result<Vec<RelationApplicationChallengeAssignment>, TranscriptError> {
+    let assignment_count = schedule
+        .ordered_application_challenge_groups()
+        .iter()
+        .try_fold(0_usize, |count, group| {
+            count.checked_add(usize::from(group.coordinate_count()))
+        })
+        .ok_or(TranscriptError::ChallengeCounterOverflow)?;
+    let mut assignments = Vec::new();
+    assignments
+        .try_reserve_exact(assignment_count)
+        .map_err(|_| TranscriptError::ChallengeCounterOverflow)?;
+    for group in schedule.ordered_application_challenge_groups() {
+        let challenge = group.challenge();
+        let values = transcript.sample_application_challenge_group(challenge)?;
+        if values.len() != usize::from(group.coordinate_count()) {
+            return Err(TranscriptError::InvalidCommonProofSchedule);
+        }
+        for (repetition_index, value) in values.into_iter().enumerate() {
+            assignments.push(
+                RelationApplicationChallengeAssignment::new(
+                    challenge,
+                    u16::try_from(repetition_index)
+                        .map_err(|_| TranscriptError::ChallengeCounterOverflow)?,
+                    value,
+                )
+                .map_err(|_| TranscriptError::InvalidCommonProofSchedule)?,
+            );
+        }
+    }
+    Ok(assignments)
 }
 
 #[cfg(test)]
@@ -1810,7 +1849,7 @@ enum CommonProofProgress {
     BaseRoots(usize),
     ApplicationChallenges(usize),
     AuxiliaryRoots(usize),
-    CompositionChallenges(u16),
+    CompositionChallenges(u32),
     QuotientRoots(u16),
     DeepPoints(u16),
     DeepValues,
@@ -1956,7 +1995,7 @@ impl CommonProofTranscript {
 
     pub(crate) fn sample_composition_challenge(
         &mut self,
-        constraint_ordinal: u16,
+        constraint_ordinal: u32,
     ) -> Result<ProofChallengeExtensionElement, TranscriptError> {
         let CommonProofProgress::CompositionChallenges(next_ordinal) = self.progress else {
             return Err(TranscriptError::UnexpectedCommonProofChallenge);
@@ -2623,7 +2662,7 @@ pub(super) fn sample_distinct_query_positions_from_values(
 mod common_challenge_chain_tests {
     use num_bigint::BigUint;
 
-    use crate::bgv::parameters::{DATA_PRIMES, PLAINTEXT_MODULUS, SPECIAL_PRIMES};
+    use crate::bgv::parameters::DATA_PRIMES;
     use crate::bgv::proof_suite::field::{
         PROOF_BASE_FIELD_MODULUS, PROOF_CHALLENGE_EXTENSION_DEGREE, ProofChallengeExtensionElement,
     };
@@ -2646,6 +2685,21 @@ mod common_challenge_chain_tests {
 
     fn alpha_challenge() -> CommonProofChallenge {
         CommonProofChallenge::Alpha { modulus_ordinal: 0 }
+    }
+
+    fn removed_theta_domain_polynomial(point: u64) -> u64 {
+        (0_u64..=256).fold(1_u64, |product, root| {
+            let difference = if point >= root {
+                point - root
+            } else {
+                PROOF_BASE_FIELD_MODULUS - (root - point)
+            };
+            u64::try_from(
+                (u128::from(product) * u128::from(difference))
+                    % u128::from(PROOF_BASE_FIELD_MODULUS),
+            )
+            .expect("the reduced base-field product fits u64")
+        })
     }
 
     fn typed_product_candidate(
@@ -2674,6 +2728,47 @@ mod common_challenge_chain_tests {
         )
         .expect("the typed product candidate derives");
         output
+    }
+
+    #[test]
+    fn composition_challenge_schedule_covers_u32_constraint_ordinals() {
+        let first_ordinal_above_u16 = u32::from(u16::MAX) + 1;
+        let challenge_count_including_first_ordinal_above_u16 = first_ordinal_above_u16 + 1;
+        let schedule = CommonProofTranscriptSchedule::new(
+            vec![0],
+            Vec::new(),
+            Vec::new(),
+            challenge_count_including_first_ordinal_above_u16,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            128,
+            CommonProofPrivacyMode::PublicOnly,
+        )
+        .expect("a selected-size composition catalog fits the transcript schedule");
+
+        assert_eq!(
+            schedule.composition_challenge_count(),
+            challenge_count_including_first_ordinal_above_u16
+        );
+        assert_eq!(
+            CommonProofChallenge::Composition {
+                constraint_ordinal: u32::from(u16::MAX),
+            }
+            .tag(0x1211),
+            "proof/1211/composition/ffff"
+        );
+        assert_eq!(
+            CommonProofChallenge::Composition {
+                constraint_ordinal: first_ordinal_above_u16,
+            }
+            .tag(0x1211),
+            "proof/1211/composition/10000"
+        );
     }
 
     #[test]
@@ -2866,7 +2961,7 @@ mod common_challenge_chain_tests {
                 vec![0],
                 if includes_product_vector {
                     vec![
-                        CommonProofApplicationChallengeGroup::new(theta_challenge(), 2, 513)
+                        CommonProofApplicationChallengeGroup::new(alpha_challenge(), 2, 513)
                             .expect("the above-512-bit product vector is valid"),
                     ]
                 } else {
@@ -2913,7 +3008,7 @@ mod common_challenge_chain_tests {
         let schedule = CommonProofTranscriptSchedule::new(
             vec![0],
             vec![
-                CommonProofApplicationChallengeGroup::new(theta_challenge(), 2, 513)
+                CommonProofApplicationChallengeGroup::new(alpha_challenge(), 2, 513)
                     .expect("the above-512-bit product vector is valid"),
             ],
             Vec::new(),
@@ -2935,7 +3030,7 @@ mod common_challenge_chain_tests {
 
         assert_eq!(rows.len(), 1);
         let row = rows[0];
-        assert_eq!(row.challenge(), theta_challenge());
+        assert_eq!(row.challenge(), alpha_challenge());
         assert_eq!(row.modulus(), 2);
         assert_eq!(row.coordinate_count(), 513);
         assert_eq!(row.candidate_byte_length(), 65);
@@ -3015,7 +3110,7 @@ mod common_challenge_chain_tests {
     fn product_residue_sampler_decodes_one_uniform_vector_candidate() {
         let modulus = 65_537_u64;
         let expected_coordinates = [0_u64, 1, 65_536, 17, 9, 42, 7];
-        let group = CommonProofApplicationChallengeGroup::new(theta_challenge(), modulus, 7)
+        let group = CommonProofApplicationChallengeGroup::new(alpha_challenge(), modulus, 7)
             .expect("the product-space group derives");
         let mut candidate = BigUint::default();
         let mut place = BigUint::from(1_u8);
@@ -3043,10 +3138,10 @@ mod common_challenge_chain_tests {
     #[test]
     fn product_residue_sampler_round_trips_an_above_512_bit_vector() {
         let modulus = DATA_PRIMES[0];
-        let coordinate_count = 9_u16;
+        let coordinate_count = 17_u16;
         let expected_coordinates = vec![modulus - 1; usize::from(coordinate_count)];
         let group =
-            CommonProofApplicationChallengeGroup::new(theta_challenge(), modulus, coordinate_count)
+            CommonProofApplicationChallengeGroup::new(alpha_challenge(), modulus, coordinate_count)
                 .expect("the selected product-space group derives");
         assert!(group.candidate_byte_length() > 64);
 
@@ -3082,7 +3177,7 @@ mod common_challenge_chain_tests {
                 .expect("the above-boundary product derives"),
             65,
         );
-        assert!(CommonProofApplicationChallengeGroup::new(theta_challenge(), 2, 513,).is_ok(),);
+        assert!(CommonProofApplicationChallengeGroup::new(alpha_challenge(), 2, 513,).is_ok(),);
     }
 
     #[test]
@@ -3090,7 +3185,7 @@ mod common_challenge_chain_tests {
         let modulus = 65_537_u64;
         let coordinate_count = 7_u16;
         let group =
-            CommonProofApplicationChallengeGroup::new(theta_challenge(), modulus, coordinate_count)
+            CommonProofApplicationChallengeGroup::new(alpha_challenge(), modulus, coordinate_count)
                 .expect("the product-space group derives");
         let candidate_byte_length = usize::try_from(group.candidate_byte_length())
             .expect("the exact candidate width fits usize");
@@ -3195,7 +3290,7 @@ mod common_challenge_chain_tests {
             CanonicalProofTranscript::try_new(1, [0x5a; 64], 0x1212, b"changed-header")
                 .expect("the changed transcript header is canonical");
         let modulus = 65_537_u64;
-        let group = CommonProofApplicationChallengeGroup::new(theta_challenge(), modulus, 7)
+        let group = CommonProofApplicationChallengeGroup::new(alpha_challenge(), modulus, 7)
             .expect("the product-space group derives");
         let (first_stream, first_candidate) = first
             .begin_common_product_residue_challenge(group)
@@ -3212,14 +3307,47 @@ mod common_challenge_chain_tests {
     }
 
     #[test]
-    fn selected_moduli_sample_nine_coordinate_product_vectors() {
-        let mut selected_moduli = DATA_PRIMES.to_vec();
-        selected_moduli.extend(SPECIAL_PRIMES);
-        selected_moduli.push(PLAINTEXT_MODULUS);
-        selected_moduli.sort_unstable();
-        selected_moduli.dedup();
+    fn selected_roles_sample_independent_product_vectors() {
+        let theta_group = CommonProofApplicationChallengeGroup::new(
+            theta_challenge(),
+            PROOF_BASE_FIELD_MODULUS,
+            4,
+        )
+        .expect("the selected theta group derives");
+        assert_eq!(theta_group.candidate_byte_length(), 32);
+        let theta_product_cardinality =
+            BigUint::from(PROOF_BASE_FIELD_MODULUS).pow(u32::from(theta_group.coordinate_count()));
+        let mut maximum_theta_candidate =
+            (&theta_product_cardinality - BigUint::from(1_u8)).to_bytes_le();
+        maximum_theta_candidate.resize(32, 0);
+        let maximum_theta_vector =
+            CommonChallengeStream::new([0x5a; 64], "selected-theta-product".to_owned())
+                .sample_residue_vector(maximum_theta_candidate, theta_group, 1)
+                .expect("the complete selected theta endpoint is accepted");
+        assert_eq!(maximum_theta_vector, vec![PROOF_BASE_FIELD_MODULUS - 1; 4]);
 
-        for (modulus_ordinal, modulus) in selected_moduli.into_iter().enumerate() {
+        let mut theta_transcript = transcript();
+        let (theta_stream, theta_candidate) = theta_transcript
+            .begin_common_product_residue_challenge(theta_group)
+            .expect("the selected theta challenge derives");
+        let theta_coordinates = theta_stream
+            .sample_residue_vector(theta_candidate, theta_group, 128)
+            .expect("the selected theta vector samples");
+        assert_eq!(theta_coordinates.len(), 4);
+        assert!(
+            theta_coordinates
+                .iter()
+                .all(|coordinate| *coordinate < PROOF_BASE_FIELD_MODULUS)
+        );
+        let fixed_full_field_theta = theta_coordinates
+            .iter()
+            .copied()
+            .find(|coordinate| *coordinate > 256)
+            .expect("the fixed full-field theta is outside the removed 257-value domain");
+        assert!((0_u64..=256).all(|point| removed_theta_domain_polynomial(point) == 0));
+        assert_ne!(removed_theta_domain_polynomial(fixed_full_field_theta), 0);
+
+        for (modulus_ordinal, modulus) in DATA_PRIMES.iter().copied().take(8).enumerate() {
             let mut transcript = CanonicalProofTranscript::try_new(
                 1,
                 [0x5b; 64],
@@ -3229,21 +3357,49 @@ mod common_challenge_chain_tests {
                     .to_le_bytes(),
             )
             .expect("the selected-modulus transcript derives");
-            let challenge = CommonProofChallenge::Theta {
+            let challenge = CommonProofChallenge::Alpha {
                 modulus_ordinal: u16::try_from(modulus_ordinal)
                     .expect("the selected modulus ordinal fits u16"),
             };
-            let group = CommonProofApplicationChallengeGroup::new(challenge, modulus, 9)
+            let group = CommonProofApplicationChallengeGroup::new(challenge, modulus, 7)
                 .expect("the selected product-space group derives");
+            assert_eq!(group.candidate_byte_length(), 28);
             let (stream, first_candidate) = transcript
                 .begin_common_product_residue_challenge(group)
-                .expect("the nine-coordinate product challenge derives");
+                .expect("the seven-coordinate alpha challenge derives");
             let coordinates = stream
                 .sample_residue_vector(first_candidate, group, 128)
-                .expect("the nine-coordinate product vector samples");
-            assert_eq!(coordinates.len(), 9);
+                .expect("the seven-coordinate alpha vector samples");
+            assert_eq!(coordinates.len(), 7);
             assert!(coordinates.iter().all(|coordinate| *coordinate < modulus));
         }
+    }
+
+    #[test]
+    fn application_challenge_groups_enforce_role_specific_fields() {
+        assert!(
+            CommonProofApplicationChallengeGroup::new(
+                theta_challenge(),
+                PROOF_BASE_FIELD_MODULUS,
+                4,
+            )
+            .is_ok()
+        );
+        assert_eq!(
+            CommonProofApplicationChallengeGroup::new(theta_challenge(), 257, 4),
+            Err(TranscriptError::InvalidCommonProofSchedule)
+        );
+        assert!(
+            CommonProofApplicationChallengeGroup::new(alpha_challenge(), DATA_PRIMES[0], 7).is_ok()
+        );
+        assert_eq!(
+            CommonProofApplicationChallengeGroup::new(
+                alpha_challenge(),
+                PROOF_BASE_FIELD_MODULUS,
+                7,
+            ),
+            Err(TranscriptError::InvalidCommonProofSchedule)
+        );
     }
 
     #[test]

@@ -1184,7 +1184,7 @@ mod tests {
     }
 
     #[test]
-    fn public_key_share_uses_every_selected_data_modulus_while_vss_stays_six_limb() {
+    fn public_key_share_uses_every_selected_data_modulus_and_eight_sharing_limbs() {
         let public_key_relation = selected_public_key_share_relation_plan_input()
             .expect("selected public-key relation derives");
         let expected_public_indices = (0..DATA_PRIMES.len())
@@ -1194,7 +1194,7 @@ mod tests {
             public_key_relation.data_modulus_indices,
             expected_public_indices
         );
-        assert_eq!(public_key_relation.data_modulus_indices.len(), 26);
+        assert_eq!(public_key_relation.data_modulus_indices.len(), 23);
 
         let committed_material_relation = selected_committed_material_relation_plan_input()
             .expect("selected committed-material relation derives");
@@ -1202,7 +1202,7 @@ mod tests {
             committed_material_relation
                 .sharing_data_modulus_indices
                 .len(),
-            6
+            8
         );
     }
 

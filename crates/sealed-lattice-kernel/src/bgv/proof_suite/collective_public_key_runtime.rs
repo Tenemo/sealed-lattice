@@ -1073,7 +1073,7 @@ pub(crate) fn collective_public_key_root_pipeline_memory_accounting(
         .map_err(|_| CommonProofRuntimeError::AllocationLimitExceeded)?
         .div_ceil(FOUNDATION_PROFILE.stream_chunk_byte_length);
     let root_plan =
-        super::setup_public_polynomial::setup_public_polynomial_compact_root_memory_plan(
+        super::setup_public_polynomial::setup_public_polynomial_wasm_compact_root_memory_plan(
             evaluation_domain_size,
             TRACE_HALF_DEGREE,
             u32::try_from(PUBLIC_KEY_SHARE_TRACE_ROW_COUNT)
@@ -2325,6 +2325,7 @@ mod tests {
     use crate::bgv::proof_suite::{
         MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH,
         relation_plan::collective_public_key_source_provider_memory_accounting,
+        setup_public_polynomial_wasm_compact_root_memory_plan,
     };
 
     #[test]
@@ -2348,11 +2349,18 @@ mod tests {
             source_provider,
         )
         .expect("application accounting derives");
-        let root_pipeline = collective_public_key_root_pipeline_memory_accounting(
-            usize::try_from(variant.evaluation_domain_size())
-                .expect("the evaluation domain fits usize"),
+        let evaluation_domain_size = usize::try_from(variant.evaluation_domain_size())
+            .expect("the evaluation domain fits usize");
+        let root_pipeline =
+            collective_public_key_root_pipeline_memory_accounting(evaluation_domain_size)
+                .expect("root-pipeline accounting derives");
+        let expected_wasm_root_plan = setup_public_polynomial_wasm_compact_root_memory_plan(
+            evaluation_domain_size,
+            TRACE_HALF_DEGREE,
+            u32::try_from(PUBLIC_KEY_SHARE_TRACE_ROW_COUNT)
+                .expect("the selected root row count fits u32"),
         )
-        .expect("root-pipeline accounting derives");
+        .expect("the selected Wasm root plan derives");
         let traffic = collective_public_key_stream_and_traffic_accounting()
             .expect("stream and traffic accounting derives");
 
@@ -2389,11 +2397,18 @@ mod tests {
         );
         assert_eq!(
             source_provider.additional_loading_source_polynomials_transient_byte_length(),
-            1_310_720,
+            checked_count_bytes(TRACE_HALF_DEGREE, size_of::<u64>())
+                .expect("the trace-half byte length is representable")
+                .checked_add(
+                    u64::try_from(FOUNDATION_PROFILE.stream_chunk_byte_length)
+                        .expect("the stream chunk byte length fits u64"),
+                )
+                .expect("the loading overlap is representable"),
         );
         assert_eq!(
             source_provider.maximum_returned_source_polynomial_byte_length(),
-            262_144,
+            checked_count_bytes(TRACE_HALF_DEGREE, size_of::<ProofBaseFieldElement>())
+                .expect("the returned source polynomial byte length is representable"),
         );
         assert_eq!(source_provider.authenticated_source_read_count(), 60);
         assert_eq!(
@@ -2447,7 +2462,7 @@ mod tests {
         );
         assert_eq!(
             root_pipeline.root_builder_owned_payload_peak_byte_length(),
-            243_531_776,
+            expected_wasm_root_plan.owned_payload_peak_byte_length(),
         );
         assert!(
             root_pipeline.peak_combined_wasm_resident_byte_length()

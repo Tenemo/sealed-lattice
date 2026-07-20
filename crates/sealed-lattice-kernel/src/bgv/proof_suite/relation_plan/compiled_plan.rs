@@ -145,7 +145,8 @@ pub(crate) struct RelationPlanCheckContext {
     pub(crate) fri_fold_count: u16,
     pub(crate) final_polynomial_degree_bound_exclusive: u32,
     pub(crate) unique_query_count: u32,
-    pub(crate) non_native_modular_identity_challenge_count: u16,
+    pub(crate) non_native_theta_repetition_count: u16,
+    pub(crate) non_native_alpha_repetition_count: u16,
     pub(crate) maximum_fiat_shamir_candidate_draws_per_output: u32,
     pub(crate) resolved_moduli: Vec<ResolvedSuiteModulus>,
 }

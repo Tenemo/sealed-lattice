@@ -298,7 +298,7 @@ impl ArtifactKind {
         match self {
             Self::EncoderAndBallotLayout => 2,
             Self::LatticeCommitmentProfile => 3,
-            Self::ProofProfileSet => 2,
+            Self::ProofProfileSet => 3,
             Self::VerifiableSecretSharingProfile
             | Self::EvaluatorProgramSet
             | Self::TargetDecryptionProfile => FOUNDATION_SCHEMA_VERSION,
@@ -1248,6 +1248,24 @@ mod tests {
             .expect_err("wrong artifact schema must refuse")
             .refusal_reason,
             RefusalReason::WrongTypeOrLength
+        );
+
+        let retired_version = CanonicalTuple::new(
+            kind.artifact_schema_identifier(),
+            2,
+            vec![CanonicalItem::unsigned16(1)],
+        )
+        .encode()
+        .expect("retired-version artifact encodes");
+        assert_eq!(
+            ArtifactReference::from_canonical_artifact_bytes(
+                kind,
+                &retired_version,
+                &CanonicalDecodeLimits::default(),
+            )
+            .expect_err("retired proof-profile version must refuse")
+            .refusal_reason,
+            RefusalReason::UnsupportedVersionOrSuite,
         );
     }
 

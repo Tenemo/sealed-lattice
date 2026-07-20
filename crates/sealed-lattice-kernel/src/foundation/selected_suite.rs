@@ -51,11 +51,9 @@ use super::{
 #[cfg(test)]
 use crate::bgv::proof_suite::SelectedEvaluatorEntryPosition;
 
-#[cfg(test)]
 pub(crate) const SELECTED_MAXIMUM_BALLOT_ATTEMPTS_PER_PARTICIPANT: u16 = 3;
 pub(crate) const SELECTED_MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT: u32 = 64;
 pub(crate) const SELECTED_MAXIMUM_PUBLIC_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT: u32 = 128;
-#[cfg(test)]
 pub(crate) const SELECTED_MAXIMUM_CANDIDATE_PACKAGES_PER_ACTION: u32 = 20;
 
 /// Non-serializable authority for the exact selected cryptographic suite.
@@ -1000,10 +998,22 @@ mod tests {
     }
 
     #[test]
-    fn every_action_variant_uses_the_exact_four_entry_evaluator_catalog() {
+    fn every_action_variant_uses_the_exact_seven_entry_evaluator_catalog() {
         let (expected_complete_list, ordered_variant_catalogs) =
             selected_complete_evaluator_catalog_fixture();
-        assert_eq!(expected_complete_list.len(), 4);
+        assert_eq!(
+            selected_evaluator_relinearization_entry_positions()
+                .expect("selected relinearization catalog derives")
+                .len(),
+            1
+        );
+        assert_eq!(
+            selected_evaluator_galois_entry_positions()
+                .expect("selected Galois catalog derives")
+                .len(),
+            6
+        );
+        assert_eq!(expected_complete_list.len(), 7);
         assert_eq!(
             ordered_variant_catalogs.len(),
             usize::from(FOUNDATION_PROFILE.option_count)

@@ -1706,9 +1706,24 @@ fn selected_statement_field_shapes(
 pub(crate) fn selected_evaluator_entry_positions(
     top_count: u16,
 ) -> Result<Vec<SelectedEvaluatorEntryPosition>, SelectedApplicationStatementError> {
+    let selected_candidate = EvaluatorCandidateInput::implemented()
+        .map_err(|_| SelectedApplicationStatementError::InvalidProfile)?;
     let key_positions = selected_evaluator_program_set()
         .and_then(|program| program.key_positions())
         .map_err(|_| SelectedApplicationStatementError::InvalidProfile)?;
+    if key_positions.relinearization_catalog_levels() != selected_candidate.relinearization_levels
+        || key_positions.galois_catalog_positions().len()
+            != selected_candidate.galois_key_schedule.len()
+        || key_positions
+            .galois_catalog_positions()
+            .iter()
+            .zip(&selected_candidate.galois_key_schedule)
+            .any(|(position, expected)| {
+                (position.galois_element(), position.catalog_level()) != *expected
+            })
+    {
+        return Err(SelectedApplicationStatementError::InvalidProfile);
+    }
     let stream = key_positions
         .streams()
         .get(
@@ -3334,7 +3349,7 @@ mod tests {
     }
 
     #[test]
-    fn evaluator_statement_uses_segment_local_catalog_positions() {
+    fn evaluator_statement_uses_canonical_catalog_positions() {
         let context = SelectedApplicationStatementContext::new(
             FOUNDATION_PROFILE.protocol_version,
             [0; Hash512::BYTE_LENGTH],
@@ -3354,6 +3369,42 @@ mod tests {
         .expect("complete evaluator statement decodes");
         let positions = selected_evaluator_entry_positions(FOUNDATION_PROFILE.option_count)
             .expect("selected positions");
+        assert_eq!(
+            EvaluatorCandidateInput::implemented()
+                .expect("selected evaluator candidate")
+                .galois_key_schedule,
+            vec![
+                (15, 14),
+                (19, 14),
+                (219, 14),
+                (257, 18),
+                (1_025, 18),
+                (8_193, 18),
+            ]
+        );
+        assert_eq!(
+            positions
+                .iter()
+                .filter_map(|position| match position.key_kind() {
+                    SelectedEvaluatorEntryKind::Relinearization { .. } => None,
+                    SelectedEvaluatorEntryKind::Galois {
+                        galois_element,
+                        catalog_level,
+                    } => Some((
+                        (galois_element, catalog_level),
+                        position.schedule_position()
+                    )),
+                })
+                .collect::<Vec<_>>(),
+            vec![
+                ((15, 14), 0),
+                ((19, 14), 1),
+                ((219, 14), 2),
+                ((257, 18), 3),
+                ((1_025, 18), 4),
+                ((8_193, 18), 5),
+            ]
+        );
         let entries = decode_nested_tuple_list(&tuple.items[1], positions.len())
             .expect("complete entry list");
         assert_eq!(entries.len(), positions.len());
@@ -3364,9 +3415,13 @@ mod tests {
                 Ok(position.schedule_position())
             );
         }
-        assert_eq!(read_unsigned32(&entries[0].items[0]), Ok(0));
-        assert_eq!(read_unsigned32(&entries[1].items[0]), Ok(0));
-        assert_eq!(read_unsigned32(&entries[3].items[0]), Ok(2));
+        assert_eq!(
+            entries
+                .iter()
+                .map(|entry| read_unsigned32(&entry.items[0]))
+                .collect::<Result<Vec<_>, _>>(),
+            Ok(vec![0, 0, 1, 2, 3, 4, 5])
+        );
         assert!(
             canonical_selected_application_statement_for_ceiling(
                 ProofApplicationSlotCeilings::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,

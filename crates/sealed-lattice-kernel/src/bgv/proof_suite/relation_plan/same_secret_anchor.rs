@@ -129,7 +129,7 @@ pub(crate) fn compile_same_secret_relation_with_source_layout(
         let (first_matrix, second_matrix) =
             add_matrix_columns(&mut builder, data_modulus_index, rank)?;
         let quotients = builder.add_anchor_quotient_witness()?;
-        for challenge_ordinal in 0..check_context.non_native_modular_identity_challenge_count {
+        for challenge_ordinal in 0..check_context.non_native_theta_repetition_count {
             builder.add_anchor_equations(
                 modulus_reference,
                 challenge_ordinal,
@@ -296,7 +296,8 @@ pub(super) mod tests {
             fri_fold_count: 9,
             final_polynomial_degree_bound_exclusive: 8,
             unique_query_count: 8,
-            non_native_modular_identity_challenge_count: 1,
+            non_native_theta_repetition_count: 1,
+            non_native_alpha_repetition_count: 1,
             maximum_fiat_shamir_candidate_draws_per_output: 128,
             resolved_moduli,
         }

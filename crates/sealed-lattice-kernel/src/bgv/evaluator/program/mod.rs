@@ -266,8 +266,8 @@ pub(crate) struct EvaluatorInstructionStream {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct EvaluatorGaloisKeyPosition {
-    galois_element: usize,
     catalog_level: usize,
+    galois_element: usize,
 }
 
 impl EvaluatorGaloisKeyPosition {

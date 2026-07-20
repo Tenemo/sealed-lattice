@@ -374,6 +374,22 @@ pub(crate) struct RelationIntegerLiftBatchDescriptor {
 }
 
 impl RelationIntegerLiftBatchDescriptor {
+    pub(crate) fn theta_bad_polynomial_degree(
+        &self,
+        trace_domain_size: u64,
+    ) -> Result<u64, RelationPlanError> {
+        theta_bad_polynomial_degree_for_topology(
+            trace_domain_size,
+            self.ordered_components
+                .iter()
+                .any(|component| !component.ordered_convolution_products.is_empty()),
+            self.ordered_components
+                .iter()
+                .any(|component| !component.ordered_full_ring_negacyclic_products.is_empty()),
+            !self.ordered_negacyclic_automorphism_permutations.is_empty(),
+        )
+    }
+
     pub(super) fn resident_owned_payload_byte_length(&self) -> Result<u64, RelationPlanError> {
         let mut total = [
             resident_vec_storage_byte_length(&self.ordered_reversed_column_bindings)?,
@@ -436,6 +452,37 @@ impl RelationIntegerLiftBatchDescriptor {
     }
 }
 
+fn theta_bad_polynomial_degree_for_topology(
+    trace_domain_size: u64,
+    has_convolution_product: bool,
+    has_full_ring_product: bool,
+    has_automorphism_multiset: bool,
+) -> Result<u64, RelationPlanError> {
+    let linear_identity_degree = trace_domain_size
+        .checked_sub(1)
+        .ok_or(RelationPlanError::InvalidDomain)?;
+    if has_automorphism_multiset {
+        return trace_domain_size
+            .checked_mul(2)
+            .and_then(|degree| degree.checked_sub(1))
+            .ok_or(RelationPlanError::CountOverflow);
+    }
+    if has_convolution_product || has_full_ring_product {
+        return trace_domain_size
+            .checked_mul(2)
+            .and_then(|degree| degree.checked_sub(2))
+            .ok_or(RelationPlanError::CountOverflow);
+    }
+    Ok(linear_identity_degree)
+}
+
+pub(crate) const fn theta_sampling_field_exceeds_bad_polynomial_degree(
+    sampling_field_size: u64,
+    bad_polynomial_degree: u64,
+) -> bool {
+    sampling_field_size > bad_polynomial_degree
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct RelationCoefficientLocalResidualDescriptor {
     pub(crate) unit_ordinal: u32,
@@ -482,6 +529,24 @@ pub(crate) struct RelationCoefficientLocalIdentityBatchDescriptor {
 }
 
 impl RelationCoefficientLocalIdentityBatchDescriptor {
+    pub(crate) const fn modulus_reference(&self) -> SuiteModulusReference {
+        self.modulus_reference
+    }
+
+    pub(crate) const fn challenge_ordinal(&self) -> u16 {
+        self.challenge_ordinal
+    }
+
+    pub(crate) fn alpha_bad_polynomial_degree(&self) -> Result<u64, RelationPlanError> {
+        u64::try_from(
+            self.ordered_residuals
+                .len()
+                .checked_sub(1)
+                .ok_or(RelationPlanError::InvalidConstraint)?,
+        )
+        .map_err(|_| RelationPlanError::CountOverflow)
+    }
+
     pub(super) fn resident_owned_payload_byte_length(&self) -> Result<u64, RelationPlanError> {
         self.ordered_residuals.iter().try_fold(
             resident_vec_storage_byte_length(&self.ordered_residuals)?,
@@ -1480,4 +1545,55 @@ pub(super) fn integer_lift_trace_root(
         row_ordinal,
         context.base_field_modulus,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        RelationPlanError, theta_bad_polynomial_degree_for_topology,
+        theta_sampling_field_exceeds_bad_polynomial_degree,
+    };
+
+    #[test]
+    fn theta_bad_polynomial_degree_is_derived_from_every_batch_topology() {
+        let trace_domain_size = 32_768;
+        assert_eq!(
+            theta_bad_polynomial_degree_for_topology(trace_domain_size, false, false, false,),
+            Ok(32_767),
+            "linear and reversed-column identities have degree N - 1",
+        );
+        assert_eq!(
+            theta_bad_polynomial_degree_for_topology(trace_domain_size, true, false, false,),
+            Ok(65_534),
+            "convolution identities have degree 2N - 2",
+        );
+        assert_eq!(
+            theta_bad_polynomial_degree_for_topology(trace_domain_size, false, true, false,),
+            Ok(65_534),
+            "full-ring identities have degree 2N - 2",
+        );
+        assert_eq!(
+            theta_bad_polynomial_degree_for_topology(trace_domain_size, true, true, true,),
+            Ok(65_535),
+            "the automorphism multiset is the maximum mixed-topology degree",
+        );
+        assert_eq!(
+            theta_bad_polynomial_degree_for_topology(0, false, false, false),
+            Err(RelationPlanError::InvalidDomain),
+        );
+        assert_eq!(
+            theta_bad_polynomial_degree_for_topology(u64::MAX, true, false, false),
+            Err(RelationPlanError::CountOverflow),
+        );
+    }
+
+    #[test]
+    fn theta_sampling_field_must_strictly_exceed_the_derived_degree() {
+        assert!(!theta_sampling_field_exceeds_bad_polynomial_degree(
+            65_534, 65_534,
+        ));
+        assert!(theta_sampling_field_exceeds_bad_polynomial_degree(
+            65_535, 65_534,
+        ));
+    }
 }

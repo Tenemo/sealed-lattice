@@ -966,7 +966,7 @@ mod tests {
             first_column.decode_authenticated_bytes(&bytes[..3]),
             Err(RefusalReason::WrongTypeOrLength)
         );
-        let mut noncanonical = bytes[..4].to_vec();
+        let mut noncanonical = bytes[..8].to_vec();
         noncanonical[..2].copy_from_slice(&TEST_DATA_MODULI[0].to_le_bytes()[..2]);
         assert_eq!(
             first_column.decode_authenticated_bytes(&noncanonical),

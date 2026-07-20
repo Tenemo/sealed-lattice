@@ -361,7 +361,6 @@ impl RelationPlanVariant {
         &self.ordered_integer_lift_batches
     }
 
-    #[cfg(test)]
     pub(crate) fn ordered_coefficient_local_identity_batches(
         &self,
     ) -> &[RelationCoefficientLocalIdentityBatchDescriptor] {
@@ -645,7 +644,12 @@ impl RelationPlanVariant {
                 _ => return Err(RelationPlanError::InvalidChallengeCatalog),
             };
             let sampling = descriptor.resolved_sampling(self, context)?;
-            if sampling.coordinate_count != context.non_native_modular_identity_challenge_count {
+            let expected_repetition_count = match descriptor.role {
+                RelationChallengeRole::NonNativeTheta => context.non_native_theta_repetition_count,
+                RelationChallengeRole::NonNativeAlpha => context.non_native_alpha_repetition_count,
+                _ => return Err(RelationPlanError::InvalidChallengeCatalog),
+            };
+            if sampling.coordinate_count != expected_repetition_count {
                 return Err(RelationPlanError::InvalidChallengeCatalog);
             }
             let (group_modulus, repetition_ordinals) = application_group_inputs
@@ -656,18 +660,23 @@ impl RelationPlanVariant {
             }
             repetition_ordinals.insert(repetition_ordinal);
         }
-        let expected_repetition_ordinals =
-            (0..context.non_native_modular_identity_challenge_count).collect::<BTreeSet<_>>();
         let ordered_application_challenge_groups = application_group_inputs
             .into_iter()
             .map(|(challenge, (modulus, repetition_ordinals))| {
+                let expected_repetition_count = match challenge {
+                    CommonProofChallenge::Theta { .. } => context.non_native_theta_repetition_count,
+                    CommonProofChallenge::Alpha { .. } => context.non_native_alpha_repetition_count,
+                    _ => return Err(RelationPlanError::InvalidChallengeCatalog),
+                };
+                let expected_repetition_ordinals =
+                    (0..expected_repetition_count).collect::<BTreeSet<_>>();
                 if repetition_ordinals != expected_repetition_ordinals {
                     return Err(RelationPlanError::InvalidChallengeCatalog);
                 }
                 CommonProofApplicationChallengeGroup::new(
                     challenge,
                     modulus,
-                    context.non_native_modular_identity_challenge_count,
+                    expected_repetition_count,
                 )
                 .map_err(|_| RelationPlanError::InvalidChallengeCatalog)
             })
@@ -677,7 +686,7 @@ impl RelationPlanVariant {
             ordered_base_tree_ordinals,
             ordered_application_challenge_groups,
             ordered_auxiliary_tree_ordinals,
-            u16::try_from(self.ordered_constraints.len())
+            u32::try_from(self.ordered_constraints.len())
                 .map_err(|_| RelationPlanError::CountOverflow)?,
             u16::try_from(context.quotient_component_count)
                 .map_err(|_| RelationPlanError::CountOverflow)?,
@@ -728,16 +737,9 @@ pub(super) fn challenge_descriptor(
     };
     let sampling = match role {
         RelationChallengeRole::NonNativeTheta => {
-            let modulus_ordinal = role_coordinates
-                .first()
-                .copied()
-                .and_then(|ordinal| u16::try_from(ordinal).ok())
-                .ok_or(RelationPlanError::InvalidChallengeCatalog)?;
             RelationChallengeSampling::ProductResidueVectorCoordinate {
-                modulus_selector: RelationChallengeModulusSelector::NonNativeModulusOrdinal(
-                    modulus_ordinal,
-                ),
-                coordinate_count: context.non_native_modular_identity_challenge_count,
+                modulus_selector: RelationChallengeModulusSelector::BaseField,
+                coordinate_count: context.non_native_theta_repetition_count,
                 maximum_candidate_draws_per_output: context
                     .maximum_fiat_shamir_candidate_draws_per_output,
             }
@@ -752,7 +754,7 @@ pub(super) fn challenge_descriptor(
                 modulus_selector: RelationChallengeModulusSelector::NonNativeModulusOrdinal(
                     modulus_ordinal,
                 ),
-                coordinate_count: context.non_native_modular_identity_challenge_count,
+                coordinate_count: context.non_native_alpha_repetition_count,
                 maximum_candidate_draws_per_output: context
                     .maximum_fiat_shamir_candidate_draws_per_output,
             }

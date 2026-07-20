@@ -1513,38 +1513,37 @@ mod tests {
             let vote_sequence =
                 derive_state_witness_vote_sequence(StateWitnessVoteKind::Reservation);
             let participant_count = usize::from(FOUNDATION_PROFILE.participant_count);
-            let canonical_vote_carriers =
-                (1..=usize::from(FOUNDATION_PROFILE.state_witness_quorum))
-                    .map(|witness_offset| {
-                        let witness_roster_position =
-                            (subject_roster_position + witness_offset) % participant_count;
-                        let witness_roster_byte = u8::try_from(witness_roster_position)
-                            .expect("test witness roster position fits u8");
-                        let vote_envelope = ObjectEnvelope {
-                            suite_id: Hash512::from_bytes([0x11; Hash512::BYTE_LENGTH]),
-                            object_type: FoundationObjectType::StateWitnessVote,
-                            ceremony_context_hash: Hash512::from_bytes(
-                                [0x22; Hash512::BYTE_LENGTH],
-                            ),
-                            action_context_hash: Hash512::from_bytes([0x33; Hash512::BYTE_LENGTH]),
-                            producer_participant_id: Some(
-                                self.participant_identities[witness_roster_position],
-                            ),
-                            producer_sequence: vote_sequence,
-                            ordered_prerequisite_hashes: Vec::new(),
-                            payload_bytes: StateWitnessVotePayload { intent_object_hash }
-                                .encode()
-                                .expect("test witness-vote payload encodes"),
-                        };
-                        self.sign_envelope(
-                            witness_roster_position,
-                            vote_envelope,
-                            0x80_u8
-                                .wrapping_add(subject_roster_byte)
-                                .wrapping_add(witness_roster_byte),
-                        )
-                    })
-                    .collect();
+            let canonical_vote_carriers = (0..participant_count)
+                .filter(|witness_roster_position| {
+                    *witness_roster_position != subject_roster_position
+                })
+                .take(usize::from(FOUNDATION_PROFILE.state_witness_quorum))
+                .map(|witness_roster_position| {
+                    let witness_roster_byte = u8::try_from(witness_roster_position)
+                        .expect("test witness roster position fits u8");
+                    let vote_envelope = ObjectEnvelope {
+                        suite_id: Hash512::from_bytes([0x11; Hash512::BYTE_LENGTH]),
+                        object_type: FoundationObjectType::StateWitnessVote,
+                        ceremony_context_hash: Hash512::from_bytes([0x22; Hash512::BYTE_LENGTH]),
+                        action_context_hash: Hash512::from_bytes([0x33; Hash512::BYTE_LENGTH]),
+                        producer_participant_id: Some(
+                            self.participant_identities[witness_roster_position],
+                        ),
+                        producer_sequence: vote_sequence,
+                        ordered_prerequisite_hashes: Vec::new(),
+                        payload_bytes: StateWitnessVotePayload { intent_object_hash }
+                            .encode()
+                            .expect("test witness-vote payload encodes"),
+                    };
+                    self.sign_envelope(
+                        witness_roster_position,
+                        vote_envelope,
+                        0x80_u8
+                            .wrapping_add(subject_roster_byte)
+                            .wrapping_add(witness_roster_byte),
+                    )
+                })
+                .collect();
             let canonical_certificate = StateCertificate::new(canonical_vote_carriers)
                 .expect("test state certificate has a distinct quorum")
                 .encode()

@@ -45,9 +45,9 @@ use super::{
     insert_materialized_tree, map_external_polynomial_plan_error,
     map_private_coin_generation_error, proof_created_tree_roles_by_column,
     read_external_polynomial_base_values, read_external_polynomial_extension_values,
-    read_external_polynomial_value, replay_polynomial_key_for_claim, statement_owned_tree_root,
-    trim_extension_polynomial, unique_catalog_entry, validate_generation_relation_trees,
-    write_common_proof_prefix,
+    read_external_polynomial_value, replay_polynomial_key_for_claim,
+    sample_relation_application_challenges, statement_owned_tree_root, trim_extension_polynomial,
+    unique_catalog_entry, validate_generation_relation_trees, write_common_proof_prefix,
 };
 
 const SETUP_POLYNOMIAL_COLUMN_REPLAY_BINDING_DOMAIN: &str =
@@ -204,6 +204,7 @@ enum CommonProofGenerationPhase {
     },
     ConstructingQuotient,
     ConstructingQuotientConstraints,
+    CompletingQuotientConstraint,
     MaterializingQuotientTrees {
         next_component_index: usize,
     },
@@ -1104,7 +1105,8 @@ impl CommonProofGenerationStateMachine {
                 CommonProofGenerationStage::MaterializingAuxiliaryTrees
             }
             CommonProofGenerationPhase::ConstructingQuotient
-            | CommonProofGenerationPhase::ConstructingQuotientConstraints => {
+            | CommonProofGenerationPhase::ConstructingQuotientConstraints
+            | CommonProofGenerationPhase::CompletingQuotientConstraint => {
                 CommonProofGenerationStage::ConstructingQuotient
             }
             CommonProofGenerationPhase::MaterializingQuotientTrees { .. } => {
@@ -3152,35 +3154,11 @@ impl CommonProofGenerationStateMachine {
                         )
                         .map_err(CommonProofGenerationError::Transcript)?;
                 }
-                let mut application_challenges = Vec::new();
-                for challenge_group in self
-                    .transcript_schedule
-                    .ordered_application_challenge_groups()
-                {
-                    let challenge = challenge_group.challenge();
-                    let values = transcript
-                        .sample_application_challenge_group(challenge)
-                        .map_err(CommonProofGenerationError::Transcript)?;
-                    if values.len() != usize::from(challenge_group.coordinate_count()) {
-                        return Err(CommonProofGenerationError::Prover(
-                            CommonProofProverError::InvalidInput,
-                        ));
-                    }
-                    for (repetition_ordinal, value) in values.into_iter().enumerate() {
-                        application_challenges.push(
-                            RelationApplicationChallengeAssignment::new(
-                                challenge,
-                                u16::try_from(repetition_ordinal).map_err(|_| {
-                                    CommonProofGenerationError::Prover(
-                                        CommonProofProverError::CountOverflow,
-                                    )
-                                })?,
-                                value,
-                            )
-                            .map_err(CommonProofGenerationError::Relation)?,
-                        );
-                    }
-                }
+                let application_challenges = sample_relation_application_challenges(
+                    &mut transcript,
+                    &self.transcript_schedule,
+                )
+                .map_err(CommonProofGenerationError::Transcript)?;
                 let auxiliary_column_synthesis_cursor =
                     CommonProofAuxiliaryColumnSynthesisCursor::new(
                         &self.variant,
@@ -3496,6 +3474,10 @@ impl CommonProofGenerationStateMachine {
                 if evaluation_progress == CommonProofQuotientEvaluationProgress::BlockComplete {
                     return Ok(CommonProofGenerationPoll::ArithmeticStepCompleted);
                 }
+                self.phase = CommonProofGenerationPhase::CompletingQuotientConstraint;
+                Ok(CommonProofGenerationPoll::ArithmeticStepCompleted)
+            }
+            CommonProofGenerationPhase::CompletingQuotientConstraint => {
                 self.executor
                     .as_mut()
                     .ok_or(CommonProofGenerationError::Prover(
@@ -3512,6 +3494,7 @@ impl CommonProofGenerationStateMachine {
                     .complete_constraint()
                     .map_err(CommonProofGenerationError::Prover)?;
                 if !all_constraints_complete {
+                    self.phase = CommonProofGenerationPhase::ConstructingQuotientConstraints;
                     return Ok(CommonProofGenerationPoll::StorageTransactionCompleted);
                 }
                 if !self.quotient_constraint_transform_plans.is_empty() {

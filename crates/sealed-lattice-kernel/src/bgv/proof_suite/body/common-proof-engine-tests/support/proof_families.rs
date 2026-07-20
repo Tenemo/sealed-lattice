@@ -189,7 +189,8 @@ fn compact_vss_relation_context() -> RelationPlanCheckContext {
         fri_fold_count: compact_engine_fri_fold_count(),
         final_polynomial_degree_bound_exclusive: PROOF_FINAL_POLYNOMIAL_DEGREE_BOUND_EXCLUSIVE,
         unique_query_count: COMMITTED_MATERIAL_PROOF_UNIQUE_QUERY_COUNT,
-        non_native_modular_identity_challenge_count: PROOF_NON_NATIVE_IDENTITY_CHALLENGE_COUNT,
+        non_native_theta_repetition_count: PROOF_NON_NATIVE_THETA_REPETITION_COUNT,
+        non_native_alpha_repetition_count: PROOF_NON_NATIVE_ALPHA_REPETITION_COUNT,
         maximum_fiat_shamir_candidate_draws_per_output:
             PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT,
         resolved_moduli: vec![ResolvedSuiteModulus::new(

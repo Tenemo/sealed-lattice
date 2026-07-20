@@ -2464,21 +2464,21 @@ mod tests {
 
         assert_eq!(
             accounting.retained_before_final_source_byte_length(),
-            3_145_728
+            2_097_152
         );
-        assert_eq!(accounting.maximum_transient_byte_length(), 6_291_456);
+        assert_eq!(accounting.maximum_transient_byte_length(), 4_194_304);
         assert_eq!(
             accounting.retained_after_final_source_byte_length(),
-            3_145_728
+            2_097_152
         );
         assert_eq!(
             accounting.removed_generation_duplicate_byte_length(),
-            6_291_456
+            4_194_304
         );
-        assert_eq!(accounting.retained_target_release_byte_length(), 3_145_728);
+        assert_eq!(accounting.retained_target_release_byte_length(), 2_097_152);
         assert_eq!(
             accounting.removed_persistent_duplicate_byte_length(),
-            3_145_728
+            2_097_152
         );
         let sharing_limb_count = u64::try_from(
             selected_vss_sharing_coordinates()

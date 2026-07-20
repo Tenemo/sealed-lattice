@@ -159,17 +159,17 @@ pub(crate) use polynomial::{
     evaluate_extension_at, extension_polynomial_degree, fold_extension_evaluations_in_place,
 };
 #[cfg(test)]
+pub(crate) use profile::FIRST_PROFILE_APPLICATION_FAMILIES;
+#[cfg(test)]
 pub(crate) use profile::ProofProfileSet;
 pub(crate) use profile::{
     COMMITTED_MATERIAL_PROOF_UNIQUE_QUERY_COUNT, PROOF_DEEP_POINT_COUNT,
     PROOF_EVALUATION_BLOWUP_FACTOR, PROOF_EVALUATION_COSET_OFFSET,
     PROOF_FINAL_POLYNOMIAL_DEGREE_BOUND_EXCLUSIVE,
-    PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT,
-    PROOF_NON_NATIVE_IDENTITY_CHALLENGE_COUNT, PROOF_UNIQUE_QUERY_COUNT, ProofProfileError,
+    PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT, PROOF_NON_NATIVE_ALPHA_REPETITION_COUNT,
+    PROOF_NON_NATIVE_THETA_REPETITION_COUNT, PROOF_UNIQUE_QUERY_COUNT, ProofProfileError,
     ValidatedRelationPlanArtifact,
 };
-#[cfg(test)]
-pub(crate) use profile::{FIRST_PROFILE_APPLICATION_FAMILIES, FirstProfileRootTopology};
 #[cfg(test)]
 pub(crate) use prover::{
     BoundedCommonProofByteSink, CommonProofResidentMemoryPhase, PublicOnlyCommonProofCoinSource,
@@ -334,6 +334,7 @@ pub(crate) use setup_public_polynomial::{
 pub(crate) use transcript::{
     CommonProofChallenge, CommonProofPrivacyMode, CommonProofQueryOpeningAbsorber,
     CommonProofTranscript, CommonProofTranscriptSchedule, TranscriptError,
+    sample_relation_application_challenges,
 };
 #[cfg(test)]
 pub(crate) use verifier::CommonProofVerificationInput;

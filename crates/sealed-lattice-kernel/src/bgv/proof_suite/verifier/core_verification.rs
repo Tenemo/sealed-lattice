@@ -16,9 +16,9 @@ use super::{
 use super::{
     CommonProofPrivacyMode, CommonProofVerificationInput, PROOF_OBJECT_HEADER_SCHEMA_IDENTIFIER,
     ProofBodyError, ProofBodyLayout, ProofByteSource, ProofEvaluationDomain, ProofFriQueryVerifier,
-    ProofTreeCatalogInput, QueryVerificationWorkspace, RelationApplicationChallengeAssignment,
-    SELECTED_PROOF_FIELD_INDEX, ValidatedRelationPlanArtifact, VerifiedCommonProof,
-    build_complete_proof_tree_catalog, build_runtime_claim_groups, decode_proof_body_prefix,
+    ProofTreeCatalogInput, QueryVerificationWorkspace, SELECTED_PROOF_FIELD_INDEX,
+    ValidatedRelationPlanArtifact, VerifiedCommonProof, build_complete_proof_tree_catalog,
+    build_runtime_claim_groups, decode_proof_body_prefix, sample_relation_application_challenges,
     verify_and_slice_proof_header,
 };
 
@@ -192,33 +192,8 @@ where
         transcript_schedule.ordered_base_tree_ordinals(),
     )?;
 
-    let mut application_challenges = Vec::new();
-    application_challenges
-        .try_reserve_exact(
-            transcript_schedule
-                .ordered_application_challenge_groups()
-                .iter()
-                .try_fold(0_usize, |count, group| {
-                    count.checked_add(usize::from(group.coordinate_count()))
-                })
-                .ok_or(CommonProofVerifierError::InvalidTreeLayout)?,
-        )
-        .map_err(|_| CommonProofVerifierError::InvalidTreeLayout)?;
-    for scheduled_group in transcript_schedule.ordered_application_challenge_groups() {
-        let challenge = scheduled_group.challenge();
-        let values = transcript.sample_application_challenge_group(challenge)?;
-        if values.len() != usize::from(scheduled_group.coordinate_count()) {
-            return Err(CommonProofVerifierError::InvalidTreeLayout);
-        }
-        for (repetition_ordinal, value) in values.into_iter().enumerate() {
-            application_challenges.push(RelationApplicationChallengeAssignment::new(
-                challenge,
-                u16::try_from(repetition_ordinal)
-                    .map_err(|_| CommonProofVerifierError::InvalidTreeLayout)?,
-                value,
-            )?);
-        }
-    }
+    let application_challenges =
+        sample_relation_application_challenges(&mut transcript, &transcript_schedule)?;
 
     absorb_relation_roots(
         &mut transcript,
@@ -229,10 +204,11 @@ where
     )?;
 
     let mut composition_challenges = Vec::new();
+    let composition_challenge_count =
+        usize::try_from(transcript_schedule.composition_challenge_count())
+            .map_err(|_| CommonProofVerifierError::InvalidTreeLayout)?;
     composition_challenges
-        .try_reserve_exact(usize::from(
-            transcript_schedule.composition_challenge_count(),
-        ))
+        .try_reserve_exact(composition_challenge_count)
         .map_err(|_| CommonProofVerifierError::InvalidTreeLayout)?;
     for constraint_ordinal in 0..transcript_schedule.composition_challenge_count() {
         composition_challenges.push(transcript.sample_composition_challenge(constraint_ordinal)?);

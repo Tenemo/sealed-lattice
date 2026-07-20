@@ -2031,7 +2031,7 @@ mod tests {
             .and_then(|count| count.checked_mul(2))
             .and_then(|count| u32::try_from(count).ok())
             .expect("the selected root row width fits u32");
-        assert_eq!(selected_root_row_width, 46);
+        assert_eq!(selected_root_row_width, 416);
         let evaluation_domain_size = usize::try_from(relation_geometry.evaluation_domain_size)
             .expect("the selected evaluation domain fits usize");
         let public_polynomial_degree_bound_exclusive =
@@ -2053,7 +2053,7 @@ mod tests {
         assert_eq!(wasm_plan.online_merkle_stack_payload_byte_length(), 1_280,);
         assert_eq!(
             wasm_plan.retained_trace_rows_payload_byte_length(),
-            12_058_624,
+            109_051_904,
         );
         assert_eq!(
             wasm_plan.column_pipeline_payload_peak_byte_length(),

@@ -563,6 +563,50 @@ fn retained_flooding_polynomial_uses_exact_zeroizable_signed_limbs() {
 }
 
 #[test]
+fn flooding_callback_allocation_accounting_separates_ready_and_construction_bytes() {
+    for (coefficient_count, magnitude_limb_count) in [(1_usize, 1_usize), (5, 4), (32_768, 4)] {
+        let accounting = ZeroizingSignedLimbPolynomial::allocation_byte_lengths_from_dimensions(
+            coefficient_count,
+            magnitude_limb_count,
+        )
+        .expect("valid signed-limb allocation dimensions");
+        let coefficient_count = u64::try_from(coefficient_count).expect("coefficient count");
+        let magnitude_limb_count =
+            u64::try_from(magnitude_limb_count).expect("magnitude limb count");
+        let magnitude_byte_length = coefficient_count
+            * magnitude_limb_count
+            * u64::try_from(size_of::<u64>()).expect("u64 width");
+
+        assert_eq!(
+            accounting.retained_heap_byte_length,
+            coefficient_count + magnitude_byte_length,
+            "retained signs and fixed-width magnitude limbs for {coefficient_count} coefficients and {magnitude_limb_count} limbs",
+        );
+        assert_eq!(
+            accounting.bigint_callback_ready_resident_byte_length,
+            coefficient_count * u64::try_from(size_of::<BigInt>()).expect("BigInt width")
+                + magnitude_byte_length,
+            "callback-ready BigInt catalog and magnitude allocations for {coefficient_count} coefficients and {magnitude_limb_count} limbs",
+        );
+        assert_eq!(
+            accounting.bigint_callback_construction_transient_byte_length,
+            magnitude_limb_count * u64::try_from(size_of::<u64>()).expect("u64 width"),
+            "only one coefficient conversion buffer is live while the callback catalog is constructed",
+        );
+    }
+
+    for invalid_dimensions in [(0_usize, 1_usize), (1, 0), (0, 0)] {
+        assert_eq!(
+            ZeroizingSignedLimbPolynomial::allocation_byte_lengths_from_dimensions(
+                invalid_dimensions.0,
+                invalid_dimensions.1,
+            ),
+            Err(TargetReleaseWitnessError::InvalidWitness),
+        );
+    }
+}
+
+#[test]
 fn factor_four_bounds_use_exact_arbitrary_width_inequalities() {
     let evaluation_error_bound = BigUint::from(1_u8);
     let minimum_flooding_bound = factor_four_required_flooding_bound(&evaluation_error_bound)

@@ -19,7 +19,8 @@ fn check_context() -> RelationPlanCheckContext {
         fri_fold_count: 7,
         final_polynomial_degree_bound_exclusive: 256,
         unique_query_count: 16,
-        non_native_modular_identity_challenge_count: 2,
+        non_native_theta_repetition_count: 2,
+        non_native_alpha_repetition_count: 3,
         maximum_fiat_shamir_candidate_draws_per_output: 128,
         resolved_moduli: vec![
             ResolvedSuiteModulus::new(SuiteModulusReference::data(0), 97),
@@ -73,7 +74,8 @@ fn committed_material_check_context() -> RelationPlanCheckContext {
         final_polynomial_degree_bound_exclusive: 8,
         unique_query_count: u32::try_from(unique_query_count)
             .expect("test unique-query count fits"),
-        non_native_modular_identity_challenge_count: 1,
+        non_native_theta_repetition_count: 1,
+        non_native_alpha_repetition_count: 1,
         maximum_fiat_shamir_candidate_draws_per_output: 128,
         resolved_moduli: vec![ResolvedSuiteModulus::new(
             SuiteModulusReference::data(0),
@@ -405,10 +407,10 @@ fn production_target_share_negacyclic_product_exceeds_the_exact_no_wrap_bound() 
     .expect("the production negacyclic product has a valid exact interval");
     let proof_base_field_modulus = BigInt::from(crate::bgv::proof_suite::PROOF_BASE_FIELD_MODULUS);
 
-    // The exact N(q - 1)^2 bound is 109 bits, so it cannot inject into the
-    // 64-bit proof base field before the modular quotient is applied.
-    assert_eq!(full_ring_convolution_bound.bits(), 109);
-    assert_eq!(proof_base_field_modulus.bits(), 64);
+    assert!(
+        full_ring_convolution_bound.bits() > proof_base_field_modulus.bits(),
+        "the exact full-ring product must not inject into the proof base field before the modular quotient is applied"
+    );
     assert!(!exact_product_interval.is_injective_modulo(&proof_base_field_modulus));
 }
 
@@ -974,7 +976,7 @@ fn generated_committed_material_plans_cover_the_exact_root_directions() {
             .ordered_coefficient_local_identity_batches()
             .len(),
         vss_variant.ordered_non_native_moduli.len()
-            * usize::from(context.non_native_modular_identity_challenge_count)
+            * usize::from(context.non_native_alpha_repetition_count)
             * 2
     );
     let aggregate_variant = &aggregate_plan.variants()[0];

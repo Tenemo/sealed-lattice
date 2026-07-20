@@ -428,11 +428,8 @@ fn upstream_input_registry_consumes_only_one_complete_application_owned_capabili
         proof_application,
         expected_relation_plan_hash,
     );
-    let proof_stream_descriptor = StreamDescriptor {
-        total_byte_length: super::super::super::super::MAXIMUM_COMMON_PROOF_BYTE_LENGTH as u64,
-        ordered_chunk_digests: vec![Hash512::from_bytes([0x45; 64]); 5].into(),
-        full_object_digest: Hash512::from_bytes([0x44; 64]),
-    };
+    let proof_stream_descriptor =
+        maximum_length_test_proof_stream_descriptor([0x45; 64], [0x44; 64]);
     let mut registry = CommonProofUpstreamInputRegistry::default();
     let application_handle = registry
         .install_test_application_fixture(
@@ -594,11 +591,8 @@ fn application_owned_statement_tree_batch_does_not_spend_one_registry_entry_per_
         proof_application,
         relation_plan_capability.relation_plan_hash(),
     );
-    let proof_stream_descriptor = StreamDescriptor {
-        total_byte_length: super::super::super::super::MAXIMUM_COMMON_PROOF_BYTE_LENGTH as u64,
-        ordered_chunk_digests: vec![Hash512::from_bytes([0x65; 64]); 5].into(),
-        full_object_digest: Hash512::from_bytes(proof_stream_digest),
-    };
+    let proof_stream_descriptor =
+        maximum_length_test_proof_stream_descriptor([0x65; 64], proof_stream_digest);
     let mut registry = CommonProofUpstreamInputRegistry::default();
     let application_handle = registry
         .install_test_application_fixture(

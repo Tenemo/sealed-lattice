@@ -1004,7 +1004,7 @@ fn generation_state_enforces_reports_and_releases_its_complete_resident_live_set
 }
 
 #[test]
-fn generation_state_rejects_an_unattainable_stream_window_before_proving() {
+fn generation_state_rejects_a_noncanonical_transport_chunk_before_proving() {
     let fixture = common_proof_engine_fixture();
     let result = CommonProofGenerationStateMachine::new(CommonProofGenerationInput {
         protocol_version: 1,
@@ -1026,7 +1026,7 @@ fn generation_state_rejects_an_unattainable_stream_window_before_proving() {
     assert!(matches!(
         result,
         Err(CommonProofGenerationInitializationError::Prover(
-            CommonProofProverError::ResidentMemoryLimitExceeded
+            CommonProofProverError::InvalidInput
         ))
     ));
 }

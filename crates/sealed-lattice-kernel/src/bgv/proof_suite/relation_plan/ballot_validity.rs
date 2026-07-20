@@ -39,10 +39,6 @@ pub(crate) enum BallotValidityWitnessValueSource {
         ciphertext_ordinal: u16,
         auxiliary_ordinal: u16,
     },
-    ReversedPairCharacterAuxiliaryCoefficient {
-        ciphertext_ordinal: u16,
-        auxiliary_ordinal: u16,
-    },
     ReversedRandomizerShifted {
         ciphertext_ordinal: u16,
     },
@@ -258,8 +254,10 @@ impl BallotValiditySourcePlan {
     }
 
     pub(crate) fn provided_column_count(&self) -> usize {
-        (0..self.recipes_by_column.len())
-            .filter(|column_index| self.recipes_by_column[*column_index].is_some())
+        self.recipes_by_column
+            .iter()
+            .zip(self.verifier_sources_by_column.iter())
+            .filter(|(recipe, verifier_source)| recipe.is_some() ^ verifier_source.is_some())
             .count()
     }
 
@@ -1527,14 +1525,14 @@ impl<'context> BallotValidityPlanBuilder<'context> {
         modulus_ordinal: usize,
         challenge_ordinal: u16,
         auxiliary_columns: &[Vec<BoundedUnsignedColumn>],
-        reversed_right_columns: &[BoundedUnsignedColumn],
+        reversed_right_column_ordinals: &[u32],
         product_quotient_columns: &[u32],
     ) -> Result<(), RelationPlanError> {
         if auxiliary_columns.len() != PAIR_CHARACTER_CIPHERTEXT_COUNT
             || auxiliary_columns
                 .iter()
                 .any(|columns| columns.len() != PAIR_CHARACTER_AUXILIARY_COUNT)
-            || reversed_right_columns.len() != PAIR_CHARACTER_CIPHERTEXT_COUNT
+            || reversed_right_column_ordinals.len() != PAIR_CHARACTER_CIPHERTEXT_COUNT
             || product_quotient_columns.len() != PAIR_CHARACTER_CIPHERTEXT_COUNT
         {
             return Err(RelationPlanError::InvalidConstraint);
@@ -1545,8 +1543,7 @@ impl<'context> BallotValidityPlanBuilder<'context> {
             reversed_bindings.push(RelationIntegerLiftReversedColumnBindingDescriptor {
                 source_column_ordinal: auxiliary_columns[ciphertext_ordinal][1]
                     .target_column_ordinal,
-                reversed_column_ordinal: reversed_right_columns[ciphertext_ordinal]
-                    .target_column_ordinal,
+                reversed_column_ordinal: reversed_right_column_ordinals[ciphertext_ordinal],
                 source_prefix_evaluation_column_ordinal: self
                     .push_prover_column(ProofTreePhase::Auxiliary)?,
                 reversed_suffix_evaluation_column_ordinal: self
@@ -1586,9 +1583,8 @@ impl<'context> BallotValidityPlanBuilder<'context> {
                         convolution_kind: RelationIntegerLiftConvolutionKind::Negacyclic,
                         multiplicand_column_ordinal: auxiliary_columns[ciphertext_ordinal][0]
                             .target_column_ordinal,
-                        reversed_multiplier_column_ordinal: reversed_right_columns
-                            [ciphertext_ordinal]
-                            .target_column_ordinal,
+                        reversed_multiplier_column_ordinal: reversed_right_column_ordinals
+                            [ciphertext_ordinal],
                         multiplier_offset: 0,
                         suffix_evaluation_column_ordinal: self
                             .push_prover_column(ProofTreePhase::Auxiliary)?,
@@ -1659,7 +1655,8 @@ impl<'context> BallotValidityPlanBuilder<'context> {
 
         let encoder_source_columns = self.add_pair_character_encoder_source_columns()?;
         let mut auxiliary_columns = Vec::with_capacity(PAIR_CHARACTER_CIPHERTEXT_COUNT);
-        let mut reversed_right_columns = Vec::with_capacity(PAIR_CHARACTER_CIPHERTEXT_COUNT);
+        let mut reversed_right_column_ordinals =
+            Vec::with_capacity(PAIR_CHARACTER_CIPHERTEXT_COUNT);
         let mut product_quotient_columns = Vec::with_capacity(PAIR_CHARACTER_CIPHERTEXT_COUNT);
         let mut reversed_randomizers_shifted = Vec::with_capacity(PAIR_CHARACTER_CIPHERTEXT_COUNT);
         let mut error_columns_shifted = Vec::with_capacity(PAIR_CHARACTER_CIPHERTEXT_COUNT);
@@ -1684,19 +1681,8 @@ impl<'context> BallotValidityPlanBuilder<'context> {
                 )?;
                 ciphertext_auxiliary_columns.push(column);
             }
-            let reversed_right = self.add_canonical_modulus_column(
-                SuiteModulusReference::plaintext(),
-                ProofTreePhase::Base,
-            )?;
-            self.assign_canonical_modulus_source_recipes(
-                &reversed_right,
-                SuiteModulusReference::plaintext(),
-                BallotValidityWitnessValueSource::ReversedPairCharacterAuxiliaryCoefficient {
-                    ciphertext_ordinal: ciphertext_ordinal_u16,
-                    auxiliary_ordinal: 1,
-                },
-            )?;
-            reversed_right_columns.push(reversed_right);
+            let reversed_right_column_ordinal = self.push_prover_column(ProofTreePhase::Base)?;
+            reversed_right_column_ordinals.push(reversed_right_column_ordinal);
 
             let product_quotient_absolute_bound =
                 u128::from(self.geometry.pair_character_product_quotient_absolute_bound);
@@ -1772,12 +1758,12 @@ impl<'context> BallotValidityPlanBuilder<'context> {
             auxiliary_columns.push(ciphertext_auxiliary_columns);
         }
 
-        for challenge_ordinal in 0..self.context.non_native_modular_identity_challenge_count {
+        for challenge_ordinal in 0..self.context.non_native_theta_repetition_count {
             self.add_pair_character_product_batch(
                 self.geometry.data_moduli.len(),
                 challenge_ordinal,
                 &auxiliary_columns,
-                &reversed_right_columns,
+                &reversed_right_column_ordinals,
                 &product_quotient_columns,
             )?;
         }
@@ -1791,7 +1777,7 @@ impl<'context> BallotValidityPlanBuilder<'context> {
             .zip(quotient_limb_columns.iter().copied())
             .enumerate()
         {
-            for challenge_ordinal in 0..self.context.non_native_modular_identity_challenge_count {
+            for challenge_ordinal in 0..self.context.non_native_theta_repetition_count {
                 self.add_integer_lift_batch(
                     modulus_ordinal,
                     challenge_ordinal,
@@ -1840,6 +1826,16 @@ impl<'context> BallotValidityPlanBuilder<'context> {
             .iter()
             .copied()
             .collect::<BTreeSet<_>>();
+        let derived_reversed_column_set = self
+            .ordered_integer_lift_batches
+            .iter()
+            .flat_map(|batch| {
+                batch
+                    .ordered_reversed_column_bindings
+                    .iter()
+                    .map(|binding| binding.reversed_column_ordinal)
+            })
+            .collect::<BTreeSet<_>>();
         for (column_index, ((column, recipe), verifier_source)) in self
             .ordered_columns
             .iter()
@@ -1850,7 +1846,8 @@ impl<'context> BallotValidityPlanBuilder<'context> {
             let column_ordinal =
                 u32::try_from(column_index).map_err(|_| RelationPlanError::CountOverflow)?;
             let expects_witness_source = matches!(column.origin, RelationColumnOrigin::Prover)
-                && base_tree_column_set.contains(&column_ordinal);
+                && base_tree_column_set.contains(&column_ordinal)
+                && !derived_reversed_column_set.contains(&column_ordinal);
             let expects_verifier_source =
                 matches!(column.origin, RelationColumnOrigin::VerifierSequence { .. })
                     && !base_tree_column_set.contains(&column_ordinal)
@@ -2523,10 +2520,13 @@ fn subtract_rotated_columns(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::bgv::proof_suite::{
+        CommonProofChallenge, CommonProofTranscript, PROOF_BASE_FIELD_MODULUS,
+        sample_relation_application_challenges,
+    };
 
     const TEST_RING_DEGREE: u64 = PAIR_CHARACTER_RING_DEGREE as u64;
     const TEST_PLAINTEXT_MODULUS: u64 = PAIR_CHARACTER_PLAINTEXT_MODULUS;
-    const TEST_DATA_MODULUS: u64 = crate::bgv::parameters::DATA_PRIMES[0];
     const TEST_EVALUATION_DOMAIN_SIZE: u64 =
         crate::bgv::proof_suite::selected_profile::SELECTED_EVALUATION_DOMAIN_SIZE;
 
@@ -2605,10 +2605,16 @@ mod tests {
                 _ => None,
             })
             .expect("the ballot relation has a base tree");
-        assert_eq!(
-            compilation.source_plan().provided_column_count(),
-            base_tree_columns.len()
-        );
+        let derived_reversed_columns = variant
+            .ordered_integer_lift_batches
+            .iter()
+            .flat_map(|batch| {
+                batch
+                    .ordered_reversed_column_bindings
+                    .iter()
+                    .map(|binding| binding.reversed_column_ordinal)
+            })
+            .collect::<BTreeSet<_>>();
         assert_eq!(
             compilation
                 .source_plan()
@@ -2627,6 +2633,10 @@ mod tests {
                     .then_some(u32::try_from(column_ordinal).unwrap())
             })
             .collect::<BTreeSet<_>>();
+        assert_eq!(
+            compilation.source_plan().provided_column_count(),
+            base_tree_columns.len() - derived_reversed_columns.len() + verifier_columns.len()
+        );
         assert!(variant.ordered_trees.iter().all(|tree| {
             tree.ordered_column_ordinals()
                 .iter()
@@ -2642,7 +2652,8 @@ mod tests {
             assert_eq!(
                 compilation.source_plan().recipe(column_ordinal).is_some(),
                 matches!(column.origin, RelationColumnOrigin::Prover)
-                    && base_tree_columns.contains(&column_ordinal),
+                    && base_tree_columns.contains(&column_ordinal)
+                    && !derived_reversed_columns.contains(&column_ordinal),
                 "column {column_ordinal} has the wrong family-source ownership"
             );
             assert_eq!(
@@ -2653,6 +2664,14 @@ mod tests {
                 matches!(column.origin, RelationColumnOrigin::VerifierSequence { .. })
                     && !base_tree_columns.contains(&column_ordinal),
                 "column {column_ordinal} has the wrong verifier-source ownership"
+            );
+            assert!(
+                !(compilation.source_plan().recipe(column_ordinal).is_some()
+                    && compilation
+                        .source_plan()
+                        .verifier_source(column_ordinal)
+                        .is_some()),
+                "column {column_ordinal} cannot have two provider sources"
             );
         }
         assert!(
@@ -2911,7 +2930,21 @@ mod tests {
         );
         assert!(typed_expression_modulus_multiples.contains(&(SuiteModulusReference::data(0), 1,)));
         assert!(variant.ordered_radix_convolutions.is_empty());
-        assert_eq!(variant.ordered_integer_lift_batches.len(), 2);
+        assert_eq!(
+            variant.ordered_integer_lift_batches.len(),
+            2 * usize::from(context.non_native_theta_repetition_count)
+        );
+        assert!(variant.ordered_integer_lift_batches.iter().all(|batch| {
+            batch
+                .theta_bad_polynomial_degree(variant.trace_domain_size)
+                .expect("the exact ballot theta degree derives")
+                == 65_534
+        }));
+        let semantically_certified_columns = variant
+            .ordered_semantic_cells
+            .iter()
+            .map(|cell| cell.column_ordinal)
+            .collect::<BTreeSet<_>>();
         let batch = variant
             .ordered_integer_lift_batches
             .iter()
@@ -2920,6 +2953,7 @@ mod tests {
         assert_eq!(batch.modulus_reference, SuiteModulusReference::data(0));
         assert_eq!(batch.challenge_ordinal, 0);
         assert_eq!(batch.ordered_components.len(), 4);
+        assert!(batch.ordered_reversed_column_bindings.is_empty());
         assert!(batch.ordered_components.iter().all(|component| {
             component.ordered_linear_terms.iter().any(|term| {
                 term.negative
@@ -2935,6 +2969,9 @@ mod tests {
                 && component.ordered_convolution_products[0].convolution_kind
                     == RelationIntegerLiftConvolutionKind::Negacyclic
                 && component.ordered_convolution_products[0].multiplier_offset == 1
+                && semantically_certified_columns.contains(
+                    &component.ordered_convolution_products[0].reversed_multiplier_column_ordinal,
+                )
         }));
         let product_batch = variant
             .ordered_integer_lift_batches
@@ -2943,6 +2980,30 @@ mod tests {
             .expect("plaintext pair-character product batch");
         assert_eq!(product_batch.ordered_components.len(), 2);
         assert_eq!(product_batch.ordered_reversed_column_bindings.len(), 2);
+        assert!(
+            product_batch
+                .ordered_reversed_column_bindings
+                .iter()
+                .all(|binding| {
+                    let source_semantic_cell = variant
+                        .ordered_semantic_cells
+                        .iter()
+                        .find(|cell| cell.column_ordinal == binding.source_column_ordinal)
+                        .expect("the pair-character source has a canonical plaintext bound");
+                    base_tree_columns.contains(&binding.reversed_column_ordinal)
+                        && source_semantic_cell.claimed_interval
+                            == SignedIntegerInterval::new(0, 256)
+                        && !semantically_certified_columns
+                            .contains(&binding.reversed_column_ordinal)
+                        && variant.ordered_columns[binding.reversed_column_ordinal as usize]
+                            .canonical_residue_modulus
+                            .is_none()
+                        && compilation
+                            .source_plan()
+                            .recipe(binding.reversed_column_ordinal)
+                            .is_none()
+                })
+        );
         assert!(product_batch.ordered_components.iter().all(|component| {
             component.ordered_convolution_products.len() == 1
                 && component.ordered_convolution_products[0].negative
@@ -2962,14 +3023,22 @@ mod tests {
                 )
             })
             .collect::<Vec<_>>();
-        assert_eq!(non_native_challenges.len(), 2);
+        assert_eq!(
+            non_native_challenges.len(),
+            2 * usize::from(context.non_native_theta_repetition_count)
+        );
         assert_eq!(
             non_native_challenges
                 .iter()
                 .filter(|challenge| challenge.role == RelationChallengeRole::NonNativeTheta)
                 .map(|challenge| challenge.role_coordinates.clone())
                 .collect::<Vec<_>>(),
-            vec![vec![0, 0], vec![1, 0]]
+            (0_u64..2)
+                .flat_map(|modulus_ordinal| {
+                    (0..u64::from(context.non_native_theta_repetition_count))
+                        .map(move |repetition_ordinal| vec![modulus_ordinal, repetition_ordinal])
+                })
+                .collect::<Vec<_>>()
         );
         assert!(
             non_native_challenges
@@ -2979,11 +3048,94 @@ mod tests {
         assert!(non_native_challenges.iter().all(|challenge| matches!(
             challenge.sampling,
             RelationChallengeSampling::ProductResidueVectorCoordinate {
-                modulus_selector: RelationChallengeModulusSelector::NonNativeModulusOrdinal(0 | 1),
-                coordinate_count: 1,
+                modulus_selector: RelationChallengeModulusSelector::BaseField,
+                coordinate_count: 4,
                 maximum_candidate_draws_per_output: 128,
             }
         )));
+        let mut truncated_plaintext_theta = non_native_challenges
+            .iter()
+            .find(|challenge| challenge.role_coordinates == vec![1, 0])
+            .expect("the plaintext theta descriptor exists")
+            .clone();
+        truncated_plaintext_theta.sampling =
+            RelationChallengeSampling::ProductResidueVectorCoordinate {
+                modulus_selector: RelationChallengeModulusSelector::NonNativeModulusOrdinal(1),
+                coordinate_count: context.non_native_theta_repetition_count,
+                maximum_candidate_draws_per_output: 128,
+            };
+        assert_eq!(
+            truncated_plaintext_theta.validate(variant, &context),
+            Err(RelationPlanError::InvalidChallengeCatalog),
+            "the catalog must reject the removed arithmetic-modulus theta domain",
+        );
+        assert_eq!(
+            context
+                .resolved_modulus(SuiteModulusReference::plaintext())
+                .expect("the plaintext arithmetic modulus resolves"),
+            257
+        );
+
+        let transcript_schedule = variant
+            .common_proof_transcript_schedule(&context)
+            .expect("the exact ballot transcript schedule derives");
+        assert_eq!(
+            transcript_schedule
+                .ordered_application_challenge_groups()
+                .len(),
+            2
+        );
+        assert!(
+            transcript_schedule
+                .ordered_application_challenge_groups()
+                .iter()
+                .all(|group| {
+                    matches!(group.challenge(), CommonProofChallenge::Theta { .. })
+                        && group.modulus() == PROOF_BASE_FIELD_MODULUS
+                        && group.coordinate_count() == context.non_native_theta_repetition_count
+                })
+        );
+        let derive_assignments = || {
+            let mut transcript = CommonProofTranscript::new(
+                1,
+                [0x31; 64],
+                BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER,
+                b"exact-ballot-theta-vector",
+                transcript_schedule.clone(),
+            )
+            .expect("the exact ballot transcript initializes");
+            for tree_ordinal in transcript_schedule.ordered_base_tree_ordinals() {
+                transcript
+                    .absorb_base_root(*tree_ordinal, [*tree_ordinal as u8; 64])
+                    .expect("the exact ballot base root is ordered");
+            }
+            let assignments =
+                sample_relation_application_challenges(&mut transcript, &transcript_schedule)
+                    .expect("the exact ballot theta vectors derive");
+            for tree_ordinal in transcript_schedule.ordered_auxiliary_tree_ordinals() {
+                transcript
+                    .absorb_auxiliary_root(*tree_ordinal, [*tree_ordinal as u8; 64])
+                    .expect("the exact ballot auxiliary root follows theta");
+            }
+            (assignments, transcript.transcript_state_for_test())
+        };
+        let first_derivation = derive_assignments();
+        let second_derivation = derive_assignments();
+        assert_eq!(first_derivation, second_derivation);
+        assert_eq!(first_derivation.0.len(), 8);
+        assert!(
+            first_derivation
+                .0
+                .iter()
+                .all(|assignment| assignment.value() < PROOF_BASE_FIELD_MODULUS)
+        );
+        assert!(
+            first_derivation
+                .0
+                .iter()
+                .any(|assignment| assignment.value() > 256),
+            "the full-field theta vector must not be truncated to the plaintext modulus"
+        );
 
         let prover_columns = variant
             .ordered_columns
@@ -3146,107 +3298,5 @@ mod tests {
             compile_ballot_validity_relation_plan(&unknown_reserved_slot_rule, &context),
             Err(RelationPlanError::InvalidDomain)
         );
-    }
-
-    #[test]
-    fn reversed_negacyclic_transpose_recurrence_matches_dense_multiplication() {
-        let public_key_coefficients = (0..TEST_RING_DEGREE)
-            .map(|coefficient_ordinal| {
-                (coefficient_ordinal
-                    .checked_mul(73)
-                    .expect("the test sequence fits u64")
-                    + 19)
-                    % TEST_DATA_MODULUS
-            })
-            .collect::<Vec<_>>();
-        for theta in [0, 1, 37, TEST_DATA_MODULUS - 1] {
-            let dense = dense_reversed_negacyclic_transpose(
-                &public_key_coefficients,
-                theta,
-                TEST_DATA_MODULUS,
-            );
-            let recurrence = recurrent_reversed_negacyclic_transpose(
-                &public_key_coefficients,
-                theta,
-                TEST_DATA_MODULUS,
-            );
-            assert_eq!(recurrence, dense, "theta={theta}");
-        }
-    }
-
-    fn dense_reversed_negacyclic_transpose(
-        coefficients: &[u64],
-        theta: u64,
-        modulus: u64,
-    ) -> Vec<u64> {
-        let ring_degree = coefficients.len();
-        (0..ring_degree)
-            .map(|row_ordinal| {
-                let output_ordinal = ring_degree - 1 - row_ordinal;
-                coefficients.iter().copied().enumerate().fold(
-                    0_u64,
-                    |sum, (coefficient_ordinal, coefficient)| {
-                        let unreduced_exponent = coefficient_ordinal + output_ordinal;
-                        let term = modular_product(
-                            coefficient,
-                            modular_power(
-                                theta,
-                                (unreduced_exponent % ring_degree) as u64,
-                                modulus,
-                            ),
-                            modulus,
-                        );
-                        if unreduced_exponent >= ring_degree {
-                            modular_difference(sum, term, modulus)
-                        } else {
-                            modular_addition(sum, term, modulus)
-                        }
-                    },
-                )
-            })
-            .collect()
-    }
-
-    fn recurrent_reversed_negacyclic_transpose(
-        coefficients: &[u64],
-        theta: u64,
-        modulus: u64,
-    ) -> Vec<u64> {
-        let mut reversed_weights = vec![0_u64; coefficients.len()];
-        let theta_to_ring_degree = modular_power(theta, coefficients.len() as u64, modulus);
-        reversed_weights[coefficients.len() - 1] = coefficients.iter().copied().enumerate().fold(
-            0_u64,
-            |sum, (coefficient_ordinal, coefficient)| {
-                modular_addition(
-                    sum,
-                    modular_product(
-                        coefficient,
-                        modular_power(theta, coefficient_ordinal as u64, modulus),
-                        modulus,
-                    ),
-                    modulus,
-                )
-            },
-        );
-        for row_ordinal in (1..coefficients.len()).rev() {
-            let theta_times_current =
-                modular_product(theta, reversed_weights[row_ordinal], modulus);
-            let correction = modular_product(
-                modular_addition(theta_to_ring_degree, 1, modulus),
-                coefficients[row_ordinal],
-                modulus,
-            );
-            reversed_weights[row_ordinal - 1] =
-                modular_difference(theta_times_current, correction, modulus);
-        }
-        reversed_weights
-    }
-
-    fn modular_addition(left: u64, right: u64, modulus: u64) -> u64 {
-        ((u128::from(left) + u128::from(right)) % u128::from(modulus)) as u64
-    }
-
-    fn modular_difference(left: u64, right: u64, modulus: u64) -> u64 {
-        ((u128::from(left) + u128::from(modulus) - u128::from(right)) % u128::from(modulus)) as u64
     }
 }

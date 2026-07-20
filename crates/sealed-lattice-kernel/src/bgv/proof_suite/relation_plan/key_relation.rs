@@ -636,6 +636,7 @@ pub(super) struct TargetBoundedUnsignedVector {
 #[derive(Clone, Debug)]
 pub(super) struct TargetCenteredVector {
     pub(super) value: ShiftedSmallVector,
+    pub(super) trit_encoding_offset: u64,
     pub(super) trits_by_half: [Vec<u32>; 2],
 }
 

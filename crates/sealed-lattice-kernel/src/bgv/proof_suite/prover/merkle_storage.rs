@@ -2531,48 +2531,6 @@ impl StatementOwnedMerkleReplay {
     }
 
     #[cfg(test)]
-    pub(crate) fn resident_owned_payload_byte_length(&self) -> Result<u64, CommonProofProverError> {
-        let vector_payload = |capacity: usize, element_byte_length: usize| {
-            u64::try_from(capacity)
-                .ok()
-                .and_then(|capacity| {
-                    u64::try_from(element_byte_length)
-                        .ok()
-                        .and_then(|element_byte_length| capacity.checked_mul(element_byte_length))
-                })
-                .ok_or(CommonProofProverError::CountOverflow)
-        };
-        [
-            vector_payload(
-                self.opened_leaf_indexes.capacity(),
-                core::mem::size_of::<u64>(),
-            )?,
-            u64::try_from(self.opened_leaf_bytes.capacity())
-                .map_err(|_| CommonProofProverError::CountOverflow)?,
-            vector_payload(
-                self.frontier_coordinates.capacity(),
-                core::mem::size_of::<(u32, u64)>(),
-            )?,
-            vector_payload(
-                self.frontier_digests.capacity(),
-                core::mem::size_of::<[u8; HASH_BYTE_LENGTH]>(),
-            )?,
-            u64::try_from(self.frontier_digest_present.capacity())
-                .map_err(|_| CommonProofProverError::CountOverflow)?,
-            vector_payload(
-                self.pending_left_digests.capacity(),
-                core::mem::size_of::<[u8; HASH_BYTE_LENGTH]>(),
-            )?,
-        ]
-        .into_iter()
-        .try_fold(0_u64, |total, length| {
-            total
-                .checked_add(length)
-                .ok_or(CommonProofProverError::CountOverflow)
-        })
-    }
-
-    #[cfg(test)]
     pub(crate) fn supply_next_leaf(
         &mut self,
         first_point_values: Zeroizing<Vec<ProofTreeValue>>,

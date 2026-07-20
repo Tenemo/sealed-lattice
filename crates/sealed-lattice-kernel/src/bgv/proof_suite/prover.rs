@@ -58,6 +58,7 @@ use super::{
     SuiteModulusReference, TranscriptError, ValidatedRelationPlanArtifact,
     build_complete_proof_tree_catalog, divide_extension_polynomial_by_linear_in_place,
     evaluate_extension_at, extension_polynomial_degree, fold_extension_evaluations_in_place,
+    sample_relation_application_challenges,
 };
 
 const SCHEMA_VERSION: u16 = 1;

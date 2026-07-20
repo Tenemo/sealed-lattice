@@ -8,15 +8,11 @@
 #[cfg(test)]
 use std::collections::BTreeSet;
 
-use crate::{
-    bgv::evaluator::{
-        candidate_evidence::EvaluatorCandidateInput, program::selected_evaluator_program_set,
-    },
-    foundation::{FOUNDATION_PROFILE, ProofApplicationSlotCeilings as ProofFamilies},
-};
+use crate::foundation::{FOUNDATION_PROFILE, ProofApplicationSlotCeilings as ProofFamilies};
 
 #[cfg(test)]
 use crate::{
+    bgv::evaluator::candidate_evidence::EvaluatorCandidateInput,
     bgv::setup::SETUP_COMMITMENT_MODULUS_LIMB_INDICES,
     foundation::{
         ArtifactKind, ArtifactReference, CanonicalDecodeLimits, CanonicalItem, CanonicalItemType,
@@ -31,7 +27,8 @@ use super::relation_plan::{
 
 use super::{
     CompiledRelationPlan, PROOF_BASE_FIELD_MODULUS, PROOF_CHALLENGE_EXTENSION_DEGREE,
-    RelationPlanCheckContext, RelationPlanError,
+    RelationPlanCheckContext, RelationPlanError, SelectedEvaluatorEntryKind,
+    selected_evaluator_entry_positions,
 };
 
 #[cfg(test)]
@@ -58,7 +55,9 @@ const RELATION_ROOT_ENDPOINT_SCHEMA_IDENTIFIER: u16 = 0x222b;
 #[cfg(test)]
 const SCHEMA_VERSION: u16 = 1;
 #[cfg(test)]
-const PROOF_PROFILE_SET_VERSION: u16 = 2;
+const PROOF_FIELD_SCHEDULE_SCHEMA_VERSION: u16 = 2;
+#[cfg(test)]
+const PROOF_PROFILE_SET_VERSION: u16 = 3;
 
 pub(crate) const FIRST_PROFILE_APPLICATION_FAMILIES: [u16; 12] = [
     ProofFamilies::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER,
@@ -86,7 +85,8 @@ pub(crate) const PROOF_DEEP_POINT_COUNT: u16 = 1;
 pub(crate) const PROOF_FINAL_POLYNOMIAL_DEGREE_BOUND_EXCLUSIVE: u32 = 256;
 pub(crate) const PROOF_UNIQUE_QUERY_COUNT: u32 = 168;
 pub(crate) const COMMITTED_MATERIAL_PROOF_UNIQUE_QUERY_COUNT: u32 = 192;
-pub(crate) const PROOF_NON_NATIVE_IDENTITY_CHALLENGE_COUNT: u16 = 9;
+pub(crate) const PROOF_NON_NATIVE_THETA_REPETITION_COUNT: u16 = 4;
+pub(crate) const PROOF_NON_NATIVE_ALPHA_REPETITION_COUNT: u16 = 7;
 pub(crate) const PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT: u32 = 128;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -179,7 +179,8 @@ pub(crate) struct ProofFieldSchedule {
     deep_point_count: u16,
     final_polynomial_degree_bound_exclusive: u32,
     unique_query_count: u32,
-    non_native_modular_identity_challenge_count: u16,
+    non_native_theta_repetition_count: u16,
+    non_native_alpha_repetition_count: u16,
     maximum_fiat_shamir_candidate_draws_per_output: u32,
 }
 
@@ -201,7 +202,8 @@ impl ProofFieldSchedule {
             } else {
                 PROOF_UNIQUE_QUERY_COUNT
             },
-            non_native_modular_identity_challenge_count: PROOF_NON_NATIVE_IDENTITY_CHALLENGE_COUNT,
+            non_native_theta_repetition_count: PROOF_NON_NATIVE_THETA_REPETITION_COUNT,
+            non_native_alpha_repetition_count: PROOF_NON_NATIVE_ALPHA_REPETITION_COUNT,
             maximum_fiat_shamir_candidate_draws_per_output:
                 PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT,
         }
@@ -222,7 +224,8 @@ impl ProofFieldSchedule {
             || self.deep_point_count == 0
             || self.final_polynomial_degree_bound_exclusive <= 1
             || self.unique_query_count == 0
-            || self.non_native_modular_identity_challenge_count == 0
+            || self.non_native_theta_repetition_count == 0
+            || self.non_native_alpha_repetition_count == 0
             || self.maximum_fiat_shamir_candidate_draws_per_output == 0
         {
             return Err(ProofProfileError::InvalidSchedule);
@@ -234,7 +237,7 @@ impl ProofFieldSchedule {
     fn canonical_tuple(&self) -> CanonicalTuple {
         CanonicalTuple::new(
             PROOF_FIELD_SCHEDULE_SCHEMA_IDENTIFIER,
-            SCHEMA_VERSION,
+            PROOF_FIELD_SCHEDULE_SCHEMA_VERSION,
             vec![
                 CanonicalItem::unsigned16(self.proof_field_index),
                 CanonicalItem::unsigned32(self.evaluation_blowup_factor),
@@ -242,7 +245,8 @@ impl ProofFieldSchedule {
                 CanonicalItem::unsigned16(self.deep_point_count),
                 CanonicalItem::unsigned32(self.final_polynomial_degree_bound_exclusive),
                 CanonicalItem::unsigned32(self.unique_query_count),
-                CanonicalItem::unsigned16(self.non_native_modular_identity_challenge_count),
+                CanonicalItem::unsigned16(self.non_native_theta_repetition_count),
+                CanonicalItem::unsigned16(self.non_native_alpha_repetition_count),
                 CanonicalItem::unsigned32(self.maximum_fiat_shamir_candidate_draws_per_output),
             ],
         )
@@ -259,8 +263,8 @@ impl ProofFieldSchedule {
             && context.final_polynomial_degree_bound_exclusive
                 == self.final_polynomial_degree_bound_exclusive
             && context.unique_query_count == self.unique_query_count
-            && context.non_native_modular_identity_challenge_count
-                == self.non_native_modular_identity_challenge_count
+            && context.non_native_theta_repetition_count == self.non_native_theta_repetition_count
+            && context.non_native_alpha_repetition_count == self.non_native_alpha_repetition_count
             && context.maximum_fiat_shamir_candidate_draws_per_output
                 == self.maximum_fiat_shamir_candidate_draws_per_output
     }
@@ -502,63 +506,28 @@ impl FirstProfileRootTopology {
 
     fn selected_evaluator_key_entries_by_top_count()
     -> Result<Vec<Vec<EvaluatorKeyAggregateEntryTopology>>, ProofProfileError> {
-        let evaluator_candidate = EvaluatorCandidateInput::implemented()
-            .map_err(|_| ProofProfileError::InvalidRootTopology)?;
-        let key_positions = selected_evaluator_program_set()
-            .and_then(|program| program.key_positions())
-            .map_err(|_| ProofProfileError::InvalidRootTopology)?;
-        if key_positions.relinearization_catalog_levels()
-            != evaluator_candidate.relinearization_levels
-            || key_positions.galois_catalog_positions().len()
-                != evaluator_candidate.galois_key_schedule.len()
-            || key_positions
-                .galois_catalog_positions()
-                .iter()
-                .zip(&evaluator_candidate.galois_key_schedule)
-                .any(|(position, expected)| {
-                    (position.galois_element(), position.catalog_level()) != *expected
-                })
-        {
-            return Err(ProofProfileError::InvalidRootTopology);
-        }
-        key_positions
-            .streams()
-            .iter()
-            .map(|stream| {
-                let mut entries = stream
-                    .relinearization_catalog_levels()
-                    .iter()
-                    .map(|level| {
-                        let schedule_position = key_positions
-                            .relinearization_catalog_levels()
-                            .binary_search(level)
-                            .map_err(|_| ProofProfileError::InvalidRootTopology)?;
-                        Ok(EvaluatorKeyAggregateEntryTopology {
-                            source_kind: EvaluatorKeyShareSourceKind::Relinearization,
-                            producer_schedule_position: u32::try_from(schedule_position)
-                                .map_err(|_| ProofProfileError::CountOverflow)?,
-                            producer_output_ordinal: 0,
-                        })
-                    })
-                    .collect::<Result<Vec<_>, ProofProfileError>>()?;
-                entries.extend(
-                    stream
-                        .galois_catalog_positions()
-                        .iter()
-                        .map(|position| {
-                            let schedule_position = key_positions
-                                .galois_catalog_positions()
-                                .binary_search(position)
-                                .map_err(|_| ProofProfileError::InvalidRootTopology)?;
-                            Ok(EvaluatorKeyAggregateEntryTopology {
+        (1..=FOUNDATION_PROFILE.option_count)
+            .map(|top_count| {
+                let entries = selected_evaluator_entry_positions(top_count)
+                    .map_err(|_| ProofProfileError::InvalidRootTopology)?
+                    .into_iter()
+                    .map(|position| match position.key_kind() {
+                        SelectedEvaluatorEntryKind::Relinearization { .. } => {
+                            EvaluatorKeyAggregateEntryTopology {
+                                source_kind: EvaluatorKeyShareSourceKind::Relinearization,
+                                producer_schedule_position: position.schedule_position(),
+                                producer_output_ordinal: 0,
+                            }
+                        }
+                        SelectedEvaluatorEntryKind::Galois { .. } => {
+                            EvaluatorKeyAggregateEntryTopology {
                                 source_kind: EvaluatorKeyShareSourceKind::Galois,
                                 producer_schedule_position: 0,
-                                producer_output_ordinal: u32::try_from(schedule_position)
-                                    .map_err(|_| ProofProfileError::CountOverflow)?,
-                            })
-                        })
-                        .collect::<Result<Vec<_>, ProofProfileError>>()?,
-                );
+                                producer_output_ordinal: position.schedule_position(),
+                            }
+                        }
+                    })
+                    .collect::<Vec<_>>();
                 Ok(entries)
             })
             .collect()
@@ -1019,6 +988,8 @@ mod canonical_profile_artifact {
 
     fn root_shape(
         variant: &super::RelationPlanVariant,
+        application_statement_schema_identifier: u16,
+        construction_kind: RelationRootConstructionKind,
         ordered_column_ordinals: &[u32],
     ) -> Result<RelationRootShape, ProofProfileError> {
         let ordered_columns = ordered_column_ordinals
@@ -1042,11 +1013,57 @@ mod canonical_profile_artifact {
         if ordered_columns.is_empty() {
             return Err(ProofProfileError::IncompatibleRoot);
         }
+        let trace_domain_size = bound_root_source_trace_domain_size(
+            application_statement_schema_identifier,
+            construction_kind,
+            variant.trace_domain_size(),
+            variant.evaluation_domain_size(),
+        )?;
         Ok(RelationRootShape {
-            trace_domain_size: variant.trace_domain_size(),
+            trace_domain_size,
             evaluation_domain_size: variant.evaluation_domain_size(),
             ordered_columns,
         })
+    }
+
+    fn bound_root_source_trace_domain_size(
+        application_statement_schema_identifier: u16,
+        construction_kind: RelationRootConstructionKind,
+        relation_trace_domain_size: u64,
+        evaluation_domain_size: u64,
+    ) -> Result<u64, ProofProfileError> {
+        if construction_kind == RelationRootConstructionKind::SetupPolynomial {
+            return Ok(relation_trace_domain_size);
+        }
+        let committed_material_profile =
+            super::super::selected_profile::selected_committed_material_profile()?;
+        let physical_trace_domain_size =
+            u64::try_from(committed_material_profile.trace_domain_size())
+                .map_err(|_| ProofProfileError::CountOverflow)?;
+        let committed_material_evaluation_domain_size =
+            u64::try_from(committed_material_profile.evaluation_domain_size())
+                .map_err(|_| ProofProfileError::CountOverflow)?;
+        let expected_relation_trace_domain_size = match application_statement_schema_identifier {
+            ProofFamilies::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER
+            | ProofFamilies::AGGREGATE_THRESHOLD_SHARE_STATEMENT_SCHEMA_IDENTIFIER => {
+                physical_trace_domain_size
+                    .checked_mul(
+                        super::super::relation_plan::COMMITTED_MATERIAL_TRACE_PACKING_FACTOR,
+                    )
+                    .ok_or(ProofProfileError::CountOverflow)?
+            }
+            ProofFamilies::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER
+            | ProofFamilies::TARGET_SHARE_PROOF_STATEMENT_SCHEMA_IDENTIFIER => {
+                physical_trace_domain_size
+            }
+            _ => return Err(ProofProfileError::InvalidRootEndpoint),
+        };
+        if relation_trace_domain_size != expected_relation_trace_domain_size
+            || evaluation_domain_size != committed_material_evaluation_domain_size
+        {
+            return Err(ProofProfileError::IncompatibleRoot);
+        }
+        Ok(physical_trace_domain_size)
     }
 
     fn ordered_bound_root_slots(
@@ -1105,7 +1122,12 @@ mod canonical_profile_artifact {
                     construction_kind,
                     root_use,
                     ordered_column_ordinals: ordered_column_ordinals.clone(),
-                    shape: root_shape(variant, ordered_column_ordinals)?,
+                    shape: root_shape(
+                        variant,
+                        application_statement_schema_identifier,
+                        construction_kind,
+                        ordered_column_ordinals,
+                    )?,
                 })
             })
             .collect()
@@ -2427,6 +2449,68 @@ mod canonical_profile_artifact {
                 ProofFamilyProfile::selected(0x9999),
                 Err(ProofProfileError::UnsupportedFamily),
             );
+        }
+
+        #[test]
+        fn committed_material_root_shape_preserves_the_physical_trace_domain() {
+            let committed_material_profile =
+                super::super::super::selected_profile::selected_committed_material_profile()
+                    .expect("selected committed-material profile");
+            let physical_trace_domain_size =
+                u64::try_from(committed_material_profile.trace_domain_size())
+                    .expect("physical trace domain fits u64");
+            let evaluation_domain_size =
+                u64::try_from(committed_material_profile.evaluation_domain_size())
+                    .expect("evaluation domain fits u64");
+            let packed_trace_domain_size = physical_trace_domain_size
+                * super::super::super::relation_plan::COMMITTED_MATERIAL_TRACE_PACKING_FACTOR;
+
+            for family in [
+                ProofFamilies::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER,
+                ProofFamilies::AGGREGATE_THRESHOLD_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+            ] {
+                assert_eq!(
+                    bound_root_source_trace_domain_size(
+                        family,
+                        RelationRootConstructionKind::CommittedMaterial,
+                        packed_trace_domain_size,
+                        evaluation_domain_size,
+                    ),
+                    Ok(physical_trace_domain_size),
+                );
+                assert_eq!(
+                    bound_root_source_trace_domain_size(
+                        family,
+                        RelationRootConstructionKind::CommittedMaterial,
+                        physical_trace_domain_size,
+                        evaluation_domain_size,
+                    ),
+                    Err(ProofProfileError::IncompatibleRoot),
+                );
+            }
+            for family in [
+                ProofFamilies::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER,
+                ProofFamilies::TARGET_SHARE_PROOF_STATEMENT_SCHEMA_IDENTIFIER,
+            ] {
+                assert_eq!(
+                    bound_root_source_trace_domain_size(
+                        family,
+                        RelationRootConstructionKind::CommittedMaterial,
+                        physical_trace_domain_size,
+                        evaluation_domain_size,
+                    ),
+                    Ok(physical_trace_domain_size),
+                );
+                assert_eq!(
+                    bound_root_source_trace_domain_size(
+                        family,
+                        RelationRootConstructionKind::CommittedMaterial,
+                        packed_trace_domain_size,
+                        evaluation_domain_size,
+                    ),
+                    Err(ProofProfileError::IncompatibleRoot),
+                );
+            }
         }
 
         #[test]

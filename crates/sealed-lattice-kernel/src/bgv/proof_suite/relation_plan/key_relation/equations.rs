@@ -135,7 +135,7 @@ impl<'context> KeyRelationPlanBuilder<'context> {
         if challenge_modulus_reference != SuiteModulusReference::data(0) {
             return Err(RelationPlanError::NonCanonicalOrder);
         }
-        for challenge_ordinal in 0..self.context.non_native_modular_identity_challenge_count {
+        for challenge_ordinal in 0..self.context.non_native_theta_repetition_count {
             let descriptor = RelationIntegerLiftNegacyclicAutomorphismPermutationDescriptor {
                 galois_element,
                 mapping_verifier_source_ordinal: mapping_source_ordinal,
@@ -581,8 +581,9 @@ impl<'context> KeyRelationPlanBuilder<'context> {
         Ok(TargetCenteredVector {
             value: ShiftedSmallVector {
                 coefficients: SplitIntegerVector { halves },
-                offset,
+                offset: 0,
             },
+            trit_encoding_offset: offset,
             trits_by_half: trits_by_half
                 .try_into()
                 .map_err(|_| RelationPlanError::CountOverflow)?,

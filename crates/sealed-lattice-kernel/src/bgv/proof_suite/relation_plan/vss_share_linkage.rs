@@ -127,7 +127,7 @@ pub(crate) fn compile_vss_share_linkage_relation_plan(
                 residuals.push(builder.integer_residual(terms)?);
             }
         }
-        for challenge_ordinal in 0..check_context.non_native_modular_identity_challenge_count {
+        for challenge_ordinal in 0..check_context.non_native_alpha_repetition_count {
             for (physical_half_ordinal, residuals) in residuals_by_half.iter().enumerate() {
                 builder.add_randomized_residual_batch(
                     sharing_limb_ordinal,

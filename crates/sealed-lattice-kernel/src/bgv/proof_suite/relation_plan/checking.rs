@@ -77,7 +77,8 @@ impl<'context> RelationPlanChecker<'context> {
             || self.context.fri_fold_count == 0
             || self.context.final_polynomial_degree_bound_exclusive == 0
             || self.context.unique_query_count == 0
-            || self.context.non_native_modular_identity_challenge_count == 0
+            || self.context.non_native_theta_repetition_count == 0
+            || self.context.non_native_alpha_repetition_count == 0
             || self.context.maximum_fiat_shamir_candidate_draws_per_output == 0
         {
             return Err(RelationPlanError::InvalidDomain);

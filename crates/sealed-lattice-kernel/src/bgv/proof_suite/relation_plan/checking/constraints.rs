@@ -328,7 +328,7 @@ impl RelationPlanChecker<'_> {
             .iter()
             .copied()
             .flat_map(|modulus_reference| {
-                (0..self.context.non_native_modular_identity_challenge_count).flat_map(
+                (0..self.context.non_native_alpha_repetition_count).flat_map(
                     move |challenge_ordinal| {
                         (0_u16..2).map(move |batch_ordinal| {
                             (modulus_reference, challenge_ordinal, batch_ordinal)
@@ -350,7 +350,10 @@ impl RelationPlanChecker<'_> {
                     .map_err(|_| RelationPlanError::MissingModulus)?,
             )
             .map_err(|_| RelationPlanError::CountOverflow)?;
-            if batch.challenge_ordinal >= self.context.non_native_modular_identity_challenge_count
+            let modulus = self.context.resolved_modulus(batch.modulus_reference)?;
+            let alpha_bad_polynomial_degree = batch.alpha_bad_polynomial_degree()?;
+            if modulus <= alpha_bad_polynomial_degree
+                || batch.challenge_ordinal >= self.context.non_native_alpha_repetition_count
                 || batch.batch_ordinal >= 2
                 || batch.ordered_residuals.is_empty()
                 || !seen_batch_coordinates.insert((

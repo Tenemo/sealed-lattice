@@ -35,8 +35,8 @@ use super::super::super::{
     MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH, PROOF_BASE_FIELD_MODULUS,
     PROOF_CHALLENGE_EXTENSION_DEGREE, PROOF_DEEP_POINT_COUNT, PROOF_EVALUATION_COSET_OFFSET,
     PROOF_FINAL_POLYNOMIAL_DEGREE_BOUND_EXCLUSIVE,
-    PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT,
-    PROOF_NON_NATIVE_IDENTITY_CHALLENGE_COUNT, PROOF_UNIQUE_QUERY_COUNT,
+    PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT, PROOF_NON_NATIVE_ALPHA_REPETITION_COUNT,
+    PROOF_NON_NATIVE_THETA_REPETITION_COUNT, PROOF_UNIQUE_QUERY_COUNT,
     PollableCommonProofVerificationInput, PreparedCommonProofGeneration,
     PreparedCommonProofVerification, ProofBaseFieldElement, ProofBodyError,
     ProofChallengeExtensionElement, ProofDecodeError, ProofEvaluationDomain, ProofExternalMemory,
@@ -64,8 +64,8 @@ use super::super::SCHEMA_VERSION;
 const APPLICATION_STATEMENT_SCHEMA_IDENTIFIER: u16 = 0x1213;
 const RKG_ROUND_ONE_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER: u16 = 0x1215;
 const EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER: u16 = 0x1218;
-const PUBLIC_AGGREGATE_TEST_EVALUATION_DOMAIN_SIZE: u64 = 2_048;
-const PUBLIC_AGGREGATE_TEST_EVALUATION_BLOWUP_FACTOR: u32 = 4;
+const PUBLIC_AGGREGATE_TEST_EVALUATION_DOMAIN_SIZE: u64 = 4_096;
+const PUBLIC_AGGREGATE_TEST_EVALUATION_BLOWUP_FACTOR: u32 = 8;
 const PUBLIC_AGGREGATE_TEST_RING_DEGREE: u64 = 4;
 const PUBLIC_AGGREGATE_TEST_COLUMN_DEGREE_BOUND_EXCLUSIVE: usize =
     PUBLIC_AGGREGATE_TEST_RING_DEGREE as usize / 2;
@@ -73,6 +73,23 @@ const PUBLIC_AGGREGATE_TEST_UNIQUE_QUERY_COUNT: u32 = PROOF_UNIQUE_QUERY_COUNT;
 const OPENING_DEGREE_BOUND_EXCLUSIVE: u64 = 258;
 const MAXIMUM_PROOF_BYTE_LENGTH: usize = 16 * 1_024 * 1_024;
 const MAXIMUM_EXTERNAL_MEMORY_BYTE_LENGTH: usize = 64 * 1_024 * 1_024;
+
+fn maximum_length_test_proof_stream_descriptor(
+    ordered_chunk_digest_bytes: [u8; Hash512::BYTE_LENGTH],
+    full_object_digest_bytes: [u8; Hash512::BYTE_LENGTH],
+) -> StreamDescriptor {
+    let proof_byte_length = super::super::super::MAXIMUM_COMMON_PROOF_BYTE_LENGTH;
+    let proof_chunk_count = proof_byte_length.div_ceil(FOUNDATION_PROFILE.stream_chunk_byte_length);
+    StreamDescriptor {
+        total_byte_length: proof_byte_length as u64,
+        ordered_chunk_digests: vec![
+            Hash512::from_bytes(ordered_chunk_digest_bytes);
+            proof_chunk_count
+        ]
+        .into(),
+        full_object_digest: Hash512::from_bytes(full_object_digest_bytes),
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum TestExternalMemoryError {
@@ -585,7 +602,8 @@ fn relation_context() -> RelationPlanCheckContext {
         fri_fold_count: 1,
         final_polynomial_degree_bound_exclusive: PROOF_FINAL_POLYNOMIAL_DEGREE_BOUND_EXCLUSIVE,
         unique_query_count: PUBLIC_AGGREGATE_TEST_UNIQUE_QUERY_COUNT,
-        non_native_modular_identity_challenge_count: PROOF_NON_NATIVE_IDENTITY_CHALLENGE_COUNT,
+        non_native_theta_repetition_count: PROOF_NON_NATIVE_THETA_REPETITION_COUNT,
+        non_native_alpha_repetition_count: PROOF_NON_NATIVE_ALPHA_REPETITION_COUNT,
         maximum_fiat_shamir_candidate_draws_per_output:
             PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT,
         resolved_moduli: vec![ResolvedSuiteModulus::new(
@@ -1041,11 +1059,9 @@ fn prepared_verification_worker_fixture() -> PreparedCommonProofVerification {
     .expect("the fixture statement has one canonical proof header")
     .into_bytes();
     let stream_domain = CanonicalStreamDomain::CollectivePublicKeyAggregateProof;
-    let proof_stream_descriptor = StreamDescriptor {
-        total_byte_length: super::super::super::MAXIMUM_COMMON_PROOF_BYTE_LENGTH as u64,
-        ordered_chunk_digests: vec![Hash512::from_bytes([0x45; 64]); 5].into(),
-        full_object_digest: Hash512::from_bytes([0x44; 64]),
-    };
+    let proof_byte_length = super::super::super::MAXIMUM_COMMON_PROOF_BYTE_LENGTH;
+    let proof_stream_descriptor =
+        maximum_length_test_proof_stream_descriptor([0x45; 64], [0x44; 64]);
     let proof_application = CommonProofApplicationBinding::new(
         [0x41; 64],
         [0x42; 64],
@@ -1053,7 +1069,7 @@ fn prepared_verification_worker_fixture() -> PreparedCommonProofVerification {
         proof_header_hash,
         stream_domain,
         proof_stream_descriptor.full_object_digest.into_bytes(),
-        super::super::super::MAXIMUM_COMMON_PROOF_BYTE_LENGTH as u64,
+        proof_byte_length as u64,
         PUBLIC_AGGREGATE_TEST_UNIQUE_QUERY_COUNT,
     )
     .expect("the fixture application fits the worker safety bound");

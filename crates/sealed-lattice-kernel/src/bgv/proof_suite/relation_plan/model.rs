@@ -1235,13 +1235,20 @@ impl RelationChallengeDescriptor {
             return Err(RelationPlanError::InvalidChallengeCatalog);
         }
         let resolved_modulus = self.modulus_selector().resolve(variant, context)?;
+        let non_native_repetition_count = match self.role {
+            RelationChallengeRole::NonNativeTheta => {
+                Some(context.non_native_theta_repetition_count)
+            }
+            RelationChallengeRole::NonNativeAlpha => {
+                Some(context.non_native_alpha_repetition_count)
+            }
+            _ => None,
+        };
         if resolved_modulus < 2
-            || matches!(
-                self.role,
-                RelationChallengeRole::NonNativeTheta | RelationChallengeRole::NonNativeAlpha
-            ) && BigUint::from(resolved_modulus).pow(u32::from(
-                context.non_native_modular_identity_challenge_count,
-            )) >= (BigUint::one() << 512_usize)
+            || non_native_repetition_count.is_some_and(|repetition_count| {
+                BigUint::from(resolved_modulus).pow(u32::from(repetition_count))
+                    >= (BigUint::one() << 512_usize)
+            })
         {
             return Err(RelationPlanError::InvalidChallengeCatalog);
         }
@@ -1265,17 +1272,9 @@ impl RelationChallengeDescriptor {
         };
         let expected_sampling = match self.role {
             RelationChallengeRole::NonNativeTheta => {
-                let modulus_ordinal = self
-                    .role_coordinates
-                    .first()
-                    .copied()
-                    .and_then(|ordinal| u16::try_from(ordinal).ok())
-                    .ok_or(RelationPlanError::InvalidChallengeCatalog)?;
                 RelationChallengeSampling::ProductResidueVectorCoordinate {
-                    modulus_selector: RelationChallengeModulusSelector::NonNativeModulusOrdinal(
-                        modulus_ordinal,
-                    ),
-                    coordinate_count: context.non_native_modular_identity_challenge_count,
+                    modulus_selector: RelationChallengeModulusSelector::BaseField,
+                    coordinate_count: context.non_native_theta_repetition_count,
                     maximum_candidate_draws_per_output: context
                         .maximum_fiat_shamir_candidate_draws_per_output,
                 }
@@ -1291,7 +1290,7 @@ impl RelationChallengeDescriptor {
                     modulus_selector: RelationChallengeModulusSelector::NonNativeModulusOrdinal(
                         modulus_ordinal,
                     ),
-                    coordinate_count: context.non_native_modular_identity_challenge_count,
+                    coordinate_count: context.non_native_alpha_repetition_count,
                     maximum_candidate_draws_per_output: context
                         .maximum_fiat_shamir_candidate_draws_per_output,
                 }
@@ -1318,15 +1317,22 @@ impl RelationChallengeDescriptor {
                     .maximum_fiat_shamir_candidate_draws_per_output,
             },
         };
+        let arithmetic_modulus_ordinal_is_valid = match self.role {
+            RelationChallengeRole::NonNativeTheta | RelationChallengeRole::NonNativeAlpha => self
+                .role_coordinates
+                .first()
+                .copied()
+                .and_then(|ordinal| usize::try_from(ordinal).ok())
+                .is_some_and(|ordinal| ordinal < variant.ordered_non_native_moduli.len()),
+            _ => true,
+        };
         let coordinates_and_count_are_valid = match self.role {
             RelationChallengeRole::NonNativeTheta => {
-                self.role_coordinates[1]
-                    < u64::from(context.non_native_modular_identity_challenge_count)
+                self.role_coordinates[1] < u64::from(context.non_native_theta_repetition_count)
                     && self.value_count == 1
             }
             RelationChallengeRole::NonNativeAlpha => {
-                self.role_coordinates[1]
-                    < u64::from(context.non_native_modular_identity_challenge_count)
+                self.role_coordinates[1] < u64::from(context.non_native_alpha_repetition_count)
                     && self.value_count == 1
             }
             RelationChallengeRole::ConstraintComposition => {
@@ -1351,6 +1357,7 @@ impl RelationChallengeDescriptor {
         };
         if self.epoch != expected_epoch
             || self.sampling != expected_sampling
+            || !arithmetic_modulus_ordinal_is_valid
             || !coordinates_and_count_are_valid
             || matches!(self.role, RelationChallengeRole::QueryPosition)
                 && u64::from(self.value_count) > resolved_modulus

@@ -1,5 +1,5 @@
 use super::{
-    ProofChallengeExtensionElement,
+    PROOF_BASE_FIELD_MODULUS, ProofChallengeExtensionElement,
     merkle::{leaf_hash, node_hash},
     transcript::{
         CommonProofApplicationChallengeGroup, CommonProofChallenge, CommonProofPrivacyMode,
@@ -20,8 +20,8 @@ fn common_proof_schedule(privacy_mode: CommonProofPrivacyMode) -> CommonProofTra
         vec![
             CommonProofApplicationChallengeGroup::new(
                 CommonProofChallenge::Theta { modulus_ordinal: 0 },
-                65_537,
-                3,
+                PROOF_BASE_FIELD_MODULUS,
+                2,
             )
             .expect("theta descriptor is valid"),
             CommonProofApplicationChallengeGroup::new(
@@ -77,9 +77,11 @@ fn common_proof_transcript_enforces_the_exact_round_chain() {
     let alpha = transcript
         .sample_application_challenge_group(CommonProofChallenge::Alpha { modulus_ordinal: 0 })
         .expect("alpha derives");
-    assert_eq!(theta.len(), 3);
+    assert_eq!(theta.len(), 2);
     assert_eq!(alpha.len(), 3);
-    assert!(theta.iter().chain(&alpha).all(|value| *value < 65_537));
+    assert!(theta.iter().all(|value| *value < PROOF_BASE_FIELD_MODULUS));
+    assert!(theta.iter().any(|value| *value >= 65_537));
+    assert!(alpha.iter().all(|value| *value < 65_537));
     transcript
         .absorb_auxiliary_root(1, [0x03; 64])
         .expect("auxiliary root follows application challenges");

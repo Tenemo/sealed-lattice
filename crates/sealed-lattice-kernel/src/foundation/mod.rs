@@ -161,7 +161,6 @@ pub use schemas::{
     SIGNED_CARRIER_SCHEMA_IDENTIFIER, STREAM_DESCRIPTOR_SCHEMA_IDENTIFIER, SignedCarrier,
     StreamDescriptor, derive_foundation_roster_parameters, signature_message,
 };
-#[cfg(test)]
 pub(crate) use selected_suite::{
     SELECTED_MAXIMUM_BALLOT_ATTEMPTS_PER_PARTICIPANT,
     SELECTED_MAXIMUM_CANDIDATE_PACKAGES_PER_ACTION,

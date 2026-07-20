@@ -13,8 +13,9 @@ use super::{
     catalog_root, decode_application_statement, decode_proof_body_prefix_owned,
     decode_proof_query_section_header_at, decode_proof_query_tree_at, derive_relation_tree_inputs,
     proof_body_prefix_byte_length, proof_query_tree_byte_length,
-    validate_evaluator_auxiliary_root_linkage, verified_application_statement_hash,
-    verified_proof_header_hash, verify_deep_composition_with_verified_sequences,
+    sample_relation_application_challenges, validate_evaluator_auxiliary_root_linkage,
+    verified_application_statement_hash, verified_proof_header_hash,
+    verify_deep_composition_with_verified_sequences,
 };
 
 /// Inputs that have already crossed their family-specific trust boundaries.
@@ -463,6 +464,9 @@ impl CommonProofVerificationStateMachine {
                 count.checked_add(usize::from(group.coordinate_count()))
             })
             .ok_or(CommonProofVerifierError::InvalidTreeLayout)?;
+        let composition_challenge_count =
+            usize::try_from(self.transcript_schedule.composition_challenge_count())
+                .map_err(|_| CommonProofVerifierError::InvalidTreeLayout)?;
         let prefix_payload_byte_length = [
             verifier_vector_payload_byte_length::<[u8; 64]>(catalog_entry_count)?,
             verifier_vector_payload_byte_length::<super::ProofChallengeExtensionElement>(
@@ -479,7 +483,7 @@ impl CommonProofVerificationStateMachine {
                 application_challenge_count,
             )?,
             verifier_vector_payload_byte_length::<super::ProofChallengeExtensionElement>(
-                usize::from(self.transcript_schedule.composition_challenge_count()),
+                composition_challenge_count,
             )?,
             verifier_vector_payload_byte_length::<super::ProofChallengeExtensionElement>(
                 usize::from(self.transcript_schedule.deep_point_count()),
@@ -740,36 +744,8 @@ impl CommonProofVerificationStateMachine {
             self.transcript_schedule.ordered_base_tree_ordinals(),
         )?;
 
-        let mut application_challenges = Vec::new();
-        application_challenges
-            .try_reserve_exact(
-                self.transcript_schedule
-                    .ordered_application_challenge_groups()
-                    .iter()
-                    .try_fold(0_usize, |count, group| {
-                        count.checked_add(usize::from(group.coordinate_count()))
-                    })
-                    .ok_or(CommonProofVerifierError::InvalidTreeLayout)?,
-            )
-            .map_err(|_| CommonProofVerifierError::InvalidTreeLayout)?;
-        for scheduled_group in self
-            .transcript_schedule
-            .ordered_application_challenge_groups()
-        {
-            let challenge = scheduled_group.challenge();
-            let values = transcript.sample_application_challenge_group(challenge)?;
-            if values.len() != usize::from(scheduled_group.coordinate_count()) {
-                return Err(CommonProofVerifierError::InvalidTreeLayout);
-            }
-            for (repetition_ordinal, value) in values.into_iter().enumerate() {
-                application_challenges.push(RelationApplicationChallengeAssignment::new(
-                    challenge,
-                    u16::try_from(repetition_ordinal)
-                        .map_err(|_| CommonProofVerifierError::InvalidTreeLayout)?,
-                    value,
-                )?);
-            }
-        }
+        let application_challenges =
+            sample_relation_application_challenges(&mut transcript, &self.transcript_schedule)?;
         absorb_relation_roots(
             &mut transcript,
             self.layout.catalog(),
@@ -779,10 +755,11 @@ impl CommonProofVerificationStateMachine {
         )?;
 
         let mut composition_challenges = Vec::new();
+        let composition_challenge_count =
+            usize::try_from(self.transcript_schedule.composition_challenge_count())
+                .map_err(|_| CommonProofVerifierError::InvalidTreeLayout)?;
         composition_challenges
-            .try_reserve_exact(usize::from(
-                self.transcript_schedule.composition_challenge_count(),
-            ))
+            .try_reserve_exact(composition_challenge_count)
             .map_err(|_| CommonProofVerifierError::InvalidTreeLayout)?;
         for constraint_ordinal in 0..self.transcript_schedule.composition_challenge_count() {
             composition_challenges

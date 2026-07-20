@@ -10,7 +10,9 @@ use super::super::{
         RelationIntegerLiftLinearTermDescriptor,
         RelationIntegerLiftReversedColumnBindingDescriptor,
     },
-    model::{RelationPlanError, SuiteModulusReference},
+    model::{
+        RelationColumnOrigin, RelationPlanError, RelationVerifierSource, SuiteModulusReference,
+    },
 };
 use super::{
     AnchorEquationInputs, EXACT_INTEGER_LIFT_RADIX, KeyRelationPlanBuilder,
@@ -251,6 +253,28 @@ impl<'context> KeyRelationPlanBuilder<'context> {
             .ordered_columns
             .get(column_ordinal as usize)
             .ok_or(RelationPlanError::InvalidColumn)?;
+        if let RelationColumnOrigin::VerifierSequence {
+            verifier_source_ordinal,
+            ..
+        } = &column.origin
+        {
+            let verifier_source = self
+                .ordered_verifier_sources
+                .get(
+                    usize::try_from(*verifier_source_ordinal)
+                        .map_err(|_| RelationPlanError::CountOverflow)?,
+                )
+                .ok_or(RelationPlanError::InvalidSource)?;
+            if let RelationVerifierSource::RadixDecomposition { radix, .. } = verifier_source {
+                if column.canonical_residue_modulus.is_some() || *radix < 2 {
+                    return Err(RelationPlanError::InvalidSemanticCell);
+                }
+                return SignedIntegerInterval::from_bigints(
+                    BigInt::zero(),
+                    BigInt::from(*radix - 1),
+                );
+            }
+        }
         let modulus_reference = column
             .canonical_residue_modulus
             .ok_or(RelationPlanError::InvalidSemanticCell)?;
@@ -458,7 +482,7 @@ impl<'context> KeyRelationPlanBuilder<'context> {
         quotient_column_ordinal: u32,
         mut ordered_linear_terms: Vec<RelationIntegerLiftLinearTermDescriptor>,
         ordered_full_ring_negacyclic_products: Vec<PendingFullRingNegacyclicProduct>,
-    ) -> Result<(), RelationPlanError> {
+    ) -> Result<Vec<u32>, RelationPlanError> {
         ordered_linear_terms.push(RelationIntegerLiftLinearTermDescriptor {
             negative: true,
             column_ordinal: quotient_column_ordinal,
@@ -546,11 +570,15 @@ impl<'context> KeyRelationPlanBuilder<'context> {
         if existing_carry_columns.is_none()
             && self
                 .exact_carry_columns_by_component
-                .insert(exact_carry_component_key, newly_allocated_carry_columns)
+                .insert(
+                    exact_carry_component_key,
+                    newly_allocated_carry_columns.clone(),
+                )
                 .is_some()
         {
             return Err(RelationPlanError::DuplicateItem);
         }
+        let exact_carry_columns = existing_carry_columns.unwrap_or(newly_allocated_carry_columns);
         let mut components = Vec::with_capacity(intervals.len());
         for limb in 0..intervals.len() {
             sort_canonical_items(&mut expanded_linear_terms[limb], |term| {
@@ -574,7 +602,7 @@ impl<'context> KeyRelationPlanBuilder<'context> {
             .or_default()
             .components
             .extend(components);
-        Ok(())
+        Ok(exact_carry_columns)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1050,8 +1078,16 @@ impl<'context> KeyRelationPlanBuilder<'context> {
             sort_canonical_items(&mut ordered_reversed_column_bindings, |binding| {
                 binding.canonical_bytes()
             })?;
-            let ordered_negacyclic_automorphism_permutations =
+            let mut ordered_negacyclic_automorphism_permutations =
                 pending_batch.negacyclic_automorphism_permutations;
+            ordered_negacyclic_automorphism_permutations
+                .sort_unstable_by_key(|permutation| permutation.galois_element);
+            if ordered_negacyclic_automorphism_permutations
+                .windows(2)
+                .any(|pair| pair[0].galois_element == pair[1].galois_element)
+            {
+                return Err(RelationPlanError::DuplicateItem);
+            }
             let mut ordered_components = pending_batch.components;
             sort_canonical_items(&mut ordered_components, |component| {
                 component.canonical_bytes()

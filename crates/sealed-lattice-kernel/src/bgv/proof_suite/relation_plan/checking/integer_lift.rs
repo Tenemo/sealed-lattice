@@ -14,6 +14,7 @@ use super::super::{
         RelationIntegerLiftFullRingNegacyclicProductDescriptor,
         RelationIntegerLiftLinearTermDescriptor,
         RelationIntegerLiftReversedColumnBindingDescriptor,
+        theta_sampling_field_exceeds_bad_polynomial_degree,
     },
     layout::RelationPlanVariant,
     model::{
@@ -57,7 +58,7 @@ impl RelationPlanChecker<'_> {
             .map(|cell| cell.column_ordinal)
             .collect::<BTreeSet<_>>();
         let expected_challenge_ordinals =
-            (0..self.context.non_native_modular_identity_challenge_count).collect::<BTreeSet<_>>();
+            (0..self.context.non_native_theta_repetition_count).collect::<BTreeSet<_>>();
         let mut challenge_ordinals_by_modulus =
             BTreeMap::<SuiteModulusReference, BTreeSet<u16>>::new();
         let mut descriptor_auxiliary_columns = BTreeSet::new();
@@ -105,10 +106,12 @@ impl RelationPlanChecker<'_> {
                     .map_err(|_| RelationPlanError::MissingModulus)?,
             )
             .map_err(|_| RelationPlanError::CountOverflow)?;
-            let modulus = self.context.resolved_modulus(batch.modulus_reference)?;
-            if modulus <= variant.trace_domain_size
-                || batch.challenge_ordinal
-                    >= self.context.non_native_modular_identity_challenge_count
+            let theta_bad_polynomial_degree =
+                batch.theta_bad_polynomial_degree(variant.trace_domain_size)?;
+            if !theta_sampling_field_exceeds_bad_polynomial_degree(
+                self.context.base_field_modulus,
+                theta_bad_polynomial_degree,
+            ) || batch.challenge_ordinal >= self.context.non_native_theta_repetition_count
                 || batch.ordered_components.is_empty()
                 || !challenge_ordinals_by_modulus
                     .entry(batch.modulus_reference)
@@ -129,6 +132,7 @@ impl RelationPlanChecker<'_> {
                 return Err(RelationPlanError::NonCanonicalOrder);
             }
             let mut reversed_bindings_by_columns = BTreeMap::new();
+            let mut reversed_bindings_by_reversed_column = BTreeMap::new();
             for binding in &batch.ordered_reversed_column_bindings {
                 if binding.source_column_ordinal == binding.reversed_column_ordinal {
                     return Err(RelationPlanError::InvalidConstraint);
@@ -161,6 +165,9 @@ impl RelationPlanChecker<'_> {
                         binding,
                     )
                     .is_some()
+                    || reversed_bindings_by_reversed_column
+                        .insert(binding.reversed_column_ordinal, binding)
+                        .is_some()
                 {
                     return Err(RelationPlanError::DuplicateItem);
                 }
@@ -437,13 +444,35 @@ impl RelationPlanChecker<'_> {
                         &explicitly_certified_columns,
                         self.context,
                     )?;
-                    let multiplier_interval = integer_lift_column_interval(
-                        product.reversed_multiplier_column_ordinal,
-                        variant,
-                        semantic_bounds,
-                        &explicitly_certified_columns,
-                        self.context,
-                    )?;
+                    let multiplier_interval = if let Some(reversed_binding) =
+                        reversed_bindings_by_reversed_column
+                            .get(&product.reversed_multiplier_column_ordinal)
+                            .copied()
+                    {
+                        // The derived reversal target is intentionally unbounded. When the
+                        // reversal identity holds it permutes the source coefficients and
+                        // therefore inherits this interval; a false identity is already
+                        // covered by the batch's theta polynomial check.
+                        used_reversed_bindings.insert((
+                            reversed_binding.source_column_ordinal,
+                            reversed_binding.reversed_column_ordinal,
+                        ));
+                        integer_lift_column_interval(
+                            reversed_binding.source_column_ordinal,
+                            variant,
+                            semantic_bounds,
+                            &explicitly_certified_columns,
+                            self.context,
+                        )?
+                    } else {
+                        integer_lift_column_interval(
+                            product.reversed_multiplier_column_ordinal,
+                            variant,
+                            semantic_bounds,
+                            &explicitly_certified_columns,
+                            self.context,
+                        )?
+                    };
                     let shifted_multiplier = SignedIntegerInterval::from_bigints(
                         multiplier_interval.minimum - BigInt::from(product.multiplier_offset),
                         multiplier_interval.maximum - BigInt::from(product.multiplier_offset),
@@ -763,21 +792,23 @@ impl RelationPlanChecker<'_> {
         for (column_index, column) in variant.ordered_columns.iter().enumerate() {
             let column_ordinal =
                 u32::try_from(column_index).map_err(|_| RelationPlanError::CountOverflow)?;
-            let tree_role = tree_roles_by_column
-                .get(&column_ordinal)
-                .copied()
-                .ok_or(RelationPlanError::MissingRoot)?;
+            let tree_role = tree_roles_by_column.get(&column_ordinal).copied();
             match (tree_role, &column.origin) {
-                (Some(1), RelationColumnOrigin::Prover)
+                (None, RelationColumnOrigin::VerifierSequence { .. }) => {}
+                (None, _) => return Err(RelationPlanError::MissingRoot),
+                (Some(_), RelationColumnOrigin::VerifierSequence { .. }) => {
+                    return Err(RelationPlanError::InvalidConstraint);
+                }
+                (Some(Some(1)), RelationColumnOrigin::Prover)
                     if !semantic_prover_columns.contains(&column_ordinal)
                         && !phase_columns.derived_base_columns.contains(&column_ordinal) =>
                 {
                     return Err(RelationPlanError::InvalidConstraint);
                 }
-                (Some(2), RelationColumnOrigin::Prover) => {
+                (Some(Some(2)), RelationColumnOrigin::Prover) => {
                     observed_auxiliary_columns.insert(column_ordinal);
                 }
-                (Some(2), _) => return Err(RelationPlanError::InvalidConstraint),
+                (Some(Some(2)), _) => return Err(RelationPlanError::InvalidConstraint),
                 _ => {}
             }
         }

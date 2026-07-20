@@ -1605,7 +1605,9 @@ mod tests {
                     participant
                         .selected_target_aggregate_threshold_roots()?
                         .as_ref(),
-                    &[[1; 64], [2; 64], [3; 64], [4; 64], [5; 64], [6; 64],]
+                    &[
+                        [1; 64], [2; 64], [3; 64], [4; 64], [5; 64], [6; 64], [7; 64], [8; 64],
+                    ]
                 );
                 Ok((
                     authority.begin_collective_public_key_readback()?,

@@ -1108,10 +1108,20 @@ pub(super) fn evaluate_integer_interval(
                     .get(modulus_ordinal)
                     .copied()
                     .ok_or(RelationPlanError::InvalidChallengeCatalog)?;
-                let modulus = context.resolved_modulus(modulus_reference)?;
+                let challenge_maximum = match challenge_role {
+                    RelationChallengeRole::NonNativeTheta => context
+                        .base_field_modulus
+                        .checked_sub(1)
+                        .ok_or(RelationPlanError::InvalidChallengeCatalog)?,
+                    RelationChallengeRole::NonNativeAlpha => context
+                        .resolved_modulus(modulus_reference)?
+                        .checked_sub(1)
+                        .ok_or(RelationPlanError::InvalidChallengeCatalog)?,
+                    _ => return Err(RelationPlanError::InvalidChallengeCatalog),
+                };
                 stack.push(SignedIntegerInterval::from_bigints(
                     BigInt::zero(),
-                    BigInt::from(modulus - 1),
+                    BigInt::from(challenge_maximum),
                 )?);
             }
             RelationExpressionInstruction::EvaluationVariable

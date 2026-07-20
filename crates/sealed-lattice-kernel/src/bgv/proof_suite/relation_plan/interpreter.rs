@@ -135,22 +135,36 @@ impl CheckedRelationApplicationChallenges {
             .collect::<Vec<_>>();
         let mut sampled_coordinates = BTreeMap::new();
         for assignment in assignments {
-            let modulus_ordinal = match assignment.challenge {
-                CommonProofChallenge::Theta { modulus_ordinal }
-                | CommonProofChallenge::Alpha { modulus_ordinal } => modulus_ordinal,
+            let (modulus_ordinal, repetition_count, coordinate_modulus) = match assignment.challenge
+            {
+                CommonProofChallenge::Theta { modulus_ordinal } => (
+                    modulus_ordinal,
+                    context.non_native_theta_repetition_count,
+                    context.base_field_modulus,
+                ),
+                CommonProofChallenge::Alpha { modulus_ordinal } => {
+                    let modulus_reference = variant
+                        .ordered_non_native_moduli
+                        .get(usize::from(modulus_ordinal))
+                        .copied()
+                        .ok_or(RelationPlanError::InvalidChallengeCatalog)?;
+                    (
+                        modulus_ordinal,
+                        context.non_native_alpha_repetition_count,
+                        context.resolved_modulus(modulus_reference)?,
+                    )
+                }
                 _ => return Err(RelationPlanError::InvalidChallengeCatalog),
             };
-            if assignment.repetition_ordinal >= context.non_native_modular_identity_challenge_count
-            {
+            if assignment.repetition_ordinal >= repetition_count {
                 return Err(RelationPlanError::InvalidChallengeCatalog);
             }
-            let modulus_reference = variant
+            variant
                 .ordered_non_native_moduli
                 .get(usize::from(modulus_ordinal))
                 .copied()
                 .ok_or(RelationPlanError::InvalidChallengeCatalog)?;
-            let modulus = context.resolved_modulus(modulus_reference)?;
-            if assignment.value >= modulus
+            if assignment.value >= coordinate_modulus
                 || sampled_coordinates
                     .insert(
                         (assignment.challenge, assignment.repetition_ordinal),
@@ -194,7 +208,7 @@ impl CheckedRelationApplicationChallenges {
                 RelationChallengeRole::NonNativeAlpha => modular_power(
                     sampled,
                     descriptor.role_coordinates[2],
-                    context.base_field_modulus,
+                    sampled_coordinate_modulus,
                 ),
                 _ => return Err(RelationPlanError::InvalidChallengeCatalog),
             };
@@ -1212,18 +1226,58 @@ fn convolve_extension_coefficients(
 mod tests {
     use super::*;
     use crate::bgv::proof_suite::relation_plan::{
-        CommittedMaterialRelationPlanInput, RelationOpeningSourceClass, RelationPlanCheckContext,
-        RelationRadixConvolutionDescriptor, RelationRadixProductTermDescriptor,
-        RelationTreeDescriptor, ResolvedSuiteModulus, SuiteModulusReference,
-        compile_vss_share_linkage_relation_plan,
+        COMMITTED_MATERIAL_TRACE_PACKING_FACTOR, CommittedMaterialRelationPlanInput,
+        RelationOpeningSourceClass, RelationPlanCheckContext, RelationRadixConvolutionDescriptor,
+        RelationRadixProductTermDescriptor, RelationTreeDescriptor, ResolvedSuiteModulus,
+        SuiteModulusReference, compile_vss_share_linkage_relation_plan,
     };
     use crate::bgv::proof_suite::{
         PROOF_BASE_FIELD_MAXIMUM_TWO_ADIC_GENERATOR, PROOF_BASE_FIELD_MODULUS,
-        PROOF_CHALLENGE_EXTENSION_DEGREE,
+        PROOF_CHALLENGE_EXTENSION_DEGREE, selected_ballot_validity_relation_compilation,
+        selected_relation_plan_check_context,
     };
+    use crate::foundation::ProofApplicationSlotCeilings;
 
     fn vss_linkage_interpreter_fixture() -> (RelationPlanVariant, RelationPlanCheckContext) {
-        let evaluation_domain_size = 256_u64;
+        let ring_degree = 64_u64;
+        let evaluation_domain_size = 1_024_u64;
+        let deep_point_count = 1_u64;
+        let unique_query_count = 1_u64;
+        let quotient_component_count = 16_u64;
+        let trace_mask_degree_bound_exclusive = COMMITTED_MATERIAL_TRACE_PACKING_FACTOR
+            .checked_mul(
+                u64::try_from(PROOF_CHALLENGE_EXTENSION_DEGREE)
+                    .expect("the challenge-extension degree fits u64"),
+            )
+            .and_then(|deep_coordinate_count| {
+                deep_coordinate_count.checked_add(2 * unique_query_count)
+            })
+            .expect("the exact trace-mask degree fits u64");
+        let input = CommittedMaterialRelationPlanInput {
+            ring_degree,
+            evaluation_domain_size,
+            opening_degree_bound_exclusive: 512,
+            material_column_degree_bound_exclusive: 10,
+            participant_count: 3,
+            threshold: 2,
+            sharing_data_modulus_indices: vec![0],
+            trace_mask_degree_bound_exclusive,
+        };
+        let rounded_mask_degree = quotient_component_count
+            .checked_add(1)
+            .and_then(|count| count.checked_mul(trace_mask_degree_bound_exclusive))
+            .and_then(|degree| degree.checked_add(quotient_component_count - 1))
+            .and_then(|degree| degree.checked_div(quotient_component_count))
+            .expect("the quotient mask degree derives");
+        let quotient_decomposition_stride = input
+            .relation_trace_domain_size()
+            .expect("the relation trace domain derives")
+            .checked_add(rounded_mask_degree)
+            .expect("the quotient decomposition stride derives");
+        let minimum_telescoping_mask_degree_bound_exclusive = unique_query_count
+            .checked_mul(2)
+            .and_then(|query_coordinate_count| query_coordinate_count.checked_add(deep_point_count))
+            .expect("the telescoping mask degree derives");
         let context = RelationPlanCheckContext {
             base_field_modulus: PROOF_BASE_FIELD_MODULUS,
             challenge_extension_degree: PROOF_CHALLENGE_EXTENSION_DEGREE as u16,
@@ -1234,28 +1288,24 @@ mod tests {
                 PROOF_BASE_FIELD_MODULUS,
             ),
             evaluation_coset_offset: 7,
-            deep_point_count: 1,
-            quotient_component_count: 4,
-            quotient_component_degree_bound_exclusive: 64,
-            fri_fold_count: 4,
+            deep_point_count: u16::try_from(deep_point_count)
+                .expect("the deep-point count fits u16"),
+            quotient_component_count: u32::try_from(quotient_component_count)
+                .expect("the quotient-component count fits u32"),
+            quotient_component_degree_bound_exclusive: quotient_decomposition_stride
+                .checked_add(minimum_telescoping_mask_degree_bound_exclusive)
+                .expect("the quotient-component degree bound derives"),
+            fri_fold_count: 6,
             final_polynomial_degree_bound_exclusive: 8,
-            unique_query_count: 1,
-            non_native_modular_identity_challenge_count: 1,
+            unique_query_count: u32::try_from(unique_query_count)
+                .expect("the unique-query count fits u32"),
+            non_native_theta_repetition_count: 1,
+            non_native_alpha_repetition_count: 1,
             maximum_fiat_shamir_candidate_draws_per_output: 128,
             resolved_moduli: vec![ResolvedSuiteModulus::new(
                 SuiteModulusReference::data(0),
                 97,
             )],
-        };
-        let input = CommittedMaterialRelationPlanInput {
-            ring_degree: 32,
-            evaluation_domain_size,
-            opening_degree_bound_exclusive: 128,
-            material_column_degree_bound_exclusive: 10,
-            participant_count: 3,
-            threshold: 2,
-            sharing_data_modulus_indices: vec![0],
-            trace_mask_degree_bound_exclusive: 14,
         };
         let compiled = compile_vss_share_linkage_relation_plan(&input, &context)
             .expect("exact VSS share-linkage plan");
@@ -1263,7 +1313,7 @@ mod tests {
     }
 
     #[test]
-    fn vss_linkage_alpha_group_uses_goldilocks_powers_of_one_sample() {
+    fn vss_linkage_alpha_group_uses_arithmetic_modulus_powers_of_one_sample() {
         let (variant, context) = vss_linkage_interpreter_fixture();
         let alpha_assignment = RelationApplicationChallengeAssignment::new(
             CommonProofChallenge::Alpha { modulus_ordinal: 0 },
@@ -1282,8 +1332,9 @@ mod tests {
                     .expect("grouped alpha power")
             })
             .collect::<Vec<_>>();
-        assert_eq!(weights, vec![1, 96, 9_216]);
-        assert_ne!(weights[2], modular_power(96, 2, 97));
+        assert_eq!(weights, vec![1, 96, 1]);
+        assert_eq!(weights[2], modular_power(96, 2, 97));
+        assert_ne!(weights[2], modular_power(96, 2, PROOF_BASE_FIELD_MODULUS));
 
         assert!(matches!(
             CheckedRelationApplicationChallenges::new(&variant, &context, &[]),
@@ -1295,6 +1346,60 @@ mod tests {
                 &context,
                 &[alpha_assignment, alpha_assignment],
             ),
+            Err(RelationPlanError::InvalidChallengeCatalog)
+        ));
+        let out_of_range_alpha = RelationApplicationChallengeAssignment::new(
+            CommonProofChallenge::Alpha { modulus_ordinal: 0 },
+            0,
+            97,
+        )
+        .expect("the unchecked alpha assignment is structurally typed");
+        assert!(matches!(
+            CheckedRelationApplicationChallenges::new(&variant, &context, &[out_of_range_alpha]),
+            Err(RelationPlanError::InvalidChallengeCatalog)
+        ));
+    }
+
+    #[test]
+    fn exact_ballot_theta_accepts_the_full_base_field_range() {
+        let context = selected_relation_plan_check_context(
+            ProofApplicationSlotCeilings::BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER,
+        )
+        .expect("the selected ballot relation context derives");
+        let compilation = selected_ballot_validity_relation_compilation()
+            .expect("the exact ballot relation compiles");
+        let variant = compilation
+            .relation_plan()
+            .select_variant(None, None)
+            .expect("the exact ballot relation has one variant");
+        let schedule = variant
+            .common_proof_transcript_schedule(&context)
+            .expect("the exact ballot challenge schedule derives");
+        let mut assignments = schedule
+            .ordered_application_challenge_groups()
+            .iter()
+            .flat_map(|group| {
+                (0..group.coordinate_count()).map(move |repetition_ordinal| {
+                    RelationApplicationChallengeAssignment::new(
+                        group.challenge(),
+                        repetition_ordinal,
+                        PROOF_BASE_FIELD_MODULUS - 1,
+                    )
+                    .expect("the full-field theta assignment is structurally typed")
+                })
+            })
+            .collect::<Vec<_>>();
+        CheckedRelationApplicationChallenges::new(variant, &context, &assignments)
+            .expect("theta p - 1 is canonical even when the arithmetic modulus is 257");
+
+        assignments[0] = RelationApplicationChallengeAssignment::new(
+            assignments[0].challenge(),
+            assignments[0].repetition_ordinal(),
+            PROOF_BASE_FIELD_MODULUS,
+        )
+        .expect("the unchecked theta assignment is structurally typed");
+        assert!(matches!(
+            CheckedRelationApplicationChallenges::new(variant, &context, &assignments),
             Err(RelationPlanError::InvalidChallengeCatalog)
         ));
     }

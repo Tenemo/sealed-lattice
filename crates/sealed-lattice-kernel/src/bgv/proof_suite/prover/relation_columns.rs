@@ -1548,7 +1548,7 @@ fn integer_lift_theta(
         .next()
         .map(RelationApplicationChallengeAssignment::value)
         .ok_or(CommonProofProverError::InvalidColumn)?;
-    if matching.next().is_some() || value >= context.resolved_modulus(modulus_reference)? {
+    if matching.next().is_some() || value >= context.base_field_modulus {
         return Err(CommonProofProverError::InvalidColumn);
     }
     ProofBaseFieldElement::from_canonical(value).map_err(CommonProofProverError::from)

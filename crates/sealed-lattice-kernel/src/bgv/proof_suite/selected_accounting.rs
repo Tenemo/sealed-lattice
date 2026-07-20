@@ -1207,9 +1207,9 @@ mod resource_accounting {
         const SELECTED_FRI_FOLD_COUNT: u16 = 10;
         const SELECTED_TERMINAL_COEFFICIENT_COUNT: u32 = 256;
         const COMMITTED_MATERIAL_QUOTIENT_DECOMPOSITION_STRIDE: u64 = 68_267;
-        const PUBLIC_AGGREGATE_QUOTIENT_DECOMPOSITION_STRIDE: u64 = 32_768;
+        const PUBLIC_AGGREGATE_QUOTIENT_DECOMPOSITION_STRIDE: u64 = 16_384;
         const COMMITTED_MATERIAL_QUOTIENT_COMPONENT_DEGREE_BOUND_EXCLUSIVE: u64 = 68_652;
-        const PUBLIC_AGGREGATE_QUOTIENT_COMPONENT_DEGREE_BOUND_EXCLUSIVE: u64 = 32_768;
+        const PUBLIC_AGGREGATE_QUOTIENT_COMPONENT_DEGREE_BOUND_EXCLUSIVE: u64 = 16_384;
         const OTHER_FAMILY_QUOTIENT_COMPONENT_DEGREE_BOUND_EXCLUSIVE: u64 = 33_884;
         const COMMITTED_MATERIAL_QUERY_COUNT: u32 = 192;
         const OTHER_FAMILY_QUERY_COUNT: u32 = 168;
@@ -1310,7 +1310,7 @@ mod resource_accounting {
             vss.bound_tree_relation_column_count(),
             vss.prover_relation_column_count(),
             vss.relation_constraint_count(),
-        ) != (3_451, 0, 448, 3_003, 3_799)
+        ) != (3_451, 0, 448, 3_003, 3_767)
             || (
                 aggregate.relation_column_count(),
                 aggregate.verifier_sequence_relation_column_count(),

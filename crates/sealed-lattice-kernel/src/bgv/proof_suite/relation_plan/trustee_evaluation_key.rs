@@ -754,7 +754,7 @@ fn add_round_one_relations(
             });
             let gadget_coefficient =
                 geometry.gadget_coefficient(decomposition_block_index, modulus_reference)?;
-            for challenge_ordinal in 0..check_context.non_native_modular_identity_challenge_count {
+            for challenge_ordinal in 0..check_context.non_native_theta_repetition_count {
                 builder.add_relinearization_round_one_equations(
                     modulus_reference,
                     challenge_ordinal,
@@ -829,7 +829,7 @@ fn add_round_two_relations(
                 right: aggregate_round_one_right.clone(),
             });
             quotients_by_row.push(quotient);
-            for challenge_ordinal in 0..check_context.non_native_modular_identity_challenge_count {
+            for challenge_ordinal in 0..check_context.non_native_theta_repetition_count {
                 builder.add_relinearization_round_two_equation(
                     modulus_reference,
                     challenge_ordinal,
@@ -895,7 +895,7 @@ fn add_galois_relations(
             quotients_by_row.push(quotient);
             let gadget_coefficient =
                 geometry.gadget_coefficient(decomposition_block_index, modulus_reference)?;
-            for challenge_ordinal in 0..check_context.non_native_modular_identity_challenge_count {
+            for challenge_ordinal in 0..check_context.non_native_theta_repetition_count {
                 builder.add_galois_key_equation(
                     modulus_reference,
                     challenge_ordinal,
@@ -992,7 +992,7 @@ fn add_anchor_relations(
         let quotients = (0..=rank)
             .map(|_| builder.add_trustee_radix_three_quotient_witness())
             .collect::<Result<Vec<_>, _>>()?;
-        for challenge_ordinal in 0..check_context.non_native_modular_identity_challenge_count {
+        for challenge_ordinal in 0..check_context.non_native_theta_repetition_count {
             builder.add_trustee_anchor_equations(
                 modulus_reference,
                 challenge_ordinal,
@@ -1687,8 +1687,8 @@ mod tests {
         let mut component_count = 0_usize;
         let mut low_quotient_columns = BTreeSet::new();
         let mut high_carry_columns = BTreeSet::new();
-        let mut outgoing_recurrence_carry_columns = BTreeSet::new();
-        let mut incoming_recurrence_carry_columns = BTreeSet::new();
+        let mut outgoing_recurrence_carry_counts = BTreeMap::new();
+        let mut positive_unit_term_counts = BTreeMap::new();
         for batch in &variant.ordered_integer_lift_batches {
             for component in &batch.ordered_components {
                 component_count += 1;
@@ -1740,10 +1740,14 @@ mod tests {
                         RelationIntegerLiftCoefficient::Constant(EXACT_INTEGER_LIFT_RADIX)
                             if term.negative =>
                         {
-                            outgoing_recurrence_carry_columns.insert(term.column_ordinal);
+                            *outgoing_recurrence_carry_counts
+                                .entry(term.column_ordinal)
+                                .or_insert(0_usize) += 1;
                         }
                         RelationIntegerLiftCoefficient::Constant(1) if !term.negative => {
-                            incoming_recurrence_carry_columns.insert(term.column_ordinal);
+                            *positive_unit_term_counts
+                                .entry(term.column_ordinal)
+                                .or_insert(0_usize) += 1;
                         }
                         _ => {}
                     }
@@ -1753,11 +1757,14 @@ mod tests {
         assert!(component_count > 0);
         assert!(!low_quotient_columns.is_empty());
         assert!(!high_carry_columns.is_empty());
-        assert!(!outgoing_recurrence_carry_columns.is_empty());
-        assert_eq!(
-            incoming_recurrence_carry_columns,
-            outgoing_recurrence_carry_columns
-        );
+        assert!(!outgoing_recurrence_carry_counts.is_empty());
+        for (carry_column_ordinal, outgoing_count) in outgoing_recurrence_carry_counts {
+            assert_eq!(
+                positive_unit_term_counts.get(&carry_column_ordinal),
+                Some(&outgoing_count),
+                "each outgoing radix carry must recur as the next limb's incoming carry"
+            );
+        }
     }
 
     #[test]
@@ -1920,7 +1927,11 @@ mod tests {
             .iter()
             .find(|batch| batch.modulus_reference == SuiteModulusReference::special(0))
             .expect("special-limb batch");
-        assert_eq!(special_batch.ordered_components.len(), 6);
+        assert_eq!(
+            special_batch.ordered_components.len(),
+            24,
+            "six exact special-modulus equations each expand into four radix limbs"
+        );
         let round_one_small_columns = special_batch
             .ordered_components
             .iter()
@@ -1949,11 +1960,11 @@ mod tests {
                 semantic_cells
                     .get(&product.multiplier_low_column_ordinal)
                     .map(|cell| &cell.bound_certificate),
-                Some(RelationBoundCertificate::CanonicalModulusRecomposition {
-                    modulus_reference,
+                Some(RelationBoundCertificate::UnsignedRadixRecomposition {
                     radix: 3,
+                    ordered_digit_column_ordinals,
                     ..
-                }) if *modulus_reference == SuiteModulusReference::special(0)
+                }) if !ordered_digit_column_ordinals.is_empty()
             ));
         }
         assert_radix_three_quotients(variant);
@@ -2205,7 +2216,19 @@ mod tests {
                 }
             })
             .collect::<Vec<_>>();
-        assert_eq!(mapping_sources, selected_galois_elements);
+        assert_eq!(
+            mapping_sources.iter().copied().collect::<BTreeSet<_>>(),
+            selected_galois_elements
+                .iter()
+                .copied()
+                .collect::<BTreeSet<_>>(),
+            "canonical verifier-source order must retain every selected automorphism",
+        );
+        assert_eq!(
+            mapping_sources.len(),
+            selected_galois_elements.len(),
+            "the canonical verifier-source catalog must not repeat an automorphism",
+        );
         let entry_count = input.ordered_entries.len();
         let anchor_count = input.geometry.commitment_data_modulus_indices.len();
         let bound_tree_count = entry_count + anchor_count;

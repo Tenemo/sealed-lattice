@@ -682,7 +682,8 @@ mod tests {
             fri_fold_count: 3,
             final_polynomial_degree_bound_exclusive: 8,
             unique_query_count: 8,
-            non_native_modular_identity_challenge_count: 2,
+            non_native_theta_repetition_count: 2,
+            non_native_alpha_repetition_count: 2,
             maximum_fiat_shamir_candidate_draws_per_output: 128,
             resolved_moduli: vec![
                 ResolvedSuiteModulus::new(SuiteModulusReference::data(0), 97),

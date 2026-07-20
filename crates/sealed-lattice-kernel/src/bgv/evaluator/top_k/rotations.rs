@@ -121,7 +121,7 @@ pub(crate) fn selected_evaluator_rotation_key_schedule(
         return Err(rotation_error());
     }
     validate_selected_rotation_topology()?;
-    Ok(TRACE_GALOIS_ELEMENTS
+    let mut ordered_catalog = TRACE_GALOIS_ELEMENTS
         .into_iter()
         .map(|element| (element, TRACE_KEY_LEVEL))
         .chain(
@@ -129,7 +129,10 @@ pub(crate) fn selected_evaluator_rotation_key_schedule(
                 .into_iter()
                 .map(|element| (element, SCATTER_KEY_LEVEL)),
         )
-        .collect())
+        .collect::<Vec<_>>();
+    ordered_catalog
+        .sort_unstable_by_key(|(galois_element, catalog_level)| (*catalog_level, *galois_element));
+    Ok(ordered_catalog)
 }
 
 fn validate_selected_rotation_topology() -> CanonicalResult<()> {
@@ -179,12 +182,12 @@ mod tests {
         assert_eq!(
             selected_evaluator_rotation_key_schedule(20).unwrap(),
             vec![
+                (15, 14),
+                (19, 14),
+                (219, 14),
                 (257, 18),
                 (1_025, 18),
                 (8_193, 18),
-                (219, 14),
-                (19, 14),
-                (15, 14),
             ]
         );
         assert!(selected_evaluator_rotation_key_schedule(19).is_err());

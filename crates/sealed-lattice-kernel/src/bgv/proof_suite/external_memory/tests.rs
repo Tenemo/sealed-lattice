@@ -332,7 +332,7 @@ fn executor_reuses_one_physical_ordinal_across_non_overlapping_lifecycles() {
             2,
             4,
             4,
-            1,
+            2,
             8,
             8,
             1,

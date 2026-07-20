@@ -418,7 +418,8 @@ struct ZeroizingSignedLimbPolynomial {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct SignedLimbPolynomialAllocationByteLengths {
     retained_heap_byte_length: u64,
-    maximum_bigint_scratch_byte_length: u64,
+    bigint_callback_ready_resident_byte_length: u64,
+    bigint_callback_construction_transient_byte_length: u64,
 }
 
 impl ZeroizingSignedLimbPolynomial {
@@ -447,13 +448,14 @@ impl ZeroizingSignedLimbPolynomial {
             .checked_mul(size_of::<u64>())
             .and_then(|length| u64::try_from(length).ok())
             .ok_or(TargetReleaseWitnessError::CountOverflow)?;
-        let maximum_bigint_scratch_byte_length = bigint_catalog_byte_length
+        let bigint_callback_ready_resident_byte_length = bigint_catalog_byte_length
             .checked_add(magnitude_limb_byte_length)
-            .and_then(|length| length.checked_add(one_coefficient_conversion_byte_length))
             .ok_or(TargetReleaseWitnessError::CountOverflow)?;
         Ok(SignedLimbPolynomialAllocationByteLengths {
             retained_heap_byte_length,
-            maximum_bigint_scratch_byte_length,
+            bigint_callback_ready_resident_byte_length,
+            bigint_callback_construction_transient_byte_length:
+                one_coefficient_conversion_byte_length,
         })
     }
 
@@ -618,7 +620,9 @@ impl ZeroizingSignedLimbPolynomial {
         Ok(allocation_byte_lengths.retained_heap_byte_length)
     }
 
-    fn maximum_bigint_scratch_byte_length(&self) -> Result<u64, TargetReleaseWitnessError> {
+    fn bigint_callback_allocation_byte_lengths(
+        &self,
+    ) -> Result<SignedLimbPolynomialAllocationByteLengths, TargetReleaseWitnessError> {
         if self.coefficient_count == 0
             || self.magnitude_limb_count == 0
             || self.negative_flags.len() != self.coefficient_count
@@ -631,13 +635,13 @@ impl ZeroizingSignedLimbPolynomial {
             return Err(TargetReleaseWitnessError::InvalidWitness);
         }
         // `BigUint::from_bytes_le` retains at most the same byte width as the
-        // fixed u64 magnitude source. One callback therefore owns the full
-        // BigInt magnitude payload plus one coefficient-sized byte scratch.
+        // fixed u64 magnitude source. The final one-coefficient byte buffer is
+        // dropped before the callback body starts, so it cannot overlap the
+        // adapter's role-layer construction scratch.
         Ok(Self::allocation_byte_lengths_from_dimensions(
             self.coefficient_count,
             self.magnitude_limb_count,
-        )?
-        .maximum_bigint_scratch_byte_length)
+        )?)
     }
 
     #[cfg(test)]
@@ -920,16 +924,28 @@ impl TargetReleaseWitnessSource for KllpsTargetReleaseProofWitnessSource {
                     .checked_add(polynomial.retained_heap_byte_length()?)
                     .ok_or(TargetReleaseWitnessError::CountOverflow)
             })?;
-        let maximum_callback_transient_byte_length = self
+        let (
+            flooding_callback_ready_resident_byte_length,
+            flooding_callback_construction_transient_byte_length,
+        ) = self
             .authorized_partial
             .flooding_polynomials_by_role
             .iter()
-            .try_fold(0_u64, |maximum, polynomial| {
-                Ok::<_, TargetReleaseWitnessError>(
-                    maximum.max(polynomial.maximum_bigint_scratch_byte_length()?),
-                )
+            .try_fold((0_u64, 0_u64), |maximums, polynomial| {
+                let allocation_byte_lengths =
+                    polynomial.bigint_callback_allocation_byte_lengths()?;
+                Ok::<_, TargetReleaseWitnessError>((
+                    maximums
+                        .0
+                        .max(allocation_byte_lengths.bigint_callback_ready_resident_byte_length),
+                    maximums.1.max(
+                        allocation_byte_lengths.bigint_callback_construction_transient_byte_length,
+                    ),
+                ))
             })?;
-        if maximum_callback_transient_byte_length == 0 {
+        if flooding_callback_ready_resident_byte_length == 0
+            || flooding_callback_construction_transient_byte_length == 0
+        {
             return Err(TargetReleaseWitnessError::InvalidWitness);
         }
         let unique_owned_heap_byte_length = [
@@ -950,7 +966,9 @@ impl TargetReleaseWitnessSource for KllpsTargetReleaseProofWitnessSource {
         TargetReleaseWitnessSourceMemoryAccounting::new(
             unique_owned_heap_byte_length,
             lease_memory_accounting.shared_allocations().to_vec(),
-            maximum_callback_transient_byte_length,
+            flooding_callback_ready_resident_byte_length,
+            flooding_callback_construction_transient_byte_length,
+            0,
         )
     }
 

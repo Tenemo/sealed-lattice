@@ -12,7 +12,9 @@ use super::{
 };
 
 #[cfg(test)]
-use super::{CanonicalItem, hash_foundation_tuple_512 as hash512};
+use super::{
+    CanonicalItem, ObjectEnvelope, ParticipantIdentity, hash_foundation_tuple_512 as hash512,
+};
 
 const CHUNK_DIGEST_DOMAIN: &str = "sealed-lattice/transport/chunk/v1";
 const FULL_OBJECT_DIGEST_DOMAIN: &str = "sealed-lattice/transport/full-object/v1";
@@ -1408,81 +1410,80 @@ fn absorb_fixed_item(
 }
 
 #[cfg(test)]
+pub(super) fn canonical_target_release_exact_output_fixture(
+    target_identifier_bytes: &[u8],
+    target_order_bytes: &[u8],
+    malicious_share_proof_bytes: &[u8],
+) -> Vec<u8> {
+    let descriptor_item = |stream_domain: CanonicalStreamDomain, canonical_bytes: &[u8]| {
+        let descriptor = derive_canonical_stream_descriptor(stream_domain, canonical_bytes)
+            .expect("test target-release child descriptor derives");
+        CanonicalItem::nested_tuple(
+            &CanonicalTuple::decode(
+                &descriptor.encode().expect("test descriptor encodes"),
+                &CanonicalDecodeLimits::default(),
+            )
+            .expect("test descriptor tuple decodes"),
+        )
+        .expect("test nested descriptor constructs")
+    };
+    let payload = CanonicalTuple::new(
+        TARGET_DECRYPTION_SHARE_PAYLOAD_SCHEMA_IDENTIFIER,
+        TARGET_RELEASE_OUTPUT_BUNDLE_VERSION,
+        vec![
+            CanonicalItem::hash512([0x31; Hash512::BYTE_LENGTH]),
+            CanonicalItem::hash512([0x32; Hash512::BYTE_LENGTH]),
+            descriptor_item(
+                CanonicalStreamDomain::TargetIdentifierPartialDecryption,
+                target_identifier_bytes,
+            ),
+            descriptor_item(
+                CanonicalStreamDomain::TargetOrderPartialDecryption,
+                target_order_bytes,
+            ),
+            descriptor_item(
+                CanonicalStreamDomain::MaliciousTargetShareProof,
+                malicious_share_proof_bytes,
+            ),
+        ],
+    )
+    .encode()
+    .expect("test target-release payload encodes");
+    let carrier = SignedCarrier {
+        envelope: ObjectEnvelope {
+            suite_id: Hash512::from_bytes([0x11; Hash512::BYTE_LENGTH]),
+            object_type: FoundationObjectType::TargetDecryptionShare,
+            ceremony_context_hash: Hash512::from_bytes([0x12; Hash512::BYTE_LENGTH]),
+            action_context_hash: Hash512::from_bytes([0x13; Hash512::BYTE_LENGTH]),
+            producer_participant_id: Some(ParticipantIdentity::from_bytes(
+                [0x14; ParticipantIdentity::BYTE_LENGTH],
+            )),
+            producer_sequence: 0,
+            ordered_prerequisite_hashes: Vec::new(),
+            payload_bytes: payload,
+        },
+        signature: [0x15; ML_DSA_65_SIGNATURE_BYTE_LENGTH],
+    }
+    .encode()
+    .expect("test target-release carrier encodes");
+    let mut bundle = Vec::new();
+    bundle.extend_from_slice(&TARGET_RELEASE_OUTPUT_BUNDLE_SCHEMA_IDENTIFIER.to_le_bytes());
+    bundle.extend_from_slice(&TARGET_RELEASE_OUTPUT_BUNDLE_VERSION.to_le_bytes());
+    bundle.extend_from_slice(&carrier);
+    bundle.extend_from_slice(target_identifier_bytes);
+    bundle.extend_from_slice(target_order_bytes);
+    bundle.extend_from_slice(malicious_share_proof_bytes);
+    bundle
+}
+
+#[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
 
     use super::*;
-    use crate::foundation::{ObjectEnvelope, ParticipantIdentity};
 
     fn descriptor_for(stream_domain: CanonicalStreamDomain, bytes: &[u8]) -> StreamDescriptor {
         derive_canonical_stream_descriptor(stream_domain, bytes).expect("test descriptor is valid")
-    }
-
-    fn target_release_bundle(
-        target_identifier_bytes: &[u8],
-        target_order_bytes: &[u8],
-        proof_bytes: &[u8],
-    ) -> Vec<u8> {
-        let target_identifier_descriptor = descriptor_for(
-            CanonicalStreamDomain::TargetIdentifierPartialDecryption,
-            target_identifier_bytes,
-        );
-        let target_order_descriptor = descriptor_for(
-            CanonicalStreamDomain::TargetOrderPartialDecryption,
-            target_order_bytes,
-        );
-        let proof_descriptor = descriptor_for(
-            CanonicalStreamDomain::MaliciousTargetShareProof,
-            proof_bytes,
-        );
-        let descriptor_item = |descriptor: &StreamDescriptor| {
-            CanonicalItem::nested_tuple(
-                &CanonicalTuple::decode(
-                    &descriptor.encode().expect("descriptor encodes"),
-                    &CanonicalDecodeLimits::default(),
-                )
-                .expect("descriptor tuple decodes"),
-            )
-            .expect("nested descriptor")
-        };
-        let payload = CanonicalTuple::new(
-            TARGET_DECRYPTION_SHARE_PAYLOAD_SCHEMA_IDENTIFIER,
-            TARGET_RELEASE_OUTPUT_BUNDLE_VERSION,
-            vec![
-                CanonicalItem::hash512([0x31; Hash512::BYTE_LENGTH]),
-                CanonicalItem::hash512([0x32; Hash512::BYTE_LENGTH]),
-                descriptor_item(&target_identifier_descriptor),
-                descriptor_item(&target_order_descriptor),
-                descriptor_item(&proof_descriptor),
-            ],
-        )
-        .encode()
-        .expect("target payload");
-        let carrier = SignedCarrier {
-            envelope: ObjectEnvelope {
-                suite_id: Hash512::from_bytes([0x11; Hash512::BYTE_LENGTH]),
-                object_type: FoundationObjectType::TargetDecryptionShare,
-                ceremony_context_hash: Hash512::from_bytes([0x12; Hash512::BYTE_LENGTH]),
-                action_context_hash: Hash512::from_bytes([0x13; Hash512::BYTE_LENGTH]),
-                producer_participant_id: Some(ParticipantIdentity::from_bytes(
-                    [0x14; ParticipantIdentity::BYTE_LENGTH],
-                )),
-                producer_sequence: 0,
-                ordered_prerequisite_hashes: Vec::new(),
-                payload_bytes: payload,
-            },
-            signature: [0x15; ML_DSA_65_SIGNATURE_BYTE_LENGTH],
-        }
-        .encode()
-        .expect("target carrier");
-        let mut bundle = Vec::new();
-        bundle.extend_from_slice(&TARGET_RELEASE_OUTPUT_BUNDLE_SCHEMA_IDENTIFIER.to_le_bytes());
-        bundle.extend_from_slice(&TARGET_RELEASE_OUTPUT_BUNDLE_VERSION.to_le_bytes());
-        bundle.extend_from_slice(&carrier);
-        bundle.extend_from_slice(target_identifier_bytes);
-        bundle.extend_from_slice(target_order_bytes);
-        bundle.extend_from_slice(proof_bytes);
-        bundle
     }
 
     fn verify_stream_with_summary(
@@ -1512,8 +1513,11 @@ mod tests {
         let target_identifier_bytes = vec![0x41; 37];
         let target_order_bytes = vec![0x42; 53];
         let proof_bytes = vec![0x43; FOUNDATION_PROFILE.stream_chunk_byte_length + 29];
-        let bundle_bytes =
-            target_release_bundle(&target_identifier_bytes, &target_order_bytes, &proof_bytes);
+        let bundle_bytes = canonical_target_release_exact_output_fixture(
+            &target_identifier_bytes,
+            &target_order_bytes,
+            &proof_bytes,
+        );
 
         let summary = verify_stream_with_summary(
             CanonicalStreamDomain::StateTargetReleaseExactOutput,
@@ -1579,8 +1583,11 @@ mod tests {
         let target_identifier_bytes = vec![0x51; 17];
         let target_order_bytes = vec![0x52; 19];
         let proof_bytes = vec![0x53; 23];
-        let bundle_bytes =
-            target_release_bundle(&target_identifier_bytes, &target_order_bytes, &proof_bytes);
+        let bundle_bytes = canonical_target_release_exact_output_fixture(
+            &target_identifier_bytes,
+            &target_order_bytes,
+            &proof_bytes,
+        );
         let mut extended = bundle_bytes.clone();
         extended.push(0);
         let extended_descriptor = descriptor_for(
@@ -1682,20 +1689,27 @@ mod tests {
 
     #[test]
     fn state_exact_output_streams_preserve_the_raw_byte_hash_relation() {
-        let bytes = (0..FOUNDATION_PROFILE.stream_chunk_byte_length + 19)
+        let finality_signature_bytes = (0..FOUNDATION_PROFILE.stream_chunk_byte_length + 19)
             .map(|index| (index.wrapping_mul(211) & 0xff) as u8)
             .collect::<Vec<_>>();
-        for (stream_domain, capability_kind) in [
+        let target_release_bytes = canonical_target_release_exact_output_fixture(
+            b"target identifier partial decryption",
+            b"target order partial decryption",
+            &finality_signature_bytes,
+        );
+        for (stream_domain, capability_kind, bytes) in [
             (
                 CanonicalStreamDomain::StateFinalitySignatureExactOutput,
                 StateCapabilityKind::FinalitySignature,
+                finality_signature_bytes,
             ),
             (
                 CanonicalStreamDomain::StateTargetReleaseExactOutput,
                 StateCapabilityKind::TargetRelease,
+                target_release_bytes,
             ),
         ] {
-            let descriptor = descriptor_for(stream_domain, &bytes);
+            let descriptor = descriptor_for(stream_domain, bytes.as_slice());
             let mut verifier = CanonicalStreamVerifier::new(stream_domain, descriptor)
                 .expect("state exact-output verifier begins");
             for (chunk_index, chunk) in bytes
@@ -1715,7 +1729,7 @@ mod tests {
             assert_eq!(summary.total_byte_length(), bytes.len() as u64);
             assert_eq!(
                 summary.full_object_digest(),
-                descriptor_for(stream_domain, &bytes).full_object_digest
+                descriptor_for(stream_domain, bytes.as_slice()).full_object_digest
             );
             assert_eq!(
                 summary.state_exact_output_hash(),

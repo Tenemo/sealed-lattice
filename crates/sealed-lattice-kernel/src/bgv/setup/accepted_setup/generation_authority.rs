@@ -5628,6 +5628,33 @@ impl SetupGenerationRecipientPayloadSourceRegistry {
             .values()
             .any(|source| source.owner_authority_identifier == authority_identifier)
     }
+
+    fn read_chunk_and_record_completion<CompletionRecorder>(
+        &mut self,
+        source_handle: &SetupGenerationRecipientPayloadSourceHandle,
+        expected_offset: usize,
+        requested_byte_length: usize,
+        record_completion: CompletionRecorder,
+    ) -> Result<Zeroizing<Vec<u8>>, RefusalReason>
+    where
+        CompletionRecorder: FnOnce(u32) -> Result<(), RefusalReason>,
+    {
+        let (chunk, finished, owner_authority_identifier) = {
+            let source = self
+                .sources
+                .get_mut(&source_handle.0)
+                .ok_or(RefusalReason::ConsumedState)?;
+            let owner_authority_identifier = source.owner_authority_identifier;
+            let (chunk, finished) = source.read_chunk(expected_offset, requested_byte_length)?;
+            (chunk, finished, owner_authority_identifier)
+        };
+        if finished {
+            record_completion(owner_authority_identifier)?;
+            let removed_source = self.sources.remove(&source_handle.0);
+            debug_assert!(removed_source.is_some());
+        }
+        Ok(chunk)
+    }
 }
 
 impl SetupGenerationAuthorityRegistry {
@@ -6623,35 +6650,28 @@ pub(crate) fn read_setup_generation_recipient_vss_payload_chunk(
         let mut registry = registry
             .try_borrow_mut()
             .map_err(|_| RefusalReason::ConsumedState)?;
-        let (chunk, finished, owner_authority_identifier) = {
-            let source = registry
-                .sources
-                .get_mut(&source_handle.0)
-                .ok_or(RefusalReason::ConsumedState)?;
-            let owner_authority_identifier = source.owner_authority_identifier;
-            let (chunk, finished) = source.read_chunk(expected_offset, requested_byte_length)?;
-            (chunk, finished, owner_authority_identifier)
-        };
-        if finished {
-            SETUP_GENERATION_AUTHORITY_REGISTRY.with(|authority_registry| {
-                let mut authority_registry = authority_registry
-                    .try_borrow_mut()
-                    .map_err(|_| RefusalReason::ConsumedState)?;
-                let authority = authority_registry
-                    .authorities
-                    .get_mut(&owner_authority_identifier)
-                    .ok_or(RefusalReason::ConsumedState)?;
-                authority.completed_recipient_private_payload_count = authority
-                    .completed_recipient_private_payload_count
-                    .checked_add(1)
-                    .filter(|count| *count <= usize::from(FOUNDATION_PROFILE.participant_count))
-                    .ok_or(RefusalReason::OutsideSupportedProfile)?;
-                Ok(())
-            })?;
-            let removed_source = registry.sources.remove(&source_handle.0);
-            debug_assert!(removed_source.is_some());
-        }
-        Ok(chunk)
+        registry.read_chunk_and_record_completion(
+            source_handle,
+            expected_offset,
+            requested_byte_length,
+            |owner_authority_identifier| {
+                SETUP_GENERATION_AUTHORITY_REGISTRY.with(|authority_registry| {
+                    let mut authority_registry = authority_registry
+                        .try_borrow_mut()
+                        .map_err(|_| RefusalReason::ConsumedState)?;
+                    let authority = authority_registry
+                        .authorities
+                        .get_mut(&owner_authority_identifier)
+                        .ok_or(RefusalReason::ConsumedState)?;
+                    authority.completed_recipient_private_payload_count = authority
+                        .completed_recipient_private_payload_count
+                        .checked_add(1)
+                        .filter(|count| *count <= usize::from(FOUNDATION_PROFILE.participant_count))
+                        .ok_or(RefusalReason::OutsideSupportedProfile)?;
+                    Ok(())
+                })
+            },
+        )
     })
 }
 
@@ -7093,11 +7113,17 @@ mod tests {
 
     #[test]
     fn retained_recipient_payload_source_reports_binding_and_removes_itself_at_completion() {
+        let owner_authority_identifier = 23;
         let source_handle = SETUP_GENERATION_RECIPIENT_PAYLOAD_SOURCE_REGISTRY.with(|registry| {
             let mut registry = registry.borrow_mut();
             let handle = registry.next_available_handle().unwrap();
-            registry.retain_at(handle, recipient_payload_source(23, 6, &[7, 8, 9, 10]))
+            registry.retain_at(
+                handle,
+                recipient_payload_source(owner_authority_identifier, 6, &[7, 8, 9, 10]),
+            )
         });
+        let mut completed_payload_count_by_authority =
+            BTreeMap::from([(owner_authority_identifier, 0_usize)]);
 
         assert_eq!(
             setup_generation_recipient_vss_payload_source_byte_length(&source_handle).unwrap(),
@@ -7118,11 +7144,26 @@ mod tests {
                 .as_slice(),
             &[7]
         );
+        let final_chunk = SETUP_GENERATION_RECIPIENT_PAYLOAD_SOURCE_REGISTRY.with(|registry| {
+            registry.borrow_mut().read_chunk_and_record_completion(
+                &source_handle,
+                1,
+                3,
+                |completed_owner_authority_identifier| {
+                    let completed_payload_count = completed_payload_count_by_authority
+                        .get_mut(&completed_owner_authority_identifier)
+                        .ok_or(RefusalReason::ConsumedState)?;
+                    *completed_payload_count = completed_payload_count
+                        .checked_add(1)
+                        .ok_or(RefusalReason::OutsideSupportedProfile)?;
+                    Ok(())
+                },
+            )
+        });
+        assert_eq!(final_chunk.unwrap().as_slice(), &[8, 9, 10]);
         assert_eq!(
-            read_setup_generation_recipient_vss_payload_chunk(&source_handle, 1, 3)
-                .unwrap()
-                .as_slice(),
-            &[8, 9, 10]
+            completed_payload_count_by_authority[&owner_authority_identifier],
+            1
         );
         assert!(matches!(
             setup_generation_recipient_vss_payload_source_byte_length(&source_handle),

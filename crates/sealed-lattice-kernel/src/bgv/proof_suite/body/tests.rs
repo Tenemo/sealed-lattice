@@ -7,8 +7,8 @@ use super::super::{
     field::ProofBaseFieldElement,
     merkle::CanonicalProofMerkleTree,
     prover::{
-        CommonProofOpeningGeometry, CommonProofProverError, StatementOwnedMerkleReplay,
-        encode_common_proof_query_tree_fragment,
+        CommonProofOpeningGeometry, CommonProofProverError, SetupPolynomialColumnMajorMerkleReplay,
+        StatementOwnedMerkleReplay, encode_common_proof_query_tree_fragment,
     },
 };
 use super::*;
@@ -259,6 +259,30 @@ fn statement_tree_opening(
         opened_leaf_bytes: vec![leaf_bytes[0].clone()],
         frontier: vec![leaf_digests[1]],
     }
+}
+
+fn supply_setup_polynomial_column_major_replay(
+    replay: &mut SetupPolynomialColumnMajorMerkleReplay,
+    ordered_column_ordinals: &[u32],
+    second_leaf_value_seed: u64,
+) -> Result<(), CommonProofProverError> {
+    for (column_position, column_ordinal) in ordered_column_ordinals.iter().copied().enumerate() {
+        let column_offset =
+            u64::try_from(column_position).map_err(|_| CommonProofProverError::CountOverflow)?;
+        replay.supply_next_column_chunk(
+            column_ordinal,
+            0,
+            &[
+                base_value(101 + column_offset),
+                base_value(second_leaf_value_seed + column_offset),
+            ],
+            &[
+                base_value(132 + column_offset),
+                base_value(second_leaf_value_seed + 31 + column_offset),
+            ],
+        )?;
+    }
+    Ok(())
 }
 
 fn canonical_extension_list_bytes(values: &[ProofChallengeExtensionElement]) -> Vec<u8> {
@@ -1042,7 +1066,7 @@ fn planned_secret_leaf_lengths_match_the_production_materializer() {
 }
 
 #[test]
-fn setup_polynomial_two_pass_replay_emits_exact_decoder_accepted_opening() {
+fn setup_polynomial_column_major_replay_emits_exact_decoder_accepted_opening() {
     let context_hash = [0x6d; 64];
     let construction = ProofTreeConstruction::SetupPolynomial {
         public_polynomial_context_hash: context_hash,
@@ -1062,68 +1086,37 @@ fn setup_polynomial_two_pass_replay_emits_exact_decoder_accepted_opening() {
         construction,
         bound_root: Some(expected_opening.root),
     };
-    let leaf_values = |value_seed: u64| {
-        (
-            Zeroizing::new(
-                (0..2)
-                    .map(|column_index| ProofTreeValue::Base(base_value(value_seed + column_index)))
-                    .collect(),
-            ),
-            Zeroizing::new(
-                (0..2)
-                    .map(|column_index| {
-                        ProofTreeValue::Base(base_value(value_seed + 31 + column_index))
-                    })
-                    .collect(),
-            ),
-        )
-    };
+    let ordered_column_ordinals = [17_u32, 29];
+    let replay_binding = [0x6e; 64];
 
-    let mut root_pass = StatementOwnedMerkleReplay::new_root_pass(&entry, 4)
-        .expect("the compact root pass initializes");
-    assert_eq!(
-        root_pass
-            .resident_owned_payload_byte_length()
-            .expect("the root-pass payload is measurable"),
-        64,
-        "the root pass retains exactly one digest for the sole tree level",
-    );
-    for value_seed in [101, 211] {
-        let (first_values, opposite_values) = leaf_values(value_seed);
-        root_pass
-            .supply_next_leaf(first_values, opposite_values)
-            .expect("the root pass accepts the canonical leaf stream");
-    }
-    let pass_one_root = root_pass
+    let mut root_replay = SetupPolynomialColumnMajorMerkleReplay::new_root_pass(
+        &entry,
+        4,
+        &ordered_column_ordinals,
+        replay_binding,
+    )
+    .expect("the setup-polynomial root replay initializes");
+    supply_setup_polynomial_column_major_replay(&mut root_replay, &ordered_column_ordinals, 211)
+        .expect("the root pass accepts the canonical column stream");
+    let root_pass = root_replay
         .finish_root_pass()
         .expect("the root pass reproduces the statement root");
-    assert_eq!(pass_one_root, expected_opening.root);
+    assert_eq!(root_pass.root(), expected_opening.root);
 
-    let mut opening_pass = StatementOwnedMerkleReplay::new_opening_pass(&entry, 4, &[0], 1_048_576)
-        .expect("the compact opening pass initializes");
-    assert_eq!(
-        opening_pass
-            .resident_owned_payload_byte_length()
-            .expect("the opening-pass payload is measurable"),
-        u64::try_from(
-            expected_opening.opened_leaf_bytes[0].len()
-                + core::mem::size_of::<u64>()
-                + core::mem::size_of::<(u32, u64)>()
-                + 64
-                + 1
-                + 64
-        )
-        .expect("the small exact payload fits u64"),
-        "the opening pass retains one leaf, one frontier digest, their indexes, and one stack digest",
-    );
-    for value_seed in [101, 211] {
-        let (first_values, opposite_values) = leaf_values(value_seed);
-        opening_pass
-            .supply_next_leaf(first_values, opposite_values)
-            .expect("the opening pass accepts the identical canonical leaf stream");
-    }
-    let artifact = opening_pass
-        .finish_opening_pass(pass_one_root)
+    let mut opening_replay = SetupPolynomialColumnMajorMerkleReplay::new_opening_pass(
+        &entry,
+        4,
+        &ordered_column_ordinals,
+        replay_binding,
+        &root_pass,
+        &[0],
+        1_048_576,
+    )
+    .expect("the setup-polynomial opening replay initializes");
+    supply_setup_polynomial_column_major_replay(&mut opening_replay, &ordered_column_ordinals, 211)
+        .expect("the opening pass accepts the identical canonical column stream");
+    let artifact = opening_replay
+        .finish_opening_pass(&root_pass)
         .expect("the second pass reproduces the first root and compact frontier");
     assert_eq!(artifact.opened_leaf_indexes(), &[0]);
     assert_eq!(
@@ -1177,7 +1170,7 @@ fn setup_polynomial_two_pass_replay_emits_exact_decoder_accepted_opening() {
     )
     .expect("the compact opening is resident");
     let (next_offset, decoded) =
-        decode_proof_query_tree_at(&source, 0, &layout, 0, pass_one_root, &[0])
+        decode_proof_query_tree_at(&source, 0, &layout, 0, root_pass.root(), &[0])
             .expect("the production decoder authenticates the two-pass opening");
     assert_eq!(next_offset, encoded.len());
     assert_eq!(
@@ -1287,7 +1280,7 @@ fn committed_material_two_pass_replay_requires_and_replays_persistent_salts() {
 }
 
 #[test]
-fn setup_polynomial_two_pass_replay_rejects_stale_or_reset_source_material() {
+fn setup_polynomial_column_major_replay_rejects_incomplete_or_stale_source_material() {
     let context_hash = [0x7d; 64];
     let construction = ProofTreeConstruction::SetupPolynomial {
         public_polynomial_context_hash: context_hash,
@@ -1307,49 +1300,58 @@ fn setup_polynomial_two_pass_replay_rejects_stale_or_reset_source_material() {
         construction,
         bound_root: Some(expected_opening.root),
     };
-    let values = |seed: u64| {
-        (
-            Zeroizing::new(vec![ProofTreeValue::Base(base_value(seed))]),
-            Zeroizing::new(vec![ProofTreeValue::Base(base_value(seed + 31))]),
-        )
-    };
+    let ordered_column_ordinals = [37_u32];
+    let replay_binding = [0x7e; 64];
 
-    let mut incomplete = StatementOwnedMerkleReplay::new_root_pass(&entry, 4)
-        .expect("the first attempt initializes");
-    let (first_values, opposite_values) = values(101);
+    let mut incomplete = SetupPolynomialColumnMajorMerkleReplay::new_root_pass(
+        &entry,
+        4,
+        &ordered_column_ordinals,
+        replay_binding,
+    )
+    .expect("the first setup-polynomial attempt initializes");
     incomplete
-        .supply_next_leaf(first_values, opposite_values)
-        .expect("the first attempt accepts one leaf");
+        .supply_next_column_chunk(
+            ordered_column_ordinals[0],
+            0,
+            &[base_value(101)],
+            &[base_value(132)],
+        )
+        .expect("the first attempt accepts one partial column chunk");
     assert_eq!(
         incomplete.finish_root_pass(),
         Err(CommonProofProverError::InvalidTree),
         "an interrupted pass is never upgraded into a reusable root",
     );
 
-    let mut fresh = StatementOwnedMerkleReplay::new_root_pass(&entry, 4)
-        .expect("a fresh reset starts from leaf zero");
-    for seed in [101, 211] {
-        let (first_values, opposite_values) = values(seed);
-        fresh
-            .supply_next_leaf(first_values, opposite_values)
-            .expect("the fresh pass accepts canonical values");
-    }
-    let pass_one_root = fresh
+    let mut fresh = SetupPolynomialColumnMajorMerkleReplay::new_root_pass(
+        &entry,
+        4,
+        &ordered_column_ordinals,
+        replay_binding,
+    )
+    .expect("a fresh setup-polynomial replay starts from column and leaf zero");
+    supply_setup_polynomial_column_major_replay(&mut fresh, &ordered_column_ordinals, 211)
+        .expect("the fresh pass accepts canonical column values");
+    let root_pass = fresh
         .finish_root_pass()
         .expect("the fresh pass reaches the bound root");
 
-    let mut stale_opening =
-        StatementOwnedMerkleReplay::new_opening_pass(&entry, 4, &[0], 1_048_576)
-            .expect("the opening replay initializes");
-    for seed in [101, 212] {
-        let (first_values, opposite_values) = values(seed);
-        stale_opening
-            .supply_next_leaf(first_values, opposite_values)
-            .expect("each stale value remains a canonical field value");
-    }
+    let mut stale_opening = SetupPolynomialColumnMajorMerkleReplay::new_opening_pass(
+        &entry,
+        4,
+        &ordered_column_ordinals,
+        replay_binding,
+        &root_pass,
+        &[0],
+        1_048_576,
+    )
+    .expect("the setup-polynomial opening replay initializes");
+    supply_setup_polynomial_column_major_replay(&mut stale_opening, &ordered_column_ordinals, 212)
+        .expect("each stale value remains a canonical field value");
     assert!(
         matches!(
-            stale_opening.finish_opening_pass(pass_one_root),
+            stale_opening.finish_opening_pass(&root_pass),
             Err(CommonProofProverError::InvalidTree)
         ),
         "a stale second-pass source cannot open the first-pass root",

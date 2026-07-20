@@ -1,24 +1,22 @@
 //! Deterministic construction of the fixed proof-profile artifact.
 
+use std::collections::{BTreeMap, BTreeSet};
+
 use num_bigint::BigUint;
 
 use crate::bgv::{
     evaluator::top_k::CANONICAL_TARGET_CIPHERTEXT_LEVEL,
     parameters::{DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE, SPECIAL_PRIMES},
 };
-use crate::foundation::{ProofApplicationSlotCeilings, selected_sharing_data_prime_coordinates};
-
-#[cfg(test)]
 use crate::foundation::{
-    SELECTED_MAXIMUM_BALLOT_ATTEMPTS_PER_PARTICIPANT,
+    ProofApplicationSlotCeilings, SELECTED_MAXIMUM_BALLOT_ATTEMPTS_PER_PARTICIPANT,
     SELECTED_MAXIMUM_CANDIDATE_PACKAGES_PER_ACTION, selected_evaluator_resource_accounting,
+    selected_sharing_data_prime_coordinates,
 };
 
 use crate::{
     bgv::{
-        evaluator::{
-            candidate_evidence::EvaluatorCandidateInput, program::selected_evaluator_program_set,
-        },
+        evaluator::candidate_evidence::EvaluatorCandidateInput,
         setup::{SETUP_COMMITMENT_MODULE_RANK, SETUP_COMMITMENT_MODULUS_LIMB_INDICES},
         target_decryption::kllps_release::{
             KLLPS_DENOMINATOR_CLEARING_FACTOR, selected_factor_four_flooding_bound,
@@ -29,6 +27,7 @@ use crate::{
 
 use super::profile::FIRST_PROFILE_APPLICATION_FAMILIES;
 use super::relation_plan::trustee_evaluation_key_relation_basis_for_catalog_level;
+use super::transcript::{CommonProofApplicationChallengeSamplerAccounting, CommonProofChallenge};
 use super::{
     BallotValidityRelationPlanInput, CompiledBallotValidityRelation,
     compile_ballot_validity_relation,
@@ -38,32 +37,37 @@ use super::{
     PROOF_BASE_FIELD_MODULUS, PROOF_CHALLENGE_EXTENSION_DEGREE, PROOF_DEEP_POINT_COUNT,
     PROOF_EVALUATION_BLOWUP_FACTOR, PROOF_EVALUATION_COSET_OFFSET,
     PROOF_FINAL_POLYNOMIAL_DEGREE_BOUND_EXCLUSIVE,
-    PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT,
-    PROOF_NON_NATIVE_IDENTITY_CHALLENGE_COUNT, PROOF_UNIQUE_QUERY_COUNT, RelationPlanCheckContext,
+    PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT, PROOF_NON_NATIVE_ALPHA_REPETITION_COUNT,
+    PROOF_NON_NATIVE_THETA_REPETITION_COUNT, PROOF_UNIQUE_QUERY_COUNT, RelationPlanCheckContext,
     ResolvedSuiteModulus, SuiteModulusReference,
 };
 
 use super::{
     CollectivePublicKeyAggregatePlanInput, CommittedMaterialProfile,
-    CommittedMaterialRelationPlanInput, CompiledTargetReleaseRelation,
+    CommittedMaterialRelationPlanInput, CompiledRelationPlan, CompiledTargetReleaseRelation,
     EvaluatorKeyAggregateEntryPlanInput, EvaluatorKeyAggregatePlanInput,
     EvaluatorKeyAggregateVariantInput, GaloisKeyShareRelationEntryInput,
     GaloisKeyShareRelationPlanInput, ProofProfileError, PublicAggregateRelationGeometry,
-    PublicKeyShareRelationPlanInput, RelinearizationRoundOneRelationPlanInput,
+    PublicKeyShareRelationPlanInput, RelationPlanVariant, RelinearizationRoundOneRelationPlanInput,
     RelinearizationRoundTwoRelationPlanInput, RkgRoundOneAggregatePlanInput,
-    RkgRoundOneAggregateVariantInput, SameSecretRelationPlanInput, TargetReleaseRelationPlanInput,
-    TrusteeEvaluationKeyRelationGeometry, ValidatedRelationPlanArtifact,
-    compile_aggregate_threshold_share_relation_plan, compile_ballot_validity_relation_plan,
-    compile_collective_public_key_aggregate_relation_plan,
+    RkgRoundOneAggregateVariantInput, SameSecretRelationPlanInput, SelectedEvaluatorEntryKind,
+    TargetReleaseRelationPlanInput, TrusteeEvaluationKeyRelationGeometry,
+    ValidatedRelationPlanArtifact, compile_aggregate_threshold_share_relation_plan,
+    compile_ballot_validity_relation_plan, compile_collective_public_key_aggregate_relation_plan,
     compile_evaluator_key_aggregate_relation_plan, compile_galois_key_share_relation_plan,
     compile_public_key_share_relation_plan, compile_relinearization_round_one_relation_plan,
     compile_relinearization_round_two_relation_plan, compile_rkg_round_one_aggregate_relation_plan,
     compile_same_secret_relation_plan, compile_target_release_relation,
-    compile_vss_share_linkage_relation_plan, selected_galois_key_share_batch_schedule,
+    compile_vss_share_linkage_relation_plan, selected_evaluator_entry_positions,
+    selected_galois_key_share_batch_schedule,
 };
 
 #[cfg(test)]
-use super::{FirstProfileRootTopology, ProofProfileSet};
+use super::ProofProfileSet;
+use super::profile::FirstProfileRootTopology;
+
+#[cfg(test)]
+use crate::bgv::evaluator::program::selected_evaluator_program_set;
 
 pub(super) const SELECTED_OPENING_DEGREE_BOUND_EXCLUSIVE: u64 = 262_144;
 pub(super) const SELECTED_EVALUATION_DOMAIN_SIZE: u64 =
@@ -77,6 +81,86 @@ const SELECTED_PUBLIC_AGGREGATE_QUOTIENT_COMPONENT_DEGREE_BOUND_EXCLUSIVE: u64 =
 const SELECTED_QUOTIENT_COMPONENT_DEGREE_BOUND_EXCLUSIVE: u64 = 33_884;
 const SELECTED_COMMITTED_MATERIAL_QUOTIENT_COMPONENT_COUNT: u32 = 3;
 const RESERVED_BALLOT_SLOT_RULE: u16 = 1;
+const NON_NATIVE_IDENTITY_COMPILER_FACTOR: u32 = 12;
+const NON_NATIVE_IDENTITY_ACTION_MARGIN_BITS: usize = 184;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct SelectedNonNativeIdentitySoundnessRow {
+    application_statement_schema_identifier: u16,
+    challenge: CommonProofChallenge,
+    arithmetic_modulus_reference: SuiteModulusReference,
+    ordered_bad_polynomial_degrees: Vec<u64>,
+    bad_set_numerator: BigUint,
+    sample_space_denominator: BigUint,
+    complete_action_application_multiplicity: u32,
+    sampler_accounting: CommonProofApplicationChallengeSamplerAccounting,
+}
+
+impl SelectedNonNativeIdentitySoundnessRow {
+    fn new(
+        application_statement_schema_identifier: u16,
+        challenge: CommonProofChallenge,
+        arithmetic_modulus_reference: SuiteModulusReference,
+        ordered_bad_polynomial_degrees: Vec<u64>,
+        complete_action_application_multiplicity: u32,
+        sampler_accounting: CommonProofApplicationChallengeSamplerAccounting,
+    ) -> Result<Self, ProofProfileError> {
+        if sampler_accounting.challenge() != challenge
+            || usize::from(sampler_accounting.coordinate_count())
+                != ordered_bad_polynomial_degrees.len()
+            || sampler_accounting.maximum_candidate_draw_count()
+                != PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT
+            || sampler_accounting.total_xof_query_count_ceiling()
+                != u64::from(PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT) + 1
+        {
+            return Err(ProofProfileError::InvalidSchedule);
+        }
+        let sample_modulus = sampler_accounting.modulus();
+        let bad_set_numerator = ordered_bad_polynomial_degrees
+            .iter()
+            .copied()
+            .map(|degree| BigUint::from(degree.min(sample_modulus)))
+            .product();
+        let sample_space_denominator =
+            BigUint::from(sample_modulus).pow(u32::from(sampler_accounting.coordinate_count()));
+        Ok(Self {
+            application_statement_schema_identifier,
+            challenge,
+            arithmetic_modulus_reference,
+            ordered_bad_polynomial_degrees,
+            bad_set_numerator,
+            sample_space_denominator,
+            complete_action_application_multiplicity,
+            sampler_accounting,
+        })
+    }
+
+    fn minimum_repetition_count(&self) -> Result<u16, ProofProfileError> {
+        minimum_non_native_identity_repetition_count(
+            self.sampler_accounting.modulus(),
+            &self.ordered_bad_polynomial_degrees,
+            self.complete_action_application_multiplicity,
+        )
+    }
+
+    fn key(&self) -> (u16, CommonProofChallenge, SuiteModulusReference) {
+        (
+            self.application_statement_schema_identifier,
+            self.challenge,
+            self.arithmetic_modulus_reference,
+        )
+    }
+
+    fn satisfies_declared_action_margin(&self) -> Result<bool, ProofProfileError> {
+        let action_factor = self
+            .complete_action_application_multiplicity
+            .checked_mul(NON_NATIVE_IDENTITY_COMPILER_FACTOR)
+            .ok_or(ProofProfileError::CountOverflow)?;
+        let action_numerator = (&self.bad_set_numerator * BigUint::from(action_factor))
+            << NON_NATIVE_IDENTITY_ACTION_MARGIN_BITS;
+        Ok(action_numerator <= self.sample_space_denominator)
+    }
+}
 
 fn uses_committed_material_proof_schedule(
     application_statement_schema_identifier: u16,
@@ -104,7 +188,6 @@ fn uses_public_aggregate_quotient_geometry(application_statement_schema_identifi
     )
 }
 
-#[cfg(test)]
 pub(crate) fn selected_proof_application_slot_ceilings()
 -> Result<ProofApplicationSlotCeilings, ProofProfileError> {
     let root_topology =
@@ -122,6 +205,222 @@ pub(crate) fn selected_proof_application_slot_ceilings()
         SELECTED_MAXIMUM_CANDIDATE_PACKAGES_PER_ACTION,
     )
     .map_err(|_| ProofProfileError::InvalidRootTopology)
+}
+
+fn minimum_non_native_identity_repetition_count(
+    sample_modulus: u64,
+    ordered_bad_polynomial_degrees: &[u64],
+    complete_action_application_multiplicity: u32,
+) -> Result<u16, ProofProfileError> {
+    if sample_modulus < 2
+        || ordered_bad_polynomial_degrees.is_empty()
+        || complete_action_application_multiplicity == 0
+    {
+        return Err(ProofProfileError::InvalidSchedule);
+    }
+    let action_factor = BigUint::from(
+        complete_action_application_multiplicity
+            .checked_mul(NON_NATIVE_IDENTITY_COMPILER_FACTOR)
+            .ok_or(ProofProfileError::CountOverflow)?,
+    );
+    let mut bad_set_numerator = BigUint::from(1_u8);
+    let mut sample_space_denominator = BigUint::from(1_u8);
+    for (repetition_index, bad_polynomial_degree) in
+        ordered_bad_polynomial_degrees.iter().copied().enumerate()
+    {
+        bad_set_numerator *= BigUint::from(bad_polynomial_degree.min(sample_modulus));
+        sample_space_denominator *= BigUint::from(sample_modulus);
+        let action_numerator =
+            (&bad_set_numerator * &action_factor) << NON_NATIVE_IDENTITY_ACTION_MARGIN_BITS;
+        if action_numerator <= sample_space_denominator {
+            return u16::try_from(repetition_index + 1)
+                .map_err(|_| ProofProfileError::CountOverflow);
+        }
+    }
+    Err(ProofProfileError::InvalidSchedule)
+}
+
+fn ordered_bad_polynomial_degrees(
+    degrees_by_repetition: BTreeMap<u16, u64>,
+    expected_repetition_count: u16,
+) -> Result<Vec<u64>, ProofProfileError> {
+    if degrees_by_repetition.len() != usize::from(expected_repetition_count)
+        || degrees_by_repetition
+            .keys()
+            .copied()
+            .ne(0..expected_repetition_count)
+    {
+        return Err(ProofProfileError::InvalidSchedule);
+    }
+    Ok(degrees_by_repetition.into_values().collect())
+}
+
+fn required_theta_repetition_count(
+    application_statement_schema_identifier: u16,
+    variant: &RelationPlanVariant,
+    complete_action_application_multiplicity: u32,
+    sampler_rows: &[CommonProofApplicationChallengeSamplerAccounting],
+    soundness_rows: &mut Vec<SelectedNonNativeIdentitySoundnessRow>,
+) -> Result<Option<u16>, ProofProfileError> {
+    let mut degrees_by_modulus_and_repetition =
+        BTreeMap::<SuiteModulusReference, BTreeMap<u16, u64>>::new();
+    for batch in variant.ordered_integer_lift_batches() {
+        let degree = batch.theta_bad_polynomial_degree(variant.trace_domain_size())?;
+        if degrees_by_modulus_and_repetition
+            .entry(batch.modulus_reference())
+            .or_default()
+            .insert(batch.challenge_ordinal(), degree)
+            .is_some()
+        {
+            return Err(ProofProfileError::InvalidSchedule);
+        }
+    }
+    let mut maximum_required_count = None::<u16>;
+    for (modulus_reference, degrees_by_repetition) in degrees_by_modulus_and_repetition {
+        let ordered_degrees = ordered_bad_polynomial_degrees(
+            degrees_by_repetition,
+            PROOF_NON_NATIVE_THETA_REPETITION_COUNT,
+        )?;
+        let challenge = CommonProofChallenge::Theta {
+            modulus_ordinal: variant.non_native_modulus_ordinal(modulus_reference)?,
+        };
+        let sampler_accounting = sampler_rows
+            .iter()
+            .copied()
+            .find(|row| row.challenge() == challenge)
+            .ok_or(ProofProfileError::InvalidSchedule)?;
+        let row = SelectedNonNativeIdentitySoundnessRow::new(
+            application_statement_schema_identifier,
+            challenge,
+            modulus_reference,
+            ordered_degrees,
+            complete_action_application_multiplicity,
+            sampler_accounting,
+        )?;
+        let required_count = row.minimum_repetition_count()?;
+        maximum_required_count = Some(
+            maximum_required_count.map_or(required_count, |current| current.max(required_count)),
+        );
+        soundness_rows.push(row);
+    }
+    Ok(maximum_required_count)
+}
+
+fn required_alpha_repetition_count(
+    application_statement_schema_identifier: u16,
+    variant: &RelationPlanVariant,
+    context: &RelationPlanCheckContext,
+    complete_action_application_multiplicity: u32,
+    sampler_rows: &[CommonProofApplicationChallengeSamplerAccounting],
+    soundness_rows: &mut Vec<SelectedNonNativeIdentitySoundnessRow>,
+) -> Result<Option<u16>, ProofProfileError> {
+    let mut degrees_by_modulus_and_repetition =
+        BTreeMap::<SuiteModulusReference, BTreeMap<u16, u64>>::new();
+    for batch in variant.ordered_coefficient_local_identity_batches() {
+        let degree = batch.alpha_bad_polynomial_degree()?;
+        degrees_by_modulus_and_repetition
+            .entry(batch.modulus_reference())
+            .or_default()
+            .entry(batch.challenge_ordinal())
+            .and_modify(|current| *current = (*current).max(degree))
+            .or_insert(degree);
+    }
+    let mut maximum_required_count = None::<u16>;
+    for (modulus_reference, degrees_by_repetition) in degrees_by_modulus_and_repetition {
+        let ordered_degrees = ordered_bad_polynomial_degrees(
+            degrees_by_repetition,
+            PROOF_NON_NATIVE_ALPHA_REPETITION_COUNT,
+        )?;
+        let challenge = CommonProofChallenge::Alpha {
+            modulus_ordinal: variant.non_native_modulus_ordinal(modulus_reference)?,
+        };
+        let sampler_accounting = sampler_rows
+            .iter()
+            .copied()
+            .find(|row| row.challenge() == challenge)
+            .ok_or(ProofProfileError::InvalidSchedule)?;
+        if sampler_accounting.modulus() != context.resolved_modulus(modulus_reference)? {
+            return Err(ProofProfileError::InvalidSchedule);
+        }
+        let row = SelectedNonNativeIdentitySoundnessRow::new(
+            application_statement_schema_identifier,
+            challenge,
+            modulus_reference,
+            ordered_degrees,
+            complete_action_application_multiplicity,
+            sampler_accounting,
+        )?;
+        let required_count = row.minimum_repetition_count()?;
+        maximum_required_count = Some(
+            maximum_required_count.map_or(required_count, |current| current.max(required_count)),
+        );
+        soundness_rows.push(row);
+    }
+    Ok(maximum_required_count)
+}
+
+fn selected_non_native_identity_soundness_ledger(
+    compiled_plans: &[CompiledRelationPlan],
+) -> Result<Vec<SelectedNonNativeIdentitySoundnessRow>, ProofProfileError> {
+    let application_slot_ceilings = selected_proof_application_slot_ceilings()?;
+    let mut required_theta_count = None::<u16>;
+    let mut required_alpha_count = None::<u16>;
+    let mut soundness_rows = Vec::new();
+    for plan in compiled_plans {
+        let complete_action_application_multiplicity = application_slot_ceilings
+            .family_ceiling(plan.application_statement_schema_identifier())
+            .ok_or(ProofProfileError::InvalidSchedule)?;
+        let context =
+            selected_relation_plan_check_context(plan.application_statement_schema_identifier())
+                .ok_or(ProofProfileError::InvalidSchedule)?;
+        for variant in plan.variants() {
+            let sampler_rows = variant
+                .common_proof_transcript_schedule(&context)?
+                .ordered_application_challenge_sampler_accounting()
+                .map_err(|_| ProofProfileError::InvalidSchedule)?;
+            let starting_row_count = soundness_rows.len();
+            let theta_count = required_theta_repetition_count(
+                plan.application_statement_schema_identifier(),
+                variant,
+                complete_action_application_multiplicity,
+                &sampler_rows,
+                &mut soundness_rows,
+            )?;
+            let alpha_count = required_alpha_repetition_count(
+                plan.application_statement_schema_identifier(),
+                variant,
+                &context,
+                complete_action_application_multiplicity,
+                &sampler_rows,
+                &mut soundness_rows,
+            )?;
+            if soundness_rows.len() - starting_row_count != sampler_rows.len() {
+                return Err(ProofProfileError::InvalidSchedule);
+            }
+            required_theta_count = match (required_theta_count, theta_count) {
+                (Some(current), Some(required)) => Some(current.max(required)),
+                (None, Some(required)) => Some(required),
+                (current, None) => current,
+            };
+            required_alpha_count = match (required_alpha_count, alpha_count) {
+                (Some(current), Some(required)) => Some(current.max(required)),
+                (None, Some(required)) => Some(required),
+                (current, None) => current,
+            };
+        }
+    }
+    if required_theta_count != Some(PROOF_NON_NATIVE_THETA_REPETITION_COUNT)
+        || required_alpha_count != Some(PROOF_NON_NATIVE_ALPHA_REPETITION_COUNT)
+    {
+        return Err(ProofProfileError::InvalidSchedule);
+    }
+    let mut row_keys = BTreeSet::new();
+    for row in &soundness_rows {
+        if !row_keys.insert(row.key()) || !row.satisfies_declared_action_margin()? {
+            return Err(ProofProfileError::InvalidSchedule);
+        }
+    }
+    Ok(soundness_rows)
 }
 
 fn fri_fold_count_for_degree_bounds(
@@ -236,7 +535,8 @@ pub(crate) fn selected_relation_plan_check_context(
         } else {
             PROOF_UNIQUE_QUERY_COUNT
         },
-        non_native_modular_identity_challenge_count: PROOF_NON_NATIVE_IDENTITY_CHALLENGE_COUNT,
+        non_native_theta_repetition_count: PROOF_NON_NATIVE_THETA_REPETITION_COUNT,
+        non_native_alpha_repetition_count: PROOF_NON_NATIVE_ALPHA_REPETITION_COUNT,
         maximum_fiat_shamir_candidate_draws_per_output:
             PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT,
         resolved_moduli,
@@ -544,6 +844,8 @@ pub(crate) fn selected_relation_plans()
         vss_share_linkage,
         aggregate_threshold_share,
     ];
+    let _non_native_identity_soundness_ledger =
+        selected_non_native_identity_soundness_ledger(&compiled_plans)?;
     compiled_plans
         .into_iter()
         .map(|plan| {
@@ -712,83 +1014,57 @@ fn selected_evaluator_aggregate_variants(
     evaluator_candidate: &EvaluatorCandidateInput,
     ordered_relinearization_runtime_component_moduli: &[SuiteModulusReference],
 ) -> Result<Vec<EvaluatorKeyAggregateVariantInput>, ProofProfileError> {
-    let key_positions = selected_evaluator_program_set()
-        .and_then(|program| program.key_positions())
-        .map_err(|_| ProofProfileError::InvalidRelationPlan)?;
-    if key_positions.relinearization_catalog_levels() != evaluator_candidate.relinearization_levels
-        || key_positions.galois_catalog_positions().len()
-            != evaluator_candidate.galois_key_schedule.len()
-        || key_positions
-            .galois_catalog_positions()
-            .iter()
-            .zip(&evaluator_candidate.galois_key_schedule)
-            .any(|(position, expected)| {
-                (position.galois_element(), position.catalog_level()) != *expected
-            })
-    {
-        return Err(ProofProfileError::InvalidRelationPlan);
-    }
-    if key_positions.streams().len() != usize::from(FOUNDATION_PROFILE.option_count) {
-        return Err(ProofProfileError::InvalidRelationPlan);
-    }
     let commitment_data_modulus_indices = selected_commitment_data_modulus_indices()?;
-    let ordered_galois_runtime_component_moduli = evaluator_candidate
-        .galois_key_schedule
-        .iter()
-        .map(|(_, catalog_level)| {
-            let geometry = selected_trustee_evaluation_key_geometry(
-                evaluator_candidate,
-                *catalog_level,
-                commitment_data_modulus_indices.clone(),
-            )?;
-            Ok(trace_half_modulus_references(
-                &ordered_trustee_root_row_modulus_references(&geometry)?,
-            ))
-        })
-        .collect::<Result<Vec<_>, ProofProfileError>>()?;
-    key_positions
-        .streams()
-        .iter()
-        .map(|stream| {
-            let mut ordered_entries = stream
-                .relinearization_catalog_levels()
-                .iter()
-                .map(|level| {
-                    let schedule_position = key_positions
-                        .relinearization_catalog_levels()
-                        .binary_search(level)
-                        .map_err(|_| ProofProfileError::InvalidRelationPlan)?;
+    (1..=FOUNDATION_PROFILE.option_count)
+        .map(|top_count| {
+            let ordered_entries = selected_evaluator_entry_positions(top_count)
+                .map_err(|_| ProofProfileError::InvalidRelationPlan)?
+                .into_iter()
+                .map(|position| {
+                    let source_schedule_position = usize::try_from(position.schedule_position())
+                        .map_err(|_| ProofProfileError::CountOverflow)?;
+                    let ordered_runtime_component_moduli = match position.key_kind() {
+                        SelectedEvaluatorEntryKind::Relinearization { catalog_level } => {
+                            if evaluator_candidate
+                                .relinearization_levels
+                                .get(source_schedule_position)
+                                .copied()
+                                != Some(catalog_level)
+                            {
+                                return Err(ProofProfileError::InvalidRelationPlan);
+                            }
+                            ordered_relinearization_runtime_component_moduli.to_vec()
+                        }
+                        SelectedEvaluatorEntryKind::Galois {
+                            galois_element,
+                            catalog_level,
+                        } => {
+                            if evaluator_candidate
+                                .galois_key_schedule
+                                .get(source_schedule_position)
+                                .copied()
+                                != Some((galois_element, catalog_level))
+                            {
+                                return Err(ProofProfileError::InvalidRelationPlan);
+                            }
+                            let geometry = selected_trustee_evaluation_key_geometry(
+                                evaluator_candidate,
+                                catalog_level,
+                                commitment_data_modulus_indices.clone(),
+                            )?;
+                            trace_half_modulus_references(
+                                &ordered_trustee_root_row_modulus_references(&geometry)?,
+                            )
+                        }
+                    };
                     Ok(EvaluatorKeyAggregateEntryPlanInput {
-                        schedule_position: u32::try_from(schedule_position)
-                            .map_err(|_| ProofProfileError::CountOverflow)?,
-                        ordered_runtime_component_moduli:
-                            ordered_relinearization_runtime_component_moduli.to_vec(),
+                        schedule_position: position.schedule_position(),
+                        ordered_runtime_component_moduli,
                     })
                 })
                 .collect::<Result<Vec<_>, ProofProfileError>>()?;
-            ordered_entries.extend(
-                stream
-                    .galois_catalog_positions()
-                    .iter()
-                    .map(|position| {
-                        let schedule_position = key_positions
-                            .galois_catalog_positions()
-                            .binary_search(position)
-                            .map_err(|_| ProofProfileError::InvalidRelationPlan)?;
-                        Ok(EvaluatorKeyAggregateEntryPlanInput {
-                            schedule_position: u32::try_from(schedule_position)
-                                .map_err(|_| ProofProfileError::CountOverflow)?,
-                            ordered_runtime_component_moduli:
-                                ordered_galois_runtime_component_moduli
-                                    .get(schedule_position)
-                                    .ok_or(ProofProfileError::InvalidRelationPlan)?
-                                    .clone(),
-                        })
-                    })
-                    .collect::<Result<Vec<_>, ProofProfileError>>()?,
-            );
             Ok(EvaluatorKeyAggregateVariantInput {
-                top_count: stream.top_count(),
+                top_count,
                 ordered_entries,
             })
         })
@@ -950,6 +1226,162 @@ mod tests {
     }
 
     #[test]
+    fn selected_non_native_identity_counts_are_independently_minimal() {
+        let relation_artifacts = selected_relation_plans().expect("selected relation plans");
+        let compiled_plans = relation_artifacts
+            .iter()
+            .map(|artifact| artifact.compiled_plan().clone())
+            .collect::<Vec<_>>();
+        let rows = selected_non_native_identity_soundness_ledger(&compiled_plans)
+            .expect("selected non-native identity soundness ledger");
+
+        let ballot_theta_row = rows
+            .iter()
+            .find(|row| {
+                row.application_statement_schema_identifier
+                    == ProofApplicationSlotCeilings::BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER
+                    && row.arithmetic_modulus_reference == SuiteModulusReference::plaintext()
+            })
+            .expect("selected ballot plaintext theta row");
+        assert!(matches!(
+            ballot_theta_row.challenge,
+            CommonProofChallenge::Theta { .. }
+        ));
+        assert_eq!(
+            ballot_theta_row.ordered_bad_polynomial_degrees,
+            vec![65_534; 4]
+        );
+        assert_eq!(
+            ballot_theta_row.complete_action_application_multiplicity,
+            20
+        );
+        assert_eq!(
+            ballot_theta_row.bad_set_numerator,
+            BigUint::from(65_534_u64).pow(4)
+        );
+        assert_eq!(
+            ballot_theta_row.sample_space_denominator,
+            BigUint::from(PROOF_BASE_FIELD_MODULUS).pow(4),
+        );
+        assert_eq!(ballot_theta_row.minimum_repetition_count(), Ok(4));
+        assert!(
+            ballot_theta_row
+                .satisfies_declared_action_margin()
+                .expect("theta margin")
+        );
+        assert_eq!(
+            ballot_theta_row.sampler_accounting.modulus(),
+            PROOF_BASE_FIELD_MODULUS
+        );
+        assert_eq!(ballot_theta_row.sampler_accounting.coordinate_count(), 4);
+        assert_eq!(
+            ballot_theta_row.sampler_accounting.candidate_byte_length(),
+            32
+        );
+        assert_eq!(
+            ballot_theta_row
+                .sampler_accounting
+                .accepted_vector_byte_length(),
+            32
+        );
+        assert_eq!(
+            ballot_theta_row
+                .sampler_accounting
+                .maximum_candidate_draw_count(),
+            128
+        );
+        assert_eq!(
+            ballot_theta_row
+                .sampler_accounting
+                .chain_handle_xof_query_count(),
+            1
+        );
+        assert_eq!(
+            ballot_theta_row
+                .sampler_accounting
+                .candidate_xof_query_count_ceiling(),
+            128
+        );
+        assert_eq!(
+            ballot_theta_row
+                .sampler_accounting
+                .total_xof_query_count_ceiling(),
+            129
+        );
+        assert_eq!(
+            minimum_non_native_identity_repetition_count(
+                PROOF_BASE_FIELD_MODULUS,
+                &[65_534; 3],
+                20,
+            ),
+            Err(ProofProfileError::InvalidSchedule),
+        );
+
+        let vss_alpha_row = rows
+            .iter()
+            .find(|row| {
+                row.application_statement_schema_identifier
+                    == ProofApplicationSlotCeilings::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER
+                    && row.arithmetic_modulus_reference == SuiteModulusReference::data(0)
+            })
+            .expect("selected VSS first-data-modulus alpha row");
+        assert!(matches!(
+            vss_alpha_row.challenge,
+            CommonProofChallenge::Alpha { .. }
+        ));
+        assert_eq!(vss_alpha_row.ordered_bad_polynomial_degrees, vec![9; 7]);
+        assert_eq!(vss_alpha_row.complete_action_application_multiplicity, 10);
+        assert_eq!(vss_alpha_row.bad_set_numerator, BigUint::from(9_u8).pow(7));
+        assert_eq!(
+            vss_alpha_row.sample_space_denominator,
+            BigUint::from(DATA_PRIMES[0]).pow(7),
+        );
+        assert_eq!(vss_alpha_row.minimum_repetition_count(), Ok(7));
+        assert!(
+            vss_alpha_row
+                .satisfies_declared_action_margin()
+                .expect("alpha margin")
+        );
+        assert_eq!(vss_alpha_row.sampler_accounting.modulus(), DATA_PRIMES[0]);
+        assert_eq!(vss_alpha_row.sampler_accounting.coordinate_count(), 7);
+        assert_eq!(vss_alpha_row.sampler_accounting.candidate_byte_length(), 28);
+        assert_eq!(
+            vss_alpha_row
+                .sampler_accounting
+                .accepted_vector_byte_length(),
+            56
+        );
+        assert_eq!(
+            vss_alpha_row
+                .sampler_accounting
+                .maximum_candidate_draw_count(),
+            128
+        );
+        assert_eq!(
+            vss_alpha_row
+                .sampler_accounting
+                .chain_handle_xof_query_count(),
+            1
+        );
+        assert_eq!(
+            vss_alpha_row
+                .sampler_accounting
+                .candidate_xof_query_count_ceiling(),
+            128
+        );
+        assert_eq!(
+            vss_alpha_row
+                .sampler_accounting
+                .total_xof_query_count_ceiling(),
+            129
+        );
+        assert_eq!(
+            minimum_non_native_identity_repetition_count(DATA_PRIMES[0], &[9; 6], 10),
+            Err(ProofProfileError::InvalidSchedule),
+        );
+    }
+
+    #[test]
     fn selected_contexts_bind_each_family_schedule() {
         let context = selected_relation_plan_check_context(
             ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER,
@@ -1026,7 +1458,7 @@ mod tests {
             assert_eq!(public_aggregate_context.quotient_component_count, 9);
             assert_eq!(
                 public_aggregate_context.quotient_component_degree_bound_exclusive,
-                32_768
+                16_384
             );
             assert_eq!(
                 public_aggregate_context.evaluation_domain_generator,
@@ -1048,11 +1480,15 @@ mod tests {
         let quotient_coefficient_count = numerator_maximum_degree - trace_domain_size + 1;
         let quotient_capacity = u64::from(SELECTED_PUBLIC_AGGREGATE_QUOTIENT_COMPONENT_COUNT)
             * SELECTED_PUBLIC_AGGREGATE_QUOTIENT_COMPONENT_DEGREE_BOUND_EXCLUSIVE;
-        assert_eq!(numerator_maximum_degree, 327_670);
-        assert_eq!(quotient_maximum_degree, 294_902);
-        assert_eq!(quotient_coefficient_count, 294_903);
-        assert_eq!(quotient_capacity, 294_912);
-        assert!(numerator_maximum_degree > SELECTED_OPENING_DEGREE_BOUND_EXCLUSIVE);
+        let one_fewer_component_capacity =
+            u64::from(SELECTED_PUBLIC_AGGREGATE_QUOTIENT_COMPONENT_COUNT - 1)
+                * SELECTED_PUBLIC_AGGREGATE_QUOTIENT_COMPONENT_DEGREE_BOUND_EXCLUSIVE;
+        assert_eq!(numerator_maximum_degree, 163_830);
+        assert_eq!(quotient_maximum_degree, 147_446);
+        assert_eq!(quotient_coefficient_count, 147_447);
+        assert_eq!(quotient_capacity, 147_456);
+        assert_eq!(one_fewer_component_capacity, 131_072);
+        assert!(quotient_coefficient_count > one_fewer_component_capacity);
         assert!(quotient_coefficient_count <= quotient_capacity);
     }
 
@@ -1080,13 +1516,20 @@ mod tests {
         let key_positions = selected_evaluator_program_set()
             .and_then(|program| program.key_positions())
             .expect("selected evaluator key positions");
-        assert_eq!(key_positions.galois_catalog_positions().len(), 3);
-        assert!(
+        assert_eq!(
             key_positions
                 .galois_catalog_positions()
                 .iter()
-                .all(|position| position.catalog_level() == 15),
-            "the complete three-entry Galois inventory stays at the comparison-output level",
+                .map(|position| (position.galois_element(), position.catalog_level()))
+                .collect::<Vec<_>>(),
+            vec![
+                (15, 14),
+                (19, 14),
+                (219, 14),
+                (257, 18),
+                (1_025, 18),
+                (8_193, 18),
+            ]
         );
         let evaluator_entry_count_by_top_count = key_positions
             .streams()
@@ -1142,6 +1585,10 @@ mod tests {
         )
         .variants()
         .len();
+        let galois_entry_count = EvaluatorCandidateInput::implemented()
+            .expect("selected evaluator candidate")
+            .galois_key_schedule
+            .len();
         let expected_root_edge_count = participant_count * sharing_limb_count
             + participant_count * participant_count * sharing_limb_count
             + participant_count * 2
@@ -1152,6 +1599,7 @@ mod tests {
             + participant_count
             + round_one_aggregate_variant_count * participant_count * 2
             + round_two_variant_count * participant_count * 4
+            + galois_variant_count * participant_count * galois_entry_count
             + evaluator_entry_count_by_top_count
                 .iter()
                 .map(|(_, evaluator_entry_count)| evaluator_entry_count * participant_count)
@@ -1216,7 +1664,7 @@ mod tests {
             expected_proof_created_column_count,
             expected_constraint_count,
         ) in [
-            (share_linkage, 112, 3_003, 3_799),
+            (share_linkage, 112, 3_003, 3_767),
             (aggregate_threshold, 88, 2_176, 2_672),
         ] {
             let quotient_decomposition_stride = relation

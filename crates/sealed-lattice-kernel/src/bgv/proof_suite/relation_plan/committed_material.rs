@@ -2768,7 +2768,8 @@ mod tests {
             final_polynomial_degree_bound_exclusive: 8,
             unique_query_count: u32::try_from(unique_query_count)
                 .expect("test unique-query count fits"),
-            non_native_modular_identity_challenge_count: 1,
+            non_native_theta_repetition_count: 1,
+            non_native_alpha_repetition_count: 1,
             maximum_fiat_shamir_candidate_draws_per_output: 128,
             resolved_moduli: vec![ResolvedSuiteModulus::new(
                 SuiteModulusReference::data(0),

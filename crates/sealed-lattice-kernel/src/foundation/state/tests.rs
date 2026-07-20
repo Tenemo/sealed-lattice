@@ -225,6 +225,16 @@ fn verified_exact_output_stream(
         .expect("exact-output stream verifies")
 }
 
+fn verified_target_release_exact_output_stream() -> VerifiedCanonicalStreamSummary {
+    let exact_output_bytes =
+        crate::foundation::canonical_stream::canonical_target_release_exact_output_fixture(
+            b"target identifier partial decryption",
+            b"target order partial decryption",
+            b"malicious target-share proof",
+        );
+    verified_exact_output_stream(StateCapabilityKind::TargetRelease, &exact_output_bytes)
+}
+
 fn expect_refusal<Value>(
     result: VerificationResult<Value>,
     expected_refusal_reason: RefusalReason,
@@ -553,7 +563,7 @@ fn state_verifier_binds_reservation_quorum_and_exact_output() {
             &verified_reservation,
             &output_carrier,
             &output_certificate,
-            verified_exact_output_stream(StateCapabilityKind::TargetRelease, EXACT_OUTPUT_BYTES),
+            verified_target_release_exact_output_stream(),
         ),
         RefusalReason::WrongContext,
     );
@@ -741,10 +751,7 @@ fn setup_state_capabilities_are_reservation_only() {
                 &verified_reservation,
                 b"not an output intent",
                 b"not a certificate",
-                verified_exact_output_stream(
-                    StateCapabilityKind::TargetRelease,
-                    EXACT_OUTPUT_BYTES,
-                ),
+                verified_target_release_exact_output_stream(),
             ),
             RefusalReason::WrongTypeOrLength,
         );

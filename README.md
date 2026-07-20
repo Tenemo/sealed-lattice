@@ -53,7 +53,12 @@ Phone byte, memory, storage, and time values are planning targets and measured
 optimization signals, not verifier inputs or cryptographic acceptance gates.
 Reasonable target variance does not invalidate a verified suite or capability;
 physical-phone evidence separately determines which exact device and build
-combinations may be described as supported.
+combinations may be described as supported. Prototype completion requires the
+frozen exact `n = 10` suite and build to complete the separate physical-phone
+acceptance procedure on one physical Samsung Galaxy S22 Ultra in both Chrome
+and Firefox. Each exact browser and build combination is reported separately.
+Failure in either browser leaves runtime evidence incomplete without
+invalidating the cryptographic suite.
 
 Transcript and mailbox services only relay bytes. Correctness and acceptance must come from canonical encodings, recomputed hashes and roots, signatures, proof verification, and externally anchored poll and roster data.
 

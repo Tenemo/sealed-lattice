@@ -107,6 +107,10 @@ mod trustee_evaluation_key;
 mod verified_key_relation_column_evaluator;
 mod vss_share_linkage;
 
+#[cfg(test)]
+pub(crate) const COMMITTED_MATERIAL_TRACE_PACKING_FACTOR: u64 =
+    committed_material::COMMITTED_MATERIAL_TRACE_PACKING_FACTOR;
+
 pub(crate) use aggregate_threshold_share::compile_aggregate_threshold_share_relation_plan;
 pub(crate) use ballot_validity::{
     BallotValidityColumnTransform, BallotValidityRelationPlanInput,

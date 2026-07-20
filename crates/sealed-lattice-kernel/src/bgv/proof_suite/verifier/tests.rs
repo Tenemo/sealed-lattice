@@ -539,6 +539,9 @@ fn build_selected_evaluator_auxiliary_capabilities() -> Vec<VerifiedEvaluatorAux
                     .wrapping_add(u64::try_from(catalog_level).expect("level fits")),
             )
             .expect("small coefficient is canonical"),
+            ProofBaseFieldElement::ZERO,
+            ProofBaseFieldElement::ZERO,
+            ProofBaseFieldElement::ZERO,
         ]];
         let tree = SetupPublicPolynomialTree::construct(SetupPublicPolynomialTreeInput {
             context: &context,
@@ -612,6 +615,9 @@ fn evaluator_public_polynomial_tree(
     let coefficients = vec![vec![
         ProofBaseFieldElement::from_canonical(coefficient_value)
             .expect("small test coefficient is canonical"),
+        ProofBaseFieldElement::ZERO,
+        ProofBaseFieldElement::ZERO,
+        ProofBaseFieldElement::ZERO,
     ]];
     SetupPublicPolynomialTree::construct(SetupPublicPolynomialTreeInput {
         context: &context,

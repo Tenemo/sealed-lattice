@@ -1,4 +1,5 @@
 use super::*;
+use crate::bgv::direct_ballots::PAIR_CHARACTER_RING_DEGREE;
 use crate::foundation::{CanonicalItem, CanonicalTuple};
 
 fn base(value: u64) -> ProofBaseFieldElement {
@@ -51,6 +52,44 @@ fn naive_ordinary_product(
         }
     }
     output
+}
+
+fn direct_negacyclic_transpose_rows(
+    multiplicand: &[ProofBaseFieldElement],
+    theta: ProofBaseFieldElement,
+) -> Vec<ProofBaseFieldElement> {
+    assert!(!multiplicand.is_empty());
+    let row_count = multiplicand.len();
+    let mut theta_powers = Vec::with_capacity(row_count);
+    let mut current_power = ProofBaseFieldElement::ONE;
+    for _ in 0..row_count {
+        theta_powers.push(current_power);
+        current_power = current_power.multiply(theta);
+    }
+    let nonzero_terms = multiplicand
+        .iter()
+        .copied()
+        .enumerate()
+        .filter(|(_, coefficient)| *coefficient != ProofBaseFieldElement::ZERO)
+        .collect::<Vec<_>>();
+
+    (0..row_count)
+        .map(|row_ordinal| {
+            let output_ordinal = row_count - 1 - row_ordinal;
+            nonzero_terms.iter().copied().fold(
+                ProofBaseFieldElement::ZERO,
+                |sum, (coefficient_ordinal, coefficient)| {
+                    let unreduced_exponent = coefficient_ordinal + output_ordinal;
+                    let term = coefficient.multiply(theta_powers[unreduced_exponent % row_count]);
+                    if unreduced_exponent >= row_count {
+                        sum.subtract(term)
+                    } else {
+                        sum.add(term)
+                    }
+                },
+            )
+        })
+        .collect()
 }
 
 fn theta_fingerprint(
@@ -172,6 +211,106 @@ fn convolution_transposes_match_all_checked_convolution_kinds() {
                     theta.canonical(),
                 );
             }
+        }
+    }
+}
+
+#[test]
+fn negacyclic_transpose_rows_match_direct_oracle_on_bounded_rings() {
+    for row_count in [1_usize, 2, 4, 8, 16, 32, 64] {
+        let mut first_impulse = vec![ProofBaseFieldElement::ZERO; row_count];
+        first_impulse[0] = signed_base(-1);
+        let mut last_impulse = vec![ProofBaseFieldElement::ZERO; row_count];
+        last_impulse[row_count - 1] = signed_base(-2);
+        let dense_mixed_sign = (0..row_count)
+            .map(|row_ordinal| match row_ordinal % 5 {
+                0 => signed_base(0),
+                1 => signed_base(1),
+                2 => signed_base(-1),
+                3 => signed_base(2),
+                _ => signed_base(-2),
+            })
+            .collect::<Vec<_>>();
+        let multiplicand_cases = [
+            ("zero", vec![ProofBaseFieldElement::ZERO; row_count]),
+            ("first impulse", first_impulse),
+            ("last impulse", last_impulse),
+            ("dense mixed sign", dense_mixed_sign),
+        ];
+
+        for (case_name, multiplicand) in multiplicand_cases {
+            for theta in [
+                base(0),
+                base(1),
+                base(2),
+                base(super::super::PROOF_BASE_FIELD_MODULUS / 2),
+                base(super::super::PROOF_BASE_FIELD_MODULUS - 2),
+                base(super::super::PROOF_BASE_FIELD_MODULUS - 1),
+            ] {
+                let suffix = suffix_evaluation_rows(&multiplicand, theta);
+                let actual = convolution_transpose_rows(
+                    RelationIntegerLiftConvolutionKind::Negacyclic,
+                    &multiplicand,
+                    &suffix,
+                    theta,
+                )
+                .expect("the bounded negacyclic transpose is valid");
+                let expected = direct_negacyclic_transpose_rows(&multiplicand, theta);
+                for (row_ordinal, (actual_row, expected_row)) in
+                    actual.iter().copied().zip(expected).enumerate()
+                {
+                    assert_eq!(
+                        actual_row,
+                        expected_row,
+                        "case={case_name}, row_count={row_count}, row={row_ordinal}, theta={}",
+                        theta.canonical(),
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn selected_negacyclic_transpose_rows_match_sparse_direct_oracle() {
+    let mut multiplicand = vec![ProofBaseFieldElement::ZERO; PAIR_CHARACTER_RING_DEGREE];
+    for (coefficient_ordinal, coefficient) in [
+        (0, -1),
+        (1, 2),
+        (PAIR_CHARACTER_RING_DEGREE / 2 - 1, -3),
+        (PAIR_CHARACTER_RING_DEGREE / 2, 5),
+        (PAIR_CHARACTER_RING_DEGREE - 2, -7),
+        (PAIR_CHARACTER_RING_DEGREE - 1, 11),
+    ] {
+        multiplicand[coefficient_ordinal] = signed_base(coefficient);
+    }
+
+    for theta in [
+        base(0),
+        base(1),
+        base(2),
+        base(super::super::PROOF_BASE_FIELD_MODULUS / 2),
+        base(super::super::PROOF_BASE_FIELD_MODULUS - 2),
+        base(super::super::PROOF_BASE_FIELD_MODULUS - 1),
+    ] {
+        let suffix = suffix_evaluation_rows(&multiplicand, theta);
+        let actual = convolution_transpose_rows(
+            RelationIntegerLiftConvolutionKind::Negacyclic,
+            &multiplicand,
+            &suffix,
+            theta,
+        )
+        .expect("the selected negacyclic transpose is valid");
+        let expected = direct_negacyclic_transpose_rows(&multiplicand, theta);
+        for (row_ordinal, (actual_row, expected_row)) in
+            actual.iter().copied().zip(expected).enumerate()
+        {
+            assert_eq!(
+                actual_row,
+                expected_row,
+                "selected row={row_ordinal}, theta={}",
+                theta.canonical(),
+            );
         }
     }
 }
