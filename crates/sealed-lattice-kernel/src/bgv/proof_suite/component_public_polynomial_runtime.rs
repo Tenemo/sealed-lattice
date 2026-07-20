@@ -8,7 +8,6 @@
 
 use crate::foundation::{
     CanonicalStreamDomain, CanonicalStreamVerifier, RefusalReason, StreamDescriptor,
-    VerifiedCanonicalStreamSummary,
 };
 
 use super::selected_profile::SELECTED_EVALUATION_DOMAIN_SIZE;
@@ -45,10 +44,6 @@ pub(crate) struct RecomputedKeySwitchComponentTree {
 }
 
 impl RecomputedKeySwitchComponentTree {
-    pub(crate) const fn material(&self) -> &VerifiedKeySwitchComponentMaterial {
-        &self.material
-    }
-
     pub(crate) const fn tree(&self) -> &SetupPublicPolynomialTree {
         &self.tree
     }
@@ -68,19 +63,10 @@ impl RecomputedKeySwitchComponentTree {
 /// before the circular application-statement hash exists, then performs a
 /// separate ownership-bound material pass after the statement is fixed.
 pub(crate) struct DescriptorAuthenticatedKeySwitchComponentTree {
-    canonical_stream_summary: VerifiedCanonicalStreamSummary,
     tree: SetupPublicPolynomialTree,
 }
 
 impl DescriptorAuthenticatedKeySwitchComponentTree {
-    pub(crate) const fn canonical_stream_summary(&self) -> &VerifiedCanonicalStreamSummary {
-        &self.canonical_stream_summary
-    }
-
-    pub(crate) const fn tree(&self) -> &SetupPublicPolynomialTree {
-        &self.tree
-    }
-
     pub(crate) fn into_tree(self) -> SetupPublicPolynomialTree {
         self.tree
     }
@@ -201,8 +187,7 @@ impl DescriptorAuthenticatedKeySwitchComponentPublicPolynomialStream {
             self.cancel();
             return Err(RefusalReason::WrongTypeOrLength.into());
         }
-        let canonical_stream_summary = self
-            .canonical_stream
+        self.canonical_stream
             .take()
             .ok_or(RefusalReason::ConsumedState)?
             .finish_with_summary()
@@ -217,10 +202,7 @@ impl DescriptorAuthenticatedKeySwitchComponentPublicPolynomialStream {
                 .half_polynomial_degree_bound_exclusive()?,
             ordered_trace_rows: &self.ordered_trace_columns,
         })?;
-        Ok(DescriptorAuthenticatedKeySwitchComponentTree {
-            canonical_stream_summary,
-            tree,
-        })
+        Ok(DescriptorAuthenticatedKeySwitchComponentTree { tree })
     }
 
     pub(crate) fn cancel(&mut self) {

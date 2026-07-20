@@ -51,9 +51,11 @@ use super::{
 #[cfg(test)]
 use crate::bgv::proof_suite::SelectedEvaluatorEntryPosition;
 
+#[cfg(test)]
 pub(crate) const SELECTED_MAXIMUM_BALLOT_ATTEMPTS_PER_PARTICIPANT: u16 = 3;
 pub(crate) const SELECTED_MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT: u32 = 64;
 pub(crate) const SELECTED_MAXIMUM_PUBLIC_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT: u32 = 128;
+#[cfg(test)]
 pub(crate) const SELECTED_MAXIMUM_CANDIDATE_PACKAGES_PER_ACTION: u32 = 20;
 
 /// Non-serializable authority for the exact selected cryptographic suite.

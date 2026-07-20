@@ -1,9 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::bgv::proof_suite::COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH;
-use crate::foundation::{
-    CanonicalItem, CanonicalItemType, hash_foundation_tuple_512,
-};
+use crate::foundation::{CanonicalItem, CanonicalItemType, hash_foundation_tuple_512};
 
 use super::super::{
     PROOF_CHALLENGE_EXTENSION_DEGREE,

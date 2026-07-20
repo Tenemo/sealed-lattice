@@ -11,26 +11,22 @@ mod tests;
 
 pub(in crate::bgv) use accepted_setup::{
     BrowserOwnedAggregateThresholdShareLimb, CanonicalAcceptedSetupPackage,
-    CanonicalPackageStreamKind, SelectedSetupGenerationLifecycleState,
-    SetupGaloisGenerationPreparationError, SetupGeneratedCommittedMaterial,
-    SetupGeneratedGaloisEntry, SetupGeneratedGaloisSourceAuthority,
-    SetupGeneratedGaloisSourceComponent, SetupGeneratedKeySwitchComponent,
-    SetupGeneratedRelinearizationAggregateSourceAuthority,
+    CanonicalPackageStreamKind, SetupGaloisGenerationPreparationError,
+    SetupGeneratedCommittedMaterial, SetupGeneratedGaloisEntry,
+    SetupGeneratedGaloisSourceAuthority, SetupGeneratedGaloisSourceComponent,
+    SetupGeneratedKeySwitchComponent, SetupGeneratedRelinearizationAggregateSourceAuthority,
     SetupGeneratedRelinearizationComponentSource,
     SetupGeneratedRelinearizationRoundOneSourceAuthority, SetupGenerationAnchorOpening,
     SetupGenerationAuthorityHandle, SetupGenerationGaloisApplication,
     SetupGenerationGaloisBatchSource, SetupGenerationGaloisPreparationSource,
     SetupGenerationKeyRelationApplication, SetupGenerationKeyRelationPreparationSource,
     SetupGenerationKeyRelationSource, SetupGenerationPublicKeyShareSourceHandle,
-    SetupGenerationRecipientPayloadSourceHandle,
-    SetupGenerationRelinearizationAggregateDescriptorDimensions,
-    SetupGenerationRelinearizationRoundOneApplication,
+    SetupGenerationRecipientPayloadSourceHandle, SetupGenerationRelinearizationRoundOneApplication,
     SetupGenerationRelinearizationRoundOnePreparationSource,
     SetupGenerationRelinearizationRoundOneSource, SetupGenerationRelinearizationRoundTwoActivation,
     SetupGenerationRelinearizationRoundTwoApplication,
     SetupGenerationRelinearizationRoundTwoPreparationSource,
-    SetupGenerationRelinearizationRoundTwoSource,
-    SetupGenerationRetainedStreamDescriptorDimensions, SetupGenerationVssApplication,
+    SetupGenerationRelinearizationRoundTwoSource, SetupGenerationVssApplication,
     SetupGenerationVssPreparationSource, SetupKeyRelationGenerationPreparationError,
     SetupKeyRelationProofFamily, SetupRelinearizationAggregateConstruction,
     SetupRelinearizationAggregateSourceReadRequest, SetupRelinearizationGenerationPreparationError,
@@ -40,7 +36,6 @@ pub(in crate::bgv) use accepted_setup::{
     VerifiedEvaluatorCommonComponentAuthority, VerifiedEvaluatorExecutionAuthority,
     absorb_setup_generation_relinearization_round_two_activation_pair,
     accepted_package_statement_source,
-    accepted_setup_participant_target_release_lease_allocation_byte_lengths,
     add_generated_proof_source_to_accepted_setup_package_builder,
     begin_setup_generation_relinearization_round_two_activation,
     cancel_collective_public_key_verification_terminal_source_reservation,
@@ -77,8 +72,6 @@ pub(in crate::bgv) use accepted_setup::{
     retain_relinearization_round_one_aggregate_verification_terminal_source,
     retain_relinearization_round_one_verification_terminal_source,
     retain_relinearization_round_two_verification_terminal_source,
-    selected_setup_generation_relinearization_round_two_activation_memory_accounting,
-    selected_setup_generation_retained_memory_accounting,
     setup_generation_public_key_share_body_byte_length,
     setup_generation_public_key_share_source_byte_length,
     setup_generation_recipient_vss_payload_byte_length,
@@ -99,14 +92,13 @@ pub(in crate::bgv) use accepted_setup::{
     with_setup_generation_relinearization_round_two_witness, with_setup_generation_vss_material,
     with_verified_accepted_setup_authority, with_verified_participant_target_release_source,
 };
-pub(in crate::bgv) use accepted_setup::{
-    GeneratedPrivateVssMailboxCorpusInput, VerifiedAggregateThresholdShareTerminal,
-    VerifiedGeneratedPrivateVssMailboxCorpusByteLengthCatalog, VerifiedPublicRandomness,
-    VerifiedVssQualificationTerminals, VerifiedVssShareLinkageTerminal,
-    derive_recipient_input_root, verify_public_randomness_board_sources,
-};
 pub(crate) use accepted_setup::{
     SetupGenerationDealerPublicRecordSource, resolve_setup_generation_dealer_public_record_source,
+};
+pub(in crate::bgv) use accepted_setup::{
+    VerifiedAggregateThresholdShareTerminal, VerifiedPublicRandomness,
+    VerifiedVssQualificationTerminals, VerifiedVssShareLinkageTerminal,
+    derive_recipient_input_root, verify_public_randomness_board_sources,
 };
 #[cfg(test)]
 pub(crate) use commitment::LatticeAnchorCommitment;
@@ -114,7 +106,6 @@ pub(crate) use commitment::{
     SETUP_COMMITMENT_HIDING_ERROR_WIDTH, SETUP_COMMITMENT_HIDING_SECRET_WIDTH,
     SETUP_COMMITMENT_MODULE_RANK, SETUP_COMMITMENT_MODULUS_LIMB_INDICES,
     parse_lattice_anchor_commitment_canonical_bytes,
-    selected_lattice_anchor_commitment_canonical_byte_length,
 };
 pub(crate) use commitment::{
     compute_lattice_anchor_commitment, lattice_anchor_commitment_canonical_bytes,

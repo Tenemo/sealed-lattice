@@ -71,6 +71,41 @@ impl RelationApplicationChallengeAssignment {
     }
 }
 
+pub(crate) struct DeepCompositionVerificationInput<'input> {
+    context: &'input RelationPlanCheckContext,
+    application_challenges: &'input [RelationApplicationChallengeAssignment],
+    composition_challenges: &'input [ProofChallengeExtensionElement],
+    deep_points: &'input [ProofChallengeExtensionElement],
+    opening_points: &'input [ProofChallengeExtensionElement],
+    ordered_deep_evaluations: &'input [ProofChallengeExtensionElement],
+}
+
+impl<'input> DeepCompositionVerificationInput<'input> {
+    pub(crate) const fn new(
+        context: &'input RelationPlanCheckContext,
+        application_challenges: &'input [RelationApplicationChallengeAssignment],
+        composition_challenges: &'input [ProofChallengeExtensionElement],
+        deep_points: &'input [ProofChallengeExtensionElement],
+        opening_points: &'input [ProofChallengeExtensionElement],
+        ordered_deep_evaluations: &'input [ProofChallengeExtensionElement],
+    ) -> Self {
+        Self {
+            context,
+            application_challenges,
+            composition_challenges,
+            deep_points,
+            opening_points,
+            ordered_deep_evaluations,
+        }
+    }
+
+    pub(crate) const fn ordered_deep_evaluations(
+        &self,
+    ) -> &'input [ProofChallengeExtensionElement] {
+        self.ordered_deep_evaluations
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct RelationConstraintEvaluation {
     pub(crate) numerator: ProofChallengeExtensionElement,
@@ -309,32 +344,6 @@ impl RelationPlanVariant {
         })
     }
 
-    /// Evaluates an expression program using the same opcode interpreter as
-    /// the generated relation constraints. The caller must first obtain the
-    /// checked application challenge catalog for this variant.
-    pub(crate) fn evaluate_expression_program_at_point<ColumnValue>(
-        &self,
-        context: &RelationPlanCheckContext,
-        expression: &[RelationExpressionInstruction],
-        evaluation_point: ProofChallengeExtensionElement,
-        checked_challenges: &CheckedRelationApplicationChallenges,
-        column_value: &mut ColumnValue,
-    ) -> Result<ProofChallengeExtensionElement, RelationPlanError>
-    where
-        ColumnValue:
-            FnMut(u32, bool, u64) -> Result<ProofChallengeExtensionElement, RelationPlanError>,
-    {
-        evaluate_program(
-            self,
-            context,
-            expression,
-            evaluation_point,
-            checked_challenges,
-            column_value,
-            false,
-        )
-    }
-
     pub(crate) fn evaluate_constraints_at_point<ColumnValue>(
         &self,
         context: &RelationPlanCheckContext,
@@ -404,18 +413,21 @@ impl RelationPlanVariant {
     /// value list is indexed only by the checked opening-claim catalog.
     pub(crate) fn verify_deep_composition<VerifierSequenceValue>(
         &self,
-        context: &RelationPlanCheckContext,
-        application_challenges: &[RelationApplicationChallengeAssignment],
-        composition_challenges: &[ProofChallengeExtensionElement],
-        deep_points: &[ProofChallengeExtensionElement],
-        opening_points: &[ProofChallengeExtensionElement],
-        ordered_deep_evaluations: &[ProofChallengeExtensionElement],
+        input: DeepCompositionVerificationInput<'_>,
         mut verifier_sequence_value: VerifierSequenceValue,
     ) -> Result<(), RelationPlanError>
     where
         VerifierSequenceValue:
             FnMut(u32, ProofChallengeExtensionElement) -> Option<ProofChallengeExtensionElement>,
     {
+        let DeepCompositionVerificationInput {
+            context,
+            application_challenges,
+            composition_challenges,
+            deep_points,
+            opening_points,
+            ordered_deep_evaluations,
+        } = input;
         if deep_points.len() != usize::from(context.deep_point_count)
             || opening_points.len() != self.ordered_opening_points.len()
             || ordered_deep_evaluations.len() != self.ordered_opening_claims.len()
@@ -921,7 +933,7 @@ pub(super) fn signed_rotation_exponent(
 }
 
 fn evaluate_program<ColumnValue>(
-    variant: &RelationPlanVariant,
+    _variant: &RelationPlanVariant,
     context: &RelationPlanCheckContext,
     program: &[RelationExpressionInstruction],
     evaluation_point: ProofChallengeExtensionElement,
@@ -988,15 +1000,14 @@ where
             } if !zeroifier_program => {
                 stack.push(application_challenges.get(*challenge_role, role_coordinates)?)
             }
+            #[cfg(test)]
             RelationExpressionInstruction::RadixConvolutionCoefficient {
                 convolution_ordinal,
                 coefficient_ordinal,
             } if !zeroifier_program => stack.push(evaluate_radix_convolution_coefficient(
-                variant,
+                _variant,
                 *convolution_ordinal,
                 *coefficient_ordinal,
-                application_challenges,
-                context,
                 column_value,
             )?),
             RelationExpressionInstruction::TraceDomainExceptRoots {
@@ -1024,12 +1035,6 @@ where
             RelationExpressionInstruction::NonnegativePower(exponent) => {
                 let value = stack.pop().ok_or(RelationPlanError::InvalidConstraint)?;
                 stack.push(value.power(*exponent));
-            }
-            RelationExpressionInstruction::FrobeniusConjugate(conjugate_index)
-                if !zeroifier_program =>
-            {
-                let value = stack.pop().ok_or(RelationPlanError::InvalidConstraint)?;
-                stack.push(value.frobenius(*conjugate_index));
             }
             _ => {
                 return Err(if zeroifier_program {
@@ -1096,12 +1101,11 @@ fn evaluate_trace_domain_except_roots(
         .map_err(|_| RelationPlanError::InvalidZeroifier)
 }
 
+#[cfg(test)]
 fn evaluate_radix_convolution_coefficient<ColumnValue>(
     variant: &RelationPlanVariant,
     convolution_ordinal: u32,
     coefficient_ordinal: u32,
-    application_challenges: &CheckedRelationApplicationChallenges,
-    context: &RelationPlanCheckContext,
     column_value: &mut ColumnValue,
 ) -> Result<ProofChallengeExtensionElement, RelationPlanError>
 where
@@ -1142,55 +1146,6 @@ where
                         })
                         .collect::<Result<Vec<_>, _>>()?
                 }
-                super::RelationRadixFactorDescriptor::TranscriptChallengeDigits {
-                    challenge_role,
-                    role_coordinates,
-                    digit_count,
-                } => {
-                    let mut remaining =
-                        application_challenges.get_u64(*challenge_role, role_coordinates)?;
-                    let mut digits = Vec::with_capacity(usize::from(*digit_count));
-                    for _ in 0..*digit_count {
-                        let digit = remaining % convolution.radix;
-                        remaining /= convolution.radix;
-                        digits.push(
-                            ProofBaseFieldElement::from_canonical(digit)
-                                .map(ProofChallengeExtensionElement::from_base)
-                                .map_err(|_| RelationPlanError::InvalidConstraint)?,
-                        );
-                    }
-                    if remaining != 0 {
-                        return Err(RelationPlanError::InvalidChallengeCatalog);
-                    }
-                    digits
-                }
-                super::RelationRadixFactorDescriptor::NonNativeModulusDigits {
-                    modulus_reference,
-                    multiplier,
-                    digit_count,
-                } => {
-                    if *multiplier == 0 {
-                        return Err(RelationPlanError::InvalidModulus);
-                    }
-                    let mut remaining = context
-                        .resolved_modulus(*modulus_reference)?
-                        .checked_mul(u64::from(*multiplier))
-                        .ok_or(RelationPlanError::IntegerBoundOverflow)?;
-                    let mut digits = Vec::with_capacity(usize::from(*digit_count));
-                    for _ in 0..*digit_count {
-                        let digit = remaining % convolution.radix;
-                        remaining /= convolution.radix;
-                        digits.push(
-                            ProofBaseFieldElement::from_canonical(digit)
-                                .map(ProofChallengeExtensionElement::from_base)
-                                .map_err(|_| RelationPlanError::InvalidConstraint)?,
-                        );
-                    }
-                    if remaining != 0 {
-                        return Err(RelationPlanError::InvalidConstraint);
-                    }
-                    digits
-                }
                 super::RelationRadixFactorDescriptor::ScalarColumn {
                     column_ordinal,
                     complement_binary_value,
@@ -1222,6 +1177,7 @@ where
     Ok(sum)
 }
 
+#[cfg(test)]
 fn convolve_extension_coefficients(
     left: &[ProofChallengeExtensionElement],
     right: &[ProofChallengeExtensionElement],
@@ -1563,12 +1519,14 @@ mod tests {
         let mut resolved_points = Vec::new();
         variant
             .verify_deep_composition(
-                &context,
-                &application_challenges,
-                &composition_challenges,
-                &deep_points,
-                &opening_points,
-                &deep_evaluations,
+                DeepCompositionVerificationInput::new(
+                    &context,
+                    &application_challenges,
+                    &composition_challenges,
+                    &deep_points,
+                    &opening_points,
+                    &deep_evaluations,
+                ),
                 |column_ordinal, point| {
                     resolved_points.push((column_ordinal, point));
                     (column_ordinal == verifier_column_ordinal)
@@ -1597,12 +1555,14 @@ mod tests {
         );
         assert!(matches!(
             variant.verify_deep_composition(
-                &context,
-                &application_challenges,
-                &composition_challenges,
-                &deep_points,
-                &opening_points,
-                &deep_evaluations,
+                DeepCompositionVerificationInput::new(
+                    &context,
+                    &application_challenges,
+                    &composition_challenges,
+                    &deep_points,
+                    &opening_points,
+                    &deep_evaluations,
+                ),
                 |column_ordinal, point| (column_ordinal == verifier_column_ordinal).then_some(
                     verifier_value_at_point(point).add(ProofChallengeExtensionElement::ONE),
                 ),
@@ -1611,12 +1571,14 @@ mod tests {
         ));
         assert!(matches!(
             variant.verify_deep_composition(
-                &context,
-                &application_challenges,
-                &composition_challenges,
-                &deep_points,
-                &opening_points,
-                &deep_evaluations,
+                DeepCompositionVerificationInput::new(
+                    &context,
+                    &application_challenges,
+                    &composition_challenges,
+                    &deep_points,
+                    &opening_points,
+                    &deep_evaluations,
+                ),
                 |_, _| None,
             ),
             Err(RelationPlanError::InvalidOpening)

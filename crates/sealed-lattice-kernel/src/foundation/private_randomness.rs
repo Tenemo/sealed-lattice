@@ -78,109 +78,11 @@ pub use proof_coins::{
 };
 pub use stream::{PrivateRandomBlockInput, PrivateRandomCursor, PrivateRandomnessStream};
 
-/// Non-serialized accounting for the distinct canonical KMAC inputs used by
-/// one action. Byte-identical resume and replay inputs are counted once by the
-/// action owner before constructing this row.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct PrivateRandomnessKmacInputClassAccounting {
-    action_key_hierarchy_derivation_count: u64,
-    attempt_identifier_derivation_count: u64,
-    private_stream_block_count: u64,
-    committed_material_inner_derivation_count: u64,
-}
-
-impl PrivateRandomnessKmacInputClassAccounting {
-    pub(crate) fn checked_new(
-        action_key_hierarchy_derivation_count: u64,
-        attempt_identifier_derivation_count: u64,
-        private_stream_block_count: u64,
-        committed_material_inner_derivation_count: u64,
-    ) -> Option<Self> {
-        action_key_hierarchy_derivation_count
-            .checked_add(attempt_identifier_derivation_count)?
-            .checked_add(private_stream_block_count)?
-            .checked_add(committed_material_inner_derivation_count)?;
-        Some(Self {
-            action_key_hierarchy_derivation_count,
-            attempt_identifier_derivation_count,
-            private_stream_block_count,
-            committed_material_inner_derivation_count,
-        })
-    }
-
-    pub(crate) fn checked_add(self, right: Self) -> Option<Self> {
-        Self::checked_new(
-            self.action_key_hierarchy_derivation_count
-                .checked_add(right.action_key_hierarchy_derivation_count)?,
-            self.attempt_identifier_derivation_count
-                .checked_add(right.attempt_identifier_derivation_count)?,
-            self.private_stream_block_count
-                .checked_add(right.private_stream_block_count)?,
-            self.committed_material_inner_derivation_count
-                .checked_add(right.committed_material_inner_derivation_count)?,
-        )
-    }
-}
-
-/// Maximum distinct block inputs consumed by one byte-oriented stream. A
-/// resumed stream can rederive its buffered block, but that byte-identical
-/// counter input is not a second distinct input.
-pub(crate) fn private_randomness_stream_block_count_for_byte_length(
-    byte_length: u64,
-) -> Option<u64> {
-    let block_byte_length = u64::try_from(PRIVATE_RANDOMNESS_BLOCK_BYTE_LENGTH).ok()?;
-    Some(byte_length.div_ceil(block_byte_length))
-}
-
-/// Maximum distinct block inputs consumed by one bit-oriented stream. Bits
-/// are packed continuously before the 64-byte stream-block boundary is
-/// applied, so this does not introduce a byte-rounding term per coefficient.
-pub(crate) fn private_randomness_stream_block_count_for_bit_length(bit_length: u64) -> Option<u64> {
-    let block_bit_length = u64::try_from(PRIVATE_RANDOMNESS_BLOCK_BYTE_LENGTH)
-        .ok()?
-        .checked_mul(8)?;
-    Some(bit_length.div_ceil(block_bit_length))
-}
-
-/// Maximum distinct block inputs consumed by consecutive modular outputs in
-/// one stream under the production rejection-sampling rule.
-pub(crate) fn private_randomness_stream_block_count_for_modulo_outputs(
-    output_count: u64,
-    modulus: u64,
-    maximum_candidate_draws_per_output: u32,
-) -> Option<u64> {
-    if modulus <= 1 || maximum_candidate_draws_per_output == 0 {
-        return None;
-    }
-    let significant_bit_length = u64::BITS - modulus.leading_zeros();
-    let sample_byte_length = u64::from(significant_bit_length).div_ceil(8);
-    private_randomness_stream_block_count_for_rejection_sampling(
-        output_count,
-        sample_byte_length,
-        maximum_candidate_draws_per_output,
-    )
-}
-
-/// Maximum distinct block inputs for a fixed-width rejection sampler whose
-/// candidate width is derived by an owning protocol module.
-pub(crate) fn private_randomness_stream_block_count_for_rejection_sampling(
-    output_count: u64,
-    sample_byte_length: u64,
-    maximum_candidate_draws_per_output: u32,
-) -> Option<u64> {
-    if sample_byte_length == 0 || maximum_candidate_draws_per_output == 0 {
-        return None;
-    }
-    let consumed_byte_length = output_count
-        .checked_mul(u64::from(maximum_candidate_draws_per_output))?
-        .checked_mul(sample_byte_length)?;
-    private_randomness_stream_block_count_for_byte_length(consumed_byte_length)
-}
-
 /// Distinct proof-attempt identifier derivations for one application slot.
 /// Public-only proof families have no private attempt input. The target proof
 /// has the same two persistent proof derivations as the other reset-safe
 /// families; its separately keyed release attempt belongs to target flooding.
+#[cfg(test)]
 pub(crate) fn proof_attempt_identifier_derivation_count(
     application_statement_schema_identifier: u16,
 ) -> Option<u64> {

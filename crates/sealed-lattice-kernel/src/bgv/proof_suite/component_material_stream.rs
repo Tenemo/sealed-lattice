@@ -323,18 +323,22 @@ pub(crate) struct KeySwitchComponentTraceColumn {
 }
 
 impl KeySwitchComponentTraceColumn {
+    #[cfg(test)]
     pub(crate) const fn column_ordinal(self) -> usize {
         self.column_ordinal
     }
 
+    #[cfg(test)]
     pub(crate) const fn block_index(self) -> usize {
         self.block_index
     }
 
+    #[cfg(test)]
     pub(crate) const fn limb_index(self) -> usize {
         self.limb_index
     }
 
+    #[cfg(test)]
     pub(crate) const fn half(self) -> KeySwitchComponentTraceHalf {
         self.half
     }
@@ -347,6 +351,7 @@ impl KeySwitchComponentTraceColumn {
         self.residue_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn coefficient_start(self) -> usize {
         self.coefficient_start
     }
@@ -459,10 +464,12 @@ impl VerifiedKeySwitchComponentMaterial {
         self.material_root
     }
 
+    #[cfg(test)]
     pub(crate) const fn full_object_digest(&self) -> Hash512 {
         self.canonical_stream_summary.full_object_digest()
     }
 
+    #[cfg(test)]
     pub(crate) const fn total_byte_length(&self) -> u64 {
         self.canonical_stream_summary.total_byte_length()
     }

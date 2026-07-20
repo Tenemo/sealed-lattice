@@ -1,11 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from 'vitest';
 
+import { clearCommonProofExternalMemoryRequest } from '../../../src/common-proof-worker-runtime/external-memory.js';
 import {
     CommonProofWorkerRuntimeError,
     decodeCommonProofExternalMemoryRequest,
     encodeCommonProofExternalMemoryResponse,
-} from "../../../src/common-proof-worker-runtime.js";
-import { clearCommonProofExternalMemoryRequest } from "../../../src/common-proof-worker-runtime/external-memory.js";
+} from '../../../src/common-proof-worker-runtime.js';
 
 import {
     encodeRequest,
@@ -13,15 +13,15 @@ import {
     readResult,
     requestDigestOffset,
     runtimeBinding,
-} from "./wire-fixtures.js";
+} from './wire-fixtures.js';
 
-describe("common-proof external-memory runtime", () => {
-    it("decodes every assigned Rust operation and protection code", () => {
+describe('common-proof external-memory runtime', () => {
+    it('decodes every assigned Rust operation and protection code', () => {
         const runtimeBindingHash = runtimeBinding(0x30);
         const assignedOperations = [
             {
-                expectedOperationKind: "create",
-                expectedProtection: "public-integrity",
+                expectedOperationKind: 'create',
+                expectedProtection: 'public-integrity',
                 operation: {
                     kind: 1,
                     objectOrdinal: 1,
@@ -31,8 +31,8 @@ describe("common-proof external-memory runtime", () => {
                 },
             },
             {
-                expectedOperationKind: "create",
-                expectedProtection: "secret-authenticated-encryption",
+                expectedOperationKind: 'create',
+                expectedProtection: 'secret-authenticated-encryption',
                 operation: {
                     kind: 1,
                     objectOrdinal: 2,
@@ -42,7 +42,7 @@ describe("common-proof external-memory runtime", () => {
                 },
             },
             {
-                expectedOperationKind: "append",
+                expectedOperationKind: 'append',
                 operation: {
                     kind: 2,
                     objectOrdinal: 3,
@@ -53,7 +53,7 @@ describe("common-proof external-memory runtime", () => {
                 },
             },
             {
-                expectedOperationKind: "seal",
+                expectedOperationKind: 'seal',
                 operation: {
                     kind: 3,
                     objectOrdinal: 4,
@@ -63,7 +63,7 @@ describe("common-proof external-memory runtime", () => {
                 },
             },
             {
-                expectedOperationKind: "read",
+                expectedOperationKind: 'read',
                 operation: {
                     kind: 4,
                     objectOrdinal: 5,
@@ -73,7 +73,7 @@ describe("common-proof external-memory runtime", () => {
                 },
             },
             {
-                expectedOperationKind: "delete",
+                expectedOperationKind: 'delete',
                 operation: {
                     kind: 5,
                     objectOrdinal: 6,
@@ -101,11 +101,11 @@ describe("common-proof external-memory runtime", () => {
                 assignedOperation.expectedOperationKind,
             );
             const decodedProtection =
-                decodedOperation?.operationKind === "create"
+                decodedOperation?.operationKind === 'create'
                     ? decodedOperation.protection
                     : undefined;
             const expectedProtection =
-                "expectedProtection" in assignedOperation
+                'expectedProtection' in assignedOperation
                     ? assignedOperation.expectedProtection
                     : undefined;
             expect(decodedProtection).toBe(expectedProtection);
@@ -113,7 +113,7 @@ describe("common-proof external-memory runtime", () => {
         }
     });
 
-    it("decodes exact single-operation Rust storage transactions", () => {
+    it('decodes exact single-operation Rust storage transactions', () => {
         const binding = runtimeBinding(0x31);
         const appendBytes = Uint8Array.from([9, 8, 7, 6]);
         const request = encodeRequest({
@@ -136,9 +136,9 @@ describe("common-proof external-memory runtime", () => {
         expect(decoded.maximumPayloadByteLength).toBe(4n);
         expect(decoded.operations).toHaveLength(1);
         const append = decoded.operations[0];
-        expect(append?.operationKind).toBe("append");
-        if (append?.operationKind !== "append") {
-            throw new Error("The append operation was not decoded.");
+        expect(append?.operationKind).toBe('append');
+        if (append?.operationKind !== 'append') {
+            throw new Error('The append operation was not decoded.');
         }
         expect([...append.bytes]).toEqual([...appendBytes]);
         expect(append.bytes.buffer).not.toBe(request.buffer);
@@ -166,7 +166,7 @@ describe("common-proof external-memory runtime", () => {
         expect(response.byteLength).toBe(80 + 88 + 4);
     });
 
-    it("rejects truncation, trailing bytes, wrong digests, and noncanonical operation order", () => {
+    it('rejects truncation, trailing bytes, wrong digests, and noncanonical operation order', () => {
         const binding = runtimeBinding(0x32);
         const request = fourByteReadRequest(binding, 1n);
         expect(() =>
@@ -183,7 +183,7 @@ describe("common-proof external-memory runtime", () => {
         wrongDigest[requestDigestOffset] ^= 1;
         expect(() =>
             decodeCommonProofExternalMemoryRequest(wrongDigest),
-        ).toThrowError(expect.objectContaining({ code: "WrongRequestDigest" }));
+        ).toThrowError(expect.objectContaining({ code: 'WrongRequestDigest' }));
 
         const reordered = encodeRequest({
             maximumPayloadByteLength: 4n,
@@ -202,7 +202,7 @@ describe("common-proof external-memory runtime", () => {
         });
         expect(() =>
             decodeCommonProofExternalMemoryRequest(reordered),
-        ).toThrowError(expect.objectContaining({ code: "MalformedRequest" }));
+        ).toThrowError(expect.objectContaining({ code: 'MalformedRequest' }));
 
         const mixedRequest = encodeRequest({
             maximumPayloadByteLength: 1n,
@@ -227,7 +227,7 @@ describe("common-proof external-memory runtime", () => {
         });
         expect(() =>
             decodeCommonProofExternalMemoryRequest(mixedRequest),
-        ).toThrowError(expect.objectContaining({ code: "MalformedRequest" }));
+        ).toThrowError(expect.objectContaining({ code: 'MalformedRequest' }));
 
         const deleteRequest = encodeRequest({
             maximumPayloadByteLength: 1n,
@@ -256,7 +256,7 @@ describe("common-proof external-memory runtime", () => {
         clearCommonProofExternalMemoryRequest(decodedDeleteRequest);
     });
 
-    it("rejects substituted single-read storage results", () => {
+    it('rejects substituted single-read storage results', () => {
         const binding = runtimeBinding(0x35);
         const request = encodeRequest({
             maximumPayloadByteLength: 4n,
@@ -279,7 +279,7 @@ describe("common-proof external-memory runtime", () => {
                 decodedRequest,
                 substitutedResults,
             ),
-        ).toThrowError(expect.objectContaining({ code: "WrongStorageResult" }));
+        ).toThrowError(expect.objectContaining({ code: 'WrongStorageResult' }));
         expect(
             encodeCommonProofExternalMemoryResponse(decodedRequest, [
                 readResult(0, 4, 10n, [4, 4, 4, 4]),
@@ -287,7 +287,7 @@ describe("common-proof external-memory runtime", () => {
         ).toBeInstanceOf(Uint8Array);
     });
 
-    it("owns the exact request view independently of its backing buffer", () => {
+    it('owns the exact request view independently of its backing buffer', () => {
         const binding = runtimeBinding(0x36);
         const request = fourByteReadRequest(binding, 1n);
         const oversizedBackingBuffer = new Uint8Array(
@@ -325,9 +325,9 @@ describe("common-proof external-memory runtime", () => {
         });
         const decoded = decodeCommonProofExternalMemoryRequest(maximumRequest);
         const appendOperation = decoded.operations[0];
-        expect(appendOperation?.operationKind).toBe("append");
-        if (appendOperation?.operationKind !== "append") {
-            throw new Error("The maximum append operation was not decoded.");
+        expect(appendOperation?.operationKind).toBe('append');
+        if (appendOperation?.operationKind !== 'append') {
+            throw new Error('The maximum append operation was not decoded.');
         }
         expect(appendOperation.bytes.byteLength).toBe(49_152);
         expect(appendOperation.bytes.buffer).not.toBe(maximumRequest.buffer);
@@ -354,10 +354,10 @@ describe("common-proof external-memory runtime", () => {
         });
         expect(() =>
             decodeCommonProofExternalMemoryRequest(overlongAppendRequest),
-        ).toThrowError(expect.objectContaining({ code: "MalformedRequest" }));
+        ).toThrowError(expect.objectContaining({ code: 'MalformedRequest' }));
     });
 
-    it("clears transferred append custody after response success and refusal", () => {
+    it('clears transferred append custody after response success and refusal', () => {
         const appendRequest = (): Uint8Array<ArrayBuffer> =>
             encodeRequest({
                 maximumPayloadByteLength: 4n,
@@ -378,8 +378,8 @@ describe("common-proof external-memory runtime", () => {
         const successfulRequest =
             decodeCommonProofExternalMemoryRequest(appendRequest());
         const successfulAppend = successfulRequest.operations[0];
-        if (successfulAppend?.operationKind !== "append") {
-            throw new Error("The successful append request was not decoded.");
+        if (successfulAppend?.operationKind !== 'append') {
+            throw new Error('The successful append request was not decoded.');
         }
         expect(
             encodeCommonProofExternalMemoryResponse(successfulRequest, []),
@@ -389,8 +389,8 @@ describe("common-proof external-memory runtime", () => {
         const refusedRequest =
             decodeCommonProofExternalMemoryRequest(appendRequest());
         const refusedAppend = refusedRequest.operations[0];
-        if (refusedAppend?.operationKind !== "append") {
-            throw new Error("The refused append request was not decoded.");
+        if (refusedAppend?.operationKind !== 'append') {
+            throw new Error('The refused append request was not decoded.');
         }
         const rejectedReadBytes = Uint8Array.from([5, 4, 3, 2]);
         expect(() =>
@@ -402,7 +402,7 @@ describe("common-proof external-memory runtime", () => {
                     operationIndex: 0,
                 },
             ]),
-        ).toThrowError(expect.objectContaining({ code: "WrongStorageResult" }));
+        ).toThrowError(expect.objectContaining({ code: 'WrongStorageResult' }));
         expect([...refusedAppend.bytes]).toEqual([0, 0, 0, 0]);
         expect([...rejectedReadBytes]).toEqual([0, 0, 0, 0]);
     });

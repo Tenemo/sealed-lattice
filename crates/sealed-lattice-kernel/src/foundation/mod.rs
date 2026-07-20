@@ -89,9 +89,7 @@ pub(crate) use finality_runtime::{
 };
 pub use hash::{Hash512, hash_foundation_tuple_512};
 pub(crate) use hash::{
-    StreamingFoundationHashError, StreamingFoundationTupleHash512,
-    canonical_foundation_tuple_hash_preimage, canonical_foundation_variable_bytes_hash_preimage,
-    fill_foundation_tuple_xof,
+    StreamingFoundationHashError, StreamingFoundationTupleHash512, fill_foundation_tuple_xof,
 };
 pub use local_encrypted_storage::{
     ACTION_STORAGE_DERIVATION_INPUT_SCHEMA_IDENTIFIER, ACTION_STORAGE_ROOT_BYTE_LENGTH,
@@ -137,13 +135,6 @@ pub use private_randomness::{
     SETUP_STRUCTURED_COMMITMENT_OPENING_CONTEXT_SCHEMA_IDENTIFIER,
     SetupStructuredCommitmentOpeningContext,
 };
-pub(crate) use private_randomness::{
-    PrivateRandomnessKmacInputClassAccounting,
-    private_randomness_stream_block_count_for_bit_length,
-    private_randomness_stream_block_count_for_byte_length,
-    private_randomness_stream_block_count_for_modulo_outputs,
-    proof_attempt_identifier_derivation_count,
-};
 pub(crate) use private_randomness_runtime::{
     ACTION_RANDOMNESS_RUNTIME_RESOURCE_LIMIT, ACTION_RANDOMNESS_RUNTIME_STALE_HANDLE,
     AuthenticatedCheckpointContinuationSource, PreparedActionProofAttemptSource,
@@ -170,10 +161,12 @@ pub use schemas::{
     SIGNED_CARRIER_SCHEMA_IDENTIFIER, STREAM_DESCRIPTOR_SCHEMA_IDENTIFIER, SignedCarrier,
     StreamDescriptor, derive_foundation_roster_parameters, signature_message,
 };
+#[cfg(test)]
 pub(crate) use selected_suite::{
     SELECTED_MAXIMUM_BALLOT_ATTEMPTS_PER_PARTICIPANT,
     SELECTED_MAXIMUM_CANDIDATE_PACKAGES_PER_ACTION,
-    SELECTED_MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT,
+};
+pub(crate) use selected_suite::{
     SELECTED_MAXIMUM_PUBLIC_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT,
     selected_evaluator_resource_accounting,
 };

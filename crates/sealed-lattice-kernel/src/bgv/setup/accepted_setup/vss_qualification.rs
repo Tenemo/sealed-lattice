@@ -11,7 +11,6 @@ use super::{
         BrowserOwnedAggregateThresholdShareLimb, VerifiedAcceptedSetupParticipantReleaseMaterial,
         VerifiedAcceptedSetupParticipantTargetReleaseSource,
     },
-    generated_mailbox_byte_lengths::VerifiedGeneratedPrivateVssMailboxCorpusByteLengthCatalog,
     verified_public_randomness::VerifiedPublicRandomness,
     verified_terminals::{
         VerifiedAggregateThresholdShareTerminal, VerifiedVssQualificationTerminals,
@@ -21,18 +20,13 @@ use super::{
 
 /// One opaque VSS qualification handoff consumed by accepted-setup
 /// finalization. It retains all sharing-basis roots for every participant and
-/// exactly one browser-local target-basis opening source. When a development
-/// harness supplied the complete positively verified mailbox corpus, the same
-/// handoff also owns its non-serialized exact byte-length catalog. Absence of
-/// that optional evidence does not affect qualification. No second registry
+/// exactly one browser-local target-basis opening source. No second registry
 /// or caller-provided root catalog can construct this authority.
 pub(in crate::bgv) struct VerifiedAcceptedSetupVssQualification {
     public_randomness: VerifiedPublicRandomness,
     qualification_terminals: VerifiedVssQualificationTerminals,
     participant_release_materials: Vec<VerifiedAcceptedSetupParticipantReleaseMaterial>,
     local_target_release_source: VerifiedAcceptedSetupParticipantTargetReleaseSource,
-    private_vss_mailbox_byte_lengths:
-        Option<VerifiedGeneratedPrivateVssMailboxCorpusByteLengthCatalog>,
 }
 
 impl VerifiedAcceptedSetupVssQualification {
@@ -41,9 +35,6 @@ impl VerifiedAcceptedSetupVssQualification {
         ordered_dealer_terminals: Vec<VerifiedVssShareLinkageTerminal>,
         ordered_recipient_terminals: Vec<VerifiedAggregateThresholdShareTerminal>,
         local_target_release_limbs: Vec<BrowserOwnedAggregateThresholdShareLimb>,
-        private_vss_mailbox_byte_lengths: Option<
-            VerifiedGeneratedPrivateVssMailboxCorpusByteLengthCatalog,
-        >,
     ) -> Result<Self, RefusalReason> {
         let participant_count = usize::from(FOUNDATION_PROFILE.participant_count);
         let selected_sharing_coordinates =
@@ -90,17 +81,11 @@ impl VerifiedAcceptedSetupVssQualification {
             ordered_dealer_terminals,
             ordered_recipient_terminals,
         )?;
-        if let Some(mailbox_byte_lengths) = private_vss_mailbox_byte_lengths.as_ref() {
-            mailbox_byte_lengths
-                .require_matches_verified_qualification(&qualification_terminals)?;
-        }
-
         Ok(Self {
             public_randomness,
             qualification_terminals,
             participant_release_materials,
             local_target_release_source,
-            private_vss_mailbox_byte_lengths,
         })
     }
 
@@ -111,14 +96,12 @@ impl VerifiedAcceptedSetupVssQualification {
         VerifiedVssQualificationTerminals,
         Vec<VerifiedAcceptedSetupParticipantReleaseMaterial>,
         VerifiedAcceptedSetupParticipantTargetReleaseSource,
-        Option<VerifiedGeneratedPrivateVssMailboxCorpusByteLengthCatalog>,
     ) {
         (
             self.public_randomness,
             self.qualification_terminals,
             self.participant_release_materials,
             self.local_target_release_source,
-            self.private_vss_mailbox_byte_lengths,
         )
     }
 

@@ -1,13 +1,12 @@
 use super::{
     BTreeMap, CanonicalStreamReadbackVerifier, CanonicalStreamVerifier, CommonProofRuntimeError,
     CommonProofRuntimeLimits, CommonProofVerificationBinding, CommonProofVerificationPoll,
-    CommonProofVerificationStateMachine, CommonProofVerificationStatementSource,
-    CommonProofVerifierError, HASH_BYTE_LENGTH, MAXIMUM_COMMON_PROOF_BYTE_LENGTH,
-    MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH, MAXIMUM_RESIDENT_COMMON_PROOF_INPUT_CHUNKS,
-    PollableCommonProofVerificationInput, RefusalReason, ResidentCommonProofByteSource,
-    ResidentCommonProofInputChunk, StreamDescriptor, VerifiedCanonicalStreamSummary,
-    VerifiedCommonProof, VerifiedEvaluatorAuxiliaryRoot, VerifiedRelationColumnEvaluator,
-    VerifiedStatementOwnedTree, required_chunk_indices,
+    CommonProofVerificationStateMachine, CommonProofVerificationStatementSource, HASH_BYTE_LENGTH,
+    MAXIMUM_COMMON_PROOF_BYTE_LENGTH, MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH,
+    MAXIMUM_RESIDENT_COMMON_PROOF_INPUT_CHUNKS, PollableCommonProofVerificationInput,
+    RefusalReason, ResidentCommonProofByteSource, ResidentCommonProofInputChunk,
+    VerifiedCanonicalStreamSummary, VerifiedCommonProof, VerifiedEvaluatorAuxiliaryRoot,
+    VerifiedRelationColumnEvaluator, VerifiedStatementOwnedTree, required_chunk_indices,
 };
 
 /// One consumed set of positively verified inputs. This value is process local
@@ -22,16 +21,14 @@ pub(crate) struct ConsumedCommonProofVerificationInputs {
 }
 
 impl ConsumedCommonProofVerificationInputs {
-    pub(crate) const fn verification_binding(&self) -> CommonProofVerificationBinding {
+    #[cfg(test)]
+    pub(crate) fn verification_binding(&self) -> CommonProofVerificationBinding {
         self.statement_source.verification_binding()
     }
 
-    pub(crate) const fn relation_plan(&self) -> &super::CommonProofRelationPlanCapability {
+    #[cfg(test)]
+    pub(crate) fn relation_plan(&self) -> &super::CommonProofRelationPlanCapability {
         self.statement_source.relation_plan()
-    }
-
-    pub(crate) const fn proof_stream_descriptor(&self) -> &StreamDescriptor {
-        self.statement_source.proof_stream_descriptor()
     }
 
     pub(crate) fn pollable_verification_input(&self) -> PollableCommonProofVerificationInput<'_> {
@@ -92,12 +89,14 @@ impl PreparedCommonProofVerification {
         self.statement_source.verification_binding().binding_hash()
     }
 
+    #[cfg(test)]
     pub(crate) fn statement_source(
         &self,
     ) -> Result<&super::VerifiedCommonProofStatementSource, CommonProofRuntimeError> {
         self.statement_source.exact_source()
     }
 
+    #[cfg(test)]
     pub(crate) fn into_statement_source(
         self,
     ) -> Result<super::VerifiedCommonProofStatementSource, CommonProofRuntimeError> {
@@ -186,7 +185,7 @@ impl CommonProofVerificationReadbackAccounting {
 pub(crate) enum CommonProofVerificationWorkerError {
     Runtime(CommonProofRuntimeError),
     Stream(RefusalReason),
-    Verifier(CommonProofVerifierError),
+    Verifier,
 }
 
 impl From<CommonProofRuntimeError> for CommonProofVerificationWorkerError {
@@ -421,7 +420,7 @@ impl CommonProofVerificationWorker {
         )?;
         let result = verifier
             .poll(&source, verified_column_evaluator.as_mut())
-            .map_err(CommonProofVerificationWorkerError::Verifier)?;
+            .map_err(|_| CommonProofVerificationWorkerError::Verifier)?;
         resident_chunks.clear();
         self.last_accounted_required_range = None;
         match result {

@@ -76,8 +76,7 @@ const requireContext = (
     if (
         context === undefined ||
         exports === undefined ||
-        typeof exports.sealed_lattice_foundation_roster_encode !==
-            'function' ||
+        typeof exports.sealed_lattice_foundation_roster_encode !== 'function' ||
         typeof exports.sealed_lattice_foundation_roster_encoded_byte_length !==
             'function'
     ) {
@@ -88,9 +87,7 @@ const requireContext = (
     return context as FoundationRosterContext;
 };
 
-const memoryBoundary = (
-    context: FoundationRosterContext,
-): WasmMemoryBoundary =>
+const memoryBoundary = (context: FoundationRosterContext): WasmMemoryBoundary =>
     new WasmMemoryBoundary({
         context,
         createInternalError: (message) =>
@@ -133,7 +130,9 @@ const copyExactBytes = (
     try {
         return Uint8Array.from(value);
     } catch {
-        throw new TypeError(`${fieldName} must reference an attached byte array.`);
+        throw new TypeError(
+            `${fieldName} must reference an attached byte array.`,
+        );
     }
 };
 
@@ -253,10 +252,7 @@ export const encodeCanonicalFoundationRoster = (input: {
                             encodedInput.byteLength,
                             statusPointer,
                         );
-                    const [lengthStatus] = boundary.readWords(
-                        statusPointer,
-                        1,
-                    );
+                    const [lengthStatus] = boundary.readWords(statusPointer, 1);
                     statusBoundary.throwIfError(lengthStatus);
                     boundary.validateAllocationByteLength(outputByteLength);
                     outputPointer = boundary.allocate(outputByteLength);

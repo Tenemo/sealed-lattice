@@ -32,6 +32,7 @@ use crate::{
     hashing::hash_framed_parts_512,
 };
 
+#[cfg(test)]
 use super::relation_plan::CollectivePublicKeySourceProviderMemoryAccounting;
 use super::runtime_ffi::{
     CommonProofGenerationFamilyAdapter, CommonProofGenerationFamilyAdapterDescription,
@@ -47,9 +48,10 @@ use super::{
     CollectivePublicKeySourcePolynomialProvider, CommonProofGenerationAuthorization,
     CommonProofGenerationPreparationError, CommonProofGenerationSources,
     CommonProofRelationPlanCapability, CommonProofRuntimeError, CommonProofRuntimeLimits,
-    CommonProofSelectedSuiteCapabilityHandle, CompiledRelationPlan, PreparedCommonProofGeneration,
-    ProofBaseFieldElement, SetupPublicPolynomialContext, SetupPublicPolynomialRootBuilder,
-    SetupPublicPolynomialTree, SetupPublicPolynomialTreeInput, VerifiedStatementOwnedTree,
+    CommonProofSelectedSuiteCapabilityHandle, CompiledRelationPlan,
+    ExpectedCommonProofPackageBindings, PreparedCommonProofGeneration, ProofBaseFieldElement,
+    SetupPublicPolynomialContext, SetupPublicPolynomialRootBuilder, SetupPublicPolynomialTree,
+    SetupPublicPolynomialTreeInput, VerifiedStatementOwnedTree,
     canonical_selected_collective_public_key_aggregate_statement, selected_proof_runtime_limits,
     selected_relation_plan_check_context, selected_relation_plans,
     verified_application_statement_hash, with_verified_accepted_setup_vss_package_sources,
@@ -706,6 +708,7 @@ impl SingleCollectiveSessionRegistry {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg(test)]
 pub(crate) struct CollectivePublicKeyApplicationMemoryAccounting {
     session_registry_fixed_byte_length: u64,
     roster_identity_payload_byte_length: u64,
@@ -723,6 +726,7 @@ pub(crate) struct CollectivePublicKeyApplicationMemoryAccounting {
     maximum_boundary_overlap_byte_length: u64,
 }
 
+#[cfg(test)]
 impl CollectivePublicKeyApplicationMemoryAccounting {
     pub(crate) const fn session_registry_fixed_byte_length(self) -> u64 {
         self.session_registry_fixed_byte_length
@@ -784,6 +788,7 @@ impl CollectivePublicKeyApplicationMemoryAccounting {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg(test)]
 pub(crate) struct CollectivePublicKeyRootPipelineMemoryAccounting {
     session_registry_fixed_byte_length: u64,
     roster_identity_payload_byte_length: u64,
@@ -798,6 +803,7 @@ pub(crate) struct CollectivePublicKeyRootPipelineMemoryAccounting {
     peak_combined_wasm_resident_byte_length: u64,
 }
 
+#[cfg(test)]
 impl CollectivePublicKeyRootPipelineMemoryAccounting {
     pub(crate) const fn session_registry_fixed_byte_length(self) -> u64 {
         self.session_registry_fixed_byte_length
@@ -845,6 +851,7 @@ impl CollectivePublicKeyRootPipelineMemoryAccounting {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg(test)]
 pub(crate) struct CollectivePublicKeyStreamAndTrafficAccounting {
     participant_body_byte_length: u64,
     participant_descriptor_byte_length: u64,
@@ -865,6 +872,7 @@ pub(crate) struct CollectivePublicKeyStreamAndTrafficAccounting {
     maximum_boundary_copied_buffer_byte_length: u64,
 }
 
+#[cfg(test)]
 impl CollectivePublicKeyStreamAndTrafficAccounting {
     pub(crate) const fn participant_body_byte_length(self) -> u64 {
         self.participant_body_byte_length
@@ -935,6 +943,7 @@ impl CollectivePublicKeyStreamAndTrafficAccounting {
     }
 }
 
+#[cfg(test)]
 fn checked_count_bytes(
     count: usize,
     item_byte_length: usize,
@@ -949,12 +958,14 @@ fn checked_count_bytes(
         .ok_or(CommonProofRuntimeError::AllocationLimitExceeded)
 }
 
+#[cfg(test)]
 fn arc_allocation_header_byte_length() -> Result<usize, CommonProofRuntimeError> {
     size_of::<std::sync::atomic::AtomicUsize>()
         .checked_mul(2)
         .ok_or(CommonProofRuntimeError::AllocationLimitExceeded)
 }
 
+#[cfg(test)]
 pub(crate) fn collective_public_key_application_memory_accounting(
     canonical_application_statement_byte_length: u64,
     source_provider_accounting: CollectivePublicKeySourceProviderMemoryAccounting,
@@ -1053,6 +1064,7 @@ pub(crate) fn collective_public_key_application_memory_accounting(
     })
 }
 
+#[cfg(test)]
 pub(crate) fn collective_public_key_root_pipeline_memory_accounting(
     evaluation_domain_size: usize,
 ) -> Result<CollectivePublicKeyRootPipelineMemoryAccounting, CommonProofRuntimeError> {
@@ -1126,6 +1138,7 @@ pub(crate) fn collective_public_key_root_pipeline_memory_accounting(
     })
 }
 
+#[cfg(test)]
 pub(crate) fn collective_public_key_stream_and_traffic_accounting()
 -> Result<CollectivePublicKeyStreamAndTrafficAccounting, CommonProofRuntimeError> {
     let participant_count = usize::from(FOUNDATION_PROFILE.participant_count);
@@ -1476,13 +1489,16 @@ fn commit_generated_proof(
                 .to_vec();
             preflight_generated_common_proof_pending_package(
                 generated_common_proof_handle,
-                session.context.suite_identifier,
-                session.context.ceremony_context_hash,
-                session.context.action_context_hash,
-                ProofApplicationSlotCeilings::COLLECTIVE_PUBLIC_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
-                None,
-                None,
-                &canonical_application_statement_bytes,
+                ExpectedCommonProofPackageBindings {
+                    suite_identifier: session.context.suite_identifier,
+                    ceremony_context_hash: session.context.ceremony_context_hash,
+                    action_context_hash: session.context.action_context_hash,
+                    application_statement_schema_identifier:
+                        ProofApplicationSlotCeilings::COLLECTIVE_PUBLIC_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+                    roster_position: None,
+                    schedule_position: None,
+                    canonical_application_statement_bytes: &canonical_application_statement_bytes,
+                },
             )?;
             session.generated_proof_handle = Some(generated_common_proof_handle);
             Ok(())
@@ -1567,13 +1583,16 @@ fn prepare_verification(
             })?;
         preflight_generated_common_proof_pending_package(
             generated_proof_handle,
-            context.suite_identifier,
-            context.ceremony_context_hash,
-            context.action_context_hash,
-            ProofApplicationSlotCeilings::COLLECTIVE_PUBLIC_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
-            None,
-            None,
-            &statement,
+            ExpectedCommonProofPackageBindings {
+                suite_identifier: context.suite_identifier,
+                ceremony_context_hash: context.ceremony_context_hash,
+                action_context_hash: context.action_context_hash,
+                application_statement_schema_identifier:
+                    ProofApplicationSlotCeilings::COLLECTIVE_PUBLIC_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+                roster_position: None,
+                schedule_position: None,
+                canonical_application_statement_bytes: &statement,
+            },
         )?;
         let relation_plan = selected_collective_relation_plan()?;
         let evaluation_domain_size = usize::try_from(
@@ -2342,6 +2361,7 @@ mod tests {
             [
                 source_provider.provider_fixed_byte_length(),
                 source_provider.prepared_source_catalog_byte_length(),
+                source_provider.prepared_authenticated_material_payload_byte_length(),
                 source_provider.ordered_column_catalog_byte_length(),
                 source_provider.authenticated_descriptor_digest_payload_byte_length(),
                 source_provider.authenticated_descriptor_digest_allocation_header_byte_length(),
@@ -2358,9 +2378,10 @@ mod tests {
             source_provider.loading_persistent_resident_byte_length()
                 - source_provider.provider_fixed_byte_length()
                 + source_provider.relation_tree_input_catalog_byte_length()
-                + source_provider
-                    .provider_fixed_byte_length()
-                    .max(source_provider.input_source_catalog_byte_length()),
+                + source_provider.provider_fixed_byte_length().max(
+                    source_provider.input_source_catalog_byte_length()
+                        + source_provider.input_authenticated_summary_payload_byte_length(),
+                ),
         );
         assert_eq!(
             source_provider.post_source_polynomial_finish_persistent_resident_byte_length(),

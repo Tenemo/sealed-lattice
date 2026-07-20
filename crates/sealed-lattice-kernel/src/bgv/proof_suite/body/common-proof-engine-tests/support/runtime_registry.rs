@@ -3,6 +3,7 @@ use super::proof_round_trip::{
     authenticated_storage_transition_source, verified_fixture_proof_stream,
 };
 use super::*;
+use crate::foundation::ParticipantIdentity;
 
 #[test]
 fn runtime_registry_accepts_only_terminal_verifier_tokens_and_retires_stale_handles() {

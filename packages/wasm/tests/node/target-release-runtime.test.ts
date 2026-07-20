@@ -37,17 +37,23 @@ const boundaryMocks = vi.hoisted(() => {
                 ) => Readonly<{ consumed: boolean; result: unknown }>,
             ) => apply(401).result,
         ),
-        deriveProofDescriptor: vi.fn(async () => Uint8Array.of(0xd1, 0xd2)),
+        deriveProofDescriptor: vi.fn(() =>
+            Promise.resolve(Uint8Array.of(0xd1, 0xd2)),
+        ),
         generatedCapabilityRelease,
         openGenerationAdapter: vi.fn(() => Object.freeze({})),
         openVerificationAdapter: vi.fn(() => Object.freeze({})),
         releaseGenerationAdapter: vi.fn(),
         releaseVerificationAdapter: vi.fn(),
-        runGeneration: vi.fn(async () =>
-            Object.freeze({ release: generatedCapabilityRelease }),
+        runGeneration: vi.fn(() =>
+            Promise.resolve(
+                Object.freeze({ release: generatedCapabilityRelease }),
+            ),
         ),
-        runVerification: vi.fn(async () =>
-            Object.freeze({ release: verifiedCapabilityRelease }),
+        runVerification: vi.fn(() =>
+            Promise.resolve(
+                Object.freeze({ release: verifiedCapabilityRelease }),
+            ),
         ),
         trackOutput: vi.fn((outputStore: unknown) =>
             Object.freeze({
@@ -224,7 +230,9 @@ const createFakeTargetReleaseRuntime = (): FakeTargetReleaseRuntime => {
         const pointer = Math.ceil(nextPointer / 8) * 8;
         nextPointer = pointer + byteLength;
         if (nextPointer > memory.buffer.byteLength) {
-            throw new Error('The fake target-release WASM memory is exhausted.');
+            throw new Error(
+                'The fake target-release WASM memory is exhausted.',
+            );
         }
         allocations.set(pointer, byteLength);
         return pointer;
@@ -349,7 +357,8 @@ const createFakeTargetReleaseRuntime = (): FakeTargetReleaseRuntime => {
             }
             if (
                 verifiedShareHandles.length < 4 ||
-                verifiedShareHandles.length > foundationProfile.participantCount ||
+                verifiedShareHandles.length >
+                    foundationProfile.participantCount ||
                 new Set(verifiedShareHandles).size !==
                     verifiedShareHandles.length ||
                 !verifiedShareHandles.every((handle) =>
@@ -407,8 +416,7 @@ const createFakeTargetReleaseRuntime = (): FakeTargetReleaseRuntime => {
             const orderedOptionIdentifiers = [5, 20, 2, 10];
             if (
                 outputByteLength !==
-                orderedOptionIdentifiers.length *
-                    Uint32Array.BYTES_PER_ELEMENT
+                orderedOptionIdentifiers.length * Uint32Array.BYTES_PER_ELEMENT
             ) {
                 writeWord(
                     memory,
@@ -422,13 +430,15 @@ const createFakeTargetReleaseRuntime = (): FakeTargetReleaseRuntime => {
                 outputPointer,
                 outputByteLength,
             );
-            orderedOptionIdentifiers.forEach((optionIdentifier, optionIndex) => {
-                outputView.setUint32(
-                    optionIndex * Uint32Array.BYTES_PER_ELEMENT,
-                    optionIdentifier,
-                    true,
-                );
-            });
+            orderedOptionIdentifiers.forEach(
+                (optionIdentifier, optionIndex) => {
+                    outputView.setUint32(
+                        optionIndex * Uint32Array.BYTES_PER_ELEMENT,
+                        optionIdentifier,
+                        true,
+                    );
+                },
+            );
             copiedReconstructionResults.add(reconstructedTargetResultHandle);
             writeWord(memory, statusPointer, 0);
             return 0;
@@ -447,9 +457,7 @@ const createFakeTargetReleaseRuntime = (): FakeTargetReleaseRuntime => {
             ) {
                 return refusalReasonCodes.consumedState;
             }
-            activeReconstructionHandles.delete(
-                reconstructedTargetResultHandle,
-            );
+            activeReconstructionHandles.delete(reconstructedTargetResultHandle);
             copiedReconstructionResults.delete(reconstructedTargetResultHandle);
             return 0;
         },
@@ -526,11 +534,9 @@ const createFakeTargetReleaseRuntime = (): FakeTargetReleaseRuntime => {
             statusPointer: number,
         ) => {
             partialReadCalls.push({ chunkIndex, roleOrdinal });
-            new Uint8Array(
-                memory.buffer,
-                outputPointer,
-                outputByteLength,
-            ).fill(1 + roleOrdinal * 16 + chunkIndex);
+            new Uint8Array(memory.buffer, outputPointer, outputByteLength).fill(
+                1 + roleOrdinal * 16 + chunkIndex,
+            );
             writeWord(memory, statusPointer, 0);
             return 0;
         },
@@ -581,12 +587,14 @@ const createOutputStore = (input?: {
 }) => {
     const chunks = new Map<number, Uint8Array<ArrayBuffer>>();
     return Object.freeze({
-        commitChunk: async (
+        commitChunk: (
             chunkIndex: number,
             chunkBytes: Uint8Array<ArrayBuffer>,
         ): Promise<void> => {
             if (input?.failAtChunkIndex === chunkIndex) {
-                throw new Error('The test output store rejected the chunk.');
+                return Promise.reject(
+                    new Error('The test output store rejected the chunk.'),
+                );
             }
             input?.observations?.push(
                 Object.freeze({
@@ -595,16 +603,19 @@ const createOutputStore = (input?: {
                 }),
             );
             chunks.set(chunkIndex, chunkBytes.slice());
+            return Promise.resolve();
         },
-        readChunk: async (
+        readChunk: (
             chunkIndex: number,
             exactByteLength: number,
         ): Promise<Uint8Array<ArrayBuffer>> => {
             const bytes = chunks.get(chunkIndex);
             if (bytes === undefined || bytes.byteLength !== exactByteLength) {
-                throw new Error('The requested target-release chunk is absent.');
+                return Promise.reject(
+                    new Error('The requested target-release chunk is absent.'),
+                );
             }
-            return bytes.slice();
+            return Promise.resolve(bytes.slice());
         },
     });
 };
@@ -629,9 +640,7 @@ const mintVerifiedTargetReleaseShares = async (
                 kernel: runtime.kernel,
                 proofInputStore: Object.freeze({}) as never,
                 selectedSuiteRecordSource: Object.freeze({}) as never,
-                targetIdentifierPartialBytes: Uint8Array.of(
-                    0x61 + shareIndex,
-                ),
+                targetIdentifierPartialBytes: Uint8Array.of(0x61 + shareIndex),
                 targetOrderPartialBytes: Uint8Array.of(0x71 + shareIndex),
                 targetShareObject: targetShareObject as never,
                 verifiedFinality: Object.freeze({}) as never,
@@ -668,20 +677,23 @@ describe('target-release closed-worker lifecycle', () => {
             kernel: runtime.kernel,
             outputStore: createOutputStore(),
             partialOutputStores: {
-                resolveOutputStore: async ({ role }) =>
-                    role === 'targetIdentifier'
-                        ? createOutputStore({
-                              observations: targetIdentifierObservations,
-                          })
-                        : createOutputStore({
-                              observations: targetOrderObservations,
-                          }),
+                resolveOutputStore: ({ role }) =>
+                    Promise.resolve(
+                        role === 'targetIdentifier'
+                            ? createOutputStore({
+                                  observations: targetIdentifierObservations,
+                              })
+                            : createOutputStore({
+                                  observations: targetOrderObservations,
+                              }),
+                    ),
             },
             reservationIntentObject: reservationIntentObject as never,
-            resolveVerifiedTargetShare: async () => ({
-                targetShareObject: targetShareObject as never,
-                verifiedOutput: verifiedOutput as never,
-            }),
+            resolveVerifiedTargetShare: () =>
+                Promise.resolve({
+                    targetShareObject: targetShareObject as never,
+                    verifiedOutput: verifiedOutput as never,
+                }),
             selectedSuiteRecordSource: Object.freeze({}) as never,
             verifiedFinality: Object.freeze({}) as never,
             verifiedReservation: Object.freeze({}) as never,
@@ -735,16 +747,19 @@ describe('target-release closed-worker lifecycle', () => {
                 options: Object.freeze({ resume: Object.freeze({}) }) as never,
                 outputStore: createOutputStore(),
                 partialOutputStores: {
-                    resolveOutputStore: async ({ role }) =>
-                        role === 'targetOrder'
-                            ? createOutputStore({ failAtChunkIndex: 0 })
-                            : createOutputStore(),
+                    resolveOutputStore: ({ role }) =>
+                        Promise.resolve(
+                            role === 'targetOrder'
+                                ? createOutputStore({ failAtChunkIndex: 0 })
+                                : createOutputStore(),
+                        ),
                 },
                 reservationIntentObject: reservationIntentObject as never,
-                resolveVerifiedTargetShare: async () => ({
-                    targetShareObject: targetShareObject as never,
-                    verifiedOutput: verifiedOutput as never,
-                }),
+                resolveVerifiedTargetShare: () =>
+                    Promise.resolve({
+                        targetShareObject: targetShareObject as never,
+                        verifiedOutput: verifiedOutput as never,
+                    }),
                 selectedSuiteRecordSource: Object.freeze({}) as never,
                 verifiedFinality: Object.freeze({}) as never,
                 verifiedReservation: Object.freeze({}) as never,
@@ -776,13 +791,15 @@ describe('target-release closed-worker lifecycle', () => {
                 kernel: runtime.kernel,
                 outputStore: createOutputStore(),
                 partialOutputStores: {
-                    resolveOutputStore: async () => createOutputStore(),
+                    resolveOutputStore: () =>
+                        Promise.resolve(createOutputStore()),
                 },
                 reservationIntentObject: reservationIntentObject as never,
-                resolveVerifiedTargetShare: async () => ({
-                    targetShareObject: targetShareObject as never,
-                    verifiedOutput: verifiedOutput as never,
-                }),
+                resolveVerifiedTargetShare: () =>
+                    Promise.resolve({
+                        targetShareObject: targetShareObject as never,
+                        verifiedOutput: verifiedOutput as never,
+                    }),
                 selectedSuiteRecordSource: Object.freeze({}) as never,
                 verifiedFinality: Object.freeze({}) as never,
                 verifiedReservation: Object.freeze({}) as never,
@@ -818,9 +835,7 @@ describe('target-release closed-worker lifecycle', () => {
             [11, 12, 14, 128, 32, 15, 21, 17, 192, 32, 16, 20, 256, 32, 19],
         ]);
         expect(runtime.verificationFinishCalls).toEqual([[401, 45]]);
-        expect(
-            runtime.verificationTerminalSourceDiscards,
-        ).toEqual([]);
+        expect(runtime.verificationTerminalSourceDiscards).toEqual([]);
         expect(boundaryMocks.verifiedCapabilityRelease).not.toHaveBeenCalled();
 
         share.release();
@@ -900,16 +915,16 @@ describe('target-release closed-worker lifecycle', () => {
             foundationProfile.participantCount,
         );
         const firstRelayOrder = [
-            firstShares[9]!,
-            firstShares[1]!,
-            firstShares[7]!,
-            firstShares[3]!,
-            firstShares[5]!,
-            firstShares[0]!,
-            firstShares[8]!,
-            firstShares[2]!,
-            firstShares[6]!,
-            firstShares[4]!,
+            firstShares[9],
+            firstShares[1],
+            firstShares[7],
+            firstShares[3],
+            firstShares[5],
+            firstShares[0],
+            firstShares[8],
+            firstShares[2],
+            firstShares[6],
+            firstShares[4],
         ];
         const firstResult = reconstructTargetReleaseInClosedWorker({
             finalizedTargetIdentifierBytes: Uint8Array.of(0x41),
@@ -968,12 +983,7 @@ describe('target-release closed-worker lifecycle', () => {
         try {
             reconstructTargetReleaseInClosedWorker({
                 ...reconstructionInput,
-                verifiedShares: [
-                    shares[0]!,
-                    shares[1]!,
-                    shares[2]!,
-                    shares[2]!,
-                ],
+                verifiedShares: [shares[0], shares[1], shares[2], shares[2]],
             });
         } catch (error) {
             repeatedSelectionFailure = error;
@@ -1020,8 +1030,7 @@ describe('target-release closed-worker lifecycle', () => {
     it('retires every poisoned share after reconstruction refusal', async () => {
         const runtime = createFakeTargetReleaseRuntime();
         const shares = await mintVerifiedTargetReleaseShares(runtime);
-        runtime.reconstructionStatus.value =
-            refusalReasonCodes.wrongHashOrRoot;
+        runtime.reconstructionStatus.value = refusalReasonCodes.wrongHashOrRoot;
 
         let reconstructionFailure: unknown;
         try {

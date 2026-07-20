@@ -24,11 +24,11 @@ import {
     constructEvaluatorAggregateInClosedWorker,
     type EvaluatorAggregateSession,
 } from '#packages/wasm/src/evaluator-aggregate-runtime';
+import type { ClosedWorkerProductionOperationIdentifiers } from '#packages/wasm/src/local-storage-root-worker-kernel/authorities';
 import {
     activateSelectedSuiteRecordSource,
     releaseSelectedSuiteRecordSource,
 } from '#packages/wasm/src/selected-suite-record-source';
-import type { ClosedWorkerProductionOperationIdentifiers } from '#packages/wasm/src/local-storage-root-worker-kernel/authorities';
 import { registerCommonProofKernelContext } from '#packages/wasm/src/transcript-core-bridge/common-proof-kernel-context';
 import type { TranscriptCoreKernelCommandRuntime } from '#packages/wasm/src/transcript-core-bridge/kernel-runtime';
 import type { TranscriptCoreKernel } from '#packages/wasm/src/transcript-core-bridge/kernel-types';
@@ -145,7 +145,7 @@ vi.mock('#packages/wasm/src/accepted-setup-package-builder-runtime', () => ({
 vi.mock(
     '#packages/wasm/src/local-storage-root-worker-kernel/worker-kernel',
     () => ({
-        withClosedWorkerProductionOperationAuthority: async (
+        withClosedWorkerProductionOperationAuthority: (
             workerKernel: BrowserActionStorageWorkerKernel,
             productionOperationIdentifiers: ClosedWorkerProductionOperationIdentifiers,
             operation: (authority: {
@@ -163,24 +163,26 @@ vi.mock(
                 throw new CanonicalStreamRefusalError('wrongContext');
             }
             const context = resolveFakeContext(state.kernel);
-            return operation(
-                Object.freeze({
-                    withExactKernelAuthorization: <Result>(
-                        callback: (authorization: object) => Result,
-                    ): Result =>
-                        callback(
-                            Object.freeze({
-                                actionRandomnessContext: context,
-                                actionRandomnessHandle: 41,
-                                kernel: state.kernel,
-                                stateReservationCapabilityMemory:
-                                    context.memory,
-                                stateReservationCapabilityPointer: 64,
-                                stateReservationHandle: 43,
-                                stateVerifierSessionHandle: 42,
-                            }),
-                        ),
-                }),
+            return Promise.resolve().then(() =>
+                operation(
+                    Object.freeze({
+                        withExactKernelAuthorization: <Result>(
+                            callback: (authorization: object) => Result,
+                        ): Result =>
+                            callback(
+                                Object.freeze({
+                                    actionRandomnessContext: context,
+                                    actionRandomnessHandle: 41,
+                                    kernel: state.kernel,
+                                    stateReservationCapabilityMemory:
+                                        context.memory,
+                                    stateReservationCapabilityPointer: 64,
+                                    stateReservationHandle: 43,
+                                    stateVerifierSessionHandle: 42,
+                                }),
+                            ),
+                    }),
+                ),
             );
         },
     }),
@@ -209,7 +211,10 @@ vi.mock('#packages/wasm/src/common-proof-worker-runtime/runtime', () => ({
     releaseClosedWorkerCommonProofGenerationFamilyAdapter: vi.fn(),
     releaseClosedWorkerCommonProofVerificationFamilyAdapter: vi.fn(),
     runClosedWorkerCommonProofGenerationFamilyAdapterWithExecutionOpener:
-        async (_adapter: object, openExecution: CommonProofGenerationExecutionOpener) => {
+        async (
+            _adapter: object,
+            openExecution: CommonProofGenerationExecutionOpener,
+        ) => {
             const execution = await openExecution(
                 Object.freeze({
                     commonProofRuntimeBindingHash: new Uint8Array(64),
@@ -739,7 +744,11 @@ const createGenerationExecutionOpener = (
 ): CommonProofGenerationExecutionOpener =>
     Object.freeze(() =>
         Promise.resolve(
-            Object.freeze({ externalMemory: emptyExternalMemory, options, outputStore }),
+            Object.freeze({
+                externalMemory: emptyExternalMemory,
+                options,
+                outputStore,
+            }),
         ),
     );
 
@@ -835,8 +844,9 @@ describe('Evaluator aggregate Rust/WASM lifecycle', () => {
             session.generate({
                 checkpointLineageIdentifier: new Uint8Array(32),
                 generationMode: 'invalid' as never,
-                openProofGenerationExecution:
-                    createGenerationExecutionOpener(createStore(new Map())),
+                openProofGenerationExecution: createGenerationExecutionOpener(
+                    createStore(new Map()),
+                ),
                 productionOperationIdentifiers:
                     state.productionOperationIdentifiers,
                 workerKernel: state.workerKernel,
@@ -860,8 +870,9 @@ describe('Evaluator aggregate Rust/WASM lifecycle', () => {
             session.generate({
                 checkpointLineageIdentifier: new Uint8Array(32),
                 generationMode: 'fresh',
-                openProofGenerationExecution:
-                    createGenerationExecutionOpener(createStore(new Map())),
+                openProofGenerationExecution: createGenerationExecutionOpener(
+                    createStore(new Map()),
+                ),
                 productionOperationIdentifiers:
                     state.productionOperationIdentifiers,
                 workerKernel: state.workerKernel,
@@ -879,8 +890,9 @@ describe('Evaluator aggregate Rust/WASM lifecycle', () => {
         await session.generate({
             checkpointLineageIdentifier: new Uint8Array(32).fill(0x33),
             generationMode: 'fresh',
-            openProofGenerationExecution:
-                createGenerationExecutionOpener(createStore(new Map())),
+            openProofGenerationExecution: createGenerationExecutionOpener(
+                createStore(new Map()),
+            ),
             productionOperationIdentifiers:
                 state.productionOperationIdentifiers,
             workerKernel: state.workerKernel,

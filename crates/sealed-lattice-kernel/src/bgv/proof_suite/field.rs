@@ -5,6 +5,7 @@
 //! prime, the exact maximum two-adic root order, and polynomial
 //! irreducibility; the constants are not trusted merely because they compile.
 
+#[cfg(test)]
 use std::sync::OnceLock;
 
 use zeroize::Zeroize;
@@ -13,12 +14,15 @@ pub(crate) const PROOF_BASE_FIELD_MODULUS: u64 = 18_446_744_069_414_584_321;
 const GOLDILOCKS_TWO_TO_64_RESIDUE: u64 = (1_u64 << 32) - 1;
 pub(crate) const PROOF_BASE_FIELD_MAXIMUM_TWO_ADIC_GENERATOR: u64 = 1_753_635_133_440_165_772;
 pub(crate) const PROOF_CHALLENGE_EXTENSION_DEGREE: usize = 5;
+#[cfg(test)]
 pub(crate) const PROOF_CHALLENGE_EXTENSION_POLYNOMIAL_COEFFICIENTS: [u64;
     PROOF_CHALLENGE_EXTENSION_DEGREE] = [PROOF_BASE_FIELD_MODULUS - 3, 0, 0, 0, 0];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ProofFieldError {
+    #[cfg(test)]
     CompositeBaseModulus,
+    #[cfg(test)]
     InvalidTwoAdicGenerator,
     InvalidExtensionPolynomial,
     NonCanonicalElement,
@@ -293,6 +297,7 @@ impl ProofChallengeExtensionElement {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn validate_proof_field_profile() -> Result<(), ProofFieldError> {
     static VALIDATION: OnceLock<Result<(), ProofFieldError>> = OnceLock::new();
     *VALIDATION.get_or_init(|| {
@@ -313,6 +318,7 @@ pub(crate) fn validate_proof_field_profile() -> Result<(), ProofFieldError> {
     })
 }
 
+#[cfg(test)]
 fn validate_maximum_two_adic_generator(
     modulus: u64,
     generator: u64,
@@ -335,6 +341,7 @@ fn validate_maximum_two_adic_generator(
     Ok(())
 }
 
+#[cfg(test)]
 fn is_prime_u64(candidate: u64) -> bool {
     if candidate < 2 {
         return false;
@@ -375,10 +382,12 @@ fn is_prime_u64(candidate: u64) -> bool {
     true
 }
 
+#[cfg(test)]
 fn modular_multiply(left: u64, right: u64, modulus: u64) -> u64 {
     ((u128::from(left) * u128::from(right)) % u128::from(modulus)) as u64
 }
 
+#[cfg(test)]
 fn modular_power(mut base: u64, mut exponent: u64, modulus: u64) -> u64 {
     let mut result = 1_u64;
     while exponent != 0 {
@@ -391,6 +400,7 @@ fn modular_power(mut base: u64, mut exponent: u64, modulus: u64) -> u64 {
     result
 }
 
+#[cfg(test)]
 fn is_irreducible_monic_polynomial(modulus: u64, coefficients: &[u64]) -> bool {
     let degree = coefficients.len();
     if degree == 0
@@ -433,6 +443,7 @@ fn is_irreducible_monic_polynomial(modulus: u64, coefficients: &[u64]) -> bool {
     ))
 }
 
+#[cfg(test)]
 fn distinct_prime_factors(mut value: usize) -> Vec<usize> {
     let mut factors = Vec::new();
     let mut candidate = 2_usize;
@@ -451,6 +462,7 @@ fn distinct_prime_factors(mut value: usize) -> Vec<usize> {
     factors
 }
 
+#[cfg(test)]
 fn polynomial_power_mod(
     base: &[u64],
     mut exponent: u64,
@@ -477,6 +489,7 @@ fn polynomial_power_mod(
     result
 }
 
+#[cfg(test)]
 fn polynomial_multiply(left: &[u64], right: &[u64], modulus: u64) -> Vec<u64> {
     if polynomial_is_zero(left) || polynomial_is_zero(right) {
         return vec![0];
@@ -493,6 +506,7 @@ fn polynomial_multiply(left: &[u64], right: &[u64], modulus: u64) -> Vec<u64> {
     product
 }
 
+#[cfg(test)]
 fn polynomial_subtract(left: &[u64], right: &[u64], modulus: u64) -> Vec<u64> {
     let mut difference = vec![0_u64; left.len().max(right.len())];
     for (index, output) in difference.iter_mut().enumerate() {
@@ -504,6 +518,7 @@ fn polynomial_subtract(left: &[u64], right: &[u64], modulus: u64) -> Vec<u64> {
     difference
 }
 
+#[cfg(test)]
 fn polynomial_remainder(mut dividend: Vec<u64>, divisor: &[u64], modulus: u64) -> Vec<u64> {
     trim_polynomial(&mut dividend);
     let divisor_degree = polynomial_degree(divisor);
@@ -525,6 +540,7 @@ fn polynomial_remainder(mut dividend: Vec<u64>, divisor: &[u64], modulus: u64) -
     dividend
 }
 
+#[cfg(test)]
 fn polynomial_gcd(mut left: Vec<u64>, mut right: Vec<u64>, modulus: u64) -> Vec<u64> {
     trim_polynomial(&mut left);
     trim_polynomial(&mut right);
@@ -544,6 +560,7 @@ fn polynomial_gcd(mut left: Vec<u64>, mut right: Vec<u64>, modulus: u64) -> Vec<
     left
 }
 
+#[cfg(test)]
 fn polynomial_degree(polynomial: &[u64]) -> usize {
     polynomial
         .iter()
@@ -551,10 +568,12 @@ fn polynomial_degree(polynomial: &[u64]) -> usize {
         .unwrap_or(0)
 }
 
+#[cfg(test)]
 fn polynomial_is_zero(polynomial: &[u64]) -> bool {
     polynomial.iter().all(|coefficient| *coefficient == 0)
 }
 
+#[cfg(test)]
 fn trim_polynomial(polynomial: &mut Vec<u64>) {
     while polynomial.len() > 1 && polynomial.last() == Some(&0) {
         polynomial.pop();
@@ -564,10 +583,12 @@ fn trim_polynomial(polynomial: &mut Vec<u64>) {
     }
 }
 
+#[cfg(test)]
 fn modular_add(left: u64, right: u64, modulus: u64) -> u64 {
     ((u128::from(left) + u128::from(right)) % u128::from(modulus)) as u64
 }
 
+#[cfg(test)]
 fn modular_subtract(left: u64, right: u64, modulus: u64) -> u64 {
     if left >= right {
         left - right

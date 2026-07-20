@@ -1,18 +1,13 @@
-use std::sync::OnceLock;
+use crate::foundation::{PRIVATE_PROOF_SALT_PURPOSE, ProofApplicationSlotCeilings};
 
-use crate::{
-    foundation::{PRIVATE_PROOF_SALT_PURPOSE, ProofApplicationSlotCeilings},
-    hashing::hash_framed_parts_512 as hash512,
-};
-
-const PROOF_TRANSCRIPT_DOMAIN_HASH_DOMAIN: &str =
-    "sealed-lattice/proof/transcript-domain-identifier/v1";
-const PROOF_TRANSCRIPT_DOMAIN_LABEL: &[u8] = b"sealed-lattice/common-proof-transcript/v1";
-const PROOF_TRANSCRIPT_DOMAIN_ENCODING_VERSION: u16 = 2;
 const PROOF_RANDOMNESS_ASSIGNMENT_COUNT: usize = 9;
+#[cfg(test)]
 pub(crate) const TRACE_MASK_RANDOMNESS_PURPOSE_CLASS: u16 = 1;
+#[cfg(test)]
 pub(crate) const TELESCOPING_MASK_RANDOMNESS_PURPOSE_CLASS: u16 = 2;
+#[cfg(test)]
 pub(crate) const OPENING_MASK_RANDOMNESS_PURPOSE_CLASS: u16 = 3;
+#[cfg(test)]
 const PROOF_MASK_RANDOMNESS_PURPOSE_CLASSES: [u16; 3] = [
     TRACE_MASK_RANDOMNESS_PURPOSE_CLASS,
     TELESCOPING_MASK_RANDOMNESS_PURPOSE_CLASS,
@@ -72,38 +67,6 @@ const PROOF_RANDOMNESS_ASSIGNMENTS: [ProofRandomnessAssignment; PROOF_RANDOMNESS
     },
 ];
 
-pub(crate) fn common_proof_transcript_domain_id() -> [u8; 64] {
-    static DOMAIN_IDENTIFIER: OnceLock<[u8; 64]> = OnceLock::new();
-    *DOMAIN_IDENTIFIER.get_or_init(|| {
-        let mut canonical_assignment_bytes = Vec::with_capacity(
-            6 + PROOF_MASK_RANDOMNESS_PURPOSE_CLASSES.len() * 2
-                + PROOF_RANDOMNESS_ASSIGNMENTS.len() * 2,
-        );
-        canonical_assignment_bytes
-            .extend_from_slice(&PROOF_TRANSCRIPT_DOMAIN_ENCODING_VERSION.to_le_bytes());
-        canonical_assignment_bytes
-            .extend_from_slice(&(PROOF_RANDOMNESS_ASSIGNMENT_COUNT as u16).to_le_bytes());
-        canonical_assignment_bytes
-            .extend_from_slice(&(PROOF_MASK_RANDOMNESS_PURPOSE_CLASSES.len() as u16).to_le_bytes());
-        for purpose_class in PROOF_MASK_RANDOMNESS_PURPOSE_CLASSES {
-            canonical_assignment_bytes.extend_from_slice(&purpose_class.to_le_bytes());
-        }
-        for assignment in PROOF_RANDOMNESS_ASSIGNMENTS {
-            canonical_assignment_bytes
-                .extend_from_slice(&assignment.family_schema_identifier.to_le_bytes());
-        }
-
-        hash512(
-            PROOF_TRANSCRIPT_DOMAIN_HASH_DOMAIN,
-            &[
-                PROOF_TRANSCRIPT_DOMAIN_LABEL,
-                &PRIVATE_PROOF_SALT_PURPOSE.to_le_bytes(),
-                &canonical_assignment_bytes,
-            ],
-        )
-    })
-}
-
 pub(crate) fn common_proof_randomness_purpose_is_assigned(
     family_schema_identifier: u16,
     purpose: u16,
@@ -141,14 +104,6 @@ mod tests {
         private_proof_salt_purpose: u16,
         mask_purpose_classes: ProofRandomnessPurposeClassesVector,
         families: Vec<ProofRandomnessAssignmentVector>,
-    }
-
-    #[test]
-    fn transcript_domain_identifier_is_deterministic_and_nonzero() {
-        let first = common_proof_transcript_domain_id();
-        let second = common_proof_transcript_domain_id();
-        assert_eq!(first, second);
-        assert_ne!(first, [0_u8; 64]);
     }
 
     #[test]

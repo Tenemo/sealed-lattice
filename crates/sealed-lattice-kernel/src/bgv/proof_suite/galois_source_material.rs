@@ -29,16 +29,10 @@ struct VerifiedGaloisProofBinding {
     ceremony_context_hash: [u8; Hash512::BYTE_LENGTH],
     action_context_hash: [u8; Hash512::BYTE_LENGTH],
     roster_hash: [u8; Hash512::BYTE_LENGTH],
-    board_object_hash: [u8; Hash512::BYTE_LENGTH],
     verification_binding_hash: [u8; Hash512::BYTE_LENGTH],
     proof_application_slot_hash: [u8; Hash512::BYTE_LENGTH],
     canonical_proof_application_binding_hash: [u8; Hash512::BYTE_LENGTH],
     application_statement_hash: [u8; Hash512::BYTE_LENGTH],
-    proof_header_hash: [u8; Hash512::BYTE_LENGTH],
-    proof_stream_full_object_digest: [u8; Hash512::BYTE_LENGTH],
-    proof_byte_length: u64,
-    verified_query_count: u32,
-    relation_plan_hash: [u8; Hash512::BYTE_LENGTH],
     relation_plan_variant_hash: [u8; Hash512::BYTE_LENGTH],
 }
 
@@ -47,9 +41,6 @@ struct VerifiedGaloisProofBinding {
 /// tree terminal; the material capability separately authenticates replay of
 /// the exact component bytes under the same application binding.
 pub(crate) struct VerifiedGaloisSourceComponent {
-    participant_identity: [u8; Hash512::BYTE_LENGTH],
-    roster_position: u16,
-    logical_schedule_position: u32,
     evaluator_position: SelectedEvaluatorEntryPosition,
     public_polynomial_context_hash: [u8; Hash512::BYTE_LENGTH],
     contribution_root: [u8; Hash512::BYTE_LENGTH],
@@ -57,18 +48,6 @@ pub(crate) struct VerifiedGaloisSourceComponent {
 }
 
 impl VerifiedGaloisSourceComponent {
-    pub(crate) const fn participant_identity(&self) -> [u8; Hash512::BYTE_LENGTH] {
-        self.participant_identity
-    }
-
-    pub(crate) const fn roster_position(&self) -> u16 {
-        self.roster_position
-    }
-
-    pub(crate) const fn logical_schedule_position(&self) -> u32 {
-        self.logical_schedule_position
-    }
-
     pub(crate) const fn evaluator_position(&self) -> SelectedEvaluatorEntryPosition {
         self.evaluator_position
     }
@@ -170,17 +149,11 @@ impl VerifiedGaloisSourceMaterialBatchPreflight {
             ceremony_context_hash: verified_proof.ceremony_context_hash(),
             action_context_hash: verified_proof.action_context_hash(),
             roster_hash,
-            board_object_hash: verified_proof.board_object_hash(),
             verification_binding_hash: verified_proof.verification_binding_hash(),
             proof_application_slot_hash: verified_proof.proof_application_slot_hash(),
             canonical_proof_application_binding_hash: verified_proof
                 .canonical_proof_application_binding_hash(),
             application_statement_hash: verified_proof.application_statement_hash(),
-            proof_header_hash: verified_proof.proof_header_hash(),
-            proof_stream_full_object_digest: verified_proof.proof_stream_full_object_digest(),
-            proof_byte_length: verified_proof.proof_byte_length(),
-            verified_query_count: verified_proof.verified_query_count(),
-            relation_plan_hash: verified_proof.relation_plan_hash(),
             relation_plan_variant_hash: verified_proof.relation_plan_variant_hash(),
         };
         if proof_binding.protocol_version != FOUNDATION_PROFILE.protocol_version
@@ -503,17 +476,11 @@ impl VerifiedGaloisSourceMaterialBatch {
             ceremony_context_hash: verified_proof.ceremony_context_hash(),
             action_context_hash: verified_proof.action_context_hash(),
             roster_hash,
-            board_object_hash: verified_proof.board_object_hash(),
             verification_binding_hash: verified_proof.verification_binding_hash(),
             proof_application_slot_hash: verified_proof.proof_application_slot_hash(),
             canonical_proof_application_binding_hash: verified_proof
                 .canonical_proof_application_binding_hash(),
             application_statement_hash: verified_proof.application_statement_hash(),
-            proof_header_hash: verified_proof.proof_header_hash(),
-            proof_stream_full_object_digest: verified_proof.proof_stream_full_object_digest(),
-            proof_byte_length: verified_proof.proof_byte_length(),
-            verified_query_count: verified_proof.verified_query_count(),
-            relation_plan_hash: verified_proof.relation_plan_hash(),
             relation_plan_variant_hash: verified_proof.relation_plan_variant_hash(),
         };
         if proof_binding.protocol_version != FOUNDATION_PROFILE.protocol_version
@@ -676,9 +643,6 @@ impl VerifiedGaloisSourceMaterialBatch {
                 return Err(CommonProofVerifierError::InvalidApplicationStatement);
             }
             verified_components.push(VerifiedGaloisSourceComponent {
-                participant_identity,
-                roster_position,
-                logical_schedule_position,
                 evaluator_position: selected_position,
                 public_polynomial_context_hash: contribution_tree.public_polynomial_context_hash(),
                 contribution_root: statement_root,
@@ -723,10 +687,6 @@ impl VerifiedGaloisSourceMaterialBatch {
         self.anchor_commitment_roots
     }
 
-    pub(crate) const fn application_statement_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
-        self.proof_binding.application_statement_hash
-    }
-
     pub(crate) const fn protocol_version(&self) -> u16 {
         self.proof_binding.protocol_version
     }
@@ -747,58 +707,12 @@ impl VerifiedGaloisSourceMaterialBatch {
         self.proof_binding.roster_hash
     }
 
-    pub(crate) const fn board_object_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
-        self.proof_binding.board_object_hash
-    }
-
-    pub(crate) const fn proof_header_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
-        self.proof_binding.proof_header_hash
-    }
-
-    pub(crate) const fn verification_binding_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
-        self.proof_binding.verification_binding_hash
-    }
-
-    pub(crate) const fn proof_application_slot_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
-        self.proof_binding.proof_application_slot_hash
-    }
-
-    pub(crate) const fn canonical_proof_application_binding_hash(
-        &self,
-    ) -> [u8; Hash512::BYTE_LENGTH] {
-        self.proof_binding.canonical_proof_application_binding_hash
-    }
-
-    pub(crate) const fn proof_stream_full_object_digest(&self) -> [u8; Hash512::BYTE_LENGTH] {
-        self.proof_binding.proof_stream_full_object_digest
-    }
-
-    pub(crate) const fn proof_byte_length(&self) -> u64 {
-        self.proof_binding.proof_byte_length
-    }
-
-    pub(crate) const fn verified_query_count(&self) -> u32 {
-        self.proof_binding.verified_query_count
-    }
-
-    pub(crate) const fn relation_plan_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
-        self.proof_binding.relation_plan_hash
-    }
-
-    pub(crate) const fn relation_plan_variant_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
-        self.proof_binding.relation_plan_variant_hash
-    }
-
     pub(crate) fn ordered_components(&self) -> &[VerifiedGaloisSourceComponent] {
         &self.ordered_components
     }
 
     pub(crate) fn ordered_auxiliary_roots(&self) -> &[VerifiedEvaluatorAuxiliaryRoot] {
         &self.ordered_auxiliary_roots
-    }
-
-    pub(crate) fn into_ordered_components(self) -> Box<[VerifiedGaloisSourceComponent]> {
-        self.ordered_components
     }
 }
 

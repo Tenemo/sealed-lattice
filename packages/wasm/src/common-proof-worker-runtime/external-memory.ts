@@ -1,6 +1,6 @@
-import { shake256 } from "@noble/hashes/sha3.js";
+import { shake256 } from '@noble/hashes/sha3.js';
 
-import { byteArraysEqual } from "../byte-array.js";
+import { byteArraysEqual } from '../byte-array.js';
 
 const hashByteLength = 64;
 export const maximumWorkerOperationCount = 4_096;
@@ -30,27 +30,27 @@ const externalMemoryProtectionCodes = Object.freeze({
     secretAuthenticatedEncryption: 2,
 } as const);
 const requestDigestDomain =
-    "sealed-lattice/common-proof/external-memory-request/v1";
-const readDigestDomain = "sealed-lattice/common-proof/external-memory-read/v1";
-const hashPreimagePrefix = new TextEncoder().encode("sealed.vote/hash512");
+    'sealed-lattice/common-proof/external-memory-request/v1';
+const readDigestDomain = 'sealed-lattice/common-proof/external-memory-read/v1';
+const hashPreimagePrefix = new TextEncoder().encode('sealed.vote/hash512');
 const textEncoder = new TextEncoder();
 
 export type CommonProofDiscardExportName =
-    | "sealed_lattice_common_proof_discard_generation_family_adapter"
-    | "sealed_lattice_common_proof_discard_prepared_generation"
-    | "sealed_lattice_common_proof_discard_prepared_verification"
-    | "sealed_lattice_common_proof_discard_verification_family_adapter";
+    | 'sealed_lattice_common_proof_discard_generation_family_adapter'
+    | 'sealed_lattice_common_proof_discard_prepared_generation'
+    | 'sealed_lattice_common_proof_discard_prepared_verification'
+    | 'sealed_lattice_common_proof_discard_verification_family_adapter';
 
 export type CommonProofExternalMemoryProtection =
-    | "public-integrity"
-    | "secret-authenticated-encryption";
+    | 'public-integrity'
+    | 'secret-authenticated-encryption';
 
 export type CommonProofExternalMemoryOperation =
     | Readonly<{
           exactByteLength: bigint;
           objectOrdinal: number;
           operationIndex: number;
-          operationKind: "create";
+          operationKind: 'create';
           protection: CommonProofExternalMemoryProtection;
       }>
     | Readonly<{
@@ -58,24 +58,24 @@ export type CommonProofExternalMemoryOperation =
           expectedOffset: bigint;
           objectOrdinal: number;
           operationIndex: number;
-          operationKind: "append";
+          operationKind: 'append';
       }>
     | Readonly<{
           objectOrdinal: number;
           operationIndex: number;
-          operationKind: "seal";
+          operationKind: 'seal';
       }>
     | Readonly<{
           byteLength: number;
           objectOrdinal: number;
           offset: bigint;
           operationIndex: number;
-          operationKind: "read";
+          operationKind: 'read';
       }>
     | Readonly<{
           objectOrdinal: number;
           operationIndex: number;
-          operationKind: "delete";
+          operationKind: 'delete';
       }>;
 
 export type CommonProofExternalMemoryRequest = Readonly<{
@@ -111,18 +111,18 @@ export const clearCommonProofExternalMemoryRequest = (
 };
 
 type CommonProofWorkerRuntimeErrorCode =
-    | "Cancelled"
-    | "KernelFailure"
-    | "MalformedRequest"
-    | "ResourceLimit"
-    | "StorageFailure"
-    | "WrongRuntimeBinding"
-    | "WrongRequestDigest"
-    | "WrongSequence"
-    | "WrongStorageResult";
+    | 'Cancelled'
+    | 'KernelFailure'
+    | 'MalformedRequest'
+    | 'ResourceLimit'
+    | 'StorageFailure'
+    | 'WrongRuntimeBinding'
+    | 'WrongRequestDigest'
+    | 'WrongSequence'
+    | 'WrongStorageResult';
 
 export class CommonProofWorkerRuntimeError extends Error {
-    public override readonly name = "CommonProofWorkerRuntimeError";
+    public override readonly name = 'CommonProofWorkerRuntimeError';
 
     public constructor(
         public readonly code: CommonProofWorkerRuntimeErrorCode,
@@ -138,8 +138,8 @@ export class CommonProofWorkerRuntimeError extends Error {
 const encodedVaruint = (input: bigint): Uint8Array<ArrayBuffer> => {
     if (input < 0n || input > 0xffff_ffff_ffff_ffffn) {
         throw new CommonProofWorkerRuntimeError(
-            "ResourceLimit",
-            "A common-proof hash-frame length is outside the unsigned 64-bit range.",
+            'ResourceLimit',
+            'A common-proof hash-frame length is outside the unsigned 64-bit range.',
         );
     }
     const encoded: number[] = [];
@@ -244,8 +244,8 @@ class BoundedMessageReader {
 
     #malformed(): never {
         throw new CommonProofWorkerRuntimeError(
-            "MalformedRequest",
-            "The common-proof storage request is truncated or malformed.",
+            'MalformedRequest',
+            'The common-proof storage request is truncated or malformed.',
         );
     }
 }
@@ -253,7 +253,7 @@ class BoundedMessageReader {
 const requireZero = (value: number, label: string): void => {
     if (value !== 0) {
         throw new CommonProofWorkerRuntimeError(
-            "MalformedRequest",
+            'MalformedRequest',
             `${label} must be zero.`,
         );
     }
@@ -265,14 +265,14 @@ const decodeOperation = (
 ): CommonProofExternalMemoryOperation => {
     if (reader.unsigned32() !== operationIndex) {
         throw new CommonProofWorkerRuntimeError(
-            "MalformedRequest",
-            "Common-proof storage operation ordinals are not canonical.",
+            'MalformedRequest',
+            'Common-proof storage operation ordinals are not canonical.',
         );
     }
     const operationKind = reader.unsigned16();
     const protectionCode = reader.unsigned16();
     const objectOrdinal = reader.unsigned32();
-    requireZero(reader.unsigned32(), "The operation reserved field");
+    requireZero(reader.unsigned32(), 'The operation reserved field');
     const position = reader.unsigned64();
     const payloadByteLength = reader.unsigned64();
     switch (operationKind) {
@@ -286,20 +286,20 @@ const decodeOperation = (
                         externalMemoryProtectionCodes.secretAuthenticatedEncryption)
             ) {
                 throw new CommonProofWorkerRuntimeError(
-                    "MalformedRequest",
-                    "A common-proof create operation has invalid metadata.",
+                    'MalformedRequest',
+                    'A common-proof create operation has invalid metadata.',
                 );
             }
             return Object.freeze({
                 exactByteLength: payloadByteLength,
                 objectOrdinal,
                 operationIndex,
-                operationKind: "create",
+                operationKind: 'create',
                 protection:
                     protectionCode ===
                     externalMemoryProtectionCodes.publicIntegrity
-                        ? "public-integrity"
-                        : "secret-authenticated-encryption",
+                        ? 'public-integrity'
+                        : 'secret-authenticated-encryption',
             });
         }
         case externalMemoryOperationCodes.append: {
@@ -309,8 +309,8 @@ const decodeOperation = (
                 payloadByteLength > maximumWorkerPayloadByteLength
             ) {
                 throw new CommonProofWorkerRuntimeError(
-                    "MalformedRequest",
-                    "A common-proof append operation has invalid metadata.",
+                    'MalformedRequest',
+                    'A common-proof append operation has invalid metadata.',
                 );
             }
             return Object.freeze({
@@ -318,7 +318,7 @@ const decodeOperation = (
                 expectedOffset: position,
                 objectOrdinal,
                 operationIndex,
-                operationKind: "append",
+                operationKind: 'append',
             });
         }
         case externalMemoryOperationCodes.seal: {
@@ -328,14 +328,14 @@ const decodeOperation = (
                 payloadByteLength !== 0n
             ) {
                 throw new CommonProofWorkerRuntimeError(
-                    "MalformedRequest",
-                    "A common-proof seal operation has invalid metadata.",
+                    'MalformedRequest',
+                    'A common-proof seal operation has invalid metadata.',
                 );
             }
             return Object.freeze({
                 objectOrdinal,
                 operationIndex,
-                operationKind: "seal",
+                operationKind: 'seal',
             });
         }
         case externalMemoryOperationCodes.read: {
@@ -345,8 +345,8 @@ const decodeOperation = (
                 payloadByteLength > maximumWorkerPayloadByteLength
             ) {
                 throw new CommonProofWorkerRuntimeError(
-                    "MalformedRequest",
-                    "A common-proof read operation has invalid metadata.",
+                    'MalformedRequest',
+                    'A common-proof read operation has invalid metadata.',
                 );
             }
             return Object.freeze({
@@ -354,7 +354,7 @@ const decodeOperation = (
                 objectOrdinal,
                 offset: position,
                 operationIndex,
-                operationKind: "read",
+                operationKind: 'read',
             });
         }
         case externalMemoryOperationCodes.delete: {
@@ -364,20 +364,20 @@ const decodeOperation = (
                 payloadByteLength !== 0n
             ) {
                 throw new CommonProofWorkerRuntimeError(
-                    "MalformedRequest",
-                    "A common-proof delete operation has invalid metadata.",
+                    'MalformedRequest',
+                    'A common-proof delete operation has invalid metadata.',
                 );
             }
             return Object.freeze({
                 objectOrdinal,
                 operationIndex,
-                operationKind: "delete",
+                operationKind: 'delete',
             });
         }
         default:
             throw new CommonProofWorkerRuntimeError(
-                "MalformedRequest",
-                "The common-proof storage operation kind is unsupported.",
+                'MalformedRequest',
+                'The common-proof storage operation kind is unsupported.',
             );
     }
 };
@@ -391,8 +391,8 @@ export const decodeCommonProofExternalMemoryRequest = (
         encodedRequest.byteLength > maximumEncodedRequestByteLength
     ) {
         throw new CommonProofWorkerRuntimeError(
-            "MalformedRequest",
-            "The common-proof storage request length exceeds the absolute worker safety bound.",
+            'MalformedRequest',
+            'The common-proof storage request length exceeds the absolute worker safety bound.',
         );
     }
     const exactOwnedView =
@@ -413,8 +413,8 @@ export const decodeCommonProofExternalMemoryRequest = (
             reader.unsigned16() !== requestMessageKind
         ) {
             throw new CommonProofWorkerRuntimeError(
-                "MalformedRequest",
-                "The common-proof storage request version or message kind is unsupported.",
+                'MalformedRequest',
+                'The common-proof storage request version or message kind is unsupported.',
             );
         }
         const maximumPayloadByteLength = reader.unsigned64();
@@ -433,8 +433,8 @@ export const decodeCommonProofExternalMemoryRequest = (
             requestSequence === 0n
         ) {
             throw new CommonProofWorkerRuntimeError(
-                "ResourceLimit",
-                "The common-proof storage request exceeds the absolute worker safety bound.",
+                'ResourceLimit',
+                'The common-proof storage request exceeds the absolute worker safety bound.',
             );
         }
         const minimumOperationByteLength =
@@ -445,8 +445,8 @@ export const decodeCommonProofExternalMemoryRequest = (
                 requestHeaderByteLength + minimumOperationByteLength
         ) {
             throw new CommonProofWorkerRuntimeError(
-                "MalformedRequest",
-                "The common-proof storage operation list is truncated.",
+                'MalformedRequest',
+                'The common-proof storage operation list is truncated.',
             );
         }
         const operations: CommonProofExternalMemoryOperation[] = [];
@@ -458,17 +458,17 @@ export const decodeCommonProofExternalMemoryRequest = (
         ) {
             const operation = decodeOperation(reader, operationIndex);
             operations.push(operation);
-            if (operation.operationKind === "append") {
+            if (operation.operationKind === 'append') {
                 transactionPayloadByteLength += BigInt(
                     operation.bytes.byteLength,
                 );
-            } else if (operation.operationKind === "read") {
+            } else if (operation.operationKind === 'read') {
                 transactionPayloadByteLength += BigInt(operation.byteLength);
             }
             if (transactionPayloadByteLength > maximumPayloadByteLength) {
                 throw new CommonProofWorkerRuntimeError(
-                    "ResourceLimit",
-                    "The common-proof storage transaction payload exceeds its declared bound.",
+                    'ResourceLimit',
+                    'The common-proof storage transaction payload exceeds its declared bound.',
                 );
             }
         }
@@ -476,26 +476,26 @@ export const decodeCommonProofExternalMemoryRequest = (
         if (
             firstOperationKind === undefined ||
             (operations.length > 1 &&
-                (firstOperationKind !== "delete" ||
+                (firstOperationKind !== 'delete' ||
                     operations.some(
-                        (operation) => operation.operationKind !== "delete",
+                        (operation) => operation.operationKind !== 'delete',
                     ))) ||
             operations.some(
                 (operation) =>
-                    operation.operationKind === "append" &&
+                    operation.operationKind === 'append' &&
                     operation.bytes.byteLength >
                         maximumExternalMemoryAppendByteLength,
             )
         ) {
             throw new CommonProofWorkerRuntimeError(
-                "MalformedRequest",
-                "The common-proof storage request does not use the fixed executor transaction grammar.",
+                'MalformedRequest',
+                'The common-proof storage request does not use the fixed executor transaction grammar.',
             );
         }
         if (!reader.complete()) {
             throw new CommonProofWorkerRuntimeError(
-                "MalformedRequest",
-                "The common-proof storage request has trailing bytes.",
+                'MalformedRequest',
+                'The common-proof storage request has trailing bytes.',
             );
         }
         const operationBytes = ownedEncodedRequest.subarray(
@@ -515,8 +515,8 @@ export const decodeCommonProofExternalMemoryRequest = (
                 !byteArraysEqual(suppliedRequestDigest, expectedRequestDigest)
             ) {
                 throw new CommonProofWorkerRuntimeError(
-                    "WrongRequestDigest",
-                    "The common-proof storage request digest does not bind its exact operation list.",
+                    'WrongRequestDigest',
+                    'The common-proof storage request digest does not bind its exact operation list.',
                 );
             }
         } finally {
@@ -542,7 +542,7 @@ const readDigest = (
     requestDigest: Uint8Array,
     operation: Extract<
         CommonProofExternalMemoryOperation,
-        { readonly operationKind: "read" }
+        { readonly operationKind: 'read' }
     >,
     bytes: Uint8Array,
 ): Uint8Array<ArrayBuffer> =>
@@ -572,13 +572,13 @@ const encodeStorageResponse = (
             operation,
         ): operation is Extract<
             CommonProofExternalMemoryOperation,
-            { readonly operationKind: "read" }
-        > => operation.operationKind === "read",
+            { readonly operationKind: 'read' }
+        > => operation.operationKind === 'read',
     );
     if (readResults.length !== readOperations.length) {
         throw new CommonProofWorkerRuntimeError(
-            "WrongStorageResult",
-            "The browser store returned the wrong number of common-proof reads.",
+            'WrongStorageResult',
+            'The browser store returned the wrong number of common-proof reads.',
         );
     }
     let responseByteLength =
@@ -596,8 +596,8 @@ const encodeStorageResponse = (
             result.offset !== operation.offset
         ) {
             throw new CommonProofWorkerRuntimeError(
-                "WrongStorageResult",
-                "The browser store returned a common-proof read with the wrong length.",
+                'WrongStorageResult',
+                'The browser store returned a common-proof read with the wrong length.',
             );
         }
         responseByteLength += bytes.byteLength;
@@ -610,8 +610,8 @@ const encodeStorageResponse = (
                 request.maximumPayloadByteLength
     ) {
         throw new CommonProofWorkerRuntimeError(
-            "ResourceLimit",
-            "The common-proof storage response exceeds its fixed bound.",
+            'ResourceLimit',
+            'The common-proof storage response exceeds its fixed bound.',
         );
     }
     const response = new Uint8Array(responseByteLength);
@@ -650,8 +650,8 @@ const encodeStorageResponse = (
     if (offset !== response.byteLength) {
         response.fill(0);
         throw new CommonProofWorkerRuntimeError(
-            "WrongStorageResult",
-            "The common-proof storage response accounting diverged.",
+            'WrongStorageResult',
+            'The common-proof storage response accounting diverged.',
         );
     }
     return response;

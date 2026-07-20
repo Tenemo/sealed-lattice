@@ -223,16 +223,14 @@ impl SingleActiveGaloisGenerationSourceRegistry {
 
 pub(crate) struct PendingGeneratedGaloisSource {
     setup_generation_authority_identifier: u32,
-    preparation_source: SetupGenerationGaloisPreparationSource,
+    // Retains the consumed generation capability until the pending source is
+    // committed or discarded.
+    _retained_preparation_source: SetupGenerationGaloisPreparationSource,
     generated_source_authority: SetupGeneratedGaloisSourceAuthority,
     component_readback_lifecycle: GaloisComponentReadbackLifecycle,
 }
 
 impl PendingGeneratedGaloisSource {
-    pub(crate) const fn preparation_source(&self) -> &SetupGenerationGaloisPreparationSource {
-        &self.preparation_source
-    }
-
     pub(crate) const fn generated_source_authority(&self) -> &SetupGeneratedGaloisSourceAuthority {
         &self.generated_source_authority
     }
@@ -677,10 +675,6 @@ impl<Source> SingleActiveGaloisVerificationRegistry<Source> {
         }
     }
 
-    fn retain(&mut self, source: Source) -> Result<u32, CommonProofRuntimeError> {
-        self.retain_recovering(source).map_err(|(error, _)| error)
-    }
-
     fn retain_recovering(
         &mut self,
         source: Source,
@@ -762,7 +756,6 @@ impl<Source> SingleActiveGaloisVerificationRegistry<Source> {
 
 struct GaloisVerificationTerminalSource {
     prepackage_catalog_handle: u32,
-    roster_position: u16,
     roster_hash: [u8; Hash512::BYTE_LENGTH],
     canonical_application_statement_bytes: Vec<u8>,
     statement_trees: Vec<VerifiedStatementOwnedTree>,
@@ -1153,7 +1146,7 @@ fn prepare_galois_generation(
     let generation_source_handle = GALOIS_GENERATION_SOURCE_REGISTRY.with(|registry| {
         registry.borrow_mut().retain(PendingGeneratedGaloisSource {
             setup_generation_authority_identifier: setup_generation_authority_handle,
-            preparation_source,
+            _retained_preparation_source: preparation_source,
             generated_source_authority,
             component_readback_lifecycle: GaloisComponentReadbackLifecycle::Available,
         })
@@ -1492,7 +1485,6 @@ fn prepare_galois_verification_adapter(
     let adapter_auxiliary_roots = ingress.ordered_auxiliary_roots.clone();
     let terminal_source = GaloisVerificationTerminalSource {
         prepackage_catalog_handle: ingress.prepackage_catalog_handle,
-        roster_position: ingress.roster_position,
         roster_hash: ingress.roster_hash,
         canonical_application_statement_bytes,
         statement_trees: terminal_statement_trees,

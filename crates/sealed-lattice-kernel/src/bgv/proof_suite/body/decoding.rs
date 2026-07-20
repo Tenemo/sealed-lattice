@@ -1,12 +1,14 @@
+#[cfg(test)]
 use std::cell::{Cell, RefCell};
 
 use crate::foundation::CanonicalItemType;
 
+#[cfg(test)]
+use super::super::transcript::{CommonProofQueryOpeningAbsorber, TranscriptError};
 use super::super::{
     decoder::{BoundedProofDecoder, ProofByteSource, ProofDecodeError},
     field::ProofChallengeExtensionElement,
     merkle::{ProofTreeRole, ProofTreeValue},
-    transcript::{CommonProofQueryOpeningAbsorber, TranscriptError},
 };
 use super::authentication::{
     authenticate_opening, decode_phase_pair_leaf, minimal_frontier_node_count,
@@ -71,12 +73,14 @@ impl<'opening> ProofTreeOpening<'opening> {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg(test)]
 pub(crate) struct DecodedProofBody {
     tree_roots: Vec<[u8; 64]>,
     deep_evaluations: Vec<ProofChallengeExtensionElement>,
     terminal_coefficients: Vec<ProofChallengeExtensionElement>,
 }
 
+#[cfg(test)]
 impl DecodedProofBody {
     pub(crate) fn tree_roots(&self) -> &[[u8; 64]] {
         &self.tree_roots
@@ -133,6 +137,7 @@ impl DecodedProofTreeOpening {
     }
 }
 
+#[cfg(test)]
 pub(crate) struct PendingProofBodyQueries<'source, 'layout, Source: ProofByteSource + ?Sized> {
     source: &'source Source,
     layout: &'layout ProofBodyLayout,
@@ -143,6 +148,7 @@ pub(crate) struct PendingProofBodyQueries<'source, 'layout, Source: ProofByteSou
     terminal_coefficients: Vec<ProofChallengeExtensionElement>,
 }
 
+#[cfg(test)]
 struct AbsorbingQuerySource<'source, 'absorber, Source: ProofByteSource + ?Sized> {
     source: &'source Source,
     source_offset: usize,
@@ -152,12 +158,14 @@ struct AbsorbingQuerySource<'source, 'absorber, Source: ProofByteSource + ?Sized
     transcript_error: RefCell<Option<TranscriptError>>,
 }
 
+#[cfg(test)]
 impl<Source: ProofByteSource + ?Sized> AbsorbingQuerySource<'_, '_, Source> {
     fn take_transcript_error(&self) -> Option<TranscriptError> {
         self.transcript_error.borrow_mut().take()
     }
 }
 
+#[cfg(test)]
 impl<Source: ProofByteSource + ?Sized> ProofByteSource for AbsorbingQuerySource<'_, '_, Source> {
     fn byte_length(&self) -> usize {
         self.byte_length
@@ -191,6 +199,7 @@ impl<Source: ProofByteSource + ?Sized> ProofByteSource for AbsorbingQuerySource<
     }
 }
 
+#[cfg(test)]
 impl<Source: ProofByteSource + ?Sized> PendingProofBodyQueries<'_, '_, Source> {
     pub(crate) fn tree_roots(&self) -> &[[u8; 64]] {
         &self.tree_roots
@@ -305,6 +314,7 @@ where
     })
 }
 
+#[cfg(test)]
 pub(crate) fn decode_proof_body_prefix<'source, 'layout, Source>(
     source: &'source Source,
     declared_byte_length: usize,
@@ -328,6 +338,7 @@ where
     })
 }
 
+#[cfg(test)]
 impl<'source, 'layout, Source: ProofByteSource + ?Sized>
     PendingProofBodyQueries<'source, 'layout, Source>
 {
@@ -716,13 +727,6 @@ pub(super) fn read_u16_item<Source: ProofByteSource + ?Sized>(
         return Err(mismatch_error);
     }
     Ok(())
-}
-
-pub(super) fn read_u32_item<Source: ProofByteSource + ?Sized>(
-    decoder: &mut BoundedProofDecoder<'_, Source>,
-) -> Result<u32, ProofBodyError> {
-    read_item_header(decoder, CanonicalItemType::Unsigned32, 4)?;
-    Ok(decoder.read_u32()?)
 }
 
 pub(super) fn read_u64_item<Source: ProofByteSource + ?Sized>(

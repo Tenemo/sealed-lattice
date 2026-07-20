@@ -194,70 +194,87 @@ pub(crate) struct RelinearizationRoundTwoSourceProviderMemoryAccounting {
 }
 
 impl RelinearizationRoundTwoSourceProviderMemoryAccounting {
+    #[cfg(test)]
     pub(crate) const fn provider_fixed_owner_byte_length(self) -> u64 {
         self.provider_fixed_owner_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn retained_catalog_heap_byte_length(self) -> u64 {
         self.retained_catalog_heap_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn readback_chunk_digest_byte_length(self) -> u64 {
         self.readback_chunk_digest_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn readback_authentication_flag_byte_length(self) -> u64 {
         self.readback_authentication_flag_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn cached_quotient_byte_length(self) -> u64 {
         self.cached_quotient_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn first_aggregate_product_byte_length(self) -> u64 {
         self.first_aggregate_product_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn maximum_loaded_aggregate_trace_pair_byte_length(self) -> u64 {
         self.maximum_loaded_aggregate_trace_pair_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn maximum_cached_authenticated_chunk_byte_length(self) -> u64 {
         self.maximum_cached_authenticated_chunk_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn maximum_pending_catalog_byte_length(self) -> u64 {
         self.maximum_pending_catalog_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn maximum_quotient_phase_populated_request_identity_byte_length(self) -> u64 {
         self.maximum_quotient_phase_populated_request_identity_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn maximum_recursive_cached_row_payload_byte_length(self) -> u64 {
         self.maximum_recursive_cached_row_payload_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn maximum_recursive_cached_row_catalog_byte_length(self) -> u64 {
         self.maximum_recursive_cached_row_catalog_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn relation_derivation_active_column_flag_byte_length(self) -> u64 {
         self.relation_derivation_active_column_flag_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn maximum_recursive_cache_and_relation_workspace_byte_length(self) -> u64 {
         self.maximum_recursive_cache_and_relation_workspace_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn maximum_requirement_discovery_transient_byte_length(self) -> u64 {
         self.maximum_requirement_discovery_transient_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn maximum_relation_column_derivation_workspace_byte_length(self) -> u64 {
         self.maximum_relation_column_derivation_workspace_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn maximum_round_two_quotient_arithmetic_transient_byte_length(self) -> u64 {
         self.maximum_round_two_quotient_arithmetic_transient_byte_length
     }
@@ -2893,12 +2910,8 @@ impl CommonProofSourcePolynomialProvider for RelinearizationRoundTwoSourcePolyno
         {
             return Err(CommonProofProverError::InvalidColumn);
         }
-        if let Some(outstanding) = self.outstanding_source_read.as_ref() {
-            return Ok(
-                CommonProofSourcePolynomialProviderPoll::AuthenticatedSourceReadRequired(
-                    outstanding.request,
-                ),
-            );
+        if self.outstanding_source_read.is_some() {
+            return Ok(CommonProofSourcePolynomialProviderPoll::AuthenticatedSourceReadRequired);
         }
         let column_ordinal = request.column_ordinal();
         if self.pending_column.is_none() {
@@ -2934,17 +2947,14 @@ impl CommonProofSourcePolynomialProvider for RelinearizationRoundTwoSourcePolyno
                     .checked_add(1)
                     .ok_or(CommonProofProverError::CountOverflow)?
                     == self.requested_column_ordinals.len();
-                if is_final_source_column {
-                    if let Some(outstanding) = self.next_final_coverage_source_read(request)? {
-                        let authenticated_source_request = outstanding.request;
-                        self.cached_source_chunk = None;
-                        self.outstanding_source_read = Some(outstanding);
-                        return Ok(
-                            CommonProofSourcePolynomialProviderPoll::AuthenticatedSourceReadRequired(
-                                authenticated_source_request,
-                            ),
-                        );
-                    }
+                if is_final_source_column
+                    && let Some(outstanding) = self.next_final_coverage_source_read(request)?
+                {
+                    self.cached_source_chunk = None;
+                    self.outstanding_source_read = Some(outstanding);
+                    return Ok(
+                        CommonProofSourcePolynomialProviderPoll::AuthenticatedSourceReadRequired,
+                    );
                 }
                 let pending = self
                     .pending_column
@@ -2971,17 +2981,21 @@ impl CommonProofSourcePolynomialProvider for RelinearizationRoundTwoSourcePolyno
                 ));
             }
             let outstanding = self.next_trace_source_read(request)?;
-            let authenticated_source_request = outstanding.request;
             // The retained chunk has contributed every byte it can to this
             // trace range. Drop it before the host allocates the next chunk.
             self.cached_source_chunk = None;
             self.outstanding_source_read = Some(outstanding);
-            return Ok(
-                CommonProofSourcePolynomialProviderPoll::AuthenticatedSourceReadRequired(
-                    authenticated_source_request,
-                ),
-            );
+            return Ok(CommonProofSourcePolynomialProviderPoll::AuthenticatedSourceReadRequired);
         }
+    }
+
+    fn pending_authenticated_source_read_request(
+        &self,
+    ) -> Result<Option<CommonProofAuthenticatedSourceReadRequest>, CommonProofProverError> {
+        Ok(self
+            .outstanding_source_read
+            .as_ref()
+            .map(|outstanding| outstanding.request))
     }
 
     fn supply_authenticated_source_range(

@@ -608,7 +608,7 @@ fn selected_plaintext_topology() -> CanonicalResult<SelectedPlaintextTopology> {
             })
             .collect::<Vec<_>>(),
     )?;
-    let order_selector = scalar_lane_coefficients(&vec![1; SELECTED_OPTION_COUNT])?;
+    let order_selector = scalar_lane_coefficients(&[1; SELECTED_OPTION_COUNT])?;
     Ok(SelectedPlaintextTopology {
         comparison_trace_mask,
         route_source_masks,
@@ -782,12 +782,15 @@ fn linear_combination_from_baby_powers(
     let anchor = builder.normalize(anchor)?;
     let encrypted_zero = builder.plaintext_multiply_scalar(anchor, 0)?;
     let mut result = builder.plaintext_add(encrypted_zero, vec![field_value(coefficients[0])?])?;
-    for power in 1..RANK_LOOKUP_BABY_STEP_COUNT {
-        let power_register = prepared.baby_powers[power]
-            .ok_or_else(|| program_error("compiled rank baby power is missing"))?;
+    for (scheduled_power, coefficient) in prepared.baby_powers[1..RANK_LOOKUP_BABY_STEP_COUNT]
+        .iter()
+        .zip(&coefficients[1..RANK_LOOKUP_BABY_STEP_COUNT])
+    {
+        let power_register =
+            scheduled_power.ok_or_else(|| program_error("compiled rank baby power is missing"))?;
         let power_register = builder.modulus_switch_to(power_register.register, anchor_level)?;
         let power_register = builder.normalize(power_register)?;
-        let scaled = builder.plaintext_multiply_scalar(power_register, coefficients[power])?;
+        let scaled = builder.plaintext_multiply_scalar(power_register, *coefficient)?;
         result = builder.add(result, scaled)?;
     }
     Ok(result)

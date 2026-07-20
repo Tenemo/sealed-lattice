@@ -1,4 +1,4 @@
-use crate::foundation::{CanonicalItem, CanonicalItemType, CanonicalTuple};
+use crate::foundation::{CanonicalItem, CanonicalTuple};
 
 use super::{
     checking::RelationPlanChecker,
@@ -7,39 +7,9 @@ use super::{
         resident_vec_storage_byte_length,
     },
     layout::RelationPlanVariant,
-    model::{RelationPlanError, SuiteModulusReference, canonical_encoding_error},
-    schema::{
-        PROOF_APPLICATION_SLOT_TEMPLATE_SCHEMA_IDENTIFIER, RELATION_PLAN_HASH_DOMAIN,
-        RELATION_PLAN_SCHEMA_IDENTIFIER, SCHEMA_VERSION,
-    },
+    model::{RelationPlanError, SuiteModulusReference},
+    schema::{RELATION_PLAN_HASH_DOMAIN, RELATION_PLAN_SCHEMA_IDENTIFIER, SCHEMA_VERSION},
 };
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct ProofApplicationSlotTemplate {
-    pub(super) application_statement_schema_identifier: u16,
-    pub(super) schedule_position: Option<u32>,
-    pub(super) top_count: Option<u16>,
-}
-
-impl ProofApplicationSlotTemplate {
-    pub(super) fn canonical_bytes(&self) -> Result<Vec<u8>, RelationPlanError> {
-        let schedule_item = self.schedule_position.map(CanonicalItem::unsigned32);
-        let top_count_item = self.top_count.map(CanonicalItem::unsigned16);
-        CanonicalTuple::new(
-            PROOF_APPLICATION_SLOT_TEMPLATE_SCHEMA_IDENTIFIER,
-            SCHEMA_VERSION,
-            vec![
-                CanonicalItem::unsigned16(self.application_statement_schema_identifier),
-                CanonicalItem::optional(CanonicalItemType::Unsigned32, schedule_item.as_ref())
-                    .map_err(canonical_encoding_error)?,
-                CanonicalItem::optional(CanonicalItemType::Unsigned16, top_count_item.as_ref())
-                    .map_err(canonical_encoding_error)?,
-            ],
-        )
-        .encode()
-        .map_err(canonical_encoding_error)
-    }
-}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct RelationPlan {
@@ -86,6 +56,7 @@ impl CompiledRelationPlan {
         )
     }
 
+    #[cfg(test)]
     pub(crate) fn canonical_tuple(&self) -> Result<CanonicalTuple, RelationPlanError> {
         self.plan.canonical_tuple()
     }
@@ -94,6 +65,7 @@ impl CompiledRelationPlan {
         self.plan.canonical_bytes()
     }
 
+    #[cfg(test)]
     pub(crate) fn encode_canonical_tuple(
         &self,
         canonical_tuple: &CanonicalTuple,
@@ -140,57 +112,12 @@ impl CompiledRelationPlan {
         Ok(selected)
     }
 
-    pub(crate) fn application_slot_templates(&self) -> Result<Vec<Vec<u8>>, RelationPlanError> {
-        self.plan
-            .variants
-            .iter()
-            .map(|variant| {
-                ProofApplicationSlotTemplate {
-                    application_statement_schema_identifier: self
-                        .plan
-                        .application_statement_schema_identifier,
-                    schedule_position: variant.schedule_position,
-                    top_count: variant.top_count,
-                }
-                .canonical_bytes()
-            })
-            .collect()
-    }
-
     pub(crate) fn check(
         &self,
         context: &RelationPlanCheckContext,
     ) -> Result<(), RelationPlanError> {
         RelationPlanChecker::new(context).check(self)
     }
-}
-
-pub(crate) fn merge_checked_relation_plan_variants(
-    application_statement_schema_identifier: u16,
-    plans: Vec<CompiledRelationPlan>,
-    context: &RelationPlanCheckContext,
-) -> Result<CompiledRelationPlan, RelationPlanError> {
-    if plans.is_empty()
-        || plans.iter().any(|plan| {
-            plan.application_statement_schema_identifier()
-                != application_statement_schema_identifier
-        })
-    {
-        return Err(RelationPlanError::UnsupportedApplicationFamily);
-    }
-
-    let variants = plans
-        .into_iter()
-        .flat_map(|plan| plan.plan.variants)
-        .collect::<Vec<_>>();
-    let merged = CompiledRelationPlan {
-        plan: RelationPlan {
-            application_statement_schema_identifier,
-            variants,
-        },
-    };
-    merged.check(context)?;
-    Ok(merged)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -305,12 +305,21 @@ pub(crate) fn prepare_relinearization_round_one_aggregate_source(
                 .total_byte_length,
         )
         .ok_or(CommonProofProverError::CountOverflow)?;
-    for component_ordinal in 0..2 {
-        let source_role = match component_ordinal {
-            0 => SetupPublicPolynomialRootRole::RelinearizationRoundOneLeft,
-            1 => SetupPublicPolynomialRootRole::RelinearizationRoundOneRight,
-            _ => return Err(CommonProofProverError::InvalidInput),
-        };
+    for (component_ordinal, (source_role, aggregate_component, aggregate_role)) in [
+        (
+            SetupPublicPolynomialRootRole::RelinearizationRoundOneLeft,
+            aggregate_left_component,
+            SetupPublicPolynomialRootRole::RelinearizationAggregateRoundOneLeft,
+        ),
+        (
+            SetupPublicPolynomialRootRole::RelinearizationRoundOneRight,
+            aggregate_right_component,
+            SetupPublicPolynomialRootRole::RelinearizationAggregateRoundOneRight,
+        ),
+    ]
+    .into_iter()
+    .enumerate()
+    {
         for (source_ordinal, source) in ordered_sources.iter().copied().enumerate() {
             let material = &source.components()[component_ordinal];
             let public_polynomial_context_hash = SetupPublicPolynomialContext::new(
@@ -332,21 +341,9 @@ pub(crate) fn prepare_relinearization_round_one_aggregate_source(
                 ),
             );
         }
-
-        let (aggregate_component, expected_role) = match component_ordinal {
-            0 => (
-                aggregate_left_component,
-                SetupPublicPolynomialRootRole::RelinearizationAggregateRoundOneLeft,
-            ),
-            1 => (
-                aggregate_right_component,
-                SetupPublicPolynomialRootRole::RelinearizationAggregateRoundOneRight,
-            ),
-            _ => return Err(CommonProofProverError::InvalidInput),
-        };
         let aggregate_context_hash = SetupPublicPolynomialContext::new(
             aggregate_authority.setup_proof_context_hash(),
-            expected_role,
+            aggregate_role,
             None,
             None,
             Some(schedule_position),

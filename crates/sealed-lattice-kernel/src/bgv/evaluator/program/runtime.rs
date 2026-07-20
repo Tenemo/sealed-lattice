@@ -30,8 +30,8 @@ pub(crate) const EVALUATOR_EXECUTION_PROGRESS_BYTE_LENGTH: usize = 16;
 type RuntimeResult<Value> = Result<Value, u32>;
 
 enum EvaluatorExecutionState {
-    Executing(SelectedEvaluatorProgramExecution),
-    Prepared(PreparedSelectedEvaluatorReplay),
+    Executing(Box<SelectedEvaluatorProgramExecution>),
+    Prepared(Box<PreparedSelectedEvaluatorReplay>),
 }
 
 struct ActiveEvaluatorExecution {
@@ -76,7 +76,7 @@ impl EvaluatorExecutionRuntimeRegistry {
         let handle = take_nonrepeating_handle(&mut self.next_handle)?;
         self.active_execution = Some(ActiveEvaluatorExecution {
             handle,
-            state: EvaluatorExecutionState::Executing(execution),
+            state: EvaluatorExecutionState::Executing(Box::new(execution)),
         });
         Ok(handle)
     }
@@ -134,13 +134,13 @@ impl EvaluatorExecutionRuntimeRegistry {
                 return Err(refusal_status(RefusalReason::ConsumedState));
             }
         };
-        let prepared = execution
+        let prepared = (*execution)
             .finish()
             .and_then(|verified_execution| verified_execution.prepare_replay())
             .map_err(refusal_status)?;
         self.active_execution = Some(ActiveEvaluatorExecution {
             handle,
-            state: EvaluatorExecutionState::Prepared(prepared),
+            state: EvaluatorExecutionState::Prepared(Box::new(prepared)),
         });
         Ok(())
     }

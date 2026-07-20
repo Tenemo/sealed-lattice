@@ -7,10 +7,14 @@ use crate::{
 };
 
 use super::{
-    EVALUATOR_CONSTANT_SCHEMA_IDENTIFIER, EVALUATOR_INSTRUCTION_SCHEMA_IDENTIFIER,
-    EVALUATOR_INSTRUCTION_STREAM_SCHEMA_IDENTIFIER, EVALUATOR_PROGRAM_SCHEMA_VERSION,
-    EVALUATOR_PROGRAM_SET_SCHEMA_IDENTIFIER, EvaluatorConstant, EvaluatorInstruction,
-    EvaluatorInstructionStream, EvaluatorProgramSet, program_error,
+    EVALUATOR_CONSTANT_SCHEMA_IDENTIFIER, EVALUATOR_PROGRAM_SCHEMA_VERSION, EvaluatorConstant,
+    program_error,
+};
+#[cfg(test)]
+use super::{
+    EVALUATOR_INSTRUCTION_SCHEMA_IDENTIFIER, EVALUATOR_INSTRUCTION_STREAM_SCHEMA_IDENTIFIER,
+    EVALUATOR_PROGRAM_SET_SCHEMA_IDENTIFIER, EvaluatorInstruction, EvaluatorInstructionStream,
+    EvaluatorProgramSet,
 };
 
 const PLAINTEXT_FIELD_ELEMENT_BYTE_LENGTH: usize = 3;
@@ -23,11 +27,13 @@ const MAXIMUM_EVALUATOR_PROGRAM_CUMULATIVE_ALLOCATION_BYTE_LENGTH: usize = 96 * 
 // instruction and catalog lists retain their narrower checks at their owners.
 const MAXIMUM_EVALUATOR_CANONICAL_LIST_COUNT: usize = crate::bgv::parameters::POLYNOMIAL_DEGREE;
 
+#[cfg(test)]
 pub(super) fn encode_program_set(program_set: &EvaluatorProgramSet) -> CanonicalResult<Vec<u8>> {
     program_set.validate()?;
     encode_program_components(&program_set.constants, &program_set.streams)
 }
 
+#[cfg(test)]
 fn encode_program_components(
     constants: &[EvaluatorConstant],
     streams: &[EvaluatorInstructionStream],
@@ -87,6 +93,7 @@ fn constant_tuple(constant: &EvaluatorConstant) -> CanonicalResult<CanonicalTupl
     ))
 }
 
+#[cfg(test)]
 fn instruction_stream_tuple(
     stream: &EvaluatorInstructionStream,
     limits: &CanonicalDecodeLimits,
@@ -109,6 +116,7 @@ fn instruction_stream_tuple(
     ))
 }
 
+#[cfg(test)]
 fn instruction_tuple(instruction: &EvaluatorInstruction) -> CanonicalResult<CanonicalTuple> {
     instruction.validate_shape()?;
     let output_register = instruction.output_register.map(CanonicalItem::unsigned32);
@@ -165,6 +173,7 @@ fn field_element_list(values: &[u32]) -> CanonicalResult<CanonicalItem> {
     .map_err(map_codec_error)
 }
 
+#[cfg(test)]
 fn nested_tuple_item(
     tuple: CanonicalTuple,
     limits: &CanonicalDecodeLimits,

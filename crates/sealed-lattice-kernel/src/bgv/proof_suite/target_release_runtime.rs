@@ -667,25 +667,33 @@ fn resolve_single_board_source(
     Ok(source)
 }
 
-fn resolve_verified_target_pair(
+struct VerifiedStateReservationAccess<'a> {
     state_verifier_session_handle: u32,
-    state_verifier_session_capability: &[u8],
+    state_verifier_session_capability: &'a [u8],
     verified_reservation_handle: u32,
+}
+
+struct VerifiedFinalityAccess<'a> {
     finality_verifier_session_handle: u32,
-    finality_verifier_session_capability: &[u8],
+    finality_verifier_session_capability: &'a [u8],
     verified_finality_handle: u32,
+}
+
+fn resolve_verified_target_pair(
+    state_reservation_access: &VerifiedStateReservationAccess<'_>,
+    finality_access: &VerifiedFinalityAccess<'_>,
     target_identifier_bytes: &[u8],
     target_order_bytes: &[u8],
 ) -> Result<KllpsTargetPair, TargetReleaseRuntimeError> {
     with_verified_state_reservation(
-        state_verifier_session_handle,
-        state_verifier_session_capability,
-        verified_reservation_handle,
+        state_reservation_access.state_verifier_session_handle,
+        state_reservation_access.state_verifier_session_capability,
+        state_reservation_access.verified_reservation_handle,
         |state_verifier, verified_reservation| {
             with_verified_finality(
-                finality_verifier_session_handle,
-                finality_verifier_session_capability,
-                verified_finality_handle,
+                finality_access.finality_verifier_session_handle,
+                finality_access.finality_verifier_session_capability,
+                finality_access.verified_finality_handle,
                 |verified_finality| {
                     verify_finalized_kllps_target_pair(
                         state_verifier,
@@ -876,13 +884,19 @@ fn prepare_target_release_generation(
     if checkpoint_lineage_identifier == [0_u8; CHECKPOINT_LINEAGE_IDENTIFIER_BYTE_LENGTH] {
         return Err(TargetReleaseRuntimeError::InvalidInput);
     }
-    let target_pair = resolve_verified_target_pair(
+    let state_reservation_access = VerifiedStateReservationAccess {
         state_verifier_session_handle,
-        &state_verifier_session_capability,
+        state_verifier_session_capability: &state_verifier_session_capability,
         verified_reservation_handle,
+    };
+    let finality_access = VerifiedFinalityAccess {
         finality_verifier_session_handle,
-        &finality_verifier_session_capability,
+        finality_verifier_session_capability: &finality_verifier_session_capability,
         verified_finality_handle,
+    };
+    let target_pair = resolve_verified_target_pair(
+        &state_reservation_access,
+        &finality_access,
         target_identifier_bytes,
         target_order_bytes,
     )?;
@@ -1253,28 +1267,24 @@ struct VerifiedTargetReleaseOutputAuthority {
 
 fn resolve_verified_target_release_output_authority(
     accepted_setup_authority_handle: &VerifiedAcceptedSetupAuthorityHandle,
-    state_verifier_session_handle: u32,
-    state_verifier_session_capability: &[u8],
-    verified_reservation_handle: u32,
+    state_reservation_access: &VerifiedStateReservationAccess<'_>,
     verified_output_handle: u32,
-    finality_verifier_session_handle: u32,
-    finality_verifier_session_capability: &[u8],
-    verified_finality_handle: u32,
+    finality_access: &VerifiedFinalityAccess<'_>,
     target_share_source: &VerifiedBoardApplicationSource,
     target_pair: &KllpsTargetPair,
 ) -> Result<VerifiedTargetReleaseOutputAuthority, TargetReleaseRuntimeError> {
     let roster_position =
         target_release_application_slot(accepted_setup_authority_handle, target_pair)?.1;
     with_verified_state_reservation_and_output(
-        state_verifier_session_handle,
-        state_verifier_session_capability,
-        verified_reservation_handle,
+        state_reservation_access.state_verifier_session_handle,
+        state_reservation_access.state_verifier_session_capability,
+        state_reservation_access.verified_reservation_handle,
         verified_output_handle,
         |state_verifier, verified_reservation, verified_output| {
             with_verified_finality(
-                finality_verifier_session_handle,
-                finality_verifier_session_capability,
-                verified_finality_handle,
+                finality_access.finality_verifier_session_handle,
+                finality_access.finality_verifier_session_capability,
+                finality_access.verified_finality_handle,
                 |verified_finality| {
                     let output_bundle = verified_output
                         .target_release_output_bundle()
@@ -1339,13 +1349,19 @@ fn prepare_target_release_verification(
     {
         return Err(TargetReleaseRuntimeError::InvalidInput);
     }
-    let target_pair = resolve_verified_target_pair(
+    let state_reservation_access = VerifiedStateReservationAccess {
         state_verifier_session_handle,
-        &state_verifier_session_capability,
+        state_verifier_session_capability: &state_verifier_session_capability,
         verified_reservation_handle,
+    };
+    let finality_access = VerifiedFinalityAccess {
         finality_verifier_session_handle,
-        &finality_verifier_session_capability,
+        finality_verifier_session_capability: &finality_verifier_session_capability,
         verified_finality_handle,
+    };
+    let target_pair = resolve_verified_target_pair(
+        &state_reservation_access,
+        &finality_access,
         target_identifier_bytes,
         target_order_bytes,
     )?;
@@ -1358,13 +1374,9 @@ fn prepare_target_release_verification(
         VerifiedAcceptedSetupAuthorityHandle::from_identifier(accepted_setup_authority_handle);
     let output_authority = resolve_verified_target_release_output_authority(
         &accepted_setup_authority,
-        state_verifier_session_handle,
-        &state_verifier_session_capability,
-        verified_reservation_handle,
+        &state_reservation_access,
         verified_output_handle,
-        finality_verifier_session_handle,
-        &finality_verifier_session_capability,
-        verified_finality_handle,
+        &finality_access,
         &target_share_source,
         &target_pair,
     )?;

@@ -1,4 +1,6 @@
-use crate::bgv::parameters::{BgvBasisKind, POLYNOMIAL_DEGREE};
+use crate::bgv::parameters::BgvBasisKind;
+#[cfg(test)]
+use crate::bgv::parameters::POLYNOMIAL_DEGREE;
 use crate::encoding::CanonicalReader;
 #[cfg(test)]
 use crate::hashing::namespace_root;
@@ -87,6 +89,7 @@ pub(crate) fn parse_two_component_data_ciphertext_at_level(
 /// Exact codec ceiling for the canonical two-component data ciphertext at one
 /// suite level. The calculation lives beside the serializer so accounting
 /// cannot drift from string framing, varuint framing, or selected moduli.
+#[cfg(test)]
 pub(crate) fn two_component_data_ciphertext_canonical_byte_length_ceiling_at_level(
     expected_level: usize,
 ) -> CanonicalResult<u64> {
@@ -143,6 +146,7 @@ pub(crate) fn two_component_data_ciphertext_canonical_byte_length_ceiling_at_lev
         .ok_or_else(canonical_ceiling_length_overflow)
 }
 
+#[cfg(test)]
 const fn canonical_varuint_byte_length(mut value: u64) -> u64 {
     let mut byte_length = 1_u64;
     while value >= 0x80 {
@@ -152,6 +156,7 @@ const fn canonical_varuint_byte_length(mut value: u64) -> u64 {
     byte_length
 }
 
+#[cfg(test)]
 fn canonical_string_byte_length(value: &str) -> CanonicalResult<u64> {
     let value_byte_length = u64::try_from(value.len()).map_err(|_| {
         CanonicalError::new(
@@ -164,6 +169,7 @@ fn canonical_string_byte_length(value: &str) -> CanonicalResult<u64> {
         .ok_or_else(canonical_ceiling_length_overflow)
 }
 
+#[cfg(test)]
 fn canonical_ceiling_length_overflow() -> CanonicalError {
     CanonicalError::new(
         CanonicalErrorCode::MalformedLength,

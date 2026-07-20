@@ -15,9 +15,9 @@ import {
     createRecipientVssAuthenticatedMailboxPlaintextSink as createAuthorityBoundRecipientVssAuthenticatedMailboxPlaintextSink,
     type AuthenticatedMailboxStorageLimits,
 } from '#packages/protocol/src/index';
-import { createRecipientVssAuthenticatedMailboxPlaintextSinkWithConsumer as createRecipientVssAuthenticatedMailboxPlaintextSink } from '#packages/protocol/src/runtime/recipient-vss-authenticated-mailbox-sink/runtime';
-import type { RecipientVssAuthenticatedPlaintextConsumer } from '#packages/protocol/src/runtime/recipient-vss-authenticated-mailbox-sink/records';
 import { createRuntimeRecordProtection } from '#packages/protocol/src/runtime/authenticated-runtime-record';
+import type { RecipientVssAuthenticatedPlaintextConsumer } from '#packages/protocol/src/runtime/recipient-vss-authenticated-mailbox-sink/records';
+import { createRecipientVssAuthenticatedMailboxPlaintextSinkWithConsumer as createRecipientVssAuthenticatedMailboxPlaintextSink } from '#packages/protocol/src/runtime/recipient-vss-authenticated-mailbox-sink/runtime';
 import {
     generateRuntimeStorageEncryptionKey,
     hashFilledWith,
@@ -168,18 +168,22 @@ const createConsumer = (): Readonly<{
         consumedEnvelopes,
         consumedPlaintexts,
         consumer: Object.freeze({
-            consumeAuthenticatedPlaintext: async ({
+            consumeAuthenticatedPlaintext: ({
                 authenticatedPlaintextCapability,
                 canonicalPlaintextBytes,
                 canonicalSignedEnvelopeBytes,
-            }) => {
-                consumedEnvelopes.push(canonicalSignedEnvelopeBytes.slice());
-                consumedPlaintexts.push(canonicalPlaintextBytes.slice());
-                authenticatedPlaintextCapability.release();
-            },
-            retireAfterUncertainConsumption: async (failure) => {
-                retirementFailures.push(failure);
-            },
+            }) =>
+                Promise.resolve().then(() => {
+                    consumedEnvelopes.push(
+                        canonicalSignedEnvelopeBytes.slice(),
+                    );
+                    consumedPlaintexts.push(canonicalPlaintextBytes.slice());
+                    authenticatedPlaintextCapability.release();
+                }),
+            retireAfterUncertainConsumption: (failure) =>
+                Promise.resolve().then(() => {
+                    retirementFailures.push(failure);
+                }),
         }),
         retirementFailures,
     };
@@ -279,13 +283,14 @@ describe('recipient VSS authenticated mailbox plaintext sink', () => {
         const canonicalEnvelopeBytes = deterministicBytes(113, 0x82);
         const envelopeHash = hashHex(0xa1);
         const firstHarness = await createHarness();
-        const firstLease = await firstHarness.sink.plaintextSinkBoundary.reserve(
-            reservation({
-                canonicalEnvelopeBytes,
-                envelopeHash,
-                plaintextByteLength: plaintext.byteLength,
-            }),
-        );
+        const firstLease =
+            await firstHarness.sink.plaintextSinkBoundary.reserve(
+                reservation({
+                    canonicalEnvelopeBytes,
+                    envelopeHash,
+                    plaintextByteLength: plaintext.byteLength,
+                }),
+            );
         expect(firstLease.disposition).toBe('fresh');
         expect(firstLease.authenticationRequirement).toBe('authenticate');
         await stagePlaintext(firstLease, plaintext);
@@ -368,13 +373,14 @@ describe('recipient VSS authenticated mailbox plaintext sink', () => {
         const canonicalEnvelopeBytes = deterministicBytes(97, 0x72);
         const envelopeHash = hashHex(0xb2);
         const firstHarness = await createHarness();
-        const firstLease = await firstHarness.sink.plaintextSinkBoundary.reserve(
-            reservation({
-                canonicalEnvelopeBytes,
-                envelopeHash,
-                plaintextByteLength: plaintext.byteLength,
-            }),
-        );
+        const firstLease =
+            await firstHarness.sink.plaintextSinkBoundary.reserve(
+                reservation({
+                    canonicalEnvelopeBytes,
+                    envelopeHash,
+                    plaintextByteLength: plaintext.byteLength,
+                }),
+            );
         await stagePlaintext(firstLease, plaintext);
         const abandonedCapability = createCapability();
         await firstLease.seal(abandonedCapability.capability);

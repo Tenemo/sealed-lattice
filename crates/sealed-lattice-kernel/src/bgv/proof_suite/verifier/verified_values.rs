@@ -3,8 +3,8 @@ use super::super::{
     ComponentMaterialOwnershipBinding, ConsumedVerifiedCommonProofCapability,
     SetupPublicPolynomialContext, VerifiedCommonProofStatementSource,
     VerifiedEvaluatorKeyStoreMaterial, VerifiedKeySwitchComponentMaterial,
-    VerifiedRelinearizationAggregateMaterial, VerifiedRelinearizationSourceMaterial,
-    decode_selected_aggregate_threshold_share_statement, decode_selected_application_statement,
+    VerifiedRelinearizationSourceMaterial, decode_selected_aggregate_threshold_share_statement,
+    decode_selected_application_statement,
     decode_selected_collective_public_key_aggregate_statement,
     decode_selected_galois_key_share_statement, decode_selected_public_key_share_statement,
     decode_selected_relinearization_round_one_aggregate_statement,
@@ -19,16 +19,17 @@ use super::super::{
     },
     selected_committed_material_relation_plan_input, selected_evaluator_aggregate_relation_plan,
 };
+#[cfg(test)]
+use super::CommittedMaterialTree;
 use super::{
-    CanonicalItemType, CommittedMaterialTree, CommonProofVerifierError, FOUNDATION_PROFILE,
-    ProofApplicationSlotCeilings, SelectedApplicationStatementContext, SelectedEvaluatorEntryKind,
+    CanonicalItemType, CommonProofVerifierError, FOUNDATION_PROFILE, ProofApplicationSlotCeilings,
+    SelectedApplicationStatementContext, SelectedEvaluatorEntryKind,
     SelectedEvaluatorEntryPosition, SetupPublicPolynomialRootRole, SetupPublicPolynomialTree,
     StatementOwnedProofTreeInput, SuiteModulusReference,
     selected_evaluator_aggregate_entry_roots_in_order, selected_evaluator_entry_positions,
     verified_application_statement_hash,
 };
 use crate::bgv::evaluator::candidate_evidence::EvaluatorCandidateInput;
-use crate::bgv::proof_suite::ProofBaseFieldElement;
 use crate::bgv::proof_suite::application_statement::decode_selected_relinearization_round_two_statement;
 use crate::bgv::setup::{
     SETUP_COMMITMENT_MODULUS_LIMB_INDICES, VerifiedAcceptedSetupEvaluatorSourceCatalog,
@@ -129,6 +130,7 @@ impl VerifiedStatementOwnedTree {
         &self.ordered_canonical_residue_moduli
     }
 
+    #[cfg(test)]
     pub(crate) fn with_relation_coordinates(
         &self,
         ordered_tree_ordinal: u32,
@@ -163,6 +165,7 @@ impl VerifiedStatementOwnedTree {
         rebound
     }
 
+    #[cfg(test)]
     pub(crate) fn from_committed_material_tree(
         ordered_tree_ordinal: u32,
         expected_root_source_ordinal: u32,
@@ -694,11 +697,11 @@ fn require_verified_statement_coordinates(
     Ok(())
 }
 
-fn selected_statement_variant<'source>(
-    statement_source: &'source VerifiedCommonProofStatementSource,
+fn selected_statement_variant(
+    statement_source: &VerifiedCommonProofStatementSource,
     schema_identifier: u16,
     schedule_position: Option<u32>,
-) -> Result<&'source RelationPlanVariant, CommonProofVerifierError> {
+) -> Result<&RelationPlanVariant, CommonProofVerifierError> {
     let selected_variant = statement_source
         .selected_relation_variant()
         .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?;
@@ -1752,36 +1755,6 @@ impl VerifiedStreamedProofTreeTerminalPreflight {
 
 impl VerifiedStreamedProofTreeTerminal {
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn from_recomputed_public_polynomial_tree(
-        verified_proof: &VerifiedCommonProof,
-        canonical_application_statement_bytes: &[u8],
-        ceremony_context_hash: [u8; 64],
-        action_context_hash: [u8; 64],
-        roster_hash: [u8; 64],
-        ordered_tree_ordinal: u32,
-        expected_root_source_ordinal: u32,
-        expected_statement_root: [u8; 64],
-        context: SetupPublicPolynomialContext,
-        ordered_canonical_residue_moduli: Vec<Option<SuiteModulusReference>>,
-        tree: SetupPublicPolynomialTree,
-    ) -> Result<Self, CommonProofVerifierError> {
-        let preflight = Self::preflight_from_recomputed_public_polynomial_tree(
-            verified_proof,
-            canonical_application_statement_bytes,
-            ceremony_context_hash,
-            action_context_hash,
-            roster_hash,
-            ordered_tree_ordinal,
-            expected_root_source_ordinal,
-            expected_statement_root,
-            context,
-            ordered_canonical_residue_moduli,
-            &tree,
-        )?;
-        Ok(preflight.complete(tree))
-    }
-
-    #[allow(clippy::too_many_arguments)]
     pub(crate) fn preflight_from_recomputed_public_polynomial_tree(
         verified_proof: &VerifiedCommonProof,
         canonical_application_statement_bytes: &[u8],
@@ -1830,43 +1803,6 @@ impl VerifiedStreamedProofTreeTerminal {
             source_material_root: None,
             source_stream_descriptor: None,
         })
-    }
-
-    /// Mints a tree terminal whose coefficient columns are proven to be the
-    /// low/high decomposition of one exact descriptor-authenticated
-    /// key-switch component. The component descriptor is recomputed from the
-    /// tree coefficients before it is retained, preventing a tree for one
-    /// material object from being paired with another object's readback.
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn from_recomputed_key_switch_component_tree(
-        verified_proof: &VerifiedCommonProof,
-        canonical_application_statement_bytes: &[u8],
-        ceremony_context_hash: [u8; 64],
-        action_context_hash: [u8; 64],
-        roster_hash: [u8; 64],
-        ordered_tree_ordinal: u32,
-        expected_root_source_ordinal: u32,
-        expected_statement_root: [u8; 64],
-        context: SetupPublicPolynomialContext,
-        ordered_canonical_residue_moduli: Vec<Option<SuiteModulusReference>>,
-        source_material: &VerifiedKeySwitchComponentMaterial,
-        tree: SetupPublicPolynomialTree,
-    ) -> Result<Self, CommonProofVerifierError> {
-        let preflight = Self::preflight_from_recomputed_key_switch_component_tree(
-            verified_proof,
-            canonical_application_statement_bytes,
-            ceremony_context_hash,
-            action_context_hash,
-            roster_hash,
-            ordered_tree_ordinal,
-            expected_root_source_ordinal,
-            expected_statement_root,
-            context,
-            ordered_canonical_residue_moduli,
-            source_material,
-            &tree,
-        )?;
-        Ok(preflight.complete(tree))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1998,24 +1934,8 @@ impl VerifiedStreamedProofTreeTerminal {
         self.source_stream_descriptor.as_ref()
     }
 
-    pub(crate) fn source_full_object_digest(&self) -> Option<[u8; 64]> {
-        self.source_stream_descriptor
-            .as_ref()
-            .map(|descriptor| descriptor.full_object_digest.into_bytes())
-    }
-
-    pub(crate) fn source_total_byte_length(&self) -> Option<u64> {
-        self.source_stream_descriptor
-            .as_ref()
-            .map(|descriptor| descriptor.total_byte_length)
-    }
-
     pub(crate) fn root(&self) -> [u8; 64] {
         self.tree.root()
-    }
-
-    pub(crate) fn ordered_trace_rows(&self) -> &[Vec<ProofBaseFieldElement>] {
-        self.tree.ordered_trace_rows()
     }
 
     pub(crate) fn statement_owned_tree(&self) -> VerifiedStatementOwnedTree {
@@ -2025,32 +1945,6 @@ impl VerifiedStreamedProofTreeTerminal {
             &self.tree,
             self.ordered_canonical_residue_moduli.to_vec(),
         )
-    }
-
-    pub(crate) fn into_recomputed_tree(self) -> SetupPublicPolynomialTree {
-        self.tree
-    }
-
-    pub(crate) fn into_statement_owned_tree_and_material(
-        self,
-    ) -> (
-        VerifiedStatementOwnedTree,
-        SetupPublicPolynomialTree,
-        Box<[u8]>,
-    ) {
-        let statement_owned_tree = self.statement_owned_tree();
-        (
-            statement_owned_tree,
-            self.tree,
-            self.canonical_application_statement_bytes,
-        )
-    }
-
-    pub(crate) fn into_evaluator_runtime_root(
-        self,
-        top_count: u16,
-    ) -> Result<VerifiedEvaluatorRuntimeRoot, CommonProofVerifierError> {
-        VerifiedEvaluatorRuntimeRoot::from_recomputed_public_polynomial_tree(&self.tree, top_count)
     }
 }
 
@@ -2094,36 +1988,6 @@ impl VerifiedEvaluatorAuxiliaryRoot {
             auxiliary_component_root: auxiliary_component.contribution_root(),
             source_material_root: Some(auxiliary_component.material_root().into_bytes()),
             source_stream_descriptor: Some(auxiliary_component.stream_descriptor().clone()),
-        })
-    }
-
-    /// Retains the relinearization A-component authority from the accepted
-    /// aggregate material. The position, root, and authenticated carrier all
-    /// come from the verifier-owned aggregate; callers cannot restate them.
-    pub(crate) fn from_verified_relinearization_aggregate_material(
-        material: &VerifiedRelinearizationAggregateMaterial,
-    ) -> Result<Self, CommonProofVerifierError> {
-        let position = material.evaluator_position();
-        let catalog_level = match position.key_kind() {
-            SelectedEvaluatorEntryKind::Relinearization { catalog_level } => catalog_level,
-            SelectedEvaluatorEntryKind::Galois { .. } => {
-                return Err(CommonProofVerifierError::InvalidApplicationStatement);
-            }
-        };
-        let selected_candidate = EvaluatorCandidateInput::implemented()
-            .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?;
-        if !material_topology_matches_selected_catalog_level(
-            &selected_candidate,
-            catalog_level,
-            material.material(),
-        ) {
-            return Err(CommonProofVerifierError::InvalidApplicationStatement);
-        }
-        Ok(Self {
-            position,
-            auxiliary_component_root: material.aggregate_right_root(),
-            source_material_root: Some(material.material_root()),
-            source_stream_descriptor: Some(material.stream_descriptor().clone()),
         })
     }
 
@@ -2181,88 +2045,9 @@ impl VerifiedEvaluatorAuxiliaryRoot {
         })
     }
 
-    pub(crate) fn from_verified_relinearization_round_one_aggregate_tree(
-        verified_proof: &VerifiedCommonProof,
-        canonical_application_statement_bytes: &[u8],
-        aggregate_right_tree: &VerifiedStreamedProofTreeTerminal,
-    ) -> Result<Self, CommonProofVerifierError> {
-        let schedule_position = verified_proof
-            .schedule_position
-            .filter(|_| {
-                verified_proof.application_statement_schema_identifier
-                    == ProofApplicationSlotCeilings::RKG_ROUND_ONE_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER
-                    && verified_proof.top_count.is_none()
-                    && verified_proof.binds_application_statement(
-                        canonical_application_statement_bytes,
-                    )
-            })
-            .ok_or(CommonProofVerifierError::InvalidApplicationStatement)?;
-        let statement = decode_selected_application_statement(
-            canonical_application_statement_bytes,
-            ProofApplicationSlotCeilings::RKG_ROUND_ONE_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
-            SelectedApplicationStatementContext::new(
-                verified_proof.protocol_version,
-                verified_proof.suite_identifier,
-                Some(schedule_position),
-                None,
-            ),
-        )
-        .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?;
-        let auxiliary_component_root = statement
-            .items
-            .get(4)
-            .filter(|item| {
-                item.item_type() == CanonicalItemType::Hash512 && item.canonical_bytes().len() == 64
-            })
-            .and_then(|item| item.canonical_bytes().try_into().ok())
-            .ok_or(CommonProofVerifierError::InvalidApplicationStatement)?;
-        let position = selected_evaluator_entry_positions(FOUNDATION_PROFILE.option_count)
-            .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?
-            .into_iter()
-            .find(|position| {
-                position.schedule_position() == schedule_position
-                    && matches!(
-                        position.key_kind(),
-                        SelectedEvaluatorEntryKind::Relinearization { .. }
-                    )
-            })
-            .ok_or(CommonProofVerifierError::InvalidApplicationStatement)?;
-        let source_material_root = aggregate_right_tree
-            .source_material_root()
-            .ok_or(CommonProofVerifierError::InvalidBoundTree)?;
-        let source_stream_descriptor = aggregate_right_tree
-            .source_stream_descriptor()
-            .cloned()
-            .ok_or(CommonProofVerifierError::InvalidBoundTree)?;
-        if aggregate_right_tree.protocol_version() != verified_proof.protocol_version
-            || aggregate_right_tree.suite_identifier() != verified_proof.suite_identifier
-            || aggregate_right_tree.application_statement_schema_identifier()
-                != ProofApplicationSlotCeilings::RKG_ROUND_ONE_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER
-            || aggregate_right_tree.application_statement_hash()
-                != verified_proof.application_statement_hash
-            || aggregate_right_tree.relation_plan_variant_hash()
-                != verified_proof.relation_plan_variant_hash
-            || aggregate_right_tree.canonical_application_statement_bytes()
-                != canonical_application_statement_bytes
-            || aggregate_right_tree.root_role()
-                != SetupPublicPolynomialRootRole::RelinearizationAggregateRoundOneRight
-            || aggregate_right_tree.schedule_position() != Some(schedule_position)
-            || aggregate_right_tree.root() != auxiliary_component_root
-            || aggregate_right_tree.source_stream_domain()
-                != Some(CanonicalStreamDomain::EvaluatorKeyStore)
-        {
-            return Err(CommonProofVerifierError::InvalidBoundTree);
-        }
-        Ok(Self {
-            position,
-            auxiliary_component_root,
-            source_material_root: Some(source_material_root),
-            source_stream_descriptor: Some(source_stream_descriptor),
-        })
-    }
-
     /// Mints the Galois A linkage only from a verifier-recomputed role-11
     /// public-polynomial tree at the exact selected catalog coordinate.
+    #[cfg(test)]
     pub(crate) fn from_galois_common_public_polynomial_tree(
         schedule_position: u32,
         galois_element: usize,
@@ -2708,16 +2493,23 @@ impl VerifiedEvaluatorKeyStorePreflight {
             );
         }
         let validated_store = VerifiedEvaluatorKeyStore::from_verified_common_proof_inner(
-            verified_proof.verified_proof(),
-            canonical_application_statement_bytes,
-            verified_evaluator_key_store_material.canonical_store_summary(),
-            &ordered_verified_runtime_roots,
-            verified_proof.ceremony_context_hash(),
-            verified_proof.action_context_hash(),
-            verified_evaluator_source_catalog.manifest_hash(),
-            roster_hash,
-            Some(verified_proof.proof_stream_descriptor().clone()),
-            None,
+            VerifiedEvaluatorKeyStoreProofInputs {
+                verified_proof: verified_proof.verified_proof(),
+                canonical_application_statement_bytes,
+            },
+            VerifiedEvaluatorKeyStoreMaterialInputs {
+                verified_evaluator_key_store_stream: verified_evaluator_key_store_material
+                    .canonical_store_summary(),
+                ordered_verified_runtime_roots: &ordered_verified_runtime_roots,
+                store_material: None,
+            },
+            VerifiedEvaluatorKeyStoreBindings {
+                ceremony_context_hash: verified_proof.ceremony_context_hash(),
+                action_context_hash: verified_proof.action_context_hash(),
+                manifest_hash: verified_evaluator_source_catalog.manifest_hash(),
+                roster_hash,
+                proof_stream_descriptor: Some(verified_proof.proof_stream_descriptor().clone()),
+            },
         )?;
         Ok(Self {
             validated_store,
@@ -2825,6 +2617,25 @@ impl VerifiedEvaluatorKeyStorePreflight {
     }
 }
 
+struct VerifiedEvaluatorKeyStoreProofInputs<'a> {
+    verified_proof: &'a VerifiedCommonProof,
+    canonical_application_statement_bytes: &'a [u8],
+}
+
+struct VerifiedEvaluatorKeyStoreMaterialInputs<'a> {
+    verified_evaluator_key_store_stream: &'a VerifiedCanonicalStreamSummary,
+    ordered_verified_runtime_roots: &'a [VerifiedEvaluatorRuntimeRoot],
+    store_material: Option<VerifiedEvaluatorKeyStoreMaterial>,
+}
+
+struct VerifiedEvaluatorKeyStoreBindings {
+    ceremony_context_hash: [u8; 64],
+    action_context_hash: [u8; 64],
+    manifest_hash: [u8; 64],
+    roster_hash: [u8; 64],
+    proof_stream_descriptor: Option<StreamDescriptor>,
+}
+
 impl VerifiedEvaluatorKeyStore {
     #[cfg(test)]
     pub(crate) fn from_verified_common_proof(
@@ -2834,350 +2645,46 @@ impl VerifiedEvaluatorKeyStore {
         ordered_verified_runtime_roots: &[VerifiedEvaluatorRuntimeRoot],
     ) -> Result<Self, CommonProofVerifierError> {
         Self::from_verified_common_proof_inner(
-            verified_proof,
-            canonical_application_statement_bytes,
-            verified_evaluator_key_store_stream,
-            ordered_verified_runtime_roots,
-            [0_u8; 64],
-            [0_u8; 64],
-            [0_u8; 64],
-            [0_u8; 64],
-            None,
-            None,
-        )
-    }
-
-    /// Constructs only the post-proof carrier needed to exercise production
-    /// executor replay in guarded tests. The store material has still passed
-    /// the real whole-store and per-component authenticators; this helper does
-    /// not create material from a digest or replace the production executor.
-    #[cfg(test)]
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn from_authenticated_material_for_executor_tests(
-        suite_identifier: [u8; 64],
-        ceremony_context_hash: [u8; 64],
-        action_context_hash: [u8; 64],
-        manifest_hash: [u8; 64],
-        roster_hash: [u8; 64],
-        setup_proof_context_hash: [u8; 64],
-        proof_stream_descriptor: StreamDescriptor,
-        store_material: VerifiedEvaluatorKeyStoreMaterial,
-    ) -> Result<Self, CommonProofVerifierError> {
-        let top_count = store_material.top_count();
-        let canonical_store_summary = store_material.canonical_store_summary().clone();
-        let store_descriptor = store_material.store_descriptor();
-        if !(1..=FOUNDATION_PROFILE.option_count).contains(&top_count)
-            || canonical_store_summary.stream_domain() != CanonicalStreamDomain::EvaluatorKeyStore
-            || canonical_store_summary.stream_descriptor() != store_descriptor
-            || canonical_store_summary.total_byte_length() != store_descriptor.total_byte_length
-            || canonical_store_summary.full_object_digest() != store_descriptor.full_object_digest
-        {
-            return Err(CommonProofVerifierError::InvalidApplicationStatement);
-        }
-        Ok(Self {
-            protocol_version: FOUNDATION_PROFILE.protocol_version,
-            suite_identifier,
-            ceremony_context_hash,
-            action_context_hash,
-            manifest_hash,
-            roster_hash,
-            setup_proof_context_hash,
-            top_count,
-            evaluator_key_store_digest: canonical_store_summary.full_object_digest().into_bytes(),
-            proof_stream_descriptor: Some(proof_stream_descriptor),
-            ordered_runtime_roots: Vec::new().into_boxed_slice(),
-            verified_evaluator_key_store_stream: canonical_store_summary,
-            store_material: Some(store_material),
-        })
-    }
-
-    pub(crate) fn from_verified_common_proof_and_material(
-        verified_proof: &VerifiedCommonProof,
-        canonical_application_statement_bytes: &[u8],
-        expected_relation_plan_hash: [u8; 64],
-        expected_ceremony_context_hash: [u8; 64],
-        expected_action_context_hash: [u8; 64],
-        verified_evaluator_source_catalog: &VerifiedAcceptedSetupEvaluatorSourceCatalog,
-        proof_stream_descriptor: StreamDescriptor,
-        verified_evaluator_key_store_material: VerifiedEvaluatorKeyStoreMaterial,
-        ordered_runtime_component_trees: Vec<VerifiedStreamedProofTreeTerminal>,
-        ordered_verified_auxiliary_roots: &[VerifiedEvaluatorAuxiliaryRoot],
-    ) -> Result<Self, CommonProofVerifierError> {
-        let top_count = verified_proof
-            .top_count
-            .filter(|top_count| (1..=FOUNDATION_PROFILE.option_count).contains(top_count))
-            .ok_or(CommonProofVerifierError::InvalidApplicationStatement)?;
-        let selected_plan = selected_evaluator_aggregate_relation_plan()
-            .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?;
-        let selected_variant = selected_plan
-            .select_variant(None, Some(top_count))
-            .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?;
-        if selected_plan
-            .canonical_hash()
-            .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?
-            != expected_relation_plan_hash
-            || selected_variant
-                .canonical_hash()
-                .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?
-                != verified_proof.relation_plan_variant_hash
-        {
-            return Err(CommonProofVerifierError::InvalidApplicationStatement);
-        }
-        let statement = decode_selected_application_statement(
-            canonical_application_statement_bytes,
-            ProofApplicationSlotCeilings::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
-            SelectedApplicationStatementContext::new(
-                verified_proof.protocol_version,
-                verified_proof.suite_identifier,
-                None,
-                Some(top_count),
-            ),
-        )
-        .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?;
-        let ordered_statement_roots =
-            selected_evaluator_aggregate_entry_roots_in_order(&statement, top_count)
-                .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?;
-        let setup_proof_context_hash: [u8; 64] = statement
-            .items
-            .first()
-            .filter(|item| {
-                item.item_type() == CanonicalItemType::Hash512 && item.canonical_bytes().len() == 64
-            })
-            .and_then(|item| item.canonical_bytes().try_into().ok())
-            .ok_or(CommonProofVerifierError::InvalidApplicationStatement)?;
-        let ordered_components = verified_evaluator_key_store_material.ordered_components();
-        if verified_evaluator_key_store_material.top_count() != top_count
-            || proof_stream_descriptor.total_byte_length != verified_proof.proof_byte_length
-            || ordered_components.len() != ordered_statement_roots.len()
-            || ordered_runtime_component_trees.len() != ordered_statement_roots.len()
-            || ordered_verified_auxiliary_roots.len() != ordered_statement_roots.len()
-            || verified_evaluator_source_catalog.protocol_version()
-                != verified_proof.protocol_version
-            || verified_evaluator_source_catalog.suite_identifier()
-                != verified_proof.suite_identifier
-            || verified_evaluator_source_catalog.ceremony_context_hash()
-                != expected_ceremony_context_hash
-            || verified_evaluator_source_catalog.action_context_hash()
-                != expected_action_context_hash
-            || verified_evaluator_source_catalog.setup_proof_context_hash()
-                != setup_proof_context_hash
-        {
-            return Err(CommonProofVerifierError::InvalidApplicationStatement);
-        }
-        let roster_hash = ordered_runtime_component_trees
-            .first()
-            .map(VerifiedStreamedProofTreeTerminal::roster_hash)
-            .ok_or(CommonProofVerifierError::InvalidApplicationStatement)?;
-        if verified_evaluator_source_catalog.roster_hash() != roster_hash {
-            return Err(CommonProofVerifierError::InvalidApplicationStatement);
-        }
-        let material_ownership = ComponentMaterialOwnershipBinding::from_verified_application(
-            verified_proof.suite_identifier,
-            expected_action_context_hash,
-            verified_proof.application_statement_hash,
-        );
-        let selected_candidate = EvaluatorCandidateInput::implemented()
-            .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?;
-        let participant_tree_count = u32::from(FOUNDATION_PROFILE.participant_count);
-        let trees_per_entry = participant_tree_count
-            .checked_add(1)
-            .ok_or(CommonProofVerifierError::InvalidApplicationStatement)?;
-        let mut ordered_verified_runtime_roots = Vec::new();
-        ordered_verified_runtime_roots
-            .try_reserve_exact(ordered_statement_roots.len())
-            .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?;
-        for (entry_ordinal, (((statement_roots, component), runtime_tree), auxiliary_root)) in
-            ordered_statement_roots
-                .iter()
-                .zip(ordered_components)
-                .zip(&ordered_runtime_component_trees)
-                .zip(ordered_verified_auxiliary_roots)
-                .enumerate()
-        {
-            let entry_ordinal = u32::try_from(entry_ordinal)
-                .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?;
-            let expected_tree_ordinal = entry_ordinal
-                .checked_mul(trees_per_entry)
-                .and_then(|ordinal| ordinal.checked_add(participant_tree_count))
-                .ok_or(CommonProofVerifierError::InvalidApplicationStatement)?;
-            let expected_tree = selected_variant
-                .ordered_trees()
-                .get(
-                    usize::try_from(expected_tree_ordinal)
-                        .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?,
-                )
-                .ok_or(CommonProofVerifierError::InvalidApplicationStatement)?;
-            let (expected_root_source_ordinal, expected_ordered_column_count) = match expected_tree
-            {
-                RelationTreeDescriptor::BoundPublic {
-                    construction_kind: BoundTreeConstructionKind::SetupPolynomial,
-                    expected_root_source_ordinal,
-                    root_use: BoundTreeRootUse::Output,
-                    ordered_column_ordinals,
-                } => (*expected_root_source_ordinal, ordered_column_ordinals.len()),
-                _ => return Err(CommonProofVerifierError::InvalidApplicationStatement),
-            };
-            let position = statement_roots.position();
-            if statement_roots
-                .source_component_roots()
-                .iter()
-                .enumerate()
-                .any(|(roster_ordinal, statement_source_root)| {
-                    u16::try_from(roster_ordinal)
-                        .ok()
-                        .and_then(|roster_position| {
-                            verified_evaluator_source_catalog
-                                .component_root(roster_position, position)
-                        })
-                        .as_ref()
-                        != Some(statement_source_root)
-                })
-            {
-                return Err(CommonProofVerifierError::InvalidApplicationStatement);
-            }
-            let catalog_level = match position.key_kind() {
-                SelectedEvaluatorEntryKind::Relinearization { catalog_level }
-                | SelectedEvaluatorEntryKind::Galois { catalog_level, .. } => catalog_level,
-            };
-            let expected_root_role = match position.key_kind() {
-                SelectedEvaluatorEntryKind::Relinearization { .. } => {
-                    SetupPublicPolynomialRootRole::RelinearizationRuntime
-                }
-                SelectedEvaluatorEntryKind::Galois { .. } => {
-                    SetupPublicPolynomialRootRole::GaloisRuntime
-                }
-            };
-            let expected_public_polynomial_context_hash = SetupPublicPolynomialContext::new(
-                setup_proof_context_hash,
-                expected_root_role,
-                None,
-                None,
-                Some(position.schedule_position()),
-                None,
-            )
-            .and_then(|context| context.context_hash())
-            .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?;
-            let expected_column_moduli =
-                expected_component_column_moduli(&selected_candidate, component.material())?;
-            if statement_roots.entry_ordinal() != entry_ordinal
-                || component.position() != position
-                || auxiliary_root.position() != position
-                || auxiliary_root.auxiliary_component_root()
-                    != statement_roots.auxiliary_component_root()
-                || runtime_tree.protocol_version() != verified_proof.protocol_version
-                || runtime_tree.suite_identifier() != verified_proof.suite_identifier
-                || runtime_tree.ceremony_context_hash() != expected_ceremony_context_hash
-                || runtime_tree.action_context_hash() != expected_action_context_hash
-                || runtime_tree.roster_hash() != roster_hash
-                || runtime_tree.application_statement_schema_identifier()
-                    != ProofApplicationSlotCeilings::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER
-                || runtime_tree.application_statement_hash()
-                    != verified_proof.application_statement_hash
-                || runtime_tree.relation_plan_variant_hash()
-                    != verified_proof.relation_plan_variant_hash
-                || runtime_tree.canonical_application_statement_bytes()
-                    != canonical_application_statement_bytes
-                || runtime_tree.ordered_tree_ordinal() != expected_tree_ordinal
-                || runtime_tree.expected_root_source_ordinal() != expected_root_source_ordinal
-                || runtime_tree.setup_proof_context_hash() != setup_proof_context_hash
-                || runtime_tree.root_role() != expected_root_role
-                || runtime_tree.owner_participant_identity().is_some()
-                || runtime_tree.owner_roster_position().is_some()
-                || runtime_tree.schedule_position() != Some(position.schedule_position())
-                || runtime_tree.public_polynomial_context_hash()
-                    != expected_public_polynomial_context_hash
-                || runtime_tree.root() != statement_roots.runtime_component_root()
-                || runtime_tree.source_polynomial_degree_bound_exclusive()
-                    != component
-                        .material()
-                        .topology()
-                        .half_polynomial_degree_bound_exclusive()
-                        .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?
-                || usize::try_from(runtime_tree.row_width()).ok()
-                    != Some(expected_ordered_column_count)
-                || runtime_tree.ordered_canonical_residue_moduli()
-                    != expected_column_moduli.as_ref()
-                || runtime_tree.source_stream_domain()
-                    != Some(CanonicalStreamDomain::EvaluatorKeyStore)
-                || runtime_tree.source_material_root()
-                    != Some(component.material().material_root().into_bytes())
-                || runtime_tree.source_stream_descriptor()
-                    != Some(component.material().stream_descriptor())
-                || !component.material().binds_ownership(material_ownership)
-                || !material_topology_matches_selected_catalog_level(
-                    &selected_candidate,
-                    catalog_level,
-                    component.material(),
-                )
-            {
-                return Err(CommonProofVerifierError::InvalidApplicationStatement);
-            }
-            match position.key_kind() {
-                SelectedEvaluatorEntryKind::Relinearization { .. } => {
-                    let linked_auxiliary = component
-                        .linked_relinearization_auxiliary()
-                        .ok_or(CommonProofVerifierError::InvalidApplicationStatement)?;
-                    if auxiliary_root.source_material_root()
-                        != Some(linked_auxiliary.material().material_root().into_bytes())
-                        || auxiliary_root.source_stream_descriptor()
-                            != Some(linked_auxiliary.material().stream_descriptor())
-                        || !linked_auxiliary
-                            .material()
-                            .binds_ownership(material_ownership)
-                        || !material_topology_matches_selected_catalog_level(
-                            &selected_candidate,
-                            catalog_level,
-                            linked_auxiliary.material(),
-                        )
-                    {
-                        return Err(CommonProofVerifierError::InvalidApplicationStatement);
-                    }
-                }
-                SelectedEvaluatorEntryKind::Galois { .. } => {
-                    if component.linked_relinearization_auxiliary().is_some()
-                        || auxiliary_root.source_material_root().is_some()
-                        || auxiliary_root.source_stream_descriptor().is_some()
-                    {
-                        return Err(CommonProofVerifierError::InvalidApplicationStatement);
-                    }
-                }
-            }
-            ordered_verified_runtime_roots.push(
-                VerifiedEvaluatorRuntimeRoot::from_recomputed_public_polynomial_tree(
-                    &runtime_tree.tree,
-                    top_count,
-                )?,
-            );
-        }
-        let verified_evaluator_key_store_stream = verified_evaluator_key_store_material
-            .canonical_store_summary()
-            .clone();
-        Self::from_verified_common_proof_inner(
-            verified_proof,
-            canonical_application_statement_bytes,
-            &verified_evaluator_key_store_stream,
-            &ordered_verified_runtime_roots,
-            expected_ceremony_context_hash,
-            expected_action_context_hash,
-            verified_evaluator_source_catalog.manifest_hash(),
-            roster_hash,
-            Some(proof_stream_descriptor),
-            Some(verified_evaluator_key_store_material),
+            VerifiedEvaluatorKeyStoreProofInputs {
+                verified_proof,
+                canonical_application_statement_bytes,
+            },
+            VerifiedEvaluatorKeyStoreMaterialInputs {
+                verified_evaluator_key_store_stream,
+                ordered_verified_runtime_roots,
+                store_material: None,
+            },
+            VerifiedEvaluatorKeyStoreBindings {
+                ceremony_context_hash: [0_u8; 64],
+                action_context_hash: [0_u8; 64],
+                manifest_hash: [0_u8; 64],
+                roster_hash: [0_u8; 64],
+                proof_stream_descriptor: None,
+            },
         )
     }
 
     fn from_verified_common_proof_inner(
-        verified_proof: &VerifiedCommonProof,
-        canonical_application_statement_bytes: &[u8],
-        verified_evaluator_key_store_stream: &VerifiedCanonicalStreamSummary,
-        ordered_verified_runtime_roots: &[VerifiedEvaluatorRuntimeRoot],
-        ceremony_context_hash: [u8; 64],
-        action_context_hash: [u8; 64],
-        manifest_hash: [u8; 64],
-        roster_hash: [u8; 64],
-        proof_stream_descriptor: Option<StreamDescriptor>,
-        store_material: Option<VerifiedEvaluatorKeyStoreMaterial>,
+        proof_inputs: VerifiedEvaluatorKeyStoreProofInputs<'_>,
+        material_inputs: VerifiedEvaluatorKeyStoreMaterialInputs<'_>,
+        bindings: VerifiedEvaluatorKeyStoreBindings,
     ) -> Result<Self, CommonProofVerifierError> {
+        let VerifiedEvaluatorKeyStoreProofInputs {
+            verified_proof,
+            canonical_application_statement_bytes,
+        } = proof_inputs;
+        let VerifiedEvaluatorKeyStoreMaterialInputs {
+            verified_evaluator_key_store_stream,
+            ordered_verified_runtime_roots,
+            store_material,
+        } = material_inputs;
+        let VerifiedEvaluatorKeyStoreBindings {
+            ceremony_context_hash,
+            action_context_hash,
+            manifest_hash,
+            roster_hash,
+            proof_stream_descriptor,
+        } = bindings;
         let top_count = verified_proof
             .top_count
             .filter(|top_count| (1..=FOUNDATION_PROFILE.option_count).contains(top_count))
@@ -3301,10 +2808,12 @@ impl VerifiedEvaluatorKeyStore {
         self.top_count
     }
 
+    #[cfg(test)]
     pub(crate) const fn evaluator_key_store_digest(&self) -> [u8; 64] {
         self.evaluator_key_store_digest
     }
 
+    #[cfg(test)]
     pub(crate) fn ordered_runtime_roots(&self) -> &[VerifiedEvaluatorRuntimeRoot] {
         &self.ordered_runtime_roots
     }

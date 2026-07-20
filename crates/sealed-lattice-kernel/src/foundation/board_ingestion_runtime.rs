@@ -336,10 +336,6 @@ impl VerifiedBoardApplicationSource {
         self.verified_object.producer_sequence()
     }
 
-    pub(crate) fn canonical_carrier_bytes(&self) -> &[u8] {
-        self.verified_object.canonical_carrier_bytes()
-    }
-
     /// Decodes the already authenticated setup-intent payload while retaining
     /// the board verifier as the only source of application authority.
     pub(crate) fn setup_intent_payload(

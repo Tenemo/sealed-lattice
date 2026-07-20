@@ -9,6 +9,8 @@ use crate::{
     },
 };
 
+#[cfg(test)]
+use super::program::VerifiedEvaluatorAggregateContext;
 use super::{
     ballot_aggregation::{IncrementalVerifiedBallotAggregation, VerifiedBallotAggregationError},
     program::VerifiedEvaluatorAggregate,
@@ -424,13 +426,9 @@ mod tests {
             decrypt_scaling: 1,
         };
         let verified_aggregate = VerifiedEvaluatorAggregate::from_verified_ballot_aggregate(
-            1,
-            [0x11; 64],
-            [0x22; 64],
-            [0x33; 64],
-            [0x44; 64],
-            [0x55; 64],
-            [0x66; 64],
+            VerifiedEvaluatorAggregateContext::from_verified_sources(
+                1, [0x11; 64], [0x22; 64], [0x33; 64], [0x44; 64], [0x55; 64], [0x66; 64],
+            ),
             1,
             1,
             aggregate_ciphertext,

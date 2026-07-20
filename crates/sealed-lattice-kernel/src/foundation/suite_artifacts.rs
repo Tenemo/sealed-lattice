@@ -90,32 +90,6 @@ impl EncoderAndBallotLayout {
         Ok(artifact)
     }
 
-    #[cfg(test)]
-    pub(crate) fn decode(bytes: &[u8], limits: &CanonicalDecodeLimits) -> SchemaResult<Self> {
-        let tuple = CanonicalTuple::decode(bytes, limits)?;
-        require_header_with_version(
-            &tuple,
-            ENCODER_AND_BALLOT_LAYOUT_SCHEMA_IDENTIFIER,
-            ENCODER_AND_BALLOT_LAYOUT_VERSION,
-            11,
-        )?;
-        let artifact = Self {
-            polynomial_degree: read_u32(&tuple.items[0])?,
-            primitive_two_n_root: read_u64(&tuple.items[1])?,
-            extension_degree: read_u16(&tuple.items[2])?,
-            lane_count: read_u16(&tuple.items[3])?,
-            ciphertext_count: read_u16(&tuple.items[4])?,
-            auxiliary_count: read_u16(&tuple.items[5])?,
-            option_count: read_u16(&tuple.items[6])?,
-            minimum_score: read_u16(&tuple.items[7])?,
-            maximum_score: read_u16(&tuple.items[8])?,
-            pair_difference_rule: read_u16(&tuple.items[9])?,
-            ordered_pair_character_assignments: read_unsigned16_list(&tuple.items[10])?,
-        };
-        artifact.validate()?;
-        Ok(artifact)
-    }
-
     pub(crate) fn encode(self) -> SchemaResult<Vec<u8>> {
         self.validate()?;
         Ok(CanonicalTuple::new(
@@ -193,8 +167,11 @@ fn require_pair_character_ballot_codec_layout() -> SchemaResult<()> {
             .map_err(|_| invalid_selected_artifact())?;
     let assignments =
         selected_pair_character_lane_assignments().map_err(|_| invalid_selected_artifact())?;
-    for ciphertext_ordinal in 0..PAIR_CHARACTER_CIPHERTEXT_COUNT {
-        let plaintext = &plaintexts[ciphertext_ordinal];
+    for (ciphertext_ordinal, plaintext) in plaintexts
+        .iter()
+        .enumerate()
+        .take(PAIR_CHARACTER_CIPHERTEXT_COUNT)
+    {
         for lane_ordinal in 0..PAIR_CHARACTER_LANE_COUNT {
             let assignment = assignments.iter().find(|assignment| {
                 usize::from(assignment.ciphertext_ordinal()) == ciphertext_ordinal
@@ -593,16 +570,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn fixed_suite_artifacts_round_trip_and_reject_profile_drift() {
+    fn current_suite_artifacts_round_trip_while_encoder_layout_remains_unavailable() {
         let limits = CanonicalDecodeLimits::default();
 
-        let encoder_bytes = EncoderAndBallotLayout::selected()
-            .and_then(EncoderAndBallotLayout::encode)
-            .expect("selected encoder artifact");
         assert_eq!(
-            EncoderAndBallotLayout::decode(&encoder_bytes, &limits)
-                .expect("decode encoder artifact"),
-            EncoderAndBallotLayout::selected().expect("selected encoder artifact")
+            EncoderAndBallotLayout::selected()
+                .expect_err("the obsolete scalar-root encoder layout must remain unavailable")
+                .refusal_reason,
+            RefusalReason::UnsupportedVersionOrSuite
         );
 
         let vss_bytes = VerifiableSecretSharingProfile::selected()
@@ -639,20 +614,6 @@ mod tests {
                 eprintln!("selected target profile unavailable: {error:?}");
             }
         }
-
-        let mut drifted_encoder_tuple = CanonicalTuple::decode(&encoder_bytes, &limits)
-            .expect("selected encoder tuple decodes");
-        drifted_encoder_tuple.items[7] =
-            CanonicalItem::unsigned16(FOUNDATION_PROFILE.maximum_score);
-        let drifted_encoder = drifted_encoder_tuple
-            .encode()
-            .expect("encode drifted artifact");
-        assert_eq!(
-            EncoderAndBallotLayout::decode(&drifted_encoder, &limits)
-                .expect_err("drifted encoder must refuse")
-                .refusal_reason,
-            RefusalReason::UnsupportedVersionOrSuite
-        );
     }
 
     #[test]

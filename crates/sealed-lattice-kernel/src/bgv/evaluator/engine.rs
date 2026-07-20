@@ -31,9 +31,11 @@ mod operations;
 pub(crate) use ciphertext_records::ciphertext_canonical_bytes;
 #[cfg(test)]
 pub(crate) use decryption::decryption_accumulator_to_coefficients;
+#[cfg(test)]
+pub(crate) use operations::ciphertext_sub;
 pub(crate) use operations::{
-    add_plaintext_coefficients, ciphertext_add, ciphertext_negate, ciphertext_sub,
-    ciphertext_tensor, modulus_switch, modulus_switch_to, normalize_scaling, plaintext_mul,
+    add_plaintext_coefficients, ciphertext_add, ciphertext_tensor, modulus_switch,
+    modulus_switch_to, normalize_scaling, plaintext_mul,
 };
 
 // Highest modulus-chain level: index of the last data prime, so a fresh
@@ -84,14 +86,6 @@ pub(crate) struct Ciphertext {
     // multiplies by delta. Modulus switching multiplies delta by the dropped
     // prime, while ciphertext multiplication multiplies the operand multipliers.
     pub(crate) decrypt_scaling: u64,
-}
-
-#[cfg(test)]
-#[derive(Clone, Debug)]
-pub(crate) struct EncryptionWitness {
-    pub(crate) randomizer_coefficients: Vec<i64>,
-    pub(crate) error_zero_coefficients: Vec<i64>,
-    pub(crate) error_one_coefficients: Vec<i64>,
 }
 
 impl Ciphertext {
@@ -151,17 +145,6 @@ impl BgvPublicKey {
         plaintext_coefficients: &[u64],
         seed_hex: &str,
     ) -> CanonicalResult<Ciphertext> {
-        Ok(self
-            .encrypt_coefficients_with_witness(plaintext_coefficients, seed_hex)?
-            .0)
-    }
-
-    #[cfg(test)]
-    pub(crate) fn encrypt_coefficients_with_witness(
-        &self,
-        plaintext_coefficients: &[u64],
-        seed_hex: &str,
-    ) -> CanonicalResult<(Ciphertext, EncryptionWitness)> {
         encrypt_coefficients_with_public_key_components(
             &self.public_b,
             &self.public_a,
@@ -273,16 +256,6 @@ impl DevelopmentBgvKey {
         plaintext_coefficients: &[u64],
         seed_hex: &str,
     ) -> CanonicalResult<Ciphertext> {
-        Ok(self
-            .encrypt_coefficients_with_witness(plaintext_coefficients, seed_hex)?
-            .0)
-    }
-
-    pub(crate) fn encrypt_coefficients_with_witness(
-        &self,
-        plaintext_coefficients: &[u64],
-        seed_hex: &str,
-    ) -> CanonicalResult<(Ciphertext, EncryptionWitness)> {
         encrypt_coefficients_with_public_key_components(
             &self.public_b,
             &self.public_a,
@@ -347,7 +320,7 @@ fn encrypt_coefficients_with_public_key_components(
     public_a: &[Vec<u64>],
     plaintext_coefficients: &[u64],
     seed_hex: &str,
-) -> CanonicalResult<(Ciphertext, EncryptionWitness)> {
+) -> CanonicalResult<Ciphertext> {
     validate_public_key_component_shape(public_b, "component zero")?;
     validate_public_key_component_shape(public_a, "component one")?;
     if plaintext_coefficients.len() != POLYNOMIAL_DEGREE {
@@ -417,18 +390,11 @@ fn encrypt_coefficients_with_public_key_components(
         component_one.push(limb_one);
     }
 
-    Ok((
-        Ciphertext {
-            components: vec![component_zero, component_one],
-            level: EVALUATOR_FULL_LEVEL,
-            decrypt_scaling: 1,
-        },
-        EncryptionWitness {
-            randomizer_coefficients: randomizer,
-            error_zero_coefficients: error_zero,
-            error_one_coefficients: error_one,
-        },
-    ))
+    Ok(Ciphertext {
+        components: vec![component_zero, component_one],
+        level: EVALUATOR_FULL_LEVEL,
+        decrypt_scaling: 1,
+    })
 }
 
 #[cfg(test)]

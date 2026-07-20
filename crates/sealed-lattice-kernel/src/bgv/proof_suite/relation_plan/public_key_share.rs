@@ -29,7 +29,6 @@ pub(crate) struct PublicKeyShareSourceLayout {
 
 pub(super) struct PublicKeyShareLimbSourceLayout {
     pub(super) data_modulus_index: u16,
-    pub(super) common_reference: SplitIntegerVector,
     pub(super) quotient_columns: [u32; 2],
 }
 
@@ -124,7 +123,6 @@ pub(crate) fn compile_public_key_share_relation_with_source_layout(
         }
         limb_source_layouts.push(PublicKeyShareLimbSourceLayout {
             data_modulus_index,
-            common_reference,
             quotient_columns,
         });
     }

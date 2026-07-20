@@ -106,20 +106,9 @@ pub(crate) struct ExternalStockhamPassPlan {
 }
 
 impl ExternalStockhamPassPlan {
+    #[cfg(test)]
     pub(crate) const fn input(self) -> ExternalPolynomialVector {
         self.input
-    }
-
-    pub(crate) const fn output(self) -> ExternalPolynomialVector {
-        self.output
-    }
-
-    pub(crate) const fn stage_ordinal(self) -> u32 {
-        self.stage_ordinal
-    }
-
-    pub(crate) const fn executor_step(self) -> u32 {
-        self.executor_step
     }
 }
 
@@ -334,6 +323,7 @@ pub(crate) fn external_stockham_resident_memory_requirement(
 }
 
 impl ExternalStockhamTransformPlan {
+    #[cfg(test)]
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         domain: ProofEvaluationDomain,
@@ -563,6 +553,7 @@ impl ExternalStockhamTransformPlan {
         })
     }
 
+    #[cfg(test)]
     pub(crate) fn passes(&self) -> &[ExternalStockhamPassPlan] {
         &self.passes
     }
@@ -571,6 +562,7 @@ impl ExternalStockhamTransformPlan {
         &self.object_plans
     }
 
+    #[cfg(test)]
     pub(crate) const fn final_output(&self) -> ExternalPolynomialVector {
         self.final_output
     }
@@ -583,10 +575,12 @@ impl ExternalStockhamTransformPlan {
         self.next_executor_step
     }
 
+    #[cfg(test)]
     pub(crate) const fn maximum_scan_element_count(&self) -> usize {
         self.maximum_scan_element_count
     }
 
+    #[cfg(test)]
     pub(crate) const fn maximum_resident_byte_length(&self) -> u64 {
         self.maximum_resident_byte_length
     }
@@ -612,14 +606,17 @@ pub(crate) struct ExternalStockhamCheckpointBoundary {
 }
 
 impl ExternalStockhamCheckpointBoundary {
+    #[cfg(test)]
     pub(crate) const fn next_pass_ordinal(self) -> u32 {
         self.next_pass_ordinal
     }
 
+    #[cfg(test)]
     pub(crate) const fn next_executor_step(self) -> u32 {
         self.next_executor_step
     }
 
+    #[cfg(test)]
     pub(crate) const fn sealed_input(self) -> ExternalPolynomialVector {
         self.sealed_input
     }
@@ -847,6 +844,7 @@ impl ExternalStockhamTransform {
         })
     }
 
+    #[cfg(test)]
     pub(crate) fn checkpoint_boundary(&self) -> Option<ExternalStockhamCheckpointBoundary> {
         if self.phase != ExternalStockhamTransformPhase::BeginOutput {
             return None;
@@ -858,10 +856,6 @@ impl ExternalStockhamTransform {
             next_executor_step: pass.executor_step,
             sealed_input: pass.input,
         })
-    }
-
-    pub(crate) const fn maximum_resident_byte_length(&self) -> u64 {
-        self.plan.maximum_resident_byte_length
     }
 
     pub(crate) fn advance<Storage: ProofExternalMemory>(
@@ -2103,7 +2097,7 @@ mod tests {
             ProofExternalMemoryObject::new(2),
             ProofExternalMemoryObject::new(1),
             ProofExternalMemoryObject::new(2),
-            ProofExternalMemoryObject::new(3),
+            ProofExternalMemoryObject::new(1),
         ];
         let reused = execute_transform_with_output_objects(
             domain,
@@ -2129,7 +2123,7 @@ mod tests {
                 .map(|plan| plan.object())
                 .collect::<BTreeSet<_>>()
                 .len(),
-            3,
+            2,
         );
         assert_eq!(reused.plan.object_plans().len(), 5);
         assert_eq!(reused.usage.deleted_object_count(), 6);

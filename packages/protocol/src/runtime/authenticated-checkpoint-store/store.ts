@@ -631,9 +631,7 @@ export const openAuthenticatedCheckpointStoreWithProtection = (input: {
                 'checkpoint lineage identifier',
             ),
         );
-        const lineageIdentifierKey = bytesToHex(
-            checkpointLineageIdentifier,
-        );
+        const lineageIdentifierKey = bytesToHex(checkpointLineageIdentifier);
         retainIdentifierKey(lineageIdentifierKey);
         try {
             await runCheckpointLineageExclusive(
@@ -718,8 +716,7 @@ export const openAuthenticatedCheckpointStoreWithProtection = (input: {
 
     const reserveCheckpointLineage: AuthenticatedCheckpointStore['reserveCheckpointLineage'] =
         async () => {
-            const releaseOperationIdentitySlot =
-                reserveOperationIdentitySlot();
+            const releaseOperationIdentitySlot = reserveOperationIdentitySlot();
             let sampledLineage:
                 | Awaited<ReturnType<typeof sampleFreshCheckpointLineage>>
                 | undefined;

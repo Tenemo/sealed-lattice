@@ -594,7 +594,7 @@ const generateParticipantProof = async (
                             authorization.stateReservationCapabilityPointer <=
                                 0 ||
                             authorization.stateReservationCapabilityPointer +
-                                    verifierCapabilityByteLength >
+                                verifierCapabilityByteLength >
                                 context.memory.buffer.byteLength
                         ) {
                             throw new CanonicalStreamInternalError(
@@ -640,8 +640,7 @@ const generateParticipantProof = async (
                                         checkpointPointer,
                                         checkpointLineageIdentifier.byteLength,
                                         metadataPointer,
-                                        metadataPointer +
-                                            wasm32WordByteLength,
+                                        metadataPointer + wasm32WordByteLength,
                                     );
                                     const [sourceHandle, status] =
                                         memoryBoundary.readWords(

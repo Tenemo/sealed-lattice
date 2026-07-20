@@ -58,10 +58,56 @@ pub(crate) enum CommonProofGenerationError<StorageError, CoinError, SinkError> {
     Storage(ProofExternalMemoryExecutorError<StorageError>),
     CoinSource(CoinError),
     Sink(SinkError),
+    #[cfg(test)]
     Cleanup {
         original: Box<CommonProofGenerationError<StorageError, CoinError, SinkError>>,
         cleanup: ProofExternalMemoryExecutorError<StorageError>,
     },
+}
+
+impl<StorageError, CoinError, SinkError> core::fmt::Display
+    for CommonProofGenerationError<StorageError, CoinError, SinkError>
+where
+    StorageError: core::fmt::Debug,
+    CoinError: core::fmt::Debug,
+    SinkError: core::fmt::Debug,
+{
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Prover(error) => write!(formatter, "common proof prover failed: {error:?}"),
+            Self::Profile(error) => write!(formatter, "common proof profile failed: {error:?}"),
+            Self::Relation(error) => write!(formatter, "common proof relation failed: {error:?}"),
+            Self::Body(error) => write!(formatter, "common proof body failed: {error:?}"),
+            Self::Transcript(error) => {
+                write!(formatter, "common proof transcript failed: {error:?}")
+            }
+            Self::StoragePlan(error) => {
+                write!(formatter, "common proof storage plan failed: {error:?}")
+            }
+            Self::Storage(error) => write!(formatter, "common proof storage failed: {error:?}"),
+            Self::CoinSource(error) => {
+                write!(
+                    formatter,
+                    "common proof private coin source failed: {error:?}"
+                )
+            }
+            Self::Sink(error) => write!(formatter, "common proof output sink failed: {error:?}"),
+            #[cfg(test)]
+            Self::Cleanup { original, cleanup } => write!(
+                formatter,
+                "common proof failed ({original}); cleanup also failed: {cleanup:?}"
+            ),
+        }
+    }
+}
+
+impl<StorageError, CoinError, SinkError> std::error::Error
+    for CommonProofGenerationError<StorageError, CoinError, SinkError>
+where
+    StorageError: core::fmt::Debug,
+    CoinError: core::fmt::Debug,
+    SinkError: core::fmt::Debug,
+{
 }
 
 pub(super) type CommonProofGenerationPollResult<StorageError, CoinError, SinkError> = Result<
@@ -752,6 +798,28 @@ fn ceiling_division_u64(
     Ok(numerator.checked_add(denominator - 1).ok_or(
         GeneratedCommonProofStoragePlanError::Prover(CommonProofProverError::CountOverflow),
     )? / denominator)
+}
+
+/// Gives one transform its own final-output identity while alternating both
+/// identities across non-overlapping Stockham pass lifecycles.
+fn stockham_output_object_pair(
+    first_object_ordinal: u32,
+) -> Result<[ProofExternalMemoryObject; 2], GeneratedCommonProofStoragePlanError> {
+    let second_object_ordinal =
+        first_object_ordinal
+            .checked_add(1)
+            .ok_or(GeneratedCommonProofStoragePlanError::Prover(
+                CommonProofProverError::CountOverflow,
+            ))?;
+    second_object_ordinal
+        .checked_add(1)
+        .ok_or(GeneratedCommonProofStoragePlanError::Prover(
+            CommonProofProverError::CountOverflow,
+        ))?;
+    Ok([
+        ProofExternalMemoryObject::new(first_object_ordinal),
+        ProofExternalMemoryObject::new(second_object_ordinal),
+    ])
 }
 
 struct CommonProofQuotientStreamRequirement {
@@ -2053,7 +2121,7 @@ fn derive_generated_common_proof_storage_geometry(
                         .ok_or(GeneratedCommonProofStoragePlanError::Prover(
                             CommonProofProverError::CountOverflow,
                         ))?;
-                    let first_executor_step = first_auxiliary_transform_step
+                    first_auxiliary_transform_step
                         .checked_add(
                             transform_index
                                 .checked_mul(transform_pass_count_per_column)
@@ -2063,8 +2131,7 @@ fn derive_generated_common_proof_storage_geometry(
                         )
                         .ok_or(GeneratedCommonProofStoragePlanError::Prover(
                             CommonProofProverError::CountOverflow,
-                        ))?;
-                    first_executor_step
+                        ))?
                 }
                 _ => {
                     return Err(GeneratedCommonProofStoragePlanError::Prover(
@@ -2109,11 +2176,11 @@ fn derive_generated_common_proof_storage_geometry(
                     replay_protection,
                 )
             } else {
-                ExternalStockhamTransformPlan::new(
+                ExternalStockhamTransformPlan::new_with_output_objects(
                     evaluation_domain,
                     ExternalStockhamTransformDirection::Forward,
                     source,
-                    next_object_ordinal,
+                    &stockham_scratch_sequence(stockham_output_object_pair(next_object_ordinal)?),
                     first_executor_step,
                     final_output_last_use_step,
                     maximum_chunk_byte_length,
@@ -2234,11 +2301,11 @@ fn derive_generated_common_proof_storage_geometry(
                     CommonProofReplayPolynomialKey::RelationColumn(column_ordinal),
                     first_executor_step,
                 );
-                let transform_plan = ExternalStockhamTransformPlan::new(
+                let transform_plan = ExternalStockhamTransformPlan::new_with_output_objects(
                     evaluation_domain,
                     ExternalStockhamTransformDirection::Forward,
                     source,
-                    next_object_ordinal,
+                    &stockham_scratch_sequence(stockham_output_object_pair(next_object_ordinal)?),
                     first_executor_step,
                     constraint_evaluation_step,
                     maximum_chunk_byte_length,
@@ -2532,6 +2599,7 @@ pub(super) fn generated_common_proof_storage_plan(
 /// Derives exact browser scratch liveness and traffic before applying the
 /// absolute storage ceiling. The production generation path constructs its
 /// enforced plan from the same geometry.
+#[cfg(test)]
 pub(crate) fn common_proof_external_memory_requirement(
     variant: &RelationPlanVariant,
     relation_context: &RelationPlanCheckContext,
@@ -2774,46 +2842,57 @@ pub(crate) struct CommonProofResidentInfrastructurePayloadAccounting {
 }
 
 impl CommonProofResidentInfrastructurePayloadAccounting {
+    #[cfg(test)]
     pub(crate) const fn state_machine_inline_byte_length(self) -> u64 {
         self.state_machine_inline_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn canonical_header_payload_byte_length(self) -> u64 {
         self.canonical_header_payload_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn relation_plan_catalog_payload_byte_length(self) -> u64 {
         self.relation_plan_catalog_payload_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn relation_context_catalog_payload_byte_length(self) -> u64 {
         self.relation_context_catalog_payload_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn proof_tree_catalog_payload_byte_length(self) -> u64 {
         self.proof_tree_catalog_payload_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn storage_plan_catalog_payload_byte_length(self) -> u64 {
         self.storage_plan_catalog_payload_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn executor_catalog_payload_byte_length(self) -> u64 {
         self.executor_catalog_payload_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn generation_catalog_payload_byte_length(self) -> u64 {
         self.generation_catalog_payload_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn resident_phase_catalog_payload_byte_length(self) -> u64 {
         self.resident_phase_catalog_payload_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn transcript_persistent_payload_byte_length(self) -> u64 {
         self.transcript_persistent_payload_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn transcript_transient_payload_byte_length(self) -> u64 {
         self.transcript_transient_payload_byte_length
     }
@@ -2867,6 +2946,7 @@ impl CommonProofResidentMemoryPhasePlan {
         self.phase
     }
 
+    #[cfg(test)]
     pub(crate) const fn infrastructure_payload_accounting(
         &self,
     ) -> CommonProofResidentInfrastructurePayloadAccounting {
@@ -2877,50 +2957,57 @@ impl CommonProofResidentMemoryPhasePlan {
         self.relation_polynomial_working_set_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn auxiliary_trace_workspace_byte_length(&self) -> u64 {
         self.auxiliary_trace_workspace_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn replay_polynomial_byte_length(&self) -> u64 {
         self.replay_polynomial_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn primary_vector_byte_length(&self) -> u64 {
         self.primary_vector_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn secondary_vector_byte_length(&self) -> u64 {
         self.secondary_vector_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn claim_and_query_metadata_byte_length(&self) -> u64 {
         self.claim_and_query_metadata_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn relation_rotation_block_byte_length(&self) -> u64 {
         self.relation_rotation_block_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn external_working_set_byte_length(&self) -> u64 {
         self.external_working_set_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn external_transaction_overlap_peak_byte_length(&self) -> u64 {
         self.external_transaction_overlap_peak_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn subphase_transient_peak_byte_length(&self) -> u64 {
         self.subphase_transient_peak_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn query_prefetch_byte_length(&self) -> u64 {
         self.query_prefetch_byte_length
     }
 
-    pub(crate) const fn output_fragment_byte_length(&self) -> u64 {
-        self.output_fragment_byte_length
-    }
-
+    #[cfg(test)]
     pub(crate) const fn stream_window_byte_length(&self) -> u64 {
         self.stream_window_byte_length
     }
@@ -2934,6 +3021,33 @@ impl CommonProofResidentMemoryPhasePlan {
 pub(crate) struct CommonProofResidentMemoryPlan {
     phases: Vec<CommonProofResidentMemoryPhasePlan>,
     peak_byte_length: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct CommonProofResidentMemoryConfiguration {
+    application_statement_schema_identifier: u16,
+    canonical_header_payload_byte_length: u64,
+    maximum_prefetched_query_byte_length: u64,
+    external_memory_write_chunk_byte_length: u64,
+    maximum_stream_window_byte_length: u64,
+}
+
+impl CommonProofResidentMemoryConfiguration {
+    pub(crate) const fn new(
+        application_statement_schema_identifier: u16,
+        canonical_header_payload_byte_length: u64,
+        maximum_prefetched_query_byte_length: u64,
+        external_memory_write_chunk_byte_length: u64,
+        maximum_stream_window_byte_length: u64,
+    ) -> Self {
+        Self {
+            application_statement_schema_identifier,
+            canonical_header_payload_byte_length,
+            maximum_prefetched_query_byte_length,
+            external_memory_write_chunk_byte_length,
+            maximum_stream_window_byte_length,
+        }
+    }
 }
 
 impl CommonProofResidentMemoryPlan {
@@ -3512,12 +3626,15 @@ fn derive_common_proof_resident_memory_plan(
     transcript_schedule: &CommonProofTranscriptSchedule,
     catalog: &CompleteProofTreeCatalog,
     storage_plan: &GeneratedCommonProofStoragePlan,
-    application_statement_schema_identifier: u16,
-    canonical_header_payload_byte_length: u64,
-    maximum_prefetched_query_byte_length: u64,
-    external_memory_write_chunk_byte_length: u64,
-    maximum_stream_window_byte_length: u64,
+    configuration: CommonProofResidentMemoryConfiguration,
 ) -> Result<CommonProofResidentMemoryPlan, CommonProofProverError> {
+    let CommonProofResidentMemoryConfiguration {
+        application_statement_schema_identifier,
+        canonical_header_payload_byte_length,
+        maximum_prefetched_query_byte_length,
+        external_memory_write_chunk_byte_length,
+        maximum_stream_window_byte_length,
+    } = configuration;
     if maximum_prefetched_query_byte_length == 0
         || external_memory_write_chunk_byte_length == 0
         || maximum_stream_window_byte_length == 0
@@ -4023,19 +4140,16 @@ fn derive_common_proof_resident_memory_plan(
 /// Derives the exact selected liveness requirement before applying the
 /// absolute WebAssembly safety bound. Development accounting uses this to
 /// report a concrete overage instead of replacing it with an opaque failure.
+#[cfg(test)]
 pub(crate) fn common_proof_resident_memory_requirement(
     variant: &RelationPlanVariant,
     relation_context: &RelationPlanCheckContext,
     transcript_schedule: &CommonProofTranscriptSchedule,
     catalog: &CompleteProofTreeCatalog,
-    application_statement_schema_identifier: u16,
-    canonical_header_payload_byte_length: u64,
-    maximum_prefetched_query_byte_length: u64,
-    external_memory_write_chunk_byte_length: u64,
-    maximum_stream_window_byte_length: u64,
+    configuration: CommonProofResidentMemoryConfiguration,
 ) -> Result<CommonProofResidentMemoryPlan, CommonProofProverError> {
     let external_memory_write_chunk_byte_length_u32 =
-        u32::try_from(external_memory_write_chunk_byte_length)
+        u32::try_from(configuration.external_memory_write_chunk_byte_length)
             .map_err(|_| CommonProofProverError::CountOverflow)?;
     let storage_plan = generated_common_proof_storage_plan(
         variant,
@@ -4055,11 +4169,7 @@ pub(crate) fn common_proof_resident_memory_requirement(
         transcript_schedule,
         catalog,
         &storage_plan,
-        application_statement_schema_identifier,
-        canonical_header_payload_byte_length,
-        maximum_prefetched_query_byte_length,
-        external_memory_write_chunk_byte_length,
-        maximum_stream_window_byte_length,
+        configuration,
     )
 }
 
@@ -4069,11 +4179,7 @@ pub(crate) fn common_proof_resident_memory_plan(
     transcript_schedule: &CommonProofTranscriptSchedule,
     catalog: &CompleteProofTreeCatalog,
     storage_plan: &GeneratedCommonProofStoragePlan,
-    application_statement_schema_identifier: u16,
-    canonical_header_payload_byte_length: u64,
-    maximum_prefetched_query_byte_length: u64,
-    external_memory_write_chunk_byte_length: u64,
-    maximum_stream_window_byte_length: u64,
+    configuration: CommonProofResidentMemoryConfiguration,
 ) -> Result<CommonProofResidentMemoryPlan, CommonProofProverError> {
     let plan = derive_common_proof_resident_memory_plan(
         variant,
@@ -4081,11 +4187,7 @@ pub(crate) fn common_proof_resident_memory_plan(
         transcript_schedule,
         catalog,
         storage_plan,
-        application_statement_schema_identifier,
-        canonical_header_payload_byte_length,
-        maximum_prefetched_query_byte_length,
-        external_memory_write_chunk_byte_length,
-        maximum_stream_window_byte_length,
+        configuration,
     )?;
     if plan.peak_byte_length() > MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH {
         return Err(CommonProofProverError::ResidentMemoryLimitExceeded);

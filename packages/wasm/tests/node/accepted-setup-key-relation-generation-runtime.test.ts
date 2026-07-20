@@ -45,18 +45,23 @@ const boundaryMocks = vi.hoisted(() => {
         generatedConsumptionOutcomes,
         openGenerationAdapter: vi.fn(() => Object.freeze({})),
         releaseGenerationAdapter: vi.fn(),
-        runGeneration: vi.fn(async (_adapter: unknown, openExecution: (description: unknown) => unknown) => {
-            const execution = (await openExecution(Object.freeze({}))) as {
-                options?: unknown;
-                outputStore: unknown;
-            };
-            return Object.freeze({
-                generatedCapability,
-                options: execution.options,
-                outputChunkByteLengths: Object.freeze([2]),
-                outputStore: execution.outputStore,
-            });
-        }),
+        runGeneration: vi.fn(
+            async (
+                _adapter: unknown,
+                openExecution: (description: unknown) => unknown,
+            ) => {
+                const execution = (await openExecution(Object.freeze({}))) as {
+                    options?: unknown;
+                    outputStore: unknown;
+                };
+                return Object.freeze({
+                    generatedCapability,
+                    options: execution.options,
+                    outputChunkByteLengths: Object.freeze([2]),
+                    outputStore: execution.outputStore,
+                });
+            },
+        ),
         verifyGeneratedPublicKeyShare: vi.fn(
             (
                 _input: unknown,
@@ -81,30 +86,33 @@ vi.mock('#packages/wasm/src/setup-generation-recipient-payload', () => ({
 vi.mock(
     '#packages/wasm/src/local-storage-root-worker-kernel/worker-kernel',
     () => ({
-        withClosedWorkerProductionOperationAuthority: async (
+        withClosedWorkerProductionOperationAuthority: (
             workerKernel: { kernel: TranscriptCoreKernel },
             _productionOperationIdentifiers: unknown,
             operation: (authority: unknown) => unknown,
         ) =>
-            operation(
-                Object.freeze({
-                    withExactKernelAuthorization: <Result>(
-                        callback: (authorization: unknown) => Result,
-                    ): Result =>
-                        callback(
-                            Object.freeze({
-                                actionRandomnessContext:
-                                    boundaryMocks.activeContext.value,
-                                actionRandomnessHandle: 13,
-                                kernel: workerKernel.kernel,
-                                stateReservationCapabilityMemory:
-                                    boundaryMocks.activeContext.value?.memory,
-                                stateReservationCapabilityPointer: 128,
-                                stateReservationHandle: 15,
-                                stateVerifierSessionHandle: 16,
-                            }),
-                        ),
-                }),
+            Promise.resolve().then(() =>
+                operation(
+                    Object.freeze({
+                        withExactKernelAuthorization: <Result>(
+                            callback: (authorization: unknown) => Result,
+                        ): Result =>
+                            callback(
+                                Object.freeze({
+                                    actionRandomnessContext:
+                                        boundaryMocks.activeContext.value,
+                                    actionRandomnessHandle: 13,
+                                    kernel: workerKernel.kernel,
+                                    stateReservationCapabilityMemory:
+                                        boundaryMocks.activeContext.value
+                                            ?.memory,
+                                    stateReservationCapabilityPointer: 128,
+                                    stateReservationHandle: 15,
+                                    stateVerifierSessionHandle: 16,
+                                }),
+                            ),
+                    }),
+                ),
             ),
     }),
 );

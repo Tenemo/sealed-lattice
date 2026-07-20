@@ -405,10 +405,6 @@ pub(crate) struct RelationConstraintDescriptor {
 }
 
 impl RelationConstraintDescriptor {
-    pub(crate) fn numerator_postfix_expression(&self) -> &[RelationExpressionInstruction] {
-        &self.numerator_postfix_expression
-    }
-
     pub(super) fn resident_owned_payload_byte_length(&self) -> Result<u64, RelationPlanError> {
         let expression_payload_byte_length = |expression: &RelationExpressionInstruction| {
             expression.resident_owned_payload_byte_length()

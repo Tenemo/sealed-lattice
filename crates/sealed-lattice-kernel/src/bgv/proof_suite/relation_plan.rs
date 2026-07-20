@@ -56,16 +56,16 @@ pub(crate) use layout::{
 pub(crate) use model::{
     BoundTreeConstructionKind, BoundTreeRootUse, ModulusCatalog, ProofPrivacyMode,
     RelationChallengeRole, RelationColumnDescriptor, RelationColumnOrigin, RelationColumnValueType,
-    RelationElementKind, RelationEmbeddingKind, RelationPlanError, RelationRadixFactorDescriptor,
-    RelationSelectorPathStep, RelationTreeDescriptor, RelationValueLayout, RelationVerifierSource,
-    SelectorPathStepKind, SuiteModulusReference, apply_negacyclic_automorphism,
-    negacyclic_automorphism_mapping_values, radix_decompose_scaled_residues,
+    RelationElementKind, RelationEmbeddingKind, RelationPlanError, RelationSelectorPathStep,
+    RelationTreeDescriptor, RelationValueLayout, RelationVerifierSource, SelectorPathStepKind,
+    SuiteModulusReference, apply_negacyclic_automorphism, negacyclic_automorphism_mapping_values,
+    radix_decompose_scaled_residues,
 };
 #[cfg(test)]
 pub(crate) use model::{
     RelationChallengeModulusSelector, RelationChallengeSampling,
-    RelationRadixConvolutionDescriptor, RelationRadixProductTermDescriptor,
-    negacyclic_automorphism_semantics_match,
+    RelationRadixConvolutionDescriptor, RelationRadixFactorDescriptor,
+    RelationRadixProductTermDescriptor, negacyclic_automorphism_semantics_match,
 };
 mod checking;
 mod expressions;
@@ -119,35 +119,48 @@ pub(crate) use ballot_validity_adapter::{
     BallotValidityBoundPublicMaterial, BallotValidityCiphertextReadback,
     BallotValidityCiphertextStreamDecoder, BallotValidityGenerationPreparationError,
     BallotValidityPreparedProofAttempt, BallotValidityVerifiedColumnEvaluator,
+};
+#[cfg(test)]
+pub(crate) use ballot_validity_adapter::{
     SelectedBallotValidityCarrierBufferAccounting,
     selected_ballot_validity_carrier_buffer_accounting,
 };
 pub(crate) use collective_public_key_adapter::{
     CollectivePublicKeySetupPolynomialSource, CollectivePublicKeySourcePolynomialProvider,
+};
+#[cfg(test)]
+pub(crate) use collective_public_key_adapter::{
     CollectivePublicKeySourceProviderMemoryAccounting,
     collective_public_key_source_provider_memory_accounting,
 };
 pub(crate) use committed_material::{
     CommittedMaterialRelationPlanInput, CommittedMaterialTraceWitnessProvider,
     CommittedMaterialTraceWitnessStructureMemoryAccounting,
-    aggregate_threshold_share_trace_witness_structure_memory_accounting,
     derive_aggregate_threshold_share_trace_witness_provider,
     derive_vss_share_linkage_trace_witness_provider,
+};
+#[cfg(test)]
+pub(crate) use committed_material::{
+    aggregate_threshold_share_trace_witness_structure_memory_accounting,
     vss_share_linkage_trace_witness_structure_memory_accounting,
 };
+pub(crate) use committed_material_adapter::CommittedMaterialSourcePolynomialAdapter;
+#[cfg(test)]
 pub(crate) use committed_material_adapter::{
-    CommittedMaterialSourcePolynomialAdapter, CommittedMaterialSourceProviderMemoryAccounting,
+    CommittedMaterialSourceProviderMemoryAccounting,
     aggregate_threshold_share_source_provider_memory_accounting,
     vss_share_linkage_source_provider_memory_accounting,
 };
 #[cfg(test)]
+pub(crate) use galois_key_share_adapter::galois_key_share_source_provider_memory_accounting;
+#[cfg(test)]
 pub(crate) use galois_key_share_adapter::galois_key_share_topology_comparison_memory_accounting;
 pub(crate) use galois_key_share_adapter::{
-    GaloisKeyShareSourcePolynomialAdapter, galois_key_share_source_provider_memory_accounting,
-    galois_relation_tree_inputs,
+    GaloisKeyShareSourcePolynomialAdapter, galois_relation_tree_inputs,
 };
 pub(crate) use interpreter::{
-    CheckedRelationApplicationChallenges, RelationApplicationChallengeAssignment,
+    CheckedRelationApplicationChallenges, DeepCompositionVerificationInput,
+    RelationApplicationChallengeAssignment,
 };
 pub(crate) use key_relation::{PublicKeyShareRelationPlanInput, SameSecretRelationPlanInput};
 pub(crate) use public_aggregate::{
@@ -161,15 +174,17 @@ pub(crate) use public_key_share::{
     PublicKeyShareSourceLayout, compile_public_key_share_relation_plan,
     compile_public_key_share_relation_with_source_layout,
 };
+#[cfg(test)]
+pub(crate) use relinearization_round_one_adapter::relinearization_round_one_source_provider_memory_accounting;
 pub(crate) use relinearization_round_one_adapter::{
     RelinearizationRoundOneSourcePolynomialAdapter, relinearization_round_one_relation_tree_inputs,
-    relinearization_round_one_source_provider_memory_accounting,
 };
 pub(crate) use relinearization_round_one_aggregate_adapter::prepare_relinearization_round_one_aggregate_source;
+#[cfg(test)]
+pub(crate) use relinearization_round_two_adapter::relinearization_round_two_source_provider_memory_accounting;
 pub(crate) use relinearization_round_two_adapter::{
     RelinearizationRoundTwoAuthenticatedAggregateSourcePlan,
     RelinearizationRoundTwoSourcePolynomialAdapter, relinearization_round_two_relation_tree_inputs,
-    relinearization_round_two_source_provider_memory_accounting,
 };
 pub(crate) use same_secret_anchor::{
     SameSecretSourceLayout, compile_same_secret_relation_plan,
@@ -177,18 +192,19 @@ pub(crate) use same_secret_anchor::{
 };
 pub(crate) use setup_key_relation_adapter::{
     SetupKeyRelationSourcePolynomialAdapter, public_key_share_relation_tree_inputs,
-    public_key_share_source_provider_memory_accounting, same_secret_relation_tree_inputs,
-    same_secret_source_provider_memory_accounting,
+    same_secret_relation_tree_inputs,
 };
 #[cfg(test)]
-pub(crate) use target_release::TargetReleaseWitness;
+pub(crate) use setup_key_relation_adapter::{
+    public_key_share_source_provider_memory_accounting,
+    same_secret_source_provider_memory_accounting,
+};
 pub(crate) use target_release::{
     CompiledTargetReleaseRelation, TargetReleaseModulusWitness, TargetReleaseRelationPlanInput,
     TargetReleaseRoleWitness, TargetReleaseSourcePolynomialAdapter,
     TargetReleaseVerifiedColumnEvaluator, TargetReleaseWitnessError, TargetReleaseWitnessSource,
     TargetReleaseWitnessSourceMemoryAccounting, VerifiedTargetReleaseModulusInput,
     VerifiedTargetReleaseProof, compile_target_release_relation,
-    selected_target_release_source_provider_memory_accounting,
 };
 #[cfg(test)]
 pub(crate) use trustee_evaluation_key::compile_galois_key_share_relation_topology_comparison;

@@ -7,7 +7,9 @@
 use std::collections::BTreeMap;
 
 use num_bigint::{BigInt, BigUint};
-use num_traits::{One, Signed, Zero};
+#[cfg(test)]
+use num_traits::Signed;
+use num_traits::{One, Zero};
 
 use crate::{
     bgv::{
@@ -56,14 +58,6 @@ impl SymbolicCiphertextBound {
             minimum_decryption_margin: state.minimum_margin,
         }
     }
-
-    pub(crate) fn final_decryption_margin(&self) -> BigInt {
-        decryption_margin(
-            self.level,
-            &self.message_coefficient_bound,
-            &self.error_coefficient_bound,
-        )
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -84,6 +78,7 @@ impl DirectBallotTargetNoiseBound {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn every_decryption_margin_is_positive(&self) -> bool {
         self.target_identifier
             .minimum_decryption_margin
@@ -402,10 +397,7 @@ fn evaluate_selected_stream(
                 participant_count,
             )?),
             EvaluatorOpcode::NormalizeDecryptionMultiplier => Some(inputs[0].clone()),
-            EvaluatorOpcode::CiphertextAdd | EvaluatorOpcode::CiphertextSubtract => {
-                Some(inputs[0].add(inputs[1])?)
-            }
-            EvaluatorOpcode::CiphertextNegate => Some(inputs[0].clone()),
+            EvaluatorOpcode::CiphertextAdd => Some(inputs[0].add(inputs[1])?),
             EvaluatorOpcode::PlaintextAdd => {
                 Some(inputs[0].plaintext_add(instruction_constant(instruction, constants_by_hash)?))
             }

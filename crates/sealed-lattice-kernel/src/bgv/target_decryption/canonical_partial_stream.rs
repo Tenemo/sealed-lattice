@@ -100,6 +100,7 @@ impl<'bytes> CanonicalTargetPartialDecryptionStream<'bytes> {
         })
     }
 
+    #[cfg(test)]
     pub(crate) const fn canonical_bytes(self) -> &'bytes [u8] {
         self.canonical_bytes
     }

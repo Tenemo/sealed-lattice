@@ -1539,8 +1539,83 @@ impl CommittedMaterialTraceWitnessProvider {
         )
     }
 
+    #[cfg(test)]
     pub(crate) fn ordered_column_ordinals(&self) -> impl ExactSizeIterator<Item = u32> + '_ {
         self.ordered_recipes.iter().map(|(ordinal, _)| *ordinal)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn representative_aggregate_projection_digit_and_quotient_column_ordinals(
+        &self,
+    ) -> Result<[u32; 3], RelationPlanError> {
+        fn contains_bound_material_digit(source: &CommittedMaterialIntegerRecipe) -> bool {
+            match source {
+                CommittedMaterialIntegerRecipe::Packed {
+                    ordered_lane_sources,
+                } => ordered_lane_sources
+                    .iter()
+                    .any(contains_bound_material_digit),
+                CommittedMaterialIntegerRecipe::BoundDigit { .. } => true,
+                _ => false,
+            }
+        }
+
+        fn contains_aggregate_quotient(source: &CommittedMaterialIntegerRecipe) -> bool {
+            match source {
+                CommittedMaterialIntegerRecipe::Packed {
+                    ordered_lane_sources,
+                } => ordered_lane_sources.iter().any(contains_aggregate_quotient),
+                CommittedMaterialIntegerRecipe::AggregateQuotient { .. } => true,
+                _ => false,
+            }
+        }
+
+        let projection_column_ordinal = self
+            .ordered_recipes
+            .iter()
+            .find_map(|(column_ordinal, recipe)| match recipe {
+                CommittedMaterialColumnRecipe::Integer(
+                    source @ CommittedMaterialIntegerRecipe::Packed { .. },
+                ) if contains_bound_material_digit(source) => Some(*column_ordinal),
+                _ => None,
+            })
+            .ok_or(RelationPlanError::InvalidColumn)?;
+        let digit_column_ordinal = self
+            .ordered_recipes
+            .iter()
+            .find_map(|(column_ordinal, recipe)| match recipe {
+                CommittedMaterialColumnRecipe::TernaryDigit { source, .. }
+                    if contains_bound_material_digit(source) =>
+                {
+                    Some(*column_ordinal)
+                }
+                _ => None,
+            })
+            .ok_or(RelationPlanError::InvalidColumn)?;
+        let quotient_column_ordinal = self
+            .ordered_recipes
+            .iter()
+            .find_map(|(column_ordinal, recipe)| match recipe {
+                CommittedMaterialColumnRecipe::Integer(source)
+                    if contains_aggregate_quotient(source) =>
+                {
+                    Some(*column_ordinal)
+                }
+                _ => None,
+            })
+            .ok_or(RelationPlanError::InvalidColumn)?;
+        let representative_ordinals = [
+            projection_column_ordinal,
+            digit_column_ordinal,
+            quotient_column_ordinal,
+        ];
+        if representative_ordinals[0] == representative_ordinals[1]
+            || representative_ordinals[0] == representative_ordinals[2]
+            || representative_ordinals[1] == representative_ordinals[2]
+        {
+            return Err(RelationPlanError::DuplicateItem);
+        }
+        Ok(representative_ordinals)
     }
 
     pub(crate) fn trace_value(
@@ -2310,6 +2385,7 @@ fn derive_vss_share_linkage_trace_witness_layout(
     })
 }
 
+#[cfg(test)]
 pub(crate) fn vss_share_linkage_trace_witness_structure_memory_accounting(
     input: &CommittedMaterialRelationPlanInput,
     context: &RelationPlanCheckContext,
@@ -2410,6 +2486,7 @@ fn derive_aggregate_threshold_share_trace_witness_layout(
     })
 }
 
+#[cfg(test)]
 pub(crate) fn aggregate_threshold_share_trace_witness_structure_memory_accounting(
     input: &CommittedMaterialRelationPlanInput,
     context: &RelationPlanCheckContext,

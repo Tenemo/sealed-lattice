@@ -5,8 +5,8 @@ use crate::{
         evaluator::{
             engine::{
                 Ciphertext, add_plaintext_coefficients, ciphertext_add, ciphertext_canonical_bytes,
-                ciphertext_negate, ciphertext_sub, ciphertext_tensor, modulus_switch,
-                modulus_switch_to, normalize_scaling, plaintext_mul,
+                ciphertext_tensor, modulus_switch, modulus_switch_to, normalize_scaling,
+                plaintext_mul,
             },
             replay::{
                 EvaluatorKeyStoreReadRequest, VerifiedEvaluatorKeyReplay,
@@ -37,6 +37,40 @@ use super::{
     EvaluatorProgramSet, selected_evaluator_program_set,
 };
 
+/// Exact context copied from the positively verified ballots and aggregate
+/// object before the aggregate authority is constructed.
+pub(crate) struct VerifiedEvaluatorAggregateContext {
+    protocol_version: u16,
+    suite_identifier: [u8; Hash512::BYTE_LENGTH],
+    ceremony_context_hash: [u8; Hash512::BYTE_LENGTH],
+    action_context_hash: [u8; Hash512::BYTE_LENGTH],
+    roster_hash: [u8; Hash512::BYTE_LENGTH],
+    verified_setup_source_hash: [u8; Hash512::BYTE_LENGTH],
+    verified_aggregate_source_hash: [u8; Hash512::BYTE_LENGTH],
+}
+
+impl VerifiedEvaluatorAggregateContext {
+    pub(in crate::bgv::evaluator) const fn from_verified_sources(
+        protocol_version: u16,
+        suite_identifier: [u8; Hash512::BYTE_LENGTH],
+        ceremony_context_hash: [u8; Hash512::BYTE_LENGTH],
+        action_context_hash: [u8; Hash512::BYTE_LENGTH],
+        roster_hash: [u8; Hash512::BYTE_LENGTH],
+        verified_setup_source_hash: [u8; Hash512::BYTE_LENGTH],
+        verified_aggregate_source_hash: [u8; Hash512::BYTE_LENGTH],
+    ) -> Self {
+        Self {
+            protocol_version,
+            suite_identifier,
+            ceremony_context_hash,
+            action_context_hash,
+            roster_hash,
+            verified_setup_source_hash,
+            verified_aggregate_source_hash,
+        }
+    }
+}
+
 /// Verifier-owned aggregate input for the deterministic evaluator. Its
 /// constructor lives with the accepted ballot aggregation bridge; detached
 /// ciphertext bytes and copied hashes cannot create this capability.
@@ -48,20 +82,13 @@ pub(crate) struct VerifiedEvaluatorAggregate {
     roster_hash: [u8; Hash512::BYTE_LENGTH],
     verified_setup_source_hash: [u8; Hash512::BYTE_LENGTH],
     verified_aggregate_source_hash: [u8; Hash512::BYTE_LENGTH],
-    ballot_count: u16,
     top_count: u16,
     aggregate_ciphertext: Ciphertext,
 }
 
 impl VerifiedEvaluatorAggregate {
     pub(in crate::bgv::evaluator) fn from_verified_ballot_aggregate(
-        protocol_version: u16,
-        suite_identifier: [u8; Hash512::BYTE_LENGTH],
-        ceremony_context_hash: [u8; Hash512::BYTE_LENGTH],
-        action_context_hash: [u8; Hash512::BYTE_LENGTH],
-        roster_hash: [u8; Hash512::BYTE_LENGTH],
-        verified_setup_source_hash: [u8; Hash512::BYTE_LENGTH],
-        verified_aggregate_source_hash: [u8; Hash512::BYTE_LENGTH],
+        context: VerifiedEvaluatorAggregateContext,
         ballot_count: u16,
         top_count: u16,
         aggregate_ciphertext: Ciphertext,
@@ -75,14 +102,13 @@ impl VerifiedEvaluatorAggregate {
             return Err(RefusalReason::OutsideSupportedProfile);
         }
         Ok(Self {
-            protocol_version,
-            suite_identifier,
-            ceremony_context_hash,
-            action_context_hash,
-            roster_hash,
-            verified_setup_source_hash,
-            verified_aggregate_source_hash,
-            ballot_count,
+            protocol_version: context.protocol_version,
+            suite_identifier: context.suite_identifier,
+            ceremony_context_hash: context.ceremony_context_hash,
+            action_context_hash: context.action_context_hash,
+            roster_hash: context.roster_hash,
+            verified_setup_source_hash: context.verified_setup_source_hash,
+            verified_aggregate_source_hash: context.verified_aggregate_source_hash,
             top_count,
             aggregate_ciphertext,
         })
@@ -96,7 +122,7 @@ pub(crate) enum SelectedEvaluatorExecutionProgress {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub(super) enum PreparedEvaluatorKeyIdentity {
+enum PreparedEvaluatorKeyIdentity {
     Relinearization {
         catalog_level: usize,
     },
@@ -146,7 +172,7 @@ impl PreparedEvaluatorKeyIdentity {
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(super) struct SelectedEvaluatorExecutionAccounting {
+struct SelectedEvaluatorExecutionAccounting {
     key_operation_count: usize,
     key_load_count: usize,
     key_store_read_byte_count: u64,
@@ -156,51 +182,10 @@ pub(super) struct SelectedEvaluatorExecutionAccounting {
     maximum_live_ciphertext_coefficient_byte_count: u64,
 }
 
-impl SelectedEvaluatorExecutionAccounting {
-    pub(super) const fn key_operation_count(self) -> usize {
-        self.key_operation_count
-    }
-
-    pub(super) const fn key_load_count(self) -> usize {
-        self.key_load_count
-    }
-
-    pub(super) const fn key_store_read_byte_count(self) -> u64 {
-        self.key_store_read_byte_count
-    }
-
-    pub(super) const fn key_store_reread_byte_count(self) -> u64 {
-        self.key_store_reread_byte_count
-    }
-
-    pub(super) const fn key_ntt_transform_count(self) -> usize {
-        self.key_ntt_transform_count
-    }
-
-    pub(super) const fn maximum_live_ciphertext_count(self) -> usize {
-        self.maximum_live_ciphertext_count
-    }
-
-    pub(super) const fn maximum_live_ciphertext_coefficient_byte_count(self) -> u64 {
-        self.maximum_live_ciphertext_coefficient_byte_count
-    }
-}
-
-pub(super) struct PreparedEvaluatorExecutionSchedule {
+struct PreparedEvaluatorExecutionSchedule {
     required_keys: Box<[Option<PreparedEvaluatorKeyIdentity>]>,
     next_required_keys: Box<[Option<PreparedEvaluatorKeyIdentity>]>,
     accounting: SelectedEvaluatorExecutionAccounting,
-    #[cfg(test)]
-    liveness_peak: PreparedEvaluatorLivenessPeak,
-}
-
-#[cfg(test)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) struct PreparedEvaluatorLivenessPeak {
-    pub(super) instruction_ordinal: usize,
-    pub(super) opcode: EvaluatorOpcode,
-    pub(super) live_ciphertext_count: usize,
-    pub(super) live_ciphertext_coefficient_byte_count: u64,
 }
 
 struct PendingEvaluatorKeyLoad {
@@ -216,7 +201,7 @@ impl PreparedEvaluatorExecutionSchedule {
     /// resident. The first different key ends the phase. This makes the
     /// canonical stream, its register numbering, and every last-use drop the
     /// complete dependency proof for the prepared schedule.
-    pub(super) fn derive(instructions: &[EvaluatorInstruction]) -> Result<Self, RefusalReason> {
+    fn derive(instructions: &[EvaluatorInstruction]) -> Result<Self, RefusalReason> {
         if instructions.is_empty() {
             return Err(RefusalReason::WrongTypeOrLength);
         }
@@ -233,9 +218,6 @@ impl PreparedEvaluatorExecutionSchedule {
             ciphertext_coefficient_byte_count(SELECTED_EVALUATOR_WORKING_LEVEL)?;
         let mut maximum_live_ciphertext_coefficient_byte_count =
             live_ciphertext_coefficient_byte_count;
-        #[cfg(test)]
-        let mut liveness_peak = None;
-
         for instruction in instructions {
             for register in instruction.input_registers() {
                 let register_index = usize::try_from(*register)
@@ -312,15 +294,6 @@ impl PreparedEvaluatorExecutionSchedule {
                 {
                     maximum_live_ciphertext_coefficient_byte_count =
                         live_ciphertext_coefficient_byte_count;
-                    #[cfg(test)]
-                    {
-                        liveness_peak = Some(PreparedEvaluatorLivenessPeak {
-                            instruction_ordinal: required_keys.len() - 1,
-                            opcode: instruction.opcode(),
-                            live_ciphertext_count,
-                            live_ciphertext_coefficient_byte_count,
-                        });
-                    }
                 }
             }
         }
@@ -390,12 +363,10 @@ impl PreparedEvaluatorExecutionSchedule {
             required_keys: required_keys.into_boxed_slice(),
             next_required_keys: next_required_keys.into_boxed_slice(),
             accounting,
-            #[cfg(test)]
-            liveness_peak: liveness_peak.ok_or(RefusalReason::WrongTypeOrLength)?,
         })
     }
 
-    pub(super) fn required_key(
+    fn required_key(
         &self,
         instruction_ordinal: usize,
     ) -> Result<Option<PreparedEvaluatorKeyIdentity>, RefusalReason> {
@@ -415,13 +386,8 @@ impl PreparedEvaluatorExecutionSchedule {
             .ok_or(RefusalReason::WrongTypeOrLength)
     }
 
-    pub(super) const fn accounting(&self) -> SelectedEvaluatorExecutionAccounting {
+    const fn accounting(&self) -> SelectedEvaluatorExecutionAccounting {
         self.accounting
-    }
-
-    #[cfg(test)]
-    pub(super) const fn liveness_peak(&self) -> PreparedEvaluatorLivenessPeak {
-        self.liveness_peak
     }
 }
 
@@ -451,11 +417,10 @@ fn prepared_instruction_output_level(
             Ok(Some(target_level))
         }
         EvaluatorOpcode::NormalizeDecryptionMultiplier
-        | EvaluatorOpcode::CiphertextNegate
         | EvaluatorOpcode::PlaintextAdd
         | EvaluatorOpcode::PlaintextMultiply
         | EvaluatorOpcode::GaloisRotate => Ok(Some(input_level(0)?)),
-        EvaluatorOpcode::CiphertextAdd | EvaluatorOpcode::CiphertextSubtract => {
+        EvaluatorOpcode::CiphertextAdd => {
             let left_level = input_level(0)?;
             if input_level(1)? != left_level {
                 return Err(RefusalReason::WrongTypeOrLength);
@@ -525,7 +490,6 @@ pub(crate) struct SelectedEvaluatorProgramExecution {
     roster_hash: [u8; Hash512::BYTE_LENGTH],
     verified_setup_source_hash: [u8; Hash512::BYTE_LENGTH],
     verified_aggregate_source_hash: [u8; Hash512::BYTE_LENGTH],
-    ballot_count: u16,
     top_count: u16,
     refusal_reason: Option<RefusalReason>,
 }
@@ -616,7 +580,6 @@ impl SelectedEvaluatorProgramExecution {
             roster_hash: aggregate.roster_hash,
             verified_setup_source_hash: aggregate.verified_setup_source_hash,
             verified_aggregate_source_hash: aggregate.verified_aggregate_source_hash,
-            ballot_count: aggregate.ballot_count,
             top_count,
             refusal_reason: None,
         })
@@ -837,16 +800,10 @@ impl SelectedEvaluatorProgramExecution {
             roster_hash: self.roster_hash,
             verified_setup_source_hash: self.verified_setup_source_hash,
             verified_aggregate_source_hash: self.verified_aggregate_source_hash,
-            ballot_count: self.ballot_count,
             top_count: self.top_count,
             target_identifier,
             target_order,
         })
-    }
-
-    #[cfg(test)]
-    pub(super) const fn execution_accounting(&self) -> SelectedEvaluatorExecutionAccounting {
-        self.execution_accounting
     }
 
     fn selected_instructions(&self) -> Result<&[EvaluatorInstruction], RefusalReason> {
@@ -883,17 +840,6 @@ impl SelectedEvaluatorProgramExecution {
                     self.input_register(instruction, 1)?,
                 )
                 .map_err(evaluator_refusal)?,
-            ),
-            EvaluatorOpcode::CiphertextSubtract => Some(
-                ciphertext_sub(
-                    self.input_register(instruction, 0)?,
-                    self.input_register(instruction, 1)?,
-                )
-                .map_err(evaluator_refusal)?,
-            ),
-            EvaluatorOpcode::CiphertextNegate => Some(
-                ciphertext_negate(self.input_register(instruction, 0)?)
-                    .map_err(evaluator_refusal)?,
             ),
             EvaluatorOpcode::PlaintextAdd => {
                 let plaintext = self.constant_coefficients(instruction)?;
@@ -1078,29 +1024,12 @@ pub(crate) struct VerifiedSelectedEvaluatorExecution {
     roster_hash: [u8; Hash512::BYTE_LENGTH],
     verified_setup_source_hash: [u8; Hash512::BYTE_LENGTH],
     verified_aggregate_source_hash: [u8; Hash512::BYTE_LENGTH],
-    ballot_count: u16,
     top_count: u16,
     target_identifier: Ciphertext,
     target_order: Ciphertext,
 }
 
 impl VerifiedSelectedEvaluatorExecution {
-    pub(crate) const fn ballot_count(&self) -> u16 {
-        self.ballot_count
-    }
-
-    pub(crate) const fn top_count(&self) -> u16 {
-        self.top_count
-    }
-
-    pub(crate) const fn target_identifier(&self) -> &Ciphertext {
-        &self.target_identifier
-    }
-
-    pub(crate) const fn target_order(&self) -> &Ciphertext {
-        &self.target_order
-    }
-
     /// Prepares the exact deterministic replay carrier from recomputed output
     /// streams. The large ciphertexts remain inside Rust and are discarded
     /// after their verifier-owned summaries have been retained.

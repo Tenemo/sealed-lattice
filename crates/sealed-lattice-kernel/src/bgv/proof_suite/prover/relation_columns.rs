@@ -12,7 +12,6 @@ use super::{
     RelationMaskKind, RelationMaskTargetClass, RelationPlanCheckContext, RelationPlanVariant,
     RelationTreeDescriptor, StreamingHash512, SuiteModulusReference, Zeroizing,
     evaluate_extension_at, trim_base_polynomial, trim_extension_polynomial,
-    validate_column_polynomials,
 };
 
 const SOURCE_REPLAY_IDENTITY_AGGREGATE_DOMAIN: &str =
@@ -132,22 +131,6 @@ impl CommonProofSourcePolynomialRequestContext {
             schedule_position,
             top_count,
         }
-    }
-
-    pub(crate) const fn protocol_version(self) -> u16 {
-        self.protocol_version
-    }
-
-    pub(crate) const fn suite_identifier(self) -> [u8; 64] {
-        self.suite_identifier
-    }
-
-    pub(crate) const fn application_statement_schema_identifier(self) -> u16 {
-        self.application_statement_schema_identifier
-    }
-
-    pub(crate) const fn application_statement_hash(self) -> [u8; 64] {
-        self.application_statement_hash
     }
 
     pub(crate) const fn relation_plan_hash(self) -> [u8; 64] {
@@ -296,14 +279,12 @@ impl CommonProofAuthenticatedSourceReadRequest {
         self.request_identity
     }
 
-    pub(crate) const fn stable_generation_binding_hash(self) -> [u8; 64] {
-        self.stable_generation_binding_hash
-    }
-
+    #[cfg(test)]
     pub(crate) const fn source_catalog_binding(self) -> [u8; 64] {
         self.source_catalog_binding
     }
 
+    #[cfg(test)]
     pub(crate) const fn source_descriptor_binding(self) -> [u8; 64] {
         self.source_descriptor_binding
     }
@@ -417,10 +398,20 @@ impl ProvidedCommonProofSourcePolynomial {
             replay_identity,
         }
     }
+
+    #[cfg(test)]
+    pub(crate) fn into_parts_for_test(
+        self,
+    ) -> (
+        CommonProofSourcePolynomial,
+        CommonProofSourcePolynomialReplayIdentity,
+    ) {
+        (self.polynomial, self.replay_identity)
+    }
 }
 
 pub(crate) enum CommonProofSourcePolynomialProviderPoll {
-    AuthenticatedSourceReadRequired(CommonProofAuthenticatedSourceReadRequest),
+    AuthenticatedSourceReadRequired,
     Ready(ProvidedCommonProofSourcePolynomial),
 }
 
@@ -484,6 +475,17 @@ pub(crate) trait CommonProofSourcePolynomialProvider {
         &mut self,
         request: CommonProofSourcePolynomialRequest<'_>,
     ) -> Result<CommonProofSourcePolynomialProviderPoll, CommonProofProverError>;
+
+    /// Returns the exact request represented by the most recent
+    /// `AuthenticatedSourceReadRequired` poll. Keeping the request in provider
+    /// state avoids copying the large request through each nested poll enum or
+    /// introducing a separately allocated request that would need additional
+    /// resident-memory accounting.
+    fn pending_authenticated_source_read_request(
+        &self,
+    ) -> Result<Option<CommonProofAuthenticatedSourceReadRequest>, CommonProofProverError> {
+        Ok(None)
+    }
 
     fn supply_authenticated_source_range(
         &mut self,
@@ -609,6 +611,7 @@ impl CommonProofSourcePolynomial {
         Self::Base(coefficients)
     }
 
+    #[cfg(test)]
     pub(crate) fn from_extension_coefficients(
         coefficients: Vec<ProofChallengeExtensionElement>,
     ) -> Self {
@@ -700,7 +703,7 @@ pub(crate) struct CommonProofPreChallengeSourceCursor {
 }
 
 pub(crate) enum CommonProofPreChallengeSourcePoll {
-    AuthenticatedSourceReadRequired(CommonProofAuthenticatedSourceReadRequest),
+    AuthenticatedSourceReadRequired,
     Ready {
         column_ordinal: u32,
         polynomial: CommonProofSourcePolynomial,
@@ -793,10 +796,8 @@ impl CommonProofPreChallengeSourceCursor {
             .map_err(CommonProofPrivateCoinError::Prover)?
         {
             CommonProofSourcePolynomialProviderPoll::Ready(provided) => provided,
-            CommonProofSourcePolynomialProviderPoll::AuthenticatedSourceReadRequired(request) => {
-                return Ok(
-                    CommonProofPreChallengeSourcePoll::AuthenticatedSourceReadRequired(request),
-                );
+            CommonProofSourcePolynomialProviderPoll::AuthenticatedSourceReadRequired => {
+                return Ok(CommonProofPreChallengeSourcePoll::AuthenticatedSourceReadRequired);
             }
         };
         validate_source_column(descriptor, &source, variant.trace_domain_size())
@@ -1200,7 +1201,7 @@ where
             .map_err(CommonProofPrivateCoinError::Prover)?
         {
             CommonProofSourcePolynomialProviderPoll::Ready(provided) => provided,
-            CommonProofSourcePolynomialProviderPoll::AuthenticatedSourceReadRequired(_) => {
+            CommonProofSourcePolynomialProviderPoll::AuthenticatedSourceReadRequired => {
                 return Err(CommonProofPrivateCoinError::Prover(
                     CommonProofProverError::InvalidInput,
                 ));
@@ -1528,24 +1529,6 @@ pub(crate) fn base_trace_rows(
         .map_err(CommonProofProverError::from)
 }
 
-fn ensure_base_trace_rows(
-    columns: &[Option<CommonProofSourcePolynomial>],
-    trace_rows_by_column: &mut BTreeMap<u32, ProtectedBaseTraceRows>,
-    column_ordinal: u32,
-    trace_domain: ProofEvaluationDomain,
-) -> Result<(), CommonProofProverError> {
-    if trace_rows_by_column.contains_key(&column_ordinal) {
-        return Ok(());
-    }
-    let source = columns
-        .get(usize::try_from(column_ordinal).map_err(|_| CommonProofProverError::CountOverflow)?)
-        .and_then(Option::as_ref)
-        .ok_or(CommonProofProverError::InvalidColumn)?;
-    let rows = base_trace_rows(source, trace_domain)?;
-    trace_rows_by_column.insert(column_ordinal, rows);
-    Ok(())
-}
-
 fn integer_lift_theta(
     variant: &RelationPlanVariant,
     context: &RelationPlanCheckContext,
@@ -1569,147 +1552,6 @@ fn integer_lift_theta(
         return Err(CommonProofProverError::InvalidColumn);
     }
     ProofBaseFieldElement::from_canonical(value).map_err(CommonProofProverError::from)
-}
-
-#[allow(clippy::too_many_arguments)]
-fn synthesize_negacyclic_automorphism_permutation<Coins>(
-    variant: &RelationPlanVariant,
-    descriptor: &RelationIntegerLiftNegacyclicAutomorphismPermutationDescriptor,
-    theta: ProofBaseFieldElement,
-    tree_roles: &BTreeMap<u32, ProofTreeRole>,
-    trace_masks: &BTreeMap<u32, RelationMaskDescriptor>,
-    columns: &mut [Option<CommonProofSourcePolynomial>],
-    trace_rows_by_column: &mut BTreeMap<u32, ProtectedBaseTraceRows>,
-    trace_domain: ProofEvaluationDomain,
-    coins: &mut Coins,
-    maximum_candidate_draws_per_output: u32,
-) -> Result<(), CommonProofPrivateCoinError<Coins::Error>>
-where
-    Coins: CommonProofPrivateCoinSource,
-{
-    let input_columns = [
-        descriptor.source_low_column_ordinal,
-        descriptor.source_high_column_ordinal,
-        descriptor.target_low_column_ordinal,
-        descriptor.target_high_column_ordinal,
-        descriptor.mapped_low_position_column_ordinal,
-        descriptor.low_negation_bit_column_ordinal,
-        descriptor.mapped_high_position_column_ordinal,
-        descriptor.high_negation_bit_column_ordinal,
-        descriptor.target_low_position_column_ordinal,
-        descriptor.target_high_position_column_ordinal,
-    ];
-    for column_ordinal in input_columns {
-        ensure_base_trace_rows(columns, trace_rows_by_column, column_ordinal, trace_domain)
-            .map_err(CommonProofPrivateCoinError::Prover)?;
-    }
-    let rows = |column_ordinal| {
-        trace_rows_by_column.get(&column_ordinal).ok_or_else(|| {
-            CommonProofPrivateCoinError::Prover(CommonProofProverError::InvalidColumn)
-        })
-    };
-    let source_low_rows = rows(descriptor.source_low_column_ordinal)?;
-    let source_high_rows = rows(descriptor.source_high_column_ordinal)?;
-    let target_low_rows = rows(descriptor.target_low_column_ordinal)?;
-    let target_high_rows = rows(descriptor.target_high_column_ordinal)?;
-    let mapped_low_position_rows = rows(descriptor.mapped_low_position_column_ordinal)?;
-    let low_negation_bit_rows = rows(descriptor.low_negation_bit_column_ordinal)?;
-    let mapped_high_position_rows = rows(descriptor.mapped_high_position_column_ordinal)?;
-    let high_negation_bit_rows = rows(descriptor.high_negation_bit_column_ordinal)?;
-    let target_low_position_rows = rows(descriptor.target_low_position_column_ordinal)?;
-    let target_high_position_rows = rows(descriptor.target_high_position_column_ordinal)?;
-    let row_count = trace_domain.size();
-    if input_columns.iter().any(|column_ordinal| {
-        trace_rows_by_column
-            .get(column_ordinal)
-            .is_none_or(|column_rows| column_rows.len() != row_count)
-    }) {
-        return Err(CommonProofPrivateCoinError::Prover(
-            CommonProofProverError::InvalidColumn,
-        ));
-    }
-    let one = ProofBaseFieldElement::ONE;
-    let two = one.add(one);
-    let three = two.add(one);
-    let encoded_source = |position: ProofBaseFieldElement,
-                          negation_bit: ProofBaseFieldElement,
-                          value: ProofBaseFieldElement| {
-        position
-            .multiply(three)
-            .add(one)
-            .add(value.subtract(negation_bit.multiply(two).multiply(value)))
-    };
-    let encoded_target = |position: ProofBaseFieldElement, value: ProofBaseFieldElement| {
-        position.multiply(three).add(one).add(value)
-    };
-    let mut source_before_rows = Zeroizing::new(Vec::with_capacity(row_count));
-    let mut source_low_product_rows = Zeroizing::new(Vec::with_capacity(row_count));
-    let mut target_before_rows = Zeroizing::new(Vec::with_capacity(row_count));
-    let mut target_low_product_rows = Zeroizing::new(Vec::with_capacity(row_count));
-    let mut source_before = one;
-    let mut target_before = one;
-    for row_ordinal in 0..row_count {
-        source_before_rows.push(source_before);
-        target_before_rows.push(target_before);
-        let source_low_factor = theta.subtract(encoded_source(
-            mapped_low_position_rows[row_ordinal],
-            low_negation_bit_rows[row_ordinal],
-            source_low_rows[row_ordinal],
-        ));
-        let source_low_product = source_before.multiply(source_low_factor);
-        source_low_product_rows.push(source_low_product);
-        let target_low_factor = theta.subtract(encoded_target(
-            target_low_position_rows[row_ordinal],
-            target_low_rows[row_ordinal],
-        ));
-        let target_low_product = target_before.multiply(target_low_factor);
-        target_low_product_rows.push(target_low_product);
-        let source_high_factor = theta.subtract(encoded_source(
-            mapped_high_position_rows[row_ordinal],
-            high_negation_bit_rows[row_ordinal],
-            source_high_rows[row_ordinal],
-        ));
-        let target_high_factor = theta.subtract(encoded_target(
-            target_high_position_rows[row_ordinal],
-            target_high_rows[row_ordinal],
-        ));
-        source_before = source_low_product.multiply(source_high_factor);
-        target_before = target_low_product.multiply(target_high_factor);
-    }
-    let auxiliary_trace_row_context = AuxiliaryTraceRowInsertionContext::new(
-        variant,
-        tree_roles,
-        trace_masks,
-        trace_domain,
-        maximum_candidate_draws_per_output,
-    );
-    for (column_ordinal, synthesized_rows) in [
-        (
-            descriptor.source_product_before_column_ordinal,
-            source_before_rows,
-        ),
-        (
-            descriptor.source_low_product_column_ordinal,
-            source_low_product_rows,
-        ),
-        (
-            descriptor.target_product_before_column_ordinal,
-            target_before_rows,
-        ),
-        (
-            descriptor.target_low_product_column_ordinal,
-            target_low_product_rows,
-        ),
-    ] {
-        insert_auxiliary_trace_rows(
-            auxiliary_trace_row_context,
-            columns,
-            column_ordinal,
-            synthesized_rows,
-            coins,
-        )?;
-    }
-    Ok(())
 }
 
 pub(super) fn prefix_evaluation_rows(
@@ -1763,34 +1605,6 @@ impl<'relation> AuxiliaryTraceRowInsertionContext<'relation> {
             maximum_candidate_draws_per_output,
         }
     }
-}
-
-fn insert_auxiliary_trace_rows<Coins>(
-    context: AuxiliaryTraceRowInsertionContext<'_>,
-    columns: &mut [Option<CommonProofSourcePolynomial>],
-    column_ordinal: u32,
-    rows: ProtectedBaseTraceRows,
-    coins: &mut Coins,
-) -> Result<(), CommonProofPrivateCoinError<Coins::Error>>
-where
-    Coins: CommonProofPrivateCoinSource,
-{
-    let column_index = usize::try_from(column_ordinal)
-        .map_err(|_| CommonProofPrivateCoinError::Prover(CommonProofProverError::CountOverflow))?;
-    if columns
-        .get(column_index)
-        .ok_or(CommonProofPrivateCoinError::Prover(
-            CommonProofProverError::InvalidColumn,
-        ))?
-        .is_some()
-    {
-        return Err(CommonProofPrivateCoinError::Prover(
-            CommonProofProverError::InvalidColumn,
-        ));
-    }
-    let constructed = construct_auxiliary_relation_column(context, column_ordinal, rows, coins)?;
-    columns[column_index] = Some(constructed);
-    Ok(())
 }
 
 fn construct_auxiliary_relation_column<Coins>(
@@ -1889,39 +1703,6 @@ fn signed_linear_term_row(
     Ok(if term.negative { value.negate() } else { value })
 }
 
-fn integer_lift_linear_evaluation_rows(
-    context: &RelationPlanCheckContext,
-    component: &RelationIntegerLiftComponentDescriptor,
-    theta: ProofBaseFieldElement,
-    columns: &[Option<CommonProofSourcePolynomial>],
-    trace_rows_by_column: &mut BTreeMap<u32, ProtectedBaseTraceRows>,
-    trace_domain: ProofEvaluationDomain,
-) -> Result<ProtectedBaseTraceRows, CommonProofProverError> {
-    for term in &component.ordered_linear_terms {
-        ensure_base_trace_rows(
-            columns,
-            trace_rows_by_column,
-            term.column_ordinal,
-            trace_domain,
-        )?;
-    }
-    let mut coefficient_rows =
-        Zeroizing::new(vec![ProofBaseFieldElement::ZERO; trace_domain.size()]);
-    for row_ordinal in 0..trace_domain.size() {
-        let mut coefficient = ProofBaseFieldElement::ZERO;
-        for term in &component.ordered_linear_terms {
-            coefficient = coefficient.add(signed_linear_term_row(
-                term,
-                row_ordinal,
-                context,
-                trace_rows_by_column,
-            )?);
-        }
-        coefficient_rows[row_ordinal] = coefficient;
-    }
-    Ok(suffix_evaluation_rows(&coefficient_rows, theta))
-}
-
 pub(super) fn product_accumulator_rows(
     product_rows: &[ProofBaseFieldElement],
 ) -> ProtectedBaseTraceRows {
@@ -1958,6 +1739,7 @@ pub(super) fn convolution_transpose_rows(
                     .subtract(wrap_factor.multiply(multiplicand_rows[row_ordinal]));
             }
         }
+        #[cfg(test)]
         RelationIntegerLiftConvolutionKind::OrdinaryLowHalf => {
             transpose_rows[last] = suffix_rows[0];
             for row_ordinal in (0..last).rev() {
@@ -1966,6 +1748,7 @@ pub(super) fn convolution_transpose_rows(
                     .subtract(theta_to_row_count.multiply(multiplicand_rows[row_ordinal + 1]));
             }
         }
+        #[cfg(test)]
         RelationIntegerLiftConvolutionKind::OrdinaryHighHalf => {
             transpose_rows[last] = ProofBaseFieldElement::ZERO;
             for row_ordinal in (0..last).rev() {
@@ -1975,110 +1758,6 @@ pub(super) fn convolution_transpose_rows(
         }
     }
     Ok(transpose_rows)
-}
-
-#[allow(clippy::too_many_arguments)]
-fn synthesize_convolution_product<Coins>(
-    variant: &RelationPlanVariant,
-    product: &RelationIntegerLiftConvolutionProductDescriptor,
-    theta: ProofBaseFieldElement,
-    tree_roles: &BTreeMap<u32, ProofTreeRole>,
-    trace_masks: &BTreeMap<u32, RelationMaskDescriptor>,
-    columns: &mut [Option<CommonProofSourcePolynomial>],
-    trace_rows_by_column: &mut BTreeMap<u32, ProtectedBaseTraceRows>,
-    product_sum_rows: &mut [ProofBaseFieldElement],
-    trace_domain: ProofEvaluationDomain,
-    coins: &mut Coins,
-    maximum_candidate_draws_per_output: u32,
-) -> Result<(), CommonProofPrivateCoinError<Coins::Error>>
-where
-    Coins: CommonProofPrivateCoinSource,
-{
-    ensure_base_trace_rows(
-        columns,
-        trace_rows_by_column,
-        product.multiplicand_column_ordinal,
-        trace_domain,
-    )
-    .map_err(CommonProofPrivateCoinError::Prover)?;
-    ensure_base_trace_rows(
-        columns,
-        trace_rows_by_column,
-        product.reversed_multiplier_column_ordinal,
-        trace_domain,
-    )
-    .map_err(CommonProofPrivateCoinError::Prover)?;
-    let offset = base_field_constant(product.multiplier_offset)
-        .map_err(CommonProofPrivateCoinError::Prover)?;
-    let (suffix_rows, transpose_rows, contribution_rows) = {
-        let multiplicand_rows = trace_rows_by_column
-            .get(&product.multiplicand_column_ordinal)
-            .ok_or_else(|| {
-                CommonProofPrivateCoinError::Prover(CommonProofProverError::InvalidColumn)
-            })?;
-        let reversed_multiplier_rows = trace_rows_by_column
-            .get(&product.reversed_multiplier_column_ordinal)
-            .ok_or_else(|| {
-                CommonProofPrivateCoinError::Prover(CommonProofProverError::InvalidColumn)
-            })?;
-        let suffix_rows = suffix_evaluation_rows(multiplicand_rows, theta);
-        let transpose_rows = convolution_transpose_rows(
-            product.convolution_kind,
-            multiplicand_rows,
-            &suffix_rows,
-            theta,
-        )
-        .map_err(CommonProofPrivateCoinError::Prover)?;
-        let contribution_rows = Zeroizing::new(
-            transpose_rows
-                .iter()
-                .copied()
-                .zip(reversed_multiplier_rows.iter().copied())
-                .map(|(transpose, reversed_multiplier)| {
-                    let value = transpose.multiply(reversed_multiplier.subtract(offset));
-                    if product.negative {
-                        value.negate()
-                    } else {
-                        value
-                    }
-                })
-                .collect::<Vec<_>>(),
-        );
-        (suffix_rows, transpose_rows, contribution_rows)
-    };
-    if contribution_rows.len() != product_sum_rows.len() {
-        return Err(CommonProofPrivateCoinError::Prover(
-            CommonProofProverError::InvalidColumn,
-        ));
-    }
-    for (accumulated, contribution) in product_sum_rows
-        .iter_mut()
-        .zip(contribution_rows.iter().copied())
-    {
-        *accumulated = accumulated.add(contribution);
-    }
-    let auxiliary_trace_row_context = AuxiliaryTraceRowInsertionContext::new(
-        variant,
-        tree_roles,
-        trace_masks,
-        trace_domain,
-        maximum_candidate_draws_per_output,
-    );
-    insert_auxiliary_trace_rows(
-        auxiliary_trace_row_context,
-        columns,
-        product.suffix_evaluation_column_ordinal,
-        suffix_rows,
-        coins,
-    )?;
-    insert_auxiliary_trace_rows(
-        auxiliary_trace_row_context,
-        columns,
-        product.reversed_transpose_column_ordinal,
-        transpose_rows,
-        coins,
-    )?;
-    Ok(())
 }
 
 pub(super) fn full_ring_transpose_rows(
@@ -2126,153 +1805,6 @@ pub(super) fn full_ring_transpose_rows(
         };
     }
     Ok(transpose_rows)
-}
-
-#[allow(clippy::too_many_arguments)]
-fn synthesize_full_ring_product<Coins>(
-    variant: &RelationPlanVariant,
-    product: &RelationIntegerLiftFullRingNegacyclicProductDescriptor,
-    theta: ProofBaseFieldElement,
-    tree_roles: &BTreeMap<u32, ProofTreeRole>,
-    trace_masks: &BTreeMap<u32, RelationMaskDescriptor>,
-    columns: &mut [Option<CommonProofSourcePolynomial>],
-    trace_rows_by_column: &mut BTreeMap<u32, ProtectedBaseTraceRows>,
-    product_sum_rows: &mut [ProofBaseFieldElement],
-    trace_domain: ProofEvaluationDomain,
-    coins: &mut Coins,
-    maximum_candidate_draws_per_output: u32,
-) -> Result<(), CommonProofPrivateCoinError<Coins::Error>>
-where
-    Coins: CommonProofPrivateCoinSource,
-{
-    for column_ordinal in [
-        product.multiplicand_low_column_ordinal,
-        product.multiplicand_high_column_ordinal,
-        product.reversed_multiplier_low_column_ordinal,
-        product.reversed_multiplier_high_column_ordinal,
-    ] {
-        ensure_base_trace_rows(columns, trace_rows_by_column, column_ordinal, trace_domain)
-            .map_err(CommonProofPrivateCoinError::Prover)?;
-    }
-    let low_offset = base_field_constant(product.multiplier_low_offset)
-        .map_err(CommonProofPrivateCoinError::Prover)?;
-    let high_offset = base_field_constant(product.multiplier_high_offset)
-        .map_err(CommonProofPrivateCoinError::Prover)?;
-    let (
-        low_suffix_rows,
-        high_suffix_rows,
-        low_transpose_rows,
-        high_transpose_rows,
-        contribution_rows,
-    ) = {
-        let multiplicand_low_rows = trace_rows_by_column
-            .get(&product.multiplicand_low_column_ordinal)
-            .ok_or_else(|| {
-                CommonProofPrivateCoinError::Prover(CommonProofProverError::InvalidColumn)
-            })?;
-        let multiplicand_high_rows = trace_rows_by_column
-            .get(&product.multiplicand_high_column_ordinal)
-            .ok_or_else(|| {
-                CommonProofPrivateCoinError::Prover(CommonProofProverError::InvalidColumn)
-            })?;
-        let reversed_multiplier_low_rows = trace_rows_by_column
-            .get(&product.reversed_multiplier_low_column_ordinal)
-            .ok_or_else(|| {
-                CommonProofPrivateCoinError::Prover(CommonProofProverError::InvalidColumn)
-            })?;
-        let reversed_multiplier_high_rows = trace_rows_by_column
-            .get(&product.reversed_multiplier_high_column_ordinal)
-            .ok_or_else(|| {
-                CommonProofPrivateCoinError::Prover(CommonProofProverError::InvalidColumn)
-            })?;
-        let low_suffix_rows = suffix_evaluation_rows(multiplicand_low_rows, theta);
-        let high_suffix_rows = suffix_evaluation_rows(multiplicand_high_rows, theta);
-        let low_transpose_rows = full_ring_transpose_rows(
-            product.selected_half,
-            true,
-            multiplicand_low_rows,
-            multiplicand_high_rows,
-            &low_suffix_rows,
-            &high_suffix_rows,
-            theta,
-        )
-        .map_err(CommonProofPrivateCoinError::Prover)?;
-        let high_transpose_rows = full_ring_transpose_rows(
-            product.selected_half,
-            false,
-            multiplicand_low_rows,
-            multiplicand_high_rows,
-            &low_suffix_rows,
-            &high_suffix_rows,
-            theta,
-        )
-        .map_err(CommonProofPrivateCoinError::Prover)?;
-        let mut contribution_rows = Zeroizing::new(Vec::with_capacity(trace_domain.size()));
-        for row_ordinal in 0..trace_domain.size() {
-            let low_product = low_transpose_rows[row_ordinal]
-                .multiply(reversed_multiplier_low_rows[row_ordinal].subtract(low_offset));
-            let high_product = high_transpose_rows[row_ordinal]
-                .multiply(reversed_multiplier_high_rows[row_ordinal].subtract(high_offset));
-            let value = low_product.add(high_product);
-            contribution_rows.push(if product.negative {
-                value.negate()
-            } else {
-                value
-            });
-        }
-        (
-            low_suffix_rows,
-            high_suffix_rows,
-            low_transpose_rows,
-            high_transpose_rows,
-            contribution_rows,
-        )
-    };
-    if contribution_rows.len() != product_sum_rows.len() {
-        return Err(CommonProofPrivateCoinError::Prover(
-            CommonProofProverError::InvalidColumn,
-        ));
-    }
-    for (accumulated, contribution) in product_sum_rows
-        .iter_mut()
-        .zip(contribution_rows.iter().copied())
-    {
-        *accumulated = accumulated.add(contribution);
-    }
-    let auxiliary_trace_row_context = AuxiliaryTraceRowInsertionContext::new(
-        variant,
-        tree_roles,
-        trace_masks,
-        trace_domain,
-        maximum_candidate_draws_per_output,
-    );
-    for (column_ordinal, rows) in [
-        (
-            product.multiplicand_low_suffix_evaluation_column_ordinal,
-            low_suffix_rows,
-        ),
-        (
-            product.multiplicand_high_suffix_evaluation_column_ordinal,
-            high_suffix_rows,
-        ),
-        (
-            product.reversed_multiplier_low_transpose_column_ordinal,
-            low_transpose_rows,
-        ),
-        (
-            product.reversed_multiplier_high_transpose_column_ordinal,
-            high_transpose_rows,
-        ),
-    ] {
-        insert_auxiliary_trace_rows(
-            auxiliary_trace_row_context,
-            columns,
-            column_ordinal,
-            rows,
-            coins,
-        )?;
-    }
-    Ok(())
 }
 
 #[derive(Clone)]
@@ -2537,68 +2069,8 @@ impl CommonProofAuxiliaryColumnSynthesisCursor {
         Ok(())
     }
 
-    /// Supplies already recovered trace rows to deterministic auxiliary
-    /// replay. Application extraction uses this path so it does not duplicate
-    /// the prover's descriptor interpreter or retain another polynomial copy.
-    pub(crate) fn accept_input_trace_rows(
-        &mut self,
-        column_ordinal: u32,
-        rows: &[ProofBaseFieldElement],
-    ) -> Result<(), CommonProofProverError> {
-        if self.next_input_column_ordinal() != Some(column_ordinal)
-            || rows.len() != self.trace_domain.size()
-        {
-            return Err(CommonProofProverError::InvalidColumn);
-        }
-        if self
-            .input_trace_rows
-            .insert(column_ordinal, Zeroizing::new(rows.to_vec()))
-            .is_some()
-        {
-            return Err(CommonProofProverError::InvalidColumn);
-        }
-        self.next_input_index = self
-            .next_input_index
-            .checked_add(1)
-            .ok_or(CommonProofProverError::CountOverflow)?;
-        Ok(())
-    }
-
     pub(crate) fn has_pending_output(&self) -> bool {
         !self.pending_output_rows.is_empty()
-    }
-
-    pub(crate) fn pending_output_column_ordinal(&self) -> Option<u32> {
-        self.pending_output_rows
-            .first()
-            .map(|(column_ordinal, _)| *column_ordinal)
-    }
-
-    #[cfg(test)]
-    pub(crate) fn pending_unmasked_output_rows(&self) -> Option<(u32, &[ProofBaseFieldElement])> {
-        self.pending_output_rows
-            .first()
-            .map(|(column_ordinal, rows)| (*column_ordinal, rows.as_slice()))
-    }
-
-    /// Compares one extracted auxiliary column before proof-owned masking.
-    /// Trace-mask multiples have already vanished when the extracted
-    /// polynomial is reduced to trace rows.
-    pub(crate) fn compare_next_unmasked_output(
-        &mut self,
-        column_ordinal: u32,
-        extracted_rows: &[ProofBaseFieldElement],
-    ) -> Result<(), CommonProofProverError> {
-        let Some((expected_column_ordinal, expected_rows)) = self.pending_output_rows.first()
-        else {
-            return Err(CommonProofProverError::InvalidColumn);
-        };
-        if *expected_column_ordinal != column_ordinal || expected_rows.as_slice() != extracted_rows
-        {
-            return Err(CommonProofProverError::InvalidColumn);
-        }
-        self.pending_output_rows.remove(0);
-        Ok(())
     }
 
     pub(crate) fn advance_ready_task(&mut self) -> Result<bool, CommonProofProverError> {
@@ -2841,15 +2313,14 @@ impl CommonProofAuxiliaryColumnSynthesisCursor {
             AuxiliaryColumnSynthesisTask::LinearEvaluation { descriptor, theta } => {
                 let mut coefficient_rows =
                     vec![ProofBaseFieldElement::ZERO; self.trace_domain.size()];
-                for row_ordinal in 0..self.trace_domain.size() {
+                for (row_ordinal, coefficient) in coefficient_rows.iter_mut().enumerate() {
                     for term in &descriptor.ordered_linear_terms {
-                        coefficient_rows[row_ordinal] =
-                            coefficient_rows[row_ordinal].add(signed_linear_term_row(
-                                term,
-                                row_ordinal,
-                                &self.relation_context,
-                                &self.input_trace_rows,
-                            )?);
+                        *coefficient = coefficient.add(signed_linear_term_row(
+                            term,
+                            row_ordinal,
+                            &self.relation_context,
+                            &self.input_trace_rows,
+                        )?);
                     }
                 }
                 Ok(vec![(
@@ -2901,30 +2372,6 @@ impl CommonProofAuxiliaryColumnSynthesisCursor {
             && self.input_trace_rows.is_empty()
             && self.pending_output_rows.is_empty()
             && self.component_product_sum_rows.is_none()
-    }
-
-    pub(crate) fn maximum_live_trace_vector_count(&self) -> Result<u64, CommonProofProverError> {
-        let mut maximum = 0_u64;
-        for task in &self.tasks {
-            let input_count = u64::try_from(task.input_column_ordinals().len())
-                .map_err(|_| CommonProofProverError::CountOverflow)?;
-            let output_count = u64::try_from(task.output_column_ordinals().len())
-                .map_err(|_| CommonProofProverError::CountOverflow)?;
-            let component_accumulator_count = u64::from(matches!(
-                task,
-                AuxiliaryColumnSynthesisTask::ConvolutionProduct { .. }
-                    | AuxiliaryColumnSynthesisTask::FullRingProduct { .. }
-                    | AuxiliaryColumnSynthesisTask::LinearEvaluation { .. }
-                    | AuxiliaryColumnSynthesisTask::ProductAccumulator { .. }
-            ));
-            maximum = maximum.max(
-                input_count
-                    .checked_add(output_count)
-                    .and_then(|count| count.checked_add(component_accumulator_count))
-                    .ok_or(CommonProofProverError::CountOverflow)?,
-            );
-        }
-        Ok(maximum)
     }
 }
 

@@ -37,6 +37,10 @@ use super::super::{
     SetupPublicPolynomialContext, SetupPublicPolynomialRootRole, SetupPublicPolynomialTree,
     StatementOwnedProofTreeInput, VerifiedEvaluatorAuxiliaryRoot,
 };
+#[cfg(test)]
+use super::trustee_evaluation_key::{
+    GaloisKeyShareRelationPlanInput, compile_galois_key_share_relation_with_source_layout,
+};
 use super::{
     BoundTreeConstructionKind, RelationBoundCertificate, RelationColumnOrigin,
     RelationIntegerLiftCoefficient, RelationIntegerLiftFullRingHalf,
@@ -48,10 +52,7 @@ use super::{
 use super::{
     key_relation::{EXACT_INTEGER_LIFT_RADIX, SplitIntegerVector},
     setup_key_relation_adapter::setup_key_relation_derivation_transient_byte_length_with_dependencies,
-    trustee_evaluation_key::{
-        GaloisKeyShareRelationPlanInput, GaloisKeyShareSourceLayout,
-        TrusteeEvaluationKeyRelationGeometry, compile_galois_key_share_relation_with_source_layout,
-    },
+    trustee_evaluation_key::{GaloisKeyShareSourceLayout, TrusteeEvaluationKeyRelationGeometry},
 };
 use crate::bgv::setup::{
     SetupGenerationAuthorityHandle, SetupGenerationGaloisApplication,
@@ -112,48 +113,14 @@ pub(crate) struct GaloisKeyShareSourceProviderMemoryAccounting {
 }
 
 impl GaloisKeyShareSourceProviderMemoryAccounting {
-    pub(crate) const fn galois_entry_count(self) -> u64 {
-        self.galois_entry_count
-    }
-
-    pub(crate) const fn maximum_selected_catalog_level(self) -> u64 {
-        self.maximum_selected_catalog_level
-    }
-
-    pub(crate) const fn maximum_component_wire_byte_length(self) -> u64 {
-        self.maximum_component_wire_byte_length
-    }
-
-    pub(crate) const fn maximum_component_resident_byte_length(self) -> u64 {
-        self.maximum_component_resident_byte_length
-    }
-
-    pub(crate) const fn retained_canonical_component_byte_length(self) -> u64 {
-        self.retained_canonical_component_byte_length
-    }
-
-    pub(crate) const fn retained_centered_error_byte_length(self) -> u64 {
-        self.retained_centered_error_byte_length
-    }
-
-    pub(crate) const fn retained_anchor_source_byte_length(self) -> u64 {
-        self.retained_anchor_source_byte_length
-    }
-
+    #[cfg(test)]
     pub(crate) const fn retained_original_source_byte_length(self) -> u64 {
         self.retained_original_source_byte_length
     }
 
-    pub(crate) const fn generated_source_summary_byte_length(self) -> u64 {
-        self.generated_source_summary_byte_length
-    }
-
+    #[cfg(test)]
     pub(crate) const fn adapter_retained_byte_length(self) -> u64 {
         self.adapter_retained_byte_length
-    }
-
-    pub(crate) const fn cached_quotient_byte_length(self) -> u64 {
-        self.cached_quotient_byte_length
     }
 
     pub(crate) const fn loading_persistent_resident_byte_length(self) -> u64 {
@@ -172,32 +139,14 @@ impl GaloisKeyShareSourceProviderMemoryAccounting {
         self.maximum_returned_source_polynomial_byte_length
     }
 
-    pub(crate) const fn preparation_decoded_component_byte_length(self) -> u64 {
-        self.preparation_decoded_component_byte_length
-    }
-
-    pub(crate) const fn preparation_tree_coefficient_copy_byte_length(self) -> u64 {
-        self.preparation_tree_coefficient_copy_byte_length
-    }
-
-    pub(crate) const fn preparation_extension_column_byte_length(self) -> u64 {
-        self.preparation_extension_column_byte_length
-    }
-
-    pub(crate) const fn preparation_merkle_level_byte_length(self) -> u64 {
-        self.preparation_merkle_level_byte_length
-    }
-
+    #[cfg(test)]
     pub(crate) const fn preparation_tree_workspace_byte_length(self) -> u64 {
         self.preparation_tree_workspace_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn preparation_peak_resident_byte_length(self) -> u64 {
         self.preparation_peak_resident_byte_length
-    }
-
-    pub(crate) const fn preparation_canonical_component_read_byte_length(self) -> u64 {
-        self.preparation_canonical_component_read_byte_length
     }
 }
 
@@ -1166,6 +1115,7 @@ pub(crate) fn galois_key_share_topology_comparison_memory_accounting(
     )
 }
 
+#[cfg(test)]
 pub(crate) fn galois_key_share_source_provider_memory_accounting(
     input: &GaloisKeyShareRelationPlanInput,
     relation_plan_variant: &RelationPlanVariant,

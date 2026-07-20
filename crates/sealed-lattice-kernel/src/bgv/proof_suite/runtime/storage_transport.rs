@@ -8,17 +8,6 @@ use super::{
     Zeroizing, hash_framed_parts_512,
 };
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct CommonProofRuntimeCancellation {
-    pub(super) cancellation_requested: bool,
-}
-
-impl super::super::ProofCancellation for CommonProofRuntimeCancellation {
-    fn cancellation_requested(&self) -> bool {
-        self.cancellation_requested
-    }
-}
-
 /// One transaction pass of a pollable external-memory operation. Recording
 /// yields an owned request. Supplying the browser's read results changes the
 /// same object into an exact replay pass; the caller resets it only after the
@@ -56,6 +45,7 @@ impl CommonProofStorageTransactionRuntime {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn storage(&mut self) -> &mut Self {
         self
     }
@@ -309,7 +299,6 @@ pub(crate) enum PollableCommonProofByteSinkError {
     ByteLengthExceeded,
     ReplayMismatch,
     AllocationLimitExceeded,
-    CanonicalStream,
 }
 
 struct PendingOutputWrite {

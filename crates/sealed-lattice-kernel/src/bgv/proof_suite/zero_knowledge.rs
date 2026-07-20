@@ -49,6 +49,7 @@ pub(crate) enum TraceMaskObservationCoordinate {
 /// that the suite allocates enough independent mask coefficients.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct TraceMaskObservationCoordinateCatalog {
+    #[cfg(test)]
     column_ordinal: u32,
     challenge_extension_degree: u16,
     coordinates: Vec<TraceMaskObservationCoordinate>,
@@ -137,12 +138,14 @@ impl TraceMaskObservationCoordinateCatalog {
         }
 
         Ok(Self {
+            #[cfg(test)]
             column_ordinal,
             challenge_extension_degree,
             coordinates,
         })
     }
 
+    #[cfg(test)]
     pub(crate) const fn column_ordinal(&self) -> u32 {
         self.column_ordinal
     }
@@ -175,8 +178,11 @@ impl TraceMaskObservationCoordinateCatalog {
 /// is suite-generation state, not proof output.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct TraceMaskSurjectivityCertificate {
+    #[cfg(test)]
     mask_coefficient_count: u64,
+    #[cfg(test)]
     evaluation_image_rank_ceiling: u64,
+    #[cfg(test)]
     proof_view_count: u32,
 }
 
@@ -209,21 +215,27 @@ impl TraceMaskSurjectivityCertificate {
             return Err(RelationPlanError::InvalidMaskGrammar);
         }
         Ok(Self {
+            #[cfg(test)]
             mask_coefficient_count,
+            #[cfg(test)]
             evaluation_image_rank_ceiling,
+            #[cfg(test)]
             proof_view_count: u32::try_from(catalogs.len())
                 .map_err(|_| RelationPlanError::CountOverflow)?,
         })
     }
 
+    #[cfg(test)]
     pub(crate) const fn mask_coefficient_count(self) -> u64 {
         self.mask_coefficient_count
     }
 
+    #[cfg(test)]
     pub(crate) const fn evaluation_image_rank_ceiling(self) -> u64 {
         self.evaluation_image_rank_ceiling
     }
 
+    #[cfg(test)]
     pub(crate) const fn proof_view_count(self) -> u32 {
         self.proof_view_count
     }

@@ -3,7 +3,7 @@
 //!
 //! Canonical statements and every witness source are derived from retained
 //! setup-generation authority. JavaScript receives only the generic prover
-//! adapter and an opaque retained source for the canonical public statement.
+//! adapter and an opaque retained handle for the statement lifecycle.
 
 use core::slice;
 use std::{cell::RefCell, collections::BTreeMap};
@@ -111,14 +111,9 @@ struct SelectedSetupKeyRelationProofRuntimePlan {
     proof_query_count: u32,
 }
 
-struct SetupKeyRelationGenerationStatementSource {
-    family: SetupKeyRelationProofFamily,
-    canonical_application_statement_bytes: Box<[u8]>,
-}
-
 struct SetupKeyRelationGenerationStatementSourceRegistry {
     next_handle: u32,
-    sources: BTreeMap<u32, SetupKeyRelationGenerationStatementSource>,
+    sources: BTreeMap<u32, ()>,
 }
 
 impl Default for SetupKeyRelationGenerationStatementSourceRegistry {
@@ -131,10 +126,7 @@ impl Default for SetupKeyRelationGenerationStatementSourceRegistry {
 }
 
 impl SetupKeyRelationGenerationStatementSourceRegistry {
-    fn retain(
-        &mut self,
-        source: SetupKeyRelationGenerationStatementSource,
-    ) -> Result<u32, CommonProofRuntimeError> {
+    fn retain(&mut self) -> Result<u32, CommonProofRuntimeError> {
         if self.sources.len() >= MAXIMUM_RETAINED_GENERATION_STATEMENT_SOURCE_COUNT
             || self.next_handle == 0
         {
@@ -145,25 +137,13 @@ impl SetupKeyRelationGenerationStatementSourceRegistry {
             .checked_add(1)
             .filter(|next_handle| *next_handle != 0)
             .ok_or(CommonProofRuntimeError::AllocationLimitExceeded)?;
-        if self.sources.insert(handle, source).is_some() {
+        if self.sources.insert(handle, ()).is_some() {
             return Err(CommonProofRuntimeError::AllocationLimitExceeded);
         }
         Ok(handle)
     }
 
-    fn source(
-        &self,
-        handle: u32,
-    ) -> Result<&SetupKeyRelationGenerationStatementSource, CommonProofRuntimeError> {
-        self.sources
-            .get(&handle)
-            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)
-    }
-
-    fn take(
-        &mut self,
-        handle: u32,
-    ) -> Result<SetupKeyRelationGenerationStatementSource, CommonProofRuntimeError> {
+    fn take(&mut self, handle: u32) -> Result<(), CommonProofRuntimeError> {
         self.sources
             .remove(&handle)
             .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)
@@ -549,18 +529,8 @@ fn prepare_generation(
             )
         }
     };
-    let statement_source_handle =
-        SETUP_KEY_RELATION_GENERATION_STATEMENT_SOURCE_REGISTRY.with(|registry| {
-            registry
-                .borrow_mut()
-                .retain(SetupKeyRelationGenerationStatementSource {
-                    family,
-                    canonical_application_statement_bytes: preparation_source
-                        .canonical_application_statement_bytes()
-                        .to_vec()
-                        .into_boxed_slice(),
-                })
-        })?;
+    let statement_source_handle = SETUP_KEY_RELATION_GENERATION_STATEMENT_SOURCE_REGISTRY
+        .with(|registry| registry.borrow_mut().retain())?;
     match retain_common_proof_generation_family_adapter(generation_family_adapter) {
         Ok(adapter_handle) => Ok((adapter_handle, statement_source_handle)),
         Err(error) => {
@@ -790,12 +760,7 @@ pub extern "C" fn sealed_lattice_setup_key_relation_generation_statement_discard
     statement_source_handle: u32,
 ) -> u32 {
     SETUP_KEY_RELATION_GENERATION_STATEMENT_SOURCE_REGISTRY
-        .with(|registry| {
-            registry
-                .borrow_mut()
-                .take(statement_source_handle)
-                .map(|_| ())
-        })
+        .with(|registry| registry.borrow_mut().take(statement_source_handle))
         .map_or_else(super::runtime_ffi::runtime_error_status, |()| 0)
 }
 
@@ -803,67 +768,35 @@ pub extern "C" fn sealed_lattice_setup_key_relation_generation_statement_discard
 mod tests {
     use super::*;
 
-    fn statement_source(
-        family: SetupKeyRelationProofFamily,
-        bytes: &[u8],
-    ) -> SetupKeyRelationGenerationStatementSource {
-        SetupKeyRelationGenerationStatementSource {
-            family,
-            canonical_application_statement_bytes: bytes.to_vec().into_boxed_slice(),
-        }
-    }
-
     #[test]
-    fn statement_source_registry_never_reuses_released_handles() {
+    fn statement_source_handle_registry_never_reuses_released_handles() {
         let mut registry = SetupKeyRelationGenerationStatementSourceRegistry::default();
-        let first_handle = registry
-            .retain(statement_source(
-                SetupKeyRelationProofFamily::SameSecret,
-                &[1, 2, 3],
-            ))
-            .expect("first source retains");
-        let released = registry.take(first_handle).expect("first source releases");
-        assert_eq!(
-            released.canonical_application_statement_bytes.as_ref(),
-            [1, 2, 3]
-        );
+        let first_handle = registry.retain().expect("first source handle retains");
+        registry
+            .take(first_handle)
+            .expect("first source handle releases");
         assert!(matches!(
-            registry.source(first_handle),
+            registry.take(first_handle),
             Err(CommonProofRuntimeError::UnknownOrStaleHandle)
         ));
-        let second_handle = registry
-            .retain(statement_source(
-                SetupKeyRelationProofFamily::PublicKeyShare,
-                &[4, 5, 6, 7],
-            ))
-            .expect("second source retains");
+        let second_handle = registry.retain().expect("second source handle retains");
         assert_ne!(second_handle, first_handle);
-        assert_eq!(
-            registry.source(second_handle).unwrap().family,
-            SetupKeyRelationProofFamily::PublicKeyShare
-        );
     }
 
     #[test]
-    fn statement_source_registry_rejects_stale_and_out_of_capacity_access() {
+    fn statement_source_handle_registry_rejects_stale_and_out_of_capacity_access() {
         let mut registry = SetupKeyRelationGenerationStatementSourceRegistry::default();
         assert!(matches!(
             registry.take(91),
             Err(CommonProofRuntimeError::UnknownOrStaleHandle)
         ));
-        for source_ordinal in 0..MAXIMUM_RETAINED_GENERATION_STATEMENT_SOURCE_COUNT {
+        for _ in 0..MAXIMUM_RETAINED_GENERATION_STATEMENT_SOURCE_COUNT {
             registry
-                .retain(statement_source(
-                    SetupKeyRelationProofFamily::SameSecret,
-                    &[u8::try_from(source_ordinal).unwrap()],
-                ))
-                .expect("source within the exact bound retains");
+                .retain()
+                .expect("source handle within the exact bound retains");
         }
         assert!(matches!(
-            registry.retain(statement_source(
-                SetupKeyRelationProofFamily::PublicKeyShare,
-                &[99],
-            )),
+            registry.retain(),
             Err(CommonProofRuntimeError::AllocationLimitExceeded)
         ));
     }

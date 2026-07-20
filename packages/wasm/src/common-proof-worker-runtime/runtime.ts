@@ -1223,9 +1223,7 @@ export const runClosedWorkerCommonProofGenerationFamilyAdapterWithExecutionOpene
             ...(execution.options === undefined
                 ? {}
                 : { options: execution.options }),
-            outputChunkByteLengths: Object.freeze([
-                ...outputChunkByteLengths,
-            ]),
+            outputChunkByteLengths: Object.freeze([...outputChunkByteLengths]),
             outputStore: execution.outputStore,
         });
     };

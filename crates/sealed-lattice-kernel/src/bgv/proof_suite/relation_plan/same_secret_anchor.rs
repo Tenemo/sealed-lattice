@@ -25,7 +25,6 @@ pub(crate) struct SameSecretSourceLayout {
 }
 
 pub(super) struct SameSecretMaterialSourceLayout {
-    pub(super) data_modulus_index: u16,
     pub(super) material: [BoundedUnsignedColumn; 2],
 }
 
@@ -101,10 +100,7 @@ pub(crate) fn compile_same_secret_relation_with_source_layout(
             &negative_indicator,
             SuiteModulusReference::data(data_modulus_index),
         )?;
-        material_source_layouts.push(SameSecretMaterialSourceLayout {
-            data_modulus_index,
-            material,
-        });
+        material_source_layouts.push(SameSecretMaterialSourceLayout { material });
     }
     let mut anchor_source_layouts = Vec::with_capacity(input.commitment_data_modulus_indices.len());
     for (root_ordinal, data_modulus_index) in input
@@ -388,6 +384,7 @@ pub(super) mod tests {
         );
     }
 
+    #[test]
     fn same_secret_plan_rejects_noncanonical_and_incomplete_geometry() {
         let context = check_context(false);
         let mut repeated_modulus = same_secret_input();

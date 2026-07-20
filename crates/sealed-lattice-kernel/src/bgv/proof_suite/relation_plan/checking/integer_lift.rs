@@ -685,8 +685,9 @@ impl RelationPlanChecker<'_> {
         } else {
             BTreeSet::new()
         };
+        let has_automorphism_semantics = !automorphism_semantics_by_galois_element.is_empty();
         if automorphism_permutation_coordinates != expected_automorphism_permutation_coordinates
-            || galois_key_share_relation != !automorphism_semantics_by_galois_element.is_empty()
+            || galois_key_share_relation != has_automorphism_semantics
         {
             return Err(RelationPlanError::InvalidConstraint);
         }

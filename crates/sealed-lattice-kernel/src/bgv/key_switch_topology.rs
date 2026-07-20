@@ -144,6 +144,7 @@ impl KeySwitchDecompositionTopology {
         self.level + 1
     }
 
+    #[cfg(test)]
     pub(crate) fn data_primes_per_block(&self) -> usize {
         self.data_primes_per_block
     }
@@ -176,6 +177,7 @@ impl KeySwitchDecompositionTopology {
         self.extended_moduli.len()
     }
 
+    #[cfg(test)]
     pub(crate) fn special_limb_count(&self) -> usize {
         KEY_SWITCH_SPECIAL_PRIMES.len()
     }
@@ -212,6 +214,7 @@ impl KeySwitchDecompositionTopology {
         checked_component_byte_length(self.data_block_count(), ring_degree, bytes_per_coefficient)
     }
 
+    #[cfg(test)]
     pub(crate) fn projection_indices_for_level(
         &self,
         projected_level: usize,

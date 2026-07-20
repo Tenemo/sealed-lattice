@@ -305,6 +305,7 @@ pub(crate) struct SetupPublicPolynomialTree {
     public_polynomial_context_hash: [u8; 64],
     root_role: SetupPublicPolynomialRootRole,
     schedule_position: Option<u32>,
+    #[cfg(test)]
     evaluation_domain_size: usize,
     source_polynomial_degree_bound_exclusive: usize,
     row_width: u32,
@@ -515,6 +516,7 @@ impl SetupPublicPolynomialTree {
     /// logical row, in row-major order. The selected prime is checked against
     /// the typed context; neither an object hash nor a claimed Merkle root is
     /// accepted.
+    #[cfg(test)]
     pub(crate) fn from_lattice_anchor_canonical_bytes(
         context: &SetupPublicPolynomialContext,
         evaluation_domain_size: usize,
@@ -645,6 +647,7 @@ impl SetupPublicPolynomialTree {
             public_polynomial_context_hash,
             root_role: input.context.root_role(),
             schedule_position: input.context.schedule_position(),
+            #[cfg(test)]
             evaluation_domain_size: input.evaluation_domain_size,
             source_polynomial_degree_bound_exclusive: input
                 .source_polynomial_degree_bound_exclusive,
@@ -670,6 +673,7 @@ impl SetupPublicPolynomialTree {
         self.source_polynomial_degree_bound_exclusive
     }
 
+    #[cfg(test)]
     pub(crate) const fn evaluation_domain_size(&self) -> usize {
         self.evaluation_domain_size
     }
@@ -678,17 +682,11 @@ impl SetupPublicPolynomialTree {
         &self.ordered_trace_rows
     }
 
-    /// Consumes the compact verifier-built tree and transfers the exact
-    /// trace-value rows whose committed root was opened by the common proof
-    /// verifier.
-    pub(crate) fn into_ordered_trace_rows(self) -> Vec<Vec<ProofBaseFieldElement>> {
-        self.ordered_trace_rows
-    }
-
     pub(crate) const fn row_width(&self) -> u32 {
         self.row_width
     }
 
+    #[cfg(test)]
     pub(crate) fn leaf_count(&self) -> usize {
         self.evaluation_domain_size / 2
     }
@@ -698,6 +696,7 @@ impl SetupPublicPolynomialTree {
     }
 }
 
+#[cfg(test)]
 pub(super) fn canonical_setup_public_polynomial_phase_pair_leaf_bytes(
     public_polynomial_context_hash: [u8; 64],
     leaf_index: u64,
@@ -1003,10 +1002,6 @@ impl SetupPublicPolynomialLeafHashArena {
             &extension_column[..self.leaf_count],
             &extension_column[self.leaf_count..],
         )
-    }
-
-    pub(crate) const fn next_leaf_index(&self) -> usize {
-        self.next_leaf_index
     }
 
     pub(crate) fn native_resident_owned_payload_byte_length(
@@ -1315,11 +1310,17 @@ impl SetupPublicPolynomialOnlineMerkleRoot {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct SetupPublicPolynomialCompactRootMemoryPlan {
+    #[cfg(test)]
     leaf_hash_state_arena_payload_byte_length: u64,
+    #[cfg(test)]
     source_column_payload_byte_length: u64,
+    #[cfg(test)]
     extension_column_payload_byte_length: u64,
+    #[cfg(test)]
     online_merkle_stack_payload_byte_length: u64,
+    #[cfg(test)]
     retained_trace_rows_payload_byte_length: u64,
+    #[cfg(test)]
     column_pipeline_payload_peak_byte_length: u64,
     owned_payload_peak_byte_length: u64,
 }
@@ -1327,26 +1328,32 @@ pub(crate) struct SetupPublicPolynomialCompactRootMemoryPlan {
 pub(crate) const WASM_SETUP_PUBLIC_POLYNOMIAL_LEAF_HASH_STATE_BYTE_LENGTH: usize = 216;
 
 impl SetupPublicPolynomialCompactRootMemoryPlan {
+    #[cfg(test)]
     pub(crate) const fn leaf_hash_state_arena_payload_byte_length(self) -> u64 {
         self.leaf_hash_state_arena_payload_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn source_column_payload_byte_length(self) -> u64 {
         self.source_column_payload_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn extension_column_payload_byte_length(self) -> u64 {
         self.extension_column_payload_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn online_merkle_stack_payload_byte_length(self) -> u64 {
         self.online_merkle_stack_payload_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn retained_trace_rows_payload_byte_length(self) -> u64 {
         self.retained_trace_rows_payload_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn column_pipeline_payload_peak_byte_length(self) -> u64 {
         self.column_pipeline_payload_peak_byte_length
     }
@@ -1356,6 +1363,7 @@ impl SetupPublicPolynomialCompactRootMemoryPlan {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn setup_public_polynomial_compact_root_memory_plan(
     evaluation_domain_size: usize,
     source_polynomial_degree_bound_exclusive: usize,
@@ -1452,11 +1460,17 @@ fn setup_public_polynomial_compact_root_memory_plan_for_leaf_hash_state_byte_len
         online_merkle_stack_payload_byte_length,
     )?;
     Ok(SetupPublicPolynomialCompactRootMemoryPlan {
+        #[cfg(test)]
         leaf_hash_state_arena_payload_byte_length,
+        #[cfg(test)]
         source_column_payload_byte_length,
+        #[cfg(test)]
         extension_column_payload_byte_length,
+        #[cfg(test)]
         online_merkle_stack_payload_byte_length,
+        #[cfg(test)]
         retained_trace_rows_payload_byte_length,
+        #[cfg(test)]
         column_pipeline_payload_peak_byte_length,
         owned_payload_peak_byte_length: column_pipeline_payload_peak_byte_length
             .max(merkle_finalization_payload_peak_byte_length)
@@ -1699,7 +1713,7 @@ mod tests {
 
     #[test]
     fn root_only_canonical_rows_match_the_retained_tree_and_require_the_exact_width() {
-        let canonical_rows = vec![vec![3, 5, 0, 1], vec![7, 0, 0, 0]];
+        let canonical_rows = [[3, 5, 0, 1], [7, 0, 0, 0]];
         let field_rows = canonical_rows
             .iter()
             .map(|row| {
@@ -1729,7 +1743,7 @@ mod tests {
                     8,
                     4,
                     canonical_rows.len(),
-                    canonical_rows.iter().map(Vec::as_slice),
+                    canonical_rows.iter().map(|row| row.as_slice()),
                 )
                 .expect("the root-only construction is canonical");
             assert_eq!(context_hash, retained_tree.public_polynomial_context_hash());
@@ -1742,7 +1756,7 @@ mod tests {
                 8,
                 4,
                 canonical_rows.len(),
-                canonical_rows.iter().take(1).map(Vec::as_slice),
+                canonical_rows.iter().take(1).map(|row| row.as_slice()),
             ),
             Err(SetupPublicPolynomialError::InvalidInput),
         );

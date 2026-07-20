@@ -92,8 +92,6 @@ impl SelectedAcceptedSetupPublicProofSlot {
 #[derive(Debug)]
 pub(in crate::bgv) struct CanonicalAcceptedSetupPackage {
     setup_package_hash: Hash512,
-    canonical_package_byte_length: u64,
-    ordered_hash_list_carrier_byte_lengths: [u64; 5],
     setup_intent_object_hashes: Box<[Hash512]>,
     public_randomness_commitment_object_hashes: Box<[Hash512]>,
     public_randomness_reveal_object_hashes: Box<[Hash512]>,
@@ -206,26 +204,6 @@ impl CanonicalAcceptedSetupPackage {
                 "accepted setup package does not round-trip canonically",
             ));
         }
-        let canonical_package_byte_length =
-            u64::try_from(canonical_package_bytes.len()).map_err(|_| {
-                AcceptedSetupPackageError::new(
-                    RefusalReason::OutsideSupportedProfile,
-                    "accepted setup package byte length does not fit u64",
-                )
-            })?;
-        let mut ordered_hash_list_carrier_byte_lengths = [0_u64; 5];
-        for (destination, item) in ordered_hash_list_carrier_byte_lengths
-            .iter_mut()
-            .zip(tuple.items.iter().take(5))
-        {
-            *destination = u64::try_from(item.canonical_bytes().len()).map_err(|_| {
-                AcceptedSetupPackageError::new(
-                    RefusalReason::OutsideSupportedProfile,
-                    "accepted setup hash-list carrier byte length does not fit u64",
-                )
-            })?;
-        }
-
         let participant_count = usize::from(FOUNDATION_PROFILE.participant_count);
         let setup_intent_object_hashes = read_exact_hash_list(&tuple.items[0], participant_count)?;
         let public_randomness_commitment_object_hashes =
@@ -253,8 +231,6 @@ impl CanonicalAcceptedSetupPackage {
         )?;
         Ok(Self {
             setup_package_hash,
-            canonical_package_byte_length,
-            ordered_hash_list_carrier_byte_lengths,
             setup_intent_object_hashes: setup_intent_object_hashes.into_boxed_slice(),
             public_randomness_commitment_object_hashes: public_randomness_commitment_object_hashes
                 .into_boxed_slice(),
@@ -272,14 +248,6 @@ impl CanonicalAcceptedSetupPackage {
 
     pub(in crate::bgv) const fn setup_package_hash(&self) -> Hash512 {
         self.setup_package_hash
-    }
-
-    pub(in crate::bgv) const fn canonical_package_byte_length(&self) -> u64 {
-        self.canonical_package_byte_length
-    }
-
-    pub(in crate::bgv) const fn ordered_hash_list_carrier_byte_lengths(&self) -> [u64; 5] {
-        self.ordered_hash_list_carrier_byte_lengths
     }
 
     pub(in crate::bgv) fn setup_intent_object_hashes(&self) -> &[Hash512] {
@@ -312,14 +280,6 @@ impl CanonicalAcceptedSetupPackage {
 
     pub(in crate::bgv) fn ordered_proof_descriptors(&self) -> &[StreamDescriptor] {
         &self.ordered_proof_descriptors
-    }
-
-    pub(in crate::bgv) fn ordered_proof_descriptor_total_byte_lengths(
-        &self,
-    ) -> impl ExactSizeIterator<Item = u64> + '_ {
-        self.ordered_proof_descriptors
-            .iter()
-            .map(|descriptor| descriptor.total_byte_length)
     }
 
     pub(in crate::bgv) fn selected_public_proof_slots(
@@ -890,11 +850,6 @@ mod tests {
         let package =
             CanonicalAcceptedSetupPackage::decode(&bytes, &CanonicalDecodeLimits::default())
                 .expect("canonical setup package decodes");
-        assert_eq!(
-            package.canonical_package_byte_length(),
-            u64::try_from(bytes.len()).expect("package length fits u64")
-        );
-        assert_eq!(package.ordered_hash_list_carrier_byte_lengths(), [646; 5]);
         assert_eq!(package.setup_intent_object_hashes()[3], test_hash(4),);
         assert_eq!(
             package.public_randomness_commitment_object_hashes()[9],
@@ -927,12 +882,6 @@ mod tests {
         assert_eq!(
             package.ordered_proof_descriptors()[52].total_byte_length,
             69
-        );
-        assert_eq!(
-            package
-                .ordered_proof_descriptor_total_byte_lengths()
-                .collect::<Vec<_>>(),
-            (17_u64..=69).collect::<Vec<_>>()
         );
         assert_eq!(
             package.setup_package_hash(),

@@ -19,7 +19,8 @@ use crate::{
 };
 
 use super::{
-    engine::Ciphertext, program::VerifiedEvaluatorAggregate,
+    engine::Ciphertext,
+    program::{VerifiedEvaluatorAggregate, VerifiedEvaluatorAggregateContext},
     top_k::SELECTED_EVALUATOR_WORKING_LEVEL,
 };
 
@@ -164,13 +165,15 @@ impl IncrementalVerifiedBallotAggregation {
             .take()
             .ok_or(RefusalReason::MissingPrerequisite)?;
         VerifiedEvaluatorAggregate::from_verified_ballot_aggregate(
-            context.protocol_version,
-            context.suite_identifier,
-            context.ceremony_context_hash,
-            context.action_context_hash,
-            context.roster_hash,
-            context.verified_setup_source_hash,
-            verified_aggregate_object.object_hash().into_bytes(),
+            VerifiedEvaluatorAggregateContext::from_verified_sources(
+                context.protocol_version,
+                context.suite_identifier,
+                context.ceremony_context_hash,
+                context.action_context_hash,
+                context.roster_hash,
+                context.verified_setup_source_hash,
+                verified_aggregate_object.object_hash().into_bytes(),
+            ),
             ballot_count,
             verified_action_top_count,
             aggregate_ciphertext,
@@ -246,8 +249,8 @@ impl IncrementalVerifiedBallotAggregation {
         if ciphertext_catalog.len() != expected_polynomial_count {
             return Err(RefusalReason::WrongTypeOrLength);
         }
-        if let Some(aggregate_ciphertext) = &self.aggregate_ciphertext {
-            if aggregate_ciphertext.level != SELECTED_EVALUATOR_WORKING_LEVEL
+        if let Some(aggregate_ciphertext) = &self.aggregate_ciphertext
+            && (aggregate_ciphertext.level != SELECTED_EVALUATOR_WORKING_LEVEL
                 || aggregate_ciphertext.decrypt_scaling != 1
                 || aggregate_ciphertext.components.len() != AGGREGATE_CIPHERTEXT_COMPONENT_COUNT
                 || aggregate_ciphertext.components.iter().any(|component| {
@@ -255,10 +258,9 @@ impl IncrementalVerifiedBallotAggregation {
                         || component
                             .iter()
                             .any(|coefficients| coefficients.len() != POLYNOMIAL_DEGREE)
-                })
-            {
-                return Err(RefusalReason::ConsumedState);
-            }
+                }))
+        {
+            return Err(RefusalReason::ConsumedState);
         }
 
         for (polynomial_ordinal, polynomial) in ciphertext_catalog.iter().enumerate() {

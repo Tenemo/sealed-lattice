@@ -182,42 +182,6 @@ impl QueryVerificationWorkspace {
         .try_fold(0_u64, u64::checked_add)
     }
 
-    pub(super) fn resident_owned_payload_byte_length(&self) -> Option<u64> {
-        let payload = |count: usize, value_byte_length: usize| {
-            u64::try_from(count)
-                .ok()?
-                .checked_mul(u64::try_from(value_byte_length).ok()?)
-        };
-        let claim_group_payload = self.claim_groups.iter().try_fold(
-            payload(
-                self.claim_groups.capacity(),
-                core::mem::size_of::<Vec<RuntimeOpeningClaim>>(),
-            )?,
-            |total, group| {
-                total.checked_add(payload(
-                    group.capacity(),
-                    core::mem::size_of::<RuntimeOpeningClaim>(),
-                )?)
-            },
-        )?;
-        [
-            claim_group_payload,
-            payload(
-                self.accumulated_initial_pairs.capacity(),
-                core::mem::size_of::<OpenedFriLayerPair>(),
-            )?,
-            self.fri_verifier.resident_owned_payload_byte_length()?,
-            self.fri_states.as_ref().map_or(Some(0), |states| {
-                payload(
-                    states.capacity(),
-                    core::mem::size_of::<ProofFriQueryState>(),
-                )
-            })?,
-        ]
-        .into_iter()
-        .try_fold(0_u64, u64::checked_add)
-    }
-
     pub(super) fn new(
         catalog_entry_count: usize,
         evaluation_domain: ProofEvaluationDomain,

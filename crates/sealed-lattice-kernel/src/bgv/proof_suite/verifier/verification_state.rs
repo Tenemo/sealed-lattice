@@ -2,15 +2,15 @@ use super::super::{DecodedProofPhasePairLeaf, canonical_common_proof_byte_length
 use super::{
     CanonicalItem, CanonicalTuple, CommonProofPrivacyMode, CommonProofQueryOpeningAbsorber,
     CommonProofTranscript, CommonProofVerifierError, CompiledRelationPlan, DecodedProofBodyPrefix,
-    PROOF_OBJECT_HEADER_SCHEMA_IDENTIFIER, PROOF_OBJECT_HEADER_SCHEMA_VERSION, ProofBodyError,
-    ProofBodyLayout, ProofByteSource, ProofDecodeError, ProofEvaluationDomain,
-    ProofFriQueryVerifier, ProofTreeCatalogInput, ProofTreeCatalogSource, ProofTreeRole,
-    ProofTreeValue, QueryVerificationWorkspace, RelationApplicationChallengeAssignment,
-    RelationPlanCheckContext, RelationPlanVariant, SELECTED_PROOF_FIELD_INDEX,
-    ValidatedRelationPlanArtifact, VerifiedCommonProof, VerifiedEvaluatorAuxiliaryRoot,
-    VerifiedRelationColumnEvaluator, VerifiedStatementOwnedTree, absorb_relation_roots,
-    build_complete_proof_tree_catalog, build_runtime_claim_groups, catalog_root,
-    decode_application_statement, decode_proof_body_prefix_owned,
+    DeepCompositionVerificationInput, PROOF_OBJECT_HEADER_SCHEMA_IDENTIFIER,
+    PROOF_OBJECT_HEADER_SCHEMA_VERSION, ProofBodyError, ProofBodyLayout, ProofByteSource,
+    ProofDecodeError, ProofEvaluationDomain, ProofFriQueryVerifier, ProofTreeCatalogInput,
+    ProofTreeCatalogSource, ProofTreeRole, ProofTreeValue, QueryVerificationWorkspace,
+    RelationApplicationChallengeAssignment, RelationPlanCheckContext, RelationPlanVariant,
+    SELECTED_PROOF_FIELD_INDEX, ValidatedRelationPlanArtifact, VerifiedCommonProof,
+    VerifiedEvaluatorAuxiliaryRoot, VerifiedRelationColumnEvaluator, VerifiedStatementOwnedTree,
+    absorb_relation_roots, build_complete_proof_tree_catalog, build_runtime_claim_groups,
+    catalog_root, decode_application_statement, decode_proof_body_prefix_owned,
     decode_proof_query_section_header_at, decode_proof_query_tree_at, derive_relation_tree_inputs,
     proof_body_prefix_byte_length, proof_query_tree_byte_length,
     validate_evaluator_auxiliary_root_linkage, verified_application_statement_hash,
@@ -20,6 +20,7 @@ use super::{
 /// Inputs that have already crossed their family-specific trust boundaries.
 /// The application wrapper owns statement/source resolution; proof bytes never
 /// supply any value in this structure.
+#[cfg(test)]
 pub(crate) struct CommonProofVerificationInput<'input, Source: ProofByteSource + ?Sized> {
     pub(crate) protocol_version: u16,
     pub(crate) suite_identifier: [u8; 64],
@@ -118,25 +119,10 @@ pub(crate) struct CommonProofVerificationStateMachine {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct CommonProofVerificationResidentMemoryAccounting {
-    fixed_and_plan_resident_byte_length: u64,
-    maximum_post_prefix_resident_byte_length: u64,
-    maximum_decoding_transient_byte_length: u64,
     maximum_resident_byte_length: u64,
 }
 
 impl CommonProofVerificationResidentMemoryAccounting {
-    pub(crate) const fn fixed_and_plan_resident_byte_length(self) -> u64 {
-        self.fixed_and_plan_resident_byte_length
-    }
-
-    pub(crate) const fn maximum_post_prefix_resident_byte_length(self) -> u64 {
-        self.maximum_post_prefix_resident_byte_length
-    }
-
-    pub(crate) const fn maximum_decoding_transient_byte_length(self) -> u64 {
-        self.maximum_decoding_transient_byte_length
-    }
-
     pub(crate) const fn maximum_resident_byte_length(self) -> u64 {
         self.maximum_resident_byte_length
     }
@@ -524,9 +510,6 @@ impl CommonProofVerificationStateMachine {
             maximum_decoding_transient_byte_length,
         )?;
         Ok(CommonProofVerificationResidentMemoryAccounting {
-            fixed_and_plan_resident_byte_length,
-            maximum_post_prefix_resident_byte_length,
-            maximum_decoding_transient_byte_length,
             maximum_resident_byte_length: prefix_construction_peak.max(query_decoding_peak),
         })
     }
@@ -844,12 +827,14 @@ impl CommonProofVerificationStateMachine {
             .derive_opening_points(&self.relation_context, &deep_points)?;
         verify_deep_composition_with_verified_sequences(
             &self.variant,
-            &self.relation_context,
-            &application_challenges,
-            &composition_challenges,
-            &deep_points,
-            &opening_points,
-            prefix.deep_evaluations(),
+            DeepCompositionVerificationInput::new(
+                &self.relation_context,
+                &application_challenges,
+                &composition_challenges,
+                &deep_points,
+                &opening_points,
+                prefix.deep_evaluations(),
+            ),
             evaluate_verified_column,
         )?;
         transcript.absorb_deep_evaluations(prefix.deep_evaluations())?;

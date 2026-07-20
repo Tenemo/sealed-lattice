@@ -5,16 +5,15 @@ use zeroize::Zeroizing;
 use crate::{
     bgv::{
         evaluator::key_switch::special_basis_modulus_residue,
-        key_switch_topology::{KEY_SWITCH_DATA_PRIMES_PER_BLOCK, canonical_residue_byte_length},
+        key_switch_topology::canonical_residue_byte_length,
         modular_arithmetic::{add_mod_fast, mul_mod_fast, sub_mod_fast},
-        parameters::{DATA_PRIMES, PLAINTEXT_MODULUS},
+        parameters::PLAINTEXT_MODULUS,
         proof_suite::{
             CommittedMaterialContext, CommittedMaterialRole, CommittedMaterialTree,
             KeySwitchComponentMaterialTopology, RecipientShareLimbInput,
             SelectedEvaluatorEntryKind, apply_negacyclic_automorphism,
-            canonical_recipient_private_vss_payload,
-            maximum_committed_material_kmac_input_accounting, selected_committed_material_profile,
-            selected_committed_material_relation_plan_input, selected_evaluator_entry_positions,
+            canonical_recipient_private_vss_payload, selected_committed_material_profile,
+            selected_committed_material_relation_plan_input,
             selected_evaluator_galois_entry_positions, selected_galois_key_share_batch_schedule,
             selected_public_key_share_relation_plan_input,
         },
@@ -28,13 +27,9 @@ use crate::{
     },
     foundation::{
         ActionPrivateRandomness, CanonicalItem, CanonicalTuple, FOUNDATION_PROFILE, Hash512,
-        PrivateRandomnessAttemptIdentifier, PrivateRandomnessDomain,
-        PrivateRandomnessKmacInputClassAccounting, RefusalReason,
-        SELECTED_MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT, SelectedSuiteCapability,
-        SetupStructuredCommitmentOpeningContext, StateCapabilityKind,
+        PrivateRandomnessAttemptIdentifier, PrivateRandomnessDomain, RefusalReason,
+        SelectedSuiteCapability, SetupStructuredCommitmentOpeningContext, StateCapabilityKind,
         VerifiedStateReservationRuntimeBinding, hash_foundation_tuple_512,
-        private_randomness_stream_block_count_for_bit_length,
-        private_randomness_stream_block_count_for_modulo_outputs,
     },
     transcript_core::encode_hex,
 };
@@ -74,166 +69,6 @@ const SPECIAL_MODULUS_CATALOG_IDENTIFIER: u16 = 2;
 const GALOIS_ERROR_CENTERED_BINOMIAL_PARAMETER: u16 = 2;
 const PUBLIC_KEY_ERROR_CENTERED_BINOMIAL_PARAMETER: u16 = 2;
 const MATERIAL_SEED_BYTE_LENGTH: usize = 64;
-
-/// Source-owned count for the complete selected setup population created by
-/// one participant. The shared setup-attempt identifier is owned once by the
-/// ceremony-level attempt catalog, not once per stream here.
-pub(in crate::bgv) fn selected_setup_generation_private_randomness_kmac_input_accounting()
--> Result<PrivateRandomnessKmacInputClassAccounting, RefusalReason> {
-    let relation_input = selected_committed_material_relation_plan_input()
-        .map_err(|_| RefusalReason::UnsupportedVersionOrSuite)?;
-    if relation_input.participant_count != FOUNDATION_PROFILE.participant_count
-        || relation_input.threshold != FOUNDATION_PROFILE.reconstruction_threshold
-        || KEY_SWITCH_DATA_PRIMES_PER_BLOCK == 0
-    {
-        return Err(RefusalReason::UnsupportedVersionOrSuite);
-    }
-    let ring_degree = relation_input.ring_degree;
-    let centered_ternary_stream_block_count =
-        private_randomness_stream_block_count_for_modulo_outputs(
-            ring_degree,
-            3,
-            SELECTED_MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT,
-        )
-        .ok_or(RefusalReason::OutsideSupportedProfile)?;
-    let anchor_randomness_polynomial_count = u64::try_from(
-        SETUP_COMMITMENT_MODULUS_LIMB_INDICES
-            .len()
-            .checked_mul(
-                SETUP_COMMITMENT_HIDING_SECRET_WIDTH
-                    .checked_add(SETUP_COMMITMENT_HIDING_ERROR_WIDTH)
-                    .ok_or(RefusalReason::OutsideSupportedProfile)?,
-            )
-            .ok_or(RefusalReason::OutsideSupportedProfile)?,
-    )
-    .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
-    let mut private_stream_block_count = centered_ternary_stream_block_count
-        .checked_mul(
-            anchor_randomness_polynomial_count
-                .checked_add(2)
-                .ok_or(RefusalReason::OutsideSupportedProfile)?,
-        )
-        .ok_or(RefusalReason::OutsideSupportedProfile)?;
-
-    let nonconstant_coefficient_count = u64::from(
-        relation_input
-            .threshold
-            .checked_sub(1)
-            .ok_or(RefusalReason::UnsupportedVersionOrSuite)?,
-    );
-    for sharing_data_modulus_index in &relation_input.sharing_data_modulus_indices {
-        let modulus = *DATA_PRIMES
-            .get(usize::from(*sharing_data_modulus_index))
-            .ok_or(RefusalReason::UnsupportedVersionOrSuite)?;
-        let polynomial_stream_block_count =
-            private_randomness_stream_block_count_for_modulo_outputs(
-                ring_degree,
-                modulus,
-                SELECTED_MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT,
-            )
-            .ok_or(RefusalReason::OutsideSupportedProfile)?;
-        private_stream_block_count = private_stream_block_count
-            .checked_add(
-                polynomial_stream_block_count
-                    .checked_mul(nonconstant_coefficient_count)
-                    .ok_or(RefusalReason::OutsideSupportedProfile)?,
-            )
-            .ok_or(RefusalReason::OutsideSupportedProfile)?;
-    }
-
-    let centered_binomial_stream_block_count =
-        private_randomness_stream_block_count_for_bit_length(
-            ring_degree
-                .checked_mul(u64::from(
-                    GALOIS_ERROR_CENTERED_BINOMIAL_PARAMETER
-                        .checked_mul(2)
-                        .ok_or(RefusalReason::OutsideSupportedProfile)?,
-                ))
-                .ok_or(RefusalReason::OutsideSupportedProfile)?,
-        )
-        .ok_or(RefusalReason::OutsideSupportedProfile)?;
-    private_stream_block_count = private_stream_block_count
-        .checked_add(centered_binomial_stream_block_count)
-        .ok_or(RefusalReason::OutsideSupportedProfile)?;
-    let selected_relinearization_catalog_levels =
-        selected_evaluator_entry_positions(FOUNDATION_PROFILE.option_count)
-            .map_err(|_| RefusalReason::UnsupportedVersionOrSuite)?
-            .into_iter()
-            .filter_map(|position| match position.key_kind() {
-                SelectedEvaluatorEntryKind::Relinearization { catalog_level } => {
-                    Some(catalog_level)
-                }
-                SelectedEvaluatorEntryKind::Galois { .. } => None,
-            })
-            .collect::<Vec<_>>();
-    let [relinearization_catalog_level] = selected_relinearization_catalog_levels.as_slice() else {
-        return Err(RefusalReason::UnsupportedVersionOrSuite);
-    };
-    let relinearization_data_block_count = relinearization_catalog_level
-        .checked_add(1)
-        .ok_or(RefusalReason::OutsideSupportedProfile)?
-        .div_ceil(KEY_SWITCH_DATA_PRIMES_PER_BLOCK);
-    private_stream_block_count = private_stream_block_count
-        .checked_add(
-            centered_binomial_stream_block_count
-                .checked_mul(3)
-                .and_then(|count| {
-                    count.checked_mul(u64::try_from(relinearization_data_block_count).ok()?)
-                })
-                .ok_or(RefusalReason::OutsideSupportedProfile)?,
-        )
-        .ok_or(RefusalReason::OutsideSupportedProfile)?;
-    for evaluator_position in selected_evaluator_galois_entry_positions()
-        .map_err(|_| RefusalReason::UnsupportedVersionOrSuite)?
-    {
-        let SelectedEvaluatorEntryKind::Galois { catalog_level, .. } =
-            evaluator_position.key_kind()
-        else {
-            return Err(RefusalReason::UnsupportedVersionOrSuite);
-        };
-        let active_data_prime_count = catalog_level
-            .checked_add(1)
-            .ok_or(RefusalReason::OutsideSupportedProfile)?;
-        let data_block_count = active_data_prime_count.div_ceil(KEY_SWITCH_DATA_PRIMES_PER_BLOCK);
-        private_stream_block_count = private_stream_block_count
-            .checked_add(
-                centered_binomial_stream_block_count
-                    .checked_mul(
-                        u64::try_from(data_block_count)
-                            .map_err(|_| RefusalReason::OutsideSupportedProfile)?,
-                    )
-                    .ok_or(RefusalReason::OutsideSupportedProfile)?,
-            )
-            .ok_or(RefusalReason::OutsideSupportedProfile)?;
-    }
-
-    let sharing_limb_count = u64::try_from(relation_input.sharing_data_modulus_indices.len())
-        .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
-    let committed_material_root_count = sharing_limb_count
-        .checked_mul(
-            u64::from(relation_input.threshold)
-                .checked_add(u64::from(relation_input.participant_count))
-                .ok_or(RefusalReason::OutsideSupportedProfile)?,
-        )
-        .ok_or(RefusalReason::OutsideSupportedProfile)?;
-    let committed_material_profile = selected_committed_material_profile()
-        .map_err(|_| RefusalReason::UnsupportedVersionOrSuite)?;
-    let full_salted_leaf_count = committed_material_root_count
-        .checked_mul(
-            u64::try_from(committed_material_profile.evaluation_domain_size() / 2)
-                .map_err(|_| RefusalReason::OutsideSupportedProfile)?,
-        )
-        .ok_or(RefusalReason::OutsideSupportedProfile)?;
-    let committed_material_accounting = maximum_committed_material_kmac_input_accounting(
-        committed_material_profile,
-        committed_material_root_count,
-        full_salted_leaf_count,
-    )
-    .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
-    PrivateRandomnessKmacInputClassAccounting::checked_new(0, 0, private_stream_block_count, 0)
-        .and_then(|accounting| accounting.checked_add(committed_material_accounting))
-        .ok_or(RefusalReason::OutsideSupportedProfile)
-}
 
 struct SetupGenerationBindings {
     suite_identifier: [u8; Hash512::BYTE_LENGTH],
@@ -1327,6 +1162,7 @@ fn centered_i64_residue(coefficient: i64, modulus: u64) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::bgv::parameters::DATA_PRIMES;
 
     fn naive_negacyclic_product(left: &[u64], right: &[u64], modulus: u64) -> Vec<u64> {
         assert_eq!(left.len(), right.len());

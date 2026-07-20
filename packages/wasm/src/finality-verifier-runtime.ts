@@ -237,7 +237,7 @@ export const createVerifiedEvaluatorReplayKernelAuthority = (input: {
         active: true,
         handle: input.handle,
         kernel: input.kernel,
-        release: input.release,
+        release: (handle) => input.release(handle),
     });
     return capability as VerifiedEvaluatorReplay;
 };

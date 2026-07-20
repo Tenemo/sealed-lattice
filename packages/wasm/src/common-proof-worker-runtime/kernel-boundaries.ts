@@ -1220,7 +1220,8 @@ export class CommonProofGenerationKernelBoundary {
                         maximumTransactionPayloadByteLength >
                             maximumWorkerPayloadByteLength ||
                         distinctPhysicalObjectCount === 0 ||
-                        distinctPhysicalObjectCount > maximumWorkerOperationCount ||
+                        distinctPhysicalObjectCount >
+                            maximumWorkerOperationCount ||
                         objectLifecycleCount < distinctPhysicalObjectCount ||
                         compiledRequirement.peakStoredByteLength === 0n ||
                         compiledRequirement.peakStoredByteLength >

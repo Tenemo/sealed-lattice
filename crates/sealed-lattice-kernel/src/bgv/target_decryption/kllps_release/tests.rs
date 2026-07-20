@@ -5,6 +5,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use num_traits::ToPrimitive;
 use sha3::{Digest, Sha3_512};
 
+use crate::bgv::{
+    direct_ballots::PAIR_CHARACTER_LANE_COUNT,
+    encoding::encode_scalar_lanes_to_plaintext_coefficients,
+};
+
 #[test]
 fn selected_kllps_constants_match_the_spaced_monomial_construction() {
     assert_eq!(KLLPS_PARTICIPANT_COUNT, 10);
@@ -207,8 +212,13 @@ fn factor_four_release_reconstructs_full_eight_prime_targets_from_lowest_distinc
     let binding = test_release_binding(11);
     let participant_binding = test_participant_release_binding(11, 0);
     let sharing_polynomials = test_sharing_polynomials();
-    let target_identifier_plaintext = sparse_plaintext(&[(0, 17), (19, 65_536), (4_097, 31)]);
-    let target_order_plaintext = sparse_plaintext(&[(1, 9), (2_047, 44), (12_345, 7)]);
+    let target_identifier_lanes = sparse_scalar_lanes(&[(0, 17), (19, 1), (97, 31)]);
+    let target_order_lanes = sparse_scalar_lanes(&[(1, 9), (63, 44), (127, 7)]);
+    let target_identifier_plaintext =
+        encode_scalar_lanes_to_plaintext_coefficients(&target_identifier_lanes)
+            .expect("encode target identifier lanes");
+    let target_order_plaintext = encode_scalar_lanes_to_plaintext_coefficients(&target_order_lanes)
+        .expect("encode target order lanes");
     let target_identifier = test_target_ciphertext(
         &target_identifier_plaintext,
         7,
@@ -218,7 +228,7 @@ fn factor_four_release_reconstructs_full_eight_prime_targets_from_lowest_distinc
     );
     let target_order = test_target_ciphertext(
         &target_order_plaintext,
-        11,
+        7,
         &sharing_polynomials[0],
         CANONICAL_TARGET_CIPHERTEXT_LEVEL,
         5,
@@ -279,8 +289,8 @@ fn factor_four_release_reconstructs_full_eight_prime_targets_from_lowest_distinc
     let (identifier_slots, order_slots) = reconstructed
         .decode_scalar_lanes()
         .expect("scalar target lanes");
-    assert_eq!(identifier_slots.len(), POLYNOMIAL_DEGREE);
-    assert_eq!(order_slots.len(), POLYNOMIAL_DEGREE);
+    assert_eq!(identifier_slots, target_identifier_lanes);
+    assert_eq!(order_slots, target_order_lanes);
 
     let ordered_positions = [0, 1, 2, 3, 4, 5, 6, 9];
     let ordered = ordered_positions
@@ -553,60 +563,6 @@ fn retained_flooding_polynomial_uses_exact_zeroizable_signed_limbs() {
 }
 
 #[test]
-fn paired_partial_generation_sums_nested_bigint_scratch_while_proof_callbacks_use_one_role() {
-    let accounting = selected_kllps_target_release_memory_accounting()
-        .expect("selected target-release memory accounting");
-    let source_provider = selected_kllps_target_release_source_provider_memory_accounting()
-        .expect("selected target-release proof-source accounting");
-    let incorrectly_paired_source_provider =
-        selected_target_release_source_provider_memory_accounting::<
-            KllpsTargetReleaseProofWitnessSource,
-        >(
-            accounting
-                .proof_generation_additional_persistent_resident_byte_length()
-                .expect("proof-generation custody fits u64"),
-            accounting.paired_generation_bigint_scratch_byte_length(),
-        )
-        .expect("comparison target-release proof-source accounting");
-
-    assert_eq!(
-        accounting.paired_generation_bigint_scratch_byte_length(),
-        accounting.one_role_bigint_scratch_byte_length() * 2,
-        "the two nested paired-generation callbacks coexist",
-    );
-    assert_eq!(
-        incorrectly_paired_source_provider.additional_loading_transient_byte_length()
-            - source_provider.additional_loading_transient_byte_length(),
-        accounting.one_role_bigint_scratch_byte_length(),
-        "the production proof source charges exactly one callback instead of the nested pair",
-    );
-    assert!(
-        accounting.proof_source_additional_persistent_resident_byte_length()
-            >= accounting.retained_flooding_polynomial_byte_length()
-    );
-    assert_eq!(
-        accounting.paired_partial_stream_custody_resident_byte_length(),
-        u64::try_from(size_of::<KllpsPairedPartialDecryptionStreams>())
-            .expect("the paired stream owner fits u64")
-            + u64::try_from(
-                selected_target_partial_decryption_stream_byte_length()
-                    .expect("the selected target partial stream length derives"),
-            )
-            .expect("the target partial stream length fits u64")
-                * u64::try_from(KLLPS_PAIRED_TARGET_ROLE_COUNT)
-                    .expect("the paired role count fits u64"),
-        "prepared proof generation retains the two exact output streams",
-    );
-    assert_eq!(
-        accounting
-            .proof_generation_additional_persistent_resident_byte_length()
-            .expect("proof-generation custody fits u64"),
-        accounting.proof_source_additional_persistent_resident_byte_length()
-            + accounting.paired_partial_stream_custody_resident_byte_length(),
-    );
-}
-
-#[test]
 fn factor_four_bounds_use_exact_arbitrary_width_inequalities() {
     let evaluation_error_bound = BigUint::from(1_u8);
     let minimum_flooding_bound = factor_four_required_flooding_bound(&evaluation_error_bound)
@@ -699,12 +655,12 @@ fn sparse_signed_polynomial(entries: &[(usize, i64)]) -> Vec<i64> {
     polynomial
 }
 
-fn sparse_plaintext(entries: &[(usize, u64)]) -> Vec<u64> {
-    let mut polynomial = vec![0_u64; POLYNOMIAL_DEGREE];
-    for (coefficient_index, coefficient) in entries {
-        polynomial[*coefficient_index] = *coefficient;
+fn sparse_scalar_lanes(entries: &[(usize, u64)]) -> Vec<u64> {
+    let mut lanes = vec![0_u64; PAIR_CHARACTER_LANE_COUNT];
+    for (lane_ordinal, lane_value) in entries {
+        lanes[*lane_ordinal] = *lane_value;
     }
-    polynomial
+    lanes
 }
 
 fn test_threshold_share(

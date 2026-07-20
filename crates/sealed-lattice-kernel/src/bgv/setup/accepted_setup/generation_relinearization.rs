@@ -113,13 +113,13 @@ pub(crate) struct SetupGenerationRelinearizationRoundOnePreparationSource {
     ceremony_context_hash: [u8; Hash512::BYTE_LENGTH],
     action_context_hash: [u8; Hash512::BYTE_LENGTH],
     roster_hash: [u8; Hash512::BYTE_LENGTH],
-    setup_proof_context_hash: [u8; Hash512::BYTE_LENGTH],
     source_setup_intent_object_hash: [u8; Hash512::BYTE_LENGTH],
     participant_identity: [u8; Hash512::BYTE_LENGTH],
     roster_position: u16,
     action_randomness_authorization_hash: [u8; Hash512::BYTE_LENGTH],
     schedule_position: u32,
-    root_pair: [[u8; Hash512::BYTE_LENGTH]; 2],
+    // The canonical statement already binds the setup proof context and both
+    // generated component roots; preparation retains no denormalized copies.
     canonical_application_statement_bytes: Box<[u8]>,
 }
 
@@ -138,13 +138,11 @@ impl SetupGenerationRelinearizationRoundOnePreparationSource {
             ceremony_context_hash: source.ceremony_context_hash,
             action_context_hash: source.action_context_hash,
             roster_hash: source.roster_hash,
-            setup_proof_context_hash: source.setup_proof_context_hash,
             source_setup_intent_object_hash,
             participant_identity: source.participant_identity,
             roster_position: source.roster_position,
             action_randomness_authorization_hash,
             schedule_position: source.schedule_position,
-            root_pair: source.root_pair(),
             canonical_application_statement_bytes: source
                 .canonical_application_statement_bytes
                 .clone(),
@@ -175,10 +173,6 @@ impl SetupGenerationRelinearizationRoundOnePreparationSource {
         self.roster_hash
     }
 
-    pub(crate) const fn setup_proof_context_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
-        self.setup_proof_context_hash
-    }
-
     pub(crate) const fn source_setup_intent_object_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
         self.source_setup_intent_object_hash
     }
@@ -197,10 +191,6 @@ impl SetupGenerationRelinearizationRoundOnePreparationSource {
 
     pub(crate) const fn schedule_position(&self) -> u32 {
         self.schedule_position
-    }
-
-    pub(crate) const fn root_pair(&self) -> [[u8; Hash512::BYTE_LENGTH]; 2] {
-        self.root_pair
     }
 
     pub(crate) fn canonical_application_statement_bytes(&self) -> &[u8] {
@@ -370,16 +360,6 @@ pub(crate) struct SetupGeneratedRelinearizationAggregateGeneration {
 }
 
 impl SetupGeneratedRelinearizationAggregateGeneration {
-    pub(crate) const fn components(&self) -> &[SetupGeneratedKeySwitchComponent; 2] {
-        &self.components
-    }
-
-    pub(crate) const fn source_authority(
-        &self,
-    ) -> &SetupGeneratedRelinearizationAggregateSourceAuthority {
-        &self.source_authority
-    }
-
     pub(crate) fn into_parts(
         self,
     ) -> (
@@ -463,15 +443,6 @@ impl SetupGeneratedRelinearizationRoundTwoGeneration {
                 .clone(),
             component,
         })
-    }
-
-    pub(crate) fn into_parts(
-        self,
-    ) -> (
-        SetupGeneratedKeySwitchComponent,
-        SetupGeneratedRelinearizationRoundTwoSourceAuthority,
-    ) {
-        (self.component, self.source_authority)
     }
 
     pub(super) fn retained_coefficient_payload_byte_length(&self) -> Result<u64, RefusalReason> {
@@ -1306,7 +1277,6 @@ pub(crate) struct SetupRelinearizationAggregateConstruction {
     ordered_component_material_roots: Box<[[[u8; Hash512::BYTE_LENGTH]; 2]]>,
     ordered_component_stream_descriptors: Box<[[StreamDescriptor; 2]]>,
     ordered_component_corpus_byte_offsets: Box<[[u64; 2]]>,
-    source_corpus_byte_length: u64,
     aggregate_component_bytes: [Vec<u8>; 2],
     current_component_ordinal: usize,
     current_roster_ordinal: usize,
@@ -1322,10 +1292,6 @@ pub(crate) struct SetupRelinearizationAggregateConstruction {
 }
 
 impl SetupRelinearizationAggregateConstruction {
-    pub(crate) const fn source_corpus_byte_length(&self) -> u64 {
-        self.source_corpus_byte_length
-    }
-
     pub(crate) fn next_read_request(
         &self,
     ) -> Result<Option<SetupRelinearizationAggregateSourceReadRequest>, RefusalReason> {
@@ -1695,7 +1661,6 @@ pub(crate) fn construct_generated_relinearization_aggregate(
             .into_boxed_slice(),
         ordered_component_corpus_byte_offsets: ordered_component_corpus_byte_offsets
             .into_boxed_slice(),
-        source_corpus_byte_length,
         aggregate_component_bytes: [
             vec![0_u8; component_byte_length],
             vec![0_u8; component_byte_length],
@@ -2336,7 +2301,6 @@ mod tests {
                 )
             ]
             .into_boxed_slice(),
-            source_corpus_byte_length: 0,
             aggregate_component_bytes: [
                 vec![0_u8; component_byte_length],
                 vec![0_u8; component_byte_length],

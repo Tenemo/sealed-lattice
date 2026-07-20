@@ -41,8 +41,8 @@ mod transaction;
 use transaction::external_memory_read_digest;
 
 pub(crate) use executor::{
-    ProofCancellation, ProofExternalMemoryError, ProofExternalMemoryExecutor,
-    ProofExternalMemoryExecutorError, ProofExternalMemoryUsage,
+    ProofExternalMemoryError, ProofExternalMemoryExecutor, ProofExternalMemoryExecutorError,
+    ProofExternalMemoryUsage,
 };
 pub(crate) use plan::{
     ProofExternalMemory, ProofExternalMemoryObject, ProofExternalMemoryObjectPlan,

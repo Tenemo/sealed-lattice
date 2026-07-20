@@ -1,4 +1,5 @@
 use super::*;
+use crate::foundation::ParticipantIdentity;
 
 #[test]
 fn complete_common_proof_engine_round_trip_binds_proof_statement_and_verified_source_root() {

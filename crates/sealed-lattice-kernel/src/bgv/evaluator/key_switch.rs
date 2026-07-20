@@ -15,8 +15,6 @@ use crate::bgv::evaluator::{
     prg::DeterministicSampler,
 };
 #[cfg(test)]
-use crate::bgv::key_switch_topology::canonical_residue_byte_length;
-#[cfg(test)]
 use crate::bgv::modular_arithmetic::add_mod;
 
 mod rotation;
@@ -52,70 +50,6 @@ pub(crate) struct KeySwitchKey {
 impl KeySwitchKey {
     pub(crate) fn level(&self) -> usize {
         self.topology.level()
-    }
-
-    #[cfg(test)]
-    pub(crate) fn runtime_component_canonical_bytes(&self) -> CanonicalResult<Vec<u8>> {
-        self.canonical_component_bytes(KeySwitchComponent::component_b_coefficients)
-    }
-
-    #[cfg(test)]
-    pub(crate) fn auxiliary_component_canonical_bytes(&self) -> CanonicalResult<Vec<u8>> {
-        self.canonical_component_bytes(KeySwitchComponent::component_a_coefficients)
-    }
-
-    #[cfg(test)]
-    fn canonical_component_bytes(
-        &self,
-        component_coefficients: fn(&KeySwitchComponent) -> CanonicalResult<Vec<Vec<u64>>>,
-    ) -> CanonicalResult<Vec<u8>> {
-        let expected_byte_length = usize::try_from(
-            self.topology
-                .canonical_component_wire_byte_length(POLYNOMIAL_DEGREE)?,
-        )
-        .map_err(|_| {
-            CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
-                "key-switch component wire length does not fit usize",
-            )
-        })?;
-        let mut canonical_bytes = Vec::with_capacity(expected_byte_length);
-        for component in &self.components {
-            let coefficient_limbs = component_coefficients(component)?;
-            if coefficient_limbs.len() != self.topology.extended_limb_count() {
-                return Err(CanonicalError::new(
-                    CanonicalErrorCode::MalformedLength,
-                    "key-switch component has the wrong extended-limb count",
-                ));
-            }
-            for (coefficient_limb, modulus) in coefficient_limbs
-                .iter()
-                .zip(self.topology.extended_moduli())
-            {
-                if coefficient_limb.len() != POLYNOMIAL_DEGREE
-                    || coefficient_limb
-                        .iter()
-                        .any(|coefficient| *coefficient >= *modulus)
-                {
-                    return Err(CanonicalError::new(
-                        CanonicalErrorCode::InvalidProtocolObject,
-                        "key-switch component contains malformed canonical residues",
-                    ));
-                }
-                let residue_byte_length = canonical_residue_byte_length(*modulus)?;
-                for coefficient in coefficient_limb {
-                    canonical_bytes
-                        .extend_from_slice(&coefficient.to_le_bytes()[..residue_byte_length]);
-                }
-            }
-        }
-        if canonical_bytes.len() != expected_byte_length {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
-                "key-switch component canonical bytes have the wrong length",
-            ));
-        }
-        Ok(canonical_bytes)
     }
 }
 
@@ -313,28 +247,6 @@ pub(crate) struct KeySwitchComponent {
 
 impl KeySwitchComponent {
     #[cfg(test)]
-    pub(crate) fn component_b_coefficients(&self) -> CanonicalResult<Vec<Vec<u64>>> {
-        self.component_b_ntt
-            .iter()
-            .zip(self.moduli.iter())
-            .map(|(component_b_limb_ntt, modulus)| {
-                inverse_negacyclic_ntt(component_b_limb_ntt, *modulus)
-            })
-            .collect()
-    }
-
-    #[cfg(test)]
-    pub(crate) fn component_a_coefficients(&self) -> CanonicalResult<Vec<Vec<u64>>> {
-        self.component_a_ntt
-            .iter()
-            .zip(self.moduli.iter())
-            .map(|(component_a_limb_ntt, modulus)| {
-                inverse_negacyclic_ntt(component_a_limb_ntt, *modulus)
-            })
-            .collect()
-    }
-
-    #[cfg(test)]
     fn from_coefficients(
         component_b: Vec<Vec<u64>>,
         component_a: Vec<Vec<u64>>,
@@ -405,7 +317,7 @@ fn generate_key_switch_key(
         ));
     }
     let extended_moduli = topology.extended_moduli();
-    let secret_residues = secret_residues_for_moduli(key.secret(), &extended_moduli);
+    let secret_residues = secret_residues_for_moduli(key.secret(), extended_moduli);
     let components = (0..topology.data_block_count())
         .map(|block_index| {
             generate_key_switch_component_for_block(

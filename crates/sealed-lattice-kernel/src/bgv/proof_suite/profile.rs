@@ -37,7 +37,7 @@ use super::{
 #[cfg(test)]
 use super::{
     PROOF_BASE_FIELD_MAXIMUM_TWO_ADIC_GENERATOR, PROOF_CHALLENGE_EXTENSION_POLYNOMIAL_COEFFICIENTS,
-    validate_proof_field_profile,
+    RelationPlanVariant, SuiteModulusReference, validate_proof_field_profile,
     zero_knowledge::{TraceMaskObservationCoordinateCatalog, TraceMaskSurjectivityCertificate},
 };
 
@@ -566,6 +566,12 @@ impl FirstProfileRootTopology {
 }
 
 #[cfg(test)]
+use canonical_profile_artifact::canonical_u64_list;
+
+#[cfg(test)]
+pub(crate) use canonical_profile_artifact::ProofProfileSet;
+
+#[cfg(test)]
 mod canonical_profile_artifact {
     use super::*;
 
@@ -598,30 +604,6 @@ mod canonical_profile_artifact {
             };
             endpoint.validate_presence_pattern()?;
             Ok(endpoint)
-        }
-
-        pub(crate) const fn application_statement_schema_identifier(self) -> u16 {
-            self.application_statement_schema_identifier
-        }
-
-        pub(crate) const fn roster_position(self) -> Option<u16> {
-            self.roster_position
-        }
-
-        pub(crate) const fn schedule_position(self) -> Option<u32> {
-            self.schedule_position
-        }
-
-        pub(crate) const fn top_count(self) -> Option<u16> {
-            self.top_count
-        }
-
-        pub(crate) const fn producer_sequence(self) -> Option<u64> {
-            self.producer_sequence
-        }
-
-        pub(crate) const fn verifier_source_ordinal(self) -> u32 {
-            self.verifier_source_ordinal
         }
 
         fn validate_presence_pattern(&self) -> Result<(), ProofProfileError> {
@@ -723,18 +705,6 @@ mod canonical_profile_artifact {
                 consumer_endpoint,
                 construction_kind,
             })
-        }
-
-        pub(crate) const fn producer_endpoint(self) -> RelationRootEndpoint {
-            self.producer_endpoint
-        }
-
-        pub(crate) const fn consumer_endpoint(self) -> RelationRootEndpoint {
-            self.consumer_endpoint
-        }
-
-        pub(crate) const fn construction_kind(self) -> RelationRootConstructionKind {
-            self.construction_kind
         }
 
         fn canonical_tuple(self) -> Result<CanonicalTuple, ProofProfileError> {
@@ -2139,7 +2109,7 @@ mod canonical_profile_artifact {
         Ok(())
     }
 
-    fn canonical_u64_list(values: &[u64]) -> Result<CanonicalItem, ProofProfileError> {
+    pub(super) fn canonical_u64_list(values: &[u64]) -> Result<CanonicalItem, ProofProfileError> {
         let items = values
             .iter()
             .copied()
@@ -2216,269 +2186,270 @@ mod canonical_profile_artifact {
             .encode_with_limits(&generated_tuple_encoding_limits(tuple, false)?)
             .map_err(canonical_encoding_error)
     }
-}
+    #[cfg(test)]
+    mod tests {
+        use super::*;
 
-#[cfg(test)]
-use canonical_profile_artifact::*;
-
-#[cfg(test)]
-pub(crate) use canonical_profile_artifact::ProofProfileSet;
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn synthetic_anchor_root(
-        family: u16,
-        source_ordinal: u32,
-        root_use: BoundTreeRootUse,
-    ) -> BoundRootSlot {
-        BoundRootSlot {
-            endpoint: RelationRootEndpoint::new(family, Some(0), None, None, None, source_ordinal)
+        fn synthetic_anchor_root(
+            family: u16,
+            source_ordinal: u32,
+            root_use: BoundTreeRootUse,
+        ) -> BoundRootSlot {
+            BoundRootSlot {
+                endpoint: RelationRootEndpoint::new(
+                    family,
+                    Some(0),
+                    None,
+                    None,
+                    None,
+                    source_ordinal,
+                )
                 .expect("the synthetic endpoint follows its family shape"),
-            construction_kind: RelationRootConstructionKind::SetupPolynomial,
-            root_use,
-            ordered_column_ordinals: vec![0],
-            shape: RelationRootShape {
-                trace_domain_size: 1 << 15,
-                evaluation_domain_size: 1 << 19,
-                ordered_columns: vec![RelationRootColumnShape {
-                    value_type: RelationColumnValueType::BaseField,
-                    source_degree_bound_exclusive: 1 << 15,
-                    canonical_residue_modulus: None,
-                }],
-            },
+                construction_kind: RelationRootConstructionKind::SetupPolynomial,
+                root_use,
+                ordered_column_ordinals: vec![0],
+                shape: RelationRootShape {
+                    trace_domain_size: 1 << 15,
+                    evaluation_domain_size: 1 << 19,
+                    ordered_columns: vec![RelationRootColumnShape {
+                        value_type: RelationColumnValueType::BaseField,
+                        source_degree_bound_exclusive: 1 << 15,
+                        canonical_residue_modulus: None,
+                    }],
+                },
+            }
         }
-    }
 
-    #[test]
-    fn selected_field_and_schedule_are_canonical_and_nonnegotiable() {
-        let field = ProofFieldProfile::selected().expect("selected field is valid");
-        assert_eq!(field.validate(), Ok(()));
-        let ordinary_family = ProofFamilies::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER;
-        let committed_material_family =
-            ProofFamilies::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER;
-        assert_eq!(
-            ProofFieldSchedule::selected(ordinary_family).validate(ordinary_family, 1),
-            Ok(())
-        );
-        assert_eq!(
-            ProofFieldSchedule::selected(committed_material_family)
-                .validate(committed_material_family, 1),
-            Ok(())
-        );
-        assert_ne!(
-            ProofFieldSchedule::selected(ordinary_family),
-            ProofFieldSchedule::selected(committed_material_family)
-        );
-        for public_aggregate_family in [
-            ProofFamilies::COLLECTIVE_PUBLIC_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
-            ProofFamilies::RKG_ROUND_ONE_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
-            ProofFamilies::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
-        ] {
+        #[test]
+        fn selected_field_and_schedule_are_canonical_and_nonnegotiable() {
+            let field = ProofFieldProfile::selected().expect("selected field is valid");
+            assert_eq!(field.validate(), Ok(()));
+            let ordinary_family = ProofFamilies::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER;
+            let committed_material_family =
+                ProofFamilies::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER;
             assert_eq!(
-                ProofFieldSchedule::selected(public_aggregate_family),
-                ProofFieldSchedule::selected(ordinary_family)
-            );
-            assert_eq!(
-                ProofFieldSchedule::selected(public_aggregate_family)
-                    .validate(public_aggregate_family, 1),
+                ProofFieldSchedule::selected(ordinary_family).validate(ordinary_family, 1),
                 Ok(())
             );
-        }
-
-        let mut wrong_field = field.clone();
-        wrong_field.maximum_two_adic_subgroup_generator = 1;
-        assert_eq!(wrong_field.validate(), Err(ProofProfileError::InvalidField));
-
-        let mut wrong_schedule = ProofFieldSchedule::selected(ordinary_family);
-        wrong_schedule.unique_query_count -= 1;
-        assert_eq!(
-            wrong_schedule.validate(ordinary_family, 1),
-            Err(ProofProfileError::InvalidSchedule),
-        );
-        assert_eq!(
-            ProofFieldSchedule::selected(ordinary_family).validate(committed_material_family, 1),
-            Err(ProofProfileError::InvalidSchedule),
-        );
-    }
-
-    #[test]
-    fn root_endpoint_presence_is_derived_from_the_family() {
-        assert!(
-            RelationRootEndpoint::new(
-                ProofFamilies::RELINEARIZATION_ROUND_TWO_STATEMENT_SCHEMA_IDENTIFIER,
-                Some(0),
-                Some(3),
-                None,
-                None,
-                4,
-            )
-            .is_ok()
-        );
-        assert_eq!(
-            RelationRootEndpoint::new(
-                ProofFamilies::RELINEARIZATION_ROUND_TWO_STATEMENT_SCHEMA_IDENTIFIER,
-                Some(0),
-                None,
-                None,
-                None,
-                4,
-            ),
-            Err(ProofProfileError::InvalidRootEndpoint),
-        );
-        assert!(
-            RelationRootEndpoint::new(
-                ProofFamilies::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
-                None,
-                None,
-                Some(20),
-                None,
-                0,
-            )
-            .is_ok()
-        );
-        assert_eq!(
-            RelationRootEndpoint::new(
-                ProofFamilies::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
-                None,
-                None,
-                Some(21),
-                None,
-                0,
-            ),
-            Err(ProofProfileError::InvalidRootEndpoint),
-        );
-        assert_eq!(
-            RelationRootEndpoint::new(
-                ProofFamilies::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
-                None,
-                Some(0),
-                Some(20),
-                None,
-                0,
-            ),
-            Err(ProofProfileError::InvalidRootEndpoint),
-        );
-        assert!(
-            RelationRootEndpoint::new(
-                ProofFamilies::BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER,
-                Some(9),
-                None,
-                None,
-                Some(2),
-                1,
-            )
-            .is_ok()
-        );
-    }
-
-    #[test]
-    fn anchor_edge_rejects_an_input_as_its_producer() {
-        let producer = synthetic_anchor_root(
-            ProofFamilies::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER,
-            3,
-            BoundTreeRootUse::Input,
-        );
-        let consumer = synthetic_anchor_root(
-            ProofFamilies::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
-            4,
-            BoundTreeRootUse::Input,
-        );
-        let mut edges = Vec::new();
-        let mut assigned_consumers = BTreeSet::new();
-
-        assert_eq!(
-            append_root_edge(
-                &mut edges,
-                &mut assigned_consumers,
-                &producer,
-                &consumer,
-                RelationRootConstructionKind::SetupPolynomial,
-            ),
-            Err(ProofProfileError::MissingRootProducer),
-        );
-        assert!(edges.is_empty());
-        assert!(assigned_consumers.is_empty());
-    }
-
-    #[test]
-    fn anchor_edge_rejects_a_second_producer_for_one_consumer() {
-        let first_producer = synthetic_anchor_root(
-            ProofFamilies::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER,
-            3,
-            BoundTreeRootUse::Output,
-        );
-        let second_producer = synthetic_anchor_root(
-            ProofFamilies::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER,
-            5,
-            BoundTreeRootUse::Output,
-        );
-        let consumer = synthetic_anchor_root(
-            ProofFamilies::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
-            4,
-            BoundTreeRootUse::Input,
-        );
-        let mut edges = Vec::new();
-        let mut assigned_consumers = BTreeSet::new();
-
-        append_root_edge(
-            &mut edges,
-            &mut assigned_consumers,
-            &first_producer,
-            &consumer,
-            RelationRootConstructionKind::SetupPolynomial,
-        )
-        .expect("the first unique producer is admissible");
-        assert_eq!(
-            append_root_edge(
-                &mut edges,
-                &mut assigned_consumers,
-                &second_producer,
-                &consumer,
-                RelationRootConstructionKind::SetupPolynomial,
-            ),
-            Err(ProofProfileError::AmbiguousRootProducer),
-        );
-        assert_eq!(edges.len(), 1);
-    }
-
-    #[test]
-    fn complete_family_catalog_is_strictly_increasing() {
-        assert!(
-            FIRST_PROFILE_APPLICATION_FAMILIES
-                .windows(2)
-                .all(|pair| pair[0] < pair[1])
-        );
-        for family in FIRST_PROFILE_APPLICATION_FAMILIES {
-            assert!(ProofFamilyProfile::selected(family).is_ok());
-        }
-        assert_eq!(
-            ProofFamilyProfile::selected(0x9999),
-            Err(ProofProfileError::UnsupportedFamily),
-        );
-    }
-
-    #[test]
-    fn persistent_root_views_use_each_family_selected_query_schedule() {
-        for family in FIRST_PROFILE_APPLICATION_FAMILIES {
-            let expected_unique_query_count = if matches!(
-                family,
-                ProofFamilies::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER
-                    | ProofFamilies::AGGREGATE_THRESHOLD_SHARE_STATEMENT_SCHEMA_IDENTIFIER
-            ) {
-                192
-            } else {
-                168
-            };
             assert_eq!(
-                selected_unique_query_count(family),
-                Ok(expected_unique_query_count),
+                ProofFieldSchedule::selected(committed_material_family)
+                    .validate(committed_material_family, 1),
+                Ok(())
+            );
+            assert_ne!(
+                ProofFieldSchedule::selected(ordinary_family),
+                ProofFieldSchedule::selected(committed_material_family)
+            );
+            for public_aggregate_family in [
+                ProofFamilies::COLLECTIVE_PUBLIC_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+                ProofFamilies::RKG_ROUND_ONE_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+                ProofFamilies::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+            ] {
+                assert_eq!(
+                    ProofFieldSchedule::selected(public_aggregate_family),
+                    ProofFieldSchedule::selected(ordinary_family)
+                );
+                assert_eq!(
+                    ProofFieldSchedule::selected(public_aggregate_family)
+                        .validate(public_aggregate_family, 1),
+                    Ok(())
+                );
+            }
+
+            let mut wrong_field = field.clone();
+            wrong_field.maximum_two_adic_subgroup_generator = 1;
+            assert_eq!(wrong_field.validate(), Err(ProofProfileError::InvalidField));
+
+            let mut wrong_schedule = ProofFieldSchedule::selected(ordinary_family);
+            wrong_schedule.unique_query_count -= 1;
+            assert_eq!(
+                wrong_schedule.validate(ordinary_family, 1),
+                Err(ProofProfileError::InvalidSchedule),
+            );
+            assert_eq!(
+                ProofFieldSchedule::selected(ordinary_family)
+                    .validate(committed_material_family, 1),
+                Err(ProofProfileError::InvalidSchedule),
             );
         }
-        assert_eq!(
-            selected_unique_query_count(0x9999),
-            Err(ProofProfileError::UnsupportedFamily),
-        );
+
+        #[test]
+        fn root_endpoint_presence_is_derived_from_the_family() {
+            assert!(
+                RelationRootEndpoint::new(
+                    ProofFamilies::RELINEARIZATION_ROUND_TWO_STATEMENT_SCHEMA_IDENTIFIER,
+                    Some(0),
+                    Some(3),
+                    None,
+                    None,
+                    4,
+                )
+                .is_ok()
+            );
+            assert_eq!(
+                RelationRootEndpoint::new(
+                    ProofFamilies::RELINEARIZATION_ROUND_TWO_STATEMENT_SCHEMA_IDENTIFIER,
+                    Some(0),
+                    None,
+                    None,
+                    None,
+                    4,
+                ),
+                Err(ProofProfileError::InvalidRootEndpoint),
+            );
+            assert!(
+                RelationRootEndpoint::new(
+                    ProofFamilies::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+                    None,
+                    None,
+                    Some(20),
+                    None,
+                    0,
+                )
+                .is_ok()
+            );
+            assert_eq!(
+                RelationRootEndpoint::new(
+                    ProofFamilies::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+                    None,
+                    None,
+                    Some(21),
+                    None,
+                    0,
+                ),
+                Err(ProofProfileError::InvalidRootEndpoint),
+            );
+            assert_eq!(
+                RelationRootEndpoint::new(
+                    ProofFamilies::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
+                    None,
+                    Some(0),
+                    Some(20),
+                    None,
+                    0,
+                ),
+                Err(ProofProfileError::InvalidRootEndpoint),
+            );
+            assert!(
+                RelationRootEndpoint::new(
+                    ProofFamilies::BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER,
+                    Some(9),
+                    None,
+                    None,
+                    Some(2),
+                    1,
+                )
+                .is_ok()
+            );
+        }
+
+        #[test]
+        fn anchor_edge_rejects_an_input_as_its_producer() {
+            let producer = synthetic_anchor_root(
+                ProofFamilies::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER,
+                3,
+                BoundTreeRootUse::Input,
+            );
+            let consumer = synthetic_anchor_root(
+                ProofFamilies::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+                4,
+                BoundTreeRootUse::Input,
+            );
+            let mut edges = Vec::new();
+            let mut assigned_consumers = BTreeSet::new();
+
+            assert_eq!(
+                append_root_edge(
+                    &mut edges,
+                    &mut assigned_consumers,
+                    &producer,
+                    &consumer,
+                    RelationRootConstructionKind::SetupPolynomial,
+                ),
+                Err(ProofProfileError::MissingRootProducer),
+            );
+            assert!(edges.is_empty());
+            assert!(assigned_consumers.is_empty());
+        }
+
+        #[test]
+        fn anchor_edge_rejects_a_second_producer_for_one_consumer() {
+            let first_producer = synthetic_anchor_root(
+                ProofFamilies::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER,
+                3,
+                BoundTreeRootUse::Output,
+            );
+            let second_producer = synthetic_anchor_root(
+                ProofFamilies::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER,
+                5,
+                BoundTreeRootUse::Output,
+            );
+            let consumer = synthetic_anchor_root(
+                ProofFamilies::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
+                4,
+                BoundTreeRootUse::Input,
+            );
+            let mut edges = Vec::new();
+            let mut assigned_consumers = BTreeSet::new();
+
+            append_root_edge(
+                &mut edges,
+                &mut assigned_consumers,
+                &first_producer,
+                &consumer,
+                RelationRootConstructionKind::SetupPolynomial,
+            )
+            .expect("the first unique producer is admissible");
+            assert_eq!(
+                append_root_edge(
+                    &mut edges,
+                    &mut assigned_consumers,
+                    &second_producer,
+                    &consumer,
+                    RelationRootConstructionKind::SetupPolynomial,
+                ),
+                Err(ProofProfileError::AmbiguousRootProducer),
+            );
+            assert_eq!(edges.len(), 1);
+        }
+
+        #[test]
+        fn complete_family_catalog_is_strictly_increasing() {
+            assert!(
+                FIRST_PROFILE_APPLICATION_FAMILIES
+                    .windows(2)
+                    .all(|pair| pair[0] < pair[1])
+            );
+            for family in FIRST_PROFILE_APPLICATION_FAMILIES {
+                assert!(ProofFamilyProfile::selected(family).is_ok());
+            }
+            assert_eq!(
+                ProofFamilyProfile::selected(0x9999),
+                Err(ProofProfileError::UnsupportedFamily),
+            );
+        }
+
+        #[test]
+        fn persistent_root_views_use_each_family_selected_query_schedule() {
+            for family in FIRST_PROFILE_APPLICATION_FAMILIES {
+                let expected_unique_query_count = if matches!(
+                    family,
+                    ProofFamilies::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER
+                        | ProofFamilies::AGGREGATE_THRESHOLD_SHARE_STATEMENT_SCHEMA_IDENTIFIER
+                ) {
+                    192
+                } else {
+                    168
+                };
+                assert_eq!(
+                    selected_unique_query_count(family),
+                    Ok(expected_unique_query_count),
+                );
+            }
+            assert_eq!(
+                selected_unique_query_count(0x9999),
+                Err(ProofProfileError::UnsupportedFamily),
+            );
+        }
     }
 }

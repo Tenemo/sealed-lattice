@@ -966,14 +966,6 @@ fn browser_transaction_boundary_enforces_both_safety_bounds_and_redacts_payloads
     assert!(debug_output.contains("byte_length: 4"));
 }
 
-struct RequestedCancellation;
-
-impl ProofCancellation for RequestedCancellation {
-    fn cancellation_requested(&self) -> bool {
-        true
-    }
-}
-
 #[test]
 fn cancellation_transactionally_removes_secret_scratch() {
     let first = ProofExternalMemoryObject::new(0);
@@ -985,11 +977,8 @@ fn cancellation_transactionally_removes_secret_scratch() {
     executor
         .append_object_bytes(&mut storage, first, &[1, 2, 3, 4])
         .expect("partial secret scratch writes");
-    assert!(matches!(
-        executor.check_cancellation(&mut storage, &RequestedCancellation),
-        Err(ProofExternalMemoryExecutorError::Execution(
-            ProofExternalMemoryError::Cancelled
-        )),
-    ));
+    executor
+        .cancel(&mut storage)
+        .expect("cancellation removes every live object");
     assert!(storage.committed.is_empty());
 }

@@ -55,13 +55,9 @@ pub(in crate::bgv) struct VerifiedPublicRandomness {
     context: VerifiedSetupVerificationContext,
     ordered_participant_identities: Box<[ParticipantIdentity]>,
     ordered_setup_intent_object_hashes: Box<[Hash512]>,
-    ordered_setup_intent_canonical_byte_lengths: Box<[u64]>,
     ordered_action_randomness_commitments: Box<[Hash512]>,
     ordered_commitment_object_hashes: Box<[Hash512]>,
-    ordered_commitment_canonical_byte_lengths: Box<[u64]>,
     ordered_reveal_object_hashes: Box<[Hash512]>,
-    ordered_reveal_canonical_byte_lengths: Box<[u64]>,
-    randomness_commitment_root: Hash512,
     public_setup_seed: Hash512,
     setup_proof_context_hash: Hash512,
 }
@@ -79,10 +75,6 @@ impl VerifiedPublicRandomness {
         &self.ordered_setup_intent_object_hashes
     }
 
-    pub(in crate::bgv) fn ordered_setup_intent_canonical_byte_lengths(&self) -> &[u64] {
-        &self.ordered_setup_intent_canonical_byte_lengths
-    }
-
     pub(in crate::bgv) fn ordered_action_randomness_commitments(&self) -> &[Hash512] {
         &self.ordered_action_randomness_commitments
     }
@@ -91,20 +83,8 @@ impl VerifiedPublicRandomness {
         &self.ordered_commitment_object_hashes
     }
 
-    pub(in crate::bgv) fn ordered_commitment_canonical_byte_lengths(&self) -> &[u64] {
-        &self.ordered_commitment_canonical_byte_lengths
-    }
-
     pub(in crate::bgv) fn ordered_reveal_object_hashes(&self) -> &[Hash512] {
         &self.ordered_reveal_object_hashes
-    }
-
-    pub(in crate::bgv) fn ordered_reveal_canonical_byte_lengths(&self) -> &[u64] {
-        &self.ordered_reveal_canonical_byte_lengths
-    }
-
-    pub(in crate::bgv) const fn randomness_commitment_root(&self) -> Hash512 {
-        self.randomness_commitment_root
     }
 
     pub(in crate::bgv) const fn public_setup_seed(&self) -> Hash512 {
@@ -144,8 +124,6 @@ impl VerifiedPublicRandomness {
                 participant_count
             ]
             .into_boxed_slice(),
-            ordered_setup_intent_canonical_byte_lengths: vec![101; participant_count]
-                .into_boxed_slice(),
             ordered_action_randomness_commitments: vec![
                 Hash512::from_bytes([0x42; 64]);
                 participant_count
@@ -156,12 +134,8 @@ impl VerifiedPublicRandomness {
                 participant_count
             ]
             .into_boxed_slice(),
-            ordered_commitment_canonical_byte_lengths: vec![102; participant_count]
-                .into_boxed_slice(),
             ordered_reveal_object_hashes: vec![Hash512::from_bytes([0x44; 64]); participant_count]
                 .into_boxed_slice(),
-            ordered_reveal_canonical_byte_lengths: vec![103; participant_count].into_boxed_slice(),
-            randomness_commitment_root: Hash512::from_bytes([0x45; 64]),
             public_setup_seed,
             setup_proof_context_hash,
         }
@@ -192,7 +166,6 @@ pub(in crate::bgv) fn verify_public_randomness_board_sources(
     };
 
     let mut ordered_setup_intent_object_hashes = Vec::with_capacity(participant_count);
-    let mut ordered_setup_intent_canonical_byte_lengths = Vec::with_capacity(participant_count);
     let mut ordered_action_randomness_commitments = Vec::with_capacity(participant_count);
     for (roster_position, source) in setup_intent_sources.iter().enumerate() {
         require_source_coordinate(
@@ -204,12 +177,10 @@ pub(in crate::bgv) fn verify_public_randomness_board_sources(
         )?;
         let payload = source.setup_intent_payload()?;
         ordered_setup_intent_object_hashes.push(source.object_hash());
-        ordered_setup_intent_canonical_byte_lengths.push(verified_carrier_byte_length(source)?);
         ordered_action_randomness_commitments.push(payload.action_randomness_commitment());
     }
 
     let mut ordered_commitment_object_hashes = Vec::with_capacity(participant_count);
-    let mut ordered_commitment_canonical_byte_lengths = Vec::with_capacity(participant_count);
     let mut ordered_contribution_commitments = Vec::with_capacity(participant_count);
     let mut ordered_participant_identities = Vec::with_capacity(participant_count);
     for (roster_position, source) in commitment_sources.iter().enumerate() {
@@ -230,7 +201,6 @@ pub(in crate::bgv) fn verify_public_randomness_board_sources(
             return Err(RefusalReason::WrongHashOrRoot);
         }
         ordered_commitment_object_hashes.push(source.object_hash());
-        ordered_commitment_canonical_byte_lengths.push(verified_carrier_byte_length(source)?);
         ordered_contribution_commitments.push(payload.contribution_commitment());
         ordered_participant_identities.push(expected_participant_identity);
     }
@@ -238,7 +208,6 @@ pub(in crate::bgv) fn verify_public_randomness_board_sources(
     let randomness_commitment_root =
         derive_randomness_commitment_root(context, &ordered_commitment_object_hashes)?;
     let mut ordered_reveal_object_hashes = Vec::with_capacity(participant_count);
-    let mut ordered_reveal_canonical_byte_lengths = Vec::with_capacity(participant_count);
     let mut ordered_contributions_and_salts = Vec::with_capacity(participant_count);
     for (roster_position, source) in reveal_sources.iter().enumerate() {
         let participant_identity = ordered_participant_identities[roster_position];
@@ -277,7 +246,6 @@ pub(in crate::bgv) fn verify_public_randomness_board_sources(
             return Err(RefusalReason::WrongHashOrRoot);
         }
         ordered_reveal_object_hashes.push(source.object_hash());
-        ordered_reveal_canonical_byte_lengths.push(verified_carrier_byte_length(source)?);
         ordered_contributions_and_salts.push(contribution_and_salt);
     }
 
@@ -291,27 +259,13 @@ pub(in crate::bgv) fn verify_public_randomness_board_sources(
         context,
         ordered_participant_identities: ordered_participant_identities.into_boxed_slice(),
         ordered_setup_intent_object_hashes: ordered_setup_intent_object_hashes.into_boxed_slice(),
-        ordered_setup_intent_canonical_byte_lengths: ordered_setup_intent_canonical_byte_lengths
-            .into_boxed_slice(),
         ordered_action_randomness_commitments: ordered_action_randomness_commitments
             .into_boxed_slice(),
         ordered_commitment_object_hashes: ordered_commitment_object_hashes.into_boxed_slice(),
-        ordered_commitment_canonical_byte_lengths: ordered_commitment_canonical_byte_lengths
-            .into_boxed_slice(),
         ordered_reveal_object_hashes: ordered_reveal_object_hashes.into_boxed_slice(),
-        ordered_reveal_canonical_byte_lengths: ordered_reveal_canonical_byte_lengths
-            .into_boxed_slice(),
-        randomness_commitment_root,
         public_setup_seed,
         setup_proof_context_hash,
     })
-}
-
-fn verified_carrier_byte_length(
-    source: &VerifiedBoardApplicationSource,
-) -> Result<u64, RefusalReason> {
-    u64::try_from(source.canonical_carrier_bytes().len())
-        .map_err(|_| RefusalReason::OutsideSupportedProfile)
 }
 
 fn require_source_coordinate(
@@ -722,17 +676,9 @@ mod tests {
             .iter()
             .map(VerifiedBoardApplicationSource::object_hash)
             .collect::<Vec<_>>();
-        let expected_setup_canonical_byte_lengths = setup_intents
-            .iter()
-            .map(|source| u64::try_from(source.canonical_carrier_bytes().len()).unwrap())
-            .collect::<Vec<_>>();
         let expected_commitment_hashes = commitments
             .iter()
             .map(VerifiedBoardApplicationSource::object_hash)
-            .collect::<Vec<_>>();
-        let expected_commitment_canonical_byte_lengths = commitments
-            .iter()
-            .map(|source| u64::try_from(source.canonical_carrier_bytes().len()).unwrap())
             .collect::<Vec<_>>();
         let expected_action_randomness_commitments = (0..FOUNDATION_PROFILE.participant_count)
             .map(|roster_position| {
@@ -742,10 +688,6 @@ mod tests {
         let expected_reveal_hashes = reveals
             .iter()
             .map(VerifiedBoardApplicationSource::object_hash)
-            .collect::<Vec<_>>();
-        let expected_reveal_canonical_byte_lengths = reveals
-            .iter()
-            .map(|source| u64::try_from(source.canonical_carrier_bytes().len()).unwrap())
             .collect::<Vec<_>>();
         let terminal = verify_public_randomness_board_sources(setup_intents, commitments, reveals)
             .expect("authenticated randomness terminal");
@@ -759,10 +701,6 @@ mod tests {
             expected_setup_hashes
         );
         assert_eq!(
-            terminal.ordered_setup_intent_canonical_byte_lengths(),
-            expected_setup_canonical_byte_lengths
-        );
-        assert_eq!(
             terminal.ordered_action_randomness_commitments(),
             expected_action_randomness_commitments
         );
@@ -771,21 +709,12 @@ mod tests {
             expected_commitment_hashes
         );
         assert_eq!(
-            terminal.ordered_commitment_canonical_byte_lengths(),
-            expected_commitment_canonical_byte_lengths
-        );
-        assert_eq!(
             terminal.ordered_reveal_object_hashes(),
             expected_reveal_hashes
-        );
-        assert_eq!(
-            terminal.ordered_reveal_canonical_byte_lengths(),
-            expected_reveal_canonical_byte_lengths
         );
         let expected_root =
             derive_randomness_commitment_root(fixture.context, &expected_commitment_hashes)
                 .unwrap();
-        assert_eq!(terminal.randomness_commitment_root(), expected_root);
         let expected_public_setup_seed =
             derive_public_setup_seed(fixture.context, expected_root, &contributions_and_salts)
                 .unwrap();

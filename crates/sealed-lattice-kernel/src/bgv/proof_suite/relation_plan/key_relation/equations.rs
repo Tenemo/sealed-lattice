@@ -487,25 +487,6 @@ impl<'context> KeyRelationPlanBuilder<'context> {
         Ok(limbs)
     }
 
-    pub(in crate::bgv::proof_suite::relation_plan) fn add_unsigned_vector_trits(
-        &mut self,
-        trit_count: usize,
-    ) -> Result<[Vec<u32>; 2], RelationPlanError> {
-        if trit_count == 0 {
-            return Err(RelationPlanError::InvalidConstraint);
-        }
-        let mut halves = Vec::with_capacity(2);
-        for _ in 0..2 {
-            let target = self.push_prover_column(ProofTreePhase::Base)?;
-            let trits = self.add_trit_columns(trit_count, ProofTreePhase::Base)?;
-            self.certify_unsigned_recomposition(target, TRIT_RADIX, &trits)?;
-            halves.push(trits);
-        }
-        halves
-            .try_into()
-            .map_err(|_| RelationPlanError::CountOverflow)
-    }
-
     pub(in crate::bgv::proof_suite::relation_plan) fn add_bounded_unsigned_vector_trits(
         &mut self,
         maximum: &BigUint,
@@ -775,15 +756,6 @@ impl<'context> KeyRelationPlanBuilder<'context> {
                 .try_into()
                 .map_err(|_| RelationPlanError::CountOverflow)?,
         })
-    }
-
-    pub(in crate::bgv::proof_suite::relation_plan) fn add_recentered_split_verifier_vector(
-        &mut self,
-        source_key: &KeyVerifierSourceKey,
-        modulus_reference: SuiteModulusReference,
-    ) -> Result<ReversibleShiftedSmallVector, RelationPlanError> {
-        self.add_recentered_split_verifier_vector_with_witness(source_key, modulus_reference)
-            .map(|witness| witness.centered)
     }
 
     pub(in crate::bgv::proof_suite::relation_plan) fn add_recentered_split_verifier_vector_with_witness(

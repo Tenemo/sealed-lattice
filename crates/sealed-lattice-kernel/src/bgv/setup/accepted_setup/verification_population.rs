@@ -32,7 +32,7 @@ use crate::{
     },
     foundation::{
         CanonicalDecodeLimits, ProofApplicationBinding, ProofApplicationSlot,
-        ProofApplicationSlotCeilings, ProofObjectHeader, RefusalReason,
+        ProofApplicationSlotCeilings, ProofObjectHeader,
     },
 };
 
@@ -859,10 +859,6 @@ pub extern "C" fn sealed_lattice_accepted_setup_public_key_share_discard_termina
     .map_or_else(runtime_error_status, |()| 0)
 }
 
-const fn refusal_status(refusal_reason: RefusalReason) -> u32 {
-    refusal_reason.canonical_code() as u32
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -913,13 +909,5 @@ mod tests {
             registry.take(handle, AcceptedSetupProofFamily::PublicKeyShare),
             Err(CommonProofRuntimeError::UnknownOrStaleHandle)
         ));
-    }
-
-    #[test]
-    fn refusal_status_uses_canonical_code() {
-        assert_eq!(
-            refusal_status(RefusalReason::WrongContext),
-            RefusalReason::WrongContext.canonical_code() as u32
-        );
     }
 }

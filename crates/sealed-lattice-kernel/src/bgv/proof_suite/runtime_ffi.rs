@@ -21,8 +21,8 @@ use crate::foundation::{
 };
 
 use super::runtime::{
-    CommonProofVerificationReadbackAccounting, common_proof_registry_entry_count,
-    require_common_proof_worker_process_admission_capacity,
+    CommonProofVerificationReadbackAccounting, ExpectedCommonProofPackageBindings,
+    common_proof_registry_entry_count, require_common_proof_worker_process_admission_capacity,
     require_common_proof_worker_process_ownership_limits,
 };
 use super::{
@@ -289,12 +289,14 @@ impl CommonProofVerificationFamilyAdapter {
         self.prepared.verification_binding_hash()
     }
 
+    #[cfg(test)]
     fn statement_source(
         &self,
     ) -> Result<&super::VerifiedCommonProofStatementSource, CommonProofRuntimeError> {
         self.prepared.statement_source()
     }
 
+    #[cfg(test)]
     fn into_statement_source(
         self,
     ) -> Result<super::VerifiedCommonProofStatementSource, CommonProofRuntimeError> {
@@ -494,6 +496,7 @@ pub(crate) fn with_common_proof_selected_suite<Output>(
 
 /// Retains one exact-family verifier adapter assembled from positive upstream
 /// capabilities. Proof bytes cannot construct this adapter.
+#[cfg(test)]
 pub(crate) fn retain_common_proof_verification_family_adapter(
     adapter: CommonProofVerificationFamilyAdapter,
 ) -> Result<u32, CommonProofRuntimeError> {
@@ -608,6 +611,7 @@ pub(crate) fn cancel_common_proof_verification_family_adapter_reservation(
 /// not enter the generic worker. The fallible destination preflight runs while
 /// the adapter remains retained; only the infallible callback receives source
 /// ownership, so a rejected destination leaves the same adapter retryable.
+#[cfg(test)]
 pub(crate) fn preflight_and_restore_common_proof_verification_family_adapter_statement_source<
     Preflight,
     Output,
@@ -641,6 +645,7 @@ pub(crate) fn preflight_and_restore_common_proof_verification_family_adapter_sta
 /// Restores the exact family-minted statement source from a prepared verifier
 /// that never entered the browser worker. The prepared handle stays live when
 /// destination preflight refuses the transition.
+#[cfg(test)]
 pub(crate) fn preflight_and_restore_prepared_common_proof_verification_statement_source<
     Preflight,
     Output,
@@ -674,6 +679,7 @@ pub(crate) fn preflight_and_restore_prepared_common_proof_verification_statement
 /// Cancels an active, cancelled, or failed verifier operation and restores its
 /// original family-minted statement source. A verifier refusal may consume its
 /// decoder state, but it never consumes this independent linear authority.
+#[cfg(test)]
 pub(crate) fn preflight_and_restore_common_proof_verification_operation_statement_source<
     Preflight,
     Output,
@@ -804,16 +810,6 @@ pub(crate) fn bind_generated_common_proofs_to_verified_statement_sources(
     })
 }
 
-pub(crate) fn release_generated_common_proof_capability(
-    generated_proof_handle: u32,
-) -> Result<(), CommonProofRuntimeError> {
-    COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
-        registry.borrow_mut().runtime.release_generated_proof(
-            GeneratedCommonProofCapabilityHandle::from_identifier(generated_proof_handle),
-        )
-    })
-}
-
 pub(crate) fn retire_generated_common_proof_capabilities(
     generated_proof_handles: &[u32],
 ) -> Result<(), CommonProofRuntimeError> {
@@ -848,13 +844,7 @@ pub(crate) fn preflight_generated_common_proof_pending_statement(
 
 pub(crate) fn preflight_generated_common_proof_pending_package(
     generated_proof_handle: u32,
-    expected_suite_identifier: [u8; Hash512::BYTE_LENGTH],
-    expected_ceremony_context_hash: [u8; Hash512::BYTE_LENGTH],
-    expected_action_context_hash: [u8; Hash512::BYTE_LENGTH],
-    expected_application_statement_schema_identifier: u16,
-    expected_roster_position: Option<u16>,
-    expected_schedule_position: Option<u32>,
-    canonical_application_statement_bytes: &[u8],
+    expected_bindings: ExpectedCommonProofPackageBindings<'_>,
 ) -> Result<StreamDescriptor, CommonProofRuntimeError> {
     COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
         registry
@@ -862,13 +852,7 @@ pub(crate) fn preflight_generated_common_proof_pending_package(
             .runtime
             .preflight_generated_proof_pending_package(
                 &GeneratedCommonProofCapabilityHandle::from_identifier(generated_proof_handle),
-                expected_suite_identifier,
-                expected_ceremony_context_hash,
-                expected_action_context_hash,
-                expected_application_statement_schema_identifier,
-                expected_roster_position,
-                expected_schedule_position,
-                canonical_application_statement_bytes,
+                expected_bindings,
             )
     })
 }
@@ -879,13 +863,7 @@ pub(crate) fn preflight_generated_common_proof_pending_package(
 /// package builder's fixed inventory; no host-supplied descriptor is read.
 pub(crate) fn preflight_verified_common_proof_pending_package(
     verified_proof_handle: u32,
-    expected_suite_identifier: [u8; Hash512::BYTE_LENGTH],
-    expected_ceremony_context_hash: [u8; Hash512::BYTE_LENGTH],
-    expected_action_context_hash: [u8; Hash512::BYTE_LENGTH],
-    expected_application_statement_schema_identifier: u16,
-    expected_roster_position: Option<u16>,
-    expected_schedule_position: Option<u32>,
-    canonical_application_statement_bytes: &[u8],
+    expected_bindings: ExpectedCommonProofPackageBindings<'_>,
 ) -> Result<StreamDescriptor, CommonProofRuntimeError> {
     COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
         registry.borrow().runtime.with_verified_proof_for_protocol(
@@ -894,17 +872,19 @@ pub(crate) fn preflight_verified_common_proof_pending_package(
                 let statement_source = verified_proof.statement_source()?;
                 let source_authority = statement_source.application_source_authority();
                 if verified_proof.application_statement_schema_identifier()
-                    != expected_application_statement_schema_identifier
-                    || verified_proof.suite_identifier() != expected_suite_identifier
-                    || verified_proof.ceremony_context_hash() != expected_ceremony_context_hash
-                    || verified_proof.action_context_hash() != expected_action_context_hash
-                    || verified_proof.schedule_position() != expected_schedule_position
+                    != expected_bindings.application_statement_schema_identifier
+                    || verified_proof.suite_identifier() != expected_bindings.suite_identifier
+                    || verified_proof.ceremony_context_hash()
+                        != expected_bindings.ceremony_context_hash
+                    || verified_proof.action_context_hash() != expected_bindings.action_context_hash
+                    || verified_proof.schedule_position() != expected_bindings.schedule_position
                     || source_authority.application_statement_schema_identifier()
-                        != expected_application_statement_schema_identifier
-                    || source_authority.producer_roster_position() != expected_roster_position
-                    || source_authority.schedule_position() != expected_schedule_position
+                        != expected_bindings.application_statement_schema_identifier
+                    || source_authority.producer_roster_position()
+                        != expected_bindings.roster_position
+                    || source_authority.schedule_position() != expected_bindings.schedule_position
                     || statement_source.canonical_application_statement_bytes()
-                        != canonical_application_statement_bytes
+                        != expected_bindings.canonical_application_statement_bytes
                     || source_authority.proof_stream_descriptor()
                         != verified_proof.proof_stream_descriptor()
                 {
@@ -1322,20 +1302,18 @@ fn verification_worker_error_status(error: CommonProofVerificationWorkerError) -
         CommonProofVerificationWorkerError::Stream(refusal_reason) => {
             refusal_status(refusal_reason)
         }
-        CommonProofVerificationWorkerError::Verifier(_) => {
-            refusal_status(RefusalReason::InvalidProof)
-        }
+        CommonProofVerificationWorkerError::Verifier => refusal_status(RefusalReason::InvalidProof),
     }
 }
 
 fn generation_worker_error_status(error: CommonProofGenerationWorkerError) -> u32 {
     match error {
         CommonProofGenerationWorkerError::Runtime(error) => runtime_error_status(error),
-        CommonProofGenerationWorkerError::AuthenticatedSource(_) => {
+        CommonProofGenerationWorkerError::AuthenticatedSource => {
             refusal_status(RefusalReason::WrongHashOrRoot)
         }
-        CommonProofGenerationWorkerError::Generation { .. }
-        | CommonProofGenerationWorkerError::Cleanup(_) => {
+        CommonProofGenerationWorkerError::Generation
+        | CommonProofGenerationWorkerError::Cleanup => {
             refusal_status(RefusalReason::OutsideSupportedProfile)
         }
     }

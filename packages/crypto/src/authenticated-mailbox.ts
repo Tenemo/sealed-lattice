@@ -1155,8 +1155,7 @@ export const openAuthenticatedMailbox = async (
                 );
             }
             if (
-                plaintextSinkLease.authenticationRequirement ===
-                'authenticate'
+                plaintextSinkLease.authenticationRequirement === 'authenticate'
             ) {
                 streamVerifier = input.streamBoundary.openVerifier({
                     descriptor: envelope.ciphertextDescriptor,
@@ -1313,9 +1312,7 @@ export const openAuthenticatedMailbox = async (
                 stagedStreamVerifier.finish();
                 authenticatedPlaintextCapability =
                     gcmVerifier.finishDecryption();
-                await plaintextSinkLease.seal(
-                    authenticatedPlaintextCapability,
-                );
+                await plaintextSinkLease.seal(authenticatedPlaintextCapability);
                 authenticatedPlaintextCapability = undefined;
                 retainPlaintextSinkForRetry = true;
                 await stagingLease.dispose();

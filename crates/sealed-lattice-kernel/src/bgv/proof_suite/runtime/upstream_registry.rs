@@ -5,20 +5,22 @@ use super::{
     CommonProofEvaluatorAuxiliaryRootEntry, CommonProofPreverificationApplicationSourceEntry,
     CommonProofPreverificationApplicationSourceHandle, CommonProofRuntimeError,
     CommonProofSelectedSuiteCapabilityHandle, CommonProofSelectedSuiteEntry,
-    CommonProofVerificationBinding, CommonProofVerificationResidentMemoryAccounting,
-    CommonProofVerificationStateMachine, CommonProofVerificationStatementSource,
-    CommonProofVerifiedColumnEvaluatorCapabilityHandle, CommonProofVerifiedColumnEvaluatorEntry,
-    ConsumedCommonProofVerificationInputs, FOUNDATION_PROFILE, MAXIMUM_COMMON_PROOF_BYTE_LENGTH,
-    MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH, MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH,
-    MAXIMUM_RESIDENT_COMMON_PROOF_INPUT_CHUNKS, PollableCommonProofVerificationInput,
-    RefusingVerifiedColumnEvaluator, RelationColumnOrigin, SelectedSuiteCapability,
-    VerifiedCommonProofStatementSource, VerifiedEvaluatorAuxiliaryRoot,
+    CommonProofVerificationResidentMemoryAccounting, CommonProofVerificationStateMachine,
+    CommonProofVerificationStatementSource, CommonProofVerifiedColumnEvaluatorCapabilityHandle,
+    CommonProofVerifiedColumnEvaluatorEntry, ConsumedCommonProofVerificationInputs,
+    FOUNDATION_PROFILE, MAXIMUM_COMMON_PROOF_BYTE_LENGTH, MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH,
+    MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH, MAXIMUM_RESIDENT_COMMON_PROOF_INPUT_CHUNKS,
+    PollableCommonProofVerificationInput, RefusingVerifiedColumnEvaluator, RelationColumnOrigin,
+    SelectedSuiteCapability, VerifiedCommonProofStatementSource, VerifiedEvaluatorAuxiliaryRoot,
     VerifiedRelationColumnEvaluator, VerifiedStatementOwnedTree, common_proof_registry_entry_count,
     require_common_proof_registry_entry_capacity, take_nonrepeating_handle,
     verified_application_statement_hash,
 };
 #[cfg(test)]
-use super::{CommonProofRelationPlanCapability, CommonProofRuntimeLimits, StreamDescriptor};
+use super::{
+    CommonProofRelationPlanCapability, CommonProofRuntimeLimits, CommonProofVerificationBinding,
+    StreamDescriptor,
+};
 
 fn checked_verification_operation_memory_add(
     left: u64,
@@ -116,7 +118,6 @@ pub(crate) struct CommonProofUpstreamInputRegistry {
     next_suite_handle: u32,
     next_application_handle: u32,
     next_preverification_application_source_handle: u32,
-    next_evaluator_root_handle: u32,
     next_verified_column_evaluator_handle: u32,
     suites: BTreeMap<u32, CommonProofSelectedSuiteEntry>,
     applications: BTreeMap<u32, CommonProofApplicationInputEntry>,
@@ -132,7 +133,6 @@ impl Default for CommonProofUpstreamInputRegistry {
             next_suite_handle: 1,
             next_application_handle: 1,
             next_preverification_application_source_handle: 1,
-            next_evaluator_root_handle: 1,
             next_verified_column_evaluator_handle: 1,
             suites: BTreeMap::new(),
             applications: BTreeMap::new(),
@@ -588,66 +588,6 @@ impl CommonProofUpstreamInputRegistry {
     }
 
     /// Atomically prepares an exact-family verifier from verifier-recomputed
-    /// statement trees and auxiliary roots, with no verifier-sequence column
-    /// evaluator. The roots are minted inside the same application ownership
-    /// transition and are removed together if any coordinate or plan check
-    /// fails.
-    pub(crate) fn prepare_statement_tree_and_auxiliary_root_family_verification_without_evaluator(
-        &mut self,
-        suite_handle: &CommonProofSelectedSuiteCapabilityHandle,
-        statement_source: VerifiedCommonProofStatementSource,
-        statement_trees: Vec<VerifiedStatementOwnedTree>,
-        auxiliary_roots: Vec<VerifiedEvaluatorAuxiliaryRoot>,
-    ) -> Result<super::PreparedCommonProofVerification, CommonProofRuntimeError> {
-        let preverification_handle =
-            self.install_preverification_application_source(suite_handle, statement_source)?;
-        let application_handle = match self
-            .promote_preverification_application_source(suite_handle, &preverification_handle)
-        {
-            Ok(handle) => handle,
-            Err(error) => {
-                self.release_preverification_application_source(&preverification_handle)?;
-                return Err(error);
-            }
-        };
-        if let Err(error) =
-            self.attach_statement_owned_tree_batch(&application_handle, statement_trees)
-        {
-            self.cancel_application(&application_handle)?;
-            return Err(error);
-        }
-        let mut auxiliary_root_handles = Vec::new();
-        if auxiliary_root_handles
-            .try_reserve_exact(auxiliary_roots.len())
-            .is_err()
-        {
-            self.cancel_application(&application_handle)?;
-            return Err(CommonProofRuntimeError::AllocationLimitExceeded);
-        }
-        for root in auxiliary_roots {
-            match self.mint_evaluator_auxiliary_root(&application_handle, root) {
-                Ok(handle) => auxiliary_root_handles.push(handle),
-                Err(error) => {
-                    self.cancel_application(&application_handle)?;
-                    return Err(error);
-                }
-            }
-        }
-        let auxiliary_root_handle_references = auxiliary_root_handles.iter().collect::<Vec<_>>();
-        match self.consume_verification_inputs(
-            &application_handle,
-            &auxiliary_root_handle_references,
-            None,
-        ) {
-            Ok(inputs) => Ok(inputs.prepare()),
-            Err(error) => {
-                self.cancel_application(&application_handle)?;
-                Err(error)
-            }
-        }
-    }
-
-    /// Atomically prepares an exact-family verifier from verifier-recomputed
     /// statement trees and its verifier-sequence column evaluator. The trees
     /// and evaluator are verifier-minted authorities; no caller-provided root,
     /// column value, or alternate representation enters this transition.
@@ -735,26 +675,6 @@ impl CommonProofUpstreamInputRegistry {
         }
         application.statement_owned_tree_batch = Some(ordered_trees);
         Ok(())
-    }
-
-    pub(crate) fn mint_evaluator_auxiliary_root(
-        &mut self,
-        application_handle: &CommonProofApplicationInputCapabilityHandle,
-        root: VerifiedEvaluatorAuxiliaryRoot,
-    ) -> Result<CommonProofEvaluatorAuxiliaryRootCapabilityHandle, CommonProofRuntimeError> {
-        self.applications
-            .get(&application_handle.0)
-            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?;
-        self.require_entry_capacity()?;
-        let handle = take_nonrepeating_handle(&mut self.next_evaluator_root_handle)?;
-        self.evaluator_roots.insert(
-            handle,
-            CommonProofEvaluatorAuxiliaryRootEntry {
-                application_handle: application_handle.0,
-                root,
-            },
-        );
-        Ok(CommonProofEvaluatorAuxiliaryRootCapabilityHandle(handle))
     }
 
     /// Retains the exact-family evaluator for plan-owned verifier-sequence

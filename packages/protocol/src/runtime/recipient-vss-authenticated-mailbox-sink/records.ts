@@ -239,9 +239,7 @@ export const decodeRecipientVssPlaintextJournal = (
     bytes: Uint8Array,
 ): StoredRecipientVssPlaintextJournal => {
     const value = decodeCanonicalJson(bytes);
-    if (
-        !isRecord(value)
-    ) {
+    if (!isRecord(value)) {
         throw new AuthenticatedMailboxStorageError(
             'AuthenticationFailed',
             'A recipient VSS plaintext journal has a noncanonical shape.',

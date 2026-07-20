@@ -416,9 +416,12 @@ export const generateVssShareLinkageInClosedWorker = async (input: {
                                         setupIntentAuthorization.capabilityPointer,
                                         verifierCapabilityByteLength,
                                         new DataView(
-                                            setupIntentAuthorization.handleBytes.buffer,
-                                            setupIntentAuthorization.handleBytes.byteOffset,
-                                            setupIntentAuthorization.handleBytes.byteLength,
+                                            setupIntentAuthorization.handleBytes
+                                                .buffer,
+                                            setupIntentAuthorization.handleBytes
+                                                .byteOffset,
+                                            setupIntentAuthorization.handleBytes
+                                                .byteLength,
                                         ).getUint32(0, true),
                                         checkpointPointer,
                                         checkpointLineageIdentifier.byteLength,

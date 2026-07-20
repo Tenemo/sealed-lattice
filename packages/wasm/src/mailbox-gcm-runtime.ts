@@ -593,7 +593,8 @@ class MailboxGcmRuntimeImplementation implements MailboxGcmRuntime {
 const requireAuthenticatedMailboxPlaintextCapabilityRecord = (
     capability: AuthenticatedMailboxPlaintextCapability,
 ): AuthenticatedMailboxPlaintextCapabilityRecord => {
-    const record = authenticatedMailboxPlaintextCapabilityRecords.get(capability);
+    const record =
+        authenticatedMailboxPlaintextCapabilityRecords.get(capability);
     if (record === undefined || record.consumed) {
         throw new CanonicalStreamInternalError(
             'The authenticated mailbox plaintext capability is unknown or already consumed.',
@@ -614,7 +615,8 @@ const retireAuthenticatedMailboxPlaintextCapabilityRecord = (
 export const releaseAuthenticatedMailboxPlaintextCapability = (
     capability: AuthenticatedMailboxPlaintextCapability,
 ): void => {
-    const record = requireAuthenticatedMailboxPlaintextCapabilityRecord(capability);
+    const record =
+        requireAuthenticatedMailboxPlaintextCapabilityRecord(capability);
     try {
         const status = record.context.runExclusive(
             'authenticated mailbox plaintext capability release',
@@ -659,45 +661,52 @@ export const consumeAuthenticatedMailboxPlaintextCapability = <ResultValue>(
         }
         throw operationFailure;
     }
-    let operationCompleted = false;
-    let operationFailure: unknown;
+    let outcome:
+        | Readonly<{ completed: true; value: ResultValue }>
+        | Readonly<{ completed: false; failure: unknown }>;
     try {
-        const result = input.consume(record.handle);
-        operationCompleted = true;
-        return result;
-    } catch (error) {
-        operationFailure = error;
-        throw error;
-    } finally {
-        if (!operationCompleted) {
-            try {
-                const status = record.context.runExclusive(
-                    'authenticated mailbox plaintext capability failure cleanup',
-                    () => record.context.mailboxGcmCancel(record.handle),
-                );
-                if (status !== 0) {
-                    throw new CanonicalStreamInternalError(
-                        'The failed authenticated mailbox plaintext capability could not be retired.',
-                    );
-                }
-            } catch (cleanupFailure) {
-                throw new CanonicalStreamCleanupError(
-                    operationFailure,
-                    cleanupFailure,
-                );
-            } finally {
-                retireAuthenticatedMailboxPlaintextCapabilityRecord(
-                    input.capability,
-                    record,
+        outcome = Object.freeze({
+            completed: true,
+            value: input.consume(record.handle),
+        });
+    } catch (failure) {
+        outcome = Object.freeze({ completed: false, failure });
+    }
+
+    if (!outcome.completed) {
+        let cleanupFailed = false;
+        let cleanupFailure: unknown;
+        try {
+            const status = record.context.runExclusive(
+                'authenticated mailbox plaintext capability failure cleanup',
+                () => record.context.mailboxGcmCancel(record.handle),
+            );
+            if (status !== 0) {
+                throw new CanonicalStreamInternalError(
+                    'The failed authenticated mailbox plaintext capability could not be retired.',
                 );
             }
-        } else {
-            retireAuthenticatedMailboxPlaintextCapabilityRecord(
-                input.capability,
-                record,
+        } catch (failure) {
+            cleanupFailed = true;
+            cleanupFailure = failure;
+        }
+        retireAuthenticatedMailboxPlaintextCapabilityRecord(
+            input.capability,
+            record,
+        );
+        if (cleanupFailed) {
+            throw new CanonicalStreamCleanupError(
+                outcome.failure,
+                cleanupFailure,
             );
         }
+        throw outcome.failure;
     }
+    retireAuthenticatedMailboxPlaintextCapabilityRecord(
+        input.capability,
+        record,
+    );
+    return outcome.value;
 };
 
 export const openMailboxGcmRuntime = (input: {

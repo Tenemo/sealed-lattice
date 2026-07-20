@@ -2,34 +2,22 @@ use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
-use crate::bgv::{
-    parameters::POLYNOMIAL_DEGREE,
-    setup::{
-        LatticeAnchorCommitment, SETUP_COMMITMENT_MODULE_RANK,
-        lattice_anchor_commitment_canonical_bytes,
-    },
-};
+use zeroize::Zeroize;
+
 use crate::foundation::{
     BrowserWorkerAuthenticatedStorageHeadSource, BrowserWorkerAuthenticatedStorageTransitionSource,
     CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalStreamDomain,
     CanonicalStreamVerifier, CanonicalTuple, FOUNDATION_PROFILE, Hash512, LocalStorageBinding,
-    ParticipantIdentity, PrivateRandomCursor, ProofApplicationSlot, ProofApplicationSlotCeilings,
-    ProofObjectHeader, RefusalReason, StreamDescriptor, VerifiedCanonicalStreamSummary,
+    PrivateRandomCursor, ProofApplicationSlot, ProofApplicationSlotCeilings, ProofObjectHeader,
+    RefusalReason, StreamDescriptor, VerifiedCanonicalStreamSummary,
     derive_canonical_stream_descriptor,
 };
 
-use super::super::super::prover::{
-    CommonProofPrivateCoinReplayCursor, CommonProofPrivateCoinReplaySpan,
-    CommonProofPrivateCoinReplaySpanStart, ReplayableCommonProofPrivateCoinCatalogSource,
-    ReplayableCommonProofPrivateCoinSource,
-};
-use super::super::super::relation_plan::{
-    BoundTreeConstructionKind, RelationColumnOrigin, RelationTreeDescriptor,
-};
+use super::super::super::relation_plan::RelationTreeDescriptor;
 use super::super::super::{
-    BoundedCommonProofByteSink, CheckpointableCommonProofPrivateCoinSource,
-    CollectivePublicKeyAggregatePlanInput, CommittedMaterialProfile, CommittedMaterialTree,
-    CommittedMaterialTreeInput, CommonProofApplicationBinding,
+    BoundedCommonProofByteSink, COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH,
+    CheckpointableCommonProofPrivateCoinSource, CollectivePublicKeyAggregatePlanInput,
+    CommittedMaterialProfile, CommittedMaterialTree, CommonProofApplicationBinding,
     CommonProofCheckpointCursorManifestError, CommonProofGenerationAuthorization,
     CommonProofGenerationError, CommonProofGenerationInitializationError,
     CommonProofGenerationInput, CommonProofGenerationOperationHandle, CommonProofGenerationSources,
@@ -41,12 +29,12 @@ use super::super::super::{
     CommonProofVerificationBinding, CommonProofVerificationInput, CommonProofVerificationPoll,
     CommonProofVerificationStateMachine, CommonProofVerificationWorkerError,
     CommonProofVerificationWorkerPoll, CommonProofVerifierError, CompiledRelationPlan,
-    CompiledTargetReleaseRelation, EvaluatorKeyAggregateEntryPlanInput,
-    EvaluatorKeyAggregatePlanInput, EvaluatorKeyAggregateVariantInput,
-    MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH, MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH,
+    EvaluatorKeyAggregateEntryPlanInput, EvaluatorKeyAggregatePlanInput,
+    EvaluatorKeyAggregateVariantInput, MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH,
+    MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH,
     MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH, PROOF_BASE_FIELD_MODULUS,
-    PROOF_CHALLENGE_EXTENSION_DEGREE, PROOF_DEEP_POINT_COUNT, PROOF_EVALUATION_BLOWUP_FACTOR,
-    PROOF_EVALUATION_COSET_OFFSET, PROOF_FINAL_POLYNOMIAL_DEGREE_BOUND_EXCLUSIVE,
+    PROOF_CHALLENGE_EXTENSION_DEGREE, PROOF_DEEP_POINT_COUNT, PROOF_EVALUATION_COSET_OFFSET,
+    PROOF_FINAL_POLYNOMIAL_DEGREE_BOUND_EXCLUSIVE,
     PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT,
     PROOF_NON_NATIVE_IDENTITY_CHALLENGE_COUNT, PROOF_UNIQUE_QUERY_COUNT,
     PollableCommonProofVerificationInput, PreparedCommonProofGeneration,
@@ -54,21 +42,17 @@ use super::super::super::{
     ProofChallengeExtensionElement, ProofDecodeError, ProofEvaluationDomain, ProofExternalMemory,
     ProofExternalMemoryObject, ProofExternalMemoryProtection,
     ProofExternalMemoryTransactionOperation, ProofExternalMemoryTransactionRequest,
-    ProofLeafVisibility, ProofProfileError, ProofTreeRole, PublicAggregateRelationGeometry,
-    PublicOnlyCommonProofCoinSource, RelationPlanCheckContext, RelationProofTreeInput,
-    ResidentCommonProofByteSource, ResidentCommonProofInputChunk,
+    PublicAggregateRelationGeometry, PublicOnlyCommonProofCoinSource, RelationPlanCheckContext,
+    RelationProofTreeInput, ResidentCommonProofByteSource, ResidentCommonProofInputChunk,
     ResidentCommonProofSourcePolynomialProvider, ResolvedSuiteModulus,
-    RkgRoundOneAggregatePlanInput, RkgRoundOneAggregateVariantInput, SameSecretRelationPlanInput,
-    SetupPublicPolynomialContext, SetupPublicPolynomialTree, SetupPublicPolynomialTreeInput,
-    StatementOwnedProofTreeInput, SuiteModulusReference, TargetReleaseModulusWitness,
-    TargetReleaseRelationPlanInput, TargetReleaseRoleWitness, TargetReleaseWitness,
-    VerifiedCommonProof, VerifiedCommonProofCapabilityHandle, VerifiedRelationColumnEvaluator,
-    VerifiedRelationColumnEvaluatorMemoryAccounting, VerifiedStatementOwnedTree,
-    VerifiedTargetReleaseModulusInput, canonical_proof_object_header_bytes,
+    RkgRoundOneAggregatePlanInput, RkgRoundOneAggregateVariantInput, SetupPublicPolynomialContext,
+    SetupPublicPolynomialTree, SetupPublicPolynomialTreeInput, StatementOwnedProofTreeInput,
+    SuiteModulusReference, VerifiedCommonProof, VerifiedCommonProofCapabilityHandle,
+    VerifiedRelationColumnEvaluator, VerifiedRelationColumnEvaluatorMemoryAccounting,
+    VerifiedStatementOwnedTree, canonical_proof_object_header_bytes,
     common_proof_private_coin_coordinate_derivation_context_hash,
     compile_collective_public_key_aggregate_relation_plan,
     compile_evaluator_key_aggregate_relation_plan, compile_rkg_round_one_aggregate_relation_plan,
-    compile_same_secret_relation_plan, compile_target_release_relation,
     construct_composed_quotient_polynomial,
     construct_constraint_stream_composed_quotient_polynomial, durable_authorization_frame_digest,
     encode_common_proof_checkpoint_cursor_manifest, generate_common_proof,
@@ -80,16 +64,12 @@ use super::super::SCHEMA_VERSION;
 const APPLICATION_STATEMENT_SCHEMA_IDENTIFIER: u16 = 0x1213;
 const RKG_ROUND_ONE_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER: u16 = 0x1215;
 const EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER: u16 = 0x1218;
-const TARGET_RELEASE_STATEMENT_SCHEMA_IDENTIFIER: u16 = 0x1621;
 const PUBLIC_AGGREGATE_TEST_EVALUATION_DOMAIN_SIZE: u64 = 2_048;
 const PUBLIC_AGGREGATE_TEST_EVALUATION_BLOWUP_FACTOR: u32 = 4;
 const PUBLIC_AGGREGATE_TEST_RING_DEGREE: u64 = 4;
 const PUBLIC_AGGREGATE_TEST_COLUMN_DEGREE_BOUND_EXCLUSIVE: usize =
     PUBLIC_AGGREGATE_TEST_RING_DEGREE as usize / 2;
 const PUBLIC_AGGREGATE_TEST_UNIQUE_QUERY_COUNT: u32 = PROOF_UNIQUE_QUERY_COUNT;
-const TARGET_TEST_EVALUATION_DOMAIN_SIZE: u64 = 2_048;
-const TARGET_TEST_OPENING_DEGREE_BOUND_EXCLUSIVE: u64 = 256;
-const TARGET_TEST_RING_DEGREE: usize = 64;
 const OPENING_DEGREE_BOUND_EXCLUSIVE: u64 = 258;
 const MAXIMUM_PROOF_BYTE_LENGTH: usize = 16 * 1_024 * 1_024;
 const MAXIMUM_EXTERNAL_MEMORY_BYTE_LENGTH: usize = 64 * 1_024 * 1_024;
@@ -100,7 +80,6 @@ enum TestExternalMemoryError {
     MissingTransaction,
     DuplicateObject,
     MissingObject,
-    UnsupportedProtection,
     OperationLimitExceeded,
     PayloadLimitExceeded,
     StorageLimitExceeded,
@@ -110,7 +89,16 @@ enum TestExternalMemoryError {
 struct TestExternalMemoryObject {
     bytes: Vec<u8>,
     exact_byte_length: usize,
+    protection: ProofExternalMemoryProtection,
     sealed: bool,
+}
+
+impl Drop for TestExternalMemoryObject {
+    fn drop(&mut self) {
+        if self.protection == ProofExternalMemoryProtection::SecretAuthenticatedEncryption {
+            self.bytes.zeroize();
+        }
+    }
 }
 
 enum TestExternalMemoryUndo {
@@ -204,9 +192,6 @@ impl ProofExternalMemory for BoundedInMemoryExternalMemory {
         protection: ProofExternalMemoryProtection,
         exact_byte_length: u64,
     ) -> Result<(), Self::Error> {
-        if protection != ProofExternalMemoryProtection::PublicIntegrity {
-            return Err(TestExternalMemoryError::UnsupportedProtection);
-        }
         let maximum_byte_length = self.maximum_byte_length;
         let exact_byte_length = usize::try_from(exact_byte_length)
             .map_err(|_| TestExternalMemoryError::StorageLimitExceeded)?;
@@ -232,6 +217,7 @@ impl ProofExternalMemory for BoundedInMemoryExternalMemory {
             TestExternalMemoryObject {
                 bytes,
                 exact_byte_length,
+                protection,
                 sealed: false,
             },
         );
@@ -378,6 +364,11 @@ impl ProofExternalMemory for BoundedInMemoryExternalMemory {
                     if previous_byte_length > stored.bytes.len() {
                         return Err(TestExternalMemoryError::WrongOffsetOrLength);
                     }
+                    if stored.protection
+                        == ProofExternalMemoryProtection::SecretAuthenticatedEncryption
+                    {
+                        stored.bytes[previous_byte_length..].zeroize();
+                    }
                     stored.bytes.truncate(previous_byte_length);
                 }
                 TestExternalMemoryUndo::RestoreSeal {
@@ -407,11 +398,6 @@ enum TestPrivateCoinError {
     CallLimitExceeded,
     ByteLimitExceeded,
     InvalidModulus,
-    ReplaySourceMismatch,
-    ReplayCursorMismatch,
-    ReplaySpanAlreadyActive,
-    ReplaySpanNotActive,
-    ReplayAttemptInvalidated,
 }
 
 struct BoundedDeterministicTestPrivateCoins {
@@ -419,11 +405,6 @@ struct BoundedDeterministicTestPrivateCoins {
     remaining_byte_count: usize,
     calls_by_coordinate: BTreeMap<CommonProofPrivateCoinCoordinate, u64>,
     checkpoint_cursor_family_schema_identifier: u16,
-    replay_instance_binding: Rc<()>,
-    replay_reset_epoch: u64,
-    next_replay_span_identifier: u64,
-    active_replay_span: Option<(bool, u64)>,
-    replay_invalidated: bool,
 }
 
 impl BoundedDeterministicTestPrivateCoins {
@@ -433,25 +414,7 @@ impl BoundedDeterministicTestPrivateCoins {
             remaining_byte_count: maximum_byte_count,
             calls_by_coordinate: BTreeMap::new(),
             checkpoint_cursor_family_schema_identifier: APPLICATION_STATEMENT_SCHEMA_IDENTIFIER,
-            replay_instance_binding: Rc::new(()),
-            replay_reset_epoch: 0,
-            next_replay_span_identifier: 1,
-            active_replay_span: None,
-            replay_invalidated: false,
         }
-    }
-
-    fn with_checkpoint_cursor_counter_delta(mut self, counter_delta: u64) -> Self {
-        if counter_delta != 0 {
-            self.checkpoint_cursor_family_schema_identifier =
-                ProofApplicationSlotCeilings::BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER;
-            self.calls_by_coordinate.insert(
-                CommonProofPrivateCoinCoordinate::mask(1, 0)
-                    .expect("trace private-coin class is assigned"),
-                counter_delta,
-            );
-        }
-        self
     }
 
     fn consume_call(
@@ -468,72 +431,6 @@ impl BoundedDeterministicTestPrivateCoins {
             .checked_add(1)
             .ok_or(TestPrivateCoinError::CallLimitExceeded)?;
         Ok(call_ordinal)
-    }
-
-    fn proof_salt_replay_cursor(&self) -> PrivateRandomCursor {
-        let coordinate = CommonProofPrivateCoinCoordinate::proof_salt();
-        PrivateRandomCursor::new(
-            self.checkpoint_cursor_family_schema_identifier,
-            coordinate.purpose_class(),
-            common_proof_private_coin_coordinate_derivation_context_hash(
-                Hash512::from_bytes([0x51; 64]),
-                coordinate,
-            ),
-            [0x52; 32],
-            self.calls_by_coordinate
-                .get(&coordinate)
-                .copied()
-                .unwrap_or(0),
-            None,
-        )
-        .expect("the common-proof test salt coordinate is assigned")
-    }
-
-    fn replay_cursor(
-        &self,
-        coordinate: CommonProofPrivateCoinCoordinate,
-        call_count: u64,
-    ) -> PrivateRandomCursor {
-        PrivateRandomCursor::new(
-            self.checkpoint_cursor_family_schema_identifier,
-            coordinate.purpose_class(),
-            common_proof_private_coin_coordinate_derivation_context_hash(
-                Hash512::from_bytes([0x51; 64]),
-                coordinate,
-            ),
-            [0x52; 32],
-            call_count,
-            None,
-        )
-        .expect("the common-proof test coordinate is assigned")
-    }
-
-    fn replay_cursor_catalog(
-        &self,
-    ) -> Box<[(CommonProofPrivateCoinCoordinate, PrivateRandomCursor)]> {
-        self.calls_by_coordinate
-            .iter()
-            .map(|(coordinate, call_count)| {
-                (*coordinate, self.replay_cursor(*coordinate, *call_count))
-            })
-            .collect::<Vec<_>>()
-            .into_boxed_slice()
-    }
-
-    fn validate_replay_cursor_catalog(
-        &self,
-        cursors: &[(CommonProofPrivateCoinCoordinate, PrivateRandomCursor)],
-    ) -> Result<(), TestPrivateCoinError> {
-        let mut previous_coordinate = None;
-        for (coordinate, cursor) in cursors {
-            if previous_coordinate.is_some_and(|previous| previous >= *coordinate)
-                || *cursor != self.replay_cursor(*coordinate, cursor.next_counter())
-            {
-                return Err(TestPrivateCoinError::ReplayCursorMismatch);
-            }
-            previous_coordinate = Some(*coordinate);
-        }
-        Ok(())
     }
 }
 
@@ -574,170 +471,6 @@ impl CommonProofPrivateCoinSource for BoundedDeterministicTestPrivateCoins {
             *byte = byte_stream_start.wrapping_add(offset as u64) as u8;
         }
         Ok(())
-    }
-}
-
-impl ReplayableCommonProofPrivateCoinSource for BoundedDeterministicTestPrivateCoins {
-    fn capture_proof_salt_replay_cursor(
-        &self,
-    ) -> Result<CommonProofPrivateCoinReplayCursor, Self::Error> {
-        Ok(CommonProofPrivateCoinReplayCursor::new(
-            &self.replay_instance_binding,
-            self.proof_salt_replay_cursor(),
-        ))
-    }
-
-    fn restore_proof_salt_replay_cursor(
-        &mut self,
-        replay_cursor: &CommonProofPrivateCoinReplayCursor,
-    ) -> Result<(), Self::Error> {
-        if !replay_cursor.belongs_to(&self.replay_instance_binding) {
-            return Err(TestPrivateCoinError::ReplaySourceMismatch);
-        }
-        let expected_cursor = self.proof_salt_replay_cursor();
-        let cursor = replay_cursor.cursor();
-        if cursor.family() != expected_cursor.family()
-            || cursor.purpose() != expected_cursor.purpose()
-            || cursor.derivation_context_hash() != expected_cursor.derivation_context_hash()
-            || cursor.stream_attempt_identifier() != expected_cursor.stream_attempt_identifier()
-            || cursor.next_unread_bit_offset_in_buffered_block().is_some()
-        {
-            return Err(TestPrivateCoinError::ReplayCursorMismatch);
-        }
-        self.calls_by_coordinate.insert(
-            CommonProofPrivateCoinCoordinate::proof_salt(),
-            cursor.next_counter(),
-        );
-        Ok(())
-    }
-
-    fn proof_salt_replay_cursor_matches(
-        &self,
-        replay_cursor: &CommonProofPrivateCoinReplayCursor,
-    ) -> Result<bool, Self::Error> {
-        if !replay_cursor.belongs_to(&self.replay_instance_binding) {
-            return Err(TestPrivateCoinError::ReplaySourceMismatch);
-        }
-        Ok(replay_cursor.cursor() == self.proof_salt_replay_cursor())
-    }
-}
-
-impl ReplayableCommonProofPrivateCoinCatalogSource for BoundedDeterministicTestPrivateCoins {
-    fn begin_all_coordinate_replay_span(
-        &mut self,
-    ) -> Result<CommonProofPrivateCoinReplaySpanStart, Self::Error> {
-        if self.replay_invalidated {
-            return Err(TestPrivateCoinError::ReplayAttemptInvalidated);
-        }
-        if self.active_replay_span.is_some() {
-            return Err(TestPrivateCoinError::ReplaySpanAlreadyActive);
-        }
-        let span_identifier = self.next_replay_span_identifier;
-        self.next_replay_span_identifier = self
-            .next_replay_span_identifier
-            .checked_add(1)
-            .ok_or(TestPrivateCoinError::ReplayAttemptInvalidated)?;
-        let start = CommonProofPrivateCoinReplaySpanStart::new(
-            &self.replay_instance_binding,
-            self.checkpoint_cursor_family_schema_identifier,
-            Hash512::from_bytes([0x51; 64]),
-            [0x52; 32],
-            self.replay_reset_epoch,
-            span_identifier,
-            self.replay_cursor_catalog(),
-        )
-        .map_err(|_| TestPrivateCoinError::ReplayCursorMismatch)?;
-        self.active_replay_span = Some((false, span_identifier));
-        Ok(start)
-    }
-
-    fn finish_all_coordinate_replay_span(
-        &mut self,
-        start: CommonProofPrivateCoinReplaySpanStart,
-    ) -> Result<CommonProofPrivateCoinReplaySpan, Self::Error> {
-        if self.replay_invalidated {
-            return Err(TestPrivateCoinError::ReplayAttemptInvalidated);
-        }
-        if self.active_replay_span != Some((false, start.span_identifier())) {
-            return Err(TestPrivateCoinError::ReplaySpanNotActive);
-        }
-        if !start.belongs_to(
-            &self.replay_instance_binding,
-            self.checkpoint_cursor_family_schema_identifier,
-            Hash512::from_bytes([0x51; 64]),
-            [0x52; 32],
-            self.replay_reset_epoch,
-        ) {
-            return Err(TestPrivateCoinError::ReplaySourceMismatch);
-        }
-        let span = CommonProofPrivateCoinReplaySpan::from_completed_capture(
-            start,
-            self.replay_cursor_catalog(),
-        )
-        .map_err(|_| TestPrivateCoinError::ReplayCursorMismatch)?;
-        self.active_replay_span = None;
-        Ok(span)
-    }
-
-    fn restore_all_coordinate_replay_span(
-        &mut self,
-        span: &CommonProofPrivateCoinReplaySpan,
-    ) -> Result<(), Self::Error> {
-        if self.replay_invalidated {
-            return Err(TestPrivateCoinError::ReplayAttemptInvalidated);
-        }
-        if self.active_replay_span.is_some() {
-            return Err(TestPrivateCoinError::ReplaySpanAlreadyActive);
-        }
-        if !span.belongs_to(
-            &self.replay_instance_binding,
-            self.checkpoint_cursor_family_schema_identifier,
-            Hash512::from_bytes([0x51; 64]),
-            [0x52; 32],
-            self.replay_reset_epoch,
-        ) {
-            return Err(TestPrivateCoinError::ReplaySourceMismatch);
-        }
-        self.validate_replay_cursor_catalog(span.start_cursors())?;
-        self.calls_by_coordinate = span
-            .start_cursors()
-            .iter()
-            .map(|(coordinate, cursor)| (*coordinate, cursor.next_counter()))
-            .collect();
-        self.active_replay_span = Some((true, span.span_identifier()));
-        Ok(())
-    }
-
-    fn complete_all_coordinate_replay_span(
-        &mut self,
-        span: &CommonProofPrivateCoinReplaySpan,
-    ) -> Result<(), Self::Error> {
-        if self.replay_invalidated {
-            return Err(TestPrivateCoinError::ReplayAttemptInvalidated);
-        }
-        if self.active_replay_span != Some((true, span.span_identifier())) {
-            return Err(TestPrivateCoinError::ReplaySpanNotActive);
-        }
-        if !span.belongs_to(
-            &self.replay_instance_binding,
-            self.checkpoint_cursor_family_schema_identifier,
-            Hash512::from_bytes([0x51; 64]),
-            [0x52; 32],
-            self.replay_reset_epoch,
-        ) || self.replay_cursor_catalog().as_ref() != span.end_cursors()
-        {
-            self.invalidate_all_coordinate_replay_state();
-            return Err(TestPrivateCoinError::ReplayCursorMismatch);
-        }
-        self.active_replay_span = None;
-        Ok(())
-    }
-
-    fn invalidate_all_coordinate_replay_state(&mut self) {
-        self.replay_invalidated = true;
-        self.replay_reset_epoch = self.replay_reset_epoch.wrapping_add(1);
-        self.active_replay_span = None;
-        self.calls_by_coordinate.clear();
     }
 }
 
@@ -862,34 +595,6 @@ fn relation_context() -> RelationPlanCheckContext {
     }
 }
 
-fn target_relation_context() -> RelationPlanCheckContext {
-    let evaluation_domain = ProofEvaluationDomain::new(
-        TARGET_TEST_EVALUATION_DOMAIN_SIZE as usize,
-        PROOF_EVALUATION_COSET_OFFSET,
-    )
-    .expect("the target test evaluation domain is valid");
-    RelationPlanCheckContext {
-        base_field_modulus: PROOF_BASE_FIELD_MODULUS,
-        challenge_extension_degree: PROOF_CHALLENGE_EXTENSION_DEGREE as u16,
-        evaluation_blowup_factor: PROOF_EVALUATION_BLOWUP_FACTOR,
-        evaluation_domain_generator: evaluation_domain.generator().canonical(),
-        evaluation_coset_offset: PROOF_EVALUATION_COSET_OFFSET,
-        deep_point_count: 1,
-        quotient_component_count: 4,
-        quotient_component_degree_bound_exclusive: 128,
-        fri_fold_count: 5,
-        final_polynomial_degree_bound_exclusive: 8,
-        unique_query_count: 5,
-        non_native_modular_identity_challenge_count: 1,
-        maximum_fiat_shamir_candidate_draws_per_output:
-            PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT,
-        resolved_moduli: vec![ResolvedSuiteModulus::new(
-            SuiteModulusReference::target(0),
-            97,
-        )],
-    }
-}
-
 fn canonical_collective_public_key_statement(roots: &[[u8; 64]]) -> Vec<u8> {
     let source_roots = roots[..2]
         .iter()
@@ -974,46 +679,6 @@ fn canonical_evaluator_key_aggregate_statement(roots: &[[u8; 64]]) -> Vec<u8> {
     .expect("the evaluator aggregate statement encodes")
 }
 
-fn canonical_target_stream_descriptor(stream_hash: [u8; 64]) -> CanonicalItem {
-    CanonicalItem::nested_tuple(&CanonicalTuple::new(
-        0x3201,
-        SCHEMA_VERSION,
-        vec![
-            CanonicalItem::hash512(stream_hash),
-            CanonicalItem::unsigned64(TARGET_TEST_RING_DEGREE as u64),
-        ],
-    ))
-    .expect("the target stream descriptor encodes")
-}
-
-fn canonical_target_release_statement(material_root: [u8; 64]) -> Vec<u8> {
-    CanonicalTuple::new(
-        TARGET_RELEASE_STATEMENT_SCHEMA_IDENTIFIER,
-        SCHEMA_VERSION,
-        vec![
-            CanonicalItem::unsigned16(1),
-            CanonicalItem::hash512([0x11; 64]),
-            CanonicalItem::hash512([0x41; 64]),
-            CanonicalItem::hash512([0x42; 64]),
-            CanonicalItem::hash512([0x43; 64]),
-            CanonicalItem::hash512([0x44; 64]),
-            CanonicalItem::hash512([0x45; 64]),
-            CanonicalItem::hash512([0x46; 64]),
-            CanonicalItem::participant_identity([0x47; 64]),
-            CanonicalItem::unsigned16(0),
-            CanonicalItem::homogeneous_list(
-                CanonicalItemType::Hash512,
-                &[CanonicalItem::hash512(material_root)],
-            )
-            .expect("the material-root list encodes"),
-            canonical_target_stream_descriptor([0x48; 64]),
-            canonical_target_stream_descriptor([0x49; 64]),
-        ],
-    )
-    .encode()
-    .expect("the target release statement encodes")
-}
-
 fn verified_statement_trees(
     relation_plan: &CompiledRelationPlan,
     trees: &[SetupPublicPolynomialTree],
@@ -1066,95 +731,6 @@ fn verified_statement_trees(
             )
         })
         .collect()
-}
-
-fn target_relation_tree_inputs(
-    compilation: &CompiledTargetReleaseRelation,
-    committed_material: &CommittedMaterialTree,
-) -> (
-    Vec<RelationProofTreeInput>,
-    Vec<VerifiedStatementOwnedTree>,
-    u16,
-) {
-    let variant = compilation
-        .relation_plan()
-        .select_variant(None, None)
-        .expect("the target relation variant exists");
-    let mut relation_trees = Vec::with_capacity(variant.ordered_trees().len());
-    let mut verified_trees = Vec::new();
-    let mut bound_tree_catalog_index = None;
-    for (tree_index, descriptor) in variant.ordered_trees().iter().enumerate() {
-        match descriptor {
-            RelationTreeDescriptor::ProofCreated {
-                proof_tree_role,
-                ordered_column_ordinals,
-            } => {
-                let tree_role = match proof_tree_role {
-                    1 => ProofTreeRole::BaseOracle,
-                    2 => ProofTreeRole::AuxiliaryOracle,
-                    _ => panic!("the checked target plan uses a known tree role"),
-                };
-                let leaf_visibility = if ordered_column_ordinals.iter().any(|column_ordinal| {
-                    variant
-                        .ordered_columns()
-                        .get(*column_ordinal as usize)
-                        .is_some_and(|column| {
-                            matches!(column.origin(), RelationColumnOrigin::Prover)
-                        })
-                }) {
-                    ProofLeafVisibility::SecretBearing
-                } else {
-                    ProofLeafVisibility::Public
-                };
-                relation_trees.push(RelationProofTreeInput::ProofCreated {
-                    tree_role,
-                    row_width: u32::try_from(ordered_column_ordinals.len())
-                        .expect("the target tree width fits u32"),
-                    leaf_visibility,
-                });
-            }
-            RelationTreeDescriptor::BoundPublic {
-                construction_kind,
-                expected_root_source_ordinal,
-                ordered_column_ordinals,
-                ..
-            } => {
-                assert_eq!(
-                    *construction_kind,
-                    BoundTreeConstructionKind::CommittedMaterial
-                );
-                assert!(bound_tree_catalog_index.is_none());
-                let tree_catalog_index =
-                    u16::try_from(tree_index).expect("the target tree index fits u16");
-                bound_tree_catalog_index = Some(tree_catalog_index);
-                let tree_input = StatementOwnedProofTreeInput::CommittedMaterial {
-                    material_context_hash: committed_material.material_context_hash(),
-                    expected_root: committed_material.root(),
-                };
-                relation_trees.push(RelationProofTreeInput::BoundPublic(tree_input.clone()));
-                verified_trees.push(VerifiedStatementOwnedTree::from_committed_material_tree(
-                    u32::try_from(tree_index).expect("the target tree index fits u32"),
-                    *expected_root_source_ordinal,
-                    committed_material,
-                    ordered_column_ordinals
-                        .iter()
-                        .map(|column_ordinal| {
-                            variant
-                                .ordered_columns()
-                                .get(*column_ordinal as usize)
-                                .expect("the checked target tree column exists")
-                                .canonical_residue_modulus()
-                        })
-                        .collect(),
-                ));
-            }
-        }
-    }
-    (
-        relation_trees,
-        verified_trees,
-        bound_tree_catalog_index.expect("the target plan has one committed-material tree"),
-    )
 }
 
 fn public_aggregate_geometry() -> PublicAggregateRelationGeometry {

@@ -12,7 +12,7 @@ use zeroize::Zeroizing;
 
 use crate::foundation::{
     CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple,
-    PrivateRandomnessKmacInputClassAccounting, hash_foundation_tuple_512,
+    hash_foundation_tuple_512,
 };
 
 use super::{
@@ -159,6 +159,7 @@ pub(crate) struct CommittedMaterialProfile {
 }
 
 impl CommittedMaterialProfile {
+    #[cfg(test)]
     pub(crate) fn selected(ring_degree: usize) -> Result<Self, CommittedMaterialError> {
         let (
             trace_domain_size,
@@ -329,73 +330,6 @@ impl CommittedMaterialProfile {
     }
 }
 
-/// Maximum number of distinct canonical inner-derivation KMAC inputs needed
-/// to construct the supplied action-level population of persistent material
-/// roots. Every mask candidate advances its physical-column counter, while
-/// every leaf salt consumes consecutive 64-byte counter blocks.
-pub(crate) fn maximum_committed_material_inner_derivation_count(
-    profile: CommittedMaterialProfile,
-    physical_root_count: u64,
-    full_salted_leaf_count: u64,
-) -> Result<u64, CommittedMaterialError> {
-    profile.validate()?;
-    let mask_coefficient_count = u64::try_from(
-        profile
-            .masking_polynomial_maximum_degree()
-            .checked_add(1)
-            .ok_or(CommittedMaterialError::CountOverflow)?,
-    )
-    .map_err(|_| CommittedMaterialError::CountOverflow)?;
-    let maximum_mask_candidate_count = physical_root_count
-        .checked_mul(
-            u64::try_from(MATERIAL_COLUMN_COUNT)
-                .map_err(|_| CommittedMaterialError::CountOverflow)?,
-        )
-        .and_then(|count| count.checked_mul(mask_coefficient_count))
-        .and_then(|count| {
-            count.checked_mul(u64::from(
-                PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT,
-            ))
-        })
-        .ok_or(CommittedMaterialError::CountOverflow)?;
-    let leaf_salt_block_count = u64::try_from(COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH)
-        .map_err(|_| CommittedMaterialError::CountOverflow)?
-        .div_ceil(
-            u64::try_from(DERIVED_BLOCK_BYTE_LENGTH)
-                .map_err(|_| CommittedMaterialError::CountOverflow)?,
-        );
-    maximum_mask_candidate_count
-        .checked_add(
-            full_salted_leaf_count
-                .checked_mul(leaf_salt_block_count)
-                .ok_or(CommittedMaterialError::CountOverflow)?,
-        )
-        .ok_or(CommittedMaterialError::CountOverflow)
-}
-
-/// Source-owned private-randomness accounting for a persistent committed
-/// material population. Every physical root has one 64-byte material-seed
-/// stream block, while mask candidates and full-leaf salts use the inner
-/// derivation keyed by that seed.
-pub(crate) fn maximum_committed_material_kmac_input_accounting(
-    profile: CommittedMaterialProfile,
-    physical_root_count: u64,
-    full_salted_leaf_count: u64,
-) -> Result<PrivateRandomnessKmacInputClassAccounting, CommittedMaterialError> {
-    let inner_derivation_count = maximum_committed_material_inner_derivation_count(
-        profile,
-        physical_root_count,
-        full_salted_leaf_count,
-    )?;
-    PrivateRandomnessKmacInputClassAccounting::checked_new(
-        0,
-        0,
-        physical_root_count,
-        inner_derivation_count,
-    )
-    .ok_or(CommittedMaterialError::CountOverflow)
-}
-
 pub(crate) struct CommittedMaterialTreeInput<'input> {
     pub(crate) profile: CommittedMaterialProfile,
     pub(crate) material_context_hash: [u8; 64],
@@ -473,12 +407,6 @@ impl AuthenticatedCommittedMaterialSharedAllocationByteLengths {
 
     pub(crate) const fn canonical_message(self) -> u64 {
         self.canonical_message
-    }
-
-    pub(crate) fn total(self) -> Result<u64, CommittedMaterialError> {
-        self.compact_source
-            .checked_add(self.canonical_message)
-            .ok_or(CommittedMaterialError::CountOverflow)
     }
 }
 
@@ -642,13 +570,6 @@ impl AuthenticatedCompactCommittedMaterialSource {
                 retained_byte_length: byte_lengths.canonical_message(),
             },
         })
-    }
-
-    pub(crate) fn maximum_regeneration_trace_byte_length(&self) -> usize {
-        self.compact_source
-            .profile
-            .trace_domain_size
-            .saturating_mul(size_of::<ProofBaseFieldElement>())
     }
 }
 
@@ -989,22 +910,21 @@ impl CommittedMaterialTree {
         })
     }
 
+    #[cfg(test)]
     pub(crate) const fn profile(&self) -> CommittedMaterialProfile {
         self.profile
     }
 
+    #[cfg(test)]
     pub(crate) const fn material_context_hash(&self) -> [u8; 64] {
         self.material_context_hash
     }
 
+    #[cfg(test)]
     pub(crate) fn masked_coefficients_by_physical_column(
         &self,
     ) -> &[Zeroizing<Vec<ProofBaseFieldElement>>] {
         &self.masked_coefficients_by_physical_column
-    }
-
-    pub(crate) fn extension_columns(&self) -> &[Vec<ProofBaseFieldElement>] {
-        &self.extension_columns
     }
 
     pub(crate) fn root(&self) -> [u8; 64] {
@@ -1013,18 +933,6 @@ impl CommittedMaterialTree {
             .and_then(|level| level.first())
             .copied()
             .expect("a constructed committed-material tree has one terminal root")
-    }
-
-    pub(crate) fn canonical_leaf_bytes(
-        &self,
-        leaf_index: usize,
-    ) -> Result<Vec<u8>, CommittedMaterialError> {
-        canonical_phase_pair_leaf_bytes(
-            self.material_context_hash,
-            &self.material_seed,
-            &self.extension_columns,
-            leaf_index,
-        )
     }
 
     /// Releases the full evaluation and Merkle representation after its root

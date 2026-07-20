@@ -329,7 +329,8 @@ export const generateAggregateThresholdShareInClosedWorker = async (input: {
         );
     }
     if (
-        input.generationMode !== 'fresh' && input.generationMode !== 'resumed'
+        input.generationMode !== 'fresh' &&
+        input.generationMode !== 'resumed'
     ) {
         throw new CanonicalStreamRefusalError('wrongContext');
     }

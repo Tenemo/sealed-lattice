@@ -853,7 +853,10 @@ export const generateBallotValidityInClosedWorker = async (input: {
             'The action-randomness session belongs to another WASM worker.',
         );
     }
-    if (input.generationMode !== 'fresh' && input.generationMode !== 'resumed') {
+    if (
+        input.generationMode !== 'fresh' &&
+        input.generationMode !== 'resumed'
+    ) {
         throw new CanonicalStreamRefusalError('wrongContext');
     }
     const producerSequence = requireUnsigned64(input.producerSequence);

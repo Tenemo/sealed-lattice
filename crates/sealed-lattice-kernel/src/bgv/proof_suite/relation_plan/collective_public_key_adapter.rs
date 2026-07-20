@@ -41,7 +41,7 @@ const PUBLIC_KEY_SHARE_BODY_BYTE_LENGTH: u64 =
 enum CollectivePublicKeySetupPolynomialMaterial {
     Authenticated {
         carrier_binding: [u8; Hash512::BYTE_LENGTH],
-        verified_summary: VerifiedCanonicalStreamSummary,
+        verified_summary: Box<VerifiedCanonicalStreamSummary>,
     },
     Resident {
         ordered_limb_polynomials: Box<[Arc<[u64]>]>,
@@ -74,7 +74,7 @@ impl CollectivePublicKeySetupPolynomialSource {
             expected_root,
             material: CollectivePublicKeySetupPolynomialMaterial::Authenticated {
                 carrier_binding,
-                verified_summary,
+                verified_summary: Box::new(verified_summary),
             },
         })
     }
@@ -100,13 +100,15 @@ impl CollectivePublicKeySetupPolynomialSource {
     }
 }
 
+struct PreparedAuthenticatedCollectiveSourceMaterial {
+    carrier_binding: [u8; Hash512::BYTE_LENGTH],
+    descriptor_binding: [u8; Hash512::BYTE_LENGTH],
+    stream_descriptor: StreamDescriptor,
+    readback: Option<CanonicalStreamReadbackVerifier>,
+}
+
 enum PreparedCollectiveSourceMaterial {
-    Authenticated {
-        carrier_binding: [u8; Hash512::BYTE_LENGTH],
-        descriptor_binding: [u8; Hash512::BYTE_LENGTH],
-        stream_descriptor: StreamDescriptor,
-        readback: Option<CanonicalStreamReadbackVerifier>,
-    },
+    Authenticated(Box<PreparedAuthenticatedCollectiveSourceMaterial>),
     Resident {
         ordered_limb_polynomials: Box<[Arc<[u64]>]>,
     },
@@ -143,7 +145,9 @@ struct CachedCollectiveSourceChunk {
 pub(crate) struct CollectivePublicKeySourceProviderMemoryAccounting {
     provider_fixed_byte_length: u64,
     input_source_catalog_byte_length: u64,
+    input_authenticated_summary_payload_byte_length: u64,
     prepared_source_catalog_byte_length: u64,
+    prepared_authenticated_material_payload_byte_length: u64,
     ordered_column_catalog_byte_length: u64,
     relation_tree_input_catalog_byte_length: u64,
     authenticated_descriptor_digest_payload_byte_length: u64,
@@ -162,50 +166,72 @@ pub(crate) struct CollectivePublicKeySourceProviderMemoryAccounting {
 }
 
 impl CollectivePublicKeySourceProviderMemoryAccounting {
+    #[cfg(test)]
     pub(crate) const fn provider_fixed_byte_length(self) -> u64 {
         self.provider_fixed_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn input_source_catalog_byte_length(self) -> u64 {
         self.input_source_catalog_byte_length
     }
 
+    #[cfg(test)]
+    pub(crate) const fn input_authenticated_summary_payload_byte_length(self) -> u64 {
+        self.input_authenticated_summary_payload_byte_length
+    }
+
+    #[cfg(test)]
     pub(crate) const fn prepared_source_catalog_byte_length(self) -> u64 {
         self.prepared_source_catalog_byte_length
     }
 
+    #[cfg(test)]
+    pub(crate) const fn prepared_authenticated_material_payload_byte_length(self) -> u64 {
+        self.prepared_authenticated_material_payload_byte_length
+    }
+
+    #[cfg(test)]
     pub(crate) const fn ordered_column_catalog_byte_length(self) -> u64 {
         self.ordered_column_catalog_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn relation_tree_input_catalog_byte_length(self) -> u64 {
         self.relation_tree_input_catalog_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn authenticated_descriptor_digest_payload_byte_length(self) -> u64 {
         self.authenticated_descriptor_digest_payload_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn authenticated_descriptor_digest_allocation_header_byte_length(self) -> u64 {
         self.authenticated_descriptor_digest_allocation_header_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn authenticated_chunk_flag_payload_byte_length(self) -> u64 {
         self.authenticated_chunk_flag_payload_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn resident_polynomial_payload_byte_length(self) -> u64 {
         self.resident_polynomial_payload_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn resident_polynomial_allocation_header_byte_length(self) -> u64 {
         self.resident_polynomial_allocation_header_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn resident_polynomial_reference_catalog_byte_length(self) -> u64 {
         self.resident_polynomial_reference_catalog_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn preparation_peak_resident_byte_length(self) -> u64 {
         self.preparation_peak_resident_byte_length
     }
@@ -226,10 +252,12 @@ impl CollectivePublicKeySourceProviderMemoryAccounting {
         self.maximum_returned_source_polynomial_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn authenticated_source_read_count(self) -> u64 {
         self.authenticated_source_read_count
     }
 
+    #[cfg(test)]
     pub(crate) const fn authenticated_source_read_byte_length(self) -> u64 {
         self.authenticated_source_read_byte_length
     }
@@ -297,8 +325,16 @@ pub(crate) fn collective_public_key_source_provider_memory_accounting(
         source_count,
         size_of::<CollectivePublicKeySetupPolynomialSource>(),
     )?;
+    let input_authenticated_summary_payload_byte_length = count_bytes(
+        participant_count,
+        size_of::<VerifiedCanonicalStreamSummary>(),
+    )?;
     let prepared_source_catalog_byte_length =
         count_bytes(source_count, size_of::<PreparedCollectiveSource>())?;
+    let prepared_authenticated_material_payload_byte_length = count_bytes(
+        participant_count,
+        size_of::<PreparedAuthenticatedCollectiveSourceMaterial>(),
+    )?;
     let ordered_column_catalog_byte_length = count_bytes(
         expected_ordered_column_count,
         size_of::<CollectiveSourceColumn>(),
@@ -331,6 +367,7 @@ pub(crate) fn collective_public_key_source_provider_memory_accounting(
     let loading_persistent_resident_byte_length = [
         provider_fixed_byte_length,
         prepared_source_catalog_byte_length,
+        prepared_authenticated_material_payload_byte_length,
         ordered_column_catalog_byte_length,
         authenticated_descriptor_digest_payload_byte_length,
         authenticated_descriptor_digest_allocation_header_byte_length,
@@ -342,11 +379,15 @@ pub(crate) fn collective_public_key_source_provider_memory_accounting(
     .into_iter()
     .try_fold(0_u64, add)?;
     let post_source_polynomial_finish_persistent_resident_byte_length = provider_fixed_byte_length;
+    let preparation_input_source_byte_length = add(
+        input_source_catalog_byte_length,
+        input_authenticated_summary_payload_byte_length,
+    )?;
     let preparation_peak_resident_byte_length = loading_persistent_resident_byte_length
         .checked_sub(provider_fixed_byte_length)
         .and_then(|length| length.checked_add(relation_tree_input_catalog_byte_length))
         .and_then(|length| {
-            length.checked_add(provider_fixed_byte_length.max(input_source_catalog_byte_length))
+            length.checked_add(provider_fixed_byte_length.max(preparation_input_source_byte_length))
         })
         .ok_or(CommonProofProverError::CountOverflow)?;
     let additional_loading_source_polynomials_transient_byte_length =
@@ -362,7 +403,9 @@ pub(crate) fn collective_public_key_source_provider_memory_accounting(
     Ok(CollectivePublicKeySourceProviderMemoryAccounting {
         provider_fixed_byte_length,
         input_source_catalog_byte_length,
+        input_authenticated_summary_payload_byte_length,
         prepared_source_catalog_byte_length,
+        prepared_authenticated_material_payload_byte_length,
         ordered_column_catalog_byte_length,
         relation_tree_input_catalog_byte_length,
         authenticated_descriptor_digest_payload_byte_length,
@@ -479,18 +522,20 @@ impl CollectivePublicKeySourcePolynomialProvider {
                             stream_descriptor.full_object_digest.as_bytes(),
                         ],
                     );
-                    PreparedCollectiveSourceMaterial::Authenticated {
-                        carrier_binding,
-                        descriptor_binding,
-                        stream_descriptor,
-                        readback: Some(
-                            CanonicalStreamReadbackVerifier::new(
-                                CanonicalStreamDomain::PublicKeyShareMaterial,
-                                verified_summary,
-                            )
-                            .map_err(|_| CommonProofProverError::InvalidInput)?,
-                        ),
-                    }
+                    PreparedCollectiveSourceMaterial::Authenticated(Box::new(
+                        PreparedAuthenticatedCollectiveSourceMaterial {
+                            carrier_binding,
+                            descriptor_binding,
+                            stream_descriptor,
+                            readback: Some(
+                                CanonicalStreamReadbackVerifier::new(
+                                    CanonicalStreamDomain::PublicKeyShareMaterial,
+                                    *verified_summary,
+                                )
+                                .map_err(|_| CommonProofProverError::InvalidInput)?,
+                            ),
+                        },
+                    ))
                 }
                 CollectivePublicKeySetupPolynomialMaterial::Resident {
                     ordered_limb_polynomials,
@@ -604,12 +649,8 @@ impl CollectivePublicKeySourcePolynomialProvider {
             .as_ref()
             .and_then(|sources| sources.get(pending.source_column.source_ordinal))
             .ok_or(CommonProofProverError::InvalidColumn)?;
-        let PreparedCollectiveSourceMaterial::Authenticated {
-            carrier_binding,
-            descriptor_binding,
-            stream_descriptor,
-            ..
-        } = &source.material
+        let PreparedCollectiveSourceMaterial::Authenticated(authenticated_material) =
+            &source.material
         else {
             return Err(CommonProofProverError::InvalidColumn);
         };
@@ -626,7 +667,8 @@ impl CollectivePublicKeySourcePolynomialProvider {
         let stream_byte_offset = chunk_index
             .checked_mul(chunk_byte_length)
             .ok_or(CommonProofProverError::CountOverflow)?;
-        let requested_byte_length = stream_descriptor
+        let requested_byte_length = authenticated_material
+            .stream_descriptor
             .total_byte_length
             .checked_sub(stream_byte_offset)
             .map(|remaining| remaining.min(chunk_byte_length))
@@ -638,10 +680,13 @@ impl CollectivePublicKeySourcePolynomialProvider {
                 &pending.source_column.descriptor,
             ),
             self.source_catalog_binding,
-            *descriptor_binding,
-            *carrier_binding,
-            stream_descriptor.full_object_digest.into_bytes(),
-            stream_descriptor.total_byte_length,
+            authenticated_material.descriptor_binding,
+            authenticated_material.carrier_binding,
+            authenticated_material
+                .stream_descriptor
+                .full_object_digest
+                .into_bytes(),
+            authenticated_material.stream_descriptor.total_byte_length,
             stream_byte_offset,
             stream_byte_offset,
             requested_byte_length,
@@ -795,9 +840,9 @@ impl CollectivePublicKeySourcePolynomialProvider {
         source: &PreparedCollectiveSource,
     ) -> Result<CommonProofSourcePolynomialReplayIdentity, CommonProofProverError> {
         let material_binding = match &source.material {
-            PreparedCollectiveSourceMaterial::Authenticated {
-                descriptor_binding, ..
-            } => *descriptor_binding,
+            PreparedCollectiveSourceMaterial::Authenticated(authenticated_material) => {
+                authenticated_material.descriptor_binding
+            }
             PreparedCollectiveSourceMaterial::Resident { .. } => hash_framed_parts_512(
                 COLLECTIVE_SOURCE_DESCRIPTOR_BINDING_DOMAIN,
                 &[
@@ -892,9 +937,15 @@ impl CommonProofSourcePolynomialProvider for CollectivePublicKeySourcePolynomial
                 .finish_pending_column()
                 .map(CommonProofSourcePolynomialProviderPoll::Ready);
         }
-        let request = self.next_read_request()?;
+        self.next_read_request()?;
         self.cached_chunk = None;
-        Ok(CommonProofSourcePolynomialProviderPoll::AuthenticatedSourceReadRequired(request))
+        Ok(CommonProofSourcePolynomialProviderPoll::AuthenticatedSourceReadRequired)
+    }
+
+    fn pending_authenticated_source_read_request(
+        &self,
+    ) -> Result<Option<CommonProofAuthenticatedSourceReadRequest>, CommonProofProverError> {
+        self.next_read_request().map(Some)
     }
 
     fn supply_authenticated_source_range(
@@ -919,11 +970,13 @@ impl CommonProofSourcePolynomialProvider for CollectivePublicKeySourcePolynomial
             .as_mut()
             .and_then(|sources| sources.get_mut(source_ordinal))
             .ok_or(CommonProofProverError::InvalidColumn)?;
-        let PreparedCollectiveSourceMaterial::Authenticated { readback, .. } = &mut source.material
+        let PreparedCollectiveSourceMaterial::Authenticated(authenticated_material) =
+            &mut source.material
         else {
             return Err(CommonProofProverError::InvalidColumn);
         };
-        readback
+        authenticated_material
+            .readback
             .as_mut()
             .ok_or(CommonProofProverError::InvalidColumn)?
             .authenticate_chunk(
@@ -964,10 +1017,11 @@ impl CommonProofSourcePolynomialProvider for CollectivePublicKeySourcePolynomial
             .ok_or(CommonProofProverError::InvalidColumn)?;
         self.cached_chunk = None;
         for source in sources {
-            if let PreparedCollectiveSourceMaterial::Authenticated { readback, .. } =
+            if let PreparedCollectiveSourceMaterial::Authenticated(authenticated_material) =
                 source.material
             {
-                readback
+                authenticated_material
+                    .readback
                     .ok_or(CommonProofProverError::InvalidColumn)?
                     .finish()
                     .into_result()

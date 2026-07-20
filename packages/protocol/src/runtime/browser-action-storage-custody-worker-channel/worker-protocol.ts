@@ -9,6 +9,7 @@ import {
     type VerifiedCommonProofCapability,
 } from '@sealed-lattice/wasm';
 
+import type { CheckpointOperationIdentity } from '../authenticated-checkpoint-store.js';
 import {
     BrowserActionStorageCustodyError,
     type BrowserActionStorageCustodyErrorCode,
@@ -18,7 +19,6 @@ import type {
     CommonProofBrowserCustody,
     CommonProofCheckpointResumeDescriptor,
 } from '../common-proof-browser-custody.js';
-import type { CheckpointOperationIdentity } from '../authenticated-checkpoint-store.js';
 
 import {
     copyBoundedBytes,
@@ -193,9 +193,7 @@ export const copyCommonProofCheckpointResumeDescriptorForWorker = (
     descriptor: CommonProofCheckpointResumeDescriptor,
 ): CommonProofCheckpointResumeDescriptor => {
     if (
-        !(
-            descriptor.privateRandomCursorManifestBytes instanceof Uint8Array
-        ) ||
+        !(descriptor.privateRandomCursorManifestBytes instanceof Uint8Array) ||
         descriptor.privateRandomCursorManifestBytes.byteLength >
             maximumCheckpointDescriptorByteLength ||
         !Number.isSafeInteger(descriptor.safeBoundaryOrdinal) ||
@@ -349,22 +347,23 @@ export const copyReservedCommonProofCheckpointLineageIdentifier = (
     return record.checkpointLineageIdentifier.slice();
 };
 
-export const releaseReservedCommonProofCheckpointLineageInInstalledCustodyWorker = (
-    installedHost: InstalledCustodyWorkerHost,
-    reservation: InstalledCommonProofCheckpointLineageReservation,
-): Promise<void> => {
-    const releaseLineage =
-        installedCustodyWorkerHostCommonProofCheckpointLineageReleasers.get(
-            installedHost,
-        );
-    if (releaseLineage === undefined) {
-        throw new BrowserActionStorageCustodyError(
-            'InvalidInput',
-            'The installed custody worker host cannot release common-proof checkpoint lineage.',
-        );
-    }
-    return releaseLineage(reservation);
-};
+export const releaseReservedCommonProofCheckpointLineageInInstalledCustodyWorker =
+    (
+        installedHost: InstalledCustodyWorkerHost,
+        reservation: InstalledCommonProofCheckpointLineageReservation,
+    ): Promise<void> => {
+        const releaseLineage =
+            installedCustodyWorkerHostCommonProofCheckpointLineageReleasers.get(
+                installedHost,
+            );
+        if (releaseLineage === undefined) {
+            throw new BrowserActionStorageCustodyError(
+                'InvalidInput',
+                'The installed custody worker host cannot release common-proof checkpoint lineage.',
+            );
+        }
+        return releaseLineage(reservation);
+    };
 
 export const installedCustodyWorkerHostCommonProofGenerationPreparers =
     new WeakMap<

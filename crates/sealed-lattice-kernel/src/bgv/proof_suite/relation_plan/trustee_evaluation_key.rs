@@ -683,6 +683,22 @@ fn add_statement_root_rows(
     )
 }
 
+type RelinearizationRoundOneRelationLayouts = (
+    Box<[RelinearizationRoundOneErrorSourceLayout]>,
+    Box<[RelinearizationRoundOneQuotientSourceLayout]>,
+);
+
+type RelinearizationRoundTwoRelationLayouts = (
+    Box<[RelinearizationRoundTwoAggregateRowSourceLayout]>,
+    Box<[ShiftedSmallVector]>,
+    Box<[TrusteeRadixThreeQuotientWitness]>,
+);
+
+type GaloisKeyRelationLayouts = (
+    Box<[ShiftedSmallVector]>,
+    Box<[TrusteeRadixThreeQuotientWitness]>,
+);
+
 #[allow(clippy::too_many_arguments)]
 fn add_round_one_relations(
     builder: &mut KeyRelationPlanBuilder<'_>,
@@ -693,13 +709,7 @@ fn add_round_one_relations(
     secret: &ReversibleShiftedSmallVector,
     ephemeral_secret: &ReversibleShiftedSmallVector,
     check_context: &RelationPlanCheckContext,
-) -> Result<
-    (
-        Box<[RelinearizationRoundOneErrorSourceLayout]>,
-        Box<[RelinearizationRoundOneQuotientSourceLayout]>,
-    ),
-    RelationPlanError,
-> {
+) -> Result<RelinearizationRoundOneRelationLayouts, RelationPlanError> {
     let ordered_modulus_references = geometry.ordered_modulus_references()?;
     let expected_row_count = geometry
         .decomposition_blocks
@@ -778,14 +788,7 @@ fn add_round_two_relations(
     secret: &ReversibleShiftedSmallVector,
     ephemeral_secret: &ReversibleShiftedSmallVector,
     check_context: &RelationPlanCheckContext,
-) -> Result<
-    (
-        Box<[RelinearizationRoundTwoAggregateRowSourceLayout]>,
-        Box<[ShiftedSmallVector]>,
-        Box<[TrusteeRadixThreeQuotientWitness]>,
-    ),
-    RelationPlanError,
-> {
+) -> Result<RelinearizationRoundTwoRelationLayouts, RelationPlanError> {
     let ordered_modulus_references = geometry.ordered_modulus_references()?;
     let expected_row_count = geometry
         .decomposition_blocks
@@ -857,13 +860,7 @@ fn add_galois_relations(
     secret: &ReversibleShiftedSmallVector,
     automorphed_secret: &super::key_relation::ShiftedSmallVector,
     check_context: &RelationPlanCheckContext,
-) -> Result<
-    (
-        Box<[ShiftedSmallVector]>,
-        Box<[TrusteeRadixThreeQuotientWitness]>,
-    ),
-    RelationPlanError,
-> {
+) -> Result<GaloisKeyRelationLayouts, RelationPlanError> {
     let ordered_modulus_references = geometry.ordered_modulus_references()?;
     let expected_row_count = geometry
         .decomposition_blocks
@@ -1481,7 +1478,7 @@ mod tests {
     use super::*;
     use crate::bgv::{
         evaluator::top_k::{SCATTER_KEY_LEVEL, TRACE_KEY_LEVEL},
-        parameters::{DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE, SPECIAL_PRIMES},
+        parameters::{DATA_PRIMES, POLYNOMIAL_DEGREE, SPECIAL_PRIMES},
     };
     fn check_context() -> RelationPlanCheckContext {
         let mut context = key_relation_check_context(true);

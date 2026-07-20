@@ -23,7 +23,6 @@ use super::{
         CanonicalAcceptedSetupPackage, VerifiedSetupTerminalReservationSet,
         setup_terminal_package_authorization_hash,
     },
-    consumed_object_byte_lengths::VerifiedAcceptedSetupConsumedObjectByteLengthCatalog,
     verified_public_proof_catalog::VerifiedAcceptedSetupPublicProofCatalog,
     verified_public_randomness::VerifiedPublicRandomness,
     verified_terminals::VerifiedVssQualificationTerminals,
@@ -63,8 +62,6 @@ struct VerifiedAcceptedSetupFinalizationPreflight {
     collective_public_key_full_object_digest: [u8; Hash512::BYTE_LENGTH],
     collective_public_key_b_polynomials: Vec<std::sync::Arc<[u64]>>,
     public_setup_seed: [u8; Hash512::BYTE_LENGTH],
-    accepted_setup_consumed_object_byte_lengths:
-        VerifiedAcceptedSetupConsumedObjectByteLengthCatalog,
 }
 
 /// Publishes one accepted setup and consumes its reset-safe state reservations
@@ -184,7 +181,6 @@ pub(in crate::bgv) fn finalize_verified_accepted_setup(
                 _vss_qualification_terminals,
                 participant_release_materials,
                 local_target_release_source,
-                private_vss_mailbox_byte_lengths,
             ) = vss_qualification.into_finalization_parts();
             let (collective_public_key_terminal, verified_evaluator_key_store) =
                 public_proof_catalog.into_authority_material();
@@ -208,9 +204,6 @@ pub(in crate::bgv) fn finalize_verified_accepted_setup(
                     .collective_public_key_full_object_digest,
                 collective_public_key_b_polynomials: preflight.collective_public_key_b_polynomials,
                 public_setup_seed: preflight.public_setup_seed,
-                accepted_setup_consumed_object_byte_lengths: preflight
-                    .accepted_setup_consumed_object_byte_lengths,
-                private_vss_mailbox_byte_lengths,
             };
             Ok((
                 preflight
@@ -241,7 +234,7 @@ fn preflight_verified_accepted_setup_finalization(
     let public_proof_catalog = &input.public_proof_catalog;
     let participant_target_release_sources =
         slice::from_ref(vss_qualification.local_target_release_source());
-    let accepted_setup_consumed_object_byte_lengths = validate_package_and_verified_sources(
+    validate_package_and_verified_sources(
         package,
         public_randomness,
         vss_qualification.qualification_terminals(),
@@ -335,7 +328,6 @@ fn preflight_verified_accepted_setup_finalization(
             .collective_public_key_b_polynomials()
             .to_vec(),
         public_setup_seed,
-        accepted_setup_consumed_object_byte_lengths,
     })
 }
 
@@ -346,16 +338,39 @@ fn validate_package_and_verified_sources(
     public_proof_catalog: &VerifiedAcceptedSetupPublicProofCatalog,
     participant_release_materials: &[VerifiedAcceptedSetupParticipantReleaseMaterial],
     participant_target_release_sources: &[VerifiedAcceptedSetupParticipantTargetReleaseSource],
-) -> Result<VerifiedAcceptedSetupConsumedObjectByteLengthCatalog, u32> {
+) -> Result<(), u32> {
     let participant_count = usize::from(FOUNDATION_PROFILE.participant_count);
     let context = public_randomness.context();
-    let verified_consumed_object_byte_lengths =
-        VerifiedAcceptedSetupConsumedObjectByteLengthCatalog::from_verified_terminals(
-            package,
-            public_randomness,
-            vss_qualification,
-        )
-        .map_err(refusal_status)?;
+    require_exact_verified_object_hash_catalog(
+        package.setup_intent_object_hashes(),
+        public_randomness.ordered_setup_intent_object_hashes(),
+        participant_count,
+    )?;
+    require_exact_verified_object_hash_catalog(
+        package.public_randomness_commitment_object_hashes(),
+        public_randomness.ordered_commitment_object_hashes(),
+        participant_count,
+    )?;
+    require_exact_verified_object_hash_catalog(
+        package.public_randomness_reveal_object_hashes(),
+        public_randomness.ordered_reveal_object_hashes(),
+        participant_count,
+    )?;
+    require_exact_verified_object_hash_catalog(
+        package.dealer_public_record_object_hashes(),
+        vss_qualification.ordered_dealer_public_record_object_hashes(),
+        participant_count,
+    )?;
+    require_exact_verified_object_hash_catalog(
+        package.private_share_acceptance_object_hashes(),
+        vss_qualification.ordered_private_share_acceptance_object_hashes(),
+        participant_count,
+    )?;
+    require_exact_verified_vss_proof_descriptor_catalog(
+        vss_qualification.ordered_share_linkage_proof_descriptors(),
+        vss_qualification.ordered_aggregate_threshold_share_proof_descriptors(),
+        participant_count,
+    )?;
     if public_randomness.ordered_participant_identities().len() != participant_count
         || public_randomness
             .ordered_action_randomness_commitments()
@@ -409,7 +424,51 @@ fn validate_package_and_verified_sources(
     {
         return Err(refusal_status(RefusalReason::WrongContext));
     }
-    Ok(verified_consumed_object_byte_lengths)
+    Ok(())
+}
+
+fn require_exact_verified_object_hash_catalog(
+    package_object_hashes: &[Hash512],
+    verified_object_hashes: &[Hash512],
+    participant_count: usize,
+) -> Result<(), u32> {
+    if package_object_hashes.len() != participant_count
+        || verified_object_hashes.len() != participant_count
+    {
+        return Err(refusal_status(RefusalReason::WrongTypeOrLength));
+    }
+    if package_object_hashes != verified_object_hashes {
+        return Err(refusal_status(RefusalReason::WrongHashOrRoot));
+    }
+    Ok(())
+}
+
+fn require_exact_verified_vss_proof_descriptor_catalog(
+    ordered_vss_share_linkage_proof_descriptors: &[crate::foundation::StreamDescriptor],
+    ordered_aggregate_threshold_share_proof_descriptors: &[crate::foundation::StreamDescriptor],
+    participant_count: usize,
+) -> Result<(), u32> {
+    if ordered_vss_share_linkage_proof_descriptors.len() != participant_count
+        || ordered_aggregate_threshold_share_proof_descriptors.len() != participant_count
+        || ordered_vss_share_linkage_proof_descriptors
+            .iter()
+            .chain(ordered_aggregate_threshold_share_proof_descriptors)
+            .any(|descriptor| descriptor.total_byte_length == 0)
+    {
+        return Err(refusal_status(RefusalReason::WrongTypeOrLength));
+    }
+    let ordered_descriptors = ordered_vss_share_linkage_proof_descriptors
+        .iter()
+        .chain(ordered_aggregate_threshold_share_proof_descriptors)
+        .collect::<Vec<_>>();
+    if ordered_descriptors
+        .iter()
+        .enumerate()
+        .any(|(ordinal, descriptor)| ordered_descriptors[..ordinal].contains(descriptor))
+    {
+        return Err(refusal_status(RefusalReason::WrongHashOrRoot));
+    }
+    Ok(())
 }
 
 fn setup_action_randomness_authorization_hash(
@@ -451,4 +510,90 @@ fn reservation_matches_action_randomness(
 
 const fn refusal_status(refusal_reason: RefusalReason) -> u32 {
     refusal_reason.canonical_code() as u32
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::foundation::StreamDescriptor;
+
+    fn catalog_hash(marker: u8) -> Hash512 {
+        Hash512::from_bytes([marker; Hash512::BYTE_LENGTH])
+    }
+
+    fn stream_descriptor(marker: u8) -> StreamDescriptor {
+        StreamDescriptor::new(
+            1,
+            vec![catalog_hash(marker)],
+            catalog_hash(marker.wrapping_add(1)),
+        )
+        .expect("one-byte test stream descriptor is valid")
+    }
+
+    #[test]
+    fn exact_verified_object_hash_catalog_rejects_length_and_order_drift() {
+        let verified_hashes = [catalog_hash(0x11), catalog_hash(0x22), catalog_hash(0x33)];
+        assert_eq!(
+            require_exact_verified_object_hash_catalog(&verified_hashes, &verified_hashes, 3),
+            Ok(())
+        );
+
+        assert_eq!(
+            require_exact_verified_object_hash_catalog(&verified_hashes[..2], &verified_hashes, 3,),
+            Err(refusal_status(RefusalReason::WrongTypeOrLength))
+        );
+
+        let reordered_hashes = [verified_hashes[1], verified_hashes[0], verified_hashes[2]];
+        assert_eq!(
+            require_exact_verified_object_hash_catalog(&reordered_hashes, &verified_hashes, 3),
+            Err(refusal_status(RefusalReason::WrongHashOrRoot))
+        );
+    }
+
+    #[test]
+    fn exact_verified_vss_descriptor_catalog_rejects_missing_zero_length_and_duplicate_sources() {
+        let share_linkage_descriptors = [stream_descriptor(0x41), stream_descriptor(0x51)];
+        let aggregate_share_descriptors = [stream_descriptor(0x61), stream_descriptor(0x71)];
+        assert_eq!(
+            require_exact_verified_vss_proof_descriptor_catalog(
+                &share_linkage_descriptors,
+                &aggregate_share_descriptors,
+                2,
+            ),
+            Ok(())
+        );
+
+        assert_eq!(
+            require_exact_verified_vss_proof_descriptor_catalog(
+                &share_linkage_descriptors[..1],
+                &aggregate_share_descriptors,
+                2,
+            ),
+            Err(refusal_status(RefusalReason::WrongTypeOrLength))
+        );
+
+        let mut zero_length_descriptors = aggregate_share_descriptors.clone();
+        zero_length_descriptors[0].total_byte_length = 0;
+        assert_eq!(
+            require_exact_verified_vss_proof_descriptor_catalog(
+                &share_linkage_descriptors,
+                &zero_length_descriptors,
+                2,
+            ),
+            Err(refusal_status(RefusalReason::WrongTypeOrLength))
+        );
+
+        let duplicate_descriptors = [
+            aggregate_share_descriptors[0].clone(),
+            share_linkage_descriptors[0].clone(),
+        ];
+        assert_eq!(
+            require_exact_verified_vss_proof_descriptor_catalog(
+                &share_linkage_descriptors,
+                &duplicate_descriptors,
+                2,
+            ),
+            Err(refusal_status(RefusalReason::WrongHashOrRoot))
+        );
+    }
 }

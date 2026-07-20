@@ -2,10 +2,8 @@ mod authority;
 mod canonical_package;
 mod canonical_package_builder;
 mod collective_and_relinearization_verification_population;
-mod consumed_object_byte_lengths;
 mod evaluator_source;
 mod finalization;
-mod generated_mailbox_byte_lengths;
 mod generation_authority;
 mod generation_population;
 mod generation_relinearization;
@@ -19,8 +17,7 @@ mod verified_terminals;
 mod vss_qualification;
 
 pub(in crate::bgv) use self::verified_public_randomness::{
-    VerifiedPublicRandomness, VerifiedSetupVerificationContext,
-    verify_public_randomness_board_sources,
+    VerifiedPublicRandomness, verify_public_randomness_board_sources,
 };
 pub(in crate::bgv) use self::verified_terminals::{
     VerifiedAggregateThresholdShareTerminal, VerifiedVssQualificationTerminals,
@@ -31,7 +28,6 @@ pub(in crate::bgv) use self::authority::{
     BrowserOwnedAggregateThresholdShareLimb, VerifiedAcceptedSetupAuthority,
     VerifiedAcceptedSetupAuthorityHandle, VerifiedAcceptedSetupParticipantTargetReleaseLease,
     VerifiedEvaluatorCommonComponentAuthority, VerifiedEvaluatorExecutionAuthority,
-    accepted_setup_participant_target_release_lease_allocation_byte_lengths,
     lease_verified_participant_target_release_source, take_verified_evaluator_execution_authority,
     with_verified_accepted_setup_authority, with_verified_participant_target_release_source,
 };
@@ -49,26 +45,19 @@ pub(crate) use self::collective_and_relinearization_verification_population::{
     retain_relinearization_round_two_verification_terminal_source,
 };
 pub(in crate::bgv) use self::evaluator_source::VerifiedAcceptedSetupEvaluatorSourceCatalog;
-pub(in crate::bgv) use self::generated_mailbox_byte_lengths::{
-    GeneratedPrivateVssMailboxCorpusInput,
-    VerifiedGeneratedPrivateVssMailboxCorpusByteLengthCatalog,
-};
 pub(in crate::bgv) use self::generation_authority::{
-    SelectedSetupGenerationLifecycleState, SetupGaloisGenerationPreparationError,
-    SetupGeneratedCommittedMaterial, SetupGeneratedGaloisEntry,
-    SetupGeneratedGaloisSourceAuthority, SetupGeneratedGaloisSourceComponent,
-    SetupGeneratedKeySwitchComponent, SetupGenerationAnchorOpening, SetupGenerationAuthorityHandle,
-    SetupGenerationGaloisApplication, SetupGenerationGaloisBatchSource,
-    SetupGenerationGaloisPreparationSource, SetupGenerationKeyRelationApplication,
-    SetupGenerationKeyRelationPreparationSource, SetupGenerationKeyRelationSource,
-    SetupGenerationPublicKeyShareSourceHandle, SetupGenerationRecipientPayloadSourceHandle,
-    SetupGenerationRelinearizationAggregateDescriptorDimensions,
-    SetupGenerationRelinearizationRoundOneApplication,
+    SetupGaloisGenerationPreparationError, SetupGeneratedCommittedMaterial,
+    SetupGeneratedGaloisEntry, SetupGeneratedGaloisSourceAuthority,
+    SetupGeneratedGaloisSourceComponent, SetupGeneratedKeySwitchComponent,
+    SetupGenerationAnchorOpening, SetupGenerationAuthorityHandle, SetupGenerationGaloisApplication,
+    SetupGenerationGaloisBatchSource, SetupGenerationGaloisPreparationSource,
+    SetupGenerationKeyRelationApplication, SetupGenerationKeyRelationPreparationSource,
+    SetupGenerationKeyRelationSource, SetupGenerationPublicKeyShareSourceHandle,
+    SetupGenerationRecipientPayloadSourceHandle, SetupGenerationRelinearizationRoundOneApplication,
     SetupGenerationRelinearizationRoundOneSource, SetupGenerationRelinearizationRoundTwoActivation,
     SetupGenerationRelinearizationRoundTwoApplication,
     SetupGenerationRelinearizationRoundTwoPreparationSource,
-    SetupGenerationRelinearizationRoundTwoSource,
-    SetupGenerationRetainedStreamDescriptorDimensions, SetupGenerationVssApplication,
+    SetupGenerationRelinearizationRoundTwoSource, SetupGenerationVssApplication,
     SetupGenerationVssPreparationSource, SetupKeyRelationGenerationPreparationError,
     SetupKeyRelationProofFamily, SetupRelinearizationGenerationPreparationError,
     SetupVssGenerationPreparationError,
@@ -86,8 +75,6 @@ pub(in crate::bgv) use self::generation_authority::{
     resolve_setup_generation_relinearization_round_one_preparation_source,
     resolve_setup_generation_relinearization_round_two_preparation_source,
     resolve_setup_generation_vss_preparation_source,
-    selected_setup_generation_relinearization_round_two_activation_memory_accounting,
-    selected_setup_generation_retained_memory_accounting,
     setup_generation_public_key_share_body_byte_length,
     setup_generation_public_key_share_source_byte_length,
     setup_generation_recipient_vss_payload_byte_length,

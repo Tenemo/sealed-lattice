@@ -312,7 +312,7 @@ pub(crate) fn selected_target_release_relation()
                 .collect::<Result<Vec<_>, _>>()?,
             decryption_scale: KLLPS_DENOMINATOR_CLEARING_FACTOR,
             simulation_scale: KLLPS_DENOMINATOR_CLEARING_FACTOR,
-            flooding_bound: selected_target_decryption_flooding_bound()?.into(),
+            flooding_bound: selected_target_decryption_flooding_bound()?,
         },
         &relation_context,
     )
@@ -1053,10 +1053,6 @@ mod tests {
         assert_eq!(quotient_coefficient_count, 294_903);
         assert_eq!(quotient_capacity, 294_912);
         assert!(numerator_maximum_degree > SELECTED_OPENING_DEGREE_BOUND_EXCLUSIVE);
-        assert!(
-            SELECTED_PUBLIC_AGGREGATE_QUOTIENT_COMPONENT_DEGREE_BOUND_EXCLUSIVE
-                < SELECTED_OPENING_DEGREE_BOUND_EXCLUSIVE
-        );
         assert!(quotient_coefficient_count <= quotient_capacity);
     }
 

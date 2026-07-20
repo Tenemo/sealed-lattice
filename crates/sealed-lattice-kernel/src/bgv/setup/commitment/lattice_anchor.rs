@@ -1,3 +1,4 @@
+#[cfg(test)]
 use core::mem::size_of;
 
 use super::{
@@ -125,7 +126,8 @@ pub(crate) fn lattice_anchor_commitment_canonical_bytes(
 /// Exact selected-shape encoding length without constructing the complete
 /// commitment rows. This follows the same tuple and homogeneous-list layout
 /// used by `lattice_anchor_commitment_canonical_bytes`.
-pub(crate) fn selected_lattice_anchor_commitment_canonical_byte_length(
+#[cfg(test)]
+fn selected_lattice_anchor_commitment_canonical_byte_length(
     commitment_data_prime_index: usize,
 ) -> CanonicalResult<usize> {
     let modulus = selected_commitment_prime(commitment_data_prime_index)?;

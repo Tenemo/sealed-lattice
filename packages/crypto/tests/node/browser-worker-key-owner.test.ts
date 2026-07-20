@@ -17,7 +17,11 @@ const installDeterministicWebCrypto = (): ReturnType<typeof vi.fn> => {
                     'The deterministic test CSPRNG accepts Uint8Array values only.',
                 );
             }
-            for (let byteIndex = 0; byteIndex < value.byteLength; byteIndex += 1) {
+            for (
+                let byteIndex = 0;
+                byteIndex < value.byteLength;
+                byteIndex += 1
+            ) {
                 value[byteIndex] = nextByte;
                 nextByte = (nextByte + 29) & 0xff;
             }
@@ -37,9 +41,7 @@ const expectProviderFailureCode = (
         throw new Error('Expected the browser-worker key operation to fail.');
     } catch (error) {
         expect(error).toBeInstanceOf(BrowserLocalKeyProviderError);
-        expect((error as BrowserLocalKeyProviderError).code).toBe(
-            expectedCode,
-        );
+        expect((error as BrowserLocalKeyProviderError).code).toBe(expectedCode);
     }
 };
 
@@ -148,22 +150,19 @@ describe('browser-worker-owned key owner', () => {
         expect(context).toEqual(contextBeforeSigning);
         expect(hedge).toEqual(hedgeBeforeSigning);
 
-        const encapsulationCoins = new Uint8Array(
-            ml_kem768.lengths.msg!,
-        ).fill(0x42);
+        const encapsulationCoins = new Uint8Array(ml_kem768.lengths.msg!).fill(
+            0x42,
+        );
         const encapsulation = ml_kem768.encapsulate(
             publicMaterial.mailboxEncapsulationKey,
             encapsulationCoins,
         );
         const ciphertextBeforeDecapsulation = encapsulation.cipherText.slice();
-        const recoveredSharedSecret =
-            lease.mailbox.decapsulateClosedCiphertext(
-                encapsulation.cipherText,
-            );
-        expect(recoveredSharedSecret).toEqual(encapsulation.sharedSecret);
-        expect(encapsulation.cipherText).toEqual(
-            ciphertextBeforeDecapsulation,
+        const recoveredSharedSecret = lease.mailbox.decapsulateClosedCiphertext(
+            encapsulation.cipherText,
         );
+        expect(recoveredSharedSecret).toEqual(encapsulation.sharedSecret);
+        expect(encapsulation.cipherText).toEqual(ciphertextBeforeDecapsulation);
 
         expectProviderFailureCode(
             () =>
@@ -251,7 +250,8 @@ describe('browser-worker-owned key owner', () => {
 
         const alreadyCancelled = new AbortController();
         alreadyCancelled.abort();
-        const entropyCallCountBeforeRejectedOpen = getRandomValues.mock.calls.length;
+        const entropyCallCountBeforeRejectedOpen =
+            getRandomValues.mock.calls.length;
         expect(() =>
             openBrowserWorkerOwnedKeyOwner({
                 signal: alreadyCancelled.signal,

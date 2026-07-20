@@ -564,14 +564,11 @@ impl CommonProofApplicationChallengeGroup {
         self.challenge
     }
 
-    pub(crate) fn modulus(self) -> u64 {
-        self.modulus
-    }
-
     pub(crate) fn coordinate_count(self) -> u16 {
         self.coordinate_count
     }
 
+    #[cfg(test)]
     pub(crate) const fn candidate_byte_length(self) -> u64 {
         self.candidate_byte_length
     }
@@ -594,14 +591,17 @@ pub(crate) struct CommonProofApplicationChallengeSamplerAccounting {
 }
 
 impl CommonProofApplicationChallengeSamplerAccounting {
+    #[cfg(test)]
     pub(crate) const fn challenge(self) -> CommonProofChallenge {
         self.challenge
     }
 
+    #[cfg(test)]
     pub(crate) const fn modulus(self) -> u64 {
         self.modulus
     }
 
+    #[cfg(test)]
     pub(crate) const fn coordinate_count(self) -> u16 {
         self.coordinate_count
     }
@@ -610,6 +610,7 @@ impl CommonProofApplicationChallengeSamplerAccounting {
         self.candidate_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn maximum_candidate_draw_count(self) -> u32 {
         self.maximum_candidate_draw_count
     }
@@ -618,14 +619,17 @@ impl CommonProofApplicationChallengeSamplerAccounting {
         self.accepted_vector_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn chain_handle_xof_query_count(self) -> u64 {
         self.chain_handle_xof_query_count
     }
 
+    #[cfg(test)]
     pub(crate) const fn candidate_xof_query_count_ceiling(self) -> u64 {
         self.candidate_xof_query_count_ceiling
     }
 
+    #[cfg(test)]
     pub(crate) const fn total_xof_query_count_ceiling(self) -> u64 {
         self.total_xof_query_count_ceiling
     }
@@ -635,6 +639,7 @@ impl CommonProofApplicationChallengeSamplerAccounting {
         self.candidate_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn maximum_xof_output_byte_length(self) -> u64 {
         if self.candidate_byte_length > Hash512::BYTE_LENGTH as u64 {
             self.candidate_byte_length
@@ -660,26 +665,6 @@ pub(crate) struct CommonProofTypedXofMemoryAccounting {
 }
 
 impl CommonProofTypedXofMemoryAccounting {
-    pub(crate) const fn typed_input_item_storage_byte_length(self) -> u64 {
-        self.typed_input_item_storage_byte_length
-    }
-
-    pub(crate) const fn typed_input_payload_byte_length(self) -> u64 {
-        self.typed_input_payload_byte_length
-    }
-
-    pub(crate) const fn framed_item_storage_byte_length(self) -> u64 {
-        self.framed_item_storage_byte_length
-    }
-
-    pub(crate) const fn framed_payload_byte_length(self) -> u64 {
-        self.framed_payload_byte_length
-    }
-
-    pub(crate) const fn encoded_tuple_byte_length(self) -> u64 {
-        self.encoded_tuple_byte_length
-    }
-
     pub(crate) const fn total_byte_length(self) -> u64 {
         self.total_byte_length
     }
@@ -692,6 +677,7 @@ impl CommonProofTypedXofMemoryAccounting {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct CommonProofProductSamplerMemoryAccounting {
     challenge_tag_byte_length: u64,
+    #[cfg(test)]
     reusable_candidate_buffer_byte_length: u64,
     accepted_coordinate_vector_byte_length: u64,
     big_integer_limb_working_set_byte_length: u64,
@@ -706,6 +692,7 @@ impl CommonProofProductSamplerMemoryAccounting {
         self.challenge_tag_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn reusable_candidate_buffer_byte_length(self) -> u64 {
         self.reusable_candidate_buffer_byte_length
     }
@@ -714,6 +701,7 @@ impl CommonProofProductSamplerMemoryAccounting {
         self.accepted_coordinate_vector_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn big_integer_limb_working_set_byte_length(self) -> u64 {
         self.big_integer_limb_working_set_byte_length
     }
@@ -722,10 +710,7 @@ impl CommonProofProductSamplerMemoryAccounting {
         self.typed_xof_memory_accounting
     }
 
-    pub(crate) const fn xof_draw_peak_byte_length(self) -> u64 {
-        self.xof_draw_peak_byte_length
-    }
-
+    #[cfg(test)]
     pub(crate) const fn accepted_decode_peak_byte_length(self) -> u64 {
         self.accepted_decode_peak_byte_length
     }
@@ -762,48 +747,54 @@ impl CommonProofTranscriptMemoryAccounting {
         self.schedule_catalog_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn accepted_deep_point_catalog_byte_length(self) -> u64 {
         self.accepted_deep_point_catalog_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn accepted_query_catalog_byte_length(self) -> u64 {
         self.accepted_query_catalog_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn pending_challenge_tag_byte_length(self) -> u64 {
         self.pending_challenge_tag_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn pending_challenge_output_byte_length(self) -> u64 {
         self.pending_challenge_output_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn product_sampler_memory_accounting(
         self,
     ) -> CommonProofProductSamplerMemoryAccounting {
         self.product_sampler_memory_accounting
     }
 
-    pub(crate) const fn extension_sampler_big_integer_limb_working_set_byte_length(self) -> u64 {
-        self.extension_sampler_big_integer_limb_working_set_byte_length
-    }
-
+    #[cfg(test)]
     pub(crate) const fn deep_point_prior_catalog_clone_byte_length(self) -> u64 {
         self.deep_point_prior_catalog_clone_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn query_xof_output_buffer_byte_length(self) -> u64 {
         self.query_xof_output_buffer_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn query_xof_split_tail_byte_length(self) -> u64 {
         self.query_xof_split_tail_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn maximum_transcript_codec_overlap_byte_length(self) -> u64 {
         self.maximum_transcript_codec_overlap_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn maximum_output_overlap_byte_length(self) -> u64 {
         self.maximum_output_overlap_byte_length
     }
@@ -1003,6 +994,7 @@ fn product_sampler_memory_accounting(
     .try_fold(0_u64, checked_memory_add)?;
     Ok(CommonProofProductSamplerMemoryAccounting {
         challenge_tag_byte_length,
+        #[cfg(test)]
         reusable_candidate_buffer_byte_length,
         accepted_coordinate_vector_byte_length,
         big_integer_limb_working_set_byte_length,
@@ -1163,10 +1155,12 @@ impl CommonProofTranscriptSchedule {
             .collect()
     }
 
+    #[cfg(test)]
     pub(crate) const fn maximum_candidate_draws_per_output(&self) -> u32 {
         self.maximum_candidate_draws_per_output
     }
 
+    #[cfg(test)]
     pub(crate) fn maximum_application_challenge_sampler_scratch_byte_length(
         &self,
     ) -> Result<u64, TranscriptError> {
@@ -1530,6 +1524,7 @@ impl CommonProofTranscriptSchedule {
     /// also consumes one chain-handle query; the complete query vector consumes
     /// one extended XOF answer. It deliberately excludes Merkle authentication,
     /// whose cost is derived from the checked tree catalog and opening geometry.
+    #[cfg(test)]
     pub(crate) fn maximum_transcript_hash_query_count(&self) -> Result<u64, TranscriptError> {
         let mut counter = TranscriptHashQueryCounter::new();
 
@@ -1589,6 +1584,7 @@ impl CommonProofTranscriptSchedule {
     /// Largest finite SHAKE256 answer read by the accepted verifier path.
     /// This is the concrete `L_max` input to the shared ideal-XOF model, not a
     /// transport or proof-byte ceiling.
+    #[cfg(test)]
     pub(crate) fn maximum_transcript_xof_output_byte_length(
         &self,
     ) -> Result<usize, TranscriptError> {
@@ -1609,11 +1605,13 @@ impl CommonProofTranscriptSchedule {
     }
 }
 
+#[cfg(test)]
 struct TranscriptHashQueryCounter {
     hash_query_count: u64,
     pending_challenge: bool,
 }
 
+#[cfg(test)]
 impl TranscriptHashQueryCounter {
     fn new() -> Self {
         Self {
@@ -1783,6 +1781,7 @@ fn query_vector_candidate_byte_length(query_orbit_count: u64) -> Result<usize, T
         .map_err(|_| TranscriptError::ChallengeCounterOverflow)
 }
 
+#[cfg(test)]
 fn maximum_extension_challenge_hash_count(
     maximum_candidate_draws: u32,
 ) -> Result<u64, TranscriptError> {
@@ -1792,6 +1791,7 @@ fn maximum_extension_challenge_hash_count(
     maximum_rejection_chain_hash_count(maximum_candidate_draws)
 }
 
+#[cfg(test)]
 fn maximum_rejection_chain_hash_count(
     maximum_candidate_draws: u32,
 ) -> Result<u64, TranscriptError> {

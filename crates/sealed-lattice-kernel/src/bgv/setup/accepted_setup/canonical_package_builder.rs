@@ -16,7 +16,7 @@ use std::{
 use crate::{
     bgv::proof_suite::{
         AggregateThresholdShareRuntimeError, CommonProofRuntimeError,
-        preflight_generated_common_proof_pending_package,
+        ExpectedCommonProofPackageBindings, preflight_generated_common_proof_pending_package,
         preflight_verified_common_proof_pending_package, runtime_error_status,
         with_verified_accepted_setup_vss_package_sources,
     },
@@ -414,27 +414,22 @@ fn preflight_proof_source(
     slot: &SelectedAcceptedSetupPublicProofSlot,
     canonical_application_statement_bytes: &[u8],
 ) -> Result<StreamDescriptor, CommonProofRuntimeError> {
+    let expected_bindings = ExpectedCommonProofPackageBindings {
+        suite_identifier: expected_suite_identifier,
+        ceremony_context_hash: expected_ceremony_context_hash,
+        action_context_hash: expected_action_context_hash,
+        application_statement_schema_identifier: slot.application_statement_schema_identifier(),
+        roster_position: slot.roster_position(),
+        schedule_position: slot.schedule_position(),
+        canonical_application_statement_bytes,
+    };
     match capability_kind {
-        PendingProofCapabilityKind::Generated => preflight_generated_common_proof_pending_package(
-            capability_handle,
-            expected_suite_identifier,
-            expected_ceremony_context_hash,
-            expected_action_context_hash,
-            slot.application_statement_schema_identifier(),
-            slot.roster_position(),
-            slot.schedule_position(),
-            canonical_application_statement_bytes,
-        ),
-        PendingProofCapabilityKind::Verified => preflight_verified_common_proof_pending_package(
-            capability_handle,
-            expected_suite_identifier,
-            expected_ceremony_context_hash,
-            expected_action_context_hash,
-            slot.application_statement_schema_identifier(),
-            slot.roster_position(),
-            slot.schedule_position(),
-            canonical_application_statement_bytes,
-        ),
+        PendingProofCapabilityKind::Generated => {
+            preflight_generated_common_proof_pending_package(capability_handle, expected_bindings)
+        }
+        PendingProofCapabilityKind::Verified => {
+            preflight_verified_common_proof_pending_package(capability_handle, expected_bindings)
+        }
     }
 }
 
@@ -469,15 +464,21 @@ impl CanonicalAcceptedSetupPackageBuilderRegistry {
         u32,
         (
             CommonProofRuntimeError,
-            CanonicalAcceptedSetupPackageBuilder,
+            Box<CanonicalAcceptedSetupPackageBuilder>,
         ),
     > {
         if self.builders.len() >= MAXIMUM_RETAINED_PACKAGE_BUILDER_COUNT || self.next_handle == 0 {
-            return Err((CommonProofRuntimeError::AllocationLimitExceeded, builder));
+            return Err((
+                CommonProofRuntimeError::AllocationLimitExceeded,
+                Box::new(builder),
+            ));
         }
         let handle = self.next_handle;
         let Some(next_handle) = handle.checked_add(1).filter(|next| *next != 0) else {
-            return Err((CommonProofRuntimeError::AllocationLimitExceeded, builder));
+            return Err((
+                CommonProofRuntimeError::AllocationLimitExceeded,
+                Box::new(builder),
+            ));
         };
         self.next_handle = next_handle;
         if self.builders.insert(handle, builder).is_some() {

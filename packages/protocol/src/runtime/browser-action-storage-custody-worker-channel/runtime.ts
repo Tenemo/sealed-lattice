@@ -256,8 +256,10 @@ export const copyCheckpointBoundary = <
         !Array.isArray(value.orderedSourceDigests) ||
         value.orderedSourceDigests.length > maximumCheckpointCollectionLength ||
         (value.privateRandomnessStreamAttemptIdentifier !== undefined &&
-            !(value.privateRandomnessStreamAttemptIdentifier instanceof
-                Uint8Array)) ||
+            !(
+                value.privateRandomnessStreamAttemptIdentifier instanceof
+                Uint8Array
+            )) ||
         (includeDescriptor &&
             !(stateStreamDescriptorBytes instanceof Uint8Array))
     ) {
@@ -2876,9 +2878,7 @@ export const openBrowserActionStorageCustodyWorker = async (input: {
             Object.freeze({
                 authenticateFoundationHead: () =>
                     client.authenticateFoundationHead(),
-                beginCheckpoint: (
-                    privateRandomnessStreamAttemptIdentifier,
-                ) =>
+                beginCheckpoint: (privateRandomnessStreamAttemptIdentifier) =>
                     client.beginCheckpoint(
                         privateRandomnessStreamAttemptIdentifier,
                     ),

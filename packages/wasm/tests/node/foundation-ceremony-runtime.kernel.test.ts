@@ -256,7 +256,7 @@ describe('foundation ceremony Rust/WASM boundary', () => {
         ).toThrow();
     });
 
-    it('keeps the exact suite bytes fail closed while preserving canonical framing', async () => {
+    it('accepts the exact suite bytes while preserving canonical framing', async () => {
         const runtime = openFoundationCeremonyRuntime(
             await loadFreshTranscriptCoreKernel(),
         );
@@ -282,10 +282,14 @@ describe('foundation ceremony Rust/WASM boundary', () => {
             ),
         ).toBe(true);
         expect(createCanonicalSuiteRecordFixture()).toEqual(suiteBytes);
-        expect(runtime.verifySuiteRecord(suiteBytes)).toEqual({
-            isValid: false,
-            refusalReason: 'invalidArithmeticRelation',
-        });
+        const suiteVerification = runtime.verifySuiteRecord(suiteBytes);
+        expect(suiteVerification.isValid).toBe(true);
+        if (!suiteVerification.isValid) {
+            throw new Error(
+                `The exact suite record was refused: ${suiteVerification.refusalReason}`,
+            );
+        }
+        expect(suiteVerification.value.suiteId).toHaveLength(64);
 
         const wrongDegreeSuiteBytes = createCanonicalSuiteRecordFixture({
             polynomialDegree: 16_384,

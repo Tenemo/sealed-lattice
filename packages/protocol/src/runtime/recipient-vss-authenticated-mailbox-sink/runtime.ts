@@ -469,8 +469,7 @@ export const createRecipientVssAuthenticatedMailboxPlaintextSinkWithConsumer = (
                         await cleanupJournal(
                             Object.freeze({
                                 envelopeHash: input.envelopeHash,
-                                plaintextByteLength:
-                                    input.plaintextByteLength,
+                                plaintextByteLength: input.plaintextByteLength,
                                 producerSlot: expectedProducerSlot,
                                 publicationIdentifier:
                                     input.publicationIdentifier,
@@ -513,11 +512,9 @@ export const createRecipientVssAuthenticatedMailboxPlaintextSinkWithConsumer = (
                             envelopeHash: input.envelopeHash,
                             plaintextByteLength: input.plaintextByteLength,
                             producerSlot: expectedProducerSlot,
-                            publicationIdentifier:
-                                input.publicationIdentifier,
+                            publicationIdentifier: input.publicationIdentifier,
                             recordVersion: recipientVssPlaintextRecordVersion,
-                            setupMailboxSlotHash:
-                                expectedSetupMailboxSlotHash,
+                            setupMailboxSlotHash: expectedSetupMailboxSlotHash,
                         });
                     await cleanupJournal(cleanupRecord);
                     if (currentManifest !== undefined) {

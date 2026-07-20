@@ -433,9 +433,7 @@ describe('Common-proof browser custody', () => {
                 checkpointStore,
                 resumeDescriptor: {
                     ...descriptorBase,
-                    privateRandomCursorManifestBytes: new Uint8Array(
-                        1_048_577,
-                    ),
+                    privateRandomCursorManifestBytes: new Uint8Array(1_048_577),
                 },
                 workerKernel,
             }),

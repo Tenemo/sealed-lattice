@@ -523,7 +523,6 @@ struct PendingGeneratedCommonProof {
 
 struct PendingGeneratedEvaluatorCommonProof {
     generated_proof_handle: Option<u32>,
-    stream_descriptor: StreamDescriptor,
     canonical_application_statement_bytes: Box<[u8]>,
 }
 
@@ -1106,26 +1105,6 @@ pub(crate) fn commit_prepackage_generated_relinearization_round_two_source(
     });
 }
 
-pub(crate) fn with_prepackage_generated_relinearization_round_two_source<Output>(
-    assembly_handle: u32,
-    roster_position: u16,
-    inspect: impl FnOnce(
-        &SetupGeneratedRelinearizationRoundTwoSourceAuthority,
-    ) -> Result<Output, CommonProofRuntimeError>,
-) -> Result<Output, CommonProofRuntimeError> {
-    PREPACKAGE_EVALUATOR_SOURCE_CATALOG_REGISTRY.with(|registry| {
-        let registry = registry.borrow();
-        let assembly = registry.get(assembly_handle)?;
-        assembly.require_collecting()?;
-        inspect(
-            assembly
-                .generated_relinearization_round_two_sources
-                .get(&roster_position)
-                .ok_or(CommonProofRuntimeError::WrongOperationPhase)?,
-        )
-    })
-}
-
 pub(crate) fn preflight_prepackage_relinearization_round_one_source_slot(
     assembly_handle: u32,
     source: &VerifiedRelinearizationRoundOneSourceMaterialPreflight,
@@ -1329,27 +1308,6 @@ pub(crate) fn preflight_prepackage_relinearization_source_slot(
             assembly_handle,
             roster_position,
         })
-    })
-}
-
-pub(crate) fn with_prepackage_relinearization_aggregate<Output, Error>(
-    assembly_handle: u32,
-    inspect: impl FnOnce(&VerifiedRelinearizationAggregateMaterial) -> Result<Output, Error>,
-) -> Result<Output, Error>
-where
-    Error: From<CommonProofRuntimeError>,
-{
-    PREPACKAGE_EVALUATOR_SOURCE_CATALOG_REGISTRY.with(|registry| {
-        let registry = registry.borrow();
-        let assembly = registry.get(assembly_handle).map_err(Error::from)?;
-        assembly.require_collecting().map_err(Error::from)?;
-        inspect(
-            assembly
-                .relinearization_aggregate
-                .as_ref()
-                .ok_or(CommonProofRuntimeError::WrongOperationPhase)
-                .map_err(Error::from)?,
-        )
     })
 }
 
@@ -1584,7 +1542,7 @@ pub(crate) fn preflight_prepackage_generated_evaluator_proof_slot(
     ordered_runtime_roots: &[VerifiedEvaluatorRuntimeRoot],
     ordered_auxiliary_roots: &[VerifiedEvaluatorAuxiliaryRoot],
 ) -> Result<PreparedPrepackageGeneratedEvaluatorProofSlot, CommonProofRuntimeError> {
-    let proof_stream_descriptor = preflight_generated_common_proof_pending_statement(
+    preflight_generated_common_proof_pending_statement(
         generated_proof_handle,
         ProofApplicationSlotCeilings::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
         None,
@@ -1665,7 +1623,6 @@ pub(crate) fn preflight_prepackage_generated_evaluator_proof_slot(
             assembly_handle,
             pending_proof: PendingGeneratedEvaluatorCommonProof {
                 generated_proof_handle: Some(generated_proof_handle),
-                stream_descriptor: proof_stream_descriptor,
                 canonical_application_statement_bytes: canonical_application_statement_bytes
                     .to_vec()
                     .into_boxed_slice(),

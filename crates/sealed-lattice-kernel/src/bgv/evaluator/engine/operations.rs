@@ -62,6 +62,7 @@ pub(crate) fn ciphertext_add(left: &Ciphertext, right: &Ciphertext) -> Canonical
     })
 }
 
+#[cfg(test)]
 pub(crate) fn ciphertext_negate(ciphertext: &Ciphertext) -> CanonicalResult<Ciphertext> {
     let primes = ciphertext.primes();
     let components = ciphertext
@@ -88,6 +89,7 @@ pub(crate) fn ciphertext_negate(ciphertext: &Ciphertext) -> CanonicalResult<Ciph
     })
 }
 
+#[cfg(test)]
 pub(crate) fn ciphertext_sub(left: &Ciphertext, right: &Ciphertext) -> CanonicalResult<Ciphertext> {
     ciphertext_add(left, &ciphertext_negate(right)?)
 }

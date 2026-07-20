@@ -251,22 +251,12 @@ impl ProofExternalMemoryPlan {
         Ok(())
     }
 
+    #[cfg(test)]
     pub(crate) const fn step_count(&self) -> u32 {
         self.step_count
     }
 
-    pub(crate) const fn maximum_chunk_byte_length(&self) -> u32 {
-        self.maximum_chunk_byte_length
-    }
-
-    pub(crate) const fn maximum_transaction_operation_count(&self) -> u32 {
-        self.maximum_transaction_operation_count
-    }
-
-    pub(crate) fn objects(&self) -> &[ProofExternalMemoryObjectPlan] {
-        &self.objects
-    }
-
+    #[cfg(test)]
     pub(crate) fn physical_object_count(&self) -> Result<u32, ProofExternalMemoryError> {
         u32::try_from(
             self.objects
@@ -278,6 +268,7 @@ impl ProofExternalMemoryPlan {
         .map_err(|_| ProofExternalMemoryError::ResourceLimitExceeded)
     }
 
+    #[cfg(test)]
     pub(crate) fn object_lifecycle_count(&self) -> Result<u32, ProofExternalMemoryError> {
         u32::try_from(self.objects.len())
             .map_err(|_| ProofExternalMemoryError::ResourceLimitExceeded)

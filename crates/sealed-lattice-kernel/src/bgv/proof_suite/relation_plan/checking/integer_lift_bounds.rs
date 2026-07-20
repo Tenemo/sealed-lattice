@@ -148,10 +148,7 @@ pub(super) fn integer_lift_column_interval(
             let modulus_reference = column
                 .canonical_residue_modulus
                 .ok_or(RelationPlanError::InvalidSemanticCell)?;
-            let layout = source.value_layout(
-                &variant.ordered_public_samplers,
-                &variant.ordered_verifier_sources,
-            )?;
+            let layout = source.value_layout()?;
             if layout.element_kind != RelationElementKind::Residue
                 || layout.residue_modulus != Some(modulus_reference)
             {

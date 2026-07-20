@@ -1215,8 +1215,7 @@ class BrowserFoundationAuthorityImplementation implements BrowserFoundationAutho
             const handle = await this.#operationOwner.beginCheckpoint(
                 proofAttempt === undefined
                     ? undefined
-                    : this.#requireProofAttempt(proofAttempt)
-                          .attemptIdentifier,
+                    : this.#requireProofAttempt(proofAttempt).attemptIdentifier,
             );
             return this.#registerCheckpoint(handle);
         });

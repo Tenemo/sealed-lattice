@@ -357,15 +357,12 @@ const copyPartialStreamToStore = async (input: {
                 return byteLength;
             },
         );
-        input.memoryBoundary.validateAllocationByteLength(
-            descriptorByteLength,
-        );
+        input.memoryBoundary.validateAllocationByteLength(descriptorByteLength);
         canonicalDescriptorBytes = input.context.runExclusive(
             'target-release partial descriptor copy',
             () => {
-                const outputPointer = input.memoryBoundary.allocate(
-                    descriptorByteLength,
-                );
+                const outputPointer =
+                    input.memoryBoundary.allocate(descriptorByteLength);
                 try {
                     const status = input.kernel.copyPartialDescriptor(
                         input.generationSourceHandle,
@@ -546,7 +543,9 @@ export const generateTargetReleaseInClosedWorker = async (input: {
     outputStore: CommonProofCanonicalOutputStore;
     partialOutputStores: TargetReleasePartialOutputStoreResolver;
     reservationIntentObject: VerifiedTranscriptObject;
-    resolveVerifiedTargetShare(input: GeneratedTargetReleaseTransport): Promise<{
+    resolveVerifiedTargetShare(
+        input: GeneratedTargetReleaseTransport,
+    ): Promise<{
         targetShareObject: VerifiedTranscriptObject;
         verifiedOutput: VerifiedStateOutput;
     }>;
@@ -583,16 +582,14 @@ export const generateTargetReleaseInClosedWorker = async (input: {
             new CanonicalStreamResourceError(message),
         label: 'target-release generation boundary',
     });
-    const selectedSuiteOwner =
-        requireSelectedSuiteRecordSourceKernelOwner({
-            kernel: input.kernel,
-            source: input.selectedSuiteRecordSource,
-        });
-    const acceptedSetupOwner =
-        requireVerifiedAcceptedSetupAuthorityKernelOwner(
-            input.acceptedSetupAuthority,
-            input.kernel,
-        );
+    const selectedSuiteOwner = requireSelectedSuiteRecordSourceKernelOwner({
+        kernel: input.kernel,
+        source: input.selectedSuiteRecordSource,
+    });
+    const acceptedSetupOwner = requireVerifiedAcceptedSetupAuthorityKernelOwner(
+        input.acceptedSetupAuthority,
+        input.kernel,
+    );
     const actionRandomnessAuthorization =
         resolveActionRandomnessKernelAuthorization(
             input.actionRandomnessSession,
@@ -603,11 +600,10 @@ export const generateTargetReleaseInClosedWorker = async (input: {
             input.verifiedReservation,
             input.kernel,
         );
-    const finalityAuthorization =
-        resolveVerifiedFinalityKernelAuthorization(
-            input.verifiedFinality,
-            input.kernel,
-        );
+    const finalityAuthorization = resolveVerifiedFinalityKernelAuthorization(
+        input.verifiedFinality,
+        input.kernel,
+    );
     const reservationIntentAuthorization =
         resolveOrderedVerifiedBoardObjectAuthorization({
             context,
@@ -658,9 +654,7 @@ export const generateTargetReleaseInClosedWorker = async (input: {
     let targetIdentifierPartialDescriptorBytes:
         | Uint8Array<ArrayBuffer>
         | undefined;
-    let targetOrderPartialDescriptorBytes:
-        | Uint8Array<ArrayBuffer>
-        | undefined;
+    let targetOrderPartialDescriptorBytes: Uint8Array<ArrayBuffer> | undefined;
     let result: GeneratedTargetReleaseTransport | undefined;
     let operationFailure: unknown;
     let operationFailed = false;
@@ -867,7 +861,10 @@ export const generateTargetReleaseInClosedWorker = async (input: {
                             ),
                         ),
                 );
-                return Object.freeze({ consumed: status === 0, result: status });
+                return Object.freeze({
+                    consumed: status === 0,
+                    result: status,
+                });
             },
         );
         statusBoundary.throwIfError(bindStatus);
@@ -978,16 +975,14 @@ export const verifyTargetReleaseInClosedWorker = async (input: {
             new CanonicalStreamResourceError(message),
         label: 'target-release verification boundary',
     });
-    const selectedSuiteOwner =
-        requireSelectedSuiteRecordSourceKernelOwner({
-            kernel: input.kernel,
-            source: input.selectedSuiteRecordSource,
-        });
-    const acceptedSetupOwner =
-        requireVerifiedAcceptedSetupAuthorityKernelOwner(
-            input.acceptedSetupAuthority,
-            input.kernel,
-        );
+    const selectedSuiteOwner = requireSelectedSuiteRecordSourceKernelOwner({
+        kernel: input.kernel,
+        source: input.selectedSuiteRecordSource,
+    });
+    const acceptedSetupOwner = requireVerifiedAcceptedSetupAuthorityKernelOwner(
+        input.acceptedSetupAuthority,
+        input.kernel,
+    );
     const stateReservationAuthorization =
         resolveVerifiedStateReservationKernelAuthorization(
             input.verifiedReservation,
@@ -998,11 +993,10 @@ export const verifyTargetReleaseInClosedWorker = async (input: {
             input.verifiedOutput,
             input.kernel,
         );
-    const finalityAuthorization =
-        resolveVerifiedFinalityKernelAuthorization(
-            input.verifiedFinality,
-            input.kernel,
-        );
+    const finalityAuthorization = resolveVerifiedFinalityKernelAuthorization(
+        input.verifiedFinality,
+        input.kernel,
+    );
     const targetShareAuthorization =
         resolveOrderedVerifiedBoardObjectAuthorization({
             context,
@@ -1195,11 +1189,10 @@ export const verifyTargetReleaseInClosedWorker = async (input: {
                                         terminalSourceHandle,
                                         statusPointer,
                                     );
-                                    const [status] =
-                                        memoryBoundary.readWords(
-                                            statusPointer,
-                                            1,
-                                        );
+                                    const [status] = memoryBoundary.readWords(
+                                        statusPointer,
+                                        1,
+                                    );
                                     return Object.freeze({
                                         consumed: status === 0,
                                         result: Object.freeze({
@@ -1407,25 +1400,27 @@ export const reconstructTargetReleaseInClosedWorker = (input: {
             new CanonicalStreamResourceError(message),
         label: 'target-release reconstruction boundary',
     });
-    const finalityAuthorization =
-        resolveVerifiedFinalityKernelAuthorization(
-            input.verifiedFinality,
-            input.kernel,
-        );
+    const finalityAuthorization = resolveVerifiedFinalityKernelAuthorization(
+        input.verifiedFinality,
+        input.kernel,
+    );
     requireSameWorkerCapability({
         capabilityMemory: finalityAuthorization.capabilityMemory,
         capabilityPointer: finalityAuthorization.capabilityPointer,
         context,
         label: 'The verified finality',
     });
+    const verifiedShareInput = input.verifiedShares;
+    const untrustedVerifiedShareInput: unknown = verifiedShareInput;
     if (
-        !Array.isArray(input.verifiedShares) ||
-        input.verifiedShares.length < targetReleaseReconstructionThreshold ||
-        input.verifiedShares.length > foundationProfile.participantCount
+        !Array.isArray(untrustedVerifiedShareInput) ||
+        untrustedVerifiedShareInput.length <
+            targetReleaseReconstructionThreshold ||
+        untrustedVerifiedShareInput.length > foundationProfile.participantCount
     ) {
         throw new CanonicalStreamRefusalError('wrongTypeOrLength');
     }
-    const verifiedShares = Array.from(input.verifiedShares);
+    const verifiedShares = verifiedShareInput.slice();
     const verifiedShareRecords = verifiedShares.map((share) => {
         const record = verifiedTargetReleaseShareRecords.get(share);
         if (record === undefined) {
@@ -1532,13 +1527,11 @@ export const reconstructTargetReleaseInClosedWorker = (input: {
 
                     const selectedOptionCount =
                         kernel.reconstructedSelectedOptionCount(
-                        reconstructedTargetResultHandle,
-                        statusPointer,
-                    );
-                    const [selectedOptionCountStatus] = memoryBoundary.readWords(
-                        statusPointer,
-                        1,
-                    );
+                            reconstructedTargetResultHandle,
+                            statusPointer,
+                        );
+                    const [selectedOptionCountStatus] =
+                        memoryBoundary.readWords(statusPointer, 1);
                     statusBoundary.throwIfError(selectedOptionCountStatus);
                     if (
                         !Number.isSafeInteger(selectedOptionCount) ||
@@ -1565,8 +1558,7 @@ export const reconstructTargetReleaseInClosedWorker = (input: {
                             statusBoundary,
                             statusPointer,
                         });
-                    orderedOptionIdentifiers =
-                        copiedOrderedOptionIdentifiers;
+                    orderedOptionIdentifiers = copiedOrderedOptionIdentifiers;
                     statusBoundary.throwIfError(
                         kernel.finishReconstruction(
                             reconstructedTargetResultHandle,

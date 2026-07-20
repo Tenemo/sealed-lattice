@@ -23,11 +23,15 @@ pub(crate) use compiler::selected_evaluator_program_set;
 pub(crate) use executor::{
     PreparedSelectedEvaluatorReplay, SelectedEvaluatorExecutionProgress,
     SelectedEvaluatorProgramExecution, VerifiedEvaluatorAggregate,
+    VerifiedEvaluatorAggregateContext,
 };
 
+#[cfg(test)]
 pub(crate) const EVALUATOR_PROGRAM_SET_SCHEMA_IDENTIFIER: u16 = 0x1500;
+#[cfg(test)]
 pub(crate) const EVALUATOR_INSTRUCTION_SCHEMA_IDENTIFIER: u16 = 0x1501;
 pub(crate) const EVALUATOR_CONSTANT_SCHEMA_IDENTIFIER: u16 = 0x1503;
+#[cfg(test)]
 pub(crate) const EVALUATOR_INSTRUCTION_STREAM_SCHEMA_IDENTIFIER: u16 = 0x1504;
 
 const EVALUATOR_PROGRAM_SCHEMA_VERSION: u16 = 1;
@@ -45,13 +49,6 @@ pub(crate) enum EvaluatorConstantKind {
 }
 
 impl EvaluatorConstantKind {
-    fn from_canonical_code(code: u16) -> CanonicalResult<Self> {
-        match code {
-            1 => Ok(Self::CoefficientVector),
-            _ => Err(program_error("evaluator constant kind is unassigned")),
-        }
-    }
-
     const fn canonical_code(self) -> u16 {
         self as u16
     }
@@ -110,8 +107,6 @@ pub(crate) enum EvaluatorOpcode {
     ModulusSwitchToLevel = 1,
     NormalizeDecryptionMultiplier = 2,
     CiphertextAdd = 3,
-    CiphertextSubtract = 4,
-    CiphertextNegate = 5,
     PlaintextAdd = 6,
     PlaintextMultiply = 7,
     CiphertextMultiplyRelinearizeAndDrop = 8,
@@ -122,24 +117,7 @@ pub(crate) enum EvaluatorOpcode {
 }
 
 impl EvaluatorOpcode {
-    fn from_canonical_code(code: u16) -> CanonicalResult<Self> {
-        match code {
-            1 => Ok(Self::ModulusSwitchToLevel),
-            2 => Ok(Self::NormalizeDecryptionMultiplier),
-            3 => Ok(Self::CiphertextAdd),
-            4 => Ok(Self::CiphertextSubtract),
-            5 => Ok(Self::CiphertextNegate),
-            6 => Ok(Self::PlaintextAdd),
-            7 => Ok(Self::PlaintextMultiply),
-            8 => Ok(Self::CiphertextMultiplyRelinearizeAndDrop),
-            9 => Ok(Self::CiphertextMultiplyAndRelinearize),
-            10 => Ok(Self::GaloisRotate),
-            11 => Ok(Self::DropRegister),
-            12 => Ok(Self::DeclareOutput),
-            _ => Err(program_error("evaluator instruction opcode is unassigned")),
-        }
-    }
-
+    #[cfg(test)]
     const fn canonical_code(self) -> u16 {
         self as u16
     }
@@ -195,12 +173,7 @@ impl EvaluatorInstruction {
             EvaluatorOpcode::NormalizeDecryptionMultiplier => {
                 (1, true, ImmediateRule::Nonzero, ConstantRule::Absent)
             }
-            EvaluatorOpcode::CiphertextAdd | EvaluatorOpcode::CiphertextSubtract => {
-                (2, true, ImmediateRule::Zero, ConstantRule::Absent)
-            }
-            EvaluatorOpcode::CiphertextNegate => {
-                (1, true, ImmediateRule::Zero, ConstantRule::Absent)
-            }
+            EvaluatorOpcode::CiphertextAdd => (2, true, ImmediateRule::Zero, ConstantRule::Absent),
             EvaluatorOpcode::PlaintextAdd | EvaluatorOpcode::PlaintextMultiply => {
                 (1, true, ImmediateRule::Zero, ConstantRule::Present)
             }
@@ -400,6 +373,7 @@ impl EvaluatorProgramSet {
         &self.streams
     }
 
+    #[cfg(test)]
     pub(crate) fn encode(&self) -> CanonicalResult<Vec<u8>> {
         codec::encode_program_set(self)
     }
@@ -754,11 +728,10 @@ fn evaluate_instruction_transition(
                 decryption_multiplier: target_multiplier,
             })
         }
-        EvaluatorOpcode::CiphertextAdd | EvaluatorOpcode::CiphertextSubtract => {
+        EvaluatorOpcode::CiphertextAdd => {
             require_matching_register_states(inputs)?;
             first
         }
-        EvaluatorOpcode::CiphertextNegate => first,
         EvaluatorOpcode::PlaintextAdd | EvaluatorOpcode::PlaintextMultiply => {
             let constant_hash = instruction
                 .constant_hash

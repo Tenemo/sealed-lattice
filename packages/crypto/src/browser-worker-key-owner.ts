@@ -442,10 +442,7 @@ const generateSigningKeyPair = (): Readonly<{
     secretKey: Uint8Array;
     verificationKey: Uint8Array;
 }> => {
-    const seed = readKeyGenerationSeed(
-        mlDsa65SeedByteLength,
-        'ML-DSA-65 key',
-    );
+    const seed = readKeyGenerationSeed(mlDsa65SeedByteLength, 'ML-DSA-65 key');
     let keyPair: ReturnType<typeof ml_dsa65.keygen> | undefined;
     try {
         keyPair = ml_dsa65.keygen(seed);
@@ -567,8 +564,7 @@ export const openBrowserWorkerOwnedKeyOwner = (input?: {
         signingVerificationKey: signingKeyPair.verificationKey,
         state: 'active',
     };
-    let owner: BrowserWorkerOwnedKeyOwner;
-    owner = Object.freeze({
+    const owner: BrowserWorkerOwnedKeyOwner = Object.freeze({
         copyPublicKeyMaterial: (): BrowserWorkerOwnedKeyPublicMaterial => {
             const currentOwnerState = requireActiveOwnerState(owner);
             return Object.freeze({

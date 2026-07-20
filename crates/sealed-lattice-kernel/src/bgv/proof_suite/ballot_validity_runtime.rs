@@ -226,6 +226,7 @@ thread_local! {
 /// Source-owned resident and boundary-overlap terms for the browser ballot
 /// ciphertext readback that remains live beside common-proof generation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg(test)]
 pub(crate) struct SelectedBallotCiphertextReadbackMemoryAccounting {
     fixed_owner_byte_length: u64,
     descriptor_encoded_byte_length: u64,
@@ -236,27 +237,8 @@ pub(crate) struct SelectedBallotCiphertextReadbackMemoryAccounting {
     maximum_boundary_overlap_byte_length: u64,
 }
 
+#[cfg(test)]
 impl SelectedBallotCiphertextReadbackMemoryAccounting {
-    pub(crate) const fn fixed_owner_byte_length(self) -> u64 {
-        self.fixed_owner_byte_length
-    }
-
-    pub(crate) const fn descriptor_encoded_byte_length(self) -> u64 {
-        self.descriptor_encoded_byte_length
-    }
-
-    pub(crate) const fn descriptor_digest_catalog_byte_length(self) -> u64 {
-        self.descriptor_digest_catalog_byte_length
-    }
-
-    pub(crate) const fn polynomial_catalog_byte_length(self) -> u64 {
-        self.polynomial_catalog_byte_length
-    }
-
-    pub(crate) const fn canonical_application_statement_byte_length(self) -> u64 {
-        self.canonical_application_statement_byte_length
-    }
-
     pub(crate) const fn persistent_resident_byte_length(self) -> u64 {
         self.persistent_resident_byte_length
     }
@@ -266,6 +248,7 @@ impl SelectedBallotCiphertextReadbackMemoryAccounting {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn selected_ballot_ciphertext_readback_memory_accounting(
     canonical_application_statement_byte_length: u64,
     carrier_accounting: super::SelectedBallotValidityCarrierBufferAccounting,
@@ -385,9 +368,7 @@ struct BallotValidityVerificationTerminalSource {
     ceremony_context_hash: [u8; 64],
     action_context_hash: [u8; 64],
     roster_hash: [u8; 64],
-    producer_identity: [u8; 64],
     producer_roster_position: u16,
-    producer_sequence: u64,
     ballot_package_object_hash: [u8; 64],
     verified_setup_source_hash: [u8; 64],
     ciphertext_descriptor: StreamDescriptor,
@@ -470,7 +451,6 @@ impl BallotValidityVerificationTerminalRegistry {
 /// ballot package. Coefficients are shared immutably with the verifier
 /// material until the evaluator aggregation consumes the ballot output.
 pub(crate) struct VerifiedBallotCiphertextPolynomial {
-    ciphertext_ordinal: u16,
     component_ordinal: u16,
     data_modulus_index: u16,
     modulus: u64,
@@ -478,10 +458,6 @@ pub(crate) struct VerifiedBallotCiphertextPolynomial {
 }
 
 impl VerifiedBallotCiphertextPolynomial {
-    pub(crate) const fn ciphertext_ordinal(&self) -> u16 {
-        self.ciphertext_ordinal
-    }
-
     pub(crate) const fn component_ordinal(&self) -> u16 {
         self.component_ordinal
     }
@@ -517,14 +493,10 @@ pub(crate) struct VerifiedBallotValidityOutput {
     ceremony_context_hash: [u8; 64],
     action_context_hash: [u8; 64],
     roster_hash: [u8; 64],
-    producer_identity: [u8; 64],
     producer_roster_position: u16,
-    producer_sequence: u64,
     ballot_package_object_hash: [u8; 64],
     verified_setup_source_hash: [u8; 64],
     ciphertext_descriptor: StreamDescriptor,
-    proof_binding_hash: [u8; 64],
-    application_statement_hash: [u8; 64],
     ciphertext_catalog: Vec<VerifiedBallotCiphertextPolynomial>,
 }
 
@@ -549,16 +521,8 @@ impl VerifiedBallotValidityOutput {
         self.roster_hash
     }
 
-    pub(crate) const fn producer_identity(&self) -> [u8; 64] {
-        self.producer_identity
-    }
-
     pub(crate) const fn producer_roster_position(&self) -> u16 {
         self.producer_roster_position
-    }
-
-    pub(crate) const fn producer_sequence(&self) -> u64 {
-        self.producer_sequence
     }
 
     pub(crate) const fn ballot_package_object_hash(&self) -> [u8; 64] {
@@ -571,14 +535,6 @@ impl VerifiedBallotValidityOutput {
 
     pub(crate) const fn ciphertext_descriptor(&self) -> &StreamDescriptor {
         &self.ciphertext_descriptor
-    }
-
-    pub(crate) const fn proof_binding_hash(&self) -> [u8; 64] {
-        self.proof_binding_hash
-    }
-
-    pub(crate) const fn application_statement_hash(&self) -> [u8; 64] {
-        self.application_statement_hash
     }
 
     pub(crate) fn ciphertext_catalog(&self) -> &[VerifiedBallotCiphertextPolynomial] {
@@ -873,9 +829,8 @@ fn finish_ballot_validity_verification_preparation(
         .authenticated_ciphertext_catalog()?
         .into_iter()
         .map(
-            |(ciphertext_ordinal, component_ordinal, data_modulus_index, modulus, coefficients)| {
+            |(_, component_ordinal, data_modulus_index, modulus, coefficients)| {
                 VerifiedBallotCiphertextPolynomial {
-                    ciphertext_ordinal,
                     component_ordinal,
                     data_modulus_index,
                     modulus,
@@ -962,9 +917,7 @@ fn finish_ballot_validity_verification_preparation(
         ceremony_context_hash: accepted_setup_binding.ceremony_context_hash,
         action_context_hash: accepted_setup_binding.action_context_hash,
         roster_hash: accepted_setup_binding.roster_hash,
-        producer_identity,
         producer_roster_position,
-        producer_sequence: preparation.board_source.producer_sequence(),
         ballot_package_object_hash: preparation.board_source.object_hash().into_bytes(),
         verified_setup_source_hash: accepted_setup_binding.exact_verified_setup_source_hash,
         ciphertext_descriptor: preparation.payload.ciphertext_descriptor().clone(),
@@ -1058,14 +1011,10 @@ impl BallotValidityVerificationTerminalSource {
             ceremony_context_hash: self.ceremony_context_hash,
             action_context_hash: self.action_context_hash,
             roster_hash: self.roster_hash,
-            producer_identity: self.producer_identity,
             producer_roster_position: self.producer_roster_position,
-            producer_sequence: self.producer_sequence,
             ballot_package_object_hash: self.ballot_package_object_hash,
             verified_setup_source_hash: self.verified_setup_source_hash,
             ciphertext_descriptor: self.ciphertext_descriptor,
-            proof_binding_hash: self.verification_binding_hash,
-            application_statement_hash: self.application_statement_hash,
             ciphertext_catalog: self.ciphertext_catalog,
         }
     }

@@ -134,7 +134,9 @@ impl RelationIntegerLiftLinearTermDescriptor {
 #[repr(u16)]
 pub(crate) enum RelationIntegerLiftConvolutionKind {
     Negacyclic = 1,
+    #[cfg(test)]
     OrdinaryLowHalf = 2,
+    #[cfg(test)]
     OrdinaryHighHalf = 3,
 }
 
@@ -279,12 +281,6 @@ impl RelationIntegerLiftNegacyclicAutomorphismPermutationDescriptor {
             ],
         )
     }
-
-    pub(super) fn canonical_bytes(&self) -> Result<Vec<u8>, RelationPlanError> {
-        self.canonical_tuple()
-            .encode()
-            .map_err(canonical_encoding_error)
-    }
 }
 
 impl RelationIntegerLiftConvolutionProductDescriptor {
@@ -401,12 +397,6 @@ impl RelationIntegerLiftBatchDescriptor {
 
     pub(crate) const fn challenge_ordinal(&self) -> u16 {
         self.challenge_ordinal
-    }
-
-    pub(crate) fn negacyclic_automorphism_permutations(
-        &self,
-    ) -> &[RelationIntegerLiftNegacyclicAutomorphismPermutationDescriptor] {
-        &self.ordered_negacyclic_automorphism_permutations
     }
 
     pub(super) fn canonical_tuple(&self) -> Result<CanonicalTuple, RelationPlanError> {
@@ -1085,6 +1075,7 @@ pub(super) fn integer_lift_product_constraint_programs(
                 );
                 (boundary, recurrence, except_zero)
             }
+            #[cfg(test)]
             RelationIntegerLiftConvolutionKind::OrdinaryLowHalf => {
                 let boundary = subtract_integer_lift_expressions(
                     integer_lift_column_expression(transpose, false, 0),
@@ -1109,6 +1100,7 @@ pub(super) fn integer_lift_product_constraint_programs(
                 );
                 (boundary, recurrence, except_last.clone())
             }
+            #[cfg(test)]
             RelationIntegerLiftConvolutionKind::OrdinaryHighHalf => {
                 let boundary = integer_lift_column_expression(transpose, false, 0);
                 let recurrence = subtract_integer_lift_expressions(

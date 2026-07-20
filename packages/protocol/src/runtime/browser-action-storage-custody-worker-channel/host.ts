@@ -1439,24 +1439,23 @@ export const installBrowserActionStorageCustodyWorkerHost = (
                     retirePreparedCommonProofOperation(preparedOperation),
                 ),
             );
-        const commonProofReservationCleanupOutcomes =
-            await Promise.allSettled(
-                [...commonProofCheckpointLineageReservations.keys()].map(
-                    (reservation) => {
-                        const releaseReservation =
-                            installedCustodyWorkerHostCommonProofCheckpointLineageReleasers.get(
-                                uninstall,
-                            );
-                        if (releaseReservation === undefined) {
-                            throw new BrowserActionStorageCustodyError(
-                                'OwnedWorkerFailure',
-                                'Worker-owned common-proof checkpoint reservation lost its release authority.',
-                            );
-                        }
-                        return releaseReservation(reservation);
-                    },
-                ),
-            );
+        const commonProofReservationCleanupOutcomes = await Promise.allSettled(
+            [...commonProofCheckpointLineageReservations.keys()].map(
+                (reservation) => {
+                    const releaseReservation =
+                        installedCustodyWorkerHostCommonProofCheckpointLineageReleasers.get(
+                            uninstall,
+                        );
+                    if (releaseReservation === undefined) {
+                        throw new BrowserActionStorageCustodyError(
+                            'OwnedWorkerFailure',
+                            'Worker-owned common-proof checkpoint reservation lost its release authority.',
+                        );
+                    }
+                    return releaseReservation(reservation);
+                },
+            ),
+        );
         const operationOutcomes = await Promise.allSettled([
             ...[...checkpointPublications.values()].map(
                 (record) => record.publication,
@@ -3448,8 +3447,7 @@ export const installBrowserActionStorageCustodyWorkerHost = (
                 );
             }
             const store = await requireCheckpointStore();
-            const storeReservation =
-                await store.reserveCheckpointLineage();
+            const storeReservation = await store.reserveCheckpointLineage();
             const checkpointLineageIdentifier = Uint8Array.from(
                 storeReservation.checkpointLineageIdentifier,
             );
@@ -3565,11 +3563,8 @@ export const installBrowserActionStorageCustodyWorkerHost = (
                 const preparedOperation = Object.freeze({
                     [installedCommonProofPreparedOperationBrand]: true as const,
                 });
-                if (
-                    preparationInput.checkpoint.generationMode === 'fresh'
-                ) {
-                    const reservation =
-                        preparationInput.checkpoint.reservation;
+                if (preparationInput.checkpoint.generationMode === 'fresh') {
+                    const reservation = preparationInput.checkpoint.reservation;
                     const reservationRecord =
                         installedCommonProofCheckpointLineageReservationRecords.get(
                             reservation,
@@ -3593,13 +3588,12 @@ export const installBrowserActionStorageCustodyWorkerHost = (
                             'The fresh common-proof adapter is not bound to the reserved checkpoint lineage.',
                         );
                     }
-                    checkpointOperationIdentity =
-                        await (
-                            await requireCheckpointStore()
-                        ).bindCheckpointLineageToProofAttempt(
-                            storeReservation,
-                            description.proofAttemptLineageIdentifier,
-                        );
+                    checkpointOperationIdentity = await (
+                        await requireCheckpointStore()
+                    ).bindCheckpointLineageToProofAttempt(
+                        storeReservation,
+                        description.proofAttemptLineageIdentifier,
+                    );
                     reservationRecord.state = 'consumed';
                     reservationRecord.checkpointLineageIdentifier.fill(0);
                     commonProofCheckpointLineageReservations.delete(
@@ -3664,9 +3658,7 @@ export const installBrowserActionStorageCustodyWorkerHost = (
                     try {
                         await (
                             await requireCheckpointStore()
-                        ).releaseOperationIdentity(
-                            checkpointOperationIdentity,
-                        );
+                        ).releaseOperationIdentity(checkpointOperationIdentity);
                     } catch (cleanupError) {
                         throw new BrowserActionStorageCustodyError(
                             'OwnedWorkerFailure',
@@ -3789,9 +3781,7 @@ export const installBrowserActionStorageCustodyWorkerHost = (
                     }
                     preparedRecord.checkpointOperationIdentity =
                         checkpointOperationIdentity;
-                    checkpointOperationIdentity = undefined;
                     preparedRecord.resumeDescriptor = copiedResumeDescriptor;
-                    copiedResumeDescriptor = undefined;
                     try {
                         await retirePreparedCommonProofOperation(
                             environmentInput.preparedOperation,
@@ -3828,9 +3818,7 @@ export const installBrowserActionStorageCustodyWorkerHost = (
                 return Promise.reject(inputError);
             }
             let generationFamilyAdapterOwnedByEnvironment = false;
-            let openedCommonProofCustody:
-                | CommonProofBrowserCustody
-                | undefined;
+            let openedCommonProofCustody: CommonProofBrowserCustody | undefined;
             const result = operationTail.then(
                 async () => {
                     const actionRandomnessHandle =

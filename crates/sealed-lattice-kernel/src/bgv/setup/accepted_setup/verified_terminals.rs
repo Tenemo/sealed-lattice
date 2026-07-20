@@ -649,7 +649,6 @@ pub(in crate::bgv) struct VerifiedVssShareLinkageTerminal {
     participant_identity: [u8; Hash512::BYTE_LENGTH],
     roster_position: u16,
     board_object_hash: [u8; Hash512::BYTE_LENGTH],
-    board_object_canonical_byte_length: u64,
     proof_stream_descriptor: StreamDescriptor,
     ordered_coefficient_material_roots: Box<[[u8; Hash512::BYTE_LENGTH]]>,
     ordered_recipient_share_material_roots: Box<[[u8; Hash512::BYTE_LENGTH]]>,
@@ -679,9 +678,6 @@ impl VerifiedVssShareLinkageTerminal {
         let protocol_version = verified_proof.protocol_version();
         let suite_identifier = verified_proof.suite_identifier();
         let board_object_hash = verified_proof.board_object_hash();
-        let board_object_canonical_byte_length =
-            u64::try_from(board_source.canonical_carrier_bytes().len())
-                .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?;
         let proof_stream_descriptor = verified_proof.proof_stream_descriptor().clone();
         let board_payload = board_source
             .dealer_public_record_payload()
@@ -777,7 +773,6 @@ impl VerifiedVssShareLinkageTerminal {
                 participant_identity: statement.participant_identity(),
                 roster_position: statement.roster_position(),
                 board_object_hash,
-                board_object_canonical_byte_length,
                 proof_stream_descriptor,
                 ordered_coefficient_material_roots: statement
                     .ordered_coefficient_material_roots()
@@ -841,10 +836,6 @@ impl VerifiedVssShareLinkageTerminal {
         self.board_object_hash
     }
 
-    pub(in crate::bgv) const fn board_object_canonical_byte_length(&self) -> u64 {
-        self.board_object_canonical_byte_length
-    }
-
     pub(in crate::bgv) const fn proof_stream_descriptor(&self) -> &StreamDescriptor {
         &self.proof_stream_descriptor
     }
@@ -883,7 +874,6 @@ pub(in crate::bgv) struct VerifiedAggregateThresholdShareTerminal {
     participant_identity: [u8; Hash512::BYTE_LENGTH],
     roster_position: u16,
     board_object_hash: [u8; Hash512::BYTE_LENGTH],
-    board_object_canonical_byte_length: u64,
     proof_stream_descriptor: StreamDescriptor,
     recipient_input_root: [u8; Hash512::BYTE_LENGTH],
     ordered_source_share_roots: Box<[[u8; Hash512::BYTE_LENGTH]]>,
@@ -900,9 +890,6 @@ impl VerifiedAggregateThresholdShareTerminal {
         let protocol_version = verified_proof.protocol_version();
         let suite_identifier = verified_proof.suite_identifier();
         let board_object_hash = verified_proof.board_object_hash();
-        let board_object_canonical_byte_length =
-            u64::try_from(board_source.canonical_carrier_bytes().len())
-                .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?;
         let proof_stream_descriptor = verified_proof.proof_stream_descriptor().clone();
         let board_payload = board_source
             .private_share_acceptance_payload()
@@ -989,7 +976,6 @@ impl VerifiedAggregateThresholdShareTerminal {
             participant_identity: statement.participant_identity(),
             roster_position: statement.roster_position(),
             board_object_hash,
-            board_object_canonical_byte_length,
             proof_stream_descriptor,
             recipient_input_root: statement.recipient_input_root(),
             ordered_source_share_roots: statement
@@ -1047,10 +1033,6 @@ impl VerifiedAggregateThresholdShareTerminal {
         self.board_object_hash
     }
 
-    pub(super) const fn board_object_canonical_byte_length(&self) -> u64 {
-        self.board_object_canonical_byte_length
-    }
-
     pub(super) const fn proof_stream_descriptor(&self) -> &StreamDescriptor {
         &self.proof_stream_descriptor
     }
@@ -1074,14 +1056,9 @@ impl VerifiedAggregateThresholdShareTerminal {
 /// root and checks the dealer/recipient transpose before discarding the large
 /// cross-product root catalogs that no later verifier consumes.
 pub(in crate::bgv) struct VerifiedVssQualificationTerminals {
-    context: VerifiedSetupVerificationContext,
-    public_setup_seed: Hash512,
-    setup_proof_context_hash: Hash512,
     ordered_participant_identities: Box<[ParticipantIdentity]>,
     ordered_dealer_public_record_object_hashes: Box<[Hash512]>,
-    ordered_dealer_public_record_canonical_byte_lengths: Box<[u64]>,
     ordered_private_share_acceptance_object_hashes: Box<[Hash512]>,
-    ordered_private_share_acceptance_canonical_byte_lengths: Box<[u64]>,
     ordered_share_linkage_proof_descriptors: Box<[StreamDescriptor]>,
     ordered_aggregate_threshold_share_proof_descriptors: Box<[StreamDescriptor]>,
     ordered_degree_zero_vss_material_roots: Box<[[u8; Hash512::BYTE_LENGTH]]>,
@@ -1117,8 +1094,6 @@ impl VerifiedVssQualificationTerminals {
         let ordered_participant_identities =
             verified_public_randomness.ordered_participant_identities();
         let mut ordered_dealer_public_record_object_hashes = Vec::with_capacity(participant_count);
-        let mut ordered_dealer_public_record_canonical_byte_lengths =
-            Vec::with_capacity(participant_count);
         let mut ordered_share_linkage_proof_descriptors = Vec::with_capacity(participant_count);
         let mut ordered_degree_zero_vss_material_roots = Vec::with_capacity(
             participant_count
@@ -1152,8 +1127,6 @@ impl VerifiedVssQualificationTerminals {
             }
             ordered_dealer_public_record_object_hashes
                 .push(Hash512::from_bytes(terminal.board_object_hash()));
-            ordered_dealer_public_record_canonical_byte_lengths
-                .push(terminal.board_object_canonical_byte_length());
             ordered_share_linkage_proof_descriptors
                 .push(terminal.proof_stream_descriptor().clone());
             for sharing_limb_ordinal in 0..sharing_limb_count {
@@ -1170,8 +1143,6 @@ impl VerifiedVssQualificationTerminals {
         }
 
         let mut ordered_private_share_acceptance_object_hashes =
-            Vec::with_capacity(participant_count);
-        let mut ordered_private_share_acceptance_canonical_byte_lengths =
             Vec::with_capacity(participant_count);
         let mut ordered_aggregate_threshold_share_proof_descriptors =
             Vec::with_capacity(participant_count);
@@ -1244,8 +1215,6 @@ impl VerifiedVssQualificationTerminals {
 
             ordered_private_share_acceptance_object_hashes
                 .push(Hash512::from_bytes(terminal.board_object_hash()));
-            ordered_private_share_acceptance_canonical_byte_lengths
-                .push(terminal.board_object_canonical_byte_length());
             ordered_aggregate_threshold_share_proof_descriptors
                 .push(terminal.proof_stream_descriptor().clone());
             ordered_aggregate_threshold_share_material_roots
@@ -1253,20 +1222,13 @@ impl VerifiedVssQualificationTerminals {
         }
 
         Ok(Self {
-            context,
-            public_setup_seed,
-            setup_proof_context_hash,
             ordered_participant_identities: ordered_participant_identities
                 .to_vec()
                 .into_boxed_slice(),
             ordered_dealer_public_record_object_hashes: ordered_dealer_public_record_object_hashes
                 .into_boxed_slice(),
-            ordered_dealer_public_record_canonical_byte_lengths:
-                ordered_dealer_public_record_canonical_byte_lengths.into_boxed_slice(),
             ordered_private_share_acceptance_object_hashes:
                 ordered_private_share_acceptance_object_hashes.into_boxed_slice(),
-            ordered_private_share_acceptance_canonical_byte_lengths:
-                ordered_private_share_acceptance_canonical_byte_lengths.into_boxed_slice(),
             ordered_share_linkage_proof_descriptors: ordered_share_linkage_proof_descriptors
                 .into_boxed_slice(),
             ordered_aggregate_threshold_share_proof_descriptors:
@@ -1278,18 +1240,6 @@ impl VerifiedVssQualificationTerminals {
         })
     }
 
-    pub(super) const fn context(&self) -> VerifiedSetupVerificationContext {
-        self.context
-    }
-
-    pub(super) const fn public_setup_seed(&self) -> Hash512 {
-        self.public_setup_seed
-    }
-
-    pub(super) const fn setup_proof_context_hash(&self) -> Hash512 {
-        self.setup_proof_context_hash
-    }
-
     pub(super) fn ordered_participant_identities(&self) -> &[ParticipantIdentity] {
         &self.ordered_participant_identities
     }
@@ -1298,16 +1248,8 @@ impl VerifiedVssQualificationTerminals {
         &self.ordered_dealer_public_record_object_hashes
     }
 
-    pub(super) fn ordered_dealer_public_record_canonical_byte_lengths(&self) -> &[u64] {
-        &self.ordered_dealer_public_record_canonical_byte_lengths
-    }
-
     pub(super) fn ordered_private_share_acceptance_object_hashes(&self) -> &[Hash512] {
         &self.ordered_private_share_acceptance_object_hashes
-    }
-
-    pub(super) fn ordered_private_share_acceptance_canonical_byte_lengths(&self) -> &[u64] {
-        &self.ordered_private_share_acceptance_canonical_byte_lengths
     }
 
     pub(super) fn ordered_share_linkage_proof_descriptors(&self) -> &[StreamDescriptor] {
@@ -1511,25 +1453,7 @@ fn compact_collective_public_key_b_polynomials(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        bgv::{
-            proof_suite::{
-                ProofBaseFieldElement, canonical_selected_vss_share_linkage_statement,
-                selected_recipient_private_vss_payload_byte_length,
-                verified_application_statement_hash,
-            },
-            setup::{
-                GeneratedPrivateVssMailboxCorpusInput,
-                VerifiedGeneratedPrivateVssMailboxCorpusByteLengthCatalog,
-            },
-        },
-        foundation::{
-            CanonicalDecodeLimits, MAILBOX_ENVELOPE_ATTEMPT_IDENTIFIER_BYTE_LENGTH,
-            MAILBOX_GCM_TAG_BYTE_LENGTH, MAILBOX_KEM_CIPHERTEXT_BYTE_LENGTH,
-            MAILBOX_SOURCE_SIGNATURE_BYTE_LENGTH, MailboxAssociatedData, MailboxKeyScheduleInput,
-            SignedMailboxEnvelope,
-        },
-    };
+    use crate::bgv::proof_suite::ProofBaseFieldElement;
 
     fn test_hash(
         family: u8,
@@ -1632,8 +1556,6 @@ mod tests {
                         .into_bytes(),
                     roster_position: u16::try_from(dealer_roster_position).unwrap(),
                     board_object_hash: test_hash(0x84, dealer_roster_position, 0, 0),
-                    board_object_canonical_byte_length: u64::try_from(201 + dealer_roster_position)
-                        .unwrap(),
                     proof_stream_descriptor: test_stream_descriptor(0x85, dealer_roster_position),
                     ordered_coefficient_material_roots: ordered_coefficient_material_roots
                         .into_boxed_slice(),
@@ -1695,10 +1617,6 @@ mod tests {
                         .into_bytes(),
                     roster_position: u16::try_from(recipient_roster_position).unwrap(),
                     board_object_hash: test_hash(0x92, recipient_roster_position, 0, 0),
-                    board_object_canonical_byte_length: u64::try_from(
-                        301 + recipient_roster_position,
-                    )
-                    .unwrap(),
                     proof_stream_descriptor: test_stream_descriptor(
                         0x93,
                         recipient_roster_position,
@@ -1714,175 +1632,6 @@ mod tests {
             verified_public_randomness,
             dealer_terminals,
             recipient_terminals,
-        )
-    }
-
-    fn selected_mailbox_material_roots(
-        dealer_terminal: &VerifiedVssShareLinkageTerminal,
-        recipient_roster_position: usize,
-    ) -> Vec<Hash512> {
-        let participant_count = usize::from(FOUNDATION_PROFILE.participant_count);
-        let mut ordered_roots = dealer_terminal
-            .ordered_coefficient_material_roots()
-            .iter()
-            .copied()
-            .map(Hash512::from_bytes)
-            .collect::<Vec<_>>();
-        ordered_roots.extend(
-            (0..selected_sharing_limb_count()).map(|sharing_limb_ordinal| {
-                Hash512::from_bytes(
-                    dealer_terminal.ordered_recipient_share_material_roots()
-                        [sharing_limb_ordinal * participant_count + recipient_roster_position],
-                )
-            }),
-        );
-        ordered_roots
-    }
-
-    fn generated_mailbox_catalog_fixture() -> (
-        VerifiedPublicRandomness,
-        Vec<VerifiedVssShareLinkageTerminal>,
-        Vec<VerifiedAggregateThresholdShareTerminal>,
-        Vec<Vec<u8>>,
-    ) {
-        let (verified_public_randomness, mut dealer_terminals, mut recipient_terminals) =
-            vss_qualification_fixture();
-        let participant_count = usize::from(FOUNDATION_PROFILE.participant_count);
-        let context = verified_public_randomness.context();
-        let payload_byte_length = selected_recipient_private_vss_payload_byte_length()
-            .expect("selected recipient-private payload length");
-        let stream_chunk_byte_length =
-            u64::try_from(FOUNDATION_PROFILE.stream_chunk_byte_length).unwrap();
-        let chunk_count =
-            usize::try_from(payload_byte_length.div_ceil(stream_chunk_byte_length)).unwrap();
-        let mut canonical_envelope_corpus = Vec::with_capacity(
-            participant_count
-                .checked_mul(participant_count)
-                .expect("selected mailbox count"),
-        );
-
-        for (dealer_roster_position, dealer_terminal) in dealer_terminals.iter_mut().enumerate() {
-            let canonical_statement = canonical_selected_vss_share_linkage_statement(
-                context.protocol_version(),
-                context.suite_identifier().into_bytes(),
-                context.ceremony_context_hash().into_bytes(),
-                context.action_context_hash().into_bytes(),
-                context.roster_hash().into_bytes(),
-                verified_public_randomness.public_setup_seed().into_bytes(),
-                dealer_terminal.participant_identity(),
-                dealer_terminal.roster_position(),
-                dealer_terminal.ordered_coefficient_material_roots(),
-                dealer_terminal.ordered_recipient_share_material_roots(),
-            )
-            .expect("selected VSS statement");
-            let statement_hash = Hash512::from_bytes(verified_application_statement_hash(
-                context.protocol_version(),
-                context.suite_identifier().into_bytes(),
-                ProofApplicationSlotCeilings::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER,
-                &canonical_statement,
-            ));
-            for recipient_roster_position in 0..participant_count {
-                let mut attempt_identifier =
-                    [0_u8; MAILBOX_ENVELOPE_ATTEMPT_IDENTIFIER_BYTE_LENGTH];
-                attempt_identifier[..2]
-                    .copy_from_slice(&u16::try_from(dealer_roster_position).unwrap().to_le_bytes());
-                attempt_identifier[2..4].copy_from_slice(
-                    &u16::try_from(recipient_roster_position)
-                        .unwrap()
-                        .to_le_bytes(),
-                );
-                let key_schedule_input = MailboxKeyScheduleInput {
-                    suite_id: context.suite_identifier(),
-                    ceremony_context_hash: context.ceremony_context_hash(),
-                    action_context_hash: context.action_context_hash(),
-                    roster_hash: context.roster_hash(),
-                    source_participant_id: ParticipantIdentity::from_bytes(
-                        dealer_terminal.participant_identity(),
-                    ),
-                    recipient_participant_id: verified_public_randomness
-                        .ordered_participant_identities()[recipient_roster_position],
-                    producer_sequence: 0,
-                    envelope_attempt_identifier: attempt_identifier,
-                    statement_hash,
-                    ordered_material_roots: selected_mailbox_material_roots(
-                        dealer_terminal,
-                        recipient_roster_position,
-                    ),
-                };
-                let descriptor = StreamDescriptor::new(
-                    payload_byte_length,
-                    (0..chunk_count)
-                        .map(|chunk_ordinal| {
-                            Hash512::from_bytes(test_hash(
-                                0xa1,
-                                dealer_roster_position,
-                                recipient_roster_position,
-                                chunk_ordinal,
-                            ))
-                        })
-                        .collect(),
-                    Hash512::from_bytes(test_hash(
-                        0xa2,
-                        dealer_roster_position,
-                        recipient_roster_position,
-                        0,
-                    )),
-                )
-                .expect("selected mailbox descriptor");
-                let envelope = SignedMailboxEnvelope::new(
-                    MailboxAssociatedData::new(key_schedule_input)
-                        .expect("selected mailbox associated data"),
-                    [0x5a; MAILBOX_KEM_CIPHERTEXT_BYTE_LENGTH],
-                    descriptor,
-                    [0xb1; MAILBOX_GCM_TAG_BYTE_LENGTH],
-                    [0xc1; MAILBOX_SOURCE_SIGNATURE_BYTE_LENGTH],
-                )
-                .expect("selected mailbox envelope");
-                dealer_terminal.ordered_recipient_envelope_hashes[recipient_roster_position] =
-                    envelope
-                        .envelope_hash()
-                        .expect("selected mailbox envelope hash")
-                        .into_bytes();
-                canonical_envelope_corpus.push(
-                    envelope
-                        .encode()
-                        .expect("canonical selected mailbox envelope"),
-                );
-            }
-        }
-
-        let ordered_dealer_object_hashes = dealer_terminals
-            .iter()
-            .map(|terminal| Hash512::from_bytes(terminal.board_object_hash()))
-            .collect::<Vec<_>>();
-        for (recipient_roster_position, recipient_terminal) in
-            recipient_terminals.iter_mut().enumerate()
-        {
-            let ordered_recipient_envelope_hashes = dealer_terminals
-                .iter()
-                .map(|dealer_terminal| {
-                    Hash512::from_bytes(
-                        dealer_terminal.ordered_recipient_envelope_hashes()
-                            [recipient_roster_position],
-                    )
-                })
-                .collect::<Vec<_>>();
-            recipient_terminal.recipient_input_root = derive_recipient_input_root(
-                context.action_context_hash(),
-                verified_public_randomness.ordered_participant_identities()
-                    [recipient_roster_position],
-                &ordered_dealer_object_hashes,
-                &ordered_recipient_envelope_hashes,
-            )
-            .expect("selected recipient input root")
-            .into_bytes();
-        }
-
-        (
-            verified_public_randomness,
-            dealer_terminals,
-            recipient_terminals,
-            canonical_envelope_corpus,
         )
     }
 
@@ -1964,210 +1713,6 @@ mod tests {
     }
 
     #[test]
-    fn generated_private_vss_mailbox_catalog_joins_exact_corpus_before_terminal_compaction() {
-        let (
-            verified_public_randomness,
-            dealer_terminals,
-            recipient_terminals,
-            canonical_envelope_corpus,
-        ) = generated_mailbox_catalog_fixture();
-        let participant_count = usize::from(FOUNDATION_PROFILE.participant_count);
-        let expected_mailbox_count = participant_count
-            .checked_mul(participant_count)
-            .expect("selected mailbox count");
-        let canonical_envelope_references = canonical_envelope_corpus
-            .iter()
-            .map(Vec::as_slice)
-            .collect::<Vec<_>>();
-        let catalog =
-            VerifiedGeneratedPrivateVssMailboxCorpusByteLengthCatalog::from_verified_dealer_terminals(
-                &verified_public_randomness,
-                &dealer_terminals,
-                GeneratedPrivateVssMailboxCorpusInput::new(&canonical_envelope_references),
-            )
-            .expect("verified generated mailbox byte-length catalog");
-        let expected_envelope_hashes = dealer_terminals
-            .iter()
-            .flat_map(|terminal| {
-                terminal
-                    .ordered_recipient_envelope_hashes()
-                    .iter()
-                    .copied()
-                    .map(Hash512::from_bytes)
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(catalog.ordered_envelope_hashes(), expected_envelope_hashes);
-        assert_eq!(
-            catalog.ordered_mailbox_byte_lengths().len(),
-            expected_mailbox_count
-        );
-        let selected_payload_byte_length =
-            selected_recipient_private_vss_payload_byte_length().unwrap();
-        assert!(
-            catalog
-                .ordered_mailbox_byte_lengths()
-                .iter()
-                .all(|mailbox| mailbox.ciphertext_stream_byte_length()
-                    == selected_payload_byte_length)
-        );
-        let exact_ciphertext_sum = catalog
-            .ordered_mailbox_byte_lengths()
-            .iter()
-            .try_fold(0_u64, |total, mailbox| {
-                total.checked_add(mailbox.ciphertext_stream_byte_length())
-            })
-            .expect("selected ciphertext corpus sum");
-        let exact_envelope_sum = catalog
-            .ordered_mailbox_byte_lengths()
-            .iter()
-            .try_fold(0_u64, |total, mailbox| {
-                total.checked_add(mailbox.canonical_signed_envelope_byte_length())
-            })
-            .expect("selected envelope corpus sum");
-        let exact_complete_sum = catalog
-            .ordered_mailbox_byte_lengths()
-            .iter()
-            .try_fold(0_u64, |total, mailbox| {
-                total.checked_add(mailbox.complete_recipient_private_wire_byte_length())
-            })
-            .expect("selected recipient-private corpus sum");
-        assert_eq!(
-            catalog.ciphertext_stream_byte_length(),
-            exact_ciphertext_sum
-        );
-        assert_eq!(
-            catalog.canonical_signed_envelope_byte_length(),
-            exact_envelope_sum
-        );
-        assert_eq!(
-            catalog.complete_recipient_private_wire_byte_length(),
-            exact_complete_sum
-        );
-        assert_eq!(
-            catalog
-                .ordered_dealer_upload_byte_lengths()
-                .iter()
-                .sum::<u64>(),
-            exact_complete_sum
-        );
-        assert_eq!(
-            catalog
-                .ordered_recipient_download_byte_lengths()
-                .iter()
-                .sum::<u64>(),
-            exact_complete_sum
-        );
-        assert_eq!(
-            catalog.maximum_ciphertext_descriptor_byte_length(),
-            catalog
-                .ordered_mailbox_byte_lengths()
-                .iter()
-                .map(|mailbox| mailbox.ciphertext_descriptor_byte_length())
-                .max()
-                .unwrap()
-        );
-        assert_eq!(
-            catalog.maximum_canonical_signed_envelope_byte_length(),
-            canonical_envelope_corpus
-                .iter()
-                .map(|envelope| u64::try_from(envelope.len()).unwrap())
-                .max()
-                .unwrap()
-        );
-
-        let mut qualification = VerifiedVssQualificationTerminals::from_verified_terminals(
-            &verified_public_randomness,
-            dealer_terminals,
-            recipient_terminals,
-        )
-        .expect("selected VSS qualification");
-        catalog
-            .require_matches_verified_qualification(&qualification)
-            .expect("mailbox catalog remains bound after terminal compaction");
-        qualification.ordered_dealer_public_record_object_hashes[0] =
-            Hash512::from_bytes([0xff; Hash512::BYTE_LENGTH]);
-        assert_eq!(
-            catalog
-                .require_matches_verified_qualification(&qualification)
-                .expect_err("a different compact dealer authority refuses"),
-            RefusalReason::WrongContext
-        );
-    }
-
-    #[test]
-    fn generated_private_vss_mailbox_catalog_refuses_an_envelope_outside_the_verified_matrix() {
-        let (
-            verified_public_randomness,
-            dealer_terminals,
-            _recipient_terminals,
-            mut canonical_envelope_corpus,
-        ) = generated_mailbox_catalog_fixture();
-        let mut first_envelope = SignedMailboxEnvelope::decode(
-            &canonical_envelope_corpus[0],
-            &CanonicalDecodeLimits::default(),
-        )
-        .expect("first generated mailbox envelope");
-        first_envelope.kem_ciphertext[0] ^= 1;
-        canonical_envelope_corpus[0] = first_envelope
-            .encode()
-            .expect("canonical wrong-hash mailbox envelope");
-        let canonical_envelope_references = canonical_envelope_corpus
-            .iter()
-            .map(Vec::as_slice)
-            .collect::<Vec<_>>();
-        let refusal_reason = match
-            VerifiedGeneratedPrivateVssMailboxCorpusByteLengthCatalog::from_verified_dealer_terminals(
-                &verified_public_randomness,
-                &dealer_terminals,
-                GeneratedPrivateVssMailboxCorpusInput::new(&canonical_envelope_references),
-            ) {
-                Ok(_) => panic!("an envelope outside the verified matrix must refuse"),
-                Err(refusal_reason) => refusal_reason,
-            };
-        assert_eq!(refusal_reason, RefusalReason::WrongHashOrRoot);
-    }
-
-    #[test]
-    fn generated_private_vss_mailbox_catalog_refuses_missing_input_without_consuming_terminals() {
-        let (
-            verified_public_randomness,
-            dealer_terminals,
-            _recipient_terminals,
-            canonical_envelope_corpus,
-        ) = generated_mailbox_catalog_fixture();
-        let canonical_envelope_references = canonical_envelope_corpus
-            .iter()
-            .map(Vec::as_slice)
-            .collect::<Vec<_>>();
-        let mut incomplete_envelope_references = canonical_envelope_references.clone();
-        incomplete_envelope_references.pop();
-        let refusal_reason = match
-            VerifiedGeneratedPrivateVssMailboxCorpusByteLengthCatalog::from_verified_dealer_terminals(
-                &verified_public_randomness,
-                &dealer_terminals,
-                GeneratedPrivateVssMailboxCorpusInput::new(&incomplete_envelope_references),
-            ) {
-                Ok(_) => panic!("an incomplete selected-roster mailbox corpus must refuse"),
-                Err(refusal_reason) => refusal_reason,
-            };
-        assert_eq!(refusal_reason, RefusalReason::WrongTypeOrLength);
-
-        let restored_catalog =
-            VerifiedGeneratedPrivateVssMailboxCorpusByteLengthCatalog::from_verified_dealer_terminals(
-                &verified_public_randomness,
-                &dealer_terminals,
-                GeneratedPrivateVssMailboxCorpusInput::new(&canonical_envelope_references),
-            )
-            .expect("failed preflight leaves all exact dealer terminals available");
-        let participant_count = usize::from(FOUNDATION_PROFILE.participant_count);
-        assert_eq!(participant_count, 10);
-        assert_eq!(
-            restored_catalog.ordered_mailbox_byte_lengths().len(),
-            participant_count * participant_count,
-        );
-    }
-
-    #[test]
     fn vss_qualification_compacts_exact_roster_order_after_recipient_transpose_joins() {
         let (verified_public_randomness, dealer_terminals, recipient_terminals) =
             vss_qualification_fixture();
@@ -2178,14 +1723,6 @@ mod tests {
         let expected_acceptance_hashes = recipient_terminals
             .iter()
             .map(|terminal| Hash512::from_bytes(terminal.board_object_hash()))
-            .collect::<Vec<_>>();
-        let expected_dealer_canonical_byte_lengths = dealer_terminals
-            .iter()
-            .map(VerifiedVssShareLinkageTerminal::board_object_canonical_byte_length)
-            .collect::<Vec<_>>();
-        let expected_acceptance_canonical_byte_lengths = recipient_terminals
-            .iter()
-            .map(VerifiedAggregateThresholdShareTerminal::board_object_canonical_byte_length)
             .collect::<Vec<_>>();
         let expected_first_degree_zero_roots = (0..selected_sharing_limb_count())
             .map(|sharing_limb_ordinal| {
@@ -2205,32 +1742,12 @@ mod tests {
         )
         .expect("the complete positively joined VSS roster qualifies");
         assert_eq!(
-            qualification.context(),
-            verified_public_randomness.context()
-        );
-        assert_eq!(
-            qualification.public_setup_seed(),
-            verified_public_randomness.public_setup_seed()
-        );
-        assert_eq!(
-            qualification.setup_proof_context_hash(),
-            verified_public_randomness.setup_proof_context_hash()
-        );
-        assert_eq!(
             qualification.ordered_dealer_public_record_object_hashes(),
             expected_dealer_hashes
         );
         assert_eq!(
             qualification.ordered_private_share_acceptance_object_hashes(),
             expected_acceptance_hashes
-        );
-        assert_eq!(
-            qualification.ordered_dealer_public_record_canonical_byte_lengths(),
-            expected_dealer_canonical_byte_lengths
-        );
-        assert_eq!(
-            qualification.ordered_private_share_acceptance_canonical_byte_lengths(),
-            expected_acceptance_canonical_byte_lengths
         );
         assert_eq!(
             qualification

@@ -904,10 +904,8 @@ fn generated_committed_material_plans_cover_the_exact_root_directions() {
             .ordered_columns
             .iter()
             .enumerate()
-            .filter_map(|(column_ordinal, column)| {
-                matches!(column.origin, RelationColumnOrigin::Prover)
-                    .then(|| u32::try_from(column_ordinal).expect("column ordinal fits"))
-            })
+            .filter(|(_, column)| matches!(column.origin, RelationColumnOrigin::Prover))
+            .map(|(column_ordinal, _)| u32::try_from(column_ordinal).expect("column ordinal fits"))
             .collect::<Vec<_>>();
         let proof_created_trees = variant
             .ordered_trees

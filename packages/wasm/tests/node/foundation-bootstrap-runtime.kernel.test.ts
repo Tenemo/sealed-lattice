@@ -1,10 +1,14 @@
-import {
-    copyAuthenticatedMailboxFrozenRosterParticipantIdentities,
-    openAuthenticatedMailboxFrozenRoster,
-} from '@sealed-lattice/crypto';
 import { foundationProfile } from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
 
+import {
+    copyAuthenticatedMailboxFrozenRosterParticipantIdentities,
+    openAuthenticatedMailboxFrozenRoster,
+} from '#packages/crypto/src/index';
+import {
+    createCanonicalCarrierMailboxKeyPairFixtures,
+    createCanonicalCarrierSigningKeyPairFixtures,
+} from '#packages/crypto/tests/support/canonical-carrier-signature-fixtures';
 import {
     activateSelectedSuiteRecordSource,
     copySelectedSuiteRecordSourceBytes,
@@ -17,10 +21,6 @@ import {
 } from '#packages/wasm/src/index';
 import { registerCommonProofKernelContext } from '#packages/wasm/src/transcript-core-bridge/common-proof-kernel-context';
 import type { TranscriptCoreKernelCommandRuntime } from '#packages/wasm/src/transcript-core-bridge/kernel-runtime';
-import {
-    createCanonicalCarrierMailboxKeyPairFixtures,
-    createCanonicalCarrierSigningKeyPairFixtures,
-} from '#packages/crypto/tests/support/canonical-carrier-signature-fixtures';
 import { createCanonicalTestRosterBytes } from '#packages/wasm/tests/canonical-tuple-test-helpers';
 
 const bytesToHex = (bytes: Uint8Array): string =>
@@ -43,11 +43,9 @@ const selectedRosterEntries = (): readonly FoundationRosterEntryInput[] => {
                     );
                 }
                 return Object.freeze({
-                    mailboxEncapsulationKey:
-                        mailboxKeyPair.publicKey.slice(),
+                    mailboxEncapsulationKey: mailboxKeyPair.publicKey.slice(),
                     rosterPosition,
-                    signingVerificationKey:
-                        signingKeyPair.publicKey.slice(),
+                    signingVerificationKey: signingKeyPair.publicKey.slice(),
                 });
             }),
         );
@@ -69,9 +67,9 @@ const expectRefusal = (
         operation();
     } catch (error) {
         expect(error).toBeInstanceOf(FoundationBootstrapRefusalError);
-        expect(
-            (error as FoundationBootstrapRefusalError).refusalReason,
-        ).toBe(expectedRefusalReason);
+        expect((error as FoundationBootstrapRefusalError).refusalReason).toBe(
+            expectedRefusalReason,
+        );
         return;
     }
     throw new Error('The expected foundation bootstrap refusal was absent.');
@@ -215,8 +213,7 @@ describe('foundation browser bootstrap Rust/WASM boundaries', () => {
         expect(firstEncoding).toEqual(
             createCanonicalTestRosterBytes(
                 entries.map((entry) => ({
-                    mailboxEncapsulationKey:
-                        entry.mailboxEncapsulationKey,
+                    mailboxEncapsulationKey: entry.mailboxEncapsulationKey,
                     signingVerificationKey: entry.signingVerificationKey,
                 })),
             ),
@@ -228,9 +225,9 @@ describe('foundation browser bootstrap Rust/WASM boundaries', () => {
         expect(participantIdentities).toHaveLength(
             foundationProfile.participantCount,
         );
-        expect(
-            new Set(participantIdentities.map(bytesToHex)).size,
-        ).toBe(foundationProfile.participantCount);
+        expect(new Set(participantIdentities.map(bytesToHex)).size).toBe(
+            foundationProfile.participantCount,
+        );
     });
 
     it('refuses malformed keys, duplicate derived identities, and noncanonical order', async () => {
@@ -260,7 +257,7 @@ describe('foundation browser bootstrap Rust/WASM boundaries', () => {
                 ? Object.freeze({
                       ...entry,
                       signingVerificationKey:
-                          entries[0]!.signingVerificationKey.slice(),
+                          entries[0].signingVerificationKey.slice(),
                   })
                 : entry,
         );
@@ -275,8 +272,8 @@ describe('foundation browser bootstrap Rust/WASM boundaries', () => {
 
         const reorderedEntries = [...entries];
         [reorderedEntries[0], reorderedEntries[1]] = [
-            reorderedEntries[1]!,
-            reorderedEntries[0]!,
+            reorderedEntries[1],
+            reorderedEntries[0],
         ];
         expect(() =>
             encodeCanonicalFoundationRoster({

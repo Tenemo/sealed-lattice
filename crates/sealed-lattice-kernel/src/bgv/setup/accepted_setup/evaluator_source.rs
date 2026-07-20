@@ -287,14 +287,6 @@ impl VerifiedAcceptedSetupEvaluatorSourceCatalog {
             .find(|component| component.evaluator_position() == evaluator_position)
             .map(|component| component.public_polynomial_context_hash())
     }
-
-    pub(crate) fn ordered_galois_auxiliary_roots(
-        &self,
-    ) -> Option<&[crate::bgv::proof_suite::VerifiedEvaluatorAuxiliaryRoot]> {
-        self.ordered_participants
-            .first()
-            .map(|participant| participant.galois().ordered_auxiliary_roots())
-    }
 }
 
 impl SelectedEvaluatorStoreSourceCatalog for VerifiedAcceptedSetupEvaluatorSourceCatalog {

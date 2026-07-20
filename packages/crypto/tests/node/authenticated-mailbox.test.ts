@@ -1532,9 +1532,7 @@ describe('authenticated mailbox', () => {
                 isValid: true,
                 value: { disposition: expectedRetryDisposition },
             });
-            expect(retryCiphertextPullCount).toBe(
-                ciphertextChunks.length + 1,
-            );
+            expect(retryCiphertextPullCount).toBe(ciphertextChunks.length + 1);
             expect(plaintextSink.observation.publicationCount).toBe(1);
             expect(plaintextSink.observation.publishedChunks).toEqual([
                 plaintext,

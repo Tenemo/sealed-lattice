@@ -343,9 +343,12 @@ export const openCommonProofBrowserCustody = (
                               maximumCheckpointCursorManifestByteLength ||
                           (checkpoint.privateRandomnessStreamAttemptIdentifier !==
                               undefined &&
-                              (!(checkpoint.privateRandomnessStreamAttemptIdentifier instanceof
-                                  Uint8Array) ||
-                                  checkpoint.privateRandomnessStreamAttemptIdentifier
+                              (!(
+                                  checkpoint.privateRandomnessStreamAttemptIdentifier instanceof
+                                  Uint8Array
+                              ) ||
+                                  checkpoint
+                                      .privateRandomnessStreamAttemptIdentifier
                                       .byteLength !== identifierByteLength)) ||
                           !isSafeUnsigned32(checkpoint.safeBoundaryOrdinal)
                       ) {

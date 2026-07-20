@@ -67,19 +67,6 @@ pub(crate) struct ProofFriQueryState {
 }
 
 impl ProofFriQueryVerifier {
-    pub(crate) fn resident_owned_payload_byte_length(&self) -> Option<u64> {
-        let extension_byte_length =
-            u64::try_from(core::mem::size_of::<ProofChallengeExtensionElement>()).ok()?;
-        u64::try_from(self.fold_challenges.capacity())
-            .ok()?
-            .checked_mul(extension_byte_length)?
-            .checked_add(
-                u64::try_from(self.terminal_coefficients.capacity())
-                    .ok()?
-                    .checked_mul(extension_byte_length)?,
-            )
-    }
-
     pub(crate) fn new(
         initial_domain: ProofEvaluationDomain,
         fold_challenges: Vec<ProofChallengeExtensionElement>,
@@ -197,6 +184,7 @@ impl ProofFriQueryVerifier {
         Ok(())
     }
 
+    #[cfg(test)]
     pub(crate) fn verify_query(
         &self,
         query_representative: u64,

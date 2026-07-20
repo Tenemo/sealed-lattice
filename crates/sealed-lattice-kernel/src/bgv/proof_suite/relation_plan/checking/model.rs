@@ -3,6 +3,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use num_bigint::{BigInt, BigUint};
 use num_traits::{One, Zero};
 
+#[cfg(test)]
+use super::super::model::{
+    RelationRadixFactorDescriptor, RelationRadixProductTermDescriptor, canonical_encoding_error,
+};
 use super::super::{
     bounds::{
         RelationBoundCertificate, RelationConstraintDescriptor, SemanticCellDescriptor,
@@ -11,15 +15,14 @@ use super::super::{
     compiled_plan::RelationPlanCheckContext,
     expressions::{
         RelationExpressionInstruction, fixed_radix_u64_digits, minimum_radix_digit_count,
-        modular_power, radix_recomposition_expression, resolved_modulus_multiple,
-        strictly_sorted_unique, unsigned_radix_comparator_digit_expression,
+        modular_power, radix_recomposition_expression, strictly_sorted_unique,
+        unsigned_radix_comparator_digit_expression,
     },
-    layout::{RelationPlanVariant, challenge_descriptor},
+    layout::RelationPlanVariant,
     model::{
         ModulusCatalog, RelationChallengeRole, RelationColumnOrigin, RelationColumnValueType,
-        RelationElementKind, RelationEmbeddingKind, RelationPlanError,
-        RelationRadixFactorDescriptor, RelationRadixProductTermDescriptor, RelationValueLayout,
-        RelationVerifierSource, SuiteModulusReference, canonical_encoding_error,
+        RelationElementKind, RelationEmbeddingKind, RelationPlanError, RelationValueLayout,
+        RelationVerifierSource, SuiteModulusReference,
     },
 };
 use super::{
@@ -144,9 +147,7 @@ impl RelationPlanChecker<'_> {
         let mut used = BTreeSet::new();
         for source in &variant.ordered_verifier_sources {
             if let RelationVerifierSource::ApplicationStatement { value_layout, .. }
-            | RelationVerifierSource::Protocol { value_layout, .. }
-            | RelationVerifierSource::Suite { value_layout, .. }
-            | RelationVerifierSource::ApplicationSlot { value_layout, .. } = source
+            | RelationVerifierSource::Protocol { value_layout, .. } = source
                 && let Some(modulus) = value_layout.residue_modulus
             {
                 used.insert(modulus);
@@ -227,40 +228,6 @@ impl RelationPlanChecker<'_> {
                 }
             }
         }
-        for factor in variant
-            .ordered_radix_convolutions
-            .iter()
-            .flat_map(|convolution| &convolution.ordered_terms)
-            .flat_map(|term| &term.ordered_factors)
-        {
-            match factor {
-                RelationRadixFactorDescriptor::TranscriptChallengeDigits {
-                    challenge_role:
-                        RelationChallengeRole::NonNativeTheta | RelationChallengeRole::NonNativeAlpha,
-                    role_coordinates,
-                    ..
-                } => {
-                    let modulus_ordinal = role_coordinates
-                        .first()
-                        .copied()
-                        .and_then(|ordinal| usize::try_from(ordinal).ok())
-                        .ok_or(RelationPlanError::InvalidChallengeCatalog)?;
-                    used.insert(
-                        variant
-                            .ordered_non_native_moduli
-                            .get(modulus_ordinal)
-                            .copied()
-                            .ok_or(RelationPlanError::InvalidChallengeCatalog)?,
-                    );
-                }
-                RelationRadixFactorDescriptor::NonNativeModulusDigits {
-                    modulus_reference, ..
-                } => {
-                    used.insert(*modulus_reference);
-                }
-                _ => {}
-            }
-        }
         Ok(used)
     }
 
@@ -308,52 +275,10 @@ impl RelationPlanChecker<'_> {
                 }
             }
         }
-        if !variant
-            .ordered_public_samplers
-            .windows(2)
-            .all(|window| window[0].canonical_order_key() < window[1].canonical_order_key())
-        {
-            return Err(RelationPlanError::NonCanonicalOrder);
+        if !variant.ordered_public_samplers.is_empty() {
+            return Err(RelationPlanError::InvalidSampler);
         }
         let mut consumed_sources = BTreeSet::new();
-        for sampler in &variant.ordered_public_samplers {
-            if sampler.output_count == 0
-                || !sampler.role_domain.starts_with("sealed-lattice/proof/")
-                || !sampler.role_domain.ends_with("/v1")
-            {
-                return Err(RelationPlanError::InvalidSampler);
-            }
-            let seed = variant
-                .ordered_verifier_sources
-                .get(sampler.seed_verifier_source_ordinal as usize)
-                .ok_or(RelationPlanError::InvalidSampler)?;
-            if matches!(seed, RelationVerifierSource::SamplerOutput { .. })
-                || seed.value_layout(
-                    &variant.ordered_public_samplers,
-                    &variant.ordered_verifier_sources,
-                )? != RelationValueLayout::scalar_hash()
-            {
-                return Err(RelationPlanError::SourceCycle);
-            }
-            let output = variant
-                .ordered_verifier_sources
-                .get(sampler.output_verifier_source_ordinal as usize)
-                .ok_or(RelationPlanError::InvalidSampler)?;
-            if !matches!(
-                output,
-                RelationVerifierSource::SamplerOutput {
-                    public_sampler_ordinal
-                } if *public_sampler_ordinal as usize
-                    == variant
-                        .ordered_public_samplers
-                        .iter()
-                        .position(|candidate| candidate == sampler)
-                        .ok_or(RelationPlanError::InvalidSampler)?
-            ) {
-                return Err(RelationPlanError::InvalidSampler);
-            }
-            consumed_sources.insert(sampler.seed_verifier_source_ordinal);
-        }
         for column in &variant.ordered_columns {
             match column.origin {
                 RelationColumnOrigin::VerifierSequence {
@@ -432,10 +357,7 @@ impl RelationPlanChecker<'_> {
                         .ordered_verifier_sources
                         .get(verifier_source_ordinal as usize)
                         .ok_or(RelationPlanError::InvalidColumn)?
-                        .value_layout(
-                            &variant.ordered_public_samplers,
-                            &variant.ordered_verifier_sources,
-                        )?;
+                        .value_layout()?;
                     let last_trace_row = variant.trace_domain_size - 1;
                     let last_index = first_logical_element_index
                         .checked_add(
@@ -461,10 +383,7 @@ impl RelationPlanChecker<'_> {
                         .ordered_verifier_sources
                         .get(expected_root_source_ordinal as usize)
                         .ok_or(RelationPlanError::MissingRoot)?
-                        .value_layout(
-                            &variant.ordered_public_samplers,
-                            &variant.ordered_verifier_sources,
-                        )?;
+                        .value_layout()?;
                     if layout != RelationValueLayout::scalar_hash() {
                         return Err(RelationPlanError::InvalidRoot);
                     }
@@ -475,10 +394,7 @@ impl RelationPlanChecker<'_> {
         for (source_ordinal, source) in variant.ordered_verifier_sources.iter().enumerate() {
             let source_ordinal =
                 u32::try_from(source_ordinal).map_err(|_| RelationPlanError::CountOverflow)?;
-            let layout = source.value_layout(
-                &variant.ordered_public_samplers,
-                &variant.ordered_verifier_sources,
-            )?;
+            let layout = source.value_layout()?;
             if matches!(layout.element_kind, RelationElementKind::Hash512) {
                 if verifier_columns_by_source.contains_key(&source_ordinal) {
                     return Err(RelationPlanError::InvalidColumn);
@@ -560,10 +476,7 @@ impl RelationPlanChecker<'_> {
                             .ordered_verifier_sources
                             .get(verifier_source_ordinal as usize)
                             .ok_or(RelationPlanError::InvalidSource)?
-                            .value_layout(
-                                &variant.ordered_public_samplers,
-                                &variant.ordered_verifier_sources,
-                            )?;
+                            .value_layout()?;
                         if layout.element_kind != RelationElementKind::Residue
                             || layout.residue_modulus != Some(modulus_reference)
                         {
@@ -614,6 +527,20 @@ impl RelationPlanChecker<'_> {
         Ok(derived_intervals)
     }
 
+    #[cfg(not(test))]
+    pub(super) fn check_radix_convolutions(
+        &self,
+        variant: &RelationPlanVariant,
+        _semantic_bounds: &BTreeMap<u32, SignedIntegerInterval>,
+    ) -> Result<(), RelationPlanError> {
+        if variant.ordered_radix_convolutions.is_empty() {
+            Ok(())
+        } else {
+            Err(RelationPlanError::InvalidConstraint)
+        }
+    }
+
+    #[cfg(test)]
     pub(super) fn check_radix_convolutions(
         &self,
         variant: &RelationPlanVariant,
@@ -701,49 +628,6 @@ impl RelationPlanChecker<'_> {
                                 || ordered_digits
                                     .iter()
                                     .any(|digit| *digit >= convolution.radix)
-                            {
-                                return Err(RelationPlanError::InvalidConstraint);
-                            }
-                        }
-                        RelationRadixFactorDescriptor::TranscriptChallengeDigits {
-                            challenge_role,
-                            role_coordinates,
-                            digit_count,
-                        } => {
-                            if !matches!(
-                                challenge_role,
-                                RelationChallengeRole::NonNativeTheta
-                                    | RelationChallengeRole::NonNativeAlpha
-                            ) {
-                                return Err(RelationPlanError::InvalidChallengeCatalog);
-                            }
-                            let descriptor = challenge_descriptor(
-                                *challenge_role,
-                                role_coordinates.clone(),
-                                1,
-                                variant,
-                                self.context,
-                            )?;
-                            let modulus = descriptor
-                                .resolved_sampling(variant, self.context)?
-                                .coordinate_modulus;
-                            if *digit_count
-                                != minimum_radix_digit_count(modulus - 1, convolution.radix)?
-                            {
-                                return Err(RelationPlanError::InvalidConstraint);
-                            }
-                        }
-                        RelationRadixFactorDescriptor::NonNativeModulusDigits {
-                            modulus_reference,
-                            multiplier,
-                            digit_count,
-                        } => {
-                            let value = resolved_modulus_multiple(
-                                *modulus_reference,
-                                *multiplier,
-                                self.context,
-                            )?;
-                            if *digit_count != minimum_radix_digit_count(value, convolution.radix)?
                             {
                                 return Err(RelationPlanError::InvalidConstraint);
                             }

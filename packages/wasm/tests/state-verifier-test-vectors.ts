@@ -194,8 +194,7 @@ export const createStateVerifierTestVector = (
             (_unused, rosterPosition) => rosterPosition,
         )
             .filter(
-                (rosterPosition) =>
-                    rosterPosition !== subjectRosterPosition,
+                (rosterPosition) => rosterPosition !== subjectRosterPosition,
             )
             .slice(0, foundationProfile.stateWitnessQuorum);
         const witnessRosterPosition = stateWitnessRosterPositions[0];

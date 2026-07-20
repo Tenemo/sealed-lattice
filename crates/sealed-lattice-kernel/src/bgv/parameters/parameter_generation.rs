@@ -10,6 +10,7 @@ use super::{
 
 const DATA_PRIME_COUNT: usize = DATA_PRIMES.len();
 const SPECIAL_PRIME_COUNT: usize = SPECIAL_PRIMES.len();
+#[cfg(test)]
 const TWICE_POLYNOMIAL_DEGREE: u64 = 2 * POLYNOMIAL_DEGREE as u64;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -235,8 +236,7 @@ fn verify_plaintext_extension_lane_layout() -> bool {
     else {
         return false;
     };
-    if extension_order != PLAINTEXT_EXTENSION_DEGREE
-        || lane_count != PLAINTEXT_EXTENSION_LANE_COUNT
+    if extension_order != PLAINTEXT_EXTENSION_DEGREE || lane_count != PLAINTEXT_EXTENSION_LANE_COUNT
     {
         return false;
     }
@@ -603,8 +603,7 @@ mod tests {
             assert!(!verify_data_root_parameters(mutated));
         }
 
-        for valid in ROOT_PARAMETERS
-            [DATA_PRIME_COUNT..DATA_PRIME_COUNT + SPECIAL_PRIME_COUNT]
+        for valid in ROOT_PARAMETERS[DATA_PRIME_COUNT..DATA_PRIME_COUNT + SPECIAL_PRIME_COUNT]
             .iter()
             .copied()
         {
@@ -645,17 +644,11 @@ mod tests {
 
         assert!(is_prime(WRONG_ORDER_PLAINTEXT_MODULUS));
         assert_eq!(
-            plaintext_extension_lane_dimensions(
-                WRONG_ORDER_PLAINTEXT_MODULUS,
-                POLYNOMIAL_DEGREE
-            ),
+            plaintext_extension_lane_dimensions(WRONG_ORDER_PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE),
             Some((16_384, 2))
         );
         assert_ne!(
-            plaintext_extension_lane_dimensions(
-                WRONG_ORDER_PLAINTEXT_MODULUS,
-                POLYNOMIAL_DEGREE
-            ),
+            plaintext_extension_lane_dimensions(WRONG_ORDER_PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE),
             Some((PLAINTEXT_EXTENSION_DEGREE, PLAINTEXT_EXTENSION_LANE_COUNT))
         );
     }

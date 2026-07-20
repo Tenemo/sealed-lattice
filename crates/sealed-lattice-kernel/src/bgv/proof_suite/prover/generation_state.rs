@@ -18,7 +18,8 @@ use super::{
     CommonProofQuotientEvaluationProgress, CommonProofReplayPolynomialKey,
     CommonProofReplayPolynomialPlan, CommonProofReplayPolynomialReader,
     CommonProofReplayPolynomialRef, CommonProofReplayPolynomialWriter,
-    CommonProofResidentMemoryPhase, CommonProofResidentMemoryPlan, CommonProofSourcePolynomial,
+    CommonProofResidentMemoryConfiguration, CommonProofResidentMemoryPhase,
+    CommonProofResidentMemoryPlan, CommonProofSourcePolynomial,
     CommonProofSourcePolynomialProvider, CommonProofSourcePolynomialRequestContext,
     CommonProofTranscript, CommonProofTranscriptSchedule, CommonProofTreeStorageError,
     CompleteProofTreeCatalog, ExternalPolynomialValue, ExternalPolynomialVector,
@@ -421,27 +422,10 @@ enum CommonProofTreeLeafSource {
     FriEvaluations(Zeroizing<Vec<ProofChallengeExtensionElement>>),
 }
 
-fn evaluate_source_polynomial_tree_value(
-    polynomial: &CommonProofSourcePolynomial,
-    point: ProofBaseFieldElement,
-) -> ProofTreeValue {
-    match polynomial {
-        CommonProofSourcePolynomial::Base(coefficients) => ProofTreeValue::Base(
-            coefficients
-                .iter()
-                .rev()
-                .fold(ProofBaseFieldElement::ZERO, |accumulated, coefficient| {
-                    accumulated.multiply(point).add(*coefficient)
-                }),
-        ),
-        CommonProofSourcePolynomial::Extension(coefficients) => {
-            ProofTreeValue::Extension(evaluate_extension_at(
-                coefficients,
-                ProofChallengeExtensionElement::from_base(point),
-            ))
-        }
-    }
-}
+type CommonProofPhasePairLeafValues = (
+    Zeroizing<Vec<ProofTreeValue>>,
+    Zeroizing<Vec<ProofTreeValue>>,
+);
 
 /// Persistent common prover state.  No storage yield restarts a transcript
 /// round, re-samples private coins, or regenerates an already accepted output
@@ -457,6 +441,7 @@ pub(crate) struct CommonProofGenerationStateMachine {
     transcript_schedule: CommonProofTranscriptSchedule,
     evaluation_domain: ProofEvaluationDomain,
     catalog: CompleteProofTreeCatalog,
+    #[cfg(test)]
     resident_memory_plan: CommonProofResidentMemoryPlan,
     source_polynomial_provider: Option<Box<dyn CommonProofSourcePolynomialProvider>>,
     source_polynomial_request_context: CommonProofSourcePolynomialRequestContext,
@@ -518,13 +503,7 @@ impl CommonProofGenerationStateMachine {
     fn active_tree_leaf_values(
         &self,
         leaf_index: u64,
-    ) -> Result<
-        (
-            Zeroizing<Vec<ProofTreeValue>>,
-            Zeroizing<Vec<ProofTreeValue>>,
-        ),
-        CommonProofProverError,
-    > {
+    ) -> Result<CommonProofPhasePairLeafValues, CommonProofProverError> {
         let leaf_index =
             usize::try_from(leaf_index).map_err(|_| CommonProofProverError::CountOverflow)?;
         let active = self
@@ -975,19 +954,21 @@ impl CommonProofGenerationStateMachine {
             &transcript_schedule,
             &catalog,
             &storage_plan,
-            validated_artifact.application_statement_schema_identifier(),
-            u64::try_from(canonical_header_bytes.len()).map_err(|_| {
-                CommonProofGenerationInitializationError::Prover(
-                    CommonProofProverError::CountOverflow,
-                )
-            })?,
-            maximum_prefetched_query_byte_length,
-            u64::from(maximum_external_memory_chunk_byte_length),
-            u64::try_from(maximum_proof_transport_chunk_byte_length).map_err(|_| {
-                CommonProofGenerationInitializationError::Prover(
-                    CommonProofProverError::CountOverflow,
-                )
-            })?,
+            CommonProofResidentMemoryConfiguration::new(
+                validated_artifact.application_statement_schema_identifier(),
+                u64::try_from(canonical_header_bytes.len()).map_err(|_| {
+                    CommonProofGenerationInitializationError::Prover(
+                        CommonProofProverError::CountOverflow,
+                    )
+                })?,
+                maximum_prefetched_query_byte_length,
+                u64::from(maximum_external_memory_chunk_byte_length),
+                u64::try_from(maximum_proof_transport_chunk_byte_length).map_err(|_| {
+                    CommonProofGenerationInitializationError::Prover(
+                        CommonProofProverError::CountOverflow,
+                    )
+                })?,
+            ),
         )
         .map_err(CommonProofGenerationInitializationError::Prover)?;
         enforce_source_provider_resident_memory_bound(
@@ -1042,6 +1023,7 @@ impl CommonProofGenerationStateMachine {
             transcript_schedule,
             evaluation_domain,
             catalog,
+            #[cfg(test)]
             resident_memory_plan,
             source_polynomial_provider: Some(source_polynomial_provider),
             source_polynomial_request_context,
@@ -1154,6 +1136,7 @@ impl CommonProofGenerationStateMachine {
         }
     }
 
+    #[cfg(test)]
     pub(crate) const fn resident_memory_plan(&self) -> &CommonProofResidentMemoryPlan {
         &self.resident_memory_plan
     }
@@ -1309,12 +1292,6 @@ impl CommonProofGenerationStateMachine {
             position,
             committed_state_digest: hasher.finalize(),
         })
-    }
-
-    fn executor_mut(&mut self) -> Result<&mut ProofExternalMemoryExecutor, CommonProofProverError> {
-        self.executor
-            .as_mut()
-            .ok_or(CommonProofProverError::InvalidInput)
     }
 
     fn setup_polynomial_replay_binding(
@@ -2847,7 +2824,18 @@ impl CommonProofGenerationStateMachine {
                     )
                     .map_err(map_private_coin_generation_error)?;
                 let (column_ordinal, polynomial) = match next_source {
-                    CommonProofPreChallengeSourcePoll::AuthenticatedSourceReadRequired(request) => {
+                    CommonProofPreChallengeSourcePoll::AuthenticatedSourceReadRequired => {
+                        let request = self
+                            .source_polynomial_provider
+                            .as_deref()
+                            .ok_or(CommonProofGenerationError::Prover(
+                                CommonProofProverError::InvalidInput,
+                            ))?
+                            .pending_authenticated_source_read_request()
+                            .map_err(CommonProofGenerationError::Prover)?
+                            .ok_or(CommonProofGenerationError::Prover(
+                                CommonProofProverError::InvalidColumn,
+                            ))?;
                         self.pending_authenticated_source_read = Some(request);
                         return Ok(CommonProofGenerationPoll::ArithmeticStepCompleted);
                     }
@@ -4432,33 +4420,6 @@ fn map_bounded_fragment_error<StorageError, CoinError, SinkError>(
 }
 
 #[cfg(test)]
-mod source_provider_resident_memory_tests {
-    use super::*;
-
-    #[test]
-    fn source_provider_lifetime_covers_every_phase_until_query_emission_finishes() {
-        for phase in [
-            CommonProofResidentMemoryPhase::LoadingSourcePolynomials,
-            CommonProofResidentMemoryPhase::ConstructingReversedColumns,
-            CommonProofResidentMemoryPhase::TransformingBaseColumns,
-            CommonProofResidentMemoryPhase::MaterializingBaseTrees,
-            CommonProofResidentMemoryPhase::DerivingAuxiliaryColumns,
-            CommonProofResidentMemoryPhase::TransformingAuxiliaryColumns,
-            CommonProofResidentMemoryPhase::MaterializingAuxiliaryTrees,
-            CommonProofResidentMemoryPhase::ConstructingQuotient,
-            CommonProofResidentMemoryPhase::MaterializingQuotientTrees,
-            CommonProofResidentMemoryPhase::DerivingOpenings,
-            CommonProofResidentMemoryPhase::ConstructingInitialFri,
-            CommonProofResidentMemoryPhase::FoldingFri,
-            CommonProofResidentMemoryPhase::PreparingQueryOutput,
-            CommonProofResidentMemoryPhase::EmittingQueries,
-        ] {
-            assert!(common_proof_source_provider_is_live_during_phase(phase));
-        }
-    }
-}
-
-#[cfg(test)]
 pub(crate) fn generate_common_proof<Storage, Coins, Sink>(
     input: CommonProofGenerationInput<'_>,
     storage: &mut Storage,
@@ -4492,5 +4453,32 @@ where
                 cleanup,
             }),
         },
+    }
+}
+
+#[cfg(test)]
+mod source_provider_resident_memory_tests {
+    use super::*;
+
+    #[test]
+    fn source_provider_lifetime_covers_every_phase_until_query_emission_finishes() {
+        for phase in [
+            CommonProofResidentMemoryPhase::LoadingSourcePolynomials,
+            CommonProofResidentMemoryPhase::ConstructingReversedColumns,
+            CommonProofResidentMemoryPhase::TransformingBaseColumns,
+            CommonProofResidentMemoryPhase::MaterializingBaseTrees,
+            CommonProofResidentMemoryPhase::DerivingAuxiliaryColumns,
+            CommonProofResidentMemoryPhase::TransformingAuxiliaryColumns,
+            CommonProofResidentMemoryPhase::MaterializingAuxiliaryTrees,
+            CommonProofResidentMemoryPhase::ConstructingQuotient,
+            CommonProofResidentMemoryPhase::MaterializingQuotientTrees,
+            CommonProofResidentMemoryPhase::DerivingOpenings,
+            CommonProofResidentMemoryPhase::ConstructingInitialFri,
+            CommonProofResidentMemoryPhase::FoldingFri,
+            CommonProofResidentMemoryPhase::PreparingQueryOutput,
+            CommonProofResidentMemoryPhase::EmittingQueries,
+        ] {
+            assert!(common_proof_source_provider_is_live_during_phase(phase));
+        }
     }
 }

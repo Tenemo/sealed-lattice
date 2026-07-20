@@ -255,14 +255,6 @@ impl SelectedEvaluatorStoreSource {
         &self.topology
     }
 
-    pub(crate) const fn material_root(&self) -> [u8; Hash512::BYTE_LENGTH] {
-        self.material_root
-    }
-
-    pub(crate) const fn stream_descriptor(&self) -> &StreamDescriptor {
-        &self.descriptor
-    }
-
     pub(crate) fn into_authenticated_parts(
         self,
     ) -> (
@@ -377,10 +369,6 @@ pub(crate) struct SelectedEvaluatorStoreConstructionOutput {
 }
 
 impl SelectedEvaluatorStoreConstructionOutput {
-    pub(crate) const fn top_count(&self) -> u16 {
-        self.top_count
-    }
-
     pub(crate) const fn store_descriptor(&self) -> &StreamDescriptor {
         &self.store_descriptor
     }
@@ -1121,6 +1109,7 @@ impl VerifiedEvaluatorKeyStoreMaterial {
             .find(|component| component.position() == position)
     }
 
+    #[cfg(test)]
     pub(crate) fn begin_authenticated_readback(
         &self,
     ) -> Result<CanonicalStreamReadbackVerifier, RefusalReason> {
@@ -1202,6 +1191,7 @@ impl VerifiedEvaluatorKeyStoreMaterialStream {
         )
     }
 
+    #[cfg(test)]
     fn begin_with_topologies_and_positions(
         top_count: u16,
         ordered_topologies: Vec<KeySwitchComponentMaterialTopology>,
@@ -1525,10 +1515,6 @@ impl VerifiedEvaluatorKeyStoreMaterialStream {
             canonical_store_summary,
             ordered_components: core::mem::take(&mut self.verified_components).into_boxed_slice(),
         })
-    }
-
-    pub(crate) fn cancel(&mut self) {
-        self.cancel_inner(RefusalReason::ConsumedState);
     }
 
     fn cancel_inner(&mut self, refusal_reason: RefusalReason) {

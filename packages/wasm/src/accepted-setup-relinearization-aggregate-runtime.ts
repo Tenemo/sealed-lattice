@@ -725,7 +725,7 @@ export const generateRelinearizationRoundOneAggregateInClosedWorker = async (
                             authorization.stateReservationCapabilityPointer <=
                                 0 ||
                             authorization.stateReservationCapabilityPointer +
-                                    verifierCapabilityByteLength >
+                                verifierCapabilityByteLength >
                                 context.memory.buffer.byteLength
                         ) {
                             throw new CanonicalStreamInternalError(

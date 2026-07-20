@@ -22,8 +22,8 @@ use super::{
         RelationChallengeEpochPrecedingMessage, RelationChallengeModulusSelector,
         RelationChallengeRole, RelationChallengeSampling, RelationColumnDescriptor,
         RelationPlanError, RelationPublicSamplerDescriptor, RelationRadixConvolutionDescriptor,
-        RelationRadixFactorDescriptor, RelationTreeDescriptor, RelationVerifierSource,
-        SuiteModulusReference, canonical_encoding_error,
+        RelationTreeDescriptor, RelationVerifierSource, SuiteModulusReference,
+        canonical_encoding_error,
     },
     schema::{
         RELATION_MASK_SCHEMA_IDENTIFIER, RELATION_OPENING_CLAIM_SCHEMA_IDENTIFIER,
@@ -176,10 +176,6 @@ impl RelationMaskDescriptor {
             purpose_class: self.mask_kind as u16,
             mask_ordinal: self.mask_ordinal,
         }
-    }
-
-    pub(crate) const fn mask_ordinal(self) -> u32 {
-        self.mask_ordinal
     }
 
     pub(crate) const fn mask_kind(self) -> RelationMaskKind {
@@ -356,18 +352,16 @@ impl RelationPlanVariant {
         &self.ordered_trees
     }
 
+    #[cfg(test)]
     pub(crate) const fn ordered_constraint_count(&self) -> usize {
         self.ordered_constraints.len()
-    }
-
-    pub(crate) fn ordered_constraints(&self) -> &[RelationConstraintDescriptor] {
-        &self.ordered_constraints
     }
 
     pub(crate) fn ordered_integer_lift_batches(&self) -> &[RelationIntegerLiftBatchDescriptor] {
         &self.ordered_integer_lift_batches
     }
 
+    #[cfg(test)]
     pub(crate) fn ordered_coefficient_local_identity_batches(
         &self,
     ) -> &[RelationCoefficientLocalIdentityBatchDescriptor] {
@@ -504,27 +498,6 @@ impl RelationPlanVariant {
                         context,
                     )?);
                 }
-            }
-        }
-        for factor in self
-            .ordered_radix_convolutions
-            .iter()
-            .flat_map(|convolution| &convolution.ordered_terms)
-            .flat_map(|term| &term.ordered_factors)
-        {
-            if let RelationRadixFactorDescriptor::TranscriptChallengeDigits {
-                challenge_role,
-                role_coordinates,
-                ..
-            } = factor
-            {
-                catalog.insert(challenge_descriptor(
-                    *challenge_role,
-                    role_coordinates.clone(),
-                    1,
-                    self,
-                    context,
-                )?);
             }
         }
         for constraint_ordinal in 0..self.ordered_constraints.len() {

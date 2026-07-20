@@ -13,6 +13,10 @@ use crate::foundation::{
 };
 use crate::hashing::hash_framed_parts_512;
 
+#[cfg(test)]
+use super::CommittedMaterialTree;
+#[cfg(test)]
+use super::decode_proof_body_prefix;
 use super::field::ProofChallengeExtensionElement;
 use super::relation_plan::{
     BoundTreeConstructionKind, RelationColumnOrigin, RelationColumnValueType,
@@ -20,18 +24,18 @@ use super::relation_plan::{
     RelationTreeDescriptor, SelectorPathStepKind, SuiteModulusReference,
 };
 use super::{
-    CommittedMaterialTree, CommonProofPrivacyMode, CommonProofQueryOpeningAbsorber,
-    CommonProofTranscript, CompiledRelationPlan, CompleteProofTreeCatalog, DecodedProofBodyPrefix,
-    OpenedFriLayerPair, ProofBodyError, ProofBodyLayout, ProofByteSource, ProofDecodeError,
-    ProofEvaluationDomain, ProofFriError, ProofFriQueryState, ProofFriQueryVerifier,
-    ProofLeafVisibility, ProofOpeningClaimEvaluation, ProofOpeningError, ProofPolynomialError,
-    ProofProfileError, ProofTreeCatalogInput, ProofTreeCatalogSource, ProofTreeOpening,
-    ProofTreeRole, ProofTreeValue, RelationApplicationChallengeAssignment,
+    CommonProofPrivacyMode, CommonProofQueryOpeningAbsorber, CommonProofTranscript,
+    CompiledRelationPlan, CompleteProofTreeCatalog, DecodedProofBodyPrefix,
+    DeepCompositionVerificationInput, OpenedFriLayerPair, ProofBodyError, ProofBodyLayout,
+    ProofByteSource, ProofDecodeError, ProofEvaluationDomain, ProofFriError, ProofFriQueryState,
+    ProofFriQueryVerifier, ProofLeafVisibility, ProofOpeningClaimEvaluation, ProofOpeningError,
+    ProofPolynomialError, ProofProfileError, ProofTreeCatalogInput, ProofTreeCatalogSource,
+    ProofTreeOpening, ProofTreeRole, ProofTreeValue, RelationApplicationChallengeAssignment,
     RelationPlanCheckContext, RelationPlanError, RelationProofTreeInput,
     SelectedApplicationStatementContext, SelectedEvaluatorEntryKind,
     SelectedEvaluatorEntryPosition, SetupPublicPolynomialRootRole, SetupPublicPolynomialTree,
     StatementOwnedProofTreeInput, TranscriptError, ValidatedRelationPlanArtifact,
-    build_complete_proof_tree_catalog, decode_proof_body_prefix, decode_proof_body_prefix_owned,
+    build_complete_proof_tree_catalog, decode_proof_body_prefix_owned,
     decode_proof_query_section_header_at, decode_proof_query_tree_at,
     decode_selected_application_statement, evaluate_normalized_opening_claim_pair,
     proof_body_prefix_byte_length, proof_query_tree_byte_length,
@@ -116,8 +120,10 @@ pub(crate) use core_verification::{
     VerifiedRelationColumnEvaluator, VerifiedRelationColumnEvaluatorMemoryAccounting,
     verified_application_statement_hash,
 };
+#[cfg(test)]
+pub(crate) use verification_state::CommonProofVerificationInput;
 pub(crate) use verification_state::{
-    CommonProofRequiredByteRange, CommonProofVerificationInput, CommonProofVerificationPoll,
+    CommonProofRequiredByteRange, CommonProofVerificationPoll,
     CommonProofVerificationResidentMemoryAccounting, CommonProofVerificationStateMachine,
     PollableCommonProofVerificationInput,
 };

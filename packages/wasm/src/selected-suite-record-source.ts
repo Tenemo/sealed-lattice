@@ -233,53 +233,56 @@ export const activateSelectedSuiteRecordSource = (input: {
     );
     let handle = 0;
     try {
-        handle = context.runExclusive('selected-suite record activation', () => {
-            let inputPointer = 0;
-            let statusPointer = 0;
-            let selectedHandle = 0;
-            try {
-                inputPointer = boundary.copy(canonicalSuiteRecordBytes);
-                statusPointer = boundary.allocateZeroedWords(1);
-                selectedHandle =
-                    context.wasmExports.sealed_lattice_common_proof_select_suite(
-                        inputPointer,
-                        canonicalSuiteRecordBytes.byteLength,
-                        statusPointer,
-                    );
-                const [status] = boundary.readWords(statusPointer, 1);
-                statusBoundary.throwIfError(status);
-                return requireHandle(selectedHandle);
-            } catch (error) {
-                if (selectedHandle !== 0) {
-                    try {
-                        statusBoundary.throwIfError(
-                            context.wasmExports.sealed_lattice_common_proof_release_suite(
-                                selectedHandle,
-                            ),
+        handle = context.runExclusive(
+            'selected-suite record activation',
+            () => {
+                let inputPointer = 0;
+                let statusPointer = 0;
+                let selectedHandle = 0;
+                try {
+                    inputPointer = boundary.copy(canonicalSuiteRecordBytes);
+                    statusPointer = boundary.allocateZeroedWords(1);
+                    selectedHandle =
+                        context.wasmExports.sealed_lattice_common_proof_select_suite(
+                            inputPointer,
+                            canonicalSuiteRecordBytes.byteLength,
+                            statusPointer,
                         );
-                    } catch (cleanupFailure) {
-                        throw new FoundationBootstrapInternalError(
-                            'Selected-suite activation and cleanup both failed.',
-                            Object.freeze({ cleanupFailure, error }),
+                    const [status] = boundary.readWords(statusPointer, 1);
+                    statusBoundary.throwIfError(status);
+                    return requireHandle(selectedHandle);
+                } catch (error) {
+                    if (selectedHandle !== 0) {
+                        try {
+                            statusBoundary.throwIfError(
+                                context.wasmExports.sealed_lattice_common_proof_release_suite(
+                                    selectedHandle,
+                                ),
+                            );
+                        } catch (cleanupFailure) {
+                            throw new FoundationBootstrapInternalError(
+                                'Selected-suite activation and cleanup both failed.',
+                                Object.freeze({ cleanupFailure, error }),
+                            );
+                        }
+                    }
+                    throw error;
+                } finally {
+                    if (statusPointer !== 0) {
+                        boundary.zeroAndDeallocate(
+                            statusPointer,
+                            wasm32WordByteLength,
+                        );
+                    }
+                    if (inputPointer !== 0) {
+                        boundary.zeroAndDeallocate(
+                            inputPointer,
+                            canonicalSuiteRecordBytes.byteLength,
                         );
                     }
                 }
-                throw error;
-            } finally {
-                if (statusPointer !== 0) {
-                    boundary.zeroAndDeallocate(
-                        statusPointer,
-                        wasm32WordByteLength,
-                    );
-                }
-                if (inputPointer !== 0) {
-                    boundary.zeroAndDeallocate(
-                        inputPointer,
-                        canonicalSuiteRecordBytes.byteLength,
-                    );
-                }
-            }
-        });
+            },
+        );
         const source = Object.freeze(
             Object.create(null) as object,
         ) as SelectedSuiteRecordSource;
@@ -317,53 +320,44 @@ export const copySelectedSuiteRecordSourceBytes = (input: {
 }): Uint8Array<ArrayBuffer> => {
     const { record } = requireOwnedSource(input);
     const boundary = memoryBoundary(record.context);
-    return record.context.runExclusive(
-        'selected-suite record copy',
-        () => {
-            let statusPointer = 0;
-            let outputPointer = 0;
-            let outputByteLength = 0;
-            try {
-                statusPointer = boundary.allocateZeroedWords(1);
-                outputByteLength =
-                    record.context.wasmExports.sealed_lattice_common_proof_selected_suite_record_byte_length(
-                        record.handle,
-                        statusPointer,
-                    );
-                const [status] = boundary.readWords(statusPointer, 1);
-                statusBoundary.throwIfError(status);
-                boundary.validateAllocationByteLength(outputByteLength);
-                outputPointer = boundary.allocate(outputByteLength);
-                statusBoundary.throwIfError(
-                    record.context.wasmExports.sealed_lattice_common_proof_copy_selected_suite_record(
-                        record.handle,
-                        outputPointer,
-                        outputByteLength,
-                    ),
+    return record.context.runExclusive('selected-suite record copy', () => {
+        let statusPointer = 0;
+        let outputPointer = 0;
+        let outputByteLength = 0;
+        try {
+            statusPointer = boundary.allocateZeroedWords(1);
+            outputByteLength =
+                record.context.wasmExports.sealed_lattice_common_proof_selected_suite_record_byte_length(
+                    record.handle,
+                    statusPointer,
                 );
-                return Uint8Array.from(
-                    new Uint8Array(
-                        record.context.memory.buffer,
-                        outputPointer,
-                        outputByteLength,
-                    ),
-                );
-            } finally {
-                if (outputPointer !== 0) {
-                    boundary.zeroAndDeallocate(
-                        outputPointer,
-                        outputByteLength,
-                    );
-                }
-                if (statusPointer !== 0) {
-                    boundary.zeroAndDeallocate(
-                        statusPointer,
-                        wasm32WordByteLength,
-                    );
-                }
+            const [status] = boundary.readWords(statusPointer, 1);
+            statusBoundary.throwIfError(status);
+            boundary.validateAllocationByteLength(outputByteLength);
+            outputPointer = boundary.allocate(outputByteLength);
+            statusBoundary.throwIfError(
+                record.context.wasmExports.sealed_lattice_common_proof_copy_selected_suite_record(
+                    record.handle,
+                    outputPointer,
+                    outputByteLength,
+                ),
+            );
+            return Uint8Array.from(
+                new Uint8Array(
+                    record.context.memory.buffer,
+                    outputPointer,
+                    outputByteLength,
+                ),
+            );
+        } finally {
+            if (outputPointer !== 0) {
+                boundary.zeroAndDeallocate(outputPointer, outputByteLength);
             }
-        },
-    );
+            if (statusPointer !== 0) {
+                boundary.zeroAndDeallocate(statusPointer, wasm32WordByteLength);
+            }
+        }
+    });
 };
 
 /** Releases the Rust suite capability and its retained exact bytes. */

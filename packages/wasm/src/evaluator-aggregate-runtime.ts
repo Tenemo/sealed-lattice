@@ -1372,7 +1372,7 @@ const generate = async (
                             authorization.stateReservationCapabilityPointer <=
                                 0 ||
                             authorization.stateReservationCapabilityPointer +
-                                    stateVerifierCapabilityByteLength >
+                                stateVerifierCapabilityByteLength >
                                 record.context.memory.buffer.byteLength
                         ) {
                             throw new CanonicalStreamRefusalError(
@@ -1405,11 +1405,10 @@ const generate = async (
                                         checkpointLineageIdentifier.byteLength,
                                         statusPointer,
                                     );
-                                    const [status] =
-                                        memoryBoundary.readWords(
-                                            statusPointer,
-                                            1,
-                                        );
+                                    const [status] = memoryBoundary.readWords(
+                                        statusPointer,
+                                        1,
+                                    );
                                     statusBoundary.throwIfError(status);
                                     return requireLiveHandle(
                                         handle,

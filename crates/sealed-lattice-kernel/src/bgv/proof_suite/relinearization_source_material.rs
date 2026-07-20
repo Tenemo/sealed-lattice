@@ -58,23 +58,13 @@ struct VerifiedRelinearizationProofBinding {
     ceremony_context_hash: [u8; Hash512::BYTE_LENGTH],
     action_context_hash: [u8; Hash512::BYTE_LENGTH],
     roster_hash: [u8; Hash512::BYTE_LENGTH],
-    board_object_hash: [u8; Hash512::BYTE_LENGTH],
-    verification_binding_hash: [u8; Hash512::BYTE_LENGTH],
     proof_application_slot_hash: [u8; Hash512::BYTE_LENGTH],
-    canonical_proof_application_binding_hash: [u8; Hash512::BYTE_LENGTH],
     application_statement_hash: [u8; Hash512::BYTE_LENGTH],
-    proof_header_hash: [u8; Hash512::BYTE_LENGTH],
-    proof_stream_full_object_digest: [u8; Hash512::BYTE_LENGTH],
-    proof_byte_length: u64,
-    verified_query_count: u32,
-    relation_plan_hash: [u8; Hash512::BYTE_LENGTH],
-    relation_plan_variant_hash: [u8; Hash512::BYTE_LENGTH],
 }
 
 /// Verifier-owned source pair for one participant's selected relinearization
-/// round-one application. Both roots come from recomputed output trees and
-/// both component carriers remain descriptor-authenticated until the aggregate
-/// proof consumes this authority.
+/// round-one application. Both roots come from recomputed output trees, and
+/// completing the source consumes both authenticated component carriers.
 pub(crate) struct VerifiedRelinearizationRoundOneSourceMaterial {
     proof_binding: VerifiedRelinearizationProofBinding,
     proof_stream_descriptor: StreamDescriptor,
@@ -85,8 +75,6 @@ pub(crate) struct VerifiedRelinearizationRoundOneSourceMaterial {
     anchor_commitment_roots: [[u8; Hash512::BYTE_LENGTH]; 3],
     left_tree: VerifiedStatementOwnedTree,
     right_tree: VerifiedStatementOwnedTree,
-    left_material: VerifiedKeySwitchComponentMaterial,
-    right_material: VerifiedKeySwitchComponentMaterial,
 }
 
 pub(crate) struct VerifiedRelinearizationRoundOneSourceMaterialPreflight {
@@ -133,10 +121,6 @@ impl VerifiedRelinearizationRoundOneSourceMaterialPreflight {
         self.roster_position
     }
 
-    pub(crate) const fn schedule_position(&self) -> u32 {
-        self.schedule_position
-    }
-
     pub(crate) const fn anchor_commitment_roots(&self) -> [[u8; Hash512::BYTE_LENGTH]; 3] {
         self.anchor_commitment_roots
     }
@@ -145,7 +129,7 @@ impl VerifiedRelinearizationRoundOneSourceMaterialPreflight {
         self,
         _verified_proof: ConsumedVerifiedCommonProofCapability,
         component_trees: [SetupPublicPolynomialTree; 2],
-        component_materials: [VerifiedKeySwitchComponentMaterial; 2],
+        _component_materials: [VerifiedKeySwitchComponentMaterial; 2],
     ) -> VerifiedRelinearizationRoundOneSourceMaterial {
         let [left_tree_preflight, right_tree_preflight] = self.component_tree_preflights;
         let [left_tree, right_tree] = component_trees;
@@ -155,7 +139,6 @@ impl VerifiedRelinearizationRoundOneSourceMaterialPreflight {
         ];
         let left_tree = left_tree.statement_owned_tree();
         let right_tree = right_tree.statement_owned_tree();
-        let [left_material, right_material] = component_materials;
         VerifiedRelinearizationRoundOneSourceMaterial {
             proof_binding: self.proof_binding,
             proof_stream_descriptor: self.proof_stream_descriptor,
@@ -166,8 +149,6 @@ impl VerifiedRelinearizationRoundOneSourceMaterialPreflight {
             anchor_commitment_roots: self.anchor_commitment_roots,
             left_tree,
             right_tree,
-            left_material,
-            right_material,
         }
     }
 }
@@ -365,18 +346,8 @@ impl VerifiedRelinearizationRoundOneSourceMaterial {
             ceremony_context_hash: verified_proof.ceremony_context_hash(),
             action_context_hash: verified_proof.action_context_hash(),
             roster_hash,
-            board_object_hash: verified_proof.board_object_hash(),
-            verification_binding_hash: verified_proof.verification_binding_hash(),
             proof_application_slot_hash: verified_proof.proof_application_slot_hash(),
-            canonical_proof_application_binding_hash: verified_proof
-                .canonical_proof_application_binding_hash(),
             application_statement_hash: verified_proof.application_statement_hash(),
-            proof_header_hash: verified_proof.proof_header_hash(),
-            proof_stream_full_object_digest: verified_proof.proof_stream_full_object_digest(),
-            proof_byte_length: verified_proof.proof_byte_length(),
-            verified_query_count: verified_proof.verified_query_count(),
-            relation_plan_hash: verified_proof.relation_plan_hash(),
-            relation_plan_variant_hash: verified_proof.relation_plan_variant_hash(),
         };
         Ok(VerifiedRelinearizationRoundOneSourceMaterialPreflight {
             proof_binding,
@@ -437,27 +408,8 @@ impl VerifiedRelinearizationRoundOneSourceMaterial {
         ]
     }
 
-    pub(crate) fn rebound_statement_owned_trees(
-        &self,
-        left_tree_ordinal: u32,
-        left_root_source_ordinal: u32,
-        right_tree_ordinal: u32,
-        right_root_source_ordinal: u32,
-    ) -> [VerifiedStatementOwnedTree; 2] {
-        [
-            self.left_tree
-                .with_relation_coordinates(left_tree_ordinal, left_root_source_ordinal),
-            self.right_tree
-                .with_relation_coordinates(right_tree_ordinal, right_root_source_ordinal),
-        ]
-    }
-
     pub(crate) const fn proof_stream_descriptor(&self) -> &StreamDescriptor {
         &self.proof_stream_descriptor
-    }
-
-    pub(crate) const fn component_materials(&self) -> [&VerifiedKeySwitchComponentMaterial; 2] {
-        [&self.left_material, &self.right_material]
     }
 }
 
@@ -611,18 +563,8 @@ impl VerifiedRelinearizationSourceMaterial {
             ceremony_context_hash: verified_proof.ceremony_context_hash(),
             action_context_hash: verified_proof.action_context_hash(),
             roster_hash,
-            board_object_hash: verified_proof.board_object_hash(),
-            verification_binding_hash: verified_proof.verification_binding_hash(),
             proof_application_slot_hash: verified_proof.proof_application_slot_hash(),
-            canonical_proof_application_binding_hash: verified_proof
-                .canonical_proof_application_binding_hash(),
             application_statement_hash: verified_proof.application_statement_hash(),
-            proof_header_hash: verified_proof.proof_header_hash(),
-            proof_stream_full_object_digest: verified_proof.proof_stream_full_object_digest(),
-            proof_byte_length: verified_proof.proof_byte_length(),
-            verified_query_count: verified_proof.verified_query_count(),
-            relation_plan_hash: verified_proof.relation_plan_hash(),
-            relation_plan_variant_hash: verified_proof.relation_plan_variant_hash(),
         };
         let schedule_position = verified_proof
             .schedule_position()
@@ -853,10 +795,6 @@ impl VerifiedRelinearizationSourceMaterial {
         &self.material
     }
 
-    pub(crate) const fn application_statement_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
-        self.proof_binding.application_statement_hash
-    }
-
     pub(crate) const fn protocol_version(&self) -> u16 {
         self.proof_binding.protocol_version
     }
@@ -876,15 +814,13 @@ impl VerifiedRelinearizationSourceMaterial {
     pub(crate) const fn roster_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
         self.proof_binding.roster_hash
     }
-
-    pub(crate) const fn proof_header_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
-        self.proof_binding.proof_header_hash
-    }
 }
 
-/// Frozen verifier authority for the selected round-one aggregate. The
-/// authority positively joins every participant's recomputed round-one source
-/// pair to both recomputed aggregate trees and their authenticated carriers.
+/// Frozen verifier authority for the selected round-one aggregate. Preflight
+/// positively joins every participant's recomputed source pair to both
+/// recomputed aggregate trees and their authenticated carriers. Completion
+/// consumes every source authority and retains the right aggregate material
+/// needed by evaluator packaging.
 pub(crate) struct VerifiedRelinearizationAggregateMaterial {
     proof_binding: VerifiedRelinearizationProofBinding,
     proof_stream_descriptor: StreamDescriptor,
@@ -895,9 +831,7 @@ pub(crate) struct VerifiedRelinearizationAggregateMaterial {
     ordered_anchor_commitment_roots: Box<[[[u8; Hash512::BYTE_LENGTH]; 3]]>,
     ordered_round_one_proof_stream_descriptors: Box<[StreamDescriptor]>,
     ordered_source_root_pairs: Box<[[[u8; Hash512::BYTE_LENGTH]; 2]]>,
-    ordered_round_one_sources: Vec<VerifiedRelinearizationRoundOneSourceMaterial>,
     aggregate_left_tree: VerifiedStatementOwnedTree,
-    aggregate_left_material: VerifiedKeySwitchComponentMaterial,
     aggregate_right_tree: VerifiedStatementOwnedTree,
     aggregate_right_material: VerifiedKeySwitchComponentMaterial,
 }
@@ -940,10 +874,6 @@ impl VerifiedRelinearizationAggregateMaterialPreflight {
         self.setup_proof_context_hash
     }
 
-    pub(crate) const fn schedule_position(&self) -> u32 {
-        self.schedule_position
-    }
-
     pub(crate) fn ordered_participant_identities(&self) -> &[[u8; Hash512::BYTE_LENGTH]] {
         &self.ordered_participant_identities
     }
@@ -951,9 +881,9 @@ impl VerifiedRelinearizationAggregateMaterialPreflight {
     pub(crate) fn complete(
         self,
         _verified_proof: ConsumedVerifiedCommonProofCapability,
-        ordered_sources: Vec<VerifiedRelinearizationRoundOneSourceMaterial>,
+        _ordered_sources: Vec<VerifiedRelinearizationRoundOneSourceMaterial>,
         aggregate_left_tree: SetupPublicPolynomialTree,
-        aggregate_left_material: VerifiedKeySwitchComponentMaterial,
+        _aggregate_left_material: VerifiedKeySwitchComponentMaterial,
         aggregate_right_tree: SetupPublicPolynomialTree,
         aggregate_right_material: VerifiedKeySwitchComponentMaterial,
     ) -> VerifiedRelinearizationAggregateMaterial {
@@ -976,9 +906,7 @@ impl VerifiedRelinearizationAggregateMaterialPreflight {
             ordered_round_one_proof_stream_descriptors: self
                 .ordered_round_one_proof_stream_descriptors,
             ordered_source_root_pairs: self.ordered_source_root_pairs,
-            ordered_round_one_sources: ordered_sources,
             aggregate_left_tree,
-            aggregate_left_material,
             aggregate_right_tree,
             aggregate_right_material,
         }
@@ -1230,18 +1158,8 @@ impl VerifiedRelinearizationAggregateMaterial {
             ceremony_context_hash: verified_proof.ceremony_context_hash(),
             action_context_hash: verified_proof.action_context_hash(),
             roster_hash,
-            board_object_hash: verified_proof.board_object_hash(),
-            verification_binding_hash: verified_proof.verification_binding_hash(),
             proof_application_slot_hash: verified_proof.proof_application_slot_hash(),
-            canonical_proof_application_binding_hash: verified_proof
-                .canonical_proof_application_binding_hash(),
             application_statement_hash: verified_proof.application_statement_hash(),
-            proof_header_hash: verified_proof.proof_header_hash(),
-            proof_stream_full_object_digest: verified_proof.proof_stream_full_object_digest(),
-            proof_byte_length: verified_proof.proof_byte_length(),
-            verified_query_count: verified_proof.verified_query_count(),
-            relation_plan_hash: verified_proof.relation_plan_hash(),
-            relation_plan_variant_hash: verified_proof.relation_plan_variant_hash(),
         };
         Ok(VerifiedRelinearizationAggregateMaterialPreflight {
             proof_binding,
@@ -1306,71 +1224,20 @@ impl VerifiedRelinearizationAggregateMaterial {
         &self.ordered_round_one_proof_stream_descriptors
     }
 
-    pub(crate) fn participant_round_one_statement_trees(
-        &self,
-        roster_position: u16,
-        left_tree_ordinal: u32,
-        left_root_source_ordinal: u32,
-        right_tree_ordinal: u32,
-        right_root_source_ordinal: u32,
-    ) -> Option<[VerifiedStatementOwnedTree; 2]> {
-        self.ordered_round_one_sources
-            .get(usize::from(roster_position))
-            .map(|source| {
-                source.rebound_statement_owned_trees(
-                    left_tree_ordinal,
-                    left_root_source_ordinal,
-                    right_tree_ordinal,
-                    right_root_source_ordinal,
-                )
-            })
-    }
-
     pub(crate) fn aggregate_left_root(&self) -> [u8; Hash512::BYTE_LENGTH] {
         self.aggregate_left_tree.expected_root()
-    }
-
-    pub(crate) const fn aggregate_left_material(&self) -> &VerifiedKeySwitchComponentMaterial {
-        &self.aggregate_left_material
     }
 
     pub(crate) fn aggregate_right_root(&self) -> [u8; Hash512::BYTE_LENGTH] {
         self.aggregate_right_tree.expected_root()
     }
 
-    pub(crate) fn rebound_statement_owned_trees(
-        &self,
-        left_tree_ordinal: u32,
-        left_root_source_ordinal: u32,
-        right_tree_ordinal: u32,
-        right_root_source_ordinal: u32,
-    ) -> [VerifiedStatementOwnedTree; 2] {
-        [
-            self.aggregate_left_tree
-                .with_relation_coordinates(left_tree_ordinal, left_root_source_ordinal),
-            self.aggregate_right_tree
-                .with_relation_coordinates(right_tree_ordinal, right_root_source_ordinal),
-        ]
-    }
-
     pub(crate) const fn proof_stream_descriptor(&self) -> &StreamDescriptor {
         &self.proof_stream_descriptor
     }
 
-    pub(crate) const fn material_root(&self) -> [u8; Hash512::BYTE_LENGTH] {
-        self.aggregate_right_material.material_root().into_bytes()
-    }
-
-    pub(crate) const fn stream_descriptor(&self) -> &crate::foundation::StreamDescriptor {
-        self.aggregate_right_material.stream_descriptor()
-    }
-
     pub(crate) const fn material(&self) -> &VerifiedKeySwitchComponentMaterial {
         &self.aggregate_right_material
-    }
-
-    pub(crate) fn into_material(self) -> VerifiedKeySwitchComponentMaterial {
-        self.aggregate_right_material
     }
 }
 

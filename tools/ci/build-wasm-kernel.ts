@@ -208,11 +208,13 @@ const readSignedI32Leb128 = (
     let offset = startingOffset;
     let value = 0;
     let shift = 0;
-    let byte = 0;
+    let byte: number;
     do {
         const nextByte = bytes[offset];
         if (nextByte === undefined || shift > 28) {
-            throw new Error('WASM contains an invalid signed i32 LEB128 value.');
+            throw new Error(
+                'WASM contains an invalid signed i32 LEB128 value.',
+            );
         }
         byte = nextByte;
         offset += 1;
@@ -225,15 +227,15 @@ const readSignedI32Leb128 = (
     return { nextOffset: offset, value: value | 0 };
 };
 
-export const assertDeterministicWasmStackLayout = (
-    bytes: Uint8Array,
-): void => {
+export const assertDeterministicWasmStackLayout = (bytes: Uint8Array): void => {
     const expectedHeader = [0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00];
     if (
         bytes.length < expectedHeader.length ||
         expectedHeader.some((byte, index) => bytes[index] !== byte)
     ) {
-        throw new Error('WASM stack inspection received an invalid module header.');
+        throw new Error(
+            'WASM stack inspection received an invalid module header.',
+        );
     }
     let module: WebAssembly.Module;
     try {
@@ -251,7 +253,9 @@ export const assertDeterministicWasmStackLayout = (
             (entry) => entry.kind === 'global',
         )
     ) {
-        throw new Error('WASM stack layout must not depend on imported globals.');
+        throw new Error(
+            'WASM stack layout must not depend on imported globals.',
+        );
     }
 
     let offset = expectedHeader.length;
@@ -280,7 +284,11 @@ export const assertDeterministicWasmStackLayout = (
         observedGlobalSection = true;
         const globalCount = readUnsignedLeb128(bytes, offset);
         offset = globalCount.nextOffset;
-        for (let globalIndex = 0; globalIndex < globalCount.value; globalIndex += 1) {
+        for (
+            let globalIndex = 0;
+            globalIndex < globalCount.value;
+            globalIndex += 1
+        ) {
             const valueType = bytes[offset];
             const mutability = bytes[offset + 1];
             const initializerOpcode = bytes[offset + 2];
@@ -300,7 +308,9 @@ export const assertDeterministicWasmStackLayout = (
             const initializer = readSignedI32Leb128(bytes, offset);
             offset = initializer.nextOffset;
             if (bytes[offset] !== 0x0b) {
-                throw new Error('WASM global initializer is not terminated canonically.');
+                throw new Error(
+                    'WASM global initializer is not terminated canonically.',
+                );
             }
             offset += 1;
             if (mutability === 1) {

@@ -57,23 +57,28 @@ const boundaryMocks = vi.hoisted(() => {
         openVerificationAdapter: vi.fn(() => Object.freeze({})),
         releaseGenerationAdapter: vi.fn(),
         releaseVerificationAdapter: vi.fn(),
-        runGeneration: vi.fn(async (_adapter: unknown, openExecution: (description: unknown) => unknown) => {
-            if (productionAuthorityActive.value) {
-                throw new Error(
-                    'The asynchronous proof run retained the serialized production-authority lease.',
-                );
-            }
-            const execution = (await openExecution(Object.freeze({}))) as {
-                options?: unknown;
-                outputStore: unknown;
-            };
-            return Object.freeze({
-                generatedCapability,
-                options: execution.options,
-                outputChunkByteLengths: Object.freeze([2]),
-                outputStore: execution.outputStore,
-            });
-        }),
+        runGeneration: vi.fn(
+            async (
+                _adapter: unknown,
+                openExecution: (description: unknown) => unknown,
+            ) => {
+                if (productionAuthorityActive.value) {
+                    throw new Error(
+                        'The asynchronous proof run retained the serialized production-authority lease.',
+                    );
+                }
+                const execution = (await openExecution(Object.freeze({}))) as {
+                    options?: unknown;
+                    outputStore: unknown;
+                };
+                return Object.freeze({
+                    generatedCapability,
+                    options: execution.options,
+                    outputChunkByteLengths: Object.freeze([2]),
+                    outputStore: execution.outputStore,
+                });
+            },
+        ),
         runVerification: vi.fn(() => Promise.resolve(verifiedCapability)),
         verifiedCapabilityRelease,
         withProductionAuthority: vi.fn(

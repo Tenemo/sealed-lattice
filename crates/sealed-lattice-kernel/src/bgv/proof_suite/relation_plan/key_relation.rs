@@ -474,10 +474,6 @@ pub(super) struct BoundedUnsignedColumn {
 }
 
 impl BoundedUnsignedColumn {
-    pub(super) const fn target_column_ordinal(&self) -> u32 {
-        self.target_column_ordinal
-    }
-
     pub(super) fn ordered_digit_column_ordinals(&self) -> &[u32] {
         &self.ordered_digit_column_ordinals
     }

@@ -41,21 +41,21 @@ const MAXIMUM_ACTIVE_RELINEARIZATION_VERIFICATION_INGRESSES: usize = 32;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum RelinearizationVerificationFamily {
-    RoundOne,
-    RoundOneAggregate,
-    RoundTwo,
+    One,
+    OneAggregate,
+    Two,
 }
 
 impl RelinearizationVerificationFamily {
     const fn schema_identifier(self) -> u16 {
         match self {
-            Self::RoundOne => {
+            Self::One => {
                 ProofApplicationSlotCeilings::RELINEARIZATION_ROUND_ONE_STATEMENT_SCHEMA_IDENTIFIER
             }
-            Self::RoundOneAggregate => {
+            Self::OneAggregate => {
                 ProofApplicationSlotCeilings::RKG_ROUND_ONE_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER
             }
-            Self::RoundTwo => {
+            Self::Two => {
                 ProofApplicationSlotCeilings::RELINEARIZATION_ROUND_TWO_STATEMENT_SCHEMA_IDENTIFIER
             }
         }
@@ -63,13 +63,13 @@ impl RelinearizationVerificationFamily {
 
     const fn component_count(self) -> usize {
         match self {
-            Self::RoundOne | Self::RoundOneAggregate => 2,
-            Self::RoundTwo => 1,
+            Self::One | Self::OneAggregate => 2,
+            Self::Two => 1,
         }
     }
 
     const fn uses_verifier_columns(self) -> bool {
-        !matches!(self, Self::RoundOneAggregate)
+        !matches!(self, Self::OneAggregate)
     }
 }
 
@@ -320,7 +320,7 @@ fn decode_relinearization_verification_statement(
         None,
     );
     match family {
-        RelinearizationVerificationFamily::RoundOne => {
+        RelinearizationVerificationFamily::One => {
             let statement = decode_selected_relinearization_round_one_statement(
                 canonical_application_statement_bytes,
                 context,
@@ -367,7 +367,7 @@ fn decode_relinearization_verification_statement(
                 ordered_components,
             })
         }
-        RelinearizationVerificationFamily::RoundOneAggregate => {
+        RelinearizationVerificationFamily::OneAggregate => {
             let statement = decode_selected_relinearization_round_one_aggregate_statement(
                 canonical_application_statement_bytes,
                 context,
@@ -407,7 +407,7 @@ fn decode_relinearization_verification_statement(
                 ordered_components,
             })
         }
-        RelinearizationVerificationFamily::RoundTwo => {
+        RelinearizationVerificationFamily::Two => {
             let statement = decode_selected_relinearization_round_two_statement(
                 canonical_application_statement_bytes,
                 context,
@@ -629,8 +629,7 @@ fn prepare_relinearization_verification(
     let selected_suite_handle =
         CommonProofSelectedSuiteCapabilityHandle::from_identifier(ingress.selected_suite_handle);
     let adapter_handle = match ingress.family {
-        RelinearizationVerificationFamily::RoundOne
-        | RelinearizationVerificationFamily::RoundTwo => {
+        RelinearizationVerificationFamily::One | RelinearizationVerificationFamily::Two => {
             let verified_column_evaluator = ingress
                 .verified_column_evaluator
                 .take()
@@ -644,7 +643,7 @@ fn prepare_relinearization_verification(
                 )
             })?
         }
-        RelinearizationVerificationFamily::RoundOneAggregate => {
+        RelinearizationVerificationFamily::OneAggregate => {
             if ingress.verified_column_evaluator.is_some() {
                 return Err(CommonProofRuntimeError::WrongVerificationBinding);
             }
@@ -668,7 +667,7 @@ fn prepare_relinearization_verification(
         })
         .collect::<Result<Vec<_>, _>>()?;
     let terminal_result = match ingress.family {
-        RelinearizationVerificationFamily::RoundOne => {
+        RelinearizationVerificationFamily::One => {
             let right = recomputed_components
                 .pop()
                 .ok_or(CommonProofRuntimeError::WrongOperationPhase)?;
@@ -690,7 +689,7 @@ fn prepare_relinearization_verification(
                 [left_material, right_material],
             )
         }
-        RelinearizationVerificationFamily::RoundOneAggregate => {
+        RelinearizationVerificationFamily::OneAggregate => {
             let right = recomputed_components
                 .pop()
                 .ok_or(CommonProofRuntimeError::WrongOperationPhase)?;
@@ -711,7 +710,7 @@ fn prepare_relinearization_verification(
                 [left_material, right_material],
             )
         }
-        RelinearizationVerificationFamily::RoundTwo => {
+        RelinearizationVerificationFamily::Two => {
             let component = recomputed_components
                 .pop()
                 .ok_or(CommonProofRuntimeError::WrongOperationPhase)?;
@@ -808,15 +807,15 @@ macro_rules! relinearization_verification_ingress_entry_point {
 
 relinearization_verification_ingress_entry_point!(
     sealed_lattice_relinearization_round_one_verification_ingress_begin,
-    RelinearizationVerificationFamily::RoundOne
+    RelinearizationVerificationFamily::One
 );
 relinearization_verification_ingress_entry_point!(
     sealed_lattice_relinearization_round_one_aggregate_verification_ingress_begin,
-    RelinearizationVerificationFamily::RoundOneAggregate
+    RelinearizationVerificationFamily::OneAggregate
 );
 relinearization_verification_ingress_entry_point!(
     sealed_lattice_relinearization_round_two_verification_ingress_begin,
-    RelinearizationVerificationFamily::RoundTwo
+    RelinearizationVerificationFamily::Two
 );
 
 #[unsafe(no_mangle)]

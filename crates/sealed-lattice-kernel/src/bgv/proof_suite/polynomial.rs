@@ -196,6 +196,7 @@ impl ProofEvaluationDomain {
         Ok(())
     }
 
+    #[cfg(test)]
     pub(crate) fn evaluate_extension_polynomial(
         self,
         coefficients: &[ProofChallengeExtensionElement],
@@ -232,6 +233,7 @@ impl ProofEvaluationDomain {
         radix_two_extension_transform(coefficients, self.generator, false)
     }
 
+    #[cfg(test)]
     pub(crate) fn interpolate_extension_polynomial(
         self,
         evaluations: &[ProofChallengeExtensionElement],
@@ -281,6 +283,7 @@ pub(crate) fn evaluate_extension_at(
     )
 }
 
+#[cfg(test)]
 pub(crate) fn divide_extension_polynomial_by_linear(
     coefficients: &[ProofChallengeExtensionElement],
     point: ProofChallengeExtensionElement,
@@ -333,6 +336,7 @@ pub(crate) fn divide_extension_polynomial_by_linear_in_place(
     Ok(running)
 }
 
+#[cfg(test)]
 pub(crate) fn fold_extension_evaluations(
     evaluations: &[ProofChallengeExtensionElement],
     domain: ProofEvaluationDomain,

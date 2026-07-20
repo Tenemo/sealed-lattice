@@ -27,16 +27,16 @@ use crate::{
         CanonicalStreamDomain, CanonicalStreamVerifier, CanonicalStreamWriter, CanonicalTuple,
         FOUNDATION_PROFILE, FoundationSchemaError, Hash512, OrdinaryProofCoinInput,
         PrivateRandomCursor, PrivateRandomnessAttemptIdentifier, PrivateRandomnessDomain,
-        PrivateRandomnessKmacInputClassAccounting, ProofApplicationSlot, RefusalReason,
-        SelectedSuiteCapability, StreamDescriptor, VerificationResult, hash_foundation_tuple_512,
-        private_randomness_stream_block_count_for_bit_length,
-        private_randomness_stream_block_count_for_modulo_outputs,
+        ProofApplicationSlot, RefusalReason, SelectedSuiteCapability, StreamDescriptor,
+        VerificationResult, hash_foundation_tuple_512,
         resolve_prepared_ordinary_proof_attempt_source,
     },
     hashing::hash_framed_parts_512,
 };
 
 use super::*;
+#[cfg(test)]
+use crate::bgv::proof_suite::selected_ballot_validity_relation_compilation;
 use crate::bgv::proof_suite::{
     CommonProofGenerationAuthorization, CommonProofGenerationPreparationError,
     CommonProofGenerationSources, CommonProofPrivateCoinCoordinateCapacity, CommonProofProverError,
@@ -51,8 +51,7 @@ use crate::bgv::proof_suite::{
     ProofTreeRole, ProvidedCommonProofSourcePolynomial, RelationProofTreeInput,
     SelectedApplicationStatementContext, VerifiedRelationColumnEvaluator,
     VerifiedRelationColumnEvaluatorMemoryAccounting, canonical_selected_ballot_validity_statement,
-    decode_selected_ballot_validity_statement, selected_ballot_validity_relation_compilation,
-    verified_application_statement_hash,
+    decode_selected_ballot_validity_statement, verified_application_statement_hash,
 };
 
 const OPTION_COUNT: usize = FOUNDATION_PROFILE.option_count as usize;
@@ -73,29 +72,8 @@ const BALLOT_EPHEMERAL_SECRET_RANDOMNESS_PURPOSE: [u16; PAIR_CHARACTER_CIPHERTEX
 const BALLOT_ERROR_ZERO_RANDOMNESS_PURPOSE: [u16; PAIR_CHARACTER_CIPHERTEXT_COUNT] = [9, 12];
 const BALLOT_ERROR_ONE_RANDOMNESS_PURPOSE: [u16; PAIR_CHARACTER_CIPHERTEXT_COUNT] = [10, 13];
 
-/// Source-owned count for one ballot encryption attempt. The centered
-/// ternary randomizer uses rejection sampling, while each eta-two centered
-/// binomial error stream consumes four packed bits per coefficient.
-pub(crate) fn ballot_encryption_private_randomness_kmac_input_accounting(
-    ring_degree: u64,
-    maximum_candidate_draws_per_output: u32,
-) -> Option<PrivateRandomnessKmacInputClassAccounting> {
-    let randomizer_stream_block_count = private_randomness_stream_block_count_for_modulo_outputs(
-        ring_degree,
-        3,
-        maximum_candidate_draws_per_output,
-    )?;
-    let centered_binomial_stream_block_count =
-        private_randomness_stream_block_count_for_bit_length(ring_degree.checked_mul(4)?)?;
-    PrivateRandomnessKmacInputClassAccounting::checked_new(
-        0,
-        0,
-        randomizer_stream_block_count
-            .checked_add(centered_binomial_stream_block_count.checked_mul(2)?)?
-            .checked_mul(u64::try_from(PAIR_CHARACTER_CIPHERTEXT_COUNT).ok()?)?,
-        0,
-    )
-}
+type BallotResiduePolynomialRecord = (u16, u16, u64, Arc<[u64]>);
+pub(crate) type BallotCiphertextPolynomialCatalogEntry = (u16, u16, u16, u64, Arc<[u64]>);
 
 /// Production-derived buffer geometry for the selected ballot carrier and
 /// its streaming common-proof source adapter. Counts cover owned coefficient,
@@ -126,64 +104,64 @@ pub(crate) struct SelectedBallotValidityCarrierBufferAccounting {
 }
 
 impl SelectedBallotValidityCarrierBufferAccounting {
+    #[cfg(test)]
     pub(crate) const fn canonical_ciphertext_byte_length(self) -> u64 {
         self.canonical_ciphertext_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn canonical_ciphertext_chunk_count(self) -> u32 {
         self.canonical_ciphertext_chunk_count
     }
 
+    #[cfg(test)]
     pub(crate) const fn canonical_ciphertext_descriptor_encoded_byte_length(self) -> u64 {
         self.canonical_ciphertext_descriptor_encoded_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn canonical_ciphertext_descriptor_digest_catalog_byte_length(self) -> u64 {
         self.canonical_ciphertext_descriptor_digest_catalog_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn ciphertext_readback_polynomial_catalog_byte_length(self) -> u64 {
         self.ciphertext_readback_polynomial_catalog_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn decoded_ciphertext_residue_byte_length(self) -> u64 {
         self.decoded_ciphertext_residue_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn provider_bound_public_residue_byte_length(self) -> u64 {
         self.provider_bound_public_residue_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn provider_witness_coefficient_byte_length(self) -> u64 {
         self.provider_witness_coefficient_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn provider_precomputed_transform_byte_length(self) -> u64 {
         self.provider_precomputed_transform_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn provider_value_cache_byte_length(self) -> u64 {
         self.provider_value_cache_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn provider_transient_scratch_byte_length(self) -> u64 {
         self.provider_transient_scratch_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn provider_buffer_live_set_peak_byte_length(self) -> u64 {
         self.provider_buffer_live_set_peak_byte_length
-    }
-
-    pub(crate) const fn provider_fixed_owner_byte_length(self) -> u64 {
-        self.provider_fixed_owner_byte_length
-    }
-
-    pub(crate) const fn provider_source_plan_catalog_byte_length(self) -> u64 {
-        self.provider_source_plan_catalog_byte_length
-    }
-
-    pub(crate) const fn provider_ordered_source_column_catalog_byte_length(self) -> u64 {
-        self.provider_ordered_source_column_catalog_byte_length
     }
 
     pub(crate) const fn provider_loading_persistent_resident_byte_length(self) -> u64 {
@@ -202,11 +180,13 @@ impl SelectedBallotValidityCarrierBufferAccounting {
         self.transferred_source_polynomial_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn maximum_boundary_copied_buffer_byte_length(self) -> u64 {
         self.maximum_boundary_copied_buffer_byte_length
     }
 }
 
+#[cfg(test)]
 pub(crate) fn selected_ballot_validity_carrier_buffer_accounting()
 -> Result<SelectedBallotValidityCarrierBufferAccounting, BallotValidityAdapterError> {
     let compilation = selected_ballot_validity_relation_compilation()?;
@@ -951,7 +931,7 @@ impl BallotValidityBoundPublicMaterial {
 #[derive(Clone)]
 pub(crate) struct BallotValidityAuthenticatedCiphertext {
     full_object_digest: [u8; 64],
-    polynomials: Vec<(u16, u16, u64, Arc<[u64]>)>,
+    polynomials: Vec<BallotResiduePolynomialRecord>,
 }
 
 /// One exact selected-suite ballot ciphertext created from a verified setup
@@ -970,9 +950,7 @@ pub(crate) struct BallotValidityPreparedProofAttempt {
     action_private_randomness: Rc<ActionPrivateRandomness>,
     application_slot: ProofApplicationSlot,
     canonical_application_statement_bytes: Vec<u8>,
-    application_statement_hash: [u8; 64],
     proof_coin_input: OrdinaryProofCoinInput,
-    encryption_randomness_cursors: [PrivateRandomCursor; 6],
     witness: BallotValidityEncryptionAttemptWitness,
     public_material: BallotValidityBoundPublicMaterial,
     generated_ciphertext: BallotValidityGeneratedCiphertext,
@@ -1093,16 +1071,15 @@ impl BallotValidityPreparedProofAttempt {
             return Err(BallotValidityAdapterError::InvalidStatementBinding);
         }
 
-        let (witness, encryption_randomness_cursors) =
-            BallotValidityEncryptionAttemptWitness::sample_from_action_randomness(
-                compilation.source_plan(),
-                selected_suite,
-                &action_private_randomness,
-                application_slot,
-                expected_setup_binding.exact_verified_setup_source_hash,
-                scores,
-                injected_encryption_attempt_identifier,
-            )?;
+        let (witness, _) = BallotValidityEncryptionAttemptWitness::sample_from_action_randomness(
+            compilation.source_plan(),
+            selected_suite,
+            &action_private_randomness,
+            application_slot,
+            expected_setup_binding.exact_verified_setup_source_hash,
+            scores,
+            injected_encryption_attempt_identifier,
+        )?;
         let public_key_polynomials = verified_public_key_polynomials(
             compilation.source_plan(),
             authority_handle,
@@ -1158,29 +1135,15 @@ impl BallotValidityPreparedProofAttempt {
             action_private_randomness,
             application_slot,
             canonical_application_statement_bytes,
-            application_statement_hash,
             proof_coin_input,
-            encryption_randomness_cursors,
             witness,
             public_material,
             generated_ciphertext,
         })
     }
 
-    pub(crate) const fn application_slot(&self) -> ProofApplicationSlot {
-        self.application_slot
-    }
-
     pub(crate) fn canonical_application_statement_bytes(&self) -> &[u8] {
         &self.canonical_application_statement_bytes
-    }
-
-    pub(crate) const fn application_statement_hash(&self) -> [u8; 64] {
-        self.application_statement_hash
-    }
-
-    pub(crate) const fn proof_coin_input(&self) -> OrdinaryProofCoinInput {
-        self.proof_coin_input
     }
 
     pub(crate) fn proof_attempt_identifier(
@@ -1189,10 +1152,6 @@ impl BallotValidityPreparedProofAttempt {
         self.action_private_randomness
             .ordinary_proof_attempt_identifier(&self.proof_coin_input)
             .map_err(BallotValidityAdapterError::from)
-    }
-
-    pub(crate) const fn encryption_randomness_cursors(&self) -> [PrivateRandomCursor; 6] {
-        self.encryption_randomness_cursors
     }
 
     pub(crate) const fn generated_ciphertext(&self) -> &BallotValidityGeneratedCiphertext {
@@ -1321,20 +1280,9 @@ impl BallotValidityPreparedProofAttempt {
 }
 
 impl BallotValidityGeneratedCiphertext {
-    pub(crate) fn encrypt(
-        source_plan: &BallotValiditySourcePlan,
-        authority_handle: &VerifiedAcceptedSetupAuthorityHandle,
-        expected_setup_binding: BallotValidityAcceptedSetupBinding,
-        witness: &BallotValidityEncryptionAttemptWitness,
-    ) -> Result<Self, BallotValidityAdapterError> {
-        let public_key_polynomials =
-            verified_public_key_polynomials(source_plan, authority_handle, expected_setup_binding)?;
-        Self::encrypt_with_public_key_polynomials(source_plan, public_key_polynomials, witness)
-    }
-
     fn encrypt_with_public_key_polynomials(
         source_plan: &BallotValiditySourcePlan,
-        public_key_polynomials: Vec<(u16, u16, u64, Arc<[u64]>)>,
+        public_key_polynomials: Vec<BallotResiduePolynomialRecord>,
         witness: &BallotValidityEncryptionAttemptWitness,
     ) -> Result<Self, BallotValidityAdapterError> {
         let public_key_by_limb =
@@ -1501,7 +1449,7 @@ impl BallotValidityGeneratedCiphertext {
 pub(crate) struct BallotValidityCiphertextReadback {
     header: [u8; 4],
     header_byte_offset: usize,
-    polynomials: Box<[(u16, u16, u64, Arc<[u64]>)]>,
+    polynomials: Box<[BallotResiduePolynomialRecord]>,
     polynomial_ordinal: usize,
     coefficient_ordinal: usize,
     coefficient_byte_offset: usize,
@@ -1608,7 +1556,7 @@ pub(crate) struct BallotValidityCiphertextStreamDecoder {
     partial_coefficient: [u8; 8],
     partial_coefficient_byte_length: usize,
     current_polynomial: Vec<u64>,
-    polynomials: Vec<(u16, u16, u64, Arc<[u64]>)>,
+    polynomials: Vec<BallotResiduePolynomialRecord>,
     refusal_reason: Option<RefusalReason>,
 }
 
@@ -1796,7 +1744,7 @@ impl BallotValidityCiphertextStreamDecoder {
 
 fn ballot_ciphertext_total_byte_length(
     source_plan: &BallotValiditySourcePlan,
-    polynomials: &[(u16, u16, u64, Arc<[u64]>)],
+    polynomials: &[BallotResiduePolynomialRecord],
 ) -> Result<u64, BallotValidityAdapterError> {
     let coefficient_byte_length = polynomials.iter().try_fold(0_u64, |total, entry| {
         let polynomial_byte_length = u64::try_from(entry.3.len())
@@ -1831,7 +1779,7 @@ fn verified_public_key_polynomials(
     source_plan: &BallotValiditySourcePlan,
     authority_handle: &VerifiedAcceptedSetupAuthorityHandle,
     expected_setup_binding: BallotValidityAcceptedSetupBinding,
-) -> Result<Vec<(u16, u16, u64, Arc<[u64]>)>, BallotValidityAdapterError> {
+) -> Result<Vec<BallotResiduePolynomialRecord>, BallotValidityAdapterError> {
     with_verified_accepted_setup_authority(authority_handle, |authority| {
         let expected_ring_degree = usize::try_from(source_plan.ring_degree()).map_err(|_| {
             CanonicalError::new(
@@ -1907,8 +1855,8 @@ impl BallotValidityBoundPublicMaterial {
         suite_identifier: [u8; 64],
         verified_setup_source_hash: [u8; 64],
         ballot_ciphertext_digest: [u8; 64],
-        public_key_polynomials: Vec<(u16, u16, u64, Arc<[u64]>)>,
-        ciphertext_polynomials: Vec<(u16, u16, u64, Arc<[u64]>)>,
+        public_key_polynomials: Vec<BallotResiduePolynomialRecord>,
+        ciphertext_polynomials: Vec<BallotResiduePolynomialRecord>,
     ) -> Result<Self, BallotValidityAdapterError> {
         if protocol_version == 0
             || suite_identifier == [0_u8; 64]
@@ -1933,6 +1881,7 @@ impl BallotValidityBoundPublicMaterial {
         })
     }
 
+    #[cfg(test)]
     pub(crate) const fn verified_setup_source_hash(&self) -> [u8; 64] {
         self.verified_setup_source_hash
     }
@@ -1943,7 +1892,7 @@ impl BallotValidityBoundPublicMaterial {
 
     pub(crate) fn authenticated_ciphertext_catalog(
         &self,
-    ) -> Result<Vec<(u16, u16, u16, u64, Arc<[u64]>)>, BallotValidityAdapterError> {
+    ) -> Result<Vec<BallotCiphertextPolynomialCatalogEntry>, BallotValidityAdapterError> {
         let mut catalog =
             Vec::with_capacity(self.ciphertext_by_limb.len() * PAIR_CHARACTER_CIPHERTEXT_COUNT * 2);
         for ciphertext_ordinal in 0..PAIR_CHARACTER_CIPHERTEXT_COUNT {
@@ -1997,7 +1946,7 @@ impl BallotValidityBoundPublicMaterial {
 
 fn checked_polynomial_sequence<const COMPONENT_COUNT: usize>(
     source_plan: &BallotValiditySourcePlan,
-    polynomials: Vec<(u16, u16, u64, Arc<[u64]>)>,
+    polynomials: Vec<BallotResiduePolynomialRecord>,
 ) -> Result<Vec<[BoundResiduePolynomial; COMPONENT_COUNT]>, BallotValidityAdapterError> {
     require_checked_polynomial_sequence::<COMPONENT_COUNT>(source_plan, &polynomials)?;
     let mut ordered_polynomials = polynomials.into_iter();
@@ -2005,11 +1954,11 @@ fn checked_polynomial_sequence<const COMPONENT_COUNT: usize>(
         .map(|_| core::array::from_fn(|_| None))
         .collect::<Vec<[Option<BoundResiduePolynomial>; COMPONENT_COUNT]>>();
     for component_ordinal in 0..COMPONENT_COUNT {
-        for limb_ordinal in 0..source_plan.data_moduli().len() {
+        for limb_components in &mut components_by_limb {
             let (_, _, modulus, coefficients) = ordered_polynomials
                 .next()
                 .ok_or(BallotValidityAdapterError::InvalidPublicMaterial)?;
-            components_by_limb[limb_ordinal][component_ordinal] = Some(BoundResiduePolynomial {
+            limb_components[component_ordinal] = Some(BoundResiduePolynomial {
                 modulus,
                 coefficients,
             });
@@ -2030,7 +1979,7 @@ fn checked_polynomial_sequence<const COMPONENT_COUNT: usize>(
 
 fn require_checked_polynomial_sequence<const COMPONENT_COUNT: usize>(
     source_plan: &BallotValiditySourcePlan,
-    polynomials: &[(u16, u16, u64, Arc<[u64]>)],
+    polynomials: &[BallotResiduePolynomialRecord],
 ) -> Result<(), BallotValidityAdapterError> {
     let ring_degree = usize::try_from(source_plan.ring_degree())
         .map_err(|_| BallotValidityAdapterError::IntegerOverflow)?;
@@ -2279,6 +2228,7 @@ impl BallotValiditySourcePolynomialAdapter {
             && self.witness.is_none()
     }
 
+    #[cfg(test)]
     pub(crate) const fn restart_binding_hash(&self) -> [u8; 64] {
         self.restart_binding_hash
     }

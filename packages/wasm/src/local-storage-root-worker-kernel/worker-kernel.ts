@@ -445,9 +445,7 @@ export const createWasmBrowserActionStorageWorkerKernel = (input: {
                 await resolvedWorkerKernel,
                 operationInput,
             ),
-        openAggregateThresholdShareRecipientAuthority: async (
-            operationInput,
-        ) =>
+        openAggregateThresholdShareRecipientAuthority: async (operationInput) =>
             openClosedWorkerAggregateThresholdShareRecipientAuthority(
                 await resolvedWorkerKernel,
                 operationInput,

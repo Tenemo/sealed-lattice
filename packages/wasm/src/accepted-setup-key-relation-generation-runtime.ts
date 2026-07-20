@@ -481,7 +481,7 @@ const generateAcceptedSetupKeyRelationInClosedWorker = async (
                             authorization.stateReservationCapabilityPointer <=
                                 0 ||
                             authorization.stateReservationCapabilityPointer +
-                                    verifierCapabilityByteLength >
+                                verifierCapabilityByteLength >
                                 context.memory.buffer.byteLength
                         ) {
                             throw new CanonicalStreamInternalError(
@@ -513,9 +513,12 @@ const generateAcceptedSetupKeyRelationInClosedWorker = async (
                                         setupIntentAuthorization.capabilityPointer,
                                         verifierCapabilityByteLength,
                                         new DataView(
-                                            setupIntentAuthorization.handleBytes.buffer,
-                                            setupIntentAuthorization.handleBytes.byteOffset,
-                                            setupIntentAuthorization.handleBytes.byteLength,
+                                            setupIntentAuthorization.handleBytes
+                                                .buffer,
+                                            setupIntentAuthorization.handleBytes
+                                                .byteOffset,
+                                            setupIntentAuthorization.handleBytes
+                                                .byteLength,
                                         ).getUint32(0, true),
                                         checkpointPointer,
                                         checkpointLineageIdentifier.byteLength,

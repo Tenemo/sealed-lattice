@@ -35,7 +35,7 @@ use super::merkle::minimal_frontier_coordinates;
 use super::relation_plan::{
     BoundTreeConstructionKind, CheckedRelationApplicationChallenges, ProofPrivacyMode,
     RelationColumnDescriptor, RelationColumnOrigin, RelationColumnValueType,
-    RelationConstraintColumnQuery, RelationExpressionInstruction, RelationIntegerLiftCoefficient,
+    RelationConstraintColumnQuery, RelationIntegerLiftCoefficient,
     RelationIntegerLiftComponentDescriptor, RelationIntegerLiftConvolutionKind,
     RelationIntegerLiftConvolutionProductDescriptor, RelationIntegerLiftFullRingHalf,
     RelationIntegerLiftFullRingNegacyclicProductDescriptor,
@@ -127,18 +127,23 @@ pub(crate) use encoding::{
 };
 pub(crate) use fri::construct_opening_batch_mask;
 #[cfg(test)]
+pub(crate) use generation_state::common_proof_source_provider_is_live_during_phase;
+#[cfg(test)]
 pub(crate) use generation_state::generate_common_proof;
 pub(crate) use generation_state::{
     CommonProofGenerationCheckpointBoundary, CommonProofGenerationPoll, CommonProofGenerationStage,
-    CommonProofGenerationStateMachine, common_proof_source_provider_is_live_during_phase,
+    CommonProofGenerationStateMachine,
 };
 pub(crate) use generation_storage::{
     CommonProofExternalMemoryRequirement, CommonProofGenerationError,
     CommonProofGenerationInitializationError, CommonProofGenerationInput,
-    CommonProofResidentMemoryPhase, CommonProofResidentMemoryPlan,
-    GeneratedCommonProofStoragePlanError, MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH,
-    common_proof_external_memory_requirement, common_proof_resident_memory_plan,
-    common_proof_resident_memory_requirement,
+    CommonProofResidentMemoryConfiguration, CommonProofResidentMemoryPhase,
+    CommonProofResidentMemoryPlan, GeneratedCommonProofStoragePlanError,
+    MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH, common_proof_resident_memory_plan,
+};
+#[cfg(test)]
+pub(crate) use generation_storage::{
+    common_proof_external_memory_requirement, common_proof_resident_memory_requirement,
 };
 pub(crate) use merkle_storage::{
     CommonProofMerkleMaterializer, CommonProofMerkleMaterializerProgress,
@@ -150,25 +155,22 @@ pub(crate) use merkle_storage::{
     setup_polynomial_column_major_merkle_replay_wasm_memory_bound,
 };
 pub(crate) use private_coins::{
-    CheckpointableCommonProofPrivateCoinSource, CommonProofCheckpointCursorManifestError,
-    CommonProofCheckpointCursorManifestRequirement, CommonProofPrivateCoinCoordinate,
-    CommonProofPrivateCoinCoordinateCapacity, CommonProofPrivateCoinReplayCursor,
-    CommonProofPrivateCoinReplaySpan, CommonProofPrivateCoinReplaySpanStart,
-    CommonProofPrivateCoinSource, PrivateRandomnessCommonProofCoinError,
-    PrivateRandomnessCommonProofCoinSource, PublicOnlyCommonProofCoinSource,
-    ReplayableCommonProofPrivateCoinCatalogSource, ReplayableCommonProofPrivateCoinSource,
-    common_proof_checkpoint_cursor_manifest_requirement_for_variant,
+    CheckpointableCommonProofPrivateCoinSource, CommonProofPrivateCoinCoordinate,
+    CommonProofPrivateCoinCoordinateCapacity, CommonProofPrivateCoinSource,
+    PrivateRandomnessCommonProofCoinError, PrivateRandomnessCommonProofCoinSource,
+    PublicOnlyCommonProofCoinSource,
 };
 #[cfg(test)]
 pub(crate) use private_coins::{
+    CommonProofCheckpointCursorManifestError, CommonProofCheckpointCursorManifestRequirement,
+    common_proof_checkpoint_cursor_manifest_requirement_for_variant,
     common_proof_private_coin_coordinate_derivation_context_hash,
     encode_common_proof_checkpoint_cursor_manifest,
 };
 #[cfg(test)]
 pub(crate) use quotient::{
     construct_composed_quotient_polynomial,
-    construct_constraint_stream_composed_quotient_polynomial, construct_quotient_components,
-    decompose_composed_quotient,
+    construct_constraint_stream_composed_quotient_polynomial, decompose_composed_quotient,
 };
 #[cfg(test)]
 pub(crate) use relation_columns::ResidentCommonProofSourcePolynomialProvider;
@@ -210,7 +212,6 @@ use quotient::{
     COMMON_PROOF_RELATION_EVALUATION_BLOCK_LENGTH, CommonProofConstraintStreamQuotientBuilder,
     CommonProofQuotientComponentCursor, CommonProofQuotientConstraintTransformKey,
     CommonProofQuotientEvaluationProgress, rotated_relation_evaluation_position,
-    validate_column_polynomials,
 };
 #[cfg(test)]
 use relation_columns::{

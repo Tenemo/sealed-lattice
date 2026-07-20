@@ -3,13 +3,14 @@ use crate::bgv::{
     base_conversion::lift_plaintext_coefficients_to_basis, parameters::BgvBasisKind,
     rns::RnsPolynomial,
 };
+#[cfg(test)]
+use crate::bgv::{
+    direct_ballots::{PAIR_CHARACTER_LANE_DEGREE, pair_character_lane_idempotent_coefficients},
+    modular_arithmetic::{add_mod, mul_mod},
+};
 use crate::{
     bgv::{
-        direct_ballots::{
-            PAIR_CHARACTER_LANE_COUNT, PAIR_CHARACTER_LANE_DEGREE,
-            pair_character_lane_idempotent_coefficients, pair_character_lane_value,
-        },
-        modular_arithmetic::{add_mod, mul_mod},
+        direct_ballots::{PAIR_CHARACTER_LANE_COUNT, pair_character_lane_value},
         parameters::{PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE},
     },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
@@ -25,6 +26,7 @@ pub(crate) struct EncodedBatchPlaintext {
 /// plaintext lanes. This is the only scalar-lane embedding used by evaluator
 /// development tests and target decoding; arbitrary extension-field lane
 /// values stay in coefficient form.
+#[cfg(test)]
 pub(super) fn encode_scalar_lanes_to_plaintext_coefficients(
     supplied_lanes: &[u64],
 ) -> CanonicalResult<Vec<u64>> {

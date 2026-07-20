@@ -870,11 +870,11 @@ impl KeyRelationColumnDerivation for RelinearizationRoundOneColumnDerivation<'_,
         for (component, rows) in [
             (
                 self.source.round_one_left_component(),
-                self.source_layout.round_one_left_rows.as_ref(),
+                self.source_layout.round_one_left_rows,
             ),
             (
                 self.source.round_one_right_component(),
-                self.source_layout.round_one_right_rows.as_ref(),
+                self.source_layout.round_one_right_rows,
             ),
         ] {
             if let Some(result) = component_direct_witness_rows(component, rows, column_ordinal)? {

@@ -13,7 +13,6 @@ use crate::{
             CommittedMaterialRole, CommittedMaterialSharedAllocationMemoryAccounting,
             CompactCommittedMaterialSource, SelectedEvaluatorEntryKind,
             SelectedEvaluatorEntryPosition, VerifiedEvaluatorKeyStore,
-            authenticated_committed_material_shared_allocation_byte_lengths,
             selected_committed_material_profile,
         },
         setup::{
@@ -29,8 +28,6 @@ use crate::{
 };
 
 use super::{
-    consumed_object_byte_lengths::VerifiedAcceptedSetupConsumedObjectByteLengthCatalog,
-    generated_mailbox_byte_lengths::VerifiedGeneratedPrivateVssMailboxCorpusByteLengthCatalog,
     generation_authority::SetupGeneratedCommittedMaterial,
     verified_terminals::{
         VerifiedAggregateThresholdShareTerminal, VerifiedCollectivePublicKeyTerminal,
@@ -164,20 +161,8 @@ pub(crate) struct VerifiedAcceptedSetupParticipantTargetReleaseLimb {
 }
 
 impl VerifiedAcceptedSetupParticipantTargetReleaseLimb {
-    pub(crate) const fn data_modulus_index(&self) -> u16 {
-        self.data_modulus_index
-    }
-
-    pub(crate) const fn modulus(&self) -> u64 {
-        self.modulus
-    }
-
     pub(crate) fn threshold_share(&self) -> &[u64] {
         self.committed_share.canonical_message()
-    }
-
-    pub(crate) fn committed_share_source(&self) -> &CompactCommittedMaterialSource {
-        self.committed_share.compact_source()
     }
 }
 
@@ -192,25 +177,6 @@ pub(crate) struct VerifiedAcceptedSetupParticipantTargetReleaseLeaseMemoryAccoun
     shared_allocations: Box<[CommittedMaterialSharedAllocationMemoryAccounting]>,
 }
 
-/// Owner-derived allocation lengths for a target-release lease before live
-/// Arc identities exist. Selected-suite resource planning uses this same
-/// layout contract as the live lease accounting below.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct AcceptedSetupParticipantTargetReleaseLeaseAllocationByteLengths {
-    unique_owned_heap_byte_length: u64,
-    shared_allocation_byte_length: u64,
-}
-
-impl AcceptedSetupParticipantTargetReleaseLeaseAllocationByteLengths {
-    pub(crate) const fn unique_owned_heap_byte_length(self) -> u64 {
-        self.unique_owned_heap_byte_length
-    }
-
-    pub(crate) const fn shared_allocation_byte_length(self) -> u64 {
-        self.shared_allocation_byte_length
-    }
-}
-
 fn target_release_lease_unique_owned_heap_byte_length(limb_count: usize) -> CanonicalResult<u64> {
     limb_count
         .checked_mul(size_of::<
@@ -218,34 +184,6 @@ fn target_release_lease_unique_owned_heap_byte_length(limb_count: usize) -> Cano
         >())
         .and_then(|length| u64::try_from(length).ok())
         .ok_or_else(authority_binding_error)
-}
-
-pub(crate) fn accepted_setup_participant_target_release_lease_allocation_byte_lengths(
-    limb_count: usize,
-    canonical_coefficient_count: usize,
-) -> CanonicalResult<AcceptedSetupParticipantTargetReleaseLeaseAllocationByteLengths> {
-    if limb_count == 0 || canonical_coefficient_count == 0 {
-        return Err(authority_binding_error());
-    }
-    let shared_source_byte_length =
-        authenticated_committed_material_shared_allocation_byte_lengths(
-            canonical_coefficient_count,
-        )
-        .map_err(|_| authority_binding_error())?
-        .total()
-        .map_err(|_| authority_binding_error())?;
-    let shared_allocation_byte_length = u64::try_from(limb_count)
-        .ok()
-        .and_then(|count| count.checked_mul(shared_source_byte_length))
-        .ok_or_else(authority_binding_error)?;
-    Ok(
-        AcceptedSetupParticipantTargetReleaseLeaseAllocationByteLengths {
-            unique_owned_heap_byte_length: target_release_lease_unique_owned_heap_byte_length(
-                limb_count,
-            )?,
-            shared_allocation_byte_length,
-        },
-    )
 }
 
 impl VerifiedAcceptedSetupParticipantTargetReleaseLeaseMemoryAccounting {
@@ -471,10 +409,6 @@ pub(crate) struct VerifiedAcceptedSetupAuthority {
     collective_public_key_b_polynomials: Box<[Arc<[u64]>]>,
     public_setup_seed: [u8; 64],
     verified_evaluator_key_store: Option<VerifiedEvaluatorKeyStore>,
-    accepted_setup_consumed_object_byte_lengths:
-        VerifiedAcceptedSetupConsumedObjectByteLengthCatalog,
-    private_vss_mailbox_byte_lengths:
-        Option<VerifiedGeneratedPrivateVssMailboxCorpusByteLengthCatalog>,
 }
 
 /// Opaque, non-serializable authority for the public common components needed
@@ -590,16 +524,8 @@ impl VerifiedAcceptedSetupAuthority {
         self.action_context_hash
     }
 
-    pub(crate) const fn manifest_hash(&self) -> [u8; 64] {
-        self.manifest_hash
-    }
-
     pub(crate) const fn roster_hash(&self) -> [u8; 64] {
         self.roster_hash
-    }
-
-    pub(crate) const fn setup_proof_context_hash(&self) -> [u8; 64] {
-        self.setup_proof_context_hash
     }
 
     pub(crate) const fn exact_verified_setup_source_hash(&self) -> [u8; 64] {
@@ -683,24 +609,6 @@ impl VerifiedAcceptedSetupAuthority {
             public_setup_seed: self.public_setup_seed,
             ring_degree: self.ring_degree,
         })
-    }
-
-    /// Derives one Galois common-component limb from the retained verified
-    /// setup seed and proof-owned catalog position. Modulus coordinates come
-    /// only from the selected topology.
-    pub(crate) fn sample_galois_common_component_limb(
-        &self,
-        position: SelectedEvaluatorEntryPosition,
-        decomposition_block_index: usize,
-        extended_limb_index: usize,
-    ) -> CanonicalResult<Vec<u64>> {
-        sample_evaluator_galois_common_component_limb(
-            &self.public_setup_seed,
-            self.ring_degree,
-            position,
-            decomposition_block_index,
-            extended_limb_index,
-        )
     }
 }
 
@@ -983,10 +891,6 @@ pub(super) struct VerifiedAcceptedSetupAuthorityInput {
     pub(super) collective_public_key_full_object_digest: [u8; 64],
     pub(super) collective_public_key_b_polynomials: Vec<Arc<[u64]>>,
     pub(super) public_setup_seed: [u8; 64],
-    pub(super) accepted_setup_consumed_object_byte_lengths:
-        VerifiedAcceptedSetupConsumedObjectByteLengthCatalog,
-    pub(super) private_vss_mailbox_byte_lengths:
-        Option<VerifiedGeneratedPrivateVssMailboxCorpusByteLengthCatalog>,
 }
 
 pub(super) struct VerifiedAcceptedSetupAuthorityBorrowedInput<'input> {
@@ -1010,6 +914,7 @@ pub(super) struct VerifiedAcceptedSetupAuthorityBorrowedInput<'input> {
 }
 
 impl VerifiedAcceptedSetupAuthority {
+    #[cfg(test)]
     fn from_verified_terminals(
         input: VerifiedAcceptedSetupAuthorityInput,
         verified_evaluator_key_store: Option<VerifiedEvaluatorKeyStore>,
@@ -1078,9 +983,6 @@ impl VerifiedAcceptedSetupAuthority {
                 .into_boxed_slice(),
             public_setup_seed: input.public_setup_seed,
             verified_evaluator_key_store,
-            accepted_setup_consumed_object_byte_lengths: input
-                .accepted_setup_consumed_object_byte_lengths,
-            private_vss_mailbox_byte_lengths: input.private_vss_mailbox_byte_lengths,
         }
     }
 }
@@ -1329,6 +1231,7 @@ impl VerifiedAcceptedSetupAuthorityRegistry {
         );
     }
 
+    #[cfg(test)]
     fn retain(
         &mut self,
         authority: VerifiedAcceptedSetupAuthority,
@@ -1395,32 +1298,6 @@ fn authority_registry() -> &'static Mutex<VerifiedAcceptedSetupAuthorityRegistry
         .get_or_init(|| Mutex::new(VerifiedAcceptedSetupAuthorityRegistry::default()))
 }
 
-pub(super) fn retain_verified_accepted_setup_authority(
-    input: VerifiedAcceptedSetupAuthorityInput,
-    verified_evaluator_key_store: VerifiedEvaluatorKeyStore,
-) -> CanonicalResult<VerifiedAcceptedSetupAuthorityHandle> {
-    Ok(prepare_verified_accepted_setup_authority(input, verified_evaluator_key_store)?.commit())
-}
-
-pub(super) fn prepare_verified_accepted_setup_authority(
-    input: VerifiedAcceptedSetupAuthorityInput,
-    verified_evaluator_key_store: VerifiedEvaluatorKeyStore,
-) -> CanonicalResult<PreparedVerifiedAcceptedSetupAuthorityCommit> {
-    let authority = VerifiedAcceptedSetupAuthority::from_verified_terminals(
-        input,
-        Some(verified_evaluator_key_store),
-    )?;
-    let mut registry = authority_registry()
-        .lock()
-        .map_err(|_| authority_state_error("accepted-setup authority registry is unavailable"))?;
-    let handle = registry.reserve_handle()?;
-    Ok(PreparedVerifiedAcceptedSetupAuthorityCommit {
-        registry,
-        handle,
-        authority,
-    })
-}
-
 pub(super) fn preflight_verified_accepted_setup_authority_destination(
     input: VerifiedAcceptedSetupAuthorityBorrowedInput<'_>,
     verified_evaluator_key_store: &VerifiedEvaluatorKeyStore,
@@ -1455,36 +1332,6 @@ pub(crate) fn with_verified_accepted_setup_authority<Output>(
         authority_state_error("accepted-setup authority handle is unknown or released")
     })?;
     operation(authority)
-}
-
-/// Borrows exact, verifier-derived setup accounting sources only while the
-/// same-kernel accepted-setup authority remains locked. The immutable borrow
-/// is deliberately repeatable, so a failed accounting derivation cannot
-/// consume evidence needed by a corrected retry. Cryptographic acceptance
-/// does not require the private mailbox catalog, but an accounting request
-/// fails loudly unless all selected-roster mailbox envelopes were positively
-/// verified and retained before VSS terminal compaction.
-pub(crate) fn with_verified_accepted_setup_development_evidence<Output>(
-    handle: &VerifiedAcceptedSetupAuthorityHandle,
-    operation: impl FnOnce(
-        &VerifiedAcceptedSetupConsumedObjectByteLengthCatalog,
-        &VerifiedGeneratedPrivateVssMailboxCorpusByteLengthCatalog,
-    ) -> CanonicalResult<Output>,
-) -> CanonicalResult<Output> {
-    with_verified_accepted_setup_authority(handle, |authority| {
-        let private_vss_mailbox_byte_lengths = authority
-            .private_vss_mailbox_byte_lengths
-            .as_ref()
-            .ok_or_else(|| {
-                authority_state_error(
-                    "accepted-setup authority has no complete verified private VSS mailbox development evidence",
-                )
-            })?;
-        operation(
-            &authority.accepted_setup_consumed_object_byte_lengths,
-            private_vss_mailbox_byte_lengths,
-        )
-    })
 }
 
 /// Validates the caller's aggregate binding while the retained authority is
@@ -1714,22 +1561,7 @@ mod tests {
             collective_public_key_full_object_digest,
             collective_public_key_b_polynomials: b_polynomials,
             public_setup_seed,
-            accepted_setup_consumed_object_byte_lengths:
-                VerifiedAcceptedSetupConsumedObjectByteLengthCatalog::deterministic_for_authority_custody_tests(
-                    0xb1,
-                ),
-            private_vss_mailbox_byte_lengths: None,
         }
-    }
-
-    fn authority_input_with_complete_development_evidence() -> VerifiedAcceptedSetupAuthorityInput {
-        let mut input = authority_input(true);
-        input.private_vss_mailbox_byte_lengths = Some(
-            VerifiedGeneratedPrivateVssMailboxCorpusByteLengthCatalog::deterministic_for_authority_custody_tests(
-                0xc1,
-            ),
-        );
-        input
     }
 
     #[test]
@@ -1864,99 +1696,5 @@ mod tests {
         registry.commit_reserved(reserved_handle, authority);
         assert!(registry.authorities.contains_key(&reserved_handle));
         assert_eq!(registry.next_handle, reserved_handle.checked_add(1));
-    }
-
-    #[test]
-    fn exact_setup_development_evidence_is_scoped_repeatable_and_restored_after_failure() {
-        let participant_count = usize::from(FOUNDATION_PROFILE.participant_count);
-        assert_eq!(participant_count, 10);
-        let handle = retain_verified_accepted_setup_authority_without_evaluator_store(
-            authority_input_with_complete_development_evidence(),
-        )
-        .expect("complete exact evidence retains with the authority");
-
-        let failed_derivation = with_verified_accepted_setup_development_evidence(
-            &handle,
-            |consumed_object_byte_lengths, private_mailbox_byte_lengths| {
-                assert_eq!(
-                    consumed_object_byte_lengths
-                        .ordered_setup_intent_canonical_byte_lengths()
-                        .len(),
-                    participant_count,
-                );
-                assert_eq!(
-                    private_mailbox_byte_lengths
-                        .ordered_mailbox_byte_lengths()
-                        .len(),
-                    participant_count * participant_count,
-                );
-                Err::<(), _>(authority_state_error(
-                    "injected accounting derivation failure",
-                ))
-            },
-        );
-        assert!(failed_derivation.is_err());
-
-        for _ in 0..2 {
-            let (setup_intent_count, mailbox_count, dealer_count, recipient_count) =
-                with_verified_accepted_setup_development_evidence(
-                    &handle,
-                    |consumed_object_byte_lengths, private_mailbox_byte_lengths| {
-                        Ok((
-                            consumed_object_byte_lengths
-                                .ordered_setup_intent_canonical_byte_lengths()
-                                .len(),
-                            private_mailbox_byte_lengths
-                                .ordered_mailbox_byte_lengths()
-                                .len(),
-                            private_mailbox_byte_lengths
-                                .ordered_dealer_upload_byte_lengths()
-                                .len(),
-                            private_mailbox_byte_lengths
-                                .ordered_recipient_download_byte_lengths()
-                                .len(),
-                        ))
-                    },
-                )
-                .expect("a failed scoped derivation leaves exact evidence available");
-            assert_eq!(setup_intent_count, participant_count);
-            assert_eq!(mailbox_count, participant_count * participant_count);
-            assert_eq!(dealer_count, participant_count);
-            assert_eq!(recipient_count, participant_count);
-        }
-
-        release_verified_accepted_setup_authority(handle).expect("authority releases once");
-    }
-
-    #[test]
-    fn exact_setup_development_evidence_refuses_missing_mailbox_corpus_and_released_authority() {
-        let missing_mailbox_handle =
-            retain_verified_accepted_setup_authority_without_evaluator_store(authority_input(true))
-                .expect("cryptographic authority does not require development evidence");
-        assert!(
-            with_verified_accepted_setup_development_evidence(&missing_mailbox_handle, |_, _| Ok(
-                ()
-            ),)
-            .is_err(),
-            "exact accounting must fail when the complete verified mailbox corpus was not retained",
-        );
-        release_verified_accepted_setup_authority(missing_mailbox_handle)
-            .expect("authority without accounting evidence releases");
-
-        let released_handle = retain_verified_accepted_setup_authority_without_evaluator_store(
-            authority_input_with_complete_development_evidence(),
-        )
-        .expect("complete evidence retains before release");
-        let released_identifier = released_handle.identifier();
-        release_verified_accepted_setup_authority(released_handle)
-            .expect("complete-evidence authority releases");
-        assert!(
-            with_verified_accepted_setup_development_evidence(
-                &VerifiedAcceptedSetupAuthorityHandle::from_identifier(released_identifier),
-                |_, _| Ok(()),
-            )
-            .is_err(),
-            "released authority cannot reopen development evidence",
-        );
     }
 }

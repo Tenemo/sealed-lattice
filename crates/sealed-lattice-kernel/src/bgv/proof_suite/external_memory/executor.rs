@@ -3,12 +3,6 @@ use super::plan::{
     ProofExternalMemoryPlan,
 };
 
-/// Cancellation is owned by the participant-operation worker.  It is checked
-/// between every bounded storage transaction and every arithmetic chunk.
-pub(crate) trait ProofCancellation {
-    fn cancellation_requested(&self) -> bool;
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ProofExternalMemoryObjectState {
     Issued,
@@ -58,7 +52,6 @@ pub(crate) enum ProofExternalMemoryError {
     InvalidLifecycle,
     WrongOffsetOrLength,
     ResourceLimitExceeded,
-    Cancelled,
     Incomplete,
 }
 
@@ -404,22 +397,6 @@ impl ProofExternalMemoryExecutor {
             self.terminal = true;
         }
         Ok(())
-    }
-
-    pub(crate) fn check_cancellation<Storage, Cancellation>(
-        &mut self,
-        storage: &mut Storage,
-        cancellation: &Cancellation,
-    ) -> Result<(), ProofExternalMemoryExecutorError<Storage::Error>>
-    where
-        Storage: ProofExternalMemory,
-        Cancellation: ProofCancellation,
-    {
-        if !cancellation.cancellation_requested() {
-            return Ok(());
-        }
-        self.cancel(storage)?;
-        Err(ProofExternalMemoryError::Cancelled.into())
     }
 
     /// Idempotently makes every live object unreachable.  The backend's

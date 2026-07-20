@@ -20,10 +20,14 @@ use super::{
     BoundTreeConstructionKind, CommittedMaterialRelationPlanInput,
     CommittedMaterialTraceWitnessProvider, CommittedMaterialTraceWitnessStructureMemoryAccounting,
     CompiledRelationPlan, RelationColumnDescriptor, RelationColumnOrigin, RelationPlanCheckContext,
-    RelationTreeDescriptor, aggregate_threshold_share_trace_witness_structure_memory_accounting,
-    compile_aggregate_threshold_share_relation_plan, compile_vss_share_linkage_relation_plan,
+    RelationTreeDescriptor, compile_aggregate_threshold_share_relation_plan,
+    compile_vss_share_linkage_relation_plan,
     derive_aggregate_threshold_share_trace_witness_provider,
     derive_vss_share_linkage_trace_witness_provider,
+};
+#[cfg(test)]
+use super::{
+    aggregate_threshold_share_trace_witness_structure_memory_accounting,
     vss_share_linkage_trace_witness_structure_memory_accounting,
 };
 
@@ -106,6 +110,7 @@ impl CommittedMaterialSourceProviderMemoryAccounting {
         self.logical_root_count
     }
 
+    #[cfg(test)]
     pub(crate) const fn adapter_fixed_byte_length(self) -> u64 {
         self.adapter_fixed_byte_length
     }
@@ -118,54 +123,67 @@ impl CommittedMaterialSourceProviderMemoryAccounting {
         self.compact_source_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn adapter_source_wrapper_catalog_byte_length(self) -> u64 {
         self.adapter_source_wrapper_catalog_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn trace_provider_source_wrapper_catalog_byte_length(self) -> u64 {
         self.trace_provider_source_wrapper_catalog_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn bound_material_column_lookup_catalog_byte_length(self) -> u64 {
         self.bound_material_column_lookup_catalog_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn ordered_column_catalog_byte_length(self) -> u64 {
         self.ordered_column_catalog_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn resolved_modulus_catalog_byte_length(self) -> u64 {
         self.resolved_modulus_catalog_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn recipe_catalog_byte_length(self) -> u64 {
         self.recipe_catalog_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn nested_recipe_catalog_byte_length(self) -> u64 {
         self.nested_recipe_catalog_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn relation_tree_input_catalog_byte_length(self) -> u64 {
         self.relation_tree_input_catalog_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn canonical_witness_framing_transient_byte_length(self) -> u64 {
         self.canonical_witness_framing_transient_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn construction_transient_peak_byte_length(self) -> u64 {
         self.construction_transient_peak_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn construction_peak_resident_byte_length(self) -> u64 {
         self.construction_peak_resident_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn preparation_transient_byte_length(self) -> u64 {
         self.preparation_transient_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn preparation_peak_resident_byte_length(self) -> u64 {
         self.preparation_peak_resident_byte_length
     }
@@ -178,6 +196,7 @@ impl CommittedMaterialSourceProviderMemoryAccounting {
         self.post_source_polynomial_finish_persistent_resident_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn persistent_resident_byte_length(self) -> u64 {
         self.loading_persistent_resident_byte_length
     }
@@ -196,6 +215,7 @@ impl CommittedMaterialSourceProviderMemoryAccounting {
     /// The 128-byte secret leaf salt is returned by value into the common
     /// tree-materialization working set. No provider-owned salt catalog or
     /// second salt buffer survives the call.
+    #[cfg(test)]
     pub(crate) const fn additional_materializing_base_trees_transient_byte_length(self) -> u64 {
         0
     }
@@ -558,6 +578,7 @@ fn committed_material_source_provider_memory_accounting(
     )
 }
 
+#[cfg(test)]
 pub(crate) fn aggregate_threshold_share_source_provider_memory_accounting(
     input: &CommittedMaterialRelationPlanInput,
     context: &RelationPlanCheckContext,
@@ -575,6 +596,7 @@ pub(crate) fn aggregate_threshold_share_source_provider_memory_accounting(
     )
 }
 
+#[cfg(test)]
 pub(crate) fn vss_share_linkage_source_provider_memory_accounting(
     input: &CommittedMaterialRelationPlanInput,
     context: &RelationPlanCheckContext,
@@ -621,6 +643,23 @@ pub(crate) struct CommittedMaterialSourcePolynomialAdapter {
 }
 
 impl CommittedMaterialSourcePolynomialAdapter {
+    #[cfg(test)]
+    pub(crate) fn representative_aggregate_projection_digit_and_quotient_column_ordinals(
+        &self,
+    ) -> Result<[u32; 3], CommonProofProverError> {
+        if !matches!(
+            self.relation_kind,
+            SelectedCommittedMaterialRelationKind::AggregateThresholdShare
+        ) {
+            return Err(CommonProofProverError::InvalidColumn);
+        }
+        self.trace_witness
+            .as_ref()
+            .ok_or(CommonProofProverError::InvalidColumn)?
+            .representative_aggregate_projection_digit_and_quotient_column_ordinals()
+            .map_err(CommonProofProverError::Relation)
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new_vss_share_linkage(
         input: CommittedMaterialRelationPlanInput,
@@ -694,6 +733,7 @@ impl CommittedMaterialSourcePolynomialAdapter {
         if protocol_version == 0
             || suite_identifier == [0_u8; 64]
             || application_statement_hash == [0_u8; 64]
+            || relation_plan_hash != compiled_relation_plan_hash
             || relation_plan_capability.relation_plan_variant_hash() != relation_plan_variant_hash
             || relation_plan_variant_hash == [0_u8; 64]
             || compiled_relation_plan.application_statement_schema_identifier()
@@ -922,16 +962,6 @@ impl CommittedMaterialSourcePolynomialAdapter {
             next_leaf_salt_index: 0,
             leaf_salts_finished: false,
         })
-    }
-
-    pub(crate) const fn restart_binding_hash(&self) -> [u8; 64] {
-        self.restart_binding_hash
-    }
-
-    pub(crate) const fn memory_accounting(
-        &self,
-    ) -> CommittedMaterialSourceProviderMemoryAccounting {
-        self.memory_accounting
     }
 
     pub(crate) fn absorb_canonical_semantic_witness(

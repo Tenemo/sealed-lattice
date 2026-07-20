@@ -69,7 +69,6 @@ const PROOF_APPLICATION_BINDING_HASH_DOMAIN: &str =
     "sealed-lattice/common-proof/application-binding/v1";
 pub(super) const CANONICAL_PROOF_APPLICATION_BINDING_HASH_DOMAIN: &str =
     "sealed-lattice/common-proof/canonical-application-binding/v1";
-const RELATION_PLAN_HASH_DOMAIN: &str = "sealed-lattice/common-proof/relation-plan/v1";
 const OUTPUT_WRITE_HASH_DOMAIN: &str = "sealed-lattice/common-proof/output-write/v1";
 const DURABLE_AUTHORIZATION_FRAME_MAGIC: [u8; 8] = *b"SLCPA001";
 const DURABLE_AUTHORIZATION_FRAME_VERSION: u16 = 1;
@@ -255,11 +254,9 @@ impl CommonProofRelationPlanCapability {
         let relation_plan_variant_hash = variant
             .canonical_hash()
             .map_err(CommonProofRelationPlanCapabilityError::Relation)?;
-        let canonical_plan_bytes = relation_plan
-            .canonical_bytes()
+        let relation_plan_hash = relation_plan
+            .canonical_hash()
             .map_err(CommonProofRelationPlanCapabilityError::Relation)?;
-        let relation_plan_hash =
-            hash_framed_parts_512(RELATION_PLAN_HASH_DOMAIN, &[&canonical_plan_bytes]);
         Ok(Self {
             relation_plan: relation_plan.clone(),
             relation_context: relation_context.clone(),
@@ -837,26 +834,29 @@ struct CommonProofSelectedSuiteEntry {
 /// Linear owner of the statement inputs used by one common-proof verifier.
 /// Production paths retain the exact family-minted source instead of
 /// decomposing it into values from which source authority cannot be restored.
+#[cfg(test)]
+pub(super) struct CommonProofVerificationTestFixture {
+    verification_binding: CommonProofVerificationBinding,
+    relation_plan: CommonProofRelationPlanCapability,
+    protocol_version: u16,
+    canonical_application_statement_bytes: Vec<u8>,
+    proof_stream_descriptor: StreamDescriptor,
+    limits: CommonProofRuntimeLimits,
+}
+
 pub(super) enum CommonProofVerificationStatementSource {
-    Exact(VerifiedCommonProofStatementSource),
+    Exact(Box<VerifiedCommonProofStatementSource>),
     #[cfg(test)]
-    TestFixture {
-        verification_binding: CommonProofVerificationBinding,
-        relation_plan: CommonProofRelationPlanCapability,
-        protocol_version: u16,
-        canonical_application_statement_bytes: Vec<u8>,
-        proof_stream_descriptor: StreamDescriptor,
-        limits: CommonProofRuntimeLimits,
-    },
+    TestFixture(Box<CommonProofVerificationTestFixture>),
 }
 
 impl CommonProofVerificationStatementSource {
-    pub(super) const fn from_exact(source: VerifiedCommonProofStatementSource) -> Self {
-        Self::Exact(source)
+    pub(super) fn from_exact(source: VerifiedCommonProofStatementSource) -> Self {
+        Self::Exact(Box::new(source))
     }
 
     #[cfg(test)]
-    pub(super) const fn from_test_fixture(
+    pub(super) fn from_test_fixture(
         verification_binding: CommonProofVerificationBinding,
         relation_plan: CommonProofRelationPlanCapability,
         protocol_version: u16,
@@ -864,42 +864,37 @@ impl CommonProofVerificationStatementSource {
         proof_stream_descriptor: StreamDescriptor,
         limits: CommonProofRuntimeLimits,
     ) -> Self {
-        Self::TestFixture {
+        Self::TestFixture(Box::new(CommonProofVerificationTestFixture {
             verification_binding,
             relation_plan,
             protocol_version,
             canonical_application_statement_bytes,
             proof_stream_descriptor,
             limits,
-        }
+        }))
     }
 
-    pub(super) const fn verification_binding(&self) -> CommonProofVerificationBinding {
+    pub(super) fn verification_binding(&self) -> CommonProofVerificationBinding {
         match self {
             Self::Exact(source) => source.verification_binding,
             #[cfg(test)]
-            Self::TestFixture {
-                verification_binding,
-                ..
-            } => *verification_binding,
+            Self::TestFixture(fixture) => fixture.verification_binding,
         }
     }
 
-    pub(super) const fn relation_plan(&self) -> &CommonProofRelationPlanCapability {
+    pub(super) fn relation_plan(&self) -> &CommonProofRelationPlanCapability {
         match self {
             Self::Exact(source) => &source.relation_plan,
             #[cfg(test)]
-            Self::TestFixture { relation_plan, .. } => relation_plan,
+            Self::TestFixture(fixture) => &fixture.relation_plan,
         }
     }
 
-    pub(super) const fn protocol_version(&self) -> u16 {
+    pub(super) fn protocol_version(&self) -> u16 {
         match self {
             Self::Exact(source) => source.protocol_version,
             #[cfg(test)]
-            Self::TestFixture {
-                protocol_version, ..
-            } => *protocol_version,
+            Self::TestFixture(fixture) => fixture.protocol_version,
         }
     }
 
@@ -907,31 +902,25 @@ impl CommonProofVerificationStatementSource {
         match self {
             Self::Exact(source) => &source.canonical_application_statement_bytes,
             #[cfg(test)]
-            Self::TestFixture {
-                canonical_application_statement_bytes,
-                ..
-            } => canonical_application_statement_bytes,
+            Self::TestFixture(fixture) => &fixture.canonical_application_statement_bytes,
         }
     }
 
-    pub(super) const fn proof_stream_descriptor(&self) -> &StreamDescriptor {
+    pub(super) fn proof_stream_descriptor(&self) -> &StreamDescriptor {
         match self {
             Self::Exact(source) => source
                 .application_source_authority
                 .proof_stream_descriptor(),
             #[cfg(test)]
-            Self::TestFixture {
-                proof_stream_descriptor,
-                ..
-            } => proof_stream_descriptor,
+            Self::TestFixture(fixture) => &fixture.proof_stream_descriptor,
         }
     }
 
-    pub(super) const fn limits(&self) -> CommonProofRuntimeLimits {
+    pub(super) fn limits(&self) -> CommonProofRuntimeLimits {
         match self {
             Self::Exact(source) => source.limits,
             #[cfg(test)]
-            Self::TestFixture { limits, .. } => *limits,
+            Self::TestFixture(fixture) => fixture.limits,
         }
     }
 
@@ -941,19 +930,34 @@ impl CommonProofVerificationStatementSource {
         match self {
             Self::Exact(source) => Ok(source),
             #[cfg(test)]
-            Self::TestFixture { .. } => Err(CommonProofRuntimeError::WrongOperationPhase),
+            Self::TestFixture(_) => Err(CommonProofRuntimeError::WrongOperationPhase),
         }
     }
 
+    #[cfg(test)]
     pub(super) fn into_exact_source(
         self,
     ) -> Result<VerifiedCommonProofStatementSource, CommonProofRuntimeError> {
         match self {
-            Self::Exact(source) => Ok(source),
+            Self::Exact(source) => Ok(*source),
             #[cfg(test)]
-            Self::TestFixture { .. } => Err(CommonProofRuntimeError::WrongOperationPhase),
+            Self::TestFixture(_) => Err(CommonProofRuntimeError::WrongOperationPhase),
         }
     }
+}
+
+/// Package-builder expectations checked against a retained generated or
+/// positively verified proof. This is borrowed call context, not serialized
+/// proof material or authority.
+#[derive(Clone, Copy)]
+pub(crate) struct ExpectedCommonProofPackageBindings<'statement> {
+    pub(crate) suite_identifier: [u8; HASH_BYTE_LENGTH],
+    pub(crate) ceremony_context_hash: [u8; HASH_BYTE_LENGTH],
+    pub(crate) action_context_hash: [u8; HASH_BYTE_LENGTH],
+    pub(crate) application_statement_schema_identifier: u16,
+    pub(crate) roster_position: Option<u16>,
+    pub(crate) schedule_position: Option<u32>,
+    pub(crate) canonical_application_statement_bytes: &'statement [u8],
 }
 
 struct CommonProofApplicationInputEntry {
@@ -1014,16 +1018,18 @@ pub(crate) use authorization_registry::{
 };
 pub(crate) use generation_worker::{
     AuthenticatedCommonProofGenerationCheckpoint, CommonProofGenerationAuthorization,
-    CommonProofGenerationCheckpointCustodyRequirement,
     CommonProofGenerationExternalMemoryAccounting, CommonProofGenerationPreparationError,
     CommonProofGenerationSources, CommonProofGenerationWorkerError,
     CommonProofGenerationWorkerPoll, PreparedCommonProofGeneration,
+};
+#[cfg(test)]
+pub(crate) use generation_worker::{
+    CommonProofGenerationCheckpointCustodyRequirement,
     common_proof_generation_checkpoint_custody_requirement_for_variant,
 };
 pub(crate) use storage_transport::{
-    CommonProofRuntimeCancellation, CommonProofStorageTransactionRuntime,
-    PollableCommonProofByteSink, PollableCommonProofByteSinkError, ResidentCommonProofByteSource,
-    ResidentCommonProofInputChunk,
+    CommonProofStorageTransactionRuntime, PollableCommonProofByteSink,
+    PollableCommonProofByteSinkError, ResidentCommonProofByteSource, ResidentCommonProofInputChunk,
 };
 pub(crate) use upstream_registry::CommonProofUpstreamInputRegistry;
 pub(crate) use verification_worker::{

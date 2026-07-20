@@ -57,10 +57,12 @@ pub(crate) struct ProofQueryTreeByteLengthCeiling {
 }
 
 impl ProofQueryTreeByteLengthCeiling {
+    #[cfg(test)]
     pub(crate) const fn tree_catalog_index(&self) -> u16 {
         self.tree_catalog_index
     }
 
+    #[cfg(test)]
     pub(crate) const fn source(&self) -> ProofTreeCatalogSource {
         self.source
     }
@@ -77,6 +79,7 @@ impl ProofQueryTreeByteLengthCeiling {
         self.canonical_leaf_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn minimum_opened_leaf_count(&self) -> usize {
         self.minimum_opened_leaf_count
     }
@@ -101,6 +104,7 @@ impl ProofQueryTreeByteLengthCeiling {
         self.authentication_frontier_digest_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn canonical_framing_byte_length(&self) -> usize {
         self.canonical_framing_byte_length
     }
@@ -123,22 +127,27 @@ pub(crate) struct CommonProofComponentByteLengths {
 }
 
 impl CommonProofComponentByteLengths {
+    #[cfg(test)]
     pub(crate) const fn canonical_framing(self) -> usize {
         self.canonical_framing
     }
 
+    #[cfg(test)]
     pub(crate) const fn relation_commitments_and_openings(self) -> usize {
         self.relation_commitments_and_openings
     }
 
+    #[cfg(test)]
     pub(crate) const fn quotient_commitments_and_openings(self) -> usize {
         self.quotient_commitments_and_openings
     }
 
+    #[cfg(test)]
     pub(crate) const fn transcript_opening_claims(self) -> usize {
         self.transcript_opening_claims
     }
 
+    #[cfg(test)]
     pub(crate) const fn fri(self) -> usize {
         self.fri
     }
@@ -169,14 +178,17 @@ pub(crate) struct CommonProofByteLengthCeiling {
 }
 
 impl CommonProofByteLengthCeiling {
+    #[cfg(test)]
     pub(crate) const fn canonical_header_byte_length(&self) -> usize {
         self.canonical_header_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn body_prefix_byte_length(&self) -> usize {
         self.body_prefix_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn query_section_byte_length(&self) -> usize {
         self.query_section_byte_length
     }
@@ -185,6 +197,7 @@ impl CommonProofByteLengthCeiling {
         self.proof_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn component_byte_lengths(&self) -> CommonProofComponentByteLengths {
         self.component_byte_lengths
     }
@@ -193,6 +206,7 @@ impl CommonProofByteLengthCeiling {
         &self.query_trees
     }
 
+    #[cfg(test)]
     pub(crate) fn maximum_query_tree_byte_length(&self) -> usize {
         self.query_trees
             .iter()

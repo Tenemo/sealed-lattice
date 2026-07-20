@@ -50,12 +50,6 @@ pub(crate) struct VerifiedTargetReleaseProof {
 }
 
 impl VerifiedTargetReleaseProof {
-    pub(crate) fn from_common_proof(
-        common_proof: VerifiedCommonProof,
-    ) -> Result<Self, TargetReleaseCapabilityError> {
-        Self::from_borrowed_common_proof(&common_proof)
-    }
-
     pub(crate) fn from_borrowed_common_proof(
         common_proof: &VerifiedCommonProof,
     ) -> Result<Self, TargetReleaseCapabilityError> {
@@ -74,10 +68,6 @@ impl VerifiedTargetReleaseProof {
 
     pub(crate) const fn application_statement_hash(&self) -> [u8; 64] {
         self.application_statement_hash
-    }
-
-    pub(crate) const fn relation_plan_variant_hash(&self) -> [u8; 64] {
-        self.relation_plan_variant_hash
     }
 
     pub(crate) fn require_selected_relation(&self) -> Result<(), TargetReleaseCapabilityError> {
@@ -106,7 +96,6 @@ struct TargetReleaseRoleEquationWitnessLayout {
 
 #[derive(Clone, Debug)]
 struct TargetReleaseModulusWitnessLayout {
-    modulus_reference: SuiteModulusReference,
     modulus: u64,
     material: TargetCommittedMaterialVector,
     share_limbs: Vec<ReversibleShiftedSmallVector>,
@@ -308,12 +297,6 @@ impl VerifiedRelationColumnEvaluator for TargetReleaseVerifiedColumnEvaluator {
     }
 }
 
-#[derive(Clone, Copy)]
-pub(crate) struct TargetReleaseWitness<'input> {
-    pub(crate) flooding_errors_by_role: [&'input [BigInt]; 2],
-    pub(crate) moduli: &'input [TargetReleaseModulusWitness<'input>],
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum TargetReleaseWitnessError {
     InvalidWitness,
@@ -402,20 +385,6 @@ impl TargetReleaseWitnessSourceMemoryAccounting {
             shared_allocation_byte_length,
             maximum_callback_transient_byte_length,
         })
-    }
-
-    pub(crate) const fn unique_owned_heap_byte_length(&self) -> u64 {
-        self.unique_owned_heap_byte_length
-    }
-
-    pub(crate) fn shared_allocations(
-        &self,
-    ) -> &[CommittedMaterialSharedAllocationMemoryAccounting] {
-        &self.shared_allocations
-    }
-
-    pub(crate) const fn shared_allocation_byte_length(&self) -> u64 {
-        self.shared_allocation_byte_length
     }
 
     pub(crate) const fn maximum_callback_transient_byte_length(&self) -> u64 {
@@ -683,10 +652,6 @@ where
             next_leaf_salt_index: 0,
             leaf_salts_finished: false,
         })
-    }
-
-    pub(crate) const fn restart_binding_hash(&self) -> [u8; 64] {
-        self.restart_binding_hash
     }
 
     pub(crate) fn absorb_canonical_semantic_witness(
@@ -1169,28 +1134,6 @@ fn target_release_source_provider_memory_accounting_from_dimensions(
         derivation_transient_byte_length,
         maximum_returned_source_polynomial_byte_length,
     ))
-}
-
-pub(crate) fn selected_target_release_source_provider_memory_accounting<Source>(
-    source_additional_persistent_resident_byte_length: u64,
-    source_maximum_callback_transient_byte_length: u64,
-) -> Result<CommonProofSourceProviderMemoryAccounting, CommonProofProverError> {
-    let compilation = crate::bgv::proof_suite::selected_profile::selected_target_release_relation()
-        .map_err(|_| CommonProofProverError::InvalidInput)?;
-    let source_blocks = target_release_source_blocks(&compilation)
-        .map_err(|_| CommonProofProverError::InvalidColumn)?;
-    if source_blocks.is_empty() || compilation.moduli.is_empty() {
-        return Err(CommonProofProverError::InvalidColumn);
-    }
-    target_release_source_provider_memory_accounting_from_dimensions(
-        &compilation,
-        core::mem::size_of::<TargetReleaseSourcePolynomialAdapter<Source>>() as u64,
-        source_additional_persistent_resident_byte_length,
-        source_maximum_callback_transient_byte_length,
-        source_blocks.len(),
-        source_blocks.len(),
-        compilation.moduli.len(),
-    )
 }
 
 impl<Source> CommonProofSourcePolynomialProvider for TargetReleaseSourcePolynomialAdapter<Source>
@@ -1982,7 +1925,6 @@ pub(crate) fn compile_target_release_relation(
             )?);
         }
         modulus_layouts.push(TargetReleaseModulusWitnessLayout {
-            modulus_reference,
             modulus,
             material,
             share_limbs,
@@ -2001,13 +1943,6 @@ pub(crate) fn compile_target_release_relation(
         flooding_by_role,
         moduli: modulus_layouts,
     })
-}
-
-pub(crate) fn compile_target_release_relation_plan(
-    input: &TargetReleaseRelationPlanInput,
-    context: &RelationPlanCheckContext,
-) -> Result<CompiledRelationPlan, RelationPlanError> {
-    Ok(compile_target_release_relation(input, context)?.relation_plan)
 }
 
 trait TargetReleaseSourcePolynomialSink {
@@ -2796,12 +2731,17 @@ fn derive_role_equation_layers(
         vec![0_i128; ring_degree];
         layout.quotient_digits.len()
     ]);
-    for coefficient_ordinal in 0..ring_degree {
+    for (coefficient_ordinal, (partial_decryption_coefficient, flooding_error_coefficient)) in role
+        .partial_decryption
+        .iter()
+        .copied()
+        .zip(flooding_error)
+        .enumerate()
+    {
         let product = checked_product_value(&product_layers, coefficient_ordinal)?;
-        let flooding_term = BigInt::from(simulation_scale) * &flooding_error[coefficient_ordinal];
-        let residual = BigInt::from(role.partial_decryption[coefficient_ordinal])
-            - BigInt::from(product)
-            - flooding_term;
+        let flooding_term = BigInt::from(simulation_scale) * flooding_error_coefficient;
+        let residual =
+            BigInt::from(partial_decryption_coefficient) - BigInt::from(product) - flooding_term;
         if &residual % &modulus_big != BigInt::zero() {
             return Err(TargetReleaseWitnessError::InvalidWitness);
         }
@@ -2830,7 +2770,12 @@ fn derive_role_equation_layers(
     let mut carry_layers =
         Zeroizing::new(vec![vec![0_i128; ring_degree]; layout.carry_values.len()]);
     let mut previous_carry = Zeroizing::new(vec![0_i128; ring_degree]);
-    for layer_ordinal in 0..equation_layer_count {
+    for (layer_ordinal, flooding_constant_digit) in flooding_constant_digits
+        .iter()
+        .copied()
+        .enumerate()
+        .take(equation_layer_count)
+    {
         let mut next_carry = Zeroizing::new(vec![0_i128; ring_degree]);
         for coefficient_ordinal in 0..ring_degree {
             let mut numerator = i128::from(
@@ -2853,9 +2798,7 @@ fn derive_role_equation_layers(
                         .checked_mul(i128::from(shifted_flooding))
                         .ok_or(TargetReleaseWitnessError::IntegerOverflow)?,
                 )
-                .and_then(|value| {
-                    value.checked_add(i128::from(flooding_constant_digits[layer_ordinal]))
-                })
+                .and_then(|value| value.checked_add(i128::from(flooding_constant_digit)))
                 .and_then(|value| value.checked_add(previous_carry[coefficient_ordinal]))
                 .ok_or(TargetReleaseWitnessError::IntegerOverflow)?;
             for (modulus_digit_ordinal, modulus_digit) in modulus_digits.iter().enumerate() {
@@ -2893,61 +2836,6 @@ fn derive_role_equation_layers(
         quotient_layers,
         carry_layers,
     })
-}
-
-#[allow(clippy::too_many_arguments)]
-fn insert_role_equation_columns(
-    columns: &mut impl TargetReleaseSourcePolynomialSink,
-    trace_domain: ProofEvaluationDomain,
-    layout: &TargetReleaseRoleEquationWitnessLayout,
-    role: TargetReleaseRoleWitness<'_>,
-    share_transform: &RadixLayerTransform,
-    flooding_error: &[BigInt],
-    flooding_shift_layers: &[Vec<u64>],
-    modulus: u64,
-    decryption_scale: u64,
-    simulation_scale: u64,
-    flooding_bound: &BigUint,
-) -> Result<(), TargetReleaseWitnessError> {
-    insert_role_verifier_columns(
-        columns,
-        trace_domain,
-        layout,
-        role,
-        modulus,
-        decryption_scale,
-    )?;
-    let ring_degree = trace_domain
-        .size()
-        .checked_mul(2)
-        .ok_or(TargetReleaseWitnessError::CountOverflow)?;
-    let derived_layers = derive_role_equation_layers(
-        layout,
-        role,
-        share_transform,
-        flooding_error,
-        flooding_shift_layers,
-        modulus,
-        decryption_scale,
-        simulation_scale,
-        flooding_bound,
-        ring_degree,
-    )?;
-    for (digit_layout, values) in layout
-        .quotient_digits
-        .iter()
-        .zip(derived_layers.quotient_layers.iter())
-    {
-        insert_centered_vector(columns, trace_domain, digit_layout, values)?;
-    }
-    for (carry_layout, values) in layout
-        .carry_values
-        .iter()
-        .zip(derived_layers.carry_layers.iter())
-    {
-        insert_centered_vector(columns, trace_domain, carry_layout, values)?;
-    }
-    Ok(())
 }
 
 type RoleVerifierRadixLayers = (Vec<Vec<u64>>, Vec<Vec<u64>>);
@@ -3004,125 +2892,6 @@ fn insert_role_verifier_columns(
 }
 
 impl CompiledTargetReleaseRelation {
-    /// Materializes every genuine pre-challenge column from the typed target
-    /// witness. Reversed and challenge-dependent auxiliary columns are omitted
-    /// deliberately; the common prover derives those from the checked plan.
-    pub(crate) fn provided_pre_challenge_columns(
-        &self,
-        witness: TargetReleaseWitness<'_>,
-    ) -> Result<BTreeMap<u32, CommonProofSourcePolynomial>, TargetReleaseWitnessError> {
-        if witness.moduli.len() != self.moduli.len()
-            || self.flooding_by_role.len() != usize::from(TARGET_ROLE_COUNT)
-            || self.ring_degree < 2
-            || !self.ring_degree.is_power_of_two()
-        {
-            return Err(TargetReleaseWitnessError::InvalidWitness);
-        }
-        let trace_domain = ProofEvaluationDomain::new_subgroup(self.ring_degree / 2)?;
-        let mut columns = BTreeMap::new();
-        insert_source_polynomial(
-            &mut columns,
-            self.constant_one_column,
-            CommonProofSourcePolynomial::from_base_coefficients(vec![ProofBaseFieldElement::ONE]),
-        )?;
-        insert_source_polynomial(
-            &mut columns,
-            self.zero_column,
-            CommonProofSourcePolynomial::from_base_coefficients(vec![ProofBaseFieldElement::ZERO]),
-        )?;
-
-        let mut flooding_shift_layers_by_role = Vec::with_capacity(2);
-        for role_ordinal in 0..2 {
-            let flooding_errors = witness.flooding_errors_by_role[role_ordinal];
-            if flooding_errors.len() != self.ring_degree
-                || flooding_errors
-                    .iter()
-                    .any(|error| error.magnitude() > &self.flooding_bound)
-            {
-                return Err(TargetReleaseWitnessError::InvalidWitness);
-            }
-            let shifted = flooding_errors
-                .iter()
-                .map(|error| {
-                    (error + BigInt::from(self.flooding_bound.clone()))
-                        .to_biguint()
-                        .ok_or(TargetReleaseWitnessError::IntegerOverflow)
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            let flooding_layout = &self.flooding_by_role[role_ordinal];
-            let flooding_shift_maximum = &self.flooding_bound * 2_u8;
-            insert_bounded_unsigned_vector(
-                &mut columns,
-                trace_domain,
-                &flooding_layout.bounded_shift,
-                &shifted,
-                &flooding_shift_maximum,
-            )?;
-            let radix_layers =
-                big_unsigned_radix_layers(&shifted, RADIX, flooding_layout.grouped_limbs.len())?;
-            insert_split_radix_layers(
-                &mut columns,
-                trace_domain,
-                &flooding_layout.grouped_limbs,
-                &radix_layers,
-            )?;
-            flooding_shift_layers_by_role.push(radix_layers);
-        }
-
-        for (modulus_layout, modulus_witness) in self.moduli.iter().zip(witness.moduli) {
-            let _material_digits = insert_committed_share_columns(
-                &mut columns,
-                trace_domain,
-                &modulus_layout.material,
-                modulus_witness.committed_share_source,
-                modulus_witness.threshold_share,
-                modulus_layout.modulus,
-            )?;
-            let share_layers = unsigned_radix_layers(
-                modulus_witness.threshold_share,
-                RADIX,
-                modulus_layout.share_limbs.len(),
-            )?;
-            let share_split_layouts = modulus_layout
-                .share_limbs
-                .iter()
-                .map(|limb| limb.source.coefficients)
-                .collect::<Vec<_>>();
-            insert_split_radix_layers(
-                &mut columns,
-                trace_domain,
-                &share_split_layouts,
-                &share_layers,
-            )?;
-            let share_transform = RadixLayerTransform::new(&share_layers)?;
-            if modulus_layout.role_equations.len() != 2 {
-                return Err(TargetReleaseWitnessError::InvalidWitness);
-            }
-            for (((role_layout, role), flooding_error), flooding_shift_layers) in modulus_layout
-                .role_equations
-                .iter()
-                .zip(modulus_witness.roles.iter().copied())
-                .zip(witness.flooding_errors_by_role.iter().copied())
-                .zip(&flooding_shift_layers_by_role)
-            {
-                insert_role_equation_columns(
-                    &mut columns,
-                    trace_domain,
-                    role_layout,
-                    role,
-                    &share_transform,
-                    flooding_error,
-                    flooding_shift_layers,
-                    modulus_layout.modulus,
-                    self.decryption_scale,
-                    self.simulation_scale,
-                    &self.flooding_bound,
-                )?;
-            }
-        }
-        Ok(columns)
-    }
-
     /// Builds the verifier-sequence adapter from public streams that have
     /// already been authenticated and reconstructed by the target verifier.
     /// The shape check is exact: every verifier-sequence column in the selected
@@ -3173,97 +2942,16 @@ impl CompiledTargetReleaseRelation {
     }
 }
 
-fn negacyclic_product_i128(left: &[u64], right: &[u64]) -> Result<Vec<i128>, RelationPlanError> {
-    if left.is_empty() || left.len() != right.len() || !left.len().is_power_of_two() {
-        return Err(RelationPlanError::InvalidConstraint);
-    }
-    let mut result = vec![0_i128; left.len()];
-    for (left_index, left_value) in left.iter().copied().enumerate() {
-        for (right_index, right_value) in right.iter().copied().enumerate() {
-            let raw_index = left_index + right_index;
-            let product = i128::from(left_value)
-                .checked_mul(i128::from(right_value))
-                .ok_or(RelationPlanError::IntegerBoundOverflow)?;
-            let target_index = raw_index % left.len();
-            result[target_index] = if raw_index >= left.len() {
-                result[target_index]
-                    .checked_sub(product)
-                    .ok_or(RelationPlanError::IntegerBoundOverflow)?
-            } else {
-                result[target_index]
-                    .checked_add(product)
-                    .ok_or(RelationPlanError::IntegerBoundOverflow)?
-            };
-        }
-    }
-    Ok(result)
-}
-
-/// Independent executable oracle for the compact radix lowering.  It compares
-/// the direct target-ring equation with the schoolbook limb/carry identity;
-/// neither side calls the relation-plan compiler or its constraint generator.
-pub(crate) fn target_release_radix_semantics_match(
-    public_a: &[u64],
-    partial_decryption: &[u64],
-    share: &[u64],
-    flooding_error: &[BigInt],
-    modulus: u64,
-    decryption_scale: u64,
-    simulation_scale: u64,
-) -> Result<bool, RelationPlanError> {
-    if public_a.len() != partial_decryption.len()
-        || public_a.len() != share.len()
-        || public_a.len() != flooding_error.len()
-        || public_a
-            .iter()
-            .chain(partial_decryption)
-            .chain(share)
-            .any(|value| *value >= modulus)
-    {
-        return Err(RelationPlanError::InvalidConstraint);
-    }
-    let product = negacyclic_product_i128(public_a, share)?;
-    let modulus_big = BigInt::from(modulus);
-    let mut direct_holds = true;
-    let mut exact_quotients = Vec::with_capacity(public_a.len());
-    for coefficient_ordinal in 0..public_a.len() {
-        let residual = BigInt::from(partial_decryption[coefficient_ordinal])
-            - BigInt::from(decryption_scale) * product[coefficient_ordinal]
-            - BigInt::from(simulation_scale) * &flooding_error[coefficient_ordinal];
-        direct_holds &= &residual % &modulus_big == BigInt::zero();
-        exact_quotients.push(residual / &modulus_big);
-    }
-
-    let scaled_a = public_a
-        .iter()
-        .copied()
-        .map(|value| {
-            value
-                .checked_mul(decryption_scale)
-                .ok_or(RelationPlanError::IntegerBoundOverflow)
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    let scaled_product = negacyclic_product_i128(&scaled_a, share)?;
-    let compact_holds = (0..public_a.len()).all(|coefficient_ordinal| {
-        BigInt::from(partial_decryption[coefficient_ordinal])
-            - scaled_product[coefficient_ordinal]
-            - BigInt::from(simulation_scale) * &flooding_error[coefficient_ordinal]
-            - &modulus_big * &exact_quotients[coefficient_ordinal]
-            == BigInt::zero()
-    });
-    Ok(direct_holds == compact_holds && direct_holds)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::bgv::ntt::negacyclic_convolution_for_tests;
     use crate::bgv::parameters::DATA_PRIMES;
     use crate::bgv::proof_suite::{
         CommittedMaterialProfile, CommittedMaterialTree, CommittedMaterialTreeInput,
         CommonProofPrivateCoinCoordinate, CommonProofPrivateCoinSource,
         CommonProofSourcePolynomialRequestContext, PROOF_BASE_FIELD_MAXIMUM_TWO_ADIC_GENERATOR,
-        PROOF_BASE_FIELD_MODULUS, ResidentCommonProofSourcePolynomialProvider,
-        construct_pre_challenge_relation_columns,
+        PROOF_BASE_FIELD_MODULUS, construct_pre_challenge_relation_columns,
     };
 
     struct DeterministicPrivateCoins(u64);
@@ -3408,57 +3096,6 @@ mod tests {
     }
 
     #[test]
-    fn compact_radix_lowering_matches_direct_negacyclic_release_relation() {
-        let modulus = 97_u64;
-        let public_a = vec![3, 7, 11, 13, 17, 19, 23, 29];
-        let share = vec![5, 2, 9, 1, 4, 8, 6, 3];
-        let flooding_error = [1, -2, 0, 3, -1, 2, -3, 1]
-            .into_iter()
-            .map(BigInt::from)
-            .collect::<Vec<_>>();
-        let decryption_scale = 4_u64;
-        let simulation_scale = 4_u64;
-        let product = negacyclic_product_i128(&public_a, &share).expect("product");
-        let partial_decryption = product
-            .iter()
-            .zip(&flooding_error)
-            .map(|(product, flooding)| {
-                (i128::from(decryption_scale) * product
-                    + i128::from(simulation_scale)
-                        * i128::try_from(flooding).expect("small flooding error"))
-                .rem_euclid(i128::from(modulus)) as u64
-            })
-            .collect::<Vec<_>>();
-        assert!(
-            target_release_radix_semantics_match(
-                &public_a,
-                &partial_decryption,
-                &share,
-                &flooding_error,
-                modulus,
-                decryption_scale,
-                simulation_scale,
-            )
-            .expect("equivalence")
-        );
-
-        let mut mutated = partial_decryption;
-        mutated[3] = (mutated[3] + 1) % modulus;
-        assert!(
-            !target_release_radix_semantics_match(
-                &public_a,
-                &mutated,
-                &share,
-                &flooding_error,
-                modulus,
-                decryption_scale,
-                simulation_scale,
-            )
-            .expect("mutation")
-        );
-    }
-
-    #[test]
     fn verifier_radix_view_is_canonical_and_rejects_non_residues() {
         assert_eq!(
             radix_decompose_scaled_residues(&[0, 96, 42], 97, 4, 9, 1, 3).expect("digits"),
@@ -3478,7 +3115,7 @@ mod tests {
             1
         );
         assert_eq!(
-            minimum_balanced_radix_digit_count(&BigUint::from((RADIX + 1) / 2))
+            minimum_balanced_radix_digit_count(&BigUint::from(RADIX.div_ceil(2)))
                 .expect("two balanced digits"),
             2
         );
@@ -3504,7 +3141,7 @@ mod tests {
     #[test]
     fn target_release_plan_compiles_with_compact_safe_limb_products() {
         let context = plan_context();
-        let plan = compile_target_release_relation_plan(
+        let plan = compile_target_release_relation(
             &TargetReleaseRelationPlanInput {
                 ring_degree: 256,
                 evaluation_domain_size: 8_192,
@@ -3518,7 +3155,8 @@ mod tests {
             },
             &context,
         )
-        .expect("target release relation plan");
+        .expect("target release relation plan")
+        .relation_plan;
         let variant = plan.select_variant(None, None).expect("variant");
         assert_eq!(variant.ordered_integer_lift_batches().len(), 1);
         assert!(
@@ -3534,7 +3172,7 @@ mod tests {
     #[test]
     fn target_release_plan_keeps_exact_equations_for_wide_flooding_bounds() {
         let context = plan_context();
-        let plan = compile_target_release_relation_plan(
+        let plan = compile_target_release_relation(
             &TargetReleaseRelationPlanInput {
                 ring_degree: 256,
                 evaluation_domain_size: 8_192,
@@ -3548,7 +3186,8 @@ mod tests {
             },
             &context,
         )
-        .expect("wide target release relation plan");
+        .expect("wide target release relation plan")
+        .relation_plan;
         let variant = plan.select_variant(None, None).expect("variant");
         let components = variant
             .ordered_integer_lift_batches()
@@ -3608,7 +3247,7 @@ mod tests {
         selected_proof
             .require_selected_relation()
             .expect("selected target-release proof relation");
-        let mut changed_variant_hash = selected_proof.relation_plan_variant_hash();
+        let mut changed_variant_hash = checked_plan.relation_plan_variant_hash();
         changed_variant_hash[0] ^= 1;
         assert_eq!(
             VerifiedTargetReleaseProof {
@@ -3621,7 +3260,7 @@ mod tests {
     }
 
     #[test]
-    fn typed_target_witness_populates_every_pre_challenge_column_and_rejects_drift() {
+    fn streaming_target_witness_populates_requested_columns_and_verifier_rejects_non_residues() {
         let context = plan_context();
         let ring_degree = 256_usize;
         let material_profile =
@@ -3673,12 +3312,12 @@ mod tests {
             .map(|index| ((index * 23 + 9) as u64) % modulus)
             .collect::<Vec<_>>();
         let partial = |converted: &[u64], flooding: &[BigInt]| {
-            negacyclic_product_i128(converted, &share)
-                .expect("product")
+            negacyclic_convolution_for_tests(converted, &share, modulus)
+                .expect("selected-modulus product")
                 .iter()
                 .zip(flooding)
                 .map(|(product, error)| {
-                    (4_i128 * *product
+                    (4_i128 * i128::from(*product)
                         + 4_i128 * i128::try_from(error).expect("small flooding error"))
                     .rem_euclid(i128::from(modulus)) as u64
                 })
@@ -3700,47 +3339,13 @@ mod tests {
                 },
             ],
         };
-        let columns = compilation
-            .provided_pre_challenge_columns(TargetReleaseWitness {
-                flooding_errors_by_role: [&flooding_identifier, &flooding_order],
-                moduli: std::slice::from_ref(&modulus_witness),
-            })
-            .expect("typed witness columns");
         let variant = compilation
             .relation_plan()
             .select_variant(None, None)
             .expect("target relation variant");
-        let mut verified_column_evaluator = compilation
-            .verified_column_evaluator(&[VerifiedTargetReleaseModulusInput {
-                roles: modulus_witness.roles,
-            }])
-            .expect("verified public target columns");
         let evaluation_point = ProofChallengeExtensionElement::from_base(
             ProofBaseFieldElement::from_canonical(7).expect("canonical point"),
         );
-        for (column_index, descriptor) in variant.ordered_columns().iter().enumerate() {
-            let column_ordinal = u32::try_from(column_index).expect("column ordinal");
-            if matches!(
-                descriptor.origin(),
-                RelationColumnOrigin::VerifierSequence { .. }
-            ) {
-                assert_eq!(
-                    verified_column_evaluator
-                        .evaluate_at_extension_point(column_ordinal, evaluation_point),
-                    columns
-                        .get(&column_ordinal)
-                        .map(|column| column.evaluate_at(evaluation_point)),
-                    "the verifier must independently reconstruct column {column_ordinal}",
-                );
-            } else {
-                assert_eq!(
-                    verified_column_evaluator
-                        .evaluate_at_extension_point(column_ordinal, evaluation_point),
-                    None,
-                    "a non-verifier column must never enter the public evaluator",
-                );
-            }
-        }
         let request_context = CommonProofSourcePolynomialRequestContext::new(
             1,
             [0x31; 64],
@@ -3776,51 +3381,6 @@ mod tests {
             streaming_source,
         )
         .expect("streaming target source");
-        let identical_restart_binding = TargetReleaseSourcePolynomialAdapter::new(
-            compilation.clone(),
-            1,
-            [0x31; 64],
-            [0x32; 64],
-            relation_plan_hash,
-            streaming_source,
-        )
-        .expect("identical streaming target source")
-        .restart_binding_hash();
-        let changed_source_restart_binding = TargetReleaseSourcePolynomialAdapter::new(
-            compilation.clone(),
-            1,
-            [0x31; 64],
-            [0x32; 64],
-            relation_plan_hash,
-            BorrowedTargetReleaseWitnessSource {
-                restart_binding_hash: [0x92; 64],
-                ..streaming_source
-            },
-        )
-        .expect("changed source restart binding")
-        .restart_binding_hash();
-        let changed_statement_restart_binding = TargetReleaseSourcePolynomialAdapter::new(
-            compilation.clone(),
-            1,
-            [0x31; 64],
-            [0x33; 64],
-            relation_plan_hash,
-            streaming_source,
-        )
-        .expect("changed statement restart binding")
-        .restart_binding_hash();
-        assert_eq!(
-            streaming_provider.restart_binding_hash(),
-            identical_restart_binding
-        );
-        assert_ne!(
-            streaming_provider.restart_binding_hash(),
-            changed_source_restart_binding
-        );
-        assert_ne!(
-            streaming_provider.restart_binding_hash(),
-            changed_statement_restart_binding
-        );
         let streaming_pre_challenge_columns = construct_pre_challenge_relation_columns(
             variant,
             request_context,
@@ -3841,73 +3401,34 @@ mod tests {
                     .column(column_ordinal as u32)
                     .is_some())
         );
-        let mut source_provider = ResidentCommonProofSourcePolynomialProvider::new(columns);
-        let pre_challenge_columns = construct_pre_challenge_relation_columns(
-            variant,
-            request_context,
-            &mut source_provider,
-            &mut DeterministicPrivateCoins(1),
-            128,
-        )
-        .expect("every plan-owned pre-challenge column is present and maskable");
-        assert!(
-            variant
-                .ordered_columns()
-                .iter()
-                .enumerate()
-                .filter(|(_, descriptor)| {
-                    matches!(descriptor.origin(), RelationColumnOrigin::Prover)
-                })
-                .any(|(column_ordinal, _)| pre_challenge_columns
-                    .column(column_ordinal as u32)
-                    .is_some())
-        );
-        for column_index in 0..variant.ordered_columns().len() {
+        let mut verified_column_evaluator = compilation
+            .verified_column_evaluator(&[VerifiedTargetReleaseModulusInput {
+                roles: modulus_witness.roles,
+            }])
+            .expect("verified public target columns");
+        for (column_index, descriptor) in variant.ordered_columns().iter().enumerate() {
             let column_ordinal = u32::try_from(column_index).expect("column ordinal");
-            assert_eq!(
-                streaming_pre_challenge_columns
-                    .column(column_ordinal)
-                    .map(|column| column.evaluate_at(evaluation_point)),
-                pre_challenge_columns
-                    .column(column_ordinal)
-                    .map(|column| column.evaluate_at(evaluation_point)),
-                "one-polynomial target release streaming must match resident derivation for column {column_ordinal}",
-            );
+            if matches!(
+                descriptor.origin(),
+                RelationColumnOrigin::VerifierSequence { .. }
+            ) {
+                assert_eq!(
+                    verified_column_evaluator
+                        .evaluate_at_extension_point(column_ordinal, evaluation_point),
+                    streaming_pre_challenge_columns
+                        .column(column_ordinal)
+                        .map(|column| column.evaluate_at(evaluation_point)),
+                    "the verifier must independently reconstruct column {column_ordinal}",
+                );
+            } else {
+                assert_eq!(
+                    verified_column_evaluator
+                        .evaluate_at_extension_point(column_ordinal, evaluation_point),
+                    None,
+                    "a non-verifier column must never enter the public evaluator",
+                );
+            }
         }
-
-        let mut changed_share = share.clone();
-        changed_share[17] += 1;
-        let changed_modulus_witness = TargetReleaseModulusWitness {
-            threshold_share: &changed_share,
-            ..modulus_witness
-        };
-        assert_eq!(
-            compilation.provided_pre_challenge_columns(TargetReleaseWitness {
-                flooding_errors_by_role: [&flooding_identifier, &flooding_order],
-                moduli: std::slice::from_ref(&changed_modulus_witness),
-            }),
-            Err(TargetReleaseWitnessError::InvalidWitness)
-        );
-
-        let mut changed_partial = partial_identifier.clone();
-        changed_partial[29] = (changed_partial[29] + 1) % modulus;
-        let changed_role_witness = TargetReleaseModulusWitness {
-            roles: [
-                TargetReleaseRoleWitness {
-                    converted_a: &converted_identifier,
-                    partial_decryption: &changed_partial,
-                },
-                modulus_witness.roles[1],
-            ],
-            ..modulus_witness
-        };
-        assert_eq!(
-            compilation.provided_pre_challenge_columns(TargetReleaseWitness {
-                flooding_errors_by_role: [&flooding_identifier, &flooding_order],
-                moduli: std::slice::from_ref(&changed_role_witness),
-            }),
-            Err(TargetReleaseWitnessError::InvalidWitness)
-        );
 
         let mut noncanonical_partial = partial_identifier.clone();
         noncanonical_partial[0] = modulus;

@@ -892,6 +892,7 @@ pub(crate) fn decode_selected_galois_key_share_statement(
     })
 }
 
+#[cfg(test)]
 pub(crate) fn canonical_selected_application_statement_for_ceiling(
     schema_identifier: u16,
     context: SelectedApplicationStatementContext,
@@ -1818,19 +1819,7 @@ pub(crate) fn selected_evaluator_relinearization_entry_positions()
     Ok(positions)
 }
 
-pub(crate) fn selected_evaluator_entry_position(
-    top_count: u16,
-    entry_ordinal: u32,
-) -> Result<SelectedEvaluatorEntryPosition, SelectedApplicationStatementError> {
-    selected_evaluator_entry_positions(top_count)?
-        .get(
-            usize::try_from(entry_ordinal)
-                .map_err(|_| SelectedApplicationStatementError::CountOverflow)?,
-        )
-        .copied()
-        .ok_or(SelectedApplicationStatementError::InvalidProfile)
-}
-
+#[cfg(test)]
 pub(crate) fn selected_galois_key_share_contribution_roots(
     statement: &CanonicalTuple,
 ) -> Result<Vec<[u8; Hash512::BYTE_LENGTH]>, SelectedApplicationStatementError> {
@@ -1915,6 +1904,7 @@ fn vss_recipient_share_material_root_count() -> Result<usize, SelectedApplicatio
         .ok_or(SelectedApplicationStatementError::CountOverflow)
 }
 
+#[cfg(test)]
 fn canonical_item_for_statement_field(
     field: &StatementFieldShape,
 ) -> Result<CanonicalItem, SelectedApplicationStatementError> {
@@ -2074,6 +2064,7 @@ fn validate_statement_field(
     Ok(())
 }
 
+#[cfg(test)]
 fn canonical_hash_list(count: usize) -> Result<CanonicalItem, SelectedApplicationStatementError> {
     let items = vec![CanonicalItem::hash512([0; Hash512::BYTE_LENGTH]); count];
     CanonicalItem::homogeneous_list(CanonicalItemType::Hash512, &items)
@@ -2155,6 +2146,7 @@ fn decode_galois_key_share_entries(
     Ok(contribution_roots)
 }
 
+#[cfg(test)]
 fn canonical_stream_descriptor_item(
     total_byte_length: u64,
 ) -> Result<CanonicalItem, SelectedApplicationStatementError> {

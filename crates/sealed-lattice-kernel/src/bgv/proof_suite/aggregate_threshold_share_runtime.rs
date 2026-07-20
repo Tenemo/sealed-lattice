@@ -5,7 +5,9 @@
 //! derives aggregate seeds from retained action randomness, and exposes no
 //! caller-selected statement, root, row, seed, or aggregate coefficient.
 
-use std::{cell::RefCell, collections::BTreeMap, mem::size_of, rc::Rc};
+#[cfg(test)]
+use std::mem::size_of;
+use std::{cell::RefCell, collections::BTreeMap, rc::Rc};
 
 use zeroize::Zeroizing;
 
@@ -14,23 +16,21 @@ use crate::{
         modular_arithmetic::{add_mod_fast, sub_mod_fast},
         parameters::POLYNOMIAL_DEGREE,
         setup::{
-            BrowserOwnedAggregateThresholdShareLimb, GeneratedPrivateVssMailboxCorpusInput,
-            SetupGeneratedCommittedMaterial, VerifiedAcceptedSetupVssQualification,
-            VerifiedAggregateThresholdShareTerminal,
-            VerifiedGeneratedPrivateVssMailboxCorpusByteLengthCatalog, VerifiedPublicRandomness,
-            VerifiedVssQualificationTerminals, VerifiedVssShareLinkageTerminal,
-            derive_recipient_input_root, verify_public_randomness_board_sources,
+            BrowserOwnedAggregateThresholdShareLimb, SetupGeneratedCommittedMaterial,
+            VerifiedAcceptedSetupVssQualification, VerifiedAggregateThresholdShareTerminal,
+            VerifiedPublicRandomness, VerifiedVssQualificationTerminals,
+            VerifiedVssShareLinkageTerminal, derive_recipient_input_root,
+            verify_public_randomness_board_sources,
         },
     },
     foundation::{
         ActionPrivateRandomness, BOARD_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH,
         CanonicalDecodeLimits, FOUNDATION_PROFILE, FoundationObjectType, FoundationSchemaError,
         Hash512, ParticipantIdentity, PersistentProofCoinInput, PreparedActionProofAttemptSource,
-        PrivateRandomnessDomain, PrivateRandomnessKmacInputClassAccounting,
-        ProofApplicationBinding, ProofApplicationSlot, ProofApplicationSlotCeilings,
-        ProofObjectHeader, RefusalReason, STATE_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH,
-        SignedMailboxEnvelope, VerifiedBoardApplicationSource,
-        VerifiedStateReservationRuntimeBinding,
+        PrivateRandomnessDomain, ProofApplicationBinding, ProofApplicationSlot,
+        ProofApplicationSlotCeilings, ProofObjectHeader, RefusalReason,
+        STATE_VERIFIER_SESSION_CAPABILITY_BYTE_LENGTH, SignedMailboxEnvelope,
+        VerifiedBoardApplicationSource, VerifiedStateReservationRuntimeBinding,
         bind_prepared_action_proof_attempt_to_canonical_witness,
         consume_authenticated_mailbox_plaintext_capability,
         resolve_prepared_action_proof_attempt_source, resolve_verified_board_application_sources,
@@ -52,9 +52,9 @@ use super::{
     canonical_selected_vss_share_linkage_statement,
     compile_aggregate_threshold_share_relation_plan,
     consume_ordered_verified_vss_share_linkage_terminals, decode_recipient_private_vss_payload,
-    maximum_committed_material_kmac_input_accounting, selected_committed_material_profile,
-    selected_committed_material_relation_plan_input, selected_proof_runtime_limits,
-    selected_relation_plan_check_context, verified_application_statement_hash,
+    selected_committed_material_profile, selected_committed_material_relation_plan_input,
+    selected_proof_runtime_limits, selected_relation_plan_check_context,
+    verified_application_statement_hash,
 };
 
 use super::runtime_ffi::{
@@ -74,6 +74,7 @@ const ATTEMPT_IDENTIFIER_BYTE_LENGTH: usize = 32;
 /// The committed-material source is the sole retained owner after the final
 /// source is absorbed and remains that sole owner in accepted setup state.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg(test)]
 pub(crate) struct AggregateThresholdShareCanonicalCoefficientMemoryAccounting {
     retained_before_final_source_byte_length: u64,
     maximum_transient_byte_length: u64,
@@ -83,6 +84,7 @@ pub(crate) struct AggregateThresholdShareCanonicalCoefficientMemoryAccounting {
     removed_persistent_duplicate_byte_length: u64,
 }
 
+#[cfg(test)]
 impl AggregateThresholdShareCanonicalCoefficientMemoryAccounting {
     pub(crate) const fn retained_before_final_source_byte_length(self) -> u64 {
         self.retained_before_final_source_byte_length
@@ -109,6 +111,7 @@ impl AggregateThresholdShareCanonicalCoefficientMemoryAccounting {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn aggregate_threshold_share_canonical_coefficient_memory_accounting() -> Result<
     AggregateThresholdShareCanonicalCoefficientMemoryAccounting,
     AggregateThresholdShareRuntimeError,
@@ -145,28 +148,6 @@ pub(crate) fn aggregate_threshold_share_canonical_coefficient_memory_accounting(
 fn selected_vss_sharing_coordinates()
 -> Result<Box<[(u16, u64)]>, AggregateThresholdShareRuntimeError> {
     selected_sharing_data_prime_coordinates().map_err(Into::into)
-}
-
-/// Source-owned count for the aggregate committed-material population created
-/// by one recipient. The setup-attempt identifier is shared with all setup
-/// streams and is therefore owned by the ceremony-level attempt catalog.
-pub(crate) fn aggregate_threshold_share_private_randomness_kmac_input_accounting()
--> Result<PrivateRandomnessKmacInputClassAccounting, AggregateThresholdShareRuntimeError> {
-    let profile = selected_committed_material_profile()?;
-    let physical_root_count = u64::try_from(selected_vss_sharing_coordinates()?.len())
-        .map_err(|_| AggregateThresholdShareRuntimeError::InvalidInput)?;
-    let full_salted_leaf_count = physical_root_count
-        .checked_mul(
-            u64::try_from(profile.evaluation_domain_size() / 2)
-                .map_err(|_| AggregateThresholdShareRuntimeError::InvalidInput)?,
-        )
-        .ok_or(AggregateThresholdShareRuntimeError::InvalidInput)?;
-    maximum_committed_material_kmac_input_accounting(
-        profile,
-        physical_root_count,
-        full_salted_leaf_count,
-    )
-    .map_err(|_| AggregateThresholdShareRuntimeError::InvalidInput)
 }
 
 #[derive(Debug)]
@@ -262,8 +243,6 @@ struct AggregateThresholdShareRecipientAuthority {
     aggregate_share_coefficients: Option<Box<[Zeroizing<Vec<u64>>]>>,
     generation_material: Option<AggregateThresholdShareGenerationMaterial>,
     ordered_recipient_terminals: Box<[Option<VerifiedAggregateThresholdShareTerminal>]>,
-    private_vss_mailbox_byte_lengths:
-        Option<VerifiedGeneratedPrivateVssMailboxCorpusByteLengthCatalog>,
 }
 
 struct AggregateThresholdShareRecipientAuthorityRegistry {
@@ -529,17 +508,6 @@ fn require_dealer_terminals_match_public_randomness(
     Ok(())
 }
 
-pub(in crate::bgv) fn require_verified_vss_dealer_terminals_match_public_randomness(
-    verified_public_randomness: &VerifiedPublicRandomness,
-    ordered_dealer_terminals: &[VerifiedVssShareLinkageTerminal],
-) -> Result<(), RefusalReason> {
-    require_dealer_terminals_match_public_randomness(
-        verified_public_randomness,
-        ordered_dealer_terminals,
-    )
-    .map_err(aggregate_threshold_share_runtime_refusal_reason)
-}
-
 pub(crate) fn begin_aggregate_threshold_share_recipient_authority(
     action_randomness_handle: u32,
     local_recipient_roster_position: u16,
@@ -605,46 +573,9 @@ pub(crate) fn begin_aggregate_threshold_share_recipient_authority(
             .take(participant_count)
             .collect::<Vec<_>>()
             .into_boxed_slice(),
-        private_vss_mailbox_byte_lengths: None,
     };
     AGGREGATE_THRESHOLD_SHARE_RECIPIENT_AUTHORITY_REGISTRY
         .with(|registry| registry.borrow_mut().retain(authority))
-}
-
-/// Positively verifies the complete dealer-major mailbox corpus while the
-/// exact dealer terminals are still owned by the recipient authority. The
-/// resulting byte-length catalog is development evidence only; omitting it
-/// cannot change cryptographic qualification, while requesting exact
-/// accounting later fails unless this complete corpus was retained.
-pub(crate) fn retain_verified_generated_private_vss_mailbox_corpus_byte_lengths(
-    recipient_authority_handle: u32,
-    ordered_canonical_signed_envelope_bytes: &[&[u8]],
-) -> Result<(), AggregateThresholdShareRuntimeError> {
-    AGGREGATE_THRESHOLD_SHARE_RECIPIENT_AUTHORITY_REGISTRY.with(|registry| {
-        let mut registry = registry.borrow_mut();
-        let authority = registry.authority_mut(recipient_authority_handle)?;
-        if authority.private_vss_mailbox_byte_lengths.is_some() {
-            return Err(AggregateThresholdShareRuntimeError::Refusal(
-                RefusalReason::ConsumedState,
-            ));
-        }
-        let verified_public_randomness = authority.verified_public_randomness.as_ref().ok_or(
-            AggregateThresholdShareRuntimeError::Refusal(RefusalReason::ConsumedState),
-        )?;
-        let ordered_dealer_terminals = authority.ordered_dealer_terminals.as_ref().ok_or(
-            AggregateThresholdShareRuntimeError::Refusal(RefusalReason::ConsumedState),
-        )?;
-        let catalog =
-            VerifiedGeneratedPrivateVssMailboxCorpusByteLengthCatalog::from_verified_dealer_terminals(
-                verified_public_randomness,
-                ordered_dealer_terminals,
-                GeneratedPrivateVssMailboxCorpusInput::new(
-                    ordered_canonical_signed_envelope_bytes,
-                ),
-            )?;
-        authority.private_vss_mailbox_byte_lengths = Some(catalog);
-        Ok(())
-    })
 }
 
 fn canonical_dealer_vss_statement_bytes(
@@ -762,47 +693,6 @@ fn require_envelope_matches_dealer_terminal(
     Ok(envelope)
 }
 
-pub(in crate::bgv) fn require_verified_recipient_vss_mailbox_envelope(
-    verified_public_randomness: &VerifiedPublicRandomness,
-    dealer_terminal: &VerifiedVssShareLinkageTerminal,
-    recipient_identity: ParticipantIdentity,
-    recipient_roster_position: u16,
-    canonical_signed_envelope_bytes: &[u8],
-    authenticated_plaintext_byte_length: usize,
-) -> Result<SignedMailboxEnvelope, RefusalReason> {
-    require_envelope_matches_dealer_terminal(
-        verified_public_randomness,
-        dealer_terminal,
-        recipient_identity,
-        recipient_roster_position,
-        canonical_signed_envelope_bytes,
-        authenticated_plaintext_byte_length,
-    )
-    .map_err(aggregate_threshold_share_runtime_refusal_reason)
-}
-
-fn aggregate_threshold_share_runtime_refusal_reason(
-    error: AggregateThresholdShareRuntimeError,
-) -> RefusalReason {
-    match error {
-        AggregateThresholdShareRuntimeError::Foundation(error) => error.refusal_reason,
-        AggregateThresholdShareRuntimeError::Refusal(refusal_reason) => refusal_reason,
-        AggregateThresholdShareRuntimeError::RecipientPayload(_) => {
-            RefusalReason::MalformedEncoding
-        }
-        AggregateThresholdShareRuntimeError::InvalidInput => RefusalReason::WrongTypeOrLength,
-        AggregateThresholdShareRuntimeError::Profile(_)
-        | AggregateThresholdShareRuntimeError::Accounting(_)
-        | AggregateThresholdShareRuntimeError::Relation(_)
-        | AggregateThresholdShareRuntimeError::RelationCapability(_)
-        | AggregateThresholdShareRuntimeError::GenerationPreparation(_)
-        | AggregateThresholdShareRuntimeError::Runtime(_)
-        | AggregateThresholdShareRuntimeError::ActionRandomnessRuntime(_)
-        | AggregateThresholdShareRuntimeError::BoardRuntime(_)
-        | AggregateThresholdShareRuntimeError::MailboxRuntime(_) => RefusalReason::WrongContext,
-    }
-}
-
 const fn aggregate_threshold_share_refusal_status(refusal_reason: RefusalReason) -> u32 {
     refusal_reason.canonical_code() as u32
 }
@@ -871,18 +761,17 @@ pub(crate) fn aggregate_threshold_share_runtime_error_status(
     }
 }
 
+type ReconstructedDealerSourceMaterials = (
+    Box<[SetupGeneratedCommittedMaterial]>,
+    Box<[super::DecodedRecipientShareLimb]>,
+);
+
 fn reconstruct_dealer_source_materials(
     verified_public_randomness: &VerifiedPublicRandomness,
     dealer_terminal: &VerifiedVssShareLinkageTerminal,
     local_recipient_roster_position: u16,
     authenticated_plaintext_bytes: &[u8],
-) -> Result<
-    (
-        Box<[SetupGeneratedCommittedMaterial]>,
-        Box<[super::DecodedRecipientShareLimb]>,
-    ),
-    AggregateThresholdShareRuntimeError,
-> {
+) -> Result<ReconstructedDealerSourceMaterials, AggregateThresholdShareRuntimeError> {
     let decoded_payload = decode_recipient_private_vss_payload(authenticated_plaintext_bytes)?;
     if decoded_payload.recipient_roster_position() != local_recipient_roster_position {
         return Err(AggregateThresholdShareRuntimeError::Refusal(
@@ -2370,7 +2259,6 @@ fn complete_vss_qualification_if_ready(
         ordered_dealer_terminals,
         ordered_recipient_terminals,
         local_target_release_limbs,
-        authority.private_vss_mailbox_byte_lengths.take(),
     )?;
     AGGREGATE_THRESHOLD_SHARE_RECIPIENT_AUTHORITY_REGISTRY.with(|registry| {
         registry

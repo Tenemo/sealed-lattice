@@ -539,16 +539,30 @@ pub(super) fn setup_key_relation_derivation_transient_byte_length_with_dependenc
     .try_fold(0_u64, checked_setup_provider_add)
 }
 
-fn finish_setup_key_relation_source_provider_memory_accounting(
-    relation_plan_variant: &RelationPlanVariant,
-    relation_context: &RelationPlanCheckContext,
+struct SetupKeyRelationSourceProviderMemoryAccountingInput<'input> {
+    relation_plan_variant: &'input RelationPlanVariant,
+    relation_context: &'input RelationPlanCheckContext,
     ring_degree: u64,
     canonical_application_statement_byte_length: usize,
     source_layout_heap_byte_length: u64,
-    exact_radix_digits_by_column: &ExactRadixDigitColumnCatalog,
+    exact_radix_digits_by_column: &'input ExactRadixDigitColumnCatalog,
     public_key_quotient_columns: BTreeSet<u32>,
     anchor_quotient_columns: BTreeSet<u32>,
+}
+
+fn finish_setup_key_relation_source_provider_memory_accounting(
+    input: SetupKeyRelationSourceProviderMemoryAccountingInput<'_>,
 ) -> Result<CommonProofSourceProviderMemoryAccounting, CommonProofProverError> {
+    let SetupKeyRelationSourceProviderMemoryAccountingInput {
+        relation_plan_variant,
+        relation_context,
+        ring_degree,
+        canonical_application_statement_byte_length,
+        source_layout_heap_byte_length,
+        exact_radix_digits_by_column,
+        public_key_quotient_columns,
+        anchor_quotient_columns,
+    } = input;
     if canonical_application_statement_byte_length == 0
         || relation_plan_variant.trace_domain_size().checked_mul(2) != Some(ring_degree)
     {
@@ -623,14 +637,18 @@ pub(crate) fn same_secret_source_provider_memory_accounting(
         .flat_map(|anchor| anchor.quotients.rows().iter().flatten().copied())
         .collect();
     finish_setup_key_relation_source_provider_memory_accounting(
-        relation_plan_variant,
-        relation_context,
-        ring_degree,
-        canonical_application_statement_byte_length,
-        same_secret_source_layout_heap_byte_length(source_layout)?,
-        &source_layout.exact_radix_digits_by_column,
-        BTreeSet::new(),
-        anchor_quotient_columns,
+        SetupKeyRelationSourceProviderMemoryAccountingInput {
+            relation_plan_variant,
+            relation_context,
+            ring_degree,
+            canonical_application_statement_byte_length,
+            source_layout_heap_byte_length: same_secret_source_layout_heap_byte_length(
+                source_layout,
+            )?,
+            exact_radix_digits_by_column: &source_layout.exact_radix_digits_by_column,
+            public_key_quotient_columns: BTreeSet::new(),
+            anchor_quotient_columns,
+        },
     )
 }
 
@@ -652,14 +670,18 @@ pub(crate) fn public_key_share_source_provider_memory_accounting(
         .flat_map(|anchor| anchor.quotients.rows().iter().flatten().copied())
         .collect();
     finish_setup_key_relation_source_provider_memory_accounting(
-        relation_plan_variant,
-        relation_context,
-        ring_degree,
-        canonical_application_statement_byte_length,
-        public_key_share_source_layout_heap_byte_length(source_layout)?,
-        &source_layout.exact_radix_digits_by_column,
-        public_key_quotient_columns,
-        anchor_quotient_columns,
+        SetupKeyRelationSourceProviderMemoryAccountingInput {
+            relation_plan_variant,
+            relation_context,
+            ring_degree,
+            canonical_application_statement_byte_length,
+            source_layout_heap_byte_length: public_key_share_source_layout_heap_byte_length(
+                source_layout,
+            )?,
+            exact_radix_digits_by_column: &source_layout.exact_radix_digits_by_column,
+            public_key_quotient_columns,
+            anchor_quotient_columns,
+        },
     )
 }
 
@@ -1410,8 +1432,10 @@ fn public_key_bound_half(
         })
 }
 
+type CachedExactKeyRelationRows = Box<[Option<Zeroizing<Box<[i128]>>>]>;
+
 pub(super) struct ExactKeyRelationDerivedRowCache {
-    ordered_rows: Box<[Option<Zeroizing<Box<[i128]>>>]>,
+    ordered_rows: CachedExactKeyRelationRows,
 }
 
 impl ExactKeyRelationDerivedRowCache {

@@ -1,9 +1,4 @@
 use std::collections::BTreeSet;
-#[cfg(test)]
-use std::{
-    cell::{Cell, RefCell},
-    collections::BTreeMap,
-};
 
 use zeroize::Zeroizing;
 
@@ -31,8 +26,7 @@ use super::{
 };
 #[cfg(test)]
 use super::{
-    decoder::{BoundedProofDecoder, ProofByteSource},
-    field::ProofChallengeExtensionElement,
+    decoder::BoundedProofDecoder, field::ProofChallengeExtensionElement,
     transcript::CommonProofQueryOpeningAbsorber,
 };
 
@@ -448,7 +442,6 @@ impl CompleteProofTreeCatalog {
     pub(crate) const fn evaluation_domain_size(&self) -> u64 {
         self.evaluation_domain_size
     }
-
 }
 
 pub(crate) fn build_complete_proof_tree_catalog(
@@ -814,20 +807,20 @@ use authentication::{
     TreeValueKind, authenticate_opening, hash_canonical_leaf, statement_owned_node_digest,
 };
 #[cfg(test)]
-pub(crate) use decoding::{DecodedProofBody, DecodedProofTreeOpening, PendingProofBodyQueries};
+pub(crate) use decoding::{DecodedProofBody, decode_proof_body_prefix};
 pub(crate) use decoding::{
-    DecodedProofBodyPrefix, DecodedProofPhasePairLeaf, ProofTreeOpening, decode_proof_body_prefix,
+    DecodedProofBodyPrefix, DecodedProofPhasePairLeaf, ProofTreeOpening,
     decode_proof_body_prefix_owned, decode_proof_query_section_header_at,
     decode_proof_query_tree_at,
 };
+#[cfg(test)]
+pub(crate) use sizing::ProofQueryTreeByteLengthCeiling;
 pub(super) use sizing::maximum_minimal_frontier_node_count;
 pub(crate) use sizing::{
     CommonProofByteLengthCeiling, canonical_common_proof_byte_length_ceiling,
     canonical_leaf_byte_length, entry_leaf_count, proof_body_prefix_byte_length,
     proof_query_tree_byte_length,
 };
-#[cfg(test)]
-pub(crate) use sizing::{CommonProofComponentByteLengths, ProofQueryTreeByteLengthCeiling};
 
 #[cfg(test)]
 #[path = "body/common-proof-engine-tests.rs"]

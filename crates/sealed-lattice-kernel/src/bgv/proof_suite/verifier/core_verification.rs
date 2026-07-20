@@ -1,13 +1,12 @@
 use super::{
     BoundTreeConstructionKind, CanonicalDecodeLimits, CanonicalItem, CanonicalItemType,
     CanonicalTuple, CommonProofTranscript, CommonProofVerifierError, CompleteProofTreeCatalog,
-    FOUNDATION_PROFILE, PROOF_HEADER_HASH_DOMAIN, PROOF_OBJECT_HEADER_SCHEMA_VERSION,
-    ProofApplicationSlotCeilings, ProofChallengeExtensionElement, ProofEvaluationDomain,
-    ProofLeafVisibility, ProofTreeCatalogSource, ProofTreeRole,
-    RelationApplicationChallengeAssignment, RelationColumnOrigin, RelationColumnValueType,
-    RelationPlanCheckContext, RelationPlanVariant, RelationProofTreeInput,
-    RelationSelectorPathStep, RelationTreeDescriptor, SelectedApplicationStatementContext,
-    SelectorPathStepKind, StatementOwnedProofTreeInput,
+    DeepCompositionVerificationInput, FOUNDATION_PROFILE, PROOF_HEADER_HASH_DOMAIN,
+    PROOF_OBJECT_HEADER_SCHEMA_VERSION, ProofApplicationSlotCeilings,
+    ProofChallengeExtensionElement, ProofLeafVisibility, ProofTreeCatalogSource, ProofTreeRole,
+    RelationColumnOrigin, RelationColumnValueType, RelationPlanCheckContext, RelationPlanVariant,
+    RelationProofTreeInput, RelationSelectorPathStep, RelationTreeDescriptor,
+    SelectedApplicationStatementContext, SelectorPathStepKind, StatementOwnedProofTreeInput,
     VERIFIED_COMMON_PROOF_STATEMENT_HASH_DOMAIN, VerifiedEvaluatorAuxiliaryRoot,
     VerifiedStatementOwnedTree, decode_selected_application_statement, hash_foundation_tuple_512,
     hash_framed_parts_512, selected_evaluator_aggregate_entry_roots,
@@ -16,10 +15,11 @@ use super::{
 #[cfg(test)]
 use super::{
     CommonProofPrivacyMode, CommonProofVerificationInput, PROOF_OBJECT_HEADER_SCHEMA_IDENTIFIER,
-    ProofBodyError, ProofBodyLayout, ProofByteSource, ProofFriQueryVerifier, ProofTreeCatalogInput,
-    QueryVerificationWorkspace, SELECTED_PROOF_FIELD_INDEX, ValidatedRelationPlanArtifact,
-    VerifiedCommonProof, build_complete_proof_tree_catalog, build_runtime_claim_groups,
-    decode_proof_body_prefix, verify_and_slice_proof_header,
+    ProofBodyError, ProofBodyLayout, ProofByteSource, ProofEvaluationDomain, ProofFriQueryVerifier,
+    ProofTreeCatalogInput, QueryVerificationWorkspace, RelationApplicationChallengeAssignment,
+    SELECTED_PROOF_FIELD_INDEX, ValidatedRelationPlanArtifact, VerifiedCommonProof,
+    build_complete_proof_tree_catalog, build_runtime_claim_groups, decode_proof_body_prefix,
+    verify_and_slice_proof_header,
 };
 
 /// Resolves plan-addressed verifier-sequence columns from verified statement,
@@ -27,7 +27,6 @@ use super::{
 /// values.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct VerifiedRelationColumnEvaluatorMemoryAccounting {
-    fixed_and_input_resident_byte_length: u64,
     maximum_cached_column_resident_byte_length: u64,
     maximum_evaluation_transient_byte_length: u64,
     maximum_resident_byte_length: u64,
@@ -44,21 +43,18 @@ impl VerifiedRelationColumnEvaluatorMemoryAccounting {
             .and_then(|length| length.checked_add(maximum_evaluation_transient_byte_length))
             .ok_or(CommonProofVerifierError::InvalidTreeLayout)?;
         Ok(Self {
-            fixed_and_input_resident_byte_length,
             maximum_cached_column_resident_byte_length,
             maximum_evaluation_transient_byte_length,
             maximum_resident_byte_length,
         })
     }
 
-    pub(crate) const fn fixed_and_input_resident_byte_length(self) -> u64 {
-        self.fixed_and_input_resident_byte_length
-    }
-
+    #[cfg(test)]
     pub(crate) const fn maximum_cached_column_resident_byte_length(self) -> u64 {
         self.maximum_cached_column_resident_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn maximum_evaluation_transient_byte_length(self) -> u64 {
         self.maximum_evaluation_transient_byte_length
     }
@@ -279,12 +275,14 @@ where
     let opening_points = variant.derive_opening_points(input.relation_context, &deep_points)?;
     verify_deep_composition_with_verified_sequences(
         variant,
-        input.relation_context,
-        &application_challenges,
-        &composition_challenges,
-        &deep_points,
-        &opening_points,
-        pending.deep_evaluations(),
+        DeepCompositionVerificationInput::new(
+            input.relation_context,
+            &application_challenges,
+            &composition_challenges,
+            &deep_points,
+            &opening_points,
+            pending.deep_evaluations(),
+        ),
         evaluate_verified_column,
     )?;
     transcript.absorb_deep_evaluations(pending.deep_evaluations())?;
@@ -717,7 +715,6 @@ fn select_application_statement_hash(
                         .map_err(|_| CommonProofVerifierError::InvalidBoundTree)?,
                 )?)
             }
-            _ => return Err(CommonProofVerifierError::InvalidBoundTree),
         };
     }
     let SelectedApplicationStatementValue::Item(item) = selected else {
@@ -921,36 +918,23 @@ pub(super) fn catalog_root(
 
 pub(super) fn verify_deep_composition_with_verified_sequences<ColumnEvaluator>(
     variant: &RelationPlanVariant,
-    relation_context: &RelationPlanCheckContext,
-    application_challenges: &[RelationApplicationChallengeAssignment],
-    composition_challenges: &[ProofChallengeExtensionElement],
-    deep_points: &[ProofChallengeExtensionElement],
-    opening_points: &[ProofChallengeExtensionElement],
-    deep_evaluations: &[ProofChallengeExtensionElement],
+    input: DeepCompositionVerificationInput<'_>,
     evaluate_verified_column: &mut ColumnEvaluator,
 ) -> Result<(), CommonProofVerifierError>
 where
     ColumnEvaluator: VerifiedRelationColumnEvaluator + ?Sized,
 {
-    if deep_evaluations.len() != variant.ordered_opening_claims().len() {
+    if input.ordered_deep_evaluations().len() != variant.ordered_opening_claims().len() {
         return Err(CommonProofVerifierError::InvalidOpeningClaim);
     }
     let mut missing_verified_column_value = false;
-    let result = variant.verify_deep_composition(
-        relation_context,
-        application_challenges,
-        composition_challenges,
-        deep_points,
-        opening_points,
-        deep_evaluations,
-        |column_ordinal, point| {
-            let value = evaluate_verified_column.evaluate_at_extension_point(column_ordinal, point);
-            if value.is_none() {
-                missing_verified_column_value = true;
-            }
-            value
-        },
-    );
+    let result = variant.verify_deep_composition(input, |column_ordinal, point| {
+        let value = evaluate_verified_column.evaluate_at_extension_point(column_ordinal, point);
+        if value.is_none() {
+            missing_verified_column_value = true;
+        }
+        value
+    });
     if missing_verified_column_value {
         return Err(CommonProofVerifierError::MissingVerifiedColumnValue);
     }

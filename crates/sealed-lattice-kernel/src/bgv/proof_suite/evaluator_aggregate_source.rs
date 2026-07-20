@@ -13,7 +13,11 @@ use crate::{
     hashing::hash_framed_parts_512,
 };
 
-use super::relation_plan::{RelationColumnDescriptor, RelationColumnValueType};
+#[cfg(test)]
+use super::RelationPlanCheckContext;
+use super::relation_plan::RelationColumnDescriptor;
+#[cfg(test)]
+use super::relation_plan::RelationColumnValueType;
 use super::{
     BoundTreeConstructionKind, CommonProofAuthenticatedSourceReadRequest, CommonProofProverError,
     CommonProofSourcePolynomial, CommonProofSourcePolynomialProvider,
@@ -21,9 +25,9 @@ use super::{
     CommonProofSourcePolynomialRequest, CommonProofSourcePolynomialRequestContext,
     CommonProofSourceProviderMemoryAccounting, CompiledRelationPlan,
     KeySwitchComponentMaterialTopology, KeySwitchComponentTraceColumn, ProofBaseFieldElement,
-    ProvidedCommonProofSourcePolynomial, RelationPlanCheckContext, RelationPlanVariant,
-    RelationProofTreeInput, RelationTreeDescriptor, SelectedApplicationStatementContext,
-    SelectedEvaluatorEntryKind, SelectedEvaluatorEntryPosition, SelectedEvaluatorStoreSource,
+    ProvidedCommonProofSourcePolynomial, RelationPlanVariant, RelationProofTreeInput,
+    RelationTreeDescriptor, SelectedApplicationStatementContext, SelectedEvaluatorEntryKind,
+    SelectedEvaluatorEntryPosition, SelectedEvaluatorStoreSource,
     SelectedEvaluatorStoreSourceCatalog, SetupPublicPolynomialContext,
     SetupPublicPolynomialRootRole, StatementOwnedProofTreeInput, VerifiedEvaluatorKeyStoreMaterial,
     VerifiedEvaluatorRuntimeRoot, VerifiedKeySwitchComponentMaterial,
@@ -65,26 +69,32 @@ pub(crate) struct SelectedEvaluatorAggregateSourceProviderMemoryAccounting {
 }
 
 impl SelectedEvaluatorAggregateSourceProviderMemoryAccounting {
+    #[cfg(test)]
     pub(crate) const fn provider_fixed_owner_byte_length(self) -> u64 {
         self.provider_fixed_owner_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn authenticated_source_catalog_byte_length(self) -> u64 {
         self.authenticated_source_catalog_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn ordered_source_column_catalog_byte_length(self) -> u64 {
         self.ordered_source_column_catalog_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn topology_catalog_byte_length(self) -> u64 {
         self.topology_catalog_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn readback_chunk_digest_byte_length(self) -> u64 {
         self.readback_chunk_digest_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn readback_authentication_flag_byte_length(self) -> u64 {
         self.readback_authentication_flag_byte_length
     }
@@ -97,10 +107,12 @@ impl SelectedEvaluatorAggregateSourceProviderMemoryAccounting {
         self.post_source_polynomial_finish_persistent_resident_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn maximum_pending_column_byte_length(self) -> u64 {
         self.maximum_pending_column_byte_length
     }
 
+    #[cfg(test)]
     pub(crate) const fn maximum_cached_authenticated_chunk_byte_length(self) -> u64 {
         self.maximum_cached_authenticated_chunk_byte_length
     }
@@ -202,6 +214,7 @@ fn finish_evaluator_source_provider_memory_accounting(
 /// Derives the complete-list provider allocation from the checked relation
 /// descriptors and verifier-owned suite moduli, without constructing setup
 /// material or hand-entering a selected-profile estimate.
+#[cfg(test)]
 pub(crate) fn evaluator_aggregate_source_provider_memory_accounting(
     variant: &RelationPlanVariant,
     relation_context: &RelationPlanCheckContext,
@@ -1058,12 +1071,18 @@ impl CommonProofSourcePolynomialProvider for SelectedEvaluatorAggregateSourcePol
                 .finish_pending_column()
                 .map(CommonProofSourcePolynomialProviderPoll::Ready);
         }
-        let request = self.next_read_request()?;
+        self.next_read_request()?;
         // The retained chunk has already contributed every byte it can to the
         // pending column. Release it before the caller allocates the next
         // authenticated chunk so two full source chunks never overlap here.
         self.cached_chunk = None;
-        Ok(CommonProofSourcePolynomialProviderPoll::AuthenticatedSourceReadRequired(request))
+        Ok(CommonProofSourcePolynomialProviderPoll::AuthenticatedSourceReadRequired)
+    }
+
+    fn pending_authenticated_source_read_request(
+        &self,
+    ) -> Result<Option<CommonProofAuthenticatedSourceReadRequest>, CommonProofProverError> {
+        self.next_read_request().map(Some)
     }
 
     fn supply_authenticated_source_range(
@@ -1453,22 +1472,22 @@ mod tests {
     #[test]
     fn authenticated_source_request_is_stable_and_rejects_wrong_range_or_replay() {
         let (mut provider, request_variant, bytes) = test_provider();
-        let first_request = match poll_first_column(&mut provider, &request_variant)
-            .expect("first provider poll")
-        {
-            CommonProofSourcePolynomialProviderPoll::AuthenticatedSourceReadRequired(request) => {
-                request
-            }
+        match poll_first_column(&mut provider, &request_variant).expect("first provider poll") {
+            CommonProofSourcePolynomialProviderPoll::AuthenticatedSourceReadRequired => {}
             CommonProofSourcePolynomialProviderPoll::Ready(_) => panic!("read was not requested"),
-        };
-        let repeated_request = match poll_first_column(&mut provider, &request_variant)
-            .expect("repeated provider poll")
-        {
-            CommonProofSourcePolynomialProviderPoll::AuthenticatedSourceReadRequired(request) => {
-                request
-            }
+        }
+        let first_request = provider
+            .pending_authenticated_source_read_request()
+            .expect("pending source request")
+            .expect("authenticated read request");
+        match poll_first_column(&mut provider, &request_variant).expect("repeated provider poll") {
+            CommonProofSourcePolynomialProviderPoll::AuthenticatedSourceReadRequired => {}
             CommonProofSourcePolynomialProviderPoll::Ready(_) => panic!("read was not requested"),
-        };
+        }
+        let repeated_request = provider
+            .pending_authenticated_source_read_request()
+            .expect("pending source request")
+            .expect("authenticated read request");
         assert_eq!(first_request, repeated_request);
         assert_eq!(first_request.storage_byte_offset(), 2_048);
         assert_eq!(first_request.source_stream_byte_offset(), 0);
@@ -1537,20 +1556,22 @@ mod tests {
     fn fresh_provider_reissues_the_same_request_and_cancellation_clears_payloads() {
         let (mut first_provider, first_variant, _) = test_provider();
         let (mut resumed_provider, resumed_variant, _) = test_provider();
-        let first_request = match poll_first_column(&mut first_provider, &first_variant).unwrap() {
-            CommonProofSourcePolynomialProviderPoll::AuthenticatedSourceReadRequired(request) => {
-                request
-            }
+        match poll_first_column(&mut first_provider, &first_variant).unwrap() {
+            CommonProofSourcePolynomialProviderPoll::AuthenticatedSourceReadRequired => {}
             CommonProofSourcePolynomialProviderPoll::Ready(_) => panic!("read was not requested"),
-        };
-        let resumed_request = match poll_first_column(&mut resumed_provider, &resumed_variant)
-            .unwrap()
-        {
-            CommonProofSourcePolynomialProviderPoll::AuthenticatedSourceReadRequired(request) => {
-                request
-            }
+        }
+        let first_request = first_provider
+            .pending_authenticated_source_read_request()
+            .expect("pending source request")
+            .expect("authenticated read request");
+        match poll_first_column(&mut resumed_provider, &resumed_variant).unwrap() {
+            CommonProofSourcePolynomialProviderPoll::AuthenticatedSourceReadRequired => {}
             CommonProofSourcePolynomialProviderPoll::Ready(_) => panic!("read was not requested"),
-        };
+        }
+        let resumed_request = resumed_provider
+            .pending_authenticated_source_read_request()
+            .expect("pending source request")
+            .expect("authenticated read request");
         assert_eq!(first_request, resumed_request);
         first_provider.cancel_pending_authenticated_source_read();
         assert!(first_provider.pending_column.is_none());
