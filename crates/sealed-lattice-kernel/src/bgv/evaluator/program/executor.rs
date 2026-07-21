@@ -997,38 +997,38 @@ fn derive_evaluator_stream_resource_totals(
     let mut loaded_keys = BTreeSet::new();
     for (instruction_ordinal, memory_phase) in memory_phases.iter().copied().enumerate() {
         let required_key = schedule.required_key(instruction_ordinal)?;
-        if let Some(required_key) = required_key {
-            if resident_key != Some(required_key) {
-                let load = prepared_evaluator_key_load_accounting(required_key)?;
-                let counts_as_reread = !loaded_keys.insert(required_key);
-                totals.key_load_count = totals
-                    .key_load_count
-                    .checked_add(1)
-                    .ok_or(RefusalReason::OutsideSupportedProfile)?;
-                totals.key_store_read_request_count = totals
-                    .key_store_read_request_count
+        if let Some(required_key) = required_key
+            && resident_key != Some(required_key)
+        {
+            let load = prepared_evaluator_key_load_accounting(required_key)?;
+            let counts_as_reread = !loaded_keys.insert(required_key);
+            totals.key_load_count = totals
+                .key_load_count
+                .checked_add(1)
+                .ok_or(RefusalReason::OutsideSupportedProfile)?;
+            totals.key_store_read_request_count = totals
+                .key_store_read_request_count
+                .checked_add(load.store_read_request_count)
+                .ok_or(RefusalReason::OutsideSupportedProfile)?;
+            totals.key_store_read_byte_count = totals
+                .key_store_read_byte_count
+                .checked_add(load.store_read_byte_count)
+                .ok_or(RefusalReason::OutsideSupportedProfile)?;
+            totals.key_ntt_transform_count = totals
+                .key_ntt_transform_count
+                .checked_add(load.ntt_transform_count)
+                .ok_or(RefusalReason::OutsideSupportedProfile)?;
+            if counts_as_reread {
+                totals.key_store_reread_request_count = totals
+                    .key_store_reread_request_count
                     .checked_add(load.store_read_request_count)
                     .ok_or(RefusalReason::OutsideSupportedProfile)?;
-                totals.key_store_read_byte_count = totals
-                    .key_store_read_byte_count
+                totals.key_store_reread_byte_count = totals
+                    .key_store_reread_byte_count
                     .checked_add(load.store_read_byte_count)
                     .ok_or(RefusalReason::OutsideSupportedProfile)?;
-                totals.key_ntt_transform_count = totals
-                    .key_ntt_transform_count
-                    .checked_add(load.ntt_transform_count)
-                    .ok_or(RefusalReason::OutsideSupportedProfile)?;
-                if counts_as_reread {
-                    totals.key_store_reread_request_count = totals
-                        .key_store_reread_request_count
-                        .checked_add(load.store_read_request_count)
-                        .ok_or(RefusalReason::OutsideSupportedProfile)?;
-                    totals.key_store_reread_byte_count = totals
-                        .key_store_reread_byte_count
-                        .checked_add(load.store_read_byte_count)
-                        .ok_or(RefusalReason::OutsideSupportedProfile)?;
-                }
-                resident_key = Some(required_key);
             }
+            resident_key = Some(required_key);
         }
         let resident_key_byte_count = resident_key
             .map(prepared_evaluator_key_load_accounting)

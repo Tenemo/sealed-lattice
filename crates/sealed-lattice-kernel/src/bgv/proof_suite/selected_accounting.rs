@@ -2009,10 +2009,14 @@ mod resource_accounting {
     ) -> Result<(), SelectedProofAccountingError> {
         let mut observed_top_counts = BTreeSet::new();
         let mut normalized_reference = None;
-        for row in diagnostic_rows.iter().cloned().filter(|row| {
-            row.application_statement_schema_identifier()
-                == ProofApplicationSlotCeilings::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER
-        }) {
+        for row in diagnostic_rows
+            .iter()
+            .filter(|row| {
+                row.application_statement_schema_identifier()
+                    == ProofApplicationSlotCeilings::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER
+            })
+            .cloned()
+        {
             let top_count = row
                 .top_count()
                 .ok_or(SelectedProofAccountingError::InvalidProfile)?;
@@ -3864,7 +3868,7 @@ mod resource_accounting {
             let mut selected_maximum_transaction_payload_byte_length = 0_u64;
             let mut selected_maximum_combined_wasm_resident_byte_length = 0_u64;
             let mut selected_maximum_copied_buffer_byte_length = 0_u64;
-            for row in diagnostic_rows.iter().cloned() {
+            for row in &diagnostic_rows {
                 let schema_identifier = row.application_statement_schema_identifier();
                 assert_ne!(family_name(schema_identifier), "unknown");
                 match row.outcome() {

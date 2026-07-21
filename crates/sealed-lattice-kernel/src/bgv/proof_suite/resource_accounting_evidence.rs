@@ -1340,7 +1340,7 @@ fn derive_candidate_input_identity() -> Result<CandidateInputIdentity, String> {
             .checked_add(1)
             .ok_or_else(|| "pair-character count overflow".to_owned())?;
     }
-    if pair_character_counts.iter().any(|count| *count == 0) {
+    if pair_character_counts.contains(&0) {
         return Err("pair-character catalog leaves an empty ciphertext".to_owned());
     }
     let selected_parameters = SelectedCandidateParameters {
@@ -1472,7 +1472,7 @@ fn derive_proof_variant_accounting(
     let mut family_accumulators = BTreeMap::<u16, ProofTotalsAccumulator>::new();
     let mut complete_action_accumulator = ProofTotalsAccumulator::default();
     let mut has_variant_error = false;
-    for row in diagnostic_rows.iter().cloned() {
+    for row in &diagnostic_rows {
         let selector = proof_variant_selector(row.schedule_position(), row.top_count())?;
         let schema_identifier = row.application_statement_schema_identifier();
         let relation_column_count = u32::try_from(row.relation_column_count())

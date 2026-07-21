@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import {
     closeSync,
     existsSync,
@@ -93,6 +94,8 @@ type LocalRunLogSummary = {
     readonly finishedAtIso: string;
     readonly lastCommandId?: string;
     readonly processStatus: ReturnType<typeof normalizeProcessStatus>;
+    readonly repositoryCommitHash: string;
+    readonly repositoryTreeDirty: boolean;
     readonly resourceExtrema: {
         readonly minimumHostFreeMemoryBytes: number;
         readonly peakHeapUsedBytes: number;
@@ -106,6 +109,11 @@ type LocalRunLogSummary = {
     readonly runDirectoryPath: string;
     readonly scriptName: string;
     readonly startedAtIso: string;
+};
+
+type RepositorySnapshot = {
+    readonly repositoryCommitHash: string;
+    readonly repositoryTreeDirty: boolean;
 };
 
 type ResourceSample = {
@@ -197,6 +205,55 @@ const repositoryRootDirectoryPath = path.resolve(
     '..',
     '..',
 );
+
+const readRepositorySnapshot = (): RepositorySnapshot => {
+    const statusRecords = execFileSync(
+        'git',
+        [
+            'status',
+            '--porcelain=v2',
+            '--branch',
+            '--untracked-files=normal',
+            '--ignore-submodules=none',
+        ],
+        {
+            cwd: repositoryRootDirectoryPath,
+            encoding: 'utf8',
+            stdio: ['ignore', 'pipe', 'pipe'],
+            windowsHide: true,
+        },
+    )
+        .split(/\r?\n/u)
+        .filter((record) => record.length > 0);
+    const branchObjectIdentifierPrefix = '# branch.oid ';
+    const branchObjectIdentifierRecords = statusRecords.filter((record) =>
+        record.startsWith(branchObjectIdentifierPrefix),
+    );
+    const [branchObjectIdentifierRecord] = branchObjectIdentifierRecords;
+    if (
+        branchObjectIdentifierRecord === undefined ||
+        branchObjectIdentifierRecords.length !== 1
+    ) {
+        throw new Error(
+            'Git status did not report exactly one branch object identifier.',
+        );
+    }
+    const repositoryCommitHash = branchObjectIdentifierRecord.slice(
+        branchObjectIdentifierPrefix.length,
+    );
+    if (!/^[0-9a-f]{40}$/u.test(repositoryCommitHash)) {
+        throw new Error(
+            'Git status did not report an exact 40-hex commit hash.',
+        );
+    }
+
+    return {
+        repositoryCommitHash,
+        repositoryTreeDirty: statusRecords.some(
+            (record) => !record.startsWith('# '),
+        ),
+    };
+};
 
 const defaultLogRootDirectoryPath = (): string =>
     path.join(repositoryRootDirectoryPath, 'logs');
@@ -293,6 +350,7 @@ class LocalRunLog implements ActiveLocalRunLog {
     #resourceSampleInterval: NodeJS.Timeout;
     #resourceSampleSequenceNumber = 0;
     #resourcesFileDescriptor: number;
+    #repositorySnapshot: RepositorySnapshot;
     #scriptName: string;
     #startedAtIso: string;
     #startedAtMilliseconds: number;
@@ -304,6 +362,7 @@ class LocalRunLog implements ActiveLocalRunLog {
         readonly processEventSource?: ProcessEventSource;
         readonly resourceSampleIntervalMilliseconds: number;
         readonly resourcesPath: string;
+        readonly repositorySnapshot: RepositorySnapshot;
         readonly runDirectoryPath: string;
         readonly scriptName: string;
         readonly startedAtIso: string;
@@ -319,6 +378,7 @@ class LocalRunLog implements ActiveLocalRunLog {
             input.processEventSource ??
             (process as unknown as ProcessEventSource);
         this.#resourcesFileDescriptor = openSync(input.resourcesPath, 'ax');
+        this.#repositorySnapshot = input.repositorySnapshot;
         this.#scriptName = input.scriptName;
         this.#startedAtIso = input.startedAtIso;
         this.#startedAtMilliseconds = input.startedAtMilliseconds;
@@ -413,6 +473,8 @@ class LocalRunLog implements ActiveLocalRunLog {
                 ? {}
                 : { lastCommandId: this.#lastCommandId }),
             processStatus,
+            repositoryCommitHash: this.#repositorySnapshot.repositoryCommitHash,
+            repositoryTreeDirty: this.#repositorySnapshot.repositoryTreeDirty,
             resourceExtrema: {
                 minimumHostFreeMemoryBytes: this.#minimumHostFreeMemoryBytes,
                 peakHeapUsedBytes: this.#peakHeapUsedBytes,
@@ -581,6 +643,8 @@ class LocalRunLog implements ActiveLocalRunLog {
         const lines = [
             `Result: ${summary.resultClassification}`,
             `Script: ${summary.scriptName}`,
+            `Repository commit: ${summary.repositoryCommitHash}`,
+            `Repository tree dirty: ${summary.repositoryTreeDirty}`,
             `Started: ${summary.startedAtIso}`,
             `Finished: ${summary.finishedAtIso}`,
             `Runtime: ${summary.durationMilliseconds} ms`,
@@ -828,6 +892,7 @@ export const createLocalRunLog = async (
     const startedAtMilliseconds = performance.now();
     const startedAt = input.now ?? new Date();
     const startedAtIso = startedAt.toISOString();
+    const repositorySnapshot = readRepositorySnapshot();
     const rootDirectoryPath =
         input.rootDirectoryPath ?? defaultLogRootDirectoryPath();
     const runDirectoryPath = await allocateRunDirectory(
@@ -891,6 +956,7 @@ export const createLocalRunLog = async (
             input.resourceSampleIntervalMilliseconds ??
             defaultResourceSampleIntervalMilliseconds,
         resourcesPath: path.join(runDirectoryPath, 'resources.jsonl'),
+        repositorySnapshot,
         runDirectoryPath,
         scriptName: input.scriptName,
         startedAtIso,

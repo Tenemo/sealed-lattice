@@ -2,7 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { access, mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
@@ -11,6 +11,28 @@ import {
     runCommandsInSeries,
     type CommandInvocation,
 } from '#tools/ci/run-command';
+
+const repositoryRootDirectoryPath = path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    '..',
+    '..',
+    '..',
+);
+
+const runGitCommand = (commandArguments: readonly string[]): string => {
+    const result = spawnSync('git', [...commandArguments], {
+        cwd: repositoryRootDirectoryPath,
+        encoding: 'utf8',
+        windowsHide: true,
+    });
+    if (result.status !== 0) {
+        throw new Error(
+            `Git command failed with status ${String(result.status)}: ${result.stderr}`,
+        );
+    }
+
+    return result.stdout;
+};
 
 const withTemporaryLogRoot = async <Result>(
     action: (rootDirectoryPath: string) => Promise<Result>,
@@ -54,6 +76,18 @@ const findOnlyRunDirectory = async (
 describe('local run logs', () => {
     it('records command output once with its stream and failure result', () =>
         withTemporaryLogRoot(async (rootDirectoryPath) => {
+            const expectedRepositoryCommitHash = runGitCommand([
+                'rev-parse',
+                '--verify',
+                'HEAD^{commit}',
+            ]).trim();
+            const expectedRepositoryTreeDirty =
+                runGitCommand([
+                    'status',
+                    '--porcelain=v1',
+                    '--untracked-files=normal',
+                    '--ignore-submodules=none',
+                ]).length > 0;
             const log = await createLocalRunLog({
                 commandLineArguments: [],
                 lanes: ['sample'],
@@ -85,6 +119,29 @@ describe('local run logs', () => {
             expect(output).toMatch(/\[sample-command\] \[stderr\] error/u);
             expect(output.match(/\bout\b/gu)).toHaveLength(1);
             expect(output.match(/\berror\b/gu)).toHaveLength(1);
+
+            const summary = JSON.parse(
+                await readFile(
+                    path.join(log.runDirectoryPath, 'summary.json'),
+                    'utf8',
+                ),
+            ) as Record<string, unknown>;
+            expect(summary.repositoryCommitHash).toBe(
+                expectedRepositoryCommitHash,
+            );
+            expect(summary.repositoryTreeDirty).toBe(
+                expectedRepositoryTreeDirty,
+            );
+            const diagnostics = await readFile(
+                path.join(log.runDirectoryPath, 'diagnostics.txt'),
+                'utf8',
+            );
+            expect(diagnostics).toContain(
+                `Repository commit: ${expectedRepositoryCommitHash}`,
+            );
+            expect(diagnostics).toContain(
+                `Repository tree dirty: ${String(expectedRepositoryTreeDirty)}`,
+            );
 
             const events = await readJsonLines(
                 path.join(log.runDirectoryPath, 'events.jsonl'),

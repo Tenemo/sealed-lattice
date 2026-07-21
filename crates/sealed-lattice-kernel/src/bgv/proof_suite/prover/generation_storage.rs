@@ -143,6 +143,19 @@ struct GeneratedCommonProofStorageResidentPayload {
     executor_catalog_byte_length: u64,
 }
 
+#[cfg(test)]
+struct GeneratedCommonProofStorageResidentPayloadRequirementInput<'input> {
+    tree_plans: &'input BTreeMap<u16, CommonProofMerkleStoragePlan>,
+    replay_polynomial_plan_count: usize,
+    relation_evaluation_transform_plan_count: usize,
+    relation_transform_resident_owned_payload_byte_length: u64,
+    setup_polynomial_query_transform_plan_count: usize,
+    setup_query_transform_resident_owned_payload_byte_length: u64,
+    quotient_constraint_transform_plan_count: usize,
+    quotient_transform_resident_owned_payload_byte_length: u64,
+    object_lifecycle_count: u32,
+}
+
 fn external_transform_resident_owned_payload_byte_length(
     plan: &ExternalStockhamTransformPlan,
 ) -> Result<u64, CommonProofProverError> {
@@ -257,16 +270,19 @@ impl GeneratedCommonProofStoragePlan {
 
 #[cfg(test)]
 fn generated_common_proof_storage_resident_payload_requirement(
-    tree_plans: &BTreeMap<u16, CommonProofMerkleStoragePlan>,
-    replay_polynomial_plan_count: usize,
-    relation_evaluation_transform_plan_count: usize,
-    relation_transform_resident_owned_payload_byte_length: u64,
-    setup_polynomial_query_transform_plan_count: usize,
-    setup_query_transform_resident_owned_payload_byte_length: u64,
-    quotient_constraint_transform_plan_count: usize,
-    quotient_transform_resident_owned_payload_byte_length: u64,
-    object_lifecycle_count: u32,
+    input: GeneratedCommonProofStorageResidentPayloadRequirementInput<'_>,
 ) -> Result<GeneratedCommonProofStorageResidentPayload, CommonProofProverError> {
+    let GeneratedCommonProofStorageResidentPayloadRequirementInput {
+        tree_plans,
+        replay_polynomial_plan_count,
+        relation_evaluation_transform_plan_count,
+        relation_transform_resident_owned_payload_byte_length,
+        setup_polynomial_query_transform_plan_count,
+        setup_query_transform_resident_owned_payload_byte_length,
+        quotient_constraint_transform_plan_count,
+        quotient_transform_resident_owned_payload_byte_length,
+        object_lifecycle_count,
+    } = input;
     let initial_tree_plan_catalog_byte_length = tree_plans.values().try_fold(
         map_entry_payload_byte_length::<u16, CommonProofMerkleStoragePlan>(tree_plans.len())?,
         |total, plan| checked_resident_add(total, plan.resident_owned_payload_byte_length()?),
@@ -2953,15 +2969,17 @@ fn derive_generated_common_proof_storage_geometry(
     let maximum_transaction_operation_count = distinct_physical_object_count;
     #[cfg(test)]
     let resident_payload_requirement = generated_common_proof_storage_resident_payload_requirement(
-        &tree_plans,
-        replay_polynomial_plans.len(),
-        relation_evaluation_transform_plan_count,
-        relation_transform_resident_owned_payload_byte_length,
-        setup_polynomial_query_transform_plan_count,
-        setup_query_transform_resident_owned_payload_byte_length,
-        quotient_constraint_transform_plan_count,
-        quotient_transform_resident_owned_payload_byte_length,
-        object_lifecycle_count,
+        GeneratedCommonProofStorageResidentPayloadRequirementInput {
+            tree_plans: &tree_plans,
+            replay_polynomial_plan_count: replay_polynomial_plans.len(),
+            relation_evaluation_transform_plan_count,
+            relation_transform_resident_owned_payload_byte_length,
+            setup_polynomial_query_transform_plan_count,
+            setup_query_transform_resident_owned_payload_byte_length,
+            quotient_constraint_transform_plan_count,
+            quotient_transform_resident_owned_payload_byte_length,
+            object_lifecycle_count,
+        },
     )
     .map_err(GeneratedCommonProofStoragePlanError::Prover)?;
     Ok(GeneratedCommonProofStorageGeometry {
@@ -3990,9 +4008,13 @@ fn resident_infrastructure_payload_accounting(
     catalog: &CompleteProofTreeCatalog,
     storage_payload: GeneratedCommonProofStorageResidentPayload,
     relation_evaluation_transform_plan_count: usize,
-    application_statement_schema_identifier: u16,
-    canonical_header_payload_byte_length: u64,
+    configuration: CommonProofResidentMemoryConfiguration,
 ) -> Result<CommonProofResidentInfrastructurePayloadAccounting, CommonProofProverError> {
+    let CommonProofResidentMemoryConfiguration {
+        application_statement_schema_identifier,
+        canonical_header_payload_byte_length,
+        ..
+    } = configuration;
     if canonical_header_payload_byte_length == 0 {
         return Err(CommonProofProverError::InvalidInput);
     }
@@ -4123,11 +4145,10 @@ fn derive_common_proof_resident_memory_plan(
     configuration: CommonProofResidentMemoryConfiguration,
 ) -> Result<CommonProofResidentMemoryPlan, CommonProofProverError> {
     let CommonProofResidentMemoryConfiguration {
-        application_statement_schema_identifier,
-        canonical_header_payload_byte_length,
         maximum_prefetched_query_byte_length,
         external_memory_write_chunk_byte_length,
         maximum_stream_window_byte_length,
+        ..
     } = configuration;
     if maximum_prefetched_query_byte_length == 0
         || external_memory_write_chunk_byte_length == 0
@@ -4145,8 +4166,7 @@ fn derive_common_proof_resident_memory_plan(
         catalog,
         storage_payload,
         relation_evaluation_transform_plan_count,
-        application_statement_schema_identifier,
-        canonical_header_payload_byte_length,
+        configuration,
     )?;
     let quotient_stream_requirement =
         common_proof_quotient_stream_requirement(variant, external_memory_write_chunk_byte_length)?;

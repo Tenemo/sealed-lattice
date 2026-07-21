@@ -18,6 +18,7 @@
         "build": "pnpm --recursive run build",
         "build:verify-reproducible": "tsx ./tools/ci/verify-build-reproducibility.ts",
         "check": "tsx ./tools/ci/run-check.ts",
+        "check:desktop": "tsx ./tools/ci/run-check.ts --include-desktop-browser",
         "release:version": "tsx ./tools/ci/release-version.ts",
         "test:rust:kernel": "tsx ./tools/ci/run-rust-kernel-tests.ts",
         "test:rust:kernel:heavy": "tsx ./tools/ci/run-rust-kernel-heavy-tests.ts",

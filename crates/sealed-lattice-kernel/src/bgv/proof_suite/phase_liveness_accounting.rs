@@ -350,7 +350,7 @@ pub(crate) struct SelectedProofGenerationAttemptTopology {
 #[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
 pub(crate) enum SelectedTargetReleasePhasePathOutcome {
     Accounting {
-        accounting: SelectedTargetReleaseStaticAccounting,
+        accounting: Box<SelectedTargetReleaseStaticAccounting>,
     },
     DerivationError {
         reason_code: String,
@@ -477,7 +477,9 @@ fn derive_target_release_phase_path(
         .map(|gap| missing_carrier(gap.dimension(), gap.reason_code(), gap.required_carrier()))
         .collect();
     (
-        SelectedTargetReleasePhasePathOutcome::Accounting { accounting },
+        SelectedTargetReleasePhasePathOutcome::Accounting {
+            accounting: Box::new(accounting),
+        },
         missing_carriers,
     )
 }
