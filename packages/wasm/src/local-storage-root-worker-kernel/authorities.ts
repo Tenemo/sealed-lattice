@@ -392,7 +392,7 @@ export const workerCommonProofApplicationRunners = new WeakMap<
     WorkerCommonProofApplicationRunner
 >();
 
-export type WorkerProductionOperationAuthorityRunner = Readonly<{
+type WorkerProductionOperationAuthorityRunner = Readonly<{
     withAuthority(
         identifiers: ClosedWorkerProductionOperationIdentifiers,
         operation: (

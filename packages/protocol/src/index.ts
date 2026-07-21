@@ -100,6 +100,7 @@ export type {
     TransferableDurableStateWitnessService,
 } from './runtime/durable-state-witness-service.js';
 export { AuthenticatedCheckpointStoreError } from './runtime/authenticated-checkpoint-store.js';
+export { createBallotAggregationCheckpointCustody } from './runtime/ballot-aggregation-checkpoint-custody.js';
 export { openBrowserLocalActionCryptographicProvider } from './runtime/browser-local-action-cryptographic-provider.js';
 export type {
     BrowserLocalActionCryptographicProvider,

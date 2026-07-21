@@ -176,17 +176,6 @@ export const installedProofAttemptLineageIdentifier = new Uint8Array(32).fill(
     0x7c,
 );
 
-export const bytesFromHex = (encoded: string): Uint8Array<ArrayBuffer> => {
-    const bytes = new Uint8Array(encoded.length / 2);
-    for (let byteIndex = 0; byteIndex < bytes.byteLength; byteIndex += 1) {
-        bytes[byteIndex] = Number.parseInt(
-            encoded.slice(byteIndex * 2, byteIndex * 2 + 2),
-            16,
-        );
-    }
-    return bytes;
-};
-
 export const fourByteReadRequest = (
     binding: Uint8Array,
     requestSequence: bigint,

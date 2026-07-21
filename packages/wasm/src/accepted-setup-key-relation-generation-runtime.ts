@@ -101,11 +101,10 @@ export type GeneratedAcceptedSetupKeyRelationProofVerificationInput = Omit<
         generatedProof: GeneratedAcceptedSetupKeyRelationProof;
     }>;
 
-export type GeneratedAcceptedSetupKeyRelationPackageContributionInput =
-    Readonly<{
-        generatedProof: GeneratedAcceptedSetupKeyRelationProof;
-        packageBuilder: AcceptedSetupPackageBuilder;
-    }>;
+type GeneratedAcceptedSetupKeyRelationPackageContributionInput = Readonly<{
+    generatedProof: GeneratedAcceptedSetupKeyRelationProof;
+    packageBuilder: AcceptedSetupPackageBuilder;
+}>;
 
 type SetupKeyRelationGenerationKernel = Readonly<{
     cancelGeneratedSource: NonNullable<

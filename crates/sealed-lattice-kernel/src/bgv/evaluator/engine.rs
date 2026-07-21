@@ -1,8 +1,3 @@
-#[cfg(test)]
-use num_bigint::BigInt;
-#[cfg(test)]
-use num_traits::{ToPrimitive, Zero};
-
 use crate::{
     bgv::{
         modular_arithmetic::{add_mod, add_mod_fast, inverse_mod, mul_mod, mul_mod_fast, sub_mod},
@@ -30,7 +25,7 @@ mod operations;
 
 pub(crate) use ciphertext_records::ciphertext_canonical_bytes;
 #[cfg(test)]
-pub(crate) use decryption::decryption_accumulator_to_coefficients;
+pub(crate) use decryption::{ExactDecryptionErrorObserver, decryption_accumulator_to_coefficients};
 #[cfg(test)]
 pub(crate) use operations::ciphertext_sub;
 pub(crate) use operations::{
@@ -268,7 +263,69 @@ impl DevelopmentBgvKey {
         &self,
         ciphertext: &Ciphertext,
     ) -> CanonicalResult<Vec<u64>> {
+        let accumulator = self.decryption_accumulator(ciphertext)?;
+
+        decryption_accumulator_to_coefficients(ciphertext, &accumulator)
+    }
+
+    pub(crate) fn exact_decryption_error_infinity_norm(
+        &self,
+        ciphertext: &Ciphertext,
+        expected_plaintext_coefficients: &[u64],
+    ) -> CanonicalResult<num_bigint::BigUint> {
+        self.exact_decryption_error_observer()?
+            .measure_infinity_norm(ciphertext, expected_plaintext_coefficients)
+    }
+
+    pub(crate) fn exact_decryption_error_observer(
+        &self,
+    ) -> CanonicalResult<ExactDecryptionErrorObserver> {
+        ExactDecryptionErrorObserver::new(&self.secret)
+    }
+
+    fn decryption_accumulator(&self, ciphertext: &Ciphertext) -> CanonicalResult<Vec<Vec<u64>>> {
+        if ciphertext.level >= DATA_PRIMES.len() {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidProtocolObject,
+                "BGV decryption received an unavailable data-prime level",
+            ));
+        }
         let primes = ciphertext.primes();
+        if ciphertext.components.is_empty() {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "BGV decryption requires at least one ciphertext component",
+            ));
+        }
+        for (component_index, component) in ciphertext.components.iter().enumerate() {
+            if component.len() != primes.len() {
+                return Err(CanonicalError::new(
+                    CanonicalErrorCode::MalformedLength,
+                    format!(
+                        "BGV decryption ciphertext component {component_index} must have one limb per active data prime"
+                    ),
+                ));
+            }
+            for (limb_index, (limb, modulus)) in component.iter().zip(primes.iter()).enumerate() {
+                if limb.len() != POLYNOMIAL_DEGREE {
+                    return Err(CanonicalError::new(
+                        CanonicalErrorCode::MalformedLength,
+                        format!(
+                            "BGV decryption ciphertext component {component_index} limb {limb_index} has the wrong coefficient count"
+                        ),
+                    ));
+                }
+                if limb.iter().any(|coefficient| *coefficient >= *modulus) {
+                    return Err(CanonicalError::new(
+                        CanonicalErrorCode::InvalidProtocolObject,
+                        format!(
+                            "BGV decryption ciphertext component {component_index} limb {limb_index} has non-canonical residues"
+                        ),
+                    ));
+                }
+            }
+        }
+
         // D = sum_k c_k * s^k, evaluated per prime in the coefficient domain.
         let secret_residues = primes
             .iter()
@@ -301,7 +358,7 @@ impl DevelopmentBgvKey {
             }
         }
 
-        decryption_accumulator_to_coefficients(ciphertext, &accumulator)
+        Ok(accumulator)
     }
 
     pub(crate) fn decrypt_to_slots(&self, ciphertext: &Ciphertext) -> CanonicalResult<Vec<u64>> {

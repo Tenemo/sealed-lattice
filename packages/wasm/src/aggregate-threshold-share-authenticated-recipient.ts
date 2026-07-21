@@ -171,7 +171,7 @@ const requireAuthorityRecord = (
     return record;
 };
 
-export type AggregateThresholdShareRecipientAuthorityKernelOwner = Readonly<{
+type AggregateThresholdShareRecipientAuthorityKernelOwner = Readonly<{
     handle: number;
     kernel: TranscriptCoreKernel;
 }>;

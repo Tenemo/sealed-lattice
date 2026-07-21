@@ -132,7 +132,7 @@ const publicKeyShareSourceRecords = new WeakMap<
     PublicKeyShareSourceRecord
 >();
 
-export type SetupGenerationAuthorityKernelAuthorization = Readonly<{
+type SetupGenerationAuthorityKernelAuthorization = Readonly<{
     handle: number;
 }>;
 

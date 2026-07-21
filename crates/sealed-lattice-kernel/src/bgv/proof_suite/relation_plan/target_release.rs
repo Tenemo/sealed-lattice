@@ -2246,11 +2246,7 @@ fn target_release_source_blocks(
     let requested_source_columns =
         super::galois_key_share_adapter::requested_source_column_ordinals(variant)
             .map_err(|_| TargetReleaseWitnessError::InvalidWitness)?;
-    if !blocks
-        .keys()
-        .copied()
-        .eq(requested_source_columns.into_iter())
-    {
+    if !blocks.keys().copied().eq(requested_source_columns) {
         return Err(TargetReleaseWitnessError::InvalidWitness);
     }
     Ok(blocks)

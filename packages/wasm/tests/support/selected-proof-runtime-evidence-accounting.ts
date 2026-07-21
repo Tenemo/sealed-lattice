@@ -312,9 +312,3 @@ export const createSelectedProofRuntimeEvidenceAccounting = (input: {
         wrapPrefixReplayExternalMemory,
     });
 };
-
-export type SelectedProofRuntimeEvidenceAccounting = ReturnType<
-    typeof createSelectedProofRuntimeEvidenceAccounting
->;
-
-export type { CanonicalByteSummary };

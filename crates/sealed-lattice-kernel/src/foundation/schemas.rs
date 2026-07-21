@@ -20,6 +20,7 @@ pub const ROSTER_ENTRY_SCHEMA_IDENTIFIER: u16 = 0x0114;
 pub const ROSTER_SCHEMA_IDENTIFIER: u16 = 0x0115;
 pub const STREAM_DESCRIPTOR_SCHEMA_IDENTIFIER: u16 = 0x1800;
 pub(crate) const AGGREGATE_PAYLOAD_SCHEMA_IDENTIFIER: u16 = 0x1404;
+pub(crate) const AGGREGATE_PAYLOAD_SCHEMA_VERSION: u16 = 2;
 pub(super) const EVALUATOR_REPLAY_PAYLOAD_SCHEMA_IDENTIFIER: u16 = 0x1502;
 pub const ML_KEM_768_ENCAPSULATION_KEY_BYTE_LENGTH: usize = ml_kem_768::EK_LEN;
 
@@ -488,28 +489,20 @@ impl StreamDescriptor {
 pub(crate) struct AggregatePayload {
     verified_setup_source_hash: Hash512,
     selected_ballot_object_hashes: Vec<Hash512>,
-    aggregate_ciphertext_descriptor: StreamDescriptor,
+    aggregate_ciphertext_descriptors: [StreamDescriptor; 2],
 }
 
 impl AggregatePayload {
     pub(crate) fn new(
         verified_setup_source_hash: Hash512,
         selected_ballot_object_hashes: Vec<Hash512>,
-        aggregate_ciphertext_descriptor: StreamDescriptor,
+        aggregate_ciphertext_descriptors: [StreamDescriptor; 2],
     ) -> SchemaResult<Self> {
-        if selected_ballot_object_hashes.is_empty()
-            || selected_ballot_object_hashes.len()
-                > usize::from(FOUNDATION_PROFILE.participant_count)
-        {
-            return Err(FoundationSchemaError::new(
-                RefusalReason::WrongTypeOrLength,
-                "aggregate selected-ballot count is outside the frozen-roster bound",
-            ));
-        }
+        validate_aggregate_selected_ballot_count(selected_ballot_object_hashes.len())?;
         Ok(Self {
             verified_setup_source_hash,
             selected_ballot_object_hashes,
-            aggregate_ciphertext_descriptor,
+            aggregate_ciphertext_descriptors,
         })
     }
 
@@ -521,16 +514,14 @@ impl AggregatePayload {
         &self.selected_ballot_object_hashes
     }
 
-    pub(crate) const fn aggregate_ciphertext_descriptor(&self) -> &StreamDescriptor {
-        &self.aggregate_ciphertext_descriptor
+    pub(crate) const fn aggregate_ciphertext_descriptors(&self) -> &[StreamDescriptor; 2] {
+        &self.aggregate_ciphertext_descriptors
     }
 
-    #[cfg(test)]
     pub(crate) fn encode(&self) -> SchemaResult<Vec<u8>> {
         Ok(self.canonical_tuple()?.encode()?)
     }
 
-    #[cfg(test)]
     fn canonical_tuple(&self) -> SchemaResult<CanonicalTuple> {
         let selected_ballot_object_hashes = self
             .selected_ballot_object_hashes
@@ -539,7 +530,7 @@ impl AggregatePayload {
             .collect::<Vec<_>>();
         Ok(CanonicalTuple::new(
             AGGREGATE_PAYLOAD_SCHEMA_IDENTIFIER,
-            FOUNDATION_SCHEMA_VERSION,
+            AGGREGATE_PAYLOAD_SCHEMA_VERSION,
             vec![
                 CanonicalItem::hash512(self.verified_setup_source_hash.into_bytes()),
                 CanonicalItem::homogeneous_list(
@@ -547,13 +538,17 @@ impl AggregatePayload {
                     &selected_ballot_object_hashes,
                 )?,
                 CanonicalItem::nested_tuple(
-                    &self.aggregate_ciphertext_descriptor.canonical_tuple()?,
+                    &self.aggregate_ciphertext_descriptors[0].canonical_tuple()?,
+                )?,
+                CanonicalItem::nested_tuple(
+                    &self.aggregate_ciphertext_descriptors[1].canonical_tuple()?,
                 )?,
             ],
         ))
     }
 
     pub(crate) fn decode(bytes: &[u8], limits: &CanonicalDecodeLimits) -> SchemaResult<Self> {
+        preflight_aggregate_payload_selected_ballot_count(bytes, limits)?;
         Self::from_tuple(&CanonicalTuple::decode(bytes, limits)?, limits)
     }
 
@@ -561,13 +556,62 @@ impl AggregatePayload {
         tuple: &CanonicalTuple,
         limits: &CanonicalDecodeLimits,
     ) -> SchemaResult<Self> {
-        require_header(tuple, AGGREGATE_PAYLOAD_SCHEMA_IDENTIFIER, 3)?;
+        require_header_with_version(
+            tuple,
+            AGGREGATE_PAYLOAD_SCHEMA_IDENTIFIER,
+            AGGREGATE_PAYLOAD_SCHEMA_VERSION,
+            4,
+        )?;
+        let (selected_ballot_count, _) =
+            read_list_header(&tuple.items[1], CanonicalItemType::Hash512)?;
+        validate_aggregate_selected_ballot_count(selected_ballot_count)?;
         Self::new(
             read_hash(&tuple.items[0])?,
             read_hash_list(&tuple.items[1])?,
-            read_stream_descriptor_item(&tuple.items[2], limits)?,
+            [
+                read_stream_descriptor_item(&tuple.items[2], limits)?,
+                read_stream_descriptor_item(&tuple.items[3], limits)?,
+            ],
         )
     }
+}
+
+pub(crate) fn encode_aggregate_carrier(
+    suite_identifier: Hash512,
+    ceremony_context_hash: Hash512,
+    action_context_hash: Hash512,
+    verified_setup_source_hash: Hash512,
+    selected_ballot_object_hashes: Vec<Hash512>,
+    aggregate_ciphertext_descriptors: [StreamDescriptor; 2],
+) -> SchemaResult<Vec<u8>> {
+    ObjectEnvelope {
+        suite_id: suite_identifier,
+        object_type: FoundationObjectType::Aggregate,
+        ceremony_context_hash,
+        action_context_hash,
+        producer_participant_id: None,
+        producer_sequence: 0,
+        ordered_prerequisite_hashes: Vec::new(),
+        payload_bytes: AggregatePayload::new(
+            verified_setup_source_hash,
+            selected_ballot_object_hashes,
+            aggregate_ciphertext_descriptors,
+        )?
+        .encode()?,
+    }
+    .encode()
+}
+
+fn validate_aggregate_selected_ballot_count(selected_ballot_count: usize) -> SchemaResult<()> {
+    if selected_ballot_count == 0
+        || selected_ballot_count > usize::from(FOUNDATION_PROFILE.participant_count)
+    {
+        return Err(FoundationSchemaError::new(
+            RefusalReason::WrongTypeOrLength,
+            "aggregate selected-ballot count is outside the frozen-roster bound",
+        ));
+    }
+    Ok(())
 }
 
 /// The single canonical representation of a deterministic evaluator replay.
@@ -919,26 +963,88 @@ pub(super) fn require_header(
     schema_identifier: u16,
     item_count: usize,
 ) -> SchemaResult<()> {
-    if tuple.schema_identifier != schema_identifier || tuple.items.len() != item_count {
+    require_header_with_version(
+        tuple,
+        schema_identifier,
+        FOUNDATION_SCHEMA_VERSION,
+        item_count,
+    )
+}
+
+fn require_header_with_version(
+    tuple: &CanonicalTuple,
+    schema_identifier: u16,
+    schema_version: u16,
+    item_count: usize,
+) -> SchemaResult<()> {
+    if tuple.schema_identifier != schema_identifier {
         return Err(FoundationSchemaError::new(
             RefusalReason::WrongTypeOrLength,
-            "foundation tuple has the wrong schema or item count",
+            "foundation tuple has the wrong schema",
         ));
     }
-    if tuple.schema_version != FOUNDATION_SCHEMA_VERSION {
+    if tuple.schema_version != schema_version {
         return Err(FoundationSchemaError::new(
             RefusalReason::UnsupportedVersionOrSuite,
             "foundation tuple schema version is unsupported",
         ));
     }
+    if tuple.items.len() != item_count {
+        return Err(FoundationSchemaError::new(
+            RefusalReason::WrongTypeOrLength,
+            "foundation tuple has the wrong item count",
+        ));
+    }
     Ok(())
+}
+
+fn preflight_aggregate_payload_selected_ballot_count(
+    bytes: &[u8],
+    limits: &CanonicalDecodeLimits,
+) -> SchemaResult<()> {
+    const ITEM_TYPES: [CanonicalItemType; 4] = [
+        CanonicalItemType::Hash512,
+        CanonicalItemType::HomogeneousList,
+        CanonicalItemType::NestedTuple,
+        CanonicalItemType::NestedTuple,
+    ];
+    let Some(selected_ballot_list_bytes) = raw_schema_item(
+        bytes,
+        limits,
+        AGGREGATE_PAYLOAD_SCHEMA_IDENTIFIER,
+        AGGREGATE_PAYLOAD_SCHEMA_VERSION,
+        &ITEM_TYPES,
+        1,
+    ) else {
+        return Ok(());
+    };
+    let Some(selected_ballot_count) = raw_homogeneous_list_count(
+        selected_ballot_list_bytes,
+        CanonicalItemType::Hash512,
+        limits,
+    ) else {
+        return Ok(());
+    };
+    validate_aggregate_selected_ballot_count(usize::try_from(selected_ballot_count).map_err(
+        |_| {
+            FoundationSchemaError::new(
+                RefusalReason::OutsideSupportedProfile,
+                "aggregate selected-ballot count does not fit this runtime",
+            )
+        },
+    )?)
 }
 
 fn preflight_roster_entry_count(bytes: &[u8], limits: &CanonicalDecodeLimits) -> SchemaResult<()> {
     const ITEM_TYPES: [CanonicalItemType; 1] = [CanonicalItemType::HomogeneousList];
-    let Some(entry_list_bytes) =
-        raw_schema_item(bytes, limits, ROSTER_SCHEMA_IDENTIFIER, &ITEM_TYPES, 0)
-    else {
+    let Some(entry_list_bytes) = raw_schema_item(
+        bytes,
+        limits,
+        ROSTER_SCHEMA_IDENTIFIER,
+        FOUNDATION_SCHEMA_VERSION,
+        &ITEM_TYPES,
+        0,
+    ) else {
         return Ok(());
     };
     let Some(declared_entry_count) =
@@ -972,6 +1078,7 @@ fn preflight_stream_descriptor_chunk_count(
         bytes,
         limits,
         STREAM_DESCRIPTOR_SCHEMA_IDENTIFIER,
+        FOUNDATION_SCHEMA_VERSION,
         &ITEM_TYPES,
         0,
     ) else {
@@ -987,6 +1094,7 @@ fn preflight_stream_descriptor_chunk_count(
         bytes,
         limits,
         STREAM_DESCRIPTOR_SCHEMA_IDENTIFIER,
+        FOUNDATION_SCHEMA_VERSION,
         &ITEM_TYPES,
         1,
     ) else {
@@ -1020,6 +1128,7 @@ fn raw_schema_item<'a>(
     bytes: &'a [u8],
     limits: &CanonicalDecodeLimits,
     expected_schema_identifier: u16,
+    expected_schema_version: u16,
     expected_item_types: &[CanonicalItemType],
     requested_item_index: usize,
 ) -> Option<&'a [u8]> {
@@ -1035,7 +1144,7 @@ fn raw_schema_item<'a>(
     }
     let tuple_header = bytes.get(..TUPLE_HEADER_BYTE_LENGTH)?;
     if read_raw_u16(tuple_header, 0)? != expected_schema_identifier
-        || read_raw_u16(tuple_header, 2)? != FOUNDATION_SCHEMA_VERSION
+        || read_raw_u16(tuple_header, 2)? != expected_schema_version
         || usize::try_from(read_raw_u32(tuple_header, 4)?).ok()? != expected_item_types.len()
     {
         return None;
@@ -1331,22 +1440,24 @@ mod tests {
             Hash512::from_bytes([0x32; Hash512::BYTE_LENGTH]),
             Hash512::from_bytes([0x33; Hash512::BYTE_LENGTH]),
         ];
-        let descriptor_digest = Hash512::from_bytes([0x44; Hash512::BYTE_LENGTH]);
-        let aggregate_ciphertext_descriptor =
-            StreamDescriptor::new(17, vec![descriptor_digest], descriptor_digest)
-                .expect("one short stream has one chunk");
+        let first_descriptor_digest = Hash512::from_bytes([0x44; Hash512::BYTE_LENGTH]);
+        let second_descriptor_digest = Hash512::from_bytes([0x45; Hash512::BYTE_LENGTH]);
+        let aggregate_ciphertext_descriptors = [
+            StreamDescriptor::new(17, vec![first_descriptor_digest], first_descriptor_digest)
+                .expect("one short stream has one chunk"),
+            StreamDescriptor::new(19, vec![second_descriptor_digest], second_descriptor_digest)
+                .expect("one short stream has one chunk"),
+        ];
         let payload = AggregatePayload::new(
             Hash512::from_bytes([0x11; Hash512::BYTE_LENGTH]),
             selected_ballot_object_hashes.clone(),
-            aggregate_ciphertext_descriptor.clone(),
+            aggregate_ciphertext_descriptors.clone(),
         )
         .expect("aggregate payload");
+        let encoded = payload.encode().expect("aggregate payload encodes");
 
-        let decoded = AggregatePayload::decode(
-            &payload.encode().expect("aggregate payload encodes"),
-            &CanonicalDecodeLimits::default(),
-        )
-        .expect("aggregate payload decodes");
+        let decoded = AggregatePayload::decode(&encoded, &CanonicalDecodeLimits::default())
+            .expect("aggregate payload decodes");
         assert_eq!(decoded, payload);
         assert_eq!(
             decoded.verified_setup_source_hash(),
@@ -1357,8 +1468,83 @@ mod tests {
             selected_ballot_object_hashes.as_slice()
         );
         assert_eq!(
-            decoded.aggregate_ciphertext_descriptor(),
-            &aggregate_ciphertext_descriptor
+            decoded.aggregate_ciphertext_descriptors(),
+            &aggregate_ciphertext_descriptors
+        );
+
+        let tuple = CanonicalTuple::decode(&encoded, &CanonicalDecodeLimits::default())
+            .expect("aggregate tuple decodes");
+        assert_eq!(tuple.schema_identifier, AGGREGATE_PAYLOAD_SCHEMA_IDENTIFIER);
+        assert_eq!(tuple.schema_version, AGGREGATE_PAYLOAD_SCHEMA_VERSION);
+        assert_eq!(tuple.items.len(), 4);
+        assert_eq!(tuple.items[0].item_type(), CanonicalItemType::Hash512);
+        assert_eq!(
+            tuple.items[1].item_type(),
+            CanonicalItemType::HomogeneousList
+        );
+        for descriptor_item in &tuple.items[2..] {
+            assert_eq!(descriptor_item.item_type(), CanonicalItemType::NestedTuple);
+            let descriptor_tuple = CanonicalTuple::decode(
+                descriptor_item.canonical_bytes(),
+                &CanonicalDecodeLimits::default(),
+            )
+            .expect("nested stream descriptor decodes");
+            assert_eq!(descriptor_tuple.schema_version, FOUNDATION_SCHEMA_VERSION);
+        }
+    }
+
+    #[test]
+    fn aggregate_carrier_encoder_roundtrips_the_fixed_unsigned_envelope() {
+        let suite_identifier = Hash512::from_bytes([0x11; Hash512::BYTE_LENGTH]);
+        let ceremony_context_hash = Hash512::from_bytes([0x12; Hash512::BYTE_LENGTH]);
+        let action_context_hash = Hash512::from_bytes([0x13; Hash512::BYTE_LENGTH]);
+        let verified_setup_source_hash = Hash512::from_bytes([0x14; Hash512::BYTE_LENGTH]);
+        let selected_ballot_object_hashes = vec![
+            Hash512::from_bytes([0x21; Hash512::BYTE_LENGTH]),
+            Hash512::from_bytes([0x22; Hash512::BYTE_LENGTH]),
+        ];
+        let first_digest = Hash512::from_bytes([0x31; Hash512::BYTE_LENGTH]);
+        let second_digest = Hash512::from_bytes([0x32; Hash512::BYTE_LENGTH]);
+        let aggregate_ciphertext_descriptors = [
+            StreamDescriptor::new(1, vec![first_digest], first_digest)
+                .expect("first descriptor is valid"),
+            StreamDescriptor::new(1, vec![second_digest], second_digest)
+                .expect("second descriptor is valid"),
+        ];
+
+        let carrier = encode_aggregate_carrier(
+            suite_identifier,
+            ceremony_context_hash,
+            action_context_hash,
+            verified_setup_source_hash,
+            selected_ballot_object_hashes.clone(),
+            aggregate_ciphertext_descriptors.clone(),
+        )
+        .expect("aggregate carrier encodes");
+        let envelope = ObjectEnvelope::decode(&carrier, &CanonicalDecodeLimits::default())
+            .expect("aggregate envelope decodes");
+        assert_eq!(envelope.suite_id, suite_identifier);
+        assert_eq!(envelope.object_type, FoundationObjectType::Aggregate);
+        assert_eq!(envelope.ceremony_context_hash, ceremony_context_hash);
+        assert_eq!(envelope.action_context_hash, action_context_hash);
+        assert_eq!(envelope.producer_participant_id, None);
+        assert_eq!(envelope.producer_sequence, 0);
+        assert!(envelope.ordered_prerequisite_hashes.is_empty());
+
+        let payload =
+            AggregatePayload::decode(&envelope.payload_bytes, &CanonicalDecodeLimits::default())
+                .expect("aggregate payload decodes");
+        assert_eq!(
+            payload.verified_setup_source_hash(),
+            verified_setup_source_hash
+        );
+        assert_eq!(
+            payload.selected_ballot_object_hashes(),
+            selected_ballot_object_hashes.as_slice()
+        );
+        assert_eq!(
+            payload.aggregate_ciphertext_descriptors(),
+            &aggregate_ciphertext_descriptors
         );
     }
 
@@ -1378,13 +1564,93 @@ mod tests {
                 AggregatePayload::new(
                     Hash512::from_bytes([0x11; Hash512::BYTE_LENGTH]),
                     selected_ballot_object_hashes,
-                    descriptor.clone(),
+                    [descriptor.clone(), descriptor.clone()],
                 )
                 .expect_err("selection count outside one through n refuses")
                 .refusal_reason,
                 RefusalReason::WrongTypeOrLength
             );
         }
+    }
+
+    #[test]
+    fn aggregate_payload_rejects_old_and_future_versions_and_descriptor_arity_changes() {
+        let first_digest = Hash512::from_bytes([0x61; Hash512::BYTE_LENGTH]);
+        let second_digest = Hash512::from_bytes([0x62; Hash512::BYTE_LENGTH]);
+        let payload = AggregatePayload::new(
+            Hash512::from_bytes([0x11; Hash512::BYTE_LENGTH]),
+            vec![Hash512::from_bytes([0x51; Hash512::BYTE_LENGTH])],
+            [
+                StreamDescriptor::new(1, vec![first_digest], first_digest)
+                    .expect("first descriptor is valid"),
+                StreamDescriptor::new(1, vec![second_digest], second_digest)
+                    .expect("second descriptor is valid"),
+            ],
+        )
+        .expect("aggregate payload");
+        let tuple = CanonicalTuple::decode(
+            &payload.encode().expect("aggregate payload encodes"),
+            &CanonicalDecodeLimits::default(),
+        )
+        .expect("aggregate tuple decodes");
+
+        let mut old_version_tuple = tuple.clone();
+        old_version_tuple.schema_version = FOUNDATION_SCHEMA_VERSION;
+        old_version_tuple.items.pop();
+        let old_version_error = AggregatePayload::decode(
+            &old_version_tuple
+                .encode()
+                .expect("old aggregate tuple encodes"),
+            &CanonicalDecodeLimits::default(),
+        )
+        .expect_err("the superseded version-one aggregate shape refuses");
+        assert_eq!(
+            old_version_error.refusal_reason,
+            RefusalReason::UnsupportedVersionOrSuite
+        );
+
+        let mut future_version_tuple = tuple.clone();
+        future_version_tuple.schema_version = AGGREGATE_PAYLOAD_SCHEMA_VERSION + 1;
+        let future_version_error = AggregatePayload::decode(
+            &future_version_tuple
+                .encode()
+                .expect("future aggregate tuple encodes"),
+            &CanonicalDecodeLimits::default(),
+        )
+        .expect_err("a future aggregate version refuses");
+        assert_eq!(
+            future_version_error.refusal_reason,
+            RefusalReason::UnsupportedVersionOrSuite
+        );
+
+        let mut missing_descriptor_tuple = tuple.clone();
+        missing_descriptor_tuple.items.pop();
+        let missing_descriptor_error = AggregatePayload::decode(
+            &missing_descriptor_tuple
+                .encode()
+                .expect("missing-descriptor aggregate tuple encodes"),
+            &CanonicalDecodeLimits::default(),
+        )
+        .expect_err("a version-two aggregate missing one descriptor refuses");
+        assert_eq!(
+            missing_descriptor_error.refusal_reason,
+            RefusalReason::WrongTypeOrLength
+        );
+
+        let mut extra_descriptor_tuple = tuple;
+        let extra_descriptor = extra_descriptor_tuple.items[3].clone();
+        extra_descriptor_tuple.items.push(extra_descriptor);
+        let extra_descriptor_error = AggregatePayload::decode(
+            &extra_descriptor_tuple
+                .encode()
+                .expect("extra-descriptor aggregate tuple encodes"),
+            &CanonicalDecodeLimits::default(),
+        )
+        .expect_err("a version-two aggregate with an extra descriptor refuses");
+        assert_eq!(
+            extra_descriptor_error.refusal_reason,
+            RefusalReason::WrongTypeOrLength
+        );
     }
 
     #[test]

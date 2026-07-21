@@ -33,7 +33,10 @@ pub(crate) mod candidate_evidence;
 pub(crate) mod engine;
 pub(crate) mod key_switch;
 pub(crate) mod noise_recurrence;
+pub(crate) mod pair_character_product;
 pub(crate) mod program;
 pub(crate) mod records;
 pub(crate) mod replay;
+#[cfg(test)]
+pub(crate) mod semantic_oracle;
 pub(crate) mod top_k;

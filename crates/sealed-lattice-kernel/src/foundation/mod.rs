@@ -6,6 +6,8 @@ mod board_ingestion_ffi;
 mod board_ingestion_runtime;
 mod canonical_stream;
 mod canonical_stream_runtime;
+#[cfg(test)]
+pub(crate) mod canonical_transport_accounting;
 mod canonical_tuple;
 mod ceremony;
 mod finality;
@@ -151,7 +153,9 @@ pub use proof_application::{
     ProofFamilyApplicationCeiling, ProofObjectHeader,
 };
 pub use refusal::{RefusalReason, VerificationResult};
-pub(crate) use schemas::{AggregatePayload, encode_evaluator_replay_carrier};
+pub(crate) use schemas::{
+    AggregatePayload, encode_aggregate_carrier, encode_evaluator_replay_carrier,
+};
 pub use schemas::{
     FOUNDATION_PROFILE, FoundationObjectType, FoundationProfile, FoundationRosterParameters,
     FoundationSchemaError, MAXIMUM_CONFIGURABLE_PARTICIPANT_COUNT,

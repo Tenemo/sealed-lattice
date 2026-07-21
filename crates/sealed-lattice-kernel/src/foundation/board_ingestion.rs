@@ -4,9 +4,7 @@ use std::{
     sync::Arc,
 };
 
-#[cfg(test)]
-use super::schemas::AGGREGATE_PAYLOAD_SCHEMA_IDENTIFIER;
-use super::schemas::{AggregatePayload, EvaluatorReplayPayload};
+use super::schemas::{AGGREGATE_PAYLOAD_SCHEMA_VERSION, AggregatePayload, EvaluatorReplayPayload};
 use super::{
     CanonicalCodecError, CanonicalCodecErrorKind, CanonicalDecodeLimits, CanonicalItem,
     CanonicalItemType, CanonicalTuple, FINALITY_SIGNATURE_PAYLOAD_SCHEMA_IDENTIFIER,
@@ -1150,7 +1148,11 @@ fn decode_typed_payload(
     limits: &CanonicalDecodeLimits,
 ) -> BoardResult<TypedPayload> {
     let tuple = CanonicalTuple::decode(payload_bytes, limits)?;
-    if tuple.schema_version != FOUNDATION_SCHEMA_VERSION {
+    let expected_schema_version = match object_type {
+        FoundationObjectType::Aggregate => AGGREGATE_PAYLOAD_SCHEMA_VERSION,
+        _ => FOUNDATION_SCHEMA_VERSION,
+    };
+    if tuple.schema_version != expected_schema_version {
         return Err(CanonicalBoardError::new(
             RefusalReason::UnsupportedVersionOrSuite,
             "transcript payload schema version is unsupported",

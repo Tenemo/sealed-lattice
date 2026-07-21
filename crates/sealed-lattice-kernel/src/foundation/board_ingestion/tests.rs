@@ -349,22 +349,18 @@ impl BoardFixture {
         verified_setup_source_hash: Hash512,
         selected_ballot_object_hashes: &[Hash512],
     ) -> (Vec<u8>, Hash512) {
-        let selected_ballots = selected_ballot_object_hashes
-            .iter()
-            .map(|hash| CanonicalItem::hash512(hash.into_bytes()))
-            .collect::<Vec<_>>();
-        let payload = CanonicalTuple::new(
-            AGGREGATE_PAYLOAD_SCHEMA_IDENTIFIER,
-            FOUNDATION_SCHEMA_VERSION,
-            vec![
-                CanonicalItem::hash512(verified_setup_source_hash.into_bytes()),
-                CanonicalItem::homogeneous_list(CanonicalItemType::Hash512, &selected_ballots)
-                    .expect("selected-ballot hash list encodes"),
-                test_stream_descriptor_item(0xc3),
-            ],
+        let payload = AggregatePayload::new(
+            verified_setup_source_hash,
+            selected_ballot_object_hashes.to_vec(),
+            [test_stream_descriptor(0xc3), test_stream_descriptor(0xc4)],
         )
+        .expect("aggregate payload is structurally valid")
         .encode()
         .expect("aggregate payload encodes");
+        self.aggregate_from_payload_bytes(payload)
+    }
+
+    fn aggregate_from_payload_bytes(&self, payload_bytes: Vec<u8>) -> (Vec<u8>, Hash512) {
         let envelope = ObjectEnvelope {
             suite_id: self.suite_id,
             object_type: FoundationObjectType::Aggregate,
@@ -373,7 +369,7 @@ impl BoardFixture {
             producer_participant_id: None,
             producer_sequence: 0,
             ordered_prerequisite_hashes: Vec::new(),
-            payload_bytes: payload,
+            payload_bytes,
         };
         let object_hash = envelope
             .object_hash()
@@ -974,7 +970,24 @@ fn aggregate_selected_ballot_subset_must_be_nonempty_unique_and_roster_ordered()
         .map(|carrier| carrier_object_hash(carrier))
         .collect::<Vec<_>>();
 
-    let (empty_aggregate, _) = fixture.aggregate(verified_setup_source_hash, &[]);
+    let valid_payload = AggregatePayload::new(
+        verified_setup_source_hash,
+        vec![ballot_hashes[0]],
+        [test_stream_descriptor(0xc3), test_stream_descriptor(0xc4)],
+    )
+    .expect("nonempty aggregate payload is structurally valid")
+    .encode()
+    .expect("aggregate payload encodes");
+    let mut empty_payload_tuple =
+        CanonicalTuple::decode(&valid_payload, &CanonicalDecodeLimits::default())
+            .expect("aggregate payload tuple decodes");
+    empty_payload_tuple.items[1] = CanonicalItem::homogeneous_list(CanonicalItemType::Hash512, &[])
+        .expect("empty selected-ballot list encodes");
+    let (empty_aggregate, _) = fixture.aggregate_from_payload_bytes(
+        empty_payload_tuple
+            .encode()
+            .expect("empty aggregate payload encodes"),
+    );
     assert_eq!(
         fixture
             .verifier()
@@ -1103,6 +1116,72 @@ fn unsupported_family_and_payload_versions_refuse_before_acceptance() {
             .expect_err("unsupported payload version refuses"),
         RefusalReason::UnsupportedVersionOrSuite
     );
+}
+
+#[test]
+fn aggregate_payload_versions_and_descriptor_arity_refuse_before_dependency_resolution() {
+    let fixture = BoardFixture::new();
+    let valid_payload = AggregatePayload::new(
+        Hash512::from_bytes([0x51; Hash512::BYTE_LENGTH]),
+        vec![Hash512::from_bytes([0x61; Hash512::BYTE_LENGTH])],
+        [test_stream_descriptor(0xc3), test_stream_descriptor(0xc4)],
+    )
+    .expect("aggregate payload is structurally valid")
+    .encode()
+    .expect("aggregate payload encodes");
+    let valid_tuple = CanonicalTuple::decode(&valid_payload, &CanonicalDecodeLimits::default())
+        .expect("aggregate payload tuple decodes");
+
+    let mut old_version_tuple = valid_tuple.clone();
+    old_version_tuple.schema_version = FOUNDATION_SCHEMA_VERSION;
+    old_version_tuple.items.pop();
+
+    let mut future_version_tuple = valid_tuple.clone();
+    future_version_tuple.schema_version = AGGREGATE_PAYLOAD_SCHEMA_VERSION + 1;
+
+    let mut missing_descriptor_tuple = valid_tuple.clone();
+    missing_descriptor_tuple.items.pop();
+
+    let mut extra_descriptor_tuple = valid_tuple;
+    let extra_descriptor = extra_descriptor_tuple.items[3].clone();
+    extra_descriptor_tuple.items.push(extra_descriptor);
+
+    for (payload_tuple, expected_refusal_reason, refusal_description) in [
+        (
+            old_version_tuple,
+            RefusalReason::UnsupportedVersionOrSuite,
+            "the superseded version-one aggregate shape refuses",
+        ),
+        (
+            future_version_tuple,
+            RefusalReason::UnsupportedVersionOrSuite,
+            "a future aggregate version refuses",
+        ),
+        (
+            missing_descriptor_tuple,
+            RefusalReason::WrongTypeOrLength,
+            "a version-two aggregate missing one descriptor refuses",
+        ),
+        (
+            extra_descriptor_tuple,
+            RefusalReason::WrongTypeOrLength,
+            "a version-two aggregate with an extra descriptor refuses",
+        ),
+    ] {
+        let (aggregate, _) = fixture.aggregate_from_payload_bytes(
+            payload_tuple
+                .encode()
+                .expect("mutated aggregate payload encodes"),
+        );
+        assert_eq!(
+            fixture
+                .verifier()
+                .verify_unordered_carriers(&[aggregate])
+                .into_result()
+                .expect_err(refusal_description),
+            expected_refusal_reason
+        );
+    }
 }
 
 #[test]

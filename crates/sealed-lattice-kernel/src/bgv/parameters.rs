@@ -15,7 +15,13 @@ pub(crate) const PLAINTEXT_MODULUS: u64 = 257;
 pub(crate) const PLAINTEXT_EXTENSION_DEGREE: usize = 256;
 pub(crate) const PLAINTEXT_EXTENSION_LANE_COUNT: usize =
     POLYNOMIAL_DEGREE / PLAINTEXT_EXTENSION_DEGREE;
-pub(crate) const LOGICAL_SLOT_GENERATOR: usize = 3;
+// These two generators have distinct algebraic roles even though the selected
+// suite represents both by the integer three. The root generator has order
+// 256 in F_257^*, while the orbit generator has order 64 modulo 256 and
+// enumerates one bank of irreducible factors before their inverse bank.
+pub(crate) const PLAINTEXT_LANE_ROOT_GENERATOR: u64 = 3;
+pub(crate) const PLAINTEXT_LANE_ORBIT_GENERATOR: usize = 3;
+pub(crate) const PLAINTEXT_LANE_IDEMPOTENT_SCALE: u64 = PLAINTEXT_MODULUS - 2;
 pub(crate) const DATA_BASIS_ID: &str = "sealed-lattice-bgv-rns-data-basis";
 #[cfg(test)]
 pub(crate) const EXTENDED_BASIS_ID: &str = "sealed-lattice-bgv-rns-extended-basis";
@@ -25,7 +31,9 @@ pub(crate) const SPECIAL_BASIS_ID: &str = "sealed-lattice-bgv-rns-special-basis"
 mod parameter_generation;
 mod root_parameters;
 
-pub(crate) use parameter_generation::validate_supported_algebraic_parameters;
+pub(crate) use parameter_generation::{
+    plaintext_extension_lane_root, validate_supported_algebraic_parameters,
+};
 pub(crate) use root_parameters::{
     BgvBasisKind, DATA_PRIMES, NttTransformParameters, ROOT_PARAMETERS, RootParameters,
     SPECIAL_PRIMES, root_parameters_for_modulus,

@@ -23,7 +23,8 @@ pub(crate) use compiler::selected_evaluator_program_set;
 pub(crate) use executor::{
     PreparedSelectedEvaluatorReplay, SelectedEvaluatorExecutionProgress,
     SelectedEvaluatorProgramExecution, VerifiedEvaluatorAggregate,
-    VerifiedEvaluatorAggregateContext,
+    VerifiedEvaluatorAggregateContext, VerifiedEvaluatorAggregateExecutionAuthority,
+    VerifiedEvaluatorAggregationAuthority,
 };
 
 #[cfg(test)]

@@ -1,19 +1,24 @@
-use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
+use crate::{
+    bgv::parameters::{
+        PLAINTEXT_EXTENSION_DEGREE, PLAINTEXT_EXTENSION_LANE_COUNT,
+        PLAINTEXT_LANE_IDEMPOTENT_SCALE, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE,
+        plaintext_extension_lane_root,
+    },
+    encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
+};
 
 use super::{MAXIMUM_SCORE, MINIMUM_SCORE, OPTION_COUNT};
 
-pub(crate) const PAIR_CHARACTER_PLAINTEXT_MODULUS: u64 = 257;
-pub(crate) const PAIR_CHARACTER_RING_DEGREE: usize = 32_768;
-pub(crate) const PAIR_CHARACTER_LANE_COUNT: usize = 128;
-pub(crate) const PAIR_CHARACTER_LANE_DEGREE: usize = 256;
+pub(crate) const PAIR_CHARACTER_PLAINTEXT_MODULUS: u64 = PLAINTEXT_MODULUS;
+pub(crate) const PAIR_CHARACTER_RING_DEGREE: usize = POLYNOMIAL_DEGREE;
+pub(crate) const PAIR_CHARACTER_LANE_COUNT: usize = PLAINTEXT_EXTENSION_LANE_COUNT;
+pub(crate) const PAIR_CHARACTER_LANE_DEGREE: usize = PLAINTEXT_EXTENSION_DEGREE;
 pub(crate) const PAIR_CHARACTER_CIPHERTEXT_COUNT: usize = 2;
 pub(crate) const PAIR_CHARACTER_AUXILIARY_COUNT: usize = 3;
 pub(crate) const SCORE_BUCKET_COUNT: usize = (MAXIMUM_SCORE - MINIMUM_SCORE + 1) as usize;
 
 const PAIR_COUNT: usize = OPTION_COUNT * (OPTION_COUNT - 1) / 2;
 const PAIR_CHARACTER_BANK_LANE_COUNT: usize = PAIR_CHARACTER_LANE_COUNT / 2;
-const LANE_IDEMPOTENT_SCALE: u64 = 255;
-const LANE_ROOT_GENERATOR: u64 = 3;
 const EXPECTED_ACTIVE_LANE_COUNTS: [usize; PAIR_CHARACTER_CIPHERTEXT_COUNT] = [93, 97];
 
 /// One suite-fixed placement of every pair at a given option separation.
@@ -267,7 +272,7 @@ pub(crate) fn pair_character_plaintexts(
             PAIR_CHARACTER_PLAINTEXT_MODULUS - 2,
             PAIR_CHARACTER_PLAINTEXT_MODULUS,
         );
-        let mut idempotent_coefficient = LANE_IDEMPOTENT_SCALE;
+        let mut idempotent_coefficient = PLAINTEXT_LANE_IDEMPOTENT_SCALE;
         for lane_coefficient_ordinal in 0..PAIR_CHARACTER_LANE_COUNT {
             let lane_block_start = lane_coefficient_ordinal
                 .checked_mul(PAIR_CHARACTER_LANE_DEGREE)
@@ -369,7 +374,7 @@ pub(crate) fn pair_character_encoder_profile_terms(
                 PAIR_CHARACTER_PLAINTEXT_MODULUS - 2,
                 PAIR_CHARACTER_PLAINTEXT_MODULUS,
             );
-            let mut idempotent_coefficient = LANE_IDEMPOTENT_SCALE;
+            let mut idempotent_coefficient = PLAINTEXT_LANE_IDEMPOTENT_SCALE;
             for accumulated in &mut coefficient_by_lane_block {
                 *accumulated = modular_sum(
                     *accumulated,
@@ -455,7 +460,7 @@ pub(crate) fn pair_character_lane_idempotent_coefficients(
         PAIR_CHARACTER_PLAINTEXT_MODULUS,
     );
     let mut coefficients = Vec::with_capacity(PAIR_CHARACTER_LANE_COUNT);
-    let mut coefficient = LANE_IDEMPOTENT_SCALE;
+    let mut coefficient = PLAINTEXT_LANE_IDEMPOTENT_SCALE;
     for _ in 0..PAIR_CHARACTER_LANE_COUNT {
         coefficients.push(coefficient);
         coefficient = modular_product(
@@ -514,25 +519,7 @@ fn validate_pair_character_lane_assignments(
 }
 
 fn pair_character_lane_root(lane_ordinal: usize) -> CanonicalResult<u64> {
-    if lane_ordinal >= PAIR_CHARACTER_LANE_COUNT {
-        return Err(pair_character_geometry_error());
-    }
-    let orbit_ordinal = lane_ordinal % PAIR_CHARACTER_BANK_LANE_COUNT;
-    let positive_exponent = modular_power(
-        3,
-        u64::try_from(orbit_ordinal).map_err(|_| pair_character_geometry_error())?,
-        PAIR_CHARACTER_PLAINTEXT_MODULUS - 1,
-    );
-    let exponent = if lane_ordinal < PAIR_CHARACTER_BANK_LANE_COUNT {
-        positive_exponent
-    } else {
-        (PAIR_CHARACTER_PLAINTEXT_MODULUS - 1) - positive_exponent
-    };
-    Ok(modular_power(
-        LANE_ROOT_GENERATOR,
-        exponent,
-        PAIR_CHARACTER_PLAINTEXT_MODULUS,
-    ))
+    plaintext_extension_lane_root(lane_ordinal).ok_or_else(pair_character_geometry_error)
 }
 
 fn add_coefficient(

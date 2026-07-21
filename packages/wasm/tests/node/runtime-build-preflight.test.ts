@@ -215,6 +215,19 @@ const operationProfileForRandomUse = (
     );
 };
 
+const ballotAggregationCheckpointOperationProfile = (): Uint8Array => {
+    const checkpointBoundary = canonicalTuple(
+        0x1807,
+        unsigned16Item(0x180a),
+        nestedTupleListItem([]),
+    );
+    return canonicalTuple(
+        0x1808,
+        unsigned16Item(0x1404),
+        nestedTupleListItem([checkpointBoundary]),
+    );
+};
+
 const createFixture = (overrides: FixtureOverrides = {}) => {
     const assets: readonly AssetFixture[] = Object.freeze([
         {
@@ -497,6 +510,22 @@ const runFixture = async (input: {
 };
 
 describe('runtime build preflight', () => {
+    it('parses the exact ballot aggregation checkpoint operation profile', () => {
+        const fixture = createFixture({
+            operationProfiles: [ballotAggregationCheckpointOperationProfile()],
+        });
+        const manifest = decodeRuntimeBuildManifest(fixture.manifestBytes);
+
+        expect(manifest.operationProfiles).toHaveLength(1);
+        const operationProfile = manifest.operationProfiles[0];
+        expect(operationProfile?.operationKind).toBe(0x1404);
+        expect(operationProfile?.safeBoundaries).toHaveLength(1);
+        expect(operationProfile?.safeBoundaries[0]).toEqual({
+            orderedRandomUses: [],
+            stateSchemaIdentifier: 0x180a,
+        });
+    });
+
     it('matches the shared proof-family randomness coordinates', async () => {
         const vector = await readPrivateRandomnessProofCoordinatesVector();
         expect(vector.families.map((family) => family.familyName)).toEqual([

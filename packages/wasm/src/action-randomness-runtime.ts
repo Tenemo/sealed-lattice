@@ -107,7 +107,7 @@ type SessionState = {
 
 const sessionStates = new WeakMap<ActionRandomnessSession, SessionState>();
 
-export type ActionRandomnessKernelAuthorization = Readonly<{
+type ActionRandomnessKernelAuthorization = Readonly<{
     context: ActionRandomnessKernelContext;
     handle: number;
 }>;

@@ -49,7 +49,6 @@ import {
     type StoredRecipientVssPlaintextManifest,
 } from './records.js';
 
-export { AuthenticatedMailboxStorageError } from '../authenticated-mailbox-storage/records.js';
 export type {
     RecipientVssAuthenticatedMailboxPlaintextSink,
     RecipientVssAuthenticatedMailboxPlaintextSinkConfiguration,

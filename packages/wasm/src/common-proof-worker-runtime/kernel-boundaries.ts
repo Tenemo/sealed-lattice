@@ -132,7 +132,7 @@ export type CommonProofAuthenticatedSourceRangeRequest = Readonly<{
     storageByteOffset: bigint;
 }>;
 
-export type CommonProofExternalMemoryUsageAccounting = Readonly<{
+type CommonProofExternalMemoryUsageAccounting = Readonly<{
     deletedObjectLifecycleCount: bigint;
     peakStoredByteLength: bigint;
     totalReadByteLength: bigint;
@@ -140,7 +140,7 @@ export type CommonProofExternalMemoryUsageAccounting = Readonly<{
     transactionCount: bigint;
 }>;
 
-export type CommonProofGenerationExternalMemoryAccounting = Readonly<{
+type CommonProofGenerationExternalMemoryAccounting = Readonly<{
     actualUsage: CommonProofExternalMemoryUsageAccounting;
     compiledRequirement: Readonly<{
         maximumChunkByteLength: number;
@@ -156,7 +156,7 @@ export type CommonProofGenerationExternalMemoryAccounting = Readonly<{
     deterministicPrefixReplayUsage?: CommonProofExternalMemoryUsageAccounting;
 }>;
 
-export type CommonProofVerificationReadbackAccounting = Readonly<{
+type CommonProofVerificationReadbackAccounting = Readonly<{
     logicalRequiredByteLength: bigint;
     logicalRequiredRangeCount: bigint;
     suppliedFullChunkByteLength: bigint;

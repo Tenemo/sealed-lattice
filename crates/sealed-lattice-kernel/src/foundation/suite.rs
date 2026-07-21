@@ -12,8 +12,10 @@ use super::{
     derive_foundation_roster_parameters, hash_foundation_tuple_512,
 };
 use crate::bgv::{
-    evaluator::top_k::CANONICAL_TARGET_CIPHERTEXT_LEVEL,
-    key_switch_topology::KEY_SWITCH_DATA_PRIMES_PER_BLOCK,
+    evaluator::top_k::{
+        CANONICAL_TARGET_CIPHERTEXT_LEVEL, selected_evaluator_rotation_key_schedule,
+    },
+    key_switch_topology::{KEY_SWITCH_DATA_PRIMES_PER_BLOCK, KeySwitchDecompositionTopology},
     parameters::{
         DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE, SPECIAL_PRIMES,
         root_parameters_for_modulus, validate_supported_algebraic_parameters,
@@ -35,6 +37,14 @@ const ORDERED_TARGET_DATA_PRIME_INDEXES: [u16; CANONICAL_TARGET_CIPHERTEXT_LEVEL
     ordered_target_data_prime_indexes();
 const ORDERED_SHARING_DATA_PRIME_INDEXES: [u16; CANONICAL_TARGET_CIPHERTEXT_LEVEL + 1] =
     ORDERED_TARGET_DATA_PRIME_INDEXES;
+const SELECTED_TRACE_AND_SCATTER_KEY_SCHEDULE: [(usize, usize); 6] = [
+    (15, 14),
+    (19, 14),
+    (219, 14),
+    (257, 18),
+    (1_025, 18),
+    (8_193, 18),
+];
 
 const fn ordered_target_data_prime_indexes() -> [u16; CANONICAL_TARGET_CIPHERTEXT_LEVEL + 1] {
     let mut indexes = [0_u16; CANONICAL_TARGET_CIPHERTEXT_LEVEL + 1];
@@ -296,7 +306,7 @@ impl ArtifactKind {
 
     pub const fn artifact_schema_version(self) -> u16 {
         match self {
-            Self::EncoderAndBallotLayout => 2,
+            Self::EncoderAndBallotLayout => 4,
             Self::LatticeCommitmentProfile => 3,
             Self::ProofProfileSet => 3,
             Self::VerifiableSecretSharingProfile
@@ -769,6 +779,7 @@ fn validate_suite_items(tuple: &CanonicalTuple) -> SchemaResult<FoundationRoster
 }
 
 fn validate_fixed_algebra() -> SchemaResult<()> {
+    validate_supported_algebraic_parameters().map_err(|_| invalid_fixed_algebra())?;
     if !POLYNOMIAL_DEGREE.is_power_of_two()
         || POLYNOMIAL_DEGREE == 0
         || CANONICAL_TARGET_CIPHERTEXT_LEVEL + 1 != ORDERED_TARGET_DATA_PRIME_INDEXES.len()
@@ -806,7 +817,45 @@ fn validate_fixed_algebra() -> SchemaResult<()> {
     {
         return Err(invalid_fixed_algebra());
     }
-    validate_supported_algebraic_parameters().map_err(|_| invalid_fixed_algebra())
+
+    let target_coordinates = selected_target_data_prime_coordinates()?;
+    let sharing_coordinates = selected_sharing_data_prime_coordinates()?;
+    if target_coordinates != sharing_coordinates
+        || target_coordinates.len() != ORDERED_TARGET_DATA_PRIME_INDEXES.len()
+        || target_coordinates.iter().enumerate().any(
+            |(target_basis_position, (data_prime_index, modulus))| {
+                *data_prime_index != ORDERED_TARGET_DATA_PRIME_INDEXES[target_basis_position]
+                    || Some(modulus) != DATA_PRIMES.get(usize::from(*data_prime_index))
+            },
+        )
+    {
+        return Err(invalid_fixed_algebra());
+    }
+
+    let selected_key_switch_topology =
+        KeySwitchDecompositionTopology::for_level(DATA_PRIMES.len() - 1)
+            .map_err(|_| invalid_fixed_algebra())?;
+    if selected_key_switch_topology.level() + 1 != DATA_PRIMES.len()
+        || selected_key_switch_topology.active_data_moduli() != DATA_PRIMES
+        || selected_key_switch_topology.extended_moduli()[DATA_PRIMES.len()..]
+            != ORDERED_SPECIAL_PRIMES
+        || selected_key_switch_topology.data_block_count()
+            != DATA_PRIMES.len().div_ceil(KEY_SWITCH_DATA_PRIMES_PER_BLOCK)
+    {
+        return Err(invalid_fixed_algebra());
+    }
+
+    let trace_and_scatter_key_schedule =
+        selected_evaluator_rotation_key_schedule(usize::from(FOUNDATION_PROFILE.option_count))
+            .map_err(|_| invalid_fixed_algebra())?;
+    if trace_and_scatter_key_schedule.as_slice() != SELECTED_TRACE_AND_SCATTER_KEY_SCHEDULE {
+        return Err(invalid_fixed_algebra());
+    }
+    for (_, catalog_level) in trace_and_scatter_key_schedule {
+        KeySwitchDecompositionTopology::for_level(catalog_level)
+            .map_err(|_| invalid_fixed_algebra())?;
+    }
+    Ok(())
 }
 
 fn validate_artifacts(artifacts: &[ArtifactReference]) -> SchemaResult<()> {
@@ -1000,6 +1049,18 @@ mod tests {
         SuiteRecord::new(sample_count_limits(), sample_artifacts()).expect("test suite is valid")
     }
 
+    fn assert_fixed_algebra_mutation_refuses(tuple: CanonicalTuple, description: &str) {
+        assert_eq!(
+            SuiteRecord::decode(
+                &tuple.encode().expect("mutated suite encodes"),
+                &CanonicalDecodeLimits::default(),
+            )
+            .expect_err(description)
+            .refusal_reason,
+            RefusalReason::UnsupportedVersionOrSuite
+        );
+    }
+
     #[test]
     fn selected_target_and_sharing_coordinates_preserve_the_same_exact_order() {
         let coordinates =
@@ -1153,27 +1214,114 @@ mod tests {
     }
 
     #[test]
-    fn suite_decode_refuses_missing_extra_reordered_and_substituted_sharing_coordinates() {
-        for invalid_sharing_indexes in [
-            vec![0, 1, 2, 3, 4],
-            vec![0, 1, 2, 3, 4, 5, 6],
-            vec![0, 1, 2, 3, 5, 4],
-            vec![0, 1, 2, 3, 4, 6],
+    fn suite_decode_refuses_modulus_basis_and_key_switch_mutations() {
+        let selected_tuple = sample_suite()
+            .canonical_tuple()
+            .expect("suite tuple derives");
+
+        let mut wrong_plaintext_modulus = selected_tuple.clone();
+        wrong_plaintext_modulus.items[6] = CanonicalItem::unsigned64(PLAINTEXT_MODULUS + 2);
+        assert_fixed_algebra_mutation_refuses(
+            wrong_plaintext_modulus,
+            "wrong plaintext modulus must refuse",
+        );
+
+        let selected_data_primes =
+            read_unsigned64_list(&selected_tuple.items[7]).expect("data basis decodes");
+        let mut substituted_data_primes = selected_data_primes.clone();
+        substituted_data_primes[0] = substituted_data_primes[0]
+            .checked_add(2)
+            .expect("mutated data prime fits u64");
+        let mut reordered_data_primes = selected_data_primes;
+        reordered_data_primes.swap(0, 1);
+        for (description, data_primes) in [
+            (
+                "substituted data basis must refuse",
+                substituted_data_primes,
+            ),
+            ("reordered data basis must refuse", reordered_data_primes),
         ] {
-            let mut tuple = sample_suite()
-                .canonical_tuple()
-                .expect("suite tuple derives");
-            tuple.items[10] =
-                unsigned16_list(&invalid_sharing_indexes).expect("sharing index list encodes");
-            assert_eq!(
-                SuiteRecord::decode(
-                    &tuple.encode().expect("mutated suite encodes"),
-                    &CanonicalDecodeLimits::default(),
-                )
-                .expect_err("noncanonical sharing coordinates must refuse")
-                .refusal_reason,
-                RefusalReason::UnsupportedVersionOrSuite
-            );
+            let mut wrong_data_basis = selected_tuple.clone();
+            wrong_data_basis.items[7] =
+                unsigned64_list(&data_primes).expect("mutated data basis encodes");
+            assert_fixed_algebra_mutation_refuses(wrong_data_basis, description);
+        }
+
+        let selected_special_primes =
+            read_unsigned64_list(&selected_tuple.items[8]).expect("special basis decodes");
+        let mut substituted_special_primes = selected_special_primes.clone();
+        substituted_special_primes[0] = substituted_special_primes[0]
+            .checked_add(2)
+            .expect("mutated special prime fits u64");
+        let mut reordered_special_primes = selected_special_primes;
+        reordered_special_primes.swap(0, 1);
+        for (description, special_primes) in [
+            (
+                "substituted special basis must refuse",
+                substituted_special_primes,
+            ),
+            (
+                "reordered special basis must refuse",
+                reordered_special_primes,
+            ),
+        ] {
+            let mut wrong_special_basis = selected_tuple.clone();
+            wrong_special_basis.items[8] =
+                unsigned64_list(&special_primes).expect("mutated special basis encodes");
+            assert_fixed_algebra_mutation_refuses(wrong_special_basis, description);
+        }
+
+        for (description, item_ordinal, replacement) in [
+            (
+                "wrong key-switch method must refuse",
+                11,
+                CanonicalItem::unsigned16(KEY_SWITCH_METHOD + 1),
+            ),
+            (
+                "wrong key-switch block size must refuse",
+                12,
+                CanonicalItem::unsigned16(
+                    u16::try_from(KEY_SWITCH_DATA_PRIMES_PER_BLOCK + 1)
+                        .expect("mutated key-switch block size fits u16"),
+                ),
+            ),
+            (
+                "wrong key-switch converter must refuse",
+                13,
+                CanonicalItem::unsigned16(KEY_SWITCH_BASIS_CONVERTER + 1),
+            ),
+        ] {
+            let mut mutated = selected_tuple.clone();
+            mutated.items[item_ordinal] = replacement;
+            assert_fixed_algebra_mutation_refuses(mutated, description);
+        }
+    }
+
+    #[test]
+    fn suite_decode_refuses_target_and_sharing_coordinate_mutations() {
+        for (basis_name, item_ordinal) in [("target", 9), ("sharing", 10)] {
+            for invalid_indexes in [
+                vec![0, 1, 2, 3, 4, 5, 6],
+                vec![0, 1, 2, 3, 4, 5, 6, 7, 8],
+                vec![0, 1, 2, 3, 4, 5, 7, 6],
+                vec![0, 1, 2, 3, 4, 5, 6, 8],
+            ] {
+                let mut tuple = sample_suite()
+                    .canonical_tuple()
+                    .expect("suite tuple derives");
+                tuple.items[item_ordinal] =
+                    unsigned16_list(&invalid_indexes).expect("mutated basis index list encodes");
+                assert_eq!(
+                    SuiteRecord::decode(
+                        &tuple.encode().expect("mutated suite encodes"),
+                        &CanonicalDecodeLimits::default(),
+                    )
+                    .unwrap_err()
+                    .refusal_reason,
+                    RefusalReason::UnsupportedVersionOrSuite,
+                    "noncanonical {basis_name} coordinates must refuse"
+                );
+            }
         }
     }
 

@@ -1,10 +1,8 @@
 import {
-    requireVerifiedAcceptedSetupAuthorityKernelOwner,
-    type VerifiedAcceptedSetupAuthority,
-} from './accepted-setup-verification-runtime.js';
-import {
     markVerifiedEvaluatorAggregateConsumedAfterKernelInvocation,
     requireVerifiedEvaluatorAggregateKernelAuthority,
+    retireVerifiedBallotEvaluationWorkerLease,
+    type EvaluatorKeyStoreRangeSource,
     type VerifiedEvaluatorAggregateAuthority,
 } from './ballot-aggregation-runtime.js';
 import { isUint8Array } from './byte-array.js';
@@ -24,7 +22,6 @@ import {
     createVerifiedEvaluatorReplayKernelAuthority,
     type VerifiedEvaluatorReplay,
 } from './finality-verifier-runtime.js';
-import { resolveCommonProofKernelContext } from './transcript-core-bridge/common-proof-kernel-context.js';
 import type { TranscriptCoreKernelCommandRuntime } from './transcript-core-bridge/kernel-runtime.js';
 import type { TranscriptCoreKernel } from './transcript-core-bridge/kernel-types.js';
 import { WasmMemoryBoundary } from './wasm-memory-boundary.js';
@@ -93,30 +90,9 @@ export type PreparedEvaluatorReplay = Readonly<{
     copyCanonicalCarrier(): Uint8Array<ArrayBuffer>;
 }>;
 
-export type EvaluatorKeyStoreRangeSource = Readonly<{
-    /** Transfers one fresh owned byte range requested by the Rust verifier. */
-    readExactRange(
-        storeByteOffset: bigint,
-        exactByteLength: number,
-    ): Promise<Uint8Array>;
-}>;
-
-export type EvaluatorKeyStoreRangeReadObservation = Readonly<{
-    requestedByteLength: number;
-    returnedByteLength: number;
-    storeByteOffset: bigint;
-}>;
-
-export type EvaluatorReplayWorkerOptions = Readonly<{
-    observeEvaluatorKeyStoreRangeRead?(
-        observation: EvaluatorKeyStoreRangeReadObservation,
-    ): void;
-    signal?: AbortSignal;
-    yieldControl?(): Promise<void>;
-}>;
-
 type PreparedEvaluatorReplayRecord = {
     canonicalCarrier: Uint8Array<ArrayBuffer>;
+    cancellationController: AbortController;
     context: TranscriptCoreKernelCommandRuntime;
     executionHandle: number;
     kernel: EvaluatorReplayKernel;
@@ -306,6 +282,10 @@ const retirePreparedRecord = (
     preparedEvaluatorReplayRecords.delete(preparedReplay);
     activeEvaluatorContexts.delete(record.context);
     record.canonicalCarrier.fill(0);
+    retireVerifiedBallotEvaluationWorkerLease(
+        record.context,
+        record.cancellationController,
+    );
 };
 
 const copyPreparedCanonicalCarrier = (
@@ -522,10 +502,6 @@ const copyReplayCarrier = (input: {
  * deterministic replay carrier is exposed for relay and board ingestion.
  */
 export const prepareEvaluatorReplayInClosedWorker = async (input: {
-    acceptedSetupAuthority: VerifiedAcceptedSetupAuthority;
-    evaluatorKeyStore: EvaluatorKeyStoreRangeSource;
-    kernel: TranscriptCoreKernel;
-    options?: EvaluatorReplayWorkerOptions;
     verifiedAggregateAuthority: VerifiedEvaluatorAggregateAuthority;
 }): Promise<PreparedEvaluatorReplay> => {
     if (typeof globalThis.document !== 'undefined') {
@@ -533,33 +509,15 @@ export const prepareEvaluatorReplayInClosedWorker = async (input: {
             'Evaluator replay may only run inside the dedicated WASM worker.',
         );
     }
-    if (
-        typeof input.evaluatorKeyStore !== 'object' ||
-        input.evaluatorKeyStore === null ||
-        typeof input.evaluatorKeyStore.readExactRange !== 'function'
-    ) {
-        throw new CanonicalStreamRefusalError('wrongTypeOrLength');
-    }
-    const context = resolveCommonProofKernelContext(input.kernel);
-    if (context === undefined) {
-        throw new CanonicalStreamInternalError(
-            'The loaded WASM kernel has no common-proof worker context.',
-        );
-    }
+    const aggregateAuthority = requireVerifiedEvaluatorAggregateKernelAuthority(
+        input.verifiedAggregateAuthority,
+    );
+    const context = aggregateAuthority.context;
     if (activeEvaluatorContexts.has(context)) {
         throw new CanonicalStreamResourceError(
             'The WASM worker already retains an evaluator execution.',
         );
     }
-    const acceptedSetupAuthority =
-        requireVerifiedAcceptedSetupAuthorityKernelOwner(
-            input.acceptedSetupAuthority,
-            input.kernel,
-        );
-    const aggregateAuthority = requireVerifiedEvaluatorAggregateKernelAuthority(
-        input.verifiedAggregateAuthority,
-        input.kernel,
-    );
     const kernel = requireEvaluatorReplayKernel(context);
     const statusBoundary = createStatusBoundary();
     const memoryBoundary = new WasmMemoryBoundary({
@@ -570,11 +528,13 @@ export const prepareEvaluatorReplayInClosedWorker = async (input: {
             new CanonicalStreamResourceError(message),
         label: 'selected evaluator replay boundary',
     });
-    const signal = input.options?.signal;
-    const yieldControl = input.options?.yieldControl ?? yieldBrowserWorkerTurn;
+    const signal = aggregateAuthority.options.signal;
+    const yieldControl =
+        aggregateAuthority.options.yieldControl ?? yieldBrowserWorkerTurn;
 
     activeEvaluatorContexts.add(context);
     let executionHandle = 0;
+    let aggregateAuthorityConsumed = false;
     let preparedReplayCreated = false;
     try {
         throwIfCancelled(signal);
@@ -585,15 +545,15 @@ export const prepareEvaluatorReplayInClosedWorker = async (input: {
                 try {
                     beginInvoked = true;
                     executionHandle = kernel.begin(
-                        acceptedSetupAuthority.handle,
                         aggregateAuthority.handle,
                         statusPointer,
                     );
                 } finally {
                     if (beginInvoked) {
+                        aggregateAuthorityConsumed = true;
                         markVerifiedEvaluatorAggregateConsumedAfterKernelInvocation(
                             input.verifiedAggregateAuthority,
-                            input.kernel,
+                            aggregateAuthority.kernel,
                         );
                     }
                 }
@@ -652,13 +612,13 @@ export const prepareEvaluatorReplayInClosedWorker = async (input: {
                     () =>
                         readExactStoreRange({
                             exactByteLength: progress.exactByteLength,
-                            source: input.evaluatorKeyStore,
+                            source: aggregateAuthority.evaluatorKeyStore,
                             storeByteOffset: progress.storeByteOffset,
                         }),
                     (lateChunkBytes) => lateChunkBytes.fill(0),
                 );
                 try {
-                    input.options?.observeEvaluatorKeyStoreRangeRead?.(
+                    aggregateAuthority.options.observeEvaluatorKeyStoreRangeRead?.(
                         Object.freeze({
                             requestedByteLength: progress.exactByteLength,
                             returnedByteLength: chunkBytes.byteLength,
@@ -719,10 +679,11 @@ export const prepareEvaluatorReplayInClosedWorker = async (input: {
         });
         const preparedReplay = createPreparedEvaluatorReplay({
             canonicalCarrier,
+            cancellationController: aggregateAuthority.cancellationController,
             context,
             executionHandle,
             kernel,
-            transcriptCoreKernel: input.kernel,
+            transcriptCoreKernel: aggregateAuthority.kernel,
         });
         preparedReplayCreated = true;
         return preparedReplay;
@@ -738,8 +699,18 @@ export const prepareEvaluatorReplayInClosedWorker = async (input: {
             } catch (error) {
                 cleanupFailure = error;
             }
+        } else if (!aggregateAuthorityConsumed) {
+            try {
+                input.verifiedAggregateAuthority.release();
+            } catch (error) {
+                cleanupFailure = error;
+            }
         }
         activeEvaluatorContexts.delete(context);
+        retireVerifiedBallotEvaluationWorkerLease(
+            context,
+            aggregateAuthority.cancellationController,
+        );
         if (cleanupFailure !== undefined) {
             throw new CanonicalStreamCleanupError(
                 operationFailure,

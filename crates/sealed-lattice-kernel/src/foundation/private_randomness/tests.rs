@@ -1,7 +1,7 @@
 use super::super::schemas::SchemaResult;
 use super::super::{
-    CanonicalDecodeLimits, CanonicalItem, CanonicalTuple, FOUNDATION_PROFILE, Hash512,
-    ParticipantIdentity, RefusalReason, hash_foundation_tuple_512 as hash512,
+    CanonicalDecodeLimits, CanonicalItem, CanonicalTuple, DistributionPurpose, FOUNDATION_PROFILE,
+    Hash512, ParticipantIdentity, RefusalReason, hash_foundation_tuple_512 as hash512,
 };
 use super::stream::sample_modulo_from_byte_source;
 use super::*;
@@ -781,13 +781,26 @@ fn every_public_only_family_refuses_private_attempts_and_randomness_domains() {
     for invalid_purpose in [0, 8, 9, 10, 13, u16::MAX] {
         assert!(PrivateRandomnessDomain::setup_suite_distribution(invalid_purpose).is_err());
     }
-    for invalid_purpose in [0, 1, 7, 11, u16::MAX] {
-        assert!(PrivateRandomnessDomain::ballot_encryption_distribution(invalid_purpose).is_err());
-    }
     assert!(PrivateRandomnessDomain::setup_mailbox(4).is_err());
     assert!(PrivateRandomnessDomain::setup_source(3).is_err());
     assert!(PrivateRandomnessDomain::target_flooding(0).is_err());
     assert!(PrivateRandomnessDomain::target_flooding(3).is_err());
     assert!(PrivateRandomnessDomain::reset_safe_proof(0x1211, 0x4000).is_err());
     assert!(PrivateRandomnessDomain::ordinary_proof(0x4000).is_err());
+}
+
+#[test]
+fn ballot_encryption_distribution_accepts_exactly_purposes_eight_through_ten() {
+    let assigned_purposes = [
+        DistributionPurpose::BallotEncryptionEphemeralSecret.canonical_code(),
+        DistributionPurpose::BallotEncryptionErrorZero.canonical_code(),
+        DistributionPurpose::BallotEncryptionErrorOne.canonical_code(),
+    ];
+    for purpose in u16::MIN..=u16::MAX {
+        assert_eq!(
+            PrivateRandomnessDomain::ballot_encryption_distribution(purpose).is_ok(),
+            assigned_purposes.contains(&purpose),
+            "unexpected ballot-encryption purpose assignment for {purpose}",
+        );
+    }
 }

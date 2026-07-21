@@ -18,13 +18,13 @@ const memoryLimitEnvironmentVariable =
     'SEALED_LATTICE_GUARDED_RUST_MEMORY_LIMIT_GIB';
 const serializedThreadCount = '1';
 
-export type BuiltGuardedRustKernelCommand = Readonly<{
+type BuiltGuardedRustKernelCommand = Readonly<{
     command: CommandInvocation;
     progressLabel: string;
     setupMessages: readonly string[];
 }>;
 
-export type GuardedRustKernelCommand = Readonly<{
+type GuardedRustKernelCommand = Readonly<{
     builtCommand: BuiltGuardedRustKernelCommand;
     expectedTestFilter?: string;
 }>;
@@ -79,7 +79,7 @@ export const buildGuardedRustEnvironment = (input: {
     };
 };
 
-export const cargoTestArgumentsForGuardedRustFilter = (
+const cargoTestArgumentsForGuardedRustFilter = (
     testFilter: string,
 ): readonly string[] => [
     'test',
@@ -141,7 +141,7 @@ export const guardRustKernelCommand = (
     });
 };
 
-export const buildGuardedRustKernelDiagnosticFileNames = (input: {
+const buildGuardedRustKernelDiagnosticFileNames = (input: {
     readonly commandIndex: number;
     readonly progressLabel: string;
 }): Readonly<{

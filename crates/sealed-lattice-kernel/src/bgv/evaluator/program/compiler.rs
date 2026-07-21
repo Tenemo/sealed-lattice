@@ -27,6 +27,73 @@ use crate::bgv::evaluator::top_k::{
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 struct Register(u32);
 
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum EvaluatorCompilerStage {
+    NormalizedCharacterProductInput { ciphertext_ordinal: usize },
+    PretraceAfterLevelSwitch { ciphertext_ordinal: usize },
+    ComparisonMaskedPretrace { ciphertext_ordinal: usize },
+    FinalTraceOutput { ciphertext_ordinal: usize },
+    RoutedScatterContribution { route_ordinal: usize },
+    RawScatterSum,
+    RankBaseAdjusted,
+    RankInputAfterLevelSwitch,
+    PreparedBabyRankPower { rank_exponent: usize },
+    PreparedGiantRankPower { rank_exponent: usize },
+    IdentifierPolynomialBeforeSelector,
+    OrderPolynomialBeforeSelector,
+    FinalIdentifierTarget,
+    FinalOrderTarget,
+}
+
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct EvaluatorCompilerStageRegister {
+    stage: EvaluatorCompilerStage,
+    register_ordinal: u32,
+}
+
+#[cfg(test)]
+impl EvaluatorCompilerStageRegister {
+    pub(crate) const fn stage(self) -> EvaluatorCompilerStage {
+        self.stage
+    }
+
+    pub(crate) const fn register_ordinal(self) -> u32 {
+        self.register_ordinal
+    }
+}
+
+#[cfg(test)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct EvaluatorCompilerStreamStageRegisters {
+    top_count: u16,
+    stage_registers: Vec<EvaluatorCompilerStageRegister>,
+}
+
+#[cfg(test)]
+impl EvaluatorCompilerStreamStageRegisters {
+    pub(crate) const fn top_count(&self) -> u16 {
+        self.top_count
+    }
+
+    pub(crate) fn stage_registers(&self) -> &[EvaluatorCompilerStageRegister] {
+        &self.stage_registers
+    }
+}
+
+struct CompiledEvaluatorInstructionStream {
+    instruction_stream: EvaluatorInstructionStream,
+    #[cfg(test)]
+    stage_registers: EvaluatorCompilerStreamStageRegisters,
+}
+
+struct CompiledEvaluatorProgramSet {
+    program_set: EvaluatorProgramSet,
+    #[cfg(test)]
+    stream_stage_registers: Vec<EvaluatorCompilerStreamStageRegisters>,
+}
+
 #[derive(Default)]
 struct ConstantCatalog {
     constants_by_hash: BTreeMap<[u8; Hash512::BYTE_LENGTH], EvaluatorConstant>,
@@ -59,6 +126,8 @@ struct ProgramBuilder<'catalog> {
     constants: &'catalog mut ConstantCatalog,
     instructions: Vec<EvaluatorInstruction>,
     register_states: Vec<RegisterState>,
+    #[cfg(test)]
+    stage_registers: Vec<EvaluatorCompilerStageRegister>,
 }
 
 impl<'catalog> ProgramBuilder<'catalog> {
@@ -73,7 +142,17 @@ impl<'catalog> ProgramBuilder<'catalog> {
                 };
                 PAIR_CHARACTER_CIPHERTEXT_COUNT
             ],
+            #[cfg(test)]
+            stage_registers: Vec::new(),
         }
+    }
+
+    #[cfg(test)]
+    fn record_stage(&mut self, stage: EvaluatorCompilerStage, register: Register) {
+        self.stage_registers.push(EvaluatorCompilerStageRegister {
+            stage,
+            register_ordinal: register.0,
+        });
     }
 
     fn input(&self, ciphertext_ordinal: usize) -> CanonicalResult<Register> {
@@ -305,7 +384,7 @@ impl<'catalog> ProgramBuilder<'catalog> {
         top_count: u16,
         target_identifier: Register,
         target_order: Register,
-    ) -> CanonicalResult<EvaluatorInstructionStream> {
+    ) -> CanonicalResult<CompiledEvaluatorInstructionStream> {
         self.instructions.push(EvaluatorInstruction::new(
             EvaluatorOpcode::DeclareOutput,
             None,
@@ -365,7 +444,16 @@ impl<'catalog> ProgramBuilder<'catalog> {
                 )?);
             }
         }
-        EvaluatorInstructionStream::new(top_count, instructions_with_drops)
+        let instruction_stream =
+            EvaluatorInstructionStream::new(top_count, instructions_with_drops)?;
+        Ok(CompiledEvaluatorInstructionStream {
+            instruction_stream,
+            #[cfg(test)]
+            stage_registers: EvaluatorCompilerStreamStageRegisters {
+                top_count,
+                stage_registers: self.stage_registers,
+            },
+        })
     }
 }
 
@@ -384,6 +472,19 @@ struct SelectedPlaintextTopology {
 }
 
 pub(crate) fn selected_evaluator_program_set() -> CanonicalResult<EvaluatorProgramSet> {
+    Ok(compile_selected_evaluator_program_set()?.program_set)
+}
+
+#[cfg(test)]
+pub(crate) fn selected_evaluator_program_set_with_stage_registers() -> CanonicalResult<(
+    EvaluatorProgramSet,
+    Vec<EvaluatorCompilerStreamStageRegisters>,
+)> {
+    let compiled = compile_selected_evaluator_program_set()?;
+    Ok((compiled.program_set, compiled.stream_stage_registers))
+}
+
+fn compile_selected_evaluator_program_set() -> CanonicalResult<CompiledEvaluatorProgramSet> {
     if usize::from(FOUNDATION_PROFILE.option_count) != SELECTED_OPTION_COUNT
         || usize::from(FOUNDATION_PROFILE.participant_count) != 10
         || FOUNDATION_PROFILE.minimum_score != 1
@@ -399,34 +500,52 @@ pub(crate) fn selected_evaluator_program_set() -> CanonicalResult<EvaluatorProgr
     let plaintext_topology = selected_plaintext_topology()?;
     let mut constants = ConstantCatalog::default();
     let mut streams = Vec::with_capacity(SELECTED_OPTION_COUNT);
+    #[cfg(test)]
+    let mut stream_stage_registers = Vec::with_capacity(SELECTED_OPTION_COUNT);
     for top_count in 1..=SELECTED_OPTION_COUNT {
-        streams.push(compile_stream(
+        let compiled_stream = compile_stream(
             &mut constants,
             &plaintext_topology,
             u16::try_from(top_count).expect("selected top count fits u16"),
-        )?);
+        )?;
+        #[cfg(test)]
+        stream_stage_registers.push(compiled_stream.stage_registers);
+        streams.push(compiled_stream.instruction_stream);
     }
-    EvaluatorProgramSet::new(constants.into_sorted_constants(), streams)
+    let program_set = EvaluatorProgramSet::new(constants.into_sorted_constants(), streams)?;
+    Ok(CompiledEvaluatorProgramSet {
+        program_set,
+        #[cfg(test)]
+        stream_stage_registers,
+    })
 }
 
 fn compile_stream(
     constants: &mut ConstantCatalog,
     plaintext_topology: &SelectedPlaintextTopology,
     top_count: u16,
-) -> CanonicalResult<EvaluatorInstructionStream> {
+) -> CanonicalResult<CompiledEvaluatorInstructionStream> {
     let mut builder = ProgramBuilder::new(constants);
     let traced_ciphertexts = (0..PAIR_CHARACTER_CIPHERTEXT_COUNT)
         .map(|ciphertext_ordinal| {
             let ciphertext = builder.input(ciphertext_ordinal)?;
+            #[cfg(test)]
+            builder.record_stage(
+                EvaluatorCompilerStage::NormalizedCharacterProductInput { ciphertext_ordinal },
+                ciphertext,
+            );
             trace_pair_character_ciphertext(
                 &mut builder,
                 ciphertext,
+                ciphertext_ordinal,
                 &plaintext_topology.comparison_trace_mask,
             )
         })
         .collect::<CanonicalResult<Vec<_>>>()?;
     let ranks = scatter_pair_comparisons(&mut builder, &traced_ciphertexts, plaintext_topology)?;
     let ranks = builder.modulus_switch_to(ranks, RANK_INPUT_LEVEL)?;
+    #[cfg(test)]
+    builder.record_stage(EvaluatorCompilerStage::RankInputAfterLevelSwitch, ranks);
     let prepared_powers = prepare_rank_powers(&mut builder, ranks)?;
 
     let top_count = usize::from(top_count);
@@ -444,12 +563,32 @@ fn compile_stream(
         .collect::<Vec<_>>();
     let identifier_polynomial = interpolate_coefficients(&identifier_values)?;
     let order_polynomial = interpolate_coefficients(&order_values)?;
-    let identifier =
+    let identifier_polynomial_output =
         evaluate_rank_polynomial(&mut builder, &prepared_powers, &identifier_polynomial)?;
-    let order = evaluate_rank_polynomial(&mut builder, &prepared_powers, &order_polynomial)?;
-    let identifier =
-        builder.plaintext_multiply(identifier, plaintext_topology.identifier_selector.clone())?;
-    let order = builder.plaintext_multiply(order, plaintext_topology.order_selector.clone())?;
+    #[cfg(test)]
+    builder.record_stage(
+        EvaluatorCompilerStage::IdentifierPolynomialBeforeSelector,
+        identifier_polynomial_output,
+    );
+    let order_polynomial_output =
+        evaluate_rank_polynomial(&mut builder, &prepared_powers, &order_polynomial)?;
+    #[cfg(test)]
+    builder.record_stage(
+        EvaluatorCompilerStage::OrderPolynomialBeforeSelector,
+        order_polynomial_output,
+    );
+    let identifier = builder.plaintext_multiply(
+        identifier_polynomial_output,
+        plaintext_topology.identifier_selector.clone(),
+    )?;
+    #[cfg(test)]
+    builder.record_stage(EvaluatorCompilerStage::FinalIdentifierTarget, identifier);
+    let order = builder.plaintext_multiply(
+        order_polynomial_output,
+        plaintext_topology.order_selector.clone(),
+    )?;
+    #[cfg(test)]
+    builder.record_stage(EvaluatorCompilerStage::FinalOrderTarget, order);
     if builder.state(identifier).level != CANONICAL_TARGET_CIPHERTEXT_LEVEL
         || builder.state(order).level != CANONICAL_TARGET_CIPHERTEXT_LEVEL
     {
@@ -467,10 +606,25 @@ fn compile_stream(
 fn trace_pair_character_ciphertext(
     builder: &mut ProgramBuilder<'_>,
     ciphertext: Register,
+    _ciphertext_ordinal: usize,
     comparison_trace_mask: &[u32],
 ) -> CanonicalResult<Register> {
     let ciphertext = builder.modulus_switch_to(ciphertext, TRACE_KEY_LEVEL)?;
+    #[cfg(test)]
+    builder.record_stage(
+        EvaluatorCompilerStage::PretraceAfterLevelSwitch {
+            ciphertext_ordinal: _ciphertext_ordinal,
+        },
+        ciphertext,
+    );
     let mut trace = builder.plaintext_multiply(ciphertext, comparison_trace_mask.to_vec())?;
+    #[cfg(test)]
+    builder.record_stage(
+        EvaluatorCompilerStage::ComparisonMaskedPretrace {
+            ciphertext_ordinal: _ciphertext_ordinal,
+        },
+        trace,
+    );
     for path in TRACE_GALOIS_PATHS {
         let mut rotated = trace;
         for galois_element in path {
@@ -478,7 +632,15 @@ fn trace_pair_character_ciphertext(
         }
         trace = builder.add(trace, rotated)?;
     }
-    builder.modulus_switch_to(trace, SCATTER_KEY_LEVEL)
+    let trace = builder.modulus_switch_to(trace, SCATTER_KEY_LEVEL)?;
+    #[cfg(test)]
+    builder.record_stage(
+        EvaluatorCompilerStage::FinalTraceOutput {
+            ciphertext_ordinal: _ciphertext_ordinal,
+        },
+        trace,
+    );
+    Ok(trace)
 }
 
 fn scatter_pair_comparisons(
@@ -510,10 +672,22 @@ fn scatter_pair_comparisons(
         for galois_element in route.galois_path() {
             routed = builder.rotate(routed, *galois_element)?;
         }
+        #[cfg(test)]
+        builder.record_stage(
+            EvaluatorCompilerStage::RoutedScatterContribution {
+                route_ordinal: routed_terms.len(),
+            },
+            routed,
+        );
         routed_terms.push(routed);
     }
-    let ranks = builder.sum_aligned(&routed_terms)?;
-    builder.plaintext_add(ranks, plaintext_topology.rank_base.clone())
+    let raw_scatter_sum = builder.sum_aligned(&routed_terms)?;
+    #[cfg(test)]
+    builder.record_stage(EvaluatorCompilerStage::RawScatterSum, raw_scatter_sum);
+    let ranks = builder.plaintext_add(raw_scatter_sum, plaintext_topology.rank_base.clone())?;
+    #[cfg(test)]
+    builder.record_stage(EvaluatorCompilerStage::RankBaseAdjusted, ranks);
+    Ok(ranks)
 }
 
 fn selected_plaintext_topology() -> CanonicalResult<SelectedPlaintextTopology> {
@@ -549,12 +723,11 @@ fn selected_plaintext_topology() -> CanonicalResult<SelectedPlaintextTopology> {
             ))
             .or_default()
             .push((lane_ordinal, true));
-        let higher_bank = 1 - bank_ordinal;
         let higher_start =
             (lane_start + PAIR_CHARACTER_LANE_COUNT / 2 - shift) % (PAIR_CHARACTER_LANE_COUNT / 2);
         assignments_by_route_and_ciphertext
             .entry((
-                u16::try_from(higher_bank).expect("selected bank fits u16"),
+                u16::try_from(bank_ordinal).expect("selected bank fits u16"),
                 u16::try_from(higher_start).expect("selected lane start fits u16"),
                 ciphertext_ordinal,
             ))
@@ -588,9 +761,9 @@ fn selected_plaintext_topology() -> CanonicalResult<SelectedPlaintextTopology> {
         }
         route_source_masks.push(source_masks);
     }
-    if !assignments_by_route_and_ciphertext.is_empty() || source_mask_count != 29 {
+    if !assignments_by_route_and_ciphertext.is_empty() || source_mask_count != 36 {
         return Err(program_error(
-            "selected evaluator scatter catalog does not contain exactly twenty-nine source masks",
+            "selected evaluator scatter catalog does not contain exactly thirty-six source masks",
         ));
     }
 
@@ -698,6 +871,26 @@ fn prepare_rank_powers(
     let giant_base = baby_powers[RANK_LOOKUP_BABY_STEP_COUNT]
         .ok_or_else(|| program_error("compiled evaluator omitted rank giant-step base"))?;
     let giant_powers = build_power_table(builder, giant_base, 3, depth_drop_counts)?;
+    #[cfg(test)]
+    for (rank_exponent, scheduled_power) in baby_powers.iter().enumerate() {
+        if let Some(scheduled_power) = scheduled_power {
+            builder.record_stage(
+                EvaluatorCompilerStage::PreparedBabyRankPower { rank_exponent },
+                scheduled_power.register,
+            );
+        }
+    }
+    #[cfg(test)]
+    for (giant_power, scheduled_power) in giant_powers.iter().enumerate() {
+        if let Some(scheduled_power) = scheduled_power {
+            builder.record_stage(
+                EvaluatorCompilerStage::PreparedGiantRankPower {
+                    rank_exponent: giant_power * RANK_LOOKUP_BABY_STEP_COUNT,
+                },
+                scheduled_power.register,
+            );
+        }
+    }
     Ok(PreparedRankPowers {
         input,
         baby_powers,
@@ -825,7 +1018,7 @@ mod tests {
     }
 
     #[test]
-    fn selected_plaintext_topology_pins_all_twenty_nine_route_masks() {
+    fn selected_plaintext_topology_pins_all_thirty_six_route_masks() {
         let topology = selected_plaintext_topology().expect("selected plaintext topology");
         assert_eq!(centered_l1(&topology.comparison_trace_mask), 90);
         assert_eq!(
@@ -834,7 +1027,7 @@ mod tests {
                 .iter()
                 .map(Vec::len)
                 .sum::<usize>(),
-            29
+            36
         );
         assert_eq!(
             topology
@@ -846,29 +1039,206 @@ mod tests {
                     .collect())
                 .collect::<Vec<Vec<u64>>>(),
             vec![
-                vec![8_256, 8_443],
-                vec![8_669],
-                vec![7_943, 8_327],
-                vec![5_756, 8_223],
-                vec![8_689],
-                vec![8_453],
+                vec![7_387],
+                vec![8_256, 7_387],
+                vec![7_994],
+                vec![7_937],
+                vec![7_943],
+                vec![7_937],
+                vec![8_089],
+                vec![8_416],
+                vec![8_416],
+                vec![8_089],
+                vec![7_625],
+                vec![7_085],
+                vec![8_256],
+                vec![7_085, 7_625],
+                vec![7_935],
+                vec![7_778],
+                vec![8_524],
+                vec![8_354, 8_524],
+                vec![8_354],
+                vec![8_327],
+                vec![5_756, 7_151],
+                vec![8_327],
+                vec![5_756],
+                vec![7_823],
+                vec![7_575],
+                vec![7_151],
                 vec![7_680],
-                vec![8_015],
-                vec![7_586, 7_625],
-                vec![7_778, 7_387],
-                vec![7_943, 8_524],
-                vec![8_354, 7_937],
-                vec![8_089, 8_327],
-                vec![5_756, 8_416],
-                vec![7_520],
-                vec![7_240],
-                vec![8_256, 7_823],
-                vec![7_942, 8_015],
+                vec![7_575],
+                vec![7_939],
+                vec![7_778],
+                vec![7_680, 8_015],
             ]
         );
         assert_eq!(centered_l1(&topology.rank_base), 8_395);
         assert_eq!(centered_l1(&topology.identifier_selector), 8_607);
         assert_eq!(centered_l1(&topology.order_selector), 8_042);
+    }
+
+    #[test]
+    fn selected_stage_registers_cover_semantic_boundaries_without_changing_instruction_bytes() {
+        let canonical_program =
+            selected_evaluator_program_set().expect("canonical selected evaluator program");
+        let (observed_program, stream_stage_registers) =
+            selected_evaluator_program_set_with_stage_registers()
+                .expect("selected evaluator program with test-only stage registers");
+        assert_eq!(
+            canonical_program.encode().expect("canonical program bytes"),
+            observed_program.encode().expect("observed program bytes"),
+        );
+        assert_eq!(
+            stream_stage_registers.len(),
+            observed_program.streams().len()
+        );
+
+        for (stream, stage_registers) in observed_program
+            .streams()
+            .iter()
+            .zip(&stream_stage_registers)
+        {
+            assert_eq!(stage_registers.top_count(), stream.top_count());
+            let produced_registers = stream
+                .instructions()
+                .iter()
+                .filter_map(EvaluatorInstruction::output_register)
+                .collect::<BTreeSet<_>>();
+            let mut normalized_inputs = Vec::new();
+            let mut switched_pretraces = Vec::new();
+            let mut masked_pretraces = Vec::new();
+            let mut final_traces = Vec::new();
+            let mut scatter_routes = Vec::new();
+            let mut raw_scatter_sums = Vec::new();
+            let mut adjusted_ranks = Vec::new();
+            let mut rank_inputs = Vec::new();
+            let mut baby_rank_powers = Vec::new();
+            let mut giant_rank_powers = Vec::new();
+            let mut identifier_polynomials = Vec::new();
+            let mut order_polynomials = Vec::new();
+            let mut final_identifiers = Vec::new();
+            let mut final_orders = Vec::new();
+
+            for stage_register in stage_registers.stage_registers() {
+                let register_ordinal = stage_register.register_ordinal();
+                match stage_register.stage() {
+                    EvaluatorCompilerStage::NormalizedCharacterProductInput {
+                        ciphertext_ordinal,
+                    } => normalized_inputs.push((ciphertext_ordinal, register_ordinal)),
+                    EvaluatorCompilerStage::PretraceAfterLevelSwitch { ciphertext_ordinal } => {
+                        switched_pretraces.push((ciphertext_ordinal, register_ordinal))
+                    }
+                    EvaluatorCompilerStage::ComparisonMaskedPretrace { ciphertext_ordinal } => {
+                        masked_pretraces.push((ciphertext_ordinal, register_ordinal))
+                    }
+                    EvaluatorCompilerStage::FinalTraceOutput { ciphertext_ordinal } => {
+                        final_traces.push((ciphertext_ordinal, register_ordinal))
+                    }
+                    EvaluatorCompilerStage::RoutedScatterContribution { route_ordinal } => {
+                        scatter_routes.push((route_ordinal, register_ordinal));
+                    }
+                    EvaluatorCompilerStage::RawScatterSum => {
+                        raw_scatter_sums.push(register_ordinal);
+                    }
+                    EvaluatorCompilerStage::RankBaseAdjusted => {
+                        adjusted_ranks.push(register_ordinal);
+                    }
+                    EvaluatorCompilerStage::RankInputAfterLevelSwitch => {
+                        rank_inputs.push(register_ordinal);
+                    }
+                    EvaluatorCompilerStage::PreparedBabyRankPower { rank_exponent } => {
+                        baby_rank_powers.push((rank_exponent, register_ordinal));
+                    }
+                    EvaluatorCompilerStage::PreparedGiantRankPower { rank_exponent } => {
+                        giant_rank_powers.push((rank_exponent, register_ordinal));
+                    }
+                    EvaluatorCompilerStage::IdentifierPolynomialBeforeSelector => {
+                        identifier_polynomials.push(register_ordinal);
+                    }
+                    EvaluatorCompilerStage::OrderPolynomialBeforeSelector => {
+                        order_polynomials.push(register_ordinal);
+                    }
+                    EvaluatorCompilerStage::FinalIdentifierTarget => {
+                        final_identifiers.push(register_ordinal);
+                    }
+                    EvaluatorCompilerStage::FinalOrderTarget => {
+                        final_orders.push(register_ordinal);
+                    }
+                }
+                if !matches!(
+                    stage_register.stage(),
+                    EvaluatorCompilerStage::NormalizedCharacterProductInput { .. }
+                ) {
+                    assert!(
+                        produced_registers.contains(&register_ordinal),
+                        "compiler stage references register {register_ordinal} without a producing instruction",
+                    );
+                }
+            }
+
+            assert_eq!(normalized_inputs, vec![(0, 0), (1, 1)]);
+            assert_eq!(
+                switched_pretraces
+                    .iter()
+                    .map(|(ciphertext_ordinal, _)| *ciphertext_ordinal)
+                    .collect::<Vec<_>>(),
+                vec![0, 1]
+            );
+            assert_eq!(
+                masked_pretraces
+                    .iter()
+                    .map(|(ciphertext_ordinal, _)| *ciphertext_ordinal)
+                    .collect::<Vec<_>>(),
+                vec![0, 1]
+            );
+            assert_eq!(
+                final_traces
+                    .iter()
+                    .map(|(ciphertext_ordinal, _)| *ciphertext_ordinal)
+                    .collect::<Vec<_>>(),
+                vec![0, 1]
+            );
+            assert_eq!(
+                scatter_routes
+                    .iter()
+                    .map(|(route_ordinal, _)| *route_ordinal)
+                    .collect::<Vec<_>>(),
+                (0..SCATTER_ROUTES.len()).collect::<Vec<_>>()
+            );
+            assert_eq!(raw_scatter_sums.len(), 1);
+            assert_eq!(adjusted_ranks.len(), 1);
+            assert_eq!(rank_inputs.len(), 1);
+            assert_eq!(
+                baby_rank_powers
+                    .iter()
+                    .map(|(rank_exponent, _)| *rank_exponent)
+                    .collect::<Vec<_>>(),
+                (1..=RANK_LOOKUP_BABY_STEP_COUNT).collect::<Vec<_>>()
+            );
+            assert_eq!(
+                giant_rank_powers
+                    .iter()
+                    .map(|(rank_exponent, _)| *rank_exponent)
+                    .collect::<Vec<_>>(),
+                (1..=3)
+                    .map(|giant_power| giant_power * RANK_LOOKUP_BABY_STEP_COUNT)
+                    .collect::<Vec<_>>()
+            );
+            assert_eq!(identifier_polynomials.len(), 1);
+            assert_eq!(order_polynomials.len(), 1);
+            assert_eq!(final_identifiers.len(), 1);
+            assert_eq!(final_orders.len(), 1);
+
+            let instructions = stream.instructions();
+            assert_eq!(
+                final_identifiers[0],
+                instructions[instructions.len() - 2].input_registers()[0]
+            );
+            assert_eq!(
+                final_orders[0],
+                instructions[instructions.len() - 1].input_registers()[0]
+            );
+        }
     }
 
     #[test]
@@ -885,3 +1255,6 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod semantic_tests;

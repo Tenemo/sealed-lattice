@@ -24,8 +24,9 @@ use crate::bgv::{
     evaluator::program::selected_evaluator_program_set,
     evaluator::top_k::CANONICAL_TARGET_CIPHERTEXT_LEVEL,
     parameters::{
-        DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE, root_parameters_for_modulus,
-        validate_supported_algebraic_parameters,
+        DATA_PRIMES, PLAINTEXT_EXTENSION_DEGREE, PLAINTEXT_EXTENSION_LANE_COUNT,
+        PLAINTEXT_LANE_ORBIT_GENERATOR, PLAINTEXT_LANE_ROOT_GENERATOR, PLAINTEXT_MODULUS,
+        POLYNOMIAL_DEGREE, plaintext_extension_lane_root, validate_supported_algebraic_parameters,
     },
     proof_suite::{
         PROOF_EVALUATION_BLOWUP_FACTOR, ProofProfileError, selected_committed_material_profile,
@@ -42,7 +43,7 @@ pub(crate) const LATTICE_COMMITMENT_PROFILE_SCHEMA_IDENTIFIER: u16 = 0x2122;
 pub(crate) const TARGET_DECRYPTION_PROFILE_SCHEMA_IDENTIFIER: u16 = 0x1630;
 
 const SCHEMA_VERSION: u16 = 1;
-const ENCODER_AND_BALLOT_LAYOUT_VERSION: u16 = 3;
+const ENCODER_AND_BALLOT_LAYOUT_VERSION: u16 = 4;
 const LATTICE_COMMITMENT_PROFILE_VERSION: u16 = 3;
 const COMMITTED_MATERIAL_PROOF_FIELD_INDEX: u16 = 0;
 const LOWER_MINUS_HIGHER_PAIR_DIFFERENCE_RULE: u16 = 1;
@@ -50,7 +51,8 @@ const LOWER_MINUS_HIGHER_PAIR_DIFFERENCE_RULE: u16 = 1;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct EncoderAndBallotLayout {
     polynomial_degree: u32,
-    primitive_two_n_root: u64,
+    lane_root_generator: u64,
+    lane_orbit_generator: u16,
     extension_degree: u16,
     lane_count: u16,
     ciphertext_count: u16,
@@ -65,16 +67,15 @@ pub(crate) struct EncoderAndBallotLayout {
 impl EncoderAndBallotLayout {
     pub(crate) fn selected() -> SchemaResult<Self> {
         validate_supported_algebraic_parameters().map_err(|_| invalid_selected_artifact())?;
-        let primitive_two_n_root = root_parameters_for_modulus(PLAINTEXT_MODULUS)
-            .ok_or_else(invalid_selected_artifact)?
-            .negacyclic_root;
         let artifact = Self {
             polynomial_degree: u32::try_from(POLYNOMIAL_DEGREE)
                 .map_err(|_| invalid_selected_artifact())?,
-            primitive_two_n_root,
-            extension_degree: u16::try_from(PAIR_CHARACTER_LANE_DEGREE)
+            lane_root_generator: PLAINTEXT_LANE_ROOT_GENERATOR,
+            lane_orbit_generator: u16::try_from(PLAINTEXT_LANE_ORBIT_GENERATOR)
                 .map_err(|_| invalid_selected_artifact())?,
-            lane_count: u16::try_from(PAIR_CHARACTER_LANE_COUNT)
+            extension_degree: u16::try_from(PLAINTEXT_EXTENSION_DEGREE)
+                .map_err(|_| invalid_selected_artifact())?,
+            lane_count: u16::try_from(PLAINTEXT_EXTENSION_LANE_COUNT)
                 .map_err(|_| invalid_selected_artifact())?,
             ciphertext_count: u16::try_from(PAIR_CHARACTER_CIPHERTEXT_COUNT)
                 .map_err(|_| invalid_selected_artifact())?,
@@ -90,6 +91,33 @@ impl EncoderAndBallotLayout {
         Ok(artifact)
     }
 
+    #[cfg(test)]
+    pub(crate) fn decode(bytes: &[u8], limits: &CanonicalDecodeLimits) -> SchemaResult<Self> {
+        let tuple = CanonicalTuple::decode(bytes, limits)?;
+        require_header_with_version(
+            &tuple,
+            ENCODER_AND_BALLOT_LAYOUT_SCHEMA_IDENTIFIER,
+            ENCODER_AND_BALLOT_LAYOUT_VERSION,
+            12,
+        )?;
+        let artifact = Self {
+            polynomial_degree: read_u32(&tuple.items[0])?,
+            lane_root_generator: read_u64(&tuple.items[1])?,
+            lane_orbit_generator: read_u16(&tuple.items[2])?,
+            extension_degree: read_u16(&tuple.items[3])?,
+            lane_count: read_u16(&tuple.items[4])?,
+            ciphertext_count: read_u16(&tuple.items[5])?,
+            auxiliary_count: read_u16(&tuple.items[6])?,
+            option_count: read_u16(&tuple.items[7])?,
+            minimum_score: read_u16(&tuple.items[8])?,
+            maximum_score: read_u16(&tuple.items[9])?,
+            pair_difference_rule: read_u16(&tuple.items[10])?,
+            ordered_pair_character_assignments: read_unsigned16_list(&tuple.items[11])?,
+        };
+        artifact.validate()?;
+        Ok(artifact)
+    }
+
     pub(crate) fn encode(self) -> SchemaResult<Vec<u8>> {
         self.validate()?;
         Ok(CanonicalTuple::new(
@@ -97,7 +125,8 @@ impl EncoderAndBallotLayout {
             ENCODER_AND_BALLOT_LAYOUT_VERSION,
             vec![
                 CanonicalItem::unsigned32(self.polynomial_degree),
-                CanonicalItem::unsigned64(self.primitive_two_n_root),
+                CanonicalItem::unsigned64(self.lane_root_generator),
+                CanonicalItem::unsigned16(self.lane_orbit_generator),
                 CanonicalItem::unsigned16(self.extension_degree),
                 CanonicalItem::unsigned16(self.lane_count),
                 CanonicalItem::unsigned16(self.ciphertext_count),
@@ -113,12 +142,13 @@ impl EncoderAndBallotLayout {
     }
 
     fn validate(&self) -> SchemaResult<()> {
-        let selected_root = root_parameters_for_modulus(PLAINTEXT_MODULUS)
-            .ok_or_else(invalid_selected_artifact)?
-            .negacyclic_root;
+        validate_supported_algebraic_parameters().map_err(|_| invalid_selected_artifact())?;
         if usize::try_from(self.polynomial_degree).ok() != Some(POLYNOMIAL_DEGREE)
-            || self.primitive_two_n_root != selected_root
+            || self.lane_root_generator != PLAINTEXT_LANE_ROOT_GENERATOR
+            || usize::from(self.lane_orbit_generator) != PLAINTEXT_LANE_ORBIT_GENERATOR
+            || usize::from(self.extension_degree) != PLAINTEXT_EXTENSION_DEGREE
             || usize::from(self.extension_degree) != PAIR_CHARACTER_LANE_DEGREE
+            || usize::from(self.lane_count) != PLAINTEXT_EXTENSION_LANE_COUNT
             || usize::from(self.lane_count) != PAIR_CHARACTER_LANE_COUNT
             || usize::from(self.ciphertext_count) != PAIR_CHARACTER_CIPHERTEXT_COUNT
             || usize::from(self.auxiliary_count) != PAIR_CHARACTER_AUXILIARY_COUNT
@@ -154,16 +184,28 @@ fn selected_pair_character_assignment_catalog() -> SchemaResult<Vec<u16>> {
 
 fn require_pair_character_ballot_codec_layout() -> SchemaResult<()> {
     let option_count = usize::from(FOUNDATION_PROFILE.option_count);
-    let ordinal_scores = (0..option_count)
+    let score_bucket_count = u64::from(
+        FOUNDATION_PROFILE
+            .maximum_score
+            .checked_sub(FOUNDATION_PROFILE.minimum_score)
+            .and_then(|score_span| score_span.checked_add(1))
+            .ok_or_else(invalid_selected_artifact)?,
+    );
+    if score_bucket_count < 2 {
+        return Err(invalid_selected_artifact());
+    }
+    let discriminating_scores = (0..option_count)
         .map(|option_ordinal| {
             u64::try_from(option_ordinal)
                 .ok()
-                .and_then(|ordinal| ordinal.checked_add(1))
+                .and_then(|ordinal| ordinal.checked_mul(score_bucket_count - 1))
+                .map(|offset| offset % score_bucket_count)
+                .and_then(|offset| offset.checked_add(u64::from(FOUNDATION_PROFILE.minimum_score)))
                 .ok_or_else(invalid_selected_artifact)
         })
         .collect::<SchemaResult<Vec<_>>>()?;
     let plaintexts =
-        pair_character_plaintexts(&ordinal_scores, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE)
+        pair_character_plaintexts(&discriminating_scores, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE)
             .map_err(|_| invalid_selected_artifact())?;
     let assignments =
         selected_pair_character_lane_assignments().map_err(|_| invalid_selected_artifact())?;
@@ -179,30 +221,61 @@ fn require_pair_character_ballot_codec_layout() -> SchemaResult<()> {
             });
             let mut expected_message = [0_u64; PAIR_CHARACTER_LANE_DEGREE];
             let mut expected_auxiliary_left = [0_u64; PAIR_CHARACTER_LANE_DEGREE];
-            let mut expected_auxiliary_right = [0_u64; PAIR_CHARACTER_LANE_DEGREE];
             if let Some(assignment) = assignment {
-                let lower_score = ordinal_scores[usize::from(assignment.lower_option_ordinal())];
-                let higher_score = ordinal_scores[usize::from(assignment.higher_option_ordinal())];
+                let lower_score =
+                    discriminating_scores[usize::from(assignment.lower_option_ordinal())];
+                let higher_score =
+                    discriminating_scores[usize::from(assignment.higher_option_ordinal())];
                 let score_span =
                     u64::from(FOUNDATION_PROFILE.maximum_score - FOUNDATION_PROFILE.minimum_score);
                 expected_message[usize::try_from(lower_score + score_span - higher_score)
                     .map_err(|_| invalid_selected_artifact())?] = 1;
                 expected_auxiliary_left[usize::try_from(lower_score + score_span)
                     .map_err(|_| invalid_selected_artifact())?] = 1;
-                expected_auxiliary_right[PAIR_CHARACTER_LANE_DEGREE
-                    - usize::try_from(higher_score).map_err(|_| invalid_selected_artifact())?] =
-                    PLAINTEXT_MODULUS - 1;
             }
-            if pair_character_lane_value(plaintext.message_coefficients(), lane_ordinal)
-                .map_err(|_| invalid_selected_artifact())?
-                != expected_message
-                || pair_character_lane_value(plaintext.auxiliary_left_coefficients(), lane_ordinal)
-                    .map_err(|_| invalid_selected_artifact())?
-                    != expected_auxiliary_left
-                || pair_character_lane_value(plaintext.auxiliary_right_coefficients(), lane_ordinal)
-                    .map_err(|_| invalid_selected_artifact())?
-                    != expected_auxiliary_right
+            let observed_message =
+                pair_character_lane_value(plaintext.message_coefficients(), lane_ordinal)
+                    .map_err(|_| invalid_selected_artifact())?;
+            let observed_auxiliary_left =
+                pair_character_lane_value(plaintext.auxiliary_left_coefficients(), lane_ordinal)
+                    .map_err(|_| invalid_selected_artifact())?;
+            let observed_auxiliary_right =
+                pair_character_lane_value(plaintext.auxiliary_right_coefficients(), lane_ordinal)
+                    .map_err(|_| invalid_selected_artifact())?;
+            if observed_message != expected_message
+                || observed_auxiliary_left != expected_auxiliary_left
             {
+                return Err(invalid_selected_artifact());
+            }
+            let Some(assignment) = assignment else {
+                if observed_auxiliary_right
+                    .iter()
+                    .any(|coefficient| *coefficient != 0)
+                {
+                    return Err(invalid_selected_artifact());
+                }
+                continue;
+            };
+            let higher_score =
+                discriminating_scores[usize::from(assignment.higher_option_ordinal())];
+            let right_exponent = PAIR_CHARACTER_LANE_DEGREE
+                .checked_sub(
+                    usize::try_from(higher_score).map_err(|_| invalid_selected_artifact())?,
+                )
+                .ok_or_else(invalid_selected_artifact)?;
+            let lane_root = plaintext_extension_lane_root(lane_ordinal)
+                .ok_or_else(invalid_selected_artifact)?;
+            if observed_auxiliary_right.iter().enumerate().any(
+                |(coefficient_ordinal, coefficient)| {
+                    if coefficient_ordinal == right_exponent {
+                        (u128::from(*coefficient) * u128::from(lane_root))
+                            % u128::from(PLAINTEXT_MODULUS)
+                            != 1
+                    } else {
+                        *coefficient != 0
+                    }
+                },
+            ) {
                 return Err(invalid_selected_artifact());
             }
         }
@@ -569,15 +642,26 @@ fn proof_profile_error(_: ProofProfileError) -> FoundationSchemaError {
 mod tests {
     use super::*;
 
-    #[test]
-    fn current_suite_artifacts_round_trip_while_encoder_layout_remains_unavailable() {
-        let limits = CanonicalDecodeLimits::default();
-
+    fn assert_encoder_layout_tuple_refuses(tuple: CanonicalTuple, description: &str) {
+        let bytes = tuple.encode().expect("mutated encoder artifact encodes");
         assert_eq!(
-            EncoderAndBallotLayout::selected()
-                .expect_err("the obsolete scalar-root encoder layout must remain unavailable")
+            EncoderAndBallotLayout::decode(&bytes, &CanonicalDecodeLimits::default())
+                .expect_err(description)
                 .refusal_reason,
             RefusalReason::UnsupportedVersionOrSuite
+        );
+    }
+
+    #[test]
+    fn current_suite_artifacts_round_trip() {
+        let limits = CanonicalDecodeLimits::default();
+
+        let encoder = EncoderAndBallotLayout::selected().expect("selected encoder artifact");
+        let encoder_bytes = encoder.clone().encode().expect("encode encoder artifact");
+        assert_eq!(
+            EncoderAndBallotLayout::decode(&encoder_bytes, &limits)
+                .expect("decode encoder artifact"),
+            encoder
         );
 
         let vss_bytes = VerifiableSecretSharingProfile::selected()
@@ -614,6 +698,115 @@ mod tests {
                 eprintln!("selected target profile unavailable: {error:?}");
             }
         }
+    }
+
+    #[test]
+    fn encoder_layout_refuses_generator_geometry_and_catalog_mutations() {
+        let selected_bytes = EncoderAndBallotLayout::selected()
+            .and_then(EncoderAndBallotLayout::encode)
+            .expect("selected encoder artifact");
+        let selected_tuple =
+            CanonicalTuple::decode(&selected_bytes, &CanonicalDecodeLimits::default())
+                .expect("selected encoder tuple decodes");
+
+        let mut obsolete_scalar_layout_version = selected_tuple.clone();
+        obsolete_scalar_layout_version.schema_version = 3;
+        assert_encoder_layout_tuple_refuses(
+            obsolete_scalar_layout_version,
+            "obsolete scalar-layout schema version must refuse",
+        );
+
+        for (description, item_ordinal, replacement) in [
+            (
+                "wrong polynomial degree must refuse",
+                0,
+                CanonicalItem::unsigned32(
+                    u32::try_from(POLYNOMIAL_DEGREE / 2).expect("half degree fits u32"),
+                ),
+            ),
+            (
+                "wrong lane-root generator must refuse",
+                1,
+                CanonicalItem::unsigned64(PLAINTEXT_LANE_ROOT_GENERATOR + 1),
+            ),
+            (
+                "wrong lane-orbit generator must refuse",
+                2,
+                CanonicalItem::unsigned16(
+                    u16::try_from(PLAINTEXT_LANE_ORBIT_GENERATOR + 2)
+                        .expect("mutated orbit generator fits u16"),
+                ),
+            ),
+            (
+                "wrong extension degree must refuse",
+                3,
+                CanonicalItem::unsigned16(
+                    u16::try_from(PLAINTEXT_EXTENSION_DEGREE / 2)
+                        .expect("half extension degree fits u16"),
+                ),
+            ),
+            (
+                "wrong lane count must refuse",
+                4,
+                CanonicalItem::unsigned16(
+                    u16::try_from(PLAINTEXT_EXTENSION_LANE_COUNT - 1)
+                        .expect("mutated lane count fits u16"),
+                ),
+            ),
+            (
+                "wrong ciphertext count must refuse",
+                5,
+                CanonicalItem::unsigned16(
+                    u16::try_from(PAIR_CHARACTER_CIPHERTEXT_COUNT + 1)
+                        .expect("mutated ciphertext count fits u16"),
+                ),
+            ),
+        ] {
+            let mut mutated = selected_tuple.clone();
+            mutated.items[item_ordinal] = replacement;
+            assert_encoder_layout_tuple_refuses(mutated, description);
+        }
+
+        let selected_catalog = read_unsigned16_list(&selected_tuple.items[11])
+            .expect("selected pair-character catalog decodes");
+        let mut shortened_catalog = selected_catalog.clone();
+        shortened_catalog.truncate(shortened_catalog.len() - 4);
+        let mut missing_assignment = selected_tuple.clone();
+        missing_assignment.items[11] =
+            unsigned16_list(&shortened_catalog).expect("shortened catalog encodes");
+        assert_encoder_layout_tuple_refuses(
+            missing_assignment,
+            "missing catalog assignment must refuse",
+        );
+
+        let mut reversed_orientation_catalog = selected_catalog.clone();
+        reversed_orientation_catalog.swap(2, 3);
+        let mut reversed_orientation = selected_tuple.clone();
+        reversed_orientation.items[11] = unsigned16_list(&reversed_orientation_catalog)
+            .expect("reversed orientation catalog encodes");
+        assert_encoder_layout_tuple_refuses(
+            reversed_orientation,
+            "reversed pair orientation must refuse",
+        );
+
+        let mut wrong_ciphertext_catalog = selected_catalog.clone();
+        wrong_ciphertext_catalog[0] = (wrong_ciphertext_catalog[0] + 1)
+            % u16::try_from(PAIR_CHARACTER_CIPHERTEXT_COUNT).expect("ciphertext count fits u16");
+        let mut wrong_ciphertext = selected_tuple.clone();
+        wrong_ciphertext.items[11] =
+            unsigned16_list(&wrong_ciphertext_catalog).expect("wrong ciphertext catalog encodes");
+        assert_encoder_layout_tuple_refuses(
+            wrong_ciphertext,
+            "wrong assignment ciphertext must refuse",
+        );
+
+        let mut wrong_lane_catalog = selected_catalog;
+        wrong_lane_catalog[1] = (wrong_lane_catalog[1] + 1)
+            % u16::try_from(PAIR_CHARACTER_LANE_COUNT).expect("lane count fits u16");
+        let mut wrong_lane = selected_tuple;
+        wrong_lane.items[11] =
+            unsigned16_list(&wrong_lane_catalog).expect("wrong lane catalog encodes");
+        assert_encoder_layout_tuple_refuses(wrong_lane, "wrong assignment lane must refuse");
     }
 
     #[test]

@@ -12,6 +12,15 @@ use std::{cell::RefCell, collections::BTreeMap, sync::Arc};
 
 use zeroize::{Zeroize, Zeroizing};
 
+#[cfg(test)]
+use crate::bgv::{
+    coefficient_codec::canonical_modulus_byte_length,
+    direct_ballots::PAIR_CHARACTER_CIPHERTEXT_COUNT,
+    parameters::{DATA_PRIMES, POLYNOMIAL_DEGREE},
+};
+#[cfg(test)]
+use crate::foundation::{CanonicalStreamWriter, selected_suite_capability_for_tests};
+
 use crate::{
     bgv::setup::{VerifiedAcceptedSetupAuthorityHandle, with_verified_accepted_setup_authority},
     encoding::{CanonicalError, CanonicalErrorCode},
@@ -447,10 +456,13 @@ impl BallotValidityVerificationTerminalRegistry {
     }
 }
 
+type AuthenticatedBallotCiphertextCatalogEntry = (u16, u16, u16, u64, Arc<[u64]>);
+
 /// One authenticated full-level RNS polynomial from a positively verified
 /// ballot package. Coefficients are shared immutably with the verifier
 /// material until the evaluator aggregation consumes the ballot output.
 pub(crate) struct VerifiedBallotCiphertextPolynomial {
+    ciphertext_ordinal: u16,
     component_ordinal: u16,
     data_modulus_index: u16,
     modulus: u64,
@@ -458,6 +470,26 @@ pub(crate) struct VerifiedBallotCiphertextPolynomial {
 }
 
 impl VerifiedBallotCiphertextPolynomial {
+    fn from_authenticated_catalog_entry(
+        ciphertext_ordinal: u16,
+        component_ordinal: u16,
+        data_modulus_index: u16,
+        modulus: u64,
+        coefficients: Arc<[u64]>,
+    ) -> Self {
+        Self {
+            ciphertext_ordinal,
+            component_ordinal,
+            data_modulus_index,
+            modulus,
+            coefficients,
+        }
+    }
+
+    pub(crate) const fn ciphertext_ordinal(&self) -> u16 {
+        self.ciphertext_ordinal
+    }
+
     pub(crate) const fn component_ordinal(&self) -> u16 {
         self.component_ordinal
     }
@@ -483,11 +515,39 @@ impl Drop for VerifiedBallotCiphertextPolynomial {
     }
 }
 
+fn verified_ciphertext_catalog_from_authenticated(
+    authenticated_catalog: impl IntoIterator<Item = AuthenticatedBallotCiphertextCatalogEntry>,
+) -> Vec<VerifiedBallotCiphertextPolynomial> {
+    authenticated_catalog
+        .into_iter()
+        .map(
+            |(ciphertext_ordinal, component_ordinal, data_modulus_index, modulus, coefficients)| {
+                VerifiedBallotCiphertextPolynomial::from_authenticated_catalog_entry(
+                    ciphertext_ordinal,
+                    component_ordinal,
+                    data_modulus_index,
+                    modulus,
+                    coefficients,
+                )
+            },
+        )
+        .collect()
+}
+
+enum VerifiedBallotValidityEvidence {
+    CommonProof {
+        _capability: Box<ConsumedVerifiedCommonProofCapability>,
+    },
+    #[cfg(test)]
+    TestMinted,
+}
+
 /// One-shot positive ballot-validity output. No transported verdict or status
-/// field can construct this value; it owns the consumed generic verifier
-/// authority and the board/setup-derived ciphertext catalog.
+/// field can construct this value. Production construction owns the consumed
+/// generic verifier authority and the board/setup-derived ciphertext catalog;
+/// unit tests may mint the same positive type only through the private registry.
 pub(crate) struct VerifiedBallotValidityOutput {
-    _verified_common_proof: ConsumedVerifiedCommonProofCapability,
+    _evidence: VerifiedBallotValidityEvidence,
     protocol_version: u16,
     suite_identifier: [u8; 64],
     ceremony_context_hash: [u8; 64],
@@ -501,6 +561,53 @@ pub(crate) struct VerifiedBallotValidityOutput {
 }
 
 impl VerifiedBallotValidityOutput {
+    #[cfg(test)]
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn retain_test_minted(
+        protocol_version: u16,
+        suite_identifier: [u8; 64],
+        ceremony_context_hash: [u8; 64],
+        action_context_hash: [u8; 64],
+        roster_hash: [u8; 64],
+        producer_roster_position: u16,
+        ballot_package_object_hash: [u8; 64],
+        verified_setup_source_hash: [u8; 64],
+        authenticated_catalog: impl IntoIterator<Item = AuthenticatedBallotCiphertextCatalogEntry>,
+    ) -> Result<u32, CommonProofRuntimeError> {
+        let authenticated_catalog = authenticated_catalog.into_iter().collect::<Vec<_>>();
+        if protocol_version != FOUNDATION_PROFILE.protocol_version
+            || suite_identifier != selected_suite_capability_for_tests().suite_identifier()
+            || producer_roster_position >= FOUNDATION_PROFILE.participant_count
+        {
+            return Err(CommonProofRuntimeError::WrongVerificationBinding);
+        }
+        let ciphertext_descriptor =
+            derive_test_minted_ballot_ciphertext_descriptor(&authenticated_catalog)
+                .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?;
+        let ciphertext_catalog =
+            verified_ciphertext_catalog_from_authenticated(authenticated_catalog);
+        let reservation = VERIFIED_BALLOT_VALIDITY_OUTPUT_REGISTRY
+            .with(|registry| registry.borrow_mut().reserve())?;
+        Ok(VERIFIED_BALLOT_VALIDITY_OUTPUT_REGISTRY.with(|registry| {
+            registry.borrow_mut().commit_preflighted(
+                reservation,
+                Self {
+                    _evidence: VerifiedBallotValidityEvidence::TestMinted,
+                    protocol_version,
+                    suite_identifier,
+                    ceremony_context_hash,
+                    action_context_hash,
+                    roster_hash,
+                    producer_roster_position,
+                    ballot_package_object_hash,
+                    verified_setup_source_hash,
+                    ciphertext_descriptor,
+                    ciphertext_catalog,
+                },
+            )
+        }))
+    }
+
     pub(crate) const fn protocol_version(&self) -> u16 {
         self.protocol_version
     }
@@ -540,10 +647,131 @@ impl VerifiedBallotValidityOutput {
     pub(crate) fn ciphertext_catalog(&self) -> &[VerifiedBallotCiphertextPolynomial] {
         &self.ciphertext_catalog
     }
+}
 
-    pub(crate) fn into_ciphertext_catalog(self) -> Vec<VerifiedBallotCiphertextPolynomial> {
-        self.ciphertext_catalog
+#[cfg(test)]
+fn derive_test_minted_ballot_ciphertext_descriptor(
+    authenticated_catalog: &[AuthenticatedBallotCiphertextCatalogEntry],
+) -> Result<StreamDescriptor, RefusalReason> {
+    const CIPHERTEXT_COMPONENT_COUNT: usize = 2;
+
+    let data_modulus_count = DATA_PRIMES.len();
+    let polynomials_per_ciphertext = CIPHERTEXT_COMPONENT_COUNT
+        .checked_mul(data_modulus_count)
+        .ok_or(RefusalReason::OutsideSupportedProfile)?;
+    let expected_polynomial_count = PAIR_CHARACTER_CIPHERTEXT_COUNT
+        .checked_mul(polynomials_per_ciphertext)
+        .ok_or(RefusalReason::OutsideSupportedProfile)?;
+    if authenticated_catalog.len() != expected_polynomial_count {
+        return Err(RefusalReason::WrongTypeOrLength);
     }
+    for (polynomial_ordinal, entry) in authenticated_catalog.iter().enumerate() {
+        let expected_ciphertext_ordinal = polynomial_ordinal / polynomials_per_ciphertext;
+        let expected_component_ordinal =
+            (polynomial_ordinal % polynomials_per_ciphertext) / data_modulus_count;
+        let expected_data_modulus_index = polynomial_ordinal % data_modulus_count;
+        let expected_modulus = DATA_PRIMES[expected_data_modulus_index];
+        if usize::from(entry.0) != expected_ciphertext_ordinal
+            || usize::from(entry.1) != expected_component_ordinal
+            || usize::from(entry.2) != expected_data_modulus_index
+            || entry.3 != expected_modulus
+            || entry.4.len() != POLYNOMIAL_DEGREE
+            || entry
+                .4
+                .iter()
+                .any(|coefficient| *coefficient >= expected_modulus)
+        {
+            return Err(RefusalReason::WrongTypeOrLength);
+        }
+    }
+
+    let bytes_per_flattened_component =
+        DATA_PRIMES
+            .iter()
+            .try_fold(0_u64, |total, modulus| -> Result<u64, RefusalReason> {
+                let polynomial_byte_length = u64::try_from(POLYNOMIAL_DEGREE)
+                    .ok()
+                    .and_then(|degree| {
+                        u64::try_from(canonical_modulus_byte_length(*modulus))
+                            .ok()
+                            .and_then(|width| degree.checked_mul(width))
+                    })
+                    .ok_or(RefusalReason::OutsideSupportedProfile)?;
+                total
+                    .checked_add(polynomial_byte_length)
+                    .ok_or(RefusalReason::OutsideSupportedProfile)
+            })?;
+    let flattened_component_count = PAIR_CHARACTER_CIPHERTEXT_COUNT
+        .checked_mul(CIPHERTEXT_COMPONENT_COUNT)
+        .ok_or(RefusalReason::OutsideSupportedProfile)?;
+    let total_byte_length = u64::try_from(flattened_component_count)
+        .ok()
+        .and_then(|count| count.checked_mul(bytes_per_flattened_component))
+        .and_then(|coefficient_bytes| coefficient_bytes.checked_add(4))
+        .ok_or(RefusalReason::OutsideSupportedProfile)?;
+    let mut writer =
+        CanonicalStreamWriter::new(CanonicalStreamDomain::BallotCiphertext, total_byte_length)?;
+    let mut pending_chunk = Vec::with_capacity(FOUNDATION_PROFILE.stream_chunk_byte_length);
+    let mut next_chunk_index = 0_usize;
+    let level =
+        u16::try_from(DATA_PRIMES.len() - 1).map_err(|_| RefusalReason::OutsideSupportedProfile)?;
+    let component_count = u16::try_from(flattened_component_count)
+        .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
+    absorb_test_minted_ballot_ciphertext_bytes(
+        &mut writer,
+        &mut pending_chunk,
+        &mut next_chunk_index,
+        &level.to_le_bytes(),
+    )?;
+    absorb_test_minted_ballot_ciphertext_bytes(
+        &mut writer,
+        &mut pending_chunk,
+        &mut next_chunk_index,
+        &component_count.to_le_bytes(),
+    )?;
+    for (_, _, _, modulus, coefficients) in authenticated_catalog {
+        let residue_byte_length = canonical_modulus_byte_length(*modulus);
+        for coefficient in coefficients.iter().copied() {
+            absorb_test_minted_ballot_ciphertext_bytes(
+                &mut writer,
+                &mut pending_chunk,
+                &mut next_chunk_index,
+                &coefficient.to_le_bytes()[..residue_byte_length],
+            )?;
+        }
+    }
+    if !pending_chunk.is_empty() {
+        writer.absorb_chunk(next_chunk_index, &pending_chunk)?;
+        pending_chunk.zeroize();
+    }
+    writer.finish()
+}
+
+#[cfg(test)]
+fn absorb_test_minted_ballot_ciphertext_bytes(
+    writer: &mut CanonicalStreamWriter,
+    pending_chunk: &mut Vec<u8>,
+    next_chunk_index: &mut usize,
+    mut bytes: &[u8],
+) -> Result<(), RefusalReason> {
+    while !bytes.is_empty() {
+        let remaining_capacity = FOUNDATION_PROFILE
+            .stream_chunk_byte_length
+            .checked_sub(pending_chunk.len())
+            .ok_or(RefusalReason::OutsideSupportedProfile)?;
+        let copied = remaining_capacity.min(bytes.len());
+        pending_chunk.extend_from_slice(&bytes[..copied]);
+        bytes = &bytes[copied..];
+        if pending_chunk.len() == FOUNDATION_PROFILE.stream_chunk_byte_length {
+            writer.absorb_chunk(*next_chunk_index, pending_chunk)?;
+            pending_chunk.zeroize();
+            pending_chunk.clear();
+            *next_chunk_index = next_chunk_index
+                .checked_add(1)
+                .ok_or(RefusalReason::OutsideSupportedProfile)?;
+        }
+    }
+    Ok(())
 }
 
 #[derive(Default)]
@@ -825,20 +1053,9 @@ fn finish_ballot_validity_verification_preparation(
         accepted_setup_binding,
         authenticated_ciphertext,
     )?;
-    let ciphertext_catalog = public_material
-        .authenticated_ciphertext_catalog()?
-        .into_iter()
-        .map(
-            |(_, component_ordinal, data_modulus_index, modulus, coefficients)| {
-                VerifiedBallotCiphertextPolynomial {
-                    component_ordinal,
-                    data_modulus_index,
-                    modulus,
-                    coefficients,
-                }
-            },
-        )
-        .collect::<Vec<_>>();
+    let ciphertext_catalog = verified_ciphertext_catalog_from_authenticated(
+        public_material.authenticated_ciphertext_catalog()?,
+    );
     let canonical_application_statement_bytes = canonical_selected_ballot_validity_statement(
         accepted_setup_binding.protocol_version,
         accepted_setup_binding.suite_identifier,
@@ -1005,7 +1222,9 @@ impl BallotValidityVerificationTerminalSource {
             "consumed ballot proof must match its completed exact-family preflight",
         );
         VerifiedBallotValidityOutput {
-            _verified_common_proof: verified_common_proof,
+            _evidence: VerifiedBallotValidityEvidence::CommonProof {
+                _capability: Box::new(verified_common_proof),
+            },
             protocol_version: self.protocol_version,
             suite_identifier: self.suite_identifier,
             ceremony_context_hash: self.ceremony_context_hash,
@@ -2004,4 +2223,107 @@ pub extern "C" fn sealed_lattice_ballot_validity_discard_verified_output(
 ) -> u32 {
     consume_verified_ballot_validity_output(output_handle)
         .map_or_else(super::runtime_ffi::runtime_error_status, |_| 0)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use crate::bgv::{direct_ballots::PAIR_CHARACTER_CIPHERTEXT_COUNT, parameters::DATA_PRIMES};
+
+    use super::{
+        derive_test_minted_ballot_ciphertext_descriptor,
+        verified_ciphertext_catalog_from_authenticated,
+    };
+
+    const CIPHERTEXT_COMPONENT_COUNT: usize = 2;
+
+    #[test]
+    fn test_minted_ballot_descriptor_refuses_an_incomplete_catalog() {
+        assert_eq!(
+            derive_test_minted_ballot_ciphertext_descriptor(&[]),
+            Err(crate::foundation::RefusalReason::WrongTypeOrLength),
+        );
+    }
+
+    #[test]
+    fn authenticated_ciphertext_conversion_preserves_all_selected_catalog_coordinates() {
+        let data_modulus_count = DATA_PRIMES.len();
+        let polynomials_per_ciphertext = CIPHERTEXT_COMPONENT_COUNT * data_modulus_count;
+        let catalog_entry_count = PAIR_CHARACTER_CIPHERTEXT_COUNT * polynomials_per_ciphertext;
+        assert_eq!(catalog_entry_count, 92);
+
+        let authenticated_catalog = (0..catalog_entry_count)
+            .map(|catalog_index| {
+                let ciphertext_ordinal = catalog_index / polynomials_per_ciphertext;
+                let component_ordinal =
+                    (catalog_index % polynomials_per_ciphertext) / data_modulus_count;
+                let data_modulus_index = catalog_index % data_modulus_count;
+                (
+                    u16::try_from(ciphertext_ordinal).expect("ciphertext ordinal fits u16"),
+                    u16::try_from(component_ordinal).expect("component ordinal fits u16"),
+                    u16::try_from(data_modulus_index).expect("data-modulus index fits u16"),
+                    DATA_PRIMES[data_modulus_index],
+                    Arc::<[u64]>::from(vec![
+                        u64::try_from(catalog_index).expect("catalog index fits u64"),
+                    ]),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        let verified_catalog =
+            verified_ciphertext_catalog_from_authenticated(authenticated_catalog);
+        assert_eq!(verified_catalog.len(), 92);
+        for (catalog_index, polynomial) in verified_catalog.iter().enumerate() {
+            let expected_ciphertext_ordinal = catalog_index / polynomials_per_ciphertext;
+            let expected_component_ordinal =
+                (catalog_index % polynomials_per_ciphertext) / data_modulus_count;
+            let expected_data_modulus_index = catalog_index % data_modulus_count;
+            assert_eq!(
+                (
+                    usize::from(polynomial.ciphertext_ordinal()),
+                    usize::from(polynomial.component_ordinal()),
+                    usize::from(polynomial.data_modulus_index()),
+                ),
+                (
+                    expected_ciphertext_ordinal,
+                    expected_component_ordinal,
+                    expected_data_modulus_index,
+                ),
+                "authenticated catalog coordinate changed at entry {catalog_index}",
+            );
+            assert_eq!(
+                polynomial.modulus(),
+                DATA_PRIMES[expected_data_modulus_index]
+            );
+            assert_eq!(
+                polynomial.coefficients(),
+                &[u64::try_from(catalog_index).expect("catalog index fits u64")]
+            );
+        }
+    }
+
+    #[test]
+    fn authenticated_ciphertext_conversion_does_not_rederive_supplied_coordinates() {
+        let authenticated_catalog = vec![
+            (1, 1, 22, DATA_PRIMES[22], Arc::<[u64]>::from([41])),
+            (0, 0, 0, DATA_PRIMES[0], Arc::<[u64]>::from([43])),
+        ];
+
+        let verified_catalog =
+            verified_ciphertext_catalog_from_authenticated(authenticated_catalog);
+        let coordinates = verified_catalog
+            .iter()
+            .map(|polynomial| {
+                (
+                    polynomial.ciphertext_ordinal(),
+                    polynomial.component_ordinal(),
+                    polynomial.data_modulus_index(),
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(coordinates, [(1, 1, 22), (0, 0, 0)]);
+        assert_eq!(verified_catalog[0].coefficients(), &[41]);
+        assert_eq!(verified_catalog[1].coefficients(), &[43]);
+    }
 }

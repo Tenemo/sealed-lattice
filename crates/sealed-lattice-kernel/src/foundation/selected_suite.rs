@@ -109,24 +109,27 @@ pub(crate) fn selected_suite_capability_for_tests() -> SelectedSuiteCapability {
 }
 
 #[cfg(test)]
+fn structural_artifact_reference_for_tests(artifact_kind: ArtifactKind) -> ArtifactReference {
+    let bytes = CanonicalTuple::new(
+        artifact_kind.artifact_schema_identifier(),
+        artifact_kind.artifact_schema_version(),
+        vec![CanonicalItem::unsigned16(artifact_kind.canonical_code())],
+    )
+    .encode()
+    .expect("structural test artifact encodes");
+    ArtifactReference::from_canonical_artifact_bytes(
+        artifact_kind,
+        &bytes,
+        &CanonicalDecodeLimits::default(),
+    )
+    .expect("structural test artifact reference derives")
+}
+
+#[cfg(test)]
 fn structural_artifact_references_for_tests() -> Vec<ArtifactReference> {
     ArtifactKind::ALL
         .into_iter()
-        .map(|artifact_kind| {
-            let bytes = CanonicalTuple::new(
-                artifact_kind.artifact_schema_identifier(),
-                artifact_kind.artifact_schema_version(),
-                vec![CanonicalItem::unsigned16(artifact_kind.canonical_code())],
-            )
-            .encode()
-            .expect("structural test artifact encodes");
-            ArtifactReference::from_canonical_artifact_bytes(
-                artifact_kind,
-                &bytes,
-                &CanonicalDecodeLimits::default(),
-            )
-            .expect("structural test artifact reference derives")
-        })
+        .map(structural_artifact_reference_for_tests)
         .collect()
 }
 
@@ -586,6 +589,15 @@ fn selected_suite_record() -> SchemaResult<SuiteRecord> {
 }
 
 #[cfg(test)]
+fn derive_selected_fixed_algebra_candidate_record() -> SchemaResult<SuiteRecord> {
+    require_selected_foundation_geometry()?;
+    SuiteRecord::new(
+        selected_count_limits()?,
+        derive_selected_fixed_algebra_artifact_references()?,
+    )
+}
+
+#[cfg(test)]
 fn derive_selected_suite_candidate_record() -> SchemaResult<SuiteRecord> {
     require_selected_foundation_geometry()?;
     require_selected_evaluator_catalog()?;
@@ -871,6 +883,33 @@ fn require_selected_absolute_resource_bounds() -> SchemaResult<()> {
 }
 
 #[cfg(test)]
+fn derive_selected_fixed_algebra_artifact_references() -> SchemaResult<Vec<ArtifactReference>> {
+    // This fixed-algebra fixture derives real canonical references only for
+    // artifacts whose construction is independent of relation and evaluator
+    // compilers. The all-real builder below retains those later gates.
+    Ok(vec![
+        derive_selected_artifact_reference(
+            ArtifactKind::EncoderAndBallotLayout,
+            selected_encoder_and_ballot_layout_artifact_bytes()?,
+        )?,
+        derive_selected_artifact_reference(
+            ArtifactKind::VerifiableSecretSharingProfile,
+            selected_verifiable_secret_sharing_profile_artifact_bytes()?,
+        )?,
+        derive_selected_artifact_reference(
+            ArtifactKind::LatticeCommitmentProfile,
+            selected_lattice_commitment_profile_artifact_bytes()?,
+        )?,
+        structural_artifact_reference_for_tests(ArtifactKind::ProofProfileSet),
+        structural_artifact_reference_for_tests(ArtifactKind::EvaluatorProgramSet),
+        derive_selected_artifact_reference(
+            ArtifactKind::TargetDecryptionProfile,
+            selected_target_decryption_profile_artifact_bytes()?,
+        )?,
+    ])
+}
+
+#[cfg(test)]
 fn derive_selected_artifact_references() -> SchemaResult<Vec<ArtifactReference>> {
     let artifacts = [
         (
@@ -903,33 +942,41 @@ fn derive_selected_artifact_references() -> SchemaResult<Vec<ArtifactReference>>
     artifacts
         .into_iter()
         .map(|(artifact_kind, canonical_bytes)| {
-            let byte_length = canonical_bytes.len();
-            if byte_length == 0
-                || u64::try_from(byte_length).map_err(|_| resource_count_overflow())?
-                    > MAXIMUM_CANONICAL_STREAM_BYTE_LENGTH
-            {
-                return Err(invalid_selected_suite(
-                    "selected artifact exceeds the absolute stream bound",
-                ));
-            }
-            let cumulative_work_byte_length = byte_length
-                .checked_mul(64)
-                .ok_or_else(resource_count_overflow)?;
-            let decode_limits = CanonicalDecodeLimits {
-                maximum_tuple_byte_length: byte_length,
-                maximum_item_count: 100_000,
-                maximum_item_byte_length: byte_length,
-                maximum_nesting_depth: 32,
-                maximum_cumulative_work_byte_length: cumulative_work_byte_length,
-                maximum_cumulative_allocation_byte_length: cumulative_work_byte_length,
-            };
-            ArtifactReference::from_canonical_artifact_bytes(
-                artifact_kind,
-                &canonical_bytes,
-                &decode_limits,
-            )
+            derive_selected_artifact_reference(artifact_kind, canonical_bytes)
         })
         .collect()
+}
+
+#[cfg(test)]
+fn derive_selected_artifact_reference(
+    artifact_kind: ArtifactKind,
+    canonical_bytes: Vec<u8>,
+) -> SchemaResult<ArtifactReference> {
+    let byte_length = canonical_bytes.len();
+    if byte_length == 0
+        || u64::try_from(byte_length).map_err(|_| resource_count_overflow())?
+            > MAXIMUM_CANONICAL_STREAM_BYTE_LENGTH
+    {
+        return Err(invalid_selected_suite(
+            "selected artifact exceeds the absolute stream bound",
+        ));
+    }
+    let cumulative_work_byte_length = byte_length
+        .checked_mul(64)
+        .ok_or_else(resource_count_overflow)?;
+    let decode_limits = CanonicalDecodeLimits {
+        maximum_tuple_byte_length: byte_length,
+        maximum_item_count: 100_000,
+        maximum_item_byte_length: byte_length,
+        maximum_nesting_depth: 32,
+        maximum_cumulative_work_byte_length: cumulative_work_byte_length,
+        maximum_cumulative_allocation_byte_length: cumulative_work_byte_length,
+    };
+    ArtifactReference::from_canonical_artifact_bytes(
+        artifact_kind,
+        &canonical_bytes,
+        &decode_limits,
+    )
 }
 
 #[cfg(test)]
@@ -946,12 +993,20 @@ fn selected_count_limits() -> SchemaResult<SuiteCountLimits> {
 
 #[cfg(test)]
 pub(crate) fn selected_maximum_proof_objects_per_action() -> SchemaResult<u32> {
-    let evaluator_resource_accounting = selected_evaluator_resource_accounting()?;
+    let selected_relinearization_positions =
+        selected_evaluator_relinearization_entry_positions()
+            .map_err(|_| invalid_selected_suite("selected relinearization catalog is invalid"))?;
+    let selected_galois_batch_schedule = selected_galois_key_share_batch_schedule();
+    if selected_relinearization_positions.is_empty() || selected_galois_batch_schedule.is_empty() {
+        return Err(invalid_selected_suite(
+            "selected evaluator proof-application catalog is empty",
+        ));
+    }
     let selected_relinearization_position_count =
-        evaluator_resource_accounting.relinearization_position_count();
-    let selected_galois_batch_count =
-        u32::try_from(selected_galois_key_share_batch_schedule().len())
+        u32::try_from(selected_relinearization_positions.len())
             .map_err(|_| resource_count_overflow())?;
+    let selected_galois_batch_count = u32::try_from(selected_galois_batch_schedule.len())
+        .map_err(|_| resource_count_overflow())?;
     Ok(ProofApplicationSlotCeilings::derive(
         FOUNDATION_PROFILE.participant_count,
         selected_relinearization_position_count,
@@ -1133,6 +1188,20 @@ mod tests {
             u32::try_from(candidate.galois_key_schedule.len())
                 .expect("selected Galois count fits u32")
         );
+        let accounting_derived_maximum_proof_objects = ProofApplicationSlotCeilings::derive(
+            FOUNDATION_PROFILE.participant_count,
+            accounting.relinearization_position_count(),
+            u32::try_from(selected_galois_key_share_batch_schedule().len())
+                .expect("selected Galois batch count fits u32"),
+            SELECTED_MAXIMUM_CANDIDATE_PACKAGES_PER_ACTION,
+        )
+        .expect("accounting-derived proof-application slots derive")
+        .total_application_slot_ceiling();
+        assert_eq!(
+            selected_maximum_proof_objects_per_action()
+                .expect("catalog-derived proof-object ceiling derives"),
+            accounting_derived_maximum_proof_objects
+        );
         assert_eq!(
             accounting.source_component_count_per_participant(),
             expected_source_component_count
@@ -1247,6 +1316,92 @@ mod tests {
             select_suite_record(&structural_candidate)
                 .err()
                 .expect("an unavailable suite cannot mint authority")
+                .refusal_reason,
+            RefusalReason::UnsupportedVersionOrSuite
+        );
+    }
+
+    #[test]
+    fn fixed_algebra_candidate_round_trips_with_owned_artifacts_and_later_placeholders() {
+        let candidate = derive_selected_fixed_algebra_candidate_record()
+            .expect("the fixed-algebra candidate and its owned artifacts must derive");
+        let encoded = candidate.encode().expect("fixed-algebra candidate encodes");
+        let decoded = SuiteRecord::decode(&encoded, &CanonicalDecodeLimits::default())
+            .expect("fixed-algebra candidate decodes");
+        assert_eq!(decoded, candidate);
+        assert_eq!(
+            decoded.encode().expect("decoded candidate re-encodes"),
+            encoded
+        );
+        assert_eq!(
+            decoded
+                .suite_id()
+                .expect("decoded candidate identifier derives"),
+            candidate.suite_id().expect("candidate identifier derives")
+        );
+        assert_eq!(
+            decoded
+                .artifacts()
+                .iter()
+                .map(|reference| reference.artifact_kind())
+                .collect::<Vec<_>>(),
+            ArtifactKind::ALL
+        );
+
+        let encoder_bytes = selected_encoder_and_ballot_layout_artifact_bytes()
+            .expect("selected encoder artifact derives");
+        let encoder_tuple =
+            CanonicalTuple::decode(&encoder_bytes, &CanonicalDecodeLimits::default())
+                .expect("selected encoder artifact decodes");
+        assert_eq!(
+            encoder_tuple.schema_identifier,
+            ArtifactKind::EncoderAndBallotLayout.artifact_schema_identifier()
+        );
+        assert_eq!(
+            encoder_tuple.schema_version,
+            ArtifactKind::EncoderAndBallotLayout.artifact_schema_version()
+        );
+        assert_eq!(encoder_tuple.schema_version, 4);
+
+        for (artifact_kind, canonical_bytes) in [
+            (ArtifactKind::EncoderAndBallotLayout, encoder_bytes),
+            (
+                ArtifactKind::VerifiableSecretSharingProfile,
+                selected_verifiable_secret_sharing_profile_artifact_bytes()
+                    .expect("selected VSS artifact derives"),
+            ),
+            (
+                ArtifactKind::LatticeCommitmentProfile,
+                selected_lattice_commitment_profile_artifact_bytes()
+                    .expect("selected lattice-commitment artifact derives"),
+            ),
+            (
+                ArtifactKind::TargetDecryptionProfile,
+                selected_target_decryption_profile_artifact_bytes()
+                    .expect("selected target-decryption artifact derives"),
+            ),
+        ] {
+            let real_reference = derive_selected_artifact_reference(artifact_kind, canonical_bytes)
+                .expect("owned real artifact reference derives");
+            assert_eq!(candidate.artifact(artifact_kind), &real_reference);
+            assert_ne!(
+                candidate.artifact(artifact_kind),
+                &structural_artifact_reference_for_tests(artifact_kind)
+            );
+        }
+        for later_owned_kind in [
+            ArtifactKind::ProofProfileSet,
+            ArtifactKind::EvaluatorProgramSet,
+        ] {
+            assert_eq!(
+                candidate.artifact(later_owned_kind),
+                &structural_artifact_reference_for_tests(later_owned_kind)
+            );
+        }
+        assert_eq!(
+            select_suite_record(&candidate)
+                .err()
+                .expect("fixed algebra does not enable runtime suite selection")
                 .refusal_reason,
             RefusalReason::UnsupportedVersionOrSuite
         );

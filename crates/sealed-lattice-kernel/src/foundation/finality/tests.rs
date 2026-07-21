@@ -9,9 +9,10 @@ use fips204::{
 };
 
 use crate::foundation::{
-    CanonicalBoardLimits, CanonicalBoardVerifier, RosterEntry, StateOutputIntentPayload,
-    StateReservationIntentPayload, StateWitnessVoteKind, StateWitnessVotePayload,
-    derive_state_exact_output_hash, derive_state_witness_vote_sequence, signature_message,
+    AggregatePayload, CanonicalBoardLimits, CanonicalBoardVerifier, RosterEntry,
+    StateOutputIntentPayload, StateReservationIntentPayload, StateWitnessVoteKind,
+    StateWitnessVotePayload, derive_state_exact_output_hash, derive_state_witness_vote_sequence,
+    signature_message,
 };
 
 const OBJECT_SIGNATURE_CONTEXT: &[u8] = b"sealed-lattice/object-signature/v1";
@@ -259,20 +260,15 @@ impl FinalityTestFixture {
             .iter()
             .map(|carrier| canonical_signed_carrier_object_hash(carrier))
             .collect::<Vec<_>>();
-        let selected_ballot_items = ballot_hashes
-            .iter()
-            .map(|object_hash| CanonicalItem::hash512(object_hash.into_bytes()))
-            .collect::<Vec<_>>();
-        let aggregate_payload = CanonicalTuple::new(
-            0x1404,
-            1,
-            vec![
-                CanonicalItem::hash512(verified_setup_source_hash.into_bytes()),
-                CanonicalItem::homogeneous_list(CanonicalItemType::Hash512, &selected_ballot_items)
-                    .expect("selected ballot list"),
-                self.stream_descriptor_item(CanonicalStreamDomain::AggregateCiphertext, 0xc3),
+        let aggregate_payload = AggregatePayload::new(
+            verified_setup_source_hash,
+            ballot_hashes.clone(),
+            [
+                self.stream_descriptor(CanonicalStreamDomain::AggregateCiphertext, 0xc3),
+                self.stream_descriptor(CanonicalStreamDomain::AggregateCiphertext, 0xc4),
             ],
         )
+        .expect("aggregate payload")
         .encode()
         .expect("aggregate payload");
         let aggregate_envelope = self.envelope(

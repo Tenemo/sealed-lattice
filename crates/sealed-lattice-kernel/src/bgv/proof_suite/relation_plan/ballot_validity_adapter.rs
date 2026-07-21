@@ -25,10 +25,10 @@ use crate::{
     foundation::{
         ActionPrivateRandomness, AuthenticatedCheckpointContinuationSource, CanonicalItem,
         CanonicalStreamDomain, CanonicalStreamVerifier, CanonicalStreamWriter, CanonicalTuple,
-        FOUNDATION_PROFILE, FoundationSchemaError, Hash512, OrdinaryProofCoinInput,
-        PrivateRandomCursor, PrivateRandomnessAttemptIdentifier, PrivateRandomnessDomain,
-        ProofApplicationSlot, RefusalReason, SelectedSuiteCapability, StreamDescriptor,
-        VerificationResult, hash_foundation_tuple_512,
+        DistributionPurpose, FOUNDATION_PROFILE, FoundationSchemaError, Hash512,
+        OrdinaryProofCoinInput, PrivateRandomCursor, PrivateRandomnessAttemptIdentifier,
+        PrivateRandomnessDomain, ProofApplicationSlot, RefusalReason, SelectedSuiteCapability,
+        StreamDescriptor, VerificationResult, hash_foundation_tuple_512,
         resolve_prepared_ordinary_proof_attempt_source,
     },
     hashing::hash_framed_parts_512,
@@ -100,11 +100,14 @@ const BALLOT_SOURCE_RESTART_BINDING_DOMAIN: &str =
 const BALLOT_SOURCE_POLYNOMIAL_REPLAY_DOMAIN: &str =
     "sealed-lattice/proof/ballot-source-polynomial-replay/v1";
 const BALLOT_ENCRYPTION_COIN_CONTEXT_SCHEMA_IDENTIFIER: u16 = 0x1303;
+const BALLOT_ENCRYPTION_COIN_CONTEXT_SCHEMA_VERSION: u16 = 2;
 const BALLOT_ENCRYPTION_COIN_CONTEXT_HASH_DOMAIN: &str =
-    "sealed-lattice/ballot/encryption-coin-context/v1";
-const BALLOT_EPHEMERAL_SECRET_RANDOMNESS_PURPOSE: [u16; PAIR_CHARACTER_CIPHERTEXT_COUNT] = [8, 11];
-const BALLOT_ERROR_ZERO_RANDOMNESS_PURPOSE: [u16; PAIR_CHARACTER_CIPHERTEXT_COUNT] = [9, 12];
-const BALLOT_ERROR_ONE_RANDOMNESS_PURPOSE: [u16; PAIR_CHARACTER_CIPHERTEXT_COUNT] = [10, 13];
+    "sealed-lattice/ballot/encryption-coin-context/v2";
+const BALLOT_ENCRYPTION_DISTRIBUTION_PURPOSES: [DistributionPurpose; 3] = [
+    DistributionPurpose::BallotEncryptionEphemeralSecret,
+    DistributionPurpose::BallotEncryptionErrorZero,
+    DistributionPurpose::BallotEncryptionErrorOne,
+];
 
 type BallotResiduePolynomialRecord = (u16, u16, u64, Arc<[u64]>);
 pub(crate) type BallotCiphertextPolynomialCatalogEntry = (u16, u16, u16, u64, Arc<[u64]>);
@@ -597,6 +600,48 @@ pub(crate) struct BallotValidityAcceptedSetupBinding {
     pub(crate) exact_verified_setup_source_hash: [u8; 64],
 }
 
+fn canonical_ballot_encryption_coin_context(
+    application_slot: ProofApplicationSlot,
+    verified_setup_source_hash: [u8; Hash512::BYTE_LENGTH],
+    ciphertext_ordinal: usize,
+) -> Result<CanonicalTuple, BallotValidityAdapterError> {
+    if ciphertext_ordinal >= PAIR_CHARACTER_CIPHERTEXT_COUNT {
+        return Err(BallotValidityAdapterError::InvalidStatementBinding);
+    }
+    let ciphertext_ordinal = u16::try_from(ciphertext_ordinal)
+        .map_err(|_| BallotValidityAdapterError::IntegerOverflow)?;
+    Ok(CanonicalTuple::new(
+        BALLOT_ENCRYPTION_COIN_CONTEXT_SCHEMA_IDENTIFIER,
+        BALLOT_ENCRYPTION_COIN_CONTEXT_SCHEMA_VERSION,
+        vec![
+            CanonicalItem::nested_tuple(&application_slot.canonical_tuple()?)
+                .map_err(|_| BallotValidityAdapterError::InvalidStatementBinding)?,
+            CanonicalItem::hash512(verified_setup_source_hash),
+            CanonicalItem::unsigned16(ciphertext_ordinal),
+        ],
+    ))
+}
+
+fn ballot_encryption_coin_context_hash(
+    application_slot: ProofApplicationSlot,
+    verified_setup_source_hash: [u8; Hash512::BYTE_LENGTH],
+    ciphertext_ordinal: usize,
+) -> Result<Hash512, BallotValidityAdapterError> {
+    let canonical_coin_context_bytes = canonical_ballot_encryption_coin_context(
+        application_slot,
+        verified_setup_source_hash,
+        ciphertext_ordinal,
+    )?
+    .encode()
+    .map_err(|_| BallotValidityAdapterError::InvalidStatementBinding)?;
+    hash_foundation_tuple_512(
+        BALLOT_ENCRYPTION_COIN_CONTEXT_HASH_DOMAIN,
+        &[CanonicalItem::variable_bytes(canonical_coin_context_bytes)
+            .map_err(|_| BallotValidityAdapterError::InvalidStatementBinding)?],
+    )
+    .map_err(|_| BallotValidityAdapterError::InvalidStatementBinding)
+}
+
 /// The common witness shared by every RNS limb of one ballot encryption.
 ///
 /// Construction checks the score domain, exact selected batch encoding, and
@@ -653,24 +698,6 @@ impl BallotValidityEncryptionAttemptWitness {
         {
             return Err(BallotValidityAdapterError::InvalidStatementBinding);
         }
-        let coin_context = CanonicalTuple::new(
-            BALLOT_ENCRYPTION_COIN_CONTEXT_SCHEMA_IDENTIFIER,
-            1,
-            vec![
-                CanonicalItem::nested_tuple(&application_slot.canonical_tuple()?)
-                    .map_err(|_| BallotValidityAdapterError::InvalidStatementBinding)?,
-                CanonicalItem::hash512(verified_setup_source_hash),
-            ],
-        );
-        let canonical_coin_context_bytes = coin_context
-            .encode()
-            .map_err(|_| BallotValidityAdapterError::InvalidStatementBinding)?;
-        let coin_context_hash = hash_foundation_tuple_512(
-            BALLOT_ENCRYPTION_COIN_CONTEXT_HASH_DOMAIN,
-            &[CanonicalItem::variable_bytes(canonical_coin_context_bytes)
-                .map_err(|_| BallotValidityAdapterError::InvalidStatementBinding)?],
-        )
-        .map_err(|_| BallotValidityAdapterError::InvalidStatementBinding)?;
         let attempt_identifier = action_private_randomness
             .ballot_encryption_attempt_identifier(injected_encryption_attempt_identifier);
         let ring_degree = usize::try_from(source_plan.ring_degree())
@@ -685,24 +712,29 @@ impl BallotValidityEncryptionAttemptWitness {
             pair_character_plaintexts(&scores[..], source_plan.plaintext_modulus(), ring_degree)?;
         let mut ciphertext_secrets = Vec::with_capacity(PAIR_CHARACTER_CIPHERTEXT_COUNT);
         let mut cursors = Vec::with_capacity(PAIR_CHARACTER_CIPHERTEXT_COUNT * 3);
-        for ciphertext_ordinal in 0..PAIR_CHARACTER_CIPHERTEXT_COUNT {
+        for (ciphertext_ordinal, plaintext) in pair_character_plaintexts.iter().enumerate() {
+            let coin_context_hash = ballot_encryption_coin_context_hash(
+                application_slot,
+                verified_setup_source_hash,
+                ciphertext_ordinal,
+            )?;
             let mut randomizer_stream = action_private_randomness.begin_stream(
                 PrivateRandomnessDomain::ballot_encryption_distribution(
-                    BALLOT_EPHEMERAL_SECRET_RANDOMNESS_PURPOSE[ciphertext_ordinal],
+                    BALLOT_ENCRYPTION_DISTRIBUTION_PURPOSES[0].canonical_code(),
                 )?,
                 coin_context_hash,
                 attempt_identifier,
             )?;
             let mut error_zero_stream = action_private_randomness.begin_stream(
                 PrivateRandomnessDomain::ballot_encryption_distribution(
-                    BALLOT_ERROR_ZERO_RANDOMNESS_PURPOSE[ciphertext_ordinal],
+                    BALLOT_ENCRYPTION_DISTRIBUTION_PURPOSES[1].canonical_code(),
                 )?,
                 coin_context_hash,
                 attempt_identifier,
             )?;
             let mut error_one_stream = action_private_randomness.begin_stream(
                 PrivateRandomnessDomain::ballot_encryption_distribution(
-                    BALLOT_ERROR_ONE_RANDOMNESS_PURPOSE[ciphertext_ordinal],
+                    BALLOT_ENCRYPTION_DISTRIBUTION_PURPOSES[2].canonical_code(),
                 )?,
                 coin_context_hash,
                 attempt_identifier,
@@ -724,7 +756,6 @@ impl BallotValidityEncryptionAttemptWitness {
                 error_zero_stream.cursor(),
                 error_one_stream.cursor(),
             ]);
-            let plaintext = &pair_character_plaintexts[ciphertext_ordinal];
             ciphertext_secrets.push(BallotValidityCiphertextEncryptionSecret {
                 auxiliary_left_coefficients: Zeroizing::new(
                     plaintext.auxiliary_left_coefficients().to_vec(),
@@ -3613,6 +3644,11 @@ mod tests {
         CommonProofPrivateCoinCoordinate, CommonProofPrivateCoinSource,
         CommonProofSourcePolynomialRequestContext, construct_pre_challenge_relation_columns,
     };
+    use crate::foundation::{
+        ACTION_RANDOMNESS_ROOT_BYTE_LENGTH, ActionRandomnessDerivationInput, ActionRandomnessRoot,
+        ParticipantIdentity, PrivateRandomnessStream, selected_suite_capability_for_tests,
+    };
+    use std::collections::BTreeSet;
 
     struct DeterministicPrivateCoins(u64);
 
@@ -3651,8 +3687,7 @@ mod tests {
         assert_eq!(accounting.canonical_ciphertext_chunk_count(), 12);
         assert!(accounting.canonical_ciphertext_descriptor_encoded_byte_length() > 0);
         let canonical_ciphertext_chunk_count =
-            u64::try_from(accounting.canonical_ciphertext_chunk_count())
-                .expect("chunk count fits u64");
+            u64::from(accounting.canonical_ciphertext_chunk_count());
         assert_eq!(
             accounting.canonical_ciphertext_descriptor_digest_catalog_byte_length(),
             canonical_ciphertext_chunk_count
@@ -3739,6 +3774,336 @@ mod tests {
             &check_context(),
         )
         .expect("ballot relation compilation")
+    }
+
+    fn ballot_randomness_context() -> (
+        SelectedSuiteCapability,
+        ActionPrivateRandomness,
+        ProofApplicationSlot,
+        [u8; Hash512::BYTE_LENGTH],
+    ) {
+        let selected_suite = selected_suite_capability_for_tests();
+        let suite_identifier = Hash512::from_bytes(selected_suite.suite_identifier());
+        let ceremony_context_hash = Hash512::from_bytes([0x42; Hash512::BYTE_LENGTH]);
+        let action_context_hash = Hash512::from_bytes([0x43; Hash512::BYTE_LENGTH]);
+        let participant_identity =
+            ParticipantIdentity::from_bytes([0x44; ParticipantIdentity::BYTE_LENGTH]);
+        let action_private_randomness = ActionRandomnessRoot::from_injected_bytes(Zeroizing::new(
+            [0x45; ACTION_RANDOMNESS_ROOT_BYTE_LENGTH],
+        ))
+        .derive(ActionRandomnessDerivationInput::new(
+            suite_identifier,
+            ceremony_context_hash,
+            action_context_hash,
+            participant_identity,
+        ))
+        .expect("ballot action randomness derives");
+        let application_slot = ProofApplicationSlot::new(
+            suite_identifier,
+            ceremony_context_hash,
+            action_context_hash,
+            crate::foundation::ProofApplicationSlotCeilings::BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER,
+            Some(0),
+            None,
+            Some(7),
+        )
+        .expect("ballot application slot");
+        (
+            selected_suite,
+            action_private_randomness,
+            application_slot,
+            [0x46; Hash512::BYTE_LENGTH],
+        )
+    }
+
+    fn sample_test_ballot_distribution(
+        stream: &mut PrivateRandomnessStream<'_>,
+        purpose: u16,
+        maximum_candidate_draws_per_output: u32,
+    ) -> i64 {
+        match purpose {
+            purpose
+                if purpose
+                    == DistributionPurpose::BallotEncryptionEphemeralSecret.canonical_code() =>
+            {
+                i64::from(
+                    stream
+                        .sample_centered_ternary(maximum_candidate_draws_per_output)
+                        .expect("ternary ballot coefficient samples"),
+                )
+            }
+            purpose
+                if purpose == DistributionPurpose::BallotEncryptionErrorZero.canonical_code()
+                    || purpose
+                        == DistributionPurpose::BallotEncryptionErrorOne.canonical_code() =>
+            {
+                i64::from(
+                    stream
+                        .sample_centered_binomial(2)
+                        .expect("centered-binomial ballot coefficient samples"),
+                )
+            }
+            _ => panic!("test purpose must be a ballot-encryption distribution"),
+        }
+    }
+
+    #[test]
+    fn two_ciphertext_ballot_randomness_is_canonical_distinct_and_reconstructible() {
+        let compilation = compilation();
+        let (selected_suite, action_private_randomness, application_slot, setup_source_hash) =
+            ballot_randomness_context();
+        let scores = (0..OPTION_COUNT)
+            .map(|option_ordinal| 1 + (option_ordinal as u64 * 7 + 3) % 10)
+            .collect::<Vec<_>>();
+        let first_attempt_identifier = [0x51; 32];
+        let changed_attempt_identifier = [0x52; 32];
+
+        let canonical_contexts = [0_usize, 1].map(|ciphertext_ordinal| {
+            canonical_ballot_encryption_coin_context(
+                application_slot,
+                setup_source_hash,
+                ciphertext_ordinal,
+            )
+            .expect("canonical ballot-encryption coin context")
+        });
+        for (ciphertext_ordinal, context) in canonical_contexts.iter().enumerate() {
+            assert_eq!(
+                context.schema_identifier,
+                BALLOT_ENCRYPTION_COIN_CONTEXT_SCHEMA_IDENTIFIER
+            );
+            assert_eq!(
+                context.schema_version,
+                BALLOT_ENCRYPTION_COIN_CONTEXT_SCHEMA_VERSION
+            );
+            assert_eq!(context.items.len(), 3);
+            assert_eq!(
+                context.items[2],
+                CanonicalItem::unsigned16(
+                    u16::try_from(ciphertext_ordinal).expect("ciphertext ordinal fits u16")
+                )
+            );
+        }
+        let mut ordinal_mutation = canonical_contexts[0].clone();
+        ordinal_mutation.items[2] = CanonicalItem::unsigned16(1);
+        assert_eq!(ordinal_mutation, canonical_contexts[1]);
+        assert_eq!(
+            canonical_ballot_encryption_coin_context(
+                application_slot,
+                setup_source_hash,
+                PAIR_CHARACTER_CIPHERTEXT_COUNT,
+            )
+            .err(),
+            Some(BallotValidityAdapterError::InvalidStatementBinding)
+        );
+
+        let context_hashes = [0_usize, 1].map(|ciphertext_ordinal| {
+            ballot_encryption_coin_context_hash(
+                application_slot,
+                setup_source_hash,
+                ciphertext_ordinal,
+            )
+            .expect("ballot-encryption coin context hash")
+        });
+        assert_ne!(context_hashes[0], context_hashes[1]);
+
+        let (first_witness, first_cursors) =
+            BallotValidityEncryptionAttemptWitness::sample_from_action_randomness(
+                compilation.source_plan(),
+                &selected_suite,
+                &action_private_randomness,
+                application_slot,
+                setup_source_hash,
+                &scores,
+                Zeroizing::new(first_attempt_identifier),
+            )
+            .expect("both ballot ciphertext randomness groups sample");
+        assert_eq!(
+            first_witness.encryption_attempt_identifier(),
+            first_attempt_identifier
+        );
+        for ciphertext_ordinal in 0..PAIR_CHARACTER_CIPHERTEXT_COUNT {
+            let randomizer = first_witness
+                .randomizer_coefficients(ciphertext_ordinal)
+                .expect("ciphertext randomizer");
+            let error_zero = first_witness
+                .error_coefficients(ciphertext_ordinal, 0)
+                .expect("ciphertext first error");
+            let error_one = first_witness
+                .error_coefficients(ciphertext_ordinal, 1)
+                .expect("ciphertext second error");
+            assert_eq!(randomizer.len(), TEST_RING_DEGREE as usize);
+            assert_eq!(error_zero.len(), TEST_RING_DEGREE as usize);
+            assert_eq!(error_one.len(), TEST_RING_DEGREE as usize);
+            assert!(randomizer.iter().all(|value| (-1..=1).contains(value)));
+            assert!(error_zero.iter().all(|value| (-2..=2).contains(value)));
+            assert!(error_one.iter().all(|value| (-2..=2).contains(value)));
+        }
+
+        let expected_purpose_order = [
+            DistributionPurpose::BallotEncryptionEphemeralSecret.canonical_code(),
+            DistributionPurpose::BallotEncryptionErrorZero.canonical_code(),
+            DistributionPurpose::BallotEncryptionErrorOne.canonical_code(),
+            DistributionPurpose::BallotEncryptionEphemeralSecret.canonical_code(),
+            DistributionPurpose::BallotEncryptionErrorZero.canonical_code(),
+            DistributionPurpose::BallotEncryptionErrorOne.canonical_code(),
+        ];
+        assert_eq!(
+            first_cursors.map(PrivateRandomCursor::purpose),
+            expected_purpose_order
+        );
+        assert!(
+            first_cursors[..3]
+                .iter()
+                .all(|cursor| cursor.derivation_context_hash() == context_hashes[0])
+        );
+        assert!(
+            first_cursors[3..]
+                .iter()
+                .all(|cursor| cursor.derivation_context_hash() == context_hashes[1])
+        );
+        assert!(
+            first_cursors
+                .iter()
+                .all(|cursor| { cursor.stream_attempt_identifier() == first_attempt_identifier })
+        );
+        let starting_coordinates = first_cursors
+            .iter()
+            .map(|cursor| {
+                PrivateRandomCursor::new(
+                    cursor.family(),
+                    cursor.purpose(),
+                    cursor.derivation_context_hash(),
+                    cursor.stream_attempt_identifier(),
+                    0,
+                    None,
+                )
+                .expect("canonical starting cursor")
+                .encode()
+                .expect("starting cursor encodes")
+            })
+            .collect::<BTreeSet<_>>();
+        assert_eq!(starting_coordinates.len(), first_cursors.len());
+
+        let (reconstructed_witness, reconstructed_cursors) =
+            BallotValidityEncryptionAttemptWitness::sample_from_action_randomness(
+                compilation.source_plan(),
+                &selected_suite,
+                &action_private_randomness,
+                application_slot,
+                setup_source_hash,
+                &scores,
+                Zeroizing::new(first_attempt_identifier),
+            )
+            .expect("same ballot attempt reconstructs");
+        assert_eq!(reconstructed_cursors, first_cursors);
+        for ciphertext_ordinal in 0..PAIR_CHARACTER_CIPHERTEXT_COUNT {
+            assert_eq!(
+                reconstructed_witness.randomizer_coefficients(ciphertext_ordinal),
+                first_witness.randomizer_coefficients(ciphertext_ordinal)
+            );
+            assert_eq!(
+                reconstructed_witness.error_coefficients(ciphertext_ordinal, 0),
+                first_witness.error_coefficients(ciphertext_ordinal, 0)
+            );
+            assert_eq!(
+                reconstructed_witness.error_coefficients(ciphertext_ordinal, 1),
+                first_witness.error_coefficients(ciphertext_ordinal, 1)
+            );
+        }
+
+        let (changed_witness, changed_cursors) =
+            BallotValidityEncryptionAttemptWitness::sample_from_action_randomness(
+                compilation.source_plan(),
+                &selected_suite,
+                &action_private_randomness,
+                application_slot,
+                setup_source_hash,
+                &scores,
+                Zeroizing::new(changed_attempt_identifier),
+            )
+            .expect("changed ballot attempt samples");
+        assert!(
+            (0..PAIR_CHARACTER_CIPHERTEXT_COUNT).any(|ciphertext_ordinal| {
+                changed_witness.randomizer_coefficients(ciphertext_ordinal)
+                    != first_witness.randomizer_coefficients(ciphertext_ordinal)
+                    || changed_witness.error_coefficients(ciphertext_ordinal, 0)
+                        != first_witness.error_coefficients(ciphertext_ordinal, 0)
+                    || changed_witness.error_coefficients(ciphertext_ordinal, 1)
+                        != first_witness.error_coefficients(ciphertext_ordinal, 1)
+            })
+        );
+        for (first_cursor, changed_cursor) in first_cursors.iter().zip(changed_cursors) {
+            assert_eq!(first_cursor.family(), changed_cursor.family());
+            assert_eq!(first_cursor.purpose(), changed_cursor.purpose());
+            assert_eq!(
+                first_cursor.derivation_context_hash(),
+                changed_cursor.derivation_context_hash()
+            );
+            assert_ne!(
+                first_cursor.stream_attempt_identifier(),
+                changed_cursor.stream_attempt_identifier()
+            );
+        }
+
+        let attempt_identifier = action_private_randomness
+            .ballot_encryption_attempt_identifier(Zeroizing::new(first_attempt_identifier));
+        let maximum_candidate_draws =
+            selected_suite.maximum_private_sampler_candidate_draws_per_output();
+        for (coordinate_ordinal, cursor) in first_cursors.iter().enumerate() {
+            let ciphertext_ordinal =
+                coordinate_ordinal / BALLOT_ENCRYPTION_DISTRIBUTION_PURPOSES.len();
+            let purpose = cursor.purpose();
+            let domain = PrivateRandomnessDomain::ballot_encryption_distribution(purpose)
+                .expect("ballot distribution domain");
+            let mut uninterrupted = action_private_randomness
+                .begin_stream(
+                    domain,
+                    context_hashes[ciphertext_ordinal],
+                    attempt_identifier,
+                )
+                .expect("uninterrupted ballot stream starts");
+            for _ in 0..TEST_RING_DEGREE {
+                sample_test_ballot_distribution(
+                    &mut uninterrupted,
+                    purpose,
+                    maximum_candidate_draws,
+                );
+            }
+            assert_eq!(uninterrupted.cursor(), *cursor);
+            let expected_suffix = sample_test_ballot_distribution(
+                &mut uninterrupted,
+                purpose,
+                maximum_candidate_draws,
+            );
+            let mut resumed = action_private_randomness
+                .resume_stream(
+                    domain,
+                    context_hashes[ciphertext_ordinal],
+                    attempt_identifier,
+                    *cursor,
+                )
+                .expect("exact ballot cursor resumes");
+            let resumed_suffix =
+                sample_test_ballot_distribution(&mut resumed, purpose, maximum_candidate_draws);
+            assert_eq!(resumed_suffix, expected_suffix);
+            assert_eq!(resumed.cursor(), uninterrupted.cursor());
+        }
+
+        let first_domain =
+            PrivateRandomnessDomain::ballot_encryption_distribution(first_cursors[0].purpose())
+                .expect("first ballot distribution domain");
+        let cross_context_error = action_private_randomness
+            .resume_stream(
+                first_domain,
+                context_hashes[1],
+                attempt_identifier,
+                first_cursors[0],
+            )
+            .expect_err("a cursor cannot cross ciphertext contexts");
+        assert_eq!(
+            cross_context_error.refusal_reason,
+            RefusalReason::WrongContext
+        );
     }
 
     fn witness(

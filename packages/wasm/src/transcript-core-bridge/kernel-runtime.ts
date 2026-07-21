@@ -612,10 +612,15 @@ type NumberExportName =
     | 'sealed_lattice_collective_public_key_aggregate_prepare_verification'
     | 'sealed_lattice_collective_public_key_aggregate_statement_byte_length'
     | 'sealed_lattice_ballot_aggregation_absorb'
+    | 'sealed_lattice_ballot_aggregation_absorb_store_chunk'
+    | 'sealed_lattice_ballot_aggregation_aggregate_carrier_byte_length'
     | 'sealed_lattice_ballot_aggregation_begin'
+    | 'sealed_lattice_ballot_aggregation_bind_aggregate_object'
     | 'sealed_lattice_ballot_aggregation_cancel'
+    | 'sealed_lattice_ballot_aggregation_copy_aggregate_carrier'
     | 'sealed_lattice_ballot_aggregation_discard_verified_aggregate'
-    | 'sealed_lattice_ballot_aggregation_finish'
+    | 'sealed_lattice_ballot_aggregation_poll'
+    | 'sealed_lattice_ballot_aggregation_prepare'
     | 'sealed_lattice_evaluator_execution_absorb_store_chunk'
     | 'sealed_lattice_evaluator_execution_begin'
     | 'sealed_lattice_evaluator_execution_bind_replay_object'
@@ -1107,5 +1112,4 @@ export {
     copyFromKernelMemory,
     assertKernelMemoryWithinProfile,
     serializeBoundedKernelCommandRequest,
-    runKernelCommand,
 };

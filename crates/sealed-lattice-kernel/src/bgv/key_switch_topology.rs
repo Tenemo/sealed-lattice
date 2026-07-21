@@ -1,6 +1,7 @@
 use std::ops::Range;
 
 use num_bigint::BigUint;
+use zeroize::Zeroize;
 
 use crate::bgv::parameters::DATA_PRIMES;
 use crate::{
@@ -83,6 +84,20 @@ pub(crate) struct KeySwitchDecompositionTopology {
     data_primes_per_block: usize,
     data_block_ranges: Vec<Range<usize>>,
     extended_moduli: Vec<u64>,
+}
+
+impl Zeroize for KeySwitchDecompositionTopology {
+    fn zeroize(&mut self) {
+        self.level.zeroize();
+        self.data_primes_per_block.zeroize();
+        for block_range in &mut self.data_block_ranges {
+            block_range.start.zeroize();
+            block_range.end.zeroize();
+        }
+        self.data_block_ranges.clear();
+        self.data_block_ranges.spare_capacity_mut().zeroize();
+        self.extended_moduli.zeroize();
+    }
 }
 
 impl KeySwitchDecompositionTopology {

@@ -36,6 +36,8 @@ use crate::bgv::setup::{
     VerifiedAcceptedSetupParticipantTargetReleaseLease, VerifiedPublicRandomness,
 };
 use crate::foundation::{CanonicalStreamDomain, StreamDescriptor, VerifiedCanonicalStreamSummary};
+#[cfg(test)]
+use crate::foundation::{derive_canonical_stream_descriptor, selected_suite_capability_for_tests};
 
 /// Opaque evidence minted only after the complete generated verifier accepts.
 /// It binds the exact suite, protocol version, application statement, and
@@ -2637,6 +2639,59 @@ struct VerifiedEvaluatorKeyStoreBindings {
 }
 
 impl VerifiedEvaluatorKeyStore {
+    /// Mints only the replay-store side of the positive type for unit tests.
+    /// The store material itself has passed the production authenticated
+    /// stream path; the omitted aggregate proof is represented only by a
+    /// private, nonempty test descriptor.
+    #[cfg(test)]
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn from_test_authenticated_replay_material(
+        protocol_version: u16,
+        suite_identifier: [u8; 64],
+        ceremony_context_hash: [u8; 64],
+        action_context_hash: [u8; 64],
+        manifest_hash: [u8; 64],
+        roster_hash: [u8; 64],
+        setup_proof_context_hash: [u8; 64],
+        store_material: VerifiedEvaluatorKeyStoreMaterial,
+    ) -> Result<Self, CommonProofVerifierError> {
+        if protocol_version != FOUNDATION_PROFILE.protocol_version
+            || suite_identifier != selected_suite_capability_for_tests().suite_identifier()
+            || store_material.top_count() != FOUNDATION_PROFILE.option_count
+            || store_material.canonical_store_summary().stream_domain()
+                != CanonicalStreamDomain::EvaluatorKeyStore
+        {
+            return Err(CommonProofVerifierError::InvalidApplicationStatement);
+        }
+        let proof_stream_descriptor = derive_canonical_stream_descriptor(
+            CanonicalStreamDomain::EvaluatorKeyAggregateProof,
+            b"test-minted evaluator-key aggregate proof authority",
+        )
+        .map_err(|_| CommonProofVerifierError::InvalidApplicationStatement)?;
+        let verified_evaluator_key_store_stream = store_material.canonical_store_summary().clone();
+        let evaluator_key_store_digest = store_material
+            .store_descriptor()
+            .full_object_digest
+            .into_bytes();
+        let store = Self {
+            protocol_version,
+            suite_identifier,
+            ceremony_context_hash,
+            action_context_hash,
+            manifest_hash,
+            roster_hash,
+            setup_proof_context_hash,
+            top_count: store_material.top_count(),
+            evaluator_key_store_digest,
+            proof_stream_descriptor: Some(proof_stream_descriptor),
+            ordered_runtime_roots: Vec::new().into_boxed_slice(),
+            verified_evaluator_key_store_stream,
+            store_material: Some(store_material),
+        };
+        store.require_production_replay_material()?;
+        Ok(store)
+    }
+
     #[cfg(test)]
     pub(crate) fn from_verified_common_proof(
         verified_proof: &VerifiedCommonProof,

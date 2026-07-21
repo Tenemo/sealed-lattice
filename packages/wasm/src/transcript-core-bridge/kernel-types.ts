@@ -1557,12 +1557,38 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
     sealed_lattice_ballot_validity_discard_verified_output?: (
         outputHandle: number,
     ) => number;
-    sealed_lattice_ballot_aggregation_begin?: (statusPointer: number) => number;
+    sealed_lattice_ballot_aggregation_begin?: (
+        acceptedSetupAuthorityHandle: number,
+        statusPointer: number,
+    ) => number;
     sealed_lattice_ballot_aggregation_absorb?: (
         aggregationHandle: number,
         verifiedBallotOutputHandle: number,
     ) => number;
-    sealed_lattice_ballot_aggregation_finish?: (
+    sealed_lattice_ballot_aggregation_poll?: (
+        aggregationHandle: number,
+        outputPointer: number,
+        outputByteLength: number,
+    ) => number;
+    sealed_lattice_ballot_aggregation_absorb_store_chunk?: (
+        aggregationHandle: number,
+        storeByteOffset: bigint,
+        chunkPointer: number,
+        chunkByteLength: number,
+    ) => number;
+    sealed_lattice_ballot_aggregation_prepare?: (
+        aggregationHandle: number,
+    ) => number;
+    sealed_lattice_ballot_aggregation_aggregate_carrier_byte_length?: (
+        aggregationHandle: number,
+        statusPointer: number,
+    ) => number;
+    sealed_lattice_ballot_aggregation_copy_aggregate_carrier?: (
+        aggregationHandle: number,
+        outputPointer: number,
+        outputByteLength: number,
+    ) => number;
+    sealed_lattice_ballot_aggregation_bind_aggregate_object?: (
         aggregationHandle: number,
         boardVerifierSessionHandle: number,
         boardVerifierSessionCapabilityPointer: number,
@@ -1577,7 +1603,6 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
         verifiedAggregateAuthorityHandle: number,
     ) => number;
     sealed_lattice_evaluator_execution_begin?: (
-        acceptedSetupAuthorityHandle: number,
         verifiedAggregateAuthorityHandle: number,
         statusPointer: number,
     ) => number;

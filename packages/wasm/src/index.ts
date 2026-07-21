@@ -39,7 +39,10 @@ import {
     generateAggregateThresholdShareInClosedWorker,
     verifyAggregateThresholdShareInClosedWorker,
 } from './aggregate-threshold-share-proof-runtime.js';
-import { openVerifiedBallotAggregationInClosedWorker } from './ballot-aggregation-runtime.js';
+import {
+    openVerifiedBallotAggregationInClosedWorker,
+    resumeVerifiedBallotAggregationFromCheckpointInClosedWorker,
+} from './ballot-aggregation-runtime.js';
 import {
     generateBallotValidityInClosedWorker,
     verifyBallotValidityInClosedWorker,
@@ -154,6 +157,7 @@ export {
     openClosedWorkerSetupMailboxRandomness,
     openClosedWorkerCommonProofScratchStorage,
     openVerifiedBallotAggregationInClosedWorker,
+    resumeVerifiedBallotAggregationFromCheckpointInClosedWorker,
     prepareClosedWorkerVerifiedCommonProofApplication,
     prepareEvaluatorReplayInClosedWorker,
     openClosedWorkerVerifiedStateDurableBinding,
@@ -227,6 +231,19 @@ export type {
 } from './accepted-setup-galois-key-share-runtime.js';
 export type { VerifiedAcceptedSetupAuthority } from './accepted-setup-verification-runtime.js';
 export type {
+    BallotAggregationCheckpointBoundary,
+    BallotAggregationCheckpointCustody,
+    BallotAggregationCheckpointOperationIdentity,
+    BallotAggregationCheckpointReplaySource,
+    BallotAggregationSelectionCheckpoint,
+    BallotAggregationSelectionIdentity,
+    BallotEvaluationWorkerOptions,
+    EvaluatorKeyStoreRangeReadObservation,
+    EvaluatorKeyStoreRangeSource,
+    ExpectedBallotAggregationCheckpointBoundary,
+    PreparedVerifiedBallotAggregate,
+    ResumedBallotAggregationCheckpoint,
+    VerifiedBallotAggregationInput,
     VerifiedBallotAggregationSession,
     VerifiedEvaluatorAggregateAuthority,
 } from './ballot-aggregation-runtime.js';
@@ -235,12 +252,7 @@ export type {
     GeneratedBallotValidityTransport,
     VerifiedBallotOutput,
 } from './ballot-validity-runtime.js';
-export type {
-    EvaluatorKeyStoreRangeReadObservation,
-    EvaluatorKeyStoreRangeSource,
-    EvaluatorReplayWorkerOptions,
-    PreparedEvaluatorReplay,
-} from './evaluator-replay-runtime.js';
+export type { PreparedEvaluatorReplay } from './evaluator-replay-runtime.js';
 export type {
     EvaluatorAggregateConstructionOptions,
     EvaluatorAggregateGenerationMode,

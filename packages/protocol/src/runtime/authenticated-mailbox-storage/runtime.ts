@@ -80,7 +80,7 @@ export type {
     BrowserLocalAuthenticatedMailboxStorageConfiguration,
 } from './records.js';
 
-export const createBrowserLocalAuthenticatedMailboxStorageWithProtection = (
+const createBrowserLocalAuthenticatedMailboxStorageWithProtection = (
     configuration: Readonly<{
         limits: AuthenticatedMailboxStorageLimits;
         protection: RuntimeRecordProtection;

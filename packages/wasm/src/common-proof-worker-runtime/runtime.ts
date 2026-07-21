@@ -122,7 +122,7 @@ export type CommonProofGenerationExecutionOpener = (
           outputStore: CommonProofCanonicalOutputStore;
       }>;
 
-export type ClosedWorkerGeneratedCommonProofExecution = Readonly<{
+type ClosedWorkerGeneratedCommonProofExecution = Readonly<{
     generatedCapability: ClosedWorkerGeneratedCommonProofCapability;
     options?: CommonProofGenerationWorkerOptions;
     outputChunkByteLengths: readonly number[];

@@ -30,7 +30,7 @@ const authorityRecords = new WeakMap<
     VerifiedAcceptedSetupAuthorityRecord
 >();
 
-export type VerifiedAcceptedSetupAuthorityKernelOwner = Readonly<{
+type VerifiedAcceptedSetupAuthorityKernelOwner = Readonly<{
     handle: number;
     kernel: TranscriptCoreKernel;
 }>;

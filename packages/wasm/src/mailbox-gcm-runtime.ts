@@ -612,7 +612,7 @@ const retireAuthenticatedMailboxPlaintextCapabilityRecord = (
     record.retireRuntimeLease();
 };
 
-export const releaseAuthenticatedMailboxPlaintextCapability = (
+const releaseAuthenticatedMailboxPlaintextCapability = (
     capability: AuthenticatedMailboxPlaintextCapability,
 ): void => {
     const record =

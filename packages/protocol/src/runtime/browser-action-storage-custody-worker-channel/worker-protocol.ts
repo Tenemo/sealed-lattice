@@ -289,7 +289,7 @@ export const installedCommonProofPreparedOperationRecords = new WeakMap<
     InstalledCommonProofPreparedOperationRecord
 >();
 
-export type InstalledCommonProofCheckpointLineageReservationRecord = {
+type InstalledCommonProofCheckpointLineageReservationRecord = {
     checkpointLineageIdentifier: Uint8Array<ArrayBuffer>;
     installedHost: InstalledCustodyWorkerHost;
     state: 'available' | 'consumed';

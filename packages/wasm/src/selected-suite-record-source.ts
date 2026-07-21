@@ -51,7 +51,7 @@ type OwnedSelectedSuiteRecordSource = Readonly<{
     source: SelectedSuiteRecordSource;
 }>;
 
-export type SelectedSuiteRecordSourceKernelOwner = Readonly<{
+type SelectedSuiteRecordSourceKernelOwner = Readonly<{
     handle: number;
     kernel: TranscriptCoreKernel;
 }>;

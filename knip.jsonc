@@ -16,7 +16,7 @@
             ],
         },
         "packages/sdk": {
-            "entry": ["tests/**/*.test.ts"],
+            "entry": ["src/index.ts", "tests/**/*.test.ts"],
             "project": ["src/**/*.ts", "tests/**/*.ts"],
             "ignoreDependencies": [
                 // The public package intentionally declares the crypto backends used by the vendored runtime surface.

@@ -226,12 +226,12 @@ const releaseEvaluatorComponentBackingMap = (
     }
 };
 
-export type AcceptedSetupVerificationAssemblyKernelOwner = Readonly<{
+type AcceptedSetupVerificationAssemblyKernelOwner = Readonly<{
     handle: number;
     kernel: TranscriptCoreKernel;
 }>;
 
-export type AcceptedSetupEvaluatorSourceCatalogKernelOwner = Readonly<{
+type AcceptedSetupEvaluatorSourceCatalogKernelOwner = Readonly<{
     handle: number;
     kernel: TranscriptCoreKernel;
 }>;
@@ -1111,52 +1111,3 @@ export const readAcceptedSetupPrepackageEvaluatorComponentExactRange =
             input.exactByteLength,
         );
     };
-
-export const readAcceptedSetupVerificationEvaluatorComponentExactRange =
-    async (input: {
-        acceptedSetupVerification: AcceptedSetupVerificationSession;
-        authenticatedByteLength: bigint;
-        exactByteLength: number;
-        fullObjectDigest: Uint8Array;
-        kernel: TranscriptCoreKernel;
-        materialRoot: Uint8Array;
-        sourceByteOffset: bigint;
-    }): Promise<Uint8Array<ArrayBuffer>> => {
-        const assemblyRecord = requireSessionRecord(
-            input.acceptedSetupVerification,
-        );
-        if (
-            assemblyRecord.kernel !== input.kernel ||
-            assemblyRecord.phase !== 'collecting'
-        ) {
-            throw new CanonicalStreamRefusalError('consumedState');
-        }
-        const backing = resolveEvaluatorComponentBacking({
-            authenticatedByteLength: input.authenticatedByteLength,
-            backings: assemblyRecord.evaluatorComponentBackings,
-            fullObjectDigest: input.fullObjectDigest,
-            kernel: input.kernel,
-            materialRoot: input.materialRoot,
-        });
-        return backing.readExactRange(
-            input.sourceByteOffset,
-            input.exactByteLength,
-        );
-    };
-
-/** Releases participant component carriers after the evaluator terminal. */
-export const releaseAcceptedSetupVerificationEvaluatorComponentBackings = (
-    acceptedSetupVerification: AcceptedSetupVerificationSession,
-    kernel: TranscriptCoreKernel,
-): void => {
-    const assemblyRecord = requireSessionRecord(acceptedSetupVerification);
-    if (
-        assemblyRecord.kernel !== kernel ||
-        assemblyRecord.phase !== 'collecting'
-    ) {
-        throw new CanonicalStreamRefusalError('consumedState');
-    }
-    releaseEvaluatorComponentBackingMap(
-        assemblyRecord.evaluatorComponentBackings,
-    );
-};

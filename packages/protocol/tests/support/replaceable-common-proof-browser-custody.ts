@@ -5,7 +5,7 @@ import type {
 
 import type { CommonProofBrowserCustody } from '#packages/protocol/src/runtime/common-proof-browser-custody';
 
-export type ReplaceableCommonProofBrowserCustody = Readonly<{
+type ReplaceableCommonProofBrowserCustody = Readonly<{
     custody: CommonProofBrowserCustody;
     currentCustody(): CommonProofBrowserCustody;
     replaceAfterAuthenticatedSuspension(

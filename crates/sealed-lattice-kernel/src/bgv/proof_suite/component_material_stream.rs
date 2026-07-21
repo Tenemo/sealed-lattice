@@ -1,5 +1,7 @@
 use core::mem::size_of;
 
+use zeroize::Zeroize;
+
 use crate::bgv::key_switch_topology::canonical_residue_byte_length;
 use crate::foundation::{
     CanonicalItem, CanonicalStreamDomain, CanonicalStreamReadbackVerifier, CanonicalStreamVerifier,
@@ -27,7 +29,26 @@ pub(crate) struct KeySwitchComponentMaterialTopology {
     expected_byte_length: u64,
 }
 
+impl Zeroize for KeySwitchComponentMaterialTopology {
+    fn zeroize(&mut self) {
+        self.ordered_moduli.zeroize();
+        self.residue_byte_lengths.zeroize();
+        self.data_block_count.zeroize();
+        self.polynomial_degree.zeroize();
+        self.expected_byte_length.zeroize();
+    }
+}
+
 impl KeySwitchComponentMaterialTopology {
+    #[cfg(test)]
+    pub(crate) fn owned_catalog_buffers_are_zeroized(&self) -> bool {
+        self.ordered_moduli.iter().all(|modulus| *modulus == 0)
+            && self
+                .residue_byte_lengths
+                .iter()
+                .all(|byte_length| *byte_length == 0)
+    }
+
     pub(crate) fn from_selected_suite_at_level(
         selected_suite: &SelectedSuiteCapability,
         catalog_level: usize,
@@ -602,6 +623,72 @@ pub(crate) struct VerifiedKeySwitchComponentMaterialStream {
     refusal_reason: Option<RefusalReason>,
 }
 
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ComponentMaterialStreamDropObservation {
+    pending_residue_byte_length_before_drop: usize,
+    catalog_modulus_count_before_drop: usize,
+    all_owned_buffers_cleared_before_release: bool,
+}
+
+#[cfg(test)]
+thread_local! {
+    static COMPONENT_MATERIAL_STREAM_DROP_OBSERVATIONS:
+        std::cell::RefCell<Vec<ComponentMaterialStreamDropObservation>> = const {
+            std::cell::RefCell::new(Vec::new())
+        };
+}
+
+#[cfg(test)]
+fn clear_component_material_stream_drop_observations() {
+    COMPONENT_MATERIAL_STREAM_DROP_OBSERVATIONS
+        .with(|observations| observations.borrow_mut().clear());
+}
+
+#[cfg(test)]
+fn take_component_material_stream_drop_observations() -> Vec<ComponentMaterialStreamDropObservation>
+{
+    COMPONENT_MATERIAL_STREAM_DROP_OBSERVATIONS
+        .with(|observations| core::mem::take(&mut *observations.borrow_mut()))
+}
+
+impl Zeroize for VerifiedKeySwitchComponentMaterialStream {
+    fn zeroize(&mut self) {
+        self.topology.zeroize();
+        self.canonical_stream = None;
+        self.block_index.zeroize();
+        self.limb_index.zeroize();
+        self.coefficient_index.zeroize();
+        self.pending_residue_bytes.zeroize();
+        self.pending_residue_byte_length.zeroize();
+        self.observed_byte_length.zeroize();
+    }
+}
+
+impl Drop for VerifiedKeySwitchComponentMaterialStream {
+    fn drop(&mut self) {
+        #[cfg(test)]
+        let observation = ComponentMaterialStreamDropObservation {
+            pending_residue_byte_length_before_drop: self.pending_residue_byte_length,
+            catalog_modulus_count_before_drop: self.topology.ordered_moduli().len(),
+            all_owned_buffers_cleared_before_release: false,
+        };
+        self.zeroize();
+        #[cfg(test)]
+        COMPONENT_MATERIAL_STREAM_DROP_OBSERVATIONS.with(|observations| {
+            observations
+                .borrow_mut()
+                .push(ComponentMaterialStreamDropObservation {
+                    all_owned_buffers_cleared_before_release: self.canonical_stream.is_none()
+                        && self.pending_residue_bytes == [0; size_of::<u64>()]
+                        && self.pending_residue_byte_length == 0
+                        && self.topology.owned_catalog_buffers_are_zeroized(),
+                    ..observation
+                });
+        });
+    }
+}
+
 impl VerifiedKeySwitchComponentMaterialStream {
     pub(crate) fn begin(
         topology: KeySwitchComponentMaterialTopology,
@@ -639,6 +726,7 @@ impl VerifiedKeySwitchComponentMaterialStream {
         match result {
             Ok(()) => VerificationResult::valid(()),
             Err(refusal_reason) => {
+                self.zeroize();
                 self.refusal_reason = Some(refusal_reason);
                 VerificationResult::refused(refusal_reason)
             }
@@ -646,9 +734,7 @@ impl VerifiedKeySwitchComponentMaterialStream {
     }
 
     pub(crate) fn cancel(&mut self) {
-        self.canonical_stream = None;
-        self.pending_residue_bytes.fill(0);
-        self.pending_residue_byte_length = 0;
+        self.zeroize();
         self.refusal_reason = Some(RefusalReason::ConsumedState);
     }
 
@@ -1111,7 +1197,15 @@ mod tests {
         )
         .expect("stream begins");
 
+        stream.pending_residue_bytes[..3].copy_from_slice(&[0x91, 0xa2, 0xb3]);
+        stream.pending_residue_byte_length = 3;
+        assert!(stream.canonical_stream.is_some());
+        assert!(!stream.topology.owned_catalog_buffers_are_zeroized());
         stream.cancel();
+        assert!(stream.canonical_stream.is_none());
+        assert_eq!(stream.pending_residue_bytes, [0; size_of::<u64>()]);
+        assert_eq!(stream.pending_residue_byte_length, 0);
+        assert!(stream.topology.owned_catalog_buffers_are_zeroized());
         assert_eq!(
             stream.absorb_chunk(0, &bytes),
             VerificationResult::refused(RefusalReason::ConsumedState)
@@ -1120,6 +1214,52 @@ mod tests {
             stream.finish(),
             VerificationResult::refused(RefusalReason::ConsumedState)
         );
+    }
+
+    #[test]
+    fn partial_stream_drop_and_refusal_scrub_residue_and_catalog_buffers() {
+        let topology = test_topology();
+        let bytes = encoded_material(&topology);
+        let descriptor =
+            derive_canonical_stream_descriptor(CanonicalStreamDomain::EvaluatorKeyStore, &bytes)
+                .expect("descriptor");
+
+        clear_component_material_stream_drop_observations();
+        {
+            let mut partial = VerifiedKeySwitchComponentMaterialStream::begin(
+                topology.clone(),
+                test_binding(0x33),
+                descriptor.clone(),
+            )
+            .expect("partial stream begins");
+            partial.pending_residue_bytes[..3].copy_from_slice(&[0xa1, 0xb2, 0xc3]);
+            partial.pending_residue_byte_length = 3;
+        }
+        let observations = take_component_material_stream_drop_observations();
+        assert_eq!(observations.len(), 1);
+        assert_eq!(observations[0].pending_residue_byte_length_before_drop, 3);
+        assert_eq!(observations[0].catalog_modulus_count_before_drop, 5);
+        assert!(observations[0].all_owned_buffers_cleared_before_release);
+
+        let mut refused = VerifiedKeySwitchComponentMaterialStream::begin(
+            topology,
+            test_binding(0x33),
+            descriptor,
+        )
+        .expect("refused stream begins");
+        refused.pending_residue_bytes[..3].copy_from_slice(&[0xd4, 0xe5, 0xf6]);
+        refused.pending_residue_byte_length = 3;
+        let mut wrong_chunk = bytes;
+        let wrong_byte_index = wrong_chunk.len() / 2;
+        wrong_chunk[wrong_byte_index] ^= 1;
+        assert_eq!(
+            refused.absorb_chunk(0, &wrong_chunk),
+            VerificationResult::refused(RefusalReason::WrongHashOrRoot)
+        );
+        assert_eq!(refused.pending_residue_bytes, [0; size_of::<u64>()]);
+        assert_eq!(refused.pending_residue_byte_length, 0);
+        assert!(refused.canonical_stream.is_none());
+        assert!(refused.topology.owned_catalog_buffers_are_zeroized());
     }
 
     #[test]

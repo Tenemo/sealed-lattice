@@ -14,10 +14,11 @@ use num_traits::{One, Zero};
 use crate::{
     bgv::{
         evaluator::{
+            pair_character_product::canonical_pair_character_product_schedule,
             program::{EvaluatorInstruction, EvaluatorOpcode, selected_evaluator_program_set},
             top_k::{
                 CANONICAL_TARGET_CIPHERTEXT_LEVEL, CHARACTER_OUTPUT_LEVEL,
-                SELECTED_EVALUATOR_MODULUS_SCHEDULE, SELECTED_EVALUATOR_WORKING_LEVEL,
+                SELECTED_EVALUATOR_WORKING_LEVEL,
             },
         },
         key_switch_topology::{
@@ -33,7 +34,6 @@ const CENTERED_PLAINTEXT_BOUND: u64 = PLAINTEXT_MODULUS / 2;
 const FRESH_ERROR_COEFFICIENT_BOUND: u64 = 2;
 const FRESH_RANDOMIZER_COEFFICIENT_BOUND: u64 = 1;
 const CANONICAL_PLAINTEXT_LIFT_OFFSET_BOUND: u64 = 1;
-const PAIR_CHARACTER_MESSAGE_WIDTH: usize = 19;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct SymbolicCiphertextBound {
@@ -154,7 +154,10 @@ impl SymbolicState {
         )
     }
 
-    fn plaintext_multiply(&self, coefficients: &[u32]) -> Self {
+    fn plaintext_multiply<Coefficient>(&self, coefficients: &[Coefficient]) -> Self
+    where
+        Coefficient: Copy + Into<u64>,
+    {
         let (_, l1_norm, _) = plaintext_norms(coefficients);
         let unreduced_message_bound = &self.message_bound * &l1_norm;
         let error_bound = (&self.error_bound * l1_norm)
@@ -283,7 +286,8 @@ pub(crate) fn direct_ballot_target_noise_bounds(
     maximum_score: u64,
 ) -> CanonicalResult<Vec<DirectBallotTargetNoiseBound>> {
     if participant_count != u64::from(FOUNDATION_PROFILE.participant_count)
-        || ballot_count != usize::from(FOUNDATION_PROFILE.participant_count)
+        || ballot_count == 0
+        || ballot_count > usize::from(FOUNDATION_PROFILE.participant_count)
         || option_count != usize::from(FOUNDATION_PROFILE.option_count)
         || minimum_score != u64::from(FOUNDATION_PROFILE.minimum_score)
         || maximum_score != u64::from(FOUNDATION_PROFILE.maximum_score)
@@ -297,7 +301,8 @@ pub(crate) fn direct_ballot_target_noise_bounds(
         ));
     }
 
-    let aggregate_character_bound = selected_pair_character_product_bound(participant_count)?;
+    let aggregate_character_bound =
+        selected_pair_character_product_bound(participant_count, ballot_count)?;
     if aggregate_character_bound.level != CHARACTER_OUTPUT_LEVEL {
         return Err(invalid_recurrence(
             "pair-character product reached the wrong selected level",
@@ -332,7 +337,10 @@ pub(crate) fn direct_ballot_target_noise_bounds(
         .collect()
 }
 
-fn selected_pair_character_product_bound(participant_count: u64) -> CanonicalResult<SymbolicState> {
+fn selected_pair_character_product_bound(
+    participant_count: u64,
+    ballot_count: usize,
+) -> CanonicalResult<SymbolicState> {
     let fresh_error = BigUint::from(2_u8)
         * BigUint::from(POLYNOMIAL_DEGREE)
         * BigUint::from(FRESH_ERROR_COEFFICIENT_BOUND)
@@ -340,35 +348,95 @@ fn selected_pair_character_product_bound(participant_count: u64) -> CanonicalRes
         * BigUint::from(participant_count)
         + BigUint::from(FRESH_ERROR_COEFFICIENT_BOUND)
         + BigUint::from(CANONICAL_PLAINTEXT_LIFT_OFFSET_BOUND);
-    let fresh = SymbolicState::new(
+    let fresh_state = SymbolicState::new(
         SELECTED_EVALUATOR_WORKING_LEVEL,
         BigUint::from(CENTERED_PLAINTEXT_BOUND),
         fresh_error,
     );
-    let drops = SELECTED_EVALUATOR_MODULUS_SCHEDULE.character_depth_drop_counts;
+    let schedule = canonical_pair_character_product_schedule(ballot_count)?;
+    let root = schedule.nodes[schedule.root_node_ordinal];
+    let executed_modulus_switch_count = schedule
+        .merges
+        .iter()
+        .map(|merge| {
+            usize::from(merge.left_alignment_drop_count > 0)
+                + usize::from(merge.right_alignment_drop_count > 0)
+                + usize::from(merge.depth_drop_count > 0)
+        })
+        .sum::<usize>()
+        + usize::from(root.level > schedule.terminal_output_level);
+    let executed_modulus_drop_count = schedule
+        .merges
+        .iter()
+        .map(|merge| {
+            merge.left_alignment_drop_count
+                + merge.right_alignment_drop_count
+                + merge.depth_drop_count
+        })
+        .sum::<usize>()
+        + root.level.saturating_sub(schedule.terminal_output_level);
+    if schedule.accounting.ciphertext_multiplication_count != schedule.merges.len()
+        || schedule.accounting.relinearization_count != schedule.merges.len()
+        || schedule
+            .accounting
+            .normalization_plaintext_multiplication_count
+            != usize::from(schedule.normalization.requires_plaintext_multiplication())
+        || schedule.accounting.modulus_switch_count() != executed_modulus_switch_count
+        || schedule.accounting.modulus_drop_count() != executed_modulus_drop_count
+    {
+        return Err(invalid_recurrence(
+            "pair-character schedule accounting does not match its operations",
+        ));
+    }
 
-    let first_round = fresh
-        .character_multiply(
-            &fresh,
-            PAIR_CHARACTER_MESSAGE_WIDTH,
-            PAIR_CHARACTER_MESSAGE_WIDTH,
-            participant_count,
-        )?
-        .modulus_switch_to(
-            SELECTED_EVALUATOR_WORKING_LEVEL - drops[0],
-            participant_count,
-        )?;
-    let second_round = first_round
-        .character_multiply(&first_round, 37, 37, participant_count)?
-        .modulus_switch_to(first_round.level - drops[1], participant_count)?;
-    let third_round = second_round
-        .character_multiply(&second_round, 73, 73, participant_count)?
-        .modulus_switch_to(second_round.level - drops[2], participant_count)?;
-    let carried_first_round =
-        first_round.modulus_switch_to(third_round.level, participant_count)?;
-    third_round
-        .character_multiply(&carried_first_round, 145, 37, participant_count)?
-        .modulus_switch_to(third_round.level - drops[3], participant_count)
+    let mut states = vec![None; schedule.nodes.len()];
+    for node in schedule
+        .nodes
+        .iter()
+        .filter(|node| node.multiplication_depth == 0)
+    {
+        states[node.node_ordinal] = Some(fresh_state.clone());
+    }
+    for merge in &schedule.merges {
+        let left_node = schedule.nodes[merge.left_node_ordinal];
+        let right_node = schedule.nodes[merge.right_node_ordinal];
+        let output_node = schedule.nodes[merge.output_node_ordinal];
+        let left = states[merge.left_node_ordinal]
+            .as_ref()
+            .ok_or_else(|| invalid_recurrence("pair-character left product state is absent"))?
+            .modulus_switch_to(merge.alignment_level, participant_count)?;
+        let right = states[merge.right_node_ordinal]
+            .as_ref()
+            .ok_or_else(|| invalid_recurrence("pair-character right product state is absent"))?
+            .modulus_switch_to(merge.alignment_level, participant_count)?;
+        let product = left
+            .character_multiply(
+                &right,
+                left_node.message_width,
+                right_node.message_width,
+                participant_count,
+            )?
+            .modulus_switch_to(output_node.level, participant_count)?;
+        states[merge.output_node_ordinal] = Some(product);
+    }
+
+    let mut product = states[schedule.root_node_ordinal]
+        .take()
+        .ok_or_else(|| invalid_recurrence("pair-character root product state is absent"))?;
+    if schedule.normalization.requires_plaintext_multiplication() {
+        let normalization_coefficients = schedule.normalization.plaintext_coefficients();
+        let (_, centered_l1_norm, _) = plaintext_norms(&normalization_coefficients);
+        if centered_l1_norm != BigUint::from(schedule.normalization.centered_coefficient_l1_norm)
+            || schedule.normalization.centered_coefficient_l1_norm
+                != schedule.normalization.convolution_infinity_operator_norm
+        {
+            return Err(invalid_recurrence(
+                "pair-character normalization does not have its selected unit norms",
+            ));
+        }
+        product = product.plaintext_multiply(&normalization_coefficients);
+    }
+    product.modulus_switch_to(schedule.terminal_output_level, participant_count)
 }
 
 fn evaluate_selected_stream(
@@ -540,12 +608,15 @@ fn hybrid_key_switch_error_bound(
         ))
 }
 
-fn plaintext_norms(coefficients: &[u32]) -> (BigUint, BigUint, BigUint) {
+fn plaintext_norms<Coefficient>(coefficients: &[Coefficient]) -> (BigUint, BigUint, BigUint)
+where
+    Coefficient: Copy + Into<u64>,
+{
     let mut infinity_norm = BigUint::zero();
     let mut l1_norm = BigUint::zero();
     let mut lift_offset = BigUint::zero();
     for coefficient in coefficients {
-        let residue = u64::from(*coefficient);
+        let residue = (*coefficient).into();
         let centered_absolute = residue.min(PLAINTEXT_MODULUS - residue);
         infinity_norm = infinity_norm.max(BigUint::from(centered_absolute));
         l1_norm += BigUint::from(centered_absolute);
@@ -615,7 +686,7 @@ mod tests {
         assert_eq!(worst.top_count, 8);
         assert_eq!(
             worst.maximum_error_coefficient_bound().to_str_radix(10),
-            "16870171037775988578755335442628",
+            "16873484365703521901782467690810",
         );
         assert!(
             bounds
@@ -625,9 +696,82 @@ mod tests {
     }
 
     #[test]
-    fn selected_recurrence_rejects_nonselected_dimensions() {
-        assert!(direct_ballot_target_noise_bounds(9, 9, 20, 1, 10).is_err());
-        assert!(direct_ballot_target_noise_bounds(10, 10, 19, 1, 10).is_err());
-        assert!(direct_ballot_target_noise_bounds(10, 10, 20, 0, 10).is_err());
+    fn selected_recurrence_is_monotone_and_positive_for_every_accepted_ballot_count() {
+        let mut previous_product_error = None;
+        let mut previous_target_bounds: Option<Vec<DirectBallotTargetNoiseBound>> = None;
+        for ballot_count in 1..=10 {
+            let product = selected_pair_character_product_bound(10, ballot_count)
+                .expect("selected pair-character recurrence");
+            assert_eq!(product.level, CHARACTER_OUTPUT_LEVEL);
+            assert!(product.minimum_margin.is_positive());
+            if let Some(previous_error) = previous_product_error.as_ref() {
+                if ballot_count == 2 {
+                    // Both paths finish with the same selected level-20 modulus
+                    // switch. Its exact correction and scaling terms dominate
+                    // the incoming error and round both bounds to this value.
+                    assert_eq!(product.error_bound, *previous_error);
+                    assert_eq!(product.error_bound, BigUint::from(163_841_u64));
+                } else {
+                    assert!(
+                        product.error_bound > *previous_error,
+                        "pair-character error did not grow from {} to {ballot_count} ballots: previous={previous_error}, current={}",
+                        ballot_count - 1,
+                        product.error_bound,
+                    );
+                }
+            }
+            previous_product_error = Some(product.error_bound);
+
+            let target_bounds = direct_ballot_target_noise_bounds(10, ballot_count, 20, 1, 10)
+                .expect("selected target recurrence");
+            assert_eq!(target_bounds.len(), 20);
+            assert!(
+                target_bounds
+                    .iter()
+                    .all(DirectBallotTargetNoiseBound::every_decryption_margin_is_positive)
+            );
+            if let Some(previous_bounds) = previous_target_bounds.as_ref() {
+                for (previous, current) in previous_bounds.iter().zip(&target_bounds) {
+                    assert_eq!(current.top_count, previous.top_count);
+                    assert!(
+                        current.target_identifier.error_coefficient_bound
+                            >= previous.target_identifier.error_coefficient_bound,
+                        "target-identifier error decreased for top count {} at {ballot_count} ballots",
+                        current.top_count
+                    );
+                    assert!(
+                        current.target_order.error_coefficient_bound
+                            >= previous.target_order.error_coefficient_bound,
+                        "target-order error decreased for top count {} at {ballot_count} ballots",
+                        current.top_count
+                    );
+                }
+            }
+            previous_target_bounds = Some(target_bounds);
+        }
+    }
+
+    #[test]
+    fn selected_recurrence_rejects_each_nonselected_dimension() {
+        for arguments in [
+            (9, 10, 20, 1, 10),
+            (10, 0, 20, 1, 10),
+            (10, 11, 20, 1, 10),
+            (10, 10, 19, 1, 10),
+            (10, 10, 21, 1, 10),
+            (10, 10, 20, 0, 10),
+            (10, 10, 20, 1, 11),
+        ] {
+            assert!(
+                direct_ballot_target_noise_bounds(
+                    arguments.0,
+                    arguments.1,
+                    arguments.2,
+                    arguments.3,
+                    arguments.4,
+                )
+                .is_err()
+            );
+        }
     }
 }

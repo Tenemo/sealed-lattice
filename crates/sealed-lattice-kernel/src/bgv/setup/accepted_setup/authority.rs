@@ -59,6 +59,121 @@ impl VerifiedAcceptedSetupAuthorityHandle {
     pub(crate) const fn identifier(&self) -> u32 {
         self.0
     }
+
+    /// Retains a test-minted accepted setup through the same validated
+    /// authority registry used by production. The evaluator store remains
+    /// one-shot and can only leave through the normal atomic take operation.
+    #[cfg(test)]
+    pub(crate) fn retain_test_minted_with_evaluator_store(
+        verified_evaluator_key_store: VerifiedEvaluatorKeyStore,
+        exact_verified_setup_source_hash: [u8; 64],
+    ) -> CanonicalResult<Self> {
+        let input = test_minted_accepted_setup_input(
+            &verified_evaluator_key_store,
+            exact_verified_setup_source_hash,
+        )?;
+        let authority = VerifiedAcceptedSetupAuthority::from_verified_terminals(
+            input,
+            Some(verified_evaluator_key_store),
+        )?;
+        authority_registry()
+            .lock()
+            .map_err(|_| authority_state_error("accepted-setup authority registry is unavailable"))?
+            .retain(authority)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn release_test_minted(self) -> CanonicalResult<()> {
+        release_verified_accepted_setup_authority(self)
+    }
+}
+
+#[cfg(test)]
+fn test_minted_accepted_setup_input(
+    verified_evaluator_key_store: &VerifiedEvaluatorKeyStore,
+    exact_verified_setup_source_hash: [u8; 64],
+) -> CanonicalResult<VerifiedAcceptedSetupAuthorityInput> {
+    let public_setup_seed = [0x5a; 64];
+    let collective_public_key_b_polynomials = test_minted_collective_public_key_b_polynomials();
+    let mut digest_accumulator =
+        CollectivePublicKeyDigestAccumulator::new(POLYNOMIAL_DEGREE, DATA_PRIMES.len())?;
+    for polynomial in &collective_public_key_b_polynomials {
+        digest_accumulator.absorb_polynomial(polynomial)?;
+    }
+    for data_modulus_index in 0..DATA_PRIMES.len() {
+        let coefficients = sample_collective_public_key_common_reference_limb(
+            &public_setup_seed,
+            u16::try_from(data_modulus_index).map_err(|_| authority_size_error())?,
+            POLYNOMIAL_DEGREE,
+        )?;
+        digest_accumulator.absorb_polynomial(&coefficients)?;
+    }
+    let collective_public_key_full_object_digest =
+        digest_accumulator.finish()?.full_object_digest.into_bytes();
+    let selected_sharing_limb_count = selected_sharing_data_prime_coordinates()
+        .map_err(|_| authority_binding_error())?
+        .len();
+    let participant_release_materials = (0..FOUNDATION_PROFILE.participant_count)
+        .map(|roster_position| {
+            VerifiedAcceptedSetupParticipantReleaseMaterial::from_test_values(
+                [u8::try_from(roster_position + 1).expect("selected roster position fits u8"); 64],
+                roster_position,
+                (0..selected_sharing_limb_count)
+                    .map(|modulus_ordinal| {
+                        [u8::try_from(usize::from(roster_position) + modulus_ordinal + 1)
+                            .expect("selected root fixture byte fits u8");
+                            64]
+                    })
+                    .collect(),
+            )
+        })
+        .collect();
+    Ok(VerifiedAcceptedSetupAuthorityInput {
+        protocol_version: verified_evaluator_key_store.protocol_version(),
+        suite_identifier: verified_evaluator_key_store.suite_identifier(),
+        ceremony_context_hash: verified_evaluator_key_store.ceremony_context_hash(),
+        action_context_hash: verified_evaluator_key_store.action_context_hash(),
+        manifest_hash: verified_evaluator_key_store.manifest_hash(),
+        roster_hash: verified_evaluator_key_store.roster_hash(),
+        setup_proof_context_hash: verified_evaluator_key_store.setup_proof_context_hash(),
+        exact_verified_setup_source_hash,
+        ring_degree: POLYNOMIAL_DEGREE,
+        ordered_data_modulus_indices: (0..DATA_PRIMES.len())
+            .map(|index| u16::try_from(index).map_err(|_| authority_size_error()))
+            .collect::<CanonicalResult<Vec<_>>>()?,
+        ordered_data_moduli: DATA_PRIMES.to_vec(),
+        participant_release_materials,
+        participant_target_release_sources: Vec::new(),
+        collective_public_key_root: [0x66; 64],
+        collective_public_key_full_object_digest,
+        collective_public_key_b_polynomials,
+        public_setup_seed,
+    })
+}
+
+#[cfg(test)]
+fn test_minted_collective_public_key_b_polynomials() -> Vec<Arc<[u64]>> {
+    DATA_PRIMES
+        .iter()
+        .copied()
+        .enumerate()
+        .map(|(modulus_ordinal, modulus)| {
+            (0..POLYNOMIAL_DEGREE)
+                .map(|coefficient_ordinal| {
+                    (u64::try_from(coefficient_ordinal)
+                        .expect("selected coefficient ordinal fits u64")
+                        .wrapping_mul(65_537)
+                        .wrapping_add(
+                            u64::try_from(modulus_ordinal)
+                                .expect("selected modulus ordinal fits u64")
+                                * 97,
+                        ))
+                        % modulus
+                })
+                .collect::<Vec<_>>()
+                .into()
+        })
+        .collect()
 }
 
 pub(crate) struct VerifiedAcceptedSetupParticipantReleaseMaterial {
@@ -498,7 +613,7 @@ impl VerifiedEvaluatorExecutionAuthority {
         self.evaluator_replay_context_hash
     }
 
-    pub(crate) const fn top_count(&self) -> u16 {
+    pub(crate) const fn verified_store_top_count(&self) -> u16 {
         self.verified_store.top_count()
     }
 
@@ -562,7 +677,7 @@ impl VerifiedAcceptedSetupAuthority {
         self.ring_degree
     }
 
-    pub(crate) fn verified_evaluator_top_count(&self) -> Option<u16> {
+    pub(crate) fn verified_evaluator_store_top_count(&self) -> Option<u16> {
         self.verified_evaluator_key_store
             .as_ref()
             .map(VerifiedEvaluatorKeyStore::top_count)
@@ -1074,6 +1189,7 @@ fn validate_verified_accepted_setup_authority_borrowed(
             || verified_store.manifest_hash() != input.manifest_hash
             || verified_store.roster_hash() != input.roster_hash
             || verified_store.setup_proof_context_hash() != input.setup_proof_context_hash
+            || verified_store.top_count() != FOUNDATION_PROFILE.option_count
             || verified_store.proof_stream_descriptor().is_err()
             || verified_store.require_production_replay_material().is_err())
     {

@@ -8,12 +8,15 @@ use crate::{
     },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
 };
+use zeroize::Zeroize;
 
 #[cfg(test)]
 use crate::bgv::evaluator::{
     engine::{DevelopmentBgvKey, negacyclic_mul, signed_residue},
     prg::DeterministicSampler,
 };
+#[cfg(test)]
+use crate::bgv::key_switch_topology::canonical_residue_byte_length;
 #[cfg(test)]
 use crate::bgv::modular_arithmetic::add_mod;
 
@@ -37,6 +40,46 @@ pub(crate) const KEY_SWITCH_SAMPLE_DOMAIN: &str = "sealed-lattice-bgv-evaluator/
 // A polynomial component held as residue vectors, one per active prime.
 type LimbMatrix = Vec<Vec<u64>>;
 
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum KeyMaterialDropKind {
+    CompleteKey,
+    IncompleteBuilder,
+}
+
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct KeyMaterialDropObservation {
+    pub(super) kind: KeyMaterialDropKind,
+    pub(super) retained_word_count_before_drop: usize,
+    pub(super) catalog_word_count_before_drop: usize,
+    pub(super) all_owned_buffers_cleared_before_release: bool,
+}
+
+#[cfg(test)]
+thread_local! {
+    static KEY_MATERIAL_DROP_OBSERVATIONS:
+        std::cell::RefCell<Vec<KeyMaterialDropObservation>> = const {
+            std::cell::RefCell::new(Vec::new())
+        };
+}
+
+#[cfg(test)]
+pub(super) fn clear_key_material_drop_observations() {
+    KEY_MATERIAL_DROP_OBSERVATIONS.with(|observations| observations.borrow_mut().clear());
+}
+
+#[cfg(test)]
+pub(super) fn take_key_material_drop_observations() -> Vec<KeyMaterialDropObservation> {
+    KEY_MATERIAL_DROP_OBSERVATIONS
+        .with(|observations| core::mem::take(&mut *observations.borrow_mut()))
+}
+
+#[cfg(test)]
+fn record_key_material_drop_observation(observation: KeyMaterialDropObservation) {
+    KEY_MATERIAL_DROP_OBSERVATIONS.with(|observations| observations.borrow_mut().push(observation));
+}
+
 // A leveled hybrid RNS key-switching key. Each component is one contiguous
 // data-prime block in the extended Q*P basis. Its gadget is P times the block
 // CRT idempotent, and key application performs exact centered block extension
@@ -50,6 +93,144 @@ pub(crate) struct KeySwitchKey {
 impl KeySwitchKey {
     pub(crate) fn level(&self) -> usize {
         self.topology.level()
+    }
+
+    /// Serializes the two physical evaluator-store passes from the same
+    /// coefficient limbs that authenticated replay reconstructs. This exists
+    /// only for tests which exercise that replay boundary without generating
+    /// the proof family that normally authorizes the bytes.
+    #[cfg(test)]
+    pub(crate) fn canonical_coefficient_store_components_for_tests(
+        &self,
+    ) -> CanonicalResult<[Vec<u8>; 2]> {
+        if self.components.len() != self.topology.data_block_count()
+            || self.components.iter().any(|component| {
+                component.moduli.as_slice() != self.topology.extended_moduli()
+                    || component.component_b_ntt.len() != self.topology.extended_limb_count()
+                    || component.component_a_ntt.len() != self.topology.extended_limb_count()
+            })
+        {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "key-switch key does not match its selected decomposition topology",
+            ));
+        }
+        let expected_byte_length = usize::try_from(
+            self.topology
+                .canonical_component_wire_byte_length(POLYNOMIAL_DEGREE)?,
+        )
+        .map_err(|_| {
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "key-switch component wire length does not fit this runtime",
+            )
+        })?;
+        let mut encoded_passes = [Vec::new(), Vec::new()];
+        for (pass_ordinal, encoded) in encoded_passes.iter_mut().enumerate() {
+            encoded
+                .try_reserve_exact(expected_byte_length)
+                .map_err(|_| {
+                    CanonicalError::new(
+                        CanonicalErrorCode::InvalidProtocolObject,
+                        "key-switch component serialization allocation failed",
+                    )
+                })?;
+            for component in &self.components {
+                let limbs = if pass_ordinal == 0 {
+                    &component.component_b_ntt
+                } else {
+                    &component.component_a_ntt
+                };
+                for (limb, modulus) in limbs
+                    .iter()
+                    .zip(self.topology.extended_moduli().iter().copied())
+                {
+                    if limb.len() != POLYNOMIAL_DEGREE {
+                        return Err(CanonicalError::new(
+                            CanonicalErrorCode::MalformedLength,
+                            "key-switch NTT limb has the wrong ring degree",
+                        ));
+                    }
+                    let coefficients = inverse_negacyclic_ntt(limb, modulus)?;
+                    let residue_byte_length = canonical_residue_byte_length(modulus)?;
+                    for coefficient in coefficients {
+                        if coefficient >= modulus {
+                            return Err(CanonicalError::new(
+                                CanonicalErrorCode::InvalidProtocolObject,
+                                "key-switch coefficient is not canonical for its modulus",
+                            ));
+                        }
+                        encoded
+                            .extend_from_slice(&coefficient.to_le_bytes()[..residue_byte_length]);
+                    }
+                }
+            }
+            if encoded.len() != expected_byte_length {
+                return Err(CanonicalError::new(
+                    CanonicalErrorCode::MalformedLength,
+                    "key-switch component serialization length is inconsistent",
+                ));
+            }
+        }
+        Ok(encoded_passes)
+    }
+
+    #[cfg(test)]
+    pub(super) fn from_zeroization_test_values() -> Self {
+        let topology = KeySwitchDecompositionTopology::for_level(0)
+            .expect("level-zero key-switch topology derives");
+        Self {
+            components: vec![KeySwitchComponent {
+                component_b_ntt: vec![vec![0x11, 0x22, 0x33]],
+                component_a_ntt: vec![vec![0x44, 0x55]],
+                moduli: topology.extended_moduli().to_vec(),
+            }],
+            topology,
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) fn retained_word_count(&self) -> usize {
+        self.components
+            .iter()
+            .map(KeySwitchComponent::retained_word_count)
+            .sum()
+    }
+
+    #[cfg(test)]
+    pub(super) fn catalog_word_count(&self) -> usize {
+        self.topology.extended_moduli().len()
+    }
+
+    #[cfg(test)]
+    pub(super) fn all_owned_buffers_are_cleared(&self) -> bool {
+        self.components.is_empty() && self.topology.extended_moduli().is_empty()
+    }
+}
+
+impl Zeroize for KeySwitchKey {
+    fn zeroize(&mut self) {
+        self.components.zeroize();
+        self.topology.zeroize();
+    }
+}
+
+impl Drop for KeySwitchKey {
+    fn drop(&mut self) {
+        #[cfg(test)]
+        let observation = KeyMaterialDropObservation {
+            kind: KeyMaterialDropKind::CompleteKey,
+            retained_word_count_before_drop: self.retained_word_count(),
+            catalog_word_count_before_drop: self.topology.extended_moduli().len(),
+            all_owned_buffers_cleared_before_release: false,
+        };
+        self.zeroize();
+        #[cfg(test)]
+        record_key_material_drop_observation(KeyMaterialDropObservation {
+            all_owned_buffers_cleared_before_release: self.components.is_empty()
+                && self.topology.extended_moduli().is_empty(),
+            ..observation
+        });
     }
 }
 
@@ -172,7 +353,7 @@ impl KeySwitchKeyNttBuilder {
         Ok(())
     }
 
-    pub(crate) fn finish(self) -> CanonicalResult<KeySwitchKey> {
+    pub(crate) fn finish(mut self) -> CanonicalResult<KeySwitchKey> {
         if self.next_runtime_limb().is_some()
             || self.next_auxiliary_limb().is_some()
             || self.components.iter().any(|component| {
@@ -185,9 +366,11 @@ impl KeySwitchKeyNttBuilder {
                 "replayed key-switch key is missing an authenticated limb",
             ));
         }
+        let components = core::mem::take(&mut self.components);
+        let topology = self.topology.clone();
         Ok(KeySwitchKey {
-            components: self.components,
-            topology: self.topology,
+            components,
+            topology,
         })
     }
 
@@ -208,11 +391,52 @@ impl KeySwitchKeyNttBuilder {
     }
 }
 
+impl Zeroize for KeySwitchKeyNttBuilder {
+    fn zeroize(&mut self) {
+        self.components.zeroize();
+        self.topology.zeroize();
+        self.next_runtime_limb_ordinal.zeroize();
+        self.next_auxiliary_limb_ordinal.zeroize();
+    }
+}
+
+impl Drop for KeySwitchKeyNttBuilder {
+    fn drop(&mut self) {
+        #[cfg(test)]
+        let observation = KeyMaterialDropObservation {
+            kind: KeyMaterialDropKind::IncompleteBuilder,
+            retained_word_count_before_drop: self
+                .components
+                .iter()
+                .map(KeySwitchComponent::retained_word_count)
+                .sum(),
+            catalog_word_count_before_drop: self.topology.extended_moduli().len(),
+            all_owned_buffers_cleared_before_release: false,
+        };
+        self.zeroize();
+        #[cfg(test)]
+        record_key_material_drop_observation(KeyMaterialDropObservation {
+            all_owned_buffers_cleared_before_release: self.components.is_empty()
+                && self.topology.extended_moduli().is_empty(),
+            ..observation
+        });
+    }
+}
+
 fn transform_authenticated_limb(
     mut coefficients: Vec<u64>,
     modulus: u64,
 ) -> CanonicalResult<Vec<u64>> {
+    transform_authenticated_limb_in_place(&mut coefficients, modulus)?;
+    Ok(coefficients)
+}
+
+fn transform_authenticated_limb_in_place(
+    coefficients: &mut Vec<u64>,
+    modulus: u64,
+) -> CanonicalResult<()> {
     if coefficients.len() != POLYNOMIAL_DEGREE {
+        coefficients.zeroize();
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
             "replayed key-switch limb has the wrong polynomial degree",
@@ -222,13 +446,17 @@ fn transform_authenticated_limb(
         .iter()
         .any(|coefficient| *coefficient >= modulus)
     {
+        coefficients.zeroize();
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidProtocolObject,
             "replayed key-switch limb contains a non-canonical residue",
         ));
     }
-    forward_negacyclic_ntt_in_place(&mut coefficients, modulus)?;
-    Ok(coefficients)
+    if let Err(error) = forward_negacyclic_ntt_in_place(coefficients, modulus) {
+        coefficients.zeroize();
+        return Err(error);
+    }
+    Ok(())
 }
 
 fn key_switch_replay_size_error() -> CanonicalError {
@@ -245,7 +473,31 @@ pub(crate) struct KeySwitchComponent {
     moduli: Vec<u64>,
 }
 
+impl Zeroize for KeySwitchComponent {
+    fn zeroize(&mut self) {
+        self.component_b_ntt.zeroize();
+        self.component_a_ntt.zeroize();
+        self.moduli.zeroize();
+    }
+}
+
+impl Drop for KeySwitchComponent {
+    fn drop(&mut self) {
+        self.zeroize();
+    }
+}
+
 impl KeySwitchComponent {
+    #[cfg(test)]
+    fn retained_word_count(&self) -> usize {
+        self.component_b_ntt
+            .iter()
+            .chain(&self.component_a_ntt)
+            .map(Vec::len)
+            .sum::<usize>()
+            .saturating_add(self.moduli.len())
+    }
+
     #[cfg(test)]
     fn from_coefficients(
         component_b: Vec<Vec<u64>>,
@@ -882,10 +1134,11 @@ mod tests {
     use std::sync::OnceLock;
 
     use super::{
-        CenteredBlockCoefficients, KEY_SWITCH_ERROR_DOMAIN, PLAINTEXT_MODULUS_I64,
-        automorphism_residues, bigint_residue, centered_block_reconstruction, generate_galois_key,
+        CenteredBlockCoefficients, KEY_SWITCH_ERROR_DOMAIN, KeyMaterialDropKind, KeySwitchKey,
+        KeySwitchKeyNttBuilder, PLAINTEXT_MODULUS_I64, automorphism_residues, bigint_residue,
+        centered_block_reconstruction, clear_key_material_drop_observations, generate_galois_key,
         generate_relinearization_key, hybrid_modulus_down, inverse_negacyclic_ntt, relinearize,
-        rotate,
+        rotate, take_key_material_drop_observations, transform_authenticated_limb_in_place,
     };
     use crate::bgv::{
         direct_ballots::PAIR_CHARACTER_LANE_COUNT,
@@ -902,6 +1155,15 @@ mod tests {
 
     const DEVELOPMENT_SEED: &str = "0011223344556677";
     const TEST_LEVEL: usize = 3;
+
+    #[test]
+    fn coefficient_store_serialization_refuses_incomplete_ntt_limbs() {
+        assert!(
+            KeySwitchKey::from_zeroization_test_values()
+                .canonical_coefficient_store_components_for_tests()
+                .is_err()
+        );
+    }
 
     fn shared_key() -> &'static DevelopmentBgvKey {
         static KEY: OnceLock<DevelopmentBgvKey> = OnceLock::new();
@@ -924,6 +1186,65 @@ mod tests {
             residue += modulus;
         }
         residue
+    }
+
+    #[test]
+    fn malformed_replay_limbs_are_zeroized_before_refusal() {
+        let modulus = DATA_PRIMES[0];
+        let mut wrong_length = vec![0x55; POLYNOMIAL_DEGREE - 1];
+        assert!(transform_authenticated_limb_in_place(&mut wrong_length, modulus).is_err());
+        assert!(wrong_length.is_empty());
+
+        let mut noncanonical = vec![7; POLYNOMIAL_DEGREE];
+        noncanonical[POLYNOMIAL_DEGREE / 2] = modulus;
+        assert!(transform_authenticated_limb_in_place(&mut noncanonical, modulus).is_err());
+        assert!(noncanonical.is_empty());
+
+        let mut unsupported_modulus = vec![0; POLYNOMIAL_DEGREE];
+        assert!(transform_authenticated_limb_in_place(&mut unsupported_modulus, 2).is_err());
+        assert!(unsupported_modulus.is_empty());
+    }
+
+    #[test]
+    fn incomplete_builder_drop_clears_transformed_limbs_and_owned_catalogs() {
+        clear_key_material_drop_observations();
+        {
+            let mut builder = KeySwitchKeyNttBuilder::new(0).expect("level-zero builder");
+            let position = builder.next_runtime_limb().expect("first runtime limb");
+            let coefficients = (0..POLYNOMIAL_DEGREE)
+                .map(|coefficient_index| {
+                    (u64::try_from(coefficient_index).expect("coefficient index fits u64") * 17 + 3)
+                        % position.modulus()
+                })
+                .collect();
+            builder
+                .absorb_runtime_limb(coefficients)
+                .expect("one authenticated limb transforms");
+        }
+
+        let observations = take_key_material_drop_observations();
+        let observation = observations
+            .iter()
+            .find(|observation| observation.kind == KeyMaterialDropKind::IncompleteBuilder)
+            .expect("incomplete builder drop was observed");
+        assert!(observation.retained_word_count_before_drop >= POLYNOMIAL_DEGREE);
+        assert!(observation.catalog_word_count_before_drop > 1);
+        assert!(observation.all_owned_buffers_cleared_before_release);
+    }
+
+    #[test]
+    fn complete_key_drop_clears_both_ntt_components_and_owned_catalogs() {
+        clear_key_material_drop_observations();
+        drop(KeySwitchKey::from_zeroization_test_values());
+
+        let observations = take_key_material_drop_observations();
+        let observation = observations
+            .iter()
+            .find(|observation| observation.kind == KeyMaterialDropKind::CompleteKey)
+            .expect("complete key drop was observed");
+        assert!(observation.retained_word_count_before_drop >= 5);
+        assert!(observation.catalog_word_count_before_drop > 1);
+        assert!(observation.all_owned_buffers_cleared_before_release);
     }
 
     fn bigint_inverse(value: &BigInt, modulus: &BigInt) -> BigInt {

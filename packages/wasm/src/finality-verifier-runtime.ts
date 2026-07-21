@@ -137,7 +137,7 @@ type VerifiedFinalityRecord = {
     session: FinalityVerifierSessionImplementation;
 };
 
-export type VerifiedFinalityKernelAuthorization = Readonly<{
+type VerifiedFinalityKernelAuthorization = Readonly<{
     capabilityMemory: WebAssembly.Memory;
     capabilityPointer: number;
     finalityHandle: number;

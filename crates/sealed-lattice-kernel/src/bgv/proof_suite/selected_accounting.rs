@@ -428,6 +428,104 @@ fn selected_query_ceiling_witness(
 }
 
 #[cfg(test)]
+mod selected_ballot_resource_cap_tests {
+    use super::*;
+
+    #[test]
+    #[ignore = "guarded selected proof resource measurement"]
+    fn selected_ballot_cap_neutral_external_memory_requirement_reports_raw_geometry() {
+        let schema_identifier =
+            ProofApplicationSlotCeilings::BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER;
+        let compilation = super::super::selected_ballot_validity_relation_compilation()
+            .expect("the selected ballot relation compiles");
+        let variant = compilation
+            .relation_plan()
+            .select_variant(None, None)
+            .expect("the selected ballot relation has one action-selected variant");
+        let relation_context = selected_relation_plan_check_context(schema_identifier)
+            .expect("the selected ballot relation has one common-proof context");
+        let statement_context = SelectedApplicationStatementContext::new(
+            FOUNDATION_PROFILE.protocol_version,
+            [0; Hash512::BYTE_LENGTH],
+            None,
+            None,
+        );
+        let statement_bytes = canonical_selected_application_statement_for_ceiling(
+            schema_identifier,
+            statement_context,
+        )
+        .expect("the selected ballot ceiling statement encodes");
+        let transport_sizing = selected_proof_transport_sizing(
+            schema_identifier,
+            &statement_bytes,
+            variant,
+            &relation_context,
+        )
+        .expect("the selected ballot proof transport sizing derives");
+        let requirement = common_proof_external_memory_requirement(
+            variant,
+            &relation_context,
+            transport_sizing.layout.catalog(),
+            &transport_sizing.transcript_schedule,
+            MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH,
+        )
+        .expect("the cap-neutral selected ballot storage requirement derives");
+        let object_count_variance = i64::from(requirement.distinct_physical_object_count())
+            - i64::try_from(MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_OBJECT_COUNT)
+                .expect("the object cap fits i64");
+        let peak_stored_byte_length_variance = i128::from(requirement.peak_stored_byte_length())
+            - i128::from(MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_STORED_BYTE_LENGTH);
+
+        println!(
+            "selected ballot cap-neutral external memory: relation_columns={}, relation_constraints={}, step_count={}, maximum_chunk_byte_length={}, maximum_transaction_payload_byte_length={}, distinct_physical_object_count={}, object_lifecycle_count={}, peak_stored_byte_length={}, total_written_byte_length={}, total_read_byte_length={}, transaction_count={}, maximum_object_count={}, object_count_variance={}, maximum_stored_byte_length={}, peak_stored_byte_length_variance={}",
+            variant.ordered_columns().len(),
+            variant.ordered_constraint_count(),
+            requirement.step_count(),
+            requirement.maximum_chunk_byte_length(),
+            requirement.maximum_transaction_payload_byte_length(),
+            requirement.distinct_physical_object_count(),
+            requirement.object_lifecycle_count(),
+            requirement.peak_stored_byte_length(),
+            requirement.total_written_byte_length(),
+            requirement.total_read_byte_length(),
+            requirement.transaction_count(),
+            MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_OBJECT_COUNT,
+            object_count_variance,
+            MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_STORED_BYTE_LENGTH,
+            peak_stored_byte_length_variance,
+        );
+
+        assert_eq!(variant.ordered_columns().len(), 3_250);
+        assert_eq!(variant.ordered_constraint_count(), 5_214);
+        assert_eq!(requirement.step_count(), 353_501);
+        assert_eq!(
+            requirement.maximum_chunk_byte_length(),
+            MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH
+        );
+        assert_eq!(
+            requirement.maximum_transaction_payload_byte_length(),
+            49_152
+        );
+        assert_eq!(requirement.distinct_physical_object_count(), 36_822);
+        assert_eq!(requirement.object_lifecycle_count(), 351_918);
+        assert_eq!(requirement.peak_stored_byte_length(), 78_048_140_864);
+        assert_eq!(requirement.total_written_byte_length(), 5_900_353_862_872);
+        assert_eq!(requirement.total_read_byte_length(), 11_468_451_326_432);
+        assert_eq!(requirement.transaction_count(), 77_262_030_541);
+        assert_eq!(object_count_variance, 32_726);
+        assert_eq!(peak_stored_byte_length_variance, 76_974_399_040);
+        assert!(
+            usize::try_from(requirement.distinct_physical_object_count())
+                .is_ok_and(|count| count > MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_OBJECT_COUNT)
+        );
+        assert!(
+            requirement.peak_stored_byte_length()
+                > MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_STORED_BYTE_LENGTH
+        );
+    }
+}
+
+#[cfg(test)]
 pub(crate) use resource_accounting::selected_complete_proof_resource_accounting;
 
 #[cfg(test)]
@@ -3327,42 +3425,42 @@ mod resource_accounting {
                 Some(accounting.complete_action_proof_byte_ceiling())
             );
             assert_eq!(
-            accounting
-                .ordered_families()
-                .iter()
-                .find(|family| {
-                    family.application_statement_schema_identifier()
-                        == ProofApplicationSlotCeilings::GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER
-                })
-                .expect("the Galois family is present")
-                .maximum_logical_entry_count_per_proof(),
-            6
-        );
+                accounting
+                    .ordered_families()
+                    .iter()
+                    .find(|family| {
+                        family.application_statement_schema_identifier()
+                            == ProofApplicationSlotCeilings::GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER
+                    })
+                    .expect("the Galois family is present")
+                    .maximum_logical_entry_count_per_proof(),
+                6
+            );
             assert_eq!(
                 {
                     let evaluator_family = accounting
-                .ordered_families()
-                .iter()
-                .find(|family| {
-                    family.application_statement_schema_identifier()
-                        == ProofApplicationSlotCeilings::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER
-                })
-                .expect("the evaluator family is present");
+                        .ordered_families()
+                        .iter()
+                        .find(|family| {
+                            family.application_statement_schema_identifier()
+                                == ProofApplicationSlotCeilings::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER
+                        })
+                        .expect("the evaluator family is present");
                     assert_eq!(evaluator_family.compiler_variant_count(), 20);
                     assert_eq!(evaluator_family.selected_variant_count(), 1);
-                    assert_eq!(evaluator_family.complete_action_logical_entry_count(), 4);
+                    assert_eq!(evaluator_family.complete_action_logical_entry_count(), 7);
                     evaluator_family.maximum_logical_entry_count_per_proof()
                 },
-                4
+                7
             );
             let complete_list_variants = selected_proof_variant_resource_inventory()
-            .expect("the selected variant inventory derives")
-            .iter()
-            .filter(|variant| {
-                variant.application_statement_schema_identifier()
-                    == ProofApplicationSlotCeilings::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER
-            })
-            .collect::<Vec<_>>();
+                .expect("the selected variant inventory derives")
+                .iter()
+                .filter(|variant| {
+                    variant.application_statement_schema_identifier()
+                        == ProofApplicationSlotCeilings::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER
+                })
+                .collect::<Vec<_>>();
             assert_eq!(complete_list_variants.len(), 20);
             assert_eq!(
                 complete_list_variants

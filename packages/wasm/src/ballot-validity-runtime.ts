@@ -457,7 +457,7 @@ const releaseBallotOutputReservation = (
     activeBallotOutputReservation = undefined;
 };
 
-export type VerifiedBallotOutputKernelAuthority = Readonly<{
+type VerifiedBallotOutputKernelAuthority = Readonly<{
     handle: number;
     kernel: TranscriptCoreKernel;
 }>;

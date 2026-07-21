@@ -185,7 +185,7 @@ type VerifiedTranscriptObjectKernelAuthorization = Readonly<{
     sessionHandle: number;
 }>;
 
-export type CanonicalBoardVerifierSessionKernelAuthorization = Readonly<{
+type CanonicalBoardVerifierSessionKernelAuthorization = Readonly<{
     capabilityByteLength: number;
     capabilityMemory: WebAssembly.Memory;
     capabilityPointer: number;

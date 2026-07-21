@@ -644,10 +644,10 @@ impl ZeroizingSignedLimbPolynomial {
         // fixed u64 magnitude source. The final one-coefficient byte buffer is
         // dropped before the callback body starts, so it cannot overlap the
         // adapter's role-layer construction scratch.
-        Ok(Self::allocation_byte_lengths_from_dimensions(
+        Self::allocation_byte_lengths_from_dimensions(
             self.coefficient_count,
             self.magnitude_limb_count,
-        )?)
+        )
     }
 
     #[cfg(test)]

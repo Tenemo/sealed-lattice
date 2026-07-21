@@ -3,9 +3,10 @@ use std::sync::OnceLock;
 
 use super::root_parameters::MULTIPLICATIVE_GROUP_PRIME_FACTORS;
 use super::{
-    DATA_PRIMES, LOGICAL_SLOT_GENERATOR, NttTransformParameters, PLAINTEXT_EXTENSION_DEGREE,
-    PLAINTEXT_EXTENSION_LANE_COUNT, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE, ROOT_PARAMETERS,
-    RootParameters, SPECIAL_PRIMES,
+    DATA_PRIMES, NttTransformParameters, PLAINTEXT_EXTENSION_DEGREE,
+    PLAINTEXT_EXTENSION_LANE_COUNT, PLAINTEXT_LANE_IDEMPOTENT_SCALE,
+    PLAINTEXT_LANE_ORBIT_GENERATOR, PLAINTEXT_LANE_ROOT_GENERATOR, PLAINTEXT_MODULUS,
+    POLYNOMIAL_DEGREE, ROOT_PARAMETERS, RootParameters, SPECIAL_PRIMES,
 };
 
 const DATA_PRIME_COUNT: usize = DATA_PRIMES.len();
@@ -231,40 +232,85 @@ fn validate_supported_algebraic_parameters_uncached() -> Result<(), ParameterGen
 }
 
 fn verify_plaintext_extension_lane_layout() -> bool {
-    let Some((extension_order, lane_count)) =
-        plaintext_extension_lane_dimensions(PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE)
+    verify_plaintext_extension_lane_layout_with_parameters(
+        PLAINTEXT_MODULUS,
+        POLYNOMIAL_DEGREE,
+        PLAINTEXT_EXTENSION_DEGREE,
+        PLAINTEXT_EXTENSION_LANE_COUNT,
+        PLAINTEXT_LANE_ROOT_GENERATOR,
+        PLAINTEXT_LANE_ORBIT_GENERATOR,
+    )
+}
+
+fn verify_plaintext_extension_lane_layout_with_parameters(
+    plaintext_modulus: u64,
+    polynomial_degree: usize,
+    declared_extension_degree: usize,
+    declared_lane_count: usize,
+    lane_root_generator: u64,
+    lane_orbit_generator: usize,
+) -> bool {
+    let Some((recomputed_extension_degree, recomputed_lane_count)) =
+        plaintext_extension_lane_dimensions(plaintext_modulus, polynomial_degree)
     else {
         return false;
     };
-    if extension_order != PLAINTEXT_EXTENSION_DEGREE || lane_count != PLAINTEXT_EXTENSION_LANE_COUNT
-    {
-        return false;
-    }
-    let positive_lane_count = lane_count / 2;
-    if LOGICAL_SLOT_GENERATOR <= 1
-        || LOGICAL_SLOT_GENERATOR >= extension_order
-        || LOGICAL_SLOT_GENERATOR.is_multiple_of(2)
-        || modular_power(
-            LOGICAL_SLOT_GENERATOR as u64,
-            positive_lane_count as u64,
-            extension_order as u64,
-        ) != 1
-        || modular_power(
-            LOGICAL_SLOT_GENERATOR as u64,
-            (positive_lane_count / 2) as u64,
-            extension_order as u64,
-        ) == 1
+    if recomputed_extension_degree != declared_extension_degree
+        || recomputed_lane_count != declared_lane_count
+        || declared_extension_degree < 4
+        || !declared_extension_degree.is_power_of_two()
+        || declared_lane_count < 2
+        || declared_lane_count.checked_mul(2) != Some(declared_extension_degree)
     {
         return false;
     }
 
-    let mut seen_odd_exponents = vec![false; PLAINTEXT_EXTENSION_LANE_COUNT];
+    let Ok(extension_degree) = u64::try_from(declared_extension_degree) else {
+        return false;
+    };
+    let Ok(lane_count) = u64::try_from(declared_lane_count) else {
+        return false;
+    };
+    let positive_lane_count = declared_lane_count / 2;
+    let Ok(positive_lane_count_u64) = u64::try_from(positive_lane_count) else {
+        return false;
+    };
+    let Ok(lane_orbit_generator_u64) = u64::try_from(lane_orbit_generator) else {
+        return false;
+    };
+    if lane_root_generator <= 1
+        || lane_root_generator >= plaintext_modulus
+        || modular_power(lane_root_generator, extension_degree, plaintext_modulus) != 1
+        || modular_power(lane_root_generator, extension_degree / 2, plaintext_modulus) == 1
+        || lane_orbit_generator <= 1
+        || lane_orbit_generator >= declared_extension_degree
+        || lane_orbit_generator.is_multiple_of(2)
+        || modular_power(
+            lane_orbit_generator_u64,
+            positive_lane_count_u64,
+            extension_degree,
+        ) != 1
+        || modular_power(
+            lane_orbit_generator_u64,
+            positive_lane_count_u64 / 2,
+            extension_degree,
+        ) == 1
+        || multiply_modular(
+            lane_count,
+            PLAINTEXT_LANE_IDEMPOTENT_SCALE,
+            plaintext_modulus,
+        ) != 1
+    {
+        return false;
+    }
+
+    let mut seen_odd_exponents = vec![false; declared_lane_count];
     let mut exponent = 1_usize;
     for _ in 0..positive_lane_count {
-        if exponent.is_multiple_of(2) || exponent == extension_order - 1 {
+        if exponent.is_multiple_of(2) || exponent == declared_extension_degree - 1 {
             return false;
         }
-        for represented_exponent in [exponent, extension_order - exponent] {
+        for represented_exponent in [exponent, declared_extension_degree - exponent] {
             let natural_transform_index = (represented_exponent - 1) / 2;
             let Some(was_seen) = seen_odd_exponents.get_mut(natural_transform_index) else {
                 return false;
@@ -274,10 +320,92 @@ fn verify_plaintext_extension_lane_layout() -> bool {
             }
             *was_seen = true;
         }
-        exponent = exponent * LOGICAL_SLOT_GENERATOR % extension_order;
+        exponent = exponent * lane_orbit_generator % declared_extension_degree;
+    }
+    if exponent != 1 || seen_odd_exponents.into_iter().any(|was_seen| !was_seen) {
+        return false;
     }
 
-    exponent == 1 && seen_odd_exponents.into_iter().all(|was_seen| was_seen)
+    let mut roots = Vec::with_capacity(declared_lane_count);
+    for lane_ordinal in 0..declared_lane_count {
+        let Some(root) = plaintext_extension_lane_root_with_parameters(
+            lane_ordinal,
+            plaintext_modulus,
+            declared_extension_degree,
+            declared_lane_count,
+            lane_root_generator,
+            lane_orbit_generator,
+        ) else {
+            return false;
+        };
+        if roots.contains(&root)
+            || modular_power(root, lane_count, plaintext_modulus) != plaintext_modulus - 1
+            || modular_power(root, extension_degree, plaintext_modulus) != 1
+            || modular_power(root, extension_degree / 2, plaintext_modulus) == 1
+        {
+            return false;
+        }
+        roots.push(root);
+    }
+    (0..positive_lane_count).all(|lane_ordinal| {
+        multiply_modular(
+            roots[lane_ordinal],
+            roots[lane_ordinal + positive_lane_count],
+            plaintext_modulus,
+        ) == 1
+    })
+}
+
+pub(crate) fn plaintext_extension_lane_root(lane_ordinal: usize) -> Option<u64> {
+    plaintext_extension_lane_root_with_parameters(
+        lane_ordinal,
+        PLAINTEXT_MODULUS,
+        PLAINTEXT_EXTENSION_DEGREE,
+        PLAINTEXT_EXTENSION_LANE_COUNT,
+        PLAINTEXT_LANE_ROOT_GENERATOR,
+        PLAINTEXT_LANE_ORBIT_GENERATOR,
+    )
+}
+
+fn plaintext_extension_lane_root_with_parameters(
+    lane_ordinal: usize,
+    plaintext_modulus: u64,
+    extension_degree: usize,
+    lane_count: usize,
+    lane_root_generator: u64,
+    lane_orbit_generator: usize,
+) -> Option<u64> {
+    if plaintext_modulus < 3
+        || extension_degree < 4
+        || lane_count < 2
+        || lane_count.checked_mul(2) != Some(extension_degree)
+        || lane_ordinal >= lane_count
+        || lane_root_generator <= 1
+        || lane_root_generator >= plaintext_modulus
+    {
+        return None;
+    }
+    let bank_lane_count = lane_count / 2;
+    let orbit_ordinal = lane_ordinal % bank_lane_count;
+    let extension_degree_u64 = u64::try_from(extension_degree).ok()?;
+    let positive_exponent = modular_power(
+        u64::try_from(lane_orbit_generator).ok()?,
+        u64::try_from(orbit_ordinal).ok()?,
+        extension_degree_u64,
+    );
+    if positive_exponent == 0 {
+        return None;
+    }
+    let exponent = if lane_ordinal < bank_lane_count {
+        positive_exponent
+    } else {
+        extension_degree_u64.checked_sub(positive_exponent)?
+    };
+    Some(modular_power(
+        lane_root_generator,
+        exponent,
+        plaintext_modulus,
+    ))
 }
 
 fn plaintext_extension_lane_dimensions(
@@ -630,12 +758,74 @@ mod tests {
         assert_eq!(PLAINTEXT_MODULUS, 257);
         assert_eq!(PLAINTEXT_EXTENSION_DEGREE, 256);
         assert_eq!(PLAINTEXT_EXTENSION_LANE_COUNT, 128);
+        assert_eq!(PLAINTEXT_LANE_ROOT_GENERATOR, 3);
+        assert_eq!(PLAINTEXT_LANE_ORBIT_GENERATOR, 3);
         assert_eq!(
             plaintext_extension_lane_dimensions(PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE),
             Some((PLAINTEXT_EXTENSION_DEGREE, PLAINTEXT_EXTENSION_LANE_COUNT))
         );
         assert!(verify_plaintext_extension_lane_layout());
         assert!(root_parameters_for_modulus(PLAINTEXT_MODULUS).is_none());
+    }
+
+    #[test]
+    fn plaintext_extension_lane_certificate_rejects_each_declared_algebra_mutation() {
+        let verifies = |plaintext_modulus,
+                        declared_extension_degree,
+                        declared_lane_count,
+                        lane_root_generator,
+                        lane_orbit_generator| {
+            verify_plaintext_extension_lane_layout_with_parameters(
+                plaintext_modulus,
+                POLYNOMIAL_DEGREE,
+                declared_extension_degree,
+                declared_lane_count,
+                lane_root_generator,
+                lane_orbit_generator,
+            )
+        };
+        assert!(verifies(
+            PLAINTEXT_MODULUS,
+            PLAINTEXT_EXTENSION_DEGREE,
+            PLAINTEXT_EXTENSION_LANE_COUNT,
+            PLAINTEXT_LANE_ROOT_GENERATOR,
+            PLAINTEXT_LANE_ORBIT_GENERATOR,
+        ));
+        assert!(!verifies(
+            259,
+            PLAINTEXT_EXTENSION_DEGREE,
+            PLAINTEXT_EXTENSION_LANE_COUNT,
+            PLAINTEXT_LANE_ROOT_GENERATOR,
+            PLAINTEXT_LANE_ORBIT_GENERATOR,
+        ));
+        assert!(!verifies(
+            PLAINTEXT_MODULUS,
+            PLAINTEXT_EXTENSION_DEGREE / 2,
+            PLAINTEXT_EXTENSION_LANE_COUNT,
+            PLAINTEXT_LANE_ROOT_GENERATOR,
+            PLAINTEXT_LANE_ORBIT_GENERATOR,
+        ));
+        assert!(!verifies(
+            PLAINTEXT_MODULUS,
+            PLAINTEXT_EXTENSION_DEGREE,
+            PLAINTEXT_EXTENSION_LANE_COUNT / 2,
+            PLAINTEXT_LANE_ROOT_GENERATOR,
+            PLAINTEXT_LANE_ORBIT_GENERATOR,
+        ));
+        assert!(!verifies(
+            PLAINTEXT_MODULUS,
+            PLAINTEXT_EXTENSION_DEGREE,
+            PLAINTEXT_EXTENSION_LANE_COUNT,
+            9,
+            PLAINTEXT_LANE_ORBIT_GENERATOR,
+        ));
+        assert!(!verifies(
+            PLAINTEXT_MODULUS,
+            PLAINTEXT_EXTENSION_DEGREE,
+            PLAINTEXT_EXTENSION_LANE_COUNT,
+            PLAINTEXT_LANE_ROOT_GENERATOR,
+            7,
+        ));
     }
 
     #[test]

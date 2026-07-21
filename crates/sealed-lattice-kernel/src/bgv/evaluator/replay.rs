@@ -1,5 +1,6 @@
 use core::{cell::Cell, mem::size_of};
 use std::rc::Rc;
+use zeroize::Zeroize;
 
 use crate::{
     bgv::{
@@ -182,11 +183,11 @@ impl VerifiedEvaluatorKeyResolver {
             ResidentEvaluatorKeyGuard::acquire(Rc::clone(&self.resident_key_active))?;
         Ok(VerifiedEvaluatorKeyReplay {
             common_component_authority: self.common_component_authority.clone(),
-            resident_key_guard,
             position,
             key_builder: Some(key_builder),
             pending_auxiliary_pass,
             phase: EvaluatorKeyReplayPhase::Runtime(runtime_pass),
+            resident_key_guard: Some(resident_key_guard),
         })
     }
 }
@@ -253,11 +254,27 @@ enum EvaluatorKeyReplayPhase {
 /// readback verifiers from the retained material capability.
 pub(crate) struct VerifiedEvaluatorKeyReplay {
     common_component_authority: VerifiedEvaluatorCommonComponentAuthority,
-    resident_key_guard: ResidentEvaluatorKeyGuard,
     position: SelectedEvaluatorEntryPosition,
     key_builder: Option<KeySwitchKeyNttBuilder>,
     pending_auxiliary_pass: Option<AuthenticatedComponentPass>,
     phase: EvaluatorKeyReplayPhase,
+    // Rust drops fields in declaration order. Keep the guard last so every
+    // partial key and decoder is scrubbed before another replay can begin.
+    resident_key_guard: Option<ResidentEvaluatorKeyGuard>,
+}
+
+impl Drop for VerifiedEvaluatorKeyReplay {
+    fn drop(&mut self) {
+        self.key_builder.take();
+        self.pending_auxiliary_pass.take();
+        let active_phase = core::mem::replace(
+            &mut self.phase,
+            EvaluatorKeyReplayPhase::Refused(RefusalReason::ConsumedState),
+        );
+        drop(active_phase);
+        // `resident_key_guard` is declared last and is released only after
+        // the builder and every active or pending decoder have been dropped.
+    }
 }
 
 impl VerifiedEvaluatorKeyReplay {
@@ -280,9 +297,17 @@ impl VerifiedEvaluatorKeyReplay {
         }
         let result = self.absorb_next_store_chunk_inner(store_byte_offset, chunk_bytes);
         if let Err(reason) = result {
-            self.phase = EvaluatorKeyReplayPhase::Refused(reason);
+            self.refuse(reason);
         }
         result
+    }
+
+    fn refuse(&mut self, reason: RefusalReason) {
+        self.key_builder.take();
+        self.pending_auxiliary_pass.take();
+        let active_phase =
+            core::mem::replace(&mut self.phase, EvaluatorKeyReplayPhase::Refused(reason));
+        drop(active_phase);
     }
 
     fn absorb_next_store_chunk_inner(
@@ -374,9 +399,9 @@ impl VerifiedEvaluatorKeyReplay {
     }
 
     pub(crate) fn finish(mut self) -> Result<VerifiedEvaluatorKeyContext, RefusalReason> {
-        match self.phase {
+        match &self.phase {
             EvaluatorKeyReplayPhase::Complete => {}
-            EvaluatorKeyReplayPhase::Refused(reason) => return Err(reason),
+            EvaluatorKeyReplayPhase::Refused(reason) => return Err(*reason),
             EvaluatorKeyReplayPhase::Runtime(_) | EvaluatorKeyReplayPhase::Auxiliary(_) => {
                 return Err(RefusalReason::WrongTypeOrLength);
             }
@@ -393,7 +418,10 @@ impl VerifiedEvaluatorKeyReplay {
             evaluator_replay_context_hash: self
                 .common_component_authority
                 .evaluator_replay_context_hash(),
-            _resident_key_guard: self.resident_key_guard,
+            _resident_key_guard: self
+                .resident_key_guard
+                .take()
+                .ok_or(RefusalReason::ConsumedState)?,
             position: self.position,
             key,
             ntt_transform_count,
@@ -410,6 +438,33 @@ pub(crate) struct VerifiedEvaluatorKeyContext {
     position: SelectedEvaluatorEntryPosition,
     key: KeySwitchKey,
     ntt_transform_count: usize,
+}
+
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct VerifiedContextDropObservation {
+    retained_word_count_before_drop: usize,
+    catalog_word_count_before_drop: usize,
+    key_cleared_while_resident_guard_was_active: bool,
+}
+
+#[cfg(test)]
+thread_local! {
+    static VERIFIED_CONTEXT_DROP_OBSERVATIONS:
+        std::cell::RefCell<Vec<VerifiedContextDropObservation>> = const {
+            std::cell::RefCell::new(Vec::new())
+        };
+}
+
+#[cfg(test)]
+fn clear_verified_context_drop_observations() {
+    VERIFIED_CONTEXT_DROP_OBSERVATIONS.with(|observations| observations.borrow_mut().clear());
+}
+
+#[cfg(test)]
+fn take_verified_context_drop_observations() -> Vec<VerifiedContextDropObservation> {
+    VERIFIED_CONTEXT_DROP_OBSERVATIONS
+        .with(|observations| core::mem::take(&mut *observations.borrow_mut()))
 }
 
 impl VerifiedEvaluatorKeyContext {
@@ -441,6 +496,40 @@ impl VerifiedEvaluatorKeyContext {
 
     pub(crate) const fn ntt_transform_count(&self) -> usize {
         self.ntt_transform_count
+    }
+}
+
+impl Zeroize for VerifiedEvaluatorKeyContext {
+    fn zeroize(&mut self) {
+        self.evaluator_replay_context_hash.zeroize();
+        self.key.zeroize();
+        self.ntt_transform_count.zeroize();
+    }
+}
+
+impl Drop for VerifiedEvaluatorKeyContext {
+    fn drop(&mut self) {
+        // Clear the key before field destruction releases the resident-key
+        // guard and permits another replay to acquire the worker slot.
+        #[cfg(test)]
+        let observation = VerifiedContextDropObservation {
+            retained_word_count_before_drop: self.key.retained_word_count(),
+            catalog_word_count_before_drop: self.key.catalog_word_count(),
+            key_cleared_while_resident_guard_was_active: false,
+        };
+        self.zeroize();
+        #[cfg(test)]
+        VERIFIED_CONTEXT_DROP_OBSERVATIONS.with(|observations| {
+            observations
+                .borrow_mut()
+                .push(VerifiedContextDropObservation {
+                    key_cleared_while_resident_guard_was_active: self
+                        .key
+                        .all_owned_buffers_are_cleared()
+                        && self._resident_key_guard.resident_key_active.get(),
+                    ..observation
+                });
+        });
     }
 }
 
@@ -566,6 +655,66 @@ struct KeySwitchComponentByteDecoder {
     current_limb: Vec<u64>,
 }
 
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct DecoderDropObservation {
+    retained_coefficient_count_before_drop: usize,
+    pending_residue_byte_count_before_drop: usize,
+    catalog_modulus_count_before_drop: usize,
+    all_owned_buffers_cleared_before_release: bool,
+}
+
+#[cfg(test)]
+thread_local! {
+    static DECODER_DROP_OBSERVATIONS: std::cell::RefCell<Vec<DecoderDropObservation>> = const {
+        std::cell::RefCell::new(Vec::new())
+    };
+}
+
+#[cfg(test)]
+fn clear_decoder_drop_observations() {
+    DECODER_DROP_OBSERVATIONS.with(|observations| observations.borrow_mut().clear());
+}
+
+#[cfg(test)]
+fn take_decoder_drop_observations() -> Vec<DecoderDropObservation> {
+    DECODER_DROP_OBSERVATIONS.with(|observations| core::mem::take(&mut *observations.borrow_mut()))
+}
+
+impl Zeroize for KeySwitchComponentByteDecoder {
+    fn zeroize(&mut self) {
+        self.topology.zeroize();
+        self.next_block_index.zeroize();
+        self.next_limb_index.zeroize();
+        self.pending_residue_bytes.zeroize();
+        self.pending_residue_byte_count.zeroize();
+        self.current_limb.zeroize();
+    }
+}
+
+impl Drop for KeySwitchComponentByteDecoder {
+    fn drop(&mut self) {
+        #[cfg(test)]
+        let observation = DecoderDropObservation {
+            retained_coefficient_count_before_drop: self.current_limb.len(),
+            pending_residue_byte_count_before_drop: self.pending_residue_byte_count,
+            catalog_modulus_count_before_drop: self.topology.ordered_moduli().len(),
+            all_owned_buffers_cleared_before_release: false,
+        };
+        self.zeroize();
+        #[cfg(test)]
+        DECODER_DROP_OBSERVATIONS.with(|observations| {
+            observations.borrow_mut().push(DecoderDropObservation {
+                all_owned_buffers_cleared_before_release: self.current_limb.is_empty()
+                    && self.pending_residue_bytes == [0; size_of::<u64>()]
+                    && self.pending_residue_byte_count == 0
+                    && self.topology.owned_catalog_buffers_are_zeroized(),
+                ..observation
+            });
+        });
+    }
+}
+
 impl KeySwitchComponentByteDecoder {
     fn new(topology: KeySwitchComponentMaterialTopology) -> Result<Self, RefusalReason> {
         if topology.polynomial_degree() == 0
@@ -684,6 +833,7 @@ fn canonical_replay_refusal(error: CanonicalError) -> RefusalReason {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::bgv::proof_suite::selected_evaluator_relinearization_entry_positions;
 
     fn test_topology() -> KeySwitchComponentMaterialTopology {
         KeySwitchComponentMaterialTopology::for_test_suite(&[257, 769], &[12_289], 1, 8)
@@ -729,6 +879,37 @@ mod tests {
         assert!(resident_key_active.get());
         drop(reused_guard);
         assert!(!resident_key_active.get());
+    }
+
+    #[test]
+    fn verified_context_drop_zeroizes_complete_key_before_guard_release() {
+        clear_verified_context_drop_observations();
+        let resident_key_active = Rc::new(Cell::new(false));
+        let resident_key_guard =
+            ResidentEvaluatorKeyGuard::acquire(Rc::clone(&resident_key_active))
+                .expect("resident key guard");
+        let position = selected_evaluator_relinearization_entry_positions()
+            .expect("selected relinearization positions")
+            .into_iter()
+            .next()
+            .expect("at least one selected relinearization position");
+        let context = VerifiedEvaluatorKeyContext {
+            evaluator_replay_context_hash: [0x5a; 64],
+            _resident_key_guard: resident_key_guard,
+            position,
+            key: KeySwitchKey::from_zeroization_test_values(),
+            ntt_transform_count: 7,
+        };
+        assert!(resident_key_active.get());
+
+        drop(context);
+
+        assert!(!resident_key_active.get());
+        let observations = take_verified_context_drop_observations();
+        assert_eq!(observations.len(), 1);
+        assert!(observations[0].retained_word_count_before_drop >= 5);
+        assert!(observations[0].catalog_word_count_before_drop > 1);
+        assert!(observations[0].key_cleared_while_resident_guard_was_active);
     }
 
     #[test]
@@ -800,5 +981,30 @@ mod tests {
             .absorb_bytes(&[1], |_, _| Ok(()))
             .expect("partial residue is retained");
         assert_eq!(incomplete.finish(), Err(RefusalReason::WrongTypeOrLength));
+    }
+
+    #[test]
+    fn partial_decoder_drop_clears_unaligned_residue_limb_and_catalog_buffers() {
+        clear_decoder_drop_observations();
+        {
+            let topology = test_topology();
+            let bytes = test_component_bytes();
+            let first_residue_byte_length =
+                canonical_residue_byte_length(topology.ordered_moduli()[0])
+                    .expect("first residue width");
+            let mut decoder = KeySwitchComponentByteDecoder::new(topology).expect("decoder");
+            decoder
+                .absorb_bytes(&bytes[..first_residue_byte_length + 1], |_, _| {
+                    panic!("one coefficient cannot complete an eight-coefficient limb")
+                })
+                .expect("one complete residue and one partial residue are retained");
+        }
+
+        let observations = take_decoder_drop_observations();
+        assert_eq!(observations.len(), 1);
+        assert_eq!(observations[0].retained_coefficient_count_before_drop, 1);
+        assert_eq!(observations[0].pending_residue_byte_count_before_drop, 1);
+        assert_eq!(observations[0].catalog_modulus_count_before_drop, 3);
+        assert!(observations[0].all_owned_buffers_cleared_before_release);
     }
 }

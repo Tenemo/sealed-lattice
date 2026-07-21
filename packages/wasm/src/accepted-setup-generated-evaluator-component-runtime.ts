@@ -159,24 +159,6 @@ const readExactStoreRange = async (input: {
     return output;
 };
 
-export const readCompleteGeneratedEvaluatorComponent = async (input: {
-    component: GeneratedEvaluatorComponentDescription;
-    kernel: TranscriptCoreKernel;
-    store: GeneratedEvaluatorComponentStore;
-}): Promise<Uint8Array<ArrayBuffer>> => {
-    const decoded = decodeComponentDescription({
-        kernel: input.kernel,
-        streamDescriptorBytes: input.component.streamDescriptorBytes,
-    });
-    return readExactStoreRange({
-        chunkByteLengths: decoded.chunkByteLengths,
-        exactByteLength: decoded.totalByteLength,
-        sourceByteOffset: 0n,
-        store: input.store,
-        totalByteLength: decoded.totalByteLength,
-    });
-};
-
 export const persistGeneratedEvaluatorComponents = async (input: {
     expectedComponentCount: number;
     kernel: TranscriptCoreKernel;

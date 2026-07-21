@@ -150,14 +150,14 @@ fn selected_eight_prime_target_basis_satisfies_the_exact_factor_four_theorem_bou
         .expect("the selected evaluator has at least one target");
     assert_eq!(
         evaluation_error_bound.to_str_radix(10),
-        "16870171037775988578755335442628",
+        "16873484365703521901782467690810",
     );
 
     let flooding_bound = factor_four_required_flooding_bound(&evaluation_error_bound)
         .expect("the exact factor-four flooding bound is representable");
     assert_eq!(
         flooding_bound.to_str_radix(10),
-        "350379744329557993497411231781118201360220160600365913688770609152",
+        "350448559458315701434059649110456171713052518886842104181466071040",
     );
     ensure_factor_four_parameter_conditions(
         CANONICAL_TARGET_CIPHERTEXT_LEVEL,
@@ -198,11 +198,11 @@ fn selected_eight_prime_target_basis_satisfies_the_exact_factor_four_theorem_bou
     );
     assert_eq!(
         scaled_c2_left.to_str_radix(10),
-        "63393506382058268647499619343694154005072056524437869067723828113069637",
+        "63405956965674143229061544194256614305082933848931450285473800446066085",
     );
     assert_eq!(
         ((&target_modulus << 1_usize) - scaled_c2_left).to_str_radix(10),
-        "4543301004659883003615368220804576733040962836921524316171207615489600367037",
+        "4543300992209299387740786658879726170580662826044199822589989865517267370589",
         "the exact C2 margin must remain positive",
     );
 }
@@ -610,8 +610,7 @@ fn flooding_callback_allocation_accounting_separates_ready_and_construction_byte
 fn nested_limb_accounting_requires_exact_lengths_and_capacities() {
     let mut exact_vectors = Vec::with_capacity(2);
     for _ in 0..2 {
-        let mut values = Vec::with_capacity(3);
-        values.resize(3, 0_u64);
+        let values = vec![0_u64; 3];
         exact_vectors.push(values);
     }
     let expected_byte_length = u64::try_from(2 * size_of::<Vec<u64>>() + 6 * size_of::<u64>())

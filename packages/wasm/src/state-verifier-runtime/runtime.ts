@@ -102,7 +102,7 @@ type VerifiedStateReservationKernelAuthorization = Readonly<{
     sessionHandle: number;
 }>;
 
-export type VerifiedStateOutputKernelAuthorization = Readonly<{
+type VerifiedStateOutputKernelAuthorization = Readonly<{
     capabilityMemory: WebAssembly.Memory;
     capabilityPointer: number;
     outputHandle: number;

@@ -2,18 +2,15 @@ use core::slice;
 use std::cell::RefCell;
 
 use crate::{
-    bgv::{
-        evaluator::{
-            ballot_aggregation_runtime::{
-                VerifiedEvaluatorAggregateAuthorityHandle,
-                take_verified_evaluator_aggregate_authority,
-            },
-            program::{
-                PreparedSelectedEvaluatorReplay, SelectedEvaluatorExecutionProgress,
-                SelectedEvaluatorProgramExecution,
-            },
+    bgv::evaluator::{
+        ballot_aggregation_runtime::{
+            VerifiedEvaluatorAggregateAuthorityHandle, VerifiedEvaluatorPipelineLease,
+            take_verified_evaluator_aggregate_execution_authority,
         },
-        setup::VerifiedAcceptedSetupAuthorityHandle,
+        program::{
+            PreparedSelectedEvaluatorReplay, SelectedEvaluatorExecutionProgress,
+            SelectedEvaluatorProgramExecution,
+        },
     },
     foundation::{
         CanonicalDecodeLimits, FOUNDATION_PROFILE, RefusalReason,
@@ -32,11 +29,16 @@ type RuntimeResult<Value> = Result<Value, u32>;
 enum EvaluatorExecutionState {
     Executing(Box<SelectedEvaluatorProgramExecution>),
     Prepared(Box<PreparedSelectedEvaluatorReplay>),
+    #[cfg(test)]
+    LeaseTestExecuting,
+    #[cfg(test)]
+    LeaseTestPrepared,
 }
 
 struct ActiveEvaluatorExecution {
     handle: u32,
     state: EvaluatorExecutionState,
+    pipeline_lease: VerifiedEvaluatorPipelineLease,
 }
 
 struct EvaluatorExecutionRuntimeRegistry {
@@ -54,29 +56,24 @@ impl Default for EvaluatorExecutionRuntimeRegistry {
 }
 
 impl EvaluatorExecutionRuntimeRegistry {
-    fn begin(
-        &mut self,
-        accepted_setup_authority_handle: u32,
-        verified_aggregate_authority_handle: u32,
-    ) -> RuntimeResult<u32> {
-        if self.active_execution.is_some() {
-            return Err(refusal_status(RefusalReason::OutsideSupportedProfile));
-        }
-        let verified_aggregate = take_verified_evaluator_aggregate_authority(
-            &VerifiedEvaluatorAggregateAuthorityHandle::from_identifier(
-                verified_aggregate_authority_handle,
-            ),
-        )
-        .map_err(refusal_status)?;
-        let execution = SelectedEvaluatorProgramExecution::begin(
-            verified_aggregate,
-            &VerifiedAcceptedSetupAuthorityHandle::from_identifier(accepted_setup_authority_handle),
-        )
-        .map_err(refusal_status)?;
+    fn begin(&mut self, verified_aggregate_authority_handle: u32) -> RuntimeResult<u32> {
+        let retained_authority =
+            take_transferred_authority_before_active_check(self.active_execution.is_some(), || {
+                take_verified_evaluator_aggregate_execution_authority(
+                    &VerifiedEvaluatorAggregateAuthorityHandle::from_identifier(
+                        verified_aggregate_authority_handle,
+                    ),
+                )
+            })
+            .map_err(refusal_status)?;
+        let (verified_aggregate_authority, pipeline_lease) = retained_authority.into_parts();
+        let execution = SelectedEvaluatorProgramExecution::begin(verified_aggregate_authority)
+            .map_err(refusal_status)?;
         let handle = take_nonrepeating_handle(&mut self.next_handle)?;
         self.active_execution = Some(ActiveEvaluatorExecution {
             handle,
             state: EvaluatorExecutionState::Executing(Box::new(execution)),
+            pipeline_lease,
         });
         Ok(handle)
     }
@@ -124,12 +121,14 @@ impl EvaluatorExecutionRuntimeRegistry {
 
     fn finish(&mut self, handle: u32) -> RuntimeResult<()> {
         let active = self.take_matching(handle)?;
+        let pipeline_lease = active.pipeline_lease;
         let execution = match active.state {
             EvaluatorExecutionState::Executing(execution) => execution,
-            EvaluatorExecutionState::Prepared(prepared) => {
+            state => {
                 self.active_execution = Some(ActiveEvaluatorExecution {
                     handle,
-                    state: EvaluatorExecutionState::Prepared(prepared),
+                    state,
+                    pipeline_lease,
                 });
                 return Err(refusal_status(RefusalReason::ConsumedState));
             }
@@ -141,6 +140,7 @@ impl EvaluatorExecutionRuntimeRegistry {
         self.active_execution = Some(ActiveEvaluatorExecution {
             handle,
             state: EvaluatorExecutionState::Prepared(Box::new(prepared)),
+            pipeline_lease,
         });
         Ok(())
     }
@@ -186,7 +186,10 @@ impl EvaluatorExecutionRuntimeRegistry {
                 }
             };
         match retain_verified_evaluator_replay(verified_replay) {
-            Ok(verified_replay_handle) => Ok(verified_replay_handle),
+            Ok(verified_replay_handle) => {
+                Self::retire_after_success(active);
+                Ok(verified_replay_handle)
+            }
             Err(status) => {
                 self.active_execution = Some(active);
                 Err(status)
@@ -196,6 +199,10 @@ impl EvaluatorExecutionRuntimeRegistry {
 
     fn cancel(&mut self, handle: u32) -> RuntimeResult<()> {
         self.take_matching(handle).map(|_| ())
+    }
+
+    fn retire_after_success(active: ActiveEvaluatorExecution) {
+        drop(active);
     }
 
     fn take_matching(&mut self, handle: u32) -> RuntimeResult<ActiveEvaluatorExecution> {
@@ -218,11 +225,20 @@ impl EvaluatorExecutionRuntimeRegistry {
             .ok_or_else(|| refusal_status(RefusalReason::ConsumedState))?;
         match &active.state {
             EvaluatorExecutionState::Prepared(prepared) => Ok(prepared),
-            EvaluatorExecutionState::Executing(_) => {
-                Err(refusal_status(RefusalReason::ConsumedState))
-            }
+            _ => Err(refusal_status(RefusalReason::ConsumedState)),
         }
     }
+}
+
+fn take_transferred_authority_before_active_check<Authority>(
+    active_execution_present: bool,
+    take_authority: impl FnOnce() -> Result<Authority, RefusalReason>,
+) -> Result<Authority, RefusalReason> {
+    let authority = take_authority()?;
+    if active_execution_present {
+        return Err(RefusalReason::OutsideSupportedProfile);
+    }
+    Ok(authority)
 }
 
 thread_local! {
@@ -231,15 +247,11 @@ thread_local! {
         RefCell::new(EvaluatorExecutionRuntimeRegistry::default());
 }
 
-fn begin_evaluator_execution(
-    accepted_setup_authority_handle: u32,
-    verified_aggregate_authority_handle: u32,
-) -> RuntimeResult<u32> {
+fn begin_evaluator_execution(verified_aggregate_authority_handle: u32) -> RuntimeResult<u32> {
     EVALUATOR_EXECUTION_RUNTIME_REGISTRY.with(|registry| {
-        registry.borrow_mut().begin(
-            accepted_setup_authority_handle,
-            verified_aggregate_authority_handle,
-        )
+        registry
+            .borrow_mut()
+            .begin(verified_aggregate_authority_handle)
     })
 }
 
@@ -371,22 +383,18 @@ unsafe fn write_status(status_pointer: *mut u32, status: u32) {
     }
 }
 
-/// Begins the sole resident evaluator execution from opaque accepted-setup and
-/// positively verified aggregate authorities.
+/// Begins the sole resident evaluator execution from the opaque aggregate
+/// authority that already owns the one accepted-setup store resolver.
 ///
 /// # Safety
 ///
 /// A non-null status pointer must name one writable `u32` in WASM memory.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn sealed_lattice_evaluator_execution_begin(
-    accepted_setup_authority_handle: u32,
     verified_aggregate_authority_handle: u32,
     status_pointer: *mut u32,
 ) -> u32 {
-    match begin_evaluator_execution(
-        accepted_setup_authority_handle,
-        verified_aggregate_authority_handle,
-    ) {
+    match begin_evaluator_execution(verified_aggregate_authority_handle) {
         Ok(handle) => {
             unsafe { write_status(status_pointer, 0) };
             handle
@@ -547,6 +555,42 @@ pub extern "C" fn sealed_lattice_evaluator_replay_release(verified_replay_handle
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::bgv::evaluator::ballot_aggregation_runtime::{
+        sealed_lattice_ballot_aggregation_begin, sealed_lattice_ballot_aggregation_cancel,
+    };
+
+    fn insert_test_execution(
+        registry: &mut EvaluatorExecutionRuntimeRegistry,
+        state: EvaluatorExecutionState,
+    ) -> u32 {
+        let handle = take_nonrepeating_handle(&mut registry.next_handle)
+            .expect("test evaluator handle is available");
+        registry.active_execution = Some(ActiveEvaluatorExecution {
+            handle,
+            state,
+            pipeline_lease: VerifiedEvaluatorPipelineLease::acquire()
+                .expect("test evaluator owns the sole pipeline lease"),
+        });
+        handle
+    }
+
+    fn assert_ballot_aggregation_is_blocked() {
+        let mut status = u32::MAX;
+        let handle = unsafe { sealed_lattice_ballot_aggregation_begin(71, &mut status) };
+        assert_eq!(handle, 0);
+        assert_eq!(
+            status,
+            refusal_status(RefusalReason::OutsideSupportedProfile)
+        );
+    }
+
+    fn assert_ballot_aggregation_can_start_and_retire() {
+        let mut status = u32::MAX;
+        let handle = unsafe { sealed_lattice_ballot_aggregation_begin(71, &mut status) };
+        assert_ne!(handle, 0);
+        assert_eq!(status, 0);
+        assert_eq!(sealed_lattice_ballot_aggregation_cancel(handle), 0);
+    }
 
     #[test]
     fn progress_record_encodes_full_width_store_coordinates() {
@@ -583,5 +627,50 @@ mod tests {
             Err(refusal_status(RefusalReason::OutsideSupportedProfile))
         );
         assert_eq!(registry.next_handle, u32::MAX);
+    }
+
+    #[test]
+    fn pipeline_lease_blocks_aggregation_through_executing_and_prepared_lifecycles() {
+        let mut executing_registry = EvaluatorExecutionRuntimeRegistry::default();
+        let executing_handle = insert_test_execution(
+            &mut executing_registry,
+            EvaluatorExecutionState::LeaseTestExecuting,
+        );
+        assert_ballot_aggregation_is_blocked();
+        assert_eq!(
+            executing_registry.cancel(executing_handle + 1),
+            Err(refusal_status(RefusalReason::ConsumedState))
+        );
+        assert_ballot_aggregation_is_blocked();
+        assert_eq!(executing_registry.cancel(executing_handle), Ok(()));
+        assert_ballot_aggregation_can_start_and_retire();
+
+        let mut prepared_registry = EvaluatorExecutionRuntimeRegistry::default();
+        let prepared_handle = insert_test_execution(
+            &mut prepared_registry,
+            EvaluatorExecutionState::LeaseTestPrepared,
+        );
+        assert_ballot_aggregation_is_blocked();
+        let prepared = prepared_registry
+            .take_matching(prepared_handle)
+            .expect("prepared test execution is live");
+        EvaluatorExecutionRuntimeRegistry::retire_after_success(prepared);
+        assert_ballot_aggregation_can_start_and_retire();
+    }
+
+    #[test]
+    fn begin_consumes_transferred_authority_before_active_execution_refusal() {
+        let take_count = std::cell::Cell::new(0_usize);
+        let refusal = take_transferred_authority_before_active_check(true, || {
+            take_count.set(take_count.get() + 1);
+            VerifiedEvaluatorPipelineLease::acquire()
+        })
+        .err();
+        assert_eq!(refusal, Some(RefusalReason::OutsideSupportedProfile));
+        assert_eq!(take_count.get(), 1);
+
+        let replacement = VerifiedEvaluatorPipelineLease::acquire()
+            .expect("refused transferred authority released its pipeline lease");
+        drop(replacement);
     }
 }

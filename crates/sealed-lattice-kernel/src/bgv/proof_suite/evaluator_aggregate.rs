@@ -3,6 +3,14 @@
 
 use std::collections::VecDeque;
 
+#[cfg(test)]
+use crate::{
+    bgv::evaluator::top_k::{
+        SELECTED_RELINEARIZATION_KEY_LEVEL, TRACE_GALOIS_PATHS, TRACE_KEY_LEVEL,
+    },
+    foundation::{derive_canonical_stream_descriptor, selected_suite_capability_for_tests},
+};
+
 use crate::{
     bgv::{
         key_switch_topology::{KEY_SWITCH_DATA_PRIMES_PER_BLOCK, canonical_residue_byte_length},
@@ -1084,6 +1092,123 @@ pub(crate) struct VerifiedEvaluatorKeyStoreMaterial {
 }
 
 impl VerifiedEvaluatorKeyStoreMaterial {
+    /// Authenticates the smallest exact selected-store catalog needed by the
+    /// aggregation/evaluator seam tests. The physical bytes remain ordered as
+    /// L22 relinearization B, linked L22 A, then L18 Galois-257 B.
+    #[cfg(test)]
+    pub(crate) fn from_test_authenticated_minimal_physical_material(
+        ownership_binding: ComponentMaterialOwnershipBinding,
+        store_bytes: Vec<u8>,
+    ) -> Result<(Self, Vec<u8>), RefusalReason> {
+        let selected_suite = selected_suite_capability_for_tests();
+        let positions = selected_evaluator_entry_positions(FOUNDATION_PROFILE.option_count)
+            .map_err(|_| RefusalReason::UnsupportedVersionOrSuite)?;
+        let relinearization_position = positions
+            .iter()
+            .copied()
+            .find(|position| {
+                matches!(
+                    position.key_kind(),
+                    SelectedEvaluatorEntryKind::Relinearization { catalog_level }
+                        if catalog_level == SELECTED_RELINEARIZATION_KEY_LEVEL
+                )
+            })
+            .ok_or(RefusalReason::MissingPrerequisite)?;
+        let first_trace_galois_element = TRACE_GALOIS_PATHS
+            .first()
+            .and_then(|path| path.first())
+            .copied()
+            .ok_or(RefusalReason::MissingPrerequisite)?;
+        let trace_galois_position = positions
+            .iter()
+            .copied()
+            .find(|position| {
+                matches!(
+                    position.key_kind(),
+                    SelectedEvaluatorEntryKind::Galois {
+                        galois_element,
+                        catalog_level,
+                    } if galois_element == first_trace_galois_element
+                        && catalog_level == TRACE_KEY_LEVEL
+                )
+            })
+            .ok_or(RefusalReason::MissingPrerequisite)?;
+        let relinearization_topology =
+            KeySwitchComponentMaterialTopology::from_selected_suite_at_level(
+                &selected_suite,
+                SELECTED_RELINEARIZATION_KEY_LEVEL,
+            )?;
+        let trace_galois_topology =
+            KeySwitchComponentMaterialTopology::from_selected_suite_at_level(
+                &selected_suite,
+                TRACE_KEY_LEVEL,
+            )?;
+        let relinearization_byte_length =
+            usize::try_from(relinearization_topology.expected_byte_length())
+                .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
+        let trace_galois_byte_length =
+            usize::try_from(trace_galois_topology.expected_byte_length())
+                .map_err(|_| RefusalReason::OutsideSupportedProfile)?;
+        let expected_store_byte_length = relinearization_byte_length
+            .checked_mul(2)
+            .and_then(|length| length.checked_add(trace_galois_byte_length))
+            .ok_or(RefusalReason::OutsideSupportedProfile)?;
+        if store_bytes.len() != expected_store_byte_length {
+            return Err(RefusalReason::WrongTypeOrLength);
+        }
+        let auxiliary_start = relinearization_byte_length;
+        let trace_start = relinearization_byte_length
+            .checked_mul(2)
+            .ok_or(RefusalReason::OutsideSupportedProfile)?;
+        let component_descriptors = vec![
+            derive_canonical_stream_descriptor(
+                CanonicalStreamDomain::EvaluatorKeyStore,
+                &store_bytes[..auxiliary_start],
+            )?,
+            derive_canonical_stream_descriptor(
+                CanonicalStreamDomain::EvaluatorKeyStore,
+                &store_bytes[auxiliary_start..trace_start],
+            )?,
+            derive_canonical_stream_descriptor(
+                CanonicalStreamDomain::EvaluatorKeyStore,
+                &store_bytes[trace_start..],
+            )?,
+        ];
+        let store_descriptor = derive_canonical_stream_descriptor(
+            CanonicalStreamDomain::EvaluatorKeyStore,
+            &store_bytes,
+        )?;
+        let mut stream = VerifiedEvaluatorKeyStoreMaterialStream::begin_with_physical_layout(
+            FOUNDATION_PROFILE.option_count,
+            vec![
+                relinearization_topology.clone(),
+                relinearization_topology,
+                trace_galois_topology,
+            ],
+            ownership_binding,
+            vec![
+                relinearization_position,
+                relinearization_position,
+                trace_galois_position,
+            ],
+            vec![
+                EvaluatorKeyStorePhysicalRole::Runtime,
+                EvaluatorKeyStorePhysicalRole::RelinearizationAuxiliary,
+                EvaluatorKeyStorePhysicalRole::Runtime,
+            ],
+            store_descriptor,
+            component_descriptors,
+        )?;
+        for (chunk_index, chunk) in store_bytes
+            .chunks(FOUNDATION_PROFILE.stream_chunk_byte_length)
+            .enumerate()
+        {
+            stream.absorb_chunk(chunk_index, chunk).into_result()?;
+        }
+        let material = stream.finish().into_result()?;
+        Ok((material, store_bytes))
+    }
+
     pub(crate) const fn top_count(&self) -> u16 {
         self.top_count
     }
@@ -1615,6 +1740,17 @@ mod tests {
         ComponentMaterialOwnershipBinding::from_verified_application(
             [0x11; 64], [0x22; 64], [0x33; 64],
         );
+
+    #[test]
+    fn minimal_test_store_material_refuses_a_truncated_physical_catalog() {
+        assert!(matches!(
+            VerifiedEvaluatorKeyStoreMaterial::from_test_authenticated_minimal_physical_material(
+                TEST_MATERIAL_OWNERSHIP,
+                vec![0],
+            ),
+            Err(RefusalReason::WrongTypeOrLength),
+        ));
+    }
 
     fn test_store_topology() -> KeySwitchComponentMaterialTopology {
         KeySwitchComponentMaterialTopology::for_test_suite(&[257, 769], &[12_289], 1, 8)
