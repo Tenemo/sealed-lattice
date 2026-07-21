@@ -761,6 +761,53 @@ mod tests {
                         .expect("mutated ciphertext count fits u16"),
                 ),
             ),
+            (
+                "wrong auxiliary count must refuse",
+                6,
+                CanonicalItem::unsigned16(
+                    u16::try_from(PAIR_CHARACTER_AUXILIARY_COUNT + 1)
+                        .expect("mutated auxiliary count fits u16"),
+                ),
+            ),
+            (
+                "wrong option count must refuse",
+                7,
+                CanonicalItem::unsigned16(
+                    FOUNDATION_PROFILE
+                        .option_count
+                        .checked_sub(1)
+                        .expect("selected option count is positive"),
+                ),
+            ),
+            (
+                "wrong minimum score must refuse",
+                8,
+                CanonicalItem::unsigned16(
+                    FOUNDATION_PROFILE
+                        .minimum_score
+                        .checked_add(1)
+                        .expect("mutated minimum score fits u16"),
+                ),
+            ),
+            (
+                "wrong maximum score must refuse",
+                9,
+                CanonicalItem::unsigned16(
+                    FOUNDATION_PROFILE
+                        .maximum_score
+                        .checked_sub(1)
+                        .expect("selected maximum score is positive"),
+                ),
+            ),
+            (
+                "wrong pair-difference rule must refuse",
+                10,
+                CanonicalItem::unsigned16(
+                    LOWER_MINUS_HIGHER_PAIR_DIFFERENCE_RULE
+                        .checked_add(1)
+                        .expect("mutated pair-difference rule fits u16"),
+                ),
+            ),
         ] {
             let mut mutated = selected_tuple.clone();
             mutated.items[item_ordinal] = replacement;

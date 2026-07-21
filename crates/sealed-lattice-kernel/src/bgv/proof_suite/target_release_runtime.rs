@@ -74,6 +74,11 @@ const HANDLE_BYTE_LENGTH: usize = core::mem::size_of::<u32>();
 const TARGET_ROLE_COUNT: usize = 2;
 const RESULT_OPTION_IDENTIFIER_BYTE_LENGTH: usize = core::mem::size_of::<u32>();
 
+#[cfg(test)]
+pub(crate) const fn target_release_checkpoint_lineage_identifier_byte_length() -> usize {
+    CHECKPOINT_LINEAGE_IDENTIFIER_BYTE_LENGTH
+}
+
 #[derive(Debug)]
 enum TargetReleaseRuntimeError {
     Accounting(SelectedProofAccountingError),

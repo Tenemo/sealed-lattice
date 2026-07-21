@@ -13,7 +13,8 @@ use super::{
 
 #[cfg(test)]
 use super::{
-    CanonicalItem, ObjectEnvelope, ParticipantIdentity, hash_foundation_tuple_512 as hash512,
+    CanonicalItem, FoundationSchemaError, ObjectEnvelope, ParticipantIdentity,
+    hash_foundation_tuple_512 as hash512,
 };
 
 const CHUNK_DIGEST_DOMAIN: &str = "sealed-lattice/transport/chunk/v1";
@@ -247,6 +248,96 @@ pub(crate) struct TargetReleaseOutputBundleByteLengths {
     target_order: u64,
     malicious_share_proof: u64,
     total: u64,
+}
+
+/// Derives the exact target-share carrier and bundle lengths without
+/// materializing the three potentially large child streams. The placeholder
+/// hashes, participant identity, and signature all occupy fixed-width
+/// canonical fields; production verification fixes the prerequisite list to
+/// empty and the producer sequence to zero, so their values cannot change the
+/// encoded length.
+#[cfg(test)]
+pub(crate) fn canonical_target_release_output_bundle_byte_lengths_for_accounting(
+    target_identifier_descriptor: &StreamDescriptor,
+    target_order_descriptor: &StreamDescriptor,
+    malicious_share_proof_descriptor: &StreamDescriptor,
+) -> Result<TargetReleaseOutputBundleByteLengths, FoundationSchemaError> {
+    fn descriptor_item(
+        descriptor: &StreamDescriptor,
+    ) -> Result<CanonicalItem, FoundationSchemaError> {
+        let canonical_descriptor = descriptor.encode()?;
+        let descriptor_tuple =
+            CanonicalTuple::decode(&canonical_descriptor, &CanonicalDecodeLimits::default())?;
+        Ok(CanonicalItem::nested_tuple(&descriptor_tuple)?)
+    }
+
+    let payload = CanonicalTuple::new(
+        TARGET_DECRYPTION_SHARE_PAYLOAD_SCHEMA_IDENTIFIER,
+        TARGET_RELEASE_OUTPUT_BUNDLE_VERSION,
+        vec![
+            CanonicalItem::hash512([0x31; Hash512::BYTE_LENGTH]),
+            CanonicalItem::hash512([0x32; Hash512::BYTE_LENGTH]),
+            descriptor_item(target_identifier_descriptor)?,
+            descriptor_item(target_order_descriptor)?,
+            descriptor_item(malicious_share_proof_descriptor)?,
+        ],
+    )
+    .encode()?;
+    let signed_carrier = SignedCarrier {
+        envelope: ObjectEnvelope {
+            suite_id: Hash512::from_bytes([0x11; Hash512::BYTE_LENGTH]),
+            object_type: FoundationObjectType::TargetDecryptionShare,
+            ceremony_context_hash: Hash512::from_bytes([0x12; Hash512::BYTE_LENGTH]),
+            action_context_hash: Hash512::from_bytes([0x13; Hash512::BYTE_LENGTH]),
+            producer_participant_id: Some(ParticipantIdentity::from_bytes(
+                [0x14; ParticipantIdentity::BYTE_LENGTH],
+            )),
+            producer_sequence: 0,
+            ordered_prerequisite_hashes: Vec::new(),
+            payload_bytes: payload,
+        },
+        signature: [0x15; ML_DSA_65_SIGNATURE_BYTE_LENGTH],
+    }
+    .encode()?;
+
+    let header = u64::try_from(TARGET_RELEASE_OUTPUT_BUNDLE_HEADER_BYTE_LENGTH).map_err(|_| {
+        FoundationSchemaError::new(
+            RefusalReason::OutsideSupportedProfile,
+            "target-release bundle header length does not fit u64",
+        )
+    })?;
+    let signed_carrier = u64::try_from(signed_carrier.len()).map_err(|_| {
+        FoundationSchemaError::new(
+            RefusalReason::OutsideSupportedProfile,
+            "target-release signed carrier length does not fit u64",
+        )
+    })?;
+    let target_identifier = target_identifier_descriptor.total_byte_length;
+    let target_order = target_order_descriptor.total_byte_length;
+    let malicious_share_proof = malicious_share_proof_descriptor.total_byte_length;
+    let total = [
+        signed_carrier,
+        target_identifier,
+        target_order,
+        malicious_share_proof,
+    ]
+    .into_iter()
+    .try_fold(header, |total, byte_length| {
+        total.checked_add(byte_length).ok_or_else(|| {
+            FoundationSchemaError::new(
+                RefusalReason::OutsideSupportedProfile,
+                "target-release output bundle length overflows",
+            )
+        })
+    })?;
+    Ok(TargetReleaseOutputBundleByteLengths {
+        header,
+        signed_carrier,
+        target_identifier,
+        target_order,
+        malicious_share_proof,
+        total,
+    })
 }
 
 #[cfg(test)]

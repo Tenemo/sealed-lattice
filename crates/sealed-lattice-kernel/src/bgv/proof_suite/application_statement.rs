@@ -1721,6 +1721,20 @@ pub(crate) fn selected_evaluator_entry_positions(
             .any(|(position, expected)| {
                 (position.galois_element(), position.catalog_level()) != *expected
             })
+        || key_positions.streams().len() != usize::from(FOUNDATION_PROFILE.option_count)
+        || key_positions
+            .streams()
+            .iter()
+            .enumerate()
+            .any(|(stream_ordinal, stream)| {
+                u16::try_from(stream_ordinal)
+                    .ok()
+                    .and_then(|ordinal| ordinal.checked_add(1))
+                    != Some(stream.top_count())
+                    || stream.relinearization_catalog_levels()
+                        != key_positions.relinearization_catalog_levels()
+                    || stream.galois_catalog_positions() != key_positions.galois_catalog_positions()
+            })
     {
         return Err(SelectedApplicationStatementError::InvalidProfile);
     }
@@ -3445,6 +3459,31 @@ mod tests {
                 ),
             )
             .is_err()
+        );
+    }
+
+    #[test]
+    fn evaluator_action_selected_key_inventories_equal_the_complete_catalog() {
+        let complete_inventory = selected_evaluator_entry_positions(1)
+            .expect("the first selected evaluator inventory derives");
+        assert_eq!(complete_inventory.len(), 7);
+
+        for top_count in 2..=FOUNDATION_PROFILE.option_count {
+            assert_eq!(
+                selected_evaluator_entry_positions(top_count)
+                    .expect("every selected evaluator inventory derives"),
+                complete_inventory,
+                "topCount {top_count} must use the complete selected evaluator catalog",
+            );
+        }
+
+        assert_eq!(
+            selected_evaluator_entry_positions(0),
+            Err(SelectedApplicationStatementError::InvalidProfile),
+        );
+        assert_eq!(
+            selected_evaluator_entry_positions(FOUNDATION_PROFILE.option_count + 1),
+            Err(SelectedApplicationStatementError::InvalidProfile),
         );
     }
 

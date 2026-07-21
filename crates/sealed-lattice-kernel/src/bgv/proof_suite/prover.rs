@@ -144,7 +144,8 @@ pub(crate) use generation_storage::{
 };
 #[cfg(test)]
 pub(crate) use generation_storage::{
-    common_proof_external_memory_requirement, common_proof_resident_memory_requirement,
+    common_proof_cap_neutral_resource_requirement, common_proof_external_memory_requirement,
+    common_proof_resident_memory_requirement,
 };
 pub(crate) use merkle_storage::{
     CommonProofMerkleMaterializer, CommonProofMerkleMaterializerProgress,

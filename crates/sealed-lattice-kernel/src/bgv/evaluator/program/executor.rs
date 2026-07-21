@@ -432,7 +432,7 @@ struct SelectedEvaluatorExecutionAccounting {
 /// maxima from unrelated phases are never added together.
 #[cfg(test)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-struct SelectedEvaluatorExecutionResourceTotals {
+pub(crate) struct SelectedEvaluatorExecutionResourceTotals {
     instruction_count: usize,
     key_operation_count: usize,
     key_load_count: usize,
@@ -453,105 +453,105 @@ struct SelectedEvaluatorExecutionResourceTotals {
 
 #[cfg(test)]
 impl SelectedEvaluatorExecutionResourceTotals {
-    const fn instruction_count(self) -> usize {
+    pub(crate) const fn instruction_count(self) -> usize {
         self.instruction_count
     }
 
-    const fn key_operation_count(self) -> usize {
+    pub(crate) const fn key_operation_count(self) -> usize {
         self.key_operation_count
     }
 
-    const fn key_load_count(self) -> usize {
+    pub(crate) const fn key_load_count(self) -> usize {
         self.key_load_count
     }
 
-    const fn key_store_read_request_count(self) -> u64 {
+    pub(crate) const fn key_store_read_request_count(self) -> u64 {
         self.key_store_read_request_count
     }
 
-    const fn key_store_reread_request_count(self) -> u64 {
+    pub(crate) const fn key_store_reread_request_count(self) -> u64 {
         self.key_store_reread_request_count
     }
 
-    const fn key_store_read_byte_count(self) -> u64 {
+    pub(crate) const fn key_store_read_byte_count(self) -> u64 {
         self.key_store_read_byte_count
     }
 
-    const fn key_store_reread_byte_count(self) -> u64 {
+    pub(crate) const fn key_store_reread_byte_count(self) -> u64 {
         self.key_store_reread_byte_count
     }
 
-    const fn key_ntt_transform_count(self) -> usize {
+    pub(crate) const fn key_ntt_transform_count(self) -> usize {
         self.key_ntt_transform_count
     }
 
-    const fn rotation_count(self) -> usize {
+    pub(crate) const fn rotation_count(self) -> usize {
         self.rotation_count
     }
 
-    const fn ciphertext_multiplication_count(self) -> usize {
+    pub(crate) const fn ciphertext_multiplication_count(self) -> usize {
         self.ciphertext_multiplication_count
     }
 
-    const fn plaintext_multiplication_count(self) -> usize {
+    pub(crate) const fn plaintext_multiplication_count(self) -> usize {
         self.plaintext_multiplication_count
     }
 
-    const fn modulus_switch_count(self) -> usize {
+    pub(crate) const fn modulus_switch_count(self) -> usize {
         self.modulus_switch_count
     }
 
-    const fn maximum_live_ciphertext_byte_count(self) -> u64 {
+    pub(crate) const fn maximum_live_ciphertext_byte_count(self) -> u64 {
         self.maximum_live_ciphertext_byte_count
     }
 
-    const fn maximum_resident_key_byte_count(self) -> u64 {
+    pub(crate) const fn maximum_resident_key_byte_count(self) -> u64 {
         self.maximum_resident_key_byte_count
     }
 
-    const fn maximum_operation_scratch_byte_count(self) -> u64 {
+    pub(crate) const fn maximum_operation_scratch_byte_count(self) -> u64 {
         self.maximum_operation_scratch_byte_count
     }
 
-    const fn peak_combined_wasm_resident_byte_count(self) -> u64 {
+    pub(crate) const fn peak_combined_wasm_resident_byte_count(self) -> u64 {
         self.peak_combined_wasm_resident_byte_count
     }
 }
 
 #[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct SelectedEvaluatorExecutionResourceRow {
+pub(crate) struct SelectedEvaluatorExecutionResourceRow {
     top_count: u16,
     totals: SelectedEvaluatorExecutionResourceTotals,
 }
 
 #[cfg(test)]
 impl SelectedEvaluatorExecutionResourceRow {
-    const fn top_count(self) -> u16 {
+    pub(crate) const fn top_count(self) -> u16 {
         self.top_count
     }
 
-    const fn totals(self) -> SelectedEvaluatorExecutionResourceTotals {
+    pub(crate) const fn totals(self) -> SelectedEvaluatorExecutionResourceTotals {
         self.totals
     }
 }
 
 #[cfg(test)]
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct SelectedEvaluatorExecutionResourceLedger {
+pub(crate) struct SelectedEvaluatorExecutionResourceLedger {
     ordered_streams: Box<[SelectedEvaluatorExecutionResourceRow]>,
     catalog_totals: SelectedEvaluatorExecutionResourceTotals,
 }
 
 #[cfg(test)]
 impl SelectedEvaluatorExecutionResourceLedger {
-    fn ordered_streams(&self) -> &[SelectedEvaluatorExecutionResourceRow] {
+    pub(crate) fn ordered_streams(&self) -> &[SelectedEvaluatorExecutionResourceRow] {
         &self.ordered_streams
     }
 
     /// Sums work and I/O across the complete alternative-stream catalog while
     /// retaining the maximum of each phase-local memory dimension.
-    const fn catalog_totals(&self) -> SelectedEvaluatorExecutionResourceTotals {
+    pub(crate) const fn catalog_totals(&self) -> SelectedEvaluatorExecutionResourceTotals {
         self.catalog_totals
     }
 }
@@ -846,7 +846,7 @@ impl PreparedEvaluatorExecutionSchedule {
 /// come from the same production program and key schedule used by execution;
 /// callers cannot inject instructions, levels, or key positions.
 #[cfg(test)]
-fn selected_evaluator_execution_resource_ledger()
+pub(crate) fn selected_evaluator_execution_resource_ledger()
 -> Result<SelectedEvaluatorExecutionResourceLedger, RefusalReason> {
     let program = selected_evaluator_program_set().map_err(evaluator_refusal)?;
     let mut ordered_streams = Vec::with_capacity(program.streams().len());
@@ -1372,6 +1372,15 @@ fn initial_evaluator_ciphertext_coefficient_byte_count() -> Result<u64, RefusalR
     ciphertext_coefficient_byte_count(CHARACTER_OUTPUT_LEVEL)?
         .checked_mul(2)
         .ok_or(RefusalReason::OutsideSupportedProfile)
+}
+
+/// Exact coefficient payload moved from the prepared two-stream aggregate
+/// into evaluator input registers. The runtime transfers the two owned
+/// ciphertexts without decoding or duplicating their coefficient buffers.
+#[cfg(test)]
+pub(crate) fn selected_evaluator_initial_ciphertext_coefficient_byte_count()
+-> Result<u64, RefusalReason> {
+    initial_evaluator_ciphertext_coefficient_byte_count()
 }
 
 fn evaluate_non_key_register_output(

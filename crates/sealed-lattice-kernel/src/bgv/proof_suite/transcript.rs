@@ -2663,6 +2663,7 @@ mod common_challenge_chain_tests {
     use num_bigint::BigUint;
 
     use crate::bgv::parameters::DATA_PRIMES;
+    use crate::bgv::proof_suite::PROOF_NON_NATIVE_THETA_REPETITION_COUNT;
     use crate::bgv::proof_suite::field::{
         PROOF_BASE_FIELD_MODULUS, PROOF_CHALLENGE_EXTENSION_DEGREE, ProofChallengeExtensionElement,
     };
@@ -3311,20 +3312,31 @@ mod common_challenge_chain_tests {
         let theta_group = CommonProofApplicationChallengeGroup::new(
             theta_challenge(),
             PROOF_BASE_FIELD_MODULUS,
-            4,
+            PROOF_NON_NATIVE_THETA_REPETITION_COUNT,
         )
         .expect("the selected theta group derives");
-        assert_eq!(theta_group.candidate_byte_length(), 32);
+        assert_eq!(PROOF_NON_NATIVE_THETA_REPETITION_COUNT, 5);
+        assert_eq!(theta_group.candidate_byte_length(), 40);
         let theta_product_cardinality =
             BigUint::from(PROOF_BASE_FIELD_MODULUS).pow(u32::from(theta_group.coordinate_count()));
         let mut maximum_theta_candidate =
             (&theta_product_cardinality - BigUint::from(1_u8)).to_bytes_le();
-        maximum_theta_candidate.resize(32, 0);
+        maximum_theta_candidate.resize(
+            usize::try_from(theta_group.candidate_byte_length())
+                .expect("the selected theta candidate width fits usize"),
+            0,
+        );
         let maximum_theta_vector =
             CommonChallengeStream::new([0x5a; 64], "selected-theta-product".to_owned())
                 .sample_residue_vector(maximum_theta_candidate, theta_group, 1)
                 .expect("the complete selected theta endpoint is accepted");
-        assert_eq!(maximum_theta_vector, vec![PROOF_BASE_FIELD_MODULUS - 1; 4]);
+        assert_eq!(
+            maximum_theta_vector,
+            vec![
+                PROOF_BASE_FIELD_MODULUS - 1;
+                usize::from(PROOF_NON_NATIVE_THETA_REPETITION_COUNT)
+            ]
+        );
 
         let mut theta_transcript = transcript();
         let (theta_stream, theta_candidate) = theta_transcript
@@ -3333,7 +3345,10 @@ mod common_challenge_chain_tests {
         let theta_coordinates = theta_stream
             .sample_residue_vector(theta_candidate, theta_group, 128)
             .expect("the selected theta vector samples");
-        assert_eq!(theta_coordinates.len(), 4);
+        assert_eq!(
+            theta_coordinates.len(),
+            usize::from(PROOF_NON_NATIVE_THETA_REPETITION_COUNT)
+        );
         assert!(
             theta_coordinates
                 .iter()

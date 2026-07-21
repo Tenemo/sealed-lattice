@@ -28,6 +28,8 @@ mod galois_key_share_runtime;
 mod galois_source_material;
 mod merkle;
 mod opening;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod phase_liveness_accounting;
 mod polynomial;
 mod profile;
 mod prover;
@@ -37,9 +39,13 @@ mod relinearization_aggregate_runtime;
 mod relinearization_runtime;
 mod relinearization_source_material;
 mod relinearization_verification_runtime;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod resource_accounting_evidence;
 mod runtime;
 mod runtime_ffi;
 mod selected_accounting;
+#[cfg(test)]
+mod selected_material_transport_accounting;
 mod selected_profile;
 mod setup_generation_runtime;
 mod setup_key_relation_runtime;
@@ -286,7 +292,9 @@ pub(crate) use runtime::{
 };
 #[cfg(test)]
 pub(crate) use runtime::{
-    CommonProofGenerationCheckpointCustodyRequirement,
+    CommonProofGenerationAttemptStart, CommonProofGenerationCheckpointCustodyRequirement,
+    CommonProofGenerationCumulativeWorkRule, CommonProofGenerationResumePrefixExecution,
+    CommonProofGenerationResumeStateRestoration, common_proof_generation_attempt_topology,
     common_proof_generation_checkpoint_custody_requirement_for_variant,
 };
 pub(crate) use runtime_ffi::bind_generated_common_proof_to_verified_statement_source;
@@ -333,6 +341,8 @@ pub(crate) use setup_public_polynomial::{
     WASM_SETUP_PUBLIC_POLYNOMIAL_LEAF_HASH_STATE_BYTE_LENGTH,
     setup_public_polynomial_wasm_compact_root_memory_plan,
 };
+#[cfg(test)]
+pub(crate) use target_release_runtime::target_release_checkpoint_lineage_identifier_byte_length;
 pub(crate) use transcript::{
     CommonProofChallenge, CommonProofPrivacyMode, CommonProofQueryOpeningAbsorber,
     CommonProofTranscript, CommonProofTranscriptSchedule, TranscriptError,

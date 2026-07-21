@@ -82,7 +82,14 @@ const SELECTED_QUOTIENT_COMPONENT_DEGREE_BOUND_EXCLUSIVE: u64 = 33_884;
 const SELECTED_COMMITTED_MATERIAL_QUOTIENT_COMPONENT_COUNT: u32 = 3;
 const RESERVED_BALLOT_SLOT_RULE: u16 = 1;
 const NON_NATIVE_IDENTITY_COMPILER_FACTOR: u32 = 12;
-const NON_NATIVE_IDENTITY_ACTION_MARGIN_BITS: usize = 184;
+// This fail-closed screen is deliberately conservative until a complete
+// construction-specific round-by-round and QROM ledger replaces it. It does
+// not itself establish a QROM claim.
+const NON_NATIVE_THETA_TRANSITION_BATCH_FACTOR: u32 = 24;
+const NON_NATIVE_THETA_CONSERVATIVE_SEARCH_FACTOR: u32 = 200;
+const NON_NATIVE_THETA_SCREEN_CEILING_BITS: usize = 176;
+// Alpha retains its separately derived local allocation.
+const NON_NATIVE_ALPHA_ACTION_MARGIN_BITS: usize = 184;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct SelectedNonNativeIdentitySoundnessRow {
@@ -93,6 +100,8 @@ struct SelectedNonNativeIdentitySoundnessRow {
     bad_set_numerator: BigUint,
     sample_space_denominator: BigUint,
     complete_action_application_multiplicity: u32,
+    screen_event_factor: u32,
+    screen_ceiling_bits: usize,
     sampler_accounting: CommonProofApplicationChallengeSamplerAccounting,
 }
 
@@ -123,6 +132,10 @@ impl SelectedNonNativeIdentitySoundnessRow {
             .product();
         let sample_space_denominator =
             BigUint::from(sample_modulus).pow(u32::from(sampler_accounting.coordinate_count()));
+        let (screen_event_factor, screen_ceiling_bits) = selected_non_native_identity_screen(
+            challenge,
+            complete_action_application_multiplicity,
+        )?;
         Ok(Self {
             application_statement_schema_identifier,
             challenge,
@@ -131,6 +144,8 @@ impl SelectedNonNativeIdentitySoundnessRow {
             bad_set_numerator,
             sample_space_denominator,
             complete_action_application_multiplicity,
+            screen_event_factor,
+            screen_ceiling_bits,
             sampler_accounting,
         })
     }
@@ -139,7 +154,8 @@ impl SelectedNonNativeIdentitySoundnessRow {
         minimum_non_native_identity_repetition_count(
             self.sampler_accounting.modulus(),
             &self.ordered_bad_polynomial_degrees,
-            self.complete_action_application_multiplicity,
+            self.screen_event_factor,
+            self.screen_ceiling_bits,
         )
     }
 
@@ -151,15 +167,38 @@ impl SelectedNonNativeIdentitySoundnessRow {
         )
     }
 
-    fn satisfies_declared_action_margin(&self) -> Result<bool, ProofProfileError> {
-        let action_factor = self
-            .complete_action_application_multiplicity
-            .checked_mul(NON_NATIVE_IDENTITY_COMPILER_FACTOR)
-            .ok_or(ProofProfileError::CountOverflow)?;
-        let action_numerator = (&self.bad_set_numerator * BigUint::from(action_factor))
-            << NON_NATIVE_IDENTITY_ACTION_MARGIN_BITS;
+    fn satisfies_selected_screen(&self) -> Result<bool, ProofProfileError> {
+        let action_numerator = (&self.bad_set_numerator * BigUint::from(self.screen_event_factor))
+            << self.screen_ceiling_bits;
         Ok(action_numerator <= self.sample_space_denominator)
     }
+}
+
+fn selected_non_native_identity_screen(
+    challenge: CommonProofChallenge,
+    complete_action_application_multiplicity: u32,
+) -> Result<(u32, usize), ProofProfileError> {
+    if complete_action_application_multiplicity == 0 {
+        return Err(ProofProfileError::InvalidSchedule);
+    }
+    let (event_factor, ceiling_bits) = match challenge {
+        CommonProofChallenge::Theta { .. } => (
+            complete_action_application_multiplicity
+                .checked_mul(NON_NATIVE_THETA_TRANSITION_BATCH_FACTOR)
+                .and_then(|factor| factor.checked_mul(NON_NATIVE_IDENTITY_COMPILER_FACTOR))
+                .and_then(|factor| factor.checked_mul(NON_NATIVE_THETA_CONSERVATIVE_SEARCH_FACTOR))
+                .ok_or(ProofProfileError::CountOverflow)?,
+            NON_NATIVE_THETA_SCREEN_CEILING_BITS,
+        ),
+        CommonProofChallenge::Alpha { .. } => (
+            complete_action_application_multiplicity
+                .checked_mul(NON_NATIVE_IDENTITY_COMPILER_FACTOR)
+                .ok_or(ProofProfileError::CountOverflow)?,
+            NON_NATIVE_ALPHA_ACTION_MARGIN_BITS,
+        ),
+        _ => return Err(ProofProfileError::InvalidSchedule),
+    };
+    Ok((event_factor, ceiling_bits))
 }
 
 fn uses_committed_material_proof_schedule(
@@ -210,19 +249,13 @@ pub(crate) fn selected_proof_application_slot_ceilings()
 fn minimum_non_native_identity_repetition_count(
     sample_modulus: u64,
     ordered_bad_polynomial_degrees: &[u64],
-    complete_action_application_multiplicity: u32,
+    screen_event_factor: u32,
+    screen_ceiling_bits: usize,
 ) -> Result<u16, ProofProfileError> {
-    if sample_modulus < 2
-        || ordered_bad_polynomial_degrees.is_empty()
-        || complete_action_application_multiplicity == 0
-    {
+    if sample_modulus < 2 || ordered_bad_polynomial_degrees.is_empty() || screen_event_factor == 0 {
         return Err(ProofProfileError::InvalidSchedule);
     }
-    let action_factor = BigUint::from(
-        complete_action_application_multiplicity
-            .checked_mul(NON_NATIVE_IDENTITY_COMPILER_FACTOR)
-            .ok_or(ProofProfileError::CountOverflow)?,
-    );
+    let action_factor = BigUint::from(screen_event_factor);
     let mut bad_set_numerator = BigUint::from(1_u8);
     let mut sample_space_denominator = BigUint::from(1_u8);
     for (repetition_index, bad_polynomial_degree) in
@@ -230,8 +263,7 @@ fn minimum_non_native_identity_repetition_count(
     {
         bad_set_numerator *= BigUint::from(bad_polynomial_degree.min(sample_modulus));
         sample_space_denominator *= BigUint::from(sample_modulus);
-        let action_numerator =
-            (&bad_set_numerator * &action_factor) << NON_NATIVE_IDENTITY_ACTION_MARGIN_BITS;
+        let action_numerator = (&bad_set_numerator * &action_factor) << screen_ceiling_bits;
         if action_numerator <= sample_space_denominator {
             return u16::try_from(repetition_index + 1)
                 .map_err(|_| ProofProfileError::CountOverflow);
@@ -416,7 +448,7 @@ fn selected_non_native_identity_soundness_ledger(
     }
     let mut row_keys = BTreeSet::new();
     for row in &soundness_rows {
-        if !row_keys.insert(row.key()) || !row.satisfies_declared_action_margin()? {
+        if !row_keys.insert(row.key()) || !row.satisfies_selected_screen()? {
             return Err(ProofProfileError::InvalidSchedule);
         }
     }
@@ -1146,6 +1178,64 @@ mod tests {
     use super::*;
 
     #[test]
+    fn conservative_theta_screen_requires_five_repetitions_independently_of_alpha() {
+        let theta_challenge = CommonProofChallenge::Theta { modulus_ordinal: 1 };
+        let (theta_event_factor, theta_ceiling_bits) =
+            selected_non_native_identity_screen(theta_challenge, 20)
+                .expect("the selected theta screen derives");
+        assert_eq!(theta_event_factor, 20 * 24 * 12 * 200);
+        assert_eq!(theta_ceiling_bits, 176);
+        assert_eq!(
+            minimum_non_native_identity_repetition_count(
+                PROOF_BASE_FIELD_MODULUS,
+                &[65_534; 4],
+                theta_event_factor,
+                theta_ceiling_bits,
+            ),
+            Err(ProofProfileError::InvalidSchedule),
+        );
+        assert_eq!(
+            minimum_non_native_identity_repetition_count(
+                PROOF_BASE_FIELD_MODULUS,
+                &[65_534; 5],
+                theta_event_factor,
+                theta_ceiling_bits,
+            ),
+            Ok(5),
+        );
+
+        let (alpha_event_factor, alpha_ceiling_bits) = selected_non_native_identity_screen(
+            CommonProofChallenge::Alpha { modulus_ordinal: 0 },
+            10,
+        )
+        .expect("the independently selected alpha screen derives");
+        assert_eq!(alpha_event_factor, 10 * 12);
+        assert_eq!(alpha_ceiling_bits, 184);
+        assert_eq!(
+            minimum_non_native_identity_repetition_count(
+                DATA_PRIMES[0],
+                &[9; 7],
+                alpha_event_factor,
+                alpha_ceiling_bits,
+            ),
+            Ok(7),
+        );
+        assert_eq!(
+            selected_non_native_identity_screen(theta_challenge, u32::MAX),
+            Err(ProofProfileError::CountOverflow),
+        );
+        assert_eq!(
+            selected_non_native_identity_screen(
+                CommonProofChallenge::Composition {
+                    constraint_ordinal: 0,
+                },
+                1,
+            ),
+            Err(ProofProfileError::InvalidSchedule),
+        );
+    }
+
+    #[test]
     fn selected_physical_proof_counts_follow_production_topology() {
         let root_topology =
             FirstProfileRootTopology::selected(SELECTED_MAXIMUM_BALLOT_ATTEMPTS_PER_PARTICIPANT)
@@ -1249,7 +1339,7 @@ mod tests {
         ));
         assert_eq!(
             ballot_theta_row.ordered_bad_polynomial_degrees,
-            vec![65_534; 4]
+            vec![65_534; 5]
         );
         assert_eq!(
             ballot_theta_row.complete_action_application_multiplicity,
@@ -1257,32 +1347,34 @@ mod tests {
         );
         assert_eq!(
             ballot_theta_row.bad_set_numerator,
-            BigUint::from(65_534_u64).pow(4)
+            BigUint::from(65_534_u64).pow(5)
         );
         assert_eq!(
             ballot_theta_row.sample_space_denominator,
-            BigUint::from(PROOF_BASE_FIELD_MODULUS).pow(4),
+            BigUint::from(PROOF_BASE_FIELD_MODULUS).pow(5),
         );
-        assert_eq!(ballot_theta_row.minimum_repetition_count(), Ok(4));
+        assert_eq!(ballot_theta_row.screen_event_factor, 1_152_000);
+        assert_eq!(ballot_theta_row.screen_ceiling_bits, 176);
+        assert_eq!(ballot_theta_row.minimum_repetition_count(), Ok(5));
         assert!(
             ballot_theta_row
-                .satisfies_declared_action_margin()
-                .expect("theta margin")
+                .satisfies_selected_screen()
+                .expect("theta screen")
         );
         assert_eq!(
             ballot_theta_row.sampler_accounting.modulus(),
             PROOF_BASE_FIELD_MODULUS
         );
-        assert_eq!(ballot_theta_row.sampler_accounting.coordinate_count(), 4);
+        assert_eq!(ballot_theta_row.sampler_accounting.coordinate_count(), 5);
         assert_eq!(
             ballot_theta_row.sampler_accounting.candidate_byte_length(),
-            32
+            40
         );
         assert_eq!(
             ballot_theta_row
                 .sampler_accounting
                 .accepted_vector_byte_length(),
-            32
+            40
         );
         assert_eq!(
             ballot_theta_row
@@ -1311,8 +1403,9 @@ mod tests {
         assert_eq!(
             minimum_non_native_identity_repetition_count(
                 PROOF_BASE_FIELD_MODULUS,
-                &[65_534; 3],
-                20,
+                &[65_534; 4],
+                1_152_000,
+                176,
             ),
             Err(ProofProfileError::InvalidSchedule),
         );
@@ -1337,9 +1430,11 @@ mod tests {
             BigUint::from(DATA_PRIMES[0]).pow(7),
         );
         assert_eq!(vss_alpha_row.minimum_repetition_count(), Ok(7));
+        assert_eq!(vss_alpha_row.screen_event_factor, 120);
+        assert_eq!(vss_alpha_row.screen_ceiling_bits, 184);
         assert!(
             vss_alpha_row
-                .satisfies_declared_action_margin()
+                .satisfies_selected_screen()
                 .expect("alpha margin")
         );
         assert_eq!(vss_alpha_row.sampler_accounting.modulus(), DATA_PRIMES[0]);
@@ -1376,7 +1471,7 @@ mod tests {
             129
         );
         assert_eq!(
-            minimum_non_native_identity_repetition_count(DATA_PRIMES[0], &[9; 6], 10),
+            minimum_non_native_identity_repetition_count(DATA_PRIMES[0], &[9; 6], 120, 184),
             Err(ProofProfileError::InvalidSchedule),
         );
     }

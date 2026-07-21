@@ -15,6 +15,8 @@ use crate::{
     },
 };
 
+#[cfg(test)]
+use super::program::selected_evaluator_initial_ciphertext_coefficient_byte_count;
 use super::{
     ballot_aggregation::{
         IncrementalVerifiedBallotAggregation, PreflightedVerifiedBallot,
@@ -156,6 +158,59 @@ struct PreparedBallotAggregationAccounting {
     key_store_read_byte_count: u64,
     key_ntt_transform_count: usize,
     maximum_resident_key_count: usize,
+}
+
+/// Exact ownership transition between the prepared two-stream product and
+/// evaluator execution. The two ciphertext coefficient allocations move into
+/// the evaluator registers; the aggregation key guard is released before the
+/// transition, and evaluator execution begins before loading its first key.
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct SelectedEvaluatorPipelineHandoffAccounting {
+    transferred_ciphertext_count: u16,
+    transferred_ciphertext_coefficient_byte_count: u64,
+    coefficient_payload_copy_count: u16,
+    aggregation_resident_key_byte_count_after_prepare: u64,
+    evaluator_resident_key_byte_count_before_first_instruction: u64,
+}
+
+#[cfg(test)]
+impl SelectedEvaluatorPipelineHandoffAccounting {
+    pub(crate) const fn transferred_ciphertext_count(self) -> u16 {
+        self.transferred_ciphertext_count
+    }
+
+    pub(crate) const fn transferred_ciphertext_coefficient_byte_count(self) -> u64 {
+        self.transferred_ciphertext_coefficient_byte_count
+    }
+
+    pub(crate) const fn coefficient_payload_copy_count(self) -> u16 {
+        self.coefficient_payload_copy_count
+    }
+
+    pub(crate) const fn aggregation_resident_key_byte_count_after_prepare(self) -> u64 {
+        self.aggregation_resident_key_byte_count_after_prepare
+    }
+
+    pub(crate) const fn evaluator_resident_key_byte_count_before_first_instruction(self) -> u64 {
+        self.evaluator_resident_key_byte_count_before_first_instruction
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn selected_evaluator_pipeline_handoff_accounting()
+-> Result<SelectedEvaluatorPipelineHandoffAccounting, RefusalReason> {
+    Ok(SelectedEvaluatorPipelineHandoffAccounting {
+        transferred_ciphertext_count: u16::try_from(
+            crate::bgv::direct_ballots::PAIR_CHARACTER_CIPHERTEXT_COUNT,
+        )
+        .map_err(|_| RefusalReason::OutsideSupportedProfile)?,
+        transferred_ciphertext_coefficient_byte_count:
+            selected_evaluator_initial_ciphertext_coefficient_byte_count()?,
+        coefficient_payload_copy_count: 0,
+        aggregation_resident_key_byte_count_after_prepare: 0,
+        evaluator_resident_key_byte_count_before_first_instruction: 0,
+    })
 }
 
 impl PreparedBallotAggregationAccounting {

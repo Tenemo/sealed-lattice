@@ -742,6 +742,11 @@ fn selected_ciphertext_total_byte_length(level: usize) -> Result<u64, RefusalRea
         .ok_or(RefusalReason::OutsideSupportedProfile)
 }
 
+#[cfg(test)]
+pub(crate) fn selected_aggregate_ciphertext_stream_byte_length() -> Result<u64, RefusalReason> {
+    selected_ciphertext_total_byte_length(CHARACTER_OUTPUT_LEVEL)
+}
+
 fn derive_aggregate_ciphertext_descriptor(
     aggregate_ciphertext: &Ciphertext,
 ) -> Result<StreamDescriptor, RefusalReason> {

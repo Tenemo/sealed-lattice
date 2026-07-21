@@ -3023,6 +3023,7 @@ mod tests {
                 )
             })
             .collect::<Vec<_>>();
+        assert_eq!(context.non_native_theta_repetition_count, 5);
         assert_eq!(
             non_native_challenges.len(),
             2 * usize::from(context.non_native_theta_repetition_count)
@@ -3049,7 +3050,7 @@ mod tests {
             challenge.sampling,
             RelationChallengeSampling::ProductResidueVectorCoordinate {
                 modulus_selector: RelationChallengeModulusSelector::BaseField,
-                coordinate_count: 4,
+                coordinate_count: 5,
                 maximum_candidate_draws_per_output: 128,
             }
         )));
@@ -3122,7 +3123,10 @@ mod tests {
         let first_derivation = derive_assignments();
         let second_derivation = derive_assignments();
         assert_eq!(first_derivation, second_derivation);
-        assert_eq!(first_derivation.0.len(), 8);
+        assert_eq!(
+            first_derivation.0.len(),
+            2 * usize::from(context.non_native_theta_repetition_count)
+        );
         assert!(
             first_derivation
                 .0

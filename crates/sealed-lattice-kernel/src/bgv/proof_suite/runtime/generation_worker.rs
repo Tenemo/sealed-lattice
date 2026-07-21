@@ -1340,6 +1340,89 @@ impl GeneratedCommonProof {
 /// private coin cursors, bound-tree source, external-memory replay, and output
 /// digest all stay in this worker. Host input can only satisfy the exact
 /// pending storage request or acknowledge and reread the exact staged chunk.
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CommonProofGenerationAttemptStart {
+    CheckpointGenesis,
+    CheckpointGenesisWithAuthenticatedResumeTarget,
+}
+
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CommonProofGenerationResumePrefixExecution {
+    DeterministicReplayFromGenesisThroughAuthenticatedTarget,
+}
+
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CommonProofGenerationResumeStateRestoration {
+    CheckpointTargetComparisonWithoutCryptographicStateRestoration,
+}
+
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CommonProofGenerationCumulativeWorkRule {
+    PriorPrefixPlusReplayedPrefixPlusRemainingSuffix,
+}
+
+/// Production resume topology used by static accounting. A checkpoint binds
+/// the target state and cursors, but it does not restore prover state. Resume
+/// therefore executes a new worker from genesis through the authenticated
+/// target before continuing, and that replayed prefix remains additional work
+/// beside the prefix completed by the prior attempt.
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct CommonProofGenerationAttemptTopology {
+    fresh_start: CommonProofGenerationAttemptStart,
+    resumed_start: CommonProofGenerationAttemptStart,
+    resumed_prefix_execution: CommonProofGenerationResumePrefixExecution,
+    resumed_state_restoration: CommonProofGenerationResumeStateRestoration,
+    cumulative_work_rule: CommonProofGenerationCumulativeWorkRule,
+}
+
+#[cfg(test)]
+impl CommonProofGenerationAttemptTopology {
+    pub(crate) const fn fresh_start(self) -> CommonProofGenerationAttemptStart {
+        self.fresh_start
+    }
+
+    pub(crate) const fn resumed_start(self) -> CommonProofGenerationAttemptStart {
+        self.resumed_start
+    }
+
+    pub(crate) const fn resumed_prefix_execution(
+        self,
+    ) -> CommonProofGenerationResumePrefixExecution {
+        self.resumed_prefix_execution
+    }
+
+    pub(crate) const fn resumed_state_restoration(
+        self,
+    ) -> CommonProofGenerationResumeStateRestoration {
+        self.resumed_state_restoration
+    }
+
+    pub(crate) const fn cumulative_work_rule(self) -> CommonProofGenerationCumulativeWorkRule {
+        self.cumulative_work_rule
+    }
+}
+
+#[cfg(test)]
+pub(crate) const fn common_proof_generation_attempt_topology()
+-> CommonProofGenerationAttemptTopology {
+    CommonProofGenerationAttemptTopology {
+        fresh_start: CommonProofGenerationAttemptStart::CheckpointGenesis,
+        resumed_start:
+            CommonProofGenerationAttemptStart::CheckpointGenesisWithAuthenticatedResumeTarget,
+        resumed_prefix_execution:
+            CommonProofGenerationResumePrefixExecution::DeterministicReplayFromGenesisThroughAuthenticatedTarget,
+        resumed_state_restoration:
+            CommonProofGenerationResumeStateRestoration::CheckpointTargetComparisonWithoutCryptographicStateRestoration,
+        cumulative_work_rule:
+            CommonProofGenerationCumulativeWorkRule::PriorPrefixPlusReplayedPrefixPlusRemainingSuffix,
+    }
+}
+
 pub(super) struct CommonProofGenerationWorker {
     binding: CommonProofGenerationBinding,
     relation_plan: CommonProofRelationPlanCapability,

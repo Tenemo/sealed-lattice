@@ -1024,7 +1024,9 @@ pub(crate) use generation_worker::{
 };
 #[cfg(test)]
 pub(crate) use generation_worker::{
-    CommonProofGenerationCheckpointCustodyRequirement,
+    CommonProofGenerationAttemptStart, CommonProofGenerationCheckpointCustodyRequirement,
+    CommonProofGenerationCumulativeWorkRule, CommonProofGenerationResumePrefixExecution,
+    CommonProofGenerationResumeStateRestoration, common_proof_generation_attempt_topology,
     common_proof_generation_checkpoint_custody_requirement_for_variant,
 };
 pub(crate) use storage_transport::{

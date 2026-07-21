@@ -87,6 +87,30 @@ pub(crate) struct ProofExternalMemoryExecutor {
 }
 
 impl ProofExternalMemoryExecutor {
+    #[cfg(test)]
+    pub(crate) fn required_resident_owned_payload_byte_length(
+        object_lifecycle_count: u32,
+    ) -> Result<u64, ProofExternalMemoryError> {
+        let object_lifecycle_count = u64::from(object_lifecycle_count);
+        object_lifecycle_count
+            .checked_mul(
+                u64::try_from(std::mem::size_of::<ProofExternalMemoryObjectPlan>())
+                    .map_err(|_| ProofExternalMemoryError::ResourceLimitExceeded)?,
+            )
+            .and_then(|object_plan_catalog_byte_length| {
+                object_lifecycle_count
+                    .checked_mul(
+                        u64::try_from(std::mem::size_of::<ProofExternalMemoryObjectState>())
+                            .ok()?,
+                    )
+                    .and_then(|object_state_catalog_byte_length| {
+                        object_plan_catalog_byte_length
+                            .checked_add(object_state_catalog_byte_length)
+                    })
+            })
+            .ok_or(ProofExternalMemoryError::ResourceLimitExceeded)
+    }
+
     pub(crate) fn planned_resident_owned_payload_byte_length(
         plan: &ProofExternalMemoryPlan,
     ) -> Result<u64, ProofExternalMemoryError> {

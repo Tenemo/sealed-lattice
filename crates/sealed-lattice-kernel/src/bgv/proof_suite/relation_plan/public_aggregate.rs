@@ -235,6 +235,11 @@ pub(crate) fn compile_evaluator_key_aggregate_relation_plan(
     context: &RelationPlanCheckContext,
 ) -> Result<CompiledRelationPlan, RelationPlanError> {
     input.geometry.validate(context)?;
+    let complete_ordered_entries = input
+        .ordered_variants
+        .first()
+        .map(|variant| variant.ordered_entries.as_slice())
+        .ok_or(RelationPlanError::NonCanonicalOrder)?;
     if input.ordered_variants.len()
         != usize::from(crate::foundation::FOUNDATION_PROFILE.option_count)
         || input
@@ -248,6 +253,7 @@ pub(crate) fn compile_evaluator_key_aggregate_relation_plan(
                         .and_then(|ordinal| ordinal.checked_add(1))
                         .unwrap_or(0)
                     || variant.ordered_entries.is_empty()
+                    || variant.ordered_entries.as_slice() != complete_ordered_entries
             })
     {
         return Err(RelationPlanError::NonCanonicalOrder);
@@ -1037,6 +1043,20 @@ mod tests {
         assert_eq!(evaluator_plan.variants()[0].schedule_position(), None);
         assert_eq!(evaluator_plan.variants()[0].top_count(), Some(1));
         assert_eq!(evaluator_plan.variants()[19].top_count(), Some(20));
+
+        let mut inconsistent_evaluator_variants = evaluator_variants.clone();
+        inconsistent_evaluator_variants[7].ordered_entries[1].ordered_runtime_component_moduli =
+            vec![SuiteModulusReference::data(0)];
+        assert_eq!(
+            compile_evaluator_key_aggregate_relation_plan(
+                &EvaluatorKeyAggregatePlanInput {
+                    geometry: geometry(),
+                    ordered_variants: inconsistent_evaluator_variants,
+                },
+                &context,
+            ),
+            Err(RelationPlanError::NonCanonicalOrder),
+        );
 
         assert_eq!(
             compile_evaluator_key_aggregate_relation_plan(

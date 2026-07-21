@@ -61,6 +61,11 @@ pub use canonical_stream::{
 pub(crate) use canonical_stream::{
     CanonicalStreamReadbackVerifier, VerifiedCanonicalStreamSummary,
 };
+#[cfg(test)]
+pub(crate) use canonical_stream::{
+    TargetReleaseOutputBundleByteLengths,
+    canonical_target_release_output_bundle_byte_lengths_for_accounting,
+};
 pub(crate) use canonical_stream_runtime::{
     CanonicalStreamRuntimeBegin, absorb_canonical_stream_chunk, begin_canonical_stream_verifier,
     begin_canonical_stream_writer, cancel_canonical_stream, finish_canonical_stream_verifier,
@@ -169,15 +174,16 @@ pub(crate) use selected_suite::{
     SELECTED_MAXIMUM_BALLOT_ATTEMPTS_PER_PARTICIPANT,
     SELECTED_MAXIMUM_CANDIDATE_PACKAGES_PER_ACTION,
 };
+#[cfg(test)]
+pub(crate) use selected_suite::{
+    SELECTED_MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT,
+    selected_maximum_proof_objects_per_action, selected_suite_capability_for_tests,
+};
 pub(crate) use selected_suite::{
     SELECTED_MAXIMUM_PUBLIC_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT,
     selected_evaluator_resource_accounting,
 };
 pub(crate) use selected_suite::{SelectedSuiteCapability, select_suite_record};
-#[cfg(test)]
-pub(crate) use selected_suite::{
-    selected_maximum_proof_objects_per_action, selected_suite_capability_for_tests,
-};
 pub(crate) use setup_transcript_runtime::derive_public_randomness_contribution_commitment;
 pub(crate) use state::PreparedStateReservationIntent;
 pub use state::{
