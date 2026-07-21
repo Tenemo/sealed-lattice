@@ -844,11 +844,11 @@ fn proof_phase_liveness_requirement(
     Ok(SelectedProofVariantPhaseLivenessRequirement {
         complete_action_application_multiplicity: requirement
             .complete_action_application_multiplicity(),
-        proof_byte_length_ceiling: u64::try_from(requirement.proof_byte_length())
+        proof_byte_length_ceiling: u64::try_from(requirement.proof_byte_length_ceiling())
             .map_err(|_| SelectedPhaseLivenessAccountingError::CountOverflow)?,
-        proof_output_chunk_count_ceiling: requirement.proof_output_chunk_count(),
+        proof_output_chunk_count_ceiling: requirement.proof_output_chunk_count_ceiling(),
         maximum_proof_output_chunk_byte_length: requirement
-            .maximum_proof_output_chunk_byte_length(),
+            .maximum_proof_output_chunk_byte_length_ceiling(),
         maximum_prefetched_query_byte_length: requirement.maximum_prefetched_query_byte_length(),
         maximum_external_memory_transaction_payload_byte_length: requirement
             .maximum_external_memory_transaction_payload_byte_length(),

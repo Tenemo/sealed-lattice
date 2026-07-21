@@ -1548,12 +1548,12 @@ mod resource_accounting {
                         selected_proof_component_byte_accounting(&transport_sizing.ceiling)
                             .map_err(SelectedProofExternalMemoryDiagnosticError::TransportSizing)?;
                     let proof_byte_length_ceiling = transport_sizing.ceiling.proof_byte_length();
-                    let proof_byte_length_ceiling_u64 =
-                        u64::try_from(proof_byte_length_ceiling).map_err(|_| {
-                        SelectedProofExternalMemoryDiagnosticError::TransportSizing(
-                            SelectedProofAccountingError::CountOverflow,
-                        )
-                    })?;
+                    let proof_byte_length_ceiling_u64 = u64::try_from(proof_byte_length_ceiling)
+                        .map_err(|_| {
+                            SelectedProofExternalMemoryDiagnosticError::TransportSizing(
+                                SelectedProofAccountingError::CountOverflow,
+                            )
+                        })?;
                     let maximum_proof_output_chunk_byte_length_ceiling =
                         u64::try_from(MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH)
                             .map_err(|_| {
@@ -3740,9 +3740,9 @@ mod resource_accounting {
             assert_eq!(observed_selectors, expected_selectors);
             assert_eq!(inventory.len(), expected_selectors.len());
             assert!(inventory.iter().all(|ceiling| {
-                ceiling.proof_byte_length() > 0
-                    && ceiling.proof_byte_length() <= MAXIMUM_COMMON_PROOF_BYTE_LENGTH
-                    && u64::try_from(ceiling.proof_byte_length())
+                ceiling.proof_byte_length_ceiling() > 0
+                    && ceiling.proof_byte_length_ceiling() <= MAXIMUM_COMMON_PROOF_BYTE_LENGTH
+                    && u64::try_from(ceiling.proof_byte_length_ceiling())
                         .is_ok_and(|length| length <= MAXIMUM_CANONICAL_STREAM_BYTE_LENGTH)
             }));
         }
@@ -4092,8 +4092,7 @@ mod resource_accounting {
                             diagnostic_requirement.maximum_prefetched_query_byte_length(),
                             diagnostic_requirement
                                 .maximum_external_memory_transaction_payload_byte_length(),
-                            diagnostic_requirement
-                                .maximum_proof_output_chunk_byte_length_ceiling(),
+                            diagnostic_requirement.maximum_proof_output_chunk_byte_length_ceiling(),
                             diagnostic_requirement.proof_output_chunk_count_ceiling(),
                             maximum_copied_buffer_byte_length,
                             maximum_copied_buffer_byte_length_bound,
@@ -4293,9 +4292,8 @@ mod resource_accounting {
             assert!(!inventory.is_empty());
 
             for variant in inventory {
-                let proof_byte_length_ceiling =
-                    u64::try_from(variant.proof_byte_length_ceiling())
-                        .expect("proof byte ceiling fits u64");
+                let proof_byte_length_ceiling = u64::try_from(variant.proof_byte_length_ceiling())
+                    .expect("proof byte ceiling fits u64");
                 assert_eq!(
                     variant
                         .proof_component_byte_accounting()
@@ -4408,7 +4406,7 @@ mod resource_accounting {
                         .expect("output chunk length fits u64");
                 assert_eq!(
                     variant.proof_output_chunk_count_ceiling(),
-                    proof_byte_length.div_ceil(output_chunk_byte_length)
+                    proof_byte_length_ceiling.div_ceil(output_chunk_byte_length)
                 );
             }
         }
