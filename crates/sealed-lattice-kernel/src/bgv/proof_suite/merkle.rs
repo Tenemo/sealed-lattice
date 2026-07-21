@@ -676,6 +676,195 @@ impl ProofOraclePhasePairLeaf {
     }
 }
 
+/// Hashes canonical common-tree leaf bytes without materializing a decoded
+/// copy. Callers obtain these bytes only from the canonical leaf encoder or an
+/// authenticated external-memory object populated by that encoder.
+pub(in crate::bgv::proof_suite) fn canonical_proof_phase_pair_leaf_digest(
+    canonical_leaf_bytes: &[u8],
+) -> Result<[u8; 64], ProofMerkleError> {
+    if canonical_leaf_bytes.is_empty() {
+        return Err(ProofMerkleError::InvalidLeaf);
+    }
+    let mut digest_builder = StreamingFoundationTupleHash512::new_variable_bytes(
+        PROOF_PHASE_PAIR_LEAF_HASH_DOMAIN,
+        &[],
+        canonical_leaf_bytes.len(),
+    )
+    .map_err(canonical_encoding_error)?;
+    digest_builder
+        .absorb(canonical_leaf_bytes)
+        .map_err(canonical_encoding_error)?;
+    Ok(digest_builder
+        .finalize()
+        .map_err(canonical_encoding_error)?
+        .into_bytes())
+}
+
+/// One-pass common-context Merkle replay.
+///
+/// Leaves must arrive in canonical storage order. The replay retains one
+/// pending left digest per tree level and only the requested minimal frontier;
+/// no complete digest level is ever materialized. Frontier digests remain
+/// private until `finish` has reconstructed and, when supplied, compared the
+/// expected root.
+pub(in crate::bgv::proof_suite) struct CommonProofMerklePathReplay {
+    context_hash: [u8; 64],
+    leaf_count: usize,
+    next_leaf_index: u64,
+    frontier_coordinates: Vec<(u32, u64)>,
+    frontier_digests: Vec<[u8; 64]>,
+    frontier_digest_present: Vec<u8>,
+    pending_left_digests: Vec<[u8; 64]>,
+    occupied_level_mask: u64,
+    recomputed_root: Option<[u8; 64]>,
+}
+
+impl CommonProofMerklePathReplay {
+    pub(in crate::bgv::proof_suite) fn new(
+        context: &ProofMerkleTreeContext,
+        sorted_unique_opened_leaf_indexes: &[u64],
+    ) -> Result<Self, ProofMerkleError> {
+        let leaf_count = context.leaf_count()?;
+        if leaf_count == 0 || !leaf_count.is_power_of_two() {
+            return Err(ProofMerkleError::InvalidContext);
+        }
+        let frontier_coordinates = if sorted_unique_opened_leaf_indexes.is_empty() {
+            Vec::new()
+        } else {
+            minimal_frontier_coordinates(sorted_unique_opened_leaf_indexes, leaf_count)?
+        };
+        let mut frontier_digests = Vec::new();
+        frontier_digests
+            .try_reserve_exact(frontier_coordinates.len())
+            .map_err(|_| ProofMerkleError::CountOverflow)?;
+        frontier_digests.resize(frontier_coordinates.len(), [0_u8; 64]);
+        let mut frontier_digest_present = Vec::new();
+        frontier_digest_present
+            .try_reserve_exact(frontier_coordinates.len())
+            .map_err(|_| ProofMerkleError::CountOverflow)?;
+        frontier_digest_present.resize(frontier_coordinates.len(), 0);
+        let tree_height = usize::try_from(leaf_count.trailing_zeros())
+            .map_err(|_| ProofMerkleError::CountOverflow)?;
+        if tree_height >= u64::BITS as usize {
+            return Err(ProofMerkleError::CountOverflow);
+        }
+        let mut pending_left_digests = Vec::new();
+        pending_left_digests
+            .try_reserve_exact(tree_height)
+            .map_err(|_| ProofMerkleError::CountOverflow)?;
+        pending_left_digests.resize(tree_height, [0_u8; 64]);
+        Ok(Self {
+            context_hash: context.context_hash()?,
+            leaf_count,
+            next_leaf_index: 0,
+            frontier_coordinates,
+            frontier_digests,
+            frontier_digest_present,
+            pending_left_digests,
+            occupied_level_mask: 0,
+            recomputed_root: None,
+        })
+    }
+
+    pub(in crate::bgv::proof_suite) fn absorb_leaf_digest(
+        &mut self,
+        leaf_index: u64,
+        leaf_digest: [u8; 64],
+    ) -> Result<(), ProofMerkleError> {
+        let leaf_count =
+            u64::try_from(self.leaf_count).map_err(|_| ProofMerkleError::CountOverflow)?;
+        if leaf_index != self.next_leaf_index || leaf_index >= leaf_count {
+            return Err(ProofMerkleError::NonCanonicalOrder);
+        }
+
+        let mut current_digest = leaf_digest;
+        let mut current_node_index = leaf_index;
+        self.capture_frontier_digest(0, current_node_index, current_digest)?;
+        let mut level = 0_usize;
+        while level < self.pending_left_digests.len()
+            && self.occupied_level_mask & (1_u64 << level) != 0
+        {
+            current_digest = proof_merkle_node_digest(
+                self.context_hash,
+                u32::try_from(level + 1).map_err(|_| ProofMerkleError::CountOverflow)?,
+                current_node_index / 2,
+                self.pending_left_digests[level],
+                current_digest,
+            )?;
+            self.occupied_level_mask &= !(1_u64 << level);
+            current_node_index /= 2;
+            level += 1;
+            self.capture_frontier_digest(
+                u32::try_from(level).map_err(|_| ProofMerkleError::CountOverflow)?,
+                current_node_index,
+                current_digest,
+            )?;
+        }
+        if level == self.pending_left_digests.len() {
+            if leaf_index != leaf_count - 1
+                || self.occupied_level_mask != 0
+                || self.recomputed_root.is_some()
+            {
+                return Err(ProofMerkleError::InvalidNode);
+            }
+            self.recomputed_root = Some(current_digest);
+        } else {
+            self.pending_left_digests[level] = current_digest;
+            self.occupied_level_mask |= 1_u64 << level;
+        }
+        self.next_leaf_index = self
+            .next_leaf_index
+            .checked_add(1)
+            .ok_or(ProofMerkleError::CountOverflow)?;
+        Ok(())
+    }
+
+    fn capture_frontier_digest(
+        &mut self,
+        level: u32,
+        node_index: u64,
+        digest: [u8; 64],
+    ) -> Result<(), ProofMerkleError> {
+        let Ok(position) = self
+            .frontier_coordinates
+            .binary_search(&(level, node_index))
+        else {
+            return Ok(());
+        };
+        if self.frontier_digest_present[position] != 0 {
+            return Err(ProofMerkleError::InvalidOpening);
+        }
+        self.frontier_digests[position] = digest;
+        self.frontier_digest_present[position] = 1;
+        Ok(())
+    }
+
+    pub(in crate::bgv::proof_suite) fn frontier_node_count(&self) -> usize {
+        self.frontier_coordinates.len()
+    }
+
+    pub(in crate::bgv::proof_suite) fn finish(
+        self,
+        expected_root: Option<[u8; 64]>,
+    ) -> Result<([u8; 64], Vec<(u32, u64)>, Vec<[u8; 64]>), ProofMerkleError> {
+        if self.next_leaf_index
+            != u64::try_from(self.leaf_count).map_err(|_| ProofMerkleError::CountOverflow)?
+            || self.occupied_level_mask != 0
+            || self
+                .frontier_digest_present
+                .iter()
+                .any(|present| *present != 1)
+        {
+            return Err(ProofMerkleError::InvalidOpening);
+        }
+        let root = self.recomputed_root.ok_or(ProofMerkleError::InvalidNode)?;
+        if expected_root.is_some_and(|expected_root| expected_root != root) {
+            return Err(ProofMerkleError::RootMismatch);
+        }
+        Ok((root, self.frontier_coordinates, self.frontier_digests))
+    }
+}
+
 #[cfg(test)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct CanonicalProofMerkleTree {
@@ -955,6 +1144,13 @@ mod canonical_tree_tests {
     use crate::bgv::proof_suite::PROOF_BASE_FIELD_MODULUS;
 
     fn context(visibility: ProofLeafVisibility) -> ProofMerkleTreeContext {
+        context_with_leaf_count(8, visibility)
+    }
+
+    fn context_with_leaf_count(
+        leaf_count: usize,
+        visibility: ProofLeafVisibility,
+    ) -> ProofMerkleTreeContext {
         ProofMerkleTreeContext::new(
             [1_u8; 64],
             [2_u8; 64],
@@ -962,7 +1158,10 @@ mod canonical_tree_tests {
             0,
             ProofTreeRole::QuotientComponent,
             0,
-            16,
+            u64::try_from(leaf_count)
+                .expect("the test leaf count fits u64")
+                .checked_mul(2)
+                .expect("the test domain size fits u64"),
             1,
             visibility,
         )
@@ -1013,6 +1212,30 @@ mod canonical_tree_tests {
         .into_bytes())
     }
 
+    fn absorb_test_leaves(
+        replay: &mut CommonProofMerklePathReplay,
+        leaves: &[ProofOraclePhasePairLeaf],
+        mutated_leaf_index: Option<usize>,
+    ) {
+        for (leaf_index, leaf) in leaves.iter().enumerate() {
+            let mut canonical_leaf_bytes = leaf.canonical_bytes().expect("canonical test leaf");
+            if mutated_leaf_index == Some(leaf_index) {
+                let last_byte = canonical_leaf_bytes
+                    .last_mut()
+                    .expect("a canonical leaf is nonempty");
+                *last_byte ^= 1;
+            }
+            let digest = canonical_proof_phase_pair_leaf_digest(&canonical_leaf_bytes)
+                .expect("canonical leaf digest");
+            replay
+                .absorb_leaf_digest(
+                    u64::try_from(leaf_index).expect("the leaf index fits u64"),
+                    digest,
+                )
+                .expect("the ordered test leaf is absorbed");
+        }
+    }
+
     #[test]
     fn streamed_phase_pair_leaf_digest_matches_canonical_one_shot_encoding() {
         for visibility in [
@@ -1061,6 +1284,103 @@ mod canonical_tree_tests {
         assert_eq!(
             base_leaf.digest().expect("streamed base leaf digest"),
             one_shot_phase_pair_leaf_digest(&base_leaf).expect("one-shot base leaf digest"),
+        );
+    }
+
+    #[test]
+    fn sequential_path_replay_matches_canonical_roots_and_paths() {
+        for leaf_count in [1_usize, 2, 4, 8] {
+            let context = context_with_leaf_count(leaf_count, ProofLeafVisibility::Public);
+            let leaves = leaves(&context, ProofLeafVisibility::Public);
+            let tree = CanonicalProofMerkleTree::from_phase_pair_leaves(context.clone(), &leaves)
+                .expect("the canonical test tree derives");
+            let opened_leaf_indexes = if leaf_count == 1 {
+                vec![0]
+            } else {
+                vec![
+                    0,
+                    u64::try_from(leaf_count - 1).expect("the last leaf index fits u64"),
+                ]
+            };
+            let mut replay = CommonProofMerklePathReplay::new(&context, &opened_leaf_indexes)
+                .expect("the sequential replay initializes");
+            absorb_test_leaves(&mut replay, &leaves, None);
+            let (root, frontier_coordinates, frontier_digests) = replay
+                .finish(Some(tree.root()))
+                .expect("the sequential replay authenticates");
+            assert_eq!(root, tree.root());
+            assert_eq!(
+                frontier_coordinates,
+                minimal_frontier_coordinates(&opened_leaf_indexes, leaf_count)
+                    .expect("the canonical frontier coordinates derive"),
+            );
+            assert_eq!(
+                frontier_digests,
+                tree.authentication_frontier(&opened_leaf_indexes)
+                    .expect("the canonical frontier derives"),
+            );
+            let opened_leaves = opened_leaf_indexes
+                .iter()
+                .map(|leaf_index| {
+                    (
+                        *leaf_index,
+                        leaves[usize::try_from(*leaf_index).expect("the leaf index fits usize")]
+                            .digest()
+                            .expect("the opened leaf digest derives"),
+                    )
+                })
+                .collect::<Vec<_>>();
+            verify_authentication_frontier(&context, &opened_leaves, &frontier_digests, root)
+                .expect("the replayed frontier verifies");
+        }
+    }
+
+    #[test]
+    fn sequential_path_replay_rejects_wrong_root_mutation_truncation_and_order() {
+        let context = context_with_leaf_count(4, ProofLeafVisibility::Public);
+        let leaves = leaves(&context, ProofLeafVisibility::Public);
+        let tree = CanonicalProofMerkleTree::from_phase_pair_leaves(context.clone(), &leaves)
+            .expect("the canonical test tree derives");
+
+        let mut wrong_root_replay = CommonProofMerklePathReplay::new(&context, &[0, 3])
+            .expect("the wrong-root replay initializes");
+        absorb_test_leaves(&mut wrong_root_replay, &leaves, None);
+        let mut wrong_root = tree.root();
+        wrong_root[0] ^= 1;
+        assert!(matches!(
+            wrong_root_replay.finish(Some(wrong_root)),
+            Err(ProofMerkleError::RootMismatch),
+        ));
+
+        let mut mutated_replay = CommonProofMerklePathReplay::new(&context, &[0, 3])
+            .expect("the mutated replay initializes");
+        absorb_test_leaves(&mut mutated_replay, &leaves, Some(2));
+        assert!(matches!(
+            mutated_replay.finish(Some(tree.root())),
+            Err(ProofMerkleError::RootMismatch),
+        ));
+
+        let mut truncated_replay = CommonProofMerklePathReplay::new(&context, &[0, 3])
+            .expect("the truncated replay initializes");
+        for (leaf_index, leaf) in leaves.iter().take(3).enumerate() {
+            truncated_replay
+                .absorb_leaf_digest(
+                    u64::try_from(leaf_index).expect("the leaf index fits u64"),
+                    leaf.digest().expect("the leaf digest derives"),
+                )
+                .expect("the retained leaf is ordered");
+        }
+        assert!(matches!(
+            truncated_replay.finish(Some(tree.root())),
+            Err(ProofMerkleError::InvalidOpening),
+        ));
+
+        let mut wrong_order_replay = CommonProofMerklePathReplay::new(&context, &[0, 3])
+            .expect("the wrong-order replay initializes");
+        assert_eq!(
+            wrong_order_replay
+                .absorb_leaf_digest(1, leaves[1].digest().expect("the leaf digest derives"),),
+            Err(ProofMerkleError::NonCanonicalOrder),
         );
     }
 

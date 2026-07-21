@@ -125,9 +125,9 @@ pub(crate) fn construct_composed_quotient_polynomial(
     Ok(quotient)
 }
 
-/// Test oracle for the production constraint-at-a-time schedule. Each
-/// constraint materializes only its own unique relation columns, while the
-/// older oracle above retains the complete relation-column matrix.
+/// Test oracle for the production constraint-at-a-time schedule. Relation
+/// columns are transformed lazily and each completed evaluation vector is
+/// reused by every later constraint that consumes the same column.
 #[cfg(test)]
 pub(crate) fn construct_constraint_stream_composed_quotient_polynomial(
     variant: &RelationPlanVariant,
@@ -161,15 +161,18 @@ pub(crate) fn construct_constraint_stream_composed_quotient_polynomial(
         ProofChallengeExtensionElement::ZERO;
         evaluation_domain.size()
     ]);
+    let mut transformed_column_evaluations = BTreeMap::new();
 
     for constraint_ordinal in 0..variant.constraint_count() {
         let queries = variant.constraint_column_queries(constraint_ordinal)?;
-        let mut constraint_column_evaluations = BTreeMap::new();
         for column_ordinal in queries
             .iter()
             .map(|query| query.column_ordinal())
             .collect::<BTreeSet<_>>()
         {
+            if transformed_column_evaluations.contains_key(&column_ordinal) {
+                continue;
+            }
             let column = columns
                 .get(
                     usize::try_from(column_ordinal)
@@ -186,7 +189,7 @@ pub(crate) fn construct_constraint_stream_composed_quotient_polynomial(
                         CommonProofColumnEvaluations::Extension(Zeroizing::new(values))
                     })?,
             };
-            if constraint_column_evaluations
+            if transformed_column_evaluations
                 .insert(column_ordinal, evaluations)
                 .is_some()
             {
@@ -219,7 +222,7 @@ pub(crate) fn construct_constraint_stream_composed_quotient_polynomial(
                         CommonProofProverError::CountOverflow => RelationPlanError::CountOverflow,
                         _ => RelationPlanError::InvalidOpening,
                     })?;
-                    constraint_column_evaluations
+                    transformed_column_evaluations
                         .get(&column_ordinal)
                         .ok_or(RelationPlanError::InvalidConstraint)?
                         .extension_value(rotated_position)
@@ -339,6 +342,7 @@ pub(super) struct CommonProofConstraintStreamQuotientBuilder {
     column_value_types: Vec<RelationColumnValueType>,
     constraint_queries: Vec<Vec<RelationConstraintColumnQuery>>,
     constraint_columns: Vec<Vec<u32>>,
+    remaining_constraint_use_counts: BTreeMap<u32, usize>,
     current_constraint_ordinal: usize,
     next_transform_column_index: usize,
     transformed_columns: BTreeMap<u32, ExternalPolynomialVector>,
@@ -357,6 +361,7 @@ impl CommonProofConstraintStreamQuotientBuilder {
         variant: &RelationPlanVariant,
         context: &RelationPlanCheckContext,
         evaluation_domain: ProofEvaluationDomain,
+        transformed_columns: BTreeMap<u32, ExternalPolynomialVector>,
         application_challenges: Vec<RelationApplicationChallengeAssignment>,
         composition_challenges: Vec<ProofChallengeExtensionElement>,
         maximum_external_read_chunk_byte_length: u32,
@@ -387,8 +392,22 @@ impl CommonProofConstraintStreamQuotientBuilder {
             .iter()
             .map(|column| column.value_type())
             .collect::<Vec<_>>();
+        for (column_ordinal, vector) in &transformed_columns {
+            if vector.element_count() != evaluation_domain.size()
+                || column_value_types
+                    .get(
+                        usize::try_from(*column_ordinal)
+                            .map_err(|_| CommonProofProverError::CountOverflow)?,
+                    )
+                    .copied()
+                    != Some(vector.value_type())
+            {
+                return Err(CommonProofProverError::InvalidColumn);
+            }
+        }
         let mut constraint_queries = Vec::new();
         let mut constraint_columns = Vec::new();
+        let mut remaining_constraint_use_counts = BTreeMap::new();
         constraint_queries
             .try_reserve_exact(variant.constraint_count())
             .map_err(|_| CommonProofProverError::AllocationLimitExceeded)?;
@@ -419,9 +438,21 @@ impl CommonProofConstraintStreamQuotientBuilder {
                 {
                     return Err(CommonProofProverError::InvalidInput);
                 }
+                let use_count = remaining_constraint_use_counts
+                    .entry(*column_ordinal)
+                    .or_insert(0usize);
+                *use_count = use_count
+                    .checked_add(1)
+                    .ok_or(CommonProofProverError::CountOverflow)?;
             }
             constraint_queries.push(queries);
             constraint_columns.push(columns);
+        }
+        if transformed_columns
+            .keys()
+            .any(|column_ordinal| !remaining_constraint_use_counts.contains_key(column_ordinal))
+        {
+            return Err(CommonProofProverError::InvalidColumn);
         }
         let checked_application_challenges =
             variant.checked_application_challenges(context, &application_challenges)?;
@@ -440,9 +471,10 @@ impl CommonProofConstraintStreamQuotientBuilder {
             column_value_types,
             constraint_queries,
             constraint_columns,
+            remaining_constraint_use_counts,
             current_constraint_ordinal: 0,
             next_transform_column_index: 0,
-            transformed_columns: BTreeMap::new(),
+            transformed_columns,
             block_start: 0,
             next_query_ordinal: 0,
             next_query_logical_value_offset: 0,
@@ -458,17 +490,20 @@ impl CommonProofConstraintStreamQuotientBuilder {
     }
 
     pub(super) fn next_transform_key(
-        &self,
+        &mut self,
     ) -> Result<Option<CommonProofQuotientConstraintTransformKey>, CommonProofProverError> {
         if self.current_constraint_ordinal >= self.constraint_columns.len() {
             return Ok(None);
         }
-        let Some(column_ordinal) = self
+        let columns = self
             .constraint_columns
             .get(self.current_constraint_ordinal)
-            .and_then(|columns| columns.get(self.next_transform_column_index))
-            .copied()
-        else {
+            .ok_or(CommonProofProverError::InvalidQuotient)?;
+        let Some(column_ordinal) = next_untransformed_column(
+            columns,
+            &mut self.next_transform_column_index,
+            |column_ordinal| self.transformed_columns.contains_key(&column_ordinal),
+        )? else {
             return Ok(None);
         };
         Ok(Some(CommonProofQuotientConstraintTransformKey::new(
@@ -525,9 +560,14 @@ impl CommonProofConstraintStreamQuotientBuilder {
     pub(super) fn next_read_request(
         &self,
     ) -> Result<Option<CommonProofQuotientEvaluationReadRequest>, CommonProofProverError> {
-        if self.current_constraint_ordinal >= self.constraint_queries.len()
-            || self.next_transform_key()?.is_some()
-        {
+        if self.current_constraint_ordinal >= self.constraint_queries.len() {
+            return Ok(None);
+        }
+        let columns = self
+            .constraint_columns
+            .get(self.current_constraint_ordinal)
+            .ok_or(CommonProofProverError::InvalidQuotient)?;
+        if self.next_transform_column_index != columns.len() {
             return Ok(None);
         }
         let queries = self
@@ -641,7 +681,9 @@ impl CommonProofConstraintStreamQuotientBuilder {
             .ok_or(CommonProofProverError::InvalidQuotient)?;
         if self.block_start >= self.evaluation_domain.size()
             || self.next_transform_column_index != columns.len()
-            || self.transformed_columns.len() != columns.len()
+            || columns
+                .iter()
+                .any(|column_ordinal| !self.transformed_columns.contains_key(column_ordinal))
             || self.next_query_ordinal != queries.len()
             || self.next_query_logical_value_offset != 0
             || self.block_values_by_query.len() != queries.len()
@@ -716,7 +758,28 @@ impl CommonProofConstraintStreamQuotientBuilder {
         {
             return Err(CommonProofProverError::InvalidQuotient);
         }
-        self.transformed_columns.clear();
+        let constraint_columns = self
+            .constraint_columns
+            .get(self.current_constraint_ordinal)
+            .ok_or(CommonProofProverError::InvalidQuotient)?;
+        for column_ordinal in constraint_columns {
+            let is_last_consumer = {
+                let remaining_use_count = self
+                    .remaining_constraint_use_counts
+                    .get_mut(column_ordinal)
+                    .ok_or(CommonProofProverError::InvalidColumn)?;
+                *remaining_use_count = remaining_use_count
+                    .checked_sub(1)
+                    .ok_or(CommonProofProverError::InvalidColumn)?;
+                *remaining_use_count == 0
+            };
+            if is_last_consumer {
+                self.remaining_constraint_use_counts.remove(column_ordinal);
+                self.transformed_columns
+                    .remove(column_ordinal)
+                    .ok_or(CommonProofProverError::InvalidColumn)?;
+            }
+        }
         self.current_constraint_ordinal = self
             .current_constraint_ordinal
             .checked_add(1)
@@ -735,6 +798,7 @@ impl CommonProofConstraintStreamQuotientBuilder {
             || self.block_start != 0
             || self.quotient_evaluations.len() != self.evaluation_domain.size()
             || !self.block_values_by_query.is_empty()
+            || !self.remaining_constraint_use_counts.is_empty()
             || !self.transformed_columns.is_empty()
         {
             return Err(CommonProofProverError::InvalidQuotient);
@@ -743,6 +807,52 @@ impl CommonProofConstraintStreamQuotientBuilder {
             .interpolate_extension_polynomial_in_place(&mut self.quotient_evaluations)?;
         trim_extension_polynomial(&mut self.quotient_evaluations);
         Ok(self.quotient_evaluations)
+    }
+}
+
+fn next_untransformed_column(
+    columns: &[u32],
+    next_column_index: &mut usize,
+    mut column_is_transformed: impl FnMut(u32) -> bool,
+) -> Result<Option<u32>, CommonProofProverError> {
+    while columns
+        .get(*next_column_index)
+        .copied()
+        .is_some_and(&mut column_is_transformed)
+    {
+        *next_column_index = next_column_index
+            .checked_add(1)
+            .ok_or(CommonProofProverError::CountOverflow)?;
+    }
+    Ok(columns.get(*next_column_index).copied())
+}
+
+#[cfg(test)]
+mod reusable_transform_tests {
+    use super::{BTreeSet, next_untransformed_column};
+
+    #[test]
+    fn transformed_columns_are_requested_once_across_nonconsecutive_constraints() {
+        let constraint_columns = [vec![2, 4, 7], vec![9], vec![4, 7], vec![2, 9]];
+        let mut transformed_columns = BTreeSet::new();
+        let mut transform_requests = Vec::new();
+
+        for columns in constraint_columns {
+            let mut next_column_index = 0;
+            while let Some(column_ordinal) = next_untransformed_column(
+                &columns,
+                &mut next_column_index,
+                |column_ordinal| transformed_columns.contains(&column_ordinal),
+            )
+            .expect("the transform request index remains in range")
+            {
+                transform_requests.push(column_ordinal);
+                assert!(transformed_columns.insert(column_ordinal));
+                next_column_index += 1;
+            }
+        }
+
+        assert_eq!(transform_requests, vec![2, 4, 7, 9]);
     }
 }
 

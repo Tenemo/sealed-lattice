@@ -2,7 +2,7 @@ use super::super::verified_application_statement_hash;
 #[cfg(test)]
 use super::CompletedCommonProofGenerationResult;
 use super::{
-    BTreeMap, BoundTreeConstructionKind, BoundedCommonProofByteSink,
+    BTreeMap, BTreeSet, BoundTreeConstructionKind, BoundedCommonProofByteSink,
     BoundedCommonProofByteSinkError, CHECKPOINT_COMMITTED_STATE_HASH_DOMAIN,
     COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH, CommonProofAuthenticatedSourceReadRequest,
     CommonProofAuxiliaryColumnSynthesisCursor, CommonProofBoundTreeLeafSaltRequest,
@@ -30,8 +30,9 @@ use super::{
     ProofBaseFieldElement, ProofChallengeExtensionElement, ProofEvaluationDomain,
     ProofExternalMemory, ProofExternalMemoryExecutor, ProofExternalMemoryExecutorError,
     ProofExternalMemoryUsage, ProofTreeCatalogEntry, ProofTreeCatalogInput, ProofTreeCatalogSource,
-    ProofTreeRole, ProofTreeValue, RelationApplicationChallengeAssignment,
-    RelationPlanCheckContext, RelationPlanVariant, RelationTreeDescriptor,
+    ProofTreeRole, ProofTreeValue, RelationApplicationChallengeAssignment, RelationColumnOrigin,
+    RelationColumnValueType, RelationPlanCheckContext, RelationPlanVariant,
+    RelationTreeDescriptor,
     SetupPolynomialColumnMajorMerkleReplay, SetupPolynomialColumnMajorMerkleReplayMode,
     SetupPolynomialColumnMajorMerkleRootPass, StatementOwnedMerkleReplay,
     StatementOwnedMerkleReplayMode, StoredCommonProofMerkleTree, StreamingHash512,
@@ -310,10 +311,6 @@ enum CommonProofRelationTransformContinuation {
     SetupPolynomialRoot {
         next_column_index: usize,
     },
-    SetupPolynomialQuery {
-        catalog_index: usize,
-        next_column_position: usize,
-    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -453,7 +450,6 @@ pub(crate) struct CommonProofGenerationStateMachine {
     replay_polynomial_plans:
         BTreeMap<CommonProofReplayPolynomialKey, CommonProofReplayPolynomialPlan>,
     relation_evaluation_transform_plans: BTreeMap<u32, ExternalStockhamTransformPlan>,
-    setup_polynomial_query_transform_plans: BTreeMap<u32, ExternalStockhamTransformPlan>,
     quotient_constraint_transform_plans:
         BTreeMap<CommonProofQuotientConstraintTransformKey, ExternalStockhamTransformPlan>,
     relation_evaluation_vectors: BTreeMap<u32, ExternalPolynomialVector>,
@@ -949,6 +945,14 @@ impl CommonProofGenerationStateMachine {
                 CommonProofGenerationInitializationError::StoragePlan(error)
             }
         })?;
+        if !storage_plan
+            .setup_polynomial_query_transform_plans
+            .is_empty()
+        {
+            return Err(CommonProofGenerationInitializationError::Prover(
+                CommonProofProverError::InvalidColumn,
+            ));
+        }
         let resident_memory_plan = common_proof_resident_memory_plan(
             variant,
             relation_context,
@@ -1034,8 +1038,6 @@ impl CommonProofGenerationStateMachine {
             storage_tree_plans: storage_plan.tree_plans,
             replay_polynomial_plans: storage_plan.replay_polynomial_plans,
             relation_evaluation_transform_plans: storage_plan.relation_evaluation_transform_plans,
-            setup_polynomial_query_transform_plans: storage_plan
-                .setup_polynomial_query_transform_plans,
             quotient_constraint_transform_plans: storage_plan.quotient_constraint_transform_plans,
             relation_evaluation_vectors: BTreeMap::new(),
             external_memory_requirement,
@@ -1219,7 +1221,6 @@ impl CommonProofGenerationStateMachine {
             && self.storage_tree_plans.is_empty()
             && self.replay_polynomial_plans.is_empty()
             && self.relation_evaluation_transform_plans.is_empty()
-            && self.setup_polynomial_query_transform_plans.is_empty()
             && self.quotient_constraint_transform_plans.is_empty()
             && self.relation_evaluation_vectors.is_empty()
             && self.stored_trees.is_empty()
@@ -1354,7 +1355,7 @@ impl CommonProofGenerationStateMachine {
         Ok(matched_tree)
     }
 
-    fn prepare_setup_polynomial_query_transform(
+    fn prepare_setup_polynomial_query_column_reader(
         &mut self,
         catalog_index: usize,
         column_position: usize,
@@ -1391,22 +1392,30 @@ impl CommonProofGenerationStateMachine {
             }
             column_ordinal
         };
-        let plan = self
-            .setup_polynomial_query_transform_plans
-            .remove(&column_ordinal)
+        let vector = self
+            .relation_evaluation_vectors
+            .get(&column_ordinal)
+            .copied()
             .ok_or(CommonProofGenerationInitializationError::Prover(
                 CommonProofProverError::InvalidColumn,
             ))?;
-        let transform = ExternalStockhamTransform::new(plan)
-            .map_err(map_external_polynomial_plan_error)
-            .map_err(CommonProofGenerationInitializationError::StoragePlan)?;
+        if vector.value_type() != RelationColumnValueType::Base
+            || vector.element_count() != self.evaluation_domain.size()
+        {
+            return Err(CommonProofGenerationInitializationError::Prover(
+                CommonProofProverError::InvalidColumn,
+            ));
+        }
         let next_column_position = column_position.checked_add(1).ok_or(
             CommonProofGenerationInitializationError::Prover(CommonProofProverError::CountOverflow),
         )?;
-        self.active_relation_column_transform = Some(ActiveRelationColumnTransform {
+        self.active_setup_polynomial_column_reader = Some(ActiveSetupPolynomialColumnReader {
+            vector,
             column_ordinal,
-            transform,
-            continuation: CommonProofRelationTransformContinuation::SetupPolynomialQuery {
+            next_leaf_index: 0,
+            first_half_values: None,
+            phase: SetupPolynomialColumnReaderPhase::ReadFirstHalf,
+            continuation: SetupPolynomialColumnContinuation::Query {
                 catalog_index,
                 next_column_position,
             },
@@ -1417,14 +1426,6 @@ impl CommonProofGenerationStateMachine {
     fn prepare_next_setup_polynomial_opening_replay(
         &mut self,
     ) -> Result<bool, CommonProofGenerationInitializationError> {
-        let Some(column_ordinal) = self
-            .setup_polynomial_query_transform_plans
-            .keys()
-            .next()
-            .copied()
-        else {
-            return Ok(false);
-        };
         if self.active_setup_polynomial_replay.is_some()
             || self.active_setup_polynomial_column_reader.is_some()
             || self.active_relation_column_transform.is_some()
@@ -1433,17 +1434,32 @@ impl CommonProofGenerationStateMachine {
                 CommonProofProverError::InvalidTree,
             ));
         }
-        let (catalog_index, column_position) = self
-            .setup_polynomial_tree_for_column(column_ordinal)
-            .map_err(CommonProofGenerationInitializationError::Prover)?
-            .ok_or(CommonProofGenerationInitializationError::Prover(
-                CommonProofProverError::InvalidColumn,
-            ))?;
-        if column_position != 0 {
+        if self
+            .setup_polynomial_opening_artifacts
+            .keys()
+            .any(|tree_catalog_index| {
+                !self
+                    .setup_polynomial_root_passes
+                    .contains_key(tree_catalog_index)
+            })
+        {
             return Err(CommonProofGenerationInitializationError::Prover(
-                CommonProofProverError::InvalidColumn,
+                CommonProofProverError::InvalidTree,
             ));
         }
+        let Some(tree_catalog_index) = self
+            .setup_polynomial_root_passes
+            .keys()
+            .find(|tree_catalog_index| {
+                !self
+                    .setup_polynomial_opening_artifacts
+                    .contains_key(tree_catalog_index)
+            })
+            .copied()
+        else {
+            return Ok(false);
+        };
+        let catalog_index = usize::from(tree_catalog_index);
         let entry = self.catalog.entries().get(catalog_index).ok_or(
             CommonProofGenerationInitializationError::Prover(CommonProofProverError::InvalidTree),
         )?;
@@ -1459,10 +1475,11 @@ impl CommonProofGenerationStateMachine {
                 ));
             }
         };
-        let tree_catalog_index = entry.tree_catalog_index();
-        if self
-            .setup_polynomial_opening_artifacts
-            .contains_key(&tree_catalog_index)
+        if ordered_column_ordinals.is_empty()
+            || entry.tree_catalog_index() != tree_catalog_index
+            || entry.setup_polynomial_construction().is_none()
+            || entry.bound_root().is_none()
+            || entry.uses_common_merkle_context()
         {
             return Err(CommonProofGenerationInitializationError::Prover(
                 CommonProofProverError::InvalidTree,
@@ -1503,33 +1520,46 @@ impl CommonProofGenerationStateMachine {
             catalog_index,
             query_geometry: Some(geometry),
         });
-        self.prepare_setup_polynomial_query_transform(catalog_index, 0)?;
+        self.prepare_setup_polynomial_query_column_reader(catalog_index, 0)?;
         Ok(true)
     }
 
-    fn retain_statement_owned_replay_vectors(&mut self) {
-        let variant = &self.variant;
-        let catalog = &self.catalog;
-        self.relation_evaluation_vectors
-            .retain(|column_ordinal, _| {
-                variant
-                    .ordered_trees()
+    fn statement_owned_query_column_ordinals(
+        &self,
+    ) -> Result<BTreeSet<u32>, CommonProofProverError> {
+        let mut column_ordinals = BTreeSet::new();
+        for (tree_index, descriptor) in self.variant.ordered_trees().iter().enumerate() {
+            let entry = self
+                .catalog
+                .entries()
+                .get(tree_index)
+                .ok_or(CommonProofProverError::InvalidTree)?;
+            if entry.bound_root().is_none() || entry.uses_common_merkle_context() {
+                continue;
+            }
+            let RelationTreeDescriptor::BoundPublic {
+                ordered_column_ordinals,
+                ..
+            } = descriptor
+            else {
+                return Err(CommonProofProverError::InvalidTree);
+            };
+            column_ordinals.extend(ordered_column_ordinals.iter().copied());
+        }
+        Ok(column_ordinals)
+    }
+
+    fn quotient_column_ordinals(&self) -> Result<BTreeSet<u32>, CommonProofProverError> {
+        let mut column_ordinals = BTreeSet::new();
+        for constraint_ordinal in 0..self.variant.constraint_count() {
+            column_ordinals.extend(
+                self.variant
+                    .constraint_column_queries(constraint_ordinal)?
                     .iter()
-                    .enumerate()
-                    .any(|(tree_index, descriptor)| {
-                        catalog.entries().get(tree_index).is_some_and(|entry| {
-                            entry.bound_root().is_some() && !entry.uses_common_merkle_context()
-                        }) && matches!(
-                            descriptor,
-                            RelationTreeDescriptor::BoundPublic {
-                                construction_kind:
-                                    BoundTreeConstructionKind::CommittedMaterial,
-                                ordered_column_ordinals,
-                                ..
-                            } if ordered_column_ordinals.contains(column_ordinal)
-                        )
-                    })
-            });
+                    .map(|query| query.column_ordinal()),
+            );
+        }
+        Ok(column_ordinals)
     }
 
     fn poll_active_relation_column_transform<Storage, CoinError, SinkError>(
@@ -1623,7 +1653,12 @@ impl CommonProofGenerationStateMachine {
                     CommonProofRelationTransformContinuation::SetupPolynomialRoot {
                         next_column_index,
                     } => {
-                        if self.active_setup_polynomial_column_reader.is_some() {
+                        if self.active_setup_polynomial_column_reader.is_some()
+                            || self
+                                .relation_evaluation_vectors
+                                .insert(active.column_ordinal, vector)
+                                .is_some()
+                        {
                             return Err(CommonProofGenerationError::Prover(
                                 CommonProofProverError::InvalidColumn,
                             ));
@@ -1637,29 +1672,6 @@ impl CommonProofGenerationStateMachine {
                                 phase: SetupPolynomialColumnReaderPhase::ReadFirstHalf,
                                 continuation: SetupPolynomialColumnContinuation::Root {
                                     next_column_index,
-                                },
-                            });
-                        self.phase
-                    }
-                    CommonProofRelationTransformContinuation::SetupPolynomialQuery {
-                        catalog_index,
-                        next_column_position,
-                    } => {
-                        if self.active_setup_polynomial_column_reader.is_some() {
-                            return Err(CommonProofGenerationError::Prover(
-                                CommonProofProverError::InvalidColumn,
-                            ));
-                        }
-                        self.active_setup_polynomial_column_reader =
-                            Some(ActiveSetupPolynomialColumnReader {
-                                vector,
-                                column_ordinal: active.column_ordinal,
-                                next_leaf_index: 0,
-                                first_half_values: None,
-                                phase: SetupPolynomialColumnReaderPhase::ReadFirstHalf,
-                                continuation: SetupPolynomialColumnContinuation::Query {
-                                    catalog_index,
-                                    next_column_position,
                                 },
                             });
                         self.phase
@@ -1911,7 +1923,7 @@ impl CommonProofGenerationStateMachine {
                             .replay
                             .next_column_ordinal();
                         if next_column_ordinal.is_some() {
-                            self.prepare_setup_polynomial_query_transform(
+                            self.prepare_setup_polynomial_query_column_reader(
                                 catalog_index,
                                 next_column_position,
                             )
@@ -3111,7 +3123,6 @@ impl CommonProofGenerationStateMachine {
                         ))?
                         .finish_bound_tree_leaf_salts()
                         .map_err(CommonProofGenerationError::Prover)?;
-                    self.retain_statement_owned_replay_vectors();
                     self.phase = CommonProofGenerationPhase::DerivingApplicationColumns;
                     return Ok(CommonProofGenerationPoll::ArithmeticStepCompleted);
                 };
@@ -3325,7 +3336,6 @@ impl CommonProofGenerationStateMachine {
                         _ => None,
                     });
                 let Some((tree_index, ordered_column_ordinals)) = next_tree else {
-                    self.retain_statement_owned_replay_vectors();
                     self.phase = CommonProofGenerationPhase::ConstructingQuotient;
                     return Ok(CommonProofGenerationPoll::ArithmeticStepCompleted);
                 };
@@ -3361,6 +3371,52 @@ impl CommonProofGenerationStateMachine {
                 Ok(CommonProofGenerationPoll::ArithmeticStepCompleted)
             }
             CommonProofGenerationPhase::ConstructingQuotient => {
+                let statement_owned_query_column_ordinals = self
+                    .statement_owned_query_column_ordinals()
+                    .map_err(CommonProofGenerationError::Prover)?;
+                let quotient_column_ordinals = self
+                    .quotient_column_ordinals()
+                    .map_err(CommonProofGenerationError::Prover)?;
+                let mut quotient_evaluation_vectors = BTreeMap::new();
+                let mut statement_owned_query_evaluation_vectors = BTreeMap::new();
+                for (column_ordinal, vector) in
+                    core::mem::take(&mut self.relation_evaluation_vectors)
+                {
+                    if quotient_column_ordinals.contains(&column_ordinal) {
+                        quotient_evaluation_vectors.insert(column_ordinal, vector);
+                    }
+                    if statement_owned_query_column_ordinals.contains(&column_ordinal) {
+                        statement_owned_query_evaluation_vectors.insert(column_ordinal, vector);
+                    }
+                }
+                if statement_owned_query_evaluation_vectors.len()
+                    != statement_owned_query_column_ordinals.len()
+                {
+                    return Err(CommonProofGenerationError::Prover(
+                        CommonProofProverError::InvalidColumn,
+                    ));
+                }
+                for column_ordinal in &quotient_column_ordinals {
+                    let column = self
+                        .variant
+                        .ordered_columns()
+                        .get(usize::try_from(*column_ordinal).map_err(|_| {
+                            CommonProofGenerationError::Prover(
+                                CommonProofProverError::CountOverflow,
+                            )
+                        })?)
+                        .ok_or(CommonProofGenerationError::Prover(
+                            CommonProofProverError::InvalidColumn,
+                        ))?;
+                    if !matches!(column.origin(), RelationColumnOrigin::VerifierSequence { .. })
+                        && !quotient_evaluation_vectors.contains_key(column_ordinal)
+                    {
+                        return Err(CommonProofGenerationError::Prover(
+                            CommonProofProverError::InvalidColumn,
+                        ));
+                    }
+                }
+                self.relation_evaluation_vectors = statement_owned_query_evaluation_vectors;
                 let transcript =
                     self.transcript
                         .as_mut()
@@ -3381,6 +3437,7 @@ impl CommonProofGenerationStateMachine {
                         &self.variant,
                         &self.relation_context,
                         self.evaluation_domain,
+                        quotient_evaluation_vectors,
                         core::mem::take(&mut self.application_challenges),
                         composition_challenges,
                         MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH,
@@ -3393,13 +3450,34 @@ impl CommonProofGenerationStateMachine {
             CommonProofGenerationPhase::ConstructingQuotientConstraints => {
                 if let Some(transform_key) = self
                     .quotient_builder
-                    .as_ref()
+                    .as_mut()
                     .ok_or(CommonProofGenerationError::Prover(
                         CommonProofProverError::InvalidQuotient,
                     ))?
                     .next_transform_key()
                     .map_err(CommonProofGenerationError::Prover)?
                 {
+                    if !self
+                        .variant
+                        .ordered_columns()
+                        .get(
+                            usize::try_from(transform_key.column_ordinal()).map_err(|_| {
+                                CommonProofGenerationError::Prover(
+                                    CommonProofProverError::CountOverflow,
+                                )
+                            })?,
+                        )
+                        .is_some_and(|column| {
+                            matches!(
+                                column.origin(),
+                                RelationColumnOrigin::VerifierSequence { .. }
+                            )
+                        })
+                    {
+                        return Err(CommonProofGenerationError::Prover(
+                            CommonProofProverError::InvalidColumn,
+                        ));
+                    }
                     let plan = self
                         .quotient_constraint_transform_plans
                         .remove(&transform_key)
@@ -4040,7 +4118,10 @@ impl CommonProofGenerationStateMachine {
                 Ok(CommonProofGenerationPoll::OutputFragmentAccepted)
             }
             CommonProofGenerationPhase::EmittingQueries { next_catalog_index } => {
-                if !self.setup_polynomial_query_transform_plans.is_empty() {
+                if next_catalog_index == 0
+                    && self.setup_polynomial_opening_artifacts.len()
+                        < self.setup_polynomial_root_passes.len()
+                {
                     if self.pending_output_fragment.is_some() || self.opening_prefetcher.is_some() {
                         return Err(CommonProofGenerationError::Prover(
                             CommonProofProverError::InvalidTree,
@@ -4055,6 +4136,22 @@ impl CommonProofGenerationStateMachine {
                         ));
                     }
                     return Ok(CommonProofGenerationPoll::ArithmeticStepCompleted);
+                }
+                if next_catalog_index == 0
+                    && (self.setup_polynomial_opening_artifacts.len()
+                        != self.setup_polynomial_root_passes.len()
+                        || self
+                            .setup_polynomial_opening_artifacts
+                            .keys()
+                            .any(|tree_catalog_index| {
+                                !self
+                                    .setup_polynomial_root_passes
+                                    .contains_key(tree_catalog_index)
+                            }))
+                {
+                    return Err(CommonProofGenerationError::Prover(
+                        CommonProofProverError::InvalidTree,
+                    ));
                 }
                 if next_catalog_index >= self.catalog.entries().len() {
                     if self.active_setup_polynomial_replay.is_some()
@@ -4321,7 +4418,6 @@ impl CommonProofGenerationStateMachine {
         self.storage_tree_plans = BTreeMap::new();
         self.replay_polynomial_plans = BTreeMap::new();
         self.relation_evaluation_transform_plans = BTreeMap::new();
-        self.setup_polynomial_query_transform_plans = BTreeMap::new();
         self.quotient_constraint_transform_plans = BTreeMap::new();
         self.relation_evaluation_vectors = BTreeMap::new();
         self.stored_trees = BTreeMap::new();

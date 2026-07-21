@@ -372,6 +372,56 @@ impl ExternalStockhamTransformPlan {
         )
     }
 
+    /// Reuses one fixed pair of protected scratch identities for every
+    /// non-final pass and writes the persistent evaluation vector to a third,
+    /// caller-selected identity on the final pass.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn new_with_fixed_scratch_and_persistent_final_output(
+        domain: ProofEvaluationDomain,
+        direction: ExternalStockhamTransformDirection,
+        source: ExternalPolynomialVector,
+        transient_scratch_objects: [ProofExternalMemoryObject; 2],
+        persistent_final_output_object: ProofExternalMemoryObject,
+        first_executor_step: u32,
+        final_output_last_use_step: u32,
+        maximum_chunk_byte_length: u32,
+        protection: ProofExternalMemoryProtection,
+    ) -> Result<Self, ExternalPolynomialError> {
+        if transient_scratch_objects[0] == transient_scratch_objects[1]
+            || transient_scratch_objects.contains(&source.object())
+            || transient_scratch_objects.contains(&persistent_final_output_object)
+            || persistent_final_output_object == source.object()
+        {
+            return Err(ExternalPolynomialError::InvalidPlan);
+        }
+        let pass_count = domain.size().trailing_zeros();
+        let transient_pass_count = pass_count
+            .checked_sub(1)
+            .ok_or(ExternalPolynomialError::InvalidPlan)?;
+        let pass_count_usize =
+            usize::try_from(pass_count).map_err(|_| ExternalPolynomialError::CountOverflow)?;
+        let mut output_objects = Vec::new();
+        output_objects
+            .try_reserve_exact(pass_count_usize)
+            .map_err(|_| ExternalPolynomialError::AllocationLimitExceeded)?;
+        for pass_ordinal in 0..transient_pass_count {
+            output_objects.push(transient_scratch_objects[usize::from((pass_ordinal % 2) as u8)]);
+        }
+        output_objects.push(persistent_final_output_object);
+
+        Self::new_with_optional_output_objects(
+            domain,
+            direction,
+            source,
+            0,
+            Some(&output_objects),
+            first_executor_step,
+            final_output_last_use_step,
+            maximum_chunk_byte_length,
+            protection,
+        )
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn new_with_optional_output_objects(
         domain: ProofEvaluationDomain,
@@ -399,8 +449,8 @@ impl ExternalStockhamTransformPlan {
             usize::try_from(pass_count).map_err(|_| ExternalPolynomialError::CountOverflow)?;
         if output_objects.is_some_and(|objects| {
             objects.len() != pass_count_usize
-                || objects.iter().any(|object| *object == source.object())
                 || objects.windows(2).any(|pair| pair[0] == pair[1])
+                || objects.contains(&source.object())
         }) {
             return Err(ExternalPolynomialError::InvalidPlan);
         }
@@ -1793,6 +1843,15 @@ mod tests {
         plan: ExternalStockhamTransformPlan,
     }
 
+    enum TestTransformObjectStrategy<'objects> {
+        Fresh,
+        Specified(&'objects [ProofExternalMemoryObject]),
+        FixedScratchAndPersistentFinalOutput {
+            transient_scratch_objects: [ProofExternalMemoryObject; 2],
+            persistent_final_output_object: ProofExternalMemoryObject,
+        },
+    }
+
     fn execute_transform(
         domain: ProofEvaluationDomain,
         value_type: RelationColumnValueType,
@@ -1800,13 +1859,13 @@ mod tests {
         encoded_source: &[u8],
         maximum_chunk_byte_length: u32,
     ) -> CompletedTransform {
-        execute_transform_with_output_objects(
+        execute_transform_with_object_strategy(
             domain,
             value_type,
             direction,
             encoded_source,
             maximum_chunk_byte_length,
-            None,
+            TestTransformObjectStrategy::Fresh,
         )
     }
 
@@ -1816,7 +1875,47 @@ mod tests {
         direction: ExternalStockhamTransformDirection,
         encoded_source: &[u8],
         maximum_chunk_byte_length: u32,
-        output_objects: Option<&[ProofExternalMemoryObject]>,
+        output_objects: &[ProofExternalMemoryObject],
+    ) -> CompletedTransform {
+        execute_transform_with_object_strategy(
+            domain,
+            value_type,
+            direction,
+            encoded_source,
+            maximum_chunk_byte_length,
+            TestTransformObjectStrategy::Specified(output_objects),
+        )
+    }
+
+    fn execute_transform_with_fixed_scratch_and_persistent_final_output(
+        domain: ProofEvaluationDomain,
+        value_type: RelationColumnValueType,
+        direction: ExternalStockhamTransformDirection,
+        encoded_source: &[u8],
+        maximum_chunk_byte_length: u32,
+        transient_scratch_objects: [ProofExternalMemoryObject; 2],
+        persistent_final_output_object: ProofExternalMemoryObject,
+    ) -> CompletedTransform {
+        execute_transform_with_object_strategy(
+            domain,
+            value_type,
+            direction,
+            encoded_source,
+            maximum_chunk_byte_length,
+            TestTransformObjectStrategy::FixedScratchAndPersistentFinalOutput {
+                transient_scratch_objects,
+                persistent_final_output_object,
+            },
+        )
+    }
+
+    fn execute_transform_with_object_strategy(
+        domain: ProofEvaluationDomain,
+        value_type: RelationColumnValueType,
+        direction: ExternalStockhamTransformDirection,
+        encoded_source: &[u8],
+        maximum_chunk_byte_length: u32,
+        object_strategy: TestTransformObjectStrategy<'_>,
     ) -> CompletedTransform {
         let domain_size = domain.size();
         let value_byte_length = usize::try_from(external_value_byte_length(value_type))
@@ -1840,19 +1939,16 @@ mod tests {
             .expect("source length fits usize")
         );
         let first_transform_step = 1;
-        let transform_plan = if let Some(output_objects) = output_objects {
-            ExternalStockhamTransformPlan::new_with_output_objects(
-                domain,
-                direction,
-                source,
-                output_objects,
-                first_transform_step,
-                first_transform_step + domain_size.trailing_zeros(),
-                maximum_chunk_byte_length,
-                ProofExternalMemoryProtection::PublicIntegrity,
-            )
-        } else {
-            ExternalStockhamTransformPlan::new(
+        let source_object_plan = ProofExternalMemoryObjectPlan::new(
+            source.object(),
+            ProofExternalMemoryProtection::PublicIntegrity,
+            source.exact_byte_length().expect("source length is valid"),
+            0,
+            0,
+            first_transform_step,
+        );
+        let transform_plan = match object_strategy {
+            TestTransformObjectStrategy::Fresh => ExternalStockhamTransformPlan::new(
                 domain,
                 direction,
                 source,
@@ -1861,18 +1957,39 @@ mod tests {
                 first_transform_step + domain_size.trailing_zeros(),
                 maximum_chunk_byte_length,
                 ProofExternalMemoryProtection::PublicIntegrity,
-            )
+            ),
+            TestTransformObjectStrategy::Specified(output_objects) => {
+                ExternalStockhamTransformPlan::new_with_output_objects(
+                    domain,
+                    direction,
+                    source,
+                    output_objects,
+                    first_transform_step,
+                    first_transform_step + domain_size.trailing_zeros(),
+                    maximum_chunk_byte_length,
+                    ProofExternalMemoryProtection::PublicIntegrity,
+                )
+            }
+            TestTransformObjectStrategy::FixedScratchAndPersistentFinalOutput {
+                transient_scratch_objects,
+                persistent_final_output_object,
+            } => {
+                ExternalStockhamTransformPlan::new_with_fixed_scratch_and_persistent_final_output(
+                    domain,
+                    direction,
+                    source,
+                    transient_scratch_objects,
+                    persistent_final_output_object,
+                    first_transform_step,
+                    first_transform_step + domain_size.trailing_zeros(),
+                    maximum_chunk_byte_length,
+                    ProofExternalMemoryProtection::PublicIntegrity,
+                )
+            }
         }
         .expect("the external transform plan is valid");
         let final_step = transform_plan.next_executor_step();
-        let mut object_plans = vec![ProofExternalMemoryObjectPlan::new(
-            source.object(),
-            ProofExternalMemoryProtection::PublicIntegrity,
-            source.exact_byte_length().expect("source length is valid"),
-            0,
-            0,
-            first_transform_step,
-        )];
+        let mut object_plans = vec![source_object_plan];
         object_plans.extend_from_slice(transform_plan.object_plans());
         let aligned_chunk_byte_length = usize::try_from(maximum_chunk_byte_length)
             .expect("chunk size fits usize")
@@ -2105,7 +2222,7 @@ mod tests {
             ExternalStockhamTransformDirection::Forward,
             &encoded_coefficients,
             80,
-            Some(&output_objects),
+            &output_objects,
         );
         let ordinary = execute_transform(
             domain,
@@ -2127,6 +2244,281 @@ mod tests {
         );
         assert_eq!(reused.plan.object_plans().len(), 5);
         assert_eq!(reused.usage.deleted_object_count(), 6);
+    }
+
+    #[test]
+    fn stockham_backend_reuses_fixed_scratch_and_preserves_a_distinct_final_output() {
+        let transient_scratch_objects = [
+            ProofExternalMemoryObject::new(1),
+            ProofExternalMemoryObject::new(2),
+        ];
+        let persistent_final_output_object = ProofExternalMemoryObject::new(3);
+        for domain_size in [2_usize, 4, 8, 16, 32, 64] {
+            let domain = ProofEvaluationDomain::new(domain_size, PROOF_EVALUATION_COSET_OFFSET)
+                .expect("the test domain is valid");
+            let coefficients = (0..domain_size / 2 + 1)
+                .map(|index| extension(index as u64 + 17))
+                .collect::<Vec<_>>();
+            let encoded_coefficients = encode_extension(&coefficients);
+            let reused = execute_transform_with_fixed_scratch_and_persistent_final_output(
+                domain,
+                RelationColumnValueType::ChallengeExtension,
+                ExternalStockhamTransformDirection::Forward,
+                &encoded_coefficients,
+                80,
+                transient_scratch_objects,
+                persistent_final_output_object,
+            );
+            let ordinary = execute_transform(
+                domain,
+                RelationColumnValueType::ChallengeExtension,
+                ExternalStockhamTransformDirection::Forward,
+                &encoded_coefficients,
+                80,
+            );
+            assert_eq!(reused.encoded_output, ordinary.encoded_output);
+
+            let pass_count = domain_size.trailing_zeros();
+            let expected_output_objects = (0..pass_count - 1)
+                .map(|pass_ordinal| {
+                    transient_scratch_objects[usize::from((pass_ordinal % 2) as u8)]
+                })
+                .chain(core::iter::once(persistent_final_output_object))
+                .collect::<Vec<_>>();
+            assert_eq!(
+                reused
+                    .plan
+                    .object_plans()
+                    .iter()
+                    .map(|plan| plan.object())
+                    .collect::<Vec<_>>(),
+                expected_output_objects,
+            );
+            assert_eq!(
+                reused.plan.final_output().object(),
+                persistent_final_output_object,
+            );
+            assert!(reused.plan.object_plans().iter().all(|plan| {
+                plan.protection() == ProofExternalMemoryProtection::PublicIntegrity
+            }));
+            let final_output_plan = reused
+                .plan
+                .object_plans()
+                .last()
+                .copied()
+                .expect("the transform has a final output lifecycle");
+            assert_eq!(final_output_plan.issued_step(), pass_count);
+            assert_eq!(final_output_plan.last_use_step(), pass_count + 1);
+            assert_eq!(
+                reused.usage.deleted_object_count(),
+                u64::from(pass_count) + 1,
+            );
+        }
+    }
+
+    #[test]
+    fn fixed_scratch_output_refuses_identity_overlap_and_invalid_liveness() {
+        let domain = ProofEvaluationDomain::new(16, PROOF_EVALUATION_COSET_OFFSET)
+            .expect("the test domain is valid");
+        let source = ExternalPolynomialVector::new(
+            ProofExternalMemoryObject::new(0),
+            RelationColumnValueType::ChallengeExtension,
+            9,
+        )
+        .expect("the source is valid");
+        let first_executor_step = 5;
+        let next_executor_step = first_executor_step + domain.size().trailing_zeros();
+        let final_output_last_use_step = next_executor_step + 7;
+        let scratch_objects = [
+            ProofExternalMemoryObject::new(10),
+            ProofExternalMemoryObject::new(11),
+        ];
+        let persistent_final_output_object = ProofExternalMemoryObject::new(12);
+        let derive_plan = |transient_scratch_objects,
+                           final_output_object,
+                           last_use_step,
+                           protection| {
+            ExternalStockhamTransformPlan::new_with_fixed_scratch_and_persistent_final_output(
+                domain,
+                ExternalStockhamTransformDirection::Forward,
+                source,
+                transient_scratch_objects,
+                final_output_object,
+                first_executor_step,
+                last_use_step,
+                80,
+                protection,
+            )
+        };
+        let valid_plan = derive_plan(
+            scratch_objects,
+            persistent_final_output_object,
+            final_output_last_use_step,
+            ProofExternalMemoryProtection::SecretAuthenticatedEncryption,
+        );
+        let valid_plan = valid_plan.expect("the distinct fixed-scratch plan is valid");
+        assert_eq!(
+            valid_plan
+                .object_plans()
+                .iter()
+                .map(|plan| plan.object())
+                .collect::<Vec<_>>(),
+            vec![
+                scratch_objects[0],
+                scratch_objects[1],
+                scratch_objects[0],
+                persistent_final_output_object,
+            ],
+        );
+        assert!(valid_plan.object_plans().iter().all(|plan| {
+            plan.protection() == ProofExternalMemoryProtection::SecretAuthenticatedEncryption
+        }));
+        let final_output_plan = valid_plan
+            .object_plans()
+            .last()
+            .copied()
+            .expect("the final output lifecycle exists");
+        assert_eq!(final_output_plan.issued_step(), next_executor_step - 1);
+        assert_eq!(final_output_plan.last_use_step(), final_output_last_use_step);
+
+        for (transient_scratch_objects, final_output_object) in [
+            (
+                [scratch_objects[0], scratch_objects[0]],
+                persistent_final_output_object,
+            ),
+            (
+                [source.object(), scratch_objects[1]],
+                persistent_final_output_object,
+            ),
+            (scratch_objects, source.object()),
+            (scratch_objects, scratch_objects[0]),
+            (scratch_objects, scratch_objects[1]),
+        ] {
+            assert_eq!(
+                derive_plan(
+                    transient_scratch_objects,
+                    final_output_object,
+                    final_output_last_use_step,
+                    ProofExternalMemoryProtection::SecretAuthenticatedEncryption,
+                ),
+                Err(ExternalPolynomialError::InvalidPlan),
+            );
+        }
+        assert_eq!(
+            derive_plan(
+                scratch_objects,
+                persistent_final_output_object,
+                next_executor_step - 1,
+                ProofExternalMemoryProtection::SecretAuthenticatedEncryption,
+            ),
+            Err(ExternalPolynomialError::InvalidPlan),
+            "the persistent output must remain live through transform completion",
+        );
+        assert_eq!(
+            ExternalStockhamTransformPlan::new_with_fixed_scratch_and_persistent_final_output(
+                domain,
+                ExternalStockhamTransformDirection::Forward,
+                source,
+                scratch_objects,
+                persistent_final_output_object,
+                u32::MAX - 2,
+                u32::MAX,
+                80,
+                ProofExternalMemoryProtection::SecretAuthenticatedEncryption,
+            ),
+            Err(ExternalPolynomialError::CountOverflow),
+            "the transform lifecycle must not wrap the executor step",
+        );
+
+        for output_objects in [
+            [
+                source.object(),
+                scratch_objects[0],
+                scratch_objects[1],
+                scratch_objects[0],
+            ],
+            [
+                scratch_objects[0],
+                source.object(),
+                scratch_objects[1],
+                scratch_objects[0],
+            ],
+            [
+                scratch_objects[0],
+                scratch_objects[1],
+                source.object(),
+                scratch_objects[0],
+            ],
+            [
+                scratch_objects[0],
+                scratch_objects[0],
+                scratch_objects[1],
+                persistent_final_output_object,
+            ],
+            [
+                scratch_objects[0],
+                scratch_objects[1],
+                scratch_objects[0],
+                source.object(),
+            ],
+        ] {
+            assert_eq!(
+                ExternalStockhamTransformPlan::new_with_output_objects(
+                    domain,
+                    ExternalStockhamTransformDirection::Forward,
+                    source,
+                    &output_objects,
+                    first_executor_step,
+                    final_output_last_use_step,
+                    80,
+                    ProofExternalMemoryProtection::SecretAuthenticatedEncryption,
+                ),
+                Err(ExternalPolynomialError::InvalidPlan),
+                "source reuse or overlapping output lifecycles must not enter through the arbitrary-output constructor",
+            );
+        }
+        assert_eq!(
+            ExternalStockhamTransformPlan::new_with_output_objects(
+                domain,
+                ExternalStockhamTransformDirection::Forward,
+                source,
+                &scratch_objects,
+                first_executor_step,
+                final_output_last_use_step,
+                80,
+                ProofExternalMemoryProtection::SecretAuthenticatedEncryption,
+            ),
+            Err(ExternalPolynomialError::InvalidPlan),
+            "the arbitrary-output constructor requires one identity per pass",
+        );
+
+        let one_pass_domain = ProofEvaluationDomain::new(2, PROOF_EVALUATION_COSET_OFFSET)
+            .expect("the one-pass test domain is valid");
+        let one_pass_source = ExternalPolynomialVector::new(
+            ProofExternalMemoryObject::new(0),
+            RelationColumnValueType::BaseField,
+            2,
+        )
+        .expect("the one-pass source is valid");
+        let one_pass_final_output_object = ProofExternalMemoryObject::new(13);
+        let one_pass_plan =
+            ExternalStockhamTransformPlan::new_with_fixed_scratch_and_persistent_final_output(
+                one_pass_domain,
+                ExternalStockhamTransformDirection::Forward,
+                one_pass_source,
+                scratch_objects,
+                one_pass_final_output_object,
+                1,
+                2,
+                8,
+                ProofExternalMemoryProtection::PublicIntegrity,
+            )
+            .expect("a one-pass transform writes directly to its persistent output");
+        assert_eq!(one_pass_plan.object_plans().len(), 1);
+        assert_eq!(
+            one_pass_plan.final_output().object(),
+            one_pass_final_output_object,
+        );
     }
 
     #[test]

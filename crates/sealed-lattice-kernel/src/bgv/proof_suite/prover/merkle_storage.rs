@@ -1,6 +1,7 @@
 use crate::bgv::proof_suite::{
     SetupPublicPolynomialError, SetupPublicPolynomialLeafByteBuilder,
     SetupPublicPolynomialLeafHashArena, WASM_SETUP_PUBLIC_POLYNOMIAL_LEAF_HASH_STATE_BYTE_LENGTH,
+    merkle::{CommonProofMerklePathReplay, canonical_proof_phase_pair_leaf_digest},
 };
 
 use super::{
@@ -22,9 +23,9 @@ pub(crate) enum CommonProofTreeStorageError<StorageError, CoinError> {
     CoinSource(CoinError),
 }
 
-/// External-memory location of one common proof-created Merkle tree.  Canonical
-/// leaves and every digest level remain random-accessible until the generated
-/// liveness plan reaches the proof-query step.
+/// External-memory location of one common proof-created Merkle tree. Canonical
+/// leaves remain authenticated and ordered until the generated liveness plan
+/// reaches the proof-query step. Digest levels are never persisted.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct StoredCommonProofMerkleTree {
     tree_catalog_index: u16,
@@ -32,7 +33,6 @@ pub(crate) struct StoredCommonProofMerkleTree {
     leaf_count: usize,
     canonical_leaf_byte_length: usize,
     leaf_bytes_object: ProofExternalMemoryObject,
-    digest_level_objects: Vec<ProofExternalMemoryObject>,
     root: [u8; HASH_BYTE_LENGTH],
 }
 
@@ -53,7 +53,6 @@ impl StoredCommonProofMerkleTree {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct CommonProofMerkleStoragePlan {
     leaf_bytes_object: ProofExternalMemoryObject,
-    digest_level_objects: Vec<ProofExternalMemoryObject>,
     object_plans: Vec<ProofExternalMemoryObjectPlan>,
     canonical_leaf_byte_length: usize,
     next_object_ordinal: u32,
@@ -61,38 +60,20 @@ pub(crate) struct CommonProofMerkleStoragePlan {
 
 impl CommonProofMerkleStoragePlan {
     pub(crate) fn resident_owned_payload_byte_length(&self) -> Result<u64, CommonProofProverError> {
-        let digest_catalog_byte_length = u64::try_from(self.digest_level_objects.capacity())
-            .ok()
-            .and_then(|capacity| {
-                capacity.checked_mul(
-                    u64::try_from(std::mem::size_of::<ProofExternalMemoryObject>()).ok()?,
-                )
-            })
-            .ok_or(CommonProofProverError::CountOverflow)?;
-        let object_plan_catalog_byte_length = u64::try_from(self.object_plans.capacity())
+        u64::try_from(self.object_plans.capacity())
             .ok()
             .and_then(|capacity| {
                 capacity.checked_mul(
                     u64::try_from(std::mem::size_of::<ProofExternalMemoryObjectPlan>()).ok()?,
                 )
             })
-            .ok_or(CommonProofProverError::CountOverflow)?;
-        digest_catalog_byte_length
-            .checked_add(object_plan_catalog_byte_length)
             .ok_or(CommonProofProverError::CountOverflow)
     }
 
     pub(crate) fn stored_tree_resident_owned_payload_byte_length(
         &self,
     ) -> Result<u64, CommonProofProverError> {
-        u64::try_from(self.digest_level_objects.capacity())
-            .ok()
-            .and_then(|capacity| {
-                capacity.checked_mul(
-                    u64::try_from(std::mem::size_of::<ProofExternalMemoryObject>()).ok()?,
-                )
-            })
-            .ok_or(CommonProofProverError::CountOverflow)
+        Ok(0)
     }
 
     pub(crate) fn object_plans(&self) -> &[ProofExternalMemoryObjectPlan] {
@@ -120,7 +101,7 @@ pub(crate) fn common_proof_merkle_storage_plan(
     materialization_step: u32,
     query_step: u32,
 ) -> Result<CommonProofMerkleStoragePlan, CommonProofProverError> {
-    if catalog_entry.uses_setup_polynomial_construction() || query_step < materialization_step {
+    if !catalog_entry.uses_common_merkle_context() || query_step < materialization_step {
         return Err(CommonProofProverError::InvalidTree);
     }
     let leaf_count = entry_leaf_count(catalog_entry, evaluation_domain_size)
@@ -142,7 +123,7 @@ pub(crate) fn common_proof_merkle_storage_plan(
             ProofExternalMemoryProtection::SecretAuthenticatedEncryption
         }
     };
-    let mut object_plans = vec![ProofExternalMemoryObjectPlan::new(
+    let object_plans = vec![ProofExternalMemoryObjectPlan::new(
         leaf_bytes_object,
         leaf_protection,
         stored_leaf_byte_length,
@@ -150,52 +131,11 @@ pub(crate) fn common_proof_merkle_storage_plan(
         materialization_step,
         query_step,
     )];
-    let level_count = usize::try_from(leaf_count.trailing_zeros())
-        .map_err(|_| CommonProofProverError::CountOverflow)?
+    let next_object_ordinal = first_object_ordinal
         .checked_add(1)
         .ok_or(CommonProofProverError::CountOverflow)?;
-    object_plans
-        .try_reserve_exact(level_count)
-        .map_err(|_| CommonProofProverError::AllocationLimitExceeded)?;
-    let mut digest_level_objects = Vec::new();
-    digest_level_objects
-        .try_reserve_exact(level_count)
-        .map_err(|_| CommonProofProverError::AllocationLimitExceeded)?;
-    let mut node_count = leaf_count;
-    let mut next_object_ordinal = first_object_ordinal
-        .checked_add(1)
-        .ok_or(CommonProofProverError::CountOverflow)?;
-    for level_ordinal in 0..level_count {
-        let object = ProofExternalMemoryObject::new(next_object_ordinal);
-        next_object_ordinal = next_object_ordinal
-            .checked_add(1)
-            .ok_or(CommonProofProverError::CountOverflow)?;
-        let exact_byte_length = u64::try_from(node_count)
-            .map_err(|_| CommonProofProverError::CountOverflow)?
-            .checked_mul(HASH_BYTE_LENGTH as u64)
-            .ok_or(CommonProofProverError::CountOverflow)?;
-        // The root is cached in `StoredCommonProofMerkleTree`; unlike every
-        // lower level it is never needed to construct an authentication
-        // frontier and can be removed when materialization completes.
-        let last_use_step = if level_ordinal + 1 == level_count {
-            materialization_step
-        } else {
-            query_step
-        };
-        digest_level_objects.push(object);
-        object_plans.push(ProofExternalMemoryObjectPlan::new(
-            object,
-            ProofExternalMemoryProtection::PublicIntegrity,
-            exact_byte_length,
-            materialization_step,
-            materialization_step,
-            last_use_step,
-        ));
-        node_count /= 2;
-    }
     Ok(CommonProofMerkleStoragePlan {
         leaf_bytes_object,
-        digest_level_objects,
         object_plans,
         canonical_leaf_byte_length,
         next_object_ordinal,
@@ -264,12 +204,7 @@ fn common_proof_merkle_storage_plan_matches(
     canonical_leaf_byte_length: usize,
     storage_plan: &CommonProofMerkleStoragePlan,
 ) -> Result<bool, CommonProofProverError> {
-    let expected_object_plan_count = storage_plan
-        .digest_level_objects
-        .len()
-        .checked_add(1)
-        .ok_or(CommonProofProverError::CountOverflow)?;
-    if storage_plan.object_plans.len() != expected_object_plan_count {
+    if storage_plan.object_plans.len() != 1 {
         return Ok(false);
     }
     let leaf_plan = storage_plan
@@ -300,69 +235,18 @@ fn common_proof_merkle_storage_plan_matches(
 
     let first_object_ordinal = storage_plan.leaf_bytes_object.ordinal();
     let expected_next_object_ordinal = first_object_ordinal
-        .checked_add(
-            u32::try_from(expected_object_plan_count)
-                .map_err(|_| CommonProofProverError::CountOverflow)?,
-        )
+        .checked_add(1)
         .ok_or(CommonProofProverError::CountOverflow)?;
-    if storage_plan.next_object_ordinal != expected_next_object_ordinal {
-        return Ok(false);
-    }
-
-    let mut level_node_count = leaf_count;
-    for (level_ordinal, object) in storage_plan.digest_level_objects.iter().enumerate() {
-        let plan = storage_plan.object_plans[level_ordinal + 1];
-        let expected_object_ordinal = first_object_ordinal
-            .checked_add(
-                u32::try_from(level_ordinal)
-                    .map_err(|_| CommonProofProverError::CountOverflow)?
-                    .checked_add(1)
-                    .ok_or(CommonProofProverError::CountOverflow)?,
-            )
-            .ok_or(CommonProofProverError::CountOverflow)?;
-        let expected_byte_length = u64::try_from(level_node_count)
-            .map_err(|_| CommonProofProverError::CountOverflow)?
-            .checked_mul(HASH_BYTE_LENGTH as u64)
-            .ok_or(CommonProofProverError::CountOverflow)?;
-        let is_root_level = level_ordinal + 1 == storage_plan.digest_level_objects.len();
-        let expected_last_use_step = if is_root_level {
-            materialization_step
-        } else {
-            query_step
-        };
-        if object.ordinal() != expected_object_ordinal
-            || plan.object() != *object
-            || plan.protection() != ProofExternalMemoryProtection::PublicIntegrity
-            || plan.exact_byte_length() != expected_byte_length
-            || plan.issued_step() != materialization_step
-            || plan.seal_step() != materialization_step
-            || plan.last_use_step() != expected_last_use_step
-        {
-            return Ok(false);
-        }
-        level_node_count /= 2;
-    }
-    Ok(true)
+    Ok(storage_plan.next_object_ordinal == expected_next_object_ordinal)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CommonProofMerkleMaterializerPhase {
     BeginLeafBytes,
-    BeginLeafDigests,
     NeedLeafValues,
     WriteLeafBytes,
-    WriteLeafDigest,
     FlushLeafBytes,
-    FlushLeafDigests,
     SealLeafBytes,
-    SealLeafDigests,
-    BeginParentLevel,
-    ReadLeftChild,
-    ReadRightChild,
-    WriteParentDigest,
-    FlushParentLevel,
-    SealParentLevel,
-    ReadRoot,
     Complete,
 }
 
@@ -387,19 +271,13 @@ pub(crate) struct CommonProofMerkleMaterializer {
     leaf_count: usize,
     canonical_leaf_byte_length: usize,
     leaf_bytes_object: ProofExternalMemoryObject,
-    digest_level_objects: Vec<ProofExternalMemoryObject>,
     phase: CommonProofMerkleMaterializerPhase,
     next_leaf_index: usize,
     current_leaf_bytes: Zeroizing<Vec<u8>>,
-    current_leaf_digest: [u8; HASH_BYTE_LENGTH],
     leaf_bytes_write_chunk: Zeroizing<Vec<u8>>,
-    digest_write_chunk: Zeroizing<Vec<u8>>,
     current_byte_offset: usize,
-    current_level_ordinal: usize,
-    current_parent_index: usize,
-    left_child_digest: [u8; HASH_BYTE_LENGTH],
-    right_child_digest: [u8; HASH_BYTE_LENGTH],
-    root: [u8; HASH_BYTE_LENGTH],
+    path_replay: Option<CommonProofMerklePathReplay>,
+    root: Option<[u8; HASH_BYTE_LENGTH]>,
 }
 
 impl CommonProofMerkleMaterializer {
@@ -412,21 +290,16 @@ impl CommonProofMerkleMaterializer {
         evaluation_domain_size: u64,
         storage_plan: CommonProofMerkleStoragePlan,
     ) -> Result<Self, CommonProofProverError> {
-        if catalog_entry.uses_setup_polynomial_construction() {
-            return Err(CommonProofProverError::InvalidTree);
-        }
+        let context = catalog_entry
+            .common_context()
+            .ok_or(CommonProofProverError::InvalidTree)?;
         let leaf_count = entry_leaf_count(catalog_entry, evaluation_domain_size)
             .map_err(map_proof_body_tree_error)?;
         let value_type = common_proof_tree_value_type(catalog_entry)?;
         let expected_leaf_byte_length =
             canonical_leaf_byte_length(catalog_entry).map_err(map_proof_body_tree_error)?;
-        let expected_level_count = usize::try_from(leaf_count.trailing_zeros())
-            .map_err(|_| CommonProofProverError::CountOverflow)?
-            .checked_add(1)
-            .ok_or(CommonProofProverError::CountOverflow)?;
         if leaf_count == 0
             || !leaf_count.is_power_of_two()
-            || storage_plan.digest_level_objects.len() != expected_level_count
             || storage_plan.canonical_leaf_byte_length != expected_leaf_byte_length
             || !common_proof_merkle_storage_plan_matches(
                 catalog_entry,
@@ -444,19 +317,13 @@ impl CommonProofMerkleMaterializer {
             leaf_count,
             canonical_leaf_byte_length: storage_plan.canonical_leaf_byte_length,
             leaf_bytes_object: storage_plan.leaf_bytes_object,
-            digest_level_objects: storage_plan.digest_level_objects,
             phase: CommonProofMerkleMaterializerPhase::BeginLeafBytes,
             next_leaf_index: 0,
             current_leaf_bytes: Zeroizing::new(Vec::new()),
-            current_leaf_digest: [0; HASH_BYTE_LENGTH],
             leaf_bytes_write_chunk: Zeroizing::new(Vec::new()),
-            digest_write_chunk: Zeroizing::new(Vec::new()),
             current_byte_offset: 0,
-            current_level_ordinal: 0,
-            current_parent_index: 0,
-            left_child_digest: [0; HASH_BYTE_LENGTH],
-            right_child_digest: [0; HASH_BYTE_LENGTH],
-            root: [0; HASH_BYTE_LENGTH],
+            path_replay: Some(CommonProofMerklePathReplay::new(context, &[])?),
+            root: None,
         })
     }
 
@@ -489,11 +356,12 @@ impl CommonProofMerkleMaterializer {
     }
 
     fn finish_current_leaf(&mut self) -> Result<(), CommonProofProverError> {
-        if self.current_byte_offset != HASH_BYTE_LENGTH || self.next_leaf_index >= self.leaf_count {
+        if self.current_byte_offset != self.current_leaf_bytes.len()
+            || self.next_leaf_index >= self.leaf_count
+        {
             return Err(CommonProofProverError::InvalidTree);
         }
         self.current_leaf_bytes.zeroize();
-        self.current_leaf_digest = [0; HASH_BYTE_LENGTH];
         self.current_byte_offset = 0;
         self.next_leaf_index = self
             .next_leaf_index
@@ -503,31 +371,6 @@ impl CommonProofMerkleMaterializer {
             CommonProofMerkleMaterializerPhase::FlushLeafBytes
         } else {
             CommonProofMerkleMaterializerPhase::NeedLeafValues
-        };
-        Ok(())
-    }
-
-    fn finish_current_parent_digest(&mut self) -> Result<(), CommonProofProverError> {
-        if self.current_byte_offset != HASH_BYTE_LENGTH
-            || self.current_level_ordinal == 0
-            || self.current_level_ordinal >= self.digest_level_objects.len()
-        {
-            return Err(CommonProofProverError::InvalidTree);
-        }
-        self.current_leaf_digest = [0; HASH_BYTE_LENGTH];
-        self.current_byte_offset = 0;
-        self.current_parent_index = self
-            .current_parent_index
-            .checked_add(1)
-            .ok_or(CommonProofProverError::CountOverflow)?;
-        let parent_count = self.leaf_count >> self.current_level_ordinal;
-        if self.current_parent_index > parent_count {
-            return Err(CommonProofProverError::InvalidTree);
-        }
-        self.phase = if self.current_parent_index == parent_count {
-            CommonProofMerkleMaterializerPhase::FlushParentLevel
-        } else {
-            CommonProofMerkleMaterializerPhase::ReadLeftChild
         };
         Ok(())
     }
@@ -598,7 +441,19 @@ impl CommonProofMerkleMaterializer {
                 CommonProofProverError::InvalidTree,
             ));
         }
-        self.current_leaf_digest = leaf_digest;
+        self.path_replay
+            .as_mut()
+            .ok_or(CommonProofTreeStorageError::Prover(
+                CommonProofProverError::InvalidTree,
+            ))?
+            .absorb_leaf_digest(
+                u64::try_from(self.next_leaf_index).map_err(|_| {
+                    CommonProofTreeStorageError::Prover(CommonProofProverError::CountOverflow)
+                })?,
+                leaf_digest,
+            )
+            .map_err(CommonProofProverError::from)
+            .map_err(CommonProofTreeStorageError::Prover)?;
         self.current_leaf_bytes = Zeroizing::new(canonical_bytes);
         self.current_byte_offset = 0;
         self.phase = CommonProofMerkleMaterializerPhase::WriteLeafBytes;
@@ -628,13 +483,6 @@ impl CommonProofMerkleMaterializer {
                 CommonProofMerkleMaterializerPhase::BeginLeafBytes => {
                     executor
                         .begin_object(storage, self.leaf_bytes_object)
-                        .map_err(CommonProofTreeStorageError::Storage)?;
-                    self.phase = CommonProofMerkleMaterializerPhase::BeginLeafDigests;
-                    return Ok(CommonProofMerkleMaterializerProgress::StorageTransactionCompleted);
-                }
-                CommonProofMerkleMaterializerPhase::BeginLeafDigests => {
-                    executor
-                        .begin_object(storage, self.digest_level_objects[0])
                         .map_err(CommonProofTreeStorageError::Storage)?;
                     self.phase = CommonProofMerkleMaterializerPhase::NeedLeafValues;
                     return Ok(CommonProofMerkleMaterializerProgress::StorageTransactionCompleted);
@@ -668,8 +516,8 @@ impl CommonProofMerkleMaterializer {
                             .map_err(CommonProofTreeStorageError::Storage)?;
                         self.leaf_bytes_write_chunk.zeroize();
                         if leaf_is_buffered {
-                            self.current_byte_offset = 0;
-                            self.phase = CommonProofMerkleMaterializerPhase::WriteLeafDigest;
+                            self.finish_current_leaf()
+                                .map_err(CommonProofTreeStorageError::Prover)?;
                         }
                         return Ok(
                             CommonProofMerkleMaterializerProgress::StorageTransactionCompleted,
@@ -680,46 +528,12 @@ impl CommonProofMerkleMaterializer {
                             CommonProofProverError::InvalidTree,
                         ));
                     }
-                    self.current_byte_offset = 0;
-                    self.phase = CommonProofMerkleMaterializerPhase::WriteLeafDigest;
-                }
-                CommonProofMerkleMaterializerPhase::WriteLeafDigest => {
-                    Self::fill_write_chunk(
-                        &mut self.digest_write_chunk,
-                        &self.current_leaf_digest,
-                        &mut self.current_byte_offset,
-                        maximum_chunk_byte_length,
-                    )
-                    .map_err(CommonProofTreeStorageError::Prover)?;
-                    let digest_is_buffered = self.current_byte_offset == HASH_BYTE_LENGTH;
-                    if self.digest_write_chunk.len() == maximum_chunk_byte_length {
-                        executor
-                            .append_object_bytes(
-                                storage,
-                                self.digest_level_objects[0],
-                                &self.digest_write_chunk,
-                            )
-                            .map_err(CommonProofTreeStorageError::Storage)?;
-                        self.digest_write_chunk.zeroize();
-                        if digest_is_buffered {
-                            self.finish_current_leaf()
-                                .map_err(CommonProofTreeStorageError::Prover)?;
-                        }
-                        return Ok(
-                            CommonProofMerkleMaterializerProgress::StorageTransactionCompleted,
-                        );
-                    }
-                    if !digest_is_buffered {
-                        return Err(CommonProofTreeStorageError::Prover(
-                            CommonProofProverError::InvalidTree,
-                        ));
-                    }
                     self.finish_current_leaf()
                         .map_err(CommonProofTreeStorageError::Prover)?;
                 }
                 CommonProofMerkleMaterializerPhase::FlushLeafBytes => {
                     if self.leaf_bytes_write_chunk.is_empty() {
-                        self.phase = CommonProofMerkleMaterializerPhase::FlushLeafDigests;
+                        self.phase = CommonProofMerkleMaterializerPhase::SealLeafBytes;
                         continue;
                     }
                     executor
@@ -730,22 +544,6 @@ impl CommonProofMerkleMaterializer {
                         )
                         .map_err(CommonProofTreeStorageError::Storage)?;
                     self.leaf_bytes_write_chunk.zeroize();
-                    self.phase = CommonProofMerkleMaterializerPhase::FlushLeafDigests;
-                    return Ok(CommonProofMerkleMaterializerProgress::StorageTransactionCompleted);
-                }
-                CommonProofMerkleMaterializerPhase::FlushLeafDigests => {
-                    if self.digest_write_chunk.is_empty() {
-                        self.phase = CommonProofMerkleMaterializerPhase::SealLeafBytes;
-                        continue;
-                    }
-                    executor
-                        .append_object_bytes(
-                            storage,
-                            self.digest_level_objects[0],
-                            &self.digest_write_chunk,
-                        )
-                        .map_err(CommonProofTreeStorageError::Storage)?;
-                    self.digest_write_chunk.zeroize();
                     self.phase = CommonProofMerkleMaterializerPhase::SealLeafBytes;
                     return Ok(CommonProofMerkleMaterializerProgress::StorageTransactionCompleted);
                 }
@@ -753,218 +551,22 @@ impl CommonProofMerkleMaterializer {
                     executor
                         .seal_object(storage, self.leaf_bytes_object)
                         .map_err(CommonProofTreeStorageError::Storage)?;
-                    self.phase = CommonProofMerkleMaterializerPhase::SealLeafDigests;
-                    return Ok(CommonProofMerkleMaterializerProgress::StorageTransactionCompleted);
-                }
-                CommonProofMerkleMaterializerPhase::SealLeafDigests => {
-                    executor
-                        .seal_object(storage, self.digest_level_objects[0])
-                        .map_err(CommonProofTreeStorageError::Storage)?;
-                    self.current_level_ordinal = 1;
-                    self.phase = if self.digest_level_objects.len() == 1 {
-                        CommonProofMerkleMaterializerPhase::ReadRoot
-                    } else {
-                        CommonProofMerkleMaterializerPhase::BeginParentLevel
-                    };
-                    return Ok(CommonProofMerkleMaterializerProgress::StorageTransactionCompleted);
-                }
-                CommonProofMerkleMaterializerPhase::BeginParentLevel => {
-                    if !self.digest_write_chunk.is_empty() {
-                        return Err(CommonProofTreeStorageError::Prover(
-                            CommonProofProverError::InvalidTree,
-                        ));
-                    }
-                    let object = *self
-                        .digest_level_objects
-                        .get(self.current_level_ordinal)
+                    let (root, frontier_coordinates, frontier_digests) = self
+                        .path_replay
+                        .take()
                         .ok_or(CommonProofTreeStorageError::Prover(
                             CommonProofProverError::InvalidTree,
-                        ))?;
-                    executor
-                        .begin_object(storage, object)
-                        .map_err(CommonProofTreeStorageError::Storage)?;
-                    self.current_parent_index = 0;
-                    self.current_byte_offset = 0;
-                    self.phase = CommonProofMerkleMaterializerPhase::ReadLeftChild;
-                    return Ok(CommonProofMerkleMaterializerProgress::StorageTransactionCompleted);
-                }
-                CommonProofMerkleMaterializerPhase::ReadLeftChild => {
-                    let child_object = self.digest_level_objects[self.current_level_ordinal - 1];
-                    let child_index = self.current_parent_index.checked_mul(2).ok_or(
-                        CommonProofTreeStorageError::Prover(CommonProofProverError::CountOverflow),
-                    )?;
-                    let storage_offset =
-                        stored_hash_chunk_offset(child_index, self.current_byte_offset)
-                            .map_err(CommonProofTreeStorageError::Prover)?;
-                    let end = next_bounded_offset(
-                        self.current_byte_offset,
-                        HASH_BYTE_LENGTH,
-                        executor.maximum_chunk_byte_length(),
-                    )
-                    .map_err(CommonProofTreeStorageError::Prover)?;
-                    executor
-                        .read_object_bytes(
-                            storage,
-                            child_object,
-                            storage_offset,
-                            &mut self.left_child_digest[self.current_byte_offset..end],
-                        )
-                        .map_err(CommonProofTreeStorageError::Storage)?;
-                    self.current_byte_offset = end;
-                    if end == HASH_BYTE_LENGTH {
-                        self.current_byte_offset = 0;
-                        self.phase = CommonProofMerkleMaterializerPhase::ReadRightChild;
-                    }
-                    return Ok(CommonProofMerkleMaterializerProgress::StorageTransactionCompleted);
-                }
-                CommonProofMerkleMaterializerPhase::ReadRightChild => {
-                    let child_object = self.digest_level_objects[self.current_level_ordinal - 1];
-                    let child_index = self
-                        .current_parent_index
-                        .checked_mul(2)
-                        .and_then(|index| index.checked_add(1))
-                        .ok_or(CommonProofTreeStorageError::Prover(
-                            CommonProofProverError::CountOverflow,
-                        ))?;
-                    let storage_offset =
-                        stored_hash_chunk_offset(child_index, self.current_byte_offset)
-                            .map_err(CommonProofTreeStorageError::Prover)?;
-                    let end = next_bounded_offset(
-                        self.current_byte_offset,
-                        HASH_BYTE_LENGTH,
-                        executor.maximum_chunk_byte_length(),
-                    )
-                    .map_err(CommonProofTreeStorageError::Prover)?;
-                    executor
-                        .read_object_bytes(
-                            storage,
-                            child_object,
-                            storage_offset,
-                            &mut self.right_child_digest[self.current_byte_offset..end],
-                        )
-                        .map_err(CommonProofTreeStorageError::Storage)?;
-                    self.current_byte_offset = end;
-                    if end == HASH_BYTE_LENGTH {
-                        self.current_leaf_digest = self
-                            .catalog_entry
-                            .materialized_parent_digest(
-                                u32::try_from(self.current_level_ordinal).map_err(|_| {
-                                    CommonProofTreeStorageError::Prover(
-                                        CommonProofProverError::CountOverflow,
-                                    )
-                                })?,
-                                u64::try_from(self.current_parent_index).map_err(|_| {
-                                    CommonProofTreeStorageError::Prover(
-                                        CommonProofProverError::CountOverflow,
-                                    )
-                                })?,
-                                self.left_child_digest,
-                                self.right_child_digest,
-                            )
-                            .map_err(map_proof_body_tree_error)
-                            .map_err(CommonProofTreeStorageError::Prover)?;
-                        self.left_child_digest = [0; HASH_BYTE_LENGTH];
-                        self.right_child_digest = [0; HASH_BYTE_LENGTH];
-                        self.current_byte_offset = 0;
-                        self.phase = CommonProofMerkleMaterializerPhase::WriteParentDigest;
-                    }
-                    return Ok(CommonProofMerkleMaterializerProgress::StorageTransactionCompleted);
-                }
-                CommonProofMerkleMaterializerPhase::WriteParentDigest => {
-                    Self::fill_write_chunk(
-                        &mut self.digest_write_chunk,
-                        &self.current_leaf_digest,
-                        &mut self.current_byte_offset,
-                        maximum_chunk_byte_length,
-                    )
-                    .map_err(CommonProofTreeStorageError::Prover)?;
-                    let digest_is_buffered = self.current_byte_offset == HASH_BYTE_LENGTH;
-                    if self.digest_write_chunk.len() == maximum_chunk_byte_length {
-                        executor
-                            .append_object_bytes(
-                                storage,
-                                self.digest_level_objects[self.current_level_ordinal],
-                                &self.digest_write_chunk,
-                            )
-                            .map_err(CommonProofTreeStorageError::Storage)?;
-                        self.digest_write_chunk.zeroize();
-                        if digest_is_buffered {
-                            self.finish_current_parent_digest()
-                                .map_err(CommonProofTreeStorageError::Prover)?;
-                        }
-                        return Ok(
-                            CommonProofMerkleMaterializerProgress::StorageTransactionCompleted,
-                        );
-                    }
-                    if !digest_is_buffered {
-                        return Err(CommonProofTreeStorageError::Prover(
-                            CommonProofProverError::InvalidTree,
-                        ));
-                    }
-                    self.finish_current_parent_digest()
+                        ))?
+                        .finish(None)
+                        .map_err(CommonProofProverError::from)
                         .map_err(CommonProofTreeStorageError::Prover)?;
-                }
-                CommonProofMerkleMaterializerPhase::FlushParentLevel => {
-                    if self.digest_write_chunk.is_empty() {
-                        self.phase = CommonProofMerkleMaterializerPhase::SealParentLevel;
-                        continue;
+                    if !frontier_coordinates.is_empty() || !frontier_digests.is_empty() {
+                        return Err(CommonProofTreeStorageError::Prover(
+                            CommonProofProverError::InvalidTree,
+                        ));
                     }
-                    executor
-                        .append_object_bytes(
-                            storage,
-                            self.digest_level_objects[self.current_level_ordinal],
-                            &self.digest_write_chunk,
-                        )
-                        .map_err(CommonProofTreeStorageError::Storage)?;
-                    self.digest_write_chunk.zeroize();
-                    self.phase = CommonProofMerkleMaterializerPhase::SealParentLevel;
-                    return Ok(CommonProofMerkleMaterializerProgress::StorageTransactionCompleted);
-                }
-                CommonProofMerkleMaterializerPhase::SealParentLevel => {
-                    executor
-                        .seal_object(
-                            storage,
-                            self.digest_level_objects[self.current_level_ordinal],
-                        )
-                        .map_err(CommonProofTreeStorageError::Storage)?;
-                    self.current_level_ordinal = self.current_level_ordinal.checked_add(1).ok_or(
-                        CommonProofTreeStorageError::Prover(CommonProofProverError::CountOverflow),
-                    )?;
-                    self.phase = if self.current_level_ordinal == self.digest_level_objects.len() {
-                        self.current_byte_offset = 0;
-                        CommonProofMerkleMaterializerPhase::ReadRoot
-                    } else {
-                        CommonProofMerkleMaterializerPhase::BeginParentLevel
-                    };
-                    return Ok(CommonProofMerkleMaterializerProgress::StorageTransactionCompleted);
-                }
-                CommonProofMerkleMaterializerPhase::ReadRoot => {
-                    let end = next_bounded_offset(
-                        self.current_byte_offset,
-                        HASH_BYTE_LENGTH,
-                        executor.maximum_chunk_byte_length(),
-                    )
-                    .map_err(CommonProofTreeStorageError::Prover)?;
-                    executor
-                        .read_object_bytes(
-                            storage,
-                            *self.digest_level_objects.last().ok_or(
-                                CommonProofTreeStorageError::Prover(
-                                    CommonProofProverError::InvalidTree,
-                                ),
-                            )?,
-                            u64::try_from(self.current_byte_offset).map_err(|_| {
-                                CommonProofTreeStorageError::Prover(
-                                    CommonProofProverError::CountOverflow,
-                                )
-                            })?,
-                            &mut self.root[self.current_byte_offset..end],
-                        )
-                        .map_err(CommonProofTreeStorageError::Storage)?;
-                    self.current_byte_offset = end;
-                    if end == HASH_BYTE_LENGTH {
-                        self.phase = CommonProofMerkleMaterializerPhase::Complete;
-                    }
+                    self.root = Some(root);
+                    self.phase = CommonProofMerkleMaterializerPhase::Complete;
                     return Ok(CommonProofMerkleMaterializerProgress::StorageTransactionCompleted);
                 }
                 CommonProofMerkleMaterializerPhase::Complete => {
@@ -977,6 +579,7 @@ impl CommonProofMerkleMaterializer {
     pub(crate) fn finish(self) -> Result<StoredCommonProofMerkleTree, CommonProofProverError> {
         if self.phase != CommonProofMerkleMaterializerPhase::Complete
             || self.next_leaf_index != self.leaf_count
+            || self.path_replay.is_some()
         {
             return Err(CommonProofProverError::InvalidTree);
         }
@@ -986,8 +589,7 @@ impl CommonProofMerkleMaterializer {
             leaf_count: self.leaf_count,
             canonical_leaf_byte_length: self.canonical_leaf_byte_length,
             leaf_bytes_object: self.leaf_bytes_object,
-            digest_level_objects: self.digest_level_objects,
-            root: self.root,
+            root: self.root.ok_or(CommonProofProverError::InvalidTree)?,
         })
     }
 }
@@ -1007,17 +609,6 @@ fn next_bounded_offset(
                     .map_err(|_| CommonProofProverError::CountOverflow)?,
             ),
         )
-        .ok_or(CommonProofProverError::CountOverflow)
-}
-
-fn stored_hash_chunk_offset(
-    hash_index: usize,
-    within_hash_offset: usize,
-) -> Result<u64, CommonProofProverError> {
-    hash_index
-        .checked_mul(HASH_BYTE_LENGTH)
-        .and_then(|offset| offset.checked_add(within_hash_offset))
-        .and_then(|offset| u64::try_from(offset).ok())
         .ok_or(CommonProofProverError::CountOverflow)
 }
 
@@ -1046,7 +637,6 @@ fn map_proof_body_tree_error(error: ProofBodyError) -> CommonProofProverError {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CommonProofOpeningPrefetchPhase {
     ReadLeaves,
-    ReadFrontier,
     Complete,
 }
 
@@ -1056,26 +646,29 @@ pub(crate) enum CommonProofOpeningPrefetchProgress {
     Complete,
 }
 
-/// One tree's query material, prefetched through resumable IndexedDB reads.
-/// This is the largest browser-side query working set: it is capped explicitly,
-/// emitted immediately, and then dropped before the next catalog entry.
+/// One tree's query material, reconstructed by one sequential authenticated
+/// scan of the persisted canonical leaves. The cached root is checked before
+/// any opening artifact can leave this state machine.
 pub(crate) struct CommonProofOpeningPrefetcher {
     tree_catalog_index: u16,
     leaf_count: usize,
     canonical_leaf_byte_length: usize,
     leaf_bytes_object: ProofExternalMemoryObject,
-    digest_level_objects: Vec<ProofExternalMemoryObject>,
+    expected_root: [u8; HASH_BYTE_LENGTH],
     opened_leaf_indexes: Vec<u64>,
     opened_leaf_bytes: Zeroizing<Vec<u8>>,
-    frontier_coordinates: Vec<(u32, u64)>,
-    frontier_digests: Vec<[u8; HASH_BYTE_LENGTH]>,
+    current_leaf_bytes: Zeroizing<Vec<u8>>,
+    path_replay: Option<CommonProofMerklePathReplay>,
+    frontier_coordinates: Option<Vec<(u32, u64)>>,
+    frontier_digests: Option<Vec<[u8; HASH_BYTE_LENGTH]>>,
+    replay_error: Option<CommonProofProverError>,
     phase: CommonProofOpeningPrefetchPhase,
-    next_item_index: usize,
+    next_leaf_index: usize,
+    next_opened_leaf_position: usize,
     current_byte_offset: usize,
 }
 
 impl CommonProofOpeningPrefetcher {
-    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         tree: &StoredCommonProofMerkleTree,
         catalog_entry: &ProofTreeCatalogEntry,
@@ -1083,22 +676,17 @@ impl CommonProofOpeningPrefetcher {
         sorted_query_representatives: &[u64],
         maximum_prefetched_byte_length: u64,
     ) -> Result<Self, CommonProofProverError> {
-        if catalog_entry.uses_setup_polynomial_construction() {
-            return Err(CommonProofProverError::InvalidTree);
-        }
+        let context = catalog_entry
+            .common_context()
+            .ok_or(CommonProofProverError::InvalidTree)?;
         let expected_leaf_count = entry_leaf_count(catalog_entry, evaluation_domain_size)
             .map_err(map_proof_body_tree_error)?;
         let expected_leaf_byte_length =
             canonical_leaf_byte_length(catalog_entry).map_err(map_proof_body_tree_error)?;
-        let expected_digest_level_count = usize::try_from(expected_leaf_count.trailing_zeros())
-            .map_err(|_| CommonProofProverError::CountOverflow)?
-            .checked_add(1)
-            .ok_or(CommonProofProverError::CountOverflow)?;
         if tree.tree_catalog_index != catalog_entry.tree_catalog_index()
             || &tree.catalog_entry != catalog_entry
             || tree.leaf_count != expected_leaf_count
             || tree.canonical_leaf_byte_length != expected_leaf_byte_length
-            || tree.digest_level_objects.len() != expected_digest_level_count
             || maximum_prefetched_byte_length == 0
         {
             return Err(CommonProofProverError::InvalidTree);
@@ -1108,14 +696,16 @@ impl CommonProofOpeningPrefetcher {
             evaluation_domain_size,
             sorted_query_representatives,
         )?;
-        let frontier_coordinates =
-            minimal_frontier_coordinates(&opened_leaf_indexes, tree.leaf_count)?;
+        if opened_leaf_indexes.is_empty() {
+            return Err(CommonProofProverError::InvalidOpening);
+        }
+        let path_replay = CommonProofMerklePathReplay::new(context, &opened_leaf_indexes)?;
         let opened_leaf_byte_length = opened_leaf_indexes
             .len()
             .checked_mul(tree.canonical_leaf_byte_length)
             .ok_or(CommonProofProverError::CountOverflow)?;
-        let frontier_byte_length = frontier_coordinates
-            .len()
+        let frontier_byte_length = path_replay
+            .frontier_node_count()
             .checked_mul(HASH_BYTE_LENGTH)
             .ok_or(CommonProofProverError::CountOverflow)?;
         let prefetched_byte_length = opened_leaf_byte_length
@@ -1132,25 +722,98 @@ impl CommonProofOpeningPrefetcher {
             .try_reserve_exact(opened_leaf_byte_length)
             .map_err(|_| CommonProofProverError::AllocationLimitExceeded)?;
         opened_leaf_bytes.resize(opened_leaf_byte_length, 0);
-        let mut frontier_digests = Vec::new();
-        frontier_digests
-            .try_reserve_exact(frontier_coordinates.len())
+        let mut current_leaf_bytes = Vec::new();
+        current_leaf_bytes
+            .try_reserve_exact(tree.canonical_leaf_byte_length)
             .map_err(|_| CommonProofProverError::AllocationLimitExceeded)?;
-        frontier_digests.resize(frontier_coordinates.len(), [0; HASH_BYTE_LENGTH]);
+        current_leaf_bytes.resize(tree.canonical_leaf_byte_length, 0);
         Ok(Self {
             tree_catalog_index: tree.tree_catalog_index,
             leaf_count: tree.leaf_count,
             canonical_leaf_byte_length: tree.canonical_leaf_byte_length,
             leaf_bytes_object: tree.leaf_bytes_object,
-            digest_level_objects: tree.digest_level_objects.clone(),
+            expected_root: tree.root,
             opened_leaf_indexes,
             opened_leaf_bytes: Zeroizing::new(opened_leaf_bytes),
-            frontier_coordinates,
-            frontier_digests,
+            current_leaf_bytes: Zeroizing::new(current_leaf_bytes),
+            path_replay: Some(path_replay),
+            frontier_coordinates: None,
+            frontier_digests: None,
+            replay_error: None,
             phase: CommonProofOpeningPrefetchPhase::ReadLeaves,
-            next_item_index: 0,
+            next_leaf_index: 0,
+            next_opened_leaf_position: 0,
             current_byte_offset: 0,
         })
+    }
+
+    fn absorb_current_leaf(&mut self) -> Result<(), CommonProofProverError> {
+        if self.current_byte_offset != self.canonical_leaf_byte_length
+            || self.next_leaf_index >= self.leaf_count
+        {
+            return Err(CommonProofProverError::InvalidOpening);
+        }
+        let leaf_index = u64::try_from(self.next_leaf_index)
+            .map_err(|_| CommonProofProverError::CountOverflow)?;
+        let digest = canonical_proof_phase_pair_leaf_digest(&self.current_leaf_bytes)?;
+        self.path_replay
+            .as_mut()
+            .ok_or(CommonProofProverError::InvalidOpening)?
+            .absorb_leaf_digest(leaf_index, digest)?;
+        if self
+            .opened_leaf_indexes
+            .get(self.next_opened_leaf_position)
+            .copied()
+            == Some(leaf_index)
+        {
+            let destination_start = self
+                .next_opened_leaf_position
+                .checked_mul(self.canonical_leaf_byte_length)
+                .ok_or(CommonProofProverError::CountOverflow)?;
+            let destination_end = destination_start
+                .checked_add(self.canonical_leaf_byte_length)
+                .ok_or(CommonProofProverError::CountOverflow)?;
+            self.opened_leaf_bytes
+                .get_mut(destination_start..destination_end)
+                .ok_or(CommonProofProverError::InvalidOpening)?
+                .copy_from_slice(&self.current_leaf_bytes);
+            self.next_opened_leaf_position = self
+                .next_opened_leaf_position
+                .checked_add(1)
+                .ok_or(CommonProofProverError::CountOverflow)?;
+        }
+        self.current_leaf_bytes.fill(0);
+        self.current_byte_offset = 0;
+        self.next_leaf_index = self
+            .next_leaf_index
+            .checked_add(1)
+            .ok_or(CommonProofProverError::CountOverflow)?;
+        Ok(())
+    }
+
+    fn finish_scan(&mut self) -> Result<(), CommonProofProverError> {
+        if self.next_leaf_index != self.leaf_count
+            || self.next_opened_leaf_position != self.opened_leaf_indexes.len()
+            || self.frontier_coordinates.is_some()
+            || self.frontier_digests.is_some()
+        {
+            return Err(CommonProofProverError::InvalidOpening);
+        }
+        let (_, frontier_coordinates, frontier_digests) = self
+            .path_replay
+            .take()
+            .ok_or(CommonProofProverError::InvalidOpening)?
+            .finish(Some(self.expected_root))?;
+        self.frontier_coordinates = Some(frontier_coordinates);
+        self.frontier_digests = Some(frontier_digests);
+        Ok(())
+    }
+
+    fn record_replay_failure(&mut self, error: CommonProofProverError) {
+        self.current_leaf_bytes.fill(0);
+        self.path_replay = None;
+        self.replay_error = Some(error);
+        self.phase = CommonProofOpeningPrefetchPhase::Complete;
     }
 
     pub(crate) fn advance_storage<Storage: ProofExternalMemory>(
@@ -1161,20 +824,17 @@ impl CommonProofOpeningPrefetcher {
     {
         match self.phase {
             CommonProofOpeningPrefetchPhase::ReadLeaves => {
-                if self.next_item_index == self.opened_leaf_indexes.len() {
-                    self.next_item_index = 0;
-                    self.current_byte_offset = 0;
-                    self.phase = if self.frontier_coordinates.is_empty() {
-                        CommonProofOpeningPrefetchPhase::Complete
+                if self.next_leaf_index == self.leaf_count {
+                    if let Err(error) = self.finish_scan() {
+                        self.record_replay_failure(error);
                     } else {
-                        CommonProofOpeningPrefetchPhase::ReadFrontier
-                    };
-                    return self.advance_storage(executor, storage);
+                        self.phase = CommonProofOpeningPrefetchPhase::Complete;
+                    }
+                    return Ok(CommonProofOpeningPrefetchProgress::Complete);
                 }
-                let leaf_index = self.opened_leaf_indexes[self.next_item_index];
-                let leaf_storage_offset = usize::try_from(leaf_index)
-                    .ok()
-                    .and_then(|index| index.checked_mul(self.canonical_leaf_byte_length))
+                let leaf_storage_offset = self
+                    .next_leaf_index
+                    .checked_mul(self.canonical_leaf_byte_length)
                     .and_then(|offset| offset.checked_add(self.current_byte_offset))
                     .and_then(|offset| u64::try_from(offset).ok())
                     .ok_or(ProofExternalMemoryExecutorError::Execution(
@@ -1190,75 +850,17 @@ impl CommonProofOpeningPrefetcher {
                         super::external_memory::ProofExternalMemoryError::ResourceLimitExceeded,
                     )
                 })?;
-                let destination_start = self
-                    .next_item_index
-                    .checked_mul(self.canonical_leaf_byte_length)
-                    .and_then(|offset| offset.checked_add(self.current_byte_offset))
-                    .ok_or(ProofExternalMemoryExecutorError::Execution(
-                        super::external_memory::ProofExternalMemoryError::ResourceLimitExceeded,
-                    ))?;
-                let destination_end = destination_start
-                    .checked_add(end_within_leaf - self.current_byte_offset)
-                    .ok_or(ProofExternalMemoryExecutorError::Execution(
-                        super::external_memory::ProofExternalMemoryError::ResourceLimitExceeded,
-                    ))?;
                 executor.read_object_bytes(
                     storage,
                     self.leaf_bytes_object,
                     leaf_storage_offset,
-                    &mut self.opened_leaf_bytes[destination_start..destination_end],
+                    &mut self.current_leaf_bytes[self.current_byte_offset..end_within_leaf],
                 )?;
                 self.current_byte_offset = end_within_leaf;
                 if end_within_leaf == self.canonical_leaf_byte_length {
-                    self.next_item_index += 1;
-                    self.current_byte_offset = 0;
-                }
-                Ok(CommonProofOpeningPrefetchProgress::StorageTransactionCompleted)
-            }
-            CommonProofOpeningPrefetchPhase::ReadFrontier => {
-                if self.next_item_index == self.frontier_coordinates.len() {
-                    self.phase = CommonProofOpeningPrefetchPhase::Complete;
-                    return Ok(CommonProofOpeningPrefetchProgress::Complete);
-                }
-                let (level, node_index) = self.frontier_coordinates[self.next_item_index];
-                let object = *self
-                    .digest_level_objects
-                    .get(usize::try_from(level).map_err(|_| {
-                        ProofExternalMemoryExecutorError::Execution(
-                            super::external_memory::ProofExternalMemoryError::ResourceLimitExceeded,
-                        )
-                    })?)
-                    .ok_or(ProofExternalMemoryExecutorError::Execution(
-                        super::external_memory::ProofExternalMemoryError::WrongOffsetOrLength,
-                    ))?;
-                let storage_offset = usize::try_from(node_index)
-                    .ok()
-                    .and_then(|index| index.checked_mul(HASH_BYTE_LENGTH))
-                    .and_then(|offset| offset.checked_add(self.current_byte_offset))
-                    .and_then(|offset| u64::try_from(offset).ok())
-                    .ok_or(ProofExternalMemoryExecutorError::Execution(
-                        super::external_memory::ProofExternalMemoryError::ResourceLimitExceeded,
-                    ))?;
-                let end = next_bounded_offset(
-                    self.current_byte_offset,
-                    HASH_BYTE_LENGTH,
-                    executor.maximum_chunk_byte_length(),
-                )
-                .map_err(|_| {
-                    ProofExternalMemoryExecutorError::Execution(
-                        super::external_memory::ProofExternalMemoryError::ResourceLimitExceeded,
-                    )
-                })?;
-                executor.read_object_bytes(
-                    storage,
-                    object,
-                    storage_offset,
-                    &mut self.frontier_digests[self.next_item_index][self.current_byte_offset..end],
-                )?;
-                self.current_byte_offset = end;
-                if end == HASH_BYTE_LENGTH {
-                    self.next_item_index += 1;
-                    self.current_byte_offset = 0;
+                    if let Err(error) = self.absorb_current_leaf() {
+                        self.record_replay_failure(error);
+                    }
                 }
                 Ok(CommonProofOpeningPrefetchProgress::StorageTransactionCompleted)
             }
@@ -1269,9 +871,18 @@ impl CommonProofOpeningPrefetcher {
     }
 
     pub(crate) fn finish(
-        self,
+        mut self,
     ) -> Result<PrefetchedCommonProofOpeningArtifact, CommonProofProverError> {
         if self.phase != CommonProofOpeningPrefetchPhase::Complete {
+            return Err(CommonProofProverError::InvalidOpening);
+        }
+        if let Some(error) = self.replay_error {
+            return Err(error);
+        }
+        if self.path_replay.is_some()
+            || self.next_leaf_index != self.leaf_count
+            || self.next_opened_leaf_position != self.opened_leaf_indexes.len()
+        {
             return Err(CommonProofProverError::InvalidOpening);
         }
         Ok(PrefetchedCommonProofOpeningArtifact {
@@ -1280,8 +891,14 @@ impl CommonProofOpeningPrefetcher {
             canonical_leaf_byte_length: self.canonical_leaf_byte_length,
             opened_leaf_indexes: self.opened_leaf_indexes,
             opened_leaf_bytes: PrefetchedCommonProofLeafBytes::Flat(self.opened_leaf_bytes),
-            frontier_coordinates: self.frontier_coordinates,
-            frontier_digests: self.frontier_digests,
+            frontier_coordinates: self
+                .frontier_coordinates
+                .take()
+                .ok_or(CommonProofProverError::InvalidOpening)?,
+            frontier_digests: self
+                .frontier_digests
+                .take()
+                .ok_or(CommonProofProverError::InvalidOpening)?,
         })
     }
 }
@@ -2691,9 +2308,587 @@ mod tests {
     use crate::bgv::proof_suite::{
         CommonProofPrivacyMode, CommonProofTranscriptSchedule, ProofTreeCatalogInput,
         RelationProofTreeInput, StatementOwnedProofTreeInput, build_complete_proof_tree_catalog,
+        external_memory::ProofExternalMemoryPlan, merkle::verify_authentication_frontier,
     };
+    use std::collections::BTreeMap;
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum TestStorageError {
+        NoTransaction,
+        DuplicateObject,
+        MissingObject,
+        WrongLength,
+    }
+
+    #[derive(Clone)]
+    struct TestStoredObject {
+        bytes: Vec<u8>,
+        exact_byte_length: usize,
+        sealed: bool,
+        protection: ProofExternalMemoryProtection,
+    }
+
+    #[derive(Default)]
+    struct TestExternalMemory {
+        committed: BTreeMap<ProofExternalMemoryObject, TestStoredObject>,
+        transaction: Option<BTreeMap<ProofExternalMemoryObject, TestStoredObject>>,
+    }
+
+    impl ProofExternalMemory for TestExternalMemory {
+        type Error = TestStorageError;
+
+        fn begin_transaction(
+            &mut self,
+            _maximum_payload_byte_length: u64,
+            _maximum_operation_count: u32,
+        ) -> Result<(), Self::Error> {
+            if self.transaction.is_some() {
+                return Err(TestStorageError::DuplicateObject);
+            }
+            self.transaction = Some(self.committed.clone());
+            Ok(())
+        }
+
+        fn create_object(
+            &mut self,
+            object: ProofExternalMemoryObject,
+            protection: ProofExternalMemoryProtection,
+            exact_byte_length: u64,
+        ) -> Result<(), Self::Error> {
+            let transaction = self
+                .transaction
+                .as_mut()
+                .ok_or(TestStorageError::NoTransaction)?;
+            if transaction.contains_key(&object) {
+                return Err(TestStorageError::DuplicateObject);
+            }
+            transaction.insert(
+                object,
+                TestStoredObject {
+                    bytes: Vec::new(),
+                    exact_byte_length: usize::try_from(exact_byte_length)
+                        .map_err(|_| TestStorageError::WrongLength)?,
+                    sealed: false,
+                    protection,
+                },
+            );
+            Ok(())
+        }
+
+        fn append_object_bytes(
+            &mut self,
+            object: ProofExternalMemoryObject,
+            expected_offset: u64,
+            bytes: &[u8],
+        ) -> Result<(), Self::Error> {
+            let object = self
+                .transaction
+                .as_mut()
+                .ok_or(TestStorageError::NoTransaction)?
+                .get_mut(&object)
+                .ok_or(TestStorageError::MissingObject)?;
+            if object.sealed
+                || usize::try_from(expected_offset).ok() != Some(object.bytes.len())
+                || object
+                    .bytes
+                    .len()
+                    .checked_add(bytes.len())
+                    .is_none_or(|length| length > object.exact_byte_length)
+            {
+                return Err(TestStorageError::WrongLength);
+            }
+            object.bytes.extend_from_slice(bytes);
+            Ok(())
+        }
+
+        fn seal_object(&mut self, object: ProofExternalMemoryObject) -> Result<(), Self::Error> {
+            let object = self
+                .transaction
+                .as_mut()
+                .ok_or(TestStorageError::NoTransaction)?
+                .get_mut(&object)
+                .ok_or(TestStorageError::MissingObject)?;
+            if object.bytes.len() != object.exact_byte_length {
+                return Err(TestStorageError::WrongLength);
+            }
+            object.sealed = true;
+            Ok(())
+        }
+
+        fn read_object_bytes(
+            &mut self,
+            object: ProofExternalMemoryObject,
+            offset: u64,
+            destination: &mut [u8],
+        ) -> Result<(), Self::Error> {
+            let object = self
+                .transaction
+                .as_ref()
+                .ok_or(TestStorageError::NoTransaction)?
+                .get(&object)
+                .ok_or(TestStorageError::MissingObject)?;
+            if !object.sealed {
+                return Err(TestStorageError::WrongLength);
+            }
+            let offset = usize::try_from(offset).map_err(|_| TestStorageError::WrongLength)?;
+            let end = offset
+                .checked_add(destination.len())
+                .ok_or(TestStorageError::WrongLength)?;
+            destination.copy_from_slice(
+                object
+                    .bytes
+                    .get(offset..end)
+                    .ok_or(TestStorageError::WrongLength)?,
+            );
+            Ok(())
+        }
+
+        fn delete_object(&mut self, object: ProofExternalMemoryObject) -> Result<(), Self::Error> {
+            self.transaction
+                .as_mut()
+                .ok_or(TestStorageError::NoTransaction)?
+                .remove(&object)
+                .ok_or(TestStorageError::MissingObject)?;
+            Ok(())
+        }
+
+        fn commit_transaction(&mut self) -> Result<(), Self::Error> {
+            self.committed = self
+                .transaction
+                .take()
+                .ok_or(TestStorageError::NoTransaction)?;
+            Ok(())
+        }
+
+        fn abort_transaction(&mut self) -> Result<(), Self::Error> {
+            self.transaction
+                .take()
+                .ok_or(TestStorageError::NoTransaction)?;
+            Ok(())
+        }
+    }
+
+    struct NoPrivateCoins;
+
+    impl CommonProofPrivateCoinSource for NoPrivateCoins {
+        type Error = core::convert::Infallible;
+
+        fn sample_modulo(
+            &mut self,
+            _coordinate: CommonProofPrivateCoinCoordinate,
+            _modulus: u64,
+            _maximum_candidate_draws_per_output: u32,
+        ) -> Result<u64, Self::Error> {
+            unreachable!("public test leaves never sample private coins")
+        }
+
+        fn fill_raw_bytes(
+            &mut self,
+            _coordinate: CommonProofPrivateCoinCoordinate,
+            _destination: &mut [u8],
+        ) -> Result<(), Self::Error> {
+            unreachable!("public test leaves never sample private coins")
+        }
+    }
     fn test_base_value(value: u64) -> ProofBaseFieldElement {
         ProofBaseFieldElement::from_canonical(value).expect("the test value is canonical")
+    }
+
+    fn common_catalog_entry(
+        leaf_count: usize,
+        visibility: ProofLeafVisibility,
+    ) -> ProofTreeCatalogEntry {
+        let evaluation_domain_size = u64::try_from(leaf_count)
+            .expect("the test leaf count fits u64")
+            .checked_mul(2)
+            .expect("the test domain size fits u64");
+        let privacy_mode = match visibility {
+            ProofLeafVisibility::Public => CommonProofPrivacyMode::PublicOnly,
+            ProofLeafVisibility::SecretBearing => CommonProofPrivacyMode::SecretBearing,
+        };
+        let schedule = CommonProofTranscriptSchedule::new(
+            vec![0],
+            Vec::new(),
+            Vec::new(),
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            evaluation_domain_size / 2,
+            1,
+            privacy_mode,
+        )
+        .expect("the focused transcript schedule is valid");
+        build_complete_proof_tree_catalog(
+            ProofTreeCatalogInput {
+                suite_identifier: [0x41; 64],
+                canonical_proof_object_header_bytes: vec![0x52],
+                application_statement_schema_identifier: 0x1216,
+                proof_field_index: 0,
+                evaluation_domain_size,
+                relation_trees: vec![RelationProofTreeInput::ProofCreated {
+                    tree_role: ProofTreeRole::BaseOracle,
+                    row_width: 1,
+                    leaf_visibility: visibility,
+                }],
+            },
+            &schedule,
+        )
+        .expect("the focused common catalog is valid")
+        .entries()
+        .iter()
+        .find(|entry| {
+            matches!(
+                entry.source(),
+                ProofTreeCatalogSource::RelationProofCreated {
+                    tree_role: ProofTreeRole::BaseOracle,
+                    tree_ordinal: 0,
+                }
+            )
+        })
+        .expect("the focused base tree exists")
+        .clone()
+    }
+
+    fn public_leaf_values(
+        leaf_index: u64,
+    ) -> (
+        Zeroizing<Vec<ProofTreeValue>>,
+        Zeroizing<Vec<ProofTreeValue>>,
+    ) {
+        (
+            Zeroizing::new(vec![ProofTreeValue::Base(test_base_value(
+                leaf_index.checked_add(1).expect("the test value fits u64"),
+            ))]),
+            Zeroizing::new(vec![ProofTreeValue::Base(test_base_value(
+                leaf_index
+                    .checked_add(101)
+                    .expect("the opposite test value fits u64"),
+            ))]),
+        )
+    }
+
+    fn external_memory_executor(
+        storage_plan: &CommonProofMerkleStoragePlan,
+    ) -> ProofExternalMemoryExecutor {
+        let exact_byte_length = storage_plan
+            .object_plans()
+            .first()
+            .expect("the leaf object plan exists")
+            .exact_byte_length();
+        ProofExternalMemoryExecutor::new(
+            ProofExternalMemoryPlan::new(
+                2,
+                17,
+                17,
+                1,
+                exact_byte_length,
+                exact_byte_length,
+                exact_byte_length,
+                1_000_000,
+                storage_plan.object_plans().to_vec(),
+            )
+            .expect("the focused external-memory plan is valid"),
+        )
+    }
+
+    fn prepare_public_stored_tree(
+        leaf_count: usize,
+    ) -> (
+        ProofTreeCatalogEntry,
+        CommonProofMerkleStoragePlan,
+        StoredCommonProofMerkleTree,
+        ProofExternalMemoryExecutor,
+        TestExternalMemory,
+        Vec<Vec<u8>>,
+    ) {
+        let evaluation_domain_size = u64::try_from(leaf_count)
+            .expect("the test leaf count fits u64")
+            .checked_mul(2)
+            .expect("the test domain size fits u64");
+        let entry = common_catalog_entry(leaf_count, ProofLeafVisibility::Public);
+        let storage_plan =
+            common_proof_merkle_storage_plan(&entry, evaluation_domain_size, 7, 0, 1)
+                .expect("the common-tree storage plan derives");
+        let mut executor = external_memory_executor(&storage_plan);
+        let mut storage = TestExternalMemory::default();
+        let mut materializer = CommonProofMerkleMaterializer::new(
+            &entry,
+            evaluation_domain_size,
+            storage_plan.clone(),
+        )
+        .expect("the common-tree materializer initializes");
+        let mut expected_leaf_bytes = Vec::new();
+        let mut coins = NoPrivateCoins;
+        loop {
+            match materializer
+                .advance_storage(&mut executor, &mut storage)
+                .expect("the common tree materializes")
+            {
+                CommonProofMerkleMaterializerProgress::StorageTransactionCompleted => {}
+                CommonProofMerkleMaterializerProgress::NeedsLeafValues { leaf_index } => {
+                    let (expected_first_values, expected_opposite_values) =
+                        public_leaf_values(leaf_index);
+                    expected_leaf_bytes.push(
+                        entry
+                            .encode_materialized_leaf(
+                                leaf_index,
+                                None,
+                                expected_first_values,
+                                expected_opposite_values,
+                            )
+                            .expect("the expected leaf encodes")
+                            .0,
+                    );
+                    let (first_values, opposite_values) = public_leaf_values(leaf_index);
+                    materializer
+                        .supply_next_leaf(first_values, opposite_values, None, &mut coins)
+                        .expect("the next public leaf is supplied");
+                }
+                CommonProofMerkleMaterializerProgress::Complete => break,
+            }
+        }
+        let tree = materializer
+            .finish()
+            .expect("the stored common tree finishes");
+        let stored_object = storage
+            .committed
+            .get(&tree.leaf_bytes_object)
+            .expect("the canonical leaf object exists");
+        assert!(stored_object.sealed);
+        assert_eq!(
+            stored_object.protection,
+            ProofExternalMemoryProtection::PublicIntegrity,
+        );
+        assert_eq!(
+            stored_object.bytes,
+            expected_leaf_bytes.concat(),
+            "only canonical leaves are persisted in source order",
+        );
+        executor
+            .complete_step(&mut storage)
+            .expect("the materialization step completes");
+        (
+            entry,
+            storage_plan,
+            tree,
+            executor,
+            storage,
+            expected_leaf_bytes,
+        )
+    }
+
+    fn drive_opening_prefetch(
+        prefetcher: &mut CommonProofOpeningPrefetcher,
+        executor: &mut ProofExternalMemoryExecutor,
+        storage: &mut TestExternalMemory,
+    ) -> Result<(), ProofExternalMemoryExecutorError<TestStorageError>> {
+        loop {
+            match prefetcher.advance_storage(executor, storage)? {
+                CommonProofOpeningPrefetchProgress::StorageTransactionCompleted => {}
+                CommonProofOpeningPrefetchProgress::Complete => return Ok(()),
+            }
+        }
+    }
+
+    #[test]
+    fn common_tree_plan_persists_one_protected_leaf_object_only() {
+        for (visibility, expected_protection) in [
+            (
+                ProofLeafVisibility::Public,
+                ProofExternalMemoryProtection::PublicIntegrity,
+            ),
+            (
+                ProofLeafVisibility::SecretBearing,
+                ProofExternalMemoryProtection::SecretAuthenticatedEncryption,
+            ),
+        ] {
+            let entry = common_catalog_entry(4, visibility);
+            let plan = common_proof_merkle_storage_plan(&entry, 8, 19, 3, 7)
+                .expect("the common-tree plan derives");
+            assert_eq!(plan.object_plans().len(), 1);
+            assert_eq!(plan.next_object_ordinal(), 20);
+            assert_eq!(plan.object_plans()[0].protection(), expected_protection,);
+            assert_eq!(plan.object_plans()[0].object(), plan.leaf_bytes_object);
+            assert_eq!(plan.object_plans()[0].issued_step(), 3);
+            assert_eq!(plan.object_plans()[0].seal_step(), 3);
+            assert_eq!(plan.object_plans()[0].last_use_step(), 7);
+            assert_eq!(plan.stored_tree_resident_owned_payload_byte_length(), Ok(0));
+        }
+
+        let entry = common_catalog_entry(4, ProofLeafVisibility::Public);
+        let valid_plan = common_proof_merkle_storage_plan(&entry, 8, 19, 3, 7)
+            .expect("the valid common-tree plan derives");
+        let mut wrong_protection_plan = valid_plan.clone();
+        wrong_protection_plan.object_plans[0] = ProofExternalMemoryObjectPlan::new(
+            wrong_protection_plan.leaf_bytes_object,
+            ProofExternalMemoryProtection::SecretAuthenticatedEncryption,
+            valid_plan.object_plans()[0].exact_byte_length(),
+            3,
+            3,
+            7,
+        );
+        assert!(matches!(
+            CommonProofMerkleMaterializer::new(&entry, 8, wrong_protection_plan),
+            Err(CommonProofProverError::InvalidTree),
+        ));
+    }
+
+    #[test]
+    fn common_tree_query_scan_authenticates_paths_and_completes_lifecycle() {
+        let (entry, storage_plan, tree, mut executor, mut storage, expected_leaf_bytes) =
+            prepare_public_stored_tree(4);
+        let query_indexes = [0_u64, 3];
+        let mut prefetcher =
+            CommonProofOpeningPrefetcher::new(&tree, &entry, 8, &query_indexes, u64::MAX)
+                .expect("the sequential opening scan initializes");
+        drive_opening_prefetch(&mut prefetcher, &mut executor, &mut storage)
+            .expect("the sequential opening scan completes");
+        assert_eq!(
+            executor.usage().total_read_byte_length(),
+            storage_plan.object_plans()[0].exact_byte_length(),
+            "the opening path scans the leaf object exactly once",
+        );
+        let artifact = prefetcher
+            .finish()
+            .expect("the root-authenticated artifact is released");
+        assert_eq!(artifact.opened_leaf_indexes(), query_indexes);
+        for (position, leaf_index) in query_indexes.iter().copied().enumerate() {
+            assert_eq!(
+                artifact
+                    .canonical_leaf_bytes_by_position(position)
+                    .expect("the opened leaf bytes exist"),
+                expected_leaf_bytes
+                    .get(usize::try_from(leaf_index).expect("the leaf index fits usize"))
+                    .expect("the expected leaf bytes exist"),
+            );
+        }
+        let opened_leaf_digests = query_indexes
+            .iter()
+            .copied()
+            .enumerate()
+            .map(|(position, leaf_index)| {
+                Ok((
+                    leaf_index,
+                    canonical_proof_phase_pair_leaf_digest(
+                        artifact.canonical_leaf_bytes_by_position(position)?,
+                    )?,
+                ))
+            })
+            .collect::<Result<Vec<_>, CommonProofProverError>>()
+            .expect("the opened leaf digests derive");
+        let frontier_digests = (0..artifact.frontier_coordinates().len())
+            .map(|position| artifact.frontier_digest_by_position(position))
+            .collect::<Result<Vec<_>, _>>()
+            .expect("the frontier digests are complete");
+        verify_authentication_frontier(
+            entry.common_context().expect("the common context exists"),
+            &opened_leaf_digests,
+            &frontier_digests,
+            tree.root(),
+        )
+        .expect("the emitted paths authenticate to the cached root");
+
+        executor
+            .complete_step(&mut storage)
+            .expect("the query step deletes the leaf object");
+        assert!(storage.committed.is_empty());
+        let usage = executor.finish().expect("the lifecycle finishes");
+        assert_eq!(usage.deleted_object_count(), 1);
+    }
+
+    #[test]
+    fn common_tree_query_scan_rejects_wrong_root_mutation_truncation_and_order() {
+        let (entry, _, tree, mut executor, mut storage, _) = prepare_public_stored_tree(4);
+        let mut wrong_root_tree = tree.clone();
+        wrong_root_tree.root[0] ^= 1;
+        let mut wrong_root_prefetcher =
+            CommonProofOpeningPrefetcher::new(&wrong_root_tree, &entry, 8, &[0, 3], u64::MAX)
+                .expect("the wrong-root scan initializes");
+        drive_opening_prefetch(&mut wrong_root_prefetcher, &mut executor, &mut storage)
+            .expect("the wrong-root leaf scan completes");
+        assert!(matches!(
+            wrong_root_prefetcher.finish(),
+            Err(CommonProofProverError::Merkle(
+                ProofMerkleError::RootMismatch
+            )),
+        ));
+
+        let (entry, _, tree, mut executor, mut storage, _) = prepare_public_stored_tree(4);
+        storage
+            .committed
+            .get_mut(&tree.leaf_bytes_object)
+            .expect("the leaf object exists")
+            .bytes[tree.canonical_leaf_byte_length + 7] ^= 1;
+        let mut mutated_prefetcher =
+            CommonProofOpeningPrefetcher::new(&tree, &entry, 8, &[0, 3], u64::MAX)
+                .expect("the mutated scan initializes");
+        drive_opening_prefetch(&mut mutated_prefetcher, &mut executor, &mut storage)
+            .expect("the mutated leaf scan completes");
+        assert!(matches!(
+            mutated_prefetcher.finish(),
+            Err(CommonProofProverError::Merkle(
+                ProofMerkleError::RootMismatch
+            )),
+        ));
+
+        let (entry, _, tree, mut executor, mut storage, _) = prepare_public_stored_tree(4);
+        let stored_bytes = &mut storage
+            .committed
+            .get_mut(&tree.leaf_bytes_object)
+            .expect("the leaf object exists")
+            .bytes;
+        let first_leaf = stored_bytes[..tree.canonical_leaf_byte_length].to_vec();
+        let second_leaf = stored_bytes
+            [tree.canonical_leaf_byte_length..2 * tree.canonical_leaf_byte_length]
+            .to_vec();
+        stored_bytes[..tree.canonical_leaf_byte_length].copy_from_slice(&second_leaf);
+        stored_bytes[tree.canonical_leaf_byte_length..2 * tree.canonical_leaf_byte_length]
+            .copy_from_slice(&first_leaf);
+        let mut reordered_prefetcher =
+            CommonProofOpeningPrefetcher::new(&tree, &entry, 8, &[0, 3], u64::MAX)
+                .expect("the reordered scan initializes");
+        drive_opening_prefetch(&mut reordered_prefetcher, &mut executor, &mut storage)
+            .expect("the reordered leaf scan completes");
+        assert!(matches!(
+            reordered_prefetcher.finish(),
+            Err(CommonProofProverError::Merkle(
+                ProofMerkleError::RootMismatch
+            )),
+        ));
+
+        let (entry, _, tree, mut executor, mut storage, _) = prepare_public_stored_tree(4);
+        storage
+            .committed
+            .get_mut(&tree.leaf_bytes_object)
+            .expect("the leaf object exists")
+            .bytes
+            .pop();
+        let mut truncated_prefetcher =
+            CommonProofOpeningPrefetcher::new(&tree, &entry, 8, &[0, 3], u64::MAX)
+                .expect("the truncated scan initializes");
+        assert_eq!(
+            drive_opening_prefetch(&mut truncated_prefetcher, &mut executor, &mut storage),
+            Err(ProofExternalMemoryExecutorError::Storage(
+                TestStorageError::WrongLength,
+            )),
+        );
+    }
+
+    #[test]
+    fn common_tree_leaf_storage_is_removed_on_cancellation() {
+        let (_, _, _, mut executor, mut storage, _) = prepare_public_stored_tree(4);
+        assert_eq!(storage.committed.len(), 1);
+        executor
+            .cancel(&mut storage)
+            .expect("cancellation removes the live leaf object");
+        executor
+            .cancel(&mut storage)
+            .expect("cancellation remains idempotent");
+        assert!(storage.committed.is_empty());
     }
 
     fn replay_base_field_value(
@@ -3178,7 +3373,6 @@ mod tests {
         let leaf_bytes_object = ProofExternalMemoryObject::new(0);
         let forged_plan = CommonProofMerkleStoragePlan {
             leaf_bytes_object,
-            digest_level_objects: Vec::new(),
             object_plans: Vec::new(),
             canonical_leaf_byte_length: 1,
             next_object_ordinal: 1,
@@ -3194,7 +3388,6 @@ mod tests {
             leaf_count: 2,
             canonical_leaf_byte_length: 1,
             leaf_bytes_object,
-            digest_level_objects: Vec::new(),
             root: entry.bound_root().expect("the setup root is bound"),
         };
         assert!(matches!(

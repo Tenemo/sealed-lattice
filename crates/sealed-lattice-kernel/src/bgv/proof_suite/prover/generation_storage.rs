@@ -1182,7 +1182,6 @@ fn stockham_output_object_pair(
 
 struct CommonProofQuotientStreamRequirement {
     constraint_columns: Vec<Vec<u32>>,
-    transform_count: u64,
     total_read_byte_length: u64,
     read_transaction_count: u64,
     maximum_rotation_block_byte_length: u64,
@@ -1214,7 +1213,6 @@ fn common_proof_quotient_stream_requirement(
     constraint_columns
         .try_reserve_exact(variant.constraint_count())
         .map_err(|_| CommonProofProverError::AllocationLimitExceeded)?;
-    let mut transform_count = 0_u64;
     let mut total_read_byte_length = 0_u64;
     let mut read_transaction_count = 0_u64;
     let mut maximum_rotation_block_byte_length = 0_u64;
@@ -1350,15 +1348,10 @@ fn common_proof_quotient_stream_requirement(
                 maximum_read_subphase_transient_byte_length.max(completed_query_block_byte_length);
             block_start = block_end;
         }
-        transform_count = transform_count
-            .checked_add(
-                u64::try_from(columns.len()).map_err(|_| CommonProofProverError::CountOverflow)?,
-            )
-            .ok_or(CommonProofProverError::CountOverflow)?;
         constraint_columns.push(columns);
     }
     if constraint_columns.is_empty()
-        || transform_count == 0
+        || constraint_columns.iter().any(Vec::is_empty)
         || maximum_rotation_block_byte_length == 0
         || maximum_read_working_set_byte_length == 0
         || maximum_read_transaction_overlap_peak_byte_length == 0
@@ -1368,7 +1361,6 @@ fn common_proof_quotient_stream_requirement(
     }
     Ok(CommonProofQuotientStreamRequirement {
         constraint_columns,
-        transform_count,
         total_read_byte_length,
         read_transaction_count,
         maximum_rotation_block_byte_length,
@@ -1603,6 +1595,23 @@ fn derive_generated_common_proof_storage_geometry(
     let quotient_stream_requirement =
         common_proof_quotient_stream_requirement(variant, u64::from(maximum_chunk_byte_length))
             .map_err(GeneratedCommonProofStoragePlanError::Prover)?;
+    let mut quotient_transform_first_constraint_by_column = BTreeMap::new();
+    for (constraint_index, columns) in quotient_stream_requirement
+        .constraint_columns
+        .iter()
+        .enumerate()
+    {
+        let constraint_ordinal = u32::try_from(constraint_index).map_err(|_| {
+            GeneratedCommonProofStoragePlanError::Prover(CommonProofProverError::CountOverflow)
+        })?;
+        for column_ordinal in columns {
+            if !tree_roles_by_column.contains_key(column_ordinal) {
+                quotient_transform_first_constraint_by_column
+                    .entry(*column_ordinal)
+                    .or_insert(constraint_ordinal);
+            }
+        }
+    }
     let base_transform_pass_count = u32::try_from(base_tree_column_count)
         .ok()
         .and_then(|column_count| column_count.checked_mul(transform_pass_count_per_column))
@@ -1663,16 +1672,13 @@ fn derive_generated_common_proof_storage_geometry(
             CommonProofProverError::CountOverflow,
         ))?;
     let quotient_transform_pass_count = u32::try_from(
-        quotient_stream_requirement
-            .transform_count
-            .checked_mul(u64::from(transform_pass_count_per_column))
-            .ok_or(GeneratedCommonProofStoragePlanError::Prover(
-                CommonProofProverError::CountOverflow,
-            ))?,
+        quotient_transform_first_constraint_by_column.len(),
     )
-    .map_err(|_| {
-        GeneratedCommonProofStoragePlanError::Prover(CommonProofProverError::CountOverflow)
-    })?;
+    .ok()
+    .and_then(|column_count| column_count.checked_mul(transform_pass_count_per_column))
+    .ok_or(GeneratedCommonProofStoragePlanError::Prover(
+        CommonProofProverError::CountOverflow,
+    ))?;
     let quotient_constraint_evaluation_step_count =
         u32::try_from(quotient_stream_requirement.constraint_columns.len()).map_err(|_| {
             GeneratedCommonProofStoragePlanError::Prover(CommonProofProverError::CountOverflow)
@@ -1762,23 +1768,56 @@ fn derive_generated_common_proof_storage_geometry(
                 .or_insert(materialization_step);
         }
     }
-    let first_setup_polynomial_query_transform_step = next_post_auxiliary_tree_step;
-    let setup_polynomial_query_work_step_count = setup_polynomial_column_count
-        .checked_mul(transform_pass_count_per_column.checked_add(1).ok_or(
+    let mut next_quotient_use_step = first_quotient_transform_step;
+    for (constraint_index, columns) in quotient_stream_requirement
+        .constraint_columns
+        .iter()
+        .enumerate()
+    {
+        let constraint_ordinal = u32::try_from(constraint_index).map_err(|_| {
+            GeneratedCommonProofStoragePlanError::Prover(CommonProofProverError::CountOverflow)
+        })?;
+        let first_use_transform_count = u32::try_from(
+            columns
+                .iter()
+                .filter(|column_ordinal| {
+                    quotient_transform_first_constraint_by_column.get(column_ordinal)
+                        == Some(&constraint_ordinal)
+                })
+                .count(),
+        )
+        .map_err(|_| {
+            GeneratedCommonProofStoragePlanError::Prover(CommonProofProverError::CountOverflow)
+        })?;
+        let constraint_evaluation_step = next_quotient_use_step
+            .checked_add(
+                first_use_transform_count
+                    .checked_mul(transform_pass_count_per_column)
+                    .ok_or(GeneratedCommonProofStoragePlanError::Prover(
+                        CommonProofProverError::CountOverflow,
+                    ))?,
+            )
+            .ok_or(GeneratedCommonProofStoragePlanError::Prover(
+                CommonProofProverError::CountOverflow,
+            ))?;
+        for column_ordinal in columns {
+            last_relation_evaluation_use_steps
+                .entry(*column_ordinal)
+                .and_modify(|last_use_step| {
+                    *last_use_step = (*last_use_step).max(constraint_evaluation_step);
+                })
+                .or_insert(constraint_evaluation_step);
+        }
+        next_quotient_use_step = constraint_evaluation_step.checked_add(1).ok_or(
             GeneratedCommonProofStoragePlanError::Prover(CommonProofProverError::CountOverflow),
-        )?)
-        .ok_or(GeneratedCommonProofStoragePlanError::Prover(
-            CommonProofProverError::CountOverflow,
-        ))?;
-    let query_step = first_setup_polynomial_query_transform_step
-        .checked_add(if include_replay_polynomials {
-            setup_polynomial_query_work_step_count
-        } else {
-            0
-        })
-        .ok_or(GeneratedCommonProofStoragePlanError::Prover(
-            CommonProofProverError::CountOverflow,
-        ))?;
+        )?;
+    }
+    if next_quotient_use_step != first_post_auxiliary_tree_step {
+        return Err(GeneratedCommonProofStoragePlanError::Prover(
+            CommonProofProverError::InvalidQuotient,
+        ));
+    }
+    let query_step = next_post_auxiliary_tree_step;
     for (tree_index, descriptor) in variant.ordered_trees().iter().enumerate() {
         let RelationTreeDescriptor::BoundPublic {
             ordered_column_ordinals,
@@ -1802,6 +1841,12 @@ fn derive_generated_common_proof_storage_geometry(
                 .and_modify(|last_use_step| *last_use_step = (*last_use_step).max(query_step))
                 .or_insert(query_step);
         }
+    }
+    for column_ordinal in &setup_polynomial_column_ordinals {
+        last_relation_evaluation_use_steps
+            .entry(*column_ordinal)
+            .and_modify(|last_use_step| *last_use_step = (*last_use_step).max(query_step))
+            .or_insert(query_step);
     }
     let quotient_component_tree_count = u32::try_from(
         common_entries
