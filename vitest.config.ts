@@ -115,11 +115,26 @@ const testResolve = {
     tsconfigPaths: true,
 } as const;
 
-const desktopBrowserInstances: BrowserInstanceOption[] = [
-    { browser: 'chromium', name: 'chromium-desktop' },
-    { browser: 'firefox', name: 'firefox-desktop' },
-    { browser: 'webkit', name: 'webkit-desktop' },
-];
+// Playwright stages active .network chunks directly under tracesDir. Keep
+// each engine in its own project and project-scoped directory so concurrent
+// instances can never write the same per-test chunk path.
+const desktopBrowserProjectDefinitions = [
+    {
+        browser: 'chromium',
+        instanceName: 'chromium-desktop',
+        projectName: 'browser-chromium-desktop',
+    },
+    {
+        browser: 'firefox',
+        instanceName: 'firefox-desktop',
+        projectName: 'browser-firefox-desktop',
+    },
+    {
+        browser: 'webkit',
+        instanceName: 'webkit-desktop',
+        projectName: 'browser-webkit-desktop',
+    },
+] as const;
 
 const desktopBrowserProofEvidenceInstances: BrowserInstanceOption[] = [
     {
@@ -181,51 +196,57 @@ const makeBrowserProject = ({
     instances,
     projectName,
     testTimeout,
-}: BrowserProjectInput): UserWorkspaceConfig => ({
-    resolve: testResolve,
-    test: {
-        name: projectName,
-        include: [...include],
-        ...(exclude === undefined ? {} : { exclude: [...exclude] }),
-        // Each real-WASM browser file can instantiate a large kernel and
-        // create workers. Running every file concurrently has exhausted the
-        // Firefox WebAssembly compiler and left its test process unable to
-        // shut down under otherwise valid multi-browser runs.
-        fileParallelism: false,
-        ...(hookTimeout === undefined ? {} : { hookTimeout }),
-        ...(testTimeout === undefined ? {} : { testTimeout }),
-        ...(nodeDiagnosticReportArguments.length === 0
-            ? {}
-            : { execArgv: nodeDiagnosticReportArguments }),
-        browser: {
-            enabled: true,
-            api: {
-                host: browserServerHost,
-                port: browserServerBasePort,
-                strictPort: false,
-            },
-            provider: playwright(),
-            headless: true,
-            instances,
-            ...(testAttachmentDirectoryPath === undefined
+}: BrowserProjectInput): UserWorkspaceConfig => {
+    const projectAttachmentDirectoryPath =
+        testAttachmentDirectoryPath === undefined
+            ? undefined
+            : path.join(testAttachmentDirectoryPath, projectName);
+    return {
+        resolve: testResolve,
+        test: {
+            name: projectName,
+            include: [...include],
+            ...(exclude === undefined ? {} : { exclude: [...exclude] }),
+            // Each real-WASM browser file can instantiate a large kernel and
+            // create workers. Running every file concurrently has exhausted the
+            // Firefox WebAssembly compiler and left its test process unable to
+            // shut down under otherwise valid multi-browser runs.
+            fileParallelism: false,
+            ...(hookTimeout === undefined ? {} : { hookTimeout }),
+            ...(testTimeout === undefined ? {} : { testTimeout }),
+            ...(nodeDiagnosticReportArguments.length === 0
                 ? {}
-                : {
-                      screenshotDirectory: path.join(
-                          testAttachmentDirectoryPath,
-                          'screenshots',
-                      ),
-                      screenshotFailures: true,
-                      trace: {
-                          mode: 'retain-on-failure' as const,
-                          tracesDir: path.join(
-                              testAttachmentDirectoryPath,
-                              'traces',
+                : { execArgv: nodeDiagnosticReportArguments }),
+            browser: {
+                enabled: true,
+                api: {
+                    host: browserServerHost,
+                    port: browserServerBasePort,
+                    strictPort: false,
+                },
+                provider: playwright(),
+                headless: true,
+                instances,
+                ...(projectAttachmentDirectoryPath === undefined
+                    ? {}
+                    : {
+                          screenshotDirectory: path.join(
+                              projectAttachmentDirectoryPath,
+                              'screenshots',
                           ),
-                      },
-                  }),
+                          screenshotFailures: true,
+                          trace: {
+                              mode: 'retain-on-failure' as const,
+                              tracesDir: path.join(
+                                  projectAttachmentDirectoryPath,
+                                  'traces',
+                              ),
+                          },
+                      }),
+            },
         },
-    },
-});
+    };
+};
 
 export default defineConfig({
     optimizeDeps: {
@@ -258,12 +279,15 @@ export default defineConfig({
             ...nodeTestProjectDefinitions.map((projectDefinition) =>
                 makeNodeProject(projectDefinition),
             ),
-            makeBrowserProject({
-                exclude: manualDesktopBrowserProofEvidenceGlobs,
-                include: desktopBrowserTestGlobs,
-                instances: desktopBrowserInstances,
-                projectName: 'browser-desktop',
-            }),
+            ...desktopBrowserProjectDefinitions.map(
+                ({ browser, instanceName, projectName }) =>
+                    makeBrowserProject({
+                        exclude: manualDesktopBrowserProofEvidenceGlobs,
+                        include: desktopBrowserTestGlobs,
+                        instances: [{ browser, name: instanceName }],
+                        projectName,
+                    }),
+            ),
             makeBrowserProject({
                 hookTimeout: 30 * 60_000,
                 include: manualDesktopBrowserProofEvidenceGlobs,
