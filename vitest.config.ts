@@ -115,26 +115,20 @@ const testResolve = {
     tsconfigPaths: true,
 } as const;
 
-// Playwright stages active .network chunks directly under tracesDir. Keep
-// each engine in its own project and project-scoped directory so concurrent
-// instances can never write the same per-test chunk path.
-const desktopBrowserProjectDefinitions = [
+const desktopBrowserInstances: BrowserInstanceOption[] = [
     {
         browser: 'chromium',
-        instanceName: 'chromium-desktop',
-        projectName: 'browser-chromium-desktop',
+        name: 'chromium-desktop',
     },
     {
         browser: 'firefox',
-        instanceName: 'firefox-desktop',
-        projectName: 'browser-firefox-desktop',
+        name: 'firefox-desktop',
     },
     {
         browser: 'webkit',
-        instanceName: 'webkit-desktop',
-        projectName: 'browser-webkit-desktop',
+        name: 'webkit-desktop',
     },
-] as const;
+];
 
 const desktopBrowserProofEvidenceInstances: BrowserInstanceOption[] = [
     {
@@ -186,6 +180,7 @@ type BrowserProjectInput = {
     readonly include: readonly string[];
     readonly instances: BrowserInstanceOption[];
     readonly projectName: string;
+    readonly retainFailureTrace?: boolean;
     readonly testTimeout?: number;
 };
 
@@ -195,6 +190,7 @@ const makeBrowserProject = ({
     include,
     instances,
     projectName,
+    retainFailureTrace = false,
     testTimeout,
 }: BrowserProjectInput): UserWorkspaceConfig => {
     const projectAttachmentDirectoryPath =
@@ -227,6 +223,21 @@ const makeBrowserProject = ({
                 provider: playwright(),
                 headless: true,
                 instances,
+                // Playwright writes active .network chunks to one project-level
+                // directory before Vitest can add browser or worker identity.
+                // Routine multi-engine coverage therefore keeps tracing off.
+                // The single-engine manual evidence project remains isolated.
+                trace:
+                    retainFailureTrace &&
+                    projectAttachmentDirectoryPath !== undefined
+                        ? {
+                              mode: 'retain-on-failure' as const,
+                              tracesDir: path.join(
+                                  projectAttachmentDirectoryPath,
+                                  'traces',
+                              ),
+                          }
+                        : ('off' as const),
                 ...(projectAttachmentDirectoryPath === undefined
                     ? {}
                     : {
@@ -235,13 +246,6 @@ const makeBrowserProject = ({
                               'screenshots',
                           ),
                           screenshotFailures: true,
-                          trace: {
-                              mode: 'retain-on-failure' as const,
-                              tracesDir: path.join(
-                                  projectAttachmentDirectoryPath,
-                                  'traces',
-                              ),
-                          },
                       }),
             },
         },
@@ -279,20 +283,18 @@ export default defineConfig({
             ...nodeTestProjectDefinitions.map((projectDefinition) =>
                 makeNodeProject(projectDefinition),
             ),
-            ...desktopBrowserProjectDefinitions.map(
-                ({ browser, instanceName, projectName }) =>
-                    makeBrowserProject({
-                        exclude: manualDesktopBrowserProofEvidenceGlobs,
-                        include: desktopBrowserTestGlobs,
-                        instances: [{ browser, name: instanceName }],
-                        projectName,
-                    }),
-            ),
+            makeBrowserProject({
+                exclude: manualDesktopBrowserProofEvidenceGlobs,
+                include: desktopBrowserTestGlobs,
+                instances: desktopBrowserInstances,
+                projectName: 'browser-desktop',
+            }),
             makeBrowserProject({
                 hookTimeout: 30 * 60_000,
                 include: manualDesktopBrowserProofEvidenceGlobs,
                 instances: desktopBrowserProofEvidenceInstances,
                 projectName: 'browser-desktop-proof-evidence',
+                retainFailureTrace: true,
                 testTimeout: 12 * 60 * 60_000,
             }),
         ],
