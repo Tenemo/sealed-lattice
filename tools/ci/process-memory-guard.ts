@@ -7,6 +7,7 @@ const bytesPerGigabyte = 1024 ** 3;
 const defaultHardMemoryLimitGigabytes = 32;
 const maximumHostMemoryFraction = 0.7;
 const reservedHostMemoryGigabytes = 2;
+const minimumResourceSampleIntervalMilliseconds = 100;
 
 export type ProcessMemoryGuard = Readonly<{
     buildVerificationCommand: () => CommandInvocation;
@@ -15,6 +16,7 @@ export type ProcessMemoryGuard = Readonly<{
         options?: Readonly<{
             diagnosticsPath?: string;
             memoryLimitBytes?: number;
+            resourceSampleIntervalMilliseconds?: number;
         }>,
     ) => CommandInvocation;
     memoryLimitBytes: number;
@@ -152,6 +154,18 @@ export const createProcessMemoryGuard = (input: {
                     'Process-memory guard diagnostics path must be absolute.',
                 );
             }
+            if (
+                options.resourceSampleIntervalMilliseconds !== undefined &&
+                (!Number.isSafeInteger(
+                    options.resourceSampleIntervalMilliseconds,
+                ) ||
+                    options.resourceSampleIntervalMilliseconds <
+                        minimumResourceSampleIntervalMilliseconds)
+            ) {
+                throw new Error(
+                    `Process-memory guard resource sample interval must be an integer of at least ${minimumResourceSampleIntervalMilliseconds} milliseconds.`,
+                );
+            }
 
             return {
                 ...command,
@@ -161,6 +175,14 @@ export const createProcessMemoryGuard = (input: {
                     ...(options.diagnosticsPath === undefined
                         ? []
                         : ['--diagnostics-path', options.diagnosticsPath]),
+                    ...(options.resourceSampleIntervalMilliseconds === undefined
+                        ? []
+                        : [
+                              '--resource-sample-interval-milliseconds',
+                              String(
+                                  options.resourceSampleIntervalMilliseconds,
+                              ),
+                          ]),
                     '--',
                     command.command,
                     ...command.args,

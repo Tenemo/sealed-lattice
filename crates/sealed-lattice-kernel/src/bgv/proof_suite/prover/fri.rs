@@ -119,9 +119,50 @@ pub(super) fn add_replay_polynomial_to_initial_fri(
     deep_evaluation: ProofChallengeExtensionElement,
     batching_coefficient: ProofChallengeExtensionElement,
 ) -> Result<(), CommonProofProverError> {
-    let mut numerator = into_extension_polynomial(polynomial)?;
     let source_degree_bound_exclusive = usize::try_from(claim.source_degree_bound_exclusive())
         .map_err(|_| CommonProofProverError::CountOverflow)?;
+    add_polynomial_to_initial_fri(
+        initial,
+        opening_degree_bound_exclusive,
+        source_degree_bound_exclusive,
+        polynomial,
+        opening_point,
+        deep_evaluation,
+        batching_coefficient,
+    )
+}
+
+#[cfg(test)]
+pub(super) fn add_bakeoff_polynomial_to_initial_fri(
+    initial: &mut [ProofChallengeExtensionElement],
+    opening_degree_bound_exclusive: usize,
+    source_degree_bound_exclusive: usize,
+    polynomial: CommonProofSourcePolynomial,
+    opening_point: ProofChallengeExtensionElement,
+    deep_evaluation: ProofChallengeExtensionElement,
+    batching_coefficient: ProofChallengeExtensionElement,
+) -> Result<(), CommonProofProverError> {
+    add_polynomial_to_initial_fri(
+        initial,
+        opening_degree_bound_exclusive,
+        source_degree_bound_exclusive,
+        polynomial,
+        opening_point,
+        deep_evaluation,
+        batching_coefficient,
+    )
+}
+
+fn add_polynomial_to_initial_fri(
+    initial: &mut [ProofChallengeExtensionElement],
+    opening_degree_bound_exclusive: usize,
+    source_degree_bound_exclusive: usize,
+    polynomial: CommonProofSourcePolynomial,
+    opening_point: ProofChallengeExtensionElement,
+    deep_evaluation: ProofChallengeExtensionElement,
+    batching_coefficient: ProofChallengeExtensionElement,
+) -> Result<(), CommonProofProverError> {
+    let mut numerator = into_extension_polynomial(polynomial)?;
     if numerator.is_empty()
         || numerator.len() > source_degree_bound_exclusive
         || source_degree_bound_exclusive > opening_degree_bound_exclusive

@@ -193,6 +193,27 @@ pub(crate) use relation_columns::{
     sample_private_extension_polynomial,
 };
 
+#[cfg(test)]
+pub(in crate::bgv::proof_suite) fn add_bakeoff_polynomial_to_initial_fri(
+    initial: &mut [ProofChallengeExtensionElement],
+    opening_degree_bound_exclusive: usize,
+    source_degree_bound_exclusive: usize,
+    polynomial: CommonProofSourcePolynomial,
+    opening_point: ProofChallengeExtensionElement,
+    deep_evaluation: ProofChallengeExtensionElement,
+    batching_coefficient: ProofChallengeExtensionElement,
+) -> Result<(), CommonProofProverError> {
+    fri::add_bakeoff_polynomial_to_initial_fri(
+        initial,
+        opening_degree_bound_exclusive,
+        source_degree_bound_exclusive,
+        polynomial,
+        opening_point,
+        deep_evaluation,
+        batching_coefficient,
+    )
+}
+
 use encoding::opened_leaf_indexes;
 use fri::{
     add_replay_polynomial_to_initial_fri, add_shifted_extension_polynomial,

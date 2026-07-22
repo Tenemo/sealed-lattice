@@ -1,0 +1,1847 @@
+//! Deterministic non-secret sumcheck-class arm for the manual backend bakeoff.
+//!
+//! The fixed RNG seed is intentional measurement scaffolding. It is not a
+//! cryptographically secure hiding source and this module is compiled only for
+//! native tests behind the manual `proof-backend-bakeoff` feature.
+//!
+//! The query ledger uses the theorem-backed unique-decoding regime and a
+//! classical ideal-XOF Fiat-Shamir bound. Plonky3 does not provide a complete
+//! theorem for the masking/code-switch composition, the adversarial grinding
+//! work model, the `ell_zk` hiding choice, or the outer relation/PCS composition,
+//! and this module makes no QROM claim. This arm is performance-only and must
+//! never receive a secret witness.
+
+use num_bigint::BigUint;
+use p3_challenger::{CanObserve, FieldChallenger, HashChallenger, SerializingChallenger64};
+use p3_commit::MultilinearPcs;
+use p3_dft::Radix2DFTSmallBatch;
+use p3_field::{PrimeCharacteristicRing, PrimeField64, extension::BinomialExtensionField};
+use p3_goldilocks::Goldilocks;
+use p3_merkle_tree::MerkleTreeMmcs;
+use p3_multilinear_util::{point::Point, poly::Poly};
+use p3_sumcheck::generic_degree::{GenericDegreeProof, RoundProver};
+use p3_symmetric::{CompressionFunctionFromHasher, CryptographicHasher, SerializingHasher};
+use p3_whir::pcs::zk::{HidingWhirPcs, ZkParameters, ZkWhirConfig};
+use p3_whir::{DomainSeparator, FoldingFactor, ProtocolParameters, SecurityAssumption};
+use rand::{SeedableRng, rngs::SmallRng};
+use serde::{Deserialize, Serialize};
+use sha3::{
+    Shake256,
+    digest::{ExtendableOutput, Update, XofReader},
+};
+
+use crate::hashing::hash512_hex;
+
+use super::proof_backend_bakeoff::{
+    ProofBackendBakeoffArmOutput, ProofBackendBakeoffFixture, ProofBackendBakeoffResult,
+    canonical_frozen_sumcheck_public_statement, frozen_fixture, recompute_frozen_input_identity,
+    validated_frozen_sumcheck_public_statement,
+};
+use super::prover::canonical_proof_object_header_bytes;
+
+const RELATION_VARIABLE_COUNT: usize = 14;
+const COLUMN_SELECTOR_VARIABLE_COUNT: usize = 3;
+const COMMITTED_VARIABLE_COUNT: usize = RELATION_VARIABLE_COUNT + COLUMN_SELECTOR_VARIABLE_COUNT;
+const RELATION_ROW_COUNT: usize = 1 << RELATION_VARIABLE_COUNT;
+const RELATION_COLUMN_COUNT: usize = 1 << COLUMN_SELECTOR_VARIABLE_COUNT;
+const CIPHERTEXT_MODULUS: u64 = 1_953_759_233;
+const MATERIAL_RADIX: u64 = 129_140_163;
+const MATERIAL_HIGH_DIGIT_MAXIMUM: u64 = 15;
+const EXTERNAL_HIDING_SECURITY_BIT_TARGET: usize = 128;
+const CLASSICAL_RANDOM_ORACLE_QUERY_BOUND_EXPONENT: usize = 128;
+const FIAT_SHAMIR_XOF_OUTPUT_BIT_LENGTH: usize = 512;
+const INTERNAL_BRANCH_SECURITY_PARAMETER: usize = 260;
+const CONSERVATIVE_RBR_AGGREGATE_SOUNDNESS_BIT_BOUND: usize = 258;
+const GRINDING_BIT_CEILING: usize = 20;
+// Separated 128-bit hiding heuristic for this non-secret performance arm only.
+const MASK_MESSAGE_LENGTH: usize = 46;
+const MASK_LOG_INVERSE_RATE: usize = 5;
+const STARTING_LOG_INVERSE_RATE: usize = 1;
+const CONSTANT_FOLDING_FACTOR: usize = 4;
+const ORDINARY_QUERY_BRANCH_COUNT: usize = 3;
+const MASK_BRANCH_COUNT: usize = 6;
+const PROXIMITY_BRANCH_COUNT: usize = 3;
+const MASK_UNION_SECURITY_PARAMETER: usize = 261;
+const UNIQUE_DECODING_ALGEBRAIC_SECURITY_PARAMETER: usize = 301;
+const OUTER_RELATION_SECURITY_PARAMETER: usize = 309;
+const OUTER_RELATION_FAILURE_NUMERATOR: usize = 43;
+const UNIQUE_DECODING_FOLD_FAILURE_NUMERATORS: [u64; PROXIMITY_BRANCH_COUNT] =
+    [262_146, 131_074, 65_538];
+const UNIQUE_DECODING_QUERY_COMBINATION_FAILURE_NUMERATOR: u64 = 1_686;
+const UNIQUE_DECODING_FINAL_FOLDING_FAILURE_NUMERATOR: u64 = 2;
+const UNIQUE_DECODING_AGGREGATE_ALGEBRAIC_FAILURE_NUMERATOR: u64 = 460_489;
+const EXPECTED_FOLDING_SCHEDULE: [usize; 3] = [4, 4, 4];
+const EXPECTED_ORACLE_RANDOMNESS_LENGTHS: [usize; 3] = [579, 264, 243];
+const EXPECTED_ROUND_QUERY_COUNTS: [usize; 2] = [579, 264];
+const EXPECTED_ROUND_POW_BITS: [usize; 2] = [20, 20];
+const EXPECTED_ROUND_VARIABLE_COUNTS: [usize; 2] = [13, 9];
+const EXPECTED_ROUND_LOG_INVERSE_RATES: [usize; 2] = [4, 7];
+const EXPECTED_ROUND_DOMAIN_SIZES: [usize; 2] = [262_144, 131_072];
+const EXPECTED_FINAL_QUERY_COUNT: usize = 243;
+const EXPECTED_FINAL_POW_BITS: usize = 20;
+const EXPECTED_FINAL_SUMCHECK_ROUND_COUNT: usize = 5;
+const CLASSICAL_MERKLE_COLLISION_SECURITY_BITS: usize = 256;
+const GENERIC_QUANTUM_COLLISION_QUERY_EXPONENT_DENOMINATOR: usize = 3;
+const MERKLE_DIGEST_WORD_LENGTH: usize = 8;
+const MERKLE_DIGEST_BYTE_LENGTH: usize = MERKLE_DIGEST_WORD_LENGTH * size_of::<u64>();
+const CHALLENGER_OUTPUT_BYTE_LENGTH: usize = 64;
+const MERKLE_TREE_ARITY: usize = 2;
+const MERKLE_MINIMUM_HEIGHT: usize = 0;
+const OUTER_SUMCHECK_DEGREE: usize = 2;
+const SYNTHETIC_HIDING_RANDOMNESS_SEED: u64 = 0x534c_5748_4952_0001;
+
+type BaseField = Goldilocks;
+type ChallengeField = BinomialExtensionField<BaseField, 5>;
+type InnerChallenger = HashChallenger<u8, DomainSeparatedShake256, CHALLENGER_OUTPUT_BYTE_LENGTH>;
+type Challenger = SerializingChallenger64<BaseField, InnerChallenger>;
+type LeafHasher = SerializingHasher<DomainSeparatedShake256>;
+type NodeCompressor =
+    CompressionFunctionFromHasher<DomainSeparatedShake256, 2, MERKLE_DIGEST_WORD_LENGTH>;
+type CommitmentScheme =
+    MerkleTreeMmcs<BaseField, u64, LeafHasher, NodeCompressor, 2, MERKLE_DIGEST_WORD_LENGTH>;
+type DiscreteFourierTransform = Radix2DFTSmallBatch<BaseField>;
+type SumcheckClassConfiguration = ZkWhirConfig<ChallengeField, BaseField, Challenger>;
+type SumcheckClassPcs = HidingWhirPcs<
+    ChallengeField,
+    BaseField,
+    DiscreteFourierTransform,
+    CommitmentScheme,
+    Challenger,
+    SmallRng,
+>;
+type SumcheckClassCommitment =
+    <SumcheckClassPcs as MultilinearPcs<ChallengeField, Challenger>>::Commitment;
+type SumcheckClassOpeningProof =
+    <SumcheckClassPcs as MultilinearPcs<ChallengeField, Challenger>>::Proof;
+
+#[derive(Clone, Copy, Debug)]
+struct DomainSeparatedShake256 {
+    domain: &'static [u8],
+}
+
+impl DomainSeparatedShake256 {
+    fn initialized_state(self) -> Shake256 {
+        let mut state = Shake256::default();
+        state.update(b"sealed-lattice/proof-backend-bakeoff/shake256/v1");
+        state.update(&(self.domain.len() as u64).to_le_bytes());
+        state.update(self.domain);
+        state
+    }
+
+    fn finish(state: Shake256) -> [u8; MERKLE_DIGEST_BYTE_LENGTH] {
+        let mut output = [0_u8; MERKLE_DIGEST_BYTE_LENGTH];
+        state.finalize_xof().read(&mut output);
+        output
+    }
+}
+
+impl CryptographicHasher<u8, [u8; MERKLE_DIGEST_BYTE_LENGTH]> for DomainSeparatedShake256 {
+    fn hash_iter<Input>(&self, input: Input) -> [u8; MERKLE_DIGEST_BYTE_LENGTH]
+    where
+        Input: IntoIterator<Item = u8>,
+    {
+        let mut state = self.initialized_state();
+        let mut buffer = [0_u8; 4_096];
+        let mut used_byte_length = 0_usize;
+        for byte in input {
+            buffer[used_byte_length] = byte;
+            used_byte_length += 1;
+            if used_byte_length == buffer.len() {
+                state.update(&buffer);
+                used_byte_length = 0;
+            }
+        }
+        state.update(&buffer[..used_byte_length]);
+        Self::finish(state)
+    }
+
+    fn hash_iter_slices<'input, Input>(&self, input: Input) -> [u8; MERKLE_DIGEST_BYTE_LENGTH]
+    where
+        Input: IntoIterator<Item = &'input [u8]>,
+    {
+        let mut state = self.initialized_state();
+        for bytes in input {
+            state.update(bytes);
+        }
+        Self::finish(state)
+    }
+}
+
+impl CryptographicHasher<u64, [u64; MERKLE_DIGEST_WORD_LENGTH]> for DomainSeparatedShake256 {
+    fn hash_iter<Input>(&self, input: Input) -> [u64; MERKLE_DIGEST_WORD_LENGTH]
+    where
+        Input: IntoIterator<Item = u64>,
+    {
+        let mut state = self.initialized_state();
+        for word in input {
+            state.update(&word.to_le_bytes());
+        }
+        let bytes = Self::finish(state);
+        core::array::from_fn(|word_index| {
+            let first_byte = word_index * size_of::<u64>();
+            u64::from_le_bytes(
+                bytes[first_byte..first_byte + size_of::<u64>()]
+                    .try_into()
+                    .expect("one SHAKE256 digest word"),
+            )
+        })
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+struct SumcheckClassArtifact {
+    outer_sumcheck_proof: GenericDegreeProof<BaseField, ChallengeField>,
+    opening_proof: SumcheckClassOpeningProof,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+struct SumcheckClassParameterRecord {
+    schema_version: u8,
+    relation_variable_count: u8,
+    column_selector_variable_count: u8,
+    relation_row_count: u32,
+    relation_column_count: u8,
+    ciphertext_modulus: u64,
+    material_radix: u64,
+    material_high_digit_maximum: u8,
+    base_field_modulus: u64,
+    challenge_extension_degree: u8,
+    discrete_fourier_transform: u8,
+    cryptographic_hash: u8,
+    challenger_encoding: u8,
+    starting_log_inverse_rate: u8,
+    configured_round_log_inverse_rates: Vec<u8>,
+    folding_strategy: u8,
+    constant_folding_factor: u8,
+    mask_message_length: u8,
+    mask_log_inverse_rate: u8,
+    merkle_digest_byte_length: u8,
+    challenger_output_byte_length: u8,
+    merkle_tree_arity: u8,
+    merkle_minimum_height: u8,
+    outer_sumcheck_degree: u8,
+    derived_folding_schedule: Vec<u8>,
+    commitment_out_of_domain_sample_count: u16,
+    starting_folding_pow_bits: u8,
+    rounds: Vec<SumcheckClassRoundParameterRecord>,
+    final_query_count: u16,
+    final_pow_bits: u8,
+    final_sumcheck_round_count: u8,
+    final_folding_pow_bits: u8,
+    mask_query_count: u16,
+    oracle_randomness_lengths: Vec<u16>,
+    sumcheck_mask: SumcheckClassMaskParameterRecord,
+    switch_masks: Vec<SumcheckClassMaskParameterRecord>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+struct SumcheckClassRoundParameterRecord {
+    pow_bits: u8,
+    folding_pow_bits: u8,
+    query_count: u16,
+    out_of_domain_sample_count: u16,
+    variable_count: u8,
+    folding_factor: u8,
+    log_inverse_rate: u8,
+    domain_size: u32,
+    folded_domain_generator: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+struct SumcheckClassMaskParameterRecord {
+    message_length: u16,
+    randomness_length: u16,
+    domain_size: u32,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct SumcheckClassSecurityBudget {
+    maximum_pow_bits: usize,
+}
+
+#[derive(Debug)]
+enum SumcheckClassConfigurationError {
+    Upstream(String),
+    ParameterDoesNotFit {
+        parameter: &'static str,
+    },
+    GrindingBudget {
+        required_bits: usize,
+        ceiling_bits: usize,
+    },
+    DerivedValueMismatch {
+        parameter: &'static str,
+        expected: usize,
+        actual: usize,
+    },
+    DerivedSequenceMismatch {
+        parameter: &'static str,
+        expected: Vec<usize>,
+        actual: Vec<usize>,
+    },
+    SecurityInequality {
+        invariant: &'static str,
+    },
+}
+
+impl core::fmt::Display for SumcheckClassConfigurationError {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Upstream(message) => formatter.write_str(message),
+            Self::ParameterDoesNotFit { parameter } => {
+                write!(
+                    formatter,
+                    "parameter {parameter} does not fit its canonical field"
+                )
+            }
+            Self::GrindingBudget {
+                required_bits,
+                ceiling_bits,
+            } => write!(
+                formatter,
+                "derived proof-of-work requires {required_bits} bits above the {ceiling_bits}-bit ceiling"
+            ),
+            Self::DerivedValueMismatch {
+                parameter,
+                expected,
+                actual,
+            } => write!(
+                formatter,
+                "derived {parameter} is {actual}, expected the frozen value {expected}"
+            ),
+            Self::DerivedSequenceMismatch {
+                parameter,
+                expected,
+                actual,
+            } => write!(
+                formatter,
+                "derived {parameter} is {actual:?}, expected the frozen sequence {expected:?}"
+            ),
+            Self::SecurityInequality { invariant } => {
+                write!(formatter, "exact security inequality failed: {invariant}")
+            }
+        }
+    }
+}
+
+struct DegreeTwoRelationProver {
+    equality_polynomial: Poly<ChallengeField>,
+    combined_residual_polynomial: Poly<ChallengeField>,
+}
+
+impl DegreeTwoRelationProver {
+    fn product_sum_at(&self, node: ChallengeField) -> ChallengeField {
+        debug_assert_eq!(
+            self.equality_polynomial.num_evals(),
+            self.combined_residual_polynomial.num_evals()
+        );
+        let half_length = self.equality_polynomial.num_evals() / 2;
+        let (equality_at_zero, equality_at_one) =
+            self.equality_polynomial.as_slice().split_at(half_length);
+        let (residual_at_zero, residual_at_one) = self
+            .combined_residual_polynomial
+            .as_slice()
+            .split_at(half_length);
+        let mut sum = ChallengeField::ZERO;
+        for row_index in 0..half_length {
+            let equality_at_node = equality_at_zero[row_index]
+                + (equality_at_one[row_index] - equality_at_zero[row_index]) * node;
+            let residual_at_node = residual_at_zero[row_index]
+                + (residual_at_one[row_index] - residual_at_zero[row_index]) * node;
+            sum += equality_at_node * residual_at_node;
+        }
+        sum
+    }
+}
+
+impl RoundProver<ChallengeField> for DegreeTwoRelationProver {
+    fn fold(&mut self, challenge: ChallengeField) {
+        self.equality_polynomial.fix_prefix_var_mut(challenge);
+        self.combined_residual_polynomial
+            .fix_prefix_var_mut(challenge);
+    }
+
+    fn round_poly(&self) -> Vec<ChallengeField> {
+        vec![
+            self.product_sum_at(ChallengeField::ZERO),
+            self.product_sum_at(ChallengeField::from_u64(2)),
+        ]
+    }
+}
+
+pub(super) fn execute_sumcheck_class(
+    fixture: &ProofBackendBakeoffFixture,
+) -> ProofBackendBakeoffResult<ProofBackendBakeoffArmOutput> {
+    validate_fixture(fixture)?;
+    let (pcs, parameters) = build_pcs()?;
+    let witness = stacked_witness(fixture);
+    let mut pcs_challenger = fresh_pcs_challenger(&pcs, &parameters)?;
+    let (commitment, prover_data) = pcs.commit(witness, &mut pcs_challenger);
+    if canonical_sumcheck_commitment(&commitment)? != fixture.expected_sumcheck_commitment {
+        return Err(
+            "sumcheck-class commitment does not match the exact frozen input binding".to_owned(),
+        );
+    }
+
+    let mut relation_challenger =
+        fresh_relation_challenger(&fixture.canonical_sumcheck_statement, &parameters)?;
+    relation_challenger.observe(commitment.clone());
+    let constraint_batching_challenge: ChallengeField =
+        relation_challenger.sample_algebra_element();
+    let equality_random_point = Point::new(
+        (0..RELATION_VARIABLE_COUNT)
+            .map(|_| relation_challenger.sample_algebra_element::<ChallengeField>())
+            .collect(),
+    );
+    let equality_polynomial = Poly::<ChallengeField>::new_from_point(
+        equality_random_point.as_slice(),
+        ChallengeField::ONE,
+    );
+    let combined_residual_polynomial =
+        combined_residual_polynomial(fixture, constraint_batching_challenge);
+    let mut sumcheck_prover = DegreeTwoRelationProver {
+        equality_polynomial,
+        combined_residual_polynomial,
+    };
+    let (outer_sumcheck_proof, terminal_relation_point) = sumcheck_prover.prove::<BaseField, _>(
+        &mut relation_challenger,
+        RELATION_VARIABLE_COUNT,
+        OUTER_SUMCHECK_DEGREE,
+        0,
+        ChallengeField::ZERO,
+    );
+    let opening_points = chosen_column_points(&terminal_relation_point);
+    let opening_proof = pcs.open(prover_data, opening_points, &mut pcs_challenger);
+    let artifact = SumcheckClassArtifact {
+        outer_sumcheck_proof,
+        opening_proof,
+    };
+    let canonical_artifact =
+        encode_canonical_artifact(&artifact, &fixture.canonical_sumcheck_statement)?;
+
+    verify_canonical_artifact(
+        &canonical_artifact,
+        &fixture.canonical_sumcheck_statement,
+        &fixture.input_identity_shake256_hex,
+    )?;
+    let proof_shake256_hex = hash512_hex(
+        "proof-backend-bakeoff/canonical-artifact/v1",
+        &[canonical_artifact.as_slice()],
+    );
+    Ok(ProofBackendBakeoffArmOutput {
+        canonical_artifact,
+        proof_shake256_hex,
+        external_read_byte_length: 0,
+        external_written_byte_length: 0,
+        external_committed_transaction_count: 0,
+    })
+}
+
+fn build_pcs() -> ProofBackendBakeoffResult<(SumcheckClassPcs, SumcheckClassParameterRecord)> {
+    let config = build_configuration().map_err(configuration_blocker)?;
+    validate_security_budgets(&config).map_err(configuration_blocker)?;
+    let parameters = parameter_record(&config).map_err(configuration_blocker)?;
+    let commitment_scheme = CommitmentScheme::new(
+        LeafHasher::new(DomainSeparatedShake256 {
+            domain: b"proof-backend-bakeoff/sumcheck-class/merkle-leaf/v1",
+        }),
+        NodeCompressor::new(DomainSeparatedShake256 {
+            domain: b"proof-backend-bakeoff/sumcheck-class/merkle-node/v1",
+        }),
+        MERKLE_MINIMUM_HEIGHT,
+    );
+    Ok((
+        SumcheckClassPcs::new(
+            config,
+            DiscreteFourierTransform::default(),
+            commitment_scheme,
+            SmallRng::seed_from_u64(SYNTHETIC_HIDING_RANDOMNESS_SEED),
+        ),
+        parameters,
+    ))
+}
+
+fn canonical_sumcheck_commitment(
+    commitment: &SumcheckClassCommitment,
+) -> ProofBackendBakeoffResult<Vec<u8>> {
+    let canonical = postcard::to_allocvec(commitment)
+        .map_err(|error| format!("encode canonical sumcheck-class commitment: {error}"))?;
+    if canonical.is_empty() {
+        return Err("canonical sumcheck-class commitment is empty".to_owned());
+    }
+    Ok(canonical)
+}
+
+fn decode_canonical_sumcheck_commitment(
+    canonical_commitment: &[u8],
+) -> ProofBackendBakeoffResult<SumcheckClassCommitment> {
+    let (commitment, trailing_bytes) =
+        postcard::take_from_bytes::<SumcheckClassCommitment>(canonical_commitment)
+            .map_err(|error| format!("decode canonical sumcheck-class commitment: {error}"))?;
+    if !trailing_bytes.is_empty() {
+        return Err("canonical sumcheck-class commitment has trailing bytes".to_owned());
+    }
+    if canonical_sumcheck_commitment(&commitment)? != canonical_commitment {
+        return Err("sumcheck-class commitment encoding is not canonical".to_owned());
+    }
+    Ok(commitment)
+}
+
+pub(super) fn validate_canonical_sumcheck_commitment(
+    canonical_commitment: &[u8],
+) -> ProofBackendBakeoffResult<()> {
+    decode_canonical_sumcheck_commitment(canonical_commitment).map(drop)
+}
+
+pub(super) fn derive_frozen_sumcheck_commitment(
+    columns: &[Vec<u64>; RELATION_COLUMN_COUNT],
+) -> ProofBackendBakeoffResult<Vec<u8>> {
+    let (pcs, parameters) = build_pcs()?;
+    let witness = stacked_witness_columns(columns);
+    let mut pcs_challenger = fresh_pcs_challenger(&pcs, &parameters)?;
+    let (commitment, prover_data) = pcs.commit(witness, &mut pcs_challenger);
+    let canonical = canonical_sumcheck_commitment(&commitment)?;
+    drop(prover_data);
+    Ok(canonical)
+}
+
+fn build_configuration() -> Result<SumcheckClassConfiguration, SumcheckClassConfigurationError> {
+    ZkWhirConfig::<ChallengeField, BaseField, Challenger>::new(
+        COMMITTED_VARIABLE_COUNT,
+        ProtocolParameters {
+            starting_log_inv_rate: STARTING_LOG_INVERSE_RATE,
+            round_log_inv_rates: Vec::new(),
+            folding_factor: FoldingFactor::Constant(CONSTANT_FOLDING_FACTOR),
+            soundness_type: SecurityAssumption::UniqueDecoding,
+            security_level: INTERNAL_BRANCH_SECURITY_PARAMETER,
+            pow_bits: GRINDING_BIT_CEILING,
+        },
+        ZkParameters {
+            ell_zk: MASK_MESSAGE_LENGTH,
+            mask_log_inv_rate: MASK_LOG_INVERSE_RATE,
+        },
+    )
+    .map_err(|error| {
+        SumcheckClassConfigurationError::Upstream(format!(
+            "construct conservative HidingWhir configuration: {error}"
+        ))
+    })
+}
+
+fn configuration_blocker(error: SumcheckClassConfigurationError) -> String {
+    format!("sumcheck-class configuration blocker: {error}")
+}
+
+fn require_derived_value(
+    parameter: &'static str,
+    expected: usize,
+    actual: usize,
+) -> Result<(), SumcheckClassConfigurationError> {
+    if actual != expected {
+        return Err(SumcheckClassConfigurationError::DerivedValueMismatch {
+            parameter,
+            expected,
+            actual,
+        });
+    }
+    Ok(())
+}
+
+fn require_derived_sequence(
+    parameter: &'static str,
+    expected: &[usize],
+    actual: Vec<usize>,
+) -> Result<(), SumcheckClassConfigurationError> {
+    if actual != expected {
+        return Err(SumcheckClassConfigurationError::DerivedSequenceMismatch {
+            parameter,
+            expected: expected.to_vec(),
+            actual,
+        });
+    }
+    Ok(())
+}
+
+fn validate_frozen_configuration_profile(
+    config: &SumcheckClassConfiguration,
+) -> Result<(), SumcheckClassConfigurationError> {
+    require_derived_value(
+        "committed variable count",
+        COMMITTED_VARIABLE_COUNT,
+        config.num_variables,
+    )?;
+    require_derived_value(
+        "internal branch security parameter",
+        INTERNAL_BRANCH_SECURITY_PARAMETER,
+        config.params.security_level,
+    )?;
+    require_derived_value(
+        "configured grinding ceiling",
+        GRINDING_BIT_CEILING,
+        config.params.pow_bits,
+    )?;
+    require_derived_value(
+        "starting log inverse rate",
+        STARTING_LOG_INVERSE_RATE,
+        config.params.starting_log_inv_rate,
+    )?;
+    require_derived_value(
+        "unique-decoding assumption selector",
+        1,
+        usize::from(config.params.soundness_type == SecurityAssumption::UniqueDecoding),
+    )?;
+    require_derived_sequence(
+        "explicit round log inverse rates",
+        &[],
+        config.params.round_log_inv_rates.clone(),
+    )?;
+    require_derived_value("mask message length", MASK_MESSAGE_LENGTH, config.zk.ell_zk)?;
+    require_derived_value(
+        "mask log inverse rate",
+        MASK_LOG_INVERSE_RATE,
+        config.zk.mask_log_inv_rate,
+    )?;
+    require_derived_sequence(
+        "folding schedule",
+        &EXPECTED_FOLDING_SCHEDULE,
+        config.folding_schedule.clone(),
+    )?;
+    require_derived_value("intermediate round count", 2, config.n_rounds())?;
+    require_derived_value(
+        "commitment out-of-domain sample count",
+        0,
+        config.commitment_ood_samples,
+    )?;
+    require_derived_value(
+        "starting folding proof-of-work bits",
+        0,
+        config.starting_folding_pow_bits,
+    )?;
+    require_derived_sequence(
+        "round query counts",
+        &EXPECTED_ROUND_QUERY_COUNTS,
+        config
+            .round_parameters
+            .iter()
+            .map(|round| round.num_queries)
+            .collect(),
+    )?;
+    require_derived_sequence(
+        "round query proof-of-work bits",
+        &EXPECTED_ROUND_POW_BITS,
+        config
+            .round_parameters
+            .iter()
+            .map(|round| round.pow_bits)
+            .collect(),
+    )?;
+    require_derived_sequence(
+        "round folding proof-of-work bits",
+        &[0, 0],
+        config
+            .round_parameters
+            .iter()
+            .map(|round| round.folding_pow_bits)
+            .collect(),
+    )?;
+    require_derived_sequence(
+        "round out-of-domain sample counts",
+        &[0, 0],
+        config
+            .round_parameters
+            .iter()
+            .map(|round| round.ood_samples)
+            .collect(),
+    )?;
+    require_derived_sequence(
+        "round variable counts",
+        &EXPECTED_ROUND_VARIABLE_COUNTS,
+        config
+            .round_parameters
+            .iter()
+            .map(|round| round.num_variables)
+            .collect(),
+    )?;
+    require_derived_sequence(
+        "round folding factors",
+        &[4, 4],
+        config
+            .round_parameters
+            .iter()
+            .map(|round| round.folding_factor)
+            .collect(),
+    )?;
+    require_derived_sequence(
+        "round log inverse rates",
+        &EXPECTED_ROUND_LOG_INVERSE_RATES,
+        config
+            .round_parameters
+            .iter()
+            .map(|round| round.log_inv_rate)
+            .collect(),
+    )?;
+    require_derived_sequence(
+        "round domain sizes",
+        &EXPECTED_ROUND_DOMAIN_SIZES,
+        config
+            .round_parameters
+            .iter()
+            .map(|round| round.domain_size)
+            .collect(),
+    )?;
+    require_derived_value(
+        "final query count",
+        EXPECTED_FINAL_QUERY_COUNT,
+        config.final_queries,
+    )?;
+    require_derived_value(
+        "final query proof-of-work bits",
+        EXPECTED_FINAL_POW_BITS,
+        config.final_pow_bits,
+    )?;
+    require_derived_value(
+        "final sumcheck round count",
+        EXPECTED_FINAL_SUMCHECK_ROUND_COUNT,
+        config.final_sumcheck_rounds,
+    )?;
+    require_derived_value(
+        "final folding proof-of-work bits",
+        0,
+        config.final_folding_pow_bits,
+    )?;
+    require_derived_sequence(
+        "oracle randomness lengths",
+        &EXPECTED_ORACLE_RANDOMNESS_LENGTHS,
+        config.oracle_randomness.clone(),
+    )?;
+    require_derived_value("mask query count", 276, config.mask_queries)?;
+    require_derived_sequence(
+        "sumcheck mask shape",
+        &[46, 276, 16_384],
+        vec![
+            config.sumcheck_mask.message_len,
+            config.sumcheck_mask.randomness_len,
+            config.sumcheck_mask.domain_size,
+        ],
+    )?;
+    require_derived_sequence(
+        "code-switch mask shapes",
+        &[579, 276, 32_768, 264, 276, 32_768],
+        config
+            .switch_masks
+            .iter()
+            .flat_map(|shape| [shape.message_len, shape.randomness_len, shape.domain_size])
+            .collect(),
+    )
+}
+
+fn unique_decoding_query_failure_fraction(
+    log_inverse_rate: usize,
+    query_count: usize,
+    grinding_bits: usize,
+) -> Result<(BigUint, usize), SumcheckClassConfigurationError> {
+    let numerator_base = 1_usize
+        .checked_shl(u32::try_from(log_inverse_rate).map_err(|_| {
+            SumcheckClassConfigurationError::ParameterDoesNotFit {
+                parameter: "unique-decoding inverse-rate exponent",
+            }
+        })?)
+        .and_then(|value| value.checked_add(1))
+        .ok_or(SumcheckClassConfigurationError::ParameterDoesNotFit {
+            parameter: "unique-decoding query numerator base",
+        })?;
+    let power = u32::try_from(query_count).map_err(|_| {
+        SumcheckClassConfigurationError::ParameterDoesNotFit {
+            parameter: "unique-decoding query exponent",
+        }
+    })?;
+    let denominator_exponent = log_inverse_rate
+        .checked_add(1)
+        .and_then(|value| value.checked_mul(query_count))
+        .and_then(|value| value.checked_add(grinding_bits))
+        .ok_or(SumcheckClassConfigurationError::ParameterDoesNotFit {
+            parameter: "unique-decoding query denominator exponent",
+        })?;
+    Ok((
+        BigUint::from(numerator_base).pow(power),
+        denominator_exponent,
+    ))
+}
+
+fn exact_unique_decoding_query_bound_holds(
+    log_inverse_rate: usize,
+    query_count: usize,
+    grinding_bits: usize,
+    security_parameter: usize,
+) -> Result<bool, SumcheckClassConfigurationError> {
+    let (numerator, denominator_exponent) =
+        unique_decoding_query_failure_fraction(log_inverse_rate, query_count, grinding_bits)?;
+    Ok((numerator << security_parameter) <= (BigUint::from(1_u8) << denominator_exponent))
+}
+
+fn exact_unique_decoding_mask_union_bound_holds(
+    mask_branch_count: usize,
+    query_count: usize,
+    security_parameter: usize,
+) -> Result<bool, SumcheckClassConfigurationError> {
+    let (branch_numerator, denominator_exponent) =
+        unique_decoding_query_failure_fraction(MASK_LOG_INVERSE_RATE, query_count, 0)?;
+    let numerator = BigUint::from(mask_branch_count) * branch_numerator;
+    Ok((numerator << security_parameter) <= (BigUint::from(1_u8) << denominator_exponent))
+}
+
+fn exact_unique_decoding_rbr_aggregate_bound_holds(
+    query_branches: &[(usize, usize, usize)],
+    mask_query_count: usize,
+    aggregate_security_parameter: usize,
+) -> Result<bool, SumcheckClassConfigurationError> {
+    // This exact comparison ledger covers the unique-decoding query, mask-query, folding,
+    // query-combination, terminal, and outer-relation terms of the frozen synthetic arm. Its
+    // non-claims are stated in the module documentation.
+    if query_branches.len() != ORDINARY_QUERY_BRANCH_COUNT {
+        return Ok(false);
+    }
+    let mut binary_denominator_terms = query_branches
+        .iter()
+        .map(|&(log_inverse_rate, query_count, grinding_bits)| {
+            unique_decoding_query_failure_fraction(log_inverse_rate, query_count, grinding_bits)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let (mask_branch_numerator, mask_denominator_exponent) =
+        unique_decoding_query_failure_fraction(MASK_LOG_INVERSE_RATE, mask_query_count, 0)?;
+    binary_denominator_terms.push((
+        BigUint::from(MASK_BRANCH_COUNT) * mask_branch_numerator,
+        mask_denominator_exponent,
+    ));
+    let common_binary_denominator_exponent = binary_denominator_terms
+        .iter()
+        .map(|(_, denominator_exponent)| *denominator_exponent)
+        .max()
+        .ok_or(SumcheckClassConfigurationError::ParameterDoesNotFit {
+            parameter: "unique-decoding aggregate binary denominator",
+        })?;
+    let binary_numerator = binary_denominator_terms.into_iter().fold(
+        BigUint::from(0_u8),
+        |sum, (numerator, denominator_exponent)| {
+            sum + (numerator << (common_binary_denominator_exponent - denominator_exponent))
+        },
+    );
+    let field_order = challenge_field_order();
+    let aggregate_numerator = binary_numerator * &field_order
+        + (BigUint::from(UNIQUE_DECODING_AGGREGATE_ALGEBRAIC_FAILURE_NUMERATOR)
+            << common_binary_denominator_exponent);
+    let aggregate_denominator = field_order << common_binary_denominator_exponent;
+    Ok((aggregate_numerator << aggregate_security_parameter) < aggregate_denominator)
+}
+
+fn exact_classical_fiat_shamir_work_factor_bound_holds() -> bool {
+    // The classical BCS/BT24 round-by-round compiler ledger is
+    // Q * epsilon_RBR + 3 * (Q^2 + 1) / 2^kappa. Evaluate its worst admitted
+    // Q = 2^128 directly over the frozen kappa = 512 denominator.
+    let random_oracle_query_bound =
+        BigUint::from(1_u8) << CLASSICAL_RANDOM_ORACLE_QUERY_BOUND_EXPONENT;
+    let rbr_term_numerator = &random_oracle_query_bound
+        << (FIAT_SHAMIR_XOF_OUTPUT_BIT_LENGTH - CONSERVATIVE_RBR_AGGREGATE_SOUNDNESS_BIT_BOUND);
+    let compiler_term_numerator = BigUint::from(3_u8)
+        * (&random_oracle_query_bound * &random_oracle_query_bound + BigUint::from(1_u8));
+    let target_numerator = BigUint::from(1_u8)
+        << (FIAT_SHAMIR_XOF_OUTPUT_BIT_LENGTH - CLASSICAL_RANDOM_ORACLE_QUERY_BOUND_EXPONENT);
+    rbr_term_numerator + compiler_term_numerator < target_numerator
+}
+
+fn challenge_field_order() -> BigUint {
+    BigUint::from(BaseField::ORDER_U64).pow(5)
+}
+
+/*
+    The unique-decoding query term is
+
+        ((2^r + 1) / 2^(r + 1))^q * 2^-w,
+
+    so every synthetic checked gate above is an integer comparison. No floating-point
+    Johnson-bound approximation or list-decoding conjecture enters the record.
+*/
+
+fn validate_security_budgets(
+    config: &SumcheckClassConfiguration,
+) -> Result<SumcheckClassSecurityBudget, SumcheckClassConfigurationError> {
+    validate_frozen_configuration_profile(config)?;
+    let maximum_pow_bits = config.max_pow_bits();
+    if !config.check_pow_bits() || maximum_pow_bits > GRINDING_BIT_CEILING {
+        return Err(SumcheckClassConfigurationError::GrindingBudget {
+            required_bits: maximum_pow_bits,
+            ceiling_bits: GRINDING_BIT_CEILING,
+        });
+    }
+
+    let query_branches = [
+        (1_usize, 579_usize, 20_usize),
+        (4_usize, 264_usize, 20_usize),
+        (7_usize, 243_usize, 20_usize),
+    ];
+    for &(log_inverse_rate, query_count, grinding_bits) in &query_branches {
+        if !exact_unique_decoding_query_bound_holds(
+            log_inverse_rate,
+            query_count,
+            grinding_bits,
+            INTERNAL_BRANCH_SECURITY_PARAMETER,
+        )? {
+            return Err(SumcheckClassConfigurationError::SecurityInequality {
+                invariant: "each ordinary unique-decoding query branch reaches 260 bits with its configured grinding",
+            });
+        }
+        if exact_unique_decoding_query_bound_holds(
+            log_inverse_rate,
+            query_count,
+            grinding_bits - 1,
+            INTERNAL_BRANCH_SECURITY_PARAMETER,
+        )? {
+            return Err(SumcheckClassConfigurationError::SecurityInequality {
+                invariant: "each ordinary unique-decoding branch uses the minimum whole grinding count at 260 bits",
+            });
+        }
+        let algebraic_security_parameter =
+            INTERNAL_BRANCH_SECURITY_PARAMETER - GRINDING_BIT_CEILING;
+        if !exact_unique_decoding_query_bound_holds(
+            log_inverse_rate,
+            query_count,
+            0,
+            algebraic_security_parameter,
+        )? || exact_unique_decoding_query_bound_holds(
+            log_inverse_rate,
+            query_count - 1,
+            0,
+            algebraic_security_parameter,
+        )? {
+            return Err(SumcheckClassConfigurationError::SecurityInequality {
+                invariant: "each ordinary unique-decoding branch uses the minimum query count at the 240-bit algebraic floor",
+            });
+        }
+    }
+
+    let mask_branch_count = 2 * config.n_rounds() + 2;
+    require_derived_value("mask branch count", MASK_BRANCH_COUNT, mask_branch_count)?;
+    if !exact_unique_decoding_mask_union_bound_holds(
+        mask_branch_count,
+        config.mask_queries,
+        MASK_UNION_SECURITY_PARAMETER,
+    )? || exact_unique_decoding_mask_union_bound_holds(
+        mask_branch_count,
+        config.mask_queries,
+        MASK_UNION_SECURITY_PARAMETER + 1,
+    )? {
+        return Err(SumcheckClassConfigurationError::SecurityInequality {
+            invariant: "the exact six-mask union reaches 261 bits but not 262 bits",
+        });
+    }
+    if !exact_unique_decoding_rbr_aggregate_bound_holds(
+        &query_branches,
+        config.mask_queries,
+        CONSERVATIVE_RBR_AGGREGATE_SOUNDNESS_BIT_BOUND,
+    )? {
+        return Err(SumcheckClassConfigurationError::SecurityInequality {
+            invariant: "the exact unique-decoding RBR aggregate is strictly below 2^-258",
+        });
+    }
+
+    let field_order = challenge_field_order();
+    let derived_algebraic_failure_numerator = UNIQUE_DECODING_FOLD_FAILURE_NUMERATORS
+        .iter()
+        .try_fold(0_u64, |sum, &value| sum.checked_add(value))
+        .and_then(|sum| sum.checked_add(UNIQUE_DECODING_QUERY_COMBINATION_FAILURE_NUMERATOR))
+        .and_then(|sum| sum.checked_add(UNIQUE_DECODING_FINAL_FOLDING_FAILURE_NUMERATOR))
+        .and_then(|sum| sum.checked_add(OUTER_RELATION_FAILURE_NUMERATOR as u64))
+        .ok_or(SumcheckClassConfigurationError::ParameterDoesNotFit {
+            parameter: "aggregate unique-decoding algebraic failure numerator",
+        })?;
+    require_derived_value(
+        "aggregate unique-decoding algebraic failure numerator",
+        UNIQUE_DECODING_AGGREGATE_ALGEBRAIC_FAILURE_NUMERATOR as usize,
+        derived_algebraic_failure_numerator as usize,
+    )?;
+    if (BigUint::from(derived_algebraic_failure_numerator)
+        << UNIQUE_DECODING_ALGEBRAIC_SECURITY_PARAMETER)
+        >= field_order.clone()
+    {
+        return Err(SumcheckClassConfigurationError::SecurityInequality {
+            invariant: "the complete unique-decoding algebraic aggregate is below 2^-301",
+        });
+    }
+    if (BigUint::from(OUTER_RELATION_FAILURE_NUMERATOR) << OUTER_RELATION_SECURITY_PARAMETER)
+        >= field_order
+    {
+        return Err(SumcheckClassConfigurationError::SecurityInequality {
+            invariant: "the composed 43/q outer relation error is below 2^-309",
+        });
+    }
+
+    let digest_bit_length = MERKLE_DIGEST_BYTE_LENGTH * 8;
+    require_derived_value(
+        "Fiat-Shamir XOF output bit length",
+        FIAT_SHAMIR_XOF_OUTPUT_BIT_LENGTH,
+        CHALLENGER_OUTPUT_BYTE_LENGTH * 8,
+    )?;
+    require_derived_value(
+        "classical Merkle collision security bits",
+        CLASSICAL_MERKLE_COLLISION_SECURITY_BITS,
+        digest_bit_length / 2,
+    )?;
+    if CLASSICAL_MERKLE_COLLISION_SECURITY_BITS <= EXTERNAL_HIDING_SECURITY_BIT_TARGET
+        || digest_bit_length
+            <= GENERIC_QUANTUM_COLLISION_QUERY_EXPONENT_DENOMINATOR
+                * EXTERNAL_HIDING_SECURITY_BIT_TARGET
+    {
+        return Err(SumcheckClassConfigurationError::SecurityInequality {
+            invariant: "the 512-bit digest has more than 128 bits of classical and generic quantum collision-query work",
+        });
+    }
+    if !exact_classical_fiat_shamir_work_factor_bound_holds() {
+        return Err(SumcheckClassConfigurationError::SecurityInequality {
+            invariant: "the ideal-XOF Fiat-Shamir ledger exceeds 128 classical bits for at most 2^128 random-oracle queries",
+        });
+    }
+
+    Ok(SumcheckClassSecurityBudget { maximum_pow_bits })
+}
+
+fn parameter_record(
+    config: &SumcheckClassConfiguration,
+) -> Result<SumcheckClassParameterRecord, SumcheckClassConfigurationError> {
+    let rounds = config
+        .round_parameters
+        .iter()
+        .map(|round| {
+            Ok(SumcheckClassRoundParameterRecord {
+                pow_bits: canonical_u8(round.pow_bits, "round pow bits")?,
+                folding_pow_bits: canonical_u8(round.folding_pow_bits, "round folding pow bits")?,
+                query_count: canonical_u16(round.num_queries, "round query count")?,
+                out_of_domain_sample_count: canonical_u16(
+                    round.ood_samples,
+                    "round out-of-domain sample count",
+                )?,
+                variable_count: canonical_u8(round.num_variables, "round variable count")?,
+                folding_factor: canonical_u8(round.folding_factor, "round folding factor")?,
+                log_inverse_rate: canonical_u8(round.log_inv_rate, "round log inverse rate")?,
+                domain_size: canonical_u32(round.domain_size, "round domain size")?,
+                folded_domain_generator: round.folded_domain_gen.as_canonical_u64(),
+            })
+        })
+        .collect::<Result<Vec<_>, SumcheckClassConfigurationError>>()?;
+    Ok(SumcheckClassParameterRecord {
+        schema_version: 5,
+        relation_variable_count: canonical_u8(RELATION_VARIABLE_COUNT, "relation variable count")?,
+        column_selector_variable_count: canonical_u8(
+            COLUMN_SELECTOR_VARIABLE_COUNT,
+            "column selector variable count",
+        )?,
+        relation_row_count: canonical_u32(RELATION_ROW_COUNT, "relation row count")?,
+        relation_column_count: canonical_u8(RELATION_COLUMN_COUNT, "relation column count")?,
+        ciphertext_modulus: CIPHERTEXT_MODULUS,
+        material_radix: MATERIAL_RADIX,
+        material_high_digit_maximum: canonical_u8(
+            MATERIAL_HIGH_DIGIT_MAXIMUM as usize,
+            "material high digit maximum",
+        )?,
+        base_field_modulus: BaseField::ORDER_U64,
+        challenge_extension_degree: 5,
+        discrete_fourier_transform: 1,
+        cryptographic_hash: 1,
+        challenger_encoding: 1,
+        starting_log_inverse_rate: canonical_u8(
+            config.params.starting_log_inv_rate,
+            "starting log inverse rate",
+        )?,
+        configured_round_log_inverse_rates: config
+            .params
+            .round_log_inv_rates
+            .iter()
+            .map(|&rate| canonical_u8(rate, "configured round log inverse rate"))
+            .collect::<Result<Vec<_>, _>>()?,
+        folding_strategy: 0,
+        constant_folding_factor: canonical_u8(CONSTANT_FOLDING_FACTOR, "constant folding factor")?,
+        mask_message_length: canonical_u8(MASK_MESSAGE_LENGTH, "mask message length")?,
+        mask_log_inverse_rate: canonical_u8(MASK_LOG_INVERSE_RATE, "mask log inverse rate")?,
+        merkle_digest_byte_length: canonical_u8(
+            MERKLE_DIGEST_BYTE_LENGTH,
+            "Merkle digest byte length",
+        )?,
+        challenger_output_byte_length: canonical_u8(
+            CHALLENGER_OUTPUT_BYTE_LENGTH,
+            "challenger output byte length",
+        )?,
+        merkle_tree_arity: canonical_u8(MERKLE_TREE_ARITY, "Merkle tree arity")?,
+        merkle_minimum_height: canonical_u8(MERKLE_MINIMUM_HEIGHT, "Merkle minimum height")?,
+        outer_sumcheck_degree: canonical_u8(OUTER_SUMCHECK_DEGREE, "outer sumcheck degree")?,
+        derived_folding_schedule: config
+            .folding_schedule
+            .iter()
+            .map(|&factor| canonical_u8(factor, "derived folding factor"))
+            .collect::<Result<Vec<_>, _>>()?,
+        commitment_out_of_domain_sample_count: canonical_u16(
+            config.commitment_ood_samples,
+            "commitment out-of-domain sample count",
+        )?,
+        starting_folding_pow_bits: canonical_u8(
+            config.starting_folding_pow_bits,
+            "starting folding pow bits",
+        )?,
+        rounds,
+        final_query_count: canonical_u16(config.final_queries, "final query count")?,
+        final_pow_bits: canonical_u8(config.final_pow_bits, "final pow bits")?,
+        final_sumcheck_round_count: canonical_u8(
+            config.final_sumcheck_rounds,
+            "final sumcheck round count",
+        )?,
+        final_folding_pow_bits: canonical_u8(
+            config.final_folding_pow_bits,
+            "final folding pow bits",
+        )?,
+        mask_query_count: canonical_u16(config.mask_queries, "mask query count")?,
+        oracle_randomness_lengths: config
+            .oracle_randomness
+            .iter()
+            .map(|&length| canonical_u16(length, "oracle randomness length"))
+            .collect::<Result<Vec<_>, _>>()?,
+        sumcheck_mask: mask_parameter_record(config.sumcheck_mask)?,
+        switch_masks: config
+            .switch_masks
+            .iter()
+            .copied()
+            .map(mask_parameter_record)
+            .collect::<Result<Vec<_>, _>>()?,
+    })
+}
+
+fn mask_parameter_record(
+    shape: p3_whir::pcs::zk::MaskCodeShape,
+) -> Result<SumcheckClassMaskParameterRecord, SumcheckClassConfigurationError> {
+    Ok(SumcheckClassMaskParameterRecord {
+        message_length: canonical_u16(shape.message_len, "mask message length")?,
+        randomness_length: canonical_u16(shape.randomness_len, "mask randomness length")?,
+        domain_size: canonical_u32(shape.domain_size, "mask domain size")?,
+    })
+}
+
+fn canonical_u8(
+    value: usize,
+    parameter: &'static str,
+) -> Result<u8, SumcheckClassConfigurationError> {
+    u8::try_from(value)
+        .map_err(|_| SumcheckClassConfigurationError::ParameterDoesNotFit { parameter })
+}
+
+fn canonical_u16(
+    value: usize,
+    parameter: &'static str,
+) -> Result<u16, SumcheckClassConfigurationError> {
+    u16::try_from(value)
+        .map_err(|_| SumcheckClassConfigurationError::ParameterDoesNotFit { parameter })
+}
+
+fn canonical_u32(
+    value: usize,
+    parameter: &'static str,
+) -> Result<u32, SumcheckClassConfigurationError> {
+    u32::try_from(value)
+        .map_err(|_| SumcheckClassConfigurationError::ParameterDoesNotFit { parameter })
+}
+
+fn append_parameter_record(
+    initial_state: &mut Vec<u8>,
+    parameters: &SumcheckClassParameterRecord,
+) -> ProofBackendBakeoffResult<()> {
+    let bytes = postcard::to_allocvec(parameters)
+        .map_err(|error| format!("encode sumcheck-class parameter record: {error}"))?;
+    let byte_length = u64::try_from(bytes.len())
+        .map_err(|_| "sumcheck-class parameter record byte length does not fit u64".to_owned())?;
+    initial_state.extend_from_slice(&byte_length.to_le_bytes());
+    initial_state.extend_from_slice(&bytes);
+    Ok(())
+}
+
+fn fresh_pcs_challenger(
+    pcs: &SumcheckClassPcs,
+    parameters: &SumcheckClassParameterRecord,
+) -> ProofBackendBakeoffResult<Challenger> {
+    let mut initial_state = b"proof-backend-bakeoff/sumcheck-class/pcs-transcript/v1".to_vec();
+    append_parameter_record(&mut initial_state, parameters)?;
+    let mut challenger = Challenger::new(HashChallenger::new(
+        initial_state,
+        DomainSeparatedShake256 {
+            domain: b"proof-backend-bakeoff/sumcheck-class/pcs-challenges/v1",
+        },
+    ));
+    let mut separator = DomainSeparator::<ChallengeField, BaseField>::new(Vec::new());
+    pcs.add_domain_separator::<MERKLE_DIGEST_WORD_LENGTH>(&mut separator);
+    separator.observe_domain_separator(&mut challenger);
+    Ok(challenger)
+}
+
+fn fresh_relation_challenger(
+    canonical_statement: &[u8],
+    parameters: &SumcheckClassParameterRecord,
+) -> ProofBackendBakeoffResult<Challenger> {
+    let initial_state = relation_transcript_initial_state(canonical_statement, parameters)?;
+    Ok(Challenger::new(HashChallenger::new(
+        initial_state,
+        DomainSeparatedShake256 {
+            domain: b"proof-backend-bakeoff/sumcheck-class/outer-challenges/v1",
+        },
+    )))
+}
+
+fn relation_transcript_initial_state(
+    canonical_statement: &[u8],
+    parameters: &SumcheckClassParameterRecord,
+) -> ProofBackendBakeoffResult<Vec<u8>> {
+    let statement_byte_length = u64::try_from(canonical_statement.len())
+        .map_err(|_| "sumcheck-class statement byte length does not fit u64".to_owned())?;
+    let mut initial_state = b"proof-backend-bakeoff/sumcheck-class/outer-sumcheck/v1".to_vec();
+    append_parameter_record(&mut initial_state, parameters)?;
+    initial_state.extend_from_slice(&statement_byte_length.to_le_bytes());
+    initial_state.extend_from_slice(canonical_statement);
+    Ok(initial_state)
+}
+
+fn stacked_witness_columns(columns: &[Vec<u64>; RELATION_COLUMN_COUNT]) -> Poly<BaseField> {
+    let mut evaluations = Vec::with_capacity(RELATION_COLUMN_COUNT * RELATION_ROW_COUNT);
+    for column in columns {
+        evaluations.extend(column.iter().copied().map(BaseField::from_u64));
+    }
+    Poly::new(evaluations)
+}
+
+fn stacked_witness(fixture: &ProofBackendBakeoffFixture) -> Poly<BaseField> {
+    stacked_witness_columns(&fixture.columns)
+}
+
+fn combined_residual_polynomial(
+    fixture: &ProofBackendBakeoffFixture,
+    constraint_batching_challenge: ChallengeField,
+) -> Poly<ChallengeField> {
+    Poly::new(
+        (0..RELATION_ROW_COUNT)
+            .map(|row_index| {
+                let first_residual = affine_residual_from_fixture(fixture, row_index, 0);
+                let second_residual = affine_residual_from_fixture(fixture, row_index, 4);
+                ChallengeField::from(first_residual)
+                    + constraint_batching_challenge * ChallengeField::from(second_residual)
+            })
+            .collect(),
+    )
+}
+
+fn affine_residual_from_fixture(
+    fixture: &ProofBackendBakeoffFixture,
+    row_index: usize,
+    first_column_index: usize,
+) -> BaseField {
+    affine_residual(
+        BaseField::from_u64(fixture.columns[first_column_index][row_index]),
+        BaseField::from_u64(fixture.columns[first_column_index + 1][row_index]),
+        BaseField::from_u64(fixture.columns[first_column_index + 2][row_index]),
+        BaseField::from_u64(fixture.columns[first_column_index + 3][row_index]),
+    )
+}
+
+fn affine_residual<Field: PrimeCharacteristicRing>(
+    low_digit: Field,
+    high_digit: Field,
+    shifted_secret: Field,
+    negative_indicator: Field,
+) -> Field {
+    low_digit + high_digit * Field::from_u64(MATERIAL_RADIX) - shifted_secret + Field::ONE
+        - negative_indicator * Field::from_u64(CIPHERTEXT_MODULUS)
+}
+
+fn chosen_column_points(
+    terminal_relation_point: &Point<ChallengeField>,
+) -> Vec<Point<ChallengeField>> {
+    (0..RELATION_COLUMN_COUNT)
+        .map(|column_index| {
+            let mut point =
+                Point::<ChallengeField>::hypercube(column_index, COLUMN_SELECTOR_VARIABLE_COUNT);
+            point.extend(terminal_relation_point);
+            point
+        })
+        .collect()
+}
+
+fn verify_canonical_artifact(
+    canonical_artifact: &[u8],
+    canonical_sumcheck_statement: &[u8],
+    input_identity_shake256_hex: &str,
+) -> ProofBackendBakeoffResult<()> {
+    let statement_bindings = validated_frozen_sumcheck_public_statement(
+        canonical_sumcheck_statement,
+        input_identity_shake256_hex,
+    )?;
+    let commitment =
+        decode_canonical_sumcheck_commitment(&statement_bindings.expected_sumcheck_commitment)?;
+    let artifact = decode_canonical_artifact(canonical_artifact, canonical_sumcheck_statement)?;
+    verify_decoded_artifact(&artifact, canonical_sumcheck_statement, &commitment)
+}
+
+fn encode_canonical_artifact(
+    artifact: &SumcheckClassArtifact,
+    canonical_statement: &[u8],
+) -> ProofBackendBakeoffResult<Vec<u8>> {
+    let canonical_body = postcard::to_allocvec(artifact)
+        .map_err(|error| format!("encode sumcheck-class artifact: {error}"))?;
+    let mut canonical_artifact = canonical_proof_object_header_bytes(canonical_statement)
+        .map_err(|error| format!("construct sumcheck-class proof header: {error:?}"))?;
+    canonical_artifact.extend_from_slice(&canonical_body);
+    Ok(canonical_artifact)
+}
+
+fn decode_canonical_artifact(
+    canonical_artifact: &[u8],
+    canonical_statement: &[u8],
+) -> ProofBackendBakeoffResult<SumcheckClassArtifact> {
+    let expected_header = canonical_proof_object_header_bytes(canonical_statement)
+        .map_err(|error| format!("construct expected sumcheck-class proof header: {error:?}"))?;
+    let canonical_body = canonical_artifact
+        .strip_prefix(expected_header.as_slice())
+        .ok_or_else(|| "sumcheck-class artifact has the wrong canonical proof header".to_owned())?;
+    let (artifact, trailing_bytes) =
+        postcard::take_from_bytes::<SumcheckClassArtifact>(canonical_body)
+            .map_err(|error| format!("decode sumcheck-class artifact: {error}"))?;
+    if !trailing_bytes.is_empty() {
+        return Err("sumcheck-class artifact has trailing bytes".to_owned());
+    }
+    let reencoded = postcard::to_allocvec(&artifact)
+        .map_err(|error| format!("re-encode sumcheck-class artifact: {error}"))?;
+    if reencoded != canonical_body {
+        return Err("sumcheck-class artifact encoding is not canonical".to_owned());
+    }
+    Ok(artifact)
+}
+
+fn require_verification_refusal(
+    result: ProofBackendBakeoffResult<()>,
+    mutation: &'static str,
+) -> ProofBackendBakeoffResult<()> {
+    if result.is_ok() {
+        return Err(format!(
+            "fresh sumcheck-class verifier accepted the {mutation} mutation"
+        ));
+    }
+    Ok(())
+}
+
+pub(super) fn verify_sumcheck_class_mutations(
+    canonical_sumcheck_statement: &[u8],
+    input_identity_shake256_hex: &str,
+    canonical_artifact: &[u8],
+) -> ProofBackendBakeoffResult<()> {
+    verify_canonical_artifact(
+        canonical_artifact,
+        canonical_sumcheck_statement,
+        input_identity_shake256_hex,
+    )?;
+
+    let mut changed_header = canonical_artifact.to_vec();
+    let first_header_byte = changed_header
+        .first_mut()
+        .ok_or_else(|| "sumcheck-class artifact is empty".to_owned())?;
+    *first_header_byte ^= 1;
+    require_verification_refusal(
+        verify_canonical_artifact(
+            &changed_header,
+            canonical_sumcheck_statement,
+            input_identity_shake256_hex,
+        ),
+        "canonical proof header",
+    )?;
+
+    let mut trailing = canonical_artifact.to_vec();
+    trailing.push(0);
+    require_verification_refusal(
+        verify_canonical_artifact(
+            &trailing,
+            canonical_sumcheck_statement,
+            input_identity_shake256_hex,
+        ),
+        "trailing byte",
+    )?;
+
+    let artifact = decode_canonical_artifact(canonical_artifact, canonical_sumcheck_statement)?;
+    let mut changed_claim = artifact.clone();
+    changed_claim.outer_sumcheck_proof.claimed_sum = ChallengeField::ONE;
+    let changed_claim_bytes =
+        encode_canonical_artifact(&changed_claim, canonical_sumcheck_statement)?;
+    require_verification_refusal(
+        verify_canonical_artifact(
+            &changed_claim_bytes,
+            canonical_sumcheck_statement,
+            input_identity_shake256_hex,
+        ),
+        "outer sumcheck claim",
+    )?;
+
+    let alternate_affine_valid_columns: [Vec<u64>; RELATION_COLUMN_COUNT] =
+        std::array::from_fn(|column_index| {
+            let constant_value = if column_index == 2 || column_index == 6 {
+                1
+            } else {
+                0
+            };
+            vec![constant_value; RELATION_ROW_COUNT]
+        });
+    let alternate_commitment_bytes =
+        derive_frozen_sumcheck_commitment(&alternate_affine_valid_columns)?;
+    let expected_commitment_bytes = validated_frozen_sumcheck_public_statement(
+        canonical_sumcheck_statement,
+        input_identity_shake256_hex,
+    )?
+    .expected_sumcheck_commitment;
+    if alternate_commitment_bytes == expected_commitment_bytes {
+        return Err(
+            "alternate affine-valid columns unexpectedly share the frozen commitment".to_owned(),
+        );
+    }
+    let alternate_sumcheck_statement = canonical_frozen_sumcheck_public_statement(
+        input_identity_shake256_hex,
+        &alternate_commitment_bytes,
+    )?;
+    let alternate_statement_artifact =
+        encode_canonical_artifact(&artifact, &alternate_sumcheck_statement)?;
+    require_verification_refusal(
+        verify_canonical_artifact(
+            &alternate_statement_artifact,
+            &alternate_sumcheck_statement,
+            input_identity_shake256_hex,
+        ),
+        "alternate affine-valid commitment statement",
+    )?;
+
+    let mut changed_evaluation = artifact;
+    let first_evaluation = changed_evaluation
+        .opening_proof
+        .evals
+        .first_mut()
+        .ok_or_else(|| "sumcheck-class artifact contains no opening evaluation".to_owned())?;
+    *first_evaluation += ChallengeField::ONE;
+    let changed_evaluation_bytes =
+        encode_canonical_artifact(&changed_evaluation, canonical_sumcheck_statement)?;
+    require_verification_refusal(
+        verify_canonical_artifact(
+            &changed_evaluation_bytes,
+            canonical_sumcheck_statement,
+            input_identity_shake256_hex,
+        ),
+        "authenticated opening evaluation",
+    )?;
+
+    let mut changed_identity_bytes = input_identity_shake256_hex.as_bytes().to_vec();
+    let first_identity_byte = changed_identity_bytes
+        .first_mut()
+        .ok_or_else(|| "sumcheck-class public input identity is empty".to_owned())?;
+    *first_identity_byte = if *first_identity_byte == b'0' {
+        b'1'
+    } else {
+        b'0'
+    };
+    let changed_identity = String::from_utf8(changed_identity_bytes)
+        .map_err(|error| format!("mutated public input identity is not UTF-8: {error}"))?;
+    require_verification_refusal(
+        verify_canonical_artifact(
+            canonical_artifact,
+            canonical_sumcheck_statement,
+            &changed_identity,
+        ),
+        "public input identity",
+    )?;
+
+    let mut changed_statement = canonical_sumcheck_statement.to_vec();
+    changed_statement.push(0);
+    require_verification_refusal(
+        verify_canonical_artifact(
+            canonical_artifact,
+            &changed_statement,
+            input_identity_shake256_hex,
+        ),
+        "canonical public statement",
+    )
+}
+
+fn verify_decoded_artifact(
+    artifact: &SumcheckClassArtifact,
+    canonical_sumcheck_statement: &[u8],
+    commitment: &SumcheckClassCommitment,
+) -> ProofBackendBakeoffResult<()> {
+    let (pcs, parameters) = build_pcs()?;
+    if artifact.outer_sumcheck_proof.claimed_sum != ChallengeField::ZERO {
+        return Err("outer sumcheck claimed sum is not zero".to_owned());
+    }
+    let mut relation_challenger =
+        fresh_relation_challenger(canonical_sumcheck_statement, &parameters)?;
+    relation_challenger.observe(commitment.clone());
+    let constraint_batching_challenge: ChallengeField =
+        relation_challenger.sample_algebra_element();
+    let equality_random_point = Point::new(
+        (0..RELATION_VARIABLE_COUNT)
+            .map(|_| relation_challenger.sample_algebra_element::<ChallengeField>())
+            .collect(),
+    );
+    let (terminal_relation_point, terminal_sum) = artifact
+        .outer_sumcheck_proof
+        .verify(
+            &mut relation_challenger,
+            RELATION_VARIABLE_COUNT,
+            OUTER_SUMCHECK_DEGREE,
+            0,
+        )
+        .map_err(|error| format!("verify outer degree-two sumcheck: {error}"))?;
+    let opening_points = chosen_column_points(&terminal_relation_point);
+
+    let mut pcs_challenger = fresh_pcs_challenger(&pcs, &parameters)?;
+    pcs.verify(
+        commitment,
+        &artifact.opening_proof,
+        &mut pcs_challenger,
+        opening_points,
+    )
+    .map_err(|error| format!("verify HidingWhir chosen openings: {error}"))?;
+    if artifact.opening_proof.evals.len() != RELATION_COLUMN_COUNT {
+        return Err("HidingWhir proof does not contain exactly eight evaluations".to_owned());
+    }
+
+    let first_residual = affine_residual(
+        artifact.opening_proof.evals[0],
+        artifact.opening_proof.evals[1],
+        artifact.opening_proof.evals[2],
+        artifact.opening_proof.evals[3],
+    );
+    let second_residual = affine_residual(
+        artifact.opening_proof.evals[4],
+        artifact.opening_proof.evals[5],
+        artifact.opening_proof.evals[6],
+        artifact.opening_proof.evals[7],
+    );
+    let terminal_residual = first_residual + constraint_batching_challenge * second_residual;
+    let equality_at_terminal = equality_random_point
+        .iter()
+        .zip(terminal_relation_point.iter())
+        .map(|(&left, &right)| {
+            left * right + (ChallengeField::ONE - left) * (ChallengeField::ONE - right)
+        })
+        .product::<ChallengeField>();
+    if terminal_sum != equality_at_terminal * terminal_residual {
+        return Err("outer sumcheck terminal residual is not authenticated".to_owned());
+    }
+    Ok(())
+}
+
+fn validate_fixture(fixture: &ProofBackendBakeoffFixture) -> ProofBackendBakeoffResult<()> {
+    let recomputed_identity = recompute_frozen_input_identity(&fixture.columns)?;
+    if recomputed_identity != fixture.input_identity_shake256_hex {
+        return Err(
+            "sumcheck-class input identity does not match the exact eight columns".to_owned(),
+        );
+    }
+    let bindings = validated_frozen_sumcheck_public_statement(
+        &fixture.canonical_sumcheck_statement,
+        &fixture.input_identity_shake256_hex,
+    )?;
+    if bindings.canonical_core_statement != fixture.canonical_core_statement
+        || bindings.expected_sumcheck_commitment != fixture.expected_sumcheck_commitment
+    {
+        return Err("sumcheck-class fixture binding fields are stale".to_owned());
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn synthetic_fixture() -> ProofBackendBakeoffFixture {
+        frozen_fixture().expect("exact frozen backend-bakeoff fixture")
+    }
+
+    #[test]
+    fn degree_two_round_polynomial_matches_direct_hypercube_sum() {
+        let equality_polynomial = Poly::new(vec![
+            ChallengeField::from_u64(2),
+            ChallengeField::from_u64(3),
+            ChallengeField::from_u64(5),
+            ChallengeField::from_u64(7),
+        ]);
+        let combined_residual_polynomial = Poly::new(vec![
+            ChallengeField::from_u64(11),
+            ChallengeField::from_u64(13),
+            ChallengeField::from_u64(17),
+            ChallengeField::from_u64(19),
+        ]);
+        let prover = DegreeTwoRelationProver {
+            equality_polynomial,
+            combined_residual_polynomial,
+        };
+        let evaluations = prover.round_poly();
+        assert_eq!(evaluations.len(), 2);
+        assert_eq!(evaluations[0], ChallengeField::from_u64(61));
+        assert_eq!(
+            evaluations[1],
+            (ChallengeField::from_u64(8) * ChallengeField::from_u64(23))
+                + (ChallengeField::from_u64(11) * ChallengeField::from_u64(25))
+        );
+    }
+
+    #[test]
+    fn fixture_validation_rejects_each_affine_half_mutation() {
+        let fixture = synthetic_fixture();
+        validate_fixture(&fixture).expect("honest synthetic fixture");
+        for column_index in 0..RELATION_COLUMN_COUNT {
+            let mut mutated = fixture.clone();
+            mutated.columns[column_index][9] += 1;
+            assert!(validate_fixture(&mutated).is_err());
+        }
+
+        let mut relation_preserving_mutation = fixture.clone();
+        for (column_index, value) in [0_u64, 0, 1, 0].into_iter().enumerate() {
+            relation_preserving_mutation.columns[column_index][0] = value;
+        }
+        assert!(
+            recompute_frozen_input_identity(&relation_preserving_mutation.columns).is_ok(),
+            "the mutation must preserve all public relation checks"
+        );
+        assert!(validate_fixture(&relation_preserving_mutation).is_err());
+
+        let mut wrong_identity = fixture.clone();
+        wrong_identity
+            .input_identity_shake256_hex
+            .replace_range(..1, "0");
+        if wrong_identity.input_identity_shake256_hex == fixture.input_identity_shake256_hex {
+            wrong_identity
+                .input_identity_shake256_hex
+                .replace_range(..1, "1");
+        }
+        assert!(validate_fixture(&wrong_identity).is_err());
+
+        let mut stale_sumcheck_binding = fixture.clone();
+        stale_sumcheck_binding.expected_sumcheck_commitment[0] ^= 1;
+        assert!(validate_fixture(&stale_sumcheck_binding).is_err());
+
+        let mut stale_core_statement_binding = fixture.clone();
+        stale_core_statement_binding
+            .canonical_core_statement
+            .push(0);
+        assert!(validate_fixture(&stale_core_statement_binding).is_err());
+
+        let mut wrong_statement = fixture;
+        wrong_statement.canonical_sumcheck_statement.push(0);
+        assert!(validate_fixture(&wrong_statement).is_err());
+    }
+
+    #[test]
+    fn hiding_whir_configuration_matches_the_exact_conservative_profile() {
+        let config = build_configuration().expect("frozen HidingWhir configuration");
+        let budget =
+            validate_security_budgets(&config).expect("frozen HidingWhir security budgets");
+
+        assert_eq!(
+            config.params.security_level,
+            INTERNAL_BRANCH_SECURITY_PARAMETER
+        );
+        assert_eq!(config.params.pow_bits, GRINDING_BIT_CEILING);
+        assert_eq!(
+            config.params.soundness_type,
+            SecurityAssumption::UniqueDecoding
+        );
+        assert_eq!(config.zk.ell_zk, MASK_MESSAGE_LENGTH);
+        assert_eq!(budget.maximum_pow_bits, GRINDING_BIT_CEILING);
+        assert_eq!(config.folding_schedule, EXPECTED_FOLDING_SCHEDULE);
+        assert_eq!(
+            config
+                .round_parameters
+                .iter()
+                .map(|round| round.num_queries)
+                .collect::<Vec<_>>(),
+            EXPECTED_ROUND_QUERY_COUNTS
+        );
+        assert_eq!(config.final_queries, EXPECTED_FINAL_QUERY_COUNT);
+        assert_eq!(config.oracle_randomness, EXPECTED_ORACLE_RANDOMNESS_LENGTHS);
+        assert_eq!(config.commitment_ood_samples, 0);
+        assert_eq!(config.mask_queries, 276);
+        assert_eq!(
+            (
+                config.sumcheck_mask.message_len,
+                config.sumcheck_mask.randomness_len,
+                config.sumcheck_mask.domain_size,
+            ),
+            (46, 276, 16_384)
+        );
+        assert_eq!(
+            config
+                .switch_masks
+                .iter()
+                .map(|shape| (shape.message_len, shape.randomness_len, shape.domain_size))
+                .collect::<Vec<_>>(),
+            [(579, 276, 32_768), (264, 276, 32_768)]
+        );
+        assert_eq!(MERKLE_DIGEST_BYTE_LENGTH, 64);
+
+        let parameters = parameter_record(&config).expect("operative parameter record");
+        assert_eq!(parameters.schema_version, 5);
+        assert_eq!(
+            parameters.merkle_digest_byte_length,
+            MERKLE_DIGEST_BYTE_LENGTH as u8
+        );
+        assert_eq!(
+            parameters.challenger_output_byte_length,
+            CHALLENGER_OUTPUT_BYTE_LENGTH as u8
+        );
+        assert_eq!(parameters.mask_query_count, config.mask_queries as u16);
+        assert_eq!(parameters.commitment_out_of_domain_sample_count, 0);
+        assert_eq!(parameters.derived_folding_schedule, [4, 4, 4]);
+        assert_eq!(
+            parameters
+                .rounds
+                .iter()
+                .map(|round| (
+                    round.variable_count,
+                    round.log_inverse_rate,
+                    round.domain_size,
+                    round.query_count,
+                    round.pow_bits,
+                    round.out_of_domain_sample_count,
+                    round.folding_pow_bits,
+                ))
+                .collect::<Vec<_>>(),
+            [
+                (13, 4, 262_144, 579, 20, 0, 0),
+                (9, 7, 131_072, 264, 20, 0, 0),
+            ]
+        );
+    }
+
+    #[test]
+    fn altered_local_operative_profile_changes_the_transcript() {
+        let config = build_configuration().expect("frozen HidingWhir configuration");
+        let parameters = parameter_record(&config).expect("frozen operative parameter record");
+        let mut altered_parameters = parameters.clone();
+        altered_parameters.final_query_count = altered_parameters
+            .final_query_count
+            .checked_sub(1)
+            .expect("the frozen final query count is positive");
+        assert_ne!(altered_parameters, parameters);
+
+        let canonical_statement = b"sumcheck-class local profile transcript test";
+        let transcript = relation_transcript_initial_state(canonical_statement, &parameters)
+            .expect("frozen relation transcript");
+        let altered_transcript =
+            relation_transcript_initial_state(canonical_statement, &altered_parameters)
+                .expect("altered relation transcript");
+        assert_ne!(transcript, altered_transcript);
+    }
+
+    #[test]
+    fn exact_unique_decoding_query_mask_and_aggregate_bounds_are_minimal() {
+        for (log_inverse_rate, query_count, grinding_bits) in
+            [(1, 579, 20), (4, 264, 20), (7, 243, 20)]
+        {
+            assert!(
+                exact_unique_decoding_query_bound_holds(
+                    log_inverse_rate,
+                    query_count,
+                    grinding_bits,
+                    260,
+                )
+                .expect("exact unique-decoding inequality")
+            );
+            assert!(
+                !exact_unique_decoding_query_bound_holds(
+                    log_inverse_rate,
+                    query_count,
+                    grinding_bits - 1,
+                    260,
+                )
+                .expect("exact unique-decoding grinding minimality")
+            );
+            assert!(
+                exact_unique_decoding_query_bound_holds(log_inverse_rate, query_count, 0, 240,)
+                    .expect("exact algebraic unique-decoding inequality")
+            );
+            assert!(!exact_unique_decoding_query_bound_holds(
+                log_inverse_rate,
+                query_count - 1,
+                0,
+                240,
+            )
+            .expect("exact unique-decoding query minimality"));
+        }
+        assert!(
+            exact_unique_decoding_mask_union_bound_holds(6, 276, 261)
+                .expect("exact mask union inequality")
+        );
+        assert!(
+            !exact_unique_decoding_mask_union_bound_holds(6, 276, 262)
+                .expect("exact mask union minimality")
+        );
+        assert!(
+            exact_unique_decoding_rbr_aggregate_bound_holds(
+                &[(1, 579, 20), (4, 264, 20), (7, 243, 20)],
+                276,
+                258,
+            )
+            .expect("exact unique-decoding RBR aggregate gate")
+        );
+        assert!(
+            !exact_unique_decoding_rbr_aggregate_bound_holds(
+                &[(1, 576, 20), (4, 262, 20), (7, 242, 20)],
+                275,
+                258,
+            )
+            .expect("lower internal parameter RBR aggregate gate")
+        );
+    }
+
+    #[test]
+    fn unique_decoding_algebraic_outer_hash_and_fiat_shamir_bounds_clear_the_floor() {
+        let challenge_field_order = challenge_field_order();
+        let fold_failure_numerator: u64 = UNIQUE_DECODING_FOLD_FAILURE_NUMERATORS.iter().sum();
+        assert_eq!(fold_failure_numerator, 458_758);
+        assert_eq!(
+            fold_failure_numerator
+                + UNIQUE_DECODING_QUERY_COMBINATION_FAILURE_NUMERATOR
+                + UNIQUE_DECODING_FINAL_FOLDING_FAILURE_NUMERATOR
+                + OUTER_RELATION_FAILURE_NUMERATOR as u64,
+            UNIQUE_DECODING_AGGREGATE_ALGEBRAIC_FAILURE_NUMERATOR
+        );
+        assert!(
+            (BigUint::from(UNIQUE_DECODING_AGGREGATE_ALGEBRAIC_FAILURE_NUMERATOR)
+                << UNIQUE_DECODING_ALGEBRAIC_SECURITY_PARAMETER)
+                < challenge_field_order
+        );
+
+        assert!(
+            (BigUint::from(OUTER_RELATION_FAILURE_NUMERATOR) << 309_usize) < challenge_field_order,
+            "43 / |Goldilocks^5| must be strictly below 2^-309"
+        );
+        assert!(exact_classical_fiat_shamir_work_factor_bound_holds());
+    }
+
+    #[test]
+    fn merkle_word_encoding_preserves_all_64_shake256_bytes() {
+        let hasher = DomainSeparatedShake256 {
+            domain: b"proof-backend-bakeoff/sumcheck-class/digest-encoding-test/v1",
+        };
+        let input_words = [0_u64, 1, u32::MAX as u64, u64::MAX, 0x0123_4567_89ab_cdef];
+        let byte_digest = <DomainSeparatedShake256 as CryptographicHasher<
+            u8,
+            [u8; MERKLE_DIGEST_BYTE_LENGTH],
+        >>::hash_iter(
+            &hasher, input_words.into_iter().flat_map(u64::to_le_bytes)
+        );
+        let word_digest = <DomainSeparatedShake256 as CryptographicHasher<
+            u64,
+            [u64; MERKLE_DIGEST_WORD_LENGTH],
+        >>::hash_iter(&hasher, input_words);
+        let reencoded_word_digest: Vec<u8> =
+            word_digest.into_iter().flat_map(u64::to_le_bytes).collect();
+
+        assert_eq!(byte_digest.len(), 64);
+        assert_eq!(reencoded_word_digest, byte_digest);
+    }
+}

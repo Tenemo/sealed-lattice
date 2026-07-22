@@ -32,6 +32,12 @@ mod opening;
 mod phase_liveness_accounting;
 mod polynomial;
 mod profile;
+#[cfg(all(test, not(target_arch = "wasm32"), feature = "proof-backend-bakeoff"))]
+mod proof_backend_bakeoff;
+#[cfg(all(test, not(target_arch = "wasm32"), feature = "proof-backend-bakeoff"))]
+mod proof_backend_bakeoff_fri;
+#[cfg(all(test, not(target_arch = "wasm32"), feature = "proof-backend-bakeoff"))]
+mod proof_backend_bakeoff_sumcheck;
 mod prover;
 mod recipient_vss_payload;
 mod relation_plan;
