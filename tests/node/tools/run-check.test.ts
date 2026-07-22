@@ -57,6 +57,9 @@ describe('check runner', () => {
             'pnpm.cjs',
             'run',
             'test:node:built',
+            '--',
+            '--maxWorkers',
+            '50%',
         ]);
         expect(nodeTestLanes[0]?.commands[0]?.args).not.toContain('build');
     });

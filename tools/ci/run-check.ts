@@ -224,7 +224,13 @@ export const buildCheckParallelLanes = (
         lane('Lint', 'lint', ['run', 'lint']),
         buildRustKernelLane(packageManagerRunner),
         lane('Knip unused-code scan', 'knip', ['exec', 'knip']),
-        lane('Node tests', 'node', ['run', 'test:node:built']),
+        lane('Node tests', 'node', [
+            'run',
+            'test:node:built',
+            '--',
+            '--maxWorkers',
+            '50%',
+        ]),
     ];
 };
 
