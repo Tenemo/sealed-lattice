@@ -13,18 +13,27 @@
 
 use num_bigint::BigUint;
 use p3_challenger::{CanObserve, FieldChallenger, HashChallenger, SerializingChallenger64};
-use p3_commit::MultilinearPcs;
+use p3_commit::{Mmcs, MultilinearPcs};
 use p3_dft::Radix2DFTSmallBatch;
 use p3_field::{PrimeCharacteristicRing, PrimeField64, extension::BinomialExtensionField};
 use p3_goldilocks::Goldilocks;
 use p3_merkle_tree::MerkleTreeMmcs;
 use p3_multilinear_util::{point::Point, poly::Poly};
-use p3_sumcheck::generic_degree::{GenericDegreeProof, RoundProver};
+use p3_sumcheck::{
+    generic_degree::{GenericDegreeProof, RoundProver},
+    zk::ZkSumcheckData,
+};
 use p3_symmetric::{CompressionFunctionFromHasher, CryptographicHasher, SerializingHasher};
 use p3_whir::pcs::zk::{HidingWhirPcs, ZkParameters, ZkWhirConfig};
-use p3_whir::{DomainSeparator, FoldingFactor, ProtocolParameters, SecurityAssumption};
+use p3_whir::{
+    BaseCaseZkProof, BlindedMask, DomainSeparator, FoldingFactor, MaskOpeningPair,
+    ProtocolParameters, QueryOpening, SecurityAssumption, ZkRoundProof, ZkWhirProof,
+};
 use rand::{SeedableRng, rngs::SmallRng};
-use serde::{Deserialize, Serialize};
+use serde::{
+    Deserialize, Serialize, Serializer,
+    ser::{SerializeSeq, SerializeStruct, SerializeStructVariant},
+};
 use sha3::{
     Shake256,
     digest::{ExtendableOutput, Update, XofReader},
@@ -77,9 +86,34 @@ const EXPECTED_ROUND_POW_BITS: [usize; 2] = [20, 20];
 const EXPECTED_ROUND_VARIABLE_COUNTS: [usize; 2] = [13, 9];
 const EXPECTED_ROUND_LOG_INVERSE_RATES: [usize; 2] = [4, 7];
 const EXPECTED_ROUND_DOMAIN_SIZES: [usize; 2] = [262_144, 131_072];
+const EXPECTED_ROUND_QUERY_VALUE_LENGTHS: [usize; 2] = [16, 16];
+const EXPECTED_ROUND_QUERY_PATH_LENGTHS: [usize; 2] = [14, 13];
 const EXPECTED_FINAL_QUERY_COUNT: usize = 243;
 const EXPECTED_FINAL_POW_BITS: usize = 20;
 const EXPECTED_FINAL_SUMCHECK_ROUND_COUNT: usize = 5;
+const EXPECTED_MASK_QUERY_COUNT: usize = 276;
+const EXPECTED_SOURCE_QUERY_VALUE_LENGTH: usize = 16;
+const EXPECTED_SOURCE_QUERY_PATH_LENGTH: usize = 12;
+const EXPECTED_FRESH_MAIN_QUERY_VALUE_LENGTH: usize = 1;
+const EXPECTED_FRESH_MAIN_QUERY_PATH_LENGTH: usize = 12;
+const EXPECTED_MASK_GROUP_WIDTHS: [usize; 5] = [4, 1, 4, 1, 4];
+const EXPECTED_MASK_GROUP_PATH_LENGTHS: [usize; 5] = [14, 15, 14, 15, 14];
+const EXPECTED_BLINDED_MASK_MESSAGE_LENGTHS: [usize; 14] = [
+    MASK_MESSAGE_LENGTH,
+    MASK_MESSAGE_LENGTH,
+    MASK_MESSAGE_LENGTH,
+    MASK_MESSAGE_LENGTH,
+    EXPECTED_ORACLE_RANDOMNESS_LENGTHS[0],
+    MASK_MESSAGE_LENGTH,
+    MASK_MESSAGE_LENGTH,
+    MASK_MESSAGE_LENGTH,
+    MASK_MESSAGE_LENGTH,
+    EXPECTED_ORACLE_RANDOMNESS_LENGTHS[1],
+    MASK_MESSAGE_LENGTH,
+    MASK_MESSAGE_LENGTH,
+    MASK_MESSAGE_LENGTH,
+    MASK_MESSAGE_LENGTH,
+];
 const CLASSICAL_MERKLE_COLLISION_SECURITY_BITS: usize = 256;
 const GENERIC_QUANTUM_COLLISION_QUERY_EXPONENT_DENOMINATOR: usize = 3;
 const MERKLE_DIGEST_WORD_LENGTH: usize = 8;
@@ -89,6 +123,180 @@ const MERKLE_TREE_ARITY: usize = 2;
 const MERKLE_MINIMUM_HEIGHT: usize = 0;
 const OUTER_SUMCHECK_DEGREE: usize = 2;
 const SYNTHETIC_HIDING_RANDOMNESS_SEED: u64 = 0x534c_5748_4952_0001;
+const CANONICAL_ARTIFACT_WIRE_SCHEMA_VERSION: u8 = 1;
+const MAXIMUM_BASE_FIELD_ELEMENT_BYTE_LENGTH: usize = 10;
+const MAXIMUM_CHALLENGE_FIELD_ELEMENT_BYTE_LENGTH: usize =
+    5 * MAXIMUM_BASE_FIELD_ELEMENT_BYTE_LENGTH;
+const MAXIMUM_MERKLE_DIGEST_BYTE_LENGTH: usize =
+    MERKLE_DIGEST_WORD_LENGTH * MAXIMUM_BASE_FIELD_ELEMENT_BYTE_LENGTH;
+const MAXIMUM_SINGLE_DIGEST_CAP_BYTE_LENGTH: usize =
+    maximum_vector_byte_length(1, MAXIMUM_MERKLE_DIGEST_BYTE_LENGTH);
+const QUERY_OPENING_BASE_TAG: u32 = 0;
+const QUERY_OPENING_EXTENSION_TAG: u32 = 1;
+
+const fn postcard_varint_byte_length(mut value: usize) -> usize {
+    let mut byte_length = 1;
+    while value >= 128 {
+        value >>= 7;
+        byte_length += 1;
+    }
+    byte_length
+}
+
+const fn maximum_vector_byte_length(element_count: usize, element_byte_length: usize) -> usize {
+    postcard_varint_byte_length(element_count) + element_count * element_byte_length
+}
+
+const fn maximum_query_opening_byte_length(
+    value_count: usize,
+    value_byte_length: usize,
+    merkle_path_length: usize,
+) -> usize {
+    postcard_varint_byte_length(QUERY_OPENING_EXTENSION_TAG as usize)
+        + maximum_vector_byte_length(value_count, value_byte_length)
+        + maximum_vector_byte_length(merkle_path_length, MAXIMUM_MERKLE_DIGEST_BYTE_LENGTH)
+}
+
+const fn maximum_blinded_masks_byte_length() -> usize {
+    let mut byte_length = postcard_varint_byte_length(EXPECTED_BLINDED_MASK_MESSAGE_LENGTHS.len());
+    let mut mask_index = 0;
+    while mask_index < EXPECTED_BLINDED_MASK_MESSAGE_LENGTHS.len() {
+        byte_length += maximum_vector_byte_length(
+            EXPECTED_BLINDED_MASK_MESSAGE_LENGTHS[mask_index],
+            MAXIMUM_CHALLENGE_FIELD_ELEMENT_BYTE_LENGTH,
+        );
+        byte_length += maximum_vector_byte_length(
+            EXPECTED_MASK_QUERY_COUNT,
+            MAXIMUM_CHALLENGE_FIELD_ELEMENT_BYTE_LENGTH,
+        );
+        mask_index += 1;
+    }
+    byte_length
+}
+
+const fn maximum_mask_query_groups_byte_length() -> usize {
+    let mut byte_length = postcard_varint_byte_length(EXPECTED_MASK_GROUP_WIDTHS.len());
+    let mut group_index = 0;
+    while group_index < EXPECTED_MASK_GROUP_WIDTHS.len() {
+        let query_byte_length = maximum_query_opening_byte_length(
+            EXPECTED_MASK_GROUP_WIDTHS[group_index],
+            MAXIMUM_CHALLENGE_FIELD_ELEMENT_BYTE_LENGTH,
+            EXPECTED_MASK_GROUP_PATH_LENGTHS[group_index],
+        );
+        byte_length += maximum_vector_byte_length(EXPECTED_MASK_QUERY_COUNT, 2 * query_byte_length);
+        group_index += 1;
+    }
+    byte_length
+}
+
+const MAXIMUM_OUTER_SUMCHECK_PROOF_BYTE_LENGTH: usize = MAXIMUM_CHALLENGE_FIELD_ELEMENT_BYTE_LENGTH
+    + maximum_vector_byte_length(
+        RELATION_VARIABLE_COUNT,
+        maximum_vector_byte_length(
+            OUTER_SUMCHECK_DEGREE,
+            MAXIMUM_CHALLENGE_FIELD_ELEMENT_BYTE_LENGTH,
+        ),
+    )
+    + maximum_vector_byte_length(0, MAXIMUM_BASE_FIELD_ELEMENT_BYTE_LENGTH);
+const MAXIMUM_MASKED_SUMCHECK_BYTE_LENGTH: usize = MAXIMUM_CHALLENGE_FIELD_ELEMENT_BYTE_LENGTH
+    + postcard_varint_byte_length(MASK_MESSAGE_LENGTH)
+    + maximum_vector_byte_length(
+        CONSTANT_FOLDING_FACTOR,
+        maximum_vector_byte_length(
+            MASK_MESSAGE_LENGTH - 1,
+            MAXIMUM_CHALLENGE_FIELD_ELEMENT_BYTE_LENGTH,
+        ),
+    )
+    + maximum_vector_byte_length(0, MAXIMUM_BASE_FIELD_ELEMENT_BYTE_LENGTH);
+const MAXIMUM_FIRST_ROUND_QUERY_BYTE_LENGTH: usize = maximum_query_opening_byte_length(
+    EXPECTED_ROUND_QUERY_VALUE_LENGTHS[0],
+    MAXIMUM_BASE_FIELD_ELEMENT_BYTE_LENGTH,
+    EXPECTED_ROUND_QUERY_PATH_LENGTHS[0],
+);
+const MAXIMUM_SECOND_ROUND_QUERY_BYTE_LENGTH: usize = maximum_query_opening_byte_length(
+    EXPECTED_ROUND_QUERY_VALUE_LENGTHS[1],
+    MAXIMUM_CHALLENGE_FIELD_ELEMENT_BYTE_LENGTH,
+    EXPECTED_ROUND_QUERY_PATH_LENGTHS[1],
+);
+const MAXIMUM_FIRST_ROUND_BYTE_LENGTH: usize = 2 * MAXIMUM_SINGLE_DIGEST_CAP_BYTE_LENGTH
+    + maximum_vector_byte_length(0, MAXIMUM_CHALLENGE_FIELD_ELEMENT_BYTE_LENGTH)
+    + MAXIMUM_BASE_FIELD_ELEMENT_BYTE_LENGTH
+    + maximum_vector_byte_length(
+        EXPECTED_ROUND_QUERY_COUNTS[0],
+        MAXIMUM_FIRST_ROUND_QUERY_BYTE_LENGTH,
+    );
+const MAXIMUM_SECOND_ROUND_BYTE_LENGTH: usize = 2 * MAXIMUM_SINGLE_DIGEST_CAP_BYTE_LENGTH
+    + maximum_vector_byte_length(0, MAXIMUM_CHALLENGE_FIELD_ELEMENT_BYTE_LENGTH)
+    + MAXIMUM_BASE_FIELD_ELEMENT_BYTE_LENGTH
+    + maximum_vector_byte_length(
+        EXPECTED_ROUND_QUERY_COUNTS[1],
+        MAXIMUM_SECOND_ROUND_QUERY_BYTE_LENGTH,
+    );
+const MAXIMUM_BLINDED_MASKS_BYTE_LENGTH: usize = maximum_blinded_masks_byte_length();
+const MAXIMUM_SOURCE_QUERY_BYTE_LENGTH: usize = maximum_query_opening_byte_length(
+    EXPECTED_SOURCE_QUERY_VALUE_LENGTH,
+    MAXIMUM_CHALLENGE_FIELD_ELEMENT_BYTE_LENGTH,
+    EXPECTED_SOURCE_QUERY_PATH_LENGTH,
+);
+const MAXIMUM_FRESH_MAIN_QUERY_BYTE_LENGTH: usize = maximum_query_opening_byte_length(
+    EXPECTED_FRESH_MAIN_QUERY_VALUE_LENGTH,
+    MAXIMUM_CHALLENGE_FIELD_ELEMENT_BYTE_LENGTH,
+    EXPECTED_FRESH_MAIN_QUERY_PATH_LENGTH,
+);
+const MAXIMUM_MASK_QUERY_GROUPS_BYTE_LENGTH: usize = maximum_mask_query_groups_byte_length();
+const MAXIMUM_BASE_CASE_BYTE_LENGTH: usize = MAXIMUM_SINGLE_DIGEST_CAP_BYTE_LENGTH
+    + maximum_vector_byte_length(
+        EXPECTED_MASK_GROUP_WIDTHS.len(),
+        MAXIMUM_SINGLE_DIGEST_CAP_BYTE_LENGTH,
+    )
+    + MAXIMUM_CHALLENGE_FIELD_ELEMENT_BYTE_LENGTH
+    + maximum_vector_byte_length(32, MAXIMUM_CHALLENGE_FIELD_ELEMENT_BYTE_LENGTH)
+    + maximum_vector_byte_length(
+        EXPECTED_FINAL_QUERY_COUNT,
+        MAXIMUM_CHALLENGE_FIELD_ELEMENT_BYTE_LENGTH,
+    )
+    + MAXIMUM_BLINDED_MASKS_BYTE_LENGTH
+    + MAXIMUM_BASE_FIELD_ELEMENT_BYTE_LENGTH
+    + maximum_vector_byte_length(EXPECTED_FINAL_QUERY_COUNT, MAXIMUM_SOURCE_QUERY_BYTE_LENGTH)
+    + maximum_vector_byte_length(
+        EXPECTED_FINAL_QUERY_COUNT,
+        MAXIMUM_FRESH_MAIN_QUERY_BYTE_LENGTH,
+    )
+    + MAXIMUM_MASK_QUERY_GROUPS_BYTE_LENGTH;
+const MAXIMUM_OPENING_PROOF_BYTE_LENGTH: usize = maximum_vector_byte_length(
+    RELATION_COLUMN_COUNT,
+    MAXIMUM_CHALLENGE_FIELD_ELEMENT_BYTE_LENGTH,
+) + maximum_vector_byte_length(
+    EXPECTED_FOLDING_SCHEDULE.len(),
+    MAXIMUM_MASKED_SUMCHECK_BYTE_LENGTH,
+) + maximum_vector_byte_length(
+    EXPECTED_FOLDING_SCHEDULE.len(),
+    MAXIMUM_SINGLE_DIGEST_CAP_BYTE_LENGTH,
+) + postcard_varint_byte_length(
+    EXPECTED_ROUND_QUERY_COUNTS.len(),
+) + MAXIMUM_FIRST_ROUND_BYTE_LENGTH
+    + MAXIMUM_SECOND_ROUND_BYTE_LENGTH
+    + MAXIMUM_BASE_CASE_BYTE_LENGTH;
+// Exact maximum for schema byte + outer sumcheck + the checked fixed-profile
+// opening proof. The canonical proof-object header is outside this body cap.
+const MAXIMUM_CANONICAL_ARTIFACT_BODY_BYTE_LENGTH: usize =
+    size_of::<u8>() + MAXIMUM_OUTER_SUMCHECK_PROOF_BYTE_LENGTH + MAXIMUM_OPENING_PROOF_BYTE_LENGTH;
+const _: () = assert!(
+    EXPECTED_FOLDING_SCHEDULE[0] == CONSTANT_FOLDING_FACTOR
+        && EXPECTED_FOLDING_SCHEDULE[1] == CONSTANT_FOLDING_FACTOR
+        && EXPECTED_FOLDING_SCHEDULE[2] == CONSTANT_FOLDING_FACTOR
+);
+const _: () = assert!(
+    EXPECTED_MASK_GROUP_WIDTHS[0] == EXPECTED_FOLDING_SCHEDULE[0]
+        && EXPECTED_MASK_GROUP_WIDTHS[1] == 1
+        && EXPECTED_MASK_GROUP_WIDTHS[2] == EXPECTED_FOLDING_SCHEDULE[1]
+        && EXPECTED_MASK_GROUP_WIDTHS[3] == 1
+        && EXPECTED_MASK_GROUP_WIDTHS[4] == EXPECTED_FOLDING_SCHEDULE[2]
+        && EXPECTED_MASK_GROUP_WIDTHS.len() == EXPECTED_MASK_GROUP_PATH_LENGTHS.len()
+        && EXPECTED_ROUND_QUERY_COUNTS.len() == EXPECTED_ROUND_QUERY_VALUE_LENGTHS.len()
+        && EXPECTED_ROUND_QUERY_COUNTS.len() == EXPECTED_ROUND_QUERY_PATH_LENGTHS.len()
+);
+const _: () = assert!(MAXIMUM_CANONICAL_ARTIFACT_BODY_BYTE_LENGTH == 5_785_122);
 
 type BaseField = Goldilocks;
 type ChallengeField = BinomialExtensionField<BaseField, 5>;
@@ -113,6 +321,11 @@ type SumcheckClassCommitment =
     <SumcheckClassPcs as MultilinearPcs<ChallengeField, Challenger>>::Commitment;
 type SumcheckClassOpeningProof =
     <SumcheckClassPcs as MultilinearPcs<ChallengeField, Challenger>>::Proof;
+type SumcheckClassMerkleProof = <CommitmentScheme as Mmcs<BaseField>>::Proof;
+type SumcheckClassQueryOpening = QueryOpening<BaseField, ChallengeField, SumcheckClassMerkleProof>;
+type SumcheckClassRoundProof = ZkRoundProof<BaseField, ChallengeField, CommitmentScheme>;
+type SumcheckClassBaseCaseProof = BaseCaseZkProof<BaseField, ChallengeField, CommitmentScheme>;
+type SumcheckClassMaskOpeningPair = MaskOpeningPair<BaseField, ChallengeField, CommitmentScheme>;
 
 #[derive(Clone, Copy, Debug)]
 struct DomainSeparatedShake256 {
@@ -188,10 +401,767 @@ impl CryptographicHasher<u64, [u64; MERKLE_DIGEST_WORD_LENGTH]> for DomainSepara
     }
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone)]
 struct SumcheckClassArtifact {
     outer_sumcheck_proof: GenericDegreeProof<BaseField, ChallengeField>,
     opening_proof: SumcheckClassOpeningProof,
+}
+
+struct SumcheckClassArtifactWireReference<'artifact> {
+    artifact: &'artifact SumcheckClassArtifact,
+}
+
+impl Serialize for SumcheckClassArtifactWireReference<'_> {
+    fn serialize<WireSerializer>(
+        &self,
+        serializer: WireSerializer,
+    ) -> Result<WireSerializer::Ok, WireSerializer::Error>
+    where
+        WireSerializer: Serializer,
+    {
+        let mut artifact = serializer.serialize_struct("SumcheckClassArtifactWire", 3)?;
+        artifact.serialize_field("schema_version", &CANONICAL_ARTIFACT_WIRE_SCHEMA_VERSION)?;
+        artifact.serialize_field("outer_sumcheck_proof", &self.artifact.outer_sumcheck_proof)?;
+        artifact.serialize_field(
+            "opening_proof",
+            &SumcheckClassOpeningProofWireReference {
+                opening_proof: &self.artifact.opening_proof,
+            },
+        )?;
+        artifact.end()
+    }
+}
+
+#[derive(Deserialize)]
+struct SumcheckClassArtifactWire {
+    schema_version: u8,
+    outer_sumcheck_proof: GenericDegreeProof<BaseField, ChallengeField>,
+    opening_proof: SumcheckClassOpeningProofWire,
+}
+
+struct SumcheckClassOpeningProofWireReference<'proof> {
+    opening_proof: &'proof SumcheckClassOpeningProof,
+}
+
+impl Serialize for SumcheckClassOpeningProofWireReference<'_> {
+    fn serialize<WireSerializer>(
+        &self,
+        serializer: WireSerializer,
+    ) -> Result<WireSerializer::Ok, WireSerializer::Error>
+    where
+        WireSerializer: Serializer,
+    {
+        let proof = self.opening_proof;
+        let mut opening_proof = serializer.serialize_struct("SumcheckClassOpeningProofWire", 5)?;
+        opening_proof.serialize_field("evals", &proof.evals)?;
+        opening_proof.serialize_field("sumchecks", &proof.sumchecks)?;
+        opening_proof.serialize_field(
+            "sumcheck_mask_commitments",
+            &proof.sumcheck_mask_commitments,
+        )?;
+        opening_proof.serialize_field(
+            "rounds",
+            &SumcheckClassRoundProofSequenceReference {
+                rounds: &proof.rounds,
+            },
+        )?;
+        opening_proof.serialize_field(
+            "base_case",
+            &SumcheckClassBaseCaseProofWireReference {
+                base_case: &proof.base_case,
+            },
+        )?;
+        opening_proof.end()
+    }
+}
+
+#[derive(Deserialize)]
+struct SumcheckClassOpeningProofWire {
+    evals: Vec<ChallengeField>,
+    sumchecks: Vec<ZkSumcheckData<BaseField, ChallengeField>>,
+    sumcheck_mask_commitments: Vec<SumcheckClassCommitment>,
+    rounds: Vec<SumcheckClassRoundProofWire>,
+    base_case: SumcheckClassBaseCaseProofWire,
+}
+
+struct SumcheckClassRoundProofSequenceReference<'proof> {
+    rounds: &'proof [SumcheckClassRoundProof],
+}
+
+impl Serialize for SumcheckClassRoundProofSequenceReference<'_> {
+    fn serialize<WireSerializer>(
+        &self,
+        serializer: WireSerializer,
+    ) -> Result<WireSerializer::Ok, WireSerializer::Error>
+    where
+        WireSerializer: Serializer,
+    {
+        let mut rounds = serializer.serialize_seq(Some(self.rounds.len()))?;
+        for round in self.rounds {
+            rounds.serialize_element(&SumcheckClassRoundProofWireReference { round })?;
+        }
+        rounds.end()
+    }
+}
+
+struct SumcheckClassRoundProofWireReference<'proof> {
+    round: &'proof SumcheckClassRoundProof,
+}
+
+impl Serialize for SumcheckClassRoundProofWireReference<'_> {
+    fn serialize<WireSerializer>(
+        &self,
+        serializer: WireSerializer,
+    ) -> Result<WireSerializer::Ok, WireSerializer::Error>
+    where
+        WireSerializer: Serializer,
+    {
+        let round = self.round;
+        let mut round_proof = serializer.serialize_struct("SumcheckClassRoundProofWire", 5)?;
+        round_proof.serialize_field("commitment", &round.commitment)?;
+        round_proof.serialize_field("mask_commitment", &round.mask_commitment)?;
+        round_proof.serialize_field("ood_answers", &round.ood_answers)?;
+        round_proof.serialize_field("pow_witness", &round.pow_witness)?;
+        round_proof.serialize_field(
+            "queries",
+            &SumcheckClassQueryOpeningSequenceReference {
+                queries: &round.queries,
+            },
+        )?;
+        round_proof.end()
+    }
+}
+
+#[derive(Deserialize)]
+struct SumcheckClassRoundProofWire {
+    commitment: SumcheckClassCommitment,
+    mask_commitment: SumcheckClassCommitment,
+    ood_answers: Vec<ChallengeField>,
+    pow_witness: BaseField,
+    queries: Vec<SumcheckClassQueryOpeningWire>,
+}
+
+struct SumcheckClassBaseCaseProofWireReference<'proof> {
+    base_case: &'proof SumcheckClassBaseCaseProof,
+}
+
+impl Serialize for SumcheckClassBaseCaseProofWireReference<'_> {
+    fn serialize<WireSerializer>(
+        &self,
+        serializer: WireSerializer,
+    ) -> Result<WireSerializer::Ok, WireSerializer::Error>
+    where
+        WireSerializer: Serializer,
+    {
+        let proof = self.base_case;
+        let mut base_case = serializer.serialize_struct("SumcheckClassBaseCaseProofWire", 10)?;
+        base_case.serialize_field("fresh_main_commitment", &proof.fresh_main_commitment)?;
+        base_case.serialize_field("fresh_mask_commitments", &proof.fresh_mask_commitments)?;
+        base_case.serialize_field("masked_claim", &proof.masked_claim)?;
+        base_case.serialize_field("blinded_message", &proof.blinded_message)?;
+        base_case.serialize_field("blinded_randomness", &proof.blinded_randomness)?;
+        base_case.serialize_field("blinded_masks", &proof.blinded_masks)?;
+        base_case.serialize_field("pow_witness", &proof.pow_witness)?;
+        base_case.serialize_field(
+            "source_queries",
+            &SumcheckClassQueryOpeningSequenceReference {
+                queries: &proof.source_queries,
+            },
+        )?;
+        base_case.serialize_field(
+            "fresh_main_queries",
+            &SumcheckClassQueryOpeningSequenceReference {
+                queries: &proof.fresh_main_queries,
+            },
+        )?;
+        base_case.serialize_field(
+            "mask_queries",
+            &SumcheckClassMaskQueryGroupSequenceReference {
+                mask_query_groups: &proof.mask_queries,
+            },
+        )?;
+        base_case.end()
+    }
+}
+
+#[derive(Deserialize)]
+struct SumcheckClassBaseCaseProofWire {
+    fresh_main_commitment: SumcheckClassCommitment,
+    fresh_mask_commitments: Vec<SumcheckClassCommitment>,
+    masked_claim: ChallengeField,
+    blinded_message: Vec<ChallengeField>,
+    blinded_randomness: Vec<ChallengeField>,
+    blinded_masks: Vec<BlindedMask<ChallengeField>>,
+    pow_witness: BaseField,
+    source_queries: Vec<SumcheckClassQueryOpeningWire>,
+    fresh_main_queries: Vec<SumcheckClassQueryOpeningWire>,
+    mask_queries: Vec<Vec<SumcheckClassMaskOpeningPairWire>>,
+}
+
+struct SumcheckClassQueryOpeningSequenceReference<'proof> {
+    queries: &'proof [SumcheckClassQueryOpening],
+}
+
+impl Serialize for SumcheckClassQueryOpeningSequenceReference<'_> {
+    fn serialize<WireSerializer>(
+        &self,
+        serializer: WireSerializer,
+    ) -> Result<WireSerializer::Ok, WireSerializer::Error>
+    where
+        WireSerializer: Serializer,
+    {
+        let mut queries = serializer.serialize_seq(Some(self.queries.len()))?;
+        for query in self.queries {
+            queries.serialize_element(&SumcheckClassQueryOpeningWireReference { query })?;
+        }
+        queries.end()
+    }
+}
+
+struct SumcheckClassQueryOpeningWireReference<'proof> {
+    query: &'proof SumcheckClassQueryOpening,
+}
+
+impl Serialize for SumcheckClassQueryOpeningWireReference<'_> {
+    fn serialize<WireSerializer>(
+        &self,
+        serializer: WireSerializer,
+    ) -> Result<WireSerializer::Ok, WireSerializer::Error>
+    where
+        WireSerializer: Serializer,
+    {
+        match self.query {
+            QueryOpening::Base { values, proof } => {
+                let mut opening = serializer.serialize_struct_variant(
+                    "SumcheckClassQueryOpeningWire",
+                    QUERY_OPENING_BASE_TAG,
+                    "Base",
+                    2,
+                )?;
+                opening.serialize_field("values", values)?;
+                opening.serialize_field("proof", proof)?;
+                opening.end()
+            }
+            QueryOpening::Extension { values, proof } => {
+                let mut opening = serializer.serialize_struct_variant(
+                    "SumcheckClassQueryOpeningWire",
+                    QUERY_OPENING_EXTENSION_TAG,
+                    "Extension",
+                    2,
+                )?;
+                opening.serialize_field("values", values)?;
+                opening.serialize_field("proof", proof)?;
+                opening.end()
+            }
+        }
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[repr(u8)]
+enum SumcheckClassQueryOpeningWire {
+    Base {
+        values: Vec<BaseField>,
+        proof: SumcheckClassMerkleProof,
+    } = 0,
+    Extension {
+        values: Vec<ChallengeField>,
+        proof: SumcheckClassMerkleProof,
+    } = 1,
+}
+
+struct SumcheckClassMaskQueryGroupSequenceReference<'proof> {
+    mask_query_groups: &'proof [Vec<SumcheckClassMaskOpeningPair>],
+}
+
+impl Serialize for SumcheckClassMaskQueryGroupSequenceReference<'_> {
+    fn serialize<WireSerializer>(
+        &self,
+        serializer: WireSerializer,
+    ) -> Result<WireSerializer::Ok, WireSerializer::Error>
+    where
+        WireSerializer: Serializer,
+    {
+        let mut groups = serializer.serialize_seq(Some(self.mask_query_groups.len()))?;
+        for group in self.mask_query_groups {
+            groups.serialize_element(&SumcheckClassMaskOpeningPairSequenceReference {
+                opening_pairs: group,
+            })?;
+        }
+        groups.end()
+    }
+}
+
+struct SumcheckClassMaskOpeningPairSequenceReference<'proof> {
+    opening_pairs: &'proof [SumcheckClassMaskOpeningPair],
+}
+
+impl Serialize for SumcheckClassMaskOpeningPairSequenceReference<'_> {
+    fn serialize<WireSerializer>(
+        &self,
+        serializer: WireSerializer,
+    ) -> Result<WireSerializer::Ok, WireSerializer::Error>
+    where
+        WireSerializer: Serializer,
+    {
+        let mut opening_pairs = serializer.serialize_seq(Some(self.opening_pairs.len()))?;
+        for opening_pair in self.opening_pairs {
+            opening_pairs
+                .serialize_element(&SumcheckClassMaskOpeningPairWireReference { opening_pair })?;
+        }
+        opening_pairs.end()
+    }
+}
+
+struct SumcheckClassMaskOpeningPairWireReference<'proof> {
+    opening_pair: &'proof SumcheckClassMaskOpeningPair,
+}
+
+impl Serialize for SumcheckClassMaskOpeningPairWireReference<'_> {
+    fn serialize<WireSerializer>(
+        &self,
+        serializer: WireSerializer,
+    ) -> Result<WireSerializer::Ok, WireSerializer::Error>
+    where
+        WireSerializer: Serializer,
+    {
+        let mut opening_pair =
+            serializer.serialize_struct("SumcheckClassMaskOpeningPairWire", 2)?;
+        opening_pair.serialize_field(
+            "carried",
+            &SumcheckClassQueryOpeningWireReference {
+                query: &self.opening_pair.carried,
+            },
+        )?;
+        opening_pair.serialize_field(
+            "fresh",
+            &SumcheckClassQueryOpeningWireReference {
+                query: &self.opening_pair.fresh,
+            },
+        )?;
+        opening_pair.end()
+    }
+}
+
+#[derive(Deserialize)]
+struct SumcheckClassMaskOpeningPairWire {
+    carried: SumcheckClassQueryOpeningWire,
+    fresh: SumcheckClassQueryOpeningWire,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SumcheckClassQueryOpeningKind {
+    Base,
+    Extension,
+}
+
+impl SumcheckClassQueryOpeningKind {
+    const fn name(self) -> &'static str {
+        match self {
+            Self::Base => "base",
+            Self::Extension => "extension",
+        }
+    }
+}
+
+impl SumcheckClassQueryOpeningWire {
+    const fn kind(&self) -> SumcheckClassQueryOpeningKind {
+        match self {
+            Self::Base { .. } => SumcheckClassQueryOpeningKind::Base,
+            Self::Extension { .. } => SumcheckClassQueryOpeningKind::Extension,
+        }
+    }
+
+    fn into_query_opening(self) -> SumcheckClassQueryOpening {
+        match self {
+            Self::Base { values, proof } => QueryOpening::Base { values, proof },
+            Self::Extension { values, proof } => QueryOpening::Extension { values, proof },
+        }
+    }
+}
+
+impl SumcheckClassRoundProofWire {
+    fn into_round_proof(self) -> SumcheckClassRoundProof {
+        SumcheckClassRoundProof {
+            commitment: self.commitment,
+            mask_commitment: self.mask_commitment,
+            ood_answers: self.ood_answers,
+            pow_witness: self.pow_witness,
+            queries: self
+                .queries
+                .into_iter()
+                .map(SumcheckClassQueryOpeningWire::into_query_opening)
+                .collect(),
+        }
+    }
+}
+
+impl SumcheckClassMaskOpeningPairWire {
+    fn into_mask_opening_pair(self) -> SumcheckClassMaskOpeningPair {
+        SumcheckClassMaskOpeningPair {
+            carried: self.carried.into_query_opening(),
+            fresh: self.fresh.into_query_opening(),
+        }
+    }
+}
+
+impl SumcheckClassBaseCaseProofWire {
+    fn into_base_case_proof(self) -> SumcheckClassBaseCaseProof {
+        SumcheckClassBaseCaseProof {
+            fresh_main_commitment: self.fresh_main_commitment,
+            fresh_mask_commitments: self.fresh_mask_commitments,
+            masked_claim: self.masked_claim,
+            blinded_message: self.blinded_message,
+            blinded_randomness: self.blinded_randomness,
+            blinded_masks: self.blinded_masks,
+            pow_witness: self.pow_witness,
+            source_queries: self
+                .source_queries
+                .into_iter()
+                .map(SumcheckClassQueryOpeningWire::into_query_opening)
+                .collect(),
+            fresh_main_queries: self
+                .fresh_main_queries
+                .into_iter()
+                .map(SumcheckClassQueryOpeningWire::into_query_opening)
+                .collect(),
+            mask_queries: self
+                .mask_queries
+                .into_iter()
+                .map(|group| {
+                    group
+                        .into_iter()
+                        .map(SumcheckClassMaskOpeningPairWire::into_mask_opening_pair)
+                        .collect()
+                })
+                .collect(),
+        }
+    }
+}
+
+impl SumcheckClassOpeningProofWire {
+    fn into_opening_proof(self) -> SumcheckClassOpeningProof {
+        ZkWhirProof {
+            evals: self.evals,
+            sumchecks: self.sumchecks,
+            sumcheck_mask_commitments: self.sumcheck_mask_commitments,
+            rounds: self
+                .rounds
+                .into_iter()
+                .map(SumcheckClassRoundProofWire::into_round_proof)
+                .collect(),
+            base_case: self.base_case.into_base_case_proof(),
+        }
+    }
+}
+
+impl SumcheckClassArtifactWire {
+    fn into_artifact(self) -> SumcheckClassArtifact {
+        SumcheckClassArtifact {
+            outer_sumcheck_proof: self.outer_sumcheck_proof,
+            opening_proof: self.opening_proof.into_opening_proof(),
+        }
+    }
+
+    fn validate_exact_shape(&self) -> ProofBackendBakeoffResult<()> {
+        if self.schema_version != CANONICAL_ARTIFACT_WIRE_SCHEMA_VERSION {
+            return Err(format!(
+                "sumcheck-class artifact wire schema version is {}, expected {}",
+                self.schema_version, CANONICAL_ARTIFACT_WIRE_SCHEMA_VERSION
+            ));
+        }
+
+        require_exact_wire_length(
+            "outer sumcheck rounds",
+            self.outer_sumcheck_proof.round_polys.len(),
+            RELATION_VARIABLE_COUNT,
+        )?;
+        for (round_index, round_polynomial) in
+            self.outer_sumcheck_proof.round_polys.iter().enumerate()
+        {
+            require_exact_wire_length(
+                &format!("outer sumcheck round {round_index} evaluations"),
+                round_polynomial.len(),
+                OUTER_SUMCHECK_DEGREE,
+            )?;
+        }
+        require_exact_wire_length(
+            "outer sumcheck proof-of-work witnesses",
+            self.outer_sumcheck_proof.pow_witnesses.len(),
+            0,
+        )?;
+
+        let opening_proof = &self.opening_proof;
+        require_exact_wire_length(
+            "opening evaluations",
+            opening_proof.evals.len(),
+            RELATION_COLUMN_COUNT,
+        )?;
+        require_exact_wire_length(
+            "masked sumcheck transcripts",
+            opening_proof.sumchecks.len(),
+            EXPECTED_FOLDING_SCHEDULE.len(),
+        )?;
+        require_exact_wire_length(
+            "masked sumcheck commitments",
+            opening_proof.sumcheck_mask_commitments.len(),
+            EXPECTED_FOLDING_SCHEDULE.len(),
+        )?;
+        for (commitment_index, commitment) in
+            opening_proof.sumcheck_mask_commitments.iter().enumerate()
+        {
+            require_single_digest_cap(
+                commitment,
+                &format!("masked sumcheck commitment {commitment_index}"),
+            )?;
+        }
+        for (batch_index, (sumcheck, expected_round_count)) in opening_proof
+            .sumchecks
+            .iter()
+            .zip(EXPECTED_FOLDING_SCHEDULE)
+            .enumerate()
+        {
+            if sumcheck.ell_zk != MASK_MESSAGE_LENGTH {
+                return Err(format!(
+                    "masked sumcheck batch {batch_index} mask message length is {}, expected {MASK_MESSAGE_LENGTH}",
+                    sumcheck.ell_zk
+                ));
+            }
+            require_exact_wire_length(
+                &format!("masked sumcheck batch {batch_index} rounds"),
+                sumcheck.round_coefficients.len(),
+                expected_round_count,
+            )?;
+            for (round_index, coefficients) in sumcheck.round_coefficients.iter().enumerate() {
+                require_exact_wire_length(
+                    &format!(
+                        "masked sumcheck batch {batch_index} round {round_index} coefficients"
+                    ),
+                    coefficients.len(),
+                    MASK_MESSAGE_LENGTH - 1,
+                )?;
+            }
+            require_exact_wire_length(
+                &format!("masked sumcheck batch {batch_index} proof-of-work witnesses"),
+                sumcheck.pow_witnesses.len(),
+                0,
+            )?;
+        }
+
+        require_exact_wire_length(
+            "code-switch rounds",
+            opening_proof.rounds.len(),
+            EXPECTED_ROUND_QUERY_COUNTS.len(),
+        )?;
+        for (round_index, (round, expected_query_count)) in opening_proof
+            .rounds
+            .iter()
+            .zip(EXPECTED_ROUND_QUERY_COUNTS)
+            .enumerate()
+        {
+            require_single_digest_cap(
+                &round.commitment,
+                &format!("code-switch round {round_index} commitment"),
+            )?;
+            require_single_digest_cap(
+                &round.mask_commitment,
+                &format!("code-switch round {round_index} mask commitment"),
+            )?;
+            require_exact_wire_length(
+                &format!("code-switch round {round_index} out-of-domain answers"),
+                round.ood_answers.len(),
+                0,
+            )?;
+            require_exact_wire_length(
+                &format!("code-switch round {round_index} query openings"),
+                round.queries.len(),
+                expected_query_count,
+            )?;
+            let expected_kind = if round_index == 0 {
+                SumcheckClassQueryOpeningKind::Base
+            } else {
+                SumcheckClassQueryOpeningKind::Extension
+            };
+            for (query_index, query) in round.queries.iter().enumerate() {
+                require_query_opening_shape(
+                    query,
+                    expected_kind,
+                    EXPECTED_ROUND_QUERY_VALUE_LENGTHS[round_index],
+                    EXPECTED_ROUND_QUERY_PATH_LENGTHS[round_index],
+                    &format!("code-switch round {round_index} query {query_index}"),
+                )?;
+            }
+        }
+
+        let base_case = &opening_proof.base_case;
+        require_exact_wire_length(
+            "fresh mask commitments",
+            base_case.fresh_mask_commitments.len(),
+            EXPECTED_MASK_GROUP_WIDTHS.len(),
+        )?;
+        require_single_digest_cap(
+            &base_case.fresh_main_commitment,
+            "base-case fresh-main commitment",
+        )?;
+        for (commitment_index, commitment) in base_case.fresh_mask_commitments.iter().enumerate() {
+            require_single_digest_cap(
+                commitment,
+                &format!("base-case fresh mask commitment {commitment_index}"),
+            )?;
+        }
+        let final_source_message_length =
+            1_usize << (COMMITTED_VARIABLE_COUNT - EXPECTED_FOLDING_SCHEDULE.iter().sum::<usize>());
+        require_exact_wire_length(
+            "base-case blinded source message",
+            base_case.blinded_message.len(),
+            final_source_message_length,
+        )?;
+        require_exact_wire_length(
+            "base-case blinded source randomness",
+            base_case.blinded_randomness.len(),
+            EXPECTED_FINAL_QUERY_COUNT,
+        )?;
+        require_exact_wire_length(
+            "base-case blinded masks",
+            base_case.blinded_masks.len(),
+            EXPECTED_MASK_GROUP_WIDTHS.iter().sum(),
+        )?;
+        for (mask_index, (mask, expected_message_length)) in base_case
+            .blinded_masks
+            .iter()
+            .zip(EXPECTED_BLINDED_MASK_MESSAGE_LENGTHS)
+            .enumerate()
+        {
+            require_exact_wire_length(
+                &format!("base-case blinded mask {mask_index} message"),
+                mask.message.len(),
+                expected_message_length,
+            )?;
+            require_exact_wire_length(
+                &format!("base-case blinded mask {mask_index} randomness"),
+                mask.randomness.len(),
+                EXPECTED_MASK_QUERY_COUNT,
+            )?;
+        }
+
+        require_exact_wire_length(
+            "base-case source query openings",
+            base_case.source_queries.len(),
+            EXPECTED_FINAL_QUERY_COUNT,
+        )?;
+        for (query_index, query) in base_case.source_queries.iter().enumerate() {
+            require_query_opening_shape(
+                query,
+                SumcheckClassQueryOpeningKind::Extension,
+                EXPECTED_SOURCE_QUERY_VALUE_LENGTH,
+                EXPECTED_SOURCE_QUERY_PATH_LENGTH,
+                &format!("base-case source query {query_index}"),
+            )?;
+        }
+        require_exact_wire_length(
+            "base-case fresh-main query openings",
+            base_case.fresh_main_queries.len(),
+            EXPECTED_FINAL_QUERY_COUNT,
+        )?;
+        for (query_index, query) in base_case.fresh_main_queries.iter().enumerate() {
+            require_query_opening_shape(
+                query,
+                SumcheckClassQueryOpeningKind::Extension,
+                EXPECTED_FRESH_MAIN_QUERY_VALUE_LENGTH,
+                EXPECTED_FRESH_MAIN_QUERY_PATH_LENGTH,
+                &format!("base-case fresh-main query {query_index}"),
+            )?;
+        }
+        require_exact_wire_length(
+            "base-case mask query groups",
+            base_case.mask_queries.len(),
+            EXPECTED_MASK_GROUP_WIDTHS.len(),
+        )?;
+        for (group_index, group) in base_case.mask_queries.iter().enumerate() {
+            require_exact_wire_length(
+                &format!("base-case mask query group {group_index} opening pairs"),
+                group.len(),
+                EXPECTED_MASK_QUERY_COUNT,
+            )?;
+            for (pair_index, pair) in group.iter().enumerate() {
+                for (opening_role, query) in [("carried", &pair.carried), ("fresh", &pair.fresh)] {
+                    require_query_opening_shape(
+                        query,
+                        SumcheckClassQueryOpeningKind::Extension,
+                        EXPECTED_MASK_GROUP_WIDTHS[group_index],
+                        EXPECTED_MASK_GROUP_PATH_LENGTHS[group_index],
+                        &format!(
+                            "base-case mask query group {group_index} pair {pair_index} {opening_role}"
+                        ),
+                    )?;
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+fn require_exact_wire_length(
+    field: &str,
+    actual: usize,
+    expected: usize,
+) -> ProofBackendBakeoffResult<()> {
+    if actual != expected {
+        return Err(format!(
+            "sumcheck-class artifact {field} length is {actual}, expected {expected}"
+        ));
+    }
+    Ok(())
+}
+
+fn require_query_opening_shape(
+    query: &SumcheckClassQueryOpeningWire,
+    expected: SumcheckClassQueryOpeningKind,
+    expected_value_length: usize,
+    expected_path_length: usize,
+    context: &str,
+) -> ProofBackendBakeoffResult<()> {
+    if query.kind() != expected {
+        return Err(format!(
+            "sumcheck-class artifact {context} uses the {} tag, expected {}",
+            query.kind().name(),
+            expected.name()
+        ));
+    }
+    let (actual_value_length, actual_path_length) = match query {
+        SumcheckClassQueryOpeningWire::Base { values, proof } => (values.len(), proof.len()),
+        SumcheckClassQueryOpeningWire::Extension { values, proof } => (values.len(), proof.len()),
+    };
+    require_exact_wire_length(
+        &format!("{context} opened values"),
+        actual_value_length,
+        expected_value_length,
+    )?;
+    require_exact_wire_length(
+        &format!("{context} Merkle path"),
+        actual_path_length,
+        expected_path_length,
+    )?;
+    Ok(())
+}
+
+fn require_single_digest_cap(
+    commitment: &SumcheckClassCommitment,
+    context: &str,
+) -> ProofBackendBakeoffResult<()> {
+    require_exact_wire_length(&format!("{context} Merkle cap"), commitment.num_roots(), 1)
+}
+
+fn require_canonical_artifact_body_within_ceiling(
+    body_byte_length: usize,
+) -> ProofBackendBakeoffResult<()> {
+    if body_byte_length > MAXIMUM_CANONICAL_ARTIFACT_BODY_BYTE_LENGTH {
+        return Err(format!(
+            "sumcheck-class artifact body is {body_byte_length} bytes, above the {}-byte codec ceiling",
+            MAXIMUM_CANONICAL_ARTIFACT_BODY_BYTE_LENGTH
+        ));
+    }
+    Ok(())
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -484,6 +1454,7 @@ fn decode_canonical_sumcheck_commitment(
     if canonical_sumcheck_commitment(&commitment)? != canonical_commitment {
         return Err("sumcheck-class commitment encoding is not canonical".to_owned());
     }
+    require_single_digest_cap(&commitment, "public sumcheck-class commitment")?;
     Ok(commitment)
 }
 
@@ -1286,8 +2257,9 @@ fn encode_canonical_artifact(
     artifact: &SumcheckClassArtifact,
     canonical_statement: &[u8],
 ) -> ProofBackendBakeoffResult<Vec<u8>> {
-    let canonical_body = postcard::to_allocvec(artifact)
+    let canonical_body = postcard::to_allocvec(&SumcheckClassArtifactWireReference { artifact })
         .map_err(|error| format!("encode sumcheck-class artifact: {error}"))?;
+    require_canonical_artifact_body_within_ceiling(canonical_body.len())?;
     let mut canonical_artifact = canonical_proof_object_header_bytes(canonical_statement)
         .map_err(|error| format!("construct sumcheck-class proof header: {error:?}"))?;
     canonical_artifact.extend_from_slice(&canonical_body);
@@ -1303,14 +2275,19 @@ fn decode_canonical_artifact(
     let canonical_body = canonical_artifact
         .strip_prefix(expected_header.as_slice())
         .ok_or_else(|| "sumcheck-class artifact has the wrong canonical proof header".to_owned())?;
-    let (artifact, trailing_bytes) =
-        postcard::take_from_bytes::<SumcheckClassArtifact>(canonical_body)
+    require_canonical_artifact_body_within_ceiling(canonical_body.len())?;
+    let (artifact_wire, trailing_bytes) =
+        postcard::take_from_bytes::<SumcheckClassArtifactWire>(canonical_body)
             .map_err(|error| format!("decode sumcheck-class artifact: {error}"))?;
     if !trailing_bytes.is_empty() {
         return Err("sumcheck-class artifact has trailing bytes".to_owned());
     }
-    let reencoded = postcard::to_allocvec(&artifact)
-        .map_err(|error| format!("re-encode sumcheck-class artifact: {error}"))?;
+    artifact_wire.validate_exact_shape()?;
+    let artifact = artifact_wire.into_artifact();
+    let reencoded = postcard::to_allocvec(&SumcheckClassArtifactWireReference {
+        artifact: &artifact,
+    })
+    .map_err(|error| format!("re-encode sumcheck-class artifact: {error}"))?;
     if reencoded != canonical_body {
         return Err("sumcheck-class artifact encoding is not canonical".to_owned());
     }
@@ -1556,8 +2533,658 @@ fn validate_fixture(fixture: &ProofBackendBakeoffFixture) -> ProofBackendBakeoff
 mod tests {
     use super::*;
 
+    fn encode_query_opening_wire(
+        query: &SumcheckClassQueryOpening,
+    ) -> ProofBackendBakeoffResult<Vec<u8>> {
+        postcard::to_allocvec(&SumcheckClassQueryOpeningWireReference { query })
+            .map_err(|error| format!("encode test query opening wire: {error}"))
+    }
+
+    fn decode_canonical_query_opening_wire(
+        canonical: &[u8],
+    ) -> ProofBackendBakeoffResult<SumcheckClassQueryOpeningWire> {
+        let (query, trailing_bytes) =
+            postcard::take_from_bytes::<SumcheckClassQueryOpeningWire>(canonical)
+                .map_err(|error| format!("decode test query opening wire: {error}"))?;
+        if !trailing_bytes.is_empty() {
+            return Err("test query opening wire has trailing bytes".to_owned());
+        }
+        let reencoded = postcard::to_allocvec(&query)
+            .map_err(|error| format!("re-encode test query opening wire: {error}"))?;
+        if reencoded != canonical {
+            return Err("test query opening wire is not canonical".to_owned());
+        }
+        Ok(query)
+    }
+
+    fn single_digest_cap(digest_word: u64) -> SumcheckClassCommitment {
+        vec![[digest_word; MERKLE_DIGEST_WORD_LENGTH]].into()
+    }
+
+    fn merkle_path(path_length: usize, digest_word: u64) -> SumcheckClassMerkleProof {
+        vec![[digest_word; MERKLE_DIGEST_WORD_LENGTH]; path_length]
+    }
+
+    fn base_query_opening(
+        value_length: usize,
+        path_length: usize,
+        value: u64,
+    ) -> SumcheckClassQueryOpening {
+        QueryOpening::Base {
+            values: vec![BaseField::from_u64(value); value_length],
+            proof: merkle_path(path_length, value),
+        }
+    }
+
+    fn extension_query_opening(
+        value_length: usize,
+        path_length: usize,
+        value: u64,
+    ) -> SumcheckClassQueryOpening {
+        QueryOpening::Extension {
+            values: vec![ChallengeField::from_u64(value); value_length],
+            proof: merkle_path(path_length, value),
+        }
+    }
+
+    fn synthetic_canonical_artifact_shape() -> SumcheckClassArtifact {
+        let outer_sumcheck_proof = GenericDegreeProof {
+            claimed_sum: ChallengeField::ZERO,
+            round_polys: vec![
+                vec![ChallengeField::ZERO; OUTER_SUMCHECK_DEGREE];
+                RELATION_VARIABLE_COUNT
+            ],
+            pow_witnesses: Vec::new(),
+        };
+        let sumchecks = EXPECTED_FOLDING_SCHEDULE
+            .iter()
+            .map(|&round_count| ZkSumcheckData {
+                mu_tilde: ChallengeField::ZERO,
+                ell_zk: MASK_MESSAGE_LENGTH,
+                round_coefficients: vec![
+                    vec![ChallengeField::ZERO; MASK_MESSAGE_LENGTH - 1];
+                    round_count
+                ],
+                pow_witnesses: Vec::new(),
+            })
+            .collect();
+        let sumcheck_mask_commitments = (0..EXPECTED_FOLDING_SCHEDULE.len())
+            .map(|commitment_index| single_digest_cap(commitment_index as u64 + 1))
+            .collect();
+        let rounds = vec![
+            SumcheckClassRoundProof {
+                commitment: single_digest_cap(11),
+                mask_commitment: single_digest_cap(12),
+                ood_answers: Vec::new(),
+                pow_witness: BaseField::ZERO,
+                queries: vec![
+                    base_query_opening(
+                        EXPECTED_ROUND_QUERY_VALUE_LENGTHS[0],
+                        EXPECTED_ROUND_QUERY_PATH_LENGTHS[0],
+                        13,
+                    );
+                    EXPECTED_ROUND_QUERY_COUNTS[0]
+                ],
+            },
+            SumcheckClassRoundProof {
+                commitment: single_digest_cap(21),
+                mask_commitment: single_digest_cap(22),
+                ood_answers: Vec::new(),
+                pow_witness: BaseField::ZERO,
+                queries: vec![
+                    extension_query_opening(
+                        EXPECTED_ROUND_QUERY_VALUE_LENGTHS[1],
+                        EXPECTED_ROUND_QUERY_PATH_LENGTHS[1],
+                        23,
+                    );
+                    EXPECTED_ROUND_QUERY_COUNTS[1]
+                ],
+            },
+        ];
+        let blinded_masks = EXPECTED_BLINDED_MASK_MESSAGE_LENGTHS
+            .into_iter()
+            .map(|message_length| BlindedMask {
+                message: vec![ChallengeField::ZERO; message_length],
+                randomness: vec![ChallengeField::ZERO; EXPECTED_MASK_QUERY_COUNT],
+            })
+            .collect();
+        let mask_queries = EXPECTED_MASK_GROUP_WIDTHS
+            .into_iter()
+            .zip(EXPECTED_MASK_GROUP_PATH_LENGTHS)
+            .enumerate()
+            .map(|(group_index, (value_length, path_length))| {
+                let opening_pair = SumcheckClassMaskOpeningPair {
+                    carried: extension_query_opening(
+                        value_length,
+                        path_length,
+                        31 + group_index as u64,
+                    ),
+                    fresh: extension_query_opening(
+                        value_length,
+                        path_length,
+                        41 + group_index as u64,
+                    ),
+                };
+                vec![opening_pair; EXPECTED_MASK_QUERY_COUNT]
+            })
+            .collect();
+        let base_case = SumcheckClassBaseCaseProof {
+            fresh_main_commitment: single_digest_cap(51),
+            fresh_mask_commitments: (0..EXPECTED_MASK_GROUP_WIDTHS.len())
+                .map(|commitment_index| single_digest_cap(52 + commitment_index as u64))
+                .collect(),
+            masked_claim: ChallengeField::ZERO,
+            blinded_message: vec![ChallengeField::ZERO; 32],
+            blinded_randomness: vec![ChallengeField::ZERO; EXPECTED_FINAL_QUERY_COUNT],
+            blinded_masks,
+            pow_witness: BaseField::ZERO,
+            source_queries: vec![
+                extension_query_opening(
+                    EXPECTED_SOURCE_QUERY_VALUE_LENGTH,
+                    EXPECTED_SOURCE_QUERY_PATH_LENGTH,
+                    61,
+                );
+                EXPECTED_FINAL_QUERY_COUNT
+            ],
+            fresh_main_queries: vec![
+                extension_query_opening(
+                    EXPECTED_FRESH_MAIN_QUERY_VALUE_LENGTH,
+                    EXPECTED_FRESH_MAIN_QUERY_PATH_LENGTH,
+                    62,
+                );
+                EXPECTED_FINAL_QUERY_COUNT
+            ],
+            mask_queries,
+        };
+        SumcheckClassArtifact {
+            outer_sumcheck_proof,
+            opening_proof: ZkWhirProof {
+                evals: vec![ChallengeField::ZERO; RELATION_COLUMN_COUNT],
+                sumchecks,
+                sumcheck_mask_commitments,
+                rounds,
+                base_case,
+            },
+        }
+    }
+
+    fn decode_synthetic_artifact_wire() -> SumcheckClassArtifactWire {
+        let artifact = synthetic_canonical_artifact_shape();
+        let bytes = postcard::to_allocvec(&SumcheckClassArtifactWireReference {
+            artifact: &artifact,
+        })
+        .expect("encode synthetic canonical artifact wire");
+        let (wire, trailing_bytes) = postcard::take_from_bytes::<SumcheckClassArtifactWire>(&bytes)
+            .expect("decode synthetic canonical artifact wire");
+        assert!(trailing_bytes.is_empty());
+        wire
+    }
+
+    #[derive(Clone, Copy)]
+    enum ArtifactQueryLocation {
+        CodeSwitchRound,
+        BaseCaseSource,
+        BaseCaseFreshMain,
+        BaseCaseMaskCarried,
+        BaseCaseMaskFresh,
+    }
+
+    fn artifact_query_at_location(
+        wire: &mut SumcheckClassArtifactWire,
+        location: ArtifactQueryLocation,
+    ) -> &mut SumcheckClassQueryOpeningWire {
+        match location {
+            ArtifactQueryLocation::CodeSwitchRound => &mut wire.opening_proof.rounds[0].queries[0],
+            ArtifactQueryLocation::BaseCaseSource => {
+                &mut wire.opening_proof.base_case.source_queries[0]
+            }
+            ArtifactQueryLocation::BaseCaseFreshMain => {
+                &mut wire.opening_proof.base_case.fresh_main_queries[0]
+            }
+            ArtifactQueryLocation::BaseCaseMaskCarried => {
+                &mut wire.opening_proof.base_case.mask_queries[0][0].carried
+            }
+            ArtifactQueryLocation::BaseCaseMaskFresh => {
+                &mut wire.opening_proof.base_case.mask_queries[0][0].fresh
+            }
+        }
+    }
+
+    fn query_with_opposite_tag(
+        query: &SumcheckClassQueryOpeningWire,
+    ) -> SumcheckClassQueryOpeningWire {
+        match query {
+            SumcheckClassQueryOpeningWire::Base { values, proof } => {
+                SumcheckClassQueryOpeningWire::Extension {
+                    values: vec![ChallengeField::ZERO; values.len()],
+                    proof: proof.clone(),
+                }
+            }
+            SumcheckClassQueryOpeningWire::Extension { values, proof } => {
+                SumcheckClassQueryOpeningWire::Base {
+                    values: vec![BaseField::ZERO; values.len()],
+                    proof: proof.clone(),
+                }
+            }
+        }
+    }
+
+    fn remove_one_opened_value(query: &mut SumcheckClassQueryOpeningWire) {
+        match query {
+            SumcheckClassQueryOpeningWire::Base { values, .. } => {
+                values.pop();
+            }
+            SumcheckClassQueryOpeningWire::Extension { values, .. } => {
+                values.pop();
+            }
+        }
+    }
+
+    fn remove_one_merkle_path_digest(query: &mut SumcheckClassQueryOpeningWire) {
+        match query {
+            SumcheckClassQueryOpeningWire::Base { proof, .. }
+            | SumcheckClassQueryOpeningWire::Extension { proof, .. } => {
+                proof.pop();
+            }
+        }
+    }
+
+    fn decoded_cap_with_root_count(root_count: usize) -> SumcheckClassCommitment {
+        let roots = vec![[91; MERKLE_DIGEST_WORD_LENGTH]; root_count];
+        let wire = postcard::to_allocvec(&roots).expect("encode test Merkle roots");
+        postcard::from_bytes(&wire).expect("decode test Merkle cap without constructor checks")
+    }
+
     fn synthetic_fixture() -> ProofBackendBakeoffFixture {
         frozen_fixture().expect("exact frozen backend-bakeoff fixture")
+    }
+
+    #[test]
+    fn query_opening_wire_uses_stable_external_numeric_tags() {
+        let base_proof = vec![[0, 1, u32::MAX as u64, u64::MAX, 5, 8, 13, 21]];
+        let base_query: SumcheckClassQueryOpening = QueryOpening::Base {
+            values: vec![BaseField::ZERO, BaseField::ONE, BaseField::from_u64(257)],
+            proof: base_proof.clone(),
+        };
+        let base_bytes = encode_query_opening_wire(&base_query).expect("encode base query tag");
+        assert_eq!(
+            base_bytes.first().copied(),
+            Some(QUERY_OPENING_BASE_TAG as u8)
+        );
+        let decoded_base =
+            decode_canonical_query_opening_wire(&base_bytes).expect("decode base query tag");
+        let SumcheckClassQueryOpeningWire::Base { values, proof } = decoded_base else {
+            panic!("base query tag decoded as extension");
+        };
+        assert_eq!(
+            values,
+            [BaseField::ZERO, BaseField::ONE, BaseField::from_u64(257)]
+        );
+        assert_eq!(proof, base_proof);
+
+        let extension_proof = vec![[34, 55, 89, 144, 233, 377, 610, 987]];
+        let extension_query: SumcheckClassQueryOpening = QueryOpening::Extension {
+            values: vec![
+                ChallengeField::ZERO,
+                ChallengeField::ONE,
+                ChallengeField::from_u64(65_537),
+            ],
+            proof: extension_proof.clone(),
+        };
+        let extension_bytes =
+            encode_query_opening_wire(&extension_query).expect("encode extension query tag");
+        assert_eq!(
+            extension_bytes.first().copied(),
+            Some(QUERY_OPENING_EXTENSION_TAG as u8)
+        );
+        let decoded_extension = decode_canonical_query_opening_wire(&extension_bytes)
+            .expect("decode extension query tag");
+        let SumcheckClassQueryOpeningWire::Extension { values, proof } = decoded_extension else {
+            panic!("extension query tag decoded as base");
+        };
+        assert_eq!(
+            values,
+            [
+                ChallengeField::ZERO,
+                ChallengeField::ONE,
+                ChallengeField::from_u64(65_537),
+            ]
+        );
+        assert_eq!(proof, extension_proof);
+    }
+
+    #[test]
+    fn query_opening_wire_rejects_malformed_trailing_and_noncanonical_bytes() {
+        assert!(decode_canonical_query_opening_wire(&[2]).is_err());
+        assert!(decode_canonical_query_opening_wire(&[QUERY_OPENING_BASE_TAG as u8]).is_err());
+
+        let empty_base_query: SumcheckClassQueryOpening = QueryOpening::Base {
+            values: Vec::new(),
+            proof: Vec::new(),
+        };
+        let canonical =
+            encode_query_opening_wire(&empty_base_query).expect("encode empty base query");
+        assert_eq!(canonical, [0, 0, 0]);
+
+        let mut trailing = canonical.clone();
+        trailing.push(0);
+        assert!(decode_canonical_query_opening_wire(&trailing).is_err());
+
+        let noncanonical = [0x80, 0x00, 0x00, 0x00];
+        let (decoded_noncanonical, trailing_bytes) =
+            postcard::take_from_bytes::<SumcheckClassQueryOpeningWire>(&noncanonical)
+                .expect("postcard accepts an overlong zero tag before the canonicality gate");
+        assert!(trailing_bytes.is_empty());
+        assert_ne!(
+            postcard::to_allocvec(&decoded_noncanonical)
+                .expect("re-encode overlong zero query tag"),
+            noncanonical
+        );
+        assert!(decode_canonical_query_opening_wire(&noncanonical).is_err());
+    }
+
+    #[test]
+    fn canonical_artifact_body_ceiling_matches_the_checked_profile_formula() {
+        assert_eq!(
+            EXPECTED_FOLDING_SCHEDULE,
+            [CONSTANT_FOLDING_FACTOR; EXPECTED_FOLDING_SCHEDULE.len()]
+        );
+        assert_eq!(MAXIMUM_SINGLE_DIGEST_CAP_BYTE_LENGTH, 81);
+        assert_eq!(MAXIMUM_OUTER_SUMCHECK_PROOF_BYTE_LENGTH, 1_466);
+        assert_eq!(MAXIMUM_MASKED_SUMCHECK_BYTE_LENGTH, 9_057);
+        assert_eq!(MAXIMUM_FIRST_ROUND_QUERY_BYTE_LENGTH, 1_283);
+        assert_eq!(MAXIMUM_SECOND_ROUND_QUERY_BYTE_LENGTH, 1_843);
+        assert_eq!(MAXIMUM_FIRST_ROUND_BYTE_LENGTH, 743_032);
+        assert_eq!(MAXIMUM_SECOND_ROUND_BYTE_LENGTH, 486_727);
+        assert_eq!(MAXIMUM_BLINDED_MASKS_BYTE_LENGTH, 262_995);
+        assert_eq!(MAXIMUM_SOURCE_QUERY_BYTE_LENGTH, 1_763);
+        assert_eq!(MAXIMUM_FRESH_MAIN_QUERY_BYTE_LENGTH, 1_013);
+        assert_eq!(
+            maximum_query_opening_byte_length(
+                EXPECTED_MASK_GROUP_WIDTHS[0],
+                MAXIMUM_CHALLENGE_FIELD_ELEMENT_BYTE_LENGTH,
+                EXPECTED_MASK_GROUP_PATH_LENGTHS[0],
+            ),
+            1_323
+        );
+        assert_eq!(
+            maximum_query_opening_byte_length(
+                EXPECTED_MASK_GROUP_WIDTHS[1],
+                MAXIMUM_CHALLENGE_FIELD_ELEMENT_BYTE_LENGTH,
+                EXPECTED_MASK_GROUP_PATH_LENGTHS[1],
+            ),
+            1_253
+        );
+        assert_eq!(MAXIMUM_MASK_QUERY_GROUPS_BYTE_LENGTH, 3_574_211);
+        assert_eq!(MAXIMUM_BASE_CASE_BYTE_LENGTH, 4_526_078);
+        assert_eq!(MAXIMUM_OPENING_PROOF_BYTE_LENGTH, 5_783_655);
+        assert_eq!(MAXIMUM_CANONICAL_ARTIFACT_BODY_BYTE_LENGTH, 5_785_122);
+        require_canonical_artifact_body_within_ceiling(MAXIMUM_CANONICAL_ARTIFACT_BODY_BYTE_LENGTH)
+            .expect("the exact ceiling is accepted");
+        assert!(
+            require_canonical_artifact_body_within_ceiling(
+                MAXIMUM_CANONICAL_ARTIFACT_BODY_BYTE_LENGTH + 1,
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn query_opening_shape_gate_checks_base_and_extension_widths_and_paths() {
+        let honest_base = base_query_opening(
+            EXPECTED_ROUND_QUERY_VALUE_LENGTHS[0],
+            EXPECTED_ROUND_QUERY_PATH_LENGTHS[0],
+            71,
+        );
+        let honest_base_bytes =
+            encode_query_opening_wire(&honest_base).expect("encode honest base opening");
+        let mut base_wire = decode_canonical_query_opening_wire(&honest_base_bytes)
+            .expect("decode honest base opening");
+        require_query_opening_shape(
+            &base_wire,
+            SumcheckClassQueryOpeningKind::Base,
+            EXPECTED_ROUND_QUERY_VALUE_LENGTHS[0],
+            EXPECTED_ROUND_QUERY_PATH_LENGTHS[0],
+            "test base opening",
+        )
+        .expect("honest base opening shape");
+        match &mut base_wire {
+            SumcheckClassQueryOpeningWire::Base { values, .. } => {
+                values.pop();
+            }
+            SumcheckClassQueryOpeningWire::Extension { .. } => {
+                panic!("base opening decoded as extension");
+            }
+        }
+        assert!(
+            require_query_opening_shape(
+                &base_wire,
+                SumcheckClassQueryOpeningKind::Base,
+                EXPECTED_ROUND_QUERY_VALUE_LENGTHS[0],
+                EXPECTED_ROUND_QUERY_PATH_LENGTHS[0],
+                "short base opening",
+            )
+            .is_err()
+        );
+        match &mut base_wire {
+            SumcheckClassQueryOpeningWire::Base { values, proof } => {
+                values.push(BaseField::ZERO);
+                proof.pop();
+            }
+            SumcheckClassQueryOpeningWire::Extension { .. } => {
+                panic!("base opening decoded as extension");
+            }
+        }
+        assert!(
+            require_query_opening_shape(
+                &base_wire,
+                SumcheckClassQueryOpeningKind::Base,
+                EXPECTED_ROUND_QUERY_VALUE_LENGTHS[0],
+                EXPECTED_ROUND_QUERY_PATH_LENGTHS[0],
+                "short base path",
+            )
+            .is_err()
+        );
+
+        let honest_extension = extension_query_opening(
+            EXPECTED_ROUND_QUERY_VALUE_LENGTHS[1],
+            EXPECTED_ROUND_QUERY_PATH_LENGTHS[1],
+            72,
+        );
+        let honest_extension_bytes =
+            encode_query_opening_wire(&honest_extension).expect("encode honest extension opening");
+        let mut extension_wire = decode_canonical_query_opening_wire(&honest_extension_bytes)
+            .expect("decode honest extension opening");
+        require_query_opening_shape(
+            &extension_wire,
+            SumcheckClassQueryOpeningKind::Extension,
+            EXPECTED_ROUND_QUERY_VALUE_LENGTHS[1],
+            EXPECTED_ROUND_QUERY_PATH_LENGTHS[1],
+            "test extension opening",
+        )
+        .expect("honest extension opening shape");
+        match &mut extension_wire {
+            SumcheckClassQueryOpeningWire::Extension { values, .. } => {
+                values.push(ChallengeField::ZERO);
+            }
+            SumcheckClassQueryOpeningWire::Base { .. } => {
+                panic!("extension opening decoded as base");
+            }
+        }
+        assert!(
+            require_query_opening_shape(
+                &extension_wire,
+                SumcheckClassQueryOpeningKind::Extension,
+                EXPECTED_ROUND_QUERY_VALUE_LENGTHS[1],
+                EXPECTED_ROUND_QUERY_PATH_LENGTHS[1],
+                "long extension opening",
+            )
+            .is_err()
+        );
+        match &mut extension_wire {
+            SumcheckClassQueryOpeningWire::Extension { values, proof } => {
+                values.pop();
+                proof.push([0; MERKLE_DIGEST_WORD_LENGTH]);
+            }
+            SumcheckClassQueryOpeningWire::Base { .. } => {
+                panic!("extension opening decoded as base");
+            }
+        }
+        assert!(
+            require_query_opening_shape(
+                &extension_wire,
+                SumcheckClassQueryOpeningKind::Extension,
+                EXPECTED_ROUND_QUERY_VALUE_LENGTHS[1],
+                EXPECTED_ROUND_QUERY_PATH_LENGTHS[1],
+                "long extension path",
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn complete_artifact_wire_roundtrips_into_fresh_verifier_types() {
+        let artifact = synthetic_canonical_artifact_shape();
+        let canonical = postcard::to_allocvec(&SumcheckClassArtifactWireReference {
+            artifact: &artifact,
+        })
+        .expect("encode complete artifact wire");
+        assert!(canonical.len() < MAXIMUM_CANONICAL_ARTIFACT_BODY_BYTE_LENGTH);
+        let (wire, trailing_bytes) =
+            postcard::take_from_bytes::<SumcheckClassArtifactWire>(&canonical)
+                .expect("decode complete artifact wire");
+        assert!(trailing_bytes.is_empty());
+        wire.validate_exact_shape()
+            .expect("validate complete artifact wire shape");
+        let decoded_artifact = wire.into_artifact();
+        let reencoded = postcard::to_allocvec(&SumcheckClassArtifactWireReference {
+            artifact: &decoded_artifact,
+        })
+        .expect("re-encode complete artifact wire");
+        assert_eq!(reencoded, canonical);
+    }
+
+    #[test]
+    fn complete_artifact_wire_rejects_each_query_location_shape_mutation() {
+        let locations = [
+            ArtifactQueryLocation::CodeSwitchRound,
+            ArtifactQueryLocation::BaseCaseSource,
+            ArtifactQueryLocation::BaseCaseFreshMain,
+            ArtifactQueryLocation::BaseCaseMaskCarried,
+            ArtifactQueryLocation::BaseCaseMaskFresh,
+        ];
+        for location in locations {
+            let mut wire = decode_synthetic_artifact_wire();
+            let original = artifact_query_at_location(&mut wire, location).clone();
+
+            *artifact_query_at_location(&mut wire, location) = query_with_opposite_tag(&original);
+            assert!(wire.validate_exact_shape().is_err());
+
+            *artifact_query_at_location(&mut wire, location) = original.clone();
+            remove_one_opened_value(artifact_query_at_location(&mut wire, location));
+            assert!(wire.validate_exact_shape().is_err());
+
+            *artifact_query_at_location(&mut wire, location) = original.clone();
+            remove_one_merkle_path_digest(artifact_query_at_location(&mut wire, location));
+            assert!(wire.validate_exact_shape().is_err());
+
+            *artifact_query_at_location(&mut wire, location) = original;
+            wire.validate_exact_shape()
+                .expect("restored query location shape");
+        }
+    }
+
+    #[test]
+    fn complete_artifact_wire_rejects_wrong_size_caps_at_every_location() {
+        for invalid_root_count in [0, 2] {
+            for cap_location in 0..5 {
+                let mut wire = decode_synthetic_artifact_wire();
+                let invalid_cap = decoded_cap_with_root_count(invalid_root_count);
+                match cap_location {
+                    0 => wire.opening_proof.sumcheck_mask_commitments[0] = invalid_cap,
+                    1 => wire.opening_proof.rounds[0].commitment = invalid_cap,
+                    2 => wire.opening_proof.rounds[0].mask_commitment = invalid_cap,
+                    3 => wire.opening_proof.base_case.fresh_main_commitment = invalid_cap,
+                    4 => wire.opening_proof.base_case.fresh_mask_commitments[0] = invalid_cap,
+                    _ => unreachable!("five cap locations"),
+                }
+                assert!(wire.validate_exact_shape().is_err());
+            }
+
+            let public_commitment = decoded_cap_with_root_count(invalid_root_count);
+            let public_commitment_bytes = postcard::to_allocvec(&public_commitment)
+                .expect("encode invalid public commitment cap");
+            assert!(decode_canonical_sumcheck_commitment(&public_commitment_bytes).is_err());
+        }
+    }
+
+    #[test]
+    fn complete_artifact_wire_rejects_schema_and_container_count_mutations() {
+        let mut wrong_schema = decode_synthetic_artifact_wire();
+        wrong_schema.schema_version = CANONICAL_ARTIFACT_WIRE_SCHEMA_VERSION + 1;
+        assert!(wrong_schema.validate_exact_shape().is_err());
+
+        for container_location in 0..3 {
+            let mut wire = decode_synthetic_artifact_wire();
+            match container_location {
+                0 => {
+                    wire.opening_proof.sumchecks.pop();
+                }
+                1 => {
+                    wire.opening_proof.rounds.pop();
+                }
+                2 => {
+                    wire.opening_proof.base_case.mask_queries.pop();
+                }
+                _ => unreachable!("three representative container locations"),
+            }
+            assert!(wire.validate_exact_shape().is_err());
+        }
+    }
+
+    #[test]
+    fn complete_artifact_decoder_rejects_oversized_truncated_and_noncanonical_bodies() {
+        let fixture = synthetic_fixture();
+        let canonical_statement = fixture.canonical_sumcheck_statement.as_slice();
+        let artifact = synthetic_canonical_artifact_shape();
+        let canonical = encode_canonical_artifact(&artifact, canonical_statement)
+            .expect("encode synthetic complete canonical artifact");
+        let header = canonical_proof_object_header_bytes(canonical_statement)
+            .expect("encode synthetic canonical proof header");
+
+        let mut oversized = header.clone();
+        oversized.resize(
+            header.len() + MAXIMUM_CANONICAL_ARTIFACT_BODY_BYTE_LENGTH + 1,
+            0,
+        );
+        let Err(oversized_error) = decode_canonical_artifact(&oversized, canonical_statement)
+        else {
+            panic!("oversized complete artifact body was accepted");
+        };
+        assert!(
+            oversized_error.contains("codec ceiling"),
+            "{oversized_error}"
+        );
+
+        let mut truncated = canonical.clone();
+        truncated.pop();
+        assert!(decode_canonical_artifact(&truncated, canonical_statement).is_err());
+
+        let first_claimed_sum_limb_offset = header.len() + 1;
+        assert_eq!(canonical[first_claimed_sum_limb_offset], 0);
+        let mut noncanonical = canonical;
+        noncanonical.splice(
+            first_claimed_sum_limb_offset..first_claimed_sum_limb_offset + 1,
+            [0x80, 0x00],
+        );
+        let Err(noncanonical_error) = decode_canonical_artifact(&noncanonical, canonical_statement)
+        else {
+            panic!("overlong complete artifact scalar encoding was accepted");
+        };
+        assert!(
+            noncanonical_error.contains("not canonical"),
+            "{noncanonical_error}"
+        );
     }
 
     #[test]
