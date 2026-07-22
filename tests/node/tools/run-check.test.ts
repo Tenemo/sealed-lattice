@@ -51,11 +51,14 @@ describe('check runner', () => {
         const nodeTestLanes = lanes.filter((lane) =>
             lane.name.startsWith('Node tests'),
         );
-        expect(nodeTestLanes).toHaveLength(3);
-        for (const lane of nodeTestLanes) {
-            expect(lane.commands).toHaveLength(1);
-            expect(lane.commands[0]?.args).not.toContain('build');
-        }
+        expect(nodeTestLanes).toHaveLength(1);
+        expect(nodeTestLanes[0]?.commands).toHaveLength(1);
+        expect(nodeTestLanes[0]?.commands[0]?.args).toEqual([
+            'pnpm.cjs',
+            'run',
+            'test:node:built',
+        ]);
+        expect(nodeTestLanes[0]?.commands[0]?.args).not.toContain('build');
     });
 
     it('keeps the opt-in desktop-browser lane buildless', () => {

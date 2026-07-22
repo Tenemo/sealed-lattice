@@ -220,25 +220,11 @@ export const buildCheckParallelLanes = (
             logFileSlug,
             commandArguments,
         );
-    const vitestLane = (
-        name: string,
-        projectName: 'node' | 'node-kernel-fast' | 'node-protocol',
-    ): ValidationLane =>
-        lane(name, projectName, [
-            'exec',
-            'vitest',
-            '--project',
-            projectName,
-            '--run',
-        ]);
-
     return [
         lane('Lint', 'lint', ['run', 'lint']),
         buildRustKernelLane(packageManagerRunner),
         lane('Knip unused-code scan', 'knip', ['exec', 'knip']),
-        vitestLane('Node tests (fast)', 'node'),
-        vitestLane('Node tests (protocol)', 'node-protocol'),
-        vitestLane('Node tests (kernel fast)', 'node-kernel-fast'),
+        lane('Node tests', 'node', ['run', 'test:node:built']),
     ];
 };
 
