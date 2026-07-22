@@ -42,12 +42,21 @@ const FROZEN_FRI_STATEMENT_DOMAIN: &str =
     "sealed-lattice/proof-backend-bakeoff/packed-deep-fri-statement/v1";
 const FROZEN_SUMCHECK_STATEMENT_DOMAIN: &str =
     "sealed-lattice/proof-backend-bakeoff/sumcheck-class-statement/v1";
-// Fail-closed placeholders: the ignored exact-binding owner below must regenerate both values,
-// after which these constants must be replaced before any bakeoff sample can pass. Keeping the
-// derivation out of `frozen_fixture` prevents either backend from warming allocator or commitment
-// state before a measured sample starts.
-const FROZEN_EXPECTED_FRI_BASE_ROOT: [u8; 64] = [0; 64];
-const FROZEN_EXPECTED_SUMCHECK_COMMITMENT: &[u8] = &[0];
+// The ignored exact-binding owner regenerates both values from the frozen columns and profiles.
+// Keeping the derivation out of `frozen_fixture` prevents either backend from warming allocator or
+// commitment state before a measured sample starts.
+const FROZEN_EXPECTED_FRI_BASE_ROOT: [u8; 64] = [
+    105, 66, 13, 132, 207, 215, 32, 167, 45, 114, 159, 94, 129, 40, 150, 244, 1, 85, 134, 190, 196,
+    198, 32, 236, 144, 96, 195, 181, 180, 48, 171, 252, 177, 189, 73, 177, 158, 23, 154, 31, 71,
+    31, 237, 156, 116, 231, 222, 26, 147, 72, 117, 184, 211, 55, 122, 155, 249, 95, 178, 61, 249,
+    79, 122, 173,
+];
+const FROZEN_EXPECTED_SUMCHECK_COMMITMENT: &[u8] = &[
+    1, 191, 172, 221, 150, 198, 254, 172, 182, 100, 137, 171, 249, 218, 137, 177, 246, 187, 52,
+    177, 222, 184, 188, 183, 161, 211, 131, 21, 200, 241, 194, 212, 147, 153, 176, 219, 174, 1,
+    172, 147, 129, 184, 226, 234, 137, 142, 244, 1, 237, 170, 166, 172, 245, 191, 239, 147, 240, 1,
+    214, 195, 180, 145, 186, 255, 203, 186, 59, 165, 202, 184, 246, 217, 216, 193, 203, 245, 1,
+];
 
 pub(super) type ProofBackendBakeoffResult<T> = Result<T, String>;
 
