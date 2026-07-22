@@ -432,21 +432,45 @@ impl ProofExternalMemoryExecutor {
         if self.terminal {
             return Ok(());
         }
-        let live_objects = self
+        let state_is_live = |state: &ProofExternalMemoryObjectState| {
+            matches!(
+                state,
+                ProofExternalMemoryObjectState::Writing { .. }
+                    | ProofExternalMemoryObjectState::Sealed
+                    | ProofExternalMemoryObjectState::Claimed
+            )
+        };
+        let mut previous_live_object = None;
+        let unique_live_object_count = self
             .plan
             .objects
             .iter()
             .zip(self.states.iter())
-            .filter_map(|(object_plan, state)| {
-                matches!(
-                    state,
-                    ProofExternalMemoryObjectState::Writing { .. }
-                        | ProofExternalMemoryObjectState::Sealed
-                        | ProofExternalMemoryObjectState::Claimed
-                )
-                .then_some(object_plan.object)
+            .filter(|(_, state)| state_is_live(state))
+            .filter(|(object_plan, _)| {
+                if previous_live_object == Some(object_plan.object) {
+                    false
+                } else {
+                    previous_live_object = Some(object_plan.object);
+                    true
+                }
             })
-            .collect::<std::collections::BTreeSet<_>>();
+            .count();
+        let mut live_objects = Vec::new();
+        live_objects
+            .try_reserve_exact(unique_live_object_count)
+            .map_err(|_| ProofExternalMemoryError::ResourceLimitExceeded)?;
+        for (object_plan, _) in self
+            .plan
+            .objects
+            .iter()
+            .zip(self.states.iter())
+            .filter(|(_, state)| state_is_live(state))
+        {
+            if live_objects.last().copied() != Some(object_plan.object) {
+                live_objects.push(object_plan.object);
+            }
+        }
         if !live_objects.is_empty() {
             self.begin_transaction(storage)?;
             for object in &live_objects {

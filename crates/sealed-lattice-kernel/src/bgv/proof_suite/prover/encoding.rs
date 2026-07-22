@@ -1,5 +1,5 @@
 use super::{
-    AUTHENTICATION_DIGEST_BYTE_LENGTH, BTreeSet, CanonicalDecodeLimits, CanonicalItemType,
+    AUTHENTICATION_DIGEST_BYTE_LENGTH, CanonicalDecodeLimits, CanonicalItemType,
     CommonProofProverError, CommonProofTranscriptSchedule, CompleteProofTreeCatalog,
     HASH_BYTE_LENGTH, PROOF_AUTHENTICATION_FRONTIER_SCHEMA_IDENTIFIER,
     PROOF_AUTHENTICATION_FRONTIER_SCHEMA_VERSION, PROOF_QUERY_OPENING_RECORD_SCHEMA_IDENTIFIER,
@@ -521,12 +521,18 @@ pub(super) fn opened_leaf_indexes(
             .checked_shr(shift)
             .filter(|count| *count != 0)
             .ok_or(CommonProofProverError::InvalidTree)?;
-        Ok(sorted_query_representatives
-            .iter()
-            .map(|representative| representative % leaf_count)
-            .collect::<BTreeSet<_>>()
-            .into_iter()
-            .collect())
+        let mut opened_leaf_indexes = Vec::new();
+        opened_leaf_indexes
+            .try_reserve_exact(sorted_query_representatives.len())
+            .map_err(|_| CommonProofProverError::AllocationLimitExceeded)?;
+        opened_leaf_indexes.extend(
+            sorted_query_representatives
+                .iter()
+                .map(|representative| representative % leaf_count),
+        );
+        opened_leaf_indexes.sort_unstable();
+        opened_leaf_indexes.dedup();
+        Ok(opened_leaf_indexes)
     } else {
         Ok(sorted_query_representatives.to_vec())
     }
@@ -603,4 +609,34 @@ where
 {
     sink.write_bytes(&value.to_le_bytes())
         .map_err(CommonProofEncodingError::Sink)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn nonterminal_fri_opened_leaf_indexes_sort_and_deduplicate_collisions() {
+        let sorted_query_representatives = [0, 1, 8, 9, 17, 24, 31];
+        assert_eq!(
+            opened_leaf_indexes(
+                ProofTreeCatalogSource::NonterminalFriLayer { fold_ordinal: 0 },
+                32,
+                &sorted_query_representatives,
+            ),
+            Ok(vec![0, 1, 7]),
+        );
+        assert_eq!(
+            opened_leaf_indexes(
+                ProofTreeCatalogSource::RelationProofCreated {
+                    tree_role: ProofTreeRole::BaseOracle,
+                    tree_ordinal: 0,
+                },
+                32,
+                &sorted_query_representatives,
+            ),
+            Ok(sorted_query_representatives.to_vec()),
+            "non-FRI trees preserve the canonical query representatives",
+        );
+    }
 }

@@ -22,7 +22,9 @@ use crate::{
         },
     },
     foundation::{
-        FOUNDATION_PROFILE, MAXIMUM_CANONICAL_STREAM_BYTE_LENGTH, ProofApplicationSlotCeilings,
+        FOUNDATION_PROFILE, MAXIMUM_CANONICAL_STREAM_BYTE_LENGTH,
+        MAXIMUM_LOCAL_RECORD_SEAL_INVOCATIONS_PER_ACTIVE_ROOT,
+        MAXIMUM_LOCAL_RECORD_SEALED_PLAINTEXT_BYTES_PER_ACTIVE_ROOT, ProofApplicationSlotCeilings,
         SELECTED_MAXIMUM_BALLOT_ATTEMPTS_PER_PARTICIPANT,
         SELECTED_MAXIMUM_CANDIDATE_PACKAGES_PER_ACTION, selected_evaluator_resource_accounting,
     },
@@ -511,9 +513,15 @@ mod selected_ballot_resource_cap_tests {
                 .expect("the object cap fits i64");
         let peak_stored_byte_length_variance = i128::from(requirement.peak_stored_byte_length())
             - i128::from(MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_STORED_BYTE_LENGTH);
+        let local_record_seal_invocation_count_variance =
+            i128::from(requirement.local_record_seal_invocation_count())
+                - i128::from(MAXIMUM_LOCAL_RECORD_SEAL_INVOCATIONS_PER_ACTIVE_ROOT);
+        let local_record_sealed_plaintext_byte_length_variance =
+            i128::from(requirement.local_record_sealed_plaintext_byte_length())
+                - i128::from(MAXIMUM_LOCAL_RECORD_SEALED_PLAINTEXT_BYTES_PER_ACTIVE_ROOT);
 
         println!(
-            "selected ballot cap-neutral external memory: relation_columns={}, relation_constraints={}, step_count={}, maximum_chunk_byte_length={}, maximum_transaction_payload_byte_length={}, distinct_physical_object_count={}, object_lifecycle_count={}, peak_stored_byte_length={}, total_written_byte_length={}, total_read_byte_length={}, transaction_count={}, maximum_object_count={}, object_count_variance={}, maximum_stored_byte_length={}, peak_stored_byte_length_variance={}",
+            "selected ballot cap-neutral external memory: relation_columns={}, relation_constraints={}, step_count={}, maximum_chunk_byte_length={}, maximum_transaction_payload_byte_length={}, distinct_physical_object_count={}, object_lifecycle_count={}, peak_stored_byte_length={}, total_written_byte_length={}, total_read_byte_length={}, transaction_count={}, local_record_seal_invocation_count={}, maximum_local_record_seal_invocations_per_active_root={}, local_record_seal_invocation_count_variance={}, local_record_sealed_plaintext_byte_length={}, maximum_local_record_sealed_plaintext_bytes_per_active_root={}, local_record_sealed_plaintext_byte_length_variance={}, exceeds_active_root_seal_custody_budget={}, maximum_object_count={}, object_count_variance={}, maximum_stored_byte_length={}, peak_stored_byte_length_variance={}",
             variant.ordered_columns().len(),
             variant.ordered_constraint_count(),
             requirement.step_count(),
@@ -525,15 +533,22 @@ mod selected_ballot_resource_cap_tests {
             requirement.total_written_byte_length(),
             requirement.total_read_byte_length(),
             requirement.transaction_count(),
+            requirement.local_record_seal_invocation_count(),
+            MAXIMUM_LOCAL_RECORD_SEAL_INVOCATIONS_PER_ACTIVE_ROOT,
+            local_record_seal_invocation_count_variance,
+            requirement.local_record_sealed_plaintext_byte_length(),
+            MAXIMUM_LOCAL_RECORD_SEALED_PLAINTEXT_BYTES_PER_ACTIVE_ROOT,
+            local_record_sealed_plaintext_byte_length_variance,
+            requirement.exceeds_active_root_seal_custody_budget(),
             MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_OBJECT_COUNT,
             object_count_variance,
             MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_STORED_BYTE_LENGTH,
             peak_stored_byte_length_variance,
         );
 
-        assert_eq!(variant.ordered_columns().len(), 3_250);
-        assert_eq!(variant.ordered_constraint_count(), 5_214);
-        assert_eq!(requirement.step_count(), 353_501);
+        assert_eq!(variant.ordered_columns().len(), 3_630);
+        assert_eq!(variant.ordered_constraint_count(), 6_070);
+        assert_eq!(requirement.step_count(), 82_323);
         assert_eq!(
             requirement.maximum_chunk_byte_length(),
             MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH
@@ -542,14 +557,21 @@ mod selected_ballot_resource_cap_tests {
             requirement.maximum_transaction_payload_byte_length(),
             49_152
         );
-        assert_eq!(requirement.distinct_physical_object_count(), 36_822);
-        assert_eq!(requirement.object_lifecycle_count(), 351_918);
-        assert_eq!(requirement.peak_stored_byte_length(), 78_048_140_864);
-        assert_eq!(requirement.total_written_byte_length(), 5_900_353_862_872);
-        assert_eq!(requirement.total_read_byte_length(), 11_468_451_326_432);
-        assert_eq!(requirement.transaction_count(), 77_262_030_541);
-        assert_eq!(object_count_variance, 32_726);
-        assert_eq!(peak_stored_byte_length_variance, 76_974_399_040);
+        assert_eq!(requirement.distinct_physical_object_count(), 7_291);
+        assert_eq!(requirement.object_lifecycle_count(), 79_889);
+        assert_eq!(requirement.peak_stored_byte_length(), 115_999_258_752);
+        assert_eq!(requirement.total_written_byte_length(), 1_341_247_396_696);
+        assert_eq!(requirement.total_read_byte_length(), 2_882_491_465_056);
+        assert_eq!(requirement.transaction_count(), 22_691_664_673);
+        assert_eq!(object_count_variance, 3_195);
+        assert_eq!(peak_stored_byte_length_variance, 114_925_516_928);
+        assert!(requirement.local_record_seal_invocation_count() > 0);
+        assert!(requirement.local_record_sealed_plaintext_byte_length() > 0);
+        assert_eq!(
+            requirement.exceeds_active_root_seal_custody_budget(),
+            local_record_seal_invocation_count_variance > 0
+                || local_record_sealed_plaintext_byte_length_variance > 0,
+        );
         assert!(
             usize::try_from(requirement.distinct_physical_object_count())
                 .is_ok_and(|count| count > MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_OBJECT_COUNT)
@@ -1109,6 +1131,102 @@ mod resource_accounting {
                 Self::CompleteActionMultiplicity(_) => "complete-action-multiplicity",
                 Self::LogicalEntryCount(_) => "logical-entry-count",
                 Self::OpeningClaimCount(_) => "opening-claim-count",
+            }
+        }
+
+        pub(crate) const fn detail_code(self) -> &'static str {
+            match self {
+                Self::ProofResourceRequirement(
+                    GeneratedCommonProofStoragePlanError::Prover(error),
+                ) => match error {
+                    super::super::prover::CommonProofProverError::CanonicalEncoding => {
+                        "resource-requirement-prover-canonical-encoding"
+                    }
+                    super::super::prover::CommonProofProverError::InvalidInput => {
+                        "resource-requirement-prover-invalid-input"
+                    }
+                    super::super::prover::CommonProofProverError::InvalidColumn => {
+                        "resource-requirement-prover-invalid-column"
+                    }
+                    super::super::prover::CommonProofProverError::InvalidMask => {
+                        "resource-requirement-prover-invalid-mask"
+                    }
+                    super::super::prover::CommonProofProverError::InvalidQuotient => {
+                        "resource-requirement-prover-invalid-quotient"
+                    }
+                    super::super::prover::CommonProofProverError::InvalidOpening => {
+                        "resource-requirement-prover-invalid-opening"
+                    }
+                    super::super::prover::CommonProofProverError::InvalidFriLayer => {
+                        "resource-requirement-prover-invalid-fri-layer"
+                    }
+                    super::super::prover::CommonProofProverError::InvalidTree => {
+                        "resource-requirement-prover-invalid-tree"
+                    }
+                    super::super::prover::CommonProofProverError::CountOverflow => {
+                        "resource-requirement-prover-count-overflow"
+                    }
+                    super::super::prover::CommonProofProverError::AllocationLimitExceeded => {
+                        "resource-requirement-prover-allocation-limit-exceeded"
+                    }
+                    super::super::prover::CommonProofProverError::ResidentMemoryLimitExceeded => {
+                        "resource-requirement-prover-resident-memory-limit-exceeded"
+                    }
+                    super::super::prover::CommonProofProverError::Field(_) => {
+                        "resource-requirement-prover-field"
+                    }
+                    super::super::prover::CommonProofProverError::Polynomial(_) => {
+                        "resource-requirement-prover-polynomial"
+                    }
+                    super::super::prover::CommonProofProverError::Merkle(_) => {
+                        "resource-requirement-prover-merkle"
+                    }
+                    super::super::prover::CommonProofProverError::Relation(_) => {
+                        "resource-requirement-prover-relation"
+                    }
+                },
+                Self::ProofResourceRequirement(
+                    GeneratedCommonProofStoragePlanError::Storage(error),
+                ) => match error {
+                    super::super::external_memory::ProofExternalMemoryError::InvalidPlan => {
+                        "resource-requirement-storage-invalid-plan"
+                    }
+                    super::super::external_memory::ProofExternalMemoryError::UnknownObject => {
+                        "resource-requirement-storage-unknown-object"
+                    }
+                    super::super::external_memory::ProofExternalMemoryError::WrongStep => {
+                        "resource-requirement-storage-wrong-step"
+                    }
+                    super::super::external_memory::ProofExternalMemoryError::InvalidLifecycle => {
+                        "resource-requirement-storage-invalid-lifecycle"
+                    }
+                    super::super::external_memory::ProofExternalMemoryError::WrongOffsetOrLength => {
+                        "resource-requirement-storage-wrong-offset-or-length"
+                    }
+                    super::super::external_memory::ProofExternalMemoryError::ResourceLimitExceeded => {
+                        "resource-requirement-storage-resource-limit-exceeded"
+                    }
+                    super::super::external_memory::ProofExternalMemoryError::Incomplete => {
+                        "resource-requirement-storage-incomplete"
+                    }
+                },
+                Self::ProofResourceRequirement(
+                    GeneratedCommonProofStoragePlanError::RequirementGeometry(error),
+                ) => match error {
+                    super::super::prover::CommonProofProverError::InvalidInput => {
+                        "resource-requirement-geometry-invalid-input"
+                    }
+                    _ => "resource-requirement-geometry-error",
+                },
+                Self::ProofResourceRequirement(
+                    GeneratedCommonProofStoragePlanError::RequirementResidentMemory(error),
+                ) => match error {
+                    super::super::prover::CommonProofProverError::InvalidInput => {
+                        "resource-requirement-resident-memory-invalid-input"
+                    }
+                    _ => "resource-requirement-resident-memory-error",
+                },
+                _ => self.stage(),
             }
         }
     }
@@ -2837,6 +2955,7 @@ mod resource_accounting {
             || external_memory_requirement.distinct_physical_object_count() == 0
             || external_memory_requirement.object_lifecycle_count()
                 < external_memory_requirement.distinct_physical_object_count()
+            || external_memory_requirement.exceeds_active_root_seal_custody_budget()
             || checkpoint_custody_requirement.restore_workspace_byte_ceiling()
                 > MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH
             || copied_buffer_requirements
@@ -3604,6 +3723,62 @@ mod resource_accounting {
         use crate::foundation::{CanonicalItem, CanonicalItemType, CanonicalTuple};
 
         #[test]
+        fn selected_target_share_cap_neutral_proof_requirement_derives() {
+            let schema_identifier =
+                ProofApplicationSlotCeilings::TARGET_SHARE_PROOF_STATEMENT_SCHEMA_IDENTIFIER;
+            let relation_context = selected_relation_plan_check_context(schema_identifier)
+                .expect("the selected target-share relation has one common-proof context");
+            let compilation = selected_target_release_relation()
+                .expect("the selected target-share relation compiles");
+            let variant = compilation
+                .relation_plan()
+                .select_variant(None, None)
+                .expect("the selected target-share relation has one variant");
+            let statement_context = SelectedApplicationStatementContext::new(
+                FOUNDATION_PROFILE.protocol_version,
+                [0; Hash512::BYTE_LENGTH],
+                variant.schedule_position(),
+                variant.top_count(),
+            );
+            let canonical_application_statement_bytes =
+                canonical_selected_application_statement_for_ceiling(
+                    schema_identifier,
+                    statement_context,
+                )
+                .expect("the selected target-share ceiling statement encodes");
+            let transport_sizing = selected_cap_neutral_proof_transport_sizing(
+                schema_identifier,
+                &canonical_application_statement_bytes,
+                variant,
+                &relation_context,
+            )
+            .expect("the selected target-share cap-neutral transport sizing derives");
+            let canonical_header_byte_length =
+                u64::try_from(transport_sizing.ceiling.canonical_header_byte_length())
+                    .expect("the canonical header length fits u64");
+            let outcome = common_proof_cap_neutral_resource_requirement(
+                variant,
+                &relation_context,
+                &transport_sizing.transcript_schedule,
+                transport_sizing.layout.catalog(),
+                CommonProofResidentMemoryConfiguration::new(
+                    schema_identifier,
+                    canonical_header_byte_length,
+                    transport_sizing.maximum_prefetched_query_byte_length,
+                    u64::from(MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH),
+                    u64::try_from(MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH)
+                        .expect("the proof chunk length fits u64"),
+                ),
+            );
+
+            assert!(
+                outcome.is_ok(),
+                "the selected target-share cap-neutral proof requirement derives: {:?}",
+                outcome.err(),
+            );
+        }
+
+        #[test]
         fn selected_target_share_resident_rows_include_the_production_source_provider() {
             let schema_identifier =
                 ProofApplicationSlotCeilings::TARGET_SHARE_PROOF_STATEMENT_SCHEMA_IDENTIFIER;
@@ -3861,11 +4036,15 @@ mod resource_accounting {
             let mut complete_action_total_written_byte_length = 0_u128;
             let mut complete_action_total_read_byte_length = 0_u128;
             let mut complete_action_transaction_count = 0_u128;
+            let mut complete_action_local_record_seal_invocation_count = 0_u128;
+            let mut complete_action_local_record_sealed_plaintext_byte_length = 0_u128;
             let mut complete_action_distinct_physical_object_count = 0_u128;
             let mut complete_action_object_lifecycle_count = 0_u128;
             let mut selected_maximum_peak_stored_byte_length = 0_u64;
             let mut selected_maximum_distinct_physical_object_count = 0_u32;
             let mut selected_maximum_transaction_payload_byte_length = 0_u64;
+            let mut selected_maximum_local_record_seal_invocation_count = 0_u64;
+            let mut selected_maximum_local_record_sealed_plaintext_byte_length = 0_u64;
             let mut selected_maximum_combined_wasm_resident_byte_length = 0_u64;
             let mut selected_maximum_copied_buffer_byte_length = 0_u64;
             for row in &diagnostic_rows {
@@ -3920,6 +4099,26 @@ mod resource_accounting {
                                     * u128::from(requirement.transaction_count()),
                             )
                             .expect("the complete-action transaction total fits u128");
+                        complete_action_local_record_seal_invocation_count =
+                            complete_action_local_record_seal_invocation_count
+                                .checked_add(
+                                    u128::from(multiplicity)
+                                        * u128::from(
+                                            requirement.local_record_seal_invocation_count(),
+                                        ),
+                                )
+                                .expect("the complete-action local-record seal count fits u128");
+                        complete_action_local_record_sealed_plaintext_byte_length =
+                            complete_action_local_record_sealed_plaintext_byte_length
+                                .checked_add(
+                                    u128::from(multiplicity)
+                                        * u128::from(
+                                            requirement.local_record_sealed_plaintext_byte_length(),
+                                        ),
+                                )
+                                .expect(
+                                    "the complete-action sealed-plaintext byte total fits u128",
+                                );
                         complete_action_distinct_physical_object_count =
                             complete_action_distinct_physical_object_count
                                 .checked_add(
@@ -3934,6 +4133,12 @@ mod resource_accounting {
                                         * u128::from(requirement.object_lifecycle_count()),
                                 )
                                 .expect("the complete-action lifecycle total fits u128");
+                        selected_maximum_local_record_seal_invocation_count =
+                            selected_maximum_local_record_seal_invocation_count
+                                .max(requirement.local_record_seal_invocation_count());
+                        selected_maximum_local_record_sealed_plaintext_byte_length =
+                            selected_maximum_local_record_sealed_plaintext_byte_length
+                                .max(requirement.local_record_sealed_plaintext_byte_length());
                         if multiplicity != 0 {
                             selected_maximum_peak_stored_byte_length =
                                 selected_maximum_peak_stored_byte_length
@@ -3963,6 +4168,20 @@ mod resource_accounting {
                                 - i128::from(
                                     MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_STORED_BYTE_LENGTH,
                                 );
+                        let local_record_seal_invocation_count_variance =
+                            i128::from(requirement.local_record_seal_invocation_count())
+                                - i128::from(MAXIMUM_LOCAL_RECORD_SEAL_INVOCATIONS_PER_ACTIVE_ROOT);
+                        let local_record_sealed_plaintext_byte_length_variance =
+                            i128::from(requirement.local_record_sealed_plaintext_byte_length())
+                                - i128::from(
+                                    MAXIMUM_LOCAL_RECORD_SEALED_PLAINTEXT_BYTES_PER_ACTIVE_ROOT,
+                                );
+                        assert_eq!(
+                            requirement.exceeds_active_root_seal_custody_budget(),
+                            local_record_seal_invocation_count_variance > 0
+                                || local_record_sealed_plaintext_byte_length_variance > 0,
+                            "the cap-neutral row must preserve the exact active-root custody predicate",
+                        );
                         let proof_components =
                             diagnostic_requirement.proof_component_byte_accounting();
                         let proof_byte_length_ceiling_variance =
@@ -4052,7 +4271,7 @@ mod resource_accounting {
                             diagnostic_requirement.maximum_combined_wasm_resident_byte_length(),
                         );
                         println!(
-                            "selected-proof-external-memory-diagnostic family={} schema_identifier=0x{:04x} schedule_position={} top_count={} relation_columns={} verifier_sequence_relation_columns={} bound_tree_relation_columns={} prover_relation_columns={} relation_constraints={} evaluation_domain_size={} opening_degree_bound_exclusive={} quotient_decomposition_stride={} quotient_component_degree_bound_exclusive={} quotient_component_count={} fri_fold_count={} terminal_coefficient_count={} unique_query_count={} query_orbit_count={} complete_action_application_multiplicity={} logical_entry_count={} opening_claim_count={} proof_byte_length_ceiling={} maximum_proof_byte_length={} proof_byte_length_ceiling_variance={} canonical_header_byte_length_ceiling={} body_prefix_byte_length_ceiling={} query_section_byte_length_ceiling={} canonical_framing_byte_length_ceiling={} relation_commitments_and_openings_byte_length_ceiling={} quotient_commitments_and_openings_byte_length_ceiling={} transcript_opening_claims_byte_length_ceiling={} fri_byte_length_ceiling={} proof_tree_count={} bound_public_tree_count={} total_materialized_row_width={} maximum_combined_wasm_resident_byte_length={} maximum_wasm_resident_byte_length={} maximum_combined_wasm_resident_byte_length_variance={} maximum_prefetched_query_byte_length={} maximum_external_memory_transaction_payload_byte_length={} maximum_proof_output_chunk_byte_length_ceiling={} proof_output_chunk_count_ceiling={} maximum_copied_buffer_byte_length={} maximum_copied_buffer_byte_length_bound={} maximum_copied_buffer_byte_length_variance={} outcome=requirement step_count={} maximum_chunk_byte_length={} maximum_transaction_payload_byte_length={} distinct_physical_object_count={} object_lifecycle_count={} peak_stored_byte_length={} total_written_byte_length={} total_read_byte_length={} transaction_count={} maximum_object_count={} object_count_variance={} maximum_stored_byte_length={} peak_stored_byte_length_variance={}",
+                            "selected-proof-external-memory-diagnostic family={} schema_identifier=0x{:04x} schedule_position={} top_count={} relation_columns={} verifier_sequence_relation_columns={} bound_tree_relation_columns={} prover_relation_columns={} relation_constraints={} evaluation_domain_size={} opening_degree_bound_exclusive={} quotient_decomposition_stride={} quotient_component_degree_bound_exclusive={} quotient_component_count={} fri_fold_count={} terminal_coefficient_count={} unique_query_count={} query_orbit_count={} complete_action_application_multiplicity={} logical_entry_count={} opening_claim_count={} proof_byte_length_ceiling={} maximum_proof_byte_length={} proof_byte_length_ceiling_variance={} canonical_header_byte_length_ceiling={} body_prefix_byte_length_ceiling={} query_section_byte_length_ceiling={} canonical_framing_byte_length_ceiling={} relation_commitments_and_openings_byte_length_ceiling={} quotient_commitments_and_openings_byte_length_ceiling={} transcript_opening_claims_byte_length_ceiling={} fri_byte_length_ceiling={} proof_tree_count={} bound_public_tree_count={} total_materialized_row_width={} maximum_combined_wasm_resident_byte_length={} maximum_wasm_resident_byte_length={} maximum_combined_wasm_resident_byte_length_variance={} maximum_prefetched_query_byte_length={} maximum_external_memory_transaction_payload_byte_length={} maximum_proof_output_chunk_byte_length_ceiling={} proof_output_chunk_count_ceiling={} maximum_copied_buffer_byte_length={} maximum_copied_buffer_byte_length_bound={} maximum_copied_buffer_byte_length_variance={} outcome=requirement step_count={} maximum_chunk_byte_length={} maximum_transaction_payload_byte_length={} distinct_physical_object_count={} object_lifecycle_count={} peak_stored_byte_length={} total_written_byte_length={} total_read_byte_length={} transaction_count={} local_record_seal_invocation_count={} maximum_local_record_seal_invocations_per_active_root={} local_record_seal_invocation_count_variance={} local_record_sealed_plaintext_byte_length={} maximum_local_record_sealed_plaintext_bytes_per_active_root={} local_record_sealed_plaintext_byte_length_variance={} exceeds_active_root_seal_custody_budget={} maximum_object_count={} object_count_variance={} maximum_stored_byte_length={} peak_stored_byte_length_variance={}",
                             family_name(schema_identifier),
                             schema_identifier,
                             selector(row.schedule_position().map(u64::from)),
@@ -4110,6 +4329,13 @@ mod resource_accounting {
                             requirement.total_written_byte_length(),
                             requirement.total_read_byte_length(),
                             requirement.transaction_count(),
+                            requirement.local_record_seal_invocation_count(),
+                            MAXIMUM_LOCAL_RECORD_SEAL_INVOCATIONS_PER_ACTIVE_ROOT,
+                            local_record_seal_invocation_count_variance,
+                            requirement.local_record_sealed_plaintext_byte_length(),
+                            MAXIMUM_LOCAL_RECORD_SEALED_PLAINTEXT_BYTES_PER_ACTIVE_ROOT,
+                            local_record_sealed_plaintext_byte_length_variance,
+                            requirement.exceeds_active_root_seal_custody_budget(),
                             MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_OBJECT_COUNT,
                             object_count_variance,
                             MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_STORED_BYTE_LENGTH,
@@ -4135,8 +4361,14 @@ mod resource_accounting {
                 requirement_count + derivation_error_count,
                 diagnostic_rows.len()
             );
+            let selected_maximum_local_record_seal_invocation_count_variance =
+                i128::from(selected_maximum_local_record_seal_invocation_count)
+                    - i128::from(MAXIMUM_LOCAL_RECORD_SEAL_INVOCATIONS_PER_ACTIVE_ROOT);
+            let selected_maximum_local_record_sealed_plaintext_byte_length_variance =
+                i128::from(selected_maximum_local_record_sealed_plaintext_byte_length)
+                    - i128::from(MAXIMUM_LOCAL_RECORD_SEALED_PLAINTEXT_BYTES_PER_ACTIVE_ROOT);
             println!(
-                "selected-proof-external-memory-diagnostic-summary family_count={} selector_count={} requirement_count={} derivation_error_count={} complete_action_physical_proof_slot_count={} complete_action_logical_entry_count={} complete_action_proof_byte_length_ceiling={} complete_action_distinct_physical_object_count={} complete_action_object_lifecycle_count={} complete_action_total_written_byte_length={} complete_action_total_read_byte_length={} complete_action_transaction_count={} selected_maximum_distinct_physical_object_count={} selected_maximum_peak_stored_byte_length={} selected_maximum_transaction_payload_byte_length={} selected_maximum_combined_wasm_resident_byte_length={} selected_maximum_copied_buffer_byte_length={}",
+                "selected-proof-external-memory-diagnostic-summary family_count={} selector_count={} requirement_count={} derivation_error_count={} complete_action_physical_proof_slot_count={} complete_action_logical_entry_count={} complete_action_proof_byte_length_ceiling={} complete_action_distinct_physical_object_count={} complete_action_object_lifecycle_count={} complete_action_total_written_byte_length={} complete_action_total_read_byte_length={} complete_action_transaction_count={} complete_action_local_record_seal_invocation_count={} complete_action_local_record_sealed_plaintext_byte_length={} selected_maximum_distinct_physical_object_count={} selected_maximum_peak_stored_byte_length={} selected_maximum_transaction_payload_byte_length={} selected_maximum_local_record_seal_invocation_count={} maximum_local_record_seal_invocations_per_active_root={} selected_maximum_local_record_seal_invocation_count_variance={} selected_maximum_local_record_sealed_plaintext_byte_length={} maximum_local_record_sealed_plaintext_bytes_per_active_root={} selected_maximum_local_record_sealed_plaintext_byte_length_variance={} selected_maximum_combined_wasm_resident_byte_length={} selected_maximum_copied_buffer_byte_length={}",
                 crate::bgv::proof_suite::FIRST_PROFILE_APPLICATION_FAMILIES.len(),
                 diagnostic_rows.len(),
                 requirement_count,
@@ -4149,9 +4381,17 @@ mod resource_accounting {
                 complete_action_total_written_byte_length,
                 complete_action_total_read_byte_length,
                 complete_action_transaction_count,
+                complete_action_local_record_seal_invocation_count,
+                complete_action_local_record_sealed_plaintext_byte_length,
                 selected_maximum_distinct_physical_object_count,
                 selected_maximum_peak_stored_byte_length,
                 selected_maximum_transaction_payload_byte_length,
+                selected_maximum_local_record_seal_invocation_count,
+                MAXIMUM_LOCAL_RECORD_SEAL_INVOCATIONS_PER_ACTIVE_ROOT,
+                selected_maximum_local_record_seal_invocation_count_variance,
+                selected_maximum_local_record_sealed_plaintext_byte_length,
+                MAXIMUM_LOCAL_RECORD_SEALED_PLAINTEXT_BYTES_PER_ACTIVE_ROOT,
+                selected_maximum_local_record_sealed_plaintext_byte_length_variance,
                 selected_maximum_combined_wasm_resident_byte_length,
                 selected_maximum_copied_buffer_byte_length,
             );

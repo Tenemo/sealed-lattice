@@ -47,7 +47,7 @@ pub(crate) use executor::{
 pub(crate) use plan::{
     ProofExternalMemory, ProofExternalMemoryObject, ProofExternalMemoryObjectPlan,
     ProofExternalMemoryPlan, ProofExternalMemoryProtection,
-    ProofExternalMemoryTransactionOperation,
+    ProofExternalMemorySecretSealCustodyRequirement, ProofExternalMemoryTransactionOperation,
 };
 pub(crate) use transaction::{
     ProofExternalMemoryTransactionAdapterError, ProofExternalMemoryTransactionRecorder,

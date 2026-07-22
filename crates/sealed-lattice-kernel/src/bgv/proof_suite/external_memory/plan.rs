@@ -5,10 +5,20 @@ use std::{
 
 use zeroize::Zeroizing;
 
+use crate::foundation::{
+    MAXIMUM_LOCAL_RECORD_SEAL_INVOCATIONS_PER_ACTIVE_ROOT,
+    MAXIMUM_LOCAL_RECORD_SEALED_PLAINTEXT_BYTES_PER_ACTIVE_ROOT,
+};
+
+use super::super::MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH;
 use super::{
     MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_OBJECT_COUNT,
     MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_STORED_BYTE_LENGTH, executor::ProofExternalMemoryError,
 };
+
+const COMMON_PROOF_EXTERNAL_MEMORY_OBJECT_HEADER_PLAINTEXT_BYTE_LENGTH: u64 =
+    1 + core::mem::size_of::<u64>() as u64;
+const COMMON_PROOF_EXTERNAL_MEMORY_SECRET_FIXED_RECORD_COUNT: u64 = 2;
 
 /// One plan-local external-memory object.  The surrounding proof transaction
 /// supplies the unguessable lease and transaction identifiers; this ordinal is
@@ -32,6 +42,90 @@ impl ProofExternalMemoryObject {
 pub(crate) enum ProofExternalMemoryProtection {
     PublicIntegrity,
     SecretAuthenticatedEncryption,
+}
+
+/// Active-root local-record custody consumed by secret external-memory object
+/// lifecycles. The browser writes one nine-byte object header, maximally sized
+/// data-chunk records, and one empty seal-marker record for each lifecycle.
+/// Public-integrity records never enter the local-record sealing path.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct ProofExternalMemorySecretSealCustodyRequirement {
+    local_record_seal_invocation_count: u64,
+    local_record_sealed_plaintext_byte_length: u64,
+}
+
+impl ProofExternalMemorySecretSealCustodyRequirement {
+    pub(crate) fn for_object_lifecycle(
+        protection: ProofExternalMemoryProtection,
+        exact_byte_length: u64,
+    ) -> Result<Self, ProofExternalMemoryError> {
+        if exact_byte_length == 0 {
+            return Err(ProofExternalMemoryError::InvalidPlan);
+        }
+        if protection == ProofExternalMemoryProtection::PublicIntegrity {
+            return Ok(Self::default());
+        }
+
+        let data_record_count = exact_byte_length.div_ceil(u64::from(
+            MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH,
+        ));
+        let local_record_seal_invocation_count = data_record_count
+            .checked_add(COMMON_PROOF_EXTERNAL_MEMORY_SECRET_FIXED_RECORD_COUNT)
+            .ok_or(ProofExternalMemoryError::ResourceLimitExceeded)?;
+        let local_record_sealed_plaintext_byte_length = exact_byte_length
+            .checked_add(COMMON_PROOF_EXTERNAL_MEMORY_OBJECT_HEADER_PLAINTEXT_BYTE_LENGTH)
+            .ok_or(ProofExternalMemoryError::ResourceLimitExceeded)?;
+        Ok(Self {
+            local_record_seal_invocation_count,
+            local_record_sealed_plaintext_byte_length,
+        })
+    }
+
+    pub(crate) fn checked_add(self, additional: Self) -> Result<Self, ProofExternalMemoryError> {
+        Ok(Self {
+            local_record_seal_invocation_count: self
+                .local_record_seal_invocation_count
+                .checked_add(additional.local_record_seal_invocation_count)
+                .ok_or(ProofExternalMemoryError::ResourceLimitExceeded)?,
+            local_record_sealed_plaintext_byte_length: self
+                .local_record_sealed_plaintext_byte_length
+                .checked_add(additional.local_record_sealed_plaintext_byte_length)
+                .ok_or(ProofExternalMemoryError::ResourceLimitExceeded)?,
+        })
+    }
+
+    #[cfg(test)]
+    pub(crate) const fn local_record_seal_invocation_count(self) -> u64 {
+        self.local_record_seal_invocation_count
+    }
+
+    #[cfg(test)]
+    pub(crate) const fn local_record_sealed_plaintext_byte_length(self) -> u64 {
+        self.local_record_sealed_plaintext_byte_length
+    }
+
+    pub(crate) const fn exceeds_active_root_budget(self) -> bool {
+        self.local_record_seal_invocation_count
+            > MAXIMUM_LOCAL_RECORD_SEAL_INVOCATIONS_PER_ACTIVE_ROOT
+            || self.local_record_sealed_plaintext_byte_length
+                > MAXIMUM_LOCAL_RECORD_SEALED_PLAINTEXT_BYTES_PER_ACTIVE_ROOT
+    }
+}
+
+fn secret_seal_custody_requirement_for_object_lifecycles(
+    objects: &[ProofExternalMemoryObjectPlan],
+) -> Result<ProofExternalMemorySecretSealCustodyRequirement, ProofExternalMemoryError> {
+    objects.iter().try_fold(
+        ProofExternalMemorySecretSealCustodyRequirement::default(),
+        |requirement, object| {
+            requirement.checked_add(
+                ProofExternalMemorySecretSealCustodyRequirement::for_object_lifecycle(
+                    object.protection,
+                    object.exact_byte_length,
+                )?,
+            )
+        },
+    )
 }
 
 /// One build-linked liveness entry.  Steps are dense zero-based executor
@@ -135,6 +229,10 @@ impl ProofExternalMemoryPlan {
         Ok(plan)
     }
 
+    pub(crate) const fn maximum_transaction_operation_count(&self) -> u32 {
+        self.maximum_transaction_operation_count
+    }
+
     pub(super) fn validate(&self) -> Result<(), ProofExternalMemoryError> {
         if self.step_count == 0
             || self.maximum_chunk_byte_length == 0
@@ -157,6 +255,11 @@ impl ProofExternalMemoryPlan {
             })
             || self.maximum_stored_byte_length
                 > MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_STORED_BYTE_LENGTH
+        {
+            return Err(ProofExternalMemoryError::ResourceLimitExceeded);
+        }
+        if secret_seal_custody_requirement_for_object_lifecycles(&self.objects)?
+            .exceeds_active_root_budget()
         {
             return Err(ProofExternalMemoryError::ResourceLimitExceeded);
         }
@@ -272,6 +375,165 @@ impl ProofExternalMemoryPlan {
     pub(crate) fn object_lifecycle_count(&self) -> Result<u32, ProofExternalMemoryError> {
         u32::try_from(self.objects.len())
             .map_err(|_| ProofExternalMemoryError::ResourceLimitExceeded)
+    }
+}
+
+#[cfg(test)]
+mod custody_requirement_tests {
+    use super::*;
+
+    #[test]
+    fn secret_seal_custody_requirement_uses_canonical_record_geometry() {
+        assert_eq!(
+            MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH,
+            49_152
+        );
+        assert_eq!(
+            COMMON_PROOF_EXTERNAL_MEMORY_OBJECT_HEADER_PLAINTEXT_BYTE_LENGTH,
+            9
+        );
+        assert_eq!(
+            ProofExternalMemorySecretSealCustodyRequirement::for_object_lifecycle(
+                ProofExternalMemoryProtection::PublicIntegrity,
+                u64::MAX,
+            ),
+            Ok(ProofExternalMemorySecretSealCustodyRequirement::default()),
+            "public-integrity objects never consume the active-root seal budget",
+        );
+
+        let canonical_chunk_byte_length =
+            u64::from(MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH);
+        for (exact_byte_length, expected_invocation_count) in [
+            (1, 3),
+            (canonical_chunk_byte_length - 1, 3),
+            (canonical_chunk_byte_length, 3),
+            (canonical_chunk_byte_length + 1, 4),
+        ] {
+            let requirement =
+                ProofExternalMemorySecretSealCustodyRequirement::for_object_lifecycle(
+                    ProofExternalMemoryProtection::SecretAuthenticatedEncryption,
+                    exact_byte_length,
+                )
+                .expect("the secret lifecycle geometry is representable");
+            assert_eq!(
+                requirement.local_record_seal_invocation_count(),
+                expected_invocation_count,
+            );
+            assert_eq!(
+                requirement.local_record_sealed_plaintext_byte_length(),
+                exact_byte_length + 9,
+            );
+        }
+        assert_eq!(
+            ProofExternalMemorySecretSealCustodyRequirement::for_object_lifecycle(
+                ProofExternalMemoryProtection::SecretAuthenticatedEncryption,
+                0,
+            ),
+            Err(ProofExternalMemoryError::InvalidPlan),
+        );
+    }
+
+    #[test]
+    fn secret_seal_custody_requirement_accepts_exact_active_root_boundaries() {
+        let exact_boundaries = ProofExternalMemorySecretSealCustodyRequirement {
+            local_record_seal_invocation_count:
+                MAXIMUM_LOCAL_RECORD_SEAL_INVOCATIONS_PER_ACTIVE_ROOT,
+            local_record_sealed_plaintext_byte_length:
+                MAXIMUM_LOCAL_RECORD_SEALED_PLAINTEXT_BYTES_PER_ACTIVE_ROOT,
+        };
+        assert!(!exact_boundaries.exceeds_active_root_budget());
+        assert!(
+            ProofExternalMemorySecretSealCustodyRequirement {
+                local_record_seal_invocation_count:
+                    MAXIMUM_LOCAL_RECORD_SEAL_INVOCATIONS_PER_ACTIVE_ROOT + 1,
+                ..exact_boundaries
+            }
+            .exceeds_active_root_budget()
+        );
+        assert!(
+            ProofExternalMemorySecretSealCustodyRequirement {
+                local_record_sealed_plaintext_byte_length:
+                    MAXIMUM_LOCAL_RECORD_SEALED_PLAINTEXT_BYTES_PER_ACTIVE_ROOT + 1,
+                ..exact_boundaries
+            }
+            .exceeds_active_root_budget()
+        );
+    }
+
+    #[test]
+    fn plan_counts_reused_object_ordinals_as_distinct_secret_lifecycles() {
+        let lifecycle_count = 1_024_u32;
+        let exact_lifecycle_byte_length = MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_STORED_BYTE_LENGTH
+            - COMMON_PROOF_EXTERNAL_MEMORY_OBJECT_HEADER_PLAINTEXT_BYTE_LENGTH;
+        let exact_total_written_byte_length = exact_lifecycle_byte_length
+            .checked_mul(u64::from(lifecycle_count))
+            .expect("the exact-boundary test total fits u64");
+        let reused_object = ProofExternalMemoryObject::new(7);
+        let exact_boundary_lifecycles = (0..lifecycle_count)
+            .map(|step| {
+                ProofExternalMemoryObjectPlan::new(
+                    reused_object,
+                    ProofExternalMemoryProtection::SecretAuthenticatedEncryption,
+                    exact_lifecycle_byte_length,
+                    step,
+                    step,
+                    step,
+                )
+            })
+            .collect::<Vec<_>>();
+        ProofExternalMemoryPlan::new(
+            lifecycle_count,
+            MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH,
+            u64::from(MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH),
+            1,
+            exact_lifecycle_byte_length,
+            exact_total_written_byte_length,
+            1,
+            1,
+            exact_boundary_lifecycles.clone(),
+        )
+        .expect("reused lifecycles at the exact sealed-plaintext boundary are accepted");
+
+        let mut one_byte_over_lifecycles = exact_boundary_lifecycles;
+        one_byte_over_lifecycles[0].exact_byte_length += 1;
+        assert_eq!(
+            ProofExternalMemoryPlan::new(
+                lifecycle_count,
+                MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH,
+                u64::from(MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH),
+                1,
+                MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_STORED_BYTE_LENGTH,
+                exact_total_written_byte_length + 1,
+                1,
+                1,
+                one_byte_over_lifecycles,
+            ),
+            Err(ProofExternalMemoryError::ResourceLimitExceeded),
+            "physical-ordinal reuse cannot evade the per-lifecycle custody budget",
+        );
+    }
+
+    #[test]
+    fn secret_seal_custody_requirement_refuses_checked_arithmetic_overflow() {
+        assert_eq!(
+            ProofExternalMemorySecretSealCustodyRequirement::for_object_lifecycle(
+                ProofExternalMemoryProtection::SecretAuthenticatedEncryption,
+                u64::MAX,
+            ),
+            Err(ProofExternalMemoryError::ResourceLimitExceeded),
+        );
+        let maximum = ProofExternalMemorySecretSealCustodyRequirement {
+            local_record_seal_invocation_count: u64::MAX,
+            local_record_sealed_plaintext_byte_length: u64::MAX,
+        };
+        let one = ProofExternalMemorySecretSealCustodyRequirement {
+            local_record_seal_invocation_count: 1,
+            local_record_sealed_plaintext_byte_length: 1,
+        };
+        assert_eq!(
+            maximum.checked_add(one),
+            Err(ProofExternalMemoryError::ResourceLimitExceeded),
+        );
     }
 }
 

@@ -1028,6 +1028,21 @@ fn generated_committed_material_plans_cover_the_exact_root_directions() {
 }
 
 #[test]
+fn relation_plan_checker_rejects_duplicate_tree_column_ownership() {
+    let context = committed_material_check_context();
+    let mut plan = compile_vss_share_linkage_relation_plan(&committed_material_input(), &context)
+        .expect("the exact VSS share-linkage relation plan compiles");
+    let duplicated_tree = plan.plan.variants[0]
+        .ordered_trees
+        .first()
+        .expect("the VSS relation owns at least one bound tree")
+        .clone();
+    plan.plan.variants[0].ordered_trees.push(duplicated_tree);
+
+    assert_eq!(plan.check(&context), Err(RelationPlanError::InvalidRoot));
+}
+
+#[test]
 fn aggregate_plan_checker_rejects_duplicate_or_randomized_half_residuals() {
     let context = committed_material_check_context();
     let input = committed_material_input();

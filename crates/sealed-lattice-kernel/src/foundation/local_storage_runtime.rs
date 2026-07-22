@@ -53,8 +53,8 @@ const COMMON_PROOF_EXTERNAL_MEMORY_IDENTIFIER_CONTEXT_BYTE_LENGTH: usize = 32
 const BINDING_BYTE_LENGTH: usize = HASH_BYTE_LENGTH * 4;
 const HANDLE_BYTE_LENGTH: usize = 4;
 const MAXIMUM_CHECKPOINT_SOURCE_DIGEST_COUNT: usize = 4_096;
-const MAXIMUM_LOCAL_RECORD_SEAL_INVOCATIONS_PER_ACTIVE_ROOT: u64 = 1 << 30;
-const MAXIMUM_LOCAL_RECORD_SEALED_PLAINTEXT_BYTES_PER_ACTIVE_ROOT: u64 = 1 << 40;
+pub(crate) const MAXIMUM_LOCAL_RECORD_SEAL_INVOCATIONS_PER_ACTIVE_ROOT: u64 = 1 << 30;
+pub(crate) const MAXIMUM_LOCAL_RECORD_SEALED_PLAINTEXT_BYTES_PER_ACTIVE_ROOT: u64 = 1 << 40;
 
 // One active browser-foundation root owns at most one default canonical
 // foundation collection of long-lived local-record identifiers. Common-proof

@@ -34,7 +34,8 @@ use crate::{
         },
     },
     foundation::{
-        FOUNDATION_PROFILE, ProofApplicationSlotCeilings,
+        FOUNDATION_PROFILE, MAXIMUM_LOCAL_RECORD_SEAL_INVOCATIONS_PER_ACTIVE_ROOT,
+        MAXIMUM_LOCAL_RECORD_SEALED_PLAINTEXT_BYTES_PER_ACTIVE_ROOT, ProofApplicationSlotCeilings,
         SELECTED_MAXIMUM_BALLOT_ATTEMPTS_PER_PARTICIPANT,
         SELECTED_MAXIMUM_CANDIDATE_PACKAGES_PER_ACTION,
     },
@@ -75,8 +76,8 @@ use super::{
 };
 
 const RECORD_KIND: &str = "pair-character-candidate-static-resource-accounting";
-const RECORD_VERSION: u16 = 1;
-const RECORD_HASH_DOMAIN: &str = "sealed-lattice/pair-character-static-resource-accounting/v1";
+const RECORD_VERSION: u16 = 2;
+const RECORD_HASH_DOMAIN: &str = "sealed-lattice/pair-character-static-resource-accounting/v2";
 const SOURCE_HASH_DOMAIN: &str =
     "sealed-lattice/pair-character-static-resource-accounting/source/v1";
 const BUILD_HASH_DOMAIN: &str = "sealed-lattice/pair-character-static-resource-accounting/build/v1";
@@ -229,6 +230,8 @@ struct StaticResourceCaps {
     maximum_external_memory_stored_byte_length: u64,
     maximum_proof_wasm_resident_byte_length: u64,
     maximum_copied_buffer_byte_length: u64,
+    maximum_local_record_seal_invocations_per_active_root: u64,
+    maximum_local_record_sealed_plaintext_bytes_per_active_root: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -387,6 +390,8 @@ struct ProofExternalMemoryRequirement {
     total_written_byte_length: u64,
     total_read_byte_length: u64,
     transaction_count: u64,
+    local_record_seal_invocation_count: u64,
+    local_record_sealed_plaintext_byte_length: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -411,12 +416,16 @@ struct ProofFamilyTotals {
     external_memory_total_written_byte_length: u64,
     external_memory_total_read_byte_length: u64,
     external_memory_transaction_count: u64,
+    external_memory_local_record_seal_invocation_count: u64,
+    external_memory_local_record_sealed_plaintext_byte_length: u64,
     maximum_external_memory_object_count_per_proof: u32,
     maximum_external_memory_peak_stored_byte_length_per_proof: u64,
     maximum_external_memory_transaction_payload_byte_length: u64,
     maximum_combined_wasm_resident_byte_length_per_proof: u64,
     maximum_prefetched_query_byte_length_per_proof_ceiling: u64,
     maximum_copied_buffer_byte_length_per_proof: u64,
+    maximum_local_record_seal_invocation_count_per_proof: u64,
+    maximum_local_record_sealed_plaintext_byte_length_per_proof: u64,
     ordered_resident_phase_maxima: Vec<ProofResidentPhaseResourceAccounting>,
 }
 
@@ -441,12 +450,16 @@ struct ProofCompleteActionTotals {
     external_memory_total_written_byte_length: u64,
     external_memory_total_read_byte_length: u64,
     external_memory_transaction_count: u64,
+    external_memory_local_record_seal_invocation_count: u64,
+    external_memory_local_record_sealed_plaintext_byte_length: u64,
     maximum_external_memory_object_count_per_proof: u32,
     maximum_external_memory_peak_stored_byte_length_per_proof: u64,
     maximum_external_memory_transaction_payload_byte_length: u64,
     maximum_combined_wasm_resident_byte_length_per_proof: u64,
     maximum_prefetched_query_byte_length_per_proof_ceiling: u64,
     maximum_copied_buffer_byte_length_per_proof: u64,
+    maximum_local_record_seal_invocation_count_per_proof: u64,
+    maximum_local_record_sealed_plaintext_byte_length_per_proof: u64,
     ordered_resident_phase_maxima: Vec<ProofResidentPhaseResourceAccounting>,
 }
 
@@ -470,12 +483,16 @@ struct ProofTotalsAccumulator {
     external_memory_total_written_byte_length: u64,
     external_memory_total_read_byte_length: u64,
     external_memory_transaction_count: u64,
+    external_memory_local_record_seal_invocation_count: u64,
+    external_memory_local_record_sealed_plaintext_byte_length: u64,
     maximum_external_memory_object_count_per_proof: u32,
     maximum_external_memory_peak_stored_byte_length_per_proof: u64,
     maximum_external_memory_transaction_payload_byte_length: u64,
     maximum_combined_wasm_resident_byte_length_per_proof: u64,
     maximum_prefetched_query_byte_length_per_proof_ceiling: u64,
     maximum_copied_buffer_byte_length_per_proof: u64,
+    maximum_local_record_seal_invocation_count_per_proof: u64,
+    maximum_local_record_sealed_plaintext_byte_length_per_proof: u64,
     resident_phase_maxima: BTreeMap<u8, ProofResidentPhaseResourceAccounting>,
 }
 
@@ -574,6 +591,18 @@ impl ProofTotalsAccumulator {
             external_memory_transaction_count,
             requirement.external_memory.transaction_count
         );
+        add_scaled!(
+            external_memory_local_record_seal_invocation_count,
+            requirement
+                .external_memory
+                .local_record_seal_invocation_count
+        );
+        add_scaled!(
+            external_memory_local_record_sealed_plaintext_byte_length,
+            requirement
+                .external_memory
+                .local_record_sealed_plaintext_byte_length
+        );
         if multiplicity != 0 {
             self.maximum_external_memory_object_count_per_proof = self
                 .maximum_external_memory_object_count_per_proof
@@ -608,6 +637,20 @@ impl ProofTotalsAccumulator {
                         .resident_memory
                         .maximum_copied_buffer_byte_length,
                 );
+            self.maximum_local_record_seal_invocation_count_per_proof = self
+                .maximum_local_record_seal_invocation_count_per_proof
+                .max(
+                    requirement
+                        .external_memory
+                        .local_record_seal_invocation_count,
+                );
+            self.maximum_local_record_sealed_plaintext_byte_length_per_proof = self
+                .maximum_local_record_sealed_plaintext_byte_length_per_proof
+                .max(
+                    requirement
+                        .external_memory
+                        .local_record_sealed_plaintext_byte_length,
+                );
             for phase in &requirement.resident_memory.ordered_phases {
                 match self.resident_phase_maxima.entry(phase.phase_code) {
                     std::collections::btree_map::Entry::Vacant(entry) => {
@@ -618,6 +661,30 @@ impl ProofTotalsAccumulator {
                     }
                 }
             }
+        }
+        Ok(())
+    }
+
+    fn require_custody_totals(
+        &self,
+        external_memory_local_record_seal_invocation_count: u64,
+        external_memory_local_record_sealed_plaintext_byte_length: u64,
+        maximum_local_record_seal_invocation_count_per_proof: u64,
+        maximum_local_record_sealed_plaintext_byte_length_per_proof: u64,
+        location: &str,
+    ) -> Result<(), String> {
+        if self.external_memory_local_record_seal_invocation_count
+            != external_memory_local_record_seal_invocation_count
+            || self.external_memory_local_record_sealed_plaintext_byte_length
+                != external_memory_local_record_sealed_plaintext_byte_length
+            || self.maximum_local_record_seal_invocation_count_per_proof
+                != maximum_local_record_seal_invocation_count_per_proof
+            || self.maximum_local_record_sealed_plaintext_byte_length_per_proof
+                != maximum_local_record_sealed_plaintext_byte_length_per_proof
+        {
+            return Err(format!(
+                "{location} does not recompute its multiplicity-scaled seal-custody ledger"
+            ));
         }
         Ok(())
     }
@@ -648,6 +715,10 @@ impl ProofTotalsAccumulator {
                 .external_memory_total_written_byte_length,
             external_memory_total_read_byte_length: self.external_memory_total_read_byte_length,
             external_memory_transaction_count: self.external_memory_transaction_count,
+            external_memory_local_record_seal_invocation_count: self
+                .external_memory_local_record_seal_invocation_count,
+            external_memory_local_record_sealed_plaintext_byte_length: self
+                .external_memory_local_record_sealed_plaintext_byte_length,
             maximum_external_memory_object_count_per_proof: self
                 .maximum_external_memory_object_count_per_proof,
             maximum_external_memory_peak_stored_byte_length_per_proof: self
@@ -660,6 +731,10 @@ impl ProofTotalsAccumulator {
                 .maximum_prefetched_query_byte_length_per_proof_ceiling,
             maximum_copied_buffer_byte_length_per_proof: self
                 .maximum_copied_buffer_byte_length_per_proof,
+            maximum_local_record_seal_invocation_count_per_proof: self
+                .maximum_local_record_seal_invocation_count_per_proof,
+            maximum_local_record_sealed_plaintext_byte_length_per_proof: self
+                .maximum_local_record_sealed_plaintext_byte_length_per_proof,
             ordered_resident_phase_maxima: self.resident_phase_maxima.into_values().collect(),
         }
     }
@@ -689,6 +764,10 @@ impl ProofTotalsAccumulator {
                 .external_memory_total_written_byte_length,
             external_memory_total_read_byte_length: self.external_memory_total_read_byte_length,
             external_memory_transaction_count: self.external_memory_transaction_count,
+            external_memory_local_record_seal_invocation_count: self
+                .external_memory_local_record_seal_invocation_count,
+            external_memory_local_record_sealed_plaintext_byte_length: self
+                .external_memory_local_record_sealed_plaintext_byte_length,
             maximum_external_memory_object_count_per_proof: self
                 .maximum_external_memory_object_count_per_proof,
             maximum_external_memory_peak_stored_byte_length_per_proof: self
@@ -701,6 +780,10 @@ impl ProofTotalsAccumulator {
                 .maximum_prefetched_query_byte_length_per_proof_ceiling,
             maximum_copied_buffer_byte_length_per_proof: self
                 .maximum_copied_buffer_byte_length_per_proof,
+            maximum_local_record_seal_invocation_count_per_proof: self
+                .maximum_local_record_seal_invocation_count_per_proof,
+            maximum_local_record_sealed_plaintext_byte_length_per_proof: self
+                .maximum_local_record_sealed_plaintext_byte_length_per_proof,
             ordered_resident_phase_maxima: self.resident_phase_maxima.into_values().collect(),
         }
     }
@@ -1423,6 +1506,10 @@ fn derive_caps() -> Result<StaticResourceCaps, String> {
             FOUNDATION_PROFILE.maximum_copied_buffer_byte_length,
         )
         .map_err(|_| "maximum copied buffer cap does not fit u64".to_owned())?,
+        maximum_local_record_seal_invocations_per_active_root:
+            MAXIMUM_LOCAL_RECORD_SEAL_INVOCATIONS_PER_ACTIVE_ROOT,
+        maximum_local_record_sealed_plaintext_bytes_per_active_root:
+            MAXIMUM_LOCAL_RECORD_SEALED_PLAINTEXT_BYTES_PER_ACTIVE_ROOT,
     })
 }
 
@@ -1701,6 +1788,16 @@ fn proof_variant_requirement(
             "proof transport and external-memory transaction payload maxima differ".to_owned(),
         );
     }
+    let exceeds_active_root_seal_custody_budget = external_memory
+        .local_record_seal_invocation_count()
+        > MAXIMUM_LOCAL_RECORD_SEAL_INVOCATIONS_PER_ACTIVE_ROOT
+        || external_memory.local_record_sealed_plaintext_byte_length()
+            > MAXIMUM_LOCAL_RECORD_SEALED_PLAINTEXT_BYTES_PER_ACTIVE_ROOT;
+    if external_memory.exceeds_active_root_seal_custody_budget()
+        != exceeds_active_root_seal_custody_budget
+    {
+        return Err("proof external-memory seal-custody comparison does not recompute".to_owned());
+    }
     let query_resources = proof_query_resources(
         requirement.ordered_query_trees(),
         requirement.unique_query_count(),
@@ -1765,6 +1862,10 @@ fn proof_variant_requirement(
             total_written_byte_length: external_memory.total_written_byte_length(),
             total_read_byte_length: external_memory.total_read_byte_length(),
             transaction_count: external_memory.transaction_count(),
+            local_record_seal_invocation_count: external_memory
+                .local_record_seal_invocation_count(),
+            local_record_sealed_plaintext_byte_length: external_memory
+                .local_record_sealed_plaintext_byte_length(),
         },
     })
 }
@@ -2348,12 +2449,18 @@ fn verify_envelope(envelope: &StaticResourceAccountingEnvelope) -> Result<(), St
 }
 
 fn require_valid_derived_sections(record: &StaticResourceAccountingRecord) -> Result<(), String> {
+    if record.caps != derive_caps()? {
+        return Err("record.caps differs from the unchanged absolute caps".to_owned());
+    }
     record
         .physical_proof_families
         .require_exactly_one_branch("record.physicalProofFamilies")?;
     record
         .proof_variants
         .require_exactly_one_branch("record.proofVariants")?;
+    if let Some(proof_variants) = record.proof_variants.data.as_ref() {
+        require_proof_custody_totals(proof_variants)?;
+    }
     record
         .target_release
         .require_exactly_one_branch("record.targetRelease")?;
@@ -2382,6 +2489,54 @@ fn require_valid_derived_sections(record: &StaticResourceAccountingRecord) -> Re
     record
         .phase_liveness
         .require_exactly_one_branch("record.phaseLiveness")?;
+    Ok(())
+}
+
+fn require_proof_custody_totals(accounting: &ProofVariantAccounting) -> Result<(), String> {
+    let mut family_accumulators = BTreeMap::<u16, ProofTotalsAccumulator>::new();
+    let mut complete_action_accumulator = ProofTotalsAccumulator::default();
+    for row in &accounting.ordered_variants {
+        let Some(requirement) = row.requirement.as_ref() else {
+            continue;
+        };
+        family_accumulators
+            .entry(row.application_statement_schema_identifier)
+            .or_default()
+            .include(requirement)?;
+        complete_action_accumulator.include(requirement)?;
+    }
+    for family_totals in &accounting.ordered_family_totals {
+        let accumulator = family_accumulators
+            .remove(&family_totals.application_statement_schema_identifier)
+            .ok_or_else(|| {
+                format!(
+                    "proof family 0x{:04x} custody totals have no matching requirement row",
+                    family_totals.application_statement_schema_identifier
+                )
+            })?;
+        accumulator.require_custody_totals(
+            family_totals.external_memory_local_record_seal_invocation_count,
+            family_totals.external_memory_local_record_sealed_plaintext_byte_length,
+            family_totals.maximum_local_record_seal_invocation_count_per_proof,
+            family_totals.maximum_local_record_sealed_plaintext_byte_length_per_proof,
+            &format!(
+                "proof family 0x{:04x} totals",
+                family_totals.application_statement_schema_identifier
+            ),
+        )?;
+    }
+    if !family_accumulators.is_empty() {
+        return Err("proof requirements contain a family without custody totals".to_owned());
+    }
+    if let Some(complete_action_totals) = accounting.complete_action_totals.as_ref() {
+        complete_action_accumulator.require_custody_totals(
+            complete_action_totals.external_memory_local_record_seal_invocation_count,
+            complete_action_totals.external_memory_local_record_sealed_plaintext_byte_length,
+            complete_action_totals.maximum_local_record_seal_invocation_count_per_proof,
+            complete_action_totals.maximum_local_record_sealed_plaintext_byte_length_per_proof,
+            "proof complete-action totals",
+        )?;
+    }
     Ok(())
 }
 
@@ -2537,6 +2692,103 @@ mod tests {
             to_hex(&hash_framed_parts_512(RECORD_HASH_DOMAIN, &[&record_bytes]));
     }
 
+    const DEFERRED_PHASE_LIVENESS_CARRIER_INVENTORY: [(&str, &str); 20] = [
+        (
+            "canonical-material-transport",
+            "remaining-material-transport-carriers-absent",
+        ),
+        (
+            "directional-ceremony-traffic",
+            "remaining-directional-traffic-carriers-absent",
+        ),
+        (
+            "public-transcript-corpus",
+            "public-transcript-corpus-carrier-absent",
+        ),
+        (
+            "non-proof-persistence-and-io",
+            "complete-persistence-carrier-absent",
+        ),
+        ("browser-boundary-memory", "browser-copy-carrier-absent"),
+        (
+            "target-release-proof-output-store",
+            "proof-output-store-lifetime-not-production-fixed",
+        ),
+        (
+            "target-release-partial-output-store",
+            "partial-output-store-lifetime-not-production-fixed",
+        ),
+        (
+            "target-release-state-certification-traffic",
+            "state-certification-traffic-not-production-fixed",
+        ),
+        (
+            "target-release-public-share-distribution",
+            "public-share-distribution-fanout-not-production-fixed",
+        ),
+        (
+            "target-release-result-transition",
+            "reconstructed-result-transition-not-production-fixed",
+        ),
+        (
+            "evaluator-replay-exact-public-carrier",
+            "missing-generated-evaluator-replay-descriptors",
+        ),
+        (
+            "evaluator-replay-exact-canonical-transport",
+            "missing-generated-evaluator-replay-descriptors",
+        ),
+        (
+            "remaining-complete-action-canonical-transport-catalog",
+            "missing-production-carrier-constructors",
+        ),
+        (
+            "remaining-complete-action-host-boundary-storage-lifetimes",
+            "missing-production-cross-runtime-state-transitions",
+        ),
+        (
+            "two-stream-product-allocation-volume",
+            "missing-production-allocation-event-type",
+        ),
+        (
+            "evaluator-execution-allocation-volume",
+            "missing-production-allocation-event-type",
+        ),
+        (
+            "proof-generation-allocation-volume",
+            "missing-production-allocation-event-type",
+        ),
+        (
+            "target-release-allocation-volume",
+            "missing-production-allocation-event-type",
+        ),
+        (
+            "fresh-proof-generation-work",
+            "missing-production-boundary-indexed-work-schedule",
+        ),
+        (
+            "resumed-proof-generation-work",
+            "missing-production-boundary-indexed-work-schedule",
+        ),
+    ];
+
+    fn require_exact_deferred_phase_liveness_carrier_inventory(errors: &[DerivationErrorRow]) {
+        let observed = errors
+            .iter()
+            .map(|error| (error.dimension.as_str(), error.reason_code.as_str()))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            observed, DEFERRED_PHASE_LIVENESS_CARRIER_INVENTORY,
+            "static resource accounting contains an added, removed, reordered, or reclassified missing carrier"
+        );
+        assert!(
+            errors
+                .iter()
+                .all(|error| !error.required_carrier.is_empty()),
+            "every deferred missing carrier identifies its required production carrier"
+        );
+    }
+
     #[test]
     fn resident_phase_maximum_retains_one_complete_row_when_component_peaks_conflict() {
         let largest_combined_row = resident_phase_row(100, 0, 100);
@@ -2624,6 +2876,31 @@ mod tests {
             )
         );
 
+        let mut inconsistent_custody_totals = decoded.clone();
+        let proof_accounting = inconsistent_custody_totals
+            .record
+            .proof_variants
+            .data
+            .as_mut()
+            .expect("selected proof accounting derives");
+        let mutated_schema_identifier =
+            ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER;
+        let mutated_family_totals = proof_accounting
+            .ordered_family_totals
+            .iter_mut()
+            .find(|family_totals| {
+                family_totals.application_statement_schema_identifier == mutated_schema_identifier
+            })
+            .expect("same-secret proof-family accounting derives");
+        mutated_family_totals.external_memory_local_record_seal_invocation_count += 1;
+        rebind_envelope_record(&mut inconsistent_custody_totals);
+        assert_eq!(
+            verify_envelope(&inconsistent_custody_totals),
+            Err(format!(
+                "proof family 0x{mutated_schema_identifier:04x} totals does not recompute its multiplicity-scaled seal-custody ledger"
+            ))
+        );
+
         let value = serde_json::to_value(&decoded)
             .expect("selected static resource-accounting evidence converts to JSON");
         assert_no_result_claim_fields(&value)
@@ -2638,11 +2915,18 @@ mod tests {
             "selected static resource-accounting attachment: {}",
             attachment_path.display()
         );
+        require_exact_deferred_phase_liveness_carrier_inventory(&decoded.record.derivation_errors);
+    }
+
+    #[test]
+    #[ignore = "guarded selected complete-action phase-liveness closure evidence"]
+    fn selected_candidate_static_resource_accounting_closes_every_missing_carrier() {
+        let record = derive_static_resource_accounting_record()
+            .expect("selected static resource-accounting record derives");
         assert!(
-            decoded.record.derivation_errors.is_empty(),
-            "static resource accounting retains {} typed derivation errors; inspect {}",
-            decoded.record.derivation_errors.len(),
-            attachment_path.display()
+            record.derivation_errors.is_empty(),
+            "static resource accounting retains {} typed missing carriers",
+            record.derivation_errors.len()
         );
     }
 }

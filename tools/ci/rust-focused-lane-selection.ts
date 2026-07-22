@@ -20,21 +20,30 @@ export const measurementRustTests = [
     'bgv::proof_suite::selected_accounting::resource_accounting::tests::report_one_mixed_galois_batch_against_two_level_shards',
 ] as const;
 
+export const phaseLivenessEvidenceRustTests = [
+    'bgv::proof_suite::resource_accounting_evidence::tests::selected_candidate_static_resource_accounting_closes_every_missing_carrier',
+] as const;
+
 type FocusedRustLane =
     | 'rust-full-profile-evidence'
     | 'rust-kernel-fast'
     | 'rust-kernel-heavy'
-    | 'rust-measurements';
+    | 'rust-measurements'
+    | 'rust-phase-liveness-evidence';
 
 export const focusedRustLaneScripts = {
     'rust-full-profile-evidence': 'test:rust:kernel:full-profile-evidence',
     'rust-kernel-fast': 'test:rust:kernel',
     'rust-kernel-heavy': 'test:rust:kernel:heavy',
     'rust-measurements': 'test:rust:kernel:measurements',
+    'rust-phase-liveness-evidence': 'test:rust:kernel:phase-liveness-evidence',
 } as const satisfies Record<FocusedRustLane, string>;
 
 const fullProfileTestSet = new Set<string>(fullProfileEvidenceRustTests);
 const measurementTestSet = new Set<string>(measurementRustTests);
+const phaseLivenessEvidenceTestSet = new Set<string>(
+    phaseLivenessEvidenceRustTests,
+);
 
 const lanesForTest = (test: RustTestInventoryEntry): FocusedRustLane[] => {
     const lanes: FocusedRustLane[] = [];
@@ -46,6 +55,9 @@ const lanesForTest = (test: RustTestInventoryEntry): FocusedRustLane[] => {
     }
     if (measurementTestSet.has(test.testName)) {
         lanes.push('rust-measurements');
+    }
+    if (phaseLivenessEvidenceTestSet.has(test.testName)) {
+        lanes.push('rust-phase-liveness-evidence');
     }
     if (!test.ignored) {
         lanes.push('rust-kernel-fast');

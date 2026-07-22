@@ -1,7 +1,15 @@
-use crate::bgv::proof_suite::{
-    SetupPublicPolynomialError, SetupPublicPolynomialLeafByteBuilder,
-    SetupPublicPolynomialLeafHashArena, WASM_SETUP_PUBLIC_POLYNOMIAL_LEAF_HASH_STATE_BYTE_LENGTH,
-    merkle::{CommonProofMerklePathReplay, canonical_proof_phase_pair_leaf_digest},
+use crate::{
+    bgv::proof_suite::{
+        SetupPublicPolynomialError, SetupPublicPolynomialLeafByteBuilder,
+        SetupPublicPolynomialLeafHashArena,
+        WASM_SETUP_PUBLIC_POLYNOMIAL_LEAF_HASH_STATE_BYTE_LENGTH,
+        external_memory::{
+            EXTERNAL_MEMORY_OPERATION_HEADER_BYTE_LENGTH,
+            EXTERNAL_MEMORY_REQUEST_HEADER_BYTE_LENGTH, ProofExternalMemoryTransactionOperation,
+        },
+        merkle::{CommonProofMerklePathReplay, canonical_proof_phase_pair_leaf_digest},
+    },
+    foundation::CanonicalItem,
 };
 
 use super::{
@@ -13,7 +21,7 @@ use super::{
     ProofMerkleTreeContext, ProofOraclePhasePairLeaf, ProofTreeCatalogEntry,
     ProofTreeCatalogSource, ProofTreeRole, ProofTreeValue, RelationColumnValueType,
     StreamingHash512, Zeroize, Zeroizing, canonical_leaf_byte_length, entry_leaf_count,
-    minimal_frontier_coordinates, opened_leaf_indexes,
+    opened_leaf_indexes,
 };
 
 #[derive(Debug, PartialEq, Eq)]
@@ -87,6 +95,146 @@ impl CommonProofMerkleStoragePlan {
     pub(crate) const fn next_object_ordinal(&self) -> u32 {
         self.next_object_ordinal
     }
+}
+
+/// Source-derived resident-memory ceiling for the path-only common-tree
+/// materializer. The component peak covers the retained prior leaf and write
+/// chunk while the next paired row is canonically encoded. The transaction
+/// peak covers all browser append copies and framing while the canonical leaf
+/// and Merkle path stack remain resident.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct CommonProofMerkleMaterializationResidentMemoryRequirement {
+    component_working_set_byte_length: u64,
+    transaction_overlap_peak_byte_length: u64,
+    peak_byte_length: u64,
+}
+
+impl CommonProofMerkleMaterializationResidentMemoryRequirement {
+    #[cfg(test)]
+    pub(crate) const fn component_working_set_byte_length(self) -> u64 {
+        self.component_working_set_byte_length
+    }
+
+    #[cfg(test)]
+    pub(crate) const fn transaction_overlap_peak_byte_length(self) -> u64 {
+        self.transaction_overlap_peak_byte_length
+    }
+
+    pub(crate) const fn peak_byte_length(self) -> u64 {
+        self.peak_byte_length
+    }
+}
+
+fn checked_merkle_resident_add(left: u64, right: u64) -> Result<u64, CommonProofProverError> {
+    left.checked_add(right)
+        .ok_or(CommonProofProverError::CountOverflow)
+}
+
+fn checked_merkle_resident_multiply(left: u64, right: u64) -> Result<u64, CommonProofProverError> {
+    left.checked_mul(right)
+        .ok_or(CommonProofProverError::CountOverflow)
+}
+
+pub(crate) fn common_proof_merkle_materialization_resident_memory_requirement(
+    catalog_entry: &ProofTreeCatalogEntry,
+    evaluation_domain_size: u64,
+    external_memory_write_chunk_byte_length: u64,
+) -> Result<CommonProofMerkleMaterializationResidentMemoryRequirement, CommonProofProverError> {
+    if external_memory_write_chunk_byte_length == 0 || !catalog_entry.uses_common_merkle_context() {
+        return Err(CommonProofProverError::InvalidTree);
+    }
+    let context = catalog_entry
+        .common_context()
+        .ok_or(CommonProofProverError::InvalidTree)?;
+    let leaf_count = entry_leaf_count(catalog_entry, evaluation_domain_size)
+        .map_err(map_proof_body_tree_error)?;
+    if leaf_count == 0 || !leaf_count.is_power_of_two() {
+        return Err(CommonProofProverError::InvalidTree);
+    }
+    let row_width = u64::try_from(
+        catalog_entry
+            .materialized_row_width()
+            .map_err(map_proof_body_tree_error)?,
+    )
+    .map_err(|_| CommonProofProverError::CountOverflow)?;
+    let canonical_leaf_byte_length = u64::try_from(
+        canonical_leaf_byte_length(catalog_entry).map_err(map_proof_body_tree_error)?,
+    )
+    .map_err(|_| CommonProofProverError::CountOverflow)?;
+    let context_canonical_byte_length = u64::try_from(context.canonical_bytes()?.len())
+        .map_err(|_| CommonProofProverError::CountOverflow)?;
+    let merkle_path_stack_byte_length = checked_merkle_resident_multiply(
+        u64::from(leaf_count.trailing_zeros()),
+        u64::try_from(HASH_BYTE_LENGTH).map_err(|_| CommonProofProverError::CountOverflow)?,
+    )?;
+    let paired_typed_row_byte_length = checked_merkle_resident_multiply(
+        checked_merkle_resident_multiply(row_width, 2)?,
+        u64::try_from(core::mem::size_of::<ProofTreeValue>())
+            .map_err(|_| CommonProofProverError::CountOverflow)?,
+    )?;
+    let canonical_item_allocation_byte_length =
+        u64::try_from(core::mem::size_of::<CanonicalItem>())
+            .map_err(|_| CommonProofProverError::CountOverflow)?;
+    let leaf_tuple_item_count = match catalog_entry.materialized_leaf_visibility() {
+        ProofLeafVisibility::Public => 5_u64,
+        ProofLeafVisibility::SecretBearing => 6_u64,
+    };
+
+    // Encoding the second homogeneous row can coexist with the first encoded
+    // row, its item catalog, and its output. Encoding the enclosing tuple can
+    // coexist with both row payloads and the final leaf output. Three complete
+    // leaf lengths plus the larger item catalog conservatively bounds both
+    // shapes without assuming allocator reuse.
+    let leaf_codec_transient_byte_length = checked_merkle_resident_add(
+        checked_merkle_resident_multiply(canonical_leaf_byte_length, 3)?,
+        checked_merkle_resident_multiply(
+            row_width.max(leaf_tuple_item_count),
+            canonical_item_allocation_byte_length,
+        )?,
+    )?;
+    // Context hashing temporarily owns the context tuple, its variable-byte
+    // wrapper, the cloned framed item, and the hash preimage. Four context
+    // encodings and twelve item allocations are a source-linked ceiling for
+    // those codec stages, including the domain item and framing catalogs.
+    let context_hash_codec_transient_byte_length = checked_merkle_resident_add(
+        checked_merkle_resident_multiply(context_canonical_byte_length, 4)?,
+        checked_merkle_resident_multiply(12, canonical_item_allocation_byte_length)?,
+    )?;
+    let component_working_set_byte_length = [
+        merkle_path_stack_byte_length,
+        paired_typed_row_byte_length,
+        canonical_leaf_byte_length,
+        external_memory_write_chunk_byte_length,
+        leaf_codec_transient_byte_length.max(context_hash_codec_transient_byte_length),
+    ]
+    .into_iter()
+    .try_fold(0_u64, checked_merkle_resident_add)?;
+
+    let operation_allocation_byte_length =
+        u64::try_from(core::mem::size_of::<ProofExternalMemoryTransactionOperation>())
+            .map_err(|_| CommonProofProverError::CountOverflow)?;
+    let request_framing_byte_length = u64::try_from(
+        EXTERNAL_MEMORY_OPERATION_HEADER_BYTE_LENGTH
+            .checked_mul(2)
+            .and_then(|length| length.checked_add(EXTERNAL_MEMORY_REQUEST_HEADER_BYTE_LENGTH))
+            .ok_or(CommonProofProverError::CountOverflow)?,
+    )
+    .map_err(|_| CommonProofProverError::CountOverflow)?;
+    let transaction_overlap_peak_byte_length = [
+        merkle_path_stack_byte_length,
+        canonical_leaf_byte_length,
+        checked_merkle_resident_multiply(external_memory_write_chunk_byte_length, 4)?,
+        operation_allocation_byte_length,
+        request_framing_byte_length,
+    ]
+    .into_iter()
+    .try_fold(0_u64, checked_merkle_resident_add)?;
+    Ok(CommonProofMerkleMaterializationResidentMemoryRequirement {
+        component_working_set_byte_length,
+        transaction_overlap_peak_byte_length,
+        peak_byte_length: component_working_set_byte_length
+            .max(transaction_overlap_peak_byte_length),
+    })
 }
 
 /// Generates the exact object lengths and last-use deletion schedule for one
@@ -857,10 +1005,10 @@ impl CommonProofOpeningPrefetcher {
                     &mut self.current_leaf_bytes[self.current_byte_offset..end_within_leaf],
                 )?;
                 self.current_byte_offset = end_within_leaf;
-                if end_within_leaf == self.canonical_leaf_byte_length {
-                    if let Err(error) = self.absorb_current_leaf() {
-                        self.record_replay_failure(error);
-                    }
+                if end_within_leaf == self.canonical_leaf_byte_length
+                    && let Err(error) = self.absorb_current_leaf()
+                {
+                    self.record_replay_failure(error);
                 }
                 Ok(CommonProofOpeningPrefetchProgress::StorageTransactionCompleted)
             }
@@ -2306,11 +2454,13 @@ impl StatementOwnedMerkleReplay {
 mod tests {
     use super::*;
     use crate::bgv::proof_suite::{
-        CommonProofPrivacyMode, CommonProofTranscriptSchedule, ProofTreeCatalogInput,
-        RelationProofTreeInput, StatementOwnedProofTreeInput, build_complete_proof_tree_catalog,
-        external_memory::ProofExternalMemoryPlan, merkle::verify_authentication_frontier,
+        CommonProofPrivacyMode, CommonProofTranscriptSchedule, CompleteProofTreeCatalog,
+        ProofMerkleError, ProofTreeCatalogInput, RelationProofTreeInput,
+        StatementOwnedProofTreeInput, build_complete_proof_tree_catalog,
+        external_memory::ProofExternalMemoryPlan,
+        merkle::{minimal_frontier_coordinates, verify_authentication_frontier},
     };
-    use std::collections::BTreeMap;
+    use std::collections::{BTreeMap, BTreeSet};
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     enum TestStorageError {
@@ -2490,6 +2640,46 @@ mod tests {
             unreachable!("public test leaves never sample private coins")
         }
     }
+
+    #[derive(Default)]
+    struct DeterministicPrivateCoins {
+        sampled_salts: Vec<[u8; COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH]>,
+    }
+
+    impl CommonProofPrivateCoinSource for DeterministicPrivateCoins {
+        type Error = core::convert::Infallible;
+
+        fn sample_modulo(
+            &mut self,
+            _coordinate: CommonProofPrivateCoinCoordinate,
+            _modulus: u64,
+            _maximum_candidate_draws_per_output: u32,
+        ) -> Result<u64, Self::Error> {
+            unreachable!("the focused secret-leaf test only samples raw salt bytes")
+        }
+
+        fn fill_raw_bytes(
+            &mut self,
+            _coordinate: CommonProofPrivateCoinCoordinate,
+            destination: &mut [u8],
+        ) -> Result<(), Self::Error> {
+            assert_eq!(destination.len(), COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH,);
+            let salt_ordinal =
+                u8::try_from(self.sampled_salts.len()).expect("the focused salt ordinal fits u8");
+            let mut salt = [0_u8; COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH];
+            for (byte_ordinal, byte) in salt.iter_mut().enumerate() {
+                *byte = 0x20_u8
+                    .wrapping_add(salt_ordinal.wrapping_mul(17))
+                    .wrapping_add(
+                        u8::try_from(byte_ordinal).expect("the focused salt byte ordinal fits u8"),
+                    );
+            }
+            destination.copy_from_slice(&salt);
+            self.sampled_salts.push(salt);
+            Ok(())
+        }
+    }
+
     fn test_base_value(value: u64) -> ProofBaseFieldElement {
         ProofBaseFieldElement::from_canonical(value).expect("the test value is canonical")
     }
@@ -2498,6 +2688,54 @@ mod tests {
         leaf_count: usize,
         visibility: ProofLeafVisibility,
     ) -> ProofTreeCatalogEntry {
+        common_catalog_entry_with_suite_byte(leaf_count, visibility, 0x41)
+    }
+
+    fn common_catalog_entry_with_suite_byte(
+        leaf_count: usize,
+        visibility: ProofLeafVisibility,
+        suite_identifier_byte: u8,
+    ) -> ProofTreeCatalogEntry {
+        common_test_catalog(leaf_count, visibility, suite_identifier_byte)
+            .entries()
+            .iter()
+            .find(|entry| {
+                matches!(
+                    entry.source(),
+                    ProofTreeCatalogSource::RelationProofCreated {
+                        tree_role: ProofTreeRole::BaseOracle,
+                        tree_ordinal: 0,
+                    }
+                )
+            })
+            .expect("the focused base tree exists")
+            .clone()
+    }
+
+    fn common_extension_catalog_entry(
+        leaf_count: usize,
+        visibility: ProofLeafVisibility,
+    ) -> ProofTreeCatalogEntry {
+        common_test_catalog(leaf_count, visibility, 0x43)
+            .entries()
+            .iter()
+            .find(|entry| {
+                matches!(
+                    entry.source(),
+                    ProofTreeCatalogSource::QuotientComponent {
+                        component_ordinal: 0,
+                    }
+                )
+            })
+            .expect("the focused extension tree exists")
+            .clone()
+    }
+
+    fn common_test_catalog(
+        leaf_count: usize,
+        visibility: ProofLeafVisibility,
+        suite_identifier_byte: u8,
+    ) -> CompleteProofTreeCatalog {
         let evaluation_domain_size = u64::try_from(leaf_count)
             .expect("the test leaf count fits u64")
             .checked_mul(2)
@@ -2524,7 +2762,7 @@ mod tests {
         .expect("the focused transcript schedule is valid");
         build_complete_proof_tree_catalog(
             ProofTreeCatalogInput {
-                suite_identifier: [0x41; 64],
+                suite_identifier: [suite_identifier_byte; 64],
                 canonical_proof_object_header_bytes: vec![0x52],
                 application_statement_schema_identifier: 0x1216,
                 proof_field_index: 0,
@@ -2538,22 +2776,9 @@ mod tests {
             &schedule,
         )
         .expect("the focused common catalog is valid")
-        .entries()
-        .iter()
-        .find(|entry| {
-            matches!(
-                entry.source(),
-                ProofTreeCatalogSource::RelationProofCreated {
-                    tree_role: ProofTreeRole::BaseOracle,
-                    tree_ordinal: 0,
-                }
-            )
-        })
-        .expect("the focused base tree exists")
-        .clone()
     }
 
-    fn public_leaf_values(
+    fn test_leaf_values(
         leaf_index: u64,
     ) -> (
         Zeroizing<Vec<ProofTreeValue>>,
@@ -2631,7 +2856,7 @@ mod tests {
                 CommonProofMerkleMaterializerProgress::StorageTransactionCompleted => {}
                 CommonProofMerkleMaterializerProgress::NeedsLeafValues { leaf_index } => {
                     let (expected_first_values, expected_opposite_values) =
-                        public_leaf_values(leaf_index);
+                        test_leaf_values(leaf_index);
                     expected_leaf_bytes.push(
                         entry
                             .encode_materialized_leaf(
@@ -2643,7 +2868,7 @@ mod tests {
                             .expect("the expected leaf encodes")
                             .0,
                     );
-                    let (first_values, opposite_values) = public_leaf_values(leaf_index);
+                    let (first_values, opposite_values) = test_leaf_values(leaf_index);
                     materializer
                         .supply_next_leaf(first_values, opposite_values, None, &mut coins)
                         .expect("the next public leaf is supplied");
@@ -2671,6 +2896,17 @@ mod tests {
         executor
             .complete_step(&mut storage)
             .expect("the materialization step completes");
+        let exact_leaf_object_byte_length = storage_plan.object_plans()[0].exact_byte_length();
+        let expected_append_transaction_count = exact_leaf_object_byte_length.div_ceil(17);
+        assert_eq!(
+            executor.usage().total_written_byte_length(),
+            exact_leaf_object_byte_length,
+        );
+        assert_eq!(
+            executor.usage().transaction_count(),
+            expected_append_transaction_count + 2,
+            "materialization uses one begin, one seal, and packed object-wide append chunks",
+        );
         (
             entry,
             storage_plan,
@@ -2692,6 +2928,51 @@ mod tests {
                 CommonProofOpeningPrefetchProgress::Complete => return Ok(()),
             }
         }
+    }
+
+    fn assert_opening_artifact_authenticates(
+        artifact: &PrefetchedCommonProofOpeningArtifact,
+        tree: &StoredCommonProofMerkleTree,
+        entry: &ProofTreeCatalogEntry,
+        query_indexes: &[u64],
+        expected_leaf_bytes: &[Vec<u8>],
+    ) {
+        assert_eq!(artifact.opened_leaf_indexes(), query_indexes);
+        for (position, leaf_index) in query_indexes.iter().copied().enumerate() {
+            assert_eq!(
+                artifact
+                    .canonical_leaf_bytes_by_position(position)
+                    .expect("the opened leaf bytes exist"),
+                expected_leaf_bytes
+                    .get(usize::try_from(leaf_index).expect("the leaf index fits usize"))
+                    .expect("the expected leaf bytes exist"),
+            );
+        }
+        let opened_leaf_digests = query_indexes
+            .iter()
+            .copied()
+            .enumerate()
+            .map(|(position, leaf_index)| {
+                Ok((
+                    leaf_index,
+                    canonical_proof_phase_pair_leaf_digest(
+                        artifact.canonical_leaf_bytes_by_position(position)?,
+                    )?,
+                ))
+            })
+            .collect::<Result<Vec<_>, CommonProofProverError>>()
+            .expect("the opened leaf digests derive");
+        let frontier_digests = (0..artifact.frontier_coordinates().len())
+            .map(|position| artifact.frontier_digest_by_position(position))
+            .collect::<Result<Vec<_>, _>>()
+            .expect("the frontier digests are complete");
+        verify_authentication_frontier(
+            entry.common_context().expect("the common context exists"),
+            &opened_leaf_digests,
+            &frontier_digests,
+            tree.root(),
+        )
+        .expect("the emitted paths authenticate to the cached root");
     }
 
     #[test]
@@ -2738,6 +3019,88 @@ mod tests {
     }
 
     #[test]
+    fn merkle_materialization_resident_requirement_covers_all_leaf_chunk_regimes() {
+        let leaf_count = 8_usize;
+        let evaluation_domain_size = 16_u64;
+        let base_entry = common_catalog_entry(leaf_count, ProofLeafVisibility::Public);
+        let extension_entry =
+            common_extension_catalog_entry(leaf_count, ProofLeafVisibility::SecretBearing);
+        let base_leaf_byte_length = u64::try_from(
+            canonical_leaf_byte_length(&base_entry).expect("the base leaf length derives"),
+        )
+        .expect("the base leaf length fits u64");
+        let extension_leaf_byte_length = u64::try_from(
+            canonical_leaf_byte_length(&extension_entry)
+                .expect("the extension leaf length derives"),
+        )
+        .expect("the extension leaf length fits u64");
+        assert!(base_leaf_byte_length > 1);
+        assert!(extension_leaf_byte_length > base_leaf_byte_length);
+
+        for (entry, canonical_leaf_byte_length) in [
+            (base_entry, base_leaf_byte_length),
+            (extension_entry, extension_leaf_byte_length),
+        ] {
+            let leaf_smaller_than_chunk =
+                common_proof_merkle_materialization_resident_memory_requirement(
+                    &entry,
+                    evaluation_domain_size,
+                    canonical_leaf_byte_length + 1,
+                )
+                .expect("the C < W requirement derives");
+            let leaf_equal_to_chunk =
+                common_proof_merkle_materialization_resident_memory_requirement(
+                    &entry,
+                    evaluation_domain_size,
+                    canonical_leaf_byte_length,
+                )
+                .expect("the C = W requirement derives");
+            let leaf_larger_than_chunk =
+                common_proof_merkle_materialization_resident_memory_requirement(
+                    &entry,
+                    evaluation_domain_size,
+                    canonical_leaf_byte_length - 1,
+                )
+                .expect("the C > W requirement derives");
+
+            assert_eq!(
+                leaf_smaller_than_chunk.component_working_set_byte_length()
+                    - leaf_equal_to_chunk.component_working_set_byte_length(),
+                1,
+                "the retained write-chunk capacity is counted during leaf encoding",
+            );
+            assert_eq!(
+                leaf_equal_to_chunk.component_working_set_byte_length()
+                    - leaf_larger_than_chunk.component_working_set_byte_length(),
+                1,
+            );
+            assert_eq!(
+                leaf_smaller_than_chunk.transaction_overlap_peak_byte_length()
+                    - leaf_equal_to_chunk.transaction_overlap_peak_byte_length(),
+                4,
+                "the materializer, recorder, operation encoder, and request each own a chunk",
+            );
+            assert_eq!(
+                leaf_equal_to_chunk.transaction_overlap_peak_byte_length()
+                    - leaf_larger_than_chunk.transaction_overlap_peak_byte_length(),
+                4,
+            );
+            for requirement in [
+                leaf_smaller_than_chunk,
+                leaf_equal_to_chunk,
+                leaf_larger_than_chunk,
+            ] {
+                assert_eq!(
+                    requirement.peak_byte_length(),
+                    requirement
+                        .component_working_set_byte_length()
+                        .max(requirement.transaction_overlap_peak_byte_length()),
+                );
+            }
+        }
+    }
+
+    #[test]
     fn common_tree_query_scan_authenticates_paths_and_completes_lifecycle() {
         let (entry, storage_plan, tree, mut executor, mut storage, expected_leaf_bytes) =
             prepare_public_stored_tree(4);
@@ -2745,6 +3108,7 @@ mod tests {
         let mut prefetcher =
             CommonProofOpeningPrefetcher::new(&tree, &entry, 8, &query_indexes, u64::MAX)
                 .expect("the sequential opening scan initializes");
+        let transaction_count_before_query = executor.usage().transaction_count();
         drive_opening_prefetch(&mut prefetcher, &mut executor, &mut storage)
             .expect("the sequential opening scan completes");
         assert_eq!(
@@ -2752,45 +3116,24 @@ mod tests {
             storage_plan.object_plans()[0].exact_byte_length(),
             "the opening path scans the leaf object exactly once",
         );
+        assert_eq!(
+            executor.usage().transaction_count() - transaction_count_before_query,
+            u64::try_from(tree.leaf_count).expect("the focused leaf count fits u64")
+                * u64::try_from(tree.canonical_leaf_byte_length)
+                    .expect("the focused leaf length fits u64")
+                    .div_ceil(17),
+            "query reads are independently chunked within each canonical leaf",
+        );
         let artifact = prefetcher
             .finish()
             .expect("the root-authenticated artifact is released");
-        assert_eq!(artifact.opened_leaf_indexes(), query_indexes);
-        for (position, leaf_index) in query_indexes.iter().copied().enumerate() {
-            assert_eq!(
-                artifact
-                    .canonical_leaf_bytes_by_position(position)
-                    .expect("the opened leaf bytes exist"),
-                expected_leaf_bytes
-                    .get(usize::try_from(leaf_index).expect("the leaf index fits usize"))
-                    .expect("the expected leaf bytes exist"),
-            );
-        }
-        let opened_leaf_digests = query_indexes
-            .iter()
-            .copied()
-            .enumerate()
-            .map(|(position, leaf_index)| {
-                Ok((
-                    leaf_index,
-                    canonical_proof_phase_pair_leaf_digest(
-                        artifact.canonical_leaf_bytes_by_position(position)?,
-                    )?,
-                ))
-            })
-            .collect::<Result<Vec<_>, CommonProofProverError>>()
-            .expect("the opened leaf digests derive");
-        let frontier_digests = (0..artifact.frontier_coordinates().len())
-            .map(|position| artifact.frontier_digest_by_position(position))
-            .collect::<Result<Vec<_>, _>>()
-            .expect("the frontier digests are complete");
-        verify_authentication_frontier(
-            entry.common_context().expect("the common context exists"),
-            &opened_leaf_digests,
-            &frontier_digests,
-            tree.root(),
-        )
-        .expect("the emitted paths authenticate to the cached root");
+        assert_opening_artifact_authenticates(
+            &artifact,
+            &tree,
+            &entry,
+            &query_indexes,
+            &expected_leaf_bytes,
+        );
 
         executor
             .complete_step(&mut storage)
@@ -2801,8 +3144,130 @@ mod tests {
     }
 
     #[test]
+    fn secret_common_tree_uses_fresh_salts_and_authenticated_path_only_lifecycle() {
+        let leaf_count = 8_usize;
+        let evaluation_domain_size = 16_u64;
+        let entry = common_catalog_entry(leaf_count, ProofLeafVisibility::SecretBearing);
+        let storage_plan =
+            common_proof_merkle_storage_plan(&entry, evaluation_domain_size, 23, 0, 1)
+                .expect("the secret common-tree storage plan derives");
+        let mut executor = external_memory_executor(&storage_plan);
+        let mut storage = TestExternalMemory::default();
+        let mut materializer = CommonProofMerkleMaterializer::new(
+            &entry,
+            evaluation_domain_size,
+            storage_plan.clone(),
+        )
+        .expect("the secret common-tree materializer initializes");
+        let mut coins = DeterministicPrivateCoins::default();
+        loop {
+            match materializer
+                .advance_storage(&mut executor, &mut storage)
+                .expect("the secret common tree materializes")
+            {
+                CommonProofMerkleMaterializerProgress::StorageTransactionCompleted => {}
+                CommonProofMerkleMaterializerProgress::NeedsLeafValues { leaf_index } => {
+                    let (first_values, opposite_values) = test_leaf_values(leaf_index);
+                    materializer
+                        .supply_next_leaf(first_values, opposite_values, None, &mut coins)
+                        .expect("the next secret-bearing leaf is supplied");
+                }
+                CommonProofMerkleMaterializerProgress::Complete => break,
+            }
+        }
+        let tree = materializer
+            .finish()
+            .expect("the stored secret common tree finishes");
+        assert_eq!(coins.sampled_salts.len(), leaf_count);
+        assert_eq!(
+            coins
+                .sampled_salts
+                .iter()
+                .copied()
+                .collect::<BTreeSet<_>>()
+                .len(),
+            leaf_count,
+            "every secret-bearing leaf consumes a distinct sequential salt",
+        );
+        let expected_leaf_bytes = coins
+            .sampled_salts
+            .iter()
+            .copied()
+            .enumerate()
+            .map(|(leaf_index, salt)| {
+                let leaf_index = u64::try_from(leaf_index).expect("the leaf index fits u64");
+                let (first_values, opposite_values) = test_leaf_values(leaf_index);
+                entry
+                    .encode_materialized_leaf(leaf_index, Some(salt), first_values, opposite_values)
+                    .expect("the expected secret-bearing leaf encodes")
+                    .0
+            })
+            .collect::<Vec<_>>();
+        let stored_object = storage
+            .committed
+            .get(&tree.leaf_bytes_object)
+            .expect("the secret canonical leaf object exists");
+        assert!(stored_object.sealed);
+        assert_eq!(
+            stored_object.protection,
+            ProofExternalMemoryProtection::SecretAuthenticatedEncryption,
+        );
+        assert_eq!(stored_object.bytes, expected_leaf_bytes.concat());
+        executor
+            .complete_step(&mut storage)
+            .expect("the secret materialization step completes");
+
+        let query_indexes = [0_u64, 1, 2, 7];
+        let transaction_count_before_query = executor.usage().transaction_count();
+        let mut prefetcher = CommonProofOpeningPrefetcher::new(
+            &tree,
+            &entry,
+            evaluation_domain_size,
+            &query_indexes,
+            u64::MAX,
+        )
+        .expect("the secret sequential opening scan initializes");
+        drive_opening_prefetch(&mut prefetcher, &mut executor, &mut storage)
+            .expect("the secret sequential opening scan completes");
+        assert_eq!(
+            executor.usage().total_read_byte_length(),
+            storage_plan.object_plans()[0].exact_byte_length(),
+        );
+        assert_eq!(
+            executor.usage().transaction_count() - transaction_count_before_query,
+            u64::try_from(leaf_count).expect("the focused leaf count fits u64")
+                * u64::try_from(tree.canonical_leaf_byte_length)
+                    .expect("the focused leaf length fits u64")
+                    .div_ceil(17),
+        );
+        let artifact = prefetcher
+            .finish()
+            .expect("the root-authenticated secret artifact is released");
+        assert_opening_artifact_authenticates(
+            &artifact,
+            &tree,
+            &entry,
+            &query_indexes,
+            &expected_leaf_bytes,
+        );
+
+        executor
+            .complete_step(&mut storage)
+            .expect("the secret query step deletes the leaf object");
+        assert!(storage.committed.is_empty());
+        let usage = executor.finish().expect("the secret lifecycle finishes");
+        assert_eq!(usage.deleted_object_count(), 1);
+    }
+
+    #[test]
     fn common_tree_query_scan_rejects_wrong_root_mutation_truncation_and_order() {
         let (entry, _, tree, mut executor, mut storage, _) = prepare_public_stored_tree(4);
+        let wrong_catalog_entry =
+            common_catalog_entry_with_suite_byte(4, ProofLeafVisibility::Public, 0x42);
+        assert!(matches!(
+            CommonProofOpeningPrefetcher::new(&tree, &wrong_catalog_entry, 8, &[0, 3], u64::MAX,),
+            Err(CommonProofProverError::InvalidTree),
+        ));
         let mut wrong_root_tree = tree.clone();
         wrong_root_tree.root[0] ^= 1;
         let mut wrong_root_prefetcher =

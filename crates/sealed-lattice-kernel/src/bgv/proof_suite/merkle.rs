@@ -700,6 +700,9 @@ pub(in crate::bgv::proof_suite) fn canonical_proof_phase_pair_leaf_digest(
         .into_bytes())
 }
 
+pub(in crate::bgv::proof_suite) type CommonProofMerklePathReplayOutput =
+    ([u8; 64], Vec<(u32, u64)>, Vec<[u8; 64]>);
+
 /// One-pass common-context Merkle replay.
 ///
 /// Leaves must arrive in canonical storage order. The replay retains one
@@ -846,7 +849,7 @@ impl CommonProofMerklePathReplay {
     pub(in crate::bgv::proof_suite) fn finish(
         self,
         expected_root: Option<[u8; 64]>,
-    ) -> Result<([u8; 64], Vec<(u32, u64)>, Vec<[u8; 64]>), ProofMerkleError> {
+    ) -> Result<CommonProofMerklePathReplayOutput, ProofMerkleError> {
         if self.next_leaf_index
             != u64::try_from(self.leaf_count).map_err(|_| ProofMerkleError::CountOverflow)?
             || self.occupied_level_mask != 0
@@ -1091,37 +1094,73 @@ pub(in crate::bgv::proof_suite) fn minimal_frontier_coordinates(
     sorted_unique_leaf_indexes: &[u64],
     leaf_count: usize,
 ) -> Result<Vec<(u32, u64)>, ProofMerkleError> {
+    let coordinate_count =
+        scan_minimal_frontier_coordinates(sorted_unique_leaf_indexes, leaf_count, None)?;
+    let mut coordinates = Vec::new();
+    coordinates
+        .try_reserve_exact(coordinate_count)
+        .map_err(|_| ProofMerkleError::CountOverflow)?;
+    coordinates.resize(coordinate_count, (0, 0));
+    scan_minimal_frontier_coordinates(
+        sorted_unique_leaf_indexes,
+        leaf_count,
+        Some(coordinates.as_mut_slice()),
+    )?;
+    Ok(coordinates)
+}
+
+/// Scans the canonical minimal frontier without constructing transient sets.
+/// The first pass obtains the exact output length and the second fills the
+/// caller's sole allocation in level-and-node order.
+fn scan_minimal_frontier_coordinates(
+    sorted_unique_leaf_indexes: &[u64],
+    leaf_count: usize,
+    mut output: Option<&mut [(u32, u64)]>,
+) -> Result<usize, ProofMerkleError> {
     if leaf_count == 0 || !leaf_count.is_power_of_two() {
         return Err(ProofMerkleError::InvalidOpening);
     }
     validate_sorted_unique_leaf_indexes(sorted_unique_leaf_indexes, leaf_count)?;
 
-    let mut required = sorted_unique_leaf_indexes
-        .iter()
-        .copied()
-        .collect::<BTreeSet<_>>();
-    let mut coordinates = Vec::new();
+    let expected_output_length = output.as_ref().map(|coordinates| coordinates.len());
+    let mut coordinate_count = 0_usize;
     for level in 0..leaf_count.trailing_zeros() {
-        let mut next = BTreeSet::new();
-        let mut processed = BTreeSet::new();
-        for index in required.iter().copied() {
-            if !processed.insert(index) {
+        let mut leaf_position = 0_usize;
+        while leaf_position < sorted_unique_leaf_indexes.len() {
+            let node_index = sorted_unique_leaf_indexes[leaf_position] >> level;
+            leaf_position += 1;
+            while leaf_position < sorted_unique_leaf_indexes.len()
+                && sorted_unique_leaf_indexes[leaf_position] >> level == node_index
+            {
+                leaf_position += 1;
+            }
+            if node_index & 1 == 0
+                && leaf_position < sorted_unique_leaf_indexes.len()
+                && sorted_unique_leaf_indexes[leaf_position] >> level == node_index + 1
+            {
+                let sibling_index = node_index + 1;
+                leaf_position += 1;
+                while leaf_position < sorted_unique_leaf_indexes.len()
+                    && sorted_unique_leaf_indexes[leaf_position] >> level == sibling_index
+                {
+                    leaf_position += 1;
+                }
                 continue;
             }
-            let sibling_index = index ^ 1;
-            if required.contains(&sibling_index) {
-                processed.insert(sibling_index);
-            } else {
-                coordinates
-                    .try_reserve(1)
-                    .map_err(|_| ProofMerkleError::CountOverflow)?;
-                coordinates.push((level, sibling_index));
+            if let Some(coordinates) = output.as_deref_mut() {
+                *coordinates
+                    .get_mut(coordinate_count)
+                    .ok_or(ProofMerkleError::InvalidOpening)? = (level, node_index ^ 1);
             }
-            next.insert(index / 2);
+            coordinate_count = coordinate_count
+                .checked_add(1)
+                .ok_or(ProofMerkleError::CountOverflow)?;
         }
-        required = next;
     }
-    Ok(coordinates)
+    if expected_output_length.is_some_and(|length| length != coordinate_count) {
+        return Err(ProofMerkleError::InvalidOpening);
+    }
+    Ok(coordinate_count)
 }
 
 fn validate_sorted_unique_leaf_indexes(
@@ -1244,9 +1283,15 @@ mod canonical_tree_tests {
         ] {
             let context = context(visibility);
             for leaf in leaves(&context, visibility) {
+                let canonical_leaf_bytes = leaf.canonical_bytes().expect("canonical leaf bytes");
                 assert_eq!(
                     leaf.digest().expect("streamed leaf digest"),
                     one_shot_phase_pair_leaf_digest(&leaf).expect("one-shot leaf digest"),
+                );
+                assert_eq!(
+                    canonical_proof_phase_pair_leaf_digest(&canonical_leaf_bytes)
+                        .expect("raw canonical leaf digest"),
+                    leaf.digest().expect("streamed leaf digest"),
                 );
             }
         }
@@ -1288,50 +1333,76 @@ mod canonical_tree_tests {
     }
 
     #[test]
-    fn sequential_path_replay_matches_canonical_roots_and_paths() {
-        for leaf_count in [1_usize, 2, 4, 8] {
-            let context = context_with_leaf_count(leaf_count, ProofLeafVisibility::Public);
-            let leaves = leaves(&context, ProofLeafVisibility::Public);
-            let tree = CanonicalProofMerkleTree::from_phase_pair_leaves(context.clone(), &leaves)
-                .expect("the canonical test tree derives");
-            let opened_leaf_indexes = if leaf_count == 1 {
-                vec![0]
-            } else {
-                vec![
-                    0,
-                    u64::try_from(leaf_count - 1).expect("the last leaf index fits u64"),
-                ]
-            };
-            let mut replay = CommonProofMerklePathReplay::new(&context, &opened_leaf_indexes)
-                .expect("the sequential replay initializes");
-            absorb_test_leaves(&mut replay, &leaves, None);
-            let (root, frontier_coordinates, frontier_digests) = replay
-                .finish(Some(tree.root()))
-                .expect("the sequential replay authenticates");
-            assert_eq!(root, tree.root());
-            assert_eq!(
-                frontier_coordinates,
-                minimal_frontier_coordinates(&opened_leaf_indexes, leaf_count)
-                    .expect("the canonical frontier coordinates derive"),
-            );
-            assert_eq!(
-                frontier_digests,
-                tree.authentication_frontier(&opened_leaf_indexes)
-                    .expect("the canonical frontier derives"),
-            );
-            let opened_leaves = opened_leaf_indexes
-                .iter()
-                .map(|leaf_index| {
-                    (
-                        *leaf_index,
-                        leaves[usize::try_from(*leaf_index).expect("the leaf index fits usize")]
-                            .digest()
-                            .expect("the opened leaf digest derives"),
+    fn sequential_path_replay_matches_every_small_canonical_frontier() {
+        for visibility in [
+            ProofLeafVisibility::Public,
+            ProofLeafVisibility::SecretBearing,
+        ] {
+            for leaf_count in [1_usize, 2, 4, 8] {
+                let context = context_with_leaf_count(leaf_count, visibility);
+                let leaves = leaves(&context, visibility);
+                let tree =
+                    CanonicalProofMerkleTree::from_phase_pair_leaves(context.clone(), &leaves)
+                        .expect("the canonical test tree derives");
+
+                let mut root_replay = CommonProofMerklePathReplay::new(&context, &[])
+                    .expect("the root-only replay initializes");
+                absorb_test_leaves(&mut root_replay, &leaves, None);
+                let (root, coordinates, digests) = root_replay
+                    .finish(None)
+                    .expect("the root-only replay finishes");
+                assert_eq!(root, tree.root());
+                assert!(coordinates.is_empty());
+                assert!(digests.is_empty());
+
+                for opened_leaf_mask in 1_usize..(1_usize << leaf_count) {
+                    let opened_leaf_indexes = (0..leaf_count)
+                        .filter(|leaf_index| opened_leaf_mask & (1_usize << *leaf_index) != 0)
+                        .map(|leaf_index| {
+                            u64::try_from(leaf_index).expect("the leaf index fits u64")
+                        })
+                        .collect::<Vec<_>>();
+                    let mut replay =
+                        CommonProofMerklePathReplay::new(&context, &opened_leaf_indexes)
+                            .expect("the sequential replay initializes");
+                    absorb_test_leaves(&mut replay, &leaves, None);
+                    let (root, frontier_coordinates, frontier_digests) = replay
+                        .finish(Some(tree.root()))
+                        .expect("the sequential replay authenticates");
+                    assert_eq!(root, tree.root());
+                    assert_eq!(
+                        frontier_coordinates,
+                        minimal_frontier_coordinates(&opened_leaf_indexes, leaf_count)
+                            .expect("the canonical frontier coordinates derive"),
+                    );
+                    assert_eq!(
+                        frontier_digests,
+                        tree.authentication_frontier(&opened_leaf_indexes)
+                            .expect("the canonical frontier derives"),
+                    );
+                    let opened_leaves = opened_leaf_indexes
+                        .iter()
+                        .map(|leaf_index| {
+                            let leaf = &leaves
+                                [usize::try_from(*leaf_index).expect("the leaf index fits usize")];
+                            let canonical_leaf_bytes =
+                                leaf.canonical_bytes().expect("canonical opened leaf");
+                            (
+                                *leaf_index,
+                                canonical_proof_phase_pair_leaf_digest(&canonical_leaf_bytes)
+                                    .expect("the opened leaf digest derives"),
+                            )
+                        })
+                        .collect::<Vec<_>>();
+                    verify_authentication_frontier(
+                        &context,
+                        &opened_leaves,
+                        &frontier_digests,
+                        root,
                     )
-                })
-                .collect::<Vec<_>>();
-            verify_authentication_frontier(&context, &opened_leaves, &frontier_digests, root)
-                .expect("the replayed frontier verifies");
+                    .expect("the replayed frontier verifies");
+                }
+            }
         }
     }
 

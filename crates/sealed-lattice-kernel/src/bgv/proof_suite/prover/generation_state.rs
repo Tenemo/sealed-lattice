@@ -1,6 +1,8 @@
 use super::super::verified_application_statement_hash;
 #[cfg(test)]
 use super::CompletedCommonProofGenerationResult;
+#[cfg(test)]
+use super::ProofExternalMemoryObject;
 use super::{
     BTreeMap, BTreeSet, BoundTreeConstructionKind, BoundedCommonProofByteSink,
     BoundedCommonProofByteSinkError, CHECKPOINT_COMMITTED_STATE_HASH_DOMAIN,
@@ -31,8 +33,7 @@ use super::{
     ProofExternalMemory, ProofExternalMemoryExecutor, ProofExternalMemoryExecutorError,
     ProofExternalMemoryUsage, ProofTreeCatalogEntry, ProofTreeCatalogInput, ProofTreeCatalogSource,
     ProofTreeRole, ProofTreeValue, RelationApplicationChallengeAssignment, RelationColumnOrigin,
-    RelationColumnValueType, RelationPlanCheckContext, RelationPlanVariant,
-    RelationTreeDescriptor,
+    RelationColumnValueType, RelationPlanCheckContext, RelationPlanVariant, RelationTreeDescriptor,
     SetupPolynomialColumnMajorMerkleReplay, SetupPolynomialColumnMajorMerkleReplayMode,
     SetupPolynomialColumnMajorMerkleRootPass, StatementOwnedMerkleReplay,
     StatementOwnedMerkleReplayMode, StoredCommonProofMerkleTree, StreamingHash512,
@@ -944,15 +945,12 @@ impl CommonProofGenerationStateMachine {
             GeneratedCommonProofStoragePlanError::Storage(error) => {
                 CommonProofGenerationInitializationError::StoragePlan(error)
             }
+            #[cfg(test)]
+            GeneratedCommonProofStoragePlanError::RequirementGeometry(error)
+            | GeneratedCommonProofStoragePlanError::RequirementResidentMemory(error) => {
+                CommonProofGenerationInitializationError::Prover(error)
+            }
         })?;
-        if !storage_plan
-            .setup_polynomial_query_transform_plans
-            .is_empty()
-        {
-            return Err(CommonProofGenerationInitializationError::Prover(
-                CommonProofProverError::InvalidColumn,
-            ));
-        }
         let resident_memory_plan = common_proof_resident_memory_plan(
             variant,
             relation_context,
@@ -1399,7 +1397,7 @@ impl CommonProofGenerationStateMachine {
             .ok_or(CommonProofGenerationInitializationError::Prover(
                 CommonProofProverError::InvalidColumn,
             ))?;
-        if vector.value_type() != RelationColumnValueType::Base
+        if vector.value_type() != RelationColumnValueType::BaseField
             || vector.element_count() != self.evaluation_domain.size()
         {
             return Err(CommonProofGenerationInitializationError::Prover(
@@ -1562,6 +1560,50 @@ impl CommonProofGenerationStateMachine {
         Ok(column_ordinals)
     }
 
+    fn validate_relation_evaluation_vector(
+        &self,
+        column_ordinal: u32,
+        vector: ExternalPolynomialVector,
+    ) -> Result<(), CommonProofProverError> {
+        let column = self
+            .variant
+            .ordered_columns()
+            .get(
+                usize::try_from(column_ordinal)
+                    .map_err(|_| CommonProofProverError::CountOverflow)?,
+            )
+            .ok_or(CommonProofProverError::InvalidColumn)?;
+        if vector.value_type() != column.value_type()
+            || vector.element_count() != self.evaluation_domain.size()
+        {
+            return Err(CommonProofProverError::InvalidColumn);
+        }
+        Ok(())
+    }
+
+    fn retain_relation_evaluation_vector(
+        &mut self,
+        column_ordinal: u32,
+        vector: ExternalPolynomialVector,
+    ) -> Result<(), CommonProofProverError> {
+        self.validate_relation_evaluation_vector(column_ordinal, vector)?;
+        if self
+            .relation_evaluation_vectors
+            .contains_key(&column_ordinal)
+            || self
+                .relation_evaluation_vectors
+                .values()
+                .any(|retained_vector| retained_vector.object() == vector.object())
+        {
+            return Err(CommonProofProverError::InvalidColumn);
+        }
+        let previous = self
+            .relation_evaluation_vectors
+            .insert(column_ordinal, vector);
+        debug_assert!(previous.is_none());
+        Ok(())
+    }
+
     fn poll_active_relation_column_transform<Storage, CoinError, SinkError>(
         &mut self,
         storage: &mut Storage,
@@ -1610,27 +1652,13 @@ impl CommonProofGenerationStateMachine {
                 )?;
                 self.phase = match active.continuation {
                     CommonProofRelationTransformContinuation::Base { next_column_index } => {
-                        if self
-                            .relation_evaluation_vectors
-                            .insert(active.column_ordinal, vector)
-                            .is_some()
-                        {
-                            return Err(CommonProofGenerationError::Prover(
-                                CommonProofProverError::InvalidColumn,
-                            ));
-                        }
+                        self.retain_relation_evaluation_vector(active.column_ordinal, vector)
+                            .map_err(CommonProofGenerationError::Prover)?;
                         CommonProofGenerationPhase::TransformingBaseColumns { next_column_index }
                     }
                     CommonProofRelationTransformContinuation::Auxiliary { next_column_index } => {
-                        if self
-                            .relation_evaluation_vectors
-                            .insert(active.column_ordinal, vector)
-                            .is_some()
-                        {
-                            return Err(CommonProofGenerationError::Prover(
-                                CommonProofProverError::InvalidColumn,
-                            ));
-                        }
+                        self.retain_relation_evaluation_vector(active.column_ordinal, vector)
+                            .map_err(CommonProofGenerationError::Prover)?;
                         CommonProofGenerationPhase::TransformingAuxiliaryColumns {
                             next_column_index,
                         }
@@ -1653,16 +1681,13 @@ impl CommonProofGenerationStateMachine {
                     CommonProofRelationTransformContinuation::SetupPolynomialRoot {
                         next_column_index,
                     } => {
-                        if self.active_setup_polynomial_column_reader.is_some()
-                            || self
-                                .relation_evaluation_vectors
-                                .insert(active.column_ordinal, vector)
-                                .is_some()
-                        {
+                        if self.active_setup_polynomial_column_reader.is_some() {
                             return Err(CommonProofGenerationError::Prover(
                                 CommonProofProverError::InvalidColumn,
                             ));
                         }
+                        self.retain_relation_evaluation_vector(active.column_ordinal, vector)
+                            .map_err(CommonProofGenerationError::Prover)?;
                         self.active_setup_polynomial_column_reader =
                             Some(ActiveSetupPolynomialColumnReader {
                                 vector,
@@ -3377,20 +3402,22 @@ impl CommonProofGenerationStateMachine {
                 let quotient_column_ordinals = self
                     .quotient_column_ordinals()
                     .map_err(CommonProofGenerationError::Prover)?;
-                let mut quotient_evaluation_vectors = BTreeMap::new();
-                let mut statement_owned_query_evaluation_vectors = BTreeMap::new();
-                for (column_ordinal, vector) in
-                    core::mem::take(&mut self.relation_evaluation_vectors)
-                {
-                    if quotient_column_ordinals.contains(&column_ordinal) {
-                        quotient_evaluation_vectors.insert(column_ordinal, vector);
-                    }
-                    if statement_owned_query_column_ordinals.contains(&column_ordinal) {
-                        statement_owned_query_evaluation_vectors.insert(column_ordinal, vector);
-                    }
+                let retained_relation_evaluation_vectors =
+                    core::mem::take(&mut self.relation_evaluation_vectors);
+                for (column_ordinal, vector) in &retained_relation_evaluation_vectors {
+                    self.validate_relation_evaluation_vector(*column_ordinal, *vector)
+                        .map_err(CommonProofGenerationError::Prover)?;
                 }
-                if statement_owned_query_evaluation_vectors.len()
-                    != statement_owned_query_column_ordinals.len()
+                let (quotient_evaluation_vectors, statement_owned_query_evaluation_vectors) =
+                    partition_relation_evaluation_vectors(
+                        retained_relation_evaluation_vectors,
+                        &quotient_column_ordinals,
+                        &statement_owned_query_column_ordinals,
+                    );
+                if !statement_owned_query_evaluation_vectors
+                    .keys()
+                    .copied()
+                    .eq(statement_owned_query_column_ordinals.iter().copied())
                 {
                     return Err(CommonProofGenerationError::Prover(
                         CommonProofProverError::InvalidColumn,
@@ -3408,8 +3435,10 @@ impl CommonProofGenerationStateMachine {
                         .ok_or(CommonProofGenerationError::Prover(
                             CommonProofProverError::InvalidColumn,
                         ))?;
-                    if !matches!(column.origin(), RelationColumnOrigin::VerifierSequence { .. })
-                        && !quotient_evaluation_vectors.contains_key(column_ordinal)
+                    if !matches!(
+                        column.origin(),
+                        RelationColumnOrigin::VerifierSequence { .. }
+                    ) && !quotient_evaluation_vectors.contains_key(column_ordinal)
                     {
                         return Err(CommonProofGenerationError::Prover(
                             CommonProofProverError::InvalidColumn,
@@ -4118,6 +4147,26 @@ impl CommonProofGenerationStateMachine {
                 Ok(CommonProofGenerationPoll::OutputFragmentAccepted)
             }
             CommonProofGenerationPhase::EmittingQueries { next_catalog_index } => {
+                if let Some(fragment) = self.pending_output_fragment.as_deref() {
+                    sink.write_bytes(fragment)
+                        .map_err(CommonProofGenerationError::Sink)?;
+                    self.query_opening_absorber
+                        .as_mut()
+                        .ok_or(CommonProofGenerationError::Prover(
+                            CommonProofProverError::InvalidInput,
+                        ))?
+                        .absorb(fragment)
+                        .map_err(CommonProofGenerationError::Transcript)?;
+                    self.pending_output_fragment = None;
+                    self.phase = CommonProofGenerationPhase::EmittingQueries {
+                        next_catalog_index: next_catalog_index.checked_add(1).ok_or(
+                            CommonProofGenerationError::Prover(
+                                CommonProofProverError::CountOverflow,
+                            ),
+                        )?,
+                    };
+                    return Ok(CommonProofGenerationPoll::OutputFragmentAccepted);
+                }
                 if next_catalog_index == 0
                     && self.setup_polynomial_opening_artifacts.len()
                         < self.setup_polynomial_root_passes.len()
@@ -4140,14 +4189,13 @@ impl CommonProofGenerationStateMachine {
                 if next_catalog_index == 0
                     && (self.setup_polynomial_opening_artifacts.len()
                         != self.setup_polynomial_root_passes.len()
-                        || self
-                            .setup_polynomial_opening_artifacts
-                            .keys()
-                            .any(|tree_catalog_index| {
+                        || self.setup_polynomial_opening_artifacts.keys().any(
+                            |tree_catalog_index| {
                                 !self
                                     .setup_polynomial_root_passes
                                     .contains_key(tree_catalog_index)
-                            }))
+                            },
+                        ))
                 {
                     return Err(CommonProofGenerationError::Prover(
                         CommonProofProverError::InvalidTree,
@@ -4189,26 +4237,6 @@ impl CommonProofGenerationStateMachine {
                         .map_err(CommonProofGenerationError::Transcript)?;
                     self.phase = CommonProofGenerationPhase::Finalizing;
                     return Ok(CommonProofGenerationPoll::ArithmeticStepCompleted);
-                }
-                if let Some(fragment) = self.pending_output_fragment.as_deref() {
-                    sink.write_bytes(fragment)
-                        .map_err(CommonProofGenerationError::Sink)?;
-                    self.query_opening_absorber
-                        .as_mut()
-                        .ok_or(CommonProofGenerationError::Prover(
-                            CommonProofProverError::InvalidInput,
-                        ))?
-                        .absorb(fragment)
-                        .map_err(CommonProofGenerationError::Transcript)?;
-                    self.pending_output_fragment = None;
-                    self.phase = CommonProofGenerationPhase::EmittingQueries {
-                        next_catalog_index: next_catalog_index.checked_add(1).ok_or(
-                            CommonProofGenerationError::Prover(
-                                CommonProofProverError::CountOverflow,
-                            ),
-                        )?,
-                    };
-                    return Ok(CommonProofGenerationPoll::OutputFragmentAccepted);
                 }
                 let entry = self.catalog.entries().get(next_catalog_index).ok_or(
                     CommonProofGenerationError::Prover(CommonProofProverError::InvalidTree),
@@ -4435,6 +4463,30 @@ impl CommonProofGenerationStateMachine {
     }
 }
 
+fn partition_relation_evaluation_vectors(
+    relation_evaluation_vectors: BTreeMap<u32, ExternalPolynomialVector>,
+    quotient_column_ordinals: &BTreeSet<u32>,
+    statement_owned_query_column_ordinals: &BTreeSet<u32>,
+) -> (
+    BTreeMap<u32, ExternalPolynomialVector>,
+    BTreeMap<u32, ExternalPolynomialVector>,
+) {
+    let mut quotient_evaluation_vectors = BTreeMap::new();
+    let mut statement_owned_query_evaluation_vectors = BTreeMap::new();
+    for (column_ordinal, vector) in relation_evaluation_vectors {
+        if quotient_column_ordinals.contains(&column_ordinal) {
+            quotient_evaluation_vectors.insert(column_ordinal, vector);
+        }
+        if statement_owned_query_column_ordinals.contains(&column_ordinal) {
+            statement_owned_query_evaluation_vectors.insert(column_ordinal, vector);
+        }
+    }
+    (
+        quotient_evaluation_vectors,
+        statement_owned_query_evaluation_vectors,
+    )
+}
+
 fn add_bound_tree_base_roles(
     variant: &RelationPlanVariant,
     roles: &mut BTreeMap<u32, ProofTreeRole>,
@@ -4559,5 +4611,56 @@ mod source_provider_resident_memory_tests {
         ] {
             assert!(common_proof_source_provider_is_live_during_phase(phase));
         }
+    }
+}
+
+#[cfg(test)]
+mod relation_evaluation_descriptor_reuse_tests {
+    use super::*;
+
+    fn evaluation_vector(object_ordinal: u32) -> ExternalPolynomialVector {
+        ExternalPolynomialVector::new(
+            ProofExternalMemoryObject::new(object_ordinal),
+            RelationColumnValueType::BaseField,
+            16,
+        )
+        .expect("the test vector has a nonzero element count")
+    }
+
+    #[test]
+    fn quotient_and_statement_query_consumers_share_one_retained_descriptor() {
+        let quotient_only = evaluation_vector(60);
+        let shared = evaluation_vector(61);
+        let query_only = evaluation_vector(62);
+        let materialization_only = evaluation_vector(63);
+        let (mut quotient_vectors, statement_query_vectors) = partition_relation_evaluation_vectors(
+            BTreeMap::from([
+                (2, quotient_only),
+                (4, shared),
+                (7, query_only),
+                (9, materialization_only),
+            ]),
+            &BTreeSet::from([2, 4]),
+            &BTreeSet::from([4, 7]),
+        );
+
+        assert_eq!(
+            quotient_vectors,
+            BTreeMap::from([(2, quotient_only), (4, shared)])
+        );
+        assert_eq!(
+            statement_query_vectors,
+            BTreeMap::from([(4, shared), (7, query_only)])
+        );
+        assert_eq!(
+            quotient_vectors.get(&4).map(|vector| vector.object()),
+            statement_query_vectors
+                .get(&4)
+                .map(|vector| vector.object()),
+        );
+        assert_eq!(quotient_vectors.remove(&4), Some(shared));
+        assert_eq!(statement_query_vectors.get(&4), Some(&shared));
+        assert!(!quotient_vectors.contains_key(&9));
+        assert!(!statement_query_vectors.contains_key(&9));
     }
 }

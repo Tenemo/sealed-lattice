@@ -4,6 +4,7 @@ import { preflightAndRunManualRustKernelLane } from '#tools/ci/run-rust-kernel-m
 import {
     fullProfileEvidenceRustTests,
     measurementRustTests,
+    phaseLivenessEvidenceRustTests,
     validateFocusedRustLaneSelection,
 } from '#tools/ci/rust-focused-lane-selection';
 
@@ -115,5 +116,26 @@ describe('manual Rust kernel preflight', () => {
 
         expect(verifiedTestFilters).toEqual([focusedFilter]);
         expect(executedTestFilters).toEqual([focusedFilter]);
+    });
+
+    it('keeps complete phase-liveness closure in its guarded registry', async () => {
+        const verifiedTestFilters: string[] = [];
+        let executedTestFilters: readonly string[] = [];
+
+        await preflightAndRunManualRustKernelLane({
+            configuredTestNames: phaseLivenessEvidenceRustTests,
+            lane: 'rust-phase-liveness-evidence',
+            runGuardedCommands: (testFilters) => {
+                executedTestFilters = testFilters;
+                return Promise.resolve();
+            },
+            verifyLaneSelection: (input) => {
+                verifiedTestFilters.push(input.testFilter);
+                return Promise.resolve();
+            },
+        });
+
+        expect(verifiedTestFilters).toEqual(phaseLivenessEvidenceRustTests);
+        expect(executedTestFilters).toEqual(phaseLivenessEvidenceRustTests);
     });
 });

@@ -20,6 +20,9 @@ struct TestObject {
 struct TestStorage {
     committed: BTreeMap<ProofExternalMemoryObject, TestObject>,
     transaction: Option<BTreeMap<ProofExternalMemoryObject, TestObject>>,
+    deleted_objects: Vec<ProofExternalMemoryObject>,
+    begun_transaction_count: u64,
+    committed_transaction_count: u64,
 }
 
 impl ProofExternalMemory for TestStorage {
@@ -29,6 +32,7 @@ impl ProofExternalMemory for TestStorage {
         if self.transaction.is_some() {
             return Err(TestStorageError::Duplicate);
         }
+        self.begun_transaction_count += 1;
         self.transaction = Some(self.committed.clone());
         Ok(())
     }
@@ -122,6 +126,7 @@ impl ProofExternalMemory for TestStorage {
             .ok_or(TestStorageError::NoTransaction)?
             .remove(&object)
             .ok_or(TestStorageError::Missing)?;
+        self.deleted_objects.push(object);
         Ok(())
     }
 
@@ -130,6 +135,7 @@ impl ProofExternalMemory for TestStorage {
             .transaction
             .take()
             .ok_or(TestStorageError::NoTransaction)?;
+        self.committed_transaction_count += 1;
         Ok(())
     }
 
@@ -981,4 +987,100 @@ fn cancellation_transactionally_removes_secret_scratch() {
         .cancel(&mut storage)
         .expect("cancellation removes every live object");
     assert!(storage.committed.is_empty());
+}
+
+#[test]
+fn cancellation_deletes_sorted_unique_live_objects_once_and_remains_idempotent() {
+    let reusable_object = ProofExternalMemoryObject::new(7);
+    let concurrent_object = ProofExternalMemoryObject::new(3);
+    let cancellation_plan = ProofExternalMemoryPlan::new(
+        3,
+        4,
+        4,
+        2,
+        8,
+        12,
+        1,
+        16,
+        vec![
+            ProofExternalMemoryObjectPlan::new(
+                reusable_object,
+                ProofExternalMemoryProtection::SecretAuthenticatedEncryption,
+                4,
+                2,
+                2,
+                2,
+            ),
+            ProofExternalMemoryObjectPlan::new(
+                reusable_object,
+                ProofExternalMemoryProtection::SecretAuthenticatedEncryption,
+                4,
+                0,
+                0,
+                1,
+            ),
+            ProofExternalMemoryObjectPlan::new(
+                concurrent_object,
+                ProofExternalMemoryProtection::PublicIntegrity,
+                4,
+                0,
+                0,
+                1,
+            ),
+        ],
+    )
+    .expect("the future lifecycle does not overlap the live lifecycle");
+    let mut executor = ProofExternalMemoryExecutor::new(cancellation_plan);
+    let mut storage = TestStorage::default();
+
+    for (object, bytes) in [
+        (reusable_object, [1_u8, 2, 3, 4]),
+        (concurrent_object, [5_u8, 6, 7, 8]),
+    ] {
+        executor
+            .begin_object(&mut storage, object)
+            .expect("the current lifecycle starts");
+        executor
+            .append_object_bytes(&mut storage, object, &bytes)
+            .expect("the current lifecycle writes");
+        executor
+            .seal_object(&mut storage, object)
+            .expect("the current lifecycle seals");
+    }
+    let begun_transaction_count_before_cancel = storage.begun_transaction_count;
+    let committed_transaction_count_before_cancel = storage.committed_transaction_count;
+
+    executor
+        .cancel(&mut storage)
+        .expect("cancellation deletes each live physical object");
+    assert_eq!(
+        storage.deleted_objects,
+        vec![concurrent_object, reusable_object],
+        "the executor plan order provides a sorted, deduplicated cancellation batch",
+    );
+    assert_eq!(
+        storage.begun_transaction_count,
+        begun_transaction_count_before_cancel + 1,
+    );
+    assert_eq!(
+        storage.committed_transaction_count,
+        committed_transaction_count_before_cancel + 1,
+    );
+    assert!(storage.committed.is_empty());
+
+    executor
+        .cancel(&mut storage)
+        .expect("a completed cancellation is idempotent");
+    assert_eq!(
+        storage.deleted_objects,
+        vec![concurrent_object, reusable_object],
+    );
+    assert_eq!(
+        storage.begun_transaction_count,
+        begun_transaction_count_before_cancel + 1,
+    );
+    assert_eq!(
+        storage.committed_transaction_count,
+        committed_transaction_count_before_cancel + 1,
+    );
 }

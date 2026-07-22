@@ -115,6 +115,8 @@ pub use local_encrypted_storage::{
 pub(crate) use local_storage_runtime::{
     BrowserWorkerAuthenticatedStorageHeadSource, BrowserWorkerAuthenticatedStorageTransitionSource,
     LOCAL_STORAGE_ROOT_CAPABILITY_BYTE_LENGTH,
+    MAXIMUM_LOCAL_RECORD_SEAL_INVOCATIONS_PER_ACTIVE_ROOT,
+    MAXIMUM_LOCAL_RECORD_SEALED_PLAINTEXT_BYTES_PER_ACTIVE_ROOT,
     resolve_browser_worker_authenticated_storage_head_source,
     resolve_browser_worker_authenticated_storage_transition_source, run_local_storage_root_command,
 };

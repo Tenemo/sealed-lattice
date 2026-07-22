@@ -437,12 +437,14 @@ fn derive_target_release_phase_path(
         .iter()
         .filter(|path| path.application_statement_schema_identifier == target_schema_identifier)
     {
-        let SelectedProofVariantPhasePathOutcome::Requirement { requirement } = &path.outcome
-        else {
-            return target_release_derivation_error(
-                "target-share-proof-diagnostic-unavailable",
-                "one successful cap-neutral schema-0x1621 proof requirement for every selected compiler variant",
-            );
+        let requirement = match &path.outcome {
+            SelectedProofVariantPhasePathOutcome::Requirement { requirement } => requirement,
+            SelectedProofVariantPhasePathOutcome::DerivationError {
+                reason_code,
+                required_carrier,
+            } => {
+                return target_release_derivation_error(reason_code, required_carrier);
+            }
         };
         if proof_byte_length_ceiling
             .replace(requirement.proof_byte_length_ceiling)
@@ -464,9 +466,9 @@ fn derive_target_release_phase_path(
         proof_byte_length_ceiling,
     ) {
         Ok(accounting) => accounting,
-        Err(_) => {
+        Err(error) => {
             return target_release_derivation_error(
-                "target-release-static-accounting-failed",
+                error.reason_code(),
                 "selected target-release accounting derived from the schema-0x1621 proof stream byte-length ceiling",
             );
         }
@@ -955,7 +957,7 @@ fn proof_diagnostic_missing_carrier(
             "proof-variant-0x{:04x}-{selector_name}-phase-liveness",
             row.application_statement_schema_identifier()
         ),
-        format!("proof-{}", error.stage()),
+        format!("proof-{}", error.detail_code()),
         "one complete cap-neutral proof resident-phase diagnostic requirement",
     )
 }
@@ -1194,7 +1196,10 @@ mod tests {
             accounting: target_release,
         } = &accounting.target_release
         else {
-            panic!("selected target-release static accounting must derive")
+            panic!(
+                "selected target-release static accounting must derive: {:?}",
+                accounting.target_release,
+            )
         };
         assert_eq!(target_release.participant_count, 10);
         assert_eq!(target_release.reconstruction_threshold, 4);

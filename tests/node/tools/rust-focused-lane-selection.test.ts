@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
     fullProfileEvidenceRustTests,
     measurementRustTests,
+    phaseLivenessEvidenceRustTests,
     validateFocusedRustLaneSelection,
 } from '#tools/ci/rust-focused-lane-selection';
 
@@ -20,6 +21,11 @@ describe('focused Rust lane selection', () => {
             fullProfileEvidenceRustTests[0],
         ],
         ['rust-measurements' as const, true, measurementRustTests[0]],
+        [
+            'rust-phase-liveness-evidence' as const,
+            true,
+            phaseLivenessEvidenceRustTests[0],
+        ],
     ])(
         'accepts %s tests only in their owning lane',
         (lane, ignored, testName) => {

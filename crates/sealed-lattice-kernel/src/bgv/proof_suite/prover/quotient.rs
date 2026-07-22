@@ -9,7 +9,10 @@ use super::{
     sample_private_extension_polynomial, subtract_extension_polynomial, trim_extension_polynomial,
 };
 #[cfg(test)]
-use super::{CommonProofSourcePolynomial, relation_columns::CommonProofColumnEvaluations};
+use super::{
+    CommonProofSourcePolynomial, ProofExternalMemoryObject,
+    relation_columns::CommonProofColumnEvaluations,
+};
 
 #[cfg(test)]
 pub(super) fn validate_column_polynomials(
@@ -392,19 +395,6 @@ impl CommonProofConstraintStreamQuotientBuilder {
             .iter()
             .map(|column| column.value_type())
             .collect::<Vec<_>>();
-        for (column_ordinal, vector) in &transformed_columns {
-            if vector.element_count() != evaluation_domain.size()
-                || column_value_types
-                    .get(
-                        usize::try_from(*column_ordinal)
-                            .map_err(|_| CommonProofProverError::CountOverflow)?,
-                    )
-                    .copied()
-                    != Some(vector.value_type())
-            {
-                return Err(CommonProofProverError::InvalidColumn);
-            }
-        }
         let mut constraint_queries = Vec::new();
         let mut constraint_columns = Vec::new();
         let mut remaining_constraint_use_counts = BTreeMap::new();
@@ -448,12 +438,12 @@ impl CommonProofConstraintStreamQuotientBuilder {
             constraint_queries.push(queries);
             constraint_columns.push(columns);
         }
-        if transformed_columns
-            .keys()
-            .any(|column_ordinal| !remaining_constraint_use_counts.contains_key(column_ordinal))
-        {
-            return Err(CommonProofProverError::InvalidColumn);
-        }
+        validate_seeded_transformed_columns(
+            &column_value_types,
+            evaluation_domain.size(),
+            &remaining_constraint_use_counts,
+            &transformed_columns,
+        )?;
         let checked_application_challenges =
             variant.checked_application_challenges(context, &application_challenges)?;
         let mut quotient_evaluations = Zeroizing::new(Vec::new());
@@ -503,7 +493,8 @@ impl CommonProofConstraintStreamQuotientBuilder {
             columns,
             &mut self.next_transform_column_index,
             |column_ordinal| self.transformed_columns.contains_key(&column_ordinal),
-        )? else {
+        )?
+        else {
             return Ok(None);
         };
         Ok(Some(CommonProofQuotientConstraintTransformKey::new(
@@ -518,8 +509,7 @@ impl CommonProofConstraintStreamQuotientBuilder {
         transform_key: CommonProofQuotientConstraintTransformKey,
         vector: ExternalPolynomialVector,
     ) -> Result<(), CommonProofProverError> {
-        if self.next_transform_key()? != Some(transform_key)
-            || vector.element_count() != self.evaluation_domain.size()
+        if vector.element_count() != self.evaluation_domain.size()
             || self
                 .column_value_types
                 .get(
@@ -531,7 +521,14 @@ impl CommonProofConstraintStreamQuotientBuilder {
             || self
                 .transformed_columns
                 .contains_key(&transform_key.column_ordinal())
+            || self
+                .transformed_columns
+                .values()
+                .any(|existing_vector| existing_vector.object() == vector.object())
         {
+            return Err(CommonProofProverError::InvalidColumn);
+        }
+        if self.next_transform_key()? != Some(transform_key) {
             return Err(CommonProofProverError::InvalidColumn);
         }
         let previous = self
@@ -762,24 +759,11 @@ impl CommonProofConstraintStreamQuotientBuilder {
             .constraint_columns
             .get(self.current_constraint_ordinal)
             .ok_or(CommonProofProverError::InvalidQuotient)?;
-        for column_ordinal in constraint_columns {
-            let is_last_consumer = {
-                let remaining_use_count = self
-                    .remaining_constraint_use_counts
-                    .get_mut(column_ordinal)
-                    .ok_or(CommonProofProverError::InvalidColumn)?;
-                *remaining_use_count = remaining_use_count
-                    .checked_sub(1)
-                    .ok_or(CommonProofProverError::InvalidColumn)?;
-                *remaining_use_count == 0
-            };
-            if is_last_consumer {
-                self.remaining_constraint_use_counts.remove(column_ordinal);
-                self.transformed_columns
-                    .remove(column_ordinal)
-                    .ok_or(CommonProofProverError::InvalidColumn)?;
-            }
-        }
+        retire_transformed_columns_after_constraint(
+            constraint_columns,
+            &mut self.remaining_constraint_use_counts,
+            &mut self.transformed_columns,
+        )?;
         self.current_constraint_ordinal = self
             .current_constraint_ordinal
             .checked_add(1)
@@ -810,6 +794,69 @@ impl CommonProofConstraintStreamQuotientBuilder {
     }
 }
 
+fn validate_seeded_transformed_columns(
+    column_value_types: &[RelationColumnValueType],
+    evaluation_domain_size: usize,
+    remaining_constraint_use_counts: &BTreeMap<u32, usize>,
+    transformed_columns: &BTreeMap<u32, ExternalPolynomialVector>,
+) -> Result<(), CommonProofProverError> {
+    let mut seeded_objects = BTreeSet::new();
+    for (column_ordinal, vector) in transformed_columns {
+        if vector.element_count() != evaluation_domain_size
+            || column_value_types
+                .get(
+                    usize::try_from(*column_ordinal)
+                        .map_err(|_| CommonProofProverError::CountOverflow)?,
+                )
+                .copied()
+                != Some(vector.value_type())
+            || remaining_constraint_use_counts
+                .get(column_ordinal)
+                .is_none_or(|use_count| *use_count == 0)
+            || !seeded_objects.insert(vector.object())
+        {
+            return Err(CommonProofProverError::InvalidColumn);
+        }
+    }
+    Ok(())
+}
+
+fn retire_transformed_columns_after_constraint(
+    constraint_columns: &[u32],
+    remaining_constraint_use_counts: &mut BTreeMap<u32, usize>,
+    transformed_columns: &mut BTreeMap<u32, ExternalPolynomialVector>,
+) -> Result<(), CommonProofProverError> {
+    if constraint_columns.is_empty()
+        || constraint_columns
+            .windows(2)
+            .any(|adjacent| adjacent[0] >= adjacent[1])
+        || constraint_columns.iter().any(|column_ordinal| {
+            remaining_constraint_use_counts
+                .get(column_ordinal)
+                .is_none_or(|use_count| *use_count == 0)
+                || !transformed_columns.contains_key(column_ordinal)
+        })
+    {
+        return Err(CommonProofProverError::InvalidColumn);
+    }
+
+    for column_ordinal in constraint_columns {
+        let remaining_use_count = remaining_constraint_use_counts
+            .get_mut(column_ordinal)
+            .ok_or(CommonProofProverError::InvalidColumn)?;
+        *remaining_use_count = remaining_use_count
+            .checked_sub(1)
+            .ok_or(CommonProofProverError::InvalidColumn)?;
+        if *remaining_use_count == 0 {
+            remaining_constraint_use_counts.remove(column_ordinal);
+            transformed_columns
+                .remove(column_ordinal)
+                .ok_or(CommonProofProverError::InvalidColumn)?;
+        }
+    }
+    Ok(())
+}
+
 fn next_untransformed_column(
     columns: &[u32],
     next_column_index: &mut usize,
@@ -825,35 +872,6 @@ fn next_untransformed_column(
             .ok_or(CommonProofProverError::CountOverflow)?;
     }
     Ok(columns.get(*next_column_index).copied())
-}
-
-#[cfg(test)]
-mod reusable_transform_tests {
-    use super::{BTreeSet, next_untransformed_column};
-
-    #[test]
-    fn transformed_columns_are_requested_once_across_nonconsecutive_constraints() {
-        let constraint_columns = [vec![2, 4, 7], vec![9], vec![4, 7], vec![2, 9]];
-        let mut transformed_columns = BTreeSet::new();
-        let mut transform_requests = Vec::new();
-
-        for columns in constraint_columns {
-            let mut next_column_index = 0;
-            while let Some(column_ordinal) = next_untransformed_column(
-                &columns,
-                &mut next_column_index,
-                |column_ordinal| transformed_columns.contains(&column_ordinal),
-            )
-            .expect("the transform request index remains in range")
-            {
-                transform_requests.push(column_ordinal);
-                assert!(transformed_columns.insert(column_ordinal));
-                next_column_index += 1;
-            }
-        }
-
-        assert_eq!(transform_requests, vec![2, 4, 7, 9]);
-    }
 }
 
 /// Splits the unique quotient into constant-first components of width `kHat`.
@@ -1032,5 +1050,173 @@ impl CommonProofQuotientComponentCursor {
             CommonProofPrivateCoinError::Prover(CommonProofProverError::CountOverflow)
         })?;
         Ok(Some(component))
+    }
+}
+
+#[cfg(test)]
+mod reusable_transform_tests {
+    use super::{
+        BTreeMap, BTreeSet, CommonProofProverError, ExternalPolynomialVector,
+        ProofExternalMemoryObject, RelationColumnValueType, next_untransformed_column,
+        retire_transformed_columns_after_constraint, validate_seeded_transformed_columns,
+    };
+
+    fn transformed_vector(
+        object_ordinal: u32,
+        value_type: RelationColumnValueType,
+        element_count: usize,
+    ) -> ExternalPolynomialVector {
+        ExternalPolynomialVector::new(
+            ProofExternalMemoryObject::new(object_ordinal),
+            value_type,
+            element_count,
+        )
+        .expect("the test vector has a nonzero element count")
+    }
+
+    #[test]
+    fn transformed_columns_are_requested_once_across_nonconsecutive_constraints() {
+        let constraint_columns = [vec![2, 4, 7], vec![9], vec![4, 7], vec![2, 9]];
+        let mut transformed_columns = BTreeSet::new();
+        let mut transform_requests = Vec::new();
+
+        for columns in constraint_columns {
+            let mut next_column_index = 0;
+            while let Some(column_ordinal) =
+                next_untransformed_column(&columns, &mut next_column_index, |column_ordinal| {
+                    transformed_columns.contains(&column_ordinal)
+                })
+                .expect("the transform request index remains in range")
+            {
+                transform_requests.push(column_ordinal);
+                assert!(transformed_columns.insert(column_ordinal));
+                next_column_index += 1;
+            }
+        }
+
+        assert_eq!(transform_requests, vec![2, 4, 7, 9]);
+    }
+
+    #[test]
+    fn transformed_columns_retire_only_after_their_last_nonconsecutive_constraint() {
+        let base_vector = transformed_vector(20, RelationColumnValueType::BaseField, 16);
+        let extension_vector =
+            transformed_vector(21, RelationColumnValueType::ChallengeExtension, 16);
+        let mut transformed_columns = BTreeMap::from([(2, base_vector), (7, extension_vector)]);
+        let mut remaining_constraint_use_counts = BTreeMap::from([(2, 2), (7, 1)]);
+
+        retire_transformed_columns_after_constraint(
+            &[2],
+            &mut remaining_constraint_use_counts,
+            &mut transformed_columns,
+        )
+        .expect("the first use retains the nonconsecutive column");
+        assert_eq!(
+            remaining_constraint_use_counts,
+            BTreeMap::from([(2, 1), (7, 1)])
+        );
+        assert_eq!(transformed_columns.get(&2), Some(&base_vector));
+
+        retire_transformed_columns_after_constraint(
+            &[7],
+            &mut remaining_constraint_use_counts,
+            &mut transformed_columns,
+        )
+        .expect("the single-use extension column retires");
+        assert!(!remaining_constraint_use_counts.contains_key(&7));
+        assert!(!transformed_columns.contains_key(&7));
+        assert_eq!(transformed_columns.get(&2), Some(&base_vector));
+
+        retire_transformed_columns_after_constraint(
+            &[2],
+            &mut remaining_constraint_use_counts,
+            &mut transformed_columns,
+        )
+        .expect("the final nonconsecutive use retires the base column");
+        assert!(remaining_constraint_use_counts.is_empty());
+        assert!(transformed_columns.is_empty());
+    }
+
+    #[test]
+    fn seeded_transformed_columns_reject_wrong_shape_usage_and_object_aliasing() {
+        let column_value_types = [
+            RelationColumnValueType::BaseField,
+            RelationColumnValueType::ChallengeExtension,
+            RelationColumnValueType::BaseField,
+        ];
+        let remaining_constraint_use_counts = BTreeMap::from([(0, 1), (1, 2)]);
+        let valid_base_vector = transformed_vector(30, RelationColumnValueType::BaseField, 16);
+        let valid_extension_vector =
+            transformed_vector(31, RelationColumnValueType::ChallengeExtension, 16);
+        assert_eq!(
+            validate_seeded_transformed_columns(
+                &column_value_types,
+                16,
+                &remaining_constraint_use_counts,
+                &BTreeMap::from([(0, valid_base_vector), (1, valid_extension_vector)]),
+            ),
+            Ok(()),
+        );
+
+        let invalid_seeds = [
+            BTreeMap::from([(
+                0,
+                transformed_vector(32, RelationColumnValueType::BaseField, 8),
+            )]),
+            BTreeMap::from([(
+                0,
+                transformed_vector(33, RelationColumnValueType::ChallengeExtension, 16),
+            )]),
+            BTreeMap::from([(
+                2,
+                transformed_vector(34, RelationColumnValueType::BaseField, 16),
+            )]),
+            BTreeMap::from([(
+                9,
+                transformed_vector(35, RelationColumnValueType::BaseField, 16),
+            )]),
+            BTreeMap::from([
+                (
+                    0,
+                    transformed_vector(36, RelationColumnValueType::BaseField, 16),
+                ),
+                (
+                    1,
+                    transformed_vector(36, RelationColumnValueType::ChallengeExtension, 16),
+                ),
+            ]),
+        ];
+        for invalid_seed in invalid_seeds {
+            assert_eq!(
+                validate_seeded_transformed_columns(
+                    &column_value_types,
+                    16,
+                    &remaining_constraint_use_counts,
+                    &invalid_seed,
+                ),
+                Err(CommonProofProverError::InvalidColumn),
+            );
+        }
+    }
+
+    #[test]
+    fn invalid_retirement_does_not_partially_consume_valid_columns() {
+        let first_vector = transformed_vector(40, RelationColumnValueType::BaseField, 16);
+        let mut transformed_columns = BTreeMap::from([(2, first_vector)]);
+        let mut remaining_constraint_use_counts = BTreeMap::from([(2, 1), (7, 1)]);
+
+        assert_eq!(
+            retire_transformed_columns_after_constraint(
+                &[2, 7],
+                &mut remaining_constraint_use_counts,
+                &mut transformed_columns,
+            ),
+            Err(CommonProofProverError::InvalidColumn),
+        );
+        assert_eq!(
+            remaining_constraint_use_counts,
+            BTreeMap::from([(2, 1), (7, 1)])
+        );
+        assert_eq!(transformed_columns, BTreeMap::from([(2, first_vector)]));
     }
 }

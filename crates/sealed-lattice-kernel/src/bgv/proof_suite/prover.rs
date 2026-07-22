@@ -153,7 +153,9 @@ pub(crate) use merkle_storage::{
     CommonProofTreeStorageError, PrefetchedCommonProofOpeningArtifact,
     SetupPolynomialColumnMajorMerkleReplay, SetupPolynomialColumnMajorMerkleReplayMode,
     SetupPolynomialColumnMajorMerkleRootPass, StatementOwnedMerkleReplay,
-    StatementOwnedMerkleReplayMode, StoredCommonProofMerkleTree, common_proof_merkle_storage_plan,
+    StatementOwnedMerkleReplayMode, StoredCommonProofMerkleTree,
+    common_proof_merkle_materialization_resident_memory_requirement,
+    common_proof_merkle_storage_plan,
     setup_polynomial_column_major_merkle_replay_wasm_memory_bound,
 };
 pub(crate) use private_coins::{

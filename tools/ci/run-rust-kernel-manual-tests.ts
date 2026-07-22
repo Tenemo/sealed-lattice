@@ -10,6 +10,7 @@ import {
     focusedRustLaneScripts,
     fullProfileEvidenceRustTests,
     measurementRustTests,
+    phaseLivenessEvidenceRustTests,
     verifyFocusedRustLaneSelection,
 } from './rust-focused-lane-selection.js';
 import { normalizeRustTestFilter } from './rust-kernel-test-arguments.js';
@@ -17,6 +18,7 @@ import { normalizeRustTestFilter } from './rust-kernel-test-arguments.js';
 const manualRustKernelTests = {
     'rust-full-profile-evidence': fullProfileEvidenceRustTests,
     'rust-measurements': measurementRustTests,
+    'rust-phase-liveness-evidence': phaseLivenessEvidenceRustTests,
 } as const;
 
 type ManualRustKernelLane = keyof typeof manualRustKernelTests;
@@ -24,6 +26,7 @@ type ManualRustKernelLane = keyof typeof manualRustKernelTests;
 const laneLabels = {
     'rust-full-profile-evidence': 'Rust full-profile evidence',
     'rust-measurements': 'Rust measurements',
+    'rust-phase-liveness-evidence': 'Rust phase-liveness evidence',
 } as const satisfies Record<ManualRustKernelLane, string>;
 
 type ManualRustLaneSelectionVerifier = (input: {
@@ -108,7 +111,7 @@ const parseArguments = (
     );
     if (!(rawLane !== undefined && rawLane in manualRustKernelTests)) {
         throw new Error(
-            'The guarded manual Rust runner requires lane rust-full-profile-evidence or rust-measurements.',
+            'The guarded manual Rust runner requires lane rust-full-profile-evidence, rust-measurements, or rust-phase-liveness-evidence.',
         );
     }
     const lane = rawLane as ManualRustKernelLane;

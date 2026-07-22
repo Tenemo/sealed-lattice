@@ -123,7 +123,6 @@ pub(crate) struct ExternalStockhamTransformPlan {
     passes: Vec<ExternalStockhamPassPlan>,
     object_plans: Vec<ProofExternalMemoryObjectPlan>,
     final_output: ExternalPolynomialVector,
-    next_object_ordinal: u32,
     next_executor_step: u32,
     maximum_scan_element_count: usize,
     maximum_resident_byte_length: u64,
@@ -348,6 +347,7 @@ impl ExternalStockhamTransformPlan {
         )
     }
 
+    #[cfg(test)]
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new_with_output_objects(
         domain: ProofEvaluationDomain,
@@ -565,14 +565,6 @@ impl ExternalStockhamTransformPlan {
             input = output;
         }
         let final_output = input;
-        if let Some(objects) = output_objects {
-            next_object_ordinal = objects
-                .iter()
-                .map(|object| object.ordinal())
-                .max()
-                .and_then(|ordinal| ordinal.checked_add(1))
-                .ok_or(ExternalPolynomialError::InvalidPlan)?;
-        }
         let pass_count_u64 = u64::from(pass_count);
         let total_written_byte_length = output_exact_byte_length
             .checked_mul(pass_count_u64)
@@ -593,7 +585,6 @@ impl ExternalStockhamTransformPlan {
             passes,
             object_plans,
             final_output,
-            next_object_ordinal,
             next_executor_step,
             maximum_scan_element_count,
             maximum_resident_byte_length,
@@ -615,10 +606,6 @@ impl ExternalStockhamTransformPlan {
     #[cfg(test)]
     pub(crate) const fn final_output(&self) -> ExternalPolynomialVector {
         self.final_output
-    }
-
-    pub(crate) const fn next_object_ordinal(&self) -> u32 {
-        self.next_object_ordinal
     }
 
     pub(crate) const fn next_executor_step(&self) -> u32 {
@@ -1973,19 +1960,17 @@ mod tests {
             TestTransformObjectStrategy::FixedScratchAndPersistentFinalOutput {
                 transient_scratch_objects,
                 persistent_final_output_object,
-            } => {
-                ExternalStockhamTransformPlan::new_with_fixed_scratch_and_persistent_final_output(
-                    domain,
-                    direction,
-                    source,
-                    transient_scratch_objects,
-                    persistent_final_output_object,
-                    first_transform_step,
-                    first_transform_step + domain_size.trailing_zeros(),
-                    maximum_chunk_byte_length,
-                    ProofExternalMemoryProtection::PublicIntegrity,
-                )
-            }
+            } => ExternalStockhamTransformPlan::new_with_fixed_scratch_and_persistent_final_output(
+                domain,
+                direction,
+                source,
+                transient_scratch_objects,
+                persistent_final_output_object,
+                first_transform_step,
+                first_transform_step + domain_size.trailing_zeros(),
+                maximum_chunk_byte_length,
+                ProofExternalMemoryProtection::PublicIntegrity,
+            ),
         }
         .expect("the external transform plan is valid");
         let final_step = transform_plan.next_executor_step();
@@ -2309,10 +2294,7 @@ mod tests {
                 .expect("the transform has a final output lifecycle");
             assert_eq!(final_output_plan.issued_step(), pass_count);
             assert_eq!(final_output_plan.last_use_step(), pass_count + 1);
-            assert_eq!(
-                reused.usage.deleted_object_count(),
-                u64::from(pass_count) + 1,
-            );
+            assert_eq!(reused.usage.deleted_object_count(), pass_count + 1,);
         }
     }
 
@@ -2334,22 +2316,20 @@ mod tests {
             ProofExternalMemoryObject::new(11),
         ];
         let persistent_final_output_object = ProofExternalMemoryObject::new(12);
-        let derive_plan = |transient_scratch_objects,
-                           final_output_object,
-                           last_use_step,
-                           protection| {
-            ExternalStockhamTransformPlan::new_with_fixed_scratch_and_persistent_final_output(
-                domain,
-                ExternalStockhamTransformDirection::Forward,
-                source,
-                transient_scratch_objects,
-                final_output_object,
-                first_executor_step,
-                last_use_step,
-                80,
-                protection,
-            )
-        };
+        let derive_plan =
+            |transient_scratch_objects, final_output_object, last_use_step, protection| {
+                ExternalStockhamTransformPlan::new_with_fixed_scratch_and_persistent_final_output(
+                    domain,
+                    ExternalStockhamTransformDirection::Forward,
+                    source,
+                    transient_scratch_objects,
+                    final_output_object,
+                    first_executor_step,
+                    last_use_step,
+                    80,
+                    protection,
+                )
+            };
         let valid_plan = derive_plan(
             scratch_objects,
             persistent_final_output_object,
@@ -2379,7 +2359,10 @@ mod tests {
             .copied()
             .expect("the final output lifecycle exists");
         assert_eq!(final_output_plan.issued_step(), next_executor_step - 1);
-        assert_eq!(final_output_plan.last_use_step(), final_output_last_use_step);
+        assert_eq!(
+            final_output_plan.last_use_step(),
+            final_output_last_use_step
+        );
 
         for (transient_scratch_objects, final_output_object) in [
             (
