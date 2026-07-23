@@ -545,6 +545,7 @@ const createSequenceDependencies = (input: {
     readonly failPreflightFeaturePhase?: boolean;
     readonly failWidthStaticPreflightPhase?: boolean;
     readonly includeBaseline?: boolean;
+    readonly invalidWidthStaticPreflightGuardTelemetry?: boolean;
     readonly invocations: CommandInvocation[];
     readonly leaveCustodyOnFailedWidth?: ProofStorageWidth;
     readonly repositoryCheckpoints?: string[];
@@ -600,7 +601,11 @@ const createSequenceDependencies = (input: {
                     'SEALED_LATTICE_PROOF_STORAGE_WIDTH_STATIC_PREFLIGHT_RESULT_PATH'
                 ];
             if (staticPreflightResultPath !== undefined) {
-                if (input.failWidthStaticPreflightPhase === true) {
+                if (
+                    input.failWidthStaticPreflightPhase === true &&
+                    invocation.description ===
+                        'guarded run the proof-storage width non-ignored static feature tests'
+                ) {
                     return failedCommandResult();
                 }
                 const diagnosticsPathIndex =
@@ -620,7 +625,17 @@ const createSequenceDependencies = (input: {
                     ),
                     writeFile(
                         diagnosticsPath,
-                        `${buildGuardJsonLines(true)}\n`,
+                        `${
+                            input.invalidWidthStaticPreflightGuardTelemetry ===
+                                true &&
+                            invocation.description ===
+                                'guarded run the proof-storage width non-ignored static feature tests'
+                                ? buildGuardJsonLines(true).replace(
+                                      '"sampleError":null',
+                                      '"sampleError":"intentional static guard failure"',
+                                  )
+                                : buildGuardJsonLines(true)
+                        }\n`,
                         { encoding: 'utf8', flag: 'wx' },
                     ),
                 ]);
@@ -1966,6 +1981,9 @@ describe('Proof-storage width evidence runner', () => {
                         undefined,
                 ),
             ).toHaveLength(0);
+            await expect(
+                access(officialReservationRootPathForRun(runDirectoryPath)),
+            ).rejects.toMatchObject({ code: 'ENOENT' });
         }));
 
     it('does not start width 8 when the width-specific static gate fails', () =>
@@ -1988,6 +2006,44 @@ describe('Proof-storage width evidence runner', () => {
                         undefined,
                 ),
             ).toHaveLength(0);
+            await expect(
+                access(officialReservationRootPathForRun(runDirectoryPath)),
+            ).rejects.toMatchObject({ code: 'ENOENT' });
+        }));
+
+    it('validates the complete width-static guard lifecycle before manifest creation or width 8', () =>
+        withTemporaryDirectory(async (runDirectoryPath) => {
+            const invocations: CommandInvocation[] = [];
+            await expect(
+                executeProofStorageWidthEvidenceSequence({
+                    dependencies: createSequenceDependencies({
+                        invalidWidthStaticPreflightGuardTelemetry: true,
+                        invocations,
+                        runDirectoryPath,
+                    }),
+                    runLog: createRunLog(runDirectoryPath),
+                }),
+            ).rejects.toThrow(/sampling error/u);
+            expect(
+                invocations.filter(
+                    (invocation) =>
+                        invocation.env?.SEALED_LATTICE_PROOF_STORAGE_WIDTH !==
+                        undefined,
+                ),
+            ).toHaveLength(0);
+            await expect(
+                access(officialReservationRootPathForRun(runDirectoryPath)),
+            ).rejects.toMatchObject({ code: 'ENOENT' });
+            await expect(
+                access(
+                    path.join(
+                        runDirectoryPath,
+                        'attachments',
+                        'proof-storage-width',
+                        'proof-storage-width-manifest.json',
+                    ),
+                ),
+            ).rejects.toMatchObject({ code: 'ENOENT' });
         }));
 
     it('preserves a postwrite failure together with the final repository-check failure', () =>

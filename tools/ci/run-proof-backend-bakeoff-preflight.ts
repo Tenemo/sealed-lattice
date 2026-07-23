@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdir, readFile } from 'node:fs/promises';
+import { access, mkdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { withLocalHeavyLaneLease } from './heavy-lane-lease.js';
@@ -8,6 +8,7 @@ import {
     createProcessMemoryGuard,
     type ProcessMemoryGuard,
 } from './process-memory-guard.js';
+import { validateProofStorageWidthStaticPreflightResult } from './proof-storage-width-evidence.js';
 import {
     runCommandAndCaptureOutput,
     type CapturedCommandResult,
@@ -28,6 +29,11 @@ const resourceSampleIntervalMilliseconds = 100;
 const exactCommitHashPattern = /^[0-9a-f]{40}$/u;
 const exactSha256HexPattern = /^[0-9a-f]{64}$/u;
 const evidenceFileName = 'proof-backend-bakeoff-preflight-evidence.json';
+const staticFeatureTestResultFileName =
+    'proof-backend-bakeoff-preflight-width-static-result.json';
+const staticFeatureTestResultRelativePath = `attachments/${staticFeatureTestResultFileName}`;
+const staticPreflightResultPathEnvironmentVariable =
+    'SEALED_LATTICE_PROOF_STORAGE_WIDTH_STATIC_PREFLIGHT_RESULT_PATH';
 
 const proofBackendBakeoffFilteredNonIgnoredFeatureTestNames = [
     `${moduleTestFilter}::frozen_checked_backend_bindings_are_nonplaceholder_and_canonical`,
@@ -297,22 +303,39 @@ export const buildProofBackendBakeoffFeatureTestCommand = (
 });
 
 export const buildProofStorageWidthStaticFeatureTestCommand = (
-    environment: NodeJS.ProcessEnv,
-): CommandInvocation => ({
-    args: [
-        ...buildCargoArguments(),
-        proofStorageWidthStaticPreflightTestName,
-        '--',
-        '--exact',
-        '--nocapture',
-        '--test-threads',
-        '1',
-    ],
-    command: 'cargo',
-    description: 'run the proof-storage width static non-ignored feature test',
-    env: environment,
-    logFileSlug: 'cargo-proof-storage-width-static-feature-test',
-});
+    input: Readonly<{
+        environment: NodeJS.ProcessEnv;
+        resultPath: string;
+    }>,
+): CommandInvocation => {
+    if (
+        !path.isAbsolute(input.resultPath) ||
+        path.resolve(input.resultPath) !== input.resultPath
+    ) {
+        throw new Error(
+            'The proof-storage width static feature-test result path must be an exact absolute path.',
+        );
+    }
+    return {
+        args: [
+            ...buildCargoArguments(),
+            proofStorageWidthStaticPreflightTestName,
+            '--',
+            '--exact',
+            '--nocapture',
+            '--test-threads',
+            '1',
+        ],
+        command: 'cargo',
+        description:
+            'run the proof-storage width static non-ignored feature test',
+        env: {
+            ...input.environment,
+            [staticPreflightResultPathEnvironmentVariable]: input.resultPath,
+        },
+        logFileSlug: 'cargo-proof-storage-width-static-feature-test',
+    };
+};
 
 const isPreflightTestName = (
     testName: string,
@@ -372,6 +395,54 @@ const defaultCommandExecutor: CommandExecutor = (invocation, runLog) =>
         echoOutput: true,
         runLog,
     });
+
+const requirePathDoesNotExist = async (filePath: string): Promise<void> => {
+    try {
+        await access(filePath);
+    } catch (error) {
+        if (
+            typeof error === 'object' &&
+            error !== null &&
+            'code' in error &&
+            error.code === 'ENOENT'
+        ) {
+            return;
+        }
+        throw error;
+    }
+    throw new Error(
+        `Refusing to overwrite proof backend bakeoff preflight evidence: ${filePath}.`,
+    );
+};
+
+const readAndValidateStaticPreflightResult = async (input: {
+    readonly resultPath: string;
+}): Promise<string> => {
+    let resultContents: Buffer;
+    try {
+        resultContents = await readFile(input.resultPath);
+    } catch (error) {
+        throw Object.assign(
+            new Error(
+                'The proof-storage width static feature test did not create its exact result artifact.',
+            ),
+            { cause: error },
+        );
+    }
+    let parsedResult: unknown;
+    try {
+        parsedResult = JSON.parse(resultContents.toString('utf8')) as unknown;
+    } catch (error) {
+        throw Object.assign(
+            new Error(
+                'The proof-storage width static feature-test result is not valid JSON.',
+            ),
+            { cause: error },
+        );
+    }
+    validateProofStorageWidthStaticPreflightResult(parsedResult);
+    return sha256Hex(resultContents);
+};
 
 const readRepositoryStateWithCommands = async (input: {
     readonly checkpoint: RepositoryCheckpoint;
@@ -640,28 +711,29 @@ const validateProcessMemoryGuardTelemetry = (input: {
     }
 };
 
-const readAndValidateGuardArtifact = async (input: {
-    readonly diagnosticsPath: string;
-    readonly expectedMemoryLimitBytes: number;
-    readonly expectedSha256Hex?: string;
-}): Promise<string> => {
-    const diagnosticsContents = await readFile(input.diagnosticsPath);
-    const diagnosticsSha256Hex = sha256Hex(diagnosticsContents);
-    if (
-        input.expectedSha256Hex !== undefined &&
-        diagnosticsSha256Hex !== input.expectedSha256Hex
-    ) {
-        throw new Error(
-            `${input.diagnosticsPath} does not match its bound SHA-256 digest.`,
-        );
-    }
-    validateProcessMemoryGuardTelemetry({
-        diagnosticsJsonLines: diagnosticsContents.toString('utf8'),
-        diagnosticsPath: input.diagnosticsPath,
-        expectedMemoryLimitBytes: input.expectedMemoryLimitBytes,
-    });
-    return diagnosticsSha256Hex;
-};
+export const readAndValidateCompletedProcessMemoryGuardArtifact =
+    async (input: {
+        readonly diagnosticsPath: string;
+        readonly expectedMemoryLimitBytes: number;
+        readonly expectedSha256Hex?: string;
+    }): Promise<string> => {
+        const diagnosticsContents = await readFile(input.diagnosticsPath);
+        const diagnosticsSha256Hex = sha256Hex(diagnosticsContents);
+        if (
+            input.expectedSha256Hex !== undefined &&
+            diagnosticsSha256Hex !== input.expectedSha256Hex
+        ) {
+            throw new Error(
+                `${input.diagnosticsPath} does not match its bound SHA-256 digest.`,
+            );
+        }
+        validateProcessMemoryGuardTelemetry({
+            diagnosticsJsonLines: diagnosticsContents.toString('utf8'),
+            diagnosticsPath: input.diagnosticsPath,
+            expectedMemoryLimitBytes: input.expectedMemoryLimitBytes,
+        });
+        return diagnosticsSha256Hex;
+    };
 
 const requireRepositoryState = (
     value: unknown,
@@ -707,7 +779,7 @@ const requireBoundGuardArtifact = async (input: {
             `${input.artifactDescription} must bind an exact lowercase SHA-256 digest.`,
         );
     }
-    await readAndValidateGuardArtifact({
+    await readAndValidateCompletedProcessMemoryGuardArtifact({
         diagnosticsPath: path.join(
             input.runDirectoryPath,
             input.expectedRelativePath,
@@ -715,6 +787,47 @@ const requireBoundGuardArtifact = async (input: {
         expectedSha256Hex: artifact.diagnosticsSha256Hex,
         expectedMemoryLimitBytes: input.expectedMemoryLimitBytes,
     });
+};
+
+const requireBoundStaticPreflightResult = async (input: {
+    readonly artifact: Record<string, unknown>;
+    readonly runDirectoryPath: string;
+}): Promise<void> => {
+    if (input.artifact.resultPath !== staticFeatureTestResultRelativePath) {
+        throw new Error(
+            `The completed proof-storage width static feature test must use the exact result path ${staticFeatureTestResultRelativePath}.`,
+        );
+    }
+    if (
+        typeof input.artifact.resultSha256Hex !== 'string' ||
+        !exactSha256HexPattern.test(input.artifact.resultSha256Hex)
+    ) {
+        throw new Error(
+            'The completed proof-storage width static feature test must bind an exact lowercase result SHA-256 digest.',
+        );
+    }
+    const resultPath = path.join(
+        input.runDirectoryPath,
+        staticFeatureTestResultRelativePath,
+    );
+    const resultContents = await readFile(resultPath);
+    if (sha256Hex(resultContents) !== input.artifact.resultSha256Hex) {
+        throw new Error(
+            `${resultPath} does not match its bound result SHA-256 digest.`,
+        );
+    }
+    let parsedResult: unknown;
+    try {
+        parsedResult = JSON.parse(resultContents.toString('utf8')) as unknown;
+    } catch (error) {
+        throw Object.assign(
+            new Error(
+                'The bound proof-storage width static feature-test result is not valid JSON.',
+            ),
+            { cause: error },
+        );
+    }
+    validateProofStorageWidthStaticPreflightResult(parsedResult);
 };
 
 export const validateProofBackendBakeoffPreflightEvidenceArtifacts = async (
@@ -758,9 +871,9 @@ export const validateProofBackendBakeoffPreflightEvidenceArtifacts = async (
         parsedEvidence,
         'Proof backend bakeoff preflight evidence',
     );
-    if (evidence.formatVersion !== 4) {
+    if (evidence.formatVersion !== 5) {
         throw new Error(
-            'The proof backend bakeoff preflight evidence format version must be 4.',
+            'The proof backend bakeoff preflight evidence format version must be 5.',
         );
     }
     if (
@@ -885,6 +998,10 @@ export const validateProofBackendBakeoffPreflightEvidenceArtifacts = async (
         expectedMemoryLimitBytes: input.expectedMemoryLimitBytes,
         runDirectoryPath,
     });
+    await requireBoundStaticPreflightResult({
+        artifact: completedStaticFeatureTest,
+        runDirectoryPath,
+    });
 
     if (
         !Array.isArray(evidence.completedTests) ||
@@ -976,7 +1093,6 @@ export const executeProofBackendBakeoffPreflightSequence = async (input: {
                 executeCommand,
                 runLog,
             }));
-
     const repositoryStateInitial = await readRepositoryState(
         'initial',
         input.runLog,
@@ -984,6 +1100,7 @@ export const executeProofBackendBakeoffPreflightSequence = async (input: {
     requireCleanRepository(repositoryStateInitial, 'initial');
 
     const cargoEnvironment = buildProofBackendBakeoffEnvironment();
+    delete cargoEnvironment[staticPreflightResultPathEnvironmentVariable];
     await executeRequiredCommand({
         command: buildProofBackendBakeoffPrecompileCommand(cargoEnvironment),
         executeCommand,
@@ -1032,7 +1149,19 @@ export const executeProofBackendBakeoffPreflightSequence = async (input: {
         input.runLog.runDirectoryPath,
         'resources',
     );
-    await mkdir(resourceDirectoryPath, { recursive: true });
+    const attachmentDirectoryPath = path.join(
+        input.runLog.runDirectoryPath,
+        'attachments',
+    );
+    await Promise.all([
+        mkdir(attachmentDirectoryPath, { recursive: true }),
+        mkdir(resourceDirectoryPath, { recursive: true }),
+    ]);
+    const staticFeatureTestResultPath = path.join(
+        attachmentDirectoryPath,
+        staticFeatureTestResultFileName,
+    );
+    await requirePathDoesNotExist(staticFeatureTestResultPath);
     const completedTests: Array<
         Readonly<{
             diagnosticsPath: string;
@@ -1056,10 +1185,11 @@ export const executeProofBackendBakeoffPreflightSequence = async (input: {
         executeCommand,
         runLog: input.runLog,
     });
-    const featureTestDiagnosticsSha256Hex = await readAndValidateGuardArtifact({
-        diagnosticsPath: featureTestDiagnosticsPath,
-        expectedMemoryLimitBytes: processMemoryGuard.memoryLimitBytes,
-    });
+    const featureTestDiagnosticsSha256Hex =
+        await readAndValidateCompletedProcessMemoryGuardArtifact({
+            diagnosticsPath: featureTestDiagnosticsPath,
+            expectedMemoryLimitBytes: processMemoryGuard.memoryLimitBytes,
+        });
     const completedFeatureTestPhase = {
         diagnosticsPath: relativeDiagnosticPath(
             input.runLog.runDirectoryPath,
@@ -1077,7 +1207,10 @@ export const executeProofBackendBakeoffPreflightSequence = async (input: {
         staticFeatureTestDiagnosticsFileName,
     );
     const guardedStaticFeatureTestCommand = processMemoryGuard.guardCommand(
-        buildProofStorageWidthStaticFeatureTestCommand(cargoEnvironment),
+        buildProofStorageWidthStaticFeatureTestCommand({
+            environment: cargoEnvironment,
+            resultPath: staticFeatureTestResultPath,
+        }),
         {
             diagnosticsPath: staticFeatureTestDiagnosticsPath,
             resourceSampleIntervalMilliseconds,
@@ -1088,8 +1221,12 @@ export const executeProofBackendBakeoffPreflightSequence = async (input: {
         executeCommand,
         runLog: input.runLog,
     });
+    const staticFeatureTestResultSha256Hex =
+        await readAndValidateStaticPreflightResult({
+            resultPath: staticFeatureTestResultPath,
+        });
     const staticFeatureTestDiagnosticsSha256Hex =
-        await readAndValidateGuardArtifact({
+        await readAndValidateCompletedProcessMemoryGuardArtifact({
             diagnosticsPath: staticFeatureTestDiagnosticsPath,
             expectedMemoryLimitBytes: processMemoryGuard.memoryLimitBytes,
         });
@@ -1099,6 +1236,11 @@ export const executeProofBackendBakeoffPreflightSequence = async (input: {
             staticFeatureTestDiagnosticsPath,
         ),
         diagnosticsSha256Hex: staticFeatureTestDiagnosticsSha256Hex,
+        resultPath: relativeDiagnosticPath(
+            input.runLog.runDirectoryPath,
+            staticFeatureTestResultPath,
+        ),
+        resultSha256Hex: staticFeatureTestResultSha256Hex,
         testName: proofStorageWidthStaticPreflightTestName,
     };
     input.runLog.writeEvent({
@@ -1126,10 +1268,11 @@ export const executeProofBackendBakeoffPreflightSequence = async (input: {
             executeCommand,
             runLog: input.runLog,
         });
-        const diagnosticsSha256Hex = await readAndValidateGuardArtifact({
-            diagnosticsPath,
-            expectedMemoryLimitBytes: processMemoryGuard.memoryLimitBytes,
-        });
+        const diagnosticsSha256Hex =
+            await readAndValidateCompletedProcessMemoryGuardArtifact({
+                diagnosticsPath,
+                expectedMemoryLimitBytes: processMemoryGuard.memoryLimitBytes,
+            });
         completedTests.push({
             diagnosticsPath: relativeDiagnosticPath(
                 input.runLog.runDirectoryPath,
@@ -1158,11 +1301,7 @@ export const executeProofBackendBakeoffPreflightSequence = async (input: {
         intervalDescription: 'during proof backend bakeoff preflight execution',
     });
 
-    const attachmentPath = path.join(
-        input.runLog.runDirectoryPath,
-        'attachments',
-        evidenceFileName,
-    );
+    const attachmentPath = path.join(attachmentDirectoryPath, evidenceFileName);
     await writeJsonAtomicallyAndExclusively(attachmentPath, {
         completedFeatureTestPhase,
         completedStaticFeatureTest,
@@ -1172,7 +1311,7 @@ export const executeProofBackendBakeoffPreflightSequence = async (input: {
             ignoredTestNames: proofBackendBakeoffIgnoredTestNames,
             nonIgnoredTestNames: proofBackendBakeoffNonIgnoredFeatureTestNames,
         },
-        formatVersion: 4,
+        formatVersion: 5,
         processMemoryGuard: {
             memoryLimitBytes: processMemoryGuard.memoryLimitBytes,
             memoryLimitGigabytes: processMemoryGuard.memoryLimitGigabytes,

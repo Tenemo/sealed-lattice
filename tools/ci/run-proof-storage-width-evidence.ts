@@ -42,6 +42,7 @@ import {
 } from './run-command.js';
 import {
     executeProofBackendBakeoffPreflightSequence,
+    readAndValidateCompletedProcessMemoryGuardArtifact,
     validateProofBackendBakeoffPreflightEvidenceArtifacts,
 } from './run-proof-backend-bakeoff-preflight.js';
 
@@ -1312,17 +1313,12 @@ export const validateProofStorageWidthObservedEvidenceArtifacts = async (
         fieldName: 'staticPreflight.guardPath',
         runDirectoryPath,
     });
-    const [
-        serializedManifest,
-        serializedPreflight,
-        serializedStaticPreflight,
-        serializedStaticGuard,
-    ] = await Promise.all([
-        readFile(manifestPath, 'utf8'),
-        readFile(preflightPath, 'utf8'),
-        readFile(staticPreflightPath, 'utf8'),
-        readFile(staticGuardPath, 'utf8'),
-    ]);
+    const [serializedManifest, serializedPreflight, serializedStaticPreflight] =
+        await Promise.all([
+            readFile(manifestPath, 'utf8'),
+            readFile(preflightPath, 'utf8'),
+            readFile(staticPreflightPath, 'utf8'),
+        ]);
     requireArtifactDigest({
         expectedSha256Hex: manifestSha256Hex,
         fieldName: 'Manifest artifact',
@@ -1350,11 +1346,6 @@ export const validateProofStorageWidthObservedEvidenceArtifacts = async (
         staticPreflightBinding.guardSha256Hex,
         'staticPreflight.guardSha256Hex',
     );
-    requireArtifactDigest({
-        expectedSha256Hex: staticPreflightGuardSha256Hex,
-        fieldName: 'Static preflight guard artifact',
-        serialized: serializedStaticGuard,
-    });
     const staticPreflight = validateProofStorageWidthStaticPreflightResult(
         parseJsonEvidence(
             serializedStaticPreflight,
@@ -1400,10 +1391,10 @@ export const validateProofStorageWidthObservedEvidenceArtifacts = async (
         expectedCommitHash: repositoryCommitHash,
         expectedMemoryLimitBytes: manifestGuard.memoryLimitBytes,
     });
-    validateProcessMemoryGuardLimitBinding({
+    await readAndValidateCompletedProcessMemoryGuardArtifact({
+        diagnosticsPath: staticGuardPath,
         expectedMemoryLimitBytes: manifestGuard.memoryLimitBytes,
-        guardJsonLines: serializedStaticGuard,
-        guardName: 'Static preflight',
+        expectedSha256Hex: staticPreflightGuardSha256Hex,
     });
     const expectedOfficialSampleReservation =
         buildProofStorageWidthNativeReservationIdentity({
@@ -1782,10 +1773,13 @@ const executeProofStorageWidthEvidenceSequenceAttempt = async (input: {
         executeCommand,
         runLog: input.runLog,
     });
-    const [serializedStaticPreflight, serializedStaticPreflightGuard] =
+    const [serializedStaticPreflight, staticPreflightGuardSha256Hex] =
         await Promise.all([
             readFile(staticPreflightResultPath, 'utf8'),
-            readFile(staticPreflightGuardPath, 'utf8'),
+            readAndValidateCompletedProcessMemoryGuardArtifact({
+                diagnosticsPath: staticPreflightGuardPath,
+                expectedMemoryLimitBytes: processMemoryGuard.memoryLimitBytes,
+            }),
         ]);
     const staticPreflight = validateProofStorageWidthStaticPreflightResult(
         parseJsonEvidence(
@@ -1796,10 +1790,6 @@ const executeProofStorageWidthEvidenceSequenceAttempt = async (input: {
     const staticPreflightEvidenceSha256Hex = createHash('sha256')
         .update(serializedStaticPreflight)
         .digest('hex');
-    const staticPreflightGuardSha256Hex = createHash('sha256')
-        .update(serializedStaticPreflightGuard)
-        .digest('hex');
-
     const repositoryStateBefore = await readRepositoryState(
         'before',
         input.runLog,
