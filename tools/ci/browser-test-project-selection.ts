@@ -14,6 +14,9 @@ export const ordinaryDesktopBrowserExcludedTestGlobs = [
 export const proofStorageWidthBrowserEvidenceProjectName =
     'chromium-proof-storage-width-evidence';
 
+export const proofStorageWidthBrowserEvidenceWorkspaceProjectName =
+    'browser-proof-storage-width-evidence';
+
 export const proofStorageWidthBrowserEvidenceInstanceDefinitions = [
     {
         browser: 'chromium',

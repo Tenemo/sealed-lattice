@@ -10,8 +10,8 @@ import {
     manualDesktopBrowserProofEvidenceTestGlobs,
     ordinaryDesktopBrowserExcludedTestGlobs,
     proofStorageWidthBrowserEvidenceInstanceDefinitions,
-    proofStorageWidthBrowserEvidenceProjectName,
     proofStorageWidthBrowserEvidenceTestGlobs,
+    proofStorageWidthBrowserEvidenceWorkspaceProjectName,
 } from './tools/ci/browser-test-project-selection.js';
 import { resolveTestDiagnosticPaths } from './tools/ci/test-diagnostic-environment.js';
 import { VitestDiagnosticReporter } from './tools/ci/vitest-diagnostic-reporter.js';
@@ -314,7 +314,8 @@ export default defineConfig({
                 hookTimeout: 30 * 60_000,
                 include: proofStorageWidthBrowserEvidenceTestGlobs,
                 instances: proofStorageWidthBrowserEvidenceInstances,
-                projectName: proofStorageWidthBrowserEvidenceProjectName,
+                projectName:
+                    proofStorageWidthBrowserEvidenceWorkspaceProjectName,
                 retainFailureTrace: true,
                 testTimeout: 12 * 60 * 60_000,
             }),

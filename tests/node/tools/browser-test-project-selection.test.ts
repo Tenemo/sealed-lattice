@@ -6,12 +6,16 @@ import {
     proofStorageWidthBrowserEvidenceInstanceDefinitions,
     proofStorageWidthBrowserEvidenceProjectName,
     proofStorageWidthBrowserEvidenceTestGlobs,
+    proofStorageWidthBrowserEvidenceWorkspaceProjectName,
 } from '#tools/ci/browser-test-project-selection';
 
 describe('Browser test project selection', () => {
     it('owns proof-storage width evidence in one exact Chromium selector', () => {
         expect(proofStorageWidthBrowserEvidenceProjectName).toBe(
             'chromium-proof-storage-width-evidence',
+        );
+        expect(proofStorageWidthBrowserEvidenceWorkspaceProjectName).toBe(
+            'browser-proof-storage-width-evidence',
         );
         expect(proofStorageWidthBrowserEvidenceTestGlobs).toEqual([
             'packages/wasm/tests/browser/proof-storage-width-evidence.manual.browser.test.ts',
@@ -29,6 +33,14 @@ describe('Browser test project selection', () => {
                     !('persistentContext' in instanceDefinition),
             ),
         ).toBe(true);
+        expect(
+            new Set([
+                proofStorageWidthBrowserEvidenceWorkspaceProjectName,
+                ...proofStorageWidthBrowserEvidenceInstanceDefinitions.map(
+                    (instanceDefinition) => instanceDefinition.name,
+                ),
+            ]).size,
+        ).toBe(proofStorageWidthBrowserEvidenceInstanceDefinitions.length + 1);
     });
 
     it('excludes every manual evidence file from the ordinary desktop lane', () => {
