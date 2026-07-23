@@ -258,6 +258,7 @@ const sha256Hex = (value: string | Uint8Array): string =>
     createHash('sha256').update(value).digest('hex');
 
 const createNativeEvidence = async (input: {
+    readonly fullWidthExternalIoByteLength?: bigint;
     readonly measurementRecord: Readonly<Record<string, unknown>>;
     readonly nativeEvidencePath: string;
 }): Promise<NativeWidthEvidence> => {
@@ -280,9 +281,10 @@ const createNativeEvidence = async (input: {
         externalCommittedTransactionCount:
             measurement.externalCommittedTransactionCount * 7n,
         externalIoByteLength:
+            input.fullWidthExternalIoByteLength ??
             (measurement.externalReadByteLength +
                 measurement.externalWrittenByteLength) *
-            7n,
+                7n,
         ldeTransformCount:
             deriveProofStorageWidthGeometry(3_451).ldeTransformCount,
         publicBaseLeafColumnCount: 3_451,
@@ -364,6 +366,7 @@ const createDependencies = (input: {
         readonly reservationRootPath: string;
         readonly runDirectoryPath: string;
     };
+    readonly fullWidthExternalIoByteLength?: bigint;
     readonly repositoryStateForCheckpoint?: (
         checkpoint: 'after' | 'before' | 'closure-after' | 'initial',
     ) => Readonly<{ commitHash: string; treeDirty: boolean }>;
@@ -417,6 +420,12 @@ const createDependencies = (input: {
         },
         loadNativeWidthEvidence: async () => {
             nativeEvidence ??= await createNativeEvidence({
+                ...(input.fullWidthExternalIoByteLength === undefined
+                    ? {}
+                    : {
+                          fullWidthExternalIoByteLength:
+                              input.fullWidthExternalIoByteLength,
+                      }),
                 measurementRecord: createMeasurementRecord(
                     sha256Hex(
                         await readFile(input.fixture.processedWasmKernelPath),
@@ -611,6 +620,162 @@ describe('Proof-storage width browser evidence runner', () => {
             expect(replacementInvocations).toHaveLength(0);
         }));
 
+    it('closes one canonical decisive-negative projection before failing the command', () =>
+        withTemporaryFixture(async (fixture) => {
+            const sampleInvocations: CommandInvocation[] = [];
+            const lifecycle: string[] = [];
+            const completionEvents: string[] = [];
+            const decisiveNegativeDetails: Array<
+                Readonly<Record<string, unknown>>
+            > = [];
+            const dependencies = createDependencies({
+                fixture,
+                fullWidthExternalIoByteLength: 1_099_511_627_776n,
+                repositoryStateForCheckpoint: (checkpoint) => {
+                    lifecycle.push(`repository:${checkpoint}`);
+                    return { commitHash, treeDirty: false };
+                },
+                sampleInvocations,
+            });
+            await expect(
+                executeProofStorageWidthBrowserEvidence({
+                    dependencies,
+                    nativeEvidencePath: fixture.nativeEvidencePath,
+                    runLog: createRunLog(fixture.runDirectoryPath, {
+                        writeCombinedOutput: (output) => {
+                            lifecycle.push('output');
+                            expect(output).toContain(
+                                'proof-storage-width-browser-evidence.json',
+                            );
+                        },
+                        writeEvent: (event) => {
+                            completionEvents.push(event.eventType);
+                            if (
+                                event.eventType ===
+                                'proof-storage-width-browser-evidence-decisive-negative'
+                            ) {
+                                lifecycle.push('decisive-negative-event');
+                                if (event.details === undefined) {
+                                    throw new Error(
+                                        'The decisive-negative event omitted its evidence details.',
+                                    );
+                                }
+                                decisiveNegativeDetails.push(event.details);
+                            }
+                        },
+                    }),
+                }),
+            ).rejects.toThrow(
+                /decisive negative terabyte-scale-external-io after canonical evidence closure/u,
+            );
+            expect(sampleInvocations).toHaveLength(1);
+            expect(lifecycle).toEqual([
+                'repository:initial',
+                'repository:before',
+                'repository:after',
+                'repository:closure-after',
+                'output',
+                'decisive-negative-event',
+            ]);
+            expect(completionEvents).not.toContain(
+                'proof-storage-width-browser-evidence-complete',
+            );
+
+            const attachmentPath = path.join(
+                fixture.runDirectoryPath,
+                'attachments',
+                'proof-storage-width-browser-evidence.json',
+            );
+            const serializedEvidence = await readFile(attachmentPath, 'utf8');
+            const evidence = JSON.parse(serializedEvidence) as {
+                readonly decision: {
+                    readonly outcome: string;
+                    readonly violations: readonly string[];
+                };
+                readonly formatVersion: number;
+            };
+            expect(evidence).toMatchObject({
+                decision: {
+                    outcome: 'ineligible',
+                    violations: ['terabyte-scale-external-io'],
+                },
+                formatVersion: 4,
+            });
+            expect(decisiveNegativeDetails).toEqual([
+                expect.objectContaining({
+                    attachmentPath,
+                    attachmentSha256Hex: sha256Hex(serializedEvidence),
+                    decisionOutcome: 'ineligible',
+                    decisionViolations: ['terabyte-scale-external-io'],
+                }),
+            ]);
+            await expect(
+                validateProofStorageWidthBrowserEvidenceArtifacts(
+                    attachmentPath,
+                    {
+                        loadNativeWidthEvidence:
+                            dependencies.loadNativeWidthEvidence,
+                        officialReservationRootPath:
+                            fixture.reservationRootPath,
+                        processedWasmKernelPath:
+                            fixture.processedWasmKernelPath,
+                        publicSdkWasmKernelPath:
+                            fixture.publicSdkWasmKernelPath,
+                    },
+                ),
+            ).resolves.toBeUndefined();
+
+            await writeFile(
+                attachmentPath,
+                `${JSON.stringify(
+                    {
+                        ...evidence,
+                        decision: { outcome: 'eligible', violations: [] },
+                    },
+                    null,
+                    2,
+                )}\n`,
+                'utf8',
+            );
+            await expect(
+                validateProofStorageWidthBrowserEvidenceArtifacts(
+                    attachmentPath,
+                    {
+                        loadNativeWidthEvidence:
+                            dependencies.loadNativeWidthEvidence,
+                        officialReservationRootPath:
+                            fixture.reservationRootPath,
+                        processedWasmKernelPath:
+                            fixture.processedWasmKernelPath,
+                        publicSdkWasmKernelPath:
+                            fixture.publicSdkWasmKernelPath,
+                    },
+                ),
+            ).rejects.toThrow(/decision does not match/u);
+            await writeFile(attachmentPath, serializedEvidence, 'utf8');
+
+            const reservationIdentityDirectories = await readdir(
+                path.join(fixture.reservationRootPath, 'browser'),
+            );
+            expect(reservationIdentityDirectories).toHaveLength(1);
+            const reservationRecords = (
+                await readFile(
+                    path.join(
+                        fixture.reservationRootPath,
+                        'browser',
+                        reservationIdentityDirectories[0] ?? '',
+                        'browser-started.json',
+                    ),
+                    'utf8',
+                )
+            )
+                .trim()
+                .split(/\r?\n/u)
+                .map((line) => JSON.parse(line) as { outcome?: string });
+            expect(reservationRecords).toHaveLength(2);
+            expect(reservationRecords[1]?.outcome).toBe('validated');
+        }));
+
     it('runs closure after a post-start sample failure and records exactly one failed outcome', () =>
         withTemporaryFixture(async (fixture) => {
             const sampleInvocations: CommandInvocation[] = [];
@@ -648,6 +813,15 @@ describe('Proof-storage width browser evidence runner', () => {
             expect(completionEvents).not.toContain(
                 'proof-storage-width-browser-evidence-complete',
             );
+            await expect(
+                readFile(
+                    path.join(
+                        fixture.runDirectoryPath,
+                        'attachments',
+                        'proof-storage-width-browser-evidence.json',
+                    ),
+                ),
+            ).rejects.toMatchObject({ code: 'ENOENT' });
             const reservationIdentityDirectories = await readdir(
                 path.join(fixture.reservationRootPath, 'browser'),
             );
@@ -825,6 +999,15 @@ describe('Proof-storage width browser evidence runner', () => {
                 'after',
                 'closure-after',
             ]);
+            await expect(
+                readFile(
+                    path.join(
+                        fixture.runDirectoryPath,
+                        'attachments',
+                        'proof-storage-width-browser-evidence.json',
+                    ),
+                ),
+            ).rejects.toMatchObject({ code: 'ENOENT' });
             const reservationIdentityDirectories = await readdir(
                 path.join(fixture.reservationRootPath, 'browser'),
             );

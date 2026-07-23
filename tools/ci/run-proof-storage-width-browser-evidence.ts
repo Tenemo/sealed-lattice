@@ -150,6 +150,18 @@ export type ProofStorageWidthBrowserProjection = Readonly<{
     workerYieldNanoseconds: bigint;
 }>;
 
+export type ProofStorageWidthBrowserProjectionViolation =
+    | 'billion-scale-external-transaction-count'
+    | 'copied-buffer-byte-length'
+    | 'operation-time-projection'
+    | 'terabyte-scale-external-io'
+    | 'wasm-linear-memory-byte-length';
+
+export type ProofStorageWidthBrowserProjectionDecision = Readonly<{
+    outcome: 'eligible' | 'ineligible';
+    violations: readonly ProofStorageWidthBrowserProjectionViolation[];
+}>;
+
 export type ProofStorageWidthBrowserProjectionPoint = Pick<
     ValidatedProofStorageWidthResult,
     | 'elapsedNanoseconds'
@@ -518,46 +530,74 @@ export const deriveProofStorageWidthBrowserProjection = (input: {
     });
 };
 
-export const requireProofStorageWidthBrowserProjectionEligibility = (input: {
+export const evaluateProofStorageWidthBrowserProjectionEligibility = (input: {
     readonly fullWidthResult: ProofStorageWidthBrowserProjectionPoint;
     readonly projection: ProofStorageWidthBrowserProjection;
-}): void => {
+}): ProofStorageWidthBrowserProjectionDecision => {
+    const violations: ProofStorageWidthBrowserProjectionViolation[] = [];
     if (
         input.projection.projectedCopiedBufferPeakByteLength >
         proofStorageWidthBrowserEvidenceProfile.maximumCopiedBufferByteLength
     ) {
-        throw new Error(
-            'The full-width browser projection exceeds the copied-buffer cap.',
-        );
+        violations.push('copied-buffer-byte-length');
     }
     if (
         input.projection.projectedWasmLinearMemoryPeakByteLength >
         proofStorageWidthBrowserEvidenceProfile.maximumWasmLinearMemoryByteLength
     ) {
-        throw new Error(
-            'The full-width browser projection exceeds the WebAssembly linear-memory cap.',
-        );
+        violations.push('wasm-linear-memory-byte-length');
     }
     if (input.fullWidthResult.externalIoByteLength >= terabyteScaleByteLength) {
-        throw new Error(
-            'The full-width browser projection requires terabyte-scale external I/O.',
-        );
+        violations.push('terabyte-scale-external-io');
     }
     if (
         input.fullWidthResult.externalCommittedTransactionCount >=
         billionTransactions
     ) {
-        throw new Error(
-            'The full-width browser projection requires at least one billion transactions.',
-        );
+        violations.push('billion-scale-external-transaction-count');
     }
     if (
         input.projection.operationNanoseconds >
         plausibleBrowserProjectionNanoseconds
     ) {
-        throw new Error(
-            'The full-width release-browser projection exceeds 120 minutes.',
-        );
+        violations.push('operation-time-projection');
+    }
+    return Object.freeze({
+        outcome: violations.length === 0 ? 'eligible' : 'ineligible',
+        violations: Object.freeze(violations),
+    });
+};
+
+export const requireProofStorageWidthBrowserProjectionEligibility = (input: {
+    readonly fullWidthResult: ProofStorageWidthBrowserProjectionPoint;
+    readonly projection: ProofStorageWidthBrowserProjection;
+}): void => {
+    const firstViolation =
+        evaluateProofStorageWidthBrowserProjectionEligibility(input)
+            .violations[0];
+    switch (firstViolation) {
+        case undefined:
+            return;
+        case 'copied-buffer-byte-length':
+            throw new Error(
+                'The full-width browser projection exceeds the copied-buffer cap.',
+            );
+        case 'wasm-linear-memory-byte-length':
+            throw new Error(
+                'The full-width browser projection exceeds the WebAssembly linear-memory cap.',
+            );
+        case 'terabyte-scale-external-io':
+            throw new Error(
+                'The full-width browser projection requires terabyte-scale external I/O.',
+            );
+        case 'billion-scale-external-transaction-count':
+            throw new Error(
+                'The full-width browser projection requires at least one billion transactions.',
+            );
+        case 'operation-time-projection':
+            throw new Error(
+                'The full-width release-browser projection exceeds 120 minutes.',
+            );
     }
 };
 
@@ -929,9 +969,9 @@ export const validateProofStorageWidthBrowserEvidenceArtifacts = async (
         ),
         'Proof-storage width browser evidence',
     );
-    if (evidence.formatVersion !== 3) {
+    if (evidence.formatVersion !== 4) {
         throw new Error(
-            'Proof-storage width browser evidence must use integrity format version three.',
+            'Proof-storage width browser evidence must use integrity format version four.',
         );
     }
     const repository = requireJsonObject(evidence.repository, 'repository');
@@ -1154,13 +1194,18 @@ export const validateProofStorageWidthBrowserEvidenceArtifacts = async (
         representativeResult: nativeEvidence.representativeResult,
         representativeStaticPoint: nativeEvidence.representativeStaticPoint,
     });
-    requireProofStorageWidthBrowserProjectionEligibility({
+    const decision = evaluateProofStorageWidthBrowserProjectionEligibility({
         fullWidthResult: nativeEvidence.fullWidthResult,
         projection,
     });
     if (!normalizedJsonEquals(evidence.projection, projection)) {
         throw new Error(
             'The browser closure projection does not match the reopened native and browser artifacts.',
+        );
+    }
+    if (!normalizedJsonEquals(evidence.decision, decision)) {
+        throw new Error(
+            'The browser closure decision does not match the recomputed projection eligibility.',
         );
     }
 
@@ -1412,6 +1457,7 @@ const executeProofStorageWidthBrowserEvidenceAttempt = async (input: {
         | ReturnType<typeof extractProofStorageWidthOperationMemory>
         | undefined;
     let projection: ProofStorageWidthBrowserProjection | undefined;
+    let decision: ProofStorageWidthBrowserProjectionDecision | undefined;
     if (attemptError === undefined) {
         try {
             [serializedEvents, guardJsonLines] = await Promise.all([
@@ -1454,7 +1500,7 @@ const executeProofStorageWidthBrowserEvidenceAttempt = async (input: {
                 representativeStaticPoint:
                     nativeEvidence.representativeStaticPoint,
             });
-            requireProofStorageWidthBrowserProjectionEligibility({
+            decision = evaluateProofStorageWidthBrowserProjectionEligibility({
                 fullWidthResult: nativeEvidence.fullWidthResult,
                 projection,
             });
@@ -1491,6 +1537,7 @@ const executeProofStorageWidthBrowserEvidenceAttempt = async (input: {
         measurement === undefined ||
         operationMemory === undefined ||
         projection === undefined ||
+        decision === undefined ||
         afterRepositoryState === undefined
     ) {
         throw new Error(
@@ -1532,7 +1579,8 @@ const executeProofStorageWidthBrowserEvidenceAttempt = async (input: {
                 sha256Hex: nativeEvidence.evidenceSha256Hex,
             },
         },
-        formatVersion: 3,
+        decision,
+        formatVersion: 4,
         guard: {
             memoryLimitBytes: processMemoryGuard.memoryLimitBytes,
             maximumOperationWindowGapMilliseconds,
@@ -1580,16 +1628,30 @@ const executeProofStorageWidthBrowserEvidenceAttempt = async (input: {
             rawSha256Hex: wasmBinding.rawSha256Hex,
         },
     });
+    const attachmentBytesBeforeValidation = await readFile(attachmentPath);
+    const attachmentSha256Hex = sha256Hex(attachmentBytesBeforeValidation);
     await validateProofStorageWidthBrowserEvidenceArtifacts(attachmentPath, {
         loadNativeWidthEvidence: loadNativeEvidence,
         officialReservationRootPath,
         processedWasmKernelPath: evidenceProcessedWasmKernelPath,
         publicSdkWasmKernelPath: evidencePublicSdkWasmKernelPath,
     });
+    const attachmentBytesAfterValidation = await readFile(attachmentPath);
+    if (
+        !attachmentBytesBeforeValidation.equals(attachmentBytesAfterValidation)
+    ) {
+        throw new Error(
+            'The browser width-evidence aggregate changed while its artifacts were being reopened and validated.',
+        );
+    }
     return {
         attachmentPath,
+        decision,
         completionEventDetails: {
             attachmentPath,
+            attachmentSha256Hex,
+            decisionOutcome: decision.outcome,
+            decisionViolations: decision.violations,
             projectedFullWidthNanoseconds:
                 projection.operationNanoseconds.toString(),
             projectedWasmLinearMemoryPeakByteLength:
@@ -1718,8 +1780,16 @@ export const executeProofStorageWidthBrowserEvidence = async (input: {
     input.runLog.writeCombinedOutput(message);
     input.runLog.writeEvent({
         details: result.completionEventDetails,
-        eventType: 'proof-storage-width-browser-evidence-complete',
+        eventType:
+            result.decision.outcome === 'eligible'
+                ? 'proof-storage-width-browser-evidence-complete'
+                : 'proof-storage-width-browser-evidence-decisive-negative',
     });
+    if (result.decision.outcome === 'ineligible') {
+        throw new Error(
+            `The release-browser width evidence produced the decisive negative ${result.decision.violations.join(', ')} after canonical evidence closure at ${result.attachmentPath}.`,
+        );
+    }
 };
 
 export const parseProofStorageWidthBrowserEvidenceArguments = (
