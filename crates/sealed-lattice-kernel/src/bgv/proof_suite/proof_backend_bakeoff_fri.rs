@@ -190,6 +190,18 @@ pub(super) const WIDTH_MAXIMUM_NATIVE_CUSTODY_PATH_BYTE_LENGTH: usize = 1_024;
     not(target_arch = "wasm32"),
     feature = "proof-storage-width-evidence"
 ))]
+const WIDTH_NATIVE_CUSTODY_PATH_HEADER_BYTE_LENGTH_CEILING: u64 = 32;
+#[cfg(all(
+    test,
+    not(target_arch = "wasm32"),
+    feature = "proof-storage-width-evidence"
+))]
+const WIDTH_NATIVE_CUSTODY_PATH_VECTOR_HEADER_BYTE_LENGTH_CEILING: u64 = 24;
+#[cfg(all(
+    test,
+    not(target_arch = "wasm32"),
+    feature = "proof-storage-width-evidence"
+))]
 pub(super) const WIDTH_ACTIVE_COLUMN_LDE_SCRATCH_BYTE_LENGTH: u64 =
     (EVALUATION_DOMAIN_SIZE * core::mem::size_of::<ProofBaseFieldElement>()) as u64;
 const CLASSICAL_COLLISION_SECURITY_BIT_FLOOR: u32 = 256;
@@ -3395,7 +3407,10 @@ fn static_wasm_ceiling_includes_prover_and_fresh_verifier_public_opening_workspa
         point.browser_operation_registry_byte_length_ceiling, 64_552,
         "browser operation registry must stay source-derived from its operation and BTree node"
     );
-    assert!(point.native_custody_metadata_byte_length_ceiling > 3_800_000);
+    assert_eq!(
+        point.native_custody_metadata_byte_length_ceiling, 3_867_448,
+        "native custody metadata must include every 32-byte PathBuf header"
+    );
     let recomputed_wasm_ceiling = point
         .digest_state_byte_length_ceiling
         .checked_add(point.digest_state_container_byte_length_ceiling)
@@ -5238,21 +5253,33 @@ fn native_custody_metadata_byte_length_ceiling(width: u64) -> ProofBackendBakeof
     let path_count = width
         .checked_add(2)
         .ok_or_else(|| "native custody path count overflowed".to_owned())?;
-    let path_header_byte_length = u64::try_from(core::mem::size_of::<PathBuf>())
+    let observed_path_header_byte_length = u64::try_from(core::mem::size_of::<PathBuf>())
         .map_err(|_| "native custody path header length does not fit u64".to_owned())?;
-    let path_payload_and_container_byte_length = path_header_byte_length
-        .checked_add(
-            u64::try_from(WIDTH_MAXIMUM_NATIVE_CUSTODY_PATH_BYTE_LENGTH)
-                .map_err(|_| "native custody path limit does not fit u64".to_owned())?,
-        )
-        .and_then(|length| {
-            length.checked_add(WIDTH_CONSERVATIVE_HEAP_ALLOCATION_OVERHEAD_BYTE_LENGTH)
-        })
-        .ok_or_else(|| "native custody path metadata ceiling overflowed".to_owned())?;
+    if observed_path_header_byte_length > WIDTH_NATIVE_CUSTODY_PATH_HEADER_BYTE_LENGTH_CEILING {
+        return Err("native custody path header exceeds its frozen ceiling".to_owned());
+    }
+    let observed_path_vector_header_byte_length =
+        u64::try_from(core::mem::size_of::<Vec<PathBuf>>())
+            .map_err(|_| "native custody path-vector header length does not fit u64".to_owned())?;
+    if observed_path_vector_header_byte_length
+        > WIDTH_NATIVE_CUSTODY_PATH_VECTOR_HEADER_BYTE_LENGTH_CEILING
+    {
+        return Err("native custody path-vector header exceeds its frozen ceiling".to_owned());
+    }
+    let path_payload_and_container_byte_length =
+        WIDTH_NATIVE_CUSTODY_PATH_HEADER_BYTE_LENGTH_CEILING
+            .checked_add(
+                u64::try_from(WIDTH_MAXIMUM_NATIVE_CUSTODY_PATH_BYTE_LENGTH)
+                    .map_err(|_| "native custody path limit does not fit u64".to_owned())?,
+            )
+            .and_then(|length| {
+                length.checked_add(WIDTH_CONSERVATIVE_HEAP_ALLOCATION_OVERHEAD_BYTE_LENGTH)
+            })
+            .ok_or_else(|| "native custody path metadata ceiling overflowed".to_owned())?;
     path_count
         .checked_mul(path_payload_and_container_byte_length)
         .and_then(|length| {
-            length.checked_add(u64::try_from(core::mem::size_of::<Vec<PathBuf>>()).ok()?)
+            length.checked_add(WIDTH_NATIVE_CUSTODY_PATH_VECTOR_HEADER_BYTE_LENGTH_CEILING)
         })
         .and_then(|length| {
             length.checked_add(WIDTH_CONSERVATIVE_HEAP_ALLOCATION_OVERHEAD_BYTE_LENGTH)

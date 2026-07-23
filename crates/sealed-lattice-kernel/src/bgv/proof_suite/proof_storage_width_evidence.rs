@@ -224,6 +224,7 @@ struct ProofStorageWidthStaticPreflightRecord {
     frozen_input_identity_hash_domain: &'static str,
     frozen_input_identity_shake256_hex: &'static str,
     width_input_identity_hash_domain: &'static str,
+    custody_model: &'static str,
     custody_schema_identifier: &'static str,
     custody_schema_version: u8,
     maximum_native_custody_path_byte_length: usize,
@@ -560,6 +561,7 @@ fn execute_static_preflight() -> ProofBackendBakeoffResult<()> {
         frozen_input_identity_hash_domain: FROZEN_INPUT_IDENTITY_HASH_DOMAIN,
         frozen_input_identity_shake256_hex: FROZEN_INPUT_IDENTITY_SHAKE256_HEX,
         width_input_identity_hash_domain: PUBLIC_SOURCE_INPUT_IDENTITY_HASH_DOMAIN,
+        custody_model: "bounded-external-storage-replay",
         custody_schema_identifier: WIDTH_CUSTODY_SCHEMA_IDENTIFIER,
         custody_schema_version: 1,
         maximum_native_custody_path_byte_length: WIDTH_MAXIMUM_NATIVE_CUSTODY_PATH_BYTE_LENGTH,
@@ -745,7 +747,19 @@ fn execute_width_record() -> ProofBackendBakeoffResult<()> {
 mod tests {
     #[test]
     fn proof_storage_width_evidence_static_preflight_checks_every_scheduled_width() {
+        let result_path = super::static_preflight_result_path()
+            .expect("resolve proof-storage width static-preflight result path");
         super::execute_static_preflight().expect("record proof-storage width static preflight");
+        let serialized_record =
+            std::fs::read(&result_path).expect("read proof-storage width static-preflight result");
+        let record: serde_json::Value = serde_json::from_slice(&serialized_record)
+            .expect("decode proof-storage width static-preflight result");
+        assert_eq!(
+            record
+                .get("custodyModel")
+                .and_then(serde_json::Value::as_str),
+            Some("bounded-external-storage-replay")
+        );
     }
 
     #[test]

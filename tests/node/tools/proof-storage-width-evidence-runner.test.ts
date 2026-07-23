@@ -81,6 +81,7 @@ const inputIdentityForTest = (width: ProofStorageWidth): string =>
 const profileBinding = {
     absoluteCapTableIdentifier:
         proofStorageWidthProfile.absoluteCapTableIdentifier,
+    backend: proofStorageWidthProfile.backend,
     backendProfileIdentifier: proofStorageWidthProfile.backendProfileIdentifier,
     custodyModel: 'bounded-external-storage-replay',
     custodySchemaIdentifier: proofStorageWidthProfile.custodySchemaIdentifier,
@@ -1174,7 +1175,10 @@ describe('Proof-storage width evidence runner', () => {
                         readonly identityShake256Hex: string;
                     };
                     readonly absoluteCaps: Readonly<Record<string, string>>;
-                    readonly backendProfile: { readonly identifier: string };
+                    readonly backendProfile: {
+                        readonly backend: string;
+                        readonly identifier: string;
+                    };
                     readonly custodySchema: {
                         readonly identifier: string;
                         readonly version: number;
@@ -1239,6 +1243,9 @@ describe('Proof-storage width evidence runner', () => {
             expect(manifestEnvelope.manifest.backendProfile.identifier).toBe(
                 proofStorageWidthProfile.backendProfileIdentifier,
             );
+            expect(manifestEnvelope.manifest.backendProfile.backend).toBe(
+                proofStorageWidthProfile.backend,
+            );
             expect(manifestEnvelope.manifest.custodySchema).toMatchObject({
                 identifier: proofStorageWidthProfile.custodySchemaIdentifier,
                 version: 1,
@@ -1279,6 +1286,7 @@ describe('Proof-storage width evidence runner', () => {
                     authenticatedMapEntry: '56',
                     authenticatedTreeOpeningHeader: '32',
                     btreeMapHeader: '24',
+                    nativeCustodyPathHeader: '32',
                     proofChallengeExtensionElement: '40',
                     proofTreeValue: '48',
                     vectorHeader: '24',

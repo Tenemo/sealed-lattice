@@ -34,6 +34,7 @@ const inputIdentityForTest = (width: ProofStorageWidth): string =>
 const profileBinding = {
     absoluteCapTableIdentifier:
         proofStorageWidthProfile.absoluteCapTableIdentifier,
+    backend: proofStorageWidthProfile.backend,
     backendProfileIdentifier: proofStorageWidthProfile.backendProfileIdentifier,
     custodyModel: 'bounded-external-storage-replay',
     custodySchemaIdentifier: proofStorageWidthProfile.custodySchemaIdentifier,
@@ -483,6 +484,14 @@ describe('Proof-storage width evidence', () => {
 
     it('validates every static width before sampling and refuses formula or cap drift', () => {
         expect(
+            deriveProofStorageWidthNativeCustodyMetadataByteLengthCeiling(8),
+        ).toBe(11_288n);
+        expect(
+            deriveProofStorageWidthNativeCustodyMetadataByteLengthCeiling(
+                3_451,
+            ),
+        ).toBe(3_867_448n);
+        expect(
             validateProofStorageWidthStaticPreflightResult(
                 buildStaticPreflightResult(),
             ).points,
@@ -572,6 +581,7 @@ describe('Proof-storage width evidence', () => {
                 /absoluteCapTableIdentifier/u,
             ],
             ['backendProfileIdentifier', 'wrong', /backendProfileIdentifier/u],
+            ['backend', 'sumcheck-class', /backend/u],
             ['custodySchemaVersion', 2, /custodySchemaVersion/u],
             ['publicColumnSeedHex', '00', /publicColumnSeedHex/u],
             [

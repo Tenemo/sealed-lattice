@@ -16,6 +16,7 @@ const inputIdentityForWidth = (width: ProofStorageWidth): string =>
 const profileBinding = {
     absoluteCapTableIdentifier:
         proofStorageWidthProfile.absoluteCapTableIdentifier,
+    backend: proofStorageWidthProfile.backend,
     backendProfileIdentifier: proofStorageWidthProfile.backendProfileIdentifier,
     custodyModel: 'bounded-external-storage-replay',
     custodySchemaIdentifier: proofStorageWidthProfile.custodySchemaIdentifier,

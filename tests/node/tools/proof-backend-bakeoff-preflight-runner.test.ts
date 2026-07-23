@@ -211,6 +211,7 @@ const createSequenceDependencies = (input: {
     readonly invalidGuardAtIndex?: number;
     readonly invalidStaticPreflightResult?: boolean;
     readonly invocations: CommandInvocation[];
+    readonly omitStaticPreflightCustodyModel?: boolean;
     readonly omitStaticPreflightResult?: boolean;
     readonly repositoryStates?: readonly {
         readonly commitHash: string;
@@ -288,7 +289,16 @@ const createSequenceDependencies = (input: {
                                       ...staticPreflightFixture,
                                       formatVersion: 2,
                                   }
-                                : staticPreflightFixture,
+                                : input.omitStaticPreflightCustodyModel === true
+                                  ? Object.fromEntries(
+                                        Object.entries(
+                                            staticPreflightFixture,
+                                        ).filter(
+                                            ([fieldName]) =>
+                                                fieldName !== 'custodyModel',
+                                        ),
+                                    )
+                                  : staticPreflightFixture,
                         ),
                         { encoding: 'utf8', flag: 'wx' },
                     );
@@ -1198,6 +1208,7 @@ describe('Proof backend bakeoff preflight runner', () => {
         for (const dependencyOverride of [
             { omitStaticPreflightResult: true },
             { invalidStaticPreflightResult: true },
+            { omitStaticPreflightCustodyModel: true },
         ] as const) {
             await withTemporaryDirectory(async (runDirectoryPath) => {
                 const invocations: CommandInvocation[] = [];
@@ -1212,7 +1223,10 @@ describe('Proof backend bakeoff preflight runner', () => {
                 ).rejects.toThrow(
                     dependencyOverride.omitStaticPreflightResult === true
                         ? /did not create its exact result artifact/u
-                        : /formatVersion/u,
+                        : dependencyOverride.invalidStaticPreflightResult ===
+                            true
+                          ? /formatVersion/u
+                          : /custodyModel/u,
                 );
                 const guardedCommands = guardedInvocations(invocations);
                 expect(guardedCommands).toHaveLength(2);

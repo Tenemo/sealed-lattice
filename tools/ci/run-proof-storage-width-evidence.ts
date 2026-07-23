@@ -765,6 +765,7 @@ const buildManifest = (input: {
             identityShake256Hex: shake256Hex(absoluteCapTable),
         },
         backendProfile: {
+            backend: proofStorageWidthProfile.backend,
             batchingFunctionCount:
                 proofStorageWidthProfile.batchingFunctionCount,
             evaluationDomainSize: proofStorageWidthProfile.evaluationDomainSize,
@@ -833,7 +834,7 @@ const buildManifest = (input: {
                 '29280 * width + 1681152',
             legacyBaseLeafObjectByteLength: '65536 * (124 + 16 * width)',
             ldeTransformCount: '6 * width',
-            nativeCustodyMetadataByteLengthCeiling: '1112 * (width + 2) + 88',
+            nativeCustodyMetadataByteLengthCeiling: '1120 * (width + 2) + 88',
             openedLeafElementByteLength: '128 + 16 * width',
             openedValueCount: '366 * width',
             publicBaseLeafByteLength: '124 + 16 * width',
@@ -923,6 +924,8 @@ const buildManifest = (input: {
                     proofStorageWidthProfile.proofChallengeExtensionElementByteLength.toString(),
                 proofTreeValue:
                     proofStorageWidthProfile.proofTreeValueByteLengthNative64.toString(),
+                nativeCustodyPathHeader:
+                    proofStorageWidthProfile.nativeCustodyPathHeaderByteLengthNative64.toString(),
                 vectorHeader:
                     proofStorageWidthProfile.vectorHeaderByteLengthNative64.toString(),
             },

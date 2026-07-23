@@ -11,6 +11,7 @@ export const proofStorageWidthProfile = {
     activeColumnLdeScratchByteLength: 1_048_576n,
     algebraicBaseColumnCount: 8,
     absoluteCapTableIdentifier: 'sealed-lattice/absolute-resource-caps/v1',
+    backend: 'packed-deep-fri',
     backendProfileIdentifier:
         'packed-deep-fri-goldilocks5-rate-1-8-six-fold-rs256-183-query-v1',
     batchingFunctionCount: 18,
@@ -45,6 +46,7 @@ export const proofStorageWidthProfile = {
     maximumLocalRecordSealInvocationCount: 1_073_741_824n,
     maximumLocalRecordSealedPlaintextByteLength: 1_099_511_627_776n,
     maximumNativeCustodyPathByteLength: 1_024,
+    nativeCustodyPathHeaderByteLengthNative64: 32n,
     maximumPhysicalObjectCount: 4_096n,
     maximumStoredScratchByteLength: 1_073_741_824n,
     maximumTransportByteLength: 4_294_967_291n,
@@ -265,7 +267,7 @@ export const deriveProofStorageWidthNativeCustodyMetadataByteLengthCeiling = (
     const pathCount = BigInt(width) + 2n;
     return (
         pathCount *
-            (proofStorageWidthProfile.vectorHeaderByteLengthNative64 +
+            (proofStorageWidthProfile.nativeCustodyPathHeaderByteLengthNative64 +
                 BigInt(
                     proofStorageWidthProfile.maximumNativeCustodyPathByteLength,
                 ) +
@@ -439,6 +441,7 @@ const requirePositiveUnsigned64 = (value: bigint, fieldName: string): void => {
 
 export type ProofStorageWidthProfileBinding = Readonly<{
     absoluteCapTableIdentifier: string;
+    backend: 'packed-deep-fri';
     backendProfileIdentifier: string;
     custodyModel: 'bounded-external-storage-replay';
     custodySchemaIdentifier: string;
@@ -473,6 +476,11 @@ const validateProofStorageWidthProfileBinding = (
             proofStorageWidthProfile.absoluteCapTableIdentifier,
             'absoluteCapTableIdentifier',
         ),
+        backend: requireExactString(
+            record.backend,
+            proofStorageWidthProfile.backend,
+            'backend',
+        ) as 'packed-deep-fri',
         backendProfileIdentifier: requireExactString(
             record.backendProfileIdentifier,
             proofStorageWidthProfile.backendProfileIdentifier,
