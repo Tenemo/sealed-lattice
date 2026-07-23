@@ -609,13 +609,17 @@ const requireArtifactDigest = (input: {
     return expectedSha256Hex;
 };
 
-const requireDirectoryAbsentOrEmpty = async (
+const requireDirectoryTreeContainsNoOperationArtifacts = async (
     directoryPath: string,
     fieldName: string,
 ): Promise<void> => {
-    let entries: string[];
+    let canonicalDirectoryPath: string;
     try {
-        entries = await readdir(directoryPath);
+        canonicalDirectoryPath = await requireExistingPathWithoutLinks({
+            expectedType: 'directory',
+            fieldName,
+            path: directoryPath,
+        });
     } catch (error) {
         if (
             typeof error === 'object' &&
@@ -627,9 +631,24 @@ const requireDirectoryAbsentOrEmpty = async (
         }
         throw error;
     }
-    if (entries.length !== 0) {
-        throw new Error(
-            `${fieldName} must contain no prior operation artifact.`,
+    if (
+        path.relative(path.resolve(directoryPath), canonicalDirectoryPath)
+            .length !== 0
+    ) {
+        throw new Error(`${fieldName} changed its canonical custody path.`);
+    }
+    const entries = await readdir(canonicalDirectoryPath, {
+        withFileTypes: true,
+    });
+    for (const entry of entries) {
+        if (!entry.isDirectory()) {
+            throw new Error(
+                `${fieldName} must contain only empty directory scaffolding and no prior operation artifact.`,
+            );
+        }
+        await requireDirectoryTreeContainsNoOperationArtifacts(
+            path.join(canonicalDirectoryPath, entry.name),
+            fieldName,
         );
     }
 };
@@ -637,17 +656,60 @@ const requireDirectoryAbsentOrEmpty = async (
 const listRecursiveRegularFilePaths = async (
     rootDirectoryPath: string,
 ): Promise<string[]> => {
+    const canonicalRootDirectoryPath = await requireCanonicalCustodyRoot(
+        rootDirectoryPath,
+        'Predecessor run inventory root',
+    );
     const filePaths: string[] = [];
     const visitDirectory = async (directoryPath: string): Promise<void> => {
-        const entries = await readdir(directoryPath, { withFileTypes: true });
+        const resolvedDirectoryPath = path.resolve(directoryPath);
+        const canonicalDirectoryPath = await requireExistingPathWithoutLinks({
+            expectedType: 'directory',
+            fieldName: 'Predecessor run inventory directory',
+            path: resolvedDirectoryPath,
+        });
+        if (
+            path.relative(resolvedDirectoryPath, canonicalDirectoryPath)
+                .length !== 0 ||
+            !isPathWithinRoot(
+                canonicalRootDirectoryPath,
+                canonicalDirectoryPath,
+            )
+        ) {
+            throw new Error(
+                'The predecessor run inventory directory changed its canonical custody path.',
+            );
+        }
+        const entries = await readdir(canonicalDirectoryPath, {
+            withFileTypes: true,
+        });
         for (const entry of entries) {
-            const entryPath = path.join(directoryPath, entry.name);
+            const entryPath = path.join(canonicalDirectoryPath, entry.name);
             if (entry.isDirectory()) {
                 await visitDirectory(entryPath);
             } else if (entry.isFile()) {
+                const canonicalFilePath = await requireExistingPathWithoutLinks(
+                    {
+                        expectedType: 'file',
+                        fieldName: 'Predecessor run inventory file',
+                        path: entryPath,
+                    },
+                );
+                if (
+                    path.relative(path.resolve(entryPath), canonicalFilePath)
+                        .length !== 0 ||
+                    !isPathWithinRoot(
+                        canonicalRootDirectoryPath,
+                        canonicalFilePath,
+                    )
+                ) {
+                    throw new Error(
+                        'The predecessor run inventory file changed its canonical custody path.',
+                    );
+                }
                 filePaths.push(
                     path
-                        .relative(rootDirectoryPath, entryPath)
+                        .relative(canonicalRootDirectoryPath, canonicalFilePath)
                         .split(path.sep)
                         .join('/'),
                 );
@@ -658,7 +720,7 @@ const listRecursiveRegularFilePaths = async (
             }
         }
     };
-    await visitDirectory(rootDirectoryPath);
+    await visitDirectory(canonicalRootDirectoryPath);
     return filePaths.sort((left, right) => left.localeCompare(right));
 };
 
@@ -863,7 +925,7 @@ export const validateProofStorageWidthBrowserPreOperationRecovery = async (
     await Promise.all(
         ['attachments', 'diagnostic-reports', 'tests', 'vitest-results'].map(
             (directoryName) =>
-                requireDirectoryAbsentOrEmpty(
+                requireDirectoryTreeContainsNoOperationArtifacts(
                     path.join(failedRunDirectoryPath, directoryName),
                     `Failed browser ${directoryName} directory`,
                 ),

@@ -399,6 +399,22 @@ const createPreOperationRecoveryProfile = async (input: {
                 recursive: true,
             }),
         ),
+        mkdir(
+            path.join(
+                failedRunDirectoryPath,
+                'attachments',
+                'proof-storage-width-browser-evidence',
+            ),
+            { recursive: true },
+        ),
+        mkdir(
+            path.join(
+                failedRunDirectoryPath,
+                'diagnostic-reports',
+                'proof-storage-width-browser-evidence',
+            ),
+            { recursive: true },
+        ),
     ]);
     const summary = `${JSON.stringify({
         exitCode: 1,
@@ -1491,37 +1507,46 @@ describe('Proof-storage width browser evidence runner', () => {
             });
         }
 
-        await withTemporaryFixture(async (fixture) => {
-            const recoveryProfile =
-                await createPreOperationRecoveryProfile(fixture);
-            await writeFile(
-                path.join(
-                    recoveryProfile.failedRunDirectoryPath,
-                    '.hidden-prior-operation.json',
-                ),
-                '{}\n',
-                'utf8',
-            );
-            const sampleInvocations: CommandInvocation[] = [];
-            await expect(
-                executeProofStorageWidthBrowserEvidence({
-                    dependencies: createDependencies({
-                        fixture,
-                        preOperationRecoveryProfile: recoveryProfile,
-                        repositoryStateForCheckpoint: () => ({
-                            commitHash: harnessCommitHash,
-                            treeDirty: false,
-                        }),
-                        sampleInvocations,
-                    }),
-                    nativeEvidencePath: fixture.nativeEvidencePath,
-                    preOperationRecoveryRunDirectoryPath:
+        for (const priorOperationArtifactRelativePath of [
+            '.hidden-prior-operation.json',
+            path.join(
+                'attachments',
+                'proof-storage-width-browser-evidence',
+                '.hidden-prior-operation.json',
+            ),
+        ]) {
+            await withTemporaryFixture(async (fixture) => {
+                const recoveryProfile =
+                    await createPreOperationRecoveryProfile(fixture);
+                await writeFile(
+                    path.join(
                         recoveryProfile.failedRunDirectoryPath,
-                    runLog: createRunLog(fixture.runDirectoryPath),
-                }),
-            ).rejects.toThrow(/recursive file inventory changed/u);
-            expect(sampleInvocations).toHaveLength(0);
-        });
+                        priorOperationArtifactRelativePath,
+                    ),
+                    '{}\n',
+                    'utf8',
+                );
+                const sampleInvocations: CommandInvocation[] = [];
+                await expect(
+                    executeProofStorageWidthBrowserEvidence({
+                        dependencies: createDependencies({
+                            fixture,
+                            preOperationRecoveryProfile: recoveryProfile,
+                            repositoryStateForCheckpoint: () => ({
+                                commitHash: harnessCommitHash,
+                                treeDirty: false,
+                            }),
+                            sampleInvocations,
+                        }),
+                        nativeEvidencePath: fixture.nativeEvidencePath,
+                        preOperationRecoveryRunDirectoryPath:
+                            recoveryProfile.failedRunDirectoryPath,
+                        runLog: createRunLog(fixture.runDirectoryPath),
+                    }),
+                ).rejects.toThrow(/recursive file inventory changed/u);
+                expect(sampleInvocations).toHaveLength(0);
+            });
+        }
 
         await withTemporaryFixture(async (fixture) => {
             const recoveryProfile =
@@ -1657,6 +1682,74 @@ describe('Proof-storage width browser evidence runner', () => {
             expect(observedFailure).toBeInstanceOf(Error);
             expect((observedFailure as Error).message).toMatch(
                 linkCreated ? /symbolic link or junction/u : /.+/u,
+            );
+            expect(sampleInvocations).toHaveLength(0);
+            await expect(
+                readdir(
+                    path.join(fixture.reservationRootPath, 'browser-recovery'),
+                ),
+            ).rejects.toMatchObject({ code: 'ENOENT' });
+        }));
+
+    it('refuses an alias inside otherwise empty predecessor scaffolding', () =>
+        withTemporaryFixture(async (fixture) => {
+            const recoveryProfile =
+                await createPreOperationRecoveryProfile(fixture);
+            const escapedEmptyDirectoryPath = path.join(
+                path.dirname(recoveryProfile.failedRunDirectoryPath),
+                'escaped-empty-scaffolding',
+            );
+            const scaffoldAliasPath = path.join(
+                recoveryProfile.failedRunDirectoryPath,
+                'attachments',
+                'proof-storage-width-browser-evidence',
+                'redirected-empty-scaffolding',
+            );
+            await mkdir(escapedEmptyDirectoryPath);
+            let linkCreated = false;
+            try {
+                await symlink(
+                    escapedEmptyDirectoryPath,
+                    scaffoldAliasPath,
+                    process.platform === 'win32' ? 'junction' : 'dir',
+                );
+                linkCreated = true;
+            } catch (error) {
+                if (
+                    typeof error !== 'object' ||
+                    error === null ||
+                    !('code' in error) ||
+                    !['EACCES', 'ENOTSUP', 'EPERM'].includes(String(error.code))
+                ) {
+                    throw error;
+                }
+            }
+            const sampleInvocations: CommandInvocation[] = [];
+            let observedFailure: unknown;
+            try {
+                await executeProofStorageWidthBrowserEvidence({
+                    dependencies: createDependencies({
+                        fixture,
+                        preOperationRecoveryProfile: recoveryProfile,
+                        repositoryStateForCheckpoint: () => ({
+                            commitHash: harnessCommitHash,
+                            treeDirty: false,
+                        }),
+                        sampleInvocations,
+                    }),
+                    nativeEvidencePath: fixture.nativeEvidencePath,
+                    preOperationRecoveryRunDirectoryPath:
+                        recoveryProfile.failedRunDirectoryPath,
+                    runLog: createRunLog(fixture.runDirectoryPath),
+                });
+            } catch (error) {
+                observedFailure = error;
+            }
+            expect(observedFailure).toBeInstanceOf(Error);
+            expect((observedFailure as Error).message).toMatch(
+                linkCreated
+                    ? /symbolic link or junction|unsupported non-file entry|canonical custody path/u
+                    : /.+/u,
             );
             expect(sampleInvocations).toHaveLength(0);
             await expect(
