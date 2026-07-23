@@ -73,6 +73,7 @@ const billionTransactions = 1_000_000_000n;
 const exactCommitHashPattern = /^[0-9a-f]{40}$/u;
 const exactSha256HexPattern = /^[0-9a-f]{64}$/u;
 const recoveryOrdinal = 1;
+const chainedRecoveryOrdinal = 2;
 const recoveryRepairFilePaths = Object.freeze([
     'tests/node/tools/browser-test-project-selection.test.ts',
     'tests/node/tools/proof-storage-width-browser-evidence-runner.test.ts',
@@ -80,6 +81,14 @@ const recoveryRepairFilePaths = Object.freeze([
     'tools/ci/run-proof-storage-width-browser-evidence.ts',
     'vitest.config.ts',
 ] as const);
+const validatorRepairFilePaths = Object.freeze([
+    'tests/node/tools/proof-storage-width-browser-evidence-runner.test.ts',
+    'tools/ci/run-proof-storage-width-browser-evidence.ts',
+] as const);
+const firstHarnessRepairCommitHash = '618c55d352d5a2f87db09b446f7e05857831c4dd';
+const validatorRepairCommitHash = 'b7398ce150044fc4d3579136989753ddcaad3faa';
+const chainedRecoveryPreflightDirectoryName = 'browser-recovery-preflight-2';
+const chainedRecoveryOperationDirectoryName = 'browser-recovery-2';
 const processedWasmKernelPath = path.resolve(
     'packages',
     'wasm',
@@ -214,6 +223,77 @@ export const proofStorageWidthBrowserPreOperationRecoveryProfile =
         recoveryOrdinal,
     } satisfies ProofStorageWidthBrowserPreOperationRecoveryProfile);
 
+export type ProofStorageWidthBrowserChainedRecoveryProfile = Readonly<{
+    failedRecoveryArtifacts: Readonly<{
+        diagnostics: RecoveryArtifactProfile;
+        events: RecoveryArtifactProfile;
+        metadata: RecoveryArtifactProfile;
+        output: RecoveryArtifactProfile;
+        resources: RecoveryArtifactProfile;
+        summary: RecoveryArtifactProfile;
+    }>;
+    failedRecoveryRunDirectoryPath: string;
+    failedRecoveryRunRelativePath: string;
+    firstHarnessRepairCommitHash: string;
+    previousAuthorizationKeySha256Hex: string;
+    previousPreflightAttempt: RecoveryArtifactProfile;
+    recoveryOrdinal: 2;
+    validatorRepairCommitHash: string;
+}>;
+
+export const proofStorageWidthBrowserChainedRecoveryProfile = Object.freeze({
+    failedRecoveryArtifacts: {
+        diagnostics: {
+            relativePath: 'diagnostics.txt',
+            sha256Hex:
+                'e8f1196327bcea0bed1196a5f69e6855fc636d6b6b616305d7b125ae3f9e1c5a',
+        },
+        events: {
+            relativePath: 'events.jsonl',
+            sha256Hex:
+                'faa70f4693ce18f27d4d99d37971a107f77071b8f4670cd5fcd071c2848cdb98',
+        },
+        metadata: {
+            relativePath: 'metadata.json',
+            sha256Hex:
+                'a9a91d3f6ada53c571bd339bff419d2d8c7c074fcec0aabe4ecd384cbf9d8534',
+        },
+        output: {
+            relativePath: 'output.log',
+            sha256Hex:
+                '27c1cf61bfefe962482964199599d20952cd68c0793339aea682671121af72a8',
+        },
+        resources: {
+            relativePath: 'resources.jsonl',
+            sha256Hex:
+                '8ec3d2772e90b0bf18047c733ca31e9424e8b3142addf7e2bf170a9c194b2c1c',
+        },
+        summary: {
+            relativePath: 'summary.json',
+            sha256Hex:
+                '213967b4f230628b3765e4501e1eedc22d4f4754ab447c22010d49126e94eab9',
+        },
+    },
+    failedRecoveryRunDirectoryPath: path.resolve(
+        'logs',
+        '2026-07-23',
+        '2026-07-23T11-28-54.155Z-test-browser-proof-storage-width-evidence',
+    ),
+    failedRecoveryRunRelativePath:
+        'logs/2026-07-23/2026-07-23T11-28-54.155Z-test-browser-proof-storage-width-evidence',
+    firstHarnessRepairCommitHash,
+    previousAuthorizationKeySha256Hex:
+        '3eaa2223911f3f55f6f58e020a3cc4f56087bfb6e16678ad2895daa1f7084121',
+    previousPreflightAttempt: {
+        relativePath:
+            'browser-recovery-preflight/3eaa2223911f3f55f6f58e020a3cc4f56087bfb6e16678ad2895daa1f7084121/preflight-attempted.json',
+        sha256Hex:
+            '5ba1a032f2e5066dfc817062f6c71bf489dfb1833376bc856275618443c3ebe9',
+    },
+    recoveryOrdinal: chainedRecoveryOrdinal,
+    validatorRepairCommitHash,
+} satisfies ProofStorageWidthBrowserChainedRecoveryProfile);
+
 type CommandExecutor = (
     invocation: CommandInvocation,
     runLog: ActiveLocalRunLog,
@@ -294,6 +374,7 @@ export type ProofStorageWidthBrowserStaticProjectionPoint = Pick<
 >;
 
 export type ProofStorageWidthBrowserEvidenceDependencies = Readonly<{
+    chainedRecoveryProfile?: ProofStorageWidthBrowserChainedRecoveryProfile;
     deriveProcessedWasmBinding?: () => Promise<ProcessedWasmBinding>;
     executeCommand?: CommandExecutor;
     loadNativeWidthEvidence?: NativeWidthEvidenceLoader;
@@ -315,10 +396,23 @@ type ValidatedPreOperationRecovery = Readonly<{
     recoveryOrdinal: 1;
 }>;
 
+type ValidatedFailedRecoveryAttempt = Readonly<{
+    failedArtifacts: ProofStorageWidthBrowserChainedRecoveryProfile['failedRecoveryArtifacts'];
+    failedRunDirectoryPath: string;
+    previousPreflightAttempt: RecoveryArtifactProfile;
+    recoveryOrdinal: 2;
+}>;
+
 type ValidatedHarnessRepairTransition = Readonly<{
     changedFilePaths: readonly string[];
     harnessCommitHash: string;
     nativeSourceCommitHash: string;
+}>;
+
+type ValidatedChainedHarnessRepairTransition = Readonly<{
+    firstHarnessRepair: ValidatedHarnessRepairTransition;
+    recoveryHarnessRepair: ValidatedHarnessRepairTransition;
+    validatorRepair: ValidatedHarnessRepairTransition;
 }>;
 
 const requireJsonObject = (value: unknown, fieldName: string): JsonObject => {
@@ -724,6 +818,112 @@ const listRecursiveRegularFilePaths = async (
     return filePaths.sort((left, right) => left.localeCompare(right));
 };
 
+const listDirectRegularFilePaths = async (
+    rootDirectoryPath: string,
+    fieldName: string,
+): Promise<string[]> => {
+    const canonicalRootDirectoryPath = await requireCanonicalCustodyRoot(
+        rootDirectoryPath,
+        `${fieldName} root`,
+    );
+    const entries = await readdir(canonicalRootDirectoryPath, {
+        withFileTypes: true,
+    });
+    const filePaths: string[] = [];
+    for (const entry of entries) {
+        if (!entry.isFile()) {
+            throw new Error(
+                `${fieldName} must contain only its exact direct regular files.`,
+            );
+        }
+        const entryPath = path.join(canonicalRootDirectoryPath, entry.name);
+        const entryStatistics = await lstat(entryPath);
+        if (entryStatistics.nlink !== 1) {
+            throw new Error(
+                `${fieldName} must not contain multiply linked regular files.`,
+            );
+        }
+        const canonicalFilePath = await requireExistingPathWithoutLinks({
+            expectedType: 'file',
+            fieldName: `${fieldName} file`,
+            path: entryPath,
+        });
+        if (
+            path.relative(path.resolve(entryPath), canonicalFilePath).length !==
+                0 ||
+            !isPathWithinRoot(canonicalRootDirectoryPath, canonicalFilePath)
+        ) {
+            throw new Error(`${fieldName} changed its canonical custody path.`);
+        }
+        filePaths.push(entry.name);
+    }
+    return filePaths.sort((left, right) => left.localeCompare(right));
+};
+
+const requireCustodyPathAbsent = async (input: {
+    readonly fieldName: string;
+    readonly relativePath: string;
+    readonly rootPath: string;
+}): Promise<void> => {
+    if (path.isAbsolute(input.relativePath)) {
+        throw new Error(`${input.fieldName} must be relative to its root.`);
+    }
+    const canonicalRootPath = await requireCanonicalCustodyRoot(
+        input.rootPath,
+        `${input.fieldName} root`,
+    );
+    const segments = input.relativePath
+        .split(/[\\/]/u)
+        .filter((segment) => segment.length !== 0);
+    if (
+        segments.length === 0 ||
+        segments.some((segment) => segment === '.' || segment === '..')
+    ) {
+        throw new Error(`${input.fieldName} has a non-canonical path.`);
+    }
+    let currentPath = canonicalRootPath;
+    for (const [segmentIndex, segment] of segments.entries()) {
+        currentPath = path.join(currentPath, segment);
+        let statistics: Awaited<ReturnType<typeof lstat>>;
+        try {
+            statistics = await lstat(currentPath);
+        } catch (error) {
+            if (
+                typeof error === 'object' &&
+                error !== null &&
+                'code' in error &&
+                error.code === 'ENOENT'
+            ) {
+                return;
+            }
+            throw error;
+        }
+        if (statistics.isSymbolicLink()) {
+            throw new Error(
+                `${input.fieldName} crosses a symbolic link or junction.`,
+            );
+        }
+        const isFinalSegment = segmentIndex === segments.length - 1;
+        if (!isFinalSegment && !statistics.isDirectory()) {
+            throw new Error(
+                `${input.fieldName} crosses a non-directory ancestor.`,
+            );
+        }
+        const canonicalPath = path.resolve(await realpath(currentPath));
+        if (
+            path.relative(path.resolve(currentPath), canonicalPath).length !==
+                0 ||
+            !isPathWithinRoot(canonicalRootPath, canonicalPath)
+        ) {
+            throw new Error(`${input.fieldName} changed its canonical path.`);
+        }
+        if (isFinalSegment) {
+            throw new Error(`${input.fieldName} already exists.`);
+        }
+        currentPath = canonicalPath;
+    }
+};
+
 const parseJsonLines = (serialized: string, fieldName: string): JsonObject[] =>
     serialized
         .split(/\r?\n/u)
@@ -734,6 +934,58 @@ const parseJsonLines = (serialized: string, fieldName: string): JsonObject[] =>
                 `${fieldName} line ${String(lineIndex + 1)}`,
             ),
         );
+
+const parseCanonicalRecoveryJsonLines = (
+    serialized: string,
+    fieldName: string,
+): JsonObject[] => {
+    if (
+        serialized.length === 0 ||
+        !serialized.endsWith('\n') ||
+        serialized.includes('\r')
+    ) {
+        throw new Error(
+            `${fieldName} must use exact LF-terminated JSONL bytes.`,
+        );
+    }
+    const recordLines = serialized.slice(0, -1).split('\n');
+    if (
+        recordLines.length === 0 ||
+        recordLines.some((recordLine) => recordLine.length === 0)
+    ) {
+        throw new Error(`${fieldName} must contain no blank JSONL records.`);
+    }
+    return recordLines.map((recordLine, recordIndex) =>
+        requireJsonObject(
+            parseJson(
+                recordLine,
+                `${fieldName} line ${String(recordIndex + 1)}`,
+            ),
+            `${fieldName} line ${String(recordIndex + 1)}`,
+        ),
+    );
+};
+
+const literalRecoveryJsonLinesPrefix = (
+    serialized: string,
+    recordCount: number,
+    fieldName: string,
+): Buffer => {
+    const serializedBytes = Buffer.from(serialized, 'utf8');
+    let terminatedRecordCount = 0;
+    for (const [byteIndex, byte] of serializedBytes.entries()) {
+        if (byte !== 0x0a) {
+            continue;
+        }
+        terminatedRecordCount += 1;
+        if (terminatedRecordCount === recordCount) {
+            return serializedBytes.subarray(0, byteIndex + 1);
+        }
+    }
+    throw new Error(
+        `${fieldName} lacks its exact ${String(recordCount)}-record byte prefix.`,
+    );
+};
 
 export const validateProofStorageWidthBrowserPreOperationRecovery = async (
     input: Readonly<{
@@ -974,6 +1226,268 @@ export const validateProofStorageWidthBrowserPreOperationRecovery = async (
         failedReservation: profile.failedReservation,
         failedRunDirectoryPath,
         recoveryOrdinal,
+    });
+};
+
+const validateProofStorageWidthBrowserFailedRecoveryAttempt = async (input: {
+    readonly failedRecoveryRunDirectoryPath: string;
+    readonly nativeEvidence: NativeWidthEvidence;
+    readonly officialReservationRootPath: string;
+    readonly preOperationRecovery: ValidatedPreOperationRecovery;
+    readonly preOperationProfile: ProofStorageWidthBrowserPreOperationRecoveryProfile;
+    readonly profile: ProofStorageWidthBrowserChainedRecoveryProfile;
+}): Promise<ValidatedFailedRecoveryAttempt> => {
+    if (!path.isAbsolute(input.failedRecoveryRunDirectoryPath)) {
+        throw new Error(
+            'The failed recovery-attempt path must be an absolute run directory.',
+        );
+    }
+    const declaredFailedRunDirectoryPath = path.resolve(
+        input.failedRecoveryRunDirectoryPath,
+    );
+    const repositoryRootPath = path.resolve('.');
+    const relativeFailedRunDirectoryPath = path.resolve(
+        repositoryRootPath,
+        input.profile.failedRecoveryRunRelativePath,
+    );
+    if (
+        declaredFailedRunDirectoryPath !==
+            path.resolve(input.profile.failedRecoveryRunDirectoryPath) ||
+        path.isAbsolute(input.profile.failedRecoveryRunRelativePath) ||
+        input.profile.failedRecoveryRunRelativePath.includes('\\') ||
+        input.profile.failedRecoveryRunRelativePath
+            .split('/')
+            .some(
+                (segment) =>
+                    segment === '' || segment === '.' || segment === '..',
+            ) ||
+        relativeFailedRunDirectoryPath !== declaredFailedRunDirectoryPath ||
+        !isPathWithinRoot(repositoryRootPath, relativeFailedRunDirectoryPath) ||
+        canonicalRelativePath(
+            repositoryRootPath,
+            relativeFailedRunDirectoryPath,
+        ) !== input.profile.failedRecoveryRunRelativePath ||
+        input.profile.recoveryOrdinal !== chainedRecoveryOrdinal ||
+        input.profile.firstHarnessRepairCommitHash !==
+            firstHarnessRepairCommitHash ||
+        input.profile.validatorRepairCommitHash !== validatorRepairCommitHash
+    ) {
+        throw new Error(
+            'The failed recovery-attempt path or commit chain is not the exact authorized predecessor.',
+        );
+    }
+    const failedRunDirectoryPath = await requireCanonicalCustodyRoot(
+        declaredFailedRunDirectoryPath,
+        'Failed recovery-attempt custody root',
+    );
+    const artifactEntries = Object.entries(
+        input.profile.failedRecoveryArtifacts,
+    ) as Array<
+        [
+            keyof ProofStorageWidthBrowserChainedRecoveryProfile['failedRecoveryArtifacts'],
+            RecoveryArtifactProfile,
+        ]
+    >;
+    const expectedFilePaths = artifactEntries
+        .map(([, artifact]) => artifact.relativePath)
+        .sort((left, right) => left.localeCompare(right));
+    const actualFilePaths = await listDirectRegularFilePaths(
+        failedRunDirectoryPath,
+        'Failed recovery-attempt inventory',
+    );
+    if (!normalizedJsonEquals(actualFilePaths, expectedFilePaths)) {
+        throw new Error(
+            'The failed recovery-attempt exact six-file inventory changed.',
+        );
+    }
+    const artifactBytes = new Map<string, Buffer>();
+    for (const [artifactName, artifact] of artifactEntries) {
+        if (
+            path.isAbsolute(artifact.relativePath) ||
+            artifact.relativePath.includes('/') ||
+            artifact.relativePath.includes('\\')
+        ) {
+            throw new Error(
+                `The failed recovery ${artifactName} artifact is not a direct file.`,
+            );
+        }
+        const artifactPath = await resolveExistingCustodyFile({
+            fieldName: `Failed recovery ${artifactName} artifact`,
+            relativePath: artifact.relativePath,
+            rootPath: failedRunDirectoryPath,
+        });
+        const bytes = await readFile(artifactPath);
+        if (sha256Hex(bytes) !== artifact.sha256Hex) {
+            throw new Error(
+                `The failed recovery ${artifactName} artifact changed after the consumed attempt.`,
+            );
+        }
+        artifactBytes.set(artifactName, bytes);
+    }
+    const summary = requireJsonObject(
+        parseJson(
+            artifactBytes.get('summary')?.toString('utf8') ?? '',
+            'Failed recovery-attempt summary',
+        ),
+        'Failed recovery-attempt summary',
+    );
+    const summaryError = requireJsonObject(
+        summary.error,
+        'Failed recovery-attempt summary error',
+    );
+    if (
+        summary.exitCode !== 1 ||
+        summary.repositoryCommitHash !==
+            input.profile.firstHarnessRepairCommitHash ||
+        summary.repositoryTreeDirty !== false ||
+        summary.resultClassification !== 'runner-failure' ||
+        summary.failedCommandId !== undefined ||
+        summaryError.message !==
+            'Failed browser attachments directory must contain no prior operation artifact.'
+    ) {
+        throw new Error(
+            'The failed recovery summary is not the exact empty-scaffolding validator failure.',
+        );
+    }
+    const metadata = requireJsonObject(
+        parseJson(
+            artifactBytes.get('metadata')?.toString('utf8') ?? '',
+            'Failed recovery-attempt metadata',
+        ),
+        'Failed recovery-attempt metadata',
+    );
+    if (
+        metadata.repositoryCommitHash !== undefined ||
+        metadata.scriptName !== scriptName ||
+        metadata.runDirectoryPath !== failedRunDirectoryPath ||
+        !normalizedJsonEquals(metadata.commandLineArguments, [
+            '--native-evidence',
+            input.nativeEvidence.evidencePath,
+            '--pre-operation-recovery',
+            input.preOperationRecovery.failedRunDirectoryPath,
+        ])
+    ) {
+        throw new Error(
+            'The failed recovery metadata changed its exact predecessor invocation.',
+        );
+    }
+    const events = parseJsonLines(
+        artifactBytes.get('events')?.toString('utf8') ?? '',
+        'Failed recovery-attempt events',
+    );
+    const permittedEventTypes = new Set([
+        'heavy-lane-lease-acquired',
+        'heavy-lane-lease-released',
+        'run-finished',
+        'run-heartbeat',
+        'run-started',
+    ]);
+    if (
+        events.length === 0 ||
+        events.some(
+            (event) =>
+                typeof event.eventType !== 'string' ||
+                !permittedEventTypes.has(event.eventType) ||
+                event.eventType.startsWith('command-'),
+        )
+    ) {
+        throw new Error(
+            'The failed recovery attempt contains a build, static-list, browser, worker, or measurement event.',
+        );
+    }
+    const resources = parseJsonLines(
+        artifactBytes.get('resources')?.toString('utf8') ?? '',
+        'Failed recovery-attempt resources',
+    );
+    if (
+        resources.length === 0 ||
+        resources.some(
+            (resource) =>
+                resource.resourceScope !== 'orchestration-process-and-host' ||
+                !normalizedJsonEquals(resource.activeCommandIds, []),
+        )
+    ) {
+        throw new Error(
+            'The failed recovery resource record contains an active child command.',
+        );
+    }
+    const output = artifactBytes.get('output')?.toString('utf8') ?? '';
+    if (
+        !output.includes('Acquired local guarded heavy-lane lease') ||
+        !output.includes('Released local guarded heavy-lane lease') ||
+        output.includes('build-proof-storage-width-browser-evidence') ||
+        output.includes('vitest-list-proof-storage-width-browser-evidence') ||
+        output.includes('vitest-proof-storage-width-browser-evidence') ||
+        output.includes('proof-storage-width-browser-evidence-complete')
+    ) {
+        throw new Error(
+            'The failed recovery output contains evidence work beyond the validator failure.',
+        );
+    }
+    const previousAuthorizationKeySha256Hex =
+        buildBrowserRecoveryAuthorizationKey(input.preOperationProfile);
+    const previousPreflightAttemptRelativePath = `${firstBrowserRecoveryCustody.preflightDirectoryName}/${previousAuthorizationKeySha256Hex}/preflight-attempted.json`;
+    if (
+        input.profile.previousAuthorizationKeySha256Hex !==
+            previousAuthorizationKeySha256Hex ||
+        input.profile.previousPreflightAttempt.relativePath !==
+            previousPreflightAttemptRelativePath
+    ) {
+        throw new Error(
+            'The consumed browser recovery authorization or marker path was not derived from its fixed predecessor namespace.',
+        );
+    }
+    const previousAttemptPath = await resolveExistingCustodyFile({
+        fieldName: 'Consumed browser recovery marker',
+        relativePath: previousPreflightAttemptRelativePath,
+        rootPath: input.officialReservationRootPath,
+    });
+    const previousAttemptBytes = await readFile(previousAttemptPath);
+    if (
+        sha256Hex(previousAttemptBytes) !==
+        input.profile.previousPreflightAttempt.sha256Hex
+    ) {
+        throw new Error(
+            'The consumed browser recovery marker changed after its terminal failure.',
+        );
+    }
+    const previousAttemptRecords = parseCanonicalRecoveryJsonLines(
+        previousAttemptBytes.toString('utf8'),
+        'Consumed browser recovery marker',
+    );
+    if (
+        previousAttemptRecords.length !== 2 ||
+        previousAttemptRecords[0]?.authorizationKeySha256Hex !==
+            previousAuthorizationKeySha256Hex ||
+        previousAttemptRecords[0]?.eventType !==
+            'official-browser-width-recovery-preflight-attempted' ||
+        previousAttemptRecords[0]?.failedReservationIdentitySha256Hex !==
+            input.preOperationRecovery.failedReservation.identitySha256Hex ||
+        previousAttemptRecords[0]?.recoveryOrdinal !== recoveryOrdinal ||
+        previousAttemptRecords[1]?.eventType !== 'official-sample-outcome' ||
+        previousAttemptRecords[1]?.outcome !== 'failed'
+    ) {
+        throw new Error(
+            'The consumed browser recovery marker is not the exact ordinal-one terminal failure.',
+        );
+    }
+    await requireCustodyPathAbsent({
+        fieldName: 'Consumed browser recovery measured-operation reservation',
+        relativePath: path.join(
+            'browser-recovery',
+            previousAuthorizationKeySha256Hex,
+            'browser-recovery-started.json',
+        ),
+        rootPath: input.officialReservationRootPath,
+    });
+    return Object.freeze({
+        failedArtifacts: input.profile.failedRecoveryArtifacts,
+        failedRunDirectoryPath,
+        previousPreflightAttempt: Object.freeze({
+            relativePath: previousPreflightAttemptRelativePath,
+            sha256Hex: input.profile.previousPreflightAttempt.sha256Hex,
+        }),
+        recoveryOrdinal: chainedRecoveryOrdinal,
     });
 };
 
@@ -1397,60 +1911,166 @@ const requireCleanPinnedRepository = (
     }
 };
 
-const validateHarnessRepairCommitTransition = async (input: {
+const validateExactHarnessRepairCommitTransition = async (input: {
+    readonly changedFilePaths: readonly string[];
+    readonly childCommitHash: string;
     readonly executeCommand: CommandExecutor;
-    readonly harnessCommitHash: string;
-    readonly nativeSourceCommitHash: string;
+    readonly logFileSlug: string;
+    readonly parentCommitHash: string;
     readonly runLog: ActiveLocalRunLog;
+    readonly transitionLabel: string;
 }): Promise<ValidatedHarnessRepairTransition> => {
+    const replacementDisabledEnvironment: NodeJS.ProcessEnv = {
+        ...process.env,
+        GIT_NO_REPLACE_OBJECTS: '1',
+    };
     const parentResult = await executeRequiredCommand({
         command: {
-            args: ['rev-list', '--parents', '-n', '1', input.harnessCommitHash],
+            args: [
+                '--no-replace-objects',
+                'cat-file',
+                'commit',
+                input.childCommitHash,
+            ],
             command: 'git',
-            description: 'validate the browser recovery direct-child commit',
-            logFileSlug: 'git-browser-width-recovery-parent',
+            description: `validate the ${input.transitionLabel} sole-parent commit`,
+            env: replacementDisabledEnvironment,
+            logFileSlug: `${input.logFileSlug}-parent`,
         },
         executeCommand: input.executeCommand,
         runLog: input.runLog,
     });
+    const headerTerminatorIndex = parentResult.stdout.indexOf('\n\n');
+    const rawCommitHeader =
+        headerTerminatorIndex === -1
+            ? undefined
+            : parentResult.stdout.slice(0, headerTerminatorIndex);
+    const parentHeaders =
+        rawCommitHeader === undefined ||
+        rawCommitHeader.includes('\r') ||
+        rawCommitHeader.includes('\0')
+            ? []
+            : rawCommitHeader
+                  .split('\n')
+                  .filter((line) => line.startsWith('parent '));
     if (
-        parentResult.stdout.trim() !==
-        `${input.harnessCommitHash} ${input.nativeSourceCommitHash}`
+        parentHeaders.length !== 1 ||
+        parentHeaders[0] !== `parent ${input.parentCommitHash}`
     ) {
         throw new Error(
-            'The browser recovery harness commit is not the sole direct child of the native source commit.',
+            `The ${input.transitionLabel} commit is not the sole direct child of its authorized parent.`,
         );
     }
     const diffResult = await executeRequiredCommand({
         command: {
             args: [
+                '--no-replace-objects',
                 'diff',
-                '--name-only',
+                '--name-status',
+                '-z',
                 '--no-renames',
-                input.nativeSourceCommitHash,
-                input.harnessCommitHash,
+                `${input.parentCommitHash}^{tree}`,
+                `${input.childCommitHash}^{tree}`,
+                '--',
             ],
             command: 'git',
-            description: 'validate the browser recovery repair file set',
-            logFileSlug: 'git-browser-width-recovery-diff',
+            description: `validate the ${input.transitionLabel} repair file set`,
+            env: replacementDisabledEnvironment,
+            logFileSlug: `${input.logFileSlug}-diff`,
         },
         executeCommand: input.executeCommand,
         runLog: input.runLog,
     });
-    const changedFilePaths = diffResult.stdout
-        .split(/\r?\n/u)
-        .map((filePath) => filePath.trim().replace(/\\/gu, '/'))
-        .filter((filePath) => filePath.length !== 0)
-        .sort((left, right) => left.localeCompare(right));
-    if (!normalizedJsonEquals(changedFilePaths, recoveryRepairFilePaths)) {
+    const diffTokens = diffResult.stdout.endsWith('\0')
+        ? diffResult.stdout.slice(0, -1).split('\0')
+        : [];
+    const changedFilePaths: string[] = [];
+    let diffShapeValid =
+        diffTokens.length === input.changedFilePaths.length * 2;
+    for (let tokenIndex = 0; tokenIndex < diffTokens.length; tokenIndex += 2) {
+        const status = diffTokens[tokenIndex];
+        const filePath = diffTokens[tokenIndex + 1];
+        if (
+            status !== 'M' ||
+            filePath === undefined ||
+            filePath.length === 0 ||
+            changedFilePaths.includes(filePath)
+        ) {
+            diffShapeValid = false;
+        } else {
+            changedFilePaths.push(filePath);
+        }
+    }
+    if (
+        !diffShapeValid ||
+        changedFilePaths.length !== input.changedFilePaths.length ||
+        input.changedFilePaths.some(
+            (expectedFilePath) => !changedFilePaths.includes(expectedFilePath),
+        )
+    ) {
         throw new Error(
-            'The browser recovery commit diff is not exactly the five authorized harness files.',
+            `The ${input.transitionLabel} commit diff is not exactly its authorized harness files.`,
         );
     }
     return Object.freeze({
         changedFilePaths,
-        harnessCommitHash: input.harnessCommitHash,
+        harnessCommitHash: input.childCommitHash,
+        nativeSourceCommitHash: input.parentCommitHash,
+    });
+};
+
+const validateHarnessRepairCommitTransition = (input: {
+    readonly executeCommand: CommandExecutor;
+    readonly harnessCommitHash: string;
+    readonly nativeSourceCommitHash: string;
+    readonly runLog: ActiveLocalRunLog;
+}): Promise<ValidatedHarnessRepairTransition> =>
+    validateExactHarnessRepairCommitTransition({
+        changedFilePaths: recoveryRepairFilePaths,
+        childCommitHash: input.harnessCommitHash,
+        executeCommand: input.executeCommand,
+        logFileSlug: 'git-browser-width-recovery',
+        parentCommitHash: input.nativeSourceCommitHash,
+        runLog: input.runLog,
+        transitionLabel: 'browser recovery harness',
+    });
+
+const validateChainedHarnessRepairCommitTransition = async (input: {
+    readonly executeCommand: CommandExecutor;
+    readonly nativeSourceCommitHash: string;
+    readonly profile: ProofStorageWidthBrowserChainedRecoveryProfile;
+    readonly recoveryHarnessCommitHash: string;
+    readonly runLog: ActiveLocalRunLog;
+}): Promise<ValidatedChainedHarnessRepairTransition> => {
+    const firstHarnessRepair = await validateHarnessRepairCommitTransition({
+        executeCommand: input.executeCommand,
+        harnessCommitHash: input.profile.firstHarnessRepairCommitHash,
         nativeSourceCommitHash: input.nativeSourceCommitHash,
+        runLog: input.runLog,
+    });
+    const validatorRepair = await validateExactHarnessRepairCommitTransition({
+        changedFilePaths: validatorRepairFilePaths,
+        childCommitHash: input.profile.validatorRepairCommitHash,
+        executeCommand: input.executeCommand,
+        logFileSlug: 'git-browser-width-validator-repair',
+        parentCommitHash: input.profile.firstHarnessRepairCommitHash,
+        runLog: input.runLog,
+        transitionLabel: 'browser recovery validator repair',
+    });
+    const recoveryHarnessRepair =
+        await validateExactHarnessRepairCommitTransition({
+            changedFilePaths: validatorRepairFilePaths,
+            childCommitHash: input.recoveryHarnessCommitHash,
+            executeCommand: input.executeCommand,
+            logFileSlug: 'git-browser-width-chained-recovery',
+            parentCommitHash: input.profile.validatorRepairCommitHash,
+            runLog: input.runLog,
+            transitionLabel: 'chained browser recovery harness',
+        });
+    return Object.freeze({
+        firstHarnessRepair,
+        recoveryHarnessRepair,
+        validatorRepair,
     });
 };
 
@@ -1471,6 +2091,34 @@ const buildBrowserRecoveryAuthorizationKey = (
             nativeSourceCommitHash: profile.nativeSourceCommitHash,
             recoveryOrdinal: profile.recoveryOrdinal,
         }),
+    );
+
+const buildBrowserChainedRecoveryAuthorizationKey = (input: {
+    readonly chainedProfile: ProofStorageWidthBrowserChainedRecoveryProfile;
+    readonly preOperationProfile: ProofStorageWidthBrowserPreOperationRecoveryProfile;
+}): string =>
+    sha256Hex(
+        JSON.stringify(
+            normalizeJsonValue({
+                failedRecoveryArtifacts:
+                    input.chainedProfile.failedRecoveryArtifacts,
+                failedRecoveryRunRelativePath:
+                    input.chainedProfile.failedRecoveryRunRelativePath,
+                formatVersion: 2,
+                nativeAggregateSha256Hex:
+                    input.preOperationProfile.nativeAggregateSha256Hex,
+                nativeSourceCommitHash:
+                    input.preOperationProfile.nativeSourceCommitHash,
+                previousAuthorizationKeySha256Hex:
+                    input.chainedProfile.previousAuthorizationKeySha256Hex,
+                previousPreflightAttemptSha256Hex:
+                    input.chainedProfile.previousPreflightAttempt.sha256Hex,
+                recoveryOrdinal: input.chainedProfile.recoveryOrdinal,
+                validatorRepairCommitHash:
+                    input.chainedProfile.validatorRepairCommitHash,
+                width: proofStorageWidthBrowserEvidenceProfile.representativeWidth,
+            }),
+        ),
     );
 
 const buildBrowserRecoveryReservationIdentity = (input: {
@@ -1503,13 +2151,52 @@ const buildBrowserRecoveryReservationIdentity = (input: {
     });
 };
 
+const buildBrowserChainedRecoveryReservationIdentity = (input: {
+    readonly failedRecoveryAttempt: ValidatedFailedRecoveryAttempt;
+    readonly harnessTransition: ValidatedChainedHarnessRepairTransition;
+    readonly nativeEvidence: NativeWidthEvidence;
+    readonly preOperationRecovery: ValidatedPreOperationRecovery;
+    readonly rawWasmSha256Hex: string;
+}): RecoveryReservationIdentity => {
+    const identityRecord = Object.freeze({
+        failedArtifacts: input.preOperationRecovery.failedArtifacts,
+        failedRecoveryArtifacts: input.failedRecoveryAttempt.failedArtifacts,
+        failedRecoveryRunDirectoryPath:
+            input.failedRecoveryAttempt.failedRunDirectoryPath,
+        failedReservationIdentitySha256Hex:
+            input.preOperationRecovery.failedReservation.identitySha256Hex,
+        failedReservationSha256Hex:
+            input.preOperationRecovery.failedReservation.sha256Hex,
+        firstHarnessRepair: input.harnessTransition.firstHarnessRepair,
+        formatVersion: 2,
+        nativeAggregateSha256Hex: input.nativeEvidence.evidenceSha256Hex,
+        nativeReservationIdentitySha256Hex:
+            input.nativeEvidence.officialSampleReservationIdentitySha256Hex,
+        nativeSourceCommitHash:
+            input.harnessTransition.firstHarnessRepair.nativeSourceCommitHash,
+        officialOwner: browserOfficialSampleOwner,
+        previousPreflightAttempt:
+            input.failedRecoveryAttempt.previousPreflightAttempt,
+        rawWasmSha256Hex: input.rawWasmSha256Hex,
+        recoveryHarnessRepair: input.harnessTransition.recoveryHarnessRepair,
+        recoveryOrdinal: chainedRecoveryOrdinal,
+        validatorRepair: input.harnessTransition.validatorRepair,
+        width: proofStorageWidthBrowserEvidenceProfile.representativeWidth,
+    });
+    return Object.freeze({
+        identityRecord,
+        identitySha256Hex: sha256Hex(JSON.stringify(identityRecord)),
+    });
+};
+
 const createBrowserRecoveryPreflightAttempt = async (input: {
     readonly authorizationKeySha256Hex: string;
-    readonly profile: ProofStorageWidthBrowserPreOperationRecoveryProfile;
+    readonly custody: BrowserRecoveryCustody;
+    readonly markerBinding: BrowserRecoveryMarkerBinding;
     readonly reservationRootPath: string;
 }): Promise<string> => {
     const attemptRelativePath = path.join(
-        'browser-recovery-preflight',
+        input.custody.preflightDirectoryName,
         input.authorizationKeySha256Hex,
         'preflight-attempted.json',
     );
@@ -1546,9 +2233,25 @@ const createBrowserRecoveryPreflightAttempt = async (input: {
                 eventType:
                     'official-browser-width-recovery-preflight-attempted',
                 failedReservationIdentitySha256Hex:
-                    input.profile.failedReservation.identitySha256Hex,
+                    input.markerBinding.failedReservationIdentitySha256Hex,
+                ...(input.markerBinding.previousAuthorizationKeySha256Hex ===
+                undefined
+                    ? {}
+                    : {
+                          previousAuthorizationKeySha256Hex:
+                              input.markerBinding
+                                  .previousAuthorizationKeySha256Hex,
+                      }),
+                ...(input.markerBinding.previousPreflightAttemptSha256Hex ===
+                undefined
+                    ? {}
+                    : {
+                          previousPreflightAttemptSha256Hex:
+                              input.markerBinding
+                                  .previousPreflightAttemptSha256Hex,
+                      }),
                 recordedAtUnixMilliseconds: Date.now(),
-                recoveryOrdinal: input.profile.recoveryOrdinal,
+                recoveryOrdinal: input.markerBinding.recoveryOrdinal,
             })}\n`,
             'utf8',
         );
@@ -1564,15 +2267,68 @@ type ValidatedBrowserRecoveryPreflightAttempt = Readonly<{
     testFile: string;
 }>;
 
+type BrowserRecoveryCustody = Readonly<{
+    operationDirectoryName: string;
+    preflightDirectoryName: string;
+    schemaVersion: 'browser-recovery-1' | 'browser-recovery-2';
+}>;
+
+type BrowserRecoveryMarkerBinding = Readonly<{
+    failedReservationIdentitySha256Hex: string;
+    previousAuthorizationKeySha256Hex?: string;
+    previousPreflightAttemptSha256Hex?: string;
+    recoveryOrdinal: 1 | 2;
+}>;
+
+const firstBrowserRecoveryCustody = Object.freeze({
+    operationDirectoryName: 'browser-recovery',
+    preflightDirectoryName: 'browser-recovery-preflight',
+    schemaVersion: 'browser-recovery-1',
+} satisfies BrowserRecoveryCustody);
+
+const chainedBrowserRecoveryCustody = Object.freeze({
+    operationDirectoryName: chainedRecoveryOperationDirectoryName,
+    preflightDirectoryName: chainedRecoveryPreflightDirectoryName,
+    schemaVersion: 'browser-recovery-2',
+} satisfies BrowserRecoveryCustody);
+
+const buildFirstRecoveryMarkerBinding = (
+    profile: ProofStorageWidthBrowserPreOperationRecoveryProfile,
+): BrowserRecoveryMarkerBinding =>
+    Object.freeze({
+        failedReservationIdentitySha256Hex:
+            profile.failedReservation.identitySha256Hex,
+        recoveryOrdinal: profile.recoveryOrdinal,
+    });
+
+const buildChainedRecoveryMarkerBinding = (input: {
+    readonly chainedProfile: ProofStorageWidthBrowserChainedRecoveryProfile;
+    readonly preOperationProfile: ProofStorageWidthBrowserPreOperationRecoveryProfile;
+}): BrowserRecoveryMarkerBinding =>
+    Object.freeze({
+        failedReservationIdentitySha256Hex:
+            input.preOperationProfile.failedReservation.identitySha256Hex,
+        previousAuthorizationKeySha256Hex:
+            input.chainedProfile.previousAuthorizationKeySha256Hex,
+        previousPreflightAttemptSha256Hex:
+            input.chainedProfile.previousPreflightAttempt.sha256Hex,
+        recoveryOrdinal: input.chainedProfile.recoveryOrdinal,
+    });
+
 type BrowserRecoveryAuthorization = Readonly<{
     authorizationKeySha256Hex: string;
+    custody: BrowserRecoveryCustody;
+    markerBinding: BrowserRecoveryMarkerBinding;
     preflightAttemptPath: string;
-    profile: ProofStorageWidthBrowserPreOperationRecoveryProfile;
+    chainedProfile?: ProofStorageWidthBrowserChainedRecoveryProfile;
+    preOperationProfile: ProofStorageWidthBrowserPreOperationRecoveryProfile;
+    recoveryOrdinal: 1 | 2;
     reservationRootPath: string;
 }>;
 
 const appendBrowserRecoveryStaticPreflightObservation = async (input: {
     readonly authorizationKeySha256Hex: string;
+    readonly custody: BrowserRecoveryCustody;
     readonly identity: RecoveryReservationIdentity;
     readonly reservationPath: string;
     readonly reservationRootPath: string;
@@ -1591,7 +2347,7 @@ const appendBrowserRecoveryStaticPreflightObservation = async (input: {
     const custodyReservationPath = await resolveExistingCustodyFile({
         fieldName: 'Browser recovery static preflight marker',
         relativePath: path.join(
-            'browser-recovery-preflight',
+            input.custody.preflightDirectoryName,
             input.authorizationKeySha256Hex,
             'preflight-attempted.json',
         ),
@@ -1617,7 +2373,7 @@ const appendBrowserRecoveryStaticPreflightObservation = async (input: {
         const openedCustodyReservationPath = await resolveExistingCustodyFile({
             fieldName: 'Opened browser recovery static preflight marker',
             relativePath: path.join(
-                'browser-recovery-preflight',
+                input.custody.preflightDirectoryName,
                 input.authorizationKeySha256Hex,
                 'preflight-attempted.json',
             ),
@@ -1650,11 +2406,20 @@ const appendBrowserRecoveryStaticPreflightObservation = async (input: {
 const validateBrowserRecoveryPreflightAttempt = (input: {
     readonly authorizationKeySha256Hex: string;
     readonly identity: RecoveryReservationIdentity;
-    readonly profile: ProofStorageWidthBrowserPreOperationRecoveryProfile;
+    readonly markerBinding: BrowserRecoveryMarkerBinding;
     readonly serialized: string;
+    readonly terminalBinding?: Readonly<{
+        attachmentPath: string;
+        attachmentSha256Hex: string;
+        decisionOutcome: 'eligible' | 'ineligible';
+        markerPrefixByteLength: number;
+        markerPrefixSha256Hex: string;
+        operationReservationPath: string;
+        operationReservationSha256Hex: string;
+    }>;
     readonly terminalOutcomeRequired: boolean;
 }): ValidatedBrowserRecoveryPreflightAttempt => {
-    const records = parseJsonLines(
+    const records = parseCanonicalRecoveryJsonLines(
         input.serialized,
         'Browser recovery static preflight attempt',
     );
@@ -1665,8 +2430,12 @@ const validateBrowserRecoveryPreflightAttempt = (input: {
         records[0]?.eventType !==
             'official-browser-width-recovery-preflight-attempted' ||
         records[0]?.failedReservationIdentitySha256Hex !==
-            input.profile.failedReservation.identitySha256Hex ||
-        records[0]?.recoveryOrdinal !== input.profile.recoveryOrdinal ||
+            input.markerBinding.failedReservationIdentitySha256Hex ||
+        records[0]?.previousAuthorizationKeySha256Hex !==
+            input.markerBinding.previousAuthorizationKeySha256Hex ||
+        records[0]?.previousPreflightAttemptSha256Hex !==
+            input.markerBinding.previousPreflightAttemptSha256Hex ||
+        records[0]?.recoveryOrdinal !== input.markerBinding.recoveryOrdinal ||
         typeof records[0]?.recordedAtUnixMilliseconds !== 'number' ||
         records[1]?.eventType !==
             'official-browser-width-recovery-static-preflight-observed' ||
@@ -1690,6 +2459,23 @@ const validateBrowserRecoveryPreflightAttempt = (input: {
         input.terminalOutcomeRequired &&
         (records[2]?.eventType !== 'official-sample-outcome' ||
             records[2]?.outcome !== 'validated' ||
+            (input.terminalBinding !== undefined &&
+                (records[2]?.attachmentPath !==
+                    input.terminalBinding.attachmentPath ||
+                    records[2]?.attachmentSha256Hex !==
+                        input.terminalBinding.attachmentSha256Hex ||
+                    records[2]?.decisionOutcome !==
+                        input.terminalBinding.decisionOutcome ||
+                    records[2]?.identitySha256Hex !==
+                        input.identity.identitySha256Hex ||
+                    records[2]?.markerPrefixByteLength !==
+                        input.terminalBinding.markerPrefixByteLength ||
+                    records[2]?.markerPrefixSha256Hex !==
+                        input.terminalBinding.markerPrefixSha256Hex ||
+                    records[2]?.operationReservationPath !==
+                        input.terminalBinding.operationReservationPath ||
+                    records[2]?.operationReservationSha256Hex !==
+                        input.terminalBinding.operationReservationSha256Hex)) ||
             typeof records[2]?.recordedAtUnixMilliseconds !== 'number')
     ) {
         throw new Error(
@@ -1730,119 +2516,151 @@ const validateBrowserRecoveryPreflightAttempt = (input: {
     });
 };
 
-const appendBrowserRecoveryPreflightFailedOutcomeIfPending = async (input: {
-    readonly authorization: BrowserRecoveryAuthorization;
-    readonly failure: unknown;
-}): Promise<void> => {
-    const serialized = await readFile(
-        await resolveExistingCustodyFile({
-            fieldName: 'Browser recovery static preflight marker',
-            relativePath: path.join(
-                'browser-recovery-preflight',
-                input.authorization.authorizationKeySha256Hex,
-                'preflight-attempted.json',
-            ),
-            rootPath: input.authorization.reservationRootPath,
-        }),
-        'utf8',
+const browserRecoveryMarkerRelativePath = (
+    authorization: BrowserRecoveryAuthorization,
+): string =>
+    path.join(
+        authorization.custody.preflightDirectoryName,
+        authorization.authorizationKeySha256Hex,
+        'preflight-attempted.json',
     );
-    const records = parseJsonLines(
-        serialized,
-        'Browser recovery static preflight attempt',
-    );
-    const finalRecord = records[records.length - 1];
-    if (finalRecord?.eventType === 'official-sample-outcome') {
-        if (
-            ![2, 3].includes(records.length) ||
-            (finalRecord.outcome !== 'failed' &&
-                finalRecord.outcome !== 'validated') ||
-            typeof finalRecord.recordedAtUnixMilliseconds !== 'number'
-        ) {
-            throw new Error(
-                'The browser recovery singleton marker has a malformed terminal outcome.',
-            );
-        }
-        return;
-    }
+
+const validateBrowserRecoveryMarkerStart = (
+    authorization: BrowserRecoveryAuthorization,
+    records: readonly JsonObject[],
+): void => {
     if (
-        (records.length !== 1 && records.length !== 2) ||
+        records.length < 1 ||
+        records.length > 3 ||
         records[0]?.authorizationKeySha256Hex !==
-            input.authorization.authorizationKeySha256Hex ||
+            authorization.authorizationKeySha256Hex ||
         records[0]?.eventType !==
             'official-browser-width-recovery-preflight-attempted' ||
         records[0]?.failedReservationIdentitySha256Hex !==
-            input.authorization.profile.failedReservation.identitySha256Hex ||
+            authorization.markerBinding.failedReservationIdentitySha256Hex ||
+        records[0]?.previousAuthorizationKeySha256Hex !==
+            authorization.markerBinding.previousAuthorizationKeySha256Hex ||
+        records[0]?.previousPreflightAttemptSha256Hex !==
+            authorization.markerBinding.previousPreflightAttemptSha256Hex ||
         records[0]?.recoveryOrdinal !==
-            input.authorization.profile.recoveryOrdinal ||
+            authorization.markerBinding.recoveryOrdinal ||
         typeof records[0]?.recordedAtUnixMilliseconds !== 'number'
     ) {
         throw new Error(
-            'The browser recovery singleton marker changed before its terminal failure could be recorded.',
+            'The browser recovery singleton marker changed before its terminal outcome could be recorded.',
         );
     }
-    if (records.length === 2) {
-        const staticListStdout = requireString(
-            records[1]?.staticListStdout,
-            'Browser recovery pending static preflight stdout',
+};
+
+const validatePendingBrowserRecoveryStaticObservation = (
+    records: readonly JsonObject[],
+): void => {
+    const staticObservation = records[1];
+    const staticListStdout = requireString(
+        staticObservation?.staticListStdout,
+        'Browser recovery pending static preflight stdout',
+    );
+    const staticListStderr = requireString(
+        staticObservation?.staticListStderr,
+        'Browser recovery pending static preflight stderr',
+    );
+    if (
+        staticObservation?.eventType !==
+            'official-browser-width-recovery-static-preflight-observed' ||
+        staticListStderr !== '' ||
+        sha256Hex(staticListStdout) !==
+            requireSha256Hex(
+                staticObservation?.staticListStdoutSha256Hex,
+                'Browser recovery pending static preflight stdout digest',
+            ) ||
+        sha256Hex(staticListStderr) !==
+            requireSha256Hex(
+                staticObservation?.staticListStderrSha256Hex,
+                'Browser recovery pending static preflight stderr digest',
+            )
+    ) {
+        throw new Error(
+            'The browser recovery pending static preflight observation changed.',
         );
-        const staticListStderr = requireString(
-            records[1]?.staticListStderr,
-            'Browser recovery pending static preflight stderr',
-        );
-        if (
-            records[1]?.eventType !==
-                'official-browser-width-recovery-static-preflight-observed' ||
-            staticListStderr !== '' ||
-            sha256Hex(staticListStdout) !==
-                requireSha256Hex(
-                    records[1]?.staticListStdoutSha256Hex,
-                    'Browser recovery pending static preflight stdout digest',
-                ) ||
-            sha256Hex(staticListStderr) !==
-                requireSha256Hex(
-                    records[1]?.staticListStderrSha256Hex,
-                    'Browser recovery pending static preflight stderr digest',
-                )
-        ) {
-            throw new Error(
-                'The browser recovery pending static preflight observation changed.',
-            );
-        }
-        parseProofStorageWidthBrowserStaticPreflightOutput(staticListStdout);
     }
-    const serializedFailureRecord = `${JSON.stringify({
-        eventType: 'official-sample-outcome',
-        failureName: errorName(input.failure),
-        outcome: 'failed',
-        recordedAtUnixMilliseconds: Date.now(),
-    })}\n`;
-    const file = await open(input.authorization.preflightAttemptPath, 'r+');
+    parseProofStorageWidthBrowserStaticPreflightOutput(staticListStdout);
+};
+
+const appendBrowserRecoveryFailureOutcomeIfPending = async (input: {
+    readonly authorization: BrowserRecoveryAuthorization;
+    readonly failure: unknown;
+}): Promise<void> => {
+    const markerRelativePath = browserRecoveryMarkerRelativePath(
+        input.authorization,
+    );
+    const markerPath = await resolveExistingCustodyFile({
+        fieldName: 'Browser recovery static preflight marker',
+        relativePath: markerRelativePath,
+        rootPath: input.authorization.reservationRootPath,
+    });
+    const file = await open(markerPath, 'r+');
     try {
         const custodyMarkerPath = await resolveExistingCustodyFile({
             fieldName: 'Opened browser recovery static preflight marker',
-            relativePath: path.join(
-                'browser-recovery-preflight',
-                input.authorization.authorizationKeySha256Hex,
-                'preflight-attempted.json',
-            ),
+            relativePath: markerRelativePath,
             rootPath: input.authorization.reservationRootPath,
         });
         if (
-            custodyMarkerPath !==
-            path.resolve(input.authorization.preflightAttemptPath)
+            custodyMarkerPath !== markerPath ||
+            markerPath !==
+                path.resolve(input.authorization.preflightAttemptPath)
         ) {
             throw new Error(
                 'The opened browser recovery static preflight marker changed custody paths.',
             );
         }
+        const serialized = await file.readFile('utf8');
+        const records = parseCanonicalRecoveryJsonLines(
+            serialized,
+            'Browser recovery static preflight attempt',
+        );
+        validateBrowserRecoveryMarkerStart(input.authorization, records);
+        const finalRecord = records[records.length - 1];
+        if (finalRecord?.eventType === 'official-sample-outcome') {
+            if (
+                (records.length !== 2 && records.length !== 3) ||
+                finalRecord.outcome !== 'failed' ||
+                finalRecord.failureName !== errorName(input.failure) ||
+                typeof finalRecord.recordedAtUnixMilliseconds !== 'number'
+            ) {
+                throw new Error(
+                    'The browser recovery singleton already has a different terminal outcome.',
+                );
+            }
+            return;
+        }
+        if (records.length !== 1 && records.length !== 2) {
+            throw new Error(
+                'The browser recovery singleton marker has an invalid pending shape.',
+            );
+        }
+        if (records.length === 2) {
+            validatePendingBrowserRecoveryStaticObservation(records);
+        }
+        const serializedOutcomeRecord = `${JSON.stringify({
+            eventType: 'official-sample-outcome',
+            failureName: errorName(input.failure),
+            outcome: 'failed',
+            recordedAtUnixMilliseconds: Date.now(),
+        })}\n`;
         const statistics = await file.stat();
+        if (statistics.size !== Buffer.byteLength(serialized, 'utf8')) {
+            throw new Error(
+                'The browser recovery singleton marker changed while recording its failure.',
+            );
+        }
         const { bytesWritten } = await file.write(
-            serializedFailureRecord,
+            serializedOutcomeRecord,
             statistics.size,
             'utf8',
         );
         if (
-            bytesWritten !== Buffer.byteLength(serializedFailureRecord, 'utf8')
+            bytesWritten !== Buffer.byteLength(serializedOutcomeRecord, 'utf8')
         ) {
             throw new Error(
                 'The browser recovery singleton failure was only partially appended.',
@@ -1854,8 +2672,205 @@ const appendBrowserRecoveryPreflightFailedOutcomeIfPending = async (input: {
     }
 };
 
+type ChainedBrowserRecoveryValidatedOutcome = Readonly<{
+    attachmentPath: string;
+    attachmentSha256Hex: string;
+    authorization: BrowserRecoveryAuthorization;
+    decisionOutcome: 'eligible' | 'ineligible';
+    identity: RecoveryReservationIdentity;
+    markerPrefixByteLength: number;
+    markerPrefixSha256Hex: string;
+    operationReservationPath: string;
+    operationReservationSha256Hex: string;
+}>;
+
+const finalizeChainedBrowserRecoveryOutcome = async (
+    input: ChainedBrowserRecoveryValidatedOutcome,
+): Promise<void> => {
+    if (
+        input.authorization.recoveryOrdinal !== chainedRecoveryOrdinal ||
+        !path.isAbsolute(input.attachmentPath) ||
+        !exactSha256HexPattern.test(input.attachmentSha256Hex) ||
+        !exactSha256HexPattern.test(input.identity.identitySha256Hex) ||
+        !Number.isSafeInteger(input.markerPrefixByteLength) ||
+        input.markerPrefixByteLength <= 0 ||
+        !exactSha256HexPattern.test(input.markerPrefixSha256Hex) ||
+        input.operationReservationPath.length === 0 ||
+        !exactSha256HexPattern.test(input.operationReservationSha256Hex)
+    ) {
+        throw new Error(
+            'The chained browser recovery validated outcome lacks its attachment, decision, or identity binding.',
+        );
+    }
+    const markerRelativePath = browserRecoveryMarkerRelativePath(
+        input.authorization,
+    );
+    const markerPath = await resolveExistingCustodyFile({
+        fieldName: 'Browser recovery static preflight marker',
+        relativePath: markerRelativePath,
+        rootPath: input.authorization.reservationRootPath,
+    });
+    const file = await open(markerPath, 'r+');
+    try {
+        const custodyMarkerPath = await resolveExistingCustodyFile({
+            fieldName: 'Opened browser recovery static preflight marker',
+            relativePath: markerRelativePath,
+            rootPath: input.authorization.reservationRootPath,
+        });
+        if (
+            custodyMarkerPath !== markerPath ||
+            markerPath !==
+                path.resolve(input.authorization.preflightAttemptPath)
+        ) {
+            throw new Error(
+                'The opened browser recovery static preflight marker changed custody paths.',
+            );
+        }
+        const serialized = await file.readFile('utf8');
+        const records = parseCanonicalRecoveryJsonLines(
+            serialized,
+            'Browser recovery static preflight attempt',
+        );
+        validateBrowserRecoveryMarkerStart(input.authorization, records);
+        const markerPrefix = literalRecoveryJsonLinesPrefix(
+            serialized,
+            2,
+            'Browser recovery static preflight marker',
+        );
+        if (
+            markerPrefix.byteLength !== input.markerPrefixByteLength ||
+            sha256Hex(markerPrefix) !== input.markerPrefixSha256Hex
+        ) {
+            throw new Error(
+                'The chained browser recovery marker prefix changed before finalization.',
+            );
+        }
+        validatePendingBrowserRecoveryStaticObservation(records);
+        const attachmentPath = await resolveCanonicalAbsoluteCustodyFile(
+            input.attachmentPath,
+            'Final chained browser recovery attachment',
+        );
+        if (
+            attachmentPath !== path.resolve(input.attachmentPath) ||
+            sha256Hex(await readFile(attachmentPath)) !==
+                input.attachmentSha256Hex
+        ) {
+            throw new Error(
+                'The chained browser recovery attachment changed before finalization.',
+            );
+        }
+        const expectedOperationReservationPath = `${input.authorization.custody.operationDirectoryName}/${input.authorization.authorizationKeySha256Hex}/browser-recovery-started.json`;
+        requireExactRelativeArtifactPath({
+            actual: input.operationReservationPath,
+            expected: expectedOperationReservationPath,
+            fieldName: 'Chained browser recovery operation reservation path',
+            rootPath: input.authorization.reservationRootPath,
+        });
+        const operationReservationPath = await resolveExistingCustodyFile({
+            fieldName: 'Final chained browser recovery operation reservation',
+            relativePath: expectedOperationReservationPath,
+            rootPath: input.authorization.reservationRootPath,
+        });
+        const serializedOperationReservation = await readFile(
+            operationReservationPath,
+            'utf8',
+        );
+        if (
+            sha256Hex(serializedOperationReservation) !==
+            input.operationReservationSha256Hex
+        ) {
+            throw new Error(
+                'The chained browser recovery operation reservation changed before finalization.',
+            );
+        }
+        validateBrowserRecoveryReservationArtifact({
+            authorizationKeySha256Hex:
+                input.authorization.authorizationKeySha256Hex,
+            identity: input.identity,
+            serialized: serializedOperationReservation,
+        });
+        const terminalBinding = Object.freeze({
+            attachmentPath,
+            attachmentSha256Hex: input.attachmentSha256Hex,
+            decisionOutcome: input.decisionOutcome,
+            markerPrefixByteLength: markerPrefix.byteLength,
+            markerPrefixSha256Hex: sha256Hex(markerPrefix),
+            operationReservationPath: expectedOperationReservationPath,
+            operationReservationSha256Hex: input.operationReservationSha256Hex,
+        });
+        const finalRecord = records[records.length - 1];
+        if (finalRecord?.eventType === 'official-sample-outcome') {
+            if (records.length !== 3 || finalRecord.outcome !== 'validated') {
+                throw new Error(
+                    'The chained browser recovery singleton already has a different terminal outcome.',
+                );
+            }
+            validateBrowserRecoveryPreflightAttempt({
+                authorizationKeySha256Hex:
+                    input.authorization.authorizationKeySha256Hex,
+                identity: input.identity,
+                markerBinding: input.authorization.markerBinding,
+                serialized,
+                terminalBinding,
+                terminalOutcomeRequired: true,
+            });
+            return;
+        }
+        if (records.length !== 2) {
+            throw new Error(
+                'The chained browser recovery cannot validate before its static observation.',
+            );
+        }
+        const serializedOutcomeRecord = `${JSON.stringify({
+            attachmentPath: terminalBinding.attachmentPath,
+            attachmentSha256Hex: terminalBinding.attachmentSha256Hex,
+            decisionOutcome: terminalBinding.decisionOutcome,
+            eventType: 'official-sample-outcome',
+            identitySha256Hex: input.identity.identitySha256Hex,
+            markerPrefixByteLength: terminalBinding.markerPrefixByteLength,
+            markerPrefixSha256Hex: terminalBinding.markerPrefixSha256Hex,
+            operationReservationPath: terminalBinding.operationReservationPath,
+            operationReservationSha256Hex:
+                terminalBinding.operationReservationSha256Hex,
+            outcome: 'validated',
+            recordedAtUnixMilliseconds: Date.now(),
+        })}\n`;
+        validateBrowserRecoveryPreflightAttempt({
+            authorizationKeySha256Hex:
+                input.authorization.authorizationKeySha256Hex,
+            identity: input.identity,
+            markerBinding: input.authorization.markerBinding,
+            serialized: `${serialized}${serializedOutcomeRecord}`,
+            terminalBinding,
+            terminalOutcomeRequired: true,
+        });
+        const statistics = await file.stat();
+        if (statistics.size !== Buffer.byteLength(serialized, 'utf8')) {
+            throw new Error(
+                'The browser recovery singleton marker changed while finalizing.',
+            );
+        }
+        const { bytesWritten } = await file.write(
+            serializedOutcomeRecord,
+            statistics.size,
+            'utf8',
+        );
+        if (
+            bytesWritten !== Buffer.byteLength(serializedOutcomeRecord, 'utf8')
+        ) {
+            throw new Error(
+                'The browser recovery singleton terminal outcome was only partially appended.',
+            );
+        }
+        await file.sync();
+    } finally {
+        await file.close();
+    }
+};
+
 const createBrowserRecoveryReservation = async (input: {
     readonly authorizationKeySha256Hex: string;
+    readonly custody: BrowserRecoveryCustody;
     readonly identity: RecoveryReservationIdentity;
     readonly reservationRootPath: string;
     readonly runDirectoryPath: string;
@@ -1874,7 +2889,7 @@ const createBrowserRecoveryReservation = async (input: {
         );
     }
     const reservationRelativePath = path.join(
-        'browser-recovery',
+        input.custody.operationDirectoryName,
         input.authorizationKeySha256Hex,
         'browser-recovery-started.json',
     );
@@ -1927,7 +2942,7 @@ const validateBrowserRecoveryReservationArtifact = (input: {
     readonly identity: RecoveryReservationIdentity;
     readonly serialized: string;
 }): void => {
-    const records = parseJsonLines(
+    const records = parseCanonicalRecoveryJsonLines(
         input.serialized,
         'Browser recovery reservation',
     );
@@ -2203,15 +3218,19 @@ const requirePinnedRepositoryRecord = (input: {
     }
 };
 
-export const validateProofStorageWidthBrowserEvidenceArtifacts = async (
+type ProofStorageWidthBrowserArtifactValidationOptions = Readonly<{
+    chainedRecoveryProfile?: ProofStorageWidthBrowserChainedRecoveryProfile;
+    loadNativeWidthEvidence?: NativeWidthEvidenceLoader;
+    officialReservationRootPath?: string;
+    preOperationRecoveryProfile?: ProofStorageWidthBrowserPreOperationRecoveryProfile;
+    processedWasmKernelPath?: string;
+    publicSdkWasmKernelPath?: string;
+}>;
+
+const validateProofStorageWidthBrowserEvidenceArtifactsWithMarkerState = async (
     attachmentPath: string,
-    options: Readonly<{
-        loadNativeWidthEvidence?: NativeWidthEvidenceLoader;
-        officialReservationRootPath?: string;
-        preOperationRecoveryProfile?: ProofStorageWidthBrowserPreOperationRecoveryProfile;
-        processedWasmKernelPath?: string;
-        publicSdkWasmKernelPath?: string;
-    }> = {},
+    options: ProofStorageWidthBrowserArtifactValidationOptions &
+        Readonly<{ allowProvisionalChainedRecoveryMarker: boolean }>,
 ): Promise<void> => {
     if (!path.isAbsolute(attachmentPath)) {
         throw new Error(
@@ -2276,19 +3295,24 @@ export const validateProofStorageWidthBrowserEvidenceArtifacts = async (
             'The official browser reservation root must stay outside the run directory.',
         );
     }
+    const serializedEvidence = await readFile(custodyAttachmentPath, 'utf8');
+    const attachmentSha256Hex = sha256Hex(serializedEvidence);
     const evidence = requireJsonObject(
-        parseJson(
-            await readFile(custodyAttachmentPath, 'utf8'),
-            'Proof-storage width browser evidence',
-        ),
+        parseJson(serializedEvidence, 'Proof-storage width browser evidence'),
         'Proof-storage width browser evidence',
     );
-    if (evidence.formatVersion !== 4 && evidence.formatVersion !== 5) {
+    if (
+        evidence.formatVersion !== 4 &&
+        evidence.formatVersion !== 5 &&
+        evidence.formatVersion !== 6
+    ) {
         throw new Error(
-            'Proof-storage width browser evidence must use integrity format version four or recovery version five.',
+            'Proof-storage width browser evidence must use integrity format version four or recovery version five or six.',
         );
     }
-    const isRecoveryEvidence = evidence.formatVersion === 5;
+    const isRecoveryEvidence =
+        evidence.formatVersion === 5 || evidence.formatVersion === 6;
+    const isChainedRecoveryEvidence = evidence.formatVersion === 6;
     const repository = requireJsonObject(evidence.repository, 'repository');
     const initialRepository = requireJsonObject(
         repository.initial,
@@ -2399,6 +3423,15 @@ export const validateProofStorageWidthBrowserEvidenceArtifacts = async (
         );
     }
     let validatedRecovery: ValidatedPreOperationRecovery | undefined;
+    let validatedFailedRecoveryAttempt:
+        | ValidatedFailedRecoveryAttempt
+        | undefined;
+    const preOperationRecoveryProfile =
+        options.preOperationRecoveryProfile ??
+        proofStorageWidthBrowserPreOperationRecoveryProfile;
+    const chainedRecoveryProfile =
+        options.chainedRecoveryProfile ??
+        proofStorageWidthBrowserChainedRecoveryProfile;
     if (recovery !== undefined) {
         validatedRecovery =
             await validateProofStorageWidthBrowserPreOperationRecovery({
@@ -2408,19 +3441,84 @@ export const validateProofStorageWidthBrowserEvidenceArtifacts = async (
                 ),
                 nativeEvidence,
                 officialReservationRootPath: reservationRootPath,
-                profile: options.preOperationRecoveryProfile,
+                profile: preOperationRecoveryProfile,
             });
         const staticPreflight = requireJsonObject(
             recovery.staticPreflight,
             'recovery.staticPreflight',
         );
-        if (
+        if (isChainedRecoveryEvidence) {
+            validatedFailedRecoveryAttempt =
+                await validateProofStorageWidthBrowserFailedRecoveryAttempt({
+                    failedRecoveryRunDirectoryPath: requireString(
+                        recovery.failedRecoveryRunDirectoryPath,
+                        'recovery.failedRecoveryRunDirectoryPath',
+                    ),
+                    nativeEvidence,
+                    officialReservationRootPath: reservationRootPath,
+                    preOperationRecovery: validatedRecovery,
+                    preOperationProfile: preOperationRecoveryProfile,
+                    profile: chainedRecoveryProfile,
+                });
+            const expectedFirstHarnessRepair = {
+                changedFilePaths: recoveryRepairFilePaths,
+                harnessCommitHash:
+                    chainedRecoveryProfile.firstHarnessRepairCommitHash,
+                nativeSourceCommitHash,
+            };
+            const expectedValidatorRepair = {
+                changedFilePaths: validatorRepairFilePaths,
+                harnessCommitHash:
+                    chainedRecoveryProfile.validatorRepairCommitHash,
+                nativeSourceCommitHash:
+                    chainedRecoveryProfile.firstHarnessRepairCommitHash,
+            };
+            const expectedRecoveryHarnessRepair = {
+                changedFilePaths: validatorRepairFilePaths,
+                harnessCommitHash: repositoryCommitHash,
+                nativeSourceCommitHash:
+                    chainedRecoveryProfile.validatorRepairCommitHash,
+            };
+            if (
+                recovery.recoveryOrdinal !== chainedRecoveryOrdinal ||
+                !normalizedJsonEquals(
+                    recovery.failedRecoveryArtifacts,
+                    validatedFailedRecoveryAttempt.failedArtifacts,
+                ) ||
+                !normalizedJsonEquals(
+                    recovery.previousPreflightAttempt,
+                    validatedFailedRecoveryAttempt.previousPreflightAttempt,
+                ) ||
+                !normalizedJsonEquals(
+                    recovery.firstHarnessRepair,
+                    expectedFirstHarnessRepair,
+                ) ||
+                !normalizedJsonEquals(
+                    recovery.validatorRepair,
+                    expectedValidatorRepair,
+                ) ||
+                !normalizedJsonEquals(
+                    recovery.recoveryHarnessRepair,
+                    expectedRecoveryHarnessRepair,
+                )
+            ) {
+                throw new Error(
+                    'The chained browser recovery closure changed its failed attempt or exact commit transitions.',
+                );
+            }
+        } else if (
             recovery.recoveryOrdinal !== recoveryOrdinal ||
             recovery.harnessCommitHash !== repositoryCommitHash ||
             !normalizedJsonEquals(
                 recovery.changedFilePaths,
                 recoveryRepairFilePaths,
-            ) ||
+            )
+        ) {
+            throw new Error(
+                'The browser recovery closure changed its predecessor, commits, repair diff, ordinal, or static preflight binding.',
+            );
+        }
+        if (
             !normalizedJsonEquals(
                 recovery.failedArtifacts,
                 validatedRecovery.failedArtifacts,
@@ -2673,16 +3771,46 @@ export const validateProofStorageWidthBrowserEvidenceArtifacts = async (
     const recoveryReservationIdentity =
         recovery === undefined || validatedRecovery === undefined
             ? undefined
-            : buildBrowserRecoveryReservationIdentity({
-                  harnessTransition: {
-                      changedFilePaths: recoveryRepairFilePaths,
-                      harnessCommitHash: repositoryCommitHash,
-                      nativeSourceCommitHash,
-                  },
-                  nativeEvidence,
-                  preOperationRecovery: validatedRecovery,
-                  rawWasmSha256Hex,
-              });
+            : isChainedRecoveryEvidence
+              ? validatedFailedRecoveryAttempt === undefined
+                  ? undefined
+                  : buildBrowserChainedRecoveryReservationIdentity({
+                        failedRecoveryAttempt: validatedFailedRecoveryAttempt,
+                        harnessTransition: {
+                            firstHarnessRepair: {
+                                changedFilePaths: recoveryRepairFilePaths,
+                                harnessCommitHash:
+                                    chainedRecoveryProfile.firstHarnessRepairCommitHash,
+                                nativeSourceCommitHash,
+                            },
+                            recoveryHarnessRepair: {
+                                changedFilePaths: validatorRepairFilePaths,
+                                harnessCommitHash: repositoryCommitHash,
+                                nativeSourceCommitHash:
+                                    chainedRecoveryProfile.validatorRepairCommitHash,
+                            },
+                            validatorRepair: {
+                                changedFilePaths: validatorRepairFilePaths,
+                                harnessCommitHash:
+                                    chainedRecoveryProfile.validatorRepairCommitHash,
+                                nativeSourceCommitHash:
+                                    chainedRecoveryProfile.firstHarnessRepairCommitHash,
+                            },
+                        },
+                        nativeEvidence,
+                        preOperationRecovery: validatedRecovery,
+                        rawWasmSha256Hex,
+                    })
+              : buildBrowserRecoveryReservationIdentity({
+                    harnessTransition: {
+                        changedFilePaths: recoveryRepairFilePaths,
+                        harnessCommitHash: repositoryCommitHash,
+                        nativeSourceCommitHash,
+                    },
+                    nativeEvidence,
+                    preOperationRecovery: validatedRecovery,
+                    rawWasmSha256Hex,
+                });
     const expectedReservationIdentitySha256Hex =
         recoveryReservationIdentity?.identitySha256Hex ??
         ordinaryReservationIdentity?.identitySha256Hex;
@@ -2691,13 +3819,33 @@ export const validateProofStorageWidthBrowserEvidenceArtifacts = async (
             'The browser closure omitted its recomputed reservation identity.',
         );
     }
+    const effectivePreOperationRecoveryProfile =
+        options.preOperationRecoveryProfile ??
+        proofStorageWidthBrowserPreOperationRecoveryProfile;
     const recoveryAuthorizationKeySha256Hex =
         validatedRecovery === undefined
             ? undefined
-            : buildBrowserRecoveryAuthorizationKey(
-                  options.preOperationRecoveryProfile ??
-                      proofStorageWidthBrowserPreOperationRecoveryProfile,
-              );
+            : isChainedRecoveryEvidence
+              ? buildBrowserChainedRecoveryAuthorizationKey({
+                    chainedProfile: chainedRecoveryProfile,
+                    preOperationProfile: effectivePreOperationRecoveryProfile,
+                })
+              : buildBrowserRecoveryAuthorizationKey(
+                    effectivePreOperationRecoveryProfile,
+                );
+    const recoveryCustody = isChainedRecoveryEvidence
+        ? chainedBrowserRecoveryCustody
+        : firstBrowserRecoveryCustody;
+    const recoveryMarkerBinding = isChainedRecoveryEvidence
+        ? buildChainedRecoveryMarkerBinding({
+              chainedProfile: chainedRecoveryProfile,
+              preOperationProfile: effectivePreOperationRecoveryProfile,
+          })
+        : buildFirstRecoveryMarkerBinding(effectivePreOperationRecoveryProfile);
+    const expectedRecoveryOperationReservationPath =
+        recovery === undefined
+            ? undefined
+            : `${recoveryCustody.operationDirectoryName}/${recoveryAuthorizationKeySha256Hex ?? ''}/browser-recovery-started.json`;
     if (recovery !== undefined) {
         const staticPreflight = requireJsonObject(
             recovery.staticPreflight,
@@ -2707,7 +3855,7 @@ export const validateProofStorageWidthBrowserEvidenceArtifacts = async (
             staticPreflight.attempt,
             'recovery.staticPreflight.attempt',
         );
-        const preflightAttemptRelativePath = `browser-recovery-preflight/${recoveryAuthorizationKeySha256Hex ?? ''}/preflight-attempted.json`;
+        const preflightAttemptRelativePath = `${recoveryCustody.preflightDirectoryName}/${recoveryAuthorizationKeySha256Hex ?? ''}/preflight-attempted.json`;
         requireExactRelativeArtifactPath({
             actual: preflightAttempt.path,
             expected: preflightAttemptRelativePath,
@@ -2723,11 +3871,38 @@ export const validateProofStorageWidthBrowserEvidenceArtifacts = async (
             preflightAttemptPath,
             'utf8',
         );
-        requireArtifactDigest({
-            expectedSha256Hex: preflightAttempt.sha256Hex,
-            fieldName: 'Browser recovery static preflight marker',
-            value: serializedPreflightAttempt,
-        });
+        const serializedPreflightAttemptRecords =
+            parseCanonicalRecoveryJsonLines(
+                serializedPreflightAttempt,
+                'Browser recovery static preflight marker',
+            );
+        const serializedPreflightAttemptPrefix = literalRecoveryJsonLinesPrefix(
+            serializedPreflightAttempt,
+            2,
+            'Browser recovery static preflight marker',
+        );
+        if (isChainedRecoveryEvidence) {
+            if (
+                preflightAttempt.prefixByteLength !==
+                serializedPreflightAttemptPrefix.byteLength
+            ) {
+                throw new Error(
+                    'The chained browser recovery static preflight marker prefix length changed.',
+                );
+            }
+            requireArtifactDigest({
+                expectedSha256Hex: preflightAttempt.prefixSha256Hex,
+                fieldName:
+                    'Chained browser recovery static preflight marker prefix',
+                value: serializedPreflightAttemptPrefix,
+            });
+        } else {
+            requireArtifactDigest({
+                expectedSha256Hex: preflightAttempt.sha256Hex,
+                fieldName: 'Browser recovery static preflight marker',
+                value: serializedPreflightAttempt,
+            });
+        }
         if (
             preflightAttempt.identitySha256Hex !==
                 expectedReservationIdentitySha256Hex ||
@@ -2738,17 +3913,47 @@ export const validateProofStorageWidthBrowserEvidenceArtifacts = async (
                 'The browser recovery static preflight marker changed its identity.',
             );
         }
+        if (
+            isChainedRecoveryEvidence &&
+            serializedPreflightAttemptRecords.length === 2 &&
+            !options.allowProvisionalChainedRecoveryMarker
+        ) {
+            throw new Error(
+                'The exported chained browser recovery closure requires its validated terminal marker.',
+            );
+        }
         const validatedPreflightAttempt =
             validateBrowserRecoveryPreflightAttempt({
                 authorizationKeySha256Hex:
                     recoveryAuthorizationKeySha256Hex ?? '',
                 identity:
                     recoveryReservationIdentity as RecoveryReservationIdentity,
-                profile:
-                    options.preOperationRecoveryProfile ??
-                    proofStorageWidthBrowserPreOperationRecoveryProfile,
+                markerBinding: recoveryMarkerBinding,
                 serialized: serializedPreflightAttempt,
-                terminalOutcomeRequired: true,
+                ...(isChainedRecoveryEvidence
+                    ? {
+                          terminalBinding: {
+                              attachmentPath: custodyAttachmentPath,
+                              attachmentSha256Hex,
+                              decisionOutcome: decision.outcome,
+                              markerPrefixByteLength:
+                                  serializedPreflightAttemptPrefix.byteLength,
+                              markerPrefixSha256Hex: sha256Hex(
+                                  serializedPreflightAttemptPrefix,
+                              ),
+                              operationReservationPath:
+                                  expectedRecoveryOperationReservationPath ??
+                                  '',
+                              operationReservationSha256Hex: requireSha256Hex(
+                                  officialReservation.sha256Hex,
+                                  'officialSampleReservation.sha256Hex',
+                              ),
+                          },
+                      }
+                    : {}),
+                terminalOutcomeRequired:
+                    !isChainedRecoveryEvidence ||
+                    serializedPreflightAttemptRecords.length === 3,
             });
         if (
             staticPreflight.outputSha256Hex !==
@@ -2772,7 +3977,7 @@ export const validateProofStorageWidthBrowserEvidenceArtifacts = async (
             officialReservation.authorizationKeySha256Hex !==
                 recoveryAuthorizationKeySha256Hex) ||
         officialReservation.schemaVersion !==
-            (recovery === undefined ? 1 : 'browser-recovery-1')
+            (recovery === undefined ? 1 : recoveryCustody.schemaVersion)
     ) {
         throw new Error(
             'The browser official reservation identity, owner, or schema changed.',
@@ -2781,7 +3986,7 @@ export const validateProofStorageWidthBrowserEvidenceArtifacts = async (
     const reservationRelativePath =
         recovery === undefined
             ? `browser/${officialReservationIdentitySha256Hex}/browser-started.json`
-            : `browser-recovery/${recoveryAuthorizationKeySha256Hex ?? ''}/browser-recovery-started.json`;
+            : (expectedRecoveryOperationReservationPath ?? '');
     requireExactRelativeArtifactPath({
         actual: officialReservation.path,
         expected: reservationRelativePath,
@@ -2817,24 +4022,77 @@ export const validateProofStorageWidthBrowserEvidenceArtifacts = async (
     }
 };
 
+export const validateProofStorageWidthBrowserEvidenceArtifacts = (
+    attachmentPath: string,
+    options: ProofStorageWidthBrowserArtifactValidationOptions = {},
+): Promise<void> =>
+    validateProofStorageWidthBrowserEvidenceArtifactsWithMarkerState(
+        attachmentPath,
+        {
+            ...options,
+            allowProvisionalChainedRecoveryMarker: false,
+        },
+    );
+
+const validateProvisionalProofStorageWidthBrowserEvidenceArtifacts = (
+    attachmentPath: string,
+    options: ProofStorageWidthBrowserArtifactValidationOptions,
+): Promise<void> =>
+    validateProofStorageWidthBrowserEvidenceArtifactsWithMarkerState(
+        attachmentPath,
+        {
+            ...options,
+            allowProvisionalChainedRecoveryMarker: true,
+        },
+    );
+
 const createBrowserRecoveryAuthorizationIfSelected = async (input: {
     readonly dependencies?: ProofStorageWidthBrowserEvidenceDependencies;
+    readonly failedRecoveryAttemptRunDirectoryPath?: string;
     readonly preOperationRecoveryRunDirectoryPath?: string;
 }): Promise<BrowserRecoveryAuthorization | undefined> => {
-    if (input.preOperationRecoveryRunDirectoryPath === undefined) {
+    if (
+        input.preOperationRecoveryRunDirectoryPath === undefined &&
+        input.failedRecoveryAttemptRunDirectoryPath === undefined
+    ) {
         return undefined;
     }
-    const profile =
+    if (input.preOperationRecoveryRunDirectoryPath === undefined) {
+        throw new Error(
+            'A browser recovery cannot name the failed recovery attempt without its pre-operation predecessor.',
+        );
+    }
+    const preOperationProfile =
         input.dependencies?.preOperationRecoveryProfile ??
         proofStorageWidthBrowserPreOperationRecoveryProfile;
+    const isChainedRecovery =
+        input.failedRecoveryAttemptRunDirectoryPath !== undefined;
+    const chainedProfile = isChainedRecovery
+        ? (input.dependencies?.chainedRecoveryProfile ??
+          proofStorageWidthBrowserChainedRecoveryProfile)
+        : undefined;
     if (
         !path.isAbsolute(input.preOperationRecoveryRunDirectoryPath) ||
         path.resolve(input.preOperationRecoveryRunDirectoryPath) !==
-            path.resolve(profile.failedRunDirectoryPath) ||
-        profile.recoveryOrdinal !== recoveryOrdinal
+            path.resolve(preOperationProfile.failedRunDirectoryPath) ||
+        preOperationProfile.recoveryOrdinal !== recoveryOrdinal ||
+        (isChainedRecovery &&
+            (chainedProfile === undefined ||
+                !path.isAbsolute(
+                    input.failedRecoveryAttemptRunDirectoryPath ?? '',
+                ) ||
+                path.resolve(
+                    input.failedRecoveryAttemptRunDirectoryPath ?? '',
+                ) !==
+                    path.resolve(
+                        chainedProfile.failedRecoveryRunDirectoryPath,
+                    ) ||
+                chainedProfile.recoveryOrdinal !== chainedRecoveryOrdinal))
     ) {
         throw new Error(
-            'The pre-operation recovery path is not the exact authorized failed run.',
+            isChainedRecovery
+                ? 'The chained recovery paths are not the exact authorized failed runs.'
+                : 'The pre-operation recovery path is not the exact authorized failed run.',
         );
     }
     const configuredReservationRootPath =
@@ -2850,22 +4108,56 @@ const createBrowserRecoveryAuthorizationIfSelected = async (input: {
         'Browser recovery reservation root',
     );
     const authorizationKeySha256Hex =
-        buildBrowserRecoveryAuthorizationKey(profile);
+        chainedProfile === undefined
+            ? buildBrowserRecoveryAuthorizationKey(preOperationProfile)
+            : buildBrowserChainedRecoveryAuthorizationKey({
+                  chainedProfile,
+                  preOperationProfile,
+              });
+    if (
+        chainedProfile !== undefined &&
+        authorizationKeySha256Hex ===
+            chainedProfile.previousAuthorizationKeySha256Hex
+    ) {
+        throw new Error(
+            'The chained browser recovery derived the consumed authorization key.',
+        );
+    }
+    const markerBinding =
+        chainedProfile === undefined
+            ? buildFirstRecoveryMarkerBinding(preOperationProfile)
+            : buildChainedRecoveryMarkerBinding({
+                  chainedProfile,
+                  preOperationProfile,
+              });
+    const custody =
+        chainedProfile === undefined
+            ? firstBrowserRecoveryCustody
+            : chainedBrowserRecoveryCustody;
     const preflightAttemptPath = await createBrowserRecoveryPreflightAttempt({
         authorizationKeySha256Hex,
-        profile,
+        custody,
+        markerBinding,
         reservationRootPath,
     });
     return Object.freeze({
         authorizationKeySha256Hex,
+        ...(chainedProfile === undefined ? {} : { chainedProfile }),
+        custody,
+        markerBinding,
         preflightAttemptPath,
-        profile,
+        preOperationProfile,
+        recoveryOrdinal:
+            chainedProfile === undefined
+                ? recoveryOrdinal
+                : chainedRecoveryOrdinal,
         reservationRootPath,
     });
 };
 
 const executeProofStorageWidthBrowserEvidenceAttempt = async (input: {
     readonly dependencies?: ProofStorageWidthBrowserEvidenceDependencies;
+    readonly failedRecoveryAttemptRunDirectoryPath?: string;
     readonly nativeEvidencePath: string;
     readonly preOperationRecoveryRunDirectoryPath?: string;
     readonly recoveryAuthorization?: BrowserRecoveryAuthorization;
@@ -2901,16 +4193,25 @@ const executeProofStorageWidthBrowserEvidenceAttempt = async (input: {
     const officialReservationRootPath = path.resolve(
         configuredOfficialReservationRootPath,
     );
-    const recoveryProfile =
-        input.recoveryAuthorization?.profile ??
+    const preOperationRecoveryProfile =
+        input.recoveryAuthorization?.preOperationProfile ??
         input.dependencies?.preOperationRecoveryProfile ??
         proofStorageWidthBrowserPreOperationRecoveryProfile;
+    const chainedRecoveryProfile =
+        input.recoveryAuthorization?.chainedProfile ??
+        input.dependencies?.chainedRecoveryProfile ??
+        proofStorageWidthBrowserChainedRecoveryProfile;
+    const isChainedRecovery =
+        input.failedRecoveryAttemptRunDirectoryPath !== undefined;
     if (
         (input.preOperationRecoveryRunDirectoryPath === undefined) !==
-        (input.recoveryAuthorization === undefined)
+            (input.recoveryAuthorization === undefined) ||
+        (input.recoveryAuthorization !== undefined &&
+            input.recoveryAuthorization.recoveryOrdinal !==
+                (isChainedRecovery ? chainedRecoveryOrdinal : recoveryOrdinal))
     ) {
         throw new Error(
-            'The browser recovery did not carry its earliest singleton authorization.',
+            'The browser recovery did not carry the singleton authorization for its exact predecessor set.',
         );
     }
     const loadNativeEvidence =
@@ -2934,7 +4235,20 @@ const executeProofStorageWidthBrowserEvidenceAttempt = async (input: {
                       input.preOperationRecoveryRunDirectoryPath,
                   nativeEvidence,
                   officialReservationRootPath,
-                  profile: recoveryProfile,
+                  profile: preOperationRecoveryProfile,
+              });
+    const failedRecoveryAttempt =
+        input.failedRecoveryAttemptRunDirectoryPath === undefined ||
+        preOperationRecovery === undefined
+            ? undefined
+            : await validateProofStorageWidthBrowserFailedRecoveryAttempt({
+                  failedRecoveryRunDirectoryPath:
+                      input.failedRecoveryAttemptRunDirectoryPath,
+                  nativeEvidence,
+                  officialReservationRootPath,
+                  preOperationRecovery,
+                  preOperationProfile: preOperationRecoveryProfile,
+                  profile: chainedRecoveryProfile,
               });
     const initialRepositoryState = await readRepositoryState(
         'initial',
@@ -2949,13 +4263,25 @@ const executeProofStorageWidthBrowserEvidenceAttempt = async (input: {
         expectedHarnessCommitHash,
         'initial',
     );
-    const harnessTransition =
+    const firstHarnessTransition =
         preOperationRecovery === undefined
             ? undefined
-            : await validateHarnessRepairCommitTransition({
+            : isChainedRecovery
+              ? undefined
+              : await validateHarnessRepairCommitTransition({
+                    executeCommand,
+                    harnessCommitHash: expectedHarnessCommitHash,
+                    nativeSourceCommitHash: nativeEvidence.repositoryCommitHash,
+                    runLog: input.runLog,
+                });
+    const chainedHarnessTransition =
+        preOperationRecovery === undefined || !isChainedRecovery
+            ? undefined
+            : await validateChainedHarnessRepairCommitTransition({
                   executeCommand,
-                  harnessCommitHash: expectedHarnessCommitHash,
                   nativeSourceCommitHash: nativeEvidence.repositoryCommitHash,
+                  profile: chainedRecoveryProfile,
+                  recoveryHarnessCommitHash: expectedHarnessCommitHash,
                   runLog: input.runLog,
               });
     const packageManagerRunner = resolvePackageManagerRunner();
@@ -3003,7 +4329,8 @@ const executeProofStorageWidthBrowserEvidenceAttempt = async (input: {
     )();
     if (
         preOperationRecovery !== undefined &&
-        wasmBinding.rawSha256Hex !== recoveryProfile.rawWasmSha256Hex
+        wasmBinding.rawSha256Hex !==
+            preOperationRecoveryProfile.rawWasmSha256Hex
     ) {
         throw new Error(
             'The rebuilt release WebAssembly bytes drifted from the authorized pre-operation predecessor.',
@@ -3033,20 +4360,37 @@ const executeProofStorageWidthBrowserEvidenceAttempt = async (input: {
         executeCommand,
         runLog: input.runLog,
     });
-    if (preOperationRecovery !== undefined && harnessTransition === undefined) {
+    if (
+        preOperationRecovery !== undefined &&
+        firstHarnessTransition === undefined &&
+        chainedHarnessTransition === undefined
+    ) {
         throw new Error(
             'The browser recovery omitted its validated commit transition.',
         );
     }
     const recoveryReservationIdentity =
-        preOperationRecovery === undefined || harnessTransition === undefined
+        preOperationRecovery === undefined
             ? undefined
-            : buildBrowserRecoveryReservationIdentity({
-                  harnessTransition,
-                  nativeEvidence,
-                  preOperationRecovery,
-                  rawWasmSha256Hex: wasmBinding.rawSha256Hex,
-              });
+            : isChainedRecovery
+              ? failedRecoveryAttempt === undefined ||
+                chainedHarnessTransition === undefined
+                  ? undefined
+                  : buildBrowserChainedRecoveryReservationIdentity({
+                        failedRecoveryAttempt,
+                        harnessTransition: chainedHarnessTransition,
+                        nativeEvidence,
+                        preOperationRecovery,
+                        rawWasmSha256Hex: wasmBinding.rawSha256Hex,
+                    })
+              : firstHarnessTransition === undefined
+                ? undefined
+                : buildBrowserRecoveryReservationIdentity({
+                      harnessTransition: firstHarnessTransition,
+                      nativeEvidence,
+                      preOperationRecovery,
+                      rawWasmSha256Hex: wasmBinding.rawSha256Hex,
+                  });
     const recoveryAuthorizationKeySha256Hex =
         preOperationRecovery === undefined
             ? undefined
@@ -3098,6 +4442,11 @@ const executeProofStorageWidthBrowserEvidenceAttempt = async (input: {
     ) {
         await appendBrowserRecoveryStaticPreflightObservation({
             authorizationKeySha256Hex: recoveryAuthorizationKeySha256Hex ?? '',
+            custody:
+                input.recoveryAuthorization?.custody ??
+                (isChainedRecovery
+                    ? chainedBrowserRecoveryCustody
+                    : firstBrowserRecoveryCustody),
             identity: recoveryReservationIdentity,
             reservationPath: recoveryPreflightAttemptPath,
             reservationRootPath: officialReservationRootPath,
@@ -3107,7 +4456,11 @@ const executeProofStorageWidthBrowserEvidenceAttempt = async (input: {
             await resolveExistingCustodyFile({
                 fieldName: 'Browser recovery static preflight marker',
                 relativePath: path.join(
-                    'browser-recovery-preflight',
+                    input.recoveryAuthorization?.custody
+                        .preflightDirectoryName ??
+                        (isChainedRecovery
+                            ? chainedRecoveryPreflightDirectoryName
+                            : firstBrowserRecoveryCustody.preflightDirectoryName),
                     recoveryAuthorizationKeySha256Hex ?? '',
                     'preflight-attempted.json',
                 ),
@@ -3118,7 +4471,16 @@ const executeProofStorageWidthBrowserEvidenceAttempt = async (input: {
         validateBrowserRecoveryPreflightAttempt({
             authorizationKeySha256Hex: recoveryAuthorizationKeySha256Hex ?? '',
             identity: recoveryReservationIdentity,
-            profile: recoveryProfile,
+            markerBinding:
+                input.recoveryAuthorization?.markerBinding ??
+                (isChainedRecovery
+                    ? buildChainedRecoveryMarkerBinding({
+                          chainedProfile: chainedRecoveryProfile,
+                          preOperationProfile: preOperationRecoveryProfile,
+                      })
+                    : buildFirstRecoveryMarkerBinding(
+                          preOperationRecoveryProfile,
+                      )),
             serialized: serializedRecoveryPreflightAttempt,
             terminalOutcomeRequired: false,
         });
@@ -3132,13 +4494,63 @@ const executeProofStorageWidthBrowserEvidenceAttempt = async (input: {
         expectedHarnessCommitHash,
         'pre-operation',
     );
-    if (harnessTransition !== undefined) {
+    if (firstHarnessTransition !== undefined) {
         await validateHarnessRepairCommitTransition({
             executeCommand,
-            harnessCommitHash: harnessTransition.harnessCommitHash,
-            nativeSourceCommitHash: harnessTransition.nativeSourceCommitHash,
+            harnessCommitHash: firstHarnessTransition.harnessCommitHash,
+            nativeSourceCommitHash:
+                firstHarnessTransition.nativeSourceCommitHash,
             runLog: input.runLog,
         });
+    }
+    if (chainedHarnessTransition !== undefined) {
+        await validateChainedHarnessRepairCommitTransition({
+            executeCommand,
+            nativeSourceCommitHash: nativeEvidence.repositoryCommitHash,
+            profile: chainedRecoveryProfile,
+            recoveryHarnessCommitHash: expectedHarnessCommitHash,
+            runLog: input.runLog,
+        });
+    }
+    if (
+        isChainedRecovery &&
+        preOperationRecovery !== undefined &&
+        failedRecoveryAttempt !== undefined &&
+        input.preOperationRecoveryRunDirectoryPath !== undefined &&
+        input.failedRecoveryAttemptRunDirectoryPath !== undefined
+    ) {
+        const reopenedPreOperationRecovery =
+            await validateProofStorageWidthBrowserPreOperationRecovery({
+                failedRunDirectoryPath:
+                    input.preOperationRecoveryRunDirectoryPath,
+                nativeEvidence,
+                officialReservationRootPath,
+                profile: preOperationRecoveryProfile,
+            });
+        const reopenedFailedRecoveryAttempt =
+            await validateProofStorageWidthBrowserFailedRecoveryAttempt({
+                failedRecoveryRunDirectoryPath:
+                    input.failedRecoveryAttemptRunDirectoryPath,
+                nativeEvidence,
+                officialReservationRootPath,
+                preOperationRecovery: reopenedPreOperationRecovery,
+                preOperationProfile: preOperationRecoveryProfile,
+                profile: chainedRecoveryProfile,
+            });
+        if (
+            !normalizedJsonEquals(
+                reopenedPreOperationRecovery,
+                preOperationRecovery,
+            ) ||
+            !normalizedJsonEquals(
+                reopenedFailedRecoveryAttempt,
+                failedRecoveryAttempt,
+            )
+        ) {
+            throw new Error(
+                'The chained recovery predecessors changed before operation reservation.',
+            );
+        }
     }
     const runCustodyRootPath = await requireCanonicalCustodyRoot(
         input.runLog.runDirectoryPath,
@@ -3194,6 +4606,11 @@ const executeProofStorageWidthBrowserEvidenceAttempt = async (input: {
             : await createBrowserRecoveryReservation({
                   authorizationKeySha256Hex:
                       recoveryAuthorizationKeySha256Hex ?? '',
+                  custody:
+                      input.recoveryAuthorization?.custody ??
+                      (isChainedRecovery
+                          ? chainedBrowserRecoveryCustody
+                          : firstBrowserRecoveryCustody),
                   identity: recoveryReservationIdentity,
                   reservationRootPath: officialReservationRootPath,
                   runDirectoryPath: input.runLog.runDirectoryPath,
@@ -3201,6 +4618,7 @@ const executeProofStorageWidthBrowserEvidenceAttempt = async (input: {
     let attemptError: unknown;
     try {
         if (
+            !isChainedRecovery &&
             recoveryPreflightAttemptPath !== undefined &&
             recoveryReservationIdentity !== undefined
         ) {
@@ -3212,7 +4630,7 @@ const executeProofStorageWidthBrowserEvidenceAttempt = async (input: {
                 await resolveExistingCustodyFile({
                     fieldName: 'Browser recovery static preflight marker',
                     relativePath: path.join(
-                        'browser-recovery-preflight',
+                        firstBrowserRecoveryCustody.preflightDirectoryName,
                         recoveryAuthorizationKeySha256Hex ?? '',
                         'preflight-attempted.json',
                     ),
@@ -3224,7 +4642,9 @@ const executeProofStorageWidthBrowserEvidenceAttempt = async (input: {
                 authorizationKeySha256Hex:
                     recoveryAuthorizationKeySha256Hex ?? '',
                 identity: recoveryReservationIdentity,
-                profile: recoveryProfile,
+                markerBinding: buildFirstRecoveryMarkerBinding(
+                    preOperationRecoveryProfile,
+                ),
                 serialized: serializedRecoveryPreflightAttempt,
                 terminalOutcomeRequired: true,
             });
@@ -3320,7 +4740,11 @@ const executeProofStorageWidthBrowserEvidenceAttempt = async (input: {
             const custodyReservationPath = await resolveExistingCustodyFile({
                 fieldName: 'Browser recovery operation reservation',
                 relativePath: path.join(
-                    'browser-recovery',
+                    input.recoveryAuthorization?.custody
+                        .operationDirectoryName ??
+                        (isChainedRecovery
+                            ? chainedRecoveryOperationDirectoryName
+                            : firstBrowserRecoveryCustody.operationDirectoryName),
                     recoveryAuthorizationKeySha256Hex,
                     'browser-recovery-started.json',
                 ),
@@ -3416,7 +4840,8 @@ const executeProofStorageWidthBrowserEvidenceAttempt = async (input: {
             },
         },
         decision,
-        formatVersion: preOperationRecovery === undefined ? 4 : 5,
+        formatVersion:
+            preOperationRecovery === undefined ? 4 : isChainedRecovery ? 6 : 5,
         guard: {
             memoryLimitBytes: processMemoryGuard.memoryLimitBytes,
             maximumOperationWindowGapMilliseconds,
@@ -3457,52 +4882,121 @@ const executeProofStorageWidthBrowserEvidenceAttempt = async (input: {
             schemaVersion:
                 recoveryReservationIdentity === undefined
                     ? 1
-                    : 'browser-recovery-1',
+                    : (input.recoveryAuthorization?.custody.schemaVersion ??
+                      firstBrowserRecoveryCustody.schemaVersion),
             sha256Hex: sha256Hex(serializedReservation),
         },
         projection,
-        ...(preOperationRecovery === undefined ||
-        harnessTransition === undefined
+        ...(preOperationRecovery === undefined
             ? {}
-            : {
-                  recovery: {
-                      changedFilePaths: harnessTransition.changedFilePaths,
-                      failedArtifacts: preOperationRecovery.failedArtifacts,
-                      failedReservation: preOperationRecovery.failedReservation,
-                      failedRunDirectoryPath:
-                          preOperationRecovery.failedRunDirectoryPath,
-                      harnessCommitHash: harnessTransition.harnessCommitHash,
-                      nativeSourceCommitHash:
-                          harnessTransition.nativeSourceCommitHash,
-                      recoveryOrdinal,
-                      staticPreflight: {
-                          attempt:
-                              recoveryPreflightAttemptPath === undefined ||
-                              serializedRecoveryPreflightAttempt === undefined
-                                  ? undefined
-                                  : {
-                                        authorizationKeySha256Hex:
-                                            recoveryAuthorizationKeySha256Hex,
-                                        identitySha256Hex:
-                                            recoveryReservationIdentity?.identitySha256Hex,
-                                        path: canonicalRelativePath(
-                                            officialReservationRootPath,
-                                            recoveryPreflightAttemptPath,
-                                        ),
-                                        sha256Hex: sha256Hex(
-                                            serializedRecoveryPreflightAttempt,
-                                        ),
-                                    },
-                          outputSha256Hex: sha256Hex(
-                              staticPreflightResult.stdout,
-                          ),
-                          semanticArguments:
-                              proofStorageWidthBrowserEvidenceStaticPreflightArguments,
-                          testFile: staticPreflightTestFile,
-                          testProjectName,
+            : isChainedRecovery
+              ? failedRecoveryAttempt === undefined ||
+                chainedHarnessTransition === undefined
+                  ? {}
+                  : {
+                        recovery: {
+                            failedArtifacts:
+                                preOperationRecovery.failedArtifacts,
+                            failedRecoveryArtifacts:
+                                failedRecoveryAttempt.failedArtifacts,
+                            failedRecoveryRunDirectoryPath:
+                                failedRecoveryAttempt.failedRunDirectoryPath,
+                            failedReservation:
+                                preOperationRecovery.failedReservation,
+                            failedRunDirectoryPath:
+                                preOperationRecovery.failedRunDirectoryPath,
+                            firstHarnessRepair:
+                                chainedHarnessTransition.firstHarnessRepair,
+                            nativeSourceCommitHash:
+                                chainedHarnessTransition.firstHarnessRepair
+                                    .nativeSourceCommitHash,
+                            previousPreflightAttempt:
+                                failedRecoveryAttempt.previousPreflightAttempt,
+                            recoveryHarnessRepair:
+                                chainedHarnessTransition.recoveryHarnessRepair,
+                            recoveryOrdinal: chainedRecoveryOrdinal,
+                            staticPreflight: {
+                                attempt:
+                                    recoveryPreflightAttemptPath ===
+                                        undefined ||
+                                    serializedRecoveryPreflightAttempt ===
+                                        undefined
+                                        ? undefined
+                                        : {
+                                              authorizationKeySha256Hex:
+                                                  recoveryAuthorizationKeySha256Hex,
+                                              identitySha256Hex:
+                                                  recoveryReservationIdentity?.identitySha256Hex,
+                                              path: canonicalRelativePath(
+                                                  officialReservationRootPath,
+                                                  recoveryPreflightAttemptPath,
+                                              ),
+                                              prefixByteLength:
+                                                  Buffer.byteLength(
+                                                      serializedRecoveryPreflightAttempt,
+                                                      'utf8',
+                                                  ),
+                                              prefixSha256Hex: sha256Hex(
+                                                  serializedRecoveryPreflightAttempt,
+                                              ),
+                                          },
+                                outputSha256Hex: sha256Hex(
+                                    staticPreflightResult.stdout,
+                                ),
+                                semanticArguments:
+                                    proofStorageWidthBrowserEvidenceStaticPreflightArguments,
+                                testFile: staticPreflightTestFile,
+                                testProjectName,
+                            },
+                            validatorRepair:
+                                chainedHarnessTransition.validatorRepair,
+                        },
+                    }
+              : firstHarnessTransition === undefined
+                ? {}
+                : {
+                      recovery: {
+                          changedFilePaths:
+                              firstHarnessTransition.changedFilePaths,
+                          failedArtifacts: preOperationRecovery.failedArtifacts,
+                          failedReservation:
+                              preOperationRecovery.failedReservation,
+                          failedRunDirectoryPath:
+                              preOperationRecovery.failedRunDirectoryPath,
+                          harnessCommitHash:
+                              firstHarnessTransition.harnessCommitHash,
+                          nativeSourceCommitHash:
+                              firstHarnessTransition.nativeSourceCommitHash,
+                          recoveryOrdinal,
+                          staticPreflight: {
+                              attempt:
+                                  recoveryPreflightAttemptPath === undefined ||
+                                  serializedRecoveryPreflightAttempt ===
+                                      undefined
+                                      ? undefined
+                                      : {
+                                            authorizationKeySha256Hex:
+                                                recoveryAuthorizationKeySha256Hex,
+                                            identitySha256Hex:
+                                                recoveryReservationIdentity?.identitySha256Hex,
+                                            path: canonicalRelativePath(
+                                                officialReservationRootPath,
+                                                recoveryPreflightAttemptPath,
+                                            ),
+                                            sha256Hex: sha256Hex(
+                                                serializedRecoveryPreflightAttempt,
+                                            ),
+                                        },
+                              outputSha256Hex: sha256Hex(
+                                  staticPreflightResult.stdout,
+                              ),
+                              semanticArguments:
+                                  proofStorageWidthBrowserEvidenceStaticPreflightArguments,
+                              testFile: staticPreflightTestFile,
+                              testProjectName,
+                          },
                       },
-                  },
-              }),
+                  }),
         repository: {
             after: afterRepositoryState,
             before: beforeRepositoryState,
@@ -3520,19 +5014,34 @@ const executeProofStorageWidthBrowserEvidenceAttempt = async (input: {
     });
     const attachmentBytesBeforeValidation = await readFile(attachmentPath);
     const attachmentSha256Hex = sha256Hex(attachmentBytesBeforeValidation);
-    await validateProofStorageWidthBrowserEvidenceArtifacts(attachmentPath, {
+    const artifactValidationOptions = {
         loadNativeWidthEvidence: loadNativeEvidence,
         officialReservationRootPath,
+        chainedRecoveryProfile: input.dependencies?.chainedRecoveryProfile,
         preOperationRecoveryProfile:
             input.dependencies?.preOperationRecoveryProfile,
         processedWasmKernelPath: evidenceProcessedWasmKernelPath,
         publicSdkWasmKernelPath: evidencePublicSdkWasmKernelPath,
-    });
-    if (harnessTransition !== undefined) {
+    } satisfies ProofStorageWidthBrowserArtifactValidationOptions;
+    await validateProvisionalProofStorageWidthBrowserEvidenceArtifacts(
+        attachmentPath,
+        artifactValidationOptions,
+    );
+    if (firstHarnessTransition !== undefined) {
         await validateHarnessRepairCommitTransition({
             executeCommand,
-            harnessCommitHash: harnessTransition.harnessCommitHash,
-            nativeSourceCommitHash: harnessTransition.nativeSourceCommitHash,
+            harnessCommitHash: firstHarnessTransition.harnessCommitHash,
+            nativeSourceCommitHash:
+                firstHarnessTransition.nativeSourceCommitHash,
+            runLog: input.runLog,
+        });
+    }
+    if (chainedHarnessTransition !== undefined) {
+        await validateChainedHarnessRepairCommitTransition({
+            executeCommand,
+            nativeSourceCommitHash: nativeEvidence.repositoryCommitHash,
+            profile: chainedRecoveryProfile,
+            recoveryHarnessCommitHash: expectedHarnessCommitHash,
             runLog: input.runLog,
         });
     }
@@ -3546,6 +5055,8 @@ const executeProofStorageWidthBrowserEvidenceAttempt = async (input: {
     }
     return {
         attachmentPath,
+        attachmentSha256Hex,
+        artifactValidationOptions,
         decision,
         completionEventDetails: {
             attachmentPath,
@@ -3563,11 +5074,36 @@ const executeProofStorageWidthBrowserEvidenceAttempt = async (input: {
             rawWasmSha256Hex: wasmBinding.rawSha256Hex,
             wasmSha256Hex: wasmBinding.normalizedSha256Hex,
         },
+        recoveryReservationIdentitySha256Hex:
+            recoveryReservationIdentity?.identitySha256Hex,
+        recoveryReservationIdentity,
+        recoveryMarkerPrefixByteLength:
+            isChainedRecovery &&
+            serializedRecoveryPreflightAttempt !== undefined
+                ? Buffer.byteLength(serializedRecoveryPreflightAttempt, 'utf8')
+                : undefined,
+        recoveryMarkerPrefixSha256Hex:
+            isChainedRecovery &&
+            serializedRecoveryPreflightAttempt !== undefined
+                ? sha256Hex(serializedRecoveryPreflightAttempt)
+                : undefined,
+        recoveryOperationReservationPath:
+            isChainedRecovery && recoveryReservationIdentity !== undefined
+                ? canonicalRelativePath(
+                      officialReservationRootPath,
+                      reservationPath,
+                  )
+                : undefined,
+        recoveryOperationReservationSha256Hex:
+            isChainedRecovery && recoveryReservationIdentity !== undefined
+                ? sha256Hex(serializedReservation)
+                : undefined,
     };
 };
 
 export const executeProofStorageWidthBrowserEvidence = async (input: {
     readonly dependencies?: ProofStorageWidthBrowserEvidenceDependencies;
+    readonly failedRecoveryAttemptRunDirectoryPath?: string;
     readonly nativeEvidencePath: string;
     readonly preOperationRecoveryRunDirectoryPath?: string;
     readonly runLog: ActiveLocalRunLog;
@@ -3575,6 +5111,8 @@ export const executeProofStorageWidthBrowserEvidence = async (input: {
     const recoveryAuthorization =
         await createBrowserRecoveryAuthorizationIfSelected({
             dependencies: input.dependencies,
+            failedRecoveryAttemptRunDirectoryPath:
+                input.failedRecoveryAttemptRunDirectoryPath,
             preOperationRecoveryRunDirectoryPath:
                 input.preOperationRecoveryRunDirectoryPath,
         });
@@ -3621,6 +5159,12 @@ export const executeProofStorageWidthBrowserEvidence = async (input: {
                 readRepositoryState: readTrackedRepositoryState,
             },
             nativeEvidencePath: input.nativeEvidencePath,
+            ...(input.failedRecoveryAttemptRunDirectoryPath === undefined
+                ? {}
+                : {
+                      failedRecoveryAttemptRunDirectoryPath:
+                          input.failedRecoveryAttemptRunDirectoryPath,
+                  }),
             ...(input.preOperationRecoveryRunDirectoryPath === undefined
                 ? {}
                 : {
@@ -3636,7 +5180,7 @@ export const executeProofStorageWidthBrowserEvidence = async (input: {
         attemptError = error;
         if (recoveryAuthorization !== undefined) {
             try {
-                await appendBrowserRecoveryPreflightFailedOutcomeIfPending({
+                await appendBrowserRecoveryFailureOutcomeIfPending({
                     authorization: recoveryAuthorization,
                     failure: error,
                 });
@@ -3665,6 +5209,25 @@ export const executeProofStorageWidthBrowserEvidence = async (input: {
             );
         } catch (error) {
             closureRepositoryError = error;
+        }
+    }
+
+    if (
+        closureRepositoryError !== undefined &&
+        recoveryAuthorization !== undefined
+    ) {
+        try {
+            await appendBrowserRecoveryFailureOutcomeIfPending({
+                authorization: recoveryAuthorization,
+                failure: closureRepositoryError,
+            });
+        } catch (outcomeError) {
+            closureRepositoryError = Object.assign(
+                new Error(
+                    'The browser recovery closure failed and its singleton terminal outcome could not be recorded.',
+                ),
+                { attemptCause: closureRepositoryError, cause: outcomeError },
+            );
         }
     }
 
@@ -3702,11 +5265,89 @@ export const executeProofStorageWidthBrowserEvidence = async (input: {
         );
     }
     if (result === undefined) {
-        throw new Error(
+        const missingResultError = new Error(
             'The browser width-evidence attempt completed without a result.',
         );
+        if (recoveryAuthorization !== undefined) {
+            await appendBrowserRecoveryFailureOutcomeIfPending({
+                authorization: recoveryAuthorization,
+                failure: missingResultError,
+            });
+        }
+        throw missingResultError;
     }
 
+    if (recoveryAuthorization?.recoveryOrdinal === chainedRecoveryOrdinal) {
+        const recoveryReservationIdentitySha256Hex =
+            result.recoveryReservationIdentitySha256Hex;
+        const recoveryReservationIdentity = result.recoveryReservationIdentity;
+        const recoveryMarkerPrefixByteLength =
+            result.recoveryMarkerPrefixByteLength;
+        const recoveryMarkerPrefixSha256Hex =
+            result.recoveryMarkerPrefixSha256Hex;
+        const recoveryOperationReservationPath =
+            result.recoveryOperationReservationPath;
+        const recoveryOperationReservationSha256Hex =
+            result.recoveryOperationReservationSha256Hex;
+        if (
+            recoveryReservationIdentitySha256Hex === undefined ||
+            !exactSha256HexPattern.test(recoveryReservationIdentitySha256Hex) ||
+            recoveryReservationIdentity === undefined ||
+            recoveryReservationIdentity.identitySha256Hex !==
+                recoveryReservationIdentitySha256Hex ||
+            typeof recoveryMarkerPrefixByteLength !== 'number' ||
+            !Number.isSafeInteger(recoveryMarkerPrefixByteLength) ||
+            recoveryMarkerPrefixByteLength <= 0 ||
+            typeof recoveryMarkerPrefixSha256Hex !== 'string' ||
+            !exactSha256HexPattern.test(recoveryMarkerPrefixSha256Hex) ||
+            typeof recoveryOperationReservationPath !== 'string' ||
+            recoveryOperationReservationPath.length === 0 ||
+            typeof recoveryOperationReservationSha256Hex !== 'string' ||
+            !exactSha256HexPattern.test(recoveryOperationReservationSha256Hex)
+        ) {
+            const missingIdentityError = new Error(
+                'The chained browser recovery omitted its final reservation identity.',
+            );
+            await appendBrowserRecoveryFailureOutcomeIfPending({
+                authorization: recoveryAuthorization,
+                failure: missingIdentityError,
+            });
+            throw missingIdentityError;
+        }
+        try {
+            await validateProvisionalProofStorageWidthBrowserEvidenceArtifacts(
+                result.attachmentPath,
+                result.artifactValidationOptions,
+            );
+            await finalizeChainedBrowserRecoveryOutcome({
+                attachmentPath: result.attachmentPath,
+                attachmentSha256Hex: result.attachmentSha256Hex,
+                authorization: recoveryAuthorization,
+                decisionOutcome: result.decision.outcome,
+                identity: recoveryReservationIdentity,
+                markerPrefixByteLength: recoveryMarkerPrefixByteLength,
+                markerPrefixSha256Hex: recoveryMarkerPrefixSha256Hex,
+                operationReservationPath: recoveryOperationReservationPath,
+                operationReservationSha256Hex:
+                    recoveryOperationReservationSha256Hex,
+            });
+        } catch (error) {
+            try {
+                await appendBrowserRecoveryFailureOutcomeIfPending({
+                    authorization: recoveryAuthorization,
+                    failure: error,
+                });
+            } catch (outcomeError) {
+                throw Object.assign(
+                    new Error(
+                        'The chained browser recovery finalization failed and its pending singleton could not record the failure.',
+                    ),
+                    { attemptCause: error, cause: outcomeError },
+                );
+            }
+            throw error;
+        }
+    }
     const message = `Proof-storage width browser evidence: ${result.attachmentPath}\n`;
     process.stdout.write(message);
     input.runLog.writeCombinedOutput(message);
@@ -3727,6 +5368,7 @@ export const executeProofStorageWidthBrowserEvidence = async (input: {
 export const parseProofStorageWidthBrowserEvidenceArguments = (
     rawArguments: readonly string[],
 ): Readonly<{
+    failedRecoveryAttemptRunDirectoryPath?: string;
     nativeEvidencePath: string;
     preOperationRecoveryRunDirectoryPath?: string;
 }> => {
@@ -3738,29 +5380,45 @@ export const parseProofStorageWidthBrowserEvidenceArguments = (
     const recoveryFlagIndex = effectiveArguments.indexOf(
         '--pre-operation-recovery',
     );
+    const failedRecoveryAttemptFlagIndex = effectiveArguments.indexOf(
+        '--failed-recovery-attempt',
+    );
     const nativeEvidencePath = effectiveArguments[nativeEvidenceFlagIndex + 1];
     const preOperationRecoveryRunDirectoryPath =
         recoveryFlagIndex === -1
             ? undefined
             : effectiveArguments[recoveryFlagIndex + 1];
-    const expectedArgumentLength =
-        preOperationRecoveryRunDirectoryPath === undefined ? 2 : 4;
+    const failedRecoveryAttemptRunDirectoryPath =
+        failedRecoveryAttemptFlagIndex === -1
+            ? undefined
+            : effectiveArguments[failedRecoveryAttemptFlagIndex + 1];
+    const hasRecovery = preOperationRecoveryRunDirectoryPath !== undefined;
+    const hasChainedRecovery =
+        failedRecoveryAttemptRunDirectoryPath !== undefined;
+    const expectedArgumentLength = hasChainedRecovery ? 6 : hasRecovery ? 4 : 2;
     if (
         effectiveArguments.length !== expectedArgumentLength ||
         nativeEvidenceFlagIndex !== 0 ||
         nativeEvidencePath === undefined ||
         !path.isAbsolute(nativeEvidencePath) ||
-        (recoveryFlagIndex !== -1 &&
+        (hasRecovery &&
             (recoveryFlagIndex !== 2 ||
                 preOperationRecoveryRunDirectoryPath === undefined ||
-                !path.isAbsolute(preOperationRecoveryRunDirectoryPath)))
+                !path.isAbsolute(preOperationRecoveryRunDirectoryPath))) ||
+        (hasChainedRecovery &&
+            (failedRecoveryAttemptFlagIndex !== 4 ||
+                !path.isAbsolute(failedRecoveryAttemptRunDirectoryPath))) ||
+        (!hasRecovery && failedRecoveryAttemptFlagIndex !== -1)
     ) {
         throw new Error(
-            'The browser width-evidence runner requires --native-evidence followed by one absolute evidence path and optionally --pre-operation-recovery followed by one absolute failed run directory.',
+            'The browser width-evidence runner requires --native-evidence followed by one absolute evidence path, optionally --pre-operation-recovery for the first recovery, and additionally --failed-recovery-attempt only for the one chained recovery; every path must be absolute.',
         );
     }
     return Object.freeze({
         nativeEvidencePath,
+        ...(failedRecoveryAttemptRunDirectoryPath === undefined
+            ? {}
+            : { failedRecoveryAttemptRunDirectoryPath }),
         ...(preOperationRecoveryRunDirectoryPath === undefined
             ? {}
             : { preOperationRecoveryRunDirectoryPath }),
@@ -3783,6 +5441,13 @@ export const runProofStorageWidthBrowserEvidence = async (
             await withLocalHeavyLaneLease({
                 action: () =>
                     executeProofStorageWidthBrowserEvidence({
+                        ...(parsedArguments.failedRecoveryAttemptRunDirectoryPath ===
+                        undefined
+                            ? {}
+                            : {
+                                  failedRecoveryAttemptRunDirectoryPath:
+                                      parsedArguments.failedRecoveryAttemptRunDirectoryPath,
+                              }),
                         nativeEvidencePath: parsedArguments.nativeEvidencePath,
                         ...(parsedArguments.preOperationRecoveryRunDirectoryPath ===
                         undefined
