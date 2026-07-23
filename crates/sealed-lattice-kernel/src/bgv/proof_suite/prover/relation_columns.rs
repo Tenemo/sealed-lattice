@@ -611,7 +611,7 @@ impl CommonProofSourcePolynomial {
         Self::Base(coefficients)
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "proof-storage-width-browser-evidence"))]
     pub(crate) fn from_extension_coefficients(
         coefficients: Vec<ProofChallengeExtensionElement>,
     ) -> Self {

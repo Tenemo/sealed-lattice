@@ -1,4 +1,4 @@
-use zeroize::Zeroizing;
+use zeroize::{Zeroize, Zeroizing};
 
 use crate::hashing::hash_framed_parts_512;
 
@@ -22,6 +22,14 @@ const EXTERNAL_MEMORY_APPEND_OPERATION_CODE: u16 = 2;
 const EXTERNAL_MEMORY_SEAL_OPERATION_CODE: u16 = 3;
 const EXTERNAL_MEMORY_READ_OPERATION_CODE: u16 = 4;
 const EXTERNAL_MEMORY_DELETE_OPERATION_CODE: u16 = 5;
+pub(crate) const EXTERNAL_MEMORY_SINGLE_OPERATION_VECTOR_CAPACITY_CEILING: usize = 4;
+pub(crate) const EXTERNAL_MEMORY_SINGLE_APPEND_RECYCLER_CAPACITY_CEILING: usize = 4;
+pub(crate) const EXTERNAL_MEMORY_SINGLE_READ_RESULT_VECTOR_CAPACITY_CEILING: usize = 1;
+
+type RecycledTransactionStorage = (
+    Vec<ProofExternalMemoryTransactionOperation>,
+    Vec<Zeroizing<Vec<u8>>>,
+);
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct ProofExternalMemoryTransactionRequest {
@@ -52,6 +60,24 @@ impl ProofExternalMemoryTransactionRequest {
         &self.operations
     }
 
+    #[cfg(test)]
+    pub(crate) fn operation_storage_identity(&self) -> (usize, usize) {
+        (
+            self.operations.as_ptr() as usize,
+            self.operations.capacity(),
+        )
+    }
+
+    #[cfg(test)]
+    pub(crate) fn append_payload_storage_identity(&self) -> Option<(usize, usize)> {
+        self.operations.iter().find_map(|operation| {
+            let ProofExternalMemoryTransactionOperation::Append { bytes, .. } = operation else {
+                return None;
+            };
+            Some((bytes.as_ptr() as usize, bytes.capacity()))
+        })
+    }
+
     /// Encodes the exact yielded transaction for the browser worker. The
     /// digest covers every operation ordinal, object, range, protection mode,
     /// and append byte. It is returned by the host with every read response so
@@ -59,15 +85,23 @@ impl ProofExternalMemoryTransactionRequest {
     pub(crate) fn encode_worker_request(
         &self,
     ) -> Result<Zeroizing<Vec<u8>>, ProofExternalMemoryTransactionAdapterError> {
-        let operation_bytes = self.encode_operation_bytes()?;
-        let request_digest = self.request_digest(&operation_bytes)?;
+        let mut operation_bytes = Zeroizing::new(Vec::new());
+        let mut encoded = Zeroizing::new(Vec::new());
+        self.encode_worker_request_into(&mut operation_bytes, &mut encoded)?;
+        Ok(encoded)
+    }
+
+    pub(crate) fn encode_worker_request_into(
+        &self,
+        operation_bytes: &mut Zeroizing<Vec<u8>>,
+        encoded: &mut Zeroizing<Vec<u8>>,
+    ) -> Result<(), ProofExternalMemoryTransactionAdapterError> {
+        self.encode_operation_bytes_into(operation_bytes)?;
+        let request_digest = self.request_digest(operation_bytes)?;
         let byte_length = EXTERNAL_MEMORY_REQUEST_HEADER_BYTE_LENGTH
             .checked_add(operation_bytes.len())
             .ok_or(ProofExternalMemoryTransactionAdapterError::AllocationLimitExceeded)?;
-        let mut encoded = Zeroizing::new(Vec::new());
-        encoded
-            .try_reserve_exact(byte_length)
-            .map_err(|_| ProofExternalMemoryTransactionAdapterError::AllocationLimitExceeded)?;
+        clear_and_reserve_zeroizing_bytes(encoded, byte_length)?;
         encoded.extend_from_slice(&EXTERNAL_MEMORY_REQUEST_SCHEMA_VERSION.to_le_bytes());
         encoded.extend_from_slice(&EXTERNAL_MEMORY_REQUEST_MESSAGE_KIND.to_le_bytes());
         encoded.extend_from_slice(&self.maximum_payload_byte_length.to_le_bytes());
@@ -80,20 +114,33 @@ impl ProofExternalMemoryTransactionRequest {
         encoded.extend_from_slice(&self.request_sequence.to_le_bytes());
         encoded.extend_from_slice(&self.runtime_binding_hash);
         encoded.extend_from_slice(&request_digest);
-        encoded.extend_from_slice(&operation_bytes);
-        Ok(encoded)
+        encoded.extend_from_slice(operation_bytes);
+        Ok(())
     }
 
     /// Decodes and authenticates one hostile worker response. The response is
     /// accepted only when it contains exactly one result for each requested
     /// read, in the same operation order and with the exact object, range,
     /// payload length, request digest, and recomputed payload digest.
+    #[cfg(test)]
     pub(crate) fn decode_worker_response(
         &self,
         encoded: &[u8],
     ) -> Result<Vec<Zeroizing<Vec<u8>>>, ProofExternalMemoryTransactionAdapterError> {
-        let operation_bytes = self.encode_operation_bytes()?;
-        let expected_request_digest = self.request_digest(&operation_bytes)?;
+        let mut operation_bytes = Zeroizing::new(Vec::new());
+        let mut read_results = Vec::new();
+        self.decode_worker_response_into(encoded, &mut operation_bytes, &mut read_results)?;
+        Ok(read_results)
+    }
+
+    pub(crate) fn decode_worker_response_into(
+        &self,
+        encoded: &[u8],
+        operation_bytes: &mut Zeroizing<Vec<u8>>,
+        read_results: &mut Vec<Zeroizing<Vec<u8>>>,
+    ) -> Result<(), ProofExternalMemoryTransactionAdapterError> {
+        self.encode_operation_bytes_into(operation_bytes)?;
+        let expected_request_digest = self.request_digest(operation_bytes)?;
         if encoded.len() < EXTERNAL_MEMORY_RESPONSE_HEADER_BYTE_LENGTH {
             return Err(ProofExternalMemoryTransactionAdapterError::MalformedWorkerResponse);
         }
@@ -131,11 +178,24 @@ impl ProofExternalMemoryTransactionRequest {
         {
             return Err(ProofExternalMemoryTransactionAdapterError::WrongOperationBinding);
         }
-        let mut read_results = Vec::new();
+        if read_results.len() > result_count {
+            for removed in read_results.drain(result_count..) {
+                drop(removed);
+            }
+        }
         read_results
-            .try_reserve_exact(result_count)
+            .try_reserve_exact(result_count.saturating_sub(read_results.len()))
             .map_err(|_| ProofExternalMemoryTransactionAdapterError::AllocationLimitExceeded)?;
+        while read_results.len() < result_count {
+            read_results.push(Zeroizing::new(Vec::new()));
+        }
+        if self.maximum_operation_count == 1
+            && read_results.capacity() > EXTERNAL_MEMORY_SINGLE_READ_RESULT_VECTOR_CAPACITY_CEILING
+        {
+            return Err(ProofExternalMemoryTransactionAdapterError::AllocationLimitExceeded);
+        }
         let mut total_payload_byte_length = 0_u64;
+        let mut next_read_result = 0_usize;
         for (expected_operation_index, operation) in self.operations.iter().enumerate() {
             let ProofExternalMemoryTransactionOperation::Read {
                 object: expected_object,
@@ -180,17 +240,17 @@ impl ProofExternalMemoryTransactionRequest {
             if supplied_digest != expected_digest {
                 return Err(ProofExternalMemoryTransactionAdapterError::WrongReadDigest);
             }
-            let mut owned_bytes = Zeroizing::new(Vec::new());
-            owned_bytes
-                .try_reserve_exact(bytes.len())
-                .map_err(|_| ProofExternalMemoryTransactionAdapterError::AllocationLimitExceeded)?;
+            let owned_bytes = read_results
+                .get_mut(next_read_result)
+                .ok_or(ProofExternalMemoryTransactionAdapterError::WrongReadLength)?;
+            clear_and_reserve_zeroizing_bytes(owned_bytes, bytes.len())?;
             owned_bytes.extend_from_slice(bytes);
-            read_results.push(owned_bytes);
+            next_read_result += 1;
         }
-        if !decoder.is_complete() {
+        if !decoder.is_complete() || next_read_result != result_count {
             return Err(ProofExternalMemoryTransactionAdapterError::MalformedWorkerResponse);
         }
-        Ok(read_results)
+        Ok(())
     }
 
     #[cfg(test)]
@@ -279,9 +339,31 @@ impl ProofExternalMemoryTransactionRequest {
         Ok(encoded)
     }
 
+    #[cfg(test)]
     pub(super) fn encode_operation_bytes(
         &self,
     ) -> Result<Zeroizing<Vec<u8>>, ProofExternalMemoryTransactionAdapterError> {
+        let mut encoded = Zeroizing::new(Vec::new());
+        self.encode_operation_bytes_into(&mut encoded)?;
+        Ok(encoded)
+    }
+
+    pub(crate) fn read_result_count(&self) -> usize {
+        self.operations
+            .iter()
+            .filter(|operation| {
+                matches!(
+                    operation,
+                    ProofExternalMemoryTransactionOperation::Read { .. }
+                )
+            })
+            .count()
+    }
+
+    fn encode_operation_bytes_into(
+        &self,
+        encoded: &mut Zeroizing<Vec<u8>>,
+    ) -> Result<(), ProofExternalMemoryTransactionAdapterError> {
         let metadata_byte_length = self
             .operations
             .len()
@@ -299,10 +381,7 @@ impl ProofExternalMemoryTransactionRequest {
         let encoded_byte_length = metadata_byte_length
             .checked_add(append_byte_length)
             .ok_or(ProofExternalMemoryTransactionAdapterError::AllocationLimitExceeded)?;
-        let mut encoded = Zeroizing::new(Vec::new());
-        encoded
-            .try_reserve_exact(encoded_byte_length)
-            .map_err(|_| ProofExternalMemoryTransactionAdapterError::AllocationLimitExceeded)?;
+        clear_and_reserve_zeroizing_bytes(encoded, encoded_byte_length)?;
         for (operation_index, operation) in self.operations.iter().enumerate() {
             let operation_index = u32::try_from(operation_index)
                 .map_err(|_| ProofExternalMemoryTransactionAdapterError::OperationCountExceeded)?;
@@ -372,7 +451,7 @@ impl ProofExternalMemoryTransactionRequest {
             encoded.extend_from_slice(&payload_byte_length.to_le_bytes());
             encoded.extend_from_slice(payload);
         }
-        Ok(encoded)
+        Ok(())
     }
 
     pub(super) fn request_digest(
@@ -507,6 +586,7 @@ pub(crate) struct ProofExternalMemoryTransactionRecorder {
     active_maximum_operation_count: Option<u32>,
     active_payload_byte_length: u64,
     active_operations: Vec<ProofExternalMemoryTransactionOperation>,
+    recycled_append_bytes: Vec<Zeroizing<Vec<u8>>>,
     yielded_request: Option<ProofExternalMemoryTransactionRequest>,
 }
 
@@ -532,12 +612,35 @@ impl ProofExternalMemoryTransactionRecorder {
             active_maximum_operation_count: None,
             active_payload_byte_length: 0,
             active_operations: Vec::new(),
+            recycled_append_bytes: Vec::new(),
+            yielded_request: None,
+        }
+    }
+
+    pub(crate) fn with_recycled_storage(
+        runtime_binding_hash: [u8; HASH_BYTE_LENGTH],
+        next_request_sequence: u64,
+        active_operations: Vec<ProofExternalMemoryTransactionOperation>,
+        recycled_append_bytes: Vec<Zeroizing<Vec<u8>>>,
+    ) -> Self {
+        Self {
+            runtime_binding_hash,
+            next_request_sequence,
+            active_maximum_payload_byte_length: None,
+            active_maximum_operation_count: None,
+            active_payload_byte_length: 0,
+            active_operations,
+            recycled_append_bytes,
             yielded_request: None,
         }
     }
 
     pub(crate) fn take_yielded_request(&mut self) -> Option<ProofExternalMemoryTransactionRequest> {
         self.yielded_request.take()
+    }
+
+    pub(crate) fn take_recycled_append_bytes(&mut self) -> Vec<Zeroizing<Vec<u8>>> {
+        core::mem::take(&mut self.recycled_append_bytes)
     }
 
     fn record(
@@ -581,8 +684,14 @@ impl ProofExternalMemoryTransactionRecorder {
             return Err(ProofExternalMemoryTransactionAdapterError::PayloadByteLengthExceeded);
         }
         self.active_operations
-            .try_reserve(1)
+            .try_reserve_exact(1)
             .map_err(|_| ProofExternalMemoryTransactionAdapterError::AllocationLimitExceeded)?;
+        if maximum_operation_count == 1
+            && self.active_operations.capacity()
+                > EXTERNAL_MEMORY_SINGLE_OPERATION_VECTOR_CAPACITY_CEILING
+        {
+            return Err(ProofExternalMemoryTransactionAdapterError::AllocationLimitExceeded);
+        }
         self.active_operations.push(operation);
         self.active_payload_byte_length = next_payload_byte_length;
         Ok(())
@@ -632,11 +741,16 @@ impl ProofExternalMemory for ProofExternalMemoryTransactionRecorder {
         expected_offset: u64,
         bytes: &[u8],
     ) -> Result<(), Self::Error> {
-        let bytes = copy_transaction_bytes(bytes)?;
+        let mut owned_bytes = self
+            .recycled_append_bytes
+            .pop()
+            .unwrap_or_else(|| Zeroizing::new(Vec::new()));
+        clear_and_reserve_zeroizing_bytes(&mut owned_bytes, bytes.len())?;
+        owned_bytes.extend_from_slice(bytes);
         self.record(ProofExternalMemoryTransactionOperation::Append {
             object,
             expected_offset,
-            bytes,
+            bytes: owned_bytes,
         })
     }
 
@@ -785,6 +899,60 @@ impl ProofExternalMemoryTransactionReplay {
         Ok(())
     }
 
+    fn accept_append(
+        &mut self,
+        object: ProofExternalMemoryObject,
+        expected_offset: u64,
+        bytes: &[u8],
+    ) -> Result<(), ProofExternalMemoryTransactionAdapterError> {
+        if !self.active
+            || !matches!(
+                self.request.operations.get(self.next_operation_index),
+                Some(ProofExternalMemoryTransactionOperation::Append {
+                    object: expected_object,
+                    expected_offset: expected_expected_offset,
+                    bytes: expected_bytes,
+                }) if *expected_object == object
+                    && *expected_expected_offset == expected_offset
+                    && expected_bytes.as_slice() == bytes
+            )
+        {
+            return Err(ProofExternalMemoryTransactionAdapterError::InvalidReplay);
+        }
+        self.next_operation_index += 1;
+        Ok(())
+    }
+
+    pub(crate) fn into_recycled_storage(
+        self,
+        recycled_append_bytes: &mut Vec<Zeroizing<Vec<u8>>>,
+    ) -> Result<RecycledTransactionStorage, ProofExternalMemoryTransactionAdapterError> {
+        let single_operation_transaction = self.request.maximum_operation_count == 1;
+        let mut operations = self.request.operations;
+        for operation in &mut operations {
+            if let ProofExternalMemoryTransactionOperation::Append { bytes, .. } = operation {
+                bytes.as_mut_slice().zeroize();
+                bytes.clear();
+                recycled_append_bytes.push(core::mem::replace(bytes, Zeroizing::new(Vec::new())));
+                if single_operation_transaction
+                    && recycled_append_bytes.capacity()
+                        > EXTERNAL_MEMORY_SINGLE_APPEND_RECYCLER_CAPACITY_CEILING
+                {
+                    return Err(
+                        ProofExternalMemoryTransactionAdapterError::AllocationLimitExceeded,
+                    );
+                }
+            }
+        }
+        operations.clear();
+        let mut read_results = self.read_results;
+        for bytes in &mut read_results {
+            bytes.as_mut_slice().zeroize();
+            bytes.clear();
+        }
+        Ok((operations, read_results))
+    }
+
     pub(crate) fn transaction_is_complete(&self) -> bool {
         !self.active
             && self.next_operation_index == self.request.operations.len()
@@ -830,12 +998,7 @@ impl ProofExternalMemory for ProofExternalMemoryTransactionReplay {
         expected_offset: u64,
         bytes: &[u8],
     ) -> Result<(), Self::Error> {
-        let bytes = copy_transaction_bytes(bytes)?;
-        self.accept(ProofExternalMemoryTransactionOperation::Append {
-            object,
-            expected_offset,
-            bytes,
-        })
+        self.accept_append(object, expected_offset, bytes)
     }
 
     fn seal_object(&mut self, object: ProofExternalMemoryObject) -> Result<(), Self::Error> {
@@ -887,13 +1050,16 @@ impl ProofExternalMemory for ProofExternalMemoryTransactionReplay {
     }
 }
 
-fn copy_transaction_bytes(
-    source: &[u8],
-) -> Result<Zeroizing<Vec<u8>>, ProofExternalMemoryTransactionAdapterError> {
-    let mut bytes = Vec::new();
-    bytes
-        .try_reserve_exact(source.len())
-        .map_err(|_| ProofExternalMemoryTransactionAdapterError::AllocationLimitExceeded)?;
-    bytes.extend_from_slice(source);
-    Ok(Zeroizing::new(bytes))
+fn clear_and_reserve_zeroizing_bytes(
+    bytes: &mut Zeroizing<Vec<u8>>,
+    required_byte_length: usize,
+) -> Result<(), ProofExternalMemoryTransactionAdapterError> {
+    bytes.as_mut_slice().zeroize();
+    bytes.clear();
+    if bytes.capacity() < required_byte_length {
+        bytes
+            .try_reserve_exact(required_byte_length)
+            .map_err(|_| ProofExternalMemoryTransactionAdapterError::AllocationLimitExceeded)?;
+    }
+    Ok(())
 }

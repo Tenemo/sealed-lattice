@@ -1,4 +1,5 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -12,20 +13,56 @@ import type {
 } from '#tools/ci/run-command';
 import { buildProofBackendBakeoffEnvironment } from '#tools/ci/run-proof-backend-bakeoff';
 import {
+    buildProofBackendBakeoffFeatureListCommand,
+    buildProofBackendBakeoffFeatureTestCommand,
     buildProofBackendBakeoffPreflightListCommand,
     buildProofBackendBakeoffPreflightTestCommand,
+    buildProofStorageWidthStaticFeatureListCommand,
+    buildProofStorageWidthStaticFeatureTestCommand,
     executeProofBackendBakeoffPreflightSequence,
+    parseProofBackendBakeoffFeatureInventory,
     parseProofBackendBakeoffPreflightInventory,
+    proofBackendBakeoffFeatureTestNames,
+    proofBackendBakeoffIgnoredTestNames,
+    proofBackendBakeoffNonIgnoredFeatureTestNames,
     proofBackendBakeoffPreflightTestNames,
+    proofStorageWidthStaticPreflightTestName,
     type ProofBackendBakeoffPreflightRunnerDependencies,
+    validateProofBackendBakeoffPreflightEvidenceArtifacts,
 } from '#tools/ci/run-proof-backend-bakeoff-preflight';
 
-const measurementTestName =
-    'bgv::proof_suite::proof_backend_bakeoff::tests::proof_backend_bakeoff_frozen_fragment';
 const commitHash = '12'.repeat(20);
+const memoryLimitBytes = 1_073_741_824;
 
-const completeInventoryOutput = (): string =>
-    [...proofBackendBakeoffPreflightTestNames, measurementTestName]
+type MutableBoundGuardArtifact = {
+    diagnosticsPath: string;
+    diagnosticsSha256Hex: string;
+};
+
+type MutablePreflightEvidence = {
+    completedFeatureTestPhase: MutableBoundGuardArtifact;
+    completedStaticFeatureTest: MutableBoundGuardArtifact;
+    completedTests: MutableBoundGuardArtifact[];
+};
+
+const completeFeatureInventoryOutput = (): string =>
+    proofBackendBakeoffFeatureTestNames
+        .map((testName) => `${testName}: test`)
+        .join('\n');
+
+const completeFilteredFeatureInventoryOutput = (): string =>
+    proofBackendBakeoffFeatureTestNames
+        .filter(
+            (testName) => testName !== proofStorageWidthStaticPreflightTestName,
+        )
+        .map((testName) => `${testName}: test`)
+        .join('\n');
+
+const completeStaticFeatureInventoryOutput = (): string =>
+    `${proofStorageWidthStaticPreflightTestName}: test`;
+
+const completeIgnoredInventoryOutput = (): string =>
+    proofBackendBakeoffIgnoredTestNames
         .map((testName) => `${testName}: test`)
         .join('\n');
 
@@ -60,6 +97,63 @@ const failedCommandResult = (): CapturedCommandResult => ({
     stdout: '',
     terminationSignal: null,
 });
+
+const validGuardJsonLines = (): string =>
+    [
+        {
+            aggregateProcessTreeMemoryLimit: true,
+            elapsedMilliseconds: 0,
+            eventType: 'guard-started',
+            memoryLimitBytes,
+            recordedAtUnixMilliseconds: 1_000,
+            resourceSampleIntervalMilliseconds: 100,
+            sequence: 0,
+        },
+        {
+            elapsedMilliseconds: 1,
+            eventType: 'child-started',
+            recordedAtUnixMilliseconds: 1_001,
+            sequence: 1,
+        },
+        {
+            confirmedMemoryLimitViolation: false,
+            elapsedMilliseconds: 2,
+            eventType: 'resource-sample',
+            processTreeResidentMemoryBytes: 65_536,
+            recordedAtUnixMilliseconds: 1_002,
+            sampleError: null,
+            sequence: 2,
+        },
+        {
+            elapsedMilliseconds: 3,
+            eventType: 'child-exited',
+            exitCode: 0,
+            memoryEvidence: 'completed',
+            recordedAtUnixMilliseconds: 1_003,
+            sequence: 3,
+            terminationClassification: 'completed',
+        },
+    ]
+        .map((record) => JSON.stringify(record))
+        .join('\n');
+
+const writeValidGuardArtifact = async (
+    invocation: CommandInvocation,
+    diagnosticsContents = validGuardJsonLines(),
+): Promise<void> => {
+    const diagnosticsPathArgumentIndex =
+        invocation.args.indexOf('--diagnostics-path');
+    const diagnosticsPath = invocation.args[diagnosticsPathArgumentIndex + 1];
+    if (
+        diagnosticsPathArgumentIndex < 0 ||
+        diagnosticsPath === undefined ||
+        diagnosticsPath.length === 0
+    ) {
+        throw new Error('The fake guarded command lacks a diagnostics path.');
+    }
+    await mkdir(path.dirname(diagnosticsPath), { recursive: true });
+    await writeFile(diagnosticsPath, diagnosticsContents, 'utf8');
+};
 
 const createRunLog = (runDirectoryPath: string): ActiveLocalRunLog => ({
     createCommandLogFiles: ({ preferredSlug }) => ({
@@ -101,47 +195,75 @@ const createProcessMemoryGuard = (): ProcessMemoryGuard => ({
 });
 
 const createSequenceDependencies = (input: {
+    readonly featureInventoryOutput?: string;
     readonly failGuardedTestAtIndex?: number;
     readonly failPrecompile?: boolean;
-    readonly inventoryOutput?: string;
+    readonly ignoredInventoryOutput?: string;
+    readonly invalidGuardAtIndex?: number;
     readonly invocations: CommandInvocation[];
     readonly repositoryStates?: readonly {
         readonly commitHash: string;
         readonly treeDirty: boolean;
     }[];
+    readonly staticFeatureInventoryOutput?: string;
 }): ProofBackendBakeoffPreflightRunnerDependencies => {
     let guardedTestIndex = 0;
     let repositoryStateIndex = 0;
     return {
-        executeCommand: (invocation) => {
+        executeCommand: async (invocation) => {
             input.invocations.push(invocation);
             if (
                 input.failPrecompile === true &&
                 invocation.description ===
                     'precompile the release proof backend bakeoff fragment'
             ) {
-                return Promise.resolve(failedCommandResult());
+                return failedCommandResult();
+            }
+            if (
+                invocation.description ===
+                'list the proof backend bakeoff feature tests'
+            ) {
+                return successfulCommandResult(
+                    input.featureInventoryOutput ??
+                        completeFilteredFeatureInventoryOutput(),
+                );
+            }
+            if (
+                invocation.description ===
+                'list the proof-storage width static feature test'
+            ) {
+                return successfulCommandResult(
+                    input.staticFeatureInventoryOutput ??
+                        completeStaticFeatureInventoryOutput(),
+                );
             }
             if (
                 invocation.description ===
                 'list the proof backend bakeoff ignored owners'
             ) {
-                return Promise.resolve(
-                    successfulCommandResult(
-                        input.inventoryOutput ?? completeInventoryOutput(),
-                    ),
+                return successfulCommandResult(
+                    input.ignoredInventoryOutput ??
+                        completeIgnoredInventoryOutput(),
                 );
             }
             if (invocation.command === 'test-process-memory-guard') {
                 const currentGuardedTestIndex = guardedTestIndex;
                 guardedTestIndex += 1;
-                return Promise.resolve(
-                    currentGuardedTestIndex === input.failGuardedTestAtIndex
-                        ? failedCommandResult()
-                        : successfulCommandResult(),
+                if (currentGuardedTestIndex === input.failGuardedTestAtIndex) {
+                    return failedCommandResult();
+                }
+                await writeValidGuardArtifact(
+                    invocation,
+                    currentGuardedTestIndex === input.invalidGuardAtIndex
+                        ? validGuardJsonLines().replace(
+                              '"sampleError":null',
+                              '"sampleError":"intentional invalid guard"',
+                          )
+                        : validGuardJsonLines(),
                 );
+                return successfulCommandResult();
             }
-            return Promise.resolve(successfulCommandResult());
+            return successfulCommandResult();
         },
         processMemoryGuard: createProcessMemoryGuard(),
         readRepositoryState: () => {
@@ -165,7 +287,7 @@ const guardedInvocations = (
     );
 
 describe('Proof backend bakeoff preflight runner', () => {
-    it('pins one exact ignored owner per fresh guarded command', () => {
+    it('pins the feature phase and one exact ignored owner per fresh guarded command', () => {
         const environment = buildProofBackendBakeoffEnvironment({
             baseEnvironment: {
                 SEALED_LATTICE_PROOF_BACKEND_BAKEOFF_BACKEND:
@@ -176,22 +298,78 @@ describe('Proof backend bakeoff preflight runner', () => {
             },
             targetDirectoryPath: 'dedicated-target',
         });
-        const listCommand =
-            buildProofBackendBakeoffPreflightListCommand(environment);
-        expect(listCommand.args).toEqual(
+        const featureListCommand =
+            buildProofBackendBakeoffFeatureListCommand(environment);
+        expect(featureListCommand.args).toEqual(
             expect.arrayContaining([
                 '--locked',
                 '--release',
                 '--features',
-                'proof-backend-bakeoff',
+                'proof-storage-width-evidence',
+                '--lib',
+                '--list',
+            ]),
+        );
+        expect(featureListCommand.args).toContain(
+            'bgv::proof_suite::proof_backend_bakeoff',
+        );
+        expect(featureListCommand.args).not.toContain('--ignored');
+
+        const ignoredListCommand =
+            buildProofBackendBakeoffPreflightListCommand(environment);
+        expect(ignoredListCommand.args).toEqual(
+            expect.arrayContaining([
+                '--locked',
+                '--release',
+                '--features',
+                'proof-storage-width-evidence',
                 '--lib',
                 '--ignored',
                 '--list',
             ]),
         );
-        expect(listCommand.args).toContain(
-            'bgv::proof_suite::proof_backend_bakeoff::tests',
+        expect(ignoredListCommand.args).toContain(
+            'bgv::proof_suite::proof_backend_bakeoff',
         );
+
+        const featureTestCommand =
+            buildProofBackendBakeoffFeatureTestCommand(environment);
+        expect(featureTestCommand.args).toContain(
+            'bgv::proof_suite::proof_backend_bakeoff',
+        );
+        expect(featureTestCommand.args).toContain('--nocapture');
+        expect(featureTestCommand.args).not.toContain('--exact');
+        expect(featureTestCommand.args).not.toContain('--ignored');
+        expect(featureTestCommand.env).not.toHaveProperty(
+            'SEALED_LATTICE_PROOF_BACKEND_BAKEOFF_BACKEND',
+        );
+        expect(featureTestCommand.env).not.toHaveProperty(
+            'SEALED_LATTICE_PROOF_BACKEND_BAKEOFF_SAMPLE_ORDINAL',
+        );
+
+        const staticFeatureListCommand =
+            buildProofStorageWidthStaticFeatureListCommand(environment);
+        expect(staticFeatureListCommand.args).toEqual(
+            expect.arrayContaining([
+                '--features',
+                'proof-storage-width-evidence',
+                proofStorageWidthStaticPreflightTestName,
+                '--exact',
+                '--list',
+            ]),
+        );
+        const staticFeatureTestCommand =
+            buildProofStorageWidthStaticFeatureTestCommand(environment);
+        expect(staticFeatureTestCommand.args).toEqual(
+            expect.arrayContaining([
+                '--features',
+                'proof-storage-width-evidence',
+                proofStorageWidthStaticPreflightTestName,
+                '--exact',
+                '--nocapture',
+            ]),
+        );
+        expect(staticFeatureTestCommand.args).not.toContain('--ignored');
 
         for (const exactTestName of proofBackendBakeoffPreflightTestNames) {
             const testCommand = buildProofBackendBakeoffPreflightTestCommand({
@@ -211,47 +389,87 @@ describe('Proof backend bakeoff preflight runner', () => {
         expect(() =>
             buildProofBackendBakeoffPreflightTestCommand({
                 environment,
-                exactTestName: measurementTestName,
+                exactTestName: 'retired::unregistered::measurement_owner',
             }),
         ).toThrow(/unregistered test/u);
     });
 
-    it('requires the complete exact ignored-owner inventory', () => {
+    it('requires the exact disjoint feature and ignored inventories', () => {
+        expect(proofBackendBakeoffNonIgnoredFeatureTestNames).toHaveLength(35);
+        expect(proofBackendBakeoffIgnoredTestNames).toHaveLength(3);
+        expect(proofBackendBakeoffFeatureTestNames).toHaveLength(38);
+        expect(new Set(proofBackendBakeoffFeatureTestNames)).toHaveProperty(
+            'size',
+            38,
+        );
+        expect(proofBackendBakeoffNonIgnoredFeatureTestNames).toContain(
+            'bgv::proof_suite::proof_backend_bakeoff_fri::canonical_artifact_write_failure_removes_every_partial_custody_object',
+        );
+        expect(proofBackendBakeoffNonIgnoredFeatureTestNames).toContain(
+            'bgv::proof_suite::proof_backend_bakeoff_fri::fresh_public_base_replay_refuses_source_and_statement_root_equivocation',
+        );
+        expect(proofBackendBakeoffNonIgnoredFeatureTestNames).toContain(
+            'bgv::proof_suite::proof_backend_bakeoff_fri::proof_storage_width_browser_evidence::tests::fresh_verifier_refuses_cross_pass_identity_equivocation_and_wrong_base_root',
+        );
+        expect(proofBackendBakeoffNonIgnoredFeatureTestNames).toContain(
+            'bgv::proof_suite::proof_backend_bakeoff_fri::proof_storage_width_browser_evidence::tests::occupied_registry_refuses_before_constructing_another_operation',
+        );
+        expect(proofBackendBakeoffNonIgnoredFeatureTestNames).toContain(
+            proofStorageWidthStaticPreflightTestName,
+        );
+        const ignoredTestNameSet = new Set<string>(
+            proofBackendBakeoffIgnoredTestNames,
+        );
+        expect(
+            proofBackendBakeoffNonIgnoredFeatureTestNames.filter((testName) =>
+                ignoredTestNameSet.has(testName),
+            ),
+        ).toEqual([]);
+
+        expect(
+            parseProofBackendBakeoffFeatureInventory(
+                `${completeFeatureInventoryOutput()}\n`,
+            ),
+        ).toHaveLength(38);
         expect(
             parseProofBackendBakeoffPreflightInventory(
-                `${completeInventoryOutput()}\n`,
+                `${completeIgnoredInventoryOutput()}\n`,
             ),
         ).toEqual(proofBackendBakeoffPreflightTestNames);
 
-        expect(() => parseProofBackendBakeoffPreflightInventory('')).toThrow(
-            /selected zero tests/u,
-        );
-        expect(() =>
-            parseProofBackendBakeoffPreflightInventory(
-                [...proofBackendBakeoffPreflightTestNames, measurementTestName]
-                    .slice(1)
-                    .map((testName) => `${testName}: test`)
-                    .join('\n'),
-            ),
-        ).toThrow(/Missing:/u);
-        expect(() =>
-            parseProofBackendBakeoffPreflightInventory(
-                `${completeInventoryOutput()}\nother::ignored_owner: test\n`,
-            ),
-        ).toThrow(/Extra: other::ignored_owner/u);
-        expect(() =>
-            parseProofBackendBakeoffPreflightInventory(
-                `${completeInventoryOutput()}\n${measurementTestName}: test\n`,
-            ),
-        ).toThrow(/duplicate tests/u);
-        expect(() =>
-            parseProofBackendBakeoffPreflightInventory(
-                `${completeInventoryOutput()}\nother::benchmark: benchmark\n`,
-            ),
-        ).toThrow(/unexpectedly selected benchmarks/u);
+        for (const [parser, completeOutput, missingInventory] of [
+            [
+                parseProofBackendBakeoffFeatureInventory,
+                completeFeatureInventoryOutput(),
+                proofBackendBakeoffFeatureTestNames.slice(1),
+            ],
+            [
+                parseProofBackendBakeoffPreflightInventory,
+                completeIgnoredInventoryOutput(),
+                proofBackendBakeoffIgnoredTestNames.slice(1),
+            ],
+        ] as const) {
+            expect(() => parser('')).toThrow(/selected zero tests/u);
+            expect(() =>
+                parser(
+                    missingInventory
+                        .map((testName) => `${testName}: test`)
+                        .join('\n'),
+                ),
+            ).toThrow(/Missing:/u);
+            expect(() =>
+                parser(`${completeOutput}\nother::test_owner: test\n`),
+            ).toThrow(/Extra: other::test_owner/u);
+            expect(() =>
+                parser(`${completeOutput}\n${missingInventory[0]}: test\n`),
+            ).toThrow(/duplicate tests/u);
+            expect(() =>
+                parser(`${completeOutput}\nother::benchmark: benchmark\n`),
+            ).toThrow(/unexpectedly selected benchmarks/u);
+        }
     });
 
-    it('runs exactly three guarded children in fixed order and pins evidence', () =>
+    it('runs both non-ignored feature phases before exactly three guarded owners and pins evidence', () =>
         withTemporaryDirectory(async (runDirectoryPath) => {
             const invocations: CommandInvocation[] = [];
             const result = await executeProofBackendBakeoffPreflightSequence({
@@ -259,30 +477,63 @@ describe('Proof backend bakeoff preflight runner', () => {
                 runLog: createRunLog(runDirectoryPath),
             });
             const guardedCommands = guardedInvocations(invocations);
-            expect(guardedCommands).toHaveLength(3);
+            expect(guardedCommands).toHaveLength(5);
             const precompileIndex = invocations.findIndex(
                 (invocation) =>
                     invocation.description ===
                     'precompile the release proof backend bakeoff fragment',
             );
-            const listIndex = invocations.findIndex(
+            expect(invocations[precompileIndex]?.args).toEqual(
+                expect.arrayContaining([
+                    '--features',
+                    'proof-storage-width-evidence',
+                    '--no-run',
+                ]),
+            );
+            const featureListIndex = invocations.findIndex(
+                (invocation) =>
+                    invocation.description ===
+                    'list the proof backend bakeoff feature tests',
+            );
+            const ignoredListIndex = invocations.findIndex(
                 (invocation) =>
                     invocation.description ===
                     'list the proof backend bakeoff ignored owners',
             );
-            const firstGuardedOwnerIndex = invocations.findIndex(
+            const staticFeatureListIndex = invocations.findIndex(
                 (invocation) =>
-                    invocation.command === 'test-process-memory-guard',
+                    invocation.description ===
+                    'list the proof-storage width static feature test',
+            );
+            const featurePhaseIndex = invocations.findIndex(
+                (invocation) =>
+                    invocation.description ===
+                    'guarded run the proof backend bakeoff non-ignored feature tests',
+            );
+            const staticFeaturePhaseIndex = invocations.findIndex(
+                (invocation) =>
+                    invocation.description ===
+                    'guarded run the proof-storage width static non-ignored feature test',
             );
             expect(precompileIndex).toBeGreaterThanOrEqual(0);
-            expect(listIndex).toBeGreaterThan(precompileIndex);
-            expect(firstGuardedOwnerIndex).toBeGreaterThan(listIndex);
+            expect(featureListIndex).toBeGreaterThan(precompileIndex);
+            expect(staticFeatureListIndex).toBeGreaterThan(featureListIndex);
+            expect(ignoredListIndex).toBeGreaterThan(staticFeatureListIndex);
+            expect(featurePhaseIndex).toBeGreaterThan(ignoredListIndex);
+            expect(staticFeaturePhaseIndex).toBeGreaterThan(featurePhaseIndex);
+            expect(guardedCommands[0]?.args).not.toContain('--ignored');
+            expect(guardedCommands[1]?.args).toContain(
+                proofStorageWidthStaticPreflightTestName,
+            );
+            expect(guardedCommands[1]?.args).not.toContain('--ignored');
             expect(
-                guardedCommands.map((command) =>
-                    proofBackendBakeoffPreflightTestNames.find((testName) =>
-                        command.args.includes(testName),
+                guardedCommands
+                    .slice(2)
+                    .map((command) =>
+                        proofBackendBakeoffPreflightTestNames.find((testName) =>
+                            command.args.includes(testName),
+                        ),
                     ),
-                ),
             ).toEqual(proofBackendBakeoffPreflightTestNames);
             expect(
                 guardedCommands.every(
@@ -299,9 +550,27 @@ describe('Proof backend bakeoff preflight runner', () => {
             const evidence = JSON.parse(
                 await readFile(result.attachmentPath, 'utf8'),
             ) as {
+                readonly completedFeatureTestPhase: {
+                    readonly diagnosticsPath: string;
+                    readonly diagnosticsSha256Hex: string;
+                    readonly testNames: readonly string[];
+                };
+                readonly completedStaticFeatureTest: {
+                    readonly diagnosticsPath: string;
+                    readonly diagnosticsSha256Hex: string;
+                    readonly testName: string;
+                };
                 readonly completedTests: readonly {
+                    readonly diagnosticsPath: string;
+                    readonly diagnosticsSha256Hex: string;
                     readonly testName: string;
                 }[];
+                readonly featureTestInventory: {
+                    readonly allTestNames: readonly string[];
+                    readonly ignoredTestNames: readonly string[];
+                    readonly nonIgnoredTestNames: readonly string[];
+                };
+                readonly formatVersion: number;
                 readonly repository: {
                     readonly after: { readonly commitHash: string };
                     readonly before: { readonly commitHash: string };
@@ -315,6 +584,43 @@ describe('Proof backend bakeoff preflight runner', () => {
             expect(
                 evidence.completedTests.map((test) => test.testName),
             ).toEqual(proofBackendBakeoffPreflightTestNames);
+            expect(evidence.completedFeatureTestPhase.testNames).toEqual(
+                proofBackendBakeoffNonIgnoredFeatureTestNames.filter(
+                    (testName) =>
+                        testName !== proofStorageWidthStaticPreflightTestName,
+                ),
+            );
+            expect(evidence.completedFeatureTestPhase.diagnosticsPath).toMatch(
+                /preflight-feature-tests\.jsonl$/u,
+            );
+            expect(
+                evidence.completedFeatureTestPhase.diagnosticsSha256Hex,
+            ).toMatch(/^[0-9a-f]{64}$/u);
+            expect(evidence.completedStaticFeatureTest).toMatchObject({
+                testName: proofStorageWidthStaticPreflightTestName,
+            });
+            expect(evidence.completedStaticFeatureTest.diagnosticsPath).toMatch(
+                /preflight-width-static-test\.jsonl$/u,
+            );
+            expect(
+                evidence.completedStaticFeatureTest.diagnosticsSha256Hex,
+            ).toMatch(/^[0-9a-f]{64}$/u);
+            expect(
+                evidence.completedTests.every(
+                    (completedTest) =>
+                        /^[0-9a-f]{64}$/u.test(
+                            completedTest.diagnosticsSha256Hex,
+                        ) &&
+                        completedTest.diagnosticsPath.startsWith('resources/'),
+                ),
+            ).toBe(true);
+            expect(evidence.featureTestInventory).toEqual({
+                allTestNames: proofBackendBakeoffFeatureTestNames,
+                ignoredTestNames: proofBackendBakeoffIgnoredTestNames,
+                nonIgnoredTestNames:
+                    proofBackendBakeoffNonIgnoredFeatureTestNames,
+            });
+            expect(evidence.formatVersion).toBe(4);
             expect(evidence.repository).toEqual({
                 after: { commitHash, treeDirty: false },
                 before: { commitHash, treeDirty: false },
@@ -324,6 +630,177 @@ describe('Proof backend bakeoff preflight runner', () => {
                 memoryLimitBytes: 1_073_741_824,
                 memoryLimitGigabytes: 1,
             });
+            await expect(
+                validateProofBackendBakeoffPreflightEvidenceArtifacts({
+                    attachmentPath: result.attachmentPath,
+                    expectedCommitHash: commitHash,
+                    expectedMemoryLimitBytes: memoryLimitBytes,
+                }),
+            ).resolves.toEqual({
+                attachmentPath: result.attachmentPath,
+                commitHash,
+            });
+        }));
+
+    it('reopens every guard artifact and rejects path, digest, and semantic tampering', () =>
+        withTemporaryDirectory(async (runDirectoryPath) => {
+            const invocations: CommandInvocation[] = [];
+            const result = await executeProofBackendBakeoffPreflightSequence({
+                dependencies: createSequenceDependencies({ invocations }),
+                runLog: createRunLog(runDirectoryPath),
+            });
+            const originalEvidenceContents = await readFile(
+                result.attachmentPath,
+                'utf8',
+            );
+            const evidence = JSON.parse(
+                originalEvidenceContents,
+            ) as MutablePreflightEvidence;
+            const boundGuardArtifacts = [
+                evidence.completedFeatureTestPhase,
+                evidence.completedStaticFeatureTest,
+                ...evidence.completedTests,
+            ];
+            expect(boundGuardArtifacts).toHaveLength(5);
+
+            for (const boundGuardArtifact of boundGuardArtifacts) {
+                const guardPath = path.join(
+                    runDirectoryPath,
+                    ...boundGuardArtifact.diagnosticsPath.split('/'),
+                );
+                const originalGuardContents = await readFile(guardPath, 'utf8');
+                await writeFile(
+                    guardPath,
+                    `${originalGuardContents}\n`,
+                    'utf8',
+                );
+                await expect(
+                    validateProofBackendBakeoffPreflightEvidenceArtifacts({
+                        attachmentPath: result.attachmentPath,
+                        expectedMemoryLimitBytes: memoryLimitBytes,
+                    }),
+                ).rejects.toThrow(/SHA-256 digest/u);
+                await writeFile(guardPath, originalGuardContents, 'utf8');
+            }
+
+            const firstCompletedTest = evidence.completedTests[0];
+            if (firstCompletedTest === undefined) {
+                throw new Error('The test evidence lacks its first owner.');
+            }
+            const originalDiagnosticsPath = firstCompletedTest.diagnosticsPath;
+            firstCompletedTest.diagnosticsPath =
+                'resources/process-memory-guard-wrong-owner.jsonl';
+            await writeFile(
+                result.attachmentPath,
+                JSON.stringify(evidence),
+                'utf8',
+            );
+            await expect(
+                validateProofBackendBakeoffPreflightEvidenceArtifacts({
+                    attachmentPath: result.attachmentPath,
+                    expectedMemoryLimitBytes: memoryLimitBytes,
+                }),
+            ).rejects.toThrow(/must use the exact path/u);
+            firstCompletedTest.diagnosticsPath = originalDiagnosticsPath;
+
+            const originalDiagnosticsSha256Hex =
+                firstCompletedTest.diagnosticsSha256Hex;
+            firstCompletedTest.diagnosticsSha256Hex = '0'.repeat(64);
+            await writeFile(
+                result.attachmentPath,
+                JSON.stringify(evidence),
+                'utf8',
+            );
+            await expect(
+                validateProofBackendBakeoffPreflightEvidenceArtifacts({
+                    attachmentPath: result.attachmentPath,
+                    expectedMemoryLimitBytes: memoryLimitBytes,
+                }),
+            ).rejects.toThrow(/SHA-256 digest/u);
+            firstCompletedTest.diagnosticsSha256Hex =
+                originalDiagnosticsSha256Hex;
+
+            const featureGuardPath = path.join(
+                runDirectoryPath,
+                ...evidence.completedFeatureTestPhase.diagnosticsPath.split(
+                    '/',
+                ),
+            );
+            const originalFeatureGuardContents = await readFile(
+                featureGuardPath,
+                'utf8',
+            );
+            const semanticallyInvalidGuardContents =
+                originalFeatureGuardContents.replace(
+                    '"sampleError":null',
+                    '"sampleError":"intentional tamper"',
+                );
+            expect(semanticallyInvalidGuardContents).not.toBe(
+                originalFeatureGuardContents,
+            );
+            await writeFile(
+                featureGuardPath,
+                semanticallyInvalidGuardContents,
+                'utf8',
+            );
+            evidence.completedFeatureTestPhase.diagnosticsSha256Hex =
+                createHash('sha256')
+                    .update(semanticallyInvalidGuardContents)
+                    .digest('hex');
+            await writeFile(
+                result.attachmentPath,
+                JSON.stringify(evidence),
+                'utf8',
+            );
+            await expect(
+                validateProofBackendBakeoffPreflightEvidenceArtifacts({
+                    attachmentPath: result.attachmentPath,
+                    expectedMemoryLimitBytes: memoryLimitBytes,
+                }),
+            ).rejects.toThrow(/sampling error/u);
+
+            await writeFile(
+                result.attachmentPath,
+                originalEvidenceContents,
+                'utf8',
+            );
+            await writeFile(
+                featureGuardPath,
+                originalFeatureGuardContents,
+                'utf8',
+            );
+            await expect(
+                validateProofBackendBakeoffPreflightEvidenceArtifacts({
+                    attachmentPath: result.attachmentPath,
+                    expectedCommitHash: commitHash,
+                    expectedMemoryLimitBytes: memoryLimitBytes,
+                }),
+            ).resolves.toMatchObject({ commitHash });
+        }));
+
+    it('refuses invalid guard telemetry immediately before launching the next phase', () =>
+        withTemporaryDirectory(async (runDirectoryPath) => {
+            const invocations: CommandInvocation[] = [];
+            await expect(
+                executeProofBackendBakeoffPreflightSequence({
+                    dependencies: createSequenceDependencies({
+                        invalidGuardAtIndex: 0,
+                        invocations,
+                    }),
+                    runLog: createRunLog(runDirectoryPath),
+                }),
+            ).rejects.toThrow(/sampling error/u);
+            expect(guardedInvocations(invocations)).toHaveLength(1);
+            await expect(
+                readFile(
+                    path.join(
+                        runDirectoryPath,
+                        'attachments',
+                        'proof-backend-bakeoff-preflight-evidence.json',
+                    ),
+                    'utf8',
+                ),
+            ).rejects.toThrow();
         }));
 
     it('launches no inventory or guarded owner when precompilation fails', () =>
@@ -346,17 +823,36 @@ describe('Proof backend bakeoff preflight runner', () => {
             ]);
         }));
 
-    it('refuses missing or extra inventory before guard verification or execution', async () => {
-        for (const inventoryOutput of [
-            '',
-            `${completeInventoryOutput()}\nother::ignored_owner: test\n`,
-        ]) {
+    it('refuses missing, extra, or duplicate ownership before guard verification or execution', async () => {
+        for (const inventoryOverride of [
+            { featureInventoryOutput: '' },
+            {
+                featureInventoryOutput: `${completeFilteredFeatureInventoryOutput()}\nother::feature_test: test\n`,
+            },
+            {
+                featureInventoryOutput: `${completeFilteredFeatureInventoryOutput()}\n${proofBackendBakeoffFeatureTestNames[0]}: test\n`,
+            },
+            { staticFeatureInventoryOutput: '' },
+            {
+                staticFeatureInventoryOutput: `${completeStaticFeatureInventoryOutput()}\nother::static_feature_test: test\n`,
+            },
+            {
+                staticFeatureInventoryOutput: `${completeStaticFeatureInventoryOutput()}\n${completeStaticFeatureInventoryOutput()}\n`,
+            },
+            { ignoredInventoryOutput: '' },
+            {
+                ignoredInventoryOutput: `${completeIgnoredInventoryOutput()}\nother::ignored_owner: test\n`,
+            },
+            {
+                ignoredInventoryOutput: `${completeIgnoredInventoryOutput()}\n${proofBackendBakeoffIgnoredTestNames[0]}: test\n`,
+            },
+        ] as const) {
             await withTemporaryDirectory(async (runDirectoryPath) => {
                 const invocations: CommandInvocation[] = [];
                 await expect(
                     executeProofBackendBakeoffPreflightSequence({
                         dependencies: createSequenceDependencies({
-                            inventoryOutput,
+                            ...inventoryOverride,
                             invocations,
                         }),
                         runLog: createRunLog(runDirectoryPath),
@@ -374,7 +870,31 @@ describe('Proof backend bakeoff preflight runner', () => {
         }
     });
 
-    it('stops after the first failed owner without retrying it', () =>
+    it('stops after a failed feature phase without launching an ignored owner', () =>
+        withTemporaryDirectory(async (runDirectoryPath) => {
+            const invocations: CommandInvocation[] = [];
+            await expect(
+                executeProofBackendBakeoffPreflightSequence({
+                    dependencies: createSequenceDependencies({
+                        failGuardedTestAtIndex: 0,
+                        invocations,
+                    }),
+                    runLog: createRunLog(runDirectoryPath),
+                }),
+            ).rejects.toThrow(/non-ignored feature tests.*failed/u);
+            const guardedCommands = guardedInvocations(invocations);
+            expect(guardedCommands).toHaveLength(1);
+            expect(guardedCommands[0]?.description).toContain(
+                'non-ignored feature tests',
+            );
+            expect(
+                proofBackendBakeoffPreflightTestNames.some((testName) =>
+                    guardedCommands[0]?.args.includes(testName),
+                ),
+            ).toBe(false);
+        }));
+
+    it('stops after a failed static feature test without launching an ignored owner', () =>
         withTemporaryDirectory(async (runDirectoryPath) => {
             const invocations: CommandInvocation[] = [];
             await expect(
@@ -385,16 +905,42 @@ describe('Proof backend bakeoff preflight runner', () => {
                     }),
                     runLog: createRunLog(runDirectoryPath),
                 }),
-            ).rejects.toThrow(/failed with exit code 1/u);
+            ).rejects.toThrow(/static non-ignored feature test.*failed/u);
             const guardedCommands = guardedInvocations(invocations);
             expect(guardedCommands).toHaveLength(2);
+            expect(guardedCommands[1]?.args).toContain(
+                proofStorageWidthStaticPreflightTestName,
+            );
             expect(
-                guardedCommands.map((command) =>
-                    proofBackendBakeoffPreflightTestNames.find((testName) =>
-                        command.args.includes(testName),
-                    ),
+                proofBackendBakeoffPreflightTestNames.some((testName) =>
+                    guardedCommands[1]?.args.includes(testName),
                 ),
-            ).toEqual(proofBackendBakeoffPreflightTestNames.slice(0, 2));
+            ).toBe(false);
+        }));
+
+    it('stops after the first failed owner without retrying it', () =>
+        withTemporaryDirectory(async (runDirectoryPath) => {
+            const invocations: CommandInvocation[] = [];
+            await expect(
+                executeProofBackendBakeoffPreflightSequence({
+                    dependencies: createSequenceDependencies({
+                        failGuardedTestAtIndex: 2,
+                        invocations,
+                    }),
+                    runLog: createRunLog(runDirectoryPath),
+                }),
+            ).rejects.toThrow(/failed with exit code 1/u);
+            const guardedCommands = guardedInvocations(invocations);
+            expect(guardedCommands).toHaveLength(3);
+            expect(
+                guardedCommands
+                    .slice(2)
+                    .map((command) =>
+                        proofBackendBakeoffPreflightTestNames.find((testName) =>
+                            command.args.includes(testName),
+                        ),
+                    ),
+            ).toEqual(proofBackendBakeoffPreflightTestNames.slice(0, 1));
         }));
 
     it('checks the clean commit before inventory, execution, and closure', async () => {
@@ -414,7 +960,7 @@ describe('Proof backend bakeoff preflight runner', () => {
                     { commitHash, treeDirty: false },
                     { commitHash, treeDirty: true },
                 ],
-                3,
+                5,
             ],
         ] as const) {
             await withTemporaryDirectory(async (runDirectoryPath) => {

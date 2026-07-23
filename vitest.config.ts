@@ -6,6 +6,13 @@ import { playwright } from '@vitest/browser-playwright';
 import { defineConfig, type UserWorkspaceConfig } from 'vitest/config';
 import type { BrowserInstanceOption } from 'vitest/node';
 
+import {
+    manualDesktopBrowserProofEvidenceTestGlobs,
+    ordinaryDesktopBrowserExcludedTestGlobs,
+    proofStorageWidthBrowserEvidenceInstanceDefinitions,
+    proofStorageWidthBrowserEvidenceProjectName,
+    proofStorageWidthBrowserEvidenceTestGlobs,
+} from './tools/ci/browser-test-project-selection.js';
 import { resolveTestDiagnosticPaths } from './tools/ci/test-diagnostic-environment.js';
 import { VitestDiagnosticReporter } from './tools/ci/vitest-diagnostic-reporter.js';
 
@@ -58,9 +65,6 @@ const nodeTestProjectDefinitions = [
 
 const desktopBrowserTestGlobs = [
     'packages/*/tests/browser/**/*.browser.test.ts',
-] as const;
-const manualDesktopBrowserProofEvidenceGlobs = [
-    'packages/wasm/tests/browser/selected-proof-runtime-evidence.manual.browser.test.ts',
 ] as const;
 const testDiagnosticPaths = resolveTestDiagnosticPaths();
 const testAttachmentDirectoryPath = testDiagnosticPaths.attachmentDirectoryPath;
@@ -143,6 +147,15 @@ const desktopBrowserProofEvidenceInstances: BrowserInstanceOption[] = [
         }),
     },
 ];
+
+// The width evidence run owns a run-unique IndexedDB database and checks its
+// initial and final state explicitly. Let the project provider create a fresh
+// browser context as well; a repository-fixed persistent profile would retain
+// unrelated browser state across diagnostic runs.
+const proofStorageWidthBrowserEvidenceInstances: BrowserInstanceOption[] =
+    proofStorageWidthBrowserEvidenceInstanceDefinitions.map(
+        (instanceDefinition) => ({ ...instanceDefinition }),
+    );
 
 type NodeProjectInput = {
     readonly exclude?: readonly string[];
@@ -284,16 +297,24 @@ export default defineConfig({
                 makeNodeProject(projectDefinition),
             ),
             makeBrowserProject({
-                exclude: manualDesktopBrowserProofEvidenceGlobs,
+                exclude: ordinaryDesktopBrowserExcludedTestGlobs,
                 include: desktopBrowserTestGlobs,
                 instances: desktopBrowserInstances,
                 projectName: 'browser-desktop',
             }),
             makeBrowserProject({
                 hookTimeout: 30 * 60_000,
-                include: manualDesktopBrowserProofEvidenceGlobs,
+                include: manualDesktopBrowserProofEvidenceTestGlobs,
                 instances: desktopBrowserProofEvidenceInstances,
                 projectName: 'browser-desktop-proof-evidence',
+                retainFailureTrace: true,
+                testTimeout: 12 * 60 * 60_000,
+            }),
+            makeBrowserProject({
+                hookTimeout: 30 * 60_000,
+                include: proofStorageWidthBrowserEvidenceTestGlobs,
+                instances: proofStorageWidthBrowserEvidenceInstances,
+                projectName: proofStorageWidthBrowserEvidenceProjectName,
                 retainFailureTrace: true,
                 testTimeout: 12 * 60 * 60_000,
             }),

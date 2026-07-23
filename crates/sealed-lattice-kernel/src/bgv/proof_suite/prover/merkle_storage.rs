@@ -1104,7 +1104,7 @@ impl PrefetchedCommonProofOpeningArtifact {
         })
     }
 
-    fn from_recomputed_common_tree(
+    pub(in crate::bgv::proof_suite) fn from_recomputed_common_tree(
         tree_catalog_index: u16,
         leaf_count: usize,
         canonical_leaf_byte_length: usize,

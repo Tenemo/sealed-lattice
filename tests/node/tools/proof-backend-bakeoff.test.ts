@@ -2,24 +2,29 @@ import { describe, expect, it } from 'vitest';
 
 import {
     aggregateProofBackendBakeoffArm,
+    auditHistoricalProofBackendBakeoffResult,
     checkedAddUnsigned64,
     compareLowerIsBetterByExactFactorTwo,
     evaluateProofBackendBakeoff,
     extractProofBackendBakeoffOperationMemory,
     parseCanonicalUnsigned64Decimal,
+    proofBackendBakeoffCustodyModel,
+    proofBackendBakeoffCustodySchemaIdentifier,
+    proofBackendBakeoffCustodySchemaVersion,
+    proofBackendBakeoffEligibleMetrics,
+    proofBackendBakeoffExecutionContracts,
+    proofBackendBakeoffExcludedMetrics,
     proofBackendBakeoffSchedule,
     selectProofBackendBakeoffWinner,
     validateProofBackendBakeoffResult,
     validateProofBackendBakeoffSample,
-    type ProofBackendBakeoffArmResult,
     type ProofBackendName,
-    type ValidatedProofBackendBakeoffSample,
 } from '#tools/ci/proof-backend-bakeoff';
 
 const maximumUnsigned64Decimal = '18446744073709551615';
 const frozenInputIdentityShake256Hex = '12'.repeat(64);
 
-const sampleResult = (
+const historicalSampleResult = (
     overrides: Readonly<Record<string, unknown>> = {},
 ): Readonly<Record<string, unknown>> => ({
     backend: 'packed-deep-fri',
@@ -37,12 +42,38 @@ const sampleResult = (
     ...overrides,
 });
 
+const sampleResult = (
+    overrides: Readonly<Record<string, unknown>> = {},
+): Readonly<Record<string, unknown>> => ({
+    backend: 'packed-deep-fri',
+    canonicalProofByteLengthDecimal: '100',
+    custodyCleanupCompleted: true,
+    custodyModel: proofBackendBakeoffCustodyModel,
+    custodySchemaIdentifier: proofBackendBakeoffCustodySchemaIdentifier,
+    custodySchemaVersion: proofBackendBakeoffCustodySchemaVersion,
+    elapsedNanosecondsDecimal: '200',
+    externalCommittedTransactionCountDecimal: '5',
+    externalReadByteLengthDecimal: '30',
+    externalWrittenByteLengthDecimal: '40',
+    formatVersion: 2,
+    frozenInputIdentityShake256Hex,
+    operationFinishedAtUnixMilliseconds: 1_100,
+    operationStartedAtUnixMilliseconds: 1_000,
+    proofPhysicalObjectCountDecimal: '1',
+    proofShake256Hex: '34'.repeat(64),
+    sampleOrdinal: 1,
+    sourcePhysicalObjectCountDecimal: '8',
+    ...overrides,
+});
+
 const guardJsonLines = (
     overrides: Readonly<{
         guardIntervalMilliseconds?: number;
         includeBaseline?: boolean;
         includeInWindow?: boolean;
         includeTerminal?: boolean;
+        baselineResidentMemoryByteLength?: number;
+        peakResidentMemoryByteLength?: number;
         sampleError?: string;
     }> = {},
 ): string => {
@@ -63,7 +94,8 @@ const guardJsonLines = (
         records.push({
             confirmedMemoryLimitViolation: false,
             eventType: 'resource-sample',
-            processTreeResidentMemoryBytes: 50,
+            processTreeResidentMemoryBytes:
+                overrides.baselineResidentMemoryByteLength ?? 50,
             recordedAtUnixMilliseconds: 999,
             sampleError: null,
         });
@@ -73,21 +105,24 @@ const guardJsonLines = (
             {
                 confirmedMemoryLimitViolation: false,
                 eventType: 'resource-sample',
-                processTreeResidentMemoryBytes: 70,
+                processTreeResidentMemoryBytes:
+                    overrides.peakResidentMemoryByteLength ?? 70,
                 recordedAtUnixMilliseconds: 1_000,
                 sampleError: null,
             },
             {
                 confirmedMemoryLimitViolation: false,
                 eventType: 'resource-sample',
-                processTreeResidentMemoryBytes: 90,
+                processTreeResidentMemoryBytes:
+                    overrides.peakResidentMemoryByteLength ?? 80,
                 recordedAtUnixMilliseconds: 1_050,
                 sampleError: overrides.sampleError ?? null,
             },
             {
                 confirmedMemoryLimitViolation: false,
                 eventType: 'resource-sample',
-                processTreeResidentMemoryBytes: 80,
+                processTreeResidentMemoryBytes:
+                    overrides.peakResidentMemoryByteLength ?? 90,
                 recordedAtUnixMilliseconds: 1_100,
                 sampleError: null,
             },
@@ -155,25 +190,37 @@ const validatedSample = (
         proofDigestByte?: string;
         transactions?: bigint;
     }> = {},
-): ValidatedProofBackendBakeoffSample => ({
-    baselineProcessTreeResidentMemoryByteLength: overrides.baseline ?? 40n,
-    peakProcessTreeResidentMemoryByteLength: overrides.peak ?? 100n,
-    result: {
-        backend,
-        canonicalProofByteLength: overrides.proofByteLength ?? 80n,
-        elapsedNanoseconds: overrides.elapsed ?? 120n,
-        externalCommittedTransactionCount: overrides.transactions ?? 4n,
-        externalIoByteLength: overrides.io ?? 30n,
-        externalReadByteLength: overrides.io ?? 30n,
-        externalWrittenByteLength: 0n,
-        formatVersion: 1,
-        frozenInputIdentityShake256Hex,
-        operationFinishedAtUnixMilliseconds: 1_100n,
-        operationStartedAtUnixMilliseconds: 1_000n,
-        proofShake256Hex: (overrides.proofDigestByte ?? '56').repeat(64),
-        sampleOrdinal,
-    },
-});
+): ReturnType<typeof validateProofBackendBakeoffSample> => {
+    const externalIoByteLength = overrides.io ?? 30n;
+    if (externalIoByteLength < 2n) {
+        throw new Error(
+            'Test samples require at least two external I/O bytes.',
+        );
+    }
+    return validateProofBackendBakeoffSample({
+        executionContract: proofBackendBakeoffExecutionContracts[backend],
+        guardJsonLines: guardJsonLines({
+            baselineResidentMemoryByteLength: Number(overrides.baseline ?? 40n),
+            peakResidentMemoryByteLength: Number(overrides.peak ?? 100n),
+        }),
+        result: sampleResult({
+            backend,
+            canonicalProofByteLengthDecimal: (
+                overrides.proofByteLength ?? 80n
+            ).toString(),
+            elapsedNanosecondsDecimal: (overrides.elapsed ?? 120n).toString(),
+            externalCommittedTransactionCountDecimal: (
+                overrides.transactions ?? 4n
+            ).toString(),
+            externalReadByteLengthDecimal: (
+                externalIoByteLength - 1n
+            ).toString(),
+            externalWrittenByteLengthDecimal: '1',
+            proofShake256Hex: (overrides.proofDigestByte ?? '56').repeat(64),
+            sampleOrdinal,
+        }),
+    });
+};
 
 const armResult = (
     backend: ProofBackendName,
@@ -184,20 +231,19 @@ const armResult = (
         proofBytes: bigint;
         transactions: bigint;
     }>,
-): ProofBackendBakeoffArmResult => ({
-    backend,
-    canonicalProofByteLength: metrics.proofBytes,
-    externalCommittedTransactionCount: metrics.transactions,
-    externalIoByteLength: metrics.io,
-    externalReadByteLength: metrics.io,
-    externalWrittenByteLength: 0n,
-    frozenInputIdentityShake256Hex,
-    maximumBaselineProcessTreeResidentMemoryByteLength: 50n,
-    maximumPeakProcessTreeResidentMemoryByteLength: metrics.peak,
-    medianElapsedNanoseconds: metrics.elapsed,
-    proofShake256Hex: (backend === 'packed-deep-fri' ? '67' : '89').repeat(64),
-    sampleCount: 3,
-});
+): ReturnType<typeof aggregateProofBackendBakeoffArm> =>
+    aggregateProofBackendBakeoffArm(
+        ([1, 2, 3] as const).map((sampleOrdinal) =>
+            validatedSample(backend, sampleOrdinal, {
+                elapsed: metrics.elapsed,
+                io: metrics.io,
+                peak: metrics.peak,
+                proofByteLength: metrics.proofBytes,
+                proofDigestByte: backend === 'packed-deep-fri' ? '67' : '89',
+                transactions: metrics.transactions,
+            }),
+        ),
+    );
 
 describe('proof backend bakeoff contracts', () => {
     it('pins canonical decimal u64 syntax, the maximum value, and checked read plus write', () => {
@@ -229,13 +275,36 @@ describe('proof backend bakeoff contracts', () => {
         ).toThrow('exceeds u64');
     });
 
-    it('validates the authoritative Rust result schema and accepts u64 maxima', () => {
+    it('keeps historical format version one audit-only and ineligible for selection', () => {
+        const result = auditHistoricalProofBackendBakeoffResult(
+            historicalSampleResult(),
+        );
+        expect(result).toMatchObject({
+            backend: 'packed-deep-fri',
+            externalIoByteLength: 70n,
+            formatVersion: 1,
+            sampleOrdinal: 1,
+        });
+        expect(() =>
+            validateProofBackendBakeoffResult(historicalSampleResult()),
+        ).toThrow(/historical audit evidence.*ineligible/u);
+        expect(() =>
+            validateProofBackendBakeoffSample({
+                executionContract:
+                    proofBackendBakeoffExecutionContracts['packed-deep-fri'],
+                guardJsonLines: guardJsonLines(),
+                result: historicalSampleResult(),
+            }),
+        ).toThrow(/historical audit evidence.*ineligible/u);
+    });
+
+    it('validates the exact selectable format-version-two custody schema and accepts u64 maxima', () => {
         const result = validateProofBackendBakeoffResult(
             sampleResult({
                 canonicalProofByteLengthDecimal: maximumUnsigned64Decimal,
                 elapsedNanosecondsDecimal: maximumUnsigned64Decimal,
-                externalReadByteLengthDecimal: maximumUnsigned64Decimal,
-                externalWrittenByteLengthDecimal: '0',
+                externalReadByteLengthDecimal: '18446744073709551614',
+                externalWrittenByteLengthDecimal: '1',
             }),
         );
 
@@ -243,12 +312,18 @@ describe('proof backend bakeoff contracts', () => {
             backend: 'packed-deep-fri',
             canonicalProofByteLength: 18_446_744_073_709_551_615n,
             externalIoByteLength: 18_446_744_073_709_551_615n,
-            formatVersion: 1,
+            custodyCleanupCompleted: true,
+            custodyModel: 'bounded-external-storage-replay',
+            custodySchemaIdentifier: 'bounded-external-storage-replay-v1',
+            custodySchemaVersion: 1,
+            formatVersion: 2,
+            proofPhysicalObjectCount: 1n,
             sampleOrdinal: 1,
+            sourcePhysicalObjectCount: 8n,
         });
         expect(() =>
             validateProofBackendBakeoffResult(
-                sampleResult({ formatVersion: 2 }),
+                sampleResult({ formatVersion: 3 }),
             ),
         ).toThrow('formatVersion');
         expect(() =>
@@ -264,6 +339,23 @@ describe('proof backend bakeoff contracts', () => {
                 }),
             ),
         ).toThrow('externalIoByteLength');
+        for (const [fieldName, invalidValue] of [
+            ['custodyModel', 'resident-process-memory'],
+            ['custodySchemaIdentifier', 'unbounded-memory-v1'],
+            ['custodySchemaVersion', 2],
+            ['custodyCleanupCompleted', false],
+            ['sourcePhysicalObjectCountDecimal', '7'],
+            ['proofPhysicalObjectCountDecimal', '2'],
+            ['externalReadByteLengthDecimal', '0'],
+            ['externalWrittenByteLengthDecimal', '0'],
+            ['externalCommittedTransactionCountDecimal', '0'],
+        ] as const) {
+            expect(() =>
+                validateProofBackendBakeoffResult(
+                    sampleResult({ [fieldName]: invalidValue }),
+                ),
+            ).toThrow(fieldName);
+        }
     });
 
     it('extracts the absolute RSS peak from the inclusive operation window', () => {
@@ -281,10 +373,44 @@ describe('proof backend bakeoff contracts', () => {
         });
         expect(
             validateProofBackendBakeoffSample({
+                executionContract:
+                    proofBackendBakeoffExecutionContracts['packed-deep-fri'],
                 guardJsonLines: guardJsonLines(),
                 result: sampleResult(),
             }).peakProcessTreeResidentMemoryByteLength,
         ).toBe(90n);
+    });
+
+    it('binds every raw result to its independently selected arm custody contract', () => {
+        expect(
+            validateProofBackendBakeoffSample({
+                executionContract:
+                    proofBackendBakeoffExecutionContracts['packed-deep-fri'],
+                guardJsonLines: guardJsonLines(),
+                result: sampleResult(),
+            }).result.custodyModel,
+        ).toBe('bounded-external-storage-replay');
+        expect(() =>
+            validateProofBackendBakeoffSample({
+                executionContract:
+                    proofBackendBakeoffExecutionContracts['sumcheck-class'],
+                guardJsonLines: guardJsonLines(),
+                result: sampleResult(),
+            }),
+        ).toThrow(
+            /does not match its scheduled sumcheck-class execution contract/u,
+        );
+        expect(
+            validateProofBackendBakeoffSample({
+                executionContract:
+                    proofBackendBakeoffExecutionContracts['packed-deep-fri'],
+                guardJsonLines: guardJsonLines(),
+                result: sampleResult(),
+            }).result,
+        ).toMatchObject({
+            proofPhysicalObjectCount: 1n,
+            sourcePhysicalObjectCount: 8n,
+        });
     });
 
     it('accepts a 500 millisecond monotonic sample gap and refuses 501 milliseconds', () => {
@@ -552,7 +678,7 @@ describe('proof backend bakeoff contracts', () => {
         ).toThrow('operation finish');
     });
 
-    it('requires deterministic proof bytes, external I/O, and transactions across three samples', () => {
+    it('aggregates only raw-validated samples with deterministic proof bytes, external I/O, and transactions', () => {
         const baseSamples = [
             validatedSample('packed-deep-fri', 1),
             validatedSample('packed-deep-fri', 2),
@@ -641,7 +767,15 @@ describe('proof backend bakeoff contracts', () => {
         ).toBe('neutral');
     });
 
-    it('selects one arm at three wins and reports two wins as ambiguous', () => {
+    it('selects one arm only when it wins at least three of the five fixed metrics', () => {
+        expect(proofBackendBakeoffEligibleMetrics).toEqual([
+            'proof-bytes',
+            'elapsed-time',
+            'peak-resident-memory',
+            'external-io',
+            'external-transactions',
+        ]);
+        expect(proofBackendBakeoffExcludedMetrics).toEqual([]);
         const packedDeepFri = armResult('packed-deep-fri', {
             elapsed: 10n,
             io: 20n,
@@ -659,6 +793,15 @@ describe('proof backend bakeoff contracts', () => {
         expect(
             selectProofBackendBakeoffWinner(packedDeepFri, sumcheckClass),
         ).toMatchObject({
+            custodyModel: 'bounded-external-storage-replay',
+            custodySchemaIdentifier: 'bounded-external-storage-replay-v1',
+            custodySchemaVersion: 1,
+            eligibleMetrics: proofBackendBakeoffEligibleMetrics,
+            excludedMetrics: proofBackendBakeoffExcludedMetrics,
+            metricWinners: {
+                'external-io': 'sumcheck-class',
+                'external-transactions': 'sumcheck-class',
+            },
             outcome: 'selected',
             packedDeepFriWinCount: 3,
             selectedBackend: 'packed-deep-fri',
@@ -667,10 +810,13 @@ describe('proof backend bakeoff contracts', () => {
 
         expect(
             selectProofBackendBakeoffWinner(
-                {
-                    ...packedDeepFri,
-                    maximumPeakProcessTreeResidentMemoryByteLength: 15n,
-                },
+                armResult('packed-deep-fri', {
+                    elapsed: 10n,
+                    io: 20n,
+                    peak: 15n,
+                    proofBytes: 10n,
+                    transactions: 20n,
+                }),
                 sumcheckClass,
             ),
         ).toMatchObject({
@@ -678,47 +824,92 @@ describe('proof backend bakeoff contracts', () => {
             packedDeepFriWinCount: 2,
             sumcheckClassWinCount: 2,
         });
-    });
 
-    it('requires all three non-I/O metrics to agree when both arms report zero I/O and transactions', () => {
-        const zeroExternalMetrics = {
-            io: 0n,
-            transactions: 0n,
-        };
-        const selected = selectProofBackendBakeoffWinner(
-            armResult('packed-deep-fri', {
-                elapsed: 10n,
-                peak: 10n,
-                proofBytes: 10n,
-                ...zeroExternalMetrics,
-            }),
-            armResult('sumcheck-class', {
-                elapsed: 20n,
-                peak: 20n,
-                proofBytes: 20n,
-                ...zeroExternalMetrics,
-            }),
-        );
-        expect(selected).toMatchObject({
+        expect(
+            selectProofBackendBakeoffWinner(
+                armResult('packed-deep-fri', {
+                    elapsed: 10n,
+                    io: 10n,
+                    peak: 10n,
+                    proofBytes: 10n,
+                    transactions: 10n,
+                }),
+                armResult('sumcheck-class', {
+                    elapsed: 20n,
+                    io: 20n,
+                    peak: 20n,
+                    proofBytes: 20n,
+                    transactions: 20n,
+                }),
+            ),
+        ).toMatchObject({
             outcome: 'selected',
+            packedDeepFriWinCount: 5,
             selectedBackend: 'packed-deep-fri',
+            sumcheckClassWinCount: 0,
         });
 
+        expect(
+            selectProofBackendBakeoffWinner(
+                armResult('packed-deep-fri', {
+                    elapsed: 20n,
+                    io: 20n,
+                    peak: 20n,
+                    proofBytes: 15n,
+                    transactions: 20n,
+                }),
+                armResult('sumcheck-class', {
+                    elapsed: 10n,
+                    io: 10n,
+                    peak: 10n,
+                    proofBytes: 10n,
+                    transactions: 10n,
+                }),
+            ),
+        ).toMatchObject({
+            outcome: 'selected',
+            packedDeepFriWinCount: 0,
+            selectedBackend: 'sumcheck-class',
+            sumcheckClassWinCount: 4,
+        });
+    });
+
+    it('reports an ambiguous result when raw-validated arms split two wins each', () => {
         const ambiguous = selectProofBackendBakeoffWinner(
             armResult('packed-deep-fri', {
                 elapsed: 10n,
+                io: 20n,
                 peak: 15n,
                 proofBytes: 10n,
-                ...zeroExternalMetrics,
+                transactions: 20n,
             }),
             armResult('sumcheck-class', {
                 elapsed: 20n,
+                io: 10n,
                 peak: 20n,
                 proofBytes: 20n,
-                ...zeroExternalMetrics,
+                transactions: 10n,
             }),
         );
-        expect(ambiguous.outcome).toBe('ambiguous');
+        expect(ambiguous).toMatchObject({
+            outcome: 'ambiguous',
+            packedDeepFriWinCount: 2,
+            sumcheckClassWinCount: 2,
+        });
+    });
+
+    it('fails closed on missing raw custody telemetry', () => {
+        for (const missingTelemetryField of [
+            'externalReadByteLengthDecimal',
+            'externalWrittenByteLengthDecimal',
+            'externalCommittedTransactionCountDecimal',
+        ]) {
+            expect(() =>
+                validateProofBackendBakeoffResult(
+                    sampleResult({ [missingTelemetryField]: undefined }),
+                ),
+            ).toThrow(missingTelemetryField);
+        }
     });
 
     it('enforces the fixed six-entry interleaved schedule and permits no seventh sample', () => {

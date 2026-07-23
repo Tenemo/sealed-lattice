@@ -91,6 +91,39 @@ pub(crate) fn encode_common_proof_query_tree_fragment(
     Vec<u8>,
     CommonProofEncodingError<BoundedCommonProofByteSinkError, CommonProofProverError>,
 > {
+    encode_common_proof_query_tree_fragment_with_layout(
+        catalog,
+        catalog_index,
+        geometry,
+        sorted_query_representatives,
+        artifact,
+        maximum_fragment_byte_length,
+    )
+    .map(|encoded| encoded.into_parts().0)
+}
+
+pub(crate) struct EncodedCommonProofQueryTreeFragment {
+    bytes: Vec<u8>,
+    opened_leaf_element_ranges: Vec<(usize, usize)>,
+}
+
+impl EncodedCommonProofQueryTreeFragment {
+    pub(crate) fn into_parts(self) -> (Vec<u8>, Vec<(usize, usize)>) {
+        (self.bytes, self.opened_leaf_element_ranges)
+    }
+}
+
+pub(crate) fn encode_common_proof_query_tree_fragment_with_layout(
+    catalog: &CompleteProofTreeCatalog,
+    catalog_index: usize,
+    geometry: CommonProofOpeningGeometry,
+    sorted_query_representatives: &[u64],
+    artifact: &PrefetchedCommonProofOpeningArtifact,
+    maximum_fragment_byte_length: usize,
+) -> Result<
+    EncodedCommonProofQueryTreeFragment,
+    CommonProofEncodingError<BoundedCommonProofByteSinkError, CommonProofProverError>,
+> {
     let entry = catalog
         .entries()
         .get(catalog_index)
@@ -135,14 +168,26 @@ pub(crate) fn encode_common_proof_query_tree_fragment(
     }
     let mut sink = BoundedCommonProofByteSink::new(maximum_fragment_byte_length)
         .map_err(CommonProofEncodingError::Sink)?;
-    write_opening_record(
+    let opened_leaf_element_ranges = write_opening_record(
         &mut sink,
         entry.tree_catalog_index(),
         geometry.canonical_leaf_byte_length,
         artifact,
     )?;
     write_authentication_frontier(&mut sink, entry.tree_catalog_index(), artifact)?;
-    Ok(sink.finish())
+    let bytes = sink.finish();
+    if opened_leaf_element_ranges
+        .last()
+        .is_none_or(|(_, end)| *end > bytes.len())
+    {
+        return Err(CommonProofEncodingError::Prover(
+            CommonProofProverError::InvalidOpening,
+        ));
+    }
+    Ok(EncodedCommonProofQueryTreeFragment {
+        bytes,
+        opened_leaf_element_ranges,
+    })
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -368,15 +413,15 @@ fn validate_common_proof_opening_geometry(
     Ok(())
 }
 
-fn write_opening_record<Sink>(
-    sink: &mut Sink,
+fn write_opening_record(
+    sink: &mut BoundedCommonProofByteSink,
     tree_catalog_index: u16,
     canonical_leaf_byte_length: usize,
     artifact: &PrefetchedCommonProofOpeningArtifact,
-) -> Result<(), CommonProofEncodingError<Sink::Error, CommonProofProverError>>
-where
-    Sink: CommonProofByteSink,
-{
+) -> Result<
+    Vec<(usize, usize)>,
+    CommonProofEncodingError<BoundedCommonProofByteSinkError, CommonProofProverError>,
+> {
     let opened_indexes = artifact.opened_leaf_indexes();
     write_tuple_header(
         sink,
@@ -405,7 +450,14 @@ where
         u32::try_from(opened_indexes.len())
             .map_err(|_| CommonProofEncodingError::Prover(CommonProofProverError::CountOverflow))?,
     )?;
+    let mut opened_leaf_element_ranges = Vec::new();
+    opened_leaf_element_ranges
+        .try_reserve_exact(opened_indexes.len())
+        .map_err(|_| {
+            CommonProofEncodingError::Prover(CommonProofProverError::AllocationLimitExceeded)
+        })?;
     for position in 0..opened_indexes.len() {
+        let start = sink.bytes.len();
         write_u32(
             sink,
             u32::try_from(canonical_leaf_byte_length).map_err(|_| {
@@ -417,8 +469,50 @@ where
             .map_err(CommonProofEncodingError::Artifact)?;
         sink.write_bytes(leaf_bytes)
             .map_err(CommonProofEncodingError::Sink)?;
+        let end = sink.bytes.len();
+        opened_leaf_element_ranges.push((start, end));
     }
-    Ok(())
+    Ok(opened_leaf_element_ranges)
+}
+
+#[cfg(test)]
+mod query_fragment_layout_tests {
+    use zeroize::Zeroizing;
+
+    use super::{
+        BoundedCommonProofByteSink, PrefetchedCommonProofOpeningArtifact, write_opening_record,
+    };
+
+    fn one_leaf_artifact(leaf_bytes: Vec<u8>) -> PrefetchedCommonProofOpeningArtifact {
+        PrefetchedCommonProofOpeningArtifact::from_recomputed_common_tree(
+            0,
+            2,
+            leaf_bytes.len(),
+            vec![0],
+            vec![Zeroizing::new(leaf_bytes)],
+            Vec::new(),
+            Vec::new(),
+        )
+        .expect("construct one-leaf encoding artifact")
+    }
+
+    #[test]
+    fn leaf_equal_to_prefix_bytes_cannot_redirect_emitted_range_accounting() {
+        let first_artifact = one_leaf_artifact(vec![0_u8; 8]);
+        let mut first_sink =
+            BoundedCommonProofByteSink::new(1_024).expect("construct first encoding sink");
+        write_opening_record(&mut first_sink, 0, 8, &first_artifact)
+            .expect("encode first opening record");
+        let colliding_leaf = first_sink.bytes[..8].to_vec();
+
+        let colliding_artifact = one_leaf_artifact(colliding_leaf);
+        let mut colliding_sink =
+            BoundedCommonProofByteSink::new(1_024).expect("construct colliding encoding sink");
+        let ranges = write_opening_record(&mut colliding_sink, 0, 8, &colliding_artifact)
+            .expect("encode prefix-colliding opening record");
+        assert_eq!(ranges, vec![(28, 40)]);
+        assert_eq!(&colliding_sink.bytes[..8], &colliding_sink.bytes[32..40]);
+    }
 }
 
 fn write_authentication_frontier<Sink>(
@@ -508,7 +602,7 @@ fn artifact_matches_query_representatives(
     Ok(every_query_is_opened && every_opened_leaf_is_queried)
 }
 
-pub(super) fn opened_leaf_indexes(
+pub(in crate::bgv::proof_suite) fn opened_leaf_indexes(
     source: ProofTreeCatalogSource,
     evaluation_domain_size: u64,
     sorted_query_representatives: &[u64],

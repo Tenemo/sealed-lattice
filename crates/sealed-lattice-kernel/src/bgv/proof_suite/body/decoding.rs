@@ -1,9 +1,9 @@
-#[cfg(test)]
+#[cfg(any(test, feature = "proof-storage-width-browser-evidence"))]
 use std::cell::{Cell, RefCell};
 
 use crate::foundation::CanonicalItemType;
 
-#[cfg(test)]
+#[cfg(any(test, feature = "proof-storage-width-browser-evidence"))]
 use super::super::transcript::{CommonProofQueryOpeningAbsorber, TranscriptError};
 use super::super::{
     decoder::{BoundedProofDecoder, ProofByteSource, ProofDecodeError},
@@ -73,14 +73,14 @@ impl<'opening> ProofTreeOpening<'opening> {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg(test)]
+#[cfg(any(test, feature = "proof-storage-width-browser-evidence"))]
 pub(crate) struct DecodedProofBody {
     tree_roots: Vec<[u8; 64]>,
     deep_evaluations: Vec<ProofChallengeExtensionElement>,
     terminal_coefficients: Vec<ProofChallengeExtensionElement>,
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "proof-storage-width-browser-evidence"))]
 impl DecodedProofBody {
     pub(crate) fn tree_roots(&self) -> &[[u8; 64]] {
         &self.tree_roots
@@ -137,7 +137,7 @@ impl DecodedProofTreeOpening {
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "proof-storage-width-browser-evidence"))]
 pub(crate) struct PendingProofBodyQueries<'source, 'layout, Source: ProofByteSource + ?Sized> {
     source: &'source Source,
     layout: &'layout ProofBodyLayout,
@@ -148,7 +148,7 @@ pub(crate) struct PendingProofBodyQueries<'source, 'layout, Source: ProofByteSou
     terminal_coefficients: Vec<ProofChallengeExtensionElement>,
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "proof-storage-width-browser-evidence"))]
 struct AbsorbingQuerySource<'source, 'absorber, Source: ProofByteSource + ?Sized> {
     source: &'source Source,
     source_offset: usize,
@@ -158,14 +158,14 @@ struct AbsorbingQuerySource<'source, 'absorber, Source: ProofByteSource + ?Sized
     transcript_error: RefCell<Option<TranscriptError>>,
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "proof-storage-width-browser-evidence"))]
 impl<Source: ProofByteSource + ?Sized> AbsorbingQuerySource<'_, '_, Source> {
     fn take_transcript_error(&self) -> Option<TranscriptError> {
         self.transcript_error.borrow_mut().take()
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "proof-storage-width-browser-evidence"))]
 impl<Source: ProofByteSource + ?Sized> ProofByteSource for AbsorbingQuerySource<'_, '_, Source> {
     fn byte_length(&self) -> usize {
         self.byte_length
@@ -199,7 +199,7 @@ impl<Source: ProofByteSource + ?Sized> ProofByteSource for AbsorbingQuerySource<
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "proof-storage-width-browser-evidence"))]
 impl<Source: ProofByteSource + ?Sized> PendingProofBodyQueries<'_, '_, Source> {
     pub(crate) fn tree_roots(&self) -> &[[u8; 64]] {
         &self.tree_roots
@@ -314,7 +314,7 @@ where
     })
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "proof-storage-width-browser-evidence"))]
 pub(crate) fn decode_proof_body_prefix<'source, 'layout, Source>(
     source: &'source Source,
     declared_byte_length: usize,
@@ -338,7 +338,7 @@ where
     })
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "proof-storage-width-browser-evidence"))]
 impl<'source, 'layout, Source: ProofByteSource + ?Sized>
     PendingProofBodyQueries<'source, 'layout, Source>
 {

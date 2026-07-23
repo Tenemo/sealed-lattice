@@ -39,8 +39,6 @@ use sha3::{
     digest::{ExtendableOutput, Update, XofReader},
 };
 
-use crate::hashing::hash512_hex;
-
 use super::proof_backend_bakeoff::{
     ProofBackendBakeoffArmOutput, ProofBackendBakeoffFixture, ProofBackendBakeoffResult,
     canonical_frozen_sumcheck_public_statement, frozen_fixture, recompute_frozen_input_identity,
@@ -1389,22 +1387,7 @@ pub(super) fn execute_sumcheck_class(
     let canonical_artifact =
         encode_canonical_artifact(&artifact, &fixture.canonical_sumcheck_statement)?;
 
-    verify_canonical_artifact(
-        &canonical_artifact,
-        &fixture.canonical_sumcheck_statement,
-        &fixture.input_identity_shake256_hex,
-    )?;
-    let proof_shake256_hex = hash512_hex(
-        "proof-backend-bakeoff/canonical-artifact/v1",
-        &[canonical_artifact.as_slice()],
-    );
-    Ok(ProofBackendBakeoffArmOutput {
-        canonical_artifact,
-        proof_shake256_hex,
-        external_read_byte_length: 0,
-        external_written_byte_length: 0,
-        external_committed_transaction_count: 0,
-    })
+    Ok(ProofBackendBakeoffArmOutput { canonical_artifact })
 }
 
 fn build_pcs() -> ProofBackendBakeoffResult<(SumcheckClassPcs, SumcheckClassParameterRecord)> {

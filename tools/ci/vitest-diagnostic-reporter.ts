@@ -7,6 +7,12 @@ import {
     desktopBrowserProofMeasurementConsolePrefix,
     parseDesktopBrowserProofMeasurementRecord,
 } from '../../tests/support/desktop-browser-proof-measurement.js';
+import {
+    parseProofStorageWidthBrowserMeasurement,
+    proofStorageWidthBrowserEvidenceConsolePrefix,
+    proofStorageWidthBrowserEvidenceProjectLabel,
+    serializeProofStorageWidthBrowserMeasurement,
+} from '../../tests/support/proof-storage-width-browser-evidence.js';
 
 import {
     redactDiagnosticText,
@@ -35,6 +41,8 @@ const moduleIdentity = (
 });
 
 export class VitestDiagnosticReporter implements Reporter {
+    #proofStorageWidthBrowserEvidenceCount = 0;
+    readonly #requiresProofStorageWidthBrowserEvidence: boolean;
     readonly #writeEvent: ReturnType<typeof createTestEventWriter>;
 
     constructor(
@@ -42,6 +50,8 @@ export class VitestDiagnosticReporter implements Reporter {
         now: () => Date = () => new Date(),
     ) {
         const paths = resolveTestDiagnosticPaths(environment);
+        this.#requiresProofStorageWidthBrowserEvidence =
+            paths.projectLabel === proofStorageWidthBrowserEvidenceProjectLabel;
         this.#writeEvent = createTestEventWriter({
             eventFilePath: paths.eventFilePath,
             now,
@@ -94,6 +104,14 @@ export class VitestDiagnosticReporter implements Reporter {
         unhandledErrors: readonly unknown[],
         reason: 'failed' | 'interrupted' | 'passed',
     ): void {
+        if (
+            this.#requiresProofStorageWidthBrowserEvidence &&
+            this.#proofStorageWidthBrowserEvidenceCount !== 1
+        ) {
+            throw new Error(
+                `The proof-storage width browser project emitted ${String(this.#proofStorageWidthBrowserEvidenceCount)} evidence records instead of exactly one.`,
+            );
+        }
         this.#writeEvent('test-run-finished', {
             reason,
             unhandledErrors: unhandledErrors.map((error) =>
@@ -115,6 +133,46 @@ export class VitestDiagnosticReporter implements Reporter {
     }): void {
         if (log.type === 'stdout') {
             for (const line of log.content.split(/\r?\n/u)) {
+                if (
+                    line.startsWith(
+                        proofStorageWidthBrowserEvidenceConsolePrefix,
+                    )
+                ) {
+                    if (this.#proofStorageWidthBrowserEvidenceCount !== 0) {
+                        throw new Error(
+                            'The proof-storage width browser project emitted duplicate evidence records.',
+                        );
+                    }
+                    if (log.browser !== true) {
+                        throw new Error(
+                            'The proof-storage width browser evidence record did not originate in a browser.',
+                        );
+                    }
+                    const encodedRecord = line.slice(
+                        proofStorageWidthBrowserEvidenceConsolePrefix.length,
+                    );
+                    let decodedRecord: unknown;
+                    try {
+                        decodedRecord = JSON.parse(encodedRecord) as unknown;
+                    } catch (error) {
+                        throw Object.assign(
+                            new Error(
+                                'The proof-storage width browser evidence record is not valid JSON.',
+                            ),
+                            { cause: error },
+                        );
+                    }
+                    const record =
+                        parseProofStorageWidthBrowserMeasurement(decodedRecord);
+                    this.#writeEvent('proof-storage-width-browser-evidence', {
+                        ...serializeProofStorageWidthBrowserMeasurement(record),
+                        browser: true,
+                        origin: log.origin,
+                        testIdentifier: log.taskId,
+                    });
+                    this.#proofStorageWidthBrowserEvidenceCount += 1;
+                    continue;
+                }
                 if (
                     !line.startsWith(
                         desktopBrowserProofMeasurementConsolePrefix,

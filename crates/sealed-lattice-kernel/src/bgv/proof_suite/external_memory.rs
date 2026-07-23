@@ -14,6 +14,9 @@ use std::collections::BTreeMap;
 #[cfg(test)]
 use zeroize::Zeroizing;
 
+#[cfg(test)]
+use super::MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH;
+
 const EXTERNAL_MEMORY_REQUEST_SCHEMA_VERSION: u16 = 1;
 const EXTERNAL_MEMORY_REQUEST_MESSAGE_KIND: u16 = 1;
 const EXTERNAL_MEMORY_RESPONSE_MESSAGE_KIND: u16 = 2;
@@ -26,6 +29,46 @@ const EXTERNAL_MEMORY_RESPONSE_HEADER_BYTE_LENGTH: usize = 80;
 pub(crate) const EXTERNAL_MEMORY_OPERATION_HEADER_BYTE_LENGTH: usize = 32;
 const EXTERNAL_MEMORY_READ_RESULT_HEADER_BYTE_LENGTH: usize = 88;
 const HASH_BYTE_LENGTH: usize = 64;
+
+#[cfg(test)]
+pub(crate) const MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_APPEND_REQUEST_BYTE_LENGTH: u64 =
+    EXTERNAL_MEMORY_REQUEST_HEADER_BYTE_LENGTH as u64
+        + EXTERNAL_MEMORY_OPERATION_HEADER_BYTE_LENGTH as u64
+        + MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH as u64;
+#[cfg(test)]
+pub(crate) const COMMON_PROOF_EXTERNAL_MEMORY_EMPTY_RESPONSE_BYTE_LENGTH: u64 =
+    EXTERNAL_MEMORY_RESPONSE_HEADER_BYTE_LENGTH as u64;
+#[cfg(test)]
+pub(crate) const COMMON_PROOF_EXTERNAL_MEMORY_READ_REQUEST_BYTE_LENGTH: u64 =
+    EXTERNAL_MEMORY_REQUEST_HEADER_BYTE_LENGTH as u64
+        + EXTERNAL_MEMORY_OPERATION_HEADER_BYTE_LENGTH as u64;
+#[cfg(test)]
+pub(crate) const MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_READ_RESPONSE_BYTE_LENGTH: u64 =
+    EXTERNAL_MEMORY_RESPONSE_HEADER_BYTE_LENGTH as u64
+        + EXTERNAL_MEMORY_READ_RESULT_HEADER_BYTE_LENGTH as u64
+        + MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH as u64;
+#[cfg(test)]
+pub(crate) const MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_COPIED_BUFFER_BYTE_LENGTH: u64 =
+    if MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_APPEND_REQUEST_BYTE_LENGTH
+        > MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_READ_RESPONSE_BYTE_LENGTH
+    {
+        MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_APPEND_REQUEST_BYTE_LENGTH
+    } else {
+        MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_READ_RESPONSE_BYTE_LENGTH
+    };
+#[cfg(test)]
+pub(crate) const MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_BOUNDARY_TRANSFER_LIVE_BYTE_LENGTH: u64 = {
+    let append_transfer_live_byte_length =
+        MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_APPEND_REQUEST_BYTE_LENGTH
+            + COMMON_PROOF_EXTERNAL_MEMORY_EMPTY_RESPONSE_BYTE_LENGTH;
+    let read_transfer_live_byte_length = COMMON_PROOF_EXTERNAL_MEMORY_READ_REQUEST_BYTE_LENGTH
+        + MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_READ_RESPONSE_BYTE_LENGTH;
+    if append_transfer_live_byte_length > read_transfer_live_byte_length {
+        append_transfer_live_byte_length
+    } else {
+        read_transfer_live_byte_length
+    }
+};
 
 /// Absolute browser scratch safety bounds. The worker-side custody layer
 /// enforces the corresponding object and encrypted-record bounds before
@@ -49,6 +92,11 @@ pub(crate) use plan::{
     ProofExternalMemoryPlan, ProofExternalMemoryProtection,
     ProofExternalMemorySecretSealCustodyRequirement, ProofExternalMemoryTransactionOperation,
 };
+pub(crate) use transaction::EXTERNAL_MEMORY_SINGLE_APPEND_RECYCLER_CAPACITY_CEILING;
+#[cfg(test)]
+pub(crate) use transaction::EXTERNAL_MEMORY_SINGLE_OPERATION_VECTOR_CAPACITY_CEILING;
+#[cfg(all(test, feature = "proof-storage-width-evidence"))]
+pub(crate) use transaction::EXTERNAL_MEMORY_SINGLE_READ_RESULT_VECTOR_CAPACITY_CEILING;
 pub(crate) use transaction::{
     ProofExternalMemoryTransactionAdapterError, ProofExternalMemoryTransactionRecorder,
     ProofExternalMemoryTransactionReplay, ProofExternalMemoryTransactionRequest,

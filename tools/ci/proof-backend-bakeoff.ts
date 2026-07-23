@@ -15,7 +15,49 @@ export const proofBackendBakeoffSchedule = [
 export type ProofBackendName =
     (typeof proofBackendBakeoffSchedule)[number]['backend'];
 
-export type ValidatedProofBackendBakeoffResult = Readonly<{
+export const proofBackendBakeoffCustodyModel =
+    'bounded-external-storage-replay' as const;
+export const proofBackendBakeoffCustodySchemaIdentifier =
+    'bounded-external-storage-replay-v1' as const;
+export const proofBackendBakeoffCustodySchemaVersion = 1 as const;
+
+type ProofBackendBakeoffCustodyModel = typeof proofBackendBakeoffCustodyModel;
+
+type ProofBackendBakeoffExecutionContract = Readonly<{
+    backend: ProofBackendName;
+    custodyModel: ProofBackendBakeoffCustodyModel;
+    custodySchemaIdentifier: typeof proofBackendBakeoffCustodySchemaIdentifier;
+    custodySchemaVersion: typeof proofBackendBakeoffCustodySchemaVersion;
+    proofPhysicalObjectCount: 1;
+    sourcePhysicalObjectCount: 8;
+}>;
+
+// Each arm is measured against the same exact eight replay-source objects and
+// one canonical-proof object. Raw format version two binds this independently
+// selected contract before a sample can participate in aggregation.
+export const proofBackendBakeoffExecutionContracts = {
+    'packed-deep-fri': {
+        backend: 'packed-deep-fri',
+        custodyModel: proofBackendBakeoffCustodyModel,
+        custodySchemaIdentifier: proofBackendBakeoffCustodySchemaIdentifier,
+        custodySchemaVersion: proofBackendBakeoffCustodySchemaVersion,
+        proofPhysicalObjectCount: 1,
+        sourcePhysicalObjectCount: 8,
+    },
+    'sumcheck-class': {
+        backend: 'sumcheck-class',
+        custodyModel: proofBackendBakeoffCustodyModel,
+        custodySchemaIdentifier: proofBackendBakeoffCustodySchemaIdentifier,
+        custodySchemaVersion: proofBackendBakeoffCustodySchemaVersion,
+        proofPhysicalObjectCount: 1,
+        sourcePhysicalObjectCount: 8,
+    },
+} as const satisfies Record<
+    ProofBackendName,
+    ProofBackendBakeoffExecutionContract
+>;
+
+type ParsedProofBackendBakeoffMeasurements = Readonly<{
     backend: ProofBackendName;
     canonicalProofByteLength: bigint;
     elapsedNanoseconds: bigint;
@@ -23,13 +65,30 @@ export type ValidatedProofBackendBakeoffResult = Readonly<{
     externalIoByteLength: bigint;
     externalReadByteLength: bigint;
     externalWrittenByteLength: bigint;
-    formatVersion: 1;
     frozenInputIdentityShake256Hex: string;
     operationFinishedAtUnixMilliseconds: bigint;
     operationStartedAtUnixMilliseconds: bigint;
     proofShake256Hex: string;
     sampleOrdinal: 1 | 2 | 3;
 }>;
+
+type AuditedHistoricalProofBackendBakeoffResult =
+    ParsedProofBackendBakeoffMeasurements &
+        Readonly<{
+            formatVersion: 1;
+        }>;
+
+type ValidatedProofBackendBakeoffResult =
+    ParsedProofBackendBakeoffMeasurements &
+        Readonly<{
+            custodyCleanupCompleted: true;
+            custodyModel: ProofBackendBakeoffCustodyModel;
+            custodySchemaIdentifier: typeof proofBackendBakeoffCustodySchemaIdentifier;
+            custodySchemaVersion: typeof proofBackendBakeoffCustodySchemaVersion;
+            formatVersion: 2;
+            proofPhysicalObjectCount: 1n;
+            sourcePhysicalObjectCount: 8n;
+        }>;
 
 type ProofBackendBakeoffOperationMemory = Readonly<{
     baselineProcessTreeResidentMemoryByteLength: bigint;
@@ -38,15 +97,19 @@ type ProofBackendBakeoffOperationMemory = Readonly<{
     resourceSampleIntervalMilliseconds: bigint;
 }>;
 
-export type ValidatedProofBackendBakeoffSample = Readonly<{
+type ValidatedProofBackendBakeoffSample = Readonly<{
     baselineProcessTreeResidentMemoryByteLength: bigint;
     peakProcessTreeResidentMemoryByteLength: bigint;
     result: ValidatedProofBackendBakeoffResult;
 }>;
 
-export type ProofBackendBakeoffArmResult = Readonly<{
+type ProofBackendBakeoffArmResult = Readonly<{
     backend: ProofBackendName;
     canonicalProofByteLength: bigint;
+    custodyCleanupCompleted: true;
+    custodyModel: ProofBackendBakeoffCustodyModel;
+    custodySchemaIdentifier: typeof proofBackendBakeoffCustodySchemaIdentifier;
+    custodySchemaVersion: typeof proofBackendBakeoffCustodySchemaVersion;
     externalCommittedTransactionCount: bigint;
     externalIoByteLength: bigint;
     externalReadByteLength: bigint;
@@ -55,20 +118,38 @@ export type ProofBackendBakeoffArmResult = Readonly<{
     maximumBaselineProcessTreeResidentMemoryByteLength: bigint;
     maximumPeakProcessTreeResidentMemoryByteLength: bigint;
     medianElapsedNanoseconds: bigint;
+    proofPhysicalObjectCount: 1n;
     proofShake256Hex: string;
     sampleCount: 3;
+    sourcePhysicalObjectCount: 8n;
 }>;
 
-export type ProofBackendBakeoffMetricName =
+type ProofBackendBakeoffMetricName =
     | 'elapsed-time'
     | 'external-io'
     | 'external-transactions'
     | 'peak-resident-memory'
     | 'proof-bytes';
 
-export type ProofBackendBakeoffMetricWinner = ProofBackendName | 'neutral';
+export const proofBackendBakeoffEligibleMetrics = [
+    'proof-bytes',
+    'elapsed-time',
+    'peak-resident-memory',
+    'external-io',
+    'external-transactions',
+] as const satisfies readonly ProofBackendBakeoffMetricName[];
 
-export type ProofBackendBakeoffDecision = Readonly<{
+export const proofBackendBakeoffExcludedMetrics =
+    [] as const satisfies readonly ProofBackendBakeoffMetricName[];
+
+type ProofBackendBakeoffMetricWinner = ProofBackendName | 'neutral';
+
+type ProofBackendBakeoffDecision = Readonly<{
+    custodyModel: ProofBackendBakeoffCustodyModel;
+    custodySchemaIdentifier: typeof proofBackendBakeoffCustodySchemaIdentifier;
+    custodySchemaVersion: typeof proofBackendBakeoffCustodySchemaVersion;
+    eligibleMetrics: typeof proofBackendBakeoffEligibleMetrics;
+    excludedMetrics: typeof proofBackendBakeoffExcludedMetrics;
     metricWinners: Readonly<
         Record<ProofBackendBakeoffMetricName, ProofBackendBakeoffMetricWinner>
     >;
@@ -153,6 +234,37 @@ const requireBackend = (value: unknown): ProofBackendName => {
     throw new Error('backend is not a bakeoff backend.');
 };
 
+const requireCustodyModel = (
+    value: unknown,
+): ProofBackendBakeoffCustodyModel => {
+    if (value === proofBackendBakeoffCustodyModel) {
+        return value;
+    }
+    throw new Error('custodyModel must be bounded-external-storage-replay.');
+};
+
+const requireExactString = <Expected extends string>(
+    value: unknown,
+    expected: Expected,
+    fieldName: string,
+): Expected => {
+    if (value !== expected) {
+        throw new Error(`${fieldName} must be ${expected}.`);
+    }
+    return expected;
+};
+
+const requireExactNumber = <Expected extends number>(
+    value: unknown,
+    expected: Expected,
+    fieldName: string,
+): Expected => {
+    if (value !== expected) {
+        throw new Error(`${fieldName} must be ${expected}.`);
+    }
+    return expected;
+};
+
 const requireSampleOrdinal = (value: unknown): 1 | 2 | 3 => {
     if (value === 1 || value === 2 || value === 3) {
         return value;
@@ -170,13 +282,9 @@ const maximum = (values: readonly bigint[]): bigint => {
         .reduce((current, value) => (value > current ? value : current), first);
 };
 
-export const validateProofBackendBakeoffResult = (
-    input: unknown,
-): ValidatedProofBackendBakeoffResult => {
-    const record = requireJsonObject(input, 'Bakeoff result');
-    if (record.formatVersion !== 1) {
-        throw new Error('formatVersion must be one.');
-    }
+const parseProofBackendBakeoffMeasurements = (
+    record: JsonObject,
+): ParsedProofBackendBakeoffMeasurements => {
     const backend = requireBackend(record.backend);
     const sampleOrdinal = requireSampleOrdinal(record.sampleOrdinal);
     const frozenInputIdentityShake256Hex = requireHash512Hex(
@@ -239,12 +347,91 @@ export const validateProofBackendBakeoffResult = (
         externalIoByteLength,
         externalReadByteLength,
         externalWrittenByteLength,
-        formatVersion: 1,
         frozenInputIdentityShake256Hex,
         operationFinishedAtUnixMilliseconds,
         operationStartedAtUnixMilliseconds,
         proofShake256Hex,
         sampleOrdinal,
+    };
+};
+
+// Format version one is retained solely so the immutable research evidence can
+// still be decoded for audit. It carries no custody-schema or cleanup binding
+// and cannot be promoted into a sample eligible for backend selection.
+export const auditHistoricalProofBackendBakeoffResult = (
+    input: unknown,
+): AuditedHistoricalProofBackendBakeoffResult => {
+    const record = requireJsonObject(input, 'Historical bakeoff result');
+    requireExactNumber(record.formatVersion, 1, 'formatVersion');
+    return {
+        ...parseProofBackendBakeoffMeasurements(record),
+        formatVersion: 1,
+    };
+};
+
+export const validateProofBackendBakeoffResult = (
+    input: unknown,
+): ValidatedProofBackendBakeoffResult => {
+    const record = requireJsonObject(input, 'Bakeoff result');
+    if (record.formatVersion === 1) {
+        throw new Error(
+            'Format-version-one bakeoff results are historical audit evidence and are ineligible for backend selection.',
+        );
+    }
+    requireExactNumber(record.formatVersion, 2, 'formatVersion');
+    const custodyModel = requireCustodyModel(record.custodyModel);
+    const custodySchemaIdentifier = requireExactString(
+        record.custodySchemaIdentifier,
+        proofBackendBakeoffCustodySchemaIdentifier,
+        'custodySchemaIdentifier',
+    );
+    const custodySchemaVersion = requireExactNumber(
+        record.custodySchemaVersion,
+        proofBackendBakeoffCustodySchemaVersion,
+        'custodySchemaVersion',
+    );
+    if (record.custodyCleanupCompleted !== true) {
+        throw new Error('custodyCleanupCompleted must be true.');
+    }
+    const sourcePhysicalObjectCount = parseCanonicalUnsigned64Decimal(
+        record.sourcePhysicalObjectCountDecimal,
+        'sourcePhysicalObjectCountDecimal',
+    );
+    const proofPhysicalObjectCount = parseCanonicalUnsigned64Decimal(
+        record.proofPhysicalObjectCountDecimal,
+        'proofPhysicalObjectCountDecimal',
+    );
+    if (sourcePhysicalObjectCount !== 8n) {
+        throw new Error('sourcePhysicalObjectCountDecimal must be eight.');
+    }
+    if (proofPhysicalObjectCount !== 1n) {
+        throw new Error('proofPhysicalObjectCountDecimal must be one.');
+    }
+    const measurements = parseProofBackendBakeoffMeasurements(record);
+    for (const [fieldName, value] of [
+        ['externalReadByteLengthDecimal', measurements.externalReadByteLength],
+        [
+            'externalWrittenByteLengthDecimal',
+            measurements.externalWrittenByteLength,
+        ],
+        [
+            'externalCommittedTransactionCountDecimal',
+            measurements.externalCommittedTransactionCount,
+        ],
+    ] as const) {
+        if (value === 0n) {
+            throw new Error(`${fieldName} must be measured and positive.`);
+        }
+    }
+    return {
+        ...measurements,
+        custodyCleanupCompleted: true,
+        custodyModel,
+        custodySchemaIdentifier,
+        custodySchemaVersion,
+        formatVersion: 2,
+        proofPhysicalObjectCount: 1n,
+        sourcePhysicalObjectCount: 8n,
     };
 };
 
@@ -534,10 +721,49 @@ export const extractProofBackendBakeoffOperationMemory = (input: {
 };
 
 export const validateProofBackendBakeoffSample = (input: {
+    readonly executionContract: ProofBackendBakeoffExecutionContract;
     readonly guardJsonLines: string;
     readonly result: unknown;
 }): ValidatedProofBackendBakeoffSample => {
     const result = validateProofBackendBakeoffResult(input.result);
+    const contractBackend = requireBackend(input.executionContract.backend);
+    const contractCustodyModel = requireCustodyModel(
+        input.executionContract.custodyModel,
+    );
+    const contractCustodySchemaIdentifier = requireExactString(
+        input.executionContract.custodySchemaIdentifier,
+        proofBackendBakeoffCustodySchemaIdentifier,
+        'executionContract.custodySchemaIdentifier',
+    );
+    const contractCustodySchemaVersion = requireExactNumber(
+        input.executionContract.custodySchemaVersion,
+        proofBackendBakeoffCustodySchemaVersion,
+        'executionContract.custodySchemaVersion',
+    );
+    const contractSourcePhysicalObjectCount = requireExactNumber(
+        input.executionContract.sourcePhysicalObjectCount,
+        8,
+        'executionContract.sourcePhysicalObjectCount',
+    );
+    const contractProofPhysicalObjectCount = requireExactNumber(
+        input.executionContract.proofPhysicalObjectCount,
+        1,
+        'executionContract.proofPhysicalObjectCount',
+    );
+    if (
+        result.backend !== contractBackend ||
+        result.custodyModel !== contractCustodyModel ||
+        result.custodySchemaIdentifier !== contractCustodySchemaIdentifier ||
+        result.custodySchemaVersion !== contractCustodySchemaVersion ||
+        result.sourcePhysicalObjectCount !==
+            BigInt(contractSourcePhysicalObjectCount) ||
+        result.proofPhysicalObjectCount !==
+            BigInt(contractProofPhysicalObjectCount)
+    ) {
+        throw new Error(
+            `The raw ${result.backend} result does not match its scheduled ${contractBackend} execution contract.`,
+        );
+    }
     const memory = extractProofBackendBakeoffOperationMemory({
         guardJsonLines: input.guardJsonLines,
         operationFinishedAtUnixMilliseconds:
@@ -583,12 +809,17 @@ export const aggregateProofBackendBakeoffArm = (
         samples.some(
             (sample) =>
                 sample.result.backend !== first.result.backend ||
+                sample.result.custodyModel !== first.result.custodyModel ||
+                sample.result.custodySchemaIdentifier !==
+                    first.result.custodySchemaIdentifier ||
+                sample.result.custodySchemaVersion !==
+                    first.result.custodySchemaVersion ||
                 sample.result.frozenInputIdentityShake256Hex !==
                     first.result.frozenInputIdentityShake256Hex,
         )
     ) {
         throw new Error(
-            'A bakeoff arm must use one backend and one frozen input identity.',
+            'A bakeoff arm must use one backend, one custody model, and one frozen input identity.',
         );
     }
     if (
@@ -622,18 +853,26 @@ export const aggregateProofBackendBakeoffArm = (
     if (
         samples.some(
             (sample) =>
+                sample.result.sourcePhysicalObjectCount !==
+                    first.result.sourcePhysicalObjectCount ||
+                sample.result.proofPhysicalObjectCount !==
+                    first.result.proofPhysicalObjectCount ||
                 sample.result.externalCommittedTransactionCount !==
-                first.result.externalCommittedTransactionCount,
+                    first.result.externalCommittedTransactionCount,
         )
     ) {
         throw new Error(
-            'A bakeoff arm produced a nondeterministic transaction count.',
+            'A bakeoff arm produced nondeterministic physical-object or transaction counts.',
         );
     }
 
     return {
         backend: first.result.backend,
         canonicalProofByteLength: first.result.canonicalProofByteLength,
+        custodyCleanupCompleted: true,
+        custodyModel: first.result.custodyModel,
+        custodySchemaIdentifier: first.result.custodySchemaIdentifier,
+        custodySchemaVersion: first.result.custodySchemaVersion,
         externalCommittedTransactionCount:
             first.result.externalCommittedTransactionCount,
         externalIoByteLength: first.result.externalIoByteLength,
@@ -656,8 +895,10 @@ export const aggregateProofBackendBakeoffArm = (
             second.result.elapsedNanoseconds,
             third.result.elapsedNanoseconds,
         ),
+        proofPhysicalObjectCount: first.result.proofPhysicalObjectCount,
         proofShake256Hex: first.result.proofShake256Hex,
         sampleCount: 3,
+        sourcePhysicalObjectCount: first.result.sourcePhysicalObjectCount,
     };
 };
 
@@ -689,6 +930,20 @@ export const compareLowerIsBetterByExactFactorTwo = (
 
 const validateArmResult = (result: ProofBackendBakeoffArmResult): void => {
     requireBackend(result.backend);
+    requireCustodyModel(result.custodyModel);
+    requireExactString(
+        result.custodySchemaIdentifier,
+        proofBackendBakeoffCustodySchemaIdentifier,
+        'custodySchemaIdentifier',
+    );
+    requireExactNumber(
+        result.custodySchemaVersion,
+        proofBackendBakeoffCustodySchemaVersion,
+        'custodySchemaVersion',
+    );
+    if (result.custodyCleanupCompleted !== true) {
+        throw new Error('custodyCleanupCompleted must be true.');
+    }
     requireHash512Hex(
         result.frozenInputIdentityShake256Hex,
         'frozenInputIdentityShake256Hex',
@@ -703,6 +958,8 @@ const validateArmResult = (result: ProofBackendBakeoffArmResult): void => {
         ['externalIoByteLength', result.externalIoByteLength],
         ['externalReadByteLength', result.externalReadByteLength],
         ['externalWrittenByteLength', result.externalWrittenByteLength],
+        ['proofPhysicalObjectCount', result.proofPhysicalObjectCount],
+        ['sourcePhysicalObjectCount', result.sourcePhysicalObjectCount],
         [
             'maximumBaselineProcessTreeResidentMemoryByteLength',
             result.maximumBaselineProcessTreeResidentMemoryByteLength,
@@ -725,9 +982,20 @@ const validateArmResult = (result: ProofBackendBakeoffArmResult): void => {
         throw new Error('The arm result external I/O total is inconsistent.');
     }
     if (
+        result.externalReadByteLength === 0n ||
+        result.externalWrittenByteLength === 0n ||
+        result.externalCommittedTransactionCount === 0n
+    ) {
+        throw new Error(
+            'A selectable arm must report positive external reads, writes, and committed transactions.',
+        );
+    }
+    if (
         result.sampleCount !== 3 ||
         result.canonicalProofByteLength === 0n ||
-        result.medianElapsedNanoseconds === 0n
+        result.medianElapsedNanoseconds === 0n ||
+        result.sourcePhysicalObjectCount !== 8n ||
+        result.proofPhysicalObjectCount !== 1n
     ) {
         throw new Error('The arm result is incomplete.');
     }
@@ -747,6 +1015,19 @@ export const selectProofBackendBakeoffWinner = (
     ) {
         throw new Error(
             'The bakeoff must compare both ordered arms on one frozen input.',
+        );
+    }
+    if (
+        packedDeepFri.custodyModel !== sumcheckClass.custodyModel ||
+        packedDeepFri.custodySchemaIdentifier !==
+            sumcheckClass.custodySchemaIdentifier ||
+        packedDeepFri.custodySchemaVersion !==
+            sumcheckClass.custodySchemaVersion ||
+        packedDeepFri.sourcePhysicalObjectCount !==
+            sumcheckClass.sourcePhysicalObjectCount
+    ) {
+        throw new Error(
+            'The bakeoff arms use mismatched custody models, schemas, or replay-source object counts.',
         );
     }
 
@@ -797,25 +1078,20 @@ export const selectProofBackendBakeoffWinner = (
     const sumcheckClassWinCount = Object.values(metricWinners).filter(
         (winner) => winner === 'sumcheck-class',
     ).length;
-    const bothIoMetricsAreZero =
-        packedDeepFri.externalIoByteLength === 0n &&
-        sumcheckClass.externalIoByteLength === 0n &&
-        packedDeepFri.externalCommittedTransactionCount === 0n &&
-        sumcheckClass.externalCommittedTransactionCount === 0n;
-    const selectedBackend = bothIoMetricsAreZero
-        ? metricWinners['proof-bytes'] === metricWinners['elapsed-time'] &&
-          metricWinners['proof-bytes'] ===
-              metricWinners['peak-resident-memory'] &&
-          metricWinners['proof-bytes'] !== 'neutral'
-            ? metricWinners['proof-bytes']
-            : undefined
-        : packedDeepFriWinCount >= 3
-          ? 'packed-deep-fri'
-          : sumcheckClassWinCount >= 3
-            ? 'sumcheck-class'
-            : undefined;
+    const requiredEligibleMetricWinCount = 3;
+    const selectedBackend =
+        packedDeepFriWinCount >= requiredEligibleMetricWinCount
+            ? 'packed-deep-fri'
+            : sumcheckClassWinCount >= requiredEligibleMetricWinCount
+              ? 'sumcheck-class'
+              : undefined;
 
     return {
+        custodyModel: packedDeepFri.custodyModel,
+        custodySchemaIdentifier: packedDeepFri.custodySchemaIdentifier,
+        custodySchemaVersion: packedDeepFri.custodySchemaVersion,
+        eligibleMetrics: proofBackendBakeoffEligibleMetrics,
+        excludedMetrics: proofBackendBakeoffExcludedMetrics,
         metricWinners,
         outcome: selectedBackend === undefined ? 'ambiguous' : 'selected',
         packedDeepFriWinCount,

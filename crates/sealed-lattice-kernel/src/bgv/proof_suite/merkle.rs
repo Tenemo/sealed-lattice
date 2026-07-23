@@ -444,6 +444,35 @@ impl ProofOraclePhasePairLeafDigestBuilder {
         )
     }
 
+    /// Starts the exact canonical digest for one public base-oracle leaf
+    /// without first materializing its width-sized value vectors.
+    ///
+    /// This constructor is deliberately restricted to public base trees. A
+    /// secret-bearing leaf needs a fresh salt and must continue through the
+    /// protected leaf constructor so recomputation cannot bypass its hiding
+    /// boundary.
+    pub(in crate::bgv::proof_suite) fn new_public_base(
+        context: &ProofMerkleTreeContext,
+        leaf_index: u64,
+    ) -> Result<Self, ProofMerkleError> {
+        if context.tree_role != ProofTreeRole::BaseOracle
+            || context.leaf_visibility() != ProofLeafVisibility::Public
+            || leaf_index
+                >= u64::try_from(context.leaf_count()?)
+                    .map_err(|_| ProofMerkleError::CountOverflow)?
+        {
+            return Err(ProofMerkleError::InvalidLeaf);
+        }
+        Self::new_from_parts(
+            context.context_hash()?,
+            leaf_index,
+            ProofLeafVisibility::Public,
+            None,
+            CanonicalItemType::FieldElement,
+            usize::try_from(context.row_width()).map_err(|_| ProofMerkleError::CountOverflow)?,
+        )
+    }
+
     fn new_from_parts(
         proof_tree_context_hash: [u8; 64],
         leaf_index: u64,
@@ -1207,6 +1236,21 @@ mod canonical_tree_tests {
         .expect("test context")
     }
 
+    fn public_base_context(row_width: u32) -> ProofMerkleTreeContext {
+        ProofMerkleTreeContext::new(
+            [3_u8; 64],
+            [4_u8; 64],
+            0x1216,
+            0,
+            ProofTreeRole::BaseOracle,
+            0,
+            16,
+            row_width,
+            ProofLeafVisibility::Public,
+        )
+        .expect("public base context")
+    }
+
     fn extension_value(index: u64) -> ProofTreeValue {
         ProofTreeValue::Extension(
             ProofChallengeExtensionElement::from_canonical_coordinates([
@@ -1503,6 +1547,76 @@ mod canonical_tree_tests {
             wrong_value_type.absorb_first_value(ProofTreeValue::Base(ProofBaseFieldElement::ZERO,)),
             Err(ProofMerkleError::InvalidLeaf),
         );
+    }
+
+    #[test]
+    fn streamed_public_base_digest_matches_canonical_leaf_and_refuses_other_boundaries() {
+        let base_context = public_base_context(3);
+        let first_values = vec![
+            ProofTreeValue::Base(ProofBaseFieldElement::from_canonical(1).expect("small field")),
+            ProofTreeValue::Base(ProofBaseFieldElement::from_canonical(2).expect("small field")),
+            ProofTreeValue::Base(ProofBaseFieldElement::from_canonical(3).expect("small field")),
+        ];
+        let opposite_values = vec![
+            ProofTreeValue::Base(ProofBaseFieldElement::from_canonical(4).expect("small field")),
+            ProofTreeValue::Base(ProofBaseFieldElement::from_canonical(5).expect("small field")),
+            ProofTreeValue::Base(ProofBaseFieldElement::from_canonical(6).expect("small field")),
+        ];
+        let leaf = ProofOraclePhasePairLeaf::new(
+            &base_context,
+            7,
+            None,
+            first_values.clone(),
+            opposite_values.clone(),
+        )
+        .expect("canonical public base leaf");
+        let mut streamed = ProofOraclePhasePairLeafDigestBuilder::new_public_base(&base_context, 7)
+            .expect("streamed public base digest");
+        for value in first_values {
+            streamed
+                .absorb_first_value(value)
+                .expect("first base value");
+        }
+        streamed
+            .begin_opposite_values()
+            .expect("complete first row");
+        for value in opposite_values {
+            streamed
+                .absorb_opposite_value(value)
+                .expect("opposite base value");
+        }
+        assert_eq!(
+            streamed.finish().expect("streamed digest"),
+            leaf.digest().expect("canonical leaf digest"),
+        );
+
+        let secret_base_context = ProofMerkleTreeContext::new(
+            [3_u8; 64],
+            [4_u8; 64],
+            0x1216,
+            0,
+            ProofTreeRole::BaseOracle,
+            0,
+            16,
+            3,
+            ProofLeafVisibility::SecretBearing,
+        )
+        .expect("secret base context");
+        assert!(matches!(
+            ProofOraclePhasePairLeafDigestBuilder::new_public_base(&secret_base_context, 0),
+            Err(ProofMerkleError::InvalidLeaf),
+        ));
+        assert!(matches!(
+            ProofOraclePhasePairLeafDigestBuilder::new_public_base(
+                &context(ProofLeafVisibility::Public),
+                0,
+            ),
+            Err(ProofMerkleError::InvalidLeaf),
+        ));
+        assert!(matches!(
+            ProofOraclePhasePairLeafDigestBuilder::new_public_base(&base_context, 8),
+            Err(ProofMerkleError::InvalidLeaf),
+        ));
     }
 
     #[test]

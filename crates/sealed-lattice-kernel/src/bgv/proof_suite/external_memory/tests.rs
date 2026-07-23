@@ -761,6 +761,92 @@ fn browser_transaction_yield_and_exact_replay_change_state_only_after_replay() {
     assert_eq!(destination, [1, 2, 3, 4]);
 }
 
+#[test]
+fn maximum_worker_transaction_buffers_match_static_boundary_accounting() {
+    let maximum_payload_byte_length =
+        usize::try_from(MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH)
+            .expect("maximum external-memory payload fits usize");
+    let object = ProofExternalMemoryObject::new(0);
+
+    let mut append_recorder = ProofExternalMemoryTransactionRecorder::new();
+    append_recorder
+        .begin_transaction(
+            u64::from(MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH),
+            1,
+        )
+        .expect("maximum append transaction starts");
+    append_recorder
+        .append_object_bytes(object, 0, &vec![0x5a; maximum_payload_byte_length])
+        .expect("maximum append records");
+    assert_eq!(
+        append_recorder.commit_transaction(),
+        Err(ProofExternalMemoryTransactionAdapterError::Yielded),
+    );
+    let append_request = append_recorder
+        .take_yielded_request()
+        .expect("maximum append request yielded");
+    let encoded_append_request = append_request
+        .encode_worker_request()
+        .expect("maximum append request encodes");
+    let encoded_empty_response = append_request
+        .encode_test_worker_response(&[])
+        .expect("empty append response encodes");
+
+    let mut read_recorder = ProofExternalMemoryTransactionRecorder::new();
+    read_recorder
+        .begin_transaction(
+            u64::from(MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH),
+            1,
+        )
+        .expect("maximum read transaction starts");
+    let mut read_destination = vec![0_u8; maximum_payload_byte_length];
+    read_recorder
+        .read_object_bytes(object, 0, &mut read_destination)
+        .expect("maximum read records");
+    assert_eq!(
+        read_recorder.commit_transaction(),
+        Err(ProofExternalMemoryTransactionAdapterError::Yielded),
+    );
+    let read_request = read_recorder
+        .take_yielded_request()
+        .expect("maximum read request yielded");
+    let encoded_read_request = read_request
+        .encode_worker_request()
+        .expect("maximum read request encodes");
+    let encoded_read_response = read_request
+        .encode_test_worker_response(&[vec![0xa5; maximum_payload_byte_length]])
+        .expect("maximum read response encodes");
+
+    assert_eq!(encoded_append_request.len(), 49_340);
+    assert_eq!(encoded_empty_response.len(), 80);
+    assert_eq!(encoded_read_request.len(), 188);
+    assert_eq!(encoded_read_response.len(), 49_320);
+    assert_eq!(
+        MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_APPEND_REQUEST_BYTE_LENGTH,
+        u64::try_from(encoded_append_request.len()).expect("append request length fits u64")
+    );
+    assert_eq!(
+        COMMON_PROOF_EXTERNAL_MEMORY_EMPTY_RESPONSE_BYTE_LENGTH,
+        u64::try_from(encoded_empty_response.len()).expect("empty response length fits u64")
+    );
+    assert_eq!(
+        COMMON_PROOF_EXTERNAL_MEMORY_READ_REQUEST_BYTE_LENGTH,
+        u64::try_from(encoded_read_request.len()).expect("read request length fits u64")
+    );
+    assert_eq!(
+        MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_READ_RESPONSE_BYTE_LENGTH,
+        u64::try_from(encoded_read_response.len()).expect("read response length fits u64")
+    );
+    assert_eq!(
+        MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_COPIED_BUFFER_BYTE_LENGTH,
+        49_340
+    );
+    assert_eq!(
+        MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_BOUNDARY_TRANSFER_LIVE_BYTE_LENGTH,
+        49_508
+    );
+}
+
 fn record_worker_response_test_request(
     recorder: &mut ProofExternalMemoryTransactionRecorder,
 ) -> ProofExternalMemoryTransactionRequest {

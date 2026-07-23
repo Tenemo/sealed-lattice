@@ -1,21 +1,10 @@
-//! Frozen synthetic-fragment driver for the manual proof-backend bakeoff.
+//! Frozen synthetic-fragment fixtures and fresh-verifier preflights.
 
-use std::{
-    env,
-    fs::{self, OpenOptions},
-    io::Write,
-    path::{Path, PathBuf},
-    thread,
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
-};
+#[cfg(all(test, not(target_arch = "wasm32"), feature = "proof-backend-bakeoff"))]
+use crate::foundation::{CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple};
+use crate::hashing::{hash_framed_parts_512, to_hex};
 
-use serde::Serialize;
-
-use crate::{
-    foundation::{CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple},
-    hashing::hash512_hex,
-};
-
+#[cfg(all(test, not(target_arch = "wasm32"), feature = "proof-backend-bakeoff"))]
 use super::{
     proof_backend_bakeoff_fri::{
         derive_frozen_fri_base_root, execute_packed_deep_fri, verify_packed_deep_fri_mutations,
@@ -26,11 +15,6 @@ use super::{
     },
 };
 
-const BACKEND_ENVIRONMENT_VARIABLE: &str = "SEALED_LATTICE_PROOF_BACKEND_BAKEOFF_BACKEND";
-const SAMPLE_ORDINAL_ENVIRONMENT_VARIABLE: &str =
-    "SEALED_LATTICE_PROOF_BACKEND_BAKEOFF_SAMPLE_ORDINAL";
-const RESULT_PATH_ENVIRONMENT_VARIABLE: &str = "SEALED_LATTICE_PROOF_BACKEND_BAKEOFF_RESULT_PATH";
-
 const FROZEN_ROSTER_SIZE: u64 = 10;
 const FROZEN_RING_DEGREE: u64 = 32_768;
 const FROZEN_PLAINTEXT_MODULUS: u64 = 257;
@@ -38,19 +22,28 @@ const FROZEN_RELATION_ROW_COUNT: usize = 16_384;
 const FROZEN_RELATION_COLUMN_COUNT: usize = 8;
 const FROZEN_CIPHERTEXT_MODULUS: u64 = 1_953_759_233;
 const FROZEN_MATERIAL_RADIX: u64 = 129_140_163;
+pub(super) const FROZEN_INPUT_RECIPE_IDENTIFIER: &str =
+    "sealed-lattice/proof-backend-bakeoff/frozen-fragment-input/v1";
+pub(super) const FROZEN_INPUT_IDENTITY_HASH_DOMAIN: &str =
+    "proof-backend-bakeoff/frozen-fragment-input/v1";
+pub(super) const FROZEN_INPUT_IDENTITY_SHAKE256_HEX: &str = "930c501295b47a502f01dd8475291d43c2a93fe8198cbe91904218eeefc68a44dd517d167b35e154853241e215255b35646a52d732edddce650777d9a0a52dec";
+#[cfg(all(test, not(target_arch = "wasm32"), feature = "proof-backend-bakeoff"))]
 const FROZEN_FRI_STATEMENT_DOMAIN: &str =
     "sealed-lattice/proof-backend-bakeoff/packed-deep-fri-statement/v1";
+#[cfg(all(test, not(target_arch = "wasm32"), feature = "proof-backend-bakeoff"))]
 const FROZEN_SUMCHECK_STATEMENT_DOMAIN: &str =
     "sealed-lattice/proof-backend-bakeoff/sumcheck-class-statement/v1";
 // The ignored exact-binding owner regenerates both values from the frozen columns and profiles.
 // Keeping the derivation out of `frozen_fixture` prevents either backend from warming allocator or
 // commitment state before a measured sample starts.
+#[cfg(all(test, not(target_arch = "wasm32"), feature = "proof-backend-bakeoff"))]
 const FROZEN_EXPECTED_FRI_BASE_ROOT: [u8; 64] = [
     105, 66, 13, 132, 207, 215, 32, 167, 45, 114, 159, 94, 129, 40, 150, 244, 1, 85, 134, 190, 196,
     198, 32, 236, 144, 96, 195, 181, 180, 48, 171, 252, 177, 189, 73, 177, 158, 23, 154, 31, 71,
     31, 237, 156, 116, 231, 222, 26, 147, 72, 117, 184, 211, 55, 122, 155, 249, 95, 178, 61, 249,
     79, 122, 173,
 ];
+#[cfg(all(test, not(target_arch = "wasm32"), feature = "proof-backend-bakeoff"))]
 const FROZEN_EXPECTED_SUMCHECK_COMMITMENT: &[u8] = &[
     1, 191, 172, 221, 150, 198, 254, 172, 182, 100, 137, 171, 249, 218, 137, 177, 246, 187, 52,
     177, 222, 184, 188, 183, 161, 211, 131, 21, 200, 241, 194, 212, 147, 153, 176, 219, 174, 1,
@@ -62,21 +55,28 @@ pub(super) type ProofBackendBakeoffResult<T> = Result<T, String>;
 
 #[derive(Clone, Debug)]
 pub(super) struct ProofBackendBakeoffFixture {
+    #[cfg(all(test, not(target_arch = "wasm32"), feature = "proof-backend-bakeoff"))]
     pub(super) canonical_core_statement: Vec<u8>,
+    #[cfg(all(test, not(target_arch = "wasm32"), feature = "proof-backend-bakeoff"))]
     pub(super) canonical_fri_statement: Vec<u8>,
+    #[cfg(all(test, not(target_arch = "wasm32"), feature = "proof-backend-bakeoff"))]
     pub(super) canonical_sumcheck_statement: Vec<u8>,
     pub(super) columns: [Vec<u64>; FROZEN_RELATION_COLUMN_COUNT],
+    #[cfg(all(test, not(target_arch = "wasm32"), feature = "proof-backend-bakeoff"))]
     pub(super) expected_fri_base_root: [u8; 64],
+    #[cfg(all(test, not(target_arch = "wasm32"), feature = "proof-backend-bakeoff"))]
     pub(super) expected_sumcheck_commitment: Vec<u8>,
     pub(super) input_identity_shake256_hex: String,
 }
 
+#[cfg(all(test, not(target_arch = "wasm32"), feature = "proof-backend-bakeoff"))]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct FrozenFriPublicStatementBindings {
     pub(super) canonical_core_statement: Vec<u8>,
     pub(super) expected_fri_base_root: [u8; 64],
 }
 
+#[cfg(all(test, not(target_arch = "wasm32"), feature = "proof-backend-bakeoff"))]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct FrozenSumcheckPublicStatementBindings {
     pub(super) canonical_core_statement: Vec<u8>,
@@ -85,74 +85,46 @@ pub(super) struct FrozenSumcheckPublicStatementBindings {
 
 #[derive(Clone, Debug)]
 struct FrozenRelationFragment {
+    #[cfg(all(test, not(target_arch = "wasm32"), feature = "proof-backend-bakeoff"))]
     canonical_core_statement: Vec<u8>,
     columns: [Vec<u64>; FROZEN_RELATION_COLUMN_COUNT],
     input_identity_shake256_hex: String,
 }
 
+#[cfg(all(test, not(target_arch = "wasm32"), feature = "proof-backend-bakeoff"))]
 #[derive(Clone, Debug)]
 pub(super) struct ProofBackendBakeoffArmOutput {
     pub(super) canonical_artifact: Vec<u8>,
-    pub(super) proof_shake256_hex: String,
-    pub(super) external_read_byte_length: u64,
-    pub(super) external_written_byte_length: u64,
-    pub(super) external_committed_transaction_count: u64,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "kebab-case")]
-enum ProofBackendBakeoffBackend {
-    PackedDeepFri,
-    SumcheckClass,
-}
-
-impl ProofBackendBakeoffBackend {
-    fn parse(value: &str) -> ProofBackendBakeoffResult<Self> {
-        match value {
-            "packed-deep-fri" => Ok(Self::PackedDeepFri),
-            "sumcheck-class" => Ok(Self::SumcheckClass),
-            _ => Err(format!(
-                "{BACKEND_ENVIRONMENT_VARIABLE} must be packed-deep-fri or sumcheck-class"
-            )),
-        }
-    }
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ProofBackendBakeoffSampleRecord {
-    format_version: u8,
-    backend: ProofBackendBakeoffBackend,
-    sample_ordinal: u8,
-    frozen_input_identity_shake256_hex: String,
-    operation_started_at_unix_milliseconds: u64,
-    operation_finished_at_unix_milliseconds: u64,
-    elapsed_nanoseconds_decimal: String,
-    canonical_proof_byte_length_decimal: String,
-    proof_shake256_hex: String,
-    external_read_byte_length_decimal: String,
-    external_written_byte_length_decimal: String,
-    external_committed_transaction_count_decimal: String,
 }
 
 pub(super) fn frozen_fixture() -> ProofBackendBakeoffResult<ProofBackendBakeoffFixture> {
     let fragment = frozen_relation_fragment()?;
-    let (expected_fri_base_root, expected_sumcheck_commitment) = checked_frozen_backend_bindings()?;
+    #[cfg(all(test, not(target_arch = "wasm32"), feature = "proof-backend-bakeoff"))]
+    let expected_fri_base_root = checked_frozen_fri_base_root()?;
+    #[cfg(all(test, not(target_arch = "wasm32"), feature = "proof-backend-bakeoff"))]
+    let expected_sumcheck_commitment = checked_frozen_sumcheck_commitment()?;
+    #[cfg(all(test, not(target_arch = "wasm32"), feature = "proof-backend-bakeoff"))]
     let canonical_fri_statement = canonical_frozen_fri_public_statement(
         &fragment.input_identity_shake256_hex,
         expected_fri_base_root,
     )?;
+    #[cfg(all(test, not(target_arch = "wasm32"), feature = "proof-backend-bakeoff"))]
     let canonical_sumcheck_statement = canonical_frozen_sumcheck_public_statement(
         &fragment.input_identity_shake256_hex,
         &expected_sumcheck_commitment,
     )?;
 
     Ok(ProofBackendBakeoffFixture {
+        #[cfg(all(test, not(target_arch = "wasm32"), feature = "proof-backend-bakeoff"))]
         canonical_core_statement: fragment.canonical_core_statement,
+        #[cfg(all(test, not(target_arch = "wasm32"), feature = "proof-backend-bakeoff"))]
         canonical_fri_statement,
+        #[cfg(all(test, not(target_arch = "wasm32"), feature = "proof-backend-bakeoff"))]
         canonical_sumcheck_statement,
         columns: fragment.columns,
+        #[cfg(all(test, not(target_arch = "wasm32"), feature = "proof-backend-bakeoff"))]
         expected_fri_base_root,
+        #[cfg(all(test, not(target_arch = "wasm32"), feature = "proof-backend-bakeoff"))]
         expected_sumcheck_commitment,
         input_identity_shake256_hex: fragment.input_identity_shake256_hex,
     })
@@ -169,15 +141,21 @@ fn frozen_relation_fragment() -> ProofBackendBakeoffResult<FrozenRelationFragmen
 
     validate_frozen_columns(&columns)?;
     let input_identity_shake256_hex = recompute_frozen_input_identity(&columns)?;
+    if input_identity_shake256_hex != FROZEN_INPUT_IDENTITY_SHAKE256_HEX {
+        return Err("frozen eight-column input identity changed".to_owned());
+    }
+    #[cfg(all(test, not(target_arch = "wasm32"), feature = "proof-backend-bakeoff"))]
     let canonical_core_statement = canonical_frozen_core_statement(&input_identity_shake256_hex)?;
 
     Ok(FrozenRelationFragment {
+        #[cfg(all(test, not(target_arch = "wasm32"), feature = "proof-backend-bakeoff"))]
         canonical_core_statement,
         columns,
         input_identity_shake256_hex,
     })
 }
 
+#[cfg(all(test, not(target_arch = "wasm32"), feature = "proof-backend-bakeoff"))]
 fn checked_frozen_backend_bindings() -> ProofBackendBakeoffResult<([u8; 64], Vec<u8>)> {
     Ok((
         checked_frozen_fri_base_root()?,
@@ -185,6 +163,7 @@ fn checked_frozen_backend_bindings() -> ProofBackendBakeoffResult<([u8; 64], Vec
     ))
 }
 
+#[cfg(all(test, not(target_arch = "wasm32"), feature = "proof-backend-bakeoff"))]
 fn checked_frozen_fri_base_root() -> ProofBackendBakeoffResult<[u8; 64]> {
     if FROZEN_EXPECTED_FRI_BASE_ROOT == [0; 64] {
         return Err("frozen expected FRI base root is still the zero placeholder".to_owned());
@@ -192,6 +171,7 @@ fn checked_frozen_fri_base_root() -> ProofBackendBakeoffResult<[u8; 64]> {
     Ok(FROZEN_EXPECTED_FRI_BASE_ROOT)
 }
 
+#[cfg(all(test, not(target_arch = "wasm32"), feature = "proof-backend-bakeoff"))]
 fn checked_frozen_sumcheck_commitment() -> ProofBackendBakeoffResult<Vec<u8>> {
     if FROZEN_EXPECTED_SUMCHECK_COMMITMENT == [0] {
         return Err(
@@ -202,6 +182,7 @@ fn checked_frozen_sumcheck_commitment() -> ProofBackendBakeoffResult<Vec<u8>> {
     Ok(FROZEN_EXPECTED_SUMCHECK_COMMITMENT.to_vec())
 }
 
+#[cfg(all(test, not(target_arch = "wasm32"), feature = "proof-backend-bakeoff"))]
 fn validate_frozen_input_identity(
     input_identity_shake256_hex: &str,
 ) -> ProofBackendBakeoffResult<()> {
@@ -217,6 +198,7 @@ fn validate_frozen_input_identity(
     Ok(())
 }
 
+#[cfg(all(test, not(target_arch = "wasm32"), feature = "proof-backend-bakeoff"))]
 fn canonical_frozen_core_statement_tuple(
     input_identity_shake256_hex: &str,
 ) -> ProofBackendBakeoffResult<CanonicalTuple> {
@@ -244,6 +226,7 @@ fn canonical_frozen_core_statement_tuple(
     ))
 }
 
+#[cfg(all(test, not(target_arch = "wasm32"), feature = "proof-backend-bakeoff"))]
 pub(super) fn canonical_frozen_core_statement(
     input_identity_shake256_hex: &str,
 ) -> ProofBackendBakeoffResult<Vec<u8>> {
@@ -252,6 +235,7 @@ pub(super) fn canonical_frozen_core_statement(
         .map_err(|error| format!("encode frozen canonical core statement: {error}"))
 }
 
+#[cfg(all(test, not(target_arch = "wasm32"), feature = "proof-backend-bakeoff"))]
 pub(super) fn canonical_frozen_fri_public_statement(
     input_identity_shake256_hex: &str,
     expected_fri_base_root: [u8; 64],
@@ -272,6 +256,7 @@ pub(super) fn canonical_frozen_fri_public_statement(
     .map_err(|error| format!("encode frozen canonical FRI statement: {error}"))
 }
 
+#[cfg(all(test, not(target_arch = "wasm32"), feature = "proof-backend-bakeoff"))]
 pub(super) fn canonical_frozen_sumcheck_public_statement(
     input_identity_shake256_hex: &str,
     expected_sumcheck_commitment: &[u8],
@@ -296,6 +281,7 @@ pub(super) fn canonical_frozen_sumcheck_public_statement(
     .map_err(|error| format!("encode frozen canonical sumcheck statement: {error}"))
 }
 
+#[cfg(all(test, not(target_arch = "wasm32"), feature = "proof-backend-bakeoff"))]
 pub(super) fn validate_frozen_core_statement(
     canonical_core_statement: &[u8],
     input_identity_shake256_hex: &str,
@@ -321,6 +307,7 @@ pub(super) fn validate_frozen_core_statement(
     Ok(())
 }
 
+#[cfg(all(test, not(target_arch = "wasm32"), feature = "proof-backend-bakeoff"))]
 pub(super) fn validated_frozen_fri_public_statement(
     canonical_statement: &[u8],
     input_identity_shake256_hex: &str,
@@ -370,6 +357,7 @@ pub(super) fn validated_frozen_fri_public_statement(
     })
 }
 
+#[cfg(all(test, not(target_arch = "wasm32"), feature = "proof-backend-bakeoff"))]
 pub(super) fn validated_frozen_sumcheck_public_statement(
     canonical_statement: &[u8],
     input_identity_shake256_hex: &str,
@@ -503,10 +491,7 @@ fn canonical_frozen_input(
         .and_then(|value| value.checked_add(128))
         .ok_or_else(|| "frozen input byte capacity overflowed".to_owned())?;
     let mut encoded = Vec::with_capacity(byte_capacity);
-    append_length_prefixed_bytes(
-        &mut encoded,
-        b"sealed-lattice/proof-backend-bakeoff/frozen-fragment-input/v1",
-    )?;
+    append_length_prefixed_bytes(&mut encoded, FROZEN_INPUT_RECIPE_IDENTIFIER.as_bytes())?;
     append_u64(&mut encoded, FROZEN_ROSTER_SIZE);
     append_u64(&mut encoded, FROZEN_RING_DEGREE);
     append_u64(&mut encoded, FROZEN_PLAINTEXT_MODULUS);
@@ -530,10 +515,10 @@ pub(super) fn recompute_frozen_input_identity(
 ) -> ProofBackendBakeoffResult<String> {
     validate_frozen_columns(columns)?;
     let canonical_input = canonical_frozen_input(columns)?;
-    Ok(hash512_hex(
-        "proof-backend-bakeoff/frozen-fragment-input/v1",
+    Ok(to_hex(&hash_framed_parts_512(
+        FROZEN_INPUT_IDENTITY_HASH_DOMAIN,
         &[canonical_input.as_slice()],
-    ))
+    )))
 }
 
 fn append_length_prefixed_bytes(
@@ -552,141 +537,23 @@ fn append_u64(destination: &mut Vec<u8>, value: u64) {
     destination.extend_from_slice(&value.to_le_bytes());
 }
 
-fn required_environment_variable(name: &str) -> ProofBackendBakeoffResult<String> {
-    let value =
-        env::var(name).map_err(|_| format!("missing required environment variable {name}"))?;
-    if value.is_empty() {
-        return Err(format!("environment variable {name} must not be empty"));
-    }
-    Ok(value)
-}
-
-fn sample_ordinal() -> ProofBackendBakeoffResult<u8> {
-    let value = required_environment_variable(SAMPLE_ORDINAL_ENVIRONMENT_VARIABLE)?;
-    if value.len() != 1 || !matches!(value.as_bytes()[0], b'1'..=b'3') {
-        return Err(format!(
-            "{SAMPLE_ORDINAL_ENVIRONMENT_VARIABLE} must be the canonical decimal integer 1, 2, or 3"
-        ));
-    }
-    Ok(value.as_bytes()[0] - b'0')
-}
-
-fn result_path() -> ProofBackendBakeoffResult<PathBuf> {
-    let path = PathBuf::from(required_environment_variable(
-        RESULT_PATH_ENVIRONMENT_VARIABLE,
-    )?);
-    if !path.is_absolute() {
-        return Err(format!(
-            "{RESULT_PATH_ENVIRONMENT_VARIABLE} must be an absolute path"
-        ));
-    }
-    let parent = path
-        .parent()
-        .ok_or_else(|| "bakeoff result path must have a parent directory".to_owned())?;
-    if !parent.is_dir() {
-        return Err("bakeoff result parent directory must already exist".to_owned());
-    }
-    if path.exists() {
-        return Err("bakeoff result path already exists".to_owned());
-    }
-    Ok(path)
-}
-
-fn unix_milliseconds() -> ProofBackendBakeoffResult<u64> {
-    let duration = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|_| "system clock precedes the Unix epoch".to_owned())?;
-    u64::try_from(duration.as_millis())
-        .map_err(|_| "Unix timestamp milliseconds do not fit u64".to_owned())
-}
-
-fn atomic_write_json<T: Serialize>(path: &Path, value: &T) -> ProofBackendBakeoffResult<()> {
-    let file_name = path
-        .file_name()
-        .and_then(|value| value.to_str())
-        .ok_or_else(|| "bakeoff result filename must be Unicode".to_owned())?;
-    let temporary_path = path.with_file_name(format!(".{file_name}.{}.tmp", std::process::id()));
-    let result = (|| {
-        let mut file = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&temporary_path)
-            .map_err(|error| format!("create bakeoff temporary result: {error}"))?;
-        serde_json::to_writer_pretty(&mut file, value)
-            .map_err(|error| format!("encode bakeoff result: {error}"))?;
-        file.write_all(b"\n")
-            .map_err(|error| format!("finish bakeoff result: {error}"))?;
-        file.sync_all()
-            .map_err(|error| format!("sync bakeoff result: {error}"))?;
-        fs::rename(&temporary_path, path)
-            .map_err(|error| format!("publish bakeoff result: {error}"))?;
-        Ok(())
-    })();
-    if result.is_err() && temporary_path.exists() {
-        let _ = fs::remove_file(&temporary_path);
-    }
-    result
-}
-
-fn execute_sample() -> ProofBackendBakeoffResult<()> {
-    let backend = ProofBackendBakeoffBackend::parse(&required_environment_variable(
-        BACKEND_ENVIRONMENT_VARIABLE,
-    )?)?;
-    let sample_ordinal = sample_ordinal()?;
-    let result_path = result_path()?;
-    let fixture = frozen_fixture()?;
-
-    // Let the process-memory guard capture a strict pre-operation RSS baseline.
-    thread::sleep(Duration::from_millis(250));
-    let operation_started_at_unix_milliseconds = unix_milliseconds()?;
-    let started = Instant::now();
-    let output = match backend {
-        ProofBackendBakeoffBackend::PackedDeepFri => execute_packed_deep_fri(&fixture),
-        ProofBackendBakeoffBackend::SumcheckClass => execute_sumcheck_class(&fixture),
-    }?;
-    let elapsed = started.elapsed();
-    let operation_finished_at_unix_milliseconds = unix_milliseconds()?;
-
-    if output.canonical_artifact.is_empty() {
-        return Err("backend returned an empty canonical artifact".to_owned());
-    }
-    let recomputed_proof_hash = hash512_hex(
-        "proof-backend-bakeoff/canonical-artifact/v1",
-        &[output.canonical_artifact.as_slice()],
-    );
-    if output.proof_shake256_hex != recomputed_proof_hash {
-        return Err("backend proof digest does not match its canonical artifact".to_owned());
-    }
-    let canonical_proof_byte_length = u64::try_from(output.canonical_artifact.len())
-        .map_err(|_| "canonical proof byte length does not fit u64".to_owned())?;
-    let elapsed_nanoseconds = u64::try_from(elapsed.as_nanos())
-        .map_err(|_| "bakeoff elapsed nanoseconds do not fit u64".to_owned())?;
-    let record = ProofBackendBakeoffSampleRecord {
-        format_version: 1,
-        backend,
-        sample_ordinal,
-        frozen_input_identity_shake256_hex: fixture.input_identity_shake256_hex,
-        operation_started_at_unix_milliseconds,
-        operation_finished_at_unix_milliseconds,
-        elapsed_nanoseconds_decimal: elapsed_nanoseconds.to_string(),
-        canonical_proof_byte_length_decimal: canonical_proof_byte_length.to_string(),
-        proof_shake256_hex: output.proof_shake256_hex,
-        external_read_byte_length_decimal: output.external_read_byte_length.to_string(),
-        external_written_byte_length_decimal: output.external_written_byte_length.to_string(),
-        external_committed_transaction_count_decimal: output
-            .external_committed_transaction_count
-            .to_string(),
-    };
-    atomic_write_json(&result_path, &record)
-}
-
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32"), feature = "proof-backend-bakeoff"))]
 mod tests {
+    use std::{
+        path::PathBuf,
+        sync::atomic::{AtomicU64, Ordering},
+    };
+
     use zeroize::Zeroize;
 
     use crate::foundation::{CanonicalDecodeLimits, CanonicalItem, CanonicalTuple};
 
+    use super::super::bounded_proof_storage::{
+        BoundedProofStorageCustody, BoundedProofStorageUsage,
+    };
+
     use super::{
+        ProofBackendBakeoffArmOutput, ProofBackendBakeoffFixture, ProofBackendBakeoffResult,
         canonical_frozen_core_statement, canonical_frozen_fri_public_statement,
         canonical_frozen_sumcheck_public_statement, checked_frozen_backend_bindings,
         derive_frozen_fri_base_root, derive_frozen_sumcheck_commitment, execute_packed_deep_fri,
@@ -695,6 +562,116 @@ mod tests {
         validated_frozen_fri_public_statement, validated_frozen_sumcheck_public_statement,
         verify_packed_deep_fri_mutations, verify_sumcheck_class_mutations,
     };
+
+    static CUSTODY_DIRECTORY_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+    fn unique_custody_directory(backend_name: &str) -> PathBuf {
+        let scratch_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("temp");
+        std::fs::create_dir_all(&scratch_root)
+            .expect("create repository-local custody scratch directory");
+        let sequence = CUSTODY_DIRECTORY_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        scratch_root.join(format!(
+            "proof-backend-preflight-{backend_name}-{}-{sequence}",
+            std::process::id()
+        ))
+    }
+
+    fn execute_with_bounded_preflight_custody(
+        fixture: &ProofBackendBakeoffFixture,
+        backend_name: &str,
+        execute_arm: fn(
+            &ProofBackendBakeoffFixture,
+        ) -> ProofBackendBakeoffResult<ProofBackendBakeoffArmOutput>,
+    ) -> ProofBackendBakeoffResult<(ProofBackendBakeoffArmOutput, BoundedProofStorageUsage)> {
+        let directory_path = unique_custody_directory(backend_name);
+        let mut custody = BoundedProofStorageCustody::new(directory_path.clone())?;
+        let operation_result = (|| {
+            let mut replayed_columns: [Vec<u64>; 8] = std::array::from_fn(|_| Vec::new());
+            for (column_index, column) in fixture.columns.iter().enumerate() {
+                let source_object =
+                    custody.create_object(&format!("source-column-{column_index:02}.bin"))?;
+                let mut canonical_column = Vec::with_capacity(column.len() * 8);
+                for value in column {
+                    canonical_column.extend_from_slice(&value.to_le_bytes());
+                }
+                custody.append_object(source_object, &canonical_column)?;
+                custody.seal_object(source_object)?;
+                canonical_column.zeroize();
+                let replayed_canonical_column = custody.read_complete_object(source_object)?;
+                if replayed_canonical_column.len() != column.len() * 8 {
+                    return Err("bounded preflight source column length changed".to_owned());
+                }
+                let replayed_column = &mut replayed_columns[column_index];
+                replayed_column
+                    .try_reserve_exact(column.len())
+                    .map_err(|_| "bounded preflight replay column allocation failed".to_owned())?;
+                for encoded_value in replayed_canonical_column.chunks_exact(8) {
+                    replayed_column.push(u64::from_le_bytes(encoded_value.try_into().map_err(
+                        |_| "bounded preflight source value is not eight bytes".to_owned(),
+                    )?));
+                }
+            }
+            validate_frozen_columns(&replayed_columns)?;
+            if recompute_frozen_input_identity(&replayed_columns)?
+                != fixture.input_identity_shake256_hex
+            {
+                return Err("bounded preflight source identity changed after replay".to_owned());
+            }
+
+            let mut replayed_fixture = fixture.clone();
+            replayed_fixture.columns = replayed_columns;
+            let mut output = execute_arm(&replayed_fixture);
+            replayed_fixture.columns.zeroize();
+            let output = output.as_mut().map_err(|error| error.to_owned())?;
+            if output.canonical_artifact.is_empty() {
+                return Err("bounded preflight proof artifact is empty".to_owned());
+            }
+            let artifact_byte_length = output.canonical_artifact.len();
+            let proof_object = custody.create_object("canonical-proof.bin")?;
+            custody.append_object(proof_object, &output.canonical_artifact)?;
+            custody.seal_object(proof_object)?;
+            if custody.object_byte_length(proof_object)?
+                != u64::try_from(artifact_byte_length)
+                    .map_err(|_| "bounded preflight proof length does not fit u64".to_owned())?
+            {
+                return Err("bounded preflight proof length changed in custody".to_owned());
+            }
+            output.canonical_artifact.zeroize();
+            let canonical_artifact = custody.read_complete_object(proof_object)?;
+            if canonical_artifact.len() != artifact_byte_length {
+                return Err("bounded preflight proof readback length changed".to_owned());
+            }
+            Ok(ProofBackendBakeoffArmOutput { canonical_artifact })
+        })();
+        let cleanup_result = custody.finish();
+        match (operation_result, cleanup_result) {
+            (Ok(output), Ok(usage)) => {
+                if !usage.cleanup_complete
+                    || usage.total_read_byte_length == 0
+                    || usage.total_written_byte_length == 0
+                    || usage.transaction_count == 0
+                    || usage.created_object_count != 9
+                    || usage.deleted_object_count != 9
+                    || usage.active_object_count != 0
+                    || usage.active_stored_byte_length != 0
+                    || directory_path.exists()
+                {
+                    return Err(
+                        "bounded preflight custody telemetry or cleanup is incomplete".to_owned(),
+                    );
+                }
+                Ok((output, usage))
+            }
+            (Err(operation_error), Ok(_)) => Err(operation_error),
+            (Ok(_), Err(cleanup_error)) => Err(cleanup_error),
+            (Err(operation_error), Err(cleanup_error)) => Err(format!(
+                "{operation_error}; bounded preflight cleanup also failed: {cleanup_error}"
+            )),
+        }
+    }
 
     #[test]
     fn frozen_fragment_has_exact_geometry_and_refuses_each_affine_half_mutation() {
@@ -872,12 +849,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "manual guarded synthetic proof-backend bakeoff sample"]
-    fn proof_backend_bakeoff_frozen_fragment() {
-        super::execute_sample().expect("proof backend bakeoff sample");
-    }
-
-    #[test]
     #[ignore = "manual guarded packed-DEEP-FRI fresh-verifier preflight"]
     fn packed_deep_fri_fresh_verifier_has_no_witness_side_channel() {
         let mut fixture = frozen_fixture().expect("frozen fixture");
@@ -909,7 +880,13 @@ mod tests {
         drop(alternate_affine_valid_columns);
         drop(alternate_core_statement);
         drop(alternate_input_identity);
-        let output = execute_packed_deep_fri(&fixture).expect("generate canonical FRI proof");
+        let (output, custody_usage) = execute_with_bounded_preflight_custody(
+            &fixture,
+            "packed-deep-fri",
+            execute_packed_deep_fri,
+        )
+        .expect("generate and read back canonical FRI proof through bounded custody");
+        assert!(custody_usage.cleanup_complete);
         let canonical_statement = std::mem::take(&mut fixture.canonical_fri_statement);
         let input_identity_shake256_hex = std::mem::take(&mut fixture.input_identity_shake256_hex);
         fixture.columns.zeroize();
@@ -934,7 +911,13 @@ mod tests {
     #[ignore = "manual guarded sumcheck-class fresh-verifier preflight"]
     fn sumcheck_class_fresh_verifier_has_no_witness_side_channel() {
         let mut fixture = frozen_fixture().expect("frozen fixture");
-        let output = execute_sumcheck_class(&fixture).expect("generate canonical sumcheck proof");
+        let (output, custody_usage) = execute_with_bounded_preflight_custody(
+            &fixture,
+            "sumcheck-class",
+            execute_sumcheck_class,
+        )
+        .expect("generate and read back canonical sumcheck proof through bounded custody");
+        assert!(custody_usage.cleanup_complete);
         let canonical_statement = std::mem::take(&mut fixture.canonical_sumcheck_statement);
         let input_identity_shake256_hex = std::mem::take(&mut fixture.input_identity_shake256_hex);
         fixture.columns.zeroize();

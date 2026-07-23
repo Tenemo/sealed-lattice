@@ -10,6 +10,8 @@ mod aggregate_threshold_share_runtime;
 mod application_statement;
 mod ballot_validity_runtime;
 mod body;
+#[cfg(all(test, not(target_arch = "wasm32"), feature = "proof-backend-bakeoff"))]
+mod bounded_proof_storage;
 mod collective_public_key_runtime;
 mod committed_material;
 mod component_material_stream;
@@ -32,12 +34,24 @@ mod opening;
 mod phase_liveness_accounting;
 mod polynomial;
 mod profile;
-#[cfg(all(test, not(target_arch = "wasm32"), feature = "proof-backend-bakeoff"))]
+#[cfg(any(
+    all(test, not(target_arch = "wasm32"), feature = "proof-backend-bakeoff"),
+    feature = "proof-storage-width-browser-evidence"
+))]
 mod proof_backend_bakeoff;
-#[cfg(all(test, not(target_arch = "wasm32"), feature = "proof-backend-bakeoff"))]
+#[cfg(any(
+    all(test, not(target_arch = "wasm32"), feature = "proof-backend-bakeoff"),
+    feature = "proof-storage-width-browser-evidence"
+))]
 mod proof_backend_bakeoff_fri;
 #[cfg(all(test, not(target_arch = "wasm32"), feature = "proof-backend-bakeoff"))]
 mod proof_backend_bakeoff_sumcheck;
+#[cfg(all(
+    test,
+    not(target_arch = "wasm32"),
+    feature = "proof-storage-width-evidence"
+))]
+mod proof_storage_width_evidence;
 mod prover;
 mod recipient_vss_payload;
 mod relation_plan;
@@ -88,7 +102,7 @@ pub(crate) use ballot_validity_runtime::{
     VerifiedBallotCiphertextPolynomial, VerifiedBallotValidityOutput,
     consume_verified_ballot_validity_output, with_verified_ballot_validity_output,
 };
-#[cfg(test)]
+#[cfg(any(test, feature = "proof-storage-width-browser-evidence"))]
 pub(crate) use body::decode_proof_body_prefix;
 pub(crate) use body::{CommonProofByteLengthCeiling, canonical_common_proof_byte_length_ceiling};
 pub(crate) use body::{
@@ -134,16 +148,16 @@ pub(crate) use evaluator_aggregate_source::{
     SelectedEvaluatorAggregateSourceProviderMemoryAccounting,
     evaluator_aggregate_source_provider_memory_accounting,
 };
+#[cfg(test)]
+pub(crate) use external_memory::ProofExternalMemoryPlan;
+#[cfg(test)]
+pub(crate) use external_memory::ProofExternalMemoryTransactionOperation;
 pub(crate) use external_memory::{
     ProofExternalMemory, ProofExternalMemoryError, ProofExternalMemoryExecutor,
     ProofExternalMemoryExecutorError, ProofExternalMemoryObject, ProofExternalMemoryObjectPlan,
     ProofExternalMemoryProtection, ProofExternalMemoryTransactionAdapterError,
     ProofExternalMemoryTransactionRecorder, ProofExternalMemoryTransactionReplay,
     ProofExternalMemoryTransactionRequest, ProofExternalMemoryUsage,
-};
-#[cfg(test)]
-pub(crate) use external_memory::{
-    ProofExternalMemoryPlan, ProofExternalMemoryTransactionOperation,
 };
 pub(crate) use field::{
     PROOF_BASE_FIELD_MAXIMUM_TWO_ADIC_GENERATOR, PROOF_BASE_FIELD_MODULUS,

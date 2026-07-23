@@ -566,6 +566,7 @@ const clearReadResults = (
 const encodeStorageResponse = (
     request: CommonProofExternalMemoryRequest,
     readResults: readonly CommonProofExternalMemoryReadResult[],
+    reusableResponseBuffer?: Uint8Array<ArrayBuffer>,
 ): Uint8Array<ArrayBuffer> => {
     const readOperations = request.operations.filter(
         (
@@ -614,8 +615,25 @@ const encodeStorageResponse = (
             'The common-proof storage response exceeds its fixed bound.',
         );
     }
-    const response = new Uint8Array(responseByteLength);
-    const view = new DataView(response.buffer);
+    if (
+        reusableResponseBuffer !== undefined &&
+        reusableResponseBuffer.byteLength < responseByteLength
+    ) {
+        throw new CommonProofWorkerRuntimeError(
+            'ResourceLimit',
+            'The reusable common-proof response buffer is too small.',
+        );
+    }
+    const response =
+        reusableResponseBuffer === undefined
+            ? new Uint8Array(responseByteLength)
+            : reusableResponseBuffer.subarray(0, responseByteLength);
+    response.fill(0);
+    const view = new DataView(
+        response.buffer,
+        response.byteOffset,
+        response.byteLength,
+    );
     let offset = 0;
     view.setUint16(offset, schemaVersion, true);
     offset += 2;
@@ -668,6 +686,31 @@ export const encodeCommonProofExternalMemoryResponse = (
 ): Uint8Array<ArrayBuffer> => {
     try {
         return encodeStorageResponse(request, readResults);
+    } finally {
+        clearReadResults(readResults);
+        clearCommonProofExternalMemoryRequest(request);
+    }
+};
+
+/**
+ * Encodes one response into caller-owned bounded storage. The returned view is
+ * valid until the caller reuses that buffer; read results and request bytes
+ * are cleared with the same semantics as the allocating encoder.
+ */
+export const encodeCommonProofExternalMemoryResponseInto = (
+    request: CommonProofExternalMemoryRequest,
+    readResults: readonly CommonProofExternalMemoryReadResult[],
+    reusableResponseBuffer: Uint8Array<ArrayBuffer>,
+): Uint8Array<ArrayBuffer> => {
+    try {
+        return encodeStorageResponse(
+            request,
+            readResults,
+            reusableResponseBuffer,
+        );
+    } catch (error) {
+        reusableResponseBuffer.fill(0);
+        throw error;
     } finally {
         clearReadResults(readResults);
         clearCommonProofExternalMemoryRequest(request);

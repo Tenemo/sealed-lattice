@@ -9,6 +9,8 @@ crate-type = ["cdylib", "rlib"]
 
 [features]
 default = []
+proof-storage-width-evidence = ["proof-backend-bakeoff"]
+proof-storage-width-browser-evidence = []
 proof-backend-bakeoff = [
     "dep:p3-challenger",
     "dep:p3-commit",

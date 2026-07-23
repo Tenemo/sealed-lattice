@@ -26,6 +26,10 @@ const wasmBuildScratchRoot = path.resolve(
     'wasm-kernel-builds',
 );
 const encodedRustflagSeparator = '\x1f';
+const wasmCargoFeaturesEnvironmentVariable =
+    'SEALED_LATTICE_WASM_CARGO_FEATURES';
+export const proofStorageWidthBrowserEvidenceCargoFeature =
+    'proof-storage-width-browser-evidence';
 export const wasmStackByteLength = 1_048_576;
 const wasmOutputFilePath = path.resolve(
     repoRoot,
@@ -129,21 +133,47 @@ export const createDeterministicCargoEnvironment = (
     };
 };
 
-const runCargoBuild = (): void => {
+export const parseWasmCargoFeatures = (
+    environment: NodeJS.ProcessEnv = process.env,
+): readonly string[] => {
+    const configuredFeatures =
+        environment[wasmCargoFeaturesEnvironmentVariable];
+    if (configuredFeatures === undefined) {
+        return [];
+    }
+    if (configuredFeatures !== proofStorageWidthBrowserEvidenceCargoFeature) {
+        throw new Error(
+            `${wasmCargoFeaturesEnvironmentVariable} must be unset or equal exactly to ${proofStorageWidthBrowserEvidenceCargoFeature}.`,
+        );
+    }
+    return [proofStorageWidthBrowserEvidenceCargoFeature];
+};
+
+export const createWasmCargoBuildArguments = (
+    environment: NodeJS.ProcessEnv = process.env,
+): readonly string[] => {
+    const enabledFeatures = parseWasmCargoFeatures(environment);
+    return [
+        'build',
+        '--locked',
+        '--package',
+        'sealed-lattice-kernel',
+        '--lib',
+        '--target',
+        'wasm32-unknown-unknown',
+        '--release',
+        ...(enabledFeatures.length === 0
+            ? []
+            : ['--features', enabledFeatures.join(',')]),
+    ];
+};
+
+const runCargoBuild = (environment: NodeJS.ProcessEnv): void => {
     runCheckedCommand({
         command: 'cargo',
-        args: [
-            'build',
-            '--locked',
-            '--package',
-            'sealed-lattice-kernel',
-            '--lib',
-            '--target',
-            'wasm32-unknown-unknown',
-            '--release',
-        ],
+        args: createWasmCargoBuildArguments(environment),
         description: 'cargo build',
-        env: createDeterministicCargoEnvironment(),
+        env: createDeterministicCargoEnvironment(environment),
     });
 };
 
@@ -338,6 +368,7 @@ export const assertDeterministicWasmStackLayout = (bytes: Uint8Array): void => {
 };
 
 export const buildWasmKernel = async (): Promise<void> => {
+    parseWasmCargoFeatures(process.env);
     const outputDirectoryPath = path.dirname(wasmOutputFilePath);
     await mkdir(outputDirectoryPath, { recursive: true });
     await mkdir(wasmBuildScratchRoot, { recursive: true });
@@ -354,7 +385,7 @@ export const buildWasmKernel = async (): Promise<void> => {
     );
 
     try {
-        runCargoBuild();
+        runCargoBuild(process.env);
         await copyFile(cargoWasmOutputFilePath(), unoptimizedOutputFilePath);
         runWasmOptimizer(unoptimizedOutputFilePath, optimizedOutputFilePath);
 

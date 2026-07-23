@@ -807,7 +807,9 @@ use authentication::{
     TreeValueKind, authenticate_opening, hash_canonical_leaf, statement_owned_node_digest,
 };
 #[cfg(test)]
-pub(crate) use decoding::{DecodedProofBody, decode_proof_body_prefix};
+pub(crate) use decoding::DecodedProofBody;
+#[cfg(any(test, feature = "proof-storage-width-browser-evidence"))]
+pub(crate) use decoding::decode_proof_body_prefix;
 pub(crate) use decoding::{
     DecodedProofBodyPrefix, DecodedProofPhasePairLeaf, ProofTreeOpening,
     decode_proof_body_prefix_owned, decode_proof_query_section_header_at,

@@ -1,3 +1,4 @@
+use super::super::external_memory::EXTERNAL_MEMORY_SINGLE_APPEND_RECYCLER_CAPACITY_CEILING;
 use super::{
     CanonicalStreamDomain, CanonicalStreamWriter, CommonProofByteSink, CommonProofRuntimeError,
     CommonProofRuntimeLimits, HASH_BYTE_LENGTH, MAXIMUM_COMMON_PROOF_BYTE_LENGTH,
@@ -16,6 +17,9 @@ pub(crate) struct CommonProofStorageTransactionRuntime {
     pass: CommonProofStorageTransactionPass,
     runtime_binding_hash: [u8; HASH_BYTE_LENGTH],
     next_request_sequence: u64,
+    operation_encoding_bytes: Zeroizing<Vec<u8>>,
+    recycled_append_bytes: Vec<Zeroizing<Vec<u8>>>,
+    recycled_read_results: Vec<Zeroizing<Vec<u8>>>,
 }
 
 enum CommonProofStorageTransactionPass {
@@ -24,6 +28,15 @@ enum CommonProofStorageTransactionPass {
     Replaying(ProofExternalMemoryTransactionReplay),
     Cancelled,
 }
+
+#[cfg(test)]
+type StorageAllocationIdentity = (usize, usize);
+#[cfg(test)]
+type PooledStorageIdentities = (
+    StorageAllocationIdentity,
+    StorageAllocationIdentity,
+    Option<StorageAllocationIdentity>,
+);
 
 impl Default for CommonProofStorageTransactionRuntime {
     fn default() -> Self {
@@ -42,6 +55,9 @@ impl CommonProofStorageTransactionRuntime {
             ),
             runtime_binding_hash,
             next_request_sequence: 1,
+            operation_encoding_bytes: Zeroizing::new(Vec::new()),
+            recycled_append_bytes: Vec::new(),
+            recycled_read_results: Vec::new(),
         }
     }
 
@@ -58,9 +74,19 @@ impl CommonProofStorageTransactionRuntime {
         let CommonProofStorageTransactionPass::Recording(recorder) = &mut self.pass else {
             return Err(CommonProofRuntimeError::TransactionPending);
         };
+        if !self.recycled_append_bytes.is_empty() || self.recycled_append_bytes.capacity() != 0 {
+            return Err(CommonProofRuntimeError::AllocationLimitExceeded);
+        }
+        let recycled_append_bytes = recorder.take_recycled_append_bytes();
+        if recycled_append_bytes.capacity()
+            > EXTERNAL_MEMORY_SINGLE_APPEND_RECYCLER_CAPACITY_CEILING
+        {
+            return Err(CommonProofRuntimeError::AllocationLimitExceeded);
+        }
         let request = recorder
             .take_yielded_request()
             .ok_or(CommonProofRuntimeError::TransactionResponseMissing)?;
+        self.recycled_append_bytes = recycled_append_bytes;
         if request.request_sequence() != self.next_request_sequence {
             return Err(CommonProofRuntimeError::TransactionReplayIncomplete);
         }
@@ -95,15 +121,45 @@ impl CommonProofStorageTransactionRuntime {
             .map_err(|_| CommonProofRuntimeError::AllocationLimitExceeded)
     }
 
+    #[cfg(any(test, feature = "proof-storage-width-browser-evidence"))]
+    pub(crate) fn encode_pending_worker_request_into(
+        &mut self,
+        encoded_request: &mut Zeroizing<Vec<u8>>,
+    ) -> Result<(), CommonProofRuntimeError> {
+        let CommonProofStorageTransactionPass::RequestReady(request) = &self.pass else {
+            return Err(CommonProofRuntimeError::TransactionResponseMissing);
+        };
+        request
+            .encode_worker_request_into(&mut self.operation_encoding_bytes, encoded_request)
+            .map_err(|_| CommonProofRuntimeError::AllocationLimitExceeded)
+    }
+
     pub(crate) fn supply_worker_response(
         &mut self,
         encoded_response: &[u8],
     ) -> Result<(), CommonProofRuntimeError> {
-        let read_results = self
-            .pending_request()
-            .ok_or(CommonProofRuntimeError::TransactionResponseMissing)?
-            .decode_worker_response(encoded_response)
-            .map_err(|_| CommonProofRuntimeError::TransactionReplayIncomplete)?;
+        let CommonProofStorageTransactionPass::RequestReady(request) = &self.pass else {
+            return Err(CommonProofRuntimeError::TransactionResponseMissing);
+        };
+        let read_result_count = request.read_result_count();
+        let mut read_results = if read_result_count == 0 {
+            Vec::new()
+        } else {
+            core::mem::take(&mut self.recycled_read_results)
+        };
+        if request
+            .decode_worker_response_into(
+                encoded_response,
+                &mut self.operation_encoding_bytes,
+                &mut read_results,
+            )
+            .is_err()
+        {
+            if read_result_count != 0 {
+                self.recycled_read_results = read_results;
+            }
+            return Err(CommonProofRuntimeError::TransactionReplayIncomplete);
+        }
         self.supply_read_results(read_results)
     }
 
@@ -143,10 +199,23 @@ impl CommonProofStorageTransactionRuntime {
         ) {
             return Err(CommonProofRuntimeError::TransactionReplayIncomplete);
         }
+        let previous =
+            core::mem::replace(&mut self.pass, CommonProofStorageTransactionPass::Cancelled);
+        let CommonProofStorageTransactionPass::Replaying(replay) = previous else {
+            unreachable!("the replay state was checked before replacement")
+        };
+        let (active_operations, read_results) = replay
+            .into_recycled_storage(&mut self.recycled_append_bytes)
+            .map_err(|_| CommonProofRuntimeError::AllocationLimitExceeded)?;
+        if !read_results.is_empty() {
+            self.recycled_read_results = read_results;
+        }
         self.pass = CommonProofStorageTransactionPass::Recording(
-            ProofExternalMemoryTransactionRecorder::for_runtime_binding(
+            ProofExternalMemoryTransactionRecorder::with_recycled_storage(
                 self.runtime_binding_hash,
                 self.next_request_sequence,
+                active_operations,
+                core::mem::take(&mut self.recycled_append_bytes),
             ),
         );
         Ok(())
@@ -155,6 +224,23 @@ impl CommonProofStorageTransactionRuntime {
     pub(crate) fn cancel(&mut self) {
         self.pass = CommonProofStorageTransactionPass::Cancelled;
         self.next_request_sequence = 0;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn pooled_storage_identities(&self) -> PooledStorageIdentities {
+        (
+            (
+                self.operation_encoding_bytes.as_ptr() as usize,
+                self.operation_encoding_bytes.capacity(),
+            ),
+            (
+                self.recycled_append_bytes.as_ptr() as usize,
+                self.recycled_append_bytes.capacity(),
+            ),
+            self.recycled_read_results
+                .first()
+                .map(|bytes| (bytes.as_ptr() as usize, bytes.capacity())),
+        )
     }
 }
 

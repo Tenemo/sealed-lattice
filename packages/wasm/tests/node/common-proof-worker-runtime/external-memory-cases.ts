@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { clearCommonProofExternalMemoryRequest } from '../../../src/common-proof-worker-runtime/external-memory.js';
+import {
+    clearCommonProofExternalMemoryRequest,
+    encodeCommonProofExternalMemoryResponseInto,
+} from '../../../src/common-proof-worker-runtime/external-memory.js';
 import {
     CommonProofWorkerRuntimeError,
     decodeCommonProofExternalMemoryRequest,
@@ -164,6 +167,63 @@ describe('common-proof external-memory runtime', () => {
         expect(responseView.getBigUint64(4, true)).toBe(2n);
         expect(responseView.getUint32(76, true)).toBe(1);
         expect(response.byteLength).toBe(80 + 88 + 4);
+    });
+
+    it('reuses one bounded response buffer without retaining request or read bytes', () => {
+        const reusableResponseBuffer = new Uint8Array(49_340);
+        const responseBuffer = reusableResponseBuffer.buffer;
+        const readRequest = decodeCommonProofExternalMemoryRequest(
+            fourByteReadRequest(runtimeBinding(0x39), 1n),
+        );
+        const readBytes = Uint8Array.from([9, 8, 7, 6]);
+        const readResponse = encodeCommonProofExternalMemoryResponseInto(
+            readRequest,
+            [
+                {
+                    bytes: readBytes,
+                    objectOrdinal: 7,
+                    offset: 3n,
+                    operationIndex: 0,
+                },
+            ],
+            reusableResponseBuffer,
+        );
+        expect(readResponse.buffer).toBe(responseBuffer);
+        expect(readResponse.byteLength).toBe(80 + 88 + 4);
+        expect([...readBytes]).toEqual([0, 0, 0, 0]);
+
+        readResponse.fill(0);
+        const appendRequest = decodeCommonProofExternalMemoryRequest(
+            encodeRequest({
+                maximumPayloadByteLength: 4n,
+                operations: [
+                    {
+                        kind: 2,
+                        objectOrdinal: 7,
+                        payload: Uint8Array.from([4, 3, 2, 1]),
+                        payloadByteLength: 4n,
+                        position: 0n,
+                        protection: 0,
+                    },
+                ],
+                requestSequence: 2n,
+                runtimeBindingHash: runtimeBinding(0x39),
+            }),
+        );
+        const appendOperation = appendRequest.operations[0];
+        if (appendOperation?.operationKind !== 'append') {
+            throw new Error(
+                'The reusable-buffer append request was not decoded.',
+            );
+        }
+        const appendResponse = encodeCommonProofExternalMemoryResponseInto(
+            appendRequest,
+            [],
+            reusableResponseBuffer,
+        );
+        expect(appendResponse.buffer).toBe(responseBuffer);
+        expect(appendResponse.byteLength).toBe(80);
+        expect([...appendOperation.bytes]).toEqual([0, 0, 0, 0]);
     });
 
     it('rejects truncation, trailing bytes, wrong digests, and noncanonical operation order', () => {

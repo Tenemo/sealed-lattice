@@ -132,7 +132,10 @@ pub(super) fn add_replay_polynomial_to_initial_fri(
     )
 }
 
-#[cfg(test)]
+#[cfg(any(
+    all(test, feature = "proof-backend-bakeoff"),
+    feature = "proof-storage-width-browser-evidence"
+))]
 pub(super) fn add_bakeoff_polynomial_to_initial_fri(
     initial: &mut [ProofChallengeExtensionElement],
     opening_degree_bound_exclusive: usize,

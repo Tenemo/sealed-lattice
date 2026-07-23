@@ -5,12 +5,73 @@ import { describe, expect, it } from 'vitest';
 import {
     assertDeterministicWasmStackLayout,
     createDeterministicCargoEnvironment,
+    createWasmCargoBuildArguments,
+    parseWasmCargoFeatures,
+    proofStorageWidthBrowserEvidenceCargoFeature,
     wasmStackByteLength,
 } from '#tools/ci/build-wasm-kernel';
 
 const encodedRustflagSeparator = '\x1f';
 
 describe('WASM kernel build environment', () => {
+    it('keeps the ordinary cargo build arguments feature-free', () => {
+        expect(createWasmCargoBuildArguments({})).toEqual([
+            'build',
+            '--locked',
+            '--package',
+            'sealed-lattice-kernel',
+            '--lib',
+            '--target',
+            'wasm32-unknown-unknown',
+            '--release',
+        ]);
+        expect(parseWasmCargoFeatures({})).toEqual([]);
+    });
+
+    it('adds only the explicit proof-storage browser evidence feature', () => {
+        const environment = {
+            SEALED_LATTICE_WASM_CARGO_FEATURES:
+                proofStorageWidthBrowserEvidenceCargoFeature,
+        };
+
+        expect(parseWasmCargoFeatures(environment)).toEqual([
+            proofStorageWidthBrowserEvidenceCargoFeature,
+        ]);
+        expect(createWasmCargoBuildArguments(environment)).toEqual([
+            'build',
+            '--locked',
+            '--package',
+            'sealed-lattice-kernel',
+            '--lib',
+            '--target',
+            'wasm32-unknown-unknown',
+            '--release',
+            '--features',
+            proofStorageWidthBrowserEvidenceCargoFeature,
+        ]);
+    });
+
+    it.each([
+        '',
+        ' ',
+        `${proofStorageWidthBrowserEvidenceCargoFeature} `,
+        ` ${proofStorageWidthBrowserEvidenceCargoFeature}`,
+        `${proofStorageWidthBrowserEvidenceCargoFeature},unknown-feature`,
+        `unknown-feature,${proofStorageWidthBrowserEvidenceCargoFeature}`,
+        'unknown-feature',
+        '--all-features',
+        proofStorageWidthBrowserEvidenceCargoFeature.toUpperCase(),
+        `${proofStorageWidthBrowserEvidenceCargoFeature}\n`,
+    ])('refuses non-canonical cargo feature input %j', (configuredFeatures) => {
+        expect(() =>
+            parseWasmCargoFeatures({
+                SEALED_LATTICE_WASM_CARGO_FEATURES: configuredFeatures,
+            }),
+        ).toThrow(
+            'SEALED_LATTICE_WASM_CARGO_FEATURES must be unset or equal exactly to proof-storage-width-browser-evidence.',
+        );
+    });
+
     it('sets the complete deterministic Rust flag list and target directory', () => {
         const projectRoot = path.resolve('C:\\repo\\sealed-lattice');
         const cargoHome = path.resolve('C:\\cargo-home');
