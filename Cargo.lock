@@ -525,7 +525,6 @@ dependencies = [
 [[package]]
 name = "p3-sumcheck"
 version = "0.6.0"
-source = "git+https://github.com/Plonky3/Plonky3.git?rev=f07da1c479c519040cca27924184c2730315e202#f07da1c479c519040cca27924184c2730315e202"
 dependencies = [
  "itertools",
  "p3-challenger",
