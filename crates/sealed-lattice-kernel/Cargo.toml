@@ -33,6 +33,18 @@ fips204 = { version = "=0.4.6", default-features = false, features = ["ml-dsa-65
 ghash = { version = "=0.5.1", default-features = false, features = ["zeroize"] }
 num-bigint = "0.4"
 num-traits = "0.2"
+p3-challenger = { path = "../../reference-projects/plonky3/challenger", default-features = false, optional = true }
+p3-commit = { path = "../../reference-projects/plonky3/commit", default-features = false, optional = true }
+p3-dft = { path = "../../reference-projects/plonky3/dft", default-features = false, optional = true }
+p3-field = { path = "../../reference-projects/plonky3/field", default-features = false, optional = true }
+p3-goldilocks = { path = "../../reference-projects/plonky3/goldilocks", default-features = false, optional = true }
+p3-merkle-tree = { path = "../../reference-projects/plonky3/merkle-tree", default-features = false, optional = true }
+p3-multilinear-util = { path = "../../reference-projects/plonky3/multilinear-util", default-features = false, optional = true }
+p3-sumcheck = { path = "../../reference-projects/plonky3/sumcheck", default-features = false, optional = true }
+p3-symmetric = { path = "../../reference-projects/plonky3/symmetric", default-features = false, optional = true }
+p3-whir = { path = "../../reference-projects/plonky3/whir", default-features = false, optional = true }
+postcard = { version = "=1.1.3", default-features = false, features = ["alloc"], optional = true }
+rand = { version = "=0.10.1", default-features = false, optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha3 = "=0.10.9"
@@ -42,16 +54,4 @@ unicode-normalization = "=0.1.25"
 zeroize = { version = "=1.8.2", default-features = false, features = ["alloc"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-p3-challenger = { git = "https://github.com/Plonky3/Plonky3.git", rev = "f07da1c479c519040cca27924184c2730315e202", default-features = false, optional = true }
-p3-commit = { git = "https://github.com/Plonky3/Plonky3.git", rev = "f07da1c479c519040cca27924184c2730315e202", default-features = false, optional = true }
-p3-dft = { git = "https://github.com/Plonky3/Plonky3.git", rev = "f07da1c479c519040cca27924184c2730315e202", default-features = false, optional = true }
-p3-field = { git = "https://github.com/Plonky3/Plonky3.git", rev = "f07da1c479c519040cca27924184c2730315e202", default-features = false, optional = true }
-p3-goldilocks = { git = "https://github.com/Plonky3/Plonky3.git", rev = "f07da1c479c519040cca27924184c2730315e202", default-features = false, optional = true }
-p3-merkle-tree = { git = "https://github.com/Plonky3/Plonky3.git", rev = "f07da1c479c519040cca27924184c2730315e202", default-features = false, optional = true }
-p3-multilinear-util = { git = "https://github.com/Plonky3/Plonky3.git", rev = "f07da1c479c519040cca27924184c2730315e202", default-features = false, optional = true }
-p3-sumcheck = { git = "https://github.com/Plonky3/Plonky3.git", rev = "f07da1c479c519040cca27924184c2730315e202", default-features = false, optional = true }
-p3-symmetric = { git = "https://github.com/Plonky3/Plonky3.git", rev = "f07da1c479c519040cca27924184c2730315e202", default-features = false, optional = true }
-p3-whir = { git = "https://github.com/Plonky3/Plonky3.git", rev = "f07da1c479c519040cca27924184c2730315e202", default-features = false, optional = true }
-postcard = { version = "=1.1.3", default-features = false, features = ["alloc"], optional = true }
-rand = { version = "=0.10.1", default-features = false, optional = true }
 rayon = "1"

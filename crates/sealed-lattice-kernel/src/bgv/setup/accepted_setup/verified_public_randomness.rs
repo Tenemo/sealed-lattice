@@ -22,6 +22,24 @@ pub(in crate::bgv) struct VerifiedSetupVerificationContext {
 }
 
 impl VerifiedSetupVerificationContext {
+    #[cfg(all(feature = "proof-backend-bakeoff", not(target_arch = "wasm32")))]
+    pub(in crate::bgv) const fn for_production_backend_prototype(
+        suite_identifier: Hash512,
+        manifest_hash: Hash512,
+        ceremony_context_hash: Hash512,
+        action_context_hash: Hash512,
+        roster_hash: Hash512,
+    ) -> Self {
+        Self {
+            protocol_version: FOUNDATION_PROFILE.protocol_version,
+            suite_identifier,
+            manifest_hash,
+            ceremony_context_hash,
+            action_context_hash,
+            roster_hash,
+        }
+    }
+
     pub(in crate::bgv) const fn protocol_version(self) -> u16 {
         self.protocol_version
     }
@@ -139,6 +157,43 @@ impl VerifiedPublicRandomness {
             public_setup_seed,
             setup_proof_context_hash,
         }
+    }
+
+    #[cfg(all(feature = "proof-backend-bakeoff", not(target_arch = "wasm32")))]
+    pub(in crate::bgv) fn from_production_backend_prototype_values(
+        context: VerifiedSetupVerificationContext,
+        ordered_participant_identities: Vec<ParticipantIdentity>,
+        ordered_action_randomness_commitments: Vec<Hash512>,
+        public_setup_seed: Hash512,
+    ) -> Result<Self, RefusalReason> {
+        if ordered_participant_identities.len() != usize::from(FOUNDATION_PROFILE.participant_count)
+            || ordered_action_randomness_commitments.len() != ordered_participant_identities.len()
+        {
+            return Err(RefusalReason::WrongTypeOrLength);
+        }
+        let participant_count = ordered_participant_identities.len();
+        let setup_proof_context_hash = derive_setup_proof_context_hash(context, public_setup_seed)?;
+        let distinct_hashes = |domain: u8| {
+            (0..participant_count)
+                .map(|participant_index| {
+                    let mut bytes = [domain; Hash512::BYTE_LENGTH];
+                    bytes[..8].copy_from_slice(&(participant_index as u64).to_le_bytes());
+                    Hash512::from_bytes(bytes)
+                })
+                .collect::<Vec<_>>()
+                .into_boxed_slice()
+        };
+        Ok(Self {
+            context,
+            ordered_participant_identities: ordered_participant_identities.into_boxed_slice(),
+            ordered_setup_intent_object_hashes: distinct_hashes(0x41),
+            ordered_action_randomness_commitments: ordered_action_randomness_commitments
+                .into_boxed_slice(),
+            ordered_commitment_object_hashes: distinct_hashes(0x43),
+            ordered_reveal_object_hashes: distinct_hashes(0x44),
+            public_setup_seed,
+            setup_proof_context_hash,
+        })
     }
 }
 

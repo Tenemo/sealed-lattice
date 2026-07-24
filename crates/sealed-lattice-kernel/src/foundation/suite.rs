@@ -427,7 +427,10 @@ pub struct SuiteCountLimits {
 }
 
 impl SuiteCountLimits {
-    #[cfg(test)]
+    #[cfg(any(
+        test,
+        all(feature = "proof-backend-bakeoff", not(target_arch = "wasm32"))
+    ))]
     pub(crate) fn new(
         maximum_ballot_attempts_per_participant: u16,
         maximum_target_share_submissions: u16,
@@ -534,7 +537,10 @@ pub struct SuiteRecord {
 }
 
 impl SuiteRecord {
-    #[cfg(test)]
+    #[cfg(any(
+        test,
+        all(feature = "proof-backend-bakeoff", not(target_arch = "wasm32"))
+    ))]
     pub(super) fn new(
         count_limits: SuiteCountLimits,
         artifacts: Vec<ArtifactReference>,

@@ -130,6 +130,10 @@ export const createDeterministicCargoEnvironment = (
 };
 
 const runCargoBuild = (): void => {
+    const researchFeatures =
+        process.env.SEALED_LATTICE_BUILD_PROOF_BACKEND_RESEARCH === '1'
+            ? ['--features', 'proof-backend-bakeoff']
+            : [];
     runCheckedCommand({
         command: 'cargo',
         args: [
@@ -141,6 +145,7 @@ const runCargoBuild = (): void => {
             '--target',
             'wasm32-unknown-unknown',
             '--release',
+            ...researchFeatures,
         ],
         description: 'cargo build',
         env: createDeterministicCargoEnvironment(),

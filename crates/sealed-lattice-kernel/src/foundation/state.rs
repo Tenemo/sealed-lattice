@@ -624,6 +624,29 @@ pub struct StateDurableBinding {
 }
 
 impl StateDurableBinding {
+    #[cfg(all(feature = "proof-backend-bakeoff", not(target_arch = "wasm32")))]
+    pub(crate) const fn for_production_backend_prototype(
+        suite_id: Hash512,
+        ceremony_context_hash: Hash512,
+        action_context_hash: Hash512,
+        subject_participant_id: ParticipantIdentity,
+    ) -> Self {
+        Self {
+            vote_kind: StateWitnessVoteKind::Reservation,
+            capability_kind: StateCapabilityKind::SetupActionRandomnessRoot,
+            suite_id,
+            ceremony_context_hash,
+            action_context_hash,
+            subject_participant_id,
+            state_key: Hash512::from_bytes([0x51; Hash512::BYTE_LENGTH]),
+            intent_object_hash: Hash512::from_bytes([0x52; Hash512::BYTE_LENGTH]),
+            reservation_intent_object_hash: Some(Hash512::from_bytes([0x52; Hash512::BYTE_LENGTH])),
+            output_intent_object_hash: None,
+            exact_output_hash: None,
+            exact_output_byte_length: None,
+        }
+    }
+
     pub const fn vote_kind(self) -> StateWitnessVoteKind {
         self.vote_kind
     }

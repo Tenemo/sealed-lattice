@@ -8,6 +8,8 @@ pub(crate) const COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH: usize = 128;
 
 mod aggregate_threshold_share_runtime;
 mod application_statement;
+#[cfg(all(feature = "proof-backend-bakeoff", any(test, target_arch = "wasm32")))]
+mod backend_spike;
 mod ballot_validity_runtime;
 mod body;
 mod collective_public_key_runtime;
@@ -206,6 +208,12 @@ pub(crate) use prover::{
     CommonProofSourcePolynomialRequestContext, CommonProofSourceProviderMemoryAccounting,
     MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH, PrivateRandomnessCommonProofCoinError,
     PrivateRandomnessCommonProofCoinSource, ProvidedCommonProofSourcePolynomial, apply_trace_mask,
+};
+#[cfg(all(feature = "proof-backend-bakeoff", not(target_arch = "wasm32")))]
+pub(crate) use prover::{
+    CommonProofAuxiliaryColumnSynthesisCursor, CommonProofPreChallengeSourceCursor,
+    CommonProofPreChallengeSourcePoll, CommonProofQuotientComponentCursor,
+    construct_opening_batch_mask, construct_reversed_relation_column,
 };
 #[cfg(test)]
 pub(crate) use prover::{

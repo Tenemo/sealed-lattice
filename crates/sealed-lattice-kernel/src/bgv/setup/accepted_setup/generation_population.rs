@@ -47,6 +47,15 @@ use super::{
 };
 use crate::bgv::setup::sampling::negacyclic_product_mod;
 
+#[cfg(all(feature = "proof-backend-bakeoff", not(target_arch = "wasm32")))]
+use super::verified_public_randomness::VerifiedSetupVerificationContext;
+
+#[cfg(all(feature = "proof-backend-bakeoff", not(target_arch = "wasm32")))]
+use crate::foundation::{
+    ACTION_RANDOMNESS_ROOT_BYTE_LENGTH, ActionRandomnessDerivationInput, ActionRandomnessRoot,
+    ParticipantIdentity, StateDurableBinding, selected_suite_capability_for_tests,
+};
+
 const FOUNDATION_SCHEMA_VERSION: u16 = 1;
 const SETUP_SOURCE_SAMPLER_CONTEXT_SCHEMA_IDENTIFIER: u16 = 0x120c;
 const GALOIS_ERROR_CONTEXT_SCHEMA_IDENTIFIER: u16 = 0x120e;
@@ -90,6 +99,89 @@ struct RecipientPayloadLimb {
     sharing_limb_index: u16,
     canonical_share_coefficients: Zeroizing<Vec<u64>>,
     recipient_share_material_seed: Zeroizing<[u8; MATERIAL_SEED_BYTE_LENGTH]>,
+}
+
+#[cfg(all(feature = "proof-backend-bakeoff", not(target_arch = "wasm32")))]
+pub(crate) struct ProductionBackendPrototypeAuthority {
+    pub(crate) action_private_randomness: Rc<ActionPrivateRandomness>,
+    pub(crate) authority_handle: SetupGenerationAuthorityHandle,
+}
+
+#[cfg(all(feature = "proof-backend-bakeoff", not(target_arch = "wasm32")))]
+pub(crate) fn populate_production_backend_prototype_authority()
+-> Result<ProductionBackendPrototypeAuthority, RefusalReason> {
+    let selected_suite = selected_suite_capability_for_tests();
+    let suite_identifier = Hash512::from_bytes(selected_suite.suite_identifier());
+    let manifest_hash = Hash512::from_bytes([0x21; Hash512::BYTE_LENGTH]);
+    let ceremony_context_hash = Hash512::from_bytes([0x22; Hash512::BYTE_LENGTH]);
+    let action_context_hash = Hash512::from_bytes([0x23; Hash512::BYTE_LENGTH]);
+    let roster_hash = Hash512::from_bytes([0x24; Hash512::BYTE_LENGTH]);
+    let public_setup_seed = Hash512::from_bytes([0x25; Hash512::BYTE_LENGTH]);
+    let local_roster_position = 3_usize;
+    let ordered_participant_identities = (0..usize::from(FOUNDATION_PROFILE.participant_count))
+        .map(|participant_index| {
+            let mut bytes = [0x31; Hash512::BYTE_LENGTH];
+            bytes[..8].copy_from_slice(&(participant_index as u64).to_le_bytes());
+            ParticipantIdentity::from_bytes(bytes)
+        })
+        .collect::<Vec<_>>();
+    let local_participant_identity = ordered_participant_identities[local_roster_position];
+    let action_private_randomness = Rc::new(
+        ActionRandomnessRoot::from_injected_bytes(Zeroizing::new(
+            [0x5a; ACTION_RANDOMNESS_ROOT_BYTE_LENGTH],
+        ))
+        .derive(ActionRandomnessDerivationInput::new(
+            suite_identifier,
+            ceremony_context_hash,
+            action_context_hash,
+            local_participant_identity,
+        ))
+        .map_err(|error| error.refusal_reason)?,
+    );
+    let mut ordered_action_randomness_commitments = (0..ordered_participant_identities.len())
+        .map(|participant_index| {
+            let mut bytes = [0x32; Hash512::BYTE_LENGTH];
+            bytes[..8].copy_from_slice(&(participant_index as u64).to_le_bytes());
+            Hash512::from_bytes(bytes)
+        })
+        .collect::<Vec<_>>();
+    ordered_action_randomness_commitments[local_roster_position] =
+        action_private_randomness.action_randomness_commitment();
+    let verified_public_randomness =
+        VerifiedPublicRandomness::from_production_backend_prototype_values(
+            VerifiedSetupVerificationContext::for_production_backend_prototype(
+                suite_identifier,
+                manifest_hash,
+                ceremony_context_hash,
+                action_context_hash,
+                roster_hash,
+            ),
+            ordered_participant_identities,
+            ordered_action_randomness_commitments,
+            public_setup_seed,
+        )?;
+    let authorization_hash = action_private_randomness
+        .setup_action_randomness_authorization(roster_hash)
+        .map_err(|error| error.refusal_reason)?;
+    let verified_reservation_binding = VerifiedStateReservationRuntimeBinding {
+        authorization_hash,
+        durable_binding: StateDurableBinding::for_production_backend_prototype(
+            suite_identifier,
+            ceremony_context_hash,
+            action_context_hash,
+            local_participant_identity,
+        ),
+    };
+    let authority_handle = populate_browser_owned_setup_generation_authority(
+        &selected_suite,
+        &verified_public_randomness,
+        Rc::clone(&action_private_randomness),
+        verified_reservation_binding,
+    )?;
+    Ok(ProductionBackendPrototypeAuthority {
+        action_private_randomness,
+        authority_handle,
+    })
 }
 
 /// Constructs the complete browser-owned setup-generation authority from

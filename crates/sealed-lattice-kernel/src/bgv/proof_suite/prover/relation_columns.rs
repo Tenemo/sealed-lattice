@@ -137,6 +137,21 @@ impl CommonProofSourcePolynomialRequestContext {
         self.relation_plan_hash
     }
 
+    #[cfg(all(feature = "proof-backend-bakeoff", not(target_arch = "wasm32")))]
+    pub(crate) const fn protocol_version(self) -> u16 {
+        self.protocol_version
+    }
+
+    #[cfg(all(feature = "proof-backend-bakeoff", not(target_arch = "wasm32")))]
+    pub(crate) const fn suite_identifier(self) -> [u8; 64] {
+        self.suite_identifier
+    }
+
+    #[cfg(all(feature = "proof-backend-bakeoff", not(target_arch = "wasm32")))]
+    pub(crate) const fn application_statement_schema_identifier(self) -> u16 {
+        self.application_statement_schema_identifier
+    }
+
     pub(crate) const fn relation_plan_variant_hash(self) -> [u8; 64] {
         self.relation_plan_variant_hash
     }
@@ -855,6 +870,13 @@ impl CommonProofPreChallengeSourceCursor {
 
     pub(crate) fn reversed_column_bindings(&self) -> &[(u32, u32)] {
         &self.reversed_column_bindings
+    }
+
+    #[cfg(all(feature = "proof-backend-bakeoff", not(target_arch = "wasm32")))]
+    pub(crate) fn next_source_column_ordinal(&self) -> Option<u32> {
+        self.requested_column_ordinals
+            .get(self.next_source_index)
+            .copied()
     }
 }
 

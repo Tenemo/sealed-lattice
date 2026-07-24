@@ -289,6 +289,87 @@ impl RelationPlanVariant {
         Ok(queries.into_iter().collect())
     }
 
+    /// Returns the first constraint ordinal that uses each constraint's exact
+    /// checked zeroifier program. Quotient builders may reuse evaluations only
+    /// within one of these structural equivalence classes.
+    #[cfg(any(
+        test,
+        all(feature = "proof-backend-bakeoff", not(target_arch = "wasm32"))
+    ))]
+    pub(crate) fn constraint_zeroifier_representative_ordinals(&self) -> Vec<usize> {
+        let mut representative_ordinals = Vec::<usize>::new();
+        self.ordered_constraints
+            .iter()
+            .enumerate()
+            .map(|(constraint_ordinal, constraint)| {
+                if let Some(representative_ordinal) =
+                    representative_ordinals
+                        .iter()
+                        .copied()
+                        .find(|representative_ordinal| {
+                            self.ordered_constraints[*representative_ordinal]
+                                .zeroifier_postfix_expression
+                                == constraint.zeroifier_postfix_expression
+                        })
+                {
+                    representative_ordinal
+                } else {
+                    representative_ordinals.push(constraint_ordinal);
+                    constraint_ordinal
+                }
+            })
+            .collect()
+    }
+
+    pub(crate) fn evaluate_constraint_numerator_at_point<ColumnValue>(
+        &self,
+        context: &RelationPlanCheckContext,
+        constraint_ordinal: usize,
+        evaluation_point: ProofChallengeExtensionElement,
+        checked_challenges: &CheckedRelationApplicationChallenges,
+        column_value: &mut ColumnValue,
+    ) -> Result<ProofChallengeExtensionElement, RelationPlanError>
+    where
+        ColumnValue:
+            FnMut(u32, bool, u64) -> Result<ProofChallengeExtensionElement, RelationPlanError>,
+    {
+        let constraint = self
+            .ordered_constraints
+            .get(constraint_ordinal)
+            .ok_or(RelationPlanError::InvalidConstraint)?;
+        evaluate_program(
+            self,
+            context,
+            &constraint.numerator_postfix_expression,
+            evaluation_point,
+            checked_challenges,
+            column_value,
+            false,
+        )
+    }
+
+    pub(crate) fn evaluate_constraint_zeroifier_at_point(
+        &self,
+        context: &RelationPlanCheckContext,
+        constraint_ordinal: usize,
+        evaluation_point: ProofChallengeExtensionElement,
+        checked_challenges: &CheckedRelationApplicationChallenges,
+    ) -> Result<ProofChallengeExtensionElement, RelationPlanError> {
+        let constraint = self
+            .ordered_constraints
+            .get(constraint_ordinal)
+            .ok_or(RelationPlanError::InvalidConstraint)?;
+        evaluate_program(
+            self,
+            context,
+            &constraint.zeroifier_postfix_expression,
+            evaluation_point,
+            checked_challenges,
+            &mut |_, _, _| Err(RelationPlanError::InvalidZeroifier),
+            true,
+        )
+    }
+
     pub(crate) fn evaluate_constraint_at_point<ColumnValue>(
         &self,
         context: &RelationPlanCheckContext,
@@ -330,27 +411,18 @@ impl RelationPlanVariant {
         ColumnValue:
             FnMut(u32, bool, u64) -> Result<ProofChallengeExtensionElement, RelationPlanError>,
     {
-        let constraint = self
-            .ordered_constraints
-            .get(constraint_ordinal)
-            .ok_or(RelationPlanError::InvalidConstraint)?;
-        let numerator = evaluate_program(
-            self,
+        let numerator = self.evaluate_constraint_numerator_at_point(
             context,
-            &constraint.numerator_postfix_expression,
+            constraint_ordinal,
             evaluation_point,
             checked_challenges,
             column_value,
-            false,
         )?;
-        let zeroifier = evaluate_program(
-            self,
+        let zeroifier = self.evaluate_constraint_zeroifier_at_point(
             context,
-            &constraint.zeroifier_postfix_expression,
+            constraint_ordinal,
             evaluation_point,
             checked_challenges,
-            column_value,
-            true,
         )?;
         Ok(RelationConstraintEvaluation {
             numerator,
@@ -1424,6 +1496,32 @@ mod tests {
                 .deep_point_candidate_is_forbidden(&context, 0, full_degree_candidate, &[])
                 .expect("full-degree candidate is decidable")
         );
+    }
+
+    #[test]
+    fn zeroifier_classes_reuse_only_structurally_identical_checked_programs() {
+        let (mut variant, _) = vss_linkage_interpreter_fixture();
+        assert!(variant.ordered_constraints.len() >= 3);
+        variant.ordered_constraints[0].zeroifier_postfix_expression =
+            vec![RelationExpressionInstruction::BaseFieldConstant(1)];
+        variant.ordered_constraints[1].zeroifier_postfix_expression =
+            vec![RelationExpressionInstruction::BaseFieldConstant(2)];
+        variant.ordered_constraints[2].zeroifier_postfix_expression =
+            vec![RelationExpressionInstruction::BaseFieldConstant(1)];
+
+        let representatives = variant.constraint_zeroifier_representative_ordinals();
+        assert_eq!(representatives.len(), variant.constraint_count());
+        assert_eq!(representatives[0], 0);
+        assert_eq!(representatives[1], 1);
+        assert_eq!(representatives[2], 0);
+        for (constraint_ordinal, representative_ordinal) in representatives.into_iter().enumerate()
+        {
+            assert_eq!(
+                variant.ordered_constraints[constraint_ordinal].zeroifier_postfix_expression,
+                variant.ordered_constraints[representative_ordinal].zeroifier_postfix_expression
+            );
+            assert!(representative_ordinal <= constraint_ordinal);
+        }
     }
 
     #[test]

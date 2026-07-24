@@ -27,6 +27,7 @@
         "test:rust:kernel:phase-liveness-evidence": "tsx ./tools/ci/run-rust-kernel-manual-tests.ts rust-phase-liveness-evidence",
         "test:rust:kernel:proof-backend-bakeoff-preflight": "tsx ./tools/ci/run-proof-backend-bakeoff-preflight.ts",
         "test:rust:kernel:proof-backend-bakeoff": "tsx ./tools/ci/run-proof-backend-bakeoff.ts",
+        "test:rust:kernel:proof-backend-prototype": "tsx ./tools/ci/run-proof-backend-prototype-test.ts",
         "test:rust:process-memory-guard": "tsx ./tools/ci/run-process-memory-guard-tests.ts",
         "test:node:kernel": "pnpm run build && pnpm exec vitest --project node-kernel-fast --run",
         "test:node:built": "vitest --project node --project node-protocol --project node-kernel-fast --run",

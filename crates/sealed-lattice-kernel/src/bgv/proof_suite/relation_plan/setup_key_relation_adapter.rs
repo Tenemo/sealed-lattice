@@ -22,6 +22,8 @@ use crate::{
     transcript_core::encode_hex,
 };
 
+#[cfg(all(feature = "proof-backend-bakeoff", not(target_arch = "wasm32")))]
+use super::super::AuthenticatedCompactCommittedMaterialSource;
 use super::super::{
     CommonProofBoundTreeLeafSaltRequest, CommonProofProverError, CommonProofRelationPlanCapability,
     CommonProofSourcePolynomial, CommonProofSourcePolynomialProvider,
@@ -44,7 +46,10 @@ use super::{
         signed_integer_to_base_field, split_rows_match, split_signed_i8_polynomial,
         split_signed_polynomial,
     },
-    key_relation::{EXACT_INTEGER_LIFT_RADIX, ExactRadixDigitColumnCatalog, SplitIntegerVector},
+    key_relation::{
+        EXACT_INTEGER_LIFT_RADIX, ExactRadixDigitColumnCatalog, MATERIAL_DIGIT_RADIX,
+        SplitIntegerVector, TRIT_RADIX, UpperBoundComparatorWitnessLayout,
+    },
 };
 
 const SAME_SECRET_SOURCE_REPLAY_IDENTITY_DOMAIN: &str =
@@ -156,6 +161,18 @@ pub(super) fn exact_radix_catalog_heap_byte_length(
 fn same_secret_source_layout_heap_byte_length(
     source_layout: &SameSecretSourceLayout,
 ) -> Result<u64, CommonProofProverError> {
+    let material_nested_payload_byte_length = source_layout
+        .ordered_materials
+        .iter()
+        .flat_map(|material| material.upper_bound_comparators.iter())
+        .try_fold(0_u64, |total, comparator| {
+            checked_setup_provider_add(
+                total,
+                comparator
+                    .retained_heap_byte_length()
+                    .map_err(CommonProofProverError::Relation)?,
+            )
+        })?;
     let anchor_nested_payload_byte_length =
         source_layout
             .ordered_anchors
@@ -179,6 +196,7 @@ fn same_secret_source_layout_heap_byte_length(
         setup_provider_payload_for_count::<
             super::same_secret_anchor::SameSecretMaterialSourceLayout,
         >(source_layout.ordered_materials.len())?,
+        material_nested_payload_byte_length,
         setup_provider_payload_for_count::<super::same_secret_anchor::SameSecretAnchorSourceLayout>(
             source_layout.ordered_anchors.len(),
         )?,
@@ -239,6 +257,33 @@ fn insert_setup_column_dependency(
             .or_default()
             .insert(source_column_ordinal);
     }
+}
+
+fn same_secret_comparator_dependencies(source_layout: &SameSecretSourceLayout) -> Vec<(u32, u32)> {
+    let mut dependencies = Vec::new();
+    for material in &source_layout.ordered_materials {
+        for half_ordinal in 0..2 {
+            let value_columns = material.material[half_ordinal].ordered_digit_column_ordinals();
+            let comparator = &material.upper_bound_comparators[half_ordinal];
+            for dependent_column in comparator
+                .difference_digits
+                .iter()
+                .flat_map(|difference| {
+                    std::iter::once(difference.target_column_ordinal)
+                        .chain(difference.trit_column_ordinals.iter().copied())
+                })
+                .chain(comparator.borrow_column_ordinals.iter().copied())
+            {
+                dependencies.extend(
+                    value_columns
+                        .iter()
+                        .copied()
+                        .map(|source_column| (dependent_column, source_column)),
+                );
+            }
+        }
+    }
+    dependencies
 }
 
 fn setup_key_relation_column_dependencies(
@@ -391,23 +436,6 @@ fn full_ring_carry_columns(relation_plan_variant: &RelationPlanVariant) -> BTree
         .collect()
 }
 
-pub(super) fn setup_key_relation_derivation_transient_byte_length(
-    relation_plan_variant: &RelationPlanVariant,
-    exact_radix_digits_by_column: &ExactRadixDigitColumnCatalog,
-    public_key_quotient_columns: &BTreeSet<u32>,
-    anchor_quotient_columns: &BTreeSet<u32>,
-    ring_degree: u64,
-) -> Result<u64, CommonProofProverError> {
-    setup_key_relation_derivation_transient_byte_length_with_dependencies(
-        relation_plan_variant,
-        exact_radix_digits_by_column,
-        public_key_quotient_columns,
-        anchor_quotient_columns,
-        ring_degree,
-        &[],
-    )
-}
-
 pub(super) fn setup_key_relation_derivation_transient_byte_length_with_dependencies(
     relation_plan_variant: &RelationPlanVariant,
     exact_radix_digits_by_column: &ExactRadixDigitColumnCatalog,
@@ -548,6 +576,7 @@ struct SetupKeyRelationSourceProviderMemoryAccountingInput<'input> {
     exact_radix_digits_by_column: &'input ExactRadixDigitColumnCatalog,
     public_key_quotient_columns: BTreeSet<u32>,
     anchor_quotient_columns: BTreeSet<u32>,
+    additional_dependencies: Vec<(u32, u32)>,
 }
 
 fn finish_setup_key_relation_source_provider_memory_accounting(
@@ -562,6 +591,7 @@ fn finish_setup_key_relation_source_provider_memory_accounting(
         exact_radix_digits_by_column,
         public_key_quotient_columns,
         anchor_quotient_columns,
+        additional_dependencies,
     } = input;
     if canonical_application_statement_byte_length == 0
         || relation_plan_variant.trace_domain_size().checked_mul(2) != Some(ring_degree)
@@ -604,12 +634,13 @@ fn finish_setup_key_relation_source_provider_memory_accounting(
         u64::try_from(size_of::<i128>()).map_err(|_| CommonProofProverError::CountOverflow)?,
     )?;
     let additional_loading_transient_byte_length =
-        setup_key_relation_derivation_transient_byte_length(
+        setup_key_relation_derivation_transient_byte_length_with_dependencies(
             relation_plan_variant,
             exact_radix_digits_by_column,
             &public_key_quotient_columns,
             &anchor_quotient_columns,
             ring_degree,
+            &additional_dependencies,
         )?;
     let maximum_returned_source_polynomial_byte_length = checked_setup_provider_multiply(
         relation_plan_variant.trace_domain_size(),
@@ -648,6 +679,7 @@ pub(crate) fn same_secret_source_provider_memory_accounting(
             exact_radix_digits_by_column: &source_layout.exact_radix_digits_by_column,
             public_key_quotient_columns: BTreeSet::new(),
             anchor_quotient_columns,
+            additional_dependencies: same_secret_comparator_dependencies(source_layout),
         },
     )
 }
@@ -681,6 +713,7 @@ pub(crate) fn public_key_share_source_provider_memory_accounting(
             exact_radix_digits_by_column: &source_layout.exact_radix_digits_by_column,
             public_key_quotient_columns,
             anchor_quotient_columns,
+            additional_dependencies: Vec::new(),
         },
     )
 }
@@ -740,6 +773,74 @@ pub(crate) struct SetupKeyRelationSourcePolynomialAdapter {
 }
 
 impl SetupKeyRelationSourcePolynomialAdapter {
+    #[cfg(all(feature = "proof-backend-bakeoff", not(target_arch = "wasm32")))]
+    pub(crate) const fn production_backend_request_context(
+        &self,
+    ) -> CommonProofSourcePolynomialRequestContext {
+        self.request_context
+    }
+
+    /// Reconstructs one plan-owned verifier sequence through the same accepted
+    /// setup authority used by the production source provider. This research
+    /// entry point never accepts polynomial bytes from its caller and refuses
+    /// every prover-owned or statement-tree column.
+    #[cfg(all(feature = "proof-backend-bakeoff", not(target_arch = "wasm32")))]
+    pub(crate) fn production_backend_verifier_sequence_polynomial(
+        &mut self,
+        column_ordinal: u32,
+    ) -> Result<CommonProofSourcePolynomial, CommonProofProverError> {
+        let descriptor = self
+            .relation_plan_variant
+            .ordered_columns()
+            .get(
+                usize::try_from(column_ordinal)
+                    .map_err(|_| CommonProofProverError::CountOverflow)?,
+            )
+            .ok_or(CommonProofProverError::InvalidColumn)?;
+        if !matches!(
+            descriptor.origin(),
+            RelationColumnOrigin::VerifierSequence { .. }
+        ) {
+            return Err(CommonProofProverError::InvalidColumn);
+        }
+        self.derive_source_polynomial(column_ordinal)
+    }
+
+    /// Returns the authority-owned compact source for one bound committed-
+    /// material tree. This research-only path lets the exact backend rebuild
+    /// canonical leaf salts without accepting salts or commitment material
+    /// from its caller.
+    #[cfg(all(feature = "proof-backend-bakeoff", not(target_arch = "wasm32")))]
+    pub(crate) fn production_backend_bound_material_source(
+        &self,
+        tree_catalog_index: u16,
+        expected_root: [u8; 64],
+    ) -> Result<AuthenticatedCompactCommittedMaterialSource, CommonProofProverError> {
+        let bound_source = self
+            .bound_material_tree_sources
+            .iter()
+            .find(|source| source.tree_catalog_index == tree_catalog_index)
+            .copied()
+            .ok_or(CommonProofProverError::InvalidTree)?;
+        let authority_handle =
+            SetupGenerationAuthorityHandle::from_identifier(self.authority_identifier);
+        let application = self.application();
+        with_setup_generation_key_relation::<_, RefusalReason>(
+            &authority_handle,
+            &application,
+            |source| {
+                let authenticated_source = source
+                    .degree_zero_material(bound_source.material_ordinal)?
+                    .owned_authenticated_source();
+                if authenticated_source.compact_source().root() != expected_root {
+                    return Err(RefusalReason::WrongHashOrRoot);
+                }
+                Ok(authenticated_source)
+            },
+        )
+        .map_err(|_| CommonProofProverError::InvalidTree)
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new_same_secret(
         source: &SetupGenerationKeyRelationSource<'_, '_>,
@@ -1052,7 +1153,13 @@ impl SetupKeyRelationSourcePolynomialAdapter {
                 Ok(CommonProofSourcePolynomial::from_protected_base_coefficients(field_values))
             },
         )
-        .map_err(|_| CommonProofProverError::InvalidColumn)?;
+        .map_err(|error| {
+            #[cfg(feature = "proof-backend-bakeoff")]
+            eprintln!(
+                "setup key-relation source derivation refused column {column_ordinal}: {error:?}"
+            );
+            CommonProofProverError::InvalidColumn
+        })?;
         Ok(polynomial)
     }
 }
@@ -1525,6 +1632,93 @@ impl ExactKeyRelationActiveColumnSet {
     }
 }
 
+fn derive_upper_bound_comparator_rows_from_values(
+    value_digit_rows: &[Zeroizing<Vec<i128>>],
+    maximum_digits: &[u64],
+    comparator: &UpperBoundComparatorWitnessLayout,
+    requested_column_ordinal: u32,
+) -> Result<Option<Zeroizing<Vec<i128>>>, RefusalReason> {
+    if value_digit_rows.is_empty()
+        || value_digit_rows.len() != maximum_digits.len()
+        || comparator.difference_digits.len() != value_digit_rows.len()
+        || comparator.borrow_column_ordinals.len() + 1 != value_digit_rows.len()
+    {
+        return Err(RefusalReason::WrongTypeOrLength);
+    }
+    let row_count = value_digit_rows
+        .first()
+        .map(|rows| rows.len())
+        .ok_or(RefusalReason::WrongTypeOrLength)?;
+    if value_digit_rows.iter().any(|rows| rows.len() != row_count) {
+        return Err(RefusalReason::WrongTypeOrLength);
+    }
+    let mut previous_borrow = vec![0_i128; row_count];
+    let mut requested_rows = None;
+    for digit_ordinal in 0..value_digit_rows.len() {
+        let mut difference_rows = Vec::with_capacity(row_count);
+        let mut next_borrow = vec![0_i128; row_count];
+        for row_ordinal in 0..row_count {
+            let value = value_digit_rows[digit_ordinal][row_ordinal];
+            if !(0..i128::from(MATERIAL_DIGIT_RADIX)).contains(&value) {
+                return Err(RefusalReason::InvalidArithmeticRelation);
+            }
+            let raw_difference = i128::from(maximum_digits[digit_ordinal])
+                .checked_sub(value)
+                .and_then(|difference| difference.checked_sub(previous_borrow[row_ordinal]))
+                .ok_or(RefusalReason::InvalidArithmeticRelation)?;
+            let borrow = i128::from(raw_difference < 0);
+            if digit_ordinal + 1 == value_digit_rows.len() && borrow != 0 {
+                return Err(RefusalReason::InvalidArithmeticRelation);
+            }
+            let difference = raw_difference
+                .checked_add(i128::from(MATERIAL_DIGIT_RADIX) * borrow)
+                .ok_or(RefusalReason::InvalidArithmeticRelation)?;
+            difference_rows.push(difference);
+            next_borrow[row_ordinal] = borrow;
+        }
+        let difference_layout = &comparator.difference_digits[digit_ordinal];
+        let candidate_rows = if difference_layout.target_column_ordinal == requested_column_ordinal
+        {
+            Some(difference_rows.clone())
+        } else if let Some(trit_ordinal) = difference_layout
+            .trit_column_ordinals
+            .iter()
+            .position(|column| *column == requested_column_ordinal)
+        {
+            let divisor = i128::from(TRIT_RADIX)
+                .checked_pow(
+                    u32::try_from(trit_ordinal)
+                        .map_err(|_| RefusalReason::OutsideSupportedProfile)?,
+                )
+                .ok_or(RefusalReason::OutsideSupportedProfile)?;
+            Some(
+                difference_rows
+                    .iter()
+                    .map(|difference| (difference / divisor) % i128::from(TRIT_RADIX))
+                    .collect(),
+            )
+        } else if comparator
+            .borrow_column_ordinals
+            .get(digit_ordinal)
+            .is_some_and(|column| *column == requested_column_ordinal)
+        {
+            Some(next_borrow.clone())
+        } else {
+            None
+        };
+        if let Some(candidate_rows) = candidate_rows
+            && requested_rows.replace(candidate_rows).is_some()
+        {
+            return Err(RefusalReason::InvalidArithmeticRelation);
+        }
+        previous_borrow = next_borrow;
+    }
+    requested_rows
+        .map(Zeroizing::new)
+        .map(Some)
+        .ok_or(RefusalReason::InvalidArithmeticRelation)
+}
+
 pub(super) trait KeyRelationColumnDerivation {
     fn relation_plan_variant(&self) -> &RelationPlanVariant;
     fn relation_context(&self) -> &RelationPlanCheckContext;
@@ -1540,6 +1734,36 @@ pub(super) trait KeyRelationColumnDerivation {
         &self,
         source: &RelationVerifierSource,
     ) -> Result<Vec<u64>, RefusalReason>;
+
+    fn upper_bound_comparator_rows(
+        &mut self,
+        value_digit_column_ordinals: &[u32],
+        maximum_digits: &[u64],
+        comparator: &UpperBoundComparatorWitnessLayout,
+        requested_column_ordinal: u32,
+    ) -> Result<Option<Zeroizing<Vec<i128>>>, RefusalReason> {
+        let requested_by_comparator = comparator.difference_digits.iter().any(|difference| {
+            difference.target_column_ordinal == requested_column_ordinal
+                || difference
+                    .trit_column_ordinals
+                    .contains(&requested_column_ordinal)
+        }) || comparator
+            .borrow_column_ordinals
+            .contains(&requested_column_ordinal);
+        if !requested_by_comparator {
+            return Ok(None);
+        }
+        let mut value_digit_rows = Vec::with_capacity(value_digit_column_ordinals.len());
+        for column_ordinal in value_digit_column_ordinals {
+            value_digit_rows.push(self.derive_rows(*column_ordinal)?);
+        }
+        derive_upper_bound_comparator_rows_from_values(
+            &value_digit_rows,
+            maximum_digits,
+            comparator,
+            requested_column_ordinal,
+        )
+    }
 
     fn derive_rows(&mut self, column_ordinal: u32) -> Result<Zeroizing<Vec<i128>>, RefusalReason> {
         if let Some(rows) = self.cached_rows().get(column_ordinal) {
@@ -1944,9 +2168,10 @@ impl KeyRelationColumnDerivation for SameSecretColumnDerivation<'_, '_, '_, '_> 
             self.source_layout.common_secret.coefficients,
             column_ordinal,
         ) {
-            return split_signed_i8_polynomial(
+            return split_i8_polynomial_with_relation_offset(
                 self.source.common_secret_coefficients(),
                 half_ordinal,
+                self.source_layout.common_secret.offset,
             )
             .map(Some);
         }
@@ -1992,6 +2217,51 @@ impl KeyRelationColumnDerivation for SameSecretColumnDerivation<'_, '_, '_, '_> 
                         .map(Some);
                 }
             }
+        }
+        let mut comparator_request = None;
+        for material_layout in &self.source_layout.ordered_materials {
+            for half_ordinal in 0..2 {
+                let comparator = &material_layout.upper_bound_comparators[half_ordinal];
+                let contains_column =
+                    comparator.difference_digits.iter().any(|difference| {
+                        difference.target_column_ordinal == column_ordinal
+                            || difference.trit_column_ordinals.contains(&column_ordinal)
+                    }) || comparator.borrow_column_ordinals.contains(&column_ordinal);
+                if contains_column {
+                    if comparator_request.is_some() {
+                        return Err(RefusalReason::InvalidArithmeticRelation);
+                    }
+                    comparator_request = Some((
+                        material_layout.data_modulus_index,
+                        material_layout.material[half_ordinal]
+                            .ordered_digit_column_ordinals()
+                            .to_vec(),
+                        comparator.clone(),
+                    ));
+                }
+            }
+        }
+        if let Some((data_modulus_index, value_digit_columns, comparator)) = comparator_request {
+            let mut maximum = self
+                .relation_context
+                .resolved_modulus(SuiteModulusReference::data(data_modulus_index))
+                .map_err(|_| RefusalReason::InvalidArithmeticRelation)?
+                .checked_sub(1)
+                .ok_or(RefusalReason::InvalidArithmeticRelation)?;
+            let mut maximum_digits = Vec::with_capacity(value_digit_columns.len());
+            for _ in &value_digit_columns {
+                maximum_digits.push(maximum % MATERIAL_DIGIT_RADIX);
+                maximum /= MATERIAL_DIGIT_RADIX;
+            }
+            if maximum != 0 {
+                return Err(RefusalReason::InvalidArithmeticRelation);
+            }
+            return self.upper_bound_comparator_rows(
+                &value_digit_columns,
+                &maximum_digits,
+                &comparator,
+                column_ordinal,
+            );
         }
         anchor_direct_witness_rows(
             self.source,
@@ -2063,9 +2333,10 @@ impl KeyRelationColumnDerivation for PublicKeyShareColumnDerivation<'_, '_, '_, 
             self.source_layout.common_secret.source.coefficients,
             column_ordinal,
         ) {
-            return split_signed_i8_polynomial(
+            return split_i8_polynomial_with_relation_offset(
                 self.source.common_secret_coefficients(),
                 half_ordinal,
+                self.source_layout.common_secret.source.offset,
             )
             .map(Some);
         }
@@ -2073,9 +2344,10 @@ impl KeyRelationColumnDerivation for PublicKeyShareColumnDerivation<'_, '_, '_, 
             self.source_layout.public_key_error.coefficients,
             column_ordinal,
         ) {
-            return split_signed_i8_polynomial(
+            return split_i8_polynomial_with_relation_offset(
                 self.source.public_key_share().centered_error_coefficients(),
                 half_ordinal,
+                self.source_layout.public_key_error.offset,
             )
             .map(Some);
         }
@@ -2282,12 +2554,13 @@ fn anchor_direct_witness_rows<Layout: AnchorSourceLayout>(
             if let Some(half_ordinal) =
                 half_position(hiding_secret.source.coefficients, column_ordinal)
             {
-                return split_signed_i8_polynomial(
+                return split_i8_polynomial_with_relation_offset(
                     anchor
                         .hiding_secret_polynomials()
                         .get(polynomial_ordinal)
                         .ok_or(RefusalReason::WrongTypeOrLength)?,
                     half_ordinal,
+                    hiding_secret.source.offset,
                 )
                 .map(Some);
             }
@@ -2296,12 +2569,13 @@ fn anchor_direct_witness_rows<Layout: AnchorSourceLayout>(
             layout.opening().hiding_errors().iter().enumerate()
         {
             if let Some(half_ordinal) = half_position(hiding_error.coefficients, column_ordinal) {
-                return split_signed_i8_polynomial(
+                return split_i8_polynomial_with_relation_offset(
                     anchor
                         .hiding_error_polynomials()
                         .get(polynomial_ordinal)
                         .ok_or(RefusalReason::WrongTypeOrLength)?,
                     half_ordinal,
+                    hiding_error.offset,
                 )
                 .map(Some);
             }
@@ -2369,6 +2643,20 @@ fn anchor_direct_witness_rows<Layout: AnchorSourceLayout>(
         }
     }
     Ok(None)
+}
+
+fn split_i8_polynomial_with_relation_offset(
+    coefficients: &[i8],
+    half_ordinal: usize,
+    relation_offset: u64,
+) -> Result<Zeroizing<Vec<i128>>, RefusalReason> {
+    let mut rows = split_signed_i8_polynomial(coefficients, half_ordinal)?;
+    for row in rows.iter_mut() {
+        *row = row
+            .checked_add(i128::from(relation_offset))
+            .ok_or(RefusalReason::InvalidArithmeticRelation)?;
+    }
+    Ok(rows)
 }
 
 fn recentered_matrix_rows(
@@ -2470,22 +2758,11 @@ fn derive_anchor_quotient<Layout: AnchorSourceLayout>(
             modulus,
         )
         .map_err(|_| RefusalReason::InvalidArithmeticRelation)?;
-        let centered_matrix = matrix
-            .into_iter()
-            .map(|value| centered_residue(value, modulus))
-            .collect::<Vec<_>>();
         let hiding_secret = anchor
             .hiding_secret_polynomials()
             .get(column_ordinal)
-            .ok_or(RefusalReason::WrongTypeOrLength)?
-            .iter()
-            .copied()
-            .map(i128::from)
-            .collect::<Vec<_>>();
-        products.push(exact_negacyclic_product_radix(
-            &centered_matrix,
-            &hiding_secret,
-        )?);
+            .ok_or(RefusalReason::WrongTypeOrLength)?;
+        products.push(exact_anchor_matrix_product(matrix, hiding_secret)?);
     }
     let last_hiding_secret = anchor
         .hiding_secret_polynomials()
@@ -2511,6 +2788,23 @@ fn derive_anchor_quotient<Layout: AnchorSourceLayout>(
                 })
         }
     })
+}
+
+fn exact_anchor_matrix_product(
+    canonical_matrix: Vec<u64>,
+    hiding_secret: &[i8],
+) -> Result<Zeroizing<Vec<i128>>, RefusalReason> {
+    exact_negacyclic_product_radix(
+        &canonical_matrix
+            .into_iter()
+            .map(i128::from)
+            .collect::<Vec<_>>(),
+        &hiding_secret
+            .iter()
+            .copied()
+            .map(i128::from)
+            .collect::<Vec<_>>(),
+    )
 }
 
 fn setup_verifier_sequence(
@@ -2568,5 +2862,196 @@ fn setup_verifier_sequence(
             .map_err(|_| RefusalReason::InvalidArithmeticRelation)
         }
         _ => Err(RefusalReason::WrongTypeOrLength),
+    }
+}
+
+#[cfg(test)]
+mod upper_bound_comparator_tests {
+    use super::super::key_relation::BoundedMaterialDigitWitnessLayout;
+    use super::*;
+
+    fn two_digit_comparator() -> UpperBoundComparatorWitnessLayout {
+        UpperBoundComparatorWitnessLayout {
+            difference_digits: vec![
+                BoundedMaterialDigitWitnessLayout {
+                    target_column_ordinal: 10,
+                    trit_column_ordinals: (100..117).collect(),
+                },
+                BoundedMaterialDigitWitnessLayout {
+                    target_column_ordinal: 20,
+                    trit_column_ordinals: vec![200],
+                },
+            ],
+            borrow_column_ordinals: vec![30],
+        }
+    }
+
+    fn valid_value_rows() -> Vec<Zeroizing<Vec<i128>>> {
+        vec![
+            Zeroizing::new(vec![0, 5, 6, i128::from(MATERIAL_DIGIT_RADIX - 1), 0]),
+            Zeroizing::new(vec![0, 1, 0, 0, 1]),
+        ]
+    }
+
+    fn requested_rows(
+        value_rows: &[Zeroizing<Vec<i128>>],
+        requested_column_ordinal: u32,
+    ) -> Result<Vec<i128>, RefusalReason> {
+        derive_upper_bound_comparator_rows_from_values(
+            value_rows,
+            &[5, 1],
+            &two_digit_comparator(),
+            requested_column_ordinal,
+        )
+        .map(|rows| {
+            rows.expect("the requested comparator column must be owned")
+                .to_vec()
+        })
+    }
+
+    #[test]
+    fn upper_bound_comparator_derives_difference_trits_and_borrows_at_boundaries() {
+        let values = valid_value_rows();
+        assert_eq!(
+            requested_rows(&values, 10),
+            Ok(vec![5, 0, i128::from(MATERIAL_DIGIT_RADIX - 1), 6, 5,])
+        );
+        assert_eq!(requested_rows(&values, 20), Ok(vec![1, 0, 0, 0, 0]));
+        assert_eq!(requested_rows(&values, 30), Ok(vec![0, 0, 1, 1, 0]));
+        assert_eq!(requested_rows(&values, 100), Ok(vec![2, 0, 2, 0, 2]));
+        assert_eq!(requested_rows(&values, 116), Ok(vec![0, 0, 2, 0, 0]));
+        assert_eq!(requested_rows(&values, 200), Ok(vec![1, 0, 0, 0, 0]));
+    }
+
+    #[test]
+    fn upper_bound_comparator_rejects_out_of_range_values_and_final_borrow() {
+        let negative_value = vec![Zeroizing::new(vec![-1]), Zeroizing::new(vec![0])];
+        assert_eq!(
+            requested_rows(&negative_value, 10),
+            Err(RefusalReason::InvalidArithmeticRelation)
+        );
+
+        let radix_value = vec![
+            Zeroizing::new(vec![i128::from(MATERIAL_DIGIT_RADIX)]),
+            Zeroizing::new(vec![0]),
+        ];
+        assert_eq!(
+            requested_rows(&radix_value, 10),
+            Err(RefusalReason::InvalidArithmeticRelation)
+        );
+
+        let above_maximum = vec![Zeroizing::new(vec![6]), Zeroizing::new(vec![1])];
+        assert_eq!(
+            requested_rows(&above_maximum, 10),
+            Err(RefusalReason::InvalidArithmeticRelation)
+        );
+    }
+
+    #[test]
+    fn upper_bound_comparator_rejects_malformed_geometry() {
+        let values = valid_value_rows();
+        assert_eq!(
+            derive_upper_bound_comparator_rows_from_values(
+                &values[..1],
+                &[5, 1],
+                &two_digit_comparator(),
+                10,
+            ),
+            Err(RefusalReason::WrongTypeOrLength)
+        );
+
+        let mismatched_rows = vec![Zeroizing::new(vec![0, 1]), Zeroizing::new(vec![0])];
+        assert_eq!(
+            requested_rows(&mismatched_rows, 10),
+            Err(RefusalReason::WrongTypeOrLength)
+        );
+
+        let mut duplicate_column = two_digit_comparator();
+        duplicate_column.difference_digits[1].target_column_ordinal = 10;
+        assert_eq!(
+            derive_upper_bound_comparator_rows_from_values(&values, &[5, 1], &duplicate_column, 10,),
+            Err(RefusalReason::InvalidArithmeticRelation)
+        );
+    }
+}
+
+#[cfg(test)]
+mod anchor_quotient_representative_tests {
+    use super::*;
+
+    #[test]
+    fn shifted_small_witness_rows_use_the_relation_encoding() {
+        let coefficients = [-1_i8, 0, 1, 1, -1, 0, 1, -1];
+        assert_eq!(
+            &split_i8_polynomial_with_relation_offset(&coefficients, 0, 1)
+                .expect("shifted low half")[..],
+            &[0, 1, 2, 2],
+        );
+        assert_eq!(
+            &split_i8_polynomial_with_relation_offset(&coefficients, 1, 1)
+                .expect("shifted high half")[..],
+            &[0, 1, 2, 0],
+        );
+        assert_eq!(
+            &split_i8_polynomial_with_relation_offset(&coefficients, 0, 0)
+                .expect("unshifted low half")[..],
+            &[-1, 0, 1, 1],
+        );
+        assert_eq!(
+            split_i8_polynomial_with_relation_offset(&coefficients, 2, 1),
+            Err(RefusalReason::WrongTypeOrLength),
+        );
+    }
+
+    #[test]
+    fn anchor_quotient_uses_the_canonical_matrix_representative_proved_by_the_relation() {
+        let modulus = 17_u64;
+        let commitment = [16_u64, 0];
+        let canonical_product =
+            exact_anchor_matrix_product(vec![16, 0], &[1, 0]).expect("canonical matrix product");
+        let canonical_quotient = exact_modular_quotient(
+            commitment
+                .iter()
+                .copied()
+                .zip(canonical_product.iter().copied()),
+            modulus,
+            |(commitment, product)| i128::from(commitment).checked_sub(product),
+        )
+        .expect("canonical quotient");
+        assert_eq!(&canonical_product[..], &[16, 0]);
+        assert_eq!(&canonical_quotient[..], &[0, 0]);
+
+        let centered_product =
+            exact_negacyclic_product_radix(&[-1, 0], &[1, 0]).expect("centered matrix product");
+        let centered_quotient = exact_modular_quotient(
+            commitment
+                .iter()
+                .copied()
+                .zip(centered_product.iter().copied()),
+            modulus,
+            |(commitment, product)| i128::from(commitment).checked_sub(product),
+        )
+        .expect("centered quotient");
+        assert_eq!(&centered_quotient[..], &[1, 0]);
+        assert_eq!(
+            i128::from(commitment[0])
+                - canonical_product[0]
+                - i128::from(modulus) * centered_quotient[0],
+            -17,
+            "a centered-source quotient cannot satisfy the canonical-representative relation",
+        );
+
+        let negative_secret_product = exact_anchor_matrix_product(vec![16, 0], &[-1, 0])
+            .expect("negative-secret matrix product");
+        let negative_secret_quotient = exact_modular_quotient(
+            [1_u64, 0]
+                .into_iter()
+                .zip(negative_secret_product.iter().copied()),
+            modulus,
+            |(commitment, product)| i128::from(commitment).checked_sub(product),
+        )
+        .expect("negative-secret quotient");
+        assert_eq!(&negative_secret_product[..], &[-16, 0]);
+        assert_eq!(&negative_secret_quotient[..], &[1, 0]);
     }
 }

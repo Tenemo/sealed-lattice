@@ -180,6 +180,57 @@ impl PreparedActionProofAttemptSource {
     }
 }
 
+#[cfg(all(feature = "proof-backend-bakeoff", not(target_arch = "wasm32")))]
+pub(crate) fn prepare_production_backend_prototype_attempt(
+    action_private_randomness: &ActionPrivateRandomness,
+    application_slot: ProofApplicationSlot,
+    application_statement_hash: Hash512,
+    expected_proof_byte_length: u64,
+    expected_query_count: u32,
+) -> Result<PreparedActionProofAttemptSource, super::FoundationSchemaError> {
+    if expected_proof_byte_length == 0
+        || expected_query_count == 0
+        || application_statement_hash.into_bytes() == [0_u8; HASH_BYTE_LENGTH]
+    {
+        return Err(super::FoundationSchemaError::new(
+            RefusalReason::OutsideSupportedProfile,
+            "the production backend prototype attempt has invalid limits",
+        ));
+    }
+    let derivation = action_private_randomness.derivation_input();
+    if application_slot.suite_identifier() != derivation.suite_identifier()
+        || application_slot.ceremony_context_hash() != derivation.ceremony_context_hash()
+        || application_slot.action_context_hash() != derivation.action_context_hash()
+        || application_slot.roster_position().is_none()
+        || application_slot.schedule_position().is_some()
+        || application_slot.producer_sequence().is_some()
+    {
+        return Err(super::FoundationSchemaError::new(
+            RefusalReason::WrongContext,
+            "the production backend prototype slot and action randomness differ",
+        ));
+    }
+    let proof_coin_input =
+        PersistentProofCoinInput::new(application_slot, application_statement_hash)?;
+    let attempt_identifier =
+        action_private_randomness.persistent_proof_preparation_identifier(&proof_coin_input)?;
+    Ok(PreparedActionProofAttemptSource {
+        attempt_identifier,
+        application_slot,
+        application_slot_hash: application_slot.hash()?,
+        application_statement_schema_identifier: application_slot
+            .application_statement_schema_identifier(),
+        application_statement_hash,
+        expected_proof_byte_length,
+        expected_query_count,
+        checkpoint_continuation:
+            AuthenticatedCheckpointContinuationSource::for_fresh_common_proof_attempt(
+                [0x71; ATTEMPT_IDENTIFIER_BYTE_LENGTH],
+                Hash512::from_bytes([0x72; HASH_BYTE_LENGTH]),
+            ),
+    })
+}
+
 /// A reset-safe prepared attempt after the family owner has streamed the
 /// exact canonical semantic witness into the browser-owned proof-coin KMAC.
 /// Only this type can authorize persistent common-proof generation.
