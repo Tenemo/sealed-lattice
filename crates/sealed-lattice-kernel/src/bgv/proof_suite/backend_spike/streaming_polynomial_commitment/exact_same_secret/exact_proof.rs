@@ -31,12 +31,13 @@ use super::super::{
 #[cfg(all(test, not(target_arch = "wasm32")))]
 use super::super::{
     plain_whir::{commit_plain_aggregate_batch, open_plain_aggregate_batches_at_points},
+    plain_whir_wire::plain_whir_batch_wire_breakdown,
     protocol::{StreamingCommitment, aggregate_weighted_message, recompute_authenticated_columns},
 };
 use super::*;
 use crate::bgv::proof_suite::relation_plan::{RelationColumnOrigin, RelationOpeningSourceClass};
 use crate::bgv::proof_suite::{
-    BoundTreeConstructionKind, COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH,
+    BoundTreeConstructionKind, BoundTreeRootUse, COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH,
     DeepCompositionVerificationInput, ProofBaseFieldElement, ProofChallengeExtensionElement,
     ProofEvaluationDomain, ProofTreeCatalogEntry, ProofTreeCatalogInput, ProofTreeCatalogSource,
     ProofTreeValue, RelationPlanVariant, RelationProofTreeInput, StatementOwnedProofTreeInput,
@@ -44,42 +45,49 @@ use crate::bgv::proof_suite::{
     VerifiedRelationColumnEvaluator, build_complete_proof_tree_catalog,
 };
 
-const EXACT_PROOF_WIRE_MAGIC: &[u8; 8] = b"SLXPRF02";
+const EXACT_PROOF_WIRE_MAGIC: &[u8; 8] = b"SLXPRF04";
 const EXACT_PUBLIC_INPUT_WIRE_MAGIC: &[u8; 8] = b"SLXPUB01";
 const EXACT_PUBLIC_INPUT_DIGEST_DOMAIN: &str = "sealed-lattice/exact-same-secret/public-input/v1";
 const EXACT_AGGREGATE_BINDING_DOMAIN: &[u8] =
-    b"sealed-lattice/exact-same-secret/aggregate-binding/v1";
+    b"sealed-lattice/exact-same-secret/aggregate-binding/v2";
 const EXACT_RANK_ONE_CHALLENGE_DOMAIN: &[u8] =
     b"sealed-lattice/exact-same-secret/rank-one-challenges/v1";
-const EXACT_COLUMN_QUERY_DOMAIN: &[u8] = b"sealed-lattice/exact-same-secret/column-queries/v1";
+const EXACT_COLUMN_QUERY_DOMAIN: &[u8] = b"sealed-lattice/exact-same-secret/column-queries/v2";
 const EXACT_PROOF_TABLE_WIDTH: usize = 4;
-const EXACT_COLUMN_QUERY_COUNT: usize = 320;
-const EXACT_TABLE_VARIABLE_COUNT: usize = 18;
-const EXACT_PCS_VARIABLE_COUNT: usize = 20;
-const EXACT_QUOTIENT_PHASE_ROW_COUNT: usize = 40;
+const EXACT_COLUMN_QUERY_COUNT: usize = 387;
+const EXACT_TABLE_VARIABLE_COUNT: usize = 19;
+const EXACT_PCS_VARIABLE_COUNT: usize = 21;
+const EXACT_QUOTIENT_PHASE_ROW_COUNT: usize = 15;
+const EXACT_OPENING_BATCH_MASK_CHUNK_COUNT: usize = 8;
 const EXACT_BOUND_TREE_COUNT: usize = 11;
+const EXACT_INPUT_BOUND_TREE_COUNT: usize = 8;
+const EXACT_OUTPUT_BOUND_TREE_COUNT: usize = 3;
 const EXACT_BOUND_COLUMN_COUNT: usize = 44;
+const EXACT_INPUT_BOUND_COLUMN_COUNT: usize = 32;
+const EXACT_OUTPUT_BOUND_COLUMN_COUNT: usize = 12;
 const EXACT_BOUND_TREE_ROW_WIDTH: usize = 4;
-const EXACT_BOUND_QUERY_COUNT: usize = 40;
+const EXACT_INPUT_BOUND_QUERY_COUNT: usize = 40;
+const EXACT_OUTPUT_BOUND_QUERY_COUNT: usize = 266;
 const EXACT_BOUND_LEAF_COUNT: usize = 1 << 20;
 const EXACT_BOUND_POLYNOMIAL_VARIABLE_COUNT: usize = 15;
-const EXACT_BOUND_POLYNOMIAL_DEGREE_BOUND_EXCLUSIVE: usize = 18_432;
+const EXACT_BOUND_SOURCE_DEGREE_BOUND_EXCLUSIVE: usize = 18_432;
+const EXACT_BOUND_QUOTIENT_DEGREE_BOUND_EXCLUSIVE: usize = 18_431;
 const EXACT_BOUND_REDUCTION_COLUMN_INDEX: usize = 3;
-const EXACT_BOUND_DEGREE_TEST_COUNT: usize = 10;
-const EXACT_BOUND_DEGREE_SUFFIX_PREFIXES: [&[u8]; 3] = [
-    &[0_u8, 0, 0, 1, 1],
-    &[0_u8, 0, 0, 1, 0, 1],
-    &[0_u8, 0, 0, 1, 0, 0, 1],
-];
+const EXACT_BOUND_REDUCTION_BLOCK_COUNT: usize = 2;
+const EXACT_BOUND_DEGREE_TESTS_PER_BLOCK: usize = 4;
+const EXACT_BOUND_DEGREE_TEST_COUNT: usize =
+    EXACT_BOUND_REDUCTION_BLOCK_COUNT * EXACT_BOUND_DEGREE_TESTS_PER_BLOCK;
+const EXACT_BOUND_DEGREE_SUFFIX_PREFIXES: [&[u8]; 3] =
+    [&[1_u8, 1], &[1_u8, 0, 1], &[1_u8, 0, 0, 1]];
 const EXACT_BOUND_BATCHING_CHALLENGE_DOMAIN: &[u8] =
-    b"sealed-lattice/exact-same-secret/bound-batching/v1";
-const EXACT_BOUND_QUERY_DOMAIN: &[u8] = b"sealed-lattice/exact-same-secret/bound-queries/v1";
+    b"sealed-lattice/exact-same-secret/bound-batching/v2";
+const EXACT_BOUND_QUERY_DOMAIN: &[u8] = b"sealed-lattice/exact-same-secret/bound-queries/v2";
 const EXACT_BOUND_DEGREE_POINT_DOMAIN: &[u8] =
-    b"sealed-lattice/exact-same-secret/bound-degree-points/v1";
+    b"sealed-lattice/exact-same-secret/bound-degree-points/v2";
 const MAXIMUM_EXACT_PUBLIC_INPUT_WIRE_BYTE_LENGTH: usize = 1_024 * 1_024;
 const MAXIMUM_EXACT_STATEMENT_BYTE_LENGTH: usize = 1_048_576;
 #[cfg(not(target_arch = "wasm32"))]
-const EXACT_PROOF_ARTIFACT_NAME: &str = "exact-same-secret-proof.bin";
+const EXACT_PROOF_ARTIFACT_NAME: &str = "exact-same-secret-proof-v4.bin";
 #[cfg(not(target_arch = "wasm32"))]
 const EXACT_PUBLIC_INPUT_ARTIFACT_NAME: &str = "exact-same-secret-public-input.bin";
 
@@ -120,6 +128,8 @@ pub(crate) struct ExactSameSecretProof {
     auxiliary_root: ColumnDigest,
     quotient_root: ColumnDigest,
     deep_evaluations: Vec<ProofChallengeExtensionElement>,
+    opening_batch_mask_chunk_evaluations:
+        [ProofChallengeExtensionElement; EXACT_OPENING_BATCH_MASK_CHUNK_COUNT],
     aggregate_commitment: PlainAggregateCommitment,
     authenticated_phase_columns: [Vec<AuthenticatedColumn>; 3],
     phase_frontiers: [Vec<ColumnDigest>; 3],
@@ -183,7 +193,10 @@ fn column_digest_bytes(digest: ColumnDigest) -> [u8; 64] {
 fn expected_opening_widths() -> Vec<usize> {
     let mut widths = vec![1, 1, 1];
     widths.extend(std::iter::repeat_n(3, EXACT_COLUMN_QUERY_COUNT));
-    widths.extend(std::iter::repeat_n(1, EXACT_BOUND_QUERY_COUNT * 2));
+    widths.extend(std::iter::repeat_n(
+        1,
+        (EXACT_INPUT_BOUND_QUERY_COUNT + EXACT_OUTPUT_BOUND_QUERY_COUNT) * 2,
+    ));
     widths.extend(std::iter::repeat_n(1, EXACT_BOUND_DEGREE_TEST_COUNT));
     widths
 }
@@ -237,11 +250,15 @@ fn validate_public_input(
         ),
     )
     .map_err(|error| format!("decode exact same-secret statement: {error:?}"))?;
+    if statement.ordered_degree_zero_commitment_roots().len() != EXACT_INPUT_BOUND_TREE_COUNT {
+        return Err("exact statement has the wrong input-root count".to_owned());
+    }
     let mut statement_roots = statement.ordered_degree_zero_commitment_roots().to_vec();
     statement_roots.extend(statement.anchor_commitment_roots());
     let mut relation_trees = Vec::with_capacity(variant.ordered_trees().len());
     let mut public_tree_inputs = public_input.public_relation_trees.iter();
     let mut actual_bound_roots = Vec::new();
+    let mut actual_bound_root_uses = Vec::new();
     let mut bound_column_ordinals = Vec::new();
     for descriptor in variant.ordered_trees() {
         match descriptor {
@@ -269,6 +286,7 @@ fn validate_public_input(
             }
             RelationTreeDescriptor::BoundPublic {
                 construction_kind,
+                root_use,
                 ordered_column_ordinals,
                 ..
             } => {
@@ -295,10 +313,21 @@ fn validate_public_input(
                 if *construction_kind != input_kind
                     || row_width != EXACT_BOUND_TREE_ROW_WIDTH
                     || ordered_column_ordinals.len() != EXACT_BOUND_TREE_ROW_WIDTH
+                    || !matches!(
+                        (input_kind, root_use),
+                        (
+                            BoundTreeConstructionKind::CommittedMaterial,
+                            BoundTreeRootUse::Input
+                        ) | (
+                            BoundTreeConstructionKind::SetupPolynomial,
+                            BoundTreeRootUse::Output
+                        )
+                    )
                 {
                     return Err("verifier-owned bound tree has the wrong construction".to_owned());
                 }
                 actual_bound_roots.push(expected_root);
+                actual_bound_root_uses.push(*root_use);
                 bound_column_ordinals.extend_from_slice(ordered_column_ordinals);
                 relation_trees.push(RelationProofTreeInput::BoundPublic(statement_tree.clone()));
             }
@@ -311,6 +340,12 @@ fn validate_public_input(
     bound_column_ordinals.dedup();
     if actual_bound_roots != statement_roots
         || actual_bound_roots.len() != EXACT_BOUND_TREE_COUNT
+        || actual_bound_root_uses
+            != [
+                vec![BoundTreeRootUse::Input; EXACT_INPUT_BOUND_TREE_COUNT],
+                vec![BoundTreeRootUse::Output; EXACT_OUTPUT_BOUND_TREE_COUNT],
+            ]
+            .concat()
         || bound_column_ordinals.len() != EXACT_BOUND_COLUMN_COUNT
     {
         return Err("verifier-owned bound roots do not match the application statement".to_owned());
@@ -325,7 +360,7 @@ fn validate_public_input(
             .ok_or_else(|| "bound column ordinal is outside the relation".to_owned())?;
         if !matches!(descriptor.origin(), RelationColumnOrigin::BoundTree { .. })
             || descriptor.source_degree_bound_exclusive()
-                > EXACT_BOUND_POLYNOMIAL_DEGREE_BOUND_EXCLUSIVE as u64
+                > EXACT_BOUND_SOURCE_DEGREE_BOUND_EXCLUSIVE as u64
         {
             return Err("bound column violates its relation descriptor".to_owned());
         }
@@ -611,6 +646,8 @@ fn aggregate_binding(
     proof_roots: [ColumnDigest; 3],
     transcript_prefix: &ExactTranscriptPrefix,
     deep_evaluations: &[ProofChallengeExtensionElement],
+    opening_batch_mask_chunk_evaluations: &[ProofChallengeExtensionElement;
+         EXACT_OPENING_BATCH_MASK_CHUNK_COUNT],
     opening_batch_challenges: &[ProofChallengeExtensionElement],
 ) -> Result<Vec<u8>, String> {
     let mut binding = Vec::new();
@@ -630,6 +667,11 @@ fn aggregate_binding(
         }
     }
     for value in deep_evaluations {
+        for coordinate in value.canonical_coordinates() {
+            binding.extend_from_slice(&coordinate.to_le_bytes());
+        }
+    }
+    for value in opening_batch_mask_chunk_evaluations {
         for coordinate in value.canonical_coordinates() {
             binding.extend_from_slice(&coordinate.to_le_bytes());
         }
@@ -698,7 +740,7 @@ fn derive_bound_opening_claims(
             column_ordinal,
             opening_point: challenge_from_production(opening_point),
             claimed_value: challenge_from_production(*claimed_value),
-            batching_weight: sample_nonzero_challenge(&mut reader),
+            batching_weight: sample_challenge(&mut reader),
         });
     }
     if claims.len() != EXACT_BOUND_COLUMN_COUNT {
@@ -756,8 +798,26 @@ fn derive_bound_query_indices(
         binding,
         aggregate_commitment,
         EXACT_BOUND_LEAF_COUNT,
-        EXACT_BOUND_QUERY_COUNT,
+        EXACT_OUTPUT_BOUND_QUERY_COUNT,
     )
+}
+
+fn bound_reduction_block_coordinates(block_ordinal: usize) -> Result<Vec<ChallengeField>, String> {
+    let block_variable_count = EXACT_TABLE_VARIABLE_COUNT
+        .checked_sub(EXACT_BOUND_POLYNOMIAL_VARIABLE_COUNT)
+        .ok_or_else(|| "bound reduction block geometry underflowed".to_owned())?;
+    if block_ordinal >= EXACT_BOUND_REDUCTION_BLOCK_COUNT {
+        return Err("bound reduction block ordinal is outside the construction".to_owned());
+    }
+    Ok((0..block_variable_count)
+        .map(|bit_ordinal| {
+            if block_ordinal & (1 << (block_variable_count - 1 - bit_ordinal)) == 0 {
+                ChallengeField::ZERO
+            } else {
+                ChallengeField::ONE
+            }
+        })
+        .collect())
 }
 
 fn bound_degree_test_points(
@@ -777,40 +837,41 @@ fn bound_degree_test_points(
     state.update(&column_digest_bytes(aggregate_root));
     let mut reader = state.finalize_xof();
     let mut points = Vec::with_capacity(EXACT_BOUND_DEGREE_TEST_COUNT);
-    for nonzero_block in 1..=7 {
-        let mut coordinates = Vec::with_capacity(EXACT_TABLE_VARIABLE_COUNT);
-        for block_bit in (0..3).rev() {
-            coordinates.push(if nonzero_block & (1 << block_bit) == 0 {
-                ChallengeField::ZERO
-            } else {
-                ChallengeField::ONE
-            });
-        }
-        coordinates.extend(
-            (0..EXACT_BOUND_POLYNOMIAL_VARIABLE_COUNT).map(|_| sample_challenge(&mut reader)),
-        );
-        points.push(Point::new(coordinates));
-    }
-    // The exact bound columns have degree below 18,432. The suffix
-    // [18,432, 32,768) is the disjoint union of three aligned subcubes.
-    // Testing each subcube plus the seven complete upper blocks proves the
-    // reduction polynomial has the exact construction degree bound.
-    for fixed_prefix in EXACT_BOUND_DEGREE_SUFFIX_PREFIXES {
-        let mut coordinates = fixed_prefix
-            .iter()
-            .copied()
-            .map(|bit| {
+    for block_ordinal in 0..EXACT_BOUND_REDUCTION_BLOCK_COUNT {
+        let mut boundary_coordinates = bound_reduction_block_coordinates(block_ordinal)?;
+        boundary_coordinates.extend((0..EXACT_BOUND_POLYNOMIAL_VARIABLE_COUNT).map(
+            |bit_ordinal| {
+                if EXACT_BOUND_QUOTIENT_DEGREE_BOUND_EXCLUSIVE
+                    & (1 << (EXACT_BOUND_POLYNOMIAL_VARIABLE_COUNT - 1 - bit_ordinal))
+                    == 0
+                {
+                    ChallengeField::ZERO
+                } else {
+                    ChallengeField::ONE
+                }
+            },
+        ));
+        points.push(Point::new(boundary_coordinates));
+
+        // An honest synthetic quotient has degree below 18,431. Its single
+        // boundary coefficient at 18,431 is checked above. The remaining
+        // suffix [18,432, 32,768) is the disjoint union of these three
+        // aligned subcubes.
+        for fixed_prefix in EXACT_BOUND_DEGREE_SUFFIX_PREFIXES {
+            let mut coordinates = bound_reduction_block_coordinates(block_ordinal)?;
+            coordinates.extend(fixed_prefix.iter().copied().map(|bit| {
                 if bit == 0 {
                     ChallengeField::ZERO
                 } else {
                     ChallengeField::ONE
                 }
-            })
-            .collect::<Vec<_>>();
-        coordinates.extend(
-            (coordinates.len()..EXACT_TABLE_VARIABLE_COUNT).map(|_| sample_challenge(&mut reader)),
-        );
-        points.push(Point::new(coordinates));
+            }));
+            coordinates.extend(
+                (coordinates.len()..EXACT_TABLE_VARIABLE_COUNT)
+                    .map(|_| sample_challenge(&mut reader)),
+            );
+            points.push(Point::new(coordinates));
+        }
     }
     if points.len() != EXACT_BOUND_DEGREE_TEST_COUNT {
         return Err("bound degree-test schedule has the wrong fixed shape".to_owned());
@@ -820,11 +881,14 @@ fn bound_degree_test_points(
 
 fn bound_column_locations(
     variant: &RelationPlanVariant,
-) -> Result<BTreeMap<u32, (usize, usize)>, String> {
+) -> Result<BTreeMap<u32, (usize, usize, BoundTreeRootUse)>, String> {
     let mut locations = BTreeMap::new();
     let mut bound_tree_ordinal = 0_usize;
+    let mut input_column_count = 0_usize;
+    let mut output_column_count = 0_usize;
     for tree in variant.ordered_trees() {
         let RelationTreeDescriptor::BoundPublic {
+            root_use,
             ordered_column_ordinals,
             ..
         } = tree
@@ -834,23 +898,42 @@ fn bound_column_locations(
         for (column_position, column_ordinal) in ordered_column_ordinals.iter().copied().enumerate()
         {
             if locations
-                .insert(column_ordinal, (bound_tree_ordinal, column_position))
+                .insert(
+                    column_ordinal,
+                    (bound_tree_ordinal, column_position, *root_use),
+                )
                 .is_some()
             {
                 return Err("bound relation column occurs in more than one tree".to_owned());
             }
         }
+        match root_use {
+            BoundTreeRootUse::Input => input_column_count += ordered_column_ordinals.len(),
+            BoundTreeRootUse::Output => output_column_count += ordered_column_ordinals.len(),
+        }
         bound_tree_ordinal += 1;
     }
-    if bound_tree_ordinal != EXACT_BOUND_TREE_COUNT || locations.len() != EXACT_BOUND_COLUMN_COUNT {
+    if bound_tree_ordinal != EXACT_BOUND_TREE_COUNT
+        || locations.len() != EXACT_BOUND_COLUMN_COUNT
+        || input_column_count != EXACT_INPUT_BOUND_COLUMN_COUNT
+        || output_column_count != EXACT_OUTPUT_BOUND_COLUMN_COUNT
+    {
         return Err("bound relation tree layout has the wrong fixed shape".to_owned());
     }
     Ok(locations)
 }
 
+fn bound_tree_query_count(bound_tree_ordinal: usize) -> Result<usize, String> {
+    match bound_tree_ordinal {
+        0..EXACT_INPUT_BOUND_TREE_COUNT => Ok(EXACT_INPUT_BOUND_QUERY_COUNT),
+        EXACT_INPUT_BOUND_TREE_COUNT..EXACT_BOUND_TREE_COUNT => Ok(EXACT_OUTPUT_BOUND_QUERY_COUNT),
+        _ => Err("bound tree ordinal is outside the exact relation".to_owned()),
+    }
+}
+
 #[derive(Clone)]
 struct ExactPointRowWeights {
-    selectors: [ChallengeField; 2],
+    selectors: [ChallengeField; 3],
     base: Vec<ChallengeField>,
     auxiliary: Vec<ChallengeField>,
     quotient: Vec<ChallengeField>,
@@ -871,22 +954,14 @@ fn sample_challenge(reader: &mut impl XofReader) -> ChallengeField {
     ChallengeField::new(core::array::from_fn(|_| sample_goldilocks(reader)))
 }
 
-fn sample_nonzero_challenge(reader: &mut impl XofReader) -> ChallengeField {
-    loop {
-        let challenge = sample_challenge(reader);
-        if challenge != ChallengeField::ZERO {
-            return challenge;
+fn challenge_extension_basis(extension_coordinate: usize) -> ChallengeField {
+    ChallengeField::new(core::array::from_fn(|coordinate| {
+        if coordinate == extension_coordinate {
+            Goldilocks::ONE
+        } else {
+            Goldilocks::ZERO
         }
-    }
-}
-
-fn sample_non_boolean_challenge(reader: &mut impl XofReader) -> ChallengeField {
-    loop {
-        let challenge = sample_challenge(reader);
-        if challenge != ChallengeField::ZERO && challenge != ChallengeField::ONE {
-            return challenge;
-        }
-    }
+    }))
 }
 
 #[cfg(test)]
@@ -928,18 +1003,13 @@ fn derive_exact_point_row_weights(
         u64::try_from(LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT)
             .map_err(|_| "logical polynomial coefficient count exceeds u64".to_owned())?,
     );
-    let split_selector_denominator = ChallengeField::ONE + quotient_chunk_power;
-    if split_selector_denominator == ChallengeField::ZERO {
-        return Err("quotient opening point cannot encode the exact low/high split".to_owned());
-    }
-    let split_selector = quotient_chunk_power * split_selector_denominator.inverse();
     let mut weights = Vec::with_capacity(3);
     for opening_point_ordinal in 0..3 {
-        let selectors = if opening_point_ordinal == 0 {
-            [sample_non_boolean_challenge(&mut reader), split_selector]
-        } else {
-            [sample_challenge(&mut reader), sample_challenge(&mut reader)]
-        };
+        let selectors = [
+            sample_challenge(&mut reader),
+            sample_challenge(&mut reader),
+            sample_challenge(&mut reader),
+        ];
         let base = base_layout
             .rows
             .iter()
@@ -948,7 +1018,7 @@ fn derive_exact_point_row_weights(
                     .opening_point_ordinals
                     .contains(&(opening_point_ordinal as u32))
                 {
-                    sample_nonzero_challenge(&mut reader)
+                    sample_challenge(&mut reader)
                 } else {
                     ChallengeField::ZERO
                 }
@@ -962,7 +1032,7 @@ fn derive_exact_point_row_weights(
                     .opening_point_ordinals
                     .contains(&(opening_point_ordinal as u32))
                 {
-                    sample_nonzero_challenge(&mut reader)
+                    sample_challenge(&mut reader)
                 } else {
                     ChallengeField::ZERO
                 }
@@ -970,38 +1040,14 @@ fn derive_exact_point_row_weights(
             .collect();
         let mut quotient = vec![ChallengeField::ZERO; EXACT_QUOTIENT_PHASE_ROW_COUNT];
         if opening_point_ordinal == 0 {
-            const QUOTIENT_COMPONENT_GROUP_COUNT: usize = 4;
-            const OPENING_BATCH_MASK_GROUP_COUNT: usize = 4;
-            for group_ordinal in 0..QUOTIENT_COMPONENT_GROUP_COUNT {
-                let group_weight = sample_nonzero_challenge(&mut reader);
-                for extension_coordinate in 0..5 {
-                    let basis = ChallengeField::new(core::array::from_fn(|coordinate| {
-                        if coordinate == extension_coordinate {
-                            Goldilocks::ONE
-                        } else {
-                            Goldilocks::ZERO
-                        }
-                    }));
-                    quotient[group_ordinal * 5 + extension_coordinate] = group_weight * basis;
-                }
-            }
-            let opening_batch_mask_weight = sample_nonzero_challenge(&mut reader);
-            let quotient_chunk_power_squared = quotient_chunk_power.square();
-            let mut group_power = ChallengeField::ONE;
-            for group_ordinal in 0..OPENING_BATCH_MASK_GROUP_COUNT {
-                for extension_coordinate in 0..5 {
-                    let basis = ChallengeField::new(core::array::from_fn(|coordinate| {
-                        if coordinate == extension_coordinate {
-                            Goldilocks::ONE
-                        } else {
-                            Goldilocks::ZERO
-                        }
-                    }));
-                    let row_ordinal =
-                        (QUOTIENT_COMPONENT_GROUP_COUNT + group_ordinal) * 5 + extension_coordinate;
-                    quotient[row_ordinal] = opening_batch_mask_weight * group_power * basis;
-                }
-                group_power *= quotient_chunk_power_squared;
+            let quotient_component_weight = sample_challenge(&mut reader);
+            let opening_batch_mask_weight = sample_challenge(&mut reader);
+            for extension_coordinate in 0..5 {
+                let basis = challenge_extension_basis(extension_coordinate);
+                quotient[extension_coordinate] = quotient_component_weight * basis;
+                quotient[5 + extension_coordinate] =
+                    quotient_component_weight * quotient_chunk_power * basis;
+                quotient[10 + extension_coordinate] = opening_batch_mask_weight * basis;
             }
         }
         weights.push(ExactPointRowWeights {
@@ -1139,17 +1185,57 @@ fn deep_evaluation_catalog(
     Ok(catalog)
 }
 
-fn selector_equality_weights(selectors: [ChallengeField; 2]) -> [ChallengeField; 4] {
+fn selector_equality_weights(selectors: [ChallengeField; 3]) -> [ChallengeField; 8] {
     Poly::new_from_point(&selectors, ChallengeField::ONE)
         .as_slice()
         .try_into()
-        .expect("two selector variables have four equality weights")
+        .expect("three selector variables have eight equality weights")
+}
+
+fn verify_opening_batch_mask_chunk_evaluations(
+    variant: &RelationPlanVariant,
+    opening_points: &[ProofChallengeExtensionElement],
+    deep_evaluations: &[ProofChallengeExtensionElement],
+    chunk_evaluations: &[ProofChallengeExtensionElement; EXACT_OPENING_BATCH_MASK_CHUNK_COUNT],
+) -> Result<(), String> {
+    let opening_point = opening_points
+        .first()
+        .copied()
+        .ok_or_else(|| "exact relation has no quotient opening point".to_owned())?;
+    let catalog = deep_evaluation_catalog(variant, deep_evaluations)?;
+    let claimed_mask_evaluation = catalog
+        .get(&claim_key(
+            RelationOpeningSourceClass::BatchMask,
+            0,
+            None,
+            0,
+        ))
+        .copied()
+        .ok_or_else(|| "exact relation has no opening-batch mask claim".to_owned())?;
+    let opening_point = challenge_from_production(opening_point);
+    let chunk_power = opening_point.exp_u64(
+        u64::try_from(LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT)
+            .map_err(|_| "logical polynomial coefficient count exceeds u64".to_owned())?,
+    );
+    let mut recombined_evaluation = ChallengeField::ZERO;
+    let mut current_chunk_power = ChallengeField::ONE;
+    for chunk_evaluation in chunk_evaluations {
+        recombined_evaluation += current_chunk_power * challenge_from_production(*chunk_evaluation);
+        current_chunk_power *= chunk_power;
+    }
+    if recombined_evaluation != challenge_from_production(claimed_mask_evaluation) {
+        return Err(
+            "opening-batch mask chunk evaluations do not recombine to the production claim"
+                .to_owned(),
+        );
+    }
+    Ok(())
 }
 
 fn expected_base_phase_deep_value(
     layout: &ExactBasePhaseLayout,
     row_weights: &[ChallengeField],
-    selector_weights: [ChallengeField; 4],
+    selector_weights: [ChallengeField; 8],
     opening_point_ordinal: u32,
     catalog: &BTreeMap<(u16, u32, u32), ProofChallengeExtensionElement>,
 ) -> Result<ChallengeField, String> {
@@ -1187,47 +1273,37 @@ fn expected_base_phase_deep_value(
 
 fn expected_quotient_phase_deep_value(
     row_weights: &[ChallengeField],
-    selector_weights: [ChallengeField; 4],
+    selector_weights: [ChallengeField; 8],
     catalog: &BTreeMap<(u16, u32, u32), ProofChallengeExtensionElement>,
+    opening_batch_mask_chunk_evaluations: &[ProofChallengeExtensionElement;
+         EXACT_OPENING_BATCH_MASK_CHUNK_COUNT],
 ) -> Result<ChallengeField, String> {
     if row_weights.len() != EXACT_QUOTIENT_PHASE_ROW_COUNT {
         return Err("exact quotient row weights have the wrong count".to_owned());
     }
     let mut expected = ChallengeField::ZERO;
-    for group_ordinal in 0..4 {
-        // Recovering the scalar from one basis-weighted limb is inconvenient;
-        // use the first limb, whose basis element is one.
-        let group_weight = row_weights[group_ordinal * 5];
-        if group_weight == ChallengeField::ZERO {
-            return Err("quotient component group has a zero rank-one weight".to_owned());
-        }
-        for component_offset in 0..2 {
-            let component_ordinal = u32::try_from(group_ordinal * 2 + component_offset)
-                .map_err(|_| "quotient component ordinal exceeds u32".to_owned())?;
-            let value = catalog
-                .get(&claim_key(
-                    RelationOpeningSourceClass::Quotient,
-                    component_ordinal,
-                    None,
-                    0,
-                ))
-                .copied()
-                .ok_or_else(|| format!("quotient component {component_ordinal} has no opening"))?;
-            expected += row_weights[group_ordinal * 5]
-                * selector_weights[component_offset * 2]
-                * challenge_from_production(value);
-        }
+    let quotient_component_weight = row_weights[0];
+    for (component_ordinal, selector_weight) in selector_weights.iter().enumerate() {
+        let source_ordinal = u32::try_from(component_ordinal)
+            .map_err(|_| "quotient component ordinal exceeds u32".to_owned())?;
+        let value = catalog
+            .get(&claim_key(
+                RelationOpeningSourceClass::Quotient,
+                source_ordinal,
+                None,
+                0,
+            ))
+            .copied()
+            .ok_or_else(|| format!("quotient component {source_ordinal} has no opening"))?;
+        expected += quotient_component_weight * *selector_weight * challenge_from_production(value);
     }
-    let batch_mask = catalog
-        .get(&claim_key(
-            RelationOpeningSourceClass::BatchMask,
-            0,
-            None,
-            0,
-        ))
-        .copied()
-        .ok_or_else(|| "exact relation has no opening-batch mask claim".to_owned())?;
-    expected += row_weights[20] * selector_weights[0] * challenge_from_production(batch_mask);
+    let opening_batch_mask_weight = row_weights[10];
+    for (chunk_ordinal, chunk_evaluation) in opening_batch_mask_chunk_evaluations.iter().enumerate()
+    {
+        expected += opening_batch_mask_weight
+            * selector_weights[chunk_ordinal]
+            * challenge_from_production(*chunk_evaluation);
+    }
     Ok(expected)
 }
 
@@ -1242,14 +1318,16 @@ fn exact_whir_opening_points(
 ) -> Result<Vec<Point<ChallengeField>>, String> {
     if opening_points.len() < 3
         || query_indices.len() != EXACT_COLUMN_QUERY_COUNT
-        || bound_query_indices.len() != EXACT_BOUND_QUERY_COUNT
+        || bound_query_indices.len() != EXACT_OUTPUT_BOUND_QUERY_COUNT
         || degree_test_points.len() != EXACT_BOUND_DEGREE_TEST_COUNT
         || bound_evaluation_domain.size() != EXACT_BOUND_LEAF_COUNT * 2
     {
         return Err("exact WHIR opening schedule has the wrong shape".to_owned());
     }
     let mut points = Vec::with_capacity(
-        3 + query_indices.len() + bound_query_indices.len() * 2 + degree_test_points.len(),
+        3 + query_indices.len()
+            + (EXACT_INPUT_BOUND_QUERY_COUNT + EXACT_OUTPUT_BOUND_QUERY_COUNT) * 2
+            + degree_test_points.len(),
     );
     for opening_point_ordinal in 0..3 {
         let reduction = polynomial_extension_opening_reduction(
@@ -1275,18 +1353,26 @@ fn exact_whir_opening_points(
             .multilinear_point,
         );
     }
-    for leaf_index in bound_query_indices {
-        for evaluation_position in [*leaf_index, *leaf_index + EXACT_BOUND_LEAF_COUNT] {
-            let evaluation_point = bound_evaluation_domain
-                .point(evaluation_position)
-                .map_err(|error| format!("derive bound evaluation point: {error:?}"))?;
-            points.push(
-                polynomial_opening_reduction(
+    for (block_ordinal, block_query_indices) in [
+        (0, &bound_query_indices[..EXACT_INPUT_BOUND_QUERY_COUNT]),
+        (1, bound_query_indices),
+    ] {
+        for leaf_index in block_query_indices {
+            for evaluation_position in [*leaf_index, *leaf_index + EXACT_BOUND_LEAF_COUNT] {
+                let evaluation_point = bound_evaluation_domain
+                    .point(evaluation_position)
+                    .map_err(|error| format!("derive bound evaluation point: {error:?}"))?;
+                let reduction = polynomial_opening_reduction(
                     Goldilocks::new(evaluation_point.canonical()),
-                    EXACT_TABLE_VARIABLE_COUNT,
-                )?
-                .multilinear_point,
-            );
+                    EXACT_BOUND_POLYNOMIAL_VARIABLE_COUNT,
+                )?;
+                let mut coordinates = bound_reduction_block_coordinates(block_ordinal)?;
+                coordinates.extend_from_slice(reduction.multilinear_point.as_slice());
+                if coordinates.len() != EXACT_TABLE_VARIABLE_COUNT {
+                    return Err("bound reduction WHIR point has the wrong width".to_owned());
+                }
+                points.push(Point::new(coordinates));
+            }
         }
     }
     points.extend_from_slice(degree_test_points);
@@ -1297,8 +1383,10 @@ fn requested_columns_by_point() -> Vec<Vec<usize>> {
     let mut requested = vec![vec![0], vec![1], vec![2]];
     requested.extend(std::iter::repeat_with(|| vec![0, 1, 2]).take(EXACT_COLUMN_QUERY_COUNT));
     requested.extend(
-        std::iter::repeat_with(|| vec![EXACT_BOUND_REDUCTION_COLUMN_INDEX])
-            .take(EXACT_BOUND_QUERY_COUNT * 2 + EXACT_BOUND_DEGREE_TEST_COUNT),
+        std::iter::repeat_with(|| vec![EXACT_BOUND_REDUCTION_COLUMN_INDEX]).take(
+            (EXACT_INPUT_BOUND_QUERY_COUNT + EXACT_OUTPUT_BOUND_QUERY_COUNT) * 2
+                + EXACT_BOUND_DEGREE_TEST_COUNT,
+        ),
     );
     requested
 }
@@ -1309,6 +1397,8 @@ fn expected_deep_whir_evaluations(
     auxiliary_layout: &ExactBasePhaseLayout,
     opening_points: &[ProofChallengeExtensionElement],
     deep_evaluations: &[ProofChallengeExtensionElement],
+    opening_batch_mask_chunk_evaluations: &[ProofChallengeExtensionElement;
+         EXACT_OPENING_BATCH_MASK_CHUNK_COUNT],
     point_row_weights: &[ExactPointRowWeights; 3],
 ) -> Result<[ChallengeField; 3], String> {
     let catalog = deep_evaluation_catalog(variant, deep_evaluations)?;
@@ -1335,6 +1425,7 @@ fn expected_deep_whir_evaluations(
                 &point_row_weights[opening_point_ordinal].quotient,
                 selector_weights,
                 &catalog,
+                opening_batch_mask_chunk_evaluations,
             )?;
         }
         let reduction = polynomial_extension_opening_reduction(
@@ -1389,8 +1480,9 @@ fn verify_materialized_frontier(
     entry: &ProofTreeCatalogEntry,
     opened_leaves: &[(u64, [u8; 64])],
     frontier: &[[u8; 64]],
+    expected_query_count: usize,
 ) -> Result<(), String> {
-    if opened_leaves.len() != EXACT_BOUND_QUERY_COUNT
+    if opened_leaves.len() != expected_query_count
         || opened_leaves.windows(2).any(|pair| pair[0].0 >= pair[1].0)
         || opened_leaves
             .last()
@@ -1453,17 +1545,23 @@ fn verify_bound_tree_authentications(
 ) -> Result<(), String> {
     if entries.len() != EXACT_BOUND_TREE_COUNT
         || proof.bound_tree_authentications.len() != EXACT_BOUND_TREE_COUNT
-        || bound_query_indices.len() != EXACT_BOUND_QUERY_COUNT
+        || bound_query_indices.len() != EXACT_OUTPUT_BOUND_QUERY_COUNT
     {
         return Err("bound authentication catalog has the wrong fixed shape".to_owned());
     }
-    for (entry, authentication) in entries.iter().zip(&proof.bound_tree_authentications) {
-        if authentication.opened_leaves.len() != EXACT_BOUND_QUERY_COUNT {
+    for (bound_tree_ordinal, (entry, authentication)) in entries
+        .iter()
+        .zip(&proof.bound_tree_authentications)
+        .enumerate()
+    {
+        let query_count = bound_tree_query_count(bound_tree_ordinal)?;
+        if authentication.opened_leaves.len() != query_count {
             return Err("bound authentication has the wrong leaf count".to_owned());
         }
-        let mut opened_leaf_digests = Vec::with_capacity(EXACT_BOUND_QUERY_COUNT);
+        let mut opened_leaf_digests = Vec::with_capacity(query_count);
         for (leaf_index, opening) in bound_query_indices
             .iter()
+            .take(query_count)
             .copied()
             .zip(&authentication.opened_leaves)
         {
@@ -1495,7 +1593,12 @@ fn verify_bound_tree_authentications(
                 leaf_digest,
             ));
         }
-        verify_materialized_frontier(entry, &opened_leaf_digests, &authentication.frontier)?;
+        verify_materialized_frontier(
+            entry,
+            &opened_leaf_digests,
+            &authentication.frontier,
+            query_count,
+        )?;
     }
     Ok(())
 }
@@ -1508,50 +1611,84 @@ fn expected_bound_reduction_whir_evaluations(
     bound_claims: &[ExactBoundOpeningClaim],
 ) -> Result<Vec<ChallengeField>, String> {
     let locations = bound_column_locations(variant)?;
-    let mut expected = Vec::with_capacity(EXACT_BOUND_QUERY_COUNT * 2);
-    for (query_ordinal, leaf_index) in bound_query_indices.iter().copied().enumerate() {
-        for (opposite, evaluation_position) in [
-            (false, leaf_index),
-            (true, leaf_index + EXACT_BOUND_LEAF_COUNT),
-        ] {
-            let evaluation_point = bound_evaluation_domain
-                .point(evaluation_position)
-                .map_err(|error| format!("derive bound evaluation point: {error:?}"))?;
-            let evaluation_point_challenge =
-                ChallengeField::from(Goldilocks::new(evaluation_point.canonical()));
-            let mut polynomial_value = ChallengeField::ZERO;
-            for claim in bound_claims {
-                let (tree_ordinal, column_position) = locations
-                    .get(&claim.column_ordinal)
-                    .copied()
-                    .ok_or_else(|| "bound claim column has no tree location".to_owned())?;
-                let opening = proof
-                    .bound_tree_authentications
-                    .get(tree_ordinal)
-                    .and_then(|authentication| authentication.opened_leaves.get(query_ordinal))
-                    .ok_or_else(|| "bound claim opening is absent".to_owned())?;
-                let value = if opposite {
-                    opening.opposite_point_values[column_position]
-                } else {
-                    opening.first_point_values[column_position]
-                };
-                let denominator = evaluation_point_challenge - claim.opening_point;
-                if denominator == ChallengeField::ZERO {
-                    return Err("bound opening reduction sampled a pole".to_owned());
+    if bound_query_indices.len() != EXACT_OUTPUT_BOUND_QUERY_COUNT {
+        return Err("bound reduction query schedule has the wrong count".to_owned());
+    }
+    let mut expected =
+        Vec::with_capacity((EXACT_INPUT_BOUND_QUERY_COUNT + EXACT_OUTPUT_BOUND_QUERY_COUNT) * 2);
+    for (root_use, query_count) in [
+        (BoundTreeRootUse::Input, EXACT_INPUT_BOUND_QUERY_COUNT),
+        (BoundTreeRootUse::Output, EXACT_OUTPUT_BOUND_QUERY_COUNT),
+    ] {
+        for (query_ordinal, leaf_index) in bound_query_indices
+            .iter()
+            .take(query_count)
+            .copied()
+            .enumerate()
+        {
+            for (opposite, evaluation_position) in [
+                (false, leaf_index),
+                (true, leaf_index + EXACT_BOUND_LEAF_COUNT),
+            ] {
+                let evaluation_point = bound_evaluation_domain
+                    .point(evaluation_position)
+                    .map_err(|error| format!("derive bound evaluation point: {error:?}"))?;
+                let evaluation_point_challenge =
+                    ChallengeField::from(Goldilocks::new(evaluation_point.canonical()));
+                let mut polynomial_value = ChallengeField::ZERO;
+                for claim in bound_claims {
+                    let (tree_ordinal, column_position, claim_root_use) = locations
+                        .get(&claim.column_ordinal)
+                        .copied()
+                        .ok_or_else(|| "bound claim column has no tree location".to_owned())?;
+                    if claim_root_use != root_use {
+                        continue;
+                    }
+                    let opening = proof
+                        .bound_tree_authentications
+                        .get(tree_ordinal)
+                        .and_then(|authentication| authentication.opened_leaves.get(query_ordinal))
+                        .ok_or_else(|| "bound claim opening is absent".to_owned())?;
+                    let value = if opposite {
+                        opening.opposite_point_values[column_position]
+                    } else {
+                        opening.first_point_values[column_position]
+                    };
+                    let denominator = evaluation_point_challenge - claim.opening_point;
+                    if denominator == ChallengeField::ZERO {
+                        return Err("bound opening reduction sampled a pole".to_owned());
+                    }
+                    polynomial_value += claim.batching_weight
+                        * (ChallengeField::from(Goldilocks::new(value.canonical()))
+                            - claim.claimed_value)
+                        * denominator.inverse();
                 }
-                polynomial_value += claim.batching_weight
-                    * (ChallengeField::from(Goldilocks::new(value.canonical()))
-                        - claim.claimed_value)
-                    * denominator.inverse();
+                let reduction = polynomial_opening_reduction(
+                    Goldilocks::new(evaluation_point.canonical()),
+                    EXACT_BOUND_POLYNOMIAL_VARIABLE_COUNT,
+                )?;
+                expected
+                    .push(polynomial_value * reduction.multilinear_to_polynomial_scale.inverse());
             }
-            let reduction = polynomial_opening_reduction(
-                Goldilocks::new(evaluation_point.canonical()),
-                EXACT_TABLE_VARIABLE_COUNT,
-            )?;
-            expected.push(polynomial_value * reduction.multilinear_to_polynomial_scale.inverse());
         }
     }
     Ok(expected)
+}
+
+fn ensure_bound_opening_points_are_outside_evaluation_domain(
+    bound_claims: &[ExactBoundOpeningClaim],
+    evaluation_domain_size: u64,
+    evaluation_coset_offset: u64,
+) -> Result<(), String> {
+    let domain_constant = ChallengeField::from(Goldilocks::new(evaluation_coset_offset))
+        .exp_u64(evaluation_domain_size);
+    if bound_claims
+        .iter()
+        .any(|claim| claim.opening_point.exp_u64(evaluation_domain_size) == domain_constant)
+    {
+        return Err("bound opening point lies in the authenticated evaluation domain".to_owned());
+    }
+    Ok(())
 }
 
 fn expected_query_whir_evaluations(
@@ -1601,11 +1738,15 @@ fn verify_whir_evaluation_claims(
     expected_queries: &[[ChallengeField; 3]],
     expected_bound_reduction: &[ChallengeField],
 ) -> Result<(), String> {
-    let expected_evaluation_count =
-        3 + EXACT_COLUMN_QUERY_COUNT + EXACT_BOUND_QUERY_COUNT * 2 + EXACT_BOUND_DEGREE_TEST_COUNT;
+    let bound_reduction_evaluation_count =
+        (EXACT_INPUT_BOUND_QUERY_COUNT + EXACT_OUTPUT_BOUND_QUERY_COUNT) * 2;
+    let expected_evaluation_count = 3
+        + EXACT_COLUMN_QUERY_COUNT
+        + bound_reduction_evaluation_count
+        + EXACT_BOUND_DEGREE_TEST_COUNT;
     if proof.aggregate_opening_proof.evals.len() != expected_evaluation_count
         || expected_queries.len() != EXACT_COLUMN_QUERY_COUNT
-        || expected_bound_reduction.len() != EXACT_BOUND_QUERY_COUNT * 2
+        || expected_bound_reduction.len() != bound_reduction_evaluation_count
     {
         return Err("exact WHIR evaluation schedule has the wrong count".to_owned());
     }
@@ -1635,7 +1776,7 @@ fn verify_whir_evaluation_claims(
             ));
         }
     }
-    let degree_test_offset = bound_evaluation_offset + EXACT_BOUND_QUERY_COUNT * 2;
+    let degree_test_offset = bound_evaluation_offset + bound_reduction_evaluation_count;
     for degree_test_ordinal in 0..EXACT_BOUND_DEGREE_TEST_COUNT {
         let batch = &proof.aggregate_opening_proof.evals[degree_test_offset + degree_test_ordinal];
         if batch.current() != [ChallengeField::ZERO] || !batch.next().is_empty() {
@@ -1682,6 +1823,12 @@ pub(crate) fn verify_exact_same_secret_proof_bytes(
         &transcript_prefix,
         &proof.deep_evaluations,
     )?;
+    verify_opening_batch_mask_chunk_evaluations(
+        &verified_relation.variant,
+        &transcript_prefix.opening_points,
+        &proof.deep_evaluations,
+        &proof.opening_batch_mask_chunk_evaluations,
+    )?;
     let opening_batch_challenges = finish_exact_transcript(
         &mut transcript_prefix,
         &proof.deep_evaluations,
@@ -1692,6 +1839,7 @@ pub(crate) fn verify_exact_same_secret_proof_bytes(
         [proof.base_root, proof.auxiliary_root, proof.quotient_root],
         &transcript_prefix,
         &proof.deep_evaluations,
+        &proof.opening_batch_mask_chunk_evaluations,
         &opening_batch_challenges,
     )?;
     let point_row_weights = derive_exact_point_row_weights(
@@ -1705,6 +1853,11 @@ pub(crate) fn verify_exact_same_secret_proof_bytes(
         &transcript_prefix.opening_points,
         &proof.deep_evaluations,
         &binding,
+    )?;
+    ensure_bound_opening_points_are_outside_evaluation_domain(
+        &bound_claims,
+        verified_relation.variant.evaluation_domain_size(),
+        verified_relation.context.evaluation_coset_offset,
     )?;
     let query_indices = derive_query_indices(
         &binding,
@@ -1741,6 +1894,7 @@ pub(crate) fn verify_exact_same_secret_proof_bytes(
         &auxiliary_layout,
         &transcript_prefix.opening_points,
         &proof.deep_evaluations,
+        &proof.opening_batch_mask_chunk_evaluations,
         &point_row_weights,
     )?;
     let expected_queries =
@@ -1922,6 +2076,9 @@ fn encode_exact_same_secret_proof(
     for evaluation in &proof.deep_evaluations {
         writer.write_production_extension(*evaluation);
     }
+    for evaluation in &proof.opening_batch_mask_chunk_evaluations {
+        writer.write_production_extension(*evaluation);
+    }
     writer.write_digest(
         *proof
             .aggregate_commitment
@@ -2020,6 +2177,11 @@ fn decode_exact_same_secret_proof(
     for _ in 0..deep_evaluation_count {
         deep_evaluations.push(reader.read_production_extension()?);
     }
+    let mut opening_batch_mask_chunk_evaluations =
+        [ProofChallengeExtensionElement::ZERO; EXACT_OPENING_BATCH_MASK_CHUNK_COUNT];
+    for evaluation in &mut opening_batch_mask_chunk_evaluations {
+        *evaluation = reader.read_production_extension()?;
+    }
     let aggregate_commitment = MerkleCap::new(vec![reader.read_digest()?]);
     let query_indices_placeholder = vec![0_usize; EXACT_COLUMN_QUERY_COUNT];
     let mut authenticated_phase_columns = std::array::from_fn(|_| Vec::new());
@@ -2056,13 +2218,14 @@ fn decode_exact_same_secret_proof(
     if bound_tree_entries.len() != EXACT_BOUND_TREE_COUNT {
         return Err("exact bound tree catalog has the wrong fixed shape".to_owned());
     }
-    let maximum_bound_frontier_count = EXACT_BOUND_QUERY_COUNT
-        .checked_mul(EXACT_BOUND_LEAF_COUNT.ilog2() as usize)
-        .ok_or_else(|| "bound frontier limit overflowed".to_owned())?;
     let mut bound_tree_authentications = Vec::with_capacity(EXACT_BOUND_TREE_COUNT);
-    for entry in bound_tree_entries {
-        let mut opened_leaves = Vec::with_capacity(EXACT_BOUND_QUERY_COUNT);
-        for _ in 0..EXACT_BOUND_QUERY_COUNT {
+    for (bound_tree_ordinal, entry) in bound_tree_entries.iter().enumerate() {
+        let query_count = bound_tree_query_count(bound_tree_ordinal)?;
+        let maximum_bound_frontier_count = query_count
+            .checked_mul(EXACT_BOUND_LEAF_COUNT.ilog2() as usize)
+            .ok_or_else(|| "bound frontier limit overflowed".to_owned())?;
+        let mut opened_leaves = Vec::with_capacity(query_count);
+        for _ in 0..query_count {
             let persistent_salt = if entry.requires_persistent_leaf_salt() {
                 Some(reader.read_exact::<COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH>()?)
             } else {
@@ -2109,6 +2272,7 @@ fn decode_exact_same_secret_proof(
         auxiliary_root,
         quotient_root,
         deep_evaluations,
+        opening_batch_mask_chunk_evaluations,
         aggregate_commitment,
         authenticated_phase_columns,
         phase_frontiers,
@@ -2145,16 +2309,22 @@ fn validate_exact_proof_shape(
             return Err("exact same-secret phase opening has the wrong fixed shape".to_owned());
         }
     }
-    let maximum_bound_frontier_count = EXACT_BOUND_QUERY_COUNT
-        .checked_mul(EXACT_BOUND_LEAF_COUNT.ilog2() as usize)
-        .ok_or_else(|| "bound frontier limit overflowed".to_owned())?;
     if bound_tree_entries.len() != EXACT_BOUND_TREE_COUNT
         || proof.bound_tree_authentications.len() != EXACT_BOUND_TREE_COUNT
         || bound_tree_entries
             .iter()
             .zip(&proof.bound_tree_authentications)
-            .any(|(entry, authentication)| {
-                authentication.opened_leaves.len() != EXACT_BOUND_QUERY_COUNT
+            .enumerate()
+            .any(|(bound_tree_ordinal, (entry, authentication))| {
+                let Ok(query_count) = bound_tree_query_count(bound_tree_ordinal) else {
+                    return true;
+                };
+                let Some(maximum_bound_frontier_count) =
+                    query_count.checked_mul(EXACT_BOUND_LEAF_COUNT.ilog2() as usize)
+                else {
+                    return true;
+                };
+                authentication.opened_leaves.len() != query_count
                     || authentication.frontier.len() > maximum_bound_frontier_count
                     || authentication.opened_leaves.iter().any(|opening| {
                         opening.persistent_salt.is_some() != entry.requires_persistent_leaf_salt()
@@ -2352,38 +2522,47 @@ mod construction_tests {
             << (common_denominator_exponent - denominator_exponent);
     }
 
-    fn index_has_prefix(index: usize, prefix: &[u8]) -> bool {
-        assert!(prefix.len() <= EXACT_TABLE_VARIABLE_COUNT);
+    fn index_has_prefix(index: usize, variable_count: usize, prefix: &[u8]) -> bool {
+        assert!(prefix.len() <= variable_count);
         prefix.iter().enumerate().all(|(bit_ordinal, expected)| {
-            let shift = EXACT_TABLE_VARIABLE_COUNT - 1 - bit_ordinal;
+            let shift = variable_count - 1 - bit_ordinal;
             ((index >> shift) & 1) as u8 == *expected
         })
     }
 
     #[test]
     fn bound_degree_subcubes_partition_the_complete_forbidden_suffix() {
-        let coefficient_count = 1_usize << EXACT_TABLE_VARIABLE_COUNT;
-        let mut covered_count = 0_usize;
-        for coefficient_ordinal in 0..coefficient_count {
-            let upper_block = coefficient_ordinal >> EXACT_BOUND_POLYNOMIAL_VARIABLE_COUNT;
-            let suffix_prefix_matches = EXACT_BOUND_DEGREE_SUFFIX_PREFIXES
-                .iter()
-                .filter(|prefix| index_has_prefix(coefficient_ordinal, prefix))
-                .count();
-            let cover_count = usize::from(upper_block != 0) + suffix_prefix_matches;
-            let should_be_covered =
-                coefficient_ordinal >= EXACT_BOUND_POLYNOMIAL_DEGREE_BOUND_EXCLUSIVE;
+        let block_coefficient_count = 1_usize << EXACT_BOUND_POLYNOMIAL_VARIABLE_COUNT;
+        for block_ordinal in 0..EXACT_BOUND_REDUCTION_BLOCK_COUNT {
+            let mut covered_count = 0_usize;
+            for coefficient_ordinal in 0..block_coefficient_count {
+                let suffix_prefix_matches = EXACT_BOUND_DEGREE_SUFFIX_PREFIXES
+                    .iter()
+                    .filter(|prefix| {
+                        index_has_prefix(
+                            coefficient_ordinal,
+                            EXACT_BOUND_POLYNOMIAL_VARIABLE_COUNT,
+                            prefix,
+                        )
+                    })
+                    .count();
+                let boundary_matches =
+                    usize::from(coefficient_ordinal == EXACT_BOUND_QUOTIENT_DEGREE_BOUND_EXCLUSIVE);
+                let cover_count = boundary_matches + suffix_prefix_matches;
+                let should_be_covered =
+                    coefficient_ordinal >= EXACT_BOUND_QUOTIENT_DEGREE_BOUND_EXCLUSIVE;
+                assert_eq!(
+                    cover_count,
+                    usize::from(should_be_covered),
+                    "wrong degree-test coverage in block {block_ordinal} at coefficient {coefficient_ordinal}"
+                );
+                covered_count += cover_count;
+            }
             assert_eq!(
-                cover_count,
-                usize::from(should_be_covered),
-                "wrong degree-test coverage at coefficient {coefficient_ordinal}"
+                covered_count,
+                block_coefficient_count - EXACT_BOUND_QUOTIENT_DEGREE_BOUND_EXCLUSIVE
             );
-            covered_count += cover_count;
         }
-        assert_eq!(
-            covered_count,
-            coefficient_count - EXACT_BOUND_POLYNOMIAL_DEGREE_BOUND_EXCLUSIVE
-        );
     }
 
     #[test]
@@ -2485,39 +2664,59 @@ mod construction_tests {
             Goldilocks::new(3),
         ]);
         let chunk_power = opening_point.exp_u64(LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT as u64);
-        assert_ne!(ChallengeField::ONE + chunk_power, ChallengeField::ZERO);
         let selectors = [
+            ChallengeField::from_u64(3),
             ChallengeField::from_u64(7),
-            chunk_power * (ChallengeField::ONE + chunk_power).inverse(),
+            ChallengeField::from_u64(11),
         ];
         let selector_weights = selector_equality_weights(selectors);
-        assert_eq!(selector_weights[1], selector_weights[0] * chunk_power);
-        assert_eq!(selector_weights[3], selector_weights[2] * chunk_power);
-
-        let first_component = [
-            (0, ChallengeField::from_u64(5)),
-            (32_767, ChallengeField::from_u64(11)),
-            (32_768, ChallengeField::from_u64(19)),
-            (33_883, ChallengeField::from_u64(23)),
-        ];
-        let second_component = [
-            (1, ChallengeField::from_u64(29)),
-            (32_766, ChallengeField::from_u64(31)),
-            (32_769, ChallengeField::from_u64(37)),
-            (33_880, ChallengeField::from_u64(41)),
-        ];
-        let packed_component_evaluation = selector_weights[0]
-            * evaluate_chunk(&first_component, 0, opening_point)
-            + selector_weights[1] * evaluate_chunk(&first_component, 1, opening_point)
-            + selector_weights[2] * evaluate_chunk(&second_component, 0, opening_point)
-            + selector_weights[3] * evaluate_chunk(&second_component, 1, opening_point);
+        let components = (0..EXACT_OPENING_BATCH_MASK_CHUNK_COUNT)
+            .map(|component_ordinal| {
+                vec![
+                    (
+                        component_ordinal,
+                        ChallengeField::from_u64((component_ordinal * 13 + 5) as u64),
+                    ),
+                    (
+                        LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT - 1 - component_ordinal,
+                        ChallengeField::from_u64((component_ordinal * 17 + 11) as u64),
+                    ),
+                    (
+                        LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT + component_ordinal,
+                        ChallengeField::from_u64((component_ordinal * 19 + 23) as u64),
+                    ),
+                ]
+            })
+            .collect::<Vec<_>>();
+        let packed_low_evaluation = components.iter().enumerate().fold(
+            ChallengeField::ZERO,
+            |evaluation, (component_ordinal, component)| {
+                evaluation
+                    + selector_weights[component_ordinal]
+                        * evaluate_chunk(component, 0, opening_point)
+            },
+        );
+        let packed_high_evaluation = components.iter().enumerate().fold(
+            ChallengeField::ZERO,
+            |evaluation, (component_ordinal, component)| {
+                evaluation
+                    + selector_weights[component_ordinal]
+                        * evaluate_chunk(component, 1, opening_point)
+            },
+        );
         assert_eq!(
-            packed_component_evaluation,
-            selector_weights[0] * evaluate_sparse(&first_component, opening_point)
-                + selector_weights[2] * evaluate_sparse(&second_component, opening_point)
+            packed_low_evaluation + chunk_power * packed_high_evaluation,
+            components.iter().enumerate().fold(
+                ChallengeField::ZERO,
+                |evaluation, (component_ordinal, component)| {
+                    evaluation
+                        + selector_weights[component_ordinal]
+                            * evaluate_sparse(component, opening_point)
+                },
+            )
         );
 
-        let batch_mask = (0..OPENING_BATCH_MASK_CHUNK_COUNT)
+        let batch_mask = (0..EXACT_OPENING_BATCH_MASK_CHUNK_COUNT)
             .flat_map(|chunk_ordinal| {
                 let chunk_start = chunk_ordinal * LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT;
                 [
@@ -2532,21 +2731,58 @@ mod construction_tests {
                 ]
             })
             .collect::<Vec<_>>();
-        let mut packed_mask_evaluation = ChallengeField::ZERO;
-        let chunk_power_squared = chunk_power.square();
-        let mut group_power = ChallengeField::ONE;
-        for group_ordinal in 0..4 {
-            packed_mask_evaluation += group_power
-                * (selector_weights[0]
-                    * evaluate_chunk(&batch_mask, group_ordinal * 2, opening_point)
-                    + selector_weights[1]
-                        * evaluate_chunk(&batch_mask, group_ordinal * 2 + 1, opening_point));
-            group_power *= chunk_power_squared;
-        }
+        let mask_chunk_evaluations =
+            core::array::from_fn::<_, EXACT_OPENING_BATCH_MASK_CHUNK_COUNT, _>(|chunk_ordinal| {
+                evaluate_chunk(&batch_mask, chunk_ordinal, opening_point)
+            });
+        let packed_mask_evaluation = mask_chunk_evaluations.iter().enumerate().fold(
+            ChallengeField::ZERO,
+            |evaluation, (chunk_ordinal, chunk_evaluation)| {
+                evaluation + selector_weights[chunk_ordinal] * *chunk_evaluation
+            },
+        );
         assert_eq!(
             packed_mask_evaluation,
-            selector_weights[0] * evaluate_sparse(&batch_mask, opening_point)
+            mask_chunk_evaluations.iter().enumerate().fold(
+                ChallengeField::ZERO,
+                |evaluation, (chunk_ordinal, chunk_evaluation)| {
+                    evaluation + selector_weights[chunk_ordinal] * *chunk_evaluation
+                },
+            )
         );
+        assert_eq!(
+            mask_chunk_evaluations
+                .iter()
+                .fold(
+                    (ChallengeField::ZERO, ChallengeField::ONE),
+                    |(evaluation, power), chunk_evaluation| {
+                        (evaluation + power * *chunk_evaluation, power * chunk_power)
+                    },
+                )
+                .0,
+            evaluate_sparse(&batch_mask, opening_point)
+        );
+    }
+
+    #[test]
+    fn three_uniform_selectors_bind_all_eight_packed_claims() {
+        for selected_block_ordinal in 0..8 {
+            let selectors = core::array::from_fn(|selector_ordinal| {
+                let selector_bit = (selected_block_ordinal >> (2 - selector_ordinal)) & 1;
+                ChallengeField::from_u64(selector_bit as u64)
+            });
+            let weights = selector_equality_weights(selectors);
+            for (block_ordinal, weight) in weights.into_iter().enumerate() {
+                assert_eq!(
+                    weight,
+                    if block_ordinal == selected_block_ordinal {
+                        ChallengeField::ONE
+                    } else {
+                        ChallengeField::ZERO
+                    }
+                );
+            }
+        }
     }
 
     #[test]
@@ -2560,14 +2796,21 @@ mod construction_tests {
             current_log_inverse_rate = round.log_inv_rate;
         }
         query_branches.push((current_log_inverse_rate, pcs.final_queries));
-        assert_eq!(query_branches, [(2, 384), (5, 273), (8, 262), (11, 261)]);
+        assert_eq!(
+            query_branches,
+            [(2, 387), (4, 288), (6, 268), (8, 264), (10, 263)]
+        );
 
         let common_binary_denominator_exponent = query_branches
             .iter()
             .map(|(log_inverse_rate, query_count)| (log_inverse_rate + 1) * query_count)
+            .chain([
+                3 * EXACT_COLUMN_QUERY_COUNT,
+                EXACT_BOUND_LEAF_COUNT.ilog2() as usize * EXACT_INPUT_BOUND_QUERY_COUNT,
+                7 * EXACT_OUTPUT_BOUND_QUERY_COUNT,
+            ])
             .max()
             .expect("the exact WHIR configuration has query branches");
-        assert_eq!(common_binary_denominator_exponent, 3_132);
         let mut binary_numerator = BigUint::from(0_u8);
         for (log_inverse_rate, query_count) in query_branches {
             add_binary_failure_term(
@@ -2579,70 +2822,111 @@ mod construction_tests {
             );
         }
 
-        // A rate-one-eighth row word outside its 7/16 unique-decoding
-        // radius agrees at no more than a 9/16 fraction of coordinates.
+        // A rate-one-quarter row word outside its 3/8 unique-decoding
+        // radius agrees at no more than a 5/8 fraction of coordinates.
         add_binary_failure_term(
             &mut binary_numerator,
-            9,
+            5,
             EXACT_COLUMN_QUERY_COUNT as u32,
-            4 * EXACT_COLUMN_QUERY_COUNT,
+            3 * EXACT_COLUMN_QUERY_COUNT,
             common_binary_denominator_exponent,
         );
-        let outer_query_term = BigUint::from(9_u8).pow(EXACT_COLUMN_QUERY_COUNT as u32);
+        let outer_query_term = BigUint::from(5_u8).pow(EXACT_COLUMN_QUERY_COUNT as u32);
         assert!(
-            (&outer_query_term << 265) < (BigUint::from(1_u8) << (4 * EXACT_COLUMN_QUERY_COUNT))
-        );
-        assert!(
-            (BigUint::from(9_u8).pow((EXACT_COLUMN_QUERY_COUNT - 1) as u32) << 265)
-                >= (BigUint::from(1_u8) << (4 * (EXACT_COLUMN_QUERY_COUNT - 1)))
+            (&outer_query_term << 262) < (BigUint::from(1_u8) << (3 * EXACT_COLUMN_QUERY_COUNT))
         );
 
         // Clearing the at most three distinct opening denominators gives a
-        // nonzero polynomial of degree at most 18,434. A paired leaf can hide
+        // nonzero polynomial of degree at most 18,433. A paired leaf can hide
         // at most two roots, hence at most 9,217 accepting leaves.
         assert_eq!(
-            (EXACT_BOUND_POLYNOMIAL_DEGREE_BOUND_EXCLUSIVE + 2) / 2,
+            (EXACT_BOUND_SOURCE_DEGREE_BOUND_EXCLUSIVE + 2) / 2,
             BOUND_CLEARED_IDENTITY_ROOT_PAIR_BOUND as usize
         );
         add_binary_failure_term(
             &mut binary_numerator,
             BOUND_CLEARED_IDENTITY_ROOT_PAIR_BOUND,
-            EXACT_BOUND_QUERY_COUNT as u32,
-            EXACT_BOUND_LEAF_COUNT.ilog2() as usize * EXACT_BOUND_QUERY_COUNT,
+            EXACT_INPUT_BOUND_QUERY_COUNT as u32,
+            EXACT_BOUND_LEAF_COUNT.ilog2() as usize * EXACT_INPUT_BOUND_QUERY_COUNT,
             common_binary_denominator_exponent,
         );
         let bound_query_term = BigUint::from(BOUND_CLEARED_IDENTITY_ROOT_PAIR_BOUND)
-            .pow(EXACT_BOUND_QUERY_COUNT as u32);
+            .pow(EXACT_INPUT_BOUND_QUERY_COUNT as u32);
         assert!(
             (&bound_query_term << 273)
                 < (BigUint::from(1_u8)
-                    << (EXACT_BOUND_LEAF_COUNT.ilog2() as usize * EXACT_BOUND_QUERY_COUNT))
+                    << (EXACT_BOUND_LEAF_COUNT.ilog2() as usize * EXACT_INPUT_BOUND_QUERY_COUNT))
         );
+        add_binary_failure_term(
+            &mut binary_numerator,
+            65,
+            EXACT_OUTPUT_BOUND_QUERY_COUNT as u32,
+            7 * EXACT_OUTPUT_BOUND_QUERY_COUNT,
+            common_binary_denominator_exponent,
+        );
+        let output_query_term = BigUint::from(65_u8).pow(EXACT_OUTPUT_BOUND_QUERY_COUNT as u32);
         assert!(
-            (BigUint::from(BOUND_CLEARED_IDENTITY_ROOT_PAIR_BOUND)
-                .pow((EXACT_BOUND_QUERY_COUNT - 1) as u32)
-                << 273)
-                >= (BigUint::from(1_u8)
-                    << (EXACT_BOUND_LEAF_COUNT.ilog2() as usize * (EXACT_BOUND_QUERY_COUNT - 1)))
+            (&output_query_term << 260)
+                < (BigUint::from(1_u8) << (7 * EXACT_OUTPUT_BOUND_QUERY_COUNT))
         );
 
         let (_, variant, _) = production_same_secret_relation()
             .expect("compile the exact production same-secret relation");
         let shape = ExactProofShape::from_variant(&variant).expect("derive exact proof shape");
         assert_eq!(shape.opening_claim_count, 4_217);
-        assert_eq!(shape.phase_row_counts(), [492, 270, 40]);
+        assert_eq!(shape.phase_row_counts(), [247, 136, 15]);
+        let base_layout = ExactBasePhaseLayout::for_tree_role(&variant, ProofTreeRole::BaseOracle)
+            .expect("derive exact base layout");
+        let auxiliary_layout =
+            ExactBasePhaseLayout::for_tree_role(&variant, ProofTreeRole::AuxiliaryOracle)
+                .expect("derive exact auxiliary layout");
+        assert!(
+            base_layout
+                .rows
+                .iter()
+                .chain(&auxiliary_layout.rows)
+                .all(|row| !row.opening_point_ordinals.is_empty()
+                    && row
+                        .opening_point_ordinals
+                        .iter()
+                        .all(|point_ordinal| *point_ordinal < 3))
+        );
+        let phase_proximity_gap_application_count = (0..3_u32)
+            .filter(|point_ordinal| {
+                base_layout
+                    .rows
+                    .iter()
+                    .chain(&auxiliary_layout.rows)
+                    .any(|row| row.opening_point_ordinals.contains(point_ordinal))
+            })
+            .count();
+        assert_eq!(phase_proximity_gap_application_count, 3);
         let scalar_opening_count = expected_opening_widths().into_iter().sum::<usize>();
-        assert_eq!(scalar_opening_count, 1_053);
+        assert_eq!(scalar_opening_count, 1_784);
 
         // This is a conservative construction-specific algebraic union. The
-        // four WHIR fold terms use the exact post-rate-reduction domains. The
-        // remaining terms cover WHIR query combination and final folding,
-        // scalar-opening batching, one full production DEEP degree bound,
-        // every relation constraint and claim, phase-row batching, bound-claim
-        // batching, and the largest multilinear degree-test polynomial.
-        let whir_fold_failure_numerator = [21_usize, 20, 19, 18]
-            .into_iter()
-            .map(|log_domain_size| 2_u64 * ((1_u64 << log_domain_size) + 1))
+        // WHIR fold terms use the exact domain entering each fold. The
+        // remaining terms cover query combination and final folding,
+        // scalar-opening batching, production DEEP, both BCIKS exceptional
+        // sets, every relation constraint and claim, phase-row and bound-claim
+        // batching, mask-chunk claims, degree-three selector batching, and all
+        // three forbidden-suffix subcubes in each bound-reduction block.
+        let intermediate_fold_domain_sizes = pcs
+            .round_parameters
+            .iter()
+            .map(|round| round.domain_size)
+            .collect::<Vec<_>>();
+        let final_fold_domain_size = pcs.final_round_config().domain_size;
+        assert_eq!(
+            intermediate_fold_domain_sizes,
+            [1 << 23, 1 << 22, 1 << 21, 1 << 20]
+        );
+        assert_eq!(final_fold_domain_size, 1 << 19);
+        let whir_fold_failure_numerator = intermediate_fold_domain_sizes
+            .iter()
+            .copied()
+            .chain([final_fold_domain_size])
+            .map(|domain_size| domain_size as u64 + 2)
             .sum::<u64>();
         let whir_query_combination_numerator = 2_u64
             * pcs
@@ -2659,8 +2943,12 @@ mod construction_tests {
             + shape.opening_claim_count as u64
             + shape.phase_row_counts().into_iter().sum::<usize>() as u64
             + EXACT_BOUND_COLUMN_COUNT as u64
-            + EXACT_TABLE_VARIABLE_COUNT as u64;
-        assert_eq!(algebraic_failure_numerator, 9_973_860);
+            + (phase_proximity_gap_application_count * shape.encoded_column_count) as u64
+            + (EXACT_BOUND_LEAF_COUNT * 2) as u64
+            + EXACT_OPENING_BATCH_MASK_CHUNK_COUNT as u64
+            + (3 * shape.phase_row_counts().into_iter().sum::<usize>()) as u64
+            + 72;
+        assert_eq!(algebraic_failure_numerator, 26_753_237);
 
         let challenge_field_order = BigUint::from(GOLDILOCKS_MODULUS).pow(5);
         let aggregate_numerator = &challenge_field_order * binary_numerator
@@ -2719,7 +3007,7 @@ mod construction_tests {
             EXACT_ROW_CODE_LOG_INVERSE_RATE,
         )
         .expect("derive exact row-code geometry");
-        assert_eq!(row_geometry.pad_value_count(), 1 << 17);
+        assert_eq!(row_geometry.pad_value_count(), 1 << 18);
         assert_eq!(row_geometry.encoded_column_count, 1 << 21);
         assert!(EXACT_COLUMN_QUERY_COUNT < row_geometry.pad_value_count());
 
@@ -2729,7 +3017,7 @@ mod construction_tests {
             .num_queries
             .checked_mul(1_usize << pcs.round_folding_factor(0))
             .expect("first-oracle opening count fits usize");
-        assert_eq!(first_oracle_opening_count, 6_144);
+        assert_eq!(first_oracle_opening_count, 3_096);
         assert!(
             EXACT_COLUMN_QUERY_COUNT + first_oracle_opening_count < row_geometry.pad_value_count(),
             "the phase and first-WHIR views together must leave pad entropy"
@@ -2740,6 +3028,166 @@ mod construction_tests {
         // the only exceptional event; it is below 2^-319 in Goldilocks^5.
         let challenge_field_order = BigUint::from(GOLDILOCKS_MODULUS).pow(5);
         assert!((BigUint::from(1_u8) << 319) < challenge_field_order);
+    }
+
+    #[test]
+    fn reduced_round_two_relation_exercises_the_scaling_geometry() {
+        use std::collections::BTreeMap;
+
+        use crate::bgv::proof_suite::{
+            RelinearizationRoundTwoRelationPlanInput,
+            compile_relinearization_round_two_relation_with_source_layout,
+            selected_relation_plan_check_context, selected_relinearization_relation_plan_inputs,
+        };
+        use crate::foundation::ProofApplicationSlotCeilings;
+
+        let (_, selected_input) = selected_relinearization_relation_plan_inputs()
+            .expect("select the production round-two relation input");
+        assert!(selected_input.geometry.data_moduli.len() >= 3);
+        assert!(!selected_input.geometry.special_moduli.is_empty());
+        let first_decomposition_block = selected_input
+            .geometry
+            .decomposition_blocks
+            .first()
+            .cloned()
+            .expect("the selected relation has a first decomposition block");
+        assert_eq!(first_decomposition_block.data_modulus_indices, [0, 1, 2]);
+
+        // Preserve the production ring, evaluation domain, commitment basis,
+        // and exact first catalog block while removing later modulus blocks.
+        // This is the smallest canonical round-two fragment that still owns
+        // the complete product, non-native reduction, and anchor topology.
+        let fragment_input = RelinearizationRoundTwoRelationPlanInput {
+            schedule_position: selected_input.schedule_position,
+            geometry: crate::bgv::proof_suite::TrusteeEvaluationKeyRelationGeometry {
+                ring_degree: selected_input.geometry.ring_degree,
+                evaluation_domain_size: selected_input.geometry.evaluation_domain_size,
+                opening_degree_bound_exclusive: selected_input
+                    .geometry
+                    .opening_degree_bound_exclusive,
+                public_polynomial_column_degree_bound_exclusive: selected_input
+                    .geometry
+                    .public_polynomial_column_degree_bound_exclusive,
+                data_moduli: selected_input.geometry.data_moduli[..3].to_vec(),
+                special_moduli: vec![selected_input.geometry.special_moduli[0]],
+                plaintext_modulus: selected_input.geometry.plaintext_modulus,
+                decomposition_blocks: vec![first_decomposition_block],
+                commitment_data_modulus_indices: selected_input
+                    .geometry
+                    .commitment_data_modulus_indices
+                    .clone(),
+                commitment_module_rank: selected_input.geometry.commitment_module_rank,
+            },
+        };
+        let relation_context = selected_relation_plan_check_context(
+            ProofApplicationSlotCeilings::RELINEARIZATION_ROUND_TWO_STATEMENT_SCHEMA_IDENTIFIER,
+        )
+        .expect("select the production round-two relation context");
+        let compiled = compile_relinearization_round_two_relation_with_source_layout(
+            &fragment_input,
+            &relation_context,
+        )
+        .expect("compile the reduced production-geometry round-two relation");
+        let variant = compiled
+            .relation_plan
+            .select_variant(Some(fragment_input.schedule_position), None)
+            .expect("select the reduced round-two variant");
+
+        assert_eq!(variant.trace_domain_size(), 1 << 14);
+        assert_eq!(variant.evaluation_domain_size(), 1 << 21);
+        crate::bgv::proof_suite::zero_knowledge::validate_zero_knowledge_mask_image(
+            variant,
+            &relation_context,
+        )
+        .expect("the reduced round-two masks cover the complete secret-bearing view");
+
+        let full_ring_products = variant
+            .ordered_integer_lift_batches()
+            .iter()
+            .flat_map(|batch| &batch.ordered_components)
+            .flat_map(|component| &component.ordered_full_ring_negacyclic_products)
+            .collect::<Vec<_>>();
+        assert!(!full_ring_products.is_empty());
+        assert!(full_ring_products.iter().any(|product| {
+            product.multiplier_low_offset != 0 || product.multiplier_high_offset != 0
+        }));
+
+        let (radix_digit_column_count, carry_column_count) =
+            variant.radix_digit_and_carry_column_counts();
+        assert!(radix_digit_column_count > 0);
+        assert!(carry_column_count > 0);
+
+        let bound_root_uses = variant
+            .ordered_trees()
+            .iter()
+            .filter_map(|tree| match tree {
+                RelationTreeDescriptor::BoundPublic { root_use, .. } => Some(*root_use),
+                RelationTreeDescriptor::ProofCreated { .. } => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(bound_root_uses.contains(&BoundTreeRootUse::Input));
+        assert!(bound_root_uses.contains(&BoundTreeRootUse::Output));
+
+        let mut product_uses_by_column = BTreeMap::<u32, usize>::new();
+        for product in &full_ring_products {
+            for column_ordinal in [
+                product.multiplicand_low_column_ordinal,
+                product.multiplicand_high_column_ordinal,
+                product.multiplier_low_column_ordinal,
+                product.multiplier_high_column_ordinal,
+            ] {
+                *product_uses_by_column.entry(column_ordinal).or_default() += 1;
+            }
+        }
+        assert!(
+            product_uses_by_column
+                .values()
+                .any(|use_count| *use_count > 1),
+            "one witness column must participate in multiple product constraints"
+        );
+
+        let base_layout = ExactBasePhaseLayout::for_tree_role(variant, ProofTreeRole::BaseOracle)
+            .expect("derive the reduced round-two base layout");
+        let auxiliary_layout =
+            ExactBasePhaseLayout::for_tree_role(variant, ProofTreeRole::AuxiliaryOracle)
+                .expect("derive the reduced round-two auxiliary layout");
+        let base_geometry = base_layout
+            .geometry()
+            .expect("derive base row-code geometry");
+        let auxiliary_geometry = auxiliary_layout
+            .geometry()
+            .expect("derive auxiliary row-code geometry");
+        assert_eq!(base_geometry.encoded_column_count, 1 << 21);
+        assert_eq!(auxiliary_geometry.encoded_column_count, 1 << 21);
+
+        let phase_row_count = base_layout
+            .rows
+            .len()
+            .checked_add(auxiliary_layout.rows.len())
+            .and_then(|count| count.checked_add(EXACT_QUOTIENT_PHASE_ROW_COUNT))
+            .expect("phase row count fits usize");
+        let opened_phase_value_byte_length = EXACT_COLUMN_QUERY_COUNT
+            .checked_mul(phase_row_count)
+            .and_then(|count| count.checked_mul(core::mem::size_of::<Goldilocks>()))
+            .expect("opened phase-value byte length fits usize");
+        assert!(
+            opened_phase_value_byte_length < 8 * 1_024 * 1_024,
+            "the representative fragment must not produce an enormous opened-column payload"
+        );
+
+        eprintln!(
+            "reduced round-two scaling geometry: columns={} constraints={} claims={} products={} radix_digit_columns={} carry_columns={} base_rows={} auxiliary_rows={} quotient_rows={} opened_phase_value_bytes={}",
+            variant.ordered_columns().len(),
+            variant.ordered_constraint_count(),
+            variant.ordered_opening_claims().len(),
+            full_ring_products.len(),
+            radix_digit_column_count,
+            carry_column_count,
+            base_layout.rows.len(),
+            auxiliary_layout.rows.len(),
+            EXACT_QUOTIENT_PHASE_ROW_COUNT,
+            opened_phase_value_byte_length,
+        );
     }
 }
 
@@ -2757,7 +3205,7 @@ mod native_prover {
         CheckpointBasePhaseSource, CheckpointQuotientPhaseSource, ExactPolynomialStore,
     };
     use super::*;
-    use crate::bgv::proof_suite::CommonProofSourcePolynomial;
+    use crate::bgv::proof_suite::{CommonProofSourcePolynomial, PROOF_CHALLENGE_EXTENSION_DEGREE};
 
     fn fixed_hash(bytes: &[u8], label: &str) -> Result<[u8; 64], String> {
         bytes
@@ -2854,12 +3302,51 @@ mod native_prover {
             .collect()
     }
 
+    fn evaluate_opening_batch_mask_chunks(
+        store: &ExactPolynomialStore,
+        opening_point: ProofChallengeExtensionElement,
+    ) -> Result<[ProofChallengeExtensionElement; EXACT_OPENING_BATCH_MASK_CHUNK_COUNT], String>
+    {
+        let coefficients = store.read_opening_batch_mask()?;
+        let maximum_coefficient_count = LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT
+            .checked_mul(EXACT_OPENING_BATCH_MASK_CHUNK_COUNT)
+            .ok_or_else(|| "opening-batch mask coefficient limit overflowed".to_owned())?;
+        if coefficients.len() > maximum_coefficient_count {
+            return Err(format!(
+                "opening-batch mask has {} coefficients, exceeding {maximum_coefficient_count}",
+                coefficients.len()
+            ));
+        }
+        let mut evaluations =
+            [ProofChallengeExtensionElement::ZERO; EXACT_OPENING_BATCH_MASK_CHUNK_COUNT];
+        for (chunk_ordinal, evaluation) in evaluations.iter_mut().enumerate() {
+            let chunk_start = chunk_ordinal * LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT;
+            if chunk_start >= coefficients.len() {
+                continue;
+            }
+            let chunk_end = chunk_start
+                .checked_add(LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT)
+                .expect("opening-batch mask chunk end fits usize")
+                .min(coefficients.len());
+            *evaluation = evaluate_extension_coefficients(
+                &coefficients[chunk_start..chunk_end],
+                opening_point,
+            );
+        }
+        Ok(evaluations)
+    }
+
     fn construct_bound_reduction_polynomial(
         store: &ExactPolynomialStore,
+        variant: &RelationPlanVariant,
         bound_claims: &[ExactBoundOpeningClaim],
     ) -> Result<Poly<ChallengeField>, String> {
         let coefficient_count = 1_usize << EXACT_BOUND_POLYNOMIAL_VARIABLE_COUNT;
-        let mut aggregate_coefficients = vec![ChallengeField::ZERO; coefficient_count];
+        let locations = bound_column_locations(variant)?;
+        let mut aggregate_coefficients =
+            std::array::from_fn::<_, EXACT_BOUND_REDUCTION_BLOCK_COUNT, _>(|_| {
+                vec![ChallengeField::ZERO; coefficient_count]
+            });
         for claim in bound_claims {
             let CommonProofSourcePolynomial::Base(source_coefficients) =
                 store.read(claim.column_ordinal)?
@@ -2870,7 +3357,7 @@ mod native_prover {
                 ));
             };
             if source_coefficients.is_empty()
-                || source_coefficients.len() > EXACT_BOUND_POLYNOMIAL_DEGREE_BOUND_EXCLUSIVE
+                || source_coefficients.len() > EXACT_BOUND_SOURCE_DEGREE_BOUND_EXCLUSIVE
             {
                 return Err(format!(
                     "bound relation column {} has the wrong degree bound",
@@ -2893,12 +3380,35 @@ mod native_prover {
                     claim.column_ordinal
                 ));
             }
-            for (aggregate, coefficient) in aggregate_coefficients.iter_mut().zip(quotient) {
+            if quotient.len() > EXACT_BOUND_QUOTIENT_DEGREE_BOUND_EXCLUSIVE {
+                return Err(format!(
+                    "bound relation column {} produced an oversized quotient",
+                    claim.column_ordinal
+                ));
+            }
+            let (_, _, root_use) = locations
+                .get(&claim.column_ordinal)
+                .copied()
+                .ok_or_else(|| "bound claim column has no tree location".to_owned())?;
+            let block_ordinal = match root_use {
+                BoundTreeRootUse::Input => 0,
+                BoundTreeRootUse::Output => 1,
+            };
+            for (aggregate, coefficient) in aggregate_coefficients[block_ordinal]
+                .iter_mut()
+                .zip(quotient)
+            {
                 *aggregate += claim.batching_weight * coefficient;
             }
         }
-        aggregate_coefficients.resize(1_usize << EXACT_TABLE_VARIABLE_COUNT, ChallengeField::ZERO);
-        Ok(Poly::new(aggregate_coefficients))
+        let mut packed_coefficients =
+            vec![ChallengeField::ZERO; 1_usize << EXACT_TABLE_VARIABLE_COUNT];
+        for (block_ordinal, block_coefficients) in aggregate_coefficients.into_iter().enumerate() {
+            let block_start = block_ordinal * coefficient_count;
+            packed_coefficients[block_start..block_start + coefficient_count]
+                .copy_from_slice(&block_coefficients);
+        }
+        Ok(Poly::new(packed_coefficients))
     }
 
     fn capture_frontier_digest(
@@ -2928,36 +3438,40 @@ mod native_prover {
         evaluation_domain: ProofEvaluationDomain,
     ) -> Result<Vec<ExactBoundTreeAuthentication>, String> {
         if entries.len() != EXACT_BOUND_TREE_COUNT
-            || bound_query_indices.len() != EXACT_BOUND_QUERY_COUNT
+            || bound_query_indices.len() != EXACT_OUTPUT_BOUND_QUERY_COUNT
             || evaluation_domain.size() != EXACT_BOUND_LEAF_COUNT * 2
         {
             return Err("bound authentication prover has the wrong fixed shape".to_owned());
         }
-        let query_positions = bound_query_indices
-            .iter()
-            .copied()
-            .enumerate()
-            .map(|(query_ordinal, leaf_index)| (leaf_index, query_ordinal))
-            .collect::<HashMap<_, _>>();
-        let frontier_coordinates = crate::bgv::proof_suite::merkle::minimal_frontier_coordinates(
-            &bound_query_indices
+        let mut authentications = Vec::with_capacity(EXACT_BOUND_TREE_COUNT);
+        for (bound_tree_ordinal, entry) in entries.iter().enumerate() {
+            let query_count = bound_tree_query_count(bound_tree_ordinal)?;
+            let tree_query_indices = &bound_query_indices[..query_count];
+            let query_positions = tree_query_indices
                 .iter()
                 .copied()
-                .map(|leaf_index| {
-                    u64::try_from(leaf_index).map_err(|_| "bound leaf index exceeds u64".to_owned())
-                })
-                .collect::<Result<Vec<_>, _>>()?,
-            EXACT_BOUND_LEAF_COUNT,
-        )
-        .map_err(|error| format!("derive bound frontier coordinates: {error:?}"))?;
-        let frontier_positions = frontier_coordinates
-            .iter()
-            .copied()
-            .enumerate()
-            .map(|(frontier_position, coordinate)| (coordinate, frontier_position))
-            .collect::<HashMap<_, _>>();
-        let mut authentications = Vec::with_capacity(EXACT_BOUND_TREE_COUNT);
-        for entry in entries {
+                .enumerate()
+                .map(|(query_ordinal, leaf_index)| (leaf_index, query_ordinal))
+                .collect::<HashMap<_, _>>();
+            let frontier_coordinates =
+                crate::bgv::proof_suite::merkle::minimal_frontier_coordinates(
+                    &tree_query_indices
+                        .iter()
+                        .copied()
+                        .map(|leaf_index| {
+                            u64::try_from(leaf_index)
+                                .map_err(|_| "bound leaf index exceeds u64".to_owned())
+                        })
+                        .collect::<Result<Vec<_>, _>>()?,
+                    EXACT_BOUND_LEAF_COUNT,
+                )
+                .map_err(|error| format!("derive bound frontier coordinates: {error:?}"))?;
+            let frontier_positions = frontier_coordinates
+                .iter()
+                .copied()
+                .enumerate()
+                .map(|(frontier_position, coordinate)| (coordinate, frontier_position))
+                .collect::<HashMap<_, _>>();
             let descriptor = sources
                 .relation_plan_variant
                 .ordered_trees()
@@ -3005,7 +3519,7 @@ mod native_prover {
             } else {
                 None
             };
-            let mut opened_leaves = vec![None; EXACT_BOUND_QUERY_COUNT];
+            let mut opened_leaves = vec![None; query_count];
             let mut frontier = vec![None; frontier_coordinates.len()];
             let mut merkle_stack =
                 vec![None::<[u8; 64]>; EXACT_BOUND_LEAF_COUNT.ilog2() as usize + 1];
@@ -3249,10 +3763,18 @@ mod native_prover {
             &transcript_prefix.opening_points,
             &store,
         )?;
+        let opening_batch_mask_chunk_evaluations =
+            evaluate_opening_batch_mask_chunks(&store, transcript_prefix.opening_points[0])?;
         verify_production_deep_composition(
             &mut verified_relation,
             &transcript_prefix,
             &deep_evaluations,
+        )?;
+        verify_opening_batch_mask_chunk_evaluations(
+            &verified_relation.variant,
+            &transcript_prefix.opening_points,
+            &deep_evaluations,
+            &opening_batch_mask_chunk_evaluations,
         )?;
         let opening_batch_challenges =
             finish_exact_transcript(&mut transcript_prefix, &deep_evaluations, quotient_root)?;
@@ -3261,6 +3783,7 @@ mod native_prover {
             [base_root, auxiliary_root, quotient_root],
             &transcript_prefix,
             &deep_evaluations,
+            &opening_batch_mask_chunk_evaluations,
             &opening_batch_challenges,
         )?;
         let point_row_weights = derive_exact_point_row_weights(
@@ -3275,6 +3798,11 @@ mod native_prover {
             &deep_evaluations,
             &binding,
         )?;
+        ensure_bound_opening_points_are_outside_evaluation_domain(
+            &bound_claims,
+            verified_relation.variant.evaluation_domain_size(),
+            verified_relation.context.evaluation_coset_offset,
+        )?;
         let mut messages = exact_aggregate_messages(
             &store,
             &base_layout,
@@ -3284,7 +3812,11 @@ mod native_prover {
             source_manifest.row_pad_seeds()?,
             &point_row_weights,
         )?;
-        messages.push(construct_bound_reduction_polynomial(&store, &bound_claims)?);
+        messages.push(construct_bound_reduction_polynomial(
+            &store,
+            &verified_relation.variant,
+            &bound_claims,
+        )?);
         let pcs = plain_aggregate_pcs(EXACT_PCS_VARIABLE_COUNT)?;
         let mut prover_challenger = plain_aggregate_challenger(&pcs, &binding);
         let (aggregate_commitment, prover_data) =
@@ -3372,6 +3904,7 @@ mod native_prover {
             auxiliary_root,
             quotient_root,
             deep_evaluations,
+            opening_batch_mask_chunk_evaluations,
             aggregate_commitment,
             authenticated_phase_columns: [base_columns, auxiliary_columns, quotient_columns],
             phase_frontiers: [base_frontier, auxiliary_frontier, quotient_frontier],
@@ -3386,6 +3919,7 @@ mod native_prover {
             &auxiliary_layout,
             &transcript_prefix.opening_points,
             &proof.deep_evaluations,
+            &proof.opening_batch_mask_chunk_evaluations,
             &point_row_weights,
         )?;
         let expected_queries =
@@ -3403,13 +3937,80 @@ mod native_prover {
             &expected_queries,
             &expected_bound_reduction,
         )?;
+        let whir_breakdown = plain_whir_batch_wire_breakdown(
+            &pcs,
+            &proof.aggregate_opening_proof,
+            &expected_opening_widths(),
+            EXACT_PROOF_TABLE_WIDTH,
+        )?;
+        let fixed_relation_byte_length = EXACT_PROOF_WIRE_MAGIC.len()
+            + 3 * 64
+            + 4
+            + shape.opening_claim_count * PROOF_CHALLENGE_EXTENSION_DEGREE * 8
+            + EXACT_OPENING_BATCH_MASK_CHUNK_COUNT * PROOF_CHALLENGE_EXTENSION_DEGREE * 8
+            + 64;
+        let phase_value_byte_length =
+            EXACT_COLUMN_QUERY_COUNT * shape.phase_row_counts().into_iter().sum::<usize>() * 8;
+        let phase_frontier_byte_length = proof
+            .phase_frontiers
+            .iter()
+            .map(|frontier| 4 + frontier.len() * 64)
+            .sum::<usize>();
+        let bound_leaf_byte_length = bound_tree_entries
+            .iter()
+            .zip(&proof.bound_tree_authentications)
+            .map(|(entry, authentication)| {
+                authentication.opened_leaves.len()
+                    * (EXACT_BOUND_TREE_ROW_WIDTH * 2 * 8
+                        + if entry.requires_persistent_leaf_salt() {
+                            COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH
+                        } else {
+                            0
+                        })
+            })
+            .sum::<usize>();
+        let bound_frontier_byte_length = proof
+            .bound_tree_authentications
+            .iter()
+            .map(|authentication| 4 + authentication.frontier.len() * 64)
+            .sum::<usize>();
+        let predicted_proof_byte_length = fixed_relation_byte_length
+            + phase_value_byte_length
+            + phase_frontier_byte_length
+            + bound_leaf_byte_length
+            + bound_frontier_byte_length
+            + whir_breakdown.complete_byte_length;
+        if predicted_proof_byte_length >= MAXIMUM_STREAMING_WIRE_BYTE_LENGTH {
+            return Err(format!(
+                "exact combined proof predicts {predicted_proof_byte_length} bytes, which is not strictly below the {}-byte hard limit",
+                MAXIMUM_STREAMING_WIRE_BYTE_LENGTH
+            ));
+        }
         let proof_wire = encode_exact_same_secret_proof(shape, &bound_tree_entries, &proof)?;
+        if proof_wire.len() != predicted_proof_byte_length {
+            return Err(format!(
+                "exact proof-size ledger predicts {predicted_proof_byte_length} bytes but encoded {} bytes",
+                proof_wire.len()
+            ));
+        }
         verify_exact_same_secret_proof_bytes(&public_input_wire, &proof_wire)?;
         write_artifact(
             &store.root().join(EXACT_PUBLIC_INPUT_ARTIFACT_NAME),
             &public_input_wire,
         )?;
         write_artifact(&store.root().join(EXACT_PROOF_ARTIFACT_NAME), &proof_wire)?;
+        println!(
+            "exact proof wire breakdown: fixed relation {}, phase values {}, phase frontiers {}, bound leaves {}, bound frontiers {}, WHIR {}, WHIR query values {}, WHIR dictionary {}, WHIR references {}",
+            fixed_relation_byte_length,
+            phase_value_byte_length,
+            phase_frontier_byte_length,
+            bound_leaf_byte_length,
+            bound_frontier_byte_length,
+            whir_breakdown.complete_byte_length,
+            whir_breakdown.query_value_byte_length,
+            whir_breakdown.merkle_dictionary_byte_length,
+            whir_breakdown.merkle_reference_byte_length,
+        );
         println!(
             "exact same-secret proof: proof bytes {}, public input bytes {}, claims {}, queries {}, complete time {:?}",
             proof_wire.len(),
@@ -3439,6 +4040,7 @@ mod persisted_verifier_tests {
     use std::{fs, path::PathBuf};
 
     use p3_sumcheck::OpeningBatch;
+    use p3_whir::QueryOpening;
 
     use super::*;
 
@@ -3446,7 +4048,7 @@ mod persisted_verifier_tests {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("temp")
             .join("test-checkpoints")
-            .join("exact-same-secret-shifted-source")
+            .join("exact-same-secret-packed-eight-v4")
             .join(file_name)
     }
 
@@ -3517,6 +4119,28 @@ mod persisted_verifier_tests {
         *batch = OpeningBatch::new(current, batch.next().to_vec());
     }
 
+    fn increment_whir_query_value(
+        query: &mut QueryOpening<ChallengeField, ChallengeField, Vec<ColumnDigest>>,
+    ) {
+        match query {
+            QueryOpening::Base { values, .. } => {
+                values[0] += ChallengeField::ONE;
+            }
+            QueryOpening::Extension { values, .. } => {
+                values[0] += ChallengeField::ONE;
+            }
+        }
+    }
+
+    fn change_whir_query_path(
+        query: &mut QueryOpening<ChallengeField, ChallengeField, Vec<ColumnDigest>>,
+    ) {
+        let path = match query {
+            QueryOpening::Base { proof, .. } | QueryOpening::Extension { proof, .. } => proof,
+        };
+        path[0][0] ^= 1;
+    }
+
     fn swap_distinct_values(values: &mut [Goldilocks]) {
         let different_position = values
             .iter()
@@ -3546,7 +4170,7 @@ mod persisted_verifier_tests {
         let (public_input, proof) = persisted_artifacts();
         let metrics = verify_exact_same_secret_proof_bytes(&public_input, &proof)
             .expect("fresh verifier accepts only the persisted public input and proof bytes");
-        assert_eq!(metrics.proof_byte_length, 5_014_844);
+        assert!(metrics.proof_byte_length < MAXIMUM_STREAMING_WIRE_BYTE_LENGTH);
         assert_eq!(metrics.public_input_byte_length, 2_461);
         assert_eq!(metrics.opening_claim_count, 4_217);
         assert_eq!(metrics.query_count, EXACT_COLUMN_QUERY_COUNT);
@@ -3566,6 +4190,12 @@ mod persisted_verifier_tests {
         let (public_input, proof) = persisted_artifacts();
         verify_exact_same_secret_proof_bytes(&public_input, &proof)
             .expect("baseline exact proof verifies before adversarial mutations");
+        let decoded_public_input = decode_exact_same_secret_public_input(&public_input)
+            .expect("decode persisted exact public input for shape derivation");
+        let verified_relation = validate_public_input(&decoded_public_input)
+            .expect("validate persisted exact public input for shape derivation");
+        let exact_shape = ExactProofShape::from_variant(&verified_relation.variant)
+            .expect("derive persisted exact proof shape");
 
         let changed_protocol = mutate_public_input(&public_input, |input| {
             input.protocol_version ^= 1;
@@ -3602,6 +4232,69 @@ mod persisted_verifier_tests {
         });
         assert_refuses(&changed_public_root, &proof, "changed public relation root");
 
+        let changed_public_tree_context = mutate_public_input(&public_input, |input| {
+            match &mut input.public_relation_trees[0] {
+                StatementOwnedProofTreeInput::CommittedMaterial {
+                    material_context_hash,
+                    ..
+                } => material_context_hash[0] ^= 1,
+                StatementOwnedProofTreeInput::SetupPolynomial {
+                    public_polynomial_context_hash,
+                    ..
+                } => public_polynomial_context_hash[0] ^= 1,
+            }
+        });
+        assert_refuses(
+            &changed_public_tree_context,
+            &proof,
+            "changed public relation-tree context",
+        );
+
+        let changed_public_tree_kind = mutate_public_input(&public_input, |input| {
+            let replacement = match input.public_relation_trees[0].clone() {
+                StatementOwnedProofTreeInput::CommittedMaterial { expected_root, .. } => {
+                    StatementOwnedProofTreeInput::SetupPolynomial {
+                        public_polynomial_context_hash: [0_u8; 64],
+                        row_width: EXACT_BOUND_TREE_ROW_WIDTH as u32,
+                        expected_root,
+                    }
+                }
+                StatementOwnedProofTreeInput::SetupPolynomial { expected_root, .. } => {
+                    StatementOwnedProofTreeInput::CommittedMaterial {
+                        material_context_hash: [0_u8; 64],
+                        expected_root,
+                    }
+                }
+            };
+            input.public_relation_trees[0] = replacement;
+        });
+        assert_refuses(
+            &changed_public_tree_kind,
+            &proof,
+            "changed public relation-tree kind",
+        );
+
+        let changed_public_tree_row_width = mutate_public_input(&public_input, |input| {
+            let row_width = input
+                .public_relation_trees
+                .iter_mut()
+                .find_map(|tree| match tree {
+                    StatementOwnedProofTreeInput::SetupPolynomial { row_width, .. } => {
+                        Some(row_width)
+                    }
+                    StatementOwnedProofTreeInput::CommittedMaterial { .. } => None,
+                })
+                .expect("the production public tree catalog contains a setup polynomial");
+            *row_width = row_width
+                .checked_add(1)
+                .expect("production public tree row width can be incremented");
+        });
+        assert_refuses(
+            &changed_public_tree_row_width,
+            &proof,
+            "changed public relation-tree row width",
+        );
+
         for (root_ordinal, root_label) in ["base", "auxiliary", "quotient"].into_iter().enumerate()
         {
             let changed_root = mutate_proof(&public_input, &proof, |decoded| {
@@ -3627,6 +4320,17 @@ mod persisted_verifier_tests {
             &public_input,
             &changed_deep_evaluation,
             "changed production deep evaluation",
+        );
+
+        let changed_mask_chunk_evaluation = mutate_proof(&public_input, &proof, |decoded| {
+            decoded.opening_batch_mask_chunk_evaluations[0] = decoded
+                .opening_batch_mask_chunk_evaluations[0]
+                .add(ProofChallengeExtensionElement::ONE);
+        });
+        assert_refuses(
+            &public_input,
+            &changed_mask_chunk_evaluation,
+            "changed opening-batch mask chunk evaluation",
         );
 
         let changed_aggregate_root = mutate_proof(&public_input, &proof, |decoded| {
@@ -3718,12 +4422,35 @@ mod persisted_verifier_tests {
             "changed bound Merkle frontier",
         );
 
+        let changed_output_bound_value = mutate_proof(&public_input, &proof, |decoded| {
+            increment_base_field(
+                &mut decoded.bound_tree_authentications[EXACT_INPUT_BOUND_TREE_COUNT].opened_leaves
+                    [0]
+                .first_point_values[0],
+            );
+        });
+        assert_refuses(
+            &public_input,
+            &changed_output_bound_value,
+            "changed output-bound first-point value",
+        );
+
+        let changed_output_bound_frontier = mutate_proof(&public_input, &proof, |decoded| {
+            decoded.bound_tree_authentications[EXACT_INPUT_BOUND_TREE_COUNT].frontier[0][0] ^= 1;
+        });
+        assert_refuses(
+            &public_input,
+            &changed_output_bound_frontier,
+            "changed output-bound Merkle frontier",
+        );
+
         for (evaluation_ordinal, evaluation_label) in [
             (0, "deep"),
             (3, "phase-query"),
             (3 + EXACT_COLUMN_QUERY_COUNT, "bound-reduction"),
             (
-                3 + EXACT_COLUMN_QUERY_COUNT + EXACT_BOUND_QUERY_COUNT * 2,
+                3 + EXACT_COLUMN_QUERY_COUNT
+                    + (EXACT_INPUT_BOUND_QUERY_COUNT + EXACT_OUTPUT_BOUND_QUERY_COUNT) * 2,
                 "bound-degree",
             ),
         ] {
@@ -3752,19 +4479,126 @@ mod persisted_verifier_tests {
             "changed WHIR sumcheck message",
         );
 
+        let whir_round_count = plain_aggregate_pcs(EXACT_PCS_VARIABLE_COUNT)
+            .expect("construct exact WHIR configuration for adversarial coverage")
+            .n_rounds();
+        assert_eq!(whir_round_count, 4);
+        for round_ordinal in 0..whir_round_count {
+            let changed_round_root = mutate_proof(&public_input, &proof, |decoded| {
+                let commitment = decoded.aggregate_opening_proof.whir.rounds[round_ordinal]
+                    .commitment
+                    .as_mut()
+                    .expect("exact WHIR round carries its commitment");
+                let mut roots = commitment.roots().to_vec();
+                roots[0][0] ^= 1;
+                *commitment = MerkleCap::new(roots);
+            });
+            assert_refuses(
+                &public_input,
+                &changed_round_root,
+                &format!("changed WHIR round {round_ordinal} root"),
+            );
+
+            let changed_round_sumcheck = mutate_proof(&public_input, &proof, |decoded| {
+                decoded.aggregate_opening_proof.whir.rounds[round_ordinal]
+                    .sumcheck
+                    .polynomial_evaluations[0][0] += ChallengeField::ONE;
+            });
+            assert_refuses(
+                &public_input,
+                &changed_round_sumcheck,
+                &format!("changed WHIR round {round_ordinal} sumcheck"),
+            );
+
+            let changed_round_query_value = mutate_proof(&public_input, &proof, |decoded| {
+                increment_whir_query_value(
+                    &mut decoded.aggregate_opening_proof.whir.rounds[round_ordinal].queries[0],
+                );
+            });
+            assert_refuses(
+                &public_input,
+                &changed_round_query_value,
+                &format!("changed WHIR round {round_ordinal} query value"),
+            );
+
+            let changed_round_query_path = mutate_proof(&public_input, &proof, |decoded| {
+                change_whir_query_path(
+                    &mut decoded.aggregate_opening_proof.whir.rounds[round_ordinal].queries[0],
+                );
+            });
+            assert_refuses(
+                &public_input,
+                &changed_round_query_path,
+                &format!("changed WHIR round {round_ordinal} query path"),
+            );
+        }
+
+        let changed_final_polynomial = mutate_proof(&public_input, &proof, |decoded| {
+            let final_polynomial = decoded
+                .aggregate_opening_proof
+                .whir
+                .final_poly
+                .as_ref()
+                .expect("exact WHIR proof carries a final polynomial");
+            let mut evaluations = final_polynomial.as_slice().to_vec();
+            evaluations[0] += ChallengeField::ONE;
+            decoded.aggregate_opening_proof.whir.final_poly = Some(Poly::new(evaluations));
+        });
+        assert_refuses(
+            &public_input,
+            &changed_final_polynomial,
+            "changed WHIR final polynomial",
+        );
+
+        let changed_final_query_value = mutate_proof(&public_input, &proof, |decoded| {
+            increment_whir_query_value(&mut decoded.aggregate_opening_proof.whir.final_queries[0]);
+        });
+        assert_refuses(
+            &public_input,
+            &changed_final_query_value,
+            "changed WHIR final query value",
+        );
+
+        let changed_final_query_path = mutate_proof(&public_input, &proof, |decoded| {
+            change_whir_query_path(&mut decoded.aggregate_opening_proof.whir.final_queries[0]);
+        });
+        assert_refuses(
+            &public_input,
+            &changed_final_query_path,
+            "changed WHIR final query path",
+        );
+
+        let changed_final_sumcheck = mutate_proof(&public_input, &proof, |decoded| {
+            decoded
+                .aggregate_opening_proof
+                .whir
+                .final_sumcheck
+                .as_mut()
+                .expect("exact WHIR proof carries a final sumcheck")
+                .polynomial_evaluations[0][0] += ChallengeField::ONE;
+        });
+        assert_refuses(
+            &public_input,
+            &changed_final_sumcheck,
+            "changed WHIR final sumcheck",
+        );
+
         let mut wrong_magic = proof.clone();
         wrong_magic[0] ^= 1;
         assert_refuses(&public_input, &wrong_magic, "wrong proof wire magic");
 
+        let deep_evaluation_count_offset = EXACT_PROOF_WIRE_MAGIC.len() + 3 * 64;
+        assert_eq!(deep_evaluation_count_offset, 200);
         let mut wrong_deep_count = proof.clone();
-        wrong_deep_count[200..204].copy_from_slice(&0_u32.to_le_bytes());
+        wrong_deep_count[deep_evaluation_count_offset..deep_evaluation_count_offset + 4]
+            .copy_from_slice(&0_u32.to_le_bytes());
         assert_refuses(
             &public_input,
             &wrong_deep_count,
             "wrong deep-evaluation count",
         );
 
-        let first_deep_evaluation_offset = 204;
+        let first_deep_evaluation_offset = deep_evaluation_count_offset + 4;
         let mut noncanonical_extension = proof.clone();
         noncanonical_extension[first_deep_evaluation_offset..first_deep_evaluation_offset + 8]
             .copy_from_slice(&GOLDILOCKS_MODULUS.to_le_bytes());
@@ -3774,7 +4608,8 @@ mod persisted_verifier_tests {
             "noncanonical extension coordinate",
         );
 
-        let aggregate_root_offset = first_deep_evaluation_offset + 4_217 * 40;
+        let aggregate_root_offset =
+            first_deep_evaluation_offset + (4_217 + EXACT_OPENING_BATCH_MASK_CHUNK_COUNT) * 40;
         let first_phase_value_offset = aggregate_root_offset + 64;
         let mut noncanonical_phase_value = proof.clone();
         noncanonical_phase_value[first_phase_value_offset..first_phase_value_offset + 8]
@@ -3794,7 +4629,9 @@ mod persisted_verifier_tests {
         );
 
         let first_phase_frontier_offset = first_phase_value_offset
-            + EXACT_COLUMN_QUERY_COUNT * (492 + 270 + EXACT_QUOTIENT_PHASE_ROW_COUNT) * 8;
+            + EXACT_COLUMN_QUERY_COUNT
+                * exact_shape.phase_row_counts().into_iter().sum::<usize>()
+                * 8;
         let mut oversized_phase_frontier = proof.clone();
         oversized_phase_frontier[first_phase_frontier_offset..first_phase_frontier_offset + 4]
             .copy_from_slice(&u32::MAX.to_le_bytes());

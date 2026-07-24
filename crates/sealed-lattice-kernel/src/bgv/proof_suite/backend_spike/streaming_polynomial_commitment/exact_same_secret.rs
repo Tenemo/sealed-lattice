@@ -61,14 +61,14 @@ const SOURCE_POLYNOMIAL_DIGEST_DOMAIN: &str =
 #[cfg(all(test, not(target_arch = "wasm32")))]
 const SOURCE_CATALOG_DIGEST_DOMAIN: &str =
     "sealed-lattice/backend-research/production-source-catalog/v1";
+#[cfg(all(test, not(target_arch = "wasm32")))]
+const EXACT_BACKEND_PROTOTYPE_REVISION: u8 = 4;
 const EXACT_TRANSCRIPT_HEADER_DOMAIN: &[u8] =
     b"sealed-lattice/exact-same-secret/transcript-header/v1";
 const LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT: usize = 32_768;
-const PHYSICAL_ROW_WITNESS_VARIABLE_COUNT: usize = 17;
-const LOGICAL_POLYNOMIALS_PER_PHYSICAL_ROW: usize = 4;
-const EXACT_ROW_CODE_LOG_INVERSE_RATE: usize = 3;
-#[cfg(test)]
-const QUOTIENT_COMPONENTS_PER_PHYSICAL_ROW: usize = 2;
+const PHYSICAL_ROW_WITNESS_VARIABLE_COUNT: usize = 18;
+const LOGICAL_POLYNOMIALS_PER_PHYSICAL_ROW: usize = 8;
+const EXACT_ROW_CODE_LOG_INVERSE_RATE: usize = 2;
 #[cfg(test)]
 const QUOTIENT_COMPONENT_CHUNK_COUNT: usize = 2;
 #[cfg(test)]
@@ -141,8 +141,8 @@ impl ExactBasePhaseLayout {
             opening_points.dedup();
         }
 
-        // A single encoded row can authenticate four logical polynomials at
-        // one rank-one block challenge only when all four are opened at the
+        // A single encoded row can authenticate eight logical polynomials at
+        // one rank-one block challenge only when all eight are opened at the
         // same point set. Grouping by this pattern is therefore a soundness
         // condition, not merely a storage optimization.
         let mut columns_by_opening_pattern = BTreeMap::<Vec<u32>, Vec<u32>>::new();
@@ -306,8 +306,9 @@ fn production_same_secret_relation() -> Result<
 #[cfg(all(test, not(target_arch = "wasm32")))]
 fn production_same_secret_sources() -> Result<ProductionBackendSameSecretSources, String> {
     let (relation_plan, _, _) = production_same_secret_relation()?;
-    let authority = populate_production_backend_prototype_authority()
-        .map_err(|error| format!("populate production setup authority: {error:?}"))?;
+    let authority =
+        populate_production_backend_prototype_authority(EXACT_BACKEND_PROTOTYPE_REVISION)
+            .map_err(|error| format!("populate production setup authority: {error:?}"))?;
     let preparation_source = resolve_setup_generation_key_relation_preparation_source(
         &authority.authority_handle,
         SetupKeyRelationProofFamily::SameSecret,
@@ -425,9 +426,9 @@ mod native_checkpoint {
     const EXTENSION_POLYNOMIAL_MAGIC: &[u8; 8] = b"SLXEXT01";
     const MANIFEST_SCHEMA: &str = "sealed-lattice/exact-same-secret-shifted-source/v1";
     const PHASE_MANIFEST_SCHEMA: &str =
-        "sealed-lattice/exact-same-secret-phase-commitments-rate-eight/v2";
+        "sealed-lattice/exact-same-secret-phase-commitments-packed-eight-rate-four/v4";
     const QUOTIENT_MANIFEST_SCHEMA: &str =
-        "sealed-lattice/exact-same-secret-quotient-commitment-rate-eight/v2";
+        "sealed-lattice/exact-same-secret-quotient-commitment-packed-eight-rate-four/v4";
     pub(super) const QUOTIENT_ACCUMULATOR_CHECKPOINT_INTERVAL: usize = 64;
     type QuotientAccumulatorCheckpoint = (
         usize,
@@ -583,7 +584,7 @@ mod native_checkpoint {
         pub(super) fn open() -> Result<Self, String> {
             let root = PathBuf::from("temp")
                 .join("test-checkpoints")
-                .join("exact-same-secret-shifted-source");
+                .join("exact-same-secret-packed-eight-v4");
             fs::create_dir_all(&root)
                 .map_err(|error| format!("create exact checkpoint directory: {error}"))?;
             Ok(Self { root })
@@ -596,7 +597,7 @@ mod native_checkpoint {
 
         fn phase_polynomial_path(&self, column_ordinal: u32) -> PathBuf {
             self.root
-                .join(format!("phase-rate-eight-column-{column_ordinal:04}.bin"))
+                .join(format!("phase-packed-eight-column-{column_ordinal:04}.bin"))
         }
 
         fn manifest_path(&self) -> PathBuf {
@@ -604,21 +605,23 @@ mod native_checkpoint {
         }
 
         fn phase_manifest_path(&self) -> PathBuf {
-            self.root.join("phase-commitments-rate-eight.json")
+            self.root
+                .join("phase-commitments-packed-eight-rate-four.json")
         }
 
         fn quotient_manifest_path(&self) -> PathBuf {
-            self.root.join("quotient-commitment-rate-eight.json")
+            self.root
+                .join("quotient-commitment-packed-eight-rate-four.json")
         }
 
         fn quotient_component_path(&self, component_ordinal: u16) -> PathBuf {
             self.root.join(format!(
-                "quotient-rate-eight-component-{component_ordinal:02}.bin"
+                "quotient-packed-eight-component-{component_ordinal:02}.bin"
             ))
         }
 
         fn opening_batch_mask_path(&self) -> PathBuf {
-            self.root.join("opening-batch-mask-rate-eight.bin")
+            self.root.join("opening-batch-mask-packed-eight.bin")
         }
 
         fn quotient_accumulator_path(
@@ -631,7 +634,7 @@ mod native_checkpoint {
                 .map(|byte| format!("{byte:02x}"))
                 .collect::<String>();
             self.root.join(format!(
-                "quotient-rate-eight-accumulator-{binding_hex}-{next_constraint_ordinal:04}.bin"
+                "quotient-packed-eight-accumulator-{binding_hex}-{next_constraint_ordinal:04}.bin"
             ))
         }
 
@@ -1143,11 +1146,9 @@ mod native_checkpoint {
             store: &'source ExactPolynomialStore,
             quotient_component_count: usize,
         ) -> Result<Self, String> {
-            if quotient_component_count == 0
-                || !quotient_component_count.is_multiple_of(QUOTIENT_COMPONENTS_PER_PHYSICAL_ROW)
-            {
+            if quotient_component_count != LOGICAL_POLYNOMIALS_PER_PHYSICAL_ROW {
                 return Err(format!(
-                    "quotient component count {quotient_component_count} does not fill two-component groups"
+                    "quotient component count {quotient_component_count} does not fill the exact eight-block row"
                 ));
             }
             Ok(Self {
@@ -1157,13 +1158,7 @@ mod native_checkpoint {
         }
 
         pub(super) fn row_count(&self) -> usize {
-            let component_group_count = self
-                .quotient_component_count
-                .div_ceil(QUOTIENT_COMPONENTS_PER_PHYSICAL_ROW);
-            let opening_batch_mask_group_count =
-                OPENING_BATCH_MASK_CHUNK_COUNT.div_ceil(QUOTIENT_COMPONENT_CHUNK_COUNT);
-            (component_group_count + opening_batch_mask_group_count)
-                * PROOF_CHALLENGE_EXTENSION_DEGREE
+            (QUOTIENT_COMPONENT_CHUNK_COUNT + 1) * PROOF_CHALLENGE_EXTENSION_DEGREE
         }
     }
 
@@ -1175,66 +1170,30 @@ mod native_checkpoint {
                     self.row_count()
                 ));
             }
-            let component_group_count = self
-                .quotient_component_count
-                .div_ceil(QUOTIENT_COMPONENTS_PER_PHYSICAL_ROW);
-            let component_row_count = component_group_count * PROOF_CHALLENGE_EXTENSION_DEGREE;
-            let (source_group_ordinal, extension_coordinate_ordinal, is_batch_mask) =
-                if row_index < component_row_count {
-                    let group_ordinal = row_index / PROOF_CHALLENGE_EXTENSION_DEGREE;
-                    (
-                        group_ordinal,
-                        row_index % PROOF_CHALLENGE_EXTENSION_DEGREE,
-                        false,
-                    )
-                } else {
-                    let mask_row_ordinal = row_index - component_row_count;
-                    (
-                        mask_row_ordinal / PROOF_CHALLENGE_EXTENSION_DEGREE,
-                        mask_row_ordinal % PROOF_CHALLENGE_EXTENSION_DEGREE,
-                        true,
-                    )
-                };
+            let source_group_ordinal = row_index / PROOF_CHALLENGE_EXTENSION_DEGREE;
+            let extension_coordinate_ordinal = row_index % PROOF_CHALLENGE_EXTENSION_DEGREE;
             let mut witness_values = vec![
                 Goldilocks::ZERO;
                 LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT
                     * LOGICAL_POLYNOMIALS_PER_PHYSICAL_ROW
             ];
-            let (polynomials, first_chunk_ordinal) = if is_batch_mask {
-                (
-                    vec![self.store.read_opening_batch_mask()?],
-                    source_group_ordinal * QUOTIENT_COMPONENT_CHUNK_COUNT,
-                )
-            } else {
-                let first_component_ordinal =
-                    source_group_ordinal * QUOTIENT_COMPONENTS_PER_PHYSICAL_ROW;
-                let mut components = Vec::with_capacity(QUOTIENT_COMPONENTS_PER_PHYSICAL_ROW);
-                for component_offset in 0..QUOTIENT_COMPONENTS_PER_PHYSICAL_ROW {
-                    components.push(
-                        self.store.read_quotient_component(
-                            u16::try_from(first_component_ordinal + component_offset)
-                                .map_err(|_| "quotient component ordinal exceeds u16".to_owned())?,
-                        )?,
-                    );
-                }
-                (components, 0)
-            };
-            for (polynomial_ordinal, polynomial) in polynomials.iter().enumerate() {
-                let maximum_coefficient_count = if is_batch_mask {
-                    LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT * OPENING_BATCH_MASK_CHUNK_COUNT
-                } else {
-                    LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT * QUOTIENT_COMPONENT_CHUNK_COUNT
-                };
-                if polynomial.len() > maximum_coefficient_count {
-                    return Err(format!(
-                        "quotient phase polynomial has {} coefficients, exceeding {}",
-                        polynomial.len(),
-                        maximum_coefficient_count
-                    ));
-                }
-                for chunk_offset in 0..QUOTIENT_COMPONENT_CHUNK_COUNT {
-                    let source_chunk_ordinal = first_chunk_ordinal + chunk_offset;
-                    let source_start = source_chunk_ordinal * LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT;
+            if source_group_ordinal < QUOTIENT_COMPONENT_CHUNK_COUNT {
+                for component_ordinal in 0..self.quotient_component_count {
+                    let polynomial =
+                        self.store
+                            .read_quotient_component(u16::try_from(component_ordinal).map_err(
+                                |_| "quotient component ordinal exceeds u16".to_owned(),
+                            )?)?;
+                    let maximum_coefficient_count =
+                        LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT * QUOTIENT_COMPONENT_CHUNK_COUNT;
+                    if polynomial.len() > maximum_coefficient_count {
+                        return Err(format!(
+                            "quotient phase polynomial has {} coefficients, exceeding {}",
+                            polynomial.len(),
+                            maximum_coefficient_count
+                        ));
+                    }
+                    let source_start = source_group_ordinal * LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT;
                     if source_start >= polynomial.len() {
                         continue;
                     }
@@ -1242,12 +1201,39 @@ mod native_checkpoint {
                         .checked_add(LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT)
                         .expect("quotient source chunk end fits usize")
                         .min(polynomial.len());
-                    let block_ordinal = if is_batch_mask {
-                        chunk_offset
-                    } else {
-                        polynomial_ordinal * QUOTIENT_COMPONENT_CHUNK_COUNT + chunk_offset
-                    };
-                    let destination_start = block_ordinal * LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT;
+                    let destination_start =
+                        component_ordinal * LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT;
+                    for (destination, coefficient) in witness_values
+                        [destination_start..destination_start + source_end - source_start]
+                        .iter_mut()
+                        .zip(polynomial[source_start..source_end].iter().copied())
+                    {
+                        *destination = Goldilocks::new(
+                            coefficient.canonical_coordinates()[extension_coordinate_ordinal],
+                        );
+                    }
+                }
+            } else {
+                let polynomial = self.store.read_opening_batch_mask()?;
+                let maximum_coefficient_count =
+                    LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT * OPENING_BATCH_MASK_CHUNK_COUNT;
+                if polynomial.len() > maximum_coefficient_count {
+                    return Err(format!(
+                        "quotient phase polynomial has {} coefficients, exceeding {}",
+                        polynomial.len(),
+                        maximum_coefficient_count
+                    ));
+                }
+                for chunk_ordinal in 0..OPENING_BATCH_MASK_CHUNK_COUNT {
+                    let source_start = chunk_ordinal * LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT;
+                    if source_start >= polynomial.len() {
+                        continue;
+                    }
+                    let source_end = source_start
+                        .checked_add(LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT)
+                        .expect("quotient source chunk end fits usize")
+                        .min(polynomial.len());
+                    let destination_start = chunk_ordinal * LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT;
                     for (destination, coefficient) in witness_values
                         [destination_start..destination_start + source_end - source_start]
                         .iter_mut()
@@ -2228,7 +2214,7 @@ mod tests {
 
         let quotient_source = CheckpointQuotientPhaseSource::new(&store, quotient_component_count)
             .expect("construct quotient phase source");
-        assert_eq!(quotient_source.row_count(), 40);
+        assert_eq!(quotient_source.row_count(), 15);
         let quotient_geometry = RowEncodingGeometry::new_weighted_batch_with_log_inverse_rate(
             quotient_source.row_count(),
             PHYSICAL_ROW_WITNESS_VARIABLE_COUNT,

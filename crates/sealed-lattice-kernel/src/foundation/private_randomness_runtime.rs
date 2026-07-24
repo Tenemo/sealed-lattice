@@ -180,7 +180,7 @@ impl PreparedActionProofAttemptSource {
     }
 }
 
-#[cfg(all(feature = "proof-backend-bakeoff", not(target_arch = "wasm32")))]
+#[cfg(all(test, feature = "proof-backend-bakeoff", not(target_arch = "wasm32")))]
 pub(crate) fn prepare_production_backend_prototype_attempt(
     action_private_randomness: &ActionPrivateRandomness,
     application_slot: ProofApplicationSlot,

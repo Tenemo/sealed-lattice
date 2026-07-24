@@ -63,7 +63,7 @@ impl VerifiedKeyRelationColumnEvaluator {
     /// Research-only entry point for a fresh verifier that already owns the
     /// accepted public setup seed and a separately revalidated relation plan.
     /// It deliberately accepts no polynomial representation from the prover.
-    #[cfg(feature = "proof-backend-bakeoff")]
+    #[cfg(all(feature = "proof-backend-bakeoff", any(test, target_arch = "wasm32")))]
     pub(in crate::bgv::proof_suite) fn from_public_setup_seed_for_backend(
         public_setup_seed: [u8; 64],
         validated_relation_plan: &ValidatedRelationPlanArtifact,

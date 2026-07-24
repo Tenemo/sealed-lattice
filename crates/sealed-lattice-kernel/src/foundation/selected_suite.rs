@@ -41,10 +41,7 @@ use super::suite_artifacts::{
 };
 use super::{FOUNDATION_PROFILE, FoundationSchemaError, Hash512, RefusalReason, SuiteRecord};
 
-#[cfg(any(
-    test,
-    all(feature = "proof-backend-bakeoff", not(target_arch = "wasm32"))
-))]
+#[cfg(test)]
 use super::{
     ArtifactKind, ArtifactReference, CanonicalDecodeLimits, CanonicalItem, CanonicalTuple,
     ProofApplicationSlotCeilings, SuiteCountLimits,
@@ -53,10 +50,7 @@ use super::{
 use super::{MAXIMUM_CANONICAL_STREAM_BYTE_LENGTH, derive_foundation_roster_parameters};
 #[cfg(test)]
 use crate::bgv::proof_suite::SelectedEvaluatorEntryPosition;
-#[cfg(any(
-    test,
-    all(feature = "proof-backend-bakeoff", not(target_arch = "wasm32"))
-))]
+#[cfg(test)]
 use crate::bgv::proof_suite::selected_galois_key_share_batch_schedule;
 
 pub(crate) const SELECTED_MAXIMUM_BALLOT_ATTEMPTS_PER_PARTICIPANT: u16 = 3;
@@ -101,10 +95,7 @@ impl SelectedSuiteCapability {
     }
 }
 
-#[cfg(any(
-    test,
-    all(feature = "proof-backend-bakeoff", not(target_arch = "wasm32"))
-))]
+#[cfg(test)]
 pub(crate) fn selected_suite_capability_for_tests() -> SelectedSuiteCapability {
     let structural_record = SuiteRecord::new(
         selected_count_limits().expect("structural test count limits derive"),
@@ -119,10 +110,7 @@ pub(crate) fn selected_suite_capability_for_tests() -> SelectedSuiteCapability {
     }
 }
 
-#[cfg(any(
-    test,
-    all(feature = "proof-backend-bakeoff", not(target_arch = "wasm32"))
-))]
+#[cfg(test)]
 fn structural_artifact_reference_for_tests(artifact_kind: ArtifactKind) -> ArtifactReference {
     let bytes = CanonicalTuple::new(
         artifact_kind.artifact_schema_identifier(),
@@ -139,10 +127,7 @@ fn structural_artifact_reference_for_tests(artifact_kind: ArtifactKind) -> Artif
     .expect("structural test artifact reference derives")
 }
 
-#[cfg(any(
-    test,
-    all(feature = "proof-backend-bakeoff", not(target_arch = "wasm32"))
-))]
+#[cfg(test)]
 fn structural_artifact_references_for_tests() -> Vec<ArtifactReference> {
     ArtifactKind::ALL
         .into_iter()
@@ -996,10 +981,7 @@ fn derive_selected_artifact_reference(
     )
 }
 
-#[cfg(any(
-    test,
-    all(feature = "proof-backend-bakeoff", not(target_arch = "wasm32"))
-))]
+#[cfg(test)]
 fn selected_count_limits() -> SchemaResult<SuiteCountLimits> {
     SuiteCountLimits::new(
         SELECTED_MAXIMUM_BALLOT_ATTEMPTS_PER_PARTICIPANT,
@@ -1011,10 +993,7 @@ fn selected_count_limits() -> SchemaResult<SuiteCountLimits> {
     )
 }
 
-#[cfg(any(
-    test,
-    all(feature = "proof-backend-bakeoff", not(target_arch = "wasm32"))
-))]
+#[cfg(test)]
 pub(crate) fn selected_maximum_proof_objects_per_action() -> SchemaResult<u32> {
     let selected_relinearization_positions =
         selected_evaluator_relinearization_entry_positions()

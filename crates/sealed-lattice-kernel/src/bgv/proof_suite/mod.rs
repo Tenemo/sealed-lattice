@@ -209,7 +209,7 @@ pub(crate) use prover::{
     MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH, PrivateRandomnessCommonProofCoinError,
     PrivateRandomnessCommonProofCoinSource, ProvidedCommonProofSourcePolynomial, apply_trace_mask,
 };
-#[cfg(all(feature = "proof-backend-bakeoff", not(target_arch = "wasm32")))]
+#[cfg(all(test, feature = "proof-backend-bakeoff", not(target_arch = "wasm32")))]
 pub(crate) use prover::{
     CommonProofAuxiliaryColumnSynthesisCursor, CommonProofPreChallengeSourceCursor,
     CommonProofPreChallengeSourcePoll, CommonProofQuotientComponentCursor,

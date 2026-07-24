@@ -624,7 +624,7 @@ pub struct StateDurableBinding {
 }
 
 impl StateDurableBinding {
-    #[cfg(all(feature = "proof-backend-bakeoff", not(target_arch = "wasm32")))]
+    #[cfg(all(test, feature = "proof-backend-bakeoff", not(target_arch = "wasm32")))]
     pub(crate) const fn for_production_backend_prototype(
         suite_id: Hash512,
         ceremony_context_hash: Hash512,

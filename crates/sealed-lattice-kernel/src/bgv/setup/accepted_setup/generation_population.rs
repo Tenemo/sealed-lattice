@@ -47,10 +47,10 @@ use super::{
 };
 use crate::bgv::setup::sampling::negacyclic_product_mod;
 
-#[cfg(all(feature = "proof-backend-bakeoff", not(target_arch = "wasm32")))]
+#[cfg(all(test, feature = "proof-backend-bakeoff", not(target_arch = "wasm32")))]
 use super::verified_public_randomness::VerifiedSetupVerificationContext;
 
-#[cfg(all(feature = "proof-backend-bakeoff", not(target_arch = "wasm32")))]
+#[cfg(all(test, feature = "proof-backend-bakeoff", not(target_arch = "wasm32")))]
 use crate::foundation::{
     ACTION_RANDOMNESS_ROOT_BYTE_LENGTH, ActionRandomnessDerivationInput, ActionRandomnessRoot,
     ParticipantIdentity, StateDurableBinding, selected_suite_capability_for_tests,
@@ -101,20 +101,23 @@ struct RecipientPayloadLimb {
     recipient_share_material_seed: Zeroizing<[u8; MATERIAL_SEED_BYTE_LENGTH]>,
 }
 
-#[cfg(all(feature = "proof-backend-bakeoff", not(target_arch = "wasm32")))]
+#[cfg(all(test, feature = "proof-backend-bakeoff", not(target_arch = "wasm32")))]
 pub(crate) struct ProductionBackendPrototypeAuthority {
     pub(crate) action_private_randomness: Rc<ActionPrivateRandomness>,
     pub(crate) authority_handle: SetupGenerationAuthorityHandle,
 }
 
-#[cfg(all(feature = "proof-backend-bakeoff", not(target_arch = "wasm32")))]
-pub(crate) fn populate_production_backend_prototype_authority()
--> Result<ProductionBackendPrototypeAuthority, RefusalReason> {
+#[cfg(all(test, feature = "proof-backend-bakeoff", not(target_arch = "wasm32")))]
+pub(crate) fn populate_production_backend_prototype_authority(
+    prototype_revision: u8,
+) -> Result<ProductionBackendPrototypeAuthority, RefusalReason> {
     let selected_suite = selected_suite_capability_for_tests();
     let suite_identifier = Hash512::from_bytes(selected_suite.suite_identifier());
     let manifest_hash = Hash512::from_bytes([0x21; Hash512::BYTE_LENGTH]);
     let ceremony_context_hash = Hash512::from_bytes([0x22; Hash512::BYTE_LENGTH]);
-    let action_context_hash = Hash512::from_bytes([0x23; Hash512::BYTE_LENGTH]);
+    let mut action_context_bytes = [0x23; Hash512::BYTE_LENGTH];
+    action_context_bytes[Hash512::BYTE_LENGTH - 1] = prototype_revision;
+    let action_context_hash = Hash512::from_bytes(action_context_bytes);
     let roster_hash = Hash512::from_bytes([0x24; Hash512::BYTE_LENGTH]);
     let public_setup_seed = Hash512::from_bytes([0x25; Hash512::BYTE_LENGTH]);
     let local_roster_position = 3_usize;
@@ -126,17 +129,17 @@ pub(crate) fn populate_production_backend_prototype_authority()
         })
         .collect::<Vec<_>>();
     let local_participant_identity = ordered_participant_identities[local_roster_position];
+    let mut action_randomness_root_bytes = [0x5a; ACTION_RANDOMNESS_ROOT_BYTE_LENGTH];
+    action_randomness_root_bytes[ACTION_RANDOMNESS_ROOT_BYTE_LENGTH - 1] = prototype_revision;
     let action_private_randomness = Rc::new(
-        ActionRandomnessRoot::from_injected_bytes(Zeroizing::new(
-            [0x5a; ACTION_RANDOMNESS_ROOT_BYTE_LENGTH],
-        ))
-        .derive(ActionRandomnessDerivationInput::new(
-            suite_identifier,
-            ceremony_context_hash,
-            action_context_hash,
-            local_participant_identity,
-        ))
-        .map_err(|error| error.refusal_reason)?,
+        ActionRandomnessRoot::from_injected_bytes(Zeroizing::new(action_randomness_root_bytes))
+            .derive(ActionRandomnessDerivationInput::new(
+                suite_identifier,
+                ceremony_context_hash,
+                action_context_hash,
+                local_participant_identity,
+            ))
+            .map_err(|error| error.refusal_reason)?,
     );
     let mut ordered_action_randomness_commitments = (0..ordered_participant_identities.len())
         .map(|participant_index| {

@@ -68,7 +68,7 @@ use crate::{
     },
 };
 
-#[cfg(all(feature = "proof-backend-bakeoff", not(target_arch = "wasm32")))]
+#[cfg(all(test, feature = "proof-backend-bakeoff", not(target_arch = "wasm32")))]
 use crate::bgv::proof_suite::{RelationPlanCheckContext, RelationProofTreeInput};
 
 const MAXIMUM_RETAINED_SETUP_GENERATION_AUTHORITY_COUNT: usize = 16;
@@ -3427,7 +3427,7 @@ pub(crate) struct SetupGenerationKeyRelationSource<'authority, 'statement> {
 /// path as ordinary browser-owned generation. The research backend therefore
 /// cannot replace the witness, statement roots, relation plan, or masking
 /// coins with a synthetic fixture.
-#[cfg(all(feature = "proof-backend-bakeoff", not(target_arch = "wasm32")))]
+#[cfg(all(test, feature = "proof-backend-bakeoff", not(target_arch = "wasm32")))]
 pub(crate) struct ProductionBackendSameSecretSources {
     pub(crate) relation_plan: CommonProofRelationPlanCapability,
     pub(crate) relation_plan_variant: RelationPlanVariant,
@@ -3743,7 +3743,7 @@ impl SetupGenerationKeyRelationSource<'_, '_> {
         .map_err(|_| RefusalReason::WrongContext)
     }
 
-    #[cfg(all(feature = "proof-backend-bakeoff", not(target_arch = "wasm32")))]
+    #[cfg(all(test, feature = "proof-backend-bakeoff", not(target_arch = "wasm32")))]
     pub(crate) fn prepare_production_backend_same_secret_sources(
         &self,
         relation_plan: CommonProofRelationPlanCapability,

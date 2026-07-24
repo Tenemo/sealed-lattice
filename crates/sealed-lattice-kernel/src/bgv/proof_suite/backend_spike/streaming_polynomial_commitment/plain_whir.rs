@@ -26,8 +26,11 @@ use super::{
 };
 
 const STARTING_LOG_INV_RATE: usize = 2;
-const FOLDING_FACTOR: usize = 4;
-const SECURITY_LEVEL: usize = super::PROTOCOL_SECURITY_LEVEL;
+const FOLDING_FACTOR: usize = 3;
+// The enclosing construction adds independent row-code and output-root
+// proximity terms. Two extra WHIR bits keep their exact union strictly below
+// the round-by-round 2^-258 target used by the Fiat-Shamir ledger.
+const SECURITY_LEVEL: usize = super::PROTOCOL_SECURITY_LEVEL + 2;
 
 type AggregateLayout = PrefixProver<ChallengeField, ChallengeField>;
 pub(super) type PlainAggregatePcs = WhirProver<
@@ -317,7 +320,7 @@ mod tests {
             SecurityAssumption::UniqueDecoding
         );
         assert_eq!(pcs.params.pow_bits, 0);
-        assert_eq!(pcs.folding_schedule, [4, 4, 4, 4]);
+        assert_eq!(pcs.folding_schedule, [3, 3, 3, 3, 3]);
         assert_eq!(
             pcs.round_parameters
                 .iter()
@@ -331,17 +334,18 @@ mod tests {
                 ))
                 .collect::<Vec<_>>(),
             [
-                (16, 5, 384, 0, 0, 0),
-                (12, 8, 273, 0, 0, 0),
-                (8, 11, 262, 0, 0, 0)
+                (17, 4, 387, 0, 0, 0),
+                (14, 6, 288, 0, 0, 0),
+                (11, 8, 268, 0, 0, 0),
+                (8, 10, 264, 0, 0, 0),
             ]
         );
         assert_eq!(pcs.starting_folding_pow_bits, 0);
-        assert_eq!(pcs.final_queries, 261);
+        assert_eq!(pcs.final_queries, 263);
         assert_eq!(pcs.final_pow_bits, 0);
         assert_eq!(pcs.final_folding_pow_bits, 0);
-        assert_eq!(pcs.final_round_config().num_variables, 4);
-        assert_eq!(pcs.final_round_config().log_inv_rate, 11);
+        assert_eq!(pcs.final_round_config().num_variables, 5);
+        assert_eq!(pcs.final_round_config().log_inv_rate, 10);
         assert!(pcs.check_pow_bits());
     }
 
@@ -628,13 +632,40 @@ mod tests {
     #[test]
     #[ignore = "manual exact-layout size evidence"]
     fn heavy_rust_kernel_exact_layout_plain_whir_size() {
-        let table_variable_count = 18;
-        let opening_count = super::super::protocol::COLUMN_QUERY_COUNT + 3;
-        let table_width = 3_usize;
+        let table_variable_count = 19;
+        let table_width = 4_usize;
+        let mut requested_columns_by_point = vec![vec![0], vec![1], vec![2]];
+        requested_columns_by_point.extend((0..387).map(|_| vec![0, 1, 2]));
+        requested_columns_by_point.extend((0..80 + 532 + 8).map(|_| vec![3]));
+        let opening_count = requested_columns_by_point.len();
         let selector_variable_count = table_width.next_power_of_two().ilog2() as usize;
         let pcs_variable_count = table_variable_count + selector_variable_count;
-        let pcs = plain_aggregate_pcs(pcs_variable_count).expect("exact-layout configuration");
         let statement = b"plain aggregate exact production-layout size";
+        let points = (0..opening_count)
+            .map(|opening_index| {
+                Point::new(
+                    (0..table_variable_count)
+                        .map(|variable_index| {
+                            ChallengeField::from_u64(
+                                opening_index as u64 * 65_537 + variable_index as u64 * 257 + 17,
+                            )
+                        })
+                        .collect(),
+                )
+            })
+            .collect::<Vec<_>>();
+        let expected_opening_widths = requested_columns_by_point
+            .iter()
+            .map(Vec::len)
+            .collect::<Vec<_>>();
+        let starting_log_inverse_rate = STARTING_LOG_INV_RATE;
+        let folding_factor = FOLDING_FACTOR;
+        let pcs = plain_aggregate_pcs_with_parameters(
+            pcs_variable_count,
+            starting_log_inverse_rate,
+            folding_factor,
+        )
+        .expect("exact-layout configuration");
         let mut prover_challenger = plain_aggregate_challenger(&pcs, statement);
         let messages = (0..table_width)
             .map(|table_column| {
@@ -649,26 +680,6 @@ mod tests {
                 )
             })
             .collect();
-        let points = (0..opening_count)
-            .map(|opening_index| {
-                Point::new(
-                    (0..table_variable_count)
-                        .map(|variable_index| {
-                            ChallengeField::from_u64(
-                                opening_index as u64 * 65_537 + variable_index as u64 * 257 + 17,
-                            )
-                        })
-                        .collect(),
-                )
-            })
-            .collect::<Vec<_>>();
-        let mut requested_columns_by_point = vec![vec![0], vec![1], vec![2]];
-        requested_columns_by_point
-            .extend((0..super::super::protocol::COLUMN_QUERY_COUNT).map(|_| vec![0, 1, 2]));
-        let expected_opening_widths = requested_columns_by_point
-            .iter()
-            .map(Vec::len)
-            .collect::<Vec<_>>();
         let (commitment, prover_data) =
             commit_plain_aggregate_batch(&pcs, messages, &mut prover_challenger);
         let proof = open_plain_aggregate_batches_at_points(
@@ -692,7 +703,12 @@ mod tests {
             table_width,
         )
         .expect("measure exact-layout proof");
-        let verifier_pcs = plain_aggregate_pcs(pcs_variable_count).expect("verifier configuration");
+        let verifier_pcs = plain_aggregate_pcs_with_parameters(
+            pcs_variable_count,
+            starting_log_inverse_rate,
+            folding_factor,
+        )
+        .expect("verifier configuration");
         let decoded = super::super::plain_whir_wire::decode_plain_whir_batch_proof(
             &verifier_pcs,
             &canonical,
@@ -713,7 +729,7 @@ mod tests {
         )
         .expect("verify exact-layout proof");
         println!(
-            "exact layout: bytes={}, values={}, dictionary={}, references={}, rounds={}, final_queries={}, final_variables={}",
+            "exact layout start={starting_log_inverse_rate}, fold={folding_factor}: bytes={}, values={}, dictionary={}, references={}, rounds={}, final_queries={}, final_variables={}",
             canonical.len(),
             breakdown.query_value_byte_length,
             breakdown.merkle_dictionary_byte_length,

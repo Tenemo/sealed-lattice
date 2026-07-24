@@ -144,7 +144,7 @@ pub use private_randomness::{
     SETUP_STRUCTURED_COMMITMENT_OPENING_CONTEXT_SCHEMA_IDENTIFIER,
     SetupStructuredCommitmentOpeningContext,
 };
-#[cfg(all(feature = "proof-backend-bakeoff", not(target_arch = "wasm32")))]
+#[cfg(all(test, feature = "proof-backend-bakeoff", not(target_arch = "wasm32")))]
 pub(crate) use private_randomness_runtime::prepare_production_backend_prototype_attempt;
 pub(crate) use private_randomness_runtime::{
     ACTION_RANDOMNESS_RUNTIME_RESOURCE_LIMIT, ACTION_RANDOMNESS_RUNTIME_STALE_HANDLE,
@@ -178,10 +178,7 @@ pub(crate) use selected_suite::{
     SELECTED_MAXIMUM_BALLOT_ATTEMPTS_PER_PARTICIPANT,
     SELECTED_MAXIMUM_CANDIDATE_PACKAGES_PER_ACTION,
 };
-#[cfg(any(
-    test,
-    all(feature = "proof-backend-bakeoff", not(target_arch = "wasm32"))
-))]
+#[cfg(test)]
 pub(crate) use selected_suite::{
     SELECTED_MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT,
     selected_maximum_proof_objects_per_action, selected_suite_capability_for_tests,

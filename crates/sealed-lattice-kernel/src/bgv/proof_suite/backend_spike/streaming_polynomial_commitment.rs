@@ -41,9 +41,9 @@ use p3_challenger::{
 #[cfg(test)]
 use p3_commit::MultilinearPcs;
 use p3_dft::Radix2DFTSmallBatch;
-use p3_field::{PrimeCharacteristicRing, RawDataSerializable, extension::BinomialExtensionField};
 #[cfg(test)]
 use p3_field::PrimeField64;
+use p3_field::{PrimeCharacteristicRing, RawDataSerializable, extension::BinomialExtensionField};
 use p3_goldilocks::Goldilocks;
 use p3_merkle_tree::{MerkleCap, MerkleTreeMmcs};
 use p3_multilinear_util::point::Point;

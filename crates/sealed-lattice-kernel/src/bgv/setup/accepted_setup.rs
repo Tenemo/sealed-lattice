@@ -45,7 +45,7 @@ pub(crate) use self::collective_and_relinearization_verification_population::{
     retain_relinearization_round_two_verification_terminal_source,
 };
 pub(in crate::bgv) use self::evaluator_source::VerifiedAcceptedSetupEvaluatorSourceCatalog;
-#[cfg(all(feature = "proof-backend-bakeoff", not(target_arch = "wasm32")))]
+#[cfg(all(test, feature = "proof-backend-bakeoff", not(target_arch = "wasm32")))]
 pub(crate) use self::generation_authority::ProductionBackendSameSecretSources;
 pub(in crate::bgv) use self::generation_authority::{
     SetupGaloisGenerationPreparationError, SetupGeneratedCommittedMaterial,
@@ -94,7 +94,7 @@ pub(crate) use self::generation_authority::{
     SetupGenerationDealerPublicRecordSource, resolve_setup_generation_dealer_public_record_source,
 };
 pub(in crate::bgv) use self::generation_population::populate_browser_owned_setup_generation_authority;
-#[cfg(all(feature = "proof-backend-bakeoff", not(target_arch = "wasm32")))]
+#[cfg(all(test, feature = "proof-backend-bakeoff", not(target_arch = "wasm32")))]
 pub(crate) use self::generation_population::populate_production_backend_prototype_authority;
 pub(in crate::bgv) use self::generation_relinearization::{
     SetupGeneratedRelinearizationAggregateSourceAuthority,

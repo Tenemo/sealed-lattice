@@ -22,7 +22,9 @@ const runProofBackendPrototypeTest = async (
         (argument) => argument !== '--',
     );
     if (positionalArguments.length !== 1) {
-        throw new Error(`${scriptName} requires exactly one heavy test filter.`);
+        throw new Error(
+            `${scriptName} requires exactly one heavy test filter.`,
+        );
     }
     const testFilter = normalizeRustTestFilter(positionalArguments[0] ?? '');
     if (!testFilter.startsWith(heavyRustKernelTestNamePrefix)) {

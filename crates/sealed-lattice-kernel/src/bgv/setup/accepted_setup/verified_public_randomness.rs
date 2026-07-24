@@ -22,7 +22,7 @@ pub(in crate::bgv) struct VerifiedSetupVerificationContext {
 }
 
 impl VerifiedSetupVerificationContext {
-    #[cfg(all(feature = "proof-backend-bakeoff", not(target_arch = "wasm32")))]
+    #[cfg(all(test, feature = "proof-backend-bakeoff", not(target_arch = "wasm32")))]
     pub(in crate::bgv) const fn for_production_backend_prototype(
         suite_identifier: Hash512,
         manifest_hash: Hash512,
@@ -159,7 +159,7 @@ impl VerifiedPublicRandomness {
         }
     }
 
-    #[cfg(all(feature = "proof-backend-bakeoff", not(target_arch = "wasm32")))]
+    #[cfg(all(test, feature = "proof-backend-bakeoff", not(target_arch = "wasm32")))]
     pub(in crate::bgv) fn from_production_backend_prototype_values(
         context: VerifiedSetupVerificationContext,
         ordered_participant_identities: Vec<ParticipantIdentity>,

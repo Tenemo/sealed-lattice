@@ -22,7 +22,7 @@ use crate::{
     transcript_core::encode_hex,
 };
 
-#[cfg(all(feature = "proof-backend-bakeoff", not(target_arch = "wasm32")))]
+#[cfg(all(test, feature = "proof-backend-bakeoff", not(target_arch = "wasm32")))]
 use super::super::AuthenticatedCompactCommittedMaterialSource;
 use super::super::{
     CommonProofBoundTreeLeafSaltRequest, CommonProofProverError, CommonProofRelationPlanCapability,
@@ -773,7 +773,7 @@ pub(crate) struct SetupKeyRelationSourcePolynomialAdapter {
 }
 
 impl SetupKeyRelationSourcePolynomialAdapter {
-    #[cfg(all(feature = "proof-backend-bakeoff", not(target_arch = "wasm32")))]
+    #[cfg(all(test, feature = "proof-backend-bakeoff", not(target_arch = "wasm32")))]
     pub(crate) const fn production_backend_request_context(
         &self,
     ) -> CommonProofSourcePolynomialRequestContext {
@@ -784,7 +784,7 @@ impl SetupKeyRelationSourcePolynomialAdapter {
     /// setup authority used by the production source provider. This research
     /// entry point never accepts polynomial bytes from its caller and refuses
     /// every prover-owned or statement-tree column.
-    #[cfg(all(feature = "proof-backend-bakeoff", not(target_arch = "wasm32")))]
+    #[cfg(all(test, feature = "proof-backend-bakeoff", not(target_arch = "wasm32")))]
     pub(crate) fn production_backend_verifier_sequence_polynomial(
         &mut self,
         column_ordinal: u32,
@@ -810,7 +810,7 @@ impl SetupKeyRelationSourcePolynomialAdapter {
     /// material tree. This research-only path lets the exact backend rebuild
     /// canonical leaf salts without accepting salts or commitment material
     /// from its caller.
-    #[cfg(all(feature = "proof-backend-bakeoff", not(target_arch = "wasm32")))]
+    #[cfg(all(test, feature = "proof-backend-bakeoff", not(target_arch = "wasm32")))]
     pub(crate) fn production_backend_bound_material_source(
         &self,
         tree_catalog_index: u16,

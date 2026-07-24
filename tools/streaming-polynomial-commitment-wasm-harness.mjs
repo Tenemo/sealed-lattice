@@ -45,10 +45,10 @@ if (
 const run = /** @type {(rowCount: number, variableCount: number) => number} */ (
     runExport
 );
-const digestAddressAfterRun = /** @type {() => number} */ (
-    digestAddressExport
+const digestAddressAfterRun = /** @type {() => number} */ (digestAddressExport);
+const metricsAddressAfterRun = /** @type {() => number} */ (
+    metricsAddressExport
 );
-const metricsAddressAfterRun = /** @type {() => number} */ (metricsAddressExport);
 const pagesBefore = memory.buffer.byteLength / 65_536;
 const started = process.hrtime.bigint();
 const pagesAfter = run(rowCount, rowVariableCount);
@@ -91,9 +91,7 @@ console.log(
             ).toFixed(2),
             elapsedMilliseconds: elapsedMilliseconds.toFixed(1),
             canonicalProofByteLength: proofByteLength,
-            canonicalProofMebibytes: (
-                proofByteLength / 1_048_576
-            ).toFixed(3),
+            canonicalProofMebibytes: (proofByteLength / 1_048_576).toFixed(3),
             aggregateProofByteLength,
             aggregateQueryValueByteLength,
             aggregateRoundQueryValueByteLength,

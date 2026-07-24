@@ -292,10 +292,7 @@ impl RelationPlanVariant {
     /// Returns the first constraint ordinal that uses each constraint's exact
     /// checked zeroifier program. Quotient builders may reuse evaluations only
     /// within one of these structural equivalence classes.
-    #[cfg(any(
-        test,
-        all(feature = "proof-backend-bakeoff", not(target_arch = "wasm32"))
-    ))]
+    #[cfg(test)]
     pub(crate) fn constraint_zeroifier_representative_ordinals(&self) -> Vec<usize> {
         let mut representative_ordinals = Vec::<usize>::new();
         self.ordered_constraints

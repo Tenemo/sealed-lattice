@@ -92,7 +92,7 @@ pub(in crate::bgv) use accepted_setup::{
     with_setup_generation_relinearization_round_two_witness, with_setup_generation_vss_material,
     with_verified_accepted_setup_authority, with_verified_participant_target_release_source,
 };
-#[cfg(all(feature = "proof-backend-bakeoff", not(target_arch = "wasm32")))]
+#[cfg(all(test, feature = "proof-backend-bakeoff", not(target_arch = "wasm32")))]
 pub(crate) use accepted_setup::{
     ProductionBackendSameSecretSources, populate_production_backend_prototype_authority,
 };
