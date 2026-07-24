@@ -2,10 +2,12 @@ import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import {
     link,
+    lstat,
     mkdir,
     mkdtemp,
     readFile,
     readdir,
+    rename,
     rm,
     symlink,
     writeFile,
@@ -29,23 +31,30 @@ import type {
     CommandInvocation,
 } from '#tools/ci/run-command';
 import {
+    dryRunProofStorageWidthBrowserRecoveryChain,
     executeProofStorageWidthBrowserEvidence,
+    immutableFailedRunMetadataInvocationEquals,
     parseProofStorageWidthBrowserEvidenceArguments,
     parseProofStorageWidthBrowserMeasurementEvents,
     parseProofStorageWidthBrowserStaticPreflightOutput,
     proofStorageWidthBrowserEvidenceVitestArguments,
     proofStorageWidthBrowserEvidenceStaticPreflightArguments,
+    runProofStorageWidthBrowserEvidence,
     validateProofStorageWidthBrowserEvidenceArtifacts,
     type NativeWidthEvidence,
     type ProofStorageWidthBrowserEvidenceDependencies,
     type ProofStorageWidthBrowserChainedRecoveryProfile,
     type ProofStorageWidthBrowserPreOperationRecoveryProfile,
+    type ProofStorageWidthBrowserThirdRecoveryProfile,
 } from '#tools/ci/run-proof-storage-width-browser-evidence';
 
 const commitHash = '9a'.repeat(20);
 const firstHarnessRepairCommitHash = '618c55d352d5a2f87db09b446f7e05857831c4dd';
 const validatorRepairCommitHash = 'b7398ce150044fc4d3579136989753ddcaad3faa';
 const recoveryHarnessCommitHash = '6d'.repeat(20);
+const thirdRecoveryIssuanceCommitHash =
+    '17d0b2b15027e0914f55105c27931f2d6e1c5824';
+const thirdRecoveryFinalHarnessCommitHash = '7e'.repeat(20);
 const officialNativeReservationIdentitySha256Hex = '34'.repeat(32);
 const testMemoryLimitBytes = 8_589_934_592;
 const expectedWasmHashEnvironmentVariable =
@@ -283,6 +292,7 @@ const validatorRepairFilePaths = [
 ] as const;
 
 const createNativeEvidence = async (input: {
+    readonly evidencePath?: string;
     readonly fullWidthExternalIoByteLength?: bigint;
     readonly measurementRecord: Readonly<Record<string, unknown>>;
     readonly nativeEvidencePath: string;
@@ -315,7 +325,8 @@ const createNativeEvidence = async (input: {
         publicBaseLeafColumnCount: 3_451,
     } as unknown as NativeWidthEvidence['fullWidthResult'];
     return {
-        evidencePath: path.resolve(input.nativeEvidencePath),
+        evidencePath:
+            input.evidencePath ?? path.resolve(input.nativeEvidencePath),
         evidenceSha256Hex: sha256Hex(nativeEvidenceBytes),
         fullWidthResult,
         fullWidthStaticPoint: {
@@ -389,8 +400,77 @@ type TestRecoveryProfile = ProofStorageWidthBrowserPreOperationRecoveryProfile &
         chainedRecoveryProfile: ProofStorageWidthBrowserChainedRecoveryProfile;
     }>;
 
+type TestThirdRecoveryProfile = TestRecoveryProfile &
+    Readonly<{
+        thirdRecoveryProfile: ProofStorageWidthBrowserThirdRecoveryProfile;
+    }>;
+
+type RecordedInvocationPathSerializer = (
+    canonicalPath: string,
+    pathArgumentIndex: 1 | 3 | 5,
+) => string;
+
+type BrowserRecoveryMarkerFaultInjection = NonNullable<
+    ProofStorageWidthBrowserEvidenceDependencies['browserRecoveryMarkerFaultInjection']
+>;
+
+const exactRecordedInvocationPath: RecordedInvocationPathSerializer = (
+    canonicalPath,
+) => canonicalPath;
+
+const doubledWindowsRecordedInvocationPath: RecordedInvocationPathSerializer = (
+    canonicalPath,
+) => {
+    if (process.platform !== 'win32') {
+        return canonicalPath;
+    }
+    const parsedPath = path.win32.parse(canonicalPath);
+    return `${parsedPath.root}${canonicalPath
+        .slice(parsedPath.root.length)
+        .split(/[\\/]+/u)
+        .join('\\\\')}`;
+};
+
+const mixedWindowsRecordedInvocationPath: RecordedInvocationPathSerializer = (
+    canonicalPath,
+) => {
+    if (process.platform !== 'win32') {
+        return canonicalPath;
+    }
+    const parsedPath = path.win32.parse(canonicalPath);
+    return `${parsedPath.root}${canonicalPath
+        .slice(parsedPath.root.length)
+        .split(/[\\/]+/u)
+        .map((segment, segmentIndex) =>
+            segmentIndex === 0
+                ? segment
+                : `${segmentIndex % 2 === 0 ? '\\\\' : '/'}${segment}`,
+        )
+        .join('')}`;
+};
+
+const normalizeTestJsonValue = (value: unknown): unknown => {
+    if (Array.isArray(value)) {
+        return value.map(normalizeTestJsonValue);
+    }
+    if (typeof value !== 'object' || value === null) {
+        return value;
+    }
+    return Object.fromEntries(
+        Object.entries(value)
+            .sort(([leftKey], [rightKey]) => leftKey.localeCompare(rightKey))
+            .map(([key, nestedValue]) => [
+                key,
+                normalizeTestJsonValue(nestedValue),
+            ]),
+    );
+};
+
 const createPreOperationRecoveryProfile = async (input: {
+    readonly failedRecoveryInvocationPathSerializer?: RecordedInvocationPathSerializer;
+    readonly failedRecoveryRunDirectoryPathSerializer?: RecordedInvocationPathSerializer;
     readonly nativeEvidencePath: string;
+    readonly nativeEvidenceBindingPath?: string;
     readonly processedWasmKernelPath: string;
     readonly reservationRootPath: string;
     readonly runDirectoryPath: string;
@@ -612,7 +692,11 @@ const createPreOperationRecoveryProfile = async (input: {
         recoveryOrdinal: 1,
     } satisfies ProofStorageWidthBrowserPreOperationRecoveryProfile;
     const chainedRecoveryProfile = await createChainedRecoveryProfile({
+        invocationPathSerializer: input.failedRecoveryInvocationPathSerializer,
+        runDirectoryPathSerializer:
+            input.failedRecoveryRunDirectoryPathSerializer,
         nativeEvidencePath: input.nativeEvidencePath,
+        nativeEvidenceBindingPath: input.nativeEvidenceBindingPath,
         preOperationRecoveryProfile,
         reservationRootPath: input.reservationRootPath,
         runDirectoryPath: input.runDirectoryPath,
@@ -624,9 +708,12 @@ const createPreOperationRecoveryProfile = async (input: {
 };
 
 const createChainedRecoveryProfile = async (input: {
+    readonly invocationPathSerializer?: RecordedInvocationPathSerializer;
     readonly nativeEvidencePath: string;
+    readonly nativeEvidenceBindingPath?: string;
     readonly preOperationRecoveryProfile: ProofStorageWidthBrowserPreOperationRecoveryProfile;
     readonly reservationRootPath: string;
+    readonly runDirectoryPathSerializer?: RecordedInvocationPathSerializer;
     readonly runDirectoryPath: string;
 }): Promise<ProofStorageWidthBrowserChainedRecoveryProfile> => {
     const failedRecoveryRunDirectoryPath = path.join(
@@ -648,13 +735,22 @@ const createChainedRecoveryProfile = async (input: {
     const metadata = `${JSON.stringify({
         commandLineArguments: [
             '--native-evidence',
-            path.resolve(input.nativeEvidencePath),
+            (input.invocationPathSerializer ?? exactRecordedInvocationPath)(
+                input.nativeEvidenceBindingPath ??
+                    path.resolve(input.nativeEvidencePath),
+                1,
+            ),
             '--pre-operation-recovery',
-            path.resolve(
-                input.preOperationRecoveryProfile.failedRunDirectoryPath,
+            (input.invocationPathSerializer ?? exactRecordedInvocationPath)(
+                path.resolve(
+                    input.preOperationRecoveryProfile.failedRunDirectoryPath,
+                ),
+                3,
             ),
         ],
-        runDirectoryPath: path.resolve(failedRecoveryRunDirectoryPath),
+        runDirectoryPath: (
+            input.runDirectoryPathSerializer ?? exactRecordedInvocationPath
+        )(path.resolve(failedRecoveryRunDirectoryPath), 1),
         scriptName: 'test:browser:proof-storage-width-evidence',
     })}\n`;
     const output = [
@@ -791,6 +887,242 @@ const createChainedRecoveryProfile = async (input: {
     };
 };
 
+const createThirdRecoveryFixtureProfile = async (input: {
+    readonly failedChainedRecoveryInvocationPathSerializer?: RecordedInvocationPathSerializer;
+    readonly failedRecoveryInvocationPathSerializer?: RecordedInvocationPathSerializer;
+    readonly failedChainedRecoveryRunDirectoryPathSerializer?: RecordedInvocationPathSerializer;
+    readonly failedRecoveryRunDirectoryPathSerializer?: RecordedInvocationPathSerializer;
+    readonly nativeEvidenceBindingPath?: string;
+    readonly nativeEvidencePath: string;
+    readonly processedWasmKernelPath: string;
+    readonly reservationRootPath: string;
+    readonly runDirectoryPath: string;
+}): Promise<TestThirdRecoveryProfile> => {
+    const preOperationRecoveryProfile = await createPreOperationRecoveryProfile(
+        {
+            failedRecoveryInvocationPathSerializer:
+                input.failedRecoveryInvocationPathSerializer,
+            failedRecoveryRunDirectoryPathSerializer:
+                input.failedRecoveryRunDirectoryPathSerializer,
+            nativeEvidencePath: input.nativeEvidencePath,
+            nativeEvidenceBindingPath: input.nativeEvidenceBindingPath,
+            processedWasmKernelPath: input.processedWasmKernelPath,
+            reservationRootPath: input.reservationRootPath,
+            runDirectoryPath: input.runDirectoryPath,
+        },
+    );
+    const failedChainedRecoveryRunDirectoryPath = path.join(
+        path.dirname(input.runDirectoryPath),
+        'failed-chained-recovery-attempt',
+    );
+    await mkdir(failedChainedRecoveryRunDirectoryPath);
+    const diagnostics = 'Result: runner-failure\n';
+    const events = [
+        { eventType: 'run-started' },
+        { eventType: 'heavy-lane-lease-waiting' },
+        { eventType: 'run-heartbeat' },
+        { eventType: 'heavy-lane-lease-acquired' },
+        { eventType: 'heavy-lane-lease-released' },
+        { eventType: 'run-finished' },
+    ]
+        .map((record) => JSON.stringify(record))
+        .join('\n');
+    const eventsWithTerminator = `${events}\n`;
+    const invocationPathSerializer =
+        input.failedChainedRecoveryInvocationPathSerializer ??
+        exactRecordedInvocationPath;
+    const metadata = `${JSON.stringify({
+        commandLineArguments: [
+            '--native-evidence',
+            invocationPathSerializer(
+                input.nativeEvidenceBindingPath ??
+                    path.resolve(input.nativeEvidencePath),
+                1,
+            ),
+            '--pre-operation-recovery',
+            invocationPathSerializer(
+                path.resolve(
+                    preOperationRecoveryProfile.failedRunDirectoryPath,
+                ),
+                3,
+            ),
+            '--failed-recovery-attempt',
+            invocationPathSerializer(
+                path.resolve(
+                    preOperationRecoveryProfile.chainedRecoveryProfile
+                        .failedRecoveryRunDirectoryPath,
+                ),
+                5,
+            ),
+        ],
+        runDirectoryPath: (
+            input.failedChainedRecoveryRunDirectoryPathSerializer ??
+            exactRecordedInvocationPath
+        )(path.resolve(failedChainedRecoveryRunDirectoryPath), 1),
+        scriptName: 'test:browser:proof-storage-width-evidence',
+    })}\n`;
+    const output = [
+        'Waiting for local guarded heavy-lane lease for Proof-storage width release WebAssembly evidence.',
+        'Acquired local guarded heavy-lane lease for Proof-storage width release WebAssembly evidence.',
+        'Released local guarded heavy-lane lease for Proof-storage width release WebAssembly evidence.',
+        '',
+    ].join('\n');
+    const resources = `${JSON.stringify({
+        activeCommandIds: [],
+        resourceScope: 'orchestration-process-and-host',
+    })}\n`;
+    const summary = `${JSON.stringify({
+        error: {
+            message:
+                'The failed recovery metadata changed its exact predecessor invocation.',
+            name: 'Error',
+        },
+        exitCode: 1,
+        repositoryCommitHash: thirdRecoveryIssuanceCommitHash,
+        repositoryTreeDirty: false,
+        resultClassification: 'runner-failure',
+    })}\n`;
+    const failedChainedRecoveryArtifacts = {
+        diagnostics: {
+            relativePath: 'diagnostics.txt',
+            sha256Hex: sha256Hex(diagnostics),
+        },
+        events: {
+            relativePath: 'events.jsonl',
+            sha256Hex: sha256Hex(eventsWithTerminator),
+        },
+        metadata: {
+            relativePath: 'metadata.json',
+            sha256Hex: sha256Hex(metadata),
+        },
+        output: {
+            relativePath: 'output.log',
+            sha256Hex: sha256Hex(output),
+        },
+        resources: {
+            relativePath: 'resources.jsonl',
+            sha256Hex: sha256Hex(resources),
+        },
+        summary: {
+            relativePath: 'summary.json',
+            sha256Hex: sha256Hex(summary),
+        },
+    } as const;
+    await Promise.all(
+        [
+            [
+                failedChainedRecoveryArtifacts.diagnostics.relativePath,
+                diagnostics,
+            ],
+            [
+                failedChainedRecoveryArtifacts.events.relativePath,
+                eventsWithTerminator,
+            ],
+            [failedChainedRecoveryArtifacts.metadata.relativePath, metadata],
+            [failedChainedRecoveryArtifacts.output.relativePath, output],
+            [failedChainedRecoveryArtifacts.resources.relativePath, resources],
+            [failedChainedRecoveryArtifacts.summary.relativePath, summary],
+        ].map(([relativePath, contents]) =>
+            writeFile(
+                path.join(
+                    failedChainedRecoveryRunDirectoryPath,
+                    relativePath ?? '',
+                ),
+                contents ?? '',
+                'utf8',
+            ),
+        ),
+    );
+    const chainedRecoveryProfile =
+        preOperationRecoveryProfile.chainedRecoveryProfile;
+    const previousChainedAuthorizationKeySha256Hex = sha256Hex(
+        JSON.stringify(
+            normalizeTestJsonValue({
+                failedRecoveryArtifacts:
+                    chainedRecoveryProfile.failedRecoveryArtifacts,
+                failedRecoveryRunRelativePath:
+                    chainedRecoveryProfile.failedRecoveryRunRelativePath,
+                formatVersion: 2,
+                nativeAggregateSha256Hex:
+                    preOperationRecoveryProfile.nativeAggregateSha256Hex,
+                nativeSourceCommitHash:
+                    preOperationRecoveryProfile.nativeSourceCommitHash,
+                previousAuthorizationKeySha256Hex:
+                    chainedRecoveryProfile.previousAuthorizationKeySha256Hex,
+                previousPreflightAttemptSha256Hex:
+                    chainedRecoveryProfile.previousPreflightAttempt.sha256Hex,
+                recoveryOrdinal: chainedRecoveryProfile.recoveryOrdinal,
+                validatorRepairCommitHash:
+                    chainedRecoveryProfile.validatorRepairCommitHash,
+                width: 512,
+            }),
+        ),
+    );
+    const previousChainedPreflightAttemptRelativePath = path.join(
+        'browser-recovery-preflight-2',
+        previousChainedAuthorizationKeySha256Hex,
+        'preflight-attempted.json',
+    );
+    const previousChainedPreflightAttempt = [
+        {
+            authorizationKeySha256Hex: previousChainedAuthorizationKeySha256Hex,
+            eventType: 'official-browser-width-recovery-preflight-attempted',
+            failedReservationIdentitySha256Hex:
+                preOperationRecoveryProfile.failedReservation.identitySha256Hex,
+            previousAuthorizationKeySha256Hex:
+                chainedRecoveryProfile.previousAuthorizationKeySha256Hex,
+            previousPreflightAttemptSha256Hex:
+                chainedRecoveryProfile.previousPreflightAttempt.sha256Hex,
+            recordedAtUnixMilliseconds: 500,
+            recoveryOrdinal: 2,
+        },
+        {
+            eventType: 'official-sample-outcome',
+            failureName: 'Error',
+            outcome: 'failed',
+            recordedAtUnixMilliseconds: 600,
+        },
+    ]
+        .map((record) => JSON.stringify(record))
+        .join('\n');
+    const previousChainedPreflightAttemptWithTerminator = `${previousChainedPreflightAttempt}\n`;
+    const previousChainedPreflightAttemptPath = path.join(
+        input.reservationRootPath,
+        previousChainedPreflightAttemptRelativePath,
+    );
+    await mkdir(path.dirname(previousChainedPreflightAttemptPath), {
+        recursive: true,
+    });
+    await writeFile(
+        previousChainedPreflightAttemptPath,
+        previousChainedPreflightAttemptWithTerminator,
+        'utf8',
+    );
+    const thirdRecoveryProfile = {
+        failedChainedRecoveryArtifacts,
+        failedChainedRecoveryRunDirectoryPath: path.resolve(
+            failedChainedRecoveryRunDirectoryPath,
+        ),
+        failedChainedRecoveryRunRelativePath: path
+            .relative(path.resolve('.'), failedChainedRecoveryRunDirectoryPath)
+            .split(path.sep)
+            .join('/'),
+        issuanceCommitHash: thirdRecoveryIssuanceCommitHash,
+        previousChainedAuthorizationKeySha256Hex,
+        previousChainedPreflightAttempt: {
+            relativePath: previousChainedPreflightAttemptRelativePath
+                .split(path.sep)
+                .join('/'),
+            sha256Hex: sha256Hex(previousChainedPreflightAttemptWithTerminator),
+        },
+        recoveryOrdinal: 3,
+    } satisfies ProofStorageWidthBrowserThirdRecoveryProfile;
+    return Object.freeze({
+        ...preOperationRecoveryProfile,
+        thirdRecoveryProfile,
+    });
+};
+
 const recoveryExecutionPaths = (
     profile: TestRecoveryProfile,
 ): Readonly<{
@@ -802,8 +1134,23 @@ const recoveryExecutionPaths = (
     preOperationRecoveryRunDirectoryPath: profile.failedRunDirectoryPath,
 });
 
+const thirdRecoveryExecutionPaths = (
+    profile: TestThirdRecoveryProfile,
+): Readonly<{
+    failedChainedRecoveryAttemptRunDirectoryPath: string;
+    failedRecoveryAttemptRunDirectoryPath: string;
+    preOperationRecoveryRunDirectoryPath: string;
+}> => ({
+    failedChainedRecoveryAttemptRunDirectoryPath:
+        profile.thirdRecoveryProfile.failedChainedRecoveryRunDirectoryPath,
+    failedRecoveryAttemptRunDirectoryPath:
+        profile.chainedRecoveryProfile.failedRecoveryRunDirectoryPath,
+    preOperationRecoveryRunDirectoryPath: profile.failedRunDirectoryPath,
+});
+
 const createDependencies = (input: {
     readonly allInvocations?: CommandInvocation[];
+    readonly browserRecoveryMarkerFaultInjection?: ProofStorageWidthBrowserEvidenceDependencies['browserRecoveryMarkerFaultInjection'];
     readonly chainedRecoveryProfile?: ProofStorageWidthBrowserChainedRecoveryProfile;
     readonly driftNativeEvidenceAtLoadCount?: number;
     readonly driftNativeEvidenceDuringAttachmentValidation?: boolean;
@@ -816,6 +1163,7 @@ const createDependencies = (input: {
         readonly runDirectoryPath: string;
     };
     readonly fullWidthExternalIoByteLength?: bigint;
+    readonly nativeEvidenceBindingPath?: string;
     readonly nativeEvidenceLoadCounts?: number[];
     readonly repositoryStateForCheckpoint?: (
         checkpoint:
@@ -833,12 +1181,51 @@ const createDependencies = (input: {
     readonly transitionChangedFileStatuses?: readonly string[];
     readonly transitionCommitObject?: string;
     readonly transitionOverrideCommitHash?: string;
+    readonly thirdRecoveryProfile?: ProofStorageWidthBrowserThirdRecoveryProfile;
 }): ProofStorageWidthBrowserEvidenceDependencies => {
     let nativeEvidence: NativeWidthEvidence | undefined;
     let nativeEvidenceLoadCount = 0;
     return {
+        ...(input.browserRecoveryMarkerFaultInjection === undefined
+            ? {}
+            : {
+                  browserRecoveryMarkerFaultInjection:
+                      input.browserRecoveryMarkerFaultInjection,
+              }),
         executeCommand: async (invocation) => {
             input.allInvocations?.push(invocation);
+            if (
+                invocation.command === 'git' &&
+                invocation.args.length === 3 &&
+                invocation.args[0] === 'rev-parse' &&
+                invocation.args[1] === '--verify' &&
+                invocation.args[2] === 'HEAD^{commit}'
+            ) {
+                return {
+                    ...successfulCommandResult(),
+                    stdout: `${
+                        input.repositoryStateForCheckpoint?.('initial')
+                            .commitHash ?? commitHash
+                    }\n`,
+                };
+            }
+            if (
+                invocation.command === 'git' &&
+                invocation.args.length === 4 &&
+                invocation.args[0] === 'status' &&
+                invocation.args[1] === '--porcelain=v1' &&
+                invocation.args[2] === '--untracked-files=all' &&
+                invocation.args[3] === '--ignore-submodules=none'
+            ) {
+                return {
+                    ...successfulCommandResult(),
+                    stdout:
+                        input.repositoryStateForCheckpoint?.('initial')
+                            .treeDirty === true
+                            ? ' M synthetic-dirty-path\n'
+                            : '',
+                };
+            }
             if (invocation.args.includes('cat-file')) {
                 const childCommitHash =
                     invocation.args[invocation.args.length - 1];
@@ -847,7 +1234,10 @@ const createDependencies = (input: {
                         ? commitHash
                         : childCommitHash === validatorRepairCommitHash
                           ? firstHarnessRepairCommitHash
-                          : validatorRepairCommitHash;
+                          : childCommitHash ===
+                              thirdRecoveryFinalHarnessCommitHash
+                            ? thirdRecoveryIssuanceCommitHash
+                            : validatorRepairCommitHash;
                 const commitObject =
                     childCommitHash ===
                         (input.transitionOverrideCommitHash ??
@@ -974,6 +1364,9 @@ const createDependencies = (input: {
                         await readFile(input.fixture.processedWasmKernelPath),
                     ),
                 ),
+                ...(input.nativeEvidenceBindingPath === undefined
+                    ? {}
+                    : { evidencePath: input.nativeEvidenceBindingPath }),
                 nativeEvidencePath: input.fixture.nativeEvidencePath,
             });
             return (input.driftNativeEvidenceDuringAttachmentValidation ===
@@ -998,6 +1391,19 @@ const createDependencies = (input: {
                       (input.preOperationRecoveryProfile as TestRecoveryProfile)
                           .chainedRecoveryProfile,
               }),
+        ...((input.thirdRecoveryProfile ??
+            (input.preOperationRecoveryProfile !== undefined &&
+            'thirdRecoveryProfile' in input.preOperationRecoveryProfile
+                ? input.preOperationRecoveryProfile.thirdRecoveryProfile
+                : undefined)) === undefined
+            ? {}
+            : {
+                  thirdRecoveryProfile:
+                      input.thirdRecoveryProfile ??
+                      (
+                          input.preOperationRecoveryProfile as TestThirdRecoveryProfile
+                      ).thirdRecoveryProfile,
+              }),
         officialReservationRootPath: input.fixture.reservationRootPath,
         ...(input.preOperationRecoveryProfile === undefined
             ? {}
@@ -1016,6 +1422,156 @@ const createDependencies = (input: {
                 },
             ),
     };
+};
+
+const snapshotDirectoryCustody = async (
+    rootPath: string,
+): Promise<readonly string[]> => {
+    const records: string[] = [];
+    const visit = async (
+        directoryPath: string,
+        relativeDirectoryPath: string,
+    ): Promise<void> => {
+        const entries = await readdir(directoryPath, { withFileTypes: true });
+        for (const entry of entries.sort((left, right) =>
+            left.name.localeCompare(right.name),
+        )) {
+            const entryPath = path.join(directoryPath, entry.name);
+            const relativeEntryPath = path
+                .join(relativeDirectoryPath, entry.name)
+                .split(path.sep)
+                .join('/');
+            if (entry.isDirectory()) {
+                records.push(`directory:${relativeEntryPath}`);
+                await visit(entryPath, relativeEntryPath);
+            } else if (entry.isFile()) {
+                const bytes = await readFile(entryPath);
+                records.push(
+                    `file:${relativeEntryPath}:${bytes.byteLength}:${sha256Hex(bytes)}`,
+                );
+            } else {
+                records.push(`other:${relativeEntryPath}`);
+            }
+        }
+    };
+    try {
+        await visit(rootPath, '');
+    } catch (error) {
+        if (
+            typeof error === 'object' &&
+            error !== null &&
+            'code' in error &&
+            error.code === 'ENOENT'
+        ) {
+            return Object.freeze(['absent']);
+        }
+        throw error;
+    }
+    return Object.freeze(records);
+};
+
+const resolveOnlyThirdRecoveryKeyDirectoryPath = async (
+    reservationRootPath: string,
+): Promise<string> => {
+    const preflightRootPath = path.join(
+        reservationRootPath,
+        'browser-recovery-preflight-3',
+    );
+    const entries = await readdir(preflightRootPath, { withFileTypes: true });
+    const keyDirectories = entries.filter(
+        (entry) => entry.isDirectory() && /^[0-9a-f]{64}$/u.test(entry.name),
+    );
+    if (keyDirectories.length !== 1) {
+        throw new Error(
+            `Expected one third-recovery key directory, observed ${keyDirectories.length}.`,
+        );
+    }
+    return path.join(preflightRootPath, keyDirectories[0]?.name ?? '');
+};
+
+const expectNoUnpublishedRecoveryRecordEntries = async (
+    preflightRootPath: string,
+    assertionLabel: string,
+): Promise<void> => {
+    const custody = await snapshotDirectoryCustody(preflightRootPath);
+    expect(
+        custody.filter((entry) =>
+            entry.includes('.unpublished-recovery-record-'),
+        ),
+        assertionLabel,
+    ).toEqual([]);
+};
+
+const readRecoveryMarker = (
+    reservationRootPath: string,
+    relativePath: string,
+): Promise<Buffer> => readFile(path.join(reservationRootPath, relativePath));
+
+const readThirdRecoveryMarkerForTest = async (
+    reservationRootPath: string,
+): Promise<
+    Readonly<{
+        authorizationKeySha256Hex: string;
+        records: readonly Record<string, unknown>[];
+        rootPath: string;
+        serialized: string;
+        terminalDirectoryPath?: string;
+        terminalRecordBytes?: Buffer;
+    }>
+> => {
+    const preflightRootPath = path.join(
+        reservationRootPath,
+        'browser-recovery-preflight-3',
+    );
+    const authorizationDirectories = await readdir(preflightRootPath);
+    expect(authorizationDirectories).toHaveLength(1);
+    const authorizationKeySha256Hex = authorizationDirectories[0] ?? '';
+    const rootPath = path.join(preflightRootPath, authorizationKeySha256Hex);
+    const attemptedBytes = await readFile(
+        path.join(rootPath, 'preflight-attempted', 'record.json'),
+    );
+    const staticRecordPath = path.join(
+        rootPath,
+        'static-preflight-observed',
+        'record.json',
+    );
+    const terminalDirectoryPath = path.join(rootPath, 'terminal-outcome');
+    const terminalRecordPath = path.join(terminalDirectoryPath, 'record.json');
+    const readOptional = (filePath: string): Promise<Buffer | undefined> =>
+        readFile(filePath).catch((error: unknown) => {
+            if (
+                typeof error === 'object' &&
+                error !== null &&
+                'code' in error &&
+                error.code === 'ENOENT'
+            ) {
+                return undefined;
+            }
+            throw error;
+        });
+    const [staticBytes, terminalRecordBytes] = await Promise.all([
+        readOptional(staticRecordPath),
+        readOptional(terminalRecordPath),
+    ]);
+    const serialized = Buffer.concat([
+        attemptedBytes,
+        ...(staticBytes === undefined ? [] : [staticBytes]),
+        ...(terminalRecordBytes === undefined ? [] : [terminalRecordBytes]),
+    ]).toString('utf8');
+    return Object.freeze({
+        authorizationKeySha256Hex,
+        records: Object.freeze(
+            serialized
+                .trim()
+                .split('\n')
+                .map((line) => JSON.parse(line) as Record<string, unknown>),
+        ),
+        rootPath,
+        serialized,
+        ...(terminalRecordBytes === undefined
+            ? {}
+            : { terminalDirectoryPath, terminalRecordBytes }),
+    });
 };
 
 describe('Proof-storage width browser evidence runner', () => {
@@ -1069,6 +1625,9 @@ describe('Proof-storage width browser evidence runner', () => {
         const failedRecoveryAttemptRunDirectoryPath = path.resolve(
             'failed-recovery-attempt',
         );
+        const failedChainedRecoveryAttemptRunDirectoryPath = path.resolve(
+            'failed-chained-recovery-attempt',
+        );
         expect(
             parseProofStorageWidthBrowserEvidenceArguments([
                 '--native-evidence',
@@ -1100,6 +1659,38 @@ describe('Proof-storage width browser evidence runner', () => {
             nativeEvidencePath,
             preOperationRecoveryRunDirectoryPath: failedRunDirectoryPath,
         });
+        const ordinalThreeArguments = [
+            '--native-evidence',
+            nativeEvidencePath,
+            '--pre-operation-recovery',
+            failedRunDirectoryPath,
+            '--failed-recovery-attempt',
+            failedRecoveryAttemptRunDirectoryPath,
+            '--failed-chained-recovery-attempt',
+            failedChainedRecoveryAttemptRunDirectoryPath,
+        ];
+        expect(
+            parseProofStorageWidthBrowserEvidenceArguments(
+                ordinalThreeArguments,
+            ),
+        ).toEqual({
+            failedChainedRecoveryAttemptRunDirectoryPath,
+            failedRecoveryAttemptRunDirectoryPath,
+            nativeEvidencePath,
+            preOperationRecoveryRunDirectoryPath: failedRunDirectoryPath,
+        });
+        expect(
+            parseProofStorageWidthBrowserEvidenceArguments([
+                ...ordinalThreeArguments,
+                '--recovery-chain-dry-run',
+            ]),
+        ).toEqual({
+            failedChainedRecoveryAttemptRunDirectoryPath,
+            failedRecoveryAttemptRunDirectoryPath,
+            nativeEvidencePath,
+            preOperationRecoveryRunDirectoryPath: failedRunDirectoryPath,
+            recoveryChainDryRun: true,
+        });
         for (const invalidArguments of [
             ['--native-evidence', 'relative.json'],
             [
@@ -1122,6 +1713,25 @@ describe('Proof-storage width browser evidence runner', () => {
                 '--native-evidence',
                 nativeEvidencePath,
             ],
+            [
+                '--native-evidence',
+                nativeEvidencePath,
+                '--pre-operation-recovery',
+                failedRunDirectoryPath,
+                '--failed-chained-recovery-attempt',
+                failedChainedRecoveryAttemptRunDirectoryPath,
+            ],
+            [...ordinalThreeArguments, '--recovery-chain-dry-run', 'extra'],
+            [
+                ...ordinalThreeArguments.slice(0, 2),
+                '--recovery-chain-dry-run',
+                ...ordinalThreeArguments.slice(2),
+            ],
+            [
+                ...ordinalThreeArguments,
+                '--recovery-chain-dry-run',
+                '--recovery-chain-dry-run',
+            ],
         ]) {
             expect(() =>
                 parseProofStorageWidthBrowserEvidenceArguments(
@@ -1130,6 +1740,2406 @@ describe('Proof-storage width browser evidence runner', () => {
             ).toThrow(/every path must be absolute/u);
         }
     });
+
+    it('compares the complete immutable predecessor invocation without weakening flags, roots, or lexical custody', () => {
+        const failedRunDirectoryPath = 'C:\\custody\\metadata-run';
+        const metadataForInvocation = (
+            commandLineArguments: readonly string[],
+        ): Readonly<Record<string, unknown>> => ({
+            commandLineArguments,
+            runDirectoryPath: failedRunDirectoryPath,
+            scriptName: 'test:browser:proof-storage-width-evidence',
+        });
+        const acceptedPairs = [
+            ['C:\\custody\\failed-run', 'C:\\\\custody//failed-run'],
+            [
+                '\\\\server\\share\\custody\\failed-run',
+                '//server/share//custody\\\\failed-run',
+            ],
+            [
+                '\\\\?\\C:\\custody\\failed-run',
+                '\\\\?\\C:\\custody\\failed-run',
+            ],
+            [
+                '\\\\.\\C:\\custody\\failed-run',
+                '\\\\.\\C:\\custody\\failed-run',
+            ],
+        ] as const;
+        for (const pathArgumentIndex of [1, 3, 5] as const) {
+            for (const [expectedPath, observedPath] of acceptedPairs) {
+                const expected = [
+                    '--native-evidence',
+                    expectedPath,
+                    '--pre-operation-recovery',
+                    expectedPath,
+                    '--failed-recovery-attempt',
+                    expectedPath,
+                ];
+                const observed = [...expected];
+                observed[pathArgumentIndex] = observedPath;
+                expect(
+                    immutableFailedRunMetadataInvocationEquals({
+                        observed: metadataForInvocation(observed),
+                        profile: {
+                            failedRecoveryAttemptRunDirectoryPath: expectedPath,
+                            failedRunDirectoryPath,
+                            nativeEvidencePath: expectedPath,
+                            preOperationRecoveryRunDirectoryPath: expectedPath,
+                            recoveryOrdinal: 2,
+                        },
+                    }),
+                    `accepted argument ${pathArgumentIndex}: ${observedPath}`,
+                ).toBe(true);
+            }
+        }
+        const rejectedPairs = [
+            ['C:\\custody\\failed-run', 'D:\\custody\\failed-run'],
+            ['C:\\custody\\failed-run', 'c:\\Custody\\failed-run'],
+            ['C:\\custody\\failed-run', 'C:\\custody\\.\\failed-run'],
+            ['C:\\custody\\failed-run', 'C:\\custody\\..\\failed-run'],
+            ['C:\\custody\\failed-run', 'C:\\custody\\failed-run\\'],
+            ['C:\\custody\\failed-run', 'C:\\custody\\failed-run:stream'],
+            ['C:\\custody\\failed-run', 'C:\\custody\\failed-rún'],
+            ['C:\\custody\\failed-run', 'C:\\custody\\failed-run '],
+            [
+                '\\\\server\\share\\custody\\failed-run',
+                '\\\\server\\other-share\\custody\\failed-run',
+            ],
+            [
+                '\\\\server\\share\\custody\\failed-run',
+                '\\\\\\server\\share\\custody\\failed-run',
+            ],
+            [
+                '\\\\?\\C:\\custody\\failed-run',
+                '\\\\?\\C:\\\\custody\\failed-run',
+            ],
+            ['\\\\.\\C:\\custody\\failed-run', '\\\\.\\C:/custody\\failed-run'],
+        ] as const;
+        for (const pathArgumentIndex of [1, 3, 5] as const) {
+            for (const [expectedPath, observedPath] of rejectedPairs) {
+                const expected = [
+                    '--native-evidence',
+                    expectedPath,
+                    '--pre-operation-recovery',
+                    expectedPath,
+                    '--failed-recovery-attempt',
+                    expectedPath,
+                ];
+                const observed = [...expected];
+                observed[pathArgumentIndex] = observedPath;
+                expect(
+                    immutableFailedRunMetadataInvocationEquals({
+                        observed: metadataForInvocation(observed),
+                        profile: {
+                            failedRecoveryAttemptRunDirectoryPath: expectedPath,
+                            failedRunDirectoryPath,
+                            nativeEvidencePath: expectedPath,
+                            preOperationRecoveryRunDirectoryPath: expectedPath,
+                            recoveryOrdinal: 2,
+                        },
+                    }),
+                    `rejected argument ${pathArgumentIndex}: ${observedPath}`,
+                ).toBe(false);
+            }
+        }
+        const exactInvocation = [
+            '--native-evidence',
+            'C:\\custody\\native.json',
+            '--pre-operation-recovery',
+            'C:\\custody\\failed-run',
+            '--failed-recovery-attempt',
+            'C:\\custody\\failed-recovery',
+        ];
+        for (const observed of [
+            exactInvocation.slice(0, -1),
+            [...exactInvocation, 'extra'],
+            [
+                '--pre-operation-recovery',
+                exactInvocation[1],
+                '--native-evidence',
+                exactInvocation[3],
+                '--failed-recovery-attempt',
+                exactInvocation[5],
+            ],
+            ['--native', ...exactInvocation.slice(1)],
+        ]) {
+            expect(
+                immutableFailedRunMetadataInvocationEquals({
+                    observed: metadataForInvocation(observed),
+                    profile: {
+                        failedRecoveryAttemptRunDirectoryPath:
+                            exactInvocation[5] ?? '',
+                        failedRunDirectoryPath,
+                        nativeEvidencePath: exactInvocation[1] ?? '',
+                        preOperationRecoveryRunDirectoryPath:
+                            exactInvocation[3] ?? '',
+                        recoveryOrdinal: 2,
+                    },
+                }),
+            ).toBe(false);
+        }
+    });
+
+    it('accepts complete failed-launch records with every drive path separator doubled or mixed at once', () => {
+        const canonicalPaths = [
+            'C:\\custody\\native-evidence.json',
+            'C:\\custody\\failed-run',
+            'C:\\custody\\failed-recovery-attempt',
+        ] as const;
+        const serializeAllPaths = (
+            invocation: readonly string[],
+            style: 'doubled' | 'mixed',
+        ): readonly string[] =>
+            invocation.map((argument, argumentIndex) => {
+                if (![1, 3, 5].includes(argumentIndex)) {
+                    return argument;
+                }
+                const [driveRoot, ...segments] = argument.split('\\');
+                return `${driveRoot}${
+                    style === 'doubled' ? '\\\\' : '//'
+                }${segments
+                    .map((segment, segmentIndex) =>
+                        segmentIndex === 0
+                            ? segment
+                            : `${
+                                  style === 'doubled'
+                                      ? '\\\\'
+                                      : segmentIndex % 2 === 0
+                                        ? '//'
+                                        : '\\\\'
+                              }${segment}`,
+                    )
+                    .join('')}`;
+            });
+        const ordinalOneInvocation = [
+            '--native-evidence',
+            canonicalPaths[0],
+            '--pre-operation-recovery',
+            canonicalPaths[1],
+        ];
+        const ordinalTwoInvocation = [
+            ...ordinalOneInvocation,
+            '--failed-recovery-attempt',
+            canonicalPaths[2],
+        ];
+        const failedRunDirectoryPath = 'C:\\custody\\metadata-run';
+        const metadataForInvocation = (
+            commandLineArguments: readonly string[],
+        ): Readonly<Record<string, unknown>> => ({
+            commandLineArguments,
+            runDirectoryPath: failedRunDirectoryPath,
+            scriptName: 'test:browser:proof-storage-width-evidence',
+        });
+        for (const style of ['doubled', 'mixed'] as const) {
+            expect(
+                immutableFailedRunMetadataInvocationEquals({
+                    observed: metadataForInvocation(
+                        serializeAllPaths(ordinalOneInvocation, style),
+                    ),
+                    profile: {
+                        failedRunDirectoryPath,
+                        nativeEvidencePath: canonicalPaths[0],
+                        preOperationRecoveryRunDirectoryPath: canonicalPaths[1],
+                        recoveryOrdinal: 1,
+                    },
+                }),
+                `ordinal one ${style}`,
+            ).toBe(true);
+            expect(
+                immutableFailedRunMetadataInvocationEquals({
+                    observed: metadataForInvocation(
+                        serializeAllPaths(ordinalTwoInvocation, style),
+                    ),
+                    profile: {
+                        failedRecoveryAttemptRunDirectoryPath:
+                            canonicalPaths[2],
+                        failedRunDirectoryPath,
+                        nativeEvidencePath: canonicalPaths[0],
+                        preOperationRecoveryRunDirectoryPath: canonicalPaths[1],
+                        recoveryOrdinal: 2,
+                    },
+                }),
+                `ordinal two ${style}`,
+            ).toBe(true);
+        }
+    });
+
+    it('accepts independently doubled or mixed predecessor metadata in the real recovery topology', async () => {
+        for (const invocationPathSerializer of [
+            doubledWindowsRecordedInvocationPath,
+            mixedWindowsRecordedInvocationPath,
+        ]) {
+            for (const metadataPosition of [
+                'ordinal-one-native',
+                'ordinal-one-predecessor',
+                'ordinal-two-native',
+                'ordinal-two-predecessor',
+                'ordinal-two-failed-recovery',
+            ] as const) {
+                await withTemporaryFixture(async (fixture) => {
+                    const selectOrdinalOnePath: RecordedInvocationPathSerializer =
+                        (canonicalPath, pathArgumentIndex) =>
+                            (metadataPosition === 'ordinal-one-native' &&
+                                pathArgumentIndex === 1) ||
+                            (metadataPosition === 'ordinal-one-predecessor' &&
+                                pathArgumentIndex === 3)
+                                ? invocationPathSerializer(
+                                      canonicalPath,
+                                      pathArgumentIndex,
+                                  )
+                                : canonicalPath;
+                    const selectOrdinalTwoPath: RecordedInvocationPathSerializer =
+                        (canonicalPath, pathArgumentIndex) => {
+                            const selectedIndex =
+                                metadataPosition === 'ordinal-two-native'
+                                    ? 1
+                                    : metadataPosition ===
+                                        'ordinal-two-predecessor'
+                                      ? 3
+                                      : metadataPosition ===
+                                          'ordinal-two-failed-recovery'
+                                        ? 5
+                                        : undefined;
+                            return selectedIndex === pathArgumentIndex
+                                ? invocationPathSerializer(
+                                      canonicalPath,
+                                      pathArgumentIndex,
+                                  )
+                                : canonicalPath;
+                        };
+                    const recoveryProfile =
+                        await createThirdRecoveryFixtureProfile({
+                            ...fixture,
+                            failedChainedRecoveryInvocationPathSerializer:
+                                selectOrdinalTwoPath,
+                            failedRecoveryInvocationPathSerializer:
+                                selectOrdinalOnePath,
+                        });
+                    await expect(
+                        dryRunProofStorageWidthBrowserRecoveryChain({
+                            dependencies: createDependencies({
+                                fixture,
+                                preOperationRecoveryProfile: recoveryProfile,
+                                repositoryStateForCheckpoint: () => ({
+                                    commitHash:
+                                        thirdRecoveryFinalHarnessCommitHash,
+                                    treeDirty: false,
+                                }),
+                                sampleInvocations: [],
+                            }),
+                            nativeEvidencePath: fixture.nativeEvidencePath,
+                            ...thirdRecoveryExecutionPaths(recoveryProfile),
+                        }),
+                    ).resolves.toMatchObject({ recoveryOrdinal: 3 });
+                });
+            }
+        }
+    });
+
+    it('keeps failed-run metadata run-directory custody exact', async () => {
+        const doubleEverySeparator: RecordedInvocationPathSerializer = (
+            canonicalPath,
+        ) => canonicalPath.replace(/([\\/])/gu, '$1$1');
+        for (const changedRunDirectory of [
+            'ordinal-one',
+            'ordinal-two',
+        ] as const) {
+            await withTemporaryFixture(async (fixture) => {
+                const recoveryProfile = await createThirdRecoveryFixtureProfile(
+                    {
+                        ...fixture,
+                        failedChainedRecoveryRunDirectoryPathSerializer:
+                            changedRunDirectory === 'ordinal-two'
+                                ? doubleEverySeparator
+                                : exactRecordedInvocationPath,
+                        failedRecoveryRunDirectoryPathSerializer:
+                            changedRunDirectory === 'ordinal-one'
+                                ? doubleEverySeparator
+                                : exactRecordedInvocationPath,
+                    },
+                );
+                await expect(
+                    dryRunProofStorageWidthBrowserRecoveryChain({
+                        dependencies: createDependencies({
+                            fixture,
+                            preOperationRecoveryProfile: recoveryProfile,
+                            repositoryStateForCheckpoint: () => ({
+                                commitHash: thirdRecoveryFinalHarnessCommitHash,
+                                treeDirty: false,
+                            }),
+                            sampleInvocations: [],
+                        }),
+                        nativeEvidencePath: fixture.nativeEvidencePath,
+                        ...thirdRecoveryExecutionPaths(recoveryProfile),
+                    }),
+                ).rejects.toThrow(
+                    /metadata changed its exact predecessor invocation/u,
+                );
+                await expect(
+                    readdir(
+                        path.join(
+                            fixture.reservationRootPath,
+                            'browser-recovery-preflight-3',
+                        ),
+                    ),
+                ).rejects.toMatchObject({ code: 'ENOENT' });
+            });
+        }
+    });
+
+    it('keeps sequential and concurrent ordinal-three dry-runs byte-read-only', () =>
+        withTemporaryFixture(async (fixture) => {
+            const recoveryProfile =
+                await createThirdRecoveryFixtureProfile(fixture);
+            const allInvocations: CommandInvocation[] = [];
+            const sampleInvocations: CommandInvocation[] = [];
+            const dependencies = createDependencies({
+                allInvocations,
+                fixture,
+                preOperationRecoveryProfile: recoveryProfile,
+                repositoryStateForCheckpoint: () => ({
+                    commitHash: thirdRecoveryFinalHarnessCommitHash,
+                    treeDirty: false,
+                }),
+                sampleInvocations,
+            });
+            const dryRunInput = {
+                dependencies,
+                nativeEvidencePath: fixture.nativeEvidencePath,
+                ...thirdRecoveryExecutionPaths(recoveryProfile),
+            };
+            const reservationBefore = await snapshotDirectoryCustody(
+                fixture.reservationRootPath,
+            );
+            const fixtureBefore = await snapshotDirectoryCustody(
+                path.dirname(fixture.runDirectoryPath),
+            );
+            const runBefore = await snapshotDirectoryCustody(
+                fixture.runDirectoryPath,
+            );
+            const firstMarkerBefore = await readRecoveryMarker(
+                fixture.reservationRootPath,
+                recoveryProfile.chainedRecoveryProfile.previousPreflightAttempt
+                    .relativePath,
+            );
+            const secondMarkerBefore = await readRecoveryMarker(
+                fixture.reservationRootPath,
+                recoveryProfile.thirdRecoveryProfile
+                    .previousChainedPreflightAttempt.relativePath,
+            );
+            const firstResult =
+                await dryRunProofStorageWidthBrowserRecoveryChain(dryRunInput);
+            const secondResult =
+                await dryRunProofStorageWidthBrowserRecoveryChain(dryRunInput);
+            const concurrentResults = await Promise.all([
+                dryRunProofStorageWidthBrowserRecoveryChain(dryRunInput),
+                dryRunProofStorageWidthBrowserRecoveryChain(dryRunInput),
+            ]);
+            expect(secondResult).toEqual(firstResult);
+            expect(concurrentResults).toEqual([firstResult, firstResult]);
+            expect(firstResult).toMatchObject({
+                finalHarnessCommitHash: thirdRecoveryFinalHarnessCommitHash,
+                recoveryOrdinal: 3,
+            });
+            expect(firstResult.authorizationKeySha256Hex).not.toBe(
+                recoveryProfile.thirdRecoveryProfile
+                    .previousChainedAuthorizationKeySha256Hex,
+            );
+            expect(firstResult.authorizationKeySha256Hex).not.toBe(
+                recoveryProfile.chainedRecoveryProfile
+                    .previousAuthorizationKeySha256Hex,
+            );
+            expect(
+                await snapshotDirectoryCustody(fixture.reservationRootPath),
+            ).toEqual(reservationBefore);
+            expect(
+                await snapshotDirectoryCustody(fixture.runDirectoryPath),
+            ).toEqual(runBefore);
+            expect(
+                await snapshotDirectoryCustody(
+                    path.dirname(fixture.runDirectoryPath),
+                ),
+            ).toEqual(fixtureBefore);
+            expect(
+                await readRecoveryMarker(
+                    fixture.reservationRootPath,
+                    recoveryProfile.chainedRecoveryProfile
+                        .previousPreflightAttempt.relativePath,
+                ),
+            ).toEqual(firstMarkerBefore);
+            expect(
+                await readRecoveryMarker(
+                    fixture.reservationRootPath,
+                    recoveryProfile.thirdRecoveryProfile
+                        .previousChainedPreflightAttempt.relativePath,
+                ),
+            ).toEqual(secondMarkerBefore);
+            await expect(
+                readdir(
+                    path.join(
+                        fixture.reservationRootPath,
+                        'browser-recovery-preflight-3',
+                    ),
+                ),
+            ).rejects.toMatchObject({ code: 'ENOENT' });
+            await expect(
+                readdir(
+                    path.join(
+                        fixture.reservationRootPath,
+                        'browser-recovery-3',
+                    ),
+                ),
+            ).rejects.toMatchObject({ code: 'ENOENT' });
+            expect(sampleInvocations).toHaveLength(0);
+            expect(allInvocations.length).toBeGreaterThan(0);
+            for (const invocation of allInvocations) {
+                expect(invocation.command).toBe('git');
+                expect(invocation.env).toMatchObject({
+                    GIT_NO_REPLACE_OBJECTS: '1',
+                    GIT_OPTIONAL_LOCKS: '0',
+                });
+                expect(invocation.args).not.toContain('list');
+                expect(invocation.args).not.toContain('build');
+                expect(invocation.args).not.toContain('vitest');
+            }
+        }));
+
+    it('dispatches the public dry-run mode before local run custody, lease, build, browser, or measurement work', () =>
+        withTemporaryFixture(async (fixture) => {
+            const recoveryProfile =
+                await createThirdRecoveryFixtureProfile(fixture);
+            const allInvocations: CommandInvocation[] = [];
+            const sampleInvocations: CommandInvocation[] = [];
+            let runLogWrapperInvocationCount = 0;
+            let heavyLaneLeaseWrapperInvocationCount = 0;
+            const dependencies = {
+                ...createDependencies({
+                    allInvocations,
+                    fixture,
+                    preOperationRecoveryProfile: recoveryProfile,
+                    repositoryStateForCheckpoint: () => ({
+                        commitHash: thirdRecoveryFinalHarnessCommitHash,
+                        treeDirty: false,
+                    }),
+                    sampleInvocations,
+                }),
+                runWithLocalRunLog: () => {
+                    runLogWrapperInvocationCount += 1;
+                    return Promise.reject(
+                        new Error(
+                            'Public dry-run dispatch entered local run-log custody.',
+                        ),
+                    );
+                },
+                withLocalHeavyLaneLease: () => {
+                    heavyLaneLeaseWrapperInvocationCount += 1;
+                    return Promise.reject(
+                        new Error(
+                            'Public dry-run dispatch entered the heavy-lane lease.',
+                        ),
+                    );
+                },
+            } satisfies ProofStorageWidthBrowserEvidenceDependencies;
+            Object.defineProperty(dependencies, 'processMemoryGuard', {
+                configurable: true,
+                get: () => {
+                    throw new Error(
+                        'Public dry-run dispatch constructed the measurement guard.',
+                    );
+                },
+            });
+            const fixtureBefore = await snapshotDirectoryCustody(
+                path.dirname(fixture.runDirectoryPath),
+            );
+            await expect(
+                runProofStorageWidthBrowserEvidence(
+                    [
+                        '--native-evidence',
+                        fixture.nativeEvidencePath,
+                        '--pre-operation-recovery',
+                        recoveryProfile.failedRunDirectoryPath,
+                        '--failed-recovery-attempt',
+                        recoveryProfile.chainedRecoveryProfile
+                            .failedRecoveryRunDirectoryPath,
+                        '--failed-chained-recovery-attempt',
+                        recoveryProfile.thirdRecoveryProfile
+                            .failedChainedRecoveryRunDirectoryPath,
+                        '--recovery-chain-dry-run',
+                    ],
+                    dependencies,
+                ),
+            ).resolves.toBeUndefined();
+            expect(runLogWrapperInvocationCount).toBe(0);
+            expect(heavyLaneLeaseWrapperInvocationCount).toBe(0);
+            expect(
+                await snapshotDirectoryCustody(
+                    path.dirname(fixture.runDirectoryPath),
+                ),
+            ).toEqual(fixtureBefore);
+            expect(sampleInvocations).toHaveLength(0);
+            expect(allInvocations.length).toBeGreaterThan(0);
+            for (const invocation of allInvocations) {
+                expect(invocation.command).toBe('git');
+                expect(invocation.args).not.toContain('build');
+                expect(invocation.args).not.toContain('vitest');
+            }
+            await expect(
+                readdir(
+                    path.join(
+                        fixture.reservationRootPath,
+                        'browser-recovery-preflight-3',
+                    ),
+                ),
+            ).rejects.toMatchObject({ code: 'ENOENT' });
+        }));
+
+    it('refuses empty and hostile preexisting ordinal-three key directories without consuming dry-run state', async () => {
+        for (const keyDirectoryKind of ['empty', 'hostile'] as const) {
+            await withTemporaryFixture(async (fixture) => {
+                const recoveryProfile =
+                    await createThirdRecoveryFixtureProfile(fixture);
+                const dryRunInput = {
+                    nativeEvidencePath: fixture.nativeEvidencePath,
+                    ...thirdRecoveryExecutionPaths(recoveryProfile),
+                };
+                const derived =
+                    await dryRunProofStorageWidthBrowserRecoveryChain({
+                        ...dryRunInput,
+                        dependencies: createDependencies({
+                            fixture,
+                            preOperationRecoveryProfile: recoveryProfile,
+                            repositoryStateForCheckpoint: () => ({
+                                commitHash: thirdRecoveryFinalHarnessCommitHash,
+                                treeDirty: false,
+                            }),
+                            sampleInvocations: [],
+                        }),
+                    });
+                const keyDirectoryPath = path.join(
+                    fixture.reservationRootPath,
+                    'browser-recovery-preflight-3',
+                    derived.authorizationKeySha256Hex,
+                );
+                await mkdir(keyDirectoryPath, { recursive: true });
+                if (keyDirectoryKind === 'hostile') {
+                    const hostileDirectoryPath = path.join(
+                        keyDirectoryPath,
+                        'unexpected',
+                    );
+                    await mkdir(hostileDirectoryPath);
+                    await writeFile(
+                        path.join(hostileDirectoryPath, 'artifact.json'),
+                        '{}\n',
+                        'utf8',
+                    );
+                }
+                const custodyBefore =
+                    await snapshotDirectoryCustody(keyDirectoryPath);
+                const allInvocations: CommandInvocation[] = [];
+                const sampleInvocations: CommandInvocation[] = [];
+                await expect(
+                    dryRunProofStorageWidthBrowserRecoveryChain({
+                        ...dryRunInput,
+                        dependencies: createDependencies({
+                            allInvocations,
+                            fixture,
+                            preOperationRecoveryProfile: recoveryProfile,
+                            repositoryStateForCheckpoint: () => ({
+                                commitHash: thirdRecoveryFinalHarnessCommitHash,
+                                treeDirty: false,
+                            }),
+                            sampleInvocations,
+                        }),
+                    }),
+                    keyDirectoryKind,
+                ).rejects.toThrow(/singleton key directory already exists/u);
+                expect(allInvocations, keyDirectoryKind).toHaveLength(0);
+                expect(sampleInvocations, keyDirectoryKind).toHaveLength(0);
+                expect(
+                    await snapshotDirectoryCustody(keyDirectoryPath),
+                    keyDirectoryKind,
+                ).toEqual(custodyBefore);
+                await expect(
+                    readdir(
+                        path.join(
+                            fixture.reservationRootPath,
+                            'browser-recovery-3',
+                        ),
+                    ),
+                    keyDirectoryKind,
+                ).rejects.toMatchObject({ code: 'ENOENT' });
+            });
+        }
+    });
+
+    it('keeps adversarial ordinal-three predecessor dry-runs non-consuming and command-free', async () => {
+        for (const mutationKind of [
+            'artifact-bytes',
+            'nested-entry',
+            'reparse-alias',
+            'ordinal-two-marker',
+            'ordinal-two-operation',
+        ] as const) {
+            await withTemporaryFixture(async (fixture) => {
+                const recoveryProfile =
+                    await createThirdRecoveryFixtureProfile(fixture);
+                if (mutationKind === 'artifact-bytes') {
+                    const summaryPath = path.join(
+                        recoveryProfile.thirdRecoveryProfile
+                            .failedChainedRecoveryRunDirectoryPath,
+                        recoveryProfile.thirdRecoveryProfile
+                            .failedChainedRecoveryArtifacts.summary
+                            .relativePath,
+                    );
+                    await writeFile(
+                        summaryPath,
+                        Buffer.concat([
+                            await readFile(summaryPath),
+                            Buffer.from('changed'),
+                        ]),
+                    );
+                } else if (mutationKind === 'nested-entry') {
+                    const nestedDirectoryPath = path.join(
+                        recoveryProfile.thirdRecoveryProfile
+                            .failedChainedRecoveryRunDirectoryPath,
+                        'hostile-nested-entry',
+                    );
+                    await mkdir(nestedDirectoryPath);
+                    await writeFile(
+                        path.join(nestedDirectoryPath, 'unexpected.txt'),
+                        'unexpected',
+                        'utf8',
+                    );
+                } else if (mutationKind === 'reparse-alias') {
+                    const aliasTargetPath = path.join(
+                        path.dirname(fixture.runDirectoryPath),
+                        'hostile-alias-target',
+                    );
+                    await mkdir(aliasTargetPath);
+                    await symlink(
+                        aliasTargetPath,
+                        path.join(
+                            recoveryProfile.thirdRecoveryProfile
+                                .failedChainedRecoveryRunDirectoryPath,
+                            'hostile-alias',
+                        ),
+                        process.platform === 'win32' ? 'junction' : 'dir',
+                    );
+                } else if (mutationKind === 'ordinal-two-marker') {
+                    const markerPath = path.join(
+                        fixture.reservationRootPath,
+                        recoveryProfile.thirdRecoveryProfile
+                            .previousChainedPreflightAttempt.relativePath,
+                    );
+                    await writeFile(
+                        markerPath,
+                        Buffer.concat([
+                            await readFile(markerPath),
+                            Buffer.from('changed'),
+                        ]),
+                    );
+                } else {
+                    const operationPath = path.join(
+                        fixture.reservationRootPath,
+                        'browser-recovery-2',
+                        recoveryProfile.thirdRecoveryProfile
+                            .previousChainedAuthorizationKeySha256Hex,
+                        'browser-recovery-started.json',
+                    );
+                    await mkdir(path.dirname(operationPath), {
+                        recursive: true,
+                    });
+                    await writeFile(operationPath, '{}\n', 'utf8');
+                }
+                const reservationBefore = await snapshotDirectoryCustody(
+                    fixture.reservationRootPath,
+                );
+                const runBefore = await snapshotDirectoryCustody(
+                    fixture.runDirectoryPath,
+                );
+                const allInvocations: CommandInvocation[] = [];
+                const sampleInvocations: CommandInvocation[] = [];
+                await expect(
+                    dryRunProofStorageWidthBrowserRecoveryChain({
+                        dependencies: createDependencies({
+                            allInvocations,
+                            fixture,
+                            preOperationRecoveryProfile: recoveryProfile,
+                            repositoryStateForCheckpoint: () => ({
+                                commitHash: thirdRecoveryFinalHarnessCommitHash,
+                                treeDirty: false,
+                            }),
+                            sampleInvocations,
+                        }),
+                        nativeEvidencePath: fixture.nativeEvidencePath,
+                        ...thirdRecoveryExecutionPaths(recoveryProfile),
+                    }),
+                    mutationKind,
+                ).rejects.toThrow();
+                expect(allInvocations, mutationKind).toHaveLength(0);
+                expect(sampleInvocations, mutationKind).toHaveLength(0);
+                expect(
+                    await snapshotDirectoryCustody(fixture.reservationRootPath),
+                    mutationKind,
+                ).toEqual(reservationBefore);
+                expect(
+                    await snapshotDirectoryCustody(fixture.runDirectoryPath),
+                    mutationKind,
+                ).toEqual(runBefore);
+                await expect(
+                    readdir(
+                        path.join(
+                            fixture.reservationRootPath,
+                            'browser-recovery-preflight-3',
+                        ),
+                    ),
+                    mutationKind,
+                ).rejects.toMatchObject({ code: 'ENOENT' });
+                await expect(
+                    readdir(
+                        path.join(
+                            fixture.reservationRootPath,
+                            'browser-recovery-3',
+                        ),
+                    ),
+                    mutationKind,
+                ).rejects.toMatchObject({ code: 'ENOENT' });
+            });
+        }
+    });
+
+    it('consumes exactly one ordinal-three singleton on failure and refuses replay before commands', () =>
+        withTemporaryFixture(async (fixture) => {
+            const recoveryProfile =
+                await createThirdRecoveryFixtureProfile(fixture);
+            const firstMarkerBefore = await readRecoveryMarker(
+                fixture.reservationRootPath,
+                recoveryProfile.chainedRecoveryProfile.previousPreflightAttempt
+                    .relativePath,
+            );
+            const secondMarkerBefore = await readRecoveryMarker(
+                fixture.reservationRootPath,
+                recoveryProfile.thirdRecoveryProfile
+                    .previousChainedPreflightAttempt.relativePath,
+            );
+            const firstInvocations: CommandInvocation[] = [];
+            const firstSampleInvocations: CommandInvocation[] = [];
+            await expect(
+                executeProofStorageWidthBrowserEvidence({
+                    dependencies: createDependencies({
+                        allInvocations: firstInvocations,
+                        fixture,
+                        preOperationRecoveryProfile: recoveryProfile,
+                        repositoryStateForCheckpoint: (checkpoint) => ({
+                            commitHash: thirdRecoveryFinalHarnessCommitHash,
+                            treeDirty: checkpoint === 'initial',
+                        }),
+                        sampleInvocations: firstSampleInvocations,
+                    }),
+                    nativeEvidencePath: fixture.nativeEvidencePath,
+                    ...thirdRecoveryExecutionPaths(recoveryProfile),
+                    runLog: createRunLog(fixture.runDirectoryPath),
+                }),
+            ).rejects.toThrow(/initial checkpoint/u);
+            expect(firstInvocations).toHaveLength(0);
+            expect(firstSampleInvocations).toHaveLength(0);
+            const marker = await readThirdRecoveryMarkerForTest(
+                fixture.reservationRootPath,
+            );
+            const authorizationKeySha256Hex = marker.authorizationKeySha256Hex;
+            const markerBeforeReplay = await snapshotDirectoryCustody(
+                marker.rootPath,
+            );
+            const markerRecords = marker.records;
+            expect(markerRecords).toHaveLength(2);
+            expect(markerRecords[0]).toMatchObject({
+                authorizationKeySha256Hex,
+                eventType:
+                    'official-browser-width-recovery-preflight-attempted',
+                failedReservationIdentitySha256Hex:
+                    recoveryProfile.failedReservation.identitySha256Hex,
+                firstAuthorizationKeySha256Hex:
+                    recoveryProfile.chainedRecoveryProfile
+                        .previousAuthorizationKeySha256Hex,
+                firstPreflightAttemptSha256Hex:
+                    recoveryProfile.chainedRecoveryProfile
+                        .previousPreflightAttempt.sha256Hex,
+                previousAuthorizationKeySha256Hex:
+                    recoveryProfile.thirdRecoveryProfile
+                        .previousChainedAuthorizationKeySha256Hex,
+                previousPreflightAttemptSha256Hex:
+                    recoveryProfile.thirdRecoveryProfile
+                        .previousChainedPreflightAttempt.sha256Hex,
+                recoveryOrdinal: 3,
+            });
+            expect(markerRecords[1]).toMatchObject({
+                eventType: 'official-sample-outcome',
+                failureName: 'Error',
+                outcome: 'failed',
+            });
+            await expect(
+                readdir(
+                    path.join(
+                        fixture.reservationRootPath,
+                        'browser-recovery-3',
+                    ),
+                ),
+            ).rejects.toMatchObject({ code: 'ENOENT' });
+            expect(
+                await readRecoveryMarker(
+                    fixture.reservationRootPath,
+                    recoveryProfile.chainedRecoveryProfile
+                        .previousPreflightAttempt.relativePath,
+                ),
+            ).toEqual(firstMarkerBefore);
+            expect(
+                await readRecoveryMarker(
+                    fixture.reservationRootPath,
+                    recoveryProfile.thirdRecoveryProfile
+                        .previousChainedPreflightAttempt.relativePath,
+                ),
+            ).toEqual(secondMarkerBefore);
+
+            const replayRunDirectoryPath = path.join(
+                path.dirname(fixture.runDirectoryPath),
+                'ordinal-three-replay',
+            );
+            await mkdir(replayRunDirectoryPath);
+            const replayInvocations: CommandInvocation[] = [];
+            const replaySampleInvocations: CommandInvocation[] = [];
+            await expect(
+                executeProofStorageWidthBrowserEvidence({
+                    dependencies: createDependencies({
+                        allInvocations: replayInvocations,
+                        fixture: {
+                            ...fixture,
+                            runDirectoryPath: replayRunDirectoryPath,
+                        },
+                        preOperationRecoveryProfile: recoveryProfile,
+                        repositoryStateForCheckpoint: () => ({
+                            commitHash: thirdRecoveryFinalHarnessCommitHash,
+                            treeDirty: false,
+                        }),
+                        sampleInvocations: replaySampleInvocations,
+                    }),
+                    nativeEvidencePath: fixture.nativeEvidencePath,
+                    ...thirdRecoveryExecutionPaths(recoveryProfile),
+                    runLog: createRunLog(replayRunDirectoryPath),
+                }),
+            ).rejects.toThrow(/already claimed its singleton key directory/u);
+            expect(replayInvocations).toHaveLength(0);
+            expect(replaySampleInvocations).toHaveLength(0);
+            expect(await snapshotDirectoryCustody(marker.rootPath)).toEqual(
+                markerBeforeReplay,
+            );
+        }));
+
+    it('keeps a preflight staging fault as one consumed empty singleton with no evidence work', async () => {
+        for (const faultStage of [
+            'before-staged-write',
+            'after-staged-close-before-validation',
+        ] as const) {
+            await withTemporaryFixture(async (fixture) => {
+                const recoveryProfile =
+                    await createThirdRecoveryFixtureProfile(fixture);
+                let injected = false;
+                const faultInjection: BrowserRecoveryMarkerFaultInjection = (
+                    event,
+                ) => {
+                    if (
+                        !injected &&
+                        event.recordKind === 'preflight-attempt' &&
+                        event.stage === faultStage
+                    ) {
+                        injected = true;
+                        if (faultStage === 'before-staged-write') {
+                            return { maximumWriteByteLength: 1 };
+                        }
+                        throw new Error(
+                            'Injected staged-close preflight failure.',
+                        );
+                    }
+                    return undefined;
+                };
+                const allInvocations: CommandInvocation[] = [];
+                const sampleInvocations: CommandInvocation[] = [];
+                await expect(
+                    executeProofStorageWidthBrowserEvidence({
+                        dependencies: createDependencies({
+                            allInvocations,
+                            browserRecoveryMarkerFaultInjection: faultInjection,
+                            fixture,
+                            preOperationRecoveryProfile: recoveryProfile,
+                            repositoryStateForCheckpoint: () => ({
+                                commitHash: thirdRecoveryFinalHarnessCommitHash,
+                                treeDirty: false,
+                            }),
+                            sampleInvocations,
+                        }),
+                        nativeEvidencePath: fixture.nativeEvidencePath,
+                        ...thirdRecoveryExecutionPaths(recoveryProfile),
+                        runLog: createRunLog(fixture.runDirectoryPath),
+                    }),
+                    faultStage,
+                ).rejects.toThrow();
+                expect(injected, faultStage).toBe(true);
+                expect(allInvocations, faultStage).toHaveLength(0);
+                expect(sampleInvocations, faultStage).toHaveLength(0);
+                const preflightRootEntries = await readdir(
+                    path.join(
+                        fixture.reservationRootPath,
+                        'browser-recovery-preflight-3',
+                    ),
+                );
+                expect(preflightRootEntries, faultStage).toHaveLength(1);
+                await expectNoUnpublishedRecoveryRecordEntries(
+                    path.join(
+                        fixture.reservationRootPath,
+                        'browser-recovery-preflight-3',
+                    ),
+                    faultStage,
+                );
+                const keyDirectoryPath = path.join(
+                    fixture.reservationRootPath,
+                    'browser-recovery-preflight-3',
+                    preflightRootEntries[0] ?? '',
+                );
+                expect(await readdir(keyDirectoryPath), faultStage).toEqual([]);
+                const consumedSingletonBeforeReplay =
+                    await snapshotDirectoryCustody(keyDirectoryPath);
+
+                const replayInvocations: CommandInvocation[] = [];
+                await expect(
+                    executeProofStorageWidthBrowserEvidence({
+                        dependencies: createDependencies({
+                            allInvocations: replayInvocations,
+                            fixture,
+                            preOperationRecoveryProfile: recoveryProfile,
+                            repositoryStateForCheckpoint: () => ({
+                                commitHash: thirdRecoveryFinalHarnessCommitHash,
+                                treeDirty: false,
+                            }),
+                            sampleInvocations: [],
+                        }),
+                        nativeEvidencePath: fixture.nativeEvidencePath,
+                        ...thirdRecoveryExecutionPaths(recoveryProfile),
+                        runLog: createRunLog(fixture.runDirectoryPath),
+                    }),
+                    faultStage,
+                ).rejects.toThrow(
+                    /already claimed its singleton key directory/u,
+                );
+                expect(replayInvocations, faultStage).toHaveLength(0);
+                expect(
+                    await snapshotDirectoryCustody(keyDirectoryPath),
+                    faultStage,
+                ).toEqual(consumedSingletonBeforeReplay);
+                await expect(
+                    readdir(
+                        path.join(
+                            fixture.reservationRootPath,
+                            'browser-recovery-3',
+                        ),
+                    ),
+                    faultStage,
+                ).rejects.toMatchObject({ code: 'ENOENT' });
+            });
+        }
+    });
+
+    it('never accepts reopenable bytes after a preflight publication durability failure', () =>
+        withTemporaryFixture(async (fixture) => {
+            const recoveryProfile =
+                await createThirdRecoveryFixtureProfile(fixture);
+            let injected = false;
+            const allInvocations: CommandInvocation[] = [];
+            const sampleInvocations: CommandInvocation[] = [];
+            await expect(
+                executeProofStorageWidthBrowserEvidence({
+                    dependencies: createDependencies({
+                        allInvocations,
+                        browserRecoveryMarkerFaultInjection: (event) => {
+                            if (
+                                !injected &&
+                                event.recordKind === 'preflight-attempt' &&
+                                event.stage === 'after-link-before-durability'
+                            ) {
+                                injected = true;
+                                throw new Error(
+                                    'Injected preflight publication durability failure.',
+                                );
+                            }
+                            return undefined;
+                        },
+                        fixture,
+                        preOperationRecoveryProfile: recoveryProfile,
+                        repositoryStateForCheckpoint: () => ({
+                            commitHash: thirdRecoveryFinalHarnessCommitHash,
+                            treeDirty: false,
+                        }),
+                        sampleInvocations,
+                    }),
+                    nativeEvidencePath: fixture.nativeEvidencePath,
+                    ...thirdRecoveryExecutionPaths(recoveryProfile),
+                    runLog: createRunLog(fixture.runDirectoryPath),
+                }),
+            ).rejects.toThrow(/preflight-attempt atomic publication failed/u);
+            expect(injected).toBe(true);
+            expect(allInvocations).toHaveLength(0);
+            expect(sampleInvocations).toHaveLength(0);
+            const preflightRootPath = path.join(
+                fixture.reservationRootPath,
+                'browser-recovery-preflight-3',
+            );
+            const preflightRootEntries = await readdir(preflightRootPath);
+            expect(preflightRootEntries).toHaveLength(1);
+            const keyDirectoryPath = path.join(
+                preflightRootPath,
+                preflightRootEntries[0] ?? '',
+            );
+            expect(await readdir(keyDirectoryPath)).toEqual([]);
+            await expectNoUnpublishedRecoveryRecordEntries(
+                preflightRootPath,
+                'durability-failed preflight cleanup',
+            );
+            const markerBeforeReplay =
+                await snapshotDirectoryCustody(keyDirectoryPath);
+
+            const replayInvocations: CommandInvocation[] = [];
+            const replaySampleInvocations: CommandInvocation[] = [];
+            await expect(
+                executeProofStorageWidthBrowserEvidence({
+                    dependencies: createDependencies({
+                        allInvocations: replayInvocations,
+                        fixture,
+                        preOperationRecoveryProfile: recoveryProfile,
+                        repositoryStateForCheckpoint: () => ({
+                            commitHash: thirdRecoveryFinalHarnessCommitHash,
+                            treeDirty: false,
+                        }),
+                        sampleInvocations: replaySampleInvocations,
+                    }),
+                    nativeEvidencePath: fixture.nativeEvidencePath,
+                    ...thirdRecoveryExecutionPaths(recoveryProfile),
+                    runLog: createRunLog(fixture.runDirectoryPath),
+                }),
+            ).rejects.toThrow(/already claimed its singleton key directory/u);
+            expect(replayInvocations).toHaveLength(0);
+            expect(replaySampleInvocations).toHaveLength(0);
+            expect(await snapshotDirectoryCustody(keyDirectoryPath)).toEqual(
+                markerBeforeReplay,
+            );
+            await expect(
+                readdir(
+                    path.join(
+                        fixture.reservationRootPath,
+                        'browser-recovery-3',
+                    ),
+                ),
+            ).rejects.toMatchObject({ code: 'ENOENT' });
+        }));
+
+    it('refuses a claimed ordinal-three key-directory identity replacement before attempted-record publication', () =>
+        withTemporaryFixture(async (fixture) => {
+            const recoveryProfile =
+                await createThirdRecoveryFixtureProfile(fixture);
+            let reportAttemptStagingReached: (() => void) | undefined;
+            const attemptStagingReached = new Promise<void>((resolve) => {
+                reportAttemptStagingReached = resolve;
+            });
+            let releaseAttemptStaging: (() => void) | undefined;
+            const attemptStagingBarrier = new Promise<void>((resolve) => {
+                releaseAttemptStaging = resolve;
+            });
+            let attemptStagingArrivalCount = 0;
+            const allInvocations: CommandInvocation[] = [];
+            const sampleInvocations: CommandInvocation[] = [];
+            const announcements: string[] = [];
+            const executionResult = executeProofStorageWidthBrowserEvidence({
+                dependencies: createDependencies({
+                    allInvocations,
+                    browserRecoveryMarkerFaultInjection: async (event) => {
+                        if (
+                            event.recordKind === 'preflight-attempt' &&
+                            event.stage === 'before-staged-write'
+                        ) {
+                            attemptStagingArrivalCount += 1;
+                            if (attemptStagingArrivalCount > 1) {
+                                throw new Error(
+                                    'The attempted-record staging barrier was entered more than once.',
+                                );
+                            }
+                            reportAttemptStagingReached?.();
+                            await attemptStagingBarrier;
+                        }
+                        return undefined;
+                    },
+                    fixture,
+                    preOperationRecoveryProfile: recoveryProfile,
+                    repositoryStateForCheckpoint: () => ({
+                        commitHash: thirdRecoveryFinalHarnessCommitHash,
+                        treeDirty: false,
+                    }),
+                    sampleInvocations,
+                }),
+                nativeEvidencePath: fixture.nativeEvidencePath,
+                ...thirdRecoveryExecutionPaths(recoveryProfile),
+                runLog: createRunLog(fixture.runDirectoryPath, {
+                    writeCombinedOutput: (output) => announcements.push(output),
+                    writeEvent: ({ eventType }) =>
+                        announcements.push(eventType),
+                }),
+            }).then(
+                () => ({ status: 'fulfilled' as const }),
+                (reason: unknown) => ({ reason, status: 'rejected' as const }),
+            );
+            const stageOrCompletion = await Promise.race([
+                attemptStagingReached.then(() => 'staging' as const),
+                executionResult.then(() => 'completed' as const),
+            ]);
+            if (stageOrCompletion !== 'staging') {
+                throw new Error(
+                    'The ordinal-three attempt completed before its controlled staging barrier.',
+                );
+            }
+
+            const claimedKeyDirectoryPath =
+                await resolveOnlyThirdRecoveryKeyDirectoryPath(
+                    fixture.reservationRootPath,
+                );
+            const displacedClaimedKeyDirectoryPath = `${claimedKeyDirectoryPath}.displaced-claim`;
+            const claimedIdentity = await lstat(claimedKeyDirectoryPath, {
+                bigint: true,
+            });
+            await rename(
+                claimedKeyDirectoryPath,
+                displacedClaimedKeyDirectoryPath,
+            );
+            await mkdir(claimedKeyDirectoryPath);
+            const replacementSentinelBytes = Buffer.from(
+                'hostile replacement custody\n',
+                'utf8',
+            );
+            await writeFile(
+                path.join(claimedKeyDirectoryPath, 'replacement-sentinel.bin'),
+                replacementSentinelBytes,
+            );
+            const replacementIdentity = await lstat(claimedKeyDirectoryPath, {
+                bigint: true,
+            });
+            const displacedIdentity = await lstat(
+                displacedClaimedKeyDirectoryPath,
+                { bigint: true },
+            );
+            expect({
+                device: displacedIdentity.dev,
+                inode: displacedIdentity.ino,
+            }).toEqual({
+                device: claimedIdentity.dev,
+                inode: claimedIdentity.ino,
+            });
+            expect({
+                device: replacementIdentity.dev,
+                inode: replacementIdentity.ino,
+            }).not.toEqual({
+                device: claimedIdentity.dev,
+                inode: claimedIdentity.ino,
+            });
+            const displacedCustodyBeforeRefusal =
+                await snapshotDirectoryCustody(
+                    displacedClaimedKeyDirectoryPath,
+                );
+            const replacementCustodyBeforeRefusal =
+                await snapshotDirectoryCustody(claimedKeyDirectoryPath);
+            releaseAttemptStaging?.();
+
+            const result = await executionResult;
+            expect(result.status).toBe('rejected');
+            if (result.status !== 'rejected') {
+                throw new Error(
+                    'The replaced ordinal-three key directory was accepted.',
+                );
+            }
+            expect(result.reason).toBeInstanceOf(Error);
+            const identityRefusalCause = (
+                result.reason as Readonly<{ cause?: unknown }>
+            ).cause;
+            expect(identityRefusalCause).toBeInstanceOf(Error);
+            if (!(identityRefusalCause instanceof Error)) {
+                throw new Error(
+                    'The identity-replacement refusal omitted its Error cause.',
+                );
+            }
+            expect(identityRefusalCause.message).toMatch(
+                /filesystem identity/u,
+            );
+            expect(attemptStagingArrivalCount).toBe(1);
+            expect(allInvocations).toHaveLength(0);
+            expect(sampleInvocations).toHaveLength(0);
+            expect(announcements).toHaveLength(0);
+            expect(
+                await snapshotDirectoryCustody(
+                    displacedClaimedKeyDirectoryPath,
+                ),
+            ).toEqual(displacedCustodyBeforeRefusal);
+            expect(
+                await snapshotDirectoryCustody(claimedKeyDirectoryPath),
+            ).toEqual(replacementCustodyBeforeRefusal);
+            const preflightRootPath = path.dirname(claimedKeyDirectoryPath);
+            await expectNoUnpublishedRecoveryRecordEntries(
+                preflightRootPath,
+                'identity replacement staging cleanup',
+            );
+            await expect(
+                readdir(
+                    path.join(
+                        fixture.reservationRootPath,
+                        'browser-recovery-3',
+                    ),
+                ),
+            ).rejects.toMatchObject({ code: 'ENOENT' });
+
+            const replayRunDirectoryPath = path.join(
+                path.dirname(fixture.runDirectoryPath),
+                'identity-replacement-replay',
+            );
+            await mkdir(replayRunDirectoryPath);
+            const replayInvocations: CommandInvocation[] = [];
+            const replaySampleInvocations: CommandInvocation[] = [];
+            await expect(
+                executeProofStorageWidthBrowserEvidence({
+                    dependencies: createDependencies({
+                        allInvocations: replayInvocations,
+                        fixture: {
+                            ...fixture,
+                            runDirectoryPath: replayRunDirectoryPath,
+                        },
+                        preOperationRecoveryProfile: recoveryProfile,
+                        repositoryStateForCheckpoint: () => ({
+                            commitHash: thirdRecoveryFinalHarnessCommitHash,
+                            treeDirty: false,
+                        }),
+                        sampleInvocations: replaySampleInvocations,
+                    }),
+                    nativeEvidencePath: fixture.nativeEvidencePath,
+                    ...thirdRecoveryExecutionPaths(recoveryProfile),
+                    runLog: createRunLog(replayRunDirectoryPath),
+                }),
+            ).rejects.toThrow(/exact record inventory/u);
+            expect(replayInvocations).toHaveLength(0);
+            expect(replaySampleInvocations).toHaveLength(0);
+            expect(
+                await snapshotDirectoryCustody(
+                    displacedClaimedKeyDirectoryPath,
+                ),
+            ).toEqual(displacedCustodyBeforeRefusal);
+            expect(
+                await snapshotDirectoryCustody(claimedKeyDirectoryPath),
+            ).toEqual(replacementCustodyBeforeRefusal);
+        }));
+
+    it('terminalizes a one-shot post-publication preflight fault before commands', () =>
+        withTemporaryFixture(async (fixture) => {
+            const recoveryProfile =
+                await createThirdRecoveryFixtureProfile(fixture);
+            let injected = false;
+            const allInvocations: CommandInvocation[] = [];
+            await expect(
+                executeProofStorageWidthBrowserEvidence({
+                    dependencies: createDependencies({
+                        allInvocations,
+                        browserRecoveryMarkerFaultInjection: (event) => {
+                            if (
+                                !injected &&
+                                event.recordKind === 'preflight-attempt' &&
+                                event.stage ===
+                                    'after-publication-before-reopen'
+                            ) {
+                                injected = true;
+                                throw new Error(
+                                    'Injected post-publication preflight failure.',
+                                );
+                            }
+                            return undefined;
+                        },
+                        fixture,
+                        preOperationRecoveryProfile: recoveryProfile,
+                        repositoryStateForCheckpoint: () => ({
+                            commitHash: thirdRecoveryFinalHarnessCommitHash,
+                            treeDirty: false,
+                        }),
+                        sampleInvocations: [],
+                    }),
+                    nativeEvidencePath: fixture.nativeEvidencePath,
+                    ...thirdRecoveryExecutionPaths(recoveryProfile),
+                    runLog: createRunLog(fixture.runDirectoryPath),
+                }),
+            ).rejects.toThrow(/preflight-attempt atomic publication failed/u);
+            expect(injected).toBe(true);
+            expect(allInvocations).toHaveLength(0);
+            const marker = await readThirdRecoveryMarkerForTest(
+                fixture.reservationRootPath,
+            );
+            expect(marker.records).toHaveLength(2);
+            expect(marker.records[1]).toMatchObject({
+                eventType: 'official-sample-outcome',
+                failureName: 'Error',
+                outcome: 'failed',
+            });
+            await expectNoUnpublishedRecoveryRecordEntries(
+                path.join(
+                    fixture.reservationRootPath,
+                    'browser-recovery-preflight-3',
+                ),
+                'post-publication preflight cleanup',
+            );
+        }));
+
+    it('reports exact custody failure when the failed terminal record cannot be staged', () =>
+        withTemporaryFixture(async (fixture) => {
+            const recoveryProfile =
+                await createThirdRecoveryFixtureProfile(fixture);
+            const allInvocations: CommandInvocation[] = [];
+            await expect(
+                executeProofStorageWidthBrowserEvidence({
+                    dependencies: createDependencies({
+                        allInvocations,
+                        browserRecoveryMarkerFaultInjection: (event) => {
+                            if (
+                                event.recordKind === 'preflight-attempt' &&
+                                event.stage ===
+                                    'after-publication-before-reopen'
+                            ) {
+                                throw new Error(
+                                    'Injected acquisition publication failure.',
+                                );
+                            }
+                            return event.recordKind === 'failure-outcome' &&
+                                event.stage === 'before-staged-write'
+                                ? { maximumWriteByteLength: 1 }
+                                : undefined;
+                        },
+                        fixture,
+                        preOperationRecoveryProfile: recoveryProfile,
+                        repositoryStateForCheckpoint: () => ({
+                            commitHash: thirdRecoveryFinalHarnessCommitHash,
+                            treeDirty: false,
+                        }),
+                        sampleInvocations: [],
+                    }),
+                    nativeEvidencePath: fixture.nativeEvidencePath,
+                    ...thirdRecoveryExecutionPaths(recoveryProfile),
+                    runLog: createRunLog(fixture.runDirectoryPath),
+                }),
+            ).rejects.toThrow(/failure-outcome atomic publication failed/u);
+            expect(allInvocations).toHaveLength(0);
+            const marker = await readThirdRecoveryMarkerForTest(
+                fixture.reservationRootPath,
+            );
+            expect(marker.records).toHaveLength(1);
+            await expectNoUnpublishedRecoveryRecordEntries(
+                path.join(
+                    fixture.reservationRootPath,
+                    'browser-recovery-preflight-3',
+                ),
+                'failed-terminal staging cleanup',
+            );
+        }));
+
+    it('never overwrites a colliding fixed ordinal-three child directory', async () => {
+        for (const collision of [
+            {
+                directoryName: 'static-preflight-observed',
+                recordKind: 'static-observation',
+            },
+            {
+                directoryName: 'terminal-outcome',
+                recordKind: 'failure-outcome',
+            },
+        ] as const) {
+            for (const collisionInventory of ['empty', 'hostile'] as const) {
+                await withTemporaryFixture(async (fixture) => {
+                    const recoveryProfile =
+                        await createThirdRecoveryFixtureProfile(fixture);
+                    const allInvocations: CommandInvocation[] = [];
+                    const sampleInvocations: CommandInvocation[] = [];
+                    const announcements: string[] = [];
+                    let collisionInjected = false;
+                    let collidingDirectoryPath: string | undefined;
+                    let collidingCustodyBeforeRefusal:
+                        | readonly string[]
+                        | undefined;
+                    const hostileRecordBytes = Buffer.from(
+                        `hostile ${collision.recordKind} record\n`,
+                        'utf8',
+                    );
+                    await expect(
+                        executeProofStorageWidthBrowserEvidence({
+                            dependencies: createDependencies({
+                                allInvocations,
+                                browserRecoveryMarkerFaultInjection: async (
+                                    event,
+                                ) => {
+                                    if (
+                                        !collisionInjected &&
+                                        event.recordKind ===
+                                            collision.recordKind &&
+                                        event.stage === 'before-staged-write'
+                                    ) {
+                                        const keyDirectoryPath =
+                                            await resolveOnlyThirdRecoveryKeyDirectoryPath(
+                                                fixture.reservationRootPath,
+                                            );
+                                        collidingDirectoryPath = path.join(
+                                            keyDirectoryPath,
+                                            collision.directoryName,
+                                        );
+                                        await mkdir(collidingDirectoryPath);
+                                        if (collisionInventory === 'hostile') {
+                                            await writeFile(
+                                                path.join(
+                                                    collidingDirectoryPath,
+                                                    'record.json',
+                                                ),
+                                                hostileRecordBytes,
+                                            );
+                                            const nestedHostileDirectoryPath =
+                                                path.join(
+                                                    collidingDirectoryPath,
+                                                    'nested-hostile-custody',
+                                                );
+                                            await mkdir(
+                                                nestedHostileDirectoryPath,
+                                            );
+                                            await writeFile(
+                                                path.join(
+                                                    nestedHostileDirectoryPath,
+                                                    'artifact.bin',
+                                                ),
+                                                Buffer.from([
+                                                    0x00, 0x7f, 0x80, 0xff,
+                                                ]),
+                                            );
+                                        }
+                                        collidingCustodyBeforeRefusal =
+                                            await snapshotDirectoryCustody(
+                                                collidingDirectoryPath,
+                                            );
+                                        collisionInjected = true;
+                                    }
+                                    return undefined;
+                                },
+                                fixture,
+                                preOperationRecoveryProfile: recoveryProfile,
+                                repositoryStateForCheckpoint: (checkpoint) => ({
+                                    commitHash:
+                                        thirdRecoveryFinalHarnessCommitHash,
+                                    treeDirty:
+                                        collision.recordKind ===
+                                            'failure-outcome' &&
+                                        checkpoint === 'initial',
+                                }),
+                                sampleInvocations,
+                            }),
+                            nativeEvidencePath: fixture.nativeEvidencePath,
+                            ...thirdRecoveryExecutionPaths(recoveryProfile),
+                            runLog: createRunLog(fixture.runDirectoryPath, {
+                                writeCombinedOutput: (output) =>
+                                    announcements.push(output),
+                                writeEvent: ({ eventType }) =>
+                                    announcements.push(eventType),
+                            }),
+                        }),
+                        `${collision.recordKind}:${collisionInventory}`,
+                    ).rejects.toThrow();
+                    expect(
+                        collisionInjected,
+                        `${collision.recordKind}:${collisionInventory}`,
+                    ).toBe(true);
+                    expect(
+                        collidingDirectoryPath,
+                        `${collision.recordKind}:${collisionInventory}`,
+                    ).toBeDefined();
+                    expect(
+                        collidingCustodyBeforeRefusal,
+                        `${collision.recordKind}:${collisionInventory}`,
+                    ).toBeDefined();
+                    expect(
+                        sampleInvocations,
+                        `${collision.recordKind}:${collisionInventory}`,
+                    ).toHaveLength(0);
+                    expect(
+                        announcements,
+                        `${collision.recordKind}:${collisionInventory}`,
+                    ).toHaveLength(0);
+                    expect(
+                        await snapshotDirectoryCustody(
+                            collidingDirectoryPath ?? '',
+                        ),
+                        `${collision.recordKind}:${collisionInventory}`,
+                    ).toEqual(collidingCustodyBeforeRefusal);
+                    const retainedHostileRecordBytes =
+                        collisionInventory === 'hostile'
+                            ? await readFile(
+                                  path.join(
+                                      collidingDirectoryPath ?? '',
+                                      'record.json',
+                                  ),
+                              )
+                            : undefined;
+                    expect(retainedHostileRecordBytes).toEqual(
+                        collisionInventory === 'hostile'
+                            ? hostileRecordBytes
+                            : undefined,
+                    );
+                    const keyDirectoryPath = path.dirname(
+                        collidingDirectoryPath ?? '',
+                    );
+                    const keyCustodyBeforeReplay =
+                        await snapshotDirectoryCustody(keyDirectoryPath);
+                    await expectNoUnpublishedRecoveryRecordEntries(
+                        path.dirname(keyDirectoryPath),
+                        `${collision.recordKind}:${collisionInventory}`,
+                    );
+                    await expect(
+                        readdir(
+                            path.join(
+                                fixture.reservationRootPath,
+                                'browser-recovery-3',
+                            ),
+                        ),
+                        `${collision.recordKind}:${collisionInventory}`,
+                    ).rejects.toMatchObject({ code: 'ENOENT' });
+
+                    const replayRunDirectoryPath = path.join(
+                        path.dirname(fixture.runDirectoryPath),
+                        `fixed-child-collision-${collision.recordKind}-${collisionInventory}`,
+                    );
+                    await mkdir(replayRunDirectoryPath);
+                    const replayInvocations: CommandInvocation[] = [];
+                    const replaySampleInvocations: CommandInvocation[] = [];
+                    await expect(
+                        executeProofStorageWidthBrowserEvidence({
+                            dependencies: createDependencies({
+                                allInvocations: replayInvocations,
+                                fixture: {
+                                    ...fixture,
+                                    runDirectoryPath: replayRunDirectoryPath,
+                                },
+                                preOperationRecoveryProfile: recoveryProfile,
+                                repositoryStateForCheckpoint: () => ({
+                                    commitHash:
+                                        thirdRecoveryFinalHarnessCommitHash,
+                                    treeDirty: false,
+                                }),
+                                sampleInvocations: replaySampleInvocations,
+                            }),
+                            nativeEvidencePath: fixture.nativeEvidencePath,
+                            ...thirdRecoveryExecutionPaths(recoveryProfile),
+                            runLog: createRunLog(replayRunDirectoryPath),
+                        }),
+                        `${collision.recordKind}:${collisionInventory}`,
+                    ).rejects.toThrow(/exact one-file inventory/u);
+                    expect(
+                        replayInvocations,
+                        `${collision.recordKind}:${collisionInventory}`,
+                    ).toHaveLength(0);
+                    expect(
+                        replaySampleInvocations,
+                        `${collision.recordKind}:${collisionInventory}`,
+                    ).toHaveLength(0);
+                    expect(
+                        await snapshotDirectoryCustody(keyDirectoryPath),
+                        `${collision.recordKind}:${collisionInventory}`,
+                    ).toEqual(keyCustodyBeforeReplay);
+                });
+            }
+        }
+    });
+
+    it('rolls back a short static observation and terminalizes the attempt', () =>
+        withTemporaryFixture(async (fixture) => {
+            const recoveryProfile =
+                await createThirdRecoveryFixtureProfile(fixture);
+            const allInvocations: CommandInvocation[] = [];
+            const sampleInvocations: CommandInvocation[] = [];
+            await expect(
+                executeProofStorageWidthBrowserEvidence({
+                    dependencies: createDependencies({
+                        allInvocations,
+                        browserRecoveryMarkerFaultInjection: (event) =>
+                            event.recordKind === 'static-observation' &&
+                            event.stage === 'before-staged-write'
+                                ? { maximumWriteByteLength: 1 }
+                                : undefined,
+                        fixture,
+                        preOperationRecoveryProfile: recoveryProfile,
+                        repositoryStateForCheckpoint: () => ({
+                            commitHash: thirdRecoveryFinalHarnessCommitHash,
+                            treeDirty: false,
+                        }),
+                        sampleInvocations,
+                    }),
+                    nativeEvidencePath: fixture.nativeEvidencePath,
+                    ...thirdRecoveryExecutionPaths(recoveryProfile),
+                    runLog: createRunLog(fixture.runDirectoryPath),
+                }),
+            ).rejects.toThrow(/static-observation atomic publication failed/u);
+            expect(allInvocations.length).toBeGreaterThan(0);
+            expect(sampleInvocations).toHaveLength(0);
+            const marker = await readThirdRecoveryMarkerForTest(
+                fixture.reservationRootPath,
+            );
+            expect(marker.records).toHaveLength(2);
+            expect(marker.records[1]).toMatchObject({
+                eventType: 'official-sample-outcome',
+                outcome: 'failed',
+            });
+            await expect(
+                readdir(
+                    path.join(marker.rootPath, 'static-preflight-observed'),
+                ),
+            ).rejects.toMatchObject({ code: 'ENOENT' });
+            await expectNoUnpublishedRecoveryRecordEntries(
+                path.dirname(marker.rootPath),
+                'short static-observation cleanup',
+            );
+        }));
+
+    it('rolls back a short validated outcome, records failure, and never announces closure', () =>
+        withTemporaryFixture(async (fixture) => {
+            const recoveryProfile =
+                await createThirdRecoveryFixtureProfile(fixture);
+            const announcements: string[] = [];
+            const sampleInvocations: CommandInvocation[] = [];
+            await expect(
+                executeProofStorageWidthBrowserEvidence({
+                    dependencies: createDependencies({
+                        browserRecoveryMarkerFaultInjection: (event) =>
+                            event.recordKind === 'validated-outcome' &&
+                            event.stage === 'before-staged-write'
+                                ? { maximumWriteByteLength: 1 }
+                                : undefined,
+                        fixture,
+                        preOperationRecoveryProfile: recoveryProfile,
+                        repositoryStateForCheckpoint: () => ({
+                            commitHash: thirdRecoveryFinalHarnessCommitHash,
+                            treeDirty: false,
+                        }),
+                        sampleInvocations,
+                    }),
+                    nativeEvidencePath: fixture.nativeEvidencePath,
+                    ...thirdRecoveryExecutionPaths(recoveryProfile),
+                    runLog: createRunLog(fixture.runDirectoryPath, {
+                        writeCombinedOutput: (output) => {
+                            if (
+                                output.startsWith(
+                                    'Proof-storage width browser evidence:',
+                                )
+                            ) {
+                                announcements.push(output);
+                            }
+                        },
+                        writeEvent: ({ eventType }) => {
+                            if (
+                                eventType ===
+                                    'proof-storage-width-browser-evidence-complete' ||
+                                eventType ===
+                                    'proof-storage-width-browser-evidence-decisive-negative'
+                            ) {
+                                announcements.push(eventType);
+                            }
+                        },
+                    }),
+                }),
+            ).rejects.toThrow(/validated-outcome atomic publication failed/u);
+            expect(sampleInvocations).toHaveLength(1);
+            expect(announcements).toHaveLength(0);
+            const marker = await readThirdRecoveryMarkerForTest(
+                fixture.reservationRootPath,
+            );
+            expect(marker.records).toHaveLength(3);
+            expect(marker.records[1]?.eventType).toBe(
+                'official-browser-width-recovery-static-preflight-observed',
+            );
+            expect(marker.records[2]).toMatchObject({
+                eventType: 'official-sample-outcome',
+                outcome: 'failed',
+            });
+            await expectNoUnpublishedRecoveryRecordEntries(
+                path.dirname(marker.rootPath),
+                'short validated-outcome cleanup',
+            );
+        }));
+
+    it('never announces closure from reopenable validated bytes whose durability barrier failed', () =>
+        withTemporaryFixture(async (fixture) => {
+            const recoveryProfile =
+                await createThirdRecoveryFixtureProfile(fixture);
+            const announcements: string[] = [];
+            const sampleInvocations: CommandInvocation[] = [];
+            let injected = false;
+            const dependencies = createDependencies({
+                browserRecoveryMarkerFaultInjection: (event) => {
+                    if (
+                        !injected &&
+                        event.recordKind === 'validated-outcome' &&
+                        event.stage === 'after-link-before-durability'
+                    ) {
+                        injected = true;
+                        throw new Error(
+                            'Injected validated publication durability failure.',
+                        );
+                    }
+                    return undefined;
+                },
+                fixture,
+                preOperationRecoveryProfile: recoveryProfile,
+                repositoryStateForCheckpoint: () => ({
+                    commitHash: thirdRecoveryFinalHarnessCommitHash,
+                    treeDirty: false,
+                }),
+                sampleInvocations,
+            });
+            await expect(
+                executeProofStorageWidthBrowserEvidence({
+                    dependencies,
+                    nativeEvidencePath: fixture.nativeEvidencePath,
+                    ...thirdRecoveryExecutionPaths(recoveryProfile),
+                    runLog: createRunLog(fixture.runDirectoryPath, {
+                        writeCombinedOutput: (output) => {
+                            if (
+                                output.startsWith(
+                                    'Proof-storage width browser evidence:',
+                                )
+                            ) {
+                                announcements.push(output);
+                            }
+                        },
+                        writeEvent: ({ eventType }) => {
+                            if (
+                                eventType ===
+                                    'proof-storage-width-browser-evidence-complete' ||
+                                eventType ===
+                                    'proof-storage-width-browser-evidence-decisive-negative'
+                            ) {
+                                announcements.push(eventType);
+                            }
+                        },
+                    }),
+                }),
+            ).rejects.toThrow(/validated-outcome atomic publication failed/u);
+            expect(injected).toBe(true);
+            expect(sampleInvocations).toHaveLength(1);
+            expect(announcements).toHaveLength(0);
+            const marker = await readThirdRecoveryMarkerForTest(
+                fixture.reservationRootPath,
+            );
+            expect(marker.records).toHaveLength(3);
+            expect(marker.records[2]).toMatchObject({
+                eventType: 'official-sample-outcome',
+                outcome: 'failed',
+            });
+            const attachmentPath = path.join(
+                fixture.runDirectoryPath,
+                'attachments',
+                'proof-storage-width-browser-evidence.json',
+            );
+            await expect(
+                validateProofStorageWidthBrowserEvidenceArtifacts(
+                    attachmentPath,
+                    {
+                        loadNativeWidthEvidence:
+                            dependencies.loadNativeWidthEvidence,
+                        officialReservationRootPath:
+                            fixture.reservationRootPath,
+                        chainedRecoveryProfile:
+                            recoveryProfile.chainedRecoveryProfile,
+                        preOperationRecoveryProfile: recoveryProfile,
+                        processedWasmKernelPath:
+                            fixture.processedWasmKernelPath,
+                        publicSdkWasmKernelPath:
+                            fixture.publicSdkWasmKernelPath,
+                        thirdRecoveryProfile:
+                            recoveryProfile.thirdRecoveryProfile,
+                    },
+                ),
+            ).rejects.toThrow(/lacks its one validated terminal outcome/u);
+            await expectNoUnpublishedRecoveryRecordEntries(
+                path.dirname(marker.rootPath),
+                'durability-failed validated-outcome cleanup',
+            );
+        }));
+
+    it('keeps a failed canonical rollback multiply linked so exported validation refuses it', () =>
+        withTemporaryFixture(async (fixture) => {
+            const recoveryProfile =
+                await createThirdRecoveryFixtureProfile(fixture);
+            const announcements: string[] = [];
+            const sampleInvocations: CommandInvocation[] = [];
+            let publicationFaultInjected = false;
+            let rollbackFaultInjected = false;
+            const dependencies = createDependencies({
+                browserRecoveryMarkerFaultInjection: (event) => {
+                    if (
+                        !publicationFaultInjected &&
+                        event.recordKind === 'validated-outcome' &&
+                        event.stage === 'after-link-before-durability'
+                    ) {
+                        publicationFaultInjected = true;
+                        throw new Error(
+                            'Injected validated publication durability failure.',
+                        );
+                    }
+                    if (
+                        !rollbackFaultInjected &&
+                        event.recordKind === 'validated-outcome' &&
+                        event.stage === 'before-incomplete-canonical-unlink'
+                    ) {
+                        rollbackFaultInjected = true;
+                        throw new Error(
+                            'Injected canonical rollback unlink failure.',
+                        );
+                    }
+                    return undefined;
+                },
+                fixture,
+                preOperationRecoveryProfile: recoveryProfile,
+                repositoryStateForCheckpoint: () => ({
+                    commitHash: thirdRecoveryFinalHarnessCommitHash,
+                    treeDirty: false,
+                }),
+                sampleInvocations,
+            });
+            await expect(
+                executeProofStorageWidthBrowserEvidence({
+                    dependencies,
+                    nativeEvidencePath: fixture.nativeEvidencePath,
+                    ...thirdRecoveryExecutionPaths(recoveryProfile),
+                    runLog: createRunLog(fixture.runDirectoryPath, {
+                        writeCombinedOutput: (output) => {
+                            if (
+                                output.startsWith(
+                                    'Proof-storage width browser evidence:',
+                                )
+                            ) {
+                                announcements.push(output);
+                            }
+                        },
+                        writeEvent: ({ eventType }) => {
+                            if (
+                                eventType ===
+                                    'proof-storage-width-browser-evidence-complete' ||
+                                eventType ===
+                                    'proof-storage-width-browser-evidence-decisive-negative'
+                            ) {
+                                announcements.push(eventType);
+                            }
+                        },
+                    }),
+                }),
+            ).rejects.toThrow(/finalization failed/u);
+            expect(publicationFaultInjected).toBe(true);
+            expect(rollbackFaultInjected).toBe(true);
+            expect(sampleInvocations).toHaveLength(1);
+            expect(announcements).toHaveLength(0);
+            const preflightRootPath = path.join(
+                fixture.reservationRootPath,
+                'browser-recovery-preflight-3',
+            );
+            const preflightRootEntries = await readdir(preflightRootPath);
+            const authorizationDirectoryName = preflightRootEntries.find(
+                (entryName) => /^[0-9a-f]{64}$/u.test(entryName),
+            );
+            expect(authorizationDirectoryName).toBeDefined();
+            const keyDirectoryPath = path.join(
+                preflightRootPath,
+                authorizationDirectoryName ?? '',
+            );
+            const terminalDirectoryPath = path.join(
+                keyDirectoryPath,
+                'terminal-outcome',
+            );
+            const canonicalRecordPath = path.join(
+                terminalDirectoryPath,
+                'record.json',
+            );
+            const terminalRecord = JSON.parse(
+                await readFile(canonicalRecordPath, 'utf8'),
+            ) as Record<string, unknown>;
+            expect(terminalRecord).toMatchObject({
+                eventType: 'official-sample-outcome',
+                outcome: 'validated',
+            });
+            const stagingDirectoryNames = preflightRootEntries.filter(
+                (entryName) =>
+                    entryName.startsWith('.unpublished-recovery-record-'),
+            );
+            expect(stagingDirectoryNames).toHaveLength(1);
+            const stagedRecordPath = path.join(
+                preflightRootPath,
+                stagingDirectoryNames[0] ?? '',
+                'record.json',
+            );
+            const [canonicalStatistics, stagedStatistics] = await Promise.all([
+                lstat(canonicalRecordPath),
+                lstat(stagedRecordPath),
+            ]);
+            expect(canonicalStatistics.nlink).toBe(2);
+            expect(stagedStatistics.nlink).toBe(2);
+            expect(canonicalStatistics.dev).toBe(stagedStatistics.dev);
+            expect(canonicalStatistics.ino).toBe(stagedStatistics.ino);
+            expect(await readFile(canonicalRecordPath)).toEqual(
+                await readFile(stagedRecordPath),
+            );
+            const attachmentPath = path.join(
+                fixture.runDirectoryPath,
+                'attachments',
+                'proof-storage-width-browser-evidence.json',
+            );
+            await expect(
+                validateProofStorageWidthBrowserEvidenceArtifacts(
+                    attachmentPath,
+                    {
+                        loadNativeWidthEvidence:
+                            dependencies.loadNativeWidthEvidence,
+                        officialReservationRootPath:
+                            fixture.reservationRootPath,
+                        chainedRecoveryProfile:
+                            recoveryProfile.chainedRecoveryProfile,
+                        preOperationRecoveryProfile: recoveryProfile,
+                        processedWasmKernelPath:
+                            fixture.processedWasmKernelPath,
+                        publicSdkWasmKernelPath:
+                            fixture.publicSdkWasmKernelPath,
+                        thirdRecoveryProfile:
+                            recoveryProfile.thirdRecoveryProfile,
+                    },
+                ),
+            ).rejects.toThrow(/singly linked regular file/u);
+        }));
+
+    it('detects same-size validated-terminal mutation after publication and never announces closure', () =>
+        withTemporaryFixture(async (fixture) => {
+            const recoveryProfile =
+                await createThirdRecoveryFixtureProfile(fixture);
+            const announcements: string[] = [];
+            const sampleInvocations: CommandInvocation[] = [];
+            let mutated = false;
+            let mutationByteLengthPreserved = false;
+            await expect(
+                executeProofStorageWidthBrowserEvidence({
+                    dependencies: createDependencies({
+                        browserRecoveryMarkerFaultInjection: async (event) => {
+                            if (
+                                !mutated &&
+                                event.recordKind === 'validated-outcome' &&
+                                event.stage ===
+                                    'after-publication-before-reopen'
+                            ) {
+                                const originalBytes = await readFile(
+                                    event.markerPath,
+                                );
+                                const mutatedRecord = originalBytes
+                                    .toString('utf8')
+                                    .replace(
+                                        '"outcome":"validated"',
+                                        '"outcome":"validateD"',
+                                    );
+                                mutationByteLengthPreserved =
+                                    Buffer.byteLength(mutatedRecord, 'utf8') ===
+                                    originalBytes.byteLength;
+                                await writeFile(
+                                    event.markerPath,
+                                    mutatedRecord,
+                                    'utf8',
+                                );
+                                mutated = true;
+                            }
+                            return undefined;
+                        },
+                        fixture,
+                        preOperationRecoveryProfile: recoveryProfile,
+                        repositoryStateForCheckpoint: () => ({
+                            commitHash: thirdRecoveryFinalHarnessCommitHash,
+                            treeDirty: false,
+                        }),
+                        sampleInvocations,
+                    }),
+                    nativeEvidencePath: fixture.nativeEvidencePath,
+                    ...thirdRecoveryExecutionPaths(recoveryProfile),
+                    runLog: createRunLog(fixture.runDirectoryPath, {
+                        writeCombinedOutput: (output) => {
+                            if (
+                                output.startsWith(
+                                    'Proof-storage width browser evidence:',
+                                )
+                            ) {
+                                announcements.push(output);
+                            }
+                        },
+                        writeEvent: ({ eventType }) => {
+                            if (
+                                eventType ===
+                                    'proof-storage-width-browser-evidence-complete' ||
+                                eventType ===
+                                    'proof-storage-width-browser-evidence-decisive-negative'
+                            ) {
+                                announcements.push(eventType);
+                            }
+                        },
+                    }),
+                }),
+            ).rejects.toThrow(
+                /chained browser recovery finalization failed and its pending singleton could not record the failure/u,
+            );
+            expect(mutated).toBe(true);
+            expect(mutationByteLengthPreserved).toBe(true);
+            expect(sampleInvocations).toHaveLength(1);
+            expect(announcements).toHaveLength(0);
+            const marker = await readThirdRecoveryMarkerForTest(
+                fixture.reservationRootPath,
+            );
+            expect(marker.records).toHaveLength(3);
+            expect(marker.records[2]).toMatchObject({
+                eventType: 'official-sample-outcome',
+                outcome: 'validateD',
+            });
+        }));
+
+    it('refuses an unexpected entry in the published ordinal-three marker before commands', () =>
+        withTemporaryFixture(async (fixture) => {
+            const recoveryProfile =
+                await createThirdRecoveryFixtureProfile(fixture);
+            const allInvocations: CommandInvocation[] = [];
+            await expect(
+                executeProofStorageWidthBrowserEvidence({
+                    dependencies: createDependencies({
+                        allInvocations,
+                        browserRecoveryMarkerFaultInjection: async (event) => {
+                            if (
+                                event.recordKind === 'preflight-attempt' &&
+                                event.stage ===
+                                    'after-publication-before-reopen'
+                            ) {
+                                await writeFile(
+                                    path.join(
+                                        path.dirname(event.markerPath),
+                                        'unexpected-marker-entry.txt',
+                                    ),
+                                    'unexpected',
+                                    'utf8',
+                                );
+                            }
+                            return undefined;
+                        },
+                        fixture,
+                        preOperationRecoveryProfile: recoveryProfile,
+                        repositoryStateForCheckpoint: () => ({
+                            commitHash: thirdRecoveryFinalHarnessCommitHash,
+                            treeDirty: false,
+                        }),
+                        sampleInvocations: [],
+                    }),
+                    nativeEvidencePath: fixture.nativeEvidencePath,
+                    ...thirdRecoveryExecutionPaths(recoveryProfile),
+                    runLog: createRunLog(fixture.runDirectoryPath),
+                }),
+            ).rejects.toThrow(/could not be reopened safely/u);
+            expect(allInvocations).toHaveLength(0);
+            await expect(
+                readdir(
+                    path.join(
+                        fixture.reservationRootPath,
+                        'browser-recovery-3',
+                    ),
+                ),
+            ).rejects.toMatchObject({ code: 'ENOENT' });
+        }));
+
+    it('allows exactly one ordinal-three measured invocation across an acquisition race', () =>
+        withTemporaryFixture(async (fixture) => {
+            const recoveryProfile =
+                await createThirdRecoveryFixtureProfile(fixture);
+            const secondRunDirectoryPath = path.join(
+                path.dirname(fixture.runDirectoryPath),
+                'ordinal-three-race-second-run',
+            );
+            await mkdir(secondRunDirectoryPath);
+            let preflightArrivalCount = 0;
+            let reportFirstPreflightArrival: (() => void) | undefined;
+            const firstPreflightArrival = new Promise<void>((resolve) => {
+                reportFirstPreflightArrival = resolve;
+            });
+            let releasePreflightBarrier: (() => void) | undefined;
+            const preflightBarrier = new Promise<void>((resolve) => {
+                releasePreflightBarrier = resolve;
+            });
+            const raceFaultInjection: BrowserRecoveryMarkerFaultInjection =
+                async (event) => {
+                    if (
+                        event.recordKind === 'preflight-attempt' &&
+                        event.stage === 'before-staged-write'
+                    ) {
+                        preflightArrivalCount += 1;
+                        if (preflightArrivalCount > 1) {
+                            throw new Error(
+                                'A second racer passed the exclusive singleton claim.',
+                            );
+                        }
+                        reportFirstPreflightArrival?.();
+                        await preflightBarrier;
+                    }
+                    return undefined;
+                };
+            const sampleInvocations: CommandInvocation[] = [];
+            const executeRacer = (runDirectoryPath: string): Promise<void> =>
+                executeProofStorageWidthBrowserEvidence({
+                    dependencies: createDependencies({
+                        browserRecoveryMarkerFaultInjection: raceFaultInjection,
+                        fixture: { ...fixture, runDirectoryPath },
+                        preOperationRecoveryProfile: recoveryProfile,
+                        repositoryStateForCheckpoint: () => ({
+                            commitHash: thirdRecoveryFinalHarnessCommitHash,
+                            treeDirty: false,
+                        }),
+                        sampleInvocations,
+                    }),
+                    nativeEvidencePath: fixture.nativeEvidencePath,
+                    ...thirdRecoveryExecutionPaths(recoveryProfile),
+                    runLog: createRunLog(runDirectoryPath),
+                });
+            const firstRacer = executeRacer(fixture.runDirectoryPath);
+            await firstPreflightArrival;
+            const secondRacerResult = await executeRacer(
+                secondRunDirectoryPath,
+            ).then(
+                () => ({ status: 'fulfilled' as const }),
+                (reason: unknown) => ({ reason, status: 'rejected' as const }),
+            );
+            releasePreflightBarrier?.();
+            const firstRacerResult = await firstRacer.then(
+                () => ({ status: 'fulfilled' as const }),
+                (reason: unknown) => ({ reason, status: 'rejected' as const }),
+            );
+            const results = [firstRacerResult, secondRacerResult];
+            expect(preflightArrivalCount).toBe(1);
+            expect(
+                results.filter((result) => result.status === 'fulfilled'),
+            ).toHaveLength(1);
+            expect(
+                results.filter((result) => result.status === 'rejected'),
+            ).toHaveLength(1);
+            expect(sampleInvocations).toHaveLength(1);
+            const marker = await readThirdRecoveryMarkerForTest(
+                fixture.reservationRootPath,
+            );
+            expect(marker.records).toHaveLength(3);
+            expect(marker.records[2]).toMatchObject({
+                eventType: 'official-sample-outcome',
+                outcome: 'validated',
+            });
+            const preflightRootEntries = await readdir(
+                path.join(
+                    fixture.reservationRootPath,
+                    'browser-recovery-preflight-3',
+                ),
+            );
+            expect(preflightRootEntries).toEqual([
+                marker.authorizationKeySha256Hex,
+            ]);
+            expect(
+                await readdir(
+                    path.join(
+                        fixture.reservationRootPath,
+                        'browser-recovery-3',
+                    ),
+                ),
+            ).toEqual([marker.authorizationKeySha256Hex]);
+        }));
+
+    it('closes successful ordinal-three evidence as format seven before announcement', () =>
+        withTemporaryFixture(async (fixture) => {
+            const recoveryProfile =
+                await createThirdRecoveryFixtureProfile(fixture);
+            const sampleInvocations: CommandInvocation[] = [];
+            const dependencies = createDependencies({
+                fixture,
+                preOperationRecoveryProfile: recoveryProfile,
+                repositoryStateForCheckpoint: () => ({
+                    commitHash: thirdRecoveryFinalHarnessCommitHash,
+                    treeDirty: false,
+                }),
+                sampleInvocations,
+            });
+            let announcementCount = 0;
+            const assertTerminalMarker = (): void => {
+                const singletonDirectories = readdirSync(
+                    path.join(
+                        fixture.reservationRootPath,
+                        'browser-recovery-preflight-3',
+                    ),
+                );
+                expect(singletonDirectories).toHaveLength(1);
+                const markerRootPath = path.join(
+                    fixture.reservationRootPath,
+                    'browser-recovery-preflight-3',
+                    singletonDirectories[0] ?? '',
+                );
+                const records = [
+                    readFileSync(
+                        path.join(
+                            markerRootPath,
+                            'preflight-attempted',
+                            'record.json',
+                        ),
+                        'utf8',
+                    ),
+                    readFileSync(
+                        path.join(
+                            markerRootPath,
+                            'static-preflight-observed',
+                            'record.json',
+                        ),
+                        'utf8',
+                    ),
+                    readFileSync(
+                        path.join(
+                            markerRootPath,
+                            'terminal-outcome',
+                            'record.json',
+                        ),
+                        'utf8',
+                    ),
+                ]
+                    .join('')
+                    .trim()
+                    .split('\n')
+                    .map((line) => JSON.parse(line) as Record<string, unknown>);
+                expect(records).toHaveLength(3);
+                expect(records[2]).toMatchObject({
+                    eventType: 'official-sample-outcome',
+                    outcome: 'validated',
+                });
+                announcementCount += 1;
+            };
+            await executeProofStorageWidthBrowserEvidence({
+                dependencies,
+                nativeEvidencePath: fixture.nativeEvidencePath,
+                ...thirdRecoveryExecutionPaths(recoveryProfile),
+                runLog: createRunLog(fixture.runDirectoryPath, {
+                    writeCombinedOutput: (output) => {
+                        if (
+                            output.startsWith(
+                                'Proof-storage width browser evidence:',
+                            )
+                        ) {
+                            assertTerminalMarker();
+                        }
+                    },
+                    writeEvent: ({ eventType }) => {
+                        if (
+                            eventType ===
+                            'proof-storage-width-browser-evidence-complete'
+                        ) {
+                            assertTerminalMarker();
+                        }
+                    },
+                }),
+            });
+            expect(announcementCount).toBe(2);
+            expect(sampleInvocations).toHaveLength(1);
+            const attachmentPath = path.join(
+                fixture.runDirectoryPath,
+                'attachments',
+                'proof-storage-width-browser-evidence.json',
+            );
+            const evidence = JSON.parse(
+                await readFile(attachmentPath, 'utf8'),
+            ) as {
+                readonly formatVersion: number;
+                readonly officialSampleReservation: {
+                    readonly schemaVersion: string;
+                };
+                readonly recovery: {
+                    readonly recoveryOrdinal: number;
+                    readonly thirdRecoveryHarness: {
+                        readonly harnessCommitHash: string;
+                        readonly nativeSourceCommitHash: string;
+                    };
+                };
+            };
+            expect(evidence).toMatchObject({
+                formatVersion: 7,
+                officialSampleReservation: {
+                    schemaVersion: 'browser-recovery-3',
+                },
+                recovery: {
+                    recoveryOrdinal: 3,
+                    thirdRecoveryHarness: {
+                        harnessCommitHash: thirdRecoveryFinalHarnessCommitHash,
+                        nativeSourceCommitHash: thirdRecoveryIssuanceCommitHash,
+                    },
+                },
+            });
+            await expect(
+                validateProofStorageWidthBrowserEvidenceArtifacts(
+                    attachmentPath,
+                    {
+                        loadNativeWidthEvidence:
+                            dependencies.loadNativeWidthEvidence,
+                        officialReservationRootPath:
+                            fixture.reservationRootPath,
+                        chainedRecoveryProfile:
+                            recoveryProfile.chainedRecoveryProfile,
+                        preOperationRecoveryProfile: recoveryProfile,
+                        processedWasmKernelPath:
+                            fixture.processedWasmKernelPath,
+                        publicSdkWasmKernelPath:
+                            fixture.publicSdkWasmKernelPath,
+                        thirdRecoveryProfile:
+                            recoveryProfile.thirdRecoveryProfile,
+                    },
+                ),
+            ).resolves.toBeUndefined();
+            const terminalMarker = await readThirdRecoveryMarkerForTest(
+                fixture.reservationRootPath,
+            );
+            expect(terminalMarker.records).toHaveLength(3);
+            expect(terminalMarker.terminalDirectoryPath).toBeDefined();
+            expect(terminalMarker.terminalRecordBytes).toBeDefined();
+            await rm(terminalMarker.terminalDirectoryPath ?? '', {
+                recursive: true,
+            });
+            await expect(
+                validateProofStorageWidthBrowserEvidenceArtifacts(
+                    attachmentPath,
+                    {
+                        loadNativeWidthEvidence:
+                            dependencies.loadNativeWidthEvidence,
+                        officialReservationRootPath:
+                            fixture.reservationRootPath,
+                        chainedRecoveryProfile:
+                            recoveryProfile.chainedRecoveryProfile,
+                        preOperationRecoveryProfile: recoveryProfile,
+                        processedWasmKernelPath:
+                            fixture.processedWasmKernelPath,
+                        publicSdkWasmKernelPath:
+                            fixture.publicSdkWasmKernelPath,
+                        thirdRecoveryProfile:
+                            recoveryProfile.thirdRecoveryProfile,
+                    },
+                ),
+            ).rejects.toThrow(/requires its validated terminal marker/u);
+            await mkdir(terminalMarker.terminalDirectoryPath ?? '');
+            await writeFile(
+                path.join(
+                    terminalMarker.terminalDirectoryPath ?? '',
+                    'record.json',
+                ),
+                terminalMarker.terminalRecordBytes ?? Buffer.alloc(0),
+            );
+        }));
 
     it('requires one raw measurement record and refuses unrelated or duplicate JSONL records', () => {
         const wasmSha256Hex = '12'.repeat(32);
