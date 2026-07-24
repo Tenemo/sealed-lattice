@@ -1,8 +1,14 @@
 # sealed-lattice
 
-`sealed-lattice` is a browser-oriented TypeScript and Rust/WebAssembly prototype for threshold homomorphic polling. It explores how participants can jointly run a poll, verify its public transcript, and release an agreed result without revealing individual ballots or trusting a tally server.
+`sealed-lattice` is a browser-oriented TypeScript and Rust/WebAssembly
+prototype for threshold homomorphic polling. It explores how participants can
+jointly run a poll, verify its public transcript, and release an agreed result
+without revealing individual ballots or trusting a tally server.
 
-The project is a research prototype for synthetic data. It has not been independently audited or approved for production elections. Do not use it with real ballots, credentials, keys, or secret material. See [SECURITY.md](SECURITY.md) for the trust boundaries and known limitations.
+The project is for synthetic data only. It has not been independently audited
+or approved for production elections. Do not use it with real ballots,
+credentials, keys, or secret material. See [SECURITY.md](SECURITY.md) for the
+current security issues and required trust boundaries.
 
 ## How it works
 
@@ -16,33 +22,46 @@ The protocol is designed around a public transcript and participant-side verific
 6. A finality quorum authorizes exactly one target result.
 7. After finality, any reconstruction threshold of valid target-bound shares reveals only that approved result.
 
-The roster and candidate-suite schemas cover `3 <= n <= 20` participants, with `f = floor((n - 1) / 3)` actively Byzantine participants, `r = floor(n / 3) + 1` reconstruction shares, and finality and state quorums of `floor((n + f) / 2) + 1` each. The sole completion and evidence target is `n = 10`, which gives `f = 3`, `r = 4`, and both quorums equal to seven. Other roster sizes pass structural validation but are unsupported and carry no security evidence.
+The roster and candidate-suite schemas cover `3 <= n <= 20`. The sole
+implementation and evidence target is currently `n = 10`, with three actively
+Byzantine participants, four reconstruction shares, and finality and state
+quorums of seven. Other roster sizes remain unsupported.
 
-The design requires every operation in a vote to run in the participants' own mobile browsers: quorum witnesses are other roster members acting through their own clients, transcript and mailbox services only relay bytes, and acceptance rests on canonical encodings, recomputed hashes and roots, signatures, and verified proofs over externally anchored poll and roster data. Participant state is deliberately bound to one phone and browser profile with no backup or recovery; losing it removes the participant from the current action. [SECURITY.md](SECURITY.md) describes these boundaries and their consequences.
+Every required participant operation is intended to run in the participant's
+own mobile browser. Transcript and mailbox services only relay untrusted bytes;
+they are not trusted to prove, verify, tally, finalize, or decrypt.
 
 ## Prototype status
 
-The kernel targets a fixed homomorphic-encryption parameter set selected for the `n = 10` prototype; exact parameters are provisional until the candidate suite is frozen.
+The kernel targets a fixed homomorphic-encryption candidate for the exact
+`n = 10` prototype. The suite remains unavailable until its parameters, proof
+construction, and evidence are frozen together.
 
 Works today:
 
-- The public package validates pre-protocol poll input and creates or verifies canonical manifests, action definitions, and board policies.
-- The Rust/WebAssembly kernel canonically decodes and recomputes manifests, rosters, suite records, ceremony contexts, and action contexts, and validates the fixed algebra of the current homomorphic-encryption candidate.
-- A browser-local foundation composes roster-bound key custody, authenticated local records, checkpoints, and fixed-roster state-witness roles, exercised by a fixture-backed desktop Chromium lifecycle test.
-- Bounded proof machinery (typed transcripts, hostile-input decoding, pollable prover and verifier state machines, external-memory planning, cancellation) runs in Rust and through the WebAssembly worker.
-- Ballot encryption, homomorphic aggregation, the encrypted evaluator, and target-release components pass focused component tests in native Rust and desktop browsers.
+- The public package validates poll input and creates or verifies canonical
+  foundation objects.
+- The Rust/WebAssembly kernel recomputes their encodings, hashes, roots, roster
+  formulas, and contexts.
+- Browser-local custody, authenticated records, checkpoints, and fixed-roster
+  state witnessing have focused desktop-browser coverage.
+- Ballot encryption, aggregation, encrypted evaluation, and target release have
+  focused component tests.
 
 Not yet:
 
-- No exact `n = 10` suite is frozen, so the kernel refuses positive suite selection and no end-to-end accepted vote path exists.
-- Current proof plans exceed the kernel's fixed resource caps; a reduced proof representation is required before a candidate can activate.
-- Proof-system assurance is incomplete: extractor, zero-knowledge, and quantum-model analyses remain open, and the homomorphic-encryption parameter assessment is provisional.
-- No supported-phone runtime evidence exists; desktop-browser, Node.js, and native runs are development evidence only. Completion additionally requires the frozen `n = 10` build to pass the physical-phone acceptance procedure on one Samsung Galaxy S22 Ultra in Chrome and Firefox.
-- Ballot, evaluator, and target-release operations are not public package APIs.
+- The currently integrated FRI proof representation is not feasible at the
+  target width. Its selected streaming-interleaved row-code replacement with an
+  explicit-point WHIR opening has promising research evidence, but is not yet
+  integrated into the production kernel or cryptographically qualified.
+- No exact `n = 10` suite is frozen, no complete accepted vote runs end to end,
+  and ballot, evaluator, and target-release operations are not public APIs.
+- No physical-phone profile is qualified. Desktop-browser, Node.js, native, and
+  fixture-backed runs are development evidence only.
 
-Local storage can repair interrupted same-browser writes, but it cannot recover deleted participant state or detect restoration of an older snapshot; see [SECURITY.md](SECURITY.md).
+## Install
 
-## Installation
+Node.js 24.14.1 or later is required.
 
 ```bash
 npm install sealed-lattice
@@ -53,8 +72,6 @@ or:
 ```bash
 pnpm add sealed-lattice
 ```
-
-Node.js consumers require Node.js 24.14.1 or later.
 
 ## Usage
 
