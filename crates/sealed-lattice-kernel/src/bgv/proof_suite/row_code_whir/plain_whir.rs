@@ -285,14 +285,16 @@ pub(super) fn verify_plain_aggregate_batches_at_points(
     let constraint = layout_verifier.constraint(batching_challenge);
     let mut claimed_evaluation = ChallengeField::ZERO;
     constraint.combine_evals(&mut claimed_evaluation);
-    WhirVerifier::new(&pcs.config, &pcs.mmcs, AggregateLayout::variable_order())
+    let verification = WhirVerifier::new(&pcs.config, &pcs.mmcs, AggregateLayout::variable_order())
         .verify(
             &proof.whir,
             challenger,
             commitment,
             constraint,
             claimed_evaluation,
-        )
+        );
+    challenger.ensure_sampling_succeeded()?;
+    verification
         .map(|_| ())
         .map_err(|error| format!("verify explicit-point plain WHIR proof: {error}"))
 }
@@ -363,7 +365,7 @@ mod tests {
 
     #[test]
     fn explicit_points_are_bound_and_verified() {
-        let variable_count = 8;
+        let variable_count = 12;
         let pcs = plain_aggregate_pcs(variable_count).expect("plain WHIR configuration");
         let mut prover_challenger = plain_aggregate_challenger(&pcs, b"plain explicit-point test");
         let message = Poly::new(

@@ -21,7 +21,10 @@ use super::plain_whir_wire::{decode_plain_whir_proof, encode_plain_whir_proof};
 #[cfg(test)]
 use super::row_encoding::ROW_CODE_LOG_INV_RATE;
 use super::row_encoding::{RowEncodingGeometry, encode_row, padded_row_coefficients};
-use super::{AuthenticatedColumn, ChallengeField, GOLDILOCKS_MODULUS};
+use super::{
+    AuthenticatedColumn, BoundedSamplingError, ChallengeField, GOLDILOCKS_MODULUS,
+    sample_bounded_goldilocks_candidate, sample_bounded_residue_index,
+};
 
 // A rate-one-quarter Reed-Solomon code has relative distance three quarters
 // and unique-decoding radius three eighths. A word outside that radius evades
@@ -443,8 +446,9 @@ pub(super) fn prove_streaming_opening_after_commitment<Source: RecomputableRowSo
     }
 
     let binding = protocol_binding(geometry, statement, &commitment, &claimed_evaluations)?;
-    let integrity_row_weights = derive_integrity_row_weights(&binding, geometry.row_count);
-    let claim_batching_weights = derive_claim_batching_weights(&binding, claimed_evaluations.len());
+    let integrity_row_weights = derive_integrity_row_weights(&binding, geometry.row_count)?;
+    let claim_batching_weights =
+        derive_claim_batching_weights(&binding, claimed_evaluations.len())?;
     let evaluation_row_weights =
         combined_claim_row_weights(geometry, statement, &claim_batching_weights)?;
     let aggregate_message = aggregate_message(
@@ -523,8 +527,9 @@ pub(super) fn verify_streaming_opening(
     validate_statement(geometry, statement)?;
     validate_claimed_evaluations(statement, claimed_evaluations)?;
     let binding = protocol_binding(geometry, statement, commitment, claimed_evaluations)?;
-    let integrity_row_weights = derive_integrity_row_weights(&binding, geometry.row_count);
-    let claim_batching_weights = derive_claim_batching_weights(&binding, claimed_evaluations.len());
+    let integrity_row_weights = derive_integrity_row_weights(&binding, geometry.row_count)?;
+    let claim_batching_weights =
+        derive_claim_batching_weights(&binding, claimed_evaluations.len())?;
     let evaluation_row_weights =
         combined_claim_row_weights(geometry, statement, &claim_batching_weights)?;
     let post_commitment_binding =
@@ -1069,24 +1074,36 @@ fn append_u64(output: &mut Vec<u8>, value: usize) -> Result<(), String> {
     Ok(())
 }
 
-fn derive_integrity_row_weights(binding: &[u8], count: usize) -> Vec<ChallengeField> {
+fn derive_integrity_row_weights(
+    binding: &[u8],
+    count: usize,
+) -> Result<Vec<ChallengeField>, String> {
     derive_challenge_vector(b"sealed-lattice/integrity-row-weights/v2", binding, count)
 }
 
-fn derive_claim_batching_weights(binding: &[u8], count: usize) -> Vec<ChallengeField> {
+fn derive_claim_batching_weights(
+    binding: &[u8],
+    count: usize,
+) -> Result<Vec<ChallengeField>, String> {
     derive_challenge_vector(b"sealed-lattice/terminal-claim-batching/v1", binding, count)
 }
 
-fn derive_challenge_vector(domain: &[u8], binding: &[u8], count: usize) -> Vec<ChallengeField> {
+fn derive_challenge_vector(
+    domain: &[u8],
+    binding: &[u8],
+    count: usize,
+) -> Result<Vec<ChallengeField>, String> {
     let mut state = Shake256::default();
     state.update(&(domain.len() as u64).to_le_bytes());
     state.update(domain);
     state.update(&(binding.len() as u64).to_le_bytes());
     state.update(binding);
     let mut reader = state.finalize_xof();
-    (0..count)
-        .map(|_| ChallengeField::new(core::array::from_fn(|_| sample_goldilocks(&mut reader))))
-        .collect()
+    let mut challenges = Vec::with_capacity(count);
+    for _ in 0..count {
+        challenges.push(sample_challenge(&mut reader)?);
+    }
+    Ok(challenges)
 }
 
 fn derive_post_commitment_challenges(
@@ -1098,44 +1115,44 @@ fn derive_post_commitment_challenges(
     state.update(&(binding.len() as u64).to_le_bytes());
     state.update(binding);
     let mut reader = state.finalize_xof();
-    let batching_challenge =
-        ChallengeField::new(core::array::from_fn(|_| sample_goldilocks(&mut reader)));
+    let batching_challenge = sample_challenge(&mut reader)?;
     let mut column_indices = Vec::with_capacity(COLUMN_QUERY_COUNT);
     while column_indices.len() < COLUMN_QUERY_COUNT {
-        let candidate = sample_bounded_index(&mut reader, encoded_column_count)?;
-        if !column_indices.contains(&candidate) {
-            column_indices.push(candidate);
-        }
+        let candidate = sample_bounded_residue_index(
+            encoded_column_count,
+            |candidate| !column_indices.contains(&candidate),
+            || {
+                let mut bytes = [0_u8; 8];
+                reader.read(&mut bytes);
+                u64::from_le_bytes(bytes)
+            },
+        )
+        .map_err(|error| match error {
+            BoundedSamplingError::InvalidUpperBound => {
+                "encoded column count cannot be sampled canonically".to_owned()
+            }
+            BoundedSamplingError::CandidateDrawsExhausted => {
+                "distinct column sampling exhausted its candidate ceiling".to_owned()
+            }
+        })?;
+        column_indices.push(candidate);
     }
     Ok((batching_challenge, column_indices))
 }
 
-fn sample_goldilocks(reader: &mut impl XofReader) -> Goldilocks {
-    loop {
-        let mut bytes = [0_u8; 8];
-        reader.read(&mut bytes);
-        let candidate = u64::from_le_bytes(bytes);
-        if candidate < GOLDILOCKS_MODULUS {
-            return Goldilocks::from_u64(candidate);
-        }
+fn sample_challenge(reader: &mut impl XofReader) -> Result<ChallengeField, String> {
+    let mut coordinates = [Goldilocks::ZERO; CHALLENGE_FIELD_LIMB_COUNT];
+    for coordinate in &mut coordinates {
+        *coordinate = sample_bounded_goldilocks_candidate(|| {
+            let mut bytes = [0_u8; 8];
+            reader.read(&mut bytes);
+            u64::from_le_bytes(bytes)
+        })
+        .map_err(|_| {
+            "streaming protocol Goldilocks sampling exhausted its candidate ceiling".to_owned()
+        })?;
     }
-}
-
-fn sample_bounded_index(reader: &mut impl XofReader, upper_bound: usize) -> Result<usize, String> {
-    let upper_bound =
-        u64::try_from(upper_bound).map_err(|_| "encoded column count exceeds u64".to_owned())?;
-    if upper_bound == 0 {
-        return Err("cannot sample an index from an empty range".to_owned());
-    }
-    let rejection_threshold = upper_bound.wrapping_neg() % upper_bound;
-    loop {
-        let mut bytes = [0_u8; 8];
-        reader.read(&mut bytes);
-        let candidate = u64::from_le_bytes(bytes);
-        if candidate >= rejection_threshold {
-            return Ok((candidate % upper_bound) as usize);
-        }
-    }
+    Ok(ChallengeField::new(coordinates))
 }
 
 #[cfg(test)]

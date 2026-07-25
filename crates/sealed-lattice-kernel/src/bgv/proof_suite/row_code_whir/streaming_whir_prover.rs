@@ -187,6 +187,7 @@ where
         initial_commitment,
         &mut recompute_initial_polynomial,
     )?;
+    challenger.ensure_sampling_succeeded()?;
     #[cfg(test)]
     trace_streaming_phase("opening-complete");
     Ok(PcsProof {
@@ -808,14 +809,15 @@ fn node_compressor() -> NodeCompressor {
 }
 
 type CaptureTargets = Vec<BTreeMap<usize, Vec<(usize, usize)>>>;
+type MerkleBuilderOutput = (MerkleDigest, Option<Vec<Vec<MerkleDigest>>>);
 
 fn merkle_capture_targets(height: usize, query_indices: &[usize]) -> CaptureTargets {
     let tree_depth = height.ilog2() as usize;
     let mut capture_targets = vec![BTreeMap::<usize, Vec<(usize, usize)>>::new(); tree_depth];
     for (query_ordinal, query_index) in query_indices.iter().copied().enumerate() {
-        for level in 0..tree_depth {
+        for (level, level_targets) in capture_targets.iter_mut().enumerate() {
             let sibling_index = (query_index >> level) ^ 1;
-            capture_targets[level]
+            level_targets
                 .entry(sibling_index)
                 .or_default()
                 .push((query_ordinal, level));
@@ -904,7 +906,7 @@ impl<'capture> StreamingMerkleBuilder<'capture> {
         Ok(())
     }
 
-    fn finish(self) -> Result<(MerkleDigest, Option<Vec<Vec<MerkleDigest>>>), String> {
+    fn finish(self) -> Result<MerkleBuilderOutput, String> {
         if self.next_leaf_index != self.leaf_count {
             return Err("plain WHIR Merkle builder ended before its final leaf".to_owned());
         }

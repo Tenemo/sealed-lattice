@@ -19,13 +19,15 @@ use zeroize::Zeroizing;
 use super::super::GOLDILOCKS_MODULUS;
 use super::super::column_commitment::verify_column_frontier;
 use super::super::{
-    AuthenticatedColumn, ChallengeField, MAXIMUM_ROW_CODE_WHIR_PROOF_BYTE_LENGTH,
+    AuthenticatedColumn, BoundedSamplingError, ChallengeField,
+    MAXIMUM_ROW_CODE_WHIR_PROOF_BYTE_LENGTH,
     algebra::{coset_point, polynomial_extension_opening_reduction, polynomial_opening_reduction},
     plain_whir::{
         PlainAggregateCommitment, PlainAggregateProof, plain_aggregate_challenger,
         plain_aggregate_pcs, verify_plain_aggregate_batches_at_points,
     },
     plain_whir_wire::{decode_plain_whir_batch_proof, encode_plain_whir_batch_proof},
+    sample_bounded_goldilocks_candidate, sample_bounded_residue_index,
 };
 #[cfg(all(test, not(target_arch = "wasm32")))]
 use super::super::{
@@ -773,7 +775,7 @@ fn derive_bound_opening_claims(
             column_ordinal,
             opening_point: challenge_from_production(opening_point),
             claimed_value: challenge_from_production(*claimed_value),
-            batching_weight: sample_challenge(&mut reader),
+            batching_weight: sample_challenge(&mut reader)?,
         });
     }
     if claims.len() != EXACT_BOUND_COLUMN_COUNT {
@@ -807,17 +809,26 @@ fn derive_distinct_indices(
     state.update(binding);
     state.update(&column_digest_bytes(aggregate_root));
     let mut reader = state.finalize_xof();
-    let upper_bound =
-        u64::try_from(upper_bound).map_err(|_| "exact query domain exceeds u64".to_owned())?;
-    let rejection_threshold = upper_bound.wrapping_neg() % upper_bound;
     let mut indices = BTreeSet::new();
     while indices.len() < count {
-        let mut bytes = [0_u8; 8];
-        reader.read(&mut bytes);
-        let candidate = u64::from_le_bytes(bytes);
-        if candidate >= rejection_threshold {
-            indices.insert((candidate % upper_bound) as usize);
-        }
+        let index = sample_bounded_residue_index(
+            upper_bound,
+            |candidate| !indices.contains(&candidate),
+            || {
+                let mut bytes = [0_u8; 8];
+                reader.read(&mut bytes);
+                u64::from_le_bytes(bytes)
+            },
+        )
+        .map_err(|error| match error {
+            BoundedSamplingError::InvalidUpperBound => {
+                "exact query domain cannot be sampled canonically".to_owned()
+            }
+            BoundedSamplingError::CandidateDrawsExhausted => {
+                "exact distinct query sampling exhausted its candidate ceiling".to_owned()
+            }
+        })?;
+        indices.insert(index);
     }
     Ok(indices.into_iter().collect())
 }
@@ -899,10 +910,9 @@ fn bound_degree_test_points(
                     ChallengeField::ONE
                 }
             }));
-            coordinates.extend(
-                (coordinates.len()..EXACT_TABLE_VARIABLE_COUNT)
-                    .map(|_| sample_challenge(&mut reader)),
-            );
+            while coordinates.len() < EXACT_TABLE_VARIABLE_COUNT {
+                coordinates.push(sample_challenge(&mut reader)?);
+            }
             points.push(Point::new(coordinates));
         }
     }
@@ -972,19 +982,21 @@ struct ExactPointRowWeights {
     quotient: Vec<ChallengeField>,
 }
 
-fn sample_goldilocks(reader: &mut impl XofReader) -> Goldilocks {
-    loop {
+fn sample_goldilocks(reader: &mut impl XofReader) -> Result<Goldilocks, String> {
+    sample_bounded_goldilocks_candidate(|| {
         let mut bytes = [0_u8; 8];
         reader.read(&mut bytes);
-        let candidate = u64::from_le_bytes(bytes);
-        if candidate < GOLDILOCKS_MODULUS {
-            return Goldilocks::new(candidate);
-        }
-    }
+        u64::from_le_bytes(bytes)
+    })
+    .map_err(|_| "exact Goldilocks challenge sampling exhausted its candidate ceiling".to_owned())
 }
 
-fn sample_challenge(reader: &mut impl XofReader) -> ChallengeField {
-    ChallengeField::new(core::array::from_fn(|_| sample_goldilocks(reader)))
+fn sample_challenge(reader: &mut impl XofReader) -> Result<ChallengeField, String> {
+    let mut coordinates = [Goldilocks::ZERO; 5];
+    for coordinate in &mut coordinates {
+        *coordinate = sample_goldilocks(reader)?;
+    }
+    Ok(ChallengeField::new(coordinates))
 }
 
 fn challenge_extension_basis(extension_coordinate: usize) -> ChallengeField {
@@ -1039,42 +1051,40 @@ fn derive_exact_point_row_weights(
     let mut weights = Vec::with_capacity(3);
     for opening_point_ordinal in 0..3 {
         let selectors = [
-            sample_challenge(&mut reader),
-            sample_challenge(&mut reader),
-            sample_challenge(&mut reader),
+            sample_challenge(&mut reader)?,
+            sample_challenge(&mut reader)?,
+            sample_challenge(&mut reader)?,
         ];
-        let base = base_layout
-            .rows
-            .iter()
-            .map(|row| {
+        let mut base = Vec::with_capacity(base_layout.rows.len());
+        for row in &base_layout.rows {
+            base.push(
                 if row
                     .opening_point_ordinals
                     .contains(&(opening_point_ordinal as u32))
                 {
-                    sample_challenge(&mut reader)
+                    sample_challenge(&mut reader)?
                 } else {
                     ChallengeField::ZERO
-                }
-            })
-            .collect();
-        let auxiliary = auxiliary_layout
-            .rows
-            .iter()
-            .map(|row| {
+                },
+            );
+        }
+        let mut auxiliary = Vec::with_capacity(auxiliary_layout.rows.len());
+        for row in &auxiliary_layout.rows {
+            auxiliary.push(
                 if row
                     .opening_point_ordinals
                     .contains(&(opening_point_ordinal as u32))
                 {
-                    sample_challenge(&mut reader)
+                    sample_challenge(&mut reader)?
                 } else {
                     ChallengeField::ZERO
-                }
-            })
-            .collect();
+                },
+            );
+        }
         let mut quotient = vec![ChallengeField::ZERO; EXACT_QUOTIENT_PHASE_ROW_COUNT];
         if opening_point_ordinal == 0 {
-            let quotient_component_weight = sample_challenge(&mut reader);
-            let opening_batch_mask_weight = sample_challenge(&mut reader);
+            let quotient_component_weight = sample_challenge(&mut reader)?;
+            let opening_batch_mask_weight = sample_challenge(&mut reader)?;
             for extension_coordinate in 0..5 {
                 let basis = challenge_extension_basis(extension_coordinate);
                 quotient[extension_coordinate] = quotient_component_weight * basis;

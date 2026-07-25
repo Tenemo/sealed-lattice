@@ -14,6 +14,7 @@ mod plain_whir_wire;
 #[cfg(test)]
 mod protocol;
 mod row_encoding;
+#[cfg(test)]
 mod streaming_whir_prover;
 
 pub(in crate::bgv) use exact_same_secret::VerifiedSameSecretLowDegreePrerequisite;
@@ -37,6 +38,8 @@ use sha3::{
     Shake256,
     digest::{ExtendableOutput, Update, XofReader},
 };
+
+use super::PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT;
 
 const MERKLE_DIGEST_WORD_LENGTH: usize = 8;
 const MERKLE_DIGEST_BYTE_LENGTH: usize = MERKLE_DIGEST_WORD_LENGTH * size_of::<u64>();
@@ -129,22 +132,142 @@ impl CryptographicHasher<u64, [u64; MERKLE_DIGEST_WORD_LENGTH]> for DomainSepara
 #[derive(Clone, Debug)]
 struct ByteExtensionFieldChallenger<FieldElement> {
     inner: InnerChallenger,
+    sampling_failure: Option<ChallengerSamplingFailure>,
+    uniform_query_bit_length: Option<usize>,
+    uniform_query_indices: Vec<usize>,
     marker: PhantomData<FieldElement>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ChallengerSamplingFailure {
+    GoldilocksCandidateDrawsExhausted,
+    DistinctQueryCandidateDrawsExhausted,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BoundedSamplingError {
+    InvalidUpperBound,
+    CandidateDrawsExhausted,
+}
+
+fn sample_bounded_goldilocks_candidate(
+    mut next_candidate: impl FnMut() -> u64,
+) -> Result<Goldilocks, BoundedSamplingError> {
+    for _ in 0..PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT {
+        let candidate = next_candidate();
+        if candidate < GOLDILOCKS_MODULUS {
+            return Ok(Goldilocks::from_u64(candidate));
+        }
+    }
+    Err(BoundedSamplingError::CandidateDrawsExhausted)
+}
+
+fn sample_bounded_residue_index(
+    upper_bound: usize,
+    mut is_acceptable: impl FnMut(usize) -> bool,
+    mut next_candidate: impl FnMut() -> u64,
+) -> Result<usize, BoundedSamplingError> {
+    let upper_bound =
+        u64::try_from(upper_bound).map_err(|_| BoundedSamplingError::InvalidUpperBound)?;
+    if upper_bound == 0 {
+        return Err(BoundedSamplingError::InvalidUpperBound);
+    }
+    let rejection_threshold = upper_bound.wrapping_neg() % upper_bound;
+    for _ in 0..PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT {
+        let candidate = next_candidate();
+        if candidate >= rejection_threshold {
+            let index = usize::try_from(candidate % upper_bound)
+                .map_err(|_| BoundedSamplingError::InvalidUpperBound)?;
+            if is_acceptable(index) {
+                return Ok(index);
+            }
+        }
+    }
+    Err(BoundedSamplingError::CandidateDrawsExhausted)
 }
 
 impl ByteExtensionFieldChallenger<ChallengeField> {
     fn new(initial_state: Vec<u8>, domain: &'static [u8]) -> Self {
         Self {
             inner: HashChallenger::new(initial_state, DomainSeparatedShake256 { domain }),
+            sampling_failure: None,
+            uniform_query_bit_length: None,
+            uniform_query_indices: Vec::new(),
             marker: PhantomData,
         }
     }
 
     fn sample_goldilocks(&mut self) -> Goldilocks {
-        loop {
-            let candidate = u64::from_le_bytes(self.inner.sample_array());
-            if candidate < GOLDILOCKS_MODULUS {
-                return Goldilocks::from_u64(candidate);
+        self.reset_uniform_query_epoch();
+        match sample_bounded_goldilocks_candidate(|| u64::from_le_bytes(self.inner.sample_array()))
+        {
+            Ok(candidate) => candidate,
+            Err(_) => {
+                self.record_sampling_failure(
+                    ChallengerSamplingFailure::GoldilocksCandidateDrawsExhausted,
+                );
+                Goldilocks::ZERO
+            }
+        }
+    }
+
+    fn sample_distinct_uniform_query_index(&mut self, bits: usize) -> usize {
+        if self.uniform_query_bit_length != Some(bits) {
+            self.uniform_query_bit_length = Some(bits);
+            self.uniform_query_indices.clear();
+        }
+        if bits == 0 {
+            if self.uniform_query_indices.is_empty() {
+                self.uniform_query_indices.push(0);
+            } else {
+                self.record_sampling_failure(
+                    ChallengerSamplingFailure::DistinctQueryCandidateDrawsExhausted,
+                );
+            }
+            return 0;
+        }
+        assert!(bits < usize::BITS as usize);
+        let domain_size = 1_usize << bits;
+        let sampled = sample_bounded_residue_index(
+            domain_size,
+            |candidate| !self.uniform_query_indices.contains(&candidate),
+            || u64::from_le_bytes(self.inner.sample_array()),
+        );
+        let index = match sampled {
+            Ok(index) => index,
+            Err(_) => {
+                self.record_sampling_failure(
+                    ChallengerSamplingFailure::DistinctQueryCandidateDrawsExhausted,
+                );
+                (0..domain_size)
+                    .find(|candidate| !self.uniform_query_indices.contains(candidate))
+                    .unwrap_or(0)
+            }
+        };
+        self.uniform_query_indices.push(index);
+        index
+    }
+
+    fn record_sampling_failure(&mut self, failure: ChallengerSamplingFailure) {
+        if self.sampling_failure.is_none() {
+            self.sampling_failure = Some(failure);
+        }
+    }
+
+    fn reset_uniform_query_epoch(&mut self) {
+        self.uniform_query_bit_length = None;
+        self.uniform_query_indices.clear();
+    }
+
+    fn ensure_sampling_succeeded(&self) -> Result<(), String> {
+        match self.sampling_failure {
+            None => Ok(()),
+            Some(ChallengerSamplingFailure::GoldilocksCandidateDrawsExhausted) => Err(
+                "plain WHIR Goldilocks challenge sampling exhausted its candidate ceiling"
+                    .to_owned(),
+            ),
+            Some(ChallengerSamplingFailure::DistinctQueryCandidateDrawsExhausted) => {
+                Err("plain WHIR distinct query sampling exhausted its candidate ceiling".to_owned())
             }
         }
     }
@@ -152,6 +275,7 @@ impl ByteExtensionFieldChallenger<ChallengeField> {
 
 impl CanObserve<ChallengeField> for ByteExtensionFieldChallenger<ChallengeField> {
     fn observe(&mut self, value: ChallengeField) {
+        self.reset_uniform_query_epoch();
         self.inner.observe_slice(
             &<ChallengeField as RawDataSerializable>::into_bytes(value)
                 .into_iter()
@@ -164,6 +288,7 @@ impl CanObserve<MerkleCap<ChallengeField, [u64; MERKLE_DIGEST_WORD_LENGTH]>>
     for ByteExtensionFieldChallenger<ChallengeField>
 {
     fn observe(&mut self, commitment: MerkleCap<ChallengeField, [u64; MERKLE_DIGEST_WORD_LENGTH]>) {
+        self.reset_uniform_query_epoch();
         for digest in commitment.roots() {
             for word in digest {
                 self.inner.observe_slice(&word.to_le_bytes());
@@ -181,6 +306,7 @@ impl CanSample<ChallengeField> for ByteExtensionFieldChallenger<ChallengeField> 
 impl CanSampleBits<usize> for ByteExtensionFieldChallenger<ChallengeField> {
     fn sample_bits(&mut self, bits: usize) -> usize {
         assert!(bits < usize::BITS as usize);
+        self.reset_uniform_query_epoch();
         if bits == 0 {
             return 0;
         }
@@ -194,7 +320,7 @@ impl CanSampleUniformBits<ChallengeField> for ByteExtensionFieldChallenger<Chall
         &mut self,
         bits: usize,
     ) -> Result<usize, ResamplingError> {
-        Ok(self.sample_bits(bits))
+        Ok(self.sample_distinct_uniform_query_index(bits))
     }
 }
 
@@ -208,3 +334,76 @@ impl GrindingChallenger for ByteExtensionFieldChallenger<ChallengeField> {
 }
 
 impl FieldChallenger<ChallengeField> for ByteExtensionFieldChallenger<ChallengeField> {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bounded_goldilocks_sampling_refuses_after_the_exact_candidate_ceiling() {
+        let mut draw_count = 0_u32;
+        let result = sample_bounded_goldilocks_candidate(|| {
+            draw_count += 1;
+            GOLDILOCKS_MODULUS
+        });
+        assert_eq!(result, Err(BoundedSamplingError::CandidateDrawsExhausted));
+        assert_eq!(
+            draw_count,
+            PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT
+        );
+    }
+
+    #[test]
+    fn bounded_goldilocks_sampling_accepts_the_last_permitted_candidate() {
+        let mut draw_count = 0_u32;
+        let result = sample_bounded_goldilocks_candidate(|| {
+            draw_count += 1;
+            if draw_count == PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT {
+                17
+            } else {
+                GOLDILOCKS_MODULUS
+            }
+        })
+        .expect("the final permitted candidate is accepted");
+        assert_eq!(result, Goldilocks::from_u64(17));
+        assert_eq!(
+            draw_count,
+            PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT
+        );
+    }
+
+    #[test]
+    fn bounded_distinct_sampling_refuses_repeated_candidates_at_the_exact_ceiling() {
+        let mut draw_count = 0_u32;
+        let result = sample_bounded_residue_index(
+            8,
+            |candidate| candidate != 3,
+            || {
+                draw_count += 1;
+                3
+            },
+        );
+        assert_eq!(result, Err(BoundedSamplingError::CandidateDrawsExhausted));
+        assert_eq!(
+            draw_count,
+            PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT
+        );
+    }
+
+    #[test]
+    fn bounded_residue_sampling_rejects_out_of_range_bias_before_acceptance() {
+        let mut candidates = [u64::MAX, 19].into_iter();
+        let result = sample_bounded_residue_index(
+            10,
+            |candidate| candidate == 9,
+            || {
+                candidates
+                    .next()
+                    .expect("the test supplies enough candidates")
+            },
+        )
+        .expect("the second candidate is uniform and accepted");
+        assert_eq!(result, 9);
+        assert!(candidates.next().is_none());
+    }
+}
