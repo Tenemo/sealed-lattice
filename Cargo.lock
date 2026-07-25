@@ -719,6 +719,7 @@ dependencies = [
  "p3-dft",
  "p3-field",
  "p3-goldilocks",
+ "p3-matrix",
  "p3-merkle-tree",
  "p3-multilinear-util",
  "p3-sumcheck",

@@ -38,7 +38,7 @@ const FOLDING_FACTOR: usize = 3;
 // the round-by-round 2^-258 target used by the Fiat-Shamir ledger.
 const SECURITY_LEVEL: usize = super::PROTOCOL_SECURITY_LEVEL + 2;
 
-type AggregateLayout = PrefixProver<ChallengeField, ChallengeField>;
+pub(super) type AggregateLayout = PrefixProver<ChallengeField, ChallengeField>;
 pub(super) type PlainAggregatePcs = WhirProver<
     ChallengeField,
     ChallengeField,
@@ -55,7 +55,7 @@ pub(super) fn plain_aggregate_pcs(variable_count: usize) -> Result<PlainAggregat
     plain_aggregate_pcs_with_parameters(variable_count, STARTING_LOG_INV_RATE, FOLDING_FACTOR)
 }
 
-fn plain_aggregate_pcs_with_parameters(
+pub(super) fn plain_aggregate_pcs_with_parameters(
     variable_count: usize,
     starting_log_inverse_rate: usize,
     folding_factor: usize,

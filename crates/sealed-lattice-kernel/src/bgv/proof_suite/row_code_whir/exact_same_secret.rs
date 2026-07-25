@@ -32,8 +32,9 @@ use crate::{
             construct_reversed_relation_column, verified_application_statement_hash,
         },
         setup::{
-            ExactSameSecretEvidenceSources, SetupGenerationKeyRelationApplication,
-            populate_exact_same_secret_evidence_authority,
+            ExactSameSecretEvidenceSources, SetupGenerationAuthorityHandle,
+            SetupGenerationKeyRelationApplication, populate_exact_same_secret_evidence_authority,
+            release_setup_generation_authority,
             resolve_setup_generation_key_relation_preparation_source,
             with_setup_generation_key_relation,
         },
@@ -64,7 +65,7 @@ const SOURCE_POLYNOMIAL_DIGEST_DOMAIN: &str =
 #[cfg(all(test, not(target_arch = "wasm32")))]
 const SOURCE_CATALOG_DIGEST_DOMAIN: &str = "sealed-lattice/exact-same-secret/source-catalog/v1";
 #[cfg(all(test, not(target_arch = "wasm32")))]
-const EXACT_SAME_SECRET_EVIDENCE_REVISION: u8 = 1;
+const EXACT_SAME_SECRET_EVIDENCE_REVISION: u8 = 4;
 const EXACT_TRANSCRIPT_HEADER_DOMAIN: &[u8] =
     b"sealed-lattice/exact-same-secret/transcript-header/v1";
 const LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT: usize = 32_768;
@@ -580,74 +581,100 @@ fn production_same_secret_prerequisite(
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
-fn production_same_secret_sources() -> Result<ExactSameSecretEvidenceSources, String> {
+struct ProductionSameSecretEvidenceSources {
+    sources: ExactSameSecretEvidenceSources,
+    authority_handle: SetupGenerationAuthorityHandle,
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+fn release_production_same_secret_authority(
+    authority_handle: SetupGenerationAuthorityHandle,
+) -> Result<(), String> {
+    release_setup_generation_authority(authority_handle)
+        .map_err(|error| format!("release production setup authority: {error:?}"))
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+fn production_same_secret_sources() -> Result<ProductionSameSecretEvidenceSources, String> {
     let (relation_plan, _, _) = production_same_secret_relation()?;
     let authority =
         populate_exact_same_secret_evidence_authority(EXACT_SAME_SECRET_EVIDENCE_REVISION)
             .map_err(|error| format!("populate production setup authority: {error:?}"))?;
-    let preparation_source = resolve_setup_generation_key_relation_preparation_source(
-        &authority.authority_handle,
-        SetupKeyRelationProofFamily::SameSecret,
-    )
-    .map_err(|error| format!("resolve production same-secret statement: {error:?}"))?;
-    let statement_schema_identifier =
-        SetupKeyRelationProofFamily::SameSecret.statement_schema_identifier();
-    let expected_query_count = relation_plan
-        .proof_query_count()
-        .map_err(|error| format!("derive production relation query count: {error:?}"))?;
-    let limits = CommonProofRuntimeLimits::new(
-        MAXIMUM_ROW_CODE_WHIR_PROOF_BYTE_LENGTH,
-        MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH,
-        MAXIMUM_ROW_CODE_WHIR_PROOF_BYTE_LENGTH as u64,
-    )
-    .map_err(|error| format!("construct exact backend runtime limits: {error:?}"))?;
-    let application_slot = ProofApplicationSlot::new(
-        Hash512::from_bytes(preparation_source.suite_identifier()),
-        Hash512::from_bytes(preparation_source.ceremony_context_hash()),
-        Hash512::from_bytes(preparation_source.action_context_hash()),
-        statement_schema_identifier,
-        Some(preparation_source.roster_position()),
-        None,
-        None,
-    )
-    .map_err(|error| format!("construct production proof application slot: {error:?}"))?;
-    let application_statement_hash = Hash512::from_bytes(verified_application_statement_hash(
-        preparation_source.protocol_version(),
-        preparation_source.suite_identifier(),
-        statement_schema_identifier,
-        preparation_source.canonical_application_statement_bytes(),
-    ));
-    let prepared_attempt = prepare_exact_same_secret_evidence_attempt(
-        &authority.action_private_randomness,
-        application_slot,
-        application_statement_hash,
-        MAXIMUM_ROW_CODE_WHIR_PROOF_BYTE_LENGTH as u64,
-        expected_query_count,
-    )
-    .map_err(|error| format!("bind production proof attempt: {error:?}"))?;
-    let decoded_statement = decode_selected_same_secret_statement(
-        preparation_source.canonical_application_statement_bytes(),
-        SelectedApplicationStatementContext::new(
+    let sources = (|| {
+        let preparation_source = resolve_setup_generation_key_relation_preparation_source(
+            &authority.authority_handle,
+            SetupKeyRelationProofFamily::SameSecret,
+        )
+        .map_err(|error| format!("resolve production same-secret statement: {error:?}"))?;
+        let statement_schema_identifier =
+            SetupKeyRelationProofFamily::SameSecret.statement_schema_identifier();
+        let expected_query_count = relation_plan
+            .proof_query_count()
+            .map_err(|error| format!("derive production relation query count: {error:?}"))?;
+        let limits = CommonProofRuntimeLimits::new(
+            MAXIMUM_ROW_CODE_WHIR_PROOF_BYTE_LENGTH,
+            MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH,
+            MAXIMUM_ROW_CODE_WHIR_PROOF_BYTE_LENGTH as u64,
+        )
+        .map_err(|error| format!("construct exact backend runtime limits: {error:?}"))?;
+        let application_slot = ProofApplicationSlot::new(
+            Hash512::from_bytes(preparation_source.suite_identifier()),
+            Hash512::from_bytes(preparation_source.ceremony_context_hash()),
+            Hash512::from_bytes(preparation_source.action_context_hash()),
+            statement_schema_identifier,
+            Some(preparation_source.roster_position()),
+            None,
+            None,
+        )
+        .map_err(|error| format!("construct production proof application slot: {error:?}"))?;
+        let application_statement_hash = Hash512::from_bytes(verified_application_statement_hash(
             preparation_source.protocol_version(),
             preparation_source.suite_identifier(),
-            None,
-            None,
-        ),
-    )
-    .map_err(|error| format!("decode production same-secret statement: {error:?}"))?;
-    let application = SetupGenerationKeyRelationApplication::from_runtime_binding(
-        SetupKeyRelationProofFamily::SameSecret,
-        prepared_attempt,
-        preparation_source.canonical_application_statement_bytes(),
-        decoded_statement.setup_proof_context_hash(),
-        preparation_source.roster_hash(),
-        preparation_source.participant_identity(),
-        preparation_source.roster_position(),
-    );
-    with_setup_generation_key_relation(&authority.authority_handle, &application, |source| {
-        source.prepare_exact_same_secret_evidence_sources(relation_plan, limits)
-    })
-    .map_err(|error| format!("prepare production same-secret sources: {error:?}"))
+            statement_schema_identifier,
+            preparation_source.canonical_application_statement_bytes(),
+        ));
+        let prepared_attempt = prepare_exact_same_secret_evidence_attempt(
+            &authority.action_private_randomness,
+            application_slot,
+            application_statement_hash,
+            MAXIMUM_ROW_CODE_WHIR_PROOF_BYTE_LENGTH as u64,
+            expected_query_count,
+        )
+        .map_err(|error| format!("bind production proof attempt: {error:?}"))?;
+        let decoded_statement = decode_selected_same_secret_statement(
+            preparation_source.canonical_application_statement_bytes(),
+            SelectedApplicationStatementContext::new(
+                preparation_source.protocol_version(),
+                preparation_source.suite_identifier(),
+                None,
+                None,
+            ),
+        )
+        .map_err(|error| format!("decode production same-secret statement: {error:?}"))?;
+        let application = SetupGenerationKeyRelationApplication::from_runtime_binding(
+            SetupKeyRelationProofFamily::SameSecret,
+            prepared_attempt,
+            preparation_source.canonical_application_statement_bytes(),
+            decoded_statement.setup_proof_context_hash(),
+            preparation_source.roster_hash(),
+            preparation_source.participant_identity(),
+            preparation_source.roster_position(),
+        );
+        with_setup_generation_key_relation(&authority.authority_handle, &application, |source| {
+            source.prepare_exact_same_secret_evidence_sources(relation_plan, limits)
+        })
+        .map_err(|error| format!("prepare production same-secret sources: {error:?}"))
+    })();
+    match sources {
+        Ok(sources) => Ok(ProductionSameSecretEvidenceSources {
+            sources,
+            authority_handle: authority.authority_handle,
+        }),
+        Err(error) => {
+            release_production_same_secret_authority(authority.authority_handle)?;
+            Err(error)
+        }
+    }
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
@@ -2071,7 +2098,10 @@ mod tests {
     #[test]
     #[ignore = "manual exact production-source gate"]
     fn heavy_rust_kernel_production_authenticated_same_secret_source() {
-        let mut sources = production_same_secret_sources().expect("production source fixture");
+        let ProductionSameSecretEvidenceSources {
+            mut sources,
+            authority_handle,
+        } = production_same_secret_sources().expect("production source fixture");
         let store = ExactPolynomialStore::open().expect("open exact polynomial checkpoint");
         assert_eq!(sources.relation_plan_variant.ordered_columns().len(), 3_110);
         assert_eq!(sources.relation_plan_variant.constraint_count(), 4_406);
@@ -2222,12 +2252,17 @@ mod tests {
             encode_hex(&source_replay_identity_digest),
         );
         println!("production source checkpoint: {}", store.root().display());
+        release_production_same_secret_authority(authority_handle)
+            .expect("release production setup authority");
     }
 
     #[test]
     #[ignore = "manual exact base and auxiliary phase commitment gate"]
     fn heavy_rust_kernel_exact_base_and_auxiliary_phase_commitments() {
-        let mut sources = production_same_secret_sources().expect("production source fixture");
+        let ProductionSameSecretEvidenceSources {
+            mut sources,
+            authority_handle,
+        } = production_same_secret_sources().expect("production source fixture");
         let store = ExactPolynomialStore::open().expect("open exact polynomial checkpoint");
         let source_manifest = store
             .read_manifest()
@@ -2418,13 +2453,18 @@ mod tests {
             encode_hex(&column_digest_bytes(base_root)),
             encode_hex(&column_digest_bytes(auxiliary_root)),
         );
+        release_production_same_secret_authority(authority_handle)
+            .expect("release production setup authority");
     }
 
     #[test]
     #[ignore = "manual exact quotient phase gate"]
     fn heavy_rust_kernel_exact_masked_quotient_phase_commitment() {
         let started_at = Instant::now();
-        let mut sources = production_same_secret_sources().expect("production source fixture");
+        let ProductionSameSecretEvidenceSources {
+            mut sources,
+            authority_handle,
+        } = production_same_secret_sources().expect("production source fixture");
         let store = ExactPolynomialStore::open().expect("open exact polynomial checkpoint");
         let source_manifest = store
             .read_manifest()
@@ -2544,5 +2584,7 @@ mod tests {
             quotient_started_at.elapsed(),
             started_at.elapsed(),
         );
+        release_production_same_secret_authority(authority_handle)
+            .expect("release production setup authority");
     }
 }

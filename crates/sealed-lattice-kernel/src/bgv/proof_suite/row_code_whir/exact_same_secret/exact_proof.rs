@@ -29,9 +29,13 @@ use super::super::{
 };
 #[cfg(all(test, not(target_arch = "wasm32")))]
 use super::super::{
-    plain_whir::{commit_plain_aggregate_batch, open_plain_aggregate_batches_at_points},
+    plain_whir::AggregateLayout,
     plain_whir_wire::plain_whir_batch_wire_breakdown,
     protocol::{StreamingCommitment, aggregate_weighted_message, recompute_authenticated_columns},
+    streaming_whir_prover::{
+        commit_streaming_plain_aggregate, open_streaming_plain_aggregate_batches_at_points,
+        streaming_plain_aggregate_prover_data,
+    },
 };
 use super::*;
 use crate::bgv::proof_suite::relation_plan::{RelationColumnOrigin, RelationOpeningSourceClass};
@@ -215,12 +219,20 @@ fn validate_public_input(
 ) -> Result<VerifiedExactRelation, String> {
     if public_input.statement_schema_identifier
         != SetupKeyRelationProofFamily::SameSecret.statement_schema_identifier()
-        || public_input.suite_identifier == [0_u8; 64]
-        || public_input.action_context_hash != prerequisite.action_context_hash()
-        || public_input.protocol_version != prerequisite.protocol_version()
-        || public_input.suite_identifier != prerequisite.suite_identifier()
     {
-        return Err("exact public input targets the wrong production family".to_owned());
+        return Err("exact public input has the wrong statement schema".to_owned());
+    }
+    if public_input.suite_identifier == [0_u8; 64] {
+        return Err("exact public input has an empty suite identifier".to_owned());
+    }
+    if public_input.action_context_hash != prerequisite.action_context_hash() {
+        return Err("exact public input has the wrong action context".to_owned());
+    }
+    if public_input.protocol_version != prerequisite.protocol_version() {
+        return Err("exact public input has the wrong protocol version".to_owned());
+    }
+    if public_input.suite_identifier != prerequisite.suite_identifier() {
+        return Err("exact public input has the wrong suite identifier".to_owned());
     }
     let relation_context =
         selected_relation_plan_check_context(public_input.statement_schema_identifier)
@@ -3230,7 +3242,11 @@ mod native_prover {
         CheckpointBasePhaseSource, CheckpointQuotientPhaseSource, ExactPolynomialStore,
     };
     use super::*;
-    use crate::bgv::proof_suite::{CommonProofSourcePolynomial, PROOF_CHALLENGE_EXTENSION_DEGREE};
+    use crate::bgv::proof_suite::{
+        AuthenticatedCompactCommittedMaterialSource, CommonProofSourcePolynomial,
+        PROOF_CHALLENGE_EXTENSION_DEGREE,
+    };
+    use p3_sumcheck::layout::{Layout, Table, Witness};
 
     fn fixed_hash(bytes: &[u8], label: &str) -> Result<[u8; 64], String> {
         bytes
@@ -3456,14 +3472,70 @@ mod native_prover {
         Ok(())
     }
 
-    fn build_bound_tree_authentications(
+    struct ExactBoundTreeProverSource {
+        ordered_column_ordinals: Box<[u32]>,
+        persistent_material_source: Option<AuthenticatedCompactCommittedMaterialSource>,
+    }
+
+    fn resolve_bound_tree_prover_sources(
         sources: &ExactSameSecretEvidenceSources,
+        entries: &[ProofTreeCatalogEntry],
+    ) -> Result<Vec<ExactBoundTreeProverSource>, String> {
+        if entries.len() != EXACT_BOUND_TREE_COUNT {
+            return Err("bound authentication source has the wrong fixed shape".to_owned());
+        }
+        entries
+            .iter()
+            .map(|entry| {
+                let descriptor = sources
+                    .relation_plan_variant
+                    .ordered_trees()
+                    .get(usize::from(entry.tree_catalog_index()))
+                    .ok_or_else(|| "bound catalog entry has no relation tree".to_owned())?;
+                let RelationTreeDescriptor::BoundPublic {
+                    ordered_column_ordinals,
+                    ..
+                } = descriptor
+                else {
+                    return Err("bound catalog entry refers to a proof-created tree".to_owned());
+                };
+                if ordered_column_ordinals.len() != EXACT_BOUND_TREE_ROW_WIDTH {
+                    return Err("bound tree has the wrong row width".to_owned());
+                }
+                let persistent_material_source = if entry.requires_persistent_leaf_salt() {
+                    Some(
+                        sources
+                            .source_polynomials
+                            .exact_same_secret_evidence_bound_material_source(
+                                entry.tree_catalog_index(),
+                                entry
+                                    .bound_root()
+                                    .ok_or_else(|| "bound tree has no root".to_owned())?,
+                            )
+                            .map_err(|error| {
+                                format!("resolve production bound material source: {error:?}")
+                            })?,
+                    )
+                } else {
+                    None
+                };
+                Ok(ExactBoundTreeProverSource {
+                    ordered_column_ordinals: ordered_column_ordinals.to_vec().into_boxed_slice(),
+                    persistent_material_source,
+                })
+            })
+            .collect()
+    }
+
+    fn build_bound_tree_authentications(
+        prover_sources: &[ExactBoundTreeProverSource],
         store: &ExactPolynomialStore,
         entries: &[ProofTreeCatalogEntry],
         bound_query_indices: &[usize],
         evaluation_domain: ProofEvaluationDomain,
     ) -> Result<Vec<ExactBoundTreeAuthentication>, String> {
         if entries.len() != EXACT_BOUND_TREE_COUNT
+            || prover_sources.len() != EXACT_BOUND_TREE_COUNT
             || bound_query_indices.len() != EXACT_OUTPUT_BOUND_QUERY_COUNT
             || evaluation_domain.size() != EXACT_BOUND_LEAF_COUNT * 2
         {
@@ -3471,6 +3543,12 @@ mod native_prover {
         }
         let mut authentications = Vec::with_capacity(EXACT_BOUND_TREE_COUNT);
         for (bound_tree_ordinal, entry) in entries.iter().enumerate() {
+            let prover_source = &prover_sources[bound_tree_ordinal];
+            if entry.requires_persistent_leaf_salt()
+                != prover_source.persistent_material_source.is_some()
+            {
+                return Err("bound tree has the wrong persistent material source".to_owned());
+            }
             let query_count = bound_tree_query_count(bound_tree_ordinal)?;
             let tree_query_indices = &bound_query_indices[..query_count];
             let query_positions = tree_query_indices
@@ -3498,23 +3576,8 @@ mod native_prover {
                 .enumerate()
                 .map(|(frontier_position, coordinate)| (coordinate, frontier_position))
                 .collect::<HashMap<_, _>>();
-            let descriptor = sources
-                .relation_plan_variant
-                .ordered_trees()
-                .get(usize::from(entry.tree_catalog_index()))
-                .ok_or_else(|| "bound catalog entry has no relation tree".to_owned())?;
-            let RelationTreeDescriptor::BoundPublic {
-                ordered_column_ordinals,
-                ..
-            } = descriptor
-            else {
-                return Err("bound catalog entry refers to a proof-created tree".to_owned());
-            };
-            if ordered_column_ordinals.len() != EXACT_BOUND_TREE_ROW_WIDTH {
-                return Err("bound tree has the wrong row width".to_owned());
-            }
             let mut evaluated_columns = Vec::with_capacity(EXACT_BOUND_TREE_ROW_WIDTH);
-            for column_ordinal in ordered_column_ordinals {
+            for column_ordinal in &prover_source.ordered_column_ordinals {
                 let CommonProofSourcePolynomial::Base(coefficients) =
                     store.read(*column_ordinal)?
                 else {
@@ -3528,23 +3591,6 @@ mod native_prover {
                         .map_err(|error| format!("evaluate bound column: {error:?}"))?,
                 );
             }
-            let persistent_source = if entry.requires_persistent_leaf_salt() {
-                Some(
-                    sources
-                        .source_polynomials
-                        .exact_same_secret_evidence_bound_material_source(
-                            entry.tree_catalog_index(),
-                            entry
-                                .bound_root()
-                                .ok_or_else(|| "bound tree has no root".to_owned())?,
-                        )
-                        .map_err(|error| {
-                            format!("resolve production bound material source: {error:?}")
-                        })?,
-                )
-            } else {
-                None
-            };
             let mut opened_leaves = vec![None; query_count];
             let mut frontier = vec![None; frontier_coordinates.len()];
             let mut merkle_stack =
@@ -3556,7 +3602,8 @@ mod native_prover {
                 let opposite_point_values = std::array::from_fn(|column_position| {
                     evaluated_columns[column_position][leaf_index + EXACT_BOUND_LEAF_COUNT]
                 });
-                let persistent_salt = persistent_source
+                let persistent_salt = prover_source
+                    .persistent_material_source
                     .as_ref()
                     .map(|source| {
                         source
@@ -3702,6 +3749,114 @@ mod native_prover {
         Ok(messages)
     }
 
+    #[allow(clippy::too_many_arguments)]
+    fn exact_aggregate_witness(
+        store: &ExactPolynomialStore,
+        base_layout: &ExactBasePhaseLayout,
+        auxiliary_layout: &ExactBasePhaseLayout,
+        quotient_component_count: usize,
+        row_pad_seeds: [[u8; 32]; 3],
+        point_row_weights: &[ExactPointRowWeights; 3],
+        relation_variant: &RelationPlanVariant,
+        bound_claims: &[ExactBoundOpeningClaim],
+        folding_factor: usize,
+    ) -> Result<Witness<ChallengeField>, String> {
+        let mut messages = exact_aggregate_messages(
+            store,
+            base_layout,
+            auxiliary_layout,
+            quotient_component_count,
+            row_pad_seeds,
+            point_row_weights,
+        )?;
+        messages.push(construct_bound_reduction_polynomial(
+            store,
+            relation_variant,
+            bound_claims,
+        )?);
+        Ok(AggregateLayout::new_witness(
+            vec![Table::new(messages)],
+            folding_factor,
+        ))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn recompute_exact_aggregate_polynomial(
+        store: &ExactPolynomialStore,
+        base_layout: &ExactBasePhaseLayout,
+        auxiliary_layout: &ExactBasePhaseLayout,
+        quotient_component_count: usize,
+        row_pad_seeds: [[u8; 32]; 3],
+        point_row_weights: &[ExactPointRowWeights; 3],
+        relation_variant: &RelationPlanVariant,
+        bound_claims: &[ExactBoundOpeningClaim],
+        _folding_factor: usize,
+    ) -> Result<Poly<ChallengeField>, String> {
+        let base_source = CheckpointBasePhaseSource::new(store, base_layout);
+        let auxiliary_source = CheckpointBasePhaseSource::new(store, auxiliary_layout);
+        let quotient_source = CheckpointQuotientPhaseSource::new(store, quotient_component_count)?;
+        let base_geometry = base_layout.geometry()?;
+        let auxiliary_geometry = auxiliary_layout.geometry()?;
+        let quotient_geometry = RowEncodingGeometry::new_weighted_batch_with_log_inverse_rate(
+            quotient_source.row_count(),
+            PHYSICAL_ROW_WITNESS_VARIABLE_COUNT,
+            EXACT_ROW_CODE_LOG_INVERSE_RATE,
+        )?;
+        let mut stacked = Poly::<ChallengeField>::zero(EXACT_PCS_VARIABLE_COUNT);
+        for (column_index, weights) in point_row_weights.iter().enumerate() {
+            let mut aggregate = aggregate_weighted_message(
+                &base_source,
+                base_geometry,
+                &row_pad_seeds[0],
+                &weights.base,
+            )?;
+            let auxiliary = aggregate_weighted_message(
+                &auxiliary_source,
+                auxiliary_geometry,
+                &row_pad_seeds[1],
+                &weights.auxiliary,
+            )?;
+            add_poly(&mut aggregate, &auxiliary);
+            let quotient = aggregate_weighted_message(
+                &quotient_source,
+                quotient_geometry,
+                &row_pad_seeds[2],
+                &weights.quotient,
+            )?;
+            add_poly(&mut aggregate, &quotient);
+            place_exact_aggregate_column(&mut stacked, aggregate, column_index)?;
+        }
+        let bound_reduction =
+            construct_bound_reduction_polynomial(store, relation_variant, bound_claims)?;
+        place_exact_aggregate_column(
+            &mut stacked,
+            bound_reduction,
+            EXACT_BOUND_REDUCTION_COLUMN_INDEX,
+        )?;
+        Ok(stacked)
+    }
+
+    fn place_exact_aggregate_column(
+        stacked: &mut Poly<ChallengeField>,
+        column: Poly<ChallengeField>,
+        column_index: usize,
+    ) -> Result<(), String> {
+        if stacked.num_variables() != EXACT_PCS_VARIABLE_COUNT
+            || column.num_variables() != EXACT_TABLE_VARIABLE_COUNT
+            || column_index >= EXACT_PROOF_TABLE_WIDTH
+        {
+            return Err("exact aggregate column has invalid stacking geometry".to_owned());
+        }
+        let selector_variable_count = EXACT_PCS_VARIABLE_COUNT - EXACT_TABLE_VARIABLE_COUNT;
+        let selector_index =
+            column_index.reverse_bits() >> (usize::BITS as usize - selector_variable_count);
+        for (local_index, value) in column.into_evals().into_iter().enumerate() {
+            let destination_index = (local_index << selector_variable_count) | selector_index;
+            stacked.as_mut_slice()[destination_index] = value;
+        }
+        Ok(())
+    }
+
     fn write_artifact(path: &Path, bytes: &[u8]) -> Result<(), String> {
         if path.is_file() {
             let existing =
@@ -3727,7 +3882,10 @@ mod native_prover {
     fn generate_exact_same_secret_artifacts()
     -> Result<(VerifiedSameSecretLowDegreePrerequisite, Vec<u8>, Vec<u8>), String> {
         let started_at = Instant::now();
-        let sources = production_same_secret_sources()?;
+        let ProductionSameSecretEvidenceSources {
+            sources,
+            authority_handle,
+        } = production_same_secret_sources()?;
         let prerequisite = production_same_secret_prerequisite(&sources)?;
         let store = ExactPolynomialStore::open()?;
         let source_manifest = store
@@ -3747,8 +3905,20 @@ mod native_prover {
                 &source_manifest.relation_plan_variant_hash,
                 "source relation-plan variant hash",
             )? != sources.relation_plan.relation_plan_variant_hash()
+            || source_manifest.canonical_application_statement_bytes
+                != sources.canonical_application_statement_bytes
+            || fixed_hash(
+                &source_manifest.generation_binding_hash,
+                "source generation-binding hash",
+            )? != sources.generation_binding_hash
             || phase_manifest.relation_plan_hash != source_manifest.relation_plan_hash
+            || phase_manifest.relation_plan_variant_hash
+                != source_manifest.relation_plan_variant_hash
+            || phase_manifest.source_catalog_digest != source_manifest.source_catalog_digest
             || quotient_manifest.relation_plan_hash != source_manifest.relation_plan_hash
+            || quotient_manifest.relation_plan_variant_hash
+                != source_manifest.relation_plan_variant_hash
+            || quotient_manifest.source_catalog_digest != source_manifest.source_catalog_digest
         {
             return Err("exact checkpoints do not share one production relation".to_owned());
         }
@@ -3757,6 +3927,10 @@ mod native_prover {
         let mut verified_relation = validate_public_input(&prerequisite, &public_input)?;
         let bound_tree_entries =
             exact_bound_tree_catalog_entries(&prerequisite, &public_input, &verified_relation)?;
+        let bound_tree_prover_sources =
+            resolve_bound_tree_prover_sources(&sources, &bound_tree_entries)?;
+        release_production_same_secret_authority(authority_handle)?;
+        drop(sources);
         let shape = ExactProofShape::from_variant(&verified_relation.variant)?;
         if phase_manifest.base_row_count != shape.base_row_count
             || phase_manifest.auxiliary_row_count != shape.auxiliary_row_count
@@ -3833,24 +4007,26 @@ mod native_prover {
             verified_relation.variant.evaluation_domain_size(),
             verified_relation.context.evaluation_coset_offset,
         )?;
-        let mut messages = exact_aggregate_messages(
+        let quotient_component_count =
+            usize::try_from(verified_relation.context.quotient_component_count)
+                .map_err(|_| "quotient component count exceeds usize".to_owned())?;
+        let row_pad_seeds = source_manifest.row_pad_seeds()?;
+        let pcs = plain_aggregate_pcs(EXACT_PCS_VARIABLE_COUNT)?;
+        let witness = exact_aggregate_witness(
             &store,
             &base_layout,
             &auxiliary_layout,
-            usize::try_from(verified_relation.context.quotient_component_count)
-                .map_err(|_| "quotient component count exceeds usize".to_owned())?,
-            source_manifest.row_pad_seeds()?,
+            quotient_component_count,
+            row_pad_seeds,
             &point_row_weights,
-        )?;
-        messages.push(construct_bound_reduction_polynomial(
-            &store,
             &verified_relation.variant,
             &bound_claims,
-        )?);
-        let pcs = plain_aggregate_pcs(EXACT_PCS_VARIABLE_COUNT)?;
+            pcs.round_folding_factor(0),
+        )?;
         let mut prover_challenger = plain_aggregate_challenger(&pcs, &binding);
-        let (aggregate_commitment, prover_data) =
-            commit_plain_aggregate_batch(&pcs, messages, &mut prover_challenger);
+        let (aggregate_commitment, committed_prover_data) =
+            commit_streaming_plain_aggregate(&pcs, witness, &mut prover_challenger)?;
+        drop(committed_prover_data);
         let query_indices =
             derive_query_indices(&binding, &aggregate_commitment, shape.encoded_column_count)?;
         let bound_query_indices = derive_bound_query_indices(&binding, &aggregate_commitment)?;
@@ -3866,7 +4042,6 @@ mod native_prover {
         {
             return Err("bound evaluation domain has the wrong generator".to_owned());
         }
-        let row_pad_seeds = source_manifest.row_pad_seeds()?;
         let base_source = CheckpointBasePhaseSource::new(&store, &base_layout);
         let auxiliary_source = CheckpointBasePhaseSource::new(&store, &auxiliary_layout);
         let quotient_source = CheckpointQuotientPhaseSource::new(
@@ -3907,7 +4082,7 @@ mod native_prover {
             &query_indices,
         )?;
         let bound_tree_authentications = build_bound_tree_authentications(
-            &sources,
+            &bound_tree_prover_sources,
             &store,
             &bound_tree_entries,
             &bound_query_indices,
@@ -3922,13 +4097,41 @@ mod native_prover {
             bound_evaluation_domain,
             &degree_test_points,
         )?;
-        let aggregate_opening_proof = open_plain_aggregate_batches_at_points(
+        let prover_data = streaming_plain_aggregate_prover_data(
             &pcs,
+            exact_aggregate_witness(
+                &store,
+                &base_layout,
+                &auxiliary_layout,
+                quotient_component_count,
+                row_pad_seeds,
+                &point_row_weights,
+                &verified_relation.variant,
+                &bound_claims,
+                pcs.round_folding_factor(0),
+            )?,
+        )?;
+        let aggregate_opening_proof = open_streaming_plain_aggregate_batches_at_points(
+            &pcs,
+            &aggregate_commitment,
             prover_data,
             &whir_points,
             &requested_columns_by_point(),
             &mut prover_challenger,
-        );
+            || {
+                recompute_exact_aggregate_polynomial(
+                    &store,
+                    &base_layout,
+                    &auxiliary_layout,
+                    quotient_component_count,
+                    row_pad_seeds,
+                    &point_row_weights,
+                    &verified_relation.variant,
+                    &bound_claims,
+                    pcs.round_folding_factor(0),
+                )
+            },
+        )?;
         let mut proof = ExactSameSecretProof {
             base_root,
             auxiliary_root,

@@ -14,6 +14,7 @@ mod plain_whir_wire;
 #[cfg(test)]
 mod protocol;
 mod row_encoding;
+mod streaming_whir_prover;
 
 pub(in crate::bgv) use exact_same_secret::VerifiedSameSecretLowDegreePrerequisite;
 pub(crate) use exact_same_secret::{
@@ -42,6 +43,7 @@ const MERKLE_DIGEST_BYTE_LENGTH: usize = MERKLE_DIGEST_WORD_LENGTH * size_of::<u
 const CHALLENGER_OUTPUT_BYTE_LENGTH: usize = 64;
 const GOLDILOCKS_MODULUS: u64 = 0xffff_ffff_0000_0001;
 const PROTOCOL_SECURITY_LEVEL: usize = 260;
+const SHAKE256_PROTOCOL_DOMAIN: &[u8] = b"sealed-lattice/row-code-whir/shake256/v1";
 
 type ChallengeField = BinomialExtensionField<Goldilocks, 5>;
 type InnerChallenger = HashChallenger<u8, DomainSeparatedShake256, CHALLENGER_OUTPUT_BYTE_LENGTH>;
@@ -67,7 +69,7 @@ struct DomainSeparatedShake256 {
 impl DomainSeparatedShake256 {
     fn initialized_state(self) -> Shake256 {
         let mut state = Shake256::default();
-        state.update(b"sealed-lattice/row-code-whir/shake256/v1");
+        state.update(SHAKE256_PROTOCOL_DOMAIN);
         state.update(&(self.domain.len() as u64).to_le_bytes());
         state.update(self.domain);
         state
