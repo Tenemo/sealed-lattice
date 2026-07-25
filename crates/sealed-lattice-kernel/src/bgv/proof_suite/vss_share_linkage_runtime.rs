@@ -188,6 +188,12 @@ impl<Output> Default for BoundedVssOutputRegistry<Output> {
 }
 
 impl<Output> BoundedVssOutputRegistry<Output> {
+    fn source(&self, handle: u32) -> Result<&Output, CommonProofRuntimeError> {
+        self.outputs
+            .get(&handle)
+            .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)
+    }
+
     fn reserve(&mut self) -> Result<u32, CommonProofRuntimeError> {
         let retained_count = self
             .outputs
@@ -299,6 +305,16 @@ pub(in crate::bgv) fn consume_verified_vss_share_linkage_terminal(
 ) -> Result<VerifiedVssShareLinkageTerminal, CommonProofRuntimeError> {
     VERIFIED_VSS_SHARE_LINKAGE_TERMINAL_REGISTRY
         .with(|registry| registry.borrow_mut().consume(handle))
+}
+
+pub(in crate::bgv) fn with_verified_vss_share_linkage_terminal<Output>(
+    handle: u32,
+    inspect: impl FnOnce(&VerifiedVssShareLinkageTerminal) -> Output,
+) -> Result<Output, CommonProofRuntimeError> {
+    VERIFIED_VSS_SHARE_LINKAGE_TERMINAL_REGISTRY.with(|registry| {
+        let registry = registry.borrow();
+        registry.source(handle).map(inspect)
+    })
 }
 
 pub(in crate::bgv) fn consume_ordered_verified_vss_share_linkage_terminals(
@@ -1764,6 +1780,18 @@ mod tests {
         ));
 
         let consumed_handle = handles[3];
+        assert_eq!(
+            *registry
+                .source(consumed_handle)
+                .expect("terminal can be borrowed before downstream use"),
+            3
+        );
+        assert_eq!(
+            *registry
+                .source(consumed_handle)
+                .expect("borrowing does not consume the terminal"),
+            3
+        );
         assert_eq!(
             registry
                 .consume(consumed_handle)

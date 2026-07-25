@@ -144,6 +144,8 @@ pub use private_randomness::{
     SETUP_STRUCTURED_COMMITMENT_OPENING_CONTEXT_SCHEMA_IDENTIFIER,
     SetupStructuredCommitmentOpeningContext,
 };
+#[cfg(all(test, not(target_arch = "wasm32")))]
+pub(crate) use private_randomness_runtime::prepare_exact_same_secret_evidence_attempt;
 pub(crate) use private_randomness_runtime::{
     ACTION_RANDOMNESS_RUNTIME_RESOURCE_LIMIT, ACTION_RANDOMNESS_RUNTIME_STALE_HANDLE,
     AuthenticatedCheckpointContinuationSource, PreparedActionProofAttemptSource,

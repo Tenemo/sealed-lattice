@@ -21,6 +21,7 @@ const boundaryMocks = vi.hoisted(() => {
     const generatedCapability = Object.freeze({
         release: generatedCapabilityRelease,
     });
+    const verifiedVssShareLinkageTerminal = Object.freeze({});
     const generatedConsumptionOutcomes: boolean[] = [];
     return {
         activeContext,
@@ -76,6 +77,7 @@ const boundaryMocks = vi.hoisted(() => {
                 _statementSourceHandle: number,
             ) => Promise.resolve(undefined),
         ),
+        verifiedVssShareLinkageTerminal,
     };
 });
 
@@ -411,6 +413,8 @@ const verificationInput = (
     generatedProof,
     inputStore: Object.freeze({}),
     kernel,
+    verifiedVssShareLinkageTerminal:
+        boundaryMocks.verifiedVssShareLinkageTerminal,
 });
 
 beforeEach(() => {

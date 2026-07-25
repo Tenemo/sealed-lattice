@@ -56,7 +56,35 @@ pub(crate) struct VerifiedCommonProof {
     pub(super) top_count: Option<u16>,
 }
 
+pub(crate) struct VerifiedRowCodeWhirProofFacts {
+    pub(crate) protocol_version: u16,
+    pub(crate) suite_identifier: [u8; 64],
+    pub(crate) application_statement_schema_identifier: u16,
+    pub(crate) application_statement_hash: [u8; 64],
+    pub(crate) proof_header_hash: [u8; 64],
+    pub(crate) proof_byte_length: u64,
+    pub(crate) verified_query_count: u32,
+    pub(crate) relation_plan_variant_hash: [u8; 64],
+    pub(crate) schedule_position: Option<u32>,
+    pub(crate) top_count: Option<u16>,
+}
+
 impl VerifiedCommonProof {
+    pub(crate) const fn from_verified_row_code_whir(facts: VerifiedRowCodeWhirProofFacts) -> Self {
+        Self {
+            protocol_version: facts.protocol_version,
+            suite_identifier: facts.suite_identifier,
+            application_statement_schema_identifier: facts.application_statement_schema_identifier,
+            application_statement_hash: facts.application_statement_hash,
+            proof_header_hash: facts.proof_header_hash,
+            proof_byte_length: facts.proof_byte_length,
+            verified_query_count: facts.verified_query_count,
+            relation_plan_variant_hash: facts.relation_plan_variant_hash,
+            schedule_position: facts.schedule_position,
+            top_count: facts.top_count,
+        }
+    }
+
     pub(crate) const fn protocol_version(&self) -> u16 {
         self.protocol_version
     }
@@ -130,6 +158,10 @@ impl VerifiedStatementOwnedTree {
 
     pub(crate) fn ordered_canonical_residue_moduli(&self) -> &[Option<SuiteModulusReference>] {
         &self.ordered_canonical_residue_moduli
+    }
+
+    pub(crate) const fn statement_owned_tree_input(&self) -> &StatementOwnedProofTreeInput {
+        &self.tree
     }
 
     #[cfg(test)]

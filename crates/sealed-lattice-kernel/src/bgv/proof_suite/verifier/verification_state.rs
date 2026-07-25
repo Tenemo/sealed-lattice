@@ -59,6 +59,17 @@ pub(crate) struct CommonProofRequiredByteRange {
 }
 
 impl CommonProofRequiredByteRange {
+    pub(crate) const fn new(offset: usize, byte_length: usize) -> Option<Self> {
+        if byte_length == 0 || offset.checked_add(byte_length).is_none() {
+            None
+        } else {
+            Some(Self {
+                offset,
+                byte_length,
+            })
+        }
+    }
+
     pub(crate) const fn offset(self) -> usize {
         self.offset
     }

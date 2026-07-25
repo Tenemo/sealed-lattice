@@ -45,6 +45,8 @@ pub(crate) use self::collective_and_relinearization_verification_population::{
     retain_relinearization_round_two_verification_terminal_source,
 };
 pub(in crate::bgv) use self::evaluator_source::VerifiedAcceptedSetupEvaluatorSourceCatalog;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+pub(crate) use self::generation_authority::ExactSameSecretEvidenceSources;
 pub(in crate::bgv) use self::generation_authority::{
     SetupGaloisGenerationPreparationError, SetupGeneratedCommittedMaterial,
     SetupGeneratedGaloisEntry, SetupGeneratedGaloisSourceAuthority,
@@ -92,6 +94,8 @@ pub(crate) use self::generation_authority::{
     SetupGenerationDealerPublicRecordSource, resolve_setup_generation_dealer_public_record_source,
 };
 pub(in crate::bgv) use self::generation_population::populate_browser_owned_setup_generation_authority;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+pub(crate) use self::generation_population::populate_exact_same_secret_evidence_authority;
 pub(in crate::bgv) use self::generation_relinearization::{
     SetupGeneratedRelinearizationAggregateSourceAuthority,
     SetupGeneratedRelinearizationComponentSource,

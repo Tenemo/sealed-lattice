@@ -92,6 +92,10 @@ pub(in crate::bgv) use accepted_setup::{
     with_setup_generation_relinearization_round_two_witness, with_setup_generation_vss_material,
     with_verified_accepted_setup_authority, with_verified_participant_target_release_source,
 };
+#[cfg(all(test, not(target_arch = "wasm32")))]
+pub(crate) use accepted_setup::{
+    ExactSameSecretEvidenceSources, populate_exact_same_secret_evidence_authority,
+};
 pub(crate) use accepted_setup::{
     SetupGenerationDealerPublicRecordSource, resolve_setup_generation_dealer_public_record_source,
 };

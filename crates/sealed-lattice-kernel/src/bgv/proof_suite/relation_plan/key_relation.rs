@@ -24,7 +24,7 @@ use super::{
     },
 };
 
-const TRIT_RADIX: u64 = 3;
+pub(super) const TRIT_RADIX: u64 = 3;
 pub(super) const MATERIAL_DIGIT_RADIX: u64 = 129_140_163;
 pub(super) const MATERIAL_DIGIT_TRIT_COUNT: usize = 17;
 const MODULAR_QUOTIENT_BIT_COUNT: usize = 17;
@@ -668,7 +668,7 @@ impl BoundedMaterialDigitWitnessLayout {
 }
 
 impl UpperBoundComparatorWitnessLayout {
-    fn retained_heap_byte_length(&self) -> Result<u64, RelationPlanError> {
+    pub(super) fn retained_heap_byte_length(&self) -> Result<u64, RelationPlanError> {
         checked_retained_allocation_sum(
             [
                 retained_vector_allocation_byte_length(&self.difference_digits),

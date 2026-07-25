@@ -196,7 +196,10 @@ export type {
     AcceptedSetupVerificationSession,
 } from './accepted-setup-assembly-runtime.js';
 export type { AcceptedSetupPackageBuilder } from './accepted-setup-package-builder-runtime.js';
-export type { AcceptedSetupProofVerificationInput } from './accepted-setup-proof-verification-runtime.js';
+export type {
+    AcceptedSetupProofVerificationInput,
+    AcceptedSetupSameSecretProofVerificationInput,
+} from './accepted-setup-proof-verification-runtime.js';
 export type {
     AcceptedSetupRelinearizationComponentDescription,
     AcceptedSetupRelinearizationVerificationInput,
@@ -221,6 +224,7 @@ export type {
     AcceptedSetupKeyRelationGenerationMode,
     GeneratedAcceptedSetupKeyRelationProof,
     GeneratedAcceptedSetupKeyRelationProofVerificationInput,
+    GeneratedAcceptedSetupSameSecretProofVerificationInput,
 } from './accepted-setup-key-relation-generation-runtime.js';
 export type { AggregateThresholdShareGenerationMode } from './aggregate-threshold-share-proof-runtime.js';
 export type {

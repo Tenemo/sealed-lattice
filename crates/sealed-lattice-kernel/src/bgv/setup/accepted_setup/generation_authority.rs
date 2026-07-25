@@ -68,6 +68,9 @@ use crate::{
     },
 };
 
+#[cfg(all(test, not(target_arch = "wasm32")))]
+use crate::bgv::proof_suite::{RelationPlanCheckContext, RelationProofTreeInput};
+
 const MAXIMUM_RETAINED_SETUP_GENERATION_AUTHORITY_COUNT: usize = 16;
 const MAXIMUM_RETAINED_SETUP_GENERATION_PUBLIC_KEY_SHARE_SOURCE_COUNT: usize =
     MAXIMUM_RETAINED_SETUP_GENERATION_AUTHORITY_COUNT;
@@ -3418,6 +3421,20 @@ pub(crate) struct SetupGenerationKeyRelationSource<'authority, 'statement> {
     application: &'authority SetupGenerationKeyRelationApplication<'statement>,
 }
 
+#[cfg(all(test, not(target_arch = "wasm32")))]
+pub(crate) struct ExactSameSecretEvidenceSources {
+    pub(crate) relation_plan: CommonProofRelationPlanCapability,
+    pub(crate) relation_plan_variant: RelationPlanVariant,
+    pub(crate) relation_context: RelationPlanCheckContext,
+    pub(crate) relation_trees: Vec<RelationProofTreeInput>,
+    pub(crate) source_polynomials: SetupKeyRelationSourcePolynomialAdapter,
+    pub(crate) private_coins: PrivateRandomnessCommonProofCoinSource,
+    pub(crate) canonical_application_statement_bytes: Vec<u8>,
+    pub(crate) generation_binding_hash: [u8; Hash512::BYTE_LENGTH],
+    pub(crate) action_context_hash: [u8; Hash512::BYTE_LENGTH],
+    pub(crate) public_setup_seed: [u8; Hash512::BYTE_LENGTH],
+}
+
 impl SetupGenerationKeyRelationSource<'_, '_> {
     pub(crate) const fn authority_identifier(&self) -> u32 {
         self.authority_identifier
@@ -3437,6 +3454,11 @@ impl SetupGenerationKeyRelationSource<'_, '_> {
 
     pub(crate) const fn roster_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
         self.authority.roster_hash
+    }
+
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    pub(crate) const fn action_context_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
+        self.authority.action_context_hash
     }
 
     pub(crate) const fn setup_proof_context_hash(&self) -> [u8; Hash512::BYTE_LENGTH] {
@@ -3719,6 +3741,72 @@ impl SetupGenerationKeyRelationSource<'_, '_> {
             coordinate_capacity,
         )
         .map_err(|_| RefusalReason::WrongContext)
+    }
+
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    pub(crate) fn prepare_exact_same_secret_evidence_sources(
+        &self,
+        relation_plan: CommonProofRelationPlanCapability,
+        limits: CommonProofRuntimeLimits,
+    ) -> Result<ExactSameSecretEvidenceSources, SetupKeyRelationGenerationPreparationError> {
+        if self.family() != SetupKeyRelationProofFamily::SameSecret {
+            return Err(RefusalReason::WrongContext.into());
+        }
+        let statement_schema_identifier = self.family().statement_schema_identifier();
+        let relation_context = selected_relation_plan_check_context(statement_schema_identifier)
+            .ok_or(RefusalReason::UnsupportedVersionOrSuite)?;
+        let input = selected_same_secret_relation_plan_input()
+            .map_err(|_| RefusalReason::UnsupportedVersionOrSuite)?;
+        let compiled_relation =
+            compile_same_secret_relation_with_source_layout(&input, &relation_context)
+                .map_err(|_| RefusalReason::UnsupportedVersionOrSuite)?;
+        let relation_plan_variant = compiled_relation
+            .relation_plan
+            .select_variant(None, None)
+            .map_err(|_| CommonProofProverError::InvalidColumn)?
+            .clone();
+        let relation_trees = same_secret_relation_tree_inputs(
+            self,
+            &relation_plan_variant,
+            &compiled_relation.source_layout,
+        )?;
+        let source_polynomials = SetupKeyRelationSourcePolynomialAdapter::new_same_secret(
+            self,
+            &relation_plan,
+            relation_plan_variant.clone(),
+            relation_context.clone(),
+            self.ring_degree(),
+            compiled_relation.source_layout,
+        )?;
+        let witness_bound_attempt = self.witness_bound_attempt()?;
+        let authorization =
+            CommonProofGenerationAuthorization::from_witness_bound_authenticated_attempt(
+                witness_bound_attempt,
+                &relation_plan,
+                self.protocol_version(),
+                self.canonical_application_statement_bytes(),
+                limits,
+            )?;
+        let generation_binding_hash = authorization.binding_hash();
+        let private_coins = self.private_coin_source(
+            generation_binding_hash,
+            &relation_plan_variant,
+            witness_bound_attempt,
+        )?;
+        Ok(ExactSameSecretEvidenceSources {
+            relation_plan,
+            relation_plan_variant,
+            relation_context,
+            relation_trees,
+            source_polynomials,
+            private_coins,
+            canonical_application_statement_bytes: self
+                .canonical_application_statement_bytes()
+                .to_vec(),
+            generation_binding_hash,
+            action_context_hash: self.action_context_hash(),
+            public_setup_seed: self.public_setup_seed(),
+        })
     }
 
     pub(crate) fn prepare_common_generation(

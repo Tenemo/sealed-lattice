@@ -176,6 +176,7 @@ pub(crate) use private_coins::{
     common_proof_private_coin_coordinate_derivation_context_hash,
     encode_common_proof_checkpoint_cursor_manifest,
 };
+pub(crate) use quotient::CommonProofQuotientComponentCursor;
 #[cfg(test)]
 pub(crate) use quotient::{
     construct_composed_quotient_polynomial,
@@ -243,8 +244,8 @@ use generation_storage::{
 use merkle_storage::{canonical_common_proof_leaf_byte_length, common_proof_tree_value_type};
 use quotient::{
     COMMON_PROOF_RELATION_EVALUATION_BLOCK_LENGTH, CommonProofConstraintStreamQuotientBuilder,
-    CommonProofQuotientComponentCursor, CommonProofQuotientConstraintTransformKey,
-    CommonProofQuotientEvaluationProgress, rotated_relation_evaluation_position,
+    CommonProofQuotientConstraintTransformKey, CommonProofQuotientEvaluationProgress,
+    rotated_relation_evaluation_position,
 };
 #[cfg(test)]
 use relation_columns::{

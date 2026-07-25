@@ -917,7 +917,7 @@ pub(crate) fn decompose_composed_quotient(
     Ok(components)
 }
 
-pub(super) struct CommonProofQuotientComponentCursor {
+pub(crate) struct CommonProofQuotientComponentCursor {
     quotient: Zeroizing<Vec<ProofChallengeExtensionElement>>,
     stride: usize,
     component_count: usize,
@@ -928,7 +928,7 @@ pub(super) struct CommonProofQuotientComponentCursor {
 }
 
 impl CommonProofQuotientComponentCursor {
-    pub(super) fn new(
+    pub(crate) fn new(
         variant: &RelationPlanVariant,
         context: &RelationPlanCheckContext,
         quotient: Zeroizing<Vec<ProofChallengeExtensionElement>>,
@@ -991,7 +991,7 @@ impl CommonProofQuotientComponentCursor {
         })
     }
 
-    pub(super) fn next_component<Coins: CommonProofPrivateCoinSource>(
+    pub(crate) fn next_component<Coins: CommonProofPrivateCoinSource>(
         &mut self,
         coins: &mut Coins,
         maximum_candidate_draws_per_output: u32,

@@ -14,14 +14,14 @@ use crate::{
             CommonProofRelationPlanCapability, CommonProofRuntimeError,
             CommonProofSelectedSuiteCapabilityHandle, SelectedApplicationStatementContext,
             VerifiedCommonProofCapabilityHandle, VerifiedCommonProofStatementSource,
-            VerifiedKeyRelationColumnEvaluator, VerifiedStatementOwnedTree,
-            bind_generated_common_proof_to_verified_statement_source,
+            VerifiedKeyRelationColumnEvaluator, VerifiedSameSecretLowDegreePrerequisite,
+            VerifiedStatementOwnedTree, bind_generated_common_proof_to_verified_statement_source,
             decode_selected_public_key_share_statement, decode_selected_same_secret_statement,
             preflight_and_consume_verified_common_proof_with_family_terminal,
             preflight_generated_common_proof_pending_statement,
             retain_common_proof_verification_family_adapter_from_upstream, runtime_error_status,
             selected_proof_runtime_limits, selected_relation_plan_check_context,
-            selected_relation_plans,
+            selected_relation_plans, with_verified_vss_share_linkage_terminal,
         },
         setup::accepted_setup::{
             commit_preflighted_verified_public_key_share_terminal,
@@ -140,8 +140,21 @@ fn prepare_verification(
     family: AcceptedSetupProofFamily,
     selected_suite_handle: u32,
     assembly_handle: u32,
+    verified_vss_share_linkage_terminal_handle: Option<u32>,
     canonical_application_statement_bytes: &[u8],
 ) -> Result<(u32, u32), CommonProofRuntimeError> {
+    let same_secret_prerequisite = match (family, verified_vss_share_linkage_terminal_handle) {
+        (AcceptedSetupProofFamily::SameSecret, Some(handle)) => Some(
+            with_verified_vss_share_linkage_terminal(handle, |terminal| {
+                VerifiedSameSecretLowDegreePrerequisite::from_verified_vss_share_linkage_terminal(
+                    terminal,
+                )
+            })?
+            .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?,
+        ),
+        (AcceptedSetupProofFamily::PublicKeyShare, None) => None,
+        _ => return Err(CommonProofRuntimeError::WrongVerificationBinding),
+    };
     let schema_identifier = family.schema_identifier();
     let canonical_application_statement_bytes = canonical_application_statement_bytes.to_vec();
     let (statement_source, statement_trees, verified_column_evaluator, terminal_source) =
@@ -288,12 +301,24 @@ fn prepare_verification(
     let selected_suite_handle =
         CommonProofSelectedSuiteCapabilityHandle::from_identifier(selected_suite_handle);
     match retain_common_proof_verification_family_adapter_from_upstream(move |upstream_inputs| {
-        upstream_inputs.prepare_statement_tree_family_verification(
-            &selected_suite_handle,
-            statement_source,
-            statement_trees,
-            Box::new(verified_column_evaluator),
-        )
+        match (family, same_secret_prerequisite) {
+            (AcceptedSetupProofFamily::SameSecret, Some(prerequisite)) => upstream_inputs
+                .prepare_same_secret_row_code_whir_verification(
+                    &selected_suite_handle,
+                    statement_source,
+                    statement_trees,
+                    Box::new(verified_column_evaluator),
+                    prerequisite,
+                ),
+            (AcceptedSetupProofFamily::PublicKeyShare, None) => upstream_inputs
+                .prepare_statement_tree_family_verification(
+                    &selected_suite_handle,
+                    statement_source,
+                    statement_trees,
+                    Box::new(verified_column_evaluator),
+                ),
+            _ => Err(CommonProofRuntimeError::WrongVerificationBinding),
+        }
     }) {
         Ok(adapter_handle) => Ok((adapter_handle, terminal_source_handle)),
         Err(error) => {
@@ -686,23 +711,28 @@ unsafe fn write_status(status_pointer: *mut u32, status: u32) {
     }
 }
 
-unsafe fn prepare_verification_ffi(
-    family: AcceptedSetupProofFamily,
+struct PrepareVerificationFfiInput {
     selected_suite_handle: u32,
     assembly_handle: u32,
+    verified_vss_share_linkage_terminal_handle: Option<u32>,
     canonical_application_statement_pointer: *const u8,
     canonical_application_statement_byte_length: usize,
     terminal_source_handle_output_pointer: *mut u32,
     status_pointer: *mut u32,
+}
+
+unsafe fn prepare_verification_ffi(
+    family: AcceptedSetupProofFamily,
+    input: PrepareVerificationFfiInput,
 ) -> u32 {
     let result = (|| {
-        if terminal_source_handle_output_pointer.is_null() {
+        if input.terminal_source_handle_output_pointer.is_null() {
             return Err(CommonProofRuntimeError::WrongVerificationBinding);
         }
         let canonical_application_statement_bytes = unsafe {
             input_bytes(
-                canonical_application_statement_pointer,
-                canonical_application_statement_byte_length,
+                input.canonical_application_statement_pointer,
+                input.canonical_application_statement_byte_length,
             )
         };
         if canonical_application_statement_bytes.is_empty() {
@@ -710,21 +740,24 @@ unsafe fn prepare_verification_ffi(
         }
         prepare_verification(
             family,
-            selected_suite_handle,
-            assembly_handle,
+            input.selected_suite_handle,
+            input.assembly_handle,
+            input.verified_vss_share_linkage_terminal_handle,
             canonical_application_statement_bytes,
         )
     })();
     match result {
         Ok((adapter_handle, terminal_source_handle)) => {
             unsafe {
-                terminal_source_handle_output_pointer.write(terminal_source_handle);
-                write_status(status_pointer, 0);
+                input
+                    .terminal_source_handle_output_pointer
+                    .write(terminal_source_handle);
+                write_status(input.status_pointer, 0);
             }
             adapter_handle
         }
         Err(error) => {
-            unsafe { write_status(status_pointer, runtime_error_status(error)) };
+            unsafe { write_status(input.status_pointer, runtime_error_status(error)) };
             0
         }
     }
@@ -740,6 +773,7 @@ unsafe fn prepare_verification_ffi(
 pub unsafe extern "C" fn sealed_lattice_accepted_setup_same_secret_prepare_verification(
     selected_suite_handle: u32,
     assembly_handle: u32,
+    verified_vss_share_linkage_terminal_handle: u32,
     canonical_application_statement_pointer: *const u8,
     canonical_application_statement_byte_length: usize,
     terminal_source_handle_output_pointer: *mut u32,
@@ -748,12 +782,17 @@ pub unsafe extern "C" fn sealed_lattice_accepted_setup_same_secret_prepare_verif
     unsafe {
         prepare_verification_ffi(
             AcceptedSetupProofFamily::SameSecret,
-            selected_suite_handle,
-            assembly_handle,
-            canonical_application_statement_pointer,
-            canonical_application_statement_byte_length,
-            terminal_source_handle_output_pointer,
-            status_pointer,
+            PrepareVerificationFfiInput {
+                selected_suite_handle,
+                assembly_handle,
+                verified_vss_share_linkage_terminal_handle: Some(
+                    verified_vss_share_linkage_terminal_handle,
+                ),
+                canonical_application_statement_pointer,
+                canonical_application_statement_byte_length,
+                terminal_source_handle_output_pointer,
+                status_pointer,
+            },
         )
     }
 }
@@ -776,12 +815,15 @@ pub unsafe extern "C" fn sealed_lattice_accepted_setup_public_key_share_prepare_
     unsafe {
         prepare_verification_ffi(
             AcceptedSetupProofFamily::PublicKeyShare,
-            selected_suite_handle,
-            assembly_handle,
-            canonical_application_statement_pointer,
-            canonical_application_statement_byte_length,
-            terminal_source_handle_output_pointer,
-            status_pointer,
+            PrepareVerificationFfiInput {
+                selected_suite_handle,
+                assembly_handle,
+                verified_vss_share_linkage_terminal_handle: None,
+                canonical_application_statement_pointer,
+                canonical_application_statement_byte_length,
+                terminal_source_handle_output_pointer,
+                status_pointer,
+            },
         )
     }
 }

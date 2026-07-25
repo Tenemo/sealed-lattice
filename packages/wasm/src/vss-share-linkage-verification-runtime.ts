@@ -279,6 +279,23 @@ const createVerifiedTerminal = (
     return terminal;
 };
 
+export const withVerifiedVssShareLinkageTerminal = <Result>(input: {
+    context: TranscriptCoreKernelCommandRuntime;
+    inspect(terminalHandle: number): Result;
+    kernel: TranscriptCoreKernel;
+    terminal: VerifiedVssShareLinkageTerminal;
+}): Result => {
+    const record = verifiedVssShareLinkageTerminalRecords.get(input.terminal);
+    if (
+        record === undefined ||
+        record.context !== input.context ||
+        record.kernel !== input.kernel
+    ) {
+        throw new CanonicalStreamRefusalError('wrongContext');
+    }
+    return input.inspect(record.handle);
+};
+
 /**
  * Internal atomic ownership transfer into the aggregate recipient authority.
  * Entering the callback poisons every wrapper because Rust may have consumed

@@ -43,7 +43,10 @@ import type {
     TranscriptCoreKernel,
     TranscriptCoreKernelExports,
 } from './transcript-core-bridge/kernel-types.js';
-import { resolveOrderedVerifiedBoardObjectAuthorization } from './vss-share-linkage-verification-runtime.js';
+import {
+    resolveOrderedVerifiedBoardObjectAuthorization,
+    type VerifiedVssShareLinkageTerminal,
+} from './vss-share-linkage-verification-runtime.js';
 import { WasmMemoryBoundary } from './wasm-memory-boundary.js';
 import { WasmStatusBoundary } from './wasm-status-boundary.js';
 
@@ -100,6 +103,21 @@ export type GeneratedAcceptedSetupKeyRelationProofVerificationInput = Omit<
     Readonly<{
         generatedProof: GeneratedAcceptedSetupKeyRelationProof;
     }>;
+
+export type GeneratedAcceptedSetupSameSecretProofVerificationInput =
+    GeneratedAcceptedSetupKeyRelationProofVerificationInput &
+        Readonly<{
+            verifiedVssShareLinkageTerminal: VerifiedVssShareLinkageTerminal;
+        }>;
+
+type GeneratedAcceptedSetupKeyRelationProofVerificationRuntimeInput =
+    GeneratedAcceptedSetupKeyRelationProofVerificationInput &
+        Partial<
+            Pick<
+                GeneratedAcceptedSetupSameSecretProofVerificationInput,
+                'verifiedVssShareLinkageTerminal'
+            >
+        >;
 
 type GeneratedAcceptedSetupKeyRelationPackageContributionInput = Readonly<{
     generatedProof: GeneratedAcceptedSetupKeyRelationProof;
@@ -759,7 +777,7 @@ export const contributeGeneratedAcceptedSetupPublicKeyShareToPackage = (
 
 const verifyGeneratedAcceptedSetupKeyRelationInClosedWorker = async (
     family: AcceptedSetupKeyRelationProofFamily,
-    input: GeneratedAcceptedSetupKeyRelationProofVerificationInput,
+    input: GeneratedAcceptedSetupKeyRelationProofVerificationRuntimeInput,
 ): Promise<void> => {
     const record = requireGeneratedProofRecord(input.generatedProof);
     const context = resolveCommonProofKernelContext(input.kernel);
@@ -779,10 +797,14 @@ const verifyGeneratedAcceptedSetupKeyRelationInClosedWorker = async (
         options: input.options,
     });
     if (family === 'sameSecret') {
+        if (input.verifiedVssShareLinkageTerminal === undefined) {
+            throw new CanonicalStreamRefusalError('wrongContext');
+        }
         await verifyGeneratedAcceptedSetupSameSecretCapabilityInClosedWorker(
             verificationInput,
             record.capability,
             record.statementSourceHandle,
+            input.verifiedVssShareLinkageTerminal,
         );
     } else {
         await verifyGeneratedAcceptedSetupPublicKeyShareCapabilityInClosedWorker(
@@ -796,7 +818,7 @@ const verifyGeneratedAcceptedSetupKeyRelationInClosedWorker = async (
 
 /** Positively verifies one generated same-secret proof from its exact package. */
 export const verifyGeneratedAcceptedSetupSameSecretInClosedWorker = (
-    input: GeneratedAcceptedSetupKeyRelationProofVerificationInput,
+    input: GeneratedAcceptedSetupSameSecretProofVerificationInput,
 ): Promise<void> =>
     verifyGeneratedAcceptedSetupKeyRelationInClosedWorker('sameSecret', input);
 

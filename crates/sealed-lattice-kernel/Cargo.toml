@@ -12,16 +12,6 @@ default = []
 proof-storage-width-evidence = ["proof-backend-bakeoff"]
 proof-storage-width-browser-evidence = []
 proof-backend-bakeoff = [
-    "dep:p3-challenger",
-    "dep:p3-commit",
-    "dep:p3-dft",
-    "dep:p3-field",
-    "dep:p3-goldilocks",
-    "dep:p3-merkle-tree",
-    "dep:p3-multilinear-util",
-    "dep:p3-sumcheck",
-    "dep:p3-symmetric",
-    "dep:p3-whir",
     "dep:postcard",
     "dep:rand",
 ]
@@ -35,6 +25,16 @@ fips204 = { version = "=0.4.6", default-features = false, features = ["ml-dsa-65
 ghash = { version = "=0.5.1", default-features = false, features = ["zeroize"] }
 num-bigint = "0.4"
 num-traits = "0.2"
+p3-challenger = { git = "https://github.com/Plonky3/Plonky3.git", rev = "f07da1c479c519040cca27924184c2730315e202", default-features = false }
+p3-commit = { git = "https://github.com/Plonky3/Plonky3.git", rev = "f07da1c479c519040cca27924184c2730315e202", default-features = false }
+p3-dft = { git = "https://github.com/Plonky3/Plonky3.git", rev = "f07da1c479c519040cca27924184c2730315e202", default-features = false }
+p3-field = { git = "https://github.com/Plonky3/Plonky3.git", rev = "f07da1c479c519040cca27924184c2730315e202", default-features = false }
+p3-goldilocks = { git = "https://github.com/Plonky3/Plonky3.git", rev = "f07da1c479c519040cca27924184c2730315e202", default-features = false }
+p3-merkle-tree = { git = "https://github.com/Plonky3/Plonky3.git", rev = "f07da1c479c519040cca27924184c2730315e202", default-features = false }
+p3-multilinear-util = { git = "https://github.com/Plonky3/Plonky3.git", rev = "f07da1c479c519040cca27924184c2730315e202", default-features = false }
+p3-sumcheck = { git = "https://github.com/Plonky3/Plonky3.git", rev = "f07da1c479c519040cca27924184c2730315e202", default-features = false }
+p3-symmetric = { git = "https://github.com/Plonky3/Plonky3.git", rev = "f07da1c479c519040cca27924184c2730315e202", default-features = false }
+p3-whir = { git = "https://github.com/Plonky3/Plonky3.git", rev = "f07da1c479c519040cca27924184c2730315e202", default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha3 = "=0.10.9"
@@ -44,16 +44,6 @@ unicode-normalization = "=0.1.25"
 zeroize = { version = "=1.8.2", default-features = false, features = ["alloc"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-p3-challenger = { git = "https://github.com/Plonky3/Plonky3.git", rev = "f07da1c479c519040cca27924184c2730315e202", default-features = false, optional = true }
-p3-commit = { git = "https://github.com/Plonky3/Plonky3.git", rev = "f07da1c479c519040cca27924184c2730315e202", default-features = false, optional = true }
-p3-dft = { git = "https://github.com/Plonky3/Plonky3.git", rev = "f07da1c479c519040cca27924184c2730315e202", default-features = false, optional = true }
-p3-field = { git = "https://github.com/Plonky3/Plonky3.git", rev = "f07da1c479c519040cca27924184c2730315e202", default-features = false, optional = true }
-p3-goldilocks = { git = "https://github.com/Plonky3/Plonky3.git", rev = "f07da1c479c519040cca27924184c2730315e202", default-features = false, optional = true }
-p3-merkle-tree = { git = "https://github.com/Plonky3/Plonky3.git", rev = "f07da1c479c519040cca27924184c2730315e202", default-features = false, optional = true }
-p3-multilinear-util = { git = "https://github.com/Plonky3/Plonky3.git", rev = "f07da1c479c519040cca27924184c2730315e202", default-features = false, optional = true }
-p3-sumcheck = { git = "https://github.com/Plonky3/Plonky3.git", rev = "f07da1c479c519040cca27924184c2730315e202", default-features = false, optional = true }
-p3-symmetric = { git = "https://github.com/Plonky3/Plonky3.git", rev = "f07da1c479c519040cca27924184c2730315e202", default-features = false, optional = true }
-p3-whir = { git = "https://github.com/Plonky3/Plonky3.git", rev = "f07da1c479c519040cca27924184c2730315e202", default-features = false, optional = true }
 postcard = { version = "=1.1.3", default-features = false, features = ["alloc"], optional = true }
 rand = { version = "=0.10.1", default-features = false, optional = true }
 rayon = "1"

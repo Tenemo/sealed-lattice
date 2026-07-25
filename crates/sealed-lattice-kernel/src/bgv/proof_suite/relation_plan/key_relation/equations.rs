@@ -20,6 +20,7 @@ use super::{
     ReversibleShiftedSmallVector, ShiftedSmallVector, SplitIntegerVector, TRIT_RADIX,
     TRUSTEE_QUOTIENT_LOW_TRIT_COUNT, TargetBoundedUnsignedVector, TargetCenteredVector,
     TargetCommittedMaterialVector, TrusteeAnchorOpeningWitness, TrusteeRadixThreeQuotientWitness,
+    UpperBoundComparatorWitnessLayout,
     column_builder::{fixed_radix_digits, minimum_unsigned_radix_digit_count},
 };
 
@@ -326,7 +327,13 @@ impl<'context> KeyRelationPlanBuilder<'context> {
         &mut self,
         source_key: &KeyVerifierSourceKey,
         modulus_reference: SuiteModulusReference,
-    ) -> Result<[BoundedUnsignedColumn; 2], RelationPlanError> {
+    ) -> Result<
+        (
+            [BoundedUnsignedColumn; 2],
+            [UpperBoundComparatorWitnessLayout; 2],
+        ),
+        RelationPlanError,
+    > {
         let source_ordinal = self.source_ordinal(source_key)?;
         let modulus = self.modulus(modulus_reference)?;
         let source_degree_bound_exclusive = self
@@ -353,6 +360,7 @@ impl<'context> KeyRelationPlanBuilder<'context> {
 
         let maximum_digits = fixed_radix_digits(modulus - 1, 2, MATERIAL_DIGIT_RADIX)?;
         let mut halves = Vec::with_capacity(2);
+        let mut upper_bound_comparators = Vec::with_capacity(2);
         for half_ordinal in 0..2 {
             let low_column = bound_columns[half_ordinal];
             let high_column = bound_columns[2 + half_ordinal];
@@ -362,19 +370,24 @@ impl<'context> KeyRelationPlanBuilder<'context> {
                 self.add_trit_columns(MATERIAL_DIGIT_TRIT_COUNT, ProofTreePhase::Base)?;
             self.certify_unsigned_recomposition(low_column, TRIT_RADIX, &low_trits)?;
             self.certify_unsigned_recomposition(high_column, TRIT_RADIX, &high_trits)?;
-            self.add_upper_bound_comparator(
+            upper_bound_comparators.push(self.add_upper_bound_comparator(
                 &[low_column, high_column],
                 &maximum_digits,
                 ProofTreePhase::Base,
-            )?;
+            )?);
             halves.push(BoundedUnsignedColumn {
                 target_column_ordinal: low_column,
                 ordered_digit_column_ordinals: vec![low_column, high_column],
             });
         }
-        halves
-            .try_into()
-            .map_err(|_| RelationPlanError::CountOverflow)
+        Ok((
+            halves
+                .try_into()
+                .map_err(|_| RelationPlanError::CountOverflow)?,
+            upper_bound_comparators
+                .try_into()
+                .map_err(|_| RelationPlanError::CountOverflow)?,
+        ))
     }
 
     pub(in crate::bgv::proof_suite::relation_plan) fn add_target_committed_material_root(

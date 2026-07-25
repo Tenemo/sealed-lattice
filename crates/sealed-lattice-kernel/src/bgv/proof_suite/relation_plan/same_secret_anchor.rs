@@ -2,7 +2,8 @@ use super::key_relation::{
     AnchorEquationInputs, AnchorOpeningWitness, AnchorQuotientWitness, BoundPolynomialRootUse,
     BoundedUnsignedColumn, ExactRadixDigitColumnCatalog, KeyRelationGeometry,
     KeyRelationPlanBuilder, KeyVerifierSourceKey, SameSecretRelationPlanInput, ShiftedSmallVector,
-    SplitIntegerVector, bdlop_matrix_source, statement_root_source,
+    SplitIntegerVector, UpperBoundComparatorWitnessLayout, bdlop_matrix_source,
+    statement_root_source,
 };
 use super::*;
 
@@ -25,7 +26,9 @@ pub(crate) struct SameSecretSourceLayout {
 }
 
 pub(super) struct SameSecretMaterialSourceLayout {
+    pub(super) data_modulus_index: u16,
     pub(super) material: [BoundedUnsignedColumn; 2],
+    pub(super) upper_bound_comparators: [UpperBoundComparatorWitnessLayout; 2],
 }
 
 pub(super) struct SameSecretAnchorSourceLayout {
@@ -85,7 +88,7 @@ pub(crate) fn compile_same_secret_relation_with_source_layout(
         .copied()
         .enumerate()
     {
-        let material = builder.add_committed_material_root(
+        let (material, upper_bound_comparators) = builder.add_committed_material_root(
             &KeyVerifierSourceKey::StatementRoot {
                 field_ordinal: DEGREE_ZERO_VSS_MATERIAL_ROOTS_FIELD_ORDINAL,
                 list_ordinal: Some(
@@ -100,7 +103,11 @@ pub(crate) fn compile_same_secret_relation_with_source_layout(
             &negative_indicator,
             SuiteModulusReference::data(data_modulus_index),
         )?;
-        material_source_layouts.push(SameSecretMaterialSourceLayout { material });
+        material_source_layouts.push(SameSecretMaterialSourceLayout {
+            data_modulus_index,
+            material,
+            upper_bound_comparators,
+        });
     }
     let mut anchor_source_layouts = Vec::with_capacity(input.commitment_data_modulus_indices.len());
     for (root_ordinal, data_modulus_index) in input

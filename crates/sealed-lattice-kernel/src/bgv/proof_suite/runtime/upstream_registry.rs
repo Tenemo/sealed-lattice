@@ -1,4 +1,5 @@
 use super::super::RelationTreeDescriptor;
+use super::super::row_code_whir::VerifiedSameSecretLowDegreePrerequisite;
 use super::{
     BTreeMap, BTreeSet, CommonProofApplicationInputCapabilityHandle,
     CommonProofApplicationInputEntry, CommonProofEvaluatorAuxiliaryRootCapabilityHandle,
@@ -626,6 +627,49 @@ impl CommonProofUpstreamInputRegistry {
         };
         match self.consume_verification_inputs(&application_handle, &[], Some(&evaluator_handle)) {
             Ok(inputs) => Ok(inputs.prepare()),
+            Err(error) => {
+                self.cancel_application(&application_handle)?;
+                Err(error)
+            }
+        }
+    }
+
+    pub(in crate::bgv) fn prepare_same_secret_row_code_whir_verification(
+        &mut self,
+        suite_handle: &CommonProofSelectedSuiteCapabilityHandle,
+        statement_source: VerifiedCommonProofStatementSource,
+        statement_trees: Vec<VerifiedStatementOwnedTree>,
+        verified_column_evaluator: Box<dyn VerifiedRelationColumnEvaluator>,
+        prerequisite: VerifiedSameSecretLowDegreePrerequisite,
+    ) -> Result<super::PreparedCommonProofVerification, CommonProofRuntimeError> {
+        let preverification_handle =
+            self.install_preverification_application_source(suite_handle, statement_source)?;
+        let application_handle = match self
+            .promote_preverification_application_source(suite_handle, &preverification_handle)
+        {
+            Ok(handle) => handle,
+            Err(error) => {
+                self.release_preverification_application_source(&preverification_handle)?;
+                return Err(error);
+            }
+        };
+        if let Err(error) =
+            self.attach_statement_owned_tree_batch(&application_handle, statement_trees)
+        {
+            self.cancel_application(&application_handle)?;
+            return Err(error);
+        }
+        let evaluator_handle = match self
+            .mint_verified_column_evaluator(&application_handle, verified_column_evaluator)
+        {
+            Ok(handle) => handle,
+            Err(error) => {
+                self.cancel_application(&application_handle)?;
+                return Err(error);
+            }
+        };
+        match self.consume_verification_inputs(&application_handle, &[], Some(&evaluator_handle)) {
+            Ok(inputs) => inputs.prepare_exact_same_secret(prerequisite),
             Err(error) => {
                 self.cancel_application(&application_handle)?;
                 Err(error)

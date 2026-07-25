@@ -1206,6 +1206,7 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
     sealed_lattice_accepted_setup_same_secret_prepare_verification?: (
         selectedSuiteHandle: number,
         assemblyHandle: number,
+        verifiedVssShareLinkageTerminalHandle: number,
         canonicalApplicationStatementPointer: number,
         canonicalApplicationStatementByteLength: number,
         terminalSourceHandleOutputPointer: number,
@@ -1214,6 +1215,7 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
     sealed_lattice_accepted_setup_same_secret_prepare_generated_verification?: (
         selectedSuiteHandle: number,
         assemblyHandle: number,
+        verifiedVssShareLinkageTerminalHandle: number,
         generationStatementSourceHandle: number,
         terminalSourceHandleOutputPointer: number,
         statusPointer: number,

@@ -6,6 +6,8 @@ use super::super::transcript::{
     CommonProofApplicationChallengeGroup, CommonProofChallenge, CommonProofPrivacyMode,
     CommonProofTranscriptSchedule,
 };
+#[cfg(test)]
+use super::bounds::RelationBoundCertificate;
 use super::{
     bounds::{RelationConstraintDescriptor, SemanticCellDescriptor},
     compiled_plan::RelationPlanCheckContext,
@@ -377,6 +379,40 @@ impl RelationPlanVariant {
 
     pub(crate) fn ordered_masks(&self) -> &[RelationMaskDescriptor] {
         &self.ordered_masks
+    }
+
+    #[cfg(test)]
+    pub(crate) fn radix_digit_and_carry_column_counts(&self) -> (usize, usize) {
+        let mut digit_columns = BTreeSet::new();
+        let mut carry_columns = BTreeSet::new();
+        for semantic_cell in &self.ordered_semantic_cells {
+            match &semantic_cell.bound_certificate {
+                RelationBoundCertificate::UnsignedRadixRecomposition {
+                    ordered_digit_column_ordinals,
+                    ..
+                }
+                | RelationBoundCertificate::ShiftedRadixRecomposition {
+                    ordered_digit_column_ordinals,
+                    ..
+                } => {
+                    digit_columns.extend(ordered_digit_column_ordinals.iter().copied());
+                }
+                RelationBoundCertificate::CanonicalModulusRecomposition {
+                    ordered_digit_column_ordinals,
+                    ordered_difference_digit_column_ordinals,
+                    ordered_borrow_column_ordinals,
+                    ..
+                } => {
+                    digit_columns.extend(ordered_digit_column_ordinals.iter().copied());
+                    digit_columns.extend(ordered_difference_digit_column_ordinals.iter().copied());
+                    carry_columns.extend(ordered_borrow_column_ordinals.iter().copied());
+                }
+                RelationBoundCertificate::Trinary { .. }
+                | RelationBoundCertificate::Binary { .. }
+                | RelationBoundCertificate::FiniteIntegerSet { .. } => {}
+            }
+        }
+        (digit_columns.len(), carry_columns.len())
     }
 
     pub(super) fn canonical_tuple(&self) -> Result<CanonicalTuple, RelationPlanError> {

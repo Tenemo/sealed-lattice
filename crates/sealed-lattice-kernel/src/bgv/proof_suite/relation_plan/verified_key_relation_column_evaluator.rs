@@ -52,6 +52,38 @@ impl VerifiedKeyRelationColumnEvaluator {
         selected_relation_plan_variant: &RelationPlanVariant,
         relation_context: &RelationPlanCheckContext,
     ) -> Result<Self, RefusalReason> {
+        Self::from_recomputed_public_setup_seed(
+            verified_public_randomness.public_setup_seed().into_bytes(),
+            validated_relation_plan,
+            selected_relation_plan_variant,
+            relation_context,
+        )
+    }
+
+    /// Constructs the deterministic public-column evaluator after the caller
+    /// has positively verified the setup-seed authority and relation context.
+    ///
+    /// This constructor accepts no prover-supplied polynomial representation.
+    pub(in crate::bgv::proof_suite) fn from_recomputed_public_setup_seed(
+        public_setup_seed: [u8; 64],
+        validated_relation_plan: &ValidatedRelationPlanArtifact,
+        selected_relation_plan_variant: &RelationPlanVariant,
+        relation_context: &RelationPlanCheckContext,
+    ) -> Result<Self, RefusalReason> {
+        Self::from_public_setup_seed(
+            public_setup_seed,
+            validated_relation_plan,
+            selected_relation_plan_variant,
+            relation_context,
+        )
+    }
+
+    fn from_public_setup_seed(
+        public_setup_seed: [u8; 64],
+        validated_relation_plan: &ValidatedRelationPlanArtifact,
+        selected_relation_plan_variant: &RelationPlanVariant,
+        relation_context: &RelationPlanCheckContext,
+    ) -> Result<Self, RefusalReason> {
         let revalidated_relation_plan = ValidatedRelationPlanArtifact::from_compiled_plan(
             validated_relation_plan.compiled_plan(),
             relation_context,
@@ -131,7 +163,7 @@ impl VerifiedKeyRelationColumnEvaluator {
         }
 
         Ok(Self {
-            public_setup_seed: verified_public_randomness.public_setup_seed().into_bytes(),
+            public_setup_seed,
             relation_plan_variant: selected_relation_plan_variant.clone(),
             relation_context: relation_context.clone(),
             ring_degree,

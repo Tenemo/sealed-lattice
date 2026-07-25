@@ -61,6 +61,7 @@ mod relinearization_source_material;
 mod relinearization_verification_runtime;
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod resource_accounting_evidence;
+mod row_code_whir;
 mod runtime;
 mod runtime_ffi;
 mod selected_accounting;
@@ -223,6 +224,12 @@ pub(crate) use prover::{
 };
 #[cfg(test)]
 pub(crate) use prover::{
+    CommonProofAuxiliaryColumnSynthesisCursor, CommonProofPreChallengeSourceCursor,
+    CommonProofPreChallengeSourcePoll, CommonProofQuotientComponentCursor,
+    construct_opening_batch_mask, construct_reversed_relation_column,
+};
+#[cfg(test)]
+pub(crate) use prover::{
     CommonProofCheckpointCursorManifestError, CommonProofCheckpointCursorManifestRequirement,
     common_proof_checkpoint_cursor_manifest_requirement_for_variant,
 };
@@ -287,6 +294,7 @@ pub(crate) use relinearization_source_material::{
     VerifiedRelinearizationRoundOneSourceMaterialPreflight, VerifiedRelinearizationSourceMaterial,
     VerifiedRelinearizationSourceMaterialPreflight,
 };
+pub(in crate::bgv) use row_code_whir::VerifiedSameSecretLowDegreePrerequisite;
 pub(crate) use runtime::{
     AuthenticatedCommonProofGenerationCheckpoint, BorrowedVerifiedCommonProofCapability,
     COMMON_PROOF_CHECKPOINT_STATE_BYTE_LENGTH, CommonProofGenerationAuthorization,
@@ -378,11 +386,12 @@ pub(crate) use verifier::{
     CommonProofVerifierError, PollableCommonProofVerificationInput, VerifiedCommonProof,
     VerifiedEvaluatorAuxiliaryRoot, VerifiedEvaluatorKeyStore, VerifiedEvaluatorKeyStorePreflight,
     VerifiedEvaluatorRuntimeRoot, VerifiedRelationColumnEvaluator,
-    VerifiedRelationColumnEvaluatorMemoryAccounting, VerifiedStatementOwnedTree,
-    VerifiedStreamedProofTreeTerminal, VerifiedStreamedProofTreeTerminalPreflight,
-    verified_application_statement_hash,
+    VerifiedRelationColumnEvaluatorMemoryAccounting, VerifiedRowCodeWhirProofFacts,
+    VerifiedStatementOwnedTree, VerifiedStreamedProofTreeTerminal,
+    VerifiedStreamedProofTreeTerminalPreflight, verified_application_statement_hash,
 };
 pub(in crate::bgv) use vss_share_linkage_runtime::consume_ordered_verified_vss_share_linkage_terminals;
+pub(in crate::bgv) use vss_share_linkage_runtime::with_verified_vss_share_linkage_terminal;
 pub(crate) use zero_knowledge::validate_zero_knowledge_mask_image;
 
 #[cfg(test)]
