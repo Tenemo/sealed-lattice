@@ -96,7 +96,7 @@ describe('manual Rust kernel preflight', () => {
     });
 
     it('resolves a libtest substring inside the exact registry before preflight', async () => {
-        const focusedFilter = 'packed_deep_fri_resource_inventory';
+        const focusedFilter = 'static_resource_accounting_emits_run_attachment';
         const verifiedTestFilters: string[] = [];
         let executedTestFilters: readonly string[] = [];
 

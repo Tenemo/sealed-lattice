@@ -95,8 +95,6 @@ pub(crate) use plan::{
 pub(crate) use transaction::EXTERNAL_MEMORY_SINGLE_APPEND_RECYCLER_CAPACITY_CEILING;
 #[cfg(test)]
 pub(crate) use transaction::EXTERNAL_MEMORY_SINGLE_OPERATION_VECTOR_CAPACITY_CEILING;
-#[cfg(all(test, feature = "proof-storage-width-evidence"))]
-pub(crate) use transaction::EXTERNAL_MEMORY_SINGLE_READ_RESULT_VECTOR_CAPACITY_CEILING;
 pub(crate) use transaction::{
     ProofExternalMemoryTransactionAdapterError, ProofExternalMemoryTransactionRecorder,
     ProofExternalMemoryTransactionReplay, ProofExternalMemoryTransactionRequest,

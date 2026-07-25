@@ -451,6 +451,7 @@ impl ProofOraclePhasePairLeafDigestBuilder {
     /// secret-bearing leaf needs a fresh salt and must continue through the
     /// protected leaf constructor so recomputation cannot bypass its hiding
     /// boundary.
+    #[cfg(test)]
     pub(in crate::bgv::proof_suite) fn new_public_base(
         context: &ProofMerkleTreeContext,
         leaf_index: u64,

@@ -25,9 +25,6 @@
         "test:rust:kernel:full-profile-evidence": "tsx ./tools/ci/run-rust-kernel-manual-tests.ts rust-full-profile-evidence",
         "test:rust:kernel:measurements": "tsx ./tools/ci/run-rust-kernel-manual-tests.ts rust-measurements",
         "test:rust:kernel:phase-liveness-evidence": "tsx ./tools/ci/run-rust-kernel-manual-tests.ts rust-phase-liveness-evidence",
-        "test:rust:kernel:proof-backend-bakeoff-preflight": "tsx ./tools/ci/run-proof-backend-bakeoff-preflight.ts",
-        "test:rust:kernel:proof-backend-bakeoff": "tsx ./tools/ci/run-proof-backend-bakeoff.ts",
-        "test:rust:kernel:proof-storage-width-evidence": "tsx ./tools/ci/run-proof-storage-width-evidence.ts",
         "test:rust:process-memory-guard": "tsx ./tools/ci/run-process-memory-guard-tests.ts",
         "test:node:kernel": "pnpm run build && pnpm exec vitest --project node-kernel-fast --run",
         "test:node:built": "vitest --project node --project node-protocol --project node-kernel-fast --run",
@@ -35,7 +32,6 @@
         "test:browser:built": "vitest --project chromium-desktop --project firefox-desktop --project webkit-desktop --run",
         "test:browser": "pnpm run build && pnpm run test:browser:built",
         "test:browser:proof-evidence": "tsx ./tools/ci/run-desktop-browser-proof-evidence.ts",
-        "test:browser:proof-storage-width-evidence": "tsx ./tools/ci/run-proof-storage-width-browser-evidence.ts",
         "test": "pnpm run build && pnpm run test:node:built && pnpm run test:browser:built",
         "smoke:pack:npm": "pnpm run build && tsx ./tools/ci/verify-packed-package.ts",
         "prepare": "husky"

@@ -808,7 +808,7 @@ use authentication::{
 };
 #[cfg(test)]
 pub(crate) use decoding::DecodedProofBody;
-#[cfg(any(test, feature = "proof-storage-width-browser-evidence"))]
+#[cfg(test)]
 pub(crate) use decoding::decode_proof_body_prefix;
 pub(crate) use decoding::{
     DecodedProofBodyPrefix, DecodedProofPhasePairLeaf, ProofTreeOpening,

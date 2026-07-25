@@ -121,7 +121,7 @@ impl CommonProofStorageTransactionRuntime {
             .map_err(|_| CommonProofRuntimeError::AllocationLimitExceeded)
     }
 
-    #[cfg(any(test, feature = "proof-storage-width-browser-evidence"))]
+    #[cfg(test)]
     pub(crate) fn encode_pending_worker_request_into(
         &mut self,
         encoded_request: &mut Zeroizing<Vec<u8>>,

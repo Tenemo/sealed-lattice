@@ -3882,52 +3882,6 @@ mod resource_accounting {
 
         #[test]
         #[ignore = "guarded selected proof resource measurement"]
-        fn selected_candidate_packed_deep_fri_resource_inventory_derives_every_variant() {
-            let inventory = selected_proof_variant_resource_inventory()
-                .expect("the selected capped resource inventory derives");
-            let proof_profile =
-                selected_proof_profile_set(SELECTED_MAXIMUM_BALLOT_ATTEMPTS_PER_PARTICIPANT)
-                    .expect("the selected proof profile derives");
-            let expected_selectors = proof_profile
-                .relation_plans()
-                .iter()
-                .flat_map(|relation_plan| {
-                    relation_plan
-                        .compiled_plan()
-                        .variants()
-                        .iter()
-                        .map(|variant| {
-                            (
-                                relation_plan.application_statement_schema_identifier(),
-                                variant.schedule_position(),
-                                variant.top_count(),
-                            )
-                        })
-                })
-                .collect::<BTreeSet<_>>();
-            let observed_selectors = inventory
-                .iter()
-                .map(|ceiling| {
-                    (
-                        ceiling.application_statement_schema_identifier(),
-                        ceiling.schedule_position(),
-                        ceiling.top_count(),
-                    )
-                })
-                .collect::<BTreeSet<_>>();
-
-            assert_eq!(observed_selectors, expected_selectors);
-            assert_eq!(inventory.len(), expected_selectors.len());
-            assert!(inventory.iter().all(|ceiling| {
-                ceiling.proof_byte_length_ceiling() > 0
-                    && ceiling.proof_byte_length_ceiling() <= MAXIMUM_COMMON_PROOF_BYTE_LENGTH
-                    && u64::try_from(ceiling.proof_byte_length_ceiling())
-                        .is_ok_and(|length| length <= MAXIMUM_CANONICAL_STREAM_BYTE_LENGTH)
-            }));
-        }
-
-        #[test]
-        #[ignore = "guarded selected proof resource measurement"]
         fn selected_candidate_external_memory_diagnostic_reports_every_variant() {
             let diagnostic_rows = selected_proof_external_memory_diagnostic_report()
                 .expect("the selected cap-neutral diagnostic inventory derives");

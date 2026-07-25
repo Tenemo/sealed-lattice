@@ -13,7 +13,6 @@ export const measurementRustTests = [
     'bgv::proof_suite::resource_accounting_evidence::tests::selected_candidate_static_resource_accounting_emits_run_attachment',
     'bgv::proof_suite::selected_accounting::selected_ballot_resource_cap_tests::selected_ballot_cap_neutral_external_memory_requirement_reports_raw_geometry',
     'bgv::proof_suite::selected_accounting::resource_accounting::tests::selected_candidate_external_memory_diagnostic_reports_every_variant',
-    'bgv::proof_suite::selected_accounting::resource_accounting::tests::selected_candidate_packed_deep_fri_resource_inventory_derives_every_variant',
     'bgv::proof_suite::selected_accounting::resource_accounting::tests::runtime_limits_match_resource_ceilings_for_every_selected_variant',
     'bgv::proof_suite::selected_accounting::resource_accounting::tests::exact_variant_rows_reconcile_transport_frontiers_memory_and_copies',
     'bgv::proof_suite::selected_accounting::resource_accounting::tests::complete_action_accounting_derives_all_physical_proof_slots',
@@ -24,17 +23,12 @@ export const phaseLivenessEvidenceRustTests = [
     'bgv::proof_suite::resource_accounting_evidence::tests::selected_candidate_static_resource_accounting_closes_every_missing_carrier',
 ] as const;
 
-export const proofStorageWidthEvidenceRustTests = [
-    'bgv::proof_suite::proof_storage_width_evidence::tests::proof_storage_width_evidence_records_incumbent_curve',
-] as const;
-
 type FocusedRustLane =
     | 'rust-full-profile-evidence'
     | 'rust-kernel-fast'
     | 'rust-kernel-heavy'
     | 'rust-measurements'
-    | 'rust-phase-liveness-evidence'
-    | 'rust-proof-storage-width-evidence';
+    | 'rust-phase-liveness-evidence';
 
 export const focusedRustLaneScripts = {
     'rust-full-profile-evidence': 'test:rust:kernel:full-profile-evidence',
@@ -42,8 +36,6 @@ export const focusedRustLaneScripts = {
     'rust-kernel-heavy': 'test:rust:kernel:heavy',
     'rust-measurements': 'test:rust:kernel:measurements',
     'rust-phase-liveness-evidence': 'test:rust:kernel:phase-liveness-evidence',
-    'rust-proof-storage-width-evidence':
-        'test:rust:kernel:proof-storage-width-evidence',
 } as const satisfies Record<FocusedRustLane, string>;
 
 const fullProfileTestSet = new Set<string>(fullProfileEvidenceRustTests);
@@ -51,10 +43,6 @@ const measurementTestSet = new Set<string>(measurementRustTests);
 const phaseLivenessEvidenceTestSet = new Set<string>(
     phaseLivenessEvidenceRustTests,
 );
-const proofStorageWidthEvidenceTestSet = new Set<string>(
-    proofStorageWidthEvidenceRustTests,
-);
-
 const lanesForTest = (test: RustTestInventoryEntry): FocusedRustLane[] => {
     const lanes: FocusedRustLane[] = [];
     if (test.testName.includes(heavyRustKernelTestNamePrefix)) {
@@ -68,9 +56,6 @@ const lanesForTest = (test: RustTestInventoryEntry): FocusedRustLane[] => {
     }
     if (phaseLivenessEvidenceTestSet.has(test.testName)) {
         lanes.push('rust-phase-liveness-evidence');
-    }
-    if (proofStorageWidthEvidenceTestSet.has(test.testName)) {
-        lanes.push('rust-proof-storage-width-evidence');
     }
     if (!test.ignored) {
         lanes.push('rust-kernel-fast');

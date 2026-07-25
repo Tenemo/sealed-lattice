@@ -119,11 +119,6 @@ mod private_coins;
 mod quotient;
 mod relation_columns;
 
-#[cfg(any(
-    feature = "proof-storage-width-evidence",
-    feature = "proof-storage-width-browser-evidence"
-))]
-pub(crate) use encoding::encode_common_proof_query_tree_fragment_with_layout;
 pub(crate) use encoding::{
     BoundedCommonProofByteSink, BoundedCommonProofByteSinkError, CommonProofByteSink,
     CommonProofEncodingError, CommonProofOpeningGeometry,
@@ -198,30 +193,6 @@ pub(crate) use relation_columns::{
     proof_created_tree_roles_by_column, relation_column_replay_requirements,
     sample_private_extension_polynomial,
 };
-
-#[cfg(any(
-    all(test, feature = "proof-backend-bakeoff"),
-    feature = "proof-storage-width-browser-evidence"
-))]
-pub(in crate::bgv::proof_suite) fn add_bakeoff_polynomial_to_initial_fri(
-    initial: &mut [ProofChallengeExtensionElement],
-    opening_degree_bound_exclusive: usize,
-    source_degree_bound_exclusive: usize,
-    polynomial: CommonProofSourcePolynomial,
-    opening_point: ProofChallengeExtensionElement,
-    deep_evaluation: ProofChallengeExtensionElement,
-    batching_coefficient: ProofChallengeExtensionElement,
-) -> Result<(), CommonProofProverError> {
-    fri::add_bakeoff_polynomial_to_initial_fri(
-        initial,
-        opening_degree_bound_exclusive,
-        source_degree_bound_exclusive,
-        polynomial,
-        opening_point,
-        deep_evaluation,
-        batching_coefficient,
-    )
-}
 
 pub(in crate::bgv::proof_suite) use encoding::opened_leaf_indexes;
 use fri::{

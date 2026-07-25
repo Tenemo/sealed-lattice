@@ -11,12 +11,11 @@ local crate, ensuring the compatibility substitution is exercised there too.
 The local `Cargo.toml` and `src/lib.rs` carry explicit modification notices as
 required when redistributing the modified source under Apache 2.0.
 
-The repository-root `Cargo.lock` and the root
-`proof-backend-bakeoff` feature gates are the authoritative reproducible
-dependency graph for this patched crate. The excluded crate's standalone
-development graph has no committed lockfile and is diagnostic only; do not
-cite a standalone run as commit-pinned closure evidence unless that graph is
-independently locked first.
+The repository-root `Cargo.lock` and kernel dependency declarations are the
+authoritative reproducible dependency graph for this patched crate. The
+excluded crate's standalone development graph has no committed lockfile and is
+diagnostic only; do not cite a standalone run as commit-pinned closure evidence
+unless that graph is independently locked first.
 
 The sole source compatibility substitution is in `apply_to_chunks`. The
 upstream call to the initialized-slice convenience method is not stable under

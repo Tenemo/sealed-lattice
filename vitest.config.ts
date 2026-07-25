@@ -9,9 +9,6 @@ import type { BrowserInstanceOption } from 'vitest/node';
 import {
     manualDesktopBrowserProofEvidenceTestGlobs,
     ordinaryDesktopBrowserExcludedTestGlobs,
-    proofStorageWidthBrowserEvidenceInstanceDefinitions,
-    proofStorageWidthBrowserEvidenceTestGlobs,
-    proofStorageWidthBrowserEvidenceWorkspaceProjectName,
 } from './tools/ci/browser-test-project-selection.js';
 import { resolveTestDiagnosticPaths } from './tools/ci/test-diagnostic-environment.js';
 import { VitestDiagnosticReporter } from './tools/ci/vitest-diagnostic-reporter.js';
@@ -147,15 +144,6 @@ const desktopBrowserProofEvidenceInstances: BrowserInstanceOption[] = [
         }),
     },
 ];
-
-// The width evidence run owns a run-unique IndexedDB database and checks its
-// initial and final state explicitly. Let the project provider create a fresh
-// browser context as well; a repository-fixed persistent profile would retain
-// unrelated browser state across diagnostic runs.
-const proofStorageWidthBrowserEvidenceInstances: BrowserInstanceOption[] =
-    proofStorageWidthBrowserEvidenceInstanceDefinitions.map(
-        (instanceDefinition) => ({ ...instanceDefinition }),
-    );
 
 type NodeProjectInput = {
     readonly exclude?: readonly string[];
@@ -307,15 +295,6 @@ export default defineConfig({
                 include: manualDesktopBrowserProofEvidenceTestGlobs,
                 instances: desktopBrowserProofEvidenceInstances,
                 projectName: 'browser-desktop-proof-evidence',
-                retainFailureTrace: true,
-                testTimeout: 12 * 60 * 60_000,
-            }),
-            makeBrowserProject({
-                hookTimeout: 30 * 60_000,
-                include: proofStorageWidthBrowserEvidenceTestGlobs,
-                instances: proofStorageWidthBrowserEvidenceInstances,
-                projectName:
-                    proofStorageWidthBrowserEvidenceWorkspaceProjectName,
                 retainFailureTrace: true,
                 testTimeout: 12 * 60 * 60_000,
             }),

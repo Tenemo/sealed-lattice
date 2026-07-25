@@ -8,7 +8,7 @@ use super::{
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ProofOpeningError {
     InvalidOpeningDegree,
-    #[cfg(any(test, feature = "proof-storage-width-browser-evidence"))]
+    #[cfg(test)]
     EmptyOpeningBatch,
     OpeningPointOnEvaluationPair,
     Field(ProofFieldError),
@@ -51,7 +51,7 @@ impl ProofOpeningClaimEvaluation {
 /// evaluation-domain point and its opposite.  `opening_batch_mask_pair` is
 /// present exactly for a secret-bearing relation and absent for a public-only
 /// relation; the caller enforces the plan mode before invoking this function.
-#[cfg(any(test, feature = "proof-storage-width-browser-evidence"))]
+#[cfg(test)]
 pub(crate) fn evaluate_initial_fri_pair(
     opening_degree_bound_exclusive: u64,
     evaluation_point: ProofBaseFieldElement,

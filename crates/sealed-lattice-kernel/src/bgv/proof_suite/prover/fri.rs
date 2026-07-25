@@ -132,30 +132,6 @@ pub(super) fn add_replay_polynomial_to_initial_fri(
     )
 }
 
-#[cfg(any(
-    all(test, feature = "proof-backend-bakeoff"),
-    feature = "proof-storage-width-browser-evidence"
-))]
-pub(super) fn add_bakeoff_polynomial_to_initial_fri(
-    initial: &mut [ProofChallengeExtensionElement],
-    opening_degree_bound_exclusive: usize,
-    source_degree_bound_exclusive: usize,
-    polynomial: CommonProofSourcePolynomial,
-    opening_point: ProofChallengeExtensionElement,
-    deep_evaluation: ProofChallengeExtensionElement,
-    batching_coefficient: ProofChallengeExtensionElement,
-) -> Result<(), CommonProofProverError> {
-    add_polynomial_to_initial_fri(
-        initial,
-        opening_degree_bound_exclusive,
-        source_degree_bound_exclusive,
-        polynomial,
-        opening_point,
-        deep_evaluation,
-        batching_coefficient,
-    )
-}
-
 fn add_polynomial_to_initial_fri(
     initial: &mut [ProofChallengeExtensionElement],
     opening_degree_bound_exclusive: usize,

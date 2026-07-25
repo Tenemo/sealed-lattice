@@ -4,7 +4,6 @@ import {
     fullProfileEvidenceRustTests,
     measurementRustTests,
     phaseLivenessEvidenceRustTests,
-    proofStorageWidthEvidenceRustTests,
     validateFocusedRustLaneSelection,
 } from '#tools/ci/rust-focused-lane-selection';
 
@@ -26,11 +25,6 @@ describe('focused Rust lane selection', () => {
             'rust-phase-liveness-evidence' as const,
             true,
             phaseLivenessEvidenceRustTests[0],
-        ],
-        [
-            'rust-proof-storage-width-evidence' as const,
-            true,
-            proofStorageWidthEvidenceRustTests[0],
         ],
     ])(
         'accepts %s tests only in their owning lane',
