@@ -200,12 +200,24 @@ impl<F: Field, EF: ExtensionField<F>> Statements<F, EF> {
 ///
 /// # Algorithm
 ///
-/// For groups indexed by `i`, the combined weight polynomial and expected value are sums weighted by challenge powers.
+/// For groups indexed by `i`, a fresh combined weight polynomial and expected value are sums weighted by challenge powers.
 ///
 /// ```text
 /// W(X) = sum_i gamma^i * weight_i(X)
 /// S    = sum_i gamma^i * eval_i
 /// ```
+///
+/// When a batch containing `m` fresh constraints is added to a carried claim,
+/// the carried claim alone receives the next unused power:
+///
+/// ```text
+/// W'(X) = gamma^m * W(X) + sum_{i=0}^{m-1} gamma^i * fresh_weight_i(X)
+/// S'    = gamma^m * S    + sum_{i=0}^{m-1} gamma^i * fresh_eval_i
+/// ```
+///
+/// This is the coefficient-reversed form of the WHIR query-restoration batch.
+/// It has the same degree as placing the fresh constraints at powers `1..=m`,
+/// while keeping every fresh coefficient disjoint from the carried claim.
 #[derive(Clone, Debug)]
 pub struct Constraint<F: Field, EF: ExtensionField<F>> {
     /// Number of variables shared by every statement group.
@@ -280,7 +292,18 @@ impl<F: Field, EF: ExtensionField<F>> Constraint<F, EF> {
             .shifted_powers(self.challenge.exp_u64(shift as u64))
     }
 
-    /// Accumulates the challenge-weighted expected value across all groups.
+    /// Returns the multiplier assigned to a claim carried into this fresh batch.
+    ///
+    /// If the batch contains `m` constraints, its fresh terms consume powers
+    /// `0..m`, so the carried claim occupies the only remaining degree-`m`
+    /// coefficient. Empty batches return one and leave the claim unchanged.
+    #[must_use]
+    pub(crate) fn carried_claim_multiplier(&self) -> EF {
+        let fresh_constraint_count = self.statements.iter().map(Statements::len).sum::<usize>();
+        self.challenge.exp_u64(fresh_constraint_count as u64)
+    }
+
+    /// Folds the challenge-weighted expected value across all groups.
     ///
     /// # Arguments
     ///
@@ -288,8 +311,13 @@ impl<F: Field, EF: ExtensionField<F>> Constraint<F, EF> {
     ///
     /// # Algorithm
     ///
-    /// Each group starts at the power just after the previous group's last constraint.
+    /// The incoming accumulator is first multiplied by `gamma^m`, where `m` is
+    /// the total fresh constraint count. Each fresh group then starts at the
+    /// power just after the previous group's last constraint.
     pub fn combine_evals(&self, eval: &mut EF) {
+        // Reserve the degree-m coefficient for the carried claim before adding
+        // fresh constraints at the disjoint powers 0 through m - 1.
+        *eval *= self.carried_claim_multiplier();
         // Running exponent of the next challenge power to assign.
         let mut shift = 0;
         for statement in &self.statements {
@@ -300,18 +328,25 @@ impl<F: Field, EF: ExtensionField<F>> Constraint<F, EF> {
         }
     }
 
-    /// Adds the batched weight polynomial and expected value onto existing accumulators.
+    /// Folds the batched weight polynomial and expected value into existing accumulators.
     ///
     /// # Overview
     ///
-    /// Every hypercube entry gains the challenge-weighted sum of each group's weight at that entry.
-    /// The scalar accumulator gains the matching challenge-weighted sum of expected values.
+    /// Every carried hypercube entry and the scalar claim are multiplied by
+    /// `gamma^m` before gaining the challenge-weighted fresh contributions.
     ///
     /// # Arguments
     ///
     /// - `combined`: weight polynomial accumulator over the hypercube.
     /// - `eval`: scalar accumulator for the expected value.
     pub fn combine(&self, combined: &mut Poly<EF>, eval: &mut EF) {
+        let carried_claim_multiplier = self.carried_claim_multiplier();
+        combined
+            .as_mut_slice()
+            .iter_mut()
+            .for_each(|weight| *weight *= carried_claim_multiplier);
+        *eval *= carried_claim_multiplier;
+
         // Running exponent of the next challenge power to assign.
         let mut shift = 0;
         // Treat the incoming accumulator as already holding data, so every group adds onto it.
@@ -324,13 +359,20 @@ impl<F: Field, EF: ExtensionField<F>> Constraint<F, EF> {
         }
     }
 
-    /// SIMD-packed variant that adds the batched weight polynomial and expected value onto existing accumulators.
+    /// SIMD-packed variant that folds the batch into existing accumulators.
     ///
     /// # Arguments
     ///
     /// - `combined`: packed weight polynomial accumulator over the hypercube.
     /// - `eval`: scalar accumulator for the expected value.
     pub fn combine_packed(&self, combined: &mut Poly<EF::ExtensionPacking>, eval: &mut EF) {
+        let carried_claim_multiplier = self.carried_claim_multiplier();
+        combined
+            .as_mut_slice()
+            .iter_mut()
+            .for_each(|weight| *weight *= carried_claim_multiplier);
+        *eval *= carried_claim_multiplier;
+
         // Running exponent of the next challenge power to assign.
         let mut shift = 0;
         // Treat the incoming accumulator as already holding data, so every group adds onto it.
@@ -409,10 +451,11 @@ impl<F: Field, EF: ExtensionField<F>> Constraint<F, EF> {
 #[cfg(test)]
 mod tests {
     use alloc::vec;
+    use alloc::vec::Vec;
 
     use p3_baby_bear::BabyBear;
-    use p3_field::PrimeCharacteristicRing;
     use p3_field::extension::BinomialExtensionField;
+    use p3_field::{PackedFieldExtension, PrimeCharacteristicRing};
     use p3_multilinear_util::point::Point;
 
     use super::*;
@@ -624,7 +667,7 @@ mod tests {
 
     #[test]
     fn test_constraint_combine_evals_accumulation() {
-        // Test that combine_evals adds to existing values rather than overwriting
+        // Test that combine_evals reserves a disjoint coefficient for the carried value.
 
         // Random challenge
         let challenge = EF::from_u64(3);
@@ -640,11 +683,160 @@ mod tests {
         let initial_value = EF::from_u64(100);
         let mut eval = initial_value;
 
-        // Combine evaluations (should add to existing value)
+        // Combine evaluations using gamma * carried + fresh for one fresh claim.
         constraint.combine_evals(&mut eval);
 
-        // Verify that the result is initial_value + (γ^0 * 10) = 100 + 10 = 110
-        assert_eq!(eval, EF::from_u64(110));
+        // Verify that the result is gamma * initial_value + gamma^0 * 10 = 310.
+        assert_eq!(eval, EF::from_u64(310));
+    }
+
+    #[test]
+    fn carried_claim_coefficient_stays_disjoint_from_two_fresh_constraints() {
+        let num_variables = 2;
+        let carried_claim = EF::from_u64(17);
+
+        for challenge_value in [2, 3, 5, 7] {
+            let challenge = EF::from_u64(challenge_value);
+
+            // This assignment cancels identically under the unsafe recurrence
+            // carried + fresh_0 + gamma * fresh_1.
+            let first_fresh_claim = -carried_claim;
+            let second_fresh_claim = EF::ZERO;
+            let equality_statement = EqStatement::new_hypercube(
+                vec![
+                    Point::new(vec![EF::ZERO, EF::ZERO]),
+                    Point::new(vec![EF::ONE, EF::ONE]),
+                ],
+                vec![first_fresh_claim, second_fresh_claim],
+            );
+            let constraint: Constraint<F, EF> = Constraint::new(
+                challenge,
+                num_variables,
+                vec![Statements::Eq(equality_statement)],
+            );
+            let mut combined_claim = carried_claim;
+            constraint.combine_evals(&mut combined_claim);
+
+            let expected_claim = challenge.square() * carried_claim
+                + first_fresh_claim
+                + challenge * second_fresh_claim;
+            assert_eq!(combined_claim, expected_claim);
+            assert_ne!(combined_claim, EF::ZERO);
+
+            // This assignment cancels identically if only one gamma is put on
+            // the carried claim while the second fresh claim also uses gamma.
+            let first_fresh_claim = EF::ZERO;
+            let second_fresh_claim = -carried_claim;
+            let equality_statement = EqStatement::new_hypercube(
+                vec![
+                    Point::new(vec![EF::ZERO, EF::ONE]),
+                    Point::new(vec![EF::ONE, EF::ZERO]),
+                ],
+                vec![first_fresh_claim, second_fresh_claim],
+            );
+            let constraint: Constraint<F, EF> = Constraint::new(
+                challenge,
+                num_variables,
+                vec![Statements::Eq(equality_statement)],
+            );
+            let mut combined_claim = carried_claim;
+            constraint.combine_evals(&mut combined_claim);
+
+            let expected_claim = challenge.square() * carried_claim
+                + first_fresh_claim
+                + challenge * second_fresh_claim;
+            assert_eq!(combined_claim, expected_claim);
+            assert_ne!(combined_claim, EF::ZERO);
+        }
+    }
+
+    #[test]
+    fn scalar_packed_and_verifier_combiners_share_the_carried_claim_recurrence() {
+        type PackedExtension = <EF as ExtensionField<F>>::ExtensionPacking;
+
+        let packing_width = <F as Field>::Packing::WIDTH;
+        let packing_log_width = log2_strict_usize(packing_width);
+        let num_variables = packing_log_width + 1;
+        let scalar_weight_count = 1 << num_variables;
+        let initial_weights = (0..scalar_weight_count)
+            .map(|weight_index| EF::from_u64(weight_index as u64 + 1))
+            .collect::<Vec<_>>();
+        let initial_claim = EF::from_u64(97);
+
+        for challenge_value in [0, 1, 3] {
+            let challenge = EF::from_u64(challenge_value);
+            let first_equality_claim = EF::from_u64(11);
+            let second_equality_claim = EF::from_u64(13);
+            let selection_claim = EF::from_u64(17);
+            let equality_statement = EqStatement::new_hypercube(
+                vec![
+                    Point::new(
+                        (0..num_variables)
+                            .map(|variable_index| EF::from_u64(variable_index as u64 + 2))
+                            .collect(),
+                    ),
+                    Point::new(
+                        (0..num_variables)
+                            .map(|variable_index| EF::from_u64(variable_index as u64 + 19))
+                            .collect(),
+                    ),
+                ],
+                vec![first_equality_claim, second_equality_claim],
+            );
+            let selection_statement =
+                SelectStatement::new(num_variables, vec![F::from_u64(23)], vec![selection_claim]);
+            let constraint: Constraint<F, EF> = Constraint::new(
+                challenge,
+                num_variables,
+                vec![
+                    Statements::Eq(equality_statement),
+                    Statements::Select(selection_statement),
+                ],
+            );
+
+            let mut scalar_weights = Poly::new(initial_weights.clone());
+            let mut packed_weights = Poly::new(
+                initial_weights
+                    .chunks(packing_width)
+                    .map(PackedExtension::from_ext_slice)
+                    .collect(),
+            );
+            let mut scalar_claim = initial_claim;
+            let mut packed_claim = initial_claim;
+            let mut verifier_claim = initial_claim;
+            let (fresh_weights, fresh_claim) = constraint.combine_new();
+
+            constraint.combine(&mut scalar_weights, &mut scalar_claim);
+            constraint.combine_packed(&mut packed_weights, &mut packed_claim);
+            constraint.combine_evals(&mut verifier_claim);
+
+            let unpacked_weights = <PackedExtension as PackedFieldExtension<F, EF>>::to_ext_iter(
+                packed_weights.as_slice().iter().copied(),
+            )
+            .collect::<Vec<_>>();
+            let carried_claim_multiplier = challenge.exp_u64(3);
+            let expected_weights = initial_weights
+                .iter()
+                .zip(fresh_weights.as_slice())
+                .map(|(&carried_weight, &fresh_weight)| {
+                    carried_claim_multiplier * carried_weight + fresh_weight
+                })
+                .collect::<Vec<_>>();
+            let expected_fresh_claim = first_equality_claim
+                + challenge * second_equality_claim
+                + challenge.square() * selection_claim;
+            let expected_claim = carried_claim_multiplier * initial_claim
+                + first_equality_claim
+                + challenge * second_equality_claim
+                + challenge.square() * selection_claim;
+
+            assert_eq!(scalar_weights.as_slice(), unpacked_weights.as_slice());
+            assert_eq!(scalar_weights.as_slice(), expected_weights.as_slice());
+            assert_eq!(fresh_claim, expected_fresh_claim);
+            assert_eq!(scalar_claim, packed_claim);
+            assert_eq!(scalar_claim, verifier_claim);
+            assert_eq!(scalar_claim, expected_claim);
+        }
     }
 
     #[test]

@@ -7,6 +7,11 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+#[cfg(test)]
+use num_bigint::BigUint;
+
+#[cfg(test)]
+use super::super::field::{PROOF_BASE_FIELD_MODULUS, PROOF_CHALLENGE_EXTENSION_DEGREE};
 use super::super::{
     field::{ProofBaseFieldElement, ProofChallengeExtensionElement},
     transcript::CommonProofChallenge,
@@ -18,6 +23,31 @@ use super::{
     RelationExpressionInstruction, RelationPlanCheckContext, RelationPlanError,
     RelationPlanVariant, modular_power, relation_column_queries, visit_relation_column_queries,
 };
+#[cfg(test)]
+use super::{RelationPlanChecker, check_expression};
+
+#[cfg(test)]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct DeepPointSamplerCardinalityBound {
+    field_cardinality: BigUint,
+    forbidden_candidate_count_ceiling: BigUint,
+    accepted_candidate_count_floor: BigUint,
+}
+
+#[cfg(test)]
+impl DeepPointSamplerCardinalityBound {
+    pub(crate) const fn field_cardinality(&self) -> &BigUint {
+        &self.field_cardinality
+    }
+
+    pub(crate) const fn forbidden_candidate_count_ceiling(&self) -> &BigUint {
+        &self.forbidden_candidate_count_ceiling
+    }
+
+    pub(crate) const fn accepted_candidate_count_floor(&self) -> &BigUint {
+        &self.accepted_candidate_count_floor
+    }
+}
 
 #[derive(Clone, Copy)]
 struct ResolvedVerifierSequenceOpening {
@@ -728,6 +758,265 @@ impl RelationPlanVariant {
             result.push(point);
         }
         Ok(result)
+    }
+
+    /// Bounds the candidates rejected by the production DEEP sampler without
+    /// enumerating the challenge field.
+    ///
+    /// The bound applies after every lower ordinal has been accepted by the
+    /// same sampler. It covers the sampler's zero and prior-point exclusions,
+    /// every domain and zeroifier root tested below, short Frobenius orbits,
+    /// and collisions with both current and prior translated orbits.
+    #[cfg(test)]
+    pub(crate) fn deep_point_sampler_cardinality_bound(
+        &self,
+        context: &RelationPlanCheckContext,
+        point_ordinal: u16,
+    ) -> Result<DeepPointSamplerCardinalityBound, RelationPlanError> {
+        let checker = RelationPlanChecker::new(context);
+        checker.check_context()?;
+        if context.base_field_modulus != PROOF_BASE_FIELD_MODULUS
+            || usize::from(context.challenge_extension_degree) != PROOF_CHALLENGE_EXTENSION_DEGREE
+            || PROOF_CHALLENGE_EXTENSION_DEGREE < 2
+            || self.trace_domain_size == 0
+            || self.evaluation_domain_size == 0
+            || !self
+                .evaluation_domain_size
+                .is_multiple_of(self.trace_domain_size)
+            || context.evaluation_domain_generator == 0
+            || context.evaluation_domain_generator >= context.base_field_modulus
+            || context.evaluation_coset_offset == 0
+            || context.evaluation_coset_offset >= context.base_field_modulus
+        {
+            return Err(RelationPlanError::InvalidDomain);
+        }
+        if point_ordinal >= context.deep_point_count {
+            return Err(RelationPlanError::InvalidChallengeCatalog);
+        }
+
+        let evaluation_generator =
+            ProofBaseFieldElement::from_canonical(context.evaluation_domain_generator)
+                .map_err(|_| RelationPlanError::InvalidDomain)?;
+        let trace_generator =
+            evaluation_generator.power(self.evaluation_domain_size / self.trace_domain_size);
+        let mut rotation_scalars_by_point = BTreeMap::<u16, BTreeSet<u64>>::new();
+        for descriptor in &self.ordered_opening_points {
+            if descriptor.deep_point_ordinal >= context.deep_point_count
+                || usize::from(descriptor.conjugate_index) >= PROOF_CHALLENGE_EXTENSION_DEGREE
+            {
+                return Err(RelationPlanError::InvalidOpening);
+            }
+            let rotation_exponent = signed_rotation_exponent(
+                descriptor.trace_rotation_is_negative,
+                descriptor.trace_rotation_magnitude,
+                self.trace_domain_size,
+            )?;
+            let rotation_scalar = trace_generator.power(rotation_exponent).canonical();
+            if !rotation_scalars_by_point
+                .entry(descriptor.deep_point_ordinal)
+                .or_default()
+                .insert(rotation_scalar)
+            {
+                // Equal rotation scalars give identical translated Frobenius
+                // orbits, so the live predicate would reject every candidate.
+                return Err(RelationPlanError::InvalidOpening);
+            }
+        }
+        let current_opening_count = rotation_scalars_by_point
+            .get(&point_ordinal)
+            .map(BTreeSet::len)
+            .filter(|count| *count != 0)
+            .ok_or(RelationPlanError::InvalidOpening)?;
+        let prior_opening_count = rotation_scalars_by_point
+            .iter()
+            .filter(|(ordinal, _)| **ordinal < point_ordinal)
+            .try_fold(0_usize, |count, (_, scalars)| {
+                count
+                    .checked_add(scalars.len())
+                    .ok_or(RelationPlanError::CountOverflow)
+            })?;
+
+        let mut distinct_zeroifiers = BTreeSet::new();
+        let mut zeroifier_root_count_ceiling = BigUint::default();
+        for constraint in &self.ordered_constraints {
+            if distinct_zeroifiers.insert(constraint.zeroifier_postfix_expression.as_slice()) {
+                checker.check_zeroifier_on_coset(
+                    &constraint.zeroifier_postfix_expression,
+                    self.trace_domain_size,
+                    self.evaluation_domain_size,
+                )?;
+                let shape = check_expression(
+                    &constraint.zeroifier_postfix_expression,
+                    self,
+                    context,
+                    true,
+                )?;
+                if shape.degree == 0 && shape.constant_value == Some(0) {
+                    return Err(RelationPlanError::InvalidZeroifier);
+                }
+                zeroifier_root_count_ceiling += BigUint::from(shape.degree);
+            }
+        }
+
+        let base_field_cardinality = BigUint::from(context.base_field_modulus);
+        let extension_degree = u32::from(context.challenge_extension_degree);
+        let field_cardinality = base_field_cardinality.pow(extension_degree);
+        let per_point_algebraic_exclusion_ceiling = BigUint::from(self.trace_domain_size)
+            + BigUint::from(self.evaluation_domain_size)
+            + zeroifier_root_count_ceiling;
+
+        // If a length-d Frobenius orbit repeats, the candidate is a root of
+        // X^(p^e) - X for some 1 <= e < d. Summing those polynomial degrees is
+        // a field-size-independent upper bound on all short orbits.
+        let short_orbit_count_ceiling = (1..extension_degree)
+            .map(|exponent| base_field_cardinality.pow(exponent))
+            .fold(BigUint::default(), |sum, term| sum + term);
+        let maximum_frobenius_equation_degree = base_field_cardinality.pow(extension_degree - 1);
+
+        let current_opening_count =
+            u64::try_from(current_opening_count).map_err(|_| RelationPlanError::CountOverflow)?;
+        let prior_opening_count =
+            u64::try_from(prior_opening_count).map_err(|_| RelationPlanError::CountOverflow)?;
+        let extension_degree = u64::from(context.challenge_extension_degree);
+        let orbit_pair_equation_count = extension_degree
+            .checked_mul(extension_degree)
+            .ok_or(RelationPlanError::CountOverflow)?;
+        let current_opening_pair_count = current_opening_count
+            .checked_mul(current_opening_count.saturating_sub(1))
+            .and_then(|product| product.checked_div(2))
+            .ok_or(RelationPlanError::CountOverflow)?;
+        let current_orbit_collision_ceiling = BigUint::from(
+            current_opening_pair_count
+                .checked_mul(orbit_pair_equation_count)
+                .ok_or(RelationPlanError::CountOverflow)?,
+        ) * &maximum_frobenius_equation_degree;
+        let prior_orbit_collision_ceiling = BigUint::from(
+            current_opening_count
+                .checked_mul(prior_opening_count)
+                .and_then(|count| count.checked_mul(orbit_pair_equation_count))
+                .ok_or(RelationPlanError::CountOverflow)?,
+        ) * maximum_frobenius_equation_degree;
+
+        let mut forbidden_candidate_count_ceiling = BigUint::from(1_u8)
+            + &per_point_algebraic_exclusion_ceiling
+            + BigUint::from(current_opening_count) * &per_point_algebraic_exclusion_ceiling
+            + BigUint::from(current_opening_count) * short_orbit_count_ceiling
+            + current_orbit_collision_ceiling
+            + prior_orbit_collision_ceiling
+            + BigUint::from(point_ordinal);
+        if forbidden_candidate_count_ceiling > field_cardinality {
+            forbidden_candidate_count_ceiling = field_cardinality.clone();
+        }
+        let accepted_candidate_count_floor =
+            &field_cardinality - &forbidden_candidate_count_ceiling;
+        Ok(DeepPointSamplerCardinalityBound {
+            field_cardinality,
+            forbidden_candidate_count_ceiling,
+            accepted_candidate_count_floor,
+        })
+    }
+
+    /// Derives the degree of the polynomial identity checked after clearing
+    /// a common relation zeroifier at an out-of-domain point.
+    ///
+    /// The verifier compares the composition of the checked rational
+    /// constraints with the source-ordered quotient-component reconstruction.
+    /// Every accepted zeroifier grammar divides the full-trace zeroifier, so
+    /// multiplying by that common multiple yields one polynomial without
+    /// double-counting shared roots. This method derives both sides of its
+    /// degree bound from the checked relation grammar instead of relying on a
+    /// construction-specific literal.
+    #[cfg(test)]
+    pub(crate) fn cross_multiplied_composition_identity_degree_bound(
+        &self,
+        context: &RelationPlanCheckContext,
+    ) -> Result<u64, RelationPlanError> {
+        let checker = RelationPlanChecker::new(context);
+        checker.check_context()?;
+        if self.ordered_constraints.is_empty()
+            || context.quotient_component_count == 0
+            || context.quotient_component_degree_bound_exclusive == 0
+        {
+            return Err(RelationPlanError::InvalidConstraint);
+        }
+
+        let mut distinct_zeroifiers = Vec::<(Vec<RelationExpressionInstruction>, u64)>::new();
+        let mut constraint_degrees = Vec::with_capacity(self.ordered_constraints.len());
+        for constraint in &self.ordered_constraints {
+            let numerator_degree = check_expression(
+                &constraint.numerator_postfix_expression,
+                self,
+                context,
+                false,
+            )?
+            .degree;
+            let zeroifier_shape = check_expression(
+                &constraint.zeroifier_postfix_expression,
+                self,
+                context,
+                true,
+            )?;
+            if zeroifier_shape.degree == 0 && zeroifier_shape.constant_value == Some(0) {
+                return Err(RelationPlanError::InvalidZeroifier);
+            }
+            if !super::zeroifier_roots_are_confined_to_trace_domain(
+                &constraint.zeroifier_postfix_expression,
+                self.trace_domain_size,
+                context.base_field_modulus,
+            ) || zeroifier_shape.degree > self.trace_domain_size
+            {
+                return Err(RelationPlanError::InvalidZeroifier);
+            }
+            if let Some((_, recorded_degree)) = distinct_zeroifiers
+                .iter()
+                .find(|(expression, _)| expression == &constraint.zeroifier_postfix_expression)
+            {
+                if *recorded_degree != zeroifier_shape.degree {
+                    return Err(RelationPlanError::InvalidZeroifier);
+                }
+            } else {
+                checker.check_zeroifier_on_coset(
+                    &constraint.zeroifier_postfix_expression,
+                    self.trace_domain_size,
+                    self.evaluation_domain_size,
+                )?;
+                distinct_zeroifiers.push((
+                    constraint.zeroifier_postfix_expression.clone(),
+                    zeroifier_shape.degree,
+                ));
+            }
+            constraint_degrees.push((numerator_degree, zeroifier_shape.degree));
+        }
+
+        // Every accepted zeroifier grammar above divides X^trace_domain_size - 1.
+        // That full-trace polynomial is therefore one common denominator. Using
+        // the product of distinct zeroifiers would count shared trace roots more
+        // than once and overstate the cross-multiplied degree.
+        let common_zeroifier_degree = self.trace_domain_size;
+        let cleared_constraint_degree = constraint_degrees.into_iter().try_fold(
+            0_u64,
+            |maximum_degree, (numerator_degree, zeroifier_degree)| {
+                let degree = numerator_degree
+                    .checked_add(common_zeroifier_degree)
+                    .and_then(|degree| degree.checked_sub(zeroifier_degree))
+                    .ok_or(RelationPlanError::DegreeBoundExceeded)?;
+                Ok::<_, RelationPlanError>(maximum_degree.max(degree))
+            },
+        )?;
+
+        let quotient_decomposition_stride = self.quotient_decomposition_stride(context)?;
+        let final_component_ordinal = u64::from(context.quotient_component_count - 1);
+        let reconstructed_quotient_degree = final_component_ordinal
+            .checked_mul(quotient_decomposition_stride)
+            .and_then(|degree| {
+                degree.checked_add(context.quotient_component_degree_bound_exclusive - 1)
+            })
+            .ok_or(RelationPlanError::DegreeBoundExceeded)?;
+        let cleared_reconstructed_quotient_degree = reconstructed_quotient_degree
+            .checked_add(common_zeroifier_degree)
+            .ok_or(RelationPlanError::DegreeBoundExceeded)?;
+
+        Ok(cleared_constraint_degree.max(cleared_reconstructed_quotient_degree))
     }
 
     pub(crate) fn deep_point_candidate_is_forbidden(
@@ -1492,6 +1781,74 @@ mod tests {
             !variant
                 .deep_point_candidate_is_forbidden(&context, 0, full_degree_candidate, &[])
                 .expect("full-degree candidate is decidable")
+        );
+    }
+
+    #[test]
+    fn exact_same_secret_deep_sampler_accepts_at_least_half_the_challenge_field() {
+        let context = selected_relation_plan_check_context(
+            ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER,
+        )
+        .expect("the selected same-secret relation context derives");
+        let compiled = crate::bgv::proof_suite::compile_same_secret_relation_plan(
+            &crate::bgv::proof_suite::selected_same_secret_relation_plan_input()
+                .expect("the selected same-secret relation input derives"),
+            &context,
+        )
+        .expect("the exact same-secret relation compiles");
+        compiled
+            .check(&context)
+            .expect("the exact same-secret relation is checked");
+        let variant = compiled
+            .select_variant(None, None)
+            .expect("the exact same-secret relation has one variant");
+        let cardinality = variant
+            .deep_point_sampler_cardinality_bound(&context, 0)
+            .expect("the exact DEEP forbidden set has a source-derived bound");
+
+        let field_cardinality =
+            BigUint::from(PROOF_BASE_FIELD_MODULUS).pow(PROOF_CHALLENGE_EXTENSION_DEGREE as u32);
+        assert_eq!(cardinality.field_cardinality(), &field_cardinality);
+        assert!(
+            cardinality.forbidden_candidate_count_ceiling() * BigUint::from(2_u8)
+                <= field_cardinality
+        );
+        assert!(
+            cardinality.accepted_candidate_count_floor() * BigUint::from(2_u8) >= field_cardinality
+        );
+    }
+
+    #[test]
+    fn exact_same_secret_cross_multiplied_composition_degree_is_source_derived() {
+        let context = selected_relation_plan_check_context(
+            ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER,
+        )
+        .expect("the selected same-secret relation context derives");
+        let compiled = crate::bgv::proof_suite::compile_same_secret_relation_plan(
+            &crate::bgv::proof_suite::selected_same_secret_relation_plan_input()
+                .expect("the selected same-secret relation input derives"),
+            &context,
+        )
+        .expect("the exact same-secret relation compiles");
+        compiled
+            .check(&context)
+            .expect("the exact same-secret relation is checked");
+        let variant = compiled
+            .select_variant(None, None)
+            .expect("the exact same-secret relation has one variant");
+
+        assert_eq!(variant.trace_domain_size(), 16_384);
+        assert_eq!(context.quotient_component_count, 8);
+        assert_eq!(context.quotient_component_degree_bound_exclusive, 33_884);
+        assert_eq!(variant.quotient_decomposition_stride(&context), Ok(17_152));
+        let maximum_reconstructed_quotient_degree = 7 * 17_152 + (33_884 - 1);
+        assert_eq!(maximum_reconstructed_quotient_degree, 153_947);
+
+        assert_eq!(
+            variant
+                .cross_multiplied_composition_identity_degree_bound(&context)
+                .expect("derive the exact cross-multiplied composition degree"),
+            maximum_reconstructed_quotient_degree + variant.trace_domain_size()
         );
     }
 

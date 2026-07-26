@@ -1,7 +1,13 @@
 use std::collections::BTreeSet;
 
+#[cfg(test)]
+use std::collections::BTreeMap;
+
 use num_bigint::BigUint;
 use num_traits::One;
+
+#[cfg(test)]
+use super::relation_plan::DeepPointSamplerCardinalityBound;
 
 use crate::foundation::{
     CANONICAL_TUPLE_SCHEMA_IDENTIFIER, CANONICAL_TUPLE_VERSION, CanonicalItem, CanonicalItemType,
@@ -17,6 +23,8 @@ use super::relation_plan::RelationApplicationChallengeAssignment;
 const TRANSCRIPT_INITIAL_DOMAIN: &str = "sealed-lattice/proof/transcript/v1";
 const TRANSCRIPT_ABSORB_DOMAIN: &str = "sealed-lattice/proof/transcript/absorb/v1";
 const TRANSCRIPT_SQUEEZE_DOMAIN: &str = "sealed-lattice/proof/transcript/squeeze/v1";
+#[cfg(test)]
+pub(crate) const PUBLIC_SAMPLER_XOF_DOMAIN: &str = TRANSCRIPT_SQUEEZE_DOMAIN;
 const PRODUCT_RESIDUE_VECTOR_SAMPLER_TYPE: &str = "sealed-lattice/proof/product-residue-vector/v1";
 
 fn transcript_hash(domain: &str, items: Vec<CanonicalItem>) -> Result<[u8; 64], TranscriptError> {
@@ -57,6 +65,467 @@ pub(crate) enum DistinctQuerySamplingError {
     QueryCountExceedsDomain,
     CandidateDrawsExhausted { output_index: usize },
     ChallengeBlockUnavailable { output_index: usize },
+}
+
+/// Exact rational used by the source-derived public-coin sampler ledger.
+/// The fraction is deliberately left unreduced: its numerator and denominator
+/// retain the candidate-space derivation that the bounded runtime sampler uses.
+#[cfg(test)]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ExactBigUintRational {
+    numerator: BigUint,
+    denominator: BigUint,
+}
+
+#[cfg(test)]
+impl ExactBigUintRational {
+    fn new(numerator: BigUint, denominator: BigUint) -> Result<Self, TranscriptError> {
+        if denominator == BigUint::default() || numerator > denominator {
+            return Err(TranscriptError::InvalidCommonProofSchedule);
+        }
+        Ok(Self {
+            numerator,
+            denominator,
+        })
+    }
+
+    pub(crate) const fn numerator(&self) -> &BigUint {
+        &self.numerator
+    }
+
+    pub(crate) const fn denominator(&self) -> &BigUint {
+        &self.denominator
+    }
+
+    fn power_of_two_denominator_exponent(&self) -> Result<usize, TranscriptError> {
+        let exponent = self
+            .denominator
+            .bits()
+            .checked_sub(1)
+            .ok_or(TranscriptError::InvalidCommonProofSchedule)?;
+        let exponent =
+            usize::try_from(exponent).map_err(|_| TranscriptError::ChallengeCounterOverflow)?;
+        if self.denominator != (BigUint::one() << exponent) {
+            return Err(TranscriptError::InvalidCommonProofSchedule);
+        }
+        Ok(exponent)
+    }
+}
+
+/// Closed kinds of public verifier samplers on the accepted row-code WHIR
+/// path. One catalog row is one logical Fiat-Shamir verifier message.
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PublicSamplerKind {
+    Product,
+    Extension,
+    Deep,
+    Distinct,
+}
+
+#[cfg(test)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum PublicSamplerExhaustionModel {
+    /// Exact only in the ideal typed-XOF model, where the candidates within
+    /// this one logical verifier message are independent and uniform.
+    IndependentDraws {
+        candidate_space_cardinality: BigUint,
+        rejected_candidate_count_ceiling: BigUint,
+    },
+    SequentialDistinct {
+        domain_cardinality: BigUint,
+    },
+}
+
+/// One typed, source-owned bounded public sampler. The row records the exact
+/// transcript tag and XOF domain, algebraic target, output arity, bit width,
+/// draw ceiling, and any separately proved forbidden-cardinality ceiling.
+/// Proof bytes supply none of these values.
+#[cfg(test)]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct PublicSamplerExhaustionCatalogRow {
+    challenge_tag: String,
+    transcript_xof_domain: &'static str,
+    sampler_kind: PublicSamplerKind,
+    target_cardinality: BigUint,
+    coordinate_modulus: Option<u64>,
+    scalar_output_count: u32,
+    candidate_bit_length: u32,
+    maximum_candidate_draws_per_output: u32,
+    forbidden_cardinality_ceiling: Option<BigUint>,
+    exhaustion_model: PublicSamplerExhaustionModel,
+}
+
+#[cfg(test)]
+impl PublicSamplerExhaustionCatalogRow {
+    fn product(
+        challenge_tag: String,
+        modulus: u64,
+        coordinate_count: u16,
+        candidate_byte_length: u64,
+        maximum_candidate_draws_per_output: u32,
+    ) -> Result<Self, TranscriptError> {
+        if modulus <= 1
+            || coordinate_count == 0
+            || candidate_byte_length == 0
+            || maximum_candidate_draws_per_output == 0
+        {
+            return Err(TranscriptError::InvalidCommonProofSchedule);
+        }
+        let candidate_bit_length = u32::try_from(
+            candidate_byte_length
+                .checked_mul(8)
+                .ok_or(TranscriptError::ChallengeCounterOverflow)?,
+        )
+        .map_err(|_| TranscriptError::ChallengeCounterOverflow)?;
+        let target_cardinality = BigUint::from(modulus).pow(u32::from(coordinate_count));
+        let candidate_space_cardinality = BigUint::one()
+            << usize::try_from(candidate_bit_length)
+                .map_err(|_| TranscriptError::ChallengeCounterOverflow)?;
+        if target_cardinality > candidate_space_cardinality {
+            return Err(TranscriptError::InvalidCommonProofSchedule);
+        }
+        let rejected_candidate_count_ceiling = &candidate_space_cardinality % &target_cardinality;
+        Ok(Self {
+            challenge_tag,
+            transcript_xof_domain: TRANSCRIPT_SQUEEZE_DOMAIN,
+            sampler_kind: PublicSamplerKind::Product,
+            target_cardinality,
+            coordinate_modulus: Some(modulus),
+            scalar_output_count: u32::from(coordinate_count),
+            candidate_bit_length,
+            maximum_candidate_draws_per_output,
+            forbidden_cardinality_ceiling: None,
+            exhaustion_model: PublicSamplerExhaustionModel::IndependentDraws {
+                candidate_space_cardinality,
+                rejected_candidate_count_ceiling,
+            },
+        })
+    }
+
+    pub(crate) fn extension(
+        challenge_tag: String,
+        sampler_kind: PublicSamplerKind,
+        maximum_candidate_draws_per_output: u32,
+        forbidden_cardinality_ceiling: Option<BigUint>,
+    ) -> Result<Self, TranscriptError> {
+        if !matches!(
+            sampler_kind,
+            PublicSamplerKind::Extension | PublicSamplerKind::Deep
+        ) || maximum_candidate_draws_per_output == 0
+            || (sampler_kind == PublicSamplerKind::Deep) != forbidden_cardinality_ceiling.is_some()
+        {
+            return Err(TranscriptError::InvalidCommonProofSchedule);
+        }
+        let target_cardinality = BigUint::from(PROOF_BASE_FIELD_MODULUS).pow(
+            u32::try_from(PROOF_CHALLENGE_EXTENSION_DEGREE)
+                .map_err(|_| TranscriptError::ChallengeCounterOverflow)?,
+        );
+        let candidate_space_cardinality = BigUint::one() << 512_usize;
+        let acceptance_multiplicity = &candidate_space_cardinality / &target_cardinality;
+        let mut rejected_candidate_count_ceiling =
+            &candidate_space_cardinality % &target_cardinality;
+        if let Some(forbidden_cardinality_ceiling) = &forbidden_cardinality_ceiling {
+            if forbidden_cardinality_ceiling >= &target_cardinality {
+                return Err(TranscriptError::InvalidCommonProofSchedule);
+            }
+            rejected_candidate_count_ceiling +=
+                &acceptance_multiplicity * forbidden_cardinality_ceiling;
+        }
+        Ok(Self {
+            challenge_tag,
+            transcript_xof_domain: TRANSCRIPT_SQUEEZE_DOMAIN,
+            sampler_kind,
+            target_cardinality,
+            coordinate_modulus: Some(PROOF_BASE_FIELD_MODULUS),
+            scalar_output_count: 1,
+            candidate_bit_length: 512,
+            maximum_candidate_draws_per_output,
+            forbidden_cardinality_ceiling,
+            exhaustion_model: PublicSamplerExhaustionModel::IndependentDraws {
+                candidate_space_cardinality,
+                rejected_candidate_count_ceiling,
+            },
+        })
+    }
+
+    pub(crate) fn distinct(
+        challenge_tag: String,
+        domain_cardinality: usize,
+        output_count: usize,
+        maximum_candidate_draws_per_output: u32,
+    ) -> Result<Self, TranscriptError> {
+        if domain_cardinality == 0
+            || !domain_cardinality.is_power_of_two()
+            || output_count == 0
+            || output_count > domain_cardinality
+            || maximum_candidate_draws_per_output == 0
+        {
+            return Err(TranscriptError::InvalidCommonProofSchedule);
+        }
+        let domain_cardinality_u64 = u64::try_from(domain_cardinality)
+            .map_err(|_| TranscriptError::ChallengeCounterOverflow)?;
+        let scalar_output_count =
+            u32::try_from(output_count).map_err(|_| TranscriptError::ChallengeCounterOverflow)?;
+        let target_cardinality = BigUint::from(domain_cardinality_u64);
+        Ok(Self {
+            challenge_tag,
+            transcript_xof_domain: TRANSCRIPT_SQUEEZE_DOMAIN,
+            sampler_kind: PublicSamplerKind::Distinct,
+            target_cardinality: target_cardinality.clone(),
+            coordinate_modulus: None,
+            scalar_output_count,
+            candidate_bit_length: 64,
+            maximum_candidate_draws_per_output,
+            forbidden_cardinality_ceiling: Some(BigUint::from(
+                scalar_output_count.saturating_sub(1),
+            )),
+            exhaustion_model: PublicSamplerExhaustionModel::SequentialDistinct {
+                domain_cardinality: target_cardinality,
+            },
+        })
+    }
+
+    pub(crate) fn challenge_tag(&self) -> &str {
+        &self.challenge_tag
+    }
+
+    pub(crate) const fn transcript_xof_domain(&self) -> &'static str {
+        self.transcript_xof_domain
+    }
+
+    pub(crate) const fn sampler_kind(&self) -> PublicSamplerKind {
+        self.sampler_kind
+    }
+
+    pub(crate) const fn target_cardinality(&self) -> &BigUint {
+        &self.target_cardinality
+    }
+
+    pub(crate) const fn coordinate_modulus(&self) -> Option<u64> {
+        self.coordinate_modulus
+    }
+
+    pub(crate) const fn scalar_output_count(&self) -> u32 {
+        self.scalar_output_count
+    }
+
+    pub(crate) const fn candidate_bit_length(&self) -> u32 {
+        self.candidate_bit_length
+    }
+
+    pub(crate) const fn maximum_candidate_draws_per_output(&self) -> u32 {
+        self.maximum_candidate_draws_per_output
+    }
+
+    pub(crate) const fn forbidden_cardinality_ceiling(&self) -> Option<&BigUint> {
+        self.forbidden_cardinality_ceiling.as_ref()
+    }
+
+    /// Exact exhaustion probability in the ideal typed-XOF model for product,
+    /// ordinary extension, and distinct-vector rows; an exact upper bound in
+    /// that model for a DEEP row whose forbidden set is supplied as a checked
+    /// cardinality ceiling. Independence is used only between candidate draws
+    /// within this row, never between catalog rows or proof executions.
+    pub(crate) fn exhaustion_probability_upper_bound(
+        &self,
+    ) -> Result<ExactBigUintRational, TranscriptError> {
+        match &self.exhaustion_model {
+            PublicSamplerExhaustionModel::IndependentDraws {
+                candidate_space_cardinality,
+                rejected_candidate_count_ceiling,
+            } => ExactBigUintRational::new(
+                rejected_candidate_count_ceiling.pow(self.maximum_candidate_draws_per_output),
+                candidate_space_cardinality.pow(self.maximum_candidate_draws_per_output),
+            ),
+            PublicSamplerExhaustionModel::SequentialDistinct { domain_cardinality } => {
+                let per_output_denominator =
+                    domain_cardinality.pow(self.maximum_candidate_draws_per_output);
+                let denominator = per_output_denominator.pow(self.scalar_output_count);
+                let successful_numerator = (0..self.scalar_output_count).fold(
+                    BigUint::one(),
+                    |product, accepted_output_count| {
+                        product
+                            * (&per_output_denominator
+                                - BigUint::from(accepted_output_count)
+                                    .pow(self.maximum_candidate_draws_per_output))
+                    },
+                );
+                ExactBigUintRational::new(&denominator - successful_numerator, denominator)
+            }
+        }
+    }
+}
+
+/// Typed source-derived public sampler ledger. A row is a logical verifier
+/// message; bit and grinding outputs are kept separately because neither is a
+/// rejection sampler and the pinned production WHIR profile requires zero.
+#[cfg(test)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct PublicSamplerExhaustionCatalog {
+    rows: Vec<PublicSamplerExhaustionCatalogRow>,
+    bit_output_count: u64,
+    grinding_output_count: u64,
+}
+
+/// Test-only trace populated by successful calls through the production
+/// transcript samplers. DEEP cardinality ceilings are installed from the
+/// checked relation before the first sampled verifier message.
+#[cfg(test)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct ObservedPublicSamplerTrace {
+    rows: Vec<PublicSamplerExhaustionCatalogRow>,
+    deep_forbidden_cardinality_ceilings: Vec<BigUint>,
+}
+
+#[cfg(test)]
+impl PublicSamplerExhaustionCatalog {
+    pub(crate) fn rows(&self) -> &[PublicSamplerExhaustionCatalogRow] {
+        &self.rows
+    }
+
+    pub(crate) fn push_row(
+        &mut self,
+        row: PublicSamplerExhaustionCatalogRow,
+    ) -> Result<(), TranscriptError> {
+        self.rows
+            .try_reserve(1)
+            .map_err(|_| TranscriptError::ChallengeCounterOverflow)?;
+        self.rows.push(row);
+        Ok(())
+    }
+
+    pub(crate) fn push_direct_row_code_whir_extension(
+        &mut self,
+        challenge: RowCodeWhirChallenge,
+        maximum_candidate_draws_per_output: u32,
+    ) -> Result<(), TranscriptError> {
+        if matches!(
+            challenge,
+            RowCodeWhirChallenge::OuterQueryVector | RowCodeWhirChallenge::BoundQueryVector
+        ) {
+            return Err(TranscriptError::InvalidCommonProofSchedule);
+        }
+        self.push_row(PublicSamplerExhaustionCatalogRow::extension(
+            challenge.tag(),
+            PublicSamplerKind::Extension,
+            maximum_candidate_draws_per_output,
+            None,
+        )?)
+    }
+
+    pub(crate) fn push_direct_row_code_whir_distinct(
+        &mut self,
+        challenge: RowCodeWhirChallenge,
+        domain_cardinality: usize,
+        output_count: usize,
+        maximum_candidate_draws_per_output: u32,
+    ) -> Result<(), TranscriptError> {
+        if !matches!(
+            challenge,
+            RowCodeWhirChallenge::OuterQueryVector | RowCodeWhirChallenge::BoundQueryVector
+        ) {
+            return Err(TranscriptError::InvalidCommonProofSchedule);
+        }
+        let domain_cardinality_u64 = u64::try_from(domain_cardinality)
+            .map_err(|_| TranscriptError::ChallengeCounterOverflow)?;
+        let output_count_u64 =
+            u64::try_from(output_count).map_err(|_| TranscriptError::ChallengeCounterOverflow)?;
+        self.push_row(PublicSamplerExhaustionCatalogRow::distinct(
+            format!(
+                "{}/{domain_cardinality_u64:016x}/{output_count_u64:016x}",
+                challenge.tag()
+            ),
+            domain_cardinality,
+            output_count,
+            maximum_candidate_draws_per_output,
+        )?)
+    }
+
+    pub(crate) fn sampler_kind_row_count(&self, sampler_kind: PublicSamplerKind) -> u64 {
+        self.rows
+            .iter()
+            .filter(|row| row.sampler_kind == sampler_kind)
+            .count() as u64
+    }
+
+    pub(crate) fn extension_scalar_output_count_including_deep(&self) -> u64 {
+        self.rows
+            .iter()
+            .filter(|row| {
+                matches!(
+                    row.sampler_kind,
+                    PublicSamplerKind::Extension | PublicSamplerKind::Deep
+                )
+            })
+            .map(|row| u64::from(row.scalar_output_count))
+            .sum()
+    }
+
+    pub(crate) fn logical_verifier_message_count(&self) -> u64 {
+        self.rows.len() as u64
+    }
+
+    /// Compares the exact union bound across catalog rows and repeated proof
+    /// executions with `2^-inverse_power`. This adds probabilities only; it
+    /// does not assume that any transcript draws or proofs are independent.
+    /// All bounded runtime samplers in this catalog have power-of-two
+    /// candidate spaces, so denominator alignment is exact.
+    pub(crate) fn multiplied_exhaustion_union_bound_is_at_most_inverse_power_of_two(
+        &self,
+        proof_execution_multiplicity: u64,
+        inverse_power: u32,
+    ) -> Result<bool, TranscriptError> {
+        if self.rows.is_empty() || proof_execution_multiplicity == 0 {
+            return Ok(true);
+        }
+
+        let mut repeated_row_groups = BTreeMap::<
+            (&PublicSamplerExhaustionModel, u32, u32),
+            (u64, &PublicSamplerExhaustionCatalogRow),
+        >::new();
+        for row in &self.rows {
+            let group_key = (
+                &row.exhaustion_model,
+                row.maximum_candidate_draws_per_output,
+                row.scalar_output_count,
+            );
+            let group = repeated_row_groups.entry(group_key).or_insert((0, row));
+            group.0 = group
+                .0
+                .checked_add(1)
+                .ok_or(TranscriptError::ChallengeCounterOverflow)?;
+        }
+
+        let mut grouped_bounds = Vec::with_capacity(repeated_row_groups.len());
+        let mut common_denominator_exponent = 0_usize;
+        for (row_multiplicity, representative_row) in repeated_row_groups.into_values() {
+            let probability = representative_row.exhaustion_probability_upper_bound()?;
+            let denominator_exponent = probability.power_of_two_denominator_exponent()?;
+            common_denominator_exponent = common_denominator_exponent.max(denominator_exponent);
+            grouped_bounds.push((probability, denominator_exponent, row_multiplicity));
+        }
+
+        let mut aligned_union_numerator = BigUint::default();
+        for (probability, denominator_exponent, row_multiplicity) in grouped_bounds {
+            aligned_union_numerator += (probability.numerator * BigUint::from(row_multiplicity))
+                << (common_denominator_exponent - denominator_exponent);
+        }
+        aligned_union_numerator *= BigUint::from(proof_execution_multiplicity);
+        let inverse_power = usize::try_from(inverse_power)
+            .map_err(|_| TranscriptError::ChallengeCounterOverflow)?;
+        aligned_union_numerator <<= inverse_power;
+
+        Ok(aligned_union_numerator <= (BigUint::one() << common_denominator_exponent))
+    }
+
+    pub(crate) const fn bit_output_count(&self) -> u64 {
+        self.bit_output_count
+    }
+
+    pub(crate) const fn grinding_output_count(&self) -> u64 {
+        self.grinding_output_count
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -1342,6 +1811,68 @@ impl CommonProofTranscriptSchedule {
         self.maximum_candidate_draws_per_output
     }
 
+    /// Derives every public sampler before the row-code successor handoff from
+    /// the checked common schedule. DEEP forbidden-set ceilings must come from
+    /// the relation interpreter's validated cardinality API in ordinal order.
+    #[cfg(test)]
+    pub(crate) fn row_code_whir_handoff_public_sampler_exhaustion_catalog(
+        &self,
+        application_statement_schema_identifier: u16,
+        deep_point_cardinality_bounds: &[DeepPointSamplerCardinalityBound],
+    ) -> Result<PublicSamplerExhaustionCatalog, TranscriptError> {
+        if self.privacy_mode != CommonProofPrivacyMode::SecretBearing
+            || deep_point_cardinality_bounds.len() != usize::from(self.deep_point_count)
+        {
+            return Err(TranscriptError::InvalidCommonProofSchedule);
+        }
+        let expected_field_cardinality = BigUint::from(PROOF_BASE_FIELD_MODULUS).pow(
+            u32::try_from(PROOF_CHALLENGE_EXTENSION_DEGREE)
+                .map_err(|_| TranscriptError::ChallengeCounterOverflow)?,
+        );
+        let mut catalog = PublicSamplerExhaustionCatalog::default();
+        for sampler in self.ordered_application_challenge_sampler_accounting()? {
+            catalog.push_row(PublicSamplerExhaustionCatalogRow::product(
+                sampler
+                    .challenge()
+                    .tag(application_statement_schema_identifier),
+                sampler.modulus(),
+                sampler.coordinate_count(),
+                sampler.candidate_byte_length(),
+                sampler.maximum_candidate_draw_count(),
+            )?)?;
+        }
+        for constraint_ordinal in 0..self.composition_challenge_count {
+            catalog.push_row(PublicSamplerExhaustionCatalogRow::extension(
+                CommonProofChallenge::Composition { constraint_ordinal }
+                    .tag(application_statement_schema_identifier),
+                PublicSamplerKind::Extension,
+                self.maximum_candidate_draws_per_output,
+                None,
+            )?)?;
+        }
+        for (point_ordinal, bound) in deep_point_cardinality_bounds.iter().enumerate() {
+            if bound.field_cardinality() != &expected_field_cardinality
+                || bound.accepted_candidate_count_floor()
+                    + bound.forbidden_candidate_count_ceiling()
+                    != expected_field_cardinality
+                || bound.accepted_candidate_count_floor() == &BigUint::default()
+            {
+                return Err(TranscriptError::InvalidCommonProofSchedule);
+            }
+            catalog.push_row(PublicSamplerExhaustionCatalogRow::extension(
+                CommonProofChallenge::DeepPoint {
+                    point_ordinal: u16::try_from(point_ordinal)
+                        .map_err(|_| TranscriptError::ChallengeCounterOverflow)?,
+                }
+                .tag(application_statement_schema_identifier),
+                PublicSamplerKind::Deep,
+                self.maximum_candidate_draws_per_output,
+                Some(bound.forbidden_candidate_count_ceiling().clone()),
+            )?)?;
+        }
+        Ok(catalog)
+    }
+
     #[cfg(test)]
     pub(crate) fn maximum_application_challenge_sampler_scratch_byte_length(
         &self,
@@ -2113,6 +2644,8 @@ pub(crate) struct CommonProofTranscript {
     progress: CommonProofProgress,
     accepted_deep_points: Vec<ProofChallengeExtensionElement>,
     accepted_query_representatives: Vec<u64>,
+    #[cfg(test)]
+    observed_public_sampler_trace: Option<ObservedPublicSamplerTrace>,
 }
 
 impl CommonProofTranscript {
@@ -2146,9 +2679,95 @@ impl CommonProofTranscript {
             progress: CommonProofProgress::BaseRoots(0),
             accepted_deep_points,
             accepted_query_representatives,
+            #[cfg(test)]
+            observed_public_sampler_trace: None,
         };
         result.skip_empty_prefix_phases();
         Ok(result)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn enable_public_sampler_trace(
+        &mut self,
+        deep_point_cardinality_bounds: &[DeepPointSamplerCardinalityBound],
+    ) -> Result<(), TranscriptError> {
+        if self.observed_public_sampler_trace.is_some()
+            || self.progress != CommonProofProgress::BaseRoots(0)
+            || deep_point_cardinality_bounds.len() != usize::from(self.schedule.deep_point_count)
+        {
+            return Err(TranscriptError::InvalidCommonProofSchedule);
+        }
+        let field_cardinality = BigUint::from(PROOF_BASE_FIELD_MODULUS).pow(
+            u32::try_from(PROOF_CHALLENGE_EXTENSION_DEGREE)
+                .map_err(|_| TranscriptError::ChallengeCounterOverflow)?,
+        );
+        let mut deep_forbidden_cardinality_ceilings = Vec::new();
+        deep_forbidden_cardinality_ceilings
+            .try_reserve_exact(deep_point_cardinality_bounds.len())
+            .map_err(|_| TranscriptError::ChallengeCounterOverflow)?;
+        for bound in deep_point_cardinality_bounds {
+            if bound.field_cardinality() != &field_cardinality
+                || bound.accepted_candidate_count_floor()
+                    + bound.forbidden_candidate_count_ceiling()
+                    != field_cardinality
+                || bound.accepted_candidate_count_floor() == &BigUint::default()
+            {
+                return Err(TranscriptError::InvalidCommonProofSchedule);
+            }
+            deep_forbidden_cardinality_ceilings
+                .push(bound.forbidden_candidate_count_ceiling().clone());
+        }
+        self.observed_public_sampler_trace = Some(ObservedPublicSamplerTrace {
+            rows: Vec::new(),
+            deep_forbidden_cardinality_ceilings,
+        });
+        Ok(())
+    }
+
+    #[cfg(test)]
+    fn traced_extension_sampler_row(
+        &self,
+        challenge: CommonProofChallenge,
+    ) -> Result<Option<PublicSamplerExhaustionCatalogRow>, TranscriptError> {
+        let Some(trace) = &self.observed_public_sampler_trace else {
+            return Ok(None);
+        };
+        let (sampler_kind, forbidden_cardinality_ceiling) = match challenge {
+            CommonProofChallenge::DeepPoint { point_ordinal } => (
+                PublicSamplerKind::Deep,
+                Some(
+                    trace
+                        .deep_forbidden_cardinality_ceilings
+                        .get(usize::from(point_ordinal))
+                        .ok_or(TranscriptError::InvalidCommonProofSchedule)?
+                        .clone(),
+                ),
+            ),
+            _ => (PublicSamplerKind::Extension, None),
+        };
+        PublicSamplerExhaustionCatalogRow::extension(
+            challenge.tag(self.transcript.application_statement_schema_identifier),
+            sampler_kind,
+            self.schedule.maximum_candidate_draws_per_output,
+            forbidden_cardinality_ceiling,
+        )
+        .map(Some)
+    }
+
+    #[cfg(test)]
+    fn record_public_sampler_row(
+        &mut self,
+        row: Option<PublicSamplerExhaustionCatalogRow>,
+    ) -> Result<(), TranscriptError> {
+        let (Some(trace), Some(row)) = (&mut self.observed_public_sampler_trace, row) else {
+            return Ok(());
+        };
+        trace
+            .rows
+            .try_reserve(1)
+            .map_err(|_| TranscriptError::ChallengeCounterOverflow)?;
+        trace.rows.push(row);
+        Ok(())
     }
 
     pub(crate) fn absorb_base_root(
@@ -2188,6 +2807,20 @@ impl CommonProofTranscript {
         if expected.challenge != challenge {
             return Err(TranscriptError::UnexpectedCommonProofChallenge);
         }
+        #[cfg(test)]
+        let observed_sampler_row = if self.observed_public_sampler_trace.is_some() {
+            Some(PublicSamplerExhaustionCatalogRow::product(
+                expected
+                    .challenge
+                    .tag(self.transcript.application_statement_schema_identifier),
+                expected.modulus,
+                expected.coordinate_count,
+                expected.candidate_byte_length,
+                self.schedule.maximum_candidate_draws_per_output,
+            )?)
+        } else {
+            None
+        };
         let (stream, first_candidate) = self
             .transcript
             .begin_common_product_residue_challenge(expected)?;
@@ -2214,6 +2847,8 @@ impl CommonProofTranscript {
             )?
             .total_xof_query_count_ceiling(),
         )?;
+        #[cfg(test)]
+        self.record_public_sampler_row(observed_sampler_row)?;
         self.progress = CommonProofProgress::ApplicationChallenges(next_index + 1);
         self.skip_empty_prefix_phases();
         Ok(sampled)
@@ -2604,12 +3239,20 @@ impl CommonProofTranscript {
         {
             return Err(TranscriptError::IncompleteCommonProofTranscript);
         }
-        RowCodeWhirTranscript::from_common_prefix(
+        let row_code_whir_transcript = RowCodeWhirTranscript::from_common_prefix(
             self.transcript,
             self.hash_query_counter,
             self.schedule.maximum_candidate_draws_per_output,
             opening_batch_mask_evaluations,
-        )
+        )?;
+        #[cfg(test)]
+        let row_code_whir_transcript = {
+            let mut row_code_whir_transcript = row_code_whir_transcript;
+            row_code_whir_transcript.observed_public_sampler_rows =
+                self.observed_public_sampler_trace.map(|trace| trace.rows);
+            row_code_whir_transcript
+        };
+        Ok(row_code_whir_transcript)
     }
 
     #[cfg(test)]
@@ -2625,6 +3268,8 @@ impl CommonProofTranscript {
     where
         F: FnMut(ProofChallengeExtensionElement) -> bool,
     {
+        #[cfg(test)]
+        let observed_sampler_row = self.traced_extension_sampler_row(challenge)?;
         let mut stream = self.transcript.begin_common_challenge(challenge)?;
         for draw_ordinal in 0..self.schedule.maximum_candidate_draws_per_output {
             if let Some(candidate) = stream.sample_extension_candidate()?
@@ -2642,6 +3287,8 @@ impl CommonProofTranscript {
                     .begin_challenge(maximum_extension_challenge_hash_count(
                         self.schedule.maximum_candidate_draws_per_output,
                     )?)?;
+                #[cfg(test)]
+                self.record_public_sampler_row(observed_sampler_row)?;
                 return Ok(candidate);
             }
             if draw_ordinal + 1 < self.schedule.maximum_candidate_draws_per_output {
@@ -2708,19 +3355,28 @@ enum RowCodeWhirProgress {
     Complete,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct RowCodeWhirTranscriptSummary {
     maximum_hash_query_count: u64,
     logical_verifier_message_count: u64,
+    #[cfg(test)]
+    observed_public_sampler_rows: Option<Vec<PublicSamplerExhaustionCatalogRow>>,
 }
 
 impl RowCodeWhirTranscriptSummary {
-    pub(crate) const fn maximum_hash_query_count(self) -> u64 {
+    pub(crate) const fn maximum_hash_query_count(&self) -> u64 {
         self.maximum_hash_query_count
     }
 
-    pub(crate) const fn logical_verifier_message_count(self) -> u64 {
+    pub(crate) const fn logical_verifier_message_count(&self) -> u64 {
         self.logical_verifier_message_count
+    }
+
+    #[cfg(test)]
+    pub(crate) fn observed_public_sampler_rows(
+        &self,
+    ) -> Option<&[PublicSamplerExhaustionCatalogRow]> {
+        self.observed_public_sampler_rows.as_deref()
     }
 }
 
@@ -2738,6 +3394,8 @@ pub(crate) struct RowCodeWhirTranscript {
     next_whir_observation_ordinal: u32,
     next_whir_challenge_ordinal: u32,
     next_whir_bit_challenge_ordinal: u32,
+    #[cfg(test)]
+    observed_public_sampler_rows: Option<Vec<PublicSamplerExhaustionCatalogRow>>,
 }
 
 impl RowCodeWhirTranscript {
@@ -2756,6 +3414,8 @@ impl RowCodeWhirTranscript {
             next_whir_observation_ordinal: 0,
             next_whir_challenge_ordinal: 0,
             next_whir_bit_challenge_ordinal: 0,
+            #[cfg(test)]
+            observed_public_sampler_rows: None,
         };
         result.absorb_opening_batch_mask_evaluations(opening_batch_mask_evaluations)?;
         Ok(result)
@@ -2778,7 +3438,23 @@ impl RowCodeWhirTranscript {
             next_whir_observation_ordinal: 0,
             next_whir_challenge_ordinal: 0,
             next_whir_bit_challenge_ordinal: 0,
+            #[cfg(test)]
+            observed_public_sampler_rows: None,
         })
+    }
+
+    #[cfg(test)]
+    fn record_public_sampler_row(
+        &mut self,
+        row: Option<PublicSamplerExhaustionCatalogRow>,
+    ) -> Result<(), TranscriptError> {
+        let (Some(rows), Some(row)) = (&mut self.observed_public_sampler_rows, row) else {
+            return Ok(());
+        };
+        rows.try_reserve(1)
+            .map_err(|_| TranscriptError::ChallengeCounterOverflow)?;
+        rows.push(row);
+        Ok(())
     }
 
     fn absorb_opening_batch_mask_evaluations(
@@ -2868,6 +3544,17 @@ impl RowCodeWhirTranscript {
             "{}/{upper_bound_u64:016x}/{output_count_u64:016x}",
             challenge.tag()
         );
+        #[cfg(test)]
+        let observed_sampler_row = if self.observed_public_sampler_rows.is_some() {
+            Some(PublicSamplerExhaustionCatalogRow::distinct(
+                challenge_tag.clone(),
+                upper_bound,
+                output_count,
+                self.maximum_candidate_draws_per_output,
+            )?)
+        } else {
+            None
+        };
         let (stream, randomness) = self
             .transcript
             .begin_typed_xof_challenge(challenge_tag, random_byte_length)?;
@@ -2918,6 +3605,8 @@ impl RowCodeWhirTranscript {
         self.transcript
             .finish_common_challenge(stream, canonical_output_bytes)?;
         self.hash_query_counter.begin_challenge(1)?;
+        #[cfg(test)]
+        self.record_public_sampler_row(observed_sampler_row)?;
         Ok(accepted_indices)
     }
 
@@ -3053,6 +3742,22 @@ impl RowCodeWhirTranscript {
         let tag = format!(
             "row-code-whir/whir-query-vector/{epoch_ordinal:08x}/{bits:04x}/{output_count_u64:016x}"
         );
+        #[cfg(test)]
+        let observed_sampler_row = if self.observed_public_sampler_rows.is_some() {
+            Some(PublicSamplerExhaustionCatalogRow::distinct(
+                tag.clone(),
+                1_usize
+                    .checked_shl(
+                        u32::try_from(bits)
+                            .map_err(|_| TranscriptError::ChallengeCounterOverflow)?,
+                    )
+                    .ok_or(TranscriptError::ChallengeCounterOverflow)?,
+                output_count,
+                self.maximum_candidate_draws_per_output,
+            )?)
+        } else {
+            None
+        };
         let (stream, randomness) = self
             .transcript
             .begin_typed_xof_challenge(tag, random_byte_length)?;
@@ -3094,6 +3799,8 @@ impl RowCodeWhirTranscript {
         self.transcript
             .finish_common_challenge(stream, canonical_output_bytes)?;
         self.hash_query_counter.begin_challenge(1)?;
+        #[cfg(test)]
+        self.record_public_sampler_row(observed_sampler_row)?;
         self.progress = RowCodeWhirProgress::Whir;
         Ok(accepted_indices)
     }
@@ -3125,6 +3832,8 @@ impl RowCodeWhirTranscript {
         Ok(RowCodeWhirTranscriptSummary {
             maximum_hash_query_count: self.hash_query_counter.finish()?,
             logical_verifier_message_count,
+            #[cfg(test)]
+            observed_public_sampler_rows: self.observed_public_sampler_rows,
         })
     }
 
@@ -3132,6 +3841,17 @@ impl RowCodeWhirTranscript {
         &mut self,
         challenge_tag: String,
     ) -> Result<ProofChallengeExtensionElement, TranscriptError> {
+        #[cfg(test)]
+        let observed_sampler_row = if self.observed_public_sampler_rows.is_some() {
+            Some(PublicSamplerExhaustionCatalogRow::extension(
+                challenge_tag.clone(),
+                PublicSamplerKind::Extension,
+                self.maximum_candidate_draws_per_output,
+                None,
+            )?)
+        } else {
+            None
+        };
         let mut stream = self.transcript.begin_typed_challenge(challenge_tag)?;
         for draw_ordinal in 0..self.maximum_candidate_draws_per_output {
             if let Some(candidate) = stream.sample_extension_candidate()? {
@@ -3147,6 +3867,8 @@ impl RowCodeWhirTranscript {
                     .begin_challenge(maximum_extension_challenge_hash_count(
                         self.maximum_candidate_draws_per_output,
                     )?)?;
+                #[cfg(test)]
+                self.record_public_sampler_row(observed_sampler_row)?;
                 return Ok(candidate);
             }
             if draw_ordinal + 1 < self.maximum_candidate_draws_per_output {
@@ -3584,8 +4306,10 @@ mod common_challenge_chain_tests {
     use super::{
         CanonicalProofTranscript, CommonChallengeStream, CommonProofApplicationChallengeGroup,
         CommonProofChallenge, CommonProofPrivacyMode, CommonProofRound, CommonProofTranscript,
-        CommonProofTranscriptSchedule, TRANSCRIPT_SQUEEZE_DOMAIN, TranscriptError,
-        product_residue_candidate_byte_length, product_residue_candidate_xof_input, transcript_xof,
+        CommonProofTranscriptSchedule, PublicSamplerExhaustionCatalog,
+        PublicSamplerExhaustionCatalogRow, PublicSamplerKind, TRANSCRIPT_SQUEEZE_DOMAIN,
+        TranscriptError, product_residue_candidate_byte_length,
+        product_residue_candidate_xof_input, transcript_xof,
     };
 
     fn transcript() -> CanonicalProofTranscript {
@@ -4058,6 +4782,73 @@ mod common_challenge_chain_tests {
         assert!(memory.maximum_output_overlap_byte_length() >= 2 * 513 * 8);
         assert!(
             memory.maximum_transient_byte_length() >= product_memory.maximum_peak_byte_length()
+        );
+    }
+
+    #[test]
+    fn public_sampler_exhaustion_rows_preserve_exact_candidate_rationals() {
+        let product = PublicSamplerExhaustionCatalogRow::product(
+            "proof/1211/alpha-vector/0000".to_owned(),
+            3,
+            2,
+            1,
+            2,
+        )
+        .expect("construct a bounded product-vector sampler row");
+        assert_eq!(product.challenge_tag(), "proof/1211/alpha-vector/0000");
+        assert_eq!(product.transcript_xof_domain(), TRANSCRIPT_SQUEEZE_DOMAIN);
+        assert_eq!(product.sampler_kind(), PublicSamplerKind::Product);
+        assert_eq!(product.target_cardinality(), &BigUint::from(9_u8));
+        assert_eq!(product.coordinate_modulus(), Some(3));
+        assert_eq!(product.scalar_output_count(), 2);
+        assert_eq!(product.candidate_bit_length(), 8);
+        assert_eq!(product.forbidden_cardinality_ceiling(), None);
+        let product_exhaustion = product
+            .exhaustion_probability_upper_bound()
+            .expect("derive the exact product-vector exhaustion probability");
+        assert_eq!(product_exhaustion.numerator(), &BigUint::from(16_u8));
+        assert_eq!(product_exhaustion.denominator(), &BigUint::from(65_536_u32));
+
+        let distinct = PublicSamplerExhaustionCatalogRow::distinct(
+            "row-code-whir/test-distinct".to_owned(),
+            4,
+            3,
+            2,
+        )
+        .expect("construct a bounded distinct-vector sampler row");
+        assert_eq!(distinct.challenge_tag(), "row-code-whir/test-distinct");
+        assert_eq!(distinct.transcript_xof_domain(), TRANSCRIPT_SQUEEZE_DOMAIN);
+        assert_eq!(distinct.sampler_kind(), PublicSamplerKind::Distinct);
+        assert_eq!(distinct.target_cardinality(), &BigUint::from(4_u8));
+        assert_eq!(distinct.coordinate_modulus(), None);
+        assert_eq!(distinct.scalar_output_count(), 3);
+        assert_eq!(distinct.candidate_bit_length(), 64);
+        assert_eq!(
+            distinct.forbidden_cardinality_ceiling(),
+            Some(&BigUint::from(2_u8))
+        );
+        let distinct_exhaustion = distinct
+            .exhaustion_probability_upper_bound()
+            .expect("derive the exact sequential distinct-vector exhaustion probability");
+        assert_eq!(distinct_exhaustion.numerator(), &BigUint::from(1_216_u16));
+        assert_eq!(distinct_exhaustion.denominator(), &BigUint::from(4_096_u16));
+
+        let mut catalog = PublicSamplerExhaustionCatalog::default();
+        catalog
+            .push_row(product)
+            .expect("catalog the product-vector sampler row");
+        catalog
+            .push_row(distinct)
+            .expect("catalog the distinct-vector sampler row");
+        assert!(
+            catalog
+                .multiplied_exhaustion_union_bound_is_at_most_inverse_power_of_two(2, 0)
+                .expect("compare the exact repeated-proof union bound with one")
+        );
+        assert!(
+            !catalog
+                .multiplied_exhaustion_union_bound_is_at_most_inverse_power_of_two(2, 1)
+                .expect("compare the exact repeated-proof union bound with one half")
         );
     }
 

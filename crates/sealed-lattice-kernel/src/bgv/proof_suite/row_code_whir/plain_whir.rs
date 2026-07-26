@@ -32,6 +32,10 @@ use super::{
     ChallengeField, CommitmentScheme, DiscreteFourierTransform, ExtensionFieldChallenger,
     LeafHasher, NodeCompressor,
 };
+#[cfg(test)]
+use crate::bgv::proof_suite::transcript::{
+    PublicSamplerExhaustionCatalog, PublicSamplerExhaustionCatalogRow, PublicSamplerKind,
+};
 
 const STARTING_LOG_INV_RATE: usize = 2;
 const FOLDING_FACTOR: usize = 3;
@@ -95,6 +99,18 @@ pub(super) fn plain_aggregate_challenger_from_transcript(
     pcs: &PlainAggregatePcs,
     transcript: super::RowCodeWhirTranscript,
 ) -> Result<ExtensionFieldChallenger, String> {
+    let query_schedule = plain_aggregate_query_schedule(pcs)?;
+    let mut challenger = ExtensionFieldChallenger::new(transcript, query_schedule);
+    let mut separator = DomainSeparator::<ChallengeField, ChallengeField>::new(Vec::new());
+    pcs.add_domain_separator::<{ super::MERKLE_DIGEST_WORD_LENGTH }>(&mut separator);
+    separator.observe_domain_separator(&mut challenger);
+    challenger.ensure_sampling_succeeded()?;
+    Ok(challenger)
+}
+
+fn plain_aggregate_query_schedule(
+    pcs: &PlainAggregatePcs,
+) -> Result<Vec<super::WhirQueryEpoch>, String> {
     let mut query_schedule = Vec::with_capacity(pcs.n_rounds() + 1);
     for round_index in 0..pcs.n_rounds() {
         let round = &pcs.round_parameters[round_index];
@@ -128,12 +144,169 @@ pub(super) fn plain_aggregate_challenger_from_transcript(
         bit_length: final_folded_domain_size.ilog2() as usize,
         query_count: pcs.final_queries.min(final_folded_domain_size),
     });
-    let mut challenger = ExtensionFieldChallenger::new(transcript, query_schedule);
-    let mut separator = DomainSeparator::<ChallengeField, ChallengeField>::new(Vec::new());
-    pcs.add_domain_separator::<{ super::MERKLE_DIGEST_WORD_LENGTH }>(&mut separator);
-    separator.observe_domain_separator(&mut challenger);
-    challenger.ensure_sampling_succeeded()?;
-    Ok(challenger)
+    Ok(query_schedule)
+}
+
+#[cfg(test)]
+fn plain_aggregate_has_nonzero_pow(pcs: &PlainAggregatePcs) -> bool {
+    pcs.starting_folding_pow_bits != 0
+        || pcs.final_pow_bits != 0
+        || pcs.final_folding_pow_bits != 0
+        || pcs
+            .round_parameters
+            .iter()
+            .any(|round| round.pow_bits != 0 || round.folding_pow_bits != 0)
+}
+
+#[cfg(test)]
+fn push_plain_aggregate_extension_sampler(
+    catalog: &mut PublicSamplerExhaustionCatalog,
+    challenge_ordinal: &mut u32,
+    maximum_candidate_draws_per_output: u32,
+) -> Result<(), String> {
+    let row = PublicSamplerExhaustionCatalogRow::extension(
+        format!("row-code-whir/whir-challenge/{:08x}", *challenge_ordinal),
+        PublicSamplerKind::Extension,
+        maximum_candidate_draws_per_output,
+        None,
+    )
+    .map_err(|error| format!("derive plain WHIR extension sampler: {error:?}"))?;
+    catalog
+        .push_row(row)
+        .map_err(|error| format!("catalog plain WHIR extension sampler: {error:?}"))?;
+    *challenge_ordinal = (*challenge_ordinal)
+        .checked_add(1)
+        .ok_or_else(|| "plain WHIR challenge ordinal overflowed".to_owned())?;
+    Ok(())
+}
+
+#[cfg(test)]
+fn push_plain_aggregate_distinct_sampler(
+    catalog: &mut PublicSamplerExhaustionCatalog,
+    epoch_ordinal: u32,
+    epoch: super::WhirQueryEpoch,
+    maximum_candidate_draws_per_output: u32,
+) -> Result<(), String> {
+    let output_count = u64::try_from(epoch.query_count)
+        .map_err(|_| "plain WHIR query count exceeds u64".to_owned())?;
+    let row = PublicSamplerExhaustionCatalogRow::distinct(
+        format!(
+            "row-code-whir/whir-query-vector/{epoch_ordinal:08x}/{:04x}/{output_count:016x}",
+            epoch.bit_length
+        ),
+        1_usize
+            .checked_shl(
+                u32::try_from(epoch.bit_length)
+                    .map_err(|_| "plain WHIR query bit length exceeds u32".to_owned())?,
+            )
+            .ok_or_else(|| "plain WHIR query domain overflowed".to_owned())?,
+        epoch.query_count,
+        maximum_candidate_draws_per_output,
+    )
+    .map_err(|error| format!("derive plain WHIR distinct sampler: {error:?}"))?;
+    catalog
+        .push_row(row)
+        .map_err(|error| format!("catalog plain WHIR distinct sampler: {error:?}"))
+}
+
+/// Extends the public sampler ledger from the same checked WHIR configuration
+/// and query epochs installed in the live challenger.
+#[cfg(test)]
+pub(super) fn extend_plain_aggregate_public_sampler_exhaustion_catalog(
+    catalog: &mut PublicSamplerExhaustionCatalog,
+    pcs: &PlainAggregatePcs,
+    maximum_candidate_draws_per_output: u32,
+) -> Result<(), String> {
+    if plain_aggregate_has_nonzero_pow(pcs) {
+        return Err("plain WHIR public sampler catalog requires the zero-PoW profile".to_owned());
+    }
+
+    let mut extension_challenge_ordinal = 0_u32;
+    let mut query_schedule = plain_aggregate_query_schedule(pcs)?.into_iter();
+    for _ in 0..pcs.commitment_ood_samples {
+        push_plain_aggregate_extension_sampler(
+            catalog,
+            &mut extension_challenge_ordinal,
+            maximum_candidate_draws_per_output,
+        )?;
+    }
+
+    // The explicit-point layout samples one claim-batching weight before the
+    // initial sumcheck coordinates.
+    push_plain_aggregate_extension_sampler(
+        catalog,
+        &mut extension_challenge_ordinal,
+        maximum_candidate_draws_per_output,
+    )?;
+    for _ in 0..pcs.round_folding_factor(0) {
+        push_plain_aggregate_extension_sampler(
+            catalog,
+            &mut extension_challenge_ordinal,
+            maximum_candidate_draws_per_output,
+        )?;
+    }
+
+    for round_index in 0..pcs.n_rounds() {
+        let round = &pcs.round_parameters[round_index];
+        for _ in 0..round.ood_samples {
+            push_plain_aggregate_extension_sampler(
+                catalog,
+                &mut extension_challenge_ordinal,
+                maximum_candidate_draws_per_output,
+            )?;
+        }
+        // The typed checkpoint precedes this round's distinct query vector;
+        // the constraint-combination challenge follows it.
+        push_plain_aggregate_extension_sampler(
+            catalog,
+            &mut extension_challenge_ordinal,
+            maximum_candidate_draws_per_output,
+        )?;
+        let epoch = query_schedule
+            .next()
+            .ok_or_else(|| "plain WHIR query schedule ended before its rounds".to_owned())?;
+        push_plain_aggregate_distinct_sampler(
+            catalog,
+            u32::try_from(round_index)
+                .map_err(|_| "plain WHIR query epoch exceeds u32".to_owned())?,
+            epoch,
+            maximum_candidate_draws_per_output,
+        )?;
+        push_plain_aggregate_extension_sampler(
+            catalog,
+            &mut extension_challenge_ordinal,
+            maximum_candidate_draws_per_output,
+        )?;
+        for _ in 0..pcs.round_folding_factor(round_index + 1) {
+            push_plain_aggregate_extension_sampler(
+                catalog,
+                &mut extension_challenge_ordinal,
+                maximum_candidate_draws_per_output,
+            )?;
+        }
+    }
+
+    let final_epoch = query_schedule
+        .next()
+        .ok_or_else(|| "plain WHIR query schedule omitted its final epoch".to_owned())?;
+    push_plain_aggregate_distinct_sampler(
+        catalog,
+        u32::try_from(pcs.n_rounds())
+            .map_err(|_| "plain WHIR final query epoch exceeds u32".to_owned())?,
+        final_epoch,
+        maximum_candidate_draws_per_output,
+    )?;
+    if query_schedule.next().is_some() {
+        return Err("plain WHIR query schedule has trailing epochs".to_owned());
+    }
+    for _ in 0..pcs.final_sumcheck_rounds {
+        push_plain_aggregate_extension_sampler(
+            catalog,
+            &mut extension_challenge_ordinal,
+            maximum_candidate_draws_per_output,
+        )?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -384,6 +557,7 @@ fn empty_plain_whir_proof(
 
 #[cfg(test)]
 mod tests {
+    use num_bigint::BigUint;
     use p3_field::PrimeCharacteristicRing;
 
     use super::*;
@@ -427,6 +601,81 @@ mod tests {
         assert_eq!(pcs.final_round_config().num_variables, 5);
         assert_eq!(pcs.final_round_config().log_inv_rate, 10);
         assert!(pcs.check_pow_bits());
+    }
+
+    #[test]
+    fn target_plain_aggregate_public_sampler_catalog_is_configuration_derived() {
+        let pcs = plain_aggregate_pcs(21).expect("exact plain WHIR configuration");
+        let mut catalog = PublicSamplerExhaustionCatalog::default();
+        extend_plain_aggregate_public_sampler_exhaustion_catalog(
+            &mut catalog,
+            &pcs,
+            super::super::PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT,
+        )
+        .expect("derive public samplers from the exact plain WHIR configuration");
+
+        assert_eq!(
+            catalog.sampler_kind_row_count(PublicSamplerKind::Extension),
+            30
+        );
+        assert_eq!(
+            catalog.sampler_kind_row_count(PublicSamplerKind::Distinct),
+            5
+        );
+        assert_eq!(catalog.logical_verifier_message_count(), 35);
+        assert_eq!(catalog.bit_output_count(), 0);
+        assert_eq!(catalog.grinding_output_count(), 0);
+
+        let distinct_rows = catalog
+            .rows()
+            .iter()
+            .filter(|row| row.sampler_kind() == PublicSamplerKind::Distinct)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            distinct_rows
+                .iter()
+                .map(|row| row.scalar_output_count())
+                .collect::<Vec<_>>(),
+            [387, 288, 268, 264, 263]
+        );
+        assert_eq!(
+            distinct_rows
+                .iter()
+                .map(|row| row.target_cardinality().clone())
+                .collect::<Vec<_>>(),
+            [
+                BigUint::from(1_u8) << 20_usize,
+                BigUint::from(1_u8) << 19_usize,
+                BigUint::from(1_u8) << 18_usize,
+                BigUint::from(1_u8) << 17_usize,
+                BigUint::from(1_u8) << 16_usize,
+            ]
+        );
+        assert!(distinct_rows.iter().all(|row| {
+            row.transcript_xof_domain()
+                == crate::bgv::proof_suite::transcript::PUBLIC_SAMPLER_XOF_DOMAIN
+                && row.candidate_bit_length() == 64
+                && row.maximum_candidate_draws_per_output()
+                    == super::super::PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT
+        }));
+    }
+
+    #[test]
+    fn public_sampler_catalog_rejects_nonzero_pow_before_recording_rows() {
+        let mut pcs = plain_aggregate_pcs(21).expect("exact plain WHIR configuration");
+        pcs.config.final_pow_bits = 1;
+        let mut catalog = PublicSamplerExhaustionCatalog::default();
+        assert_eq!(
+            extend_plain_aggregate_public_sampler_exhaustion_catalog(
+                &mut catalog,
+                &pcs,
+                super::super::PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT,
+            ),
+            Err("plain WHIR public sampler catalog requires the zero-PoW profile".to_owned())
+        );
+        assert_eq!(catalog.logical_verifier_message_count(), 0);
+        assert_eq!(catalog.bit_output_count(), 0);
+        assert_eq!(catalog.grinding_output_count(), 0);
     }
 
     #[test]

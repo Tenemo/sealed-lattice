@@ -162,6 +162,8 @@ pub(crate) use galois_key_share_adapter::galois_key_share_topology_comparison_me
 pub(crate) use galois_key_share_adapter::{
     GaloisKeyShareSourcePolynomialAdapter, galois_relation_tree_inputs,
 };
+#[cfg(test)]
+pub(crate) use interpreter::DeepPointSamplerCardinalityBound;
 pub(crate) use interpreter::{
     CheckedRelationApplicationChallenges, DeepCompositionVerificationInput,
     RelationApplicationChallengeAssignment,

@@ -538,6 +538,10 @@ impl<F: Field, EF: ExtensionField<F>> ProductPolynomial<F, EF> {
     ///
     /// This is used when additional constraints need to be folded into the sumcheck
     /// after initial construction (e.g., from STIR challenges).
+    /// A batch containing `m` fresh constraints first scales the carried weights
+    /// and sum by `gamma^m`, then adds the fresh constraints at powers `0..m`.
+    /// This keeps the carried claim on a coefficient disjoint from every fresh
+    /// query-restoration constraint.
     ///
     /// # Arguments
     ///

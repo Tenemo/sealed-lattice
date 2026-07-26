@@ -167,6 +167,8 @@ pub(crate) use private_coins::{
 #[cfg(test)]
 pub(crate) use private_coins::{
     CommonProofCheckpointCursorManifestError, CommonProofCheckpointCursorManifestRequirement,
+    CommonProofPrivateCoinSamplingCatalog, CommonProofPrivateCoinSamplingOperation,
+    RecordingCommonProofPrivateCoinSource,
     common_proof_checkpoint_cursor_manifest_requirement_for_variant,
     common_proof_private_coin_coordinate_derivation_context_hash,
     encode_common_proof_checkpoint_cursor_manifest,

@@ -1,5 +1,11 @@
 use std::rc::Rc;
 
+#[cfg(test)]
+use std::collections::BTreeMap;
+
+#[cfg(test)]
+use num_bigint::BigUint;
+
 use crate::{
     foundation::{
         ActionPrivateRandomness, FoundationSchemaError, Hash512, PRIVATE_PROOF_SALT_PURPOSE,
@@ -12,6 +18,12 @@ use crate::{
 use super::super::relation_plan::{
     ProofPrivacyMode, RelationMaskCoordinate, RelationMaskKind, RelationPlanVariant,
 };
+#[cfg(test)]
+use super::super::relation_plan::{
+    RelationColumnOrigin, RelationColumnValueType, RelationMaskTargetClass,
+};
+#[cfg(test)]
+use super::super::{PROOF_BASE_FIELD_MODULUS, PROOF_CHALLENGE_EXTENSION_DEGREE};
 
 const COMMON_PROOF_PRIVATE_COIN_COORDINATE_HASH_DOMAIN: &str =
     "sealed-lattice/common-proof/private-coin-coordinate/v1";
@@ -140,6 +152,380 @@ pub(crate) trait CommonProofPrivateCoinSource {
         coordinate: CommonProofPrivateCoinCoordinate,
         destination: &mut [u8],
     ) -> Result<(), Self::Error>;
+}
+
+/// One source-owned private-coin operation, aggregated by its independently
+/// derived coordinate. A raw byte fill deliberately has no modulus or
+/// rejection-sampling draw ceiling.
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CommonProofPrivateCoinSamplingOperation {
+    ModuloSamples {
+        modulus: u64,
+        maximum_candidate_draws_per_output: u32,
+        output_count: u64,
+    },
+    RawByteFill {
+        byte_count: u64,
+    },
+}
+
+#[cfg(test)]
+impl CommonProofPrivateCoinSamplingOperation {
+    pub(crate) const fn maximum_candidate_draws_per_output(self) -> Option<u32> {
+        match self {
+            Self::ModuloSamples {
+                maximum_candidate_draws_per_output,
+                ..
+            } => Some(maximum_candidate_draws_per_output),
+            Self::RawByteFill { .. } => None,
+        }
+    }
+}
+
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CommonProofPrivateCoinSamplingCatalogError {
+    CountOverflow,
+    ConflictingOperation,
+    InvalidMask,
+    InvalidSampler,
+}
+
+/// Exact union bound for bounded private rejection-sampler exhaustion in the
+/// uniform-private-coin model. For the production KMAC stream this is the
+/// corresponding ideal-PRF premise; a computational claim must carry that PRF
+/// reduction explicitly. The fraction is left unreduced so its
+/// candidate-space derivation remains inspectable.
+#[cfg(test)]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct CommonProofPrivateCoinExhaustionUnionBound {
+    numerator: BigUint,
+    denominator: BigUint,
+}
+
+#[cfg(test)]
+impl CommonProofPrivateCoinExhaustionUnionBound {
+    pub(crate) fn is_at_most_inverse_power_of_two(&self, exponent: usize) -> bool {
+        (&self.numerator << exponent) <= self.denominator
+    }
+
+    #[cfg(test)]
+    const fn numerator(&self) -> &BigUint {
+        &self.numerator
+    }
+
+    #[cfg(test)]
+    const fn denominator(&self) -> &BigUint {
+        &self.denominator
+    }
+}
+
+/// Canonical per-coordinate accounting for private proof coins. The static
+/// constructor derives every mask draw from the compiled relation variant;
+/// callers add only construction-specific raw fills that are outside the mask
+/// grammar.
+#[cfg(test)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct CommonProofPrivateCoinSamplingCatalog {
+    entries: BTreeMap<CommonProofPrivateCoinCoordinate, CommonProofPrivateCoinSamplingOperation>,
+}
+
+#[cfg(test)]
+impl CommonProofPrivateCoinSamplingCatalog {
+    pub(crate) fn from_relation_plan_variant(
+        variant: &RelationPlanVariant,
+        maximum_candidate_draws_per_output: u32,
+    ) -> Result<Self, CommonProofPrivateCoinSamplingCatalogError> {
+        if maximum_candidate_draws_per_output == 0 {
+            return Err(CommonProofPrivateCoinSamplingCatalogError::InvalidMask);
+        }
+        let mut catalog = Self::default();
+        for mask in variant.ordered_masks().iter().copied() {
+            let coordinate = CommonProofPrivateCoinCoordinate::from_mask(mask.mask_coordinate());
+            let coordinate_count_per_coefficient = match (mask.mask_kind(), mask.target_class()) {
+                (RelationMaskKind::Trace, RelationMaskTargetClass::Column) => {
+                    let column = variant
+                        .ordered_columns()
+                        .get(usize::try_from(mask.target_ordinal()).map_err(|_| {
+                            CommonProofPrivateCoinSamplingCatalogError::CountOverflow
+                        })?)
+                        .ok_or(CommonProofPrivateCoinSamplingCatalogError::InvalidMask)?;
+                    if !matches!(column.origin(), RelationColumnOrigin::Prover) {
+                        return Err(CommonProofPrivateCoinSamplingCatalogError::InvalidMask);
+                    }
+                    match column.value_type() {
+                        RelationColumnValueType::BaseField => 1_u64,
+                        RelationColumnValueType::ChallengeExtension => {
+                            u64::try_from(PROOF_CHALLENGE_EXTENSION_DEGREE).map_err(|_| {
+                                CommonProofPrivateCoinSamplingCatalogError::CountOverflow
+                            })?
+                        }
+                    }
+                }
+                (RelationMaskKind::Telescoping, RelationMaskTargetClass::QuotientComponent)
+                | (RelationMaskKind::OpeningBatch, RelationMaskTargetClass::Batch) => {
+                    u64::try_from(PROOF_CHALLENGE_EXTENSION_DEGREE)
+                        .map_err(|_| CommonProofPrivateCoinSamplingCatalogError::CountOverflow)?
+                }
+                _ => return Err(CommonProofPrivateCoinSamplingCatalogError::InvalidMask),
+            };
+            let output_count = mask
+                .mask_degree_bound_exclusive()
+                .checked_mul(coordinate_count_per_coefficient)
+                .ok_or(CommonProofPrivateCoinSamplingCatalogError::CountOverflow)?;
+            if output_count == 0
+                || catalog
+                    .entries
+                    .insert(
+                        coordinate,
+                        CommonProofPrivateCoinSamplingOperation::ModuloSamples {
+                            modulus: PROOF_BASE_FIELD_MODULUS,
+                            maximum_candidate_draws_per_output,
+                            output_count,
+                        },
+                    )
+                    .is_some()
+            {
+                return Err(CommonProofPrivateCoinSamplingCatalogError::InvalidMask);
+            }
+        }
+        Ok(catalog)
+    }
+
+    pub(crate) fn record_raw_byte_fill(
+        &mut self,
+        coordinate: CommonProofPrivateCoinCoordinate,
+        byte_count: usize,
+    ) -> Result<(), CommonProofPrivateCoinSamplingCatalogError> {
+        let byte_count = u64::try_from(byte_count)
+            .map_err(|_| CommonProofPrivateCoinSamplingCatalogError::CountOverflow)?;
+        if byte_count == 0 {
+            return Ok(());
+        }
+        match self.entries.entry(coordinate) {
+            std::collections::btree_map::Entry::Vacant(entry) => {
+                entry.insert(CommonProofPrivateCoinSamplingOperation::RawByteFill { byte_count });
+            }
+            std::collections::btree_map::Entry::Occupied(mut entry) => {
+                let CommonProofPrivateCoinSamplingOperation::RawByteFill {
+                    byte_count: recorded_byte_count,
+                } = entry.get_mut()
+                else {
+                    return Err(CommonProofPrivateCoinSamplingCatalogError::ConflictingOperation);
+                };
+                *recorded_byte_count = recorded_byte_count
+                    .checked_add(byte_count)
+                    .ok_or(CommonProofPrivateCoinSamplingCatalogError::CountOverflow)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn record_modulo_sample(
+        &mut self,
+        coordinate: CommonProofPrivateCoinCoordinate,
+        modulus: u64,
+        maximum_candidate_draws_per_output: u32,
+    ) -> Result<(), CommonProofPrivateCoinSamplingCatalogError> {
+        match self.entries.entry(coordinate) {
+            std::collections::btree_map::Entry::Vacant(entry) => {
+                entry.insert(CommonProofPrivateCoinSamplingOperation::ModuloSamples {
+                    modulus,
+                    maximum_candidate_draws_per_output,
+                    output_count: 1,
+                });
+            }
+            std::collections::btree_map::Entry::Occupied(mut entry) => {
+                let CommonProofPrivateCoinSamplingOperation::ModuloSamples {
+                    modulus: recorded_modulus,
+                    maximum_candidate_draws_per_output: recorded_maximum_candidate_draws,
+                    output_count,
+                } = entry.get_mut()
+                else {
+                    return Err(CommonProofPrivateCoinSamplingCatalogError::ConflictingOperation);
+                };
+                if *recorded_modulus != modulus
+                    || *recorded_maximum_candidate_draws != maximum_candidate_draws_per_output
+                {
+                    return Err(CommonProofPrivateCoinSamplingCatalogError::ConflictingOperation);
+                }
+                *output_count = output_count
+                    .checked_add(1)
+                    .ok_or(CommonProofPrivateCoinSamplingCatalogError::CountOverflow)?;
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn entry(
+        &self,
+        coordinate: CommonProofPrivateCoinCoordinate,
+    ) -> Option<CommonProofPrivateCoinSamplingOperation> {
+        self.entries.get(&coordinate).copied()
+    }
+
+    pub(crate) fn entry_count(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub(crate) fn entries(
+        &self,
+    ) -> impl Iterator<
+        Item = (
+            CommonProofPrivateCoinCoordinate,
+            CommonProofPrivateCoinSamplingOperation,
+        ),
+    > + '_ {
+        self.entries
+            .iter()
+            .map(|(coordinate, operation)| (*coordinate, *operation))
+    }
+
+    pub(crate) fn retaining_coordinates(
+        &self,
+        mut retain: impl FnMut(CommonProofPrivateCoinCoordinate) -> bool,
+    ) -> Self {
+        Self {
+            entries: self
+                .entries
+                .iter()
+                .filter(|(coordinate, _)| retain(**coordinate))
+                .map(|(coordinate, operation)| (*coordinate, *operation))
+                .collect(),
+        }
+    }
+
+    /// Derives the exact action-level union bound from the live private
+    /// sampler in the uniform-private-coin model. A modulus `m` consumes
+    /// `L = ceil(bit_length(m) / 8)` bytes, so one candidate draw rejects
+    /// exactly `2^(8L) mod m` values. Exhausting one output rejects all `D`
+    /// independent uniform candidates. For the production deterministic KMAC
+    /// stream, this step relies on the corresponding ideal-PRF premise. Raw
+    /// byte fills do not reject and therefore add no term.
+    pub(crate) fn exhaustion_union_bound(
+        &self,
+        application_multiplicity: u32,
+    ) -> Result<
+        CommonProofPrivateCoinExhaustionUnionBound,
+        CommonProofPrivateCoinSamplingCatalogError,
+    > {
+        if application_multiplicity == 0 {
+            return Err(CommonProofPrivateCoinSamplingCatalogError::InvalidSampler);
+        }
+        let mut union_numerator = BigUint::default();
+        let mut union_denominator = BigUint::from(1_u8);
+        for operation in self.entries.values().copied() {
+            let CommonProofPrivateCoinSamplingOperation::ModuloSamples {
+                modulus,
+                maximum_candidate_draws_per_output,
+                output_count,
+            } = operation
+            else {
+                continue;
+            };
+            if modulus <= 1 || maximum_candidate_draws_per_output == 0 || output_count == 0 {
+                return Err(CommonProofPrivateCoinSamplingCatalogError::InvalidSampler);
+            }
+            let significant_bit_length = u64::BITS - modulus.leading_zeros();
+            let sample_byte_length = significant_bit_length.div_ceil(8);
+            let sample_bit_length = usize::try_from(
+                sample_byte_length
+                    .checked_mul(8)
+                    .ok_or(CommonProofPrivateCoinSamplingCatalogError::CountOverflow)?,
+            )
+            .map_err(|_| CommonProofPrivateCoinSamplingCatalogError::CountOverflow)?;
+            let candidate_space = BigUint::from(1_u8) << sample_bit_length;
+            let rejected_candidate_count = &candidate_space % BigUint::from(modulus);
+            if rejected_candidate_count == BigUint::default() {
+                continue;
+            }
+            let operation_denominator = candidate_space.pow(maximum_candidate_draws_per_output);
+            let operation_numerator = rejected_candidate_count
+                .pow(maximum_candidate_draws_per_output)
+                * BigUint::from(output_count);
+            if union_numerator == BigUint::default() {
+                union_numerator = operation_numerator;
+                union_denominator = operation_denominator;
+            } else if union_denominator == operation_denominator {
+                union_numerator += operation_numerator;
+            } else {
+                union_numerator = &union_numerator * &operation_denominator
+                    + operation_numerator * &union_denominator;
+                union_denominator *= operation_denominator;
+            }
+        }
+        union_numerator *= BigUint::from(application_multiplicity);
+        Ok(CommonProofPrivateCoinExhaustionUnionBound {
+            numerator: union_numerator,
+            denominator: union_denominator,
+        })
+    }
+}
+
+/// Test-only transparent delegate that records successful calls made through
+/// the production private-coin trait seam.
+#[cfg(test)]
+pub(crate) struct RecordingCommonProofPrivateCoinSource<'source, Source> {
+    source: &'source mut Source,
+    observed_catalog: &'source mut CommonProofPrivateCoinSamplingCatalog,
+}
+
+#[cfg(test)]
+impl<'source, Source> RecordingCommonProofPrivateCoinSource<'source, Source> {
+    pub(crate) fn new(
+        source: &'source mut Source,
+        observed_catalog: &'source mut CommonProofPrivateCoinSamplingCatalog,
+    ) -> Self {
+        Self {
+            source,
+            observed_catalog,
+        }
+    }
+}
+
+#[cfg(test)]
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum RecordingCommonProofPrivateCoinError<SourceError> {
+    Source(SourceError),
+    Catalog(CommonProofPrivateCoinSamplingCatalogError),
+}
+
+#[cfg(test)]
+impl<Source> CommonProofPrivateCoinSource for RecordingCommonProofPrivateCoinSource<'_, Source>
+where
+    Source: CommonProofPrivateCoinSource,
+{
+    type Error = RecordingCommonProofPrivateCoinError<Source::Error>;
+
+    fn sample_modulo(
+        &mut self,
+        coordinate: CommonProofPrivateCoinCoordinate,
+        modulus: u64,
+        maximum_candidate_draws_per_output: u32,
+    ) -> Result<u64, Self::Error> {
+        let sampled = self
+            .source
+            .sample_modulo(coordinate, modulus, maximum_candidate_draws_per_output)
+            .map_err(RecordingCommonProofPrivateCoinError::Source)?;
+        self.observed_catalog
+            .record_modulo_sample(coordinate, modulus, maximum_candidate_draws_per_output)
+            .map_err(RecordingCommonProofPrivateCoinError::Catalog)?;
+        Ok(sampled)
+    }
+
+    fn fill_raw_bytes(
+        &mut self,
+        coordinate: CommonProofPrivateCoinCoordinate,
+        destination: &mut [u8],
+    ) -> Result<(), Self::Error> {
+        self.source
+            .fill_raw_bytes(coordinate, destination)
+            .map_err(RecordingCommonProofPrivateCoinError::Source)?;
+        self.observed_catalog
+            .record_raw_byte_fill(coordinate, destination.len())
+            .map_err(RecordingCommonProofPrivateCoinError::Catalog)
+    }
 }
 
 /// Private proof coins that can expose their exact authenticated stream
@@ -902,6 +1288,93 @@ impl CheckpointableCommonProofPrivateCoinSource for PrivateRandomnessCommonProof
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct SuccessfulRecordingDelegate {
+        next_sample: u64,
+        fill_byte: u8,
+    }
+
+    impl CommonProofPrivateCoinSource for SuccessfulRecordingDelegate {
+        type Error = core::convert::Infallible;
+
+        fn sample_modulo(
+            &mut self,
+            _coordinate: CommonProofPrivateCoinCoordinate,
+            modulus: u64,
+            _maximum_candidate_draws_per_output: u32,
+        ) -> Result<u64, Self::Error> {
+            let sampled = self.next_sample % modulus;
+            self.next_sample = self.next_sample.wrapping_add(1);
+            Ok(sampled)
+        }
+
+        fn fill_raw_bytes(
+            &mut self,
+            _coordinate: CommonProofPrivateCoinCoordinate,
+            destination: &mut [u8],
+        ) -> Result<(), Self::Error> {
+            destination.fill(self.fill_byte);
+            self.fill_byte = self.fill_byte.wrapping_add(1);
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn recording_private_coin_source_delegates_and_aggregates_typed_operations() {
+        let trace_coordinate =
+            CommonProofPrivateCoinCoordinate::mask(1, 7).expect("trace-mask coordinate is valid");
+        let salt_coordinate = CommonProofPrivateCoinCoordinate::proof_salt();
+        let mut delegate = SuccessfulRecordingDelegate {
+            next_sample: 19,
+            fill_byte: 0xa5,
+        };
+        let mut observed = CommonProofPrivateCoinSamplingCatalog::default();
+        {
+            let mut recording =
+                RecordingCommonProofPrivateCoinSource::new(&mut delegate, &mut observed);
+
+            assert_eq!(recording.sample_modulo(trace_coordinate, 17, 64), Ok(2));
+            assert_eq!(recording.sample_modulo(trace_coordinate, 17, 64), Ok(3));
+            assert_eq!(recording.sample_modulo(trace_coordinate, 17, 64), Ok(4));
+            let mut raw_bytes = [0_u8; 11];
+            assert_eq!(
+                recording.fill_raw_bytes(salt_coordinate, &mut raw_bytes),
+                Ok(())
+            );
+            assert_eq!(raw_bytes, [0xa5; 11]);
+            let mut empty_raw_bytes = [];
+            assert_eq!(
+                recording.fill_raw_bytes(salt_coordinate, &mut empty_raw_bytes),
+                Ok(())
+            );
+        }
+
+        assert_eq!(delegate.fill_byte, 0xa7);
+        assert_eq!(observed.entry_count(), 2);
+        assert_eq!(
+            observed.entry(trace_coordinate),
+            Some(CommonProofPrivateCoinSamplingOperation::ModuloSamples {
+                modulus: 17,
+                maximum_candidate_draws_per_output: 64,
+                output_count: 3,
+            })
+        );
+        let raw_operation = observed
+            .entry(salt_coordinate)
+            .expect("raw fill was recorded");
+        assert_eq!(
+            raw_operation,
+            CommonProofPrivateCoinSamplingOperation::RawByteFill { byte_count: 11 }
+        );
+        assert_eq!(raw_operation.maximum_candidate_draws_per_output(), None);
+
+        let exhaustion = observed
+            .exhaustion_union_bound(10)
+            .expect("derive exact recording-source exhaustion");
+        assert_eq!(exhaustion.numerator(), &BigUint::from(30_u8));
+        assert_eq!(exhaustion.denominator(), &BigUint::from(256_u16).pow(64));
+        assert!(exhaustion.is_at_most_inverse_power_of_two(128));
+    }
 
     #[test]
     fn zero_cursor_manifest_retains_reset_safe_source_identity() {

@@ -14,8 +14,9 @@ lockfile. The patch redirects only `p3-sumcheck` and the already-vendored
 Rust-1.90 compatibility copy of `p3-util`; every other Plonky3 crate continues
 to come from the exact upstream revision.
 
-The source modification adds the explicit-point opening hooks needed by the
-sealed-lattice WHIR reduction:
+The source modifications add the explicit-point opening hooks and the
+query-restoration batching recurrence needed by the sealed-lattice WHIR
+reduction:
 
 - `Layout::eval_at_point` records a prover opening at a caller-derived
   multilinear point, absorbs the point before its evaluations, and retains the
@@ -23,16 +24,28 @@ sealed-lattice WHIR reduction:
 - `Verifier::add_claim_at_point` checks the opening shape, absorbs the same
   point and evaluations in the same order, and records the corresponding
   verifier claim.
+- Incremental constraint batching reserves `gamma^m` for the carried claim and
+  assigns powers `0..m` to a batch's `m` fresh constraints. This is the
+  coefficient-reversed form of WHIR's carried-plus-fresh random combination:
+  it preserves the same degree while preventing a fresh constant coefficient
+  from cancelling the carried claim deterministically.
+- The scalar prover, packed prover, running verifier claim, and final
+  constraint-polynomial evaluation all use that same chronological recurrence.
 
 The changes are confined to:
 
+- `src/constraints/mod.rs`
 - `src/layout/prover/mod.rs`
 - `src/layout/prover/prefix.rs`
 - `src/layout/prover/suffix.rs`
 - `src/layout/verifier.rs`
+- `src/product_polynomial.rs`
+- `src/strategy.rs`
 
 Focused local tests require explicit-point prover and verifier transcript
 agreement for both layout strategies, reject a changed point, and reject an
-opening-shape mismatch. Production integration additionally tests the
-valid-Boolean-openings and false-non-Boolean-terminal forgery at the complete
-proof boundary.
+opening-shape mismatch. They also exercise deterministic cancellation attempts
+against two fresh constraints and require scalar, packed, running-verifier, and
+final-verifier batching agreement. Production integration additionally tests
+the valid-Boolean-openings and false-non-Boolean-terminal forgery at the
+complete proof boundary.

@@ -303,6 +303,11 @@ impl VariableOrder {
     ///   the last `k` original variables of the challenge.
     /// - Suffix binding folds variables high-to-low, so each constraint sees
     ///   the last `k` original variables of the challenge, reversed.
+    ///
+    /// Constraints are folded in protocol order with the same additive
+    /// recurrence used while proving. For a batch containing `m` fresh claims,
+    /// the accumulated polynomial is multiplied by `gamma^m` before the fresh
+    /// powers `0..m` are added.
     pub fn eval_constraints_poly<F, EF>(
         self,
         constraints: &[Constraint<F, EF>],
@@ -317,7 +322,7 @@ impl VariableOrder {
 
         constraints
             .iter()
-            .map(|constraint| {
+            .fold(EF::ZERO, |accumulated, constraint| {
                 // Slice the reversed challenge to the constraint arity; flip back for prefix binding.
                 let local_challenge = match self {
                     Self::Prefix => reversed
@@ -338,7 +343,7 @@ impl VariableOrder {
                 //     group 1: chi^{l_0}   ...         chi^{l_0 + l_1 - 1}
                 //     ...
                 let mut shift = 0;
-                let mut acc = EF::ZERO;
+                let mut fresh_evaluation = EF::ZERO;
                 // Each statement group exposes its weights evaluated at the
                 // local challenge; the kinds differ only in how weights are formed.
                 for statement in constraint.statements() {
@@ -346,21 +351,21 @@ impl VariableOrder {
                         // Equality weights: one term per recorded equality point.
                         Statements::Eq(eq_statement) => {
                             // Pair this group's weights with powers starting at the shift.
-                            acc += dot_product::<EF, _, _>(
+                            fresh_evaluation += dot_product::<EF, _, _>(
                                 eq_statement.weights_at(&local_challenge),
                                 constraint.challenge_powers(shift),
                             );
                         }
                         // Successor-view weights: equality through the repeat-last view.
                         Statements::Next(next_statement) => {
-                            acc += dot_product::<EF, _, _>(
+                            fresh_evaluation += dot_product::<EF, _, _>(
                                 next_statement.weights_at(&local_challenge),
                                 constraint.challenge_powers(shift),
                             );
                         }
                         // Selector weights: one term per single-variable selector.
                         Statements::Select(sel_statement) => {
-                            acc += dot_product::<EF, _, _>(
+                            fresh_evaluation += dot_product::<EF, _, _>(
                                 sel_statement.weights_at(&local_challenge),
                                 constraint.challenge_powers(shift),
                             );
@@ -370,9 +375,9 @@ impl VariableOrder {
                     // begin one beyond the last power consumed here.
                     shift += statement.len();
                 }
-                acc
+
+                accumulated * constraint.carried_claim_multiplier() + fresh_evaluation
             })
-            .sum()
     }
 }
 
@@ -526,7 +531,6 @@ mod tests {
     use p3_field::PrimeCharacteristicRing;
     use p3_field::extension::BinomialExtensionField;
     use p3_multilinear_util::point::Point;
-    use p3_multilinear_util::poly::Poly;
     use proptest::prelude::*;
     use rand::rngs::SmallRng;
     use rand::{RngExt, SeedableRng};
@@ -538,8 +542,9 @@ mod tests {
     type F = BabyBear;
     type EF = BinomialExtensionField<BabyBear, 4>;
 
-    // Reference implementation: evaluate each constraint's combined polynomial at
-    // the appropriately sliced challenge and sum. Used to cross-check the fast path.
+    // Reference implementation: build each fresh constraint polynomial, evaluate
+    // it at the appropriately sliced challenge, then apply the chronological
+    // carried-claim recurrence. Used to cross-check the fast path.
     fn eval_constraints_poly_reference(
         order: VariableOrder,
         constraints: &[Constraint<F, EF>],
@@ -547,11 +552,11 @@ mod tests {
     ) -> EF {
         constraints
             .iter()
-            .map(|constraint| {
-                // Combine eq + sel contributions into one weight polynomial.
-                let mut combined = Poly::zero(constraint.num_variables());
-                let mut eval = EF::ZERO;
-                constraint.combine(&mut combined, &mut eval);
+            .fold(EF::ZERO, |accumulated, constraint| {
+                // Build only this batch's fresh weight polynomial. Scaling a
+                // zero accumulator has no effect, so this stays independent of
+                // the recurrence applied outside this reference calculation.
+                let (combined, _) = constraint.combine_new();
 
                 // Slice the challenge per binding direction; evaluate at that local point.
                 let point = match order {
@@ -564,9 +569,8 @@ mod tests {
                         .get_subpoint_over_range(..constraint.num_variables()),
                 };
 
-                combined.eval_ext::<F>(&point)
+                accumulated * constraint.carried_claim_multiplier() + combined.eval_ext::<F>(&point)
             })
-            .sum()
     }
 
     // Generates a random list of constraints for fuzzing the evaluator.

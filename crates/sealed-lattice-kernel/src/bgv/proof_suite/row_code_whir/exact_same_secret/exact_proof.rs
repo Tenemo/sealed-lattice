@@ -592,6 +592,22 @@ fn exact_transcript_prefix(
         schedule.clone(),
     )
     .map_err(|error| format!("construct exact production transcript: {error:?}"))?;
+    #[cfg(test)]
+    {
+        let deep_point_cardinality_bounds = (0..verified_relation.context.deep_point_count)
+            .map(|point_ordinal| {
+                verified_relation
+                    .variant
+                    .deep_point_sampler_cardinality_bound(&verified_relation.context, point_ordinal)
+                    .map_err(|error| {
+                        format!("derive live DEEP sampler cardinality bound: {error:?}")
+                    })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        transcript
+            .enable_public_sampler_trace(&deep_point_cardinality_bounds)
+            .map_err(|error| format!("enable exact public sampler trace: {error:?}"))?;
+    }
     absorb_role_roots(
         &mut transcript,
         schedule.ordered_base_tree_ordinals(),
@@ -2485,8 +2501,16 @@ mod construction_tests {
     use p3_field::extension::BinomiallyExtendable;
 
     use super::*;
+    use crate::bgv::proof_suite::row_code_whir::plain_whir::{
+        PlainAggregatePcs, extend_plain_aggregate_public_sampler_exhaustion_catalog,
+    };
+    use crate::bgv::proof_suite::transcript::{
+        CommonProofApplicationChallengeGroup, CommonProofChallenge, PublicSamplerExhaustionCatalog,
+        PublicSamplerKind,
+    };
 
-    const STRICT_ROUND_BY_ROUND_SOUNDNESS_BITS: usize = 258;
+    const EXACT_AGGREGATE_SOUNDNESS_UPPER_BOUND_BITS: usize = 245;
+    const EXACT_SAME_SECRET_APPLICATION_COUNT: u64 = 10;
     const QROM_RANDOM_ORACLE_QUERY_BOUND_EXPONENT: usize = 80;
     const FIAT_SHAMIR_XOF_OUTPUT_BIT_LENGTH: usize = 512;
     const BOUND_CLEARED_IDENTITY_ROOT_PAIR_BOUND: u64 = 9_217;
@@ -2528,6 +2552,185 @@ mod construction_tests {
         assert!(denominator_exponent <= common_denominator_exponent);
         *accumulator += BigUint::from(numerator_base).pow(numerator_exponent)
             << (common_denominator_exponent - denominator_exponent);
+    }
+
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    enum ExactAlgebraicChallengeFamily {
+        CommonThetaProductVectors {
+            challenge_groups: Vec<CommonProofApplicationChallengeGroup>,
+        },
+        CommonComposition,
+        CommonDeepPoint(CommonProofChallenge),
+        RowCodeWhirPointSelectorAndPhaseRow,
+        RowCodeWhirBoundOpening,
+        RowCodeWhirOpeningBatchMask,
+        RowCodeWhirBoundDegreeCoordinate,
+        WhirFold {
+            round_ordinal: usize,
+        },
+        WhirQueryCombination {
+            round_ordinal: usize,
+        },
+        WhirFinalSumcheck {
+            round_count: usize,
+        },
+        WhirScalarOpeningBatch,
+        PhaseOpeningReduction,
+        BoundOpeningReduction,
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum ExactAlgebraicFailureEvent {
+        SameSecretIntegerLift,
+        WhirFold,
+        WhirQueryCombination,
+        WhirFinalSumcheck,
+        WhirScalarOpeningBatch,
+        DeepPointForbiddenSet,
+        RelationCompositionBatch,
+        PackedPhaseSelectorAndRows,
+        BoundOpeningBatch,
+        OpeningBatchMask,
+        PhaseOpeningReductionExceptionalSet,
+        BoundOpeningReductionExceptionalSet,
+        BoundDegreeSuffix,
+    }
+
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    enum ExactAlgebraicSampleSpace {
+        ChallengeExtensionField,
+        IndependentBaseFieldProduct {
+            coordinate_modulus: u64,
+            independent_repetition_count: u16,
+        },
+        DeepAcceptedCandidates {
+            field_cardinality: BigUint,
+            accepted_candidate_count_floor: BigUint,
+            challenge_field_numerator_ceiling: BigUint,
+        },
+    }
+
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    struct ExactAlgebraicSoundnessRow {
+        challenge: ExactAlgebraicChallengeFamily,
+        event: ExactAlgebraicFailureEvent,
+        independent_bad_polynomial_degrees: Vec<u64>,
+        multiplicity: u64,
+        sample_space: ExactAlgebraicSampleSpace,
+    }
+
+    impl ExactAlgebraicSoundnessRow {
+        fn extension_field(
+            challenge: ExactAlgebraicChallengeFamily,
+            event: ExactAlgebraicFailureEvent,
+            degree: u64,
+            multiplicity: u64,
+        ) -> Self {
+            Self {
+                challenge,
+                event,
+                independent_bad_polynomial_degrees: vec![degree],
+                multiplicity,
+                sample_space: ExactAlgebraicSampleSpace::ChallengeExtensionField,
+            }
+        }
+
+        fn raw_numerator(&self) -> BigUint {
+            self.independent_bad_polynomial_degrees
+                .iter()
+                .copied()
+                .map(BigUint::from)
+                .fold(BigUint::from(1_u8), |product, degree| product * degree)
+                * BigUint::from(self.multiplicity)
+        }
+
+        fn challenge_field_numerator(&self, challenge_field_order: &BigUint) -> BigUint {
+            let raw_numerator = self.raw_numerator();
+            match &self.sample_space {
+                ExactAlgebraicSampleSpace::ChallengeExtensionField => {
+                    assert_eq!(self.independent_bad_polynomial_degrees.len(), 1);
+                    raw_numerator
+                }
+                ExactAlgebraicSampleSpace::IndependentBaseFieldProduct {
+                    coordinate_modulus,
+                    independent_repetition_count,
+                } => {
+                    assert_eq!(
+                        self.independent_bad_polynomial_degrees.len(),
+                        usize::from(*independent_repetition_count)
+                    );
+                    assert_eq!(
+                        BigUint::from(*coordinate_modulus)
+                            .pow(u32::from(*independent_repetition_count)),
+                        *challenge_field_order,
+                        "the theta product sampler must have the common algebraic denominator"
+                    );
+                    raw_numerator
+                }
+                ExactAlgebraicSampleSpace::DeepAcceptedCandidates {
+                    field_cardinality,
+                    accepted_candidate_count_floor,
+                    challenge_field_numerator_ceiling,
+                } => {
+                    assert_eq!(field_cardinality, challenge_field_order);
+                    assert!(accepted_candidate_count_floor > &BigUint::from(0_u8));
+                    assert!(
+                        &raw_numerator * field_cardinality
+                            <= challenge_field_numerator_ceiling * accepted_candidate_count_floor,
+                        "the source-derived DEEP accepted set must imply its field-denominator ceiling"
+                    );
+                    challenge_field_numerator_ceiling.clone()
+                }
+            }
+        }
+
+        fn challenge_matches_event(&self) -> bool {
+            matches!(
+                (&self.challenge, self.event),
+                (
+                    ExactAlgebraicChallengeFamily::CommonThetaProductVectors { .. },
+                    ExactAlgebraicFailureEvent::SameSecretIntegerLift,
+                ) | (
+                    ExactAlgebraicChallengeFamily::CommonComposition,
+                    ExactAlgebraicFailureEvent::RelationCompositionBatch,
+                ) | (
+                    ExactAlgebraicChallengeFamily::CommonDeepPoint(
+                        CommonProofChallenge::DeepPoint { point_ordinal: 0 },
+                    ),
+                    ExactAlgebraicFailureEvent::DeepPointForbiddenSet,
+                ) | (
+                    ExactAlgebraicChallengeFamily::RowCodeWhirPointSelectorAndPhaseRow,
+                    ExactAlgebraicFailureEvent::PackedPhaseSelectorAndRows,
+                ) | (
+                    ExactAlgebraicChallengeFamily::RowCodeWhirBoundOpening,
+                    ExactAlgebraicFailureEvent::BoundOpeningBatch,
+                ) | (
+                    ExactAlgebraicChallengeFamily::RowCodeWhirOpeningBatchMask,
+                    ExactAlgebraicFailureEvent::OpeningBatchMask,
+                ) | (
+                    ExactAlgebraicChallengeFamily::RowCodeWhirBoundDegreeCoordinate,
+                    ExactAlgebraicFailureEvent::BoundDegreeSuffix,
+                ) | (
+                    ExactAlgebraicChallengeFamily::WhirFold { .. },
+                    ExactAlgebraicFailureEvent::WhirFold,
+                ) | (
+                    ExactAlgebraicChallengeFamily::WhirQueryCombination { .. },
+                    ExactAlgebraicFailureEvent::WhirQueryCombination,
+                ) | (
+                    ExactAlgebraicChallengeFamily::WhirFinalSumcheck { .. },
+                    ExactAlgebraicFailureEvent::WhirFinalSumcheck,
+                ) | (
+                    ExactAlgebraicChallengeFamily::WhirScalarOpeningBatch,
+                    ExactAlgebraicFailureEvent::WhirScalarOpeningBatch,
+                ) | (
+                    ExactAlgebraicChallengeFamily::PhaseOpeningReduction,
+                    ExactAlgebraicFailureEvent::PhaseOpeningReductionExceptionalSet,
+                ) | (
+                    ExactAlgebraicChallengeFamily::BoundOpeningReduction,
+                    ExactAlgebraicFailureEvent::BoundOpeningReductionExceptionalSet,
+                )
+            )
+        }
     }
 
     fn assert_without_replacement_probability_is_bounded_by_power(
@@ -2757,6 +2960,498 @@ mod construction_tests {
         }
         counter.response();
         counter.finish()
+    }
+
+    pub(super) fn exact_public_sampler_exhaustion_catalog(
+        pcs: &PlainAggregatePcs,
+        variant: &RelationPlanVariant,
+        relation_context: &crate::bgv::proof_suite::RelationPlanCheckContext,
+        shape: ExactProofShape,
+    ) -> PublicSamplerExhaustionCatalog {
+        let schedule = variant
+            .common_proof_transcript_schedule(relation_context)
+            .expect("derive the exact common-proof transcript schedule");
+        let deep_point_cardinality_bounds = (0..relation_context.deep_point_count)
+            .map(|point_ordinal| {
+                variant
+                    .deep_point_sampler_cardinality_bound(relation_context, point_ordinal)
+                    .expect("derive an exact DEEP sampler cardinality bound")
+            })
+            .collect::<Vec<_>>();
+        let mut catalog = schedule
+            .row_code_whir_handoff_public_sampler_exhaustion_catalog(
+                SetupKeyRelationProofFamily::SameSecret.statement_schema_identifier(),
+                &deep_point_cardinality_bounds,
+            )
+            .expect("derive the exact common-prefix public sampler catalog");
+        let maximum_candidate_draws_per_output = schedule.maximum_candidate_draws_per_output();
+
+        let base_layout = ExactBasePhaseLayout::for_tree_role(variant, ProofTreeRole::BaseOracle)
+            .expect("derive the exact base phase layout");
+        let auxiliary_layout =
+            ExactBasePhaseLayout::for_tree_role(variant, ProofTreeRole::AuxiliaryOracle)
+                .expect("derive the exact auxiliary phase layout");
+        let opening_point_count = variant.ordered_opening_points().len();
+        let point_selector_count = EXACT_TABLE_VARIABLE_COUNT
+            .checked_sub(1)
+            .and_then(|remaining| {
+                remaining.checked_sub(LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT.ilog2() as usize)
+            })
+            .expect("derive the exact point-selector count");
+        for opening_point_ordinal in 0..opening_point_count {
+            let opening_point_ordinal =
+                u16::try_from(opening_point_ordinal).expect("opening-point ordinal fits u16");
+            for selector_ordinal in 0..point_selector_count {
+                catalog
+                    .push_direct_row_code_whir_extension(
+                        RowCodeWhirChallenge::PointSelectorWeight {
+                            opening_point_ordinal,
+                            selector_ordinal: u16::try_from(selector_ordinal)
+                                .expect("selector ordinal fits u16"),
+                        },
+                        maximum_candidate_draws_per_output,
+                    )
+                    .expect("catalog an exact point-selector sampler");
+            }
+            for (phase, layout) in [
+                (RowCodeWhirPhase::Base, &base_layout),
+                (RowCodeWhirPhase::Auxiliary, &auxiliary_layout),
+            ] {
+                for (row_ordinal, row) in layout.rows.iter().enumerate() {
+                    if row
+                        .opening_point_ordinals
+                        .contains(&u32::from(opening_point_ordinal))
+                    {
+                        catalog
+                            .push_direct_row_code_whir_extension(
+                                RowCodeWhirChallenge::PhaseRowWeight {
+                                    opening_point_ordinal,
+                                    phase,
+                                    row_ordinal: u32::try_from(row_ordinal)
+                                        .expect("phase row ordinal fits u32"),
+                                },
+                                maximum_candidate_draws_per_output,
+                            )
+                            .expect("catalog an exact phase-row sampler");
+                    }
+                }
+            }
+            if opening_point_ordinal == 0 {
+                for challenge in [
+                    RowCodeWhirChallenge::QuotientComponentWeight,
+                    RowCodeWhirChallenge::OpeningBatchMaskWeight,
+                ] {
+                    catalog
+                        .push_direct_row_code_whir_extension(
+                            challenge,
+                            maximum_candidate_draws_per_output,
+                        )
+                        .expect("catalog an exact quotient-phase sampler");
+                }
+            }
+        }
+
+        let mut bound_column_ordinals = BTreeSet::new();
+        for claim in variant.ordered_opening_claims() {
+            if claim.source_class() != RelationOpeningSourceClass::TreeColumn {
+                continue;
+            }
+            let column_ordinal = claim
+                .column_ordinal()
+                .expect("an exact tree opening has a column ordinal");
+            let column = variant
+                .ordered_columns()
+                .get(usize::try_from(column_ordinal).expect("column ordinal fits usize"))
+                .expect("an exact opening references a relation column");
+            if !matches!(column.origin(), RelationColumnOrigin::BoundTree { .. }) {
+                continue;
+            }
+            assert!(
+                bound_column_ordinals.insert(column_ordinal),
+                "each exact bound column has one opening claim"
+            );
+            catalog
+                .push_direct_row_code_whir_extension(
+                    RowCodeWhirChallenge::BoundOpeningWeight { column_ordinal },
+                    maximum_candidate_draws_per_output,
+                )
+                .expect("catalog an exact bound-opening sampler");
+        }
+        assert_eq!(bound_column_ordinals.len(), EXACT_BOUND_COLUMN_COUNT);
+
+        catalog
+            .push_direct_row_code_whir_distinct(
+                RowCodeWhirChallenge::OuterQueryVector,
+                shape.encoded_column_count,
+                EXACT_COLUMN_QUERY_COUNT,
+                maximum_candidate_draws_per_output,
+            )
+            .expect("catalog the exact outer query vector");
+        catalog
+            .push_direct_row_code_whir_distinct(
+                RowCodeWhirChallenge::BoundQueryVector,
+                EXACT_BOUND_LEAF_COUNT,
+                EXACT_OUTPUT_BOUND_QUERY_COUNT,
+                maximum_candidate_draws_per_output,
+            )
+            .expect("catalog the exact bound query vector");
+
+        let block_selector_variable_count =
+            EXACT_TABLE_VARIABLE_COUNT - EXACT_BOUND_POLYNOMIAL_VARIABLE_COUNT;
+        for block_ordinal in 0..EXACT_BOUND_REDUCTION_BLOCK_COUNT {
+            for (suffix_ordinal, fixed_prefix) in
+                EXACT_BOUND_DEGREE_SUFFIX_PREFIXES.iter().enumerate()
+            {
+                for coordinate_ordinal in
+                    block_selector_variable_count + fixed_prefix.len()..EXACT_TABLE_VARIABLE_COUNT
+                {
+                    catalog
+                        .push_direct_row_code_whir_extension(
+                            RowCodeWhirChallenge::BoundDegreeCoordinate {
+                                block_ordinal: u16::try_from(block_ordinal)
+                                    .expect("bound block ordinal fits u16"),
+                                degree_test_ordinal: u16::try_from(suffix_ordinal + 1)
+                                    .expect("bound degree-test ordinal fits u16"),
+                                coordinate_ordinal: u16::try_from(coordinate_ordinal)
+                                    .expect("bound coordinate ordinal fits u16"),
+                            },
+                            maximum_candidate_draws_per_output,
+                        )
+                        .expect("catalog an exact bound-degree sampler");
+                }
+            }
+        }
+
+        extend_plain_aggregate_public_sampler_exhaustion_catalog(
+            &mut catalog,
+            pcs,
+            maximum_candidate_draws_per_output,
+        )
+        .expect("extend the exact public sampler catalog through plain WHIR");
+        catalog
+    }
+
+    fn exact_algebraic_soundness_catalog(
+        pcs: &PlainAggregatePcs,
+        variant: &RelationPlanVariant,
+        relation_context: &crate::bgv::proof_suite::RelationPlanCheckContext,
+        shape: ExactProofShape,
+    ) -> Vec<ExactAlgebraicSoundnessRow> {
+        let transcript_schedule = variant
+            .common_proof_transcript_schedule(relation_context)
+            .expect("derive the exact common-proof transcript schedule");
+        let theta_challenge_groups = transcript_schedule
+            .ordered_application_challenge_groups()
+            .iter()
+            .copied()
+            .filter(|group| matches!(group.challenge(), CommonProofChallenge::Theta { .. }))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            theta_challenge_groups
+                .iter()
+                .map(|group| (group.challenge(), group.modulus(), group.coordinate_count(),))
+                .collect::<Vec<_>>(),
+            [
+                (
+                    CommonProofChallenge::Theta { modulus_ordinal: 0 },
+                    GOLDILOCKS_MODULUS,
+                    5,
+                ),
+                (
+                    CommonProofChallenge::Theta { modulus_ordinal: 1 },
+                    GOLDILOCKS_MODULUS,
+                    5,
+                ),
+                (
+                    CommonProofChallenge::Theta { modulus_ordinal: 2 },
+                    GOLDILOCKS_MODULUS,
+                    5,
+                ),
+            ],
+            "the live transcript must sample three five-coordinate base-field theta vectors"
+        );
+
+        let theta_challenges = theta_challenge_groups
+            .iter()
+            .map(|group| group.challenge())
+            .collect::<BTreeSet<_>>();
+        let mut theta_degrees_by_repetition =
+            BTreeMap::<u16, BTreeMap<CommonProofChallenge, u64>>::new();
+        for batch in variant.ordered_integer_lift_batches() {
+            let challenge = CommonProofChallenge::Theta {
+                modulus_ordinal: variant
+                    .non_native_modulus_ordinal(batch.modulus_reference())
+                    .expect("derive the exact theta modulus ordinal"),
+            };
+            assert!(theta_challenges.contains(&challenge));
+            let degree = batch
+                .theta_bad_polynomial_degree(variant.trace_domain_size())
+                .expect("derive the exact theta bad-polynomial degree");
+            assert!(
+                theta_degrees_by_repetition
+                    .entry(batch.challenge_ordinal())
+                    .or_default()
+                    .insert(challenge, degree)
+                    .is_none(),
+                "a theta modulus row may occur only once in one repetition"
+            );
+        }
+        let theta_repetition_count = theta_challenge_groups
+            .first()
+            .expect("the exact same-secret relation has a theta group")
+            .coordinate_count();
+        let theta_coordinate_modulus = theta_challenge_groups
+            .first()
+            .expect("the exact same-secret relation has a theta group")
+            .modulus();
+        assert_eq!(
+            theta_repetition_count,
+            relation_context.non_native_theta_repetition_count
+        );
+        assert_eq!(
+            theta_degrees_by_repetition
+                .keys()
+                .copied()
+                .collect::<Vec<_>>(),
+            (0..theta_repetition_count).collect::<Vec<_>>(),
+            "the integer-lift relation must consume every sampled theta repetition"
+        );
+        let theta_epoch_maximum_degrees = theta_degrees_by_repetition
+            .values()
+            .map(|degrees_by_challenge| {
+                assert_eq!(
+                    degrees_by_challenge
+                        .keys()
+                        .copied()
+                        .collect::<BTreeSet<_>>(),
+                    theta_challenges,
+                    "each theta repetition must cover all three exact modulus rows"
+                );
+                assert_eq!(
+                    degrees_by_challenge.values().copied().collect::<Vec<_>>(),
+                    [32_766, 32_766, 32_766],
+                    "the theta degrees must remain derived from the three live integer-lift rows"
+                );
+                degrees_by_challenge
+                    .values()
+                    .copied()
+                    .max()
+                    .expect("one theta repetition has a modulus row")
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(theta_epoch_maximum_degrees, [32_766; 5]);
+
+        // Conditional same-secret extraction premise: a false prechallenge
+        // assignment fixes one nonzero modulus row before each theta epoch.
+        // Every epoch therefore pays the maximum of its three row degrees,
+        // while acceptance requires all five independent base-field
+        // repetitions to vanish. The live product sampler has denominator
+        // p^5; the extension degree happens to be five too, but is not the
+        // source of this exponent.
+        let mut rows = vec![ExactAlgebraicSoundnessRow {
+            challenge: ExactAlgebraicChallengeFamily::CommonThetaProductVectors {
+                challenge_groups: theta_challenge_groups,
+            },
+            event: ExactAlgebraicFailureEvent::SameSecretIntegerLift,
+            independent_bad_polynomial_degrees: theta_epoch_maximum_degrees,
+            multiplicity: 1,
+            sample_space: ExactAlgebraicSampleSpace::IndependentBaseFieldProduct {
+                coordinate_modulus: theta_coordinate_modulus,
+                independent_repetition_count: theta_repetition_count,
+            },
+        }];
+
+        for (round_ordinal, round) in pcs.round_parameters.iter().enumerate() {
+            rows.push(ExactAlgebraicSoundnessRow::extension_field(
+                ExactAlgebraicChallengeFamily::WhirFold { round_ordinal },
+                ExactAlgebraicFailureEvent::WhirFold,
+                u64::try_from(round.domain_size).expect("WHIR fold domain size fits u64") + 2,
+                1,
+            ));
+            rows.push(ExactAlgebraicSoundnessRow::extension_field(
+                ExactAlgebraicChallengeFamily::WhirQueryCombination { round_ordinal },
+                ExactAlgebraicFailureEvent::WhirQueryCombination,
+                2,
+                u64::try_from(round.num_queries).expect("WHIR query count fits u64"),
+            ));
+        }
+        let final_round_ordinal = pcs.n_rounds();
+        rows.push(ExactAlgebraicSoundnessRow::extension_field(
+            ExactAlgebraicChallengeFamily::WhirFold {
+                round_ordinal: final_round_ordinal,
+            },
+            ExactAlgebraicFailureEvent::WhirFold,
+            u64::try_from(pcs.final_round_config().domain_size)
+                .expect("final WHIR fold domain size fits u64")
+                + 2,
+            1,
+        ));
+        // Each final-sumcheck wire message carries h(0) and h(infinity),
+        // while the verifier derives h(1) from the claimed sum and performs
+        // quadratic interpolation. A false round identity can therefore have
+        // two challenge roots. Charge that degree for every compiled round;
+        // charging only the round count as one polynomial would miss the
+        // quadratic factor.
+        rows.push(ExactAlgebraicSoundnessRow::extension_field(
+            ExactAlgebraicChallengeFamily::WhirFinalSumcheck {
+                round_count: pcs.final_sumcheck_rounds,
+            },
+            ExactAlgebraicFailureEvent::WhirFinalSumcheck,
+            2,
+            u64::try_from(pcs.final_sumcheck_rounds)
+                .expect("final WHIR sumcheck round count fits u64"),
+        ));
+
+        let scalar_opening_count = expected_opening_widths().into_iter().sum::<usize>();
+        assert_eq!(scalar_opening_count, 1_784);
+        // This is a conservative union over every scalar opening carried by
+        // the adapter. No tighter simultaneous-opening extraction is assumed.
+        rows.push(ExactAlgebraicSoundnessRow::extension_field(
+            ExactAlgebraicChallengeFamily::WhirScalarOpeningBatch,
+            ExactAlgebraicFailureEvent::WhirScalarOpeningBatch,
+            u64::try_from(scalar_opening_count).expect("scalar opening count fits u64"),
+            1,
+        ));
+
+        let deep_point_ordinal = 0_u16;
+        let deep_cardinality_bound = variant
+            .deep_point_sampler_cardinality_bound(relation_context, deep_point_ordinal)
+            .expect("derive the exact DEEP accepted-candidate floor");
+        // Derive the degree of the source-owned cross-multiplied common
+        // relation identity from the checked numerator and zeroifier grammar
+        // plus the quotient-component reconstruction. The 2^21 term below is
+        // a conservative field-denominator ceiling proved from the live
+        // accepted set; it is not the similarly sized evaluation domain.
+        let deep_identity_degree = variant
+            .cross_multiplied_composition_identity_degree_bound(relation_context)
+            .expect("derive the exact cross-multiplied composition identity degree");
+        let deep_challenge_field_numerator_ceiling = BigUint::from(1_u8) << 21_usize;
+        rows.push(ExactAlgebraicSoundnessRow {
+            challenge: ExactAlgebraicChallengeFamily::CommonDeepPoint(
+                CommonProofChallenge::DeepPoint {
+                    point_ordinal: deep_point_ordinal,
+                },
+            ),
+            event: ExactAlgebraicFailureEvent::DeepPointForbiddenSet,
+            independent_bad_polynomial_degrees: vec![deep_identity_degree],
+            multiplicity: 1,
+            sample_space: ExactAlgebraicSampleSpace::DeepAcceptedCandidates {
+                field_cardinality: deep_cardinality_bound.field_cardinality().clone(),
+                accepted_candidate_count_floor: deep_cardinality_bound
+                    .accepted_candidate_count_floor()
+                    .clone(),
+                challenge_field_numerator_ceiling: deep_challenge_field_numerator_ceiling,
+            },
+        });
+
+        assert_eq!(variant.constraint_count(), 4_406);
+        // Independent composition weights turn the first false constraint
+        // into one nonzero linear equation, not a constraint-count union.
+        rows.push(ExactAlgebraicSoundnessRow::extension_field(
+            ExactAlgebraicChallengeFamily::CommonComposition,
+            ExactAlgebraicFailureEvent::RelationCompositionBatch,
+            1,
+            1,
+        ));
+
+        let phase_opening_point_count = variant.ordered_opening_points().len();
+        assert_eq!(phase_opening_point_count, 3);
+        let point_selector_count = EXACT_TABLE_VARIABLE_COUNT
+            .checked_sub(1)
+            .and_then(|remaining| {
+                remaining.checked_sub(LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT.ilog2() as usize)
+            })
+            .expect("derive exact point-selector count");
+        assert_eq!(point_selector_count, 3);
+        // Each of the three point equations is cubic in its selector vector
+        // and linear in its independently sampled row weight.
+        rows.push(ExactAlgebraicSoundnessRow::extension_field(
+            ExactAlgebraicChallengeFamily::RowCodeWhirPointSelectorAndPhaseRow,
+            ExactAlgebraicFailureEvent::PackedPhaseSelectorAndRows,
+            u64::try_from(point_selector_count + 1).expect("packed selector degree fits u64"),
+            u64::try_from(phase_opening_point_count).expect("phase opening-point count fits u64"),
+        ));
+
+        let bound_opening_count = variant
+            .ordered_opening_claims()
+            .iter()
+            .filter(|claim| {
+                claim
+                    .column_ordinal()
+                    .and_then(|column_ordinal| {
+                        variant
+                            .ordered_columns()
+                            .get(usize::try_from(column_ordinal).ok()?)
+                    })
+                    .is_some_and(|column| {
+                        matches!(column.origin(), RelationColumnOrigin::BoundTree { .. })
+                    })
+            })
+            .count();
+        assert_eq!(bound_opening_count, EXACT_BOUND_COLUMN_COUNT);
+        // As with composition, the first false bound claim gives one nonzero
+        // linear equation in the independent bound-opening weights.
+        rows.push(ExactAlgebraicSoundnessRow::extension_field(
+            ExactAlgebraicChallengeFamily::RowCodeWhirBoundOpening,
+            ExactAlgebraicFailureEvent::BoundOpeningBatch,
+            1,
+            1,
+        ));
+        // The mask chunks are values of an already-bound polynomial. Their
+        // deterministic reconstruction adds no challenge-root event.
+        rows.push(ExactAlgebraicSoundnessRow::extension_field(
+            ExactAlgebraicChallengeFamily::RowCodeWhirOpeningBatchMask,
+            ExactAlgebraicFailureEvent::OpeningBatchMask,
+            0,
+            u64::try_from(EXACT_OPENING_BATCH_MASK_CHUNK_COUNT)
+                .expect("opening-batch mask chunk count fits u64"),
+        ));
+
+        // Conditional extraction hypothesis: after the three authenticated
+        // phase roots are bound and extracted, every false phase opening fixes
+        // a nonzero reduction polynomial of degree below the encoded column
+        // domain before its opening point is sampled.
+        rows.push(ExactAlgebraicSoundnessRow::extension_field(
+            ExactAlgebraicChallengeFamily::PhaseOpeningReduction,
+            ExactAlgebraicFailureEvent::PhaseOpeningReductionExceptionalSet,
+            u64::try_from(shape.encoded_column_count).expect("encoded phase column count fits u64"),
+            u64::try_from(phase_opening_point_count).expect("phase opening-point count fits u64"),
+        ));
+
+        // Each bound-reduction block authenticates paired leaves from one
+        // complete 2^21-point codeword. BCIKS contributes one exceptional set
+        // per block at that complete-domain degree, not separate 2^20 events
+        // for the point and its opposite.
+        let bound_encoded_domain_size = EXACT_BOUND_LEAF_COUNT
+            .checked_mul(2)
+            .expect("bound encoded domain size fits usize");
+        assert_eq!(bound_encoded_domain_size, shape.encoded_column_count);
+        rows.push(ExactAlgebraicSoundnessRow::extension_field(
+            ExactAlgebraicChallengeFamily::BoundOpeningReduction,
+            ExactAlgebraicFailureEvent::BoundOpeningReductionExceptionalSet,
+            u64::try_from(bound_encoded_domain_size).expect("bound encoded domain size fits u64"),
+            u64::try_from(EXACT_BOUND_REDUCTION_BLOCK_COUNT)
+                .expect("bound reduction block count fits u64"),
+        ));
+
+        let block_selector_variable_count =
+            EXACT_TABLE_VARIABLE_COUNT - EXACT_BOUND_POLYNOMIAL_VARIABLE_COUNT;
+        let bound_degree_random_coordinate_count = EXACT_BOUND_REDUCTION_BLOCK_COUNT
+            * EXACT_BOUND_DEGREE_SUFFIX_PREFIXES
+                .iter()
+                .map(|prefix| {
+                    EXACT_TABLE_VARIABLE_COUNT - block_selector_variable_count - prefix.len()
+                })
+                .sum::<usize>();
+        assert_eq!(bound_degree_random_coordinate_count, 72);
+        rows.push(ExactAlgebraicSoundnessRow::extension_field(
+            ExactAlgebraicChallengeFamily::RowCodeWhirBoundDegreeCoordinate,
+            ExactAlgebraicFailureEvent::BoundDegreeSuffix,
+            1,
+            u64::try_from(bound_degree_random_coordinate_count)
+                .expect("bound degree coordinate count fits u64"),
+        ));
+        rows
     }
 
     fn index_has_prefix(index: usize, variable_count: usize, prefix: &[u8]) -> bool {
@@ -3194,6 +3889,7 @@ mod construction_tests {
             ])
             .max()
             .expect("the exact WHIR configuration has query branches");
+        assert_eq!(common_binary_denominator_exponent, 2_893);
         let mut binary_numerator = BigUint::from(0_u8);
         let mut binary_event_terms = Vec::new();
         for &(log_inverse_rate, query_count, complete_population) in &query_branches {
@@ -3303,89 +3999,246 @@ mod construction_tests {
 
         assert_eq!(shape.opening_claim_count, 4_217);
         assert_eq!(shape.phase_row_counts(), [247, 136, 15]);
-        let base_layout = ExactBasePhaseLayout::for_tree_role(&variant, ProofTreeRole::BaseOracle)
-            .expect("derive exact base layout");
-        let auxiliary_layout =
-            ExactBasePhaseLayout::for_tree_role(&variant, ProofTreeRole::AuxiliaryOracle)
-                .expect("derive exact auxiliary layout");
-        assert!(
-            base_layout
-                .rows
-                .iter()
-                .chain(&auxiliary_layout.rows)
-                .all(|row| !row.opening_point_ordinals.is_empty()
-                    && row
-                        .opening_point_ordinals
-                        .iter()
-                        .all(|point_ordinal| *point_ordinal < 3))
-        );
-        let phase_proximity_gap_application_count = (0..3_u32)
-            .filter(|point_ordinal| {
-                base_layout
-                    .rows
-                    .iter()
-                    .chain(&auxiliary_layout.rows)
-                    .any(|row| row.opening_point_ordinals.contains(point_ordinal))
-            })
-            .count();
-        assert_eq!(phase_proximity_gap_application_count, 3);
-        let scalar_opening_count = expected_opening_widths().into_iter().sum::<usize>();
-        assert_eq!(scalar_opening_count, 1_784);
-
-        // This is a conservative construction-specific algebraic union. The
-        // WHIR fold terms use the exact domain entering each fold. The
-        // remaining terms cover query combination and final folding,
-        // scalar-opening batching, production DEEP, both BCIKS exceptional
-        // sets, every relation constraint, phase-row and bound-claim
-        // batching, mask-chunk claims, degree-three selector batching, and all
-        // three forbidden-suffix subcubes in each bound-reduction block.
-        let intermediate_fold_domain_sizes = pcs
-            .round_parameters
-            .iter()
-            .map(|round| round.domain_size)
-            .collect::<Vec<_>>();
-        let final_fold_domain_size = pcs.final_round_config().domain_size;
+        let public_sampler_catalog =
+            exact_public_sampler_exhaustion_catalog(&pcs, &variant, &relation_context, shape);
         assert_eq!(
-            intermediate_fold_domain_sizes,
-            [1 << 23, 1 << 22, 1 << 21, 1 << 20]
+            public_sampler_catalog.sampler_kind_row_count(PublicSamplerKind::Product),
+            3
         );
-        assert_eq!(final_fold_domain_size, 1 << 19);
-        let whir_fold_failure_numerator = intermediate_fold_domain_sizes
-            .iter()
-            .copied()
-            .chain([final_fold_domain_size])
-            .map(|domain_size| domain_size as u64 + 2)
-            .sum::<u64>();
-        let whir_query_combination_numerator = 2_u64
-            * pcs
-                .round_parameters
-                .iter()
-                .map(|round| round.num_queries as u64)
-                .sum::<u64>();
-        let algebraic_failure_numerator = whir_fold_failure_numerator
-            + whir_query_combination_numerator
-            + 2
-            + scalar_opening_count as u64
-            + variant.evaluation_domain_size()
-            + variant.constraint_count() as u64
-            + shape.phase_row_counts().into_iter().sum::<usize>() as u64
-            + EXACT_BOUND_COLUMN_COUNT as u64
-            + (phase_proximity_gap_application_count * shape.encoded_column_count) as u64
-            + (EXACT_BOUND_LEAF_COUNT * 2) as u64
-            + EXACT_OPENING_BATCH_MASK_CHUNK_COUNT as u64
-            + (3 * shape.phase_row_counts().into_iter().sum::<usize>()) as u64
-            + 72;
-        assert_eq!(algebraic_failure_numerator, 26_749_020);
+        assert_eq!(
+            public_sampler_catalog.sampler_kind_row_count(PublicSamplerKind::Extension),
+            5_087
+        );
+        assert_eq!(
+            public_sampler_catalog.sampler_kind_row_count(PublicSamplerKind::Deep),
+            1
+        );
+        assert_eq!(
+            public_sampler_catalog.sampler_kind_row_count(PublicSamplerKind::Distinct),
+            7
+        );
+        assert_eq!(
+            public_sampler_catalog.sampler_kind_row_count(PublicSamplerKind::Extension)
+                + public_sampler_catalog.sampler_kind_row_count(PublicSamplerKind::Deep),
+            5_088
+        );
+        assert_eq!(
+            public_sampler_catalog.extension_scalar_output_count_including_deep(),
+            5_088
+        );
+        assert_eq!(
+            public_sampler_catalog.logical_verifier_message_count(),
+            EXACT_LOGICAL_VERIFIER_MESSAGE_COUNT
+        );
+        assert_eq!(public_sampler_catalog.bit_output_count(), 0);
+        assert_eq!(public_sampler_catalog.grinding_output_count(), 0);
+        assert_eq!(
+            crate::bgv::proof_suite::PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT,
+            128
+        );
+        for row in public_sampler_catalog.rows() {
+            assert_eq!(
+                row.maximum_candidate_draws_per_output(),
+                128,
+                "every exact public sampler row must use D=128"
+            );
+            let expected_candidate_bit_length = match row.sampler_kind() {
+                PublicSamplerKind::Product => 320,
+                PublicSamplerKind::Extension | PublicSamplerKind::Deep => 512,
+                PublicSamplerKind::Distinct => 64,
+            };
+            assert_eq!(
+                row.candidate_bit_length(),
+                expected_candidate_bit_length,
+                "exact public sampler candidate width changed for {}",
+                row.challenge_tag()
+            );
+        }
+        // This availability bound is exact in the ideal typed-XOF model for
+        // candidates within each row. The union does not assume independence
+        // between rows or repeated proofs.
+        assert!(
+            public_sampler_catalog
+                .multiplied_exhaustion_union_bound_is_at_most_inverse_power_of_two(
+                    EXACT_SAME_SECRET_APPLICATION_COUNT,
+                    128,
+                )
+                .expect("compare the exact public sampler exhaustion union"),
+            "ten same-secret proofs must retain at least 128 public-sampler availability bits"
+        );
 
-        let challenge_field_order = BigUint::from(GOLDILOCKS_MODULUS).pow(5);
+        assert_eq!(relation_context.base_field_modulus, GOLDILOCKS_MODULUS);
+        let challenge_field_order = BigUint::from(relation_context.base_field_modulus)
+            .pow(u32::from(relation_context.challenge_extension_degree));
+        assert_eq!(
+            challenge_field_order,
+            BigUint::parse_bytes(
+                b"2135987033434293902082969833143585405490115481162544232032811052120416417467265840012020259225601",
+                10,
+            )
+            .expect("parse the exact challenge-field order")
+        );
+        let algebraic_catalog =
+            exact_algebraic_soundness_catalog(&pcs, &variant, &relation_context, shape);
+        assert!(
+            algebraic_catalog
+                .iter()
+                .all(ExactAlgebraicSoundnessRow::challenge_matches_event),
+            "every algebraic event must remain attached to its typed challenge family"
+        );
+        let theta_challenge_groups = algebraic_catalog
+            .iter()
+            .find_map(|row| match &row.challenge {
+                ExactAlgebraicChallengeFamily::CommonThetaProductVectors { challenge_groups } => {
+                    Some(challenge_groups)
+                }
+                _ => None,
+            })
+            .expect("the exact algebraic catalog has theta product vectors");
+        assert_eq!(theta_challenge_groups.len(), 3);
+        assert!(
+            theta_challenge_groups
+                .iter()
+                .all(|group| group.coordinate_count() == 5)
+        );
+        assert_eq!(
+            algebraic_catalog
+                .iter()
+                .filter_map(|row| match &row.challenge {
+                    ExactAlgebraicChallengeFamily::WhirFold { round_ordinal } => {
+                        Some(*round_ordinal)
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>(),
+            (0..=pcs.n_rounds()).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            algebraic_catalog
+                .iter()
+                .filter_map(|row| match &row.challenge {
+                    ExactAlgebraicChallengeFamily::WhirQueryCombination { round_ordinal } => {
+                        Some(*round_ordinal)
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>(),
+            (0..pcs.n_rounds()).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            algebraic_catalog
+                .iter()
+                .filter_map(|row| match &row.challenge {
+                    ExactAlgebraicChallengeFamily::WhirFinalSumcheck { round_count } => {
+                        Some(*round_count)
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>(),
+            [pcs.final_sumcheck_rounds]
+        );
+        assert_eq!(
+            pcs.final_sumcheck_rounds, 6,
+            "the frozen exact WHIR profile has six quadratic final-sumcheck rounds"
+        );
+        let numerator_for_event = |event| {
+            algebraic_catalog
+                .iter()
+                .filter(|row| row.event == event)
+                .map(|row| row.challenge_field_numerator(&challenge_field_order))
+                .fold(BigUint::from(0_u8), |sum, numerator| sum + numerator)
+        };
+        assert_eq!(
+            numerator_for_event(ExactAlgebraicFailureEvent::WhirFold),
+            BigUint::from(16_252_938_u64)
+        );
+        assert_eq!(
+            numerator_for_event(ExactAlgebraicFailureEvent::WhirQueryCombination),
+            BigUint::from(2_414_u64)
+        );
+        assert_eq!(
+            numerator_for_event(ExactAlgebraicFailureEvent::WhirFinalSumcheck),
+            BigUint::from(12_u8)
+        );
+        assert_eq!(
+            numerator_for_event(ExactAlgebraicFailureEvent::WhirScalarOpeningBatch),
+            BigUint::from(1_784_u64)
+        );
+        assert_eq!(
+            numerator_for_event(ExactAlgebraicFailureEvent::DeepPointForbiddenSet),
+            BigUint::from(1_u64 << 21)
+        );
+        assert_eq!(
+            algebraic_catalog
+                .iter()
+                .find(|row| row.event == ExactAlgebraicFailureEvent::DeepPointForbiddenSet)
+                .expect("the exact algebraic catalog has one DEEP row")
+                .raw_numerator(),
+            BigUint::from(170_331_u64),
+            "the DEEP identity degree remains distinct from its accepted-set field ceiling"
+        );
+        assert_eq!(
+            numerator_for_event(ExactAlgebraicFailureEvent::RelationCompositionBatch),
+            BigUint::from(1_u8)
+        );
+        assert_eq!(
+            numerator_for_event(ExactAlgebraicFailureEvent::PackedPhaseSelectorAndRows),
+            BigUint::from(12_u8)
+        );
+        assert_eq!(
+            numerator_for_event(ExactAlgebraicFailureEvent::BoundOpeningBatch),
+            BigUint::from(1_u8)
+        );
+        assert_eq!(
+            numerator_for_event(ExactAlgebraicFailureEvent::OpeningBatchMask),
+            BigUint::from(0_u8)
+        );
+        assert_eq!(
+            numerator_for_event(ExactAlgebraicFailureEvent::PhaseOpeningReductionExceptionalSet,),
+            BigUint::from(3_u64 * (1_u64 << 21))
+        );
+        assert_eq!(
+            numerator_for_event(ExactAlgebraicFailureEvent::BoundOpeningReductionExceptionalSet,),
+            BigUint::from(4_u64 * (1_u64 << 20))
+        );
+        assert_eq!(
+            numerator_for_event(ExactAlgebraicFailureEvent::BoundDegreeSuffix),
+            BigUint::from(72_u8)
+        );
+
+        let theta_failure_numerator =
+            numerator_for_event(ExactAlgebraicFailureEvent::SameSecretIntegerLift);
+        assert_eq!(theta_failure_numerator, BigUint::from(32_766_u64).pow(5));
+        assert_eq!(
+            theta_failure_numerator,
+            BigUint::parse_bytes(b"37767404055200080068576", 10)
+                .expect("parse the exact theta numerator")
+        );
+        let non_theta_algebraic_failure_numerator = algebraic_catalog
+            .iter()
+            .filter(|row| row.event != ExactAlgebraicFailureEvent::SameSecretIntegerLift)
+            .map(|row| row.challenge_field_numerator(&challenge_field_order))
+            .fold(BigUint::from(0_u8), |sum, numerator| sum + numerator);
+        assert_eq!(
+            non_theta_algebraic_failure_numerator,
+            BigUint::from(28_840_146_u64)
+        );
+        let algebraic_failure_numerator =
+            &theta_failure_numerator + &non_theta_algebraic_failure_numerator;
+        assert_eq!(
+            algebraic_failure_numerator,
+            BigUint::parse_bytes(b"37767404055200108908722", 10)
+                .expect("parse the exact algebraic numerator")
+        );
         let aggregate_numerator = &challenge_field_order * binary_numerator
-            + (BigUint::from(algebraic_failure_numerator) << common_binary_denominator_exponent);
+            + (&algebraic_failure_numerator << common_binary_denominator_exponent);
         let aggregate_denominator = &challenge_field_order << common_binary_denominator_exponent;
         assert!(
-            (&aggregate_numerator << STRICT_ROUND_BY_ROUND_SOUNDNESS_BITS) < aggregate_denominator
+            (&aggregate_numerator << EXACT_AGGREGATE_SOUNDNESS_UPPER_BOUND_BITS)
+                < aggregate_denominator
         );
         assert!(
-            (&aggregate_numerator << (STRICT_ROUND_BY_ROUND_SOUNDNESS_BITS + 1))
+            (&aggregate_numerator << (EXACT_AGGREGATE_SOUNDNESS_UPPER_BOUND_BITS + 1))
                 >= aggregate_denominator
         );
         for (event_numerator, event_denominator) in &binary_event_terms {
@@ -3395,17 +4248,19 @@ mod construction_tests {
             );
         }
         assert!(
-            BigUint::from(algebraic_failure_numerator) * &output_query_denominator
+            &non_theta_algebraic_failure_numerator * &output_query_denominator
                 <= &output_query_term * &challenge_field_order
         );
 
-        // Conditional multi-round QROM arithmetic. The state-function, RBR
-        // extractor, list-decoder, and typed ideal-XOF correspondence remain
-        // separate theorem obligations. The `2k/2^512` term is the simulated
-        // oracle/database penalty from CMS19 Lemma 4.9. The transcript counter
-        // is reconciled with the accepted verifier in the persisted-proof gate;
-        // all other verifier-owned SHAKE calls are enumerated by the Merkle and
-        // fixed-hash ledgers above.
+        // Conditional multi-round QROM arithmetic. The common-construction
+        // state function, RBR extractor, row-code list decoder, typed ideal-XOF
+        // correspondence, same-secret nonzero-theta-row extraction, phase
+        // opening-reduction extraction, and checked DEEP forbidden-set bound
+        // remain named theorem obligations. The `2k/2^512` term is the
+        // simulated oracle/database penalty from CMS19 Lemma 4.9. The
+        // transcript counter is reconciled with the accepted verifier in the
+        // persisted-proof gate; all other verifier-owned SHAKE calls are
+        // enumerated by the Merkle and fixed-hash ledgers above.
         let verifier_hash_query_count = EXACT_TRANSCRIPT_HASH_QUERY_COUNT
             + EXACT_VERIFIER_MERKLE_HASH_QUERY_COUNT
             + EXACT_VERIFIER_NON_MERKLE_HASH_QUERY_COUNT;
@@ -3458,6 +4313,11 @@ mod construction_tests {
             same_secret_application_ceiling,
             u32::from(crate::foundation::FOUNDATION_PROFILE.participant_count)
         );
+        assert_eq!(
+            u64::from(same_secret_application_ceiling),
+            EXACT_SAME_SECRET_APPLICATION_COUNT
+        );
+        let same_secret_application_count = BigUint::from(EXACT_SAME_SECRET_APPLICATION_COUNT);
         let transcript_accounting = exact_transcript_accounting(&variant, &relation_context);
         assert_eq!(
             transcript_accounting.logical_verifier_message_count,
@@ -3468,22 +4328,18 @@ mod construction_tests {
         // typed verifier message can drive more than one bad event, so they
         // are not multiplied by the logical message count.
         assert!(
-            BigUint::from(same_secret_application_ceiling)
-                * &aggregate_numerator
-                * (BigUint::from(1_u8) << 80)
+            &same_secret_application_count * &aggregate_numerator * (BigUint::from(1_u8) << 80)
                 <= aggregate_denominator
         );
         assert!(
-            BigUint::from(4_u8)
-                * BigUint::from(same_secret_application_ceiling)
-                * &compiler_numerator
+            BigUint::from(4_u8) * &same_secret_application_count * &compiler_numerator
                 <= compiler_denominator
         );
 
         // Since Q_H + h < 2^81, this stronger integer check also rules out
         // an initial-search term consuming the family budget.
         assert!(
-            BigUint::from(same_secret_application_ceiling)
+            &same_secret_application_count
                 * BigUint::from(12_u8)
                 * &aggregate_numerator
                 * (BigUint::from(1_u8) << 176)
@@ -4732,7 +5588,32 @@ mod native_prover {
                 proof_wire.len()
             ));
         }
-        let _transcript_summary = prover_challenger.finish(&proof_wire)?;
+        let transcript_summary = prover_challenger.finish(&proof_wire)?;
+        let expected_public_sampler_catalog =
+            construction_tests::exact_public_sampler_exhaustion_catalog(
+                &pcs,
+                &verified_relation.variant,
+                &verified_relation.context,
+                shape,
+            );
+        let observed_public_sampler_rows = transcript_summary
+            .observed_public_sampler_rows()
+            .ok_or_else(|| {
+                "exact production transcript did not record public samplers".to_owned()
+            })?;
+        if observed_public_sampler_rows != expected_public_sampler_catalog.rows() {
+            let expected_rows = expected_public_sampler_catalog.rows();
+            let mismatch_ordinal = observed_public_sampler_rows
+                .iter()
+                .zip(expected_rows)
+                .position(|(observed, expected)| observed != expected)
+                .unwrap_or_else(|| observed_public_sampler_rows.len().min(expected_rows.len()));
+            return Err(format!(
+                "exact production public sampler trace diverged at row {mismatch_ordinal}: observed {:?}, expected {:?}",
+                observed_public_sampler_rows.get(mismatch_ordinal),
+                expected_rows.get(mismatch_ordinal),
+            ));
+        }
         verify_exact_same_secret_proof_bytes(&prerequisite, &public_input_wire, &proof_wire)?;
         write_artifact(
             &store.root().join(EXACT_PUBLIC_INPUT_ARTIFACT_NAME),

@@ -180,7 +180,9 @@ pub(crate) use profile::{
 };
 #[cfg(test)]
 pub(crate) use prover::{
-    BoundedCommonProofByteSink, CommonProofResidentMemoryPhase, PublicOnlyCommonProofCoinSource,
+    BoundedCommonProofByteSink, CommonProofPrivateCoinSamplingCatalog,
+    CommonProofPrivateCoinSamplingOperation, CommonProofResidentMemoryPhase,
+    PublicOnlyCommonProofCoinSource, RecordingCommonProofPrivateCoinSource,
     ResidentCommonProofSourcePolynomialProvider, canonical_proof_object_header_bytes,
     common_proof_private_coin_coordinate_derivation_context_hash,
     construct_composed_quotient_polynomial,

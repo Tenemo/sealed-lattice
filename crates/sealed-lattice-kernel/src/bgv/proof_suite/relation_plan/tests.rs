@@ -1,5 +1,6 @@
 use super::integer_lift::{
-    integer_lift_component_constraint_programs, integer_lift_full_ring_product_constraint_programs,
+    integer_lift_component_constraint_programs, integer_lift_component_product_expression,
+    integer_lift_full_ring_product_constraint_programs,
 };
 use super::interpreter::signed_rotation_exponent;
 use super::*;
@@ -385,6 +386,482 @@ fn dense_negacyclic_product(left: &[BigInt], right: &[BigInt]) -> Vec<BigInt> {
         }
     }
     product
+}
+
+fn evaluate_dense_polynomial(coefficients: &[BigInt], point: &BigInt) -> BigInt {
+    coefficients.iter().enumerate().fold(
+        BigInt::zero(),
+        |evaluation, (coefficient_ordinal, coefficient)| {
+            evaluation
+                + coefficient
+                    * integer_power(
+                        point.clone(),
+                        u64::try_from(coefficient_ordinal)
+                            .expect("test coefficient ordinal fits u64"),
+                    )
+        },
+    )
+}
+
+fn selected_full_ring_half(
+    coefficients: &[BigInt],
+    selected_half: RelationIntegerLiftFullRingHalf,
+) -> Vec<BigInt> {
+    let half_ring_degree = coefficients.len() / 2;
+    let start = match selected_half {
+        RelationIntegerLiftFullRingHalf::Low => 0,
+        RelationIntegerLiftFullRingHalf::High => half_ring_degree,
+    };
+    coefficients[start..start + half_ring_degree].to_vec()
+}
+
+fn dense_oracle_transpose_rows(
+    multiplicand: &[BigInt],
+    selected_product_half: RelationIntegerLiftFullRingHalf,
+    multiplier_half: RelationIntegerLiftFullRingHalf,
+    point: &BigInt,
+) -> Vec<BigInt> {
+    let ring_degree = multiplicand.len();
+    let half_ring_degree = ring_degree / 2;
+    let multiplier_half_start = match multiplier_half {
+        RelationIntegerLiftFullRingHalf::Low => 0,
+        RelationIntegerLiftFullRingHalf::High => half_ring_degree,
+    };
+    (0..half_ring_degree)
+        .map(|reversed_row_ordinal| {
+            let multiplier_coefficient_ordinal =
+                multiplier_half_start + (half_ring_degree - 1 - reversed_row_ordinal);
+            let mut multiplier_basis = vec![BigInt::zero(); ring_degree];
+            multiplier_basis[multiplier_coefficient_ordinal] = BigInt::one();
+            let basis_product = dense_negacyclic_product(multiplicand, &multiplier_basis);
+            evaluate_dense_polynomial(
+                &selected_full_ring_half(&basis_product, selected_product_half),
+                point,
+            )
+        })
+        .collect()
+}
+
+const ORACLE_MULTIPLICAND_LOW_COLUMN: u32 = 0;
+const ORACLE_MULTIPLICAND_HIGH_COLUMN: u32 = 1;
+const ORACLE_MULTIPLIER_LOW_COLUMN: u32 = 2;
+const ORACLE_MULTIPLIER_HIGH_COLUMN: u32 = 3;
+const ORACLE_REVERSED_MULTIPLIER_LOW_COLUMN: u32 = 4;
+const ORACLE_REVERSED_MULTIPLIER_HIGH_COLUMN: u32 = 5;
+const ORACLE_MULTIPLICAND_LOW_SUFFIX_COLUMN: u32 = 6;
+const ORACLE_MULTIPLICAND_HIGH_SUFFIX_COLUMN: u32 = 7;
+const ORACLE_REVERSED_MULTIPLIER_LOW_TRANSPOSE_COLUMN: u32 = 8;
+const ORACLE_REVERSED_MULTIPLIER_HIGH_TRANSPOSE_COLUMN: u32 = 9;
+const ORACLE_LINEAR_SOURCE_COLUMN: u32 = 10;
+const ORACLE_LINEAR_EVALUATION_COLUMN: u32 = 11;
+const ORACLE_PRODUCT_ACCUMULATOR_COLUMN: u32 = 12;
+
+struct FullRingIntegerLiftOracleFixture {
+    component: RelationIntegerLiftComponentDescriptor,
+    columns: BTreeMap<u32, Vec<BigInt>>,
+    expected_product_expression_rows: Vec<BigInt>,
+    expected_signed_product_half: Vec<BigInt>,
+}
+
+fn full_ring_integer_lift_oracle_fixture(
+    multiplicand: &[BigInt],
+    multiplier: &[BigInt],
+    selected_product_half: RelationIntegerLiftFullRingHalf,
+    product_is_negative: bool,
+    multiplier_low_offset: u64,
+    multiplier_high_offset: u64,
+    point: &BigInt,
+) -> FullRingIntegerLiftOracleFixture {
+    assert_eq!(multiplicand.len(), multiplier.len());
+    assert_eq!(multiplicand.len(), 4);
+    let half_ring_degree = multiplicand.len() / 2;
+    let multiplicand_low = multiplicand[..half_ring_degree].to_vec();
+    let multiplicand_high = multiplicand[half_ring_degree..].to_vec();
+    let multiplier_low = multiplier[..half_ring_degree].to_vec();
+    let multiplier_high = multiplier[half_ring_degree..].to_vec();
+    let encoded_multiplier_low = multiplier_low
+        .iter()
+        .map(|coefficient| coefficient + BigInt::from(multiplier_low_offset))
+        .collect::<Vec<_>>();
+    let encoded_multiplier_high = multiplier_high
+        .iter()
+        .map(|coefficient| coefficient + BigInt::from(multiplier_high_offset))
+        .collect::<Vec<_>>();
+    let reversed_multiplier_low = encoded_multiplier_low
+        .iter()
+        .rev()
+        .cloned()
+        .collect::<Vec<_>>();
+    let reversed_multiplier_high = encoded_multiplier_high
+        .iter()
+        .rev()
+        .cloned()
+        .collect::<Vec<_>>();
+    let low_multiplier_transpose = dense_oracle_transpose_rows(
+        multiplicand,
+        selected_product_half,
+        RelationIntegerLiftFullRingHalf::Low,
+        point,
+    );
+    let high_multiplier_transpose = dense_oracle_transpose_rows(
+        multiplicand,
+        selected_product_half,
+        RelationIntegerLiftFullRingHalf::High,
+        point,
+    );
+
+    let dense_product = dense_negacyclic_product(multiplicand, multiplier);
+    let mut expected_signed_product_half =
+        selected_full_ring_half(&dense_product, selected_product_half);
+    if product_is_negative {
+        for coefficient in &mut expected_signed_product_half {
+            *coefficient = -coefficient.clone();
+        }
+    }
+    let linear_source = expected_signed_product_half
+        .iter()
+        .map(|coefficient| -coefficient)
+        .collect::<Vec<_>>();
+    let linear_evaluation = suffix_evaluations(&linear_source, point);
+
+    let product_sign = if product_is_negative {
+        -BigInt::one()
+    } else {
+        BigInt::one()
+    };
+    let expected_product_expression_rows = (0..half_ring_degree)
+        .map(|row_ordinal| {
+            let low_multiplier =
+                &reversed_multiplier_low[row_ordinal] - BigInt::from(multiplier_low_offset);
+            let high_multiplier =
+                &reversed_multiplier_high[row_ordinal] - BigInt::from(multiplier_high_offset);
+            &product_sign
+                * (&low_multiplier_transpose[row_ordinal] * low_multiplier
+                    + &high_multiplier_transpose[row_ordinal] * high_multiplier)
+        })
+        .collect::<Vec<_>>();
+    let mut product_accumulator = vec![BigInt::zero(); half_ring_degree];
+    for row_ordinal in 0..half_ring_degree - 1 {
+        product_accumulator[row_ordinal + 1] =
+            &product_accumulator[row_ordinal] + &expected_product_expression_rows[row_ordinal];
+    }
+
+    let product_descriptor = RelationIntegerLiftFullRingNegacyclicProductDescriptor {
+        negative: product_is_negative,
+        selected_half: selected_product_half,
+        multiplicand_low_column_ordinal: ORACLE_MULTIPLICAND_LOW_COLUMN,
+        multiplicand_high_column_ordinal: ORACLE_MULTIPLICAND_HIGH_COLUMN,
+        multiplier_low_column_ordinal: ORACLE_MULTIPLIER_LOW_COLUMN,
+        multiplier_high_column_ordinal: ORACLE_MULTIPLIER_HIGH_COLUMN,
+        reversed_multiplier_low_column_ordinal: ORACLE_REVERSED_MULTIPLIER_LOW_COLUMN,
+        reversed_multiplier_high_column_ordinal: ORACLE_REVERSED_MULTIPLIER_HIGH_COLUMN,
+        multiplier_low_offset,
+        multiplier_high_offset,
+        multiplicand_low_suffix_evaluation_column_ordinal: ORACLE_MULTIPLICAND_LOW_SUFFIX_COLUMN,
+        multiplicand_high_suffix_evaluation_column_ordinal: ORACLE_MULTIPLICAND_HIGH_SUFFIX_COLUMN,
+        reversed_multiplier_low_transpose_column_ordinal:
+            ORACLE_REVERSED_MULTIPLIER_LOW_TRANSPOSE_COLUMN,
+        reversed_multiplier_high_transpose_column_ordinal:
+            ORACLE_REVERSED_MULTIPLIER_HIGH_TRANSPOSE_COLUMN,
+    };
+    let component = RelationIntegerLiftComponentDescriptor {
+        ordered_linear_terms: vec![RelationIntegerLiftLinearTermDescriptor {
+            negative: false,
+            column_ordinal: ORACLE_LINEAR_SOURCE_COLUMN,
+            column_offset: 0,
+            coefficient: RelationIntegerLiftCoefficient::Constant(1),
+        }],
+        ordered_convolution_products: Vec::new(),
+        ordered_full_ring_negacyclic_products: vec![product_descriptor],
+        linear_evaluation_column_ordinal: ORACLE_LINEAR_EVALUATION_COLUMN,
+        product_accumulator_column_ordinal: ORACLE_PRODUCT_ACCUMULATOR_COLUMN,
+    };
+    let columns = BTreeMap::from([
+        (ORACLE_MULTIPLICAND_LOW_COLUMN, multiplicand_low.clone()),
+        (ORACLE_MULTIPLICAND_HIGH_COLUMN, multiplicand_high.clone()),
+        (ORACLE_MULTIPLIER_LOW_COLUMN, encoded_multiplier_low),
+        (ORACLE_MULTIPLIER_HIGH_COLUMN, encoded_multiplier_high),
+        (
+            ORACLE_REVERSED_MULTIPLIER_LOW_COLUMN,
+            reversed_multiplier_low,
+        ),
+        (
+            ORACLE_REVERSED_MULTIPLIER_HIGH_COLUMN,
+            reversed_multiplier_high,
+        ),
+        (
+            ORACLE_MULTIPLICAND_LOW_SUFFIX_COLUMN,
+            suffix_evaluations(&multiplicand_low, point),
+        ),
+        (
+            ORACLE_MULTIPLICAND_HIGH_SUFFIX_COLUMN,
+            suffix_evaluations(&multiplicand_high, point),
+        ),
+        (
+            ORACLE_REVERSED_MULTIPLIER_LOW_TRANSPOSE_COLUMN,
+            low_multiplier_transpose,
+        ),
+        (
+            ORACLE_REVERSED_MULTIPLIER_HIGH_TRANSPOSE_COLUMN,
+            high_multiplier_transpose,
+        ),
+        (ORACLE_LINEAR_SOURCE_COLUMN, linear_source),
+        (ORACLE_LINEAR_EVALUATION_COLUMN, linear_evaluation),
+        (ORACLE_PRODUCT_ACCUMULATOR_COLUMN, product_accumulator),
+    ]);
+    FullRingIntegerLiftOracleFixture {
+        component,
+        columns,
+        expected_product_expression_rows,
+        expected_signed_product_half,
+    }
+}
+
+fn assert_full_ring_integer_lift_fixture_satisfies_compiled_identities(
+    fixture: &FullRingIntegerLiftOracleFixture,
+    point: &BigInt,
+    case_description: &str,
+) {
+    let trace_domain_size = fixture.expected_signed_product_half.len();
+    let theta_expression = vec![RelationExpressionInstruction::TranscriptChallenge {
+        challenge_role: RelationChallengeRole::NonNativeTheta,
+        role_coordinates: vec![0, 0],
+    }];
+    let product_descriptor = &fixture.component.ordered_full_ring_negacyclic_products[0];
+    let product_programs = integer_lift_full_ring_product_constraint_programs(
+        product_descriptor,
+        &theta_expression,
+        u64::try_from(trace_domain_size).expect("test half-ring degree fits u64"),
+        Vec::new(),
+        Vec::new(),
+    )
+    .expect("full-ring product constraint programs");
+    for program_pair_ordinal in 0..4 {
+        assert_eq!(
+            evaluate_integer_lift_test_expression(
+                &product_programs[program_pair_ordinal * 2].numerator_postfix_expression,
+                trace_domain_size - 1,
+                trace_domain_size,
+                point,
+                &fixture.columns,
+            ),
+            BigInt::zero(),
+            "full-ring boundary identity failed for {case_description}, program pair {program_pair_ordinal}",
+        );
+        for row_ordinal in 0..trace_domain_size - 1 {
+            assert_eq!(
+                evaluate_integer_lift_test_expression(
+                    &product_programs[program_pair_ordinal * 2 + 1].numerator_postfix_expression,
+                    row_ordinal,
+                    trace_domain_size,
+                    point,
+                    &fixture.columns,
+                ),
+                BigInt::zero(),
+                "full-ring recurrence identity failed for {case_description}, program pair {program_pair_ordinal}, row {row_ordinal}",
+            );
+        }
+    }
+
+    let product_expression = integer_lift_component_product_expression(&fixture.component)
+        .expect("component product expression");
+    let interpreted_product_rows = (0..trace_domain_size)
+        .map(|row_ordinal| {
+            evaluate_integer_lift_test_expression(
+                &product_expression,
+                row_ordinal,
+                trace_domain_size,
+                point,
+                &fixture.columns,
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        interpreted_product_rows, fixture.expected_product_expression_rows,
+        "compiled product expression diverged from the dense oracle for {case_description}",
+    );
+    assert_eq!(
+        interpreted_product_rows.iter().sum::<BigInt>(),
+        evaluate_dense_polynomial(&fixture.expected_signed_product_half, point),
+        "compiled product evaluation diverged from the dense oracle for {case_description}",
+    );
+
+    let component_programs = integer_lift_component_constraint_programs(
+        &fixture.component,
+        SuiteModulusReference::data(0),
+        &theta_expression,
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        &check_context(),
+    )
+    .expect("integer-lift component constraint programs");
+    for (program_ordinal, enforced_rows) in [
+        (0, vec![trace_domain_size - 1]),
+        (1, (0..trace_domain_size - 1).collect()),
+        (2, vec![0]),
+        (3, (0..trace_domain_size - 1).collect()),
+        (4, vec![trace_domain_size - 1]),
+    ] {
+        for row_ordinal in enforced_rows {
+            assert_eq!(
+                evaluate_integer_lift_test_expression(
+                    &component_programs[program_ordinal].numerator_postfix_expression,
+                    row_ordinal,
+                    trace_domain_size,
+                    point,
+                    &fixture.columns,
+                ),
+                BigInt::zero(),
+                "integer-lift component identity failed for {case_description}, program {program_ordinal}, row {row_ordinal}",
+            );
+        }
+    }
+}
+
+#[test]
+fn full_ring_integer_lift_matches_an_exhaustive_degree_four_oracle() {
+    let point = BigInt::from(11_u8);
+    for multiplicand_ordinal in 0..4 {
+        for multiplicand_sign in [-1_i8, 1] {
+            let mut multiplicand = vec![BigInt::zero(); 4];
+            multiplicand[multiplicand_ordinal] = BigInt::from(multiplicand_sign);
+            for multiplier_ordinal in 0..4 {
+                for multiplier_sign in [-1_i8, 1] {
+                    let mut multiplier = vec![BigInt::zero(); 4];
+                    multiplier[multiplier_ordinal] = BigInt::from(multiplier_sign);
+                    for selected_product_half in [
+                        RelationIntegerLiftFullRingHalf::Low,
+                        RelationIntegerLiftFullRingHalf::High,
+                    ] {
+                        for product_is_negative in [false, true] {
+                            for (multiplier_low_offset, multiplier_high_offset) in
+                                [(0_u64, 0_u64), (3, 5)]
+                            {
+                                let case_description = format!(
+                                    "multiplicand={multiplicand_sign}*X^{multiplicand_ordinal}, multiplier={multiplier_sign}*X^{multiplier_ordinal}, selected_half={selected_product_half:?}, product_is_negative={product_is_negative}, offsets=({multiplier_low_offset},{multiplier_high_offset})"
+                                );
+                                let fixture = full_ring_integer_lift_oracle_fixture(
+                                    &multiplicand,
+                                    &multiplier,
+                                    selected_product_half,
+                                    product_is_negative,
+                                    multiplier_low_offset,
+                                    multiplier_high_offset,
+                                    &point,
+                                );
+                                assert_full_ring_integer_lift_fixture_satisfies_compiled_identities(
+                                    &fixture,
+                                    &point,
+                                    &case_description,
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn full_ring_integer_lift_rejects_a_locally_valid_detached_product_component() {
+    let point = BigInt::from(11_u8);
+    let shared_secret = [1, 0, 0, 0].map(BigInt::from);
+    let detached_secret = [0, -1, 0, 0].map(BigInt::from);
+    let multiplier = [0, 0, 1, 0].map(BigInt::from);
+    let shared_fixture = full_ring_integer_lift_oracle_fixture(
+        &shared_secret,
+        &multiplier,
+        RelationIntegerLiftFullRingHalf::High,
+        false,
+        3,
+        5,
+        &point,
+    );
+    let mut detached_fixture = full_ring_integer_lift_oracle_fixture(
+        &detached_secret,
+        &multiplier,
+        RelationIntegerLiftFullRingHalf::High,
+        false,
+        3,
+        5,
+        &point,
+    );
+    assert_full_ring_integer_lift_fixture_satisfies_compiled_identities(
+        &shared_fixture,
+        &point,
+        "honest shared-secret component",
+    );
+    assert_full_ring_integer_lift_fixture_satisfies_compiled_identities(
+        &detached_fixture,
+        &point,
+        "locally valid detached component",
+    );
+
+    detached_fixture.columns.insert(
+        ORACLE_MULTIPLICAND_LOW_COLUMN,
+        shared_fixture.columns[&ORACLE_MULTIPLICAND_LOW_COLUMN].clone(),
+    );
+    detached_fixture.columns.insert(
+        ORACLE_MULTIPLICAND_HIGH_COLUMN,
+        shared_fixture.columns[&ORACLE_MULTIPLICAND_HIGH_COLUMN].clone(),
+    );
+    let theta_expression = vec![RelationExpressionInstruction::TranscriptChallenge {
+        challenge_role: RelationChallengeRole::NonNativeTheta,
+        role_coordinates: vec![0, 0],
+    }];
+    let product_programs = integer_lift_full_ring_product_constraint_programs(
+        &detached_fixture
+            .component
+            .ordered_full_ring_negacyclic_products[0],
+        &theta_expression,
+        2,
+        Vec::new(),
+        Vec::new(),
+    )
+    .expect("full-ring product constraint programs");
+    let component_programs = integer_lift_component_constraint_programs(
+        &detached_fixture.component,
+        SuiteModulusReference::data(0),
+        &theta_expression,
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        &check_context(),
+    )
+    .expect("integer-lift component constraint programs");
+    for (program_ordinal, row_ordinal) in [(0, 1), (1, 0), (2, 0), (3, 0), (4, 1)] {
+        assert_eq!(
+            evaluate_integer_lift_test_expression(
+                &component_programs[program_ordinal].numerator_postfix_expression,
+                row_ordinal,
+                2,
+                &point,
+                &detached_fixture.columns,
+            ),
+            BigInt::zero(),
+            "the detached product remains locally valid before its shared multiplicand binding is enforced",
+        );
+    }
+    let hostile_residuals = product_programs
+        .iter()
+        .enumerate()
+        .map(|(program_ordinal, program)| {
+            let row_ordinal = if program_ordinal % 2 == 0 { 1 } else { 0 };
+            evaluate_integer_lift_test_expression(
+                &program.numerator_postfix_expression,
+                row_ordinal,
+                2,
+                &point,
+                &detached_fixture.columns,
+            )
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        hostile_residuals.iter().any(|residual| !residual.is_zero()),
+        "the full-ring identities must bind a locally valid component back to the shared same-secret columns",
+    );
 }
 
 #[test]

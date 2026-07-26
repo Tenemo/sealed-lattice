@@ -12,7 +12,8 @@ use crate::{
             SelectedApplicationStatementContext, VerifiedCommonProofStatementSource,
             VerifiedStatementOwnedTree, compile_same_secret_relation_plan,
             decode_selected_same_secret_statement, sample_relation_application_challenges,
-            selected_relation_plan_check_context, selected_same_secret_relation_plan_input,
+            selected_committed_material_relation_plan_input, selected_relation_plan_check_context,
+            selected_same_secret_relation_plan_input,
         },
         setup::{SetupKeyRelationProofFamily, VerifiedVssShareLinkageTerminal},
     },
@@ -27,8 +28,11 @@ use crate::{
         proof_suite::{
             CommonProofAuxiliaryColumnSynthesisCursor, CommonProofPreChallengeSourceCursor,
             CommonProofPreChallengeSourcePoll, CommonProofPrivateCoinCoordinate,
+            CommonProofPrivateCoinSamplingCatalog, CommonProofPrivateCoinSamplingOperation,
             CommonProofPrivateCoinSource, CommonProofRuntimeLimits, CommonProofSourcePolynomial,
-            MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH, RelationProofTreeInput,
+            MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH,
+            PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT,
+            RecordingCommonProofPrivateCoinSource, RelationProofTreeInput,
             construct_reversed_relation_column, verified_application_statement_hash,
         },
         setup::{
@@ -40,7 +44,8 @@ use crate::{
         },
     },
     foundation::{
-        ProofApplicationSlot, SELECTED_MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT,
+        ProofApplicationSlot, ProofApplicationSlotCeilings,
+        SELECTED_MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT,
         prepare_exact_same_secret_evidence_attempt,
     },
 };
@@ -81,6 +86,8 @@ const TEST_VERIFIED_VSS_PROOF_RESULT_DIGEST: [u8; Hash512::BYTE_LENGTH] =
 const QUOTIENT_COMPONENT_CHUNK_COUNT: usize = 2;
 #[cfg(test)]
 const OPENING_BATCH_MASK_CHUNK_COUNT: usize = 8;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+const EXACT_ROW_PAD_SEED_BYTE_LENGTH: usize = core::mem::size_of::<[[u8; 32]; 3]>();
 
 /// Opaque authority proving that the same-secret input roots already passed
 /// the selected VSS low-degree verification.
@@ -157,10 +164,9 @@ impl VerifiedSameSecretLowDegreePrerequisite {
     pub(in crate::bgv) fn from_verified_vss_share_linkage_terminal(
         terminal: &VerifiedVssShareLinkageTerminal,
     ) -> Result<Self, RefusalReason> {
-        let ordered_input_roots: [[u8; Hash512::BYTE_LENGTH]; 8] = terminal
-            .ordered_coefficient_material_roots()
-            .try_into()
-            .map_err(|_| RefusalReason::WrongTypeOrLength)?;
+        let ordered_input_roots = selected_vss_degree_zero_coefficient_roots(
+            terminal.ordered_coefficient_material_roots(),
+        )?;
         let canonical_prior_proof_descriptor = terminal
             .proof_stream_descriptor()
             .encode()
@@ -300,6 +306,36 @@ impl VerifiedSameSecretLowDegreePrerequisite {
     const fn binding_digest(&self) -> [u8; Hash512::BYTE_LENGTH] {
         self.binding_digest
     }
+}
+
+fn selected_vss_degree_zero_coefficient_roots(
+    ordered_coefficient_material_roots: &[[u8; Hash512::BYTE_LENGTH]],
+) -> Result<[[u8; Hash512::BYTE_LENGTH]; 8], RefusalReason> {
+    let relation_input = selected_committed_material_relation_plan_input()
+        .map_err(|_| RefusalReason::WrongTypeOrLength)?;
+    let sharing_limb_count = relation_input.sharing_data_modulus_indices.len();
+    let reconstruction_threshold = usize::from(relation_input.threshold);
+    let expected_root_count = sharing_limb_count
+        .checked_mul(reconstruction_threshold)
+        .ok_or(RefusalReason::WrongTypeOrLength)?;
+    if sharing_limb_count != 8
+        || reconstruction_threshold == 0
+        || ordered_coefficient_material_roots.len() != expected_root_count
+    {
+        return Err(RefusalReason::WrongTypeOrLength);
+    }
+
+    (0..sharing_limb_count)
+        .map(|sharing_limb_ordinal| {
+            sharing_limb_ordinal
+                .checked_mul(reconstruction_threshold)
+                .and_then(|root_ordinal| ordered_coefficient_material_roots.get(root_ordinal))
+                .copied()
+                .ok_or(RefusalReason::WrongTypeOrLength)
+        })
+        .collect::<Result<Vec<_>, _>>()?
+        .try_into()
+        .map_err(|_| RefusalReason::WrongTypeOrLength)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -675,6 +711,24 @@ fn production_same_secret_sources() -> Result<ProductionSameSecretEvidenceSource
             Err(error)
         }
     }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+fn exact_private_coin_sampling_catalog(
+    variant: &crate::bgv::proof_suite::RelationPlanVariant,
+) -> Result<CommonProofPrivateCoinSamplingCatalog, String> {
+    let mut catalog = CommonProofPrivateCoinSamplingCatalog::from_relation_plan_variant(
+        variant,
+        SELECTED_MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT,
+    )
+    .map_err(|error| format!("derive exact private-coin mask catalog: {error:?}"))?;
+    catalog
+        .record_raw_byte_fill(
+            CommonProofPrivateCoinCoordinate::proof_salt(),
+            EXACT_ROW_PAD_SEED_BYTE_LENGTH,
+        )
+        .map_err(|error| format!("add exact row-pad seed fill to catalog: {error:?}"))?;
+    Ok(catalog)
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
@@ -1564,11 +1618,55 @@ mod tests {
         ExactPolynomialStore, ExactQuotientCommitmentManifest, SourceCheckpointManifest,
     };
     use super::*;
+    use crate::bgv::proof_suite::relation_plan::RelationMaskKind;
     use crate::bgv::proof_suite::{
         CommonProofQuotientComponentCursor, ProofBaseFieldElement, ProofChallengeExtensionElement,
         ProofEvaluationDomain, RelationPlanError, construct_opening_batch_mask,
     };
     use crate::transcript_core::encode_hex;
+
+    #[test]
+    fn verified_vss_prerequisite_selects_each_limb_degree_zero_root() {
+        let relation_input = selected_committed_material_relation_plan_input()
+            .expect("selected committed-material relation input");
+        let sharing_limb_count = relation_input.sharing_data_modulus_indices.len();
+        let reconstruction_threshold = usize::from(relation_input.threshold);
+        assert_eq!(sharing_limb_count, 8);
+        assert_eq!(reconstruction_threshold, 4);
+
+        let coefficient_roots = (0..sharing_limb_count * reconstruction_threshold)
+            .map(|root_ordinal| {
+                [u8::try_from(root_ordinal + 1).expect("test root ordinal fits"); 64]
+            })
+            .collect::<Vec<_>>();
+        let selected_roots = selected_vss_degree_zero_coefficient_roots(&coefficient_roots)
+            .expect("select one degree-zero root per sharing limb");
+
+        for (sharing_limb_ordinal, selected_root) in selected_roots.iter().enumerate() {
+            let expected_root_ordinal = sharing_limb_ordinal * reconstruction_threshold;
+            assert_eq!(*selected_root, coefficient_roots[expected_root_ordinal]);
+        }
+    }
+
+    #[test]
+    fn verified_vss_prerequisite_rejects_incomplete_or_extra_coefficient_roots() {
+        let relation_input = selected_committed_material_relation_plan_input()
+            .expect("selected committed-material relation input");
+        let exact_root_count = relation_input
+            .sharing_data_modulus_indices
+            .len()
+            .checked_mul(usize::from(relation_input.threshold))
+            .expect("selected coefficient-root count fits");
+        let exact_roots = vec![[0x5a; 64]; exact_root_count];
+
+        assert!(
+            selected_vss_degree_zero_coefficient_roots(&exact_roots[..exact_root_count - 1])
+                .is_err()
+        );
+        let mut extra_roots = exact_roots;
+        extra_roots.push([0xa5; 64]);
+        assert!(selected_vss_degree_zero_coefficient_roots(&extra_roots).is_err());
+    }
 
     fn fixed_hash(bytes: &[u8], label: &str) -> [u8; 64] {
         bytes
@@ -1583,6 +1681,53 @@ mod tests {
             .collect::<Vec<_>>()
             .try_into()
             .expect("eight digest words encode 64 bytes")
+    }
+
+    fn exact_trace_private_coin_catalog_for_tree_role(
+        variant: &crate::bgv::proof_suite::RelationPlanVariant,
+        tree_role: ProofTreeRole,
+        include_row_pad_seed_fill: bool,
+    ) -> CommonProofPrivateCoinSamplingCatalog {
+        let layout = ExactBasePhaseLayout::for_tree_role(variant, tree_role)
+            .expect("derive exact phase layout for private-coin reconciliation");
+        let phase_column_ordinals = layout
+            .rows
+            .iter()
+            .flat_map(|row| row.column_ordinals)
+            .flatten()
+            .collect::<BTreeSet<_>>();
+        let phase_coordinates = variant
+            .ordered_masks()
+            .iter()
+            .copied()
+            .filter(|mask| {
+                mask.mask_kind() == RelationMaskKind::Trace
+                    && phase_column_ordinals.contains(&mask.target_ordinal())
+            })
+            .map(|mask| CommonProofPrivateCoinCoordinate::from_mask(mask.mask_coordinate()))
+            .collect::<BTreeSet<_>>();
+        exact_private_coin_sampling_catalog(variant)
+            .expect("derive exact private-coin catalog")
+            .retaining_coordinates(|coordinate| {
+                phase_coordinates.contains(&coordinate)
+                    || (include_row_pad_seed_fill
+                        && coordinate == CommonProofPrivateCoinCoordinate::proof_salt())
+            })
+    }
+
+    fn exact_quotient_private_coin_catalog(
+        variant: &crate::bgv::proof_suite::RelationPlanVariant,
+    ) -> CommonProofPrivateCoinSamplingCatalog {
+        let quotient_coordinates = variant
+            .ordered_masks()
+            .iter()
+            .copied()
+            .filter(|mask| mask.mask_kind() != RelationMaskKind::Trace)
+            .map(|mask| CommonProofPrivateCoinCoordinate::from_mask(mask.mask_coordinate()))
+            .collect::<BTreeSet<_>>();
+        exact_private_coin_sampling_catalog(variant)
+            .expect("derive exact private-coin catalog")
+            .retaining_coordinates(|coordinate| quotient_coordinates.contains(&coordinate))
     }
 
     fn validate_checkpoint_binding(
@@ -1751,6 +1896,108 @@ mod tests {
             accumulated_inverse = accumulated_inverse.multiply(value);
         }
         Ok(())
+    }
+
+    #[test]
+    fn exact_private_coin_catalog_uses_the_exact_draw_ceiling_and_non_rejecting_raw_fill() {
+        let (_, variant, _) =
+            production_same_secret_relation().expect("compile exact same-secret relation");
+        let catalog =
+            exact_private_coin_sampling_catalog(&variant).expect("derive exact private coins");
+        assert_eq!(
+            EXACT_ROW_PAD_SEED_BYTE_LENGTH, 96,
+            "the exact three row-pad seeds must consume one 96-byte raw fill"
+        );
+
+        let base_phase_catalog = exact_trace_private_coin_catalog_for_tree_role(
+            &variant,
+            ProofTreeRole::BaseOracle,
+            true,
+        );
+        let auxiliary_phase_catalog = exact_trace_private_coin_catalog_for_tree_role(
+            &variant,
+            ProofTreeRole::AuxiliaryOracle,
+            false,
+        );
+        let quotient_phase_catalog = exact_quotient_private_coin_catalog(&variant);
+        let proof_salt_coordinate = CommonProofPrivateCoinCoordinate::proof_salt();
+        assert_eq!(
+            base_phase_catalog.entry(proof_salt_coordinate),
+            Some(CommonProofPrivateCoinSamplingOperation::RawByteFill { byte_count: 96 })
+        );
+        assert_eq!(auxiliary_phase_catalog.entry(proof_salt_coordinate), None);
+        assert_eq!(quotient_phase_catalog.entry(proof_salt_coordinate), None);
+
+        let mut partitioned_entries = BTreeMap::new();
+        for (phase_label, phase_catalog) in [
+            ("base", &base_phase_catalog),
+            ("auxiliary", &auxiliary_phase_catalog),
+            ("quotient", &quotient_phase_catalog),
+        ] {
+            for (coordinate, operation) in phase_catalog.entries() {
+                assert!(
+                    partitioned_entries.insert(coordinate, operation).is_none(),
+                    "the exact private-coin coordinate {coordinate:?} appears in more than one phase, including {phase_label}"
+                );
+            }
+        }
+        assert_eq!(
+            partitioned_entries,
+            catalog.entries().collect::<BTreeMap<_, _>>(),
+            "the pairwise-disjoint exact private-coin phases must partition the complete action catalog"
+        );
+
+        assert_eq!(
+            (
+                SELECTED_MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT,
+                PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT,
+            ),
+            (64, 128),
+            "the exact private sampler remains authoritative at D=64; the generic transcript sampler still uses D=128"
+        );
+        assert_eq!(catalog.entry_count(), variant.ordered_masks().len() + 1);
+        for (coordinate, operation) in catalog.entries() {
+            if coordinate == CommonProofPrivateCoinCoordinate::proof_salt() {
+                assert_eq!(
+                    operation,
+                    CommonProofPrivateCoinSamplingOperation::RawByteFill {
+                        byte_count: u64::try_from(EXACT_ROW_PAD_SEED_BYTE_LENGTH)
+                            .expect("row-pad seed byte count fits u64"),
+                    }
+                );
+                assert_eq!(operation.maximum_candidate_draws_per_output(), None);
+            } else {
+                let CommonProofPrivateCoinSamplingOperation::ModuloSamples {
+                    modulus,
+                    maximum_candidate_draws_per_output,
+                    output_count,
+                } = operation
+                else {
+                    panic!("a relation mask must use modulo sampling")
+                };
+                assert_eq!(modulus, crate::bgv::proof_suite::PROOF_BASE_FIELD_MODULUS);
+                assert_eq!(
+                    maximum_candidate_draws_per_output,
+                    SELECTED_MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT
+                );
+                assert!(output_count > 0);
+            }
+        }
+
+        let application_slot_ceilings =
+            crate::bgv::proof_suite::selected_profile::selected_proof_application_slot_ceilings()
+                .expect("derive selected proof-application ceilings");
+        let same_secret_application_multiplicity = application_slot_ceilings
+            .family_ceiling(ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER)
+            .expect("selected profile includes the same-secret family");
+        assert_eq!(same_secret_application_multiplicity, 10);
+        let complete_action_exhaustion = catalog
+            .exhaustion_union_bound(same_secret_application_multiplicity)
+            .expect("derive exact complete-action private-coin exhaustion");
+        assert!(
+            complete_action_exhaustion.is_at_most_inverse_power_of_two(128),
+            "under the uniform-private-coin or ideal-PRF premise, the source-derived exact same-secret private-coin exhaustion union must be at most 2^-128"
+        );
     }
 
     #[test]
@@ -2119,94 +2366,113 @@ mod tests {
                 .application_statement_schema_identifier(),
             SetupKeyRelationProofFamily::SameSecret.statement_schema_identifier()
         );
-
+        let expected_private_coin_catalog = exact_trace_private_coin_catalog_for_tree_role(
+            &sources.relation_plan_variant,
+            ProofTreeRole::BaseOracle,
+            true,
+        );
+        let mut observed_private_coin_catalog = CommonProofPrivateCoinSamplingCatalog::default();
         let request_context = sources
             .source_polynomials
             .exact_same_secret_evidence_request_context();
-        let mut cursor = CommonProofPreChallengeSourceCursor::new(
-            &sources.relation_plan_variant,
-            request_context,
-        )
-        .expect("construct production source cursor");
-        let reversed_column_bindings = cursor.reversed_column_bindings().to_vec();
+        let reversed_column_bindings;
         let mut polynomial_digests = Vec::new();
         let mut total_coefficient_count = 0_u64;
         let mut maximum_coefficient_count = 0_usize;
-        loop {
-            let requested_column_ordinal = cursor.next_source_column_ordinal();
-            match cursor
-                .next_source(
+        let source_replay_identity_digest;
+        let catalog_digest;
+        let mut row_pad_seed_bytes = [0_u8; EXACT_ROW_PAD_SEED_BYTE_LENGTH];
+        {
+            let mut recording_private_coins = RecordingCommonProofPrivateCoinSource::new(
+                &mut sources.private_coins,
+                &mut observed_private_coin_catalog,
+            );
+            let mut cursor = CommonProofPreChallengeSourceCursor::new(
+                &sources.relation_plan_variant,
+                request_context,
+            )
+            .expect("construct production source cursor");
+            reversed_column_bindings = cursor.reversed_column_bindings().to_vec();
+            loop {
+                let requested_column_ordinal = cursor.next_source_column_ordinal();
+                match cursor
+                    .next_source(
+                        &sources.relation_plan_variant,
+                        request_context,
+                        &mut sources.source_polynomials,
+                        &mut recording_private_coins,
+                        SELECTED_MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT,
+                    )
+                    .unwrap_or_else(|error| {
+                        panic!(
+                            "derive exact production source polynomial {requested_column_ordinal:?}: {error:?}"
+                        )
+                    })
+                {
+                    CommonProofPreChallengeSourcePoll::Ready {
+                        column_ordinal,
+                        polynomial,
+                    } => {
+                        maximum_coefficient_count =
+                            maximum_coefficient_count.max(polynomial.coefficient_count());
+                        total_coefficient_count = total_coefficient_count
+                            .checked_add(polynomial.coefficient_count() as u64)
+                            .expect("source coefficient count fits u64");
+                        polynomial_digests.push(
+                            source_polynomial_digest(column_ordinal, &polynomial)
+                                .expect("hash source polynomial"),
+                        );
+                        store
+                            .write(column_ordinal, &polynomial)
+                            .expect("checkpoint production source polynomial");
+                    }
+                    CommonProofPreChallengeSourcePoll::AuthenticatedSourceReadRequired => {
+                        panic!(
+                            "the browser-owned setup source unexpectedly requested host material"
+                        )
+                    }
+                    CommonProofPreChallengeSourcePoll::Complete => break,
+                }
+            }
+            source_replay_identity_digest = cursor
+                .finish(&mut sources.source_polynomials)
+                .expect("finish exact production source traversal");
+            for (source_column_ordinal, reversed_column_ordinal) in &reversed_column_bindings {
+                let source = store
+                    .read(*source_column_ordinal)
+                    .expect("replay reversed-column source");
+                let reversed = construct_reversed_relation_column(
                     &sources.relation_plan_variant,
-                    request_context,
-                    &mut sources.source_polynomials,
-                    &mut sources.private_coins,
+                    *source_column_ordinal,
+                    *reversed_column_ordinal,
+                    source,
+                    &mut recording_private_coins,
                     SELECTED_MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT,
                 )
-                .unwrap_or_else(|error| {
-                    panic!(
-                        "derive exact production source polynomial {requested_column_ordinal:?}: {error:?}"
-                    )
-                })
-            {
-                CommonProofPreChallengeSourcePoll::Ready {
-                    column_ordinal,
-                    polynomial,
-                } => {
-                    maximum_coefficient_count =
-                        maximum_coefficient_count.max(polynomial.coefficient_count());
-                    total_coefficient_count = total_coefficient_count
-                        .checked_add(polynomial.coefficient_count() as u64)
-                        .expect("source coefficient count fits u64");
-                    polynomial_digests.push(
-                        source_polynomial_digest(column_ordinal, &polynomial)
-                            .expect("hash source polynomial"),
-                    );
-                    store
-                        .write(column_ordinal, &polynomial)
-                        .expect("checkpoint production source polynomial");
-                }
-                CommonProofPreChallengeSourcePoll::AuthenticatedSourceReadRequired => {
-                    panic!("the browser-owned setup source unexpectedly requested host material")
-                }
-                CommonProofPreChallengeSourcePoll::Complete => break,
+                .expect("construct exact reversed relation column");
+                store
+                    .write(*reversed_column_ordinal, &reversed)
+                    .expect("checkpoint reversed relation column");
             }
+            let mut catalog_hasher = StreamingHash512::new(
+                SOURCE_CATALOG_DIGEST_DOMAIN,
+                u64::try_from(polynomial_digests.len()).expect("digest count fits u64"),
+            );
+            for digest in &polynomial_digests {
+                catalog_hasher.absorb_part(digest);
+            }
+            catalog_digest = catalog_hasher.finalize();
+            recording_private_coins
+                .fill_raw_bytes(
+                    CommonProofPrivateCoinCoordinate::proof_salt(),
+                    &mut row_pad_seed_bytes,
+                )
+                .expect("derive production-private row-pad seeds");
         }
-        let source_replay_identity_digest = cursor
-            .finish(&mut sources.source_polynomials)
-            .expect("finish exact production source traversal");
-        for (source_column_ordinal, reversed_column_ordinal) in &reversed_column_bindings {
-            let source = store
-                .read(*source_column_ordinal)
-                .expect("replay reversed-column source");
-            let reversed = construct_reversed_relation_column(
-                &sources.relation_plan_variant,
-                *source_column_ordinal,
-                *reversed_column_ordinal,
-                source,
-                &mut sources.private_coins,
-                SELECTED_MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT,
-            )
-            .expect("construct exact reversed relation column");
-            store
-                .write(*reversed_column_ordinal, &reversed)
-                .expect("checkpoint reversed relation column");
-        }
-        let mut catalog_hasher = StreamingHash512::new(
-            SOURCE_CATALOG_DIGEST_DOMAIN,
-            u64::try_from(polynomial_digests.len()).expect("digest count fits u64"),
+        assert_eq!(
+            observed_private_coin_catalog, expected_private_coin_catalog,
+            "the exact base-source generator must consume its source-derived private-coin catalog exactly"
         );
-        for digest in &polynomial_digests {
-            catalog_hasher.absorb_part(digest);
-        }
-        let catalog_digest = catalog_hasher.finalize();
-        let mut row_pad_seed_bytes = [0_u8; 96];
-        sources
-            .private_coins
-            .fill_raw_bytes(
-                CommonProofPrivateCoinCoordinate::proof_salt(),
-                &mut row_pad_seed_bytes,
-            )
-            .expect("derive production-private row-pad seeds");
         let row_pad_seeds = [
             row_pad_seed_bytes[0..32]
                 .try_into()
@@ -2368,41 +2634,57 @@ mod tests {
             &application_challenges,
         )
         .expect("construct exact auxiliary synthesis cursor");
+        let expected_private_coin_catalog = exact_trace_private_coin_catalog_for_tree_role(
+            &sources.relation_plan_variant,
+            ProofTreeRole::AuxiliaryOracle,
+            false,
+        );
+        let mut observed_private_coin_catalog = CommonProofPrivateCoinSamplingCatalog::default();
         let mut auxiliary_output_count = 0_usize;
-        while !auxiliary_cursor.is_complete() {
-            if auxiliary_cursor.has_pending_output() {
-                let (column_ordinal, polynomial) = auxiliary_cursor
-                    .take_next_output(
-                        &sources.relation_plan_variant,
-                        &mut sources.private_coins,
-                        SELECTED_MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT,
-                    )
-                    .expect("construct masked exact auxiliary column")
-                    .expect("pending exact auxiliary output exists");
-                store
-                    .write_phase(column_ordinal, &polynomial)
-                    .expect("checkpoint exact auxiliary polynomial");
-                auxiliary_output_count += 1;
-                continue;
-            }
-            if let Some(column_ordinal) = auxiliary_cursor.next_input_column_ordinal() {
-                auxiliary_cursor
-                    .accept_input_column(
-                        column_ordinal,
-                        store
-                            .read(column_ordinal)
-                            .expect("read exact auxiliary input column"),
-                    )
-                    .expect("accept exact auxiliary input column");
-                continue;
-            }
-            assert!(
-                auxiliary_cursor
-                    .advance_ready_task()
-                    .expect("advance exact auxiliary synthesis task"),
-                "an incomplete exact auxiliary cursor must have a ready task"
+        {
+            let mut recording_private_coins = RecordingCommonProofPrivateCoinSource::new(
+                &mut sources.private_coins,
+                &mut observed_private_coin_catalog,
             );
+            while !auxiliary_cursor.is_complete() {
+                if auxiliary_cursor.has_pending_output() {
+                    let (column_ordinal, polynomial) = auxiliary_cursor
+                        .take_next_output(
+                            &sources.relation_plan_variant,
+                            &mut recording_private_coins,
+                            SELECTED_MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT,
+                        )
+                        .expect("construct masked exact auxiliary column")
+                        .expect("pending exact auxiliary output exists");
+                    store
+                        .write_phase(column_ordinal, &polynomial)
+                        .expect("checkpoint exact auxiliary polynomial");
+                    auxiliary_output_count += 1;
+                    continue;
+                }
+                if let Some(column_ordinal) = auxiliary_cursor.next_input_column_ordinal() {
+                    auxiliary_cursor
+                        .accept_input_column(
+                            column_ordinal,
+                            store
+                                .read(column_ordinal)
+                                .expect("read exact auxiliary input column"),
+                        )
+                        .expect("accept exact auxiliary input column");
+                    continue;
+                }
+                assert!(
+                    auxiliary_cursor
+                        .advance_ready_task()
+                        .expect("advance exact auxiliary synthesis task"),
+                    "an incomplete exact auxiliary cursor must have a ready task"
+                );
+            }
         }
+        assert_eq!(
+            observed_private_coin_catalog, expected_private_coin_catalog,
+            "the exact auxiliary generator must consume its source-derived private-coin catalog exactly"
+        );
         assert_eq!(auxiliary_output_count, 1_080);
         assert!(auxiliary_layout.rows.iter().all(|row| {
             row.column_ordinals
@@ -2502,31 +2784,45 @@ mod tests {
             composed_quotient,
         )
         .expect("construct masked quotient component cursor");
+        let expected_private_coin_catalog =
+            exact_quotient_private_coin_catalog(&sources.relation_plan_variant);
+        let mut observed_private_coin_catalog = CommonProofPrivateCoinSamplingCatalog::default();
         let mut produced_component_count = 0_usize;
-        while let Some(component) = component_cursor
-            .next_component(
+        let opening_batch_mask;
+        {
+            let mut recording_private_coins = RecordingCommonProofPrivateCoinSource::new(
                 &mut sources.private_coins,
+                &mut observed_private_coin_catalog,
+            );
+            while let Some(component) = component_cursor
+                .next_component(
+                    &mut recording_private_coins,
+                    SELECTED_MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT,
+                )
+                .expect("construct telescopically masked quotient component")
+            {
+                store
+                    .write_quotient_component(
+                        u16::try_from(produced_component_count)
+                            .expect("quotient component ordinal fits u16"),
+                        &component,
+                    )
+                    .expect("checkpoint masked quotient component");
+                produced_component_count += 1;
+            }
+            opening_batch_mask = construct_opening_batch_mask(
+                &sources.relation_plan_variant,
+                &mut recording_private_coins,
                 SELECTED_MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT,
             )
-            .expect("construct telescopically masked quotient component")
-        {
-            store
-                .write_quotient_component(
-                    u16::try_from(produced_component_count)
-                        .expect("quotient component ordinal fits u16"),
-                    &component,
-                )
-                .expect("checkpoint masked quotient component");
-            produced_component_count += 1;
+            .expect("construct production opening-batch mask")
+            .expect("the secret-bearing exact relation requires an opening-batch mask");
         }
         assert_eq!(produced_component_count, quotient_component_count);
-        let opening_batch_mask = construct_opening_batch_mask(
-            &sources.relation_plan_variant,
-            &mut sources.private_coins,
-            SELECTED_MAXIMUM_PRIVATE_SAMPLER_CANDIDATE_DRAWS_PER_OUTPUT,
-        )
-        .expect("construct production opening-batch mask")
-        .expect("the secret-bearing exact relation requires an opening-batch mask");
+        assert_eq!(
+            observed_private_coin_catalog, expected_private_coin_catalog,
+            "the exact quotient generator must consume its source-derived private-coin catalog exactly"
+        );
         store
             .write_opening_batch_mask(&opening_batch_mask)
             .expect("checkpoint production opening-batch mask");

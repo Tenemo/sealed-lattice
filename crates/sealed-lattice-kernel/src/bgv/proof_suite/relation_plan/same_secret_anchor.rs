@@ -260,6 +260,12 @@ pub(super) fn add_matrix_columns(
 #[cfg(test)]
 pub(super) mod tests {
     use super::*;
+    use std::collections::{BTreeMap, BTreeSet};
+
+    use super::super::key_relation::{
+        EXACT_INTEGER_LIFT_RADIX, MATERIAL_DIGIT_RADIX, fixed_radix_digits, integer_column_term,
+        integer_constant_term, integer_scaled_column_term, sum_integer_terms,
+    };
     use crate::bgv::{
         parameters::DATA_PRIMES,
         proof_suite::{
@@ -525,5 +531,1049 @@ pub(super) mod tests {
         .expect("production same-secret relation plan");
         plan.check(&context)
             .expect("checked production same-secret relation plan");
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+    enum SameSecretSemanticCategory {
+        CommonSecretTernary,
+        NegativeIndicator,
+        VssInputMaterialEncodingAndBounds,
+        VssToCommonSecretEquality,
+        AnchorOpenings,
+        AnchorCommitmentOutputs,
+        PublicBdlopMatrices,
+        ModularQuotientWitnesses,
+        IntegerLiftReversalBindings,
+        ExactCarryEncodings,
+        FullRingProductIdentities,
+        ComponentAccumulatorIdentities,
+        RelationQuotientComponents,
+        BatchMask,
+    }
+
+    const SAME_SECRET_SEMANTIC_CATEGORY_COUNTS: &[(
+        SameSecretSemanticCategory,
+        usize,
+        usize,
+        usize,
+    )] = &[
+        (SameSecretSemanticCategory::CommonSecretTernary, 2, 2, 2),
+        (SameSecretSemanticCategory::NegativeIndicator, 2, 2, 2),
+        (
+            SameSecretSemanticCategory::VssInputMaterialEncodingAndBounds,
+            944,
+            976,
+            944,
+        ),
+        (
+            SameSecretSemanticCategory::VssToCommonSecretEquality,
+            0,
+            16,
+            0,
+        ),
+        (SameSecretSemanticCategory::AnchorOpenings, 18, 18, 18),
+        (
+            SameSecretSemanticCategory::AnchorCommitmentOutputs,
+            276,
+            276,
+            276,
+        ),
+        (
+            SameSecretSemanticCategory::PublicBdlopMatrices,
+            414,
+            414,
+            432,
+        ),
+        (
+            SameSecretSemanticCategory::ModularQuotientWitnesses,
+            216,
+            216,
+            216,
+        ),
+        (
+            SameSecretSemanticCategory::IntegerLiftReversalBindings,
+            132,
+            300,
+            252,
+        ),
+        (
+            SameSecretSemanticCategory::ExactCarryEncodings,
+            146,
+            146,
+            146,
+        ),
+        (
+            SameSecretSemanticCategory::FullRingProductIdentities,
+            720,
+            1_440,
+            1_440,
+        ),
+        (
+            SameSecretSemanticCategory::ComponentAccumulatorIdentities,
+            240,
+            600,
+            480,
+        ),
+        (
+            SameSecretSemanticCategory::RelationQuotientComponents,
+            0,
+            0,
+            8,
+        ),
+        (SameSecretSemanticCategory::BatchMask, 0, 0, 1),
+    ];
+
+    #[derive(Default)]
+    struct SameSecretSemanticOwnership {
+        columns: BTreeMap<SameSecretSemanticCategory, BTreeSet<u32>>,
+        constraints: BTreeMap<SameSecretSemanticCategory, BTreeSet<u32>>,
+        opening_claims: BTreeMap<SameSecretSemanticCategory, BTreeSet<u32>>,
+    }
+
+    impl SameSecretSemanticOwnership {
+        fn constraint_set_mut(
+            &mut self,
+            category: SameSecretSemanticCategory,
+        ) -> &mut BTreeSet<u32> {
+            self.constraints.entry(category).or_default()
+        }
+
+        fn opening_claim_set_mut(
+            &mut self,
+            category: SameSecretSemanticCategory,
+        ) -> &mut BTreeSet<u32> {
+            self.opening_claims.entry(category).or_default()
+        }
+    }
+
+    #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+    struct SameSecretConstraintShape {
+        numerator_postfix_expression: Vec<RelationExpressionInstruction>,
+        zeroifier_postfix_expression: Vec<RelationExpressionInstruction>,
+        enforce_proof_base_field_no_wrap: bool,
+    }
+
+    type SameSecretConstraintShapeIndex = BTreeMap<SameSecretConstraintShape, Vec<u32>>;
+
+    fn same_secret_constraint_shape(
+        numerator_postfix_expression: &[RelationExpressionInstruction],
+        zeroifier_postfix_expression: &[RelationExpressionInstruction],
+        enforce_proof_base_field_no_wrap: bool,
+    ) -> SameSecretConstraintShape {
+        SameSecretConstraintShape {
+            numerator_postfix_expression: numerator_postfix_expression.to_vec(),
+            zeroifier_postfix_expression: zeroifier_postfix_expression.to_vec(),
+            enforce_proof_base_field_no_wrap,
+        }
+    }
+
+    fn same_secret_constraint_shape_index(
+        variant: &RelationPlanVariant,
+    ) -> SameSecretConstraintShapeIndex {
+        let mut constraint_ordinals_by_shape = SameSecretConstraintShapeIndex::new();
+        for (constraint_ordinal, constraint) in variant.ordered_constraints.iter().enumerate() {
+            if !constraint
+                .ordered_injective_integer_factor_expressions
+                .is_empty()
+            {
+                continue;
+            }
+            constraint_ordinals_by_shape
+                .entry(same_secret_constraint_shape(
+                    &constraint.numerator_postfix_expression,
+                    &constraint.zeroifier_postfix_expression,
+                    constraint.enforce_proof_base_field_no_wrap,
+                ))
+                .or_default()
+                .push(u32::try_from(constraint_ordinal).expect("constraint ordinal fits u32"));
+        }
+        constraint_ordinals_by_shape
+    }
+
+    fn extend_split_integer_vector_columns(
+        columns: &mut BTreeSet<u32>,
+        vector: SplitIntegerVector,
+    ) {
+        columns.extend(vector.halves);
+    }
+
+    fn bound_certificate_dependency_columns(certificate: &RelationBoundCertificate) -> Vec<u32> {
+        match certificate {
+            RelationBoundCertificate::UnsignedRadixRecomposition {
+                ordered_digit_column_ordinals,
+                ..
+            }
+            | RelationBoundCertificate::ShiftedRadixRecomposition {
+                ordered_digit_column_ordinals,
+                ..
+            } => ordered_digit_column_ordinals.clone(),
+            RelationBoundCertificate::CanonicalModulusRecomposition {
+                ordered_digit_column_ordinals,
+                ordered_difference_digit_column_ordinals,
+                ordered_borrow_column_ordinals,
+                ..
+            } => ordered_digit_column_ordinals
+                .iter()
+                .chain(ordered_difference_digit_column_ordinals)
+                .chain(ordered_borrow_column_ordinals)
+                .copied()
+                .collect(),
+            RelationBoundCertificate::Trinary { .. }
+            | RelationBoundCertificate::Binary { .. }
+            | RelationBoundCertificate::FiniteIntegerSet { .. } => Vec::new(),
+        }
+    }
+
+    fn expand_same_secret_column_dependencies(
+        variant: &RelationPlanVariant,
+        exact_radix_digits_by_column: &ExactRadixDigitColumnCatalog,
+        columns: &mut BTreeSet<u32>,
+    ) {
+        loop {
+            let previous_count = columns.len();
+            for (source_column_ordinal, exact_digit_column_ordinals) in exact_radix_digits_by_column
+            {
+                if columns.contains(source_column_ordinal) {
+                    columns.extend(exact_digit_column_ordinals.iter().copied());
+                }
+            }
+            for semantic_cell in &variant.ordered_semantic_cells {
+                if columns.contains(&semantic_cell.column_ordinal) {
+                    columns.extend(bound_certificate_dependency_columns(
+                        &semantic_cell.bound_certificate,
+                    ));
+                }
+            }
+            if columns.len() == previous_count {
+                break;
+            }
+        }
+    }
+
+    fn same_secret_column_ownership(
+        variant: &RelationPlanVariant,
+        source_layout: &SameSecretSourceLayout,
+    ) -> BTreeMap<SameSecretSemanticCategory, BTreeSet<u32>> {
+        let mut ownership = BTreeMap::<SameSecretSemanticCategory, BTreeSet<u32>>::new();
+
+        extend_split_integer_vector_columns(
+            ownership
+                .entry(SameSecretSemanticCategory::CommonSecretTernary)
+                .or_default(),
+            source_layout.common_secret.coefficients,
+        );
+        ownership
+            .entry(SameSecretSemanticCategory::NegativeIndicator)
+            .or_default()
+            .extend(source_layout.negative_indicator);
+
+        let material_columns = ownership
+            .entry(SameSecretSemanticCategory::VssInputMaterialEncodingAndBounds)
+            .or_default();
+        for material in &source_layout.ordered_materials {
+            for (bounded_material, comparator) in material
+                .material
+                .iter()
+                .zip(&material.upper_bound_comparators)
+            {
+                material_columns.extend(
+                    bounded_material
+                        .ordered_digit_column_ordinals()
+                        .iter()
+                        .copied(),
+                );
+                for difference_digit in &comparator.difference_digits {
+                    material_columns.insert(difference_digit.target_column_ordinal);
+                    material_columns.extend(difference_digit.trit_column_ordinals.iter().copied());
+                }
+                material_columns.extend(comparator.borrow_column_ordinals.iter().copied());
+            }
+        }
+
+        for anchor in &source_layout.ordered_anchors {
+            let opening_columns = ownership
+                .entry(SameSecretSemanticCategory::AnchorOpenings)
+                .or_default();
+            for hiding_secret in anchor.opening.hiding_secrets() {
+                extend_split_integer_vector_columns(
+                    opening_columns,
+                    hiding_secret.source.coefficients,
+                );
+            }
+            for hiding_error in anchor.opening.hiding_errors() {
+                extend_split_integer_vector_columns(opening_columns, hiding_error.coefficients);
+            }
+
+            let commitment_columns = ownership
+                .entry(SameSecretSemanticCategory::AnchorCommitmentOutputs)
+                .or_default();
+            for commitment in &anchor.commitments {
+                extend_split_integer_vector_columns(commitment_columns, *commitment);
+            }
+
+            let matrix_columns = ownership
+                .entry(SameSecretSemanticCategory::PublicBdlopMatrices)
+                .or_default();
+            for matrix_row in &anchor.first_matrix {
+                for matrix_entry in matrix_row {
+                    extend_split_integer_vector_columns(matrix_columns, *matrix_entry);
+                }
+            }
+            for matrix_entry in &anchor.second_matrix {
+                extend_split_integer_vector_columns(matrix_columns, *matrix_entry);
+            }
+
+            let quotient_columns = ownership
+                .entry(SameSecretSemanticCategory::ModularQuotientWitnesses)
+                .or_default();
+            for quotient_row in anchor.quotients.rows() {
+                quotient_columns.extend(*quotient_row);
+            }
+        }
+
+        let mut reversal_columns = BTreeSet::new();
+        let mut full_ring_product_columns = BTreeSet::new();
+        let mut component_columns = BTreeSet::new();
+        let mut exact_carry_columns = BTreeSet::new();
+        for batch in variant.ordered_integer_lift_batches() {
+            for binding in &batch.ordered_reversed_column_bindings {
+                reversal_columns.extend([
+                    binding.reversed_column_ordinal,
+                    binding.source_prefix_evaluation_column_ordinal,
+                    binding.reversed_suffix_evaluation_column_ordinal,
+                ]);
+            }
+            for component in &batch.ordered_components {
+                for product in &component.ordered_full_ring_negacyclic_products {
+                    full_ring_product_columns.extend([
+                        product.multiplicand_low_suffix_evaluation_column_ordinal,
+                        product.multiplicand_high_suffix_evaluation_column_ordinal,
+                        product.reversed_multiplier_low_transpose_column_ordinal,
+                        product.reversed_multiplier_high_transpose_column_ordinal,
+                    ]);
+                }
+                component_columns.extend([
+                    component.linear_evaluation_column_ordinal,
+                    component.product_accumulator_column_ordinal,
+                ]);
+                for term in &component.ordered_linear_terms {
+                    if term.negative
+                        && term.column_offset == 0
+                        && term.coefficient
+                            == RelationIntegerLiftCoefficient::Constant(EXACT_INTEGER_LIFT_RADIX)
+                    {
+                        exact_carry_columns.insert(term.column_ordinal);
+                    }
+                }
+            }
+        }
+        ownership.insert(
+            SameSecretSemanticCategory::IntegerLiftReversalBindings,
+            reversal_columns,
+        );
+        ownership.insert(
+            SameSecretSemanticCategory::FullRingProductIdentities,
+            full_ring_product_columns,
+        );
+        ownership.insert(
+            SameSecretSemanticCategory::ComponentAccumulatorIdentities,
+            component_columns,
+        );
+        ownership.insert(
+            SameSecretSemanticCategory::ExactCarryEncodings,
+            exact_carry_columns,
+        );
+
+        for columns in ownership.values_mut() {
+            expand_same_secret_column_dependencies(
+                variant,
+                &source_layout.exact_radix_digits_by_column,
+                columns,
+            );
+        }
+        ownership
+    }
+
+    fn bound_certificate_constraint_ordinals(certificate: &RelationBoundCertificate) -> Vec<u32> {
+        match certificate {
+            RelationBoundCertificate::Trinary { constraint_ordinal }
+            | RelationBoundCertificate::Binary { constraint_ordinal }
+            | RelationBoundCertificate::UnsignedRadixRecomposition {
+                constraint_ordinal, ..
+            }
+            | RelationBoundCertificate::ShiftedRadixRecomposition {
+                constraint_ordinal, ..
+            }
+            | RelationBoundCertificate::FiniteIntegerSet {
+                constraint_ordinal, ..
+            } => vec![*constraint_ordinal],
+            RelationBoundCertificate::CanonicalModulusRecomposition {
+                recomposition_constraint_ordinal,
+                ordered_comparator_constraint_ordinals,
+                ..
+            } => std::iter::once(*recomposition_constraint_ordinal)
+                .chain(ordered_comparator_constraint_ordinals.iter().copied())
+                .collect(),
+        }
+    }
+
+    fn constraint_ordinals_matching_shape<'index>(
+        constraint_shape_index: &'index SameSecretConstraintShapeIndex,
+        numerator_postfix_expression: &[RelationExpressionInstruction],
+        zeroifier_postfix_expression: &[RelationExpressionInstruction],
+        enforce_proof_base_field_no_wrap: bool,
+    ) -> &'index [u32] {
+        let constraint_shape = same_secret_constraint_shape(
+            numerator_postfix_expression,
+            zeroifier_postfix_expression,
+            enforce_proof_base_field_no_wrap,
+        );
+        constraint_shape_index
+            .get(&constraint_shape)
+            .map_or(&[][..], Vec::as_slice)
+    }
+
+    fn claim_matching_constraint(
+        constraint_shape_index: &SameSecretConstraintShapeIndex,
+        ownership: &mut SameSecretSemanticOwnership,
+        category: SameSecretSemanticCategory,
+        numerator_postfix_expression: &[RelationExpressionInstruction],
+        zeroifier_postfix_expression: &[RelationExpressionInstruction],
+        enforce_proof_base_field_no_wrap: bool,
+    ) {
+        let matches = constraint_ordinals_matching_shape(
+            constraint_shape_index,
+            numerator_postfix_expression,
+            zeroifier_postfix_expression,
+            enforce_proof_base_field_no_wrap,
+        );
+        assert_eq!(
+            matches.len(),
+            1,
+            "generated {category:?} constraint has unique compiled ownership"
+        );
+        assert!(
+            ownership.constraint_set_mut(category).insert(matches[0]),
+            "generated {category:?} constraint is claimed once"
+        );
+    }
+
+    fn claim_integer_lift_constraint_programs(
+        constraint_shape_index: &SameSecretConstraintShapeIndex,
+        ownership: &mut SameSecretSemanticOwnership,
+        category: SameSecretSemanticCategory,
+        programs: impl IntoIterator<
+            Item = super::super::integer_lift::RelationIntegerLiftConstraintProgram,
+        >,
+    ) {
+        for program in programs {
+            claim_matching_constraint(
+                constraint_shape_index,
+                ownership,
+                category,
+                &program.numerator_postfix_expression,
+                &program.zeroifier_postfix_expression,
+                false,
+            );
+        }
+    }
+
+    fn claim_same_secret_bound_constraints(
+        variant: &RelationPlanVariant,
+        constraint_shape_index: &SameSecretConstraintShapeIndex,
+        source_layout: &SameSecretSourceLayout,
+        context: &RelationPlanCheckContext,
+        ownership: &mut SameSecretSemanticOwnership,
+    ) {
+        let column_categories = ownership
+            .columns
+            .iter()
+            .flat_map(|(category, columns)| {
+                columns
+                    .iter()
+                    .copied()
+                    .map(|column_ordinal| (column_ordinal, *category))
+            })
+            .collect::<BTreeMap<_, _>>();
+        for semantic_cell in &variant.ordered_semantic_cells {
+            let category = *column_categories
+                .get(&semantic_cell.column_ordinal)
+                .expect("every semantic cell belongs to one semantic category");
+            ownership
+                .constraint_set_mut(category)
+                .extend(bound_certificate_constraint_ordinals(
+                    &semantic_cell.bound_certificate,
+                ));
+        }
+
+        let full_trace_zeroifier = full_trace_zeroifier_expression(variant.trace_domain_size());
+        for (target_column_ordinal, exact_digit_column_ordinals) in
+            &source_layout.exact_radix_digits_by_column
+        {
+            let category = *column_categories
+                .get(target_column_ordinal)
+                .expect("every exact-radix target belongs to one semantic category");
+            let expression = radix_recomposition_expression(
+                *target_column_ordinal,
+                EXACT_INTEGER_LIFT_RADIX,
+                None,
+                exact_digit_column_ordinals,
+                context.base_field_modulus,
+            )
+            .expect("exact-radix target recomposition expression");
+            claim_matching_constraint(
+                constraint_shape_index,
+                ownership,
+                category,
+                &expression,
+                &full_trace_zeroifier,
+                true,
+            );
+        }
+
+        for material in &source_layout.ordered_materials {
+            let maximum_digits = fixed_radix_digits(
+                context
+                    .resolved_modulus(SuiteModulusReference::data(material.data_modulus_index))
+                    .expect("material modulus")
+                    - 1,
+                2,
+                MATERIAL_DIGIT_RADIX,
+            )
+            .expect("material upper-bound digits");
+            for (bounded_material, comparator) in material
+                .material
+                .iter()
+                .zip(&material.upper_bound_comparators)
+            {
+                let value_columns = bounded_material.ordered_digit_column_ordinals();
+                assert_eq!(value_columns.len(), maximum_digits.len());
+                assert_eq!(comparator.difference_digits.len(), maximum_digits.len());
+                for digit_ordinal in 0..maximum_digits.len() {
+                    let mut terms =
+                        vec![integer_constant_term(maximum_digits[digit_ordinal], false)];
+                    terms.push(integer_column_term(value_columns[digit_ordinal], true));
+                    if digit_ordinal > 0 {
+                        terms.push(integer_column_term(
+                            comparator.borrow_column_ordinals[digit_ordinal - 1],
+                            true,
+                        ));
+                    }
+                    if digit_ordinal + 1 < maximum_digits.len() {
+                        terms.push(integer_scaled_column_term(
+                            comparator.borrow_column_ordinals[digit_ordinal],
+                            MATERIAL_DIGIT_RADIX,
+                            false,
+                        ));
+                    }
+                    terms.push(integer_column_term(
+                        comparator.difference_digits[digit_ordinal].target_column_ordinal,
+                        true,
+                    ));
+                    let expression = sum_integer_terms(terms)
+                        .expect("material upper-bound comparator expression");
+                    claim_matching_constraint(
+                        constraint_shape_index,
+                        ownership,
+                        SameSecretSemanticCategory::VssInputMaterialEncodingAndBounds,
+                        &expression,
+                        &full_trace_zeroifier,
+                        true,
+                    );
+                }
+            }
+        }
+    }
+
+    fn same_secret_equality_expression(
+        source_layout: &SameSecretSourceLayout,
+        material: &SameSecretMaterialSourceLayout,
+        half_ordinal: usize,
+    ) -> Vec<RelationExpressionInstruction> {
+        let material_digits = material.material[half_ordinal].ordered_digit_column_ordinals();
+        assert_eq!(material_digits.len(), 2);
+        vec![
+            unrotated_column_expression(material_digits[0]),
+            unrotated_column_expression(material_digits[1]),
+            RelationExpressionInstruction::BaseFieldConstant(MATERIAL_DIGIT_RADIX),
+            RelationExpressionInstruction::Multiplication,
+            RelationExpressionInstruction::Addition,
+            unrotated_column_expression(
+                source_layout.common_secret.coefficients.halves[half_ordinal],
+            ),
+            RelationExpressionInstruction::Negation,
+            RelationExpressionInstruction::Addition,
+            RelationExpressionInstruction::BaseFieldConstant(1),
+            RelationExpressionInstruction::Addition,
+            unrotated_column_expression(source_layout.negative_indicator[half_ordinal]),
+            RelationExpressionInstruction::NonNativeModulusConstant {
+                modulus_reference: SuiteModulusReference::data(material.data_modulus_index),
+                multiplier: 1,
+            },
+            RelationExpressionInstruction::Multiplication,
+            RelationExpressionInstruction::Negation,
+            RelationExpressionInstruction::Addition,
+        ]
+    }
+
+    fn claim_same_secret_equality_constraints(
+        variant: &RelationPlanVariant,
+        constraint_shape_index: &SameSecretConstraintShapeIndex,
+        source_layout: &SameSecretSourceLayout,
+        ownership: &mut SameSecretSemanticOwnership,
+    ) {
+        let full_trace_zeroifier = full_trace_zeroifier_expression(variant.trace_domain_size());
+        for material in &source_layout.ordered_materials {
+            for half_ordinal in 0..2 {
+                let expression =
+                    same_secret_equality_expression(source_layout, material, half_ordinal);
+                claim_matching_constraint(
+                    constraint_shape_index,
+                    ownership,
+                    SameSecretSemanticCategory::VssToCommonSecretEquality,
+                    &expression,
+                    &full_trace_zeroifier,
+                    true,
+                );
+            }
+        }
+    }
+
+    fn claim_same_secret_integer_lift_constraints(
+        variant: &RelationPlanVariant,
+        constraint_shape_index: &SameSecretConstraintShapeIndex,
+        context: &RelationPlanCheckContext,
+        ownership: &mut SameSecretSemanticOwnership,
+    ) {
+        use super::super::integer_lift::{
+            integer_lift_component_constraint_programs,
+            integer_lift_full_ring_product_constraint_programs, integer_lift_point_zeroifier,
+            integer_lift_reversed_column_binding_constraint_programs,
+            integer_lift_theta_expression, integer_lift_trace_except_rows_zeroifier,
+        };
+
+        let trace_domain_size = variant.trace_domain_size();
+        let last_row = trace_domain_size - 1;
+        let point_zero = integer_lift_point_zeroifier(
+            0,
+            trace_domain_size,
+            variant.evaluation_domain_size(),
+            context,
+        )
+        .expect("integer-lift zero-row zeroifier");
+        let point_last = integer_lift_point_zeroifier(
+            last_row,
+            trace_domain_size,
+            variant.evaluation_domain_size(),
+            context,
+        )
+        .expect("integer-lift last-row zeroifier");
+        let except_zero = integer_lift_trace_except_rows_zeroifier(
+            &[0],
+            trace_domain_size,
+            variant.evaluation_domain_size(),
+            context,
+        )
+        .expect("integer-lift except-zero zeroifier");
+        let except_last = integer_lift_trace_except_rows_zeroifier(
+            &[last_row],
+            trace_domain_size,
+            variant.evaluation_domain_size(),
+            context,
+        )
+        .expect("integer-lift except-last zeroifier");
+
+        for batch in variant.ordered_integer_lift_batches() {
+            assert!(
+                batch
+                    .ordered_negacyclic_automorphism_permutations
+                    .is_empty()
+            );
+            let modulus_ordinal = variant
+                .non_native_modulus_ordinal(batch.modulus_reference())
+                .expect("integer-lift modulus ordinal");
+            let theta_expression =
+                integer_lift_theta_expression(modulus_ordinal, batch.challenge_ordinal());
+            for binding in &batch.ordered_reversed_column_bindings {
+                claim_integer_lift_constraint_programs(
+                    constraint_shape_index,
+                    ownership,
+                    SameSecretSemanticCategory::IntegerLiftReversalBindings,
+                    integer_lift_reversed_column_binding_constraint_programs(
+                        binding,
+                        &theta_expression,
+                        point_zero.clone(),
+                        point_last.clone(),
+                        except_zero.clone(),
+                        except_last.clone(),
+                    ),
+                );
+            }
+            for component in &batch.ordered_components {
+                assert!(component.ordered_convolution_products.is_empty());
+                for product in &component.ordered_full_ring_negacyclic_products {
+                    claim_integer_lift_constraint_programs(
+                        constraint_shape_index,
+                        ownership,
+                        SameSecretSemanticCategory::FullRingProductIdentities,
+                        integer_lift_full_ring_product_constraint_programs(
+                            product,
+                            &theta_expression,
+                            trace_domain_size,
+                            point_last.clone(),
+                            except_last.clone(),
+                        )
+                        .expect("full-ring product constraint programs"),
+                    );
+                }
+                claim_integer_lift_constraint_programs(
+                    constraint_shape_index,
+                    ownership,
+                    SameSecretSemanticCategory::ComponentAccumulatorIdentities,
+                    integer_lift_component_constraint_programs(
+                        component,
+                        batch.modulus_reference(),
+                        &theta_expression,
+                        point_zero.clone(),
+                        point_last.clone(),
+                        except_last.clone(),
+                        context,
+                    )
+                    .expect("component accumulator constraint programs"),
+                );
+            }
+        }
+    }
+
+    fn claim_same_secret_opening_claims(
+        variant: &RelationPlanVariant,
+        ownership: &mut SameSecretSemanticOwnership,
+    ) {
+        let column_categories = ownership
+            .columns
+            .iter()
+            .flat_map(|(category, columns)| {
+                columns
+                    .iter()
+                    .copied()
+                    .map(|column_ordinal| (column_ordinal, *category))
+            })
+            .collect::<BTreeMap<_, _>>();
+        for (opening_claim_ordinal, claim) in variant.ordered_opening_claims().iter().enumerate() {
+            let category = match claim.source_class() {
+                RelationOpeningSourceClass::TreeColumn => {
+                    let column_ordinal = claim
+                        .column_ordinal()
+                        .expect("tree-column opening names its column");
+                    *column_categories
+                        .get(&column_ordinal)
+                        .expect("opened tree column has semantic ownership")
+                }
+                RelationOpeningSourceClass::Quotient => {
+                    assert!(claim.column_ordinal().is_none());
+                    SameSecretSemanticCategory::RelationQuotientComponents
+                }
+                RelationOpeningSourceClass::BatchMask => {
+                    assert!(claim.column_ordinal().is_none());
+                    SameSecretSemanticCategory::BatchMask
+                }
+            };
+            assert!(ownership.opening_claim_set_mut(category).insert(
+                u32::try_from(opening_claim_ordinal).expect("opening claim ordinal fits u32")
+            ));
+        }
+    }
+
+    fn assert_exact_semantic_partition(
+        ownership: &BTreeMap<SameSecretSemanticCategory, BTreeSet<u32>>,
+        total_item_count: usize,
+        item_kind: &str,
+    ) {
+        let mut union = BTreeSet::new();
+        for (category, category_items) in ownership {
+            assert!(
+                union.is_disjoint(category_items),
+                "{item_kind} semantic category {category:?} overlaps an earlier category"
+            );
+            union.extend(category_items);
+        }
+        let expected_union = (0..total_item_count)
+            .map(|ordinal| u32::try_from(ordinal).expect("semantic ordinal fits u32"))
+            .collect::<BTreeSet<_>>();
+        assert_eq!(union, expected_union, "complete {item_kind} semantic union");
+    }
+
+    #[test]
+    fn same_secret_production_anchor_descriptors_reuse_the_vss_common_secret_columns() {
+        let context = production_context(false);
+        let compiled = compile_same_secret_relation_with_source_layout(
+            &crate::bgv::proof_suite::selected_profile::selected_same_secret_relation_plan_input()
+                .expect("selected same-secret relation input"),
+            &context,
+        )
+        .expect("compiled production same-secret relation and source layout");
+        compiled
+            .relation_plan
+            .check(&context)
+            .expect("production same-secret relation plan is valid");
+        let variant = compiled
+            .relation_plan
+            .select_variant(None, None)
+            .expect("production same-secret relation variant");
+        let constraint_shape_index = same_secret_constraint_shape_index(variant);
+        let common_secret_columns = compiled
+            .source_layout
+            .common_secret
+            .coefficients
+            .halves
+            .into_iter()
+            .collect::<BTreeSet<_>>();
+        assert_eq!(common_secret_columns.len(), 2);
+        for common_secret_column in &common_secret_columns {
+            assert!(
+                compiled
+                    .source_layout
+                    .exact_radix_digits_by_column
+                    .iter()
+                    .all(|(source_column, _)| source_column != common_secret_column),
+                "shifted common-secret columns remain direct integer-lift terms"
+            );
+        }
+
+        let full_trace_zeroifier = full_trace_zeroifier_expression(variant.trace_domain_size());
+        let mut vss_equality_common_secret_columns = BTreeSet::new();
+        for material in &compiled.source_layout.ordered_materials {
+            for half_ordinal in 0..2 {
+                let equality_expression = same_secret_equality_expression(
+                    &compiled.source_layout,
+                    material,
+                    half_ordinal,
+                );
+                let matching_constraint_ordinals = constraint_ordinals_matching_shape(
+                    &constraint_shape_index,
+                    &equality_expression,
+                    &full_trace_zeroifier,
+                    true,
+                );
+                assert_eq!(
+                    matching_constraint_ordinals.len(),
+                    1,
+                    "each VSS equality has one compiled constraint"
+                );
+                let constraint =
+                    &variant.ordered_constraints[usize::try_from(matching_constraint_ordinals[0])
+                        .expect("constraint ordinal fits usize")];
+                let queried_common_secret_columns = constraint
+                    .numerator_postfix_expression
+                    .iter()
+                    .filter_map(|instruction| match instruction {
+                        RelationExpressionInstruction::ColumnValue { column_ordinal, .. }
+                            if common_secret_columns.contains(column_ordinal) =>
+                        {
+                            Some(*column_ordinal)
+                        }
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>();
+                let expected_common_secret_column =
+                    compiled.source_layout.common_secret.coefficients.halves[half_ordinal];
+                assert_eq!(
+                    queried_common_secret_columns,
+                    vec![expected_common_secret_column],
+                    "VSS equality queries its common-secret half exactly once"
+                );
+                vss_equality_common_secret_columns.insert(expected_common_secret_column);
+            }
+        }
+        assert_eq!(vss_equality_common_secret_columns, common_secret_columns);
+
+        let mut integer_lift_batches_by_key = BTreeMap::new();
+        for batch in variant.ordered_integer_lift_batches() {
+            assert!(
+                integer_lift_batches_by_key
+                    .insert(
+                        (batch.modulus_reference(), batch.challenge_ordinal()),
+                        batch,
+                    )
+                    .is_none(),
+                "integer-lift batch keys are unique"
+            );
+        }
+        let expected_batch_count = compiled
+            .source_layout
+            .ordered_anchors
+            .len()
+            .checked_mul(usize::from(context.non_native_theta_repetition_count))
+            .expect("integer-lift batch count fits usize");
+        assert_eq!(integer_lift_batches_by_key.len(), expected_batch_count);
+
+        let mut anchor_common_secret_columns = BTreeSet::new();
+        for anchor in &compiled.source_layout.ordered_anchors {
+            let final_hiding_secret = anchor
+                .opening
+                .hiding_secrets()
+                .last()
+                .expect("anchor has its final hiding secret");
+            for challenge_ordinal in 0..context.non_native_theta_repetition_count {
+                let batch = integer_lift_batches_by_key
+                    .get(&(
+                        SuiteModulusReference::data(anchor.data_modulus_index),
+                        challenge_ordinal,
+                    ))
+                    .expect("every anchor and theta repetition has an integer-lift batch");
+                for half_ordinal in 0..2 {
+                    let hiding_secret_column =
+                        final_hiding_secret.source.coefficients.halves[half_ordinal];
+                    let expected_hiding_secret_term = RelationIntegerLiftLinearTermDescriptor {
+                        negative: true,
+                        column_ordinal: hiding_secret_column,
+                        column_offset: final_hiding_secret.source.offset,
+                        coefficient: RelationIntegerLiftCoefficient::Constant(1),
+                    };
+                    let matching_components = batch
+                        .ordered_components
+                        .iter()
+                        .filter(|component| {
+                            component
+                                .ordered_linear_terms
+                                .contains(&expected_hiding_secret_term)
+                        })
+                        .collect::<Vec<_>>();
+                    assert_eq!(
+                        matching_components.len(),
+                        1,
+                        "each anchor half has one final component"
+                    );
+                    let final_component = matching_components[0];
+                    let common_secret_column =
+                        compiled.source_layout.common_secret.coefficients.halves[half_ordinal];
+                    let expected_common_secret_term = RelationIntegerLiftLinearTermDescriptor {
+                        negative: true,
+                        column_ordinal: common_secret_column,
+                        column_offset: compiled.source_layout.common_secret.offset,
+                        coefficient: RelationIntegerLiftCoefficient::Constant(1),
+                    };
+                    assert!(
+                        final_component
+                            .ordered_linear_terms
+                            .contains(&expected_common_secret_term),
+                        "anchor final component uses the corresponding common-secret half"
+                    );
+                    let shifted_secret_terms = final_component
+                        .ordered_linear_terms
+                        .iter()
+                        .filter(|term| {
+                            term.negative
+                                && term.column_offset == compiled.source_layout.common_secret.offset
+                                && term.coefficient == RelationIntegerLiftCoefficient::Constant(1)
+                        })
+                        .collect::<Vec<_>>();
+                    assert_eq!(
+                        shifted_secret_terms.len(),
+                        2,
+                        "the anchor final component has two shifted secret terms"
+                    );
+                    let shifted_secret_term_columns = shifted_secret_terms
+                        .into_iter()
+                        .map(|term| term.column_ordinal)
+                        .collect::<BTreeSet<_>>();
+                    assert_eq!(
+                        shifted_secret_term_columns,
+                        BTreeSet::from([hiding_secret_column, common_secret_column]),
+                        "the anchor final component has no detached secret term"
+                    );
+                    anchor_common_secret_columns.insert(common_secret_column);
+                }
+            }
+        }
+        assert_eq!(anchor_common_secret_columns, common_secret_columns);
+        assert_eq!(
+            anchor_common_secret_columns, vss_equality_common_secret_columns,
+            "VSS equalities and every anchor batch reuse the same secret columns"
+        );
+    }
+
+    #[test]
+    fn same_secret_production_relation_has_an_exact_generated_semantic_partition() {
+        let context = production_context(false);
+        let compiled = compile_same_secret_relation_with_source_layout(
+            &crate::bgv::proof_suite::selected_profile::selected_same_secret_relation_plan_input()
+                .expect("selected same-secret relation input"),
+            &context,
+        )
+        .expect("compiled production same-secret relation and source layout");
+        compiled
+            .relation_plan
+            .check(&context)
+            .expect("production same-secret relation plan is valid");
+        let variant = compiled
+            .relation_plan
+            .select_variant(None, None)
+            .expect("production same-secret relation variant");
+        let constraint_shape_index = same_secret_constraint_shape_index(variant);
+        let mut ownership = SameSecretSemanticOwnership {
+            columns: same_secret_column_ownership(variant, &compiled.source_layout),
+            ..SameSecretSemanticOwnership::default()
+        };
+
+        claim_same_secret_bound_constraints(
+            variant,
+            &constraint_shape_index,
+            &compiled.source_layout,
+            &context,
+            &mut ownership,
+        );
+        claim_same_secret_equality_constraints(
+            variant,
+            &constraint_shape_index,
+            &compiled.source_layout,
+            &mut ownership,
+        );
+        claim_same_secret_integer_lift_constraints(
+            variant,
+            &constraint_shape_index,
+            &context,
+            &mut ownership,
+        );
+        claim_same_secret_opening_claims(variant, &mut ownership);
+
+        for (category, expected_columns, expected_constraints, expected_opening_claims) in
+            SAME_SECRET_SEMANTIC_CATEGORY_COUNTS
+        {
+            assert_eq!(
+                ownership.columns.get(category).map_or(0, BTreeSet::len),
+                *expected_columns,
+                "{category:?} column count"
+            );
+            assert_eq!(
+                ownership.constraints.get(category).map_or(0, BTreeSet::len),
+                *expected_constraints,
+                "{category:?} constraint count"
+            );
+            assert_eq!(
+                ownership
+                    .opening_claims
+                    .get(category)
+                    .map_or(0, BTreeSet::len),
+                *expected_opening_claims,
+                "{category:?} opening-claim count"
+            );
+        }
+
+        assert_exact_semantic_partition(
+            &ownership.columns,
+            variant.ordered_columns().len(),
+            "column",
+        );
+        assert_exact_semantic_partition(
+            &ownership.constraints,
+            variant.ordered_constraints.len(),
+            "constraint",
+        );
+        assert_exact_semantic_partition(
+            &ownership.opening_claims,
+            variant.ordered_opening_claims().len(),
+            "opening claim",
+        );
     }
 }
