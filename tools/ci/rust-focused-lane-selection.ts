@@ -6,6 +6,7 @@ import {
 } from './rust-test-inventory.js';
 
 export const fullProfileEvidenceRustTests = [
+    'bgv::evaluator::program::executor::semantic_tests::encrypted_evaluator_matches_direct_stable_top_k_across_covering_matrix',
     'foundation::selected_suite::tests::candidate_suite_gate_derives_one_complete_canonical_record',
 ] as const;
 

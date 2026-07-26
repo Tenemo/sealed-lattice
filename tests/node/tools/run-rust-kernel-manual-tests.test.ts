@@ -10,7 +10,6 @@ import {
 
 describe('manual Rust kernel preflight', () => {
     it('preflights every configured name before starting the guarded executor', async () => {
-        const currentTestName = fullProfileEvidenceRustTests[0];
         const missingTestName =
             'foundation::selected_suite::tests::deleted_candidate_gate';
         const verifiedTestFilters: string[] = [];
@@ -18,7 +17,10 @@ describe('manual Rust kernel preflight', () => {
 
         await expect(
             preflightAndRunManualRustKernelLane({
-                configuredTestNames: [currentTestName, missingTestName],
+                configuredTestNames: [
+                    ...fullProfileEvidenceRustTests,
+                    missingTestName,
+                ],
                 lane: 'rust-full-profile-evidence',
                 runGuardedCommands: () => {
                     guardedExecutorCallCount += 1;
@@ -35,7 +37,7 @@ describe('manual Rust kernel preflight', () => {
                                 : [
                                       {
                                           ignored: true,
-                                          testName: currentTestName,
+                                          testName: input.testFilter,
                                       },
                                   ],
                     });
@@ -44,7 +46,10 @@ describe('manual Rust kernel preflight', () => {
             }),
         ).rejects.toThrow('selects zero tests');
 
-        expect(verifiedTestFilters).toEqual([currentTestName, missingTestName]);
+        expect(verifiedTestFilters).toEqual([
+            ...fullProfileEvidenceRustTests,
+            missingTestName,
+        ]);
         expect(guardedExecutorCallCount).toBe(0);
     });
 

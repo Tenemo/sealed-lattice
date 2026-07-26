@@ -6,6 +6,7 @@ import {
     phaseLivenessEvidenceRustTests,
     validateFocusedRustLaneSelection,
 } from '#tools/ci/rust-focused-lane-selection';
+import { heavyRustKernelTestNamePrefix } from '#tools/ci/rust-kernel-test-arguments';
 
 describe('focused Rust lane selection', () => {
     it.each([
@@ -19,6 +20,11 @@ describe('focused Rust lane selection', () => {
             'rust-full-profile-evidence' as const,
             true,
             fullProfileEvidenceRustTests[0],
+        ],
+        [
+            'rust-full-profile-evidence' as const,
+            true,
+            fullProfileEvidenceRustTests[1],
         ],
         ['rust-measurements' as const, true, measurementRustTests[0]],
         [
@@ -38,6 +44,32 @@ describe('focused Rust lane selection', () => {
             ).not.toThrow();
         },
     );
+
+    it('keeps the evaluator covering matrix exclusively in the full-profile lane', () => {
+        const evaluatorCoveringMatrixTest = fullProfileEvidenceRustTests[0];
+        const inventoryEntry = {
+            ignored: true,
+            testName: evaluatorCoveringMatrixTest,
+        } as const;
+
+        expect(evaluatorCoveringMatrixTest).not.toContain(
+            heavyRustKernelTestNamePrefix,
+        );
+        expect(() =>
+            validateFocusedRustLaneSelection({
+                lane: 'rust-full-profile-evidence',
+                testFilter: evaluatorCoveringMatrixTest,
+                tests: [inventoryEntry],
+            }),
+        ).not.toThrow();
+        expect(() =>
+            validateFocusedRustLaneSelection({
+                lane: 'rust-kernel-heavy',
+                testFilter: evaluatorCoveringMatrixTest,
+                tests: [inventoryEntry],
+            }),
+        ).toThrow('test:rust:kernel:full-profile-evidence');
+    });
 
     it('fails closed for zero matches and cross-lane selections', () => {
         expect(() =>

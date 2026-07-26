@@ -172,7 +172,7 @@ impl ExactErrorLedger {
 
 #[test]
 #[ignore = "guarded selected-suite encrypted evaluator semantic and exact-error evidence"]
-fn heavy_rust_kernel_encrypted_evaluator_matches_direct_stable_top_k_across_covering_matrix() {
+fn encrypted_evaluator_matches_direct_stable_top_k_across_covering_matrix() {
     let harness = EncryptedEvaluatorHarness::new();
     let cases = encrypted_semantic_cases();
     let mut exact_error_ledger =
