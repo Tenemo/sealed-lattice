@@ -57,6 +57,40 @@ export const createMockKernelRuntime = (
     const wasmExports: TranscriptCoreKernelExports = {
         memory,
         sealed_lattice_allocate: allocate,
+        sealed_lattice_common_proof_generation_copy_external_memory_accounting:
+            (_operationHandle, outputPointer, outputByteLength) => {
+                expect(outputByteLength).toBe(160);
+                const accounting = new BigUint64Array(
+                    memory.buffer,
+                    outputPointer,
+                    20,
+                );
+                accounting.set([
+                    1n,
+                    1_048_576n,
+                    1n,
+                    1n,
+                    1n,
+                    1n,
+                    1n,
+                    1n,
+                    1n,
+                    0n,
+                    0n,
+                    0n,
+                    0n,
+                    1n,
+                    0n,
+                    0n,
+                    0n,
+                    0n,
+                    0n,
+                    0n,
+                ]);
+                return 0;
+            },
+        sealed_lattice_common_proof_generation_external_memory_accounting_byte_length:
+            () => 160,
         sealed_lattice_deallocate: deallocate,
         ...createCommonProofExports(memory),
     };

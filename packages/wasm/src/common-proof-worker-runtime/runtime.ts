@@ -38,7 +38,10 @@ import {
     type ClosedWorkerCommonProofGenerationFamilyAdapterDescription,
     type ClosedWorkerCommonProofVerificationFamilyAdapterDescription,
     type CommonProofAuthenticatedSourceRangeRequest,
+    type CommonProofBrowserStorageAccounting,
+    type CommonProofGenerationExternalMemoryAccounting,
     type CommonProofGenerationCheckpointIdentityExpectation,
+    type CommonProofWorkerStorageTransportAccounting,
 } from './kernel-boundaries.js';
 
 /**
@@ -47,6 +50,7 @@ import {
  * after encoding the exact Rust response.
  */
 export type CommonProofExternalMemoryTransactionExecutor = Readonly<{
+    copyBrowserStorageAccounting?(): CommonProofBrowserStorageAccounting;
     executeTransaction(
         request: CommonProofExternalMemoryRequest,
     ): Promise<readonly CommonProofExternalMemoryReadResult[]>;
@@ -124,6 +128,7 @@ export type CommonProofGenerationExecutionOpener = (
       }>;
 
 type ClosedWorkerGeneratedCommonProofExecution = Readonly<{
+    externalMemoryAccounting: CommonProofGenerationExternalMemoryAccounting;
     generatedCapability: ClosedWorkerGeneratedCommonProofCapability;
     options?: CommonProofGenerationWorkerOptions;
     outputChunkByteLengths: readonly number[];
@@ -167,6 +172,23 @@ const closedWorkerCommonProofGenerationFamilyAdapterBrand = Symbol(
 const closedWorkerCommonProofVerificationFamilyAdapterBrand = Symbol(
     'closed-worker-common-proof-verification-family-adapter',
 );
+
+const destroyTransferredWorkerBuffer = (bytes: Uint8Array): void => {
+    if (!(bytes.buffer instanceof ArrayBuffer)) {
+        bytes.fill(0);
+        return;
+    }
+    const buffer = bytes.buffer;
+    if (buffer.byteLength === 0) {
+        return;
+    }
+    if (bytes.byteOffset !== 0 || bytes.byteLength !== buffer.byteLength) {
+        bytes.fill(0);
+        return;
+    }
+    new Uint8Array(buffer).fill(0);
+    structuredClone(buffer, { transfer: [buffer] });
+};
 
 /**
  * Non-cloneable exact-family prover adapter retained in one WASM worker. A
@@ -312,7 +334,10 @@ const validateTransferredReadResults = (
                 !('bytes' in result) ||
                 !(transferredBytes instanceof Uint8Array) ||
                 !(transferredBytes.buffer instanceof ArrayBuffer) ||
+                transferredBytes.byteOffset !== 0 ||
                 transferredBytes.byteLength !== expectedOperation.byteLength ||
+                transferredBytes.buffer.byteLength !==
+                    expectedOperation.byteLength ||
                 !('objectOrdinal' in result) ||
                 typeof result.objectOrdinal !== 'number' ||
                 !Number.isSafeInteger(result.objectOrdinal) ||
@@ -337,11 +362,7 @@ const validateTransferredReadResults = (
                 );
             }
             return Object.freeze({
-                bytes: new Uint8Array(
-                    transferredBytes.buffer,
-                    transferredBytes.byteOffset,
-                    transferredBytes.byteLength,
-                ),
+                bytes: transferredBytes as Uint8Array<ArrayBuffer>,
                 objectOrdinal: result.objectOrdinal,
                 offset: result.offset,
                 operationIndex: result.operationIndex,
@@ -365,7 +386,7 @@ const validateTransferredReadResults = (
                 'bytes' in result &&
                 result.bytes instanceof Uint8Array
             ) {
-                result.bytes.fill(0);
+                destroyTransferredWorkerBuffer(result.bytes);
             }
         }
         throw error;
@@ -376,6 +397,7 @@ const createGeneratedCapability = (
     context: TranscriptCoreKernelCommandRuntime,
     kernel: CommonProofGenerationKernelBoundary,
     capabilityHandle: number,
+    externalMemoryAccounting: CommonProofGenerationExternalMemoryAccounting,
 ): ClosedWorkerGeneratedCommonProofCapability => {
     const capability: ClosedWorkerGeneratedCommonProofCapability =
         Object.freeze({
@@ -401,6 +423,7 @@ const createGeneratedCapability = (
     generatedCommonProofCapabilityRecords.set(capability, {
         capabilityHandle,
         context,
+        externalMemoryAccounting,
         kernel,
     });
     return capability;
@@ -409,6 +432,7 @@ const createGeneratedCapability = (
 type GeneratedCommonProofCapabilityRecord = Readonly<{
     capabilityHandle: number;
     context: TranscriptCoreKernelCommandRuntime;
+    externalMemoryAccounting: CommonProofGenerationExternalMemoryAccounting;
     kernel: CommonProofGenerationKernelBoundary;
 }>;
 
@@ -1232,7 +1256,17 @@ export const runClosedWorkerCommonProofGenerationFamilyAdapterWithExecutionOpene
                 trackedOutputStore,
                 execution.options,
             );
+        const externalMemoryAccounting =
+            generatedCommonProofCapabilityRecords.get(
+                generatedCapability,
+            )?.externalMemoryAccounting;
+        if (externalMemoryAccounting === undefined) {
+            throw kernelFailure(
+                'The completed common-proof generation lost its external-memory accounting.',
+            );
+        }
         return Object.freeze({
+            externalMemoryAccounting,
             generatedCapability,
             ...(execution.options === undefined
                 ? {}
@@ -1363,9 +1397,15 @@ const runPreparedCommonProofGenerationWorkerWithAuthenticatedState = async (
             options.authenticatedSourceRangeReader;
         const requestSequence = new CommonProofStorageRequestSequence();
         const committedOutputChunkByteLengths = new Map<number, number>();
+        let browserToWasmCopyByteLength = 0n;
+        let browserToWasmCopyCount = 0n;
         let committedOutputByteLength = 0;
         let deterministicPrefixReplayComplete = resume === undefined;
         let cancellationRequested = false;
+        let readResultTransferByteLength = 0n;
+        let readResultTransferCount = 0n;
+        let wasmToBrowserCopyByteLength = 0n;
+        let wasmToBrowserCopyCount = 0n;
         kernel = new CommonProofGenerationKernelBoundary(context);
         if (resume === undefined) {
             operationHandle = kernel.begin(preparedGenerationHandle);
@@ -1447,6 +1487,10 @@ const runPreparedCommonProofGenerationWorkerWithAuthenticatedState = async (
                         liveOperationHandle,
                         poll.encodedRequestByteLength,
                     );
+                    wasmToBrowserCopyCount += 1n;
+                    wasmToBrowserCopyByteLength += BigInt(
+                        encodedRequest.byteLength,
+                    );
                     let encodedResponse: Uint8Array<ArrayBuffer> | undefined;
                     let request: CommonProofExternalMemoryRequest | undefined;
                     try {
@@ -1478,6 +1522,14 @@ const runPreparedCommonProofGenerationWorkerWithAuthenticatedState = async (
                                 request,
                                 untrustedReadResults,
                             );
+                            readResultTransferCount += BigInt(
+                                readResults.length,
+                            );
+                            for (const readResult of readResults) {
+                                readResultTransferByteLength += BigInt(
+                                    readResult.bytes.byteLength,
+                                );
+                            }
                         } catch (error) {
                             throw storageFailure(
                                 deterministicPrefixReplayComplete
@@ -1491,6 +1543,10 @@ const runPreparedCommonProofGenerationWorkerWithAuthenticatedState = async (
                                 request,
                                 readResults,
                             );
+                        browserToWasmCopyCount += 1n;
+                        browserToWasmCopyByteLength += BigInt(
+                            encodedResponse.byteLength,
+                        );
                         kernel.supplyStorageResponse(
                             liveOperationHandle,
                             encodedResponse,
@@ -1500,10 +1556,10 @@ const runPreparedCommonProofGenerationWorkerWithAuthenticatedState = async (
                         if (request !== undefined) {
                             clearCommonProofExternalMemoryRequest(request);
                         }
-                        if (encodedRequest.byteLength !== 0) {
-                            encodedRequest.fill(0);
+                        destroyTransferredWorkerBuffer(encodedRequest);
+                        if (encodedResponse !== undefined) {
+                            destroyTransferredWorkerBuffer(encodedResponse);
                         }
-                        encodedResponse?.fill(0);
                     }
                     break;
                 }
@@ -1550,7 +1606,9 @@ const runPreparedCommonProofGenerationWorkerWithAuthenticatedState = async (
                             sourceBytes,
                         );
                     } finally {
-                        sourceBytes?.fill(0);
+                        if (sourceBytes !== undefined) {
+                            destroyTransferredWorkerBuffer(sourceBytes);
+                        }
                         request.sourceMaterialRoot.fill(0);
                         request.sourceStreamDigest.fill(0);
                     }
@@ -1650,7 +1708,9 @@ const runPreparedCommonProofGenerationWorkerWithAuthenticatedState = async (
                     }
                     if (
                         !(storedChunk instanceof Uint8Array) ||
-                        !(storedChunk.buffer instanceof ArrayBuffer)
+                        !(storedChunk.buffer instanceof ArrayBuffer) ||
+                        storedChunk.byteOffset !== 0 ||
+                        storedChunk.byteLength !== storedChunk.buffer.byteLength
                     ) {
                         if (storedChunk instanceof Uint8Array) {
                             storedChunk.fill(0);
@@ -1667,19 +1727,14 @@ const runPreparedCommonProofGenerationWorkerWithAuthenticatedState = async (
                             'The browser store returned a common-proof output chunk with the wrong length.',
                         );
                     }
-                    const transferredReadback = new Uint8Array(
-                        storedChunk.buffer,
-                        storedChunk.byteOffset,
-                        storedChunk.byteLength,
-                    );
                     try {
                         kernel.confirmOutputReadback(
                             liveOperationHandle,
                             poll.chunkIndex,
-                            transferredReadback,
+                            storedChunk,
                         );
                     } finally {
-                        transferredReadback.fill(0);
+                        destroyTransferredWorkerBuffer(storedChunk);
                     }
                     break;
                 }
@@ -1694,12 +1749,43 @@ const runPreparedCommonProofGenerationWorkerWithAuthenticatedState = async (
                             'The common-proof kernel completed before deterministic prefix replay reached its authenticated target.',
                         );
                     }
+                    const kernelAccounting =
+                        kernel.externalMemoryAccounting(liveOperationHandle);
+                    const browserStorage =
+                        externalMemory.copyBrowserStorageAccounting?.();
+                    const workerTransport: CommonProofWorkerStorageTransportAccounting =
+                        Object.freeze({
+                            browserToWasmCopyByteLength,
+                            browserToWasmCopyCount,
+                            readResultTransferByteLength,
+                            readResultTransferCount,
+                            wasmToBrowserCopyByteLength,
+                            wasmToBrowserCopyCount,
+                        });
+                    const externalMemoryAccounting: CommonProofGenerationExternalMemoryAccounting =
+                        Object.freeze({
+                            actualUsage: kernelAccounting.actualUsage,
+                            ...(browserStorage === undefined
+                                ? {}
+                                : { browserStorage }),
+                            compiledRequirement:
+                                kernelAccounting.compiledRequirement,
+                            ...(kernelAccounting.deterministicPrefixReplayUsage ===
+                            undefined
+                                ? {}
+                                : {
+                                      deterministicPrefixReplayUsage:
+                                          kernelAccounting.deterministicPrefixReplayUsage,
+                                  }),
+                            workerTransport,
+                        });
                     const capabilityHandle = kernel.finish(liveOperationHandle);
                     operationTerminal = true;
                     return createGeneratedCapability(
                         context,
                         kernel,
                         capabilityHandle,
+                        externalMemoryAccounting,
                     );
                 }
                 case 'cancelled':
@@ -1793,7 +1879,7 @@ const readCommittedVerificationChunk = async (
     inputStore: AuthenticatedCommonProofInputStore,
     declaredByteLength: number,
     chunkIndex: number,
-): Promise<Uint8Array> => {
+): Promise<Uint8Array<ArrayBuffer>> => {
     const exactByteLength = verificationChunkByteLength(
         declaredByteLength,
         chunkIndex,
@@ -1812,17 +1898,20 @@ const readCommittedVerificationChunk = async (
     }
     if (
         !(chunkBytes instanceof Uint8Array) ||
-        chunkBytes.byteLength !== exactByteLength
+        !(chunkBytes.buffer instanceof ArrayBuffer) ||
+        chunkBytes.byteOffset !== 0 ||
+        chunkBytes.byteLength !== exactByteLength ||
+        chunkBytes.buffer.byteLength !== exactByteLength
     ) {
         if (chunkBytes instanceof Uint8Array) {
-            chunkBytes.fill(0);
+            destroyTransferredWorkerBuffer(chunkBytes);
         }
         throw new CommonProofWorkerRuntimeError(
             'WrongStorageResult',
-            'The browser store returned a committed common-proof chunk with the wrong length.',
+            'The browser store returned a malformed committed common-proof chunk.',
         );
     }
-    return chunkBytes;
+    return chunkBytes as Uint8Array<ArrayBuffer>;
 };
 
 const throwIfVerificationCancelled = (signal?: AbortSignal): void => {
@@ -1852,7 +1941,7 @@ const supplyVerificationReadback = async (
         throwIfVerificationCancelled(signal);
         kernel.supplyReadbackChunk(operationHandle, chunkIndex, chunkBytes);
     } finally {
-        chunkBytes.fill(0);
+        destroyTransferredWorkerBuffer(chunkBytes);
     }
 };
 
@@ -1906,7 +1995,7 @@ export const runPreparedCommonProofVerificationWorker = async (
                     chunkBytes,
                 );
             } finally {
-                chunkBytes.fill(0);
+                destroyTransferredWorkerBuffer(chunkBytes);
             }
             await yieldControl();
         }

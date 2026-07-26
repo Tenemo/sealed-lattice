@@ -783,20 +783,27 @@ describe('Common-proof browser custody', () => {
             { length: 100_003 },
             (_unused, index) => (index * 13 + 17) & 0xff,
         );
-        const replayAppendRequests = canonicalAppendRequests(
-            8,
-            replayBytes,
-            2n,
-        );
-        const replayRequests = [
-            request([createOperation(8, BigInt(replayBytes.byteLength))], 1n),
-            ...replayAppendRequests,
-            request(
-                [sealOperation(8)],
-                2n + BigInt(replayAppendRequests.length),
-            ),
-        ] as const;
-        for (const replayRequest of replayRequests) {
+        const createReplayRequests = () => {
+            const replayAppendRequests = canonicalAppendRequests(
+                8,
+                replayBytes,
+                2n,
+            );
+            return [
+                request(
+                    [createOperation(8, BigInt(replayBytes.byteLength))],
+                    1n,
+                ),
+                ...replayAppendRequests,
+                request(
+                    [sealOperation(8)],
+                    2n + BigInt(replayAppendRequests.length),
+                ),
+            ] as const;
+        };
+        const replayRequests = createReplayRequests();
+        const resumedReplayRequests = createReplayRequests();
+        for (const replayRequest of resumedReplayRequests) {
             await first.custody.externalMemory.executeTransaction(
                 replayRequest,
             );
@@ -1517,6 +1524,110 @@ describe('Common-proof browser custody', () => {
         }
     });
 
+    it('opens one partial terminal secret chunk once and accounts every ownership transition', async () => {
+        const workerKernel = createWasmBrowserActionStorageWorkerKernel({
+            kernel: await loadFreshTranscriptCoreKernel(),
+        });
+        await workerKernel.createAndStageDeviceWrappingState({
+            binding,
+        });
+        await workerKernel.commitStagedActionStorageRoot();
+        const { custody } = await openFixture({ workerKernel });
+        const terminalChunkByteLength = 113;
+        const objectByteLength =
+            maximumCanonicalDataChunkByteLength + terminalChunkByteLength;
+        const sourceBytes = Uint8Array.from(
+            { length: objectByteLength },
+            (_unused, byteIndex) => (byteIndex * 29 + 7) & 0xff,
+        );
+        const expectedReadBytes = sourceBytes.slice(
+            maximumCanonicalDataChunkByteLength + 19,
+            maximumCanonicalDataChunkByteLength + 76,
+        );
+        const copyAccounting = () => {
+            const accounting =
+                custody.externalMemory.copyBrowserStorageAccounting?.();
+            if (accounting === undefined) {
+                throw new Error(
+                    'Expected production browser-storage accounting.',
+                );
+            }
+            return accounting;
+        };
+
+        await custody.externalMemory.executeTransaction(
+            request([createOperation(41, BigInt(objectByteLength))]),
+        );
+        await custody.externalMemory.executeTransaction(
+            request([
+                appendOperation(
+                    41,
+                    sourceBytes.slice(0, maximumCanonicalDataChunkByteLength),
+                ),
+            ]),
+        );
+        const beforeTerminalAppend = copyAccounting();
+        await custody.externalMemory.executeTransaction(
+            request([
+                appendOperation(
+                    41,
+                    sourceBytes.slice(maximumCanonicalDataChunkByteLength),
+                    BigInt(maximumCanonicalDataChunkByteLength),
+                ),
+            ]),
+        );
+        const afterTerminalAppend = copyAccounting();
+        expect(
+            afterTerminalAppend.claimedBufferCount -
+                beforeTerminalAppend.claimedBufferCount,
+        ).toBe(2n);
+        expect(
+            afterTerminalAppend.releasedBufferCount -
+                beforeTerminalAppend.releasedBufferCount,
+        ).toBe(2n);
+        expect(
+            afterTerminalAppend.claimedByteLength -
+                beforeTerminalAppend.claimedByteLength,
+        ).toBeGreaterThan(BigInt(terminalChunkByteLength));
+
+        await custody.externalMemory.executeTransaction(
+            request([sealOperation(41)]),
+        );
+        const beforeRead = copyAccounting();
+        const readResults = await custody.externalMemory.executeTransaction(
+            request([
+                readOperation(
+                    41,
+                    BigInt(maximumCanonicalDataChunkByteLength + 19),
+                    expectedReadBytes.byteLength,
+                ),
+            ]),
+        );
+        const afterRead = copyAccounting();
+
+        expect(readResults[0]?.bytes).toEqual(expectedReadBytes);
+        expect(
+            afterRead.secretRecordOpenCount - beforeRead.secretRecordOpenCount,
+        ).toBe(1n);
+        expect(
+            afterRead.claimedBufferCount - beforeRead.claimedBufferCount,
+        ).toBe(2n);
+        expect(afterRead.claimedByteLength - beforeRead.claimedByteLength).toBe(
+            BigInt(terminalChunkByteLength + expectedReadBytes.byteLength),
+        );
+        expect(
+            afterRead.transferredBufferCount -
+                beforeRead.transferredBufferCount,
+        ).toBe(1n);
+        expect(
+            afterRead.transferredByteLength - beforeRead.transferredByteLength,
+        ).toBe(BigInt(expectedReadBytes.byteLength));
+        expect(
+            afterRead.releasedBufferCount - beforeRead.releasedBufferCount,
+        ).toBe(2n);
+        expect(afterRead.maximumLiveBufferCount).toBeLessThanOrEqual(2);
+    });
+
     it('stores one canonical authenticated scratch chunk under the exact lease ceiling', async () => {
         const adapter = new InMemoryRuntimeStorageAdapter();
         const openedStore = await openRuntimeTestStore({
@@ -1537,9 +1648,11 @@ describe('Common-proof browser custody', () => {
             { length: maximumCanonicalDataChunkByteLength },
             (_unused, byteIndex) => (byteIndex * 37 + 11) & 0xff,
         );
+        const expectedTerminalBytes = chunkBytes.slice(-97);
+        const chunkByteLength = chunkBytes.byteLength;
 
         await custody.externalMemory.executeTransaction(
-            request([createOperation(31, BigInt(chunkBytes.byteLength))]),
+            request([createOperation(31, BigInt(chunkByteLength))]),
         );
         await custody.externalMemory.executeTransaction(
             request([appendOperation(31, chunkBytes)]),
@@ -1548,11 +1661,9 @@ describe('Common-proof browser custody', () => {
             request([sealOperation(31)]),
         );
         const readResults = await custody.externalMemory.executeTransaction(
-            request([
-                readOperation(31, BigInt(chunkBytes.byteLength - 97), 97),
-            ]),
+            request([readOperation(31, BigInt(chunkByteLength - 97), 97)]),
         );
 
-        expect(readResults[0]?.bytes).toEqual(chunkBytes.slice(-97));
+        expect(readResults[0]?.bytes).toEqual(expectedTerminalBytes);
     });
 });

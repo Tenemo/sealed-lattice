@@ -80,8 +80,222 @@ type StagedExternalMemoryRecordWrite = {
     descriptor: ExternalMemoryRecordDescriptor;
     encodedRecord?: Uint8Array<ArrayBuffer>;
     expectedCurrentValue: Uint8Array<ArrayBuffer> | null;
-    payload: Uint8Array<ArrayBuffer>;
+    payloadOwnership?: CommonProofPayloadBufferOwnership;
 };
+
+export type CommonProofPayloadBufferOwnership = Readonly<{
+    buffer: ArrayBuffer;
+    byteLength: number;
+    identifier: number;
+    ledger: CommonProofPayloadBufferOwnershipLedger;
+}>;
+
+export type CommonProofPayloadBufferAccounting = Readonly<{
+    claimedBufferCount: bigint;
+    claimedByteLength: bigint;
+    maximumLiveBufferByteLength: bigint;
+    maximumLiveBufferCount: number;
+    releasedBufferCount: bigint;
+    releasedByteLength: bigint;
+    secretRecordOpenByteLength: bigint;
+    secretRecordOpenCount: bigint;
+    secretRecordSealByteLength: bigint;
+    secretRecordSealCount: bigint;
+    transferredBufferCount: bigint;
+    transferredByteLength: bigint;
+}>;
+
+export class CommonProofPayloadBufferOwnershipLedger {
+    readonly #liveOwners = new Map<
+        ArrayBuffer,
+        Readonly<{ byteLength: number; identifier: number; owner: string }>
+    >();
+    #claimedBufferCount = 0n;
+    #claimedByteLength = 0n;
+    #liveBufferByteLength = 0n;
+    #maximumLiveBufferByteLength = 0n;
+    #maximumLiveOwnerCount = 0;
+    #nextIdentifier = 1;
+    #releasedBufferCount = 0n;
+    #releasedByteLength = 0n;
+    #transferredBufferCount = 0n;
+    #transferredByteLength = 0n;
+    readonly #transitions: string[] = [];
+
+    public observe(
+        bytes: Uint8Array,
+        owner: string,
+    ): CommonProofPayloadBufferOwnership | undefined {
+        if (!(bytes.buffer instanceof ArrayBuffer)) {
+            return undefined;
+        }
+        const existing = this.#liveOwners.get(bytes.buffer);
+        if (existing !== undefined) {
+            this.#liveOwners.set(bytes.buffer, {
+                byteLength: existing.byteLength,
+                identifier: existing.identifier,
+                owner,
+            });
+            this.#transferredBufferCount += 1n;
+            this.#transferredByteLength += BigInt(existing.byteLength);
+            this.#transitions.push(
+                `transfer:${String(existing.identifier)}:${owner}`,
+            );
+            return Object.freeze({
+                buffer: bytes.buffer,
+                byteLength: existing.byteLength,
+                identifier: existing.identifier,
+                ledger: this,
+            });
+        }
+        if (this.#liveOwners.size >= 2) {
+            throw new BrowserActionStorageCustodyError(
+                'StorageFailure',
+                `Common-proof payload custody cannot add ${owner} while ${[
+                    ...this.#liveOwners.values(),
+                ]
+                    .map(
+                        (liveOwner) =>
+                            `${String(liveOwner.identifier)}:${liveOwner.owner}`,
+                    )
+                    .join(' and ')} are live.`,
+            );
+        }
+        const identifier = this.#nextIdentifier;
+        this.#nextIdentifier += 1;
+        const byteLength = bytes.byteLength;
+        this.#liveOwners.set(bytes.buffer, { byteLength, identifier, owner });
+        this.#claimedBufferCount += 1n;
+        this.#claimedByteLength += BigInt(byteLength);
+        this.#liveBufferByteLength += BigInt(byteLength);
+        this.#maximumLiveBufferByteLength =
+            this.#maximumLiveBufferByteLength > this.#liveBufferByteLength
+                ? this.#maximumLiveBufferByteLength
+                : this.#liveBufferByteLength;
+        this.#maximumLiveOwnerCount = Math.max(
+            this.#maximumLiveOwnerCount,
+            this.#liveOwners.size,
+        );
+        this.#transitions.push(`claim:${String(identifier)}:${owner}`);
+        return Object.freeze({
+            buffer: bytes.buffer,
+            byteLength,
+            identifier,
+            ledger: this,
+        });
+    }
+
+    public transfer(
+        ownership: CommonProofPayloadBufferOwnership,
+        owner: string,
+    ): void {
+        this.#requireOwnership(ownership);
+        this.#liveOwners.set(ownership.buffer, {
+            byteLength: ownership.byteLength,
+            identifier: ownership.identifier,
+            owner,
+        });
+        this.#transferredBufferCount += 1n;
+        this.#transferredByteLength += BigInt(ownership.byteLength);
+        this.#transitions.push(
+            `transfer:${String(ownership.identifier)}:${owner}`,
+        );
+    }
+
+    public replace(
+        ownership: CommonProofPayloadBufferOwnership | undefined,
+        bytes: Uint8Array,
+        owner: string,
+    ): CommonProofPayloadBufferOwnership | undefined {
+        const replacement = this.observe(bytes, owner);
+        if (
+            ownership !== undefined &&
+            replacement?.buffer !== ownership.buffer
+        ) {
+            this.release(ownership);
+        }
+        return replacement;
+    }
+
+    public release(ownership: CommonProofPayloadBufferOwnership): void {
+        this.#requireOwnership(ownership);
+        const owner = this.#liveOwners.get(ownership.buffer);
+        this.#liveOwners.delete(ownership.buffer);
+        this.#liveBufferByteLength -= BigInt(ownership.byteLength);
+        this.#releasedBufferCount += 1n;
+        this.#releasedByteLength += BigInt(ownership.byteLength);
+        this.#transitions.push(
+            `release:${String(ownership.identifier)}:${owner?.owner}`,
+        );
+    }
+
+    public releaseIfLive(
+        ownership: CommonProofPayloadBufferOwnership | undefined,
+    ): void {
+        if (
+            ownership !== undefined &&
+            ownership.ledger === this &&
+            this.#liveOwners.get(ownership.buffer)?.identifier ===
+                ownership.identifier
+        ) {
+            this.release(ownership);
+        }
+    }
+
+    public assertReleased(): void {
+        if (this.#liveOwners.size !== 0) {
+            throw new BrowserActionStorageCustodyError(
+                'StorageFailure',
+                `Common-proof payload custody retained ${[
+                    ...this.#liveOwners.values(),
+                ]
+                    .map(
+                        (owner) => `${String(owner.identifier)}:${owner.owner}`,
+                    )
+                    .join(' and ')} after the transaction.`,
+            );
+        }
+    }
+
+    public snapshot(): Readonly<{
+        accounting: CommonProofPayloadBufferAccounting;
+        maximumLiveOwnerCount: number;
+        transitions: readonly string[];
+    }> {
+        return Object.freeze({
+            accounting: Object.freeze({
+                claimedBufferCount: this.#claimedBufferCount,
+                claimedByteLength: this.#claimedByteLength,
+                maximumLiveBufferByteLength: this.#maximumLiveBufferByteLength,
+                maximumLiveBufferCount: this.#maximumLiveOwnerCount,
+                releasedBufferCount: this.#releasedBufferCount,
+                releasedByteLength: this.#releasedByteLength,
+                secretRecordOpenByteLength: 0n,
+                secretRecordOpenCount: 0n,
+                secretRecordSealByteLength: 0n,
+                secretRecordSealCount: 0n,
+                transferredBufferCount: this.#transferredBufferCount,
+                transferredByteLength: this.#transferredByteLength,
+            }),
+            maximumLiveOwnerCount: this.#maximumLiveOwnerCount,
+            transitions: Object.freeze([...this.#transitions]),
+        });
+    }
+
+    #requireOwnership(ownership: CommonProofPayloadBufferOwnership): void {
+        if (
+            ownership.ledger !== this ||
+            !this.#liveOwners.has(ownership.buffer) ||
+            this.#liveOwners.get(ownership.buffer)?.identifier !==
+                ownership.identifier
+        ) {
+            throw new BrowserActionStorageCustodyError(
+                'StorageFailure',
+                'Common-proof payload custody received a stale or foreign ownership claim.',
+            );
+        }
+    }
+}
 
 type StagedExternalMemoryRecordDeletion = {
     descriptor: ExternalMemoryRecordDescriptor;

@@ -195,6 +195,28 @@ type CommandFailureContext =
     | 'recordSeal'
     | 'runtime';
 
+type CommandInputSegment = Readonly<{
+    bytes: Uint8Array;
+    consumeAfterCopy: boolean;
+}>;
+
+const destroyOwnedCommandBuffer = (bytes: Uint8Array): void => {
+    if (!(bytes.buffer instanceof ArrayBuffer)) {
+        bytes.fill(0);
+        return;
+    }
+    const buffer = bytes.buffer;
+    if (buffer.byteLength === 0) {
+        return;
+    }
+    if (bytes.byteOffset !== 0 || bytes.byteLength !== buffer.byteLength) {
+        bytes.fill(0);
+        return;
+    }
+    new Uint8Array(buffer).fill(0);
+    structuredClone(buffer, { transfer: [buffer] });
+};
+
 export class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorageWorkerKernel {
     readonly #actionRandomnessContext: ActionRandomnessKernelContext;
     readonly #context: LocalStorageRootKernelContext;
@@ -302,6 +324,7 @@ export class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorag
             this.#sealLocalRecord(
                 { ...input, recordVersion: 0n as const },
                 localStorageRootCommands.sealCommonProofExternalMemoryRecord,
+                true,
             ),
         );
     }
@@ -313,6 +336,7 @@ export class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorag
             this.#openLocalRecord(
                 { ...input, recordVersion: 0n as const },
                 localStorageRootCommands.openCommonProofExternalMemoryRecord,
+                true,
             ),
         );
     }
@@ -2608,6 +2632,7 @@ export class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorag
             | (ClosedWorkerCommonProofScratchRecordSealInput &
                   Readonly<{ recordVersion: 0n }>),
         command: number = localStorageRootCommands.sealRecord,
+        consumePlaintext = false,
     ): Uint8Array<ArrayBuffer> {
         if (
             typeof input !== 'object' ||
@@ -2625,18 +2650,38 @@ export class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorag
             localRecordNonceByteLength,
             'local-record nonce',
         );
+        let expectedContext: Uint8Array<ArrayBuffer> | undefined;
         try {
-            const envelope = this.#runCommand(
-                command,
-                this.#leaseCommandInput(
-                    activeLease,
-                    encodeLocalRecordExpectedContext(input),
-                    nonce,
-                    input.plaintext,
-                ),
-                'seal a local record',
-                'recordSeal',
-            );
+            expectedContext = encodeLocalRecordExpectedContext(input);
+            const envelope = consumePlaintext
+                ? this.#runLeasedCommandSegments(
+                      command,
+                      activeLease,
+                      [
+                          {
+                              bytes: expectedContext,
+                              consumeAfterCopy: true,
+                          },
+                          { bytes: nonce, consumeAfterCopy: true },
+                          {
+                              bytes: input.plaintext,
+                              consumeAfterCopy: true,
+                          },
+                      ],
+                      'seal a local record',
+                      'recordSeal',
+                  )
+                : this.#runCommand(
+                      command,
+                      this.#leaseCommandInput(
+                          activeLease,
+                          expectedContext,
+                          nonce,
+                          input.plaintext,
+                      ),
+                      'seal a local record',
+                      'recordSeal',
+                  );
             if (envelope.byteLength === 0) {
                 throw new BrowserActionStorageCustodyError(
                     'OwnedWorkerFailure',
@@ -2646,7 +2691,13 @@ export class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorag
 
             return envelope;
         } finally {
-            nonce.fill(0);
+            destroyOwnedCommandBuffer(nonce);
+            if (expectedContext !== undefined) {
+                destroyOwnedCommandBuffer(expectedContext);
+            }
+            if (consumePlaintext) {
+                destroyOwnedCommandBuffer(input.plaintext);
+            }
         }
     }
 
@@ -2656,6 +2707,7 @@ export class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorag
             | (ClosedWorkerCommonProofScratchRecordOpenInput &
                   Readonly<{ recordVersion: 0n }>),
         command: number = localStorageRootCommands.openRecord,
+        consumeEnvelope = false,
     ): Uint8Array<ArrayBuffer> {
         if (
             typeof input !== 'object' ||
@@ -2670,17 +2722,44 @@ export class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorag
             );
         }
         const activeLease = this.#requireActiveLease();
-
-        return this.#runCommand(
-            command,
-            this.#leaseCommandInput(
-                activeLease,
-                encodeLocalRecordExpectedContext(input),
-                input.envelope,
-            ),
-            'open a local record',
-            'recordOpen',
-        );
+        let expectedContext: Uint8Array<ArrayBuffer> | undefined;
+        try {
+            expectedContext = encodeLocalRecordExpectedContext(input);
+            return consumeEnvelope
+                ? this.#runLeasedCommandSegments(
+                      command,
+                      activeLease,
+                      [
+                          {
+                              bytes: expectedContext,
+                              consumeAfterCopy: true,
+                          },
+                          {
+                              bytes: input.envelope,
+                              consumeAfterCopy: true,
+                          },
+                      ],
+                      'open a local record',
+                      'recordOpen',
+                  )
+                : this.#runCommand(
+                      command,
+                      this.#leaseCommandInput(
+                          activeLease,
+                          expectedContext,
+                          input.envelope,
+                      ),
+                      'open a local record',
+                      'recordOpen',
+                  );
+        } finally {
+            if (expectedContext !== undefined) {
+                destroyOwnedCommandBuffer(expectedContext);
+            }
+            if (consumeEnvelope) {
+                destroyOwnedCommandBuffer(input.envelope);
+            }
+        }
     }
 
     #hashLocalRecordEnvelope(envelope: Uint8Array): Uint8Array<ArrayBuffer> {
@@ -3777,12 +3856,76 @@ export class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorag
         operationName: string,
         failureContext: CommandFailureContext,
     ): Uint8Array<ArrayBuffer> {
-        if (input.byteLength > maximumCommandByteLength) {
-            input.fill(0);
-            throw new BrowserActionStorageCustodyError(
-                'InvalidInput',
-                'The local storage-root command input exceeds its supported byte limit.',
+        try {
+            return this.#runCommandSegments(
+                command,
+                [{ bytes: input, consumeAfterCopy: false }],
+                operationName,
+                failureContext,
             );
+        } finally {
+            input.fill(0);
+        }
+    }
+
+    #runLeasedCommandSegments(
+        command: number,
+        lease: RootLease,
+        trailingSegments: readonly CommandInputSegment[],
+        operationName: string,
+        failureContext: CommandFailureContext,
+    ): Uint8Array<ArrayBuffer> {
+        const handleBytes = encodeUnsigned32(lease.handle);
+        try {
+            return this.#runCommandSegments(
+                command,
+                [
+                    { bytes: handleBytes, consumeAfterCopy: true },
+                    { bytes: lease.capability, consumeAfterCopy: false },
+                    ...trailingSegments,
+                ],
+                operationName,
+                failureContext,
+            );
+        } finally {
+            destroyOwnedCommandBuffer(handleBytes);
+        }
+    }
+
+    #runCommandSegments(
+        command: number,
+        inputSegments: readonly CommandInputSegment[],
+        operationName: string,
+        failureContext: CommandFailureContext,
+    ): Uint8Array<ArrayBuffer> {
+        let inputByteLength = 0;
+        for (const segment of inputSegments) {
+            if (!(segment.bytes instanceof Uint8Array)) {
+                for (const consumedSegment of inputSegments) {
+                    if (consumedSegment.consumeAfterCopy) {
+                        destroyOwnedCommandBuffer(consumedSegment.bytes);
+                    }
+                }
+                throw new BrowserActionStorageCustodyError(
+                    'InvalidInput',
+                    'The local storage-root command input contains malformed bytes.',
+                );
+            }
+            inputByteLength += segment.bytes.byteLength;
+            if (
+                !Number.isSafeInteger(inputByteLength) ||
+                inputByteLength > maximumCommandByteLength
+            ) {
+                for (const consumedSegment of inputSegments) {
+                    if (consumedSegment.consumeAfterCopy) {
+                        destroyOwnedCommandBuffer(consumedSegment.bytes);
+                    }
+                }
+                throw new BrowserActionStorageCustodyError(
+                    'InvalidInput',
+                    'The local storage-root command input exceeds its supported byte limit.',
+                );
+            }
         }
 
         return this.#context.runExclusive(
@@ -3793,19 +3936,35 @@ export class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorag
                 let outputPointer = 0;
                 let outputByteLength = 0;
                 try {
-                    if (input.byteLength > 0) {
-                        inputPointer = this.#context.allocate(input.byteLength);
+                    if (inputByteLength > 0) {
+                        inputPointer = this.#context.allocate(inputByteLength);
                         if (inputPointer === 0) {
                             throw new BrowserActionStorageCustodyError(
                                 'OwnedWorkerFailure',
                                 'WASM could not allocate local storage-root input.',
                             );
                         }
-                        new Uint8Array(
+                        const wasmInput = new Uint8Array(
                             this.#context.memory.buffer,
                             inputPointer,
-                            input.byteLength,
-                        ).set(input);
+                            inputByteLength,
+                        );
+                        let inputOffset = 0;
+                        for (const segment of inputSegments) {
+                            wasmInput.set(segment.bytes, inputOffset);
+                            inputOffset += segment.bytes.byteLength;
+                        }
+                        if (inputOffset !== inputByteLength) {
+                            throw new BrowserActionStorageCustodyError(
+                                'OwnedWorkerFailure',
+                                'The local storage-root command input accounting diverged.',
+                            );
+                        }
+                        for (const segment of inputSegments) {
+                            if (segment.consumeAfterCopy) {
+                                destroyOwnedCommandBuffer(segment.bytes);
+                            }
+                        }
                     }
                     metadataPointer = this.#context.allocate(
                         wasm32WordByteLength * 2,
@@ -3819,10 +3978,19 @@ export class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorag
                     outputPointer = this.#context.command(
                         command,
                         inputPointer,
-                        input.byteLength,
+                        inputByteLength,
                         metadataPointer,
                         metadataPointer + wasm32WordByteLength,
                     );
+                    if (inputPointer !== 0) {
+                        new Uint8Array(
+                            this.#context.memory.buffer,
+                            inputPointer,
+                            inputByteLength,
+                        ).fill(0);
+                        this.#context.deallocate(inputPointer, inputByteLength);
+                        inputPointer = 0;
+                    }
                     const metadata = new Uint32Array(
                         this.#context.memory.buffer,
                         metadataPointer,
@@ -3866,24 +4034,40 @@ export class WasmBrowserActionStorageWorkerKernel implements BrowserActionStorag
                               error,
                           );
                 } finally {
-                    input.fill(0);
+                    for (const segment of inputSegments) {
+                        if (segment.consumeAfterCopy) {
+                            destroyOwnedCommandBuffer(segment.bytes);
+                        }
+                    }
                     if (outputPointer !== 0 && outputByteLength > 0) {
+                        new Uint8Array(
+                            this.#context.memory.buffer,
+                            outputPointer,
+                            outputByteLength,
+                        ).fill(0);
                         this.#context.deallocate(
                             outputPointer,
                             outputByteLength,
                         );
                     }
                     if (metadataPointer !== 0) {
+                        new Uint8Array(
+                            this.#context.memory.buffer,
+                            metadataPointer,
+                            wasm32WordByteLength * 2,
+                        ).fill(0);
                         this.#context.deallocate(
                             metadataPointer,
                             wasm32WordByteLength * 2,
                         );
                     }
                     if (inputPointer !== 0) {
-                        this.#context.deallocate(
+                        new Uint8Array(
+                            this.#context.memory.buffer,
                             inputPointer,
-                            input.byteLength,
-                        );
+                            inputByteLength,
+                        ).fill(0);
+                        this.#context.deallocate(inputPointer, inputByteLength);
                     }
                 }
             },

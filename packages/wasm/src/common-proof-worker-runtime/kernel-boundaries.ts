@@ -52,6 +52,23 @@ export const canonicalCommonProofChunkByteLength = 1_048_576;
 const maximumGenerationCheckpointStateByteLength = 4_096;
 const maximumGenerationCheckpointCursorManifestByteLength = 1_048_576;
 
+const destroyOwnedKernelBoundaryInput = (bytes: Uint8Array): void => {
+    if (!(bytes.buffer instanceof ArrayBuffer)) {
+        bytes.fill(0);
+        return;
+    }
+    const buffer = bytes.buffer;
+    if (buffer.byteLength === 0) {
+        return;
+    }
+    if (bytes.byteOffset !== 0 || bytes.byteLength !== buffer.byteLength) {
+        bytes.fill(0);
+        return;
+    }
+    new Uint8Array(buffer).fill(0);
+    structuredClone(buffer, { transfer: [buffer] });
+};
+
 export type CommonProofGenerationCheckpointIdentityExpectation = Readonly<{
     applicationStatementSchemaIdentifier: number;
     proofAttemptLineageIdentifier: Uint8Array<ArrayBuffer>;
@@ -146,8 +163,33 @@ type CommonProofExternalMemoryUsageAccounting = Readonly<{
     transactionCount: bigint;
 }>;
 
-type CommonProofGenerationExternalMemoryAccounting = Readonly<{
+export type CommonProofBrowserStorageAccounting = Readonly<{
+    claimedBufferCount: bigint;
+    claimedByteLength: bigint;
+    maximumLiveBufferByteLength: bigint;
+    maximumLiveBufferCount: number;
+    releasedBufferCount: bigint;
+    releasedByteLength: bigint;
+    secretRecordOpenByteLength: bigint;
+    secretRecordOpenCount: bigint;
+    secretRecordSealByteLength: bigint;
+    secretRecordSealCount: bigint;
+    transferredBufferCount: bigint;
+    transferredByteLength: bigint;
+}>;
+
+export type CommonProofWorkerStorageTransportAccounting = Readonly<{
+    browserToWasmCopyByteLength: bigint;
+    browserToWasmCopyCount: bigint;
+    readResultTransferByteLength: bigint;
+    readResultTransferCount: bigint;
+    wasmToBrowserCopyByteLength: bigint;
+    wasmToBrowserCopyCount: bigint;
+}>;
+
+export type CommonProofGenerationExternalMemoryAccounting = Readonly<{
     actualUsage: CommonProofExternalMemoryUsageAccounting;
+    browserStorage?: CommonProofBrowserStorageAccounting;
     compiledRequirement: Readonly<{
         maximumChunkByteLength: number;
         maximumTransactionPayloadByteLength: bigint;
@@ -160,6 +202,7 @@ type CommonProofGenerationExternalMemoryAccounting = Readonly<{
         transactionCount: bigint;
     }>;
     deterministicPrefixReplayUsage?: CommonProofExternalMemoryUsageAccounting;
+    workerTransport?: CommonProofWorkerStorageTransportAccounting;
 }>;
 
 type CommonProofVerificationReadbackAccounting = Readonly<{
@@ -1023,11 +1066,11 @@ export class CommonProofGenerationKernelBoundary {
         this.#withKernelInput(
             encodedResponse,
             'storage response',
-            (responsePointer) =>
+            (responsePointer, responseByteLength) =>
                 resolveNumberExport(
                     this.#context.wasmExports,
                     'sealed_lattice_common_proof_generation_supply_storage_response',
-                )(operationHandle, responsePointer, encodedResponse.byteLength),
+                )(operationHandle, responsePointer, responseByteLength),
         );
     }
 
@@ -1111,11 +1154,11 @@ export class CommonProofGenerationKernelBoundary {
         this.#withKernelInput(
             sourceBytes,
             'authenticated-source range',
-            (sourcePointer) =>
+            (sourcePointer, sourceByteLength) =>
                 resolveNumberExport(
                     this.#context.wasmExports,
                     'sealed_lattice_common_proof_generation_supply_authenticated_source_range',
-                )(operationHandle, sourcePointer, sourceBytes.byteLength),
+                )(operationHandle, sourcePointer, sourceByteLength),
         );
     }
 
@@ -1171,7 +1214,7 @@ export class CommonProofGenerationKernelBoundary {
         this.#withKernelInput(
             readbackBytes,
             'output readback',
-            (readbackPointer) =>
+            (readbackPointer, readbackByteLength) =>
                 resolveNumberExport(
                     this.#context.wasmExports,
                     'sealed_lattice_common_proof_generation_confirm_output_readback',
@@ -1179,7 +1222,7 @@ export class CommonProofGenerationKernelBoundary {
                     operationHandle,
                     chunkIndex,
                     readbackPointer,
-                    readbackBytes.byteLength,
+                    readbackByteLength,
                 ),
         );
     }
@@ -1474,22 +1517,28 @@ export class CommonProofGenerationKernelBoundary {
     #withKernelInput(
         bytes: Uint8Array,
         label: string,
-        invoke: (inputPointer: number) => number,
+        invoke: (inputPointer: number, inputByteLength: number) => number,
     ): void {
         if (!(bytes instanceof Uint8Array) || bytes.byteLength === 0) {
             throw resourceFailure(
                 `The common-proof ${label} must be a non-empty byte array.`,
             );
         }
+        const byteLength = bytes.byteLength;
         this.#context.runExclusive(`common-proof ${label}`, () => {
-            const inputPointer = this.#memoryBoundary.copy(bytes);
+            let inputPointer = 0;
             try {
-                requireKernelSuccess(invoke(inputPointer), label);
+                inputPointer = this.#memoryBoundary.copy(bytes);
+                destroyOwnedKernelBoundaryInput(bytes);
+                requireKernelSuccess(invoke(inputPointer, byteLength), label);
             } finally {
-                this.#memoryBoundary.zeroAndDeallocate(
-                    inputPointer,
-                    bytes.byteLength,
-                );
+                destroyOwnedKernelBoundaryInput(bytes);
+                if (inputPointer !== 0) {
+                    this.#memoryBoundary.zeroAndDeallocate(
+                        inputPointer,
+                        byteLength,
+                    );
+                }
             }
         });
     }
@@ -1651,11 +1700,11 @@ export class CommonProofVerificationKernelBoundary {
         this.#withKernelInput(
             chunkBytes,
             'verification input chunk',
-            (pointer) =>
+            (pointer, chunkByteLength) =>
                 resolveNumberExport(
                     this.#context.wasmExports,
                     'sealed_lattice_common_proof_verification_absorb_input_chunk',
-                )(operationHandle, chunkIndex, pointer, chunkBytes.byteLength),
+                )(operationHandle, chunkIndex, pointer, chunkByteLength),
         );
     }
 
@@ -1715,11 +1764,11 @@ export class CommonProofVerificationKernelBoundary {
         this.#withKernelInput(
             chunkBytes,
             'verification readback chunk',
-            (pointer) =>
+            (pointer, chunkByteLength) =>
                 resolveNumberExport(
                     this.#context.wasmExports,
                     'sealed_lattice_common_proof_verification_supply_readback_chunk',
-                )(operationHandle, chunkIndex, pointer, chunkBytes.byteLength),
+                )(operationHandle, chunkIndex, pointer, chunkByteLength),
         );
     }
 
@@ -2220,7 +2269,7 @@ export class CommonProofVerificationKernelBoundary {
     #withKernelInput(
         bytes: Uint8Array,
         label: string,
-        invoke: (inputPointer: number) => number,
+        invoke: (inputPointer: number, inputByteLength: number) => number,
     ): void {
         if (
             !(bytes instanceof Uint8Array) ||
@@ -2231,15 +2280,21 @@ export class CommonProofVerificationKernelBoundary {
                 `The common-proof ${label} length exceeds the absolute worker safety bound.`,
             );
         }
+        const byteLength = bytes.byteLength;
         this.#context.runExclusive(`common-proof ${label}`, () => {
-            const inputPointer = this.#memoryBoundary.copy(bytes);
+            let inputPointer = 0;
             try {
-                requireKernelSuccess(invoke(inputPointer), label);
+                inputPointer = this.#memoryBoundary.copy(bytes);
+                destroyOwnedKernelBoundaryInput(bytes);
+                requireKernelSuccess(invoke(inputPointer, byteLength), label);
             } finally {
-                this.#memoryBoundary.zeroAndDeallocate(
-                    inputPointer,
-                    bytes.byteLength,
-                );
+                destroyOwnedKernelBoundaryInput(bytes);
+                if (inputPointer !== 0) {
+                    this.#memoryBoundary.zeroAndDeallocate(
+                        inputPointer,
+                        byteLength,
+                    );
+                }
             }
         });
     }

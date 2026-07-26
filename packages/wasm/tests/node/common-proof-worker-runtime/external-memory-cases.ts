@@ -147,7 +147,7 @@ describe('common-proof external-memory runtime', () => {
         expect([...append.bytes]).toEqual([...appendBytes]);
         expect(append.bytes.buffer).not.toBe(request.buffer);
         clearCommonProofExternalMemoryRequest(decoded);
-        expect([...append.bytes]).toEqual([0, 0, 0, 0]);
+        expect(append.bytes.byteLength).toBe(0);
 
         const readRequest = decodeCommonProofExternalMemoryRequest(
             fourByteReadRequest(binding, 2n),
@@ -161,7 +161,7 @@ describe('common-proof external-memory runtime', () => {
                 operationIndex: 0,
             },
         ]);
-        expect([...transferredRead]).toEqual([0, 0, 0, 0]);
+        expect(transferredRead.byteLength).toBe(0);
         const responseView = new DataView(response.buffer);
         expect(responseView.getUint16(0, true)).toBe(1);
         expect(responseView.getUint16(2, true)).toBe(2);
@@ -195,7 +195,7 @@ describe('common-proof external-memory runtime', () => {
         );
         expect(readResponse.buffer).toBe(responseBuffer);
         expect(readResponse.byteLength).toBe(80 + 88 + 4);
-        expect([...readBytes]).toEqual([0, 0, 0, 0]);
+        expect(readBytes.byteLength).toBe(0);
 
         readResponse.fill(0);
         const appendRequest = decodeCommonProofExternalMemoryRequest(
@@ -228,7 +228,7 @@ describe('common-proof external-memory runtime', () => {
         );
         expect(appendResponse.buffer).toBe(responseBuffer);
         expect(appendResponse.byteLength).toBe(80);
-        expect([...appendOperation.bytes]).toEqual([0, 0, 0, 0]);
+        expect(appendOperation.bytes.byteLength).toBe(0);
     });
 
     it('rejects truncation, trailing bytes, wrong digests, and noncanonical operation order', () => {
@@ -398,8 +398,7 @@ describe('common-proof external-memory runtime', () => {
         expect(appendOperation.bytes.buffer).not.toBe(maximumRequest.buffer);
         expect(maximumRequest.byteLength).toBe(0);
         clearCommonProofExternalMemoryRequest(decoded);
-        expect(appendOperation.bytes[0]).toBe(0);
-        expect(appendOperation.bytes[appendOperation.bytes.length - 1]).toBe(0);
+        expect(appendOperation.bytes.byteLength).toBe(0);
 
         const overlongAppendPayload = new Uint8Array(1_048_577).fill(0x6b);
         const overlongAppendRequest = encodeRequest({
@@ -449,7 +448,7 @@ describe('common-proof external-memory runtime', () => {
         expect(
             encodeCommonProofExternalMemoryResponse(successfulRequest, []),
         ).toBeInstanceOf(Uint8Array);
-        expect([...successfulAppend.bytes]).toEqual([0, 0, 0, 0]);
+        expect(successfulAppend.bytes.byteLength).toBe(0);
 
         const refusedRequest =
             decodeCommonProofExternalMemoryRequest(appendRequest());
@@ -468,7 +467,7 @@ describe('common-proof external-memory runtime', () => {
                 },
             ]),
         ).toThrowError(expect.objectContaining({ code: 'WrongStorageResult' }));
-        expect([...refusedAppend.bytes]).toEqual([0, 0, 0, 0]);
-        expect([...rejectedReadBytes]).toEqual([0, 0, 0, 0]);
+        expect(refusedAppend.bytes.byteLength).toBe(0);
+        expect(rejectedReadBytes.byteLength).toBe(0);
     });
 });

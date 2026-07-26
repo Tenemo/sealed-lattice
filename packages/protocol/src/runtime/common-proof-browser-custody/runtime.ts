@@ -61,6 +61,9 @@ import {
     type CommonProofApplicationHandoff,
     type CommonProofCheckpointCustody,
     type CommonProofBrowserCustody,
+    type CommonProofPayloadBufferOwnership,
+    type CommonProofPayloadBufferAccounting,
+    CommonProofPayloadBufferOwnershipLedger,
 } from './records.js';
 
 export {
@@ -73,6 +76,103 @@ export type {
     CommonProofBrowserCustody,
     CommonProofCheckpointResumeDescriptor,
 } from './records.js';
+
+const storedRecordDigestDomain =
+    'sealed-lattice/common-proof/stored-record-digest/v1';
+const storedPayloadDigestDomain =
+    'sealed-lattice/common-proof/stored-payload-digest/v1';
+
+const destroyOwnedPayloadBuffer = (bytes: Uint8Array): void => {
+    if (!(bytes.buffer instanceof ArrayBuffer)) {
+        bytes.fill(0);
+        return;
+    }
+    const buffer = bytes.buffer;
+    if (buffer.byteLength === 0) {
+        return;
+    }
+    if (bytes.byteOffset !== 0 || bytes.byteLength !== buffer.byteLength) {
+        bytes.fill(0);
+        return;
+    }
+    new Uint8Array(buffer).fill(0);
+    structuredClone(buffer, { transfer: [buffer] });
+};
+
+const emptyPayloadBufferAccounting = (): CommonProofPayloadBufferAccounting =>
+    Object.freeze({
+        claimedBufferCount: 0n,
+        claimedByteLength: 0n,
+        maximumLiveBufferByteLength: 0n,
+        maximumLiveBufferCount: 0,
+        releasedBufferCount: 0n,
+        releasedByteLength: 0n,
+        secretRecordOpenByteLength: 0n,
+        secretRecordOpenCount: 0n,
+        secretRecordSealByteLength: 0n,
+        secretRecordSealCount: 0n,
+        transferredBufferCount: 0n,
+        transferredByteLength: 0n,
+    });
+
+const addPayloadBufferAccounting = (
+    accumulated: CommonProofPayloadBufferAccounting,
+    transaction: CommonProofPayloadBufferAccounting,
+): CommonProofPayloadBufferAccounting =>
+    Object.freeze({
+        claimedBufferCount:
+            accumulated.claimedBufferCount + transaction.claimedBufferCount,
+        claimedByteLength:
+            accumulated.claimedByteLength + transaction.claimedByteLength,
+        maximumLiveBufferByteLength:
+            accumulated.maximumLiveBufferByteLength >
+            transaction.maximumLiveBufferByteLength
+                ? accumulated.maximumLiveBufferByteLength
+                : transaction.maximumLiveBufferByteLength,
+        maximumLiveBufferCount: Math.max(
+            accumulated.maximumLiveBufferCount,
+            transaction.maximumLiveBufferCount,
+        ),
+        releasedBufferCount:
+            accumulated.releasedBufferCount + transaction.releasedBufferCount,
+        releasedByteLength:
+            accumulated.releasedByteLength + transaction.releasedByteLength,
+        secretRecordOpenByteLength:
+            accumulated.secretRecordOpenByteLength +
+            transaction.secretRecordOpenByteLength,
+        secretRecordOpenCount:
+            accumulated.secretRecordOpenCount +
+            transaction.secretRecordOpenCount,
+        secretRecordSealByteLength:
+            accumulated.secretRecordSealByteLength +
+            transaction.secretRecordSealByteLength,
+        secretRecordSealCount:
+            accumulated.secretRecordSealCount +
+            transaction.secretRecordSealCount,
+        transferredBufferCount:
+            accumulated.transferredBufferCount +
+            transaction.transferredBufferCount,
+        transferredByteLength:
+            accumulated.transferredByteLength +
+            transaction.transferredByteLength,
+    });
+
+const custodyDigest = (
+    domain: string,
+    bytes: Uint8Array,
+): Uint8Array<ArrayBuffer> => {
+    const hash = shake256.create({ dkLen: foundationHashByteLength });
+    try {
+        const domainBytes = textEncoder.encode(domain);
+        hash.update(unsigned32Bytes(domainBytes.byteLength));
+        hash.update(domainBytes);
+        hash.update(unsigned32Bytes(bytes.byteLength));
+        hash.update(bytes);
+        return hash.digest();
+    } finally {
+        hash.destroy();
+    }
+};
 
 export const openCommonProofBrowserCustody = (
     input: CommonProofBrowserCustodyInput,
@@ -203,6 +303,11 @@ export const openCommonProofBrowserCustody = (
     const outputChunks = new Map<number, CanonicalOutputChunk>();
     let externalMemoryByteLength = 0n;
     let externalMemoryRecordCount = 0;
+    let payloadBufferAccounting = emptyPayloadBufferAccounting();
+    let secretRecordOpenByteLength = 0n;
+    let secretRecordOpenCount = 0n;
+    let secretRecordSealByteLength = 0n;
+    let secretRecordSealCount = 0n;
     let outputByteLength = 0;
     let outputSealed = false;
     let outputTerminalChunkIndex: number | undefined;
@@ -611,17 +716,18 @@ export const openCommonProofBrowserCustody = (
 
     const openSecretRecord = async (
         descriptor: ExternalMemoryRecordDescriptor,
-        canonicalEnvelope: Uint8Array,
+        canonicalEnvelope: Uint8Array<ArrayBuffer>,
     ): Promise<Uint8Array<ArrayBuffer>> => {
         const commitmentCopy = actionRandomnessCommitment.slice();
-        const envelopeCopy = canonicalEnvelope.slice();
         const identifierInputCopy = copyIdentifierInput(
             descriptor.identifierInput,
         );
         try {
+            secretRecordOpenCount += 1n;
+            secretRecordOpenByteLength += BigInt(canonicalEnvelope.byteLength);
             const plaintext = await scratchStorage.openRecord({
                 actionRandomnessCommitment: commitmentCopy,
-                envelope: envelopeCopy,
+                envelope: canonicalEnvelope,
                 identifierInput: identifierInputCopy,
             });
             if (!(plaintext instanceof Uint8Array)) {
@@ -630,8 +736,21 @@ export const openCommonProofBrowserCustody = (
                     'The worker kernel returned malformed common-proof external-memory plaintext.',
                 );
             }
+            if (!(plaintext.buffer instanceof ArrayBuffer)) {
+                plaintext.fill(0);
+                throw new BrowserActionStorageCustodyError(
+                    'OwnedWorkerFailure',
+                    'The worker kernel returned malformed common-proof external-memory plaintext.',
+                );
+            }
+            if (
+                plaintext.byteOffset === 0 &&
+                plaintext.byteLength === plaintext.buffer.byteLength
+            ) {
+                return plaintext as Uint8Array<ArrayBuffer>;
+            }
             const ownedPlaintext = plaintext.slice();
-            plaintext.fill(0);
+            destroyOwnedPayloadBuffer(plaintext);
             return ownedPlaintext;
         } catch (error) {
             if (error instanceof BrowserActionStorageCustodyError) {
@@ -644,86 +763,129 @@ export const openCommonProofBrowserCustody = (
             );
         } finally {
             commitmentCopy.fill(0);
-            envelopeCopy.fill(0);
+            destroyOwnedPayloadBuffer(canonicalEnvelope);
             destroyIdentifierInput(identifierInputCopy);
         }
     };
 
     const encodeRecord = async (
         descriptor: ExternalMemoryRecordDescriptor,
-        payload: Uint8Array,
+        payload: Uint8Array<ArrayBuffer>,
     ): Promise<Uint8Array<ArrayBuffer>> => {
         if (descriptor.protection === 'public-integrity') {
-            return encodePublicRecord(descriptor.logicalRecordKey, payload);
+            try {
+                return encodePublicRecord(descriptor.logicalRecordKey, payload);
+            } finally {
+                destroyOwnedPayloadBuffer(payload);
+            }
         }
         const commitmentCopy = actionRandomnessCommitment.slice();
         const identifierInputCopy = copyIdentifierInput(
             descriptor.identifierInput,
         );
-        const plaintextCopy = payload.slice();
         try {
+            secretRecordSealCount += 1n;
+            secretRecordSealByteLength += BigInt(payload.byteLength);
             const envelope = await scratchStorage.sealRecord({
                 actionRandomnessCommitment: commitmentCopy,
                 identifierInput: identifierInputCopy,
-                plaintext: plaintextCopy,
+                plaintext: payload,
             });
-            if (
-                !(envelope instanceof Uint8Array) ||
-                envelope.byteLength === 0
-            ) {
+            if (!(envelope instanceof Uint8Array)) {
                 throw new BrowserActionStorageCustodyError(
                     'OwnedWorkerFailure',
                     'The worker kernel returned a malformed secret common-proof external-memory envelope.',
                 );
             }
+            if (
+                !(envelope.buffer instanceof ArrayBuffer) ||
+                envelope.byteLength === 0
+            ) {
+                envelope.fill(0);
+                throw new BrowserActionStorageCustodyError(
+                    'OwnedWorkerFailure',
+                    'The worker kernel returned a malformed secret common-proof external-memory envelope.',
+                );
+            }
+            if (
+                envelope.byteOffset === 0 &&
+                envelope.byteLength === envelope.buffer.byteLength
+            ) {
+                return envelope as Uint8Array<ArrayBuffer>;
+            }
             const ownedEnvelope = envelope.slice();
-            envelope.fill(0);
+            destroyOwnedPayloadBuffer(envelope);
             return ownedEnvelope;
         } finally {
             commitmentCopy.fill(0);
             destroyIdentifierInput(identifierInputCopy);
-            plaintextCopy.fill(0);
+            destroyOwnedPayloadBuffer(payload);
         }
     };
 
     const decodeRecord = async (
         descriptor: ExternalMemoryRecordDescriptor,
-        storedBytes: Uint8Array,
-    ): Promise<Uint8Array<ArrayBuffer>> =>
-        descriptor.protection === 'public-integrity'
-            ? decodePublicRecord(descriptor.logicalRecordKey, storedBytes)
-            : openSecretRecord(descriptor, storedBytes);
+        storedBytes: Uint8Array<ArrayBuffer>,
+    ): Promise<Uint8Array<ArrayBuffer>> => {
+        if (descriptor.protection !== 'public-integrity') {
+            return openSecretRecord(descriptor, storedBytes);
+        }
+        try {
+            return decodePublicRecord(descriptor.logicalRecordKey, storedBytes);
+        } finally {
+            destroyOwnedPayloadBuffer(storedBytes);
+        }
+    };
 
-    const authenticateRecord =
+    const authenticateRecordBytes =
         (
             descriptor: ExternalMemoryRecordDescriptor,
-            expectedPayload?: Uint8Array,
+            expectedRecord: Uint8Array,
         ): UntrustedStorageAuthenticator =>
-        async ({ bytes, logicalRecordKey }) => {
+        ({ bytes, logicalRecordKey }) => {
             if (logicalRecordKey !== descriptor.logicalRecordKey) {
                 throw new BrowserActionStorageCustodyError(
                     'RecordAuthenticationFailed',
                     'A common-proof record was returned under the wrong logical key.',
                 );
             }
-            const payload = await decodeRecord(descriptor, bytes);
+            if (!bytesEqual(bytes, expectedRecord)) {
+                throw new BrowserActionStorageCustodyError(
+                    'RecordAuthenticationFailed',
+                    'A common-proof record does not contain the expected canonical bytes.',
+                );
+            }
+        };
+
+    const authenticateRecordDigest =
+        (
+            descriptor: ExternalMemoryRecordDescriptor,
+            expectedRecordDigest: Uint8Array,
+        ): UntrustedStorageAuthenticator =>
+        ({ bytes, logicalRecordKey }) => {
+            if (logicalRecordKey !== descriptor.logicalRecordKey) {
+                throw new BrowserActionStorageCustodyError(
+                    'RecordAuthenticationFailed',
+                    'A common-proof record was returned under the wrong logical key.',
+                );
+            }
+            const digest = custodyDigest(storedRecordDigestDomain, bytes);
             try {
-                if (
-                    expectedPayload !== undefined &&
-                    !bytesEqual(payload, expectedPayload)
-                ) {
+                if (!bytesEqual(digest, expectedRecordDigest)) {
                     throw new BrowserActionStorageCustodyError(
                         'RecordAuthenticationFailed',
-                        'A common-proof record does not contain the expected bytes.',
+                        'A common-proof record changed after its authenticated commit.',
                     );
                 }
             } finally {
-                payload.fill(0);
+                digest.fill(0);
             }
         };
 
     const readStoredRecord = async (
         descriptor: ExternalMemoryRecordDescriptor,
+        expectedPayloadDigest?: Uint8Array,
+        beforeAuthentication?: () => void,
     ): Promise<
         | Readonly<{
               payload: Uint8Array<ArrayBuffer>;
@@ -731,32 +893,116 @@ export const openCommonProofBrowserCustody = (
           }>
         | undefined
     > => {
+        let authenticationFailure: unknown;
         let authenticatedPayload: Uint8Array<ArrayBuffer> | undefined;
-        const storedBytes = await input.store.readAuthenticated({
-            authenticate: async ({ bytes, logicalRecordKey }) => {
-                if (logicalRecordKey !== descriptor.logicalRecordKey) {
-                    throw new BrowserActionStorageCustodyError(
-                        'RecordAuthenticationFailed',
-                        'A common-proof record was returned under the wrong logical key.',
-                    );
-                }
-                authenticatedPayload = await decodeRecord(descriptor, bytes);
-            },
-            logicalRecordKey: descriptor.logicalRecordKey,
-        });
+        let storedBytes: Uint8Array | undefined;
+        try {
+            storedBytes = await input.store.readAuthenticated({
+                authenticate: async ({ bytes, logicalRecordKey }) => {
+                    try {
+                        if (logicalRecordKey !== descriptor.logicalRecordKey) {
+                            throw new BrowserActionStorageCustodyError(
+                                'RecordAuthenticationFailed',
+                                'A common-proof record was returned under the wrong logical key.',
+                            );
+                        }
+                        if (authenticatedPayload !== undefined) {
+                            throw new BrowserActionStorageCustodyError(
+                                'StorageFailure',
+                                'A common-proof record was authenticated more than once during one logical read.',
+                            );
+                        }
+                        beforeAuthentication?.();
+                        let payload: Uint8Array<ArrayBuffer> | undefined;
+                        try {
+                            payload =
+                                descriptor.protection === 'public-integrity'
+                                    ? decodePublicRecord(
+                                          descriptor.logicalRecordKey,
+                                          bytes,
+                                      )
+                                    : await openSecretRecord(
+                                          descriptor,
+                                          bytes.slice(),
+                                      );
+                            if (expectedPayloadDigest !== undefined) {
+                                const digest = custodyDigest(
+                                    storedPayloadDigestDomain,
+                                    payload,
+                                );
+                                try {
+                                    if (
+                                        !bytesEqual(
+                                            digest,
+                                            expectedPayloadDigest,
+                                        )
+                                    ) {
+                                        throw new BrowserActionStorageCustodyError(
+                                            'RecordAuthenticationFailed',
+                                            'A replayed common-proof record differs from its committed payload.',
+                                        );
+                                    }
+                                } finally {
+                                    digest.fill(0);
+                                }
+                            }
+                            authenticatedPayload = payload;
+                            payload = undefined;
+                        } finally {
+                            if (payload !== undefined) {
+                                destroyOwnedPayloadBuffer(payload);
+                            }
+                        }
+                    } catch (error) {
+                        authenticationFailure = error;
+                        throw error;
+                    }
+                },
+                logicalRecordKey: descriptor.logicalRecordKey,
+            });
+        } catch (error) {
+            if (authenticatedPayload !== undefined) {
+                destroyOwnedPayloadBuffer(authenticatedPayload);
+            }
+            if (
+                authenticationFailure instanceof
+                BrowserActionStorageCustodyError
+            ) {
+                throw authenticationFailure;
+            }
+            throw error;
+        }
         if (storedBytes === undefined) {
-            authenticatedPayload?.fill(0);
+            if (authenticatedPayload !== undefined) {
+                destroyOwnedPayloadBuffer(authenticatedPayload);
+                throw new BrowserActionStorageCustodyError(
+                    'RecordAuthenticationFailed',
+                    'A common-proof record was authenticated but not returned in owned browser memory.',
+                );
+            }
             return undefined;
         }
-        if (authenticatedPayload === undefined) {
+        if (
+            !(storedBytes.buffer instanceof ArrayBuffer) ||
+            authenticatedPayload === undefined
+        ) {
             storedBytes.fill(0);
+            if (authenticatedPayload !== undefined) {
+                destroyOwnedPayloadBuffer(authenticatedPayload);
+            }
             throw new BrowserActionStorageCustodyError(
                 'RecordAuthenticationFailed',
-                'A common-proof record was not authenticated during its read.',
+                'A common-proof record was not returned with one authenticated payload in owned browser memory.',
             );
         }
-        const ownedStoredBytes = Uint8Array.from(storedBytes);
-        storedBytes.fill(0);
+        const ownedStoredBytes =
+            storedBytes.byteOffset === 0 &&
+            storedBytes.byteLength === storedBytes.buffer.byteLength
+                ? (storedBytes as Uint8Array<ArrayBuffer>)
+                : storedBytes.slice();
+        if (ownedStoredBytes !== storedBytes) {
+            destroyOwnedPayloadBuffer(storedBytes);
+        }
         return Object.freeze({
             payload: authenticatedPayload,
             storedBytes: ownedStoredBytes,
@@ -766,24 +1012,68 @@ export const openCommonProofBrowserCustody = (
     const readRecord = async (
         descriptor: ExternalMemoryRecordDescriptor,
     ): Promise<Uint8Array<ArrayBuffer>> => {
-        const storedRecord = await readStoredRecord(descriptor);
-        if (storedRecord === undefined) {
+        const authenticatedRecord = await readStoredRecord(descriptor);
+        if (authenticatedRecord === undefined) {
             throw new BrowserActionStorageCustodyError(
                 'RecordAuthenticationFailed',
                 'A required common-proof record is unavailable.',
             );
         }
-        storedRecord.storedBytes.fill(0);
-        return storedRecord.payload;
+        destroyOwnedPayloadBuffer(authenticatedRecord.storedBytes);
+        return authenticatedRecord.payload;
+    };
+
+    const readStoredRecordByDigest = async (
+        descriptor: ExternalMemoryRecordDescriptor,
+        expectedRecordDigest: Uint8Array,
+    ): Promise<Uint8Array<ArrayBuffer> | undefined> => {
+        const storedBytes = await input.store.readAuthenticated({
+            authenticate: authenticateRecordDigest(
+                descriptor,
+                expectedRecordDigest,
+            ),
+            logicalRecordKey: descriptor.logicalRecordKey,
+        });
+        if (storedBytes === undefined) {
+            return undefined;
+        }
+        if (!(storedBytes.buffer instanceof ArrayBuffer)) {
+            storedBytes.fill(0);
+            throw new BrowserActionStorageCustodyError(
+                'RecordAuthenticationFailed',
+                'A common-proof record was not returned in owned browser memory.',
+            );
+        }
+        if (
+            storedBytes.byteOffset === 0 &&
+            storedBytes.byteLength === storedBytes.buffer.byteLength
+        ) {
+            return storedBytes as Uint8Array<ArrayBuffer>;
+        }
+        const ownedStoredBytes = storedBytes.slice();
+        destroyOwnedPayloadBuffer(storedBytes);
+        return ownedStoredBytes;
     };
 
     const clearStagedRecordChange = (
         change: StagedExternalMemoryRecordChange,
     ): void => {
         if (change.kind === 'write') {
-            change.write.encodedRecord?.fill(0);
-            change.write.payload.fill(0);
-            change.write.expectedCurrentValue?.fill(0);
+            if (change.write.encodedRecord !== undefined) {
+                destroyOwnedPayloadBuffer(change.write.encodedRecord);
+            }
+            if (
+                change.write.expectedCurrentValue !== null &&
+                change.write.expectedCurrentValue !== change.write.encodedRecord
+            ) {
+                destroyOwnedPayloadBuffer(change.write.expectedCurrentValue);
+            }
+            if (change.write.payloadOwnership !== undefined) {
+                change.write.payloadOwnership.ledger.releaseIfLive(
+                    change.write.payloadOwnership,
+                );
+                change.write.payloadOwnership = undefined;
+            }
             return;
         }
     };
@@ -798,7 +1088,8 @@ export const openCommonProofBrowserCustody = (
     const stageRecordWrite = async (
         shadow: ExternalMemoryShadowState,
         descriptor: ExternalMemoryRecordDescriptor,
-        payload: Uint8Array,
+        payload: Uint8Array<ArrayBuffer>,
+        payloadOwnership?: CommonProofPayloadBufferOwnership,
     ): Promise<void> => {
         if (shadow.changes.has(descriptor.logicalRecordKey)) {
             throw new BrowserActionStorageCustodyError(
@@ -808,40 +1099,68 @@ export const openCommonProofBrowserCustody = (
         }
         let encodedRecord: Uint8Array<ArrayBuffer> | undefined;
         let expectedCurrentValue: Uint8Array<ArrayBuffer> | null = null;
-        if (shadow.replay) {
-            const storedRecord = await readStoredRecord(descriptor);
-            if (storedRecord !== undefined) {
-                try {
-                    if (!bytesEqual(storedRecord.payload, payload)) {
-                        throw new BrowserActionStorageCustodyError(
-                            'RecordAuthenticationFailed',
-                            'A replayed common-proof record differs from its committed bytes.',
-                        );
-                    }
-                    encodedRecord = storedRecord.storedBytes.slice();
-                    expectedCurrentValue = storedRecord.storedBytes.slice();
-                } finally {
-                    storedRecord.payload.fill(0);
-                    storedRecord.storedBytes.fill(0);
-                }
-            } else {
-                encodedRecord = undefined;
-            }
-        } else {
-            encodedRecord = undefined;
-        }
-        shadow.changes.set(
-            descriptor.logicalRecordKey,
-            Object.freeze({
-                kind: 'write',
-                write: {
+        let expectedPayloadDigest: Uint8Array<ArrayBuffer> | undefined;
+        let payloadConsumed = false;
+        try {
+            if (shadow.replay) {
+                expectedPayloadDigest = custodyDigest(
+                    storedPayloadDigestDomain,
+                    payload,
+                );
+                const authenticatedRecord = await readStoredRecord(
                     descriptor,
+                    expectedPayloadDigest,
+                    () => {
+                        if (payloadConsumed) {
+                            return;
+                        }
+                        destroyOwnedPayloadBuffer(payload);
+                        payloadConsumed = true;
+                    },
+                );
+                if (authenticatedRecord !== undefined) {
+                    destroyOwnedPayloadBuffer(authenticatedRecord.payload);
+                    encodedRecord = authenticatedRecord.storedBytes;
+                    expectedCurrentValue = encodedRecord;
+                }
+            }
+            if (encodedRecord === undefined) {
+                encodedRecord = await encodeRecord(descriptor, payload);
+                payloadConsumed = true;
+            }
+            if (payloadOwnership !== undefined) {
+                payloadOwnership = payloadOwnership.ledger.replace(
+                    payloadOwnership,
                     encodedRecord,
-                    expectedCurrentValue,
-                    payload: payload.slice(),
-                },
-            }),
-        );
+                    'canonical-record',
+                );
+            }
+            shadow.changes.set(
+                descriptor.logicalRecordKey,
+                Object.freeze({
+                    kind: 'write',
+                    write: {
+                        descriptor,
+                        encodedRecord,
+                        expectedCurrentValue,
+                        payloadOwnership,
+                    },
+                }),
+            );
+        } catch (error) {
+            if (encodedRecord !== undefined) {
+                destroyOwnedPayloadBuffer(encodedRecord);
+            }
+            if (payloadOwnership !== undefined) {
+                payloadOwnership.ledger.release(payloadOwnership);
+            }
+            throw error;
+        } finally {
+            expectedPayloadDigest?.fill(0);
+            if (!payloadConsumed) {
+                destroyOwnedPayloadBuffer(payload);
+            }
+        }
     };
 
     const stageRecordDeletion = (
@@ -876,7 +1195,14 @@ export const openCommonProofBrowserCustody = (
     ): Promise<Uint8Array<ArrayBuffer>> => {
         const stagedChange = shadow.changes.get(descriptor.logicalRecordKey);
         if (stagedChange?.kind === 'write') {
-            return stagedChange.write.payload.slice();
+            const encodedRecord = stagedChange.write.encodedRecord;
+            if (encodedRecord === undefined) {
+                throw new BrowserActionStorageCustodyError(
+                    'InvalidState',
+                    'A staged common-proof record no longer has readable canonical bytes.',
+                );
+            }
+            return decodeRecord(descriptor, encodedRecord.slice());
         }
         if (stagedChange?.kind === 'delete') {
             throw new BrowserActionStorageCustodyError(
@@ -892,17 +1218,6 @@ export const openCommonProofBrowserCustody = (
     ): Promise<void> => {
         if (shadow.changes.size === 0) {
             return;
-        }
-        for (const change of shadow.changes.values()) {
-            if (
-                change.kind === 'write' &&
-                change.write.encodedRecord === undefined
-            ) {
-                change.write.encodedRecord = await encodeRecord(
-                    change.write.descriptor,
-                    change.write.payload,
-                );
-            }
         }
         const changes = [...shadow.changes.values()];
         const changeBatches: readonly (readonly StagedExternalMemoryRecordChange[])[] =
@@ -950,9 +1265,9 @@ export const openCommonProofBrowserCustody = (
                     });
                     await lease.write(encodedRecord);
                     await lease.seal(
-                        authenticateRecord(
+                        authenticateRecordBytes(
                             change.write.descriptor,
-                            change.write.payload,
+                            encodedRecord,
                         ),
                     );
                 }
@@ -982,8 +1297,8 @@ export const openCommonProofBrowserCustody = (
                             change.deletion.descriptor,
                         );
                         if (remaining !== undefined) {
-                            remaining.payload.fill(0);
-                            remaining.storedBytes.fill(0);
+                            destroyOwnedPayloadBuffer(remaining.payload);
+                            destroyOwnedPayloadBuffer(remaining.storedBytes);
                             throw new BrowserActionStorageCustodyError(
                                 'RecordAuthenticationFailed',
                                 'A deleted common-proof record remained visible during exact readback.',
@@ -991,30 +1306,48 @@ export const openCommonProofBrowserCustody = (
                         }
                         continue;
                     }
-                    const committed = await readStoredRecord(
-                        change.write.descriptor,
-                    );
-                    if (committed === undefined) {
+                    const encodedRecord = change.write.encodedRecord;
+                    if (encodedRecord === undefined) {
                         throw new BrowserActionStorageCustodyError(
-                            'RecordAuthenticationFailed',
-                            'A committed common-proof record is unavailable during exact readback.',
+                            'InvalidState',
+                            'A committed common-proof record lost its canonical storage bytes before readback.',
                         );
                     }
+                    const expectedRecordDigest = custodyDigest(
+                        storedRecordDigestDomain,
+                        encodedRecord,
+                    );
                     try {
-                        const encodedRecord = change.write.encodedRecord;
                         if (
-                            encodedRecord === undefined ||
-                            !bytesEqual(committed.storedBytes, encodedRecord) ||
-                            !bytesEqual(committed.payload, change.write.payload)
+                            change.write.expectedCurrentValue !== null &&
+                            change.write.expectedCurrentValue !== encodedRecord
                         ) {
-                            throw new BrowserActionStorageCustodyError(
-                                'RecordAuthenticationFailed',
-                                'A common-proof record changed during exact commit readback.',
+                            destroyOwnedPayloadBuffer(
+                                change.write.expectedCurrentValue,
                             );
                         }
+                        change.write.expectedCurrentValue = null;
+                        destroyOwnedPayloadBuffer(encodedRecord);
+                        change.write.encodedRecord = undefined;
+                        if (change.write.payloadOwnership !== undefined) {
+                            change.write.payloadOwnership.ledger.release(
+                                change.write.payloadOwnership,
+                            );
+                            change.write.payloadOwnership = undefined;
+                        }
+                        const committed = await readStoredRecordByDigest(
+                            change.write.descriptor,
+                            expectedRecordDigest,
+                        );
+                        if (committed === undefined) {
+                            throw new BrowserActionStorageCustodyError(
+                                'RecordAuthenticationFailed',
+                                'A committed common-proof record is unavailable during exact readback.',
+                            );
+                        }
+                        destroyOwnedPayloadBuffer(committed);
                     } finally {
-                        committed.payload.fill(0);
-                        committed.storedBytes.fill(0);
+                        expectedRecordDigest.fill(0);
                     }
                 }
             } catch (error) {
@@ -1116,7 +1449,7 @@ export const openCommonProofBrowserCustody = (
         try {
             await stageRecordWrite(shadow, header, headerPayload);
         } finally {
-            headerPayload.fill(0);
+            destroyOwnedPayloadBuffer(headerPayload);
         }
         shadow.objects.set(operation.objectOrdinal, {
             appendedByteLength: 0n,
@@ -1134,6 +1467,7 @@ export const openCommonProofBrowserCustody = (
             { readonly operationKind: 'append' }
         >,
         shadow: ExternalMemoryShadowState,
+        payloadLedger: CommonProofPayloadBufferOwnershipLedger,
     ): Promise<void> => {
         const object = requireObject(shadow.objects, operation.objectOrdinal);
         const remainingByteLength =
@@ -1155,25 +1489,20 @@ export const openCommonProofBrowserCustody = (
                 'A common-proof append operation violates the object lifecycle.',
             );
         }
-        let sourceOffset = 0;
-        while (sourceOffset < operation.bytes.byteLength) {
-            const chunkByteLength = Math.min(
-                maximumCanonicalDataChunkByteLength,
-                operation.bytes.byteLength - sourceOffset,
+        const chunkByteLength = operation.bytes.byteLength;
+        const byteOffset = object.appendedByteLength;
+        const chunkOrdinal = object.nextChunkOrdinal;
+        if (!isSafeUnsigned32(chunkOrdinal)) {
+            throw new BrowserActionStorageCustodyError(
+                'StorageFailure',
+                'Common-proof external-memory chunk ordinals are exhausted.',
             );
-            const chunkBytes = operation.bytes.slice(
-                sourceOffset,
-                sourceOffset + chunkByteLength,
-            );
-            const byteOffset = object.appendedByteLength + BigInt(sourceOffset);
-            const chunkOrdinal = object.nextChunkOrdinal;
-            if (!isSafeUnsigned32(chunkOrdinal)) {
-                chunkBytes.fill(0);
-                throw new BrowserActionStorageCustodyError(
-                    'StorageFailure',
-                    'Common-proof external-memory chunk ordinals are exhausted.',
-                );
-            }
+        }
+        const payloadOwnership = payloadLedger.observe(
+            operation.bytes,
+            'decoded-append',
+        );
+        try {
             reserveRecord(shadow, chunkByteLength);
             const descriptor = await createDescriptor(
                 identifierInput({
@@ -1185,20 +1514,24 @@ export const openCommonProofBrowserCustody = (
                 object.protection,
             );
             shadow.createdDescriptors.add(descriptor);
-            try {
-                await stageRecordWrite(shadow, descriptor, chunkBytes);
-            } finally {
-                chunkBytes.fill(0);
-            }
+            await stageRecordWrite(
+                shadow,
+                descriptor,
+                operation.bytes as Uint8Array<ArrayBuffer>,
+                payloadOwnership,
+            );
             object.chunks.push({
                 byteLength: chunkByteLength,
                 byteOffset,
                 descriptor,
             });
             object.nextChunkOrdinal += 1;
-            sourceOffset += chunkByteLength;
+            object.appendedByteLength += BigInt(chunkByteLength);
+        } catch (error) {
+            destroyOwnedPayloadBuffer(operation.bytes);
+            payloadLedger.releaseIfLive(payloadOwnership);
+            throw error;
         }
-        object.appendedByteLength += BigInt(operation.bytes.byteLength);
     };
 
     const sealObject = async (
@@ -1241,6 +1574,7 @@ export const openCommonProofBrowserCustody = (
             { readonly operationKind: 'read' }
         >,
         shadow: ExternalMemoryShadowState,
+        payloadLedger: CommonProofPayloadBufferOwnershipLedger,
     ): Promise<CommonProofExternalMemoryReadResult> => {
         const object = requireObject(shadow.objects, operation.objectOrdinal);
         const readEnd = operation.offset + BigInt(operation.byteLength);
@@ -1253,8 +1587,56 @@ export const openCommonProofBrowserCustody = (
                 'A common-proof read operation violates the sealed object extent.',
             );
         }
+        const exactChunk = object.chunks.find(
+            (chunk) =>
+                chunk.byteOffset === operation.offset &&
+                chunk.byteLength === operation.byteLength,
+        );
+        if (exactChunk !== undefined) {
+            const chunkBytes = await readShadowRecord(
+                shadow,
+                exactChunk.descriptor,
+            );
+            const chunkOwnership = payloadLedger.observe(
+                chunkBytes,
+                'decoded-record',
+            );
+            let transferredChunk = false;
+            try {
+                if (chunkBytes.byteLength !== exactChunk.byteLength) {
+                    throw new BrowserActionStorageCustodyError(
+                        'RecordAuthenticationFailed',
+                        'A common-proof external-memory chunk has the wrong length.',
+                    );
+                }
+                if (chunkOwnership !== undefined) {
+                    payloadLedger.transfer(
+                        chunkOwnership,
+                        'transferred-read-result',
+                    );
+                    payloadLedger.release(chunkOwnership);
+                }
+                transferredChunk = true;
+                return Object.freeze({
+                    bytes: chunkBytes,
+                    objectOrdinal: operation.objectOrdinal,
+                    offset: operation.offset,
+                    operationIndex: operation.operationIndex,
+                });
+            } finally {
+                if (!transferredChunk) {
+                    destroyOwnedPayloadBuffer(chunkBytes);
+                    payloadLedger.releaseIfLive(chunkOwnership);
+                }
+            }
+        }
         const result = new Uint8Array(operation.byteLength);
+        const resultOwnership = payloadLedger.observe(
+            result,
+            'assembled-read-result',
+        );
         let copiedByteLength = 0;
+        let transferredResult = false;
         try {
             for (const chunk of object.chunks) {
                 const chunkEnd = chunk.byteOffset + BigInt(chunk.byteLength);
@@ -1278,6 +1660,10 @@ export const openCommonProofBrowserCustody = (
                     shadow,
                     chunk.descriptor,
                 );
+                const chunkOwnership = payloadLedger.observe(
+                    chunkBytes,
+                    'decoded-record',
+                );
                 try {
                     if (chunkBytes.byteLength !== chunk.byteLength) {
                         throw new BrowserActionStorageCustodyError(
@@ -1293,7 +1679,8 @@ export const openCommonProofBrowserCustody = (
                         destinationStart,
                     );
                 } finally {
-                    chunkBytes.fill(0);
+                    destroyOwnedPayloadBuffer(chunkBytes);
+                    payloadLedger.releaseIfLive(chunkOwnership);
                 }
                 copiedByteLength += overlapByteLength;
             }
@@ -1303,15 +1690,25 @@ export const openCommonProofBrowserCustody = (
                     'Common-proof external-memory chunks do not cover the requested range.',
                 );
             }
+            if (resultOwnership !== undefined) {
+                payloadLedger.transfer(
+                    resultOwnership,
+                    'transferred-read-result',
+                );
+                payloadLedger.release(resultOwnership);
+            }
+            transferredResult = true;
             return Object.freeze({
                 bytes: result,
                 objectOrdinal: operation.objectOrdinal,
                 offset: operation.offset,
                 operationIndex: operation.operationIndex,
             });
-        } catch (error) {
-            result.fill(0);
-            throw error;
+        } finally {
+            if (!transferredResult) {
+                destroyOwnedPayloadBuffer(result);
+                payloadLedger.releaseIfLive(resultOwnership);
+            }
         }
     };
 
@@ -1380,6 +1777,7 @@ export const openCommonProofBrowserCustody = (
             replay,
         };
         const readResults: CommonProofExternalMemoryReadResult[] = [];
+        const payloadLedger = new CommonProofPayloadBufferOwnershipLedger();
         try {
             for (const operation of request.operations) {
                 switch (operation.operationKind) {
@@ -1387,13 +1785,15 @@ export const openCommonProofBrowserCustody = (
                         await createObject(operation, shadow);
                         break;
                     case 'append':
-                        await appendObject(operation, shadow);
+                        await appendObject(operation, shadow, payloadLedger);
                         break;
                     case 'seal':
                         await sealObject(operation, shadow);
                         break;
                     case 'read':
-                        readResults.push(await readObject(operation, shadow));
+                        readResults.push(
+                            await readObject(operation, shadow, payloadLedger),
+                        );
                         break;
                     case 'delete':
                         deleteObject(shadow, operation.objectOrdinal);
@@ -1426,7 +1826,7 @@ export const openCommonProofBrowserCustody = (
             return Object.freeze(readResults);
         } catch (error) {
             for (const readResult of readResults) {
-                readResult.bytes.fill(0);
+                destroyOwnedPayloadBuffer(readResult.bytes);
             }
             for (const descriptor of shadow.createdDescriptors) {
                 destroyIdentifierInput(descriptor.identifierInput);
@@ -1435,6 +1835,11 @@ export const openCommonProofBrowserCustody = (
             throw error;
         } finally {
             clearShadowChanges(shadow);
+            payloadLedger.assertReleased();
+            payloadBufferAccounting = addPayloadBufferAccounting(
+                payloadBufferAccounting,
+                payloadLedger.snapshot().accounting,
+            );
         }
     };
 
@@ -2008,6 +2413,14 @@ export const openCommonProofBrowserCustody = (
             });
         },
         externalMemory: Object.freeze({
+            copyBrowserStorageAccounting: () =>
+                Object.freeze({
+                    ...payloadBufferAccounting,
+                    secretRecordOpenByteLength,
+                    secretRecordOpenCount,
+                    secretRecordSealByteLength,
+                    secretRecordSealCount,
+                }),
             executeTransaction: (request: CommonProofExternalMemoryRequest) =>
                 executeTransaction(request, false),
         }),

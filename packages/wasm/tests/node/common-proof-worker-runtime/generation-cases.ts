@@ -6,6 +6,7 @@ import {
     openClosedWorkerCommonProofGenerationFamilyAdapter,
     releaseClosedWorkerCommonProofGenerationFamilyAdapter,
     runClosedWorkerCommonProofGenerationFamilyAdapter,
+    runClosedWorkerCommonProofGenerationFamilyAdapterWithExecutionOpener,
     runPreparedCommonProofGenerationWorker,
     type CommonProofCanonicalOutputStore,
     type CommonProofExternalMemoryTransactionExecutor,
@@ -147,7 +148,58 @@ describe('common-proof generation runtime', () => {
         const outputBytes = Uint8Array.from([7, 3, 9, 1, 4]);
         let phase = 0;
         let releasedCapabilityCount = 0;
+        let suppliedResponseByteLength = 0;
         const runtime = createMockKernelRuntime((memory) => ({
+            sealed_lattice_common_proof_describe_generation_family_adapter: (
+                adapterHandle,
+                runtimeBindingHashOutputPointer,
+                generationAuthorizationHashOutputPointer,
+                proofAttemptLineageIdentifierOutputPointer,
+                checkpointLineageIdentifierOutputPointer,
+                applicationStatementSchemaIdentifierOutputPointer,
+                statusPointer,
+            ) => {
+                expect(adapterHandle).toBe(31);
+                memoryBytes(
+                    memory,
+                    runtimeBindingHashOutputPointer,
+                    hashByteLength,
+                ).set(binding);
+                memoryBytes(
+                    memory,
+                    generationAuthorizationHashOutputPointer,
+                    hashByteLength,
+                ).fill(0x42);
+                memoryBytes(
+                    memory,
+                    proofAttemptLineageIdentifierOutputPointer,
+                    32,
+                ).fill(0x43);
+                memoryBytes(
+                    memory,
+                    checkpointLineageIdentifierOutputPointer,
+                    32,
+                ).fill(0x44);
+                writeUnsigned32(
+                    memory,
+                    applicationStatementSchemaIdentifierOutputPointer,
+                    applicationStatementSchemaIdentifier,
+                );
+                writeUnsigned32(memory, statusPointer, 0);
+                return 0;
+            },
+            sealed_lattice_common_proof_prepare_generation_family_adapter: (
+                adapterHandle,
+                checkpointStatePointer,
+                checkpointStateByteLength,
+                statusPointer,
+            ) => {
+                expect(adapterHandle).toBe(31);
+                expect(checkpointStatePointer).toBe(0);
+                expect(checkpointStateByteLength).toBe(0);
+                writeUnsigned32(memory, statusPointer, 0);
+                return 41;
+            },
             sealed_lattice_common_proof_begin_generation: (
                 preparedGenerationHandle,
                 statusPointer,
@@ -236,6 +288,7 @@ describe('common-proof generation runtime', () => {
             ) => {
                 expect(operationHandle).toBe(51);
                 expect(phase).toBe(1);
+                suppliedResponseByteLength = responseLength;
                 const response = memoryBytes(
                     memory,
                     responsePointer,
@@ -310,13 +363,29 @@ describe('common-proof generation runtime', () => {
             },
         }));
         const transferredReadBytes = new SliceObservingBytes([5, 8, 13, 21]);
+        const transferredReadByteLength = transferredReadBytes.byteLength;
         const transferredReadResult = {
             bytes: transferredReadBytes,
             objectOrdinal: 7,
             offset: 3n,
             operationIndex: 0,
         };
+        const browserStorageAccounting = Object.freeze({
+            claimedBufferCount: 7n,
+            claimedByteLength: 70n,
+            maximumLiveBufferByteLength: 40n,
+            maximumLiveBufferCount: 2,
+            releasedBufferCount: 7n,
+            releasedByteLength: 70n,
+            secretRecordOpenByteLength: 31n,
+            secretRecordOpenCount: 1n,
+            secretRecordSealByteLength: 37n,
+            secretRecordSealCount: 1n,
+            transferredBufferCount: 3n,
+            transferredByteLength: 19n,
+        });
         const externalMemory: CommonProofExternalMemoryTransactionExecutor = {
+            copyBrowserStorageAccounting: () => browserStorageAccounting,
             executeTransaction: (decodedRequest) => {
                 expect(decodedRequest.requestSequence).toBe(1n);
                 return Promise.resolve([transferredReadResult]);
@@ -342,19 +411,42 @@ describe('common-proof generation runtime', () => {
             },
         };
         let yieldCount = 0;
-
-        const capability = await runPreparedCommonProofGenerationWorker(
-            runtime,
-            41,
-            externalMemory,
-            outputStore,
-            {
-                yieldControl: () => {
-                    yieldCount += 1;
-                    return Promise.resolve();
+        const familyAdapter =
+            openClosedWorkerCommonProofGenerationFamilyAdapter(runtime, 31);
+        const execution =
+            await runClosedWorkerCommonProofGenerationFamilyAdapterWithExecutionOpener(
+                familyAdapter,
+                (description) => {
+                    expect(
+                        description.applicationStatementSchemaIdentifier,
+                    ).toBe(applicationStatementSchemaIdentifier);
+                    return {
+                        externalMemory,
+                        options: {
+                            yieldControl: () => {
+                                yieldCount += 1;
+                                return Promise.resolve();
+                            },
+                        },
+                        outputStore,
+                    };
                 },
-            },
+            );
+
+        expect(execution.externalMemoryAccounting.browserStorage).toEqual(
+            browserStorageAccounting,
         );
+        expect(execution.externalMemoryAccounting.workerTransport).toEqual({
+            browserToWasmCopyByteLength: BigInt(suppliedResponseByteLength),
+            browserToWasmCopyCount: 1n,
+            readResultTransferByteLength: BigInt(transferredReadByteLength),
+            readResultTransferCount: 1n,
+            wasmToBrowserCopyByteLength: BigInt(request.byteLength),
+            wasmToBrowserCopyCount: 1n,
+        });
+        expect(execution.outputChunkByteLengths).toEqual([
+            outputBytes.byteLength,
+        ]);
 
         expect(yieldCount).toBe(1);
         expect([...(committedOutput ?? [])]).toEqual([...outputBytes]);
@@ -362,14 +454,12 @@ describe('common-proof generation runtime', () => {
             Array(outputBytes.byteLength).fill(0),
         );
         expect(transferredReadBytes.sliceCount).toBe(0);
-        expect([...transferredReadResult.bytes]).toEqual([0, 0, 0, 0]);
+        expect(transferredReadResult.bytes.byteLength).toBe(0);
         expect(transferredOutputReadback?.sliceCount).toBe(0);
-        expect([...(transferredOutputReadback ?? [])]).toEqual(
-            Array(outputBytes.byteLength).fill(0),
-        );
-        capability.release();
+        expect(transferredOutputReadback?.byteLength).toBe(0);
+        execution.generatedCapability.release();
         expect(releasedCapabilityCount).toBe(1);
-        expect(() => capability.release()).toThrowError(
+        expect(() => execution.generatedCapability.release()).toThrowError(
             expect.objectContaining({ code: 'KernelFailure' }),
         );
     });
@@ -517,9 +607,7 @@ describe('common-proof generation runtime', () => {
             },
         );
 
-        expect([...(transferredSourceBytes ?? [])]).toEqual(
-            Array(exactSourceBytes.byteLength).fill(0),
-        );
+        expect(transferredSourceBytes?.byteLength).toBe(0);
         expect([...(retainedSourceMaterialRoot ?? [])]).toEqual(
             Array(hashByteLength).fill(0),
         );
@@ -793,7 +881,92 @@ describe('common-proof generation runtime', () => {
             permanentRetirementRequired: true,
         });
         expect(transferredBytes.copyAttempted).toBe(false);
-        expect([...transferredBytes]).toEqual([0, 0, 0, 0, 0]);
+        expect(transferredBytes.byteLength).toBe(0);
+        expect(retiredOperationCount).toBe(1);
+    });
+
+    it('rejects a read-result subview without clearing or detaching adjacent bytes', async () => {
+        const binding = runtimeBinding(0x48);
+        const request = fourByteReadRequest(binding, 1n);
+        let retiredOperationCount = 0;
+        const runtime = createMockKernelRuntime((memory) => ({
+            sealed_lattice_common_proof_begin_generation: (
+                preparedGenerationHandle,
+                statusPointer,
+            ) => {
+                expect(preparedGenerationHandle).toBe(43);
+                writeUnsigned32(memory, statusPointer, 0);
+                return 53;
+            },
+            sealed_lattice_common_proof_generation_poll: (
+                operationHandle,
+                pollKindPointer,
+                primaryValuePointer,
+                secondaryValuePointer,
+            ) => {
+                expect(operationHandle).toBe(53);
+                return writeGenerationPoll(
+                    memory,
+                    pollKindPointer,
+                    primaryValuePointer,
+                    secondaryValuePointer,
+                    2,
+                    request.byteLength,
+                    noSecondPollValue,
+                );
+            },
+            sealed_lattice_common_proof_generation_copy_storage_request: (
+                operationHandle,
+                outputPointer,
+                outputByteLength,
+            ) => {
+                expect(operationHandle).toBe(53);
+                expect(outputByteLength).toBe(request.byteLength);
+                memoryBytes(memory, outputPointer, outputByteLength).set(
+                    request,
+                );
+                return 0;
+            },
+            sealed_lattice_common_proof_generation_retire_failed: (
+                operationHandle,
+            ) => {
+                expect(operationHandle).toBe(53);
+                retiredOperationCount += 1;
+                return 0;
+            },
+        }));
+        const backingBytes = new Uint8Array(6).fill(0x9b);
+        const transferredSubview = backingBytes.subarray(1, 5);
+        transferredSubview.set([5, 8, 13, 21]);
+
+        await expect(
+            runPreparedCommonProofGenerationWorker(
+                runtime,
+                43,
+                {
+                    executeTransaction: () =>
+                        Promise.resolve([
+                            {
+                                bytes: transferredSubview,
+                                objectOrdinal: 7,
+                                offset: 3n,
+                                operationIndex: 0,
+                            },
+                        ]),
+                },
+                {
+                    commitChunk: () => Promise.resolve(),
+                    readChunk: () => Promise.resolve(new Uint8Array()),
+                },
+            ),
+        ).rejects.toMatchObject({
+            code: 'WrongStorageResult',
+            permanentRetirementRequired: true,
+        });
+        expect([...transferredSubview]).toEqual([0, 0, 0, 0]);
+        expect(backingBytes[0]).toBe(0x9b);
+        expect(backingBytes[5]).toBe(0x9b);
+        expect(backingBytes.buffer.byteLength).toBe(6);
         expect(retiredOperationCount).toBe(1);
     });
 

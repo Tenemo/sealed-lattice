@@ -104,15 +104,33 @@ const ownedRequestBytes = new WeakMap<
     Uint8Array<ArrayBuffer>
 >();
 
+const destroyOwnedArrayBuffer = (bytes: Uint8Array): void => {
+    if (!(bytes.buffer instanceof ArrayBuffer)) {
+        bytes.fill(0);
+        return;
+    }
+    const buffer = bytes.buffer;
+    if (buffer.byteLength === 0) {
+        return;
+    }
+    if (bytes.byteOffset !== 0 || bytes.byteLength !== buffer.byteLength) {
+        bytes.fill(0);
+        return;
+    }
+    new Uint8Array(buffer).fill(0);
+    structuredClone(buffer, { transfer: [buffer] });
+};
+
 export const clearCommonProofExternalMemoryRequest = (
     request: CommonProofExternalMemoryRequest,
 ): void => {
     const bytes = ownedRequestBytes.get(request);
-    if (bytes === undefined) {
-        return;
+    if (bytes !== undefined) {
+        destroyOwnedArrayBuffer(bytes);
+        ownedRequestBytes.delete(request);
     }
-    bytes.fill(0);
-    ownedRequestBytes.delete(request);
+    request.requestDigest.fill(0);
+    request.runtimeBindingHash.fill(0);
 };
 
 type CommonProofWorkerRuntimeErrorCode =
@@ -426,8 +444,8 @@ export const decodeCommonProofExternalMemoryRequest = (
         const maximumOperationCount = reader.unsigned32();
         const operationCount = reader.unsigned32();
         const requestSequence = reader.unsigned64();
-        const runtimeBindingHash = reader.bytes(hashByteLength);
-        const suppliedRequestDigest = reader.bytes(hashByteLength);
+        const runtimeBindingHash = reader.bytes(hashByteLength).slice();
+        const suppliedRequestDigest = reader.bytes(hashByteLength).slice();
         if (
             maximumPayloadByteLength === 0n ||
             maximumPayloadByteLength > maximumWorkerPayloadByteLength ||
@@ -538,7 +556,7 @@ export const decodeCommonProofExternalMemoryRequest = (
         ownedRequestBytes.set(request, ownedEncodedRequest);
         return request;
     } catch (error) {
-        ownedEncodedRequest.fill(0);
+        destroyOwnedArrayBuffer(ownedEncodedRequest);
         throw error;
     }
 };
@@ -564,7 +582,7 @@ const clearReadResults = (
     readResults: readonly CommonProofExternalMemoryReadResult[],
 ): void => {
     for (const result of readResults) {
-        result.bytes.fill(0);
+        destroyOwnedArrayBuffer(result.bytes);
     }
 };
 
