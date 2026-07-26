@@ -1,4 +1,3 @@
-use super::super::row_code_whir::RowCodeWhirConstructionPlan;
 use super::super::{DecodedProofPhasePairLeaf, canonical_common_proof_byte_length_ceiling};
 use super::{
     CanonicalItem, CanonicalTuple, CommonProofPrivacyMode, CommonProofQueryOpeningAbsorber,
@@ -104,7 +103,6 @@ enum CommonProofVerificationPhase {
 pub(crate) struct CommonProofVerificationStateMachine {
     protocol_version: u16,
     suite_identifier: [u8; 64],
-    row_code_whir_construction_plan_identity_hash: [u8; 64],
     canonical_application_statement_bytes: Vec<u8>,
     application_statement_schema_identifier: u16,
     relation_context: RelationPlanCheckContext,
@@ -194,45 +192,27 @@ impl CommonProofVerificationStateMachine {
     pub(crate) fn new(
         input: PollableCommonProofVerificationInput<'_>,
     ) -> Result<Self, CommonProofVerifierError> {
-        let validated_artifact = ValidatedRelationPlanArtifact::from_compiled_plan(
+        ValidatedRelationPlanArtifact::from_compiled_plan(
             input.relation_plan,
             input.relation_context,
         )?;
-        let row_code_whir_construction_plan = RowCodeWhirConstructionPlan::for_selected_variant(
-            &validated_artifact,
-            input.schedule_position,
-            input.top_count,
-        )
-        .map_err(|_| CommonProofVerifierError::RowCodeWhirConstructionPlan)?;
-        Self::new_with_validated_construction_plan(input, row_code_whir_construction_plan)
+        Self::new_after_plan_validation(input)
     }
 
     #[cfg(test)]
     pub(crate) fn new_for_checked_fixture(
         input: PollableCommonProofVerificationInput<'_>,
     ) -> Result<Self, CommonProofVerifierError> {
-        let validated_artifact = ValidatedRelationPlanArtifact::from_checked_fixture_plan(
+        ValidatedRelationPlanArtifact::from_checked_fixture_plan(
             input.relation_plan,
             input.relation_context,
         )?;
-        let row_code_whir_construction_plan =
-            RowCodeWhirConstructionPlan::for_checked_fixture_variant(
-                &validated_artifact,
-                input.relation_context,
-                input.schedule_position,
-                input.top_count,
-            )
-            .map_err(|_| CommonProofVerifierError::RowCodeWhirConstructionPlan)?;
-        Self::new_with_validated_construction_plan(input, row_code_whir_construction_plan)
+        Self::new_after_plan_validation(input)
     }
 
-    fn new_with_validated_construction_plan(
+    fn new_after_plan_validation(
         input: PollableCommonProofVerificationInput<'_>,
-        row_code_whir_construction_plan: RowCodeWhirConstructionPlan,
     ) -> Result<Self, CommonProofVerifierError> {
-        let row_code_whir_construction_plan_identity_hash = row_code_whir_construction_plan
-            .canonical_identity_hash()
-            .map_err(|_| CommonProofVerifierError::RowCodeWhirConstructionPlan)?;
         let application_statement = decode_application_statement(
             input.canonical_application_statement_bytes,
             input
@@ -327,7 +307,6 @@ impl CommonProofVerificationStateMachine {
         Ok(Self {
             protocol_version: input.protocol_version,
             suite_identifier: input.suite_identifier,
-            row_code_whir_construction_plan_identity_hash,
             canonical_application_statement_bytes: input
                 .canonical_application_statement_bytes
                 .to_vec(),
@@ -783,7 +762,6 @@ impl CommonProofVerificationStateMachine {
         let mut transcript = CommonProofTranscript::new(
             self.protocol_version,
             self.suite_identifier,
-            self.row_code_whir_construction_plan_identity_hash,
             self.application_statement_schema_identifier,
             &self.canonical_proof_object_header_bytes,
             self.transcript_schedule.clone(),

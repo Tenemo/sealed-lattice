@@ -3100,7 +3100,6 @@ mod tests {
             let mut transcript = CommonProofTranscript::new(
                 1,
                 [0x31; 64],
-                [0x32; 64],
                 BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER,
                 b"exact-ballot-theta-vector",
                 crate::bgv::proof_suite::packed_fri_transcript_schedule(variant, &context)

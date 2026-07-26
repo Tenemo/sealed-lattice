@@ -61,7 +61,6 @@ pub(crate) enum CommonProofVerifierError {
     MissingVerifiedColumnValue,
     Profile(ProofProfileError),
     Relation(RelationPlanError),
-    RowCodeWhirConstructionPlan,
     Body(ProofBodyError),
     Transcript(TranscriptError),
     Polynomial(ProofPolynomialError),

@@ -436,9 +436,8 @@ fn query_opening_absorber(
         1,
         1,
     );
-    let mut transcript =
-        CommonProofTranscript::new(1, [0x11; 64], [0x12; 64], 0x1216, &[0x22; 96], schedule)
-            .expect("test transcript starts");
+    let mut transcript = CommonProofTranscript::new(1, [0x11; 64], 0x1216, &[0x22; 96], schedule)
+        .expect("test transcript starts");
     transcript
         .sample_composition_challenge(0)
         .expect("composition challenge derives");

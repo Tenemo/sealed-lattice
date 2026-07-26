@@ -51,7 +51,6 @@ fn common_proof_transcript_enforces_the_exact_round_chain() {
     let mut transcript = CommonProofTranscript::new(
         1,
         [0x31; 64],
-        [0x32; 64],
         0x1216,
         b"header",
         common_proof_schedule(CommonProofPrivacyMode::SecretBearing),
@@ -179,7 +178,6 @@ fn public_common_proof_transcript_rejects_a_secret_mode_round() {
     let mut transcript = CommonProofTranscript::new(
         1,
         [0x41; 64],
-        [0x42; 64],
         0x1213,
         b"header",
         common_proof_schedule(CommonProofPrivacyMode::PublicOnly),

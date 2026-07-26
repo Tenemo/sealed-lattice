@@ -1,5 +1,3 @@
-#[cfg(test)]
-use super::super::row_code_whir::RowCodeWhirConstructionPlan;
 use super::{
     BoundTreeConstructionKind, CanonicalDecodeLimits, CanonicalItem, CanonicalItemType,
     CanonicalTuple, CommonProofTranscript, CommonProofVerifierError, CompleteProofTreeCatalog,
@@ -90,19 +88,10 @@ where
     Source: ProofByteSource + ?Sized,
     ColumnEvaluator: VerifiedRelationColumnEvaluator + ?Sized,
 {
-    let validated_artifact = ValidatedRelationPlanArtifact::from_checked_fixture_plan(
+    ValidatedRelationPlanArtifact::from_checked_fixture_plan(
         input.relation_plan,
         input.relation_context,
     )?;
-    let row_code_whir_construction_plan_identity_hash =
-        RowCodeWhirConstructionPlan::for_checked_fixture_variant(
-            &validated_artifact,
-            input.relation_context,
-            input.schedule_position,
-            input.top_count,
-        )
-        .and_then(|plan| plan.canonical_identity_hash())
-        .map_err(|_| CommonProofVerifierError::RowCodeWhirConstructionPlan)?;
     let application_statement = decode_application_statement(
         input.canonical_application_statement_bytes,
         input
@@ -191,7 +180,6 @@ where
     let mut transcript = CommonProofTranscript::new(
         input.protocol_version,
         input.suite_identifier,
-        row_code_whir_construction_plan_identity_hash,
         input
             .relation_plan
             .application_statement_schema_identifier(),

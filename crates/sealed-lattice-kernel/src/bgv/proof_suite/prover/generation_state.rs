@@ -1,4 +1,3 @@
-use super::super::row_code_whir::RowCodeWhirConstructionPlan;
 use super::super::verified_application_statement_hash;
 #[cfg(test)]
 use super::CompletedCommonProofGenerationResult;
@@ -434,7 +433,6 @@ type CommonProofPhasePairLeafValues = (
 pub(crate) struct CommonProofGenerationStateMachine {
     protocol_version: u16,
     suite_identifier: [u8; HASH_BYTE_LENGTH],
-    row_code_whir_construction_plan_identity_hash: [u8; HASH_BYTE_LENGTH],
     application_statement_schema_identifier: u16,
     canonical_header_bytes: Vec<u8>,
     variant: RelationPlanVariant,
@@ -851,13 +849,7 @@ impl CommonProofGenerationStateMachine {
             input.relation_context,
         )
         .map_err(CommonProofGenerationInitializationError::Profile)?;
-        let row_code_whir_construction_plan = RowCodeWhirConstructionPlan::for_selected_variant(
-            &validated_artifact,
-            input.schedule_position,
-            input.top_count,
-        )
-        .map_err(|_| CommonProofGenerationInitializationError::RowCodeWhirConstructionPlan)?;
-        Self::new_after_plan_validation(input, validated_artifact, row_code_whir_construction_plan)
+        Self::new_after_plan_validation(input, validated_artifact)
     }
 
     #[cfg(test)]
@@ -870,15 +862,7 @@ impl CommonProofGenerationStateMachine {
             input.relation_context,
         )
         .map_err(CommonProofGenerationInitializationError::Profile)?;
-        let row_code_whir_construction_plan =
-            RowCodeWhirConstructionPlan::for_checked_fixture_variant(
-                &validated_artifact,
-                input.relation_context,
-                input.schedule_position,
-                input.top_count,
-            )
-            .map_err(|_| CommonProofGenerationInitializationError::RowCodeWhirConstructionPlan)?;
-        Self::new_after_plan_validation(input, validated_artifact, row_code_whir_construction_plan)
+        Self::new_after_plan_validation(input, validated_artifact)
     }
 
     fn validate_generation_input_limits(
@@ -900,7 +884,6 @@ impl CommonProofGenerationStateMachine {
     fn new_after_plan_validation<'input>(
         input: CommonProofGenerationInput<'input>,
         validated_artifact: ValidatedRelationPlanArtifact,
-        row_code_whir_construction_plan: RowCodeWhirConstructionPlan,
     ) -> Result<Self, CommonProofGenerationInitializationError> {
         let CommonProofGenerationInput {
             protocol_version,
@@ -916,9 +899,6 @@ impl CommonProofGenerationStateMachine {
             maximum_proof_transport_chunk_byte_length,
             maximum_prefetched_query_byte_length,
         } = input;
-        let row_code_whir_construction_plan_identity_hash = row_code_whir_construction_plan
-            .canonical_identity_hash()
-            .map_err(|_| CommonProofGenerationInitializationError::RowCodeWhirConstructionPlan)?;
         let canonical_header_bytes =
             canonical_proof_object_header_bytes(canonical_application_statement_bytes)
                 .map_err(CommonProofGenerationInitializationError::Prover)?;
@@ -1068,7 +1048,6 @@ impl CommonProofGenerationStateMachine {
         Ok(Self {
             protocol_version,
             suite_identifier,
-            row_code_whir_construction_plan_identity_hash,
             application_statement_schema_identifier: validated_artifact
                 .application_statement_schema_identifier(),
             canonical_header_bytes,
@@ -3220,7 +3199,6 @@ impl CommonProofGenerationStateMachine {
                 let mut transcript = CommonProofTranscript::new(
                     self.protocol_version,
                     self.suite_identifier,
-                    self.row_code_whir_construction_plan_identity_hash,
                     self.application_statement_schema_identifier,
                     &self.canonical_header_bytes,
                     self.transcript_schedule.clone(),
@@ -4585,9 +4563,6 @@ fn map_generation_initialization_error<StorageError, CoinError, SinkError>(
         }
         CommonProofGenerationInitializationError::Relation(error) => {
             CommonProofGenerationError::Relation(error)
-        }
-        CommonProofGenerationInitializationError::RowCodeWhirConstructionPlan => {
-            CommonProofGenerationError::RowCodeWhirConstructionPlan
         }
         CommonProofGenerationInitializationError::Body(error) => {
             CommonProofGenerationError::Body(error)

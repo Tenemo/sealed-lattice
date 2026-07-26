@@ -376,8 +376,6 @@ impl CommonProofRelationPlanCapability {
             .map_err(|_| CommonProofRuntimeError::InvalidPlanCapability)?;
         let proof_byte_length = u64::try_from(limits.proof_byte_length())
             .map_err(|_| CommonProofRuntimeError::InvalidLimits)?;
-        let construction_plan_identity_hash =
-            self.row_code_whir_construction_plan_identity_hash()?;
         let non_terminal_fri_fold_count = schedule.fri_fold_count().saturating_sub(1);
         let durable_boundary_count = 4_u32
             .checked_add(u32::from(non_terminal_fri_fold_count))
@@ -389,7 +387,6 @@ impl CommonProofRelationPlanCapability {
                 &COMMON_PROOF_CHECKPOINT_STATE_FORMAT_IDENTIFIER.to_le_bytes(),
                 &self.relation_plan_hash,
                 &self.relation_plan_variant_hash,
-                &construction_plan_identity_hash,
                 &proof_byte_length.to_le_bytes(),
                 &limits.external_memory_chunk_byte_length().to_le_bytes(),
                 &limits.prefetched_query_byte_length().to_le_bytes(),

@@ -57,7 +57,6 @@ pub(crate) enum CommonProofGenerationError<StorageError, CoinError, SinkError> {
     Prover(CommonProofProverError),
     Profile(ProofProfileError),
     Relation(RelationPlanError),
-    RowCodeWhirConstructionPlan,
     Body(ProofBodyError),
     Transcript(TranscriptError),
     StoragePlan(ProofExternalMemoryError),
@@ -83,9 +82,6 @@ where
             Self::Prover(error) => write!(formatter, "common proof prover failed: {error:?}"),
             Self::Profile(error) => write!(formatter, "common proof profile failed: {error:?}"),
             Self::Relation(error) => write!(formatter, "common proof relation failed: {error:?}"),
-            Self::RowCodeWhirConstructionPlan => {
-                write!(formatter, "common proof construction plan failed")
-            }
             Self::Body(error) => write!(formatter, "common proof body failed: {error:?}"),
             Self::Transcript(error) => {
                 write!(formatter, "common proof transcript failed: {error:?}")
@@ -3599,7 +3595,6 @@ pub(crate) enum CommonProofGenerationInitializationError {
     Prover(CommonProofProverError),
     Profile(ProofProfileError),
     Relation(RelationPlanError),
-    RowCodeWhirConstructionPlan,
     Body(ProofBodyError),
     Transcript(TranscriptError),
     StoragePlan(ProofExternalMemoryError),

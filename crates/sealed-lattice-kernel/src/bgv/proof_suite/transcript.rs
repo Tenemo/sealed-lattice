@@ -568,26 +568,65 @@ struct PendingCommonChallenge {
 }
 
 impl CanonicalProofTranscript {
-    fn try_new(
+    fn try_new_packed_fri(
+        protocol_version: u16,
+        suite_id: [u8; 64],
+        application_statement_schema_identifier: u16,
+        canonical_proof_object_header_bytes: &[u8],
+    ) -> Result<Self, TranscriptError> {
+        Self::try_new_with_row_code_whir_construction_identity(
+            protocol_version,
+            suite_id,
+            None,
+            application_statement_schema_identifier,
+            canonical_proof_object_header_bytes,
+        )
+    }
+
+    fn try_new_row_code_whir(
         protocol_version: u16,
         suite_id: [u8; 64],
         row_code_whir_construction_plan_identity_hash: [u8; 64],
         application_statement_schema_identifier: u16,
         canonical_proof_object_header_bytes: &[u8],
     ) -> Result<Self, TranscriptError> {
+        Self::try_new_with_row_code_whir_construction_identity(
+            protocol_version,
+            suite_id,
+            Some(row_code_whir_construction_plan_identity_hash),
+            application_statement_schema_identifier,
+            canonical_proof_object_header_bytes,
+        )
+    }
+
+    fn try_new_with_row_code_whir_construction_identity(
+        protocol_version: u16,
+        suite_id: [u8; 64],
+        row_code_whir_construction_plan_identity_hash: Option<[u8; 64]>,
+        application_statement_schema_identifier: u16,
+        canonical_proof_object_header_bytes: &[u8],
+    ) -> Result<Self, TranscriptError> {
+        let mut initial_items = vec![
+            CanonicalItem::unsigned16(protocol_version),
+            CanonicalItem::hash512(suite_id),
+        ];
+        if let Some(row_code_whir_construction_plan_identity_hash) =
+            row_code_whir_construction_plan_identity_hash
+        {
+            initial_items.push(CanonicalItem::hash512(
+                row_code_whir_construction_plan_identity_hash,
+            ));
+        }
+        initial_items.push(CanonicalItem::unsigned16(
+            application_statement_schema_identifier,
+        ));
+        initial_items.push(
+            CanonicalItem::variable_bytes(canonical_proof_object_header_bytes)
+                .map_err(|_| TranscriptError::CanonicalEncoding)?,
+        );
         Ok(Self {
             application_statement_schema_identifier,
-            state: transcript_hash(
-                TRANSCRIPT_INITIAL_DOMAIN,
-                vec![
-                    CanonicalItem::unsigned16(protocol_version),
-                    CanonicalItem::hash512(suite_id),
-                    CanonicalItem::hash512(row_code_whir_construction_plan_identity_hash),
-                    CanonicalItem::unsigned16(application_statement_schema_identifier),
-                    CanonicalItem::variable_bytes(canonical_proof_object_header_bytes)
-                        .map_err(|_| TranscriptError::CanonicalEncoding)?,
-                ],
-            )?,
+            state: transcript_hash(TRANSCRIPT_INITIAL_DOMAIN, initial_items)?,
             pending_common_challenge: None,
         })
     }
@@ -2991,7 +3030,6 @@ impl CommonProofTranscript {
     pub(crate) fn new(
         protocol_version: u16,
         suite_id: [u8; 64],
-        row_code_whir_construction_plan_identity_hash: [u8; 64],
         application_statement_schema_identifier: u16,
         canonical_proof_object_header_bytes: &[u8],
         schedule: CommonProofTranscriptSchedule,
@@ -3000,7 +3038,7 @@ impl CommonProofTranscript {
         Self::new_with_schedule(
             protocol_version,
             suite_id,
-            row_code_whir_construction_plan_identity_hash,
+            None,
             application_statement_schema_identifier,
             canonical_proof_object_header_bytes,
             relation_prefix_schedule,
@@ -3019,7 +3057,7 @@ impl CommonProofTranscript {
         Self::new_with_schedule(
             protocol_version,
             suite_id,
-            row_code_whir_construction_plan_identity_hash,
+            Some(row_code_whir_construction_plan_identity_hash),
             application_statement_schema_identifier,
             canonical_proof_object_header_bytes,
             schedule,
@@ -3030,7 +3068,7 @@ impl CommonProofTranscript {
     fn new_with_schedule(
         protocol_version: u16,
         suite_id: [u8; 64],
-        row_code_whir_construction_plan_identity_hash: [u8; 64],
+        row_code_whir_construction_plan_identity_hash: Option<[u8; 64]>,
         application_statement_schema_identifier: u16,
         canonical_proof_object_header_bytes: &[u8],
         relation_prefix_schedule: CommonProofRelationPrefixSchedule,
@@ -3056,13 +3094,21 @@ impl CommonProofTranscript {
             )
             .map_err(|_| TranscriptError::ChallengeCounterOverflow)?;
         let mut result = Self {
-            transcript: CanonicalProofTranscript::try_new(
-                protocol_version,
-                suite_id,
-                row_code_whir_construction_plan_identity_hash,
-                application_statement_schema_identifier,
-                canonical_proof_object_header_bytes,
-            )?,
+            transcript: match row_code_whir_construction_plan_identity_hash {
+                Some(identity_hash) => CanonicalProofTranscript::try_new_row_code_whir(
+                    protocol_version,
+                    suite_id,
+                    identity_hash,
+                    application_statement_schema_identifier,
+                    canonical_proof_object_header_bytes,
+                )?,
+                None => CanonicalProofTranscript::try_new_packed_fri(
+                    protocol_version,
+                    suite_id,
+                    application_statement_schema_identifier,
+                    canonical_proof_object_header_bytes,
+                )?,
+            },
             hash_query_counter: TranscriptHashQueryCounter::new(),
             relation_prefix_schedule,
             tail_schedule,
@@ -3952,7 +3998,7 @@ impl RowCodeWhirTranscript {
     #[cfg(test)]
     pub(crate) fn new_for_test(statement: &[u8]) -> Result<Self, TranscriptError> {
         Ok(Self {
-            transcript: CanonicalProofTranscript::try_new(
+            transcript: CanonicalProofTranscript::try_new_row_code_whir(
                 1,
                 [0_u8; Hash512::BYTE_LENGTH],
                 [0x63_u8; Hash512::BYTE_LENGTH],
@@ -4818,7 +4864,7 @@ mod common_challenge_chain_tests {
     const TEST_CONSTRUCTION_PLAN_IDENTITY_HASH: [u8; 64] = [0x6c; 64];
 
     fn transcript() -> CanonicalProofTranscript {
-        CanonicalProofTranscript::try_new(
+        CanonicalProofTranscript::try_new_row_code_whir(
             1,
             [0x5a; 64],
             TEST_CONSTRUCTION_PLAN_IDENTITY_HASH,
@@ -4830,12 +4876,14 @@ mod common_challenge_chain_tests {
 
     #[test]
     fn construction_plan_identity_hash_binds_initial_and_downstream_transcript_state() {
-        let mut first =
-            CanonicalProofTranscript::try_new(1, [0x5a; 64], [0x6c; 64], 0x1211, b"header")
-                .expect("the first test transcript header is canonical");
-        let mut changed =
-            CanonicalProofTranscript::try_new(1, [0x5a; 64], [0x6d; 64], 0x1211, b"header")
-                .expect("the changed construction identity is canonical");
+        let mut first = CanonicalProofTranscript::try_new_row_code_whir(
+            1, [0x5a; 64], [0x6c; 64], 0x1211, b"header",
+        )
+        .expect("the first test transcript header is canonical");
+        let mut changed = CanonicalProofTranscript::try_new_row_code_whir(
+            1, [0x5a; 64], [0x6d; 64], 0x1211, b"header",
+        )
+        .expect("the changed construction identity is canonical");
 
         assert_ne!(first.state, changed.state);
 
@@ -5165,7 +5213,6 @@ mod common_challenge_chain_tests {
         let mut complete_transcript = CommonProofTranscript::new(
             1,
             [0x5a; 64],
-            TEST_CONSTRUCTION_PLAN_IDENTITY_HASH,
             0x1211,
             b"header",
             complete_schedule(CommonProofPrivacyMode::SecretBearing),
@@ -5261,7 +5308,7 @@ mod common_challenge_chain_tests {
     }
 
     #[test]
-    fn relation_prefix_split_preserves_every_shared_transcript_byte() {
+    fn packed_fri_and_row_code_whir_transcripts_are_domain_separated() {
         let relation_prefix_schedule =
             relation_prefix_schedule(CommonProofPrivacyMode::SecretBearing);
         let complete_schedule = CommonProofTranscriptSchedule::from_relation_prefix_schedule(
@@ -5271,26 +5318,25 @@ mod common_challenge_chain_tests {
             1,
             2,
         )
-        .expect("the complete parity schedule is valid");
+        .expect("the complete packed-FRI schedule is valid");
         let mut complete_transcript = CommonProofTranscript::new(
             1,
             [0x5a; 64],
-            TEST_CONSTRUCTION_PLAN_IDENTITY_HASH,
             0x1211,
-            b"byte-neutral-prefix",
+            b"construction-separated-prefix",
             complete_schedule,
         )
-        .expect("the complete parity transcript starts");
+        .expect("the packed-FRI transcript starts");
         let mut relation_prefix_transcript = CommonProofTranscript::new_relation_prefix(
             1,
             [0x5a; 64],
             TEST_CONSTRUCTION_PLAN_IDENTITY_HASH,
             0x1211,
-            b"byte-neutral-prefix",
+            b"construction-separated-prefix",
             relation_prefix_schedule,
         )
-        .expect("the relation-prefix parity transcript starts");
-        assert_eq!(
+        .expect("the row-code WHIR relation-prefix transcript starts");
+        assert_ne!(
             complete_transcript.transcript_state_for_test(),
             relation_prefix_transcript.transcript_state_for_test()
         );
@@ -5301,105 +5347,22 @@ mod common_challenge_chain_tests {
         relation_prefix_transcript
             .absorb_base_root(0, [0x21; 64])
             .expect("the relation-prefix base root is absorbed");
-        assert_eq!(
+        assert_ne!(
             complete_transcript.transcript_state_for_test(),
             relation_prefix_transcript.transcript_state_for_test()
         );
 
-        assert_eq!(
-            complete_transcript
-                .sample_application_challenge_group(theta_challenge())
-                .expect("the complete application challenge group samples"),
-            relation_prefix_transcript
-                .sample_application_challenge_group(theta_challenge())
-                .expect("the relation-prefix application challenge group samples")
-        );
-        assert_eq!(
+        let packed_fri_challenge = complete_transcript
+            .sample_application_challenge_group(theta_challenge())
+            .expect("the packed-FRI application challenge group samples");
+        let row_code_whir_challenge = relation_prefix_transcript
+            .sample_application_challenge_group(theta_challenge())
+            .expect("the row-code WHIR application challenge group samples");
+        assert_ne!(packed_fri_challenge, row_code_whir_challenge);
+        assert_ne!(
             complete_transcript.transcript_state_for_test(),
             relation_prefix_transcript.transcript_state_for_test()
         );
-
-        complete_transcript
-            .absorb_auxiliary_root(0, [0x22; 64])
-            .expect("the complete auxiliary root is absorbed");
-        relation_prefix_transcript
-            .absorb_auxiliary_root(0, [0x22; 64])
-            .expect("the relation-prefix auxiliary root is absorbed");
-        assert_eq!(
-            complete_transcript.transcript_state_for_test(),
-            relation_prefix_transcript.transcript_state_for_test()
-        );
-
-        assert_eq!(
-            complete_transcript
-                .sample_composition_challenge(0)
-                .expect("the complete composition challenge samples"),
-            relation_prefix_transcript
-                .sample_composition_challenge(0)
-                .expect("the relation-prefix composition challenge samples")
-        );
-        assert_eq!(
-            complete_transcript.transcript_state_for_test(),
-            relation_prefix_transcript.transcript_state_for_test()
-        );
-
-        complete_transcript
-            .absorb_quotient_root(0, [0x31; 64])
-            .expect("the complete quotient root is absorbed");
-        relation_prefix_transcript
-            .absorb_quotient_root(0, [0x31; 64])
-            .expect("the relation-prefix quotient root is absorbed");
-        assert_eq!(
-            complete_transcript.transcript_state_for_test(),
-            relation_prefix_transcript.transcript_state_for_test()
-        );
-
-        assert_eq!(
-            complete_transcript
-                .sample_out_of_domain_point(0, |_| false)
-                .expect("the complete out-of-domain point samples"),
-            relation_prefix_transcript
-                .sample_out_of_domain_point(0, |_| false)
-                .expect("the relation-prefix out-of-domain point samples")
-        );
-        assert_eq!(
-            complete_transcript.transcript_state_for_test(),
-            relation_prefix_transcript.transcript_state_for_test()
-        );
-
-        complete_transcript
-            .absorb_out_of_domain_evaluations(&[ProofChallengeExtensionElement::ONE])
-            .expect("the complete out-of-domain evaluations are absorbed");
-        relation_prefix_transcript
-            .absorb_out_of_domain_evaluations(&[ProofChallengeExtensionElement::ONE])
-            .expect("the relation-prefix out-of-domain evaluations are absorbed");
-        assert_eq!(
-            complete_transcript.transcript_state_for_test(),
-            relation_prefix_transcript.transcript_state_for_test()
-        );
-
-        complete_transcript
-            .absorb_opening_batch_mask_root([0x42; 64])
-            .expect("the complete mask root is absorbed");
-        relation_prefix_transcript
-            .absorb_opening_batch_mask_root([0x42; 64])
-            .expect("the relation-prefix mask root is absorbed");
-        assert_eq!(
-            complete_transcript.transcript_state_for_test(),
-            relation_prefix_transcript.transcript_state_for_test()
-        );
-        assert!(matches!(
-            relation_prefix_transcript
-                .clone()
-                .sample_opening_batch_challenge(0),
-            Err(TranscriptError::UnexpectedCommonProofChallenge)
-        ));
-        complete_transcript
-            .sample_opening_batch_challenge(0)
-            .expect("the complete transcript enters its opening tail");
-        relation_prefix_transcript
-            .into_secret_bearing_row_code_whir_transcript(&[ProofChallengeExtensionElement::ONE])
-            .expect("the relation-prefix transcript enters the row-code successor");
     }
 
     fn removed_theta_domain_polynomial(point: u64) -> u64 {
@@ -6078,7 +6041,7 @@ mod common_challenge_chain_tests {
     #[test]
     fn product_residue_sampler_binds_transcript_context() {
         let mut first = transcript();
-        let mut second = CanonicalProofTranscript::try_new(
+        let mut second = CanonicalProofTranscript::try_new_row_code_whir(
             1,
             [0x5a; 64],
             TEST_CONSTRUCTION_PLAN_IDENTITY_HASH,
@@ -6159,7 +6122,7 @@ mod common_challenge_chain_tests {
         assert_ne!(removed_theta_domain_polynomial(fixed_full_field_theta), 0);
 
         for (modulus_ordinal, modulus) in DATA_PRIMES.iter().copied().take(8).enumerate() {
-            let mut transcript = CanonicalProofTranscript::try_new(
+            let mut transcript = CanonicalProofTranscript::try_new_row_code_whir(
                 1,
                 [0x5b; 64],
                 TEST_CONSTRUCTION_PLAN_IDENTITY_HASH,
