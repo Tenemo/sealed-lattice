@@ -130,7 +130,7 @@ pub(crate) use fri::construct_opening_batch_mask;
 #[cfg(test)]
 pub(crate) use generation_state::common_proof_source_provider_is_live_during_phase;
 #[cfg(test)]
-pub(crate) use generation_state::generate_common_proof;
+pub(crate) use generation_state::generate_checked_fixture_common_proof;
 pub(crate) use generation_state::{
     CommonProofGenerationCheckpointBoundary, CommonProofGenerationPoll, CommonProofGenerationStage,
     CommonProofGenerationStateMachine,
@@ -191,8 +191,8 @@ pub(crate) use relation_columns::{
     CommonProofSourcePolynomialReplayIdentity, CommonProofSourcePolynomialRequest,
     CommonProofSourcePolynomialRequestContext, CommonProofSourceProviderMemoryAccounting,
     ProvidedCommonProofSourcePolynomial, apply_trace_mask, construct_reversed_relation_column,
-    integer_lift_derived_columns, maximum_auxiliary_synthesis_trace_vector_count,
-    proof_created_tree_roles_by_column, relation_column_replay_requirements,
+    maximum_auxiliary_synthesis_trace_vector_count, proof_created_tree_roles_by_column,
+    relation_column_replay_requirements, requested_pre_challenge_source_column_ordinals,
     sample_private_extension_polynomial,
 };
 

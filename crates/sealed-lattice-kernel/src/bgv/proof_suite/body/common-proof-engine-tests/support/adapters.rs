@@ -4,6 +4,8 @@ use super::*;
 #[test]
 fn wasm_family_adapters_derive_bindings_and_discard_unstarted_preparations_once() {
     let (prepared_generation, _) = prepared_generation_worker_fixture();
+    let expected_application_statement_schema_identifier =
+        prepared_generation.application_statement_schema_identifier();
     let expected_runtime_binding_hash = prepared_generation.runtime_binding_hash();
     let expected_generation_authorization_hash =
         prepared_generation.generation_authorization_hash();
@@ -21,6 +23,7 @@ fn wasm_family_adapters_derive_bindings_and_discard_unstarted_preparations_once(
     let mut described_generation_authorization_hash = [0_u8; 64];
     let mut described_lineage_identifier = [0_u8; 32];
     let mut described_checkpoint_lineage_identifier = [0_u8; 32];
+    let mut described_application_statement_schema_identifier = 0_u32;
     let mut status = u32::MAX;
     assert_eq!(
         unsafe {
@@ -30,6 +33,7 @@ fn wasm_family_adapters_derive_bindings_and_discard_unstarted_preparations_once(
                 described_generation_authorization_hash.as_mut_ptr(),
                 described_lineage_identifier.as_mut_ptr(),
                 described_checkpoint_lineage_identifier.as_mut_ptr(),
+                &mut described_application_statement_schema_identifier,
                 &mut status,
             )
         },
@@ -48,6 +52,11 @@ fn wasm_family_adapters_derive_bindings_and_discard_unstarted_preparations_once(
     assert_eq!(
         described_checkpoint_lineage_identifier,
         expected_checkpoint_lineage_identifier
+    );
+    assert_ne!(expected_application_statement_schema_identifier, 1);
+    assert_eq!(
+        described_application_statement_schema_identifier,
+        u32::from(expected_application_statement_schema_identifier)
     );
     let generation_handle = unsafe {
         super::super::runtime_ffi::sealed_lattice_common_proof_prepare_generation_family_adapter(
@@ -144,7 +153,7 @@ fn resume_family_adapter_authenticates_checkpoint_before_invoking_family_prepara
     let refused_callback_observation = Rc::clone(&refused_callback_count);
     let refused_adapter = super::super::runtime_ffi::CommonProofGenerationFamilyAdapter::resume(
         super::super::runtime_ffi::CommonProofGenerationFamilyAdapterDescription::new(
-            [0x11; 64], [0x22; 64], [0x33; 32],
+            0x1213, [0x11; 64], [0x22; 64], [0x33; 32],
         ),
         [0x44; 32],
         Hash512::from_bytes([0x55; 64]),
@@ -181,6 +190,8 @@ fn resume_family_adapter_authenticates_checkpoint_before_invoking_family_prepara
     let expected_runtime_binding_hash = prepared.runtime_binding_hash();
     let expected_generation_authorization_hash = prepared.generation_authorization_hash();
     let expected_lineage_identifier = prepared.proof_attempt_lineage_identifier();
+    let expected_application_statement_schema_identifier =
+        prepared.application_statement_schema_identifier();
     let checkpoint_lineage_identifier = prepared.checkpoint_lineage_identifier();
     let checkpoint_schedule_digest = prepared.checkpoint_schedule_digest();
 
@@ -189,6 +200,7 @@ fn resume_family_adapter_authenticates_checkpoint_before_invoking_family_prepara
     let wrong_binding_adapter =
         super::super::runtime_ffi::CommonProofGenerationFamilyAdapter::resume(
             super::super::runtime_ffi::CommonProofGenerationFamilyAdapterDescription::new(
+                expected_application_statement_schema_identifier,
                 expected_runtime_binding_hash,
                 expected_generation_authorization_hash,
                 expected_lineage_identifier,
@@ -263,6 +275,7 @@ fn resume_family_adapter_authenticates_checkpoint_before_invoking_family_prepara
         let mismatch_adapter =
             super::super::runtime_ffi::CommonProofGenerationFamilyAdapter::resume(
                 super::super::runtime_ffi::CommonProofGenerationFamilyAdapterDescription::new(
+                    expected_application_statement_schema_identifier,
                     adapter_runtime_binding_hash,
                     expected_generation_authorization_hash,
                     expected_lineage_identifier,
@@ -300,10 +313,59 @@ fn resume_family_adapter_authenticates_checkpoint_before_invoking_family_prepara
         );
     }
 
+    let schema_mismatch_callback_count = Rc::new(Cell::new(0_u32));
+    let schema_mismatch_callback_observation = Rc::clone(&schema_mismatch_callback_count);
+    let schema_mismatch_checkpoint_state = authenticated_checkpoint_state.clone();
+    let mismatched_application_statement_schema_identifier =
+        expected_application_statement_schema_identifier ^ 1;
+    let schema_mismatch_adapter =
+        super::super::runtime_ffi::CommonProofGenerationFamilyAdapter::resume(
+            super::super::runtime_ffi::CommonProofGenerationFamilyAdapterDescription::new(
+                mismatched_application_statement_schema_identifier,
+                expected_runtime_binding_hash,
+                expected_generation_authorization_hash,
+                expected_lineage_identifier,
+            ),
+            checkpoint_lineage_identifier,
+            checkpoint_schedule_digest,
+            Box::new(move |_continuation| {
+                schema_mismatch_callback_observation
+                    .set(schema_mismatch_callback_observation.get() + 1);
+                Ok(prepared_generation_worker_fixture_for_checkpoint(
+                    Some(&schema_mismatch_checkpoint_state),
+                    0,
+                )
+                .expect("the schema-mismatch fixture reconstructs the resumed attempt")
+                .0)
+            }),
+        );
+    let schema_mismatch_adapter_handle =
+        super::super::runtime_ffi::retain_common_proof_generation_family_adapter(
+            schema_mismatch_adapter,
+        )
+        .expect("the schema-mismatch resume adapter is retained");
+    status = u32::MAX;
+    let schema_mismatch_prepared_handle = unsafe {
+        super::super::runtime_ffi::sealed_lattice_common_proof_prepare_generation_family_adapter(
+            schema_mismatch_adapter_handle,
+            authenticated_checkpoint_state.as_ptr(),
+            authenticated_checkpoint_state.len(),
+            &mut status,
+        )
+    };
+    assert_eq!(schema_mismatch_prepared_handle, 0);
+    assert_ne!(status, 0);
+    assert_eq!(
+        schema_mismatch_callback_count.get(),
+        1,
+        "the reconstructed resumed preparation is rejected when its exact family differs from the adapter description"
+    );
+
     let callback_count = Rc::new(Cell::new(0_u32));
     let callback_observation = Rc::clone(&callback_count);
     let adapter = super::super::runtime_ffi::CommonProofGenerationFamilyAdapter::resume(
         super::super::runtime_ffi::CommonProofGenerationFamilyAdapterDescription::new(
+            expected_application_statement_schema_identifier,
             expected_runtime_binding_hash,
             expected_generation_authorization_hash,
             expected_lineage_identifier,

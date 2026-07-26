@@ -37,7 +37,8 @@ use tiny_keccak::keccakf;
 
 use super::{
     ChallengeField, DomainSeparatedShake256, ExtensionFieldChallenger, MERKLE_DIGEST_WORD_LENGTH,
-    NodeCompressor, SHAKE256_PROTOCOL_DOMAIN,
+    NodeCompressor, ROW_CODE_WHIR_AGGREGATE_LEAF_DOMAIN, ROW_CODE_WHIR_AGGREGATE_NODE_DOMAIN,
+    ROW_CODE_WHIR_SHAKE256_PROTOCOL_DOMAIN,
     plain_whir::{
         AggregateLayout, PlainAggregateCommitment, PlainAggregatePcs, PlainAggregateProof,
     },
@@ -45,8 +46,6 @@ use super::{
 
 type MerkleDigest = [u64; MERKLE_DIGEST_WORD_LENGTH];
 
-const MERKLE_LEAF_DOMAIN: &[u8] = b"aggregate-plain-pcs/merkle-leaf/v1";
-const MERKLE_NODE_DOMAIN: &[u8] = b"aggregate-plain-pcs/merkle-node/v1";
 const SHAKE256_STATE_WORD_LENGTH: usize = 25;
 const SHAKE256_RATE_BYTE_LENGTH: usize = 136;
 const SHAKE256_DELIMITER: u8 = 0x1f;
@@ -542,14 +541,18 @@ impl StreamingMatrixLeafHasher {
         absorb_shake_bytes(
             &mut base_state,
             &mut next_rate_byte,
-            SHAKE256_PROTOCOL_DOMAIN,
+            ROW_CODE_WHIR_SHAKE256_PROTOCOL_DOMAIN,
         );
         absorb_shake_bytes(
             &mut base_state,
             &mut next_rate_byte,
-            &(MERKLE_LEAF_DOMAIN.len() as u64).to_le_bytes(),
+            &(ROW_CODE_WHIR_AGGREGATE_LEAF_DOMAIN.len() as u64).to_le_bytes(),
         );
-        absorb_shake_bytes(&mut base_state, &mut next_rate_byte, MERKLE_LEAF_DOMAIN);
+        absorb_shake_bytes(
+            &mut base_state,
+            &mut next_rate_byte,
+            ROW_CODE_WHIR_AGGREGATE_LEAF_DOMAIN,
+        );
         Ok(Self {
             states: vec![base_state; row_count],
             next_rate_byte,
@@ -804,7 +807,7 @@ fn bounded_dft_rows(
 
 fn node_compressor() -> NodeCompressor {
     NodeCompressor::new(DomainSeparatedShake256 {
-        domain: MERKLE_NODE_DOMAIN,
+        domain: ROW_CODE_WHIR_AGGREGATE_NODE_DOMAIN,
     })
 }
 

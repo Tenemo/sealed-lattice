@@ -19,10 +19,10 @@ pub(super) fn build_runtime_claim_groups(
     variant: &RelationPlanVariant,
     catalog: &CompleteProofTreeCatalog,
     opening_points: &[ProofChallengeExtensionElement],
-    deep_evaluations: &[ProofChallengeExtensionElement],
+    out_of_domain_evaluations: &[ProofChallengeExtensionElement],
     batching_coefficients: &[ProofChallengeExtensionElement],
 ) -> Result<Vec<Vec<RuntimeOpeningClaim>>, CommonProofVerifierError> {
-    if deep_evaluations.len() != variant.ordered_opening_claims().len()
+    if out_of_domain_evaluations.len() != variant.ordered_opening_claims().len()
         || batching_coefficients.len() != variant.ordered_opening_claims().len()
     {
         return Err(CommonProofVerifierError::InvalidOpeningClaim);
@@ -104,7 +104,7 @@ pub(super) fn build_runtime_claim_groups(
                 column_position,
                 source_degree_bound_exclusive: claim.source_degree_bound_exclusive(),
                 opening_point,
-                opened_value: deep_evaluations[claim_ordinal],
+                opened_value: out_of_domain_evaluations[claim_ordinal],
                 batching_coefficient: batching_coefficients[claim_ordinal],
             });
     }

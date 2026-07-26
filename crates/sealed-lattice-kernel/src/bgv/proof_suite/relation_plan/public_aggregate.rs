@@ -105,10 +105,9 @@ impl PublicAggregateRelationGeometry {
             .opening_degree_bound_exclusive
             .checked_next_power_of_two()
             .ok_or(RelationPlanError::CountOverflow)?;
-        if next_degree_domain
-            .checked_mul(u64::from(context.evaluation_blowup_factor))
-            .ok_or(RelationPlanError::CountOverflow)?
-            != self.evaluation_domain_size
+        if !self
+            .evaluation_domain_size
+            .is_multiple_of(next_degree_domain)
         {
             return Err(RelationPlanError::InvalidDomain);
         }
@@ -432,13 +431,15 @@ fn compile_public_aggregate_variant(
         }
     }
 
-    let ordered_opening_points = (0..context.deep_point_count)
-        .map(|deep_point_ordinal| RelationOpeningPointDescriptor {
-            deep_point_ordinal,
-            trace_rotation_is_negative: false,
-            trace_rotation_magnitude: 0,
-            conjugate_index: 0,
-        })
+    let ordered_opening_points = (0..context.out_of_domain_point_count)
+        .map(
+            |out_of_domain_point_ordinal| RelationOpeningPointDescriptor {
+                out_of_domain_point_ordinal,
+                trace_rotation_is_negative: false,
+                trace_rotation_magnitude: 0,
+                conjugate_index: 0,
+            },
+        )
         .collect::<Vec<_>>();
     let mut ordered_opening_claims = Vec::new();
     for (tree_ordinal, tree) in ordered_trees.iter().enumerate() {
@@ -675,19 +676,16 @@ mod tests {
             base_field_modulus: crate::bgv::proof_suite::PROOF_BASE_FIELD_MODULUS,
             challenge_extension_degree: crate::bgv::proof_suite::PROOF_CHALLENGE_EXTENSION_DEGREE
                 as u16,
-            evaluation_blowup_factor: 2,
             evaluation_domain_generator: modular_power(
                 crate::bgv::proof_suite::PROOF_BASE_FIELD_MAXIMUM_TWO_ADIC_GENERATOR,
                 maximum_two_adic_order / evaluation_domain_size,
                 crate::bgv::proof_suite::PROOF_BASE_FIELD_MODULUS,
             ),
             evaluation_coset_offset: 7,
-            deep_point_count: 2,
+            out_of_domain_point_count: 2,
             quotient_component_count: 2,
             quotient_component_degree_bound_exclusive: 64,
-            fri_fold_count: 3,
-            final_polynomial_degree_bound_exclusive: 8,
-            unique_query_count: 8,
+            phase_column_query_coordinate_count: 8,
             non_native_theta_repetition_count: 2,
             non_native_alpha_repetition_count: 2,
             maximum_fiat_shamir_candidate_draws_per_output: 128,
@@ -822,7 +820,7 @@ mod tests {
     }
 
     #[test]
-    fn later_deep_candidate_rejects_a_cross_ordinal_translated_collision() {
+    fn later_out_of_domain_candidate_rejects_a_cross_ordinal_translated_collision() {
         let context = check_context();
         let plan = compile_collective_public_key_aggregate_relation_plan(
             &CollectivePublicKeyAggregatePlanInput {
@@ -835,13 +833,13 @@ mod tests {
         let mut variant = plan.variants()[0].clone();
         variant.ordered_opening_points = vec![
             RelationOpeningPointDescriptor {
-                deep_point_ordinal: 0,
+                out_of_domain_point_ordinal: 0,
                 trace_rotation_is_negative: false,
                 trace_rotation_magnitude: 0,
                 conjugate_index: 0,
             },
             RelationOpeningPointDescriptor {
-                deep_point_ordinal: 1,
+                out_of_domain_point_ordinal: 1,
                 trace_rotation_is_negative: false,
                 trace_rotation_magnitude: 0,
                 conjugate_index: 0,
@@ -865,7 +863,7 @@ mod tests {
                 let translated_candidate = prior_point.multiply_base(trace_generator_inverse);
                 (translated_candidate != prior_point
                     && variant
-                        .deep_point_candidate_is_forbidden(
+                        .out_of_domain_point_candidate_is_forbidden(
                             &context,
                             1,
                             translated_candidate,
@@ -880,7 +878,7 @@ mod tests {
         variant.ordered_opening_points[1].trace_rotation_magnitude = 1;
         assert!(
             variant
-                .deep_point_candidate_is_forbidden(
+                .out_of_domain_point_candidate_is_forbidden(
                     &context,
                     1,
                     translated_candidate,

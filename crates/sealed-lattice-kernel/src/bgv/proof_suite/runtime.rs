@@ -40,10 +40,10 @@ use super::{
     ProofExternalMemoryProtection, ProofExternalMemoryTransactionAdapterError,
     ProofExternalMemoryTransactionRecorder, ProofExternalMemoryTransactionReplay,
     ProofExternalMemoryTransactionRequest, ProofProfileError, RelationPlanCheckContext,
-    RelationPlanError, RelationProofTreeInput, ValidatedRelationPlanArtifact, VerifiedCommonProof,
+    RelationProofTreeInput, ValidatedRelationPlanArtifact, VerifiedCommonProof,
     VerifiedEvaluatorAuxiliaryRoot, VerifiedRelationColumnEvaluator,
     VerifiedRelationColumnEvaluatorMemoryAccounting, VerifiedStatementOwnedTree,
-    verified_application_statement_hash,
+    row_code_whir::RowCodeWhirConstructionPlan, verified_application_statement_hash,
 };
 #[cfg(test)]
 use super::{SelectedApplicationStatementContext, decode_selected_vss_share_linkage_statement};
@@ -61,7 +61,7 @@ const CHECKPOINT_CUMULATIVE_HASH_DOMAIN: &str =
 const CHECKPOINT_SCHEDULE_HASH_DOMAIN: &str = "sealed-lattice/common-proof/checkpoint-schedule/v1";
 const CHECKPOINT_SCHEDULE_VERSION: u16 = 1;
 // The first four durable boundaries precede application-column derivation,
-// quotient construction, DEEP openings, and FRI preparation. Tag five is
+// quotient construction, out-of-domain openings, and FRI preparation. Tag five is
 // repeated for every completed non-terminal FRI fold. This is the entire
 // ordered durable-boundary alphabet exposed by the generation state machine.
 const CHECKPOINT_BOUNDARY_PHASE_TAGS: [u8; 5] = [1, 2, 3, 4, 5];
@@ -227,15 +227,18 @@ impl CommonProofRuntimeLimits {
 }
 
 /// Opaque checked relation-plan capability. It can only be minted from a
-/// compiled plan that passes the profile and relation checks for its exact
-/// context and selected variant.
+/// compiled plan that passes the profile, relation, and construction checks
+/// for its exact context and variant. The production constructor additionally
+/// requires the globally selected family context.
 pub(crate) struct CommonProofRelationPlanCapability {
-    relation_plan: CompiledRelationPlan,
+    validated_relation_plan: ValidatedRelationPlanArtifact,
     relation_context: RelationPlanCheckContext,
     schedule_position: Option<u32>,
     top_count: Option<u16>,
     relation_plan_hash: [u8; HASH_BYTE_LENGTH],
     relation_plan_variant_hash: [u8; HASH_BYTE_LENGTH],
+    row_code_whir_construction_plan: RowCodeWhirConstructionPlan,
+    row_code_whir_construction_plan_identity_hash: [u8; HASH_BYTE_LENGTH],
 }
 
 impl CommonProofRelationPlanCapability {
@@ -245,25 +248,73 @@ impl CommonProofRelationPlanCapability {
         schedule_position: Option<u32>,
         top_count: Option<u16>,
     ) -> Result<Self, CommonProofRelationPlanCapabilityError> {
-        let _validated =
+        let validated =
             ValidatedRelationPlanArtifact::from_compiled_plan(relation_plan, relation_context)
                 .map_err(CommonProofRelationPlanCapabilityError::Profile)?;
-        let variant = relation_plan
-            .select_variant(schedule_position, top_count)
-            .map_err(CommonProofRelationPlanCapabilityError::Relation)?;
-        let relation_plan_variant_hash = variant
-            .canonical_hash()
-            .map_err(CommonProofRelationPlanCapabilityError::Relation)?;
-        let relation_plan_hash = relation_plan
-            .canonical_hash()
-            .map_err(CommonProofRelationPlanCapabilityError::Relation)?;
+        let row_code_whir_construction_plan = RowCodeWhirConstructionPlan::for_selected_variant(
+            &validated,
+            schedule_position,
+            top_count,
+        )
+        .map_err(|_| CommonProofRelationPlanCapabilityError::RowCodeWhirConstructionPlan)?;
+        Self::from_validated_plan(
+            validated,
+            schedule_position,
+            top_count,
+            row_code_whir_construction_plan,
+        )
+    }
+
+    #[cfg(test)]
+    pub(crate) fn from_checked_fixture_plan(
+        relation_plan: &CompiledRelationPlan,
+        relation_context: &RelationPlanCheckContext,
+        schedule_position: Option<u32>,
+        top_count: Option<u16>,
+    ) -> Result<Self, CommonProofRelationPlanCapabilityError> {
+        let validated = ValidatedRelationPlanArtifact::from_checked_fixture_plan(
+            relation_plan,
+            relation_context,
+        )
+        .map_err(CommonProofRelationPlanCapabilityError::Profile)?;
+        let row_code_whir_construction_plan =
+            RowCodeWhirConstructionPlan::for_checked_fixture_variant(
+                &validated,
+                relation_context,
+                schedule_position,
+                top_count,
+            )
+            .map_err(|_| CommonProofRelationPlanCapabilityError::RowCodeWhirConstructionPlan)?;
+        Self::from_validated_plan(
+            validated,
+            schedule_position,
+            top_count,
+            row_code_whir_construction_plan,
+        )
+    }
+
+    fn from_validated_plan(
+        validated_relation_plan: ValidatedRelationPlanArtifact,
+        schedule_position: Option<u32>,
+        top_count: Option<u16>,
+        row_code_whir_construction_plan: RowCodeWhirConstructionPlan,
+    ) -> Result<Self, CommonProofRelationPlanCapabilityError> {
+        let relation_plan_hash = row_code_whir_construction_plan.relation_plan_hash();
+        let relation_plan_variant_hash =
+            row_code_whir_construction_plan.relation_plan_variant_hash();
+        let row_code_whir_construction_plan_identity_hash = row_code_whir_construction_plan
+            .canonical_identity_hash()
+            .map_err(|_| CommonProofRelationPlanCapabilityError::RowCodeWhirConstructionPlan)?;
+        let relation_context = validated_relation_plan.checked_context().clone();
         Ok(Self {
-            relation_plan: relation_plan.clone(),
-            relation_context: relation_context.clone(),
+            validated_relation_plan,
+            relation_context,
             schedule_position,
             top_count,
             relation_plan_hash,
             relation_plan_variant_hash,
+            row_code_whir_construction_plan,
+            row_code_whir_construction_plan_identity_hash,
         })
     }
 
@@ -275,14 +326,34 @@ impl CommonProofRelationPlanCapability {
         self.relation_plan_variant_hash
     }
 
+    pub(crate) fn row_code_whir_construction_plan_identity_hash(
+        &self,
+    ) -> Result<[u8; HASH_BYTE_LENGTH], CommonProofRuntimeError> {
+        Ok(self.row_code_whir_construction_plan_identity_hash)
+    }
+
+    pub(in crate::bgv::proof_suite) const fn row_code_whir_construction_plan(
+        &self,
+    ) -> &RowCodeWhirConstructionPlan {
+        &self.row_code_whir_construction_plan
+    }
+
     pub(crate) const fn application_statement_schema_identifier(&self) -> u16 {
-        self.relation_plan.application_statement_schema_identifier()
+        self.validated_relation_plan
+            .application_statement_schema_identifier()
+    }
+
+    pub(crate) fn compiled_plan(&self) -> &CompiledRelationPlan {
+        self.validated_relation_plan.compiled_plan()
     }
 
     pub(crate) fn proof_query_count(&self) -> Result<u32, CommonProofRuntimeError> {
-        self.relation_plan
+        self.validated_relation_plan
+            .compiled_plan()
             .select_variant(self.schedule_position, self.top_count)
-            .and_then(|variant| variant.common_proof_transcript_schedule(&self.relation_context))
+            .and_then(|variant| {
+                super::packed_fri_transcript_schedule(variant, &self.relation_context)
+            })
             .map(|schedule| schedule.unique_query_count())
             .map_err(|_| CommonProofRuntimeError::InvalidPlanCapability)
     }
@@ -296,12 +367,17 @@ impl CommonProofRelationPlanCapability {
         limits: CommonProofRuntimeLimits,
     ) -> Result<Hash512, CommonProofRuntimeError> {
         let schedule = self
-            .relation_plan
+            .validated_relation_plan
+            .compiled_plan()
             .select_variant(self.schedule_position, self.top_count)
-            .and_then(|variant| variant.common_proof_transcript_schedule(&self.relation_context))
+            .and_then(|variant| {
+                super::packed_fri_transcript_schedule(variant, &self.relation_context)
+            })
             .map_err(|_| CommonProofRuntimeError::InvalidPlanCapability)?;
         let proof_byte_length = u64::try_from(limits.proof_byte_length())
             .map_err(|_| CommonProofRuntimeError::InvalidLimits)?;
+        let construction_plan_identity_hash =
+            self.row_code_whir_construction_plan_identity_hash()?;
         let non_terminal_fri_fold_count = schedule.fri_fold_count().saturating_sub(1);
         let durable_boundary_count = 4_u32
             .checked_add(u32::from(non_terminal_fri_fold_count))
@@ -313,6 +389,7 @@ impl CommonProofRelationPlanCapability {
                 &COMMON_PROOF_CHECKPOINT_STATE_FORMAT_IDENTIFIER.to_le_bytes(),
                 &self.relation_plan_hash,
                 &self.relation_plan_variant_hash,
+                &construction_plan_identity_hash,
                 &proof_byte_length.to_le_bytes(),
                 &limits.external_memory_chunk_byte_length().to_le_bytes(),
                 &limits.prefetched_query_byte_length().to_le_bytes(),
@@ -338,7 +415,7 @@ impl CommonProofRelationPlanCapability {
             protocol_version,
             suite_identifier,
             canonical_application_statement_bytes,
-            relation_plan: &self.relation_plan,
+            relation_plan: self.validated_relation_plan.compiled_plan(),
             relation_context: &self.relation_context,
             schedule_position: self.schedule_position,
             top_count: self.top_count,
@@ -349,12 +426,16 @@ impl CommonProofRelationPlanCapability {
             maximum_prefetched_query_byte_length: limits.prefetched_query_byte_length(),
         }
     }
+
+    pub(crate) const fn validated_relation_plan_artifact(&self) -> &ValidatedRelationPlanArtifact {
+        &self.validated_relation_plan
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum CommonProofRelationPlanCapabilityError {
     Profile(ProofProfileError),
-    Relation(RelationPlanError),
+    RowCodeWhirConstructionPlan,
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -549,10 +630,7 @@ impl VerifiedCommonProofStatementSource {
     ) -> Result<Self, CommonProofRuntimeError> {
         let schema_identifier =
             ProofApplicationSlotCeilings::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER;
-        if relation_plan
-            .relation_plan
-            .application_statement_schema_identifier()
-            != schema_identifier
+        if relation_plan.application_statement_schema_identifier() != schema_identifier
             || relation_plan.schedule_position.is_some()
             || relation_plan.top_count.is_some()
         {
@@ -792,10 +870,7 @@ impl VerifiedCommonProofStatementSource {
     pub(crate) fn selected_relation_variant(
         &self,
     ) -> Result<&super::RelationPlanVariant, CommonProofRuntimeError> {
-        if self
-            .relation_plan
-            .relation_plan
-            .application_statement_schema_identifier()
+        if self.relation_plan.application_statement_schema_identifier()
             != self
                 .application_source_authority
                 .application_statement_schema_identifier()
@@ -803,7 +878,7 @@ impl VerifiedCommonProofStatementSource {
             return Err(CommonProofRuntimeError::InvalidPlanCapability);
         }
         self.relation_plan
-            .relation_plan
+            .compiled_plan()
             .select_variant(
                 self.relation_plan.schedule_position,
                 self.relation_plan.top_count,
@@ -921,6 +996,19 @@ impl CommonProofVerificationStatementSource {
             Self::Exact(source) => source.limits,
             #[cfg(test)]
             Self::TestFixture(fixture) => fixture.limits,
+        }
+    }
+
+    pub(super) fn new_verification_state_machine(
+        &self,
+        input: PollableCommonProofVerificationInput<'_>,
+    ) -> Result<CommonProofVerificationStateMachine, CommonProofVerifierError> {
+        match self {
+            Self::Exact(_) => CommonProofVerificationStateMachine::new(input),
+            #[cfg(test)]
+            Self::TestFixture(_) => {
+                CommonProofVerificationStateMachine::new_for_checked_fixture(input)
+            }
         }
     }
 

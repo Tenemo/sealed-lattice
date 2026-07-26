@@ -3210,7 +3210,7 @@ fn invert_extension_elements_in_place(
 
 /// Verifier-sequence adapter rebuilt only from authenticated setup and ballot
 /// ciphertext material. One coefficient polynomial at a time is retained for
-/// authenticated DEEP-point evaluation. Deterministic encoder sequences use a
+/// authenticated out-of-domain-point evaluation. Deterministic encoder sequences use a
 /// compact sparse subgroup interpolation cache and are never materialized as
 /// full columns or committed in a proof tree.
 pub(crate) struct BallotValidityVerifiedColumnEvaluator {

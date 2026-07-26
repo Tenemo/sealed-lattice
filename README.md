@@ -53,7 +53,12 @@ Not yet:
 - The currently integrated FRI proof representation is not feasible at the
   target width. Its selected streaming-interleaved row-code replacement with an
   explicit-point WHIR opening has promising research evidence, but is not yet
-  integrated into the production kernel or cryptographically qualified.
+  integrated into the production kernel or cryptographically qualified. The
+  current test-only bounded prover repeats full transforms across its hashing
+  stripes and has no production browser external-memory path. Its available
+  post-quantum soundness argument models an ideal quantum random oracle; no
+  quantitatively usable result currently instantiates that oracle with fixed
+  SHAKE256 at the candidate query budget.
 - No exact `n = 10` suite is frozen, no complete accepted vote runs end to end,
   and ballot, evaluator, and target-release operations are not public APIs.
 - No physical-phone profile is qualified. Desktop-browser, Node.js, native, and

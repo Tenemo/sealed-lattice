@@ -296,19 +296,16 @@ pub(super) mod tests {
             base_field_modulus: PROOF_BASE_FIELD_MODULUS,
             challenge_extension_degree: crate::bgv::proof_suite::PROOF_CHALLENGE_EXTENSION_DEGREE
                 as u16,
-            evaluation_blowup_factor: 2,
             evaluation_domain_generator: modular_power(
                 PROOF_BASE_FIELD_MAXIMUM_TWO_ADIC_GENERATOR,
                 maximum_two_adic_order / TEST_EVALUATION_DOMAIN_SIZE,
                 PROOF_BASE_FIELD_MODULUS,
             ),
             evaluation_coset_offset: 7,
-            deep_point_count: 1,
+            out_of_domain_point_count: 1,
             quotient_component_count: 4,
             quotient_component_degree_bound_exclusive: 1_024,
-            fri_fold_count: 9,
-            final_polynomial_degree_bound_exclusive: 8,
-            unique_query_count: 8,
+            phase_column_query_coordinate_count: 8,
             non_native_theta_repetition_count: 1,
             non_native_alpha_repetition_count: 1,
             maximum_fiat_shamir_candidate_draws_per_output: 128,
@@ -335,7 +332,7 @@ pub(super) mod tests {
     ) -> Vec<RelationApplicationChallengeAssignment> {
         let mut seen_coordinates = std::collections::BTreeSet::new();
         variant
-            .derived_challenge_catalog(context)
+            .derived_relation_prefix_challenge_catalog(context)
             .expect("derived challenge catalog")
             .into_iter()
             .filter_map(|descriptor| {

@@ -57,6 +57,7 @@ pub(crate) enum CommonProofGenerationError<StorageError, CoinError, SinkError> {
     Prover(CommonProofProverError),
     Profile(ProofProfileError),
     Relation(RelationPlanError),
+    RowCodeWhirConstructionPlan,
     Body(ProofBodyError),
     Transcript(TranscriptError),
     StoragePlan(ProofExternalMemoryError),
@@ -82,6 +83,9 @@ where
             Self::Prover(error) => write!(formatter, "common proof prover failed: {error:?}"),
             Self::Profile(error) => write!(formatter, "common proof profile failed: {error:?}"),
             Self::Relation(error) => write!(formatter, "common proof relation failed: {error:?}"),
+            Self::RowCodeWhirConstructionPlan => {
+                write!(formatter, "common proof construction plan failed")
+            }
             Self::Body(error) => write!(formatter, "common proof body failed: {error:?}"),
             Self::Transcript(error) => {
                 write!(formatter, "common proof transcript failed: {error:?}")
@@ -2197,12 +2201,12 @@ fn derive_generated_common_proof_storage_geometry(
     .map_err(|_| {
         GeneratedCommonProofStoragePlanError::Prover(CommonProofProverError::CountOverflow)
     })?;
-    let deep_opening_step = first_post_auxiliary_tree_step
+    let out_of_domain_opening_step = first_post_auxiliary_tree_step
         .checked_add(quotient_component_tree_count)
         .ok_or(GeneratedCommonProofStoragePlanError::Prover(
             CommonProofProverError::CountOverflow,
         ))?;
-    let initial_fri_step = deep_opening_step
+    let initial_fri_step = out_of_domain_opening_step
         .checked_add(opening_mask_tree_count)
         .ok_or(GeneratedCommonProofStoragePlanError::Prover(
             CommonProofProverError::CountOverflow,
@@ -2653,7 +2657,7 @@ fn derive_generated_common_proof_storage_geometry(
                 &mut replay_read_requirements,
                 key,
                 1,
-                deep_opening_step,
+                out_of_domain_opening_step,
             )
             .map_err(GeneratedCommonProofStoragePlanError::Prover)?;
             include_common_proof_replay_reads(
@@ -2665,14 +2669,14 @@ fn derive_generated_common_proof_storage_geometry(
             .map_err(GeneratedCommonProofStoragePlanError::Prover)?;
         }
         if transcript_schedule.privacy_mode() == CommonProofPrivacyMode::SecretBearing {
-            // Besides its ordinary DEEP and initial-FRI opening-claim reads,
+            // Besides its ordinary out-of-domain and initial-FRI opening-claim reads,
             // the secret opening-batch mask is replayed once to materialize
             // its tree and once to seed the initial FRI polynomial.
             include_common_proof_replay_reads(
                 &mut replay_read_requirements,
                 CommonProofReplayPolynomialKey::OpeningBatchMask,
                 1,
-                deep_opening_step,
+                out_of_domain_opening_step,
             )
             .map_err(GeneratedCommonProofStoragePlanError::Prover)?;
             include_common_proof_replay_reads(
@@ -3595,6 +3599,7 @@ pub(crate) enum CommonProofGenerationInitializationError {
     Prover(CommonProofProverError),
     Profile(ProofProfileError),
     Relation(RelationPlanError),
+    RowCodeWhirConstructionPlan,
     Body(ProofBodyError),
     Transcript(TranscriptError),
     StoragePlan(ProofExternalMemoryError),
@@ -4553,7 +4558,7 @@ fn resident_infrastructure_payload_accounting(
 /// schedule. Every potentially domain-sized state-machine field is assigned to
 /// a phase: one current relation polynomial, one replay polynomial,
 /// descriptor-local auxiliary trace rows, quotient and FRI vectors,
-/// DEEP/opening metadata, terminal and query vectors, bounded external
+/// out-of-domain/opening metadata, terminal and query vectors, bounded external
 /// materialization/transform/write working sets, query prefetch, output
 /// staging, and the acknowledged stream window. Complete Merkle levels and
 /// persisted polynomial vectors are external; no pre- or post-challenge
@@ -4861,10 +4866,10 @@ fn derive_common_proof_resident_memory_plan(
         )?,
         extension_value_byte_length,
     )?;
-    let deep_evaluation_byte_length =
+    let out_of_domain_evaluation_byte_length =
         checked_resident_multiply(opening_claim_count, extension_value_byte_length)?;
     let terminal_coefficient_byte_length = checked_resident_multiply(
-        u64::from(relation_context.final_polynomial_degree_bound_exclusive),
+        u64::from(transcript_schedule.terminal_coefficient_count()),
         extension_value_byte_length,
     )?;
     let query_representative_byte_length = checked_resident_multiply(
@@ -5039,7 +5044,7 @@ fn derive_common_proof_resident_memory_plan(
                 replay_polynomial_byte_length:
                     retained_setup_polynomial_root_pass_catalog_byte_length,
                 primary_vector_byte_length: evaluation_extension_vector_byte_length,
-                claim_and_query_metadata_byte_length: deep_evaluation_byte_length,
+                claim_and_query_metadata_byte_length: out_of_domain_evaluation_byte_length,
                 external_working_set_byte_length: maximum_extension_merkle_working_set_byte_length,
                 ..CommonProofResidentMemoryPhaseInput::default()
             },

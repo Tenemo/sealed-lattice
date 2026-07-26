@@ -219,7 +219,7 @@ pub(crate) fn write_common_proof_prefix<Sink>(
     canonical_header_bytes: &[u8],
     catalog: &CompleteProofTreeCatalog,
     tree_roots: &[[u8; HASH_BYTE_LENGTH]],
-    deep_evaluations: &[ProofChallengeExtensionElement],
+    out_of_domain_evaluations: &[ProofChallengeExtensionElement],
     terminal_coefficients: &[ProofChallengeExtensionElement],
     transcript_schedule: &CommonProofTranscriptSchedule,
 ) -> Result<(), CommonProofEncodingError<Sink::Error, core::convert::Infallible>>
@@ -231,7 +231,7 @@ where
             .map_err(|_| CommonProofEncodingError::Prover(CommonProofProverError::CountOverflow))?;
     if canonical_header_bytes.is_empty()
         || tree_roots.len() != catalog.entries().len()
-        || deep_evaluations.len() != expected_opening_claim_count
+        || out_of_domain_evaluations.len() != expected_opening_claim_count
         || terminal_coefficients.len()
             != usize::try_from(transcript_schedule.terminal_coefficient_count()).map_err(|_| {
                 CommonProofEncodingError::Prover(CommonProofProverError::CountOverflow)
@@ -264,7 +264,7 @@ where
     write_roots_for_phase(sink, catalog, tree_roots, |source| {
         matches!(source, ProofTreeCatalogSource::QuotientComponent { .. })
     })?;
-    write_extension_list(sink, deep_evaluations)?;
+    write_extension_list(sink, out_of_domain_evaluations)?;
     write_roots_for_phase(sink, catalog, tree_roots, |source| {
         source == ProofTreeCatalogSource::OpeningBatchMask
     })?;

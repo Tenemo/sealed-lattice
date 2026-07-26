@@ -116,7 +116,7 @@ pub(super) fn add_replay_polynomial_to_initial_fri(
     claim: &RelationOpeningClaimDescriptor,
     polynomial: CommonProofSourcePolynomial,
     opening_point: ProofChallengeExtensionElement,
-    deep_evaluation: ProofChallengeExtensionElement,
+    out_of_domain_evaluation: ProofChallengeExtensionElement,
     batching_coefficient: ProofChallengeExtensionElement,
 ) -> Result<(), CommonProofProverError> {
     let source_degree_bound_exclusive = usize::try_from(claim.source_degree_bound_exclusive())
@@ -127,7 +127,7 @@ pub(super) fn add_replay_polynomial_to_initial_fri(
         source_degree_bound_exclusive,
         polynomial,
         opening_point,
-        deep_evaluation,
+        out_of_domain_evaluation,
         batching_coefficient,
     )
 }
@@ -138,7 +138,7 @@ fn add_polynomial_to_initial_fri(
     source_degree_bound_exclusive: usize,
     polynomial: CommonProofSourcePolynomial,
     opening_point: ProofChallengeExtensionElement,
-    deep_evaluation: ProofChallengeExtensionElement,
+    out_of_domain_evaluation: ProofChallengeExtensionElement,
     batching_coefficient: ProofChallengeExtensionElement,
 ) -> Result<(), CommonProofProverError> {
     let mut numerator = into_extension_polynomial(polynomial)?;
@@ -149,7 +149,7 @@ fn add_polynomial_to_initial_fri(
     {
         return Err(CommonProofProverError::InvalidOpening);
     }
-    numerator[0] = numerator[0].subtract(deep_evaluation);
+    numerator[0] = numerator[0].subtract(out_of_domain_evaluation);
     let remainder = divide_extension_polynomial_by_linear_in_place(&mut numerator, opening_point)?;
     if !remainder.is_zero() {
         return Err(CommonProofProverError::InvalidOpening);

@@ -38,6 +38,7 @@ import {
     type ClosedWorkerCommonProofGenerationFamilyAdapterDescription,
     type ClosedWorkerCommonProofVerificationFamilyAdapterDescription,
     type CommonProofAuthenticatedSourceRangeRequest,
+    type CommonProofGenerationCheckpointIdentityExpectation,
 } from './kernel-boundaries.js';
 
 /**
@@ -186,6 +187,7 @@ export type ClosedWorkerCommonProofVerificationFamilyAdapter = Readonly<{
 
 type ClosedWorkerCommonProofGenerationFamilyAdapterRecord = {
     adapterHandle: number;
+    applicationStatementSchemaIdentifier: number;
     checkpointLineageIdentifier: Uint8Array<ArrayBuffer>;
     commonProofGenerationAuthorizationHash: Uint8Array<ArrayBuffer>;
     commonProofRuntimeBindingHash: Uint8Array<ArrayBuffer>;
@@ -814,6 +816,8 @@ export const openClosedWorkerCommonProofGenerationFamilyAdapter = (
             familyAdapter,
             {
                 adapterHandle,
+                applicationStatementSchemaIdentifier:
+                    description.applicationStatementSchemaIdentifier,
                 checkpointLineageIdentifier:
                     description.checkpointLineageIdentifier,
                 commonProofGenerationAuthorizationHash:
@@ -905,6 +909,8 @@ export const describeClosedWorkerCommonProofGenerationFamilyAdapter = (
         familyAdapter,
     );
     return Object.freeze({
+        applicationStatementSchemaIdentifier:
+            record.applicationStatementSchemaIdentifier,
         checkpointLineageIdentifier: record.checkpointLineageIdentifier.slice(),
         commonProofGenerationAuthorizationHash:
             record.commonProofGenerationAuthorizationHash.slice(),
@@ -1088,6 +1094,14 @@ export const runClosedWorkerCommonProofGenerationFamilyAdapterRetainingGenerated
                     outputStore,
                     ownedOptions,
                     authenticatedCheckpointState,
+                    Object.freeze({
+                        applicationStatementSchemaIdentifier:
+                            record.applicationStatementSchemaIdentifier,
+                        proofAttemptLineageIdentifier:
+                            record.proofAttemptLineageIdentifier,
+                        stableAttemptBindingHash:
+                            record.commonProofRuntimeBindingHash,
+                    }),
                 );
             return generatedCapability;
         } catch (error) {
@@ -1321,6 +1335,7 @@ export const runPreparedCommonProofGenerationWorker = async (
         outputStore,
         options,
         undefined,
+        undefined,
     );
 
 const runPreparedCommonProofGenerationWorkerWithAuthenticatedState = async (
@@ -1330,6 +1345,9 @@ const runPreparedCommonProofGenerationWorkerWithAuthenticatedState = async (
     outputStore: CommonProofCanonicalOutputStore,
     options: CommonProofGenerationWorkerOptions,
     previouslyAuthenticatedCheckpointState: Uint8Array<ArrayBuffer> | undefined,
+    expectedCheckpointIdentity:
+        | CommonProofGenerationCheckpointIdentityExpectation
+        | undefined,
 ): Promise<ClosedWorkerGeneratedCommonProofCapability> => {
     let kernel: CommonProofGenerationKernelBoundary | undefined;
     let operationHandle: number | undefined;
@@ -1383,8 +1401,10 @@ const runPreparedCommonProofGenerationWorkerWithAuthenticatedState = async (
                                 'The common-proof kernel exposed a checkpoint before deterministic prefix replay completed.',
                             );
                         }
-                        const checkpoint =
-                            kernel.copyCheckpoint(liveOperationHandle);
+                        const checkpoint = kernel.copyCheckpoint(
+                            liveOperationHandle,
+                            expectedCheckpointIdentity,
+                        );
                         try {
                             if (checkpointCustody === undefined) {
                                 kernel.discardCheckpoint(liveOperationHandle);

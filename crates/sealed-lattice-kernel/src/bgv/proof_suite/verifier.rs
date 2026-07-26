@@ -25,9 +25,9 @@ use super::relation_plan::{
 };
 use super::{
     CommonProofPrivacyMode, CommonProofQueryOpeningAbsorber, CommonProofTranscript,
-    CompiledRelationPlan, CompleteProofTreeCatalog, DecodedProofBodyPrefix,
-    DeepCompositionVerificationInput, OpenedFriLayerPair, ProofBodyError, ProofBodyLayout,
-    ProofByteSource, ProofDecodeError, ProofEvaluationDomain, ProofFriError, ProofFriQueryState,
+    CompiledRelationPlan, CompleteProofTreeCatalog, DecodedProofBodyPrefix, OpenedFriLayerPair,
+    OutOfDomainCompositionVerificationInput, ProofBodyError, ProofBodyLayout, ProofByteSource,
+    ProofDecodeError, ProofEvaluationDomain, ProofFriError, ProofFriQueryState,
     ProofFriQueryVerifier, ProofLeafVisibility, ProofOpeningClaimEvaluation, ProofOpeningError,
     ProofPolynomialError, ProofProfileError, ProofTreeCatalogInput, ProofTreeCatalogSource,
     ProofTreeOpening, ProofTreeRole, ProofTreeValue, RelationApplicationChallengeAssignment,
@@ -61,6 +61,7 @@ pub(crate) enum CommonProofVerifierError {
     MissingVerifiedColumnValue,
     Profile(ProofProfileError),
     Relation(RelationPlanError),
+    RowCodeWhirConstructionPlan,
     Body(ProofBodyError),
     Transcript(TranscriptError),
     Polynomial(ProofPolynomialError),
@@ -116,7 +117,7 @@ mod verification_state;
 mod verified_values;
 
 #[cfg(test)]
-pub(crate) use core_verification::verify_common_proof;
+pub(crate) use core_verification::verify_checked_fixture_common_proof;
 pub(crate) use core_verification::{
     VerifiedRelationColumnEvaluator, VerifiedRelationColumnEvaluatorMemoryAccounting,
     verified_application_statement_hash,
@@ -138,7 +139,7 @@ pub(crate) use verified_values::{
 use core_verification::{
     absorb_relation_roots, catalog_root, decode_application_statement, derive_relation_tree_inputs,
     validate_evaluator_auxiliary_root_linkage, verified_proof_header_hash,
-    verify_deep_composition_with_verified_sequences,
+    verify_out_of_domain_composition_with_verified_sequences,
 };
 use query_verification::{QueryVerificationWorkspace, build_runtime_claim_groups};
 #[cfg(test)]

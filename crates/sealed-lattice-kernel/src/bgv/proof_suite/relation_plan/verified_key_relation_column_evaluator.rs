@@ -50,13 +50,11 @@ impl VerifiedKeyRelationColumnEvaluator {
         verified_public_randomness: &VerifiedPublicRandomness,
         validated_relation_plan: &ValidatedRelationPlanArtifact,
         selected_relation_plan_variant: &RelationPlanVariant,
-        relation_context: &RelationPlanCheckContext,
     ) -> Result<Self, RefusalReason> {
         Self::from_recomputed_public_setup_seed(
             verified_public_randomness.public_setup_seed().into_bytes(),
             validated_relation_plan,
             selected_relation_plan_variant,
-            relation_context,
         )
     }
 
@@ -68,13 +66,11 @@ impl VerifiedKeyRelationColumnEvaluator {
         public_setup_seed: [u8; 64],
         validated_relation_plan: &ValidatedRelationPlanArtifact,
         selected_relation_plan_variant: &RelationPlanVariant,
-        relation_context: &RelationPlanCheckContext,
     ) -> Result<Self, RefusalReason> {
         Self::from_public_setup_seed(
             public_setup_seed,
             validated_relation_plan,
             selected_relation_plan_variant,
-            relation_context,
         )
     }
 
@@ -82,17 +78,8 @@ impl VerifiedKeyRelationColumnEvaluator {
         public_setup_seed: [u8; 64],
         validated_relation_plan: &ValidatedRelationPlanArtifact,
         selected_relation_plan_variant: &RelationPlanVariant,
-        relation_context: &RelationPlanCheckContext,
     ) -> Result<Self, RefusalReason> {
-        let revalidated_relation_plan = ValidatedRelationPlanArtifact::from_compiled_plan(
-            validated_relation_plan.compiled_plan(),
-            relation_context,
-        )
-        .map_err(|_| RefusalReason::InvalidArithmeticRelation)?;
-        if &revalidated_relation_plan != validated_relation_plan {
-            return Err(RefusalReason::InvalidArithmeticRelation);
-        }
-
+        let relation_context = validated_relation_plan.checked_context();
         let application_statement_schema_identifier =
             validated_relation_plan.application_statement_schema_identifier();
         if !is_supported_key_relation_family(application_statement_schema_identifier) {

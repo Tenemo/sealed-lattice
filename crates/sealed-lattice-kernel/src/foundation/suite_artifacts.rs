@@ -29,8 +29,8 @@ use crate::bgv::{
         POLYNOMIAL_DEGREE, plaintext_extension_lane_root, validate_supported_algebraic_parameters,
     },
     proof_suite::{
-        PROOF_EVALUATION_BLOWUP_FACTOR, ProofProfileError, selected_committed_material_profile,
-        selected_proof_profile_set, selected_target_decryption_flooding_bound,
+        ProofProfileError, selected_committed_material_profile, selected_proof_profile_set,
+        selected_target_decryption_flooding_bound,
     },
     setup::{SETUP_COMMITMENT_MODULE_RANK, SETUP_COMMITMENT_MODULUS_LIMB_INDICES},
 };
@@ -286,7 +286,6 @@ fn require_pair_character_ballot_codec_layout() -> SchemaResult<()> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct CommittedMaterialFieldProfile {
     proof_field_index: u16,
-    evaluation_blowup_factor: u32,
     evaluation_coset_offset: u64,
     masking_polynomial_maximum_degree: u32,
     committed_polynomial_degree_bound_exclusive: u32,
@@ -297,7 +296,6 @@ impl CommittedMaterialFieldProfile {
         let profile = selected_committed_material_profile().map_err(proof_profile_error)?;
         let selected = Self {
             proof_field_index: COMMITTED_MATERIAL_PROOF_FIELD_INDEX,
-            evaluation_blowup_factor: PROOF_EVALUATION_BLOWUP_FACTOR,
             evaluation_coset_offset: profile.evaluation_coset_offset(),
             masking_polynomial_maximum_degree: u32::try_from(
                 profile.masking_polynomial_maximum_degree(),
@@ -314,13 +312,12 @@ impl CommittedMaterialFieldProfile {
 
     #[cfg(test)]
     fn from_tuple(tuple: &CanonicalTuple) -> SchemaResult<Self> {
-        require_header(tuple, COMMITTED_MATERIAL_FIELD_PROFILE_SCHEMA_IDENTIFIER, 5)?;
+        require_header(tuple, COMMITTED_MATERIAL_FIELD_PROFILE_SCHEMA_IDENTIFIER, 4)?;
         let profile = Self {
             proof_field_index: read_u16(&tuple.items[0])?,
-            evaluation_blowup_factor: read_u32(&tuple.items[1])?,
-            evaluation_coset_offset: read_u64(&tuple.items[2])?,
-            masking_polynomial_maximum_degree: read_u32(&tuple.items[3])?,
-            committed_polynomial_degree_bound_exclusive: read_u32(&tuple.items[4])?,
+            evaluation_coset_offset: read_u64(&tuple.items[1])?,
+            masking_polynomial_maximum_degree: read_u32(&tuple.items[2])?,
+            committed_polynomial_degree_bound_exclusive: read_u32(&tuple.items[3])?,
         };
         profile.validate()?;
         Ok(profile)
@@ -333,7 +330,6 @@ impl CommittedMaterialFieldProfile {
             SCHEMA_VERSION,
             vec![
                 CanonicalItem::unsigned16(self.proof_field_index),
-                CanonicalItem::unsigned32(self.evaluation_blowup_factor),
                 CanonicalItem::unsigned64(self.evaluation_coset_offset),
                 CanonicalItem::unsigned32(self.masking_polynomial_maximum_degree),
                 CanonicalItem::unsigned32(self.committed_polynomial_degree_bound_exclusive),
@@ -352,7 +348,6 @@ impl CommittedMaterialFieldProfile {
         let profile = selected_committed_material_profile().map_err(proof_profile_error)?;
         Ok(Self {
             proof_field_index: COMMITTED_MATERIAL_PROOF_FIELD_INDEX,
-            evaluation_blowup_factor: PROOF_EVALUATION_BLOWUP_FACTOR,
             evaluation_coset_offset: profile.evaluation_coset_offset(),
             masking_polynomial_maximum_degree: u32::try_from(
                 profile.masking_polynomial_maximum_degree(),
@@ -907,7 +902,6 @@ mod tests {
     fn committed_material_profile_matches_the_selected_common_proof_domain() {
         let profile = CommittedMaterialFieldProfile::selected().expect("selected material profile");
         assert_eq!(profile.proof_field_index, 0);
-        assert_eq!(profile.evaluation_blowup_factor, 8);
         assert_eq!(profile.evaluation_coset_offset, 7);
         assert_eq!(profile.masking_polynomial_maximum_degree, 2_047);
         assert_eq!(profile.committed_polynomial_degree_bound_exclusive, 262_144);

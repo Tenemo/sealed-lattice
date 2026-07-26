@@ -65,18 +65,14 @@ impl<'context> RelationPlanChecker<'context> {
         if self.context.base_field_modulus < 3
             || self.context.base_field_modulus.is_multiple_of(2)
             || self.context.challenge_extension_degree == 0
-            || self.context.evaluation_blowup_factor == 0
-            || !self.context.evaluation_blowup_factor.is_power_of_two()
             || self.context.evaluation_domain_generator == 0
             || self.context.evaluation_domain_generator >= self.context.base_field_modulus
             || self.context.evaluation_coset_offset == 0
             || self.context.evaluation_coset_offset >= self.context.base_field_modulus
-            || self.context.deep_point_count == 0
+            || self.context.out_of_domain_point_count == 0
             || self.context.quotient_component_count < 2
             || self.context.quotient_component_degree_bound_exclusive == 0
-            || self.context.fri_fold_count == 0
-            || self.context.final_polynomial_degree_bound_exclusive == 0
-            || self.context.unique_query_count == 0
+            || self.context.phase_column_query_coordinate_count == 0
             || self.context.non_native_theta_repetition_count == 0
             || self.context.non_native_alpha_repetition_count == 0
             || self.context.maximum_fiat_shamir_candidate_draws_per_output == 0
@@ -216,7 +212,7 @@ impl<'context> RelationPlanChecker<'context> {
         eprintln!("relation checker mask image: {:?}", phase_started.elapsed());
         #[cfg(test)]
         let phase_started = std::time::Instant::now();
-        let challenge_catalog = variant.derived_challenge_catalog(self.context)?;
+        let challenge_catalog = variant.derived_relation_prefix_challenge_catalog(self.context)?;
         validate_challenge_catalog(&challenge_catalog, variant, self.context)?;
         #[cfg(test)]
         eprintln!(
@@ -225,18 +221,7 @@ impl<'context> RelationPlanChecker<'context> {
         );
         #[cfg(test)]
         let phase_started = std::time::Instant::now();
-        let epoch_catalogs = variant.derived_challenge_epoch_catalogs(self.context)?;
-        if epoch_catalogs.is_empty() {
-            return Err(RelationPlanError::InvalidChallengeCatalog);
-        }
-        for epoch_catalog in epoch_catalogs {
-            let _ = epoch_catalog.canonical_catalog_bytes()?;
-        }
-        #[cfg(test)]
-        eprintln!("relation checker epochs: {:?}", phase_started.elapsed());
-        #[cfg(test)]
-        let phase_started = std::time::Instant::now();
-        let _ = variant.common_proof_transcript_schedule(self.context)?;
+        let _ = variant.common_proof_relation_prefix_schedule(self.context)?;
         #[cfg(test)]
         eprintln!("relation checker transcript: {:?}", phase_started.elapsed());
         Ok(())

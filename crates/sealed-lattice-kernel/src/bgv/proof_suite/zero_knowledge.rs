@@ -13,31 +13,25 @@ use super::relation_plan::{
 };
 use super::{RelationPlanCheckContext, RelationPlanError, RelationPlanVariant};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) enum TraceMaskQueryPhase {
-    First,
-    Opposite,
-}
-
 /// One base-field coordinate of the verifier-visible image of a trace mask.
 ///
 /// An extension-field opening is represented by its complete Galois closure.
-/// A query-tree leaf contributes only the two physical evaluations encoded in
-/// that leaf. Relation rotations affect the DEEP claim catalog, but they do
-/// not create extra query-tree evaluations of a committed polynomial.
+/// The row-code phase commitment contributes one base-field coordinate for
+/// each phase-column query. Relation rotations affect the out-of-domain claim
+/// catalog, but they do not create extra phase-column evaluations of a
+/// committed polynomial.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum TraceMaskObservationCoordinate {
-    DeepGaloisClosure {
+    OutOfDomainGaloisClosure {
         opening_point_ordinal: u32,
-        deep_point_ordinal: u16,
+        out_of_domain_point_ordinal: u16,
         trace_rotation_is_negative: bool,
         trace_rotation_magnitude: u64,
         descriptor_conjugate_index: u16,
         galois_conjugate_index: u16,
     },
-    QueryPhasePair {
+    PhaseColumnQuery {
         query_ordinal: u32,
-        phase: TraceMaskQueryPhase,
     },
 }
 
@@ -60,7 +54,7 @@ impl TraceMaskObservationCoordinateCatalog {
         variant: &RelationPlanVariant,
         column_ordinal: u32,
         challenge_extension_degree: u16,
-        unique_query_count: u32,
+        phase_column_query_coordinate_count: u32,
     ) -> Result<Self, RelationPlanError> {
         if challenge_extension_degree == 0
             || variant
@@ -87,19 +81,18 @@ impl TraceMaskObservationCoordinateCatalog {
             return Err(RelationPlanError::InvalidMaskGrammar);
         }
 
-        let deep_coordinate_count = opening_point_ordinals
+        let out_of_domain_coordinate_count = opening_point_ordinals
             .len()
             .checked_mul(usize::from(challenge_extension_degree))
             .ok_or(RelationPlanError::CountOverflow)?;
-        let query_coordinate_count = usize::try_from(unique_query_count)
-            .map_err(|_| RelationPlanError::CountOverflow)?
-            .checked_mul(2)
-            .ok_or(RelationPlanError::CountOverflow)?;
+        let phase_column_query_coordinate_count_usize =
+            usize::try_from(phase_column_query_coordinate_count)
+                .map_err(|_| RelationPlanError::CountOverflow)?;
         let mut coordinates = Vec::new();
         coordinates
             .try_reserve_exact(
-                deep_coordinate_count
-                    .checked_add(query_coordinate_count)
+                out_of_domain_coordinate_count
+                    .checked_add(phase_column_query_coordinate_count_usize)
                     .ok_or(RelationPlanError::CountOverflow)?,
             )
             .map_err(|_| RelationPlanError::CountOverflow)?;
@@ -116,9 +109,9 @@ impl TraceMaskObservationCoordinateCatalog {
             let (trace_rotation_is_negative, trace_rotation_magnitude) =
                 opening_point.trace_rotation();
             for galois_conjugate_index in 0..challenge_extension_degree {
-                coordinates.push(TraceMaskObservationCoordinate::DeepGaloisClosure {
+                coordinates.push(TraceMaskObservationCoordinate::OutOfDomainGaloisClosure {
                     opening_point_ordinal,
-                    deep_point_ordinal: opening_point.deep_point_ordinal(),
+                    out_of_domain_point_ordinal: opening_point.out_of_domain_point_ordinal(),
                     trace_rotation_is_negative,
                     trace_rotation_magnitude,
                     descriptor_conjugate_index: opening_point.conjugate_index(),
@@ -126,15 +119,8 @@ impl TraceMaskObservationCoordinateCatalog {
                 });
             }
         }
-        for query_ordinal in 0..unique_query_count {
-            coordinates.push(TraceMaskObservationCoordinate::QueryPhasePair {
-                query_ordinal,
-                phase: TraceMaskQueryPhase::First,
-            });
-            coordinates.push(TraceMaskObservationCoordinate::QueryPhasePair {
-                query_ordinal,
-                phase: TraceMaskQueryPhase::Opposite,
-            });
+        for query_ordinal in 0..phase_column_query_coordinate_count {
+            coordinates.push(TraceMaskObservationCoordinate::PhaseColumnQuery { query_ordinal });
         }
 
         Ok(Self {
@@ -166,16 +152,17 @@ impl TraceMaskObservationCoordinateCatalog {
 /// Computation-derived rank-ceiling check for the direct evaluations of one
 /// base-field mask polynomial represented by one or more observation catalogs.
 ///
-/// For each DEEP opening the catalog contains the complete Galois closure, and
-/// every query coordinate lies in the base field. Their union is therefore
-/// Frobenius closed. Subject to the sampler's separate trace-domain,
-/// full-degree, disjoint-orbit, and coprimality checks, Habock-Al Kindi's
-/// evaluation-image lemma identifies the direct-evaluation rank over the base
-/// field with the number of distinct coordinates. Summing the catalogs is a
-/// conservative upper bound even when separate proof invocations happen to
-/// observe the same point. Passing this check does not establish a simulator
-/// for nonlinear quotient, lookup, fold, or auxiliary-input views. This value
-/// is suite-generation state, not proof output.
+/// For each out-of-domain opening the catalog contains the complete Galois
+/// closure, and every phase-column query coordinate lies in the base field.
+/// Their union is therefore Frobenius closed. Subject to the sampler's
+/// separate trace-domain, full-degree, disjoint-orbit, and coprimality checks,
+/// Habock-Al Kindi's evaluation-image lemma identifies the direct-evaluation
+/// rank over the base field with the number of distinct coordinates. Summing
+/// the catalogs is a conservative upper bound even when separate proof
+/// invocations happen to observe the same point. Passing this check does not
+/// establish a simulator for nonlinear quotient, lookup, fold, or
+/// auxiliary-input views. This value is suite-generation state, not proof
+/// output.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct TraceMaskSurjectivityCertificate {
     #[cfg(test)]
@@ -255,9 +242,8 @@ pub(crate) fn validate_zero_knowledge_mask_image(
         return Ok(());
     }
 
-    let phase_pair_query_coordinate_count = u64::from(context.unique_query_count)
-        .checked_mul(2)
-        .ok_or(RelationPlanError::CountOverflow)?;
+    let phase_column_query_coordinate_count =
+        u64::from(context.phase_column_query_coordinate_count);
     let trace_mask_degree_by_column = variant
         .ordered_masks()
         .iter()
@@ -278,7 +264,7 @@ pub(crate) fn validate_zero_knowledge_mask_image(
             variant,
             column_ordinal,
             context.challenge_extension_degree,
-            context.unique_query_count,
+            context.phase_column_query_coordinate_count,
         )?;
         let actual_trace_mask_degree = trace_mask_degree_by_column
             .get(&column_ordinal)
@@ -290,8 +276,8 @@ pub(crate) fn validate_zero_knowledge_mask_image(
         TraceMaskSurjectivityCertificate::derive(actual_trace_mask_degree, &[catalog])?;
     }
 
-    let minimum_telescoping_mask_degree = u64::from(context.deep_point_count)
-        .checked_add(phase_pair_query_coordinate_count)
+    let minimum_telescoping_mask_degree = u64::from(context.out_of_domain_point_count)
+        .checked_add(phase_column_query_coordinate_count)
         .ok_or(RelationPlanError::CountOverflow)?;
     let mut telescoping_mask_count = 0_u32;
     for mask in variant.ordered_masks().iter().filter(|mask| {
@@ -313,7 +299,7 @@ pub(crate) fn validate_zero_knowledge_mask_image(
         return Err(RelationPlanError::InvalidMaskGrammar);
     }
 
-    let minimum_opening_batch_mask_degree = phase_pair_query_coordinate_count
+    let minimum_opening_batch_mask_degree = phase_column_query_coordinate_count
         .checked_add(1)
         .ok_or(RelationPlanError::CountOverflow)?;
     let mut opening_batch_masks = variant.ordered_masks().iter().filter(|mask| {
@@ -338,14 +324,14 @@ mod tests {
     fn synthetic_catalog(
         column_ordinal: u32,
         opening_point_ordinals: &[u32],
-        unique_query_count: u32,
+        phase_column_query_coordinate_count: u32,
     ) -> TraceMaskObservationCoordinateCatalog {
         let mut coordinates = Vec::new();
         for opening_point_ordinal in opening_point_ordinals {
             for galois_conjugate_index in 0..5 {
-                coordinates.push(TraceMaskObservationCoordinate::DeepGaloisClosure {
+                coordinates.push(TraceMaskObservationCoordinate::OutOfDomainGaloisClosure {
                     opening_point_ordinal: *opening_point_ordinal,
-                    deep_point_ordinal: 0,
+                    out_of_domain_point_ordinal: 0,
                     trace_rotation_is_negative: false,
                     trace_rotation_magnitude: u64::from(*opening_point_ordinal),
                     descriptor_conjugate_index: 0,
@@ -353,15 +339,8 @@ mod tests {
                 });
             }
         }
-        for query_ordinal in 0..unique_query_count {
-            coordinates.push(TraceMaskObservationCoordinate::QueryPhasePair {
-                query_ordinal,
-                phase: TraceMaskQueryPhase::First,
-            });
-            coordinates.push(TraceMaskObservationCoordinate::QueryPhasePair {
-                query_ordinal,
-                phase: TraceMaskQueryPhase::Opposite,
-            });
+        for query_ordinal in 0..phase_column_query_coordinate_count {
+            coordinates.push(TraceMaskObservationCoordinate::PhaseColumnQuery { query_ordinal });
         }
         TraceMaskObservationCoordinateCatalog {
             column_ordinal,
@@ -371,29 +350,29 @@ mod tests {
     }
 
     #[test]
-    fn query_tree_geometry_contributes_one_phase_pair_per_query() {
-        let catalog = synthetic_catalog(4, &[2, 7, 11], 14);
+    fn row_code_geometry_contributes_one_coordinate_per_phase_column_query() {
+        let catalog = synthetic_catalog(4, &[2, 7, 11], 387);
 
         assert_eq!(catalog.column_ordinal(), 4);
-        assert_eq!(catalog.base_coordinate_count(), Ok(3 * 5 + 2 * 14));
+        assert_eq!(catalog.base_coordinate_count(), Ok(3 * 5 + 387));
         assert_eq!(
             catalog
                 .coordinates()
                 .iter()
                 .filter(|coordinate| matches!(
                     coordinate,
-                    TraceMaskObservationCoordinate::QueryPhasePair { .. }
+                    TraceMaskObservationCoordinate::PhaseColumnQuery { .. }
                 ))
                 .count(),
-            2 * 14
+            387
         );
     }
 
     #[test]
     fn joint_persistent_views_are_covered_per_physical_column() {
-        let producer = synthetic_catalog(3, &[0, 1], 192);
-        let first_consumer = synthetic_catalog(8, &[0], 192);
-        let second_consumer = synthetic_catalog(12, &[0, 1, 2], 168);
+        let producer = synthetic_catalog(3, &[0, 1], 387);
+        let first_consumer = synthetic_catalog(8, &[0], 387);
+        let second_consumer = synthetic_catalog(12, &[0, 1, 2], 387);
         let exact_catalog_ceiling = producer.base_coordinate_count().unwrap()
             + first_consumer.base_coordinate_count().unwrap()
             + second_consumer.base_coordinate_count().unwrap();
@@ -414,8 +393,8 @@ mod tests {
 
     #[test]
     fn one_missing_mask_coefficient_refuses_the_joint_view() {
-        let producer = synthetic_catalog(3, &[0, 1], 192);
-        let consumer = synthetic_catalog(8, &[0, 1], 192);
+        let producer = synthetic_catalog(3, &[0, 1], 387);
+        let consumer = synthetic_catalog(8, &[0, 1], 387);
         let required =
             producer.base_coordinate_count().unwrap() + consumer.base_coordinate_count().unwrap();
 

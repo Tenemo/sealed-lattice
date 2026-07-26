@@ -11,15 +11,12 @@ fn check_context() -> RelationPlanCheckContext {
     RelationPlanCheckContext {
         base_field_modulus: TEST_BASE_FIELD,
         challenge_extension_degree: 4,
-        evaluation_blowup_factor: 2,
         evaluation_domain_generator: 9,
         evaluation_coset_offset: 3,
-        deep_point_count: 2,
+        out_of_domain_point_count: 2,
         quotient_component_count: 4,
         quotient_component_degree_bound_exclusive: 8_200,
-        fri_fold_count: 7,
-        final_polynomial_degree_bound_exclusive: 256,
-        unique_query_count: 16,
+        phase_column_query_coordinate_count: 16,
         non_native_theta_repetition_count: 2,
         non_native_alpha_repetition_count: 3,
         maximum_fiat_shamir_candidate_draws_per_output: 128,
@@ -36,8 +33,8 @@ fn committed_material_check_context() -> RelationPlanCheckContext {
     let evaluation_domain_size = 1_024_u64;
     let maximum_two_adic_order = 1_u64 << 32;
     let quotient_component_count = 16_u64;
-    let unique_query_count = 1_u64;
-    let deep_point_count = 1_u64;
+    let phase_column_query_coordinate_count = 1_u64;
+    let out_of_domain_point_count = 1_u64;
     let relation_input = committed_material_input();
     let rounded_mask_degree = quotient_component_count
         .checked_add(1)
@@ -50,31 +47,28 @@ fn committed_material_check_context() -> RelationPlanCheckContext {
         .expect("test relation trace domain derives")
         .checked_add(rounded_mask_degree)
         .expect("test quotient decomposition stride derives");
-    let minimum_telescoping_mask_degree_bound_exclusive = unique_query_count
-        .checked_mul(2)
-        .and_then(|query_coordinate_count| query_coordinate_count.checked_add(deep_point_count))
+    let minimum_telescoping_mask_degree_bound_exclusive = phase_column_query_coordinate_count
+        .checked_add(out_of_domain_point_count)
         .expect("test telescoping mask degree derives");
     RelationPlanCheckContext {
         base_field_modulus: crate::bgv::proof_suite::PROOF_BASE_FIELD_MODULUS,
         challenge_extension_degree: crate::bgv::proof_suite::PROOF_CHALLENGE_EXTENSION_DEGREE
             as u16,
-        evaluation_blowup_factor: 2,
         evaluation_domain_generator: modular_power(
             crate::bgv::proof_suite::PROOF_BASE_FIELD_MAXIMUM_TWO_ADIC_GENERATOR,
             maximum_two_adic_order / evaluation_domain_size,
             crate::bgv::proof_suite::PROOF_BASE_FIELD_MODULUS,
         ),
         evaluation_coset_offset: 7,
-        deep_point_count: u16::try_from(deep_point_count).expect("test deep-point count fits"),
+        out_of_domain_point_count: u16::try_from(out_of_domain_point_count)
+            .expect("test out-of-domain-point count fits"),
         quotient_component_count: u32::try_from(quotient_component_count)
             .expect("test quotient component count fits"),
         quotient_component_degree_bound_exclusive: quotient_decomposition_stride
             .checked_add(minimum_telescoping_mask_degree_bound_exclusive)
             .expect("test quotient component degree bound derives"),
-        fri_fold_count: 6,
-        final_polynomial_degree_bound_exclusive: 8,
-        unique_query_count: u32::try_from(unique_query_count)
-            .expect("test unique-query count fits"),
+        phase_column_query_coordinate_count: u32::try_from(phase_column_query_coordinate_count)
+            .expect("test phase-column query-coordinate count fits"),
         non_native_theta_repetition_count: 1,
         non_native_alpha_repetition_count: 1,
         maximum_fiat_shamir_candidate_draws_per_output: 128,
@@ -1403,19 +1397,14 @@ fn generated_committed_material_plans_cover_the_exact_root_directions() {
             "every proof-created committed-material column shares one base-oracle leaf"
         );
 
-        let transcript_schedule = variant
-            .common_proof_transcript_schedule(&context)
-            .expect("committed-material transcript schedule");
+        let relation_prefix_schedule = variant
+            .common_proof_relation_prefix_schedule(&context)
+            .expect("committed-material relation-prefix schedule");
         assert_eq!(
-            usize::try_from(transcript_schedule.opening_claim_count())
+            usize::try_from(relation_prefix_schedule.opening_claim_count())
                 .expect("opening-claim count fits"),
             variant.ordered_opening_claims.len(),
-            "the one initial FRI polynomial consumes every ordered DEEP claim"
-        );
-        assert_eq!(
-            transcript_schedule.fri_fold_count(),
-            context.fri_fold_count,
-            "the committed-material proof carries one schedule-fixed fold chain"
+            "the row-code successor consumes every ordered out-of-domain claim"
         );
     }
 

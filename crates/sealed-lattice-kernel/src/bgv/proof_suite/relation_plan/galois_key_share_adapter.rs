@@ -26,7 +26,7 @@ use crate::{
     transcript_core::encode_hex,
 };
 
-use super::super::prover::{integer_lift_derived_columns, proof_created_tree_roles_by_column};
+use super::super::prover::requested_pre_challenge_source_column_ordinals;
 use super::super::{
     CommonProofProverError, CommonProofRelationPlanCapability, CommonProofSourcePolynomial,
     CommonProofSourcePolynomialProvider, CommonProofSourcePolynomialProviderPoll,
@@ -211,7 +211,8 @@ impl GaloisKeyShareSourcePolynomialAdapter {
             relation_plan_variant.top_count(),
         );
         let requested_column_ordinals =
-            requested_source_column_ordinals(&relation_plan_variant)?.into_boxed_slice();
+            requested_pre_challenge_source_column_ordinals(&relation_plan_variant)?
+                .into_boxed_slice();
         let memory_accounting = galois_key_share_source_provider_memory_accounting_from_layout(
             &relation_plan_variant,
             &relation_context,
@@ -399,30 +400,6 @@ impl CommonProofSourcePolynomialProvider for GaloisKeyShareSourcePolynomialAdapt
         }
         Ok(())
     }
-}
-
-pub(super) fn requested_source_column_ordinals(
-    relation_plan_variant: &RelationPlanVariant,
-) -> Result<Vec<u32>, CommonProofProverError> {
-    let proof_tree_roles = proof_created_tree_roles_by_column(relation_plan_variant)?;
-    let (reversed_columns_by_source, integer_lift_auxiliary_columns) =
-        integer_lift_derived_columns(relation_plan_variant)?;
-    let reversed_columns = reversed_columns_by_source
-        .into_values()
-        .collect::<BTreeSet<_>>();
-    let mut requested_column_ordinals =
-        Vec::with_capacity(relation_plan_variant.ordered_columns().len());
-    for (column_index, _) in relation_plan_variant.ordered_columns().iter().enumerate() {
-        let column_ordinal =
-            u32::try_from(column_index).map_err(|_| CommonProofProverError::CountOverflow)?;
-        if !reversed_columns.contains(&column_ordinal)
-            && !integer_lift_auxiliary_columns.contains(&column_ordinal)
-            && proof_tree_roles.get(&column_ordinal) != Some(&ProofTreeRole::AuxiliaryOracle)
-        {
-            requested_column_ordinals.push(column_ordinal);
-        }
-    }
-    Ok(requested_column_ordinals)
 }
 
 fn checked_memory_add(left: u64, right: u64) -> Result<u64, CommonProofProverError> {
@@ -929,7 +906,8 @@ fn galois_key_share_source_provider_memory_accounting_from_layout(
     ]
     .into_iter()
     .try_fold(0_u64, checked_memory_add)?;
-    let requested_column_count = requested_source_column_ordinals(relation_plan_variant)?.len();
+    let requested_column_count =
+        requested_pre_challenge_source_column_ordinals(relation_plan_variant)?.len();
     let adapter_retained_byte_length = [
         size_of::<GaloisKeyShareSourcePolynomialAdapter>() as u64,
         u64::try_from(canonical_application_statement_byte_length)

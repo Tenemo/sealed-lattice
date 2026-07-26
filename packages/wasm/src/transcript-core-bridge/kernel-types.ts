@@ -1433,6 +1433,7 @@ type TranscriptCoreKernelExports = WebAssembly.Exports & {
         verificationBindingHashOutputPointer: number,
         proofAttemptLineageIdentifierOutputPointer: number,
         checkpointLineageIdentifierOutputPointer: number,
+        applicationStatementSchemaIdentifierOutputPointer: number,
         statusPointer: number,
     ) => number;
     sealed_lattice_common_proof_describe_verification_family_adapter?: (

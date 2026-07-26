@@ -24,6 +24,7 @@ use crate::{
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 use super::super::AuthenticatedCompactCommittedMaterialSource;
+use super::super::prover::requested_pre_challenge_source_column_ordinals;
 use super::super::{
     CommonProofBoundTreeLeafSaltRequest, CommonProofProverError, CommonProofRelationPlanCapability,
     CommonProofSourcePolynomial, CommonProofSourcePolynomialProvider,
@@ -42,9 +43,8 @@ use super::{
     galois_key_share_adapter::{
         anchor_full_row, canonical_comparator_column_rows, centered_residue,
         exact_modular_quotient, exact_negacyclic_product_radix, exact_negacyclic_product_small,
-        half_position, requested_source_column_ordinals, resolve_integer_lift_coefficient,
-        signed_integer_to_base_field, split_rows_match, split_signed_i8_polynomial,
-        split_signed_polynomial,
+        half_position, resolve_integer_lift_coefficient, signed_integer_to_base_field,
+        split_rows_match, split_signed_i8_polynomial, split_signed_polynomial,
     },
     key_relation::{
         EXACT_INTEGER_LIFT_RADIX, ExactRadixDigitColumnCatalog, MATERIAL_DIGIT_RADIX,
@@ -396,7 +396,7 @@ fn setup_key_relation_recursive_column_closures(
             *source_column_ordinal,
         );
     }
-    requested_source_column_ordinals(relation_plan_variant)?
+    requested_pre_challenge_source_column_ordinals(relation_plan_variant)?
         .into_iter()
         .map(|requested_column| {
             let mut pending = vec![requested_column];
@@ -598,7 +598,8 @@ fn finish_setup_key_relation_source_provider_memory_accounting(
     {
         return Err(CommonProofProverError::InvalidColumn);
     }
-    let requested_column_count = requested_source_column_ordinals(relation_plan_variant)?.len();
+    let requested_column_count =
+        requested_pre_challenge_source_column_ordinals(relation_plan_variant)?.len();
     let bound_material_tree_count = relation_plan_variant
         .ordered_trees()
         .iter()
@@ -916,7 +917,8 @@ impl SetupKeyRelationSourcePolynomialAdapter {
             None,
         );
         let requested_column_ordinals =
-            requested_source_column_ordinals(&relation_plan_variant)?.into_boxed_slice();
+            requested_pre_challenge_source_column_ordinals(&relation_plan_variant)?
+                .into_boxed_slice();
         let bound_material_tree_sources = match &source_layout {
             SetupKeyRelationSourceLayout::SameSecret(layout) => relation_plan_variant
                 .ordered_trees()
@@ -1184,7 +1186,7 @@ impl CommonProofSourcePolynomialProvider for SetupKeyRelationSourcePolynomialAda
         };
         if setup_provider_payload_for_count::<u32>(self.requested_column_ordinals.len())?
             != setup_provider_payload_for_count::<u32>(
-                requested_source_column_ordinals(&self.relation_plan_variant)?.len(),
+                requested_pre_challenge_source_column_ordinals(&self.relation_plan_variant)?.len(),
             )?
             || setup_provider_payload_for_count::<BoundMaterialTreeSource>(
                 self.bound_material_tree_sources.len(),

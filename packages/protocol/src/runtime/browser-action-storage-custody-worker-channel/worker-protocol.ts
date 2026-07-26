@@ -168,6 +168,7 @@ type OpenInstalledCommonProofExecutionEnvironmentInput = Readonly<{
 }>;
 
 export type ResolvedInstalledCommonProofExecutionEnvironmentInput = Readonly<{
+    applicationStatementSchemaIdentifier: number;
     commonProofRuntimeBindingHash: Uint8Array<ArrayBuffer>;
     foundationActionRandomnessHandleIdentifier: string;
     generationFamilyAdapter: ClosedWorkerCommonProofGenerationFamilyAdapter;
@@ -272,6 +273,7 @@ export const copyCommonProofCheckpointResumeDescriptorForWorker = (
 };
 
 export type InstalledCommonProofPreparedOperationRecord = {
+    applicationStatementSchemaIdentifier: number;
     checkpointOperationIdentity?: CheckpointOperationIdentity;
     commonProofRuntimeBindingHash: Uint8Array<ArrayBuffer>;
     consumed: boolean;
@@ -417,6 +419,7 @@ export type InstalledCommonProofExecutionEnvironmentRecord = {
     applyVerifiedCommonProof(
         input: InstalledCommonProofApplicationInput,
     ): Promise<void>;
+    applicationStatementSchemaIdentifier: number;
     closed: boolean;
     commonProofRuntimeBindingHash: Uint8Array<ArrayBuffer>;
     custody: CommonProofBrowserCustody;

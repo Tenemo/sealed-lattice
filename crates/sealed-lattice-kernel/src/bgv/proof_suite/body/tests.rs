@@ -368,7 +368,7 @@ fn authentication_frontier_uses_version_two_and_rejects_the_version_one_digest_l
 fn encode_body(
     layout: &ProofBodyLayout,
     tree_openings: &[EncodedTreeOpening],
-    deep_evaluations: &[ProofChallengeExtensionElement],
+    out_of_domain_evaluations: &[ProofChallengeExtensionElement],
     terminal_coefficients: &[ProofChallengeExtensionElement],
 ) -> Vec<u8> {
     assert_eq!(layout.catalog.entries.len(), tree_openings.len());
@@ -401,7 +401,7 @@ fn encode_body(
     append_roots(&mut bytes, &|source| {
         matches!(source, ProofTreeCatalogSource::QuotientComponent { .. })
     });
-    bytes.extend_from_slice(&canonical_extension_list_bytes(deep_evaluations));
+    bytes.extend_from_slice(&canonical_extension_list_bytes(out_of_domain_evaluations));
     append_roots(&mut bytes, &|source| {
         matches!(source, ProofTreeCatalogSource::OpeningBatchMask)
     });
@@ -436,8 +436,9 @@ fn query_opening_absorber(
         1,
         1,
     );
-    let mut transcript = CommonProofTranscript::new(1, [0x11; 64], 0x1216, &[0x22; 96], schedule)
-        .expect("test transcript starts");
+    let mut transcript =
+        CommonProofTranscript::new(1, [0x11; 64], [0x12; 64], 0x1216, &[0x22; 96], schedule)
+            .expect("test transcript starts");
     transcript
         .sample_composition_challenge(0)
         .expect("composition challenge derives");
@@ -445,11 +446,11 @@ fn query_opening_absorber(
         .absorb_quotient_root(0, [0x31; 64])
         .expect("quotient root absorbs");
     transcript
-        .sample_deep_point(0, |_| false)
-        .expect("DEEP point derives");
+        .sample_out_of_domain_point(0, |_| false)
+        .expect("out-of-domain point derives");
     transcript
-        .absorb_deep_values(&canonical_extension_list_bytes(&[extension_value(5)]))
-        .expect("DEEP values absorb");
+        .absorb_out_of_domain_values(&canonical_extension_list_bytes(&[extension_value(5)]))
+        .expect("out-of-domain values absorb");
     transcript
         .sample_opening_batch_challenge(0)
         .expect("opening challenge derives");
@@ -520,18 +521,18 @@ fn simple_public_body() -> (
         .iter()
         .map(common_tree_opening)
         .collect::<Vec<_>>();
-    let deep_evaluations = vec![extension_value(7), extension_value(17)];
+    let out_of_domain_evaluations = vec![extension_value(7), extension_value(17)];
     let terminal_coefficients = vec![extension_value(27), extension_value(37)];
     let bytes = encode_body(
         &layout,
         &tree_openings,
-        &deep_evaluations,
+        &out_of_domain_evaluations,
         &terminal_coefficients,
     );
     (
         layout,
         tree_openings,
-        deep_evaluations,
+        out_of_domain_evaluations,
         terminal_coefficients,
         bytes,
     )
@@ -539,7 +540,7 @@ fn simple_public_body() -> (
 
 #[test]
 fn decoder_accepts_exact_public_body_and_streams_one_opening_at_a_time() {
-    let (layout, tree_openings, deep_evaluations, terminal_coefficients, bytes) =
+    let (layout, tree_openings, out_of_domain_evaluations, terminal_coefficients, bytes) =
         simple_public_body();
     let mut observed_openings = Vec::new();
     let pending = decode_proof_body_prefix(&bytes, bytes.len(), bytes.len(), &layout)
@@ -571,7 +572,10 @@ fn decoder_accepts_exact_public_body_and_streams_one_opening_at_a_time() {
             .map(|opening| opening.root)
             .collect::<Vec<_>>()
     );
-    assert_eq!(decoded.deep_evaluations(), deep_evaluations);
+    assert_eq!(
+        decoded.out_of_domain_evaluations(),
+        out_of_domain_evaluations
+    );
     assert_eq!(decoded.terminal_coefficients(), terminal_coefficients);
     assert_eq!(observed_openings, [(0, 2), (1, 1)]);
 }
@@ -886,6 +890,70 @@ fn catalog_and_decoder_enforce_secret_root_order_and_leaf_grammar() {
         .finish_query_openings(absorber)
         .expect("streamed query bytes finish");
     assert_eq!(opened_catalog_indexes, [0, 1, 2, 3, 4]);
+}
+
+#[test]
+fn relation_bound_public_catalog_preserves_relation_indexes_and_validates_setup_widths() {
+    let committed_material_root = [0x31; 64];
+    let setup_polynomial_root = [0x42; 64];
+    let relation_trees = vec![
+        RelationProofTreeInput::ProofCreated {
+            tree_role: ProofTreeRole::BaseOracle,
+            row_width: 3,
+            leaf_visibility: ProofLeafVisibility::SecretBearing,
+        },
+        RelationProofTreeInput::BoundPublic(StatementOwnedProofTreeInput::CommittedMaterial {
+            material_context_hash: [0x53; 64],
+            expected_root: committed_material_root,
+        }),
+        RelationProofTreeInput::ProofCreated {
+            tree_role: ProofTreeRole::AuxiliaryOracle,
+            row_width: 2,
+            leaf_visibility: ProofLeafVisibility::SecretBearing,
+        },
+        RelationProofTreeInput::BoundPublic(StatementOwnedProofTreeInput::SetupPolynomial {
+            public_polynomial_context_hash: [0x64; 64],
+            row_width: 7,
+            expected_root: setup_polynomial_root,
+        }),
+    ];
+
+    let entries = build_relation_bound_public_tree_catalog_entries(&relation_trees)
+        .expect("bound public catalog derives independently of the opening tail");
+
+    assert_eq!(entries.len(), 2);
+    assert_eq!(entries[0].tree_catalog_index(), 1);
+    assert_eq!(entries[1].tree_catalog_index(), 3);
+    assert!(
+        entries
+            .iter()
+            .all(|entry| entry.source() == ProofTreeCatalogSource::RelationBoundPublic)
+    );
+    assert_eq!(entries[0].bound_root(), Some(committed_material_root));
+    assert_eq!(entries[1].bound_root(), Some(setup_polynomial_root));
+    assert_eq!(
+        entries[0]
+            .materialized_row_width()
+            .expect("committed material width derives"),
+        COMMITTED_MATERIAL_ROW_WIDTH as usize,
+    );
+    assert_eq!(
+        entries[1]
+            .materialized_row_width()
+            .expect("setup polynomial width derives"),
+        7,
+    );
+
+    let invalid_setup_tree =
+        RelationProofTreeInput::BoundPublic(StatementOwnedProofTreeInput::SetupPolynomial {
+            public_polynomial_context_hash: [0x75; 64],
+            row_width: 0,
+            expected_root: [0x86; 64],
+        });
+    assert_eq!(
+        build_relation_bound_public_tree_catalog_entries(&[invalid_setup_tree]),
+        Err(ProofBodyError::InvalidCatalog),
+    );
 }
 
 #[test]

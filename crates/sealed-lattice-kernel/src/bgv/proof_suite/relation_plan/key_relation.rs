@@ -264,14 +264,14 @@ impl KeyRelationGeometry {
                 return Err(RelationPlanError::NonCanonicalOrder);
             }
         }
-        let expected_evaluation_domain = self
+        let opening_degree_domain = self
             .opening_degree_bound_exclusive
             .checked_next_power_of_two()
-            .and_then(|degree_domain| {
-                degree_domain.checked_mul(u64::from(context.evaluation_blowup_factor))
-            })
             .ok_or(RelationPlanError::CountOverflow)?;
-        if expected_evaluation_domain != self.evaluation_domain_size {
+        if !self
+            .evaluation_domain_size
+            .is_multiple_of(opening_degree_domain)
+        {
             return Err(RelationPlanError::InvalidDomain);
         }
         if self.plaintext_modulus.is_some() {

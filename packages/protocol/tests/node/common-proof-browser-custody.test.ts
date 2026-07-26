@@ -62,6 +62,7 @@ const binding = Object.freeze({
 const actionRandomnessCommitment = new Uint8Array(64).fill(0x55);
 const runtimeBindingHash = new Uint8Array(64).fill(0x66);
 const proofAttemptLineageIdentifier = new Uint8Array(32).fill(0x77);
+const applicationStatementSchemaIdentifier = 0x1217;
 
 const emptyPrivateRandomCursorManifest = (): Uint8Array<ArrayBuffer> =>
     Uint8Array.of(
@@ -282,6 +283,7 @@ describe('Common-proof browser custody', () => {
 
     const openFixture = async (input?: {
         adapter?: InMemoryRuntimeStorageAdapter;
+        applicationStatementSchemaIdentifier?: number;
         decorateCapacityReservation?: (
             reservation: UntrustedStorageExclusiveCapacityReservation,
         ) => UntrustedStorageExclusiveCapacityReservation;
@@ -358,6 +360,9 @@ describe('Common-proof browser custody', () => {
         try {
             custody = openCommonProofBrowserCustody({
                 actionRandomnessCommitment,
+                applicationStatementSchemaIdentifier:
+                    input?.applicationStatementSchemaIdentifier ??
+                    applicationStatementSchemaIdentifier,
                 capacityReservation: ownedCapacityReservation,
                 ...(input?.checkpointStore === undefined
                     ? {}
@@ -425,7 +430,7 @@ describe('Common-proof browser custody', () => {
             checkpointLineageIdentifier: new Uint8Array(32).fill(0x12),
             commonProofEnvironmentIdentifier: new Uint8Array(32).fill(0x99),
             safeBoundaryOrdinal: 1,
-            stableAttemptBindingHash: new Uint8Array(64).fill(0x34),
+            stableAttemptBindingHash: runtimeBindingHash.slice(),
         } as const;
 
         await expect(
@@ -737,7 +742,9 @@ describe('Common-proof browser custody', () => {
         expect(ownedStorageRecordKeys(adapter)).toEqual([]);
     });
 
-    it('publishes and restores authenticated checkpoints before byte-identical copy-on-write replay', async () => {
+    it('refuses mismatched bindings and restores authenticated checkpoints before byte-identical copy-on-write replay', async () => {
+        const publishedOperationKinds: number[] = [];
+        const resumedOperationKinds: number[] = [];
         const adapter = new InMemoryRuntimeStorageAdapter();
         const openedStore = await openRuntimeTestStore({
             adapter,
@@ -749,7 +756,14 @@ describe('Common-proof browser custody', () => {
         const encryptionKey = await generateRuntimeStorageEncryptionKey();
         const checkpointStore = openAuthenticatedCheckpointStore({
             authorityContext: runtimeAuthorityContext(),
-            boundaryPolicy,
+            boundaryPolicy: {
+                validatePublication: ({ boundary }) => {
+                    publishedOperationKinds.push(boundary.operationKind);
+                },
+                validateResume: ({ expectedBoundary }) => {
+                    resumedOperationKinds.push(expectedBoundary.operationKind);
+                },
+            },
             cryptoProvider,
             encryptionKey,
             limits: checkpointLimits,
@@ -792,20 +806,54 @@ describe('Common-proof browser custody', () => {
             { length: 733 },
             (_unused, index) => (index * 41 + 9) & 0xff,
         );
+        const mismatchedRuntimeBindingHash = runtimeBindingHash.slice();
+        mismatchedRuntimeBindingHash[0] ^= 0xff;
+        await expect(
+            first.custody.checkpointCustody?.publishAuthenticatedCheckpoint({
+                canonicalStateBytes: checkpointState,
+                privateRandomCursorManifestBytes: cursorBytes,
+                privateRandomnessStreamAttemptIdentifier:
+                    proofAttemptLineageIdentifier.slice(),
+                safeBoundaryOrdinal: 6,
+                stableAttemptBindingHash: mismatchedRuntimeBindingHash,
+            }),
+        ).rejects.toMatchObject({ code: 'RecordAuthenticationFailed' });
+        expect(publishedOperationKinds).toEqual([]);
+        expect(first.custody.copyCheckpointResumeDescriptor()).toBeUndefined();
         await first.custody.checkpointCustody?.publishAuthenticatedCheckpoint({
             canonicalStateBytes: checkpointState,
             privateRandomCursorManifestBytes: cursorBytes,
             privateRandomnessStreamAttemptIdentifier:
                 proofAttemptLineageIdentifier.slice(),
             safeBoundaryOrdinal: 6,
-            stableAttemptBindingHash: new Uint8Array(64).fill(0x31),
+            stableAttemptBindingHash: runtimeBindingHash.slice(),
         });
+        expect(publishedOperationKinds).toEqual([
+            applicationStatementSchemaIdentifier,
+        ]);
         const resumeDescriptor = first.custody.copyCheckpointResumeDescriptor();
         expect(resumeDescriptor).toBeDefined();
         if (resumeDescriptor === undefined) {
             throw new Error('Expected an authenticated checkpoint descriptor.');
         }
         await first.custody.suspendForAuthenticatedResume();
+
+        const mismatchedResumeBindingHash =
+            resumeDescriptor.stableAttemptBindingHash.slice();
+        mismatchedResumeBindingHash[0] ^= 0xff;
+        await expect(
+            openFixture({
+                adapter,
+                checkpointStore,
+                resumeDescriptor: {
+                    ...resumeDescriptor,
+                    stableAttemptBindingHash: mismatchedResumeBindingHash,
+                },
+                store: openedStore.store,
+                workerKernel: first.workerKernel,
+            }),
+        ).rejects.toMatchObject({ code: 'RecordAuthenticationFailed' });
+        expect(resumedOperationKinds).toEqual([]);
 
         await expect(
             openFixture({
@@ -828,6 +876,9 @@ describe('Common-proof browser custody', () => {
         await expect(
             resumed.custody.checkpointCustody?.restoreAuthenticatedCheckpointState(),
         ).resolves.toEqual(checkpointState);
+        expect(resumedOperationKinds).toEqual([
+            applicationStatementSchemaIdentifier,
+        ]);
 
         for (const replayRequest of replayRequests) {
             await resumed.custody.prefixReplayExternalMemory.executeDeterministicPrefixReplayTransaction(
@@ -892,6 +943,58 @@ describe('Common-proof browser custody', () => {
         ).rejects.toMatchObject({ code: 'RecordAuthenticationFailed' });
     });
 
+    it('refuses to resume an authenticated checkpoint under a different application schema', async () => {
+        const adapter = new InMemoryRuntimeStorageAdapter();
+        const openedStore = await openRuntimeTestStore({
+            adapter,
+            namespace: 'common-proof-schema-mismatch-custody-test',
+        });
+        const checkpointStorage = await openRuntimeTestStore({
+            namespace: 'common-proof-schema-mismatch-checkpoint-test',
+        });
+        const checkpointStore = openAuthenticatedCheckpointStore({
+            authorityContext: runtimeAuthorityContext(),
+            boundaryPolicy,
+            cryptoProvider,
+            encryptionKey: await generateRuntimeStorageEncryptionKey(),
+            limits: checkpointLimits,
+            store: checkpointStorage.store,
+        });
+        openedCheckpointStores.push(checkpointStore);
+        const first = await openFixture({
+            adapter,
+            checkpointStore,
+            store: openedStore.store,
+        });
+        await first.custody.checkpointCustody?.publishAuthenticatedCheckpoint({
+            canonicalStateBytes: new Uint8Array(97).fill(0x3a),
+            privateRandomCursorManifestBytes:
+                emptyPrivateRandomCursorManifest(),
+            privateRandomnessStreamAttemptIdentifier:
+                proofAttemptLineageIdentifier.slice(),
+            safeBoundaryOrdinal: 2,
+            stableAttemptBindingHash: runtimeBindingHash.slice(),
+        });
+        const resumeDescriptor = first.custody.copyCheckpointResumeDescriptor();
+        if (resumeDescriptor === undefined) {
+            throw new Error('Expected an authenticated checkpoint descriptor.');
+        }
+        await first.custody.suspendForAuthenticatedResume();
+
+        const mismatched = await openFixture({
+            adapter,
+            applicationStatementSchemaIdentifier:
+                applicationStatementSchemaIdentifier + 1,
+            checkpointStore,
+            resumeDescriptor,
+            store: openedStore.store,
+            workerKernel: first.workerKernel,
+        });
+        await expect(
+            mismatched.custody.checkpointCustody?.restoreAuthenticatedCheckpointState(),
+        ).rejects.toMatchObject({ code: 'AuthenticationFailed' });
+    });
+
     it('retires cleanly when authenticated checkpoint custody is missing or corrupt', async () => {
         const adapter = new InMemoryRuntimeStorageAdapter();
         const openedStore = await openRuntimeTestStore({
@@ -924,7 +1027,7 @@ describe('Common-proof browser custody', () => {
             privateRandomnessStreamAttemptIdentifier:
                 proofAttemptLineageIdentifier.slice(),
             safeBoundaryOrdinal: 2,
-            stableAttemptBindingHash: new Uint8Array(64).fill(0x29),
+            stableAttemptBindingHash: runtimeBindingHash.slice(),
         });
         const resumeDescriptor = first.custody.copyCheckpointResumeDescriptor();
         if (resumeDescriptor === undefined) {
@@ -1004,7 +1107,7 @@ describe('Common-proof browser custody', () => {
             privateRandomnessStreamAttemptIdentifier:
                 proofAttemptLineageIdentifier.slice(),
             safeBoundaryOrdinal: 3,
-            stableAttemptBindingHash: new Uint8Array(64).fill(0x52),
+            stableAttemptBindingHash: runtimeBindingHash.slice(),
         });
         const resumeDescriptor = first.custody.copyCheckpointResumeDescriptor();
         if (resumeDescriptor === undefined) {
@@ -1232,7 +1335,7 @@ describe('Common-proof browser custody', () => {
             privateRandomnessStreamAttemptIdentifier:
                 proofAttemptLineageIdentifier.slice(),
             safeBoundaryOrdinal: 4,
-            stableAttemptBindingHash: new Uint8Array(64).fill(0x72),
+            stableAttemptBindingHash: runtimeBindingHash.slice(),
         });
         await custody.outputStore.commitChunk(
             0,
@@ -1311,6 +1414,7 @@ describe('Common-proof browser custody', () => {
         expect(() =>
             openCommonProofBrowserCustody({
                 actionRandomnessCommitment: new Uint8Array(63),
+                applicationStatementSchemaIdentifier,
                 capacityReservation,
                 commonProofEnvironmentIdentifier: new Uint8Array(32),
                 commonProofRuntimeBindingHash: runtimeBindingHash,
@@ -1325,6 +1429,35 @@ describe('Common-proof browser custody', () => {
                 workerKernel,
             }),
         ).toThrow(BrowserActionStorageCustodyError);
+        for (const malformedApplicationStatementSchemaIdentifier of [
+            0, 0x1_0000,
+        ]) {
+            expect(() =>
+                openCommonProofBrowserCustody({
+                    actionRandomnessCommitment,
+                    applicationStatementSchemaIdentifier:
+                        malformedApplicationStatementSchemaIdentifier,
+                    capacityReservation,
+                    commonProofEnvironmentIdentifier: new Uint8Array(32),
+                    commonProofRuntimeBindingHash: runtimeBindingHash,
+                    limits: {
+                        maximumExternalMemoryByteLength: 1n,
+                        maximumExternalMemoryObjectCount: 1,
+                        maximumExternalMemoryRecordCount: 1,
+                        transactionLifetimeMilliseconds: 1,
+                    },
+                    proofAttemptLineageIdentifier,
+                    store: openedStore.store,
+                    workerKernel,
+                }),
+            ).toThrowError(
+                expect.objectContaining({
+                    code: 'InvalidInput',
+                    message:
+                        'The common-proof application-statement schema identifier is not a nonzero unsigned 16-bit value.',
+                }),
+            );
+        }
         await capacityReservation.release();
     });
 

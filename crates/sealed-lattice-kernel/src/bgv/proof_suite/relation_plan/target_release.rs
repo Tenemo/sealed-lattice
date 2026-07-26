@@ -1,3 +1,4 @@
+use super::super::prover::requested_pre_challenge_source_column_ordinals;
 use super::key_relation::{
     KeyRelationGeometry, KeyRelationPlanBuilder, KeyVerifierSourceKey, MATERIAL_DIGIT_RADIX,
     ReversibleShiftedSmallVector, ShiftedSmallVector, SplitIntegerVector,
@@ -2243,9 +2244,8 @@ fn target_release_source_blocks(
             }
         }
     }
-    let requested_source_columns =
-        super::galois_key_share_adapter::requested_source_column_ordinals(variant)
-            .map_err(|_| TargetReleaseWitnessError::InvalidWitness)?;
+    let requested_source_columns = requested_pre_challenge_source_column_ordinals(variant)
+        .map_err(|_| TargetReleaseWitnessError::InvalidWitness)?;
     if !blocks.keys().copied().eq(requested_source_columns) {
         return Err(TargetReleaseWitnessError::InvalidWitness);
     }
@@ -4799,19 +4799,16 @@ mod tests {
             base_field_modulus: PROOF_BASE_FIELD_MODULUS,
             challenge_extension_degree: crate::bgv::proof_suite::PROOF_CHALLENGE_EXTENSION_DEGREE
                 as u16,
-            evaluation_blowup_factor: 2,
             evaluation_domain_generator: modular_power(
                 PROOF_BASE_FIELD_MAXIMUM_TWO_ADIC_GENERATOR,
                 (1_u64 << 32) / evaluation_domain_size,
                 PROOF_BASE_FIELD_MODULUS,
             ),
             evaluation_coset_offset: 7,
-            deep_point_count: 1,
+            out_of_domain_point_count: 1,
             quotient_component_count: 4,
             quotient_component_degree_bound_exclusive: 1_024,
-            fri_fold_count: 9,
-            final_polynomial_degree_bound_exclusive: 8,
-            unique_query_count: 8,
+            phase_column_query_coordinate_count: 8,
             non_native_theta_repetition_count: 1,
             non_native_alpha_repetition_count: 1,
             maximum_fiat_shamir_candidate_draws_per_output: 128,
@@ -5681,7 +5678,7 @@ mod tests {
         let context = plan_context();
         let ring_degree = 256_usize;
         let material_profile =
-            CommittedMaterialProfile::for_common_proof_evaluation_domain(ring_degree, 8_192)
+            CommittedMaterialProfile::for_common_proof_evaluation_domain(ring_degree, 8_192, 4_096)
                 .expect("material profile");
         let compilation = compile_target_release_relation(
             &TargetReleaseRelationPlanInput {

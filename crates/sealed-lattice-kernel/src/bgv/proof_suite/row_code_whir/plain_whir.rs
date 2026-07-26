@@ -81,10 +81,10 @@ pub(super) fn plain_aggregate_pcs_with_parameters(
         .map_err(|error| format!("construct plain WHIR configuration: {error}"))?;
     let commitment_scheme = CommitmentScheme::new(
         LeafHasher::new(super::DomainSeparatedShake256 {
-            domain: b"aggregate-plain-pcs/merkle-leaf/v1",
+            domain: super::ROW_CODE_WHIR_AGGREGATE_LEAF_DOMAIN,
         }),
         NodeCompressor::new(super::DomainSeparatedShake256 {
-            domain: b"aggregate-plain-pcs/merkle-node/v1",
+            domain: super::ROW_CODE_WHIR_AGGREGATE_NODE_DOMAIN,
         }),
         0,
     );
@@ -652,8 +652,8 @@ mod tests {
             ]
         );
         assert!(distinct_rows.iter().all(|row| {
-            row.transcript_xof_domain()
-                == crate::bgv::proof_suite::transcript::PUBLIC_SAMPLER_XOF_DOMAIN
+            row.transcript_handle_domain()
+                == crate::bgv::proof_suite::transcript::PUBLIC_SAMPLER_HANDLE_DOMAIN
                 && row.candidate_bit_length() == 64
                 && row.maximum_candidate_draws_per_output()
                     == super::super::PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT

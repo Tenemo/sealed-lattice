@@ -101,6 +101,10 @@ export type {
 } from './runtime/durable-state-witness-service.js';
 export { AuthenticatedCheckpointStoreError } from './runtime/authenticated-checkpoint-store.js';
 export { createBallotAggregationCheckpointCustody } from './runtime/ballot-aggregation-checkpoint-custody.js';
+export {
+    createRuntimeBuildCheckpointBoundaryPolicy,
+    RuntimeBuildCheckpointBoundaryPolicyError,
+} from './runtime/runtime-build-checkpoint-boundary-policy.js';
 export { openBrowserLocalActionCryptographicProvider } from './runtime/browser-local-action-cryptographic-provider.js';
 export type {
     BrowserLocalActionCryptographicProvider,
@@ -117,6 +121,10 @@ export type {
     ResumedCheckpoint,
     TransferableAuthenticatedCheckpointStore,
 } from './runtime/authenticated-checkpoint-store.js';
+export type {
+    RuntimeBuildCheckpointBoundaryBinding,
+    RuntimeBuildCheckpointBoundaryPolicyInput,
+} from './runtime/runtime-build-checkpoint-boundary-policy.js';
 export { deriveCollectiveBgvSetupRosterHash } from './roster/hashes.js';
 export type { CollectiveBgvSetupRosterEntryInput } from './roster/hashes.js';
 export { copyCanonicalStreamDescriptor } from './setup/canonical-stream-descriptor.js';

@@ -84,7 +84,7 @@ use super::{
     CommonProofGenerationCheckpointCustodyRequirement, CommonProofSourceProviderMemoryAccounting,
     CommonProofTranscriptSchedule, KeySwitchComponentMaterialTopology,
     MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH, MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH,
-    PROOF_BASE_FIELD_MODULUS, PROOF_CHALLENGE_EXTENSION_DEGREE, PROOF_DEEP_POINT_COUNT,
+    PROOF_BASE_FIELD_MODULUS, PROOF_CHALLENGE_EXTENSION_DEGREE, PROOF_OUT_OF_DOMAIN_POINT_COUNT,
     SelectedApplicationStatementContext, SelectedBallotCiphertextReadbackMemoryAccounting,
     SelectedBallotValidityCarrierBufferAccounting,
     SelectedEvaluatorAggregateSourceProviderMemoryAccounting,
@@ -178,8 +178,7 @@ fn selected_proof_transport_sizing_with_proof_byte_length_policy(
         .encode()
         .map_err(|_| SelectedProofAccountingError::CanonicalEncoding)?;
     let proof_header_byte_length = proof_header_bytes.len();
-    let transcript_schedule = variant
-        .common_proof_transcript_schedule(relation_context)
+    let transcript_schedule = super::packed_fri_transcript_schedule(variant, relation_context)
         .map_err(|_| SelectedProofAccountingError::InvalidProfile)?;
     let relation_trees = selected_relation_tree_inputs(variant)?;
     let catalog = build_complete_proof_tree_catalog(
@@ -2172,16 +2171,17 @@ mod resource_accounting {
         const SELECTED_CHALLENGE_EXTENSION_DEGREE: usize = 5;
         const SELECTED_OPENING_DEGREE_BOUND_EXCLUSIVE: u64 = 262_144;
         const SELECTED_EVALUATION_DOMAIN_SIZE: u64 = 2_097_152;
-        const SELECTED_DEEP_POINT_COUNT: u16 = 1;
+        const SELECTED_OUT_OF_DOMAIN_POINT_COUNT: u16 = 1;
         const SELECTED_FRI_FOLD_COUNT: u16 = 10;
         const SELECTED_TERMINAL_COEFFICIENT_COUNT: u32 = 256;
         const COMMITTED_MATERIAL_QUOTIENT_DECOMPOSITION_STRIDE: u64 = 68_267;
         const PUBLIC_AGGREGATE_QUOTIENT_DECOMPOSITION_STRIDE: u64 = 16_384;
-        const COMMITTED_MATERIAL_QUOTIENT_COMPONENT_DEGREE_BOUND_EXCLUSIVE: u64 = 68_652;
+        const COMMITTED_MATERIAL_QUOTIENT_COMPONENT_DEGREE_BOUND_EXCLUSIVE: u64 = 68_655;
         const PUBLIC_AGGREGATE_QUOTIENT_COMPONENT_DEGREE_BOUND_EXCLUSIVE: u64 = 16_384;
-        const OTHER_FAMILY_QUOTIENT_COMPONENT_DEGREE_BOUND_EXCLUSIVE: u64 = 33_884;
-        const COMMITTED_MATERIAL_QUERY_COUNT: u32 = 192;
-        const OTHER_FAMILY_QUERY_COUNT: u32 = 168;
+        const OTHER_FAMILY_QUOTIENT_COMPONENT_DEGREE_BOUND_EXCLUSIVE: u64 = 34_050;
+        const SELECTED_PHASE_COLUMN_QUERY_COORDINATE_COUNT: u32 = 387;
+        const SELECTED_PACKED_FRI_QUERY_COUNT: u32 =
+            SELECTED_PHASE_COLUMN_QUERY_COORDINATE_COUNT / 2;
         const COMMITTED_MATERIAL_QUOTIENT_COMPONENT_COUNT: u16 = 3;
         const PUBLIC_AGGREGATE_QUOTIENT_COMPONENT_COUNT: u16 = 9;
         const OTHER_FAMILY_QUOTIENT_COMPONENT_COUNT: u16 = 8;
@@ -2195,7 +2195,7 @@ mod resource_accounting {
             .collect::<BTreeSet<_>>();
         if PROOF_BASE_FIELD_MODULUS != SELECTED_BASE_FIELD_MODULUS
             || PROOF_CHALLENGE_EXTENSION_DEGREE != SELECTED_CHALLENGE_EXTENSION_DEGREE
-            || PROOF_DEEP_POINT_COUNT != SELECTED_DEEP_POINT_COUNT
+            || PROOF_OUT_OF_DOMAIN_POINT_COUNT != SELECTED_OUT_OF_DOMAIN_POINT_COUNT
             || observed_families != expected_families
             || observed_families.len()
                 != crate::bgv::proof_suite::FIRST_PROFILE_APPLICATION_FAMILIES.len()
@@ -2213,11 +2213,6 @@ mod resource_accounting {
             let is_public_aggregate =
                 ProofApplicationSlotCeilings::PUBLIC_ONLY_FAMILY_SCHEMA_IDENTIFIERS
                     .contains(&schema_identifier);
-            let expected_query_count = if is_committed_material {
-                COMMITTED_MATERIAL_QUERY_COUNT
-            } else {
-                OTHER_FAMILY_QUERY_COUNT
-            };
             let expected_quotient_component_count = if is_committed_material {
                 COMMITTED_MATERIAL_QUOTIENT_COMPONENT_COUNT
             } else if is_public_aggregate {
@@ -2245,14 +2240,13 @@ mod resource_accounting {
             };
             if variant.opening_degree_bound_exclusive() != SELECTED_OPENING_DEGREE_BOUND_EXCLUSIVE
                 || variant.evaluation_domain_size() != SELECTED_EVALUATION_DOMAIN_SIZE
-                || variant.evaluation_domain_size() / variant.opening_degree_bound_exclusive() != 8
                 || variant.quotient_component_degree_bound_exclusive()
                     != expected_quotient_component_degree_bound_exclusive
                 || !quotient_decomposition_stride_is_selected
                 || variant.fri_fold_count() != SELECTED_FRI_FOLD_COUNT
                 || variant.terminal_coefficient_count() != SELECTED_TERMINAL_COEFFICIENT_COUNT
                 || variant.query_orbit_count() != variant.evaluation_domain_size() / 2
-                || variant.unique_query_count() != expected_query_count
+                || variant.unique_query_count() != SELECTED_PACKED_FRI_QUERY_COUNT
                 || variant.quotient_component_count() != expected_quotient_component_count
             {
                 return Err(SelectedProofAccountingError::InvalidProfile);
@@ -4423,7 +4417,7 @@ mod resource_accounting {
                         sizing.transcript_schedule.opening_claim_count(),
                         u32::try_from(variant.ordered_opening_claims().len())
                             .expect("the checked opening-claim count fits u32"),
-                        "every ordered DEEP claim must enter the one packed initial polynomial",
+                        "every ordered out-of-domain claim must enter the one packed initial polynomial",
                     );
                 }
             }

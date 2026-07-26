@@ -254,7 +254,6 @@ fn prepare_verification(
                         verified_public_randomness,
                         &relation_plan_artifact,
                         relation_plan_variant,
-                        &relation_context,
                     )
                     .map_err(|_| CommonProofRuntimeError::InvalidPlanCapability)?;
                 let relation_plan_capability =

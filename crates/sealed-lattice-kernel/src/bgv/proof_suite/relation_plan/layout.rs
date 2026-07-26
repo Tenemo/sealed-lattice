@@ -4,7 +4,7 @@ use crate::foundation::{CanonicalItem, CanonicalItemType, CanonicalTuple};
 
 use super::super::transcript::{
     CommonProofApplicationChallengeGroup, CommonProofChallenge, CommonProofPrivacyMode,
-    CommonProofTranscriptSchedule,
+    CommonProofRelationPrefixSchedule,
 };
 #[cfg(test)]
 use super::bounds::RelationBoundCertificate;
@@ -20,8 +20,7 @@ use super::{
         RelationCoefficientLocalIdentityBatchDescriptor, RelationIntegerLiftBatchDescriptor,
     },
     model::{
-        ProofPrivacyMode, RelationChallengeDescriptor, RelationChallengeEpochCatalog,
-        RelationChallengeEpochPrecedingMessage, RelationChallengeModulusSelector,
+        ProofPrivacyMode, RelationChallengeDescriptor, RelationChallengeModulusSelector,
         RelationChallengeRole, RelationChallengeSampling, RelationColumnDescriptor,
         RelationPlanError, RelationPublicSamplerDescriptor, RelationRadixConvolutionDescriptor,
         RelationTreeDescriptor, RelationVerifierSource, SuiteModulusReference,
@@ -36,15 +35,15 @@ use super::{
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct RelationOpeningPointDescriptor {
-    pub(super) deep_point_ordinal: u16,
+    pub(super) out_of_domain_point_ordinal: u16,
     pub(super) trace_rotation_is_negative: bool,
     pub(super) trace_rotation_magnitude: u64,
     pub(super) conjugate_index: u16,
 }
 
 impl RelationOpeningPointDescriptor {
-    pub(crate) const fn deep_point_ordinal(self) -> u16 {
-        self.deep_point_ordinal
+    pub(crate) const fn out_of_domain_point_ordinal(self) -> u16 {
+        self.out_of_domain_point_ordinal
     }
 
     pub(crate) const fn trace_rotation(self) -> (bool, u64) {
@@ -63,7 +62,7 @@ impl RelationOpeningPointDescriptor {
             RELATION_OPENING_POINT_SCHEMA_IDENTIFIER,
             SCHEMA_VERSION,
             vec![
-                CanonicalItem::unsigned16(self.deep_point_ordinal),
+                CanonicalItem::unsigned16(self.out_of_domain_point_ordinal),
                 CanonicalItem::unsigned8(u8::from(self.trace_rotation_is_negative)),
                 CanonicalItem::unsigned64(self.trace_rotation_magnitude),
                 CanonicalItem::unsigned16(self.conjugate_index),
@@ -513,7 +512,7 @@ impl RelationPlanVariant {
         ))
     }
 
-    pub(crate) fn derived_challenge_catalog(
+    pub(in crate::bgv::proof_suite::relation_plan) fn derived_relation_prefix_challenge_catalog(
         &self,
         context: &RelationPlanCheckContext,
     ) -> Result<Vec<RelationChallengeDescriptor>, RelationPlanError> {
@@ -525,6 +524,13 @@ impl RelationPlanVariant {
                     role_coordinates,
                 } = instruction
                 {
+                    if !matches!(
+                        challenge_role,
+                        RelationChallengeRole::NonNativeTheta
+                            | RelationChallengeRole::NonNativeAlpha
+                    ) {
+                        return Err(RelationPlanError::InvalidChallengeCatalog);
+                    }
                     catalog.insert(challenge_descriptor(
                         *challenge_role,
                         role_coordinates.clone(),
@@ -544,10 +550,10 @@ impl RelationPlanVariant {
                 context,
             )?);
         }
-        for deep_point_ordinal in 0..context.deep_point_count {
+        for out_of_domain_point_ordinal in 0..context.out_of_domain_point_count {
             catalog.insert(challenge_descriptor(
-                RelationChallengeRole::DeepPoint,
-                vec![u64::from(deep_point_ordinal)],
+                RelationChallengeRole::OutOfDomainPoint,
+                vec![u64::from(out_of_domain_point_ordinal)],
                 1,
                 self,
                 context,
@@ -561,70 +567,15 @@ impl RelationPlanVariant {
             self,
             context,
         )?);
-        for fold_ordinal in 0..context.fri_fold_count {
-            catalog.insert(challenge_descriptor(
-                RelationChallengeRole::FriFold,
-                vec![u64::from(fold_ordinal)],
-                1,
-                self,
-                context,
-            )?);
-        }
-        catalog.insert(challenge_descriptor(
-            RelationChallengeRole::QueryPosition,
-            vec![0],
-            context.unique_query_count,
-            self,
-            context,
-        )?);
         let catalog = catalog.into_iter().collect::<Vec<_>>();
         validate_challenge_catalog(&catalog, self, context)?;
         Ok(catalog)
     }
 
-    pub(crate) fn derived_challenge_epoch_catalogs(
+    pub(crate) fn common_proof_relation_prefix_schedule(
         &self,
         context: &RelationPlanCheckContext,
-    ) -> Result<Vec<RelationChallengeEpochCatalog>, RelationPlanError> {
-        let mut descriptors_by_epoch = BTreeMap::<u16, Vec<_>>::new();
-        for descriptor in self.derived_challenge_catalog(context)? {
-            descriptors_by_epoch
-                .entry(descriptor.epoch)
-                .or_default()
-                .push(descriptor);
-        }
-        let query_epoch = 4_u16
-            .checked_add(context.fri_fold_count)
-            .ok_or(RelationPlanError::CountOverflow)?;
-        descriptors_by_epoch
-            .into_iter()
-            .map(|(epoch, ordered_descriptors)| {
-                let preceding_message = match epoch {
-                    1 => RelationChallengeEpochPrecedingMessage::BaseRoots,
-                    2 => RelationChallengeEpochPrecedingMessage::AuxiliaryRoots,
-                    3 => RelationChallengeEpochPrecedingMessage::QuotientRoots,
-                    4 => RelationChallengeEpochPrecedingMessage::DeepValuesAndOpeningBatchMask,
-                    value if value == query_epoch => {
-                        RelationChallengeEpochPrecedingMessage::FriTerminal
-                    }
-                    value if value > 4 && value < query_epoch => {
-                        RelationChallengeEpochPrecedingMessage::FriLayerRoot(value - 5)
-                    }
-                    _ => return Err(RelationPlanError::InvalidChallengeCatalog),
-                };
-                Ok(RelationChallengeEpochCatalog {
-                    epoch,
-                    preceding_message,
-                    ordered_descriptors,
-                })
-            })
-            .collect()
-    }
-
-    pub(crate) fn common_proof_transcript_schedule(
-        &self,
-        context: &RelationPlanCheckContext,
-    ) -> Result<CommonProofTranscriptSchedule, RelationPlanError> {
+    ) -> Result<CommonProofRelationPrefixSchedule, RelationPlanError> {
         let mut next_base_tree_ordinal = 0_u16;
         let mut next_auxiliary_tree_ordinal = 0_u16;
         let mut ordered_base_tree_ordinals = Vec::new();
@@ -655,16 +606,15 @@ impl RelationPlanVariant {
 
         let mut application_group_inputs =
             BTreeMap::<CommonProofChallenge, (u64, BTreeSet<u16>)>::new();
-        for descriptor in
-            self.derived_challenge_catalog(context)?
-                .into_iter()
-                .filter(|descriptor| {
-                    matches!(
-                        descriptor.role,
-                        RelationChallengeRole::NonNativeTheta
-                            | RelationChallengeRole::NonNativeAlpha
-                    )
-                })
+        for descriptor in self
+            .derived_relation_prefix_challenge_catalog(context)?
+            .into_iter()
+            .filter(|descriptor| {
+                matches!(
+                    descriptor.role,
+                    RelationChallengeRole::NonNativeTheta | RelationChallengeRole::NonNativeAlpha
+                )
+            })
         {
             let modulus_ordinal = u16::try_from(descriptor.role_coordinates[0])
                 .map_err(|_| RelationPlanError::CountOverflow)?;
@@ -718,7 +668,7 @@ impl RelationPlanVariant {
             })
             .collect::<Result<Vec<_>, _>>()?;
 
-        CommonProofTranscriptSchedule::new(
+        CommonProofRelationPrefixSchedule::new(
             ordered_base_tree_ordinals,
             ordered_application_challenge_groups,
             ordered_auxiliary_tree_ordinals,
@@ -726,16 +676,9 @@ impl RelationPlanVariant {
                 .map_err(|_| RelationPlanError::CountOverflow)?,
             u16::try_from(context.quotient_component_count)
                 .map_err(|_| RelationPlanError::CountOverflow)?,
-            context.deep_point_count,
+            context.out_of_domain_point_count,
             u32::try_from(self.ordered_opening_claims.len())
                 .map_err(|_| RelationPlanError::CountOverflow)?,
-            context.fri_fold_count,
-            context.final_polynomial_degree_bound_exclusive,
-            context.unique_query_count,
-            self.evaluation_domain_size
-                .checked_div(2)
-                .filter(|count| *count > 0)
-                .ok_or(RelationPlanError::InvalidDomain)?,
             context.maximum_fiat_shamir_candidate_draws_per_output,
             match self.proof_privacy_mode {
                 ProofPrivacyMode::PublicOnly => CommonProofPrivacyMode::PublicOnly,
@@ -756,20 +699,8 @@ pub(super) fn challenge_descriptor(
     let epoch = match role {
         RelationChallengeRole::NonNativeTheta | RelationChallengeRole::NonNativeAlpha => 1,
         RelationChallengeRole::ConstraintComposition => 2,
-        RelationChallengeRole::DeepPoint => 3,
+        RelationChallengeRole::OutOfDomainPoint => 3,
         RelationChallengeRole::OpeningBatch => 4,
-        RelationChallengeRole::FriFold => 4_u16
-            .checked_add(
-                role_coordinates
-                    .first()
-                    .copied()
-                    .and_then(|ordinal| u16::try_from(ordinal).ok())
-                    .ok_or(RelationPlanError::InvalidChallengeCatalog)?,
-            )
-            .ok_or(RelationPlanError::CountOverflow)?,
-        RelationChallengeRole::QueryPosition => 4_u16
-            .checked_add(context.fri_fold_count)
-            .ok_or(RelationPlanError::CountOverflow)?,
     };
     let sampling = match role {
         RelationChallengeRole::NonNativeTheta => {
@@ -795,25 +726,22 @@ pub(super) fn challenge_descriptor(
                     .maximum_fiat_shamir_candidate_draws_per_output,
             }
         }
-        RelationChallengeRole::ConstraintComposition
-        | RelationChallengeRole::OpeningBatch
-        | RelationChallengeRole::FriFold => RelationChallengeSampling::IndependentResidues {
-            modulus_selector: RelationChallengeModulusSelector::BaseField,
-            coordinate_count: context.challenge_extension_degree,
-            maximum_candidate_draws_per_output: context
-                .maximum_fiat_shamir_candidate_draws_per_output,
-        },
-        RelationChallengeRole::DeepPoint => RelationChallengeSampling::NonzeroExtensionVectors {
-            base_modulus_selector: RelationChallengeModulusSelector::BaseField,
-            coordinate_count: context.challenge_extension_degree,
-            maximum_candidate_draws_per_output: context
-                .maximum_fiat_shamir_candidate_draws_per_output,
-        },
-        RelationChallengeRole::QueryPosition => RelationChallengeSampling::DistinctPositions {
-            position_count_selector: RelationChallengeModulusSelector::QueryOrbitCount,
-            maximum_candidate_draws_per_output: context
-                .maximum_fiat_shamir_candidate_draws_per_output,
-        },
+        RelationChallengeRole::ConstraintComposition | RelationChallengeRole::OpeningBatch => {
+            RelationChallengeSampling::IndependentResidues {
+                modulus_selector: RelationChallengeModulusSelector::BaseField,
+                coordinate_count: context.challenge_extension_degree,
+                maximum_candidate_draws_per_output: context
+                    .maximum_fiat_shamir_candidate_draws_per_output,
+            }
+        }
+        RelationChallengeRole::OutOfDomainPoint => {
+            RelationChallengeSampling::NonzeroExtensionVectors {
+                base_modulus_selector: RelationChallengeModulusSelector::BaseField,
+                coordinate_count: context.challenge_extension_degree,
+                maximum_candidate_draws_per_output: context
+                    .maximum_fiat_shamir_candidate_draws_per_output,
+            }
+        }
     };
     let descriptor = RelationChallengeDescriptor {
         epoch,

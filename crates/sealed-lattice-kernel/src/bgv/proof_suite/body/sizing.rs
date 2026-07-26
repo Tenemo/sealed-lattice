@@ -366,7 +366,7 @@ pub(crate) fn canonical_common_proof_byte_length_ceiling(
         .checked_mul(8)
         .ok_or(ProofBodyError::CountOverflow)?;
     let transcript_opening_claim_payload_byte_length =
-        usize::try_from(layout.deep_evaluation_count)
+        usize::try_from(layout.out_of_domain_evaluation_count)
             .map_err(|_| ProofBodyError::CountOverflow)?
             .checked_mul(extension_element_byte_length)
             .ok_or(ProofBodyError::CountOverflow)?;
@@ -503,7 +503,7 @@ pub(crate) fn proof_body_prefix_byte_length(
     let extension_element_byte_length = PROOF_CHALLENGE_EXTENSION_DEGREE
         .checked_mul(8)
         .ok_or(ProofBodyError::CountOverflow)?;
-    let deep_byte_length = usize::try_from(layout.deep_evaluation_count)
+    let out_of_domain_byte_length = usize::try_from(layout.out_of_domain_evaluation_count)
         .map_err(|_| ProofBodyError::CountOverflow)?
         .checked_mul(extension_element_byte_length)
         .and_then(|length| length.checked_add(6))
@@ -514,7 +514,7 @@ pub(crate) fn proof_body_prefix_byte_length(
         .and_then(|length| length.checked_add(6))
         .ok_or(ProofBodyError::CountOverflow)?;
     root_byte_length
-        .checked_add(deep_byte_length)
+        .checked_add(out_of_domain_byte_length)
         .and_then(|length| length.checked_add(terminal_byte_length))
         .ok_or(ProofBodyError::CountOverflow)
 }

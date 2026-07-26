@@ -1,7 +1,9 @@
+#[cfg(test)]
+use super::super::row_code_whir::RowCodeWhirConstructionPlan;
 use super::{
     BoundTreeConstructionKind, CanonicalDecodeLimits, CanonicalItem, CanonicalItemType,
     CanonicalTuple, CommonProofTranscript, CommonProofVerifierError, CompleteProofTreeCatalog,
-    DeepCompositionVerificationInput, FOUNDATION_PROFILE, PROOF_HEADER_HASH_DOMAIN,
+    FOUNDATION_PROFILE, OutOfDomainCompositionVerificationInput, PROOF_HEADER_HASH_DOMAIN,
     PROOF_OBJECT_HEADER_SCHEMA_VERSION, ProofApplicationSlotCeilings,
     ProofChallengeExtensionElement, ProofLeafVisibility, ProofTreeCatalogSource, ProofTreeRole,
     RelationColumnOrigin, RelationColumnValueType, RelationPlanCheckContext, RelationPlanVariant,
@@ -76,10 +78,11 @@ pub(crate) trait VerifiedRelationColumnEvaluator {
     ) -> Option<ProofChallengeExtensionElement>;
 }
 
-/// Verifies one complete common proof. Returning `None` from a verified-column
-/// evaluator fails closed; prover and bound-tree columns never call it.
+/// Verifies one complete checked-fixture common proof. Returning `None` from a
+/// verified-column evaluator fails closed; prover and bound-tree columns never
+/// call it.
 #[cfg(test)]
-pub(crate) fn verify_common_proof<Source, ColumnEvaluator>(
+pub(crate) fn verify_checked_fixture_common_proof<Source, ColumnEvaluator>(
     input: CommonProofVerificationInput<'_, Source>,
     evaluate_verified_column: &mut ColumnEvaluator,
 ) -> Result<VerifiedCommonProof, CommonProofVerifierError>
@@ -87,10 +90,19 @@ where
     Source: ProofByteSource + ?Sized,
     ColumnEvaluator: VerifiedRelationColumnEvaluator + ?Sized,
 {
-    let _validated_artifact = ValidatedRelationPlanArtifact::from_compiled_plan(
+    let validated_artifact = ValidatedRelationPlanArtifact::from_checked_fixture_plan(
         input.relation_plan,
         input.relation_context,
     )?;
+    let row_code_whir_construction_plan_identity_hash =
+        RowCodeWhirConstructionPlan::for_checked_fixture_variant(
+            &validated_artifact,
+            input.relation_context,
+            input.schedule_position,
+            input.top_count,
+        )
+        .and_then(|plan| plan.canonical_identity_hash())
+        .map_err(|_| CommonProofVerifierError::RowCodeWhirConstructionPlan)?;
     let application_statement = decode_application_statement(
         input.canonical_application_statement_bytes,
         input
@@ -136,7 +148,8 @@ where
     let variant = input
         .relation_plan
         .select_variant(input.schedule_position, input.top_count)?;
-    let transcript_schedule = variant.common_proof_transcript_schedule(input.relation_context)?;
+    let transcript_schedule =
+        super::super::packed_fri_transcript_schedule(variant, input.relation_context)?;
     let evaluation_domain = ProofEvaluationDomain::new(
         usize::try_from(variant.evaluation_domain_size())
             .map_err(|_| CommonProofVerifierError::InvalidTreeLayout)?,
@@ -178,6 +191,7 @@ where
     let mut transcript = CommonProofTranscript::new(
         input.protocol_version,
         input.suite_identifier,
+        row_code_whir_construction_plan_identity_hash,
         input
             .relation_plan
             .application_statement_schema_identifier(),
@@ -192,8 +206,10 @@ where
         transcript_schedule.ordered_base_tree_ordinals(),
     )?;
 
-    let application_challenges =
-        sample_relation_application_challenges(&mut transcript, &transcript_schedule)?;
+    let application_challenges = sample_relation_application_challenges(
+        &mut transcript,
+        transcript_schedule.relation_prefix_schedule(),
+    )?;
 
     absorb_relation_roots(
         &mut transcript,
@@ -223,45 +239,47 @@ where
         )?;
     }
 
-    let mut deep_points = Vec::new();
-    deep_points
-        .try_reserve_exact(usize::from(transcript_schedule.deep_point_count()))
+    let mut out_of_domain_points = Vec::new();
+    out_of_domain_points
+        .try_reserve_exact(usize::from(transcript_schedule.out_of_domain_point_count()))
         .map_err(|_| CommonProofVerifierError::InvalidTreeLayout)?;
-    for point_ordinal in 0..transcript_schedule.deep_point_count() {
+    for point_ordinal in 0..transcript_schedule.out_of_domain_point_count() {
         let mut relation_error = None;
-        let sampled = transcript.sample_deep_point(point_ordinal, |candidate| {
-            match variant.deep_point_candidate_is_forbidden(
-                input.relation_context,
-                point_ordinal,
-                candidate,
-                &deep_points,
-            ) {
-                Ok(is_forbidden) => is_forbidden,
-                Err(error) => {
-                    relation_error = Some(error);
-                    true
+        let sampled =
+            transcript.sample_out_of_domain_point(point_ordinal, |candidate| {
+                match variant.out_of_domain_point_candidate_is_forbidden(
+                    input.relation_context,
+                    point_ordinal,
+                    candidate,
+                    &out_of_domain_points,
+                ) {
+                    Ok(is_forbidden) => is_forbidden,
+                    Err(error) => {
+                        relation_error = Some(error);
+                        true
+                    }
                 }
-            }
-        });
+            });
         if let Some(error) = relation_error {
             return Err(error.into());
         }
-        deep_points.push(sampled?);
+        out_of_domain_points.push(sampled?);
     }
-    let opening_points = variant.derive_opening_points(input.relation_context, &deep_points)?;
-    verify_deep_composition_with_verified_sequences(
+    let opening_points =
+        variant.derive_opening_points(input.relation_context, &out_of_domain_points)?;
+    verify_out_of_domain_composition_with_verified_sequences(
         variant,
-        DeepCompositionVerificationInput::new(
+        OutOfDomainCompositionVerificationInput::new(
             input.relation_context,
             &application_challenges,
             &composition_challenges,
-            &deep_points,
+            &out_of_domain_points,
             &opening_points,
-            pending.deep_evaluations(),
+            pending.out_of_domain_evaluations(),
         ),
         evaluate_verified_column,
     )?;
-    transcript.absorb_deep_evaluations(pending.deep_evaluations())?;
+    transcript.absorb_out_of_domain_evaluations(pending.out_of_domain_evaluations())?;
 
     if transcript_schedule.privacy_mode() == CommonProofPrivacyMode::SecretBearing {
         transcript.absorb_opening_batch_mask_root(catalog_root(
@@ -309,19 +327,15 @@ where
         variant,
         layout.catalog(),
         &opening_points,
-        pending.deep_evaluations(),
+        pending.out_of_domain_evaluations(),
         &opening_batch_coefficients,
     )?;
     let fri_verifier = ProofFriQueryVerifier::new(
         evaluation_domain,
         fri_fold_challenges,
         pending.terminal_coefficients().to_vec(),
-        usize::try_from(
-            input
-                .relation_context
-                .final_polynomial_degree_bound_exclusive,
-        )
-        .map_err(|_| CommonProofVerifierError::InvalidTreeLayout)?,
+        usize::try_from(transcript_schedule.terminal_coefficient_count())
+            .map_err(|_| CommonProofVerifierError::InvalidTreeLayout)?,
     )?;
     let mut workspace = QueryVerificationWorkspace::new(
         layout.catalog().entries().len(),
@@ -892,19 +906,19 @@ pub(super) fn catalog_root(
     Ok(root)
 }
 
-pub(super) fn verify_deep_composition_with_verified_sequences<ColumnEvaluator>(
+pub(super) fn verify_out_of_domain_composition_with_verified_sequences<ColumnEvaluator>(
     variant: &RelationPlanVariant,
-    input: DeepCompositionVerificationInput<'_>,
+    input: OutOfDomainCompositionVerificationInput<'_>,
     evaluate_verified_column: &mut ColumnEvaluator,
 ) -> Result<(), CommonProofVerifierError>
 where
     ColumnEvaluator: VerifiedRelationColumnEvaluator + ?Sized,
 {
-    if input.ordered_deep_evaluations().len() != variant.ordered_opening_claims().len() {
+    if input.ordered_out_of_domain_evaluations().len() != variant.ordered_opening_claims().len() {
         return Err(CommonProofVerifierError::InvalidOpeningClaim);
     }
     let mut missing_verified_column_value = false;
-    let result = variant.verify_deep_composition(input, |column_ordinal, point| {
+    let result = variant.verify_out_of_domain_composition(input, |column_ordinal, point| {
         let value = evaluate_verified_column.evaluate_at_extension_point(column_ordinal, point);
         if value.is_none() {
             missing_verified_column_value = true;

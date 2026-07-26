@@ -2,13 +2,12 @@ use super::*;
 use crate::bgv::proof_suite::external_memory::MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_OBJECT_COUNT;
 use crate::bgv::proof_suite::relation_plan::RelationColumnOrigin;
 use crate::bgv::proof_suite::{
-    AuthenticatedCompactCommittedMaterialSource, COMMITTED_MATERIAL_PROOF_UNIQUE_QUERY_COUNT,
-    CommittedMaterialError, CommittedMaterialRelationPlanInput,
-    CommittedMaterialSourcePolynomialAdapter, CommonProofAuthenticatedSourceReadRequest,
-    CommonProofBoundTreeLeafSaltRequest, CommonProofGenerationPoll,
-    CommonProofSourcePolynomialProvider, CommonProofSourcePolynomialProviderPoll,
-    CommonProofSourcePolynomialRequest, CommonProofSourceProviderMemoryAccounting,
-    PROOF_EVALUATION_BLOWUP_FACTOR, ProvidedCommonProofSourcePolynomial,
+    AuthenticatedCompactCommittedMaterialSource, CommittedMaterialError,
+    CommittedMaterialRelationPlanInput, CommittedMaterialSourcePolynomialAdapter,
+    CommonProofAuthenticatedSourceReadRequest, CommonProofBoundTreeLeafSaltRequest,
+    CommonProofGenerationPoll, CommonProofSourcePolynomialProvider,
+    CommonProofSourcePolynomialProviderPoll, CommonProofSourcePolynomialRequest,
+    CommonProofSourceProviderMemoryAccounting, ProvidedCommonProofSourcePolynomial,
     compile_aggregate_threshold_share_relation_plan, compile_vss_share_linkage_relation_plan,
 };
 use zeroize::Zeroizing;
@@ -17,6 +16,7 @@ const VSS_ENGINE_TEST_RING_DEGREE: usize = 1_024;
 const VSS_ENGINE_TEST_EVALUATION_DOMAIN_SIZE: usize = 65_536;
 const VSS_ENGINE_TEST_OPENING_DEGREE_BOUND_EXCLUSIVE: u64 = 8_192;
 const VSS_ENGINE_TEST_MODULUS: u64 = 97;
+const VSS_ENGINE_TEST_PHASE_COLUMN_QUERY_COORDINATE_COUNT: u32 = 2;
 const VSS_ENGINE_TEST_MAXIMUM_PROOF_BYTE_LENGTH: usize = 64 * 1_024 * 1_024;
 const VSS_ENGINE_TEST_MAXIMUM_EXTERNAL_MEMORY_BYTE_LENGTH: usize = 512 * 1_024 * 1_024;
 
@@ -128,28 +128,6 @@ fn compact_vss_relation_input() -> CommittedMaterialRelationPlanInput {
     }
 }
 
-fn compact_engine_fri_fold_count() -> u16 {
-    let final_degree_bound = u64::from(PROOF_FINAL_POLYNOMIAL_DEGREE_BOUND_EXCLUSIVE);
-    let mut folded_degree_bound = VSS_ENGINE_TEST_OPENING_DEGREE_BOUND_EXCLUSIVE
-        .checked_sub(1)
-        .expect("the bounded opening degree has a nonzero initial FRI bound");
-    assert!(
-        folded_degree_bound > final_degree_bound,
-        "the bounded opening degree exceeds the final FRI degree",
-    );
-    let mut fold_count = 0_u16;
-    while folded_degree_bound > final_degree_bound {
-        folded_degree_bound = folded_degree_bound
-            .checked_add(1)
-            .and_then(|degree| degree.checked_div(2))
-            .expect("the bounded FRI degree halves");
-        fold_count = fold_count
-            .checked_add(1)
-            .expect("the bounded FRI fold count fits u16");
-    }
-    fold_count
-}
-
 fn compact_vss_relation_context() -> RelationPlanCheckContext {
     let input = compact_vss_relation_input();
     let evaluation_domain = ProofEvaluationDomain::new(
@@ -170,25 +148,19 @@ fn compact_vss_relation_context() -> RelationPlanCheckContext {
         .checked_add(rounded_mask_degree)
         .expect("the bounded quotient stride derives");
     let minimum_telescoping_mask_degree_bound_exclusive =
-        u64::from(COMMITTED_MATERIAL_PROOF_UNIQUE_QUERY_COUNT)
-            .checked_mul(2)
-            .and_then(|coordinate_count| {
-                coordinate_count.checked_add(u64::from(PROOF_DEEP_POINT_COUNT))
-            })
+        u64::from(VSS_ENGINE_TEST_PHASE_COLUMN_QUERY_COORDINATE_COUNT)
+            .checked_add(u64::from(PROOF_OUT_OF_DOMAIN_POINT_COUNT))
             .expect("the bounded telescoping mask degree derives");
     RelationPlanCheckContext {
         base_field_modulus: PROOF_BASE_FIELD_MODULUS,
         challenge_extension_degree: PROOF_CHALLENGE_EXTENSION_DEGREE as u16,
-        evaluation_blowup_factor: PROOF_EVALUATION_BLOWUP_FACTOR,
         evaluation_domain_generator: evaluation_domain.generator().canonical(),
         evaluation_coset_offset: PROOF_EVALUATION_COSET_OFFSET,
-        deep_point_count: PROOF_DEEP_POINT_COUNT,
+        out_of_domain_point_count: PROOF_OUT_OF_DOMAIN_POINT_COUNT,
         quotient_component_count: quotient_component_count as u32,
         quotient_component_degree_bound_exclusive: quotient_decomposition_stride
             + minimum_telescoping_mask_degree_bound_exclusive,
-        fri_fold_count: compact_engine_fri_fold_count(),
-        final_polynomial_degree_bound_exclusive: PROOF_FINAL_POLYNOMIAL_DEGREE_BOUND_EXCLUSIVE,
-        unique_query_count: COMMITTED_MATERIAL_PROOF_UNIQUE_QUERY_COUNT,
+        phase_column_query_coordinate_count: VSS_ENGINE_TEST_PHASE_COLUMN_QUERY_COORDINATE_COUNT,
         non_native_theta_repetition_count: PROOF_NON_NATIVE_THETA_REPETITION_COUNT,
         non_native_alpha_repetition_count: PROOF_NON_NATIVE_ALPHA_REPETITION_COUNT,
         maximum_fiat_shamir_candidate_draws_per_output:
@@ -337,6 +309,8 @@ fn compact_vss_proof_fixture(
     let material_profile = CommittedMaterialProfile::for_common_proof_evaluation_domain(
         VSS_ENGINE_TEST_RING_DEGREE,
         VSS_ENGINE_TEST_EVALUATION_DOMAIN_SIZE,
+        usize::try_from(VSS_ENGINE_TEST_OPENING_DEGREE_BOUND_EXCLUSIVE)
+            .expect("the bounded opening degree bound fits usize"),
     )
     .expect("the bounded committed-material profile derives");
     let mut ordered_messages = compact_vss_messages();
@@ -412,7 +386,7 @@ fn compact_vss_proof_fixture(
         schema_identifier,
         &canonical_application_statement_bytes,
     );
-    let relation_plan_capability = CommonProofRelationPlanCapability::from_compiled_plan(
+    let relation_plan_capability = CommonProofRelationPlanCapability::from_checked_fixture_plan(
         &relation_plan,
         &relation_context,
         None,
@@ -482,7 +456,7 @@ fn attempt_compact_vss_proof_generation(
     );
     let mut sink = BoundedCommonProofByteSink::new(VSS_ENGINE_TEST_MAXIMUM_PROOF_BYTE_LENGTH)
         .expect("the bounded VSS proof sink initializes");
-    let result = generate_common_proof(
+    let result = generate_checked_fixture_common_proof(
         CommonProofGenerationInput {
             protocol_version: FOUNDATION_PROFILE.protocol_version,
             suite_identifier: [0x11; 64],
@@ -513,7 +487,7 @@ fn verify_compact_vss_proof(
     canonical_application_statement_bytes: &[u8],
     statement_owned_trees: &[VerifiedStatementOwnedTree],
 ) -> Result<VerifiedCommonProof, CommonProofVerifierError> {
-    verify_common_proof(
+    verify_checked_fixture_common_proof(
         CommonProofVerificationInput {
             protocol_version: FOUNDATION_PROFILE.protocol_version,
             suite_identifier: [0x11; 64],
@@ -671,7 +645,7 @@ fn bounded_external_memory_preserves_protection_through_abort_and_lifecycle_reus
 #[test]
 fn compact_vss_generation_plan_reuses_storage_and_accepts_canonical_secret_source_replay() {
     let mut fixture = compact_vss_proof_fixture(false, false);
-    let relation_plan_capability = CommonProofRelationPlanCapability::from_compiled_plan(
+    let relation_plan_capability = CommonProofRelationPlanCapability::from_checked_fixture_plan(
         &fixture.engine.relation_plan,
         &fixture.engine.relation_context,
         None,
@@ -691,24 +665,25 @@ fn compact_vss_generation_plan_reuses_storage_and_accepts_canonical_secret_sourc
         .source_polynomial_provider
         .take()
         .expect("the bounded source provider is consumed exactly once");
-    let mut state = CommonProofGenerationStateMachine::new(CommonProofGenerationInput {
-        protocol_version: FOUNDATION_PROFILE.protocol_version,
-        suite_identifier: [0x11; 64],
-        canonical_application_statement_bytes: &fixture
-            .engine
-            .canonical_application_statement_bytes,
-        relation_plan: &fixture.engine.relation_plan,
-        relation_context: &fixture.engine.relation_context,
-        schedule_position: None,
-        top_count: None,
-        relation_trees: fixture.engine.relation_trees.clone(),
-        source_polynomial_provider,
-        maximum_external_memory_chunk_byte_length:
-            MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH,
-        maximum_proof_transport_chunk_byte_length: MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH,
-        maximum_prefetched_query_byte_length: VSS_ENGINE_TEST_MAXIMUM_PROOF_BYTE_LENGTH as u64,
-    })
-    .expect("the bounded VSS generation storage plan fits its enforced limits");
+    let mut state =
+        CommonProofGenerationStateMachine::new_for_checked_fixture(CommonProofGenerationInput {
+            protocol_version: FOUNDATION_PROFILE.protocol_version,
+            suite_identifier: [0x11; 64],
+            canonical_application_statement_bytes: &fixture
+                .engine
+                .canonical_application_statement_bytes,
+            relation_plan: &fixture.engine.relation_plan,
+            relation_context: &fixture.engine.relation_context,
+            schedule_position: None,
+            top_count: None,
+            relation_trees: fixture.engine.relation_trees.clone(),
+            source_polynomial_provider,
+            maximum_external_memory_chunk_byte_length:
+                MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH,
+            maximum_proof_transport_chunk_byte_length: MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH,
+            maximum_prefetched_query_byte_length: VSS_ENGINE_TEST_MAXIMUM_PROOF_BYTE_LENGTH as u64,
+        })
+        .expect("the bounded VSS generation storage plan fits its enforced limits");
     let requirement = state.external_memory_requirement();
     assert!(
         usize::try_from(requirement.distinct_physical_object_count())
@@ -760,6 +735,8 @@ fn authenticated_compact_vss_source_refuses_a_detached_canonical_message() {
     let material_profile = CommittedMaterialProfile::for_common_proof_evaluation_domain(
         VSS_ENGINE_TEST_RING_DEGREE,
         VSS_ENGINE_TEST_EVALUATION_DOMAIN_SIZE,
+        usize::try_from(VSS_ENGINE_TEST_OPENING_DEGREE_BOUND_EXCLUSIVE)
+            .expect("the bounded opening degree bound fits usize"),
     )
     .expect("the bounded committed-material profile derives");
     let canonical_message = compact_vss_messages()
@@ -1061,6 +1038,8 @@ fn compact_aggregate_threshold_share_proof_fixture(
     let material_profile = CommittedMaterialProfile::for_common_proof_evaluation_domain(
         VSS_ENGINE_TEST_RING_DEGREE,
         VSS_ENGINE_TEST_EVALUATION_DOMAIN_SIZE,
+        usize::try_from(VSS_ENGINE_TEST_OPENING_DEGREE_BOUND_EXCLUSIVE)
+            .expect("the bounded opening degree bound fits usize"),
     )
     .expect("the bounded committed-material profile derives");
     let bound_tree_descriptors = selected_variant
@@ -1146,7 +1125,7 @@ fn compact_aggregate_threshold_share_proof_fixture(
         schema_identifier,
         &canonical_application_statement_bytes,
     );
-    let relation_plan_capability = CommonProofRelationPlanCapability::from_compiled_plan(
+    let relation_plan_capability = CommonProofRelationPlanCapability::from_checked_fixture_plan(
         &relation_plan,
         &relation_context,
         None,
@@ -1226,7 +1205,7 @@ fn attempt_compact_aggregate_threshold_share_proof_generation(
     );
     let mut sink = BoundedCommonProofByteSink::new(VSS_ENGINE_TEST_MAXIMUM_PROOF_BYTE_LENGTH)
         .expect("the bounded aggregate proof sink initializes");
-    let result = generate_common_proof(
+    let result = generate_checked_fixture_common_proof(
         CommonProofGenerationInput {
             protocol_version: FOUNDATION_PROFILE.protocol_version,
             suite_identifier: AGGREGATE_THRESHOLD_SHARE_ENGINE_TEST_SUITE_IDENTIFIER,
@@ -1257,7 +1236,7 @@ fn verify_compact_aggregate_threshold_share_proof(
     canonical_application_statement_bytes: &[u8],
     statement_owned_trees: &[VerifiedStatementOwnedTree],
 ) -> Result<VerifiedCommonProof, CommonProofVerifierError> {
-    verify_common_proof(
+    verify_checked_fixture_common_proof(
         CommonProofVerificationInput {
             protocol_version: FOUNDATION_PROFILE.protocol_version,
             suite_identifier: AGGREGATE_THRESHOLD_SHARE_ENGINE_TEST_SUITE_IDENTIFIER,
@@ -1281,6 +1260,8 @@ fn authenticated_compact_aggregate_threshold_share_source_refuses_a_detached_can
     let material_profile = CommittedMaterialProfile::for_common_proof_evaluation_domain(
         VSS_ENGINE_TEST_RING_DEGREE,
         VSS_ENGINE_TEST_EVALUATION_DOMAIN_SIZE,
+        usize::try_from(VSS_ENGINE_TEST_OPENING_DEGREE_BOUND_EXCLUSIVE)
+            .expect("the bounded opening degree bound fits usize"),
     )
     .expect("the bounded committed-material profile derives");
     let canonical_message = compact_aggregate_threshold_share_messages()
@@ -1380,12 +1361,15 @@ fn heavy_rust_kernel_compact_aggregate_threshold_share_proof_verifies_and_refuse
     ));
     let (projection_fault_result, _) =
         attempt_compact_aggregate_threshold_share_proof_generation(&mut projection_fault_fixture);
-    assert!(matches!(
-        projection_fault_result,
-        Err(CommonProofGenerationError::Prover(
-            CommonProofProverError::InvalidTree
-        )),
-    ));
+    assert!(
+        matches!(
+            &projection_fault_result,
+            Err(CommonProofGenerationError::Prover(
+                CommonProofProverError::InvalidQuotient
+            )),
+        ),
+        "unexpected aggregate projection fault result: {projection_fault_result:?}",
+    );
 
     let mut quotient_fault_fixture = compact_aggregate_threshold_share_proof_fixture(Some(
         AggregateThresholdShareColumnFault::AggregateQuotient,

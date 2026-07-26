@@ -23,6 +23,7 @@ use crate::{
     transcript_core::encode_hex,
 };
 
+use super::super::prover::requested_pre_challenge_source_column_ordinals;
 use super::super::{
     CommonProofProverError, CommonProofRelationPlanCapability, CommonProofSourcePolynomial,
     CommonProofSourcePolynomialProvider, CommonProofSourcePolynomialProviderPoll,
@@ -36,8 +37,8 @@ use super::{
     RelationTreeDescriptor, RelationVerifierSource, SuiteModulusReference,
     galois_key_share_adapter::{
         anchor_full_row, centered_residue, exact_modular_quotient, exact_negacyclic_product_radix,
-        half_position, requested_source_column_ordinals, signed_integer_to_base_field,
-        split_balanced_quotient, split_rows_match, split_signed_i8_polynomial,
+        half_position, signed_integer_to_base_field, split_balanced_quotient, split_rows_match,
+        split_signed_i8_polynomial,
     },
     key_relation::{
         ExactRadixDigitColumnCatalog, RecenteredVerifierVectorWitness,
@@ -392,7 +393,8 @@ pub(crate) fn relinearization_round_one_source_provider_memory_accounting(
         .collect::<BTreeSet<_>>();
     let additional_dependencies =
         relinearization_round_one_additional_dependencies(source_layout_view);
-    let requested_column_count = requested_source_column_ordinals(relation_plan_variant)?.len();
+    let requested_column_count =
+        requested_pre_challenge_source_column_ordinals(relation_plan_variant)?.len();
     let adapter_retained_byte_length = [
         u64::try_from(size_of::<RelinearizationRoundOneSourcePolynomialAdapter>())
             .map_err(|_| CommonProofProverError::CountOverflow)?,
@@ -527,7 +529,8 @@ impl RelinearizationRoundOneSourcePolynomialAdapter {
             relation_plan_variant.top_count(),
         );
         let requested_column_ordinals =
-            requested_source_column_ordinals(&relation_plan_variant)?.into_boxed_slice();
+            requested_pre_challenge_source_column_ordinals(&relation_plan_variant)?
+                .into_boxed_slice();
         Ok(Self {
             authority_identifier: source.authority_identifier(),
             prepared_attempt: *source.prepared_attempt(),
@@ -638,7 +641,7 @@ impl CommonProofSourcePolynomialProvider for RelinearizationRoundOneSourcePolyno
         &self,
     ) -> Result<CommonProofSourceProviderMemoryAccounting, CommonProofProverError> {
         let requested_column_count =
-            requested_source_column_ordinals(&self.relation_plan_variant)?.len();
+            requested_pre_challenge_source_column_ordinals(&self.relation_plan_variant)?.len();
         if requested_column_count != self.requested_column_ordinals.len() {
             return Err(CommonProofProverError::InvalidColumn);
         }

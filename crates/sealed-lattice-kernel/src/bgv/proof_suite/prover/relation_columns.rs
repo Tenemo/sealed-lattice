@@ -739,22 +739,13 @@ impl CommonProofPreChallengeSourceCursor {
             .values()
             .copied()
             .collect::<BTreeSet<_>>();
-        let mut requested_column_ordinals = Vec::new();
-        requested_column_ordinals
-            .try_reserve_exact(variant.ordered_columns().len())
-            .map_err(|_| CommonProofProverError::AllocationLimitExceeded)?;
-        for column_index in 0..variant.ordered_columns().len() {
-            let column_ordinal =
-                u32::try_from(column_index).map_err(|_| CommonProofProverError::CountOverflow)?;
-            let is_auxiliary_tree_column =
-                tree_roles.get(&column_ordinal) == Some(&ProofTreeRole::AuxiliaryOracle);
-            if !reversed_columns.contains(&column_ordinal)
-                && !integer_lift_auxiliary_columns.contains(&column_ordinal)
-                && !is_auxiliary_tree_column
-            {
-                requested_column_ordinals.push(column_ordinal);
-            }
-        }
+        let requested_column_ordinals =
+            requested_pre_challenge_source_column_ordinals_from_derived_catalogs(
+                variant,
+                &tree_roles,
+                &reversed_columns,
+                &integer_lift_auxiliary_columns,
+            )?;
         let source_identity_part_count = u64::try_from(requested_column_ordinals.len())
             .ok()
             .and_then(|count| count.checked_add(2))
@@ -1165,21 +1156,15 @@ where
         })?;
     columns.resize_with(variant.ordered_columns().len(), || None);
 
-    let requested_source_count = variant
-        .ordered_columns()
-        .iter()
-        .enumerate()
-        .filter(|(column_index, _)| {
-            let Some(column_ordinal) = u32::try_from(*column_index).ok() else {
-                return false;
-            };
-            let is_auxiliary_tree_column =
-                tree_roles.get(&column_ordinal) == Some(&ProofTreeRole::AuxiliaryOracle);
-            !reversed_columns.contains(&column_ordinal)
-                && !integer_lift_auxiliary_columns.contains(&column_ordinal)
-                && !is_auxiliary_tree_column
-        })
-        .count();
+    let requested_column_ordinals =
+        requested_pre_challenge_source_column_ordinals_from_derived_catalogs(
+            variant,
+            &tree_roles,
+            &reversed_columns,
+            &integer_lift_auxiliary_columns,
+        )
+        .map_err(CommonProofPrivateCoinError::Prover)?;
+    let requested_source_count = requested_column_ordinals.len();
     let source_identity_part_count = u64::try_from(requested_source_count)
         .ok()
         .and_then(|count| count.checked_add(2))
@@ -1199,22 +1184,13 @@ where
             .to_le_bytes(),
     );
 
-    for (column_index, (column_slot, descriptor)) in columns
-        .iter_mut()
-        .zip(variant.ordered_columns())
-        .enumerate()
-    {
-        let column_ordinal = u32::try_from(column_index).map_err(|_| {
+    for column_ordinal in requested_column_ordinals {
+        let column_index = usize::try_from(column_ordinal).map_err(|_| {
             CommonProofPrivateCoinError::Prover(CommonProofProverError::CountOverflow)
         })?;
-        let is_auxiliary_tree_column =
-            tree_roles.get(&column_ordinal) == Some(&ProofTreeRole::AuxiliaryOracle);
-        if reversed_columns.contains(&column_ordinal)
-            || integer_lift_auxiliary_columns.contains(&column_ordinal)
-            || is_auxiliary_tree_column
-        {
-            continue;
-        }
+        let descriptor = variant.ordered_columns().get(column_index).ok_or(
+            CommonProofPrivateCoinError::Prover(CommonProofProverError::InvalidColumn),
+        )?;
         let ProvidedCommonProofSourcePolynomial {
             polynomial: source,
             replay_identity,
@@ -1235,7 +1211,17 @@ where
         coordinate_identity[..4].copy_from_slice(&column_ordinal.to_le_bytes());
         coordinate_identity[4..].copy_from_slice(&replay_identity.bytes());
         source_identity_hasher.absorb_part(&coordinate_identity);
-        *column_slot = Some(source);
+        let column_slot =
+            columns
+                .get_mut(column_index)
+                .ok_or(CommonProofPrivateCoinError::Prover(
+                    CommonProofProverError::InvalidColumn,
+                ))?;
+        if column_slot.replace(source).is_some() {
+            return Err(CommonProofPrivateCoinError::Prover(
+                CommonProofProverError::InvalidColumn,
+            ));
+        }
     }
     source_provider
         .finish()
@@ -1353,6 +1339,46 @@ pub(crate) fn proof_created_tree_roles_by_column(
         }
     }
     Ok(roles)
+}
+
+fn requested_pre_challenge_source_column_ordinals_from_derived_catalogs(
+    variant: &RelationPlanVariant,
+    proof_tree_roles: &BTreeMap<u32, ProofTreeRole>,
+    derived_reversed_columns: &BTreeSet<u32>,
+    integer_lift_auxiliary_columns: &BTreeSet<u32>,
+) -> Result<Vec<u32>, CommonProofProverError> {
+    let mut requested_column_ordinals = Vec::new();
+    requested_column_ordinals
+        .try_reserve_exact(variant.ordered_columns().len())
+        .map_err(|_| CommonProofProverError::AllocationLimitExceeded)?;
+    for column_index in 0..variant.ordered_columns().len() {
+        let column_ordinal =
+            u32::try_from(column_index).map_err(|_| CommonProofProverError::CountOverflow)?;
+        if proof_tree_roles.get(&column_ordinal) != Some(&ProofTreeRole::AuxiliaryOracle)
+            && !integer_lift_auxiliary_columns.contains(&column_ordinal)
+            && !derived_reversed_columns.contains(&column_ordinal)
+        {
+            requested_column_ordinals.push(column_ordinal);
+        }
+    }
+    Ok(requested_column_ordinals)
+}
+
+pub(crate) fn requested_pre_challenge_source_column_ordinals(
+    variant: &RelationPlanVariant,
+) -> Result<Vec<u32>, CommonProofProverError> {
+    let proof_tree_roles = proof_created_tree_roles_by_column(variant)?;
+    let (reversed_columns_by_source, integer_lift_auxiliary_columns) =
+        integer_lift_derived_columns(variant)?;
+    let derived_reversed_columns = reversed_columns_by_source
+        .into_values()
+        .collect::<BTreeSet<_>>();
+    requested_pre_challenge_source_column_ordinals_from_derived_catalogs(
+        variant,
+        &proof_tree_roles,
+        &derived_reversed_columns,
+        &integer_lift_auxiliary_columns,
+    )
 }
 
 pub(crate) fn integer_lift_derived_columns(
@@ -2594,4 +2620,145 @@ pub(crate) fn relation_column_replay_requirements(
         }
     }
     Ok(requirements)
+}
+
+#[cfg(test)]
+mod requested_pre_challenge_source_column_tests {
+    use std::collections::BTreeSet;
+
+    use crate::{
+        bgv::proof_suite::{ProofTreeRole, selected_relation_plans},
+        foundation::ProofApplicationSlotCeilings,
+    };
+
+    use super::{
+        integer_lift_derived_columns, proof_created_tree_roles_by_column,
+        requested_pre_challenge_source_column_ordinals,
+    };
+
+    fn expected_requested_source_column_count(schema_identifier: u16) -> usize {
+        match schema_identifier {
+            ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER => 2_018,
+            ProofApplicationSlotCeilings::PUBLIC_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER => 4_528,
+            ProofApplicationSlotCeilings::COLLECTIVE_PUBLIC_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER => 506,
+            ProofApplicationSlotCeilings::RELINEARIZATION_ROUND_ONE_STATEMENT_SCHEMA_IDENTIFIER => 61_140,
+            ProofApplicationSlotCeilings::RKG_ROUND_ONE_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER => 9_152,
+            ProofApplicationSlotCeilings::RELINEARIZATION_ROUND_TWO_STATEMENT_SCHEMA_IDENTIFIER => 157_508,
+            ProofApplicationSlotCeilings::GALOIS_KEY_SHARE_STATEMENT_SCHEMA_IDENTIFIER => 123_450,
+            ProofApplicationSlotCeilings::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER => 20_680,
+            ProofApplicationSlotCeilings::BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER => 1_728,
+            ProofApplicationSlotCeilings::TARGET_SHARE_PROOF_STATEMENT_SCHEMA_IDENTIFIER => 25_670,
+            ProofApplicationSlotCeilings::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER => 3_451,
+            ProofApplicationSlotCeilings::AGGREGATE_THRESHOLD_SHARE_STATEMENT_SCHEMA_IDENTIFIER => 2_528,
+            _ => panic!("unexpected selected proof family {schema_identifier}"),
+        }
+    }
+
+    #[test]
+    fn selected_pre_challenge_source_column_catalog_matches_exact_family_geometry() {
+        let selected_plans = selected_relation_plans().expect("selected relation plans compile");
+        let mut variant_count = 0_usize;
+        let mut evaluator_top_counts = BTreeSet::new();
+        let mut observed_repeated_reversed_column_binding = false;
+        let mut observed_integer_lift_auxiliary_column = false;
+
+        for artifact in selected_plans {
+            let schema_identifier = artifact.application_statement_schema_identifier();
+            let expected_requested_count =
+                expected_requested_source_column_count(schema_identifier);
+            for variant in artifact.compiled_plan().variants() {
+                variant_count += 1;
+                if schema_identifier
+                    == ProofApplicationSlotCeilings::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER
+                {
+                    assert!(
+                        evaluator_top_counts.insert(
+                            variant
+                                .top_count()
+                                .expect("each evaluator aggregate variant has a top count"),
+                        ),
+                        "evaluator aggregate top counts are unique",
+                    );
+                }
+
+                let requested_column_ordinals =
+                    requested_pre_challenge_source_column_ordinals(variant)
+                        .expect("selected requested source columns derive");
+                assert_eq!(
+                    requested_column_ordinals.len(),
+                    expected_requested_count,
+                    "family {schema_identifier} has the exact requested source count",
+                );
+                assert!(
+                    requested_column_ordinals
+                        .windows(2)
+                        .all(|pair| pair[0] < pair[1]),
+                    "requested source columns remain in strict physical-column order",
+                );
+
+                let proof_tree_roles = proof_created_tree_roles_by_column(variant)
+                    .expect("selected proof tree roles derive");
+                let auxiliary_oracle_columns = proof_tree_roles
+                    .iter()
+                    .filter_map(|(column_ordinal, role)| {
+                        (*role == ProofTreeRole::AuxiliaryOracle).then_some(*column_ordinal)
+                    })
+                    .collect::<BTreeSet<_>>();
+                let (reversed_columns_by_source, integer_lift_auxiliary_columns) =
+                    integer_lift_derived_columns(variant)
+                        .expect("selected integer-lift columns derive");
+                let derived_reversed_columns = reversed_columns_by_source
+                    .into_values()
+                    .collect::<BTreeSet<_>>();
+                assert!(
+                    integer_lift_auxiliary_columns.is_subset(&auxiliary_oracle_columns),
+                    "integer-lift auxiliary columns are owned by the auxiliary oracle",
+                );
+                assert!(
+                    auxiliary_oracle_columns.is_disjoint(&derived_reversed_columns),
+                    "derived reversed columns remain base-oracle columns",
+                );
+                observed_integer_lift_auxiliary_column |=
+                    !integer_lift_auxiliary_columns.is_empty();
+
+                let excluded_columns = auxiliary_oracle_columns
+                    .union(&derived_reversed_columns)
+                    .copied()
+                    .collect::<BTreeSet<_>>();
+                assert!(requested_column_ordinals.iter().all(|column_ordinal| {
+                    usize::try_from(*column_ordinal)
+                        .ok()
+                        .is_some_and(|column_index| {
+                            column_index < variant.ordered_columns().len()
+                                && !excluded_columns.contains(column_ordinal)
+                        })
+                }));
+                assert_eq!(
+                    requested_column_ordinals.len(),
+                    variant
+                        .ordered_columns()
+                        .len()
+                        .checked_sub(excluded_columns.len())
+                        .expect("excluded columns fit the relation column catalog"),
+                    "auxiliary and derived reversed columns are excluded as one set union",
+                );
+
+                let raw_reversed_binding_count = variant
+                    .ordered_integer_lift_batches()
+                    .iter()
+                    .map(|batch| batch.ordered_reversed_column_bindings.len())
+                    .sum::<usize>();
+                observed_repeated_reversed_column_binding |=
+                    raw_reversed_binding_count > derived_reversed_columns.len();
+            }
+        }
+
+        assert_eq!(variant_count, 31);
+        assert_eq!(evaluator_top_counts, (1_u16..=20).collect::<BTreeSet<_>>());
+        assert!(observed_integer_lift_auxiliary_column);
+        assert!(
+            observed_repeated_reversed_column_binding,
+            "theta-repeated reversal descriptors exclude each physical column only once",
+        );
+    }
 }

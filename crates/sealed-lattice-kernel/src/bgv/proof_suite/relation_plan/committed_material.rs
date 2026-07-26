@@ -1016,12 +1016,12 @@ impl<'context> CommittedMaterialPlanBuilder<'context> {
             )
             .collect::<Result<Vec<_>, RelationPlanError>>()?;
 
-        let ordered_opening_points = (0..self.context.deep_point_count)
-            .flat_map(|deep_point_ordinal| {
+        let ordered_opening_points = (0..self.context.out_of_domain_point_count)
+            .flat_map(|out_of_domain_point_ordinal| {
                 used_rotations
                     .iter()
                     .map(move |rotation| RelationOpeningPointDescriptor {
-                        deep_point_ordinal,
+                        out_of_domain_point_ordinal,
                         trace_rotation_is_negative: rotation.0,
                         trace_rotation_magnitude: rotation.1,
                         conjugate_index: 0,
@@ -1051,14 +1051,14 @@ impl<'context> CommittedMaterialPlanBuilder<'context> {
                     .get(*column_ordinal as usize)
                     .ok_or(RelationPlanError::InvalidOpening)?
                     .source_degree_bound_exclusive;
-                for deep_point_ordinal in 0..self.context.deep_point_count {
+                for out_of_domain_point_ordinal in 0..self.context.out_of_domain_point_count {
                     for rotation in required_rotations_by_column
                         .get(column_ordinal)
                         .ok_or(RelationPlanError::InvalidOpening)?
                     {
                         let opening_point_ordinal = opening_point_ordinals
                             .get(&RelationOpeningPointDescriptor {
-                                deep_point_ordinal,
+                                out_of_domain_point_ordinal,
                                 trace_rotation_is_negative: rotation.0,
                                 trace_rotation_magnitude: rotation.1,
                                 conjugate_index: 0,
@@ -1078,10 +1078,10 @@ impl<'context> CommittedMaterialPlanBuilder<'context> {
             }
         }
         for quotient_ordinal in 0..self.context.quotient_component_count {
-            for deep_point_ordinal in 0..self.context.deep_point_count {
+            for out_of_domain_point_ordinal in 0..self.context.out_of_domain_point_count {
                 let opening_point_ordinal = opening_point_ordinals
                     .get(&RelationOpeningPointDescriptor {
-                        deep_point_ordinal,
+                        out_of_domain_point_ordinal,
                         trace_rotation_is_negative: false,
                         trace_rotation_magnitude: 0,
                         conjugate_index: 0,
@@ -2710,15 +2710,15 @@ mod tests {
         COMMITTED_MATERIAL_TRACE_PACKING_FACTOR, CommittedMaterialColumnRecipe,
         CommittedMaterialIntegerRecipe, CommittedMaterialRelationPlanInput,
         MATERIAL_DIGIT_TERNARY_DIGIT_COUNT, MonomialActionBranch, RelationBoundCertificate,
-        RelationColumnOrigin, RelationPlanCheckContext, RelationPlanError, ResolvedSuiteModulus,
-        SuiteModulusReference, TERNARY_DIGIT_RADIX,
+        RelationColumnOrigin, RelationPlanCheckContext, RelationPlanError, RelationTreeDescriptor,
+        ResolvedSuiteModulus, SuiteModulusReference, TERNARY_DIGIT_RADIX,
         derive_aggregate_threshold_share_trace_witness_provider,
         derive_vss_share_linkage_trace_witness_provider, modular_power, monomial_action_branches,
         vss_share_linkage_trace_witness_structure_memory_accounting,
     };
     use crate::bgv::proof_suite::{
         AuthenticatedCompactCommittedMaterialSource, CommittedMaterialProfile,
-        CommittedMaterialTree,
+        CommittedMaterialTree, ProofTreeRole,
     };
     use crate::foundation::{
         MAXIMUM_CONFIGURABLE_PARTICIPANT_COUNT, MINIMUM_CONFIGURABLE_PARTICIPANT_COUNT,
@@ -2730,8 +2730,8 @@ mod tests {
         let evaluation_domain_size = 4_096_u64;
         let relation_input = trace_witness_input();
         let quotient_component_count = 3_u64;
-        let deep_point_count = 1_u64;
-        let unique_query_count = 1_u64;
+        let out_of_domain_point_count = 1_u64;
+        let phase_column_query_coordinate_count = 1_u64;
         let rounded_mask_degree = quotient_component_count
             .checked_add(1)
             .and_then(|count| count.checked_mul(relation_input.trace_mask_degree_bound_exclusive))
@@ -2743,31 +2743,28 @@ mod tests {
             .expect("test relation trace domain derives")
             .checked_add(rounded_mask_degree)
             .expect("test quotient decomposition stride derives");
-        let minimum_telescoping_mask_degree_bound_exclusive = unique_query_count
-            .checked_mul(2)
-            .and_then(|query_coordinate_count| query_coordinate_count.checked_add(deep_point_count))
+        let minimum_telescoping_mask_degree_bound_exclusive = phase_column_query_coordinate_count
+            .checked_add(out_of_domain_point_count)
             .expect("test telescoping mask degree derives");
         RelationPlanCheckContext {
             base_field_modulus: crate::bgv::proof_suite::PROOF_BASE_FIELD_MODULUS,
             challenge_extension_degree: crate::bgv::proof_suite::PROOF_CHALLENGE_EXTENSION_DEGREE
                 as u16,
-            evaluation_blowup_factor: crate::bgv::proof_suite::PROOF_EVALUATION_BLOWUP_FACTOR,
             evaluation_domain_generator: modular_power(
                 crate::bgv::proof_suite::PROOF_BASE_FIELD_MAXIMUM_TWO_ADIC_GENERATOR,
                 (1_u64 << 32) / evaluation_domain_size,
                 crate::bgv::proof_suite::PROOF_BASE_FIELD_MODULUS,
             ),
             evaluation_coset_offset: 7,
-            deep_point_count: u16::try_from(deep_point_count).expect("test deep-point count fits"),
+            out_of_domain_point_count: u16::try_from(out_of_domain_point_count)
+                .expect("test out-of-domain-point count fits"),
             quotient_component_count: u32::try_from(quotient_component_count)
                 .expect("test quotient component count fits"),
             quotient_component_degree_bound_exclusive: quotient_decomposition_stride
                 .checked_add(minimum_telescoping_mask_degree_bound_exclusive)
                 .expect("test quotient component degree bound derives"),
-            fri_fold_count: 6,
-            final_polynomial_degree_bound_exclusive: 8,
-            unique_query_count: u32::try_from(unique_query_count)
-                .expect("test unique-query count fits"),
+            phase_column_query_coordinate_count: u32::try_from(phase_column_query_coordinate_count)
+                .expect("test phase-column query-coordinate count fits"),
             non_native_theta_repetition_count: 1,
             non_native_alpha_repetition_count: 1,
             maximum_fiat_shamir_candidate_draws_per_output: 128,
@@ -2784,7 +2781,9 @@ mod tests {
                 u64::try_from(crate::bgv::proof_suite::PROOF_CHALLENGE_EXTENSION_DEGREE)
                     .expect("test challenge extension degree fits"),
             )
-            .and_then(|deep_coordinate_count| deep_coordinate_count.checked_add(2))
+            .and_then(|out_of_domain_coordinate_count| {
+                out_of_domain_coordinate_count.checked_add(1)
+            })
             .expect("test trace mask degree derives");
         CommittedMaterialRelationPlanInput {
             ring_degree: 64,
@@ -2810,6 +2809,8 @@ mod tests {
             ring_degree,
             usize::try_from(input.evaluation_domain_size)
                 .expect("test evaluation domain size fits usize"),
+            usize::try_from(input.opening_degree_bound_exclusive)
+                .expect("test opening degree bound fits usize"),
         )
         .expect("test committed-material profile derives");
         assert_eq!(
@@ -3154,9 +3155,30 @@ mod tests {
             &input, &context,
         )
         .expect("test aggregate relation plan");
+        let [projection_column_ordinal, _, _] = provider
+            .representative_aggregate_projection_digit_and_quotient_column_ordinals()
+            .expect("the aggregate witness exposes representative semantic columns");
+        assert_eq!(projection_column_ordinal, 16);
+        let variant = &plan.variants()[0];
+        assert_eq!(
+            variant.ordered_columns
+                [usize::try_from(projection_column_ordinal).expect("column ordinal fits usize")]
+            .origin,
+            RelationColumnOrigin::Prover,
+        );
+        assert!(variant.ordered_trees.iter().any(|tree| {
+            matches!(
+                tree,
+                RelationTreeDescriptor::ProofCreated {
+                    proof_tree_role,
+                    ordered_column_ordinals,
+                } if *proof_tree_role == ProofTreeRole::BaseOracle as u16
+                    && ordered_column_ordinals.contains(&projection_column_ordinal)
+            )
+        }));
         assert_eq!(
             provider.ordered_column_ordinals().len(),
-            plan.variants()[0]
+            variant
                 .ordered_columns
                 .iter()
                 .filter(|column| matches!(column.origin, RelationColumnOrigin::Prover))

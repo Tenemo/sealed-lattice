@@ -67,21 +67,6 @@ pub fn hash_foundation_tuple_512(
     Ok(Hash512(output))
 }
 
-/// Fills one arbitrary-length SHAKE256 output for a typed foundation tuple.
-/// This is one XOF evaluation at one framed input, not a chain of separately
-/// addressable hashes. It is kept crate-private for verifier messages whose
-/// logical challenge space is wider than 512 bits.
-pub(crate) fn fill_foundation_tuple_xof(
-    domain: &str,
-    items: &[CanonicalItem],
-    output: &mut [u8],
-) -> Result<(), CanonicalCodecError> {
-    let hasher = foundation_tuple_hasher(domain, items)?;
-    let mut reader = hasher.finalize_xof();
-    reader.read(output);
-    Ok(())
-}
-
 fn foundation_tuple_hasher(
     domain: &str,
     items: &[CanonicalItem],
@@ -249,37 +234,6 @@ mod tests {
         reader.read(&mut expected);
         assert_eq!(actual, Hash512::from_bytes(expected));
         assert_eq!(actual.to_lowercase_hex().len(), 128);
-    }
-
-    #[test]
-    fn extended_output_keeps_the_hash512_prefix_at_one_framed_input() {
-        let items = [
-            CanonicalItem::hash512([0x41; 64]),
-            CanonicalItem::nonempty_ascii("proof/1216/query-vector")
-                .expect("test tag is canonical"),
-            CanonicalItem::unsigned64(0),
-        ];
-        let expected_prefix =
-            hash_foundation_tuple_512("sealed-lattice/proof/transcript/squeeze/v1", &items)
-                .expect("the hash input is canonical");
-        let mut extended_output = [0_u8; 1024];
-
-        fill_foundation_tuple_xof(
-            "sealed-lattice/proof/transcript/squeeze/v1",
-            &items,
-            &mut extended_output,
-        )
-        .expect("the extended output input is canonical");
-
-        assert_eq!(
-            &extended_output[..Hash512::BYTE_LENGTH],
-            expected_prefix.as_bytes(),
-        );
-        assert!(
-            extended_output[Hash512::BYTE_LENGTH..]
-                .iter()
-                .any(|byte| *byte != 0)
-        );
     }
 
     #[test]

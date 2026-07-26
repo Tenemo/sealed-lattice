@@ -24,7 +24,7 @@ fn runtime_registry_accepts_only_terminal_verifier_tokens_and_retires_stale_hand
     let expected_proof_header_hash = verified_proof.proof_header_hash();
     let expected_proof_stream_full_object_digest =
         verified_stream.full_object_digest().into_bytes();
-    let relation_plan_capability = CommonProofRelationPlanCapability::from_compiled_plan(
+    let relation_plan_capability = CommonProofRelationPlanCapability::from_checked_fixture_plan(
         &fixture.relation_plan,
         &fixture.relation_context,
         fixture.schedule_position,
@@ -133,7 +133,7 @@ fn runtime_registry_accepts_only_terminal_verifier_tokens_and_retires_stale_hand
         ),
         (
             proof_bytes.len() as u64,
-            PUBLIC_AGGREGATE_TEST_UNIQUE_QUERY_COUNT,
+            PUBLIC_AGGREGATE_TEST_PACKED_FRI_QUERY_COUNT,
         ),
     );
     let durable_frame = prepared.durable_authorization_frame();
@@ -198,7 +198,7 @@ fn runtime_registry_accepts_only_terminal_verifier_tokens_and_retires_stale_hand
     );
     assert_eq!(
         u32::from_le_bytes(durable_frame[670..674].try_into().unwrap()),
-        PUBLIC_AGGREGATE_TEST_UNIQUE_QUERY_COUNT,
+        PUBLIC_AGGREGATE_TEST_PACKED_FRI_QUERY_COUNT,
     );
     assert_eq!(
         &durable_frame[674..738],
@@ -401,7 +401,7 @@ fn upstream_input_registry_consumes_only_one_complete_application_owned_capabili
         super::super::super::super::MAXIMUM_COMMON_PROOF_BYTE_LENGTH as u64,
     )
     .expect("the fixed worker limits are valid");
-    let relation_plan_capability = CommonProofRelationPlanCapability::from_compiled_plan(
+    let relation_plan_capability = CommonProofRelationPlanCapability::from_checked_fixture_plan(
         &fixture.relation_plan,
         &fixture.relation_context,
         fixture.schedule_position,
@@ -417,7 +417,7 @@ fn upstream_input_registry_consumes_only_one_complete_application_owned_capabili
         CanonicalStreamDomain::CollectivePublicKeyAggregateProof,
         [0x44; 64],
         super::super::super::super::MAXIMUM_COMMON_PROOF_BYTE_LENGTH as u64,
-        PUBLIC_AGGREGATE_TEST_UNIQUE_QUERY_COUNT,
+        PUBLIC_AGGREGATE_TEST_PACKED_FRI_QUERY_COUNT,
     )
     .expect("the application reservation fits the worker safety bound");
     let binding = CommonProofVerificationBinding::new(
@@ -459,13 +459,14 @@ fn upstream_input_registry_consumes_only_one_complete_application_owned_capabili
         "a second batch cannot replace the application-owned catalog",
     );
 
-    let second_relation_plan_capability = CommonProofRelationPlanCapability::from_compiled_plan(
-        &fixture.relation_plan,
-        &fixture.relation_context,
-        fixture.schedule_position,
-        fixture.top_count,
-    )
-    .expect("the same checked plan can back an independent application");
+    let second_relation_plan_capability =
+        CommonProofRelationPlanCapability::from_checked_fixture_plan(
+            &fixture.relation_plan,
+            &fixture.relation_context,
+            fixture.schedule_position,
+            fixture.top_count,
+        )
+        .expect("the same checked plan can back an independent application");
     let second_application_handle = registry
         .install_test_application_fixture(
             binding,
@@ -556,7 +557,7 @@ fn application_owned_statement_tree_batch_does_not_spend_one_registry_entry_per_
         statement_tree_count > 64,
         "the regression must cover a catalog larger than the registry ceiling",
     );
-    let relation_plan_capability = CommonProofRelationPlanCapability::from_compiled_plan(
+    let relation_plan_capability = CommonProofRelationPlanCapability::from_checked_fixture_plan(
         relation_plan_artifact.compiled_plan(),
         &relation_context,
         None,

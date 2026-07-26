@@ -471,12 +471,52 @@ export const proofRandomnessFamilyAssignments = Object.freeze([
     }),
 ]);
 
-const isAssignedRandomUse = (family: number, purpose: number): boolean => {
-    if (purpose === 0 || purpose === 0xffff) {
+const assignedRuntimeCheckpointRandomUseFamilySet = new Set<number>([
+    0x0116,
+    0x1201,
+    0x2120,
+    0x0200,
+    0x1630,
+    ...proofRandomnessFamilyAssignments.map(
+        (assignment) => assignment.familySchemaIdentifier,
+    ),
+]);
+
+const publicOnlyCommonProofCheckpointFamilySet = new Set<number>([
+    0x1213, 0x1215, 0x1218,
+]);
+
+export const isPublicOnlyCommonProofCheckpointFamily = (
+    family: number,
+): boolean =>
+    Number.isInteger(family) &&
+    family > 0 &&
+    family <= 0xffff &&
+    publicOnlyCommonProofCheckpointFamilySet.has(family);
+
+export const isAssignedRuntimeCheckpointRandomUseFamily = (
+    family: number,
+): boolean =>
+    Number.isInteger(family) &&
+    family > 0 &&
+    family <= 0xffff &&
+    assignedRuntimeCheckpointRandomUseFamilySet.has(family);
+
+export const isAssignedRuntimeCheckpointRandomUse = (
+    family: number,
+    purpose: number,
+): boolean => {
+    if (
+        !isAssignedRuntimeCheckpointRandomUseFamily(family) ||
+        !Number.isInteger(purpose) ||
+        purpose <= 0 ||
+        purpose > 0xffff ||
+        purpose === 0xffff
+    ) {
         return false;
     }
     if (family === 0x0116) {
-        return purpose >= 1 && purpose <= 12 && purpose !== 0;
+        return purpose <= 12;
     }
     if (family === 0x1201) {
         return purpose === 1 || purpose === 2 || purpose === 4;
@@ -552,7 +592,7 @@ const parseCheckpointRandomUse = (
     }
     const family = readUnsigned16Item(tuple, 0);
     const purpose = readUnsigned16Item(tuple, 1);
-    if (!isAssignedRandomUse(family, purpose)) {
+    if (!isAssignedRuntimeCheckpointRandomUse(family, purpose)) {
         return fail('A checkpoint random-use profile is unassigned.');
     }
     return Object.freeze({ family, purpose });

@@ -33,10 +33,9 @@ use super::super::super::{
     EvaluatorKeyAggregateVariantInput, MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH,
     MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH,
     MAXIMUM_COMMON_PROOF_WASM_RESIDENT_BYTE_LENGTH, PROOF_BASE_FIELD_MODULUS,
-    PROOF_CHALLENGE_EXTENSION_DEGREE, PROOF_DEEP_POINT_COUNT, PROOF_EVALUATION_COSET_OFFSET,
-    PROOF_FINAL_POLYNOMIAL_DEGREE_BOUND_EXCLUSIVE,
+    PROOF_CHALLENGE_EXTENSION_DEGREE, PROOF_EVALUATION_COSET_OFFSET,
     PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT, PROOF_NON_NATIVE_ALPHA_REPETITION_COUNT,
-    PROOF_NON_NATIVE_THETA_REPETITION_COUNT, PROOF_UNIQUE_QUERY_COUNT,
+    PROOF_NON_NATIVE_THETA_REPETITION_COUNT, PROOF_OUT_OF_DOMAIN_POINT_COUNT,
     PollableCommonProofVerificationInput, PreparedCommonProofGeneration,
     PreparedCommonProofVerification, ProofBaseFieldElement, ProofBodyError,
     ProofChallengeExtensionElement, ProofDecodeError, ProofEvaluationDomain, ProofExternalMemory,
@@ -55,9 +54,9 @@ use super::super::super::{
     compile_evaluator_key_aggregate_relation_plan, compile_rkg_round_one_aggregate_relation_plan,
     construct_composed_quotient_polynomial,
     construct_constraint_stream_composed_quotient_polynomial, durable_authorization_frame_digest,
-    encode_common_proof_checkpoint_cursor_manifest, generate_common_proof,
+    encode_common_proof_checkpoint_cursor_manifest, generate_checked_fixture_common_proof,
     selected_relation_plan_check_context, selected_relation_plans,
-    verified_application_statement_hash, verify_common_proof,
+    verified_application_statement_hash, verify_checked_fixture_common_proof,
 };
 use super::super::SCHEMA_VERSION;
 
@@ -65,11 +64,12 @@ const APPLICATION_STATEMENT_SCHEMA_IDENTIFIER: u16 = 0x1213;
 const RKG_ROUND_ONE_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER: u16 = 0x1215;
 const EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER: u16 = 0x1218;
 const PUBLIC_AGGREGATE_TEST_EVALUATION_DOMAIN_SIZE: u64 = 4_096;
-const PUBLIC_AGGREGATE_TEST_EVALUATION_BLOWUP_FACTOR: u32 = 8;
 const PUBLIC_AGGREGATE_TEST_RING_DEGREE: u64 = 4;
 const PUBLIC_AGGREGATE_TEST_COLUMN_DEGREE_BOUND_EXCLUSIVE: usize =
     PUBLIC_AGGREGATE_TEST_RING_DEGREE as usize / 2;
-const PUBLIC_AGGREGATE_TEST_UNIQUE_QUERY_COUNT: u32 = PROOF_UNIQUE_QUERY_COUNT;
+const PUBLIC_AGGREGATE_TEST_PHASE_COLUMN_QUERY_COORDINATE_COUNT: u32 = 16;
+const PUBLIC_AGGREGATE_TEST_PACKED_FRI_QUERY_COUNT: u32 =
+    PUBLIC_AGGREGATE_TEST_PHASE_COLUMN_QUERY_COORDINATE_COUNT / 2;
 const OPENING_DEGREE_BOUND_EXCLUSIVE: u64 = 258;
 const MAXIMUM_PROOF_BYTE_LENGTH: usize = 16 * 1_024 * 1_024;
 const MAXIMUM_EXTERNAL_MEMORY_BYTE_LENGTH: usize = 64 * 1_024 * 1_024;
@@ -593,15 +593,13 @@ fn relation_context() -> RelationPlanCheckContext {
     RelationPlanCheckContext {
         base_field_modulus: PROOF_BASE_FIELD_MODULUS,
         challenge_extension_degree: PROOF_CHALLENGE_EXTENSION_DEGREE as u16,
-        evaluation_blowup_factor: PUBLIC_AGGREGATE_TEST_EVALUATION_BLOWUP_FACTOR,
         evaluation_domain_generator: evaluation_domain.generator().canonical(),
         evaluation_coset_offset: PROOF_EVALUATION_COSET_OFFSET,
-        deep_point_count: PROOF_DEEP_POINT_COUNT,
+        out_of_domain_point_count: PROOF_OUT_OF_DOMAIN_POINT_COUNT,
         quotient_component_count: 2,
         quotient_component_degree_bound_exclusive: 2,
-        fri_fold_count: 1,
-        final_polynomial_degree_bound_exclusive: PROOF_FINAL_POLYNOMIAL_DEGREE_BOUND_EXCLUSIVE,
-        unique_query_count: PUBLIC_AGGREGATE_TEST_UNIQUE_QUERY_COUNT,
+        phase_column_query_coordinate_count:
+            PUBLIC_AGGREGATE_TEST_PHASE_COLUMN_QUERY_COORDINATE_COUNT,
         non_native_theta_repetition_count: PROOF_NON_NATIVE_THETA_REPETITION_COUNT,
         non_native_alpha_repetition_count: PROOF_NON_NATIVE_ALPHA_REPETITION_COUNT,
         maximum_fiat_shamir_candidate_draws_per_output:
@@ -847,7 +845,7 @@ fn verify_fixture_proof_capability(
     canonical_application_statement_bytes: &[u8],
     statement_owned_trees: &[VerifiedStatementOwnedTree],
 ) -> Result<VerifiedCommonProof, CommonProofVerifierError> {
-    verify_common_proof(
+    verify_checked_fixture_common_proof(
         CommonProofVerificationInput {
             protocol_version: 1,
             suite_identifier: [0x11; 64],
@@ -950,20 +948,22 @@ fn fixture_incremental_verifier(
     declared_proof_byte_length: usize,
     maximum_resident_window_byte_length: usize,
 ) -> Result<CommonProofVerificationStateMachine, CommonProofVerifierError> {
-    CommonProofVerificationStateMachine::new(PollableCommonProofVerificationInput {
-        protocol_version: 1,
-        suite_identifier: [0x11; 64],
-        canonical_application_statement_bytes: &fixture.canonical_application_statement_bytes,
-        relation_plan: &fixture.relation_plan,
-        relation_context: &fixture.relation_context,
-        schedule_position: fixture.schedule_position,
-        top_count: fixture.top_count,
-        statement_owned_trees,
-        evaluator_auxiliary_roots: &[],
-        declared_proof_byte_length,
-        proof_byte_ceiling: MAXIMUM_PROOF_BYTE_LENGTH,
-        maximum_resident_window_byte_length,
-    })
+    CommonProofVerificationStateMachine::new_for_checked_fixture(
+        PollableCommonProofVerificationInput {
+            protocol_version: 1,
+            suite_identifier: [0x11; 64],
+            canonical_application_statement_bytes: &fixture.canonical_application_statement_bytes,
+            relation_plan: &fixture.relation_plan,
+            relation_context: &fixture.relation_context,
+            schedule_position: fixture.schedule_position,
+            top_count: fixture.top_count,
+            statement_owned_trees,
+            evaluator_auxiliary_roots: &[],
+            declared_proof_byte_length,
+            proof_byte_ceiling: MAXIMUM_PROOF_BYTE_LENGTH,
+            maximum_resident_window_byte_length,
+        },
+    )
 }
 
 fn verify_fixture_proof(
@@ -998,7 +998,7 @@ fn generate_fixture_proof(fixture: &mut CommonProofEngineFixture) -> Vec<u8> {
     .expect("the public aggregate fixture has no private proof-coin domain");
     let mut sink = BoundedCommonProofByteSink::new(MAXIMUM_PROOF_BYTE_LENGTH)
         .expect("the bounded proof sink initializes");
-    generate_common_proof(
+    generate_checked_fixture_common_proof(
         CommonProofGenerationInput {
             protocol_version: 1,
             suite_identifier: [0x11; 64],
@@ -1044,7 +1044,7 @@ fn prepared_verification_worker_fixture() -> PreparedCommonProofVerification {
         super::super::super::MAXIMUM_COMMON_PROOF_BYTE_LENGTH as u64,
     )
     .expect("the fixed worker limits are valid");
-    let relation_plan_capability = CommonProofRelationPlanCapability::from_compiled_plan(
+    let relation_plan_capability = CommonProofRelationPlanCapability::from_checked_fixture_plan(
         &fixture.relation_plan,
         &fixture.relation_context,
         fixture.schedule_position,
@@ -1070,7 +1070,7 @@ fn prepared_verification_worker_fixture() -> PreparedCommonProofVerification {
         stream_domain,
         proof_stream_descriptor.full_object_digest.into_bytes(),
         proof_byte_length as u64,
-        PUBLIC_AGGREGATE_TEST_UNIQUE_QUERY_COUNT,
+        PUBLIC_AGGREGATE_TEST_PACKED_FRI_QUERY_COUNT,
     )
     .expect("the fixture application fits the worker safety bound");
     let verification_binding = CommonProofVerificationBinding::new(

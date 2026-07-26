@@ -29,12 +29,12 @@ impl RelationPlanChecker<'_> {
             .values()
             .flat_map(|rotations| rotations.iter().copied())
             .collect::<BTreeSet<_>>();
-        let expected_points = (0..self.context.deep_point_count)
-            .flat_map(|deep_point_ordinal| {
+        let expected_points = (0..self.context.out_of_domain_point_count)
+            .flat_map(|out_of_domain_point_ordinal| {
                 required_rotations
                     .iter()
                     .map(move |rotation| RelationOpeningPointDescriptor {
-                        deep_point_ordinal,
+                        out_of_domain_point_ordinal,
                         trace_rotation_is_negative: rotation.0,
                         trace_rotation_magnitude: rotation.1,
                         conjugate_index: 0,
@@ -43,7 +43,7 @@ impl RelationPlanChecker<'_> {
             .collect::<BTreeSet<_>>();
         let mut points = BTreeSet::new();
         for point in &variant.ordered_opening_points {
-            if point.deep_point_ordinal >= self.context.deep_point_count
+            if point.out_of_domain_point_ordinal >= self.context.out_of_domain_point_count
                 || point.conjugate_index >= self.context.challenge_extension_degree
                 || !points.insert(*point)
             {
@@ -142,11 +142,11 @@ impl RelationPlanChecker<'_> {
                 let rotations = required_rotations_by_column
                     .get(column_ordinal)
                     .ok_or(RelationPlanError::InvalidOpening)?;
-                for deep_point_ordinal in 0..self.context.deep_point_count {
+                for out_of_domain_point_ordinal in 0..self.context.out_of_domain_point_count {
                     for rotation in rotations {
                         let opening_point_ordinal = point_ordinals
                             .get(&RelationOpeningPointDescriptor {
-                                deep_point_ordinal,
+                                out_of_domain_point_ordinal,
                                 trace_rotation_is_negative: rotation.0,
                                 trace_rotation_magnitude: rotation.1,
                                 conjugate_index: 0,
@@ -164,10 +164,10 @@ impl RelationPlanChecker<'_> {
             }
         }
         for quotient_ordinal in 0..self.context.quotient_component_count {
-            for deep_point_ordinal in 0..self.context.deep_point_count {
+            for out_of_domain_point_ordinal in 0..self.context.out_of_domain_point_count {
                 let opening_point_ordinal = point_ordinals
                     .get(&RelationOpeningPointDescriptor {
-                        deep_point_ordinal,
+                        out_of_domain_point_ordinal,
                         trace_rotation_is_negative: false,
                         trace_rotation_magnitude: 0,
                         conjugate_index: 0,

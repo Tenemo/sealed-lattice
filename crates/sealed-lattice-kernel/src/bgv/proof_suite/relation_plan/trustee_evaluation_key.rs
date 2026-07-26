@@ -312,14 +312,13 @@ impl TrusteeEvaluationKeyRelationGeometry {
             return Err(RelationPlanError::InvalidDomain);
         }
 
-        let expected_evaluation_domain = self
+        let opening_degree_domain = self
             .opening_degree_bound_exclusive
             .checked_next_power_of_two()
-            .and_then(|degree_domain| {
-                degree_domain.checked_mul(u64::from(check_context.evaluation_blowup_factor))
-            })
             .ok_or(RelationPlanError::CountOverflow)?;
-        if expected_evaluation_domain != self.evaluation_domain_size
+        if !self
+            .evaluation_domain_size
+            .is_multiple_of(opening_degree_domain)
             || !(check_context.base_field_modulus - 1).is_multiple_of(self.evaluation_domain_size)
             || super::modular_power(
                 check_context.evaluation_domain_generator,

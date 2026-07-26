@@ -180,6 +180,14 @@ pub(super) fn decode_streaming_prover_output(
             "streaming proof has {frontier_count} frontier nodes, exceeding the geometry-derived maximum {maximum_frontier_count}"
         ));
     }
+    let frontier_byte_length = frontier_count
+        .checked_mul(super::MERKLE_DIGEST_WORD_LENGTH * core::mem::size_of::<u64>())
+        .ok_or_else(|| "streaming proof frontier byte count overflowed".to_owned())?;
+    if reader.remaining().len() < frontier_byte_length {
+        return Err(format!(
+            "streaming proof is truncated before {frontier_count} column frontier nodes"
+        ));
+    }
     let mut column_frontier = Vec::with_capacity(frontier_count);
     for _ in 0..frontier_count {
         column_frontier.push(reader.read_digest()?);
@@ -1556,6 +1564,35 @@ mod tests {
             .expect("generate complete streaming proof");
         let canonical = encode_streaming_prover_output(geometry, &output)
             .expect("encode canonical streaming proof");
+
+        let frontier_count_offset = STREAMING_WIRE_MAGIC.len()
+            + core::mem::size_of::<ColumnDigest>()
+            + core::mem::size_of::<u32>()
+            + output.claimed_evaluations.len()
+                * CHALLENGE_FIELD_LIMB_COUNT
+                * core::mem::size_of::<u64>()
+            + core::mem::size_of::<ColumnDigest>()
+            + COLUMN_QUERY_COUNT
+                * (core::mem::size_of::<u32>() + geometry.row_count * core::mem::size_of::<u64>());
+        assert_eq!(
+            u32::from_le_bytes(
+                canonical[frontier_count_offset..frontier_count_offset + 4]
+                    .try_into()
+                    .expect("the frontier-count slice has canonical u32 width")
+            ) as usize,
+            output.proof.column_frontier.len(),
+        );
+        let mut missing_frontier_payload = canonical[..frontier_count_offset + 4].to_vec();
+        missing_frontier_payload[frontier_count_offset..frontier_count_offset + 4]
+            .copy_from_slice(&1_u32.to_le_bytes());
+        let missing_frontier_error =
+            decode_streaming_prover_output(geometry, &missing_frontier_payload)
+                .err()
+                .expect("a declared frontier without node bytes must be rejected");
+        assert!(
+            missing_frontier_error.contains("truncated before 1 column frontier nodes"),
+            "unexpected missing-frontier error: {missing_frontier_error}"
+        );
 
         let mut truncated = canonical.clone();
         truncated.pop();

@@ -1,8 +1,9 @@
+use super::super::row_code_whir::RowCodeWhirConstructionPlan;
 use super::super::{DecodedProofPhasePairLeaf, canonical_common_proof_byte_length_ceiling};
 use super::{
     CanonicalItem, CanonicalTuple, CommonProofPrivacyMode, CommonProofQueryOpeningAbsorber,
     CommonProofTranscript, CommonProofVerifierError, CompiledRelationPlan, DecodedProofBodyPrefix,
-    DeepCompositionVerificationInput, PROOF_OBJECT_HEADER_SCHEMA_IDENTIFIER,
+    OutOfDomainCompositionVerificationInput, PROOF_OBJECT_HEADER_SCHEMA_IDENTIFIER,
     PROOF_OBJECT_HEADER_SCHEMA_VERSION, ProofBodyError, ProofBodyLayout, ProofByteSource,
     ProofDecodeError, ProofEvaluationDomain, ProofFriQueryVerifier, ProofTreeCatalogInput,
     ProofTreeCatalogSource, ProofTreeRole, ProofTreeValue, QueryVerificationWorkspace,
@@ -15,7 +16,7 @@ use super::{
     proof_body_prefix_byte_length, proof_query_tree_byte_length,
     sample_relation_application_challenges, validate_evaluator_auxiliary_root_linkage,
     verified_application_statement_hash, verified_proof_header_hash,
-    verify_deep_composition_with_verified_sequences,
+    verify_out_of_domain_composition_with_verified_sequences,
 };
 
 /// Inputs that have already crossed their family-specific trust boundaries.
@@ -103,6 +104,7 @@ enum CommonProofVerificationPhase {
 pub(crate) struct CommonProofVerificationStateMachine {
     protocol_version: u16,
     suite_identifier: [u8; 64],
+    row_code_whir_construction_plan_identity_hash: [u8; 64],
     canonical_application_statement_bytes: Vec<u8>,
     application_statement_schema_identifier: u16,
     relation_context: RelationPlanCheckContext,
@@ -192,10 +194,45 @@ impl CommonProofVerificationStateMachine {
     pub(crate) fn new(
         input: PollableCommonProofVerificationInput<'_>,
     ) -> Result<Self, CommonProofVerifierError> {
-        let _validated_artifact = ValidatedRelationPlanArtifact::from_compiled_plan(
+        let validated_artifact = ValidatedRelationPlanArtifact::from_compiled_plan(
             input.relation_plan,
             input.relation_context,
         )?;
+        let row_code_whir_construction_plan = RowCodeWhirConstructionPlan::for_selected_variant(
+            &validated_artifact,
+            input.schedule_position,
+            input.top_count,
+        )
+        .map_err(|_| CommonProofVerifierError::RowCodeWhirConstructionPlan)?;
+        Self::new_with_validated_construction_plan(input, row_code_whir_construction_plan)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn new_for_checked_fixture(
+        input: PollableCommonProofVerificationInput<'_>,
+    ) -> Result<Self, CommonProofVerifierError> {
+        let validated_artifact = ValidatedRelationPlanArtifact::from_checked_fixture_plan(
+            input.relation_plan,
+            input.relation_context,
+        )?;
+        let row_code_whir_construction_plan =
+            RowCodeWhirConstructionPlan::for_checked_fixture_variant(
+                &validated_artifact,
+                input.relation_context,
+                input.schedule_position,
+                input.top_count,
+            )
+            .map_err(|_| CommonProofVerifierError::RowCodeWhirConstructionPlan)?;
+        Self::new_with_validated_construction_plan(input, row_code_whir_construction_plan)
+    }
+
+    fn new_with_validated_construction_plan(
+        input: PollableCommonProofVerificationInput<'_>,
+        row_code_whir_construction_plan: RowCodeWhirConstructionPlan,
+    ) -> Result<Self, CommonProofVerifierError> {
+        let row_code_whir_construction_plan_identity_hash = row_code_whir_construction_plan
+            .canonical_identity_hash()
+            .map_err(|_| CommonProofVerifierError::RowCodeWhirConstructionPlan)?;
         let application_statement = decode_application_statement(
             input.canonical_application_statement_bytes,
             input
@@ -242,7 +279,7 @@ impl CommonProofVerificationStateMachine {
             .relation_plan
             .select_variant(input.schedule_position, input.top_count)?;
         let transcript_schedule =
-            variant.common_proof_transcript_schedule(input.relation_context)?;
+            super::super::packed_fri_transcript_schedule(variant, input.relation_context)?;
         let evaluation_domain = ProofEvaluationDomain::new(
             usize::try_from(variant.evaluation_domain_size())
                 .map_err(|_| CommonProofVerifierError::InvalidTreeLayout)?,
@@ -290,6 +327,7 @@ impl CommonProofVerificationStateMachine {
         Ok(Self {
             protocol_version: input.protocol_version,
             suite_identifier: input.suite_identifier,
+            row_code_whir_construction_plan_identity_hash,
             canonical_application_statement_bytes: input
                 .canonical_application_statement_bytes
                 .to_vec(),
@@ -497,7 +535,7 @@ impl CommonProofVerificationStateMachine {
                 composition_challenge_count,
             )?,
             verifier_vector_payload_byte_length::<super::ProofChallengeExtensionElement>(
-                usize::from(self.transcript_schedule.deep_point_count()),
+                usize::from(self.transcript_schedule.out_of_domain_point_count()),
             )?,
             verifier_vector_payload_byte_length::<super::ProofChallengeExtensionElement>(
                 self.variant.ordered_opening_points().len(),
@@ -506,7 +544,9 @@ impl CommonProofVerificationStateMachine {
                 opening_claim_count,
             )?,
             self.variant
-                .verifier_sequence_deep_resolution_payload_byte_length(&self.relation_context)
+                .verifier_sequence_out_of_domain_resolution_payload_byte_length(
+                    &self.relation_context,
+                )
                 .map_err(CommonProofVerifierError::from)?,
             verifier_vector_payload_byte_length::<u64>(query_representative_count)?,
             transcript_memory.maximum_transient_byte_length(),
@@ -743,6 +783,7 @@ impl CommonProofVerificationStateMachine {
         let mut transcript = CommonProofTranscript::new(
             self.protocol_version,
             self.suite_identifier,
+            self.row_code_whir_construction_plan_identity_hash,
             self.application_statement_schema_identifier,
             &self.canonical_proof_object_header_bytes,
             self.transcript_schedule.clone(),
@@ -755,8 +796,10 @@ impl CommonProofVerificationStateMachine {
             self.transcript_schedule.ordered_base_tree_ordinals(),
         )?;
 
-        let application_challenges =
-            sample_relation_application_challenges(&mut transcript, &self.transcript_schedule)?;
+        let application_challenges = sample_relation_application_challenges(
+            &mut transcript,
+            self.transcript_schedule.relation_prefix_schedule(),
+        )?;
         absorb_relation_roots(
             &mut transcript,
             self.layout.catalog(),
@@ -785,18 +828,20 @@ impl CommonProofVerificationStateMachine {
             )?;
         }
 
-        let mut deep_points = Vec::new();
-        deep_points
-            .try_reserve_exact(usize::from(self.transcript_schedule.deep_point_count()))
+        let mut out_of_domain_points = Vec::new();
+        out_of_domain_points
+            .try_reserve_exact(usize::from(
+                self.transcript_schedule.out_of_domain_point_count(),
+            ))
             .map_err(|_| CommonProofVerifierError::InvalidTreeLayout)?;
-        for point_ordinal in 0..self.transcript_schedule.deep_point_count() {
+        for point_ordinal in 0..self.transcript_schedule.out_of_domain_point_count() {
             let mut relation_error = None;
-            let sampled = transcript.sample_deep_point(point_ordinal, |candidate| {
-                match self.variant.deep_point_candidate_is_forbidden(
+            let sampled = transcript.sample_out_of_domain_point(point_ordinal, |candidate| {
+                match self.variant.out_of_domain_point_candidate_is_forbidden(
                     &self.relation_context,
                     point_ordinal,
                     candidate,
-                    &deep_points,
+                    &out_of_domain_points,
                 ) {
                     Ok(is_forbidden) => is_forbidden,
                     Err(error) => {
@@ -808,24 +853,24 @@ impl CommonProofVerificationStateMachine {
             if let Some(error) = relation_error {
                 return Err(error.into());
             }
-            deep_points.push(sampled?);
+            out_of_domain_points.push(sampled?);
         }
         let opening_points = self
             .variant
-            .derive_opening_points(&self.relation_context, &deep_points)?;
-        verify_deep_composition_with_verified_sequences(
+            .derive_opening_points(&self.relation_context, &out_of_domain_points)?;
+        verify_out_of_domain_composition_with_verified_sequences(
             &self.variant,
-            DeepCompositionVerificationInput::new(
+            OutOfDomainCompositionVerificationInput::new(
                 &self.relation_context,
                 &application_challenges,
                 &composition_challenges,
-                &deep_points,
+                &out_of_domain_points,
                 &opening_points,
-                prefix.deep_evaluations(),
+                prefix.out_of_domain_evaluations(),
             ),
             evaluate_verified_column,
         )?;
-        transcript.absorb_deep_evaluations(prefix.deep_evaluations())?;
+        transcript.absorb_out_of_domain_evaluations(prefix.out_of_domain_evaluations())?;
 
         if self.transcript_schedule.privacy_mode() == CommonProofPrivacyMode::SecretBearing {
             transcript.absorb_opening_batch_mask_root(catalog_root(
@@ -872,18 +917,15 @@ impl CommonProofVerificationStateMachine {
             &self.variant,
             self.layout.catalog(),
             &opening_points,
-            prefix.deep_evaluations(),
+            prefix.out_of_domain_evaluations(),
             &opening_batch_coefficients,
         )?;
         let fri_verifier = ProofFriQueryVerifier::new(
             self.evaluation_domain,
             fri_fold_challenges,
             prefix.terminal_coefficients().to_vec(),
-            usize::try_from(
-                self.relation_context
-                    .final_polynomial_degree_bound_exclusive,
-            )
-            .map_err(|_| CommonProofVerifierError::InvalidTreeLayout)?,
+            usize::try_from(self.transcript_schedule.terminal_coefficient_count())
+                .map_err(|_| CommonProofVerifierError::InvalidTreeLayout)?,
         )?;
         let workspace = QueryVerificationWorkspace::new(
             self.layout.catalog().entries().len(),

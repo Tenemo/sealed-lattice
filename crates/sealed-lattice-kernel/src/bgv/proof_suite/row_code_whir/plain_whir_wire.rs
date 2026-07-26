@@ -171,6 +171,11 @@ pub(super) fn decode_plain_whir_batch_proof(
             "plain WHIR Merkle dictionary has {dictionary_count} nodes, exceeding the configuration-derived maximum {maximum_merkle_references}"
         ));
     }
+    reader.require_remaining_elements(
+        dictionary_count,
+        MERKLE_DIGEST_WORD_LENGTH * core::mem::size_of::<u64>(),
+        "Merkle dictionary nodes",
+    )?;
     let mut dictionary = Vec::with_capacity(dictionary_count);
     let mut distinct_nodes = BTreeSet::new();
     for dictionary_index in 0..dictionary_count {
@@ -184,6 +189,15 @@ pub(super) fn decode_plain_whir_batch_proof(
     }
     let mut dictionary_usage = DictionaryUsage::new(dictionary_count);
 
+    let opening_evaluation_count = expected_opening_widths
+        .iter()
+        .try_fold(0_usize, |count, width| count.checked_add(*width))
+        .ok_or_else(|| "plain WHIR opening-evaluation count overflowed".to_owned())?;
+    reader.require_remaining_elements(
+        opening_evaluation_count,
+        CHALLENGE_FIELD_LIMB_COUNT * core::mem::size_of::<u64>(),
+        "opening evaluations",
+    )?;
     let mut evaluations = Vec::with_capacity(expected_opening_widths.len());
     for opening_width in expected_opening_widths {
         evaluations.push(OpeningBatch::new(
@@ -618,6 +632,17 @@ fn read_queries(
     path_length: usize,
     base_variant: bool,
 ) -> Result<Vec<QueryOpening<ChallengeField, ChallengeField, Vec<MerkleNode>>>, String> {
+    let query_value_byte_length = value_count
+        .checked_mul(CHALLENGE_FIELD_LIMB_COUNT * core::mem::size_of::<u64>())
+        .ok_or_else(|| "plain WHIR query-value byte count overflowed".to_owned())?;
+    let query_path_byte_length = path_length
+        .checked_mul(core::mem::size_of::<u32>())
+        .ok_or_else(|| "plain WHIR query-path byte count overflowed".to_owned())?;
+    let query_byte_length = query_value_byte_length
+        .checked_add(query_path_byte_length)
+        .and_then(|byte_length| byte_length.checked_mul(query_count))
+        .ok_or_else(|| "plain WHIR query-batch byte count overflowed".to_owned())?;
+    reader.require_remaining_bytes(query_byte_length, "query batch")?;
     let mut queries = Vec::with_capacity(query_count);
     for _ in 0..query_count {
         let values = reader.read_fields(value_count, "query values")?;
@@ -801,6 +826,31 @@ impl<'bytes> CanonicalReader<'bytes> {
         Ok(u64::from_le_bytes(self.read_exact()?))
     }
 
+    fn require_remaining_bytes(
+        &self,
+        required_byte_length: usize,
+        label: &str,
+    ) -> Result<(), String> {
+        if self.bytes.len().saturating_sub(self.offset) < required_byte_length {
+            return Err(format!(
+                "plain WHIR proof is truncated before {label} requiring {required_byte_length} bytes"
+            ));
+        }
+        Ok(())
+    }
+
+    fn require_remaining_elements(
+        &self,
+        element_count: usize,
+        element_byte_length: usize,
+        label: &str,
+    ) -> Result<(), String> {
+        let required_byte_length = element_count
+            .checked_mul(element_byte_length)
+            .ok_or_else(|| format!("plain WHIR {label} byte count overflowed"))?;
+        self.require_remaining_bytes(required_byte_length, label)
+    }
+
     fn read_field(&mut self) -> Result<ChallengeField, String> {
         let mut coefficients = [Goldilocks::ZERO; CHALLENGE_FIELD_LIMB_COUNT];
         for (coefficient_index, coefficient) in coefficients.iter_mut().enumerate() {
@@ -824,14 +874,11 @@ impl<'bytes> CanonicalReader<'bytes> {
     }
 
     fn read_fields(&mut self, count: usize, label: &str) -> Result<Vec<ChallengeField>, String> {
-        let required_bytes = count
-            .checked_mul(CHALLENGE_FIELD_LIMB_COUNT * 8)
-            .ok_or_else(|| format!("plain WHIR {label} byte count overflowed"))?;
-        if self.bytes.len().saturating_sub(self.offset) < required_bytes {
-            return Err(format!(
-                "plain WHIR proof is truncated before {count} {label}"
-            ));
-        }
+        self.require_remaining_elements(
+            count,
+            CHALLENGE_FIELD_LIMB_COUNT * core::mem::size_of::<u64>(),
+            label,
+        )?;
         let mut fields = Vec::with_capacity(count);
         for _ in 0..count {
             fields.push(self.read_field()?);
@@ -867,4 +914,258 @@ impl<'bytes> CanonicalReader<'bytes> {
 
 fn checked_u32(value: usize, label: &str) -> Result<u32, String> {
     u32::try_from(value).map_err(|_| format!("{label} {value} exceeds canonical u32"))
+}
+
+#[cfg(test)]
+mod tests {
+    use p3_field::{PrimeCharacteristicRing, PrimeField64};
+    use p3_multilinear_util::{point::Point, poly::Poly};
+
+    use super::super::plain_whir::{
+        commit_plain_aggregate, open_plain_aggregate_at_points, plain_aggregate_challenger,
+        plain_aggregate_pcs,
+    };
+    use super::*;
+
+    const TEST_VARIABLE_COUNT: usize = 12;
+    const U32_BYTE_LENGTH: usize = core::mem::size_of::<u32>();
+    const FIELD_BYTE_LENGTH: usize = CHALLENGE_FIELD_LIMB_COUNT * core::mem::size_of::<u64>();
+    const MERKLE_NODE_BYTE_LENGTH: usize = MERKLE_DIGEST_WORD_LENGTH * core::mem::size_of::<u64>();
+    const DICTIONARY_COUNT_OFFSET: usize = WIRE_MAGIC.len() + 3 * U32_BYTE_LENGTH;
+    const DICTIONARY_START_OFFSET: usize = WIRE_MAGIC.len() + 4 * U32_BYTE_LENGTH;
+
+    fn deterministic_wire_fixture() -> (PlainAggregatePcs, Vec<u8>) {
+        let pcs = plain_aggregate_pcs(TEST_VARIABLE_COUNT).expect("small plain WHIR configuration");
+        let message = Poly::new(
+            (0..1_usize << TEST_VARIABLE_COUNT)
+                .map(|coefficient_index| {
+                    ChallengeField::from_u64(coefficient_index as u64 * 19 + 7)
+                })
+                .collect(),
+        );
+        let opening_point = Point::new(
+            (0..TEST_VARIABLE_COUNT)
+                .map(|coordinate_index| ChallengeField::from_u64(coordinate_index as u64 * 5 + 3))
+                .collect(),
+        );
+        let mut challenger = plain_aggregate_challenger(&pcs, b"plain WHIR hostile wire test");
+        let (_, prover_data) = commit_plain_aggregate(&pcs, message, &mut challenger);
+        let proof =
+            open_plain_aggregate_at_points(&pcs, prover_data, &[opening_point], &mut challenger);
+        let canonical =
+            encode_plain_whir_proof(&pcs, &proof, 1).expect("encode small canonical proof");
+        decode_plain_whir_proof(&pcs, &canonical, 1)
+            .expect("decode the unmodified small canonical proof");
+        (pcs, canonical)
+    }
+
+    fn read_wire_u32(canonical: &[u8], offset: usize) -> u32 {
+        u32::from_le_bytes(
+            canonical[offset..offset + U32_BYTE_LENGTH]
+                .try_into()
+                .expect("a fixed-width wire u32 slice converts to an array"),
+        )
+    }
+
+    fn write_wire_u32(canonical: &mut [u8], offset: usize, value: u32) {
+        canonical[offset..offset + U32_BYTE_LENGTH].copy_from_slice(&value.to_le_bytes());
+    }
+
+    fn dictionary_end_offset(dictionary_count: usize) -> usize {
+        DICTIONARY_START_OFFSET
+            .checked_add(
+                dictionary_count
+                    .checked_mul(MERKLE_NODE_BYTE_LENGTH)
+                    .expect("the small fixture dictionary byte length fits usize"),
+            )
+            .expect("the small fixture dictionary end fits usize")
+    }
+
+    fn first_dictionary_reference_offset(pcs: &PlainAggregatePcs, dictionary_end: usize) -> usize {
+        let first_round_parameters = pcs
+            .round_parameters
+            .first()
+            .expect("the small fixture has a committed WHIR round");
+        assert!(first_round_parameters.num_queries > 0);
+        assert!(
+            query_path_length(
+                first_round_parameters.domain_size,
+                pcs.round_folding_factor(0),
+            )
+            .expect("derive the first query path length")
+                > 0
+        );
+        let initial_sumcheck_field_count = pcs
+            .round_folding_factor(0)
+            .checked_mul(2)
+            .expect("the small fixture initial sumcheck field count fits usize");
+        let field_count_before_first_reference = 1_usize
+            .checked_add(pcs.commitment_ood_samples)
+            .and_then(|field_count| field_count.checked_add(initial_sumcheck_field_count))
+            .and_then(|field_count| field_count.checked_add(first_round_parameters.ood_samples))
+            .and_then(|field_count| {
+                field_count.checked_add(
+                    initial_query_value_count(pcs, 0).expect("derive the first query value count"),
+                )
+            })
+            .expect("the small fixture prefix field count fits usize");
+        dictionary_end
+            .checked_add(MERKLE_NODE_BYTE_LENGTH)
+            .and_then(|offset| {
+                offset.checked_add(
+                    field_count_before_first_reference
+                        .checked_mul(FIELD_BYTE_LENGTH)
+                        .expect("the small fixture prefix byte length fits usize"),
+                )
+            })
+            .expect("the first dictionary reference offset fits usize")
+    }
+
+    fn distinct_unused_dictionary_node(
+        canonical: &[u8],
+        dictionary_count: usize,
+    ) -> [u8; MERKLE_NODE_BYTE_LENGTH] {
+        let dictionary_end = dictionary_end_offset(dictionary_count);
+        let dictionary_bytes = &canonical[DICTIONARY_START_OFFSET..dictionary_end];
+        for candidate_ordinal in 0..=dictionary_count {
+            let mut candidate = [0_u8; MERKLE_NODE_BYTE_LENGTH];
+            candidate[..core::mem::size_of::<u64>()].copy_from_slice(
+                &u64::try_from(candidate_ordinal)
+                    .expect("the small fixture candidate ordinal fits u64")
+                    .to_le_bytes(),
+            );
+            if dictionary_bytes
+                .chunks_exact(MERKLE_NODE_BYTE_LENGTH)
+                .all(|node| node != candidate.as_slice())
+            {
+                return candidate;
+            }
+        }
+        unreachable!("one more candidate than dictionary nodes must leave an unused value")
+    }
+
+    fn assert_wire_refused(
+        pcs: &PlainAggregatePcs,
+        canonical: &[u8],
+        expected_error_fragment: &str,
+        mutation_label: &str,
+    ) {
+        let error = match decode_plain_whir_proof(pcs, canonical, 1) {
+            Ok(_) => panic!("plain WHIR decoder accepted {mutation_label}"),
+            Err(error) => error,
+        };
+        assert!(
+            error.contains(expected_error_fragment),
+            "plain WHIR {mutation_label} returned an unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn canonical_wire_rejects_hostile_raw_mutations() {
+        let (pcs, canonical) = deterministic_wire_fixture();
+        let dictionary_count = read_wire_u32(&canonical, DICTIONARY_COUNT_OFFSET) as usize;
+        let maximum_dictionary_count =
+            maximum_merkle_reference_count(&pcs).expect("derive the dictionary maximum");
+        assert!(dictionary_count >= 2);
+        assert!(dictionary_count < maximum_dictionary_count);
+        let dictionary_end = dictionary_end_offset(dictionary_count);
+        let first_reference_offset = first_dictionary_reference_offset(&pcs, dictionary_end);
+        assert_eq!(read_wire_u32(&canonical, first_reference_offset), 0);
+
+        let mut oversized_dictionary_count = canonical.clone();
+        write_wire_u32(
+            &mut oversized_dictionary_count,
+            DICTIONARY_COUNT_OFFSET,
+            u32::MAX,
+        );
+        assert_wire_refused(
+            &pcs,
+            &oversized_dictionary_count,
+            "exceeding the configuration-derived maximum",
+            "an oversized dictionary count",
+        );
+
+        let missing_dictionary_payload = canonical[..DICTIONARY_START_OFFSET].to_vec();
+        assert_wire_refused(
+            &pcs,
+            &missing_dictionary_payload,
+            "truncated before Merkle dictionary nodes",
+            "a dictionary count without its node payload",
+        );
+
+        let mut duplicate_dictionary_node = canonical.clone();
+        let first_node = duplicate_dictionary_node
+            [DICTIONARY_START_OFFSET..DICTIONARY_START_OFFSET + MERKLE_NODE_BYTE_LENGTH]
+            .to_vec();
+        duplicate_dictionary_node[DICTIONARY_START_OFFSET + MERKLE_NODE_BYTE_LENGTH
+            ..DICTIONARY_START_OFFSET + 2 * MERKLE_NODE_BYTE_LENGTH]
+            .copy_from_slice(&first_node);
+        assert_wire_refused(
+            &pcs,
+            &duplicate_dictionary_node,
+            "node 1 is duplicated",
+            "a duplicate dictionary node",
+        );
+
+        let mut unused_dictionary_node = canonical.clone();
+        let distinct_node = distinct_unused_dictionary_node(&canonical, dictionary_count);
+        unused_dictionary_node.splice(dictionary_end..dictionary_end, distinct_node);
+        write_wire_u32(
+            &mut unused_dictionary_node,
+            DICTIONARY_COUNT_OFFSET,
+            u32::try_from(dictionary_count + 1)
+                .expect("the small fixture dictionary count fits u32"),
+        );
+        assert_wire_refused(
+            &pcs,
+            &unused_dictionary_node,
+            "unused trailing nodes",
+            "an unused trailing dictionary node",
+        );
+
+        let mut first_use_violation = canonical.clone();
+        write_wire_u32(&mut first_use_violation, first_reference_offset, 1);
+        assert_wire_refused(
+            &pcs,
+            &first_use_violation,
+            "first uses node 1, expected node 0",
+            "an out-of-order first dictionary use",
+        );
+
+        let mut out_of_range_reference = canonical.clone();
+        write_wire_u32(
+            &mut out_of_range_reference,
+            first_reference_offset,
+            u32::try_from(dictionary_count).expect("the small dictionary count fits u32"),
+        );
+        assert_wire_refused(
+            &pcs,
+            &out_of_range_reference,
+            "is outside",
+            "an out-of-range dictionary reference",
+        );
+
+        let mut noncanonical_field_limb = canonical.clone();
+        noncanonical_field_limb[dictionary_end..dictionary_end + core::mem::size_of::<u64>()]
+            .copy_from_slice(&Goldilocks::ORDER_U64.to_le_bytes());
+        assert_wire_refused(
+            &pcs,
+            &noncanonical_field_limb,
+            "field limb 0 is not canonical",
+            "a noncanonical field limb",
+        );
+
+        let mut truncated = canonical.clone();
+        truncated.pop();
+        assert_wire_refused(&pcs, &truncated, "truncated", "a truncated proof");
+
+        let mut trailing_data = canonical;
+        trailing_data.push(0);
+        assert_wire_refused(
+            &pcs,
+            &trailing_data,
+            "1 trailing bytes",
+            "a proof with trailing data",
+        );
+    }
 }

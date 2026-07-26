@@ -17,7 +17,7 @@ use crate::foundation::{
 
 use super::{
     COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH, CommonProofProverError, CommonProofSourcePolynomial,
-    PROOF_BASE_FIELD_MODULUS, PROOF_EVALUATION_BLOWUP_FACTOR, PROOF_EVALUATION_COSET_OFFSET,
+    PROOF_BASE_FIELD_MODULUS, PROOF_EVALUATION_COSET_OFFSET,
     PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT, ProofBaseFieldElement,
     ProofEvaluationDomain, ProofFieldError, ProofPolynomialError, apply_trace_mask,
 };
@@ -167,12 +167,7 @@ impl CommittedMaterialProfile {
             material_column_degree_bound_exclusive,
             minimum_committed_polynomial_degree_bound_exclusive,
         ) = Self::degree_bounds(ring_degree)?;
-        let evaluation_domain_size = minimum_committed_polynomial_degree_bound_exclusive
-            .checked_mul(
-                usize::try_from(PROOF_EVALUATION_BLOWUP_FACTOR)
-                    .map_err(|_| CommittedMaterialError::CountOverflow)?,
-            )
-            .ok_or(CommittedMaterialError::CountOverflow)?;
+        let evaluation_domain_size = minimum_committed_polynomial_degree_bound_exclusive;
         Self::new(
             trace_domain_size,
             evaluation_domain_size,
@@ -189,6 +184,7 @@ impl CommittedMaterialProfile {
     pub(crate) fn for_common_proof_evaluation_domain(
         ring_degree: usize,
         evaluation_domain_size: usize,
+        committed_polynomial_degree_bound_exclusive: usize,
     ) -> Result<Self, CommittedMaterialError> {
         let (
             trace_domain_size,
@@ -196,15 +192,12 @@ impl CommittedMaterialProfile {
             material_column_degree_bound_exclusive,
             minimum_committed_polynomial_degree_bound_exclusive,
         ) = Self::degree_bounds(ring_degree)?;
-        let blowup_factor = usize::try_from(PROOF_EVALUATION_BLOWUP_FACTOR)
-            .map_err(|_| CommittedMaterialError::CountOverflow)?;
-        let committed_polynomial_degree_bound_exclusive = evaluation_domain_size
-            .checked_div(blowup_factor)
-            .filter(|degree_bound| {
-                *degree_bound >= minimum_committed_polynomial_degree_bound_exclusive
-                    && *degree_bound * blowup_factor == evaluation_domain_size
-            })
-            .ok_or(CommittedMaterialError::InvalidProfile)?;
+        if committed_polynomial_degree_bound_exclusive
+            < minimum_committed_polynomial_degree_bound_exclusive
+            || !evaluation_domain_size.is_multiple_of(committed_polynomial_degree_bound_exclusive)
+        {
+            return Err(CommittedMaterialError::InvalidProfile);
+        }
         Self::new(
             trace_domain_size,
             evaluation_domain_size,
@@ -275,14 +268,9 @@ impl CommittedMaterialProfile {
             || !self.trace_domain_size.is_power_of_two()
             || self.evaluation_domain_size == 0
             || !self.evaluation_domain_size.is_power_of_two()
-            || self.evaluation_domain_size
-                != self
-                    .committed_polynomial_degree_bound_exclusive
-                    .checked_mul(
-                        usize::try_from(PROOF_EVALUATION_BLOWUP_FACTOR)
-                            .map_err(|_| CommittedMaterialError::CountOverflow)?,
-                    )
-                    .ok_or(CommittedMaterialError::CountOverflow)?
+            || !self
+                .evaluation_domain_size
+                .is_multiple_of(self.committed_polynomial_degree_bound_exclusive)
             || self.evaluation_coset_offset != PROOF_EVALUATION_COSET_OFFSET
             || self.masking_polynomial_maximum_degree >= self.trace_domain_size
             || self.material_column_degree_bound_exclusive

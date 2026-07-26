@@ -1,4 +1,4 @@
-//! Recomputable, randomized row encoding for the streaming commitment.
+//! Recomputable row encoding with an explicit public or private high half.
 
 #[cfg(test)]
 use p3_dft::{Radix2Bowers, TwoAdicSubgroupDft};
@@ -14,11 +14,84 @@ use sha3::{
 
 #[cfg(test)]
 use super::GOLDILOCKS_MODULUS;
+#[cfg(test)]
+use crate::bgv::proof_suite::PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT;
 
 #[cfg(test)]
-const ROW_PAD_DOMAIN: &[u8] = b"sealed-lattice/streaming-row-pad/v1";
+const PRIVATE_ROW_HIGH_HALF_DOMAIN: &[u8] = b"sealed-lattice/streaming-row-pad/v1";
 #[cfg(test)]
 pub(super) const ROW_CODE_LOG_INV_RATE: usize = 2;
+
+/// Operative high-half choice for a row-code message. The caller supplies the
+/// complete canonical low half, including zeros after a partial chunk and in
+/// unused suffix slots. Public rows append literal zeros and therefore remain
+/// the plain Reed-Solomon encoding of those coefficients. Secret rows append
+/// the existing private, domain-separated masking coefficients. Transform
+/// slack after the complete coefficient message is always zero-filled.
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum RowCodeHighHalfSource<'seed> {
+    CanonicalPublicZeros,
+    PrivateMaskSeed(&'seed [u8; 32]),
+}
+
+#[cfg(test)]
+impl<'seed> From<&'seed [u8; 32]> for RowCodeHighHalfSource<'seed> {
+    fn from(private_seed: &'seed [u8; 32]) -> Self {
+        Self::PrivateMaskSeed(private_seed)
+    }
+}
+
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum RowEncodingError {
+    RowIndexOutsideGeometry {
+        row_index: usize,
+        row_count: usize,
+    },
+    WitnessValueCountMismatch {
+        row_index: usize,
+        actual_value_count: usize,
+        expected_value_count: usize,
+    },
+    PrivateHighHalfCandidateDrawsExhausted {
+        output_index: usize,
+    },
+}
+
+#[cfg(test)]
+impl core::fmt::Display for RowEncodingError {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::RowIndexOutsideGeometry {
+                row_index,
+                row_count,
+            } => write!(
+                formatter,
+                "row index {row_index} is outside row count {row_count}"
+            ),
+            Self::WitnessValueCountMismatch {
+                row_index,
+                actual_value_count,
+                expected_value_count,
+            } => write!(
+                formatter,
+                "row {row_index} has {actual_value_count} witness values, expected {expected_value_count}"
+            ),
+            Self::PrivateHighHalfCandidateDrawsExhausted { output_index } => write!(
+                formatter,
+                "private row high-half output {output_index} exhausted its {PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT} candidate draws"
+            ),
+        }
+    }
+}
+
+#[cfg(test)]
+impl From<RowEncodingError> for String {
+    fn from(error: RowEncodingError) -> Self {
+        error.to_string()
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct RowEncodingGeometry {
@@ -109,85 +182,129 @@ impl RowEncodingGeometry {
 }
 
 #[cfg(test)]
-pub(super) fn encode_row(
+pub(super) fn encode_row<'seed>(
     geometry: RowEncodingGeometry,
     row_index: usize,
     witness_values: &[Goldilocks],
-    secret_pad_seed: &[u8; 32],
-) -> Result<Vec<Goldilocks>, String> {
+    high_half_source: impl Into<RowCodeHighHalfSource<'seed>>,
+) -> Result<Vec<Goldilocks>, RowEncodingError> {
     if row_index >= geometry.row_count {
-        return Err(format!(
-            "row index {row_index} is outside row count {}",
-            geometry.row_count
-        ));
+        return Err(RowEncodingError::RowIndexOutsideGeometry {
+            row_index,
+            row_count: geometry.row_count,
+        });
     }
     if witness_values.len() != geometry.witness_values_per_row {
-        return Err(format!(
-            "row {row_index} has {} witness values, expected {}",
-            witness_values.len(),
-            geometry.witness_values_per_row
-        ));
+        return Err(RowEncodingError::WitnessValueCountMismatch {
+            row_index,
+            actual_value_count: witness_values.len(),
+            expected_value_count: geometry.witness_values_per_row,
+        });
     }
 
     let mut coefficients = Vec::with_capacity(geometry.encoded_column_count);
     coefficients.extend_from_slice(witness_values);
-    coefficients.extend(derive_row_pad(geometry, row_index, secret_pad_seed));
+    append_row_high_half(
+        &mut coefficients,
+        geometry,
+        row_index,
+        high_half_source.into(),
+    )?;
     coefficients.resize(geometry.encoded_column_count, Goldilocks::ZERO);
     Ok(Radix2Bowers.coset_dft(coefficients, Goldilocks::GENERATOR))
 }
 
 #[cfg(test)]
-pub(super) fn padded_row_coefficients(
+pub(super) fn padded_row_coefficients<'seed>(
     geometry: RowEncodingGeometry,
     row_index: usize,
     witness_values: &[Goldilocks],
-    secret_pad_seed: &[u8; 32],
-) -> Result<Vec<Goldilocks>, String> {
+    high_half_source: impl Into<RowCodeHighHalfSource<'seed>>,
+) -> Result<Vec<Goldilocks>, RowEncodingError> {
     if row_index >= geometry.row_count {
-        return Err(format!(
-            "row index {row_index} is outside row count {}",
-            geometry.row_count
-        ));
+        return Err(RowEncodingError::RowIndexOutsideGeometry {
+            row_index,
+            row_count: geometry.row_count,
+        });
     }
     if witness_values.len() != geometry.witness_values_per_row {
-        return Err(format!(
-            "row {row_index} has {} witness values, expected {}",
-            witness_values.len(),
-            geometry.witness_values_per_row
-        ));
+        return Err(RowEncodingError::WitnessValueCountMismatch {
+            row_index,
+            actual_value_count: witness_values.len(),
+            expected_value_count: geometry.witness_values_per_row,
+        });
     }
     let mut coefficients = Vec::with_capacity(geometry.padded_coefficient_count);
     coefficients.extend_from_slice(witness_values);
-    coefficients.extend(derive_row_pad(geometry, row_index, secret_pad_seed));
+    append_row_high_half(
+        &mut coefficients,
+        geometry,
+        row_index,
+        high_half_source.into(),
+    )?;
     Ok(coefficients)
 }
 
 #[cfg(test)]
-fn derive_row_pad(
+fn append_row_high_half(
+    coefficients: &mut Vec<Goldilocks>,
     geometry: RowEncodingGeometry,
     row_index: usize,
-    secret_pad_seed: &[u8; 32],
-) -> Vec<Goldilocks> {
+    high_half_source: RowCodeHighHalfSource<'_>,
+) -> Result<(), RowEncodingError> {
+    match high_half_source {
+        RowCodeHighHalfSource::CanonicalPublicZeros => {
+            coefficients.resize(geometry.padded_coefficient_count, Goldilocks::ZERO);
+        }
+        RowCodeHighHalfSource::PrivateMaskSeed(private_seed) => {
+            coefficients.extend(derive_private_row_high_half(
+                geometry,
+                row_index,
+                private_seed,
+            )?);
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+fn derive_private_row_high_half(
+    geometry: RowEncodingGeometry,
+    row_index: usize,
+    private_seed: &[u8; 32],
+) -> Result<Vec<Goldilocks>, RowEncodingError> {
     let mut state = Shake256::default();
-    state.update(&(ROW_PAD_DOMAIN.len() as u64).to_le_bytes());
-    state.update(ROW_PAD_DOMAIN);
-    state.update(secret_pad_seed);
+    state.update(&(PRIVATE_ROW_HIGH_HALF_DOMAIN.len() as u64).to_le_bytes());
+    state.update(PRIVATE_ROW_HIGH_HALF_DOMAIN);
+    state.update(private_seed);
     state.update(&(geometry.row_count as u64).to_le_bytes());
     state.update(&(geometry.witness_values_per_row as u64).to_le_bytes());
     state.update(&(row_index as u64).to_le_bytes());
     let mut reader = state.finalize_xof();
-    (0..geometry.pad_value_count())
-        .map(|_| {
-            loop {
-                let mut bytes = [0_u8; 8];
-                reader.read(&mut bytes);
-                let candidate = u64::from_le_bytes(bytes);
-                if candidate < GOLDILOCKS_MODULUS {
-                    return Goldilocks::from_u64(candidate);
-                }
+    derive_private_row_high_half_from_candidates(geometry.pad_value_count(), || {
+        let mut bytes = [0_u8; 8];
+        reader.read(&mut bytes);
+        u64::from_le_bytes(bytes)
+    })
+}
+
+#[cfg(test)]
+fn derive_private_row_high_half_from_candidates(
+    output_count: usize,
+    mut next_candidate: impl FnMut() -> u64,
+) -> Result<Vec<Goldilocks>, RowEncodingError> {
+    let mut high_half = Vec::with_capacity(output_count);
+    'next_output: for output_index in 0..output_count {
+        for _ in 0..PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT {
+            let candidate = next_candidate();
+            if candidate < GOLDILOCKS_MODULUS {
+                high_half.push(Goldilocks::from_u64(candidate));
+                continue 'next_output;
             }
-        })
-        .collect()
+        }
+        return Err(RowEncodingError::PrivateHighHalfCandidateDrawsExhausted { output_index });
+    }
+    Ok(high_half)
 }
 
 #[cfg(test)]
@@ -268,24 +385,255 @@ mod tests {
     }
 
     #[test]
-    fn row_pads_are_recomputable_and_domain_separated() {
+    fn private_high_halves_are_recomputable_domain_separated_and_byte_stable() {
         let geometry = RowEncodingGeometry::new(8, 5).expect("valid row geometry");
         let witness = vec![Goldilocks::ZERO; geometry.witness_values_per_row];
-        let first =
-            padded_row_coefficients(geometry, 2, &witness, &[7; 32]).expect("valid padded row");
-        let repeated =
-            padded_row_coefficients(geometry, 2, &witness, &[7; 32]).expect("valid padded row");
-        let different_row =
-            padded_row_coefficients(geometry, 3, &witness, &[7; 32]).expect("valid padded row");
-        let different_seed =
-            padded_row_coefficients(geometry, 2, &witness, &[8; 32]).expect("valid padded row");
+        let private_seed = [7_u8; 32];
+        let different_private_seed = [8_u8; 32];
+        let first = padded_row_coefficients(
+            geometry,
+            2,
+            &witness,
+            RowCodeHighHalfSource::PrivateMaskSeed(&private_seed),
+        )
+        .expect("valid padded row");
+        let repeated = padded_row_coefficients(
+            geometry,
+            2,
+            &witness,
+            RowCodeHighHalfSource::PrivateMaskSeed(&private_seed),
+        )
+        .expect("valid padded row");
+        let different_row = padded_row_coefficients(
+            geometry,
+            3,
+            &witness,
+            RowCodeHighHalfSource::PrivateMaskSeed(&private_seed),
+        )
+        .expect("valid padded row");
+        let different_seed = padded_row_coefficients(
+            geometry,
+            2,
+            &witness,
+            RowCodeHighHalfSource::PrivateMaskSeed(&different_private_seed),
+        )
+        .expect("valid padded row");
         assert_eq!(first, repeated);
         assert_ne!(first, different_row);
         assert_ne!(first, different_seed);
+        let private_high_half_prefix: [u64; 8] = core::array::from_fn(|offset| {
+            first[geometry.witness_values_per_row + offset].as_canonical_u64()
+        });
+        assert_eq!(
+            private_high_half_prefix,
+            [
+                17_430_977_488_077_981_331,
+                13_756_202_890_566_730_034,
+                15_732_332_081_728_082_493,
+                16_084_400_137_907_358_694,
+                12_151_837_950_350_672_020,
+                6_079_371_940_936_520_614,
+                6_473_835_573_199_951_724,
+                14_036_611_626_177_606_630,
+            ]
+        );
         assert!(
             first[geometry.witness_values_per_row..]
                 .iter()
                 .any(|value| value.as_canonical_u64() != 0)
+        );
+    }
+
+    #[test]
+    fn both_high_half_modes_preserve_canonical_low_half_suffix_boundaries() {
+        const LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT: usize = 1 << 15;
+        const LOGICAL_POLYNOMIALS_PER_PHYSICAL_ROW: usize = 8;
+
+        let geometry = RowEncodingGeometry::new(8, 18).expect("valid selected row geometry");
+        assert_eq!(
+            geometry.witness_values_per_row,
+            LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT * LOGICAL_POLYNOMIALS_PER_PHYSICAL_ROW
+        );
+        assert_eq!(geometry.padded_coefficient_count, 1 << 19);
+        assert_eq!(geometry.encoded_column_count, 1 << 21);
+        let mut witness = vec![Goldilocks::ZERO; geometry.witness_values_per_row];
+        for (coefficient_index, coefficient) in witness[..LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT]
+            .iter_mut()
+            .enumerate()
+        {
+            *coefficient = Goldilocks::from_u64(coefficient_index as u64 + 1);
+        }
+        let partial_final_logical_chunk_start = LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT;
+        let partial_final_logical_chunk_coefficient_count = 17_usize;
+        for (coefficient_offset, coefficient) in witness[partial_final_logical_chunk_start
+            ..partial_final_logical_chunk_start + partial_final_logical_chunk_coefficient_count]
+            .iter_mut()
+            .enumerate()
+        {
+            *coefficient = Goldilocks::from_u64(100_001 + coefficient_offset as u64);
+        }
+
+        let partial_final_logical_chunk_suffix_start =
+            partial_final_logical_chunk_start + partial_final_logical_chunk_coefficient_count;
+        let partial_final_logical_chunk_end = 2 * LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT;
+        let unused_suffix_only_logical_slots_start = partial_final_logical_chunk_end;
+        let assert_canonical_low_half_suffixes = |coefficients: &[Goldilocks]| {
+            assert_eq!(
+                &coefficients[..geometry.witness_values_per_row],
+                witness.as_slice()
+            );
+            assert!(
+                coefficients
+                    [partial_final_logical_chunk_suffix_start..partial_final_logical_chunk_end]
+                    .iter()
+                    .all(|coefficient| *coefficient == Goldilocks::ZERO)
+            );
+            assert!(
+                coefficients
+                    [unused_suffix_only_logical_slots_start..geometry.witness_values_per_row]
+                    .iter()
+                    .all(|coefficient| *coefficient == Goldilocks::ZERO)
+            );
+        };
+
+        for row_index in [0_usize, 4, 7] {
+            let public_coefficients = padded_row_coefficients(
+                geometry,
+                row_index,
+                &witness,
+                RowCodeHighHalfSource::CanonicalPublicZeros,
+            )
+            .expect("valid canonical public row");
+            assert_canonical_low_half_suffixes(&public_coefficients);
+            assert!(
+                public_coefficients
+                    [geometry.witness_values_per_row..geometry.padded_coefficient_count]
+                    .iter()
+                    .all(|coefficient| *coefficient == Goldilocks::ZERO)
+            );
+        }
+
+        let private_seed = [9_u8; 32];
+        let private_coefficients = padded_row_coefficients(
+            geometry,
+            4,
+            &witness,
+            RowCodeHighHalfSource::PrivateMaskSeed(&private_seed),
+        )
+        .expect("valid private masked row");
+        assert_canonical_low_half_suffixes(&private_coefficients);
+        assert!(
+            private_coefficients
+                [geometry.witness_values_per_row..geometry.padded_coefficient_count]
+                .iter()
+                .any(|coefficient| *coefficient != Goldilocks::ZERO)
+        );
+    }
+
+    #[test]
+    fn canonical_public_row_equals_direct_plain_reed_solomon_encoding() {
+        let geometry = RowEncodingGeometry::new(8, 6).expect("valid row geometry");
+        let witness = (0..geometry.witness_values_per_row)
+            .map(|coefficient_index| Goldilocks::from_u64(29 * coefficient_index as u64 + 13))
+            .collect::<Vec<_>>();
+        let encoded = encode_row(
+            geometry,
+            5,
+            &witness,
+            RowCodeHighHalfSource::CanonicalPublicZeros,
+        )
+        .expect("valid canonical public row");
+
+        let mut direct_plain_reed_solomon_coefficients = padded_row_coefficients(
+            geometry,
+            5,
+            &witness,
+            RowCodeHighHalfSource::CanonicalPublicZeros,
+        )
+        .expect("valid canonical public coefficients");
+        let transform_slack_start = direct_plain_reed_solomon_coefficients.len();
+        direct_plain_reed_solomon_coefficients
+            .resize(geometry.encoded_column_count, Goldilocks::ZERO);
+        assert!(
+            direct_plain_reed_solomon_coefficients[transform_slack_start..]
+                .iter()
+                .all(|coefficient| *coefficient == Goldilocks::ZERO)
+        );
+        let direct_plain_reed_solomon_encoding = Radix2Bowers.coset_dft(
+            direct_plain_reed_solomon_coefficients,
+            Goldilocks::GENERATOR,
+        );
+        assert_eq!(encoded, direct_plain_reed_solomon_encoding);
+    }
+
+    #[test]
+    fn zero_private_mask_seed_does_not_alias_canonical_public_zeros() {
+        let geometry = RowEncodingGeometry::new(8, 5).expect("valid row geometry");
+        let witness = vec![Goldilocks::ZERO; geometry.witness_values_per_row];
+        let zero_private_seed = [0_u8; 32];
+        let public_source = RowCodeHighHalfSource::CanonicalPublicZeros;
+        let private_source = RowCodeHighHalfSource::PrivateMaskSeed(&zero_private_seed);
+        assert_ne!(public_source, private_source);
+
+        let public_coefficients = padded_row_coefficients(geometry, 1, &witness, public_source)
+            .expect("valid canonical public row");
+        let private_coefficients = padded_row_coefficients(geometry, 1, &witness, private_source)
+            .expect("valid private masked row");
+        assert_eq!(
+            &public_coefficients[..geometry.witness_values_per_row],
+            &private_coefficients[..geometry.witness_values_per_row]
+        );
+        assert!(
+            public_coefficients[geometry.witness_values_per_row..]
+                .iter()
+                .all(|coefficient| *coefficient == Goldilocks::ZERO)
+        );
+        assert!(
+            private_coefficients[geometry.witness_values_per_row..]
+                .iter()
+                .any(|coefficient| *coefficient != Goldilocks::ZERO)
+        );
+        assert_ne!(public_coefficients, private_coefficients);
+    }
+
+    #[test]
+    fn private_high_half_sampling_enforces_the_selected_ceiling_per_output() {
+        assert_eq!(PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT, 128);
+
+        let mut final_allowed_draw_count = 0_usize;
+        let accepted_at_ceiling = derive_private_row_high_half_from_candidates(1, || {
+            final_allowed_draw_count += 1;
+            if final_allowed_draw_count
+                == PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT as usize
+            {
+                GOLDILOCKS_MODULUS - 1
+            } else {
+                GOLDILOCKS_MODULUS
+            }
+        })
+        .expect("the final candidate within the selected ceiling is accepted");
+        assert_eq!(final_allowed_draw_count, 128);
+        assert_eq!(
+            accepted_at_ceiling,
+            vec![Goldilocks::from_u64(GOLDILOCKS_MODULUS - 1)]
+        );
+
+        let mut hostile_candidate_draw_count = 0_usize;
+        let exhaustion = derive_private_row_high_half_from_candidates(2, || {
+            hostile_candidate_draw_count += 1;
+            if hostile_candidate_draw_count == 1 {
+                7
+            } else {
+                GOLDILOCKS_MODULUS
+            }
+        });
+        assert_eq!(
+            exhaustion,
+            Err(RowEncodingError::PrivateHighHalfCandidateDrawsExhausted { output_index: 1 })
+        );
+        assert_eq!(
+            hostile_candidate_draw_count,
+            1 + PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT as usize
         );
     }
 
@@ -342,7 +690,13 @@ mod tests {
         assert!(RowEncodingGeometry::new(3, 4).is_err());
         let geometry = RowEncodingGeometry::new(8, 4).expect("valid row geometry");
         let witness = vec![Goldilocks::ZERO; geometry.witness_values_per_row];
-        assert!(encode_row(geometry, 8, &witness, &[0; 32]).is_err());
-        assert!(encode_row(geometry, 0, &witness[..15], &[0; 32]).is_err());
+        let private_seed = [0_u8; 32];
+        for high_half_source in [
+            RowCodeHighHalfSource::CanonicalPublicZeros,
+            RowCodeHighHalfSource::PrivateMaskSeed(&private_seed),
+        ] {
+            assert!(encode_row(geometry, 8, &witness, high_half_source).is_err());
+            assert!(encode_row(geometry, 0, &witness[..15], high_half_source).is_err());
+        }
     }
 }

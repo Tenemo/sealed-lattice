@@ -48,7 +48,7 @@ impl ConsumedCommonProofVerificationInputs {
             canonical_application_statement_bytes: self
                 .statement_source
                 .canonical_application_statement_bytes(),
-            relation_plan: &relation_plan.relation_plan,
+            relation_plan: relation_plan.compiled_plan(),
             relation_context: &relation_plan.relation_context,
             schedule_position: relation_plan.schedule_position,
             top_count: relation_plan.top_count,
@@ -63,7 +63,9 @@ impl ConsumedCommonProofVerificationInputs {
     }
 
     pub(crate) fn prepare(self) -> PreparedCommonProofVerification {
-        let verifier = CommonProofVerificationStateMachine::new(self.pollable_verification_input())
+        let verifier = self
+            .statement_source
+            .new_verification_state_machine(self.pollable_verification_input())
             .expect("consumed common-proof verifier inputs passed complete validation");
         let verification_binding = self.statement_source.verification_binding();
         let canonical_stream_verifier = CanonicalStreamVerifier::new(

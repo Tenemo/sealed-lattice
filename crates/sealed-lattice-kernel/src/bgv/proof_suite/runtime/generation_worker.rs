@@ -636,6 +636,12 @@ pub(crate) struct PreparedCommonProofGeneration {
 }
 
 impl PreparedCommonProofGeneration {
+    pub(crate) const fn application_statement_schema_identifier(&self) -> u16 {
+        self.binding
+            .authorization
+            .application_statement_schema_identifier
+    }
+
     pub(crate) fn runtime_binding_hash(&self) -> [u8; HASH_BYTE_LENGTH] {
         self.binding.binding_hash()
     }
@@ -932,7 +938,7 @@ impl CommonProofGenerationCheckpointState {
         if cursor != bytes.len()
             || output_byte_length != 0
             || state.next_event_index == 0
-            || u64::from(state.safe_boundary_ordinal) != state.next_event_index
+            || u64::from(state.safe_boundary_ordinal).checked_add(1) != Some(state.next_event_index)
         {
             return Err(CommonProofRuntimeError::WrongVerificationBinding);
         }
@@ -1111,7 +1117,7 @@ fn build_generation_checkpoint(
     let next_event_index = previous_next_event_index
         .checked_add(1)
         .ok_or(CommonProofRuntimeError::AllocationLimitExceeded)?;
-    if u64::from(boundary.safe_boundary_ordinal()) != next_event_index {
+    if u64::from(boundary.safe_boundary_ordinal()).checked_add(1) != Some(next_event_index) {
         return Err(CommonProofRuntimeError::WrongVerificationBinding);
     }
 

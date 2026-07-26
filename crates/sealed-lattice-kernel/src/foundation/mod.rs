@@ -95,9 +95,7 @@ pub(crate) use finality_runtime::{
     verify_finality, with_verified_finality,
 };
 pub use hash::{Hash512, hash_foundation_tuple_512};
-pub(crate) use hash::{
-    StreamingFoundationHashError, StreamingFoundationTupleHash512, fill_foundation_tuple_xof,
-};
+pub(crate) use hash::{StreamingFoundationHashError, StreamingFoundationTupleHash512};
 pub use local_encrypted_storage::{
     ACTION_STORAGE_DERIVATION_INPUT_SCHEMA_IDENTIFIER, ACTION_STORAGE_ROOT_BYTE_LENGTH,
     ActionStorageDerivationInput, ActionStorageRoot, CommonProofExternalMemoryRecordKind,

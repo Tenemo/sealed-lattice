@@ -679,6 +679,67 @@ pub(crate) fn build_complete_proof_tree_catalog(
     })
 }
 
+/// Derives only the verifier-owned public tree entries from the checked
+/// relation catalog. The row-code successor uses these entries independently
+/// of the incumbent opening-argument tail, while preserving each tree's
+/// canonical relation-catalog index.
+pub(crate) fn build_relation_bound_public_tree_catalog_entries(
+    relation_trees: &[RelationProofTreeInput],
+) -> Result<Vec<ProofTreeCatalogEntry>, ProofBodyError> {
+    if relation_trees.len() > MAXIMUM_TREE_CATALOG_ENTRY_COUNT {
+        return Err(ProofBodyError::CatalogTooLarge);
+    }
+    let bound_tree_count = relation_trees
+        .iter()
+        .filter(|tree| matches!(tree, RelationProofTreeInput::BoundPublic(_)))
+        .count();
+    let mut entries = Vec::new();
+    entries
+        .try_reserve_exact(bound_tree_count)
+        .map_err(|_| ProofBodyError::AllocationLimitExceeded)?;
+    for (tree_catalog_index, relation_tree) in relation_trees.iter().enumerate() {
+        let RelationProofTreeInput::BoundPublic(statement_tree) = relation_tree else {
+            continue;
+        };
+        let (construction, bound_root) = match statement_tree {
+            StatementOwnedProofTreeInput::CommittedMaterial {
+                material_context_hash,
+                expected_root,
+            } => (
+                ProofTreeConstruction::CommittedMaterial {
+                    material_context_hash: *material_context_hash,
+                    row_width: COMMITTED_MATERIAL_ROW_WIDTH,
+                },
+                *expected_root,
+            ),
+            StatementOwnedProofTreeInput::SetupPolynomial {
+                public_polynomial_context_hash,
+                row_width,
+                expected_root,
+            } => {
+                if *row_width == 0 {
+                    return Err(ProofBodyError::InvalidCatalog);
+                }
+                (
+                    ProofTreeConstruction::SetupPolynomial {
+                        public_polynomial_context_hash: *public_polynomial_context_hash,
+                        row_width: *row_width,
+                    },
+                    *expected_root,
+                )
+            }
+        };
+        entries.push(ProofTreeCatalogEntry {
+            tree_catalog_index: u16::try_from(tree_catalog_index)
+                .map_err(|_| ProofBodyError::CatalogTooLarge)?,
+            source: ProofTreeCatalogSource::RelationBoundPublic,
+            construction,
+            bound_root: Some(bound_root),
+        });
+    }
+    Ok(entries)
+}
+
 fn common_tree_context(
     input: &ProofTreeCatalogInput,
     proof_header_hash: [u8; 64],
@@ -721,7 +782,7 @@ fn push_catalog_entry(
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ProofBodyLayout {
     catalog: CompleteProofTreeCatalog,
-    deep_evaluation_count: u32,
+    out_of_domain_evaluation_count: u32,
     terminal_coefficient_count: u32,
     unique_query_count: u32,
     query_orbit_count: u64,
@@ -740,7 +801,7 @@ impl ProofBodyLayout {
         }
         Ok(Self {
             catalog,
-            deep_evaluation_count: transcript_schedule.opening_claim_count(),
+            out_of_domain_evaluation_count: transcript_schedule.opening_claim_count(),
             terminal_coefficient_count,
             unique_query_count: transcript_schedule.unique_query_count(),
             query_orbit_count: transcript_schedule.query_orbit_count(),

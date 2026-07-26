@@ -503,7 +503,7 @@ impl CommonProofUpstreamInputRegistry {
         self.preflight_statement_source_suite_binding(suite_handle, statement_source)?;
         let selected_variant = statement_source
             .relation_plan
-            .relation_plan
+            .compiled_plan()
             .select_variant(
                 statement_source.relation_plan.schedule_position,
                 statement_source.relation_plan.top_count,
@@ -526,7 +526,7 @@ impl CommonProofUpstreamInputRegistry {
                 suite_identifier: statement_source.verification_binding.suite_identifier,
                 canonical_application_statement_bytes: statement_source
                     .canonical_application_statement_bytes(),
-                relation_plan: &statement_source.relation_plan.relation_plan,
+                relation_plan: statement_source.relation_plan.compiled_plan(),
                 relation_context: &statement_source.relation_plan.relation_context,
                 schedule_position: statement_source.relation_plan.schedule_position,
                 top_count: statement_source.relation_plan.top_count,
@@ -687,7 +687,7 @@ impl CommonProofUpstreamInputRegistry {
             .ok_or(CommonProofRuntimeError::UnknownOrStaleHandle)?;
         let relation_plan = application.statement_source.relation_plan();
         let selected_variant = relation_plan
-            .relation_plan
+            .compiled_plan()
             .select_variant(relation_plan.schedule_position, relation_plan.top_count)
             .map_err(|_| CommonProofRuntimeError::InvalidPlanCapability)?;
         Ok(selected_variant
@@ -777,7 +777,7 @@ impl CommonProofUpstreamInputRegistry {
         }
         let relation_plan = application.statement_source.relation_plan();
         let selected_variant = relation_plan
-            .relation_plan
+            .compiled_plan()
             .select_variant(relation_plan.schedule_position, relation_plan.top_count)
             .map_err(|_| CommonProofRuntimeError::InvalidPlanCapability)?;
         let requires_verified_column_evaluator =
@@ -815,28 +815,27 @@ impl CommonProofUpstreamInputRegistry {
             .collect::<Result<Vec<_>, _>>()?;
         let relation_plan = application.statement_source.relation_plan();
         let verification_binding = application.statement_source.verification_binding();
-        let validation_state =
-            CommonProofVerificationStateMachine::new(PollableCommonProofVerificationInput {
-                protocol_version: application.statement_source.protocol_version(),
-                suite_identifier: verification_binding.suite_identifier,
-                canonical_application_statement_bytes: application
-                    .statement_source
-                    .canonical_application_statement_bytes(),
-                relation_plan: &relation_plan.relation_plan,
-                relation_context: &relation_plan.relation_context,
-                schedule_position: relation_plan.schedule_position,
-                top_count: relation_plan.top_count,
-                statement_owned_trees,
-                evaluator_auxiliary_roots: &evaluator_auxiliary_roots,
-                declared_proof_byte_length: application
-                    .statement_source
-                    .limits()
-                    .proof_byte_length(),
-                proof_byte_ceiling: MAXIMUM_COMMON_PROOF_BYTE_LENGTH,
-                maximum_resident_window_byte_length: MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH
-                    .checked_mul(MAXIMUM_RESIDENT_COMMON_PROOF_INPUT_CHUNKS)
-                    .ok_or(CommonProofRuntimeError::AllocationLimitExceeded)?,
-            })
+        let verification_input = PollableCommonProofVerificationInput {
+            protocol_version: application.statement_source.protocol_version(),
+            suite_identifier: verification_binding.suite_identifier,
+            canonical_application_statement_bytes: application
+                .statement_source
+                .canonical_application_statement_bytes(),
+            relation_plan: relation_plan.compiled_plan(),
+            relation_context: &relation_plan.relation_context,
+            schedule_position: relation_plan.schedule_position,
+            top_count: relation_plan.top_count,
+            statement_owned_trees,
+            evaluator_auxiliary_roots: &evaluator_auxiliary_roots,
+            declared_proof_byte_length: application.statement_source.limits().proof_byte_length(),
+            proof_byte_ceiling: MAXIMUM_COMMON_PROOF_BYTE_LENGTH,
+            maximum_resident_window_byte_length: MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH
+                .checked_mul(MAXIMUM_RESIDENT_COMMON_PROOF_INPUT_CHUNKS)
+                .ok_or(CommonProofRuntimeError::AllocationLimitExceeded)?,
+        };
+        let validation_state = application
+            .statement_source
+            .new_verification_state_machine(verification_input)
             .map_err(|_| CommonProofRuntimeError::WrongVerificationBinding)?;
         let verifier_memory_accounting = validation_state
             .resident_memory_accounting()

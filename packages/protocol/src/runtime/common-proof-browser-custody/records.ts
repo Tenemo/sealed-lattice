@@ -32,6 +32,7 @@ export const maximumCommonProofOutputChunkCount = 256;
 export const maximumCommonProofOutputByteLength = 268_435_456;
 export const maximumCheckpointCursorManifestByteLength = 1_048_576;
 const maximumUnsigned32 = 0xffff_ffff;
+const maximumUnsigned16 = 0xffff;
 const publicRecordMagic = Uint8Array.of(0x53, 0x4c, 0x43, 0x50);
 const publicRecordVersion = 1;
 const publicRecordHeaderByteLength =
@@ -46,7 +47,6 @@ export const checkpointStateStreamDomain =
     'sealed-lattice/common-proof/generation-checkpoint-state/v1';
 const commonProofAttemptStoragePrefixDomain =
     'sealed-lattice/common-proof/attempt-storage-prefix/v1';
-export const commonProofGenerationCheckpointOperationKind = 1;
 export const textEncoder = new TextEncoder();
 
 export type CommonProofExternalMemoryIdentifierInput =
@@ -118,6 +118,7 @@ export type CommonProofBrowserCustodyLimits = Readonly<{
 
 export type CommonProofBrowserCustodyInput = Readonly<{
     actionRandomnessCommitment: Uint8Array;
+    applicationStatementSchemaIdentifier: number;
     capacityReservation: UntrustedStorageExclusiveCapacityReservation;
     commonProofEnvironmentIdentifier: Uint8Array;
     commonProofRuntimeBindingHash: Uint8Array;
@@ -185,6 +186,9 @@ export type CommonProofBrowserCustody = Readonly<{
 
 export const isSafeUnsigned32 = (value: number): boolean =>
     Number.isSafeInteger(value) && value >= 0 && value <= maximumUnsigned32;
+
+export const isNonzeroUnsigned16 = (value: number): boolean =>
+    Number.isSafeInteger(value) && value > 0 && value <= maximumUnsigned16;
 
 export const copyExactBytes = (
     value: Uint8Array,

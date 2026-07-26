@@ -1104,6 +1104,7 @@ fn prepare_galois_generation(
                 runtime_plan.limits,
             )?;
             let description = CommonProofGenerationFamilyAdapterDescription::new(
+                fresh_preparation.application_statement_schema_identifier(),
                 fresh_preparation.runtime_binding_hash(),
                 fresh_preparation.generation_authorization_hash(),
                 fresh_preparation.proof_attempt_lineage_identifier(),

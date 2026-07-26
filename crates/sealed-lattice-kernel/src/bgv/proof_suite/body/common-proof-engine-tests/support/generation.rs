@@ -24,7 +24,7 @@ fn prepared_generation_worker_fixture_for_public_family(
     )
     .and_then(|header| header.proof_header_hash())
     .expect("the genuine fixture statement has one canonical proof header");
-    let relation_plan = CommonProofRelationPlanCapability::from_compiled_plan(
+    let relation_plan = CommonProofRelationPlanCapability::from_checked_fixture_plan(
         &fixture.relation_plan,
         &fixture.relation_context,
         fixture.schedule_position,
@@ -66,24 +66,25 @@ fn prepared_generation_worker_fixture_for_public_family(
         .expect("the prefetch window fits u64"),
     )
     .expect("the genuine proof fits the browser worker limits");
-    let state = CommonProofGenerationStateMachine::new(CommonProofGenerationInput {
-        protocol_version: 1,
-        suite_identifier: [0x11; 64],
-        canonical_application_statement_bytes: &fixture.canonical_application_statement_bytes,
-        relation_plan: &fixture.relation_plan,
-        relation_context: &fixture.relation_context,
-        schedule_position: fixture.schedule_position,
-        top_count: fixture.top_count,
-        relation_trees: fixture.relation_trees,
-        source_polynomial_provider: Box::new(ResidentCommonProofSourcePolynomialProvider::new(
-            fixture.provided_columns,
-        )),
-        maximum_external_memory_chunk_byte_length:
-            MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH,
-        maximum_proof_transport_chunk_byte_length: MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH,
-        maximum_prefetched_query_byte_length: limits.prefetched_query_byte_length(),
-    })
-    .expect("the genuine generation state owns the checked relation inputs");
+    let state =
+        CommonProofGenerationStateMachine::new_for_checked_fixture(CommonProofGenerationInput {
+            protocol_version: 1,
+            suite_identifier: [0x11; 64],
+            canonical_application_statement_bytes: &fixture.canonical_application_statement_bytes,
+            relation_plan: &fixture.relation_plan,
+            relation_context: &fixture.relation_context,
+            schedule_position: fixture.schedule_position,
+            top_count: fixture.top_count,
+            relation_trees: fixture.relation_trees,
+            source_polynomial_provider: Box::new(ResidentCommonProofSourcePolynomialProvider::new(
+                fixture.provided_columns,
+            )),
+            maximum_external_memory_chunk_byte_length:
+                MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH,
+            maximum_proof_transport_chunk_byte_length: MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH,
+            maximum_prefetched_query_byte_length: limits.prefetched_query_byte_length(),
+        })
+        .expect("the genuine generation state owns the checked relation inputs");
     let mut source_attempt_lineage = [0x52_u8; 32];
     source_attempt_lineage[31] = source_attempt_lineage[31].wrapping_add(
         u8::try_from(checkpoint_source_lineage_delta)
@@ -356,11 +357,11 @@ fn capture_first_generation_checkpoint_for_public_family(
                 let stable_attempt_binding_hash = registry
                     .generation_checkpoint_stable_attempt_binding_hash(operation)
                     .expect("the checkpoint exposes its stable attempt binding");
-                assert!(
+                assert_eq!(
                     registry
                         .generation_checkpoint_safe_boundary_ordinal(operation)
-                        .expect("the checkpoint boundary ordinal is available")
-                        > 0,
+                        .expect("the checkpoint boundary ordinal is available"),
+                    0,
                 );
                 registry
                     .retire_failed_generation(operation)
@@ -795,24 +796,25 @@ fn constraint_stream_quotient_is_byte_identical_to_the_whole_matrix_oracle() {
 #[test]
 fn generation_state_enforces_reports_and_releases_its_complete_resident_live_set() {
     let fixture = common_proof_engine_fixture();
-    let mut state = CommonProofGenerationStateMachine::new(CommonProofGenerationInput {
-        protocol_version: 1,
-        suite_identifier: [0x11; 64],
-        canonical_application_statement_bytes: &fixture.canonical_application_statement_bytes,
-        relation_plan: &fixture.relation_plan,
-        relation_context: &fixture.relation_context,
-        schedule_position: fixture.schedule_position,
-        top_count: fixture.top_count,
-        relation_trees: fixture.relation_trees.clone(),
-        source_polynomial_provider: Box::new(ResidentCommonProofSourcePolynomialProvider::new(
-            fixture.provided_columns.clone(),
-        )),
-        maximum_external_memory_chunk_byte_length:
-            MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH,
-        maximum_proof_transport_chunk_byte_length: MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH,
-        maximum_prefetched_query_byte_length: MAXIMUM_PROOF_BYTE_LENGTH as u64,
-    })
-    .expect("the compact fixture fits the resident-memory safety bound");
+    let mut state =
+        CommonProofGenerationStateMachine::new_for_checked_fixture(CommonProofGenerationInput {
+            protocol_version: 1,
+            suite_identifier: [0x11; 64],
+            canonical_application_statement_bytes: &fixture.canonical_application_statement_bytes,
+            relation_plan: &fixture.relation_plan,
+            relation_context: &fixture.relation_context,
+            schedule_position: fixture.schedule_position,
+            top_count: fixture.top_count,
+            relation_trees: fixture.relation_trees.clone(),
+            source_polynomial_provider: Box::new(ResidentCommonProofSourcePolynomialProvider::new(
+                fixture.provided_columns.clone(),
+            )),
+            maximum_external_memory_chunk_byte_length:
+                MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH,
+            maximum_proof_transport_chunk_byte_length: MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH,
+            maximum_prefetched_query_byte_length: MAXIMUM_PROOF_BYTE_LENGTH as u64,
+        })
+        .expect("the compact fixture fits the resident-memory safety bound");
     let resident_memory_plan = state.resident_memory_plan();
     assert_eq!(resident_memory_plan.phases().len(), 14);
     assert_eq!(
@@ -1006,23 +1008,24 @@ fn generation_state_enforces_reports_and_releases_its_complete_resident_live_set
 #[test]
 fn generation_state_rejects_a_noncanonical_transport_chunk_before_proving() {
     let fixture = common_proof_engine_fixture();
-    let result = CommonProofGenerationStateMachine::new(CommonProofGenerationInput {
-        protocol_version: 1,
-        suite_identifier: [0x11; 64],
-        canonical_application_statement_bytes: &fixture.canonical_application_statement_bytes,
-        relation_plan: &fixture.relation_plan,
-        relation_context: &fixture.relation_context,
-        schedule_position: fixture.schedule_position,
-        top_count: fixture.top_count,
-        relation_trees: fixture.relation_trees,
-        source_polynomial_provider: Box::new(ResidentCommonProofSourcePolynomialProvider::new(
-            fixture.provided_columns,
-        )),
-        maximum_external_memory_chunk_byte_length:
-            MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH,
-        maximum_proof_transport_chunk_byte_length: usize::MAX,
-        maximum_prefetched_query_byte_length: MAXIMUM_PROOF_BYTE_LENGTH as u64,
-    });
+    let result =
+        CommonProofGenerationStateMachine::new_for_checked_fixture(CommonProofGenerationInput {
+            protocol_version: 1,
+            suite_identifier: [0x11; 64],
+            canonical_application_statement_bytes: &fixture.canonical_application_statement_bytes,
+            relation_plan: &fixture.relation_plan,
+            relation_context: &fixture.relation_context,
+            schedule_position: fixture.schedule_position,
+            top_count: fixture.top_count,
+            relation_trees: fixture.relation_trees,
+            source_polynomial_provider: Box::new(ResidentCommonProofSourcePolynomialProvider::new(
+                fixture.provided_columns,
+            )),
+            maximum_external_memory_chunk_byte_length:
+                MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH,
+            maximum_proof_transport_chunk_byte_length: usize::MAX,
+            maximum_prefetched_query_byte_length: MAXIMUM_PROOF_BYTE_LENGTH as u64,
+        });
     assert!(matches!(
         result,
         Err(CommonProofGenerationInitializationError::Prover(

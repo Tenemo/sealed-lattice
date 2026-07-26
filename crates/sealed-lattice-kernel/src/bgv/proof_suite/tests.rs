@@ -51,6 +51,7 @@ fn common_proof_transcript_enforces_the_exact_round_chain() {
     let mut transcript = CommonProofTranscript::new(
         1,
         [0x31; 64],
+        [0x32; 64],
         0x1216,
         b"header",
         common_proof_schedule(CommonProofPrivacyMode::SecretBearing),
@@ -97,16 +98,16 @@ fn common_proof_transcript_enforces_the_exact_round_chain() {
     }
     for point_ordinal in 0..2 {
         transcript
-            .sample_deep_point(point_ordinal, |_| false)
-            .expect("distinct nonzero DEEP point derives");
+            .sample_out_of_domain_point(point_ordinal, |_| false)
+            .expect("distinct nonzero out-of-domain point derives");
     }
     transcript
-        .absorb_deep_evaluations(&[
+        .absorb_out_of_domain_evaluations(&[
             transcript_extension_value(1),
             transcript_extension_value(2),
             transcript_extension_value(3),
         ])
-        .expect("DEEP values follow points");
+        .expect("out-of-domain values follow points");
     transcript
         .absorb_opening_batch_mask_root([0x09; 64])
         .expect("secret mode requires the opening mask root");
@@ -178,6 +179,7 @@ fn public_common_proof_transcript_rejects_a_secret_mode_round() {
     let mut transcript = CommonProofTranscript::new(
         1,
         [0x41; 64],
+        [0x42; 64],
         0x1213,
         b"header",
         common_proof_schedule(CommonProofPrivacyMode::PublicOnly),
@@ -206,14 +208,14 @@ fn public_common_proof_transcript_rejects_a_secret_mode_round() {
         .absorb_quotient_root(1, [5; 64])
         .expect("quotient one");
     transcript
-        .sample_deep_point(0, |_| false)
-        .expect("DEEP zero");
+        .sample_out_of_domain_point(0, |_| false)
+        .expect("out-of-domain zero");
     transcript
-        .sample_deep_point(1, |_| false)
-        .expect("DEEP one");
+        .sample_out_of_domain_point(1, |_| false)
+        .expect("out-of-domain one");
     transcript
-        .absorb_deep_values(b"canonical-deep-values")
-        .expect("DEEP values");
+        .absorb_out_of_domain_values(b"canonical-out-of-domain-values")
+        .expect("out-of-domain values");
     assert_eq!(
         transcript.absorb_opening_batch_mask_root([9; 64]),
         Err(TranscriptError::UnexpectedCommonProofRound),
@@ -223,7 +225,7 @@ fn public_common_proof_transcript_rejects_a_secret_mode_round() {
 #[test]
 fn distinct_query_sampler_is_deterministic_and_bounded() {
     let sample = || {
-        sample_distinct_query_positions_with_blocks(1 << 16, 168, 64, |output, counter| {
+        sample_distinct_query_positions_with_blocks(1 << 16, 387, 64, |output, counter| {
             let mut block = [0_u8; 64];
             let candidate = u16::try_from(output)
                 .expect("the selected query count fits u16")
@@ -234,7 +236,7 @@ fn distinct_query_sampler_is_deterministic_and_bounded() {
     };
     assert_eq!(
         sample().expect("deterministic query sample"),
-        (0..168).collect::<Vec<_>>(),
+        (0..387).collect::<Vec<_>>(),
     );
 
     assert_eq!(

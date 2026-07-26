@@ -1885,7 +1885,7 @@ impl<'context> BallotValidityPlanBuilder<'context> {
                     )
                     .ok_or(RelationPlanError::InvalidOpening)?
                     .len();
-                let translated_opening_count = u64::from(self.context.deep_point_count)
+                let translated_opening_count = u64::from(self.context.out_of_domain_point_count)
                     .checked_mul(
                         u64::try_from(distinct_rotation_count)
                             .map_err(|_| RelationPlanError::CountOverflow)?,
@@ -1894,9 +1894,9 @@ impl<'context> BallotValidityPlanBuilder<'context> {
                 let view_count = u64::from(self.context.challenge_extension_degree)
                     .checked_mul(translated_opening_count)
                     .and_then(|count| {
-                        count.checked_add(
-                            2_u64.checked_mul(u64::from(self.context.unique_query_count))?,
-                        )
+                        count.checked_add(u64::from(
+                            self.context.phase_column_query_coordinate_count,
+                        ))
                     })
                     .ok_or(RelationPlanError::DegreeBoundExceeded)?;
                 view_count
@@ -1949,12 +1949,12 @@ impl<'context> BallotValidityPlanBuilder<'context> {
             )
             .collect::<Result<Vec<_>, RelationPlanError>>()?;
 
-        let ordered_opening_points = (0..self.context.deep_point_count)
-            .flat_map(|deep_point_ordinal| {
+        let ordered_opening_points = (0..self.context.out_of_domain_point_count)
+            .flat_map(|out_of_domain_point_ordinal| {
                 used_rotations
                     .iter()
                     .map(move |rotation| RelationOpeningPointDescriptor {
-                        deep_point_ordinal,
+                        out_of_domain_point_ordinal,
                         trace_rotation_is_negative: rotation.0,
                         trace_rotation_magnitude: rotation.1,
                         conjugate_index: 0,
@@ -1980,14 +1980,14 @@ impl<'context> BallotValidityPlanBuilder<'context> {
                     .get(*column_ordinal as usize)
                     .ok_or(RelationPlanError::InvalidOpening)?
                     .source_degree_bound_exclusive;
-                for deep_point_ordinal in 0..self.context.deep_point_count {
+                for out_of_domain_point_ordinal in 0..self.context.out_of_domain_point_count {
                     for rotation in required_rotations_by_column
                         .get(column_ordinal)
                         .ok_or(RelationPlanError::InvalidOpening)?
                     {
                         let opening_point_ordinal = opening_point_ordinals
                             .get(&RelationOpeningPointDescriptor {
-                                deep_point_ordinal,
+                                out_of_domain_point_ordinal,
                                 trace_rotation_is_negative: rotation.0,
                                 trace_rotation_magnitude: rotation.1,
                                 conjugate_index: 0,
@@ -2007,10 +2007,10 @@ impl<'context> BallotValidityPlanBuilder<'context> {
             }
         }
         for quotient_ordinal in 0..self.context.quotient_component_count {
-            for deep_point_ordinal in 0..self.context.deep_point_count {
+            for out_of_domain_point_ordinal in 0..self.context.out_of_domain_point_count {
                 let opening_point_ordinal = opening_point_ordinals
                     .get(&RelationOpeningPointDescriptor {
-                        deep_point_ordinal,
+                        out_of_domain_point_ordinal,
                         trace_rotation_is_negative: false,
                         trace_rotation_magnitude: 0,
                         conjugate_index: 0,
@@ -3013,7 +3013,7 @@ mod tests {
         }));
 
         let non_native_challenges = variant
-            .derived_challenge_catalog(&context)
+            .derived_relation_prefix_challenge_catalog(&context)
             .expect("challenge derivation must succeed")
             .into_iter()
             .filter(|challenge| {
@@ -3077,17 +3077,17 @@ mod tests {
             257
         );
 
-        let transcript_schedule = variant
-            .common_proof_transcript_schedule(&context)
-            .expect("the exact ballot transcript schedule derives");
+        let relation_prefix_schedule = variant
+            .common_proof_relation_prefix_schedule(&context)
+            .expect("the exact ballot relation-prefix schedule derives");
         assert_eq!(
-            transcript_schedule
+            relation_prefix_schedule
                 .ordered_application_challenge_groups()
                 .len(),
             2
         );
         assert!(
-            transcript_schedule
+            relation_prefix_schedule
                 .ordered_application_challenge_groups()
                 .iter()
                 .all(|group| {
@@ -3100,20 +3100,22 @@ mod tests {
             let mut transcript = CommonProofTranscript::new(
                 1,
                 [0x31; 64],
+                [0x32; 64],
                 BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER,
                 b"exact-ballot-theta-vector",
-                transcript_schedule.clone(),
+                crate::bgv::proof_suite::packed_fri_transcript_schedule(variant, &context)
+                    .expect("the transitional engine schedule derives"),
             )
             .expect("the exact ballot transcript initializes");
-            for tree_ordinal in transcript_schedule.ordered_base_tree_ordinals() {
+            for tree_ordinal in relation_prefix_schedule.ordered_base_tree_ordinals() {
                 transcript
                     .absorb_base_root(*tree_ordinal, [*tree_ordinal as u8; 64])
                     .expect("the exact ballot base root is ordered");
             }
             let assignments =
-                sample_relation_application_challenges(&mut transcript, &transcript_schedule)
+                sample_relation_application_challenges(&mut transcript, &relation_prefix_schedule)
                     .expect("the exact ballot theta vectors derive");
-            for tree_ordinal in transcript_schedule.ordered_auxiliary_tree_ordinals() {
+            for tree_ordinal in relation_prefix_schedule.ordered_auxiliary_tree_ordinals() {
                 transcript
                     .absorb_auxiliary_root(*tree_ordinal, [*tree_ordinal as u8; 64])
                     .expect("the exact ballot auxiliary root follows theta");
@@ -3178,7 +3180,7 @@ mod tests {
             * (u64::from(context.challenge_extension_degree)
                 * u64::try_from(maximum_translated_opening_count)
                     .expect("the opening count fits u64")
-                + 2 * u64::from(context.unique_query_count));
+                + u64::from(context.phase_column_query_coordinate_count));
         assert!(expected_trace_mask_degree > 0 && expected_trace_mask_degree <= TEST_RING_DEGREE);
         assert!(variant.ordered_masks.iter().all(|mask| {
             mask.mask_kind != RelationMaskKind::Trace

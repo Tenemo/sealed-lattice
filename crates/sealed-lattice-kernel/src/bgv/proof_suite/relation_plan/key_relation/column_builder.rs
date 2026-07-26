@@ -637,12 +637,12 @@ impl KeyRelationPlanBuilder<'_> {
             )
             .collect::<Result<Vec<_>, RelationPlanError>>()?;
 
-        let ordered_opening_points = (0..self.context.deep_point_count)
-            .flat_map(|deep_point_ordinal| {
+        let ordered_opening_points = (0..self.context.out_of_domain_point_count)
+            .flat_map(|out_of_domain_point_ordinal| {
                 used_rotations
                     .iter()
                     .map(move |rotation| RelationOpeningPointDescriptor {
-                        deep_point_ordinal,
+                        out_of_domain_point_ordinal,
                         trace_rotation_is_negative: rotation.0,
                         trace_rotation_magnitude: rotation.1,
                         conjugate_index: 0,
@@ -670,14 +670,14 @@ impl KeyRelationPlanBuilder<'_> {
                     .get(*column_ordinal as usize)
                     .ok_or(RelationPlanError::InvalidOpening)?
                     .source_degree_bound_exclusive;
-                for deep_point_ordinal in 0..self.context.deep_point_count {
+                for out_of_domain_point_ordinal in 0..self.context.out_of_domain_point_count {
                     for rotation in required_rotations_by_column
                         .get(column_ordinal)
                         .ok_or(RelationPlanError::InvalidOpening)?
                     {
                         let opening_point_ordinal = opening_point_ordinals
                             .get(&RelationOpeningPointDescriptor {
-                                deep_point_ordinal,
+                                out_of_domain_point_ordinal,
                                 trace_rotation_is_negative: rotation.0,
                                 trace_rotation_magnitude: rotation.1,
                                 conjugate_index: 0,
@@ -697,10 +697,10 @@ impl KeyRelationPlanBuilder<'_> {
             }
         }
         for quotient_ordinal in 0..self.context.quotient_component_count {
-            for deep_point_ordinal in 0..self.context.deep_point_count {
+            for out_of_domain_point_ordinal in 0..self.context.out_of_domain_point_count {
                 let opening_point_ordinal = opening_point_ordinals
                     .get(&RelationOpeningPointDescriptor {
-                        deep_point_ordinal,
+                        out_of_domain_point_ordinal,
                         trace_rotation_is_negative: false,
                         trace_rotation_magnitude: 0,
                         conjugate_index: 0,
@@ -853,16 +853,15 @@ pub(in crate::bgv::proof_suite::relation_plan) fn derived_trace_mask_degree_boun
                 .len(),
         )
         .map_err(|_| RelationPlanError::CountOverflow)?;
-        let deep_opening_view_count = u64::from(context.challenge_extension_degree)
-            .checked_mul(u64::from(context.deep_point_count))
+        let out_of_domain_opening_view_count = u64::from(context.challenge_extension_degree)
+            .checked_mul(u64::from(context.out_of_domain_point_count))
             .and_then(|count| count.checked_mul(rotation_count))
             .ok_or(RelationPlanError::CountOverflow)?;
-        let query_view_count = u64::from(context.unique_query_count)
-            .checked_mul(2)
-            .and_then(|count| count.checked_mul(rotation_count))
+        let query_view_count = u64::from(context.phase_column_query_coordinate_count)
+            .checked_mul(rotation_count)
             .ok_or(RelationPlanError::CountOverflow)?;
         maximum_view_count = maximum_view_count.max(
-            deep_opening_view_count
+            out_of_domain_opening_view_count
                 .checked_add(query_view_count)
                 .ok_or(RelationPlanError::CountOverflow)?,
         );

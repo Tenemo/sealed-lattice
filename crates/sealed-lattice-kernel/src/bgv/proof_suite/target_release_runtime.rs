@@ -977,6 +977,7 @@ fn prepare_target_release_generation(
         }
         TargetReleaseGenerationMode::Resume => {
             let description = CommonProofGenerationFamilyAdapterDescription::new(
+                initial_common_generation.application_statement_schema_identifier(),
                 initial_common_generation.runtime_binding_hash(),
                 initial_common_generation.generation_authorization_hash(),
                 initial_common_generation.proof_attempt_lineage_identifier(),

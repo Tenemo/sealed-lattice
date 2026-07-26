@@ -90,9 +90,9 @@ pub(crate) use body::{
     CompleteProofTreeCatalog, DecodedProofBodyPrefix, DecodedProofPhasePairLeaf, ProofBodyError,
     ProofBodyLayout, ProofTreeCatalogEntry, ProofTreeCatalogInput, ProofTreeCatalogSource,
     ProofTreeOpening, RelationProofTreeInput, StatementOwnedProofTreeInput,
-    build_complete_proof_tree_catalog, decode_proof_body_prefix_owned,
-    decode_proof_query_section_header_at, decode_proof_query_tree_at,
-    proof_body_prefix_byte_length, proof_query_tree_byte_length,
+    build_complete_proof_tree_catalog, build_relation_bound_public_tree_catalog_entries,
+    decode_proof_body_prefix_owned, decode_proof_query_section_header_at,
+    decode_proof_query_tree_at, proof_body_prefix_byte_length, proof_query_tree_byte_length,
 };
 pub(crate) use committed_material::CommittedMaterialTree;
 pub(crate) use committed_material::{
@@ -151,6 +151,7 @@ pub(crate) use field::{
 };
 pub(crate) use fri::{
     OpenedFriLayerPair, ProofFriError, ProofFriQueryState, ProofFriQueryVerifier,
+    packed_fri_transcript_schedule,
 };
 pub(crate) use galois_source_material::{
     VerifiedGaloisSourceMaterialBatch, VerifiedGaloisSourceMaterialBatchPreflight,
@@ -171,12 +172,9 @@ pub(crate) use profile::FIRST_PROFILE_APPLICATION_FAMILIES;
 #[cfg(test)]
 pub(crate) use profile::ProofProfileSet;
 pub(crate) use profile::{
-    COMMITTED_MATERIAL_PROOF_UNIQUE_QUERY_COUNT, PROOF_DEEP_POINT_COUNT,
-    PROOF_EVALUATION_BLOWUP_FACTOR, PROOF_EVALUATION_COSET_OFFSET,
-    PROOF_FINAL_POLYNOMIAL_DEGREE_BOUND_EXCLUSIVE,
-    PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT, PROOF_NON_NATIVE_ALPHA_REPETITION_COUNT,
-    PROOF_NON_NATIVE_THETA_REPETITION_COUNT, PROOF_UNIQUE_QUERY_COUNT, ProofProfileError,
-    ValidatedRelationPlanArtifact,
+    PROOF_EVALUATION_COSET_OFFSET, PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT,
+    PROOF_NON_NATIVE_ALPHA_REPETITION_COUNT, PROOF_NON_NATIVE_THETA_REPETITION_COUNT,
+    PROOF_OUT_OF_DOMAIN_POINT_COUNT, ProofProfileError, ValidatedRelationPlanArtifact,
 };
 #[cfg(test)]
 pub(crate) use prover::{
@@ -188,7 +186,7 @@ pub(crate) use prover::{
     construct_composed_quotient_polynomial,
     construct_constraint_stream_composed_quotient_polynomial,
     construct_pre_challenge_relation_columns, encode_common_proof_checkpoint_cursor_manifest,
-    generate_common_proof,
+    generate_checked_fixture_common_proof,
 };
 pub(crate) use prover::{
     CheckpointableCommonProofPrivateCoinSource, CommonProofAuthenticatedSourceReadRequest,
@@ -230,10 +228,10 @@ pub(crate) use relation_plan::{
     CollectivePublicKeyAggregatePlanInput, CollectivePublicKeySetupPolynomialSource,
     CollectivePublicKeySourcePolynomialProvider, CommittedMaterialRelationPlanInput,
     CommittedMaterialSourcePolynomialAdapter, CompiledBallotValidityRelation, CompiledRelationPlan,
-    CompiledTargetReleaseRelation, DeepCompositionVerificationInput,
-    EvaluatorKeyAggregateEntryPlanInput, EvaluatorKeyAggregatePlanInput,
-    EvaluatorKeyAggregateVariantInput, GaloisKeyShareRelationEntryInput,
-    GaloisKeyShareRelationPlanInput, GaloisKeyShareSourcePolynomialAdapter,
+    CompiledTargetReleaseRelation, EvaluatorKeyAggregateEntryPlanInput,
+    EvaluatorKeyAggregatePlanInput, EvaluatorKeyAggregateVariantInput,
+    GaloisKeyShareRelationEntryInput, GaloisKeyShareRelationPlanInput,
+    GaloisKeyShareSourcePolynomialAdapter, OutOfDomainCompositionVerificationInput,
     PublicAggregateRelationGeometry, PublicKeyShareRelationPlanInput,
     RelationApplicationChallengeAssignment, RelationPlanCheckContext, RelationPlanError,
     RelationPlanVariant, RelationTreeDescriptor, RelinearizationRoundOneRelationPlanInput,
@@ -361,7 +359,7 @@ pub(crate) use transcript::{
 #[cfg(test)]
 pub(crate) use verifier::CommonProofVerificationInput;
 #[cfg(test)]
-pub(crate) use verifier::verify_common_proof;
+pub(crate) use verifier::verify_checked_fixture_common_proof;
 pub(crate) use verifier::{
     CommonProofRequiredByteRange, CommonProofVerificationPoll,
     CommonProofVerificationResidentMemoryAccounting, CommonProofVerificationStateMachine,

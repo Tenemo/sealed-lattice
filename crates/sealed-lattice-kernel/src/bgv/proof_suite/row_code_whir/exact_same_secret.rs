@@ -1791,8 +1791,10 @@ mod tests {
             SetupKeyRelationProofFamily::SameSecret.statement_schema_identifier();
         let schedule = sources
             .relation_plan_variant
-            .common_proof_transcript_schedule(&sources.relation_context)
-            .expect("derive production transcript schedule");
+            .common_proof_relation_prefix_schedule(&sources.relation_context)
+            .expect("derive production transcript schedule")
+            .into_row_code_whir_successor()
+            .expect("derive production successor transcript schedule");
         let header = exact_transcript_header(
             request_context.protocol_version(),
             request_context.suite_identifier(),
@@ -1805,9 +1807,13 @@ mod tests {
             &sources.canonical_application_statement_bytes,
         )
         .expect("derive exact transcript header");
-        let mut transcript = CommonProofTranscript::new(
+        let mut transcript = CommonProofTranscript::new_relation_prefix(
             request_context.protocol_version(),
             request_context.suite_identifier(),
+            sources
+                .relation_plan
+                .row_code_whir_construction_plan_identity_hash()
+                .expect("derive exact construction-plan identity"),
             statement_schema_identifier,
             &header,
             schedule.clone(),
@@ -2593,7 +2599,7 @@ mod tests {
         );
         let schedule = sources
             .relation_plan_variant
-            .common_proof_transcript_schedule(&sources.relation_context)
+            .common_proof_relation_prefix_schedule(&sources.relation_context)
             .expect("derive production transcript schedule");
         let header = exact_transcript_header(
             request_context.protocol_version(),
@@ -2607,9 +2613,13 @@ mod tests {
             &sources.canonical_application_statement_bytes,
         )
         .expect("derive exact transcript header");
-        let mut transcript = CommonProofTranscript::new(
+        let mut transcript = CommonProofTranscript::new_relation_prefix(
             request_context.protocol_version(),
             request_context.suite_identifier(),
+            sources
+                .relation_plan
+                .row_code_whir_construction_plan_identity_hash()
+                .expect("derive exact construction-plan identity"),
             statement_schema_identifier,
             &header,
             schedule.clone(),
@@ -2845,14 +2855,9 @@ mod tests {
         )
         .expect("commit exact quotient phase")
         .column_root;
-        for component_ordinal in 0..sources.relation_context.quotient_component_count {
-            transcript
-                .absorb_quotient_root(
-                    u16::try_from(component_ordinal).expect("quotient component ordinal fits u16"),
-                    column_digest_bytes(quotient_root),
-                )
-                .expect("absorb exact quotient root");
-        }
+        transcript
+            .absorb_row_code_whir_quotient_phase_root(column_digest_bytes(quotient_root))
+            .expect("absorb exact quotient phase root");
 
         let manifest = ExactQuotientCommitmentManifest::new(
             &source_manifest,

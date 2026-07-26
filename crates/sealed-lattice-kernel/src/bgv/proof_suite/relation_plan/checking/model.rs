@@ -53,10 +53,9 @@ impl RelationPlanChecker<'_> {
             .opening_degree_bound_exclusive
             .checked_next_power_of_two()
             .ok_or(RelationPlanError::CountOverflow)?;
-        let expected_evaluation_domain = next_degree_domain
-            .checked_mul(u64::from(self.context.evaluation_blowup_factor))
-            .ok_or(RelationPlanError::CountOverflow)?;
-        if expected_evaluation_domain != variant.evaluation_domain_size
+        if !variant
+            .evaluation_domain_size
+            .is_multiple_of(next_degree_domain)
             || !(self.context.base_field_modulus - 1).is_multiple_of(variant.evaluation_domain_size)
             || modular_power(
                 self.context.evaluation_domain_generator,
@@ -79,28 +78,6 @@ impl RelationPlanChecker<'_> {
                 self.context.base_field_modulus,
             ) == 1
         {
-            return Err(RelationPlanError::InvalidDomain);
-        }
-        let initial_fri_degree_bound_exclusive = variant
-            .opening_degree_bound_exclusive
-            .checked_sub(1)
-            .ok_or(RelationPlanError::InvalidDomain)?;
-        let final_degree_bound = u64::from(self.context.final_polynomial_degree_bound_exclusive);
-        if final_degree_bound >= initial_fri_degree_bound_exclusive {
-            return Err(RelationPlanError::InvalidDomain);
-        }
-        let mut folded_degree_bound = initial_fri_degree_bound_exclusive;
-        let mut expected_fold_count = 0_u16;
-        while folded_degree_bound > final_degree_bound {
-            folded_degree_bound = folded_degree_bound
-                .checked_add(1)
-                .ok_or(RelationPlanError::CountOverflow)?
-                / 2;
-            expected_fold_count = expected_fold_count
-                .checked_add(1)
-                .ok_or(RelationPlanError::CountOverflow)?;
-        }
-        if expected_fold_count != self.context.fri_fold_count {
             return Err(RelationPlanError::InvalidDomain);
         }
         Ok(())

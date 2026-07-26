@@ -26,8 +26,6 @@ const SHAKE256_RATE_WORD_LENGTH: usize = 17;
 const SHAKE256_DELIMITER: u64 = 0x1f;
 #[cfg(test)]
 const SHAKE256_FINAL_RATE_BYTE: u64 = 0x80_u64 << 56;
-const COLUMN_HASH_DOMAIN: [u8; 32] = *b"sealed-lattice/column-hash/v1\0\0\0";
-const MERKLE_NODE_DOMAIN: &[u8] = b"sealed-lattice/column-merkle-node/v1";
 
 pub(super) type ColumnDigest = [u64; COLUMN_DIGEST_WORD_LENGTH];
 
@@ -280,7 +278,10 @@ impl StreamingMerkleBuilder {
 
 fn column_hash_preamble(expected_row_count: usize, encoded_column_count: usize) -> [u64; 6] {
     let mut words = [0_u64; 6];
-    for (word_index, chunk) in COLUMN_HASH_DOMAIN.chunks_exact(8).enumerate() {
+    for (word_index, chunk) in super::ROW_CODE_WHIR_PHASE_COLUMN_LEAF_DOMAIN
+        .chunks_exact(8)
+        .enumerate()
+    {
         words[word_index] = u64::from_le_bytes(chunk.try_into().expect("eight-byte domain word"));
     }
     words[4] = expected_row_count as u64;
@@ -318,8 +319,8 @@ pub(super) fn hash_opened_column(
 
 fn hash_merkle_parent(left: &ColumnDigest, right: &ColumnDigest) -> ColumnDigest {
     let mut state = Shake256::default();
-    state.update(&(MERKLE_NODE_DOMAIN.len() as u64).to_le_bytes());
-    state.update(MERKLE_NODE_DOMAIN);
+    state.update(&(super::ROW_CODE_WHIR_PHASE_COLUMN_NODE_DOMAIN.len() as u64).to_le_bytes());
+    state.update(super::ROW_CODE_WHIR_PHASE_COLUMN_NODE_DOMAIN);
     for word in left.iter().chain(right) {
         state.update(&word.to_le_bytes());
     }

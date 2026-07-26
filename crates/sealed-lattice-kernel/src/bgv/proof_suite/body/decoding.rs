@@ -76,7 +76,7 @@ impl<'opening> ProofTreeOpening<'opening> {
 #[cfg(test)]
 pub(crate) struct DecodedProofBody {
     tree_roots: Vec<[u8; 64]>,
-    deep_evaluations: Vec<ProofChallengeExtensionElement>,
+    out_of_domain_evaluations: Vec<ProofChallengeExtensionElement>,
     terminal_coefficients: Vec<ProofChallengeExtensionElement>,
 }
 
@@ -86,8 +86,8 @@ impl DecodedProofBody {
         &self.tree_roots
     }
 
-    pub(crate) fn deep_evaluations(&self) -> &[ProofChallengeExtensionElement] {
-        &self.deep_evaluations
+    pub(crate) fn out_of_domain_evaluations(&self) -> &[ProofChallengeExtensionElement] {
+        &self.out_of_domain_evaluations
     }
 
     pub(crate) fn terminal_coefficients(&self) -> &[ProofChallengeExtensionElement] {
@@ -99,7 +99,7 @@ impl DecodedProofBody {
 pub(crate) struct DecodedProofBodyPrefix {
     query_section_offset: usize,
     tree_roots: Vec<[u8; 64]>,
-    deep_evaluations: Vec<ProofChallengeExtensionElement>,
+    out_of_domain_evaluations: Vec<ProofChallengeExtensionElement>,
     terminal_coefficients: Vec<ProofChallengeExtensionElement>,
 }
 
@@ -112,8 +112,8 @@ impl DecodedProofBodyPrefix {
         &self.tree_roots
     }
 
-    pub(crate) fn deep_evaluations(&self) -> &[ProofChallengeExtensionElement] {
-        &self.deep_evaluations
+    pub(crate) fn out_of_domain_evaluations(&self) -> &[ProofChallengeExtensionElement] {
+        &self.out_of_domain_evaluations
     }
 
     pub(crate) fn terminal_coefficients(&self) -> &[ProofChallengeExtensionElement] {
@@ -144,7 +144,7 @@ pub(crate) struct PendingProofBodyQueries<'source, 'layout, Source: ProofByteSou
     declared_byte_length: usize,
     query_section_offset: usize,
     tree_roots: Vec<[u8; 64]>,
-    deep_evaluations: Vec<ProofChallengeExtensionElement>,
+    out_of_domain_evaluations: Vec<ProofChallengeExtensionElement>,
     terminal_coefficients: Vec<ProofChallengeExtensionElement>,
 }
 
@@ -205,8 +205,8 @@ impl<Source: ProofByteSource + ?Sized> PendingProofBodyQueries<'_, '_, Source> {
         &self.tree_roots
     }
 
-    pub(crate) fn deep_evaluations(&self) -> &[ProofChallengeExtensionElement] {
-        &self.deep_evaluations
+    pub(crate) fn out_of_domain_evaluations(&self) -> &[ProofChallengeExtensionElement] {
+        &self.out_of_domain_evaluations
     }
 
     pub(crate) fn terminal_coefficients(&self) -> &[ProofChallengeExtensionElement] {
@@ -271,9 +271,10 @@ where
         |source| matches!(source, ProofTreeCatalogSource::QuotientComponent { .. }),
     )?;
 
-    let deep_evaluations = read_extension_value_list(
+    let out_of_domain_evaluations = read_extension_value_list(
         &mut decoder,
-        usize::try_from(layout.deep_evaluation_count).map_err(|_| ProofBodyError::CountOverflow)?,
+        usize::try_from(layout.out_of_domain_evaluation_count)
+            .map_err(|_| ProofBodyError::CountOverflow)?,
     )?;
 
     read_serialized_roots(
@@ -309,7 +310,7 @@ where
     Ok(DecodedProofBodyPrefix {
         query_section_offset,
         tree_roots,
-        deep_evaluations,
+        out_of_domain_evaluations,
         terminal_coefficients,
     })
 }
@@ -333,7 +334,7 @@ where
         declared_byte_length,
         query_section_offset: prefix.query_section_offset,
         tree_roots: prefix.tree_roots,
-        deep_evaluations: prefix.deep_evaluations,
+        out_of_domain_evaluations: prefix.out_of_domain_evaluations,
         terminal_coefficients: prefix.terminal_coefficients,
     })
 }
@@ -359,7 +360,7 @@ impl<'source, 'layout, Source: ProofByteSource + ?Sized>
             declared_byte_length,
             query_section_offset,
             tree_roots,
-            deep_evaluations,
+            out_of_domain_evaluations,
             terminal_coefficients,
         } = self;
 
@@ -471,7 +472,7 @@ impl<'source, 'layout, Source: ProofByteSource + ?Sized>
         }
         Ok(DecodedProofBody {
             tree_roots,
-            deep_evaluations,
+            out_of_domain_evaluations,
             terminal_coefficients,
         })
     }

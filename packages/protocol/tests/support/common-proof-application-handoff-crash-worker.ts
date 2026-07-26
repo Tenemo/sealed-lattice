@@ -138,6 +138,7 @@ workerScope.addEventListener('message', (event) => {
             }
             const commonProofCustody = await owner.openCommonProofCustody({
                 actionRandomnessCommitment: new Uint8Array(64).fill(0x31),
+                applicationStatementSchemaIdentifier: 0x1217,
                 commonProofEnvironmentIdentifier: new Uint8Array(32).fill(0x41),
                 commonProofRuntimeBindingHash: new Uint8Array(64).fill(0x51),
                 proofAttemptLineageIdentifier: new Uint8Array(32).fill(0x61),

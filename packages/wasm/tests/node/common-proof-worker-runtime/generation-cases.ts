@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 
 import {
     decodeCommonProofExternalMemoryRequest,
+    describeClosedWorkerCommonProofGenerationFamilyAdapter,
     openClosedWorkerCommonProofGenerationFamilyAdapter,
+    releaseClosedWorkerCommonProofGenerationFamilyAdapter,
     runClosedWorkerCommonProofGenerationFamilyAdapter,
     runPreparedCommonProofGenerationWorker,
     type CommonProofCanonicalOutputStore,
@@ -15,6 +17,7 @@ import type { TranscriptCoreKernelCommandRuntime } from '../../../src/transcript
 import {
     createCheckpointGenerationKernelFixture,
     createMockKernelRuntime,
+    createResetSafeCommonProofCursorManifest,
     memoryBytes,
     noSecondPollValue,
     writeGenerationPoll,
@@ -30,6 +33,7 @@ import {
 } from './wire-fixtures.js';
 
 const authenticatedSourceRequestByteLength = 160;
+const applicationStatementSchemaIdentifier = 0x1217;
 
 const encodeAuthenticatedSourceReadRequest = (input: {
     authenticationChunkIndex: number;
@@ -57,6 +61,74 @@ const encodeAuthenticatedSourceReadRequest = (input: {
 };
 
 describe('common-proof generation runtime', () => {
+    it('records a non-1 application schema and refuses malformed family descriptions', () => {
+        const openAdapter = (
+            adapterHandle: number,
+            describedApplicationStatementSchemaIdentifier: number,
+        ) => {
+            const runtime = createMockKernelRuntime((memory) => ({
+                sealed_lattice_common_proof_describe_generation_family_adapter:
+                    (
+                        describedAdapterHandle,
+                        _runtimeBindingHashOutputPointer,
+                        _verificationBindingHashOutputPointer,
+                        _proofAttemptLineageIdentifierOutputPointer,
+                        _checkpointLineageIdentifierOutputPointer,
+                        applicationStatementSchemaIdentifierOutputPointer,
+                        statusPointer,
+                    ) => {
+                        expect(describedAdapterHandle).toBe(adapterHandle);
+                        writeUnsigned32(
+                            memory,
+                            applicationStatementSchemaIdentifierOutputPointer,
+                            describedApplicationStatementSchemaIdentifier,
+                        );
+                        writeUnsigned32(memory, statusPointer, 0);
+                        return 0;
+                    },
+                sealed_lattice_common_proof_discard_generation_family_adapter: (
+                    discardedAdapterHandle,
+                ) => {
+                    expect(discardedAdapterHandle).toBe(adapterHandle);
+                    return 0;
+                },
+            }));
+            return {
+                adapter: () =>
+                    openClosedWorkerCommonProofGenerationFamilyAdapter(
+                        runtime,
+                        adapterHandle,
+                    ),
+                runtime,
+            };
+        };
+
+        const accepted = openAdapter(
+            31,
+            applicationStatementSchemaIdentifier,
+        ).adapter();
+        expect(
+            describeClosedWorkerCommonProofGenerationFamilyAdapter(accepted)
+                .applicationStatementSchemaIdentifier,
+        ).toBe(applicationStatementSchemaIdentifier);
+        releaseClosedWorkerCommonProofGenerationFamilyAdapter(accepted);
+
+        for (const [adapterHandle, malformedSchemaIdentifier] of [
+            [32, 0],
+            [33, 0x1_0000],
+        ] as const) {
+            expect(() =>
+                openAdapter(adapterHandle, malformedSchemaIdentifier).adapter(),
+            ).toThrowError(
+                expect.objectContaining({
+                    code: 'KernelFailure',
+                    message:
+                        'The common-proof application-statement schema identifier is not a nonzero unsigned 16-bit value.',
+                }),
+            );
+        }
+    });
+
     it('drives storage, commit, exact readback, and opaque generation authority in order', async () => {
         class SliceObservingBytes extends Uint8Array {
             public sliceCount = 0;
@@ -908,7 +980,7 @@ describe('common-proof generation runtime', () => {
                 checkpointCustody: {
                     publishAuthenticatedCheckpoint: (checkpoint) => {
                         publishedCheckpoint = checkpoint;
-                        expect(checkpoint.safeBoundaryOrdinal).toBe(4);
+                        expect(checkpoint.safeBoundaryOrdinal).toBe(0);
                         committedStateBytes =
                             checkpoint.canonicalStateBytes.slice();
                         committedCursorBytes =
@@ -1005,11 +1077,26 @@ describe('common-proof generation runtime', () => {
         expect(fixture.observations.retiredOperationCount).toBe(1);
     });
 
-    it('explicitly discards a ready checkpoint when custody is absent', async () => {
-        const fixture = createCheckpointGenerationKernelFixture();
-        const capability = await runPreparedCommonProofGenerationWorker(
-            fixture.runtime,
-            81,
+    it('copies and discards a fresh public-only checkpoint when custody is absent', async () => {
+        const proofAttemptLineageIdentifier = new Uint8Array(32).fill(0x74);
+        const fixture = createCheckpointGenerationKernelFixture(
+            createResetSafeCommonProofCursorManifest(
+                proofAttemptLineageIdentifier,
+                new Uint8Array(hashByteLength).fill(0x62),
+                0x1213,
+            ),
+            {
+                applicationStatementSchemaIdentifier: 0x1213,
+                proofAttemptLineageIdentifier,
+            },
+        );
+        const familyAdapter =
+            openClosedWorkerCommonProofGenerationFamilyAdapter(
+                fixture.runtime,
+                71,
+            );
+        await runClosedWorkerCommonProofGenerationFamilyAdapter(
+            familyAdapter,
             {
                 executeTransaction: () => Promise.resolve([]),
             },
@@ -1023,7 +1110,155 @@ describe('common-proof generation runtime', () => {
         expect(fixture.observations.acknowledgedCheckpointCount).toBe(0);
         expect(fixture.observations.discardedCheckpointCount).toBe(1);
         expect(fixture.observations.retiredOperationCount).toBe(0);
-        capability.release();
+    });
+
+    it('retires a checkpoint whose cursor derivation binding differs from its stable attempt', async () => {
+        const fixture = createCheckpointGenerationKernelFixture(
+            createResetSafeCommonProofCursorManifest(
+                installedProofAttemptLineageIdentifier,
+                new Uint8Array(hashByteLength).fill(0x63),
+                0x1213,
+            ),
+        );
+
+        await expect(
+            runPreparedCommonProofGenerationWorker(
+                fixture.runtime,
+                81,
+                { executeTransaction: () => Promise.resolve([]) },
+                {
+                    commitChunk: () => Promise.resolve(),
+                    readChunk: () => Promise.resolve(new Uint8Array()),
+                },
+                { yieldControl: () => Promise.resolve() },
+            ),
+        ).rejects.toMatchObject({
+            code: 'KernelFailure',
+            permanentRetirementRequired: true,
+        });
+        expect(fixture.observations.acknowledgedCheckpointCount).toBe(0);
+        expect(fixture.observations.discardedCheckpointCount).toBe(0);
+        expect(fixture.observations.retiredOperationCount).toBe(1);
+    });
+
+    it('threads the exact adapter runtime binding into no-custody checkpoint copying', async () => {
+        const proofAttemptLineageIdentifier = new Uint8Array(32).fill(0x74);
+        const fixture = createCheckpointGenerationKernelFixture(
+            createResetSafeCommonProofCursorManifest(
+                proofAttemptLineageIdentifier,
+                new Uint8Array(hashByteLength).fill(0x62),
+                0x1213,
+            ),
+            {
+                applicationStatementSchemaIdentifier: 0x1213,
+                commonProofRuntimeBindingHash: new Uint8Array(
+                    hashByteLength,
+                ).fill(0x63),
+                proofAttemptLineageIdentifier,
+            },
+        );
+        const familyAdapter =
+            openClosedWorkerCommonProofGenerationFamilyAdapter(
+                fixture.runtime,
+                71,
+            );
+
+        await expect(
+            runClosedWorkerCommonProofGenerationFamilyAdapter(
+                familyAdapter,
+                { executeTransaction: () => Promise.resolve([]) },
+                {
+                    commitChunk: () => Promise.resolve(),
+                    readChunk: () => Promise.resolve(new Uint8Array()),
+                },
+                { yieldControl: () => Promise.resolve() },
+            ),
+        ).rejects.toMatchObject({
+            code: 'KernelFailure',
+            permanentRetirementRequired: true,
+        });
+        expect(fixture.observations.acknowledgedCheckpointCount).toBe(0);
+        expect(fixture.observations.discardedCheckpointCount).toBe(0);
+        expect(fixture.observations.retiredOperationCount).toBe(1);
+    });
+
+    it('threads the exact adapter schema into public-only checkpoint copying', async () => {
+        const fixture = createCheckpointGenerationKernelFixture(
+            createResetSafeCommonProofCursorManifest(
+                installedProofAttemptLineageIdentifier,
+                new Uint8Array(hashByteLength).fill(0x62),
+                0x1215,
+            ),
+            {
+                applicationStatementSchemaIdentifier: 0x1213,
+                proofAttemptLineageIdentifier:
+                    installedProofAttemptLineageIdentifier,
+            },
+        );
+        const familyAdapter =
+            openClosedWorkerCommonProofGenerationFamilyAdapter(
+                fixture.runtime,
+                71,
+            );
+
+        await expect(
+            runClosedWorkerCommonProofGenerationFamilyAdapter(
+                familyAdapter,
+                { executeTransaction: () => Promise.resolve([]) },
+                {
+                    commitChunk: () => Promise.resolve(),
+                    readChunk: () => Promise.resolve(new Uint8Array()),
+                },
+                { yieldControl: () => Promise.resolve() },
+            ),
+        ).rejects.toMatchObject({
+            code: 'KernelFailure',
+            permanentRetirementRequired: true,
+        });
+        expect(fixture.observations.acknowledgedCheckpointCount).toBe(0);
+        expect(fixture.observations.discardedCheckpointCount).toBe(0);
+        expect(fixture.observations.retiredOperationCount).toBe(1);
+    });
+
+    it('threads the exact adapter attempt lineage into no-custody checkpoint copying', async () => {
+        const proofAttemptLineageIdentifier = new Uint8Array(32).fill(0x74);
+        const wrongProofAttemptLineageIdentifier =
+            proofAttemptLineageIdentifier.slice();
+        wrongProofAttemptLineageIdentifier[0] ^= 0xff;
+        const fixture = createCheckpointGenerationKernelFixture(
+            createResetSafeCommonProofCursorManifest(
+                wrongProofAttemptLineageIdentifier,
+                new Uint8Array(hashByteLength).fill(0x62),
+                0x1213,
+            ),
+            {
+                applicationStatementSchemaIdentifier: 0x1213,
+                proofAttemptLineageIdentifier,
+            },
+        );
+        const familyAdapter =
+            openClosedWorkerCommonProofGenerationFamilyAdapter(
+                fixture.runtime,
+                71,
+            );
+
+        await expect(
+            runClosedWorkerCommonProofGenerationFamilyAdapter(
+                familyAdapter,
+                { executeTransaction: () => Promise.resolve([]) },
+                {
+                    commitChunk: () => Promise.resolve(),
+                    readChunk: () => Promise.resolve(new Uint8Array()),
+                },
+                { yieldControl: () => Promise.resolve() },
+            ),
+        ).rejects.toMatchObject({
+            code: 'KernelFailure',
+            permanentRetirementRequired: true,
+        });
+        expect(fixture.observations.acknowledgedCheckpointCount).toBe(0);
+        expect(fixture.observations.discardedCheckpointCount).toBe(0);
+        expect(fixture.observations.retiredOperationCount).toBe(1);
     });
 
     it('permanently retires an ambiguous checkpoint publication and wipes the snapshot', async () => {
@@ -1146,6 +1381,7 @@ describe('common-proof generation runtime', () => {
                 verificationBindingHashOutputPointer,
                 proofAttemptLineageIdentifierOutputPointer,
                 checkpointLineageIdentifierOutputPointer,
+                applicationStatementSchemaIdentifierOutputPointer,
                 statusPointer,
             ) => {
                 expect(adapterHandle).toBe(72);
@@ -1169,6 +1405,11 @@ describe('common-proof generation runtime', () => {
                     checkpointLineageIdentifierOutputPointer,
                     32,
                 ).fill(0x5a);
+                writeUnsigned32(
+                    memory,
+                    applicationStatementSchemaIdentifierOutputPointer,
+                    applicationStatementSchemaIdentifier,
+                );
                 writeUnsigned32(memory, statusPointer, 0);
                 return 0;
             },
@@ -1450,6 +1691,7 @@ describe('common-proof generation runtime', () => {
                 verificationBindingHashOutputPointer,
                 proofAttemptLineageIdentifierOutputPointer,
                 checkpointLineageIdentifierOutputPointer,
+                applicationStatementSchemaIdentifierOutputPointer,
                 statusPointer,
             ) => {
                 expect(adapterHandle).toBe(73);
@@ -1473,6 +1715,11 @@ describe('common-proof generation runtime', () => {
                     checkpointLineageIdentifierOutputPointer,
                     32,
                 ).fill(0x34);
+                writeUnsigned32(
+                    memory,
+                    applicationStatementSchemaIdentifierOutputPointer,
+                    applicationStatementSchemaIdentifier,
+                );
                 writeUnsigned32(memory, statusPointer, 0);
                 return 0;
             },
@@ -1545,6 +1792,7 @@ describe('common-proof generation runtime', () => {
                 verificationBindingHashOutputPointer,
                 proofAttemptLineageIdentifierOutputPointer,
                 checkpointLineageIdentifierOutputPointer,
+                applicationStatementSchemaIdentifierOutputPointer,
                 statusPointer,
             ) => {
                 expect(adapterHandle).toBe(74);
@@ -1568,6 +1816,11 @@ describe('common-proof generation runtime', () => {
                     checkpointLineageIdentifierOutputPointer,
                     32,
                 ).fill(0x34);
+                writeUnsigned32(
+                    memory,
+                    applicationStatementSchemaIdentifierOutputPointer,
+                    applicationStatementSchemaIdentifier,
+                );
                 writeUnsigned32(memory, statusPointer, 0);
                 return 0;
             },
@@ -1611,6 +1864,7 @@ describe('common-proof generation runtime', () => {
                 verificationBindingHashOutputPointer,
                 proofAttemptLineageIdentifierOutputPointer,
                 checkpointLineageIdentifierOutputPointer,
+                applicationStatementSchemaIdentifierOutputPointer,
                 statusPointer,
             ) => {
                 expect(adapterHandle).toBe(77);
@@ -1634,6 +1888,11 @@ describe('common-proof generation runtime', () => {
                     checkpointLineageIdentifierOutputPointer,
                     32,
                 ).fill(0x34);
+                writeUnsigned32(
+                    memory,
+                    applicationStatementSchemaIdentifierOutputPointer,
+                    applicationStatementSchemaIdentifier,
+                );
                 writeUnsigned32(memory, statusPointer, 0);
                 return 0;
             },
@@ -1691,6 +1950,7 @@ describe('common-proof generation runtime', () => {
                 _verificationBindingHashOutputPointer,
                 _proofAttemptLineageIdentifierOutputPointer,
                 _checkpointLineageIdentifierOutputPointer,
+                _applicationStatementSchemaIdentifierOutputPointer,
                 _statusPointer,
             ) => {
                 adapterDescriptionCount += 1;
@@ -1730,6 +1990,7 @@ describe('common-proof generation runtime', () => {
                 verificationBindingHashOutputPointer,
                 proofAttemptLineageIdentifierOutputPointer,
                 checkpointLineageIdentifierOutputPointer,
+                applicationStatementSchemaIdentifierOutputPointer,
                 statusPointer,
             ) => {
                 expect(adapterHandle).toBe(76);
@@ -1753,6 +2014,11 @@ describe('common-proof generation runtime', () => {
                     checkpointLineageIdentifierOutputPointer,
                     32,
                 ).fill(0x34);
+                writeUnsigned32(
+                    memory,
+                    applicationStatementSchemaIdentifierOutputPointer,
+                    applicationStatementSchemaIdentifier,
+                );
                 writeUnsigned32(memory, statusPointer, 0);
                 return 0;
             },

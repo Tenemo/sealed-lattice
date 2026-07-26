@@ -399,6 +399,14 @@ export {
     openBrowserRuntimeBuildCache,
     RuntimeBuildPreflightError,
 } from './runtime-build-preflight.js';
+export {
+    CommonProofCheckpointCursorManifestError,
+    decodeCommonProofCheckpointCursorManifest,
+} from './common-proof-checkpoint-cursor-manifest.js';
+export {
+    isAssignedRuntimeCheckpointRandomUse,
+    isPublicOnlyCommonProofCheckpointFamily,
+} from './runtime-build-canonical.js';
 export type {
     RuntimeBuildActivation,
     RuntimeBuildAuthorityBinding,
@@ -411,6 +419,8 @@ export type {
     RuntimeBuildPreflightEnvironment,
     RuntimeBuildWorkerPreflight,
 } from './runtime-build-preflight.js';
+export type { DecodedCommonProofCheckpointCursorManifest } from './common-proof-checkpoint-cursor-manifest.js';
+export type { RuntimeBuildManifest } from './runtime-build-canonical.js';
 // Workspace builds use an unpinned kernel; the published SDK verifies its normalized hash.
 export const loadTranscriptCoreKernel: () => Promise<TranscriptCoreKernel> =
     createTranscriptCoreKernelLoader(transcriptCoreKernelUrl, {

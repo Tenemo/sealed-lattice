@@ -308,7 +308,7 @@ impl ArtifactKind {
         match self {
             Self::EncoderAndBallotLayout => 4,
             Self::LatticeCommitmentProfile => 3,
-            Self::ProofProfileSet => 3,
+            Self::ProofProfileSet => 4,
             Self::VerifiableSecretSharingProfile
             | Self::EvaluatorProgramSet
             | Self::TargetDecryptionProfile => FOUNDATION_SCHEMA_VERSION,
@@ -1400,7 +1400,7 @@ mod tests {
 
         let retired_version = CanonicalTuple::new(
             kind.artifact_schema_identifier(),
-            2,
+            3,
             vec![CanonicalItem::unsigned16(1)],
         )
         .encode()

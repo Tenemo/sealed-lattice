@@ -25,15 +25,31 @@ use super::relation_plan::{
     BoundTreeConstructionKind, BoundTreeRootUse, RelationColumnValueType, RelationTreeDescriptor,
 };
 
+#[cfg(test)]
+use super::row_code_whir::{
+    ROW_CODE_WHIR_AGGREGATE_LEAF_DOMAIN, ROW_CODE_WHIR_AGGREGATE_NODE_DOMAIN,
+    ROW_CODE_WHIR_PHASE_COLUMN_LEAF_DOMAIN, ROW_CODE_WHIR_PHASE_COLUMN_NODE_DOMAIN,
+    ROW_CODE_WHIR_PHASE_COLUMN_QUERY_COORDINATE_COUNT, ROW_CODE_WHIR_SHAKE256_PROTOCOL_DOMAIN,
+    RowCodeWhirConstructionPlan, RowCodeWhirSelectedParameters, RowCodeWhirSoundnessAssumption,
+};
+
+#[cfg(test)]
+use super::transcript::{
+    TRANSCRIPT_ABSORB_DOMAIN_BYTES, TRANSCRIPT_ACCEPTED_CHALLENGE_DOMAIN_BYTES,
+    TRANSCRIPT_CHALLENGE_HANDLE_DOMAIN_BYTES, TRANSCRIPT_DISTINCT_QUERY_BLOCK_DOMAIN_BYTES,
+    TRANSCRIPT_INITIAL_DOMAIN_BYTES, TRANSCRIPT_PRODUCT_RESIDUE_BLOCK_DOMAIN_BYTES,
+    TRANSCRIPT_RESPONSE_BINDING_DOMAIN_BYTES,
+};
+
 use super::{
-    CompiledRelationPlan, PROOF_BASE_FIELD_MODULUS, PROOF_CHALLENGE_EXTENSION_DEGREE,
-    RelationPlanCheckContext, RelationPlanError, SelectedEvaluatorEntryKind,
-    selected_evaluator_entry_positions,
+    CompiledRelationPlan, RelationPlanCheckContext, RelationPlanError, SelectedEvaluatorEntryKind,
+    selected_evaluator_entry_positions, selected_relation_plan_check_context,
 };
 
 #[cfg(test)]
 use super::{
-    PROOF_BASE_FIELD_MAXIMUM_TWO_ADIC_GENERATOR, PROOF_CHALLENGE_EXTENSION_POLYNOMIAL_COEFFICIENTS,
+    PROOF_BASE_FIELD_MAXIMUM_TWO_ADIC_GENERATOR, PROOF_BASE_FIELD_MODULUS,
+    PROOF_CHALLENGE_EXTENSION_DEGREE, PROOF_CHALLENGE_EXTENSION_POLYNOMIAL_COEFFICIENTS,
     RelationPlanVariant, SuiteModulusReference, validate_proof_field_profile,
     zero_knowledge::{TraceMaskObservationCoordinateCatalog, TraceMaskSurjectivityCertificate},
 };
@@ -45,19 +61,29 @@ const PROOF_FIELD_PROFILE_SCHEMA_IDENTIFIER: u16 = 0x2201;
 #[cfg(test)]
 const PROOF_FAMILY_PROFILE_SCHEMA_IDENTIFIER: u16 = 0x2202;
 #[cfg(test)]
-const PROOF_FIELD_SCHEDULE_SCHEMA_IDENTIFIER: u16 = 0x2203;
-#[cfg(test)]
 const RELATION_PLAN_REFERENCE_SCHEMA_IDENTIFIER: u16 = 0x222c;
 #[cfg(test)]
 const RELATION_ROOT_COMPATIBILITY_EDGE_SCHEMA_IDENTIFIER: u16 = 0x222a;
 #[cfg(test)]
 const RELATION_ROOT_ENDPOINT_SCHEMA_IDENTIFIER: u16 = 0x222b;
 #[cfg(test)]
+const ROW_CODE_WHIR_CONSTRUCTION_PROFILE_SCHEMA_IDENTIFIER: u16 = 0x2254;
+#[cfg(test)]
+const ROW_CODE_WHIR_CONSTRUCTION_REFERENCE_SCHEMA_IDENTIFIER: u16 = 0x2255;
+#[cfg(test)]
+const ROW_CODE_WHIR_HASH_PROFILE_SCHEMA_IDENTIFIER: u16 = 0x2256;
+#[cfg(test)]
 const SCHEMA_VERSION: u16 = 1;
 #[cfg(test)]
-const PROOF_FIELD_SCHEDULE_SCHEMA_VERSION: u16 = 2;
+const PROOF_FAMILY_PROFILE_SCHEMA_VERSION: u16 = 2;
 #[cfg(test)]
-const PROOF_PROFILE_SET_VERSION: u16 = 3;
+const PROOF_PROFILE_SET_VERSION: u16 = 4;
+#[cfg(test)]
+const SELECTED_ROW_CODE_WHIR_CONSTRUCTION_REFERENCE_COUNT: usize = 31;
+#[cfg(test)]
+const ROW_CODE_WHIR_HASH_ALGORITHM_IDENTIFIER: &str = "SHAKE256";
+#[cfg(test)]
+const ROW_CODE_WHIR_DIGEST_BYTE_LENGTH: u16 = 64;
 
 pub(crate) const FIRST_PROFILE_APPLICATION_FAMILIES: [u16; 12] = [
     ProofFamilies::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER,
@@ -74,17 +100,13 @@ pub(crate) const FIRST_PROFILE_APPLICATION_FAMILIES: [u16; 12] = [
     ProofFamilies::AGGREGATE_THRESHOLD_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
 ];
 
-pub(crate) const PROOF_EVALUATION_BLOWUP_FACTOR: u32 = 8;
 pub(crate) const PROOF_EVALUATION_COSET_OFFSET: u64 = 7;
 // BGKTTZ23's correlated-hIOP composition theorem has one final random
 // out-of-domain center and permits every plan-fixed rotation of that center.
 // A second independently sampled center is a different protocol and would
 // need a separate composition theorem. The degree-five challenge extension
 // already gives the one-center application identity ample soundness margin.
-pub(crate) const PROOF_DEEP_POINT_COUNT: u16 = 1;
-pub(crate) const PROOF_FINAL_POLYNOMIAL_DEGREE_BOUND_EXCLUSIVE: u32 = 256;
-pub(crate) const PROOF_UNIQUE_QUERY_COUNT: u32 = 168;
-pub(crate) const COMMITTED_MATERIAL_PROOF_UNIQUE_QUERY_COUNT: u32 = 192;
+pub(crate) const PROOF_OUT_OF_DOMAIN_POINT_COUNT: u16 = 1;
 pub(crate) const PROOF_NON_NATIVE_THETA_REPETITION_COUNT: u16 = 5;
 pub(crate) const PROOF_NON_NATIVE_ALPHA_REPETITION_COUNT: u16 = 7;
 pub(crate) const PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT: u32 = 128;
@@ -101,6 +123,8 @@ pub(crate) enum ProofProfileError {
     #[cfg(test)]
     NonCanonicalOrder,
     InvalidRelationPlan,
+    #[cfg(test)]
+    InvalidConstructionProfile,
     RelationPlan(RelationPlanError),
     #[cfg(test)]
     InvalidRootEndpoint,
@@ -171,109 +195,18 @@ impl ProofFieldProfile {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct ProofFieldSchedule {
-    proof_field_index: u16,
-    evaluation_blowup_factor: u32,
-    evaluation_coset_offset: u64,
-    deep_point_count: u16,
-    final_polynomial_degree_bound_exclusive: u32,
-    unique_query_count: u32,
-    non_native_theta_repetition_count: u16,
-    non_native_alpha_repetition_count: u16,
-    maximum_fiat_shamir_candidate_draws_per_output: u32,
-}
-
-impl ProofFieldSchedule {
-    fn selected(application_statement_schema_identifier: u16) -> Self {
-        let uses_committed_material_query_schedule = matches!(
-            application_statement_schema_identifier,
-            ProofFamilies::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER
-                | ProofFamilies::AGGREGATE_THRESHOLD_SHARE_STATEMENT_SCHEMA_IDENTIFIER
-        );
-        Self {
-            proof_field_index: 0,
-            evaluation_blowup_factor: PROOF_EVALUATION_BLOWUP_FACTOR,
-            evaluation_coset_offset: PROOF_EVALUATION_COSET_OFFSET,
-            deep_point_count: PROOF_DEEP_POINT_COUNT,
-            final_polynomial_degree_bound_exclusive: PROOF_FINAL_POLYNOMIAL_DEGREE_BOUND_EXCLUSIVE,
-            unique_query_count: if uses_committed_material_query_schedule {
-                COMMITTED_MATERIAL_PROOF_UNIQUE_QUERY_COUNT
-            } else {
-                PROOF_UNIQUE_QUERY_COUNT
-            },
-            non_native_theta_repetition_count: PROOF_NON_NATIVE_THETA_REPETITION_COUNT,
-            non_native_alpha_repetition_count: PROOF_NON_NATIVE_ALPHA_REPETITION_COUNT,
-            maximum_fiat_shamir_candidate_draws_per_output:
-                PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT,
-        }
-    }
-
-    #[cfg(test)]
-    fn validate(
-        &self,
-        application_statement_schema_identifier: u16,
-        proof_field_count: usize,
-    ) -> Result<(), ProofProfileError> {
-        if *self != Self::selected(application_statement_schema_identifier)
-            || usize::from(self.proof_field_index) >= proof_field_count
-            || self.evaluation_blowup_factor == 0
-            || !self.evaluation_blowup_factor.is_power_of_two()
-            || self.evaluation_coset_offset == 0
-            || self.evaluation_coset_offset >= PROOF_BASE_FIELD_MODULUS
-            || self.deep_point_count == 0
-            || self.final_polynomial_degree_bound_exclusive <= 1
-            || self.unique_query_count == 0
-            || self.non_native_theta_repetition_count == 0
-            || self.non_native_alpha_repetition_count == 0
-            || self.maximum_fiat_shamir_candidate_draws_per_output == 0
-        {
-            return Err(ProofProfileError::InvalidSchedule);
-        }
-        Ok(())
-    }
-
-    #[cfg(test)]
-    fn canonical_tuple(&self) -> CanonicalTuple {
-        CanonicalTuple::new(
-            PROOF_FIELD_SCHEDULE_SCHEMA_IDENTIFIER,
-            PROOF_FIELD_SCHEDULE_SCHEMA_VERSION,
-            vec![
-                CanonicalItem::unsigned16(self.proof_field_index),
-                CanonicalItem::unsigned32(self.evaluation_blowup_factor),
-                CanonicalItem::unsigned64(self.evaluation_coset_offset),
-                CanonicalItem::unsigned16(self.deep_point_count),
-                CanonicalItem::unsigned32(self.final_polynomial_degree_bound_exclusive),
-                CanonicalItem::unsigned32(self.unique_query_count),
-                CanonicalItem::unsigned16(self.non_native_theta_repetition_count),
-                CanonicalItem::unsigned16(self.non_native_alpha_repetition_count),
-                CanonicalItem::unsigned32(self.maximum_fiat_shamir_candidate_draws_per_output),
-            ],
-        )
-    }
-
-    fn matches_relation_context(&self, context: &RelationPlanCheckContext) -> bool {
-        context.base_field_modulus == PROOF_BASE_FIELD_MODULUS
-            && context.challenge_extension_degree
-                == u16::try_from(PROOF_CHALLENGE_EXTENSION_DEGREE)
-                    .expect("the fixed extension degree fits u16")
-            && context.evaluation_blowup_factor == self.evaluation_blowup_factor
-            && context.evaluation_coset_offset == self.evaluation_coset_offset
-            && context.deep_point_count == self.deep_point_count
-            && context.final_polynomial_degree_bound_exclusive
-                == self.final_polynomial_degree_bound_exclusive
-            && context.unique_query_count == self.unique_query_count
-            && context.non_native_theta_repetition_count == self.non_native_theta_repetition_count
-            && context.non_native_alpha_repetition_count == self.non_native_alpha_repetition_count
-            && context.maximum_fiat_shamir_candidate_draws_per_output
-                == self.maximum_fiat_shamir_candidate_draws_per_output
-    }
+fn matches_selected_relation_context(
+    application_statement_schema_identifier: u16,
+    context: &RelationPlanCheckContext,
+) -> bool {
+    selected_relation_plan_check_context(application_statement_schema_identifier)
+        .is_some_and(|selected_context| selected_context == *context)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct ProofFamilyProfile {
     application_statement_schema_identifier: u16,
-    field_schedule: ProofFieldSchedule,
+    proof_field_index: u16,
 }
 
 impl ProofFamilyProfile {
@@ -285,7 +218,7 @@ impl ProofFamilyProfile {
         }
         Ok(Self {
             application_statement_schema_identifier,
-            field_schedule: ProofFieldSchedule::selected(application_statement_schema_identifier),
+            proof_field_index: 0,
         })
     }
 
@@ -296,10 +229,12 @@ impl ProofFamilyProfile {
         {
             return Err(ProofProfileError::UnsupportedFamily);
         }
-        self.field_schedule.validate(
-            self.application_statement_schema_identifier,
-            proof_field_count,
-        )
+        if usize::from(self.proof_field_index) >= proof_field_count
+            || self != &Self::selected(self.application_statement_schema_identifier)?
+        {
+            return Err(ProofProfileError::InvalidSchedule);
+        }
+        Ok(())
     }
 
     #[cfg(test)]
@@ -307,11 +242,10 @@ impl ProofFamilyProfile {
         self.validate(1)?;
         Ok(CanonicalTuple::new(
             PROOF_FAMILY_PROFILE_SCHEMA_IDENTIFIER,
-            SCHEMA_VERSION,
+            PROOF_FAMILY_PROFILE_SCHEMA_VERSION,
             vec![
                 CanonicalItem::unsigned16(self.application_statement_schema_identifier),
-                CanonicalItem::nested_tuple(&self.field_schedule.canonical_tuple())
-                    .map_err(canonical_encoding_error)?,
+                CanonicalItem::unsigned16(self.proof_field_index),
             ],
         ))
     }
@@ -322,6 +256,7 @@ pub(crate) struct ValidatedRelationPlanArtifact {
     application_statement_schema_identifier: u16,
     canonical_plan_byte_length: u64,
     canonical_plan_hash: [u8; 64],
+    checked_context: RelationPlanCheckContext,
     compiled_plan: CompiledRelationPlan,
 }
 
@@ -337,16 +272,42 @@ impl ValidatedRelationPlanArtifact {
         plan: CompiledRelationPlan,
         context: &RelationPlanCheckContext,
     ) -> Result<Self, ProofProfileError> {
+        let application_statement_schema_identifier = Self::check_plan_for_family(&plan, context)?;
+        if !matches_selected_relation_context(application_statement_schema_identifier, context) {
+            return Err(ProofProfileError::InvalidSchedule);
+        }
+        Self::from_checked_plan(plan, context, application_statement_schema_identifier)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn from_checked_fixture_plan(
+        plan: &CompiledRelationPlan,
+        context: &RelationPlanCheckContext,
+    ) -> Result<Self, ProofProfileError> {
+        let application_statement_schema_identifier = Self::check_plan_for_family(plan, context)?;
+        Self::from_checked_plan(
+            plan.clone(),
+            context,
+            application_statement_schema_identifier,
+        )
+    }
+
+    fn check_plan_for_family(
+        plan: &CompiledRelationPlan,
+        context: &RelationPlanCheckContext,
+    ) -> Result<u16, ProofProfileError> {
         plan.check(context)?;
         let application_statement_schema_identifier =
             plan.application_statement_schema_identifier();
-        let family_profile = ProofFamilyProfile::selected(application_statement_schema_identifier)?;
-        if !family_profile
-            .field_schedule
-            .matches_relation_context(context)
-        {
-            return Err(ProofProfileError::InvalidSchedule);
-        }
+        ProofFamilyProfile::selected(application_statement_schema_identifier)?;
+        Ok(application_statement_schema_identifier)
+    }
+
+    fn from_checked_plan(
+        plan: CompiledRelationPlan,
+        context: &RelationPlanCheckContext,
+        application_statement_schema_identifier: u16,
+    ) -> Result<Self, ProofProfileError> {
         let (canonical_plan_byte_length, canonical_plan_hash) =
             plan.canonical_byte_length_and_hash()?;
         if canonical_plan_byte_length == 0 {
@@ -356,12 +317,21 @@ impl ValidatedRelationPlanArtifact {
             application_statement_schema_identifier,
             canonical_plan_byte_length,
             canonical_plan_hash,
+            checked_context: context.clone(),
             compiled_plan: plan,
         })
     }
 
     pub(crate) const fn application_statement_schema_identifier(&self) -> u16 {
         self.application_statement_schema_identifier
+    }
+
+    pub(crate) const fn canonical_plan_hash(&self) -> [u8; 64] {
+        self.canonical_plan_hash
+    }
+
+    pub(in crate::bgv::proof_suite) const fn checked_context(&self) -> &RelationPlanCheckContext {
+        &self.checked_context
     }
 
     #[cfg(test)]
@@ -691,12 +661,393 @@ mod canonical_profile_artifact {
         }
     }
 
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    struct RowCodeWhirParameterProfile {
+        logical_polynomial_coefficient_count: u64,
+        logical_polynomials_per_physical_row: u64,
+        physical_row_witness_variable_count: u64,
+        row_code_log_inverse_rate: u64,
+        table_variable_count: u64,
+        polynomial_commitment_variable_count: u64,
+        starting_log_inverse_rate: u64,
+        folding_factor: u64,
+        soundness_assumption: u16,
+        security_level: u64,
+        proof_of_work_bits: u64,
+        outer_query_count: u64,
+        direct_bound_query_count: u64,
+        verified_vss_bound_query_count: u64,
+        maximum_fiat_shamir_candidate_draws_per_output: u32,
+        evaluation_coset_offset: u64,
+    }
+
+    impl RowCodeWhirParameterProfile {
+        fn selected() -> Result<Self, ProofProfileError> {
+            Self::from_selected(RowCodeWhirSelectedParameters::selected())
+        }
+
+        fn from_selected(
+            parameters: RowCodeWhirSelectedParameters,
+        ) -> Result<Self, ProofProfileError> {
+            let convert_count =
+                |count| u64::try_from(count).map_err(|_| ProofProfileError::CountOverflow);
+            Ok(Self {
+                logical_polynomial_coefficient_count: convert_count(
+                    parameters.logical_polynomial_coefficient_count,
+                )?,
+                logical_polynomials_per_physical_row: convert_count(
+                    parameters.logical_polynomials_per_physical_row,
+                )?,
+                physical_row_witness_variable_count: convert_count(
+                    parameters.physical_row_witness_variable_count,
+                )?,
+                row_code_log_inverse_rate: convert_count(parameters.row_code_log_inverse_rate)?,
+                table_variable_count: convert_count(parameters.table_variable_count)?,
+                polynomial_commitment_variable_count: convert_count(
+                    parameters.polynomial_commitment_variable_count,
+                )?,
+                starting_log_inverse_rate: convert_count(parameters.starting_log_inverse_rate)?,
+                folding_factor: convert_count(parameters.folding_factor)?,
+                soundness_assumption: match parameters.soundness_assumption {
+                    RowCodeWhirSoundnessAssumption::UniqueDecoding => 1,
+                },
+                security_level: convert_count(parameters.security_level)?,
+                proof_of_work_bits: convert_count(parameters.proof_of_work_bits)?,
+                outer_query_count: convert_count(parameters.outer_query_count)?,
+                direct_bound_query_count: convert_count(parameters.direct_bound_query_count)?,
+                verified_vss_bound_query_count: convert_count(
+                    parameters.verified_vss_bound_query_count,
+                )?,
+                maximum_fiat_shamir_candidate_draws_per_output: parameters
+                    .maximum_fiat_shamir_candidate_draws_per_output,
+                evaluation_coset_offset: PROOF_EVALUATION_COSET_OFFSET,
+            })
+        }
+
+        fn validate(&self) -> Result<(), ProofProfileError> {
+            if self != &Self::selected()? {
+                return Err(ProofProfileError::InvalidConstructionProfile);
+            }
+            Ok(())
+        }
+
+        fn canonical_items(self) -> Vec<CanonicalItem> {
+            vec![
+                CanonicalItem::unsigned64(self.logical_polynomial_coefficient_count),
+                CanonicalItem::unsigned64(self.logical_polynomials_per_physical_row),
+                CanonicalItem::unsigned64(self.physical_row_witness_variable_count),
+                CanonicalItem::unsigned64(self.row_code_log_inverse_rate),
+                CanonicalItem::unsigned64(self.table_variable_count),
+                CanonicalItem::unsigned64(self.polynomial_commitment_variable_count),
+                CanonicalItem::unsigned64(self.starting_log_inverse_rate),
+                CanonicalItem::unsigned64(self.folding_factor),
+                CanonicalItem::unsigned16(self.soundness_assumption),
+                CanonicalItem::unsigned64(self.security_level),
+                CanonicalItem::unsigned64(self.proof_of_work_bits),
+                CanonicalItem::unsigned64(self.outer_query_count),
+                CanonicalItem::unsigned64(self.direct_bound_query_count),
+                CanonicalItem::unsigned64(self.verified_vss_bound_query_count),
+                CanonicalItem::unsigned32(self.maximum_fiat_shamir_candidate_draws_per_output),
+                CanonicalItem::unsigned64(self.evaluation_coset_offset),
+            ]
+        }
+    }
+
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    struct RowCodeWhirHashProfile {
+        hash_algorithm_identifier: String,
+        digest_byte_length: u16,
+        protocol_hash_domain: Vec<u8>,
+        phase_column_leaf_domain: Vec<u8>,
+        phase_column_node_domain: Vec<u8>,
+        aggregate_leaf_domain: Vec<u8>,
+        aggregate_node_domain: Vec<u8>,
+        transcript_initial_domain: Vec<u8>,
+        transcript_absorb_domain: Vec<u8>,
+        transcript_challenge_handle_domain: Vec<u8>,
+        transcript_accepted_challenge_domain: Vec<u8>,
+        transcript_response_binding_domain: Vec<u8>,
+        transcript_product_residue_block_domain: Vec<u8>,
+        transcript_distinct_query_block_domain: Vec<u8>,
+    }
+
+    impl RowCodeWhirHashProfile {
+        fn selected() -> Self {
+            Self {
+                hash_algorithm_identifier: ROW_CODE_WHIR_HASH_ALGORITHM_IDENTIFIER.to_owned(),
+                digest_byte_length: ROW_CODE_WHIR_DIGEST_BYTE_LENGTH,
+                protocol_hash_domain: ROW_CODE_WHIR_SHAKE256_PROTOCOL_DOMAIN.to_vec(),
+                phase_column_leaf_domain: ROW_CODE_WHIR_PHASE_COLUMN_LEAF_DOMAIN.to_vec(),
+                phase_column_node_domain: ROW_CODE_WHIR_PHASE_COLUMN_NODE_DOMAIN.to_vec(),
+                aggregate_leaf_domain: ROW_CODE_WHIR_AGGREGATE_LEAF_DOMAIN.to_vec(),
+                aggregate_node_domain: ROW_CODE_WHIR_AGGREGATE_NODE_DOMAIN.to_vec(),
+                transcript_initial_domain: TRANSCRIPT_INITIAL_DOMAIN_BYTES.to_vec(),
+                transcript_absorb_domain: TRANSCRIPT_ABSORB_DOMAIN_BYTES.to_vec(),
+                transcript_challenge_handle_domain: TRANSCRIPT_CHALLENGE_HANDLE_DOMAIN_BYTES
+                    .to_vec(),
+                transcript_accepted_challenge_domain: TRANSCRIPT_ACCEPTED_CHALLENGE_DOMAIN_BYTES
+                    .to_vec(),
+                transcript_response_binding_domain: TRANSCRIPT_RESPONSE_BINDING_DOMAIN_BYTES
+                    .to_vec(),
+                transcript_product_residue_block_domain:
+                    TRANSCRIPT_PRODUCT_RESIDUE_BLOCK_DOMAIN_BYTES.to_vec(),
+                transcript_distinct_query_block_domain:
+                    TRANSCRIPT_DISTINCT_QUERY_BLOCK_DOMAIN_BYTES.to_vec(),
+            }
+        }
+
+        fn validate(&self) -> Result<(), ProofProfileError> {
+            if self != &Self::selected() {
+                return Err(ProofProfileError::InvalidConstructionProfile);
+            }
+            Ok(())
+        }
+
+        fn canonical_tuple(&self) -> Result<CanonicalTuple, ProofProfileError> {
+            self.validate()?;
+            Ok(CanonicalTuple::new(
+                ROW_CODE_WHIR_HASH_PROFILE_SCHEMA_IDENTIFIER,
+                SCHEMA_VERSION,
+                vec![
+                    CanonicalItem::ascii(&self.hash_algorithm_identifier)
+                        .map_err(canonical_encoding_error)?,
+                    CanonicalItem::unsigned16(self.digest_byte_length),
+                    CanonicalItem::fixed_bytes(&self.protocol_hash_domain)
+                        .map_err(canonical_encoding_error)?,
+                    CanonicalItem::fixed_bytes(&self.phase_column_leaf_domain)
+                        .map_err(canonical_encoding_error)?,
+                    CanonicalItem::fixed_bytes(&self.phase_column_node_domain)
+                        .map_err(canonical_encoding_error)?,
+                    CanonicalItem::fixed_bytes(&self.aggregate_leaf_domain)
+                        .map_err(canonical_encoding_error)?,
+                    CanonicalItem::fixed_bytes(&self.aggregate_node_domain)
+                        .map_err(canonical_encoding_error)?,
+                    CanonicalItem::fixed_bytes(&self.transcript_initial_domain)
+                        .map_err(canonical_encoding_error)?,
+                    CanonicalItem::fixed_bytes(&self.transcript_absorb_domain)
+                        .map_err(canonical_encoding_error)?,
+                    CanonicalItem::fixed_bytes(&self.transcript_challenge_handle_domain)
+                        .map_err(canonical_encoding_error)?,
+                    CanonicalItem::fixed_bytes(&self.transcript_accepted_challenge_domain)
+                        .map_err(canonical_encoding_error)?,
+                    CanonicalItem::fixed_bytes(&self.transcript_response_binding_domain)
+                        .map_err(canonical_encoding_error)?,
+                    CanonicalItem::fixed_bytes(&self.transcript_product_residue_block_domain)
+                        .map_err(canonical_encoding_error)?,
+                    CanonicalItem::fixed_bytes(&self.transcript_distinct_query_block_domain)
+                        .map_err(canonical_encoding_error)?,
+                ],
+            ))
+        }
+    }
+
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    struct RowCodeWhirConstructionReference {
+        application_statement_schema_identifier: u16,
+        schedule_position: Option<u32>,
+        top_count: Option<u16>,
+        canonical_identity_byte_length: u64,
+        canonical_identity_hash: [u8; 64],
+    }
+
+    impl RowCodeWhirConstructionReference {
+        fn for_selected_variant(
+            artifact: &ValidatedRelationPlanArtifact,
+            variant: &RelationPlanVariant,
+        ) -> Result<(Self, RowCodeWhirSelectedParameters), ProofProfileError> {
+            let schedule_position = variant.schedule_position();
+            let top_count = variant.top_count();
+            let construction_plan = RowCodeWhirConstructionPlan::for_selected_variant(
+                artifact,
+                schedule_position,
+                top_count,
+            )
+            .map_err(|_| ProofProfileError::InvalidConstructionProfile)?;
+            let canonical_identity_bytes = construction_plan
+                .canonical_identity_bytes()
+                .map_err(|_| ProofProfileError::CanonicalEncoding)?;
+            let canonical_identity_byte_length = u64::try_from(canonical_identity_bytes.len())
+                .map_err(|_| ProofProfileError::CountOverflow)?;
+            if canonical_identity_byte_length == 0 {
+                return Err(ProofProfileError::CanonicalEncoding);
+            }
+            let canonical_identity_hash = construction_plan
+                .canonical_identity_hash()
+                .map_err(|_| ProofProfileError::CanonicalEncoding)?;
+            Ok((
+                Self {
+                    application_statement_schema_identifier: artifact
+                        .application_statement_schema_identifier(),
+                    schedule_position,
+                    top_count,
+                    canonical_identity_byte_length,
+                    canonical_identity_hash,
+                },
+                construction_plan.selected_parameters(),
+            ))
+        }
+
+        fn coordinates(&self) -> (u16, Option<u32>, Option<u16>) {
+            (
+                self.application_statement_schema_identifier,
+                self.schedule_position,
+                self.top_count,
+            )
+        }
+
+        fn canonical_tuple(&self) -> Result<CanonicalTuple, ProofProfileError> {
+            let schedule_position = self.schedule_position.map(CanonicalItem::unsigned32);
+            let top_count = self.top_count.map(CanonicalItem::unsigned16);
+            Ok(CanonicalTuple::new(
+                ROW_CODE_WHIR_CONSTRUCTION_REFERENCE_SCHEMA_IDENTIFIER,
+                SCHEMA_VERSION,
+                vec![
+                    CanonicalItem::unsigned16(self.application_statement_schema_identifier),
+                    CanonicalItem::optional(
+                        CanonicalItemType::Unsigned32,
+                        schedule_position.as_ref(),
+                    )
+                    .map_err(canonical_encoding_error)?,
+                    CanonicalItem::optional(CanonicalItemType::Unsigned16, top_count.as_ref())
+                        .map_err(canonical_encoding_error)?,
+                    CanonicalItem::unsigned64(self.canonical_identity_byte_length),
+                    CanonicalItem::hash512(self.canonical_identity_hash),
+                ],
+            ))
+        }
+    }
+
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    struct RowCodeWhirConstructionProfile {
+        parameters: RowCodeWhirParameterProfile,
+        hash_profile: RowCodeWhirHashProfile,
+        ordered_references: Vec<RowCodeWhirConstructionReference>,
+    }
+
+    impl RowCodeWhirConstructionProfile {
+        fn selected(
+            relation_plans: &[ValidatedRelationPlanArtifact],
+        ) -> Result<Self, ProofProfileError> {
+            let (parameters, ordered_references) =
+                derive_selected_row_code_whir_construction_catalog(relation_plans)?;
+            let profile = Self {
+                parameters,
+                hash_profile: RowCodeWhirHashProfile::selected(),
+                ordered_references,
+            };
+            profile.validate(relation_plans)?;
+            Ok(profile)
+        }
+
+        fn validate(
+            &self,
+            relation_plans: &[ValidatedRelationPlanArtifact],
+        ) -> Result<(), ProofProfileError> {
+            validate_relation_plan_catalog(relation_plans)?;
+            self.parameters.validate()?;
+            self.hash_profile.validate()?;
+            if self.ordered_references.len() != SELECTED_ROW_CODE_WHIR_CONSTRUCTION_REFERENCE_COUNT
+            {
+                return Err(ProofProfileError::InvalidConstructionProfile);
+            }
+
+            let mut coordinates = BTreeSet::new();
+            let mut identity_hashes = BTreeSet::new();
+            let mut reference_index = 0_usize;
+            for artifact in relation_plans {
+                for variant in artifact.compiled_plan().variants() {
+                    let reference = self
+                        .ordered_references
+                        .get(reference_index)
+                        .ok_or(ProofProfileError::InvalidConstructionProfile)?;
+                    reference_index = reference_index
+                        .checked_add(1)
+                        .ok_or(ProofProfileError::CountOverflow)?;
+                    if !coordinates.insert(reference.coordinates())
+                        || !identity_hashes.insert(reference.canonical_identity_hash)
+                        || reference.canonical_identity_byte_length == 0
+                    {
+                        return Err(ProofProfileError::InvalidConstructionProfile);
+                    }
+                    if reference.coordinates()
+                        != (
+                            artifact.application_statement_schema_identifier(),
+                            variant.schedule_position(),
+                            variant.top_count(),
+                        )
+                    {
+                        return Err(ProofProfileError::NonCanonicalOrder);
+                    }
+                }
+            }
+            if reference_index != self.ordered_references.len() {
+                return Err(ProofProfileError::InvalidConstructionProfile);
+            }
+            Ok(())
+        }
+
+        fn canonical_tuple(
+            &self,
+            relation_plans: &[ValidatedRelationPlanArtifact],
+        ) -> Result<CanonicalTuple, ProofProfileError> {
+            self.validate(relation_plans)?;
+            let mut items = self.parameters.canonical_items();
+            items.push(
+                CanonicalItem::nested_tuple(&self.hash_profile.canonical_tuple()?)
+                    .map_err(canonical_encoding_error)?,
+            );
+            items.push(canonical_nested_list(
+                self.ordered_references
+                    .iter()
+                    .map(RowCodeWhirConstructionReference::canonical_tuple)
+                    .collect::<Result<Vec<_>, _>>()?,
+            )?);
+            Ok(CanonicalTuple::new(
+                ROW_CODE_WHIR_CONSTRUCTION_PROFILE_SCHEMA_IDENTIFIER,
+                SCHEMA_VERSION,
+                items,
+            ))
+        }
+    }
+
+    fn derive_selected_row_code_whir_construction_catalog(
+        relation_plans: &[ValidatedRelationPlanArtifact],
+    ) -> Result<
+        (
+            RowCodeWhirParameterProfile,
+            Vec<RowCodeWhirConstructionReference>,
+        ),
+        ProofProfileError,
+    > {
+        validate_relation_plan_catalog(relation_plans)?;
+        let selected_parameters = RowCodeWhirSelectedParameters::selected();
+        let mut ordered_references = Vec::new();
+        for artifact in relation_plans {
+            for variant in artifact.compiled_plan().variants() {
+                let (reference, parameters) =
+                    RowCodeWhirConstructionReference::for_selected_variant(artifact, variant)?;
+                if parameters != selected_parameters {
+                    return Err(ProofProfileError::InvalidConstructionProfile);
+                }
+                ordered_references.push(reference);
+            }
+        }
+        if ordered_references.len() != SELECTED_ROW_CODE_WHIR_CONSTRUCTION_REFERENCE_COUNT {
+            return Err(ProofProfileError::InvalidConstructionProfile);
+        }
+        Ok((
+            RowCodeWhirParameterProfile::from_selected(selected_parameters)?,
+            ordered_references,
+        ))
+    }
+
     #[derive(Clone, Debug, PartialEq, Eq)]
     pub(crate) struct ProofProfileSet {
         proof_fields: Vec<ProofFieldProfile>,
         proof_families: Vec<ProofFamilyProfile>,
         relation_plans: Vec<ValidatedRelationPlanArtifact>,
         root_compatibility_edges: Vec<RelationRootCompatibilityEdge>,
+        row_code_whir_construction_profile: RowCodeWhirConstructionProfile,
     }
 
     impl ProofProfileSet {
@@ -713,11 +1064,14 @@ mod canonical_profile_artifact {
                 .into_iter()
                 .map(ProofFamilyProfile::selected)
                 .collect::<Result<Vec<_>, _>>()?;
+            let row_code_whir_construction_profile =
+                RowCodeWhirConstructionProfile::selected(&relation_plans)?;
             let profile = Self {
                 proof_fields,
                 proof_families,
                 relation_plans,
                 root_compatibility_edges,
+                row_code_whir_construction_profile,
             };
             profile.validate()?;
             Ok(profile)
@@ -747,7 +1101,23 @@ mod canonical_profile_artifact {
                 {
                     return Err(ProofProfileError::NonCanonicalOrder);
                 }
+                if self
+                    .row_code_whir_construction_profile
+                    .parameters
+                    .evaluation_coset_offset
+                    != PROOF_EVALUATION_COSET_OFFSET
+                    || self
+                        .row_code_whir_construction_profile
+                        .parameters
+                        .maximum_fiat_shamir_candidate_draws_per_output
+                        != PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT
+                {
+                    return Err(ProofProfileError::InvalidSchedule);
+                }
             }
+
+            self.row_code_whir_construction_profile
+                .validate(&self.relation_plans)?;
 
             let mut edge_bytes = BTreeSet::new();
             let mut previous_edge_bytes = None;
@@ -804,6 +1174,12 @@ mod canonical_profile_artifact {
                             .map(RelationRootCompatibilityEdge::canonical_tuple)
                             .collect::<Result<Vec<_>, _>>()?,
                     )?,
+                    CanonicalItem::nested_tuple(
+                        &self
+                            .row_code_whir_construction_profile
+                            .canonical_tuple(&self.relation_plans)?,
+                    )
+                    .map_err(canonical_encoding_error)?,
                 ],
             );
             encode_generated_tuple(&tuple)
@@ -853,6 +1229,151 @@ mod canonical_profile_artifact {
                 Err(ProofProfileError::NonCanonicalOrder)
             );
             self.relation_plans.swap(0, 1);
+
+            self.proof_families[0].proof_field_index = 1;
+            assert_eq!(
+                self.canonical_bytes(),
+                Err(ProofProfileError::InvalidSchedule)
+            );
+            self.proof_families[0].proof_field_index = 0;
+
+            self.proof_families.swap(0, 1);
+            assert_eq!(
+                self.canonical_bytes(),
+                Err(ProofProfileError::NonCanonicalOrder)
+            );
+            self.proof_families.swap(0, 1);
+
+            self.row_code_whir_construction_profile
+                .parameters
+                .maximum_fiat_shamir_candidate_draws_per_output += 1;
+            assert_eq!(
+                self.canonical_bytes(),
+                Err(ProofProfileError::InvalidSchedule)
+            );
+            self.row_code_whir_construction_profile
+                .parameters
+                .maximum_fiat_shamir_candidate_draws_per_output -= 1;
+
+            self.row_code_whir_construction_profile
+                .parameters
+                .evaluation_coset_offset += 1;
+            assert_eq!(
+                self.canonical_bytes(),
+                Err(ProofProfileError::InvalidSchedule)
+            );
+            self.row_code_whir_construction_profile
+                .parameters
+                .evaluation_coset_offset -= 1;
+
+            self.row_code_whir_construction_profile
+                .parameters
+                .folding_factor += 1;
+            assert_eq!(
+                self.canonical_bytes(),
+                Err(ProofProfileError::InvalidConstructionProfile)
+            );
+            self.row_code_whir_construction_profile
+                .parameters
+                .folding_factor -= 1;
+
+            self.row_code_whir_construction_profile
+                .hash_profile
+                .protocol_hash_domain[0] ^= 1;
+            assert_eq!(
+                self.canonical_bytes(),
+                Err(ProofProfileError::InvalidConstructionProfile)
+            );
+            self.row_code_whir_construction_profile
+                .hash_profile
+                .protocol_hash_domain[0] ^= 1;
+
+            self.row_code_whir_construction_profile
+                .hash_profile
+                .transcript_challenge_handle_domain[0] ^= 1;
+            assert_eq!(
+                self.canonical_bytes(),
+                Err(ProofProfileError::InvalidConstructionProfile)
+            );
+            self.row_code_whir_construction_profile
+                .hash_profile
+                .transcript_challenge_handle_domain[0] ^= 1;
+
+            self.row_code_whir_construction_profile.ordered_references[0]
+                .canonical_identity_byte_length += 1;
+            let wrong_construction_length_bytes = self
+                .canonical_bytes()
+                .expect("a mutated positive construction length remains structurally canonical");
+            assert_ne!(wrong_construction_length_bytes, baseline_bytes);
+            assert_ne!(
+                proof_profile_artifact_reference(&wrong_construction_length_bytes).artifact_hash(),
+                baseline_reference.artifact_hash()
+            );
+            self.row_code_whir_construction_profile.ordered_references[0]
+                .canonical_identity_byte_length -= 1;
+
+            self.row_code_whir_construction_profile.ordered_references[0]
+                .canonical_identity_hash[0] ^= 1;
+            let wrong_construction_hash_bytes = self
+                .canonical_bytes()
+                .expect("a mutated construction hash remains structurally canonical");
+            assert_ne!(wrong_construction_hash_bytes, baseline_bytes);
+            assert_ne!(
+                proof_profile_artifact_reference(&wrong_construction_hash_bytes).artifact_hash(),
+                baseline_reference.artifact_hash()
+            );
+            self.row_code_whir_construction_profile.ordered_references[0]
+                .canonical_identity_hash[0] ^= 1;
+
+            self.row_code_whir_construction_profile.ordered_references[0].schedule_position =
+                Some(0);
+            assert_eq!(
+                self.canonical_bytes(),
+                Err(ProofProfileError::NonCanonicalOrder)
+            );
+            self.row_code_whir_construction_profile.ordered_references[0].schedule_position = None;
+
+            self.row_code_whir_construction_profile
+                .ordered_references
+                .swap(0, 1);
+            assert_eq!(
+                self.canonical_bytes(),
+                Err(ProofProfileError::NonCanonicalOrder)
+            );
+            self.row_code_whir_construction_profile
+                .ordered_references
+                .swap(0, 1);
+
+            let duplicate_reference =
+                self.row_code_whir_construction_profile.ordered_references[0].clone();
+            let final_reference = self
+                .row_code_whir_construction_profile
+                .ordered_references
+                .last_mut()
+                .expect("selected construction references are nonempty");
+            let original_final_reference = core::mem::replace(final_reference, duplicate_reference);
+            assert_eq!(
+                self.canonical_bytes(),
+                Err(ProofProfileError::InvalidConstructionProfile)
+            );
+            *self
+                .row_code_whir_construction_profile
+                .ordered_references
+                .last_mut()
+                .expect("selected construction references are nonempty") = original_final_reference;
+
+            let removed_reference = self
+                .row_code_whir_construction_profile
+                .ordered_references
+                .pop()
+                .expect("selected construction references are nonempty");
+            assert_eq!(
+                self.canonical_bytes(),
+                Err(ProofProfileError::InvalidConstructionProfile)
+            );
+            self.row_code_whir_construction_profile
+                .ordered_references
+                .push(removed_reference);
 
             self.root_compatibility_edges.swap(0, 1);
             assert_eq!(
@@ -1013,57 +1534,31 @@ mod canonical_profile_artifact {
         if ordered_columns.is_empty() {
             return Err(ProofProfileError::IncompatibleRoot);
         }
-        let trace_domain_size = bound_root_source_trace_domain_size(
-            application_statement_schema_identifier,
-            construction_kind,
-            variant.trace_domain_size(),
-            variant.evaluation_domain_size(),
-        )?;
+        let selected_construction_kind = match construction_kind {
+            RelationRootConstructionKind::CommittedMaterial => {
+                BoundTreeConstructionKind::CommittedMaterial
+            }
+            RelationRootConstructionKind::SetupPolynomial => {
+                BoundTreeConstructionKind::SetupPolynomial
+            }
+        };
+        let trace_domain_size =
+            super::super::selected_profile::selected_bound_root_source_trace_domain_size(
+                application_statement_schema_identifier,
+                selected_construction_kind,
+                variant.trace_domain_size(),
+                variant.evaluation_domain_size(),
+            )
+            .map_err(|error| match error {
+                ProofProfileError::InvalidRootTopology => ProofProfileError::InvalidRootEndpoint,
+                ProofProfileError::InvalidRelationPlan => ProofProfileError::IncompatibleRoot,
+                error => error,
+            })?;
         Ok(RelationRootShape {
             trace_domain_size,
             evaluation_domain_size: variant.evaluation_domain_size(),
             ordered_columns,
         })
-    }
-
-    fn bound_root_source_trace_domain_size(
-        application_statement_schema_identifier: u16,
-        construction_kind: RelationRootConstructionKind,
-        relation_trace_domain_size: u64,
-        evaluation_domain_size: u64,
-    ) -> Result<u64, ProofProfileError> {
-        if construction_kind == RelationRootConstructionKind::SetupPolynomial {
-            return Ok(relation_trace_domain_size);
-        }
-        let committed_material_profile =
-            super::super::selected_profile::selected_committed_material_profile()?;
-        let physical_trace_domain_size =
-            u64::try_from(committed_material_profile.trace_domain_size())
-                .map_err(|_| ProofProfileError::CountOverflow)?;
-        let committed_material_evaluation_domain_size =
-            u64::try_from(committed_material_profile.evaluation_domain_size())
-                .map_err(|_| ProofProfileError::CountOverflow)?;
-        let expected_relation_trace_domain_size = match application_statement_schema_identifier {
-            ProofFamilies::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER
-            | ProofFamilies::AGGREGATE_THRESHOLD_SHARE_STATEMENT_SCHEMA_IDENTIFIER => {
-                physical_trace_domain_size
-                    .checked_mul(
-                        super::super::relation_plan::COMMITTED_MATERIAL_TRACE_PACKING_FACTOR,
-                    )
-                    .ok_or(ProofProfileError::CountOverflow)?
-            }
-            ProofFamilies::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER
-            | ProofFamilies::TARGET_SHARE_PROOF_STATEMENT_SCHEMA_IDENTIFIER => {
-                physical_trace_domain_size
-            }
-            _ => return Err(ProofProfileError::InvalidRootEndpoint),
-        };
-        if relation_trace_domain_size != expected_relation_trace_domain_size
-            || evaluation_domain_size != committed_material_evaluation_domain_size
-        {
-            return Err(ProofProfileError::IncompatibleRoot);
-        }
-        Ok(physical_trace_domain_size)
     }
 
     fn ordered_bound_root_slots(
@@ -1642,8 +2137,8 @@ mod canonical_profile_artifact {
         .select_variant(endpoint.schedule_position, endpoint.top_count)?;
         let challenge_extension_degree = u16::try_from(PROOF_CHALLENGE_EXTENSION_DEGREE)
             .map_err(|_| ProofProfileError::CountOverflow)?;
-        let unique_query_count =
-            selected_unique_query_count(endpoint.application_statement_schema_identifier)?;
+        ProofFamilyProfile::selected(endpoint.application_statement_schema_identifier)?;
+        let phase_column_query_coordinate_count = ROW_CODE_WHIR_PHASE_COLUMN_QUERY_COORDINATE_COUNT;
         let catalogs = root
             .ordered_column_ordinals
             .into_iter()
@@ -1652,7 +2147,7 @@ mod canonical_profile_artifact {
                     variant,
                     column_ordinal,
                     challenge_extension_degree,
-                    unique_query_count,
+                    phase_column_query_coordinate_count,
                 )
                 .map_err(ProofProfileError::from)
             })
@@ -1661,16 +2156,6 @@ mod canonical_profile_artifact {
             return Err(ProofProfileError::InsufficientRootMaskImage);
         }
         Ok(catalogs)
-    }
-
-    fn selected_unique_query_count(
-        application_statement_schema_identifier: u16,
-    ) -> Result<u32, ProofProfileError> {
-        Ok(
-            ProofFamilyProfile::selected(application_statement_schema_identifier)?
-                .field_schedule
-                .unique_query_count,
-        )
     }
 
     fn committed_material_mask_coefficient_counts(
@@ -2243,55 +2728,179 @@ mod canonical_profile_artifact {
         }
 
         #[test]
-        fn selected_field_and_schedule_are_canonical_and_nonnegotiable() {
+        fn selected_field_and_family_mapping_are_canonical_and_nonnegotiable() {
             let field = ProofFieldProfile::selected().expect("selected field is valid");
             assert_eq!(field.validate(), Ok(()));
             let ordinary_family = ProofFamilies::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER;
-            let committed_material_family =
-                ProofFamilies::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER;
+            let ordinary_family_profile =
+                ProofFamilyProfile::selected(ordinary_family).expect("selected proof family");
             assert_eq!(
-                ProofFieldSchedule::selected(ordinary_family).validate(ordinary_family, 1),
-                Ok(())
+                ordinary_family_profile
+                    .canonical_tuple()
+                    .expect("selected proof family encodes"),
+                CanonicalTuple::new(
+                    PROOF_FAMILY_PROFILE_SCHEMA_IDENTIFIER,
+                    PROOF_FAMILY_PROFILE_SCHEMA_VERSION,
+                    vec![
+                        CanonicalItem::unsigned16(ordinary_family),
+                        CanonicalItem::unsigned16(0),
+                    ],
+                )
             );
-            assert_eq!(
-                ProofFieldSchedule::selected(committed_material_family)
-                    .validate(committed_material_family, 1),
-                Ok(())
-            );
-            assert_ne!(
-                ProofFieldSchedule::selected(ordinary_family),
-                ProofFieldSchedule::selected(committed_material_family)
-            );
-            for public_aggregate_family in [
-                ProofFamilies::COLLECTIVE_PUBLIC_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
-                ProofFamilies::RKG_ROUND_ONE_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
-                ProofFamilies::EVALUATOR_KEY_AGGREGATE_STATEMENT_SCHEMA_IDENTIFIER,
-            ] {
-                assert_eq!(
-                    ProofFieldSchedule::selected(public_aggregate_family),
-                    ProofFieldSchedule::selected(ordinary_family)
-                );
-                assert_eq!(
-                    ProofFieldSchedule::selected(public_aggregate_family)
-                        .validate(public_aggregate_family, 1),
-                    Ok(())
-                );
-            }
 
             let mut wrong_field = field.clone();
             wrong_field.maximum_two_adic_subgroup_generator = 1;
             assert_eq!(wrong_field.validate(), Err(ProofProfileError::InvalidField));
 
-            let mut wrong_schedule = ProofFieldSchedule::selected(ordinary_family);
-            wrong_schedule.unique_query_count -= 1;
+            let mut wrong_family_profile = ordinary_family_profile;
+            wrong_family_profile.proof_field_index = 1;
             assert_eq!(
-                wrong_schedule.validate(ordinary_family, 1),
+                wrong_family_profile.validate(1),
                 Err(ProofProfileError::InvalidSchedule),
             );
+        }
+
+        #[test]
+        fn relation_plan_artifacts_require_the_complete_selected_context() {
+            let application_statement_schema_identifier =
+                ProofFamilies::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER;
+            let selected_context =
+                selected_relation_plan_check_context(application_statement_schema_identifier)
+                    .expect("same-secret has a selected relation context");
+            let relation_plan = crate::bgv::proof_suite::compile_same_secret_relation_plan(
+                &crate::bgv::proof_suite::selected_same_secret_relation_plan_input()
+                    .expect("derive the selected same-secret relation input"),
+                &selected_context,
+            )
+            .expect("compile the selected same-secret relation");
+            ValidatedRelationPlanArtifact::from_compiled_plan(&relation_plan, &selected_context)
+                .expect("the exact selected context mints a validated artifact");
+
+            let mut alternative_valid_context = selected_context.clone();
+            let modulus = u128::from(alternative_valid_context.base_field_modulus);
+            let generator = u128::from(alternative_valid_context.evaluation_domain_generator);
+            alternative_valid_context.evaluation_domain_generator =
+                u64::try_from(((generator * generator) % modulus * generator) % modulus)
+                    .expect("the cubed alternative generator fits u64");
+            let alternative_relation_plan =
+                crate::bgv::proof_suite::compile_same_secret_relation_plan(
+                    &crate::bgv::proof_suite::selected_same_secret_relation_plan_input()
+                        .expect("derive the alternative same-secret relation input"),
+                    &alternative_valid_context,
+                )
+                .expect("compile under a different generally valid domain generator");
             assert_eq!(
-                ProofFieldSchedule::selected(ordinary_family)
-                    .validate(committed_material_family, 1),
+                alternative_relation_plan.check(&alternative_valid_context),
+                Ok(())
+            );
+            assert_eq!(
+                ValidatedRelationPlanArtifact::from_compiled_plan(
+                    &alternative_relation_plan,
+                    &alternative_valid_context,
+                ),
                 Err(ProofProfileError::InvalidSchedule),
+                "a generally valid context must not be relabeled as the selected construction",
+            );
+            let checked_fixture_artifact =
+                ValidatedRelationPlanArtifact::from_checked_fixture_plan(
+                    &alternative_relation_plan,
+                    &alternative_valid_context,
+                )
+                .expect("the fully checked fixture context mints a fixture artifact");
+            assert_eq!(
+                checked_fixture_artifact.checked_context(),
+                &alternative_valid_context,
+            );
+            assert_eq!(
+                checked_fixture_artifact.canonical_plan_hash(),
+                alternative_relation_plan
+                    .canonical_hash()
+                    .expect("the checked fixture relation plan hashes canonically"),
+            );
+            assert!(
+                RowCodeWhirConstructionPlan::for_checked_fixture_variant(
+                    &checked_fixture_artifact,
+                    &alternative_valid_context,
+                    None,
+                    None,
+                )
+                .is_err(),
+                "fixture construction must reject a domain the proof engine cannot execute",
+            );
+            assert!(
+                matches!(
+                    crate::bgv::proof_suite::CommonProofRelationPlanCapability::from_checked_fixture_plan(
+                        &alternative_relation_plan,
+                        &alternative_valid_context,
+                        None,
+                        None,
+                    ),
+                    Err(
+                        crate::bgv::proof_suite::CommonProofRelationPlanCapabilityError::RowCodeWhirConstructionPlan,
+                    ),
+                ),
+                "the fixture runtime capability must reject the same unsupported domain",
+            );
+            assert!(
+                RowCodeWhirConstructionPlan::for_checked_fixture_variant(
+                    &checked_fixture_artifact,
+                    &selected_context,
+                    None,
+                    None,
+                )
+                .is_err(),
+                "a fixture artifact cannot be reused under a different valid context",
+            );
+            assert!(
+                RowCodeWhirConstructionPlan::for_selected_variant(
+                    &checked_fixture_artifact,
+                    None,
+                    None,
+                )
+                .is_err(),
+                "a fixture artifact cannot mint a selected production construction",
+            );
+        }
+
+        #[test]
+        fn selected_hash_profile_binds_every_executable_domain_in_canonical_order() {
+            assert_eq!(
+                RowCodeWhirHashProfile::selected()
+                    .canonical_tuple()
+                    .expect("selected hash profile encodes"),
+                CanonicalTuple::new(
+                    ROW_CODE_WHIR_HASH_PROFILE_SCHEMA_IDENTIFIER,
+                    SCHEMA_VERSION,
+                    vec![
+                        CanonicalItem::ascii(ROW_CODE_WHIR_HASH_ALGORITHM_IDENTIFIER)
+                            .expect("selected hash algorithm identifier is canonical ASCII"),
+                        CanonicalItem::unsigned16(ROW_CODE_WHIR_DIGEST_BYTE_LENGTH),
+                        CanonicalItem::fixed_bytes(ROW_CODE_WHIR_SHAKE256_PROTOCOL_DOMAIN)
+                            .expect("row-code protocol domain fits the canonical byte limit"),
+                        CanonicalItem::fixed_bytes(ROW_CODE_WHIR_PHASE_COLUMN_LEAF_DOMAIN)
+                            .expect("phase-column leaf domain fits the canonical byte limit"),
+                        CanonicalItem::fixed_bytes(ROW_CODE_WHIR_PHASE_COLUMN_NODE_DOMAIN)
+                            .expect("phase-column node domain fits the canonical byte limit"),
+                        CanonicalItem::fixed_bytes(ROW_CODE_WHIR_AGGREGATE_LEAF_DOMAIN)
+                            .expect("aggregate leaf domain fits the canonical byte limit"),
+                        CanonicalItem::fixed_bytes(ROW_CODE_WHIR_AGGREGATE_NODE_DOMAIN)
+                            .expect("aggregate node domain fits the canonical byte limit"),
+                        CanonicalItem::fixed_bytes(TRANSCRIPT_INITIAL_DOMAIN_BYTES)
+                            .expect("transcript initial domain fits the canonical byte limit"),
+                        CanonicalItem::fixed_bytes(TRANSCRIPT_ABSORB_DOMAIN_BYTES)
+                            .expect("transcript absorb domain fits the canonical byte limit"),
+                        CanonicalItem::fixed_bytes(TRANSCRIPT_CHALLENGE_HANDLE_DOMAIN_BYTES)
+                            .expect("transcript challenge domain fits the canonical byte limit"),
+                        CanonicalItem::fixed_bytes(TRANSCRIPT_ACCEPTED_CHALLENGE_DOMAIN_BYTES)
+                            .expect("accepted-challenge domain fits the canonical byte limit"),
+                        CanonicalItem::fixed_bytes(TRANSCRIPT_RESPONSE_BINDING_DOMAIN_BYTES)
+                            .expect("response-binding domain fits the canonical byte limit"),
+                        CanonicalItem::fixed_bytes(TRANSCRIPT_PRODUCT_RESIDUE_BLOCK_DOMAIN_BYTES)
+                            .expect("product-residue block domain fits the canonical byte limit"),
+                        CanonicalItem::fixed_bytes(TRANSCRIPT_DISTINCT_QUERY_BLOCK_DOMAIN_BYTES)
+                            .expect("distinct-query block domain fits the canonical byte limit"),
+                    ],
+                ),
             );
         }
 
@@ -2470,22 +3079,22 @@ mod canonical_profile_artifact {
                 ProofFamilies::AGGREGATE_THRESHOLD_SHARE_STATEMENT_SCHEMA_IDENTIFIER,
             ] {
                 assert_eq!(
-                    bound_root_source_trace_domain_size(
+                    super::super::super::selected_profile::selected_bound_root_source_trace_domain_size(
                         family,
-                        RelationRootConstructionKind::CommittedMaterial,
+                        BoundTreeConstructionKind::CommittedMaterial,
                         packed_trace_domain_size,
                         evaluation_domain_size,
                     ),
                     Ok(physical_trace_domain_size),
                 );
                 assert_eq!(
-                    bound_root_source_trace_domain_size(
+                    super::super::super::selected_profile::selected_bound_root_source_trace_domain_size(
                         family,
-                        RelationRootConstructionKind::CommittedMaterial,
+                        BoundTreeConstructionKind::CommittedMaterial,
                         physical_trace_domain_size,
                         evaluation_domain_size,
                     ),
-                    Err(ProofProfileError::IncompatibleRoot),
+                    Err(ProofProfileError::InvalidRelationPlan),
                 );
             }
             for family in [
@@ -2493,45 +3102,39 @@ mod canonical_profile_artifact {
                 ProofFamilies::TARGET_SHARE_PROOF_STATEMENT_SCHEMA_IDENTIFIER,
             ] {
                 assert_eq!(
-                    bound_root_source_trace_domain_size(
+                    super::super::super::selected_profile::selected_bound_root_source_trace_domain_size(
                         family,
-                        RelationRootConstructionKind::CommittedMaterial,
+                        BoundTreeConstructionKind::CommittedMaterial,
                         physical_trace_domain_size,
                         evaluation_domain_size,
                     ),
                     Ok(physical_trace_domain_size),
                 );
                 assert_eq!(
-                    bound_root_source_trace_domain_size(
+                    super::super::super::selected_profile::selected_bound_root_source_trace_domain_size(
                         family,
-                        RelationRootConstructionKind::CommittedMaterial,
+                        BoundTreeConstructionKind::CommittedMaterial,
                         packed_trace_domain_size,
                         evaluation_domain_size,
                     ),
-                    Err(ProofProfileError::IncompatibleRoot),
+                    Err(ProofProfileError::InvalidRelationPlan),
                 );
             }
         }
 
         #[test]
-        fn persistent_root_views_use_each_family_selected_query_schedule() {
+        fn persistent_root_views_use_the_successor_phase_query_geometry() {
+            assert_eq!(ROW_CODE_WHIR_PHASE_COLUMN_QUERY_COORDINATE_COUNT, 387);
             for family in FIRST_PROFILE_APPLICATION_FAMILIES {
-                let expected_unique_query_count = if matches!(
-                    family,
-                    ProofFamilies::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER
-                        | ProofFamilies::AGGREGATE_THRESHOLD_SHARE_STATEMENT_SCHEMA_IDENTIFIER
-                ) {
-                    192
-                } else {
-                    168
-                };
                 assert_eq!(
-                    selected_unique_query_count(family),
-                    Ok(expected_unique_query_count),
+                    ProofFamilyProfile::selected(family)
+                        .map(|_| ROW_CODE_WHIR_PHASE_COLUMN_QUERY_COORDINATE_COUNT),
+                    Ok(387),
                 );
             }
             assert_eq!(
-                selected_unique_query_count(0x9999),
+                ProofFamilyProfile::selected(0x9999)
+                    .map(|_| ROW_CODE_WHIR_PHASE_COLUMN_QUERY_COORDINATE_COUNT),
                 Err(ProofProfileError::UnsupportedFamily),
             );
         }

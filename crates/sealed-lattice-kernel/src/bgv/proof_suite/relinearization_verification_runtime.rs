@@ -543,7 +543,6 @@ fn begin_relinearization_verification_ingress(
                         verified_public_randomness,
                         &relation_plan_artifact,
                         relation_plan_variant,
-                        &relation_context,
                     )
                     .map_err(|_| CommonProofRuntimeError::InvalidPlanCapability)?,
                 )

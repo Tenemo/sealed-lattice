@@ -6,7 +6,55 @@ use super::{
         ProofEvaluationDomain, ProofPolynomialError, evaluate_extension_at,
         extension_polynomial_degree, fold_extension_pair,
     },
+    relation_plan::{RelationPlanCheckContext, RelationPlanError, RelationPlanVariant},
+    transcript::CommonProofTranscriptSchedule,
 };
+
+const PACKED_FRI_TERMINAL_COEFFICIENT_COUNT: u32 = 256;
+
+/// Builds the incumbent packed-FRI tail from engine-owned geometry while the
+/// common proof engine is being replaced. Relation contexts intentionally do
+/// not carry these backend-specific fields.
+pub(crate) fn packed_fri_transcript_schedule(
+    variant: &RelationPlanVariant,
+    context: &RelationPlanCheckContext,
+) -> Result<CommonProofTranscriptSchedule, RelationPlanError> {
+    let mut folded_degree_bound = variant
+        .opening_degree_bound_exclusive()
+        .checked_sub(1)
+        .ok_or(RelationPlanError::InvalidDomain)?;
+    let mut fold_count = 0_u16;
+    while folded_degree_bound > u64::from(PACKED_FRI_TERMINAL_COEFFICIENT_COUNT) {
+        folded_degree_bound = folded_degree_bound
+            .checked_add(1)
+            .and_then(|degree| degree.checked_div(2))
+            .ok_or(RelationPlanError::CountOverflow)?;
+        fold_count = fold_count
+            .checked_add(1)
+            .ok_or(RelationPlanError::CountOverflow)?;
+    }
+    let query_orbit_count = variant
+        .evaluation_domain_size()
+        .checked_div(2)
+        .filter(|count| *count > 0)
+        .ok_or(RelationPlanError::InvalidDomain)?;
+    // The incumbent packed-FRI query opens a phase pair. Keep its query count
+    // within the successor context's base-field coordinate budget until this
+    // engine is deleted.
+    let packed_fri_query_count = context
+        .phase_column_query_coordinate_count
+        .checked_div(2)
+        .filter(|count| *count > 0)
+        .ok_or(RelationPlanError::InvalidDomain)?;
+    CommonProofTranscriptSchedule::from_relation_prefix_schedule(
+        variant.common_proof_relation_prefix_schedule(context)?,
+        fold_count,
+        PACKED_FRI_TERMINAL_COEFFICIENT_COUNT,
+        packed_fri_query_count,
+        query_orbit_count,
+    )
+    .map_err(|_| RelationPlanError::InvalidChallengeCatalog)
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ProofFriError {

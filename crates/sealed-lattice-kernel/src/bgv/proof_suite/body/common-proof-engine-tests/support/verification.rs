@@ -25,7 +25,7 @@ fn owned_verification_worker_authenticates_external_readback_before_minting_auth
             .min(MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH) as u64,
     )
     .expect("the generated proof fits the worker profile");
-    let relation_plan_capability = CommonProofRelationPlanCapability::from_compiled_plan(
+    let relation_plan_capability = CommonProofRelationPlanCapability::from_checked_fixture_plan(
         &fixture.relation_plan,
         &fixture.relation_context,
         fixture.schedule_position,
@@ -49,7 +49,7 @@ fn owned_verification_worker_authenticates_external_readback_before_minting_auth
         stream_domain,
         proof_stream_descriptor.full_object_digest.into_bytes(),
         proof_bytes.len() as u64,
-        PUBLIC_AGGREGATE_TEST_UNIQUE_QUERY_COUNT,
+        PUBLIC_AGGREGATE_TEST_PACKED_FRI_QUERY_COUNT,
     )
     .expect("the generated proof fits the exact application reservation");
     let binding = CommonProofVerificationBinding::new(
@@ -240,7 +240,7 @@ fn owned_verification_worker_authenticates_external_readback_before_minting_auth
     assert_eq!(consumed.proof_byte_length(), proof_bytes.len() as u64);
     assert_eq!(
         consumed.verified_query_count(),
-        PUBLIC_AGGREGATE_TEST_UNIQUE_QUERY_COUNT
+        PUBLIC_AGGREGATE_TEST_PACKED_FRI_QUERY_COUNT
     );
     assert_eq!(consumed.relation_plan_hash(), expected_relation_plan_hash);
     assert_eq!(
@@ -292,7 +292,7 @@ fn incremental_verifier_retains_only_owned_initialization_material_across_yields
     assert_eq!(verified.proof_byte_length(), proof_bytes.len() as u64);
     assert_eq!(
         verified.verified_query_count(),
-        PUBLIC_AGGREGATE_TEST_UNIQUE_QUERY_COUNT
+        PUBLIC_AGGREGATE_TEST_PACKED_FRI_QUERY_COUNT
     );
 }
 

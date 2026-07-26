@@ -28,14 +28,14 @@ use super::{RelationPlanChecker, check_expression};
 
 #[cfg(test)]
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct DeepPointSamplerCardinalityBound {
+pub(crate) struct OutOfDomainPointSamplerCardinalityBound {
     field_cardinality: BigUint,
     forbidden_candidate_count_ceiling: BigUint,
     accepted_candidate_count_floor: BigUint,
 }
 
 #[cfg(test)]
-impl DeepPointSamplerCardinalityBound {
+impl OutOfDomainPointSamplerCardinalityBound {
     pub(crate) const fn field_cardinality(&self) -> &BigUint {
         &self.field_cardinality
     }
@@ -101,38 +101,38 @@ impl RelationApplicationChallengeAssignment {
     }
 }
 
-pub(crate) struct DeepCompositionVerificationInput<'input> {
+pub(crate) struct OutOfDomainCompositionVerificationInput<'input> {
     context: &'input RelationPlanCheckContext,
     application_challenges: &'input [RelationApplicationChallengeAssignment],
     composition_challenges: &'input [ProofChallengeExtensionElement],
-    deep_points: &'input [ProofChallengeExtensionElement],
+    out_of_domain_points: &'input [ProofChallengeExtensionElement],
     opening_points: &'input [ProofChallengeExtensionElement],
-    ordered_deep_evaluations: &'input [ProofChallengeExtensionElement],
+    ordered_out_of_domain_evaluations: &'input [ProofChallengeExtensionElement],
 }
 
-impl<'input> DeepCompositionVerificationInput<'input> {
+impl<'input> OutOfDomainCompositionVerificationInput<'input> {
     pub(crate) const fn new(
         context: &'input RelationPlanCheckContext,
         application_challenges: &'input [RelationApplicationChallengeAssignment],
         composition_challenges: &'input [ProofChallengeExtensionElement],
-        deep_points: &'input [ProofChallengeExtensionElement],
+        out_of_domain_points: &'input [ProofChallengeExtensionElement],
         opening_points: &'input [ProofChallengeExtensionElement],
-        ordered_deep_evaluations: &'input [ProofChallengeExtensionElement],
+        ordered_out_of_domain_evaluations: &'input [ProofChallengeExtensionElement],
     ) -> Self {
         Self {
             context,
             application_challenges,
             composition_challenges,
-            deep_points,
+            out_of_domain_points,
             opening_points,
-            ordered_deep_evaluations,
+            ordered_out_of_domain_evaluations,
         }
     }
 
-    pub(crate) const fn ordered_deep_evaluations(
+    pub(crate) const fn ordered_out_of_domain_evaluations(
         &self,
     ) -> &'input [ProofChallengeExtensionElement] {
-        self.ordered_deep_evaluations
+        self.ordered_out_of_domain_evaluations
     }
 }
 
@@ -154,7 +154,7 @@ impl CheckedRelationApplicationChallenges {
         assignments: &[RelationApplicationChallengeAssignment],
     ) -> Result<Self, RelationPlanError> {
         let descriptors = variant
-            .derived_challenge_catalog(context)?
+            .derived_relation_prefix_challenge_catalog(context)?
             .into_iter()
             .filter(|descriptor| {
                 matches!(
@@ -422,7 +422,7 @@ impl RelationPlanVariant {
         Ok(evaluation)
     }
 
-    /// Evaluates both checked programs without imposing the DEEP/coset
+    /// Evaluates both checked programs without imposing the out-of-domain/coset
     /// non-vanishing condition. Application extraction uses this entry point
     /// on trace roots, where a constraint is operative precisely when its
     /// checked zeroifier vanishes.
@@ -521,29 +521,29 @@ impl RelationPlanVariant {
             )
     }
 
-    /// Verifies the DEEP values against both the complete relation expression
-    /// and the canonical quotient-component decomposition.  The ordered DEEP
+    /// Verifies the out-of-domain values against both the complete relation expression
+    /// and the canonical quotient-component decomposition.  The ordered out-of-domain
     /// value list is indexed only by the checked opening-claim catalog.
-    pub(crate) fn verify_deep_composition<VerifierSequenceValue>(
+    pub(crate) fn verify_out_of_domain_composition<VerifierSequenceValue>(
         &self,
-        input: DeepCompositionVerificationInput<'_>,
+        input: OutOfDomainCompositionVerificationInput<'_>,
         mut verifier_sequence_value: VerifierSequenceValue,
     ) -> Result<(), RelationPlanError>
     where
         VerifierSequenceValue:
             FnMut(u32, ProofChallengeExtensionElement) -> Option<ProofChallengeExtensionElement>,
     {
-        let DeepCompositionVerificationInput {
+        let OutOfDomainCompositionVerificationInput {
             context,
             application_challenges,
             composition_challenges,
-            deep_points,
+            out_of_domain_points,
             opening_points,
-            ordered_deep_evaluations,
+            ordered_out_of_domain_evaluations,
         } = input;
-        if deep_points.len() != usize::from(context.deep_point_count)
+        if out_of_domain_points.len() != usize::from(context.out_of_domain_point_count)
             || opening_points.len() != self.ordered_opening_points.len()
-            || ordered_deep_evaluations.len() != self.ordered_opening_claims.len()
+            || ordered_out_of_domain_evaluations.len() != self.ordered_opening_claims.len()
         {
             return Err(RelationPlanError::InvalidOpening);
         }
@@ -572,17 +572,19 @@ impl RelationPlanVariant {
                 .ok_or(RelationPlanError::InvalidOpening)?;
         }
 
-        for (deep_point_ordinal, deep_point) in deep_points.iter().copied().enumerate() {
-            let deep_point_ordinal =
-                u16::try_from(deep_point_ordinal).map_err(|_| RelationPlanError::CountOverflow)?;
+        for (out_of_domain_point_ordinal, out_of_domain_point) in
+            out_of_domain_points.iter().copied().enumerate()
+        {
+            let out_of_domain_point_ordinal = u16::try_from(out_of_domain_point_ordinal)
+                .map_err(|_| RelationPlanError::CountOverflow)?;
             let composed_quotient = self.evaluate_composed_quotient_at_point(
                 context,
-                deep_point,
+                out_of_domain_point,
                 application_challenges,
                 composition_challenges,
                 |column_ordinal, rotation_is_negative, rotation_magnitude| {
                     let opening_point_ordinal = self.opening_point_ordinal_for_rotation(
-                        deep_point_ordinal,
+                        out_of_domain_point_ordinal,
                         rotation_is_negative,
                         rotation_magnitude,
                         0,
@@ -611,14 +613,14 @@ impl RelationPlanVariant {
                         self.tree_column_opened_value(
                             column_ordinal,
                             opening_point_ordinal,
-                            ordered_deep_evaluations,
+                            ordered_out_of_domain_evaluations,
                         )
                     }
                 },
             )?;
 
             let raw_opening_point_ordinal =
-                self.opening_point_ordinal_for_rotation(deep_point_ordinal, false, 0, 0)?;
+                self.opening_point_ordinal_for_rotation(out_of_domain_point_ordinal, false, 0, 0)?;
             let mut reconstructed_quotient = ProofChallengeExtensionElement::ZERO;
             for component_ordinal in 0..context.quotient_component_count {
                 let component_value = self.opened_value(
@@ -626,13 +628,16 @@ impl RelationPlanVariant {
                     component_ordinal,
                     None,
                     raw_opening_point_ordinal,
-                    ordered_deep_evaluations,
+                    ordered_out_of_domain_evaluations,
                 )?;
                 let exponent = u64::from(component_ordinal)
                     .checked_mul(quotient_decomposition_stride)
                     .ok_or(RelationPlanError::DegreeBoundExceeded)?;
-                reconstructed_quotient = reconstructed_quotient
-                    .add(deep_point.power(exponent).multiply(component_value));
+                reconstructed_quotient = reconstructed_quotient.add(
+                    out_of_domain_point
+                        .power(exponent)
+                        .multiply(component_value),
+                );
             }
             if reconstructed_quotient != composed_quotient {
                 return Err(RelationPlanError::InvalidConstraint);
@@ -641,7 +646,7 @@ impl RelationPlanVariant {
         Ok(())
     }
 
-    pub(crate) fn verifier_sequence_deep_resolution_payload_byte_length(
+    pub(crate) fn verifier_sequence_out_of_domain_resolution_payload_byte_length(
         &self,
         context: &RelationPlanCheckContext,
     ) -> Result<u64, RelationPlanError> {
@@ -678,7 +683,7 @@ impl RelationPlanVariant {
     where
         Visit: FnMut(u32, u32) -> Result<(), RelationPlanError>,
     {
-        if context.deep_point_count == 0 {
+        if context.out_of_domain_point_count == 0 {
             return Err(RelationPlanError::InvalidOpening);
         }
         for constraint in &self.ordered_constraints {
@@ -700,11 +705,11 @@ impl RelationPlanVariant {
                     if !matches!(column.origin, RelationColumnOrigin::VerifierSequence { .. }) {
                         return Ok(());
                     }
-                    for deep_point_ordinal in 0..context.deep_point_count {
+                    for out_of_domain_point_ordinal in 0..context.out_of_domain_point_count {
                         visit(
                             query.column_ordinal,
                             self.opening_point_ordinal_for_rotation(
-                                deep_point_ordinal,
+                                out_of_domain_point_ordinal,
                                 query.rotation_is_negative,
                                 query.rotation_magnitude,
                                 0,
@@ -721,9 +726,9 @@ impl RelationPlanVariant {
     pub(crate) fn derive_opening_points(
         &self,
         context: &RelationPlanCheckContext,
-        deep_points: &[ProofChallengeExtensionElement],
+        out_of_domain_points: &[ProofChallengeExtensionElement],
     ) -> Result<Vec<ProofChallengeExtensionElement>, RelationPlanError> {
-        if deep_points.len() != usize::from(context.deep_point_count)
+        if out_of_domain_points.len() != usize::from(context.out_of_domain_point_count)
             || self.trace_domain_size == 0
             || !self
                 .evaluation_domain_size
@@ -739,8 +744,8 @@ impl RelationPlanVariant {
         let mut result = Vec::with_capacity(self.ordered_opening_points.len());
         let mut canonical_points = BTreeSet::new();
         for descriptor in &self.ordered_opening_points {
-            let deep_point = deep_points
-                .get(usize::from(descriptor.deep_point_ordinal))
+            let out_of_domain_point = out_of_domain_points
+                .get(usize::from(descriptor.out_of_domain_point_ordinal))
                 .copied()
                 .ok_or(RelationPlanError::InvalidOpening)?;
             let reduced_rotation = descriptor.trace_rotation_magnitude % self.trace_domain_size;
@@ -750,7 +755,7 @@ impl RelationPlanVariant {
             } else {
                 reduced_rotation
             };
-            let rotated = deep_point.multiply_base(trace_generator.power(signed_exponent));
+            let rotated = out_of_domain_point.multiply_base(trace_generator.power(signed_exponent));
             let point = rotated.frobenius(descriptor.conjugate_index);
             if !canonical_points.insert(point.canonical_coordinates()) {
                 return Err(RelationPlanError::InvalidOpening);
@@ -760,7 +765,7 @@ impl RelationPlanVariant {
         Ok(result)
     }
 
-    /// Bounds the candidates rejected by the production DEEP sampler without
+    /// Bounds the candidates rejected by the production out-of-domain sampler without
     /// enumerating the challenge field.
     ///
     /// The bound applies after every lower ordinal has been accepted by the
@@ -768,11 +773,11 @@ impl RelationPlanVariant {
     /// every domain and zeroifier root tested below, short Frobenius orbits,
     /// and collisions with both current and prior translated orbits.
     #[cfg(test)]
-    pub(crate) fn deep_point_sampler_cardinality_bound(
+    pub(crate) fn out_of_domain_point_sampler_cardinality_bound(
         &self,
         context: &RelationPlanCheckContext,
         point_ordinal: u16,
-    ) -> Result<DeepPointSamplerCardinalityBound, RelationPlanError> {
+    ) -> Result<OutOfDomainPointSamplerCardinalityBound, RelationPlanError> {
         let checker = RelationPlanChecker::new(context);
         checker.check_context()?;
         if context.base_field_modulus != PROOF_BASE_FIELD_MODULUS
@@ -790,7 +795,7 @@ impl RelationPlanVariant {
         {
             return Err(RelationPlanError::InvalidDomain);
         }
-        if point_ordinal >= context.deep_point_count {
+        if point_ordinal >= context.out_of_domain_point_count {
             return Err(RelationPlanError::InvalidChallengeCatalog);
         }
 
@@ -801,7 +806,7 @@ impl RelationPlanVariant {
             evaluation_generator.power(self.evaluation_domain_size / self.trace_domain_size);
         let mut rotation_scalars_by_point = BTreeMap::<u16, BTreeSet<u64>>::new();
         for descriptor in &self.ordered_opening_points {
-            if descriptor.deep_point_ordinal >= context.deep_point_count
+            if descriptor.out_of_domain_point_ordinal >= context.out_of_domain_point_count
                 || usize::from(descriptor.conjugate_index) >= PROOF_CHALLENGE_EXTENSION_DEGREE
             {
                 return Err(RelationPlanError::InvalidOpening);
@@ -813,7 +818,7 @@ impl RelationPlanVariant {
             )?;
             let rotation_scalar = trace_generator.power(rotation_exponent).canonical();
             if !rotation_scalars_by_point
-                .entry(descriptor.deep_point_ordinal)
+                .entry(descriptor.out_of_domain_point_ordinal)
                 .or_default()
                 .insert(rotation_scalar)
             {
@@ -909,7 +914,7 @@ impl RelationPlanVariant {
         }
         let accepted_candidate_count_floor =
             &field_cardinality - &forbidden_candidate_count_ceiling;
-        Ok(DeepPointSamplerCardinalityBound {
+        Ok(OutOfDomainPointSamplerCardinalityBound {
             field_cardinality,
             forbidden_candidate_count_ceiling,
             accepted_candidate_count_floor,
@@ -1019,12 +1024,12 @@ impl RelationPlanVariant {
         Ok(cleared_constraint_degree.max(cleared_reconstructed_quotient_degree))
     }
 
-    pub(crate) fn deep_point_candidate_is_forbidden(
+    pub(crate) fn out_of_domain_point_candidate_is_forbidden(
         &self,
         context: &RelationPlanCheckContext,
         point_ordinal: u16,
         candidate: ProofChallengeExtensionElement,
-        prior_accepted_deep_points: &[ProofChallengeExtensionElement],
+        prior_accepted_out_of_domain_points: &[ProofChallengeExtensionElement],
     ) -> Result<bool, RelationPlanError> {
         if self.trace_domain_size == 0
             || self.evaluation_domain_size == 0
@@ -1034,8 +1039,8 @@ impl RelationPlanVariant {
         {
             return Err(RelationPlanError::InvalidDomain);
         }
-        if point_ordinal >= context.deep_point_count
-            || prior_accepted_deep_points.len() != usize::from(point_ordinal)
+        if point_ordinal >= context.out_of_domain_point_count
+            || prior_accepted_out_of_domain_points.len() != usize::from(point_ordinal)
         {
             return Err(RelationPlanError::InvalidChallengeCatalog);
         }
@@ -1074,10 +1079,10 @@ impl RelationPlanVariant {
         for descriptor in self
             .ordered_opening_points
             .iter()
-            .filter(|descriptor| descriptor.deep_point_ordinal < point_ordinal)
+            .filter(|descriptor| descriptor.out_of_domain_point_ordinal < point_ordinal)
         {
-            let prior_deep_point = prior_accepted_deep_points
-                .get(usize::from(descriptor.deep_point_ordinal))
+            let prior_out_of_domain_point = prior_accepted_out_of_domain_points
+                .get(usize::from(descriptor.out_of_domain_point_ordinal))
                 .copied()
                 .ok_or(RelationPlanError::InvalidChallengeCatalog)?;
             let reduced_rotation = descriptor.trace_rotation_magnitude % self.trace_domain_size;
@@ -1087,7 +1092,7 @@ impl RelationPlanVariant {
             } else {
                 reduced_rotation
             };
-            let translated = prior_deep_point
+            let translated = prior_out_of_domain_point
                 .multiply_base(trace_generator.power(signed_exponent))
                 .frobenius(descriptor.conjugate_index);
             let orbit = frobenius_orbit(translated);
@@ -1104,7 +1109,7 @@ impl RelationPlanVariant {
         for descriptor in self
             .ordered_opening_points
             .iter()
-            .filter(|descriptor| descriptor.deep_point_ordinal == point_ordinal)
+            .filter(|descriptor| descriptor.out_of_domain_point_ordinal == point_ordinal)
         {
             let reduced_rotation = descriptor.trace_rotation_magnitude % self.trace_domain_size;
             let signed_exponent = if descriptor.trace_rotation_is_negative && reduced_rotation != 0
@@ -1159,7 +1164,7 @@ impl RelationPlanVariant {
 
     fn opening_point_ordinal_for_rotation(
         &self,
-        deep_point_ordinal: u16,
+        out_of_domain_point_ordinal: u16,
         rotation_is_negative: bool,
         rotation_magnitude: u64,
         conjugate_index: u16,
@@ -1174,7 +1179,7 @@ impl RelationPlanVariant {
                 .iter()
                 .enumerate()
                 .filter(|(_, descriptor)| {
-                    descriptor.deep_point_ordinal == deep_point_ordinal
+                    descriptor.out_of_domain_point_ordinal == out_of_domain_point_ordinal
                         && descriptor.conjugate_index == conjugate_index
                         && signed_rotation_exponent(
                             descriptor.trace_rotation_is_negative,
@@ -1193,7 +1198,7 @@ impl RelationPlanVariant {
         &self,
         column_ordinal: u32,
         opening_point_ordinal: u32,
-        ordered_deep_evaluations: &[ProofChallengeExtensionElement],
+        ordered_out_of_domain_evaluations: &[ProofChallengeExtensionElement],
     ) -> Result<ProofChallengeExtensionElement, RelationPlanError> {
         let mut matching_tree_ordinals = self
             .ordered_trees
@@ -1214,7 +1219,7 @@ impl RelationPlanVariant {
             tree_ordinal,
             Some(column_ordinal),
             opening_point_ordinal,
-            ordered_deep_evaluations,
+            ordered_out_of_domain_evaluations,
         )
     }
 
@@ -1224,7 +1229,7 @@ impl RelationPlanVariant {
         source_ordinal: u32,
         column_ordinal: Option<u32>,
         opening_point_ordinal: u32,
-        ordered_deep_evaluations: &[ProofChallengeExtensionElement],
+        ordered_out_of_domain_evaluations: &[ProofChallengeExtensionElement],
     ) -> Result<ProofChallengeExtensionElement, RelationPlanError> {
         let mut matches = self
             .ordered_opening_claims
@@ -1240,7 +1245,7 @@ impl RelationPlanVariant {
         if matches.next().is_some() {
             return Err(RelationPlanError::InvalidOpening);
         }
-        ordered_deep_evaluations
+        ordered_out_of_domain_evaluations
             .get(claim_ordinal)
             .copied()
             .ok_or(RelationPlanError::InvalidOpening)
@@ -1599,16 +1604,16 @@ mod tests {
     fn vss_linkage_interpreter_fixture() -> (RelationPlanVariant, RelationPlanCheckContext) {
         let ring_degree = 64_u64;
         let evaluation_domain_size = 1_024_u64;
-        let deep_point_count = 1_u64;
-        let unique_query_count = 1_u64;
+        let out_of_domain_point_count = 1_u64;
+        let phase_column_query_coordinate_count = 1_u64;
         let quotient_component_count = 16_u64;
         let trace_mask_degree_bound_exclusive = COMMITTED_MATERIAL_TRACE_PACKING_FACTOR
             .checked_mul(
                 u64::try_from(PROOF_CHALLENGE_EXTENSION_DEGREE)
                     .expect("the challenge-extension degree fits u64"),
             )
-            .and_then(|deep_coordinate_count| {
-                deep_coordinate_count.checked_add(2 * unique_query_count)
+            .and_then(|out_of_domain_coordinate_count| {
+                out_of_domain_coordinate_count.checked_add(phase_column_query_coordinate_count)
             })
             .expect("the exact trace-mask degree fits u64");
         let input = CommittedMaterialRelationPlanInput {
@@ -1632,31 +1637,27 @@ mod tests {
             .expect("the relation trace domain derives")
             .checked_add(rounded_mask_degree)
             .expect("the quotient decomposition stride derives");
-        let minimum_telescoping_mask_degree_bound_exclusive = unique_query_count
-            .checked_mul(2)
-            .and_then(|query_coordinate_count| query_coordinate_count.checked_add(deep_point_count))
+        let minimum_telescoping_mask_degree_bound_exclusive = phase_column_query_coordinate_count
+            .checked_add(out_of_domain_point_count)
             .expect("the telescoping mask degree derives");
         let context = RelationPlanCheckContext {
             base_field_modulus: PROOF_BASE_FIELD_MODULUS,
             challenge_extension_degree: PROOF_CHALLENGE_EXTENSION_DEGREE as u16,
-            evaluation_blowup_factor: 2,
             evaluation_domain_generator: modular_power(
                 PROOF_BASE_FIELD_MAXIMUM_TWO_ADIC_GENERATOR,
                 (1_u64 << 32) / evaluation_domain_size,
                 PROOF_BASE_FIELD_MODULUS,
             ),
             evaluation_coset_offset: 7,
-            deep_point_count: u16::try_from(deep_point_count)
-                .expect("the deep-point count fits u16"),
+            out_of_domain_point_count: u16::try_from(out_of_domain_point_count)
+                .expect("the out_of_domain-point count fits u16"),
             quotient_component_count: u32::try_from(quotient_component_count)
                 .expect("the quotient-component count fits u32"),
             quotient_component_degree_bound_exclusive: quotient_decomposition_stride
                 .checked_add(minimum_telescoping_mask_degree_bound_exclusive)
                 .expect("the quotient-component degree bound derives"),
-            fri_fold_count: 6,
-            final_polynomial_degree_bound_exclusive: 8,
-            unique_query_count: u32::try_from(unique_query_count)
-                .expect("the unique-query count fits u32"),
+            phase_column_query_coordinate_count: u32::try_from(phase_column_query_coordinate_count)
+                .expect("the phase-column query-coordinate count fits u32"),
             non_native_theta_repetition_count: 1,
             non_native_alpha_repetition_count: 1,
             maximum_fiat_shamir_candidate_draws_per_output: 128,
@@ -1731,8 +1732,8 @@ mod tests {
             .select_variant(None, None)
             .expect("the exact ballot relation has one variant");
         let schedule = variant
-            .common_proof_transcript_schedule(&context)
-            .expect("the exact ballot challenge schedule derives");
+            .common_proof_relation_prefix_schedule(&context)
+            .expect("the exact ballot relation-prefix schedule derives");
         let mut assignments = schedule
             .ordered_application_challenge_groups()
             .iter()
@@ -1763,14 +1764,14 @@ mod tests {
     }
 
     #[test]
-    fn deep_sampler_requires_full_degree_disjoint_frobenius_orbits() {
+    fn out_of_domain_sampler_requires_full_degree_disjoint_frobenius_orbits() {
         let (variant, context) = vss_linkage_interpreter_fixture();
         let base_field_candidate = ProofChallengeExtensionElement::from_base(
             ProofBaseFieldElement::from_canonical(17).expect("canonical base-field candidate"),
         );
         assert!(
             variant
-                .deep_point_candidate_is_forbidden(&context, 0, base_field_candidate, &[])
+                .out_of_domain_point_candidate_is_forbidden(&context, 0, base_field_candidate, &[])
                 .expect("base-field membership is decidable")
         );
 
@@ -1779,13 +1780,13 @@ mod tests {
                 .expect("canonical extension generator");
         assert!(
             !variant
-                .deep_point_candidate_is_forbidden(&context, 0, full_degree_candidate, &[])
+                .out_of_domain_point_candidate_is_forbidden(&context, 0, full_degree_candidate, &[])
                 .expect("full-degree candidate is decidable")
         );
     }
 
     #[test]
-    fn exact_same_secret_deep_sampler_accepts_at_least_half_the_challenge_field() {
+    fn exact_same_secret_out_of_domain_sampler_accepts_at_least_half_the_challenge_field() {
         let context = selected_relation_plan_check_context(
             ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER,
         )
@@ -1803,8 +1804,8 @@ mod tests {
             .select_variant(None, None)
             .expect("the exact same-secret relation has one variant");
         let cardinality = variant
-            .deep_point_sampler_cardinality_bound(&context, 0)
-            .expect("the exact DEEP forbidden set has a source-derived bound");
+            .out_of_domain_point_sampler_cardinality_bound(&context, 0)
+            .expect("the exact out-of-domain forbidden set has a source-derived bound");
 
         let field_cardinality =
             BigUint::from(PROOF_BASE_FIELD_MODULUS).pow(PROOF_CHALLENGE_EXTENSION_DEGREE as u32);
@@ -1839,10 +1840,10 @@ mod tests {
 
         assert_eq!(variant.trace_domain_size(), 16_384);
         assert_eq!(context.quotient_component_count, 8);
-        assert_eq!(context.quotient_component_degree_bound_exclusive, 33_884);
-        assert_eq!(variant.quotient_decomposition_stride(&context), Ok(17_152));
-        let maximum_reconstructed_quotient_degree = 7 * 17_152 + (33_884 - 1);
-        assert_eq!(maximum_reconstructed_quotient_degree, 153_947);
+        assert_eq!(context.quotient_component_degree_bound_exclusive, 34_050);
+        assert_eq!(variant.quotient_decomposition_stride(&context), Ok(17_266));
+        let maximum_reconstructed_quotient_degree = 7 * 17_266 + (34_050 - 1);
+        assert_eq!(maximum_reconstructed_quotient_degree, 154_911);
 
         assert_eq!(
             variant
@@ -1938,7 +1939,7 @@ mod tests {
     }
 
     #[test]
-    fn deep_composition_resolves_virtual_verifier_sequences_without_opening_claims() {
+    fn out_of_domain_composition_resolves_virtual_verifier_sequences_without_opening_claims() {
         let (mut variant, context) = vss_linkage_interpreter_fixture();
         let verifier_column_ordinal = (0..variant.constraint_count())
             .flat_map(|constraint_ordinal| {
@@ -1998,12 +1999,12 @@ mod tests {
         .expect("alpha assignment")];
         let composition_challenges =
             vec![ProofChallengeExtensionElement::ONE; variant.constraint_count()];
-        let deep_point =
+        let out_of_domain_point =
             ProofChallengeExtensionElement::from_canonical_coordinates([0, 1, 0, 0, 0])
                 .expect("canonical full-degree point");
-        let deep_points = [deep_point];
+        let out_of_domain_points = [out_of_domain_point];
         let opening_points = variant
-            .derive_opening_points(&context, &deep_points)
+            .derive_opening_points(&context, &out_of_domain_points)
             .expect("canonical opening points");
         let verifier_constant = ProofChallengeExtensionElement::from_base(
             ProofBaseFieldElement::from_canonical(23).expect("canonical verifier value"),
@@ -2013,7 +2014,7 @@ mod tests {
         let composed_quotient = variant
             .evaluate_composed_quotient_at_point(
                 &context,
-                deep_point,
+                out_of_domain_point,
                 &application_challenges,
                 &composition_challenges,
                 |column_ordinal, rotation_is_negative, rotation_magnitude| {
@@ -2034,7 +2035,7 @@ mod tests {
                 },
             )
             .expect("the fixture quotient evaluates");
-        let deep_evaluations = variant
+        let out_of_domain_evaluations = variant
             .ordered_opening_claims
             .iter()
             .map(|claim| {
@@ -2049,14 +2050,14 @@ mod tests {
             .collect::<Vec<_>>();
         let mut resolved_points = Vec::new();
         variant
-            .verify_deep_composition(
-                DeepCompositionVerificationInput::new(
+            .verify_out_of_domain_composition(
+                OutOfDomainCompositionVerificationInput::new(
                     &context,
                     &application_challenges,
                     &composition_challenges,
-                    &deep_points,
+                    &out_of_domain_points,
                     &opening_points,
-                    &deep_evaluations,
+                    &out_of_domain_evaluations,
                 ),
                 |column_ordinal, point| {
                     resolved_points.push((column_ordinal, point));
@@ -2081,18 +2082,18 @@ mod tests {
         assert!(
             resolved_points
                 .iter()
-                .any(|(_, point)| *point != deep_point),
-            "a rotated query must resolve at its canonical rotated DEEP point"
+                .any(|(_, point)| *point != out_of_domain_point),
+            "a rotated query must resolve at its canonical rotated out-of-domain point"
         );
         assert!(matches!(
-            variant.verify_deep_composition(
-                DeepCompositionVerificationInput::new(
+            variant.verify_out_of_domain_composition(
+                OutOfDomainCompositionVerificationInput::new(
                     &context,
                     &application_challenges,
                     &composition_challenges,
-                    &deep_points,
+                    &out_of_domain_points,
                     &opening_points,
-                    &deep_evaluations,
+                    &out_of_domain_evaluations,
                 ),
                 |column_ordinal, point| (column_ordinal == verifier_column_ordinal).then_some(
                     verifier_value_at_point(point).add(ProofChallengeExtensionElement::ONE),
@@ -2101,14 +2102,14 @@ mod tests {
             Err(RelationPlanError::InvalidConstraint)
         ));
         assert!(matches!(
-            variant.verify_deep_composition(
-                DeepCompositionVerificationInput::new(
+            variant.verify_out_of_domain_composition(
+                OutOfDomainCompositionVerificationInput::new(
                     &context,
                     &application_challenges,
                     &composition_challenges,
-                    &deep_points,
+                    &out_of_domain_points,
                     &opening_points,
-                    &deep_evaluations,
+                    &out_of_domain_evaluations,
                 ),
                 |_, _| None,
             ),

@@ -22,6 +22,7 @@ use crate::{
     hashing::{StreamingHash512, hash_framed_parts_512},
 };
 
+use super::super::prover::requested_pre_challenge_source_column_ordinals;
 use super::super::{
     CommonProofAuthenticatedSourceReadRequest, CommonProofProverError,
     CommonProofRelationPlanCapability, CommonProofSourcePolynomial,
@@ -38,8 +39,8 @@ use super::{
     RelationTreeDescriptor, RelationVerifierSource, SuiteModulusReference,
     galois_key_share_adapter::{
         centered_residue, exact_modular_quotient, exact_negacyclic_product_radix, half_position,
-        requested_source_column_ordinals, signed_integer_to_base_field, split_balanced_quotient,
-        split_rows_match, split_signed_i8_polynomial,
+        signed_integer_to_base_field, split_balanced_quotient, split_rows_match,
+        split_signed_i8_polynomial,
     },
     relinearization_round_one_adapter::{
         CachedQuotient, CachedQuotientKey, RelinearizationRoundOneColumnDerivation,
@@ -877,7 +878,7 @@ fn relinearization_round_two_recursive_column_closures(
 ) -> Result<Vec<BTreeSet<u32>>, CommonProofProverError> {
     let dependencies =
         relinearization_round_two_column_dependencies(relation_plan_variant, source_layout);
-    requested_source_column_ordinals(relation_plan_variant)?
+    requested_pre_challenge_source_column_ordinals(relation_plan_variant)?
         .into_iter()
         .map(|requested_column| {
             let mut pending = vec![requested_column];
@@ -1124,7 +1125,8 @@ pub(crate) fn relinearization_round_two_source_provider_memory_accounting(
     let total_authenticated_source_chunk_count = component_chunk_count
         .checked_mul(2)
         .ok_or(CommonProofProverError::CountOverflow)?;
-    let requested_column_count = requested_source_column_ordinals(relation_plan_variant)?.len();
+    let requested_column_count =
+        requested_pre_challenge_source_column_ordinals(relation_plan_variant)?.len();
     let recursive_column_closures =
         relinearization_round_two_recursive_column_closures(relation_plan_variant, source_layout)?;
     let maximum_recursive_cached_row_count = recursive_column_closures
@@ -1789,7 +1791,8 @@ impl RelinearizationRoundTwoSourcePolynomialAdapter {
             relation_plan_variant.top_count(),
         );
         let requested_column_ordinals =
-            requested_source_column_ordinals(&relation_plan_variant)?.into_boxed_slice();
+            requested_pre_challenge_source_column_ordinals(&relation_plan_variant)?
+                .into_boxed_slice();
         let memory_accounting = relinearization_round_two_source_provider_memory_accounting(
             &relation_plan_variant,
             &relation_context,

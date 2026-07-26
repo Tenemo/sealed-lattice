@@ -338,6 +338,7 @@ export type WebLockOwnedBrowserActionStorageCustody = Readonly<{
     ): Promise<RuntimeRecordProtection>;
     openCommonProofCustody?(input: {
         actionRandomnessCommitment: Uint8Array;
+        applicationStatementSchemaIdentifier: number;
         checkpoint?:
             | Readonly<{
                   operationIdentity: CheckpointOperationIdentity;

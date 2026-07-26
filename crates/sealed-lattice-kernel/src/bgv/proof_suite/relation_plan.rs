@@ -163,9 +163,9 @@ pub(crate) use galois_key_share_adapter::{
     GaloisKeyShareSourcePolynomialAdapter, galois_relation_tree_inputs,
 };
 #[cfg(test)]
-pub(crate) use interpreter::DeepPointSamplerCardinalityBound;
+pub(crate) use interpreter::OutOfDomainPointSamplerCardinalityBound;
 pub(crate) use interpreter::{
-    CheckedRelationApplicationChallenges, DeepCompositionVerificationInput,
+    CheckedRelationApplicationChallenges, OutOfDomainCompositionVerificationInput,
     RelationApplicationChallengeAssignment,
 };
 pub(crate) use key_relation::{PublicKeyShareRelationPlanInput, SameSecretRelationPlanInput};

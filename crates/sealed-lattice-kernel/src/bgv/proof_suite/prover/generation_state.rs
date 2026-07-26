@@ -1,3 +1,4 @@
+use super::super::row_code_whir::RowCodeWhirConstructionPlan;
 use super::super::verified_application_statement_hash;
 #[cfg(test)]
 use super::CompletedCommonProofGenerationResult;
@@ -134,7 +135,7 @@ pub(crate) enum CommonProofGenerationStage {
     MaterializingAuxiliaryTrees = 4,
     ConstructingQuotient = 5,
     MaterializingQuotientTrees = 6,
-    DerivingDeepOpenings = 7,
+    DerivingOutOfDomainOpenings = 7,
     MaterializingOpeningMask = 8,
     FoldingFri = 9,
     EmittingPrefix = 10,
@@ -210,8 +211,8 @@ enum CommonProofGenerationPhase {
     MaterializingQuotientTrees {
         next_component_index: usize,
     },
-    DerivingDeepOpenings,
-    EvaluatingDeepOpenings {
+    DerivingOutOfDomainOpenings,
+    EvaluatingOutOfDomainOpenings {
         next_claim_index: usize,
     },
     MaterializingOpeningMask,
@@ -271,7 +272,7 @@ enum CommonProofReplayReadContinuation {
     AuxiliarySynthesisInput {
         column_ordinal: u32,
     },
-    DeepOpening {
+    OutOfDomainOpening {
         claim_index: usize,
     },
     OpeningBatchMaskTree,
@@ -433,6 +434,7 @@ type CommonProofPhasePairLeafValues = (
 pub(crate) struct CommonProofGenerationStateMachine {
     protocol_version: u16,
     suite_identifier: [u8; HASH_BYTE_LENGTH],
+    row_code_whir_construction_plan_identity_hash: [u8; HASH_BYTE_LENGTH],
     application_statement_schema_identifier: u16,
     canonical_header_bytes: Vec<u8>,
     variant: RelationPlanVariant,
@@ -477,7 +479,7 @@ pub(crate) struct CommonProofGenerationStateMachine {
     current_quotient_component: Option<Zeroizing<Vec<ProofChallengeExtensionElement>>>,
     opening_points: Vec<ProofChallengeExtensionElement>,
     opening_batch_mask: Option<Zeroizing<Vec<ProofChallengeExtensionElement>>>,
-    deep_evaluations: Vec<ProofChallengeExtensionElement>,
+    out_of_domain_evaluations: Vec<ProofChallengeExtensionElement>,
     opening_batch_coefficients: Vec<ProofChallengeExtensionElement>,
     initial_fri_polynomial: Option<Zeroizing<Vec<ProofChallengeExtensionElement>>>,
     fri_domain: Option<ProofEvaluationDomain>,
@@ -843,6 +845,63 @@ impl CommonProofGenerationStateMachine {
     pub(crate) fn new<'input>(
         input: CommonProofGenerationInput<'input>,
     ) -> Result<Self, CommonProofGenerationInitializationError> {
+        Self::validate_generation_input_limits(&input)?;
+        let validated_artifact = ValidatedRelationPlanArtifact::from_compiled_plan(
+            input.relation_plan,
+            input.relation_context,
+        )
+        .map_err(CommonProofGenerationInitializationError::Profile)?;
+        let row_code_whir_construction_plan = RowCodeWhirConstructionPlan::for_selected_variant(
+            &validated_artifact,
+            input.schedule_position,
+            input.top_count,
+        )
+        .map_err(|_| CommonProofGenerationInitializationError::RowCodeWhirConstructionPlan)?;
+        Self::new_after_plan_validation(input, validated_artifact, row_code_whir_construction_plan)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn new_for_checked_fixture<'input>(
+        input: CommonProofGenerationInput<'input>,
+    ) -> Result<Self, CommonProofGenerationInitializationError> {
+        Self::validate_generation_input_limits(&input)?;
+        let validated_artifact = ValidatedRelationPlanArtifact::from_checked_fixture_plan(
+            input.relation_plan,
+            input.relation_context,
+        )
+        .map_err(CommonProofGenerationInitializationError::Profile)?;
+        let row_code_whir_construction_plan =
+            RowCodeWhirConstructionPlan::for_checked_fixture_variant(
+                &validated_artifact,
+                input.relation_context,
+                input.schedule_position,
+                input.top_count,
+            )
+            .map_err(|_| CommonProofGenerationInitializationError::RowCodeWhirConstructionPlan)?;
+        Self::new_after_plan_validation(input, validated_artifact, row_code_whir_construction_plan)
+    }
+
+    fn validate_generation_input_limits(
+        input: &CommonProofGenerationInput<'_>,
+    ) -> Result<(), CommonProofGenerationInitializationError> {
+        if input.maximum_prefetched_query_byte_length == 0
+            || input.maximum_external_memory_chunk_byte_length
+                != MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH
+            || input.maximum_proof_transport_chunk_byte_length
+                != MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH
+        {
+            return Err(CommonProofGenerationInitializationError::Prover(
+                CommonProofProverError::InvalidInput,
+            ));
+        }
+        Ok(())
+    }
+
+    fn new_after_plan_validation<'input>(
+        input: CommonProofGenerationInput<'input>,
+        validated_artifact: ValidatedRelationPlanArtifact,
+        row_code_whir_construction_plan: RowCodeWhirConstructionPlan,
+    ) -> Result<Self, CommonProofGenerationInitializationError> {
         let CommonProofGenerationInput {
             protocol_version,
             suite_identifier,
@@ -857,18 +916,9 @@ impl CommonProofGenerationStateMachine {
             maximum_proof_transport_chunk_byte_length,
             maximum_prefetched_query_byte_length,
         } = input;
-        if maximum_prefetched_query_byte_length == 0
-            || maximum_external_memory_chunk_byte_length
-                != MAXIMUM_COMMON_PROOF_EXTERNAL_MEMORY_CHUNK_BYTE_LENGTH
-            || maximum_proof_transport_chunk_byte_length != MAXIMUM_COMMON_PROOF_CHUNK_BYTE_LENGTH
-        {
-            return Err(CommonProofGenerationInitializationError::Prover(
-                CommonProofProverError::InvalidInput,
-            ));
-        }
-        let validated_artifact =
-            ValidatedRelationPlanArtifact::from_compiled_plan(relation_plan, relation_context)
-                .map_err(CommonProofGenerationInitializationError::Profile)?;
+        let row_code_whir_construction_plan_identity_hash = row_code_whir_construction_plan
+            .canonical_identity_hash()
+            .map_err(|_| CommonProofGenerationInitializationError::RowCodeWhirConstructionPlan)?;
         let canonical_header_bytes =
             canonical_proof_object_header_bytes(canonical_application_statement_bytes)
                 .map_err(CommonProofGenerationInitializationError::Prover)?;
@@ -898,9 +948,9 @@ impl CommonProofGenerationStateMachine {
         );
         validate_generation_relation_trees(variant, &relation_trees)
             .map_err(CommonProofGenerationInitializationError::Prover)?;
-        let transcript_schedule = variant
-            .common_proof_transcript_schedule(relation_context)
-            .map_err(CommonProofGenerationInitializationError::Relation)?;
+        let transcript_schedule =
+            super::super::packed_fri_transcript_schedule(variant, relation_context)
+                .map_err(CommonProofGenerationInitializationError::Relation)?;
         let evaluation_domain = ProofEvaluationDomain::new(
             usize::try_from(variant.evaluation_domain_size()).map_err(|_| {
                 CommonProofGenerationInitializationError::Prover(
@@ -1018,6 +1068,7 @@ impl CommonProofGenerationStateMachine {
         Ok(Self {
             protocol_version,
             suite_identifier,
+            row_code_whir_construction_plan_identity_hash,
             application_statement_schema_identifier: validated_artifact
                 .application_statement_schema_identifier(),
             canonical_header_bytes,
@@ -1061,7 +1112,7 @@ impl CommonProofGenerationStateMachine {
             current_quotient_component: None,
             opening_points: Vec::new(),
             opening_batch_mask: None,
-            deep_evaluations: Vec::new(),
+            out_of_domain_evaluations: Vec::new(),
             opening_batch_coefficients: Vec::new(),
             initial_fri_polynomial: None,
             fri_domain: None,
@@ -1112,11 +1163,11 @@ impl CommonProofGenerationStateMachine {
             CommonProofGenerationPhase::MaterializingQuotientTrees { .. } => {
                 CommonProofGenerationStage::MaterializingQuotientTrees
             }
-            CommonProofGenerationPhase::DerivingDeepOpenings => {
-                CommonProofGenerationStage::DerivingDeepOpenings
+            CommonProofGenerationPhase::DerivingOutOfDomainOpenings => {
+                CommonProofGenerationStage::DerivingOutOfDomainOpenings
             }
-            CommonProofGenerationPhase::EvaluatingDeepOpenings { .. } => {
-                CommonProofGenerationStage::DerivingDeepOpenings
+            CommonProofGenerationPhase::EvaluatingOutOfDomainOpenings { .. } => {
+                CommonProofGenerationStage::DerivingOutOfDomainOpenings
             }
             CommonProofGenerationPhase::MaterializingOpeningMask => {
                 CommonProofGenerationStage::MaterializingOpeningMask
@@ -1208,7 +1259,7 @@ impl CommonProofGenerationStateMachine {
             && self.current_quotient_component.is_none()
             && self.opening_points.is_empty()
             && self.opening_batch_mask.is_none()
-            && self.deep_evaluations.is_empty()
+            && self.out_of_domain_evaluations.is_empty()
             && self.opening_batch_coefficients.is_empty()
             && self.initial_fri_polynomial.is_none()
             && self.fri_domain.is_none()
@@ -1258,16 +1309,16 @@ impl CommonProofGenerationStateMachine {
         }
 
         let (safe_boundary_ordinal, phase_tag, phase_ordinal) = match self.phase {
-            CommonProofGenerationPhase::DerivingApplicationColumns => (1, 1, 0),
-            CommonProofGenerationPhase::ConstructingQuotient => (2, 2, 0),
-            CommonProofGenerationPhase::DerivingDeepOpenings => (3, 3, 0),
-            CommonProofGenerationPhase::PreparingFri => (4, 4, 0),
+            CommonProofGenerationPhase::DerivingApplicationColumns => (0, 1, 0),
+            CommonProofGenerationPhase::ConstructingQuotient => (1, 2, 0),
+            CommonProofGenerationPhase::DerivingOutOfDomainOpenings => (2, 3, 0),
+            CommonProofGenerationPhase::PreparingFri => (3, 4, 0),
             CommonProofGenerationPhase::FoldingFri { next_fold_ordinal }
                 if next_fold_ordinal > 0
                     && next_fold_ordinal < self.transcript_schedule.fri_fold_count() =>
             {
                 (
-                    u32::from(next_fold_ordinal).checked_add(4)?,
+                    u32::from(next_fold_ordinal).checked_add(3)?,
                     5,
                     u32::from(next_fold_ordinal),
                 )
@@ -2357,7 +2408,7 @@ impl CommonProofGenerationStateMachine {
                 CommonProofReplayWriteContinuation::QuotientComponent => {}
                 CommonProofReplayWriteContinuation::OpeningBatchMask => {
                     self.opening_batch_mask = None;
-                    self.phase = CommonProofGenerationPhase::EvaluatingDeepOpenings {
+                    self.phase = CommonProofGenerationPhase::EvaluatingOutOfDomainOpenings {
                         next_claim_index: 0,
                     };
                 }
@@ -2394,7 +2445,7 @@ impl CommonProofGenerationStateMachine {
                     .accept_input_column(column_ordinal, polynomial)?;
                 self.phase = CommonProofGenerationPhase::DerivingAuxiliaryColumns;
             }
-            CommonProofReplayReadContinuation::DeepOpening { claim_index } => {
+            CommonProofReplayReadContinuation::OutOfDomainOpening { claim_index } => {
                 let claim = *self
                     .variant
                     .ordered_opening_claims()
@@ -2408,13 +2459,13 @@ impl CommonProofGenerationStateMachine {
                     )
                     .copied()
                     .ok_or(CommonProofProverError::InvalidOpening)?;
-                self.deep_evaluations
+                self.out_of_domain_evaluations
                     .push(evaluate_replay_polynomial_opening(
                         &claim,
                         &polynomial,
                         opening_point,
                     )?);
-                self.phase = CommonProofGenerationPhase::EvaluatingDeepOpenings {
+                self.phase = CommonProofGenerationPhase::EvaluatingOutOfDomainOpenings {
                     next_claim_index: claim_index
                         .checked_add(1)
                         .ok_or(CommonProofProverError::CountOverflow)?,
@@ -2461,8 +2512,8 @@ impl CommonProofGenerationStateMachine {
                     )
                     .copied()
                     .ok_or(CommonProofProverError::InvalidOpening)?;
-                let deep_evaluation = *self
-                    .deep_evaluations
+                let out_of_domain_evaluation = *self
+                    .out_of_domain_evaluations
                     .get(claim_index)
                     .ok_or(CommonProofProverError::InvalidOpening)?;
                 let batching_coefficient = *self
@@ -2478,7 +2529,7 @@ impl CommonProofGenerationStateMachine {
                     &claim,
                     polynomial,
                     opening_point,
-                    deep_evaluation,
+                    out_of_domain_evaluation,
                     batching_coefficient,
                 )?;
                 self.phase = CommonProofGenerationPhase::ConstructingInitialFri {
@@ -3169,6 +3220,7 @@ impl CommonProofGenerationStateMachine {
                 let mut transcript = CommonProofTranscript::new(
                     self.protocol_version,
                     self.suite_identifier,
+                    self.row_code_whir_construction_plan_identity_hash,
                     self.application_statement_schema_identifier,
                     &self.canonical_header_bytes,
                     self.transcript_schedule.clone(),
@@ -3192,7 +3244,7 @@ impl CommonProofGenerationStateMachine {
                 }
                 let application_challenges = sample_relation_application_challenges(
                     &mut transcript,
-                    &self.transcript_schedule,
+                    self.transcript_schedule.relation_prefix_schedule(),
                 )
                 .map_err(CommonProofGenerationError::Transcript)?;
                 let auxiliary_column_synthesis_cursor =
@@ -3649,7 +3701,7 @@ impl CommonProofGenerationStateMachine {
                     let Some(component) = component else {
                         self.quotient_component_cursor = None;
                         self.application_challenges.clear();
-                        self.phase = CommonProofGenerationPhase::DerivingDeepOpenings;
+                        self.phase = CommonProofGenerationPhase::DerivingOutOfDomainOpenings;
                         return Ok(CommonProofGenerationPoll::ArithmeticStepCompleted);
                     };
                     self.current_quotient_component = Some(component);
@@ -3686,38 +3738,43 @@ impl CommonProofGenerationStateMachine {
                 .map_err(CommonProofGenerationError::Prover)?;
                 Ok(CommonProofGenerationPoll::ArithmeticStepCompleted)
             }
-            CommonProofGenerationPhase::DerivingDeepOpenings => {
+            CommonProofGenerationPhase::DerivingOutOfDomainOpenings => {
                 let transcript =
                     self.transcript
                         .as_mut()
                         .ok_or(CommonProofGenerationError::Prover(
                             CommonProofProverError::InvalidInput,
                         ))?;
-                let mut deep_points = Vec::new();
-                for point_ordinal in 0..self.transcript_schedule.deep_point_count() {
+                let mut out_of_domain_points = Vec::new();
+                for point_ordinal in 0..self.transcript_schedule.out_of_domain_point_count() {
                     let mut relation_error = None;
-                    let point = transcript.sample_deep_point(point_ordinal, |candidate| match self
-                        .variant
-                        .deep_point_candidate_is_forbidden(
-                            &self.relation_context,
+                    let point =
+                        transcript.sample_out_of_domain_point(
                             point_ordinal,
-                            candidate,
-                            &deep_points,
-                        ) {
-                        Ok(forbidden) => forbidden,
-                        Err(error) => {
-                            relation_error = Some(error);
-                            true
-                        }
-                    });
+                            |candidate| match self
+                                .variant
+                                .out_of_domain_point_candidate_is_forbidden(
+                                    &self.relation_context,
+                                    point_ordinal,
+                                    candidate,
+                                    &out_of_domain_points,
+                                ) {
+                                Ok(forbidden) => forbidden,
+                                Err(error) => {
+                                    relation_error = Some(error);
+                                    true
+                                }
+                            },
+                        );
                     if let Some(error) = relation_error {
                         return Err(CommonProofGenerationError::Relation(error));
                     }
-                    deep_points.push(point.map_err(CommonProofGenerationError::Transcript)?);
+                    out_of_domain_points
+                        .push(point.map_err(CommonProofGenerationError::Transcript)?);
                 }
                 let opening_points = self
                     .variant
-                    .derive_opening_points(&self.relation_context, &deep_points)
+                    .derive_opening_points(&self.relation_context, &out_of_domain_points)
                     .map_err(CommonProofGenerationError::Relation)?;
                 let opening_batch_mask = construct_opening_batch_mask(
                     &self.variant,
@@ -3728,8 +3785,8 @@ impl CommonProofGenerationStateMachine {
                 .map_err(map_private_coin_generation_error)?;
                 self.opening_points = opening_points;
                 self.opening_batch_mask = opening_batch_mask;
-                self.deep_evaluations.clear();
-                self.deep_evaluations
+                self.out_of_domain_evaluations.clear();
+                self.out_of_domain_evaluations
                     .try_reserve_exact(self.variant.ordered_opening_claims().len())
                     .map_err(|_| {
                         CommonProofGenerationError::Prover(
@@ -3749,20 +3806,22 @@ impl CommonProofGenerationStateMachine {
                             CommonProofProverError::InvalidMask,
                         ));
                     }
-                    self.phase = CommonProofGenerationPhase::EvaluatingDeepOpenings {
+                    self.phase = CommonProofGenerationPhase::EvaluatingOutOfDomainOpenings {
                         next_claim_index: 0,
                     };
                 }
                 Ok(CommonProofGenerationPoll::ArithmeticStepCompleted)
             }
-            CommonProofGenerationPhase::EvaluatingDeepOpenings { next_claim_index } => {
+            CommonProofGenerationPhase::EvaluatingOutOfDomainOpenings { next_claim_index } => {
                 let Some(claim) = self
                     .variant
                     .ordered_opening_claims()
                     .get(next_claim_index)
                     .copied()
                 else {
-                    if self.deep_evaluations.len() != self.variant.ordered_opening_claims().len() {
+                    if self.out_of_domain_evaluations.len()
+                        != self.variant.ordered_opening_claims().len()
+                    {
                         return Err(CommonProofGenerationError::Prover(
                             CommonProofProverError::InvalidOpening,
                         ));
@@ -3772,7 +3831,7 @@ impl CommonProofGenerationStateMachine {
                         .ok_or(CommonProofGenerationError::Prover(
                             CommonProofProverError::InvalidInput,
                         ))?
-                        .absorb_deep_evaluations(&self.deep_evaluations)
+                        .absorb_out_of_domain_evaluations(&self.out_of_domain_evaluations)
                         .map_err(CommonProofGenerationError::Transcript)?;
                     self.phase = CommonProofGenerationPhase::MaterializingOpeningMask;
                     return Ok(CommonProofGenerationPoll::ArithmeticStepCompleted);
@@ -3780,7 +3839,7 @@ impl CommonProofGenerationStateMachine {
                 self.prepare_replay_polynomial_reader(
                     replay_polynomial_key_for_claim(&claim)
                         .map_err(CommonProofGenerationError::Prover)?,
-                    CommonProofReplayReadContinuation::DeepOpening {
+                    CommonProofReplayReadContinuation::OutOfDomainOpening {
                         claim_index: next_claim_index,
                     },
                 )
@@ -3850,7 +3909,7 @@ impl CommonProofGenerationStateMachine {
                     );
                 }
                 if opening_batch_coefficients.len() != self.variant.ordered_opening_claims().len()
-                    || self.deep_evaluations.len() != opening_batch_coefficients.len()
+                    || self.out_of_domain_evaluations.len() != opening_batch_coefficients.len()
                 {
                     return Err(CommonProofGenerationError::Prover(
                         CommonProofProverError::InvalidOpening,
@@ -4013,13 +4072,13 @@ impl CommonProofGenerationStateMachine {
                     .interpolate_extension_polynomial_in_place(&mut terminal_coefficients)
                     .map_err(CommonProofProverError::from)
                     .map_err(CommonProofGenerationError::Prover)?;
-                let terminal_coefficient_count = usize::try_from(
-                    self.relation_context
-                        .final_polynomial_degree_bound_exclusive,
-                )
-                .map_err(|_| {
-                    CommonProofGenerationError::Prover(CommonProofProverError::CountOverflow)
-                })?;
+                let terminal_coefficient_count =
+                    usize::try_from(self.transcript_schedule.terminal_coefficient_count())
+                        .map_err(|_| {
+                            CommonProofGenerationError::Prover(
+                                CommonProofProverError::CountOverflow,
+                            )
+                        })?;
                 if terminal_coefficient_count == 0
                     || extension_polynomial_degree(&terminal_coefficients)
                         .is_some_and(|degree| degree >= terminal_coefficient_count)
@@ -4072,7 +4131,7 @@ impl CommonProofGenerationStateMachine {
                     &self.canonical_header_bytes,
                     &self.catalog,
                     &self.tree_roots,
-                    &self.deep_evaluations,
+                    &self.out_of_domain_evaluations,
                     &terminal_coefficients,
                     &self.transcript_schedule,
                 )
@@ -4087,7 +4146,7 @@ impl CommonProofGenerationStateMachine {
                 self.sorted_query_representatives = sorted_query_representatives;
                 self.query_section_byte_length = Some(query_section_byte_length);
                 self.pending_output_fragment = Some(prefix_sink.finish());
-                self.deep_evaluations.clear();
+                self.out_of_domain_evaluations.clear();
                 self.phase = CommonProofGenerationPhase::EmittingPrefix;
                 Ok(CommonProofGenerationPoll::ArithmeticStepCompleted)
             }
@@ -4435,7 +4494,7 @@ impl CommonProofGenerationStateMachine {
         self.current_quotient_component = None;
         self.opening_points = Vec::new();
         self.opening_batch_mask = None;
-        self.deep_evaluations = Vec::new();
+        self.out_of_domain_evaluations = Vec::new();
         self.opening_batch_coefficients = Vec::new();
         self.initial_fri_polynomial = None;
         self.fri_domain = None;
@@ -4527,6 +4586,9 @@ fn map_generation_initialization_error<StorageError, CoinError, SinkError>(
         CommonProofGenerationInitializationError::Relation(error) => {
             CommonProofGenerationError::Relation(error)
         }
+        CommonProofGenerationInitializationError::RowCodeWhirConstructionPlan => {
+            CommonProofGenerationError::RowCodeWhirConstructionPlan
+        }
         CommonProofGenerationInitializationError::Body(error) => {
             CommonProofGenerationError::Body(error)
         }
@@ -4551,7 +4613,7 @@ fn map_bounded_fragment_error<StorageError, CoinError, SinkError>(
 }
 
 #[cfg(test)]
-pub(crate) fn generate_common_proof<Storage, Coins, Sink>(
+pub(crate) fn generate_checked_fixture_common_proof<Storage, Coins, Sink>(
     input: CommonProofGenerationInput<'_>,
     storage: &mut Storage,
     coins: &mut Coins,
@@ -4562,7 +4624,7 @@ where
     Coins: CommonProofPrivateCoinSource,
     Sink: CommonProofByteSink,
 {
-    let mut state_machine = CommonProofGenerationStateMachine::new(input)
+    let mut state_machine = CommonProofGenerationStateMachine::new_for_checked_fixture(input)
         .map_err(map_generation_initialization_error)?;
     let generation_result = loop {
         match state_machine.poll(storage, coins, sink) {

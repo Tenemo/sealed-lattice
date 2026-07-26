@@ -22,7 +22,7 @@ use crate::{
             KLLPS_DENOMINATOR_CLEARING_FACTOR, selected_factor_four_flooding_bound,
         },
     },
-    foundation::FOUNDATION_PROFILE,
+    foundation::{FOUNDATION_PROFILE, Hash512},
 };
 
 use super::profile::FIRST_PROFILE_APPLICATION_FAMILIES;
@@ -33,17 +33,19 @@ use super::{
     compile_ballot_validity_relation,
 };
 use super::{
-    COMMITTED_MATERIAL_PROOF_UNIQUE_QUERY_COUNT, PROOF_BASE_FIELD_MAXIMUM_TWO_ADIC_GENERATOR,
-    PROOF_BASE_FIELD_MODULUS, PROOF_CHALLENGE_EXTENSION_DEGREE, PROOF_DEEP_POINT_COUNT,
-    PROOF_EVALUATION_BLOWUP_FACTOR, PROOF_EVALUATION_COSET_OFFSET,
-    PROOF_FINAL_POLYNOMIAL_DEGREE_BOUND_EXCLUSIVE,
+    PROOF_BASE_FIELD_MAXIMUM_TWO_ADIC_GENERATOR, PROOF_BASE_FIELD_MODULUS,
+    PROOF_CHALLENGE_EXTENSION_DEGREE, PROOF_EVALUATION_COSET_OFFSET,
     PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT, PROOF_NON_NATIVE_ALPHA_REPETITION_COUNT,
-    PROOF_NON_NATIVE_THETA_REPETITION_COUNT, PROOF_UNIQUE_QUERY_COUNT, RelationPlanCheckContext,
-    ResolvedSuiteModulus, SuiteModulusReference,
+    PROOF_NON_NATIVE_THETA_REPETITION_COUNT, PROOF_OUT_OF_DOMAIN_POINT_COUNT,
+    RelationPlanCheckContext, ResolvedSuiteModulus, SuiteModulusReference,
+    row_code_whir::{
+        ROW_CODE_WHIR_EVALUATION_DOMAIN_SIZE, ROW_CODE_WHIR_OPENING_DEGREE_BOUND_EXCLUSIVE,
+        ROW_CODE_WHIR_PHASE_COLUMN_QUERY_COORDINATE_COUNT,
+    },
 };
 
 use super::{
-    CollectivePublicKeyAggregatePlanInput, CommittedMaterialProfile,
+    BoundTreeConstructionKind, CollectivePublicKeyAggregatePlanInput, CommittedMaterialProfile,
     CommittedMaterialRelationPlanInput, CompiledRelationPlan, CompiledTargetReleaseRelation,
     EvaluatorKeyAggregateEntryPlanInput, EvaluatorKeyAggregatePlanInput,
     EvaluatorKeyAggregateVariantInput, GaloisKeyShareRelationEntryInput,
@@ -69,16 +71,16 @@ use super::profile::FirstProfileRootTopology;
 #[cfg(test)]
 use crate::bgv::evaluator::program::selected_evaluator_program_set;
 
-pub(super) const SELECTED_OPENING_DEGREE_BOUND_EXCLUSIVE: u64 = 262_144;
-pub(super) const SELECTED_EVALUATION_DOMAIN_SIZE: u64 =
-    SELECTED_OPENING_DEGREE_BOUND_EXCLUSIVE * PROOF_EVALUATION_BLOWUP_FACTOR as u64;
+pub(super) const SELECTED_OPENING_DEGREE_BOUND_EXCLUSIVE: u64 =
+    ROW_CODE_WHIR_OPENING_DEGREE_BOUND_EXCLUSIVE;
+pub(super) const SELECTED_EVALUATION_DOMAIN_SIZE: u64 = ROW_CODE_WHIR_EVALUATION_DOMAIN_SIZE;
 pub(super) const SELECTED_PUBLIC_POLYNOMIAL_COLUMN_DEGREE_BOUND_EXCLUSIVE: u64 =
     POLYNOMIAL_DEGREE as u64 / 2;
 const SELECTED_QUOTIENT_COMPONENT_COUNT: u32 = 8;
 const SELECTED_PUBLIC_AGGREGATE_QUOTIENT_COMPONENT_COUNT: u32 = 9;
 const SELECTED_PUBLIC_AGGREGATE_QUOTIENT_COMPONENT_DEGREE_BOUND_EXCLUSIVE: u64 =
     POLYNOMIAL_DEGREE as u64 / 2;
-const SELECTED_QUOTIENT_COMPONENT_DEGREE_BOUND_EXCLUSIVE: u64 = 33_884;
+const SELECTED_QUOTIENT_COMPONENT_DEGREE_BOUND_EXCLUSIVE: u64 = 34_050;
 const SELECTED_COMMITTED_MATERIAL_QUOTIENT_COMPONENT_COUNT: u32 = 3;
 const RESERVED_BALLOT_SLOT_RULE: u16 = 1;
 const NON_NATIVE_IDENTITY_COMPILER_FACTOR: u32 = 12;
@@ -105,6 +107,24 @@ struct SelectedNonNativeIdentitySoundnessRow {
     sampler_accounting: CommonProofApplicationChallengeSamplerAccounting,
 }
 
+fn expected_product_sampler_total_xof_query_count_ceiling(
+    sampler_accounting: CommonProofApplicationChallengeSamplerAccounting,
+) -> Result<u64, ProofProfileError> {
+    let oracle_answer_byte_length =
+        u64::try_from(Hash512::BYTE_LENGTH).map_err(|_| ProofProfileError::CountOverflow)?;
+    let candidate_byte_length = sampler_accounting.candidate_byte_length();
+    if candidate_byte_length == 0
+        || !candidate_byte_length.is_multiple_of(oracle_answer_byte_length)
+    {
+        return Err(ProofProfileError::InvalidSchedule);
+    }
+    let candidate_block_count = candidate_byte_length / oracle_answer_byte_length;
+    u64::from(sampler_accounting.maximum_candidate_draw_count())
+        .checked_mul(candidate_block_count)
+        .and_then(|candidate_query_count| candidate_query_count.checked_add(1))
+        .ok_or(ProofProfileError::CountOverflow)
+}
+
 impl SelectedNonNativeIdentitySoundnessRow {
     fn new(
         application_statement_schema_identifier: u16,
@@ -120,7 +140,7 @@ impl SelectedNonNativeIdentitySoundnessRow {
             || sampler_accounting.maximum_candidate_draw_count()
                 != PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT
             || sampler_accounting.total_xof_query_count_ceiling()
-                != u64::from(PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT) + 1
+                != expected_product_sampler_total_xof_query_count_ceiling(sampler_accounting)?
         {
             return Err(ProofProfileError::InvalidSchedule);
         }
@@ -407,7 +427,7 @@ fn selected_non_native_identity_soundness_ledger(
                 .ok_or(ProofProfileError::InvalidSchedule)?;
         for variant in plan.variants() {
             let sampler_rows = variant
-                .common_proof_transcript_schedule(&context)?
+                .common_proof_relation_prefix_schedule(&context)?
                 .ordered_application_challenge_sampler_accounting()
                 .map_err(|_| ProofProfileError::InvalidSchedule)?;
             let starting_row_count = soundness_rows.len();
@@ -455,25 +475,6 @@ fn selected_non_native_identity_soundness_ledger(
     Ok(soundness_rows)
 }
 
-fn fri_fold_count_for_degree_bounds(
-    opening_degree_bound_exclusive: u64,
-    final_degree_bound_exclusive: u32,
-) -> Option<u16> {
-    let final_degree_bound_exclusive = u64::from(final_degree_bound_exclusive);
-    if opening_degree_bound_exclusive <= final_degree_bound_exclusive
-        || final_degree_bound_exclusive <= 1
-    {
-        return None;
-    }
-    let mut current_degree_bound = opening_degree_bound_exclusive;
-    let mut fold_count = 0_u16;
-    while current_degree_bound > final_degree_bound_exclusive {
-        current_degree_bound = current_degree_bound.checked_add(1)?.checked_div(2)?;
-        fold_count = fold_count.checked_add(1)?;
-    }
-    Some(fold_count)
-}
-
 pub(crate) fn selected_relation_plan_check_context(
     application_statement_schema_identifier: u16,
 ) -> Option<RelationPlanCheckContext> {
@@ -481,17 +482,6 @@ pub(crate) fn selected_relation_plan_check_context(
         uses_committed_material_proof_schedule(application_statement_schema_identifier)?;
     let uses_public_aggregate_quotient_geometry =
         uses_public_aggregate_quotient_geometry(application_statement_schema_identifier);
-    let evaluation_blowup_factor = PROOF_EVALUATION_BLOWUP_FACTOR;
-    let opening_degree_bound_exclusive = SELECTED_OPENING_DEGREE_BOUND_EXCLUSIVE;
-    if opening_degree_bound_exclusive.checked_mul(u64::from(evaluation_blowup_factor))?
-        != SELECTED_EVALUATION_DOMAIN_SIZE
-    {
-        return None;
-    }
-    let fri_fold_count = fri_fold_count_for_degree_bounds(
-        opening_degree_bound_exclusive,
-        PROOF_FINAL_POLYNOMIAL_DEGREE_BOUND_EXCLUSIVE,
-    )?;
     let mut resolved_moduli = DATA_PRIMES
         .iter()
         .copied()
@@ -538,14 +528,13 @@ pub(crate) fn selected_relation_plan_check_context(
         base_field_modulus: PROOF_BASE_FIELD_MODULUS,
         challenge_extension_degree: u16::try_from(PROOF_CHALLENGE_EXTENSION_DEGREE)
             .expect("the selected challenge extension degree fits u16"),
-        evaluation_blowup_factor,
         evaluation_domain_generator: modular_power(
             PROOF_BASE_FIELD_MAXIMUM_TWO_ADIC_GENERATOR,
             (1_u64 << 32) / SELECTED_EVALUATION_DOMAIN_SIZE,
             PROOF_BASE_FIELD_MODULUS,
         ),
         evaluation_coset_offset: PROOF_EVALUATION_COSET_OFFSET,
-        deep_point_count: PROOF_DEEP_POINT_COUNT,
+        out_of_domain_point_count: PROOF_OUT_OF_DOMAIN_POINT_COUNT,
         quotient_component_count: if uses_committed_material_schedule {
             SELECTED_COMMITTED_MATERIAL_QUOTIENT_COMPONENT_COUNT
         } else if uses_public_aggregate_quotient_geometry {
@@ -560,13 +549,7 @@ pub(crate) fn selected_relation_plan_check_context(
         } else {
             SELECTED_QUOTIENT_COMPONENT_DEGREE_BOUND_EXCLUSIVE
         },
-        fri_fold_count,
-        final_polynomial_degree_bound_exclusive: PROOF_FINAL_POLYNOMIAL_DEGREE_BOUND_EXCLUSIVE,
-        unique_query_count: if uses_committed_material_schedule {
-            COMMITTED_MATERIAL_PROOF_UNIQUE_QUERY_COUNT
-        } else {
-            PROOF_UNIQUE_QUERY_COUNT
-        },
+        phase_column_query_coordinate_count: ROW_CODE_WHIR_PHASE_COLUMN_QUERY_COORDINATE_COUNT,
         non_native_theta_repetition_count: PROOF_NON_NATIVE_THETA_REPETITION_COUNT,
         non_native_alpha_repetition_count: PROOF_NON_NATIVE_ALPHA_REPETITION_COUNT,
         maximum_fiat_shamir_candidate_draws_per_output:
@@ -611,8 +594,49 @@ pub(crate) fn selected_committed_material_profile()
         POLYNOMIAL_DEGREE,
         usize::try_from(SELECTED_EVALUATION_DOMAIN_SIZE)
             .map_err(|_| ProofProfileError::CountOverflow)?,
+        usize::try_from(SELECTED_OPENING_DEGREE_BOUND_EXCLUSIVE)
+            .map_err(|_| ProofProfileError::CountOverflow)?,
     )
     .map_err(|_| ProofProfileError::InvalidRelationPlan)
+}
+
+pub(crate) fn selected_bound_root_source_trace_domain_size(
+    application_statement_schema_identifier: u16,
+    construction_kind: BoundTreeConstructionKind,
+    relation_trace_domain_size: u64,
+    evaluation_domain_size: u64,
+) -> Result<u64, ProofProfileError> {
+    if relation_trace_domain_size == 0 || evaluation_domain_size != SELECTED_EVALUATION_DOMAIN_SIZE
+    {
+        return Err(ProofProfileError::InvalidRelationPlan);
+    }
+    if construction_kind == BoundTreeConstructionKind::SetupPolynomial {
+        return Ok(relation_trace_domain_size);
+    }
+
+    let committed_material_profile = selected_committed_material_profile()?;
+    let physical_trace_domain_size = u64::try_from(committed_material_profile.trace_domain_size())
+        .map_err(|_| ProofProfileError::CountOverflow)?;
+    let committed_material_evaluation_domain_size =
+        u64::try_from(committed_material_profile.evaluation_domain_size())
+            .map_err(|_| ProofProfileError::CountOverflow)?;
+    let expected_relation_trace_domain_size = match application_statement_schema_identifier {
+        ProofApplicationSlotCeilings::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER
+        | ProofApplicationSlotCeilings::AGGREGATE_THRESHOLD_SHARE_STATEMENT_SCHEMA_IDENTIFIER => {
+            selected_committed_material_relation_plan_input()?.relation_trace_domain_size()?
+        }
+        ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER
+        | ProofApplicationSlotCeilings::TARGET_SHARE_PROOF_STATEMENT_SCHEMA_IDENTIFIER => {
+            physical_trace_domain_size
+        }
+        _ => return Err(ProofProfileError::InvalidRootTopology),
+    };
+    if relation_trace_domain_size != expected_relation_trace_domain_size
+        || evaluation_domain_size != committed_material_evaluation_domain_size
+    {
+        return Err(ProofProfileError::InvalidRelationPlan);
+    }
+    Ok(physical_trace_domain_size)
 }
 
 pub(crate) fn selected_target_decryption_flooding_bound() -> Result<BigUint, ProofProfileError> {
@@ -687,11 +711,8 @@ fn selected_committed_material_quotient_component_degree_bound_exclusive()
         .checked_add(rounded_mask_degree)
         .ok_or(ProofProfileError::CountOverflow)?;
     let minimum_telescoping_mask_degree_bound_exclusive =
-        u64::from(COMMITTED_MATERIAL_PROOF_UNIQUE_QUERY_COUNT)
-            .checked_mul(2)
-            .and_then(|query_coordinate_count| {
-                query_coordinate_count.checked_add(u64::from(PROOF_DEEP_POINT_COUNT))
-            })
+        u64::from(ROW_CODE_WHIR_PHASE_COLUMN_QUERY_COORDINATE_COUNT)
+            .checked_add(u64::from(PROOF_OUT_OF_DOMAIN_POINT_COUNT))
             .ok_or(ProofProfileError::CountOverflow)?;
     quotient_decomposition_stride
         .checked_add(minimum_telescoping_mask_degree_bound_exclusive)
@@ -1175,7 +1196,76 @@ mod tests {
     use super::super::relation_plan::{
         BoundTreeConstructionKind, RelationColumnOrigin, RelationMaskKind, RelationTreeDescriptor,
     };
+    use super::super::transcript::{
+        CommonProofApplicationChallengeGroup, CommonProofPrivacyMode,
+        CommonProofRelationPrefixSchedule,
+    };
     use super::*;
+
+    fn assert_fixed_block_sampler_accounting(
+        sampler_accounting: CommonProofApplicationChallengeSamplerAccounting,
+        expected_candidate_block_count: u64,
+    ) {
+        let oracle_answer_byte_length = sampler_accounting.maximum_oracle_answer_byte_length();
+        assert_eq!(
+            oracle_answer_byte_length,
+            u64::try_from(Hash512::BYTE_LENGTH).expect("the oracle answer length fits u64"),
+        );
+        assert_eq!(
+            sampler_accounting.candidate_byte_length(),
+            expected_candidate_block_count * oracle_answer_byte_length,
+        );
+        assert_eq!(
+            sampler_accounting.maximum_candidate_draw_count(),
+            PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT,
+        );
+        assert_eq!(sampler_accounting.chain_handle_xof_query_count(), 1);
+        let expected_candidate_xof_query_count =
+            u64::from(sampler_accounting.maximum_candidate_draw_count())
+                * expected_candidate_block_count;
+        assert_eq!(
+            sampler_accounting.candidate_xof_query_count_ceiling(),
+            expected_candidate_xof_query_count,
+        );
+        assert_eq!(
+            sampler_accounting.total_xof_query_count_ceiling(),
+            sampler_accounting.chain_handle_xof_query_count() + expected_candidate_xof_query_count,
+        );
+        assert_eq!(
+            sampler_accounting.total_xof_query_count_ceiling(),
+            expected_product_sampler_total_xof_query_count_ceiling(sampler_accounting)
+                .expect("the fixed-block sampler query ceiling derives"),
+        );
+    }
+
+    #[test]
+    fn product_sampler_query_ceiling_scales_with_rounded_candidate_blocks() {
+        let group = CommonProofApplicationChallengeGroup::new(
+            CommonProofChallenge::Alpha { modulus_ordinal: 0 },
+            2,
+            513,
+        )
+        .expect("the 513-bit product sampler derives");
+        let schedule = CommonProofRelationPrefixSchedule::new(
+            Vec::new(),
+            vec![group],
+            Vec::new(),
+            1,
+            1,
+            1,
+            1,
+            PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT,
+            CommonProofPrivacyMode::PublicOnly,
+        )
+        .expect("the two-block sampler schedule is valid");
+        let [sampler_accounting] = schedule
+            .ordered_application_challenge_sampler_accounting()
+            .expect("the two-block sampler accounting derives")
+            .try_into()
+            .expect("the schedule has exactly one application sampler");
+
+        assert_fixed_block_sampler_accounting(sampler_accounting, 2);
+    }
 
     #[test]
     fn conservative_theta_screen_requires_five_repetitions_independently_of_alpha() {
@@ -1324,6 +1414,8 @@ mod tests {
             .collect::<Vec<_>>();
         let rows = selected_non_native_identity_soundness_ledger(&compiled_plans)
             .expect("selected non-native identity soundness ledger");
+        let accepted_coordinate_byte_length =
+            u64::try_from(std::mem::size_of::<u64>()).expect("the coordinate width fits u64");
 
         let ballot_theta_row = rows
             .iter()
@@ -1366,39 +1458,13 @@ mod tests {
             PROOF_BASE_FIELD_MODULUS
         );
         assert_eq!(ballot_theta_row.sampler_accounting.coordinate_count(), 5);
-        assert_eq!(
-            ballot_theta_row.sampler_accounting.candidate_byte_length(),
-            40
-        );
+        assert_fixed_block_sampler_accounting(ballot_theta_row.sampler_accounting, 1);
         assert_eq!(
             ballot_theta_row
                 .sampler_accounting
                 .accepted_vector_byte_length(),
-            40
-        );
-        assert_eq!(
-            ballot_theta_row
-                .sampler_accounting
-                .maximum_candidate_draw_count(),
-            128
-        );
-        assert_eq!(
-            ballot_theta_row
-                .sampler_accounting
-                .chain_handle_xof_query_count(),
-            1
-        );
-        assert_eq!(
-            ballot_theta_row
-                .sampler_accounting
-                .candidate_xof_query_count_ceiling(),
-            128
-        );
-        assert_eq!(
-            ballot_theta_row
-                .sampler_accounting
-                .total_xof_query_count_ceiling(),
-            129
+            u64::from(ballot_theta_row.sampler_accounting.coordinate_count())
+                * accepted_coordinate_byte_length,
         );
         assert_eq!(
             minimum_non_native_identity_repetition_count(
@@ -1439,36 +1505,13 @@ mod tests {
         );
         assert_eq!(vss_alpha_row.sampler_accounting.modulus(), DATA_PRIMES[0]);
         assert_eq!(vss_alpha_row.sampler_accounting.coordinate_count(), 7);
-        assert_eq!(vss_alpha_row.sampler_accounting.candidate_byte_length(), 28);
+        assert_fixed_block_sampler_accounting(vss_alpha_row.sampler_accounting, 1);
         assert_eq!(
             vss_alpha_row
                 .sampler_accounting
                 .accepted_vector_byte_length(),
-            56
-        );
-        assert_eq!(
-            vss_alpha_row
-                .sampler_accounting
-                .maximum_candidate_draw_count(),
-            128
-        );
-        assert_eq!(
-            vss_alpha_row
-                .sampler_accounting
-                .chain_handle_xof_query_count(),
-            1
-        );
-        assert_eq!(
-            vss_alpha_row
-                .sampler_accounting
-                .candidate_xof_query_count_ceiling(),
-            128
-        );
-        assert_eq!(
-            vss_alpha_row
-                .sampler_accounting
-                .total_xof_query_count_ceiling(),
-            129
+            u64::from(vss_alpha_row.sampler_accounting.coordinate_count())
+                * accepted_coordinate_byte_length,
         );
         assert_eq!(
             minimum_non_native_identity_repetition_count(DATA_PRIMES[0], &[9; 6], 120, 184),
@@ -1482,14 +1525,13 @@ mod tests {
             ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER,
         )
         .expect("selected ordinary proof context");
-        assert_eq!(context.deep_point_count, 1);
+        assert_eq!(context.out_of_domain_point_count, 1);
+        assert_eq!(context.phase_column_query_coordinate_count, 387);
         assert_eq!(
             context.evaluation_domain_generator,
             17_654_865_857_378_133_588
         );
-        assert_eq!(context.fri_fold_count, 10);
-        assert_eq!(context.evaluation_blowup_factor, 8);
-        assert_eq!(context.unique_query_count, 168);
+        assert_eq!(context.quotient_component_degree_bound_exclusive, 34_050);
         assert_eq!(
             context.resolved_moduli.len(),
             DATA_PRIMES.len()
@@ -1503,6 +1545,8 @@ mod tests {
                 POLYNOMIAL_DEGREE,
                 usize::try_from(SELECTED_EVALUATION_DOMAIN_SIZE)
                     .expect("the selected evaluation domain fits usize"),
+                usize::try_from(SELECTED_OPENING_DEGREE_BOUND_EXCLUSIVE)
+                    .expect("the selected opening bound fits usize"),
             )
             .expect("persistent material profile on the consuming domain");
         assert_eq!(
@@ -1523,9 +1567,11 @@ mod tests {
             ProofApplicationSlotCeilings::VSS_SHARE_LINKAGE_STATEMENT_SCHEMA_IDENTIFIER,
         )
         .expect("selected committed-material proof context");
-        assert_eq!(committed_material_context.evaluation_blowup_factor, 8);
-        assert_eq!(committed_material_context.unique_query_count, 192);
-        assert_eq!(committed_material_context.fri_fold_count, 10);
+        assert_eq!(committed_material_context.out_of_domain_point_count, 1);
+        assert_eq!(
+            committed_material_context.phase_column_query_coordinate_count,
+            387
+        );
         assert_eq!(committed_material_context.quotient_component_count, 3);
         assert_eq!(
             committed_material_context.quotient_component_degree_bound_exclusive,
@@ -1534,7 +1580,7 @@ mod tests {
         );
         assert_eq!(
             committed_material_context.quotient_component_degree_bound_exclusive,
-            68_652
+            68_655
         );
         assert_eq!(
             committed_material_context.evaluation_domain_generator,
@@ -1547,9 +1593,11 @@ mod tests {
         ] {
             let public_aggregate_context = selected_relation_plan_check_context(family)
                 .expect("selected public-aggregate proof context");
-            assert_eq!(public_aggregate_context.evaluation_blowup_factor, 8);
-            assert_eq!(public_aggregate_context.unique_query_count, 168);
-            assert_eq!(public_aggregate_context.fri_fold_count, 10);
+            assert_eq!(public_aggregate_context.out_of_domain_point_count, 1);
+            assert_eq!(
+                public_aggregate_context.phase_column_query_coordinate_count,
+                387
+            );
             assert_eq!(public_aggregate_context.quotient_component_count, 9);
             assert_eq!(
                 public_aggregate_context.quotient_component_degree_bound_exclusive,
@@ -1585,6 +1633,56 @@ mod tests {
         assert_eq!(one_fewer_component_capacity, 131_072);
         assert!(quotient_coefficient_count > one_fewer_component_capacity);
         assert!(quotient_coefficient_count <= quotient_capacity);
+    }
+
+    #[test]
+    fn selected_secret_relation_masks_match_row_code_phase_geometry() {
+        let same_secret_context = selected_relation_plan_check_context(
+            ProofApplicationSlotCeilings::SAME_SECRET_STATEMENT_SCHEMA_IDENTIFIER,
+        )
+        .expect("selected same-secret context");
+        let same_secret_plan = compile_same_secret_relation_plan(
+            &selected_same_secret_relation_plan_input()
+                .expect("selected same-secret relation input"),
+            &same_secret_context,
+        )
+        .expect("selected same-secret relation plan");
+        let same_secret_variant = same_secret_plan
+            .select_variant(None, None)
+            .expect("selected same-secret variant");
+        assert_eq!(
+            same_secret_variant.quotient_decomposition_stride(&same_secret_context),
+            Ok(17_266)
+        );
+        assert!(same_secret_variant.ordered_masks().iter().all(|mask| {
+            match mask.mask_kind() {
+                RelationMaskKind::Trace => mask.mask_degree_bound_exclusive() == 784,
+                RelationMaskKind::Telescoping => mask.mask_degree_bound_exclusive() == 16_784,
+                RelationMaskKind::OpeningBatch => mask.mask_degree_bound_exclusive() == 262_143,
+            }
+        }));
+
+        let ballot_context = selected_relation_plan_check_context(
+            ProofApplicationSlotCeilings::BALLOT_VALIDITY_STATEMENT_SCHEMA_IDENTIFIER,
+        )
+        .expect("selected ballot context");
+        let ballot_compilation = selected_ballot_validity_relation_compilation()
+            .expect("selected ballot relation compilation");
+        let ballot_variant = ballot_compilation
+            .relation_plan()
+            .select_variant(None, None)
+            .expect("selected ballot variant");
+        assert_eq!(
+            ballot_variant.quotient_decomposition_stride(&ballot_context),
+            Ok(33_662)
+        );
+        assert!(ballot_variant.ordered_masks().iter().all(|mask| {
+            match mask.mask_kind() {
+                RelationMaskKind::Trace => mask.mask_degree_bound_exclusive() == 794,
+                RelationMaskKind::Telescoping => mask.mask_degree_bound_exclusive() == 388,
+                RelationMaskKind::OpeningBatch => mask.mask_degree_bound_exclusive() == 262_143,
+            }
+        }));
     }
 
     #[test]
@@ -1741,17 +1839,16 @@ mod tests {
         assert_eq!(share_linkage.trace_domain_size(), 65_536);
         assert_eq!(share_linkage.opening_degree_bound_exclusive(), 262_144);
         assert_eq!(share_linkage.evaluation_domain_size(), 2_097_152);
-        assert_eq!(context.evaluation_blowup_factor, 8);
-        assert_eq!(context.fri_fold_count, 10);
+        assert_eq!(context.out_of_domain_point_count, 1);
+        assert_eq!(context.phase_column_query_coordinate_count, 387);
         assert_eq!(share_linkage.ordered_columns().len(), 3_451);
         assert_eq!(aggregate_threshold.ordered_columns().len(), 2_528);
 
-        let minimum_telescoping_mask_degree_bound_exclusive = u64::from(context.unique_query_count)
-            .checked_mul(2)
-            .and_then(|query_coordinate_count| {
-                query_coordinate_count.checked_add(u64::from(context.deep_point_count))
-            })
-            .expect("selected telescoping-mask degree derives");
+        let minimum_telescoping_mask_degree_bound_exclusive =
+            u64::from(context.phase_column_query_coordinate_count)
+                .checked_add(u64::from(context.out_of_domain_point_count))
+                .expect("selected telescoping-mask degree derives");
+        assert_eq!(minimum_telescoping_mask_degree_bound_exclusive, 388);
 
         for (
             relation,
@@ -1778,6 +1875,10 @@ mod tests {
                 .max()
                 .expect("selected relation has prover columns");
             assert_eq!(maximum_prover_column_degree_bound_exclusive, 67_584);
+            assert!(relation.ordered_masks().iter().all(|mask| {
+                mask.mask_kind() != RelationMaskKind::Trace
+                    || mask.mask_degree_bound_exclusive() == 2_048
+            }));
             let maximum_ternary_range_numerator_degree =
                 (maximum_prover_column_degree_bound_exclusive - 1) * 3;
             assert_eq!(maximum_ternary_range_numerator_degree, 202_749);

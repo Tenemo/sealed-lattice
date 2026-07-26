@@ -16,6 +16,9 @@ import {
 } from './wire-fixtures.js';
 
 export const noSecondPollValue = 0xffff_ffff;
+const checkpointStableAttemptBindingHash = new Uint8Array(hashByteLength).fill(
+    0x62,
+);
 
 export const writeUnsigned32 = (
     memory: WebAssembly.Memory,
@@ -100,10 +103,17 @@ export const writeGenerationPoll = (
 
 export const createResetSafeCommonProofCursorManifest = (
     streamAttemptIdentifier: Uint8Array = installedProofAttemptLineageIdentifier,
+    derivationBindingHash: Uint8Array = checkpointStableAttemptBindingHash,
+    familySchemaIdentifier = 0x1217,
 ): Uint8Array<ArrayBuffer> => {
     if (streamAttemptIdentifier.byteLength !== 32) {
         throw new TypeError(
             'The cursor-manifest stream-attempt identifier must contain exactly 32 bytes.',
+        );
+    }
+    if (derivationBindingHash.byteLength !== hashByteLength) {
+        throw new TypeError(
+            'The cursor-manifest derivation binding hash must contain exactly 64 bytes.',
         );
     }
     const prefixByteLength = 19;
@@ -115,14 +125,19 @@ export const createResetSafeCommonProofCursorManifest = (
     manifest[10] = 1;
     view.setUint32(11, 0, true);
     view.setUint32(15, 0, true);
-    view.setUint16(19, 0x1217, true);
-    manifest.set(installedCommonProofVerificationBindingHash, 21);
+    view.setUint16(19, familySchemaIdentifier, true);
+    manifest.set(derivationBindingHash, 21);
     manifest.set(streamAttemptIdentifier, 85);
     return manifest;
 };
 
 export const createCheckpointGenerationKernelFixture = (
     checkpointCursorManifestBytes: Uint8Array = createResetSafeCommonProofCursorManifest(),
+    options: Readonly<{
+        applicationStatementSchemaIdentifier?: number;
+        commonProofRuntimeBindingHash?: Uint8Array;
+        proofAttemptLineageIdentifier?: Uint8Array;
+    }> = {},
 ): Readonly<{
     canonicalStateBytes: Uint8Array<ArrayBuffer>;
     cursorManifestBytes: Uint8Array<ArrayBuffer>;
@@ -136,7 +151,21 @@ export const createCheckpointGenerationKernelFixture = (
 }> => {
     const canonicalStateBytes = new Uint8Array(37).fill(0x91);
     const cursorManifestBytes = Uint8Array.from(checkpointCursorManifestBytes);
-    const stableAttemptBindingHash = new Uint8Array(hashByteLength).fill(0x62);
+    const stableAttemptBindingHash = checkpointStableAttemptBindingHash.slice();
+    const commonProofRuntimeBindingHash =
+        options.commonProofRuntimeBindingHash ?? stableAttemptBindingHash;
+    if (commonProofRuntimeBindingHash.byteLength !== hashByteLength) {
+        throw new TypeError(
+            'The fixture common-proof runtime binding hash must contain exactly 64 bytes.',
+        );
+    }
+    const proofAttemptLineageIdentifier =
+        options.proofAttemptLineageIdentifier ?? new Uint8Array(32).fill(0x74);
+    if (proofAttemptLineageIdentifier.byteLength !== 32) {
+        throw new TypeError(
+            'The fixture proof-attempt lineage identifier must contain exactly 32 bytes.',
+        );
+    }
     const observations = {
         acknowledgedCheckpointCount: 0,
         discardedCheckpointCount: 0,
@@ -145,6 +174,56 @@ export const createCheckpointGenerationKernelFixture = (
     let phase: 'checkpoint' | 'complete' | 'finished' | 'retired' =
         'checkpoint';
     const runtime = createMockKernelRuntime((memory) => ({
+        sealed_lattice_common_proof_describe_generation_family_adapter: (
+            adapterHandle,
+            runtimeBindingHashOutputPointer,
+            generationAuthorizationHashOutputPointer,
+            proofAttemptLineageIdentifierOutputPointer,
+            checkpointLineageIdentifierOutputPointer,
+            applicationStatementSchemaIdentifierOutputPointer,
+            statusPointer,
+        ) => {
+            expect(adapterHandle).toBe(71);
+            memoryBytes(
+                memory,
+                runtimeBindingHashOutputPointer,
+                hashByteLength,
+            ).set(commonProofRuntimeBindingHash);
+            memoryBytes(
+                memory,
+                generationAuthorizationHashOutputPointer,
+                hashByteLength,
+            ).fill(0x73);
+            memoryBytes(
+                memory,
+                proofAttemptLineageIdentifierOutputPointer,
+                32,
+            ).set(proofAttemptLineageIdentifier);
+            memoryBytes(
+                memory,
+                checkpointLineageIdentifierOutputPointer,
+                32,
+            ).fill(0x75);
+            writeUnsigned32(
+                memory,
+                applicationStatementSchemaIdentifierOutputPointer,
+                options.applicationStatementSchemaIdentifier ?? 0x1217,
+            );
+            writeUnsigned32(memory, statusPointer, 0);
+            return 0;
+        },
+        sealed_lattice_common_proof_prepare_generation_family_adapter: (
+            adapterHandle,
+            checkpointStatePointer,
+            checkpointStateByteLength,
+            statusPointer,
+        ) => {
+            expect(adapterHandle).toBe(71);
+            expect(checkpointStatePointer).toBe(0);
+            expect(checkpointStateByteLength).toBe(0);
+            writeUnsigned32(memory, statusPointer, 0);
+            return 81;
+        },
         sealed_lattice_common_proof_begin_generation: (
             preparedGenerationHandle,
             statusPointer,
@@ -180,7 +259,7 @@ export const createCheckpointGenerationKernelFixture = (
         ) => {
             expect(operationHandle).toBe(91);
             expect(phase).toBe('checkpoint');
-            writeUnsigned32(memory, safeBoundaryOrdinalPointer, 4);
+            writeUnsigned32(memory, safeBoundaryOrdinalPointer, 0);
             writeUnsigned32(
                 memory,
                 stateByteLengthPointer,

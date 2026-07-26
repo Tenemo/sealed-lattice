@@ -1,3 +1,5 @@
+import { byteArraysEqual } from '../byte-array.js';
+import { decodeCommonProofCheckpointCursorManifest } from '../common-proof-checkpoint-cursor-manifest.js';
 import {
     resolveNumberExport,
     type TranscriptCoreKernelCommandRuntime,
@@ -47,63 +49,64 @@ export const maximumCommonProofByteLength = 268_435_456;
 export const canonicalCommonProofChunkByteLength = 1_048_576;
 const maximumGenerationCheckpointStateByteLength = 4_096;
 const maximumGenerationCheckpointCursorManifestByteLength = 1_048_576;
-const checkpointCursorManifestMagic = Uint8Array.of(
-    0x53,
-    0x4c,
-    0x43,
-    0x50,
-    0x43,
-    0x4d,
-    0x30,
-    0x33,
-);
-const checkpointCursorManifestVersion = 3;
-const checkpointCursorManifestPrefixByteLength = 19;
-const checkpointCursorManifestIdentityByteLength = 98;
-const checkpointCursorManifestStreamAttemptIdentifierOffset =
-    checkpointCursorManifestPrefixByteLength + 2 + hashByteLength;
+
+export type CommonProofGenerationCheckpointIdentityExpectation = Readonly<{
+    applicationStatementSchemaIdentifier: number;
+    proofAttemptLineageIdentifier: Uint8Array<ArrayBuffer>;
+    stableAttemptBindingHash: Uint8Array<ArrayBuffer>;
+}>;
 
 const copyCheckpointPrivateRandomnessStreamAttemptIdentifier = (
     manifestBytes: Uint8Array<ArrayBuffer>,
+    stableAttemptBindingHash: Uint8Array<ArrayBuffer>,
+    expectedIdentity?: CommonProofGenerationCheckpointIdentityExpectation,
 ): Uint8Array<ArrayBuffer> => {
-    if (
-        manifestBytes.byteLength < checkpointCursorManifestPrefixByteLength ||
-        checkpointCursorManifestMagic.some(
-            (byte, byteIndex) => manifestBytes[byteIndex] !== byte,
-        )
-    ) {
+    let decoded;
+    try {
+        decoded = decodeCommonProofCheckpointCursorManifest(manifestBytes);
+    } catch (error) {
         throw new CommonProofWorkerRuntimeError(
             'KernelFailure',
             'The common-proof kernel exposed a malformed checkpoint cursor manifest.',
+            error,
         );
     }
-    const view = new DataView(
-        manifestBytes.buffer,
-        manifestBytes.byteOffset,
-        manifestBytes.byteLength,
-    );
-    const version = view.getUint16(8, true);
-    const hasIdentity = manifestBytes[10];
-    const runCount = view.getUint32(11, true);
-    const logicalCursorCount = view.getUint32(15, true);
-    if (
-        version !== checkpointCursorManifestVersion ||
-        hasIdentity !== 1 ||
-        (runCount === 0) !== (logicalCursorCount === 0) ||
-        runCount > logicalCursorCount ||
-        manifestBytes.byteLength <
-            checkpointCursorManifestPrefixByteLength +
-                checkpointCursorManifestIdentityByteLength
-    ) {
+    if (!decoded.hasPrivateRandomnessIdentity) {
         throw new CommonProofWorkerRuntimeError(
             'KernelFailure',
             'The common-proof kernel exposed an inconsistent checkpoint cursor manifest.',
         );
     }
-    return manifestBytes.slice(
-        checkpointCursorManifestStreamAttemptIdentifierOffset,
-        checkpointCursorManifestStreamAttemptIdentifierOffset + 32,
-    );
+    try {
+        if (
+            !byteArraysEqual(
+                decoded.derivationBindingHash,
+                stableAttemptBindingHash,
+            ) ||
+            (expectedIdentity !== undefined &&
+                (decoded.familySchemaIdentifier !==
+                    expectedIdentity.applicationStatementSchemaIdentifier ||
+                    !byteArraysEqual(
+                        stableAttemptBindingHash,
+                        expectedIdentity.stableAttemptBindingHash,
+                    ) ||
+                    !byteArraysEqual(
+                        decoded.privateRandomnessStreamAttemptIdentifier,
+                        expectedIdentity.proofAttemptLineageIdentifier,
+                    )))
+        ) {
+            throw new CommonProofWorkerRuntimeError(
+                'KernelFailure',
+                'The common-proof kernel exposed an inconsistent checkpoint cursor identity.',
+            );
+        }
+        return decoded.privateRandomnessStreamAttemptIdentifier;
+    } catch (error) {
+        decoded.privateRandomnessStreamAttemptIdentifier.fill(0);
+        throw error;
+    } finally {
+        decoded.derivationBindingHash.fill(0);
+    }
 };
 export const maximumCommonProofOutputChunkCount = Math.ceil(
     maximumCommonProofByteLength / canonicalCommonProofChunkByteLength,
@@ -111,6 +114,7 @@ export const maximumCommonProofOutputChunkCount = Math.ceil(
 
 export type ClosedWorkerCommonProofGenerationFamilyAdapterDescription =
     Readonly<{
+        applicationStatementSchemaIdentifier: number;
         checkpointLineageIdentifier: Uint8Array<ArrayBuffer>;
         commonProofGenerationAuthorizationHash: Uint8Array<ArrayBuffer>;
         commonProofRuntimeBindingHash: Uint8Array<ArrayBuffer>;
@@ -218,6 +222,13 @@ export const resourceFailure = (
 const requireUnsigned32 = (value: number, label: string): number => {
     if (!Number.isSafeInteger(value) || value < 0 || value > 0xffff_ffff) {
         throw kernelFailure(`${label} is outside the unsigned 32-bit range.`);
+    }
+    return value;
+};
+
+const requireNonzeroUnsigned16 = (value: number, label: string): number => {
+    if (!Number.isSafeInteger(value) || value <= 0 || value > 0xffff) {
+        throw kernelFailure(`${label} is not a nonzero unsigned 16-bit value.`);
     }
     return value;
 };
@@ -367,6 +378,8 @@ export class CommonProofFamilyAdapterKernelBoundary {
                     this.#memoryBoundary.allocate(outputByteLength);
                 const statusPointer =
                     this.#memoryBoundary.allocateZeroedWords(1);
+                const applicationStatementSchemaIdentifierPointer =
+                    this.#memoryBoundary.allocateZeroedWords(1);
                 try {
                     resolveNumberExport(
                         this.#context.wasmExports,
@@ -377,6 +390,7 @@ export class CommonProofFamilyAdapterKernelBoundary {
                         outputPointer + hashByteLength,
                         outputPointer + 2 * hashByteLength,
                         outputPointer + 2 * hashByteLength + 32,
+                        applicationStatementSchemaIdentifierPointer,
                         statusPointer,
                     );
                     const [status] = this.#memoryBoundary.readWords(
@@ -387,12 +401,22 @@ export class CommonProofFamilyAdapterKernelBoundary {
                         status,
                         'generation family-adapter description',
                     );
+                    const [applicationStatementSchemaIdentifier] =
+                        this.#memoryBoundary.readWords(
+                            applicationStatementSchemaIdentifierPointer,
+                            1,
+                        );
                     const output = new Uint8Array(
                         this.#context.memory.buffer,
                         outputPointer,
                         outputByteLength,
                     );
                     return Object.freeze({
+                        applicationStatementSchemaIdentifier:
+                            requireNonzeroUnsigned16(
+                                applicationStatementSchemaIdentifier,
+                                'The common-proof application-statement schema identifier',
+                            ),
                         commonProofRuntimeBindingHash: output
                             .subarray(0, hashByteLength)
                             .slice(),
@@ -416,6 +440,10 @@ export class CommonProofFamilyAdapterKernelBoundary {
                     );
                     this.#memoryBoundary.zeroAndDeallocate(
                         statusPointer,
+                        wasm32WordByteLength,
+                    );
+                    this.#memoryBoundary.zeroAndDeallocate(
+                        applicationStatementSchemaIdentifierPointer,
                         wasm32WordByteLength,
                     );
                 }
@@ -799,7 +827,24 @@ export class CommonProofGenerationKernelBoundary {
 
     public copyCheckpoint(
         operationHandle: number,
+        expectedIdentity?: CommonProofGenerationCheckpointIdentityExpectation,
     ): CommonProofGenerationCheckpoint {
+        if (expectedIdentity !== undefined) {
+            requireNonzeroUnsigned16(
+                expectedIdentity.applicationStatementSchemaIdentifier,
+                'The expected common-proof application-statement schema identifier',
+            );
+            requireExactApplicationBytes(
+                expectedIdentity.stableAttemptBindingHash,
+                hashByteLength,
+                'The expected common-proof stable-attempt binding hash',
+            );
+            requireExactApplicationBytes(
+                expectedIdentity.proofAttemptLineageIdentifier,
+                32,
+                'The expected common-proof proof-attempt lineage identifier',
+            );
+        }
         const canonicalStateByteLength = this.#context.runExclusive(
             'common-proof generation checkpoint state length',
             () =>
@@ -853,7 +898,6 @@ export class CommonProofGenerationKernelBoundary {
                 },
             );
         if (
-            safeBoundaryOrdinal === 0 ||
             stateByteLength !== canonicalStateByteLength ||
             cursorManifestByteLength === 0 ||
             cursorManifestByteLength >
@@ -898,6 +942,8 @@ export class CommonProofGenerationKernelBoundary {
             const privateRandomnessStreamAttemptIdentifier =
                 copyCheckpointPrivateRandomnessStreamAttemptIdentifier(
                     privateRandomCursorManifestBytes,
+                    stableAttemptBindingHash,
+                    expectedIdentity,
                 );
             return Object.freeze({
                 canonicalStateBytes,

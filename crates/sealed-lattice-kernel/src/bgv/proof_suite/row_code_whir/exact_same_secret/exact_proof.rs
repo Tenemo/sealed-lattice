@@ -15,6 +15,11 @@ use zeroize::Zeroizing;
 
 use super::super::GOLDILOCKS_MODULUS;
 use super::super::column_commitment::verify_column_frontier;
+use super::super::construction_plan::{
+    RowCodeWhirAggregateColumnRole, RowCodeWhirBoundLowDegreeMode, RowCodeWhirConstructionPlan,
+    RowCodeWhirOpenedPolynomialSource, RowCodeWhirSoundnessAssumption, RowCodeWhirTracePhasePlan,
+};
+use super::super::row_encoding::RowEncodingGeometry;
 use super::super::{
     AuthenticatedColumn, ChallengeField, ExtensionFieldChallenger,
     MAXIMUM_ROW_CODE_WHIR_PROOF_BYTE_LENGTH,
@@ -36,17 +41,21 @@ use super::super::{
     },
 };
 use super::*;
-use crate::bgv::proof_suite::relation_plan::{RelationColumnOrigin, RelationOpeningSourceClass};
+use crate::bgv::proof_suite::prover::requested_pre_challenge_source_column_ordinals;
+use crate::bgv::proof_suite::relation_plan::{
+    ProofPrivacyMode, RelationColumnOrigin, RelationOpeningSourceClass,
+};
 use crate::bgv::proof_suite::transcript::{
-    RowCodeWhirChallenge, RowCodeWhirPhase, RowCodeWhirTranscript,
+    RowCodeWhirChallenge, RowCodeWhirTracePhase, RowCodeWhirTranscript,
 };
 use crate::bgv::proof_suite::{
     BoundTreeConstructionKind, BoundTreeRootUse, COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH,
-    DeepCompositionVerificationInput, ProofBaseFieldElement, ProofChallengeExtensionElement,
-    ProofEvaluationDomain, ProofTreeCatalogEntry, ProofTreeCatalogInput, ProofTreeCatalogSource,
-    ProofTreeValue, RelationPlanVariant, RelationProofTreeInput, StatementOwnedProofTreeInput,
-    ValidatedRelationPlanArtifact, VerifiedKeyRelationColumnEvaluator,
-    VerifiedRelationColumnEvaluator, build_complete_proof_tree_catalog,
+    OutOfDomainCompositionVerificationInput, PROOF_CHALLENGE_EXTENSION_DEGREE,
+    PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT, ProofBaseFieldElement,
+    ProofChallengeExtensionElement, ProofEvaluationDomain, ProofTreeCatalogEntry, ProofTreeValue,
+    RelationPlanCheckContext, RelationPlanVariant, RelationProofTreeInput,
+    StatementOwnedProofTreeInput, VerifiedKeyRelationColumnEvaluator,
+    VerifiedRelationColumnEvaluator, build_relation_bound_public_tree_catalog_entries,
 };
 
 const EXACT_PROOF_WIRE_MAGIC: &[u8; 8] = b"SLXPRF05";
@@ -71,20 +80,60 @@ const EXACT_INPUT_BOUND_QUERY_COUNT: usize = 40;
 const EXACT_OUTPUT_BOUND_QUERY_COUNT: usize = 266;
 const EXACT_BOUND_LEAF_COUNT: usize = 1 << 20;
 const EXACT_BOUND_POLYNOMIAL_VARIABLE_COUNT: usize = 15;
-const EXACT_BOUND_SOURCE_DEGREE_BOUND_EXCLUSIVE: usize = 18_432;
-const EXACT_BOUND_QUOTIENT_DEGREE_BOUND_EXCLUSIVE: usize = 18_431;
 const EXACT_BOUND_REDUCTION_COLUMN_INDEX: usize = 3;
 const EXACT_BOUND_REDUCTION_BLOCK_COUNT: usize = 2;
-const EXACT_BOUND_DEGREE_TESTS_PER_BLOCK: usize = 4;
-const EXACT_BOUND_DEGREE_TEST_COUNT: usize =
-    EXACT_BOUND_REDUCTION_BLOCK_COUNT * EXACT_BOUND_DEGREE_TESTS_PER_BLOCK;
-const EXACT_BOUND_DEGREE_SUFFIX_PREFIXES: [&[u8]; 3] =
-    [&[1_u8, 1], &[1_u8, 0, 1], &[1_u8, 0, 0, 1]];
+const EXACT_BOUND_REDUCTION_BLOCK_SELECTOR_VARIABLE_COUNT: usize = 1;
+const EXACT_INPUT_BOUND_DEGREE_SUFFIX_PREFIXES: &[&[u8]] =
+    &[&[1_u8, 1], &[1_u8, 0, 1], &[1_u8, 0, 0, 1]];
+const EXACT_OUTPUT_BOUND_DEGREE_SUFFIX_PREFIXES: &[&[u8]] = &[&[1_u8]];
+const EXACT_BOUND_DEGREE_TEST_COUNT: usize = EXACT_BOUND_REDUCTION_BLOCK_COUNT
+    + EXACT_INPUT_BOUND_DEGREE_SUFFIX_PREFIXES.len()
+    + EXACT_OUTPUT_BOUND_DEGREE_SUFFIX_PREFIXES.len();
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ExactBoundReductionBlockSchedule {
+    root_use: BoundTreeRootUse,
+    source_degree_bound_exclusive: usize,
+    quotient_degree_bound_exclusive: usize,
+    degree_suffix_prefixes: &'static [&'static [u8]],
+}
+
+impl ExactBoundReductionBlockSchedule {
+    const fn degree_test_count(self) -> usize {
+        1 + self.degree_suffix_prefixes.len()
+    }
+
+    #[cfg(test)]
+    fn random_degree_coordinate_count(self) -> usize {
+        self.degree_suffix_prefixes
+            .iter()
+            .map(|prefix| EXACT_BOUND_POLYNOMIAL_VARIABLE_COUNT - prefix.len())
+            .sum()
+    }
+}
+
+const EXACT_BOUND_REDUCTION_BLOCK_SCHEDULES: [ExactBoundReductionBlockSchedule;
+    EXACT_BOUND_REDUCTION_BLOCK_COUNT] = [
+    ExactBoundReductionBlockSchedule {
+        root_use: BoundTreeRootUse::Input,
+        source_degree_bound_exclusive: 18_432,
+        quotient_degree_bound_exclusive: 18_431,
+        degree_suffix_prefixes: EXACT_INPUT_BOUND_DEGREE_SUFFIX_PREFIXES,
+    },
+    ExactBoundReductionBlockSchedule {
+        root_use: BoundTreeRootUse::Output,
+        source_degree_bound_exclusive: 16_384,
+        quotient_degree_bound_exclusive: 16_383,
+        degree_suffix_prefixes: EXACT_OUTPUT_BOUND_DEGREE_SUFFIX_PREFIXES,
+    },
+];
 const EXACT_VERIFIER_MERKLE_HASH_QUERY_COUNT: u64 = 61_241;
-const EXACT_RELATION_PLAN_HASH_QUERY_COUNT: u64 = 4;
+const EXACT_RELATION_PLAN_HASH_QUERY_COUNT: u64 = 1;
 const EXACT_RELATION_PLAN_DISTINCT_EQUATION_COUNT: u64 = 1;
 const EXACT_VARIANT_HASH_QUERY_COUNT: u64 = 1;
 const EXACT_VARIANT_DISTINCT_EQUATION_COUNT: u64 = 1;
+const EXACT_CONSTRUCTION_PLAN_IDENTITY_HASH_QUERY_COUNT: u64 = 1;
+const EXACT_CONSTRUCTION_PLAN_IDENTITY_DISTINCT_EQUATION_COUNT: u64 = 1;
 const EXACT_TRANSCRIPT_HEADER_HASH_QUERY_COUNT: u64 = 1;
 const EXACT_TRANSCRIPT_HEADER_DISTINCT_EQUATION_COUNT: u64 = 1;
 const EXACT_PUBLIC_INPUT_HASH_QUERY_COUNT: u64 = 1;
@@ -93,12 +142,14 @@ const EXACT_PUBLIC_SETUP_SAMPLING_HASH_QUERY_COUNT: u64 = 18;
 const EXACT_PUBLIC_SETUP_SAMPLING_DISTINCT_EQUATION_COUNT: u64 = 9;
 const EXACT_VERIFIER_NON_MERKLE_HASH_QUERY_COUNT: u64 = EXACT_RELATION_PLAN_HASH_QUERY_COUNT
     + EXACT_VARIANT_HASH_QUERY_COUNT
+    + EXACT_CONSTRUCTION_PLAN_IDENTITY_HASH_QUERY_COUNT
     + EXACT_TRANSCRIPT_HEADER_HASH_QUERY_COUNT
     + EXACT_PUBLIC_INPUT_HASH_QUERY_COUNT
     + EXACT_PUBLIC_SETUP_SAMPLING_HASH_QUERY_COUNT;
 const EXACT_VERIFIER_NON_MERKLE_DISTINCT_EQUATION_COUNT: u64 =
     EXACT_RELATION_PLAN_DISTINCT_EQUATION_COUNT
         + EXACT_VARIANT_DISTINCT_EQUATION_COUNT
+        + EXACT_CONSTRUCTION_PLAN_IDENTITY_DISTINCT_EQUATION_COUNT
         + EXACT_TRANSCRIPT_HEADER_DISTINCT_EQUATION_COUNT
         + EXACT_PUBLIC_INPUT_DISTINCT_EQUATION_COUNT
         + EXACT_PUBLIC_SETUP_SAMPLING_DISTINCT_EQUATION_COUNT;
@@ -173,7 +224,7 @@ pub(crate) struct ExactSameSecretProof {
     base_root: ColumnDigest,
     auxiliary_root: ColumnDigest,
     quotient_root: ColumnDigest,
-    deep_evaluations: Vec<ProofChallengeExtensionElement>,
+    out_of_domain_evaluations: Vec<ProofChallengeExtensionElement>,
     opening_batch_mask_chunk_evaluations:
         [ProofChallengeExtensionElement; EXACT_OPENING_BATCH_MASK_CHUNK_COUNT],
     aggregate_commitment: PlainAggregateCommitment,
@@ -183,15 +234,17 @@ pub(crate) struct ExactSameSecretProof {
     aggregate_opening_proof: PlainAggregateProof,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct ExactProofShape {
     base_row_count: usize,
     auxiliary_row_count: usize,
+    quotient_row_count: usize,
     opening_claim_count: usize,
     encoded_column_count: usize,
 }
 
 impl ExactProofShape {
+    #[cfg(test)]
     fn from_variant(variant: &RelationPlanVariant) -> Result<Self, String> {
         let base_layout = ExactBasePhaseLayout::for_tree_role(variant, ProofTreeRole::BaseOracle)?;
         let auxiliary_layout =
@@ -203,6 +256,7 @@ impl ExactProofShape {
         Ok(Self {
             base_row_count: base_layout.rows.len(),
             auxiliary_row_count: auxiliary_layout.rows.len(),
+            quotient_row_count: EXACT_QUOTIENT_PHASE_ROW_COUNT,
             opening_claim_count: variant.ordered_opening_claims().len(),
             encoded_column_count: geometry.encoded_column_count,
         })
@@ -212,7 +266,7 @@ impl ExactProofShape {
         [
             self.base_row_count,
             self.auxiliary_row_count,
-            EXACT_QUOTIENT_PHASE_ROW_COUNT,
+            self.quotient_row_count,
         ]
     }
 
@@ -221,6 +275,416 @@ impl ExactProofShape {
             .checked_mul(self.encoded_column_count.ilog2() as usize)
             .ok_or_else(|| "exact frontier bound overflowed".to_owned())
     }
+}
+
+fn validate_exact_trace_phase_plan(
+    phase: Option<&RowCodeWhirTracePhasePlan>,
+    expected_layout: &ExactBasePhaseLayout,
+    expected_tree_role: ProofTreeRole,
+) -> Result<RowEncodingGeometry, String> {
+    let phase = phase
+        .ok_or_else(|| format!("exact construction plan omits the {expected_tree_role:?} phase"))?;
+    let expected_geometry = expected_layout.geometry()?;
+    if phase.tree_role != expected_tree_role
+        || phase.geometry != expected_geometry
+        || phase.rows.len() != expected_layout.rows.len()
+    {
+        return Err(format!(
+            "exact construction plan has the wrong {expected_tree_role:?} geometry"
+        ));
+    }
+    for (row_index, (planned_row, expected_row)) in
+        phase.rows.iter().zip(&expected_layout.rows).enumerate()
+    {
+        let expected_row_ordinal = u32::try_from(row_index)
+            .map_err(|_| "exact trace-phase row ordinal exceeds u32".to_owned())?;
+        if planned_row.column_group_ordinal != expected_row_ordinal
+            || planned_row.coefficient_chunk_ordinal != 0
+            || planned_row.opening_point_ordinals != expected_row.opening_point_ordinals
+        {
+            return Err(format!(
+                "exact construction plan has the wrong {expected_tree_role:?} row metadata"
+            ));
+        }
+        for (planned_chunk, expected_column_ordinal) in planned_row
+            .logical_polynomial_chunks
+            .iter()
+            .zip(expected_row.column_ordinals)
+        {
+            match (planned_chunk, expected_column_ordinal) {
+                (None, None) => {}
+                (Some(planned_chunk), Some(expected_column_ordinal))
+                    if planned_chunk.column_ordinal == expected_column_ordinal
+                        && planned_chunk.coefficient_chunk_ordinal == 0 => {}
+                _ => {
+                    return Err(format!(
+                        "exact construction plan has the wrong {expected_tree_role:?} row encoding"
+                    ));
+                }
+            }
+        }
+    }
+    Ok(expected_geometry)
+}
+
+fn validate_exact_quotient_phase_plan(
+    plan: &RowCodeWhirConstructionPlan,
+    context: &RelationPlanCheckContext,
+) -> Result<RowEncodingGeometry, String> {
+    let phase = &plan.quotient_phase;
+    let expected_mask_degree_bound_exclusive =
+        plan.opening_degree_bound_exclusive
+            .checked_sub(1)
+            .ok_or_else(|| "exact opening-mask degree bound is empty".to_owned())?;
+    let expected_geometry = RowEncodingGeometry::new_weighted_batch_with_log_inverse_rate(
+        EXACT_QUOTIENT_PHASE_ROW_COUNT,
+        PHYSICAL_ROW_WITNESS_VARIABLE_COUNT,
+        EXACT_ROW_CODE_LOG_INVERSE_RATE,
+    )?;
+    if context.challenge_extension_degree != 5
+        || context.quotient_component_count
+            != u32::try_from(LOGICAL_POLYNOMIALS_PER_PHYSICAL_ROW)
+                .map_err(|_| "exact quotient component count exceeds u32".to_owned())?
+        || phase.quotient_component_count != context.quotient_component_count
+        || phase.quotient_component_degree_bound_exclusive
+            != context.quotient_component_degree_bound_exclusive
+        || phase.opening_batch_mask_degree_bound_exclusive
+            != Some(expected_mask_degree_bound_exclusive)
+        || phase.rows.len() != EXACT_QUOTIENT_PHASE_ROW_COUNT
+        || phase.geometry != expected_geometry
+    {
+        return Err("exact construction plan has the wrong quotient geometry".to_owned());
+    }
+
+    let quotient_row_count = 2 * usize::from(context.challenge_extension_degree);
+    for (row_index, row) in phase.rows.iter().enumerate() {
+        if row.opening_point_ordinals != [0] {
+            return Err("exact construction plan has the wrong quotient opening points".to_owned());
+        }
+        if row_index < quotient_row_count {
+            let expected_chunk_ordinal =
+                u32::try_from(row_index / usize::from(context.challenge_extension_degree))
+                    .map_err(|_| "exact quotient chunk ordinal exceeds u32".to_owned())?;
+            let expected_extension_coordinate =
+                u16::try_from(row_index % usize::from(context.challenge_extension_degree))
+                    .map_err(|_| "exact quotient extension coordinate exceeds u16".to_owned())?;
+            if row.source_class != RelationOpeningSourceClass::Quotient
+                || row.source_group_ordinal != 0
+                || row.coefficient_chunk_group_start_ordinal != expected_chunk_ordinal
+                || row.extension_coordinate_ordinal != expected_extension_coordinate
+            {
+                return Err("exact construction plan has the wrong quotient row".to_owned());
+            }
+            for (component_ordinal, chunk) in row.logical_polynomial_chunks.iter().enumerate() {
+                let expected_component_ordinal = u32::try_from(component_ordinal)
+                    .map_err(|_| "exact quotient component ordinal exceeds u32".to_owned())?;
+                if !matches!(
+                    chunk,
+                    Some(planned_chunk)
+                        if planned_chunk.source
+                            == RowCodeWhirOpenedPolynomialSource::QuotientComponent {
+                                component_ordinal: expected_component_ordinal,
+                            }
+                            && planned_chunk.coefficient_chunk_ordinal
+                                == expected_chunk_ordinal
+                ) {
+                    return Err(
+                        "exact construction plan has the wrong quotient row encoding".to_owned(),
+                    );
+                }
+            }
+        } else {
+            let expected_extension_coordinate = u16::try_from(row_index - quotient_row_count)
+                .map_err(|_| "exact mask extension coordinate exceeds u16".to_owned())?;
+            if row.source_class != RelationOpeningSourceClass::BatchMask
+                || row.source_group_ordinal != 0
+                || row.coefficient_chunk_group_start_ordinal != 0
+                || row.extension_coordinate_ordinal != expected_extension_coordinate
+            {
+                return Err("exact construction plan has the wrong batch-mask row".to_owned());
+            }
+            for (chunk_ordinal, chunk) in row.logical_polynomial_chunks.iter().enumerate() {
+                let expected_chunk_ordinal = u32::try_from(chunk_ordinal)
+                    .map_err(|_| "exact mask chunk ordinal exceeds u32".to_owned())?;
+                if !matches!(
+                    chunk,
+                    Some(planned_chunk)
+                        if planned_chunk.source
+                            == RowCodeWhirOpenedPolynomialSource::OpeningBatchMask {
+                                mask_ordinal: 0,
+                            }
+                            && planned_chunk.coefficient_chunk_ordinal
+                                == expected_chunk_ordinal
+                ) {
+                    return Err(
+                        "exact construction plan has the wrong batch-mask row encoding".to_owned(),
+                    );
+                }
+            }
+        }
+    }
+    Ok(expected_geometry)
+}
+
+fn validate_exact_bound_construction_plan(
+    plan: &RowCodeWhirConstructionPlan,
+    variant: &RelationPlanVariant,
+) -> Result<(), String> {
+    let mut opening_points_by_column = BTreeMap::<u32, Vec<u32>>::new();
+    for claim in variant.ordered_opening_claims() {
+        if claim.source_class() == RelationOpeningSourceClass::TreeColumn {
+            let column_ordinal = claim
+                .column_ordinal()
+                .ok_or_else(|| "exact tree opening has no column ordinal".to_owned())?;
+            opening_points_by_column
+                .entry(column_ordinal)
+                .or_default()
+                .push(claim.opening_point_ordinal());
+        }
+    }
+    for opening_points in opening_points_by_column.values_mut() {
+        opening_points.sort_unstable();
+        opening_points.dedup();
+    }
+
+    let mut bound_tree_ordinal = 0_usize;
+    for (relation_tree_ordinal, descriptor) in variant.ordered_trees().iter().enumerate() {
+        let RelationTreeDescriptor::BoundPublic {
+            construction_kind,
+            expected_root_source_ordinal,
+            root_use,
+            ordered_column_ordinals,
+        } = descriptor
+        else {
+            continue;
+        };
+        let tree = plan
+            .bound_trees
+            .get(bound_tree_ordinal)
+            .ok_or_else(|| "exact construction plan omits a bound tree".to_owned())?;
+        let (expected_construction_kind, expected_low_degree_mode, expected_query_count) =
+            match root_use {
+                BoundTreeRootUse::Input => (
+                    BoundTreeConstructionKind::CommittedMaterial,
+                    RowCodeWhirBoundLowDegreeMode::PriorVssProofRequired,
+                    EXACT_INPUT_BOUND_QUERY_COUNT,
+                ),
+                BoundTreeRootUse::Output => (
+                    BoundTreeConstructionKind::SetupPolynomial,
+                    RowCodeWhirBoundLowDegreeMode::Direct,
+                    EXACT_OUTPUT_BOUND_QUERY_COUNT,
+                ),
+            };
+        if *construction_kind != expected_construction_kind
+            || tree.relation_tree_ordinal
+                != u32::try_from(relation_tree_ordinal)
+                    .map_err(|_| "exact relation tree ordinal exceeds u32".to_owned())?
+            || tree.bound_tree_ordinal
+                != u32::try_from(bound_tree_ordinal)
+                    .map_err(|_| "exact bound tree ordinal exceeds u32".to_owned())?
+            || tree.construction_kind != *construction_kind
+            || tree.expected_root_source_ordinal != *expected_root_source_ordinal
+            || tree.root_use != *root_use
+            || tree.source_trace_domain_size != 16_384
+            || tree.evaluation_domain_size != plan.evaluation_domain_size
+            || tree.leaf_count != EXACT_BOUND_LEAF_COUNT
+            || tree.low_degree_mode != expected_low_degree_mode
+            || tree.query_count != expected_query_count
+            || tree.ordered_columns.len() != EXACT_BOUND_TREE_ROW_WIDTH
+            || tree.ordered_columns.len() != ordered_column_ordinals.len()
+        {
+            return Err("exact construction plan has the wrong bound-tree geometry".to_owned());
+        }
+        for (column, expected_column_ordinal) in
+            tree.ordered_columns.iter().zip(ordered_column_ordinals)
+        {
+            let descriptor = variant
+                .ordered_columns()
+                .get(
+                    usize::try_from(*expected_column_ordinal)
+                        .map_err(|_| "exact bound column ordinal exceeds usize".to_owned())?,
+                )
+                .ok_or_else(|| "exact bound column is outside the relation".to_owned())?;
+            let expected_opening_points = opening_points_by_column
+                .get(expected_column_ordinal)
+                .ok_or_else(|| "exact bound column has no opening point".to_owned())?;
+            if column.column_ordinal != *expected_column_ordinal
+                || column.value_type != descriptor.value_type()
+                || column.source_degree_bound_exclusive
+                    != descriptor.source_degree_bound_exclusive()
+                || column.opening_point_ordinals != *expected_opening_points
+            {
+                return Err("exact construction plan has the wrong bound-column mapping".to_owned());
+            }
+        }
+        bound_tree_ordinal += 1;
+    }
+    if bound_tree_ordinal != EXACT_BOUND_TREE_COUNT
+        || plan.bound_trees.len() != EXACT_BOUND_TREE_COUNT
+    {
+        return Err("exact construction plan has the wrong bound-tree count".to_owned());
+    }
+
+    let expected_blocks = [
+        (
+            RowCodeWhirBoundLowDegreeMode::PriorVssProofRequired,
+            (0_u32..8).collect::<Vec<_>>(),
+            18_432_u64,
+            18_431_u64,
+            vec![0, 0, 0, 0],
+            EXACT_INPUT_BOUND_DEGREE_SUFFIX_PREFIXES
+                .iter()
+                .map(|prefix| prefix.to_vec())
+                .collect::<Vec<_>>(),
+            EXACT_INPUT_BOUND_QUERY_COUNT,
+        ),
+        (
+            RowCodeWhirBoundLowDegreeMode::Direct,
+            (8_u32..11).collect::<Vec<_>>(),
+            16_384_u64,
+            16_383_u64,
+            vec![0, 0, 0, 1],
+            EXACT_OUTPUT_BOUND_DEGREE_SUFFIX_PREFIXES
+                .iter()
+                .map(|prefix| prefix.to_vec())
+                .collect::<Vec<_>>(),
+            EXACT_OUTPUT_BOUND_QUERY_COUNT,
+        ),
+    ];
+    if plan.bound_reduction_blocks.len() != expected_blocks.len() {
+        return Err("exact construction plan has the wrong bound-block count".to_owned());
+    }
+    for (block, expected) in plan.bound_reduction_blocks.iter().zip(expected_blocks) {
+        if block.low_degree_mode != expected.0
+            || block.ordered_bound_tree_ordinals != expected.1
+            || block.maximum_source_degree_bound_exclusive != expected.2
+            || block.quotient_degree_bound_exclusive != expected.3
+            || block.polynomial_variable_count != EXACT_BOUND_POLYNOMIAL_VARIABLE_COUNT
+            || block.selector_prefix != expected.4
+            || block.degree_suffix_prefixes != expected.5
+            || block.query_count != expected.6
+        {
+            return Err("exact construction plan has the wrong bound-block schedule".to_owned());
+        }
+    }
+    Ok(())
+}
+
+fn validate_exact_same_secret_construction_plan(
+    plan: &RowCodeWhirConstructionPlan,
+    variant: &RelationPlanVariant,
+    context: &RelationPlanCheckContext,
+    expected_relation_plan_hash: [u8; 64],
+    expected_relation_plan_variant_hash: [u8; 64],
+) -> Result<ExactProofShape, String> {
+    let expected_schema_identifier =
+        SetupKeyRelationProofFamily::SameSecret.statement_schema_identifier();
+    let expected_requested_source_column_ordinals =
+        requested_pre_challenge_source_column_ordinals(variant)
+            .map_err(|error| format!("derive exact source catalog: {error:?}"))?;
+    if plan.application_statement_schema_identifier != expected_schema_identifier
+        || plan.schedule_position.is_some()
+        || plan.top_count.is_some()
+        || plan.relation_plan_hash != expected_relation_plan_hash
+        || plan.relation_plan_variant_hash != expected_relation_plan_variant_hash
+        || plan.trace_domain_size != variant.trace_domain_size()
+        || plan.trace_domain_size != 16_384
+        || plan.evaluation_domain_size != variant.evaluation_domain_size()
+        || plan.evaluation_domain_size != (1_u64 << EXACT_PCS_VARIABLE_COUNT)
+        || plan.opening_degree_bound_exclusive != variant.opening_degree_bound_exclusive()
+        || plan.opening_degree_bound_exclusive
+            != u64::try_from(
+                LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT * LOGICAL_POLYNOMIALS_PER_PHYSICAL_ROW,
+            )
+            .map_err(|_| "exact opening degree bound exceeds u64".to_owned())?
+        || plan.proof_privacy_mode != ProofPrivacyMode::SecretBearing
+        || plan.requested_source_column_ordinals != expected_requested_source_column_ordinals
+    {
+        return Err("exact construction plan does not match the selected relation".to_owned());
+    }
+
+    let parameters = plan.parameters;
+    if parameters.logical_polynomial_coefficient_count != LOGICAL_POLYNOMIAL_COEFFICIENT_COUNT
+        || parameters.logical_polynomials_per_physical_row != LOGICAL_POLYNOMIALS_PER_PHYSICAL_ROW
+        || parameters.physical_row_witness_variable_count != PHYSICAL_ROW_WITNESS_VARIABLE_COUNT
+        || parameters.row_code_log_inverse_rate != EXACT_ROW_CODE_LOG_INVERSE_RATE
+        || parameters.table_variable_count != EXACT_TABLE_VARIABLE_COUNT
+        || parameters.polynomial_commitment_variable_count != EXACT_PCS_VARIABLE_COUNT
+        || parameters.starting_log_inverse_rate != EXACT_ROW_CODE_LOG_INVERSE_RATE
+        || parameters.folding_factor != 3
+        || parameters.soundness_assumption != RowCodeWhirSoundnessAssumption::UniqueDecoding
+        || parameters.security_level != 262
+        || parameters.proof_of_work_bits != 0
+        || parameters.outer_query_count != EXACT_COLUMN_QUERY_COUNT
+        || parameters.direct_bound_query_count != EXACT_OUTPUT_BOUND_QUERY_COUNT
+        || parameters.verified_vss_bound_query_count != EXACT_INPUT_BOUND_QUERY_COUNT
+        || parameters.maximum_fiat_shamir_candidate_draws_per_output
+            != PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT
+        || parameters.maximum_fiat_shamir_candidate_draws_per_output
+            != context.maximum_fiat_shamir_candidate_draws_per_output
+        || context.phase_column_query_coordinate_count
+            != u32::try_from(EXACT_COLUMN_QUERY_COUNT)
+                .map_err(|_| "exact query count exceeds u32".to_owned())?
+    {
+        return Err("exact construction plan has the wrong selected parameters".to_owned());
+    }
+
+    let base_layout = ExactBasePhaseLayout::for_tree_role(variant, ProofTreeRole::BaseOracle)?;
+    let auxiliary_layout =
+        ExactBasePhaseLayout::for_tree_role(variant, ProofTreeRole::AuxiliaryOracle)?;
+    let base_geometry = validate_exact_trace_phase_plan(
+        plan.base_phase.as_ref(),
+        &base_layout,
+        ProofTreeRole::BaseOracle,
+    )?;
+    let auxiliary_geometry = validate_exact_trace_phase_plan(
+        plan.auxiliary_phase.as_ref(),
+        &auxiliary_layout,
+        ProofTreeRole::AuxiliaryOracle,
+    )?;
+    let quotient_geometry = validate_exact_quotient_phase_plan(plan, context)?;
+    if auxiliary_geometry.encoded_column_count != base_geometry.encoded_column_count
+        || quotient_geometry.encoded_column_count != base_geometry.encoded_column_count
+    {
+        return Err("exact construction phases do not share one encoded domain".to_owned());
+    }
+
+    validate_exact_bound_construction_plan(plan, variant)?;
+    let expected_aggregate_column_roles = vec![
+        RowCodeWhirAggregateColumnRole::OpeningPoint {
+            opening_point_ordinal: 0,
+        },
+        RowCodeWhirAggregateColumnRole::OpeningPoint {
+            opening_point_ordinal: 1,
+        },
+        RowCodeWhirAggregateColumnRole::OpeningPoint {
+            opening_point_ordinal: 2,
+        },
+        RowCodeWhirAggregateColumnRole::BoundReduction,
+    ];
+    if variant.ordered_opening_points().len() != 3
+        || plan.aggregate_column_roles != expected_aggregate_column_roles
+    {
+        return Err("exact construction plan has the wrong aggregate columns".to_owned());
+    }
+
+    Ok(ExactProofShape {
+        base_row_count: plan
+            .base_phase
+            .as_ref()
+            .expect("validated exact base phase")
+            .rows
+            .len(),
+        auxiliary_row_count: plan
+            .auxiliary_phase
+            .as_ref()
+            .expect("validated exact auxiliary phase")
+            .rows
+            .len(),
+        quotient_row_count: plan.quotient_phase.rows.len(),
+        opening_claim_count: variant.ordered_opening_claims().len(),
+        encoded_column_count: base_geometry.encoded_column_count,
+    })
 }
 
 fn challenge_from_production(value: ProofChallengeExtensionElement) -> ChallengeField {
@@ -250,8 +714,10 @@ fn expected_opening_widths() -> Vec<usize> {
 struct VerifiedExactRelation {
     variant: RelationPlanVariant,
     context: crate::bgv::proof_suite::RelationPlanCheckContext,
+    proof_shape: ExactProofShape,
     relation_plan_hash: [u8; 64],
     relation_plan_variant_hash: [u8; 64],
+    row_code_whir_construction_plan_identity_hash: [u8; 64],
     relation_trees: Vec<RelationProofTreeInput>,
     verifier_sequence_evaluator: VerifiedKeyRelationColumnEvaluator,
 }
@@ -297,6 +763,13 @@ fn validate_public_input(
         None,
     )
     .map_err(|error| format!("validate exact same-secret relation: {error:?}"))?;
+    let proof_shape = validate_exact_same_secret_construction_plan(
+        relation_plan.row_code_whir_construction_plan(),
+        &variant,
+        &relation_context,
+        relation_plan.relation_plan_hash(),
+        relation_plan.relation_plan_variant_hash(),
+    )?;
     let statement = decode_selected_same_secret_statement(
         &public_input.canonical_application_statement_bytes,
         SelectedApplicationStatementContext::new(
@@ -322,7 +795,7 @@ fn validate_public_input(
     let mut public_tree_inputs = public_input.public_relation_trees.iter();
     let mut actual_bound_roots = Vec::new();
     let mut actual_bound_root_uses = Vec::new();
-    let mut bound_column_ordinals = Vec::new();
+    let mut bound_column_root_uses = BTreeMap::new();
     for descriptor in variant.ordered_trees() {
         match descriptor {
             RelationTreeDescriptor::ProofCreated {
@@ -391,7 +864,14 @@ fn validate_public_input(
                 }
                 actual_bound_roots.push(expected_root);
                 actual_bound_root_uses.push(*root_use);
-                bound_column_ordinals.extend_from_slice(ordered_column_ordinals);
+                for column_ordinal in ordered_column_ordinals {
+                    if bound_column_root_uses
+                        .insert(*column_ordinal, *root_use)
+                        .is_some()
+                    {
+                        return Err("bound relation column occurs in more than one tree".to_owned());
+                    }
+                }
                 relation_trees.push(RelationProofTreeInput::BoundPublic(statement_tree.clone()));
             }
         }
@@ -399,8 +879,6 @@ fn validate_public_input(
     if public_tree_inputs.next().is_some() {
         return Err("exact public input has an extraneous bound relation tree".to_owned());
     }
-    bound_column_ordinals.sort_unstable();
-    bound_column_ordinals.dedup();
     if actual_bound_roots != statement_roots
         || actual_bound_roots.len() != EXACT_BOUND_TREE_COUNT
         || actual_bound_root_uses
@@ -409,11 +887,11 @@ fn validate_public_input(
                 vec![BoundTreeRootUse::Output; EXACT_OUTPUT_BOUND_TREE_COUNT],
             ]
             .concat()
-        || bound_column_ordinals.len() != EXACT_BOUND_COLUMN_COUNT
+        || bound_column_root_uses.len() != EXACT_BOUND_COLUMN_COUNT
     {
         return Err("verifier-owned bound roots do not match the application statement".to_owned());
     }
-    for column_ordinal in bound_column_ordinals {
+    for (column_ordinal, root_use) in bound_column_root_uses {
         let descriptor = variant
             .ordered_columns()
             .get(
@@ -421,30 +899,31 @@ fn validate_public_input(
                     .map_err(|_| "bound column ordinal exceeds usize".to_owned())?,
             )
             .ok_or_else(|| "bound column ordinal is outside the relation".to_owned())?;
+        let (_, block_schedule) = bound_reduction_block_schedule_for_root_use(root_use)?;
         if !matches!(descriptor.origin(), RelationColumnOrigin::BoundTree { .. })
             || descriptor.source_degree_bound_exclusive()
-                > EXACT_BOUND_SOURCE_DEGREE_BOUND_EXCLUSIVE as u64
+                != block_schedule.source_degree_bound_exclusive as u64
         {
             return Err("bound column violates its relation descriptor".to_owned());
         }
     }
 
-    let validated_plan =
-        ValidatedRelationPlanArtifact::from_compiled_plan(&compiled_plan, &relation_context)
-            .map_err(|error| format!("revalidate exact relation plan: {error:?}"))?;
     let verifier_sequence_evaluator =
         VerifiedKeyRelationColumnEvaluator::from_recomputed_public_setup_seed(
             prerequisite.public_setup_seed(),
-            &validated_plan,
+            relation_plan.validated_relation_plan_artifact(),
             &variant,
-            &relation_context,
         )
         .map_err(|error| format!("construct verifier-sequence evaluator: {error:?}"))?;
     Ok(VerifiedExactRelation {
         variant,
         context: relation_context,
+        proof_shape,
         relation_plan_hash: relation_plan.relation_plan_hash(),
         relation_plan_variant_hash: relation_plan.relation_plan_variant_hash(),
+        row_code_whir_construction_plan_identity_hash: relation_plan
+            .row_code_whir_construction_plan_identity_hash()
+            .map_err(|error| format!("derive exact construction-plan identity: {error:?}"))?,
         relation_trees,
         verifier_sequence_evaluator,
     })
@@ -458,47 +937,11 @@ pub(super) fn validate_public_input_bindings(
 }
 
 fn exact_bound_tree_catalog_entries(
-    prerequisite: &VerifiedSameSecretLowDegreePrerequisite,
-    public_input: &ExactSameSecretPublicInput,
     verified_relation: &VerifiedExactRelation,
 ) -> Result<Vec<ProofTreeCatalogEntry>, String> {
-    let schedule = verified_relation
-        .variant
-        .common_proof_transcript_schedule(&verified_relation.context)
-        .map_err(|error| format!("derive exact tree-catalog schedule: {error:?}"))?;
-    let canonical_header = exact_transcript_header(
-        public_input.protocol_version,
-        public_input.suite_identifier,
-        public_input.statement_schema_identifier,
-        verified_relation.relation_plan_hash,
-        verified_relation.relation_plan_variant_hash,
-        prerequisite.binding_digest(),
-        &public_input.canonical_application_statement_bytes,
-    )?;
-    let catalog = build_complete_proof_tree_catalog(
-        ProofTreeCatalogInput {
-            suite_identifier: public_input.suite_identifier,
-            canonical_proof_object_header_bytes: canonical_header,
-            application_statement_schema_identifier: public_input.statement_schema_identifier,
-            proof_field_index: 0,
-            evaluation_domain_size: verified_relation.variant.evaluation_domain_size(),
-            relation_trees: verified_relation.relation_trees.clone(),
-        },
-        &schedule,
-    )
-    .map_err(|error| format!("build exact bound tree catalog: {error:?}"))?;
-    if catalog.evaluation_domain_size()
-        != u64::try_from(EXACT_BOUND_LEAF_COUNT * 2)
-            .map_err(|_| "bound evaluation domain exceeds u64".to_owned())?
-    {
-        return Err("exact bound tree catalog has the wrong evaluation domain".to_owned());
-    }
-    let entries = catalog
-        .entries()
-        .iter()
-        .filter(|entry| entry.source() == ProofTreeCatalogSource::RelationBoundPublic)
-        .cloned()
-        .collect::<Vec<_>>();
+    let entries =
+        build_relation_bound_public_tree_catalog_entries(&verified_relation.relation_trees)
+            .map_err(|error| format!("build exact bound tree catalog: {error:?}"))?;
     if entries.len() != EXACT_BOUND_TREE_COUNT
         || entries.iter().any(|entry| {
             entry.materialized_row_width().ok() != Some(EXACT_BOUND_TREE_ROW_WIDTH)
@@ -514,7 +957,7 @@ struct ExactTranscriptPrefix {
     transcript: Option<CommonProofTranscript>,
     application_challenges: Vec<crate::bgv::proof_suite::RelationApplicationChallengeAssignment>,
     composition_challenges: Vec<ProofChallengeExtensionElement>,
-    deep_points: Vec<ProofChallengeExtensionElement>,
+    out_of_domain_points: Vec<ProofChallengeExtensionElement>,
     opening_points: Vec<ProofChallengeExtensionElement>,
 }
 
@@ -568,8 +1011,10 @@ fn exact_transcript_prefix(
 ) -> Result<ExactTranscriptPrefix, String> {
     let schedule = verified_relation
         .variant
-        .common_proof_transcript_schedule(&verified_relation.context)
-        .map_err(|error| format!("derive exact transcript schedule: {error:?}"))?;
+        .common_proof_relation_prefix_schedule(&verified_relation.context)
+        .map_err(|error| format!("derive exact transcript schedule: {error:?}"))?
+        .into_row_code_whir_successor()
+        .map_err(|error| format!("derive exact successor transcript schedule: {error:?}"))?;
     let mut header = exact_transcript_header(
         public_input.protocol_version,
         public_input.suite_identifier,
@@ -584,9 +1029,10 @@ fn exact_transcript_prefix(
     );
     header.extend_from_slice(EXACT_PUBLIC_INPUT_TRANSCRIPT_BINDING_DOMAIN);
     header.extend_from_slice(&public_input.digest()?);
-    let mut transcript = CommonProofTranscript::new(
+    let mut transcript = CommonProofTranscript::new_relation_prefix(
         public_input.protocol_version,
         public_input.suite_identifier,
+        verified_relation.row_code_whir_construction_plan_identity_hash,
         public_input.statement_schema_identifier,
         &header,
         schedule.clone(),
@@ -594,18 +1040,23 @@ fn exact_transcript_prefix(
     .map_err(|error| format!("construct exact production transcript: {error:?}"))?;
     #[cfg(test)]
     {
-        let deep_point_cardinality_bounds = (0..verified_relation.context.deep_point_count)
+        let out_of_domain_point_cardinality_bounds = (0..verified_relation
+            .context
+            .out_of_domain_point_count)
             .map(|point_ordinal| {
                 verified_relation
                     .variant
-                    .deep_point_sampler_cardinality_bound(&verified_relation.context, point_ordinal)
+                    .out_of_domain_point_sampler_cardinality_bound(
+                        &verified_relation.context,
+                        point_ordinal,
+                    )
                     .map_err(|error| {
-                        format!("derive live DEEP sampler cardinality bound: {error:?}")
+                        format!("derive live out-of-domain sampler cardinality bound: {error:?}")
                     })
             })
             .collect::<Result<Vec<_>, _>>()?;
         transcript
-            .enable_public_sampler_trace(&deep_point_cardinality_bounds)
+            .enable_public_sampler_trace(&out_of_domain_point_cardinality_bounds)
             .map_err(|error| format!("enable exact public sampler trace: {error:?}"))?;
     }
     absorb_role_roots(
@@ -636,27 +1087,24 @@ fn exact_transcript_prefix(
                 .map_err(|error| format!("sample composition challenge: {error:?}"))?,
         );
     }
-    for component_ordinal in 0..verified_relation.context.quotient_component_count {
-        transcript
-            .absorb_quotient_root(
-                u16::try_from(component_ordinal)
-                    .map_err(|_| "quotient component ordinal exceeds u16".to_owned())?,
-                column_digest_bytes(quotient_root),
-            )
-            .map_err(|error| format!("absorb exact quotient root: {error:?}"))?;
-    }
-    let mut deep_points =
-        Vec::with_capacity(usize::from(verified_relation.context.deep_point_count));
-    for point_ordinal in 0..verified_relation.context.deep_point_count {
+    transcript
+        .absorb_row_code_whir_quotient_phase_root(column_digest_bytes(quotient_root))
+        .map_err(|error| format!("absorb exact quotient phase root: {error:?}"))?;
+    let mut out_of_domain_points = Vec::with_capacity(usize::from(
+        verified_relation.context.out_of_domain_point_count,
+    ));
+    for point_ordinal in 0..verified_relation.context.out_of_domain_point_count {
         let mut relation_error = None;
-        let deep_point = transcript
-            .sample_deep_point(point_ordinal, |candidate| {
-                match verified_relation.variant.deep_point_candidate_is_forbidden(
-                    &verified_relation.context,
-                    point_ordinal,
-                    candidate,
-                    &deep_points,
-                ) {
+        let out_of_domain_point = transcript
+            .sample_out_of_domain_point(point_ordinal, |candidate| {
+                match verified_relation
+                    .variant
+                    .out_of_domain_point_candidate_is_forbidden(
+                        &verified_relation.context,
+                        point_ordinal,
+                        candidate,
+                        &out_of_domain_points,
+                    ) {
                     Ok(forbidden) => forbidden,
                     Err(error) => {
                         relation_error = Some(error);
@@ -664,29 +1112,28 @@ fn exact_transcript_prefix(
                     }
                 }
             })
-            .map_err(|error| format!("sample exact deep point: {error:?}"))?;
+            .map_err(|error| format!("sample exact out-of-domain point: {error:?}"))?;
         if let Some(error) = relation_error {
-            return Err(format!("validate exact deep point: {error:?}"));
+            return Err(format!("validate exact out-of-domain point: {error:?}"));
         }
-        deep_points.push(deep_point);
+        out_of_domain_points.push(out_of_domain_point);
     }
     let opening_points = verified_relation
         .variant
-        .derive_opening_points(&verified_relation.context, &deep_points)
+        .derive_opening_points(&verified_relation.context, &out_of_domain_points)
         .map_err(|error| format!("derive exact opening points: {error:?}"))?;
     Ok(ExactTranscriptPrefix {
         transcript: Some(transcript),
         application_challenges,
         composition_challenges,
-        deep_points,
+        out_of_domain_points,
         opening_points,
     })
 }
 
 fn finish_exact_transcript(
     prefix: &mut ExactTranscriptPrefix,
-    deep_evaluations: &[ProofChallengeExtensionElement],
-    quotient_root: ColumnDigest,
+    out_of_domain_evaluations: &[ProofChallengeExtensionElement],
     opening_batch_mask_chunk_evaluations: &[ProofChallengeExtensionElement;
          EXACT_OPENING_BATCH_MASK_CHUNK_COUNT],
 ) -> Result<RowCodeWhirTranscript, String> {
@@ -695,34 +1142,31 @@ fn finish_exact_transcript(
         .as_mut()
         .ok_or_else(|| "exact common transcript was already consumed".to_owned())?;
     transcript
-        .absorb_deep_evaluations(deep_evaluations)
-        .map_err(|error| format!("absorb exact deep evaluations: {error:?}"))?;
-    transcript
-        .absorb_opening_batch_mask_root(column_digest_bytes(quotient_root))
-        .map_err(|error| format!("absorb exact opening-batch root: {error:?}"))?;
+        .absorb_out_of_domain_evaluations(out_of_domain_evaluations)
+        .map_err(|error| format!("absorb exact out-of-domain evaluations: {error:?}"))?;
     prefix
         .transcript
         .take()
         .ok_or_else(|| "exact common transcript was already consumed".to_owned())?
-        .into_row_code_whir_transcript(opening_batch_mask_chunk_evaluations)
+        .into_secret_bearing_row_code_whir_transcript(opening_batch_mask_chunk_evaluations)
         .map_err(|error| format!("handoff exact row-code WHIR transcript: {error:?}"))
 }
 
-fn verify_production_deep_composition(
+fn verify_production_out_of_domain_composition(
     verified_relation: &mut VerifiedExactRelation,
     transcript_prefix: &ExactTranscriptPrefix,
-    deep_evaluations: &[ProofChallengeExtensionElement],
+    out_of_domain_evaluations: &[ProofChallengeExtensionElement],
 ) -> Result<(), String> {
     verified_relation
         .variant
-        .verify_deep_composition(
-            DeepCompositionVerificationInput::new(
+        .verify_out_of_domain_composition(
+            OutOfDomainCompositionVerificationInput::new(
                 &verified_relation.context,
                 &transcript_prefix.application_challenges,
                 &transcript_prefix.composition_challenges,
-                &transcript_prefix.deep_points,
+                &transcript_prefix.out_of_domain_points,
                 &transcript_prefix.opening_points,
-                deep_evaluations,
+                out_of_domain_evaluations,
             ),
             |column_ordinal, point| {
                 verified_relation
@@ -730,7 +1174,7 @@ fn verify_production_deep_composition(
                     .evaluate_at_extension_point(column_ordinal, point)
             },
         )
-        .map_err(|error| format!("verify exact production deep composition: {error:?}"))
+        .map_err(|error| format!("verify exact production out-of-domain composition: {error:?}"))
 }
 
 #[derive(Clone, Copy)]
@@ -744,17 +1188,17 @@ struct ExactBoundOpeningClaim {
 fn derive_bound_opening_claims(
     variant: &RelationPlanVariant,
     opening_points: &[ProofChallengeExtensionElement],
-    deep_evaluations: &[ProofChallengeExtensionElement],
+    out_of_domain_evaluations: &[ProofChallengeExtensionElement],
     challenger: &mut ExtensionFieldChallenger,
 ) -> Result<Vec<ExactBoundOpeningClaim>, String> {
-    if variant.ordered_opening_claims().len() != deep_evaluations.len() {
+    if variant.ordered_opening_claims().len() != out_of_domain_evaluations.len() {
         return Err("bound opening reduction has the wrong claim count".to_owned());
     }
     let mut claims = Vec::new();
     for (claim, claimed_value) in variant
         .ordered_opening_claims()
         .iter()
-        .zip(deep_evaluations)
+        .zip(out_of_domain_evaluations)
     {
         if claim.source_class() != RelationOpeningSourceClass::TreeColumn {
             continue;
@@ -817,13 +1261,46 @@ fn derive_bound_query_indices(
     })
 }
 
+fn bound_reduction_block_schedule(
+    block_ordinal: usize,
+) -> Result<ExactBoundReductionBlockSchedule, String> {
+    EXACT_BOUND_REDUCTION_BLOCK_SCHEDULES
+        .get(block_ordinal)
+        .copied()
+        .ok_or_else(|| "bound reduction block ordinal is outside the construction".to_owned())
+}
+
+fn bound_reduction_block_schedule_for_root_use(
+    root_use: BoundTreeRootUse,
+) -> Result<(usize, ExactBoundReductionBlockSchedule), String> {
+    EXACT_BOUND_REDUCTION_BLOCK_SCHEDULES
+        .iter()
+        .copied()
+        .enumerate()
+        .find(|(_, schedule)| schedule.root_use == root_use)
+        .ok_or_else(|| "bound root use has no reduction block".to_owned())
+}
+
+#[cfg(test)]
+fn bound_degree_random_coordinate_count() -> usize {
+    EXACT_BOUND_REDUCTION_BLOCK_SCHEDULES
+        .iter()
+        .copied()
+        .map(ExactBoundReductionBlockSchedule::random_degree_coordinate_count)
+        .sum()
+}
+
 fn bound_reduction_block_coordinates(block_ordinal: usize) -> Result<Vec<ChallengeField>, String> {
     let block_variable_count = EXACT_TABLE_VARIABLE_COUNT
         .checked_sub(EXACT_BOUND_POLYNOMIAL_VARIABLE_COUNT)
         .ok_or_else(|| "bound reduction block geometry underflowed".to_owned())?;
-    if block_ordinal >= EXACT_BOUND_REDUCTION_BLOCK_COUNT {
-        return Err("bound reduction block ordinal is outside the construction".to_owned());
+    if EXACT_BOUND_REDUCTION_BLOCK_COUNT
+        != 1_usize << EXACT_BOUND_REDUCTION_BLOCK_SELECTOR_VARIABLE_COUNT
+        || EXACT_BOUND_REDUCTION_BLOCK_SELECTOR_VARIABLE_COUNT > block_variable_count
+    {
+        return Err("bound reduction block selector has the wrong fixed width".to_owned());
     }
+    bound_reduction_block_schedule(block_ordinal)?;
     Ok((0..block_variable_count)
         .map(|bit_ordinal| {
             if block_ordinal & (1 << (block_variable_count - 1 - bit_ordinal)) == 0 {
@@ -839,11 +1316,15 @@ fn bound_degree_test_points(
     challenger: &mut ExtensionFieldChallenger,
 ) -> Result<Vec<Point<ChallengeField>>, String> {
     let mut points = Vec::with_capacity(EXACT_BOUND_DEGREE_TEST_COUNT);
-    for block_ordinal in 0..EXACT_BOUND_REDUCTION_BLOCK_COUNT {
+    for (block_ordinal, schedule) in EXACT_BOUND_REDUCTION_BLOCK_SCHEDULES
+        .iter()
+        .copied()
+        .enumerate()
+    {
         let mut boundary_coordinates = bound_reduction_block_coordinates(block_ordinal)?;
         boundary_coordinates.extend((0..EXACT_BOUND_POLYNOMIAL_VARIABLE_COUNT).map(
             |bit_ordinal| {
-                if EXACT_BOUND_QUOTIENT_DEGREE_BOUND_EXCLUSIVE
+                if schedule.quotient_degree_bound_exclusive
                     & (1 << (EXACT_BOUND_POLYNOMIAL_VARIABLE_COUNT - 1 - bit_ordinal))
                     == 0
                 {
@@ -855,12 +1336,11 @@ fn bound_degree_test_points(
         ));
         points.push(Point::new(boundary_coordinates));
 
-        // An honest synthetic quotient has degree below 18,431. Its single
-        // boundary coefficient at 18,431 is checked above. The remaining
-        // suffix [18,432, 32,768) is the disjoint union of these three
-        // aligned subcubes.
+        // The boundary point checks the first forbidden quotient coefficient.
+        // The block-specific aligned subcubes partition every later coefficient
+        // through the shared 32,768-coefficient ambient polynomial.
         for (suffix_ordinal, fixed_prefix) in
-            EXACT_BOUND_DEGREE_SUFFIX_PREFIXES.into_iter().enumerate()
+            schedule.degree_suffix_prefixes.iter().copied().enumerate()
         {
             let mut coordinates = bound_reduction_block_coordinates(block_ordinal)?;
             coordinates.extend(fixed_prefix.iter().copied().map(|bit| {
@@ -885,6 +1365,15 @@ fn bound_degree_test_points(
                 );
             }
             points.push(Point::new(coordinates));
+        }
+        if points.len()
+            != EXACT_BOUND_REDUCTION_BLOCK_SCHEDULES[..=block_ordinal]
+                .iter()
+                .copied()
+                .map(ExactBoundReductionBlockSchedule::degree_test_count)
+                .sum::<usize>()
+        {
+            return Err("bound degree-test block has the wrong fixed shape".to_owned());
         }
     }
     if points.len() != EXACT_BOUND_DEGREE_TEST_COUNT {
@@ -1013,36 +1502,41 @@ fn derive_exact_point_row_weights(
             })?,
         ];
         let mut base = Vec::with_capacity(base_layout.rows.len());
-        for (row_ordinal, row) in base_layout.rows.iter().enumerate() {
+        for (column_group_ordinal, row) in base_layout.rows.iter().enumerate() {
             base.push(
                 if row
                     .opening_point_ordinals
                     .contains(&(opening_point_ordinal as u32))
                 {
-                    challenger.sample_exact_challenge(RowCodeWhirChallenge::PhaseRowWeight {
-                        opening_point_ordinal,
-                        phase: RowCodeWhirPhase::Base,
-                        row_ordinal: u32::try_from(row_ordinal)
-                            .map_err(|_| "base row ordinal exceeds u32".to_owned())?,
-                    })?
+                    challenger.sample_exact_challenge(
+                        RowCodeWhirChallenge::TraceColumnGroupWeight {
+                            opening_point_ordinal,
+                            phase: RowCodeWhirTracePhase::Base,
+                            column_group_ordinal: u32::try_from(column_group_ordinal)
+                                .map_err(|_| "base column-group ordinal exceeds u32".to_owned())?,
+                        },
+                    )?
                 } else {
                     ChallengeField::ZERO
                 },
             );
         }
         let mut auxiliary = Vec::with_capacity(auxiliary_layout.rows.len());
-        for (row_ordinal, row) in auxiliary_layout.rows.iter().enumerate() {
+        for (column_group_ordinal, row) in auxiliary_layout.rows.iter().enumerate() {
             auxiliary.push(
                 if row
                     .opening_point_ordinals
                     .contains(&(opening_point_ordinal as u32))
                 {
-                    challenger.sample_exact_challenge(RowCodeWhirChallenge::PhaseRowWeight {
-                        opening_point_ordinal,
-                        phase: RowCodeWhirPhase::Auxiliary,
-                        row_ordinal: u32::try_from(row_ordinal)
-                            .map_err(|_| "auxiliary row ordinal exceeds u32".to_owned())?,
-                    })?
+                    challenger.sample_exact_challenge(
+                        RowCodeWhirChallenge::TraceColumnGroupWeight {
+                            opening_point_ordinal,
+                            phase: RowCodeWhirTracePhase::Auxiliary,
+                            column_group_ordinal: u32::try_from(column_group_ordinal).map_err(
+                                |_| "auxiliary column-group ordinal exceeds u32".to_owned(),
+                            )?,
+                        },
+                    )?
                 } else {
                     ChallengeField::ZERO
                 },
@@ -1051,9 +1545,15 @@ fn derive_exact_point_row_weights(
         let mut quotient = vec![ChallengeField::ZERO; EXACT_QUOTIENT_PHASE_ROW_COUNT];
         if opening_point_ordinal == 0 {
             let quotient_component_weight =
-                challenger.sample_exact_challenge(RowCodeWhirChallenge::QuotientComponentWeight)?;
-            let opening_batch_mask_weight =
-                challenger.sample_exact_challenge(RowCodeWhirChallenge::OpeningBatchMaskWeight)?;
+                challenger.sample_exact_challenge(RowCodeWhirChallenge::QuotientGroupWeight {
+                    opening_point_ordinal,
+                    source_group_ordinal: 0,
+                })?;
+            let opening_batch_mask_weight = challenger.sample_exact_challenge(
+                RowCodeWhirChallenge::OpeningBatchMaskWeight {
+                    opening_point_ordinal,
+                },
+            )?;
             for extension_coordinate in 0..5 {
                 let basis = challenge_extension_basis(extension_coordinate);
                 quotient[extension_coordinate] = quotient_component_weight * basis;
@@ -1171,18 +1671,18 @@ fn claim_key(
     )
 }
 
-fn deep_evaluation_catalog(
+fn out_of_domain_evaluation_catalog(
     variant: &RelationPlanVariant,
-    deep_evaluations: &[ProofChallengeExtensionElement],
+    out_of_domain_evaluations: &[ProofChallengeExtensionElement],
 ) -> Result<BTreeMap<(u16, u32, u32), ProofChallengeExtensionElement>, String> {
-    if deep_evaluations.len() != variant.ordered_opening_claims().len() {
-        return Err("deep evaluation count does not match the relation".to_owned());
+    if out_of_domain_evaluations.len() != variant.ordered_opening_claims().len() {
+        return Err("out-of-domain evaluation count does not match the relation".to_owned());
     }
     let mut catalog = BTreeMap::new();
     for (claim, value) in variant
         .ordered_opening_claims()
         .iter()
-        .zip(deep_evaluations)
+        .zip(out_of_domain_evaluations)
     {
         let key = claim_key(
             claim.source_class(),
@@ -1207,14 +1707,14 @@ fn selector_equality_weights(selectors: [ChallengeField; 3]) -> [ChallengeField;
 fn verify_opening_batch_mask_chunk_evaluations(
     variant: &RelationPlanVariant,
     opening_points: &[ProofChallengeExtensionElement],
-    deep_evaluations: &[ProofChallengeExtensionElement],
+    out_of_domain_evaluations: &[ProofChallengeExtensionElement],
     chunk_evaluations: &[ProofChallengeExtensionElement; EXACT_OPENING_BATCH_MASK_CHUNK_COUNT],
 ) -> Result<(), String> {
     let opening_point = opening_points
         .first()
         .copied()
         .ok_or_else(|| "exact relation has no quotient opening point".to_owned())?;
-    let catalog = deep_evaluation_catalog(variant, deep_evaluations)?;
+    let catalog = out_of_domain_evaluation_catalog(variant, out_of_domain_evaluations)?;
     let claimed_mask_evaluation = catalog
         .get(&claim_key(
             RelationOpeningSourceClass::BatchMask,
@@ -1244,7 +1744,7 @@ fn verify_opening_batch_mask_chunk_evaluations(
     Ok(())
 }
 
-fn expected_base_phase_deep_value(
+fn expected_base_phase_out_of_domain_value(
     layout: &ExactBasePhaseLayout,
     row_weights: &[ChallengeField],
     selector_weights: [ChallengeField; 8],
@@ -1283,7 +1783,7 @@ fn expected_base_phase_deep_value(
     Ok(expected)
 }
 
-fn expected_quotient_phase_deep_value(
+fn expected_quotient_phase_out_of_domain_value(
     row_weights: &[ChallengeField],
     selector_weights: [ChallengeField; 8],
     catalog: &BTreeMap<(u16, u32, u32), ProofChallengeExtensionElement>,
@@ -1351,7 +1851,7 @@ fn exact_whir_opening_points(
         coordinates.extend_from_slice(&point_row_weights[opening_point_ordinal].selectors);
         coordinates.extend_from_slice(reduction.multilinear_point.as_slice());
         if coordinates.len() != EXACT_TABLE_VARIABLE_COUNT {
-            return Err("exact deep WHIR point has the wrong variable count".to_owned());
+            return Err("exact out-of-domain WHIR point has the wrong variable count".to_owned());
         }
         points.push(Point::new(coordinates));
     }
@@ -1403,29 +1903,29 @@ fn requested_columns_by_point() -> Vec<Vec<usize>> {
     requested
 }
 
-fn expected_deep_whir_evaluations(
+fn expected_out_of_domain_whir_evaluations(
     variant: &RelationPlanVariant,
     base_layout: &ExactBasePhaseLayout,
     auxiliary_layout: &ExactBasePhaseLayout,
     opening_points: &[ProofChallengeExtensionElement],
-    deep_evaluations: &[ProofChallengeExtensionElement],
+    out_of_domain_evaluations: &[ProofChallengeExtensionElement],
     opening_batch_mask_chunk_evaluations: &[ProofChallengeExtensionElement;
          EXACT_OPENING_BATCH_MASK_CHUNK_COUNT],
     point_row_weights: &[ExactPointRowWeights; 3],
 ) -> Result<[ChallengeField; 3], String> {
-    let catalog = deep_evaluation_catalog(variant, deep_evaluations)?;
+    let catalog = out_of_domain_evaluation_catalog(variant, out_of_domain_evaluations)?;
     let mut expected = [ChallengeField::ZERO; 3];
     for opening_point_ordinal in 0..3 {
         let selector_weights =
             selector_equality_weights(point_row_weights[opening_point_ordinal].selectors);
-        let mut polynomial_value = expected_base_phase_deep_value(
+        let mut polynomial_value = expected_base_phase_out_of_domain_value(
             base_layout,
             &point_row_weights[opening_point_ordinal].base,
             selector_weights,
             opening_point_ordinal as u32,
             &catalog,
         )?;
-        polynomial_value += expected_base_phase_deep_value(
+        polynomial_value += expected_base_phase_out_of_domain_value(
             auxiliary_layout,
             &point_row_weights[opening_point_ordinal].auxiliary,
             selector_weights,
@@ -1433,7 +1933,7 @@ fn expected_deep_whir_evaluations(
             &catalog,
         )?;
         if opening_point_ordinal == 0 {
-            polynomial_value += expected_quotient_phase_deep_value(
+            polynomial_value += expected_quotient_phase_out_of_domain_value(
                 &point_row_weights[opening_point_ordinal].quotient,
                 selector_weights,
                 &catalog,
@@ -1742,7 +2242,7 @@ fn expected_query_whir_evaluations(
 
 fn verify_whir_evaluation_claims(
     proof: &ExactSameSecretProof,
-    expected_deep: [ChallengeField; 3],
+    expected_out_of_domain: [ChallengeField; 3],
     expected_queries: &[[ChallengeField; 3]],
     expected_bound_reduction: &[ChallengeField],
 ) -> Result<(), String> {
@@ -1758,11 +2258,11 @@ fn verify_whir_evaluation_claims(
     {
         return Err("exact WHIR evaluation schedule has the wrong count".to_owned());
     }
-    for (opening_ordinal, expected) in expected_deep.iter().enumerate() {
+    for (opening_ordinal, expected) in expected_out_of_domain.iter().enumerate() {
         let batch = &proof.aggregate_opening_proof.evals[opening_ordinal];
         if batch.current() != [*expected] || !batch.next().is_empty() {
             return Err(format!(
-                "exact WHIR deep opening {opening_ordinal} does not authenticate the production claims"
+                "exact WHIR out-of-domain opening {opening_ordinal} does not authenticate the production claims"
             ));
         }
     }
@@ -1815,9 +2315,8 @@ pub(crate) fn verify_exact_same_secret_proof_bytes(
 ) -> Result<ExactSameSecretVerificationMetrics, String> {
     let public_input = decode_exact_same_secret_public_input(canonical_public_input)?;
     let mut verified_relation = validate_public_input(prerequisite, &public_input)?;
-    let bound_tree_entries =
-        exact_bound_tree_catalog_entries(prerequisite, &public_input, &verified_relation)?;
-    let shape = ExactProofShape::from_variant(&verified_relation.variant)?;
+    let bound_tree_entries = exact_bound_tree_catalog_entries(&verified_relation)?;
+    let shape = verified_relation.proof_shape;
     let base_layout =
         ExactBasePhaseLayout::for_tree_role(&verified_relation.variant, ProofTreeRole::BaseOracle)?;
     let auxiliary_layout = ExactBasePhaseLayout::for_tree_role(
@@ -1833,21 +2332,20 @@ pub(crate) fn verify_exact_same_secret_proof_bytes(
         proof.auxiliary_root,
         proof.quotient_root,
     )?;
-    verify_production_deep_composition(
+    verify_production_out_of_domain_composition(
         &mut verified_relation,
         &transcript_prefix,
-        &proof.deep_evaluations,
+        &proof.out_of_domain_evaluations,
     )?;
     verify_opening_batch_mask_chunk_evaluations(
         &verified_relation.variant,
         &transcript_prefix.opening_points,
-        &proof.deep_evaluations,
+        &proof.out_of_domain_evaluations,
         &proof.opening_batch_mask_chunk_evaluations,
     )?;
     let row_code_whir_transcript = finish_exact_transcript(
         &mut transcript_prefix,
-        &proof.deep_evaluations,
-        proof.quotient_root,
+        &proof.out_of_domain_evaluations,
         &proof.opening_batch_mask_chunk_evaluations,
     )?;
     let pcs = plain_aggregate_pcs(EXACT_PCS_VARIABLE_COUNT)?;
@@ -1862,7 +2360,7 @@ pub(crate) fn verify_exact_same_secret_proof_bytes(
     let bound_claims = derive_bound_opening_claims(
         &verified_relation.variant,
         &transcript_prefix.opening_points,
-        &proof.deep_evaluations,
+        &proof.out_of_domain_evaluations,
         &mut challenger,
     )?;
     ensure_bound_opening_points_are_outside_evaluation_domain(
@@ -1896,12 +2394,12 @@ pub(crate) fn verify_exact_same_secret_proof_bytes(
         bound_evaluation_domain,
         &degree_test_points,
     )?;
-    let expected_deep = expected_deep_whir_evaluations(
+    let expected_out_of_domain = expected_out_of_domain_whir_evaluations(
         &verified_relation.variant,
         &base_layout,
         &auxiliary_layout,
         &transcript_prefix.opening_points,
-        &proof.deep_evaluations,
+        &proof.out_of_domain_evaluations,
         &proof.opening_batch_mask_chunk_evaluations,
         &point_row_weights,
     )?;
@@ -1916,7 +2414,7 @@ pub(crate) fn verify_exact_same_secret_proof_bytes(
     )?;
     verify_whir_evaluation_claims(
         &proof,
-        expected_deep,
+        expected_out_of_domain,
         &expected_queries,
         &expected_bound_reduction,
     )?;
@@ -2047,6 +2545,11 @@ pub(crate) fn decode_exact_same_secret_public_input(
     if public_relation_tree_count == 0 {
         return Err("exact public input has no public relation trees".to_owned());
     }
+    reader.require_remaining_elements(
+        public_relation_tree_count,
+        1 + 2 * 64,
+        "public relation-tree entries",
+    )?;
     let mut public_relation_trees = Vec::with_capacity(public_relation_tree_count);
     for _ in 0..public_relation_tree_count {
         public_relation_trees.push(match reader.read_u8()? {
@@ -2092,10 +2595,10 @@ fn encode_exact_same_secret_proof(
     writer.write_digest(proof.auxiliary_root);
     writer.write_digest(proof.quotient_root);
     writer.write_u32(checked_u32(
-        proof.deep_evaluations.len(),
-        "deep evaluation count",
+        proof.out_of_domain_evaluations.len(),
+        "out-of-domain evaluation count",
     )?);
-    for evaluation in &proof.deep_evaluations {
+    for evaluation in &proof.out_of_domain_evaluations {
         writer.write_production_extension(*evaluation);
     }
     for evaluation in &proof.opening_batch_mask_chunk_evaluations {
@@ -2188,16 +2691,21 @@ fn decode_exact_same_secret_proof(
     let base_root = reader.read_digest()?;
     let auxiliary_root = reader.read_digest()?;
     let quotient_root = reader.read_digest()?;
-    let deep_evaluation_count = reader.read_u32()? as usize;
-    if deep_evaluation_count != shape.opening_claim_count {
+    let out_of_domain_evaluation_count = reader.read_u32()? as usize;
+    if out_of_domain_evaluation_count != shape.opening_claim_count {
         return Err(format!(
-            "exact same-secret proof has {deep_evaluation_count} deep evaluations, expected {}",
+            "exact same-secret proof has {out_of_domain_evaluation_count} out-of-domain evaluations, expected {}",
             shape.opening_claim_count
         ));
     }
-    let mut deep_evaluations = Vec::with_capacity(deep_evaluation_count);
-    for _ in 0..deep_evaluation_count {
-        deep_evaluations.push(reader.read_production_extension()?);
+    reader.require_remaining_elements(
+        out_of_domain_evaluation_count,
+        PROOF_CHALLENGE_EXTENSION_DEGREE * core::mem::size_of::<u64>(),
+        "out-of-domain evaluations",
+    )?;
+    let mut out_of_domain_evaluations = Vec::with_capacity(out_of_domain_evaluation_count);
+    for _ in 0..out_of_domain_evaluation_count {
+        out_of_domain_evaluations.push(reader.read_production_extension()?);
     }
     let mut opening_batch_mask_chunk_evaluations =
         [ProofChallengeExtensionElement::ZERO; EXACT_OPENING_BATCH_MASK_CHUNK_COUNT];
@@ -2206,6 +2714,17 @@ fn decode_exact_same_secret_proof(
     }
     let aggregate_commitment = MerkleCap::new(vec![reader.read_digest()?]);
     let query_indices_placeholder = vec![0_usize; EXACT_COLUMN_QUERY_COUNT];
+    let authenticated_phase_value_count = shape
+        .phase_row_counts()
+        .into_iter()
+        .try_fold(0_usize, |count, row_count| count.checked_add(row_count))
+        .and_then(|row_count| row_count.checked_mul(EXACT_COLUMN_QUERY_COUNT))
+        .ok_or_else(|| "exact authenticated phase-value count overflowed".to_owned())?;
+    reader.require_remaining_elements(
+        authenticated_phase_value_count,
+        core::mem::size_of::<u64>(),
+        "authenticated phase values",
+    )?;
     let mut authenticated_phase_columns = std::array::from_fn(|_| Vec::new());
     for (phase_columns, row_count) in authenticated_phase_columns
         .iter_mut()
@@ -2232,6 +2751,7 @@ fn decode_exact_same_secret_proof(
                 "exact phase frontier has {frontier_count} nodes, exceeding {maximum_frontier_count}"
             ));
         }
+        reader.require_remaining_elements(frontier_count, 64, "phase frontier nodes")?;
         frontier.reserve_exact(frontier_count);
         for _ in 0..frontier_count {
             frontier.push(reader.read_digest()?);
@@ -2246,6 +2766,22 @@ fn decode_exact_same_secret_proof(
         let maximum_bound_frontier_count = query_count
             .checked_mul(EXACT_BOUND_LEAF_COUNT.ilog2() as usize)
             .ok_or_else(|| "bound frontier limit overflowed".to_owned())?;
+        let bound_leaf_byte_length = 2_usize
+            .checked_mul(EXACT_BOUND_TREE_ROW_WIDTH)
+            .and_then(|value_count| value_count.checked_mul(core::mem::size_of::<u64>()))
+            .and_then(|byte_length| {
+                byte_length.checked_add(if entry.requires_persistent_leaf_salt() {
+                    COMMON_PROOF_SECRET_LEAF_SALT_BYTE_LENGTH
+                } else {
+                    0
+                })
+            })
+            .ok_or_else(|| "bound leaf byte count overflowed".to_owned())?;
+        reader.require_remaining_elements(
+            query_count,
+            bound_leaf_byte_length,
+            "bound leaf openings",
+        )?;
         let mut opened_leaves = Vec::with_capacity(query_count);
         for _ in 0..query_count {
             let persistent_salt = if entry.requires_persistent_leaf_salt() {
@@ -2273,6 +2809,7 @@ fn decode_exact_same_secret_proof(
         if frontier_count > maximum_bound_frontier_count {
             return Err("bound frontier exceeds its fixed maximum".to_owned());
         }
+        reader.require_remaining_elements(frontier_count, 64, "bound frontier nodes")?;
         let mut frontier = Vec::with_capacity(frontier_count);
         for _ in 0..frontier_count {
             frontier.push(reader.read_exact::<64>()?);
@@ -2293,7 +2830,7 @@ fn decode_exact_same_secret_proof(
         base_root,
         auxiliary_root,
         quotient_root,
-        deep_evaluations,
+        out_of_domain_evaluations,
         opening_batch_mask_chunk_evaluations,
         aggregate_commitment,
         authenticated_phase_columns,
@@ -2310,7 +2847,7 @@ fn validate_exact_proof_shape(
     bound_tree_entries: &[ProofTreeCatalogEntry],
     proof: &ExactSameSecretProof,
 ) -> Result<(), String> {
-    if proof.deep_evaluations.len() != shape.opening_claim_count
+    if proof.out_of_domain_evaluations.len() != shape.opening_claim_count
         || proof.aggregate_commitment.num_roots() != 1
     {
         return Err("exact same-secret proof has the wrong fixed shape".to_owned());
@@ -2449,6 +2986,23 @@ impl<'bytes> ExactWireReader<'bytes> {
         Ok(u64::from_le_bytes(self.read_exact()?))
     }
 
+    fn require_remaining_elements(
+        &self,
+        element_count: usize,
+        element_byte_length: usize,
+        label: &str,
+    ) -> Result<(), String> {
+        let required_byte_length = element_count
+            .checked_mul(element_byte_length)
+            .ok_or_else(|| format!("exact {label} byte count overflowed"))?;
+        if self.bytes.len().saturating_sub(self.offset) < required_byte_length {
+            return Err(format!(
+                "exact wire is truncated before {label} requiring {required_byte_length} bytes"
+            ));
+        }
+        Ok(())
+    }
+
     fn read_goldilocks(&mut self) -> Result<Goldilocks, String> {
         let canonical = self.read_u64()?;
         if canonical >= GOLDILOCKS_MODULUS {
@@ -2512,10 +3066,71 @@ mod construction_tests {
     const EXACT_AGGREGATE_SOUNDNESS_UPPER_BOUND_BITS: usize = 245;
     const EXACT_SAME_SECRET_APPLICATION_COUNT: u64 = 10;
     const QROM_RANDOM_ORACLE_QUERY_BOUND_EXPONENT: usize = 80;
-    const FIAT_SHAMIR_XOF_OUTPUT_BIT_LENGTH: usize = 512;
-    const BOUND_CLEARED_IDENTITY_ROOT_PAIR_BOUND: u64 = 9_217;
-    const EXACT_TRANSCRIPT_HASH_QUERY_COUNT: u64 = 1_306_993;
-    const EXACT_LOGICAL_VERIFIER_MESSAGE_COUNT: u64 = 5_098;
+    const FIAT_SHAMIR_RANDOM_ORACLE_OUTPUT_BIT_LENGTH: usize = 512;
+    const INPUT_BOUND_CLEARED_IDENTITY_ROOT_PAIR_BOUND: u64 = 9_217;
+    const EXACT_TRANSCRIPT_HASH_QUERY_COUNT: u64 = 1_335_305;
+    const EXACT_LOGICAL_VERIFIER_MESSAGE_COUNT: u64 = 5_076;
+
+    #[test]
+    fn exact_construction_plan_correspondence_rejects_operational_mutations() {
+        type ExactConstructionPlanMutation = (&'static str, fn(&mut RowCodeWhirConstructionPlan));
+
+        let (capability, variant, relation_context) = production_same_secret_relation()
+            .expect("compile the exact production same-secret relation");
+        let canonical_plan = capability.row_code_whir_construction_plan().clone();
+        let relation_plan_hash = capability.relation_plan_hash();
+        let relation_plan_variant_hash = capability.relation_plan_variant_hash();
+        let validate = |plan: &RowCodeWhirConstructionPlan| {
+            validate_exact_same_secret_construction_plan(
+                plan,
+                &variant,
+                &relation_context,
+                relation_plan_hash,
+                relation_plan_variant_hash,
+            )
+        };
+        validate(&canonical_plan).expect("accept the capability-held exact construction plan");
+
+        let mutations: &[ExactConstructionPlanMutation] = &[
+            ("trace row mapping", |plan| {
+                plan.base_phase.as_mut().expect("exact base phase").rows[0]
+                    .logical_polynomial_chunks[0]
+                    .as_mut()
+                    .expect("first exact base chunk")
+                    .coefficient_chunk_ordinal += 1;
+            }),
+            ("trace geometry", |plan| {
+                plan.auxiliary_phase
+                    .as_mut()
+                    .expect("exact auxiliary phase")
+                    .geometry
+                    .encoded_column_count /= 2;
+            }),
+            ("quotient row mapping", |plan| {
+                plan.quotient_phase.rows[0].coefficient_chunk_group_start_ordinal += 1;
+            }),
+            ("bound tree query schedule", |plan| {
+                plan.bound_trees[0].query_count += 1;
+            }),
+            ("bound reduction schedule", |plan| {
+                plan.bound_reduction_blocks[1].selector_prefix[0] ^= 1;
+            }),
+            ("aggregate role", |plan| {
+                plan.aggregate_column_roles.swap(0, 1);
+            }),
+            ("selected WHIR parameters", |plan| {
+                plan.parameters.outer_query_count += 1;
+            }),
+        ];
+        for (label, mutate) in mutations {
+            let mut mutated_plan = canonical_plan.clone();
+            mutate(&mut mutated_plan);
+            assert!(
+                validate(&mutated_plan).is_err(),
+                "accepted mutated exact construction plan: {label}"
+            );
+        }
+    }
 
     #[test]
     fn exact_challenge_field_reduction_polynomial_is_irreducible() {
@@ -2560,7 +3175,7 @@ mod construction_tests {
             challenge_groups: Vec<CommonProofApplicationChallengeGroup>,
         },
         CommonComposition,
-        CommonDeepPoint(CommonProofChallenge),
+        CommonOutOfDomainPoint(CommonProofChallenge),
         RowCodeWhirPointSelectorAndPhaseRow,
         RowCodeWhirBoundOpening,
         RowCodeWhirOpeningBatchMask,
@@ -2586,7 +3201,7 @@ mod construction_tests {
         WhirQueryCombination,
         WhirFinalSumcheck,
         WhirScalarOpeningBatch,
-        DeepPointForbiddenSet,
+        OutOfDomainPointForbiddenSet,
         RelationCompositionBatch,
         PackedPhaseSelectorAndRows,
         BoundOpeningBatch,
@@ -2603,7 +3218,7 @@ mod construction_tests {
             coordinate_modulus: u64,
             independent_repetition_count: u16,
         },
-        DeepAcceptedCandidates {
+        OutOfDomainAcceptedCandidates {
             field_cardinality: BigUint,
             accepted_candidate_count_floor: BigUint,
             challenge_field_numerator_ceiling: BigUint,
@@ -2667,7 +3282,7 @@ mod construction_tests {
                     );
                     raw_numerator
                 }
-                ExactAlgebraicSampleSpace::DeepAcceptedCandidates {
+                ExactAlgebraicSampleSpace::OutOfDomainAcceptedCandidates {
                     field_cardinality,
                     accepted_candidate_count_floor,
                     challenge_field_numerator_ceiling,
@@ -2677,7 +3292,7 @@ mod construction_tests {
                     assert!(
                         &raw_numerator * field_cardinality
                             <= challenge_field_numerator_ceiling * accepted_candidate_count_floor,
-                        "the source-derived DEEP accepted set must imply its field-denominator ceiling"
+                        "the source-derived out-of-domain accepted set must imply its field-denominator ceiling"
                     );
                     challenge_field_numerator_ceiling.clone()
                 }
@@ -2694,10 +3309,10 @@ mod construction_tests {
                     ExactAlgebraicChallengeFamily::CommonComposition,
                     ExactAlgebraicFailureEvent::RelationCompositionBatch,
                 ) | (
-                    ExactAlgebraicChallengeFamily::CommonDeepPoint(
-                        CommonProofChallenge::DeepPoint { point_ordinal: 0 },
+                    ExactAlgebraicChallengeFamily::CommonOutOfDomainPoint(
+                        CommonProofChallenge::OutOfDomainPoint { point_ordinal: 0 },
                     ),
-                    ExactAlgebraicFailureEvent::DeepPointForbiddenSet,
+                    ExactAlgebraicFailureEvent::OutOfDomainPointForbiddenSet,
                 ) | (
                     ExactAlgebraicChallengeFamily::RowCodeWhirPointSelectorAndPhaseRow,
                     ExactAlgebraicFailureEvent::PackedPhaseSelectorAndRows,
@@ -2861,12 +3476,14 @@ mod construction_tests {
         relation_context: &crate::bgv::proof_suite::RelationPlanCheckContext,
     ) -> StaticTranscriptAccounting {
         let schedule = variant
-            .common_proof_transcript_schedule(relation_context)
-            .expect("derive exact transcript schedule");
+            .common_proof_relation_prefix_schedule(relation_context)
+            .expect("derive exact transcript schedule")
+            .into_row_code_whir_successor()
+            .expect("derive exact successor transcript schedule");
         let common_handoff_count = schedule
             .maximum_row_code_whir_handoff_hash_query_count()
             .expect("derive exact common-prefix hash-query ceiling");
-        assert_eq!(common_handoff_count, 1_128_603);
+        assert_eq!(common_handoff_count, 1_128_587);
         let common_logical_verifier_message_count = schedule
             .maximum_row_code_whir_handoff_logical_verifier_message_count()
             .expect("derive exact common-prefix verifier-message count");
@@ -2902,19 +3519,14 @@ mod construction_tests {
         }
         counter.response();
 
-        // The outer and bound query vectors are one extended XOF message each.
-        counter.challenge(1);
-        counter.challenge(1);
-        let block_selector_variable_count =
-            EXACT_TABLE_VARIABLE_COUNT - EXACT_BOUND_POLYNOMIAL_VARIABLE_COUNT;
-        let bound_degree_random_coordinate_count = EXACT_BOUND_REDUCTION_BLOCK_COUNT
-            * EXACT_BOUND_DEGREE_SUFFIX_PREFIXES
-                .iter()
-                .map(|prefix| {
-                    EXACT_TABLE_VARIABLE_COUNT - block_selector_variable_count - prefix.len()
-                })
-                .sum::<usize>();
-        assert_eq!(bound_degree_random_coordinate_count, 72);
+        // Every distinct output owns 16 directly addressed 512-bit blocks at
+        // the pinned D=128 draw ceiling, in addition to one typed chain handle.
+        counter.challenge(exact_distinct_query_hash_count(EXACT_COLUMN_QUERY_COUNT));
+        counter.challenge(exact_distinct_query_hash_count(
+            EXACT_OUTPUT_BOUND_QUERY_COUNT,
+        ));
+        let bound_degree_random_coordinate_count = bound_degree_random_coordinate_count();
+        assert_eq!(bound_degree_random_coordinate_count, 50);
         for _ in 0..bound_degree_random_coordinate_count {
             counter.challenge(maximum_extension_hash_query_count);
         }
@@ -2926,7 +3538,7 @@ mod construction_tests {
             counter.response();
         }
         let explicit_point_count = expected_opening_widths().len();
-        assert_eq!(explicit_point_count, 1_010);
+        assert_eq!(explicit_point_count, 1_008);
         for _ in 0..explicit_point_count {
             counter.response();
             counter.response();
@@ -2945,7 +3557,7 @@ mod construction_tests {
                 counter.response();
             }
             counter.challenge(maximum_extension_hash_query_count);
-            counter.challenge(1);
+            counter.challenge(exact_distinct_query_hash_count(round.num_queries));
             counter.challenge(maximum_extension_hash_query_count);
             for _ in 0..pcs.round_folding_factor(round_index + 1) {
                 counter.response();
@@ -2953,13 +3565,41 @@ mod construction_tests {
             }
         }
         counter.response();
-        counter.challenge(1);
+        counter.challenge(exact_distinct_query_hash_count(pcs.final_queries));
         for _ in 0..pcs.final_sumcheck_rounds {
             counter.response();
             counter.challenge(maximum_extension_hash_query_count);
         }
         counter.response();
         counter.finish()
+    }
+
+    fn exact_distinct_query_hash_count(output_count: usize) -> u64 {
+        let candidates_per_block = Hash512::BYTE_LENGTH / std::mem::size_of::<u64>();
+        let blocks_per_output = usize::try_from(
+            crate::bgv::proof_suite::PROOF_MAXIMUM_FIAT_SHAMIR_CANDIDATE_DRAWS_PER_OUTPUT,
+        )
+        .expect("the candidate ceiling fits usize")
+        .div_ceil(candidates_per_block);
+        1 + u64::try_from(output_count).expect("the exact query count fits u64")
+            * u64::try_from(blocks_per_output).expect("the block count fits u64")
+    }
+
+    #[test]
+    fn exact_distinct_query_block_ledger_is_directly_recomputed() {
+        assert_eq!(exact_distinct_query_hash_count(387), 6_193);
+        assert_eq!(exact_distinct_query_hash_count(266), 4_257);
+        assert_eq!(exact_distinct_query_hash_count(288), 4_609);
+        assert_eq!(exact_distinct_query_hash_count(268), 4_289);
+        assert_eq!(exact_distinct_query_hash_count(264), 4_225);
+        assert_eq!(exact_distinct_query_hash_count(263), 4_209);
+        assert_eq!(
+            [387_usize, 266, 387, 288, 268, 264, 263]
+                .into_iter()
+                .map(exact_distinct_query_hash_count)
+                .sum::<u64>(),
+            33_975
+        );
     }
 
     pub(super) fn exact_public_sampler_exhaustion_catalog(
@@ -2969,19 +3609,22 @@ mod construction_tests {
         shape: ExactProofShape,
     ) -> PublicSamplerExhaustionCatalog {
         let schedule = variant
-            .common_proof_transcript_schedule(relation_context)
-            .expect("derive the exact common-proof transcript schedule");
-        let deep_point_cardinality_bounds = (0..relation_context.deep_point_count)
+            .common_proof_relation_prefix_schedule(relation_context)
+            .expect("derive the exact common-proof transcript schedule")
+            .into_row_code_whir_successor()
+            .expect("derive the exact successor transcript schedule");
+        let out_of_domain_point_cardinality_bounds = (0..relation_context
+            .out_of_domain_point_count)
             .map(|point_ordinal| {
                 variant
-                    .deep_point_sampler_cardinality_bound(relation_context, point_ordinal)
-                    .expect("derive an exact DEEP sampler cardinality bound")
+                    .out_of_domain_point_sampler_cardinality_bound(relation_context, point_ordinal)
+                    .expect("derive an exact out-of-domain sampler cardinality bound")
             })
             .collect::<Vec<_>>();
         let mut catalog = schedule
             .row_code_whir_handoff_public_sampler_exhaustion_catalog(
                 SetupKeyRelationProofFamily::SameSecret.statement_schema_identifier(),
-                &deep_point_cardinality_bounds,
+                &out_of_domain_point_cardinality_bounds,
             )
             .expect("derive the exact common-prefix public sampler catalog");
         let maximum_candidate_draws_per_output = schedule.maximum_candidate_draws_per_output();
@@ -3014,21 +3657,21 @@ mod construction_tests {
                     .expect("catalog an exact point-selector sampler");
             }
             for (phase, layout) in [
-                (RowCodeWhirPhase::Base, &base_layout),
-                (RowCodeWhirPhase::Auxiliary, &auxiliary_layout),
+                (RowCodeWhirTracePhase::Base, &base_layout),
+                (RowCodeWhirTracePhase::Auxiliary, &auxiliary_layout),
             ] {
-                for (row_ordinal, row) in layout.rows.iter().enumerate() {
+                for (column_group_ordinal, row) in layout.rows.iter().enumerate() {
                     if row
                         .opening_point_ordinals
                         .contains(&u32::from(opening_point_ordinal))
                     {
                         catalog
                             .push_direct_row_code_whir_extension(
-                                RowCodeWhirChallenge::PhaseRowWeight {
+                                RowCodeWhirChallenge::TraceColumnGroupWeight {
                                     opening_point_ordinal,
                                     phase,
-                                    row_ordinal: u32::try_from(row_ordinal)
-                                        .expect("phase row ordinal fits u32"),
+                                    column_group_ordinal: u32::try_from(column_group_ordinal)
+                                        .expect("column-group ordinal fits u32"),
                                 },
                                 maximum_candidate_draws_per_output,
                             )
@@ -3038,8 +3681,13 @@ mod construction_tests {
             }
             if opening_point_ordinal == 0 {
                 for challenge in [
-                    RowCodeWhirChallenge::QuotientComponentWeight,
-                    RowCodeWhirChallenge::OpeningBatchMaskWeight,
+                    RowCodeWhirChallenge::QuotientGroupWeight {
+                        opening_point_ordinal,
+                        source_group_ordinal: 0,
+                    },
+                    RowCodeWhirChallenge::OpeningBatchMaskWeight {
+                        opening_point_ordinal,
+                    },
                 ] {
                     catalog
                         .push_direct_row_code_whir_extension(
@@ -3098,9 +3746,8 @@ mod construction_tests {
 
         let block_selector_variable_count =
             EXACT_TABLE_VARIABLE_COUNT - EXACT_BOUND_POLYNOMIAL_VARIABLE_COUNT;
-        for block_ordinal in 0..EXACT_BOUND_REDUCTION_BLOCK_COUNT {
-            for (suffix_ordinal, fixed_prefix) in
-                EXACT_BOUND_DEGREE_SUFFIX_PREFIXES.iter().enumerate()
+        for (block_ordinal, schedule) in EXACT_BOUND_REDUCTION_BLOCK_SCHEDULES.iter().enumerate() {
+            for (suffix_ordinal, fixed_prefix) in schedule.degree_suffix_prefixes.iter().enumerate()
             {
                 for coordinate_ordinal in
                     block_selector_variable_count + fixed_prefix.len()..EXACT_TABLE_VARIABLE_COUNT
@@ -3138,8 +3785,10 @@ mod construction_tests {
         shape: ExactProofShape,
     ) -> Vec<ExactAlgebraicSoundnessRow> {
         let transcript_schedule = variant
-            .common_proof_transcript_schedule(relation_context)
-            .expect("derive the exact common-proof transcript schedule");
+            .common_proof_relation_prefix_schedule(relation_context)
+            .expect("derive the exact common-proof transcript schedule")
+            .into_row_code_whir_successor()
+            .expect("derive the exact successor transcript schedule");
         let theta_challenge_groups = transcript_schedule
             .ordered_application_challenge_groups()
             .iter()
@@ -3262,10 +3911,14 @@ mod construction_tests {
         }];
 
         for (round_ordinal, round) in pcs.round_parameters.iter().enumerate() {
+            // WHIR Theorem 5.2 charges d * ell / |K| for one folding
+            // challenge, with d = max(d*, 3). The selected construction has
+            // ell = 1 and d* <= 3, so the conservative numerator is the
+            // round-domain size plus three rather than plus two.
             rows.push(ExactAlgebraicSoundnessRow::extension_field(
                 ExactAlgebraicChallengeFamily::WhirFold { round_ordinal },
                 ExactAlgebraicFailureEvent::WhirFold,
-                u64::try_from(round.domain_size).expect("WHIR fold domain size fits u64") + 2,
+                u64::try_from(round.domain_size).expect("WHIR fold domain size fits u64") + 3,
                 1,
             ));
             rows.push(ExactAlgebraicSoundnessRow::extension_field(
@@ -3283,7 +3936,7 @@ mod construction_tests {
             ExactAlgebraicFailureEvent::WhirFold,
             u64::try_from(pcs.final_round_config().domain_size)
                 .expect("final WHIR fold domain size fits u64")
-                + 2,
+                + 3,
             1,
         ));
         // Each final-sumcheck wire message carries h(0) and h(infinity),
@@ -3303,7 +3956,7 @@ mod construction_tests {
         ));
 
         let scalar_opening_count = expected_opening_widths().into_iter().sum::<usize>();
-        assert_eq!(scalar_opening_count, 1_784);
+        assert_eq!(scalar_opening_count, 1_782);
         // This is a conservative union over every scalar opening carried by
         // the adapter. No tighter simultaneous-opening extraction is assumed.
         rows.push(ExactAlgebraicSoundnessRow::extension_field(
@@ -3313,34 +3966,37 @@ mod construction_tests {
             1,
         ));
 
-        let deep_point_ordinal = 0_u16;
-        let deep_cardinality_bound = variant
-            .deep_point_sampler_cardinality_bound(relation_context, deep_point_ordinal)
-            .expect("derive the exact DEEP accepted-candidate floor");
+        let out_of_domain_point_ordinal = 0_u16;
+        let out_of_domain_cardinality_bound = variant
+            .out_of_domain_point_sampler_cardinality_bound(
+                relation_context,
+                out_of_domain_point_ordinal,
+            )
+            .expect("derive the exact out-of-domain accepted-candidate floor");
         // Derive the degree of the source-owned cross-multiplied common
         // relation identity from the checked numerator and zeroifier grammar
         // plus the quotient-component reconstruction. The 2^21 term below is
         // a conservative field-denominator ceiling proved from the live
         // accepted set; it is not the similarly sized evaluation domain.
-        let deep_identity_degree = variant
+        let out_of_domain_identity_degree = variant
             .cross_multiplied_composition_identity_degree_bound(relation_context)
             .expect("derive the exact cross-multiplied composition identity degree");
-        let deep_challenge_field_numerator_ceiling = BigUint::from(1_u8) << 21_usize;
+        let out_of_domain_challenge_field_numerator_ceiling = BigUint::from(1_u8) << 21_usize;
         rows.push(ExactAlgebraicSoundnessRow {
-            challenge: ExactAlgebraicChallengeFamily::CommonDeepPoint(
-                CommonProofChallenge::DeepPoint {
-                    point_ordinal: deep_point_ordinal,
+            challenge: ExactAlgebraicChallengeFamily::CommonOutOfDomainPoint(
+                CommonProofChallenge::OutOfDomainPoint {
+                    point_ordinal: out_of_domain_point_ordinal,
                 },
             ),
-            event: ExactAlgebraicFailureEvent::DeepPointForbiddenSet,
-            independent_bad_polynomial_degrees: vec![deep_identity_degree],
+            event: ExactAlgebraicFailureEvent::OutOfDomainPointForbiddenSet,
+            independent_bad_polynomial_degrees: vec![out_of_domain_identity_degree],
             multiplicity: 1,
-            sample_space: ExactAlgebraicSampleSpace::DeepAcceptedCandidates {
-                field_cardinality: deep_cardinality_bound.field_cardinality().clone(),
-                accepted_candidate_count_floor: deep_cardinality_bound
+            sample_space: ExactAlgebraicSampleSpace::OutOfDomainAcceptedCandidates {
+                field_cardinality: out_of_domain_cardinality_bound.field_cardinality().clone(),
+                accepted_candidate_count_floor: out_of_domain_cardinality_bound
                     .accepted_candidate_count_floor()
                     .clone(),
-                challenge_field_numerator_ceiling: deep_challenge_field_numerator_ceiling,
+                challenge_field_numerator_ceiling: out_of_domain_challenge_field_numerator_ceiling,
             },
         });
 
@@ -3418,10 +4074,16 @@ mod construction_tests {
             u64::try_from(phase_opening_point_count).expect("phase opening-point count fits u64"),
         ));
 
-        // Each bound-reduction block authenticates paired leaves from one
-        // complete 2^21-point codeword. BCIKS contributes one exceptional set
-        // per block at that complete-domain degree, not separate 2^20 events
-        // for the point and its opposite.
+        // The exact 18,431- and 16,383-coefficient quotient blocks each
+        // authenticate paired leaves from one complete 2^21-point codeword.
+        // BCIKS contributes one exceptional set per block at that complete
+        // domain degree, not separate 2^20 events for the point and its
+        // opposite.
+        assert_eq!(
+            EXACT_BOUND_REDUCTION_BLOCK_SCHEDULES
+                .map(|schedule| schedule.quotient_degree_bound_exclusive),
+            [18_431, 16_383],
+        );
         let bound_encoded_domain_size = EXACT_BOUND_LEAF_COUNT
             .checked_mul(2)
             .expect("bound encoded domain size fits usize");
@@ -3434,16 +4096,11 @@ mod construction_tests {
                 .expect("bound reduction block count fits u64"),
         ));
 
-        let block_selector_variable_count =
-            EXACT_TABLE_VARIABLE_COUNT - EXACT_BOUND_POLYNOMIAL_VARIABLE_COUNT;
-        let bound_degree_random_coordinate_count = EXACT_BOUND_REDUCTION_BLOCK_COUNT
-            * EXACT_BOUND_DEGREE_SUFFIX_PREFIXES
-                .iter()
-                .map(|prefix| {
-                    EXACT_TABLE_VARIABLE_COUNT - block_selector_variable_count - prefix.len()
-                })
-                .sum::<usize>();
-        assert_eq!(bound_degree_random_coordinate_count, 72);
+        // The input block samples 13 + 12 + 11 coordinates for its three
+        // suffix subcubes. The output block samples 14 for its single [1]
+        // suffix, giving 50 independent degree coordinates in total.
+        let bound_degree_random_coordinate_count = bound_degree_random_coordinate_count();
+        assert_eq!(bound_degree_random_coordinate_count, 50);
         rows.push(ExactAlgebraicSoundnessRow::extension_field(
             ExactAlgebraicChallengeFamily::RowCodeWhirBoundDegreeCoordinate,
             ExactAlgebraicFailureEvent::BoundDegreeSuffix,
@@ -3465,10 +4122,49 @@ mod construction_tests {
     #[test]
     fn bound_degree_subcubes_partition_the_complete_forbidden_suffix() {
         let block_coefficient_count = 1_usize << EXACT_BOUND_POLYNOMIAL_VARIABLE_COUNT;
-        for block_ordinal in 0..EXACT_BOUND_REDUCTION_BLOCK_COUNT {
+        assert_eq!(EXACT_BOUND_DEGREE_TEST_COUNT, 6);
+        assert_eq!(EXACT_BOUND_REDUCTION_BLOCK_SELECTOR_VARIABLE_COUNT, 1);
+        assert_eq!(
+            EXACT_BOUND_REDUCTION_BLOCK_SCHEDULES[0].root_use,
+            BoundTreeRootUse::Input
+        );
+        assert_eq!(
+            EXACT_BOUND_REDUCTION_BLOCK_SCHEDULES[0].source_degree_bound_exclusive,
+            18_432
+        );
+        assert_eq!(
+            EXACT_BOUND_REDUCTION_BLOCK_SCHEDULES[0].quotient_degree_bound_exclusive,
+            18_431
+        );
+        assert_eq!(
+            EXACT_BOUND_REDUCTION_BLOCK_SCHEDULES[0].degree_test_count(),
+            4
+        );
+        assert_eq!(
+            EXACT_BOUND_REDUCTION_BLOCK_SCHEDULES[1].root_use,
+            BoundTreeRootUse::Output
+        );
+        assert_eq!(
+            EXACT_BOUND_REDUCTION_BLOCK_SCHEDULES[1].source_degree_bound_exclusive,
+            16_384
+        );
+        assert_eq!(
+            EXACT_BOUND_REDUCTION_BLOCK_SCHEDULES[1].quotient_degree_bound_exclusive,
+            16_383
+        );
+        assert_eq!(
+            EXACT_BOUND_REDUCTION_BLOCK_SCHEDULES[1].degree_test_count(),
+            2
+        );
+        for (block_ordinal, schedule) in EXACT_BOUND_REDUCTION_BLOCK_SCHEDULES
+            .iter()
+            .copied()
+            .enumerate()
+        {
             let mut covered_count = 0_usize;
             for coefficient_ordinal in 0..block_coefficient_count {
-                let suffix_prefix_matches = EXACT_BOUND_DEGREE_SUFFIX_PREFIXES
+                let suffix_prefix_matches = schedule
+                    .degree_suffix_prefixes
                     .iter()
                     .filter(|prefix| {
                         index_has_prefix(
@@ -3479,10 +4175,10 @@ mod construction_tests {
                     })
                     .count();
                 let boundary_matches =
-                    usize::from(coefficient_ordinal == EXACT_BOUND_QUOTIENT_DEGREE_BOUND_EXCLUSIVE);
+                    usize::from(coefficient_ordinal == schedule.quotient_degree_bound_exclusive);
                 let cover_count = boundary_matches + suffix_prefix_matches;
                 let should_be_covered =
-                    coefficient_ordinal >= EXACT_BOUND_QUOTIENT_DEGREE_BOUND_EXCLUSIVE;
+                    coefficient_ordinal >= schedule.quotient_degree_bound_exclusive;
                 assert_eq!(
                     cover_count,
                     usize::from(should_be_covered),
@@ -3492,7 +4188,7 @@ mod construction_tests {
             }
             assert_eq!(
                 covered_count,
-                block_coefficient_count - EXACT_BOUND_QUOTIENT_DEGREE_BOUND_EXCLUSIVE
+                block_coefficient_count - schedule.quotient_degree_bound_exclusive
             );
         }
     }
@@ -3722,7 +4418,7 @@ mod construction_tests {
         let (_, variant, relation_context) = production_same_secret_relation()
             .expect("compile the exact production same-secret relation");
         let accounting = exact_transcript_accounting(&variant, &relation_context);
-        assert_eq!(accounting.maximum_hash_query_count, 1_306_993);
+        assert_eq!(accounting.maximum_hash_query_count, 1_335_305);
         assert_eq!(
             accounting.logical_verifier_message_count,
             EXACT_LOGICAL_VERIFIER_MESSAGE_COUNT
@@ -3760,6 +4456,7 @@ mod construction_tests {
         let hash_query_components = [
             EXACT_RELATION_PLAN_HASH_QUERY_COUNT,
             EXACT_VARIANT_HASH_QUERY_COUNT,
+            EXACT_CONSTRUCTION_PLAN_IDENTITY_HASH_QUERY_COUNT,
             EXACT_TRANSCRIPT_HEADER_HASH_QUERY_COUNT,
             EXACT_PUBLIC_INPUT_HASH_QUERY_COUNT,
             EXACT_PUBLIC_SETUP_SAMPLING_HASH_QUERY_COUNT,
@@ -3767,14 +4464,15 @@ mod construction_tests {
         let distinct_equation_components = [
             EXACT_RELATION_PLAN_DISTINCT_EQUATION_COUNT,
             EXACT_VARIANT_DISTINCT_EQUATION_COUNT,
+            EXACT_CONSTRUCTION_PLAN_IDENTITY_DISTINCT_EQUATION_COUNT,
             EXACT_TRANSCRIPT_HEADER_DISTINCT_EQUATION_COUNT,
             EXACT_PUBLIC_INPUT_DISTINCT_EQUATION_COUNT,
             EXACT_PUBLIC_SETUP_SAMPLING_DISTINCT_EQUATION_COUNT,
         ];
-        assert_eq!(hash_query_components.into_iter().sum::<u64>(), 25);
-        assert_eq!(distinct_equation_components.into_iter().sum::<u64>(), 13);
-        assert_eq!(EXACT_VERIFIER_NON_MERKLE_HASH_QUERY_COUNT, 25);
-        assert_eq!(EXACT_VERIFIER_NON_MERKLE_DISTINCT_EQUATION_COUNT, 13);
+        assert_eq!(hash_query_components.into_iter().sum::<u64>(), 23);
+        assert_eq!(distinct_equation_components.into_iter().sum::<u64>(), 14);
+        assert_eq!(EXACT_VERIFIER_NON_MERKLE_HASH_QUERY_COUNT, 23);
+        assert_eq!(EXACT_VERIFIER_NON_MERKLE_DISTINCT_EQUATION_COUNT, 14);
     }
 
     #[test]
@@ -3942,16 +4640,19 @@ mod construction_tests {
             (&outer_query_term << 262) < (BigUint::from(1_u8) << (3 * EXACT_COLUMN_QUERY_COUNT))
         );
 
+        let input_bound_schedule = EXACT_BOUND_REDUCTION_BLOCK_SCHEDULES[0];
+        let output_bound_schedule = EXACT_BOUND_REDUCTION_BLOCK_SCHEDULES[1];
+        // The VSS-borrowed input columns have source degree below 18,432.
         // Clearing the at most three distinct opening denominators gives a
         // nonzero polynomial of degree at most 18,433. A paired leaf can hide
         // at most two roots, hence at most 9,217 accepting leaves.
         assert_eq!(
-            (EXACT_BOUND_SOURCE_DEGREE_BOUND_EXCLUSIVE + 2) / 2,
-            BOUND_CLEARED_IDENTITY_ROOT_PAIR_BOUND as usize
+            (input_bound_schedule.source_degree_bound_exclusive + 2) / 2,
+            INPUT_BOUND_CLEARED_IDENTITY_ROOT_PAIR_BOUND as usize
         );
         add_binary_failure_term(
             &mut binary_numerator,
-            BOUND_CLEARED_IDENTITY_ROOT_PAIR_BOUND,
+            INPUT_BOUND_CLEARED_IDENTITY_ROOT_PAIR_BOUND,
             EXACT_INPUT_BOUND_QUERY_COUNT as u32,
             EXACT_BOUND_LEAF_COUNT.ilog2() as usize * EXACT_INPUT_BOUND_QUERY_COUNT,
             common_binary_denominator_exponent,
@@ -3961,11 +4662,11 @@ mod construction_tests {
         // subset afterward only canonicalizes Merkle traversal and does not
         // change the sampled event.
         assert_without_replacement_probability_is_bounded_by_power(
-            BOUND_CLEARED_IDENTITY_ROOT_PAIR_BOUND,
+            INPUT_BOUND_CLEARED_IDENTITY_ROOT_PAIR_BOUND,
             EXACT_BOUND_LEAF_COUNT as u64,
             EXACT_INPUT_BOUND_QUERY_COUNT as u32,
         );
-        let bound_query_term = BigUint::from(BOUND_CLEARED_IDENTITY_ROOT_PAIR_BOUND)
+        let bound_query_term = BigUint::from(INPUT_BOUND_CLEARED_IDENTITY_ROOT_PAIR_BOUND)
             .pow(EXACT_INPUT_BOUND_QUERY_COUNT as u32);
         binary_event_terms.push((
             bound_query_term.clone(),
@@ -3977,6 +4678,12 @@ mod construction_tests {
                 < (BigUint::from(1_u8)
                     << (EXACT_BOUND_LEAF_COUNT.ilog2() as usize * EXACT_INPUT_BOUND_QUERY_COUNT))
         );
+        // The direct output columns have source degree below 16,384, exactly
+        // rate 1/128 in the 2^21-point domain. A received word outside the
+        // unique-decoding radius therefore agrees on less than 129/256 of
+        // coordinates; 65/128 is the conservative dyadic ceiling used here.
+        assert_eq!(output_bound_schedule.source_degree_bound_exclusive, 16_384);
+        assert_eq!(EXACT_BOUND_LEAF_COUNT * 2 / 128, 16_384);
         add_binary_failure_term(
             &mut binary_numerator,
             65,
@@ -4007,10 +4714,10 @@ mod construction_tests {
         );
         assert_eq!(
             public_sampler_catalog.sampler_kind_row_count(PublicSamplerKind::Extension),
-            5_087
+            5_065
         );
         assert_eq!(
-            public_sampler_catalog.sampler_kind_row_count(PublicSamplerKind::Deep),
+            public_sampler_catalog.sampler_kind_row_count(PublicSamplerKind::OutOfDomain),
             1
         );
         assert_eq!(
@@ -4019,12 +4726,12 @@ mod construction_tests {
         );
         assert_eq!(
             public_sampler_catalog.sampler_kind_row_count(PublicSamplerKind::Extension)
-                + public_sampler_catalog.sampler_kind_row_count(PublicSamplerKind::Deep),
-            5_088
+                + public_sampler_catalog.sampler_kind_row_count(PublicSamplerKind::OutOfDomain),
+            5_066
         );
         assert_eq!(
-            public_sampler_catalog.extension_scalar_output_count_including_deep(),
-            5_088
+            public_sampler_catalog.extension_scalar_output_count_including_out_of_domain(),
+            5_066
         );
         assert_eq!(
             public_sampler_catalog.logical_verifier_message_count(),
@@ -4043,8 +4750,8 @@ mod construction_tests {
                 "every exact public sampler row must use D=128"
             );
             let expected_candidate_bit_length = match row.sampler_kind() {
-                PublicSamplerKind::Product => 320,
-                PublicSamplerKind::Extension | PublicSamplerKind::Deep => 512,
+                PublicSamplerKind::Product => 512,
+                PublicSamplerKind::Extension | PublicSamplerKind::OutOfDomain => 512,
                 PublicSamplerKind::Distinct => 64,
             };
             assert_eq!(
@@ -4054,7 +4761,7 @@ mod construction_tests {
                 row.challenge_tag()
             );
         }
-        // This availability bound is exact in the ideal typed-XOF model for
+        // This availability bound is exact in the ideal typed random-oracle model for
         // candidates within each row. The union does not assume independence
         // between rows or repeated proofs.
         assert!(
@@ -4150,7 +4857,7 @@ mod construction_tests {
         };
         assert_eq!(
             numerator_for_event(ExactAlgebraicFailureEvent::WhirFold),
-            BigUint::from(16_252_938_u64)
+            BigUint::from(16_252_943_u64)
         );
         assert_eq!(
             numerator_for_event(ExactAlgebraicFailureEvent::WhirQueryCombination),
@@ -4162,20 +4869,22 @@ mod construction_tests {
         );
         assert_eq!(
             numerator_for_event(ExactAlgebraicFailureEvent::WhirScalarOpeningBatch),
-            BigUint::from(1_784_u64)
+            BigUint::from(1_782_u64)
         );
         assert_eq!(
-            numerator_for_event(ExactAlgebraicFailureEvent::DeepPointForbiddenSet),
+            numerator_for_event(ExactAlgebraicFailureEvent::OutOfDomainPointForbiddenSet),
             BigUint::from(1_u64 << 21)
         );
         assert_eq!(
             algebraic_catalog
                 .iter()
-                .find(|row| row.event == ExactAlgebraicFailureEvent::DeepPointForbiddenSet)
-                .expect("the exact algebraic catalog has one DEEP row")
+                .find(|row| {
+                    row.event == ExactAlgebraicFailureEvent::OutOfDomainPointForbiddenSet
+                })
+                .expect("the exact algebraic catalog has one out-of-domain row")
                 .raw_numerator(),
-            BigUint::from(170_331_u64),
-            "the DEEP identity degree remains distinct from its accepted-set field ceiling"
+            BigUint::from(171_295_u64),
+            "the out-of-domain identity degree remains distinct from its accepted-set field ceiling"
         );
         assert_eq!(
             numerator_for_event(ExactAlgebraicFailureEvent::RelationCompositionBatch),
@@ -4203,7 +4912,7 @@ mod construction_tests {
         );
         assert_eq!(
             numerator_for_event(ExactAlgebraicFailureEvent::BoundDegreeSuffix),
-            BigUint::from(72_u8)
+            BigUint::from(50_u8)
         );
 
         let theta_failure_numerator =
@@ -4221,13 +4930,13 @@ mod construction_tests {
             .fold(BigUint::from(0_u8), |sum, numerator| sum + numerator);
         assert_eq!(
             non_theta_algebraic_failure_numerator,
-            BigUint::from(28_840_146_u64)
+            BigUint::from(28_840_127_u64)
         );
         let algebraic_failure_numerator =
             &theta_failure_numerator + &non_theta_algebraic_failure_numerator;
         assert_eq!(
             algebraic_failure_numerator,
-            BigUint::parse_bytes(b"37767404055200108908722", 10)
+            BigUint::parse_bytes(b"37767404055200108908703", 10)
                 .expect("parse the exact algebraic numerator")
         );
         let aggregate_numerator = &challenge_field_order * binary_numerator
@@ -4253,9 +4962,9 @@ mod construction_tests {
         );
 
         // Conditional multi-round QROM arithmetic. The common-construction
-        // state function, RBR extractor, row-code list decoder, typed ideal-XOF
+        // state function, RBR extractor, row-code list decoder, typed ideal-RO
         // correspondence, same-secret nonzero-theta-row extraction, phase
-        // opening-reduction extraction, and checked DEEP forbidden-set bound
+        // opening-reduction extraction, and checked out-of-domain forbidden-set bound
         // remain named theorem obligations. The `2k/2^512` term is the
         // simulated oracle/database penalty from CMS19 Lemma 4.9. The
         // transcript counter is reconciled with the accepted verifier in the
@@ -4267,25 +4976,31 @@ mod construction_tests {
         let accepting_database_equation_count_ceiling = EXACT_TRANSCRIPT_HASH_QUERY_COUNT
             + EXACT_VERIFIER_MERKLE_HASH_QUERY_COUNT
             + EXACT_VERIFIER_NON_MERKLE_DISTINCT_EQUATION_COUNT;
-        assert_eq!(verifier_hash_query_count, 1_368_259);
-        assert_eq!(accepting_database_equation_count_ceiling, 1_368_247);
+        assert_eq!(verifier_hash_query_count, 1_396_569);
+        assert_eq!(accepting_database_equation_count_ceiling, 1_396_560);
 
         let adversary_hash_query_bound =
             (BigUint::from(1_u8) << QROM_RANDOM_ORACLE_QUERY_BOUND_EXPONENT) - BigUint::from(1_u8);
         let compiler_query_bound =
             &adversary_hash_query_bound + BigUint::from(verifier_hash_query_count);
+        assert_eq!(
+            compiler_query_bound,
+            BigUint::parse_bytes(b"1208925819614629176102744", 10)
+                .expect("the exact compiler query ceiling is a decimal integer")
+        );
         let compiler_numerator = BigUint::from(12_u8)
             * &compiler_query_bound
             * &compiler_query_bound
             * &aggregate_numerator
-            * (BigUint::from(1_u8) << FIAT_SHAMIR_XOF_OUTPUT_BIT_LENGTH)
+            * (BigUint::from(1_u8) << FIAT_SHAMIR_RANDOM_ORACLE_OUTPUT_BIT_LENGTH)
             + (BigUint::from(48_u8)
                 * &compiler_query_bound
                 * &compiler_query_bound
                 * &compiler_query_bound
                 + BigUint::from(2_u8) * BigUint::from(accepting_database_equation_count_ceiling))
                 * &aggregate_denominator;
-        let compiler_denominator = &aggregate_denominator << FIAT_SHAMIR_XOF_OUTPUT_BIT_LENGTH;
+        let compiler_denominator =
+            &aggregate_denominator << FIAT_SHAMIR_RANDOM_ORACLE_OUTPUT_BIT_LENGTH;
 
         let relinearization_position_count = u32::try_from(
             crate::bgv::proof_suite::selected_evaluator_relinearization_entry_positions()
@@ -4346,37 +5061,25 @@ mod construction_tests {
                 <= aggregate_denominator
         );
         let transcript_schedule = variant
-            .common_proof_transcript_schedule(&relation_context)
-            .expect("derive exact transcript schedule");
-        let common_prefix_xof_output_byte_length = transcript_schedule
+            .common_proof_relation_prefix_schedule(&relation_context)
+            .expect("derive exact transcript schedule")
+            .into_row_code_whir_successor()
+            .expect("derive exact successor transcript schedule");
+        let common_prefix_oracle_answer_byte_length = transcript_schedule
             .ordered_application_challenge_sampler_accounting()
             .expect("derive exact application samplers")
             .into_iter()
             .map(|sampler| {
-                usize::try_from(sampler.maximum_xof_output_byte_length())
-                    .expect("application sampler output length fits usize")
+                usize::try_from(sampler.maximum_oracle_answer_byte_length())
+                    .expect("application sampler answer length fits usize")
             })
             .max()
             .unwrap_or(Hash512::BYTE_LENGTH)
             .max(Hash512::BYTE_LENGTH);
-        let maximum_successor_query_count = pcs
-            .round_parameters
-            .iter()
-            .map(|round| round.num_queries)
-            .chain([pcs.final_queries])
-            .chain([EXACT_COLUMN_QUERY_COUNT, EXACT_OUTPUT_BOUND_QUERY_COUNT])
-            .max()
-            .expect("the exact successor has a query vector");
-        let successor_query_xof_output_byte_length = Hash512::BYTE_LENGTH
-            + maximum_successor_query_count
-                * usize::try_from(transcript_schedule.maximum_candidate_draws_per_output())
-                    .expect("candidate ceiling fits usize")
-                * std::mem::size_of::<u64>();
-        let maximum_typed_xof_call_byte_length = common_prefix_xof_output_byte_length
-            .max(Hash512::BYTE_LENGTH + std::mem::size_of::<u64>())
-            .max(successor_query_xof_output_byte_length);
-        assert_eq!(maximum_typed_xof_call_byte_length, 396_352);
-        assert_eq!(maximum_typed_xof_call_byte_length * 8, 3_170_816);
+        let maximum_typed_oracle_answer_byte_length =
+            common_prefix_oracle_answer_byte_length.max(Hash512::BYTE_LENGTH);
+        assert_eq!(maximum_typed_oracle_answer_byte_length, 64);
+        assert_eq!(maximum_typed_oracle_answer_byte_length * 8, 512);
     }
 
     #[test]
@@ -4666,7 +5369,7 @@ mod native_prover {
         )
     }
 
-    fn evaluate_exact_deep_claims(
+    fn evaluate_exact_out_of_domain_claims(
         variant: &RelationPlanVariant,
         opening_points: &[ProofChallengeExtensionElement],
         store: &ExactPolynomialStore,
@@ -4756,6 +5459,12 @@ mod native_prover {
                 vec![ChallengeField::ZERO; coefficient_count]
             });
         for claim in bound_claims {
+            let (_, _, root_use) = locations
+                .get(&claim.column_ordinal)
+                .copied()
+                .ok_or_else(|| "bound claim column has no tree location".to_owned())?;
+            let (block_ordinal, block_schedule) =
+                bound_reduction_block_schedule_for_root_use(root_use)?;
             let CommonProofSourcePolynomial::Base(source_coefficients) =
                 store.read(claim.column_ordinal)?
             else {
@@ -4765,7 +5474,7 @@ mod native_prover {
                 ));
             };
             if source_coefficients.is_empty()
-                || source_coefficients.len() > EXACT_BOUND_SOURCE_DEGREE_BOUND_EXCLUSIVE
+                || source_coefficients.len() > block_schedule.source_degree_bound_exclusive
             {
                 return Err(format!(
                     "bound relation column {} has the wrong degree bound",
@@ -4784,24 +5493,16 @@ mod native_prover {
             )?;
             if remainder != ChallengeField::ZERO {
                 return Err(format!(
-                    "bound relation column {} does not match its claimed deep evaluation",
+                    "bound relation column {} does not match its claimed out-of-domain evaluation",
                     claim.column_ordinal
                 ));
             }
-            if quotient.len() > EXACT_BOUND_QUOTIENT_DEGREE_BOUND_EXCLUSIVE {
+            if quotient.len() > block_schedule.quotient_degree_bound_exclusive {
                 return Err(format!(
                     "bound relation column {} produced an oversized quotient",
                     claim.column_ordinal
                 ));
             }
-            let (_, _, root_use) = locations
-                .get(&claim.column_ordinal)
-                .copied()
-                .ok_or_else(|| "bound claim column has no tree location".to_owned())?;
-            let block_ordinal = match root_use {
-                BoundTreeRootUse::Input => 0,
-                BoundTreeRootUse::Output => 1,
-            };
             for (aggregate, coefficient) in aggregate_coefficients[block_ordinal]
                 .iter_mut()
                 .zip(quotient)
@@ -5291,13 +5992,12 @@ mod native_prover {
         let public_input = exact_public_input_from_production_source(&sources)?;
         let public_input_wire = encode_exact_same_secret_public_input(&public_input)?;
         let mut verified_relation = validate_public_input(&prerequisite, &public_input)?;
-        let bound_tree_entries =
-            exact_bound_tree_catalog_entries(&prerequisite, &public_input, &verified_relation)?;
+        let bound_tree_entries = exact_bound_tree_catalog_entries(&verified_relation)?;
         let bound_tree_prover_sources =
             resolve_bound_tree_prover_sources(&sources, &bound_tree_entries)?;
         release_production_same_secret_authority(authority_handle)?;
         drop(sources);
-        let shape = ExactProofShape::from_variant(&verified_relation.variant)?;
+        let shape = verified_relation.proof_shape;
         if phase_manifest.base_row_count != shape.base_row_count
             || phase_manifest.auxiliary_row_count != shape.auxiliary_row_count
             || quotient_manifest.quotient_phase_row_count != EXACT_QUOTIENT_PHASE_ROW_COUNT
@@ -5327,28 +6027,27 @@ mod native_prover {
             auxiliary_root,
             quotient_root,
         )?;
-        let deep_evaluations = evaluate_exact_deep_claims(
+        let out_of_domain_evaluations = evaluate_exact_out_of_domain_claims(
             &verified_relation.variant,
             &transcript_prefix.opening_points,
             &store,
         )?;
         let opening_batch_mask_chunk_evaluations =
             evaluate_opening_batch_mask_chunks(&store, transcript_prefix.opening_points[0])?;
-        verify_production_deep_composition(
+        verify_production_out_of_domain_composition(
             &mut verified_relation,
             &transcript_prefix,
-            &deep_evaluations,
+            &out_of_domain_evaluations,
         )?;
         verify_opening_batch_mask_chunk_evaluations(
             &verified_relation.variant,
             &transcript_prefix.opening_points,
-            &deep_evaluations,
+            &out_of_domain_evaluations,
             &opening_batch_mask_chunk_evaluations,
         )?;
         let row_code_whir_transcript = finish_exact_transcript(
             &mut transcript_prefix,
-            &deep_evaluations,
-            quotient_root,
+            &out_of_domain_evaluations,
             &opening_batch_mask_chunk_evaluations,
         )?;
         let pcs = plain_aggregate_pcs(EXACT_PCS_VARIABLE_COUNT)?;
@@ -5363,7 +6062,7 @@ mod native_prover {
         let bound_claims = derive_bound_opening_claims(
             &verified_relation.variant,
             &transcript_prefix.opening_points,
-            &deep_evaluations,
+            &out_of_domain_evaluations,
             &mut prover_challenger,
         )?;
         ensure_bound_opening_points_are_outside_evaluation_domain(
@@ -5498,7 +6197,7 @@ mod native_prover {
             base_root,
             auxiliary_root,
             quotient_root,
-            deep_evaluations,
+            out_of_domain_evaluations,
             opening_batch_mask_chunk_evaluations,
             aggregate_commitment,
             authenticated_phase_columns: [base_columns, auxiliary_columns, quotient_columns],
@@ -5508,12 +6207,12 @@ mod native_prover {
         };
         verify_phase_openings(shape, &mut proof, &query_indices)?;
         verify_bound_tree_authentications(&bound_tree_entries, &proof, &bound_query_indices)?;
-        let expected_deep = expected_deep_whir_evaluations(
+        let expected_out_of_domain = expected_out_of_domain_whir_evaluations(
             &verified_relation.variant,
             &base_layout,
             &auxiliary_layout,
             &transcript_prefix.opening_points,
-            &proof.deep_evaluations,
+            &proof.out_of_domain_evaluations,
             &proof.opening_batch_mask_chunk_evaluations,
             &point_row_weights,
         )?;
@@ -5528,7 +6227,7 @@ mod native_prover {
         )?;
         verify_whir_evaluation_claims(
             &proof,
-            expected_deep,
+            expected_out_of_domain,
             &expected_queries,
             &expected_bound_reduction,
         )?;
@@ -5653,10 +6352,10 @@ mod native_prover {
         assert!(metrics.proof_byte_length < MAXIMUM_ROW_CODE_WHIR_PROOF_BYTE_LENGTH);
         assert_eq!(metrics.opening_claim_count, 4_217);
         assert_eq!(metrics.query_count, EXACT_COLUMN_QUERY_COUNT);
-        assert_eq!(metrics.maximum_transcript_hash_query_count, 1_306_993);
-        assert_eq!(metrics.logical_verifier_message_count, 5_098);
-        assert_eq!(metrics.maximum_verifier_hash_query_count, 1_368_259);
-        assert_eq!(metrics.maximum_accepting_database_equation_count, 1_368_247);
+        assert_eq!(metrics.maximum_transcript_hash_query_count, 1_335_305);
+        assert_eq!(metrics.logical_verifier_message_count, 5_076);
+        assert_eq!(metrics.maximum_verifier_hash_query_count, 1_396_569);
+        assert_eq!(metrics.maximum_accepting_database_equation_count, 1_396_560);
     }
 }
 
@@ -5770,11 +6469,9 @@ mod persisted_verifier_tests {
             .expect("construct verified VSS prerequisite for mutation");
         let verified_relation = validate_public_input(&prerequisite, &public_input)
             .expect("validate exact public input for mutation");
-        let bound_tree_entries =
-            exact_bound_tree_catalog_entries(&prerequisite, &public_input, &verified_relation)
-                .expect("derive exact bound tree entries for mutation");
-        let shape = ExactProofShape::from_variant(&verified_relation.variant)
-            .expect("derive exact proof shape for mutation");
+        let bound_tree_entries = exact_bound_tree_catalog_entries(&verified_relation)
+            .expect("derive exact bound tree entries for mutation");
+        let shape = verified_relation.proof_shape;
         let mut proof = decode_exact_same_secret_proof(shape, &bound_tree_entries, canonical_proof)
             .expect("decode exact proof for mutation");
         mutate(&mut proof);
@@ -5868,10 +6565,10 @@ mod persisted_verifier_tests {
         assert_eq!(metrics.public_input_byte_length, 2_461);
         assert_eq!(metrics.opening_claim_count, 4_217);
         assert_eq!(metrics.query_count, EXACT_COLUMN_QUERY_COUNT);
-        assert_eq!(metrics.maximum_transcript_hash_query_count, 1_306_993);
-        assert_eq!(metrics.logical_verifier_message_count, 5_098);
-        assert_eq!(metrics.maximum_verifier_hash_query_count, 1_368_259);
-        assert_eq!(metrics.maximum_accepting_database_equation_count, 1_368_247);
+        assert_eq!(metrics.maximum_transcript_hash_query_count, 1_335_305);
+        assert_eq!(metrics.logical_verifier_message_count, 5_076);
+        assert_eq!(metrics.maximum_verifier_hash_query_count, 1_396_569);
+        assert_eq!(metrics.maximum_accepting_database_equation_count, 1_396_560);
         assert!(metrics.proof_byte_length < MAXIMUM_ROW_CODE_WHIR_PROOF_BYTE_LENGTH);
         println!(
             "persisted exact verifier: proof bytes {}, public input bytes {}, claims {}, queries {}",
@@ -5893,8 +6590,7 @@ mod persisted_verifier_tests {
             .expect("decode persisted exact public input for shape derivation");
         let verified_relation = validate_public_input(&prerequisite, &decoded_public_input)
             .expect("validate persisted exact public input for shape derivation");
-        let exact_shape = ExactProofShape::from_variant(&verified_relation.variant)
-            .expect("derive persisted exact proof shape");
+        let exact_shape = verified_relation.proof_shape;
 
         let changed_protocol = mutate_public_input(&public_input, |input| {
             input.protocol_version ^= 1;
@@ -6093,14 +6789,14 @@ mod persisted_verifier_tests {
             );
         }
 
-        let changed_deep_evaluation = mutate_proof(&public_input, &proof, |decoded| {
-            decoded.deep_evaluations[0] =
-                decoded.deep_evaluations[0].add(ProofChallengeExtensionElement::ONE);
+        let changed_out_of_domain_evaluation = mutate_proof(&public_input, &proof, |decoded| {
+            decoded.out_of_domain_evaluations[0] =
+                decoded.out_of_domain_evaluations[0].add(ProofChallengeExtensionElement::ONE);
         });
         assert_refuses(
             &public_input,
-            &changed_deep_evaluation,
-            "changed production deep evaluation",
+            &changed_out_of_domain_evaluation,
+            "changed production out-of-domain evaluation",
         );
 
         let changed_mask_chunk_evaluation = mutate_proof(&public_input, &proof, |decoded| {
@@ -6226,7 +6922,7 @@ mod persisted_verifier_tests {
         );
 
         for (evaluation_ordinal, evaluation_label) in [
-            (0, "deep"),
+            (0, "out-of-domain"),
             (3, "phase-query"),
             (3 + EXACT_COLUMN_QUERY_COUNT, "bound-reduction"),
             (
@@ -6368,20 +7064,22 @@ mod persisted_verifier_tests {
         wrong_magic[0] ^= 1;
         assert_refuses(&public_input, &wrong_magic, "wrong proof wire magic");
 
-        let deep_evaluation_count_offset = EXACT_PROOF_WIRE_MAGIC.len() + 3 * 64;
-        assert_eq!(deep_evaluation_count_offset, 200);
-        let mut wrong_deep_count = proof.clone();
-        wrong_deep_count[deep_evaluation_count_offset..deep_evaluation_count_offset + 4]
+        let out_of_domain_evaluation_count_offset = EXACT_PROOF_WIRE_MAGIC.len() + 3 * 64;
+        assert_eq!(out_of_domain_evaluation_count_offset, 200);
+        let mut wrong_out_of_domain_count = proof.clone();
+        wrong_out_of_domain_count
+            [out_of_domain_evaluation_count_offset..out_of_domain_evaluation_count_offset + 4]
             .copy_from_slice(&0_u32.to_le_bytes());
         assert_refuses(
             &public_input,
-            &wrong_deep_count,
-            "wrong deep-evaluation count",
+            &wrong_out_of_domain_count,
+            "wrong out-of-domain-evaluation count",
         );
 
-        let first_deep_evaluation_offset = deep_evaluation_count_offset + 4;
+        let first_out_of_domain_evaluation_offset = out_of_domain_evaluation_count_offset + 4;
         let mut noncanonical_extension = proof.clone();
-        noncanonical_extension[first_deep_evaluation_offset..first_deep_evaluation_offset + 8]
+        noncanonical_extension
+            [first_out_of_domain_evaluation_offset..first_out_of_domain_evaluation_offset + 8]
             .copy_from_slice(&GOLDILOCKS_MODULUS.to_le_bytes());
         assert_refuses(
             &public_input,
@@ -6389,8 +7087,8 @@ mod persisted_verifier_tests {
             "noncanonical extension coordinate",
         );
 
-        let aggregate_root_offset =
-            first_deep_evaluation_offset + (4_217 + EXACT_OPENING_BATCH_MASK_CHUNK_COUNT) * 40;
+        let aggregate_root_offset = first_out_of_domain_evaluation_offset
+            + (4_217 + EXACT_OPENING_BATCH_MASK_CHUNK_COUNT) * 40;
         let first_phase_value_offset = aggregate_root_offset + 64;
         let mut noncanonical_phase_value = proof.clone();
         noncanonical_phase_value[first_phase_value_offset..first_phase_value_offset + 8]
@@ -6402,7 +7100,10 @@ mod persisted_verifier_tests {
         );
 
         let mut swapped_extension_limbs = proof.clone();
-        swap_distinct_eight_byte_chunks(&mut swapped_extension_limbs, first_deep_evaluation_offset);
+        swap_distinct_eight_byte_chunks(
+            &mut swapped_extension_limbs,
+            first_out_of_domain_evaluation_offset,
+        );
         assert_refuses(
             &public_input,
             &swapped_extension_limbs,

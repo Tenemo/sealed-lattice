@@ -157,6 +157,7 @@ pub const extern "C" fn sealed_lattice_common_proof_verification_readback_accoun
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct CommonProofGenerationFamilyAdapterDescription {
+    application_statement_schema_identifier: u16,
     common_proof_runtime_binding_hash: [u8; 64],
     common_proof_generation_authorization_hash: [u8; 64],
     proof_attempt_lineage_identifier: [u8; 32],
@@ -164,11 +165,13 @@ pub(crate) struct CommonProofGenerationFamilyAdapterDescription {
 
 impl CommonProofGenerationFamilyAdapterDescription {
     pub(crate) const fn new(
+        application_statement_schema_identifier: u16,
         common_proof_runtime_binding_hash: [u8; 64],
         common_proof_generation_authorization_hash: [u8; 64],
         proof_attempt_lineage_identifier: [u8; 32],
     ) -> Self {
         Self {
+            application_statement_schema_identifier,
             common_proof_runtime_binding_hash,
             common_proof_generation_authorization_hash,
             proof_attempt_lineage_identifier,
@@ -223,6 +226,7 @@ impl CommonProofGenerationFamilyAdapter {
     fn description(&self) -> CommonProofGenerationFamilyAdapterDescription {
         match self {
             Self::Fresh { prepared } => CommonProofGenerationFamilyAdapterDescription::new(
+                prepared.application_statement_schema_identifier(),
                 prepared.runtime_binding_hash(),
                 prepared.generation_authorization_hash(),
                 prepared.proof_attempt_lineage_identifier(),
@@ -262,7 +266,9 @@ impl CommonProofGenerationFamilyAdapter {
             }
             _ => return Err(CommonProofRuntimeError::WrongVerificationBinding.into()),
         };
-        if prepared.runtime_binding_hash() != description.common_proof_runtime_binding_hash
+        if prepared.application_statement_schema_identifier()
+            != description.application_statement_schema_identifier
+            || prepared.runtime_binding_hash() != description.common_proof_runtime_binding_hash
             || prepared.generation_authorization_hash()
                 != description.common_proof_generation_authorization_hash
             || prepared.proof_attempt_lineage_identifier()
@@ -900,8 +906,10 @@ pub(crate) fn preflight_verified_common_proof_pending_package(
 ///
 /// # Safety
 ///
-/// Each output pointer must name its complete fixed-size writable range. A
-/// non-null status pointer must name one writable `u32` in WASM memory.
+/// Each byte output pointer must name its complete fixed-size writable range.
+/// The application-statement schema output pointer must name one writable
+/// `u32` in WASM memory. A non-null status pointer must name one writable
+/// `u32` in WASM memory.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn sealed_lattice_common_proof_describe_generation_family_adapter(
     adapter_handle: u32,
@@ -909,6 +917,7 @@ pub unsafe extern "C" fn sealed_lattice_common_proof_describe_generation_family_
     generation_authorization_hash_output_pointer: *mut u8,
     proof_attempt_lineage_identifier_output_pointer: *mut u8,
     checkpoint_lineage_identifier_output_pointer: *mut u8,
+    application_statement_schema_identifier_output_pointer: *mut u32,
     status_pointer: *mut u32,
 ) -> u32 {
     let result = COMMON_PROOF_WASM_RUNTIME_REGISTRY.with(|registry| {
@@ -940,6 +949,10 @@ pub unsafe extern "C" fn sealed_lattice_common_proof_describe_generation_family_
                 checkpoint_lineage_identifier_output_pointer,
                 checkpoint_lineage_identifier.len(),
                 &checkpoint_lineage_identifier,
+            )?;
+            write_required_unsigned32(
+                application_statement_schema_identifier_output_pointer,
+                u32::from(description.application_statement_schema_identifier),
             )?;
         }
         Ok::<(), u32>(())
@@ -1222,6 +1235,16 @@ unsafe fn write_status(status_pointer: *mut u32, status: u32) {
             status_pointer.write(status);
         }
     }
+}
+
+unsafe fn write_required_unsigned32(output_pointer: *mut u32, value: u32) -> Result<(), u32> {
+    if output_pointer.is_null() {
+        return Err(refusal_status(RefusalReason::WrongTypeOrLength));
+    }
+    unsafe {
+        output_pointer.write(value);
+    }
+    Ok(())
 }
 
 unsafe fn copy_exact_output_bytes(
@@ -2559,7 +2582,9 @@ mod tests {
 
     fn refusing_generation_family_adapter() -> CommonProofGenerationFamilyAdapter {
         CommonProofGenerationFamilyAdapter::resume(
-            CommonProofGenerationFamilyAdapterDescription::new([0x11; 64], [0x22; 64], [0x33; 32]),
+            CommonProofGenerationFamilyAdapterDescription::new(
+                0x1213, [0x11; 64], [0x22; 64], [0x33; 32],
+            ),
             [0x44; 32],
             Hash512::from_bytes([0x55; 64]),
             Box::new(|_| Err(CommonProofRuntimeError::WrongVerificationBinding.into())),

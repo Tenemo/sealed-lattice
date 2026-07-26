@@ -8,6 +8,7 @@
 
 mod algebra;
 mod column_commitment;
+mod construction_plan;
 mod exact_same_secret;
 mod plain_whir;
 mod plain_whir_wire;
@@ -16,6 +17,16 @@ mod protocol;
 mod row_encoding;
 #[cfg(test)]
 mod streaming_whir_prover;
+
+pub(in crate::bgv::proof_suite) use construction_plan::RowCodeWhirConstructionPlan;
+pub(in crate::bgv::proof_suite) use construction_plan::{
+    ROW_CODE_WHIR_EVALUATION_DOMAIN_SIZE, ROW_CODE_WHIR_OPENING_DEGREE_BOUND_EXCLUSIVE,
+    ROW_CODE_WHIR_PHASE_COLUMN_QUERY_COORDINATE_COUNT,
+};
+#[cfg(test)]
+pub(in crate::bgv::proof_suite) use construction_plan::{
+    RowCodeWhirSelectedParameters, RowCodeWhirSoundnessAssumption,
+};
 
 pub(in crate::bgv) use exact_same_secret::VerifiedSameSecretLowDegreePrerequisite;
 pub(crate) use exact_same_secret::{
@@ -54,7 +65,16 @@ const MERKLE_DIGEST_WORD_LENGTH: usize = 8;
 const MERKLE_DIGEST_BYTE_LENGTH: usize = MERKLE_DIGEST_WORD_LENGTH * size_of::<u64>();
 const GOLDILOCKS_MODULUS: u64 = 0xffff_ffff_0000_0001;
 const PROTOCOL_SECURITY_LEVEL: usize = 260;
-const SHAKE256_PROTOCOL_DOMAIN: &[u8] = b"sealed-lattice/row-code-whir/shake256/v1";
+pub(in crate::bgv::proof_suite) const ROW_CODE_WHIR_SHAKE256_PROTOCOL_DOMAIN: &[u8] =
+    b"sealed-lattice/row-code-whir/shake256/v1";
+pub(in crate::bgv::proof_suite) const ROW_CODE_WHIR_PHASE_COLUMN_LEAF_DOMAIN: &[u8; 32] =
+    b"sealed-lattice/column-hash/v1\0\0\0";
+pub(in crate::bgv::proof_suite) const ROW_CODE_WHIR_PHASE_COLUMN_NODE_DOMAIN: &[u8] =
+    b"sealed-lattice/column-merkle-node/v1";
+pub(in crate::bgv::proof_suite) const ROW_CODE_WHIR_AGGREGATE_LEAF_DOMAIN: &[u8] =
+    b"aggregate-plain-pcs/merkle-leaf/v1";
+pub(in crate::bgv::proof_suite) const ROW_CODE_WHIR_AGGREGATE_NODE_DOMAIN: &[u8] =
+    b"aggregate-plain-pcs/merkle-node/v1";
 
 type ChallengeField = BinomialExtensionField<Goldilocks, 5>;
 type ExtensionFieldChallenger = RowCodeWhirChallenger;
@@ -79,7 +99,7 @@ struct DomainSeparatedShake256 {
 impl DomainSeparatedShake256 {
     fn initialized_state(self) -> Shake256 {
         let mut state = Shake256::default();
-        state.update(SHAKE256_PROTOCOL_DOMAIN);
+        state.update(ROW_CODE_WHIR_SHAKE256_PROTOCOL_DOMAIN);
         state.update(&(self.domain.len() as u64).to_le_bytes());
         state.update(self.domain);
         state

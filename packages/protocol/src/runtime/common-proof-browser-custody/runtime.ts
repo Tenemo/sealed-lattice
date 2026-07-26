@@ -27,10 +27,10 @@ import {
     maximumCommonProofOutputByteLength,
     canonicalOutputKeyDomain,
     checkpointStateStreamDomain,
-    commonProofGenerationCheckpointOperationKind,
     maximumCheckpointCursorManifestByteLength,
     textEncoder,
     isSafeUnsigned32,
+    isNonzeroUnsigned16,
     copyExactBytes,
     bytesEqual,
     bytesToHex,
@@ -81,6 +81,14 @@ export const openCommonProofBrowserCustody = (
         throw new BrowserActionStorageCustodyError(
             'InvalidInput',
             'Common-proof browser custody requires a configuration object.',
+        );
+    }
+    const applicationStatementSchemaIdentifier =
+        input.applicationStatementSchemaIdentifier;
+    if (!isNonzeroUnsigned16(applicationStatementSchemaIdentifier)) {
+        throw new BrowserActionStorageCustodyError(
+            'InvalidInput',
+            'The common-proof application-statement schema identifier is not a nonzero unsigned 16-bit value.',
         );
     }
     const scratchStorage = openClosedWorkerCommonProofScratchStorage(
@@ -147,6 +155,10 @@ export const openCommonProofBrowserCustody = (
                 latestCheckpointResumeDescriptor.commonProofEnvironmentIdentifier,
                 commonProofEnvironmentIdentifier,
             ) ||
+                !bytesEqual(
+                    latestCheckpointResumeDescriptor.stableAttemptBindingHash,
+                    commonProofRuntimeBindingHash,
+                ) ||
                 latestCheckpointResumeDescriptor.privateRandomnessStreamAttemptIdentifier ===
                     undefined ||
                 !bytesEqual(
@@ -156,7 +168,7 @@ export const openCommonProofBrowserCustody = (
         ) {
             throw new BrowserActionStorageCustodyError(
                 'RecordAuthenticationFailed',
-                'The resumed common-proof environment or proof-attempt lineage differs from the authenticated checkpoint.',
+                'The resumed common-proof environment, runtime binding, or proof-attempt lineage differs from the authenticated checkpoint.',
             );
         }
         if (initialCheckpointOperationIdentity !== undefined) {
@@ -283,7 +295,7 @@ export const openCommonProofBrowserCustody = (
             proofAttemptLineageIdentifier,
         });
         return Object.freeze({
-            operationKind: commonProofGenerationCheckpointOperationKind,
+            operationKind: applicationStatementSchemaIdentifier,
             orderedSourceDigests: Object.freeze([
                 commonProofRuntimeBindingHash.slice(),
                 inputValue.stableAttemptBindingHash.slice(),
@@ -355,6 +367,17 @@ export const openCommonProofBrowserCustody = (
                           throw new BrowserActionStorageCustodyError(
                               'InvalidInput',
                               'The common-proof kernel exposed a malformed checkpoint.',
+                          );
+                      }
+                      if (
+                          !bytesEqual(
+                              checkpoint.stableAttemptBindingHash,
+                              commonProofRuntimeBindingHash,
+                          )
+                      ) {
+                          throw new BrowserActionStorageCustodyError(
+                              'RecordAuthenticationFailed',
+                              'A common-proof checkpoint differs from its installed runtime binding.',
                           );
                       }
                       if (

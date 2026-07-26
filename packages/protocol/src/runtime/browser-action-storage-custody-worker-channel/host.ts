@@ -3625,6 +3625,8 @@ export const installBrowserActionStorageCustodyWorkerHost = (
                 installedCommonProofPreparedOperationRecords.set(
                     preparedOperation,
                     {
+                        applicationStatementSchemaIdentifier:
+                            description.applicationStatementSchemaIdentifier,
                         ...(checkpointOperationIdentity === undefined
                             ? {}
                             : { checkpointOperationIdentity }),
@@ -3747,6 +3749,8 @@ export const installBrowserActionStorageCustodyWorkerHost = (
                     preparedRecord.generationFamilyAdapter;
                 preparedRecord.generationFamilyAdapter = undefined;
                 copiedInput = Object.freeze({
+                    applicationStatementSchemaIdentifier:
+                        preparedRecord.applicationStatementSchemaIdentifier,
                     commonProofRuntimeBindingHash: copiedRuntimeBindingHash,
                     foundationActionRandomnessHandleIdentifier:
                         preparedRecord.foundationActionRandomnessHandleIdentifier,
@@ -3867,6 +3871,8 @@ export const installBrowserActionStorageCustodyWorkerHost = (
                             await owned.openCommonProofCustody({
                                 actionRandomnessCommitment:
                                     actionRandomnessHandle.actionRandomnessCommitment.slice(),
+                                applicationStatementSchemaIdentifier:
+                                    copiedInput.applicationStatementSchemaIdentifier,
                                 checkpoint:
                                     copiedInput.resumeDescriptor === undefined
                                         ? {
@@ -3906,6 +3912,8 @@ export const installBrowserActionStorageCustodyWorkerHost = (
                         {
                             applyVerifiedCommonProof:
                                 runVerifiedCommonProofApplication,
+                            applicationStatementSchemaIdentifier:
+                                copiedInput.applicationStatementSchemaIdentifier,
                             assertDurableBindingCurrent:
                                 assertCommonProofDurableBindingCurrent,
                             closed: false,
